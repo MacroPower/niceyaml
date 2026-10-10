@@ -2461,16 +2461,13 @@ type checkHours struct {
 func TestNode_Bind_Constructors(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString(stringtest.Input(`
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
 		close: top
 		shops:
 		  - hours:
 		      open: "17:00"
 		      close: "09:00"
 	`), niceyaml.WithName("cfg.yaml"))
-
-	doc, err := source.Document()
-	require.NoError(t, err)
 
 	hours := yamltest.At(t, doc, paths.Current().Child("shops").Index(0).Child("hours"))
 	closePath := paths.Current().Child("close")
@@ -2544,16 +2541,13 @@ func TestNode_Bind_Scope(t *testing.T) {
 
 	// The root holds a key close of its own, so a path the binding left
 	// as the check wrote it would name that key.
-	source := niceyaml.NewSourceFromString(stringtest.Input(`
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
 		close: top
 		shops:
 		  - hours:
 		      open: "17:00"
 		      close: "09:00"
 	`), niceyaml.WithName("cfg.yaml"))
-
-	doc, err := source.Document()
-	require.NoError(t, err)
 
 	hoursPath := paths.Current().Child("shops").Index(0).Child("hours")
 	hours := yamltest.At(t, doc, hoursPath)
@@ -3102,9 +3096,7 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 	t.Run("a typed nil from Validate decodes without error", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("name: test\nvalue: 42\n")
-		doc, err := source.Document()
-		require.NoError(t, err)
+		doc := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
 
 		result, err := doc.Decode[accumulatingConfig](t.Context())
 		require.NoError(t, err)
@@ -3114,11 +3106,9 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 	t.Run("a typed non-nil from Validate binds to the document", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("name: test\nvalue: 0\n")
-		doc, err := source.Document()
-		require.NoError(t, err)
+		doc := yamltest.FirstDocument(t, "name: test\nvalue: 0\n")
 
-		_, err = doc.Decode[accumulatingConfig](t.Context())
+		_, err := doc.Decode[accumulatingConfig](t.Context())
 
 		bound := sourceErrorIn(t, err)
 		assert.Equal(t, "2:8: $.value: value is required", bound.Error())
@@ -7304,8 +7294,7 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 	t.Run("with option the last value wins", func(t *testing.T) {
 		t.Parallel()
 
-		doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithAllowDuplicateKeys(true)).Document()
-		require.NoError(t, err)
+		doc := yamltest.FirstDocument(t, input, niceyaml.WithAllowDuplicateKeys(true))
 
 		result, err := doc.Decode[config](t.Context())
 		require.NoError(t, err)
@@ -7315,10 +7304,8 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 	t.Run("At resolves the value the decode keeps", func(t *testing.T) {
 		t.Parallel()
 
-		d := niceyaml.NewSourceFromString(input, niceyaml.WithAllowDuplicateKeys(true)).Documents()
-		require.Len(t, d, 1)
-
-		name := yamltest.At(t, d[0], paths.Current().Child("name"))
+		doc := yamltest.FirstDocument(t, input, niceyaml.WithAllowDuplicateKeys(true))
+		name := yamltest.At(t, doc, paths.Current().Child("name"))
 
 		got, err := name.Decode[string](t.Context())
 		require.NoError(t, err)
@@ -8588,7 +8575,7 @@ func TestDocument_Decode_ValidatorAmbiguousErrorBoundToReceiver(t *testing.T) {
 func TestNode_At_NotFound(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString(stringtest.Input(`
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
 		# c
 		name: s
 		hours:
@@ -8597,9 +8584,6 @@ func TestNode_At_NotFound(t *testing.T) {
 		  - x
 		  - k: 1
 	`), niceyaml.WithName("c.yaml"))
-
-	doc, err := source.Document()
-	require.NoError(t, err)
 
 	hoursPath := paths.Current().Child("hours")
 	itemsPath := paths.Current().Child("items")
@@ -8892,7 +8876,7 @@ func TestDocument_PathAnchors(t *testing.T) {
 func TestDocument_Validate_NodePaths(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString(stringtest.Input(`
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
 		spec:
 		  containers:
 		    - name: a
@@ -8900,9 +8884,6 @@ func TestDocument_Validate_NodePaths(t *testing.T) {
 		    - name: b
 		      image: nginx
 	`), niceyaml.WithFilePath("m.yaml"))
-
-	doc, err := source.Document()
-	require.NoError(t, err)
 
 	// The check names each image by the path its Node reports, which starts
 	// at `$`, and binds through the Node it got.
@@ -9621,8 +9602,7 @@ func TestNode_Validate(t *testing.T) {
 
 		var order []string
 
-		doc, err := niceyaml.NewSourceFromString("meta:\n  name: test\n", niceyaml.WithName("x.yaml")).Document()
-		require.NoError(t, err)
+		doc := yamltest.FirstDocument(t, "meta:\n  name: test\n", niceyaml.WithName("x.yaml"))
 
 		scoped := yamltest.At(t, doc, paths.Current().Child("meta"))
 
@@ -9631,7 +9611,7 @@ func TestNode_Validate(t *testing.T) {
 		short := &fieldValidator{err: niceyaml.NewError("name is too short", niceyaml.AtPath(namePath))}
 
 		// A ChainValidator stops at the first validator that fails.
-		err = scoped.Validate(t.Context(), niceyaml.ChainValidator(
+		err := scoped.Validate(t.Context(), niceyaml.ChainValidator(
 			recordingValidator(&order, "first"),
 			reserved,
 			recordingValidator(&order, "unreached"),
@@ -9673,10 +9653,7 @@ func TestNode_Validate(t *testing.T) {
 	t.Run("binds the error a validator leaves unbound", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("meta:\n  name: test\n", niceyaml.WithName("x.yaml"))
-
-		doc, err := source.Document()
-		require.NoError(t, err)
+		doc := yamltest.FirstDocument(t, "meta:\n  name: test\n", niceyaml.WithName("x.yaml"))
 
 		scoped := yamltest.At(t, doc, paths.Current().Child("meta"))
 		unbound := &fieldValidator{
@@ -9687,7 +9664,7 @@ func TestNode_Validate(t *testing.T) {
 		// the Node binds it from its own scope.
 		require.EqualError(t, unbound.Check(t.Context(), scoped), "name is required")
 
-		err = scoped.Validate(t.Context(), unbound)
+		err := scoped.Validate(t.Context(), unbound)
 		require.EqualError(t, err, "x.yaml:2:9: $.meta.name: name is required")
 
 		bound := sourceErrorIn(t, err)
@@ -9755,7 +9732,7 @@ func TestNode_Validate(t *testing.T) {
 func TestNode_Nodes(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString(stringtest.Input(`
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
 		items:
 		  - name: tea
 		    price: 1
@@ -9769,9 +9746,6 @@ func TestNode_Nodes(t *testing.T) {
 		  - x
 		ref: *items
 	`), niceyaml.WithName("m.yaml"))
-
-	doc, err := source.Document()
-	require.NoError(t, err)
 
 	t.Run("scopes each element of a sequence", func(t *testing.T) {
 		t.Parallel()
@@ -9817,7 +9791,7 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("scopes every node at any depth", func(t *testing.T) {
 		t.Parallel()
 
-		config, err := niceyaml.NewSourceFromString(stringtest.Input(`
+		config := yamltest.FirstDocument(t, stringtest.Input(`
 			defaults: &defaults
 			  logLevel: info
 			server:
@@ -9829,8 +9803,7 @@ func TestNode_Nodes(t *testing.T) {
 			  - match: /api
 			    upstreamURL: http://api
 			  - *defaults
-		`), niceyaml.WithName("c.yaml")).Document()
-		require.NoError(t, err)
+		`), niceyaml.WithName("c.yaml"))
 
 		nodes, err := config.Nodes(paths.Current().RecursiveAll())
 		require.NoError(t, err)
@@ -9878,7 +9851,7 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("scopes each entry of a mapping", func(t *testing.T) {
 		t.Parallel()
 
-		workflow, err := niceyaml.NewSourceFromString(stringtest.Input(`
+		workflow := yamltest.FirstDocument(t, stringtest.Input(`
 			defaults: &defaults
 			  lint:
 			    runs-on: linux
@@ -9891,8 +9864,7 @@ func TestNode_Nodes(t *testing.T) {
 			    steps:
 			      - uses: checkout
 			      - run: make
-		`), niceyaml.WithName("w.yaml")).Document()
-		require.NoError(t, err)
+		`), niceyaml.WithName("w.yaml"))
 
 		jobs, err := workflow.Nodes(paths.Current().Child("jobs").ChildAll())
 		require.NoError(t, err)
@@ -9989,8 +9961,7 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("a duplicate key scopes the entry the decode keeps", func(t *testing.T) {
 		t.Parallel()
 
-		dup, err := niceyaml.NewSourceFromString("a: 1\na: 2\n", niceyaml.WithAllowDuplicateKeys(true)).Document()
-		require.NoError(t, err)
+		dup := yamltest.FirstDocument(t, "a: 1\na: 2\n", niceyaml.WithAllowDuplicateKeys(true))
 
 		// The path $.a selects the later entry, so `..a` lists only that
 		// one.
@@ -10294,14 +10265,13 @@ func TestNode_ConcurrentPaths(t *testing.T) {
 	// Every Node of a document resolves paths through one resolver, which
 	// the first path creates, so Nodes of one document resolve paths from
 	// several goroutines at once.
-	doc, err := niceyaml.NewSourceFromString(stringtest.Input(`
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
 		base: &b
 		  name: x
 		items: [*b, *b]
 		spec:
 		  replicas: 1
-	`)).Document()
-	require.NoError(t, err)
+	`))
 
 	spec, err := doc.At(paths.Current().Child("spec"))
 	require.NoError(t, err)
@@ -11110,18 +11080,14 @@ func TestValidator_DirectCall(t *testing.T) {
 func TestValidatorFunc_Check(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString(stringtest.Input(`
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
 		price: 5
 		items:
 		  - price: 1
 		  - price: -2
 	`), niceyaml.WithName("menu.yaml"))
 
-	doc, err := source.Document()
-	require.NoError(t, err)
-
-	other, err := niceyaml.NewSourceFromString("# other\nprice: 0\n", niceyaml.WithName("other.yaml")).Document()
-	require.NoError(t, err)
+	other := yamltest.FirstDocument(t, "# other\nprice: 0\n", niceyaml.WithName("other.yaml"))
 
 	pricePath := paths.Current().Child("price")
 	item := yamltest.At(t, doc, paths.Current().Child("items").Index(1))
@@ -11400,10 +11366,7 @@ func TestMultiValidator(t *testing.T) {
 	t.Run("each line of the message carries its source and position", func(t *testing.T) {
 		t.Parallel()
 
-		src := niceyaml.NewSourceFromString("a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
-
-		doc, err := src.Document()
-		require.NoError(t, err)
+		doc := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
 
 		want := "x.yaml:2:6: $.a.b: bad b\nx.yaml:3:6: $.a.c: bad c"
 
@@ -11433,12 +11396,9 @@ func TestMultiValidator(t *testing.T) {
 	t.Run("a lone failure keeps its position", func(t *testing.T) {
 		t.Parallel()
 
-		src := niceyaml.NewSourceFromString("a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
+		doc := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
 
-		doc, err := src.Document()
-		require.NoError(t, err)
-
-		err = doc.Validate(t.Context(), niceyaml.MultiValidator(badB, passing))
+		err := doc.Validate(t.Context(), niceyaml.MultiValidator(badB, passing))
 		require.ErrorIs(t, err, errB)
 		assert.Equal(t, "x.yaml:2:6: $.a.b: bad b", err.Error())
 
@@ -11462,17 +11422,14 @@ func TestMultiValidator(t *testing.T) {
 	t.Run("a sentinel around a binding stands in front of its position", func(t *testing.T) {
 		t.Parallel()
 
-		src := niceyaml.NewSourceFromString("a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
-
-		doc, err := src.Document()
-		require.NoError(t, err)
+		doc := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
 
 		errInvalid := errors.New("invalid")
 		classified := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 			return fmt.Errorf("%w: %w", errInvalid, badC.Check(ctx, n))
 		})
 
-		err = doc.Validate(t.Context(), niceyaml.MultiValidator(classified, badB))
+		err := doc.Validate(t.Context(), niceyaml.MultiValidator(classified, badB))
 		require.ErrorIs(t, err, errInvalid)
 		assert.Equal(t, "x.yaml:2:6: $.a.b: bad b\ninvalid: x.yaml:3:6: $.a.c: bad c", err.Error())
 	})
@@ -11517,8 +11474,7 @@ func TestChainValidator(t *testing.T) {
 	newDoc := func(t *testing.T) *niceyaml.Node {
 		t.Helper()
 
-		doc, err := niceyaml.NewSourceFromString("meta:\n  name: 5\nname: 7\n", niceyaml.WithName("x.yaml")).Document()
-		require.NoError(t, err)
+		doc := yamltest.FirstDocument(t, "meta:\n  name: 5\nname: 7\n", niceyaml.WithName("x.yaml"))
 
 		return doc
 	}
@@ -12001,10 +11957,7 @@ func TestSkipEmpty(t *testing.T) {
 	t.Run("runs the validator and the Node binds its error", func(t *testing.T) {
 		t.Parallel()
 
-		src := niceyaml.NewSourceFromString("a:\n  b: 1\n", niceyaml.WithFilePath("x.yaml"))
-
-		doc, err := src.Document()
-		require.NoError(t, err)
+		doc := yamltest.FirstDocument(t, "a:\n  b: 1\n", niceyaml.WithFilePath("x.yaml"))
 
 		located := niceyaml.Invalid(errBad, niceyaml.AtPath(paths.Current().Child("a", "b")))
 		want := "x.yaml:2:6: $.a.b: bad"
