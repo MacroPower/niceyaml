@@ -5431,14 +5431,23 @@ func TestWithAliasLimit(t *testing.T) {
 		schema.WithRequireSchema(false),
 	)
 
-	decode := func(ctx context.Context, n *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
-		_, err := n.Decode[any](ctx, opts...)
+	// A reader reads a node and returns the error of the read.
+	type reader = func(ctx context.Context, n *niceyaml.Node) error
 
-		return err
+	decode := func(opts ...niceyaml.DecodeOption) reader {
+		return func(ctx context.Context, n *niceyaml.Node) error {
+			_, err := n.Decode[any](ctx, opts...)
+
+			return err
+		}
+	}
+
+	validate := func(v niceyaml.Validator) reader {
+		return func(ctx context.Context, n *niceyaml.Node) error { return n.Validate(ctx, v) }
 	}
 
 	tcs := map[string]struct {
-		read func(ctx context.Context, n *niceyaml.Node) error
+		read reader
 		path paths.Path
 		// The message of the refusal with the limit on.
 		want string
@@ -5446,21 +5455,15 @@ func TestWithAliasLimit(t *testing.T) {
 		resolve bool
 	}{
 		"decode": {
-			read: func(ctx context.Context, n *niceyaml.Node) error {
-				return decode(ctx, n)
-			},
+			read: decode(),
 			want: "bomb.yaml:1:1: excessive aliasing",
 		},
 		"decode with a schema validator": {
-			read: func(ctx context.Context, n *niceyaml.Node) error {
-				return decode(ctx, n, niceyaml.WithValidator(shape))
-			},
+			read: decode(niceyaml.WithValidator(shape)),
 			want: "bomb.yaml:1:1: excessive aliasing",
 		},
 		"schema validation": {
-			read: func(ctx context.Context, n *niceyaml.Node) error {
-				return n.Validate(ctx, shape)
-			},
+			read: validate(shape),
 			want: "bomb.yaml:1:1: excessive aliasing",
 		},
 		"validation of every document": {
@@ -5470,16 +5473,12 @@ func TestWithAliasLimit(t *testing.T) {
 			want: "bomb.yaml:1:1: excessive aliasing",
 		},
 		"registry with a content matcher": {
-			read: func(ctx context.Context, n *niceyaml.Node) error {
-				return n.Validate(ctx, routed)
-			},
+			read:    validate(routed),
 			want:    "resolve schema: bomb.yaml: excessive aliasing",
 			resolve: true,
 		},
 		"decode with a registry with a content matcher": {
-			read: func(ctx context.Context, n *niceyaml.Node) error {
-				return decode(ctx, n, niceyaml.WithValidator(routed))
-			},
+			read:    decode(niceyaml.WithValidator(routed)),
 			want:    "resolve schema: bomb.yaml: excessive aliasing",
 			resolve: true,
 		},
@@ -5487,16 +5486,12 @@ func TestWithAliasLimit(t *testing.T) {
 		// a scoped node names no path in front of it.
 		"decode of a scoped node": {
 			path: last,
-			read: func(ctx context.Context, n *niceyaml.Node) error {
-				return decode(ctx, n)
-			},
+			read: decode(),
 			want: "bomb.yaml:7:9: excessive aliasing",
 		},
 		"schema validation of a scoped node": {
 			path: last,
-			read: func(ctx context.Context, n *niceyaml.Node) error {
-				return n.Validate(ctx, shape)
-			},
+			read: validate(shape),
 			want: "bomb.yaml:7:9: excessive aliasing",
 		},
 	}
@@ -5505,20 +5500,25 @@ func TestWithAliasLimit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			sources := map[string][]niceyaml.SourceOption{
-				"default":  {niceyaml.WithName("bomb.yaml")},
-				"limit on": {niceyaml.WithName("bomb.yaml"), niceyaml.WithAliasLimit(true)},
-			}
-
-			for via, opts := range sources {
-				node := yamltest.FirstDocument(t, bomb, opts...)
+			// The node of the case, in a Source of the bomb with opts.
+			node := func(opts ...niceyaml.SourceOption) *niceyaml.Node {
+				doc := yamltest.FirstDocument(t, bomb, append(opts, niceyaml.WithName("bomb.yaml"))...)
 				if tc.path.Len() > 0 {
-					node = yamltest.At(t, node, tc.path)
+					return yamltest.At(t, doc, tc.path)
 				}
 
+				return doc
+			}
+
+			limited := map[string]*niceyaml.Node{
+				"default":  node(),
+				"limit on": node(niceyaml.WithAliasLimit(true)),
+			}
+
+			for via, n := range limited {
 				// Every reader reports the aliases of the document as a
 				// fault of the document.
-				err := tc.read(t.Context(), node)
+				err := tc.read(t.Context(), n)
 				require.EqualError(t, err, tc.want, via)
 				require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing, via)
 				require.NotErrorIs(t, err, schema.ErrValidate, via)
@@ -5528,12 +5528,7 @@ func TestWithAliasLimit(t *testing.T) {
 			}
 
 			// With the limit off, the same reader reads the document.
-			trusted := yamltest.FirstDocument(t, bomb, niceyaml.WithName("bomb.yaml"), niceyaml.WithAliasLimit(false))
-			if tc.path.Len() > 0 {
-				trusted = yamltest.At(t, trusted, tc.path)
-			}
-
-			require.NoError(t, tc.read(t.Context(), trusted))
+			require.NoError(t, tc.read(t.Context(), node(niceyaml.WithAliasLimit(false))))
 		})
 	}
 
@@ -5544,7 +5539,7 @@ func TestWithAliasLimit(t *testing.T) {
 		require.Len(t, docs, 2)
 
 		for _, doc := range docs {
-			require.NoError(t, decode(t.Context(), doc, niceyaml.WithValidator(shape)))
+			require.NoError(t, decode(niceyaml.WithValidator(shape))(t.Context(), doc))
 		}
 	})
 
