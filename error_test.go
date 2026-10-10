@@ -2265,17 +2265,15 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 		want string
 	}{
 		"no nested errors": {
-			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-				"main error",
-			)),
+			err:  niceyaml.NewError("main error"),
 			want: "main error",
 		},
 		"nested errors without locations": {
-			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
+			err: niceyaml.NewSummary(
 				"main error",
 				niceyaml.NewError("nested 1"),
 				niceyaml.NewError("nested 2"),
-			)),
+			),
 			want: stringtest.JoinLF(
 				"main error",
 				"├── nested 1",
@@ -2283,7 +2281,7 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 			),
 		},
 		"nested error with path": {
-			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
+			err: niceyaml.NewError(
 				"main error",
 				niceyaml.WithDetails(
 					niceyaml.NewError(
@@ -2291,7 +2289,7 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 						niceyaml.AtPath(paths.Current().Child("key").Key()),
 					),
 				),
-			)),
+			),
 			want: stringtest.JoinLF(
 				"main error",
 				"└── 1:1: $.key~: nested with path",
@@ -2302,19 +2300,15 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 			),
 		},
 		"nested error with token": {
-			err: func() error {
-				tokens := lexer.Tokenize(source)
-
-				return yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-					"main error",
-					niceyaml.WithDetails(
-						niceyaml.NewError(
-							"nested with token",
-							niceyaml.AtPosition(position.NewFromToken(tokens[0])),
-						),
+			err: niceyaml.NewError(
+				"main error",
+				niceyaml.WithDetails(
+					niceyaml.NewError(
+						"nested with token",
+						niceyaml.AtPosition(position.NewFromToken(lexer.Tokenize(source)[0])),
 					),
-				))
-			}(),
+				),
+			),
 			want: stringtest.JoinLF(
 				"main error",
 				"└── 1:1: nested with token",
@@ -2325,7 +2319,7 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 			),
 		},
 		"mix of located and unlocated nested errors": {
-			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
+			err: niceyaml.NewSummary(
 				"main error",
 				niceyaml.NewError("no path"),
 				niceyaml.NewError(
@@ -2333,7 +2327,7 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 					niceyaml.AtPath(paths.Current().Child("key").Key()),
 				),
 				niceyaml.NewError("also no path"),
-			)),
+			),
 			want: stringtest.JoinLF(
 				"main error",
 				"├── 1:1: $.key~: has path",
@@ -2346,9 +2340,7 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 			),
 		},
 		"nil details only": {
-			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-				"main error", niceyaml.WithDetails(nil, nil),
-			)),
+			err:  niceyaml.NewError("main error", niceyaml.WithDetails(nil, nil)),
 			want: "main error",
 		},
 	}
@@ -2357,7 +2349,9 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, stringtest.TrimLineEnds(render(tc.err)))
+			err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), tc.err)
+
+			assert.Equal(t, tc.want, stringtest.TrimLineEnds(render(err)))
 		})
 	}
 }
