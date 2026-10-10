@@ -358,146 +358,116 @@ func TestParseDocumentDirective(t *testing.T) {
 	}
 }
 
-func TestParseDocumentDirective_TokenBuilder(t *testing.T) {
+func TestParseDocumentDirective_Tokens(t *testing.T) {
 	t.Parallel()
+
+	const comment = " yaml-language-server: $schema=./doc.json"
+
+	tkb := yamltest.NewTokenBuilder()
+
+	// Each case is a token stream that ParseDocumentDirective reads as it
+	// is, and want is the schema its directive names, or empty for a
+	// stream with no directive.
+	tcs := map[string]struct {
+		want   string
+		tokens token.Tokens
+	}{
+		"document header precedes the directive": {
+			tokens: token.Tokens{
+				tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build(),
+				tkb.Clone().Type(token.CommentType).Value(comment).Build(),
+				tkb.Clone().Type(token.StringType).Value("key").Build(),
+				tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
+				tkb.Clone().Type(token.StringType).Value("value").Build(),
+			},
+			want: "./doc.json",
+		},
+		// The parser splits "%YAML 1.2" into a directive token and the
+		// tokens of its value, and neither is content.
+		"directive line precedes the directive": {
+			tokens: token.Tokens{
+				tkb.Clone().Type(token.DirectiveType).Value("%").PositionLine(1).Build(),
+				tkb.Clone().Type(token.FloatType).Value("1.2").PositionLine(1).Build(),
+				tkb.Clone().Type(token.CommentType).Value(comment).PositionLine(2).Build(),
+				tkb.Clone().Type(token.StringType).Value("key").PositionLine(3).Build(),
+				tkb.Clone().Type(token.MappingValueType).Value(":").PositionLine(3).Build(),
+				tkb.Clone().Type(token.StringType).Value("value").PositionLine(3).Build(),
+			},
+			want: "./doc.json",
+		},
+		// ParseDocumentDirective skips only the directive's own line.
+		"content on the line after a directive line": {
+			tokens: token.Tokens{
+				tkb.Clone().Type(token.DirectiveType).Value("%").PositionLine(1).Build(),
+				tkb.Clone().Type(token.StringType).Value("YAML").PositionLine(1).Build(),
+				tkb.Clone().Type(token.StringType).Value("key").PositionLine(2).Build(),
+				tkb.Clone().Type(token.MappingValueType).Value(":").PositionLine(2).Build(),
+				tkb.Clone().Type(token.CommentType).Value(comment).PositionLine(3).Build(),
+			},
+		},
+		"content before the directive": {
+			tokens: token.Tokens{
+				tkb.Clone().Type(token.StringType).Value("key").Build(),
+				tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
+				tkb.Clone().Type(token.StringType).Value("value").Build(),
+				tkb.Clone().Type(token.CommentType).Value(comment).Build(),
+			},
+		},
+		"nil tokens": {},
+		// ParseDocumentDirective skips a nil token in the stream, as every
+		// other token consumer skips it, rather than dereferencing it.
+		"nil token in the stream": {
+			tokens: token.Tokens{nil, tokens.Tokenize("#" + comment + "\n")[0]},
+			want:   "./doc.json",
+		},
+		// A "..." marker is part of the preamble, as a "---" header is, so
+		// a directive after it, or in a comment that trails it, still
+		// names the schema of the document.
+		"directive after a document end": {
+			tokens: tokens.Tokenize("...\n#" + comment + "\nj: 2\n"),
+			want:   "./doc.json",
+		},
+		"directive after a header and a document end": {
+			tokens: tokens.Tokenize("---\n...\n#" + comment + "\nj: 2\n"),
+			want:   "./doc.json",
+		},
+		"directive in a comment that trails a document end": {
+			tokens: tokens.Tokenize("... #" + comment + "\nj: 2\n"),
+			want:   "./doc.json",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := schema.ParseDocumentDirective(tc.tokens)
+			if tc.want == "" {
+				assert.Nil(t, got)
+
+				return
+			}
+
+			require.NotNil(t, got)
+			assert.Equal(t, tc.want, got.Schema)
+		})
+	}
 
 	t.Run("directive position is set from token", func(t *testing.T) {
 		t.Parallel()
 
-		tkb := yamltest.NewTokenBuilder()
-		tks := token.Tokens{
-			tkb.Clone().Type(token.CommentType).
-				Value(" yaml-language-server: $schema=./schema.json").
-				PositionLine(3).
-				PositionColumn(5).
-				Build(),
+		got := schema.ParseDocumentDirective(token.Tokens{
+			tkb.Clone().Type(token.CommentType).Value(comment).PositionLine(3).PositionColumn(5).Build(),
 			tkb.Clone().Type(token.StringType).Value("key").Build(),
 			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
 			tkb.Clone().Type(token.StringType).Value("value").Build(),
-		}
-
-		got := schema.ParseDocumentDirective(tks)
+		})
 
 		require.NotNil(t, got)
-		assert.Equal(t, "./schema.json", got.Schema)
+		assert.Equal(t, "./doc.json", got.Schema)
 		// The token counts from 1 and the directive from 0.
 		assert.Equal(t, position.New(2, 4), got.Position)
 	})
-
-	t.Run("document header precedes the directive", func(t *testing.T) {
-		t.Parallel()
-
-		tkb := yamltest.NewTokenBuilder()
-		tks := token.Tokens{
-			tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build(),
-			tkb.Clone().Type(token.CommentType).
-				Value(" yaml-language-server: $schema=./doc.json").
-				Build(),
-			tkb.Clone().Type(token.StringType).Value("key").Build(),
-			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
-			tkb.Clone().Type(token.StringType).Value("value").Build(),
-		}
-
-		got := schema.ParseDocumentDirective(tks)
-
-		require.NotNil(t, got)
-		assert.Equal(t, "./doc.json", got.Schema)
-	})
-
-	t.Run("directive line precedes the directive", func(t *testing.T) {
-		t.Parallel()
-
-		// The parser splits "%YAML 1.2" into a directive token and the
-		// tokens of its value, and neither is content.
-		tkb := yamltest.NewTokenBuilder()
-		tks := token.Tokens{
-			tkb.Clone().Type(token.DirectiveType).Value("%").PositionLine(1).Build(),
-			tkb.Clone().Type(token.FloatType).Value("1.2").PositionLine(1).Build(),
-			tkb.Clone().Type(token.CommentType).
-				Value(" yaml-language-server: $schema=./doc.json").
-				PositionLine(2).
-				Build(),
-			tkb.Clone().Type(token.StringType).Value("key").PositionLine(3).Build(),
-			tkb.Clone().Type(token.MappingValueType).Value(":").PositionLine(3).Build(),
-			tkb.Clone().Type(token.StringType).Value("value").PositionLine(3).Build(),
-		}
-
-		got := schema.ParseDocumentDirective(tks)
-
-		require.NotNil(t, got)
-		assert.Equal(t, "./doc.json", got.Schema)
-	})
-
-	t.Run("content on the line after a directive yields nil", func(t *testing.T) {
-		t.Parallel()
-
-		// ParseDocumentDirective skips only the directive's own line.
-		tkb := yamltest.NewTokenBuilder()
-		tks := token.Tokens{
-			tkb.Clone().Type(token.DirectiveType).Value("%").PositionLine(1).Build(),
-			tkb.Clone().Type(token.StringType).Value("YAML").PositionLine(1).Build(),
-			tkb.Clone().Type(token.StringType).Value("key").PositionLine(2).Build(),
-			tkb.Clone().Type(token.MappingValueType).Value(":").PositionLine(2).Build(),
-			tkb.Clone().Type(token.CommentType).
-				Value(" yaml-language-server: $schema=./doc.json").
-				PositionLine(3).
-				Build(),
-		}
-
-		assert.Nil(t, schema.ParseDocumentDirective(tks))
-	})
-
-	t.Run("content before the directive yields nil", func(t *testing.T) {
-		t.Parallel()
-
-		tkb := yamltest.NewTokenBuilder()
-		tks := token.Tokens{
-			tkb.Clone().Type(token.StringType).Value("key").Build(),
-			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
-			tkb.Clone().Type(token.StringType).Value("value").Build(),
-			tkb.Clone().Type(token.CommentType).
-				Value(" yaml-language-server: $schema=./doc.json").
-				Build(),
-		}
-
-		assert.Nil(t, schema.ParseDocumentDirective(tks))
-	})
-
-	t.Run("nil tokens yield nil", func(t *testing.T) {
-		t.Parallel()
-
-		assert.Nil(t, schema.ParseDocumentDirective(nil))
-	})
-}
-
-func TestParseDocumentDirective_NilToken(t *testing.T) {
-	t.Parallel()
-
-	// ParseDocumentDirective skips a nil token in the stream, as every
-	// other token consumer skips it, rather than dereferencing it.
-	directive := schema.ParseDocumentDirective(token.Tokens{
-		nil,
-		tokens.Tokenize("# yaml-language-server: $schema=./schema.json\n")[0],
-	})
-	require.NotNil(t, directive)
-	assert.Equal(t, "./schema.json", directive.Schema)
-}
-
-func TestParseDocumentDirective_AfterDocumentEnd(t *testing.T) {
-	t.Parallel()
-
-	// A "..." marker is part of the preamble, as a "---" header is, so a
-	// directive after it, or in a comment that trails it, still names the
-	// schema of the document.
-	for _, input := range []string{
-		"...\n# yaml-language-server: $schema=./schema.json\nj: 2\n",
-		"---\n...\n# yaml-language-server: $schema=./schema.json\nj: 2\n",
-		"... # yaml-language-server: $schema=./schema.json\nj: 2\n",
-	} {
-		directive := schema.ParseDocumentDirective(tokens.Tokenize(input))
-		require.NotNil(t, directive, "input %q", input)
-		assert.Equal(t, "./schema.json", directive.Schema, "input %q", input)
-	}
 }
 
 func TestDirective(t *testing.T) {
