@@ -306,179 +306,71 @@ func TestView_All(t *testing.T) {
 func TestView_Flag(t *testing.T) {
 	t.Parallel()
 
-	t.Run("defaults to FlagDefault", func(t *testing.T) {
-		t.Parallel()
+	view := newTestView(t, "a: 1\nb: 2\nc: 3\n", 3)
+	assert.Equal(t, []line.Flag{line.FlagDefault, line.FlagDefault, line.FlagDefault}, flagsOf(view))
 
-		view := newTestView(t, "a: 1\nb: 2\n", 2)
+	view.SetFlag(1, line.FlagInserted)
+	view.SetFlag(1, line.FlagDeleted)
+	assert.Equal(
+		t,
+		[]line.Flag{line.FlagDefault, line.FlagDeleted, line.FlagDefault},
+		flagsOf(view),
+		"the last flag set on a line replaces the one before, on that line alone",
+	)
 
-		assert.Equal(t, line.FlagDefault, view.Flag(0))
-		assert.Equal(t, line.FlagDefault, view.Flag(1))
-	})
+	// FlagDefault clears the flag of a line, so no line counts as decorated.
+	view.SetFlag(1, line.FlagDefault)
+	view.SetFlag(2, line.FlagDefault)
+	assert.Equal(t, []line.Flag{line.FlagDefault, line.FlagDefault, line.FlagDefault}, flagsOf(view))
+	assert.Equal(t, line.FlagDefault, view.Slice().Flag(1))
+	assert.Equal(t, 0, view.Hunks(0).Count())
+}
 
-	t.Run("SetFlag sets one line only", func(t *testing.T) {
-		t.Parallel()
+// flagsOf returns the flag of every line of the content of view.
+func flagsOf(view *line.View) []line.Flag {
+	flags := make([]line.Flag, view.Count())
+	for i := range flags {
+		flags[i] = view.Flag(i)
+	}
 
-		view := newTestView(t, "a: 1\nb: 2\nc: 3\n", 3)
-		view.SetFlag(1, line.FlagDeleted)
-
-		assert.Equal(t, line.FlagDefault, view.Flag(0))
-		assert.Equal(t, line.FlagDeleted, view.Flag(1))
-		assert.Equal(t, line.FlagDefault, view.Flag(2))
-	})
-
-	t.Run("SetFlag overwrites", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "a: 1\n", 1)
-		view.SetFlag(0, line.FlagInserted)
-		view.SetFlag(0, line.FlagDeleted)
-
-		assert.Equal(t, line.FlagDeleted, view.Flag(0))
-	})
-
-	t.Run("SetFlag to FlagDefault clears the flag", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "a: 1\nb: 2\n", 2)
-		view.SetFlag(0, line.FlagInserted)
-		view.SetFlag(0, line.FlagDefault)
-		view.SetFlag(1, line.FlagDefault)
-
-		assert.Equal(t, line.FlagDefault, view.Flag(0))
-		assert.Equal(t, line.FlagDefault, view.Flag(1))
-		assert.Equal(t, line.FlagDefault, view.Slice().Flag(0))
-		assert.Equal(t, 0, view.Hunks(0).Count())
-	})
+	return flags
 }
 
 func TestView_Annotate(t *testing.T) {
 	t.Parallel()
 
-	t.Run("no annotations by default", func(t *testing.T) {
-		t.Parallel()
+	view := newTestView(t, "a: 1\nb: 2\n", 2)
+	assert.Nil(t, view.Annotations(1))
 
-		view := newTestView(t, "key: value\n", 1)
+	first := line.Annotation{Content: "first", Placement: line.Above}
+	second := line.Annotation{Content: "second", Placement: line.Below}
+	third := line.Annotation{Content: "third"}
 
-		assert.Nil(t, view.Annotations(0))
-	})
+	// Each call adds to the annotations of its line.
+	view.Annotate(1, first)
+	view.Annotate(1, second, third)
 
-	t.Run("add single annotation", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below})
-
-		require.Len(t, view.Annotations(0), 1)
-		assert.Equal(t, "note", view.Annotations(0)[0].Content)
-		assert.Equal(t, line.Below, view.Annotations(0)[0].Placement)
-	})
-
-	t.Run("add multiple annotations", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.Annotate(0,
-			line.Annotation{Content: "first", Placement: line.Above},
-			line.Annotation{Content: "second", Placement: line.Below},
-		)
-
-		require.Len(t, view.Annotations(0), 2)
-		assert.Equal(t, "first", view.Annotations(0)[0].Content)
-		assert.Equal(t, "second", view.Annotations(0)[1].Content)
-	})
-
-	t.Run("accumulates annotations", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.Annotate(0, line.Annotation{Content: "first"})
-		view.Annotate(0, line.Annotation{Content: "second"})
-
-		require.Len(t, view.Annotations(0), 2)
-	})
-
-	t.Run("annotates one line only", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "a: 1\nb: 2\n", 2)
-		view.Annotate(1, line.Annotation{Content: "note"})
-
-		assert.Empty(t, view.Annotations(0))
-		require.Len(t, view.Annotations(1), 1)
-	})
+	assert.Equal(t, line.Annotations{first, second, third}, view.Annotations(1))
+	assert.Nil(t, view.Annotations(0))
 }
 
 func TestView_AddLineOverlay(t *testing.T) {
 	t.Parallel()
 
-	t.Run("no overlays by default", func(t *testing.T) {
-		t.Parallel()
+	view := newTestView(t, "a: 1\nb: 2\n", 2)
+	assert.Nil(t, view.Overlays(1))
 
-		view := newTestView(t, "key: value\n", 1)
+	first := line.Overlay{Cols: position.NewSpan(0, 3), Kind: "test1"}
+	second := line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"}
+	// AddOverlay would cut these columns to the width of the line.
+	wide := line.Overlay{Cols: position.NewSpan(-2, 99), Kind: "test1"}
 
-		assert.Nil(t, view.Overlays(0))
-	})
+	// Each call adds to the overlays of its line and keeps their columns.
+	view.AddLineOverlay(1, first)
+	view.AddLineOverlay(1, second, wide)
 
-	t.Run("add single overlay", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.AddLineOverlay(0, line.Overlay{
-			Cols: position.NewSpan(0, 5),
-			Kind: "test1",
-		})
-
-		require.Len(t, view.Overlays(0), 1)
-		assert.Equal(t, position.NewSpan(0, 5), view.Overlays(0)[0].Cols)
-		assert.Equal(t, kind.Kind("test1"), view.Overlays(0)[0].Kind)
-	})
-
-	t.Run("add multiple overlays", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.AddLineOverlay(0,
-			line.Overlay{Cols: position.NewSpan(0, 3), Kind: "test1"},
-			line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"},
-		)
-
-		require.Len(t, view.Overlays(0), 2)
-		assert.Equal(t, position.NewSpan(0, 3), view.Overlays(0)[0].Cols)
-		assert.Equal(t, position.NewSpan(5, 10), view.Overlays(0)[1].Cols)
-	})
-
-	t.Run("accumulates overlays", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(0, 3), Kind: "test1"})
-		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"})
-
-		require.Len(t, view.Overlays(0), 2)
-	})
-
-	t.Run("does not clamp", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-
-		// The clamped AddOverlay would cut this to the line width; the raw
-		// method keeps the columns as given.
-		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(-2, 99), Kind: "test1"})
-
-		require.Len(t, view.Overlays(0), 1)
-		assert.Equal(t, position.NewSpan(-2, 99), view.Overlays(0)[0].Cols)
-	})
-
-	t.Run("overlays one line only", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "a: 1\nb: 2\n", 2)
-		view.AddLineOverlay(1, line.Overlay{Cols: position.NewSpan(0, 1), Kind: "test1"})
-
-		assert.Empty(t, view.Overlays(0))
-		require.Len(t, view.Overlays(1), 1)
-	})
+	assert.Equal(t, line.Overlays{first, second, wide}, view.Overlays(1))
+	assert.Nil(t, view.Overlays(0))
 }
 
 func TestView_AddOverlay(t *testing.T) {
