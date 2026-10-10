@@ -12,17 +12,34 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
-func BenchmarkFullDiffSource(b *testing.B) {
-	sizes := []struct {
-		name  string
-		lines int
-	}{
-		{"small_50", 50},
-		{"medium_500", 500},
-		{"large_2000", 2000},
+// benchSizes lists the input sizes the diff benchmarks share.
+var benchSizes = []struct {
+	name  string
+	lines int
+}{
+	{"small_50", 50},
+	{"medium_500", 500},
+	{"large_2000", 2000},
+}
+
+// partlyChangedYAML returns the content of [yamltest.GenerateYAML] with
+// every tenth line changed.
+func partlyChangedYAML(lines int) string {
+	var sb strings.Builder
+
+	for i := range lines {
+		if i%10 == 0 {
+			fmt.Fprintf(&sb, "modified_key_%d: modified_value_%d\n", i, i)
+		} else {
+			fmt.Fprintf(&sb, "key_%d: value_%d\n", i, i)
+		}
 	}
 
-	for _, sz := range sizes {
+	return sb.String()
+}
+
+func BenchmarkFullDiffSource(b *testing.B) {
+	for _, sz := range benchSizes {
 		yamlA := yamltest.GenerateYAML(sz.lines)
 		sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
 
@@ -60,19 +77,7 @@ func BenchmarkFullDiffSource(b *testing.B) {
 		})
 
 		b.Run(sz.name+"/partial_changes", func(b *testing.B) {
-			// Change 10% of lines.
-			var sb strings.Builder
-
-			for i := range sz.lines {
-				if i%10 == 0 {
-					fmt.Fprintf(&sb, "modified_key_%d: modified_value_%d\n", i, i)
-				} else {
-					fmt.Fprintf(&sb, "key_%d: value_%d\n", i, i)
-				}
-			}
-
-			yamlB := sb.String()
-			sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
+			sourceB := niceyaml.NewSourceFromString(partlyChangedYAML(sz.lines), niceyaml.WithName("b"))
 
 			b.ReportAllocs()
 
@@ -86,34 +91,13 @@ func BenchmarkFullDiffSource(b *testing.B) {
 }
 
 func BenchmarkHunksDiffSource(b *testing.B) {
-	sizes := []struct {
-		name  string
-		lines int
-	}{
-		{"small_50", 50},
-		{"medium_500", 500},
-		{"large_2000", 2000},
-	}
-
 	contexts := []int{0, 3, 10}
 
-	for _, sz := range sizes {
+	for _, sz := range benchSizes {
 		yamlA := yamltest.GenerateYAML(sz.lines)
 		sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
 
-		// Create B with 10% changed lines.
-		var sb strings.Builder
-
-		for i := range sz.lines {
-			if i%10 == 0 {
-				fmt.Fprintf(&sb, "modified_key_%d: modified_value_%d\n", i, i)
-			} else {
-				fmt.Fprintf(&sb, "key_%d: value_%d\n", i, i)
-			}
-		}
-
-		yamlB := sb.String()
-		sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
+		sourceB := niceyaml.NewSourceFromString(partlyChangedYAML(sz.lines), niceyaml.WithName("b"))
 
 		for _, ctx := range contexts {
 			b.Run(fmt.Sprintf("%s/context_%d", sz.name, ctx), func(b *testing.B) {
@@ -130,32 +114,11 @@ func BenchmarkHunksDiffSource(b *testing.B) {
 }
 
 func BenchmarkSideBySideDiffSource(b *testing.B) {
-	sizes := []struct {
-		name  string
-		lines int
-	}{
-		{"small_50", 50},
-		{"medium_500", 500},
-		{"large_2000", 2000},
-	}
-
-	for _, sz := range sizes {
+	for _, sz := range benchSizes {
 		yamlA := yamltest.GenerateYAML(sz.lines)
 		sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
 
-		// Create B with 10% changed lines.
-		var sb strings.Builder
-
-		for i := range sz.lines {
-			if i%10 == 0 {
-				fmt.Fprintf(&sb, "modified_key_%d: modified_value_%d\n", i, i)
-			} else {
-				fmt.Fprintf(&sb, "key_%d: value_%d\n", i, i)
-			}
-		}
-
-		yamlB := sb.String()
-		sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
+		sourceB := niceyaml.NewSourceFromString(partlyChangedYAML(sz.lines), niceyaml.WithName("b"))
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
