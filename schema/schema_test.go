@@ -252,8 +252,6 @@ func TestSchema_Check(t *testing.T) {
 			err := v.ValidateValue(t.Context(), tc.input)
 
 			if tc.wantErr {
-				require.Error(t, err)
-
 				var validationErr *niceyaml.Error
 
 				require.ErrorAs(t, err, &validationErr)
@@ -970,8 +968,6 @@ func TestSchema_PathTarget(t *testing.T) {
 			v := compileSchema(t, []byte(tc.schema))
 
 			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
-			require.Error(t, err)
-
 			bound := yamltest.RequireSourceError(t, err)
 
 			assert.Contains(t, yamltest.NewXMLPrinter().PrintError(bound),
@@ -999,9 +995,7 @@ func TestSchema_NonFiniteFloats(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := v.ValidateValue(t.Context(), map[string]any{"x": value})
-			require.NoError(t, err)
-			assert.NotErrorIs(t, err, schema.ErrValidate)
+			require.NoError(t, v.ValidateValue(t.Context(), map[string]any{"x": value}))
 		})
 	}
 }
@@ -1239,9 +1233,8 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 				return
 			}
 
-			require.Error(t, err)
+			require.ErrorContains(t, err, tc.err)
 			require.NotErrorIs(t, err, schema.ErrValidate)
-			assert.Contains(t, err.Error(), tc.err)
 		})
 	}
 }
@@ -2200,9 +2193,8 @@ func TestSchema_AliasExpansion(t *testing.T) {
 						requireExcessiveAliasing(t, err)
 
 					case tc.err != "":
-						require.Error(t, err)
+						require.ErrorContains(t, err, tc.err)
 						require.NotErrorIs(t, err, schema.ErrValidate)
-						assert.Contains(t, err.Error(), tc.err)
 
 					default:
 						require.NoError(t, err)
@@ -2677,9 +2669,8 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 					"name": {"type": "string"}
 				}
 			}`,
-			input:            "name: 123",
-			wantAnnotations:  []string{`expected "string", got "integer"`},
-			wantNestedErrors: 0,
+			input:           "name: 123",
+			wantAnnotations: []string{`expected "string", got "integer"`},
 		},
 		"multiple sub-errors from required fields": {
 			schema: `{
@@ -2710,8 +2701,7 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 				user:
 				  age: notanumber
 			`),
-			wantAnnotations:  []string{`expected "integer", got "string"`},
-			wantNestedErrors: 0,
+			wantAnnotations: []string{`expected "integer", got "string"`},
 		},
 	}
 
@@ -2722,15 +2712,11 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 			v := compileSchema(t, []byte(tc.schema))
 
 			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
-			require.Error(t, err)
 
-			bound := yamltest.RequireSourceError(t, err)
-
-			errOutput := fmt.Sprintf("%+v", bound)
+			errOutput := fmt.Sprintf("%+v", yamltest.RequireSourceError(t, err))
 
 			for _, annotation := range tc.wantAnnotations {
-				assert.Contains(t, errOutput, annotation,
-					"expected error output to contain annotation text")
+				assert.Contains(t, errOutput, annotation)
 			}
 
 			var validationErr *niceyaml.Error
@@ -2738,10 +2724,7 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 			require.ErrorAs(t, err, &validationErr)
 
 			// Unwrap includes the main error plus its nested errors.
-			unwrapped := validationErr.Unwrap()
-			nestedCount := len(unwrapped) - 1
-			assert.Equal(t, tc.wantNestedErrors, nestedCount,
-				"expected %d nested errors, got %d", tc.wantNestedErrors, nestedCount)
+			assert.Len(t, validationErr.Unwrap(), tc.wantNestedErrors+1)
 		})
 	}
 }

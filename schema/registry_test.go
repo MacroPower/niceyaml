@@ -69,9 +69,8 @@ func requireRejects(t *testing.T, reg *schema.Registry, input, want string) {
 	t.Helper()
 
 	err := reg.Check(t.Context(), yamltest.FirstDocument(t, input))
-	require.Error(t, err)
+	require.ErrorContains(t, err, want)
 	require.NotErrorIs(t, err, schema.ErrValidate)
-	assert.Contains(t, err.Error(), want)
 }
 
 // requireRefs returns the option that sets whether a registry compiles a
