@@ -1746,16 +1746,11 @@ func TestNewSourceFromLayers_Context(t *testing.T) {
 
 	// Each alias writes the hundred items of its anchor out, so the merge
 	// writes far more values than the layer spells.
-	var input strings.Builder
-
-	input.WriteString("items: &items [" + strings.Repeat("1, ", 99) + "1]\n")
-
-	for i := range 50 {
-		fmt.Fprintf(&input, "copy%d: *items\n", i)
-	}
+	input := "items: &items " + yamltest.FlowSequence("1", 100) + "\n" +
+		yamltest.GenerateLines(50, "copy%d: *items")
 
 	base := niceyaml.NewSourceFromString("name: base\n", niceyaml.WithName("base.yaml"))
-	prod := niceyaml.NewSourceFromString(input.String(),
+	prod := niceyaml.NewSourceFromString(input,
 		niceyaml.WithName("prod.yaml"), niceyaml.WithAliasLimit(false))
 
 	t.Run("a context that ends while a layer writes its aliases out returns its error", func(t *testing.T) {
