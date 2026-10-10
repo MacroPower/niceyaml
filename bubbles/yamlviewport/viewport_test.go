@@ -613,6 +613,13 @@ func addRevisions(m *yamlviewport.Model, docs ...string) {
 	}
 }
 
+// searchNext moves the selected match of m ahead by n matches.
+func searchNext(m *yamlviewport.Model, n int) {
+	for range n {
+		m.SearchNext()
+	}
+}
+
 // Documents that several tests share.
 var (
 	// Ten lines that each fit one row.
@@ -3085,8 +3092,7 @@ func TestViewport_SameDiffBaseKeepsPosition(t *testing.T) {
 	m := testModel(testPrinter(), 40, 10)
 	addRevisions(&m, v1, replaceLine(v1, 20, "k20: w"))
 	m.SetSearchTerm("v")
-	m.SearchNext()
-	m.SearchNext()
+	searchNext(&m, 2)
 	m.SetYOffset(30)
 
 	require.Equal(t, 1, m.RevisionIndex())
@@ -3190,10 +3196,7 @@ func TestViewport_ViewModeWithoutDiffKeepsPosition(t *testing.T) {
 			}
 
 			m.SetSearchTerm("v")
-
-			for range 20 {
-				m.SearchNext()
-			}
+			searchNext(&m, 20)
 
 			require.Equal(t, tc.diff, m.ShowingDiff())
 			require.Equal(t, 20, m.SearchIndex())
@@ -3899,10 +3902,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			m.SetPrinter(testPrinterWithSearch())
 			sideBySide(m)
 			m.SetSearchTerm(term)
-
-			for range next {
-				m.SearchNext()
-			}
+			searchNext(m, next)
 		}
 	}
 
@@ -6097,11 +6097,7 @@ func TestViewport_NewSearchTermStartsAtFirstMatch(t *testing.T) {
 	m.SetRevision(niceyaml.NewSourceFromString(yamltest.GenerateLines(40, "k%d: needle")))
 
 	m.SetSearchTerm("needle")
-
-	for range 7 {
-		m.SearchNext()
-	}
-
+	searchNext(&m, 7)
 	require.Equal(t, 7, m.SearchIndex())
 
 	// Setting the same term again keeps the current match and the scroll
@@ -6309,9 +6305,7 @@ func TestViewport_SearchScrollsToTransformedMatch(t *testing.T) {
 			m.SetSearchTerm("ab")
 			require.Equal(t, 30, m.SearchCount())
 
-			for range tc.next {
-				m.SearchNext()
-			}
+			searchNext(&m, tc.next)
 
 			assert.Contains(t, ansi.Strip(m.View()), "{ab}")
 		})
@@ -6380,9 +6374,7 @@ func TestViewport_UnchangedModeKeepsPosition(t *testing.T) {
 	m := testModel(testPrinter(), 40, 10)
 	m.AddRevision(niceyaml.NewSourceFromString(yamltest.GenerateLines(50, "k%d: v")))
 	m.SetSearchTerm("v")
-	m.SearchNext()
-	m.SearchNext()
-	m.SearchNext()
+	searchNext(&m, 3)
 	m.SetYOffset(30)
 
 	require.Equal(t, 3, m.SearchIndex())
