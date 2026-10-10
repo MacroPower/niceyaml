@@ -11020,6 +11020,9 @@ func TestErrDecode(t *testing.T) {
 			input  string
 			source []niceyaml.SourceOption
 			decode func(ctx context.Context, dd *niceyaml.Node) error
+			// Whether errors.As finds a go-yaml error in the chain, which
+			// it does when the unmarshaler wraps one.
+			goYAML bool
 		}{
 			"top-level value": {
 				input:  "value: 1",
@@ -11038,6 +11041,21 @@ func TestErrDecode(t *testing.T) {
 				},
 				decode: decodeAs[map[string]item](),
 			},
+			"error that wraps the go-yaml error of a top-level value": {
+				input:  "abc",
+				decode: decodeAs[wrappingUnmarshaler](),
+				goYAML: true,
+			},
+			"error that wraps the go-yaml error of a sequence element": {
+				input:  "- 1\n- abc\n",
+				decode: decodeAs[[]wrappingUnmarshaler](),
+				goYAML: true,
+			},
+			"error that wraps the go-yaml error of a mapping value": {
+				input:  "a: 1\nb: abc\n",
+				decode: decodeAs[map[string]wrappingUnmarshaler](),
+				goYAML: true,
+			},
 		}
 
 		for name, tc := range tcs {
@@ -11049,43 +11067,9 @@ func TestErrDecode(t *testing.T) {
 				err := tc.decode(t.Context(), dd)
 				require.ErrorIs(t, err, errUnmarshal)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
-			})
-		}
-	})
-
-	t.Run("wrapped unmarshaler error matches and keeps its chain", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]struct {
-			input  string
-			decode func(ctx context.Context, dd *niceyaml.Node) error
-		}{
-			"top-level value": {
-				input:  "abc",
-				decode: decodeAs[wrappingUnmarshaler](),
-			},
-			"sequence element": {
-				input:  "- 1\n- abc\n",
-				decode: decodeAs[[]wrappingUnmarshaler](),
-			},
-			"mapping value": {
-				input:  "a: 1\nb: abc\n",
-				decode: decodeAs[map[string]wrappingUnmarshaler](),
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				dd := yamltest.FirstDocument(t, tc.input)
-
-				err := tc.decode(t.Context(), dd)
-				require.ErrorIs(t, err, errUnmarshal)
-				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 				_, ok := errors.AsType[yaml.Error](err)
-				assert.True(t, ok, "errors.As no longer finds the go-yaml error")
+				assert.Equal(t, tc.goYAML, ok)
 			})
 		}
 	})
