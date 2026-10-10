@@ -543,28 +543,9 @@ func TestSchemaStore_ConcurrentFirstFetch(t *testing.T) {
 		// Concurrent lookups before the catalog has loaded share one fetch.
 		const goroutines = 10
 
-		data, err := json.Marshal(testCatalog)
-		require.NoError(t, err)
-
-		var fetchCount atomic.Int32
-
-		release := make(chan struct{})
-
-		// A goroutine waiting on a test server's socket does not count as
-		// durably blocked inside the bubble, so a stub transport stands in
-		// for the server.
-		client := &http.Client{
-			Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-				fetchCount.Add(1)
-				<-release // Hold the fetch open until every caller waits on it.
-
-				return &http.Response{
-					StatusCode: http.StatusOK,
-					Body:       io.NopCloser(bytes.NewReader(data)),
-					Request:    r,
-				}, nil
-			}),
-		}
+		// The transport holds the fetch open until every caller waits on
+		// it.
+		client, fetchCount, release := newHeldCatalogClient(t, 0)
 
 		store := newStore(client)
 
@@ -581,14 +562,14 @@ func TestSchemaStore_ConcurrentFirstFetch(t *testing.T) {
 
 		// Wait until every caller is waiting on the one fetch in flight.
 		synctest.Wait()
-		close(release)
+		release()
 		wg.Wait()
 
 		assert.Equal(t, int32(1), fetchCount.Load(), "concurrent lookups should share one fetch")
 
 		for i := range goroutines {
 			require.NoError(t, errs[i])
-			assert.Equal(t, "Test", entries[i].Name)
+			assert.Equal(t, "Catalog 1", entries[i].Name)
 		}
 	})
 }
@@ -835,38 +816,20 @@ func TestSchemaStore_FetchPanicReachesCaller(t *testing.T) {
 	// must reach the lookup that waits for the fetch rather than end the
 	// process.
 	tcs := map[string]struct {
-		setup func(t *testing.T) (*schemastore.Store, *atomic.Int32)
-		want  any
+		transport yamltest.RoundTripFunc
+		filter    func(schemastore.CatalogEntry) bool
+		want      any
 	}{
 		"filter": {
-			setup: func(t *testing.T) (*schemastore.Store, *atomic.Int32) {
-				t.Helper()
-
-				client, fetchCount := newCountingCatalogClient(t, testCatalog)
-
-				return newStore(client, schemastore.WithFilter(func(schemastore.CatalogEntry) bool {
-					panic("filter bug")
-				})), fetchCount
+			transport: respondWith(http.StatusOK, marshalCatalog(t, testCatalog)),
+			filter: func(schemastore.CatalogEntry) bool {
+				panic("filter bug")
 			},
 			want: "filter bug",
 		},
 		"transport": {
-			setup: func(t *testing.T) (*schemastore.Store, *atomic.Int32) {
-				t.Helper()
-
-				var fetchCount atomic.Int32
-
-				client := &http.Client{
-					Transport: yamltest.RoundTripFunc(func(*http.Request) (*http.Response, error) {
-						fetchCount.Add(1)
-
-						panic("transport bug")
-					}),
-				}
-
-				return newStore(client), &fetchCount
-			},
-			want: "transport bug",
+			transport: panicTransport,
+			want:      "transport bug",
 		},
 	}
 
@@ -874,7 +837,8 @@ func TestSchemaStore_FetchPanicReachesCaller(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			store, fetchCount := tc.setup(t)
+			client, fetchCount := newCountingTransportClient(tc.transport)
+			store := newStore(client, schemastore.WithFilter(tc.filter))
 
 			assert.PanicsWithValue(t, tc.want, func() {
 				_, err := store.FindMatch(t.Context(), "config.yaml")
@@ -897,38 +861,19 @@ func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
 	// goroutine of the lookup that waits for it the same way, rather than
 	// leave every lookup waiting on a fetch that never finishes.
 	tcs := map[string]struct {
-		setup func(t *testing.T) (*schemastore.Store, *atomic.Int32)
+		transport yamltest.RoundTripFunc
+		filter    func(schemastore.CatalogEntry) bool
 	}{
 		"filter": {
-			setup: func(t *testing.T) (*schemastore.Store, *atomic.Int32) {
-				t.Helper()
+			transport: respondWith(http.StatusOK, marshalCatalog(t, testCatalog)),
+			filter: func(schemastore.CatalogEntry) bool {
+				runtime.Goexit()
 
-				client, fetchCount := newCountingCatalogClient(t, testCatalog)
-
-				return newStore(client, schemastore.WithFilter(func(schemastore.CatalogEntry) bool {
-					runtime.Goexit()
-
-					return true
-				})), fetchCount
+				return true
 			},
 		},
 		"transport": {
-			setup: func(t *testing.T) (*schemastore.Store, *atomic.Int32) {
-				t.Helper()
-
-				var fetchCount atomic.Int32
-
-				client := &http.Client{
-					Transport: yamltest.RoundTripFunc(func(*http.Request) (*http.Response, error) {
-						fetchCount.Add(1)
-						runtime.Goexit()
-
-						panic("unreachable")
-					}),
-				}
-
-				return newStore(client), &fetchCount
-			},
+			transport: goexitTransport,
 		},
 	}
 
@@ -936,7 +881,8 @@ func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			store, fetchCount := tc.setup(t)
+			client, fetchCount := newCountingTransportClient(tc.transport)
+			store := newStore(client, schemastore.WithFilter(tc.filter))
 
 			var returned bool
 
@@ -977,27 +923,17 @@ func TestSchemaStore_RecordedFetchPanicLoadsAsError(t *testing.T) {
 	// that error must fail with it rather than raise the fetch's panic or
 	// Goexit again in a caller that never waited on the fetch.
 	tcs := map[string]struct {
-		fn func(*http.Request) (*http.Response, error)
+		transport yamltest.RoundTripFunc
 	}{
-		"panic": {
-			fn: func(*http.Request) (*http.Response, error) {
-				panic("transport bug")
-			},
-		},
-		"goexit": {
-			fn: func(*http.Request) (*http.Response, error) {
-				runtime.Goexit()
-
-				panic("unreachable")
-			},
-		},
+		"panic":  {transport: panicTransport},
+		"goexit": {transport: goexitTransport},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			store := newStore(&http.Client{Transport: yamltest.RoundTripFunc(tc.fn)})
+			store := newStore(&http.Client{Transport: tc.transport})
 
 			// The first lookup waits on the fetch and raises its panic or
 			// Goexit, so it runs on a goroutine of its own.
@@ -1956,21 +1892,53 @@ func newStore(client *http.Client, opts ...schemastore.Option) *schemastore.Stor
 // flight can fail with "transport connection broken" instead of getting
 // its response.
 func newCountingClient(status int, body []byte) (*http.Client, *atomic.Int32) {
+	return newCountingTransportClient(respondWith(status, body))
+}
+
+// newCountingTransportClient returns a client whose transport is fn, along
+// with a counter of the requests fn has received.
+func newCountingTransportClient(fn yamltest.RoundTripFunc) (*http.Client, *atomic.Int32) {
 	var requests atomic.Int32
 
 	client := &http.Client{
 		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 			requests.Add(1)
 
-			return &http.Response{
-				StatusCode: status,
-				Body:       io.NopCloser(bytes.NewReader(body)),
-				Request:    r,
-			}, nil
+			return fn(r)
 		}),
 	}
 
 	return client, &requests
+}
+
+// respondWith returns a transport function that answers every request
+// with status and body.
+func respondWith(status int, body []byte) yamltest.RoundTripFunc {
+	return func(r *http.Request) (*http.Response, error) {
+		return response(r, status, body), nil
+	}
+}
+
+// response returns the response to r with status and body.
+func response(r *http.Request, status int, body []byte) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Body:       io.NopCloser(bytes.NewReader(body)),
+		Request:    r,
+	}
+}
+
+// panicTransport is a transport function that panics.
+func panicTransport(*http.Request) (*http.Response, error) {
+	panic("transport bug")
+}
+
+// goexitTransport is a transport function that calls runtime.Goexit, as
+// t.FailNow does.
+func goexitTransport(*http.Request) (*http.Response, error) {
+	runtime.Goexit()
+
+	panic("unreachable")
 }
 
 // newClient is newCountingClient without the counter.
@@ -2002,18 +1970,10 @@ func newRoutingClient(routes map[string][]byte) *http.Client {
 		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 			body, ok := routes[r.URL.String()]
 			if !ok {
-				return &http.Response{
-					StatusCode: http.StatusNotFound,
-					Body:       http.NoBody,
-					Request:    r,
-				}, nil
+				return response(r, http.StatusNotFound, nil), nil
 			}
 
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(bytes.NewReader(body)),
-				Request:    r,
-			}, nil
+			return response(r, http.StatusOK, body), nil
 		}),
 	}
 }
@@ -2070,11 +2030,7 @@ func newHeldCatalogClient(t *testing.T, immediate int32) (*http.Client, *atomic.
 				return nil, fmt.Errorf("marshal catalog: %w", err)
 			}
 
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(bytes.NewReader(data)),
-				Request:    r,
-			}, nil
+			return response(r, http.StatusOK, data), nil
 		}),
 	}
 
