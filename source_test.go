@@ -912,6 +912,39 @@ func TestSource_File_CommentBelowAnchor(t *testing.T) {
 			input: "  a: &x\n# d\n  # c\n",
 			err:   "2:1: value is not allowed in this context",
 		},
+		// The go-yaml parser takes the token after a "&" as the name of the
+		// anchor, so it rejects a "&" with no name above a comment. The
+		// Source keeps that comment in the parser input wherever it sits.
+		// Without the comment, the parser would name the anchor after the
+		// token below it.
+		"no name, comment left of the key above a scalar": {
+			input: "p:\n  a: &\n# c\n   1\n",
+			err:   "3:1: unexpected scalar value type",
+		},
+		"no name, comment left of the key above a scalar and the next key": {
+			input: "p:\n  a: &\n# c\n   1\nz: 2\n",
+			err:   "3:1: unexpected scalar value type",
+		},
+		"no name, comment in the column of the key above a tagged scalar left of it": {
+			input: "p:\n   q: 1\n   a: &\n   # c\n!t 1\n",
+			err:   "4:4: unexpected scalar value type",
+		},
+		"no name, comment left of the entry above a scalar and the next entry": {
+			input: "- - &\n# c\n    1\n- 2\n",
+			err:   "2:1: unexpected scalar value type",
+		},
+		"no name, comment above the end of a flow sequence": {
+			input: "[&\n# c\n]\n",
+			err:   "2:1: unexpected scalar value type",
+		},
+		"no name, comment above a colon": {
+			input: "a: &\n# c\n: 1\n",
+			err:   "1:4: mapping value is not allowed in this context",
+		},
+		"no name, closing comment left of the root above a header": {
+			input: "  a: &\n# c\n---\n",
+			err:   "2:1: unexpected scalar value type",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -932,57 +965,6 @@ func TestSource_File_CommentBelowAnchor(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 
 			assert.Equal(t, tc.kept, strings.Contains(dd.DocumentAST().String(), "# c"))
-		})
-	}
-}
-
-func TestSource_File_CommentBelowAnchorWithNoName(t *testing.T) {
-	t.Parallel()
-
-	// The go-yaml parser takes the token after a "&" as the name of the
-	// anchor, so it rejects a "&" with no name above a comment. The Source
-	// keeps that comment in the parser input wherever it sits. Without the
-	// comment, the parser would name the anchor after the token below it.
-	tcs := map[string]struct {
-		input string
-		err   string
-	}{
-		"comment left of the key above a scalar": {
-			input: "p:\n  a: &\n# c\n   1\n",
-			err:   "3:1: unexpected scalar value type",
-		},
-		"comment left of the key above a scalar and the next key": {
-			input: "p:\n  a: &\n# c\n   1\nz: 2\n",
-			err:   "3:1: unexpected scalar value type",
-		},
-		"comment in the column of the key above a tagged scalar left of it": {
-			input: "p:\n   q: 1\n   a: &\n   # c\n!t 1\n",
-			err:   "4:4: unexpected scalar value type",
-		},
-		"comment left of the entry above a scalar and the next entry": {
-			input: "- - &\n# c\n    1\n- 2\n",
-			err:   "2:1: unexpected scalar value type",
-		},
-		"comment above the end of a flow sequence": {
-			input: "[&\n# c\n]\n",
-			err:   "2:1: unexpected scalar value type",
-		},
-		"comment above a colon": {
-			input: "a: &\n# c\n: 1\n",
-			err:   "1:4: mapping value is not allowed in this context",
-		},
-		"closing comment left of the root above a header": {
-			input: "  a: &\n# c\n---\n",
-			err:   "2:1: unexpected scalar value type",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			_, err := niceyaml.NewSourceFromString(tc.input).File()
-			require.EqualError(t, err, tc.err)
 		})
 	}
 }
