@@ -116,6 +116,14 @@ func TestErrorHandler(t *testing.T) {
 	spaced := niceyaml.NewSourceFromString("name: test\n\n\n")
 	spacedErr := yamltest.Bind(t, spaced, errAt("bad name", "$.name"))
 
+	// The excerpt of a lone error at the name key, behind the indent of the
+	// handler.
+	nameExcerpt := stringtest.JoinLF(
+		"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
+		"  <textError>^^^^</textError>",
+		"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
+	)
+
 	tcs := map[string]struct {
 		err  error
 		want string
@@ -196,9 +204,7 @@ func TestErrorHandler(t *testing.T) {
 				"Error",
 				"  1:1: $.name~: invalid name",
 				"  ",
-				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
-				"  <textError>^^^^</textError>",
-				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
+				nameExcerpt,
 				"",
 				"",
 			),
@@ -209,9 +215,7 @@ func TestErrorHandler(t *testing.T) {
 				"Error",
 				"  unknown flag: a.yaml:1:1: $.name~: bad name",
 				"  ",
-				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
-				"  <textError>^^^^</textError>",
-				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
+				nameExcerpt,
 				"",
 				"",
 			),
@@ -238,9 +242,7 @@ func TestErrorHandler(t *testing.T) {
 				"Error",
 				"  document 0: 1:1: $.name~:",
 				"  ",
-				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
-				"  <textError>^^^^</textError>",
-				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
+				nameExcerpt,
 				"",
 				"",
 			),
@@ -273,8 +275,7 @@ func TestErrorHandler(t *testing.T) {
 
 			var buf bytes.Buffer
 
-			styles := testStyles()
-			fangs.NewErrorHandler(fangs.WithPrinter(xmlPrinter()))(&buf, styles, tc.err)
+			fangs.NewErrorHandler(fangs.WithPrinter(xmlPrinter()))(&buf, testStyles(), tc.err)
 
 			assert.Equal(t, tc.want, buf.String())
 		})
