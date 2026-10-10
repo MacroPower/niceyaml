@@ -1,6 +1,7 @@
 package yamltest_test
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"testing"
@@ -333,78 +334,69 @@ func TestTokenBuilder(t *testing.T) {
 func TestValidateTokens(t *testing.T) {
 	t.Parallel()
 
-	t.Run("equal length with valid tokens", func(t *testing.T) {
-		t.Parallel()
+	tk := yamltest.NewTokenBuilder().Build()
 
-		tb := yamltest.NewTokenBuilder()
-		want := token.Tokens{tb.Build(), tb.Build()}
-		got := token.Tokens{tb.Build(), tb.Build()}
+	tcs := map[string]struct {
+		err  error // Nil when the tokens are valid.
+		msg  string
+		want token.Tokens
+		got  token.Tokens
+	}{
+		"equal length with valid tokens": {
+			want: token.Tokens{tk, tk},
+			got:  token.Tokens{tk, tk},
+		},
+		"empty slices": {
+			want: token.Tokens{},
+			got:  token.Tokens{},
+		},
+		"count mismatch": {
+			want: token.Tokens{tk},
+			got:  token.Tokens{tk, tk},
+			err:  yamltest.ErrTokenCountMismatch,
+			msg:  "want 1, got 2",
+		},
+		"nil want token": {
+			want: token.Tokens{nil},
+			got:  token.Tokens{tk},
+			err:  yamltest.ErrNilToken,
+			msg:  "token 0 want",
+		},
+		"nil want position": {
+			want: token.Tokens{{}},
+			got:  token.Tokens{tk},
+			err:  yamltest.ErrNilPosition,
+			msg:  "token 0 want",
+		},
+		"nil got token": {
+			want: token.Tokens{tk},
+			got:  token.Tokens{nil},
+			err:  yamltest.ErrNilToken,
+			msg:  "token 0 got",
+		},
+	}
 
-		err := yamltest.ValidateTokens(want, got)
-		assert.NoError(t, err)
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("empty slices pass", func(t *testing.T) {
-		t.Parallel()
+			err := yamltest.ValidateTokens(tc.want, tc.got)
+			if tc.err == nil {
+				require.NoError(t, err)
 
-		err := yamltest.ValidateTokens(token.Tokens{}, token.Tokens{})
-		assert.NoError(t, err)
-	})
+				return
+			}
 
-	t.Run("count mismatch fails", func(t *testing.T) {
-		t.Parallel()
+			require.ErrorIs(t, err, tc.err)
+			assert.Contains(t, err.Error(), tc.msg)
 
-		tb := yamltest.NewTokenBuilder()
-		want := token.Tokens{tb.Build()}
-		got := token.Tokens{tb.Build(), tb.Build()}
+			// A count mismatch names no token, so it alone is no
+			// TokenValidationError.
+			var tve *yamltest.TokenValidationError
 
-		err := yamltest.ValidateTokens(want, got)
-		require.ErrorIs(t, err, yamltest.ErrTokenCountMismatch)
-		assert.Contains(t, err.Error(), "want 1, got 2")
-
-		var tve *yamltest.TokenValidationError
-
-		assert.NotErrorAs(t, err, &tve)
-	})
-
-	t.Run("nil want token fails", func(t *testing.T) {
-		t.Parallel()
-
-		tb := yamltest.NewTokenBuilder()
-		want := token.Tokens{nil}
-		got := token.Tokens{tb.Build()}
-
-		err := yamltest.ValidateTokens(want, got)
-		require.Error(t, err)
-		require.ErrorIs(t, err, yamltest.ErrNilToken)
-		assert.Contains(t, err.Error(), "token 0 want")
-	})
-
-	t.Run("nil want position fails", func(t *testing.T) {
-		t.Parallel()
-
-		tb := yamltest.NewTokenBuilder()
-		want := token.Tokens{&token.Token{}}
-		got := token.Tokens{tb.Build()}
-
-		err := yamltest.ValidateTokens(want, got)
-		require.Error(t, err)
-		require.ErrorIs(t, err, yamltest.ErrNilPosition)
-		assert.Contains(t, err.Error(), "token 0 want")
-	})
-
-	t.Run("nil got token fails", func(t *testing.T) {
-		t.Parallel()
-
-		tb := yamltest.NewTokenBuilder()
-		want := token.Tokens{tb.Build()}
-		got := token.Tokens{nil}
-
-		err := yamltest.ValidateTokens(want, got)
-		require.Error(t, err)
-		require.ErrorIs(t, err, yamltest.ErrNilToken)
-		assert.Contains(t, err.Error(), "token 0 got")
-	})
+			assert.Equal(t, !errors.Is(tc.err, yamltest.ErrTokenCountMismatch), errors.As(err, &tve))
+		})
+	}
 }
 
 func TestCompareTokens(t *testing.T) {
