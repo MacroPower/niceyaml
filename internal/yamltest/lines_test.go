@@ -18,7 +18,26 @@ import (
 func TestLines_Validate(t *testing.T) {
 	t.Parallel()
 
-	strTkb := yamltest.NewTokenBuilder().Type(token.StringType)
+	// A str token is a string at a line and a column, whose Value is its
+	// Origin without the line ending.
+	str := func(origin string, line, col int) *token.Token {
+		return yamltest.NewTokenBuilder().
+			Type(token.StringType).
+			Origin(origin).
+			Value(strings.TrimSuffix(origin, "\n")).
+			PositionLine(line).
+			PositionColumn(col).
+			Build()
+	}
+
+	// The tokens linked returns carry the links between them that Add sets.
+	linked := func(tks ...*token.Token) token.Tokens {
+		var out token.Tokens
+
+		out.Add(tks...)
+
+		return out
+	}
 
 	t.Run("valid cases", func(t *testing.T) {
 		t.Parallel()
@@ -56,44 +75,72 @@ func TestLines_Validate(t *testing.T) {
 		}
 	})
 
-	t.Run("line numbers normalized - same input", func(t *testing.T) {
+	t.Run("hand-built tokens", func(t *testing.T) {
 		t.Parallel()
 
-		// Create tokens with the same line number and a newline between
-		// them. NewLines normalizes the numbers so they strictly increase.
-		tks := token.Tokens{}
-		tks.Add(strTkb.Clone().Origin("first\n").Value("first").PositionLine(5).PositionColumn(1).Build())
-		tks.Add(
-			strTkb.Clone().Origin("second\n").Value("second").PositionLine(5).PositionColumn(1).Build(),
-		) // Same line number in input.
+		tcs := map[string]struct {
+			err  error
+			msg  string
+			tks  token.Tokens
+			want []int // The number NewLines gives each line.
+		}{
+			// NewLines normalizes the numbers so they strictly increase.
+			"same line number twice": {
+				tks:  linked(str("first\n", 5, 1), str("second\n", 5, 1)),
+				want: []int{5, 6},
+			},
+			"decreasing line numbers": {
+				tks:  linked(str("first\n", 10, 1), str("second\n", 5, 1)),
+				want: []int{10, 11},
+			},
+			"gaps in line numbers": {
+				tks:  linked(str("first\n", 1, 1), str("second\n", 10, 1), str("third\n", 100, 1)),
+				want: []int{1, 10, 100},
+			},
+			"line with tokens and no number": {
+				tks:  linked(str("first\n", 0, 1)),
+				want: []int{0},
+				err:  yamltest.ErrLineNumberNotIncreasing,
+			},
+			"same column twice": {
+				tks:  linked(str("first", 1, 5), str("second\n", 1, 5)),
+				want: []int{1},
+				err:  yamltest.ErrColumnNotIncreasing,
+				msg:  "column 5 not greater than previous 5",
+			},
+			"decreasing columns": {
+				tks:  linked(str("first", 1, 10), str("second\n", 1, 5)),
+				want: []int{1},
+				err:  yamltest.ErrColumnNotIncreasing,
+				msg:  "column 5 not greater than previous 10",
+			},
+		}
 
-		lines := line.NewLines(tks)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		// After normalization, line numbers are sequential.
-		require.NoError(t, yamltest.ValidateLines(lines))
-		require.Equal(t, 2, lines.Len())
-		assert.Equal(t, 5, lines.Line(0).Number())
-		assert.Equal(t, 6, lines.Line(1).Number())
-	})
+				lines := line.NewLines(tc.tks)
 
-	t.Run("line numbers normalized - decreasing input", func(t *testing.T) {
-		t.Parallel()
+				var got []int
 
-		// Create tokens with decreasing line numbers.
-		// NewLines normalizes the numbers so they strictly increase.
-		tks := token.Tokens{}
-		tks.Add(strTkb.Clone().Origin("first\n").Value("first").PositionLine(10).PositionColumn(1).Build())
-		tks.Add(
-			strTkb.Clone().Origin("second\n").Value("second").PositionLine(5).PositionColumn(1).Build(),
-		) // Lower line number in input.
+				for _, l := range lines.All() {
+					got = append(got, l.Number())
+				}
 
-		lines := line.NewLines(tks)
+				assert.Equal(t, tc.want, got)
 
-		// After normalization, line numbers are sequential.
-		require.NoError(t, yamltest.ValidateLines(lines))
-		require.Equal(t, 2, lines.Len())
-		assert.Equal(t, 10, lines.Line(0).Number())
-		assert.Equal(t, 11, lines.Line(1).Number())
+				err := yamltest.ValidateLines(lines)
+				if tc.err == nil {
+					require.NoError(t, err)
+
+					return
+				}
+
+				require.ErrorIs(t, err, tc.err)
+				assert.Contains(t, err.Error(), tc.msg)
+			})
+		}
 	})
 
 	t.Run("placeholder lines carry no number", func(t *testing.T) {
@@ -102,19 +149,6 @@ func TestLines_Validate(t *testing.T) {
 		// A side-by-side diff inserts zero-value lines opposite inserted
 		// and deleted lines, and they hold no tokens to number.
 		require.NoError(t, yamltest.ValidateLines(line.Collect(&line.Line{}, &line.Line{})))
-	})
-
-	t.Run("line with tokens and no number", func(t *testing.T) {
-		t.Parallel()
-
-		tks := token.Tokens{}
-		tks.Add(strTkb.Clone().Origin("first\n").Value("first").PositionLine(0).PositionColumn(1).Build())
-
-		lines := line.NewLines(tks)
-		require.Equal(t, 1, lines.Len())
-
-		err := yamltest.ValidateLines(lines)
-		require.ErrorIs(t, err, yamltest.ErrLineNumberNotIncreasing)
 	})
 
 	t.Run("token line differs from line number", func(t *testing.T) {
@@ -134,52 +168,13 @@ func TestLines_Validate(t *testing.T) {
 		assert.Contains(t, err.Error(), "token line 7 differs from line number 2")
 	})
 
-	t.Run("columns not increasing - same", func(t *testing.T) {
-		t.Parallel()
-
-		// Create two tokens on same line with same column.
-		tks := token.Tokens{}
-		tks.Add(strTkb.Clone().Origin("first").Value("first").PositionLine(1).PositionColumn(5).Build())
-		tks.Add(
-			strTkb.Clone().Origin("second\n").Value("second").PositionLine(1).PositionColumn(5).Build(),
-		) // Same column!
-
-		lines := line.NewLines(tks)
-
-		err := yamltest.ValidateLines(lines)
-		require.ErrorIs(t, err, yamltest.ErrColumnNotIncreasing)
-		assert.Contains(t, err.Error(), "column 5 not greater than previous 5")
-	})
-
-	t.Run("columns not increasing - decreasing", func(t *testing.T) {
-		t.Parallel()
-
-		tks := token.Tokens{}
-		tks.Add(strTkb.Clone().Origin("first").Value("first").PositionLine(1).PositionColumn(10).Build())
-		tks.Add(
-			strTkb.Clone().Origin("second\n").Value("second").PositionLine(1).PositionColumn(5).Build(),
-		) // Lower column!
-
-		lines := line.NewLines(tks)
-
-		err := yamltest.ValidateLines(lines)
-		require.ErrorIs(t, err, yamltest.ErrColumnNotIncreasing)
-		assert.Contains(t, err.Error(), "column 5 not greater than previous 10")
-	})
-
 	t.Run("token line number opens a new line", func(t *testing.T) {
 		t.Parallel()
 
 		// The lexer drops the line ending ahead of some tokens, so a
 		// token whose position names the next line opens that line even
 		// though the Origin before it holds no line ending.
-		tks := token.Tokens{}
-		tks.Add(strTkb.Clone().Origin("first").Value("first").PositionLine(1).PositionColumn(1).Build())
-		tks.Add(
-			strTkb.Clone().Origin("second\n").Value("second").PositionLine(2).PositionColumn(1).Build(),
-		)
-
-		lines := line.NewLines(tks)
+		lines := line.NewLines(linked(str("first", 1, 1), str("second\n", 2, 1)))
 
 		require.NoError(t, yamltest.ValidateLines(lines))
 		require.Equal(t, 2, lines.Len())
@@ -191,36 +186,16 @@ func TestLines_Validate(t *testing.T) {
 	t.Run("nil position tokens - normalized", func(t *testing.T) {
 		t.Parallel()
 
-		tks := token.Tokens{}
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "first",
-			Value:    "first",
-			Position: nil, // TokenBuilder always sets a Position, so build by hand.
-		})
-		tks.Add(strTkb.Clone().Origin("second\n").Value("second").PositionLine(1).PositionColumn(10).Build())
+		// TokenBuilder always sets a Position, so the test drops it by hand.
+		unplaced := str("first", 0, 0)
+		unplaced.Position = nil
 
-		lines := line.NewLines(tks)
+		lines := line.NewLines(linked(unplaced, str("second\n", 1, 10)))
 
 		// NewLines gives every token a position, so validation sees none of
 		// the nil positions it rejects.
 		require.NoError(t, yamltest.ValidateLines(lines))
 		assert.NotNil(t, lines.Line(0).Token(0).Position)
-	})
-
-	t.Run("valid with gaps in line numbers", func(t *testing.T) {
-		t.Parallel()
-
-		tks := token.Tokens{}
-		tks.Add(strTkb.Clone().Origin("first\n").Value("first").PositionLine(1).PositionColumn(1).Build())
-		tks.Add(
-			strTkb.Clone().Origin("second\n").Value("second").PositionLine(10).PositionColumn(1).Build(),
-		) // Gap is fine.
-		tks.Add(strTkb.Clone().Origin("third\n").Value("third").PositionLine(100).PositionColumn(1).Build())
-
-		lines := line.NewLines(tks)
-
-		assert.NoError(t, yamltest.ValidateLines(lines))
 	})
 }
 
