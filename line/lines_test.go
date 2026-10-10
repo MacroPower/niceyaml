@@ -20,6 +20,9 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
+// TestNewLines_Roundtrip verifies that NewLines leaves the tokens it cuts
+// into parts as the lexer produced them, that Lines.Tokens returns those same
+// tokens, and that the lines hold the content of the input.
 func TestNewLines_Roundtrip(t *testing.T) {
 	t.Parallel()
 
@@ -207,6 +210,8 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		"blank line between CRLF": "key: value\r\n\r\nnext: data\r\n",
 		"list of maps CRLF":       "items:\r\n  - name: a\r\n    val: 1\r\n",
 		"plain multiline string":  "key: this is\n  a multiline\n  plain string\n",
+		"double quoted multiline": "key: \"line1\nline2\"\n",
+		"single quoted multiline": "key: 'line1\nline2'\n",
 		"multiple keys CR":        "a: 1\rb: 2\r",
 		"block scalar with CR":    "key: |\r  line1\r  line2\r",
 		"blank line between CR":   "a: 1\r\rb: 2\r",
@@ -217,7 +222,22 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := requireRoundtrip(t, input)
+			// The lines hold the tokens passed to NewLines, so the lexer's
+			// tokens come from a second tokenization.
+			want := tokens.Tokenize(input)
+			tks := tokens.Tokenize(input)
+			lines := line.NewLines(tks)
+
+			// NewLines leaves the tokens it cuts into parts as the lexer
+			// produced them, and Lines.Tokens returns those same tokens.
+			yamltest.RequireTokensEqual(t, want, tks)
+
+			got := lines.Tokens()
+			require.Len(t, got, len(tks))
+
+			for i := range tks {
+				assert.Same(t, tks[i], got[i], "token %d", i)
+			}
 
 			contentDiff := yamltest.CompareContent(input, lines.Content())
 			require.True(t, contentDiff.Equal(), contentDiff.String())
@@ -244,48 +264,6 @@ func requireRoundtrip(t *testing.T, input string) line.Lines {
 	yamltest.RequireTokensEqual(t, want, lines.Tokens())
 
 	return lines
-}
-
-// TestNewLines_DoesNotMutateInput verifies that NewLines leaves the tokens
-// it cuts into parts as the lexer produced them, and that Lines.Tokens
-// returns those same tokens.
-func TestNewLines_DoesNotMutateInput(t *testing.T) {
-	t.Parallel()
-
-	full, err := os.ReadFile(filepath.Join("..", "testdata", "full.yaml"))
-	require.NoError(t, err)
-
-	tcs := map[string]string{
-		"testdata/full.yaml":      string(full),
-		"literal block":           "script: |\n  line1\n  line2\n",
-		"literal keep":            "text: |+\n  line1\n  line2\n\n",
-		"folded with blank lines": "text: >\n  first\n\n  second\n",
-		"double quoted multiline": "key: \"line1\nline2\"\n",
-		"single quoted multiline": "key: 'line1\nline2'\n",
-		"plain multiline":         "key: this is\n  a multiline\n  plain string\n",
-		"unicode key":             "日: value\n",
-		"block scalar CRLF":       "key: |\r\n  line1\r\n  line2\r\n",
-		"quoted string CRLF":      "key: \"line1\r\nline2\"\r\n",
-		"plain multiline CRLF":    "key: text\r\n  continued\r\n",
-		"blank line between CRLF": "key: value\r\n\r\nnext: data\r\n",
-	}
-
-	for name, input := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			want := tokens.Tokenize(input)
-			tks := tokens.Tokenize(input)
-			got := line.NewLines(tks).Tokens()
-
-			yamltest.RequireTokensEqual(t, want, tks)
-			require.Len(t, got, len(tks))
-
-			for i := range tks {
-				assert.Same(t, tks[i], got[i], "token %d", i)
-			}
-		})
-	}
 }
 
 func TestNewLines_PerLine(t *testing.T) {
