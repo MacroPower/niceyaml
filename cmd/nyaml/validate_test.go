@@ -51,6 +51,18 @@ func relToWorkDir(t *testing.T, path string) string {
 	return rel
 }
 
+// writeOrSkip writes content to the file name in dir. It skips the test
+// when the write fails, since some file systems, such as those on Windows,
+// reject control characters in a name.
+func writeOrSkip(t *testing.T, dir, name, content string) {
+	t.Helper()
+
+	err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600)
+	if err != nil {
+		t.Skipf("write %q: %v", name, err)
+	}
+}
+
 // directive returns the comment line that names ref as the schema of the
 // document below it.
 func directive(ref string) string {
@@ -695,12 +707,7 @@ func TestValidateCmdOutput(t *testing.T) {
 			schemaPath := writeFile(t, dir, "schema.json", `{"type": "object"}`)
 
 			for _, file := range tc.files {
-				err := os.WriteFile(filepath.Join(dir, file), []byte("name: a\n"), 0o600)
-				if err != nil {
-					// Some file systems, such as those on Windows, reject
-					// control characters in a name.
-					t.Skipf("write %q: %v", file, err)
-				}
+				writeOrSkip(t, dir, file, "name: a\n")
 			}
 
 			args := []string{"--schema", schemaPath}
@@ -765,12 +772,7 @@ func TestValidateCmdErrorNames(t *testing.T) {
 					t.Skipf("symlink %q: %v", file, err)
 				}
 			} else {
-				err := os.WriteFile(path, []byte(tc.content), 0o600)
-				if err != nil {
-					// Some file systems, such as those on Windows, reject
-					// control characters in a name.
-					t.Skipf("write %q: %v", file, err)
-				}
+				writeOrSkip(t, dir, file, tc.content)
 			}
 
 			out := io.Writer(&bytes.Buffer{})
