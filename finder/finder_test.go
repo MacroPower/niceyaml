@@ -79,12 +79,10 @@ func TestFinder_Find(t *testing.T) {
 		"no match": {
 			input:  "key: value",
 			search: "notfound",
-			want:   nil,
 		},
 		"empty search": {
 			input:  "key: value",
 			search: "",
-			want:   nil,
 		},
 		"multi-line value": {
 			input:  "text: |\n  line1\n  line2",
@@ -112,13 +110,11 @@ func TestFinder_Find(t *testing.T) {
 			input:      "name: ガ",
 			search:     "カ",
 			normalizer: normalizer.New(),
-			want:       nil,
 		},
 		"with normalizer - kana voicing mark distinguishes decomposed source": {
 			input:      "name: ガ",
 			search:     "カ",
 			normalizer: normalizer.New(),
-			want:       nil,
 		},
 		"with normalizer - katakana precomposed source, decomposed search": {
 			input:      "name: ガ",
@@ -178,7 +174,6 @@ func TestFinder_Find(t *testing.T) {
 			input:  "key: VALUE",
 			search: "value",
 			exact:  true,
-			want:   nil,
 		},
 		"exact matching - match covers a trailing combining mark": {
 			input:  "name: café",
@@ -190,7 +185,6 @@ func TestFinder_Find(t *testing.T) {
 			input:      "key: VALUE",
 			search:     "value",
 			normalizer: (*normalizer.Normalizer)(nil),
-			want:       nil,
 		},
 		"nil normalizer pointer - exact match": {
 			input:      "key: VALUE",
@@ -276,7 +270,6 @@ func TestFinder_Find(t *testing.T) {
 		"utf8 - box drawing chars not matched by japanese": {
 			input:  "# ───────────",
 			search: "日本",
-			want:   nil,
 		},
 		"emoji search": {
 			input:  "icon: 🎉",
@@ -286,7 +279,6 @@ func TestFinder_Find(t *testing.T) {
 		"search longer than input": {
 			input:  "a: b",
 			search: "this is a very long search string",
-			want:   nil,
 		},
 		"search equals input": {
 			input:  "key: value",
@@ -315,7 +307,6 @@ func TestFinder_Find(t *testing.T) {
 		"empty input": {
 			input:  "",
 			search: "test",
-			want:   nil,
 		},
 		"last character": {
 			input:  "key: value",
@@ -340,7 +331,6 @@ func TestFinder_Find(t *testing.T) {
 			input:      "key: value\n",
 			search:     "́",
 			normalizer: normalizer.New(),
-			want:       nil,
 		},
 		// The accent is a combining mark that belongs to the "e" before it, and
 		// the normalizer drops it. A match ending at that "e" covers the accent,
@@ -398,7 +388,6 @@ func TestFinder_Find(t *testing.T) {
 			input:      "x: ßa",
 			search:     "sa",
 			normalizer: normalizer.New(),
-			want:       nil,
 		},
 		"expansion next to a plain match": {
 			input:      "x: ßs",
@@ -417,18 +406,15 @@ func TestFinder_Find(t *testing.T) {
 		"continuation byte without normalizer": {
 			input:  "x: a\u00e9",
 			search: "\xa9",
-			want:   nil,
 		},
 		"continuation byte with normalizer": {
 			input:      "x: a\u00e9",
 			search:     "\xa9",
 			normalizer: normalizer.New(),
-			want:       nil,
 		},
 		"truncated rune": {
 			input:  "x: a\u00e9",
 			search: "a\xc3",
-			want:   nil,
 		},
 		"replacement character in the source": {
 			input:  "x: a\xa9b",
