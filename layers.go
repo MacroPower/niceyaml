@@ -34,14 +34,27 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 //		return err
 //	}
 //
-//	cfg, err := niceyaml.NewSourceFromLayers(base, prod).Decode[Config](ctx)
+//	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+//	if err != nil {
+//		return err
+//	}
 //
-// The layers merge in the call, which decodes each of them as a decode
-// of that layer alone reads it, and no deadline stops that decode. The
-// Source never changes after that, so it is safe for concurrent use. A
-// nil Layer adds nothing, and neither does a nil Source or a nil
-// [*Node], so a program with an optional file passes its Source as it
-// is.
+//	cfg, err := merged.Decode[Config](ctx)
+//
+// The layers merge in the call, which decodes each of them with ctx as a
+// decode of that layer alone reads it. The Source never changes after
+// that, so it is safe for concurrent use. A nil Layer adds nothing, and
+// neither does a nil Source or a nil [*Node], so a program with an
+// optional file passes its Source as it is.
+//
+// A layer whose document did not parse holds no value. Neither does a
+// Source that holds several documents, which has no one document to
+// merge, nor a layer that a decode of it alone into an any value
+// rejects, as it rejects an alias with no anchor. NewSourceFromLayers
+// then returns the error of the lowest such layer, bound in its file,
+// and no Source. It returns the error of ctx once ctx ends, so a
+// deadline stops a merge that writes many aliases out, as the Aliases
+// section describes.
 //
 // # Decoding
 //
@@ -83,7 +96,12 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 //	env := niceyaml.NewSourceFromBytes(data,
 //		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
 //
-//	cfg, err := niceyaml.NewSourceFromLayers(base, prod, env).Decode[Config](ctx)
+//	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod, env)
+//	if err != nil {
+//		return err
+//	}
+//
+//	cfg, err := merged.Decode[Config](ctx)
 //
 // Every [Validator] and the self-validation step then check the port the
 // environment set, and a schema that requires a key passes when only the
@@ -283,24 +301,6 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 // excerpt. The merged text holds the secret whatever the option says, so
 // the merged Source has excerpts off when the Source of any layer has.
 //
-// # Layer Errors
-//
-// A layer whose document did not parse holds no value. Neither does a
-// Source that holds several documents, which has no one document to
-// merge, nor a layer that a decode of it alone into an any value rejects,
-// as it rejects an alias with no anchor. The merged Source then holds
-// the error of the lowest such layer, bound in its file, as a Source
-// holds the syntax error of a file that did not parse. [Source.File],
-// [Source.Document], [Source.Decode], [Source.DecodeInto], and
-// [Source.SelfValidate] return that error. [Source.Documents] still
-// returns the one document of the merged Source, and [Node.Err] returns
-// the error for it, as do the Node methods that read the tree, such as
-// [Node.Validate]. A path in an error that [Source.Bind] or [Node.Bind]
-// binds resolves nowhere then, as in a file that did not parse. The
-// bound error names the lowest layer and no position, and
-// [SourceError.Unresolved] returns [ErrPathNeedsDocument] wrapping the
-// error of the layer.
-//
 // # Optional Files
 //
 // A nil layer adds nothing. [NewSourceFromFile] returns a nil Source for
@@ -312,7 +312,12 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 //		return err
 //	}
 //
-//	cfg, err := niceyaml.NewSourceFromLayers(base, user).Decode[Config](ctx)
+//	merged, err := niceyaml.NewSourceFromLayers(ctx, base, user)
+//	if err != nil {
+//		return err
+//	}
+//
+//	cfg, err := merged.Decode[Config](ctx)
 //
 // A program whose optional files are all missing merges no layer. A
 // decode then leaves the value as it was, and each error binds with no
@@ -321,8 +326,8 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 // error is bound to an empty document, so no other document places it.
 // A value that came from no document validates through
 // [SelfValidateValue] instead.
-func NewSourceFromLayers(layers ...Layer) *Source {
-	return mergeLayers(context.Background(), layers)
+func NewSourceFromLayers(ctx context.Context, layers ...Layer) (*Source, error) {
+	return mergeLayers(ctx, layers)
 }
 
 // Layer is one layer of the Source [NewSourceFromLayers] builds: a
@@ -331,8 +336,8 @@ func NewSourceFromLayers(layers ...Layer) *Source {
 //
 // A Source stands for its one document, the one [Source.Document]
 // returns, so a program passes each file as it read it. A Source that
-// holds several documents, or a document that did not parse, is a layer
-// that holds no value, as [NewSourceFromLayers] describes.
+// holds several documents, or a document that did not parse, holds no
+// value, and [NewSourceFromLayers] returns its error.
 //
 // A Node is the root of a document, or the value at a path of one for a
 // Node from [Node.At]. It serves a program that layers one document of a
@@ -355,7 +360,12 @@ func NewSourceFromLayers(layers ...Layer) *Source {
 //		layers = append(layers, source)
 //	}
 //
-//	cfg, err := niceyaml.NewSourceFromLayers(layers...).Decode[Config](ctx)
+//	merged, err := niceyaml.NewSourceFromLayers(ctx, layers...)
+//	if err != nil {
+//		return err
+//	}
+//
+//	cfg, err := merged.Decode[Config](ctx)
 //
 // See [*Source] and [*Node] for the implementations.
 type Layer interface {
@@ -421,20 +431,12 @@ type Layer interface {
 // which wraps [go.jacobcolvin.com/niceyaml/paths.ErrAlias]. The error is
 // bound to the layer that holds the alias, so [SourceError.Source] names
 // the file of that layer.
-//
-// A layer that holds no value, as NewSourceFromLayers describes, has no
-// Node, so the origin of a value that lies in it is the error of that
-// layer.
 func (n *Node) Origin() (*Node, error) {
 	if !n.merges() {
 		return n, nil
 	}
 
 	layer, _, path := n.source.layers.layer(n, n.base)
-
-	if layer.node == nil {
-		return nil, layer.err
-	}
 
 	// The path names the Node of the layer itself, which needs no scope.
 	// The root of a document covers every line of it, where a Node that

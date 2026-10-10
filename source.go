@@ -1467,12 +1467,6 @@ func (d *document) anchorToken() *token.Token {
 // holds a [PanicError] and does not match ErrSyntax. The documents the
 // parser was reading have no tree, as the documents of a syntax error
 // have none, and every later call returns the same error.
-//
-// # Merged Documents
-//
-// The Source [NewSourceFromLayers] builds holds the error of a layer
-// that holds no value, as NewSourceFromLayers describes, and File
-// returns that error as it returns a syntax error.
 func (s *Source) File() (*ast.File, error) {
 	s.parseOnce()
 

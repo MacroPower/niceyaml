@@ -63,10 +63,12 @@ import (
 // SelfValidate through the Node of one file binds every error in that
 // file:
 //
-//	return niceyaml.NewSourceFromLayers(base, prod).SelfValidate(ctx, &cfg)
+//	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+//	if err != nil {
+//		return err
+//	}
 //
-// The merged Source holds the error of a layer that did not parse, so
-// Source.SelfValidate returns that error and the walk does not run.
+//	return merged.SelfValidate(ctx, &cfg)
 //
 // # Decode Options
 //

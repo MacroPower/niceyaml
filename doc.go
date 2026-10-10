@@ -503,10 +503,18 @@
 // that requires a key passes when any file sets it, and each error binds
 // in the file that holds its value:
 //
-//	cfg, err := niceyaml.NewSourceFromLayers(base, prod).Decode[Config](ctx, niceyaml.WithValidator(schema))
+//	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
 //	if err != nil {
 //		return err
 //	}
+//
+//	cfg, err := merged.Decode[Config](ctx, niceyaml.WithValidator(schema))
+//	if err != nil {
+//		return err
+//	}
+//
+// The merge returns the error of a file that did not parse, bound in
+// that file, and the error of ctx once ctx ends.
 //
 // [Source.Document] of the merged Source returns the root Node of the
 // merged document, and a [Validator] gets that Node. A caller reads one
@@ -535,7 +543,12 @@
 //
 //	env := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment"))
 //
-//	cfg, err := niceyaml.NewSourceFromLayers(base, prod, env).Decode[Config](ctx, niceyaml.WithValidator(schema))
+//	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod, env)
+//	if err != nil {
+//		return err
+//	}
+//
+//	cfg, err := merged.Decode[Config](ctx, niceyaml.WithValidator(schema))
 //
 // The schema then checks the port the environment set. An error under
 // the port binds in that layer, as in

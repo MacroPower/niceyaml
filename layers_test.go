@@ -36,9 +36,14 @@ func ExampleNewSourceFromLayers() {
 		niceyaml.WithName("prod.yaml"),
 	)
 
+	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	// The port of the server comes from base.yaml, and the list of servers
 	// from prod.yaml.
-	_, err := niceyaml.NewSourceFromLayers(base, prod).Decode[layerConfig](ctx)
+	_, err = merged.Decode[layerConfig](ctx)
 	fmt.Println(niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 	// Output:
@@ -67,7 +72,12 @@ func ExampleNewSourceFromLayers_document() {
 		niceyaml.WithName("prod.yaml"),
 	)
 
-	doc, err := niceyaml.NewSourceFromLayers(base, prod).Document()
+	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	doc, err := merged.Document()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -127,9 +137,14 @@ func ExampleNewSourceFromLayers_environment() {
 		"properties": {"server": {"required": ["host", "port"]}}
 	}`))
 
+	merged, err := niceyaml.NewSourceFromLayers(ctx, base, env)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	// The schema finds the port it requires in the environment, and the
 	// check of the server reports the port in that layer.
-	_, err = niceyaml.NewSourceFromLayers(base, env).Decode[layerConfig](ctx, niceyaml.WithValidator(requires))
+	_, err = merged.Decode[layerConfig](ctx, niceyaml.WithValidator(requires))
 	fmt.Println(niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 	// Output:
@@ -150,7 +165,12 @@ func ExampleNode_Origin() {
 		niceyaml.WithFilePath("conf/prod/app.yaml"),
 	)
 
-	doc, err := niceyaml.NewSourceFromLayers(base, prod).Document()
+	merged, err := niceyaml.NewSourceFromLayers(context.Background(), base, prod)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	doc, err := merged.Document()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -207,10 +227,10 @@ func TestNewSourceFromLayers(t *testing.T) {
 		require.NoError(t, err)
 
 		tcs := map[string]*niceyaml.Source{
-			"two Sources":           niceyaml.NewSourceFromLayers(sources[0], sources[1]),
-			"two Nodes":             niceyaml.NewSourceFromLayers(base, prod),
-			"a Source under a Node": niceyaml.NewSourceFromLayers(sources[0], prod),
-			"a Node under a Source": niceyaml.NewSourceFromLayers(base, sources[1]),
+			"two Sources":           yamltest.Layers(t, sources[0], sources[1]),
+			"two Nodes":             yamltest.Layers(t, base, prod),
+			"a Source under a Node": yamltest.Layers(t, sources[0], prod),
+			"a Node under a Source": yamltest.Layers(t, base, sources[1]),
 		}
 
 		for name, layers := range tcs {
@@ -240,7 +260,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 		)
 		prod := yamltest.At(t, profiles, paths.Doc().Child("profiles", "prod"))
 
-		layers := niceyaml.NewSourceFromLayers(base, prod)
+		layers := yamltest.Layers(t, base, prod)
 
 		_, err := layers.Decode[layerConfig](t.Context())
 		require.EqualError(t, err, want)
@@ -262,9 +282,9 @@ func TestNewSourceFromLayers(t *testing.T) {
 		base, prod := sources[0], sources[1]
 
 		tcs := map[string]*niceyaml.Source{
-			"a nil Layer":  niceyaml.NewSourceFromLayers(nil, base, layer, prod, nil),
-			"a nil Source": niceyaml.NewSourceFromLayers(source, base, source, prod, source),
-			"a nil Node":   niceyaml.NewSourceFromLayers(node, base, node, prod, node),
+			"a nil Layer":  yamltest.Layers(t, nil, base, layer, prod, nil),
+			"a nil Source": yamltest.Layers(t, source, base, source, prod, source),
+			"a nil Node":   yamltest.Layers(t, node, base, node, prod, node),
 		}
 
 		for name, layers := range tcs {
@@ -288,7 +308,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 		user, err := niceyaml.NewSourceFromFS(fsys, "user.yaml")
 		require.ErrorIs(t, err, fs.ErrNotExist)
 
-		_, err = niceyaml.NewSourceFromLayers(base, user).Decode[layerConfig](t.Context())
+		_, err = yamltest.Layers(t, base, user).Decode[layerConfig](t.Context())
 		require.EqualError(t, err, want)
 	})
 
@@ -300,7 +320,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 			niceyaml.WithName("base.yaml"),
 		)
 
-		cfg, err := niceyaml.NewSourceFromLayers(base).Decode[layerConfig](t.Context())
+		cfg, err := yamltest.Layers(t, base).Decode[layerConfig](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, layerServer{Host: "example.com", Port: 80}, cfg.Server)
 	})
@@ -313,7 +333,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 		docs := source.Documents()
 		require.Len(t, docs, 2)
 
-		cfg, err := niceyaml.NewSourceFromLayers(layersOf(docs)...).Decode[layerConfig](t.Context())
+		cfg, err := yamltest.Layers(t, layersOf(docs)...).Decode[layerConfig](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, layerServer{Host: "example.com", Port: 80}, cfg.Server)
 	})
@@ -322,7 +342,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 		t.Parallel()
 
 		given := layersOf(layerSources(t, baseInput, prodInput))
-		layers := niceyaml.NewSourceFromLayers(given...)
+		layers := yamltest.Layers(t, given...)
 
 		clear(given)
 
@@ -330,7 +350,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 		require.EqualError(t, err, want)
 	})
 
-	t.Run("a Source that holds no one document holds no value", func(t *testing.T) {
+	t.Run("a Source that holds no one document returns its error", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
@@ -355,8 +375,6 @@ func TestNewSourceFromLayers(t *testing.T) {
 			},
 		}
 
-		port := paths.Doc().Child("server", "port")
-
 		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
@@ -367,66 +385,83 @@ func TestNewSourceFromLayers(t *testing.T) {
 				_, err := broken.Document()
 				require.EqualError(t, err, tc.want)
 
-				layers := niceyaml.NewSourceFromLayers(base, broken)
+				// The merge returns the error the Source returns for its one
+				// document, wherever the layer lies.
+				placements := map[string][]niceyaml.Layer{
+					"on top": {base, broken},
+					"lowest": {broken, base},
+					"alone":  {broken},
+				}
 
-				// Each call that reads the merged document returns the
-				// error the Source returns for its one document.
-				cfg := layerConfig{Name: "default"}
+				for placement, layers := range placements {
+					merged, err := niceyaml.NewSourceFromLayers(t.Context(), layers...)
+					require.EqualError(t, err, tc.want, placement)
+					require.ErrorIs(t, err, tc.err, placement)
+					assert.Nil(t, merged, placement)
 
-				err = layers.DecodeInto(t.Context(), &cfg)
-				require.EqualError(t, err, tc.want)
-				require.ErrorIs(t, err, tc.err)
-				assert.Equal(t, layerConfig{Name: "default"}, cfg)
+					var bound *niceyaml.SourceError
 
-				_, err = layers.Decode[layerConfig](t.Context())
-				require.EqualError(t, err, tc.want)
-
-				err = layers.ValidateDocuments(t.Context(), nil)
-				require.EqualError(t, err, tc.want)
-
-				err = layers.SelfValidate(t.Context(), &cfg)
-				require.EqualError(t, err, tc.want)
-
-				doc, err := layers.Document()
-				require.EqualError(t, err, tc.want)
-				assert.Nil(t, doc)
-
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &bound)
-				assert.Same(t, broken, bound.Source())
-
-				// The merged document holds the error of the layer, so a
-				// path resolves nowhere in it and the error names the
-				// lowest layer and no position.
-				taken := niceyaml.NewError("port is taken", niceyaml.AtPath(port))
-
-				err = layers.Bind(taken)
-				require.EqualError(t, err, "base.yaml: $.server.port: port is taken")
-				require.ErrorAs(t, err, &bound)
-				assert.Same(t, base, bound.Source())
-				require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrPathNeedsDocument)
-				require.ErrorIs(t, bound.Unresolved(), tc.err)
-
-				// Alone, the layer has no document a path resolves in
-				// either.
-				err = niceyaml.NewSourceFromLayers(broken).Bind(taken)
-				require.EqualError(t, err, "prod.yaml: $.server.port: port is taken")
-				require.ErrorAs(t, err, &bound)
-				assert.Same(t, broken, bound.Source())
-				assert.Nil(t, bound.Node())
-				require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrPathNeedsDocument)
-				require.ErrorIs(t, bound.Unresolved(), tc.err)
-
-				// As the lowest layer, it names an error with no
-				// location.
-				err = niceyaml.NewSourceFromLayers(broken, base).Bind(errors.New("quota service: connection refused"))
-				require.EqualError(t, err, "prod.yaml: quota service: connection refused")
-				require.ErrorAs(t, err, &bound)
-				assert.Same(t, broken, bound.Source())
-				assert.Nil(t, bound.Node())
+					require.ErrorAs(t, err, &bound, placement)
+					assert.Same(t, broken, bound.Source(), placement)
+				}
 			})
 		}
+	})
+
+	t.Run("a Node whose document did not parse returns its error", func(t *testing.T) {
+		t.Parallel()
+
+		docs := niceyaml.NewSourceFromString("server: [\n", niceyaml.WithName("prod.yaml")).AllDocuments()
+		require.Len(t, docs, 1)
+		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
+
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), layerNodes(t, baseInput)[0], docs[0])
+		require.EqualError(t, err, "prod.yaml:1:9: sequence end token ']' not found")
+		require.ErrorIs(t, err, docs[0].Err())
+		assert.Nil(t, merged)
+	})
+
+	t.Run("the lowest layer that holds no value names the error", func(t *testing.T) {
+		t.Parallel()
+
+		// Each outer layer fails as a decode of it alone does.
+		nodes := layerNodes(t, "server: *missing\n", baseInput, "name: *gone\n")
+
+		_, alone := nodes[0].Decode[any](t.Context())
+		require.EqualError(t, alone, "base.yaml:1:9: $.server: could not find alias \"missing\"")
+
+		_, err := niceyaml.NewSourceFromLayers(t.Context(), layersOf(nodes)...)
+		require.EqualError(t, err, alone.Error())
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, nodes[0], bound.Node())
+	})
+
+	t.Run("a context that ended returns its error", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		sources := layerSources(t, baseInput, prodInput)
+
+		// The error binds in the layer the merge was reading.
+		merged, err := niceyaml.NewSourceFromLayers(ctx, sources[0], sources[1])
+		require.EqualError(t, err, "base.yaml: context canceled")
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Nil(t, merged)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, sources[0], bound.Source())
+
+		// A merge of no layer reads nothing.
+		merged, err = niceyaml.NewSourceFromLayers(ctx)
+		require.NoError(t, err)
+		require.NotNil(t, merged)
 	})
 }
 
@@ -599,7 +634,7 @@ func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
 
 			var cfg layerConfig
 
-			layers := niceyaml.NewSourceFromLayers(layersOf(layerSources(t, tc.layers...))...)
+			layers := yamltest.Layers(t, layersOf(layerSources(t, tc.layers...))...)
 
 			err := layers.DecodeInto(t.Context(), &cfg, niceyaml.WithSelfValidation(false))
 			require.NoError(t, err)
@@ -614,42 +649,6 @@ func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
 			require.EqualError(t, err, tc.err)
 		})
 	}
-
-	t.Run("a layer that did not parse returns its syntax error", func(t *testing.T) {
-		t.Parallel()
-
-		nodes := layerNodes(t, badPort, "server:\n  host: prod.example.com\n")
-		base, prod := nodes[0], nodes[1]
-
-		var cfg layerConfig
-
-		err := niceyaml.NewSourceFromLayers(base, prod).
-			DecodeInto(t.Context(), &cfg, niceyaml.WithSelfValidation(false))
-		require.NoError(t, err)
-
-		docs := niceyaml.NewSourceFromString("server: [\n", niceyaml.WithName("mid.yaml")).AllDocuments()
-		require.Len(t, docs, 1)
-		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
-
-		// The step does not run, wherever the layer lies.
-		tcs := map[string]*niceyaml.Source{
-			"between two layers": niceyaml.NewSourceFromLayers(base, docs[0], prod),
-			"on top":             niceyaml.NewSourceFromLayers(base, docs[0]),
-			"alone":              niceyaml.NewSourceFromLayers(docs[0]),
-		}
-
-		for name, layers := range tcs {
-			err = layers.SelfValidate(t.Context(), &cfg)
-			require.EqualError(t, err, "mid.yaml:1:9: sequence end token ']' not found", name)
-			require.ErrorIs(t, err, docs[0].Err(), name)
-		}
-
-		// The layer reports before a value that holds nothing to
-		// validate, as a file that did not parse does.
-		err = niceyaml.NewSourceFromLayers(base, docs[0]).SelfValidate(t.Context(), nil)
-		require.ErrorIs(t, err, niceyaml.ErrSyntax)
-		require.NotErrorIs(t, err, niceyaml.ErrSelfValidateTarget)
-	})
 }
 
 func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
@@ -670,7 +669,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 
 		var cfg layerConfig
 
-		err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).DecodeInto(t.Context(), &cfg)
+		err := yamltest.Layers(t, layersOf(nodes)...).DecodeInto(t.Context(), &cfg)
 		require.EqualError(t, err, want)
 		assert.True(t, niceyaml.IsInvalid(err))
 		assert.Equal(t, "prod.example.com", cfg.Server.Host)
@@ -698,7 +697,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		err := nodes[0].DecodeInto(t.Context(), &alone)
 		require.EqualError(t, err, "base.yaml:1:1: $.server.port: port must be at least 1")
 
-		cfg, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[layerConfig](t.Context())
+		cfg, err := yamltest.Layers(t, layersOf(nodes)...).Decode[layerConfig](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, layerServer{Host: "example.com", Port: 80}, cfg.Server)
 	})
@@ -710,17 +709,17 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		// holds the value the merge kept.
 		nodes := layerNodes(t, "server:\n  port: 0\n", baseInput, prodInput)
 
-		_, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[layerConfig](t.Context())
+		_, err := yamltest.Layers(t, layersOf(nodes)...).Decode[layerConfig](t.Context())
 		require.EqualError(t, err, "mid.yaml:3:9: $.server.port: port must be at least 1")
 
-		_, err = niceyaml.NewSourceFromLayers(nodes[1], nodes[0], nodes[2]).Decode[layerConfig](t.Context())
+		_, err = yamltest.Layers(t, nodes[1], nodes[0], nodes[2]).Decode[layerConfig](t.Context())
 		require.EqualError(t, err, "base.yaml:2:9: $.server.port: port must be at least 1")
 	})
 
 	t.Run("self-validation off leaves the value to the caller", func(t *testing.T) {
 		t.Parallel()
 
-		layers := niceyaml.NewSourceFromLayers(layersOf(layerSources(t, baseInput, prodInput))...)
+		layers := yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...)
 
 		var cfg layerConfig
 
@@ -741,7 +740,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 
 		nodes := layerNodes(t, "limits:\n  timeout: 5\n", "limits:\n  timeout: null\n")
 
-		cfg, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[layerConfig](t.Context())
+		cfg, err := yamltest.Layers(t, layersOf(nodes)...).Decode[layerConfig](t.Context())
 		require.NoError(t, err)
 		require.NotNil(t, cfg.Limits)
 		require.NotNil(t, cfg.Limits.Timeout)
@@ -755,7 +754,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 
 		var cfg layerConfig
 
-		err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).DecodeInto(t.Context(), &cfg)
+		err := yamltest.Layers(t, layersOf(nodes)...).DecodeInto(t.Context(), &cfg)
 		require.EqualError(t, err, "base.yaml: 2 problems\n"+
 			"base.yaml:2:9: $.server.port: expected integer, got string\n"+
 			"prod.yaml:1:1: $.name: expected string, got sequence")
@@ -826,7 +825,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		for name, tc := range tcs {
 			nodes := layerNodes(t, tc.layers...)
 
-			_, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[config](
+			_, err := yamltest.Layers(t, layersOf(nodes)...).Decode[config](
 				t.Context(), niceyaml.WithDisallowUnknownFields(true),
 			)
 			require.EqualError(t, err, tc.want, name)
@@ -850,7 +849,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 
 		nodes := layerNodes(t, "server:\n  prot: 80\n", "server:\n  host: x\n  port: 1\nzone: prod\n")
 
-		_, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[layerConfig](
+		_, err := yamltest.Layers(t, layersOf(nodes)...).Decode[layerConfig](
 			t.Context(), niceyaml.WithDisallowUnknownFields(true),
 		)
 		require.EqualError(t, err, "base.yaml: 2 unknown fields\n"+
@@ -872,7 +871,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 			Servers:  []layerServer{{Host: "s", Port: 9}},
 		}
 
-		err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).DecodeInto(t.Context(), &cfg)
+		err := yamltest.Layers(t, layersOf(nodes)...).DecodeInto(t.Context(), &cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "default", cfg.Name)
 		assert.Equal(t, []layerServer{{Host: "s", Port: 9}}, cfg.Servers)
@@ -880,32 +879,6 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 			"a": {Host: "a", Port: 1},
 			"b": {Host: "b", Port: 2},
 		}, cfg.Backends)
-	})
-
-	t.Run("a layer that did not parse returns its syntax error", func(t *testing.T) {
-		t.Parallel()
-
-		nodes := layerNodes(t, baseInput, prodInput)
-
-		docs := niceyaml.NewSourceFromString("server: [\n", niceyaml.WithName("mid.yaml")).AllDocuments()
-		require.Len(t, docs, 1)
-
-		_, err := niceyaml.NewSourceFromLayers(nodes[0], docs[0], nodes[1]).Decode[layerConfig](t.Context())
-		require.ErrorIs(t, err, niceyaml.ErrSyntax)
-		require.ErrorIs(t, err, docs[0].Err())
-	})
-
-	t.Run("the lowest layer that fails returns its error", func(t *testing.T) {
-		t.Parallel()
-
-		nodes := layerNodes(t, "server: *missing\n", baseInput, "name: *gone\n")
-
-		_, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[layerConfig](t.Context())
-		require.EqualError(t, err, "base.yaml:1:9: $.server: could not find alias \"missing\"")
-
-		// The layer fails as a decode of it alone does.
-		_, alone := nodes[0].Decode[any](t.Context())
-		require.EqualError(t, alone, err.Error())
 	})
 
 	t.Run("scoped Nodes bind in their files with the paths of those files", func(t *testing.T) {
@@ -920,7 +893,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		baseServer := yamltest.At(t, base, paths.Current().Child("defaults", "server"))
 		prodServer := yamltest.At(t, prod, paths.Current().Child("server"))
 
-		layers := niceyaml.NewSourceFromLayers(baseServer, prodServer)
+		layers := yamltest.Layers(t, baseServer, prodServer)
 
 		server, err := layers.Decode[layerServer](t.Context(), niceyaml.WithSelfValidation(false))
 		require.NoError(t, err)
@@ -1010,7 +983,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 			return nil
 		})
 
-		_, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[layerConfig](
+		_, err := yamltest.Layers(t, layersOf(nodes)...).Decode[layerConfig](
 			t.Context(),
 			niceyaml.WithValidator(record),
 		)
@@ -1026,7 +999,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		layers := niceyaml.NewSourceFromLayers(layersOf(layerSources(t, baseInput, prodInput))...)
+		layers := yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...)
 
 		_, err := layers.Decode[layerConfig](ctx)
 		require.ErrorIs(t, err, context.Canceled)
@@ -1039,12 +1012,12 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 	t.Run("a target that is no pointer returns an error", func(t *testing.T) {
 		t.Parallel()
 
-		layers := niceyaml.NewSourceFromLayers(layersOf(layerSources(t, baseInput, prodInput))...)
+		layers := yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...)
 
 		err := layers.DecodeInto(t.Context(), layerConfig{})
 		require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
 
-		err = niceyaml.NewSourceFromLayers().DecodeInto(t.Context(), nil)
+		err = yamltest.Layers(t).DecodeInto(t.Context(), nil)
 		require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
 	})
 }
@@ -1080,13 +1053,13 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 
 		// Each violation binds in the layer that holds its value, and the
 		// key no layer holds in the highest layer that holds its mapping.
-		err = niceyaml.NewSourceFromLayers(layersOf(nodes)...).ValidateDocuments(t.Context(), requires)
+		err = yamltest.Layers(t, layersOf(nodes)...).ValidateDocuments(t.Context(), requires)
 		require.EqualError(t, err, "base.yaml: 2 schema violations\n"+
 			"base.yaml:5:9: $.server.port: 0 is less than 1\n"+
 			"prod.yaml:1:1: $.server.tls: missing required property \"tls\"")
 		assert.True(t, niceyaml.IsInvalid(err))
 
-		_, err = niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[layerConfig](
+		_, err = yamltest.Layers(t, layersOf(nodes)...).Decode[layerConfig](
 			t.Context(),
 			niceyaml.WithValidator(requires),
 		)
@@ -1104,7 +1077,7 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 
 		var seen *niceyaml.Node
 
-		err := niceyaml.NewSourceFromLayers(base, prod).ValidateDocuments(t.Context(), niceyaml.ValidatorFunc(
+		err := yamltest.Layers(t, base, prod).ValidateDocuments(t.Context(), niceyaml.ValidatorFunc(
 			func(_ context.Context, n *niceyaml.Node) error {
 				seen = n
 
@@ -1156,7 +1129,7 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 			)
 		})
 
-		err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).ValidateDocuments(t.Context(), byPosition)
+		err := yamltest.Layers(t, layersOf(nodes)...).ValidateDocuments(t.Context(), byPosition)
 		require.EqualError(t, err, "base.yaml:2:7: $.name: in the preamble\n"+
 			"base.yaml:5:9: at a position\n"+
 			"base.yaml:5:9: at a range\n"+
@@ -1166,30 +1139,12 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 			"base.yaml: in the preamble alone")
 	})
 
-	t.Run("a layer that did not parse returns its error and nothing runs", func(t *testing.T) {
-		t.Parallel()
-
-		docs := niceyaml.NewSourceFromString("server: [\n", niceyaml.WithName("prod.yaml")).AllDocuments()
-		require.Len(t, docs, 1)
-
-		ran := false
-
-		err := niceyaml.NewSourceFromLayers(layerNodes(t, baseInput)[0], docs[0]).ValidateDocuments(t.Context(),
-			niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-				ran = true
-
-				return nil
-			}))
-		require.ErrorIs(t, err, docs[0].Err())
-		assert.False(t, ran)
-	})
-
 	t.Run("a nil validator runs nothing", func(t *testing.T) {
 		t.Parallel()
 
 		require.NoError(
 			t,
-			niceyaml.NewSourceFromLayers(layersOf(layerSources(t, baseInput, prodInput))...).
+			yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...).
 				ValidateDocuments(t.Context(), nil),
 		)
 	})
@@ -1214,7 +1169,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 		t.Parallel()
 
 		nodes := layerNodes(t, baseInput, prodInput)
-		layers := niceyaml.NewSourceFromLayers(layersOf(nodes)...)
+		layers := yamltest.Layers(t, layersOf(nodes)...)
 
 		doc, err := layers.Document()
 		require.NoError(t, err)
@@ -1250,7 +1205,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 	t.Run("a caller reads one value of the layers", func(t *testing.T) {
 		t.Parallel()
 
-		doc, err := niceyaml.NewSourceFromLayers(layersOf(layerSources(t, baseInput, prodInput))...).Document()
+		doc, err := yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...).Document()
 		require.NoError(t, err)
 
 		got, err := doc.DecodeAt[string](t.Context(), host)
@@ -1283,7 +1238,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 
 		nodes := layerNodes(t, "server:\n  timeout: soon\n", "server:\n  port: 70000\nname: [prod]\n")
 
-		doc, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Document()
+		doc, err := yamltest.Layers(t, layersOf(nodes)...).Document()
 		require.NoError(t, err)
 
 		// The decoder rejects the timeout first, with no token of the
@@ -1305,7 +1260,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 			"base.yaml:2:29: $.server.tier: unknown tier \"mid\"\n"+
 			"base.yaml:2:43: $.server.timeout: time: invalid duration \"soon\"")
 
-		doc, err = niceyaml.NewSourceFromLayers(file).Document()
+		doc, err = yamltest.Layers(t, file).Document()
 		require.NoError(t, err)
 
 		_, got := doc.DecodeAt[problemTimed](t.Context(), server)
@@ -1320,7 +1275,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 	t.Run("an error binds in the file of a layer", func(t *testing.T) {
 		t.Parallel()
 
-		doc, err := niceyaml.NewSourceFromLayers(layersOf(layerSources(t, baseInput, prodInput))...).Document()
+		doc, err := yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...).Document()
 		require.NoError(t, err)
 
 		server := yamltest.At(t, doc, paths.Doc().Child("server"))
@@ -1368,7 +1323,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 
 		nodes := layerNodes(t, baseInput, prodInput)
 
-		doc, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Document()
+		doc, err := yamltest.Layers(t, layersOf(nodes)...).Document()
 		require.NoError(t, err)
 
 		merged, err := doc.Ranges(port)
@@ -1406,44 +1361,12 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 		require.EqualError(t, err, "base.yaml: here")
 	})
 
-	t.Run("a layer that holds no value returns its error and no Node", func(t *testing.T) {
-		t.Parallel()
-
-		docs := niceyaml.NewSourceFromString("server: [\n", niceyaml.WithName("prod.yaml")).AllDocuments()
-		require.Len(t, docs, 1)
-
-		layers := niceyaml.NewSourceFromLayers(layerNodes(t, baseInput)[0], docs[0])
-
-		doc, err := layers.Document()
-		require.ErrorIs(t, err, docs[0].Err())
-		assert.Nil(t, doc)
-
-		// The Node of the merged document returns the error too, and
-		// a path resolves nowhere in it.
-		doc = layers.AllDocuments()[0]
-		require.ErrorIs(t, doc.Err(), docs[0].Err())
-
-		_, err = doc.At(port)
-		require.ErrorIs(t, err, docs[0].Err())
-
-		// The Node has no tree, as the Node of a document that did not
-		// parse has none.
-		assert.Nil(t, doc.AST())
-		assert.Nil(t, doc.DocumentAST())
-		assert.Equal(t, niceyaml.NodeNone, doc.Kind())
-
-		for name, bind := range map[string]func(error) error{"Source": layers.Bind, "Node": doc.Bind} {
-			err = bind(niceyaml.NewError("here", niceyaml.AtPath(port)))
-			require.EqualError(t, err, "base.yaml: $.server.port: here", name)
-		}
-	})
-
 	t.Run("a merge of no layer returns an empty document", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]*niceyaml.Source{
-			"no layers":       niceyaml.NewSourceFromLayers(),
-			"only nil layers": niceyaml.NewSourceFromLayers(nil, (*niceyaml.Source)(nil), (*niceyaml.Node)(nil)),
+			"no layers":       yamltest.Layers(t),
+			"only nil layers": yamltest.Layers(t, nil, (*niceyaml.Source)(nil), (*niceyaml.Node)(nil)),
 		}
 
 		for name, layers := range tcs {
@@ -1598,7 +1521,7 @@ func TestNode_Origin(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc, err := niceyaml.NewSourceFromLayers(layersOf(layerSources(t, tc.inputs...))...).Document()
+			doc, err := yamltest.Layers(t, layersOf(layerSources(t, tc.inputs...))...).Document()
 			require.NoError(t, err)
 
 			node := doc
@@ -1653,7 +1576,7 @@ func TestNode_Origin(t *testing.T) {
 	t.Run("layers that hold no layer return the Node itself", func(t *testing.T) {
 		t.Parallel()
 
-		doc, err := niceyaml.NewSourceFromLayers().Document()
+		doc, err := yamltest.Layers(t).Document()
 		require.NoError(t, err)
 
 		origin, err := doc.Origin()
@@ -1673,7 +1596,7 @@ func TestNode_Origin(t *testing.T) {
 		// A Source gives the Node its Document method returns, and a Node
 		// gives itself.
 		for name, top := range map[string]niceyaml.Layer{"source": prod, "node": prodDoc} {
-			doc, err := niceyaml.NewSourceFromLayers(base, top).Document()
+			doc, err := yamltest.Layers(t, base, top).Document()
 			require.NoError(t, err, name)
 
 			origin, err := doc.Origin()
@@ -1719,7 +1642,7 @@ func TestNode_Origin(t *testing.T) {
 		})
 
 		// The same validator runs on the layers and on one file.
-		require.NoError(t, niceyaml.NewSourceFromLayers(base, prod).ValidateDocuments(t.Context(), beside))
+		require.NoError(t, yamltest.Layers(t, base, prod).ValidateDocuments(t.Context(), beside))
 		require.NoError(t, base.ValidateDocuments(t.Context(), beside))
 		require.Len(t, origins, 2)
 
@@ -1746,7 +1669,7 @@ func TestNode_Origin(t *testing.T) {
 		defaults := yamltest.At(t, envs, paths.Doc().Child("defaults"))
 		prod := yamltest.At(t, envs, paths.Doc().Child("prod"))
 
-		doc, err := niceyaml.NewSourceFromLayers(defaults, prod).Document()
+		doc, err := yamltest.Layers(t, defaults, prod).Document()
 		require.NoError(t, err)
 
 		origin, err := yamltest.At(t, doc, port).Origin()
@@ -1771,7 +1694,7 @@ func TestNode_Origin(t *testing.T) {
 
 		sources := layerSources(t, baseInput, "server:\n  host: mid.example.com\n", "server:\n  port: 8443\n")
 
-		inner, err := niceyaml.NewSourceFromLayers(sources[0], sources[1]).Document()
+		inner, err := yamltest.Layers(t, sources[0], sources[1]).Document()
 		require.NoError(t, err)
 
 		below := []niceyaml.Layer{inner, sources[2]}
@@ -1810,7 +1733,7 @@ func TestNode_Origin(t *testing.T) {
 		}
 
 		for name, tc := range tcs {
-			doc, err := niceyaml.NewSourceFromLayers(tc.layers...).Document()
+			doc, err := yamltest.Layers(t, tc.layers...).Document()
 			require.NoError(t, err, name)
 
 			node := doc
@@ -1862,7 +1785,7 @@ func TestNode_Origin(t *testing.T) {
 				niceyaml.WithReferences(shared),
 			)
 
-			doc, err := niceyaml.NewSourceFromLayers(base, prod).Document()
+			doc, err := yamltest.Layers(t, base, prod).Document()
 			require.NoError(t, err, name)
 
 			// The merged document holds the value the alias reads.
@@ -1885,7 +1808,7 @@ func TestNode_Origin(t *testing.T) {
 			"server:\n  <<: *shared\n", niceyaml.WithName("prod.yaml"), niceyaml.WithReferences(shared),
 		)
 
-		doc, err := niceyaml.NewSourceFromLayers(base, prod).Document()
+		doc, err := yamltest.Layers(t, base, prod).Document()
 		require.NoError(t, err)
 
 		origin, err := yamltest.At(t, doc, server).Origin()
@@ -1901,8 +1824,8 @@ func TestNewSourceFromLayers_Empty(t *testing.T) {
 	const want = "$.server.port: port must be at least 1"
 
 	tcs := map[string]*niceyaml.Source{
-		"no layers":       niceyaml.NewSourceFromLayers(),
-		"only nil layers": niceyaml.NewSourceFromLayers(nil, (*niceyaml.Source)(nil), (*niceyaml.Node)(nil)),
+		"no layers":       yamltest.Layers(t),
+		"only nil layers": yamltest.Layers(t, nil, (*niceyaml.Source)(nil), (*niceyaml.Node)(nil)),
 	}
 
 	for name, layers := range tcs {
@@ -1955,7 +1878,7 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 		"server:\n  host: example.com\n  port: 8080\nservers:\n  - {host: a, port: 80}\n",
 		"server:\n  host: prod.example.com\nbackends:\n  a: {host: x, port: 80}\n",
 	)
-	layers := niceyaml.NewSourceFromLayers(layersOf(nodes)...)
+	layers := yamltest.Layers(t, layersOf(nodes)...)
 
 	portPath := paths.Doc().Child("server", "port")
 
@@ -2031,31 +1954,6 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 		require.NoError(t, layers.Bind(nil))
 	})
 
-	t.Run("a bind resolves no path once a layer did not parse", func(t *testing.T) {
-		t.Parallel()
-
-		const want = "base.yaml: $.server.port: port is taken"
-
-		taken := niceyaml.NewError("port is taken", niceyaml.AtPath(portPath))
-
-		docs := niceyaml.NewSourceFromString("server: [\n", niceyaml.WithName("mid.yaml")).AllDocuments()
-		require.Len(t, docs, 1)
-		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
-
-		// The error names the lowest layer and no position, wherever
-		// the layer that did not parse lies.
-		require.EqualError(t, niceyaml.NewSourceFromLayers(nodes[0], docs[0], nodes[1]).Bind(taken), want)
-		require.EqualError(t, niceyaml.NewSourceFromLayers(nodes[0], docs[0]).Bind(taken), want)
-
-		// On its own it resolves no path, so the error names the file
-		// and no position.
-		require.EqualError(
-			t,
-			niceyaml.NewSourceFromLayers(docs[0]).Bind(taken),
-			"mid.yaml: $.server.port: port is taken",
-		)
-	})
-
 	t.Run("a position outside the merged text holds no value", func(t *testing.T) {
 		t.Parallel()
 
@@ -2065,7 +1963,7 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 			"server:\n  host: example.com\n\n  # one\n  # two\n  port: 8080\n",
 			"server:\n  port: 80\n",
 		)
-		merged := niceyaml.NewSourceFromLayers(layersOf(long)...)
+		merged := yamltest.Layers(t, layersOf(long)...)
 		require.Equal(t, 3, merged.Lines().Len())
 
 		doc, err := merged.Document()
@@ -2138,7 +2036,7 @@ func TestNewSourceFromLayers_ExcerptsOff(t *testing.T) {
 	env := yamltest.FirstDocument(t, "db:\n  password: hunter2\n",
 		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
 
-	layers := niceyaml.NewSourceFromLayers(base, env)
+	layers := yamltest.Layers(t, base, env)
 	db := paths.Doc().Child("db")
 
 	requiresName := schema.MustCompile([]byte(`{
@@ -2304,7 +2202,7 @@ func TestNewSourceFromLayers_Alias(t *testing.T) {
 
 			var cfg layerConfig
 
-			err := niceyaml.NewSourceFromLayers(base, prod).DecodeInto(t.Context(), &cfg)
+			err := yamltest.Layers(t, base, prod).DecodeInto(t.Context(), &cfg)
 			require.EqualError(t, err, tc.err)
 			assert.Equal(t, "shared.example.com", cfg.Server.Host)
 
@@ -2322,7 +2220,7 @@ func TestNewSourceFromLayers_Alias(t *testing.T) {
 func TestNewSourceFromLayers_Concurrent(t *testing.T) {
 	t.Parallel()
 
-	layers := niceyaml.NewSourceFromLayers(layersOf(layerSources(t,
+	layers := yamltest.Layers(t, layersOf(layerSources(t,
 		"server:\n  host: example.com\n  port: 0\n",
 		"server:\n  host: prod.example.com\n",
 	))...)

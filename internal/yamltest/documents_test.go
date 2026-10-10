@@ -75,4 +75,18 @@ func TestDocumentHelpers(t *testing.T) {
 
 		require.ErrorAs(t, err, &srcErr)
 	})
+
+	t.Run("Layers", func(t *testing.T) {
+		t.Parallel()
+
+		var tb testing.TB = t
+
+		base := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+		prod := niceyaml.NewSourceFromString("b: 3\n")
+
+		got, err := yamltest.Layers(tb, base, prod).Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+
+		assert.Equal(t, map[string]int{"a": 1, "b": 3}, got)
+	})
 }

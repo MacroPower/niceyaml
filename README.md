@@ -102,7 +102,7 @@ Types declare their constraints with `jsonschema` struct tags. The `gen` tool fr
 
 ### Layers
 
-[`niceyaml.NewSourceFromLayers`][niceyaml.NewSourceFromLayers] merges several files into one document, such as a base file with the file of one environment over it, and returns a [`Source`][niceyaml.Source] that decodes that document once. Pass the `Source` of each file, lowest first:
+[`niceyaml.NewSourceFromLayers`][niceyaml.NewSourceFromLayers] merges several files into one document, such as a base file with the file of one environment over it, and returns a [`Source`][niceyaml.Source] that decodes that document once. Pass a context and the `Source` of each file, lowest first:
 
 ```go
 base, err := niceyaml.NewSourceFromFile("base.yaml")
@@ -115,8 +115,15 @@ if err != nil {
 	return err
 }
 
-cfg, err := niceyaml.NewSourceFromLayers(base, prod).Decode[Config](ctx, niceyaml.WithValidator(schema))
+merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+if err != nil {
+	return err
+}
+
+cfg, err := merged.Decode[Config](ctx, niceyaml.WithValidator(schema))
 ```
+
+The merge returns the error of a file that did not parse, bound in that file, and the error of the context once it ends.
 
 - A mapping merges into the mapping of the file below it, key by key and at every depth, so `prod.yaml` changes one field of one entry of a map and keeps the rest of `base.yaml`.
 - A sequence or a scalar replaces what the file below holds.
@@ -139,7 +146,12 @@ if err != nil && !errors.Is(err, fs.ErrNotExist) {
 	return err
 }
 
-cfg, err := niceyaml.NewSourceFromLayers(base, prod, user).Decode[Config](ctx, niceyaml.WithValidator(schema))
+merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod, user)
+if err != nil {
+	return err
+}
+
+cfg, err := merged.Decode[Config](ctx, niceyaml.WithValidator(schema))
 ```
 
 A [`Node`][niceyaml.Node] is a layer too, for one document of a file that holds several, or for the part of a document that `Node.At` returns. A program that collects its layers in a loop holds them in a `[]niceyaml.Layer`, since Go spreads neither a `[]*Source` nor a `[]*Node` into `NewSourceFromLayers`.
@@ -147,7 +159,12 @@ A [`Node`][niceyaml.Node] is a layer too, for one document of a file that holds 
 The merged `Source` is a `Source` like any other. Its `Document` method returns the merged document as a [`Node`][niceyaml.Node], and its errors still report the file and the line that hold each value. One value of the files then decodes on its own, and the merged text prints as any document does:
 
 ```go
-doc, err := niceyaml.NewSourceFromLayers(base, prod).Document()
+merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+if err != nil {
+	return err
+}
+
+doc, err := merged.Document()
 if err != nil {
 	return err
 }
@@ -168,7 +185,12 @@ if err != nil {
 env := niceyaml.NewSourceFromBytes(data,
 	niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
 
-cfg, err := niceyaml.NewSourceFromLayers(base, prod, env).Decode[Config](ctx, niceyaml.WithValidator(schema))
+merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod, env)
+if err != nil {
+	return err
+}
+
+cfg, err := merged.Decode[Config](ctx, niceyaml.WithValidator(schema))
 ```
 
 ```text

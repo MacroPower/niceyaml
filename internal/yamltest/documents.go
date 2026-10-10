@@ -49,6 +49,18 @@ func Bind(tb testing.TB, source *niceyaml.Source, err error) error {
 	return doc.Bind(err)
 }
 
+// Layers merges layers through [niceyaml.NewSourceFromLayers] with the
+// context of the test, and returns the merged [*niceyaml.Source]. The
+// test fails when a layer holds no value the merge can read.
+func Layers(tb testing.TB, layers ...niceyaml.Layer) *niceyaml.Source {
+	tb.Helper()
+
+	merged, err := niceyaml.NewSourceFromLayers(tb.Context(), layers...)
+	require.NoError(tb, err)
+
+	return merged
+}
+
 // FirstDocumentWithPath creates the root [*niceyaml.Node] of the first
 // document of a YAML input, with file path context, for testing.
 //

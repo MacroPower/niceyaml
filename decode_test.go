@@ -9888,7 +9888,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
 				t.Helper()
 
-				_, err := niceyaml.NewSourceFromLayers(document(t, src)).Decode[gradedConfig](t.Context(), opts...)
+				_, err := yamltest.Layers(t, document(t, src)).Decode[gradedConfig](t.Context(), opts...)
 
 				return err
 			},
@@ -9899,7 +9899,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
 				t.Helper()
 
-				return niceyaml.NewSourceFromLayers(document(t, src)).
+				return yamltest.Layers(t, document(t, src)).
 					DecodeInto(t.Context(), new(gradedConfig), opts...)
 			},
 			err:  unknown,
@@ -9909,7 +9909,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
 				t.Helper()
 
-				return niceyaml.NewSourceFromLayers(document(t, src)).SelfValidate(t.Context(), changed(), opts...)
+				return yamltest.Layers(t, document(t, src)).SelfValidate(t.Context(), changed(), opts...)
 			},
 			err: notHTTP,
 		},

@@ -1574,11 +1574,7 @@ type location struct {
 	// bound through. It is the path of the root of that document in the
 	// document of the layer.
 	layerRoot *paths.Path
-	// Set for a location in a layer of the document
-	// [NewSourceFromLayers] builds that has no node, since its source holds no one document. It is that
-	// source, which the error binds in.
-	layerSource *Source
-	pos         position.Position
+	pos       position.Position
 }
 
 // locate resolves l, the location of an [Error], and returns the node it
@@ -1686,10 +1682,7 @@ func locateBelow(b binder, l locus) (location, *Node, error) {
 // the layer [layering.layer] picks, and that layer is the node locatePath
 // returns, so it belongs to another source than the one b binds to. The
 // location then says so, whether or not the path resolved there, and
-// holds the path of the root of the merged document in that layer. A
-// layer from a source that holds no one document has no document to
-// resolve the path in, so the location is ErrPathNeedsDocument wrapping
-// the error of the layer. It names that source, and the node is nil.
+// holds the path of the root of the merged document in that layer.
 func locatePath(b binder, path paths.Path) (location, *Node, error) {
 	node := b.node
 
@@ -1706,17 +1699,7 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 		return location{}, nil, fmt.Errorf("%w: %s", ErrPathNeedsDocument, path)
 	}
 
-	// The document NewSourceFromLayers builds holds the error of a layer
-	// that holds no value, and a path resolves nowhere in it then, as in
-	// a document that did not parse. The error binds in the lowest layer.
-	if node.merges() && node.doc.err != nil {
-		return location{}, nil, fmt.Errorf("%w: %s: %w", ErrPathNeedsDocument, path, node.doc.err)
-	}
-
 	layer, base, path := node.source.layers.layer(node, path)
-	if layer.node == nil {
-		return location{layerSource: layer.source}, nil, fmt.Errorf("%w: %s: %w", ErrPathNeedsDocument, path, layer.err)
-	}
 
 	loc, err := layer.node.resolveLocation(path)
 	if layer.node != node {
@@ -3076,10 +3059,6 @@ func newSourceError(err error, b binder) *SourceError {
 
 		if e.node != nil {
 			e.source = e.node.source
-		}
-
-		if e.loc.layerSource != nil {
-			e.source = e.loc.layerSource
 		}
 
 		// The path of the error reads from the value the layers hold.
