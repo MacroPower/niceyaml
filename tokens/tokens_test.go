@@ -1189,13 +1189,7 @@ func TestTokenize(t *testing.T) {
 
 			// The stream covers the whole source, including the final
 			// line ending the lexer leaves out of the last Origin.
-			var joined strings.Builder
-
-			for _, tk := range got {
-				joined.WriteString(tk.Origin)
-			}
-
-			assert.Equal(t, tc.input, joined.String())
+			assert.Equal(t, tc.input, yamltest.DumpTokenOrigins(got))
 
 			if len(want) == 0 {
 				// The lexer emits nothing for whitespace alone, and
