@@ -204,7 +204,10 @@ func TestPrinter_PrintError(t *testing.T) {
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
 	bound := yamltest.Bind(t, source, errAt("bad", "b"))
 	other := niceyaml.NewSourceFromString("c: 3\n")
-	nested := niceyaml.NewSourceFromString("a:\n  b: 2\n")
+	nested := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a:",
+		"  b: 2",
+	))
 	empty := niceyaml.NewSourceFromString("a:\nb: 2\n")
 	flags := niceyaml.NewSourceFromString("flags: 🇺🇸🇫🇷\n")
 
@@ -212,7 +215,10 @@ func TestPrinter_PrintError(t *testing.T) {
 	blank := niceyaml.NewSourceFromString("")
 	comments := niceyaml.NewSourceFromString("# defaults apply\n", niceyaml.WithName("app.yaml"))
 
-	_, tabErr := niceyaml.NewSourceFromString("a:\n\tb: 1\n").File()
+	_, tabErr := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a:",
+		"\tb: 1",
+	)).File()
 
 	// The root has no message beside its range, so a caret run under the
 	// range shows its extent without color.
@@ -849,7 +855,11 @@ func TestPrinter_MarksRangeUnderHighlight(t *testing.T) {
 			),
 		},
 		"empty value": {
-			source:    "a: 1\nb:\nc: 2\n",
+			source: stringtest.LinesLF(
+				"a: 1",
+				"b:",
+				"c: 2",
+			),
 			key:       "b",
 			highlight: yamltest.LineRange(1, 0, 1),
 			want: stringtest.JoinLF(
@@ -948,6 +958,13 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 	// The carets under a wrapped line take a row below each wrapped row
 	// they mark, padded from that row's start, so every caret sits under
 	// the column it marks.
+
+	// A block scalar whose one content line is a word wider than the wrap.
+	crt := stringtest.JoinLF(
+		"crt: |",
+		"    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMr",
+	)
+
 	tcs := map[string]struct {
 		annotation *line.Annotation
 		content    string
@@ -960,7 +977,7 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 		// beside it, so the first row starts at the word, and so does the
 		// padding of the marks under it.
 		"indent dropped before a long word": {
-			content: "crt: |\n    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMr",
+			content: crt,
 			cols:    []position.Span{position.NewSpan(4, 8)},
 			line:    1,
 			width:   30,
@@ -972,7 +989,7 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 			),
 		},
 		"indent dropped before a long word under a whole-line range": {
-			content: "crt: |\n    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMr",
+			content: crt,
 			cols:    []position.Span{position.NewSpan(0, 48)},
 			line:    1,
 			width:   30,
@@ -985,7 +1002,7 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 			),
 		},
 		"indent dropped before a long word above the line": {
-			content:    "crt: |\n    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMr",
+			content:    crt,
 			annotation: &line.Annotation{Placement: line.Above, Col: 4, Content: "here"},
 			line:       1,
 			width:      30,
@@ -999,10 +1016,14 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 		// The wrap drops the spaces at the end of the line when they run
 		// past the width, so they get no caret either.
 		"trailing spaces dropped on the last row": {
-			content: "a: |\n  some text          \n  more",
-			cols:    []position.Span{position.NewSpan(2, 21)},
-			line:    1,
-			width:   20,
+			content: stringtest.JoinLF(
+				"a: |",
+				"  some text          ",
+				"  more",
+			),
+			cols:  []position.Span{position.NewSpan(2, 21)},
+			line:  1,
+			width: 20,
 			want: stringtest.JoinLF(
 				"a: |",
 				"  some text",
@@ -1206,7 +1227,11 @@ func TestPrinter_CRLF(t *testing.T) {
 			wantOverlay: stringtest.JoinLF("[a][:][ ][b]", "[c][:][ ][d]"),
 		},
 		"blank line": {
-			input:       "a: b\r\n\r\nc: d\r\n",
+			input: stringtest.LinesCRLF(
+				"a: b",
+				"",
+				"c: d",
+			),
 			want:        stringtest.JoinLF("a: b", "", "c: d"),
 			wantOverlay: stringtest.JoinLF("[a][:][ ][b]", "", "[c][:][ ][d]"),
 		},
@@ -1224,7 +1249,11 @@ func TestPrinter_CRLF(t *testing.T) {
 			wantOverlay: stringtest.JoinLF("[a][:][ ]['x']", "[b][:][ ]['y']"),
 		},
 		"block scalar": {
-			input:       "a: |\r\n  x\r\n  y\r\n",
+			input: stringtest.LinesCRLF(
+				"a: |",
+				"  x",
+				"  y",
+			),
 			want:        stringtest.JoinLF("a: |", "  x", "  y"),
 			wantOverlay: stringtest.JoinLF("[a][:][ ][|]", "[  ][x]", "[  ][y]"),
 		},
@@ -2285,7 +2314,10 @@ func TestPrinter_WordWrap_NoEmptyRows(t *testing.T) {
 		width int
 	}{
 		"word wider than the width after leading spaces": {
-			input: "k: |\n    abcdefghijkl\n",
+			input: stringtest.LinesLF(
+				"k: |",
+				"    abcdefghijkl",
+			),
 			width: 5,
 			want:  stringtest.JoinLF("k: |", "abcde", "fghij", "kl"),
 		},
@@ -2629,8 +2661,11 @@ func TestGutter(t *testing.T) {
 		wantWidth int
 	}{
 		"pads a row that renders less than the width": {
-			gutter:    prefixGutter{inserted: "+ "},
-			want:      "  a: 1\n+ b: 2",
+			gutter: prefixGutter{inserted: "+ "},
+			want: stringtest.JoinLF(
+				"  a: 1",
+				"+ b: 2",
+			),
 			wantWidth: 2,
 		},
 		"cuts a row that renders more than the width": {
@@ -2641,8 +2676,11 @@ func TestGutter(t *testing.T) {
 		// The two-cell rune does not fit in one cell, so the cut leaves
 		// nothing and the printer pads the row back to the width.
 		"pads a row whose cut drops a wide rune": {
-			gutter:    fixedGutter{width: 1, text: "日"},
-			want:      " a: 1\n b: 2",
+			gutter: fixedGutter{width: 1, text: "日"},
+			want: stringtest.JoinLF(
+				" a: 1",
+				" b: 2",
+			),
 			wantWidth: 1,
 		},
 		// Two keycaps take four cells, so a cut to three keeps the first
@@ -2996,7 +3034,10 @@ func TestPrinter_WithAnnotation(t *testing.T) {
 		// first annotated line.
 		"nil shows them as DefaultAnnotation does": {
 			annotation: line.Annotation{Content: "note", Placement: line.Below, Col: 5},
-			want:       "key: value\n     ^ note",
+			want: stringtest.JoinLF(
+				"key: value",
+				"     ^ note",
+			),
 		},
 		"custom func marks one below": {
 			fn:         custom,
@@ -3042,7 +3083,10 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 		"above annotation with col padding": {
 			input:      "key: value",
 			annotation: line.Annotation{Content: "^-- error here", Placement: line.Above, Col: 5},
-			want:       "     ^-- error here\nkey: value",
+			want: stringtest.JoinLF(
+				"     ^-- error here",
+				"key: value",
+			),
 		},
 		"below annotation at col 0": {
 			input:      "key: value",
@@ -3052,19 +3096,28 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 		"below annotation with col padding": {
 			input:      "key: value",
 			annotation: line.Annotation{Content: "error here", Placement: line.Below, Col: 5},
-			want:       "key: value\n     ^ error here",
+			want: stringtest.JoinLF(
+				"key: value",
+				"     ^ error here",
+			),
 		},
 		"below annotation under wide runes": {
 			input:      "日本語: 値",
 			annotation: line.Annotation{Content: "bad value", Placement: line.Below, Col: 5},
 			// The three wide runes take six cells, so the marker sits eight
 			// cells in, under the value.
-			want: "日本語: 値\n        ^ bad value",
+			want: stringtest.JoinLF(
+				"日本語: 値",
+				"        ^ bad value",
+			),
 		},
 		"below annotation past the end of wide runes": {
 			input:      "日本",
 			annotation: line.Annotation{Content: "after", Placement: line.Below, Col: 4},
-			want:       "日本\n      ^ after",
+			want: stringtest.JoinLF(
+				"日本",
+				"      ^ after",
+			),
 		},
 		"below annotation on second line": {
 			input: stringtest.JoinLF(
@@ -3104,13 +3157,19 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			gutter:     printer.LineNumberGutter,
 			input:      "key: value",
 			annotation: line.Annotation{Content: "@@ -1 +1 @@", Placement: line.Above},
-			want:       "     @@ -1 +1 @@\n   1 key: value",
+			want: stringtest.JoinLF(
+				"     @@ -1 +1 @@",
+				"   1 key: value",
+			),
 		},
 		"below annotation with line numbers": {
 			gutter:     printer.LineNumberGutter,
 			input:      "key: value",
 			annotation: line.Annotation{Content: "error", Placement: line.Below, Col: 5},
-			want:       "   1 key: value\n          ^ error",
+			want: stringtest.JoinLF(
+				"   1 key: value",
+				"          ^ error",
+			),
 		},
 		"below annotation with col padding and line numbers": {
 			gutter: printer.LineNumberGutter,
@@ -5292,7 +5351,11 @@ func TestPrinter_LineNumbers_Placeholder(t *testing.T) {
 
 	// A side-by-side diff pads the shorter side with zero-value lines, which
 	// have no number. The gutter renders a blank column for them.
-	result := diffOf("a: 1\nb: 2\nc: 3", "a: 1")
+	result := diffOf(stringtest.JoinLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+	), "a: 1")
 	p := testPrinterWithGutter(printer.DefaultGutter)
 
 	assert.Equal(t, stringtest.JoinLF(
@@ -5426,7 +5489,11 @@ func TestPrinter_SeparatorStyle(t *testing.T) {
 func TestPrinter_Layout_GutterWidth(t *testing.T) {
 	t.Parallel()
 
-	short := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3").View()
+	short := niceyaml.NewSourceFromString(stringtest.JoinLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+	)).View()
 	long := niceyaml.NewSourceFromString(strings.Repeat("k: v\n", 10000) + "last: v").View()
 
 	tcs := map[string]struct {
@@ -5847,7 +5914,10 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 				got = testPrinterWithGutter(tc.gutter).Print(view)
 			})
 			assert.Equal(t, want, got)
-			assert.Equal(t, "key: value\n     ^ note", got)
+			assert.Equal(t, stringtest.JoinLF(
+				"key: value",
+				"     ^ note",
+			), got)
 		})
 	}
 }

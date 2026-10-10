@@ -77,8 +77,12 @@ func TestPrinter_Layout_PositionAt(t *testing.T) {
 			ok:      true,
 		},
 		"blank line": {
-			content: "a: 1\n\nb: 2",
-			row:     1,
+			content: stringtest.JoinLF(
+				"a: 1",
+				"",
+				"b: 2",
+			),
+			row: 1,
 		},
 		"first cell of a wide rune": {
 			content: "k: 日本x",
@@ -200,11 +204,15 @@ func TestPrinter_Layout_PositionAt(t *testing.T) {
 			ok:         true,
 		},
 		"line of a slice keeps its index in the content": {
-			content: "a: 1\nb: 2\nc: 3",
-			slice:   &position.Span{Start: 2, End: 3},
-			cell:    3,
-			want:    position.New(2, 3),
-			ok:      true,
+			content: stringtest.JoinLF(
+				"a: 1",
+				"b: 2",
+				"c: 3",
+			),
+			slice: &position.Span{Start: 2, End: 3},
+			cell:  3,
+			want:  position.New(2, 3),
+			ok:    true,
 		},
 		"empty view": {content: ""},
 		// A clip of 10 columns shows this line as "k: abcdefg...".
