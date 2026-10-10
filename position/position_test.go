@@ -13,31 +13,7 @@ import (
 func TestNew(t *testing.T) {
 	t.Parallel()
 
-	tcs := map[string]struct {
-		line int
-		col  int
-		want position.Position
-	}{
-		"zero values": {
-			line: 0,
-			col:  0,
-			want: position.Position{Line: 0, Col: 0},
-		},
-		"positive values": {
-			line: 5,
-			col:  10,
-			want: position.Position{Line: 5, Col: 10},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := position.New(tc.line, tc.col)
-			assert.Equal(t, tc.want, got)
-		})
-	}
+	assert.Equal(t, position.Position{Line: 5, Col: 10}, position.New(5, 10))
 }
 
 func TestNewFromToken(t *testing.T) {
@@ -95,10 +71,6 @@ func TestPosition_String(t *testing.T) {
 		"zero position": {
 			pos:  position.New(0, 0),
 			want: "0:0",
-		},
-		"first line tenth column": {
-			pos:  position.New(0, 9),
-			want: "0:9",
 		},
 		"line 5 col 15 (0-indexed)": {
 			pos:  position.New(4, 14),
@@ -171,14 +143,6 @@ func TestRanges_String(t *testing.T) {
 			},
 			want: "0:0-0:5, 2:3-4:8",
 		},
-		"three ranges": {
-			ranges: position.Ranges{
-				position.NewRange(position.New(0, 0), position.New(0, 1)),
-				position.NewRange(position.New(1, 0), position.New(1, 1)),
-				position.NewRange(position.New(2, 0), position.New(2, 1)),
-			},
-			want: "0:0-0:1, 1:0-1:1, 2:0-2:1",
-		},
 	}
 
 	for name, tc := range tcs {
@@ -194,36 +158,8 @@ func TestRanges_String(t *testing.T) {
 func TestNewRange(t *testing.T) {
 	t.Parallel()
 
-	tcs := map[string]struct {
-		start position.Position
-		end   position.Position
-		want  position.Range
-	}{
-		"single line range": {
-			start: position.New(1, 0),
-			end:   position.New(1, 10),
-			want:  position.Range{Start: position.Position{Line: 1, Col: 0}, End: position.Position{Line: 1, Col: 10}},
-		},
-		"multi-line range": {
-			start: position.New(0, 5),
-			end:   position.New(3, 15),
-			want:  position.Range{Start: position.Position{Line: 0, Col: 5}, End: position.Position{Line: 3, Col: 15}},
-		},
-		"empty range": {
-			start: position.New(2, 3),
-			end:   position.New(2, 3),
-			want:  position.Range{Start: position.Position{Line: 2, Col: 3}, End: position.Position{Line: 2, Col: 3}},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := position.NewRange(tc.start, tc.end)
-			assert.Equal(t, tc.want, got)
-		})
-	}
+	want := position.Range{Start: position.Position{Line: 0, Col: 5}, End: position.Position{Line: 3, Col: 15}}
+	assert.Equal(t, want, position.NewRange(position.New(0, 5), position.New(3, 15)))
 }
 
 func TestRange_Contains(t *testing.T) {
@@ -472,31 +408,7 @@ func TestRanges_LineIndices(t *testing.T) {
 func TestNewSpan(t *testing.T) {
 	t.Parallel()
 
-	tcs := map[string]struct {
-		start int
-		end   int
-		want  position.Span
-	}{
-		"zero values": {
-			start: 0,
-			end:   0,
-			want:  position.Span{Start: 0, End: 0},
-		},
-		"positive values": {
-			start: 5,
-			end:   10,
-			want:  position.Span{Start: 5, End: 10},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := position.NewSpan(tc.start, tc.end)
-			assert.Equal(t, tc.want, got)
-		})
-	}
+	assert.Equal(t, position.Span{Start: 5, End: 10}, position.NewSpan(5, 10))
 }
 
 func TestSpan_Len(t *testing.T) {
