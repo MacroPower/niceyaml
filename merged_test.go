@@ -37,8 +37,17 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 	}{
 		"mappings merge key by key at every depth": {
 			layers: []string{
-				"services:\n  web: {image: nginx, replicas: 1}\n  db: {image: postgres}\n",
-				"services:\n  web: {replicas: 5}\n  api:\n    image: api\n",
+				stringtest.LinesLF(
+					"services:",
+					"  web: {image: nginx, replicas: 1}",
+					"  db: {image: postgres}",
+				),
+				stringtest.LinesLF(
+					"services:",
+					"  web: {replicas: 5}",
+					"  api:",
+					"    image: api",
+				),
 			},
 			want: stringtest.LinesLF(
 				"services:",
@@ -92,7 +101,13 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				"name: shop\nweb: {image: nginx}\ntags: [x]\n",
 				"name: ~\nweb:\n  # image: other\ntags: null\n",
 			},
-			want: "name: shop\nweb:\n  image: nginx\ntags:\n  - x\n",
+			want: stringtest.LinesLF(
+				"name: shop",
+				"web:",
+				"  image: nginx",
+				"tags:",
+				"  - x",
+			),
 			binds: map[string]string{
 				"$.name":      "base.yaml:1:7",
 				"$.web.image": "base.yaml:2:14",
@@ -200,7 +215,13 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				"web: {image: nginx, replicas: 1}\n",
 				"d: &d {replicas: 7}\nweb: *d\n",
 			},
-			want: "web:\n  image: nginx\n  replicas: 7\nd:\n  replicas: 7\n",
+			want: stringtest.LinesLF(
+				"web:",
+				"  image: nginx",
+				"  replicas: 7",
+				"d:",
+				"  replicas: 7",
+			),
 			binds: map[string]string{
 				"$.web.image":    "base.yaml:1:14",
 				"$.web.replicas": "prod.yaml:1:18",
@@ -209,11 +230,25 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 		},
 		"an alias inside its own anchor reads as null": {
 			layers: []string{"a: &a\n  b: 1\n  self: *a\nc: *a\n"},
-			want:   "a:\n  b: 1\n  self: null\nc:\n  b: 1\n  self: null\n",
+			want: stringtest.LinesLF(
+				"a:",
+				"  b: 1",
+				"  self: null",
+				"c:",
+				"  b: 1",
+				"  self: null",
+			),
 		},
 		"an alias to a scalar copies its text": {
 			layers: []string{"v: &v 1.50\nlist: [*v, &w two, *w]\n*w : key\n"},
-			want:   "v: 1.50\nlist:\n  - 1.50\n  - two\n  - two\ntwo: key\n",
+			want: stringtest.LinesLF(
+				"v: 1.50",
+				"list:",
+				"  - 1.50",
+				"  - two",
+				"  - two",
+				"two: key",
+			),
 		},
 		"a merge key in each layer": {
 			layers: []string{
@@ -240,7 +275,14 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 		},
 		"a later merge key wins over the key before it": {
 			layers: []string{"d: &d {a: 1}\none: {a: 9, <<: *d}\ntwo: {<<: *d, a: 9}\n"},
-			want:   "d:\n  a: 1\none:\n  a: 1\ntwo:\n  a: 9\n",
+			want: stringtest.LinesLF(
+				"d:",
+				"  a: 1",
+				"one:",
+				"  a: 1",
+				"two:",
+				"  a: 9",
+			),
 			binds: map[string]string{
 				"$.one.a": "base.yaml:1:11",
 				"$.two.a": "base.yaml:3:18",
@@ -264,7 +306,16 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 		},
 		"a merge key of a merge source brings its keys in": {
 			layers: []string{"a: &a {k: 1}\nb: &b {<<: *a, l: 2}\nc: {<<: *b}\n"},
-			want:   "a:\n  k: 1\nb:\n  k: 1\n  l: 2\nc:\n  k: 1\n  l: 2\n",
+			want: stringtest.LinesLF(
+				"a:",
+				"  k: 1",
+				"b:",
+				"  k: 1",
+				"  l: 2",
+				"c:",
+				"  k: 1",
+				"  l: 2",
+			),
 		},
 		"a quoted key that spells a merge key is a key": {
 			layers: []string{"m: {\"<<\": {a: 1}}\n", "m: {'<<': {b: 2}}\n"},
@@ -342,7 +393,15 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 		},
 		"a plain scalar that a block line reads another way takes quotes": {
 			layers: []string{"a: [-, ?, a b, -x]\nb: {k: -}\n"},
-			want:   "a:\n  - \"-\"\n  - \"?\"\n  - a b\n  - -x\nb:\n  k: \"-\"\n",
+			want: stringtest.LinesLF(
+				"a:",
+				`  - "-"`,
+				`  - "?"`,
+				"  - a b",
+				"  - -x",
+				"b:",
+				`  k: "-"`,
+			),
 		},
 		"a tag stays on its value": {
 			layers: []string{
@@ -384,7 +443,14 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 		},
 		"a merged mapping takes the tag of the highest layer that writes one": {
 			layers: []string{"m: !a {x: 1}\nn: !a {x: 1}\n", "m: {y: 2}\nn: !b {y: 2}\n"},
-			want:   "m: !a\n  x: 1\n  y: 2\nn: !b\n  x: 1\n  y: 2\n",
+			want: stringtest.LinesLF(
+				"m: !a",
+				"  x: 1",
+				"  y: 2",
+				"n: !b",
+				"  x: 1",
+				"  y: 2",
+			),
 		},
 		"a tag at the root goes above its collection": {
 			layers: []string{"!obj\na: 1\n"},
@@ -415,10 +481,24 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 		},
 		"the preamble of the lowest layer stays and other comments go": {
 			layers: []string{
-				"# base header\n---\n# lead\na: 1 # trailing\n# between\nb: 2\n",
+				stringtest.LinesLF(
+					"# base header",
+					"---",
+					"# lead",
+					"a: 1 # trailing",
+					"# between",
+					"b: 2",
+				),
 				"# prod header\n---\nc: 3\n",
 			},
-			want: "# base header\n---\n# lead\na: 1\nb: 2\nc: 3\n",
+			want: stringtest.LinesLF(
+				"# base header",
+				"---",
+				"# lead",
+				"a: 1",
+				"b: 2",
+				"c: 3",
+			),
 		},
 	}
 
@@ -724,7 +804,16 @@ var mergedCorpus = map[string]struct {
 		),
 		typed: func() any { return new(map[string]string) },
 	},
-	"comments": {input: "# head\na: 1 # trailing\n\n# middle\nb:\n  # inner\n  c: 2\n# tail\n"},
+	"comments": {input: stringtest.LinesLF(
+		"# head",
+		"a: 1 # trailing",
+		"",
+		"# middle",
+		"b:",
+		"  # inner",
+		"  c: 2",
+		"# tail",
+	)},
 }
 
 func TestNewSourceFromLayers_Decode_Equivalence(t *testing.T) {
@@ -843,7 +932,15 @@ func TestNewSourceFromLayers_Decode_Equivalence_Errors(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t,
-			"server:\n  host: example.com\nservers:\n  - host: a\nbackup: &b {host: b}\nnested:\n  inner: *b\n",
+			stringtest.LinesLF(
+				"server:",
+				"  host: example.com",
+				"servers:",
+				"  - host: a",
+				"backup: &b {host: b}",
+				"nested:",
+				"  inner: *b",
+			),
 			niceyaml.WithName("doc.yaml"))
 
 		_, want := doc.Decode[layerConfig](t.Context())
@@ -994,9 +1091,19 @@ func TestNewSourceFromLayers_Decode_Scalars(t *testing.T) {
 		Ratio   float64   `yaml:"ratio"`
 	}
 
-	const (
-		baseInput = "version: 1.10\nhex: 0x1F\ncount: 0x10\nratio: 1.50\nwhen: 2001-12-14\n"
-		prodInput = "text: |\n  one\n  two\nquoted: 'true'\ndata: !!binary aGVsbG8=\n"
+	baseInput := stringtest.LinesLF(
+		"version: 1.10",
+		"hex: 0x1F",
+		"count: 0x10",
+		"ratio: 1.50",
+		"when: 2001-12-14",
+	)
+	prodInput := stringtest.LinesLF(
+		"text: |",
+		"  one",
+		"  two",
+		"quoted: 'true'",
+		"data: !!binary aGVsbG8=",
 	)
 
 	// The merged document spells each scalar as its layer does, so a
@@ -1094,7 +1201,12 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 			niceyaml.WithName("base.yaml"), niceyaml.WithReferences(other))
 		prod := yamltest.FirstDocument(
 			t,
-			"web: *server\napi: {<<: *base, port: 2}\nbase: &base {port: 3}\ndb: {host: x}\n",
+			stringtest.LinesLF(
+				"web: *server",
+				"api: {<<: *base, port: 2}",
+				"base: &base {port: 3}",
+				"db: {host: x}",
+			),
 			niceyaml.WithName("prod.yaml"),
 			niceyaml.WithReferences(shared),
 		)
@@ -1416,7 +1528,15 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 			nodes := layerNodes(t, baseInput, midInput, prodInput)
 			layers := yamltest.Layers(t, arrange(t, nodes[0], nodes[1], nodes[2])...)
 
-			assert.Equal(t, "# base\nname: shop\nserver:\n  host: mid.example.com\n  port: 0\n  tls:\n    cert: 1\n",
+			assert.Equal(t, stringtest.LinesLF(
+				"# base",
+				"name: shop",
+				"server:",
+				"  host: mid.example.com",
+				"  port: 0",
+				"  tls:",
+				"    cert: 1",
+			),
 				mergedText(t, layers))
 
 			requireLayerBinds(t, layers, binds)
@@ -1452,7 +1572,12 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 		t.Parallel()
 
 		base := yamltest.FirstDocument(t,
-			"defaults:\n  server:\n    host: example.com\n    port: 0\n",
+			stringtest.LinesLF(
+				"defaults:",
+				"  server:",
+				"    host: example.com",
+				"    port: 0",
+			),
 			niceyaml.WithName("base.yaml"),
 		)
 		defaults := yamltest.At(t, base, paths.Doc().Child("defaults"))
