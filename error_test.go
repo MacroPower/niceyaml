@@ -5972,147 +5972,134 @@ func TestSourceError_TreeBranches(t *testing.T) {
 	t.Run("a join in a named source names the source of each branch", func(t *testing.T) {
 		t.Parallel()
 
-		// Each branch names its own source, so the join puts no name in
-		// front of them, whichever source it binds to.
 		named := func(name string) *niceyaml.Source {
 			return niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n", niceyaml.WithName(name))
 		}
 
 		src := named("f.yaml")
-		err := yamltest.Bind(t, src, errors.Join(
-			yamltest.Bind(t, src, badA),
-			yamltest.Bind(t, src, badB),
-		))
-		assert.Equal(t, "f.yaml:1:4: $.a: bad a\nf.yaml:2:4: $.b: bad b", err.Error())
-
-		err = yamltest.Bind(t, named("c.yaml"), errors.Join(
-			yamltest.Bind(t, named("a.yaml"), badA),
-			yamltest.Bind(t, named("b.yaml"), badB),
-		))
-		assert.Equal(t, "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b", err.Error())
-
-		// A binding of another source names that source alone, and a
-		// branch the join binds itself names the source of the join. A
-		// branch that joins bindings of other sources holds no text of its
-		// own, so it adds no name.
-		err = yamltest.Bind(t, named("c.yaml"), errors.Join(yamltest.Bind(t, named("a.yaml"), badA), badB))
-		assert.Equal(t, "a.yaml:1:4: $.a: bad a\nc.yaml:2:4: $.b: bad b", err.Error())
-
-		err = yamltest.Bind(t, named("c.yaml"), errors.Join(
-			errors.Join(yamltest.Bind(t, named("a.yaml"), badA), yamltest.Bind(t, named("b.yaml"), badB)),
-			yamltest.Bind(t, named("b.yaml"), badB),
-		))
-		assert.Equal(t, "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b\nb.yaml:2:4: $.b: bad b", err.Error())
-
-		// So does an Error that only wraps a binding of such a join.
 		joinSrc := named("c.yaml")
-		err = yamltest.Bind(t, joinSrc, errors.Join(
-			yamltest.Bind(t, named("a.yaml"), badA),
-			niceyaml.Invalid(yamltest.Bind(t, joinSrc, errors.Join(
-				yamltest.Bind(t, named("b.yaml"), badB),
-			))),
-		))
-		assert.Equal(t, "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b", err.Error())
-
-		// A binding of such a join to this source has no line of its own,
-		// so its branches stand in its place. A join that leads with that
-		// binding, or a summary that heads it, lists them beside the child
-		// that belongs to this source, with the sources in the order they
-		// first appear.
 		joinOfOthers := yamltest.Bind(t, src, errors.Join(
 			yamltest.Bind(t, named("a.yaml"), badA),
 			yamltest.Bind(t, named("b.yaml"), badB),
 		))
-		leads := map[string]struct {
-			err  error
-			want string
-		}{
-			"join that leads with it": {
-				err:  errors.Join(joinOfOthers, badC),
-				want: "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b\nf.yaml:3:4: $.c: bad c",
-			},
-			"summary that heads it": {
-				err:  niceyaml.NewSummary("2 checks", joinOfOthers, badC),
-				want: "f.yaml: 2 checks\na.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b\nf.yaml:3:4: $.c: bad c",
-			},
-		}
 
-		for name, tc := range leads {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				err := yamltest.Bind(t, src, tc.err)
-				assert.Equal(t, tc.want, err.Error())
-			})
-		}
-
-		// A binding of a source with no name has no name to put in front
-		// of its branches, so a branch of that source carries its position
-		// alone, and one bound to this source keeps the name it carries.
 		unnamed := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n")
 		ownLead := yamltest.Bind(t, src, badA)
 		unnamedB := yamltest.Bind(t, unnamed, badB)
-		unnamedLeads := map[string]struct {
+
+		// Each case holds the join as its source binds it.
+		tcs := map[string]struct {
 			err  error
 			want string
 		}{
-			"join that leads with it": {
-				err: errors.Join(
+			// Each branch names its own source, so the join puts no name in
+			// front of them, whichever source it binds to.
+			"bindings of the source of the join": {
+				err: yamltest.Bind(t, src, errors.Join(
+					yamltest.Bind(t, src, badA),
+					yamltest.Bind(t, src, badB),
+				)),
+				want: "f.yaml:1:4: $.a: bad a\nf.yaml:2:4: $.b: bad b",
+			},
+			"bindings of two other sources": {
+				err: yamltest.Bind(t, named("c.yaml"), errors.Join(
+					yamltest.Bind(t, named("a.yaml"), badA),
+					yamltest.Bind(t, named("b.yaml"), badB),
+				)),
+				want: "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b",
+			},
+			// A binding of another source names that source alone, and a
+			// branch the join binds itself names the source of the join. A
+			// branch that joins bindings of other sources holds no text of its
+			// own, so it adds no name.
+			"binding of another source beside a branch the join binds": {
+				err:  yamltest.Bind(t, named("c.yaml"), errors.Join(yamltest.Bind(t, named("a.yaml"), badA), badB)),
+				want: "a.yaml:1:4: $.a: bad a\nc.yaml:2:4: $.b: bad b",
+			},
+			"join of bindings of other sources as a branch": {
+				err: yamltest.Bind(t, named("c.yaml"), errors.Join(
+					errors.Join(yamltest.Bind(t, named("a.yaml"), badA), yamltest.Bind(t, named("b.yaml"), badB)),
+					yamltest.Bind(t, named("b.yaml"), badB),
+				)),
+				want: "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b\nb.yaml:2:4: $.b: bad b",
+			},
+			// So does an Error that only wraps a binding of such a join.
+			"Error that wraps a binding of a join of another source": {
+				err: yamltest.Bind(t, joinSrc, errors.Join(
+					yamltest.Bind(t, named("a.yaml"), badA),
+					niceyaml.Invalid(yamltest.Bind(t, joinSrc, errors.Join(
+						yamltest.Bind(t, named("b.yaml"), badB),
+					))),
+				)),
+				want: "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b",
+			},
+			// A binding of such a join to this source has no line of its own,
+			// so its branches stand in its place. A join that leads with that
+			// binding, or a summary that heads it, lists them beside the child
+			// that belongs to this source, with the sources in the order they
+			// first appear.
+			"join that leads with a binding of a join of other sources": {
+				err:  yamltest.Bind(t, src, errors.Join(joinOfOthers, badC)),
+				want: "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b\nf.yaml:3:4: $.c: bad c",
+			},
+			"summary that heads a binding of a join of other sources": {
+				err:  yamltest.Bind(t, src, niceyaml.NewSummary("2 checks", joinOfOthers, badC)),
+				want: "f.yaml: 2 checks\na.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b\nf.yaml:3:4: $.c: bad c",
+			},
+			// A binding of a source with no name has no name to put in front
+			// of its branches, so a branch of that source carries its position
+			// alone, and one bound to this source keeps the name it carries.
+			"join that leads with a binding of a source with no name": {
+				err: yamltest.Bind(t, src, errors.Join(
 					yamltest.Bind(t, unnamed, errors.Join(ownLead, unnamedB)),
 					badC,
-				),
+				)),
 				want: "f.yaml:1:4: $.a: bad a\nf.yaml:3:4: $.c: bad c\n2:4: $.b: bad b",
 			},
-			"summary that heads it": {
-				err: errors.Join(
+			"summary of a source with no name that heads a binding": {
+				err: yamltest.Bind(t, src, errors.Join(
 					yamltest.Bind(t, unnamed, niceyaml.NewSummary("2 checks",
 						yamltest.Bind(t, unnamed, errors.Join(ownLead)),
 						unnamedB,
 					)),
 					badC,
-				),
+				)),
 				want: "f.yaml:3:4: $.c: bad c\n2 checks\nf.yaml:1:4: $.a: bad a\n2:4: $.b: bad b",
 			},
-		}
-
-		for name, tc := range unnamedLeads {
-			t.Run("unnamed "+name, func(t *testing.T) {
-				t.Parallel()
-
-				err := yamltest.Bind(t, src, tc.err)
-				assert.Equal(t, tc.want, err.Error())
-			})
-		}
-
-		// Every line takes the name, so a join names the source in front
-		// of each branch it binds, a branch nested in another join
-		// included, and the lines read in the order of their positions.
-		err = yamltest.Bind(t, src, errors.Join(yamltest.Bind(t, src, badA), badB))
-		assert.Equal(t, "f.yaml:1:4: $.a: bad a\nf.yaml:2:4: $.b: bad b", err.Error())
-
-		err = yamltest.Bind(t, src, errors.Join(
-			errors.Join(yamltest.Bind(t, src, badA), badB),
-			badC,
-		))
-		assert.Equal(t, "f.yaml:1:4: $.a: bad a\nf.yaml:2:4: $.b: bad b\nf.yaml:3:4: $.c: bad c", err.Error())
-
-		err = yamltest.Bind(t, src, errors.Join(badB, yamltest.Bind(t, src, badA)))
-		assert.Equal(t, "f.yaml:1:4: $.a: bad a\nf.yaml:2:4: $.b: bad b", err.Error())
-
-		// An Error with details above a binding writes the text of the
-		// binding as it is, and the details stay out of the line. An Error
-		// that carries a position alone binds anew, so its line carries its
-		// own position in front of the one the binding wrote.
-		tcs := map[string]struct {
-			lead error
-			want string
-		}{
-			"details": {
-				lead: niceyaml.Invalid(yamltest.Bind(t, src, badA), niceyaml.WithDetails(badB)),
+			// Every line takes the name, so a join names the source in front
+			// of each branch it binds, a branch nested in another join
+			// included, and the lines read in the order of their positions.
+			"binding in front of a branch the join binds": {
+				err:  yamltest.Bind(t, src, errors.Join(yamltest.Bind(t, src, badA), badB)),
+				want: "f.yaml:1:4: $.a: bad a\nf.yaml:2:4: $.b: bad b",
+			},
+			"binding nested in another join": {
+				err: yamltest.Bind(t, src, errors.Join(
+					errors.Join(yamltest.Bind(t, src, badA), badB),
+					badC,
+				)),
+				want: "f.yaml:1:4: $.a: bad a\nf.yaml:2:4: $.b: bad b\nf.yaml:3:4: $.c: bad c",
+			},
+			"binding behind a branch the join binds": {
+				err:  yamltest.Bind(t, src, errors.Join(badB, yamltest.Bind(t, src, badA))),
+				want: "f.yaml:1:4: $.a: bad a\nf.yaml:2:4: $.b: bad b",
+			},
+			// An Error with details above a binding writes the text of the
+			// binding as it is, and the details stay out of the line. An Error
+			// that carries a position alone binds anew, so its line carries its
+			// own position in front of the one the binding wrote.
+			"details above a binding": {
+				err: yamltest.Bind(t, src, errors.Join(
+					niceyaml.Invalid(yamltest.Bind(t, src, badA), niceyaml.WithDetails(badB)),
+					badC,
+				)),
 				want: "f.yaml:1:4: $.a: bad a\nf.yaml:3:4: $.c: bad c",
 			},
-			"position alone": {
-				lead: niceyaml.Invalid(yamltest.Bind(t, src, badA), niceyaml.AtPosition(position.New(0, 3))),
+			"position alone above a binding": {
+				err: yamltest.Bind(t, src, errors.Join(
+					niceyaml.Invalid(yamltest.Bind(t, src, badA), niceyaml.AtPosition(position.New(0, 3))),
+					badC,
+				)),
 				want: "f.yaml:1:4: f.yaml:1:4: $.a: bad a\nf.yaml:3:4: $.c: bad c",
 			},
 		}
@@ -6121,8 +6108,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				err := yamltest.Bind(t, src, errors.Join(tc.lead, badC))
-				assert.Equal(t, tc.want, err.Error())
+				assert.Equal(t, tc.want, tc.err.Error())
 			})
 		}
 	})
