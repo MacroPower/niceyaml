@@ -67,8 +67,8 @@ import (
 // costs an index of the lines and no copy of their content.
 //
 // Create instances with [NewSourceFromFile], [NewSourceFromFS],
-// [NewSourceFromReader], [NewSourceFromBytes], [NewSourceFromString], or
-// [NewSourceFromTokens].
+// [NewSourceFromReader], [NewSourceFromBytes], [NewSourceFromString],
+// [NewSourceFromTokens], or [NewSourceFromLayers].
 type Source struct {
 	lines line.Lines
 	// Holds the text the Source read, which [Source.Text] returns. A
