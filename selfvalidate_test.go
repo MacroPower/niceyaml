@@ -1395,7 +1395,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:    "1:24: $.0x10.price: negative price",
 			},
 			"int-tagged hexadecimal int after another key": {
-				input:   "1: {price: 1}\n!!int 0x10: {price: -1}\n",
+				input:   stringtest.LinesLF("1: {price: 1}", "!!int 0x10: {price: -1}"),
 				targets: []any{new(map[int]item), new(map[uint64]item)},
 				want:    "2:21: $.0x10.price: negative price",
 			},
@@ -1487,12 +1487,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:    "4:16: $.m.0x10.price: negative price",
 			},
 			"key of a mapping behind an alias": {
-				input:   "base: &b {0x10: {price: -1}}\nf: *b\n",
+				input:   stringtest.LinesLF("base: &b {0x10: {price: -1}}", "f: *b"),
 				targets: []any{new(named)},
 				want:    "1:25: $.f.0x10.price: negative price",
 			},
 			"key of a mapping behind a tagged alias": {
-				input:   "base: &b {0x10: {price: -1}}\nf: !t *b\n",
+				input:   stringtest.LinesLF("base: &b {0x10: {price: -1}}", "f: !t *b"),
 				targets: []any{new(named)},
 				want:    "1:25: $.f.0x10.price: negative price",
 			},
@@ -1839,7 +1839,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, ".nan: {price: -1}\n1.5: {price: -1}\n")
+				dd := yamltest.FirstDocument(t, stringtest.LinesLF(".nan: {price: -1}", "1.5: {price: -1}"))
 
 				err := dd.DecodeInto(t.Context(), tc.target)
 
