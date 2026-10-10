@@ -67,6 +67,28 @@ var (
 		},
 	}
 
+	// A catalog with an entry for GitHub workflows, an entry for Docker
+	// Compose files, and an entry that matches every YAML file.
+	toolsCatalog = schemastore.Catalog{
+		Schemas: []schemastore.CatalogEntry{
+			{
+				Name:      "GitHub Workflow",
+				URL:       "https://json.schemastore.org/github-workflow.json",
+				FileMatch: []string{".github/workflows/*.yaml"},
+			},
+			{
+				Name:      "Docker Compose",
+				URL:       "https://json.schemastore.org/docker-compose.json",
+				FileMatch: []string{"docker-compose.yaml", "docker-compose.yml"},
+			},
+			{
+				Name:      "Generic",
+				URL:       "https://example.com/generic.json",
+				FileMatch: []string{"*.yaml"},
+			},
+		},
+	}
+
 	// A catalog whose first entry matches every YAML file and whose second
 	// matches one file name.
 	layeredCatalog = schemastore.Catalog{
@@ -669,28 +691,8 @@ func TestSchemaStore_SlowFetch(t *testing.T) {
 func TestSchemaStore_ConcurrentAccess(t *testing.T) {
 	t.Parallel()
 
-	catalog := schemastore.Catalog{
-		Schemas: []schemastore.CatalogEntry{
-			{
-				Name:      "GitHub Workflow",
-				URL:       "https://json.schemastore.org/github-workflow.json",
-				FileMatch: []string{".github/workflows/*.yaml"},
-			},
-			{
-				Name:      "Docker Compose",
-				URL:       "https://json.schemastore.org/docker-compose.json",
-				FileMatch: []string{"docker-compose.yaml", "docker-compose.yml"},
-			},
-			{
-				Name:      "Generic",
-				URL:       "https://example.com/generic.json",
-				FileMatch: []string{"*.yaml"},
-			},
-		},
-	}
-
 	// Use short TTL to trigger concurrent cache refreshes.
-	store := newCatalogStore(t, catalog, schemastore.WithCacheTTL(1*time.Millisecond))
+	store := newCatalogStore(t, toolsCatalog, schemastore.WithCacheTTL(1*time.Millisecond))
 
 	// Run multiple goroutines calling FindMatch concurrently.
 	const numGoroutines = 10
@@ -727,23 +729,8 @@ func TestSchemaStore_ConcurrentAccess(t *testing.T) {
 func TestSchemaStore_Filter(t *testing.T) {
 	t.Parallel()
 
-	catalog := schemastore.Catalog{
-		Schemas: []schemastore.CatalogEntry{
-			{
-				Name:      "GitHub Workflow",
-				URL:       "https://json.schemastore.org/github-workflow.json",
-				FileMatch: []string{".github/workflows/*.yaml"},
-			},
-			{
-				Name:      "Docker Compose",
-				URL:       "https://json.schemastore.org/docker-compose.json",
-				FileMatch: []string{"docker-compose.yaml", "docker-compose.yml"},
-			},
-		},
-	}
-
 	// Filter to only GitHub schemas.
-	store := newCatalogStore(t, catalog, schemastore.WithFilter(func(e schemastore.CatalogEntry) bool {
+	store := newCatalogStore(t, toolsCatalog, schemastore.WithFilter(func(e schemastore.CatalogEntry) bool {
 		return strings.Contains(strings.ToLower(e.Name), "github")
 	}))
 
