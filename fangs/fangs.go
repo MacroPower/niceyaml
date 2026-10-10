@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strings"
 
 	"charm.land/fang/v2"
@@ -79,7 +80,12 @@ func WithPrinter(p *printer.Printer) Option {
 // an excerpt shows. The styled output and the plain output of the
 // handler draw one report, so both show the same lines. A later call
 // replaces the options of an earlier one.
+//
+// WithExcerptOptions copies the options it gets, so a caller that edits
+// the slice it passed changes nothing in the handler.
 func WithExcerptOptions(opts ...niceyaml.ExcerptOption) Option {
+	opts = slices.Clone(opts)
+
 	return func(cfg *config) {
 		cfg.excerpt = opts
 	}

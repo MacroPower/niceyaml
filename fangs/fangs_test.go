@@ -688,6 +688,21 @@ func TestNewErrorHandler_WithExcerptOptions(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("an edit of the slice the caller passed changes nothing", func(t *testing.T) {
+		t.Parallel()
+
+		opts := []niceyaml.ExcerptOption{niceyaml.WithContextLines(0)}
+		handler := fangs.NewErrorHandler(fangs.WithPrinter(p), fangs.WithExcerptOptions(opts...))
+
+		opts[0] = niceyaml.WithContextLines(3)
+
+		var plain bytes.Buffer
+
+		handler(&colorprofile.Writer{Forward: &plain, Profile: colorprofile.ASCII}, testStyles(), err)
+
+		assert.Equal(t, output(niceyaml.FormatError(err, niceyaml.WithContextLines(0))), plain.String())
+	})
 }
 
 func TestErrorHandler_UnwritableWriter(t *testing.T) {
