@@ -542,11 +542,36 @@ func TestDiffer_Full(t *testing.T) {
 func TestDiffer_Hunks(t *testing.T) {
 	t.Parallel()
 
+	tenLines := stringtest.Input(`
+		l1: 1
+		l2: 2
+		l3: 3
+		l4: 4
+		l5: 5
+		l6: 6
+		l7: 7
+		l8: 8
+		l9: 9
+		l10: 10
+	`)
+	// Deletes l2, inserts a line after l5, and changes l9.
+	threeChanges := stringtest.Input(`
+		l1: 1
+		l3: 3
+		l4: 4
+		l5: 5
+		new: x
+		l6: 6
+		l7: 7
+		l8: 8
+		l9: changed
+		l10: 10
+	`)
+
 	tcs := map[string]struct {
 		before      string
 		after       string
 		context     int
-		wantEmpty   bool
 		wantLen     int
 		flags       map[int]line.Flag
 		annotations map[int]string
@@ -599,19 +624,15 @@ func TestDiffer_Hunks(t *testing.T) {
 				line4: 4
 				line5: 5
 			`),
-			context: 0,
-			wantLen: 2,
-			flags: map[int]line.Flag{
-				2: line.FlagDeleted,
-				3: line.FlagInserted,
-			},
+			context:     0,
+			wantLen:     2,
+			flags:       map[int]line.Flag{2: line.FlagDeleted, 3: line.FlagInserted},
 			annotations: map[int]string{2: "@@ -3 +3 @@"},
 		},
 		"no changes returns empty": {
-			before:    "key: value\n",
-			after:     "key: value\n",
-			context:   3,
-			wantEmpty: true,
+			before:  "key: value\n",
+			after:   "key: value\n",
+			context: 3,
 		},
 		"negative context treated as zero": {
 			before: stringtest.Input(`
@@ -624,12 +645,9 @@ func TestDiffer_Hunks(t *testing.T) {
 				line2: new
 				line3: 3
 			`),
-			context: -5,
-			wantLen: 2,
-			flags: map[int]line.Flag{
-				1: line.FlagDeleted,
-				2: line.FlagInserted,
-			},
+			context:     -5,
+			wantLen:     2,
+			flags:       map[int]line.Flag{1: line.FlagDeleted, 2: line.FlagInserted},
 			annotations: map[int]string{1: "@@ -2 +2 @@"},
 		},
 		"append reports line before insertion with zero count": {
@@ -645,12 +663,9 @@ func TestDiffer_Hunks(t *testing.T) {
 				d: 4
 				e: 5
 			`),
-			context: 0,
-			wantLen: 2,
-			flags: map[int]line.Flag{
-				3: line.FlagInserted,
-				4: line.FlagInserted,
-			},
+			context:     0,
+			wantLen:     2,
+			flags:       map[int]line.Flag{3: line.FlagInserted, 4: line.FlagInserted},
 			annotations: map[int]string{3: "@@ -3,0 +4,2 @@"},
 		},
 		"deletion reports line before removal with zero count": {
@@ -663,11 +678,9 @@ func TestDiffer_Hunks(t *testing.T) {
 				a: 1
 				c: 3
 			`),
-			context: 0,
-			wantLen: 1,
-			flags: map[int]line.Flag{
-				1: line.FlagDeleted,
-			},
+			context:     0,
+			wantLen:     1,
+			flags:       map[int]line.Flag{1: line.FlagDeleted},
 			annotations: map[int]string{1: "@@ -2 +1,0 @@"},
 		},
 		"insertion at start reports zero line": {
@@ -680,32 +693,25 @@ func TestDiffer_Hunks(t *testing.T) {
 				a: 1
 				b: 2
 			`),
-			context: 0,
-			wantLen: 1,
-			flags: map[int]line.Flag{
-				0: line.FlagInserted,
-			},
+			context:     0,
+			wantLen:     1,
+			flags:       map[int]line.Flag{0: line.FlagInserted},
 			annotations: map[int]string{0: "@@ -0,0 +1 @@"},
 		},
 		"insertion into empty file": {
-			before:  "",
-			after:   "a: 1\n",
-			context: 0,
-			wantLen: 1,
-			flags: map[int]line.Flag{
-				0: line.FlagInserted,
-			},
+			before:      "",
+			after:       "a: 1\n",
+			context:     0,
+			wantLen:     1,
+			flags:       map[int]line.Flag{0: line.FlagInserted},
 			annotations: map[int]string{0: "@@ -0,0 +1 @@"},
 		},
 		"deletion to empty file": {
-			before:  "a: 1\nb: 2\n",
-			after:   "",
-			context: 0,
-			wantLen: 2,
-			flags: map[int]line.Flag{
-				0: line.FlagDeleted,
-				1: line.FlagDeleted,
-			},
+			before:      "a: 1\nb: 2\n",
+			after:       "",
+			context:     0,
+			wantLen:     2,
+			flags:       map[int]line.Flag{0: line.FlagDeleted, 1: line.FlagDeleted},
 			annotations: map[int]string{0: "@@ -1,2 +0,0 @@"},
 		},
 		"delete trailing repeated list item": {
@@ -767,30 +773,8 @@ func TestDiffer_Hunks(t *testing.T) {
 			annotations: map[int]string{5: "@@ -5,0 +6,4 @@"},
 		},
 		"three hunks without context": {
-			before: stringtest.Input(`
-				l1: 1
-				l2: 2
-				l3: 3
-				l4: 4
-				l5: 5
-				l6: 6
-				l7: 7
-				l8: 8
-				l9: 9
-				l10: 10
-			`),
-			after: stringtest.Input(`
-				l1: 1
-				l3: 3
-				l4: 4
-				l5: 5
-				new: x
-				l6: 6
-				l7: 7
-				l8: 8
-				l9: changed
-				l10: 10
-			`),
+			before:  tenLines,
+			after:   threeChanges,
 			context: 0,
 			wantLen: 4,
 			flags: map[int]line.Flag{
@@ -806,30 +790,8 @@ func TestDiffer_Hunks(t *testing.T) {
 			},
 		},
 		"three hunks with context": {
-			before: stringtest.Input(`
-				l1: 1
-				l2: 2
-				l3: 3
-				l4: 4
-				l5: 5
-				l6: 6
-				l7: 7
-				l8: 8
-				l9: 9
-				l10: 10
-			`),
-			after: stringtest.Input(`
-				l1: 1
-				l3: 3
-				l4: 4
-				l5: 5
-				new: x
-				l6: 6
-				l7: 7
-				l8: 8
-				l9: changed
-				l10: 10
-			`),
+			before:  tenLines,
+			after:   threeChanges,
 			context: 1,
 			wantLen: 10,
 			flags: map[int]line.Flag{
@@ -863,16 +825,6 @@ func TestDiffer_Hunks(t *testing.T) {
 			require.NotNil(t, got)
 			assertSameContent(t, result.Unified(), got)
 
-			if tc.wantEmpty {
-				assert.Equal(t, 0, got.Count())
-
-				// The empty view takes decoration as any other.
-				got.AddOverlay(kind.GenericHighlight, yamltest.LineRange(0, 0, 1))
-				assert.Empty(t, got.String())
-
-				return
-			}
-
 			assert.Equal(t, tc.wantLen, got.Count())
 
 			for lineIdx, wantFlag := range tc.flags {
@@ -880,12 +832,16 @@ func TestDiffer_Hunks(t *testing.T) {
 				assert.Equal(t, wantFlag, got.Flag(lineIdx), "flag mismatch at line %d", lineIdx)
 			}
 
-			if tc.annotations != nil {
-				for lineIdx, wantAnnotation := range tc.annotations {
-					anns := got.Annotations(lineIdx)
-					require.NotEmpty(t, anns, "expected annotation at line %d", lineIdx)
-					assert.Equal(t, wantAnnotation, anns[0].Content)
-				}
+			for lineIdx, wantAnnotation := range tc.annotations {
+				anns := got.Annotations(lineIdx)
+				require.NotEmpty(t, anns, "expected annotation at line %d", lineIdx)
+				assert.Equal(t, wantAnnotation, anns[0].Content)
+			}
+
+			if tc.wantLen == 0 {
+				// The empty view takes decoration as any other.
+				got.AddOverlay(kind.GenericHighlight, yamltest.LineRange(0, 0, 1))
+				assert.Empty(t, got.String())
 			}
 		})
 	}
