@@ -709,9 +709,32 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 	sla := niceyaml.NewSourceFromString(stringtest.LinesLF("spec:", "  sla: 99", "  hours:"))
 	badSLA := yamltest.Bind(t, sla, errAt("bad", "spec", "sla"))
 
+	// A line of twenty items is longer than the default excerpt width, so
+	// the printer shows whole lines to keep every wrapped row of it.
+	twenty := niceyaml.NewSourceFromString(itemsInput(20))
+	twentyRows := []string{
+		"   1  items: [item00, item01, item02,",
+		"   -  item03, item04, item05, item06,",
+		"   -  item07, item08, item09, item10,",
+		"   -  item11, item12, item13, item14,",
+		"   -  item15, item16, item17, item18,",
+		"   -  item19]",
+	}
+	badItem := func(index int) error {
+		return yamltest.Bind(t, twenty, niceyaml.NewError("outer", niceyaml.WithDetails(
+			niceyaml.NewError("expected string", niceyaml.AtPath(paths.Current().Child("items").Index(index))),
+		)))
+	}
+
+	// A line of forty items is long enough for an excerpt to clip it.
+	forty := itemNames(40)
+	badForty := yamltest.Bind(t, niceyaml.NewSourceFromString(itemsInput(40)),
+		niceyaml.NewError("expected number", niceyaml.AtPath(paths.Current().Child("items").Index(20))))
+
 	tcs := map[string]struct {
 		err    error
 		gutter printer.Gutter // Nil for no gutter.
+		opts   []niceyaml.ExcerptOption
 		want   string
 		width  int
 	}{
@@ -823,6 +846,69 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 				"   -  item11]",
 			),
 		},
+		// The message sits below the wrapped row that holds the item, whether
+		// or not that row is the last, so the carets land under the item. On
+		// the earlier row, the message wraps, and its second row starts under
+		// its first word.
+		"message below an earlier wrapped row": {
+			err:    badItem(5),
+			gutter: printer.DefaultGutter,
+			opts:   []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0)},
+			width:  40,
+			want: stringtest.JoinLF(slices.Concat(
+				[]string{"outer", "└── 1:49: $.items[5]: expected string", ""},
+				twentyRows[:2],
+				[]string{
+					strings.Repeat(" ", 22) + "^^^^^^ expected",
+					strings.Repeat(" ", 29) + "string",
+				},
+				twentyRows[2:],
+			)...),
+		},
+		"message below the wrapped row before the last": {
+			err:    badItem(16),
+			gutter: printer.DefaultGutter,
+			opts:   []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0)},
+			width:  40,
+			want: stringtest.JoinLF(slices.Concat(
+				[]string{"outer", "└── 1:137: $.items[16]: expected string", ""},
+				twentyRows[:5],
+				[]string{strings.Repeat(" ", 14) + "^^^^^^ expected string"},
+				twentyRows[5:],
+			)...),
+		},
+		"long line clipped to the default width": {
+			err:    badForty,
+			gutter: printer.DefaultGutter,
+			want: stringtest.JoinLF(
+				"1:169: $.items[20]: expected number",
+				"",
+				"   1  ..."+strings.Join(forty[10:30], ", ")+", ...",
+				strings.Repeat(" ", 6+3+80)+"^^^^^^",
+			),
+		},
+		"long line clipped to the width from the options": {
+			err:    badForty,
+			gutter: printer.DefaultGutter,
+			opts:   []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(24)},
+			want: stringtest.JoinLF(
+				"1:169: $.items[20]: expected number",
+				"",
+				"   1  ...18, item19, item20, item...",
+				strings.Repeat(" ", 6+3+12)+"^^^^^^",
+			),
+		},
+		"long line shown whole": {
+			err:    badForty,
+			gutter: printer.DefaultGutter,
+			opts:   []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0)},
+			want: stringtest.JoinLF(
+				"1:169: $.items[20]: expected number",
+				"",
+				"   1  items: ["+strings.Join(forty, ", ")+"]",
+				strings.Repeat(" ", 6+168)+"^^^^^^",
+			),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -831,7 +917,7 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 
 			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.width))
 
-			assert.Equal(t, tc.want, p.PrintError(tc.err))
+			assert.Equal(t, tc.want, p.PrintError(tc.err, tc.opts...))
 		})
 	}
 }
@@ -5180,68 +5266,6 @@ func TestPrinter_PrintError_WrappedAnnotation(t *testing.T) {
 	assert.Contains(t, got, "^ expected string")
 }
 
-func TestPrinter_PrintError_AnnotationOnWrappedRow(t *testing.T) {
-	t.Parallel()
-
-	// The line is longer than the default excerpt width, so the printer
-	// shows whole lines to keep every wrapped row of it.
-	source := niceyaml.NewSourceFromString(itemsInput(20))
-
-	rows := []string{
-		"   1  items: [item00, item01, item02,",
-		"   -  item03, item04, item05, item06,",
-		"   -  item07, item08, item09, item10,",
-		"   -  item11, item12, item13, item14,",
-		"   -  item15, item16, item17, item18,",
-		"   -  item19]",
-	}
-
-	// The message sits below the wrapped row that holds the item, whether
-	// or not that row is the last, so the carets land under the item. On
-	// the earlier row, the message wraps, and its second row starts under
-	// its first word.
-	tcs := map[string]struct {
-		want  []string
-		index int
-	}{
-		"item on an earlier row": {
-			index: 5,
-			want: slices.Concat(
-				[]string{"outer", "└── 1:49: $.items[5]: expected string", ""},
-				rows[:2],
-				[]string{
-					strings.Repeat(" ", 22) + "^^^^^^ expected",
-					strings.Repeat(" ", 29) + "string",
-				},
-				rows[2:],
-			),
-		},
-		"item on the row before the last": {
-			index: 16,
-			want: slices.Concat(
-				[]string{"outer", "└── 1:137: $.items[16]: expected string", ""},
-				rows[:5],
-				[]string{strings.Repeat(" ", 14) + "^^^^^^ expected string"},
-				rows[5:],
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			err := yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
-				niceyaml.NewError("expected string", niceyaml.AtPath(paths.Current().Child("items").Index(tc.index))),
-			)))
-
-			p := testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrapWidth(40))
-
-			assert.Equal(t, stringtest.JoinLF(tc.want...), p.PrintError(err, niceyaml.WithExcerptWidth(0)))
-		})
-	}
-}
-
 func TestPrinter_PrintError_AnnotationNearEdge(t *testing.T) {
 	t.Parallel()
 
@@ -7158,56 +7182,4 @@ func TestPrinter_Layout_Clip(t *testing.T) {
 			assert.Equal(t, want, ansi.Strip(printer.Cut(row, cell, cell+1)), "column %d", col)
 		}
 	})
-}
-
-func TestPrinter_PrintError_ClipsLongLine(t *testing.T) {
-	t.Parallel()
-
-	items := itemNames(40)
-	input := itemsInput(40)
-	bad := niceyaml.NewError("expected number", niceyaml.AtPath(paths.Current().Child("items").Index(20)))
-
-	tcs := map[string]struct {
-		opts []niceyaml.ExcerptOption
-		want []string
-	}{
-		"default width": {
-			want: []string{
-				"1:169: $.items[20]: expected number",
-				"",
-				"   1  ..." + strings.Join(items[10:30], ", ") + ", ...",
-				strings.Repeat(" ", 6+3+80) + "^^^^^^",
-			},
-		},
-		"width from the options": {
-			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(24)},
-			want: []string{
-				"1:169: $.items[20]: expected number",
-				"",
-				"   1  ...18, item19, item20, item...",
-				strings.Repeat(" ", 6+3+12) + "^^^^^^",
-			},
-		},
-		"whole lines": {
-			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0)},
-			want: []string{
-				"1:169: $.items[20]: expected number",
-				"",
-				"   1  " + strings.TrimSuffix(input, "\n"),
-				strings.Repeat(" ", 6+168) + "^^^^^^",
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			err := yamltest.Bind(t, niceyaml.NewSourceFromString(input), bad)
-
-			p := testPrinterWithGutter(printer.DefaultGutter)
-
-			assert.Equal(t, stringtest.JoinLF(tc.want...), p.PrintError(err, tc.opts...))
-		})
-	}
 }
