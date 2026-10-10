@@ -3385,15 +3385,27 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				got, err := yamltest.FirstDocument(t, tc.input).Decode[validatorConfig](t.Context(), tc.opts...)
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				got, err := doc.Decode[validatorConfig](t.Context(), tc.opts...)
+
+				// A decode into a value the caller holds runs Validate as
+				// a decode that returns the value does.
+				var into validatorConfig
+
+				intoErr := doc.DecodeInto(t.Context(), &into, tc.opts...)
+
 				if tc.err != nil {
 					require.ErrorIs(t, err, tc.err)
+					require.ErrorIs(t, intoErr, tc.err)
 
 					return
 				}
 
 				require.NoError(t, err)
+				require.NoError(t, intoErr)
 				assert.Equal(t, tc.validated, got.validated)
+				assert.Equal(t, tc.validated, into.validated)
 			})
 		}
 	})
@@ -7455,29 +7467,6 @@ func TestDocument_DecodeInto(t *testing.T) {
 		assert.Equal(t, 7, result.Value)
 		assert.True(t, called, "the validator should have been called")
 		assert.True(t, result.validated, "Validate() should have been called")
-	})
-
-	t.Run("WithoutValidator skips Validate", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "name: test")
-
-		var result validatorConfig
-
-		err := dd.DecodeInto(t.Context(), &result, niceyaml.WithSelfValidation(false))
-		require.NoError(t, err)
-		assert.False(t, result.validated, "Validate() should NOT have been called with WithoutValidator")
-	})
-
-	t.Run("returns SelfValidator error", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, `name: ""`)
-
-		var result validatorConfig
-
-		err := dd.DecodeInto(t.Context(), &result)
-		require.ErrorIs(t, err, errNameRequired)
 	})
 }
 
