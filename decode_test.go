@@ -9872,14 +9872,6 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 		return &gradedConfig{ByGrade: map[grade]upstream{gradeHigh: {URL: "ftp://h"}}}
 	}
 
-	document := func(t *testing.T, src *niceyaml.Source) *niceyaml.Node {
-		t.Helper()
-
-		doc := yamltest.Document(t, src)
-
-		return doc
-	}
-
 	// Each option shows that it reached the call. A grade decodes only
 	// under gradeNames, and the walk binds at the key of the document
 	// only under it. The unknown key fails only a strict decode. The
@@ -9896,7 +9888,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
 				t.Helper()
 
-				_, err := document(t, src).Decode[gradedConfig](t.Context(), opts...)
+				_, err := yamltest.Document(t, src).Decode[gradedConfig](t.Context(), opts...)
 
 				return err
 			},
@@ -9907,7 +9899,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
 				t.Helper()
 
-				return document(t, src).DecodeInto(t.Context(), new(gradedConfig), opts...)
+				return yamltest.Document(t, src).DecodeInto(t.Context(), new(gradedConfig), opts...)
 			},
 			err:  unknown,
 			runs: 1,
@@ -9916,7 +9908,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
 				t.Helper()
 
-				got, err := document(t, src).DecodeAt[map[grade]upstream](t.Context(), byGrade, opts...)
+				got, err := yamltest.Document(t, src).DecodeAt[map[grade]upstream](t.Context(), byGrade, opts...)
 				assert.Equal(t, map[grade]upstream{gradeHigh: {URL: "http://h"}}, got)
 
 				return err
@@ -9929,7 +9921,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 
 				var got map[grade]upstream
 
-				present, err := document(t, src).DecodeIfPresent(t.Context(), byGrade, &got, opts...)
+				present, err := yamltest.Document(t, src).DecodeIfPresent(t.Context(), byGrade, &got, opts...)
 				assert.True(t, present)
 				assert.Equal(t, map[grade]upstream{gradeHigh: {URL: "http://h"}}, got)
 
@@ -9941,7 +9933,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
 				t.Helper()
 
-				return document(t, src).SelfValidate(t.Context(), changed(), opts...)
+				return yamltest.Document(t, src).SelfValidate(t.Context(), changed(), opts...)
 			},
 			err: notHTTP,
 		},
@@ -9977,7 +9969,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
 				t.Helper()
 
-				_, err := yamltest.Layers(t, document(t, src)).Decode[gradedConfig](t.Context(), opts...)
+				_, err := yamltest.Layers(t, yamltest.Document(t, src)).Decode[gradedConfig](t.Context(), opts...)
 
 				return err
 			},
@@ -9988,7 +9980,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
 				t.Helper()
 
-				return yamltest.Layers(t, document(t, src)).
+				return yamltest.Layers(t, yamltest.Document(t, src)).
 					DecodeInto(t.Context(), new(gradedConfig), opts...)
 			},
 			err:  unknown,
@@ -9998,7 +9990,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
 				t.Helper()
 
-				return yamltest.Layers(t, document(t, src)).SelfValidate(t.Context(), changed(), opts...)
+				return yamltest.Layers(t, yamltest.Document(t, src)).SelfValidate(t.Context(), changed(), opts...)
 			},
 			err: notHTTP,
 		},
