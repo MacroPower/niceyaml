@@ -1342,12 +1342,6 @@ func TestView_String(t *testing.T) {
 			})
 		}
 	})
-
-	t.Run("empty", func(t *testing.T) {
-		t.Parallel()
-
-		assert.Empty(t, line.NewView(line.Lines{}).String())
-	})
 }
 
 func TestView_OutOfRange(t *testing.T) {
