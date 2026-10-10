@@ -7741,18 +7741,6 @@ func TestDocument_At_Scope(t *testing.T) {
 		}
 	})
 
-	t.Run("scope on a block scalar covers every line of it", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "text: |\n  a\n  b\nnext: 1\n")
-		text := yamltest.At(t, dd, paths.Current().Child("text"))
-
-		assert.Equal(t, position.NewSpan(0, 3), text.Span())
-		require.Len(t, text.Tokens(), 2)
-		assert.Equal(t, "|", text.Tokens()[0].Value)
-		assert.Equal(t, "a\nb\n", text.Tokens()[1].Value)
-	})
-
 	t.Run("scope on an alias", func(t *testing.T) {
 		t.Parallel()
 
@@ -7787,62 +7775,6 @@ func TestDocument_At_Scope(t *testing.T) {
 				got, err := scoped.Decode[map[string]int](t.Context())
 				require.NoError(t, err)
 				assert.Equal(t, map[string]int{"k": 1}, got)
-			})
-		}
-	})
-
-	t.Run("scope ends on the last line of content", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]struct {
-			input  string
-			path   paths.Path
-			span   position.Span
-			tokens []string
-		}{
-			"block scalar with trailing blank lines": {
-				input:  "a: |\n  t\n\n\nb: 1\n",
-				path:   paths.Current().Child("a"),
-				span:   position.NewSpan(0, 2),
-				tokens: []string{"|", "t\n"},
-			},
-			"kept block scalar with trailing blank lines": {
-				input:  "a: |+\n  t\n\n\nb: 1\n",
-				path:   paths.Current().Child("a"),
-				span:   position.NewSpan(0, 2),
-				tokens: []string{"|+", "t\n\n\n"},
-			},
-			"multi-line plain scalar": {
-				input:  "a: one\n  two\n  three\nb: 1\n",
-				path:   paths.Current().Child("a"),
-				span:   position.NewSpan(0, 3),
-				tokens: []string{"one two three"},
-			},
-			"multi-line double-quoted scalar": {
-				input:  "a: \"one\n  two\"\nb: 1\n",
-				path:   paths.Current().Child("a"),
-				span:   position.NewSpan(0, 2),
-				tokens: []string{"one two"},
-			},
-			"CRLF source": {
-				input:  "a:\r\n  x: 1\r\n  y: |\r\n    t\r\nb: 1\r\n",
-				path:   paths.Current().Child("a"),
-				span:   position.NewSpan(1, 4),
-				tokens: []string{"x", ":", "1", "y", ":", "|", "t\n"},
-			},
-			"element that ends in a trailing comment": {
-				input:  "- x: 1\n  y: 2 # c\n- b\n",
-				path:   paths.Current().Index(0),
-				span:   position.NewSpan(0, 2),
-				tokens: []string{"x", ":", "1", "y", ":", "2", " c"},
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				requireNodeExtent(t, yamltest.FirstDocument(t, tc.input), tc.path, tc.span, tc.tokens)
 			})
 		}
 	})
@@ -8591,17 +8523,62 @@ func TestDocument_Validate_NodePaths(t *testing.T) {
 	}
 }
 
-func TestDocument_At_FlowCollectionSpan(t *testing.T) {
+func TestDocument_At_Extent(t *testing.T) {
 	t.Parallel()
 
-	// The token that closes a flow collection belongs to the node, so the
-	// span and the tokens of a scoped Node run through it.
+	// Each case lists the span and the token values of the Node that path
+	// selects.
 	tcs := map[string]struct {
 		input  string
 		path   paths.Path
 		span   position.Span
 		tokens []string
 	}{
+		"block scalar covers every line of it": {
+			input:  "text: |\n  a\n  b\nnext: 1\n",
+			path:   paths.Current().Child("text"),
+			span:   position.NewSpan(0, 3),
+			tokens: []string{"|", "a\nb\n"},
+		},
+		// The extent ends on the last line of content.
+		"block scalar with trailing blank lines": {
+			input:  "a: |\n  t\n\n\nb: 1\n",
+			path:   paths.Current().Child("a"),
+			span:   position.NewSpan(0, 2),
+			tokens: []string{"|", "t\n"},
+		},
+		"kept block scalar with trailing blank lines": {
+			input:  "a: |+\n  t\n\n\nb: 1\n",
+			path:   paths.Current().Child("a"),
+			span:   position.NewSpan(0, 2),
+			tokens: []string{"|+", "t\n\n\n"},
+		},
+		"multi-line plain scalar": {
+			input:  "a: one\n  two\n  three\nb: 1\n",
+			path:   paths.Current().Child("a"),
+			span:   position.NewSpan(0, 3),
+			tokens: []string{"one two three"},
+		},
+		"multi-line double-quoted scalar": {
+			input:  "a: \"one\n  two\"\nb: 1\n",
+			path:   paths.Current().Child("a"),
+			span:   position.NewSpan(0, 2),
+			tokens: []string{"one two"},
+		},
+		"CRLF source": {
+			input:  "a:\r\n  x: 1\r\n  y: |\r\n    t\r\nb: 1\r\n",
+			path:   paths.Current().Child("a"),
+			span:   position.NewSpan(1, 4),
+			tokens: []string{"x", ":", "1", "y", ":", "|", "t\n"},
+		},
+		"element that ends in a trailing comment": {
+			input:  "- x: 1\n  y: 2 # c\n- b\n",
+			path:   paths.Current().Index(0),
+			span:   position.NewSpan(0, 2),
+			tokens: []string{"x", ":", "1", "y", ":", "2", " c"},
+		},
+		// The token that closes a flow collection belongs to the node, so
+		// the extent runs through it.
 		"flow sequence over several lines": {
 			input:  "a: [\n  1,\n  2,\n]\nb: 3\n",
 			path:   paths.Current().Child("a"),
@@ -8620,31 +8597,10 @@ func TestDocument_At_FlowCollectionSpan(t *testing.T) {
 			span:   position.NewSpan(0, 1),
 			tokens: []string{"[", "1", ",", "2", "]"},
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			requireNodeExtent(t, yamltest.FirstDocument(t, tc.input), tc.path, tc.span, tc.tokens)
-		})
-	}
-}
-
-func TestDocument_At_ZeroWidthBoundary(t *testing.T) {
-	t.Parallel()
-
-	// A token that holds no text can share its offset with a token of
-	// another node. The empty content of a block scalar sits where the
-	// next key starts, and an implicit null takes the offset of the ":"
-	// or "-" before it. The span and the tokens of a scoped Node keep
-	// to the tokens of the node.
-	tcs := map[string]struct {
-		input  string
-		path   paths.Path
-		span   position.Span
-		tokens []string
-	}{
+		// A token that holds no text can share its offset with a token of
+		// another node. The empty content of a block scalar sits where the
+		// next key starts, and an implicit null takes the offset of the ":"
+		// or "-" before it. The extent keeps to the tokens of the node.
 		"empty block scalar before a sibling": {
 			input:  "a: |\nb: 1\n",
 			path:   paths.Current().Child("a"),
