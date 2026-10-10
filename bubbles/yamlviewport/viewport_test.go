@@ -54,9 +54,7 @@ func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
 		printer.WithGutter(printer.NoGutter),
 	)
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(p))
-	m.SetWidth(24)
-	m.SetHeight(2)
+	m := testModel(p, 24, 2)
 	m.SetWordWrap(true)
 	m.SetRevision(niceyaml.NewSourceFromString("k: aaaa aaaa aaaa aaaa\nv: aaaa aaaa aaaa aaaa\n"))
 
@@ -136,9 +134,7 @@ func TestViewport_SearchNextRefreshesRowCounts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(tc.width)
-			m.SetHeight(height)
+			m := testModel(p, tc.width, height)
 			m.SetWordWrap(tc.wrap)
 			m.AddRevision(niceyaml.NewSourceFromString(before, niceyaml.WithName("v1")))
 			m.AddRevision(niceyaml.NewSourceFromString(after, niceyaml.WithName("v2")))
@@ -339,9 +335,7 @@ func TestViewport_SearchTermRefreshesRowCounts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(tc.width)
-			m.SetHeight(5)
+			m := testModel(p, tc.width, 5)
 			m.SetWordWrap(tc.wrap)
 			m.AddRevision(niceyaml.NewSourceFromString(before, niceyaml.WithName("v1")))
 			m.AddRevision(niceyaml.NewSourceFromString(after, niceyaml.WithName("v2")))
@@ -425,9 +419,7 @@ func TestViewport_SearchHighlightsMatchAcrossLines(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithSearch()))
-			m.SetWidth(160)
-			m.SetHeight(5)
+			m := testModel(testPrinterWithSearch(), 160, 5)
 			m.AddRevision(niceyaml.NewSourceFromString(before.String(), niceyaml.WithName("v1")))
 			m.AddRevision(niceyaml.NewSourceFromString(after, niceyaml.WithName("v2")))
 			m.SetViewMode(tc.viewMode)
@@ -484,6 +476,15 @@ func testPrinterWithSearch() *printer.Printer {
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 		printer.WithGutter(printer.DiffGutter),
 	)
+}
+
+// testModel returns a model of the given size that prints with p.
+func testModel(p *printer.Printer, width, height int, opts ...yamlviewport.Option) yamlviewport.Model {
+	m := yamlviewport.New(append([]yamlviewport.Option{yamlviewport.WithPrinter(p)}, opts...)...)
+	m.SetWidth(width)
+	m.SetHeight(height)
+
+	return m
 }
 
 func TestViewport_Golden(t *testing.T) {
@@ -1075,9 +1076,7 @@ func TestViewport_Scrolling(t *testing.T) {
 
 			tks := tokens.Tokenize(tc.yaml)
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(tc.width)
-			m.SetHeight(tc.height)
+			m := testModel(testPrinter(), tc.width, tc.height)
 			m.SetRevision(niceyaml.NewSourceFromTokens(tks))
 
 			if tc.setup != nil {
@@ -1108,9 +1107,7 @@ func TestViewport_RowScrolling(t *testing.T) {
 	newModel := func(t *testing.T) *yamlviewport.Model {
 		t.Helper()
 
-		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-		m.SetWidth(30)
-		m.SetHeight(5)
+		m := testModel(testPrinter(), 30, 5)
 		m.SetRevision(niceyaml.NewSourceFromString(wrapYAML))
 
 		return &m
@@ -1291,9 +1288,7 @@ func TestViewport_LayoutChangesKeepTopLine(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(30)
-			m.SetHeight(5)
+			m := testModel(testPrinter(), 30, 5)
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 			require.Equal(t, 250, m.TotalRowCount())
 
@@ -1403,9 +1398,7 @@ func TestViewport_LayoutChangesKeepFrameRow(t *testing.T) {
 				fmt.Fprintf(&src, "k%d: v\n", i)
 			}
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(framed(tc.container)))
-			m.SetWidth(40)
-			m.SetHeight(tc.height)
+			m := testModel(framed(tc.container), 40, tc.height)
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 
 			if tc.bottom {
@@ -1446,9 +1439,7 @@ func TestViewport_ContainerStyleKeepsTopLine(t *testing.T) {
 		fmt.Fprintf(&src, "k%02d: word word word word\n", i)
 	}
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(40)
-	m.SetHeight(13)
+	m := testModel(testPrinter(), 40, 13)
 	m.SetContainerStyle(lipgloss.NewStyle().PaddingTop(3))
 	m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 	m.GotoBottom()
@@ -1587,12 +1578,7 @@ func TestViewport_ResizeClampsOffsetAtOnce(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(
-				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithContainerStyle(tc.style),
-			)
-			m.SetWidth(80)
-			m.SetHeight(tc.height)
+			m := testModel(testPrinter(), 80, tc.height, yamlviewport.WithContainerStyle(tc.style))
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 			m.SetYOffset(20)
 			require.Equal(t, 20, m.YOffset())
@@ -1689,9 +1675,7 @@ func TestViewport_ContainerFrame(t *testing.T) {
 			const lines = 10
 
 			p := testPrinter().With(printer.WithContainerStyle(tc.container))
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(40)
-			m.SetHeight(tc.height)
+			m := testModel(p, 40, tc.height)
 			m.SetViewMode(tc.mode)
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 
@@ -1772,9 +1756,7 @@ func TestViewport_ContainerFrameWidth(t *testing.T) {
 			)
 
 			p := testPrinter().With(printer.WithContainerStyle(tc.container))
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(width)
-			m.SetHeight(height)
+			m := testModel(p, width, height)
 			m.SetRevision(niceyaml.NewSourceFromString(src))
 
 			for offset := range m.TotalRowCount() - height + 1 {
@@ -1826,9 +1808,7 @@ func TestViewport_ContainerBoxKeepsItsColumns(t *testing.T) {
 			)
 
 			p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(width)
-			m.SetHeight(height)
+			m := testModel(p, width, height)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(tc.wrap)
 			m.SetRevision(niceyaml.NewSourceFromString(src))
@@ -1865,9 +1845,7 @@ func TestViewport_SideBySideFillerRowsKeepTheFrame(t *testing.T) {
 	after := niceyaml.NewSourceFromString("a: 1\nb: " + strings.Repeat("y", 60) + "\nc: 3\n")
 
 	p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
-	m := yamlviewport.New(yamlviewport.WithPrinter(p))
-	m.SetWidth(width)
-	m.SetHeight(height)
+	m := testModel(p, width, height)
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
 	m.AddRevision(before)
 	m.AddRevision(after)
@@ -1926,9 +1904,7 @@ func TestViewport_HorizontalScrollKeepsFrame(t *testing.T) {
 			t.Parallel()
 
 			p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(tc.width)
-			m.SetHeight(3)
+			m := testModel(p, tc.width, 3)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(false)
 			m.SetRevision(niceyaml.NewSourceFromString("k: 0123456789abcdefghijklmnopqrstuvwxyz\n"))
@@ -1953,9 +1929,7 @@ func TestViewport_HorizontalScrollKeepsFrameOfNarrowerPane(t *testing.T) {
 	// reach past the content of the narrower pane. Its right border stays
 	// in its column, as the top and bottom borders do.
 	p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
-	m := yamlviewport.New(yamlviewport.WithPrinter(p))
-	m.SetWidth(31)
-	m.SetHeight(3)
+	m := testModel(p, 31, 3)
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
 	m.SetWordWrap(false)
 	m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: s\nc: 3\n"))
@@ -2008,9 +1982,7 @@ func TestViewport_HorizontalScrollKeepsFrameAtWideRune(t *testing.T) {
 			t.Parallel()
 
 			p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(tc.width)
-			m.SetHeight(4)
+			m := testModel(p, tc.width, 4)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(false)
 			m.SetRevision(niceyaml.NewSourceFromString(
@@ -2072,9 +2044,7 @@ func TestViewport_HorizontalScrollKeepsFrameAtKeycap(t *testing.T) {
 			t.Parallel()
 
 			p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(tc.width)
-			m.SetHeight(4)
+			m := testModel(p, tc.width, 4)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(false)
 			m.SetRevision(niceyaml.NewSourceFromString(
@@ -2182,9 +2152,7 @@ func TestViewport_SideBySideWithoutPaneColumns(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(tc.width)
-			m.SetHeight(5)
+			m := testModel(testPrinter(), tc.width, 5)
 			m.AddRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n", niceyaml.WithName("v1")))
 			m.AddRevision(niceyaml.NewSourceFromString("a: 1\nb: 9\nc: 3\n", niceyaml.WithName("v2")))
 			m.SetViewMode(yamlviewport.ViewModeSideBySide)
@@ -2207,9 +2175,7 @@ func TestViewport_DiffOfRevisionsOverPartOfTheSource(t *testing.T) {
 		return yamlviewport.NewRevision("part", source.View().Slice(position.NewSpan(1, 4)))
 	}
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(80)
-	m.SetHeight(10)
+	m := testModel(testPrinter(), 80, 10)
 	m.SetRevision(slice("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"))
 	m.AddRevision(slice("a: 9\nb: 2\nc: 3\nd: 4\ne: 9\n"))
 
@@ -2253,12 +2219,7 @@ func TestViewport_ViewFitsHeight(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(
-				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithContainerStyle(tc.style),
-			)
-			m.SetWidth(20)
-			m.SetHeight(tc.height)
+			m := testModel(testPrinter(), 20, tc.height, yamlviewport.WithContainerStyle(tc.style))
 			m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n"))
 
 			view := m.View()
@@ -2311,12 +2272,7 @@ func TestViewport_FixedSizeContainerStyle(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(
-				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithContainerStyle(tc.style),
-			)
-			m.SetWidth(60)
-			m.SetHeight(40)
+			m := testModel(testPrinter(), 60, 40, yamlviewport.WithContainerStyle(tc.style))
 			m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\n"))
 
 			view := m.View()
@@ -2370,12 +2326,7 @@ func TestViewport_MaxSizeContainerStyle(t *testing.T) {
 				fmt.Fprintf(&src, "k%d: v\n", i)
 			}
 
-			m := yamlviewport.New(
-				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithContainerStyle(tc.style),
-			)
-			m.SetWidth(20)
-			m.SetHeight(12)
+			m := testModel(testPrinter(), 20, 12, yamlviewport.WithContainerStyle(tc.style))
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 
 			view := m.View()
@@ -2455,9 +2406,7 @@ func TestViewport_PrinterContainerSizeIgnored(t *testing.T) {
 			}
 
 			p := testPrinter().With(printer.WithContainerStyle(tc.container))
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(tc.width)
-			m.SetHeight(tc.height)
+			m := testModel(p, tc.width, tc.height)
 			m.SetWordWrap(true)
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 
@@ -2500,9 +2449,7 @@ func TestViewport_ViewFillsContentArea(t *testing.T) {
 
 			const width, height = 40, 6
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithColors()))
-			m.SetWidth(width)
-			m.SetHeight(height)
+			m := testModel(testPrinterWithColors(), width, height)
 			m.SetViewMode(tc.mode)
 
 			if tc.yaml != "" {
@@ -2542,9 +2489,7 @@ func TestViewport_ViewFitsWidth(t *testing.T) {
 			const height = 3
 
 			for width := 1; width <= 12; width++ {
-				m := yamlviewport.New(yamlviewport.WithPrinter(tc.printer))
-				m.SetWidth(width)
-				m.SetHeight(height)
+				m := testModel(tc.printer, width, height)
 				m.SetViewMode(tc.mode)
 				m.AddRevision(niceyaml.NewSourceFromString("name: original\ncount: 10\n"))
 				m.AddRevision(niceyaml.NewSourceFromString("name: modified\ncount: 20\n"))
@@ -2643,9 +2588,7 @@ func TestViewport_Search(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(80)
-			m.SetHeight(24)
+			m := testModel(testPrinter(), 80, 24)
 			m.SetRevision(lines)
 			m.SetSearchTerm(tc.searchTerm)
 
@@ -3002,9 +2945,7 @@ func TestViewport_Revisions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(80)
-			m.SetHeight(24)
+			m := testModel(testPrinter(), 80, 24)
 
 			if tc.setup != nil {
 				tc.setup(&m)
@@ -3206,9 +3147,7 @@ func TestViewport_DiffMode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(80)
-			m.SetHeight(24)
+			m := testModel(testPrinter(), 80, 24)
 
 			if tc.setup != nil {
 				tc.setup(&m)
@@ -3240,9 +3179,7 @@ func TestViewport_SameDiffBaseKeepsPosition(t *testing.T) {
 		return sb.String()
 	}
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(40)
-	m.SetHeight(10)
+	m := testModel(testPrinter(), 40, 10)
 	m.AddRevision(niceyaml.NewSourceFromString(doc(-1), niceyaml.WithName("v1")))
 	m.AddRevision(niceyaml.NewSourceFromString(doc(20), niceyaml.WithName("v2")))
 	m.SetSearchTerm("v")
@@ -3355,9 +3292,7 @@ func TestViewport_ViewModeWithoutDiffKeepsPosition(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(40)
-			m.SetHeight(10)
+			m := testModel(testPrinter(), 40, 10)
 			m.SetViewMode(tc.from)
 			m.AddRevision(niceyaml.NewSourceFromString(doc(-1), niceyaml.WithName("v1")))
 
@@ -3640,9 +3575,7 @@ func TestViewport_SetFile(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(80)
-			m.SetHeight(24)
+			m := testModel(testPrinter(), 80, 24)
 
 			if tc.beforeYAML != "" && tc.afterYAML != "" {
 				beforeLines := niceyaml.NewSourceFromString(tc.beforeYAML, niceyaml.WithName("before"))
@@ -3954,9 +3887,7 @@ func TestViewport_Update(t *testing.T) {
 
 			tks := tokens.Tokenize(tc.yaml)
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(tc.width)
-			m.SetHeight(tc.height)
+			m := testModel(testPrinter(), tc.width, tc.height)
 			m.SetRevision(niceyaml.NewSourceFromTokens(tks))
 
 			if tc.setup != nil {
@@ -4038,9 +3969,7 @@ func TestViewport_KeyMap(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(80)
-			m.SetHeight(2)
+			m := testModel(testPrinter(), 80, 2)
 			m.SetRevision(lines)
 
 			if tc.setup != nil {
@@ -4162,9 +4091,7 @@ func TestViewport_RevisionDeduplication(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(80)
-			m.SetHeight(24)
+			m := testModel(testPrinter(), 80, 24)
 
 			if tc.setup != nil {
 				tc.setup(&m)
@@ -4351,9 +4278,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(tc.width)
-			m.SetHeight(tc.height)
+			m := testModel(testPrinter(), tc.width, tc.height)
 
 			if tc.setupFunc != nil {
 				tc.setupFunc(&m)
@@ -4702,9 +4627,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(tc.width)
-			m.SetHeight(tc.height)
+			m := testModel(testPrinter(), tc.width, tc.height)
 
 			if tc.setupFunc != nil {
 				tc.setupFunc(&m)
@@ -5245,12 +5168,7 @@ func TestViewport_LayoutChangesKeepSearchIndex(t *testing.T) {
 	t.Parallel()
 
 	searcher := &countingSearcher{finder: finder.New()}
-	m := yamlviewport.New(
-		yamlviewport.WithPrinter(testPrinter()),
-		yamlviewport.WithSearcher(searcher),
-	)
-	m.SetWidth(80)
-	m.SetHeight(10)
+	m := testModel(testPrinter(), 80, 10, yamlviewport.WithSearcher(searcher))
 	m.AddRevision(niceyaml.NewSourceFromString("key: alpha\n", niceyaml.WithName("v1")))
 	m.AddRevision(niceyaml.NewSourceFromString("key: alpha\nother: alpha\n", niceyaml.WithName("v2")))
 
@@ -5339,12 +5257,7 @@ func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
 				fmt.Fprintf(&src, "line%d: v\n", i)
 			}
 
-			m := yamlviewport.New(
-				yamlviewport.WithPrinter(p),
-				yamlviewport.WithContainerStyle(frame),
-			)
-			m.SetWidth(40)
-			m.SetHeight(10)
+			m := testModel(p, 40, 10, yamlviewport.WithContainerStyle(frame))
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 			m.SetYOffset(20)
 			m.TotalRowCount()
@@ -5366,12 +5279,7 @@ func TestViewport_SideBySideLoadsSearcherOncePerContent(t *testing.T) {
 	// Side-by-side search indexes both panes, and like the unified view it
 	// loads them once per change of content rather than on every keystroke.
 	searcher := &countingSearcher{finder: finder.New()}
-	m := yamlviewport.New(
-		yamlviewport.WithPrinter(testPrinter()),
-		yamlviewport.WithSearcher(searcher),
-	)
-	m.SetWidth(80)
-	m.SetHeight(10)
+	m := testModel(testPrinter(), 80, 10, yamlviewport.WithSearcher(searcher))
 	m.AddRevision(niceyaml.NewSourceFromString("key: alpha\n", niceyaml.WithName("v1")))
 	m.AddRevision(niceyaml.NewSourceFromString("key: alpha\nother: alpha\n", niceyaml.WithName("v2")))
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
@@ -5471,9 +5379,7 @@ func TestViewport_ViewModeReusesDiff(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(80)
-			m.SetHeight(10)
+			m := testModel(testPrinter(), 80, 10)
 
 			revs := make([]*countingRevision, len(docs))
 			for i, doc := range docs {
@@ -5500,9 +5406,7 @@ func TestViewport_ViewModeReusesDiff(t *testing.T) {
 				}
 			}
 
-			want := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			want.SetWidth(80)
-			want.SetHeight(10)
+			want := testModel(testPrinter(), 80, 10)
 
 			for _, i := range tc.history {
 				want.AddRevision(niceyaml.NewSourceFromString(docs[i], niceyaml.WithName(fmt.Sprintf("v%d", i+1))))
@@ -5522,9 +5426,7 @@ func TestViewport_ViewModeReusesDiff(t *testing.T) {
 func TestViewport_AddRevisionsDiffsOnce(t *testing.T) {
 	t.Parallel()
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(80)
-	m.SetHeight(10)
+	m := testModel(testPrinter(), 80, 10)
 
 	revs := make([]*countingRevision, 5)
 	batch := make([]yamlviewport.Revision, len(revs))
@@ -5548,9 +5450,7 @@ func TestViewport_AddRevisionsDiffsOnce(t *testing.T) {
 	assert.Positive(t, revs[3].views)
 	assert.Positive(t, revs[4].views)
 
-	want := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	want.SetWidth(80)
-	want.SetHeight(10)
+	want := testModel(testPrinter(), 80, 10)
 
 	for i := range revs {
 		doc := fmt.Sprintf("a: %d\nb: 2\n", i)
@@ -5569,13 +5469,7 @@ func TestViewport_WithSearcher(t *testing.T) {
 		t.Parallel()
 
 		searcher := &countingSearcher{finder: finder.New()}
-		m := yamlviewport.New(
-			yamlviewport.WithPrinter(testPrinter()),
-			yamlviewport.WithSearcher(searcher),
-		)
-
-		m.SetWidth(80)
-		m.SetHeight(10)
+		m := testModel(testPrinter(), 80, 10, yamlviewport.WithSearcher(searcher))
 
 		tks := tokens.Tokenize("key: value\n")
 		m.SetRevision(niceyaml.NewSourceFromTokens(tks))
@@ -5590,13 +5484,7 @@ func TestViewport_WithSearcher(t *testing.T) {
 	t.Run("WithFinder searches through the finder", func(t *testing.T) {
 		t.Parallel()
 
-		m := yamlviewport.New(
-			yamlviewport.WithPrinter(testPrinter()),
-			yamlviewport.WithFinder(finder.New(finder.WithNormalizer(nil))),
-		)
-
-		m.SetWidth(80)
-		m.SetHeight(10)
+		m := testModel(testPrinter(), 80, 10, yamlviewport.WithFinder(finder.New(finder.WithNormalizer(nil))))
 		m.SetRevision(niceyaml.NewSourceFromString("key: Value\n"))
 
 		// The finder has no normalizer, so the search is case-sensitive,
@@ -5625,10 +5513,7 @@ func TestViewport_WithSearcher(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()), opt)
-
-				m.SetWidth(80)
-				m.SetHeight(10)
+				m := testModel(testPrinter(), 80, 10, opt)
 				m.SetRevision(niceyaml.NewSourceFromString("key: Value\n"))
 
 				// The default finder folds case.
@@ -5691,12 +5576,7 @@ func TestViewport_SearchOrdersIndexMatches(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(
-				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithSearcher(reverseSearcher{finder: finder.New()}),
-			)
-			m.SetWidth(80)
-			m.SetHeight(5)
+			m := testModel(testPrinter(), 80, 5, yamlviewport.WithSearcher(reverseSearcher{finder: finder.New()}))
 			m.AddRevision(niceyaml.NewSourceFromString(before.String(), niceyaml.WithName("v1")))
 			m.AddRevision(niceyaml.NewSourceFromString(after.String(), niceyaml.WithName("v2")))
 			m.SetViewMode(mode)
@@ -5769,12 +5649,7 @@ func TestViewport_SearchLaysOutOnlyHighlightedLines(t *testing.T) {
 			printer.WithGutter(printer.NoGutter),
 		)
 
-		m := yamlviewport.New(
-			yamlviewport.WithPrinter(p),
-			yamlviewport.WithSearcher(fixedSearcher{matches: matches}),
-		)
-		m.SetWidth(40)
-		m.SetHeight(10)
+		m := testModel(p, 40, 10, yamlviewport.WithSearcher(fixedSearcher{matches: matches}))
 		m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\n"))
 		m.TotalRowCount()
 
@@ -5873,12 +5748,7 @@ func TestViewport_NilIndexFindsNothing(t *testing.T) {
 			t.Parallel()
 
 			searcher := &nilSearcher{index: tc.index}
-			m := yamlviewport.New(
-				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithSearcher(searcher),
-			)
-			m.SetWidth(80)
-			m.SetHeight(10)
+			m := testModel(testPrinter(), 80, 10, yamlviewport.WithSearcher(searcher))
 			m.AddRevision(niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("v1")))
 			m.AddRevision(niceyaml.NewSourceFromString("a: 2\n", niceyaml.WithName("v2")))
 			m.SetViewMode(tc.viewMode)
@@ -5908,9 +5778,7 @@ func TestViewport_SideBySideSelectedMatchOnInsertedLine(t *testing.T) {
 
 	const highlight = "<genericHighlight>"
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithSearch()))
-	m.SetWidth(100)
-	m.SetHeight(8)
+	m := testModel(testPrinterWithSearch(), 100, 8)
 	m.AddRevision(before)
 	m.AddRevision(after)
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
@@ -5961,9 +5829,7 @@ func TestViewport_SideBySideMatchStartingOnPadding(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithSearch()))
-			m.SetWidth(100)
-			m.SetHeight(8)
+			m := testModel(testPrinterWithSearch(), 100, 8)
 			m.AddRevision(niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("v1")))
 			m.AddRevision(niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("v2")))
 			m.SetViewMode(yamlviewport.ViewModeSideBySide)
@@ -6036,12 +5902,7 @@ func TestViewport_OffsetWithNoContentHeight(t *testing.T) {
 				fmt.Fprintf(&src, "line%d: v\n", i)
 			}
 
-			m := yamlviewport.New(
-				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithContainerStyle(tc.container),
-			)
-			m.SetWidth(40)
-			m.SetHeight(tc.height)
+			m := testModel(testPrinter(), 40, tc.height, yamlviewport.WithContainerStyle(tc.container))
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 
 			require.Equal(t, tc.lines, m.TotalRowCount())
@@ -6063,9 +5924,7 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 	t.Run("scroll down with n=0 does nothing", func(t *testing.T) {
 		t.Parallel()
 
-		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-		m.SetWidth(80)
-		m.SetHeight(2)
+		m := testModel(testPrinter(), 80, 2)
 
 		// Need more lines than viewport height to enable scrolling.
 		tks := tokens.Tokenize("line1: value1\nline2: value2\nline3: value3\nline4: value4\nline5: value5\n")
@@ -6080,9 +5939,7 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 	t.Run("scroll down with empty lines does nothing", func(t *testing.T) {
 		t.Parallel()
 
-		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-		m.SetWidth(80)
-		m.SetHeight(10)
+		m := testModel(testPrinter(), 80, 10)
 		// No tokens set, so the lines are empty.
 
 		m.ScrollDown(1)
@@ -6092,9 +5949,7 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 	t.Run("scroll up with n=0 does nothing", func(t *testing.T) {
 		t.Parallel()
 
-		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-		m.SetWidth(80)
-		m.SetHeight(2)
+		m := testModel(testPrinter(), 80, 2)
 
 		// Need more lines than viewport height to enable scrolling.
 		tks := tokens.Tokenize("line1: value1\nline2: value2\nline3: value3\nline4: value4\nline5: value5\n")
@@ -6108,9 +5963,7 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 	t.Run("scroll up with empty lines does nothing", func(t *testing.T) {
 		t.Parallel()
 
-		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-		m.SetWidth(80)
-		m.SetHeight(10)
+		m := testModel(testPrinter(), 80, 10)
 		// No tokens set, so the lines are empty.
 
 		m.ScrollUp(1)
@@ -6120,9 +5973,7 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 	t.Run("half page at one row of content scrolls one row", func(t *testing.T) {
 		t.Parallel()
 
-		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-		m.SetWidth(80)
-		m.SetHeight(1)
+		m := testModel(testPrinter(), 80, 1)
 		m.SetRevision(niceyaml.NewSourceFromString(
 			"line1: v\nline2: v\nline3: v\nline4: v\nline5: v\n",
 		))
@@ -6206,9 +6057,7 @@ func TestViewport_ScrollByExtremeSteps(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(40)
-			m.SetHeight(5)
+			m := testModel(testPrinter(), 40, 5)
 			m.SetWordWrap(false)
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 			m.SetYOffset(10)
@@ -6246,9 +6095,7 @@ func TestViewport_RevisionStateEdgeCases(t *testing.T) {
 	t.Run("AtFirstRevision with multiple revisions", func(t *testing.T) {
 		t.Parallel()
 
-		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-		m.SetWidth(80)
-		m.SetHeight(10)
+		m := testModel(testPrinter(), 80, 10)
 
 		tokens1 := tokens.Tokenize("v1: value1\n")
 		tokens2 := tokens.Tokenize("v2: value2\n")
@@ -6269,9 +6116,7 @@ func TestViewport_RevisionStateEdgeCases(t *testing.T) {
 	t.Run("AtFirstRevision with no revisions", func(t *testing.T) {
 		t.Parallel()
 
-		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-		m.SetWidth(80)
-		m.SetHeight(10)
+		m := testModel(testPrinter(), 80, 10)
 
 		// With no revisions, both checks return true.
 		assert.True(t, m.AtFirstRevision())
@@ -6282,9 +6127,7 @@ func TestViewport_RevisionStateEdgeCases(t *testing.T) {
 func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
 	t.Parallel()
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(20)
-	m.SetHeight(10)
+	m := testModel(testPrinter(), 20, 10)
 
 	tks := tokens.Tokenize("key: very long value that exceeds width\n")
 	m.SetRevision(niceyaml.NewSourceFromTokens(tks))
@@ -6306,9 +6149,7 @@ func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
 func TestViewport_WordWrapDisablesHorizontalScroll(t *testing.T) {
 	t.Parallel()
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(20)
-	m.SetHeight(10)
+	m := testModel(testPrinter(), 20, 10)
 	m.SetRevision(niceyaml.NewSourceFromString("key: very long value that exceeds the viewport width\n"))
 	require.True(t, m.WordWrap())
 
@@ -6373,9 +6214,7 @@ func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
 			p := testPrinterWithLineNumbers().With(
 				printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
 			)
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(width)
-			m.SetHeight(10)
+			m := testModel(p, width, 10)
 			m.SetViewMode(tc.mode)
 			m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
 			require.True(t, m.WordWrap())
@@ -6507,9 +6346,7 @@ func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(tc.printer))
-			m.SetWidth(tc.width)
-			m.SetHeight(5)
+			m := testModel(tc.printer, tc.width, 5)
 			m.SetWordWrap(false)
 			tc.setup(&m)
 
@@ -6536,9 +6373,7 @@ func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
 func TestViewport_SetSearchTermEmpty(t *testing.T) {
 	t.Parallel()
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(80)
-	m.SetHeight(10)
+	m := testModel(testPrinter(), 80, 10)
 
 	tks := tokens.Tokenize("key: value\n")
 	m.SetRevision(niceyaml.NewSourceFromTokens(tks))
@@ -6572,9 +6407,7 @@ func TestViewport_SideBySidePanesShareGutterWidth(t *testing.T) {
 		fmt.Fprintf(&before, "k%d: v\n", i)
 	}
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithLineNumbers()))
-	m.SetWidth(60)
-	m.SetHeight(5)
+	m := testModel(testPrinterWithLineNumbers(), 60, 5)
 	m.SetWordWrap(false)
 	m.AddRevision(niceyaml.NewSourceFromString(before.String(), niceyaml.WithName("v1")))
 	m.AddRevision(niceyaml.NewSourceFromString(first+"last: v\n", niceyaml.WithName("v2")))
@@ -6616,9 +6449,7 @@ func TestViewport_SideBySideWithoutDiffPrintsOnce(t *testing.T) {
 	// the window once and shows its rows in both panes.
 	gutter := &countingGutter{renders: map[int]int{}}
 	p := testPrinter().With(printer.WithGutter(gutter))
-	m := yamlviewport.New(yamlviewport.WithPrinter(p))
-	m.SetWidth(40)
-	m.SetHeight(10)
+	m := testModel(p, 40, 10)
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
 	m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n"))
 	m.TotalRowCount()
@@ -6673,9 +6504,7 @@ func TestSideBySideSearch_MatchCounting(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(80)
-			m.SetHeight(24)
+			m := testModel(testPrinter(), 80, 24)
 
 			m.AddRevision(niceyaml.NewSourceFromString(beforeYAML, niceyaml.WithName("v1")))
 			m.AddRevision(niceyaml.NewSourceFromString(afterYAML, niceyaml.WithName("v2")))
@@ -6691,9 +6520,7 @@ func TestSideBySideSearch_MatchCounting(t *testing.T) {
 func TestViewport_DoesNotMutateSource(t *testing.T) {
 	t.Parallel()
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(80)
-	m.SetHeight(10)
+	m := testModel(testPrinter(), 80, 10)
 
 	source := niceyaml.NewSourceFromString("key: value\n")
 
@@ -6725,9 +6552,7 @@ func TestViewport_RevisionOverPartOfTheSource(t *testing.T) {
 		printer.WithGutter(printer.LineNumberGutter),
 	)
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(p))
-	m.SetWidth(80)
-	m.SetHeight(2)
+	m := testModel(p, 80, 2)
 
 	source := niceyaml.NewSourceFromString(stringtest.Input(`
 		a: item
@@ -6786,9 +6611,7 @@ func TestViewport_RevisionKeepsDecoration(t *testing.T) {
 		printer.WithGutter(printer.NoGutter),
 	)
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(p))
-	m.SetWidth(80)
-	m.SetHeight(10)
+	m := testModel(p, 80, 10)
 
 	source := niceyaml.NewSourceFromString("key: value\nother: thing\n", niceyaml.WithName("marked"))
 	view := source.View()
@@ -6867,9 +6690,7 @@ func TestViewport_RevisionIgnoresLaterMarks(t *testing.T) {
 				printer.WithGutter(printer.NoGutter),
 			)
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(80)
-			m.SetHeight(10)
+			m := testModel(p, 80, 10)
 
 			source := niceyaml.NewSourceFromString("key: value\nother: value\n", niceyaml.WithName(name))
 			view := source.View()
@@ -6917,9 +6738,7 @@ func TestViewport_RevisionNavigationResetsSearch(t *testing.T) {
 		fmt.Fprintf(&v2, "key%d: %s\n", i, value)
 	}
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(80)
-	m.SetHeight(5)
+	m := testModel(testPrinter(), 80, 5)
 	m.AddRevision(niceyaml.NewSourceFromString(v1.String(), niceyaml.WithName("v1")))
 	m.AddRevision(niceyaml.NewSourceFromString(v2.String(), niceyaml.WithName("v2")))
 
@@ -6995,9 +6814,7 @@ func TestViewport_ContentChangesResetSearch(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(80)
-			m.SetHeight(5)
+			m := testModel(testPrinter(), 80, 5)
 			m.AddRevision(niceyaml.NewSourceFromString(doc(false), niceyaml.WithName("v1")))
 			m.AddRevision(niceyaml.NewSourceFromString(doc(true), niceyaml.WithName("v2")))
 
@@ -7097,9 +6914,7 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 				p = testPrinter()
 			}
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(20)
-			m.SetHeight(4)
+			m := testModel(p, 20, 4)
 			tc.setup(&m)
 
 			m.SetSearchTerm("needle")
@@ -7176,9 +6991,7 @@ func TestViewport_ContentChangesScrollToTop(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(80)
-			m.SetHeight(4)
+			m := testModel(testPrinter(), 80, 4)
 			m.AddRevision(niceyaml.NewSourceFromString(doc(false), niceyaml.WithName("v1")))
 			m.SetYOffset(50)
 			require.Equal(t, 50, m.YOffset())
@@ -7198,9 +7011,7 @@ func TestViewport_ContentChangesScrollToTop(t *testing.T) {
 func TestViewport_SearchAcrossRevisions(t *testing.T) {
 	t.Parallel()
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(80)
-	m.SetHeight(10)
+	m := testModel(testPrinter(), 80, 10)
 
 	m.AddRevision(niceyaml.NewSourceFromString("key: alpha\n", niceyaml.WithName("v1")))
 	m.SetSearchTerm("alpha")
@@ -7224,9 +7035,7 @@ func TestViewport_NewSearchTermStartsAtFirstMatch(t *testing.T) {
 		fmt.Fprintf(&sb, "k%d: needle\n", i)
 	}
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(80)
-	m.SetHeight(5)
+	m := testModel(testPrinter(), 80, 5)
 	m.SetRevision(niceyaml.NewSourceFromString(sb.String()))
 
 	m.SetSearchTerm("needle")
@@ -7309,9 +7118,7 @@ func TestViewport_UnchangedSearchKeepsLayout(t *testing.T) {
 				printer.WithGutter(printer.NoGutter),
 			)
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(40)
-			m.SetHeight(10)
+			m := testModel(p, 40, 10)
 			m.SetRevision(niceyaml.NewSourceFromString(sb.String()))
 
 			tc.setup(&m)
@@ -7352,9 +7159,7 @@ func TestViewport_SideBySideSearchOrder(t *testing.T) {
 		return sb.String()
 	}
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithSearch()))
-	m.SetWidth(160)
-	m.SetHeight(3)
+	m := testModel(testPrinterWithSearch(), 160, 3)
 	m.AddRevision(niceyaml.NewSourceFromString(doc("a"), niceyaml.WithName("v1")))
 	m.AddRevision(niceyaml.NewSourceFromString(doc("b"), niceyaml.WithName("v2")))
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
@@ -7397,9 +7202,7 @@ func TestViewport_ClearSearchSideBySide(t *testing.T) {
 	// The XML tags of the test styles take up columns, so the viewport is
 	// wide enough that highlighted lines still fit on one row.
 	newModel := func() yamlviewport.Model {
-		m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithSearch()))
-		m.SetWidth(120)
-		m.SetHeight(5)
+		m := testModel(testPrinterWithSearch(), 120, 5)
 		m.AddRevision(niceyaml.NewSourceFromString("foo: a\nbar: b\n", niceyaml.WithName("v1")))
 		m.AddRevision(niceyaml.NewSourceFromString("foo: c\nbar: b\n", niceyaml.WithName("v2")))
 		m.SetViewMode(yamlviewport.ViewModeSideBySide)
@@ -7491,9 +7294,7 @@ func TestViewport_SearchScrollsToHorizontalMatch(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			m.SetWidth(tc.width)
-			m.SetHeight(5)
+			m := testModel(testPrinter(), tc.width, 5)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(tc.wrap)
 
@@ -7546,9 +7347,7 @@ func TestViewport_SearchScrollsToTransformedMatch(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
-			m.SetWidth(40)
-			m.SetHeight(3)
+			m := testModel(p, 40, 3)
 			m.SetWordWrap(false)
 			m.SetRevision(niceyaml.NewSourceFromString("k: " + strings.Repeat("ab ", 30) + "\n"))
 
@@ -7570,9 +7369,7 @@ func TestViewport_ContentChangeResetsHorizontalScroll(t *testing.T) {
 	// A search match scrolls the view to the right, and content that holds
 	// no match starts from the first column again rather than keeping an
 	// offset that described other lines.
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(30)
-	m.SetHeight(5)
+	m := testModel(testPrinter(), 30, 5)
 	m.SetWordWrap(false)
 	m.SetRevision(niceyaml.NewSourceFromString("k: " + strings.Repeat("-", 60) + "NEEDLE\n"))
 
@@ -7592,9 +7389,7 @@ func TestViewport_ClipsRowsWiderThanContent(t *testing.T) {
 	// rather than wrapping it onto a second screen row, which the scroll
 	// math does not count. The view keeps one screen row per printed row,
 	// so the last rows stay reachable.
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithLineNumbers()))
-	m.SetWidth(6)
-	m.SetHeight(4)
+	m := testModel(testPrinterWithLineNumbers(), 6, 4)
 	m.AddRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"))
 
 	// Every screen row opens with the gutter, which a wrapped row would
@@ -7634,9 +7429,7 @@ func TestViewport_UnchangedModeKeepsPosition(t *testing.T) {
 		fmt.Fprintf(&sb, "k%d: v\n", i)
 	}
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(40)
-	m.SetHeight(10)
+	m := testModel(testPrinter(), 40, 10)
 	m.AddRevision(niceyaml.NewSourceFromString(sb.String()))
 	m.SetSearchTerm("v")
 	m.SearchNext()
@@ -7930,9 +7723,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 				p = testPrinter()
 			}
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(p), yamlviewport.WithContainerStyle(tc.style))
-			m.SetWidth(tc.width)
-			m.SetHeight(tc.height)
+			m := testModel(p, tc.width, tc.height, yamlviewport.WithContainerStyle(tc.style))
 
 			sources := make([]*niceyaml.Source, 0, len(tc.revisions))
 			for _, text := range tc.revisions {
@@ -8452,9 +8243,7 @@ func TestViewport_HitAt(t *testing.T) {
 				p = testPrinter()
 			}
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(p), yamlviewport.WithContainerStyle(tc.style))
-			m.SetWidth(tc.width)
-			m.SetHeight(tc.height)
+			m := testModel(p, tc.width, tc.height, yamlviewport.WithContainerStyle(tc.style))
 			m.AddRevisions(tc.revisions...)
 
 			if tc.setup != nil {
@@ -8486,9 +8275,7 @@ func TestViewport_HitAt_PathAt(t *testing.T) {
 	before := niceyaml.NewSourceFromString("spec:\n  replicas: 3\n  paused: false\n")
 	after := niceyaml.NewSourceFromString("spec:\n  replicas: 5\n  image: app\n  paused: false\n")
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	m.SetWidth(24)
-	m.SetHeight(6)
+	m := testModel(testPrinter(), 24, 6)
 	m.AddRevisions(before, after)
 
 	sources := []*niceyaml.Source{before, after}
