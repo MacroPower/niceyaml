@@ -35,6 +35,17 @@ func walk(tb testing.TB, idx *datapath.Index, root ast.Node, steps ...any) datap
 	return target
 }
 
+// find walks the first document of input from its root, as [walk] does,
+// and returns the target with the index that found it.
+func find(tb testing.TB, input string, steps ...any) (*datapath.Index, datapath.Target) {
+	tb.Helper()
+
+	doc := yamltest.FirstDocument(tb, input)
+	idx := datapath.NewIndex(doc.Resolver())
+
+	return idx, walk(tb, idx, doc.AST(), steps...)
+}
+
 // at returns the line and column of tk, counted from 1, or the empty
 // string for no token.
 func at(tk *token.Token) string {
@@ -171,8 +182,7 @@ func TestIndex_Member(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
-			got := walk(t, datapath.NewIndex(doc.Resolver()), doc.AST(), tc.steps...)
+			_, got := find(t, tc.input, tc.steps...)
 
 			assert.Equal(t, tc.want, got.Path.String())
 			assert.Equal(t, tc.unspelled, got.Unspelled)
@@ -236,8 +246,7 @@ func TestIndex_Element(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
-			got := walk(t, datapath.NewIndex(doc.Resolver()), doc.AST(), tc.steps...)
+			_, got := find(t, tc.input, tc.steps...)
 
 			assert.Equal(t, tc.want, got.Path.String())
 			assert.False(t, got.Unspelled)
@@ -320,8 +329,7 @@ func TestTarget_Start(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
-			got := walk(t, datapath.NewIndex(doc.Resolver()), doc.AST(), tc.steps...)
+			_, got := find(t, tc.input, tc.steps...)
 
 			assert.Equal(t, tc.want, at(got.Start(false)))
 			assert.Equal(t, tc.wantKey, at(got.Start(true)))
@@ -358,8 +366,7 @@ func TestTarget_Token(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
-			got := walk(t, datapath.NewIndex(doc.Resolver()), doc.AST(), tc.steps...)
+			_, got := find(t, tc.input, tc.steps...)
 
 			assert.Equal(t, tc.want, at(got.Token(false)))
 			assert.Equal(t, tc.wantKey, at(got.Token(true)))
@@ -401,10 +408,8 @@ func TestIndex_Deref(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
-			idx := datapath.NewIndex(doc.Resolver())
-
-			got := idx.Deref(walk(t, idx, doc.AST(), tc.steps...).Node)
+			idx, target := find(t, tc.input, tc.steps...)
+			got := idx.Deref(target.Node)
 
 			require.NotNil(t, got)
 			assert.Equal(t, tc.want, got.String())
@@ -420,10 +425,9 @@ func TestIndex_Deref(t *testing.T) {
 	t.Run("alias with no anchor", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "a: *missing\n")
-		idx := datapath.NewIndex(doc.Resolver())
+		idx, target := find(t, "a: *missing\n", "a")
 
-		assert.Nil(t, idx.Deref(walk(t, idx, doc.AST(), "a").Node))
+		assert.Nil(t, idx.Deref(target.Node))
 	})
 }
 
@@ -464,9 +468,9 @@ func TestIndex_MemberNode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
+			idx, root := find(t, tc.input)
 
-			got := datapath.NewIndex(doc.Resolver()).MemberNode(doc.AST(), tc.name)
+			got := idx.MemberNode(root.Node, tc.name)
 			if tc.want == "" {
 				assert.Nil(t, got)
 
@@ -592,12 +596,9 @@ func TestIndex_SelectsEntry(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
-			idx := datapath.NewIndex(doc.Resolver())
+			idx, target := find(t, tc.input, tc.steps...)
 
-			got := idx.SelectsEntry(walk(t, idx, doc.AST(), tc.steps...).Node, tc.name)
-
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, idx.SelectsEntry(target.Node, tc.name))
 		})
 	}
 }
@@ -698,12 +699,9 @@ func TestIndex_Lacks(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
-			idx := datapath.NewIndex(doc.Resolver())
+			idx, target := find(t, tc.input, tc.steps...)
 
-			got := idx.Lacks(walk(t, idx, doc.AST(), tc.steps...).Node, tc.name)
-
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, idx.Lacks(target.Node, tc.name))
 		})
 	}
 }
@@ -777,12 +775,9 @@ func TestIndex_SelectsOther(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
-			idx := datapath.NewIndex(doc.Resolver())
+			idx, target := find(t, tc.input, tc.steps...)
 
-			got := idx.SelectsOther(walk(t, idx, doc.AST(), tc.steps...).Node, tc.name)
-
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, idx.SelectsOther(target.Node, tc.name))
 		})
 	}
 }
