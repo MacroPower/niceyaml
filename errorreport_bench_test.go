@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -30,11 +28,9 @@ func BenchmarkNewErrorReport(b *testing.B) {
 			children = append(children, sources[i%k].Bind(child))
 		}
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(b, sources[0].Bind(niceyaml.NewError("root",
+		bound := yamltest.RequireSourceError(b, sources[0].Bind(niceyaml.NewError("root",
 			niceyaml.AtPath(paths.Current().Child("key_0")),
-			niceyaml.WithDetails(children...))), &bound)
+			niceyaml.WithDetails(children...))))
 
 		b.Run(fmt.Sprintf("sources_%d", k), func(b *testing.B) {
 			b.ReportAllocs()

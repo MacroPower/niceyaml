@@ -1014,8 +1014,7 @@ func TestErrorTree_New(t *testing.T) {
 			// at the top.
 			bound, ok := tc.err.(*niceyaml.SourceError) //nolint:errorlint // The value itself formats.
 			if ok && !tc.multiLine {
-				msg, _, _ := strings.Cut(fmt.Sprintf("%+v", bound), "\n\n")
-				assert.Len(t, strings.Split(msg, "\n"), countNodes(got))
+				assert.Len(t, strings.Split(report(bound), "\n"), countNodes(got))
 			}
 		})
 	}
@@ -1090,9 +1089,7 @@ func TestErrorTree_Bound(t *testing.T) {
 	bind := func(t *testing.T, err error) *niceyaml.SourceError {
 		t.Helper()
 
-		bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, err))
-
-		return bound
+		return yamltest.RequireSourceError(t, yamltest.Bind(t, source, err))
 	}
 
 	// Node is one node of a tree, as [niceyaml.ErrorTree.All] yields it.

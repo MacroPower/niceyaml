@@ -420,11 +420,9 @@ func TestNewErrorReport_SeveralSources(t *testing.T) {
 	t.Run("a tree in one source yields one excerpt", func(t *testing.T) {
 		t.Parallel()
 
-		var one *niceyaml.SourceError
-
-		require.ErrorAs(t, yamltest.Bind(t, values, niceyaml.NewError("bad", niceyaml.WithDetails(
+		one := yamltest.RequireSourceError(t, yamltest.Bind(t, values, niceyaml.NewError("bad", niceyaml.WithDetails(
 			niceyaml.NewError("not a number", niceyaml.AtPath(paths.Current().Child("port"))),
-		))), &one)
+		))))
 
 		assert.Len(t, niceyaml.NewErrorReport(one, niceyaml.WithContextLines(0)).Excerpts, 1)
 	})
@@ -432,17 +430,8 @@ func TestNewErrorReport_SeveralSources(t *testing.T) {
 	t.Run("nothing resolved yields nothing", func(t *testing.T) {
 		t.Parallel()
 
-		var none *niceyaml.SourceError
-
-		require.ErrorAs(
-			t,
-			yamltest.Bind(
-				t,
-				values,
-				niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("missing").Index(0))),
-			),
-			&none,
-		)
+		none := yamltest.RequireSourceError(t, yamltest.Bind(t, values,
+			niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("missing").Index(0)))))
 
 		assert.Empty(t, niceyaml.NewErrorReport(none, niceyaml.WithContextLines(0)).Excerpts)
 
