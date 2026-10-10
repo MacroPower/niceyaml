@@ -44,6 +44,29 @@ func quietValidateCmd(out io.Writer, args ...string) *cobra.Command {
 	return cmd
 }
 
+// linkedDir returns a temporary directory that holds the directory
+// sub/deep and a symlink named link that leads to it. It skips the test
+// where the OS makes no symlink, and on Windows, which reads a ".." after
+// a symlink differently.
+func linkedDir(t *testing.T, link string) string {
+	t.Helper()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	dir := t.TempDir()
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub", "deep"), 0o755))
+
+	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, link))
+	if err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	return dir
+}
+
 func TestValidateFile(t *testing.T) {
 	t.Parallel()
 
@@ -213,23 +236,13 @@ func TestValidateFileRoutesOnAbsolutePath(t *testing.T) {
 func TestValidateFileDotDotAfterSymlink(t *testing.T) {
 	t.Parallel()
 
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows drops a .. element as text before it follows a symlink")
-	}
-
 	// With ldir linking to sub/deep, the OS reads ldir/../x.yaml as
 	// sub/x.yaml, so the directive's ./s.json names sub/s.json.
-	dir := t.TempDir()
+	dir := linkedDir(t, "ldir")
 	sub := filepath.Join(dir, "sub")
 
-	require.NoError(t, os.MkdirAll(filepath.Join(sub, "deep"), 0o755))
 	writeFile(t, sub, "s.json", string(nameSchema))
 	writeFile(t, sub, "x.yaml", "# yaml-language-server: $schema=./s.json\nname: a\n")
-
-	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, "ldir"))
-	if err != nil {
-		t.Skipf("symlinks unsupported: %v", err)
-	}
 
 	// Joining the name with filepath.Join would clean it to x.yaml.
 	path := dir + "/ldir/../x.yaml"
@@ -283,26 +296,15 @@ func TestBuildRegistryRefs(t *testing.T) {
 func TestBuildRegistrySchemaDotDotAfterSymlink(t *testing.T) {
 	t.Parallel()
 
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows drops a .. element as text before it follows a symlink")
-	}
-
 	// With ldir linking to sub/deep, the OS reads ldir/../schema.json as
 	// sub/schema.json, which accepts a string. The schema.json beside
 	// ldir, which cleaning the path as text would name, rejects one.
-	dir := t.TempDir()
-	sub := filepath.Join(dir, "sub")
+	dir := linkedDir(t, "ldir")
 
-	require.NoError(t, os.MkdirAll(filepath.Join(sub, "deep"), 0o755))
-	writeFile(t, sub, "schema.json", `{"type": "string"}`)
+	writeFile(t, filepath.Join(dir, "sub"), "schema.json", `{"type": "string"}`)
 	writeFile(t, dir, "schema.json", `{"type": "integer"}`)
 
 	yamlPath := writeFile(t, dir, "x.yaml", "hello\n")
-
-	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, "ldir"))
-	if err != nil {
-		t.Skipf("symlinks unsupported: %v", err)
-	}
 
 	wd, err := os.Getwd()
 	require.NoError(t, err)
@@ -339,29 +341,18 @@ func TestBuildRegistrySchemaDotDotAfterSymlink(t *testing.T) {
 //
 //nolint:paralleltest // See above.
 func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows drops a .. element as text before it follows a symlink")
-	}
-
 	// Every link leads to sub/deep, so the OS reads each ref as
 	// sub/schema.json, which accepts a string. Cleaning a ref as text
 	// would name a schema.json beside the link, which rejects one or
 	// does not exist.
-	dir := t.TempDir()
-	sub := filepath.Join(dir, "sub")
+	dir := linkedDir(t, "v1:ldir")
 
-	require.NoError(t, os.MkdirAll(filepath.Join(sub, "deep"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "cfg:v2"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "file:"), 0o755))
-	writeFile(t, sub, "schema.json", `{"type": "string"}`)
+	writeFile(t, filepath.Join(dir, "sub"), "schema.json", `{"type": "string"}`)
 	writeFile(t, dir, "schema.json", `{"type": "integer"}`)
 
 	yamlPath := writeFile(t, dir, "x.yaml", "hello\n")
-
-	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, "v1:ldir"))
-	if err != nil {
-		t.Skipf("symlinks unsupported: %v", err)
-	}
 
 	require.NoError(t, os.Symlink(filepath.Join("..", "sub", "deep"), filepath.Join(dir, "cfg:v2", "ldir")))
 	require.NoError(t, os.Symlink(filepath.Join("..", "sub", "deep"), filepath.Join(dir, "file:", "ldir")))
@@ -435,23 +426,7 @@ func TestReadsAsPath(t *testing.T) {
 func TestPhysicalAbs(t *testing.T) {
 	t.Parallel()
 
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows drops a .. element as text before it follows a symlink")
-	}
-
-	// Create a directory structure with a symlink:
-	// dir/
-	//   sub/
-	//     deep/
-	//   ldir -> sub/deep
-	dir := t.TempDir()
-
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub", "deep"), 0o755))
-
-	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, "ldir"))
-	if err != nil {
-		t.Skipf("symlinks unsupported: %v", err)
-	}
+	dir := linkedDir(t, "ldir")
 
 	// Resolving the part up to a ".." also resolves any symlink in the
 	// temporary directory itself.
