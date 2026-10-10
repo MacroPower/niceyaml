@@ -6937,24 +6937,14 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 
 	namePath := paths.Current().Child("name")
 
-	newDoc := func(t *testing.T, input string) (*niceyaml.Source, *niceyaml.Node) {
+	// The helper asserts err is a [*niceyaml.SourceError] bound to the
+	// source of doc.
+	requireBound := func(t *testing.T, doc *niceyaml.Node, err error) {
 		t.Helper()
-
-		source := niceyaml.NewSourceFromString(input)
-		docs := source.Documents()
-
-		return source, docs[0]
-	}
-
-	// The helper asserts err is a [*niceyaml.SourceError] bound to source.
-	requireBound := func(t *testing.T, source *niceyaml.Source, err error) {
-		t.Helper()
-
-		require.Error(t, err)
 
 		bound, ok := err.(*niceyaml.SourceError) //nolint:errorlint // The top-level value is the bound error.
 		require.True(t, ok, "want *niceyaml.SourceError, got %T", err)
-		assert.Same(t, source, bound.Source())
+		assert.Same(t, doc.Source(), bound.Source())
 	}
 
 	type config struct {
@@ -6964,56 +6954,58 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 	failing := rejectingValidator(niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
 
 	tcs := map[string]struct {
+		call func(ctx context.Context, doc *niceyaml.Node) error
+		// An error the result matches, for a case that names one.
+		is    error
 		input string
-		call  func(t *testing.T, doc *niceyaml.Node) error
 	}{
 		"Decode binds a decoding error": {
 			input: "name: [1, 2]\n",
-			call: func(t *testing.T, doc *niceyaml.Node) error {
-				t.Helper()
-
-				_, err := doc.Decode[config](t.Context())
-
-				return err
-			},
+			call:  decodeErrorAs[config],
+			is:    niceyaml.ErrDecode,
 		},
 		"Decode binds a schema error": {
 			input: "name: a\n",
-			call: func(t *testing.T, doc *niceyaml.Node) error {
-				t.Helper()
-
-				_, err := doc.Decode[config](t.Context(), niceyaml.WithValidator(failing))
+			call: func(ctx context.Context, doc *niceyaml.Node) error {
+				_, err := doc.Decode[config](ctx, niceyaml.WithValidator(failing))
 
 				return err
 			},
 		},
 		"DecodeInto binds a schema error": {
 			input: "name: a\n",
-			call: func(t *testing.T, doc *niceyaml.Node) error {
-				t.Helper()
-
-				var cfg config
-
-				return doc.DecodeInto(t.Context(), &cfg, niceyaml.WithValidator(failing))
+			call: func(ctx context.Context, doc *niceyaml.Node) error {
+				return doc.DecodeInto(ctx, new(config), niceyaml.WithValidator(failing))
 			},
 		},
-		"Get binds a decoding error": {
+		"DecodeAt binds a decoding error": {
 			input: "name: [1, 2]\n",
-			call: func(t *testing.T, doc *niceyaml.Node) error {
-				t.Helper()
-
-				_, err := yamltest.At(t, doc, namePath).Decode[string](t.Context())
+			call: func(ctx context.Context, doc *niceyaml.Node) error {
+				_, err := doc.DecodeAt[string](ctx, namePath)
 
 				return err
 			},
+			is: niceyaml.ErrDecode,
 		},
 		"Validate binds a validator error": {
 			input: "name: a\n",
-			call: func(t *testing.T, doc *niceyaml.Node) error {
-				t.Helper()
-
-				return doc.Validate(t.Context(), failing)
+			call: func(ctx context.Context, doc *niceyaml.Node) error {
+				return doc.Validate(ctx, failing)
 			},
+		},
+		"Decode binds a plain self validation error": {
+			input: "name: a\n",
+			call:  decodeErrorAs[plainValidated],
+			is:    errPlainValidation,
+		},
+		"At binds a path resolution error": {
+			input: "name: a\n",
+			call: func(_ context.Context, doc *niceyaml.Node) error {
+				_, err := doc.At(paths.Current().Child("missing"))
+
+				return err //nolint:wrapcheck // The test inspects the error of the call.
+			},
+			is: paths.ErrNotFound,
 		},
 	}
 
@@ -7021,15 +7013,21 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source, doc := newDoc(t, tc.input)
-			requireBound(t, source, tc.call(t, doc))
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			err := tc.call(t.Context(), doc)
+			requireBound(t, doc, err)
+
+			if tc.is != nil {
+				require.ErrorIs(t, err, tc.is)
+			}
 		})
 	}
 
 	t.Run("a validator error bound to the source comes back as it is", func(t *testing.T) {
 		t.Parallel()
 
-		source, doc := newDoc(t, "name: a\n")
+		doc := yamltest.FirstDocument(t, "name: a\n")
 
 		var pre error
 
@@ -7040,29 +7038,8 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 		})
 
 		_, err := doc.Decode[config](t.Context(), niceyaml.WithValidator(validator))
-		require.Error(t, err)
 		assert.Same(t, pre, err)
-		requireBound(t, source, err)
-	})
-
-	t.Run("a plain self validation error binds to the source", func(t *testing.T) {
-		t.Parallel()
-
-		source, doc := newDoc(t, "name: a\n")
-
-		_, err := doc.Decode[plainValidated](t.Context())
-		require.ErrorIs(t, err, errPlainValidation)
-		requireBound(t, source, err)
-	})
-
-	t.Run("a path resolution error binds to the source", func(t *testing.T) {
-		t.Parallel()
-
-		source, doc := newDoc(t, "name: a\n")
-
-		_, err := doc.At(paths.Current().Child("missing"))
-		require.ErrorIs(t, err, paths.ErrNotFound)
-		requireBound(t, source, err)
+		requireBound(t, doc, err)
 	})
 }
 
