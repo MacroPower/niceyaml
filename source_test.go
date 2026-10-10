@@ -4383,61 +4383,67 @@ func TestSource_Bind(t *testing.T) {
 		), fmt.Sprintf("%+v", err))
 	})
 
-	t.Run("position error resolves to its token", func(t *testing.T) {
+	t.Run("position error binds to the document that holds its line", func(t *testing.T) {
 		t.Parallel()
 
-		docs := source.Documents()
+		tcs := map[string]struct {
+			// The reason the position resolves to no range, when it does
+			// not.
+			unresolved error
+			want       string
+			rng        position.Range
+			pos        position.Position
+			// The index of the document the error binds to, or -1 for
+			// none.
+			doc int
+		}{
+			"position in the first document": {
+				pos:  position.New(0, 3),
+				doc:  0,
+				want: "two.yaml:1:4: bad",
+				rng:  yamltest.LineRange(0, 3, 4),
+			},
+			"position in the second document resolves to its token": {
+				pos:  position.New(2, 3),
+				doc:  1,
+				want: "two.yaml:3:4: bad",
+				rng:  yamltest.LineRange(2, 3, 5),
+			},
+			"position outside the source binds to no document": {
+				pos:        position.New(9, 0),
+				doc:        -1,
+				want:       "two.yaml: bad",
+				unresolved: niceyaml.ErrOutOfRange,
+			},
+			"column before the first binds to the document holding the line": {
+				pos:        position.New(2, -3),
+				doc:        1,
+				want:       "two.yaml: document 2: bad",
+				unresolved: niceyaml.ErrOutOfRange,
+			},
+		}
 
-		err := source.Bind(niceyaml.NewError("bad value", niceyaml.AtPosition(position.New(2, 3))))
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, docs[1], bound.Document())
+				err := source.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(tc.pos)))
+				require.EqualError(t, err, tc.want)
 
-		got, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, yamltest.LineRange(2, 3, 5), got)
-	})
+				bound := yamltest.RequireSourceError(t, err)
 
-	t.Run("position in the first document binds there", func(t *testing.T) {
-		t.Parallel()
+				if tc.doc < 0 {
+					assert.Nil(t, bound.Document())
+				} else {
+					assert.Same(t, source.Documents()[tc.doc], bound.Document())
+				}
 
-		docs := source.Documents()
-
-		err := source.Bind(niceyaml.NewError("bad value", niceyaml.AtPosition(position.New(0, 3))))
-
-		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, docs[0], bound.Document())
-		assert.Equal(t, "two.yaml:1:4: bad value", err.Error())
-	})
-
-	t.Run("position outside the source binds to no document", func(t *testing.T) {
-		t.Parallel()
-
-		err := source.Bind(niceyaml.NewError("far", niceyaml.AtPosition(position.New(9, 0))))
-
-		bound := yamltest.RequireSourceError(t, err)
-		assert.Nil(t, bound.Document())
-
-		rangeErr := bound.Unresolved()
-		require.ErrorIs(t, rangeErr, niceyaml.ErrOutOfRange)
-	})
-
-	t.Run("column before the first binds to the document holding the line", func(t *testing.T) {
-		t.Parallel()
-
-		docs := source.Documents()
-
-		err := source.Bind(niceyaml.NewError("far", niceyaml.AtPosition(position.New(2, -3))))
-
-		bound := yamltest.RequireSourceError(t, err)
-		assert.Equal(t, "two.yaml: document 2: far", err.Error())
-		assert.Same(t, docs[1], bound.Document())
-
-		rangeErr := bound.Unresolved()
-		require.ErrorIs(t, rangeErr, niceyaml.ErrOutOfRange)
-
-		_, ok := bound.Range()
-		assert.False(t, ok)
+				got, ok := bound.Range()
+				assert.Equal(t, tc.unresolved == nil, ok)
+				assert.Equal(t, tc.rng, got)
+				require.ErrorIs(t, bound.Unresolved(), tc.unresolved)
+			})
+		}
 	})
 
 	t.Run("position in a source with a syntax error binds to the document holding the line", func(t *testing.T) {
