@@ -850,22 +850,21 @@ func TestDiffer_Hunks(t *testing.T) {
 func TestDiffResult_HunksKeepUnifiedIndices(t *testing.T) {
 	t.Parallel()
 
+	before := "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"
+
 	tcs := map[string]struct {
-		before   string
 		after    string
 		mark     int
 		wantHeld []int
 	}{
 		"changes": {
-			before:   "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n",
 			after:    "a: 1\nb: 2\nc: 3\nd: 4\ne: 6\n",
 			mark:     5,
 			wantHeld: []int{3, 4, 5},
 		},
 		"no changes": {
-			before: "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n",
-			after:  "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n",
-			mark:   4,
+			after: before,
+			mark:  4,
 		},
 	}
 
@@ -873,7 +872,7 @@ func TestDiffResult_HunksKeepUnifiedIndices(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			result := diffStrings(tc.before, tc.after)
+			result := diffStrings(before, tc.after)
 
 			unified := result.Unified()
 			got := result.Hunks(1)
@@ -910,6 +909,7 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 	// body lines are 5, 6, and 7 in the file.
 	head := "x: 1\ny: 2\nz: 3\n"
 	body := "a: 1\nb: 2\nc: 3\n"
+	changed := "a: 1\nb: 9\nc: 3\n"
 
 	tcs := map[string]struct {
 		// Holds the second document of the before side, when it is not body.
@@ -921,7 +921,7 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 		want      []string
 	}{
 		"modify one line": {
-			after: "a: 1\nb: 9\nc: 3\n",
+			after: changed,
 			want:  []string{"@@ -6 +6 @@"},
 		},
 		"insert after the separator": {
@@ -942,13 +942,13 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 			want:   []string{"@@ -5 +5 @@", "@@ -9 +9 @@"},
 		},
 		"context 1": {
-			after:   "a: 1\nb: 9\nc: 3\n",
+			after:   changed,
 			context: 1,
 			want:    []string{"@@ -5,3 +5,3 @@"},
 		},
 		"earlier document grew": {
 			afterHead: head + "v: 4\nu: 5\n",
-			after:     "a: 1\nb: 9\nc: 3\n",
+			after:     changed,
 			want:      []string{"@@ -6 +8 @@"},
 		},
 	}
@@ -982,26 +982,24 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 func TestDiffer_HunksOfHeldLines(t *testing.T) {
 	t.Parallel()
 
+	// The before side holds lines 4-6 of a six-line file.
+	before := niceyaml.NewSourceFromString("x: 1\ny: 2\nz: 3\na: 1\nb: 2\nc: 3\n")
+	beforeView := before.View().Slice(position.NewSpan(3, 6))
+
 	tcs := map[string]struct {
-		before     string
-		after      string
-		beforeSpan position.Span
-		afterSpan  position.Span
-		want       []string
+		after     string
+		afterSpan position.Span
+		want      []string
 	}{
 		"insert before the first held line": {
-			before:     "x: 1\ny: 2\nz: 3\na: 1\nb: 2\nc: 3\n",
-			after:      "x: 1\ny: 2\nz: 3\nw: 0\na: 1\nb: 2\nc: 3\n",
-			beforeSpan: position.Span{Start: 3, End: 6},
-			afterSpan:  position.Span{Start: 3, End: 7},
-			want:       []string{"@@ -3,0 +4 @@"},
+			after:     "x: 1\ny: 2\nz: 3\nw: 0\na: 1\nb: 2\nc: 3\n",
+			afterSpan: position.NewSpan(3, 7),
+			want:      []string{"@@ -3,0 +4 @@"},
 		},
 		"delete the first held line": {
-			before:     "x: 1\ny: 2\nz: 3\na: 1\nb: 2\nc: 3\n",
-			after:      "x: 1\ny: 2\nz: 3\nb: 2\nc: 3\n",
-			beforeSpan: position.Span{Start: 3, End: 6},
-			afterSpan:  position.Span{Start: 3, End: 5},
-			want:       []string{"@@ -4 +3,0 @@"},
+			after:     "x: 1\ny: 2\nz: 3\nb: 2\nc: 3\n",
+			afterSpan: position.NewSpan(3, 5),
+			want:      []string{"@@ -4 +3,0 @@"},
 		},
 	}
 
@@ -1009,10 +1007,7 @@ func TestDiffer_HunksOfHeldLines(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			before := niceyaml.NewSourceFromString(tc.before)
 			after := niceyaml.NewSourceFromString(tc.after)
-
-			beforeView := before.View().Slice(tc.beforeSpan)
 			afterView := after.View().Slice(tc.afterSpan)
 
 			got := diff.Diff(beforeView, afterView).Hunks(0)
