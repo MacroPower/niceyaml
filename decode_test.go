@@ -7573,6 +7573,9 @@ func TestDocument_At_Scope(t *testing.T) {
 	`)
 	hoursPath := paths.Doc().Child("spec", "hours")
 
+	dd := yamltest.FirstDocument(t, input)
+	hours := yamltest.At(t, dd, hoursPath)
+
 	// The value of spec.hours.open sits on line 4 (index 3) at column 11
 	// (index 10), and the root key open on line 1.
 	openValue := position.New(3, 10)
@@ -7580,9 +7583,7 @@ func TestDocument_At_Scope(t *testing.T) {
 	t.Run("SelfValidator paths resolve from the node", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-
-		_, err := yamltest.At(t, dd, hoursPath).Decode[hoursConfig](t.Context())
+		_, err := hours.Decode[hoursConfig](t.Context())
 		bound := yamltest.RequireSourceError(t, err)
 
 		rng, ok := bound.Range()
@@ -7593,9 +7594,6 @@ func TestDocument_At_Scope(t *testing.T) {
 
 	t.Run("Bind resolves a path from the node", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
-		hours := yamltest.At(t, dd, hoursPath)
 
 		err := hours.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("open"))))
 
@@ -7619,12 +7617,10 @@ func TestDocument_At_Scope(t *testing.T) {
 	t.Run("Ranges resolves from the node", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-
 		want, err := dd.Ranges(hoursPath.Child("open"))
 		require.NoError(t, err)
 
-		got, err := yamltest.At(t, dd, hoursPath).Ranges(paths.Current().Child("open"))
+		got, err := hours.Ranges(paths.Current().Child("open"))
 		require.NoError(t, err)
 		assert.Equal(t, want, got)
 		assert.Equal(t, openValue, got[0].Start)
@@ -7632,8 +7628,6 @@ func TestDocument_At_Scope(t *testing.T) {
 
 	t.Run("a validator receives the scope", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		var seen map[string]any
 
@@ -7647,7 +7641,7 @@ func TestDocument_At_Scope(t *testing.T) {
 			return err
 		})
 
-		h, err := yamltest.At(t, dd, hoursPath).Decode[hoursConfig](t.Context(),
+		h, err := hours.Decode[hoursConfig](t.Context(),
 			niceyaml.WithValidator(capture),
 			niceyaml.WithSelfValidation(false),
 		)
@@ -7659,11 +7653,9 @@ func TestDocument_At_Scope(t *testing.T) {
 	t.Run("a validator error resolves from the node", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-
 		reject := rejectingValidator(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("open"))))
 
-		err := yamltest.At(t, dd, hoursPath).Validate(t.Context(), reject)
+		err := hours.Validate(t.Context(), reject)
 
 		bound := yamltest.RequireSourceError(t, err)
 
@@ -7675,7 +7667,6 @@ func TestDocument_At_Scope(t *testing.T) {
 	t.Run("scopes chain", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
 		assert.True(t, dd.Path().IsRoot())
 
 		open := yamltest.At(
@@ -7696,9 +7687,6 @@ func TestDocument_At_Scope(t *testing.T) {
 	t.Run("scope shares the enclosing document", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-		hours := yamltest.At(t, dd, hoursPath)
-
 		assert.Same(t, dd.Source(), hours.Source())
 		assert.Same(t, dd, hours.Document())
 		assert.Same(t, dd.DocumentAST(), hours.Document().DocumentAST())
@@ -7709,8 +7697,6 @@ func TestDocument_At_Scope(t *testing.T) {
 
 	t.Run("scope covers the lines and tokens of the node", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		tcs := map[string]struct {
 			path   paths.Path
@@ -7959,18 +7945,14 @@ func TestDocument_At_Scope(t *testing.T) {
 	t.Run("scopes chain to the same extent", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-		direct := yamltest.At(t, dd, hoursPath)
 		chained := yamltest.At(t, yamltest.At(t, dd, paths.Current().Child("spec")), paths.Current().Child("hours"))
 
-		assert.Equal(t, direct.Span(), chained.Span())
-		assert.Equal(t, direct.Tokens(), chained.Tokens())
+		assert.Equal(t, hours.Span(), chained.Span())
+		assert.Equal(t, hours.Tokens(), chained.Tokens())
 	})
 
 	t.Run("a scope that selects nothing fails at At", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		missing, err := dd.At(paths.Current().Child("spec", "missing"))
 		require.ErrorIs(t, err, paths.ErrNotFound)
@@ -7988,9 +7970,7 @@ func TestDocument_At_Scope(t *testing.T) {
 	t.Run("excerpt marks the node", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-
-		_, err := yamltest.At(t, dd, hoursPath).Decode[hoursConfig](t.Context())
+		_, err := hours.Decode[hoursConfig](t.Context())
 		bound := yamltest.RequireSourceError(t, err)
 
 		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
