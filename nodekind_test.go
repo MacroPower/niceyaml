@@ -17,7 +17,7 @@ func TestNode_Kind(t *testing.T) {
 
 	tcs := map[string]struct {
 		input string
-		path  string
+		path  paths.Path
 		want  niceyaml.NodeKind
 	}{
 		"block mapping": {
@@ -108,27 +108,27 @@ func TestNode_Kind(t *testing.T) {
 				"a:",
 				"  b: 1",
 			),
-			path: "$.a",
+			path: paths.MustParse("$.a"),
 			want: niceyaml.NodeMapping,
 		},
 		"value sequence": {
 			input: "a: [1]\n",
-			path:  "$.a",
+			path:  paths.MustParse("$.a"),
 			want:  niceyaml.NodeSequence,
 		},
 		"value scalar": {
 			input: "a: 1\n",
-			path:  "$.a",
+			path:  paths.MustParse("$.a"),
 			want:  niceyaml.NodeScalar,
 		},
 		"value left out": {
 			input: "a:\n",
-			path:  "$.a",
+			path:  paths.MustParse("$.a"),
 			want:  niceyaml.NodeScalar,
 		},
 		"value tagged as a string": {
 			input: "a: !!str 1\n",
-			path:  "$.a",
+			path:  paths.MustParse("$.a"),
 			want:  niceyaml.NodeScalar,
 		},
 		"alias to a sequence": {
@@ -136,7 +136,7 @@ func TestNode_Kind(t *testing.T) {
 				"a: &x [1]",
 				"b: *x",
 			),
-			path: "$.b",
+			path: paths.MustParse("$.b"),
 			want: niceyaml.NodeSequence,
 		},
 		"tagged alias to a mapping": {
@@ -144,7 +144,7 @@ func TestNode_Kind(t *testing.T) {
 				"a: &x {k: 1}",
 				"b: !custom *x",
 			),
-			path: "$.b",
+			path: paths.MustParse("$.b"),
 			want: niceyaml.NodeMapping,
 		},
 		"tagged alias to a scalar": {
@@ -152,7 +152,7 @@ func TestNode_Kind(t *testing.T) {
 				"a: &x 1",
 				"b: !!str *x",
 			),
-			path: "$.b",
+			path: paths.MustParse("$.b"),
 			want: niceyaml.NodeScalar,
 		},
 		"anchor on a tagged mapping, through an alias": {
@@ -160,17 +160,17 @@ func TestNode_Kind(t *testing.T) {
 				"a: &x !!map {k: 1}",
 				"b: *x",
 			),
-			path: "$.b",
+			path: paths.MustParse("$.b"),
 			want: niceyaml.NodeMapping,
 		},
 		"key": {
 			input: "a: 1\n",
-			path:  "$.a~",
+			path:  paths.MustParse("$.a~"),
 			want:  niceyaml.NodeScalar,
 		},
 		"explicit key": {
 			input: "? a\n: [1]\n",
-			path:  "$.a~",
+			path:  paths.MustParse("$.a~"),
 			want:  niceyaml.NodeScalar,
 		},
 		"entry through a merge key": {
@@ -179,7 +179,7 @@ func TestNode_Kind(t *testing.T) {
 				"a:",
 				"  <<: *base",
 			),
-			path: "$.a.k",
+			path: paths.MustParse("$.a.k"),
 			want: niceyaml.NodeSequence,
 		},
 	}
@@ -188,10 +188,7 @@ func TestNode_Kind(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			n := yamltest.FirstDocument(t, tc.input)
-			if tc.path != "" {
-				n = yamltest.At(t, n, paths.MustParse(tc.path))
-			}
+			n := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.path)
 
 			assert.Equal(t, tc.want, n.Kind())
 		})
@@ -276,7 +273,7 @@ func TestNode_IsEmpty(t *testing.T) {
 
 	tcs := map[string]struct {
 		input string
-		path  string
+		path  paths.Path
 		want  bool
 	}{
 		"empty source": {
@@ -329,15 +326,15 @@ func TestNode_IsEmpty(t *testing.T) {
 		"mapping":                             {input: "a: 1\n"},
 		"value left out": {
 			input: "a:\n",
-			path:  "$.a",
+			path:  paths.MustParse("$.a"),
 		},
 		"empty mapping value": {
 			input: "a: {}\n",
-			path:  "$.a",
+			path:  paths.MustParse("$.a"),
 		},
 		"key": {
 			input: "a: 1\n",
-			path:  "$.a~",
+			path:  paths.MustParse("$.a~"),
 		},
 	}
 
@@ -345,10 +342,7 @@ func TestNode_IsEmpty(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			n := yamltest.FirstDocument(t, tc.input)
-			if tc.path != "" {
-				n = yamltest.At(t, n, paths.MustParse(tc.path))
-			}
+			n := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.path)
 
 			assert.Equal(t, tc.want, n.IsEmpty())
 		})

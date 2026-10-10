@@ -195,10 +195,7 @@ func TestNode_DecodeAt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			node := document(t)
-			if tc.scope.Len() > 0 {
-				node = yamltest.At(t, node, tc.scope)
-			}
+			node := yamltest.AtOrSelf(t, document(t), tc.scope)
 
 			got, err := tc.read.decodeAt(t.Context(), node, tc.path)
 			assert.Equal(t, tc.want, got)

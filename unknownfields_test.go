@@ -150,7 +150,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 	tcs := map[string]struct {
 		decode     func(context.Context, *niceyaml.Node) error
 		input      string
-		scope      string
+		scope      paths.Path
 		want       string
 		sourceOpts []niceyaml.SourceOption
 	}{
@@ -537,7 +537,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				"    zzz: 2",
 				"    yyy: 3",
 			),
-			scope: "$.servers[0]",
+			scope: paths.MustParse("$.servers[0]"),
 			want: stringtest.JoinLF(
 				`3:5: $.servers[0].zzz~: unknown field "zzz"`,
 				`4:5: $.servers[0].yyy~: unknown field "yyy"`,
@@ -614,10 +614,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			// so several decodes show that the report does not depend on
 			// its pick.
 			for range 10 {
-				node := yamltest.FirstDocument(t, tc.input, tc.sourceOpts...)
-				if tc.scope != "" {
-					node = yamltest.At(t, node, paths.MustParse(tc.scope))
-				}
+				node := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input, tc.sourceOpts...), tc.scope)
 
 				err := tc.decode(t.Context(), node)
 				if tc.want == "" {
