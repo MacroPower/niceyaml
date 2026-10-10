@@ -21,34 +21,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// problemsOf returns the children of the node of err in the tree
-// [niceyaml.NewErrorTree] builds that stand for the problems err heads,
-// in the order the tree shows them.
-func problemsOf(err error) []niceyaml.ErrorTree {
-	return childrenOf(err, false)
-}
-
-// detailsOf returns the children of the node of err in the tree
-// [niceyaml.NewErrorTree] builds that explain it, in the order the tree
-// shows them.
-func detailsOf(err error) []niceyaml.ErrorTree {
-	return childrenOf(err, true)
-}
-
-// childrenOf returns the children of the node of err whose Detail is
-// detail.
-func childrenOf(err error, detail bool) []niceyaml.ErrorTree {
-	var out []niceyaml.ErrorTree
-
-	for _, c := range niceyaml.NewErrorTree(err).Children {
-		if c.Detail == detail {
-			out = append(out, c)
-		}
-	}
-
-	return out
-}
-
 // errsOf returns the error of each node.
 func errsOf(nodes []niceyaml.ErrorTree) []error {
 	errs := make([]error, 0, len(nodes))
@@ -58,24 +30,6 @@ func errsOf(nodes []niceyaml.ErrorTree) []error {
 	}
 
 	return errs
-}
-
-// boundIn returns each distinct binding in the tree of err, a node before
-// the nodes below it, as [niceyaml.ErrorTree.All] yields them.
-func boundIn(err error) []*niceyaml.SourceError {
-	var (
-		out  []*niceyaml.SourceError
-		seen = map[*niceyaml.SourceError]bool{}
-	)
-
-	for n := range niceyaml.NewErrorTree(err).All() {
-		if n.Bound != nil && !seen[n.Bound] {
-			seen[n.Bound] = true
-			out = append(out, n.Bound)
-		}
-	}
-
-	return out
 }
 
 // countNodes returns the number of nodes with text in t.
@@ -1398,7 +1352,7 @@ func TestErrorTree_Bound(t *testing.T) {
 				t.Helper()
 
 				bound := bind(t, niceyaml.NewSummary("2 problems", badB(), badA()))
-				kids := problemsOf(bound)
+				kids := yamltest.ProblemsOf(bound)
 				require.Len(t, kids, 2)
 
 				// The tree sorts the children by position, so the second
@@ -1415,7 +1369,7 @@ func TestErrorTree_Bound(t *testing.T) {
 				t.Helper()
 
 				bound := bind(t, errors.Join(badA(), badB()))
-				kids := problemsOf(bound)
+				kids := yamltest.ProblemsOf(bound)
 				require.Len(t, kids, 2)
 
 				return tree{err: bound, want: []node{

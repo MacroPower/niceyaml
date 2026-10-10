@@ -86,6 +86,17 @@
 //
 //	input := yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n"
 //
+// # Error Trees
+//
+// Tests that read the structure of an error read the tree
+// [niceyaml.NewErrorTree] builds. [ProblemsOf] and [DetailsOf] return the
+// children of its root that are problems and details, and [BoundIn]
+// returns each binding in the tree:
+//
+//	for _, problem := range yamltest.ProblemsOf(err) {
+//		assert.Same(t, source, problem.Source())
+//	}
+//
 // # Mocks
 //
 // [NormalizerFunc] adapts a function so it can stand in for a normalizer

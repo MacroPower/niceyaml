@@ -394,12 +394,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
-		require.Len(t, problemsOf(bound), 2)
+		require.Len(t, yamltest.ProblemsOf(bound), 2)
 
-		assert.Equal(t, "cafe.yaml:2:9: $.schedule.open: open is empty", problemsOf(bound)[0].Bound.Error())
-		assert.Equal(t, "cafe.yaml:3:10: $.schedule.close: close is empty", problemsOf(bound)[1].Bound.Error())
+		assert.Equal(t, "cafe.yaml:2:9: $.schedule.open: open is empty", yamltest.ProblemsOf(bound)[0].Bound.Error())
+		assert.Equal(t, "cafe.yaml:3:10: $.schedule.close: close is empty", yamltest.ProblemsOf(bound)[1].Bound.Error())
 
-		p, ok := problemsOf(bound)[1].Path()
+		p, ok := yamltest.ProblemsOf(bound)[1].Path()
 		require.True(t, ok)
 		assert.Equal(t, "$.schedule.close", p.String())
 
@@ -487,7 +487,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		var got []string
 
-		for _, child := range problemsOf(bound) {
+		for _, child := range yamltest.ProblemsOf(bound) {
 			got = append(got, child.Bound.Error())
 		}
 
@@ -1332,7 +1332,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			require.ErrorAs(t, err, &bound)
 
 			got := make([]string, 0, len(want))
-			for _, child := range problemsOf(bound) {
+			for _, child := range yamltest.ProblemsOf(bound) {
 				got = append(got, child.Bound.Error())
 			}
 
@@ -1410,7 +1410,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				var got []string
 
-				for _, bound := range boundIn(err) {
+				for _, bound := range yamltest.BoundIn(err) {
 					if _, ok := bound.Path(); !ok {
 						continue
 					}
@@ -1612,7 +1612,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		var got []string
 
-		for _, child := range problemsOf(bound) {
+		for _, child := range yamltest.ProblemsOf(bound) {
 			got = append(got, child.Bound.Error())
 		}
 
@@ -1655,7 +1655,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				var got []string
 
-				for _, child := range problemsOf(bound) {
+				for _, child := range yamltest.ProblemsOf(bound) {
 					got = append(got, child.Bound.Error())
 				}
 
@@ -1811,7 +1811,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				var got []string
 
-				for _, bound := range boundIn(err) {
+				for _, bound := range yamltest.BoundIn(err) {
 					if _, ok := bound.Path(); ok {
 						got = append(got, bound.Error())
 					}
@@ -1897,7 +1897,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				require.ErrorAs(t, err, &bound)
 
 				got := []string{err.Error()}
-				if children := problemsOf(bound); len(children) > 0 {
+				if children := yamltest.ProblemsOf(bound); len(children) > 0 {
 					got = got[:0]
 
 					for _, child := range children {
@@ -1940,7 +1940,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				var got []string
 
-				for _, child := range problemsOf(bound) {
+				for _, child := range yamltest.ProblemsOf(bound) {
 					got = append(got, child.Bound.Error())
 				}
 
@@ -1984,7 +1984,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 					var got []string
 
-					for _, child := range problemsOf(bound) {
+					for _, child := range yamltest.ProblemsOf(bound) {
 						got = append(got, child.Bound.Error())
 					}
 
@@ -2009,7 +2009,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		var got []string
 
-		for _, bound := range boundIn(err) {
+		for _, bound := range yamltest.BoundIn(err) {
 			if _, ok := bound.Path(); !ok {
 				continue
 			}
@@ -2155,7 +2155,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		var got []string
 
-		for _, child := range problemsOf(bound) {
+		for _, child := range yamltest.ProblemsOf(bound) {
 			got = append(got, child.Bound.Error())
 		}
 
@@ -2310,7 +2310,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				require.ErrorAs(t, err, &bound)
 
 				got := []string{err.Error()}
-				if children := problemsOf(bound); len(children) > 0 {
+				if children := yamltest.ProblemsOf(bound); len(children) > 0 {
 					got = got[:0]
 
 					for _, child := range children {
@@ -3016,7 +3016,7 @@ func TestNode_Decode_SelfValidatorContext(t *testing.T) {
 
 			_, ok := bound.Position()
 			assert.False(t, ok)
-			assert.Empty(t, problemsOf(bound))
+			assert.Empty(t, yamltest.ProblemsOf(bound))
 		})
 	}
 }
@@ -3661,7 +3661,7 @@ func TestSelfValidateValue(t *testing.T) {
 			assert.Equal(t, !tc.cancel, niceyaml.IsInvalid(err))
 
 			// The result stands in no document, as one from BindValue does.
-			for _, bound := range boundIn(err) {
+			for _, bound := range yamltest.BoundIn(err) {
 				assert.Nil(t, bound.Node())
 				assert.Nil(t, bound.Document())
 
@@ -3757,7 +3757,7 @@ func TestSelfValidateValue_SharedPath(t *testing.T) {
 
 				var got []string
 
-				for _, child := range problemsOf(bound) {
+				for _, child := range yamltest.ProblemsOf(bound) {
 					require.ErrorIs(t, child.Bound.Unresolved(), niceyaml.ErrAmbiguousPath)
 
 					got = append(got, child.Bound.Error())
@@ -3838,7 +3838,7 @@ func TestSelfValidateValue_Place(t *testing.T) {
 			require.EqualError(t, placed, tc.want)
 			assert.True(t, niceyaml.IsInvalid(placed))
 
-			for _, bound := range boundIn(placed) {
+			for _, bound := range yamltest.BoundIn(placed) {
 				assert.Same(t, doc.Source(), bound.Source())
 
 				if _, ok := bound.Path(); ok && tc.shared {
@@ -4202,7 +4202,7 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 
 			var nearest map[string]string
 
-			for _, bound := range boundIn(err) {
+			for _, bound := range yamltest.BoundIn(err) {
 				near, ok := bound.Nearest()
 				if !ok {
 					continue

@@ -587,7 +587,7 @@ func TestSource_Decode_Problems(t *testing.T) {
 	_, ok = srcErr.Path()
 	assert.False(t, ok)
 
-	problems := problemsOf(srcErr)
+	problems := yamltest.ProblemsOf(srcErr)
 	require.Len(t, problems, 3)
 
 	want := []struct {
@@ -976,7 +976,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				_, ok = srcErr.Path()
 				assert.Equal(t, rows == 0, ok)
 
-				problems := problemsOf(srcErr)
+				problems := yamltest.ProblemsOf(srcErr)
 				require.Len(t, problems, rows)
 
 				for _, problem := range problems {
@@ -1970,7 +1970,7 @@ func TestDocument_Decode_Problems_Deep(t *testing.T) {
 	var srcErr *niceyaml.SourceError
 
 	require.ErrorAs(t, err, &srcErr)
-	assert.Empty(t, problemsOf(srcErr))
+	assert.Empty(t, yamltest.ProblemsOf(srcErr))
 	assert.Equal(t, "expected integer, got string", srcErr.Message())
 
 	path, ok := srcErr.Path()
@@ -1992,7 +1992,7 @@ func TestDocument_Decode_Problems_Many(t *testing.T) {
 	var srcErr *niceyaml.SourceError
 
 	require.ErrorAs(t, err, &srcErr)
-	require.Len(t, problemsOf(srcErr), servers)
+	require.Len(t, yamltest.ProblemsOf(srcErr), servers)
 
 	lines := strings.Split(err.Error(), "\n")
 	require.Len(t, lines, niceyaml.ErrorListLimit+2)

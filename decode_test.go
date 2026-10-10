@@ -2861,8 +2861,8 @@ func TestNode_Bind_Scope(t *testing.T) {
 				assert.Equal(t, tc.path, path.String())
 			}
 
-			assert.Equal(t, tc.children, errorTexts(problemsOf(bound)))
-			assert.Equal(t, tc.details, errorTexts(detailsOf(bound)))
+			assert.Equal(t, tc.children, errorTexts(yamltest.ProblemsOf(bound)))
+			assert.Equal(t, tc.details, errorTexts(yamltest.DetailsOf(bound)))
 
 			// A Rebase under the path of the scope binds the same way,
 			// except for the error of a context that ended, which is about
@@ -2875,8 +2875,8 @@ func TestNode_Bind_Scope(t *testing.T) {
 
 			require.ErrorAs(t, doc.Bind(niceyaml.Rebase(tc.err, hoursPath)), &rebased)
 			assert.Equal(t, tc.want, rebased.Error())
-			assert.Equal(t, tc.children, errorTexts(problemsOf(rebased)))
-			assert.Equal(t, tc.details, errorTexts(detailsOf(rebased)))
+			assert.Equal(t, tc.children, errorTexts(yamltest.ProblemsOf(rebased)))
+			assert.Equal(t, tc.details, errorTexts(yamltest.DetailsOf(rebased)))
 		})
 	}
 
@@ -4020,7 +4020,7 @@ func TestWithDisallowUnknownFields_ControlCharacters(t *testing.T) {
 
 			require.ErrorAs(t, err, &bound)
 
-			for _, b := range boundIn(err) {
+			for _, b := range yamltest.BoundIn(err) {
 				path, ok := b.Path()
 				if !ok {
 					continue
@@ -4647,8 +4647,8 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 				var srcErr *niceyaml.SourceError
 
 				require.ErrorAs(t, err, &srcErr)
-				require.Len(t, detailsOf(srcErr), 1)
-				assert.EqualError(t, detailsOf(srcErr)[0].Bound, tc.detail)
+				require.Len(t, yamltest.DetailsOf(srcErr), 1)
+				assert.EqualError(t, yamltest.DetailsOf(srcErr)[0].Bound, tc.detail)
 			})
 		}
 
@@ -8900,7 +8900,7 @@ func TestDocument_Decode_ValidatorAmbiguousErrorBoundToReceiver(t *testing.T) {
 
 			ambiguous := 0
 
-			for _, bound := range boundIn(err) {
+			for _, bound := range yamltest.BoundIn(err) {
 				assert.Same(t, dd, bound.Node())
 
 				if errors.Is(bound.Unresolved(), niceyaml.ErrAmbiguousPath) {
@@ -10914,7 +10914,7 @@ func TestErrDecode(t *testing.T) {
 				rng, ok := srcErr.Range()
 				require.True(t, ok, "the rejection carries no location")
 				assert.Equal(t, tc.line, rng.Start.Line)
-				assert.Empty(t, problemsOf(srcErr), "the rejection binds its own causes as children")
+				assert.Empty(t, yamltest.ProblemsOf(srcErr), "the rejection binds its own causes as children")
 			})
 		}
 	})
@@ -11796,7 +11796,7 @@ func TestMultiValidator(t *testing.T) {
 
 		var got []string
 
-		for _, b := range boundIn(err) {
+		for _, b := range yamltest.BoundIn(err) {
 			if rng, ok := b.Range(); ok {
 				got = append(got, rng.Start.String()+" "+b.Message())
 			}
@@ -11920,7 +11920,7 @@ func TestMultiValidator(t *testing.T) {
 
 		_, ok := serr.Range()
 		assert.True(t, ok)
-		assert.Empty(t, problemsOf(serr))
+		assert.Empty(t, yamltest.ProblemsOf(serr))
 
 		// A validator that binds its own error names the source once.
 		err = doc.Validate(t.Context(), niceyaml.MultiValidator(passing, badC))

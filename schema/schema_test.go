@@ -24,52 +24,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-// problemsOf returns the children of the node of err in the tree
-// [niceyaml.NewErrorTree] builds that stand for the problems err heads,
-// in the order the tree shows them.
-func problemsOf(err error) []niceyaml.ErrorTree {
-	return childrenOf(err, false)
-}
-
-// detailsOf returns the children of the node of err in the tree
-// [niceyaml.NewErrorTree] builds that explain it, in the order the tree
-// shows them.
-func detailsOf(err error) []niceyaml.ErrorTree {
-	return childrenOf(err, true)
-}
-
-// childrenOf returns the children of the node of err whose Detail is
-// detail.
-func childrenOf(err error, detail bool) []niceyaml.ErrorTree {
-	var out []niceyaml.ErrorTree
-
-	for _, c := range niceyaml.NewErrorTree(err).Children {
-		if c.Detail == detail {
-			out = append(out, c)
-		}
-	}
-
-	return out
-}
-
-// boundIn returns each distinct binding in the tree of err, a node before
-// the nodes below it, as [niceyaml.ErrorTree.All] yields them.
-func boundIn(err error) []*niceyaml.SourceError {
-	var (
-		out  []*niceyaml.SourceError
-		seen = map[*niceyaml.SourceError]bool{}
-	)
-
-	for n := range niceyaml.NewErrorTree(err).All() {
-		if n.Bound != nil && !seen[n.Bound] {
-			seen[n.Bound] = true
-			out = append(out, n.Bound)
-		}
-	}
-
-	return out
-}
-
 // compileSchema compiles schemaData into a [*schema.Schema] and fails the
 // test if the schema does not compile.
 func compileSchema(t *testing.T, schemaData []byte) *schema.Schema {
@@ -1539,7 +1493,7 @@ func TestSchema_ValidateValue(t *testing.T) {
 
 			// The value came from no document, so no binding of the
 			// result names a Node, a document, or the index of one.
-			for _, b := range boundIn(err) {
+			for _, b := range yamltest.BoundIn(err) {
 				assert.Nil(t, b.Node())
 				assert.Nil(t, b.Document())
 
@@ -1647,7 +1601,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 			require.ErrorAs(t, placed, &violation)
 
-			for _, b := range boundIn(placed) {
+			for _, b := range yamltest.BoundIn(placed) {
 				assert.Same(t, doc.Source(), b.Source())
 			}
 
@@ -1787,7 +1741,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 				require.ErrorAs(t, placed, &violation)
 
-				for _, b := range boundIn(placed) {
+				for _, b := range yamltest.BoundIn(placed) {
 					assert.Same(t, doc.Source(), b.Source())
 				}
 			})
@@ -1846,7 +1800,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			"app.yaml:2:9: $.request.port: check: 0 is less than 1",
 		)
 
-		for _, b := range boundIn(request.Bind(niceyaml.Invalid(err))) {
+		for _, b := range yamltest.BoundIn(request.Bind(niceyaml.Invalid(err))) {
 			assert.Same(t, doc.Source(), b.Source())
 		}
 	})
@@ -1917,13 +1871,13 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 				var gotDetails []string
 
-				for _, detail := range detailsOf(bound) {
+				for _, detail := range yamltest.DetailsOf(bound) {
 					gotDetails = append(gotDetails, detail.Message())
 				}
 
 				assert.Equal(t, tc.wantDetails, gotDetails)
 
-				for _, problem := range problemsOf(bound) {
+				for _, problem := range yamltest.ProblemsOf(bound) {
 					assert.Same(t, doc.Source(), problem.Source())
 				}
 			})
@@ -1964,8 +1918,8 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, doc.Bind(detailed), &bound)
-		require.Len(t, detailsOf(bound), 1)
-		assert.Same(t, doc.Source(), detailsOf(bound)[0].Source())
+		require.Len(t, yamltest.DetailsOf(bound), 1)
+		assert.Same(t, doc.Source(), yamltest.DetailsOf(bound)[0].Source())
 	})
 
 	t.Run("each violation places on its own", func(t *testing.T) {
@@ -1977,7 +1931,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 		require.ErrorAs(t, err, &result)
 
-		violations := problemsOf(result)
+		violations := yamltest.ProblemsOf(result)
 		require.Len(t, violations, 2)
 
 		// A caller that keeps only some of the violations places the
@@ -1993,7 +1947,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			require.EqualError(t, placed, want[i])
 			assert.True(t, niceyaml.IsInvalid(placed))
 
-			for _, b := range boundIn(placed) {
+			for _, b := range yamltest.BoundIn(placed) {
 				assert.Same(t, doc.Source(), b.Source())
 			}
 
@@ -4192,7 +4146,7 @@ func TestSchema_SourcePath_HiddenKeyName(t *testing.T) {
 
 	var got []string
 
-	for _, child := range problemsOf(bound) {
+	for _, child := range yamltest.ProblemsOf(bound) {
 		got = append(got, child.Bound.Error())
 	}
 
@@ -4229,7 +4183,7 @@ func TestSchema_SourcePath_SeveralViolations(t *testing.T) {
 
 	var got []string
 
-	for _, child := range problemsOf(bound) {
+	for _, child := range yamltest.ProblemsOf(bound) {
 		path, ok := child.Path()
 		require.True(t, ok, "violation carries no path")
 
@@ -4299,7 +4253,7 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 
 			require.ErrorAs(t, err, &ve)
 
-			violations := problemsOf(ve)
+			violations := yamltest.ProblemsOf(ve)
 			require.Len(t, violations, tc.members)
 
 			spelled := 0

@@ -4646,7 +4646,7 @@ func TestSource_Bind(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 		assert.Nil(t, bound.Document())
 
-		children := problemsOf(bound)
+		children := yamltest.ProblemsOf(bound)
 		require.Len(t, children, 2)
 		assert.Same(t, docs[0], children[0].Bound.Document())
 		assert.Same(t, docs[1], children[1].Bound.Document())
@@ -4664,7 +4664,7 @@ func TestSource_Bind(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		for _, child := range problemsOf(bound) {
+		for _, child := range yamltest.ProblemsOf(bound) {
 			rangeErr := child.Bound.Unresolved()
 			require.ErrorIs(t, rangeErr, niceyaml.ErrPathNeedsDocument)
 		}

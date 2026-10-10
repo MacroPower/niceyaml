@@ -838,7 +838,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 			require.ErrorAs(t, err, &bound, name)
 			assert.Same(t, nodes[0], bound.Node(), name)
 
-			for _, problem := range problemsOf(bound) {
+			for _, problem := range yamltest.ProblemsOf(bound) {
 				assert.Contains(t, nodes, problem.Bound.Node(), name)
 			}
 		}

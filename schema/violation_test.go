@@ -202,7 +202,7 @@ func TestViolation_Binding(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
-		require.Len(t, problemsOf(bound), 2)
+		require.Len(t, yamltest.ProblemsOf(bound), 2)
 
 		// The summary counts the violations and is none itself, so a search
 		// of the whole binding descends into the first violation under it.
@@ -210,7 +210,7 @@ func TestViolation_Binding(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "type", first.Keyword)
 
-		for _, child := range problemsOf(bound) {
+		for _, child := range yamltest.ProblemsOf(bound) {
 			got, ok := errors.AsType[*schema.Violation](child.Err)
 			require.True(t, ok)
 			assert.Equal(t, "type", got.Keyword)
@@ -562,7 +562,7 @@ func TestViolation_Value(t *testing.T) {
 
 		require.ErrorAs(t, err, &summary)
 
-		nested := problemsOf(summary)
+		nested := yamltest.ProblemsOf(summary)
 		require.Len(t, nested, 2)
 
 		for _, n := range nested {
@@ -863,9 +863,9 @@ func TestViolation_Forms(t *testing.T) {
 		// The value is one problem, so the binding heads none, and the
 		// forms are its details. Each form carries no location and wraps
 		// no Violation, and the violation of its branch carries both.
-		assert.Empty(t, problemsOf(bound))
+		assert.Empty(t, yamltest.ProblemsOf(bound))
 
-		forms := detailsOf(bound)
+		forms := yamltest.DetailsOf(bound)
 		require.Len(t, forms, 2)
 
 		want := []schema.Violation{
@@ -895,7 +895,7 @@ func TestViolation_Forms(t *testing.T) {
 			assert.False(t, ok)
 			assert.Nil(t, own)
 
-			nested := detailsOf(form.Bound)
+			nested := yamltest.DetailsOf(form.Bound)
 			require.Len(t, nested, 1)
 
 			path, ok := nested[0].Path()
@@ -928,9 +928,9 @@ func TestViolation_Forms(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "anyOf", got.Keyword)
 
-		assert.Empty(t, problemsOf(bound))
+		assert.Empty(t, yamltest.ProblemsOf(bound))
 
-		forms := detailsOf(bound)
+		forms := yamltest.DetailsOf(bound)
 		require.Len(t, forms, 2)
 
 		for i, form := range forms {
@@ -938,7 +938,7 @@ func TestViolation_Forms(t *testing.T) {
 
 			_, ok := form.Path()
 			assert.False(t, ok)
-			assert.Len(t, detailsOf(form.Bound), 1)
+			assert.Len(t, yamltest.DetailsOf(form.Bound), 1)
 		}
 
 		// A document places the violation, and its forms come with it.
@@ -948,7 +948,7 @@ func TestViolation_Forms(t *testing.T) {
 
 		_, ok = bound.Range()
 		assert.True(t, ok)
-		assert.Len(t, detailsOf(bound), 2)
+		assert.Len(t, yamltest.DetailsOf(bound), 2)
 	})
 }
 
