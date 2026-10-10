@@ -407,9 +407,10 @@ func TestSchemaStore_FindMatchRepeatedPath(t *testing.T) {
 func TestSchemaStore_FindMatchAfterRefresh(t *testing.T) {
 	t.Parallel()
 
-	// With caching off, each lookup fetches a new catalog whose entry takes
-	// its name from the request count. A lookup matches against the catalog
-	// it fetched, not the one an earlier lookup of the same path read.
+	// A TTL of 0 turns caching off, so each lookup fetches a new catalog,
+	// whose entry takes its name from the request count. A lookup matches
+	// against the catalog it fetched, not the one an earlier lookup of the
+	// same path read.
 	client, requests, _ := newHeldCatalogClient(t, 3)
 
 	store := newStore(client, schemastore.WithCacheTTL(0))
@@ -528,21 +529,6 @@ func TestSchemaStore_CacheTTL(t *testing.T) {
 	_, err = store.FindMatch(t.Context(), "config.yaml")
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), fetchCount.Load())
-}
-
-func TestSchemaStore_NoCaching(t *testing.T) {
-	t.Parallel()
-
-	client, fetchCount := newCountingCatalogClient(t, testCatalog)
-
-	// TTL of 0 should disable caching (fetch on every lookup).
-	store := newStore(client, schemastore.WithCacheTTL(0))
-
-	for i := range 3 {
-		_, err := store.FindMatch(t.Context(), "config.yaml")
-		require.NoError(t, err)
-		assert.Equal(t, int32(i+1), fetchCount.Load())
-	}
 }
 
 func TestSchemaStore_ConcurrentFirstFetch(t *testing.T) {
