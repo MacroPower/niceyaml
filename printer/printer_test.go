@@ -51,12 +51,11 @@ func testPrinter() *printer.Printer {
 
 // testPrinterWithGutter returns a printer without styles but with a custom gutter.
 func testPrinterWithGutter(gutter printer.Gutter) *printer.Printer {
-	return printer.New(
+	return yamltest.NewPlainPrinter(
 		printer.WithStyles(style.New(
 			lipgloss.NewStyle(),
 			style.Set(testOverlayHighlight, testHighlightStyle()),
 		)),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
 		printer.WithGutter(gutter),
 	)
 }
@@ -64,7 +63,7 @@ func testPrinterWithGutter(gutter printer.Gutter) *printer.Printer {
 // testPrinterWithStyles returns a printer without a gutter or padding whose
 // styles are the empty style with opts applied.
 func testPrinterWithStyles(opts ...style.Option) *printer.Printer {
-	return testPrinter().With(printer.WithStyles(style.New(lipgloss.NewStyle(), opts...)))
+	return yamltest.NewPlainPrinter(printer.WithStyles(style.New(lipgloss.NewStyle(), opts...)))
 }
 
 // colsRange returns the range of the columns of cols on line ln.
