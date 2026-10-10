@@ -645,8 +645,8 @@ func TestDocument_Decode_Problems(t *testing.T) {
 	tcs := map[string]struct {
 		decode func(context.Context, *niceyaml.Node) error
 		input  string
-		scope  string
 		want   string
+		scope  paths.Path
 	}{
 		// One problem comes back as the error itself, with no summary.
 		"one problem": {
@@ -1033,7 +1033,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				"  - {name: a, port: 1}",
 				"  - {<<: *b, name: [b], timeout: soon}",
 			),
-			scope: "$.servers[1]",
+			scope: paths.MustParse("$.servers[1]"),
 			want: stringtest.JoinLF(
 				"3 problems",
 				"1:17: $.base.port: expected integer, got string",
@@ -1066,10 +1066,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 					))
 				}
 
-				node := yamltest.FirstDocument(t, tc.input, srcOpts...)
-				if tc.scope != "" {
-					node = yamltest.At(t, node, paths.MustParse(tc.scope))
-				}
+				node := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input, srcOpts...), tc.scope)
 
 				err := tc.decode(t.Context(), node)
 				require.EqualError(t, err, tc.want)
@@ -1479,8 +1476,8 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 	tcs := map[string]struct {
 		decode func(context.Context, *niceyaml.Node) error
 		input  string
-		scope  string
 		want   string
+		scope  paths.Path
 	}{
 		// An alias reads the anchor of its own document, so the port of
 		// the reference document is no part of the report.
@@ -1578,7 +1575,7 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 				"  - {name: a}",
 				"  - {<<: *b, name: [b], timeout: *limit}",
 			),
-			scope: "$.servers[1]",
+			scope: paths.MustParse("$.servers[1]"),
 			want: stringtest.JoinLF(
 				"2 problems",
 				"1:17: $.base.port: expected integer, got string",
@@ -1592,11 +1589,9 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 			t.Parallel()
 
 			for range 10 {
-				node := yamltest.FirstDocument(t, tc.input,
+				doc := yamltest.FirstDocument(t, tc.input,
 					niceyaml.WithReferences(niceyaml.NewSourceFromString(references)))
-				if tc.scope != "" {
-					node = yamltest.At(t, node, paths.MustParse(tc.scope))
-				}
+				node := yamltest.AtOrSelf(t, doc, tc.scope)
 
 				err := tc.decode(t.Context(), node)
 				require.EqualError(t, err, tc.want)
