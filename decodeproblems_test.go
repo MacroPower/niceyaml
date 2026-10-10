@@ -574,7 +574,7 @@ func TestSource_Decode_Problems(t *testing.T) {
 		"     | ...",
 		"   4 |   - port: http",
 		"     |           ^^^^ expected integer, got string",
-	), strings.TrimRight(niceyaml.FormatError(err, niceyaml.WithContextLines(0)), "\n"))
+	), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 	var srcErr *niceyaml.SourceError
 
