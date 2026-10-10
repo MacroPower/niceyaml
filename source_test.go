@@ -4628,49 +4628,35 @@ func TestSource_SelfValidate(t *testing.T) {
 	// empty Source holds no line for the error, so its text is the path
 	// and the message.
 	tcs := map[string]struct {
-		source     string
-		name       string
-		want       string
-		wantFormat string
-		located    bool
+		source string
+		name   string
+		want   string
+		// Whether the Source holds the second server, whose line the
+		// excerpt of the error then shows.
+		located bool
 	}{
 		"no file": {
-			want:       "$.servers[1].port: port must be at least 1",
-			wantFormat: "$.servers[1].port: port must be at least 1",
+			want: "$.servers[1].port: port must be at least 1",
 		},
 		"no file under a name": {
-			name:       "defaults",
-			want:       "defaults: $.servers[1].port: port must be at least 1",
-			wantFormat: "defaults: $.servers[1].port: port must be at least 1",
+			name: "defaults",
+			want: "defaults: $.servers[1].port: port must be at least 1",
 		},
 		"file of comments alone": {
-			source:     "# every default applies\n",
-			name:       "app.yaml",
-			want:       "app.yaml: $.servers[1].port: port must be at least 1",
-			wantFormat: "app.yaml: $.servers[1].port: port must be at least 1",
+			source: "# every default applies\n",
+			name:   "app.yaml",
+			want:   "app.yaml: $.servers[1].port: port must be at least 1",
 		},
 		"file that holds the value": {
-			source: "servers:\n  - port: 80\n  - {}\n",
-			name:   "app.yaml",
-			want:   "app.yaml:3:3: $.servers[1].port: port must be at least 1",
-			wantFormat: stringtest.JoinLF(
-				"app.yaml:3:3: $.servers[1].port: port must be at least 1",
-				"",
-				"   3 |   - {}",
-				"     |   ^",
-			),
+			source:  "servers:\n  - port: 80\n  - {}\n",
+			name:    "app.yaml",
+			want:    "app.yaml:3:3: $.servers[1].port: port must be at least 1",
 			located: true,
 		},
 		"file that holds the value above a trailing header": {
-			source: "servers:\n  - port: 80\n  - {}\n---\n",
-			name:   "app.yaml",
-			want:   "app.yaml:3:3: $.servers[1].port: port must be at least 1",
-			wantFormat: stringtest.JoinLF(
-				"app.yaml:3:3: $.servers[1].port: port must be at least 1",
-				"",
-				"   3 |   - {}",
-				"     |   ^",
-			),
+			source:  "servers:\n  - port: 80\n  - {}\n---\n",
+			name:    "app.yaml",
+			want:    "app.yaml:3:3: $.servers[1].port: port must be at least 1",
 			located: true,
 		},
 	}
@@ -4679,18 +4665,17 @@ func TestSource_SelfValidate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var opts []niceyaml.SourceOption
+			source := niceyaml.NewSourceFromString(tc.source, niceyaml.WithName(tc.name))
 
-			if tc.name != "" {
-				opts = append(opts, niceyaml.WithName(tc.name))
+			wantFormat := tc.want
+			if tc.located {
+				wantFormat = stringtest.JoinLF(tc.want, "", "   3 |   - {}", "     |   ^")
 			}
-
-			source := niceyaml.NewSourceFromString(tc.source, opts...)
 
 			err := source.SelfValidate(t.Context(), failing())
 			require.EqualError(t, err, tc.want)
 			assert.True(t, niceyaml.IsInvalid(err))
-			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
+			assert.Equal(t, wantFormat, niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 			bound := yamltest.RequireSourceError(t, err)
 			assert.Same(t, source, bound.Source())
