@@ -12618,8 +12618,10 @@ func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 		"a small mapping aliased in each item of a long list": {
 			// Each alias counts as a node of the document, so the 150
 			// aliases stay a small enough share of what a decode reads.
-			input: "base: &b {os: linux, arch: amd64, go: stable, cgo: false}\nmatrix:\n" +
-				strings.Repeat("  - *b\n", 150),
+			input: stringtest.LinesLF(
+				"base: &b {os: linux, arch: amd64, go: stable, cgo: false}",
+				"matrix:",
+			) + strings.Repeat("  - *b\n", 150),
 		},
 		"a mapping of 200 keys aliased under 150 keys": {input: yamltest.AliasedMapping(200, 150)},
 		"a mapping of 1000 keys aliased under 300 keys": {
@@ -12722,8 +12724,10 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 	// To decode a type that reads text, the decoder writes the node out
 	// with a copy of the long scalar at each alias. A plain string shares
 	// the scalar between the aliases, so it decodes.
-	manyAliases := "a: &a " + strings.Repeat("x", 2000) + "\n" +
-		"kind: " + yamltest.FlowSequence("*a", 500) + "\n"
+	manyAliases := stringtest.LinesLF(
+		"a: &a "+strings.Repeat("x", 2000),
+		"kind: "+yamltest.FlowSequence("*a", 500),
+	)
 	kind := paths.Current().Child("kind")
 
 	plainText := niceyaml.WithCustomUnmarshaler(func(_ context.Context, a *aliasPlain, decode func(any) error) error {
