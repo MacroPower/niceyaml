@@ -1746,26 +1746,37 @@ func TestPrinter_WordWrap(t *testing.T) {
 	}
 }
 
-func TestPrinter_WordWrap_NarrowWidth(t *testing.T) {
+func TestPrinter_WordWrap_RowsFit(t *testing.T) {
 	t.Parallel()
 
-	// Only a width of 0 turns wrapping off. A positive width at or below the
-	// gutter width still wraps, at one column of content per row.
-	input := "key: this is a long value"
-	view := niceyaml.NewSourceFromString(input).View()
+	const (
+		short = "key: this is a long value"
+		long  = "name: some-very-long-name-that-will-wrap-around-the-viewport-width-for-sure\n"
+	)
 
 	tcs := map[string]struct {
+		input string
 		width int
+		want  int // Width every row fits.
 	}{
-		"width below the gutter":    {width: 3},
-		"width equal to the gutter": {width: 5},
-		"width one past the gutter": {width: 6},
+		// Only a width of 0 turns wrapping off. A positive width at or below
+		// the gutter width still wraps, at one column of content per row.
+		"width below the gutter":    {input: short, width: 3, want: 6},
+		"width equal to the gutter": {input: short, width: 5, want: 6},
+		"width one past the gutter": {input: short, width: 6, want: 6},
+		// A breakpoint character just past the wrap width can leave a row
+		// wider than the width, and every row must still fit.
+		"breakpoint past a width of 12": {input: long, width: 12, want: 12},
+		"breakpoint past a width of 13": {input: long, width: 13, want: 13},
+		"breakpoint past a width of 14": {input: long, width: 14, want: 14},
+		"breakpoint past a width of 16": {input: long, width: 16, want: 16},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
+			view := niceyaml.NewSourceFromString(tc.input).View()
 			p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(tc.width))
 
 			got := p.Print(view)
@@ -1773,7 +1784,7 @@ func TestPrinter_WordWrap_NarrowWidth(t *testing.T) {
 
 			assert.Greater(t, len(rows), 1)
 			assert.Equal(t, []int{len(rows)}, layoutRows(p.Layout(view)))
-			assertRowsFit(t, got, 6)
+			assertRowsFit(t, got, tc.want)
 		})
 	}
 }
@@ -1988,24 +1999,6 @@ func TestPrinter_WordWrap_SpaceCluster(t *testing.T) {
 			// Each letter shows on one row, which RowOf must name.
 			assertRowOfRunes(t, l, tc.input, strings.Split(got, "\n"), unicode.IsLetter)
 		})
-	}
-}
-
-func TestPrinter_WordWrap_BreakpointPastWidth(t *testing.T) {
-	t.Parallel()
-
-	// A breakpoint character just past the wrap width can leave a row
-	// wider than the width, and every row must still fit.
-	input := "name: some-very-long-name-that-will-wrap-around-the-viewport-width-for-sure\n"
-	view := niceyaml.NewSourceFromString(input).View()
-
-	for _, width := range []int{12, 13, 14, 16} {
-		p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(width))
-
-		got := p.Print(view)
-
-		assert.Equal(t, []int{lipgloss.Height(got)}, layoutRows(p.Layout(view)))
-		assertRowsFit(t, got, width)
 	}
 }
 
