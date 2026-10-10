@@ -88,17 +88,11 @@ func BenchmarkResolver_Nodes_RecursiveChained(b *testing.B) {
 // grows.
 func BenchmarkResolver_Node_WideMapping(b *testing.B) {
 	for _, keys := range []int{1000, 4000, 16000} {
-		var sb strings.Builder
-
-		for i := range keys {
-			fmt.Fprintf(&sb, "k%d: %d\n", i, i)
-		}
-
-		doc := yamltest.FirstDocument(b, sb.String()).DocumentAST()
+		doc := yamltest.FirstDocument(b, yamltest.GenerateYAML(keys)).DocumentAST()
 
 		ps := make([]paths.Path, keys)
 		for i := range keys {
-			ps[i] = paths.Doc().Child(fmt.Sprintf("k%d", i))
+			ps[i] = paths.Doc().Child(fmt.Sprintf("key_%d", i))
 		}
 
 		b.Run(fmt.Sprintf("keys_%d", keys), func(b *testing.B) {
