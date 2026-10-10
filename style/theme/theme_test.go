@@ -456,9 +456,7 @@ func TestPalette_KindStyles(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			th, ok := theme.Builtin().Get(tc.theme)
-			require.True(t, ok)
-			assert.Equal(t, tc.want, style.Encode(th.Style(tc.kind)))
+			assert.Equal(t, tc.want, style.Encode(builtin(t, tc.theme).Style(tc.kind)))
 		})
 	}
 }
@@ -539,8 +537,7 @@ func TestPalette_ErrorAndDiffBadgesReadable(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			th, ok := theme.Builtin().Get(tc.theme)
-			require.True(t, ok)
+			th := builtin(t, tc.theme)
 
 			st := th.Style(tc.kind)
 			assert.GreaterOrEqual(t, yamltest.Contrast(st.GetForeground(), st.GetBackground()), 4.5,
@@ -555,25 +552,22 @@ func TestPalette_DirectivesMatchSourceComments(t *testing.T) {
 	// These source themes draw CommentPreproc in plain italic, the same as
 	// their comments, and reserve bold for CommentPreprocFile, so YAML
 	// directives must render like comments.
-	tests := map[string]struct {
-		theme string
-	}{
-		"catppuccin-frappe":    {theme: "catppuccin-frappe"},
-		"catppuccin-latte":     {theme: "catppuccin-latte"},
-		"catppuccin-macchiato": {theme: "catppuccin-macchiato"},
-		"catppuccin-mocha":     {theme: "catppuccin-mocha"},
-		"tokyonight-day":       {theme: "tokyonight-day"},
-		"tokyonight-moon":      {theme: "tokyonight-moon"},
-		"tokyonight-night":     {theme: "tokyonight-night"},
-		"tokyonight-storm":     {theme: "tokyonight-storm"},
+	themes := []string{
+		"catppuccin-frappe",
+		"catppuccin-latte",
+		"catppuccin-macchiato",
+		"catppuccin-mocha",
+		"tokyonight-day",
+		"tokyonight-moon",
+		"tokyonight-night",
+		"tokyonight-storm",
 	}
 
-	for name, tc := range tests {
+	for _, name := range themes {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			th, ok := theme.Builtin().Get(tc.theme)
-			require.True(t, ok)
+			th := builtin(t, name)
 
 			got := th.Style(kind.CommentPreproc)
 			assert.False(t, got.GetBold(), "CommentPreproc is bold")
@@ -632,8 +626,7 @@ func TestPalette_DiffAndErrorKindsUpright(t *testing.T) {
 		t.Run(name+" diff lines", func(t *testing.T) {
 			t.Parallel()
 
-			th, ok := theme.Builtin().Get(name)
-			require.True(t, ok)
+			th := builtin(t, name)
 
 			for _, k := range []kind.Kind{kind.GenericDeleted, kind.GenericInserted} {
 				assert.False(t, th.Style(k).GetBold(), "%s renders bold", k)
@@ -648,11 +641,8 @@ func TestPalette_TokyonightStormSurface(t *testing.T) {
 	// Storm and Night share every syntax color and part ways on their
 	// surfaces, so Storm renders on #24283b with #1f2335 behind the diff
 	// marks.
-	night, ok := theme.Builtin().Get("tokyonight-night")
-	require.True(t, ok)
-
-	storm, ok := theme.Builtin().Get("tokyonight-storm")
-	require.True(t, ok)
+	night := builtin(t, "tokyonight-night")
+	storm := builtin(t, "tokyonight-storm")
 
 	assert.NotEqual(t,
 		night.Style(kind.Text).GetBackground(),
@@ -750,7 +740,7 @@ func TestPalette_HeadingsReadable(t *testing.T) {
 				got := yamltest.Contrast(st.GetForeground(), st.GetBackground())
 
 				for _, body := range []color.Color{text.GetForeground(), text.GetBackground()} {
-					if _, unset := body.(lipgloss.NoColor); unset {
+					if unset(body) {
 						continue
 					}
 
@@ -797,7 +787,7 @@ func TestPalette_HighlightsReadable(t *testing.T) {
 			text := styles.Style(kind.Text)
 
 			bg := text.GetBackground()
-			if _, unset := bg.(lipgloss.NoColor); unset {
+			if unset(bg) {
 				t.Skip("theme leaves the background to the terminal")
 			}
 
@@ -904,7 +894,7 @@ func TestPalette_SurfaceHeadingsReadable(t *testing.T) {
 			text := styles.Style(kind.Text)
 
 			bg := text.GetBackground()
-			if _, unset := bg.(lipgloss.NoColor); unset {
+			if unset(bg) {
 				t.Skip("theme leaves the background to the terminal")
 			}
 
@@ -935,7 +925,7 @@ func TestPalette_ChromeReadable(t *testing.T) {
 			styles := th.Styles()
 
 			bg := styles.Style(kind.Text).GetBackground()
-			if _, unset := bg.(lipgloss.NoColor); unset {
+			if unset(bg) {
 				t.Skip("theme leaves the background to the terminal")
 			}
 
@@ -981,15 +971,29 @@ func standsOut(token, marked lipgloss.Style) bool {
 	}
 
 	a, b := token.GetForeground(), marked.GetForeground()
-
-	_, aUnset := a.(lipgloss.NoColor)
-	_, bUnset := b.(lipgloss.NoColor)
-
-	if aUnset || bUnset {
-		return aUnset != bUnset
+	if unset(a) || unset(b) {
+		return unset(a) != unset(b)
 	}
 
 	return distance(a, b) >= minMarkDistance
+}
+
+// builtin returns the built-in theme of the given name. The test fails
+// when no built-in theme has that name.
+func builtin(t *testing.T, name string) theme.Theme {
+	t.Helper()
+
+	th, ok := theme.Builtin().Get(name)
+	require.True(t, ok, "no built-in theme %q", name)
+
+	return th
+}
+
+// unset reports whether c is a color that a style leaves to the terminal.
+func unset(c color.Color) bool {
+	_, ok := c.(lipgloss.NoColor)
+
+	return ok
 }
 
 // distance returns the CIEDE2000 distance between a and b, on
