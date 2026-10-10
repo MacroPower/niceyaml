@@ -37,6 +37,17 @@ func writeSchema(t *testing.T, name string, data []byte) string {
 	return path
 }
 
+// mapFS returns a file system that holds files, a map from
+// slash-separated path to content.
+func mapFS(files map[string]string) fstest.MapFS {
+	fsys := fstest.MapFS{}
+	for name, data := range files {
+		fsys[name] = &fstest.MapFile{Data: []byte(data)}
+	}
+
+	return fsys
+}
+
 func TestFile(t *testing.T) {
 	t.Parallel()
 
@@ -215,7 +226,7 @@ func TestFile_HashInName(t *testing.T) {
 			ref: schema.File(path),
 		},
 		"in a file system": {
-			ref: schema.FileFS(fstest.MapFS{"a#b.json": &fstest.MapFile{Data: []byte(data)}}, "a#b.json"),
+			ref: schema.FileFS(mapFS(map[string]string{"a#b.json": data}), "a#b.json"),
 		},
 		"under WithFSAt": {
 			ref:  schema.File(path),
@@ -251,13 +262,11 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 
 	elsewhere := t.TempDir()
 
-	bundle := fstest.MapFS{
-		"configs/app.yaml": &fstest.MapFile{
-			Data: []byte("# yaml-language-server: $schema=../schemas/root.json\nname: 5\n"),
-		},
-		"schemas/root.json": &fstest.MapFile{Data: []byte(`{"properties": {"name": {"$ref": "defs.json"}}}`)},
-		"schemas/defs.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
-	}
+	bundle := mapFS(map[string]string{
+		"configs/app.yaml":  "# yaml-language-server: $schema=../schemas/root.json\nname: 5\n",
+		"schemas/root.json": `{"properties": {"name": {"$ref": "defs.json"}}}`,
+		"schemas/defs.json": `{"type": "string"}`,
+	})
 
 	gone := filepath.Join(t.TempDir(), "gone")
 	require.NoError(t, os.Mkdir(gone, 0o700))

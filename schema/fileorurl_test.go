@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -428,9 +427,9 @@ func TestRefBeside(t *testing.T) {
 
 	const schemaData = `{"type": "object", "required": ["kind"]}`
 
-	bundle := fstest.MapFS{
-		"configs/schema.json": &fstest.MapFile{Data: []byte(schemaData)},
-	}
+	bundle := mapFS(map[string]string{
+		"configs/schema.json": schemaData,
+	})
 
 	dir := filepath.Dir(writeSchema(t, "schema.json", []byte(schemaData)))
 
@@ -515,9 +514,9 @@ func TestRefBeside(t *testing.T) {
 	t.Run("the origin of a layered value names a file beside its layer", func(t *testing.T) {
 		t.Parallel()
 
-		layered := fstest.MapFS{
-			"configs/prod/schema.json": &fstest.MapFile{Data: []byte(schemaData)},
-		}
+		layered := mapFS(map[string]string{
+			"configs/prod/schema.json": schemaData,
+		})
 
 		base := niceyaml.NewSourceFromString("kind: App\n",
 			niceyaml.WithFilePath("configs/app.yaml"), niceyaml.WithFS(layered))

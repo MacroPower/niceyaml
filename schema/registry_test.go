@@ -1900,13 +1900,11 @@ func TestRegistry_FileFS(t *testing.T) {
 
 	schemaData := []byte(`{"type": "object", "required": ["kind"]}`)
 
-	bundle := fstest.MapFS{
-		"configs/app.yaml": &fstest.MapFile{
-			Data: []byte("# yaml-language-server: $schema=./app.schema.json\nkind: App\n"),
-		},
-		"configs/app.schema.json": &fstest.MapFile{Data: schemaData},
-		"schemas/pod.json":        &fstest.MapFile{Data: schemaData},
-	}
+	bundle := mapFS(map[string]string{
+		"configs/app.yaml":        "# yaml-language-server: $schema=./app.schema.json\nkind: App\n",
+		"configs/app.schema.json": string(schemaData),
+		"schemas/pod.json":        string(schemaData),
+	})
 
 	// The working directory holds none of these files, so a read that
 	// went to it would fail.
@@ -1954,11 +1952,9 @@ func TestRegistry_FileFS(t *testing.T) {
 	t.Run("a directive with a fragment selects a subschema", func(t *testing.T) {
 		t.Parallel()
 
-		fsys := fstest.MapFS{
-			"configs/defs.json": &fstest.MapFile{
-				Data: []byte(`{"$defs": {"Foo": {"$ref": "#/$defs/Name"}, "Name": {"required": ["name"]}}}`),
-			},
-		}
+		fsys := mapFS(map[string]string{
+			"configs/defs.json": `{"$defs": {"Foo": {"$ref": "#/$defs/Name"}, "Name": {"required": ["name"]}}}`,
+		})
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
@@ -1986,12 +1982,10 @@ func TestRegistry_FileFS(t *testing.T) {
 	t.Run("a $ref through the parent stays in the file system", func(t *testing.T) {
 		t.Parallel()
 
-		fsys := fstest.MapFS{
-			"schemas/app/main.json": &fstest.MapFile{
-				Data: []byte(`{"properties": {"a": {"$ref": "../defs/a.json"}}}`),
-			},
-			"schemas/defs/a.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
-		}
+		fsys := mapFS(map[string]string{
+			"schemas/app/main.json": `{"properties": {"a": {"$ref": "../defs/a.json"}}}`,
+			"schemas/defs/a.json":   `{"type": "string"}`,
+		})
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.FileFS(fsys, "schemas/app/main.json")))
 
@@ -2018,11 +2012,9 @@ func TestRegistry_FileFS(t *testing.T) {
 	t.Run("a missing $ref reports the path in the file system", func(t *testing.T) {
 		t.Parallel()
 
-		fsys := fstest.MapFS{
-			"schemas/root.json": &fstest.MapFile{
-				Data: []byte(`{"properties": {"a": {"$ref": "defs.json"}}}`),
-			},
-		}
+		fsys := mapFS(map[string]string{
+			"schemas/root.json": `{"properties": {"a": {"$ref": "defs.json"}}}`,
+		})
 
 		for name, mode := range refModes {
 			t.Run(name, func(t *testing.T) {
@@ -2101,7 +2093,7 @@ func TestRegistry_FileFS(t *testing.T) {
 	t.Run("a file and a loadable with one name stay apart", func(t *testing.T) {
 		t.Parallel()
 
-		fsys := fstest.MapFS{"s.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)}}
+		fsys := mapFS(map[string]string{"s.json": `{"type": "string"}`})
 
 		file := schema.FileFS(fsys, "s.json")
 		loadable := schema.Loadable("s.json", func(context.Context) ([]byte, error) {
@@ -2246,16 +2238,16 @@ func TestRegistry_FileSystems(t *testing.T) {
 
 	// Both file systems and the directory on disk hold the same paths.
 	// The schemas differ, and so do the documents their $ref names.
-	stringFS := fstest.MapFS{
-		"configs/app.yaml":    &fstest.MapFile{Data: []byte(directive + "v: x\n")},
-		"configs/schema.json": &fstest.MapFile{Data: []byte(wantsString)},
-		"configs/defs.json":   &fstest.MapFile{Data: []byte(stringDef)},
-	}
-	integerFS := fstest.MapFS{
-		"configs/app.yaml":    &fstest.MapFile{Data: []byte(directive + "v: 5\n")},
-		"configs/schema.json": &fstest.MapFile{Data: []byte(wantsInteger)},
-		"configs/defs.json":   &fstest.MapFile{Data: []byte(integerDef)},
-	}
+	stringFS := mapFS(map[string]string{
+		"configs/app.yaml":    directive + "v: x\n",
+		"configs/schema.json": wantsString,
+		"configs/defs.json":   stringDef,
+	})
+	integerFS := mapFS(map[string]string{
+		"configs/app.yaml":    directive + "v: 5\n",
+		"configs/schema.json": wantsInteger,
+		"configs/defs.json":   integerDef,
+	})
 
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{
@@ -2589,10 +2581,10 @@ func TestRegistry_WithFSAt(t *testing.T) {
 		t.Parallel()
 
 		schemaData := []byte(`{"type": "object", "required": ["kind"]}`)
-		bundle := fstest.MapFS{
-			"configs/app.schema.json": &fstest.MapFile{Data: schemaData},
-			"schemas/pod.json":        &fstest.MapFile{Data: schemaData},
-		}
+		bundle := mapFS(map[string]string{
+			"configs/app.schema.json": string(schemaData),
+			"schemas/pod.json":        string(schemaData),
+		})
 
 		wd, err := os.Getwd()
 		require.NoError(t, err)
@@ -2794,12 +2786,10 @@ func TestRegistry_DocumentOutsideFileSystem(t *testing.T) {
 //
 //nolint:paralleltest // See above.
 func TestRegistry_FileSystemAfterChdir(t *testing.T) {
-	bundle := fstest.MapFS{
-		"schemas/config.json": &fstest.MapFile{
-			Data: []byte(`{"properties": {"a": {"$ref": "defs.json"}}}`),
-		},
-		"schemas/defs.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
-	}
+	bundle := mapFS(map[string]string{
+		"schemas/config.json": `{"properties": {"a": {"$ref": "defs.json"}}}`,
+		"schemas/defs.json":   `{"type": "string"}`,
+	})
 
 	const rel = "schemas/config.json"
 
@@ -2857,14 +2847,14 @@ func TestRegistry_FileSystemAfterChdir(t *testing.T) {
 //
 //nolint:paralleltest // See above.
 func TestRegistry_FileFS_AnyWorkingDirectory(t *testing.T) {
-	bundle := fstest.MapFS{
-		"x/s.json":    &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
-		"s.json":      &fstest.MapFile{Data: []byte(`{"type": "integer"}`)},
-		"x/main.json": &fstest.MapFile{Data: []byte(`{"$ref": "defs.json"}`)},
-		"x/defs.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
-		"other.json":  &fstest.MapFile{Data: []byte(`{"$ref": "defs.json"}`)},
-		"defs.json":   &fstest.MapFile{Data: []byte(`{"type": "integer"}`)},
-	}
+	bundle := mapFS(map[string]string{
+		"x/s.json":    `{"type": "string"}`,
+		"s.json":      `{"type": "integer"}`,
+		"x/main.json": `{"$ref": "defs.json"}`,
+		"x/defs.json": `{"type": "string"}`,
+		"other.json":  `{"$ref": "defs.json"}`,
+		"defs.json":   `{"type": "integer"}`,
+	})
 
 	// Each Ref is FileFS(bundle, path) run from dir under a temporary
 	// base, and its schema accepts only values of the JSON type want.
@@ -2981,7 +2971,7 @@ func TestRegistry_WithFSAt_RelativeDocument(t *testing.T) {
 //
 //nolint:paralleltest // See above.
 func TestRegistry_WithFSAt_RelativeDirectory(t *testing.T) {
-	bundle := fstest.MapFS{"s.json": &fstest.MapFile{Data: []byte(`{"type": "object"}`)}}
+	bundle := mapFS(map[string]string{"s.json": `{"type": "object"}`})
 
 	before, at, after := t.TempDir(), t.TempDir(), t.TempDir()
 
@@ -3449,10 +3439,10 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 	tmpDir := t.TempDir()
 	writeFiles(t, tmpDir, map[string]string{"root.json": rootSchema})
 
-	bundle := fstest.MapFS{
-		"schemas/root.json": &fstest.MapFile{Data: []byte(rootSchema)},
-		"schemas/two.json":  &fstest.MapFile{Data: []byte(twoSchema)},
-	}
+	bundle := mapFS(map[string]string{
+		"schemas/root.json": rootSchema,
+		"schemas/two.json":  twoSchema,
+	})
 
 	base := serve(t, map[string]string{"/s/root.json": rootSchema})
 
@@ -3981,10 +3971,10 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 	tmpDir := t.TempDir()
 	writeFiles(t, tmpDir, map[string]string{"main.json": mainSchema, "defs.json": defsSchema})
 
-	bundle := fstest.MapFS{
-		"schemas/main.json": &fstest.MapFile{Data: []byte(mainSchema)},
-		"schemas/defs.json": &fstest.MapFile{Data: []byte(defsSchema)},
-	}
+	bundle := mapFS(map[string]string{
+		"schemas/main.json": mainSchema,
+		"schemas/defs.json": defsSchema,
+	})
 
 	// The defs file on disk, and the directory that holds it as a base.
 	defsURL := "file://" + filepath.ToSlash(filepath.Join(tmpDir, "defs.json"))
