@@ -908,29 +908,6 @@ func TestTokenize_PlaceholderPosition(t *testing.T) {
 	}
 }
 
-func TestTokenize_RepairsPositionsAfterTruncatedLastToken(t *testing.T) {
-	t.Parallel()
-
-	// The lexer places a token one rune short after a tag. When the last
-	// token's text is not in the source, every position must still move to
-	// where the source holds the text.
-	tks := tokens.Tokenize("a: !!str x\nname: \"Caf\\u00e9\"\n")
-	require.NotEmpty(t, tks)
-
-	var x *token.Token
-
-	for _, tk := range tks {
-		if tk.Value == "x" {
-			x = tk
-		}
-	}
-
-	require.NotNil(t, x)
-	assert.Equal(t, 1, x.Position.Line)
-	assert.Equal(t, 10, x.Position.Column)
-	assert.Equal(t, 10, x.Position.Offset)
-}
-
 func TestTokenize_RestoresDroppedLineBreaks(t *testing.T) {
 	t.Parallel()
 
@@ -2292,6 +2269,13 @@ func TestTokenize_Positions(t *testing.T) {
 		"value after a tag": {
 			input: "t: !!str s\n...",
 			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:10:10", "2:1:12"},
+		},
+		"value after a tag before a truncated last token": {
+			// The lexer places a token one rune short after a tag. When
+			// the last token's text is not in the source, every position
+			// must still move to where the source holds the text.
+			input: "a: !!str x\nname: \"Caf\\u00e9\"\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:10:10", "2:1:12", "2:5:16", "2:7:18"},
 		},
 		"block scalar at the end": {
 			input: "k: |\n    hello\n    world\n",
