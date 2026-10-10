@@ -18,21 +18,30 @@ func BenchmarkNode_Decode_ProblemsNested(b *testing.B) {
 	for _, depth := range []int{500, 1000, 2000, 4000} {
 		doc := yamltest.FirstDocument(b, deepDocument(depth))
 
-		b.Run(fmt.Sprintf("depth_%d", depth), func(b *testing.B) {
-			b.ReportAllocs()
-
-			for b.Loop() {
-				var v problemDeep
-
-				err := doc.DecodeInto(b.Context(), &v)
-				if !errors.Is(err, niceyaml.ErrDecode) {
-					b.Fatalf("got %v, want a rejection", err)
-				}
-			}
-
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*depth), "ns/level")
-		})
+		benchRejected[problemDeep](b, fmt.Sprintf("depth_%d", depth), doc, depth, "level")
 	}
+}
+
+// benchRejected runs a benchmark under name that decodes doc into a new
+// T in each iteration and stops unless the decoder rejects it. It reports
+// the time per unit, of which doc holds count.
+func benchRejected[T any](b *testing.B, name string, doc *niceyaml.Node, count int, unit string) {
+	b.Helper()
+
+	b.Run(name, func(b *testing.B) {
+		b.ReportAllocs()
+
+		for b.Loop() {
+			var v T
+
+			err := doc.DecodeInto(b.Context(), &v)
+			if !errors.Is(err, niceyaml.ErrDecode) {
+				b.Fatalf("got %v, want a rejection", err)
+			}
+		}
+
+		b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*count), "ns/"+unit)
+	})
 }
 
 // BenchmarkNode_Decode_ProblemsWide decodes a list of servers. In the
@@ -68,20 +77,7 @@ func BenchmarkNode_Decode_ProblemsWide(b *testing.B) {
 
 		doc := yamltest.FirstDocument(b, sb.String())
 
-		b.Run(layout.name, func(b *testing.B) {
-			b.ReportAllocs()
-
-			for b.Loop() {
-				var v problemConfig
-
-				err := doc.DecodeInto(b.Context(), &v)
-				if !errors.Is(err, niceyaml.ErrDecode) {
-					b.Fatalf("got %v, want a rejection", err)
-				}
-			}
-
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*layout.servers), "ns/server")
-		})
+		benchRejected[problemConfig](b, layout.name, doc, layout.servers, "server")
 	}
 }
 
@@ -125,21 +121,8 @@ func BenchmarkNode_Decode_ProblemsText(b *testing.B) {
 
 		doc := yamltest.FirstDocument(b, sb.String())
 
-		b.Run(layout.name, func(b *testing.B) {
-			b.ReportAllocs()
-
-			for b.Loop() {
-				var v struct {
-					Servers []problemTiered `yaml:"servers"`
-				}
-
-				err := doc.DecodeInto(b.Context(), &v)
-				if !errors.Is(err, niceyaml.ErrDecode) {
-					b.Fatalf("got %v, want a rejection", err)
-				}
-			}
-
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*layout.servers), "ns/server")
-		})
+		benchRejected[struct {
+			Servers []problemTiered `yaml:"servers"`
+		}](b, layout.name, doc, layout.servers, "server")
 	}
 }
