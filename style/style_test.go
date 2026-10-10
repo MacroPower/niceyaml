@@ -12,6 +12,16 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
+// assertStyles asserts that styles holds the style want names for each of
+// its kinds.
+func assertStyles(t *testing.T, want map[kind.Kind]lipgloss.Style, styles style.Styles) {
+	t.Helper()
+
+	for k := range want {
+		assert.Equal(t, want[k], styles.Style(k), "kind %q", k)
+	}
+}
+
 func TestNew(t *testing.T) {
 	t.Parallel()
 
@@ -79,9 +89,7 @@ func TestNew(t *testing.T) {
 
 			styles := style.New(base, tc.opts...)
 
-			for k := range tc.want {
-				assert.Equal(t, tc.want[k], styles.Style(k), "kind %q", k)
-			}
+			assertStyles(t, tc.want, styles)
 		})
 	}
 }
@@ -143,10 +151,7 @@ func TestStyles_With(t *testing.T) {
 			t.Parallel()
 
 			result := original.With(tc.opts...)
-
-			for k := range tc.want {
-				assert.Equal(t, tc.want[k], result.Style(k), "kind %q", k)
-			}
+			assertStyles(t, tc.want, result)
 
 			// The original is not modified. The custom key is unset in it,
 			// so it inherits the base.
@@ -271,9 +276,7 @@ func TestInherit(t *testing.T) {
 
 			styles := style.New(base, tc.opts...)
 
-			for k := range tc.want {
-				assert.Equal(t, tc.want[k], styles.Style(k), "kind %q", k)
-			}
+			assertStyles(t, tc.want, styles)
 		})
 	}
 
