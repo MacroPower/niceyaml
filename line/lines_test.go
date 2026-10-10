@@ -1,6 +1,7 @@
 package line_test
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -711,6 +712,11 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 				doc2: value2
 			`),
 		},
+		// The chain never crosses a line, including after a gap the
+		// builder flushes.
+		"gap after multi-part token": {input: "''\n\n:"},
+		"quoted scalar before a key": {input: "s: 'q\nr'\n\r\n: v\n   \nj: 1\n"},
+		"sequence end before a key":  {input: "]\n\n:"},
 	}
 
 	for name, tc := range tcs {
@@ -725,13 +731,7 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 				parts := ln.Tokens()
 				require.NotEmpty(t, parts, "line %d", ln.Number())
 
-				assert.Nil(t, parts[0].Prev, "line %d first part Prev", ln.Number())
-				assert.Nil(t, parts[len(parts)-1].Next, "line %d last part Next", ln.Number())
-
-				for j := range len(parts) - 1 {
-					assert.Same(t, parts[j+1], parts[j].Next, "line %d part %d Next", ln.Number(), j)
-					assert.Same(t, parts[j], parts[j+1].Prev, "line %d part %d Prev", ln.Number(), j+1)
-				}
+				assertLinked(t, fmt.Sprintf("line %d", ln.Number()), parts)
 			}
 		})
 	}
@@ -1777,34 +1777,6 @@ func TestNewLines_TrailingBlankLines(t *testing.T) {
 			lines := line.NewLines(tokens.Tokenize(tc.input))
 
 			assert.Equal(t, tc.want, lines.Len())
-		})
-	}
-}
-
-// TestNewLines_PartLinksStopAtLineBoundary verifies that the per-line part
-// chain never crosses a line, including after a gap the builder flushes.
-func TestNewLines_PartLinksStopAtLineBoundary(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]string{
-		"gap after multi-part token": "''\n\n:",
-		"quoted scalar before a key": "s: 'q\nr'\n\r\n: v\n   \nj: 1\n",
-		"sequence end before a key":  "]\n\n:",
-	}
-
-	for name, input := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			for _, ln := range line.NewLines(tokens.Tokenize(input)).All() {
-				parts := ln.Tokens()
-				if len(parts) == 0 {
-					continue
-				}
-
-				assert.Nil(t, parts[0].Prev, "line %d first part has a Prev", ln.Number())
-				assert.Nil(t, parts[len(parts)-1].Next, "line %d last part has a Next", ln.Number())
-			}
 		})
 	}
 }
