@@ -72,11 +72,7 @@ func TestViolation(t *testing.T) {
 		"type": {
 			schema: `{"properties": {"name": {"type": "string"}}}`,
 			input:  "name: 123\n",
-			want: []schema.Violation{{
-				Keyword:    "type",
-				SchemaPath: "/properties/name/type",
-				Message:    `expected "string", got "integer"`,
-			}},
+			want:   []schema.Violation{nameType},
 		},
 		"required": {
 			schema: `{"required": ["name"]}`,
@@ -151,11 +147,7 @@ func TestViolation(t *testing.T) {
 			}`,
 			input: "name: 123\n",
 			want: []schema.Violation{
-				{
-					Keyword:    "type",
-					SchemaPath: "/properties/name/type",
-					Message:    `expected "string", got "integer"`,
-				},
+				nameType,
 				{
 					Keyword:    "required",
 					SchemaPath: "/required",
@@ -179,6 +171,14 @@ func TestViolation(t *testing.T) {
 			assert.ElementsMatch(t, tc.want, violations(err))
 		})
 	}
+}
+
+// nameType is the violation of a name that holds an integer where its
+// schema takes a string.
+var nameType = schema.Violation{
+	Keyword:    "type",
+	SchemaPath: "/properties/name/type",
+	Message:    `expected "string", got "integer"`,
 }
 
 // nameAndAge is a schema that takes a string for the member name and an
@@ -238,11 +238,7 @@ func TestViolation_Binding(t *testing.T) {
 
 		err := yamltest.At(t, doc, paths.Current().Child("spec")).Validate(t.Context(), v)
 
-		assert.Equal(t, []schema.Violation{{
-			Keyword:    "type",
-			SchemaPath: "/properties/name/type",
-			Message:    `expected "string", got "integer"`,
-		}}, violations(err))
+		assert.Equal(t, []schema.Violation{nameType}, violations(err))
 	})
 }
 
@@ -609,11 +605,7 @@ func TestViolation_Value(t *testing.T) {
 
 		require.ErrorAs(t, err, &located)
 
-		assert.Equal(t, schema.Violation{
-			Keyword:    "type",
-			SchemaPath: "/properties/name/type",
-			Message:    `expected "string", got "integer"`,
-		}, *requireViolation(t, located))
+		assert.Equal(t, nameType, *requireViolation(t, located))
 	})
 
 	t.Run("several violations", func(t *testing.T) {
