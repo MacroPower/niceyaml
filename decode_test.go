@@ -1284,20 +1284,6 @@ func TestDocument_Decode(t *testing.T) {
 	})
 }
 
-func TestDocument_Decode_TypeMismatch(t *testing.T) {
-	t.Parallel()
-
-	t.Run("string to int", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "value: not_a_number")
-
-		_, err := dd.Decode[struct{ Value int }](t.Context())
-
-		require.ErrorAs(t, err, new(*niceyaml.Error))
-	})
-}
-
 func TestDocument_Decode_Schema(t *testing.T) {
 	t.Parallel()
 
@@ -2844,20 +2830,6 @@ func (c accumulatingConfig) Validate() error {
 	return err
 }
 
-func TestDocument_Decode_SchemaThenDecodeError(t *testing.T) {
-	t.Parallel()
-
-	// Test when the decode after validation fails.
-	dd := yamltest.FirstDocument(t, `value: not_a_number`)
-
-	// Schema validation passes, but the decode fails on a type mismatch.
-	_, err := dd.Decode[strictValueConfig](t.Context(),
-		niceyaml.WithValidator(passingValidator()),
-	)
-
-	require.ErrorAs(t, err, new(*niceyaml.Error))
-}
-
 func TestDocument_Decode_SelfValidator(t *testing.T) {
 	t.Parallel()
 
@@ -3015,12 +2987,6 @@ func nameSchema(called *bool) niceyaml.Validator {
 
 		return nil
 	})
-}
-
-// strictValueConfig has a typed field, so decoding a mismatched value fails
-// after schema validation passes.
-type strictValueConfig struct {
-	Value int `yaml:"value"`
 }
 
 func TestDocument_Tokens(t *testing.T) {
@@ -9793,6 +9759,15 @@ func TestErrDecode(t *testing.T) {
 			input:  "value: abc",
 			decode: decodeErrorAs[struct{ Value int }],
 		},
+		// The validator passes, and the decode after it fails.
+		"type mismatch after a validator": {
+			input: "value: abc",
+			decode: func(ctx context.Context, dd *niceyaml.Node) error {
+				_, err := dd.Decode[struct{ Value int }](ctx, niceyaml.WithValidator(passingValidator()))
+
+				return err
+			},
+		},
 		"overflow": {
 			input:  "value: 300",
 			decode: decodeErrorAs[struct{ Value int8 }],
@@ -9860,6 +9835,7 @@ func TestErrDecode(t *testing.T) {
 			err := tc.decode(t.Context(), dd)
 			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
+			require.ErrorAs(t, err, new(*niceyaml.Error))
 			require.ErrorAs(t, err, new(*niceyaml.SourceError), "the rejection is not bound to the source")
 
 			_, ok := errors.AsType[yaml.Error](err)
