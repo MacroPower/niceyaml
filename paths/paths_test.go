@@ -108,155 +108,155 @@ func TestPath_Build(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		build    func() paths.Path
+		path     paths.Path
 		want     string
 		wantYAML string
 	}{
 		"root path": {
-			build: paths.Doc,
-			want:  "$",
+			path: paths.Doc(),
+			want: "$",
 		},
 		"current path": {
-			build:    paths.Current,
+			path:     paths.Current(),
 			want:     "@",
 			wantYAML: "$",
 		},
 		"current path with selectors": {
-			build:    func() paths.Path { return paths.Current().Child("items").Index(0).Key() },
+			path:     paths.Current().Child("items").Index(0).Key(),
 			want:     "@.items[0]~",
 			wantYAML: "$.items[0]",
 		},
 		"chained children": {
-			build: func() paths.Path { return paths.Doc().Child("metadata", "labels") },
-			want:  "$.metadata.labels",
+			path: paths.Doc().Child("metadata", "labels"),
+			want: "$.metadata.labels",
 		},
 		"child then index": {
-			build: func() paths.Path { return paths.Doc().Child("items").Index(0) },
-			want:  "$.items[0]",
+			path: paths.Doc().Child("items").Index(0),
+			want: "$.items[0]",
 		},
 		"variadic index": {
-			build: func() paths.Path { return paths.Doc().Child("matrix").Index(0, 1) },
-			want:  "$.matrix[0][1]",
+			path: paths.Doc().Child("matrix").Index(0, 1),
+			want: "$.matrix[0][1]",
 		},
 		"index all": {
-			build: func() paths.Path { return paths.Doc().Child("items").IndexAll() },
-			want:  "$.items[*]",
+			path: paths.Doc().Child("items").IndexAll(),
+			want: "$.items[*]",
 		},
 		"recursive descent": {
-			build: func() paths.Path { return paths.Doc().Recursive("name") },
-			want:  "$..name",
+			path: paths.Doc().Recursive("name"),
+			want: "$..name",
 		},
 		"large index": {
-			build: func() paths.Path { return paths.Doc().Child("items").Index(999) },
-			want:  "$.items[999]",
+			path: paths.Doc().Child("items").Index(999),
+			want: "$.items[999]",
 		},
 		"recursive with index": {
-			build: func() paths.Path { return paths.Doc().Recursive("items").Index(0) },
-			want:  "$..items[0]",
+			path: paths.Doc().Recursive("items").Index(0),
+			want: "$..items[0]",
 		},
 		"multiple recursive": {
-			build: func() paths.Path { return paths.Doc().Recursive("containers").Recursive("name") },
-			want:  "$..containers..name",
+			path: paths.Doc().Recursive("containers").Recursive("name"),
+			want: "$..containers..name",
 		},
 		"child after index": {
-			build: func() paths.Path { return paths.Doc().Child("items").Index(0).Child("name") },
-			want:  "$.items[0].name",
+			path: paths.Doc().Child("items").Index(0).Child("name"),
+			want: "$.items[0].name",
 		},
 		"index all then index": {
-			build: func() paths.Path { return paths.Doc().Child("matrix").IndexAll().Index(0) },
-			want:  "$.matrix[*][0]",
+			path: paths.Doc().Child("matrix").IndexAll().Index(0),
+			want: "$.matrix[*][0]",
 		},
 		"dotted child name is quoted": {
-			build: func() paths.Path { return paths.Doc().Child("kubernetes.io/name") },
-			want:  "$.'kubernetes.io/name'",
+			path: paths.Doc().Child("kubernetes.io/name"),
+			want: "$.'kubernetes.io/name'",
 		},
 		"child name with quote is quoted and escaped": {
-			build:    func() paths.Path { return paths.Doc().Child("it's") },
+			path:     paths.Doc().Child("it's"),
 			want:     `$.'it\'s'`,
 			wantYAML: "$.it's",
 		},
 		"empty child name is quoted, but goccy leaves it bare": {
-			build:    func() paths.Path { return paths.Doc().Child("") },
+			path:     paths.Doc().Child(""),
 			want:     "$.''",
 			wantYAML: "$.",
 		},
 		"empty recursive name is quoted, but goccy leaves it bare": {
-			build:    func() paths.Path { return paths.Doc().Recursive("") },
+			path:     paths.Doc().Recursive(""),
 			want:     "$..''",
 			wantYAML: "$..",
 		},
 		"child name with brackets is quoted": {
-			build:    func() paths.Path { return paths.Doc().Child("a[0]") },
+			path:     paths.Doc().Child("a[0]"),
 			want:     "$.'a[0]'",
 			wantYAML: "$.a[0]",
 		},
 		"recursive name with a dot is quoted, but goccy cannot quote it": {
-			build:    func() paths.Path { return paths.Doc().Recursive("x.y") },
+			path:     paths.Doc().Recursive("x.y"),
 			want:     "$..'x.y'",
 			wantYAML: "$..x.y",
 		},
 		"key selector, which goccy has no form for": {
-			build:    func() paths.Path { return paths.Doc().Child("spec", "name").Key() },
+			path:     paths.Doc().Child("spec", "name").Key(),
 			want:     "$.spec.name~",
 			wantYAML: "$.spec.name",
 		},
 		"key selector mid-path": {
-			build:    func() paths.Path { return paths.Doc().Child("a").Key().Child("b") },
+			path:     paths.Doc().Child("a").Key().Child("b"),
 			want:     "$.a~.b",
 			wantYAML: "$.a.b",
 		},
 		"name wrapped in single quotes": {
-			build:    func() paths.Path { return paths.Doc().Child("'x'") },
+			path:     paths.Doc().Child("'x'"),
 			want:     `$.'\'x\''`,
 			wantYAML: "$.'x'",
 		},
 		"tilde in a name is quoted": {
-			build:    func() paths.Path { return paths.Doc().Child("a~b") },
+			path:     paths.Doc().Child("a~b"),
 			want:     "$.'a~b'",
 			wantYAML: "$.a~b",
 		},
 		"colon and space in a name are quoted": {
-			build:    func() paths.Path { return paths.Doc().Child("x: y") },
+			path:     paths.Doc().Child("x: y"),
 			want:     "$.'x: y'",
 			wantYAML: "$.x: y",
 		},
 		"trailing space in a name is quoted": {
-			build:    func() paths.Path { return paths.Doc().Child("name ") },
+			path:     paths.Doc().Child("name "),
 			want:     "$.'name '",
 			wantYAML: "$.name ",
 		},
 		"line break in a name is escaped": {
-			build:    func() paths.Path { return paths.Doc().Child("a\nb") },
+			path:     paths.Doc().Child("a\nb"),
 			want:     `$.'a\nb'`,
 			wantYAML: "$.a\nb",
 		},
 		"tab and carriage return in a name are escaped": {
-			build:    func() paths.Path { return paths.Doc().Child("a\tb\rc") },
+			path:     paths.Doc().Child("a\tb\rc"),
 			want:     `$.'a\tb\rc'`,
 			wantYAML: "$.a\tb\rc",
 		},
 		"escape character in a name is escaped": {
-			build:    func() paths.Path { return paths.Doc().Child("a\x1b[31mb") },
+			path:     paths.Doc().Child("a\x1b[31mb"),
 			want:     `$.'a\u001b[31mb'`,
 			wantYAML: "$.a\x1b[31mb",
 		},
 		"delete and a C1 control in a name are escaped": {
-			build:    func() paths.Path { return paths.Doc().Child("a\x7fb\u0085c") },
+			path:     paths.Doc().Child("a\x7fb\u0085c"),
 			want:     `$.'a\u007fb\u0085c'`,
 			wantYAML: "$.a\x7fb\u0085c",
 		},
 		"line and paragraph separators in a name are escaped": {
-			build:    func() paths.Path { return paths.Doc().Child("a\u2028b\u2029c") },
+			path:     paths.Doc().Child("a\u2028b\u2029c"),
 			want:     `$.'a\u2028b\u2029c'`,
 			wantYAML: "$.a\u2028b\u2029c",
 		},
 		"forged line in a name stays on one line": {
-			build:    func() paths.Path { return paths.Doc().Child("a\nother.yaml:9:9: $.secret: forged") },
+			path:     paths.Doc().Child("a\nother.yaml:9:9: $.secret: forged"),
 			want:     `$.'a\nother.yaml:9:9: $.secret: forged'`,
 			wantYAML: "$.'a\nother.yaml:9:9: $.secret: forged'",
 		},
 		"recursive name with a space is quoted": {
-			build:    func() paths.Path { return paths.Doc().Recursive("a b") },
+			path:     paths.Doc().Recursive("a b"),
 			want:     "$..'a b'",
 			wantYAML: "$..a b",
 		},
@@ -266,19 +266,11 @@ func TestPath_Build(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path := tc.build()
-
-			require.NotNil(t, path)
-			assert.Equal(t, tc.want, path.String())
+			assert.Equal(t, tc.want, tc.path.String())
 
 			// The goccy form only differs where goccy quotes a name
 			// differently or has no form for a selector.
-			wantGoccy := tc.wantYAML
-			if wantGoccy == "" {
-				wantGoccy = tc.want
-			}
-
-			assert.Equal(t, wantGoccy, yamlPath(t, path).String())
+			assert.Equal(t, cmp.Or(tc.wantYAML, tc.want), yamlPath(t, tc.path).String())
 		})
 	}
 }
@@ -1714,9 +1706,7 @@ func TestMustParse(t *testing.T) {
 	t.Run("valid expression returns path", func(t *testing.T) {
 		t.Parallel()
 
-		p := paths.MustParse("$.foo.bar")
-		require.NotNil(t, p)
-		assert.Equal(t, "$.foo.bar", p.String())
+		assert.Equal(t, "$.foo.bar", paths.MustParse("$.foo.bar").String())
 	})
 
 	t.Run("panics on invalid expression", func(t *testing.T) {
