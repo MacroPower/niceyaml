@@ -1328,12 +1328,17 @@ func TestDiff_Concurrent(t *testing.T) {
 func TestDiffResult_BeforeAfter(t *testing.T) {
 	t.Parallel()
 
+	oneChange := struct{ before, after string }{"a: 1\nb: 2\n", "a: 1\nb: 3\n"}
+	twoChanges := struct{ before, after string }{"a: 1\nb: 2\nc: 3\n", "a: 1\nb: 3\nc: 4\n"}
+
 	tcs := map[string]struct {
-		before     string
-		after      string
+		before string
+		after  string
+		// Holds the ops of the diff, in place of those the default
+		// algorithm finds.
+		ops        []lcs.Op
 		wantBefore []wantLine
 		wantAfter  []wantLine
-		wantRowLen int
 	}{
 		"no changes": {
 			before: "key: value\n",
@@ -1344,7 +1349,6 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			wantAfter: []wantLine{
 				{content: "key: value", flag: line.FlagDefault},
 			},
-			wantRowLen: 1,
 		},
 		"simple insertion": {
 			before: "a: 1\n",
@@ -1357,7 +1361,6 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 				{content: "a: 1", flag: line.FlagDefault},
 				{content: "b: 2", flag: line.FlagInserted},
 			},
-			wantRowLen: 2,
 		},
 		"simple deletion": {
 			before: "a: 1\nb: 2\n",
@@ -1370,7 +1373,6 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 				{content: "a: 1", flag: line.FlagDefault},
 				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
 			},
-			wantRowLen: 2,
 		},
 		"modification": {
 			before: "key: old\n",
@@ -1381,7 +1383,6 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			wantAfter: []wantLine{
 				{content: "key: new", flag: line.FlagInserted},
 			},
-			wantRowLen: 1,
 		},
 		"consecutive insertions": {
 			before: stringtest.Input(`
@@ -1406,7 +1407,6 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 				{content: "new2: b", flag: line.FlagInserted},
 				{content: "after: 2", flag: line.FlagDefault},
 			},
-			wantRowLen: 4,
 		},
 		"consecutive deletions": {
 			before: stringtest.Input(`
@@ -1431,7 +1431,6 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder for old2.
 				{content: "after: 2", flag: line.FlagDefault},
 			},
-			wantRowLen: 4,
 		},
 		"mixed changes": {
 			before: stringtest.Input(`
@@ -1458,7 +1457,6 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 				{content: "insert2: q", flag: line.FlagInserted},
 				{content: "keep2: b", flag: line.FlagDefault},
 			},
-			wantRowLen: 4,
 		},
 		"unbalanced delete insert": {
 			// More deletes than inserts, so the extra rows are placeholders.
@@ -1488,7 +1486,6 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
 				{content: "end: 2", flag: line.FlagDefault},
 			},
-			wantRowLen: 5,
 		},
 		"unbalanced insert delete": {
 			// More inserts than deletes.
@@ -1518,53 +1515,15 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 				{content: "ins3: z", flag: line.FlagInserted},
 				{content: "end: 2", flag: line.FlagDefault},
 			},
-			wantRowLen: 5,
 		},
 		"both empty": {
 			before:     "",
 			after:      "",
 			wantBefore: nil,
 			wantAfter:  nil,
-			wantRowLen: 0,
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			result := diffStrings(tc.before, tc.after)
-
-			beforeView := result.Before()
-			afterView := result.After()
-
-			// Both views should have the same length.
-			assert.Equal(t, tc.wantRowLen, beforeView.Count(), "Before Count()")
-			assert.Equal(t, tc.wantRowLen, afterView.Count(), "After Count()")
-
-			// Check IsEmpty.
-			assert.Equal(t, tc.wantRowLen == 0, beforeView.Held().IsEmpty(), "Before IsEmpty()")
-			assert.Equal(t, tc.wantRowLen == 0, afterView.Held().IsEmpty(), "After IsEmpty()")
-
-			verifyLines(t, "Before", beforeView, tc.wantBefore)
-			verifyLines(t, "After", afterView, tc.wantAfter)
-		})
-	}
-}
-
-func TestDiffResult_BeforeAfterPairsAnyOrder(t *testing.T) {
-	t.Parallel()
-
-	oneChange := struct{ before, after string }{"a: 1\nb: 2\n", "a: 1\nb: 3\n"}
-	twoChanges := struct{ before, after string }{"a: 1\nb: 2\nc: 3\n", "a: 1\nb: 3\nc: 4\n"}
-
-	tcs := map[string]struct {
-		before     string
-		after      string
-		ops        []lcs.Op
-		wantBefore []wantLine
-		wantAfter  []wantLine
-	}{
+		// An algorithm may return the deletes and inserts of one change in
+		// any order, and the views still pair them row by row.
 		"delete then insert": {
 			before: oneChange.before,
 			after:  oneChange.after,
@@ -1667,13 +1626,28 @@ func TestDiffResult_BeforeAfterPairsAnyOrder(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			before := niceyaml.NewSourceFromString(tc.before).Lines()
-			after := niceyaml.NewSourceFromString(tc.after).Lines()
+			d := diff.New()
+			if tc.ops != nil {
+				d = diff.New(diff.WithAlgorithm(opsAlgorithm(tc.ops)))
+			}
 
-			result := diff.New(diff.WithAlgorithm(opsAlgorithm(tc.ops))).Diff(before, after)
+			result := d.Diff(
+				niceyaml.NewSourceFromString(tc.before).Lines(),
+				niceyaml.NewSourceFromString(tc.after).Lines(),
+			)
 
-			verifyLines(t, "Before", result.Before(), tc.wantBefore)
-			verifyLines(t, "After", result.After(), tc.wantAfter)
+			beforeView := result.Before()
+			afterView := result.After()
+
+			// Both views should have the same length.
+			assert.Equal(t, beforeView.Count(), afterView.Count())
+
+			// Check IsEmpty.
+			assert.Equal(t, len(tc.wantBefore) == 0, beforeView.Held().IsEmpty(), "Before IsEmpty()")
+			assert.Equal(t, len(tc.wantAfter) == 0, afterView.Held().IsEmpty(), "After IsEmpty()")
+
+			verifyLines(t, "Before", beforeView, tc.wantBefore)
+			verifyLines(t, "After", afterView, tc.wantAfter)
 		})
 	}
 }
