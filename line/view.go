@@ -410,7 +410,7 @@ func (v *View) Slice(spans ...position.Span) *View {
 // hunks of hunks match the hunks of the original View at the same or a
 // smaller context. A negative context shows the decorated lines alone,
 // as 0 does, and a View with no decorated line yields a View that holds
-// no line.
+// no line, as a nil View does.
 //
 // The result is a [View.Slice], so the lines keep their indices, a
 // range from the content applies to it, and decoration added after
@@ -426,6 +426,10 @@ func (v *View) Slice(spans ...position.Span) *View {
 //	niceyaml.Annotate(err, view)
 //	lipgloss.Println(p.Print(view.Hunks(2)))
 func (v *View) Hunks(context int) *View {
+	if v == nil {
+		return &View{}
+	}
+
 	var marked []int
 
 	for i := range v.All() {

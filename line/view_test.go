@@ -1918,6 +1918,18 @@ func TestView_Hunks(t *testing.T) {
 		assert.Panics(t, func() { got.Line(8) })
 	})
 
+	t.Run("nil view yields no line", func(t *testing.T) {
+		t.Parallel()
+
+		var view *line.View
+
+		got := view.Hunks(2)
+
+		require.NotNil(t, got)
+		assert.Equal(t, 0, got.Count())
+		assert.Empty(t, got.String())
+	})
+
 	t.Run("a slice yields hunks within the slice", func(t *testing.T) {
 		t.Parallel()
 
