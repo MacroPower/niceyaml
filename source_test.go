@@ -431,6 +431,11 @@ func TestSource_Lines(t *testing.T) {
 
 			assert.Equal(t, stringtest.JoinLF(tc.want...), lines.Content())
 			require.NoError(t, yamltest.ValidateLines(lines))
+
+			// A Source built from the bytes of the input holds the same
+			// lines.
+			fromBytes := niceyaml.NewSourceFromBytes([]byte(tc.input)).Lines()
+			assert.Equal(t, lines.Content(), fromBytes.Content())
 		})
 	}
 }
@@ -1417,14 +1422,6 @@ func TestNewSourceFromTokens_WhitespaceDocument(t *testing.T) {
 			assert.Equal(t, []int{1, 2}, got)
 		})
 	}
-}
-
-func TestNewSourceFromBytes(t *testing.T) {
-	t.Parallel()
-
-	src := []byte("key: value")
-	s := niceyaml.NewSourceFromBytes(src)
-	assert.Equal(t, "key: value", s.Lines().Content())
 }
 
 func TestNewSourceFromString_ByteOrderMark(t *testing.T) {
