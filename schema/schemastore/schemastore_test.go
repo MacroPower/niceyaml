@@ -33,16 +33,37 @@ import (
 // catalogURL is the URL the stores of these tests fetch their catalog from.
 const catalogURL = "https://example.com/catalog.json"
 
-// testCatalog is a one-entry catalog whose pattern matches every YAML file.
-var testCatalog = schemastore.Catalog{
-	Schemas: []schemastore.CatalogEntry{
-		{
-			Name:      "Test",
-			URL:       "https://example.com/test.json",
-			FileMatch: []string{"*.yaml"},
+// The URLs of the schemas that testCatalog and workflowCatalog name.
+const (
+	testSchemaURL     = "https://example.com/test.json"
+	workflowSchemaURL = "https://example.com/github-workflow.json"
+)
+
+// The catalogs that tests share.
+var (
+	// A one-entry catalog whose pattern matches every YAML file.
+	testCatalog = schemastore.Catalog{
+		Schemas: []schemastore.CatalogEntry{
+			{
+				Name:      "Test",
+				URL:       testSchemaURL,
+				FileMatch: []string{"*.yaml"},
+			},
 		},
-	},
-}
+	}
+
+	// A one-entry catalog whose pattern matches the YAML files of a
+	// GitHub workflows directory.
+	workflowCatalog = schemastore.Catalog{
+		Schemas: []schemastore.CatalogEntry{
+			{
+				Name:      "GitHub Workflow",
+				URL:       workflowSchemaURL,
+				FileMatch: []string{".github/workflows/*.yaml"},
+			},
+		},
+	}
+)
 
 func TestSchemaStore_FindMatch(t *testing.T) {
 	t.Parallel()
@@ -1417,38 +1438,18 @@ func TestSchemaStore_Resolve(t *testing.T) {
 	t.Run("matches known pattern", func(t *testing.T) {
 		t.Parallel()
 
-		catalog := schemastore.Catalog{
-			Schemas: []schemastore.CatalogEntry{
-				{
-					Name:      "GitHub Workflow",
-					URL:       "https://json.schemastore.org/github-workflow.json",
-					FileMatch: []string{".github/workflows/*.yaml"},
-				},
-			},
-		}
-
-		store := newStore(newCatalogClient(t, catalog))
+		store := newStore(newCatalogClient(t, workflowCatalog))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
 		ref, err := store.Resolve(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Equal(t, "https://json.schemastore.org/github-workflow.json", ref.Key())
+		assert.Equal(t, workflowSchemaURL, ref.Key())
 	})
 
 	t.Run("no match for unknown file", func(t *testing.T) {
 		t.Parallel()
 
-		catalog := schemastore.Catalog{
-			Schemas: []schemastore.CatalogEntry{
-				{
-					Name:      "GitHub Workflow",
-					URL:       "https://json.schemastore.org/github-workflow.json",
-					FileMatch: []string{".github/workflows/*.yaml"},
-				},
-			},
-		}
-
-		store := newStore(newCatalogClient(t, catalog))
+		store := newStore(newCatalogClient(t, workflowCatalog))
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
 		_, err := store.Resolve(t.Context(), doc)
@@ -1498,21 +1499,9 @@ func TestSchemaStore_Resolve(t *testing.T) {
 	t.Run("loads matching schema", func(t *testing.T) {
 		t.Parallel()
 
-		const schemaURL = "https://example.com/schema.json"
-
-		catalog := schemastore.Catalog{
-			Schemas: []schemastore.CatalogEntry{
-				{
-					Name:      "Test Schema",
-					URL:       schemaURL,
-					FileMatch: []string{"*.yaml"},
-				},
-			},
-		}
-
 		client := newRoutingClient(map[string][]byte{
-			catalogURL: marshalCatalog(t, catalog),
-			schemaURL:  []byte(schemaData),
+			catalogURL:    marshalCatalog(t, testCatalog),
+			testSchemaURL: []byte(schemaData),
 		})
 
 		store := newStore(client)
@@ -1521,7 +1510,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		ref, err := store.Resolve(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Equal(t, schemaURL, ref.Key())
+		assert.Equal(t, testSchemaURL, ref.Key())
 
 		data, err := schema.NewRegistry(schema.WithHTTPClient(client)).Load(t.Context(), ref)
 		require.NoError(t, err)
@@ -1531,22 +1520,10 @@ func TestSchemaStore_Resolve(t *testing.T) {
 	t.Run("error when schema URL not found", func(t *testing.T) {
 		t.Parallel()
 
-		const schemaURL = "https://example.com/schema.json"
-
-		catalog := schemastore.Catalog{
-			Schemas: []schemastore.CatalogEntry{
-				{
-					Name:      "Test Schema",
-					URL:       schemaURL,
-					FileMatch: []string{"*.yaml"},
-				},
-			},
-		}
-
 		// The client serves the catalog alone, so the schema URL gets
 		// status 404.
 		client := newRoutingClient(map[string][]byte{
-			catalogURL: marshalCatalog(t, catalog),
+			catalogURL: marshalCatalog(t, testCatalog),
 		})
 
 		store := newStore(client)
@@ -1557,11 +1534,11 @@ func TestSchemaStore_Resolve(t *testing.T) {
 		// and a failed load is not a no-match.
 		ref, err := store.Resolve(t.Context(), doc)
 		require.NoError(t, err)
-		assert.Equal(t, schemaURL, ref.Key())
+		assert.Equal(t, testSchemaURL, ref.Key())
 
 		_, err = schema.NewRegistry(schema.WithHTTPClient(client)).Load(t.Context(), ref)
 		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorContains(t, err, "fetch "+schemaURL+": status 404")
+		require.ErrorContains(t, err, "fetch "+testSchemaURL+": status 404")
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})
 }
@@ -1569,68 +1546,61 @@ func TestSchemaStore_Resolve(t *testing.T) {
 func TestIntegration(t *testing.T) {
 	t.Parallel()
 
-	schemaData := `{
-		"type": "object",
-		"properties": {
-			"on": {"type": ["string", "object"]}
-		},
-		"required": ["on"]
-	}`
+	schemaData := stringtest.Input(`
+		{
+			"type": "object",
+			"properties": {
+				"on": {"type": ["string", "object"]}
+			},
+			"required": ["on"]
+		}
+	`)
+
+	// The check function validates a document through a registry whose
+	// store serves workflowCatalog.
+	check := func(t *testing.T, input, filePath string) error {
+		t.Helper()
+
+		client := newRoutingClient(map[string][]byte{
+			catalogURL:        marshalCatalog(t, workflowCatalog),
+			workflowSchemaURL: []byte(schemaData),
+		})
+
+		reg := schema.NewRegistry(
+			schema.WithHTTPClient(client),
+			schema.WithResolvers(newStore(client)),
+		)
+
+		return reg.Check(t.Context(), yamltest.FirstDocumentWithPath(t, input, filePath))
+	}
 
 	t.Run("validates matching document", func(t *testing.T) {
 		t.Parallel()
 
-		const schemaURL = "https://example.com/github-workflow.json"
+		require.NoError(t, check(t, `on: push`, ".github/workflows/ci.yaml"))
+	})
 
-		catalog := schemastore.Catalog{
-			Schemas: []schemastore.CatalogEntry{
-				{
-					Name:      "GitHub Workflow",
-					URL:       schemaURL,
-					FileMatch: []string{".github/workflows/*.yaml", ".github/workflows/*.yml"},
-				},
-			},
-		}
+	t.Run("rejects invalid document", func(t *testing.T) {
+		t.Parallel()
 
-		client := newRoutingClient(map[string][]byte{
-			catalogURL: marshalCatalog(t, catalog),
-			schemaURL:  []byte(schemaData),
-		})
+		require.Error(t, check(t, `name: test`, ".github/workflows/ci.yaml"))
+	})
 
-		store := newStore(client)
+	t.Run("returns ErrNoMatch for unmatched document", func(t *testing.T) {
+		t.Parallel()
 
-		reg := schema.NewRegistry(
-			schema.WithHTTPClient(client),
-			schema.WithResolvers(store),
-		)
-
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
-
-		err := reg.Check(t.Context(), doc)
-		require.NoError(t, err)
+		require.ErrorIs(t, check(t, `key: value`, "random.yaml"), schema.ErrNoMatch)
 	})
 
 	t.Run("fetches each schema once", func(t *testing.T) {
 		t.Parallel()
 
-		catalog := schemastore.Catalog{
-			Schemas: []schemastore.CatalogEntry{
-				{
-					Name:      "GitHub Workflow",
-					URL:       "https://example.com/github-workflow.json",
-					FileMatch: []string{".github/workflows/*.yaml"},
-				},
-			},
-		}
-
-		catalogClient, catalogFetches := newCountingCatalogClient(t, catalog)
+		catalogClient, catalogFetches := newCountingCatalogClient(t, workflowCatalog)
 		schemaClient, schemaFetches := newCountingClient(http.StatusOK, []byte(schemaData))
-
-		store := newStore(catalogClient)
 
 		reg := schema.NewRegistry(
 			schema.WithHTTPClient(schemaClient),
-			schema.WithResolvers(store),
+			schema.WithResolvers(newStore(catalogClient)),
 		)
 
 		for _, name := range []string{"ci.yaml", "release.yaml", "lint.yaml"} {
@@ -1642,62 +1612,6 @@ func TestIntegration(t *testing.T) {
 
 		assert.Equal(t, int32(1), catalogFetches.Load())
 		assert.Equal(t, int32(1), schemaFetches.Load(), "the registry should fetch the schema once")
-	})
-
-	t.Run("rejects invalid document", func(t *testing.T) {
-		t.Parallel()
-
-		const schemaURL = "https://example.com/github-workflow.json"
-
-		catalog := schemastore.Catalog{
-			Schemas: []schemastore.CatalogEntry{
-				{
-					Name:      "GitHub Workflow",
-					URL:       schemaURL,
-					FileMatch: []string{".github/workflows/*.yaml", ".github/workflows/*.yml"},
-				},
-			},
-		}
-
-		client := newRoutingClient(map[string][]byte{
-			catalogURL: marshalCatalog(t, catalog),
-			schemaURL:  []byte(schemaData),
-		})
-
-		store := newStore(client)
-
-		reg := schema.NewRegistry(
-			schema.WithHTTPClient(client),
-			schema.WithResolvers(store),
-		)
-
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`name: test`), ".github/workflows/ci.yaml")
-
-		err := reg.Check(t.Context(), doc)
-		require.Error(t, err)
-	})
-
-	t.Run("returns ErrNoMatch for unmatched document", func(t *testing.T) {
-		t.Parallel()
-
-		catalog := schemastore.Catalog{
-			Schemas: []schemastore.CatalogEntry{
-				{
-					Name:      "GitHub Workflow",
-					URL:       "https://example.com/github-workflow.json",
-					FileMatch: []string{".github/workflows/*.yaml", ".github/workflows/*.yml"},
-				},
-			},
-		}
-
-		store := newStore(newCatalogClient(t, catalog))
-
-		reg := schema.NewRegistry(schema.WithResolvers(store))
-
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
-
-		err := reg.Check(t.Context(), doc)
-		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 
 	t.Run("reports an unreachable catalog through the registry", func(t *testing.T) {
