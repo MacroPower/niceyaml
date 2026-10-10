@@ -8076,15 +8076,11 @@ func TestRebase_Anchors(t *testing.T) {
 	hoursPath := paths.Doc().Child("spec", "hours")
 	hours := yamltest.At(t, doc, hoursPath)
 
-	open := func() error {
-		return niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("open")))
-	}
-	name := func() error {
-		return niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("name")))
-	}
+	open := niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("open")))
+	name := niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("name")))
 
 	tcs := map[string]struct {
-		err func() error
+		err error
 		// The node that binds the result.
 		node *niceyaml.Node
 		// The path of the unbound result, and the message of its binding.
@@ -8092,51 +8088,49 @@ func TestRebase_Anchors(t *testing.T) {
 		want     string
 	}{
 		"relative path under a relative base": {
-			err:      func() error { return niceyaml.Rebase(open(), paths.Current().Child("spec", "hours")) },
+			err:      niceyaml.Rebase(open, paths.Current().Child("spec", "hours")),
 			node:     doc,
 			wantPath: "@.spec.hours.open",
 			want:     `4:11: $.spec.hours.open: bad`,
 		},
 		"relative path under an absolute base": {
-			err:      func() error { return niceyaml.Rebase(open(), hoursPath) },
+			err:      niceyaml.Rebase(open, hoursPath),
 			node:     doc,
 			wantPath: "$.spec.hours.open",
 			want:     `4:11: $.spec.hours.open: bad`,
 		},
 		"absolute path under a relative base": {
-			err:      func() error { return niceyaml.Rebase(name(), paths.Current().Child("spec", "hours")) },
+			err:      niceyaml.Rebase(name, paths.Current().Child("spec", "hours")),
 			node:     doc,
 			wantPath: "$.name",
 			want:     `1:7: $.name: bad`,
 		},
 		"absolute path under an absolute base": {
-			err:      func() error { return niceyaml.Rebase(name(), hoursPath) },
+			err:      niceyaml.Rebase(name, hoursPath),
 			node:     doc,
 			wantPath: "$.name",
 			want:     `1:7: $.name: bad`,
 		},
 		"no location under an absolute base": {
-			err:      func() error { return niceyaml.Rebase(errors.New("bad"), hoursPath) },
+			err:      niceyaml.Rebase(errors.New("bad"), hoursPath),
 			node:     doc,
 			wantPath: "$.spec.hours",
 			want:     `3:3: $.spec.hours: bad`,
 		},
 		"absolute base stops the bases above it": {
-			err: func() error {
-				return niceyaml.Rebase(niceyaml.Rebase(open(), hoursPath), paths.Current().Child("x"))
-			},
+			err:      niceyaml.Rebase(niceyaml.Rebase(open, hoursPath), paths.Current().Child("x")),
 			node:     doc,
 			wantPath: "$.spec.hours.open",
 			want:     `4:11: $.spec.hours.open: bad`,
 		},
 		"scoped Node binds under its own path": {
-			err:      func() error { return niceyaml.Rebase(open(), hours.Path()) },
+			err:      niceyaml.Rebase(open, hours.Path()),
 			node:     hours,
 			wantPath: "$.spec.hours.open",
 			want:     `4:11: $.spec.hours.open: bad`,
 		},
 		"scoped Node puts its path in front of a relative path": {
-			err:      func() error { return niceyaml.Rebase(open(), paths.Current()) },
+			err:      niceyaml.Rebase(open, paths.Current()),
 			node:     hours,
 			wantPath: "@.open",
 			want:     `4:11: $.spec.hours.open: bad`,
@@ -8153,13 +8147,9 @@ func TestRebase_Anchors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := tc.err()
+			assert.Equal(t, tc.wantPath, errorPath(t, errorIn(t, tc.err)).String())
 
-			located := errorIn(t, err)
-
-			assert.Equal(t, tc.wantPath, errorPath(t, located).String())
-
-			bound := tc.node.Bind(err)
+			bound := tc.node.Bind(tc.err)
 			require.EqualError(t, bound, tc.want)
 
 			source := yamltest.RequireSourceError(t, bound)
@@ -10526,15 +10516,13 @@ func TestInvalid(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
-			check func() error
-			want  string
+			err  error
+			want string
 		}{
-			"valid value": {
-				check: func() error { return nil },
-			},
+			"valid value": {},
 			"invalid value": {
-				check: func() error { return errors.New("closes before it opens") },
-				want:  "cfg.yaml:1:1: $.hours: closes before it opens",
+				err:  errors.New("closes before it opens"),
+				want: "cfg.yaml:1:1: $.hours: closes before it opens",
 			},
 		}
 
@@ -10543,7 +10531,7 @@ func TestInvalid(t *testing.T) {
 				t.Parallel()
 
 				hours := yamltest.At(t, doc, hoursPath)
-				err := hours.Bind(niceyaml.Invalid(tc.check()))
+				err := hours.Bind(niceyaml.Invalid(tc.err))
 
 				if tc.want == "" {
 					require.NoError(t, err)
