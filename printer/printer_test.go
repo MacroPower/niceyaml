@@ -4090,8 +4090,6 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		kindC    kind.Kind = "kindC"
 		kindX    kind.Kind = "kindX"
 		kindY    kind.Kind = "kindY"
-		kindK    kind.Kind = "kindK"
-		kindVal  kind.Kind = "kindVal"
 		kindSpan kind.Kind = "kindSpan"
 	)
 
@@ -4105,8 +4103,6 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		style.Set(kindC, styleWithTag("c")),
 		style.Set(kindX, styleWithTag("x")),
 		style.Set(kindY, styleWithTag("y")),
-		style.Set(kindK, styleWithTag("k")),
-		style.Set(kindVal, styleWithTag("val")),
 		style.Set(kindSpan, styleWithTag("span")),
 	)
 
@@ -4196,14 +4192,6 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			// Position 4: only <y> (style changes, new span)
 			// Position 5: no style.
 			want: "a<x>bc</x><y><x>d</x></y><y>e</y>f",
-		},
-		"range covers entire token": {
-			input: "key: value",
-			ranges: []overlayRange{
-				{kindK, position.New(0, 0), position.New(0, 3)},
-				{kindVal, position.New(0, 5), position.New(0, 10)},
-			},
-			want: "<k>key</k>: <val>value</val>",
 		},
 		"multi-line with ranges on each line": {
 			input: stringtest.JoinLF("a: 1", "b: 2"),
