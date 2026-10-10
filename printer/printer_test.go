@@ -4201,19 +4201,16 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 	)
 
 	tcs := map[string]struct {
-		input    string
 		overlays []overlayDef
 	}{
 		"ForegroundBlend": {
 			// Where the two ranges overlap, the printer blends the colors via LAB.
-			input: "key: value",
 			overlays: []overlayDef{
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), yamltest.LineRange(0, 0, 5)},
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), yamltest.LineRange(0, 3, 10)},
 			},
 		},
 		"BackgroundBlend": {
-			input: "key: value",
 			overlays: []overlayDef{
 				{lipgloss.NewStyle().Background(lipgloss.Color("#00FF00")), yamltest.LineRange(0, 0, 5)},
 				{lipgloss.NewStyle().Background(lipgloss.Color("#FF00FF")), yamltest.LineRange(0, 3, 10)},
@@ -4222,7 +4219,6 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		"FirstColorOnly": {
 			// The second style has NoColor, so the printer uses the first
 			// color directly.
-			input: "key: value",
 			overlays: []overlayDef{
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), yamltest.LineRange(0, 0, 5)},
 				{lipgloss.NewStyle(), yamltest.LineRange(0, 3, 10)},
@@ -4230,7 +4226,6 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		},
 		"SecondColorOnly": {
 			// The first style has NoColor, so the printer uses the second color.
-			input: "key: value",
 			overlays: []overlayDef{
 				{lipgloss.NewStyle(), yamltest.LineRange(0, 0, 5)},
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), yamltest.LineRange(0, 3, 10)},
@@ -4238,7 +4233,6 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		},
 		"BothNoColor": {
 			// Both styles have NoColor, so the blend yields nil and applies no color.
-			input: "key: value",
 			overlays: []overlayDef{
 				{lipgloss.NewStyle(), yamltest.LineRange(0, 0, 5)},
 				{lipgloss.NewStyle(), yamltest.LineRange(0, 3, 10)},
@@ -4246,7 +4240,6 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		},
 		"ThreeOverlapping": {
 			// Three ranges overlap, so the printer blends all three colors.
-			input: "key: value",
 			overlays: []overlayDef{
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), yamltest.LineRange(0, 0, 6)},
 				{lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")), yamltest.LineRange(0, 2, 8)},
@@ -4255,7 +4248,6 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		},
 		"MixedFgBg": {
 			// The printer blends foreground and background colors independently.
-			input: "key: value",
 			overlays: []overlayDef{
 				{
 					lipgloss.NewStyle().
@@ -4277,7 +4269,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromString(tc.input).View()
+			view := niceyaml.NewSourceFromString("key: value").View()
 
 			// Build overlay styler with styles from test case.
 			kinds := []kind.Kind{colorKind1, colorKind2, colorKind3}
