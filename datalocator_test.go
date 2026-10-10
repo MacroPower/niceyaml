@@ -3,6 +3,7 @@ package niceyaml_test
 import (
 	"fmt"
 	"log"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -517,17 +518,7 @@ func TestDataLocator_Names(t *testing.T) {
 	members, ok := data.(map[string]any)
 	require.True(t, ok, "decode into any gave %T", data)
 
-	got := make([]string, 0, len(members))
-	for name := range members {
-		got = append(got, name)
-	}
-
-	wantNames := make([]string, 0, len(want))
-	for name := range want {
-		wantNames = append(wantNames, name)
-	}
-
-	assert.ElementsMatch(t, wantNames, got)
+	assert.ElementsMatch(t, slices.Collect(maps.Keys(want)), slices.Collect(maps.Keys(members)))
 
 	loc := doc.DataLocator()
 
