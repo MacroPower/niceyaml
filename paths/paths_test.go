@@ -1814,7 +1814,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 	t.Run("goccy strips single quotes from a name", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "x: plain\n\"'x'\": quoted\n").DocumentAST()
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("x: plain", `"'x'": quoted`)).DocumentAST()
 
 		assert.Equal(t, "plain", goccyValue(t, paths.Doc().Child("'x'"), doc))
 	})
