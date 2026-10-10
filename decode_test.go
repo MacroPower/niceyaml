@@ -61,6 +61,22 @@ func sourceErrorIn(t *testing.T, err error) *niceyaml.SourceError {
 	return bound
 }
 
+// decodedAs decodes n into a T through [niceyaml.Node.Decode]. A table
+// that lists decodes into several types holds it as a func of one type.
+func decodedAs[T any](t *testing.T, n *niceyaml.Node) (any, error) {
+	t.Helper()
+
+	return n.Decode[T](t.Context())
+}
+
+// decodeErrorAs decodes n into a T through [niceyaml.Node.Decode] and
+// returns the error of the decode alone.
+func decodeErrorAs[T any](ctx context.Context, n *niceyaml.Node) error {
+	_, err := n.Decode[T](ctx)
+
+	return err
+}
+
 // requireDocumentValues decodes every document of input into an any and
 // compares the values with want. When kept is not empty, the tree of the
 // file must also hold that comment.
@@ -6681,22 +6697,14 @@ func TestDocument_DecodeInto(t *testing.T) {
 			err    string
 		}{
 			"str tag in a field": {
-				input: "items: !!str foo\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[listConfig](ctx)
-
-					return err
-				},
-				err: "1:14: $.items: expected sequence, got string",
+				input:  "items: !!str foo\n",
+				decode: decodeErrorAs[listConfig],
+				err:    "1:14: $.items: expected sequence, got string",
 			},
 			"str tag into a slice": {
-				input: "!!str foo\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[[]string](ctx)
-
-					return err
-				},
-				err: "1:7: $: expected sequence, got string",
+				input:  "!!str foo\n",
+				decode: decodeErrorAs[[]string],
+				err:    "1:7: $: expected sequence, got string",
 			},
 		}
 
@@ -6863,6 +6871,32 @@ func TestDocument_DecodeInto(t *testing.T) {
 		// A selfPointer never reaches a value that is not a pointer.
 		type selfPointer *selfPointer
 
+		// Decodes into a pointer to a config and returns the pointer the
+		// decode leaves.
+		intoConfig := func(t *testing.T, dd *niceyaml.Node) (any, error) {
+			t.Helper()
+
+			got := &plainConfig{Value: 7}
+
+			err := dd.DecodeInto(t.Context(), &got)
+
+			return got, err //nolint:wrapcheck // The test inspects the error of the decode.
+		}
+
+		// Decodes as intoConfig does, and checks that the decode left the
+		// pointer in place.
+		intoSameConfig := func(t *testing.T, dd *niceyaml.Node) (any, error) {
+			t.Helper()
+
+			got := &plainConfig{Value: 7}
+			before := got
+
+			err := dd.DecodeInto(t.Context(), &got)
+			assert.Same(t, before, got, "the decode replaced the pointer")
+
+			return got, err //nolint:wrapcheck // The test inspects the error of the decode.
+		}
+
 		tcs := map[string]struct {
 			decode     func(t *testing.T, dd *niceyaml.Node) (any, error)
 			want       any
@@ -6871,23 +6905,15 @@ func TestDocument_DecodeInto(t *testing.T) {
 			references string
 		}{
 			"Decode validates the value": {
-				input: "name: a\nvalue: 1\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					return dd.Decode[*validatorConfig](t.Context())
-				},
-				want: &validatorConfig{Name: "a", Value: 1, validated: true},
+				input:  "name: a\nvalue: 1\n",
+				decode: decodedAs[*validatorConfig],
+				want:   &validatorConfig{Name: "a", Value: 1, validated: true},
 			},
 			"Decode returns the error of Validate": {
-				input: "value: 1\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					return dd.Decode[*validatorConfig](t.Context())
-				},
-				want: (*validatorConfig)(nil),
-				err:  errNameRequired,
+				input:  "value: 1\n",
+				decode: decodedAs[*validatorConfig],
+				want:   (*validatorConfig)(nil),
+				err:    errNameRequired,
 			},
 			"DecodeInto allocates a nil pointer": {
 				input: "name: a\nvalue: 1\n",
@@ -6903,164 +6929,84 @@ func TestDocument_DecodeInto(t *testing.T) {
 				want: &validatorConfig{Name: "a", Value: 1, validated: true},
 			},
 			"DecodeInto keeps the fields of a non-nil pointer": {
-				input: "name: a\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					got := &plainConfig{Value: 7}
-					before := got
-
-					err := dd.DecodeInto(t.Context(), &got)
-					assert.Same(t, before, got, "the decode replaced the pointer")
-
-					return got, err //nolint:wrapcheck // The test inspects the error of the decode.
-				},
-				want: &plainConfig{Name: "a", Value: 7},
+				input:  "name: a\n",
+				decode: intoSameConfig,
+				want:   &plainConfig{Name: "a", Value: 7},
 			},
 			"null": {
-				input: "null\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					return dd.Decode[*validatorConfig](t.Context())
-				},
-				want: (*validatorConfig)(nil),
+				input:  "null\n",
+				decode: decodedAs[*validatorConfig],
+				want:   (*validatorConfig)(nil),
 			},
 			"DecodeInto sets a non-nil pointer to nil for null": {
-				input: "null\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					got := &plainConfig{Value: 7}
-
-					err := dd.DecodeInto(t.Context(), &got)
-
-					return got, err //nolint:wrapcheck // The test inspects the error of the decode.
-				},
-				want: (*plainConfig)(nil),
+				input:  "null\n",
+				decode: intoConfig,
+				want:   (*plainConfig)(nil),
 			},
 			"DecodeInto keeps a non-nil pointer for a tagged null": {
-				input: "!!null\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					got := &plainConfig{Value: 7}
-					before := got
-
-					err := dd.DecodeInto(t.Context(), &got)
-					assert.Same(t, before, got, "the decode replaced the pointer")
-
-					return got, err //nolint:wrapcheck // The test inspects the error of the decode.
-				},
-				want: &plainConfig{Value: 7},
+				input:  "!!null\n",
+				decode: intoSameConfig,
+				want:   &plainConfig{Value: 7},
 			},
 			"anchored null": {
-				input: "&a null\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					return dd.Decode[*validatorConfig](t.Context())
-				},
-				want: (*validatorConfig)(nil),
+				input:  "&a null\n",
+				decode: decodedAs[*validatorConfig],
+				want:   (*validatorConfig)(nil),
 			},
 			"alias to a null of a reference document": {
 				input:      "*x\n",
 				references: "a: &x ~\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					return dd.Decode[*validatorConfig](t.Context())
-				},
-				want: (*validatorConfig)(nil),
+				decode:     decodedAs[*validatorConfig],
+				want:       (*validatorConfig)(nil),
 			},
 			"DecodeInto sets a non-nil pointer to nil for an alias to a null": {
 				input:      "*x\n",
 				references: "a: &x ~\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					got := &plainConfig{Value: 7}
-
-					err := dd.DecodeInto(t.Context(), &got)
-
-					return got, err //nolint:wrapcheck // The test inspects the error of the decode.
-				},
-				want: (*plainConfig)(nil),
+				decode:     intoConfig,
+				want:       (*plainConfig)(nil),
 			},
 			"anchored alias to a null of a reference document": {
 				input:      "&y\n*x\n",
 				references: "a: &x ~\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					return dd.Decode[*validatorConfig](t.Context())
-				},
-				want: (*validatorConfig)(nil),
+				decode:     decodedAs[*validatorConfig],
+				want:       (*validatorConfig)(nil),
 			},
 			"alias to a tagged null of a reference document": {
 				input:      "*x\n",
 				references: "a: &x !!null\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					return dd.Decode[*string](t.Context())
-				},
-				want: (*string)(nil),
+				decode:     decodedAs[*string],
+				want:       (*string)(nil),
 			},
 			"alias to a scalar of a reference document": {
 				input:      "*x\n",
 				references: "a: &x 7\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					return dd.Decode[*int](t.Context())
-				},
-				want: new(7),
+				decode:     decodedAs[*int],
+				want:       new(7),
 			},
 			"comment only": {
-				input: "# comment\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					return dd.Decode[*validatorConfig](t.Context())
-				},
-				want: (*validatorConfig)(nil),
+				input:  "# comment\n",
+				decode: decodedAs[*validatorConfig],
+				want:   (*validatorConfig)(nil),
 			},
 			"scalar": {
-				input: "7\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					return dd.Decode[*int](t.Context())
-				},
-				want: new(7),
+				input:  "7\n",
+				decode: decodedAs[*int],
+				want:   new(7),
 			},
 			"string tag over no value": {
-				input: "!!str\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					return dd.Decode[*string](t.Context())
-				},
-				want: new(""),
+				input:  "!!str\n",
+				decode: decodedAs[*string],
+				want:   new(""),
 			},
 			"pointer to a pointer": {
-				input: "7\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					return dd.Decode[**int](t.Context())
-				},
-				want: new(new(7)),
+				input:  "7\n",
+				decode: decodedAs[**int],
+				want:   new(new(7)),
 			},
 			"pointer type that refers to itself": {
-				input: "a: 1\n",
-				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
-					t.Helper()
-
-					return dd.Decode[selfPointer](t.Context())
-				},
-				want: selfPointer(nil),
+				input:  "a: 1\n",
+				decode: decodedAs[selfPointer],
+				want:   selfPointer(nil),
 			},
 		}
 
@@ -10476,20 +10422,12 @@ func TestErrDecode(t *testing.T) {
 		decode func(ctx context.Context, dd *niceyaml.Node) error
 	}{
 		"type mismatch": {
-			input: "value: abc",
-			decode: func(ctx context.Context, dd *niceyaml.Node) error {
-				_, err := dd.Decode[struct{ Value int }](ctx)
-
-				return err
-			},
+			input:  "value: abc",
+			decode: decodeErrorAs[struct{ Value int }],
 		},
 		"overflow": {
-			input: "value: 300",
-			decode: func(ctx context.Context, dd *niceyaml.Node) error {
-				_, err := dd.Decode[struct{ Value int8 }](ctx)
-
-				return err
-			},
+			input:  "value: 300",
+			decode: decodeErrorAs[struct{ Value int8 }],
 		},
 		"unknown field": {
 			input: "other: 1",
@@ -10500,12 +10438,8 @@ func TestErrDecode(t *testing.T) {
 			},
 		},
 		"mapping into scalar": {
-			input: "value:\n  a: 1",
-			decode: func(ctx context.Context, dd *niceyaml.Node) error {
-				_, err := dd.Decode[struct{ Value string }](ctx)
-
-				return err
-			},
+			input:  "value:\n  a: 1",
+			decode: decodeErrorAs[struct{ Value string }],
 		},
 		"DecodeInto": {
 			input: "value: abc",
@@ -10544,12 +10478,8 @@ func TestErrDecode(t *testing.T) {
 			},
 		},
 		"tag over no value": {
-			input: "a: !!bool\n",
-			decode: func(ctx context.Context, dd *niceyaml.Node) error {
-				_, err := dd.Decode[map[string]any](ctx)
-
-				return err
-			},
+			input:  "a: !!bool\n",
+			decode: decodeErrorAs[map[string]any],
 		},
 	}
 
@@ -10688,6 +10618,16 @@ func TestErrDecode(t *testing.T) {
 
 		ref := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {x: notint}\nother: &other 1\n"))
 
+		// Decodes the node under the key outer.
+		scoped := func(ctx context.Context, dd *niceyaml.Node) error {
+			node, err := dd.At(paths.Current().Child("outer"))
+			if err != nil {
+				return err //nolint:wrapcheck // The test inspects the error as it is.
+			}
+
+			return decodeErrorAs[cfg](ctx, node)
+		}
+
 		// A line of -1 means the rejection carries no location.
 		tcs := map[string]struct {
 			input  string
@@ -10695,64 +10635,34 @@ func TestErrDecode(t *testing.T) {
 			line   int
 		}{
 			"merge from a reference": {
-				input: "item:\n  <<: *base\ny: 1\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[cfg](ctx)
-
-					return err
-				},
-				line: 1,
+				input:  "item:\n  <<: *base\ny: 1\n",
+				decode: decodeErrorAs[cfg],
+				line:   1,
 			},
 			"alias to a reference": {
-				input: "a: 1\nitem: *base\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[cfg](ctx)
-
-					return err
-				},
-				line: 1,
+				input:  "a: 1\nitem: *base\n",
+				decode: decodeErrorAs[cfg],
+				line:   1,
 			},
 			"alias to a reference in a scoped decode": {
-				input: "a: 1\nouter:\n  item: *base\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					node, err := dd.At(paths.Current().Child("outer"))
-					if err != nil {
-						return err //nolint:wrapcheck // The test inspects the error as it is.
-					}
-
-					_, err = node.Decode[cfg](ctx)
-
-					return err
-				},
-				line: 2,
+				input:  "a: 1\nouter:\n  item: *base\n",
+				decode: scoped,
+				line:   2,
 			},
 			// The decode reads the reference through an anchor outside
 			// the node, so it binds at the alias in that anchor.
 			"alias to a reference through an anchor in a scoped decode": {
-				input: "m: &m {<<: *base}\nouter:\n  item: *m\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					node, err := dd.At(paths.Current().Child("outer"))
-					if err != nil {
-						return err //nolint:wrapcheck // The test inspects the error as it is.
-					}
-
-					_, err = node.Decode[cfg](ctx)
-
-					return err
-				},
-				line: 0,
+				input:  "m: &m {<<: *base}\nouter:\n  item: *m\n",
+				decode: scoped,
+				line:   0,
 			},
 			// The token of the rejection does not tell which of the two
 			// aliases led to it, so the rejection carries no location even
 			// though cfg reads only *base.
 			"aliases to two references": {
-				input: "a: *other\nitem: *base\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[cfg](ctx)
-
-					return err
-				},
-				line: -1,
+				input:  "a: *other\nitem: *base\n",
+				decode: decodeErrorAs[cfg],
+				line:   -1,
 			},
 			// The decoder reports a key of an inline map with no token,
 			// which the decode cannot tell from a token of a reference
@@ -10814,12 +10724,8 @@ func TestErrDecode(t *testing.T) {
 			decode func(ctx context.Context, dd *niceyaml.Node) error
 		}{
 			"top-level value": {
-				input: "value: 1",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[rejectingUnmarshaler](ctx)
-
-					return err
-				},
+				input:  "value: 1",
+				decode: decodeErrorAs[rejectingUnmarshaler],
 			},
 			// The document's resolver binds no anchor for the alias, which
 			// the reference document defines for the decoder.
@@ -10828,11 +10734,7 @@ func TestErrDecode(t *testing.T) {
 				source: []niceyaml.SourceOption{
 					niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {x: 1}\n")),
 				},
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[map[string]item](ctx)
-
-					return err
-				},
+				decode: decodeErrorAs[map[string]item],
 			},
 		}
 
@@ -10857,28 +10759,16 @@ func TestErrDecode(t *testing.T) {
 			decode func(ctx context.Context, dd *niceyaml.Node) error
 		}{
 			"top-level value": {
-				input: "abc",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[wrappingUnmarshaler](ctx)
-
-					return err
-				},
+				input:  "abc",
+				decode: decodeErrorAs[wrappingUnmarshaler],
 			},
 			"sequence element": {
-				input: "- 1\n- abc\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[[]wrappingUnmarshaler](ctx)
-
-					return err
-				},
+				input:  "- 1\n- abc\n",
+				decode: decodeErrorAs[[]wrappingUnmarshaler],
 			},
 			"mapping value": {
-				input: "a: 1\nb: abc\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[map[string]wrappingUnmarshaler](ctx)
-
-					return err
-				},
+				input:  "a: 1\nb: abc\n",
+				decode: decodeErrorAs[map[string]wrappingUnmarshaler],
 			},
 		}
 
@@ -11155,20 +11045,12 @@ func TestErrDecode(t *testing.T) {
 			want   string
 		}{
 			"value the decode locates": {
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct{ Value deadlineUnmarshaler }](ctx)
-
-					return err
-				},
-				want: "lookup stopped: context deadline exceeded",
+				decode: decodeErrorAs[struct{ Value deadlineUnmarshaler }],
+				want:   "lookup stopped: context deadline exceeded",
 			},
 			"node the decode reads": {
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[deadlineUnmarshaler](ctx)
-
-					return err
-				},
-				want: "lookup stopped: context deadline exceeded",
+				decode: decodeErrorAs[deadlineUnmarshaler],
+				want:   "lookup stopped: context deadline exceeded",
 			},
 		}
 
