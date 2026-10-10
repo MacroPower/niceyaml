@@ -5531,29 +5531,20 @@ func TestWithExcerpts(t *testing.T) {
 func TestWithAliasLimit(t *testing.T) {
 	t.Parallel()
 
-	// Each level of the bomb lists nine aliases to the level below, so a4
-	// expands to 9^5 scalars from 252 bytes.
-	var sb strings.Builder
+	// Each item of the bomb lists ten aliases to the item above it, so the
+	// last one expands to 10^5 scalars.
+	bomb := yamltest.AliasLevels(5)
+	last := paths.Current().Child("a").Index(5)
 
-	sb.WriteString("a0: &a0 [x, x, x, x, x, x, x, x, x]\n")
-
-	for level := 1; level <= 4; level++ {
-		aliases := strings.Repeat(fmt.Sprintf("*a%d, ", level-1), 9)
-		fmt.Fprintf(&sb, "a%d: &a%d [%s]\n", level, level, strings.TrimSuffix(aliases, ", "))
-	}
-
-	bomb := sb.String()
-	last := paths.Current().Child("a4")
-
-	// The schema accepts the root and the list under a4, and it decodes
-	// the node it checks, which a schema that accepts everything skips.
+	// The schema accepts the root and the last item, and it decodes the
+	// node it checks, which a schema that accepts everything skips.
 	shape := schema.MustCompile([]byte(`{"type": ["object", "array"]}`))
 
-	// The registry routes a document on the content of a4, so its matcher
-	// reads a node that holds an alias. No document matches, and the
-	// registry then passes it.
+	// The registry routes a document on the content of the last item, so
+	// its matcher reads a node that holds an alias. No document matches,
+	// and the registry then passes it.
 	routed := schema.NewRegistry(
-		schema.WithResolvers(schema.When(matcher.Content(paths.Doc().Child("a4"), "x"), shape.Ref())),
+		schema.WithResolvers(schema.When(matcher.Content(paths.Doc().Child("a").Index(5), "x"), shape.Ref())),
 		schema.WithRequireSchema(false),
 	)
 
@@ -5616,14 +5607,14 @@ func TestWithAliasLimit(t *testing.T) {
 			read: func(ctx context.Context, n *niceyaml.Node) error {
 				return decode(ctx, n)
 			},
-			want: "bomb.yaml:5:9: excessive aliasing",
+			want: "bomb.yaml:7:9: excessive aliasing",
 		},
 		"schema validation of a scoped node": {
 			path: last,
 			read: func(ctx context.Context, n *niceyaml.Node) error {
 				return n.Validate(ctx, shape)
 			},
-			want: "bomb.yaml:5:9: excessive aliasing",
+			want: "bomb.yaml:7:9: excessive aliasing",
 		},
 	}
 
@@ -5690,11 +5681,11 @@ func TestWithAliasLimit(t *testing.T) {
 		require.NotErrorIs(t, err, schema.ErrValidate)
 		assert.True(t, niceyaml.IsInvalid(err))
 
-		// Each [*] lists nine aliases to the level below, so the path
-		// would select 9^5 nodes. The path is at fault for that, and the
+		// Each [*] lists ten aliases to the item above, so the path would
+		// select 10^5 nodes. The path is at fault for that, and the
 		// document is not.
-		_, err = trusted.Nodes(paths.MustParse("$.a4[*][*][*][*][*]"))
-		require.EqualError(t, err, "bomb.yaml: resolve $.a4[*][*][*][*][*]: excessive aliasing")
+		_, err = trusted.Nodes(paths.MustParse("$.a[5][*][*][*][*][*]"))
+		require.EqualError(t, err, "bomb.yaml: resolve $.a[5][*][*][*][*][*]: excessive aliasing")
 		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
 		assert.False(t, niceyaml.IsInvalid(err))
 	})
