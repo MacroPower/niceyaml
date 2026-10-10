@@ -9283,6 +9283,18 @@ func TestNode_Validate(t *testing.T) {
 	})
 }
 
+// nodePaths returns the path of each Node of nodes as a string, or nil for
+// no nodes.
+func nodePaths(nodes []*niceyaml.Node) []string {
+	var got []string
+
+	for _, n := range nodes {
+		got = append(got, n.Path().String())
+	}
+
+	return got
+}
+
 func TestNode_Nodes(t *testing.T) {
 	t.Parallel()
 
@@ -9327,19 +9339,50 @@ func TestNode_Nodes(t *testing.T) {
 		require.EqualError(t, err, "m.yaml:5:12: $.items[1].price: negative price")
 	})
 
-	t.Run("scopes each entry a recursive selector finds", func(t *testing.T) {
+	t.Run("scopes each node the path selects", func(t *testing.T) {
 		t.Parallel()
 
-		images, err := doc.Nodes(paths.Current().Recursive("image"))
-		require.NoError(t, err)
-		require.Len(t, images, 2)
+		tcs := map[string]struct {
+			// The path of the Node that lists the nodes, and the path it
+			// gets.
+			scope paths.Path
+			path  paths.Path
+			want  []string
+		}{
+			"each entry a recursive selector finds": {
+				scope: paths.Doc(),
+				path:  paths.Current().Recursive("image"),
+				want:  []string{"$.spec.image", "$.spec.nested.image"},
+			},
+			"from the scope of the receiver": {
+				scope: paths.Doc().Child("spec"),
+				path:  paths.Current().Recursive("image"),
+				want:  []string{"$.spec.image", "$.spec.nested.image"},
+			},
+			"a single path yields its one node": {
+				scope: paths.Doc(),
+				path:  paths.Current().Child("spec", "image"),
+				want:  []string{"$.spec.image"},
+			},
+			"a mapping wildcard on a sequence yields no nodes": {
+				scope: paths.Doc(),
+				path:  paths.Current().Child("items").ChildAll(),
+			},
+			"a path that selects nothing yields no nodes": {
+				scope: paths.Doc(),
+				path:  paths.Current().Child("missing").IndexAll(),
+			},
+		}
 
-		assert.Equal(t, "$.spec.image", images[0].Path().String())
-		assert.Equal(t, "$.spec.nested.image", images[1].Path().String())
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		got, err := images[1].Decode[string](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, "b", got)
+				nodes, err := yamltest.At(t, doc, tc.scope).Nodes(tc.path)
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, nodePaths(nodes))
+			})
+		}
 	})
 
 	t.Run("scopes every node at any depth", func(t *testing.T) {
@@ -9362,19 +9405,13 @@ func TestNode_Nodes(t *testing.T) {
 		nodes, err := config.Nodes(paths.Current().RecursiveAll())
 		require.NoError(t, err)
 
-		var gotPaths []string
-
-		for _, n := range nodes {
-			gotPaths = append(gotPaths, n.Path().String())
-		}
-
 		// The merged key and the alias are listed where the source writes
 		// them, not again where they are used.
 		assert.Equal(t, []string{
 			"$.defaults", "$.defaults.logLevel",
 			"$.server", "$.server.listen_addr", "$.server.TLS", "$.server.TLS.cert_file",
 			"$.routes", "$.routes[0]", "$.routes[0].match", "$.routes[0].upstreamURL", "$.routes[1]",
-		}, gotPaths)
+		}, nodePaths(nodes))
 
 		snake := regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
@@ -9478,14 +9515,6 @@ func TestNode_Nodes(t *testing.T) {
 		assert.Equal(t, "$.jobs.build~", keys[1].Path().String())
 	})
 
-	t.Run("a mapping wildcard on a sequence yields no nodes", func(t *testing.T) {
-		t.Parallel()
-
-		nodes, err := doc.Nodes(paths.Current().Child("items").ChildAll())
-		require.NoError(t, err)
-		assert.Empty(t, nodes)
-	})
-
 	t.Run("a merge key that does not resolve is an error bound to the source", func(t *testing.T) {
 		t.Parallel()
 
@@ -9507,9 +9536,7 @@ func TestNode_Nodes(t *testing.T) {
 		// inner one in the source.
 		nodes, err := nested.Nodes(paths.Current().Recursive("a").Child("c"))
 		require.NoError(t, err)
-		require.Len(t, nodes, 2)
-		assert.Equal(t, "$.a.b.a.c", nodes[0].Path().String())
-		assert.Equal(t, "$.a.c", nodes[1].Path().String())
+		assert.Equal(t, []string{"$.a.b.a.c", "$.a.c"}, nodePaths(nodes))
 	})
 
 	t.Run("a duplicate key scopes the entry the decode keeps", func(t *testing.T) {
@@ -9529,26 +9556,6 @@ func TestNode_Nodes(t *testing.T) {
 		assert.Equal(t, 2, got)
 	})
 
-	t.Run("resolves from the scope of the receiver", func(t *testing.T) {
-		t.Parallel()
-
-		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
-
-		images, err := spec.Nodes(paths.Current().Recursive("image"))
-		require.NoError(t, err)
-		require.Len(t, images, 2)
-		assert.Equal(t, "$.spec.image", images[0].Path().String())
-	})
-
-	t.Run("a single path yields its one node", func(t *testing.T) {
-		t.Parallel()
-
-		nodes, err := doc.Nodes(paths.Current().Child("spec", "image"))
-		require.NoError(t, err)
-		require.Len(t, nodes, 1)
-		assert.Equal(t, "$.spec.image", nodes[0].Path().String())
-	})
-
 	t.Run("an empty block scalar stays off the line of its sibling", func(t *testing.T) {
 		t.Parallel()
 
@@ -9558,14 +9565,6 @@ func TestNode_Nodes(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, nodes, 1)
 		assert.Equal(t, position.NewSpan(1, 2), nodes[0].Span())
-	})
-
-	t.Run("a path that selects nothing yields no nodes", func(t *testing.T) {
-		t.Parallel()
-
-		nodes, err := doc.Nodes(paths.Current().Child("missing").IndexAll())
-		require.NoError(t, err)
-		assert.Empty(t, nodes)
 	})
 
 	t.Run("a node through an alias keeps the path as written", func(t *testing.T) {
