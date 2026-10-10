@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
@@ -75,13 +76,11 @@ func TestFile(t *testing.T) {
 	t.Run("oversize file", func(t *testing.T) {
 		t.Parallel()
 
-		const maxSchemaSize = 10 * 1024 * 1024 // Must match httpfetch.MaxSize.
-
 		// Truncate grows the file without writing its bytes.
 		path := filepath.Join(t.TempDir(), "schema.json")
 		f, err := os.Create(path)
 		require.NoError(t, err)
-		require.NoError(t, f.Truncate(maxSchemaSize+1))
+		require.NoError(t, f.Truncate(httpfetch.MaxSize+1))
 		require.NoError(t, f.Close())
 
 		_, data, err := load(t, schema.File(path))

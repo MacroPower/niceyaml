@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	"github.com/stretchr/testify/require"
 
@@ -27,10 +26,10 @@ func TestFile_FSRootedPath(t *testing.T) {
 
 	rooted := filepath.ToSlash(strings.TrimPrefix(cwd, filepath.VolumeName(cwd)))
 
-	fsys := fstest.MapFS{
-		"schemas/main.json": &fstest.MapFile{Data: []byte(`{"$ref": "` + rooted + `/schemas/defs.json"}`)},
-		"schemas/defs.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
-	}
+	fsys := mapFS(map[string]string{
+		"schemas/main.json": `{"$ref": "` + rooted + `/schemas/defs.json"}`,
+		"schemas/defs.json": `{"type": "string"}`,
+	})
 
 	tcs := map[string]struct {
 		path string
