@@ -3060,7 +3060,13 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
-		source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n---\nkind: Wat\n", niceyaml.WithName("m.yaml"))
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			a: 1
+			---
+			b: 2
+			---
+			kind: Wat
+		`), niceyaml.WithName("m.yaml"))
 
 		docs := source.Documents()
 		require.Len(t, docs, 3)
@@ -4166,10 +4172,14 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 			err:  schema.ErrLoad,
 		},
 		"schema with two documents": {
-			files: map[string]string{"root.yaml": "required: [name]\n---\nrequired: [kind]\n"},
-			name:  "root.yaml",
-			at:    "root.yaml",
-			err:   schema.ErrCompile,
+			files: map[string]string{"root.yaml": stringtest.Input(`
+				required: [name]
+				---
+				required: [kind]
+			`)},
+			name: "root.yaml",
+			at:   "root.yaml",
+			err:  schema.ErrCompile,
 		},
 	}
 
