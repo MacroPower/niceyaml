@@ -660,6 +660,30 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`timeout: 1.5e999`),
 			want:    false,
 		},
+		"duration does not match plain words": {
+			// A string that time.ParseDuration rejects does not read as a
+			// time.Duration, and the decode reports it with
+			// niceyaml.ErrDecode, so the matcher answers no rather than
+			// returning the error. A quoted float is such a string.
+			matcher: matcher.Content(timeoutPath, time.Minute),
+			input:   stringtest.Input(`timeout: 5 minutes`),
+			want:    false,
+		},
+		"duration does not match a quoted exponent": {
+			matcher: matcher.Content(timeoutPath, time.Minute),
+			input:   stringtest.Input(`timeout: "1e3"`),
+			want:    false,
+		},
+		"duration does not match a str-tagged exponent": {
+			matcher: matcher.Content(timeoutPath, time.Minute),
+			input:   stringtest.Input(`timeout: !!str 1e3`),
+			want:    false,
+		},
+		"duration does not match plain inf": {
+			matcher: matcher.Content(timeoutPath, time.Minute),
+			input:   stringtest.Input(`timeout: inf`),
+			want:    false,
+		},
 		"bool match": {
 			matcher: matcher.Content(enabledPath, true),
 			input:   stringtest.Input(`enabled: true`),
@@ -743,6 +767,15 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`kind: [Deployment]`),
 			want:    false,
 		},
+		"nested path match": {
+			matcher: matcher.Content(metadataName, "my-app"),
+			input: stringtest.Input(`
+				kind: Deployment
+				metadata:
+				  name: my-app
+			`),
+			want: true,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -756,32 +789,16 @@ func TestContent(t *testing.T) {
 		})
 	}
 
-	t.Run("nested path match", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.Content(metadataName, "my-app")
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			metadata:
-			  name: my-app
-		`))
-
-		got := match(t, m, doc)
-		assert.True(t, got)
-	})
-
 	t.Run("duplicate key matches the value the decode keeps", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			kind: Pod
 			kind: Service
 		`), niceyaml.WithAllowDuplicateKeys(true))
-		docs := source.Documents()
-		require.Len(t, docs, 1)
 
-		assert.True(t, match(t, matcher.Content(kindPath, "Service"), docs[0]))
-		assert.False(t, match(t, matcher.Content(kindPath, "Pod"), docs[0]))
+		assert.True(t, match(t, matcher.Content(kindPath, "Service"), doc))
+		assert.False(t, match(t, matcher.Content(kindPath, "Pod"), doc))
 	})
 
 	t.Run("node a decode hands its validator", func(t *testing.T) {
@@ -852,21 +869,11 @@ func TestContent(t *testing.T) {
 
 		// A tag on the alias changes nothing.
 		tcs := map[string]struct {
-			matcher matcher.Matcher
-			input   string
+			input string
 		}{
-			"alias without an anchor": {
-				matcher: matcher.Content(kindPath, "Deployment"),
-				input:   `kind: *missing`,
-			},
-			"tagged alias without an anchor": {
-				matcher: matcher.Content(kindPath, "Deployment"),
-				input:   `kind: !!str *missing`,
-			},
-			"tagged alias to itself": {
-				matcher: matcher.Content(kindPath, "Deployment"),
-				input:   `kind: &a !!str *a`,
-			},
+			"alias without an anchor":        {input: `kind: *missing`},
+			"tagged alias without an anchor": {input: `kind: !!str *missing`},
+			"tagged alias to itself":         {input: `kind: &a !!str *a`},
 		}
 
 		for name, tc := range tcs {
@@ -875,7 +882,7 @@ func TestContent(t *testing.T) {
 
 				doc := yamltest.FirstDocument(t, tc.input)
 
-				ok, err := tc.matcher.Match(t.Context(), doc)
+				ok, err := matcher.Content(kindPath, "Deployment").Match(t.Context(), doc)
 				require.ErrorIs(t, err, paths.ErrAlias)
 				assert.False(t, ok)
 			})
@@ -1140,48 +1147,6 @@ func TestContent_UnmarshalerError(t *testing.T) {
 
 		require.ErrorAs(t, err, &p)
 	})
-}
-
-func TestContent_UnparsableDuration(t *testing.T) {
-	t.Parallel()
-
-	// A string that time.ParseDuration rejects does not read as a
-	// time.Duration, and the decode reports it with
-	// niceyaml.ErrDecode, so the matcher answers no rather than
-	// returning the error. A quoted float is such a string.
-	tcs := map[string]struct {
-		matcher matcher.Matcher
-		input   string
-	}{
-		"plain words": {
-			matcher: matcher.Content(timeoutPath, time.Minute),
-			input:   stringtest.Input(`timeout: 5 minutes`),
-		},
-		"quoted exponent": {
-			matcher: matcher.Content(timeoutPath, time.Minute),
-			input:   stringtest.Input(`timeout: "1e3"`),
-		},
-		"str tagged exponent": {
-			matcher: matcher.Content(timeoutPath, time.Minute),
-			input:   stringtest.Input(`timeout: !!str 1e3`),
-		},
-		"plain inf": {
-			matcher: matcher.Content(timeoutPath, time.Minute),
-			input:   stringtest.Input(`timeout: inf`),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			doc := yamltest.FirstDocument(t, tc.input)
-
-			ok, err := tc.matcher.Match(t.Context(), doc)
-			require.NoError(t, err)
-			assert.False(t, ok)
-		})
-	}
 }
 
 func TestContent_SelfValidator(t *testing.T) {
