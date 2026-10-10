@@ -4689,7 +4689,7 @@ func (e *SourceError) Excerpts(opts ...ExcerptOption) iter.Seq2[*Source, *line.V
 //		errs = append(errs, doc.Validate(ctx, schema))
 //	}
 //
-//	for src, excerpt := range niceyaml.Excerpts(errors.Join(errs...), 2) {
+//	for src, excerpt := range niceyaml.Excerpts(errors.Join(errs...)) {
 //		fmt.Println(src.Name())
 //		fmt.Println(excerpt)
 //	}
