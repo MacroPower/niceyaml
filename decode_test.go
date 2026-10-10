@@ -11074,68 +11074,51 @@ func TestErrDecode(t *testing.T) {
 		}
 	})
 
-	t.Run("unmarshaler parse error matches with no location", func(t *testing.T) {
-		t.Parallel()
-
-		// The error of the value's own parse carries a token of the bytes
-		// it parsed, not of the source, so it comes back as the value's
-		// own error rather than as a rejection at the wrong line.
-		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
-			"a: 1",
-			"b: x",
-			"c: y",
-			"z:",
-			"  n: notanumber",
-		))
-
-		_, err := dd.Decode[struct{ Z reparsingUnmarshaler }](t.Context())
-		require.ErrorIs(t, err, niceyaml.ErrDecode)
-
-		srcErr := yamltest.RequireSourceError(t, err)
-
-		_, ok := srcErr.Range()
-		assert.False(t, ok, "the error took a location from the value's own parse")
-	})
-
-	t.Run("unmarshaler parse error matching a source token matches with no location", func(t *testing.T) {
-		t.Parallel()
-
-		// The item's own parse fails at "abc" on its line 1, where the
-		// source holds the same token at the same position.
-		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
-			"name: [abc]",
-			"items:",
-			"  - name: [abc]",
-		))
-
-		_, err := dd.Decode[struct {
-			Name  []string
-			Items []bareReparsingUnmarshaler
-		}](t.Context())
-		require.ErrorIs(t, err, niceyaml.ErrDecode)
-
-		srcErr := yamltest.RequireSourceError(t, err)
-
-		_, ok := srcErr.Range()
-		assert.False(t, ok, "the error took a location from the value's own parse")
-	})
-
-	t.Run("decoder error without a token matches with no location", func(t *testing.T) {
+	t.Run("error without a token of the source matches with no location", func(t *testing.T) {
 		t.Parallel()
 
 		type inner struct {
 			A int `yaml:"a"`
 		}
 
-		// The decoder reports these with no token to bind them to, and
-		// none comes from a value that decodes itself, so the decode finds
-		// no value to bind them at. A go-yaml release that gives one a
-		// token gives its case a location.
 		tcs := map[string]struct {
 			input  string
 			decode func(ctx context.Context, dd *niceyaml.Node) error
 			msg    string
 		}{
+			// The error of the value's own parse carries a token of the
+			// bytes it parsed, not of the source, so it comes back as the
+			// value's own error rather than as a rejection at the wrong
+			// line.
+			"parse error of an unmarshaler": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"b: x",
+					"c: y",
+					"z:",
+					"  n: notanumber",
+				),
+				decode: decodeAs[struct{ Z reparsingUnmarshaler }](),
+				msg:    "cannot unmarshal string into Go struct field .Z of type int",
+			},
+			// The item's own parse fails at "abc" on its line 1, where the
+			// source holds the same token at the same position.
+			"parse error of an unmarshaler at a token the source holds": {
+				input: stringtest.LinesLF(
+					"name: [abc]",
+					"items:",
+					"  - name: [abc]",
+				),
+				decode: decodeAs[struct {
+					Name  []string
+					Items []bareReparsingUnmarshaler
+				}](),
+				msg: "cannot unmarshal string into Go struct field .Items of type int",
+			},
+			// The decoder reports each of the other cases with no token to
+			// bind it to, and none comes from a value that decodes itself,
+			// so the decode finds no value to bind it at. A go-yaml release
+			// that gives one a token gives its case a location.
 			"duplicated struct field name": {
 				input: "a: 1\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
