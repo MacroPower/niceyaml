@@ -669,11 +669,11 @@ func TestSource_Lines_DroppedText(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 	}{
-		"code of an escape in a double-quoted scalar": {input: "m: {a: \"\\u00e9\", b: xx, c: yy}\n"},
-		"code of an escape after a tag":               {input: "name: !!str \"Caf\\u00e9\"\nage: 3\n"},
+		"code of an escape in a double-quoted scalar": {input: `m: {a: "\u00e9", b: xx, c: yy}` + "\n"},
+		"code of an escape after a tag":               {input: stringtest.LinesLF(`name: !!str "Caf\u00e9"`, "age: 3")},
 		"blank line with a tab before the first key":  {input: " \t\na: 1\n"},
 		"blank line of a tab before the first key":    {input: "\t\na: 1\n"},
-		"space before a colon after a quoted key":     {input: "{\"a\" : 1, \"b\" : \"x\"}\n"},
+		"space before a colon after a quoted key":     {input: `{"a" : 1, "b" : "x"}` + "\n"},
 		"trailing spaces":                             {input: "a: 1   \nb: 2\n"},
 		"blank line of spaces":                        {input: stringtest.LinesLF("a: 1", "   ", "b: 2")},
 	}
@@ -2301,7 +2301,7 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			want: []bool{true},
 		},
 		"unknown escape": {
-			input: "a: \"\\q\"\n",
+			input: `a: "\q"` + "\n",
 			want:  []bool{true},
 		},
 		"second of three documents": {
