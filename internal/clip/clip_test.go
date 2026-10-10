@@ -79,9 +79,7 @@ func TestMap_Content(t *testing.T) {
 			width:   26,
 			want:    "...",
 		},
-		"empty line": {
-			want: "",
-		},
+		"empty line": {want: ""},
 		"windows count runes": {
 			content: "日本語のテキスト",
 			width:   8,
@@ -206,9 +204,7 @@ func TestMap_LineCol_InvertsCol(t *testing.T) {
 			width:   26,
 			windows: []position.Span{position.NewSpan(0, 26)},
 		},
-		"no window": {
-			width: 26,
-		},
+		"no window":  {width: 26},
 		"empty line": {},
 	}
 

@@ -69,9 +69,7 @@ func TestFormatTokenPosition(t *testing.T) {
 		input *token.Position
 		want  string
 	}{
-		"nil position": {
-			want: "<nil>",
-		},
+		"nil position": {want: "<nil>"},
 		"valid position": {
 			input: &token.Position{Line: 10, Column: 5, Offset: 100, IndentNum: 2, IndentLevel: 1},
 			want:  "Line=10 Col=5 Offset=100 IndentNum=2 IndentLevel=1",
@@ -94,9 +92,7 @@ func TestFormatToken(t *testing.T) {
 		input *token.Token
 		want  string
 	}{
-		"nil token": {
-			want: "<nil>",
-		},
+		"nil token": {want: "<nil>"},
 		"valid token": {
 			input: &token.Token{
 				Type:          token.StringType,
@@ -137,9 +133,7 @@ func TestFormatTokens(t *testing.T) {
 		want  string
 		input token.Tokens
 	}{
-		"nil slice": {
-			want: "<empty>",
-		},
+		"nil slice": {want: "<empty>"},
 		"empty slice": {
 			input: token.Tokens{},
 			want:  "<empty>",

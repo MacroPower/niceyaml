@@ -34,9 +34,7 @@ func TestNewPattern(t *testing.T) {
 			pattern: "{,{}}",
 			err:     filepaths.ErrInvalidPattern,
 		},
-		"one empty alternative": {
-			pattern: "{,a.yaml}",
-		},
+		"one empty alternative": {pattern: "{,a.yaml}"},
 		"invalid bracket": {
 			pattern: "[",
 			err:     filepaths.ErrInvalidPattern,
@@ -45,9 +43,7 @@ func TestNewPattern(t *testing.T) {
 			pattern: "[abc",
 			err:     filepaths.ErrInvalidPattern,
 		},
-		"braces within the expansion limit": {
-			pattern: strings.Repeat("{a,b}", 10) + ".yaml",
-		},
+		"braces within the expansion limit": {pattern: strings.Repeat("{a,b}", 10) + ".yaml"},
 		"braces past the expansion limit": {
 			pattern: strings.Repeat("{,}", 30) + "x.yaml",
 			err:     filepaths.ErrBraceLimit,
@@ -56,15 +52,9 @@ func TestNewPattern(t *testing.T) {
 			pattern: strings.Repeat("{a}", 20000) + ".yaml",
 			err:     filepaths.ErrBraceLimit,
 		},
-		"parent after a literal element": {
-			pattern: "configs/../*.yaml",
-		},
-		"leading parent elements": {
-			pattern: "../../*.yaml",
-		},
-		"parent after a double star": {
-			pattern: "**/../x.yaml",
-		},
+		"parent after a literal element": {pattern: "configs/../*.yaml"},
+		"leading parent elements":        {pattern: "../../*.yaml"},
+		"parent after a double star":     {pattern: "**/../x.yaml"},
 		"parent after a wildcard element": {
 			pattern: "*/../x.yaml",
 			err:     filepaths.ErrInvalidPattern,
@@ -81,9 +71,7 @@ func TestNewPattern(t *testing.T) {
 			pattern: "**/a/**/../x.yaml",
 			err:     filepaths.ErrInvalidPattern,
 		},
-		"parent after a double star after leading parents": {
-			pattern: "../**/../x.yaml",
-		},
+		"parent after a double star after leading parents": {pattern: "../**/../x.yaml"},
 		"parent after a class element": {
 			pattern: "a/[bc]/../x.yaml",
 			err:     filepaths.ErrInvalidPattern,

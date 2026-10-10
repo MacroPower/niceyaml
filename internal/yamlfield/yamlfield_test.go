@@ -154,9 +154,7 @@ func TestIgnoresMerges(t *testing.T) {
 				base embedded `yaml:",inline,alias,omitempty"` //nolint:unused // Only reflect reads the field.
 			}](),
 		},
-		"no fields": {
-			typ: reflect.TypeFor[struct{}](),
-		},
+		"no fields": {typ: reflect.TypeFor[struct{}]()},
 	}
 
 	for name, tc := range tcs {

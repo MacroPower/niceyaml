@@ -77,9 +77,7 @@ func TestValidateFile(t *testing.T) {
 		// documents have no entry, and a valid file has none.
 		want []string
 	}{
-		"every document valid": {
-			content: "name: a\n---\nname: b\n---\nname: c\n",
-		},
+		"every document valid": {content: "name: a\n---\nname: b\n---\nname: c\n"},
 		"first and last document invalid": {
 			content: "value: 1\n---\nname: b\n---\nvalue: 3\n",
 			want:    []string{"1:1:", "5:1:"},
@@ -316,12 +314,8 @@ func TestBuildRegistrySchemaDotDotAfterSymlink(t *testing.T) {
 	tcs := map[string]struct {
 		ref string
 	}{
-		"absolute": {
-			ref: dir + "/ldir/../schema.json",
-		},
-		"relative": {
-			ref: rel + "/ldir/../schema.json",
-		},
+		"absolute": {ref: dir + "/ldir/../schema.json"},
+		"relative": {ref: rel + "/ldir/../schema.json"},
 	}
 
 	for name, tc := range tcs {
@@ -362,12 +356,8 @@ func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
 	tcs := map[string]struct {
 		ref string
 	}{
-		"colon in the symlink name": {
-			ref: "v1:ldir/../schema.json",
-		},
-		"colon in a directory before the symlink": {
-			ref: "cfg:v2/ldir/../schema.json",
-		},
+		"colon in the symlink name":               {ref: "v1:ldir/../schema.json"},
+		"colon in a directory before the symlink": {ref: "cfg:v2/ldir/../schema.json"},
 		// FileOrURL reads a file URL whose host is not localhost as a
 		// relative path, here file:/ldir/../schema.json.
 		"file URL with a host": {
@@ -504,9 +494,7 @@ func TestValidateCmdSchemaError(t *testing.T) {
 		// with a 500.
 		url bool
 	}{
-		"missing file": {
-			err: schema.ErrLoad,
-		},
+		"missing file": {err: schema.ErrLoad},
 		"invalid JSON": {
 			content: `{"type": 12`,
 			err:     schema.ErrCompile,
@@ -732,12 +720,8 @@ func TestValidateCmdErrorNames(t *testing.T) {
 		// Makes every write of a result line fail.
 		failWrite bool
 	}{
-		"invalid document": {
-			content: "value: 1\n",
-		},
-		"unreadable file": {
-			err: fs.ErrNotExist,
-		},
+		"invalid document": {content: "value: 1\n"},
+		"unreadable file":  {err: fs.ErrNotExist},
 		"result line not written": {
 			content:   "name: a\n",
 			failWrite: true,

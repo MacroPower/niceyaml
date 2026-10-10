@@ -212,15 +212,9 @@ func TestGet_NamesURLAsRedacted(t *testing.T) {
 	tcs := map[string]struct {
 		url string
 	}{
-		"password": {
-			url: u.String(),
-		},
-		"space in the path": {
-			url: server.URL + "/my schema.json",
-		},
-		"password and a space in the path": {
-			url: u.String() + "/my schema.json",
-		},
+		"password":                         {url: u.String()},
+		"space in the path":                {url: server.URL + "/my schema.json"},
+		"password and a space in the path": {url: u.String() + "/my schema.json"},
 	}
 
 	for name, tc := range tcs {

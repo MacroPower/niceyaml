@@ -38,16 +38,12 @@ func TestState_AliasLimit(t *testing.T) {
 		opts []docstate.Option
 		want bool
 	}{
-		"default": {
-			want: true,
-		},
+		"default": {want: true},
 		"limit on": {
 			opts: []docstate.Option{docstate.WithAliasLimit(true)},
 			want: true,
 		},
-		"limit off": {
-			opts: []docstate.Option{docstate.WithAliasLimit(false)},
-		},
+		"limit off": {opts: []docstate.Option{docstate.WithAliasLimit(false)}},
 		"limit off and on again": {
 			opts: []docstate.Option{docstate.WithAliasLimit(false), docstate.WithAliasLimit(true)},
 			want: true,

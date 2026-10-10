@@ -45,21 +45,11 @@ func TestLines_Validate(t *testing.T) {
 		tcs := map[string]struct {
 			input string
 		}{
-			"valid simple": {
-				input: "key: value\n",
-			},
-			"valid multi-line": {
-				input: "first: 1\nsecond: 2\nthird: 3\n",
-			},
-			"valid with join flags": {
-				input: "script: |\n  line1\n  line2\n",
-			},
-			"block scalar with content after it": {
-				input: "k: >\n  a\n\n  b\nz: 1\n",
-			},
-			"empty": {
-				input: "",
-			},
+			"valid simple":                       {input: "key: value\n"},
+			"valid multi-line":                   {input: "first: 1\nsecond: 2\nthird: 3\n"},
+			"valid with join flags":              {input: "script: |\n  line1\n  line2\n"},
+			"block scalar with content after it": {input: "k: >\n  a\n\n  b\nz: 1\n"},
+			"empty":                              {input: ""},
 		}
 
 		for name, tc := range tcs {

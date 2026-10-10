@@ -69,12 +69,8 @@ func TestCheckDecode(t *testing.T) {
 		input string
 		path  paths.Path
 	}{
-		"no alias": {
-			input: "a: [x, y]\n",
-		},
-		"alias to a small sequence": {
-			input: "s: &s [a, b]\nt: *s\n",
-		},
+		"no alias":                  {input: "a: [x, y]\n"},
+		"alias to a small sequence": {input: "s: &s [a, b]\nt: *s\n"},
 		"aliases to a small mapping in a long sequence": {
 			// Each alias is a node of the document as well as a read of
 			// its anchor, so the 150 aliases add 150 nodes to the 13 the
@@ -319,16 +315,12 @@ func TestLimited(t *testing.T) {
 		opts []niceyaml.SourceOption
 		want bool
 	}{
-		"default": {
-			want: true,
-		},
+		"default": {want: true},
 		"limit on": {
 			opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(true)},
 			want: true,
 		},
-		"limit off": {
-			opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
-		},
+		"limit off": {opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)}},
 	}
 
 	for name, tc := range tcs {
@@ -361,15 +353,9 @@ func TestHoldsReferenceAlias(t *testing.T) {
 		path  paths.Path
 		want  bool
 	}{
-		"no alias": {
-			input: "a: [x, y]\n",
-		},
-		"alias to an anchor before it": {
-			input: "s: &s [a, b]\nt: *s\n",
-		},
-		"alias inside its own anchor": {
-			input: "x: &x [a, *x]\n",
-		},
+		"no alias":                     {input: "a: [x, y]\n"},
+		"alias to an anchor before it": {input: "s: &s [a, b]\nt: *s\n"},
+		"alias inside its own anchor":  {input: "x: &x [a, *x]\n"},
 		"alias with no anchor": {
 			input: "t: *s\n",
 			want:  true,
@@ -431,9 +417,7 @@ func TestCheckDecodeText(t *testing.T) {
 		err   error
 		input string
 	}{
-		"no alias": {
-			input: longScalar + "kind: x\n",
-		},
+		"no alias": {input: longScalar + "kind: x\n"},
 		"many aliases to a long scalar": {
 			input: longScalar + "kind: " + yamltest.FlowSequence("*a", 500) + "\n",
 			err:   aliaslimit.ErrExcessiveAliasing,

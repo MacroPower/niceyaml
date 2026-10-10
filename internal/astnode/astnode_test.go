@@ -30,12 +30,8 @@ func TestContent(t *testing.T) {
 		node ast.Node
 		want ast.Node
 	}{
-		"nil": {
-			node: nil,
-		},
-		"typed nil": {
-			node: (*ast.MappingNode)(nil),
-		},
+		"nil":       {node: nil},
+		"typed nil": {node: (*ast.MappingNode)(nil)},
 		"scalar": {
 			node: scalar,
 			want: scalar,
@@ -56,12 +52,8 @@ func TestContent(t *testing.T) {
 			node: &ast.MappingKeyNode{Value: mapping},
 			want: mapping,
 		},
-		"typed nil wrapper": {
-			node: (*ast.AnchorNode)(nil),
-		},
-		"wrapper around typed nil": {
-			node: &ast.TagNode{Value: (*ast.MappingNode)(nil)},
-		},
+		"typed nil wrapper":        {node: (*ast.AnchorNode)(nil)},
+		"wrapper around typed nil": {node: &ast.TagNode{Value: (*ast.MappingNode)(nil)}},
 		"nested wrappers": {
 			node: &ast.DocumentNode{Body: &ast.AnchorNode{Value: &ast.TagNode{Value: mapping}}},
 			want: mapping,

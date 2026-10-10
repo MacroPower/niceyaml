@@ -267,12 +267,8 @@ func TestNewModelDefaultTheme(t *testing.T) {
 	tcs := map[string]struct {
 		lineNumbers bool
 	}{
-		"diff gutter": {
-			lineNumbers: false,
-		},
-		"line numbers": {
-			lineNumbers: true,
-		},
+		"diff gutter":  {lineNumbers: false},
+		"line numbers": {lineNumbers: true},
 	}
 
 	for name, tc := range tcs {
@@ -569,18 +565,10 @@ func TestStatusBarWidth(t *testing.T) {
 	tcs := map[string]struct {
 		width int
 	}{
-		"20 columns": {
-			width: 20,
-		},
-		"50 columns": {
-			width: 50,
-		},
-		"80 columns": {
-			width: 80,
-		},
-		"120 columns": {
-			width: 120,
-		},
+		"20 columns":  {width: 20},
+		"50 columns":  {width: 50},
+		"80 columns":  {width: 80},
+		"120 columns": {width: 120},
 	}
 
 	for name, tc := range tcs {
@@ -611,9 +599,7 @@ func TestTitleLinePosition(t *testing.T) {
 		keys []tea.Msg
 		want string
 	}{
-		"top": {
-			want: " [1] ",
-		},
+		"top": {want: " [1] "},
 		"bottom": {
 			keys: []tea.Msg{press('G')},
 			want: " [3] ",
@@ -717,15 +703,9 @@ func TestUpdateCtrlCQuits(t *testing.T) {
 	tcs := map[string]struct {
 		setup func(m *model)
 	}{
-		"viewing": {
-			setup: func(*model) {},
-		},
-		"theme picker open": {
-			setup: func(m *model) { m.themePicking = true },
-		},
-		"search prompt open": {
-			setup: func(m *model) { m.searching = true },
-		},
+		"viewing":            {setup: func(*model) {}},
+		"theme picker open":  {setup: func(m *model) { m.themePicking = true }},
+		"search prompt open": {setup: func(m *model) { m.searching = true }},
 	}
 
 	for name, tc := range tcs {

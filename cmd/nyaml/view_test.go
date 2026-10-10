@@ -26,12 +26,8 @@ func TestLoadSources(t *testing.T) {
 		// Makes the missing file a dangling symlink, as a glob can match.
 		dangling bool
 	}{
-		"distinct base names": {
-			files: []string{"a/one.yaml", "b/two.yaml"},
-		},
-		"shared base name": {
-			files: []string{"a/config.yaml", "b/config.yaml"},
-		},
+		"distinct base names": {files: []string{"a/one.yaml", "b/two.yaml"}},
+		"shared base name":    {files: []string{"a/config.yaml", "b/config.yaml"}},
 		"missing file": {
 			files:   []string{"a/config.yaml", "b/config.yaml"},
 			missing: "b/config.yaml",

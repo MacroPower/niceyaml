@@ -135,12 +135,8 @@ func TestViewSignal(t *testing.T) {
 	tcs := map[string]struct {
 		sig syscall.Signal
 	}{
-		"SIGINT": {
-			sig: syscall.SIGINT,
-		},
-		"SIGTERM": {
-			sig: syscall.SIGTERM,
-		},
+		"SIGINT":  {sig: syscall.SIGINT},
+		"SIGTERM": {sig: syscall.SIGTERM},
 	}
 
 	for name, tc := range tcs {

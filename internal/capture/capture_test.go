@@ -20,9 +20,7 @@ func TestRun(t *testing.T) {
 		fn  func() error
 		err error
 	}{
-		"returns nil": {
-			fn: func() error { return nil },
-		},
+		"returns nil": {fn: func() error { return nil }},
 		"returns an error": {
 			fn:  func() error { return errSentinel },
 			err: errSentinel,
@@ -59,10 +57,8 @@ func TestReraise(t *testing.T) {
 		err  error
 		want error
 	}{
-		"nil": {},
-		"ordinary error": {
-			err: errSentinel,
-		},
+		"nil":            {},
+		"ordinary error": {err: errSentinel},
 		"panic": {
 			err:  &capture.PanicError{Value: "bug"},
 			want: &capture.PanicError{Value: "bug"},
@@ -74,9 +70,7 @@ func TestReraise(t *testing.T) {
 		"wrapped panic": {
 			err: fmt.Errorf("%w: %w", errSentinel, &capture.PanicError{Value: "bug"}),
 		},
-		"wrapped runtime.Goexit": {
-			err: fmt.Errorf("%w: %w", errSentinel, capture.ErrGoexit),
-		},
+		"wrapped runtime.Goexit": {err: fmt.Errorf("%w: %w", errSentinel, capture.ErrGoexit)},
 	}
 
 	for name, tc := range tcs {

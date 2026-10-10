@@ -162,9 +162,7 @@ func TestDecodesText(t *testing.T) {
 			typ:  reflect.TypeFor[embeddedTime](),
 			want: true,
 		},
-		"time": {
-			typ: reflect.TypeFor[time.Time](),
-		},
+		"time": {typ: reflect.TypeFor[time.Time]()},
 		"struct with time fields": {
 			typ: reflect.TypeFor[struct {
 				At      time.Time
@@ -172,18 +170,12 @@ func TestDecodesText(t *testing.T) {
 				Timeout time.Duration
 			}](),
 		},
-		"recursive type without a text field": {
-			typ: reflect.TypeFor[plainChain](),
-		},
-		"node unmarshaler with a text field": {
-			typ: reflect.TypeFor[nodeValue](),
-		},
+		"recursive type without a text field": {typ: reflect.TypeFor[plainChain]()},
+		"node unmarshaler with a text field":  {typ: reflect.TypeFor[nodeValue]()},
 		"node unmarshaler with a context and a text field": {
 			typ: reflect.TypeFor[nodeContextValue](),
 		},
-		"node and text unmarshaler": {
-			typ: reflect.TypeFor[nodeTextValue](),
-		},
+		"node and text unmarshaler": {typ: reflect.TypeFor[nodeTextValue]()},
 		"struct field node unmarshaler": {
 			typ: reflect.TypeFor[struct {
 				Name string
@@ -206,12 +198,8 @@ func TestDecodesText(t *testing.T) {
 				Addr netip.Prefix `json:"-"`
 			}](),
 		},
-		"plain types": {
-			typ: reflect.TypeFor[map[string][]string](),
-		},
-		"interface": {
-			typ: reflect.TypeFor[any](),
-		},
+		"plain types": {typ: reflect.TypeFor[map[string][]string]()},
+		"interface":   {typ: reflect.TypeFor[any]()},
 	}
 
 	for name, tc := range tcs {
@@ -254,9 +242,7 @@ func TestDecodesTextWith(t *testing.T) {
 		u    aliasing.Unmarshalers
 		want bool
 	}{
-		"no unmarshalers reads a plain type by its fields": {
-			typ: reflect.TypeFor[plainValue](),
-		},
+		"no unmarshalers reads a plain type by its fields": {typ: reflect.TypeFor[plainValue]()},
 		"no unmarshalers still reads a text unmarshaler": {
 			typ:  reflect.TypeFor[textValue](),
 			want: true,
@@ -289,9 +275,7 @@ func TestDecodesTextWith(t *testing.T) {
 			u:    aliasing.Unmarshalers{Custom: custom(reflect.TypeFor[nodeValue]())},
 			want: true,
 		},
-		"json unmarshaler without its option": {
-			typ: reflect.TypeFor[jsonValue](),
-		},
+		"json unmarshaler without its option": {typ: reflect.TypeFor[jsonValue]()},
 		"json unmarshaler under its option": {
 			typ:  reflect.TypeFor[jsonValue](),
 			u:    aliasing.Unmarshalers{JSON: true},

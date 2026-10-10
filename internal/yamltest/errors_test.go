@@ -24,10 +24,8 @@ func TestProblemsOf(t *testing.T) {
 		wantProblem []error
 		wantDetail  []error
 	}{
-		"nil": {},
-		"one problem with no detail": {
-			err: badA,
-		},
+		"nil":                        {},
+		"one problem with no detail": {err: badA},
 		"a summary heads its problems": {
 			err:         niceyaml.NewSummary("2 problems", badA, badB),
 			wantProblem: []error{badA, badB},
