@@ -1434,6 +1434,16 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			input: "either: {a: {b: 1}}\nport: x\n",
 			want:  "2:7: $.port: expected integer, got string",
 		},
+		// The unmarshaler returns an error bound to a source of its own. Its
+		// position lies in that source, so nothing joins it.
+		"unmarshaler error bound to another source": {
+			decode: decodeAs[struct {
+				Nested   problemNested `yaml:"nested"`
+				Replicas int           `yaml:"replicas"`
+			}](),
+			input: "nested: {prt: 80}\nreplicas: x\n",
+			want:  `inner.yaml:1:2: $.prt~: unknown field "prt"`,
+		},
 		"mapping in a text type with an UnmarshalJSON method": {
 			decode: decodeAs[struct {
 				Either map[string]problemTextual `yaml:"either"`
@@ -1880,18 +1890,6 @@ func TestDocument_Decode_Problems_Context(t *testing.T) {
 		))
 		assert.Equal(t, 1, calls)
 	})
-}
-
-func TestDocument_Decode_Problems_BoundElsewhere(t *testing.T) {
-	t.Parallel()
-
-	// The unmarshaler returns an error bound to a source of its own. Its
-	// position lies in that source, so nothing joins it.
-	_, err := yamltest.FirstDocument(t, "nested: {prt: 80}\nreplicas: x\n").Decode[struct {
-		Nested   problemNested `yaml:"nested"`
-		Replicas int           `yaml:"replicas"`
-	}](t.Context())
-	require.EqualError(t, err, `inner.yaml:1:2: $.prt~: unknown field "prt"`)
 }
 
 func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
