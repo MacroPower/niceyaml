@@ -2056,6 +2056,61 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 		)
 	})
 
+	t.Run("a position outside the merged text holds no value", func(t *testing.T) {
+		t.Parallel()
+
+		// The merged text keeps no comment of base.yaml, so it ends
+		// above the last lines of that file.
+		long := layerNodes(t,
+			"server:\n  host: example.com\n\n  # one\n  # two\n  port: 8080\n",
+			"server:\n  port: 80\n",
+		)
+		merged := niceyaml.NewSourceFromLayers(layersOf(long)...)
+		require.Equal(t, 3, merged.Lines().Len())
+
+		doc, err := merged.Document()
+		require.NoError(t, err)
+
+		inBase := position.New(4, 2)
+
+		tcs := map[string]struct {
+			err  error
+			want string
+		}{
+			"a line of the lowest layer": {
+				err:  niceyaml.NewError("bad", niceyaml.AtPosition(inBase)),
+				want: "base.yaml: bad",
+			},
+			"a line no layer holds": {
+				err:  niceyaml.NewError("bad", niceyaml.AtPosition(position.New(20, 0))),
+				want: "base.yaml: bad",
+			},
+			"a range": {
+				err:  niceyaml.NewError("bad", niceyaml.AtRange(position.NewRange(inBase, position.New(4, 7)))),
+				want: "base.yaml: bad",
+			},
+			"a path beside the position locates the error": {
+				err:  niceyaml.NewError("bad", niceyaml.AtPath(portPath), niceyaml.AtPosition(inBase)),
+				want: "prod.yaml:2:9: $.server.port: bad",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				// The Source binds the error as its one document does.
+				require.EqualError(t, merged.Bind(tc.err), tc.want)
+				require.EqualError(t, doc.Bind(tc.err), tc.want)
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, merged.Bind(tc.err), &bound)
+				require.NoError(t, bound.Unresolved())
+			})
+		}
+	})
+
 	t.Run("no error binds in the merged document", func(t *testing.T) {
 		t.Parallel()
 

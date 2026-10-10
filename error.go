@@ -2284,12 +2284,21 @@ func anchored(err error) scopedError {
 // nil when the line lies outside the source. The spans of the documents
 // run in order and each ends where the next starts, so a search for the
 // first span that ends past the line finds the one that holds it.
+//
+// The Source [NewSourceFromLayers] builds holds one document, and every
+// error of that Source binds in a layer through it. A line outside the
+// merged text thus gives that document too, so [locateMerged] reads the
+// line as one that holds no value.
 func (b binder) nodeAt(idx int) *Node {
 	if b.node != nil || !b.route {
 		return b.node
 	}
 
 	docs := b.src.documents()
+
+	if b.src.layers != nil {
+		return docs[0]
+	}
 
 	i := sort.Search(len(docs), func(i int) bool {
 		return docs[i].span.End > idx
