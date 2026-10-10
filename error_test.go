@@ -3671,7 +3671,7 @@ func TestError_Width_WithCustomPrinter(t *testing.T) {
 	tokens := lexer.Tokenize(source)
 
 	// Width comes from the printer, which wraps only at the width
-	// [printer.WithWrap] sets.
+	// [printer.WithWrapWidth] sets.
 	customPrinter := printer.New(
 		printer.WithStyles(yamltest.NewXMLStyles()),
 		printer.WithGutter(printer.NoGutter),
@@ -8055,7 +8055,8 @@ func TestSourceError_As(t *testing.T) {
 
 		// A summary heads one error per violation. [errors.As] on its
 		// binding descends into them and finds the rule of the first, and
-		// on each binding Members returns it finds the rule of that one.
+		// on the error of each problem the binding heads it finds the rule
+		// of that one.
 		ruleB := &ruleError{id: "b"}
 		summary := niceyaml.NewSummary("2 violations",
 			located,
