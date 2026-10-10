@@ -2827,7 +2827,9 @@ func TestNode_Decode_SelfValidatorContext(t *testing.T) {
 func ExampleNode_SelfValidate() {
 	ctx := context.Background()
 
-	doc, err := niceyaml.NewSourceFromString("db:\n  host: localhost\n", niceyaml.WithName("app.yaml")).Document()
+	doc, err := niceyaml.NewSourceFromString(`db:
+  host: localhost
+`, niceyaml.WithName("app.yaml")).Document()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -3305,10 +3307,11 @@ func ExampleSelfValidateValue() {
 	fmt.Println(err)
 
 	// A document that holds the value under a key places the error later.
-	doc, docErr := niceyaml.NewSourceFromString(
-		"config:\n  items:\n    - url: http://x\n    - url: ftp://y\n",
-		niceyaml.WithName("app.yaml"),
-	).Document()
+	doc, docErr := niceyaml.NewSourceFromString(`config:
+  items:
+    - url: http://x
+    - url: ftp://y
+`, niceyaml.WithName("app.yaml")).Document()
 	if docErr != nil {
 		log.Fatal(docErr)
 	}

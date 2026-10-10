@@ -156,10 +156,9 @@ func ExampleNewSourceFromLayers_environment() {
 }
 
 func ExampleNode_Origin() {
-	base := niceyaml.NewSourceFromString(
-		"name: shop\nlicense: LICENSE\n",
-		niceyaml.WithFilePath("conf/base.yaml"),
-	)
+	base := niceyaml.NewSourceFromString(`name: shop
+license: LICENSE
+`, niceyaml.WithFilePath("conf/base.yaml"))
 
 	prod := niceyaml.NewSourceFromString(`# Production.
 
