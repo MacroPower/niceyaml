@@ -4486,7 +4486,7 @@ func TestPrinter_With(t *testing.T) {
 	assert.Equal(t, 0, base.WrapWidth())
 	assert.Equal(t, 20, narrow.WrapWidth())
 
-	// A negative width disables wrapping, and Wrap reports that as 0.
+	// A negative width disables wrapping, and WrapWidth reports that as 0.
 	assert.Equal(t, 0, base.With(printer.WithWrapWidth(-5)).WrapWidth())
 
 	// The receiver still renders on one line; the copy wraps.
