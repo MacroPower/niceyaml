@@ -45,7 +45,7 @@ func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
 
 	m := testModel(p, 24, 2)
 	m.SetWordWrap(true)
-	m.SetRevision(niceyaml.NewSourceFromString("k: aaaa aaaa aaaa aaaa\nv: aaaa aaaa aaaa aaaa\n"))
+	m.SetRevision(niceyaml.NewSourceFromString(stringtest.LinesLF("k: aaaa aaaa aaaa aaaa", "v: aaaa aaaa aaaa aaaa")))
 
 	_ = m.View()
 
@@ -611,7 +611,7 @@ func addRevisions(m *yamlviewport.Model, docs ...string) {
 	}
 }
 
-// Documents that several tests scroll through.
+// Documents that several tests share.
 var (
 	// Ten lines that each fit one row.
 	verticalYAML = stringtest.Input(`
@@ -648,6 +648,17 @@ var (
 		line9: i
 		line10: j
 	`)
+
+	// Three short lines, and a second revision that changes the middle one.
+	threeYAML        = stringtest.LinesLF("a: 1", "b: 2", "c: 3")
+	threeChangedYAML = stringtest.LinesLF("a: 1", "b: 9", "c: 3")
+
+	// Revisions the [yamlviewport.Model.HitAt] tests point into. The second
+	// line of the first two holds wide characters, and each later revision
+	// changes the lines between the first and the last.
+	hitV1 = stringtest.LinesLF("a: 1", "b: 日本語 x", "c: 3")
+	hitV2 = stringtest.LinesLF("a: 1", "b: 日本 y", "new: line here", "c: 3")
+	hitV3 = stringtest.LinesLF("a: 1", "new: line here", "c: 3", "d: 4")
 )
 
 func TestViewport_Golden(t *testing.T) {
@@ -1924,7 +1935,7 @@ func TestViewport_SideBySideFillerRowsKeepTheFrame(t *testing.T) {
 		pane   = 14
 	)
 
-	before := niceyaml.NewSourceFromString("a: 1\nb: short\nc: 3\n")
+	before := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: short", "c: 3"))
 	after := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: "+strings.Repeat("y", 60), "c: 3"))
 
 	m := testModel(framedPrinter(normalBorder()), width, height)
@@ -1999,7 +2010,7 @@ func TestViewport_HorizontalScrollKeepsFrameOfNarrowerPane(t *testing.T) {
 	m := testModel(framedPrinter(normalBorder()), 31, 3)
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
 	m.SetWordWrap(false)
-	m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: s\nc: 3\n"))
+	m.SetRevision(niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: s", "c: 3")))
 	m.AddRevision(niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: "+strings.Repeat("y", 50), "c: 3")))
 
 	for _, offset := range []int{1, 10, 40} {
@@ -2155,7 +2166,7 @@ func TestViewport_SideBySideWithoutPaneColumns(t *testing.T) {
 			t.Parallel()
 
 			m := testModel(testPrinter(), tc.width, 5)
-			addRevisions(&m, "a: 1\nb: 2\nc: 3\n", "a: 1\nb: 9\nc: 3\n")
+			addRevisions(&m, threeYAML, threeChangedYAML)
 			m.SetViewMode(yamlviewport.ViewModeSideBySide)
 
 			assert.Empty(t, m.View())
@@ -2170,15 +2181,15 @@ func TestViewport_DiffOfRevisionsOverPartOfTheSource(t *testing.T) {
 
 	// A diff compares the lines each revision holds, as the other view
 	// modes render them, so a change outside the held lines does not show.
-	slice := func(input string) yamlviewport.Revision {
-		source := niceyaml.NewSourceFromString(input)
+	slice := func(lines ...string) yamlviewport.Revision {
+		source := niceyaml.NewSourceFromString(stringtest.LinesLF(lines...))
 
 		return yamlviewport.NewRevision("part", source.View().Slice(position.NewSpan(1, 4)))
 	}
 
 	m := testModel(testPrinter(), 80, 10)
-	m.SetRevision(slice("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"))
-	m.AddRevision(slice("a: 9\nb: 2\nc: 3\nd: 4\ne: 9\n"))
+	m.SetRevision(slice("a: 1", "b: 2", "c: 3", "d: 4", "e: 5"))
+	m.AddRevision(slice("a: 9", "b: 2", "c: 3", "d: 4", "e: 9"))
 
 	require.True(t, m.ShowingDiff())
 
@@ -2188,7 +2199,7 @@ func TestViewport_DiffOfRevisionsOverPartOfTheSource(t *testing.T) {
 	assert.NotContains(t, m.View(), "e: 5")
 
 	// A change inside the held lines shows as it does for a whole source.
-	m.AddRevision(slice("a: 9\nb: 2\nc: 8\nd: 4\ne: 9\n"))
+	m.AddRevision(slice("a: 9", "b: 2", "c: 8", "d: 4", "e: 9"))
 
 	assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, m.DiffStats())
 	assert.Contains(t, m.View(), "c: 8")
@@ -2221,7 +2232,7 @@ func TestViewport_ViewFitsHeight(t *testing.T) {
 			t.Parallel()
 
 			m := testModel(testPrinter(), 20, tc.height, yamlviewport.WithContainerStyle(tc.style))
-			m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n"))
+			m.SetRevision(niceyaml.NewSourceFromString(threeYAML))
 
 			view := m.View()
 			if tc.wantRows == 0 {
@@ -3498,7 +3509,7 @@ func TestViewport_UpdateHorizontalWheel(t *testing.T) {
 func TestViewport_KeyMap(t *testing.T) {
 	t.Parallel()
 
-	lines := niceyaml.NewSourceFromString("key: value\nkey2: value2\nkey3: value3")
+	lines := niceyaml.NewSourceFromString(stringtest.JoinLF("key: value", "key2: value2", "key3: value3"))
 
 	tcs := map[string]struct {
 		setup func(m *yamlviewport.Model)
@@ -4368,7 +4379,7 @@ func TestViewport_CopiesRenderConcurrently(t *testing.T) {
 
 			newModel := func() yamlviewport.Model {
 				m := testModel(printer.New(), 20, 3)
-				addRevisions(&m, "a: 1\nb: 2\n", "a: aaaa bbbb cccc dddd eeee\nb: 3\nc: 4\n")
+				addRevisions(&m, "a: 1\nb: 2\n", stringtest.LinesLF("a: aaaa bbbb cccc dddd eeee", "b: 3", "c: 4"))
 
 				if tc.setup != nil {
 					tc.setup(&m)
@@ -4520,7 +4531,7 @@ func TestViewport_NilPrinterSelectsDefault(t *testing.T) {
 	setup := func(m *yamlviewport.Model) {
 		m.SetWidth(40)
 		m.SetHeight(5)
-		m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: foo\nc: foo\n"))
+		m.SetRevision(niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: foo", "c: foo")))
 		m.SetSearchTerm("foo")
 	}
 
@@ -4741,9 +4752,9 @@ func TestViewport_ViewModeReusesDiff(t *testing.T) {
 	t.Parallel()
 
 	docs := []string{
-		"a: 1\nb: 2\nc: 3\n",
-		"a: 1\nb: 20\nc: 3\n",
-		"a: 10\nb: 20\nc: 3\nd: 4\n",
+		threeYAML,
+		stringtest.LinesLF("a: 1", "b: 20", "c: 3"),
+		stringtest.LinesLF("a: 10", "b: 20", "c: 3", "d: 4"),
 	}
 
 	tcs := map[string]struct {
@@ -5051,7 +5062,7 @@ func TestViewport_SearchLaysOutOnlyHighlightedLines(t *testing.T) {
 		))
 
 		m := testModel(p, 40, 10, yamlviewport.WithSearcher(&indexSearcher{index: &ptrIndex{matches: matches}}))
-		m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\n"))
+		m.SetRevision(niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2", "c: 3", "d: 4")))
 		m.TotalRowCount()
 
 		steps := []func(){
@@ -5153,7 +5164,7 @@ func TestViewport_SideBySideSelectedMatchOnInsertedLine(t *testing.T) {
 	const highlight = "<genericHighlight>"
 
 	m := testModel(testPrinterWithSearch(), 100, 8)
-	addRevisions(&m, "a: 1\nb: 2\n", "a: 1\nfind: me\nb: 2\n")
+	addRevisions(&m, "a: 1\nb: 2\n", stringtest.LinesLF("a: 1", "find: me", "b: 2"))
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
 
 	m.SetSearchTerm("find")
@@ -5179,10 +5190,11 @@ func TestViewport_SideBySideMatchStartingOnPadding(t *testing.T) {
 	// pane draws the selected highlight once as the search steps through
 	// them.
 	const (
-		withBlank = "a: 1\n\nb: 2\n"
 		without   = "a: 1\nb: 2\n"
 		highlight = "<genericHighlight>"
 	)
+
+	withBlank := stringtest.LinesLF("a: 1", "", "b: 2")
 
 	tcs := map[string]struct {
 		before string
@@ -5446,9 +5458,9 @@ func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
 
 			// The lines fill the pane, so every row of the view is a row
 			// of the frame.
-			source := niceyaml.NewSourceFromString(
-				"a: 1\nk: v\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nh: 8\ni: 9\nj: 10\n",
-			)
+			source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+				"a: 1", "k: v", "c: 3", "d: 4", "e: 5", "f: 6", "g: 7", "h: 8", "i: 9", "j: 10",
+			))
 			view := source.View()
 			view.Annotate(1, line.Annotation{Content: "BAD", Placement: line.Below, Col: 50})
 
@@ -5557,7 +5569,7 @@ func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
 			printer: testPrinter(),
 			width:   14,
 			setup: func(m *yamlviewport.Model) {
-				addRevisions(m, "a: 1\nb: 2\nc: 3\n", "a: 1\nb: 9\nc: 3\n")
+				addRevisions(m, threeYAML, threeChangedYAML)
 				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
 			// Gutter 1 + hunk header 15 - width 14. The header is an
@@ -5644,7 +5656,7 @@ func TestViewport_SideBySideWithoutDiffPrintsOnce(t *testing.T) {
 	p := testPrinter().With(printer.WithGutter(gutter))
 	m := testModel(p, 40, 10)
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
-	m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n"))
+	m.SetRevision(niceyaml.NewSourceFromString(threeYAML))
 	m.TotalRowCount()
 
 	clear(gutter.renders)
@@ -5953,7 +5965,7 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 	// A long line wraps to many rows at width 20, and the match sits on the
 	// last of them.
 	long := func(value string) string {
-		return value + ": " + strings.Repeat("word ", 40) + "needle\n"
+		return value + ": " + strings.Repeat("word ", 40) + "needle"
 	}
 
 	// One long line whose match sits in the middle, after the separator.
@@ -5970,7 +5982,7 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 	}{
 		"wrapped line": {
 			setup: func(m *yamlviewport.Model) {
-				m.SetRevision(niceyaml.NewSourceFromString("a: 1\n" + long("k") + "y: 2\nz: 3\n"))
+				m.SetRevision(niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", long("k"), "y: 2", "z: 3")))
 			},
 			wantRow: 1,
 		},
@@ -5988,14 +6000,14 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 		},
 		"hunk header above the line": {
 			setup: func(m *yamlviewport.Model) {
-				addRevisions(m, "k: old\n", long("k"))
+				addRevisions(m, "k: old\n", long("k")+"\n")
 				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
 			wantRow: -1,
 		},
 		"right pane": {
 			setup: func(m *yamlviewport.Model) {
-				addRevisions(m, "k: old\n", long("k"))
+				addRevisions(m, "k: old\n", long("k")+"\n")
 				m.SetViewMode(yamlviewport.ViewModeSideBySide)
 				m.SetWidth(43)
 			},
@@ -6238,7 +6250,7 @@ func TestViewport_SearchScrollsToHorizontalMatch(t *testing.T) {
 		wantScroll bool
 	}{
 		"match past the right edge": {
-			revisions:  []string{"k: " + strings.Repeat("-", 60) + "NEEDLE\nz: 1\n"},
+			revisions:  []string{stringtest.LinesLF("k: "+strings.Repeat("-", 60)+"NEEDLE", "z: 1")},
 			width:      30,
 			wantScroll: true,
 		},
@@ -6246,29 +6258,35 @@ func TestViewport_SearchScrollsToHorizontalMatch(t *testing.T) {
 			// Each rune before the needle takes two cells, so the cell of
 			// the match is twice its column, and an offset counted in
 			// runes would leave the needle off screen.
-			revisions:  []string{"k: " + strings.Repeat("日本", 15) + "NEEDLE\nz: 1\n"},
+			revisions:  []string{stringtest.LinesLF("k: "+strings.Repeat("日本", 15)+"NEEDLE", "z: 1")},
 			width:      30,
 			wantScroll: true,
 		},
 		"match inside the first screen": {
-			revisions:  []string{"k: NEEDLE " + strings.Repeat("-", 60) + "\nz: 1\n"},
+			revisions:  []string{stringtest.LinesLF("k: NEEDLE "+strings.Repeat("-", 60), "z: 1")},
 			width:      30,
 			wantScroll: false,
 		},
 		"match right of center inside the first screen": {
-			revisions:  []string{"key: " + strings.Repeat("-", 20) + "NEEDLE" + strings.Repeat("-", 40) + "\nz: 1\n"},
+			revisions: []string{
+				stringtest.LinesLF("key: "+strings.Repeat("-", 20)+"NEEDLE"+strings.Repeat("-", 40), "z: 1"),
+			},
 			width:      40,
 			wantScroll: false,
 		},
 		"match that ends at the edge of the first screen": {
 			// The one-cell gutter, "key: ", and the dashes take 34 cells,
 			// so the needle ends on the last of the 40.
-			revisions:  []string{"key: " + strings.Repeat("-", 28) + "NEEDLE" + strings.Repeat("-", 40) + "\nz: 1\n"},
+			revisions: []string{
+				stringtest.LinesLF("key: "+strings.Repeat("-", 28)+"NEEDLE"+strings.Repeat("-", 40), "z: 1"),
+			},
 			width:      40,
 			wantScroll: false,
 		},
 		"match that ends one cell past the first screen": {
-			revisions:  []string{"key: " + strings.Repeat("-", 29) + "NEEDLE" + strings.Repeat("-", 40) + "\nz: 1\n"},
+			revisions: []string{
+				stringtest.LinesLF("key: "+strings.Repeat("-", 29)+"NEEDLE"+strings.Repeat("-", 40), "z: 1"),
+			},
 			width:      40,
 			wantScroll: true,
 		},
@@ -6282,7 +6300,7 @@ func TestViewport_SearchScrollsToHorizontalMatch(t *testing.T) {
 			wantScroll: true,
 		},
 		"wrap on": {
-			revisions:  []string{"k: " + strings.Repeat("-", 60) + "NEEDLE\nz: 1\n"},
+			revisions:  []string{stringtest.LinesLF("k: "+strings.Repeat("-", 60)+"NEEDLE", "z: 1")},
 			width:      30,
 			wrap:       true,
 			wantScroll: false,
@@ -6378,7 +6396,7 @@ func TestViewport_ClipsRowsWiderThanContent(t *testing.T) {
 	// math does not count. The view keeps one screen row per printed row,
 	// so the last rows stay reachable.
 	m := testModel(testPrinterWithLineNumbers(), 6, 4)
-	m.AddRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"))
+	m.AddRevision(niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2", "c: 3", "d: 4", "e: 5")))
 
 	// Every screen row opens with the gutter, which a wrapped row would
 	// not, and the last row of the view at the largest offset is a row of
@@ -6502,11 +6520,6 @@ func screenCells(screen string) [][]string {
 func TestViewport_HitAt_Screen(t *testing.T) {
 	t.Parallel()
 
-	const (
-		v1 = "a: 1\nb: 日本語 x\nc: 3\n"
-		v2 = "a: 1\nb: 日本 y\nnew: line here\nc: 3\n"
-	)
-
 	framed := testPrinterWithLineNumbers().With(printer.WithContainerStyle(normalBorder().Padding(0, 1)))
 
 	// Each want holds the hit map of the screen above it, which the
@@ -6522,7 +6535,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 		height    int
 	}{
 		"clipped lines": {
-			revisions: []string{v1},
+			revisions: []string{hitV1},
 			clip:      4,
 			width:     16,
 			height:    3,
@@ -6533,7 +6546,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 			),
 		},
 		"clipped lines scrolled sideways": {
-			revisions: []string{v1},
+			revisions: []string{hitV1},
 			clip:      4,
 			width:     6,
 			height:    3,
@@ -6548,7 +6561,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 			),
 		},
 		"one revision": {
-			revisions: []string{v1},
+			revisions: []string{hitV1},
 			width:     16,
 			height:    4,
 			want: stringtest.JoinLF(
@@ -6559,7 +6572,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 			),
 		},
 		"wide character the right edge cuts": {
-			revisions: []string{v1},
+			revisions: []string{hitV1},
 			width:     8,
 			height:    3,
 			setup: func(m *yamlviewport.Model) {
@@ -6573,7 +6586,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 			),
 		},
 		"wide character the left edge cuts": {
-			revisions: []string{v1},
+			revisions: []string{hitV1},
 			width:     6,
 			height:    3,
 			setup: func(m *yamlviewport.Model) {
@@ -6587,7 +6600,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 			),
 		},
 		"scrolled down": {
-			revisions: []string{v2},
+			revisions: []string{hitV2},
 			width:     16,
 			height:    2,
 			setup: func(m *yamlviewport.Model) {
@@ -6599,7 +6612,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 			),
 		},
 		"wrapped": {
-			revisions: []string{v2},
+			revisions: []string{hitV2},
 			width:     11,
 			height:    5,
 			want: stringtest.JoinLF(
@@ -6611,7 +6624,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 			),
 		},
 		"unified diff": {
-			revisions: []string{v1, v2},
+			revisions: []string{hitV1, hitV2},
 			width:     20,
 			height:    6,
 			want: stringtest.JoinLF(
@@ -6624,7 +6637,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 			),
 		},
 		"hunks": {
-			revisions: []string{v1, v2},
+			revisions: []string{hitV1, hitV2},
 			width:     20,
 			height:    5,
 			setup: func(m *yamlviewport.Model) {
@@ -6640,7 +6653,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 			),
 		},
 		"side by side": {
-			revisions: []string{v1, v2},
+			revisions: []string{hitV1, hitV2},
 			width:     31,
 			height:    6,
 			setup: func(m *yamlviewport.Model) {
@@ -6656,7 +6669,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 			),
 		},
 		"side by side without a diff": {
-			revisions: []string{v1, v2},
+			revisions: []string{hitV1, hitV2},
 			width:     31,
 			height:    5,
 			setup: func(m *yamlviewport.Model) {
@@ -6672,7 +6685,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 			),
 		},
 		"frames of both container styles": {
-			revisions: []string{v2},
+			revisions: []string{hitV2},
 			printer:   framed,
 			style:     lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Margin(1, 2),
 			width:     30,
@@ -6752,12 +6765,6 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 func TestViewport_HitAt(t *testing.T) {
 	t.Parallel()
 
-	const (
-		v1 = "a: 1\nb: 日本語 x\nc: 3\n"
-		v2 = "a: 1\nb: 日本 y\nnew: line here\nc: 3\n"
-		v3 = "a: 1\nnew: line here\nc: 3\nd: 4\n"
-	)
-
 	source := func(text string) yamlviewport.Revision {
 		return niceyaml.NewSourceFromString(text)
 	}
@@ -6771,12 +6778,12 @@ func TestViewport_HitAt(t *testing.T) {
 		m.SetHunkContext(0)
 	}
 
-	annotated := niceyaml.NewSourceFromString(v1).View()
+	annotated := niceyaml.NewSourceFromString(hitV1).View()
 	annotated.Annotate(0, line.Annotation{Content: "bad", Placement: line.Below})
 
 	// The mark at column 20 centers the window of the long line, which
 	// shows as "...mnopqrstuv..." behind the gutter.
-	marked := niceyaml.NewSourceFromString("a: 1\nk: abcdefghijklmnopqrstuvwxyz\nc: 3\n").View()
+	marked := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "k: abcdefghijklmnopqrstuvwxyz", "c: 3")).View()
 	marked.Annotate(1, line.Annotation{Content: "x", Placement: line.Below, Col: 20})
 
 	clipped := yamlviewport.NewRevision("clipped", marked.Clip(10))
@@ -6802,7 +6809,7 @@ func TestViewport_HitAt(t *testing.T) {
 		ok        bool
 	}{
 		"first column of a line": {
-			revisions: []yamlviewport.Revision{source(v1)},
+			revisions: []yamlviewport.Revision{source(hitV1)},
 			width:     16,
 			height:    4,
 			x:         1,
@@ -6811,7 +6818,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"second cell of a wide character": {
-			revisions: []yamlviewport.Revision{source(v1)},
+			revisions: []yamlviewport.Revision{source(hitV1)},
 			width:     16,
 			height:    4,
 			x:         5,
@@ -6820,35 +6827,35 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"gutter": {
-			revisions: []yamlviewport.Revision{source(v1)},
+			revisions: []yamlviewport.Revision{source(hitV1)},
 			width:     16,
 			height:    4,
 			x:         0,
 			y:         1,
 		},
 		"past the end of a row": {
-			revisions: []yamlviewport.Revision{source(v1)},
+			revisions: []yamlviewport.Revision{source(hitV1)},
 			width:     16,
 			height:    4,
 			x:         5,
 			y:         0,
 		},
 		"below the last row": {
-			revisions: []yamlviewport.Revision{source(v1)},
+			revisions: []yamlviewport.Revision{source(hitV1)},
 			width:     16,
 			height:    4,
 			x:         1,
 			y:         3,
 		},
 		"left of the viewport": {
-			revisions: []yamlviewport.Revision{source(v1)},
+			revisions: []yamlviewport.Revision{source(hitV1)},
 			width:     16,
 			height:    4,
 			x:         -1,
 			y:         1,
 		},
 		"right of the viewport": {
-			revisions: []yamlviewport.Revision{source(v1)},
+			revisions: []yamlviewport.Revision{source(hitV1)},
 			width:     4,
 			height:    4,
 			x:         4,
@@ -6856,21 +6863,21 @@ func TestViewport_HitAt(t *testing.T) {
 			setup:     func(m *yamlviewport.Model) { m.SetWordWrap(false) },
 		},
 		"above the viewport": {
-			revisions: []yamlviewport.Revision{source(v1)},
+			revisions: []yamlviewport.Revision{source(hitV1)},
 			width:     16,
 			height:    4,
 			x:         1,
 			y:         -1,
 		},
 		"below the viewport": {
-			revisions: []yamlviewport.Revision{source(v1)},
+			revisions: []yamlviewport.Revision{source(hitV1)},
 			width:     16,
 			height:    2,
 			x:         1,
 			y:         2,
 		},
 		"row a line wraps onto": {
-			revisions: []yamlviewport.Revision{source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV2)},
 			width:     11,
 			height:    5,
 			x:         1,
@@ -6879,7 +6886,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"scrolled down": {
-			revisions: []yamlviewport.Revision{source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV2)},
 			width:     16,
 			height:    2,
 			x:         3,
@@ -6889,7 +6896,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"scrolled sideways": {
-			revisions: []yamlviewport.Revision{source(v1)},
+			revisions: []yamlviewport.Revision{source(hitV1)},
 			width:     8,
 			height:    3,
 			x:         0,
@@ -6902,7 +6909,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:   true,
 		},
 		"frames of both container styles": {
-			revisions: []yamlviewport.Revision{source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV2)},
 			printer:   framed,
 			style:     lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Margin(1, 2),
 			width:     30,
@@ -6913,7 +6920,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"frame of the printer": {
-			revisions: []yamlviewport.Revision{source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV2)},
 			printer:   framed,
 			style:     lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Margin(1, 2),
 			width:     30,
@@ -6922,7 +6929,7 @@ func TestViewport_HitAt(t *testing.T) {
 			y:         2,
 		},
 		"deleted line of a diff": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
 			width:     20,
 			height:    6,
 			x:         10,
@@ -6931,7 +6938,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"inserted line of a diff": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
 			width:     20,
 			height:    6,
 			x:         1,
@@ -6940,7 +6947,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"line below the changes keeps the index of its revision": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
 			width:     20,
 			height:    6,
 			x:         1,
@@ -6949,7 +6956,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"deleted line of a diff with the first revision": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2), source(v3)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2), source(hitV3)},
 			width:     20,
 			height:    6,
 			x:         1,
@@ -6959,7 +6966,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"deleted line of a diff with the revision before": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2), source(v3)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2), source(hitV3)},
 			width:     20,
 			height:    6,
 			x:         1,
@@ -6968,7 +6975,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"later revision without a diff": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
 			width:     20,
 			height:    6,
 			x:         1,
@@ -6978,7 +6985,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"hunk header": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
 			width:     20,
 			height:    5,
 			x:         3,
@@ -6986,7 +6993,7 @@ func TestViewport_HitAt(t *testing.T) {
 			setup:     hunks,
 		},
 		"line of a hunk": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
 			width:     20,
 			height:    5,
 			x:         1,
@@ -6996,7 +7003,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"left pane holds the revision the diff compares with": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
 			width:     31,
 			height:    6,
 			x:         1,
@@ -7006,7 +7013,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"right pane holds the current revision": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
 			width:     31,
 			height:    6,
 			x:         18,
@@ -7016,7 +7023,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"row a line wraps onto in the right pane": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
 			width:     31,
 			height:    6,
 			x:         18,
@@ -7026,7 +7033,7 @@ func TestViewport_HitAt(t *testing.T) {
 			ok:        true,
 		},
 		"filler beside a taller pane": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
 			width:     31,
 			height:    6,
 			x:         1,
@@ -7034,7 +7041,7 @@ func TestViewport_HitAt(t *testing.T) {
 			setup:     sideBySide,
 		},
 		"separator between the panes": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
 			width:     31,
 			height:    6,
 			x:         15,
@@ -7042,7 +7049,7 @@ func TestViewport_HitAt(t *testing.T) {
 			setup:     sideBySide,
 		},
 		"gutter of the right pane": {
-			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
 			width:     31,
 			height:    6,
 			x:         17,
@@ -7050,7 +7057,7 @@ func TestViewport_HitAt(t *testing.T) {
 			setup:     sideBySide,
 		},
 		"right pane without a diff": {
-			revisions: []yamlviewport.Revision{source(v1)},
+			revisions: []yamlviewport.Revision{source(hitV1)},
 			width:     31,
 			height:    6,
 			x:         22,
@@ -7063,7 +7070,7 @@ func TestViewport_HitAt(t *testing.T) {
 			revisions: []yamlviewport.Revision{
 				yamlviewport.NewRevision(
 					"slice",
-					niceyaml.NewSourceFromString(v2).View().Slice(position.NewSpan(2, 4)),
+					niceyaml.NewSourceFromString(hitV2).View().Slice(position.NewSpan(2, 4)),
 				),
 			},
 			width:  20,
@@ -7193,7 +7200,7 @@ func TestViewport_HitAt(t *testing.T) {
 			y:      0,
 		},
 		"no height": {
-			revisions: []yamlviewport.Revision{source(v1)},
+			revisions: []yamlviewport.Revision{source(hitV1)},
 			width:     16,
 			height:    0,
 			x:         1,
@@ -7225,8 +7232,17 @@ func TestViewport_HitAt_PathAt(t *testing.T) {
 	// A parent names the value under the pointer from the hit: the
 	// revision picks the document, and the position goes to PathAt as it
 	// is, whatever the diff shows around the line.
-	before := niceyaml.NewSourceFromString("spec:\n  replicas: 3\n  paused: false\n")
-	after := niceyaml.NewSourceFromString("spec:\n  replicas: 5\n  image: app\n  paused: false\n")
+	before := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"spec:",
+		"  replicas: 3",
+		"  paused: false",
+	))
+	after := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"spec:",
+		"  replicas: 5",
+		"  image: app",
+		"  paused: false",
+	))
 
 	m := testModel(testPrinter(), 24, 6)
 	m.AddRevisions(before, after)
