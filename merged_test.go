@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1336,6 +1338,82 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 
 		err = layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.Doc().Child("x", "q"))))
 		require.EqualError(t, err, "prod.yaml:1:8: $.x.q: here")
+	})
+}
+
+// endingContext is a context that ends once Err has answered lasts
+// calls, so a test ends it between two steps of the call that reads it.
+type endingContext struct {
+	context.Context
+
+	calls atomic.Int64
+	lasts int64
+}
+
+func (c *endingContext) Err() error {
+	if c.calls.Add(1) > c.lasts {
+		return context.Canceled
+	}
+
+	return nil
+}
+
+func TestNewSourceFromLayers_Context(t *testing.T) {
+	t.Parallel()
+
+	// Each alias writes the hundred items of its anchor out, so the merge
+	// writes far more values than the layer spells.
+	var input strings.Builder
+
+	input.WriteString("items: &items [" + strings.Repeat("1, ", 99) + "1]\n")
+
+	for i := range 50 {
+		fmt.Fprintf(&input, "copy%d: *items\n", i)
+	}
+
+	base := niceyaml.NewSourceFromString("name: base\n", niceyaml.WithName("base.yaml"))
+	prod := niceyaml.NewSourceFromString(input.String(),
+		niceyaml.WithName("prod.yaml"), niceyaml.WithAliasLimit(false))
+
+	t.Run("a context that ends while a layer writes its aliases out returns its error", func(t *testing.T) {
+		t.Parallel()
+
+		// The decode of each layer reads the context a few times, so the
+		// context ends among the values the aliases of prod.yaml write.
+		ctx := &endingContext{Context: t.Context(), lasts: 100}
+
+		merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+		require.EqualError(t, err, "prod.yaml: context canceled")
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Nil(t, merged)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, prod, bound.Source())
+	})
+
+	t.Run("a context that ends once every layer is read returns its error", func(t *testing.T) {
+		t.Parallel()
+
+		whole := &endingContext{Context: t.Context(), lasts: math.MaxInt64}
+
+		_, err := niceyaml.NewSourceFromLayers(whole, base, prod)
+		require.NoError(t, err)
+
+		// The merge reads the context a last time before it parses the
+		// merged text, and binds that error in the lowest layer.
+		ctx := &endingContext{Context: t.Context(), lasts: whole.calls.Load() - 1}
+
+		merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+		require.EqualError(t, err, "base.yaml: context canceled")
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Nil(t, merged)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, base, bound.Source())
 	})
 }
 
