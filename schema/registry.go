@@ -44,7 +44,7 @@ var (
 	ErrLoad = errors.New("load schema")
 
 	// ErrScopedDocument indicates a caller passed a [*niceyaml.Node] from
-	// [niceyaml.Node.At] to [Registry.Lookup] or [Registry.Validate],
+	// [niceyaml.Node.At] to [Registry.Lookup] or [Registry.Check],
 	// which pick a schema for a whole document. Validate the document
 	// once at its root, then decode its nodes without the registry.
 	ErrScopedDocument = errors.New("registry needs a whole document")
@@ -277,7 +277,7 @@ func WithResolvers(res ...Resolver) RegistryOption {
 }
 
 // WithRequireSchema is a [RegistryOption] that sets whether
-// [Registry.Validate] reports a document no resolver applies to. The
+// [Registry.Check] reports a document no resolver applies to. The
 // default is true, and such a document then fails with [ErrNoMatch]. With
 // false, Validate accepts it, so a registry that validates what it
 // recognizes and passes the rest runs inside a decode through
@@ -399,7 +399,7 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // value of the document, so it carries no position, even when n is a
 // Node from [niceyaml.Node.At].
 //
-// For most use cases, prefer [Registry.Validate] which combines lookup
+// For most use cases, prefer [Registry.Check] which combines lookup
 // and validation. Use Lookup when you need the validator for custom
 // processing.
 func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (*Schema, error) {
@@ -547,13 +547,13 @@ func (e reasonError) Unwrap() error {
 	return e.err
 }
 
-// Validate validates a document using the first matching schema. It
+// Check validates a document using the first matching schema. It
 // combines schema lookup and validation into a single call. Use
 // [Registry.Lookup] when you need the validator for custom processing.
-// Validate takes the root [niceyaml.Node] of a document. It returns the
+// Check takes the root [niceyaml.Node] of a document. It returns the
 // violations of a document that does not conform to its schema, and
 // [ErrNoMatch] when no resolver applies to the document, unless
-// [WithRequireSchema] set false. Validate implements
+// [WithRequireSchema] set false. Check implements
 // [niceyaml.Validator], so [niceyaml.WithValidator] runs it before a
 // decode and [niceyaml.Node.Validate] runs it on its own:
 //
@@ -615,13 +615,13 @@ func (e reasonError) Unwrap() error {
 //
 // Returns validation errors if the document doesn't conform to the schema.
 // Returns resolution, loading, or compilation errors if schema preparation
-// fails. When ctx ends before the lookup finishes, Validate returns the
+// fails. When ctx ends before the lookup finishes, Check returns the
 // error [Registry.Lookup] returns for it, even with [WithRequireSchema] set
 // false. A document that did not parse returns the syntax error
 // [niceyaml.Node.Err] returns, even with [WithRequireSchema] set false, so
 // a loop that validates every document of a file reports each syntax
 // error beside the violations of the documents that parsed.
-func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
+func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 	err := n.Err()
 	if err != nil {
 		//nolint:wrapcheck // The source bound the syntax error already.

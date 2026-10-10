@@ -1,7 +1,6 @@
 package yamltest_test
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -76,74 +75,4 @@ func TestDocumentHelpers(t *testing.T) {
 
 		require.ErrorAs(t, err, &srcErr)
 	})
-}
-
-func TestRequireBound(t *testing.T) {
-	t.Parallel()
-
-	reserved := niceyaml.NewError("reserved name", niceyaml.AtPath(paths.Current().Child("name")))
-
-	tcs := map[string]struct {
-		// Build returns the error the helper checks, given a Node to bind
-		// it through.
-		build func(item *niceyaml.Node) error
-		msgs  []string // Empty when the helper passes.
-	}{
-		"no error": {
-			build: func(*niceyaml.Node) error { return nil },
-		},
-		"bound through the node": {
-			build: func(item *niceyaml.Node) error { return item.Bind(reserved) },
-		},
-		"join of bound errors": {
-			build: func(item *niceyaml.Node) error {
-				return errors.Join(item.Bind(reserved), item.Bind(errors.New("bad item")))
-			},
-		},
-		"unbound": {
-			build: func(*niceyaml.Node) error { return reserved },
-			msgs:  []string{"validator returned an unbound error", `bound to no source: "reserved name"`},
-		},
-		"join of a bound error and an unbound one": {
-			build: func(item *niceyaml.Node) error { return errors.Join(item.Bind(reserved), errors.New("bad item")) },
-			msgs:  []string{"validator returned an unbound error", `bound to no source: "bad item"`},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			doc := yamltest.FirstDocument(
-				t,
-				"name: lunch\nitems:\n  - name: soup\n  - name: admin\n",
-				niceyaml.WithName("c.yaml"),
-			)
-			item := yamltest.At(t, doc, paths.Doc().Child("items").Index(1))
-
-			rec := &recordingTB{}
-			done := make(chan struct{})
-
-			// FailNow ends the goroutine, as it does for a real test.
-			go func() {
-				defer close(done)
-
-				yamltest.RequireBound(rec, tc.build(item))
-			}()
-
-			<-done
-
-			if len(tc.msgs) == 0 {
-				assert.False(t, rec.failed, rec.msg)
-
-				return
-			}
-
-			require.True(t, rec.failed)
-
-			for _, msg := range tc.msgs {
-				assert.Contains(t, rec.msg, msg)
-			}
-		})
-	}
 }

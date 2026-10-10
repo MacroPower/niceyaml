@@ -264,13 +264,16 @@ type SelfValidator interface {
 // Validator validates a [*Node] before it decodes, as a JSON schema does,
 // or a schema registry that picks the schema from the document's content
 // or file path. Pass one to [Node.Decode] with [WithValidator], or run
-// one on its own with [Node.Validate]. Validate checks the Node it gets,
+// one on its own with [Node.Validate]. Check checks the Node it gets,
 // which is the root of a document or a Node from [Node.At], and returns
-// its errors bound through that Node, as [Node.NewError] builds one and
-// [Node.Bind] binds one. An [*Error] from [NewError] or [Invalid] says
-// what is wrong with the document, and any other error says the check
-// could not run. A document that did not parse never reaches a validator
-// that a decode or Node.Validate runs.
+// its errors relative to that Node: an [*Error] whose `@` path reads
+// from the Node, a plain error, or an error a Node bound already. The
+// Node that runs the validator binds what it returns, as [Node.Bind]
+// binds an error, so the error names the source the validator read and
+// its `@` paths resolve from the Node. An Error from [NewError] or
+// [Invalid] says what is wrong with the document, and any other error
+// says the check could not run. A document that did not parse never
+// reaches a validator that a decode or Node.Validate runs.
 //
 // See [ValidatorFunc], [MultiValidator], [ChainValidator], [SkipEmpty],
 // [go.jacobcolvin.com/niceyaml/schema.Schema], and
@@ -301,13 +304,13 @@ type SelfValidator interface {
 // decode. The context carries cancellation and deadlines to validators
 // doing cancellable work, such as remote schema reference resolution:
 //
-//	func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
+//	func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 //		data, err := n.Decode[any](ctx)
 //		if err != nil {
 //			return err
 //		}
 //
-//		return n.Bind(s.check(ctx, data))
+//		return s.check(ctx, data)
 //	}
 //
 // The names of that data are not the keys of the document, since the
@@ -316,49 +319,50 @@ type SelfValidator interface {
 // location from [Node.DataLocator], which reads the names as the decoder
 // does.
 //
-// # Bound Errors
+// # Errors
 //
-// Validate returns its errors bound through the Node it got or a Node it
-// scoped from that one. [Node.NewError], [Node.Invalid], and [Node.Place]
-// each build an error bound through their Node, and [Node.Bind] binds an
-// error that exists already. Each error then resolves its `@`
-// paths from the Node that binds it and its `$` paths from the root of
-// the document, and names the source the validator read. A caller that
-// calls Validate itself thus gets the error [Node.Validate] returns. Two
-// spellings bind an error where the validator found it. A value the
-// validator read through a Node from [Node.At] takes an error with no
-// location, and that Node binds the error at the value:
+// A validator writes the path of an error from the Node it got, as a
+// [SelfValidator] writes it from the value it checks. A key the
+// document lacks has no Node, so its error carries the path of the key,
+// and the Node that runs the validator points the error at the key of
+// the mapping that lacks the value, as Node.At describes:
 //
-//	node, err := n.At(kindPath)
-//	if err != nil {
-//		return err
+//	return niceyaml.NewError("kind is required", niceyaml.AtPath(kindPath))
+//
+// A validator that read a value through a Node from [Node.At] names the
+// value the same way, with the path it scoped the Node by. A path that a
+// Node hands out, such as [Node.Path] of a Node from [Node.Nodes], starts
+// at `$`, so it names the same value through the Node the validator got,
+// whatever the scope of that Node:
+//
+//	for _, item := range items {
+//		errs = append(errs, niceyaml.NewError("bad item", niceyaml.AtPath(item.Path())))
 //	}
 //
-//	// ...
+// An error with no location binds at the value the Node selects, as
+// [Node.Bind] describes, so a validator that runs on a Node from Node.At
+// or Node.Nodes reports a plain error at that value.
 //
-//	return node.NewError("unknown kind")
+// A validator binds an error itself, through [Node.Bind], when it wants
+// the error somewhere other than the Node it got. One that scopes a Node
+// with Node.At and binds through it reports the value it read, and one
+// that binds through [Node.Document] gives an error that is no fault of
+// the value, such as a schema that does not load, no location. A bound
+// error comes back from the Node that runs the validator as it is, since
+// Node.Bind leaves a bound error as it is.
 //
-// A key the document lacks has no Node, so its error carries the path of
-// the key and binds through the Node the validator got. The error points
-// at the key of the mapping that lacks the value, as Node.At describes:
-//
-//	return n.NewError("kind is required", niceyaml.AtPath(kindPath))
-//
-// [ValidatorFunc], [MultiValidator], [ChainValidator], and [SkipEmpty]
-// bind what the validators built with them leave unbound, through the
-// Node they got. The Validate method of a type has no such wrapper, so a
-// direct call to it returns what the method returns. A function given to
-// ValidatorFunc binds its errors all the same, and its body then stays
-// right when it moves into such a method.
+// A bound error keeps its text, so context a validator wraps around a
+// bound error stands in front of the position, as in
+// "config schema: svc.yaml:2:7: $.port: 0 is less than 1". The binding
+// puts the position in front of context wrapped around an unbound
+// error instead, as in "svc.yaml:2:7: $.port: config schema: 0 is less
+// than 1". A validator that wants its context in front thus binds first.
 //
 // # Nested Validators
 //
-// Node.Validate and a decode bind what a validator leaves unbound and
-// leave a bound error as it is. A caller that runs a validator it did not
-// write therefore runs it with Node.Validate, which binds either kind. A
-// validator that runs another on a Node of its own choosing, such as
-// each element of a list, runs it that way and returns the error as it
-// is:
+// A validator that runs another on a Node of its own choosing, such as
+// each element of a list, runs it through [Node.Validate] and returns
+// the error as it is:
 //
 //	items, err := n.Nodes(itemsPath)
 //	if err != nil {
@@ -371,66 +375,25 @@ type SelfValidator interface {
 //		}
 //	}
 //
-// A call to inner.Validate(ctx, item) returns the error as inner left it
-// instead. An error that inner left unbound then binds through the Node
-// the outer validator got, and its `@` paths resolve from that Node. In
-// the c.yaml below, a rule that reserves the name admin rejects the
-// second item:
+// A call to inner.Check(ctx, item) returns the error as inner wrote it
+// instead, relative to item. The Node that runs the outer validator then
+// binds it, and its `@` paths resolve from that Node rather than from
+// item. In the c.yaml below, a rule that reserves the name admin rejects
+// the second item:
 //
 //	name: lunch
 //	items:
 //	  - name: soup
 //	  - name: admin
 //
-// The rule writes its error at `@.name`. When the rule binds nothing,
-// that path resolves from the root of the document and names lunch, a
-// valid name. The outer validator reports one of these lines, by the
-// call it makes:
+// The rule writes its error at `@.name`. The outer validator reports one
+// of these lines, by the call it makes:
 //
 //	item.Validate(ctx, inner)   c.yaml:4:11: $.items[1].name: reserved name
-//	inner.Validate(ctx, item)   c.yaml:1:7: $.name: reserved name
+//	inner.Check(ctx, item)      c.yaml:1:7: $.name: reserved name
 //
 // When the item is a Node of another source, the error names the wrong
 // file too, since it takes the source of the Node that binds it.
-//
-// # Tests
-//
-// Node.Validate binds what a validator left unbound, so a test of a
-// validator calls Validate itself, on a Node from Node.At. It passes the
-// result to [go.jacobcolvin.com/niceyaml/niceyamltest.CheckBound] and
-// compares the whole message:
-//
-//	item, err := doc.At(paths.Doc().Child("items").Index(1))
-//	require.NoError(t, err)
-//
-//	err = rule.Validate(ctx, item)
-//	require.NoError(t, niceyamltest.CheckBound(err))
-//	require.EqualError(t, err, "c.yaml:4:11: $.items[1].name: reserved name")
-//
-// For an error the validator left unbound, CheckBound returns
-// `bound to no source: "reserved name"`.
-//
-// # Scoped Nodes
-//
-// A path that a Node hands out, such as [Node.Path] of a Node from
-// [Node.Nodes], starts at `$`, so it names the same value through the
-// Node a validator got, whatever the scope of that Node:
-//
-//	for _, item := range items {
-//		errs = append(errs, n.NewError("bad item", niceyaml.AtPath(item.Path())))
-//	}
-//
-// A validator that runs on a Node from [Node.At] or [Node.Nodes] checks
-// one value, so an error with no location that it binds through that
-// Node binds at the value, as Node.Bind describes. An error that is no
-// fault of the value, such as a schema that does not load, binds through
-// the root Node.Document returns, which gives it no location.
-//
-// A decode hands its validators the Node it decodes, the one the caller
-// holds, so [SourceError.Node] of an error a validator binds through it
-// returns that Node. A Node the validator scopes from it with [Node.At]
-// or [Node.Nodes] binds errors to itself, so their `@` paths resolve from
-// its scope.
 //
 // # Fault
 //
@@ -448,9 +411,9 @@ type SelfValidator interface {
 //	_, err := os.Stat(spec.License)
 //	switch {
 //	case errors.Is(err, fs.ErrNotExist):
-//		return n.NewError("license file does not exist", niceyaml.AtPath(licensePath))
+//		return niceyaml.NewError("license file does not exist", niceyaml.AtPath(licensePath))
 //	case err != nil:
-//		return n.Place(fmt.Errorf("stat license: %w", err), niceyaml.AtPath(licensePath))
+//		return niceyaml.Place(fmt.Errorf("stat license: %w", err), niceyaml.AtPath(licensePath))
 //	}
 //
 // The first error is the fault of the document, which names a file that
@@ -468,31 +431,19 @@ type SelfValidator interface {
 // holds the value. Origin returns the Node of the value in the file of
 // its layer, and the receiver where the validator runs on one file.
 //
-// # Added Context
-//
-// A bound error keeps its text. Context that a validator adds around the
-// error of another therefore stands in front of the position, as in
-// "config schema: svc.yaml:2:7: $.port: 0 is less than 1". [Rebase]
-// returns a bound error as it is, since the binding resolved its location
-// already. A check that reports under another path or in another document
-// starts from errors that stand in no document instead. A check of the
-// decoded data returns those through [BindValue], as
-// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] does, and
-// Rebase puts them under that path before a Node binds them.
-//
 // # Unparsed Documents
 //
 // A document with a YAML syntax error has no tree to check. Node.Validate
 // and a decode return the syntax error [Node.Err] returns before any
 // validator runs, so a validator they run always gets a document that
-// parsed. A caller that calls Validate itself can hand it a Node whose
+// parsed. A caller that calls Check itself can hand it a Node whose
 // document did not parse. [Node.Decode], [Node.At], and [Node.Nodes]
 // return the syntax error for such a Node, and a validator passes that
 // error on. [ValidatorFunc], [MultiValidator], [ChainValidator], and the
 // validators of [go.jacobcolvin.com/niceyaml/schema] return it before
 // they read the Node.
 type Validator interface {
-	Validate(ctx context.Context, n *Node) error
+	Check(ctx context.Context, n *Node) error
 }
 
 // ValidatorFunc adapts a function to the [Validator] interface.
@@ -510,31 +461,31 @@ type Validator interface {
 //		}
 //
 //		if kind != "Deployment" {
-//			return node.NewError("unknown kind")
+//			return niceyaml.NewError("unknown kind", niceyaml.AtPath(kindPath))
 //		}
 //
 //		return nil
 //	})
 //
-// The function binds its error through the Node it read, as [Validator]
-// asks, so its body is also right as the Validate method of a type.
-// Validate leaves a bound error as it is. It binds through n an error the
-// function leaves unbound, and an `@` path in such an error resolves
-// from n.
+// The function writes its errors from the Node it got, as [Validator]
+// asks, so its body is also right as the Check method of a type. Check
+// binds through n the error the function returns, and leaves a bound
+// error as it is, so a direct call to Check returns what [Node.Validate]
+// returns for the function.
 //
 // A check that knows nothing of YAML returns a plain error, which
 // declares no fault. The function declares the document at fault for
-// that error by returning the check inside [Node.Invalid], which returns
-// nil for a value that passes:
+// that error by returning the check inside [Invalid], which returns nil
+// for a value that passes:
 //
-//	return n.Invalid(check(v))
+//	return niceyaml.Invalid(check(v))
 type ValidatorFunc func(ctx context.Context, n *Node) error
 
-// Validate implements [Validator]. It calls f and binds the error f
+// Check implements [Validator]. It calls f and binds the error f
 // returns through n, so a nil [*Error] or [*SourceError] pointer from f
 // comes back as a nil error. For a document that did not parse, it
 // returns the syntax error [Node.Err] returns without calling f.
-func (f ValidatorFunc) Validate(ctx context.Context, n *Node) error {
+func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 	if n.doc.err != nil {
 		return n.doc.err
 	}
@@ -592,7 +543,7 @@ func MultiValidator(validators ...Validator) Validator {
 			}
 
 			// A typed nil pointer is no failure, as [Node.Bind] reads it.
-			err = dv.Validate(ctx, n)
+			err = dv.Check(ctx, n)
 			if isNothing(err) {
 				continue
 			}
@@ -1612,7 +1563,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 //	for _, n := range nodes {
 //		sel, ok := n.Path().Last()
 //		if ok && sel.Kind == paths.SelectorChild && !snake.MatchString(sel.Name) {
-//			errs = append(errs, doc.NewError(
+//			errs = append(errs, niceyaml.NewError(
 //				fmt.Sprintf("key %q is not snake_case", sel.Name),
 //				niceyaml.AtPath(n.Path().Key())))
 //		}
@@ -2228,16 +2179,17 @@ func (e notFoundError) Unwrap() error {
 // func, so Validate then returns what [Node.Err] returns. A validator
 // that returns a nil [*Error] or [*SourceError] pointer passes.
 //
-// A validator returns its errors bound, as [Validator] describes, and
-// Validate returns such an error as it is. An error a validator leaves
-// unbound comes back bound to the source as a [SourceError] through
-// [Node.Bind], so an [*Error] renders its location and any other error
-// names the source. A Node from [Node.At] or [Node.Nodes] also points an
-// error with no location at its own value, as Node.Bind describes.
-// Validate is thus the way to run a validator the caller did not write.
-// It reports a validator that binds nothing as it reports one that
-// binds, so a test of a validator calls the validator's own Validate, as
-// Validator describes.
+// A validator writes its errors from the Node it got, as [Validator]
+// describes, and Validate binds them to the source as a [SourceError]
+// through [Node.Bind], so an [*Error] renders its location and any other
+// error names the source. A Node from [Node.At] or [Node.Nodes] also
+// points an error with no location at its own value, as Node.Bind
+// describes. An error the validator bound itself comes back as it is.
+// Validate is thus the way to run a validator, the caller's own or one
+// it did not write, and the way a validator runs another on a Node of
+// its choosing. A direct call to the Check method of a validator returns
+// the error as the validator wrote it, with no source and with its `@`
+// paths unresolved.
 //
 // A document that did not parse fails before v runs, with the syntax
 // error [Node.Err] returns, even when v is nil. A caller that validates
@@ -2261,7 +2213,7 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 		}
 
 		// A typed nil pointer is no failure, as [Node.Bind] reads it.
-		err := dv.Validate(ctx, n)
+		err := dv.Check(ctx, n)
 		if isNothing(err) {
 			continue
 		}
@@ -2424,42 +2376,6 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 // returns. A position or a range binds there as it does in any document.
 func (n *Node) Bind(err error) error {
 	return bindTree(err, binder{src: n.source, node: n, locate: true})
-}
-
-// NewError creates a new [*Error] with the given message and binds it
-// through n. It returns what [Node.Bind] returns for [NewError] with the
-// same arguments, so a [Validator] reports what is wrong with the value
-// it read in one call:
-//
-//	return node.NewError("unknown kind")
-//
-// The error is bound, so NewError returns an error rather than an
-// [*Error]. A [SelfValidator] holds no Node, so its Validate method
-// builds its errors with the package function.
-func (n *Node) NewError(msg string, opts ...ErrorOption) error {
-	return n.Bind(NewError(msg, opts...))
-}
-
-// Invalid creates a new [*Error] that wraps err, declares the document
-// at fault for it, and binds it through n. It returns what [Node.Bind]
-// returns for [Invalid] with the same arguments, so it returns nil for a
-// nil err, and a check that knows nothing of YAML goes inside it as it
-// is:
-//
-//	return n.Invalid(check(v))
-func (n *Node) Invalid(err error, opts ...ErrorOption) error {
-	return n.Bind(Invalid(err, opts...))
-}
-
-// Place creates a new [*Error] that gives err the location and the
-// details of the options, and binds it through n. It declares no fault,
-// as [Place] describes, and returns what [Node.Bind] returns for Place
-// with the same arguments. A check that could not run shows its error
-// at the value it read this way:
-//
-//	return n.Place(fmt.Errorf("stat license: %w", err), niceyaml.AtPath(licensePath))
-func (n *Node) Place(err error, opts ...ErrorOption) error {
-	return n.Bind(Place(err, opts...))
 }
 
 // bindOwn binds an error of an operation of n, as [Node.Bind] binds it,
@@ -3474,7 +3390,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 	}
 
 	if err != nil {
-		return n.Invalid(err, atToken(contentStart(n.AST())))
+		return n.Bind(Invalid(err, atToken(contentStart(n.AST()))))
 	}
 
 	err = n.decodeNode(ctx, n.AST(), v, cfg, comments)

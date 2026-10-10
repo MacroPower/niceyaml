@@ -1081,7 +1081,7 @@ func TestViolation_Is(t *testing.T) {
 
 		s := schema.MustCompile([]byte(`{"properties": {"a": {"type": "string"}, "b": {"maximum": 1}}}`))
 
-		err := s.Validate(t.Context(), yamltest.FirstDocument(t, "a: 1\nb: 2\n"))
+		err := s.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\nb: 2\n"))
 		require.Error(t, err)
 		assert.True(t, niceyaml.IsInvalid(err))
 

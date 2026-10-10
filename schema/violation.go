@@ -20,7 +20,7 @@ import (
 const noFormMessage = "value matches none of the allowed forms"
 
 // Violation is one constraint of a JSON schema that a value breaks.
-// [Schema.Validate] and [Schema.ValidateValue] report each one as a
+// [Schema.Check] and [Schema.ValidateValue] report each one as a
 // [*niceyaml.Error] that wraps a Violation and carries the YAML path to
 // the failing location. A binding reports that path from `$`. For
 // Validate, `$` is the root of the document. For ValidateValue, it is

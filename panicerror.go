@@ -40,9 +40,10 @@ import (
 //
 // # Validators
 //
-// Nothing recovers a panic in a [Validator] or in the Validate method of
-// a [SelfValidator], so it reaches the caller as a panic. A caller that
-// wants a panic of the decode to crash the same way raises it again:
+// Nothing recovers a panic in the Check method of a [Validator] or in
+// the Validate method of a [SelfValidator], so it reaches the caller as a
+// panic. A caller that wants a panic of the decode to crash the same way
+// raises it again:
 //
 //	if p, ok := errors.AsType[*niceyaml.PanicError](err); ok {
 //		panic(p.Value)

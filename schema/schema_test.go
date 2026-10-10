@@ -47,7 +47,7 @@ func requireExcessiveAliasing(t *testing.T, err error) {
 	assert.True(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
 }
 
-func TestSchema_Validate(t *testing.T) {
+func TestSchema_Check(t *testing.T) {
 	t.Parallel()
 
 	schemaData := []byte(`{
@@ -1788,8 +1788,8 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 		// Invalid and Place with no option add nothing to the result, so
 		// it places as it does alone.
-		require.EqualError(t, request.Invalid(err), want)
-		require.EqualError(t, request.Place(err), want)
+		require.EqualError(t, request.Bind(niceyaml.Invalid(err)), want)
+		require.EqualError(t, request.Bind(niceyaml.Place(err)), want)
 		require.EqualError(t, doc.Bind(niceyaml.Rebase(niceyaml.Invalid(err), base)), want)
 		require.EqualError(t,
 			doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", niceyaml.Invalid(err)), base)),
@@ -1800,7 +1800,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			"app.yaml:2:9: $.request.port: check: 0 is less than 1",
 		)
 
-		for b := range niceyaml.AllBindings(request.Invalid(err)) {
+		for b := range niceyaml.AllBindings(request.Bind(niceyaml.Invalid(err))) {
 			assert.Same(t, doc.Source(), b.Source())
 		}
 	})
@@ -2213,7 +2213,7 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 	}
 }
 
-func TestSchema_Validate_OrderedMapDates(t *testing.T) {
+func TestSchema_Check_OrderedMapDates(t *testing.T) {
 	t.Parallel()
 
 	// The niceyaml.WithYAMLOrderedMaps option reaches the decode that
@@ -3142,7 +3142,7 @@ func TestSchema_ErrorPaths(t *testing.T) {
 	}
 }
 
-func TestSchema_Validate_Scope(t *testing.T) {
+func TestSchema_Check_Scope(t *testing.T) {
 	t.Parallel()
 
 	v := compileSchema(t, []byte(`{
@@ -3258,7 +3258,7 @@ func TestSchema_Validate_Scope(t *testing.T) {
 	})
 }
 
-func TestSchema_Validate_SyntaxError(t *testing.T) {
+func TestSchema_Check_SyntaxError(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -3287,11 +3287,11 @@ func TestSchema_Validate_SyntaxError(t *testing.T) {
 
 			// The second document did not parse, so the schema has no data
 			// to check and returns the syntax error.
-			assert.Same(t, docs[1].Err(), v.Validate(t.Context(), docs[1]))
+			assert.Same(t, docs[1].Err(), v.Check(t.Context(), docs[1]))
 			assert.Same(t, docs[1].Err(), docs[1].Validate(t.Context(), v))
 
 			// The first document parsed, so the schema checks it.
-			err := v.Validate(t.Context(), docs[0])
+			err := v.Check(t.Context(), docs[0])
 			if tc.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -3301,7 +3301,7 @@ func TestSchema_Validate_SyntaxError(t *testing.T) {
 	}
 }
 
-func TestSchema_Validate_Bound(t *testing.T) {
+func TestSchema_Check_Bound(t *testing.T) {
 	t.Parallel()
 
 	v := compileSchema(t, []byte(`{
@@ -3389,7 +3389,7 @@ func TestSchema_Validate_Bound(t *testing.T) {
 				node = yamltest.At(t, node, tc.path)
 			}
 
-			err := v.Validate(t.Context(), node)
+			err := v.Check(t.Context(), node)
 			if tc.want == "" {
 				require.NoError(t, err)
 
@@ -3422,7 +3422,7 @@ func TestSchema_Validate_Bound(t *testing.T) {
 			}
 
 			for _, item := range items {
-				err := v.Validate(ctx, item)
+				err := v.Check(ctx, item)
 				if err != nil {
 					return err //nolint:wrapcheck // The test inspects the error as it is.
 				}
@@ -3447,7 +3447,7 @@ func TestSchema_Validate_Bound(t *testing.T) {
 
 		other := yamltest.FirstDocumentWithPath(t, "# other\nprice: -1\n", "other.yaml")
 		include := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
-			return v.Validate(ctx, other)
+			return v.Check(ctx, other)
 		})
 
 		err := yamltest.FirstDocumentWithPath(t, menu, "menu.yaml").Validate(t.Context(), include)
@@ -4219,7 +4219,7 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 
 			dd := yamltest.FirstDocument(t, wideMerge(tc.members))
 
-			err := v.Validate(t.Context(), dd)
+			err := v.Check(t.Context(), dd)
 
 			var ve *niceyaml.Error
 
@@ -4278,7 +4278,7 @@ func TestSchema_RefToRejectingSchema(t *testing.T) {
 			v, err := schema.Compile(t.Context(), []byte(schemaData))
 			require.NoError(t, err)
 
-			err = v.Validate(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
+			err = v.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
 			require.NotErrorIs(t, err, schema.ErrValidate)
 
 			var nerr *niceyaml.Error

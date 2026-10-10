@@ -6,7 +6,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/niceyamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -48,21 +47,6 @@ func Bind(tb testing.TB, source *niceyaml.Source, err error) error {
 	require.NoError(tb, docErr)
 
 	return doc.Bind(err)
-}
-
-// RequireBound fails the test unless err is bound, as
-// [niceyaml.Validator] asks of every error a validator returns. A test
-// calls the validator itself on a Node from [At] and passes the result:
-//
-//	item := yamltest.At(t, doc, paths.Doc().Child("items").Index(1))
-//	yamltest.RequireBound(t, rule.Validate(t.Context(), item))
-//
-// [niceyamltest.CheckBound] decides whether err is bound, so a test
-// outside the module holds its validators to the same check.
-func RequireBound(tb testing.TB, err error) {
-	tb.Helper()
-
-	require.NoError(tb, niceyamltest.CheckBound(err), "validator returned an unbound error")
 }
 
 // FirstDocumentWithPath creates the root [*niceyaml.Node] of the first

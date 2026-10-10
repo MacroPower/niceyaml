@@ -61,7 +61,7 @@ func BenchmarkSchema_Validate(b *testing.B) {
 			b.SetBytes(int64(len(yaml)))
 
 			for b.Loop() {
-				err := s.Validate(b.Context(), doc)
+				err := s.Check(b.Context(), doc)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -158,7 +158,7 @@ func BenchmarkSchema_Validate_WideMerge(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				err := v.Validate(b.Context(), doc)
+				err := v.Check(b.Context(), doc)
 				if err == nil {
 					b.Fatal("want violations")
 				}

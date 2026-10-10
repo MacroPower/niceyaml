@@ -70,7 +70,7 @@
 // path it would have, such as $.server.name, and the error binds at the
 // key of the mapping that lacks it.
 //
-// [Schema.Validate] returns the same bound error, so a validator of the
+// [Schema.Check] returns the same bound error, so a validator of the
 // program's own runs the schema on a node it picks and returns the
 // result.
 //
@@ -157,7 +157,7 @@
 // it for the document the schema would validate.
 //
 // A YAML schema holds the values a decode into any yields, and
-// [Schema.Validate] reads the numbers of a document the same way. The
+// [Schema.Check] reads the numbers of a document the same way. The
 // go-yaml decoder reads three spellings of a number in its own way:
 //
 //   - A number with an exponent and no decimal point, such as 1e3, is

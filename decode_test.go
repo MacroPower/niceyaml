@@ -2563,42 +2563,42 @@ func TestNode_ErrorConstructors(t *testing.T) {
 		invalid bool
 	}{
 		"NewError binds at the scope": {
-			got:     hours.NewError("bad hours"),
+			got:     hours.Bind(niceyaml.NewError("bad hours")),
 			bound:   hours.Bind(niceyaml.NewError("bad hours")),
 			want:    "cfg.yaml:3:5: $.shops[0].hours: bad hours",
 			invalid: true,
 		},
 		"NewError resolves a path from the scope": {
-			got:     hours.NewError("bad", niceyaml.AtPath(closePath)),
+			got:     hours.Bind(niceyaml.NewError("bad", niceyaml.AtPath(closePath))),
 			bound:   hours.Bind(niceyaml.NewError("bad", niceyaml.AtPath(closePath))),
 			want:    "cfg.yaml:5:14: $.shops[0].hours.close: bad",
 			invalid: true,
 		},
 		"NewError through the root gains no location": {
-			got:     doc.NewError("bad"),
+			got:     doc.Bind(niceyaml.NewError("bad")),
 			bound:   doc.Bind(niceyaml.NewError("bad")),
 			want:    "cfg.yaml: bad",
 			invalid: true,
 		},
 		"Invalid declares the document at fault": {
-			got:     hours.Invalid(errStat, niceyaml.AtPath(closePath)),
+			got:     hours.Bind(niceyaml.Invalid(errStat, niceyaml.AtPath(closePath))),
 			bound:   hours.Bind(niceyaml.Invalid(errStat, niceyaml.AtPath(closePath))),
 			want:    "cfg.yaml:5:14: $.shops[0].hours.close: stat license: permission denied",
 			invalid: true,
 		},
 		"Invalid with no options binds at the scope": {
-			got:     hours.Invalid(errStat),
+			got:     hours.Bind(niceyaml.Invalid(errStat)),
 			bound:   hours.Bind(niceyaml.Invalid(errStat)),
 			want:    "cfg.yaml:3:5: $.shops[0].hours: stat license: permission denied",
 			invalid: true,
 		},
 		"Place declares no fault": {
-			got:   hours.Place(errStat, niceyaml.AtPath(closePath)),
+			got:   hours.Bind(niceyaml.Place(errStat, niceyaml.AtPath(closePath))),
 			bound: hours.Bind(niceyaml.Place(errStat, niceyaml.AtPath(closePath))),
 			want:  "cfg.yaml:5:14: $.shops[0].hours.close: stat license: permission denied",
 		},
 		"Place keeps the fault of the error it places": {
-			got:     hours.Place(niceyaml.NewError("bad"), niceyaml.AtPath(closePath)),
+			got:     hours.Bind(niceyaml.Place(niceyaml.NewError("bad"), niceyaml.AtPath(closePath))),
 			bound:   hours.Bind(niceyaml.Place(niceyaml.NewError("bad"), niceyaml.AtPath(closePath))),
 			want:    "cfg.yaml:5:14: $.shops[0].hours.close: bad",
 			invalid: true,
@@ -2621,10 +2621,10 @@ func TestNode_ErrorConstructors(t *testing.T) {
 
 		var typed *niceyaml.Error
 
-		require.NoError(t, hours.Invalid(nil, niceyaml.AtPath(closePath)))
-		require.NoError(t, hours.Place(nil, niceyaml.AtPath(closePath)))
-		require.NoError(t, hours.Invalid(typed))
-		require.NoError(t, hours.Place(typed))
+		require.NoError(t, hours.Bind(niceyaml.Invalid(nil, niceyaml.AtPath(closePath))))
+		require.NoError(t, hours.Bind(niceyaml.Place(nil, niceyaml.AtPath(closePath))))
+		require.NoError(t, hours.Bind(niceyaml.Invalid(typed)))
+		require.NoError(t, hours.Bind(niceyaml.Place(typed)))
 	})
 }
 
@@ -2984,7 +2984,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 			return plain
 		})
 
-		require.EqualError(t, fn.Validate(t.Context(), hours), want)
+		require.EqualError(t, fn.Check(t.Context(), hours), want)
 		require.EqualError(t, hours.Validate(t.Context(), fn), want)
 
 		// Validate binds the error a validator leaves unbound.
@@ -3100,7 +3100,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 
 		want := "cfg.yaml:5:14: $.shops[0].hours.close: bad"
 
-		require.EqualError(t, reject.Validate(t.Context(), hours), want)
+		require.EqualError(t, reject.Check(t.Context(), hours), want)
 		require.EqualError(t, hours.Validate(t.Context(), reject), want)
 
 		scoped := niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
@@ -3622,7 +3622,7 @@ type fieldValidator struct {
 	err error
 }
 
-func (v *fieldValidator) Validate(context.Context, *niceyaml.Node) error {
+func (v *fieldValidator) Check(context.Context, *niceyaml.Node) error {
 	return v.err
 }
 
@@ -3746,12 +3746,12 @@ func TestDocument_Err(t *testing.T) {
 			"ValidatorFunc called directly": {call: func(t *testing.T, doc *niceyaml.Node) error {
 				t.Helper()
 
-				return niceyaml.ValidatorFunc(ran.Validate).Validate(t.Context(), doc)
+				return niceyaml.ValidatorFunc(ran.Check).Check(t.Context(), doc)
 			}},
 			"MultiValidator called directly": {call: func(t *testing.T, doc *niceyaml.Node) error {
 				t.Helper()
 
-				return niceyaml.MultiValidator(ran, ran).Validate(t.Context(), doc)
+				return niceyaml.MultiValidator(ran, ran).Check(t.Context(), doc)
 			}},
 		}
 
@@ -10039,7 +10039,7 @@ func TestNode_Validate(t *testing.T) {
 
 		// A direct call returns the error as the validator wrote it, and
 		// the Node binds it from its own scope.
-		require.EqualError(t, unbound.Validate(t.Context(), scoped), "name is required")
+		require.EqualError(t, unbound.Check(t.Context(), scoped), "name is required")
 
 		err = scoped.Validate(t.Context(), unbound)
 		require.EqualError(t, err, "x.yaml:2:9: $.meta.name: name is required")
@@ -11451,9 +11451,9 @@ func TestErrDecode(t *testing.T) {
 	})
 }
 
-// TestValidator_DirectCall calls the Validate method of every validator
-// the library ships, where [niceyaml.Node.Validate] would bind an error
-// the validator left unbound.
+// TestValidator_DirectCall calls the Check method of every validator the
+// library ships, which binds the error of the validator it wraps as
+// [niceyaml.Node.Validate] would.
 func TestValidator_DirectCall(t *testing.T) {
 	t.Parallel()
 
@@ -11493,7 +11493,7 @@ func TestValidator_DirectCall(t *testing.T) {
 			want: "c.yaml:1:7: $.name: should not validate against the schema",
 		},
 		"ValidatorFunc": {
-			v:    niceyaml.ValidatorFunc(rule.Validate),
+			v:    niceyaml.ValidatorFunc(rule.Check),
 			path: itemPath,
 			want: "c.yaml:4:11: $.items[1].name: reserved name",
 		},
@@ -11527,15 +11527,13 @@ func TestValidator_DirectCall(t *testing.T) {
 			`), niceyaml.WithName("c.yaml"))
 			node := yamltest.At(t, doc, tc.path)
 
-			err := tc.v.Validate(t.Context(), node)
-
+			err := tc.v.Check(t.Context(), node)
 			require.EqualError(t, err, tc.want)
-			yamltest.RequireBound(t, err)
 		})
 	}
 }
 
-func TestValidatorFunc_Validate(t *testing.T) {
+func TestValidatorFunc_Check(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString(stringtest.Input(`
@@ -11611,7 +11609,7 @@ func TestValidatorFunc_Validate(t *testing.T) {
 
 			validator := rejectingValidator(tc.returns)
 
-			err := validator.Validate(t.Context(), tc.node)
+			err := validator.Check(t.Context(), tc.node)
 			if tc.want == "" {
 				require.NoError(t, err)
 				require.NoError(t, tc.node.Validate(t.Context(), validator))
@@ -11657,7 +11655,7 @@ func TestValidatorFunc_Validate(t *testing.T) {
 			}
 
 			for _, it := range items {
-				err := perItem.Validate(ctx, it)
+				err := perItem.Check(ctx, it)
 				if err != nil {
 					return err //nolint:wrapcheck // The test inspects the error as it is.
 				}
@@ -11681,7 +11679,7 @@ func TestValidatorFunc_Validate(t *testing.T) {
 			return niceyaml.NewError("no price", niceyaml.AtPath(pricePath))
 		})
 		include := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
-			return zero.Validate(ctx, other)
+			return zero.Check(ctx, other)
 		})
 
 		require.EqualError(t, doc.Validate(t.Context(), include), "other.yaml:2:8: $.price: no price")
@@ -11691,7 +11689,7 @@ func TestValidatorFunc_Validate(t *testing.T) {
 		t.Parallel()
 
 		wrapped := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-			return fmt.Errorf("menu check: %w", rejectingValidator(negative).Validate(ctx, n))
+			return fmt.Errorf("menu check: %w", rejectingValidator(negative).Check(ctx, n))
 		})
 
 		err := doc.Validate(t.Context(), wrapped)
@@ -11843,7 +11841,7 @@ func TestMultiValidator(t *testing.T) {
 				multi := niceyaml.MultiValidator(tc.first, badC)
 
 				require.EqualError(t, doc.Validate(t.Context(), multi), want)
-				require.EqualError(t, multi.Validate(t.Context(), doc), want)
+				require.EqualError(t, multi.Check(t.Context(), doc), want)
 			})
 		}
 	})
@@ -11889,7 +11887,7 @@ func TestMultiValidator(t *testing.T) {
 
 		errInvalid := errors.New("invalid")
 		classified := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-			return fmt.Errorf("%w: %w", errInvalid, badC.Validate(ctx, n))
+			return fmt.Errorf("%w: %w", errInvalid, badC.Check(ctx, n))
 		})
 
 		err = doc.Validate(t.Context(), niceyaml.MultiValidator(classified, badB))
@@ -12017,7 +12015,7 @@ func TestChainValidator(t *testing.T) {
 		doc := newDoc(t)
 
 		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator()))
-		require.NoError(t, niceyaml.ChainValidator().Validate(t.Context(), doc))
+		require.NoError(t, niceyaml.ChainValidator().Check(t.Context(), doc))
 		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator(passing, passing)))
 		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator(typedNilValidator())))
 	})
@@ -12065,7 +12063,7 @@ func TestChainValidator(t *testing.T) {
 		chain := niceyaml.ChainValidator(record(&order, "unreached"))
 
 		assert.Same(t, docs[0].Err(), docs[0].Validate(t.Context(), chain))
-		assert.Same(t, docs[0].Err(), chain.Validate(t.Context(), docs[0]))
+		assert.Same(t, docs[0].Err(), chain.Check(t.Context(), docs[0]))
 		assert.Empty(t, order)
 	})
 
@@ -12125,7 +12123,7 @@ func TestChainValidator(t *testing.T) {
 				// A direct call returns the error Node.Validate returns.
 				for _, err := range []error{
 					tc.node.Validate(t.Context(), chain),
-					chain.Validate(t.Context(), tc.node),
+					chain.Check(t.Context(), tc.node),
 				} {
 					require.EqualError(t, err, tc.want)
 					assert.Equal(t, niceyaml.IsInvalid(alone), niceyaml.IsInvalid(err))
@@ -12361,7 +12359,7 @@ func TestSkipEmpty(t *testing.T) {
 				skip := niceyaml.SkipEmpty(rejecting(&calls))
 
 				require.NoError(t, doc.Validate(t.Context(), skip))
-				require.NoError(t, skip.Validate(t.Context(), doc))
+				require.NoError(t, skip.Check(t.Context(), doc))
 				assert.Zero(t, calls)
 
 				// The validator alone still runs on the document.
@@ -12428,7 +12426,7 @@ func TestSkipEmpty(t *testing.T) {
 			skip := niceyaml.SkipEmpty(rejecting(&calls))
 
 			assert.Same(t, docs[0].Err(), docs[0].Validate(t.Context(), skip), input)
-			assert.Same(t, docs[0].Err(), skip.Validate(t.Context(), docs[0]), input)
+			assert.Same(t, docs[0].Err(), skip.Check(t.Context(), docs[0]), input)
 			assert.Zero(t, calls, input)
 		}
 	})
@@ -12462,7 +12460,7 @@ func TestSkipEmpty(t *testing.T) {
 				skip := niceyaml.SkipEmpty(tc.v)
 
 				// A direct call returns the error Node.Validate returns.
-				require.EqualError(t, skip.Validate(t.Context(), doc), want)
+				require.EqualError(t, skip.Check(t.Context(), doc), want)
 				require.EqualError(t, doc.Validate(t.Context(), skip), want)
 			})
 		}
@@ -12481,7 +12479,7 @@ func TestSkipEmpty(t *testing.T) {
 		// validator given alone.
 		typedNil := &fieldValidator{err: (*niceyaml.Error)(nil)}
 
-		require.NoError(t, niceyaml.SkipEmpty(typedNil).Validate(t.Context(), doc))
+		require.NoError(t, niceyaml.SkipEmpty(typedNil).Check(t.Context(), doc))
 	})
 
 	t.Run("a decode of an empty document returns the zero value", func(t *testing.T) {

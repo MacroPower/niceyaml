@@ -543,7 +543,7 @@ func TestDirective(t *testing.T) {
 			schema.WithResolvers(schema.Directive()),
 		)
 
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Equal(t, int32(1), requests.Load())
 	})
@@ -596,7 +596,7 @@ func TestDirective(t *testing.T) {
 
 				doc := yamltest.FirstDocumentWithPath(t, tc.input, filepath.Join(dir, "config.yaml"))
 
-				err := reg.Validate(t.Context(), doc)
+				err := reg.Check(t.Context(), doc)
 				if tc.want == "" {
 					require.NoError(t, err)
 
@@ -620,7 +620,7 @@ func TestDirective(t *testing.T) {
 			filepath.Join(dir, "config.yaml"),
 		)
 
-		err := schema.NewRegistry(schema.WithResolvers(schema.Directive())).Validate(t.Context(), doc)
+		err := schema.NewRegistry(schema.WithResolvers(schema.Directive())).Check(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrCompile)
 		assert.Contains(t, err.Error(), "schema.yaml")
 		assert.Contains(t, err.Error(), "YAML decode: 1:11: ")
@@ -750,10 +750,10 @@ func TestDirective_Resolve(t *testing.T) {
 		directive := "# yaml-language-server: $schema=" + server.URL + "/defs.json#/definitions/Foo\n"
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
-		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, directive+"name: x\n"))
+		err := reg.Check(t.Context(), yamltest.FirstDocument(t, directive+"name: x\n"))
 		require.NoError(t, err)
 
-		err = reg.Validate(t.Context(), yamltest.FirstDocument(t, directive+"kind: Deployment\n"))
+		err = reg.Check(t.Context(), yamltest.FirstDocument(t, directive+"kind: Deployment\n"))
 		require.ErrorContains(t, err, `missing required property "name"`)
 	})
 
@@ -791,11 +791,11 @@ func TestDirective_Resolve(t *testing.T) {
 
 				reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
-				err := reg.Validate(t.Context(), doc)
+				err := reg.Check(t.Context(), doc)
 				require.NoError(t, err)
 
 				doc = yamltest.FirstDocumentWithPath(t, directive+"kind: Deployment\n", yamlPath)
-				err = reg.Validate(t.Context(), doc)
+				err = reg.Check(t.Context(), doc)
 				require.ErrorContains(t, err, `missing required property "name"`)
 			})
 		}
@@ -928,7 +928,7 @@ func TestDirective_Resolve(t *testing.T) {
 					schema.Directive(),
 					schema.MustCompile([]byte("false")),
 				))
-				require.NoError(t, reg.Validate(t.Context(), doc))
+				require.NoError(t, reg.Check(t.Context(), doc))
 			})
 		}
 	})
@@ -1034,7 +1034,7 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 			}
 
 			for _, key := range tt.order {
-				err := reg.Validate(t.Context(), docs[key])
+				err := reg.Check(t.Context(), docs[key])
 				require.NoError(t, err, "%s document", key)
 			}
 		})
@@ -1136,7 +1136,7 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 			))
 
 			for i, doc := range docs {
-				err := reg.Validate(t.Context(), doc)
+				err := reg.Check(t.Context(), doc)
 
 				switch tc.want[i] {
 				case valid:

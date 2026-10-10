@@ -280,9 +280,9 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 	t.Run("a relative path loads from a file system", func(t *testing.T) {
 		reg := schema.NewRegistry(schema.WithResolvers(schema.FileFS(bundle, "schemas/root.json")))
 
-		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "name: cafe\n")))
+		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "name: cafe\n")))
 
-		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "name: 5\n"))
+		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "name: 5\n"))
 		require.ErrorContains(t, err, `$.name: expected "string", got "integer"`)
 	})
 

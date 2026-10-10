@@ -194,7 +194,7 @@ func (r *layerReader) read(ctx context.Context) (*mergedValue, error) {
 
 	err = aliasing.CheckDecodeText(n)
 	if err != nil {
-		return nil, n.Invalid(err, atToken(contentStart(n.AST())))
+		return nil, n.Bind(Invalid(err, atToken(contentStart(n.AST()))))
 	}
 
 	if !astnode.HasContent(n.AST()) {

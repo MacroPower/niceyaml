@@ -5316,7 +5316,7 @@ func TestWithReferences(t *testing.T) {
 					v := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 						seen = append(seen, n)
 
-						return serverSchema.Validate(ctx, n)
+						return serverSchema.Check(ctx, n)
 					})
 
 					err = check(t.Context(), src, doc, v)

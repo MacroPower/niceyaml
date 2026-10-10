@@ -1938,7 +1938,7 @@ func TestIntegration(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
 
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.NoError(t, err)
 	})
 
@@ -1971,7 +1971,7 @@ func TestIntegration(t *testing.T) {
 		for _, name := range []string{"ci.yaml", "release.yaml", "lint.yaml"} {
 			doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/"+name)
 
-			err := reg.Validate(t.Context(), doc)
+			err := reg.Check(t.Context(), doc)
 			require.NoError(t, err)
 		}
 
@@ -2014,7 +2014,7 @@ func TestIntegration(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`name: test`), ".github/workflows/ci.yaml")
 
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.Error(t, err)
 	})
 
@@ -2040,7 +2040,7 @@ func TestIntegration(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
 
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 
@@ -2052,7 +2052,7 @@ func TestIntegration(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
 		require.ErrorIs(t, err, schema.ErrResolve)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
@@ -2075,7 +2075,7 @@ func TestIntegration(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
 		assert.Zero(t, fallbackCalls.Load(), "the registry should not try resolvers after the store")
 	})

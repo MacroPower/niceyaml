@@ -226,7 +226,7 @@ func TestRegistry_Lookup(t *testing.T) {
 	})
 }
 
-func TestRegistry_Validate_ScopedNode(t *testing.T) {
+func TestRegistry_Check_ScopedNode(t *testing.T) {
 	t.Parallel()
 
 	// The resolvers read the file path, the preamble, and the content of a
@@ -252,7 +252,7 @@ func TestRegistry_Validate_ScopedNode(t *testing.T) {
 		`))
 		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
 
-		err := reg.Validate(t.Context(), spec)
+		err := reg.Check(t.Context(), spec)
 		require.ErrorIs(t, err, schema.ErrScopedDocument)
 		require.EqualError(t, err, "registry needs a whole document: node is scoped to $.spec")
 
@@ -303,7 +303,7 @@ func TestRegistry_Validate_ScopedNode(t *testing.T) {
 		`))
 		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
 
-		require.ErrorIs(t, lax.Validate(t.Context(), spec), schema.ErrScopedDocument)
+		require.ErrorIs(t, lax.Check(t.Context(), spec), schema.ErrScopedDocument)
 	})
 
 	t.Run("the root validates once and the nodes decode without it", func(t *testing.T) {
@@ -406,7 +406,7 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 
 		// A registry that does not require a schema passes an unmatched
 		// document, but never a canceled lookup.
-		require.ErrorIs(t, reg.Validate(ctx, doc), context.Canceled)
+		require.ErrorIs(t, reg.Check(ctx, doc), context.Canceled)
 	})
 
 	t.Run("resolver cancels and fails", func(t *testing.T) {
@@ -464,7 +464,7 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 				ctx, cancel = context.WithCancel(t.Context())
 				defer cancel()
 
-				err = newRegistry(cancel).Validate(ctx, doc)
+				err = newRegistry(cancel).Check(ctx, doc)
 				require.ErrorIs(t, err, context.Canceled)
 				require.ErrorIs(t, err, schema.ErrResolve)
 			})
@@ -556,7 +556,7 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 	})
 }
 
-func TestRegistry_Validate(t *testing.T) {
+func TestRegistry_Check(t *testing.T) {
 	t.Parallel()
 
 	t.Run("valid document", func(t *testing.T) {
@@ -569,7 +569,7 @@ func TestRegistry_Validate(t *testing.T) {
 		)))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.NoError(t, err)
 	})
 
@@ -583,7 +583,7 @@ func TestRegistry_Validate(t *testing.T) {
 		)))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.Error(t, err)
 
 		var validationErr *niceyaml.Error
@@ -606,7 +606,7 @@ func TestRegistry_Validate(t *testing.T) {
 
 		// Service matches no resolver, so Validate returns ErrNoMatch.
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 }
@@ -630,21 +630,21 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
-		require.NoError(t, newRegistry().Validate(t.Context(), doc))
+		require.NoError(t, newRegistry().Check(t.Context(), doc))
 	})
 
 	t.Run("accepts a document without content", func(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t, "# only a comment\n")
-		require.NoError(t, newRegistry().Validate(t.Context(), doc))
+		require.NoError(t, newRegistry().Check(t.Context(), doc))
 	})
 
 	t.Run("still validates a document a resolver applies to", func(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		err := newRegistry().Validate(t.Context(), doc)
+		err := newRegistry().Check(t.Context(), doc)
 		require.Error(t, err)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})
@@ -662,7 +662,7 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 		)
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrResolve)
 		require.ErrorIs(t, err, cannotDecide)
 	})
@@ -680,7 +680,7 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 		)
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrLoad)
 	})
 
@@ -702,7 +702,7 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 	})
 }
 
-func TestRegistry_Validate_SyntaxError(t *testing.T) {
+func TestRegistry_Check_SyntaxError(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -745,7 +745,7 @@ func TestRegistry_Validate_SyntaxError(t *testing.T) {
 
 			// The document did not parse, so every route to the registry
 			// returns its syntax error.
-			assert.Same(t, doc.Err(), tc.reg.Validate(t.Context(), doc))
+			assert.Same(t, doc.Err(), tc.reg.Check(t.Context(), doc))
 			assert.Same(t, doc.Err(), doc.Validate(t.Context(), tc.reg))
 
 			found, err := tc.reg.Lookup(t.Context(), doc)
@@ -791,7 +791,7 @@ func TestRegistry_Caching(t *testing.T) {
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 
 		for range 5 {
-			err := reg.Validate(t.Context(), doc)
+			err := reg.Check(t.Context(), doc)
 			require.NoError(t, err)
 		}
 
@@ -843,7 +843,7 @@ func TestRegistry_Caching(t *testing.T) {
 		require.Len(t, docs, 2)
 
 		for _, doc := range docs {
-			require.NoError(t, reg.Validate(t.Context(), doc))
+			require.NoError(t, reg.Check(t.Context(), doc))
 		}
 
 		assert.Equal(t, int32(1), fetches.Load(), "one schema should be fetched once")
@@ -862,7 +862,7 @@ func TestRegistry_Caching(t *testing.T) {
 
 		for _, input := range []string{`kind: Deployment`, `kind: Service`, `kind: Deployment`, `kind: Service`} {
 			doc := yamltest.FirstDocument(t, stringtest.Input(input))
-			err := reg.Validate(t.Context(), doc)
+			err := reg.Check(t.Context(), doc)
 			require.NoError(t, err)
 		}
 
@@ -1418,17 +1418,17 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 
 		// Deployment should validate.
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.NoError(t, err)
 
 		// Service should validate.
 		doc = yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
-		err = reg.Validate(t.Context(), doc)
+		err = reg.Check(t.Context(), doc)
 		require.NoError(t, err)
 
 		// ConfigMap has no schema.
 		doc = yamltest.FirstDocument(t, stringtest.Input(`kind: ConfigMap`))
-		err = reg.Validate(t.Context(), doc)
+		err = reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 
@@ -1453,7 +1453,7 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 		docs := source.Documents()
 
 		for _, doc := range docs {
-			err = reg.Validate(t.Context(), doc)
+			err = reg.Check(t.Context(), doc)
 			require.NoError(t, err)
 		}
 	})
@@ -1494,7 +1494,7 @@ func TestRegistry_CompileOptionsNotAliased(t *testing.T) {
 			opts[0] = schema.WithJSONSchemaOptions(jsonschema.WithFormats(false))
 
 			doc := yamltest.FirstDocument(t, stringtest.Input(`not-an-ip`))
-			err := reg.Validate(t.Context(), doc)
+			err := reg.Check(t.Context(), doc)
 			require.Error(t, err)
 			require.NotErrorIs(t, err, schema.ErrNoMatch)
 		})
@@ -1514,7 +1514,7 @@ func TestRegistry_ResolversNotAliased(t *testing.T) {
 	reg := schema.NewRegistry(opt)
 
 	doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
-	err := reg.Validate(t.Context(), doc)
+	err := reg.Check(t.Context(), doc)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, schema.ErrNoMatch)
 	assert.Contains(t, err.Error(), "string")
@@ -1537,7 +1537,7 @@ func TestRegistry_JSONSchemaOptionsNotAliased(t *testing.T) {
 	jopts[0] = jsonschema.WithFormats(false)
 
 	doc := yamltest.FirstDocument(t, stringtest.Input(`not-an-ip`))
-	err := reg.Validate(t.Context(), doc)
+	err := reg.Check(t.Context(), doc)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, schema.ErrNoMatch)
 }
@@ -1554,7 +1554,7 @@ func TestRegistry_CompileOptionsAppend(t *testing.T) {
 	)
 
 	doc := yamltest.FirstDocument(t, stringtest.Input(`not-an-ip`))
-	err := reg.Validate(t.Context(), doc)
+	err := reg.Check(t.Context(), doc)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, schema.ErrNoMatch)
 }
@@ -1572,7 +1572,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 		)
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrResolve)
 		assert.Contains(t, err.Error(), "cannot decide")
 	})
@@ -1589,7 +1589,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 		)
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrLoad)
 		assert.Contains(t, err.Error(), "disk on fire")
 		assert.Contains(t, err.Error(), "broken.json")
@@ -1660,7 +1660,7 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 		kind, err := yamltest.At(t, doc, kindPath).Decode[string](t.Context())
 		require.NoError(t, err)
 
-		err = reg.Validate(t.Context(), doc)
+		err = reg.Check(t.Context(), doc)
 
 		if kind == "Deployment" || kind == "Service" {
 			require.NoError(t, err, "expected %s to validate", kind)
@@ -1831,7 +1831,7 @@ func TestRegistry_Lookup_MatcherError(t *testing.T) {
 
 	// A registry that does not require a schema passes an unmatched
 	// document, but never one its matcher could not decide on.
-	require.ErrorIs(t, reg.Validate(t.Context(), doc), paths.ErrAlias)
+	require.ErrorIs(t, reg.Check(t.Context(), doc), paths.ErrAlias)
 }
 
 func TestRegistry_CompiledSchema(t *testing.T) {
@@ -1853,10 +1853,10 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 		got, err := reg.Lookup(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Same(t, service, got)
-		require.NoError(t, reg.Validate(t.Context(), doc))
+		require.NoError(t, reg.Check(t.Context(), doc))
 
 		bad := yamltest.FirstDocument(t, "kind: Deployment\nport: 80\n")
-		err = reg.Validate(t.Context(), bad)
+		err = reg.Check(t.Context(), bad)
 		require.Error(t, err)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
 		assert.Contains(t, err.Error(), "replicas")
@@ -1919,7 +1919,7 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 			schema.WithResolvers(lax),
 		)
 
-		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "not-an-ip")))
+		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "not-an-ip")))
 	})
 }
 
@@ -1940,7 +1940,7 @@ func TestRegistry_WithHTTPClient(t *testing.T) {
 			schema.WithResolvers(schema.URL(server.URL+"/schema.json")),
 		)
 
-		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 1\n")))
+		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\n")))
 	})
 
 	t.Run("a client replaces the default", func(t *testing.T) {
@@ -1981,9 +1981,9 @@ func TestRegistry_FileFS(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
 
-		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "kind: Pod\n")))
+		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Pod\n")))
 
-		err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "name: x\n"))
+		err = reg.Check(t.Context(), yamltest.FirstDocument(t, "name: x\n"))
 		require.Error(t, err)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})
@@ -1999,13 +1999,13 @@ func TestRegistry_FileFS(t *testing.T) {
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
-		require.NoError(t, reg.Validate(t.Context(), doc))
+		require.NoError(t, reg.Check(t.Context(), doc))
 
 		// The same text with its path alone names a file on disk, where
 		// the schema does not exist.
 		onDisk := yamltest.FirstDocumentWithPath(t, string(bundle["configs/app.yaml"].Data), "configs/app.yaml")
 
-		err = reg.Validate(t.Context(), onDisk)
+		err = reg.Check(t.Context(), onDisk)
 		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorIs(t, err, os.ErrNotExist)
 	})
@@ -2028,15 +2028,15 @@ func TestRegistry_FileFS(t *testing.T) {
 		}
 
 		valid := app(directive + "name: x\n")
-		require.NoError(t, reg.Validate(t.Context(), valid))
+		require.NoError(t, reg.Check(t.Context(), valid))
 
 		invalid := app(directive + "other: 1\n")
-		err := reg.Validate(t.Context(), invalid)
+		err := reg.Check(t.Context(), invalid)
 		require.ErrorContains(t, err, `missing required property "name"`)
 
 		// A pointer that names nothing reports the path in the file system.
 		missing := app("# yaml-language-server: $schema=./defs.json#/$defs/Missing\nname: x\n")
-		err = reg.Validate(t.Context(), missing)
+		err = reg.Check(t.Context(), missing)
 		require.ErrorIs(t, err, schema.ErrCompile)
 		assert.Contains(t, err.Error(), `"configs/defs.json#/$defs/Missing"`)
 		assert.NotContains(t, err.Error(), wd)
@@ -2054,9 +2054,9 @@ func TestRegistry_FileFS(t *testing.T) {
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.FileFS(fsys, "schemas/app/main.json")))
 
-		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
+		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
 
-		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
 		require.ErrorContains(t, err, `$.a: expected "string", got "integer"`)
 	})
 
@@ -2092,7 +2092,7 @@ func TestRegistry_FileFS(t *testing.T) {
 					schema.WithResolvers(schema.FileFS(fsys, "schemas/root.json")),
 				)
 
-				err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
+				err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
 				require.ErrorIs(t, err, mode.err)
 				assert.Contains(t, err.Error(), "read schemas/defs.json: open schemas/defs.json: file does not exist")
 				assert.NotContains(t, err.Error(), wd)
@@ -2152,7 +2152,7 @@ func TestRegistry_FileFS(t *testing.T) {
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorIs(t, err, fs.ErrInvalid)
 	})
@@ -2373,7 +2373,7 @@ func TestRegistry_FileSystems(t *testing.T) {
 		doc := yamltest.FirstDocument(t, directive+"v: 5\n",
 			niceyaml.WithFilePath("configs/other.yaml"), niceyaml.WithFS(stringFS))
 
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.ErrorContains(t, err, `$.v: expected "string", got "integer"`)
 	})
 
@@ -2601,7 +2601,7 @@ func TestRegistry_WithFSAt(t *testing.T) {
 			schema.WithResolvers(schema.File(filepath.Join(tenant, "in.json"))),
 		)
 
-		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "in: 5\n"))
+		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "in: 5\n"))
 		require.Error(t, err)
 		require.NotErrorIs(t, err, schema.ErrValidate)
 		assert.Contains(t, err.Error(), `$.in: expected "string", got "integer"`)
@@ -2616,7 +2616,7 @@ func TestRegistry_WithFSAt(t *testing.T) {
 					schema.WithResolvers(schema.File(filepath.Join(tenant, "out.json"))),
 				)
 
-				err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "out: 5\n"))
+				err := reg.Check(t.Context(), yamltest.FirstDocument(t, "out: 5\n"))
 				require.ErrorIs(t, err, mode.err)
 				assert.Contains(t, err.Error(), "not under "+tenant)
 			})
@@ -2624,7 +2624,7 @@ func TestRegistry_WithFSAt(t *testing.T) {
 
 		// Without the file system, the same schema reads the file outside.
 		disk := schema.NewRegistry(schema.WithResolvers(schema.File(filepath.Join(tenant, "out.json"))))
-		err = disk.Validate(t.Context(), yamltest.FirstDocument(t, "out: 5\n"))
+		err = disk.Check(t.Context(), yamltest.FirstDocument(t, "out: 5\n"))
 		require.Error(t, err)
 		require.NotErrorIs(t, err, schema.ErrValidate)
 		assert.Contains(t, err.Error(), `$.out: expected "string", got "integer"`)
@@ -2641,9 +2641,9 @@ func TestRegistry_WithFSAt(t *testing.T) {
 		ref := fileOrURL(t, "", "file://"+filepath.ToSlash(filepath.Join(tenant, "defs.json"))+"#/$defs/Foo")
 		reg := schema.NewRegistry(schema.WithFSAt(tenant, os.DirFS(tenant)), schema.WithResolvers(ref))
 
-		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "name: x\n")))
+		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "name: x\n")))
 
-		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "other: 1\n"))
+		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "other: 1\n"))
 		require.ErrorContains(t, err, `missing required property "name"`)
 	})
 
@@ -2675,7 +2675,7 @@ func TestRegistry_WithFSAt(t *testing.T) {
 		doc := yamltest.FirstDocumentWithPath(t,
 			"# yaml-language-server: $schema=./app.schema.json\nkind: App\n",
 			filepath.Join(wd, "configs", "app.yaml"))
-		require.NoError(t, reg.Validate(t.Context(), doc))
+		require.NoError(t, reg.Check(t.Context(), doc))
 
 		_, err = reg.Load(t.Context(), schema.File(filepath.Join(t.TempDir(), "pod.json")))
 		require.ErrorIs(t, err, schema.ErrLoad)
@@ -2902,9 +2902,9 @@ func TestRegistry_FileSystemAfterChdir(t *testing.T) {
 
 			reg := schema.NewRegistry(append(tc.opts(wd), schema.WithResolvers(ref))...)
 
-			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
+			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
 
-			err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+			err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
 			require.Error(t, err)
 			require.NotErrorIs(t, err, schema.ErrValidate)
 			assert.Contains(t, err.Error(), `$.a: expected "string", got "integer"`)
@@ -3489,12 +3489,12 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		doc := yamltest.FirstDocument(t, "kind: Service\n")
 
-		err := reg.Validate(t.Context(), doc)
+		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 		require.ErrorIs(t, err, schema.ErrNoDirective)
 
 		lenient := schema.NewRegistry(schema.WithResolvers(schema.Directive()), schema.WithRequireSchema(false))
-		require.NoError(t, lenient.Validate(t.Context(), doc))
+		require.NoError(t, lenient.Check(t.Context(), doc))
 	})
 }
 
@@ -3624,7 +3624,7 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 			// same way, bound to the document.
 			byDocument := schema.NewRegistry(append(tc.opts, schema.WithResolvers(tc.ref))...)
 
-			err = byDocument.Validate(t.Context(), yamltest.FirstDocument(t, "b: 5\n"))
+			err = byDocument.Check(t.Context(), yamltest.FirstDocument(t, "b: 5\n"))
 			require.ErrorIs(t, err, tc.err)
 			assert.False(t, niceyaml.IsInvalid(err))
 		})
@@ -3939,9 +3939,9 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			}, tc.opts...)
 			reg := schema.NewRegistry(opts...)
 
-			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, tc.valid)))
+			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, tc.valid)))
 
-			err := reg.Validate(t.Context(), yamltest.FirstDocument(t, tc.invalid))
+			err := reg.Check(t.Context(), yamltest.FirstDocument(t, tc.invalid))
 			require.Error(t, err)
 			require.NotErrorIs(t, err, schema.ErrValidate)
 			assert.Contains(t, err.Error(), tc.want)
@@ -4073,9 +4073,9 @@ definitions:
 
 			reg := schema.NewRegistry(schema.WithResolvers(schema.URL(server.URL + tc.path)))
 
-			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, tc.valid)))
+			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, tc.valid)))
 
-			err := reg.Validate(t.Context(), yamltest.FirstDocument(t, tc.invalid))
+			err := reg.Check(t.Context(), yamltest.FirstDocument(t, tc.invalid))
 			require.Error(t, err)
 			require.NotErrorIs(t, err, schema.ErrValidate)
 			assert.Contains(t, err.Error(), tc.want)
@@ -4162,9 +4162,9 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 
 			reg := schema.NewRegistry(append(tc.opts, schema.WithResolvers(tc.ref))...)
 
-			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
+			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
 
-			err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+			err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
 			require.Error(t, err)
 			require.NotErrorIs(t, err, schema.ErrValidate)
 			assert.Contains(t, err.Error(), `$.a: expected "string", got "integer"`)
@@ -4183,7 +4183,7 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 					schema.WithResolvers(schema.URL(server.URL+"/s/local.json")),
 				)
 
-				err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+				err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
 				require.ErrorIs(t, err, mode.err)
 				assert.Contains(t, err.Error(), "cannot resolve $ref")
 			})
@@ -4227,14 +4227,14 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 
 						reg := schema.NewRegistry(requireRefs(mode.require), schema.WithResolvers(schema.File(root)))
 
-						err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+						err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
 						require.ErrorIs(t, err, mode.err)
 						assert.NotContains(t, err.Error(), `expected "string", got "integer"`)
 						assert.Contains(t, err.Error(), "names local file")
 
 						// A string fails too, since the registry refuses the
 						// remote schema rather than skip the reference.
-						err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: x\n"))
+						err = reg.Check(t.Context(), yamltest.FirstDocument(t, "a: x\n"))
 						require.ErrorContains(t, err, "names local file")
 					})
 				}
@@ -4322,14 +4322,14 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		reg := schema.NewRegistry(requireRefs(false), schema.WithResolvers(schema.URL(server.URL+"/f.json")))
 
 		for range 5 {
-			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "b: 2\n")))
+			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n")))
 		}
 
 		// The compile missed the document, and the first validation loaded
 		// it for every validation after.
 		assert.Equal(t, int32(2), hits["/flaky.json"].Load())
 
-		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "b: x\n"))
+		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "b: x\n"))
 		require.ErrorContains(t, err, `expected "integer"`)
 	})
 
@@ -4340,7 +4340,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		reg := schema.NewRegistry(schema.WithResolvers(ref))
 
 		for range 3 {
-			err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "b: 2\n"))
+			err := reg.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n"))
 			require.ErrorIs(t, err, schema.ErrLoad)
 			assert.Contains(t, err.Error(), "/kept/flaky.json")
 		}
@@ -4355,7 +4355,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 
 		// A new registry fetches both and compiles the schema.
 		fresh := schema.NewRegistry(schema.WithResolvers(ref))
-		require.NoError(t, fresh.Validate(t.Context(), yamltest.FirstDocument(t, "b: 2\n")))
+		require.NoError(t, fresh.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n")))
 	})
 
 	t.Run("a document that fails to load is fetched again", func(t *testing.T) {
@@ -4369,7 +4369,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		for i := range 3 {
 			before := hits["/missing.json"].Load()
 
-			err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "b: 2\n"))
+			err := reg.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n"))
 			require.ErrorIs(t, err, schema.ErrValidate)
 			assert.Equal(t, before+1, hits["/missing.json"].Load(), "validation %d", i)
 		}
@@ -4396,7 +4396,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 				err = yamltest.FirstDocument(t, "a: 5\n").Validate(t.Context(), s)
 				require.ErrorContains(t, err, `expected "string"`)
 
-				err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+				err = reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
 				require.ErrorIs(t, err, mode.err)
 				assert.Contains(t, err.Error(), "cannot resolve $ref")
 			})
@@ -4420,7 +4420,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int32(1), hits["/remote-names-file.json"].Load())
 
-		err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+		err = reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
 		require.ErrorIs(t, err, schema.ErrValidate)
 		assert.NotContains(t, err.Error(), `expected "string", got "integer"`)
 		assert.Contains(t, err.Error(), "names local file")
@@ -4662,7 +4662,7 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 			ref, _ := onDisk(tc.files, tc.name)(t)
 
 			err := schema.NewRegistry(schema.WithResolvers(ref)).
-				Validate(t.Context(), yamltest.FirstDocument(t, "name: a\n"))
+				Check(t.Context(), yamltest.FirstDocument(t, "name: a\n"))
 			require.ErrorIs(t, err, tc.err)
 			assert.Contains(t, err.Error(), tc.at)
 			assert.Contains(t, err.Error(), "YAML decode: ")
@@ -4713,7 +4713,7 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 
 					reg := schema.NewRegistry(requireRefs(mode.require), schema.WithResolvers(schema.File(root)))
 
-					err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+					err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
 					require.ErrorIs(t, err, mode.err)
 					assert.Contains(t, err.Error(), "names local file")
 				})
@@ -4815,7 +4815,7 @@ func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 	}
 }
 
-func TestRegistry_Validate_RedactsPassword(t *testing.T) {
+func TestRegistry_Check_RedactsPassword(t *testing.T) {
 	t.Parallel()
 
 	// The referenced document answers 500 to its first request, so the
@@ -4851,7 +4851,7 @@ func TestRegistry_Validate_RedactsPassword(t *testing.T) {
 	_, err := reg.Schema(t.Context(), ref)
 	require.NoError(t, err)
 
-	err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+	err = reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
 	require.ErrorIs(t, err, schema.ErrValidate)
 	assert.Contains(t, err.Error(), "1bad")
 	assert.NotContains(t, err.Error(), "secret")
@@ -4906,7 +4906,7 @@ func TestRegistry_RefCredentials(t *testing.T) {
 
 			reg := schema.NewRegistry(schema.WithResolvers(schema.URL(tc.url)))
 
-			err := reg.Validate(t.Context(), yamltest.FirstDocument(t, tc.input))
+			err := reg.Check(t.Context(), yamltest.FirstDocument(t, tc.input))
 			require.Error(t, err)
 			require.NotErrorIs(t, err, schema.ErrValidate)
 			assert.Contains(t, err.Error(), `expected "string", got "integer"`)
@@ -4937,7 +4937,7 @@ func TestRegistry_RefCredentials(t *testing.T) {
 		ref := schema.URL(strings.Replace(root.URL, "://", "://user:secret@", 1) + "/root.json")
 		reg := schema.NewRegistry(schema.WithResolvers(ref))
 
-		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
 		require.ErrorContains(t, err, `expected "string", got "integer"`)
 		assert.False(t, sawAuth.Load())
 	})

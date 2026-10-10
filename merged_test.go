@@ -544,10 +544,13 @@ func TestLayers_Decode_Equivalence_Errors(t *testing.T) {
 		"keys no field reads":        {niceyaml.WithDisallowUnknownFields(true)},
 		"a validator that fails": {niceyaml.WithValidator(niceyaml.ValidatorFunc(
 			func(_ context.Context, n *niceyaml.Node) error {
-				return niceyaml.NewSummary("checks",
+				return niceyaml.NewSummary(
+					"checks",
 					niceyaml.NewError("bad host", niceyaml.AtPath(paths.Current().Child("server", "host"))),
 					niceyaml.NewError("no zone", niceyaml.AtPath(paths.Doc().Child("server", "zone"))),
-					n.NewError("bad inner", niceyaml.AtPath(paths.Doc().Child("nested", "inner", "host"))),
+					n.Bind(
+						niceyaml.NewError("bad inner", niceyaml.AtPath(paths.Doc().Child("nested", "inner", "host"))),
+					),
 				)
 			},
 		))},

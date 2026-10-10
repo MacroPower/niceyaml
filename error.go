@@ -353,10 +353,9 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 // rather than an [*Error], as [NewSummary] does, so the nil compares
 // equal to nil wherever it goes. A check that returns nil for a valid
 // value thus goes inside Invalid as it is, and a validator returns the
-// result bound through the Node it read, which [Node.Invalid] does in
-// one call:
+// result for the Node that runs it to bind:
 //
-//	return hours.Invalid(spec.Check())
+//	return niceyaml.Invalid(spec.Check())
 //
 // A caller that reads the Error itself finds it with [errors.AsType]. An
 // Error that carries a location and no message has no error to wrap, so
@@ -1079,7 +1078,7 @@ type errorConfig struct {
 // binds through the Node a validator got whatever the scope of that Node:
 //
 //	for _, item := range items {
-//		errs = append(errs, n.NewError("bad item", niceyaml.AtPath(item.Path())))
+//		errs = append(errs, niceyaml.NewError("bad item", niceyaml.AtPath(item.Path())))
 //	}
 //
 // # Missing Values

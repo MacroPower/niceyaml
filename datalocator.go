@@ -23,7 +23,7 @@ import (
 // location [go.jacobcolvin.com/niceyaml/schema.Schema] gives a violation
 // of the same value:
 //
-//	func (c *check) Validate(ctx context.Context, n *niceyaml.Node) error {
+//	func (c *check) Check(ctx context.Context, n *niceyaml.Node) error {
 //		data, err := n.Decode[any](ctx)
 //		if err != nil {
 //			return err
@@ -37,7 +37,7 @@ import (
 //			errs = append(errs, niceyaml.NewError(f.Msg, loc.At(f.Path...)))
 //		}
 //
-//		return n.Bind(errors.Join(errs...))
+//		return errors.Join(errs...)
 //	}
 //
 // In this document, a finding at ports, 16, name reports the key as the

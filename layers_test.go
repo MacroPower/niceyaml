@@ -84,7 +84,9 @@ func ExampleNewSourceFromLayers_document() {
 	fmt.Println(doc.View().Held().Content())
 
 	// An error binds in the file that holds its value.
-	fmt.Println(doc.NewError("port must be at least 1", niceyaml.AtPath(paths.Doc().Child("server", "port"))))
+	fmt.Println(
+		doc.Bind(niceyaml.NewError("port must be at least 1", niceyaml.AtPath(paths.Doc().Child("server", "port")))),
+	)
 
 	// Output:
 	// prod.example.com
@@ -1150,7 +1152,7 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 				niceyaml.NewError("in the preamble",
 					niceyaml.AtPath(paths.Doc().Child("name")), niceyaml.AtPosition(position.New(0, 2))),
 				niceyaml.NewError("in the preamble alone", niceyaml.AtPosition(position.New(0, 2))),
-				n.NewError("through the Node", niceyaml.AtPath(paths.Current().Child("server", "host"))),
+				n.Bind(niceyaml.NewError("through the Node", niceyaml.AtPath(paths.Current().Child("server", "host")))),
 			)
 		})
 
@@ -1327,15 +1329,15 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 			want string
 		}{
 			"at a path": {
-				err:  doc.NewError("here", niceyaml.AtPath(port)),
+				err:  doc.Bind(niceyaml.NewError("here", niceyaml.AtPath(port))),
 				want: "base.yaml:6:9: $.server.port: here",
 			},
 			"at a path from a scoped Node": {
-				err:  server.NewError("here", niceyaml.AtPath(paths.Current().Child("host"))),
+				err:  server.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.Current().Child("host")))),
 				want: "prod.yaml:2:9: $.server.host: here",
 			},
 			"at a scoped Node": {
-				err:  server.NewError("here"),
+				err:  server.Bind(niceyaml.NewError("here")),
 				want: "prod.yaml:1:1: $.server: here",
 			},
 			"of a decode of one value": {
@@ -1376,7 +1378,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 
 		// The error binds in base.yaml, at the range that file has for
 		// the value.
-		err = doc.NewError("here", niceyaml.AtPath(port))
+		err = doc.Bind(niceyaml.NewError("here", niceyaml.AtPath(port)))
 
 		var bound *niceyaml.SourceError
 
@@ -1393,10 +1395,10 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 
 		// A position reads the merged text, so the one base.yaml has for
 		// the port names no value of the merged document.
-		err = doc.NewError("here", niceyaml.AtPosition(merged[0].Start))
+		err = doc.Bind(niceyaml.NewError("here", niceyaml.AtPosition(merged[0].Start)))
 		require.EqualError(t, err, "base.yaml:6:9: here")
 
-		err = doc.NewError("here", niceyaml.AtPosition(inBase[0].Start))
+		err = doc.Bind(niceyaml.NewError("here", niceyaml.AtPosition(inBase[0].Start)))
 		require.EqualError(t, err, "base.yaml: here")
 	})
 
@@ -1442,7 +1444,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 			assert.True(t, doc.IsEmpty(), name)
 			assert.Empty(t, doc.Source().Name(), name)
 
-			err = doc.NewError("port is required", niceyaml.AtPath(port))
+			err = doc.Bind(niceyaml.NewError("port is required", niceyaml.AtPath(port)))
 			require.EqualError(t, err, "$.server.port: port is required", name)
 		}
 	})
@@ -1604,7 +1606,7 @@ func TestNode_Origin(t *testing.T) {
 			// An error at the Node binds in the layer of its origin.
 			var bound *niceyaml.SourceError
 
-			require.ErrorAs(t, node.NewError("bad value", niceyaml.AtPath(paths.Current())), &bound)
+			require.ErrorAs(t, node.Bind(niceyaml.NewError("bad value", niceyaml.AtPath(paths.Current()))), &bound)
 			assert.Same(t, origin.Source(), bound.Source())
 
 			// The origin belongs to a file, so it is its own origin.

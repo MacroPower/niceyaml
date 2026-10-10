@@ -660,13 +660,13 @@ func TestRefBeside(t *testing.T) {
 
 		byName := schema.NewRegistry(schema.WithResolvers(beside))
 
-		require.NoError(t, byName.Validate(t.Context(), inBundle))
-		require.NoError(t, byName.Validate(t.Context(), onDisk))
+		require.NoError(t, byName.Check(t.Context(), inBundle))
+		require.NoError(t, byName.Check(t.Context(), onDisk))
 
 		invalid := yamltest.FirstDocument(t, "name: x\n",
 			niceyaml.WithFilePath("configs/other.yaml"), niceyaml.WithFS(bundle))
 
-		err := byName.Validate(t.Context(), invalid)
+		err := byName.Check(t.Context(), invalid)
 		require.ErrorContains(t, err, `missing required property "kind"`)
 	})
 }
