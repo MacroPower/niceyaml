@@ -97,6 +97,38 @@ func TestGenerateYAML(t *testing.T) {
 	assert.Empty(t, yamltest.GenerateYAML(0))
 }
 
+func TestWideMergeOf(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		item string
+		want string
+		tail []string
+	}{
+		"alias to the mapping a": {
+			item: "*a",
+			want: yamltest.WideMerge(2),
+		},
+		"another item": {
+			item: "0",
+			want: "a: &a {z: 0}\nm:\n  0x1000: x\n  0x1001: x\n  <<: [0, 0]\n",
+		},
+		"tail after the items": {
+			item: "*a",
+			tail: []string{"*late", "x"},
+			want: "a: &a {z: 0}\nm:\n  0x1000: x\n  0x1001: x\n  <<: [*a, *a, *late, x]\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, yamltest.WideMergeOf(2, tc.item, tc.tail...))
+		})
+	}
+}
+
 func TestFlowSequence(t *testing.T) {
 	t.Parallel()
 

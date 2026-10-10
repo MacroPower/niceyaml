@@ -70,6 +70,13 @@ func MergeLevels(levels int) string {
 // lists as many aliases to the mapping a. To tell which entry the
 // spelling of one of those keys selects, a lookup reads that whole list.
 func WideMerge(members int) string {
+	return WideMergeOf(members, "*a")
+}
+
+// WideMergeOf creates the YAML content of [WideMerge] with another merge
+// list. The merge key of m lists item members times and then each element
+// of tail, as [FlowSequence] writes them.
+func WideMergeOf(members int, item string, tail ...string) string {
 	var sb strings.Builder
 
 	sb.WriteString("a: &a {z: 0}\nm:\n")
@@ -78,7 +85,7 @@ func WideMerge(members int) string {
 		fmt.Fprintf(&sb, "  %#x: x\n", 0x1000+i)
 	}
 
-	sb.WriteString("  <<: " + FlowSequence("*a", members) + "\n")
+	sb.WriteString("  <<: " + FlowSequence(item, members, tail...) + "\n")
 
 	return sb.String()
 }
