@@ -2726,7 +2726,12 @@ func TestSourceError_NilReceiver(t *testing.T) {
 	assert.False(t, bound)
 	assert.NoError(t, missing.Unwrap()) //nolint:testifylint // Asserts the nil, not a test failure.
 
-	_, resolved := missing.Range()
+	pos, positioned := missing.Position()
+	assert.Zero(t, pos)
+	require.False(t, positioned)
+
+	rng, resolved := missing.Range()
+	assert.Zero(t, rng)
 	require.False(t, resolved)
 	require.NoError(t, missing.Unresolved())
 
@@ -4619,14 +4624,8 @@ func TestSourceError_Position(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("name: hello\nvalue: 123\n")
 
-	bind := func(t *testing.T, err error) *niceyaml.SourceError {
-		t.Helper()
-
-		return errorBinding(t, yamltest.Bind(t, source, err))
-	}
-
 	tcs := map[string]struct {
-		build func(t *testing.T) *niceyaml.SourceError
+		err error
 		// The start of the range the error resolves to, which differs from
 		// the position only for a position inside a token.
 		start position.Position
@@ -4634,75 +4633,45 @@ func TestSourceError_Position(t *testing.T) {
 		ok    bool
 	}{
 		"path": {
-			build: func(t *testing.T) *niceyaml.SourceError {
-				t.Helper()
-
-				return bind(t, niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("value"))))
-			},
+			err:   niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("value"))),
 			want:  position.New(1, 7),
 			start: position.New(1, 7),
 			ok:    true,
 		},
 		"range": {
-			build: func(t *testing.T) *niceyaml.SourceError {
-				t.Helper()
-
-				return bind(t, niceyaml.NewError("bad", niceyaml.AtRange(
-					position.NewRange(position.New(0, 6), position.New(0, 9)),
-				)))
-			},
+			err: niceyaml.NewError("bad", niceyaml.AtRange(
+				position.NewRange(position.New(0, 6), position.New(0, 9)),
+			)),
 			want:  position.New(0, 6),
 			start: position.New(0, 6),
 			ok:    true,
 		},
 		"position at the start of a token": {
-			build: func(t *testing.T) *niceyaml.SourceError {
-				t.Helper()
-
-				return bind(t, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(1, 7))))
-			},
+			err:   niceyaml.NewError("bad", niceyaml.AtPosition(position.New(1, 7))),
 			want:  position.New(1, 7),
 			start: position.New(1, 7),
 			ok:    true,
 		},
 		"position inside a token": {
-			build: func(t *testing.T) *niceyaml.SourceError {
-				t.Helper()
-
-				return bind(t, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 8))))
-			},
+			err:   niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 8))),
 			want:  position.New(0, 8),
 			start: position.New(0, 6),
 			ok:    true,
 		},
 		"binding around a binding": {
-			build: func(t *testing.T) *niceyaml.SourceError {
-				t.Helper()
-
-				inner := bind(t, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 8))))
-
-				return bind(t, niceyaml.Invalid(inner, niceyaml.WithDetails(errors.New("see docs"))))
-			},
+			err: niceyaml.Invalid(
+				yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 8)))),
+				niceyaml.WithDetails(errors.New("see docs")),
+			),
 			want:  position.New(0, 8),
 			start: position.New(0, 6),
 			ok:    true,
 		},
 		"no location": {
-			build: func(t *testing.T) *niceyaml.SourceError {
-				t.Helper()
-
-				return bind(t, niceyaml.NewError("bad"))
-			},
+			err: niceyaml.NewError("bad"),
 		},
 		"position past the last line": {
-			build: func(t *testing.T) *niceyaml.SourceError {
-				t.Helper()
-
-				return bind(t, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(99, 0))))
-			},
-		},
-		"nil": {
-			build: func(*testing.T) *niceyaml.SourceError { return nil },
+			err: niceyaml.NewError("bad", niceyaml.AtPosition(position.New(99, 0))),
 		},
 	}
 
@@ -4710,7 +4679,7 @@ func TestSourceError_Position(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			bound := tc.build(t)
+			bound := errorBinding(t, yamltest.Bind(t, source, tc.err))
 
 			got, ok := bound.Position()
 			assert.Equal(t, tc.ok, ok)
