@@ -17,7 +17,6 @@ import (
 	"testing/iotest"
 	"unicode/utf8"
 
-	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/lexer"
@@ -3651,26 +3650,6 @@ func TestSource_ValidateDocuments_Context(t *testing.T) {
 	})
 }
 
-func TestSource_View_IndependentViews(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString("key: value\n")
-
-	first := source.View()
-	first.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
-	first.Annotate(0, line.Annotation{Content: "note", Placement: line.Below})
-
-	// A second view starts from the pristine document.
-	second := source.View()
-	assert.Empty(t, second.Overlays(0))
-	assert.Empty(t, second.Annotations(0))
-
-	// The first view keeps its overlay and annotation.
-	require.Len(t, first.Overlays(0), 1)
-	assert.Equal(t, kind.Kind("test1"), first.Overlays(0)[0].Kind)
-	assert.Equal(t, "key: value", first.Held().Content())
-}
-
 func TestSource_Name(t *testing.T) {
 	t.Parallel()
 
@@ -4076,21 +4055,27 @@ func TestSource_View_IsIndependent(t *testing.T) {
 
 	// A change to one view reaches neither the Source nor another view.
 	view := source.View()
+	view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
+	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below})
+
+	assert.Empty(t, source.View().Overlays(0))
+	assert.Empty(t, source.View().Annotations(0))
+
+	// The view keeps its overlay and annotation.
+	require.Len(t, view.Overlays(0), 1)
+	assert.Equal(t, kind.Kind("test1"), view.Overlays(0)[0].Kind)
+	assert.NotEmpty(t, view.Annotations(0))
+	assert.Equal(t, "key: value", view.Held().Content())
+
+	// An overlay on one line of the view stays in the view too.
 	for i := range view.All() {
-		view.Annotate(i, line.Annotation{Content: "note", Placement: line.Below})
 		view.AddLineOverlay(i, line.Overlay{Cols: position.NewSpan(0, 3), Kind: kind.GenericError})
 	}
 
-	assert.NotEmpty(t, view.Annotations(0))
-	assert.Empty(t, source.View().Annotations(0))
 	assert.Empty(t, source.View().Overlays(0))
 
 	// A fresh view renders the pristine document.
-	plain := printer.New(
-		printer.WithStyles(style.Styles{}),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.NoGutter),
-	)
+	plain := yamltest.NewXMLPrinter(printer.WithStyles(style.Styles{}))
 	assert.Equal(t, "key: value", plain.Print(source.View()))
 }
 
