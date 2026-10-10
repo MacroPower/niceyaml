@@ -621,10 +621,10 @@ func TestDirective_Resolve_Match(t *testing.T) {
 func TestDirective_Resolve(t *testing.T) {
 	t.Parallel()
 
+	schemaData := []byte(`{"type": "object"}`)
+
 	t.Run("successfully loads schema from file directive", func(t *testing.T) {
 		t.Parallel()
-
-		schemaData := []byte(`{"type": "object"}`)
 
 		// Each case writes the schema to file under a temporary directory
 		// and names it by a directive in a document at doc there, or at
@@ -681,8 +681,6 @@ func TestDirective_Resolve(t *testing.T) {
 
 	t.Run("successfully loads schema from URL directive", func(t *testing.T) {
 		t.Parallel()
-
-		schemaData := []byte(`{"type": "object"}`)
 
 		// A URL needs no directory to resolve against.
 		tcs := map[string]struct {
@@ -782,7 +780,6 @@ func TestDirective_Resolve(t *testing.T) {
 	t.Run("resolves an absolute path without a file path", func(t *testing.T) {
 		t.Parallel()
 
-		schemaData := []byte(`{"type": "object"}`)
 		schemaPath := writeSchema(t, "schema.json", schemaData)
 
 		doc := yamltest.FirstDocument(t, withDirective(schemaPath, "kind: Deployment\n"))
