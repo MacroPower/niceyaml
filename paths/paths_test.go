@@ -2181,8 +2181,7 @@ func TestPath_Token_Collections(t *testing.T) {
 			tk, err := paths.NewResolver(doc).Token(paths.MustParse(tc.path))
 			require.NoError(t, err)
 
-			got := fmt.Sprintf("%s@%d:%d", tk.Value, tk.Position.Line, tk.Position.Column)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, yamltest.TokenPlace(tk))
 		})
 	}
 }
