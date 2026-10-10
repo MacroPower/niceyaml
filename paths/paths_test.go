@@ -2646,35 +2646,14 @@ func TestPath_Node_TaggedKey(t *testing.T) {
 	// A `~` keeps a tag on the key, as a path to a value keeps a tag on
 	// the value, while the token of the key is still the key text.
 	tcs := map[string]struct {
-		input     string
-		want      string
-		wantToken string
+		input string
+		want  string
 	}{
-		"plain key": {
-			input:     "2: x\n",
-			want:      "2",
-			wantToken: "2",
-		},
-		"tagged key": {
-			input:     "!!str 2: x\n",
-			want:      "!!str 2",
-			wantToken: "2",
-		},
-		"explicit tagged key": {
-			input:     "? !!str 2\n: x\n",
-			want:      "!!str 2",
-			wantToken: "2",
-		},
-		"anchored tagged key": {
-			input:     "&k !!str 2: x\n",
-			want:      "!!str 2",
-			wantToken: "2",
-		},
-		"anchored key": {
-			input:     "&k 2: x\n",
-			want:      "2",
-			wantToken: "2",
-		},
+		"plain key":           {input: "2: x\n", want: "2"},
+		"tagged key":          {input: "!!str 2: x\n", want: "!!str 2"},
+		"explicit tagged key": {input: "? !!str 2\n: x\n", want: "!!str 2"},
+		"anchored tagged key": {input: "&k !!str 2: x\n", want: "!!str 2"},
+		"anchored key":        {input: "&k 2: x\n", want: "2"},
 	}
 
 	for name, tc := range tcs {
@@ -2695,7 +2674,7 @@ func TestPath_Node_TaggedKey(t *testing.T) {
 
 			tk, err := paths.NewResolver(doc).Token(path)
 			require.NoError(t, err)
-			assert.Equal(t, tc.wantToken, tk.Value)
+			assert.Equal(t, "2", tk.Value)
 		})
 	}
 }
