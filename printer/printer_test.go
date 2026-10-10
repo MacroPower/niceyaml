@@ -3055,8 +3055,11 @@ func TestPrinter_Style(t *testing.T) {
 	}
 }
 
-func TestPrinter_TokenTypes_XMLStyler(t *testing.T) {
+func TestPrinter_Print_Tokens(t *testing.T) {
 	t.Parallel()
+
+	// A printer with tagged styles wraps each token in the tag of its kind,
+	// and a printer without styles prints the text of the tokens it gets.
 
 	tcs := map[string]struct {
 		input string
@@ -3194,38 +3197,20 @@ func TestPrinter_TokenTypes_XMLStyler(t *testing.T) {
 			input: "key: value   # comment",
 			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString><text>   </text><comment># comment</comment>",
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).View()
-
-			assert.Equal(t, tc.want, yamltest.NewXMLPrinter().Print(view))
-		})
-	}
-}
-
-func TestPrinter_Print_Tokens(t *testing.T) {
-	t.Parallel()
-
-	// A printer without styles prints the text of the tokens it gets.
-	tcs := map[string]struct {
-		input string
-	}{
-		"empty file": {input: ""},
-		"anchor and alias": {
-			input: stringtest.JoinLF(
-				"anchor: &x 1",
-				"alias: *x",
-			),
+		"empty file": {
+			input: "",
+			want:  "",
 		},
 		"two documents": {
 			input: stringtest.JoinLF(
 				"doc1: value1",
 				"---",
 				"doc2: value2",
+			),
+			want: stringtest.JoinLF(
+				"<nameTag>doc1</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value1</literalString>",
+				"<punctuationHeading>---</punctuationHeading>",
+				"<nameTag>doc2</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value2</literalString>",
 			),
 		},
 		"three documents": {
@@ -3236,27 +3221,35 @@ func TestPrinter_Print_Tokens(t *testing.T) {
 				"---",
 				"third: 3",
 			),
+			want: stringtest.JoinLF(
+				"<nameTag>first</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>1</literalNumberInteger>",
+				"<punctuationHeading>---</punctuationHeading>",
+				"<nameTag>second</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>2</literalNumberInteger>",
+				"<punctuationHeading>---</punctuationHeading>",
+				"<nameTag>third</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>3</literalNumberInteger>",
+			),
 		},
-		"documents with header": {
+		"document with header": {
 			input: stringtest.JoinLF(
 				"---",
 				"key: value",
 			),
+			want: stringtest.JoinLF(
+				"<punctuationHeading>---</punctuationHeading>",
+				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+			),
 		},
-		"documents with footer": {
+		"document with footer": {
 			input: stringtest.JoinLF(
 				"key: value",
 				"...",
 			),
-		},
-		"document with header and footer": {
-			input: stringtest.JoinLF(
-				"---",
-				"key: value",
-				"...",
+			want: stringtest.JoinLF(
+				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+				"<punctuationHeading>...</punctuationHeading>",
 			),
 		},
-		"multiple docs with headers and footers": {
+		"two documents with headers and footers": {
 			input: stringtest.JoinLF(
 				"---",
 				"doc1: value1",
@@ -3264,6 +3257,14 @@ func TestPrinter_Print_Tokens(t *testing.T) {
 				"---",
 				"doc2: value2",
 				"...",
+			),
+			want: stringtest.JoinLF(
+				"<punctuationHeading>---</punctuationHeading>",
+				"<nameTag>doc1</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value1</literalString>",
+				"<punctuationHeading>...</punctuationHeading>",
+				"<punctuationHeading>---</punctuationHeading>",
+				"<nameTag>doc2</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value2</literalString>",
+				"<punctuationHeading>...</punctuationHeading>",
 			),
 		},
 	}
@@ -3274,6 +3275,7 @@ func TestPrinter_Print_Tokens(t *testing.T) {
 
 			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).View()
 
+			assert.Equal(t, tc.want, yamltest.NewXMLPrinter().Print(view))
 			assert.Equal(t, tc.input, testPrinter().Print(view))
 		})
 	}
