@@ -4613,7 +4613,10 @@ func (e *SourceError) Excerpt(opts ...ExcerptOption) (*line.View, bool) {
 		return nil, false
 	}
 
-	_, positions := excerptPositions([]*SourceError{e})
+	// The location of a lone binding carries no message, so the excerpt
+	// gives it a caret run alone, since the tree above the excerpt names
+	// it.
+	_, positions := treePositions([]*SourceError{e}, false, nil)
 
 	return e.source.excerpt(positions[e.source], newExcerptConfig(opts))
 }
@@ -4807,15 +4810,6 @@ func highlightStart(at position.Position, segments []position.Range) (int, bool)
 	}
 
 	return col, found
-}
-
-// excerptPositions returns what [treePositions] returns for the excerpts of
-// bindings. The own location of a binding carries its message only among
-// several bindings, where the message tells the carets of one excerpt
-// apart. The location of a lone binding carries none, so an excerpt gives
-// it a caret run alone, since the tree above the excerpt names it.
-func excerptPositions(bindings []*SourceError) ([]*Source, map[*Source][]errorPosition) {
-	return treePositions(bindings, len(bindings) > 1, nil)
 }
 
 // treePositions returns the sources the trees of bindings touch, with the

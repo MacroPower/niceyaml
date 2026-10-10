@@ -116,6 +116,10 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 	}
 
 	bindings := slices.Collect(Bindings(err))
+
+	// The own location of a binding carries its message only among
+	// several bindings, where the message tells the carets of one excerpt
+	// apart.
 	sources, positions := treePositions(bindings, len(bindings) > 1, skipped)
 
 	var rep ErrorReport
