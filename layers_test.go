@@ -208,17 +208,12 @@ func ExampleNode_Origin() {
 func TestNewSourceFromLayers(t *testing.T) {
 	t.Parallel()
 
-	const (
-		baseInput = "server:\n  host: example.com\n  port: 0\n"
-		prodInput = "server:\n  host: prod.example.com\n"
-
-		want = "base.yaml:3:9: $.server.port: port must be at least 1"
-	)
+	const want = "base.yaml:3:9: $.server.port: port must be at least 1"
 
 	t.Run("a Source is the layer its one document is", func(t *testing.T) {
 		t.Parallel()
 
-		sources := layerSources(t, baseInput, prodInput)
+		sources := layerSources(t, layerBadPort, layerProdHost)
 
 		base := yamltest.Document(t, sources[0])
 
@@ -245,7 +240,10 @@ func TestNewSourceFromLayers(t *testing.T) {
 				assert.Same(t, base, bound.Node())
 				assert.Same(t, sources[0], bound.Source())
 
-				assert.Equal(t, "server:\n  host: prod.example.com\n  port: 0\n", mergedText(t, layers))
+				assert.Equal(t,
+					stringtest.LinesLF("server:", "  host: prod.example.com", "  port: 0"),
+					mergedText(t, layers),
+				)
 			})
 		}
 	})
@@ -253,7 +251,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 	t.Run("a Source layers beside a Node of another document", func(t *testing.T) {
 		t.Parallel()
 
-		base := layerSources(t, baseInput)[0]
+		base := layerSources(t, layerBadPort)[0]
 		profiles := yamltest.FirstDocument(t,
 			stringtest.LinesLF(
 				"profiles:",
@@ -283,7 +281,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 			layer  niceyaml.Layer
 		)
 
-		sources := layerSources(t, baseInput, prodInput)
+		sources := layerSources(t, layerBadPort, layerProdHost)
 		base, prod := sources[0], sources[1]
 
 		tcs := map[string]*niceyaml.Source{
@@ -305,7 +303,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 	t.Run("a file that does not exist adds nothing", func(t *testing.T) {
 		t.Parallel()
 
-		fsys := fstest.MapFS{"base.yaml": {Data: []byte(baseInput)}}
+		fsys := fstest.MapFS{"base.yaml": {Data: []byte(layerBadPort)}}
 
 		base, err := niceyaml.NewSourceFromFS(fsys, "base.yaml")
 		require.NoError(t, err)
@@ -321,7 +319,12 @@ func TestNewSourceFromLayers(t *testing.T) {
 		t.Parallel()
 
 		base := niceyaml.NewSourceFromString(
-			"server:\n  host: example.com\n  port: 80\n---\n",
+			stringtest.LinesLF(
+				"server:",
+				"  host: example.com",
+				"  port: 80",
+				"---",
+			),
 			niceyaml.WithName("base.yaml"),
 		)
 
@@ -335,8 +338,11 @@ func TestNewSourceFromLayers(t *testing.T) {
 
 		// An overlay that a template comments out renders as headers
 		// alone, and it layers as an empty file does.
-		base := layerSources(t, baseInput)[0]
-		overlay := niceyaml.NewSourceFromString("---\n# off\n---\n", niceyaml.WithName("overlay.yaml"))
+		base := layerSources(t, layerBadPort)[0]
+		overlay := niceyaml.NewSourceFromString(
+			stringtest.LinesLF("---", "# off", "---"),
+			niceyaml.WithName("overlay.yaml"),
+		)
 
 		placements := map[string][]niceyaml.Layer{
 			"on top": {base, overlay},
@@ -352,7 +358,10 @@ func TestNewSourceFromLayers(t *testing.T) {
 	t.Run("the documents of one file layer in order", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(baseInput+"---\nserver:\n  port: 80\n", niceyaml.WithName("app.yaml"))
+		source := niceyaml.NewSourceFromString(
+			layerBadPort+stringtest.LinesLF("---", "server:", "  port: 80"),
+			niceyaml.WithName("app.yaml"),
+		)
 
 		docs := source.Documents()
 		require.Len(t, docs, 2)
@@ -365,7 +374,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 	t.Run("a change of the slice of the caller reaches no layer", func(t *testing.T) {
 		t.Parallel()
 
-		given := layersOf(layerSources(t, baseInput, prodInput))
+		given := layersOf(layerSources(t, layerBadPort, layerProdHost))
 		layers := yamltest.Layers(t, given...)
 
 		clear(given)
@@ -383,9 +392,15 @@ func TestNewSourceFromLayers(t *testing.T) {
 			want  string
 		}{
 			"several documents": {
-				input: "server:\n  port: 1\n---\nserver:\n  port: 2\n",
-				want:  "prod.yaml:3:1: multiple documents in source: 2 documents",
-				err:   niceyaml.ErrMultipleDocuments,
+				input: stringtest.LinesLF(
+					"server:",
+					"  port: 1",
+					"---",
+					"server:",
+					"  port: 2",
+				),
+				want: "prod.yaml:3:1: multiple documents in source: 2 documents",
+				err:  niceyaml.ErrMultipleDocuments,
 			},
 			"a syntax error": {
 				input: "server: [\n",
@@ -393,9 +408,14 @@ func TestNewSourceFromLayers(t *testing.T) {
 				err:   niceyaml.ErrSyntax,
 			},
 			"a syntax error below a document that parses": {
-				input: "server:\n  port: 1\n---\nserver: [\n",
-				want:  "prod.yaml:4:9: " + unclosedSequence,
-				err:   niceyaml.ErrSyntax,
+				input: stringtest.LinesLF(
+					"server:",
+					"  port: 1",
+					"---",
+					"server: [",
+				),
+				want: "prod.yaml:4:9: " + unclosedSequence,
+				err:  niceyaml.ErrSyntax,
 			},
 		}
 
@@ -403,7 +423,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				base := layerSources(t, baseInput)[0]
+				base := layerSources(t, layerBadPort)[0]
 				broken := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("prod.yaml"))
 
 				_, err := broken.Document()
@@ -440,7 +460,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 		require.Len(t, docs, 1)
 		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
 
-		merged, err := niceyaml.NewSourceFromLayers(t.Context(), layerNodes(t, baseInput)[0], docs[0])
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), layerNodes(t, layerBadPort)[0], docs[0])
 		require.EqualError(t, err, "prod.yaml:1:9: "+unclosedSequence)
 		require.ErrorIs(t, err, docs[0].Err())
 		assert.Nil(t, merged)
@@ -450,7 +470,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 		t.Parallel()
 
 		// Each outer layer fails as a decode of it alone does.
-		nodes := layerNodes(t, "server: *missing\n", baseInput, "name: *gone\n")
+		nodes := layerNodes(t, "server: *missing\n", layerBadPort, "name: *gone\n")
 
 		_, alone := nodes[0].Decode[any](t.Context())
 		require.EqualError(t, alone, "base.yaml:1:9: $.server: could not find alias \"missing\"")
@@ -468,7 +488,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		sources := layerSources(t, baseInput, prodInput)
+		sources := layerSources(t, layerBadPort, layerProdHost)
 
 		// The error binds in the layer the merge was reading.
 		merged, err := niceyaml.NewSourceFromLayers(ctx, sources[0], sources[1])
@@ -489,12 +509,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
 	t.Parallel()
 
-	const (
-		portMessage = "port must be at least 1"
-
-		// A base file whose server names a host and an invalid port.
-		badPort = "server:\n  host: example.com\n  port: 0\n"
-	)
+	const portMessage = "port must be at least 1"
 
 	// Each case decodes its layers into one value and validates the
 	// value through them. The files are base.yaml and prod.yaml, with
@@ -512,25 +527,31 @@ func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
 		odd []paths.Path
 	}{
 		"a field binds in the layer that sets it": {
-			layers: []string{badPort, "server:\n  host: prod.example.com\n"},
+			layers: []string{layerBadPort, layerProdHost},
 			err:    "base.yaml:3:9: $.server.port: " + portMessage,
 		},
 		"the top layer keeps a field it sets": {
-			layers: []string{"server:\n  host: example.com\n  port: 80\n", "server:\n  port: 0\n"},
+			layers: []string{layerPort80, stringtest.LinesLF("server:", "  port: 0")},
 			err:    "prod.yaml:2:9: $.server.port: " + portMessage,
 		},
 		"an element binds in the layer that holds the sequence": {
-			layers: []string{"servers:\n  - {host: a, port: 80}\n", "servers:\n  - {host: x}\n"},
-			err:    "prod.yaml:2:3: $.servers[0].port: " + portMessage,
+			layers: []string{
+				stringtest.LinesLF("servers:", "  - {host: a, port: 80}"),
+				stringtest.LinesLF("servers:", "  - {host: x}"),
+			},
+			err: "prod.yaml:2:3: $.servers[0].port: " + portMessage,
 		},
 		"an element of an array binds in the layer that holds the sequence": {
-			layers: []string{"pair:\n  - {host: a, port: 80}\n", "pair:\n  - {host: x}\n"},
-			err:    "prod.yaml:2:3: $.pair[0].port: " + portMessage,
+			layers: []string{
+				stringtest.LinesLF("pair:", "  - {host: a, port: 80}"),
+				stringtest.LinesLF("pair:", "  - {host: x}"),
+			},
+			err: "prod.yaml:2:3: $.pair[0].port: " + portMessage,
 		},
 		"a field of a map entry binds in the layer that sets it": {
 			layers: []string{
-				"backends:\n  a: {host: a, port: 0}\n",
-				"backends:\n  a: {host: x}\n  b: {host: b, port: 1}\n",
+				stringtest.LinesLF("backends:", "  a: {host: a, port: 0}"),
+				stringtest.LinesLF("backends:", "  a: {host: x}", "  b: {host: b, port: 1}"),
 			},
 			err: "base.yaml:2:22: $.backends.a.port: " + portMessage,
 		},
@@ -545,31 +566,34 @@ func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
 			err:    "base.yaml:1:26: $.switch.mode: odd value",
 		},
 		"a null field keeps the value of the layer below": {
-			layers: []string{badPort, "server:\n  host: x\n  port: null\n"},
+			layers: []string{layerBadPort, stringtest.LinesLF("server:", "  host: x", "  port: null")},
 			err:    "base.yaml:3:9: $.server.port: " + portMessage,
 		},
 		"a null mapping keeps the value of the layer below": {
-			layers: []string{badPort, "server: null\n"},
+			layers: []string{layerBadPort, "server: null\n"},
 			err:    "base.yaml:3:9: $.server.port: " + portMessage,
 		},
 		"an empty mapping keeps the value of the layer below": {
-			layers: []string{badPort, "server: {}\n"},
+			layers: []string{layerBadPort, "server: {}\n"},
 			err:    "base.yaml:3:9: $.server.port: " + portMessage,
 		},
 		"a null that no layer sets a value under binds in the highest layer": {
-			layers: []string{"limits:\n  timeout: null\n", "limits:\n  timeout: ~\n"},
-			err:    "prod.yaml:2:12: $.limits.timeout: timeout is required",
+			layers: []string{
+				stringtest.LinesLF("limits:", "  timeout: null"),
+				stringtest.LinesLF("limits:", "  timeout: ~"),
+			},
+			err: "prod.yaml:2:12: $.limits.timeout: timeout is required",
 		},
 		"the middle of three layers sets the value": {
 			layers: []string{
-				"server:\n  host: example.com\n  port: 80\n",
-				"server:\n  port: 0\n",
-				"server:\n  host: prod.example.com\n",
+				layerPort80,
+				stringtest.LinesLF("server:", "  port: 0"),
+				layerProdHost,
 			},
 			err: "mid.yaml:2:9: $.server.port: " + portMessage,
 		},
 		"the search passes over a null in a middle layer": {
-			layers: []string{badPort, "name: mid\n", "server:\n  port: null\n"},
+			layers: []string{layerBadPort, "name: mid\n", stringtest.LinesLF("server:", "  port: null")},
 			err:    "base.yaml:3:9: $.server.port: " + portMessage,
 		},
 		"an inline struct binds in the layer that sets its field": {
@@ -577,25 +601,36 @@ func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
 			err:    "base.yaml:2:9: $.region: unknown region",
 		},
 		"a pointer to a struct binds in the layer that sets its field": {
-			layers: []string{"backup:\n  host: example.com\n  port: 0\n", "backup:\n  host: x\n"},
-			err:    "base.yaml:3:9: $.backup.port: " + portMessage,
+			layers: []string{
+				stringtest.LinesLF("backup:", "  host: example.com", "  port: 0"),
+				stringtest.LinesLF("backup:", "  host: x"),
+			},
+			err: "base.yaml:3:9: $.backup.port: " + portMessage,
 		},
 		"a struct two fields down binds in the layer that sets its field": {
-			layers: []string{"nested:\n  inner:\n    host: example.com\n    port: 0\n", "name: prod\n"},
-			err:    "base.yaml:4:11: $.nested.inner.port: " + portMessage,
+			layers: []string{
+				stringtest.LinesLF(
+					"nested:",
+					"  inner:",
+					"    host: example.com",
+					"    port: 0",
+				),
+				"name: prod\n",
+			},
+			err: "base.yaml:4:11: $.nested.inner.port: " + portMessage,
 		},
 		"a sequence that only a lower layer holds binds there": {
-			layers: []string{"name: base\nservers:\n  - {host: a, port: 0}\n", "name: prod\n"},
+			layers: []string{stringtest.LinesLF("name: base", "servers:", "  - {host: a, port: 0}"), "name: prod\n"},
 			err:    "base.yaml:3:21: $.servers[0].port: " + portMessage,
 		},
 		"a mapping that only a lower layer holds binds there": {
-			layers: []string{"name: base\nbackends:\n  a: {host: a, port: 0}\n", "name: prod\n"},
+			layers: []string{stringtest.LinesLF("name: base", "backends:", "  a: {host: a, port: 0}"), "name: prod\n"},
 			err:    "base.yaml:3:22: $.backends.a.port: " + portMessage,
 		},
 		"each problem of a summary binds in its own layer": {
 			layers: []string{
-				"server: {host: example.com, port: 1}\nbackends:\n  a: {host: a, port: 80}\n",
-				"backends:\n  a: {host: x, port: 2}\n",
+				stringtest.LinesLF("server: {host: example.com, port: 1}", "backends:", "  a: {host: a, port: 80}"),
+				stringtest.LinesLF("backends:", "  a: {host: x, port: 2}"),
 			},
 			odd: []paths.Path{
 				paths.Current().Child("server", "host"),
@@ -608,7 +643,7 @@ func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
 			),
 		},
 		"a value no layer sets binds at the deepest mapping that lacks it": {
-			layers: []string{"name: base\nserver:\n  host: example.com\n", "name: prod\n"},
+			layers: []string{stringtest.LinesLF("name: base", "server:", "  host: example.com"), "name: prod\n"},
 			err:    "base.yaml:2:1: $.server.port: " + portMessage,
 		},
 		"the top layer wins among mappings of one depth": {
@@ -625,25 +660,28 @@ func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
 		// file stays, and only the backup lacks one.
 		"a value an alias brings in merges as one written in its place": {
 			layers: []string{
-				"server:\n  host: example.com\n  port: 80\n",
+				layerPort80,
 				"backup: &b {host: x}\nserver: *b\n",
 			},
 			err: "prod.yaml:1:1: $.backup.port: " + portMessage,
 		},
 		"a value under an alias binds at the content of the anchor": {
 			layers: []string{
-				"server:\n  host: example.com\n  port: 80\n",
-				"extra: &s {host: x, port: 0}\nserver: *s\n",
+				layerPort80,
+				stringtest.LinesLF("extra: &s {host: x, port: 0}", "server: *s"),
 			},
 			err: "prod.yaml:1:27: $.server.port: " + portMessage,
 		},
 		"a key spelled unlike its Go value binds at its entry": {
-			layers: []string{"name: base\nrates:\n  1.50: {limit: 0}\n", "name: prod\n"},
+			layers: []string{stringtest.LinesLF("name: base", "rates:", "  1.50: {limit: 0}"), "name: prod\n"},
 			err:    "base.yaml:3:17: $.rates.'1.50'.limit: limit must be at least 1",
 		},
 		// The limit that NewSourceFromLayers documents.
 		"a value the caller set binds at what a file holds": {
-			layers: []string{"server:\n  host: example.com\n  port: 8080\n", "server:\n  host: x\n"},
+			layers: []string{
+				stringtest.LinesLF("server:", "  host: example.com", "  port: 8080"),
+				stringtest.LinesLF("server:", "  host: x"),
+			},
 			change: func(cfg *layerConfig) {
 				cfg.Server.Port = 0
 			},
@@ -677,17 +715,12 @@ func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
 func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 	t.Parallel()
 
-	const (
-		baseInput = "server:\n  host: example.com\n  port: 0\n"
-		prodInput = "server:\n  host: prod.example.com\n"
-
-		want = "base.yaml:3:9: $.server.port: port must be at least 1"
-	)
+	const want = "base.yaml:3:9: $.server.port: port must be at least 1"
 
 	t.Run("a decode validates once and binds in the layer below", func(t *testing.T) {
 		t.Parallel()
 
-		nodes := layerNodes(t, baseInput, prodInput)
+		nodes := layerNodes(t, layerBadPort, layerProdHost)
 		base := nodes[0]
 
 		var cfg layerConfig
@@ -711,7 +744,10 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		t.Parallel()
 
 		// The base names a host and no port, which its own decode rejects.
-		nodes := layerNodes(t, "server:\n  host: example.com\n", "server:\n  port: 80\n")
+		nodes := layerNodes(t,
+			stringtest.LinesLF("server:", "  host: example.com"),
+			stringtest.LinesLF("server:", "  port: 80"),
+		)
 
 		var alone layerConfig
 
@@ -728,7 +764,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 
 		// Both layers below the top one set the port, and the nearer one
 		// holds the value the merge kept.
-		nodes := layerNodes(t, "server:\n  port: 0\n", baseInput, prodInput)
+		nodes := layerNodes(t, stringtest.LinesLF("server:", "  port: 0"), layerBadPort, layerProdHost)
 
 		_, err := yamltest.Layers(t, layersOf(nodes)...).Decode[layerConfig](t.Context())
 		require.EqualError(t, err, "mid.yaml:3:9: $.server.port: port must be at least 1")
@@ -740,7 +776,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 	t.Run("self-validation off leaves the value to the caller", func(t *testing.T) {
 		t.Parallel()
 
-		layers := layerFiles(t, baseInput, prodInput)
+		layers := layerFiles(t, layerBadPort, layerProdHost)
 
 		var cfg layerConfig
 
@@ -759,7 +795,10 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 	t.Run("a null keeps the value below it in a pointer field too", func(t *testing.T) {
 		t.Parallel()
 
-		nodes := layerNodes(t, "limits:\n  timeout: 5\n", "limits:\n  timeout: null\n")
+		nodes := layerNodes(t,
+			stringtest.LinesLF("limits:", "  timeout: 5"),
+			stringtest.LinesLF("limits:", "  timeout: null"),
+		)
 
 		cfg, err := yamltest.Layers(t, layersOf(nodes)...).Decode[layerConfig](t.Context())
 		require.NoError(t, err)
@@ -771,7 +810,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 	t.Run("one decode reports the values every layer gets wrong", func(t *testing.T) {
 		t.Parallel()
 
-		nodes := layerNodes(t, "server:\n  port: many\n", "name: [prod]\n")
+		nodes := layerNodes(t, stringtest.LinesLF("server:", "  port: many"), "name: [prod]\n")
 
 		var cfg layerConfig
 
@@ -800,7 +839,15 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 			layers []string
 		}{
 			"the other problems lie in the layer above": {
-				layers: []string{"server:\n  timeout: soon\n", "server:\n  port: 70000\ntier: mid\nzone: prod\n"},
+				layers: []string{
+					stringtest.LinesLF("server:", "  timeout: soon"),
+					stringtest.LinesLF(
+						"server:",
+						"  port: 70000",
+						"tier: mid",
+						"zone: prod",
+					),
+				},
 				want: stringtest.JoinLF(
 					"base.yaml: 4 problems",
 					`base.yaml:2:12: $.server.timeout: time: invalid duration "soon"`,
@@ -810,7 +857,10 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 				),
 			},
 			"the other problems lie in the layer below": {
-				layers: []string{"server:\n  port: 70000\nzone: base\n", "server:\n  tier: mid\n"},
+				layers: []string{
+					stringtest.LinesLF("server:", "  port: 70000", "zone: base"),
+					stringtest.LinesLF("server:", "  tier: mid"),
+				},
 				want: stringtest.JoinLF(
 					"base.yaml: 3 problems",
 					"base.yaml:2:9: $.server.port: expected integer from 0 to 65535, got 70000",
@@ -823,7 +873,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 			"flow style": {
 				layers: []string{
 					"{server: {timeout: soon}}\n",
-					"# prod\n\n{server: {port: 70000}, tier: mid, zone: prod}\n",
+					stringtest.LinesLF("# prod", "", "{server: {port: 70000}, tier: mid, zone: prod}"),
 				},
 				want: stringtest.JoinLF(
 					"base.yaml: 4 problems",
@@ -835,8 +885,8 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 			},
 			"a layer above replaces the value": {
 				layers: []string{
-					"server:\n  timeout: soon\n  port: 1\n",
-					"server:\n  timeout: later\n  port: 70000\n",
+					stringtest.LinesLF("server:", "  timeout: soon", "  port: 1"),
+					stringtest.LinesLF("server:", "  timeout: later", "  port: 70000"),
 				},
 				want: stringtest.JoinLF(
 					"base.yaml: 2 problems",
@@ -845,7 +895,11 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 				),
 			},
 			"three layers": {
-				layers: []string{"server:\n  timeout: soon\n", "server:\n  tier: mid\n", "server:\n  port: 70000\n"},
+				layers: []string{
+					stringtest.LinesLF("server:", "  timeout: soon"),
+					stringtest.LinesLF("server:", "  tier: mid"),
+					stringtest.LinesLF("server:", "  port: 70000"),
+				},
 				want: stringtest.JoinLF(
 					"base.yaml: 3 problems",
 					`base.yaml:2:12: $.server.timeout: time: invalid duration "soon"`,
@@ -882,7 +936,15 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 	t.Run("a key no field reads reports in the layer that holds it", func(t *testing.T) {
 		t.Parallel()
 
-		nodes := layerNodes(t, "server:\n  prot: 80\n", "server:\n  host: x\n  port: 1\nzone: prod\n")
+		nodes := layerNodes(t,
+			stringtest.LinesLF("server:", "  prot: 80"),
+			stringtest.LinesLF(
+				"server:",
+				"  host: x",
+				"  port: 1",
+				"zone: prod",
+			),
+		)
 
 		_, err := yamltest.Layers(t, layersOf(nodes)...).Decode[layerConfig](
 			t.Context(), niceyaml.WithDisallowUnknownFields(true),
@@ -897,7 +959,10 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 	t.Run("a value that holds defaults follows the rule of a decode", func(t *testing.T) {
 		t.Parallel()
 
-		nodes := layerNodes(t, "backends:\n  a: {host: a, port: 1}\n", "backends:\n  b: {host: b, port: 2}\n")
+		nodes := layerNodes(t,
+			stringtest.LinesLF("backends:", "  a: {host: a, port: 1}"),
+			stringtest.LinesLF("backends:", "  b: {host: b, port: 2}"),
+		)
 
 		// A field the layers leave out keeps its default. The mapping of
 		// the merged document replaces the map the value holds, so the
@@ -930,7 +995,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 			),
 			niceyaml.WithName("base.yaml"),
 		)
-		prod := yamltest.FirstDocument(t, prodInput, niceyaml.WithName("prod.yaml"))
+		prod := yamltest.FirstDocument(t, layerProdHost, niceyaml.WithName("prod.yaml"))
 
 		baseServer := yamltest.At(t, base, paths.Current().Child("defaults", "server"))
 		prodServer := yamltest.At(t, prod, paths.Current().Child("server"))
@@ -1013,7 +1078,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 	t.Run("a validator runs once, on the merged document", func(t *testing.T) {
 		t.Parallel()
 
-		nodes := layerNodes(t, baseInput, "server:\n  port: 80\n")
+		nodes := layerNodes(t, layerBadPort, stringtest.LinesLF("server:", "  port: 80"))
 
 		var seen []*niceyaml.Node
 
@@ -1030,7 +1095,10 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, seen, 1)
 		assert.NotContains(t, nodes, seen[0])
-		assert.Equal(t, "server:\n  host: example.com\n  port: 80", seen[0].View().Held().Content())
+		assert.Equal(t,
+			stringtest.JoinLF("server:", "  host: example.com", "  port: 80"),
+			seen[0].View().Held().Content(),
+		)
 	})
 
 	t.Run("a context that ended stops the decode", func(t *testing.T) {
@@ -1039,7 +1107,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		layers := layerFiles(t, baseInput, prodInput)
+		layers := layerFiles(t, layerBadPort, layerProdHost)
 
 		_, err := layers.Decode[layerConfig](ctx)
 		require.ErrorIs(t, err, context.Canceled)
@@ -1052,7 +1120,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 	t.Run("a target that is no pointer returns an error", func(t *testing.T) {
 		t.Parallel()
 
-		layers := layerFiles(t, baseInput, prodInput)
+		layers := layerFiles(t, layerBadPort, layerProdHost)
 
 		err := layers.DecodeInto(t.Context(), layerConfig{})
 		require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
@@ -1064,8 +1132,6 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 
 func TestNewSourceFromLayers_Validate(t *testing.T) {
 	t.Parallel()
-
-	const prodInput = "server:\n  host: prod.example.com\n"
 
 	baseInput := stringtest.LinesLF(
 		"# yaml-language-server: $schema=app.json",
@@ -1090,7 +1156,7 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 	t.Run("a schema checks what the layers hold together", func(t *testing.T) {
 		t.Parallel()
 
-		nodes := layerNodes(t, baseInput, prodInput)
+		nodes := layerNodes(t, baseInput, layerProdHost)
 
 		// The name is required, and prod.yaml leaves it to base.yaml.
 		err := nodes[1].Validate(t.Context(), requires)
@@ -1119,7 +1185,7 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 		fsys := fstest.MapFS{}
 		base := yamltest.FirstDocument(t, baseInput,
 			niceyaml.WithName("base"), niceyaml.WithFilePath("conf/base.yaml"), niceyaml.WithFS(fsys))
-		prod := yamltest.FirstDocument(t, "# yaml-language-server: $schema=other.json\n"+prodInput,
+		prod := yamltest.FirstDocument(t, "# yaml-language-server: $schema=other.json\n"+layerProdHost,
 			niceyaml.WithFilePath("conf/prod.yaml"))
 
 		var seen *niceyaml.Node
@@ -1158,7 +1224,7 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 	t.Run("an error with a position in the merged text binds at the value there", func(t *testing.T) {
 		t.Parallel()
 
-		nodes := layerNodes(t, baseInput, prodInput)
+		nodes := layerNodes(t, baseInput, layerProdHost)
 
 		// The validator reads the positions of the merged text, which is
 		// no file, and each binds in the file that holds the value.
@@ -1197,14 +1263,12 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 	t.Run("a nil validator runs nothing", func(t *testing.T) {
 		t.Parallel()
 
-		require.NoError(t, layerFiles(t, baseInput, prodInput).ValidateDocuments(t.Context(), nil))
+		require.NoError(t, layerFiles(t, baseInput, layerProdHost).ValidateDocuments(t.Context(), nil))
 	})
 }
 
 func TestNewSourceFromLayers_Document(t *testing.T) {
 	t.Parallel()
-
-	const prodInput = "server:\n  host: prod.example.com\n"
 
 	// The blank line keeps the lines of base.yaml apart from the lines of
 	// the merged document.
@@ -1225,7 +1289,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 	t.Run("the Node is the root of the merged document", func(t *testing.T) {
 		t.Parallel()
 
-		nodes := layerNodes(t, baseInput, prodInput)
+		nodes := layerNodes(t, baseInput, layerProdHost)
 		layers := yamltest.Layers(t, layersOf(nodes)...)
 
 		doc := yamltest.Document(t, layers)
@@ -1265,7 +1329,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 	t.Run("a caller reads one value of the layers", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.Document(t, layerFiles(t, baseInput, prodInput))
+		doc := yamltest.Document(t, layerFiles(t, baseInput, layerProdHost))
 
 		got, err := doc.DecodeAt[string](t.Context(), host)
 		require.NoError(t, err)
@@ -1295,7 +1359,10 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 
 		server := paths.Doc().Child("server")
 
-		nodes := layerNodes(t, "server:\n  timeout: soon\n", "server:\n  port: 70000\nname: [prod]\n")
+		nodes := layerNodes(t,
+			stringtest.LinesLF("server:", "  timeout: soon"),
+			stringtest.LinesLF("server:", "  port: 70000", "name: [prod]"),
+		)
 
 		doc := yamltest.Document(t, yamltest.Layers(t, layersOf(nodes)...))
 
@@ -1311,7 +1378,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 
 		// One layer reports what a decode of its file reports.
 		file := yamltest.FirstDocument(t,
-			"name: [base]\nserver: {port: 70000, tier: mid, timeout: soon}\n",
+			stringtest.LinesLF("name: [base]", "server: {port: 70000, tier: mid, timeout: soon}"),
 			niceyaml.WithName("base.yaml"))
 
 		_, want := file.DecodeAt[problemTimed](t.Context(), server)
@@ -1334,7 +1401,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 	t.Run("an error binds in the file of a layer", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.Document(t, layerFiles(t, baseInput, prodInput))
+		doc := yamltest.Document(t, layerFiles(t, baseInput, layerProdHost))
 		server := yamltest.At(t, doc, paths.Doc().Child("server"))
 
 		_, wrongType := doc.DecodeAt[int](t.Context(), host)
@@ -1378,7 +1445,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 	t.Run("the positions of the Node read the merged text", func(t *testing.T) {
 		t.Parallel()
 
-		nodes := layerNodes(t, baseInput, prodInput)
+		nodes := layerNodes(t, baseInput, layerProdHost)
 
 		doc := yamltest.Document(t, yamltest.Layers(t, layersOf(nodes)...))
 
@@ -1434,6 +1501,15 @@ func TestNode_Origin(t *testing.T) {
 		tags   = paths.Doc().Child("tags")
 	)
 
+	// The layers above the base file that several cases share.
+	var (
+		port8080 = stringtest.LinesLF("server:", "  port: 8080")
+		port8443 = stringtest.LinesLF("server:", "  port: 8443")
+		midHost  = stringtest.LinesLF("server:", "  host: mid.example.com")
+		newTags  = stringtest.LinesLF("tags:", "  - c", "  - d")
+		aliased  = stringtest.LinesLF("defaults: &defaults", "  port: 9", "server: *defaults")
+	)
+
 	// Each case reads the origin of the Node at path in the layers that
 	// inputs merge into, which [layerSources] names.
 	tcs := map[string]struct {
@@ -1447,28 +1523,28 @@ func TestNode_Origin(t *testing.T) {
 		inputs []string
 	}{
 		"a scalar comes from the highest layer that sets it": {
-			inputs:    []string{baseInput, "server:\n  port: 8080\n", "server:\n  port: 8443\n"},
+			inputs:    []string{baseInput, port8080, port8443},
 			path:      port,
 			wantLayer: "prod.yaml",
 			wantPath:  "$.server.port",
 			want:      "  port: 8443",
 		},
 		"a scalar no higher layer sets comes from the layer below": {
-			inputs:    []string{baseInput, "server:\n  host: mid.example.com\n", "server:\n  port: 8443\n"},
+			inputs:    []string{baseInput, midHost, port8443},
 			path:      host,
 			wantLayer: "mid.yaml",
 			wantPath:  "$.server.host",
 			want:      "  host: mid.example.com",
 		},
 		"a null in a higher layer holds no value": {
-			inputs:    []string{baseInput, "server:\n  port:\n"},
+			inputs:    []string{baseInput, stringtest.LinesLF("server:", "  port:")},
 			path:      port,
 			wantLayer: "base.yaml",
 			wantPath:  "$.server.port",
 			want:      "  port: 80",
 		},
 		"a mapping comes from the highest layer that holds it, with the keys of that layer alone": {
-			inputs:    []string{baseInput, "server:\n  port: 8443\n"},
+			inputs:    []string{baseInput, port8443},
 			path:      server,
 			wantLayer: "prod.yaml",
 			wantPath:  "$.server",
@@ -1479,38 +1555,38 @@ func TestNode_Origin(t *testing.T) {
 			path:      server,
 			wantLayer: "base.yaml",
 			wantPath:  "$.server",
-			want:      "  host: example.com\n  port: 80",
+			want:      stringtest.JoinLF("  host: example.com", "  port: 80"),
 		},
 		"a sequence comes whole from the layer that replaces it": {
-			inputs:    []string{baseInput, "tags:\n  - c\n  - d\n"},
+			inputs:    []string{baseInput, newTags},
 			path:      tags,
 			wantLayer: "prod.yaml",
 			wantPath:  "$.tags",
-			want:      "  - c\n  - d",
+			want:      stringtest.JoinLF("  - c", "  - d"),
 		},
 		"an element comes from the layer of its sequence": {
-			inputs:    []string{baseInput, "tags:\n  - c\n  - d\n"},
+			inputs:    []string{baseInput, newTags},
 			path:      tags.Index(1),
 			wantLayer: "prod.yaml",
 			wantPath:  "$.tags[1]",
 			want:      "  - d",
 		},
 		"a sequence no higher layer holds comes from the layer below": {
-			inputs:    []string{baseInput, "server:\n  port: 8443\n"},
+			inputs:    []string{baseInput, port8443},
 			path:      tags.Index(0),
 			wantLayer: "base.yaml",
 			wantPath:  "$.tags[0]",
 			want:      "tags: [a, b]",
 		},
 		"a value read through an alias comes from the content of the anchor": {
-			inputs:    []string{baseInput, "defaults: &defaults\n  port: 9\nserver: *defaults\n"},
+			inputs:    []string{baseInput, aliased},
 			path:      port,
 			wantLayer: "prod.yaml",
 			wantPath:  "$.server.port",
 			want:      "  port: 9",
 		},
 		"a mapping read through an alias comes from the content of the anchor": {
-			inputs:    []string{baseInput, "defaults: &defaults\n  port: 9\nserver: *defaults\n"},
+			inputs:    []string{baseInput, aliased},
 			path:      server,
 			wantLayer: "prod.yaml",
 			wantPath:  "$.server",
@@ -1533,25 +1609,25 @@ func TestNode_Origin(t *testing.T) {
 			want:      "  port: 9",
 		},
 		"a key comes from the layer of its value": {
-			inputs:    []string{baseInput, "server:\n  port: 8443\n"},
+			inputs:    []string{baseInput, port8443},
 			path:      port.Key(),
 			wantLayer: "prod.yaml",
 			wantPath:  "$.server.port~",
 			want:      "  port: 8443",
 		},
 		"the root comes from the highest layer that holds a value": {
-			inputs:    []string{baseInput, "server:\n  port: 8080\n", "server:\n  port: 8443\n"},
+			inputs:    []string{baseInput, port8080, port8443},
 			path:      paths.Doc(),
 			wantLayer: "prod.yaml",
 			wantPath:  "$",
-			want:      "server:\n  port: 8443",
+			want:      stringtest.JoinLF("server:", "  port: 8443"),
 		},
 		"the root passes over a layer that holds no value": {
-			inputs:    []string{baseInput, "server:\n  port: 8080\n", "# nothing yet\n"},
+			inputs:    []string{baseInput, port8080, "# nothing yet\n"},
 			path:      paths.Doc(),
 			wantLayer: "mid.yaml",
 			wantPath:  "$",
-			want:      "server:\n  port: 8080",
+			want:      stringtest.JoinLF("server:", "  port: 8080"),
 		},
 		"the root of layers that hold no value comes from the highest layer": {
 			inputs:    []string{"# base\n", "# prod\n"},
@@ -1632,7 +1708,7 @@ func TestNode_Origin(t *testing.T) {
 		t.Parallel()
 
 		base := niceyaml.NewSourceFromString(baseInput, niceyaml.WithFilePath("conf/base.yaml"))
-		prod := niceyaml.NewSourceFromString("server:\n  port: 8443\n", niceyaml.WithFilePath("conf/prod.yaml"))
+		prod := niceyaml.NewSourceFromString(port8443, niceyaml.WithFilePath("conf/prod.yaml"))
 
 		prodDoc := yamltest.Document(t, prod)
 
@@ -1745,7 +1821,7 @@ func TestNode_Origin(t *testing.T) {
 	t.Run("a layer a merge built gives a Node of a file", func(t *testing.T) {
 		t.Parallel()
 
-		sources := layerSources(t, baseInput, "server:\n  host: mid.example.com\n", "server:\n  port: 8443\n")
+		sources := layerSources(t, baseInput, midHost, port8443)
 
 		inner := yamltest.Document(t, yamltest.Layers(t, sources[0], sources[1]))
 
@@ -1768,7 +1844,8 @@ func TestNode_Origin(t *testing.T) {
 				layers: below, path: port, wantLayer: "prod.yaml", want: "  port: 8443",
 			},
 			"below a file, the root": {
-				layers: below, path: paths.Doc(), wantLayer: "prod.yaml", want: "server:\n  port: 8443",
+				layers: below, path: paths.Doc(), wantLayer: "prod.yaml",
+				want: stringtest.JoinLF("server:", "  port: 8443"),
 			},
 			"above a file, a value of its lower layer": {
 				layers: above, path: tags, wantLayer: "base.yaml", want: "tags: [a, b]",
@@ -1780,7 +1857,8 @@ func TestNode_Origin(t *testing.T) {
 				layers: above, path: port, wantLayer: "base.yaml", want: "  port: 80",
 			},
 			"above a file, the root": {
-				layers: above, path: paths.Doc(), wantLayer: "mid.yaml", want: "server:\n  host: mid.example.com",
+				layers: above, path: paths.Doc(), wantLayer: "mid.yaml",
+				want: stringtest.JoinLF("server:", "  host: mid.example.com"),
 			},
 		}
 
@@ -1825,7 +1903,7 @@ func TestNode_Origin(t *testing.T) {
 				err:  "prod.yaml: resolve $.server.port: alias does not resolve: *shared has no anchor before it",
 			},
 			"a value a merge key reads": {
-				prod: "server:\n  <<: *shared\n",
+				prod: stringtest.LinesLF("server:", "  <<: *shared"),
 				path: port,
 				err:  "prod.yaml: resolve $.server.port: alias does not resolve: *shared has no anchor before it",
 			},
@@ -1856,7 +1934,9 @@ func TestNode_Origin(t *testing.T) {
 
 		// The mapping that holds the merge key has a Node in its layer.
 		prod := niceyaml.NewSourceFromString(
-			"server:\n  <<: *shared\n", niceyaml.WithName("prod.yaml"), niceyaml.WithReferences(shared),
+			stringtest.LinesLF("server:", "  <<: *shared"),
+			niceyaml.WithName("prod.yaml"),
+			niceyaml.WithReferences(shared),
 		)
 
 		origin, err := yamltest.At(t, yamltest.Document(t, yamltest.Layers(t, base, prod)), server).Origin()
@@ -2038,7 +2118,7 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 				"  # two",
 				"  port: 8080",
 			),
-			"server:\n  port: 80\n",
+			stringtest.LinesLF("server:", "  port: 80"),
 		)
 		merged := yamltest.Layers(t, layersOf(long)...)
 		require.Equal(t, 3, merged.Lines().Len())
@@ -2103,8 +2183,11 @@ func TestNewSourceFromLayers_ExcerptsOff(t *testing.T) {
 	t.Parallel()
 
 	// The environment sets a password alone, and its text must not show.
-	base := yamltest.FirstDocument(t, "db:\n  host: db.internal\n  port: 0\n", niceyaml.WithName("base.yaml"))
-	env := yamltest.FirstDocument(t, "db:\n  password: hunter2\n",
+	base := yamltest.FirstDocument(t,
+		stringtest.LinesLF("db:", "  host: db.internal", "  port: 0"),
+		niceyaml.WithName("base.yaml"),
+	)
+	env := yamltest.FirstDocument(t, stringtest.LinesLF("db:", "  password: hunter2"),
 		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
 
 	layers := yamltest.Layers(t, base, env)
@@ -2231,8 +2314,6 @@ func TestNewSourceFromLayers_ExcerptsOff(t *testing.T) {
 func TestNewSourceFromLayers_Alias(t *testing.T) {
 	t.Parallel()
 
-	const baseInput = "server:\n  host: example.com\n  port: 0\n"
-
 	// The top layer reads its server from a reference document, which a
 	// path cannot follow. The merge reads it, so each error binds in the
 	// layer that holds its value.
@@ -2251,7 +2332,7 @@ func TestNewSourceFromLayers_Alias(t *testing.T) {
 		},
 		"a value a merge key reads from the reference document binds in its layer": {
 			shared: "shared: &shared {host: shared.example.com, port: -1}\n",
-			prod:   "server:\n  <<: *shared\n",
+			prod:   stringtest.LinesLF("server:", "  <<: *shared"),
 			err:    "prod.yaml: $.server.port: port must be at least 1",
 		},
 		"a value the reference document leaves out binds in the layer below": {
@@ -2266,7 +2347,7 @@ func TestNewSourceFromLayers_Alias(t *testing.T) {
 			t.Parallel()
 
 			shared := niceyaml.NewSourceFromString(tc.shared, niceyaml.WithName("shared.yaml"))
-			base := yamltest.FirstDocument(t, baseInput, niceyaml.WithName("base.yaml"))
+			base := yamltest.FirstDocument(t, layerBadPort, niceyaml.WithName("base.yaml"))
 			prod := yamltest.FirstDocument(t, tc.prod, niceyaml.WithName("prod.yaml"), niceyaml.WithReferences(shared))
 
 			var cfg layerConfig
@@ -2287,10 +2368,7 @@ func TestNewSourceFromLayers_Alias(t *testing.T) {
 func TestNewSourceFromLayers_Concurrent(t *testing.T) {
 	t.Parallel()
 
-	layers := layerFiles(t,
-		"server:\n  host: example.com\n  port: 0\n",
-		"server:\n  host: prod.example.com\n",
-	)
+	layers := layerFiles(t, layerBadPort, layerProdHost)
 
 	// NewSourceFromLayers merged and parsed the layers already, so
 	// every call reads the one merged document.
@@ -2320,6 +2398,26 @@ func TestNewSourceFromLayers_Concurrent(t *testing.T) {
 		require.EqualError(t, bound[i], "prod.yaml:2:9: $.server.host: bad")
 	}
 }
+
+// The documents most tests of the layers merge.
+var (
+	// A base file whose server names a host and an invalid port.
+	layerBadPort = stringtest.LinesLF(
+		"server:",
+		"  host: example.com",
+		"  port: 0",
+	)
+
+	// A base file whose server passes its check.
+	layerPort80 = stringtest.LinesLF(
+		"server:",
+		"  host: example.com",
+		"  port: 80",
+	)
+
+	// A file that replaces the host and leaves the port to the layer below.
+	layerProdHost = stringtest.LinesLF("server:", "  host: prod.example.com")
+)
 
 // layerNodes returns the root Node of each of inputs, in the order they
 // apply. The first input is base.yaml and the last is prod.yaml, with
