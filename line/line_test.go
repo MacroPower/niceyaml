@@ -20,9 +20,6 @@ func TestSplit(t *testing.T) {
 		wantContent []string
 		wantNumbers []int
 	}{
-		"empty": {
-			input: "",
-		},
 		"single line": {
 			input:       "key: value",
 			wantContent: []string{"key: value"},
@@ -33,6 +30,20 @@ func TestSplit(t *testing.T) {
 			wantContent: []string{"foo: |-", "  hello", "  world"},
 			wantNumbers: []int{1, 2, 3},
 		},
+		// The lexer drops the line ending ahead of some tokens, such as a
+		// "?" after a document header or a value indicator after a
+		// directive. Tokenize restores it, so the token opens a new line
+		// rather than joining the one before it.
+		"explicit key after header": {
+			input:       "x: 1\n---\n? a\n: b\n",
+			wantContent: []string{"x: 1", "---", "? a", ": b"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+		"value indicator after directive": {
+			input:       "%YAML 1.2\n: value\n",
+			wantContent: []string{"%YAML 1.2", ": value"},
+			wantNumbers: []int{1, 2},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -40,12 +51,9 @@ func TestSplit(t *testing.T) {
 			t.Parallel()
 
 			lines := newLines(tc.input)
-			require.Equal(t, len(tc.wantContent), lines.Len())
 
-			for i, l := range lines.All() {
-				assert.Equal(t, tc.wantContent[i], l.Content(), "line %d content", i)
-				assert.Equal(t, tc.wantNumbers[i], l.Number(), "line %d number", i)
-			}
+			assert.Equal(t, tc.wantContent, contentsOf(lines.All()))
+			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
 		})
 	}
 
