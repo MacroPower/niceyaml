@@ -8002,6 +8002,10 @@ func TestError_Accessors_Wrapped(t *testing.T) {
 			err:         niceyaml.Invalid(fmt.Errorf("%w: %w", errCheck, summary)),
 			wantMembers: []string{"@.a", "@.b"},
 		},
+		"a wrapper with several %w verbs keeps the problem as its one branch": {
+			err:         niceyaml.Invalid(fmt.Errorf("%w: %w", errCheck, port)),
+			wantDetails: []string{"@.max"},
+		},
 	}
 
 	for name, tc := range tcs {

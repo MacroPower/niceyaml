@@ -1497,10 +1497,12 @@ func (e *Error) Members() []error {
 // outermost first and in the order each received them, without the nil
 // ones. Each detail comes with the base of every [Rebase] above it
 // joined in front of its paths, and points nothing at that base, as the
-// tree [NewErrorTree] builds and a binding place it. The chain ends at a
-// [*SourceError], which holds its own details, and at an error that
-// unwraps to several. A nil Error has none. The slice is new, so a
-// caller may keep or sort it.
+// tree [NewErrorTree] builds and a binding place it. The chain follows a
+// wrapper that [fmt.Errorf] builds with several %w verbs to the one
+// branch it keeps, as [Error.Members] does. It ends at a [*SourceError],
+// which holds its own details, and at any other error that unwraps to
+// several. A nil Error has none. The slice is new, so a caller may keep
+// or sort it.
 func (e *Error) Details() []error {
 	var details []error
 
