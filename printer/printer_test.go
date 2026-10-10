@@ -3112,18 +3112,24 @@ func TestPrinter_NoAnnotation(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		annotation string
-		want       string
 		fn         printer.AnnotationFunc
+		want       string
+		annotation line.Annotation
 	}{
-		"NoAnnotation hides them": {
+		// With annotations disabled, the printer renders only the content.
+		"NoAnnotation hides one above": {
 			fn:         printer.NoAnnotation,
-			annotation: "test annotation",
+			annotation: line.Annotation{Content: "# hidden above", Placement: line.Above},
+			want:       "key: value",
+		},
+		"NoAnnotation hides one below": {
+			fn:         printer.NoAnnotation,
+			annotation: line.Annotation{Content: "# hidden below", Placement: line.Below, Col: 5},
 			want:       "key: value",
 		},
 		"DefaultAnnotation shows them": {
 			fn:         printer.DefaultAnnotation,
-			annotation: "@@ -1 +1 @@",
+			annotation: line.Annotation{Content: "@@ -1 +1 @@"},
 			want:       "@@ -1 +1 @@\nkey: value",
 		},
 	}
@@ -3133,7 +3139,7 @@ func TestPrinter_NoAnnotation(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString("key: value\n").View()
-			view.Annotate(0, line.Annotation{Content: tc.annotation})
+			view.Annotate(0, tc.annotation)
 
 			p := testPrinter().With(printer.WithAnnotation(tc.fn))
 
@@ -3400,45 +3406,6 @@ func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
 			got := p.Print(view)
 
 			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestPrinter_AnnotationPosition_Disabled(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		annotation line.Annotation
-	}{
-		"above annotation disabled": {
-			annotation: line.Annotation{
-				Content:   "# hidden above",
-				Placement: line.Above,
-				Col:       0,
-			},
-		},
-		"below annotation disabled": {
-			annotation: line.Annotation{
-				Content:   "# hidden below",
-				Placement: line.Below,
-				Col:       5,
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := niceyaml.NewSourceFromString("key: value").View()
-			view.Annotate(0, tc.annotation)
-
-			p := testPrinter().With(printer.WithAnnotation(printer.NoAnnotation))
-
-			got := p.Print(view)
-
-			// With annotations disabled, the printer renders only the content.
-			assert.Equal(t, "key: value", got)
 		})
 	}
 }
