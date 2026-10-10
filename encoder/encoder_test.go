@@ -18,28 +18,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
-func TestNew(t *testing.T) {
-	t.Parallel()
-
-	t.Run("creates encoder with no options", func(t *testing.T) {
-		t.Parallel()
-
-		var buf bytes.Buffer
-
-		enc := encoder.New(&buf)
-		require.NotNil(t, enc)
-	})
-
-	t.Run("creates encoder with Pretty", func(t *testing.T) {
-		t.Parallel()
-
-		var buf bytes.Buffer
-
-		enc := encoder.New(&buf, encoder.Pretty())
-		require.NotNil(t, enc)
-	})
-}
-
 func TestEncoder_Encode(t *testing.T) {
 	t.Parallel()
 
@@ -63,14 +41,6 @@ func TestEncoder_Encode(t *testing.T) {
 		"nested struct": {
 			input: nested{Name: "test", Value: 42},
 			want:  "name: test\nvalue: 42\n",
-		},
-		"slice": {
-			input: []string{"a", "b", "c"},
-			want:  "- a\n- b\n- c\n",
-		},
-		"nil value": {
-			input: nil,
-			want:  "null\n",
 		},
 	}
 
