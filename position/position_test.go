@@ -512,84 +512,23 @@ func TestSpan_Overlaps(t *testing.T) {
 		other position.Span
 		want  bool
 	}{
-		"identical spans overlap": {
-			s:     position.NewSpan(5, 10),
-			other: position.NewSpan(5, 10),
-			want:  true,
-		},
-		"partial overlap at end": {
-			s:     position.NewSpan(0, 10),
-			other: position.NewSpan(5, 15),
-			want:  true,
-		},
-		"partial overlap at start": {
-			s:     position.NewSpan(5, 15),
-			other: position.NewSpan(0, 10),
-			want:  true,
-		},
-		"one contains other": {
-			s:     position.NewSpan(0, 20),
-			other: position.NewSpan(5, 10),
-			want:  true,
-		},
-		"contained by other": {
-			s:     position.NewSpan(5, 10),
-			other: position.NewSpan(0, 20),
-			want:  true,
-		},
-		"adjacent spans do not overlap": {
-			s:     position.NewSpan(0, 5),
-			other: position.NewSpan(5, 10),
-			want:  false,
-		},
-		"adjacent spans reversed do not overlap": {
-			s:     position.NewSpan(5, 10),
-			other: position.NewSpan(0, 5),
-			want:  false,
-		},
-		"disjoint spans before": {
-			s:     position.NewSpan(0, 5),
-			other: position.NewSpan(10, 15),
-			want:  false,
-		},
-		"disjoint spans after": {
-			s:     position.NewSpan(10, 15),
-			other: position.NewSpan(0, 5),
-			want:  false,
-		},
-		"empty span does not overlap": {
-			s:     position.NewSpan(5, 5),
-			other: position.NewSpan(0, 10),
-			want:  false,
-		},
-		"span does not overlap with empty": {
-			s:     position.NewSpan(0, 10),
-			other: position.NewSpan(5, 5),
-			want:  false,
-		},
-		"both empty at same point do not overlap": {
-			s:     position.NewSpan(5, 5),
-			other: position.NewSpan(5, 5),
-			want:  false,
-		},
-		"single element spans overlap": {
-			s:     position.NewSpan(5, 6),
-			other: position.NewSpan(5, 6),
-			want:  true,
-		},
-		"single element overlaps with larger": {
-			s:     position.NewSpan(5, 6),
-			other: position.NewSpan(0, 10),
-			want:  true,
-		},
+		"identical spans":        {s: position.NewSpan(5, 10), other: position.NewSpan(5, 10), want: true},
+		"partial overlap":        {s: position.NewSpan(0, 10), other: position.NewSpan(5, 15), want: true},
+		"one contains the other": {s: position.NewSpan(0, 20), other: position.NewSpan(5, 10), want: true},
+		"adjacent spans":         {s: position.NewSpan(0, 5), other: position.NewSpan(5, 10), want: false},
+		"disjoint spans":         {s: position.NewSpan(0, 5), other: position.NewSpan(10, 15), want: false},
+		"empty span in another":  {s: position.NewSpan(5, 5), other: position.NewSpan(0, 10), want: false},
+		"empty spans at a point": {s: position.NewSpan(5, 5), other: position.NewSpan(5, 5), want: false},
+		"spans of one element":   {s: position.NewSpan(5, 6), other: position.NewSpan(5, 6), want: true},
+		"one element in another": {s: position.NewSpan(5, 6), other: position.NewSpan(0, 10), want: true},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.s.Overlaps(tc.other)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.s.Overlaps(tc.other))
+			assert.Equal(t, tc.want, tc.other.Overlaps(tc.s), "with the spans swapped")
 		})
 	}
 }
