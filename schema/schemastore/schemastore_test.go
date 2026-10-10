@@ -211,7 +211,7 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			store := newStore(respondCatalog(t, catalog).Client())
+			store := newCatalogStore(t, catalog)
 
 			entry, err := store.FindMatch(t.Context(), tc.filePath)
 			if tc.want == "" {
@@ -305,7 +305,7 @@ func TestSchemaStore_FindMatchPrefersSpecificPattern(t *testing.T) {
 				catalog.Schemas = append(catalog.Schemas, entry)
 			}
 
-			store := newStore(respondCatalog(t, catalog).Client())
+			store := newCatalogStore(t, catalog)
 
 			entry, err := store.FindMatch(t.Context(), tc.path)
 			require.NoError(t, err)
@@ -319,7 +319,7 @@ func TestSchemaStore_FindMatchDoesNotAliasCatalog(t *testing.T) {
 
 	// The returned entry must not share its pattern slice with the cached
 	// catalog, or a caller writing to it changes which entry matches next.
-	store := newStore(respondCatalog(t, layeredCatalog).Client())
+	store := newCatalogStore(t, layeredCatalog)
 
 	entry, err := store.FindMatch(t.Context(), "/x/other.yaml")
 	require.NoError(t, err)
@@ -371,7 +371,7 @@ func TestSchemaStore_FindMatchRepeatedPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			store := newStore(respondCatalog(t, layeredCatalog).Client())
+			store := newCatalogStore(t, layeredCatalog)
 
 			for i, path := range tc.paths {
 				entry, err := store.FindMatch(t.Context(), path)
@@ -425,7 +425,7 @@ func BenchmarkStore_FindMatch(b *testing.B) {
 		})
 	}
 
-	store := newStore(respondCatalog(b, catalog).Client())
+	store := newCatalogStore(b, catalog)
 
 	_, err := store.FindMatch(b.Context(), "/repo/unmatched.yaml")
 	require.ErrorIs(b, err, schemastore.ErrNoCatalogMatch)
@@ -714,7 +714,7 @@ func TestSchemaStore_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Use short TTL to trigger concurrent cache refreshes.
-	store := newStore(respondCatalog(t, catalog).Client(), schemastore.WithCacheTTL(1*time.Millisecond))
+	store := newCatalogStore(t, catalog, schemastore.WithCacheTTL(1*time.Millisecond))
 
 	// Run multiple goroutines calling FindMatch concurrently.
 	const numGoroutines = 10
@@ -767,12 +767,9 @@ func TestSchemaStore_Filter(t *testing.T) {
 	}
 
 	// Filter to only GitHub schemas.
-	store := newStore(
-		respondCatalog(t, catalog).Client(),
-		schemastore.WithFilter(func(e schemastore.CatalogEntry) bool {
-			return strings.Contains(strings.ToLower(e.Name), "github")
-		}),
-	)
+	store := newCatalogStore(t, catalog, schemastore.WithFilter(func(e schemastore.CatalogEntry) bool {
+		return strings.Contains(strings.ToLower(e.Name), "github")
+	}))
 
 	// GitHub workflow should match.
 	entry, err := store.FindMatch(t.Context(), ".github/workflows/ci.yaml")
@@ -1085,7 +1082,7 @@ func TestSchemaStore_ZeroRefreshTimeout(t *testing.T) {
 
 	// A zero timeout keeps the default rather than expiring every fetch
 	// before it starts.
-	store := newStore(respondCatalog(t, testCatalog).Client(), schemastore.WithRefreshTimeout(0))
+	store := newCatalogStore(t, testCatalog, schemastore.WithRefreshTimeout(0))
 
 	requireEntry(t, store, "Test")
 }
@@ -1227,7 +1224,7 @@ func TestSchemaStore_EmptyCatalog(t *testing.T) {
 		Schemas: []schemastore.CatalogEntry{},
 	}
 
-	store := newStore(respondCatalog(t, catalog).Client())
+	store := newCatalogStore(t, catalog)
 
 	// No schemas in catalog means no matches.
 	_, err := store.FindMatch(t.Context(), "config.yaml")
@@ -1374,7 +1371,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 	t.Run("matches known pattern", func(t *testing.T) {
 		t.Parallel()
 
-		store := newStore(respondCatalog(t, workflowCatalog).Client())
+		store := newCatalogStore(t, workflowCatalog)
 
 		doc := yamltest.FirstDocumentWithPath(t, `on: push`, ".github/workflows/ci.yaml")
 		ref, err := store.Resolve(t.Context(), doc)
@@ -1385,7 +1382,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 	t.Run("no match for unknown file", func(t *testing.T) {
 		t.Parallel()
 
-		store := newStore(respondCatalog(t, workflowCatalog).Client())
+		store := newCatalogStore(t, workflowCatalog)
 
 		doc := yamltest.FirstDocumentWithPath(t, `key: value`, "random.yaml")
 		_, err := store.Resolve(t.Context(), doc)
@@ -1414,7 +1411,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 			},
 		}
 
-		store := newStore(respondCatalog(t, catalog).Client())
+		store := newCatalogStore(t, catalog)
 
 		doc := yamltest.FirstDocumentWithPath(t, `on: push`, "ci.yml")
 		ref, err := store.Resolve(t.Context(), doc)
@@ -1584,6 +1581,14 @@ func newStore(client *http.Client, opts ...schemastore.Option) *schemastore.Stor
 		schemastore.WithCatalogURL(catalogURL),
 		schemastore.WithHTTPClient(client),
 	}, opts...)...)
+}
+
+// newCatalogStore creates a [*schemastore.Store] whose client answers every
+// URL with catalog as JSON, with opts applied after.
+func newCatalogStore(tb testing.TB, catalog schemastore.Catalog, opts ...schemastore.Option) *schemastore.Store {
+	tb.Helper()
+
+	return newStore(respondCatalog(tb, catalog).Client(), opts...)
 }
 
 // respondCatalog returns a transport function that answers every URL
@@ -1847,7 +1852,7 @@ func TestStore_FindMatch_SupportedPatterns(t *testing.T) {
 		},
 	}}
 
-	store := newStore(respondCatalog(t, catalog).Client())
+	store := newCatalogStore(t, catalog)
 
 	tcs := map[string]struct {
 		file string
