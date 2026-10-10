@@ -517,9 +517,7 @@ func TestSource_Lines_Whitespace(t *testing.T) {
 				assert.Equal(t, want, lines.Line(i).Number(), "line %d", i)
 			}
 
-			docs := src.Documents()
-			require.Len(t, docs, 1)
-			assert.Equal(t, tc.want, docs[0].Span())
+			assert.Equal(t, tc.want, yamltest.Document(t, src).Span())
 		})
 	}
 }
@@ -723,10 +721,7 @@ func TestSource_File_BlankLineBeforeFirstKey(t *testing.T) {
 
 			source := niceyaml.NewSourceFromString(tc.input)
 
-			docs := source.Documents()
-			require.Len(t, docs, 1)
-
-			doc := docs[0]
+			doc := yamltest.Document(t, source)
 
 			keyTk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Current().Child("a").Key())
 			require.NoError(t, err)
