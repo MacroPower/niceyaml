@@ -65,8 +65,20 @@ func twoProblems() error {
 	))
 }
 
+// handle returns what a handler created with opts writes for err under
+// [testStyles].
+func handle(err error, opts ...fangs.Option) string {
+	var buf bytes.Buffer
+
+	fangs.NewErrorHandler(opts...)(&buf, testStyles(), err)
+
+	return buf.String()
+}
+
 // xmlPrinter returns a printer that renders styles as XML tags, with no
-// gutter and no container frame.
+// gutter and no container frame. NewXMLPrinter in yamltest builds the same
+// printer, but the niceyaml version this module requires predates it, and
+// the tests must build against that version.
 func xmlPrinter() *printer.Printer {
 	return printer.New(
 		printer.WithStyles(yamltest.NewXMLStyles()),
@@ -286,11 +298,7 @@ func TestErrorHandler(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var buf bytes.Buffer
-
-			fangs.NewErrorHandler(fangs.WithPrinter(xmlPrinter()))(&buf, testStyles(), tc.err)
-
-			assert.Equal(t, tc.want, buf.String())
+			assert.Equal(t, tc.want, handle(tc.err, fangs.WithPrinter(xmlPrinter())))
 		})
 	}
 }
@@ -374,11 +382,7 @@ func TestErrorHandler_UsageHint(t *testing.T) {
 				want += "Try --help for usage.\n\n"
 			}
 
-			var buf bytes.Buffer
-
-			fangs.NewErrorHandler(fangs.WithPrinter(xmlPrinter()))(&buf, testStyles(), errors.New(tc.msg))
-
-			assert.Equal(t, want, buf.String())
+			assert.Equal(t, want, handle(errors.New(tc.msg), fangs.WithPrinter(xmlPrinter())))
 		})
 	}
 }
@@ -405,14 +409,10 @@ func TestNewErrorHandler_Width(t *testing.T) {
 
 			err := yamltest.Bind(t, src, errAt("invalid name", "$.name"))
 
-			p := printer.New(printer.WithWrapWidth(tc.width))
-
-			var buf bytes.Buffer
-
-			fangs.NewErrorHandler(fangs.WithPrinter(p))(&buf, testStyles(), err)
+			got := handle(err, fangs.WithPrinter(printer.New(printer.WithWrapWidth(tc.width))))
 
 			// The widest row fills the width, so no row runs past it.
-			assert.Equal(t, tc.width, lipgloss.Width(buf.String()))
+			assert.Equal(t, tc.width, lipgloss.Width(got))
 		})
 	}
 }
