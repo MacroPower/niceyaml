@@ -1,7 +1,6 @@
 package schemastore_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -224,7 +223,7 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			store := newStore(newCatalogClient(t, catalog))
+			store := newStore(respondCatalog(t, catalog).Client())
 
 			entry, err := store.FindMatch(t.Context(), tc.filePath)
 
@@ -319,7 +318,7 @@ func TestSchemaStore_FindMatchPrefersSpecificPattern(t *testing.T) {
 				catalog.Schemas = append(catalog.Schemas, entry)
 			}
 
-			store := newStore(newCatalogClient(t, catalog))
+			store := newStore(respondCatalog(t, catalog).Client())
 
 			entry, err := store.FindMatch(t.Context(), tc.path)
 			require.NoError(t, err)
@@ -348,7 +347,7 @@ func TestSchemaStore_FindMatchDoesNotAliasCatalog(t *testing.T) {
 		},
 	}
 
-	store := newStore(newCatalogClient(t, catalog))
+	store := newStore(respondCatalog(t, catalog).Client())
 
 	entry, err := store.FindMatch(t.Context(), "/x/other.yaml")
 	require.NoError(t, err)
@@ -407,7 +406,7 @@ func TestSchemaStore_FindMatchRepeatedPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			store := newStore(newCatalogClient(t, catalog))
+			store := newStore(respondCatalog(t, catalog).Client())
 
 			for i, path := range tc.paths {
 				entry, err := store.FindMatch(t.Context(), path)
@@ -461,7 +460,7 @@ func BenchmarkStore_FindMatch(b *testing.B) {
 		})
 	}
 
-	store := newStore(newCatalogClient(b, catalog))
+	store := newStore(respondCatalog(b, catalog).Client())
 
 	_, err := store.FindMatch(b.Context(), "/repo/unmatched.yaml")
 	require.ErrorIs(b, err, schemastore.ErrNoCatalogMatch)
@@ -505,7 +504,7 @@ func TestSchemaStore_LazyLoading(t *testing.T) {
 	// synctest.Wait lets every such fetch reach the transport before the
 	// test reads the count.
 	synctest.Test(t, func(t *testing.T) {
-		client, fetchCount := newCountingCatalogClient(t, testCatalog)
+		client, fetchCount := yamltest.CountingClient(respondCatalog(t, testCatalog))
 
 		// New performs no I/O.
 		store := newStore(client)
@@ -534,7 +533,7 @@ func TestSchemaStore_LazyLoading(t *testing.T) {
 func TestSchemaStore_CacheTTL(t *testing.T) {
 	t.Parallel()
 
-	client, fetchCount := newCountingCatalogClient(t, testCatalog)
+	client, fetchCount := yamltest.CountingClient(respondCatalog(t, testCatalog))
 
 	// Use a very short TTL for testing.
 	store := newStore(client, schemastore.WithCacheTTL(10*time.Millisecond))
@@ -756,7 +755,7 @@ func TestSchemaStore_ConcurrentAccess(t *testing.T) {
 	}
 
 	// Use short TTL to trigger concurrent cache refreshes.
-	store := newStore(newCatalogClient(t, catalog), schemastore.WithCacheTTL(1*time.Millisecond))
+	store := newStore(respondCatalog(t, catalog).Client(), schemastore.WithCacheTTL(1*time.Millisecond))
 
 	// Run multiple goroutines calling FindMatch concurrently.
 	const numGoroutines = 10
@@ -810,7 +809,7 @@ func TestSchemaStore_Filter(t *testing.T) {
 
 	// Filter to only GitHub schemas.
 	store := newStore(
-		newCatalogClient(t, catalog),
+		respondCatalog(t, catalog).Client(),
 		schemastore.WithFilter(func(e schemastore.CatalogEntry) bool {
 			return strings.Contains(strings.ToLower(e.Name), "github")
 		}),
@@ -838,7 +837,7 @@ func TestSchemaStore_FetchPanicReachesCaller(t *testing.T) {
 		want      any
 	}{
 		"filter": {
-			transport: respondWith(http.StatusOK, marshalCatalog(t, testCatalog)),
+			transport: respondCatalog(t, testCatalog),
 			filter: func(schemastore.CatalogEntry) bool {
 				panic("filter bug")
 			},
@@ -854,7 +853,7 @@ func TestSchemaStore_FetchPanicReachesCaller(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client, fetchCount := newCountingTransportClient(tc.transport)
+			client, fetchCount := yamltest.CountingClient(tc.transport)
 			store := newStore(client, schemastore.WithFilter(tc.filter))
 
 			assert.PanicsWithValue(t, tc.want, func() {
@@ -882,7 +881,7 @@ func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
 		filter    func(schemastore.CatalogEntry) bool
 	}{
 		"filter": {
-			transport: respondWith(http.StatusOK, marshalCatalog(t, testCatalog)),
+			transport: respondCatalog(t, testCatalog),
 			filter: func(schemastore.CatalogEntry) bool {
 				runtime.Goexit()
 
@@ -898,7 +897,7 @@ func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client, fetchCount := newCountingTransportClient(tc.transport)
+			client, fetchCount := yamltest.CountingClient(tc.transport)
 			store := newStore(client, schemastore.WithFilter(tc.filter))
 
 			var returned bool
@@ -946,7 +945,7 @@ func TestSchemaStore_RecordedFetchPanicLoadsAsError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			store := newStore(&http.Client{Transport: tc.transport})
+			store := newStore(tc.transport.Client())
 
 			// The first lookup waits on the fetch and raises its panic or
 			// Goexit, so it runs on a goroutine of its own.
@@ -1014,14 +1013,14 @@ func TestSchemaStore_ContextEndsAfterFetch(t *testing.T) {
 		wantErr   bool
 	}{
 		"fetch succeeds": {
-			client: newCatalogClient(t, testCatalog),
+			client: respondCatalog(t, testCatalog).Client(),
 		},
 		"fetch fails": {
-			client:  newClient(http.StatusInternalServerError, nil),
+			client:  yamltest.Respond(http.StatusInternalServerError, "").Client(),
 			wantErr: true,
 		},
 		"filter panics": {
-			client: newCatalogClient(t, testCatalog),
+			client: respondCatalog(t, testCatalog).Client(),
 			opts: []schemastore.Option{
 				schemastore.WithFilter(func(schemastore.CatalogEntry) bool {
 					panic("filter bug")
@@ -1111,7 +1110,7 @@ func TestSchemaStore_HTTPClient(t *testing.T) {
 
 	// The catalog URL names a host that never resolves, so only the
 	// configured client can answer it.
-	client, fetchCount := newCountingCatalogClient(t, testCatalog)
+	client, fetchCount := yamltest.CountingClient(respondCatalog(t, testCatalog))
 
 	store := schemastore.New(
 		schemastore.WithCatalogURL("https://catalog.invalid/catalog.json"),
@@ -1129,7 +1128,7 @@ func TestSchemaStore_ZeroRefreshTimeout(t *testing.T) {
 
 	// A zero timeout keeps the default rather than expiring every fetch
 	// before it starts.
-	store := newStore(newCatalogClient(t, testCatalog), schemastore.WithRefreshTimeout(0))
+	store := newStore(respondCatalog(t, testCatalog).Client(), schemastore.WithRefreshTimeout(0))
 
 	entry, err := store.FindMatch(t.Context(), "config.yaml")
 	require.NoError(t, err)
@@ -1141,14 +1140,13 @@ func TestSchemaStore_NilHTTPClient(t *testing.T) {
 
 	// A nil client keeps the default rather than panicking on the first
 	// fetch. The default client needs a real server, so this is the one
-	// test in the package that starts one. See newCountingClient for why
-	// the other tests fetch from memory.
-	data, err := json.Marshal(testCatalog)
-	require.NoError(t, err)
+	// test in the package that starts one. See respondCatalog for why the
+	// other tests fetch from memory.
+	data := marshalCatalog(t, testCatalog)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		//nolint:errcheck // Test helper.
-		w.Write(data)
+		w.Write([]byte(data))
 	}))
 	t.Cleanup(server.Close)
 
@@ -1167,16 +1165,16 @@ func TestSchemaStore_FetchError(t *testing.T) {
 
 	// With no catalog ever loaded, a failed fetch surfaces from the lookup.
 	tcs := map[string]*schemastore.Store{
-		"server error": newStore(newClient(http.StatusInternalServerError, nil)),
-		"invalid json": newStore(newClient(http.StatusOK, []byte("not json"))),
+		"server error": newStore(yamltest.Respond(http.StatusInternalServerError, "").Client()),
+		"invalid json": newStore(yamltest.Respond(http.StatusOK, "not json").Client()),
 
 		// A JSON body with no schemas array is not a catalog, so the store
 		// treats it as a failed fetch rather than as a catalog with no
 		// entries.
-		"null":         newStore(newClient(http.StatusOK, []byte(`null`))),
-		"empty object": newStore(newClient(http.StatusOK, []byte(`{}`))),
-		"null schemas": newStore(newClient(http.StatusOK, []byte(`{"schemas": null}`))),
-		"error object": newStore(newClient(http.StatusOK, []byte(`{"message": "rate limited"}`))),
+		"null":         newStore(yamltest.Respond(http.StatusOK, `null`).Client()),
+		"empty object": newStore(yamltest.Respond(http.StatusOK, `{}`).Client()),
+		"null schemas": newStore(yamltest.Respond(http.StatusOK, `{"schemas": null}`).Client()),
+		"error object": newStore(yamltest.Respond(http.StatusOK, `{"message": "rate limited"}`).Client()),
 
 		// The control character makes url.Parse reject the URL, so the
 		// fetch sends no request.
@@ -1185,14 +1183,12 @@ func TestSchemaStore_FetchError(t *testing.T) {
 		// Port 1 is a privileged port that won't be listening.
 		"connection refused": schemastore.New(schemastore.WithCatalogURL("http://localhost:1")),
 
-		"read body error": newStore(&http.Client{
-			Transport: yamltest.RoundTripFunc(func(*http.Request) (*http.Response, error) {
-				return &http.Response{
-					StatusCode: http.StatusOK,
-					Body:       io.NopCloser(iotest.ErrReader(errors.New("read error"))),
-				}, nil
-			}),
-		}),
+		"read body error": newStore(yamltest.RoundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(iotest.ErrReader(errors.New("read error"))),
+			}, nil
+		}).Client()),
 	}
 
 	for name, store := range tcs {
@@ -1218,7 +1214,7 @@ func TestSchemaStore_RetryAfter(t *testing.T) {
 	// lookup lands inside the retry interval however slowly the first one
 	// returns.
 	synctest.Test(t, func(t *testing.T) {
-		client, fetchCount := newCountingClient(http.StatusInternalServerError, nil)
+		client, fetchCount := yamltest.CountingClient(yamltest.Respond(http.StatusInternalServerError, ""))
 
 		store := newStore(client, schemastore.WithRetryAfter(20*time.Millisecond))
 
@@ -1254,7 +1250,7 @@ func TestSchemaStore_NonPositiveRetryAfter(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client, fetchCount := newCountingClient(http.StatusInternalServerError, nil)
+			client, fetchCount := yamltest.CountingClient(yamltest.Respond(http.StatusInternalServerError, ""))
 
 			// A non-positive interval keeps the default rather than
 			// retrying on every lookup, which costs one refresh timeout
@@ -1278,7 +1274,7 @@ func TestSchemaStore_EmptyCatalog(t *testing.T) {
 		Schemas: []schemastore.CatalogEntry{},
 	}
 
-	store := newStore(newCatalogClient(t, catalog))
+	store := newStore(respondCatalog(t, catalog).Client())
 
 	// No schemas in catalog means no matches.
 	_, err := store.FindMatch(t.Context(), "config.yaml")
@@ -1297,7 +1293,7 @@ func TestSchemaStore_CanceledContext(t *testing.T) {
 		t.Parallel()
 
 		synctest.Test(t, func(t *testing.T) {
-			client, fetchCount := newCountingCatalogClient(t, testCatalog)
+			client, fetchCount := yamltest.CountingClient(respondCatalog(t, testCatalog))
 
 			// Use short TTL so cache expires quickly.
 			store := newStore(client, schemastore.WithCacheTTL(10*time.Millisecond))
@@ -1327,7 +1323,7 @@ func TestSchemaStore_CanceledContext(t *testing.T) {
 		t.Parallel()
 
 		synctest.Test(t, func(t *testing.T) {
-			client, fetchCount := newCountingCatalogClient(t, testCatalog)
+			client, fetchCount := yamltest.CountingClient(respondCatalog(t, testCatalog))
 
 			store := newStore(client)
 
@@ -1379,22 +1375,20 @@ func TestSchemaStore_RefetchFails(t *testing.T) {
 			// Inside the bubble, the sleep below moves the fake clock past
 			// the cache TTL without waiting in real time.
 			synctest.Test(t, func(t *testing.T) {
-				catalog := marshalCatalog(t, testCatalog)
+				first, later := respondCatalog(t, testCatalog), yamltest.Respond(tc.status, tc.body)
 
 				var requestCount atomic.Int32
 
 				// The transport serves the catalog first and the response
 				// of the case after. It opens no socket, so it counts only
 				// the store's own requests.
-				client := &http.Client{
-					Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-						if requestCount.Add(1) > 1 {
-							return response(r, tc.status, []byte(tc.body)), nil
-						}
+				client := yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if requestCount.Add(1) > 1 {
+						return later(r)
+					}
 
-						return response(r, http.StatusOK, catalog), nil
-					}),
-				}
+					return first(r)
+				}).Client()
 
 				// Use short TTL so cache expires quickly.
 				store := newStore(client, schemastore.WithCacheTTL(10*time.Millisecond))
@@ -1435,7 +1429,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 	t.Run("matches known pattern", func(t *testing.T) {
 		t.Parallel()
 
-		store := newStore(newCatalogClient(t, workflowCatalog))
+		store := newStore(respondCatalog(t, workflowCatalog).Client())
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
 		ref, err := store.Resolve(t.Context(), doc)
@@ -1446,7 +1440,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 	t.Run("no match for unknown file", func(t *testing.T) {
 		t.Parallel()
 
-		store := newStore(newCatalogClient(t, workflowCatalog))
+		store := newStore(respondCatalog(t, workflowCatalog).Client())
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
 		_, err := store.Resolve(t.Context(), doc)
@@ -1475,7 +1469,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 			},
 		}
 
-		store := newStore(newCatalogClient(t, catalog))
+		store := newStore(respondCatalog(t, catalog).Client())
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), "ci.yml")
 		ref, err := store.Resolve(t.Context(), doc)
@@ -1496,9 +1490,9 @@ func TestSchemaStore_Resolve(t *testing.T) {
 	t.Run("loads matching schema", func(t *testing.T) {
 		t.Parallel()
 
-		client := newRoutingClient(map[string][]byte{
+		client := newRoutingClient(map[string]string{
 			catalogURL:    marshalCatalog(t, testCatalog),
-			testSchemaURL: []byte(schemaData),
+			testSchemaURL: schemaData,
 		})
 
 		store := newStore(client)
@@ -1511,7 +1505,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		data, err := schema.NewRegistry(schema.WithHTTPClient(client)).Load(t.Context(), ref)
 		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), data)
+		assert.Equal(t, schemaData, string(data))
 	})
 
 	t.Run("error when schema URL not found", func(t *testing.T) {
@@ -1519,7 +1513,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		// The client serves the catalog alone, so the schema URL gets
 		// status 404.
-		client := newRoutingClient(map[string][]byte{
+		client := newRoutingClient(map[string]string{
 			catalogURL: marshalCatalog(t, testCatalog),
 		})
 
@@ -1558,9 +1552,9 @@ func TestIntegration(t *testing.T) {
 	check := func(t *testing.T, input, filePath string) error {
 		t.Helper()
 
-		client := newRoutingClient(map[string][]byte{
+		client := newRoutingClient(map[string]string{
 			catalogURL:        marshalCatalog(t, workflowCatalog),
-			workflowSchemaURL: []byte(schemaData),
+			workflowSchemaURL: schemaData,
 		})
 
 		reg := schema.NewRegistry(
@@ -1592,8 +1586,8 @@ func TestIntegration(t *testing.T) {
 	t.Run("fetches each schema once", func(t *testing.T) {
 		t.Parallel()
 
-		catalogClient, catalogFetches := newCountingCatalogClient(t, workflowCatalog)
-		schemaClient, schemaFetches := newCountingClient(http.StatusOK, []byte(schemaData))
+		catalogClient, catalogFetches := yamltest.CountingClient(respondCatalog(t, workflowCatalog))
+		schemaClient, schemaFetches := yamltest.CountingClient(yamltest.Respond(http.StatusOK, schemaData))
 
 		reg := schema.NewRegistry(
 			schema.WithHTTPClient(schemaClient),
@@ -1659,53 +1653,20 @@ func newStore(client *http.Client, opts ...schemastore.Option) *schemastore.Stor
 	}, opts...)...)
 }
 
-// newCountingClient returns a client whose transport answers every URL
-// with status and body, along with a counter of the requests it has
-// answered. The transport opens no socket, so no other test or process
-// can reach it and change the count.
+// respondCatalog returns a transport function that answers every URL
+// with catalog as JSON.
 //
-// Tests in this package fetch through in-memory clients like this one
+// Tests in this package fetch through transport functions like this one
 // rather than from test servers on http.DefaultTransport. Closing a test
 // server closes the idle connections of http.DefaultTransport. That
 // transport returns a connection to its idle pool just before it hands
 // over a response with no body, so a request that another test has in
 // flight can fail with "transport connection broken" instead of getting
 // its response.
-func newCountingClient(status int, body []byte) (*http.Client, *atomic.Int32) {
-	return newCountingTransportClient(respondWith(status, body))
-}
+func respondCatalog(tb testing.TB, catalog schemastore.Catalog) yamltest.RoundTripFunc {
+	tb.Helper()
 
-// newCountingTransportClient returns a client whose transport is fn, along
-// with a counter of the requests fn has received.
-func newCountingTransportClient(fn yamltest.RoundTripFunc) (*http.Client, *atomic.Int32) {
-	var requests atomic.Int32
-
-	client := &http.Client{
-		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-			requests.Add(1)
-
-			return fn(r)
-		}),
-	}
-
-	return client, &requests
-}
-
-// respondWith returns a transport function that answers every request
-// with status and body.
-func respondWith(status int, body []byte) yamltest.RoundTripFunc {
-	return func(r *http.Request) (*http.Response, error) {
-		return response(r, status, body), nil
-	}
-}
-
-// response returns the response to r with status and body.
-func response(r *http.Request, status int, body []byte) *http.Response {
-	return &http.Response{
-		StatusCode: status,
-		Body:       io.NopCloser(bytes.NewReader(body)),
-		Request:    r,
-	}
+	return yamltest.Respond(http.StatusOK, marshalCatalog(tb, catalog))
 }
 
 // panicTransport is a transport function that panics.
@@ -1721,51 +1682,27 @@ func goexitTransport(*http.Request) (*http.Response, error) {
 	panic("unreachable")
 }
 
-// newClient is newCountingClient without the counter.
-func newClient(status int, body []byte) *http.Client {
-	client, _ := newCountingClient(status, body)
-
-	return client
-}
-
-// newCountingCatalogClient is newCountingClient serving catalog.
-func newCountingCatalogClient(tb testing.TB, catalog schemastore.Catalog) (*http.Client, *atomic.Int32) {
-	tb.Helper()
-
-	return newCountingClient(http.StatusOK, marshalCatalog(tb, catalog))
-}
-
-// newCatalogClient is newClient serving catalog.
-func newCatalogClient(tb testing.TB, catalog schemastore.Catalog) *http.Client {
-	tb.Helper()
-
-	return newClient(http.StatusOK, marshalCatalog(tb, catalog))
-}
-
 // newRoutingClient returns a client whose transport answers each URL in
-// routes with its body and every other URL with status 404. Like
-// newCountingClient, it opens no socket.
-func newRoutingClient(routes map[string][]byte) *http.Client {
-	return &http.Client{
-		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-			body, ok := routes[r.URL.String()]
-			if !ok {
-				return response(r, http.StatusNotFound, nil), nil
-			}
+// routes with its body and every other URL with status 404.
+func newRoutingClient(routes map[string]string) *http.Client {
+	return yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, ok := routes[r.URL.String()]
+		if !ok {
+			return yamltest.Respond(http.StatusNotFound, "")(r)
+		}
 
-			return response(r, http.StatusOK, body), nil
-		}),
-	}
+		return yamltest.Respond(http.StatusOK, body)(r)
+	}).Client()
 }
 
 // marshalCatalog returns catalog as JSON.
-func marshalCatalog(tb testing.TB, catalog schemastore.Catalog) []byte {
+func marshalCatalog(tb testing.TB, catalog schemastore.Catalog) string {
 	tb.Helper()
 
 	data, err := json.Marshal(catalog)
 	require.NoError(tb, err)
 
-	return data
+	return string(data)
 }
 
 // newHeldCatalogClient returns a client whose transport answers every URL
@@ -1788,31 +1725,29 @@ func newHeldCatalogClient(t *testing.T, immediate int32) (*http.Client, *atomic.
 	release := sync.OnceFunc(func() { close(unblock) })
 	t.Cleanup(release)
 
-	client := &http.Client{
-		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-			n := requests.Add(1)
-			if n > immediate {
-				select {
-				case <-unblock:
-				case <-r.Context().Done():
-					return nil, r.Context().Err()
-				}
+	client := yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		n := requests.Add(1)
+		if n > immediate {
+			select {
+			case <-unblock:
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
 			}
+		}
 
-			data, err := json.Marshal(schemastore.Catalog{
-				Schemas: []schemastore.CatalogEntry{{
-					Name:      fmt.Sprintf("Catalog %d", n),
-					URL:       "https://example.com/test.json",
-					FileMatch: []string{"*.yaml"},
-				}},
-			})
-			if err != nil {
-				return nil, fmt.Errorf("marshal catalog: %w", err)
-			}
+		data, err := json.Marshal(schemastore.Catalog{
+			Schemas: []schemastore.CatalogEntry{{
+				Name:      fmt.Sprintf("Catalog %d", n),
+				URL:       testSchemaURL,
+				FileMatch: []string{"*.yaml"},
+			}},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("marshal catalog: %w", err)
+		}
 
-			return response(r, http.StatusOK, data), nil
-		}),
-	}
+		return yamltest.Respond(http.StatusOK, string(data))(r)
+	}).Client()
 
 	return client, &requests, release
 }
@@ -1862,7 +1797,7 @@ func TestStore_ParseErrorRedactsCredentials(t *testing.T) {
 
 	store := schemastore.New(
 		schemastore.WithCatalogURL("http://svc:hunter2@example.com/catalog.json"),
-		schemastore.WithHTTPClient(newClient(http.StatusOK, []byte("<html>not json</html>"))),
+		schemastore.WithHTTPClient(yamltest.Respond(http.StatusOK, "<html>not json</html>").Client()),
 	)
 
 	_, err := store.FindMatch(t.Context(), "a.yaml")
@@ -1969,7 +1904,7 @@ func TestStore_FindMatch_SupportedPatterns(t *testing.T) {
 		},
 	}}
 
-	store := newStore(newCatalogClient(t, catalog))
+	store := newStore(respondCatalog(t, catalog).Client())
 
 	tcs := map[string]struct {
 		file      string
