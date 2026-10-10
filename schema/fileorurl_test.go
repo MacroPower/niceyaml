@@ -34,20 +34,95 @@ func fileOrURL(t *testing.T, baseDir, ref string) schema.Ref {
 func TestFileOrURL(t *testing.T) {
 	t.Parallel()
 
-	t.Run("relative path", func(t *testing.T) {
+	t.Run("file", func(t *testing.T) {
 		t.Parallel()
 
-		// Create temp schema file.
-		tmpDir := t.TempDir()
-		schemaPath := filepath.Join(tmpDir, "schema.json")
 		schemaData := []byte(`{"type": "object"}`)
-		err := os.WriteFile(schemaPath, schemaData, 0o600)
-		require.NoError(t, err)
 
-		url, data, err := load(t, fileOrURL(t, tmpDir, "schema.json"))
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
-		assert.Equal(t, fileURL(t, schemaPath), url)
+		// Each case writes the schema to file in a temporary directory.
+		// In baseDir and ref, "{dir}" stands for that directory, "{path}"
+		// for the path of the file, and "{slash}" for that path with
+		// forward slashes. The key is the URL of the file and then
+		// fragment.
+		tcs := map[string]struct {
+			file     string
+			baseDir  string
+			ref      string
+			fragment string
+		}{
+			"relative path": {
+				file:    "schema.json",
+				baseDir: "{dir}",
+				ref:     "schema.json",
+			},
+			"absolute path ignores baseDir": {
+				file:    "schema.json",
+				baseDir: "/some/other/dir",
+				ref:     "{path}",
+			},
+			"absolute path without base directory": {
+				file: "schema.json",
+				ref:  "{path}",
+			},
+			// A file URL names a local path, so it ignores baseDir.
+			"file URL": {
+				file:    "schema.json",
+				baseDir: "/some/other/dir",
+				ref:     "file://{path}",
+			},
+			// RFC 8089 allows file:/path alongside file:///path, and both
+			// name the same absolute path rather than a path relative to
+			// baseDir.
+			"file URL without authority": {
+				file:    "schema.json",
+				baseDir: "/some/other/dir",
+				ref:     "file:{slash}",
+			},
+			"file URL scheme in upper case": {
+				file:    "schema.json",
+				baseDir: "/some/other/dir",
+				ref:     "FILE://{path}",
+			},
+			"file URL with percent-encoded path": {
+				file:    "my schema.json",
+				baseDir: "/some/other/dir",
+				ref:     "file://" + filepath.Join("{dir}", "my%20schema.json"),
+			},
+			// The key keeps the fragment that names the subschema, and the
+			// registry loads the whole file.
+			"file URL with fragment": {
+				file:     "schema.json",
+				baseDir:  "/some/other/dir",
+				ref:      "file://{slash}#/definitions/Foo",
+				fragment: "#/definitions/Foo",
+			},
+			// A colon is a legal character in a POSIX file name, and only a
+			// separator behind it makes a drive letter, so this path joins
+			// baseDir like any other relative one.
+			"colon in a relative path": {
+				file:    "a:b.json",
+				baseDir: "{dir}",
+				ref:     "a:b.json",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				schemaPath := writeSchema(t, tc.file, schemaData)
+				fill := strings.NewReplacer(
+					"{dir}", filepath.Dir(schemaPath),
+					"{path}", schemaPath,
+					"{slash}", filepath.ToSlash(schemaPath),
+				)
+
+				url, data, err := load(t, fileOrURL(t, fill.Replace(tc.baseDir), fill.Replace(tc.ref)))
+				require.NoError(t, err)
+				assert.Equal(t, schemaData, data)
+				assert.Equal(t, fileURL(t, schemaPath)+tc.fragment, url)
+			})
+		}
 	})
 
 	t.Run("relative path without base directory", func(t *testing.T) {
@@ -68,38 +143,6 @@ func TestFileOrURL(t *testing.T) {
 			_, err := schema.FileOrURL(baseDir, "")
 			require.ErrorIs(t, err, schema.ErrEmptyPath, "baseDir %q", baseDir)
 		}
-	})
-
-	t.Run("absolute path", func(t *testing.T) {
-		t.Parallel()
-
-		// Create temp schema file.
-		tmpDir := t.TempDir()
-		schemaPath := filepath.Join(tmpDir, "schema.json")
-		schemaData := []byte(`{"type": "object"}`)
-		err := os.WriteFile(schemaPath, schemaData, 0o600)
-		require.NoError(t, err)
-
-		// An absolute path ignores baseDir.
-		url, data, err := load(t, fileOrURL(t, "/some/other/dir", schemaPath))
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
-		assert.Equal(t, fileURL(t, schemaPath), url)
-	})
-
-	t.Run("absolute path without base directory", func(t *testing.T) {
-		t.Parallel()
-
-		tmpDir := t.TempDir()
-		schemaPath := filepath.Join(tmpDir, "schema.json")
-		schemaData := []byte(`{"type": "object"}`)
-		err := os.WriteFile(schemaPath, schemaData, 0o600)
-		require.NoError(t, err)
-
-		url, data, err := load(t, fileOrURL(t, "", schemaPath))
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
-		assert.Equal(t, fileURL(t, schemaPath), url)
 	})
 
 	t.Run("URL schema", func(t *testing.T) {
@@ -140,87 +183,6 @@ func TestFileOrURL(t *testing.T) {
 				assert.Equal(t, schemaURL, url)
 			})
 		}
-	})
-
-	t.Run("file URL", func(t *testing.T) {
-		t.Parallel()
-
-		tmpDir := t.TempDir()
-		schemaPath := filepath.Join(tmpDir, "schema.json")
-		schemaData := []byte(`{"type": "object"}`)
-		err := os.WriteFile(schemaPath, schemaData, 0o600)
-		require.NoError(t, err)
-
-		// A file URL names a local path, so it ignores baseDir.
-		url, data, err := load(t, fileOrURL(t, "/some/other/dir", "file://"+schemaPath))
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
-		assert.Equal(t, fileURL(t, schemaPath), url)
-	})
-
-	t.Run("file URL without authority", func(t *testing.T) {
-		t.Parallel()
-
-		// RFC 8089 allows file:/path alongside file:///path, and both name
-		// the same absolute path rather than a path relative to baseDir.
-		tmpDir := t.TempDir()
-		schemaPath := filepath.Join(tmpDir, "schema.json")
-		schemaData := []byte(`{"type": "object"}`)
-		require.NoError(t, os.WriteFile(schemaPath, schemaData, 0o600))
-
-		url, data, err := load(t, fileOrURL(t, "/some/other/dir", "file:"+filepath.ToSlash(schemaPath)))
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
-		assert.Equal(t, fileURL(t, schemaPath), url)
-	})
-
-	t.Run("file URL scheme in upper case", func(t *testing.T) {
-		t.Parallel()
-
-		tmpDir := t.TempDir()
-		schemaPath := filepath.Join(tmpDir, "schema.json")
-		schemaData := []byte(`{"type": "object"}`)
-		err := os.WriteFile(schemaPath, schemaData, 0o600)
-		require.NoError(t, err)
-
-		_, data, err := load(t, fileOrURL(t, "/some/other/dir", "FILE://"+schemaPath))
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
-	})
-
-	t.Run("file URL with percent-encoded path", func(t *testing.T) {
-		t.Parallel()
-
-		tmpDir := t.TempDir()
-		schemaPath := filepath.Join(tmpDir, "my schema.json")
-		schemaData := []byte(`{"type": "object"}`)
-		err := os.WriteFile(schemaPath, schemaData, 0o600)
-		require.NoError(t, err)
-
-		encoded := "file://" + filepath.Join(tmpDir, "my%20schema.json")
-
-		url, data, err := load(t, fileOrURL(t, "/some/other/dir", encoded))
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
-		assert.Equal(t, fileURL(t, schemaPath), url)
-	})
-
-	t.Run("file URL with fragment", func(t *testing.T) {
-		t.Parallel()
-
-		tmpDir := t.TempDir()
-		schemaPath := filepath.Join(tmpDir, "schema.json")
-		schemaData := []byte(`{"definitions": {"Foo": {"type": "object"}}}`)
-		require.NoError(t, os.WriteFile(schemaPath, schemaData, 0o600))
-
-		// The key keeps the fragment that names the subschema, and the
-		// registry loads the whole file.
-		ref := "file://" + filepath.ToSlash(schemaPath) + "#/definitions/Foo"
-
-		url, data, err := load(t, fileOrURL(t, "/some/other/dir", ref))
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
-		assert.Equal(t, fileURL(t, schemaPath)+"#/definitions/Foo", url)
 	})
 
 	t.Run("URL with custom client", func(t *testing.T) {
@@ -305,23 +267,6 @@ func TestFileOrURL(t *testing.T) {
 		assert.Equal(t, "file:///C%3A/schemas/config.json", url)
 		require.ErrorIs(t, err, os.ErrNotExist)
 		require.ErrorContains(t, err, "read /C:/schemas/config.json")
-	})
-
-	t.Run("colon in a relative path", func(t *testing.T) {
-		t.Parallel()
-
-		// A colon is a legal character in a POSIX file name, and only a
-		// separator behind it makes a drive letter, so this path joins
-		// baseDir like any other relative one.
-		tmpDir := t.TempDir()
-		schemaPath := filepath.Join(tmpDir, "a:b.json")
-		schemaData := []byte(`{"type": "object"}`)
-		require.NoError(t, os.WriteFile(schemaPath, schemaData, 0o600))
-
-		url, data, err := load(t, fileOrURL(t, tmpDir, "a:b.json"))
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
-		assert.Equal(t, fileURL(t, schemaPath), url)
 	})
 
 	t.Run("missing file", func(t *testing.T) {
