@@ -276,10 +276,7 @@ func TestCheckDecode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
-			if tc.path.Len() > 0 {
-				doc = yamltest.At(t, doc, tc.path)
-			}
+			doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.path)
 
 			err := aliasing.CheckDecode(doc)
 			if tc.err != nil {
@@ -391,10 +388,7 @@ func TestHoldsReferenceAlias(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
-			if tc.path.Len() > 0 {
-				doc = yamltest.At(t, doc, tc.path)
-			}
+			doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.path)
 
 			// The document keeps the answer, so a second call returns
 			// the same one.
