@@ -50,16 +50,26 @@ func AtOrSelf(tb testing.TB, n *niceyaml.Node, path paths.Path) *niceyaml.Node {
 	return At(tb, n, path)
 }
 
+// Document returns the root [*niceyaml.Node] of the single document of
+// source, through [niceyaml.Source.Document]. The test fails when the
+// source does not hold exactly one document, or when that document did
+// not parse.
+func Document(tb testing.TB, source *niceyaml.Source) *niceyaml.Node {
+	tb.Helper()
+
+	doc, err := source.Document()
+	require.NoError(tb, err)
+
+	return doc
+}
+
 // Bind binds err to the single document of source through
 // [niceyaml.Node.Bind]. The test fails when the source does not hold
 // exactly one document.
 func Bind(tb testing.TB, source *niceyaml.Source, err error) error {
 	tb.Helper()
 
-	doc, docErr := source.Document()
-	require.NoError(tb, docErr)
-
-	return doc.Bind(err)
+	return Document(tb, source).Bind(err)
 }
 
 // Layers merges layers through [niceyaml.NewSourceFromLayers] with the

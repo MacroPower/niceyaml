@@ -78,6 +78,18 @@ func TestDocumentHelpers(t *testing.T) {
 		assert.Equal(t, 1, got)
 	})
 
+	t.Run("Document", func(t *testing.T) {
+		t.Parallel()
+
+		var tb testing.TB = t
+
+		source := niceyaml.NewSourceFromString("a: 1\n")
+		doc := yamltest.Document(tb, source)
+
+		assert.Same(t, source, doc.Source())
+		assert.True(t, doc.Path().IsRoot())
+	})
+
 	t.Run("Bind", func(t *testing.T) {
 		t.Parallel()
 
