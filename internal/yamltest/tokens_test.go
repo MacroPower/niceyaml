@@ -451,61 +451,54 @@ func TestCompareTokens(t *testing.T) {
 func TestCompareTokenSlices(t *testing.T) {
 	t.Parallel()
 
-	t.Run("equal token slices", func(t *testing.T) {
-		t.Parallel()
+	tkb := yamltest.NewTokenBuilder()
+	a, b, c := tkb.Value("a").Build(), tkb.Value("b").Build(), tkb.Value("c").Build()
+	x, y := tkb.Value("x").Build(), tkb.Value("y").Build()
 
-		tb := yamltest.NewTokenBuilder().Type(token.StringType)
-		tks := token.Tokens{
-			tb.Value("a").PositionLine(1).Build(),
-			tb.Value("b").PositionLine(2).Build(),
-		}
+	tcs := map[string]struct {
+		str   string // What the diff prints.
+		want  token.Tokens
+		got   token.Tokens
+		equal bool
+	}{
+		"equal token slices": {
+			want:  token.Tokens{a, b},
+			got:   token.Tokens{a, b},
+			equal: true,
+			str:   "token slices equal",
+		},
+		"empty slices": {
+			want:  token.Tokens{},
+			got:   token.Tokens{},
+			equal: true,
+			str:   "token slices equal",
+		},
+		"count mismatch": {
+			want: token.Tokens{a},
+			got:  token.Tokens{a, b},
+			str:  "token count mismatch: want 1, got 2",
+		},
+		"only the tokens that differ are listed": {
+			want: token.Tokens{a, b, c},
+			got:  token.Tokens{a, x, y},
+			str: "token 1: " + yamltest.CompareTokens(b, x).String() +
+				"\ntoken 2: " + yamltest.CompareTokens(c, y).String(),
+		},
+	}
 
-		diff := yamltest.CompareTokenSlices(tks, tks)
-		assert.True(t, diff.Equal())
-		assert.Equal(t, "token slices equal", diff.String())
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("count mismatch", func(t *testing.T) {
-		t.Parallel()
+			diff := yamltest.CompareTokenSlices(tc.want, tc.got)
 
-		tb := yamltest.NewTokenBuilder()
-		want := token.Tokens{tb.Build()}
-		got := token.Tokens{tb.Build(), tb.Build()}
-
-		diff := yamltest.CompareTokenSlices(want, got)
-		assert.False(t, diff.Equal())
-		assert.True(t, diff.CountMismatch())
-		assert.Equal(t, 1, diff.WantCount)
-		assert.Equal(t, 2, diff.GotCount)
-		assert.Contains(t, diff.String(), "count mismatch")
-	})
-
-	t.Run("differences reported for each token", func(t *testing.T) {
-		t.Parallel()
-
-		tb := yamltest.NewTokenBuilder()
-		want := token.Tokens{
-			tb.Value("a").Build(),
-			tb.Value("b").Build(),
-		}
-		got := token.Tokens{
-			tb.Value("x").Build(),
-			tb.Value("y").Build(),
-		}
-
-		diff := yamltest.CompareTokenSlices(want, got)
-		assert.False(t, diff.Equal())
-		require.Len(t, diff.Diffs, 2)
-		assert.False(t, diff.Diffs[0].Equal())
-		assert.False(t, diff.Diffs[1].Equal())
-	})
-
-	t.Run("empty slices equal", func(t *testing.T) {
-		t.Parallel()
-
-		diff := yamltest.CompareTokenSlices(token.Tokens{}, token.Tokens{})
-		assert.True(t, diff.Equal())
-	})
+			assert.Equal(t, tc.equal, diff.Equal())
+			assert.Equal(t, tc.str, diff.String())
+			assert.Equal(t, len(tc.want), diff.WantCount)
+			assert.Equal(t, len(tc.got), diff.GotCount)
+			assert.Equal(t, len(tc.want) != len(tc.got), diff.CountMismatch())
+		})
+	}
 }
 
 // recordingTB is a [testing.TB] that records a reported failure instead of
@@ -698,40 +691,5 @@ func TestTokenValidationError(t *testing.T) {
 			Reason: yamltest.ErrNilToken,
 		}
 		assert.Equal(t, yamltest.ErrNilToken, err.Unwrap())
-	})
-}
-
-func TestTokensDiff_String(t *testing.T) {
-	t.Parallel()
-
-	t.Run("shows all mismatches", func(t *testing.T) {
-		t.Parallel()
-
-		diff := yamltest.TokensDiff{
-			WantCount: 3,
-			GotCount:  3,
-			Diffs: []yamltest.TokenDiff{
-				{Fields: nil}, // Equal.
-				{Fields: []string{"Value"}},
-				{Fields: []string{"Type", "Origin"}},
-			},
-		}
-
-		str := diff.String()
-		assert.Contains(t, str, "token 1")
-		assert.Contains(t, str, "token 2")
-		assert.NotContains(t, str, "token 0") // Equal token not shown.
-	})
-
-	t.Run("counts that differ", func(t *testing.T) {
-		t.Parallel()
-
-		diff := yamltest.TokensDiff{
-			WantCount: 1,
-			GotCount:  2,
-		}
-
-		assert.False(t, diff.Equal())
-		assert.Contains(t, diff.String(), "token count mismatch: want 1, got 2")
 	})
 }
