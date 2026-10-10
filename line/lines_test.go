@@ -1626,30 +1626,29 @@ func TestNewLines_TrailingBlankLines(t *testing.T) {
 func TestLines_TokenAt(t *testing.T) {
 	t.Parallel()
 
-	t.Run("returns token at position", func(t *testing.T) {
+	t.Run("returns the token that holds the position", func(t *testing.T) {
 		t.Parallel()
 
-		input := "key: value\n"
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
+		lines := line.NewLines(tokens.Tokenize("key: value\n"))
 
-		// Get token at start of line.
-		tk := lines.TokenAt(position.New(0, 0))
-		require.NotNil(t, tk)
-		assert.Equal(t, "key", tk.Value)
-	})
+		tcs := map[string]struct {
+			pos  position.Position
+			want string
+		}{
+			"start of the line": {pos: position.New(0, 0), want: "key"},
+			// Column 5 is the "v" of "value".
+			"inside a later token": {pos: position.New(0, 5), want: "value"},
+		}
 
-	t.Run("returns token at column offset", func(t *testing.T) {
-		t.Parallel()
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		input := "key: value\n"
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
-
-		// Get token in middle of "value" (column 5 is 'v').
-		tk := lines.TokenAt(position.New(0, 5))
-		require.NotNil(t, tk)
-		assert.Equal(t, "value", tk.Value)
+				tk := lines.TokenAt(tc.pos)
+				require.NotNil(t, tk)
+				assert.Equal(t, tc.want, tk.Value)
+			})
+		}
 	})
 
 	t.Run("multiline token returns same source", func(t *testing.T) {
@@ -1717,33 +1716,25 @@ func TestLines_TokenAt(t *testing.T) {
 		}
 	})
 
-	t.Run("whitespace line before the line ending of the next token", func(t *testing.T) {
+	t.Run("a position no token holds returns nil", func(t *testing.T) {
 		t.Parallel()
 
-		// The lexer bundles a tab on an otherwise empty line into the token
-		// before it, as it does with indentation. The token after it starts
-		// with the line ending, so no token holds text on the whitespace
-		// line after the tab.
 		tcs := map[string]struct {
 			input string
-			line  int
+			pos   position.Position
 		}{
-			"tab line in mapping": {
-				input: "a: 1\n\t\nb: 2\n",
-				line:  1,
-			},
-			"tab line in sequence": {
-				input: "- a\n\t\n- b\n",
-				line:  1,
-			},
-			"tab line in nested sequence": {
-				input: "a:\n  - 1\n\t\n  - 2\n",
-				line:  2,
-			},
-			"tab line with CRLF": {
-				input: "a: 1\r\n\t\r\nb: 2\r\n",
-				line:  1,
-			},
+			"line before the first": {input: "key: value\n", pos: position.New(-1, 0)},
+			"line past the last":    {input: "key: value\n", pos: position.New(999, 0)},
+			"column past the line":  {input: "key: value\n", pos: position.New(0, 100)},
+
+			// The lexer bundles a tab on an otherwise empty line into the
+			// token before it, as it does with indentation. The token after
+			// it starts with the line ending, so no token holds text on the
+			// whitespace line after the tab.
+			"tab line in mapping":         {input: "a: 1\n\t\nb: 2\n", pos: position.New(1, 0)},
+			"tab line in sequence":        {input: "- a\n\t\n- b\n", pos: position.New(1, 0)},
+			"tab line in nested sequence": {input: "a:\n  - 1\n\t\n  - 2\n", pos: position.New(2, 0)},
+			"tab line with CRLF":          {input: "a: 1\r\n\t\r\nb: 2\r\n", pos: position.New(1, 0)},
 		}
 
 		for name, tc := range tcs {
@@ -1752,30 +1743,9 @@ func TestLines_TokenAt(t *testing.T) {
 
 				lines := line.NewLines(tokens.Tokenize(tc.input))
 
-				assert.Nil(t, lines.TokenAt(position.New(tc.line, 0)))
+				assert.Nil(t, lines.TokenAt(tc.pos))
 			})
 		}
-	})
-
-	t.Run("out of bounds line returns nil", func(t *testing.T) {
-		t.Parallel()
-
-		input := "key: value\n"
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
-
-		assert.Nil(t, lines.TokenAt(position.New(-1, 0)))
-		assert.Nil(t, lines.TokenAt(position.New(999, 0)))
-	})
-
-	t.Run("column outside token range returns nil", func(t *testing.T) {
-		t.Parallel()
-
-		input := "key: value\n"
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
-
-		assert.Nil(t, lines.TokenAt(position.New(0, 100)))
 	})
 }
 
