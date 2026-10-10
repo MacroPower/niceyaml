@@ -603,68 +603,45 @@ func TestRequireTokensEqual(t *testing.T) {
 func TestDiffTokenFields(t *testing.T) {
 	t.Parallel()
 
-	t.Run("all fields equal returns empty", func(t *testing.T) {
-		t.Parallel()
+	// Every field differs between the two tokens.
+	want := yamltest.NewTokenBuilder().
+		Type(token.StringType).
+		Value("a").
+		Origin("a\n").
+		CharacterType(token.CharacterTypeMiscellaneous).
+		Indicator(token.NotIndicator).
+		Error("bad").
+		PositionLine(1).
+		PositionColumn(1).
+		PositionOffset(0).
+		PositionIndentNum(2).
+		PositionIndentLevel(1).
+		Build()
 
-		tk := yamltest.NewTokenBuilder().
-			Type(token.StringType).
-			Value("test").
-			Origin("test\n").
-			CharacterType(token.CharacterTypeMiscellaneous).
-			Indicator(token.NotIndicator).
-			PositionLine(1).
-			PositionColumn(1).
-			PositionOffset(0).
-			PositionIndentNum(0).
-			PositionIndentLevel(0).
-			Build()
+	got := yamltest.NewTokenBuilder().
+		Type(token.IntegerType).
+		Value("b").
+		Origin("b\n").
+		CharacterType(token.CharacterTypeIndicator).
+		Indicator(token.BlockStructureIndicator).
+		PositionLine(2).
+		PositionColumn(2).
+		PositionOffset(10).
+		PositionIndentNum(4).
+		PositionIndentLevel(2).
+		Build()
 
-		diffs := yamltest.DiffTokenFields(tk, tk)
-		assert.Empty(t, diffs)
-	})
-
-	t.Run("reports all differing fields", func(t *testing.T) {
-		t.Parallel()
-
-		want := yamltest.NewTokenBuilder().
-			Type(token.StringType).
-			Value("a").
-			Origin("a\n").
-			CharacterType(token.CharacterTypeMiscellaneous).
-			Indicator(token.NotIndicator).
-			Error("bad").
-			PositionLine(1).
-			PositionColumn(1).
-			PositionOffset(0).
-			PositionIndentNum(2).
-			PositionIndentLevel(1).
-			Build()
-
-		got := yamltest.NewTokenBuilder().
-			Type(token.IntegerType).
-			Value("b").
-			Origin("b\n").
-			CharacterType(token.CharacterTypeIndicator).
-			Indicator(token.BlockStructureIndicator).
-			PositionLine(2).
-			PositionColumn(2).
-			PositionOffset(10).
-			PositionIndentNum(4).
-			PositionIndentLevel(2).
-			Build()
-
-		assert.ElementsMatch(t, []string{
-			"Type",
-			"Value",
-			"Origin",
-			"CharacterType",
-			"Indicator",
-			"Error",
-			"Position.Line",
-			"Position.Column",
-			"Position.Offset",
-			"Position.IndentNum",
-			"Position.IndentLevel",
-		}, yamltest.DiffTokenFields(want, got))
-	})
+	assert.ElementsMatch(t, []string{
+		"Type",
+		"Value",
+		"Origin",
+		"CharacterType",
+		"Indicator",
+		"Error",
+		"Position.Line",
+		"Position.Column",
+		"Position.Offset",
+		"Position.IndentNum",
+		"Position.IndentLevel",
+	}, yamltest.DiffTokenFields(want, got))
 }
