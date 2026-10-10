@@ -534,7 +534,7 @@ func TestDocument_Decode(t *testing.T) {
 				want:  []any{"x"},
 			},
 			"quoted scalar on two lines": {
-				input: "\"a\n b\"\n# c\n",
+				input: stringtest.LinesLF(`"a`, ` b"`, "# c"),
 				want:  []any{"a b"},
 			},
 			"anchored scalar": {
@@ -546,7 +546,7 @@ func TestDocument_Decode(t *testing.T) {
 				want:  []any{"1"},
 			},
 			"indented comment": {
-				input: "x\n  # c\n",
+				input: stringtest.LinesLF("x", "  # c"),
 				want:  []any{"x"},
 			},
 			"comment on the line and below it": {
@@ -557,31 +557,36 @@ func TestDocument_Decode(t *testing.T) {
 			// its line, so it reads a comment on the last line of a scalar
 			// on several lines as one on a line of its own.
 			"comment on the last line of a plain scalar": {
-				input: "a\n b # c\n",
+				input: stringtest.LinesLF("a", " b # c"),
 				want:  []any{"a b"},
 			},
 			"comment on the last line of a single-quoted scalar": {
-				input: "'x\n y' # c\n",
+				input: stringtest.LinesLF("'x", " y' # c"),
 				want:  []any{"x y"},
 			},
 			"comment on the last line of a double-quoted scalar above a header": {
-				input: "\"multi\n line\" # c\n---\nx\n",
-				want:  []any{"multi line", "x"},
+				input: stringtest.LinesLF(
+					`"multi`,
+					` line" # c`,
+					"---",
+					"x",
+				),
+				want: []any{"multi line", "x"},
 			},
 			"comment on the last line of a tagged scalar": {
-				input: "!!str a\n b # c\n",
+				input: stringtest.LinesLF("!!str a", " b # c"),
 				want:  []any{"a b"},
 			},
 			"comment on the last line of an anchored scalar": {
-				input: "&x a\n b # c\n",
+				input: stringtest.LinesLF("&x a", " b # c"),
 				want:  []any{"a b"},
 			},
 			"comment on the last line of a scalar above an end marker": {
-				input: "--- a\n b # c\n...\n",
+				input: stringtest.LinesLF("--- a", " b # c", "..."),
 				want:  []any{"a b"},
 			},
 			"comments on and below the last line of a scalar": {
-				input: "a\n b # c\n# d\n",
+				input: stringtest.LinesLF("a", " b # c", "# d"),
 				want:  []any{"a b"},
 			},
 			"flow sequence": {
@@ -593,75 +598,102 @@ func TestDocument_Decode(t *testing.T) {
 				want:  []any{map[string]any{"a": uint64(1)}},
 			},
 			"block scalar": {
-				input: "--- |\n  lit\n# c\n",
+				input: stringtest.LinesLF("--- |", "  lit", "# c"),
 				want:  []any{"lit\n"},
 			},
 			"scalar above an end marker": {
-				input: "x\n# c\n...\n--- y\n",
+				input: stringtest.LinesLF("x", "# c", "...", "--- y"),
 				want:  []any{"x", "y"},
 			},
 			"flow sequence above a header": {
-				input: "--- [1, 2]\n# c\n# d\n--- [3]\n",
+				input: stringtest.LinesLF("--- [1, 2]", "# c", "# d", "--- [3]"),
 				want:  []any{[]any{uint64(1), uint64(2)}, []any{uint64(3)}},
 			},
 			"scalar after a directive": {
-				input: "%YAML 1.2\n---\nx\n# c\n",
+				input: stringtest.LinesLF("%YAML 1.2", "---", "x", "# c"),
 				want:  []any{"x"},
 			},
 			"comment between a directive and its header": {
-				input: "%YAML 1.2\n# c\n---\na: 1\n",
+				input: stringtest.LinesLF("%YAML 1.2", "# c", "---", "a: 1"),
 				want:  []any{map[string]any{"a": uint64(1)}},
 			},
 			"comment between a tag directive and its header": {
-				input: "%TAG !e! tag:example.com,2000:\n# c\n\n# d\n---\n!e!x y\n",
-				want:  []any{"y"},
+				input: stringtest.LinesLF(
+					"%TAG !e! tag:example.com,2000:",
+					"# c",
+					"",
+					"# d",
+					"---",
+					"!e!x y",
+				),
+				want: []any{"y"},
 			},
 			"comment left of an indented mapping below a header": {
-				input: "---\n  apiVersion: v1\n  kind: Pod\n# end\n",
-				want:  []any{map[string]any{"apiVersion": "v1", "kind": "Pod"}},
+				input: stringtest.LinesLF(
+					"---",
+					"  apiVersion: v1",
+					"  kind: Pod",
+					"# end",
+				),
+				want: []any{map[string]any{"apiVersion": "v1", "kind": "Pod"}},
 			},
 			"comment left of an indented sequence above an end marker": {
-				input: "  - a\n  - b\n# c\n...\n",
-				want:  []any{[]any{"a", "b"}},
+				input: stringtest.LinesLF(
+					"  - a",
+					"  - b",
+					"# c",
+					"...",
+				),
+				want: []any{[]any{"a", "b"}},
 			},
 			"comment left of a tagged indented mapping": {
-				input: "!!map\n  a: 1\n# c\n",
+				input: stringtest.LinesLF("!!map", "  a: 1", "# c"),
 				want:  []any{map[string]any{"a": uint64(1)}},
 			},
 			"comment left of an indented mapping below a tagged header": {
-				input: "--- !!map\n  a: 1\n# c\n",
+				input: stringtest.LinesLF("--- !!map", "  a: 1", "# c"),
 				want:  []any{map[string]any{"a": uint64(1)}},
 			},
 			"comment left of an indented mapping above a header": {
-				input: "  a: 1\n# c\n---\nb: 2\n",
-				want:  []any{map[string]any{"a": uint64(1)}, map[string]any{"b": uint64(2)}},
+				input: stringtest.LinesLF(
+					"  a: 1",
+					"# c",
+					"---",
+					"b: 2",
+				),
+				want: []any{map[string]any{"a": uint64(1)}, map[string]any{"b": uint64(2)}},
 			},
 			"comment left of an indented explicit key": {
-				input: "  ? a\n  : 1\n# c\n",
+				input: stringtest.LinesLF("  ? a", "  : 1", "# c"),
 				want:  []any{map[string]any{"a": uint64(1)}},
 			},
 			"comment left of an indented anchored key": {
-				input: "  &x a: 1\n # c\n",
+				input: stringtest.LinesLF("  &x a: 1", " # c"),
 				want:  []any{map[string]any{"a": uint64(1)}},
 			},
 			"comment left of an indented nested mapping": {
-				input: "  a:\n    b: 1\n  # c\n# d\n",
-				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
+				input: stringtest.LinesLF(
+					"  a:",
+					"    b: 1",
+					"  # c",
+					"# d",
+				),
+				want: []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
 			},
 			"comments in and left of the column of an indented mapping": {
-				input: "  a: 1\n  # c\n# d\n",
+				input: stringtest.LinesLF("  a: 1", "  # c", "# d"),
 				want:  []any{map[string]any{"a": uint64(1)}},
 			},
 			"comment left of an indented mapping above more keys": {
-				input: "  a: 1\n# c\n  b: 2\n",
+				input: stringtest.LinesLF("  a: 1", "# c", "  b: 2"),
 				want:  []any{map[string]any{"a": uint64(1), "b": uint64(2)}},
 			},
 			"comment in the column of an indented mapping": {
-				input: "  a: 1\n  # c\n",
+				input: stringtest.LinesLF("  a: 1", "  # c"),
 				want:  []any{map[string]any{"a": uint64(1)}},
 			},
 			"comment in the column of a sequence in a mapping": {
-				input: "a:\n- b\n# c\n",
+				input: stringtest.LinesLF("a:", "- b", "# c"),
 				want:  []any{map[string]any{"a": []any{"b"}}},
 			},
 			// The parser takes the comment below an anchor with no value
@@ -672,11 +704,11 @@ func TestDocument_Decode(t *testing.T) {
 				want:  []any{nil},
 			},
 			"anchor with no value above an end marker": {
-				input: "--- &a\n# c\n...\n",
+				input: stringtest.LinesLF("--- &a", "# c", "..."),
 				want:  []any{nil},
 			},
 			"anchor with no value above a header": {
-				input: "&a\n# c\n---\nb\n",
+				input: stringtest.LinesLF("&a", "# c", "---", "b"),
 				want:  []any{nil, "b"},
 			},
 			// In an indented root, the parser takes an anchor that directly
@@ -685,112 +717,205 @@ func TestDocument_Decode(t *testing.T) {
 			// It rejects a comment left of the first key or "-" of the
 			// root.
 			"anchor with no value in an indented mapping above an end marker": {
-				input: "  a: &x\n# c\n...\n",
+				input: stringtest.LinesLF("  a: &x", "# c", "..."),
 				want:  []any{map[string]any{"a": nil}},
 			},
 			"anchor with no value in an indented mapping above a header": {
-				input: "  a: &x\n# c\n---\nb: 1\n",
-				want:  []any{map[string]any{"a": nil}, map[string]any{"b": uint64(1)}},
+				input: stringtest.LinesLF(
+					"  a: &x",
+					"# c",
+					"---",
+					"b: 1",
+				),
+				want: []any{map[string]any{"a": nil}, map[string]any{"b": uint64(1)}},
 			},
 			"anchor with no value in an indented sequence above a header": {
-				input: "  - &x\n# c\n---\nb: 1\n",
-				want:  []any{[]any{nil}, map[string]any{"b": uint64(1)}},
+				input: stringtest.LinesLF(
+					"  - &x",
+					"# c",
+					"---",
+					"b: 1",
+				),
+				want: []any{[]any{nil}, map[string]any{"b": uint64(1)}},
 			},
 			"anchor with no value on a later key of an indented mapping": {
-				input: "  a: 1\n  b: &x\n # c\n---\nc: 1\n",
+				input: stringtest.LinesLF(
+					"  a: 1",
+					"  b: &x",
+					" # c",
+					"---",
+					"c: 1",
+				),
 				want: []any{
 					map[string]any{"a": uint64(1), "b": nil},
 					map[string]any{"c": uint64(1)},
 				},
 			},
 			"anchor with no value in an anchored indented mapping": {
-				input: "&r\n  a: &x\n# c\n...\n",
-				want:  []any{map[string]any{"a": nil}},
+				input: stringtest.LinesLF(
+					"&r",
+					"  a: &x",
+					"# c",
+					"...",
+				),
+				want: []any{map[string]any{"a": nil}},
 			},
 			"anchor with no value above comments left of and in the column": {
-				input: "  a: &x\n# c\n  # d\n...\n",
-				want:  []any{map[string]any{"a": nil}},
+				input: stringtest.LinesLF(
+					"  a: &x",
+					"# c",
+					"  # d",
+					"...",
+				),
+				want: []any{map[string]any{"a": nil}},
 			},
 			// The parser rejects any other anchor without the comment, so
 			// the comment stays in the parser input as its value even left
 			// of the first key or "-" of the root. The tree holds a null in
 			// its place.
 			"anchor with no value after the colon of an explicit key": {
-				input: "  ? a\n  : &x\n# c\n...\n",
-				want:  []any{map[string]any{"a": nil}},
+				input: stringtest.LinesLF(
+					"  ? a",
+					"  : &x",
+					"# c",
+					"...",
+				),
+				want: []any{map[string]any{"a": nil}},
 			},
 			"anchor with no value after the colon of an explicit key above a header": {
-				input: "  ? a\n  : &x\n# c\n---\nb: 2\n",
-				want:  []any{map[string]any{"a": nil}, map[string]any{"b": uint64(2)}},
+				input: stringtest.LinesLF(
+					"  ? a",
+					"  : &x",
+					"# c",
+					"---",
+					"b: 2",
+				),
+				want: []any{map[string]any{"a": nil}, map[string]any{"b": uint64(2)}},
 			},
 			"anchor with no value on a line below its key": {
-				input: "  a:\n    &x\n# c\n...\n",
-				want:  []any{map[string]any{"a": nil}},
+				input: stringtest.LinesLF(
+					"  a:",
+					"    &x",
+					"# c",
+					"...",
+				),
+				want: []any{map[string]any{"a": nil}},
 			},
 			"anchor with no value on a line below its entry": {
-				input: "  -\n    &x\n# c\n---\nb: 2\n",
-				want:  []any{[]any{nil}, map[string]any{"b": uint64(2)}},
+				input: stringtest.LinesLF(
+					"  -",
+					"    &x",
+					"# c",
+					"---",
+					"b: 2",
+				),
+				want: []any{[]any{nil}, map[string]any{"b": uint64(2)}},
 			},
 			"anchor with no value after a tag": {
-				input: "  a: !!str &x\n# c\n...\n",
+				input: stringtest.LinesLF("  a: !!str &x", "# c", "..."),
 				want:  []any{map[string]any{"a": ""}},
 			},
 			"anchor with no value after the colon of a nested explicit key": {
-				input: "  a:\n    ? b\n    : &x\n# c\n...\n",
-				want:  []any{map[string]any{"a": map[string]any{"b": nil}}},
+				input: stringtest.LinesLF(
+					"  a:",
+					"    ? b",
+					"    : &x",
+					"# c",
+					"...",
+				),
+				want: []any{map[string]any{"a": map[string]any{"b": nil}}},
 			},
 			// With the comment, the parser would take the node below it
 			// as the value of the anchor.
 			"anchor with no value above a mapping key": {
-				input: "a: &x\n# c\nb: 1\n",
+				input: stringtest.LinesLF("a: &x", "# c", "b: 1"),
 				want:  []any{map[string]any{"a": nil, "b": uint64(1)}},
 			},
 			"anchor with no value above a sequence entry": {
-				input: "- &x\n# c\n- 1\n",
+				input: stringtest.LinesLF("- &x", "# c", "- 1"),
 				want:  []any{[]any{nil, uint64(1)}},
 			},
 			"anchor with no value in a nested mapping": {
-				input: "a:\n  k: &x\n  # c\n  l: 1\nm: 2\n",
+				input: stringtest.LinesLF(
+					"a:",
+					"  k: &x",
+					"  # c",
+					"  l: 1",
+					"m: 2",
+				),
 				want: []any{map[string]any{
 					"a": map[string]any{"k": nil, "l": uint64(1)},
 					"m": uint64(2),
 				}},
 			},
 			"anchor with no value above a dedent": {
-				input: "a:\n  b: &x\n  # c\nc: 1\n",
+				input: stringtest.LinesLF(
+					"a:",
+					"  b: &x",
+					"  # c",
+					"c: 1",
+				),
 				want: []any{map[string]any{
 					"a": map[string]any{"b": nil},
 					"c": uint64(1),
 				}},
 			},
 			"anchor with no value above blank lines and comments": {
-				input: "a: &x\n\n# c\n# d\n\nb: 1\n",
-				want:  []any{map[string]any{"a": nil, "b": uint64(1)}},
+				input: stringtest.LinesLF(
+					"a: &x",
+					"",
+					"# c",
+					"# d",
+					"",
+					"b: 1",
+				),
+				want: []any{map[string]any{"a": nil, "b": uint64(1)}},
 			},
 			"anchor with no value in a mapping in a sequence": {
-				input: "- a: &x\n  # c\n  b: 1\n",
+				input: stringtest.LinesLF("- a: &x", "  # c", "  b: 1"),
 				want:  []any{[]any{map[string]any{"a": nil, "b": uint64(1)}}},
 			},
 			"anchor with no value in a nested sequence": {
-				input: "- - &x\n  # c\n  - 1\n- 2\n",
-				want:  []any{[]any{[]any{nil, uint64(1)}, uint64(2)}},
+				input: stringtest.LinesLF(
+					"- - &x",
+					"  # c",
+					"  - 1",
+					"- 2",
+				),
+				want: []any{[]any{[]any{nil, uint64(1)}, uint64(2)}},
 			},
 			// Below a comment left of its "-", the parser gives the anchor
 			// a null value. Without the comment, it takes the key in the
 			// column of that "-" as the value of the anchor.
 			"anchor with no value in a sequence in the column of its key": {
-				input: "p:\n  q:\n  - &x\n# c\n  n: 1\n",
+				input: stringtest.LinesLF(
+					"p:",
+					"  q:",
+					"  - &x",
+					"# c",
+					"  n: 1",
+				),
 				want: []any{map[string]any{
 					"p": map[string]any{"q": []any{nil}, "n": uint64(1)},
 				}},
 			},
 			"anchor with no value in a sequence in the column of a key of an entry": {
-				input: "- p:\n  - &x\n# c\n  n: 1\n",
-				want:  []any{[]any{map[string]any{"p": []any{nil}, "n": uint64(1)}}},
+				input: stringtest.LinesLF(
+					"- p:",
+					"  - &x",
+					"# c",
+					"  n: 1",
+				),
+				want: []any{[]any{map[string]any{"p": []any{nil}, "n": uint64(1)}}},
 			},
 			// The anchor still takes the indented node below the comment.
 			"anchor above a comment and its nested value": {
-				input: "a: &x\n# c\n  b: 1\nc: *x\n",
+				input: stringtest.LinesLF(
+					"a: &x",
+					"# c",
+					"  b: 1",
+					"c: *x",
+				),
 				want: []any{map[string]any{
 					"a": map[string]any{"b": uint64(1)},
 					"c": map[string]any{"b": uint64(1)},
@@ -800,21 +925,36 @@ func TestDocument_Decode(t *testing.T) {
 			// directly follows on its line, the parser gives the anchor a
 			// null value and rejects the value of the anchor.
 			"comment left of the key above a sequence in its column": {
-				input: "a:\n  b: &x\n# c\n  - 1\n",
-				want:  []any{map[string]any{"a": map[string]any{"b": []any{uint64(1)}}}},
+				input: stringtest.LinesLF(
+					"a:",
+					"  b: &x",
+					"# c",
+					"  - 1",
+				),
+				want: []any{map[string]any{"a": map[string]any{"b": []any{uint64(1)}}}},
 			},
 			"comment left of the key above an indented value": {
-				input: "a:\n  b: &x\n# c\n    c: 1\n",
+				input: stringtest.LinesLF(
+					"a:",
+					"  b: &x",
+					"# c",
+					"    c: 1",
+				),
 				want: []any{map[string]any{
 					"a": map[string]any{"b": map[string]any{"c": uint64(1)}},
 				}},
 			},
 			"comment left of the entry above an indented value": {
-				input: "- - &x\n# c\n    - 1\n",
+				input: stringtest.LinesLF("- - &x", "# c", "    - 1"),
 				want:  []any{[]any{[]any{[]any{uint64(1)}}}},
 			},
 			"comment left of the key below a comment on its line": {
-				input: "a:\n  b: &x # c\n# d\n    c: 1\n",
+				input: stringtest.LinesLF(
+					"a:",
+					"  b: &x # c",
+					"# d",
+					"    c: 1",
+				),
 				want: []any{map[string]any{
 					"a": map[string]any{"b": map[string]any{"c": uint64(1)}},
 				}},
@@ -822,13 +962,25 @@ func TestDocument_Decode(t *testing.T) {
 			// The first comment on a line of its own decides for the
 			// comments below it.
 			"comment left of the key below a comment in its column": {
-				input: "a:\n  b: &x\n  # c\n# d\n    c: 1\n",
+				input: stringtest.LinesLF(
+					"a:",
+					"  b: &x",
+					"  # c",
+					"# d",
+					"    c: 1",
+				),
 				want: []any{map[string]any{
 					"a": map[string]any{"b": map[string]any{"c": uint64(1)}},
 				}},
 			},
 			"comment in the column of the key below a comment left of it": {
-				input: "a:\n  b: &x\n# c\n    # d\n    c: 1\n",
+				input: stringtest.LinesLF(
+					"a:",
+					"  b: &x",
+					"# c",
+					"    # d",
+					"    c: 1",
+				),
 				want: []any{map[string]any{
 					"a": map[string]any{"b": map[string]any{"c": uint64(1)}},
 				}},
@@ -836,8 +988,13 @@ func TestDocument_Decode(t *testing.T) {
 			// The parser accepts a comment left of the "?" of an explicit
 			// key above the value of the anchor.
 			"comment left of an explicit key above an indented value": {
-				input: "  ? a\n  : &x\n# c\n    b: 2\n",
-				want:  []any{map[string]any{"a": map[string]any{"b": uint64(2)}}},
+				input: stringtest.LinesLF(
+					"  ? a",
+					"  : &x",
+					"# c",
+					"    b: 2",
+				),
+				want: []any{map[string]any{"a": map[string]any{"b": uint64(2)}}},
 			},
 		}
 
@@ -872,7 +1029,7 @@ func TestDocument_Decode(t *testing.T) {
 				path:  paths.Current(),
 			},
 			"root above a header": {
-				input: "--- &x\n# c\n---\nb: 1\n",
+				input: stringtest.LinesLF("--- &x", "# c", "---", "b: 1"),
 				path:  paths.Current(),
 			},
 			"mapping value": {
@@ -880,7 +1037,7 @@ func TestDocument_Decode(t *testing.T) {
 				path:  paths.Current().Child("list"),
 			},
 			"mapping value after a reused anchor name": {
-				input: "x: &d 1\ny: *d\nlist: &d\n# end\n",
+				input: stringtest.LinesLF("x: &d 1", "y: *d", "list: &d", "# end"),
 				path:  paths.Current().Child("list"),
 			},
 			"sequence item": {
@@ -927,10 +1084,10 @@ func TestDocument_Decode(t *testing.T) {
 				input: "list: &d\n# end\n",
 			},
 			"field after a reused anchor name": {
-				input: "x: &d 1\ny: *d\nlist: &d\n# end\n",
+				input: stringtest.LinesLF("x: &d 1", "y: *d", "list: &d", "# end"),
 			},
 			"field above a header": {
-				input: "list: &d\n# end\n---\nb: 1\n",
+				input: stringtest.LinesLF("list: &d", "# end", "---", "b: 1"),
 			},
 		}
 
@@ -1056,15 +1213,15 @@ func TestDocument_Decode(t *testing.T) {
 			want  string
 		}{
 			"tag": {
-				input: "spec:\n  version: !!int 16\n",
+				input: stringtest.LinesLF("spec:", "  version: !!int 16"),
 				want:  "version: !!int 16\n",
 			},
 			"tag on an anchor": {
-				input: "spec:\n  version: !!int &x 16\n",
+				input: stringtest.LinesLF("spec:", "  version: !!int &x 16"),
 				want:  "version: !!int &x 16\n",
 			},
 			"anchors on both sides of the tag": {
-				input: "spec:\n  version: &x !!int &y 16\n",
+				input: stringtest.LinesLF("spec:", "  version: &x !!int &y 16"),
 				want:  "version: &x !!int &y 16\n",
 			},
 			"after a reused anchor name": {
@@ -1114,113 +1271,215 @@ func TestDocument_Decode(t *testing.T) {
 			want  []any
 		}{
 			"comment at the start of a flow mapping": {
-				input: "config: {\n  # production\n  name: prod\n}\n",
-				want:  []any{map[string]any{"config": map[string]any{"name": "prod"}}},
+				input: stringtest.LinesLF(
+					"config: {",
+					"  # production",
+					"  name: prod",
+					"}",
+				),
+				want: []any{map[string]any{"config": map[string]any{"name": "prod"}}},
 			},
 			"comment between flow mapping entries": {
-				input: "a: {\n  b: 1,\n  # c\n  c: 2\n}\n",
-				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1), "c": uint64(2)}}},
+				input: stringtest.LinesLF(
+					"a: {",
+					"  b: 1,",
+					"  # c",
+					"  c: 2",
+					"}",
+				),
+				want: []any{map[string]any{"a": map[string]any{"b": uint64(1), "c": uint64(2)}}},
 			},
 			"comment before a comma in a flow mapping": {
-				input: "a: {\n  b: 1\n  # c\n  , c: 2\n}\n",
-				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1), "c": uint64(2)}}},
+				input: stringtest.LinesLF(
+					"a: {",
+					"  b: 1",
+					"  # c",
+					"  , c: 2",
+					"}",
+				),
+				want: []any{map[string]any{"a": map[string]any{"b": uint64(1), "c": uint64(2)}}},
 			},
 			"comments before a closing brace": {
-				input: "a: {\n  b: 1\n  # c\n  # d\n}\n",
-				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
+				input: stringtest.LinesLF(
+					"a: {",
+					"  b: 1",
+					"  # c",
+					"  # d",
+					"}",
+				),
+				want: []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
 			},
 			"comment after a trailing comma in a flow mapping": {
-				input: "a: {\n  b: 1,\n  # c\n}\n",
-				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
+				input: stringtest.LinesLF(
+					"a: {",
+					"  b: 1,",
+					"  # c",
+					"}",
+				),
+				want: []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
 			},
 			"comment in an empty flow mapping": {
-				input: "a: {\n  # c\n}\n",
+				input: stringtest.LinesLF("a: {", "  # c", "}"),
 				want:  []any{map[string]any{"a": map[string]any{}}},
 			},
 			"comment between an explicit key and its colon": {
-				input: "a: {\n  ? b\n  # c\n  : 1\n}\n",
-				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
+				input: stringtest.LinesLF(
+					"a: {",
+					"  ? b",
+					"  # c",
+					"  : 1",
+					"}",
+				),
+				want: []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
 			},
 			"comment after an explicit key indicator in a flow mapping": {
-				input: "a: {? \n  # c\n  b : 1, c: d}\n",
+				input: stringtest.LinesLF("a: {? ", "  # c", "  b : 1, c: d}"),
 				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1), "c": "d"}}},
 			},
 			"comment after an explicit key indicator in a flow sequence": {
-				input: "a: [? \n  # c\n  b : 1, c]\n",
+				input: stringtest.LinesLF("a: [? ", "  # c", "  b : 1, c]"),
 				want:  []any{map[string]any{"a": []any{map[string]any{"b": uint64(1)}, "c"}}},
 			},
 			"comments after an explicit key indicator in a root flow sequence": {
-				input: "[? \n  # c\n  # d\n  b : 1, c]\n",
-				want:  []any{[]any{map[string]any{"b": uint64(1)}, "c"}},
+				input: stringtest.LinesLF(
+					"[? ",
+					"  # c",
+					"  # d",
+					"  b : 1, c]",
+				),
+				want: []any{[]any{map[string]any{"b": uint64(1)}, "c"}},
 			},
 			"comment before a closing bracket": {
-				input: "a: [\n  1\n  # c\n]\n",
-				want:  []any{map[string]any{"a": []any{uint64(1)}}},
+				input: stringtest.LinesLF(
+					"a: [",
+					"  1",
+					"  # c",
+					"]",
+				),
+				want: []any{map[string]any{"a": []any{uint64(1)}}},
 			},
 			"comment before a comma in a flow sequence": {
-				input: "a: [\n  1\n  # c\n  , 2\n]\n",
-				want:  []any{map[string]any{"a": []any{uint64(1), uint64(2)}}},
+				input: stringtest.LinesLF(
+					"a: [",
+					"  1",
+					"  # c",
+					"  , 2",
+					"]",
+				),
+				want: []any{map[string]any{"a": []any{uint64(1), uint64(2)}}},
 			},
 			"comment after a trailing comma in a flow sequence": {
-				input: "a: [\n  1,\n  # c\n]\n",
-				want:  []any{map[string]any{"a": []any{uint64(1)}}},
+				input: stringtest.LinesLF(
+					"a: [",
+					"  1,",
+					"  # c",
+					"]",
+				),
+				want: []any{map[string]any{"a": []any{uint64(1)}}},
 			},
 			"comment in an empty flow sequence": {
-				input: "a: [\n  # c\n]\n",
+				input: stringtest.LinesLF("a: [", "  # c", "]"),
 				want:  []any{map[string]any{"a": []any{}}},
 			},
 			"comment below a comment on the line of an entry": {
-				input: "a: [\n  1 # c\n  # d\n]\n",
-				kept:  "# c",
-				want:  []any{map[string]any{"a": []any{uint64(1)}}},
+				input: stringtest.LinesLF(
+					"a: [",
+					"  1 # c",
+					"  # d",
+					"]",
+				),
+				kept: "# c",
+				want: []any{map[string]any{"a": []any{uint64(1)}}},
 			},
 			// The parser reads a comment on the last line of a scalar on
 			// several lines as one on a line of its own.
 			"comment on the last line of an entry before a closing bracket": {
-				input: "[a\n b # c\n]\n",
+				input: stringtest.LinesLF("[a", " b # c", "]"),
 				want:  []any{[]any{"a b"}},
 			},
 			"comment on the last line of an entry before a comma": {
-				input: "[a\n b # c\n, d]\n",
+				input: stringtest.LinesLF("[a", " b # c", ", d]"),
 				want:  []any{[]any{"a b", "d"}},
 			},
 			"comment on the last line of a value before a closing brace": {
-				input: "{a: \"x\n y\" # c\n}\n",
+				input: stringtest.LinesLF(`{a: "x`, ` y" # c`, "}"),
 				want:  []any{map[string]any{"a": "x y"}},
 			},
 			"flow mapping in a flow sequence": {
-				input: "a: [1, {\n  # c\n  b: 2\n}]\n",
-				want:  []any{map[string]any{"a": []any{uint64(1), map[string]any{"b": uint64(2)}}}},
+				input: stringtest.LinesLF(
+					"a: [1, {",
+					"  # c",
+					"  b: 2",
+					"}]",
+				),
+				want: []any{map[string]any{"a": []any{uint64(1), map[string]any{"b": uint64(2)}}}},
 			},
 			"flow mapping at the root": {
-				input: "{\n  # c\n  a: 1\n}\n",
-				want:  []any{map[string]any{"a": uint64(1)}},
+				input: stringtest.LinesLF(
+					"{",
+					"  # c",
+					"  a: 1",
+					"}",
+				),
+				want: []any{map[string]any{"a": uint64(1)}},
 			},
 			"crlf line endings": {
-				input: "config: {\r\n  # production\r\n  name: prod\r\n}\r\n",
-				want:  []any{map[string]any{"config": map[string]any{"name": "prod"}}},
+				input: stringtest.LinesCRLF(
+					"config: {",
+					"  # production",
+					"  name: prod",
+					"}",
+				),
+				want: []any{map[string]any{"config": map[string]any{"name": "prod"}}},
 			},
 			"second document": {
-				input: "a: {\n  # c\n  b: 1\n}\n---\nx: [\n  1\n  # d\n]\n",
+				input: stringtest.LinesLF(
+					"a: {",
+					"  # c",
+					"  b: 1",
+					"}",
+					"---",
+					"x: [",
+					"  1",
+					"  # d",
+					"]",
+				),
 				want: []any{
 					map[string]any{"a": map[string]any{"b": uint64(1)}},
 					map[string]any{"x": []any{uint64(1)}},
 				},
 			},
 			"comment after an opening bracket": {
-				input: "a: [\n  # c\n  1\n]\n",
-				kept:  "# c",
-				want:  []any{map[string]any{"a": []any{uint64(1)}}},
+				input: stringtest.LinesLF(
+					"a: [",
+					"  # c",
+					"  1",
+					"]",
+				),
+				kept: "# c",
+				want: []any{map[string]any{"a": []any{uint64(1)}}},
 			},
 			"comment between flow sequence entries": {
-				input: "a: [\n  1,\n  # c\n  2\n]\n",
-				kept:  "# c",
-				want:  []any{map[string]any{"a": []any{uint64(1), uint64(2)}}},
+				input: stringtest.LinesLF(
+					"a: [",
+					"  1,",
+					"  # c",
+					"  2",
+					"]",
+				),
+				kept: "# c",
+				want: []any{map[string]any{"a": []any{uint64(1), uint64(2)}}},
 			},
 			"comment between a colon and its value": {
-				input: "a: {\n  b:\n  # c\n  1\n}\n",
-				kept:  "# c",
-				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
+				input: stringtest.LinesLF(
+					"a: {",
+					"  b:",
+					"  # c",
+					"  1",
+					"}",
+				),
+				kept: "# c",
+				want: []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
 			},
 		}
 
@@ -1246,56 +1505,89 @@ func TestDocument_Decode(t *testing.T) {
 			want  []any
 		}{
 			"comment between a key and its colon": {
-				input: "? a\n# c\n: 1\n",
+				input: stringtest.LinesLF("? a", "# c", ": 1"),
 				want:  []any{map[string]any{"a": uint64(1)}},
 			},
 			"indented comment between a key and its colon": {
-				input: "? a\n  # c\n: 1\n",
+				input: stringtest.LinesLF("? a", "  # c", ": 1"),
 				want:  []any{map[string]any{"a": uint64(1)}},
 			},
 			"comments with a blank line between them": {
-				input: "? a\n# c\n\n# d\n: 1\n",
-				want:  []any{map[string]any{"a": uint64(1)}},
+				input: stringtest.LinesLF(
+					"? a",
+					"# c",
+					"",
+					"# d",
+					": 1",
+				),
+				want: []any{map[string]any{"a": uint64(1)}},
 			},
 			"comment before the colon of a later key": {
-				input: "? a\n: 1\n? b\n# c\n: 2\n",
-				want:  []any{map[string]any{"a": uint64(1), "b": uint64(2)}},
+				input: stringtest.LinesLF(
+					"? a",
+					": 1",
+					"? b",
+					"# c",
+					": 2",
+				),
+				want: []any{map[string]any{"a": uint64(1), "b": uint64(2)}},
 			},
 			"comment in a nested mapping": {
-				input: "x:\n  ? a\n  # c\n  : 1\n",
-				want:  []any{map[string]any{"x": map[string]any{"a": uint64(1)}}},
+				input: stringtest.LinesLF(
+					"x:",
+					"  ? a",
+					"  # c",
+					"  : 1",
+				),
+				want: []any{map[string]any{"x": map[string]any{"a": uint64(1)}}},
 			},
 			"comment in a mapping in a sequence": {
-				input: "- ? a\n  # c\n  : 1\n",
+				input: stringtest.LinesLF("- ? a", "  # c", "  : 1"),
 				want:  []any{[]any{map[string]any{"a": uint64(1)}}},
 			},
 			"comment below a block scalar key": {
-				input: "? |\n  lit\n# c\n: 1\n",
-				want:  []any{map[string]any{"lit\n": uint64(1)}},
+				input: stringtest.LinesLF(
+					"? |",
+					"  lit",
+					"# c",
+					": 1",
+				),
+				want: []any{map[string]any{"lit\n": uint64(1)}},
 			},
 			"comment above a block sequence value": {
-				input: "? a\n# c\n: - 1\n",
+				input: stringtest.LinesLF("? a", "# c", ": - 1"),
 				want:  []any{map[string]any{"a": []any{uint64(1)}}},
 			},
 			"comment between an indicator and its key": {
-				input: "? \n  # c\n  a\n: 1\n",
-				want:  []any{map[string]any{"a": uint64(1)}},
+				input: stringtest.LinesLF(
+					"? ",
+					"  # c",
+					"  a",
+					": 1",
+				),
+				want: []any{map[string]any{"a": uint64(1)}},
 			},
 			"comment on the line of the key": {
-				input: "? a # k\n# c\n: 1\n",
+				input: stringtest.LinesLF("? a # k", "# c", ": 1"),
 				kept:  "# k",
 				want:  []any{map[string]any{"a": uint64(1)}},
 			},
 			// The parser reads a comment on the last line of a key on
 			// several lines as one on a line of its own.
 			"comment on the last line of a quoted key": {
-				input: "? \"a\n b\" # c\n: 1\n",
+				input: stringtest.LinesLF(`? "a`, ` b" # c`, ": 1"),
 				want:  []any{map[string]any{"a b": uint64(1)}},
 			},
 			"comment between entries": {
-				input: "? a\n: 1\n# c\n? b\n: 2\n",
-				kept:  "# c",
-				want:  []any{map[string]any{"a": uint64(1), "b": uint64(2)}},
+				input: stringtest.LinesLF(
+					"? a",
+					": 1",
+					"# c",
+					"? b",
+					": 2",
+				),
+				kept: "# c",
+				want: []any{map[string]any{"a": uint64(1), "b": uint64(2)}},
 			},
 		}
 
