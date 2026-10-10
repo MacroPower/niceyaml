@@ -417,17 +417,15 @@ func TestResolver_Token(t *testing.T) {
 			path:  "$.b",
 			err:   paths.ErrNotFound,
 		},
-		"nil document": {
-			path: "$.a",
-			err:  paths.ErrNoDocument,
-		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk, err := paths.NewResolver(documentOf(t, tc.input)).Token(paths.MustParse(tc.path))
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
+
+			tk, err := paths.NewResolver(doc).Token(paths.MustParse(tc.path))
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 
@@ -701,21 +699,15 @@ func TestResolver_Matches(t *testing.T) {
 			path:  "$",
 			want:  []string{"$=null"},
 		},
-		"nil document": {
-			path: "$.a",
-			err:  paths.ErrNoDocument,
-		},
-		"wildcard in a nil document": {
-			path: "$.a[*]",
-			err:  paths.ErrNoDocument,
-		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			matches, err := paths.NewResolver(documentOf(t, tc.input)).Matches(paths.MustParse(tc.path))
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
+
+			matches, err := paths.NewResolver(doc).Matches(paths.MustParse(tc.path))
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 
