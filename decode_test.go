@@ -3116,86 +3116,48 @@ func TestDocument_Tokens(t *testing.T) {
 	t.Run("yields the same tokens on every pass", func(t *testing.T) {
 		t.Parallel()
 
-		input := stringtest.Input(`
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
 			---
 			a: 1
 			---
 			b: 2
-		`)
-		source := niceyaml.NewSourceFromString(input)
-		d := source.Documents()
+		`))
 
-		var first, second [][]int
+		docs := source.Documents()
+		require.Len(t, docs, 2)
 
-		collect := func() []int {
-			var lens []int
-
-			for _, dd := range d {
-				lens = append(lens, len(dd.Tokens()))
-			}
-
-			return lens
-		}
-
-		first = append(first, collect())
-		second = append(second, collect())
-		assert.Equal(t, first, second)
-		assert.Equal(t, [][]int{{4, 4}}, first)
-
-		// The tokens are the source's originals, not copies, so the first token
-		// of the second document is the same pointer on each pass.
-		var passes []*token.Token
-
+		// The tokens are the source's originals, not copies, so the first
+		// token of the second document is the same pointer on each pass.
 		for range 2 {
-			for i, dd := range d {
-				if i == 1 {
-					passes = append(passes, dd.Tokens()[0])
-				}
-			}
-		}
+			assert.Len(t, docs[0].Tokens(), 4)
 
-		require.Len(t, passes, 2)
-		assert.Same(t, passes[0], passes[1])
-		assert.Same(t, source.Tokens()[4], passes[0])
+			second := docs[1].Tokens()
+			require.Len(t, second, 4)
+			assert.Same(t, source.Tokens()[4], second[0])
+		}
 	})
 
 	t.Run("pairs tokens with documents closed by an end marker", func(t *testing.T) {
 		t.Parallel()
 
-		input := stringtest.Input(`
+		docs := niceyaml.NewSourceFromString(stringtest.Input(`
 			kind: A
 			...
 			kind: B
-		`)
-		source := niceyaml.NewSourceFromString(input)
-		d := source.Documents()
-		require.Len(t, d, 2)
+		`)).Documents()
+		require.Len(t, docs, 2)
 
-		kindPath := paths.Current().Child("kind")
-
-		for i, dd := range d {
-			kind, err := yamltest.At(t, dd, kindPath).Decode[string](t.Context())
+		for i, want := range []string{"A", "B"} {
+			kind, err := yamltest.At(t, docs[i], paths.Current().Child("kind")).Decode[string](t.Context())
 			require.NoError(t, err)
-
-			tks := dd.Tokens()
-			require.NotEmpty(t, tks, "document %d has no tokens", i)
-
-			var want string
-
-			switch i {
-			case 0:
-				want = "A"
-
-				assert.Equal(t, token.DocumentEndType, tks[len(tks)-1].Type)
-
-			case 1:
-				want = "B"
-
-				assert.NotEqual(t, token.DocumentEndType, tks[len(tks)-1].Type)
-			}
-
 			assert.Equal(t, want, kind)
+
+			tks := docs[i].Tokens()
+			require.NotEmpty(t, tks, "document %d has no tokens", i)
 			assert.Contains(t, tks[0].Origin, "kind")
+
+			// The marker ends the first document alone.
+			assert.Equal(t, i == 0, tks[len(tks)-1].Type == token.DocumentEndType, "document %d", i)
 		}
 	})
 
@@ -3225,30 +3187,22 @@ func TestDocument_Tokens(t *testing.T) {
 		// The parser cuts a leading comment into a node of its own, and the
 		// header that follows starts the document. The comment is the
 		// preamble of that document, so its tokens open the document's.
-		input := stringtest.Input(`
+		d := niceyaml.NewSourceFromString(stringtest.Input(`
 			# top
 
 			---
 			b: 2
-		`)
-		source := niceyaml.NewSourceFromString(input)
-		d := source.Documents()
+		`)).Documents()
 		require.Len(t, d, 1)
 
-		var types [][]token.Type
+		var types []token.Type
 
-		for _, dd := range d {
-			var docTypes []token.Type
-
-			for _, tk := range dd.Tokens() {
-				docTypes = append(docTypes, tk.Type)
-			}
-
-			types = append(types, docTypes)
+		for _, tk := range d[0].Tokens() {
+			types = append(types, tk.Type)
 		}
 
-		assert.Equal(t, [][]token.Type{
-			{token.CommentType, token.DocumentHeaderType, token.StringType, token.MappingValueType, token.IntegerType},
+		assert.Equal(t, []token.Type{
+			token.CommentType, token.DocumentHeaderType, token.StringType, token.MappingValueType, token.IntegerType,
 		}, types)
 	})
 
