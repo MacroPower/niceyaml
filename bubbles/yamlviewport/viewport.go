@@ -88,8 +88,8 @@ func (s finderSearcher) Load(lines line.Sequence) Index {
 //
 // The viewport renders the lines the view holds in the order
 // [line.View.All] yields them, which is content order, and windows them
-// by index. A search covers the content of the view, and the viewport
-// keeps the matches on lines the view holds.
+// by index. A search reads the lines the view holds, and the viewport
+// drops a match that a [Searcher] reports on any other line.
 //
 // See [ViewRevision] and [niceyaml.Source] for implementations.
 type Revision interface {
@@ -1282,8 +1282,9 @@ func find(idx Index, search string) position.Ranges {
 }
 
 // heldMatches returns the matches that start on a line view holds. A
-// search covers the whole content of the view, and a view over part of a
-// document, such as one from [niceyaml.Node.View], holds some of it.
+// [Searcher] loads those lines alone, but an Index of another package may
+// report a range on a line the view skips, such as one between two hunks
+// or outside the document of a [niceyaml.Node.View].
 func heldMatches(view *line.View, matches position.Ranges) position.Ranges {
 	held := make(position.Ranges, 0, len(matches))
 
