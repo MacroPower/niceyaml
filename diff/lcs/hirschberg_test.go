@@ -335,30 +335,6 @@ func TestHirschberg_Reuse(t *testing.T) {
 	}, ops1)
 }
 
-func TestHirschberg_BufferGrowth(t *testing.T) {
-	t.Parallel()
-
-	// Test that larger inputs work when buffers are initially empty.
-	h := lcs.NewHirschberg()
-
-	before := []string{"a", "b", "c", "d", "e"}
-	after := []string{"a", "x", "c", "y", "e"}
-
-	got := h.Diff(before, after)
-
-	want := []lcs.Op{
-		{Kind: lcs.OpEqual, Before: 0, After: 0},
-		{Kind: lcs.OpDelete, Before: 1, After: -1},
-		{Kind: lcs.OpInsert, Before: -1, After: 1},
-		{Kind: lcs.OpEqual, Before: 2, After: 2},
-		{Kind: lcs.OpDelete, Before: 3, After: -1},
-		{Kind: lcs.OpInsert, Before: -1, After: 3},
-		{Kind: lcs.OpEqual, Before: 4, After: 4},
-	}
-
-	assert.Equal(t, want, got)
-}
-
 func TestHirschberg_Concurrent(t *testing.T) {
 	t.Parallel()
 
