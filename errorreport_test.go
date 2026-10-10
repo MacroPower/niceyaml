@@ -241,11 +241,11 @@ func TestNewErrorReport_JoinOfNothing(t *testing.T) {
 	}{
 		"a bound join of typed-nil errors holds its message": {
 			err:  nothing,
-			want: niceyaml.ErrorTree{Label: "f.yaml: \n"},
+			want: textNode("f.yaml: \n"),
 		},
 		"a join of typed-nil errors holds its message": {
 			err:  errors.Join(nilErr, nilErr),
-			want: niceyaml.ErrorTree{Label: "\n"},
+			want: textNode("\n"),
 		},
 		"an error with no message holds nothing": {
 			err: errors.New(""),

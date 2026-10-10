@@ -47,6 +47,18 @@ func textTree(t niceyaml.ErrorTree) niceyaml.ErrorTree {
 	return out
 }
 
+// textNode returns a node with the text label above children, the shape
+// [textTree] gives a node of a tree.
+func textNode(label string, children ...niceyaml.ErrorTree) niceyaml.ErrorTree {
+	return niceyaml.ErrorTree{Label: label, Children: children}
+}
+
+// textForest returns a root with no text above children, the shape
+// [textTree] gives the tree of a join.
+func textForest(children ...niceyaml.ErrorTree) niceyaml.ErrorTree {
+	return niceyaml.ErrorTree{Children: children}
+}
+
 // badKeyError returns a function that builds an error with the message
 // "bad <key>" at the path of key under the value in scope. Each call
 // builds an error of its own.
@@ -202,7 +214,7 @@ func TestErrorTree_New_LeftDeepJoin(t *testing.T) {
 			for i := range n {
 				msg := fmt.Sprintf("error %d", i)
 				joined = errors.Join(joined, countingError{calls: &calls, msg: msg})
-				want.Children = append(want.Children, niceyaml.ErrorTree{Label: tc.prefix + msg})
+				want.Children = append(want.Children, textNode(tc.prefix+msg))
 			}
 
 			got := textTree(niceyaml.NewErrorTree(tc.build(joined)))
@@ -236,8 +248,8 @@ func TestErrorTree_New_DeepMultiWrap(t *testing.T) {
 
 				return err
 			},
-			want: niceyaml.ErrorTree{Label: "e0; e1; e2; e3; e4; e5; e6; e7; e8; e9; " +
-				"e10; e11; e12; e13; e14; e15; e16; e17; e18; e19"},
+			want: textNode("e0; e1; e2; e3; e4; e5; e6; e7; e8; e9; " +
+				"e10; e11; e12; e13; e14; e15; e16; e17; e18; e19"),
 		},
 		"sentinel wrappers over a located error": {
 			build: func(calls *atomic.Int64) error {
@@ -251,7 +263,7 @@ func TestErrorTree_New_DeepMultiWrap(t *testing.T) {
 
 				return err
 			},
-			want: niceyaml.ErrorTree{Label: "@.a: " + strings.Repeat("invalid: ", n-1) + "bad"},
+			want: textNode("@.a: " + strings.Repeat("invalid: ", n-1) + "bad"),
 		},
 	}
 
@@ -478,31 +490,25 @@ func TestErrorTree_New(t *testing.T) {
 		},
 		"plain error": {
 			err:  errors.New("boom"),
-			want: niceyaml.ErrorTree{Label: "boom"},
+			want: textNode("boom"),
 		},
 		"error without nested errors": {
 			err:  badA(),
-			want: niceyaml.ErrorTree{Label: "@.a: bad a"},
+			want: textNode("@.a: bad a"),
 		},
 		"nested errors are children": {
 			err: niceyaml.NewSummary("2 problems", badA(), niceyaml.NewError("no path")),
-			want: niceyaml.ErrorTree{
-				Label: "2 problems",
-				Children: []niceyaml.ErrorTree{
-					{Label: "@.a: bad a"},
-					{Label: "no path"},
-				},
-			},
+			want: textNode("2 problems",
+				textNode("@.a: bad a"),
+				textNode("no path"),
+			),
 		},
 		"bound children carry their position without the name": {
 			err: yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", badA(), badB())),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: 2 problems",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("f.yaml: 2 problems",
+				textNode("1:4: $.a: bad a"),
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"bound child reports the position it was given": {
 			// The position sits inside the token of the value, so the
@@ -512,23 +518,17 @@ func TestErrorTree_New(t *testing.T) {
 				badB(),
 				niceyaml.NewError("mid", niceyaml.AtPosition(position.New(0, 8))),
 			)),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: 2 problems",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:9: mid"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("f.yaml: 2 problems",
+				textNode("1:9: mid"),
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"children sort by position": {
 			err: yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", badB(), badA())),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: 2 problems",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("f.yaml: 2 problems",
+				textNode("1:4: $.a: bad a"),
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"children without a position follow the positioned ones": {
 			err: yamltest.Bind(t, source, niceyaml.NewSummary("3 problems",
@@ -536,25 +536,19 @@ func TestErrorTree_New(t *testing.T) {
 				niceyaml.NewError("no path"),
 				badA(),
 			)),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: 3 problems",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "$.x[0]: bad x"},
-					{Label: "no path"},
-				},
-			},
+			want: textNode("f.yaml: 3 problems",
+				textNode("1:4: $.a: bad a"),
+				textNode("$.x[0]: bad x"),
+				textNode("no path"),
+			),
 		},
 		"child wrapping a binding of the same source keeps one position": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
 				fmt.Errorf("ctx: %w", yamltest.Bind(t, source, badA())),
 			))),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: outer",
-				Children: []niceyaml.ErrorTree{
-					{Label: "ctx: f.yaml:1:4: $.a: bad a"},
-				},
-			},
+			want: textNode("f.yaml: outer",
+				textNode("ctx: f.yaml:1:4: $.a: bad a"),
+			),
 		},
 		"child wrapping a binding in Errors alone reads as the binding": {
 			err: yamltest.Bind(t, source, niceyaml.NewSummary("summary",
@@ -565,51 +559,39 @@ func TestErrorTree_New(t *testing.T) {
 					niceyaml.Invalid(yamltest.Bind(t, source, badA()), niceyaml.WithDetails(niceyaml.NewError("y"))),
 				)),
 			)),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: summary",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "1:4: $.a: bad a", Children: []niceyaml.ErrorTree{{Label: "y"}}},
-					{Label: "2:4: $.b: bad b", Children: []niceyaml.ErrorTree{{Label: "x"}}},
-					{Label: "plain"},
-				},
-			},
+			want: textNode("f.yaml: summary",
+				textNode("1:4: $.a: bad a"),
+				textNode("1:4: $.a: bad a", textNode("y")),
+				textNode("2:4: $.b: bad b", textNode("x")),
+				textNode("plain"),
+			),
 		},
 		"root with a position keeps it": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer",
 				niceyaml.AtPath(paths.Current().Child("a")),
 				niceyaml.WithDetails(badB()),
 			)),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml:1:4: $.a: outer",
-				Children: []niceyaml.ErrorTree{
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("f.yaml:1:4: $.a: outer",
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"wrapper context stays in front of the root": {
 			err: fmt.Errorf("document 0: %w", yamltest.Bind(t, source,
 				niceyaml.NewSummary("2 problems", badA(), badB()),
 			)),
-			want: niceyaml.ErrorTree{
-				Label: "document 0: f.yaml: 2 problems",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("document 0: f.yaml: 2 problems",
+				textNode("1:4: $.a: bad a"),
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"wrapper inside the binding stays in front of the root": {
 			err: yamltest.Bind(t, source, fmt.Errorf("document 0: %w",
 				niceyaml.NewSummary("2 problems", badA(), badB()),
 			)),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: document 0: 2 problems",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("f.yaml: document 0: 2 problems",
+				textNode("1:4: $.a: bad a"),
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"nested error with nested errors is a subtree": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
@@ -618,44 +600,29 @@ func TestErrorTree_New(t *testing.T) {
 					niceyaml.WithDetails(badB()),
 				),
 			))),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: outer",
-				Children: []niceyaml.ErrorTree{
-					{
-						Label: "1:4: $.a: mid",
-						Children: []niceyaml.ErrorTree{
-							{Label: "2:4: $.b: bad b"},
-						},
-					},
-				},
-			},
+			want: textNode("f.yaml: outer",
+				textNode("1:4: $.a: mid",
+					textNode("2:4: $.b: bad b"),
+				),
+			),
 		},
 		"nested error bound to another source keeps its own positions": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
 				niceyaml.Invalid(yamltest.Bind(t, other, niceyaml.NewError("inner", niceyaml.WithDetails(badC())))),
 			))),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: outer",
-				Children: []niceyaml.ErrorTree{
-					{
-						Label: "g.yaml: inner",
-						Children: []niceyaml.ErrorTree{
-							{Label: "1:4: $.c: bad c"},
-						},
-					},
-				},
-			},
+			want: textNode("f.yaml: outer",
+				textNode("g.yaml: inner",
+					textNode("1:4: $.c: bad c"),
+				),
+			),
 		},
 		"binding rebound to another binding keeps the inner positions": {
 			err: yamltest.Bind(t, source, fmt.Errorf("outer: %w",
 				yamltest.Bind(t, other, niceyaml.NewError("inner", niceyaml.WithDetails(badC()))),
 			)),
-			want: niceyaml.ErrorTree{
-				Label: "outer: g.yaml: inner",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.c: bad c"},
-				},
-			},
+			want: textNode("outer: g.yaml: inner",
+				textNode("1:4: $.c: bad c"),
+			),
 		},
 		"located error above an inner binding positions its own nested errors": {
 			err: yamltest.Bind(t, source, niceyaml.Invalid(
@@ -663,112 +630,88 @@ func TestErrorTree_New(t *testing.T) {
 				niceyaml.AtPath(paths.Current().Child("a")),
 				niceyaml.WithDetails(badB()),
 			)),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml:1:4: $.a: g.yaml: inner",
-				Children: []niceyaml.ErrorTree{
-					{Label: "2:4: $.b: bad b"},
-					{Label: "g.yaml:1:4: $.c: bad c"},
-				},
-			},
+			want: textNode("f.yaml:1:4: $.a: g.yaml: inner",
+				textNode("2:4: $.b: bad b"),
+				textNode("g.yaml:1:4: $.c: bad c"),
+			),
 		},
 		"joined errors form a forest": {
 			err: errors.Join(
 				yamltest.Bind(t, source, badA()),
 				yamltest.Bind(t, other, badC()),
 			),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "f.yaml:1:4: $.a: bad a"},
-					{Label: "g.yaml:1:4: $.c: bad c"},
-				},
-			},
+			want: textForest(
+				textNode("f.yaml:1:4: $.a: bad a"),
+				textNode("g.yaml:1:4: $.c: bad c"),
+			),
 		},
 		"joined errors with nested errors are subtrees": {
 			err: errors.Join(
 				yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", badA(), badB())),
 				yamltest.Bind(t, other, badC()),
 			),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{
-						Label: "f.yaml: 2 problems",
-						Children: []niceyaml.ErrorTree{
-							{Label: "1:4: $.a: bad a"},
-							{Label: "2:4: $.b: bad b"},
-						},
-					},
-					{Label: "g.yaml:1:4: $.c: bad c"},
-				},
-			},
+			want: textForest(
+				textNode("f.yaml: 2 problems",
+					textNode("1:4: $.a: bad a"),
+					textNode("2:4: $.b: bad b"),
+				),
+				textNode("g.yaml:1:4: $.c: bad c"),
+			),
 		},
 		"unbound Error keeps the order of its bindings": {
 			err: niceyaml.NewSummary("summary",
 				yamltest.Bind(t, source, badB()),
 				yamltest.Bind(t, source, badA()),
 			),
-			want: niceyaml.ErrorTree{
-				Label: "summary",
-				Children: []niceyaml.ErrorTree{
-					{Label: "f.yaml:2:4: $.b: bad b"},
-					{Label: "f.yaml:1:4: $.a: bad a"},
-				},
-			},
+			want: textNode("summary",
+				textNode("f.yaml:2:4: $.b: bad b"),
+				textNode("f.yaml:1:4: $.a: bad a"),
+			),
 		},
 		"unbound join keeps the order of its bindings": {
 			err: errors.Join(
 				yamltest.Bind(t, source, badB()),
 				yamltest.Bind(t, source, badA()),
 			),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "f.yaml:2:4: $.b: bad b"},
-					{Label: "f.yaml:1:4: $.a: bad a"},
-				},
-			},
+			want: textForest(
+				textNode("f.yaml:2:4: $.b: bad b"),
+				textNode("f.yaml:1:4: $.a: bad a"),
+			),
 		},
 		"bound join of two sources keeps the order it was given": {
 			err: yamltest.Bind(t, source, errors.Join(
 				yamltest.Bind(t, source, badB()),
 				yamltest.Bind(t, other, badC()),
 			)),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "f.yaml:2:4: $.b: bad b"},
-					{Label: "g.yaml:1:4: $.c: bad c"},
-				},
-			},
+			want: textForest(
+				textNode("f.yaml:2:4: $.b: bad b"),
+				textNode("g.yaml:1:4: $.c: bad c"),
+			),
 			multiLine: true,
 		},
 		"bound join is a forest of named bindings": {
 			err: yamltest.Bind(t, source, errors.Join(badB(), badA())),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "f.yaml:1:4: $.a: bad a"},
-					{Label: "f.yaml:2:4: $.b: bad b"},
-				},
-			},
+			want: textForest(
+				textNode("f.yaml:1:4: $.a: bad a"),
+				textNode("f.yaml:2:4: $.b: bad b"),
+			),
 			multiLine: true,
 		},
 		"bound nested join flattens into one forest": {
 			err: yamltest.Bind(t, source, errors.Join(errors.Join(badB()), badA())),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "f.yaml:1:4: $.a: bad a"},
-					{Label: "f.yaml:2:4: $.b: bad b"},
-				},
-			},
+			want: textForest(
+				textNode("f.yaml:1:4: $.a: bad a"),
+				textNode("f.yaml:2:4: $.b: bad b"),
+			),
 		},
 		"join nested under a message gives its place to its branches": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
 				errors.Join(badB(), badA()),
 			))),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: outer",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("f.yaml: outer",
+				textNode("1:4: $.a: bad a"),
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"nested join bound to another source names it on its branches": {
 			err: yamltest.Bind(t, source, niceyaml.NewSummary("outer",
@@ -778,126 +721,96 @@ func TestErrorTree_New(t *testing.T) {
 					niceyaml.NewError("start", niceyaml.AtPosition(position.New(0, 0))),
 				)),
 			)),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: outer",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "g.yaml:1:1: start"},
-					{Label: "g.yaml:1:4: $.c: bad c"},
-				},
-			},
+			want: textNode("f.yaml: outer",
+				textNode("1:4: $.a: bad a"),
+				textNode("g.yaml:1:1: start"),
+				textNode("g.yaml:1:4: $.c: bad c"),
+			),
 		},
 		"error that only wraps a join is the join": {
 			err: niceyaml.Invalid(errors.Join(badA(), badB())),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "@.a: bad a"},
-					{Label: "@.b: bad b"},
-				},
-			},
+			want: textForest(
+				textNode("@.a: bad a"),
+				textNode("@.b: bad b"),
+			),
 		},
 		"bound error that only wraps a join is a forest of named bindings": {
 			err: yamltest.Bind(t, source, niceyaml.Invalid(errors.Join(badB(), badA()))),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "f.yaml:1:4: $.a: bad a"},
-					{Label: "f.yaml:2:4: $.b: bad b"},
-				},
-			},
+			want: textForest(
+				textNode("f.yaml:1:4: $.a: bad a"),
+				textNode("f.yaml:2:4: $.b: bad b"),
+			),
 			multiLine: true,
 		},
 		"nested error that only wraps a join gives its place to the branches": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
 				niceyaml.Invalid(errors.Join(badB(), badA())),
 			))),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: outer",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("f.yaml: outer",
+				textNode("1:4: $.a: bad a"),
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"error that only wraps a bound join is the bound join": {
 			err: niceyaml.Invalid(yamltest.Bind(t, source, errors.Join(badB(), badA()))),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "f.yaml:1:4: $.a: bad a"},
-					{Label: "f.yaml:2:4: $.b: bad b"},
-				},
-			},
+			want: textForest(
+				textNode("f.yaml:1:4: $.a: bad a"),
+				textNode("f.yaml:2:4: $.b: bad b"),
+			),
 		},
 		"nested error that only wraps a bound join gives its place to the branches": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
 				niceyaml.Invalid(yamltest.Bind(t, source, errors.Join(badB(), badA()))),
 			))),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: outer",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("f.yaml: outer",
+				textNode("1:4: $.a: bad a"),
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"nested error that only wraps a bound join with a nil branch gives its place to the rest": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
 				niceyaml.Invalid(yamltest.Bind(t, source, errors.Join((*niceyaml.Error)(nil), badB()))),
 			))),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: outer",
-				Children: []niceyaml.ErrorTree{
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("f.yaml: outer",
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"bound join below a wrapper keeps the text of the wrapper as the root": {
 			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", errors.Join(badA(), badB()))),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: ctx:",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("f.yaml: ctx:",
+				textNode("1:4: $.a: bad a"),
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"bound join that leads with another source names the root": {
 			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", errors.Join(
 				yamltest.Bind(t, other, badC()),
 				badB(),
 			))),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: ctx:",
-				Children: []niceyaml.ErrorTree{
-					{Label: "g.yaml:1:4: $.c: bad c"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("f.yaml: ctx:",
+				textNode("g.yaml:1:4: $.c: bad c"),
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"bound join that leads with a same-source binding of another source names the root": {
 			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", errors.Join(
 				yamltest.Bind(t, source, errors.Join(yamltest.Bind(t, other, badC()))),
 				badB(),
 			))),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: ctx:",
-				Children: []niceyaml.ErrorTree{
-					{Label: "g.yaml:1:4: $.c: bad c"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("f.yaml: ctx:",
+				textNode("g.yaml:1:4: $.c: bad c"),
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"Error with details around a same-source binding of another source names the root": {
 			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", niceyaml.Invalid(
 				yamltest.Bind(t, source, errors.Join(yamltest.Bind(t, other, badC()))),
 				niceyaml.WithDetails(badB()),
 			))),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: ctx:",
-				Children: []niceyaml.ErrorTree{
-					{Label: "2:4: $.b: bad b"},
-					{Label: "g.yaml:1:4: $.c: bad c"},
-				},
-			},
+			want: textNode("f.yaml: ctx:",
+				textNode("2:4: $.b: bad b"),
+				textNode("g.yaml:1:4: $.c: bad c"),
+			),
 		},
 		"child with details around a bound join gives its place to its named children": {
 			err: yamltest.Bind(t, other, niceyaml.NewError("root",
@@ -907,13 +820,10 @@ func TestErrorTree_New(t *testing.T) {
 					niceyaml.WithDetails(badB()),
 				))),
 			)),
-			want: niceyaml.ErrorTree{
-				Label: "g.yaml:1:4: $.c: root",
-				Children: []niceyaml.ErrorTree{
-					{Label: "f.yaml:2:4: $.b: bad b"},
-					{Label: "g.yaml:1:4: $.c: bad c"},
-				},
-			},
+			want: textNode("g.yaml:1:4: $.c: root",
+				textNode("f.yaml:2:4: $.b: bad b"),
+				textNode("g.yaml:1:4: $.c: bad c"),
+			),
 		},
 		"branch with details around a bound join gives its place to its named children": {
 			err: yamltest.Bind(t, source, errors.Join(
@@ -923,71 +833,55 @@ func TestErrorTree_New(t *testing.T) {
 				)),
 				badA(),
 			)),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "f.yaml:1:4: $.a: bad a"},
-					{Label: "f.yaml:2:4: $.b: bad b"},
-					{Label: "g.yaml:1:4: $.c: bad c"},
-				},
-			},
+			want: textForest(
+				textNode("f.yaml:1:4: $.a: bad a"),
+				textNode("f.yaml:2:4: $.b: bad b"),
+				textNode("g.yaml:1:4: $.c: bad c"),
+			),
 		},
 		"wrapper around a join of bindings keeps its own text": {
 			err: fmt.Errorf("load: %w", errors.Join(
 				yamltest.Bind(t, source, badB()),
 				yamltest.Bind(t, source, badA()),
 			)),
-			want: niceyaml.ErrorTree{
-				Label: "load:",
-				Children: []niceyaml.ErrorTree{
-					{Label: "f.yaml:2:4: $.b: bad b"},
-					{Label: "f.yaml:1:4: $.a: bad a"},
-				},
-			},
+			want: textNode("load:",
+				textNode("f.yaml:2:4: $.b: bad b"),
+				textNode("f.yaml:1:4: $.a: bad a"),
+			),
 		},
 		"wrapper around a bound join names the source on each branch": {
 			err: fmt.Errorf("load: %w", yamltest.Bind(t, source, errors.Join(badB(), badA()))),
-			want: niceyaml.ErrorTree{
-				Label: "load:",
-				Children: []niceyaml.ErrorTree{
-					{Label: "f.yaml:1:4: $.a: bad a"},
-					{Label: "f.yaml:2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("load:",
+				textNode("f.yaml:1:4: $.a: bad a"),
+				textNode("f.yaml:2:4: $.b: bad b"),
+			),
 		},
 		"wrapper with no text of its own around a join is the join": {
 			err: fmt.Errorf("%w", errors.Join(badA(), badB())),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "@.a: bad a"},
-					{Label: "@.b: bad b"},
-				},
-			},
+			want: textForest(
+				textNode("@.a: bad a"),
+				textNode("@.b: bad b"),
+			),
 		},
 		"wrapper that puts text behind a binding keeps it on the line of the binding": {
 			err: fmt.Errorf("%w (while loading)", yamltest.Bind(t, source,
 				niceyaml.NewSummary("2 problems", badA(), badB()))),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: 2 problems (while loading)",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("f.yaml: 2 problems (while loading)",
+				textNode("1:4: $.a: bad a"),
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"wrapper that rewrites the message of a binding keeps its text whole": {
 			err: upperError{err: yamltest.Bind(t, source,
 				niceyaml.NewSummary("2 problems", badA(), badB()))},
-			want: niceyaml.ErrorTree{
-				Label: "F.YAML: 2 PROBLEMS\nF.YAML:1:4: $.A: BAD A\nF.YAML:2:4: $.B: BAD B",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
+			want: textNode("F.YAML: 2 PROBLEMS\nF.YAML:1:4: $.A: BAD A\nF.YAML:2:4: $.B: BAD B",
+				textNode("1:4: $.a: bad a"),
+				textNode("2:4: $.b: bad b"),
+			),
 		},
 		"join of one error is that error": {
 			err:  errors.Join(errors.Join(errors.New("boom"))),
-			want: niceyaml.ErrorTree{Label: "boom"},
+			want: textNode("boom"),
 		},
 		"nested joins flatten into one forest": {
 			err: errors.Join(
@@ -995,40 +889,36 @@ func TestErrorTree_New(t *testing.T) {
 				nil,
 				errors.New("three"),
 			),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "one"},
-					{Label: "two"},
-					{Label: "three"},
-				},
-			},
+			want: textForest(
+				textNode("one"),
+				textNode("two"),
+				textNode("three"),
+			),
 		},
 		"error without a message and nested errors is a forest": {
 			err: niceyaml.NewError("", niceyaml.WithDetails(
 				niceyaml.NewError("one"),
 				niceyaml.NewError("two"),
 			)),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "one"},
-					{Label: "two"},
-				},
-			},
+			want: textForest(
+				textNode("one"),
+				textNode("two"),
+			),
 		},
 		"nil details are skipped": {
 			err:  niceyaml.NewError("main", niceyaml.WithDetails(nil, niceyaml.NewError("one"), nil)),
-			want: niceyaml.ErrorTree{Label: "main", Children: []niceyaml.ErrorTree{{Label: "one"}}},
+			want: textNode("main", textNode("one")),
 		},
 		"nil errors a summary heads are skipped": {
 			err: niceyaml.NewSummary("main", nil, niceyaml.NewError("one"), nil, niceyaml.NewError("two")),
-			want: niceyaml.ErrorTree{
-				Label:    "main",
-				Children: []niceyaml.ErrorTree{{Label: "one"}, {Label: "two"}},
-			},
+			want: textNode("main",
+				textNode("one"),
+				textNode("two"),
+			),
 		},
 		"rewritten message keeps its children": {
 			err:  yamltest.RewriteError{Err: niceyaml.NewError("main", niceyaml.WithDetails(badA()))},
-			want: niceyaml.ErrorTree{Label: "rewritten", Children: []niceyaml.ErrorTree{{Label: "@.a: bad a"}}},
+			want: textNode("rewritten", textNode("@.a: bad a")),
 		},
 		"rewritten bound message keeps its children with positions": {
 			err: yamltest.Bind(
@@ -1036,98 +926,77 @@ func TestErrorTree_New(t *testing.T) {
 				source,
 				yamltest.RewriteError{Err: niceyaml.NewError("main", niceyaml.WithDetails(badA()))},
 			),
-			want: niceyaml.ErrorTree{
-				Label:    "f.yaml: rewritten",
-				Children: []niceyaml.ErrorTree{{Label: "1:4: $.a: bad a"}},
-			},
+			want: textNode("f.yaml: rewritten",
+				textNode("1:4: $.a: bad a"),
+			),
 		},
 		"multi-line nested message stays whole": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
 				niceyaml.NewError("bad a\n  see docs", niceyaml.AtPath(paths.Current().Child("a"))),
 			))),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: outer",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a\n  see docs"},
-				},
-			},
+			want: textNode("f.yaml: outer",
+				textNode("1:4: $.a: bad a\n  see docs"),
+			),
 			multiLine: true,
 		},
 		"wrapper with two verbs over plain errors is one node": {
 			err:  fmt.Errorf("parse path: %w: %w", errA, errB),
-			want: niceyaml.ErrorTree{Label: "parse path: first: second"},
+			want: textNode("parse path: first: second"),
 		},
 		"wrapper with two verbs goes on through its one branch with children": {
 			err: fmt.Errorf("%w: %w", errA, niceyaml.NewError("parent", niceyaml.WithDetails(errB))),
-			want: niceyaml.ErrorTree{
-				Label:    "first: parent",
-				Children: []niceyaml.ErrorTree{{Label: "second"}},
-			},
+			want: textNode("first: parent",
+				textNode("second"),
+			),
 		},
 		"wrapper with two verbs keeps its own text": {
 			err: fmt.Errorf("parse path: %w; %w",
 				niceyaml.NewError("x", niceyaml.WithDetails(errA)),
 				niceyaml.NewError("y", niceyaml.WithDetails(errB)),
 			),
-			want: niceyaml.ErrorTree{
-				Label: "parse path: x; y",
-				Children: []niceyaml.ErrorTree{
-					{Label: "x", Children: []niceyaml.ErrorTree{{Label: "first"}}},
-					{Label: "y", Children: []niceyaml.ErrorTree{{Label: "second"}}},
-				},
-			},
+			want: textNode("parse path: x; y",
+				textNode("x", textNode("first")),
+				textNode("y", textNode("second")),
+			),
 		},
 		"multi-error of its own type keeps each branch": {
 			err: violationsError{errA, errB},
-			want: niceyaml.ErrorTree{
-				Label: "2 violations",
-				Children: []niceyaml.ErrorTree{
-					{Label: "first"},
-					{Label: "second"},
-				},
-			},
+			want: textNode("2 violations",
+				textNode("first"),
+				textNode("second"),
+			),
 		},
 		"bound multi-error of its own type keeps each branch": {
 			err: yamltest.Bind(t, source, violationsError{errA, errB}),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: 2 violations",
-				Children: []niceyaml.ErrorTree{
-					{Label: "first"},
-					{Label: "second"},
-				},
-			},
+			want: textNode("f.yaml: 2 violations",
+				textNode("first"),
+				textNode("second"),
+			),
 		},
 		"join below a wrapper yields one child per branch": {
 			err: fmt.Errorf("while checking: %w", errors.Join(errA, errB)),
-			want: niceyaml.ErrorTree{
-				Label: "while checking:",
-				Children: []niceyaml.ErrorTree{
-					{Label: "first"},
-					{Label: "second"},
-				},
-			},
+			want: textNode("while checking:",
+				textNode("first"),
+				textNode("second"),
+			),
 		},
 		"children that add nothing leave no children": {
 			err:  niceyaml.NewError("outer", niceyaml.WithDetails(niceyaml.NewError(""))),
-			want: niceyaml.ErrorTree{Label: "outer"},
+			want: textNode("outer"),
 		},
 		"join at the root is textless": {
 			err: errors.Join(errA, errB),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "first"},
-					{Label: "second"},
-				},
-			},
+			want: textForest(
+				textNode("first"),
+				textNode("second"),
+			),
 		},
 		"join with a leading nil branch is textless": {
 			err: sparseJoinError{errs: []error{nil, errA, errB}},
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "first"},
-					{Label: "second"},
-				},
-			},
+			want: textForest(
+				textNode("first"),
+				textNode("second"),
+			),
 		},
 	}
 
@@ -1172,24 +1041,20 @@ func TestErrorTree_New_ExcerptsOff(t *testing.T) {
 	}{
 		"one error": {
 			err:  badPort,
-			want: niceyaml.ErrorTree{Label: "secrets.yaml:2:7: $.port: bad port"},
+			want: textNode("secrets.yaml:2:7: $.port: bad port"),
 		},
 		"a summary over two errors": {
 			err: niceyaml.NewSummary("2 problems", badPort, short),
-			want: niceyaml.ErrorTree{
-				Label: "secrets.yaml: 2 problems",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:11: $.password: too short"},
-					{Label: "2:7: $.port: bad port"},
-				},
-			},
+			want: textNode("secrets.yaml: 2 problems",
+				textNode("1:11: $.password: too short"),
+				textNode("2:7: $.port: bad port"),
+			),
 		},
 		"an error with a detail": {
 			err: niceyaml.NewError("bad port", niceyaml.AtPath(paths.Doc().Child("port")), niceyaml.WithDetails(short)),
-			want: niceyaml.ErrorTree{
-				Label:    "secrets.yaml:2:7: $.port: bad port",
-				Children: []niceyaml.ErrorTree{{Label: "1:11: $.password: too short"}},
-			},
+			want: textNode("secrets.yaml:2:7: $.port: bad port",
+				textNode("1:11: $.password: too short"),
+			),
 		},
 	}
 
@@ -1407,31 +1272,25 @@ func TestErrorTree_All(t *testing.T) {
 			want: nil,
 		},
 		"single node": {
-			tree: niceyaml.ErrorTree{Label: "boom"},
+			tree: textNode("boom"),
 			want: []string{"boom"},
 		},
 		"each node comes before the nodes below it": {
-			tree: niceyaml.ErrorTree{
-				Label: "root",
-				Children: []niceyaml.ErrorTree{
-					{Label: "a", Children: []niceyaml.ErrorTree{{Label: "a1"}, {Label: "a2"}}},
-					{Label: "b", Children: []niceyaml.ErrorTree{{Label: "b1"}}},
-				},
-			},
+			tree: textNode("root",
+				textNode("a", textNode("a1"), textNode("a2")),
+				textNode("b", textNode("b1")),
+			),
 			want: []string{"root", "a", "a1", "a2", "b", "b1"},
 		},
 		"root with no text gives its place to its children": {
-			tree: niceyaml.ErrorTree{Children: []niceyaml.ErrorTree{{Label: "a"}, {Label: "b"}}},
+			tree: textForest(textNode("a"), textNode("b")),
 			want: []string{"a", "b"},
 		},
 		"node with no text gives its place to its children": {
-			tree: niceyaml.ErrorTree{
-				Label: "root",
-				Children: []niceyaml.ErrorTree{
-					{Children: []niceyaml.ErrorTree{{Label: "x"}, {Label: "y"}}},
-					{Label: "z"},
-				},
-			},
+			tree: textNode("root",
+				textForest(textNode("x"), textNode("y")),
+				textNode("z"),
+			),
 			want: []string{"root", "x", "y", "z"},
 		},
 	}
@@ -1484,13 +1343,10 @@ func TestErrorTree_All_PrintedOrder(t *testing.T) {
 func TestErrorTree_All_Stops(t *testing.T) {
 	t.Parallel()
 
-	tree := niceyaml.ErrorTree{
-		Label: "root",
-		Children: []niceyaml.ErrorTree{
-			{Label: "a", Children: []niceyaml.ErrorTree{{Label: "a1"}}},
-			{Label: "b"},
-		},
-	}
+	tree := textNode("root",
+		textNode("a", textNode("a1")),
+		textNode("b"),
+	)
 
 	var got []string
 
@@ -2040,13 +1896,10 @@ func TestErrorTree_Problems_Reasons(t *testing.T) {
 	require.Len(t, got, 1)
 
 	// The reasons stay below the node that yields.
-	assert.Equal(t, niceyaml.ErrorTree{
-		Label: "f.yaml: no matching schema",
-		Children: []niceyaml.ErrorTree{
-			{Label: "no schema directive"},
-			{Label: "no catalog entry matches"},
-		},
-	}, textTree(got[0]))
+	assert.Equal(t, textNode("f.yaml: no matching schema",
+		textNode("no schema directive"),
+		textNode("no catalog entry matches"),
+	), textTree(got[0]))
 	require.ErrorIs(t, got[0].Err, err)
 }
 
@@ -2562,7 +2415,7 @@ func TestErrorTree_IsInvalid_HandBuilt(t *testing.T) {
 			tree: niceyaml.ErrorTree{},
 		},
 		"node with no Err": {
-			tree: niceyaml.ErrorTree{Label: "bad a"},
+			tree: textNode("bad a"),
 		},
 		"heading over invalid problems": {
 			tree: niceyaml.ErrorTree{
