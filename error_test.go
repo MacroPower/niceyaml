@@ -3140,21 +3140,39 @@ func TestError_Width(t *testing.T) {
 	`)
 	tokens := lexer.Tokenize(source)
 
+	// Bare creates a printer with no gutter or container that wraps at width.
+	bare := func(width int) *printer.Printer {
+		return printer.New(
+			printer.WithGutter(printer.NoGutter),
+			printer.WithContainerStyle(lipgloss.NewStyle()),
+			printer.WithWrapWidth(width),
+		)
+	}
+
+	// Width comes from the printer, which wraps only at the width
+	// [printer.WithWrapWidth] sets.
 	tcs := map[string]struct {
-		width       int
+		printer     *printer.Printer
 		wantWrapped bool
 	}{
 		"wraps at narrow width": {
-			width:       40,
+			printer:     bare(40),
 			wantWrapped: true,
 		},
 		"no wrap when width is 0": {
-			width:       0,
-			wantWrapped: false,
+			printer: bare(0),
 		},
 		"no wrap when width is large": {
-			width:       200,
-			wantWrapped: false,
+			printer: bare(200),
+		},
+		"wraps with custom styles": {
+			printer:     yamltest.NewXMLPrinter(printer.WithWrapWidth(30)),
+			wantWrapped: true,
+		},
+		// A printer with only a width keeps the default styles and gutter.
+		"wraps with the default styles and gutter": {
+			printer:     printer.New(printer.WithWrapWidth(30)),
+			wantWrapped: true,
 		},
 	}
 
@@ -3162,24 +3180,19 @@ func TestError_Width(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			errPrinter := printer.New(
-				printer.WithGutter(printer.NoGutter),
-				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithWrapWidth(tc.width),
-			)
-
 			err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError("test error",
 				niceyaml.AtPosition(position.NewFromToken(tokens[0])),
 			))
 
-			output := renderWith(err, errPrinter, 2)
-			lines := strings.Split(output, "\n")
+			output := renderWith(err, tc.printer, 2)
 
-			// Skip the header line and the empty line.
+			// Count the rows that hold content, which leaves out the header
+			// line and the empty line. Each check is a single word, which
+			// stays whole on one row wherever the rows break.
 			contentLines := 0
-			for _, line := range lines {
-				if strings.Contains(line, "key:") || strings.Contains(line, "this is") ||
-					strings.Contains(line, "should wrap") || strings.Contains(line, "limited") {
+			for line := range strings.SplitSeq(output, "\n") {
+				if strings.Contains(line, "key") || strings.Contains(line, "value") ||
+					strings.Contains(line, "limited") {
 					contentLines++
 				}
 			}
@@ -3195,99 +3208,41 @@ func TestError_Width(t *testing.T) {
 	}
 }
 
-func TestError_Width_WithCustomPrinter(t *testing.T) {
-	t.Parallel()
-
-	source := stringtest.Input(`
-		key: this is a very long value that should wrap when width is limited
-	`)
-	tokens := lexer.Tokenize(source)
-
-	// Width comes from the printer, which wraps only at the width
-	// [printer.WithWrapWidth] sets.
-	customPrinter := yamltest.NewXMLPrinter()
-
-	errPrinter := customPrinter.With(printer.WithWrapWidth(30))
-
-	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-		"test error",
-		niceyaml.AtPosition(position.NewFromToken(tokens[0])),
-	))
-
-	output := renderWith(err, errPrinter, 2)
-	lines := strings.Split(output, "\n")
-
-	// Wrapping splits the content over several lines.
-	contentLines := 0
-	for _, line := range lines {
-		if strings.Contains(line, "key") || strings.Contains(line, "this is") ||
-			strings.Contains(line, "should wrap") {
-			contentLines++
-		}
-	}
-
-	assert.Greater(t, contentLines, 1, "expected content to wrap into multiple lines with custom printer")
-
-	// The caller's printer keeps its own width.
-	assert.Equal(t, 0, customPrinter.WrapWidth())
-}
-
-func TestError_Width_DefaultPrinter(t *testing.T) {
-	t.Parallel()
-
-	source := stringtest.Input(`
-		key: this is a very long value that should wrap when width is limited
-	`)
-	tokens := lexer.Tokenize(source)
-
-	// A printer with only a width keeps the default styles and gutter.
-	errPrinter := printer.New(printer.WithWrapWidth(30))
-
-	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-		"test error",
-		niceyaml.AtPosition(position.NewFromToken(tokens[0])),
-	))
-
-	output := renderWith(err, errPrinter, 2)
-	lines := strings.Split(output, "\n")
-
-	// Wrapping splits the content over several lines. Each check is a
-	// single word, which stays whole on one row wherever the rows break.
-	contentLines := 0
-	for _, line := range lines {
-		if strings.Contains(line, "key") || strings.Contains(line, "value") ||
-			strings.Contains(line, "limited") {
-			contentLines++
-		}
-	}
-
-	assert.Greater(t, contentLines, 1, "expected content to wrap into multiple lines with default printer")
-}
-
 func TestError_Width_AnnotationWrapping(t *testing.T) {
 	t.Parallel()
 
-	source := stringtest.Input(`
+	pair := stringtest.Input(`
 		key: value
 		other: data
 	`)
+	keyPath := paths.Current().Child("key")
 
+	// Detailed returns an error at the key of pair with a detail at its
+	// value that carries msg.
+	detailed := func(msg string) error {
+		return niceyaml.NewError("validation failed", niceyaml.AtPath(keyPath.Key()), niceyaml.WithDetails(
+			niceyaml.NewError(msg, niceyaml.AtPath(keyPath)),
+		))
+	}
+
+	// The message tree and the annotation in the excerpt both wrap to the
+	// width, the tree less its connectors.
 	tcs := map[string]struct {
-		width        int
-		nestedErrMsg string
-		tree         string
-		want         string
+		source string
+		err    error
+		want   string
+		width  int
 	}{
 		"long annotation wraps at narrow width": {
-			width:        40,
-			nestedErrMsg: "this is a very long error message that should definitely wrap when the width is limited",
-			tree: stringtest.JoinLF(
+			source: pair,
+			width:  40,
+			err:    detailed("this is a very long error message that should definitely wrap when the width is limited"),
+			want: stringtest.JoinLF(
 				"1:1: $.key~: validation failed",
 				"└── 1:6: $.key: this is a very long",
 				"    error message that should definitely",
 				"    wrap when the width is limited",
-			),
-			want: stringtest.JoinLF(
+				"",
 				"key: value",
 				"^^^  ^^^^^ this is a very long error",
 				"           message that should",
@@ -3297,29 +3252,84 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 			),
 		},
 		"annotation does not wrap when width is 0": {
-			width:        0,
-			nestedErrMsg: "this is a very long error message that should not wrap",
-			tree: stringtest.JoinLF(
+			source: pair,
+			width:  0,
+			err:    detailed("this is a very long error message that should not wrap"),
+			want: stringtest.JoinLF(
 				"1:1: $.key~: validation failed",
 				"└── 1:6: $.key: this is a very long error message that should not wrap",
-			),
-			want: stringtest.JoinLF(
+				"",
 				"key: value",
 				"^^^  ^^^^^ this is a very long error message that should not wrap",
 				"other: data",
 			),
 		},
 		"short annotation fits on single line": {
-			width:        80,
-			nestedErrMsg: "short error",
-			tree: stringtest.JoinLF(
+			source: pair,
+			width:  80,
+			err:    detailed("short error"),
+			want: stringtest.JoinLF(
 				"1:1: $.key~: validation failed",
 				"└── 1:6: $.key: short error",
-			),
-			want: stringtest.JoinLF(
+				"",
 				"key: value",
 				"^^^  ^^^^^ short error",
 				"other: data",
+			),
+		},
+		// Several nested errors carry long messages.
+		"annotations on several lines each wrap": {
+			source: stringtest.Input(`
+				name: test
+				value: 123
+				other: data
+			`),
+			width: 50,
+			err: niceyaml.NewSummary(
+				"validation failed at 2 locations",
+				niceyaml.NewError(
+					"first error with a very long message that should wrap properly",
+					niceyaml.AtPath(paths.Current().Child("value")),
+				),
+				niceyaml.NewError(
+					"second error also with a long message for testing wrap behavior",
+					niceyaml.AtPath(paths.Current().Child("other").Key()),
+				),
+			),
+			want: stringtest.JoinLF(
+				"validation failed at 2 locations",
+				"├── 2:8: $.value: first error with a very long",
+				"│   message that should wrap properly",
+				"└── 3:1: $.other~: second error also with a long",
+				"    message for testing wrap behavior",
+				"",
+				"name: test",
+				"value: 123",
+				"       ^^^ first error with a very long message",
+				"           that should wrap properly",
+				"other: data",
+				"^^^^^ second error also with a long message for",
+				"      testing wrap behavior",
+			),
+		},
+		// Multiple errors on the same line combine with "; ".
+		"annotations combined on one line wrap": {
+			source: "key: value",
+			width:  40,
+			err: niceyaml.NewError("validation failed", niceyaml.AtPath(keyPath.Key()), niceyaml.WithDetails(
+				niceyaml.NewError("first error message here", niceyaml.AtPath(keyPath.Key())),
+				niceyaml.NewError("second error message here", niceyaml.AtPath(keyPath)),
+			)),
+			want: stringtest.JoinLF(
+				"1:1: $.key~: validation failed",
+				"├── 1:1: $.key~: first error message",
+				"│   here",
+				"└── 1:6: $.key: second error message",
+				"    here",
+				"",
+				"key: value",
+				"^^^  ^^^^^ first error message here;",
+				"           second error message here",
 			),
 		},
 	}
@@ -3335,117 +3345,11 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 				printer.WithWrapWidth(tc.width),
 			)
 
-			err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-				"validation failed",
-				niceyaml.AtPath(paths.Current().Child("key").Key()),
-				niceyaml.WithDetails(
-					niceyaml.NewError(
-						tc.nestedErrMsg,
-						niceyaml.AtPath(paths.Current().Child("key")),
-					),
-				),
-			))
+			err := yamltest.Bind(t, niceyaml.NewSourceFromString(tc.source), tc.err)
 
-			got := stringtest.TrimLineEnds(renderWith(err, errPrinter, 2))
-
-			// The message tree and the annotation in the excerpt both
-			// wrap to the width, the tree less its connectors.
-			assert.Equal(t, tc.tree+"\n\n"+tc.want, got)
+			assert.Equal(t, tc.want, stringtest.TrimLineEnds(renderWith(err, errPrinter, 2)))
 		})
 	}
-}
-
-func TestError_Width_MultipleAnnotationsWrapping(t *testing.T) {
-	t.Parallel()
-
-	source := stringtest.Input(`
-		name: test
-		value: 123
-		other: data
-	`)
-
-	// Several nested errors carry long messages.
-	errPrinter := printer.New(
-		printer.WithStyles(&style.Styles{}),
-		printer.WithGutter(printer.NoGutter),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithWrapWidth(50),
-	)
-
-	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
-		"validation failed at 2 locations",
-		niceyaml.NewError(
-			"first error with a very long message that should wrap properly",
-			niceyaml.AtPath(paths.Current().Child("value")),
-		),
-		niceyaml.NewError(
-			"second error also with a long message for testing wrap behavior",
-			niceyaml.AtPath(paths.Current().Child("other").Key()),
-		),
-	))
-	got := stringtest.TrimLineEnds(renderWith(err, errPrinter, 2))
-
-	want := stringtest.JoinLF(
-		"validation failed at 2 locations",
-		"├── 2:8: $.value: first error with a very long",
-		"│   message that should wrap properly",
-		"└── 3:1: $.other~: second error also with a long",
-		"    message for testing wrap behavior",
-		"",
-		"name: test",
-		"value: 123",
-		"       ^^^ first error with a very long message",
-		"           that should wrap properly",
-		"other: data",
-		"^^^^^ second error also with a long message for",
-		"      testing wrap behavior",
-	)
-	assert.Equal(t, want, got)
-}
-
-func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
-	t.Parallel()
-
-	source := stringtest.Input(`
-		key: value
-	`)
-
-	// Multiple errors on the same line combine with "; ".
-	errPrinter := printer.New(
-		printer.WithStyles(&style.Styles{}),
-		printer.WithGutter(printer.NoGutter),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithWrapWidth(40),
-	)
-
-	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-		"validation failed",
-		niceyaml.AtPath(paths.Current().Child("key").Key()),
-		niceyaml.WithDetails(
-			niceyaml.NewError(
-				"first error message here",
-				niceyaml.AtPath(paths.Current().Child("key").Key()),
-			),
-			niceyaml.NewError(
-				"second error message here",
-				niceyaml.AtPath(paths.Current().Child("key")),
-			),
-		),
-	))
-	got := stringtest.TrimLineEnds(renderWith(err, errPrinter, 2))
-
-	want := stringtest.JoinLF(
-		"1:1: $.key~: validation failed",
-		"├── 1:1: $.key~: first error message",
-		"│   here",
-		"└── 1:6: $.key: second error message",
-		"    here",
-		"",
-		"key: value",
-		"^^^  ^^^^^ first error message here;",
-		"           second error message here",
-	)
-	assert.Equal(t, want, got)
 }
 
 func TestError_TokenRendersFromSource(t *testing.T) {
