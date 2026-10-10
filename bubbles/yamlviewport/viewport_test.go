@@ -1150,6 +1150,65 @@ func TestViewport_Scrolling(t *testing.T) {
 				assert.InDelta(t, 1.0, m.ScrollPercent(), 0.01)
 			},
 		},
+		"Vertical/ScrollDownByZero": {
+			yaml:   verticalYAML,
+			width:  80,
+			height: 2,
+			setup: func(m *yamlviewport.Model) {
+				m.SetYOffset(1)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				require.False(t, m.AtBottom())
+				m.ScrollDown(0)
+				assert.Equal(t, 1, m.YOffset())
+			},
+		},
+		"Vertical/ScrollUpByZero": {
+			yaml:   verticalYAML,
+			width:  80,
+			height: 2,
+			setup: func(m *yamlviewport.Model) {
+				m.SetYOffset(2)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				m.ScrollUp(0)
+				assert.Equal(t, 2, m.YOffset())
+			},
+		},
+		"Vertical/ScrollDownWithoutLines": {
+			width:  80,
+			height: 10,
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				m.ScrollDown(1)
+				assert.Equal(t, 0, m.YOffset())
+			},
+		},
+		"Vertical/ScrollUpWithoutLines": {
+			width:  80,
+			height: 10,
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				m.ScrollUp(1)
+				assert.Equal(t, 0, m.YOffset())
+			},
+		},
+		"Vertical/HalfPageOfOneRow": {
+			// Half a page of one row of content still scrolls one row.
+			yaml:   verticalYAML,
+			width:  80,
+			height: 1,
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				m.HalfPageDown()
+				assert.Equal(t, 1, m.YOffset())
+
+				m.HalfPageUp()
+				assert.Equal(t, 0, m.YOffset())
+			},
+		},
 		"Horizontal/ScrollRight": {
 			yaml:   horizontalYAML,
 			width:  40,
@@ -1215,10 +1274,12 @@ func TestViewport_Scrolling(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := tokens.Tokenize(tc.yaml)
-
 			m := testModel(testPrinter(), tc.width, tc.height)
-			m.SetRevision(niceyaml.NewSourceFromTokens(tks))
+
+			// A case without YAML scrolls a model that holds no revision.
+			if tc.yaml != "" {
+				m.SetRevision(niceyaml.NewSourceFromTokens(tokens.Tokenize(tc.yaml)))
+			}
 
 			if tc.setup != nil {
 				tc.setup(&m)
@@ -2582,6 +2643,18 @@ func TestViewport_Search(t *testing.T) {
 				assert.Empty(t, m.SearchTerm())
 			},
 		},
+		"SetSearchTerm/Empty": {
+			searchTerm: "item",
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Positive(t, m.SearchCount())
+
+				// An empty term clears the search.
+				m.SetSearchTerm("")
+				assert.Empty(t, m.SearchTerm())
+				assert.Equal(t, 0, m.SearchCount())
+			},
+		},
 		"NoMatches": {
 			searchTerm: "nonexistent",
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -2654,40 +2727,25 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Empty(t, m.RevisionName())
 			},
 		},
-		"AddRevision/Nil": {
-			setup: func(m *yamlviewport.Model) {
-				m.AddRevision(nil)
-				m.SetRevision(nil)
-			},
+		"AtFirstRevision/Empty": {
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				assert.Equal(t, 0, m.RevisionCount())
-				assert.Empty(t, m.RevisionName())
-				assert.Empty(t, m.RevisionNames())
+				// With no revisions, both checks return true.
+				assert.True(t, m.AtFirstRevision())
+				assert.True(t, m.AtLatestRevision())
 			},
 		},
-		"AddRevision/NilSource": {
-			setup: func(m *yamlviewport.Model) {
-				m.AddRevision((*niceyaml.Source)(nil))
-				m.SetRevision((*niceyaml.Source)(nil))
-			},
+		"AtFirstRevision/Multiple": {
+			revisions: 2,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				assert.Equal(t, 0, m.RevisionCount())
-				assert.Empty(t, m.RevisionName())
-				assert.Empty(t, m.RevisionNames())
-			},
-		},
-		"AddRevision/NilFunc": {
-			setup: func(m *yamlviewport.Model) {
-				m.AddRevision(funcRevision(nil))
-				m.SetRevision(funcRevision(nil))
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, 0, m.RevisionCount())
-				assert.Empty(t, m.RevisionName())
-				assert.Empty(t, m.RevisionNames())
+				// At the latest revision, not at the first.
+				assert.False(t, m.AtFirstRevision())
+				assert.True(t, m.AtLatestRevision())
+
+				m.GotoRevision(0)
+				assert.True(t, m.AtFirstRevision())
+				assert.False(t, m.AtLatestRevision())
 			},
 		},
 		"AddRevision/Single": {
@@ -2924,6 +2982,34 @@ func TestViewport_Revisions(t *testing.T) {
 			}
 
 			tc.test(t, &m)
+		})
+	}
+}
+
+func TestViewport_NilRevision(t *testing.T) {
+	t.Parallel()
+
+	// A revision that is nil, or that holds a nil pointer or a nil func,
+	// has no view to show, so the model leaves it out.
+	tcs := map[string]struct {
+		revision yamlviewport.Revision
+	}{
+		"nil":        {revision: nil},
+		"nil source": {revision: (*niceyaml.Source)(nil)},
+		"nil func":   {revision: funcRevision(nil)},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 80, 24)
+			m.AddRevision(tc.revision)
+			m.SetRevision(tc.revision)
+
+			assert.Equal(t, 0, m.RevisionCount())
+			assert.Empty(t, m.RevisionName())
+			assert.Empty(t, m.RevisionNames())
 		})
 	}
 }
@@ -5720,74 +5806,6 @@ func TestViewport_OffsetWithNoContentHeight(t *testing.T) {
 	}
 }
 
-func TestViewport_ScrollEdgeCases(t *testing.T) {
-	t.Parallel()
-
-	t.Run("scroll down with n=0 does nothing", func(t *testing.T) {
-		t.Parallel()
-
-		m := testModel(testPrinter(), 80, 2)
-
-		// Need more lines than viewport height to enable scrolling.
-		tks := tokens.Tokenize("line1: value1\nline2: value2\nline3: value3\nline4: value4\nline5: value5\n")
-		m.SetRevision(niceyaml.NewSourceFromTokens(tks))
-
-		m.SetYOffset(1)
-		require.False(t, m.AtBottom())
-		m.ScrollDown(0)
-		assert.Equal(t, 1, m.YOffset())
-	})
-
-	t.Run("scroll down with empty lines does nothing", func(t *testing.T) {
-		t.Parallel()
-
-		m := testModel(testPrinter(), 80, 10)
-		// No tokens set, so the lines are empty.
-
-		m.ScrollDown(1)
-		assert.Equal(t, 0, m.YOffset())
-	})
-
-	t.Run("scroll up with n=0 does nothing", func(t *testing.T) {
-		t.Parallel()
-
-		m := testModel(testPrinter(), 80, 2)
-
-		// Need more lines than viewport height to enable scrolling.
-		tks := tokens.Tokenize("line1: value1\nline2: value2\nline3: value3\nline4: value4\nline5: value5\n")
-		m.SetRevision(niceyaml.NewSourceFromTokens(tks))
-
-		m.SetYOffset(2)
-		m.ScrollUp(0)
-		assert.Equal(t, 2, m.YOffset())
-	})
-
-	t.Run("scroll up with empty lines does nothing", func(t *testing.T) {
-		t.Parallel()
-
-		m := testModel(testPrinter(), 80, 10)
-		// No tokens set, so the lines are empty.
-
-		m.ScrollUp(1)
-		assert.Equal(t, 0, m.YOffset())
-	})
-
-	t.Run("half page at one row of content scrolls one row", func(t *testing.T) {
-		t.Parallel()
-
-		m := testModel(testPrinter(), 80, 1)
-		m.SetRevision(niceyaml.NewSourceFromString(
-			"line1: v\nline2: v\nline3: v\nline4: v\nline5: v\n",
-		))
-
-		m.HalfPageDown()
-		assert.Equal(t, 1, m.YOffset())
-
-		m.HalfPageUp()
-		assert.Equal(t, 0, m.YOffset())
-	})
-}
-
 func TestViewport_ScrollByExtremeSteps(t *testing.T) {
 	t.Parallel()
 
@@ -5883,37 +5901,6 @@ func TestViewport_ScrollByExtremeSteps(t *testing.T) {
 			assert.Equal(t, want, offset(&m))
 		})
 	}
-}
-
-func TestViewport_RevisionStateEdgeCases(t *testing.T) {
-	t.Parallel()
-
-	t.Run("AtFirstRevision with multiple revisions", func(t *testing.T) {
-		t.Parallel()
-
-		m := testModel(testPrinter(), 80, 10)
-
-		addRevisions(&m, "v1: value1\n", "v2: value2\n")
-
-		// At latest revision (rev2), not at first.
-		assert.False(t, m.AtFirstRevision())
-		assert.True(t, m.AtLatestRevision())
-
-		// Go to first revision.
-		m.GotoRevision(0)
-		assert.True(t, m.AtFirstRevision())
-		assert.False(t, m.AtLatestRevision())
-	})
-
-	t.Run("AtFirstRevision with no revisions", func(t *testing.T) {
-		t.Parallel()
-
-		m := testModel(testPrinter(), 80, 10)
-
-		// With no revisions, both checks return true.
-		assert.True(t, m.AtFirstRevision())
-		assert.True(t, m.AtLatestRevision())
-	})
 }
 
 func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
@@ -6144,25 +6131,6 @@ func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
 			assert.NotContains(t, m.View(), tail)
 		})
 	}
-}
-
-func TestViewport_SetSearchTermEmpty(t *testing.T) {
-	t.Parallel()
-
-	m := testModel(testPrinter(), 80, 10)
-
-	tks := tokens.Tokenize("key: value\n")
-	m.SetRevision(niceyaml.NewSourceFromTokens(tks))
-
-	// Set a search term first.
-	m.SetSearchTerm("value")
-	assert.Equal(t, "value", m.SearchTerm())
-	assert.Positive(t, m.SearchCount())
-
-	// Clear with empty string.
-	m.SetSearchTerm("")
-	assert.Empty(t, m.SearchTerm())
-	assert.Equal(t, 0, m.SearchCount())
 }
 
 func TestViewport_SideBySidePanesShareGutterWidth(t *testing.T) {
