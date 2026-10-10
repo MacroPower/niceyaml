@@ -775,8 +775,8 @@ func TestResolver_SeveralPaths(t *testing.T) {
 	t.Parallel()
 
 	// One Resolver resolves every path, including one it resolved before,
-	// to the node, token, matches, and error that Path.Node, Path.Token,
-	// and Path.Matches find on their own.
+	// to the node, token, matches, and error that a Resolver made for that
+	// path alone finds.
 	source := niceyaml.NewSourceFromString(stringtest.Input(`
 		base: &base
 		  name: shared
@@ -817,21 +817,21 @@ func TestResolver_SeveralPaths(t *testing.T) {
 	} {
 		p := paths.MustParse(expr)
 
-		wantNode, wantErr := p.Node(doc)
+		wantNode, wantErr := paths.NewResolver(doc).Node(p)
 		gotNode, err := r.Node(p)
 
 		if assertSameError(t, wantErr, err, expr) {
 			assert.Same(t, wantNode, gotNode, expr)
 		}
 
-		wantToken, wantErr := p.Token(doc)
+		wantToken, wantErr := paths.NewResolver(doc).Token(p)
 		gotToken, err := r.Token(p)
 
 		if assertSameError(t, wantErr, err, expr) {
 			assert.Same(t, wantToken, gotToken, expr)
 		}
 
-		wantMatches, wantErr := p.Matches(doc)
+		wantMatches, wantErr := paths.NewResolver(doc).Matches(p)
 		gotMatches, err := r.Matches(p)
 
 		if assertSameError(t, wantErr, err, expr) {
@@ -850,7 +850,7 @@ func TestResolver_ConcurrentUse(t *testing.T) {
 
 	// Several goroutines look up keys in the same mappings through one
 	// Resolver, as the Nodes of one document do, and each finds the node
-	// Path.Node finds on its own.
+	// a Resolver made for that path alone finds.
 	var sb strings.Builder
 
 	sb.WriteString("base: &base {shared: 1}\n")
@@ -870,7 +870,7 @@ func TestResolver_ConcurrentUse(t *testing.T) {
 		for _, name := range []string{"own", "shared"} {
 			p := paths.Doc().Child(fmt.Sprintf("k%d", i), name)
 
-			node, err := p.Node(doc)
+			node, err := paths.NewResolver(doc).Node(p)
 			require.NoError(t, err)
 
 			want[p.String()] = node

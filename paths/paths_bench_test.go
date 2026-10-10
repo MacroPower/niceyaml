@@ -27,7 +27,7 @@ func generateItemsYAML(count int) string {
 	return sb.String()
 }
 
-func BenchmarkPath_Nodes_Recursive(b *testing.B) {
+func BenchmarkResolver_Nodes_Recursive(b *testing.B) {
 	inputs := []struct {
 		name string
 		yaml string
@@ -43,13 +43,13 @@ func BenchmarkPath_Nodes_Recursive(b *testing.B) {
 		file, err := niceyaml.NewSourceFromString(in.yaml).File()
 		require.NoError(b, err)
 
-		doc := file.Docs[0]
+		r := paths.NewResolver(file.Docs[0])
 
 		b.Run(in.name, func(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				_, err := path.Nodes(doc)
+				_, err := r.Nodes(path)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -58,7 +58,7 @@ func BenchmarkPath_Nodes_Recursive(b *testing.B) {
 	}
 }
 
-func BenchmarkPath_Nodes_RecursiveChained(b *testing.B) {
+func BenchmarkResolver_Nodes_RecursiveChained(b *testing.B) {
 	depths := []int{100, 200, 400, 3000}
 
 	// The second ..a reaches each entry below the first from every
@@ -71,13 +71,13 @@ func BenchmarkPath_Nodes_RecursiveChained(b *testing.B) {
 		file, err := niceyaml.NewSourceFromString(src).File()
 		require.NoError(b, err)
 
-		doc := file.Docs[0]
+		r := paths.NewResolver(file.Docs[0])
 
 		b.Run(fmt.Sprintf("depth_%d", depth), func(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				nodes, err := path.Nodes(doc)
+				nodes, err := r.Nodes(path)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -189,12 +189,12 @@ func BenchmarkNewResolver_NestedOpenMerges(b *testing.B) {
 	}
 }
 
-// BenchmarkPath_Matches_MissingMergeFirst walks a mapping whose keys come
+// BenchmarkResolver_Matches_MissingMergeFirst walks a mapping whose keys come
 // before a merge list that starts with an alias that does not resolve and
 // then lists as many aliases as the mapping has keys. The lookup of each
 // key stops at that alias, so the time per key should stay flat as the
 // mapping grows.
-func BenchmarkPath_Matches_MissingMergeFirst(b *testing.B) {
+func BenchmarkResolver_Matches_MissingMergeFirst(b *testing.B) {
 	path := paths.Doc().Recursive("nope")
 
 	for _, keys := range []int{8000, 16000, 32000, 64000} {
@@ -211,13 +211,13 @@ func BenchmarkPath_Matches_MissingMergeFirst(b *testing.B) {
 		file, err := niceyaml.NewSourceFromString(sb.String()).File()
 		require.NoError(b, err)
 
-		doc := file.Docs[0]
+		r := paths.NewResolver(file.Docs[0])
 
 		b.Run(fmt.Sprintf("keys_%d", keys), func(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				_, err := path.Matches(doc)
+				_, err := r.Matches(path)
 				if err != nil {
 					b.Fatal(err)
 				}

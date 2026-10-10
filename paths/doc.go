@@ -8,14 +8,15 @@
 // one line. A path selects a node, which for a mapping entry is its
 // value. Error highlighting and precise editing often need the key of an
 // entry rather than its value, so [Path.Key] appends a `~` selector that
-// picks the key instead, and every method reads which one from the Path:
+// picks the key instead, and a [Resolver] reads which one from the Path:
 //
 //	p := paths.Doc().Child("metadata", "name")
-//	node, err := p.Node(doc)          // the value node
-//	value, err := p.Token(doc)        // the token of the value
-//	key, err := p.Key().Token(doc)    // the key token "name"
+//	r := paths.NewResolver(doc)
+//	node, err := r.Node(p)            // the value node
+//	value, err := r.Token(p)          // the token of the value
+//	key, err := r.Token(p.Key())      // the key token "name"
 //
-// [Path.Token] gives the one token a path points at, where an error at
+// [Resolver.Token] gives the one token a path points at, where an error at
 // the path binds. A scalar is its own token. A mapping or a sequence
 // spans many lines, so its path points at the token that introduces it:
 // the key of the entry it is the value of, or the "-" of the block
@@ -28,12 +29,11 @@
 //	    - name: web  # $.spec.ports[0] points at "-"
 //	      port: 80   # $.spec.ports[0].port points at "80"
 //
-// Every method resolves within a single document, so callers working with
-// multi-document files pick the document first.
-//
-// Each [Path] method walks the whole document to bind its aliases before it
-// resolves. A caller that resolves many paths in one document creates one
-// [Resolver], which binds them once, and resolves each path through it:
+// A Resolver resolves within a single document, so callers working with
+// multi-document files pick the document first. [NewResolver] walks the
+// document once to bind its aliases, and every path resolves through
+// those bindings, so a caller creates one Resolver for a document and
+// resolves each of its paths through it:
 //
 //	r := paths.NewResolver(doc)
 //	for _, p := range fields {
@@ -123,7 +123,7 @@
 // before it, or one that leads back to itself, has no content, so resolving
 // through it returns an error wrapping [ErrAlias]. Unless a `<<` merge key
 // names it, an alias inside the content of the anchor it refers to leads
-// back to itself, so the decoder reads it as null. [Path.Token] still finds
+// back to itself, so the decoder reads it as null. [Resolver.Token] still finds
 // the token of such an alias.
 //
 // A `.*` selector selects every entry of a mapping, as `[*]` selects every
@@ -145,12 +145,13 @@
 // inline there.
 //
 // The wildcard selectors `.*`, `[*]`, `..name`, and `..*` select any
-// number of nodes, so [Path.Token] and [Path.Node] reject them with
-// [ErrWildcard]. Use [Path.Nodes] to list every match. [ErrNotFound] means
-// nothing exists at the path, and [ErrAlias] means an alias on the path
-// names no anchor or forms a cycle. When the document has no content to
-// resolve in, the error of Path.Token and Path.Node wraps [ErrNoDocument]
-// along with ErrNotFound. Path.Nodes lists nothing in such a document, as
+// number of nodes, so [Resolver.Token] and [Resolver.Node] reject them
+// with [ErrWildcard]. Use [Resolver.Nodes] to list every match.
+// [ErrNotFound] means nothing exists at the path, and [ErrAlias] means an
+// alias on the path names no anchor or forms a cycle. When the document
+// has no content to resolve in, the error of Resolver.Token and
+// Resolver.Node wraps [ErrNoDocument] along with ErrNotFound.
+// Resolver.Nodes lists nothing in such a document, as
 // it does for any path that selects nothing.
 //
 // A `[*]` selector lists the elements of a sequence once for each alias
@@ -173,8 +174,8 @@
 // its mapping and of the mappings it merges. Each of these can make one
 // selector read a chain many times. A resolve stops with
 // [ErrExcessiveMerging] once those reads come to many times the nodes the
-// document holds. One lookup alone can read that many, so [Path.Node] and
-// [Path.Token] return the error as well.
+// document holds. One lookup alone can read that many, so
+// [Resolver.Node] and [Resolver.Token] return the error as well.
 //
 // # Error Highlighting
 //

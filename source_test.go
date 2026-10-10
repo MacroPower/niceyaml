@@ -802,7 +802,7 @@ func TestSource_File_BlankLineBeforeFirstKey(t *testing.T) {
 
 			doc := docs[0]
 
-			keyTk, err := paths.Current().Child("a").Key().Token(doc.DocumentAST())
+			keyTk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Current().Child("a").Key())
 			require.NoError(t, err)
 			require.NotNil(t, keyTk)
 
@@ -1166,7 +1166,7 @@ func TestSource_File_TokensFindLines(t *testing.T) {
 
 		// The parser holds copies of the Source's tokens, and a copy finds
 		// the ranges the original does.
-		tk, err := paths.Current().Child("other").Token(doc.DocumentAST())
+		tk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Current().Child("other"))
 		require.NoError(t, err)
 		require.NotNil(t, tk)
 
@@ -1181,13 +1181,13 @@ func TestSource_File_TokensFindLines(t *testing.T) {
 
 		// A path to a key resolves to the key token, and a block scalar to
 		// its indicator, each of which finds its own columns.
-		keyTk, err := paths.Current().Child("other").Key().Token(doc.DocumentAST())
+		keyTk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Current().Child("other").Key())
 		require.NoError(t, err)
 		assert.Equal(t, position.Ranges{
 			position.NewRange(position.New(3, 0), position.New(3, 5)),
 		}, source.Lines().ContentRanges(keyTk))
 
-		blockTk, err := paths.Current().Child("key").Token(doc.DocumentAST())
+		blockTk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Current().Child("key"))
 		require.NoError(t, err)
 		assert.Equal(t, position.Ranges{
 			position.NewRange(position.New(0, 5), position.New(0, 6)),

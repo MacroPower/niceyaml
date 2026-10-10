@@ -23,10 +23,10 @@ var (
 	// directives or comments, or a document of whitespace alone. Errors
 	// that wrap it also wrap [ErrNotFound], since nothing exists at any
 	// path in such a document. The root path of such a document under a
-	// "---" header still resolves, to the null at the header. [Path.Node]
-	// and [Path.Token] return it for each of these documents. [Path.Nodes]
-	// and [Path.Matches] return it for a nil document alone, and select
-	// nothing in the others.
+	// "---" header still resolves, to the null at the header.
+	// [Resolver.Node] and [Resolver.Token] return it for each of these
+	// documents. [Resolver.Nodes] and [Resolver.Matches] return it for a
+	// nil document alone, and select nothing in the others.
 	ErrNoDocument = errors.New("document has no content")
 
 	// ErrNotFound indicates that nothing exists at the path in the document.
@@ -37,7 +37,7 @@ var (
 	ErrAlias = errors.New("alias does not resolve")
 
 	// ErrWildcard indicates a request for a single node or token from a path
-	// with a `.*`, `[*]`, or `..` selector. Use [Path.Nodes] for such paths.
+	// with a `.*`, `[*]`, or `..` selector. Use [Resolver.Nodes] for such paths.
 	ErrWildcard = errors.New("wildcard path matches any number of nodes")
 
 	// ErrNoYAMLPath indicates a path with a `.*` or `..*` selector, which
@@ -219,7 +219,7 @@ func isSeparatorRune(r rune) bool {
 // out, such as [go.jacobcolvin.com/niceyaml.Node.Path] or the path of a
 // bound error, starts at `$`, so it names the same node from any Node of
 // the document. A resolve that has no current node, such as
-// [Path.Node] on a document, reads an `@` path from the document root.
+// [Resolver.Node], reads an `@` path from the document root.
 //
 // A Path is a value and never changes. Each selector method returns a new
 // Path and leaves the receiver as it was, so a Path is safe to share as a
@@ -233,7 +233,7 @@ func isSeparatorRune(r rune) bool {
 // selects a node, which for a mapping entry is its value. [Path.Key]
 // appends the `~` selector, which picks the key of that entry instead, so
 // one Path names either node of an entry and every method that takes a
-// Path, such as [Path.Token] or [go.jacobcolvin.com/niceyaml.AtPath],
+// Path, such as [Resolver.Token] or [go.jacobcolvin.com/niceyaml.AtPath],
 // reads the key or the value from the Path alone.
 //
 // [Path.String] returns the path as a path expression, `$` or `@` and the
@@ -339,17 +339,18 @@ func (p Path) IndexAll() Path {
 // its value. The selector looks through the `?` indicator of an explicit
 // key. It keeps a tag on the key, as a path to a value keeps a tag on the
 // value, so the key decodes as it does when the decoder reads the
-// mapping, and [Path.Token] still gives the key text. Where the path
+// mapping, and [Resolver.Token] still gives the key text. Where the path
 // selects no entry, such as a sequence element or the root, the `~`
 // selects the node the path already does, so an error at such a path
 // highlights the same text with or without it. A path to a mapping or a
-// sequence under a key points at that key already, as [Path.Token]
+// sequence under a key points at that key already, as [Resolver.Token]
 // describes, so the `~` there changes the node the path selects and
 // leaves the token it points at.
 //
 //	name := paths.Doc().Child("metadata", "name")
-//	value, err := name.Token(doc)       // the token of the value
-//	key, err := name.Key().Token(doc)   // the key token "name"
+//	r := paths.NewResolver(doc)
+//	value, err := r.Token(name)         // the token of the value
+//	key, err := r.Token(name.Key())     // the key token "name"
 func (p Path) Key() Path {
 	return p.extend(segment{kind: segmentKey})
 }
@@ -364,7 +365,7 @@ func (p Path) Recursive(selector string) Path {
 // selector appended, which selects every node below the node the path
 // before it selects: the value of each mapping entry and each element of
 // a sequence, at any depth, in document order. It follows the rules
-// [Path.Nodes] gives for a `..name` selector, so it lists each node once,
+// [Resolver.Nodes] gives for a `..name` selector, so it lists each node once,
 // where the source writes it, and does not follow aliases. It leaves out
 // the entry of a `<<` merge key, as `.*` does, and the sources that key
 // lists, but walks a mapping written inline there:
@@ -577,13 +578,13 @@ func (p *Path) UnmarshalText(text []byte) error {
 //
 // The result holds each child name as its raw text. [yaml.Path.FilterNode]
 // and [yaml.Path.ReplaceWithNode] compare that name with the text of the
-// first token of each key, where [Path.Node] compares it with the name
+// first token of each key, where [Resolver.Node] compares it with the name
 // [Resolver.KeyName] gives. A key with an anchor, a tag, an alias, an
 // explicit `?`, or a block scalar header matches the text of that
 // indicator, such as `&`, `!!str`, `*`, `?`, or `|-`, rather than its name.
 // Neither function sees the entries a `<<` merge key brings in. Among
 // duplicate keys, FilterNode selects the first and ReplaceWithNode
-// replaces them all, where [Path.Node] selects the last.
+// replaces them all, where [Resolver.Node] selects the last.
 //
 // FilterNode also strips single quotes from around a name and quotes from
 // around the text of a key, so Child("'id'") may select the key id. A path
@@ -602,7 +603,7 @@ func (p *Path) UnmarshalText(text []byte) error {
 // The goccy/go-yaml syntax has no selector for the key of an entry, so
 // YAMLPath leaves out the `~` selector from [Path.Key] and the selectors
 // after it apply to the value. The path $.a~.b becomes $.a.b, which can
-// select a node where [Path.Node] finds nothing.
+// select a node where [Resolver.Node] finds nothing.
 //
 // The goccy/go-yaml syntax has no selector for every entry of a mapping
 // either, and its `[*]` lists the elements of a sequence alone. A path
@@ -611,7 +612,7 @@ func (p *Path) UnmarshalText(text []byte) error {
 // [ErrNoYAMLPath] for a path that holds one. Its `..` takes a name alone,
 // so YAMLPath returns that error for the `..*` selector from
 // [Path.RecursiveAll] too. A caller resolves such a path with
-// [Path.Matches] and converts the path of each match.
+// [Resolver.Matches] and converts the path of each match.
 func (p Path) YAMLPath() (*yaml.Path, error) {
 	// Only a path that yaml.PathString reads holds a quoted name as its raw
 	// text. The builder holds a name with `.` or `*` still quoted, and the
@@ -819,98 +820,6 @@ func (p Path) singleFrom(r *resolver, node ast.Node) (match, error) {
 	return found[0], nil
 }
 
-// Nodes resolves every node the path selects in doc, in document order,
-// from the document root, whether the path starts at `$` or `@`, as
-// [Path.Node] does. A path without `.*`, `[*]`, or `..` selectors yields
-// at most one node, and an empty result means nothing exists at the path.
-// Nodes lists one node for each path that selects it, as [Path.Matches]
-// does. A node that several aliases or `<<` merge keys lead to appears
-// once for each, in the place of that alias or merge key. A `..name` or
-// `..*` selector lists each node once, even when chained `..` selectors
-// reach it more than once. An alias on the path that does not resolve
-// returns an error wrapping [ErrAlias].
-//
-// # Aliases and Tags
-//
-// Nodes looks through anchors and aliases, so each node is the content
-// the path names, and stops at a tag, as [Path.Node] does. The `.name`,
-// `.*`, `[n]`, and `[*]` selectors follow aliases to their anchor and see
-// the entries a `<<` merge key brings into a mapping.
-//
-// # Wildcard Selectors
-//
-// The `.*` selector lists the value of each entry that a `.name` selector
-// resolves in a mapping, once for each name. It lists an entry a `<<`
-// merge key brings in at the place of that merge key, and the entries of
-// one merge key in the order its sources first name them. Among entries
-// that share a key it lists the one a path through that key selects, so a
-// later entry or a later merge wins. It leaves out a merge key, whose
-// value is a source of entries, and an entry whose key has no name, as
-// [Resolver.KeyName] reports it. On a node that is not a mapping it
-// selects nothing, as `[*]` does on a node that is not a sequence.
-//
-// # Recursive Selectors
-//
-// The `..name` selector looks through
-// an alias or tag on the node it starts from, as the other selectors do.
-// Below that node it visits each entry once, where the source defines it.
-// It does not follow aliases there, including one a `<<` merge key names,
-// and it does not list the entries a merge key brings into a mapping under
-// that mapping. It walks a mapping written inline under a `<<` key as it
-// walks any other value, and lists its entries under the `<<` selector even
-// when a later source or a key of the mapping itself overrides them. When a
-// path through `<<` selects a real key with the text `<<`, whether the
-// mapping holds it or a merge brings it in, the `..name` selector skips the
-// merge key and its inline mapping, since no path through `<<` reaches
-// them. It skips an entry that a later entry with the same key shadows,
-// whether that entry belongs to its mapping or comes from a later `<<`
-// merge key. It also skips an entry whose key has no name, as
-// [Resolver.KeyName] reports it, and everything below that entry, since no
-// path names them. An alias key with no anchor before it has no name, and
-// so does one whose anchor holds a collection.
-//
-// The `..*` selector visits what the `..name` selector visits. It lists
-// the value of every entry it visits, whatever its key, and every element
-// of a sequence it visits, each before the nodes below it. It leaves out
-// the entry of a `<<` merge key, as `.*` does, and each element of a
-// sequence that lists the sources of one, but lists the entries of a
-// mapping written inline there.
-//
-// # Empty Documents
-//
-// A document with no content, such as an empty one or one of comments
-// alone, holds no node for a selector to reach. Nodes returns an empty
-// result for a path with selectors there, as it does wherever a path
-// selects nothing. The root path selects the null at the "---" header of
-// such a document, and nothing when the document has no header.
-//
-// # Errors
-//
-// Wraps [ErrNoDocument], together with [ErrNotFound], when doc is nil,
-// and [ErrAlias] when an alias on the path does
-// not resolve, including one under a tag. A `.*` selector reads every `<<`
-// merge key of its mapping and of the mappings it merges, so an alias one
-// of them names counts as on the path. A `..*` selector lists every value
-// below the node it starts from, so an alias it lists counts as on the
-// path too. Wraps [ErrExcessiveAliasing] when
-// aliases lead a selector to far more nodes than the document holds, and
-// [ErrExcessiveMerging] when the key lookups of a selector read far more
-// nodes under `<<` merge keys than that. [Path.Matches] returns the same
-// nodes with the path that selects each one alone.
-func (p Path) Nodes(doc *ast.DocumentNode) ([]ast.Node, error) {
-	found, err := p.Matches(doc)
-	if err != nil {
-		return nil, err
-	}
-
-	nodes := make([]ast.Node, 0, len(found))
-	for _, m := range found {
-		nodes = append(nodes, m.Node)
-	}
-
-	return nodes, nil
-}
-
 // Match is one node a [Path] selects in a document, together with the path
 // that selects that node alone. That path is the path as given, with each
 // `[*]` selector replaced by the index of the element and each `.*` selector
@@ -920,86 +829,10 @@ func (p Path) Nodes(doc *ast.DocumentNode) ([]ast.Node, error) {
 // The path starts at `$`, since the node lies in the document, so a match
 // of an `@` path holds the `$` path with its selectors.
 //
-// Receive instances from [Path.Matches].
+// Receive instances from [Resolver.Matches].
 type Match struct {
 	Node ast.Node
 	Path Path
-}
-
-// Matches resolves every node the path selects in doc, as [Path.Nodes]
-// does, and returns each with the path that selects it alone. A caller
-// that checks each element of a sequence, each entry of a mapping, or
-// each node a `..` selector finds thus reports the one it checked:
-//
-//	for _, m := range matches {
-//		fmt.Println(m.Path) // $.items[0], $.items[1], ...
-//	}
-//
-// A path without `.*`, `[*]`, or `..` selectors yields at most one match,
-// whose path is the path as given, at `$`. The path of a node reached
-// through an alias is the path as written, not the location of the
-// anchor, and the path of an entry a `<<` merge key brings in is the path
-// of the mapping that merges it. Returns the errors [Path.Nodes] returns.
-func (p Path) Matches(doc *ast.DocumentNode) ([]Match, error) {
-	return NewResolver(doc).Matches(p)
-}
-
-// Node resolves the node at the path in doc.
-//
-// The document root is the node a `$` path reads from. A resolve in a
-// document has no other node to start at, so an `@` path reads from the
-// document root too, and selects the node the `$` path with its
-// selectors selects.
-//
-// It looks through anchors and aliases, so the result is the content the
-// path names. It stops at a tag, which decides how that content decodes,
-// and keeps any anchor or alias under the tag. The `.name` and `[n]`
-// selectors follow aliases to their anchor and see the entries a `<<`
-// merge key brings into a mapping.
-//
-// Returns [ErrWildcard] for a path with a `.*`, `[*]`, or `..` selector,
-// which needs [Path.Nodes]. Wraps [ErrNotFound] when nothing exists at the
-// path, together with [ErrNoDocument] when the document has no content to
-// resolve in. Wraps [ErrAlias] when an alias on the path does not resolve,
-// including one under a tag, and [ErrExcessiveMerging] when the key lookups
-// of a selector read far more nodes under `<<` merge keys than the document
-// holds.
-func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
-	return NewResolver(doc).Node(p)
-}
-
-// Token resolves the [*token.Token] the path points at in doc, where an
-// error at the path binds. A scalar is its own token. A mapping or a
-// sequence spans many lines, so it points at the token that introduces
-// it:
-//
-//   - The value of a mapping entry points at the key of the entry,
-//     whether the value is in block or flow style.
-//   - An element of a block sequence points at its "-".
-//   - Any other flow mapping or flow sequence points at its own "{" or
-//     "[", such as one at the root or an element of a flow sequence.
-//   - A block mapping or a block sequence at the root points at its
-//     first key or its first element.
-//
-// Token looks through the anchors and tags on a mapping or a sequence to
-// find that token. For a mapping or a sequence under a key, the token
-// lies outside the node [Path.Node] returns, and a path to the value
-// points where the same path ending in the `~` selector from [Path.Key]
-// does. A path ending in that selector points at the key of the entry.
-// An alias resolves to its own token rather than the anchor's content,
-// since that is where the path points in the source.
-//
-// The path resolves against the document body only, from its root whether
-// the path starts at `$` or `@`, so the same path resolves to different
-// tokens in different documents of one file. Token returns the same
-// errors as [Path.Node], except that it does not look through the node
-// the last selector reaches. An alias there that does not resolve, such
-// as one that names no anchor or one inside the content of its own
-// anchor, yields the alias's own token rather than [ErrAlias].
-// Token still returns [ErrAlias] for an alias an earlier selector
-// resolves through.
-func (p Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
-	return NewResolver(doc).Token(p)
 }
 
 // tokenOf returns the token p points at for m, a match of p, as

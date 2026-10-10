@@ -1474,7 +1474,7 @@ func (n *Node) AST() ast.Node {
 // # Errors
 //
 // At resolves the node to find the lines and tokens it covers, and a path
-// that selects nothing returns the error [paths.Path.Node] describes,
+// that selects nothing returns the error [paths.Resolver.Node] describes,
 // bound to the source: an error wrapping [paths.ErrNotFound] when nothing
 // exists at the path, which also wraps [paths.ErrNoDocument] when the
 // document has no content at all, such as an empty document or one
@@ -1553,7 +1553,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // root of the document, as for Node.At. A path that selects nothing
 // returns no Nodes and no error. Each Node is scoped as one from Node.At
 // is, and [Node.Path] is the `$` path that selects its node alone, as
-// [paths.Path.Matches] resolves it, so a validator run on each element,
+// [paths.Resolver.Matches] resolves it, so a validator run on each element,
 // or an error bound to it, reports the element it came from:
 //
 //	items, err := doc.Nodes(paths.Current().Child("items").IndexAll())
@@ -1614,7 +1614,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // # Empty Results
 //
 // A path that selects nothing returns no Nodes and no error, as
-// [paths.Path.Nodes] does. A document with no content, which
+// [paths.Resolver.Nodes] does. A document with no content, which
 // [Node.IsEmpty] reports, holds nothing for a selector to reach. A path
 // with selectors returns no Nodes there too, where Node.At returns an
 // error wrapping [paths.ErrNoDocument]. A loop over the items of each
@@ -1624,7 +1624,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 //
 // # Errors
 //
-// The errors [paths.Path.Nodes] returns come back bound to the source:
+// The errors [paths.Resolver.Nodes] returns come back bound to the source:
 // one wrapping [paths.ErrAlias] when an alias on the path does not
 // resolve, [ErrExcessiveAliasing] when aliases lead a selector of the
 // path to far more nodes than the document holds, and
@@ -1945,7 +1945,7 @@ func (n *Node) FS() fs.FS {
 // lines.
 //
 // [Node.Ranges] of the scope and an error bound at its root resolve to
-// the token the path of the scope points at, as [paths.Path.Token]
+// the token the path of the scope points at, as [paths.Resolver.Token]
 // describes. For a mapping or a sequence that token is the key of its
 // entry or the "-" of its element. It lies on the line above the span
 // when the value starts below it, as a block mapping under a key does:
@@ -1972,7 +1972,7 @@ func (n *Node) FS() fs.FS {
 // Node.Ranges of the scope and an error bound at its root resolve to the
 // alias, where the path points. They lie outside the span unless the
 // alias shares a line with that content, as it can in a flow collection.
-// A tag on the alias keeps the node at the tag, as [paths.Path.Node]
+// A tag on the alias keeps the node at the tag, as [paths.Resolver.Node]
 // describes, so the node of `$.c` in `c: !t *x` is the tag with the alias
 // under it, and the span covers the line of the alias instead.
 //
@@ -2021,7 +2021,7 @@ func (n *Node) View() *line.View {
 }
 
 // Ranges returns the ranges of the token path points at, the token
-// [paths.Path.Token] resolves, one per line the token spans, without the
+// [paths.Resolver.Token] resolves, one per line the token spans, without the
 // spaces around its content. They are the ranges [SourceError.Excerpt]
 // highlights for an [Error] built with [AtPath] at that path, and the path
 // resolves as it does in such an Error: an `@` path from the scope of the
@@ -2046,7 +2046,7 @@ func (n *Node) View() *line.View {
 // To mark every line of a mapping or sequence, pass the path to [Node.At]
 // and use [Node.Span] or [Node.View] of the Node it returns.
 //
-// A path that does not resolve returns the error [paths.Path.Token]
+// A path that does not resolve returns the error [paths.Resolver.Token]
 // describes, bound to the source. The error of a path that names a key a
 // mapping leaves out binds at that mapping, as it does for [Node.At], and
 // [IsInvalid] reports every error that wraps [paths.ErrNotFound]. A
@@ -2068,9 +2068,9 @@ func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
 }
 
 // pathLocation returns the location of the token that path resolves to in
-// the document, through [paths.Path.Token], with an `@` path resolving
+// the document, through [paths.Resolver.Token], with an `@` path resolving
 // from the scope. The location holds the token and its position. An error
-// from [paths.Path.Token] names the path already and comes back as it is,
+// from [paths.Resolver.Token] names the path already and comes back as it is,
 // and a token without a position is [ErrNoLocation].
 func (n *Node) pathLocation(path paths.Path) (location, error) {
 	tk, err := n.doc.pathResolver().Token(n.base.Join(path))

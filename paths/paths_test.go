@@ -1919,7 +1919,7 @@ func TestParse_RoundTrip_EmptyName(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, want, got)
 
-			nodes, err := got.Nodes(file.Docs[0])
+			nodes, err := paths.NewResolver(file.Docs[0]).Nodes(got)
 			require.NoError(t, err)
 			require.Len(t, nodes, 1)
 			assert.Equal(t, "v", nodes[0].GetToken().Value)
@@ -2109,7 +2109,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		require.NotNil(t, node, "node not found")
 		assert.Equal(t, "1", node.GetToken().Value)
 
-		_, err = path.Node(file.Docs[0])
+		_, err = paths.NewResolver(file.Docs[0]).Node(path)
 		require.ErrorIs(t, err, paths.ErrNotFound)
 	})
 
@@ -2157,7 +2157,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 
 				byName := paths.Doc().Child("m", "k")
 
-				node, err := byName.Node(doc)
+				node, err := paths.NewResolver(doc).Node(byName)
 				require.NoError(t, err)
 				assert.Equal(t, "v", node.GetToken().Value)
 
@@ -2167,7 +2167,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 
 				byIndicator := paths.Doc().Child("m", tc.indicator)
 
-				_, err = byIndicator.Node(doc)
+				_, err = paths.NewResolver(doc).Node(byIndicator)
 				require.ErrorIs(t, err, paths.ErrNotFound)
 
 				node, err = yamlPath(t, byIndicator).FilterNode(doc.Body)
@@ -2186,7 +2186,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 
 		path := paths.Doc().Child("m", "k")
 
-		node, err := path.Node(file.Docs[0])
+		node, err := paths.NewResolver(file.Docs[0]).Node(path)
 		require.NoError(t, err)
 		assert.Equal(t, "v", node.GetToken().Value)
 
@@ -2205,7 +2205,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 
 		path := paths.Doc().Child("m", "k")
 
-		node, err := path.Node(file.Docs[0])
+		node, err := paths.NewResolver(file.Docs[0]).Node(path)
 		require.NoError(t, err)
 		assert.Equal(t, "last", node.GetToken().Value)
 
@@ -2533,7 +2533,7 @@ func TestPath_Token_Collections(t *testing.T) {
 			file, err := niceyaml.NewSourceFromString(tc.input).File()
 			require.NoError(t, err)
 
-			tk, err := paths.MustParse(tc.path).Token(file.Docs[0])
+			tk, err := paths.NewResolver(file.Docs[0]).Token(paths.MustParse(tc.path))
 			require.NoError(t, err)
 
 			got := fmt.Sprintf("%s@%d:%d", tk.Value, tk.Position.Line, tk.Position.Column)
@@ -2554,7 +2554,7 @@ func TestPath_Token_InvalidPath(t *testing.T) {
 	require.NoError(t, err)
 
 	path := paths.Doc().Child("nonexistent")
-	_, err = path.Token(file.Docs[0])
+	_, err = paths.NewResolver(file.Docs[0]).Token(path)
 	require.ErrorIs(t, err, paths.ErrNotFound)
 }
 
@@ -2563,18 +2563,18 @@ func TestPath_Token_NoDocument(t *testing.T) {
 
 	path := paths.Doc().Child("name")
 
-	for name, resolve := range map[string]func(*ast.DocumentNode) (*token.Token, error){
-		"Token": path.Token,
-		"Key":   path.Key().Token,
+	for name, p := range map[string]paths.Path{
+		"Token": path,
+		"Key":   path.Key(),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := resolve(nil)
+			_, err := paths.NewResolver(nil).Token(p)
 			require.ErrorIs(t, err, paths.ErrNoDocument)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 
-			_, err = resolve(&ast.DocumentNode{})
+			_, err = paths.NewResolver(&ast.DocumentNode{}).Token(p)
 			require.ErrorIs(t, err, paths.ErrNoDocument)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 			assert.Contains(t, err.Error(), "$.name")
@@ -2591,20 +2591,20 @@ func TestPath_DirectiveDocument(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, file.Docs, 2)
 
-	_, err = paths.Doc().Node(file.Docs[0])
+	_, err = paths.NewResolver(file.Docs[0]).Node(paths.Doc())
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 	require.ErrorIs(t, err, paths.ErrNotFound)
 
-	_, err = paths.Doc().Child("key").Token(file.Docs[0])
+	_, err = paths.NewResolver(file.Docs[0]).Token(paths.Doc().Child("key"))
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 
 	// The directive stands above the header, so its document holds no
 	// header for the root path to select.
-	nodes, err := paths.Doc().Nodes(file.Docs[0])
+	nodes, err := paths.NewResolver(file.Docs[0]).Nodes(paths.Doc())
 	require.NoError(t, err)
 	assert.Empty(t, nodes)
 
-	node, err := paths.Doc().Child("key").Node(file.Docs[1])
+	node, err := paths.NewResolver(file.Docs[1]).Node(paths.Doc().Child("key"))
 	require.NoError(t, err)
 	assert.Equal(t, "v", node.String())
 }
@@ -2620,14 +2620,14 @@ func TestPath_CommentDocument(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, file.Docs, 1)
 
-	_, err = paths.Doc().Node(file.Docs[0])
+	_, err = paths.NewResolver(file.Docs[0]).Node(paths.Doc())
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 	require.ErrorIs(t, err, paths.ErrNotFound)
 
-	_, err = paths.Doc().Token(file.Docs[0])
+	_, err = paths.NewResolver(file.Docs[0]).Token(paths.Doc())
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 
-	nodes, err := paths.Doc().Nodes(file.Docs[0])
+	nodes, err := paths.NewResolver(file.Docs[0]).Nodes(paths.Doc())
 	require.NoError(t, err)
 	assert.Empty(t, nodes)
 }
@@ -2656,15 +2656,15 @@ func TestPath_WhitespaceDocument(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, file.Docs, 1)
 
-			_, err = paths.Doc().Node(file.Docs[0])
+			_, err = paths.NewResolver(file.Docs[0]).Node(paths.Doc())
 			require.ErrorIs(t, err, paths.ErrNoDocument)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 
-			_, err = paths.Doc().Child("a").Token(file.Docs[0])
+			_, err = paths.NewResolver(file.Docs[0]).Token(paths.Doc().Child("a"))
 			require.ErrorIs(t, err, paths.ErrNoDocument)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 
-			nodes, err := paths.Doc().Nodes(file.Docs[0])
+			nodes, err := paths.NewResolver(file.Docs[0]).Nodes(paths.Doc())
 			require.NoError(t, err)
 			assert.Empty(t, nodes)
 		})
@@ -2681,10 +2681,10 @@ func TestPath_Token_UnresolvableAlias(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, file.Docs, 1)
 
-	_, err = paths.Doc().Child("a").Node(file.Docs[0])
+	_, err = paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("a"))
 	require.ErrorIs(t, err, paths.ErrAlias)
 
-	tk, err := paths.Doc().Child("a").Token(file.Docs[0])
+	tk, err := paths.NewResolver(file.Docs[0]).Token(paths.Doc().Child("a"))
 	require.NoError(t, err)
 	assert.Equal(t, token.AliasType, tk.Type)
 }
@@ -2699,11 +2699,11 @@ func TestPath_Token_MultipleDocuments(t *testing.T) {
 
 	path := paths.Doc().Child("name")
 
-	tk, err := path.Token(file.Docs[0])
+	tk, err := paths.NewResolver(file.Docs[0]).Token(path)
 	require.NoError(t, err)
 	assert.Equal(t, "first", tk.Value)
 
-	tk, err = path.Token(file.Docs[1])
+	tk, err = paths.NewResolver(file.Docs[1]).Token(path)
 	require.NoError(t, err)
 	assert.Equal(t, "second", tk.Value)
 }
@@ -2778,7 +2778,7 @@ func TestPath_Node(t *testing.T) {
 	file, err := source.File()
 	require.NoError(t, err)
 
-	node, err := paths.Doc().Child("a", "b").Node(file.Docs[0])
+	node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("a", "b"))
 	require.NoError(t, err)
 
 	seq, ok := node.(*ast.SequenceNode)
@@ -2961,14 +2961,14 @@ late:
 	t.Run("merged key not present", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := paths.Doc().Child("merged", "zzz").Token(file.Docs[0])
+		_, err := paths.NewResolver(file.Docs[0]).Token(paths.Doc().Child("merged", "zzz"))
 		require.ErrorIs(t, err, paths.ErrNotFound)
 	})
 
 	t.Run("merge key entry itself is addressable", func(t *testing.T) {
 		t.Parallel()
 
-		tk, err := paths.Doc().Child("merged", "<<").Key().Token(file.Docs[0])
+		tk, err := paths.NewResolver(file.Docs[0]).Token(paths.Doc().Child("merged", "<<").Key())
 		require.NoError(t, err)
 		assert.Equal(t, "<<", tk.Value)
 	})
@@ -2984,7 +2984,7 @@ func TestPath_Node_Anchors(t *testing.T) {
 	t.Run("anchor is looked through", func(t *testing.T) {
 		t.Parallel()
 
-		node, err := paths.Doc().Child("base").Node(file.Docs[0])
+		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("base"))
 		require.NoError(t, err)
 		assert.IsType(t, &ast.MappingNode{}, node)
 	})
@@ -2992,7 +2992,7 @@ func TestPath_Node_Anchors(t *testing.T) {
 	t.Run("alias is looked through", func(t *testing.T) {
 		t.Parallel()
 
-		node, err := paths.Doc().Child("other").Node(file.Docs[0])
+		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("other"))
 		require.NoError(t, err)
 		assert.IsType(t, &ast.MappingNode{}, node)
 	})
@@ -3000,7 +3000,7 @@ func TestPath_Node_Anchors(t *testing.T) {
 	t.Run("tag is kept", func(t *testing.T) {
 		t.Parallel()
 
-		node, err := paths.Doc().Child("tagged").Node(file.Docs[0])
+		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("tagged"))
 		require.NoError(t, err)
 		assert.IsType(t, &ast.TagNode{}, node)
 	})
@@ -3050,16 +3050,16 @@ func TestPath_Node_TaggedKey(t *testing.T) {
 			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 			path := paths.Doc().Child("2").Key()
 
-			node, err := path.Node(doc)
+			node, err := paths.NewResolver(doc).Node(path)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, node.String())
 
-			nodes, err := path.Nodes(doc)
+			nodes, err := paths.NewResolver(doc).Nodes(path)
 			require.NoError(t, err)
 			require.Len(t, nodes, 1)
 			assert.Same(t, node, nodes[0])
 
-			tk, err := path.Token(doc)
+			tk, err := paths.NewResolver(doc).Token(path)
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantToken, tk.Value)
 		})
@@ -3073,12 +3073,12 @@ func TestPath_UnknownAlias(t *testing.T) {
 	file, err := source.File()
 	require.NoError(t, err)
 
-	_, err = paths.Doc().Child("other", "a").Token(file.Docs[0])
+	_, err = paths.NewResolver(file.Docs[0]).Token(paths.Doc().Child("other", "a"))
 	require.ErrorIs(t, err, paths.ErrAlias)
 	require.NotErrorIs(t, err, paths.ErrNotFound)
 	assert.Contains(t, err.Error(), "*nope")
 
-	_, err = paths.Doc().Child("other").Node(file.Docs[0])
+	_, err = paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("other"))
 	require.ErrorIs(t, err, paths.ErrAlias)
 }
 
@@ -3122,8 +3122,8 @@ func TestPath_TaggedAlias(t *testing.T) {
 			dd := yamltest.FirstDocument(t, tc.input)
 			doc := dd.DocumentAST()
 
-			node, err := tc.path.Node(doc)
-			_, nodesErr := tc.path.Nodes(doc)
+			node, err := paths.NewResolver(doc).Node(tc.path)
+			_, nodesErr := paths.NewResolver(doc).Nodes(tc.path)
 			_, atErr := dd.At(tc.path)
 
 			if tc.err != nil {
@@ -3154,17 +3154,17 @@ func TestPath_UnknownAliasKey(t *testing.T) {
 
 	doc := file.Docs[0]
 
-	node, err := paths.Doc().Child("b").Node(doc)
+	node, err := paths.NewResolver(doc).Node(paths.Doc().Child("b"))
 	require.NoError(t, err)
 	assert.Equal(t, "2", node.String())
 
-	matches, err := paths.Doc().Recursive("b").Matches(doc)
+	matches, err := paths.NewResolver(doc).Matches(paths.Doc().Recursive("b"))
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
 	assert.Equal(t, "$.b", matches[0].Path.String())
 
 	for _, name := range []string{"nope", "*"} {
-		_, err := paths.Doc().Child(name).Node(doc)
+		_, err := paths.NewResolver(doc).Node(paths.Doc().Child(name))
 		require.ErrorIs(t, err, paths.ErrNotFound, "Child(%q)", name)
 	}
 }
@@ -3237,7 +3237,7 @@ func TestPath_UnnamedKey(t *testing.T) {
 
 			doc := file.Docs[0]
 
-			node, err := paths.MustParse(tc.path).Node(doc)
+			node, err := paths.NewResolver(doc).Node(paths.MustParse(tc.path))
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 			} else {
@@ -3245,7 +3245,7 @@ func TestPath_UnnamedKey(t *testing.T) {
 				assert.Equal(t, tc.want, node.String())
 			}
 
-			matches, err := paths.MustParse(tc.recursive).Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(paths.MustParse(tc.recursive))
 			require.NoError(t, err)
 
 			var got []string
@@ -3316,13 +3316,13 @@ func TestPath_AliasCycle(t *testing.T) {
 			errs := make(chan error, 3)
 
 			go func() {
-				_, err := tc.path.Token(doc)
+				_, err := paths.NewResolver(doc).Token(tc.path)
 				errs <- err
 
-				_, err = tc.path.Node(doc)
+				_, err = paths.NewResolver(doc).Node(tc.path)
 				errs <- err
 
-				_, err = tc.path.Nodes(doc)
+				_, err = paths.NewResolver(doc).Nodes(tc.path)
 				errs <- err
 			}()
 
@@ -3392,12 +3392,12 @@ func TestPath_AliasInsideOwnAnchor(t *testing.T) {
 			dd := yamltest.FirstDocument(t, tc.input)
 			doc := dd.DocumentAST()
 
-			tk, err := tc.path.Token(doc)
+			tk, err := paths.NewResolver(doc).Token(tc.path)
 			require.NoError(t, err)
 			assert.Equal(t, "*", tk.Value)
 
-			node, err := tc.path.Node(doc)
-			_, nodesErr := tc.path.Nodes(doc)
+			node, err := paths.NewResolver(doc).Node(tc.path)
+			_, nodesErr := paths.NewResolver(doc).Nodes(tc.path)
 			_, atErr := dd.At(tc.path)
 
 			if tc.err != nil {
@@ -3433,11 +3433,11 @@ func TestPath_HandBuiltAST(t *testing.T) {
 
 		mapping.Values[0].Value = &ast.AliasNode{}
 
-		_, err = paths.Doc().Child("a").Node(doc)
+		_, err = paths.NewResolver(doc).Node(paths.Doc().Child("a"))
 		require.ErrorIs(t, err, paths.ErrAlias)
 		assert.Contains(t, err.Error(), "alias has no name")
 
-		_, err = paths.Doc().Child("a", "b").Token(doc)
+		_, err = paths.NewResolver(doc).Token(paths.Doc().Child("a", "b"))
 		require.ErrorIs(t, err, paths.ErrAlias)
 	})
 
@@ -3453,13 +3453,13 @@ func TestPath_HandBuiltAST(t *testing.T) {
 
 		mapping.Values[0].Key = nil
 
-		tk, err := paths.Doc().Token(doc)
+		tk, err := paths.NewResolver(doc).Token(paths.Doc())
 		require.NoError(t, err)
 		assert.Equal(t, mapping.Values[0].GetToken(), tk)
 
 		// An entry without a key has no name, so not even the empty
 		// name selects it.
-		_, err = paths.Doc().Child("").Key().Token(doc)
+		_, err = paths.NewResolver(doc).Token(paths.Doc().Child("").Key())
 		require.ErrorIs(t, err, paths.ErrNotFound)
 	})
 }
@@ -3593,7 +3593,7 @@ func TestPath_Node_HandBuiltTree(t *testing.T) {
 
 			doc := &ast.DocumentNode{Body: tc.body}
 
-			_, err := tc.path.Node(doc)
+			_, err := paths.NewResolver(doc).Node(tc.path)
 			require.ErrorIs(t, err, tc.err)
 		})
 	}
@@ -3610,7 +3610,7 @@ func TestPath_Nodes_HandBuiltTreeRecursive(t *testing.T) {
 		)),
 	)}
 
-	nodes, err := paths.Doc().Recursive("b").Nodes(doc)
+	nodes, err := paths.NewResolver(doc).Nodes(paths.Doc().Recursive("b"))
 	require.NoError(t, err)
 	assert.Empty(t, nodes)
 }
@@ -3694,7 +3694,7 @@ func TestPath_Matches_HandBuiltTreeRecursive(t *testing.T) {
 
 			doc := &ast.DocumentNode{Body: tc.body}
 
-			matches, err := paths.MustParse(tc.path).Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(paths.MustParse(tc.path))
 			require.NoError(t, err)
 
 			got := make([]string, 0, len(matches))
@@ -3781,7 +3781,7 @@ func TestPath_Matches_HandBuiltTreeChildAll(t *testing.T) {
 
 			doc := &ast.DocumentNode{Body: tc.body}
 
-			matches, err := paths.MustParse(tc.path).Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(paths.MustParse(tc.path))
 			require.NoError(t, err)
 
 			got := make([]string, 0, len(matches))
@@ -3816,7 +3816,7 @@ func TestPath_Nodes_HandBuiltTreeTypedNil(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			nodes, err := path.Nodes(doc)
+			nodes, err := paths.NewResolver(doc).Nodes(path)
 			require.NoError(t, err)
 			assert.Empty(t, nodes)
 		})
@@ -3853,12 +3853,12 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk, err := paths.Doc().Child(tc.key, "v").Token(file.Docs[0])
+			tk, err := paths.NewResolver(file.Docs[0]).Token(paths.Doc().Child(tc.key, "v"))
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantValue, tk.Value)
 			assert.Equal(t, tc.wantLine, tk.Position.Line)
 
-			node, err := paths.Doc().Child(tc.key).Node(file.Docs[0])
+			node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child(tc.key))
 			require.NoError(t, err)
 
 			mapping, ok := node.(*ast.MappingNode)
@@ -3921,7 +3921,7 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 
 				dd := yamltest.FirstDocument(t, tc.input)
 
-				node, err := paths.Doc().Child(tc.key).Node(dd.DocumentAST())
+				node, err := paths.NewResolver(dd.DocumentAST()).Node(paths.Doc().Child(tc.key))
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, node.String())
 
@@ -3943,12 +3943,12 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 		forwardFile, err := forward.File()
 		require.NoError(t, err)
 
-		_, err = paths.Doc().Child("b", "v").Token(forwardFile.Docs[0])
+		_, err = paths.NewResolver(forwardFile.Docs[0]).Token(paths.Doc().Child("b", "v"))
 		require.ErrorIs(t, err, paths.ErrAlias)
 		require.NotErrorIs(t, err, paths.ErrNotFound)
 		assert.Contains(t, err.Error(), "*x has no anchor before it")
 
-		_, err = paths.Doc().Child("b").Node(forwardFile.Docs[0])
+		_, err = paths.NewResolver(forwardFile.Docs[0]).Node(paths.Doc().Child("b"))
 		require.ErrorIs(t, err, paths.ErrAlias)
 	})
 }
@@ -3976,17 +3976,17 @@ func TestPath_Token_NotFound(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := path.Token(file.Docs[0])
+			_, err := paths.NewResolver(file.Docs[0]).Token(path)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 			assert.Contains(t, err.Error(), path.String())
 
-			_, err = path.Key().Token(file.Docs[0])
+			_, err = paths.NewResolver(file.Docs[0]).Token(path.Key())
 			require.ErrorIs(t, err, paths.ErrNotFound)
 
-			_, err = path.Node(file.Docs[0])
+			_, err = paths.NewResolver(file.Docs[0]).Node(path)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 
-			nodes, err := path.Nodes(file.Docs[0])
+			nodes, err := paths.NewResolver(file.Docs[0]).Nodes(path)
 			require.NoError(t, err)
 			assert.Empty(t, nodes)
 		})
@@ -4140,7 +4140,7 @@ refs: [*r, *r]
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			nodes, err := tc.path.Nodes(file.Docs[0])
+			nodes, err := paths.NewResolver(file.Docs[0]).Nodes(tc.path)
 			require.NoError(t, err)
 
 			got := make([]string, 0, len(nodes))
@@ -4157,31 +4157,31 @@ refs: [*r, *r]
 
 		path := paths.Doc().Child("items").IndexAll().Child("name")
 
-		_, err := path.Token(file.Docs[0])
+		_, err := paths.NewResolver(file.Docs[0]).Token(path)
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
-		_, err = path.Node(file.Docs[0])
+		_, err = paths.NewResolver(file.Docs[0]).Node(path)
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
-		_, err = paths.Doc().Recursive("name").Key().Token(file.Docs[0])
+		_, err = paths.NewResolver(file.Docs[0]).Token(paths.Doc().Recursive("name").Key())
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
 		entries := paths.Doc().Child("meta").ChildAll()
 
-		_, err = entries.Token(file.Docs[0])
+		_, err = paths.NewResolver(file.Docs[0]).Token(entries)
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
-		_, err = entries.Node(file.Docs[0])
+		_, err = paths.NewResolver(file.Docs[0]).Node(entries)
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
-		_, err = entries.Key().Token(file.Docs[0])
+		_, err = paths.NewResolver(file.Docs[0]).Token(entries.Key())
 		require.ErrorIs(t, err, paths.ErrWildcard)
 	})
 
 	t.Run("nodes rejects a nil document", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := paths.Doc().Nodes(nil)
+		_, err := paths.NewResolver(nil).Nodes(paths.Doc())
 		require.ErrorIs(t, err, paths.ErrNoDocument)
 	})
 }
@@ -4256,11 +4256,11 @@ func TestPath_Matches_AliasFanOut(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
-			matches, err := tc.path.Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(tc.path)
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 
-				_, err = tc.path.Nodes(doc)
+				_, err = paths.NewResolver(doc).Nodes(tc.path)
 				require.ErrorIs(t, err, tc.err)
 
 				return
@@ -4562,15 +4562,15 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
-			matches, err := tc.path.Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(tc.path)
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 
-				_, err = tc.path.Nodes(doc)
+				_, err = paths.NewResolver(doc).Nodes(tc.path)
 				require.ErrorIs(t, err, tc.err)
 
 				// Path.Node takes only a path without a wildcard.
-				_, err = tc.path.Node(doc)
+				_, err = paths.NewResolver(doc).Node(tc.path)
 				if !errors.Is(err, paths.ErrWildcard) {
 					require.ErrorIs(t, err, tc.err)
 				}
@@ -4646,7 +4646,7 @@ l: [*c, *c, *c]
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			node, err := paths.Doc().Child("c", tc.name).Node(doc)
+			node, err := paths.NewResolver(doc).Node(paths.Doc().Child("c", tc.name))
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 
@@ -4658,7 +4658,7 @@ l: [*c, *c, *c]
 
 			// The `[*]` selector shares one lookup state among the lookups
 			// in each element, and each of them finds the same entry.
-			nodes, err := paths.Doc().Child("l").IndexAll().Child(tc.name).Nodes(doc)
+			nodes, err := paths.NewResolver(doc).Nodes(paths.Doc().Child("l").IndexAll().Child(tc.name))
 			require.NoError(t, err)
 			require.Len(t, nodes, 3)
 
@@ -4778,7 +4778,7 @@ base: &kk aliased_name
 		t.Parallel()
 
 		for _, name := range []string{"!!str", "&k", "k", "&", "?", "*", "kk", "|"} {
-			_, err := paths.Doc().Child(name).Node(file.Docs[0])
+			_, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child(name))
 			require.ErrorIs(t, err, paths.ErrNotFound, "Child(%q)", name)
 		}
 	})
@@ -4794,7 +4794,7 @@ func resolveToken(t *testing.T, path paths.Path, key bool, doc *ast.DocumentNode
 		path = path.Key()
 	}
 
-	tk, err := path.Token(doc)
+	tk, err := paths.NewResolver(doc).Token(path)
 	require.NoError(t, err)
 	require.NotNil(t, tk)
 
@@ -4834,7 +4834,7 @@ func TestPath_Token_HandBuiltMapping(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := tc.path.Token(&ast.DocumentNode{Body: tc.body})
+			_, err := paths.NewResolver(&ast.DocumentNode{Body: tc.body}).Token(tc.path)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 			require.EqualError(t, err, tc.want)
 		})
@@ -4851,7 +4851,7 @@ func TestPath_Node_LaterMergeKeyWins(t *testing.T) {
 	f, err := parser.ParseBytes([]byte(src), 0, parser.AllowDuplicateMapKey())
 	require.NoError(t, err)
 
-	node, err := paths.MustParse("$.t.k").Node(f.Docs[0])
+	node, err := paths.NewResolver(f.Docs[0]).Node(paths.MustParse("$.t.k"))
 	require.NoError(t, err)
 	assert.Equal(t, "Q", node.String())
 }
@@ -4895,11 +4895,11 @@ func TestPath_OwnKeyBetweenMergeKeys(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, decoded.T["k"])
 
-			node, err := paths.MustParse("$.t.k").Node(doc)
+			node, err := paths.NewResolver(doc).Node(paths.MustParse("$.t.k"))
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, node.String())
 
-			matches, err := paths.MustParse("$.t..k").Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$.t..k"))
 			require.NoError(t, err)
 
 			var found []string
@@ -4925,20 +4925,20 @@ func TestPath_Matches_RepeatedMergeKey(t *testing.T) {
 
 	doc := f.Docs[0]
 
-	matches, err := paths.MustParse("$..a").Matches(doc)
+	matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$..a"))
 	require.NoError(t, err)
 	assert.Empty(t, matches)
 
-	matches, err = paths.MustParse("$..b").Matches(doc)
+	matches, err = paths.NewResolver(doc).Matches(paths.MustParse("$..b"))
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
 	assert.Equal(t, "$.t.<<.b", matches[0].Path.String())
 
-	single, err := matches[0].Path.Node(doc)
+	single, err := paths.NewResolver(doc).Node(matches[0].Path)
 	require.NoError(t, err)
 	assert.Same(t, matches[0].Node, single)
 
-	node, err := paths.MustParse("$.t.a").Node(doc)
+	node, err := paths.NewResolver(doc).Node(paths.MustParse("$.t.a"))
 	require.NoError(t, err)
 	assert.Equal(t, "1", node.String())
 }
@@ -4992,7 +4992,7 @@ func TestPath_Matches_InlineMergeSource(t *testing.T) {
 
 			doc := file.Docs[0]
 
-			matches, err := paths.MustParse("$.m..name").Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$.m..name"))
 			require.NoError(t, err)
 
 			var got []string
@@ -5000,14 +5000,14 @@ func TestPath_Matches_InlineMergeSource(t *testing.T) {
 			for _, m := range matches {
 				got = append(got, m.Path.String())
 
-				node, err := m.Path.Node(doc)
+				node, err := paths.NewResolver(doc).Node(m.Path)
 				require.NoError(t, err)
 				assert.Same(t, m.Node, node)
 			}
 
 			assert.Equal(t, tc.want, got)
 
-			node, err := paths.MustParse("$.m.name").Node(doc)
+			node, err := paths.NewResolver(doc).Node(paths.MustParse("$.m.name"))
 			require.NoError(t, err)
 			assert.Equal(t, tc.value, node.String())
 		})
@@ -5045,21 +5045,21 @@ func TestPath_MergeKeyAndLiteralMergeName(t *testing.T) {
 
 			doc := file.Docs[0]
 
-			node, err := paths.MustParse("$.m.'<<'.k").Node(doc)
+			node, err := paths.NewResolver(doc).Node(paths.MustParse("$.m.'<<'.k"))
 			require.NoError(t, err)
 			assert.Equal(t, "1", node.String())
 
-			node, err = paths.MustParse("$.m.k").Node(doc)
+			node, err = paths.NewResolver(doc).Node(paths.MustParse("$.m.k"))
 			require.NoError(t, err)
 			assert.Equal(t, "2", node.String())
 
-			matches, err := paths.MustParse("$.m..k").Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$.m..k"))
 			require.NoError(t, err)
 			require.Len(t, matches, 1)
 			assert.Equal(t, "1", matches[0].Node.String())
 			assert.Equal(t, "$.m.<<.k", matches[0].Path.String())
 
-			node, err = matches[0].Path.Node(doc)
+			node, err = paths.NewResolver(doc).Node(matches[0].Path)
 			require.NoError(t, err)
 			assert.Same(t, matches[0].Node, node)
 		})
@@ -5115,11 +5115,11 @@ func TestPath_MergeBringsInLiteralMergeName(t *testing.T) {
 
 			doc := f.Docs[0]
 
-			node, err := paths.MustParse("$.top.'<<'").Node(doc)
+			node, err := paths.NewResolver(doc).Node(paths.MustParse("$.top.'<<'"))
 			require.NoError(t, err)
 			assert.Equal(t, "real", node.String())
 
-			matches, err := paths.MustParse("$..'<<'").Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$..'<<'"))
 			require.NoError(t, err)
 
 			var found []string
@@ -5127,7 +5127,7 @@ func TestPath_MergeBringsInLiteralMergeName(t *testing.T) {
 			for _, m := range matches {
 				found = append(found, m.Path.String())
 
-				single, err := m.Path.Node(doc)
+				single, err := paths.NewResolver(doc).Node(m.Path)
 				require.NoError(t, err)
 				assert.Same(t, m.Node, single)
 			}
@@ -5150,20 +5150,20 @@ func TestPath_Node_LaterDuplicateKeyWins(t *testing.T) {
 
 	doc := f.Docs[0]
 
-	node, err := paths.MustParse("$.m.a").Node(doc)
+	node, err := paths.NewResolver(doc).Node(paths.MustParse("$.m.a"))
 	require.NoError(t, err)
 	assert.Equal(t, "2", node.String())
 
-	key, err := paths.MustParse("$.m.a~").Token(doc)
+	key, err := paths.NewResolver(doc).Token(paths.MustParse("$.m.a~"))
 	require.NoError(t, err)
 	assert.Equal(t, 3, key.Position.Line)
 
-	matches, err := paths.MustParse("$..a").Matches(doc)
+	matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$..a"))
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
 	assert.Equal(t, "$.m.a", matches[0].Path.String())
 
-	single, err := matches[0].Path.Node(doc)
+	single, err := paths.NewResolver(doc).Node(matches[0].Path)
 	require.NoError(t, err)
 	assert.Same(t, matches[0].Node, single)
 }
@@ -5265,7 +5265,7 @@ func TestPath_Matches_RecursiveReachedTwice(t *testing.T) {
 
 			doc := file.Docs[0]
 
-			matches, err := paths.MustParse(tc.path).Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(paths.MustParse(tc.path))
 			require.NoError(t, err)
 
 			got := make([]string, 0, len(matches))
@@ -5275,7 +5275,7 @@ func TestPath_Matches_RecursiveReachedTwice(t *testing.T) {
 
 			assert.Equal(t, tc.want, got)
 
-			nodes, err := paths.MustParse(tc.path).Nodes(doc)
+			nodes, err := paths.NewResolver(doc).Nodes(paths.MustParse(tc.path))
 			require.NoError(t, err)
 			require.Len(t, nodes, len(matches))
 
@@ -5418,7 +5418,7 @@ func TestPath_Matches(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			matches, err := tc.path.Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(tc.path)
 			require.NoError(t, err)
 
 			var got []string
@@ -5429,7 +5429,7 @@ func TestPath_Matches(t *testing.T) {
 
 			assert.Equal(t, tc.want, got)
 
-			nodes, err := tc.path.Nodes(doc)
+			nodes, err := paths.NewResolver(doc).Nodes(tc.path)
 			require.NoError(t, err)
 			require.Len(t, nodes, len(matches))
 
@@ -5437,7 +5437,7 @@ func TestPath_Matches(t *testing.T) {
 				assert.Same(t, nodes[i], m.Node)
 
 				// The path of a match selects its node alone.
-				single, err := m.Path.Node(doc)
+				single, err := paths.NewResolver(doc).Node(m.Path)
 				require.NoError(t, err)
 				assert.Same(t, m.Node, single)
 			}
@@ -5639,7 +5639,7 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 			doc := file.Docs[0]
 			path := paths.MustParse(tc.path)
 
-			matches, err := path.Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(path)
 			require.NoError(t, err)
 
 			var got []string
@@ -5650,14 +5650,14 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 
 			assert.Equal(t, tc.want, got)
 
-			nodes, err := path.Nodes(doc)
+			nodes, err := paths.NewResolver(doc).Nodes(path)
 			require.NoError(t, err)
 			require.Len(t, nodes, len(matches))
 
 			for i, m := range matches {
 				assert.Same(t, nodes[i], m.Node)
 
-				single, err := m.Path.Node(doc)
+				single, err := paths.NewResolver(doc).Node(m.Path)
 				require.NoError(t, err)
 				assert.Same(t, m.Node, single)
 
@@ -5711,17 +5711,17 @@ func TestPath_Matches_ChildAll_Errors(t *testing.T) {
 			doc := file.Docs[0]
 			path := paths.MustParse(tc.path)
 
-			_, err = path.Matches(doc)
+			_, err = paths.NewResolver(doc).Matches(path)
 			require.ErrorIs(t, err, paths.ErrAlias)
 
-			_, err = path.Nodes(doc)
+			_, err = paths.NewResolver(doc).Nodes(path)
 			require.ErrorIs(t, err, paths.ErrAlias)
 
 			if tc.named == "" {
 				return
 			}
 
-			node, err := paths.MustParse(tc.named).Node(doc)
+			node, err := paths.NewResolver(doc).Node(paths.MustParse(tc.named))
 			require.NoError(t, err)
 			assert.Equal(t, "1", node.String())
 		})
@@ -5876,7 +5876,7 @@ func TestPath_Matches_RecursiveAll(t *testing.T) {
 			doc := file.Docs[0]
 			path := paths.MustParse(tc.path)
 
-			matches, err := path.Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(path)
 			require.NoError(t, err)
 
 			var got []string
@@ -5887,14 +5887,14 @@ func TestPath_Matches_RecursiveAll(t *testing.T) {
 
 			assert.Equal(t, tc.want, got)
 
-			nodes, err := path.Nodes(doc)
+			nodes, err := paths.NewResolver(doc).Nodes(path)
 			require.NoError(t, err)
 			require.Len(t, nodes, len(matches))
 
 			for i, m := range matches {
 				assert.Same(t, nodes[i], m.Node)
 
-				single, err := m.Path.Node(doc)
+				single, err := paths.NewResolver(doc).Node(m.Path)
 				require.NoError(t, err)
 				assert.Same(t, m.Node, single)
 
@@ -5943,17 +5943,17 @@ func TestPath_Matches_RecursiveAll_Errors(t *testing.T) {
 			doc := file.Docs[0]
 			path := paths.MustParse(tc.path)
 
-			_, err = path.Matches(doc)
+			_, err = paths.NewResolver(doc).Matches(path)
 			require.ErrorIs(t, err, paths.ErrAlias)
 
-			_, err = path.Nodes(doc)
+			_, err = paths.NewResolver(doc).Nodes(path)
 			require.ErrorIs(t, err, paths.ErrAlias)
 
 			if tc.named == "" {
 				return
 			}
 
-			nodes, err := paths.MustParse(tc.named).Nodes(doc)
+			nodes, err := paths.NewResolver(doc).Nodes(paths.MustParse(tc.named))
 			require.NoError(t, err)
 			require.Len(t, nodes, 1)
 			assert.Equal(t, "1", nodes[0].String())
@@ -5983,11 +5983,11 @@ func TestPath_EmptyDocument(t *testing.T) {
 
 		doc := emptyDocument(t, "a: 1\n---\n")
 
-		node, err := paths.Doc().Node(doc)
+		node, err := paths.NewResolver(doc).Node(paths.Doc())
 		require.NoError(t, err)
 		assert.Equal(t, ast.NullType, node.Type())
 
-		tk, err := paths.Doc().Token(doc)
+		tk, err := paths.NewResolver(doc).Token(paths.Doc())
 		require.NoError(t, err)
 		assert.Equal(t, token.DocumentHeaderType, tk.Type)
 		assert.Equal(t, 2, tk.Position.Line)
@@ -5998,7 +5998,7 @@ func TestPath_EmptyDocument(t *testing.T) {
 
 		doc := emptyDocument(t, "a: 1\n---\n")
 
-		tk, err := paths.Doc().Key().Token(doc)
+		tk, err := paths.NewResolver(doc).Token(paths.Doc().Key())
 		require.NoError(t, err)
 		assert.Equal(t, token.DocumentHeaderType, tk.Type)
 	})
@@ -6025,16 +6025,16 @@ func TestPath_EmptyDocument(t *testing.T) {
 
 				doc := docs[len(docs)-1].DocumentAST()
 
-				node, err := paths.Doc().Node(doc)
+				node, err := paths.NewResolver(doc).Node(paths.Doc())
 				require.NoError(t, err)
 				assert.Equal(t, ast.NullType, node.Type())
 
-				tk, err := paths.Doc().Token(doc)
+				tk, err := paths.NewResolver(doc).Token(paths.Doc())
 				require.NoError(t, err)
 				assert.Equal(t, token.DocumentHeaderType, tk.Type)
 				assert.Equal(t, tc.line, tk.Position.Line)
 
-				_, err = paths.Doc().Child("a").Node(doc)
+				_, err = paths.NewResolver(doc).Node(paths.Doc().Child("a"))
 				require.ErrorIs(t, err, paths.ErrNoDocument)
 				require.ErrorIs(t, err, paths.ErrNotFound)
 			})
@@ -6047,7 +6047,7 @@ func TestPath_EmptyDocument(t *testing.T) {
 		doc := emptyDocument(t, "---\n")
 
 		for _, path := range []paths.Path{paths.Doc(), paths.Doc().Key()} {
-			matches, err := path.Matches(doc)
+			matches, err := paths.NewResolver(doc).Matches(path)
 			require.NoError(t, err)
 			require.Len(t, matches, 1)
 			assert.Equal(t, path.String(), matches[0].Path.String())
@@ -6070,7 +6070,7 @@ func TestPath_EmptyDocument(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				_, err := tc.path.Node(doc)
+				_, err := paths.NewResolver(doc).Node(tc.path)
 				require.ErrorIs(t, err, paths.ErrNoDocument)
 				require.ErrorIs(t, err, paths.ErrNotFound)
 			})
@@ -6096,11 +6096,11 @@ func TestPath_EmptyDocument(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				nodes, err := tc.path.Nodes(doc)
+				nodes, err := paths.NewResolver(doc).Nodes(tc.path)
 				require.NoError(t, err)
 				assert.Empty(t, nodes)
 
-				matches, err := tc.path.Matches(doc)
+				matches, err := paths.NewResolver(doc).Matches(tc.path)
 				require.NoError(t, err)
 				assert.Empty(t, matches)
 			})
@@ -6110,7 +6110,7 @@ func TestPath_EmptyDocument(t *testing.T) {
 	t.Run("a document without a header reaches nothing", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := paths.Doc().Node(&ast.DocumentNode{})
+		_, err := paths.NewResolver(&ast.DocumentNode{}).Node(paths.Doc())
 		require.ErrorIs(t, err, paths.ErrNoDocument)
 	})
 
@@ -6118,7 +6118,7 @@ func TestPath_EmptyDocument(t *testing.T) {
 		t.Parallel()
 
 		for _, path := range []paths.Path{paths.Doc(), paths.Doc().Child("items").IndexAll()} {
-			nodes, err := path.Nodes(&ast.DocumentNode{})
+			nodes, err := paths.NewResolver(&ast.DocumentNode{}).Nodes(path)
 			require.NoError(t, err, path)
 			assert.Empty(t, nodes, path)
 		}
@@ -6128,11 +6128,11 @@ func TestPath_EmptyDocument(t *testing.T) {
 		t.Parallel()
 
 		for _, path := range []paths.Path{paths.Doc(), paths.Doc().Child("items").IndexAll()} {
-			_, err := path.Nodes(nil)
+			_, err := paths.NewResolver(nil).Nodes(path)
 			require.ErrorIs(t, err, paths.ErrNoDocument, path)
 			require.ErrorIs(t, err, paths.ErrNotFound, path)
 
-			_, err = path.Matches(nil)
+			_, err = paths.NewResolver(nil).Matches(path)
 			require.ErrorIs(t, err, paths.ErrNoDocument, path)
 		}
 	})

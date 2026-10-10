@@ -1046,7 +1046,7 @@ type errorConfig struct {
 // # Mappings and Sequences
 //
 // A mapping or a sequence spans many lines, so the error points at the
-// token that introduces it, as [paths.Path.Token] describes. That is the
+// token that introduces it, as [paths.Resolver.Token] describes. That is the
 // key of the entry that holds it, or the "-" of the element it is in a
 // block sequence. With neither, it is the "{" or "[" of a flow mapping or
 // a flow sequence, and the first key or element of a block mapping or a

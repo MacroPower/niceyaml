@@ -2294,7 +2294,7 @@ func TestDocument_Node(t *testing.T) {
 		node := yamltest.At(t, dd, paths.Current().Child("meta")).AST()
 		assert.Equal(t, "  name: app", node.String())
 
-		want, err := paths.Current().Child("meta").Node(dd.DocumentAST())
+		want, err := paths.NewResolver(dd.DocumentAST()).Node(paths.Current().Child("meta"))
 		require.NoError(t, err)
 		assert.Same(t, want, node)
 	})
@@ -2453,7 +2453,7 @@ func TestNode_Resolver(t *testing.T) {
 		got, err := item.Resolver().Deref(item.AST())
 		require.NoError(t, err)
 
-		want, err := paths.Current().Child("base").Node(docs[0].DocumentAST())
+		want, err := paths.NewResolver(docs[0].DocumentAST()).Node(paths.Current().Child("base"))
 		require.NoError(t, err)
 		assert.Same(t, want, got)
 		assert.Equal(t, "  name: app", got.String())
