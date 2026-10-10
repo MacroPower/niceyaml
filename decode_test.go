@@ -5455,28 +5455,25 @@ func TestDocument_At(t *testing.T) {
 		assert.Nil(t, got)
 	})
 
-	t.Run("empty document returns ErrNotFound and ErrNoDocument", func(t *testing.T) {
+	t.Run("document with no content returns ErrNotFound and ErrNoDocument", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "---\n")
+		for name, input := range map[string]string{
+			"empty document":     "---\n",
+			"file of whitespace": "\n",
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		got, err := dd.At(paths.Current().Child("key"))
-		require.ErrorIs(t, err, paths.ErrNotFound)
-		require.ErrorIs(t, err, paths.ErrNoDocument)
-		assert.Contains(t, err.Error(), "$.key")
-		assert.Nil(t, got)
-	})
+				dd := yamltest.FirstDocument(t, input)
 
-	t.Run("file of whitespace returns ErrNotFound and ErrNoDocument", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "\n")
-
-		got, err := dd.At(paths.Current().Child("key"))
-		require.ErrorIs(t, err, paths.ErrNotFound)
-		require.ErrorIs(t, err, paths.ErrNoDocument)
-		assert.Contains(t, err.Error(), "$.key")
-		assert.Nil(t, got)
+				got, err := dd.At(paths.Current().Child("key"))
+				require.ErrorIs(t, err, paths.ErrNotFound)
+				require.ErrorIs(t, err, paths.ErrNoDocument)
+				assert.Contains(t, err.Error(), "$.key")
+				assert.Nil(t, got)
+			})
+		}
 	})
 
 	t.Run("alias without anchor returns ErrAlias", func(t *testing.T) {
@@ -5494,34 +5491,34 @@ func TestDocument_At(t *testing.T) {
 	t.Run("wildcard path returns ErrWildcard", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "tags: [a, b]")
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+		}{
+			"sequence wildcard": {
+				input: "tags: [a, b]",
+				path:  paths.Current().Child("tags").IndexAll(),
+			},
+			"mapping wildcard": {
+				input: "jobs:\n  build: 1\n",
+				path:  paths.Current().Child("jobs").ChildAll(),
+			},
+			"recursive wildcard": {
+				input: "jobs:\n  build: 1\n",
+				path:  paths.Current().RecursiveAll(),
+			},
+		}
 
-		got, err := dd.At(paths.Current().Child("tags").IndexAll())
-		require.ErrorIs(t, err, paths.ErrWildcard)
-		require.NotErrorIs(t, err, paths.ErrNotFound)
-		assert.Nil(t, got)
-	})
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-	t.Run("mapping wildcard path returns ErrWildcard", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "jobs:\n  build: 1\n")
-
-		got, err := dd.At(paths.Current().Child("jobs").ChildAll())
-		require.ErrorIs(t, err, paths.ErrWildcard)
-		require.NotErrorIs(t, err, paths.ErrNotFound)
-		assert.Nil(t, got)
-	})
-
-	t.Run("recursive wildcard path returns ErrWildcard", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "jobs:\n  build: 1\n")
-
-		got, err := dd.At(paths.Current().RecursiveAll())
-		require.ErrorIs(t, err, paths.ErrWildcard)
-		require.NotErrorIs(t, err, paths.ErrNotFound)
-		assert.Nil(t, got)
+				got, err := yamltest.FirstDocument(t, tc.input).At(tc.path)
+				require.ErrorIs(t, err, paths.ErrWildcard)
+				require.NotErrorIs(t, err, paths.ErrNotFound)
+				assert.Nil(t, got)
+			})
+		}
 	})
 
 	t.Run("type mismatch returns Error", func(t *testing.T) {
@@ -5694,37 +5691,14 @@ func TestDocument_At(t *testing.T) {
 				path: paths.Current().Child("node"),
 				want: map[string]any{"p": uint64(1), "r": map[string]any{"z": uint64(2)}},
 			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				dd := yamltest.FirstDocument(t, tc.input)
-
-				got, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context())
-				require.NoError(t, err)
-				assert.Equal(t, tc.want, got)
-			})
-		}
-	})
-
-	t.Run("alias to an anchor that holds the node reads null", func(t *testing.T) {
-		t.Parallel()
-
-		// The decoder reads an alias inside the value of its own anchor as
-		// null, as a decode of the whole document does.
-		tcs := map[string]struct {
-			input string
-			path  paths.Path
-			want  any
-		}{
-			"value of the anchor": {
+			// The decoder reads an alias inside the value of its own anchor as
+			// null, as a decode of the whole document does.
+			"alias to the anchor the node is the value of": {
 				input: "a: &a\n  - 1\n  - *a\n",
 				path:  paths.Current().Child("a"),
 				want:  []any{uint64(1), nil},
 			},
-			"node inside the anchor": {
+			"alias to an anchor that holds the node": {
 				input: "a: &a\n  b:\n    c: *a\n",
 				path:  paths.Current().Child("a", "b"),
 				want:  map[string]any{"c": nil},
