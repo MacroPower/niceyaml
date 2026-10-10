@@ -4650,6 +4650,9 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			return decode((*fields)(b))
 		})
 
+		// The item of the one box holds a to below its from.
+		reversed := stringtest.LinesLF("boxes:", "  - item: {from: 9, to: 3}")
+
 		tcs := map[string]struct {
 			report error
 			input  string
@@ -4657,12 +4660,12 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			detail string
 		}{
 			"path": {
-				input:  stringtest.LinesLF("boxes:", "  - item: {from: 9, to: 3}"),
+				input:  reversed,
 				report: spanError(),
 				want:   "2:25: $.boxes[0].item.to: to is below from",
 			},
 			"path of a detail": {
-				input: stringtest.LinesLF("boxes:", "  - item: {from: 9, to: 3}"),
+				input: reversed,
 				report: niceyaml.NewError("span is odd", niceyaml.WithDetails(
 					niceyaml.NewError("to set here", niceyaml.AtPath(paths.Current().Child("to"))),
 				)),
@@ -4670,7 +4673,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 				detail: "2:25: $.boxes[0].item.to: to set here",
 			},
 			"join": {
-				input:  stringtest.LinesLF("boxes:", "  - item: {from: 9, to: 3}"),
+				input:  reversed,
 				report: errors.Join(errors.New("from is odd"), errors.New("to is odd")),
 				want: stringtest.JoinLF(
 					"2:5: $.boxes[0].item: from is odd",
