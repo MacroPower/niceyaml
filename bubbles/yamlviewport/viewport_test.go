@@ -4456,6 +4456,9 @@ func TestViewport_ZeroValue(t *testing.T) {
 	assert.True(t, m.AtTop())
 	assert.True(t, m.AtBottom())
 
+	_, ok := m.HitAt(0, 0)
+	assert.False(t, ok)
+
 	m.ScrollDown(1)
 	m.PageDown()
 	m.HalfPageDown()
@@ -7269,15 +7272,6 @@ func TestViewport_HitAt(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
-}
-
-func TestViewport_HitAt_ZeroModel(t *testing.T) {
-	t.Parallel()
-
-	var m yamlviewport.Model
-
-	_, ok := m.HitAt(0, 0)
-	assert.False(t, ok)
 }
 
 func TestViewport_HitAt_PathAt(t *testing.T) {
