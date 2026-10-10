@@ -2879,9 +2879,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 		plain := errors.New("bad")
 		want := "cfg.yaml:3:5: $.shops[0].hours: bad"
 
-		fn := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-			return plain
-		})
+		fn := rejectingValidator(plain)
 
 		// A direct call returns the error as the function wrote it, and
 		// the Node binds it at the scope.
@@ -3002,9 +3000,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 		require.EqualError(t, reject.Check(t.Context(), hours), want)
 		require.EqualError(t, hours.Validate(t.Context(), reject), want)
 
-		scoped := niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
-			return niceyaml.NewError("bad", niceyaml.AtPath(closePath))
-		})
+		scoped := rejectingValidator(niceyaml.NewError("bad", niceyaml.AtPath(closePath)))
 
 		require.EqualError(t, hours.Validate(t.Context(), scoped), want)
 
@@ -3806,9 +3802,7 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 		source := niceyaml.NewSourceFromString(input)
 		d := source.Documents()
 
-		validator := niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
-			return niceyaml.NewError("bad name", niceyaml.AtPath(namePath))
-		})
+		validator := rejectingValidator(niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
 
 		var errs []error
 
@@ -7804,6 +7798,16 @@ func rejectingValidator(err error) niceyaml.Validator {
 	})
 }
 
+// recordingValidator returns a [niceyaml.Validator] that accepts every
+// document and appends name to order on each run.
+func recordingValidator(order *[]string, name string) niceyaml.Validator {
+	return niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+		*order = append(*order, name)
+
+		return nil
+	})
+}
+
 // typedNilValidator returns a [niceyaml.Validator] that accepts every
 // document by returning a nil [*niceyaml.Error] pointer.
 func typedNilValidator() niceyaml.Validator {
@@ -8002,9 +8006,7 @@ func TestDocument_At_Scope(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		reject := niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
-			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("open")))
-		})
+		reject := rejectingValidator(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("open"))))
 
 		err := yamltest.At(t, dd, hoursPath).Validate(t.Context(), reject)
 
@@ -9193,11 +9195,7 @@ func TestDecodeOptions(t *testing.T) {
 	`)
 
 	record := func(order *[]string, name string) niceyaml.DecodeOption {
-		return niceyaml.WithValidator(niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
-			*order = append(*order, name)
-
-			return nil
-		}))
+		return niceyaml.WithValidator(recordingValidator(order, name))
 	}
 
 	strict := niceyaml.WithDisallowUnknownFields(true)
@@ -9644,14 +9642,6 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 func TestNode_Validate(t *testing.T) {
 	t.Parallel()
 
-	record := func(order *[]string, name string) niceyaml.Validator {
-		return niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
-			*order = append(*order, name)
-
-			return nil
-		})
-	}
-
 	t.Run("runs the validator on the receiver", func(t *testing.T) {
 		t.Parallel()
 
@@ -9686,9 +9676,9 @@ func TestNode_Validate(t *testing.T) {
 
 		// A ChainValidator stops at the first validator that fails.
 		err = scoped.Validate(t.Context(), niceyaml.ChainValidator(
-			record(&order, "first"),
+			recordingValidator(&order, "first"),
 			reserved,
-			record(&order, "unreached"),
+			recordingValidator(&order, "unreached"),
 			short,
 		))
 		require.EqualError(t, err, "x.yaml:2:9: $.meta.name: reserved name")
@@ -9698,9 +9688,9 @@ func TestNode_Validate(t *testing.T) {
 
 		// A MultiValidator runs every one and joins the failures.
 		err = scoped.Validate(t.Context(), niceyaml.MultiValidator(
-			record(&order, "first"),
+			recordingValidator(&order, "first"),
 			reserved,
-			record(&order, "second"),
+			recordingValidator(&order, "second"),
 			short,
 		))
 		require.EqualError(t, err, stringtest.JoinLF(
@@ -9792,7 +9782,10 @@ func TestNode_Validate(t *testing.T) {
 
 		docs := niceyaml.NewSourceFromString("name: a\n---\nname: b\n").Documents()
 
-		_, err := docs[0].Decode[map[string]any](t.Context(), niceyaml.WithValidator(record(&order, "call")))
+		_, err := docs[0].Decode[map[string]any](
+			t.Context(),
+			niceyaml.WithValidator(recordingValidator(&order, "call")),
+		)
 		require.NoError(t, err)
 
 		order = nil
@@ -10934,9 +10927,7 @@ func TestErrDecode(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "value: 1\n")
 
-		rejects := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-			return niceyaml.NewError("too low", niceyaml.AtPath(paths.Current().Child("value")))
-		})
+		rejects := rejectingValidator(niceyaml.NewError("too low", niceyaml.AtPath(paths.Current().Child("value"))))
 
 		_, err := dd.Decode[struct{ Value int }](t.Context(), niceyaml.WithValidator(rejects))
 		require.EqualError(t, err, "1:8: $.value: too low")
@@ -11323,9 +11314,7 @@ func TestValidatorFunc_Check(t *testing.T) {
 	t.Run("a validator that checks another document names that document", func(t *testing.T) {
 		t.Parallel()
 
-		zero := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-			return niceyaml.NewError("no price", niceyaml.AtPath(pricePath))
-		})
+		zero := rejectingValidator(niceyaml.NewError("no price", niceyaml.AtPath(pricePath)))
 		include := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
 			return other.Validate(ctx, zero)
 		})
@@ -11354,26 +11343,14 @@ func TestMultiValidator(t *testing.T) {
 	errB := errors.New("bad b")
 	errC := errors.New("bad c")
 
-	badB := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return niceyaml.Invalid(errB, niceyaml.AtPath(paths.Current().Child("a", "b")))
-	})
+	badB := rejectingValidator(niceyaml.Invalid(errB, niceyaml.AtPath(paths.Current().Child("a", "b"))))
 	badC := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
 		// A validator that binds its own error, as [niceyaml.Validator] allows.
 		return n.Bind(niceyaml.Invalid(errC, niceyaml.AtPath(paths.Current().Child("a", "c"))))
 	})
 	// A validator of a type of its own that leaves its error unbound.
 	unboundB := &fieldValidator{err: niceyaml.Invalid(errB, niceyaml.AtPath(paths.Current().Child("a", "b")))}
-	passing := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return nil
-	})
-	record := func(order *[]string, name string) niceyaml.Validator {
-		return niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-			*order = append(*order, name)
-
-			return nil
-		})
-	}
-
+	passing := passingValidator()
 	dd := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n")
 
 	t.Run("runs every validator and reports every failure in order", func(t *testing.T) {
@@ -11381,7 +11358,12 @@ func TestMultiValidator(t *testing.T) {
 
 		var order []string
 
-		multi := niceyaml.MultiValidator(record(&order, "first"), badB, record(&order, "second"), badC)
+		multi := niceyaml.MultiValidator(
+			recordingValidator(&order, "first"),
+			badB,
+			recordingValidator(&order, "second"),
+			badC,
+		)
 
 		err := dd.Validate(t.Context(), multi)
 		require.ErrorIs(t, err, errB)
@@ -11416,11 +11398,7 @@ func TestMultiValidator(t *testing.T) {
 
 		// A typed nil pointer reports no failure, as it does from a
 		// validator given alone.
-		typedNil := niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
-			var e *niceyaml.Error
-
-			return e
-		})
+		typedNil := typedNilValidator()
 
 		require.NoError(t, dd.Validate(t.Context(), typedNil))
 		require.NoError(t, dd.Validate(t.Context(), niceyaml.MultiValidator(typedNil, passing)))
@@ -11436,7 +11414,7 @@ func TestMultiValidator(t *testing.T) {
 			nil,
 			(*fieldValidator)(nil),
 			niceyaml.ValidatorFunc(nil),
-			record(&order, "after"),
+			recordingValidator(&order, "after"),
 		))
 		require.ErrorIs(t, err, errB)
 		assert.Equal(t, []string{"after"}, order)
@@ -11577,23 +11555,9 @@ func TestChainValidator(t *testing.T) {
 
 	// Both validators fail at the same value, as a schema and a check
 	// that decodes the node do.
-	first := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath))
-	})
-	second := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return niceyaml.Invalid(errSecond, niceyaml.AtPath(namePath))
-	})
-	passing := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return nil
-	})
-	record := func(order *[]string, name string) niceyaml.Validator {
-		return niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-			*order = append(*order, name)
-
-			return nil
-		})
-	}
-
+	first := rejectingValidator(niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath)))
+	second := rejectingValidator(niceyaml.Invalid(errSecond, niceyaml.AtPath(namePath)))
+	passing := passingValidator()
 	newDoc := func(t *testing.T) *niceyaml.Node {
 		t.Helper()
 
@@ -11609,9 +11573,9 @@ func TestChainValidator(t *testing.T) {
 		var order []string
 
 		chain := niceyaml.ChainValidator(
-			record(&order, "before"),
+			recordingValidator(&order, "before"),
 			first,
-			record(&order, "unreached"),
+			recordingValidator(&order, "unreached"),
 			second,
 		)
 
@@ -11643,14 +11607,14 @@ func TestChainValidator(t *testing.T) {
 
 		// A typed nil pointer is no failure, so the chain goes on.
 		err := newDoc(t).Validate(t.Context(), niceyaml.ChainValidator(
-			record(&order, "before"),
+			recordingValidator(&order, "before"),
 			typedNilValidator(),
 			niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
 				var e *niceyaml.SourceError
 
 				return e
 			}),
-			record(&order, "after"),
+			recordingValidator(&order, "after"),
 			second,
 		))
 		require.EqualError(t, err, "x.yaml:3:7: $.name: second rule")
@@ -11676,11 +11640,11 @@ func TestChainValidator(t *testing.T) {
 		doc := newDoc(t)
 
 		err := doc.Validate(t.Context(), niceyaml.ChainValidator(
-			record(&order, "before"),
+			recordingValidator(&order, "before"),
 			nil,
 			(*fieldValidator)(nil),
 			niceyaml.ValidatorFunc(nil),
-			record(&order, "after"),
+			recordingValidator(&order, "after"),
 			first,
 		))
 		require.ErrorIs(t, err, errFirst)
@@ -11708,7 +11672,7 @@ func TestChainValidator(t *testing.T) {
 
 		var order []string
 
-		chain := niceyaml.ChainValidator(record(&order, "unreached"))
+		chain := niceyaml.ChainValidator(recordingValidator(&order, "unreached"))
 
 		assert.Same(t, docs[0].Err(), docs[0].Validate(t.Context(), chain))
 		assert.Same(t, docs[0].Err(), chain.Check(t.Context(), docs[0]))
@@ -11917,7 +11881,10 @@ func TestChainValidator(t *testing.T) {
 		// Around one, the chain stops once the MultiValidator fails.
 		var order []string
 
-		chain := niceyaml.ChainValidator(niceyaml.MultiValidator(first, second), record(&order, "unreached"))
+		chain := niceyaml.ChainValidator(
+			niceyaml.MultiValidator(first, second),
+			recordingValidator(&order, "unreached"),
+		)
 		require.EqualError(t, doc.Validate(t.Context(), chain),
 			"x.yaml:3:7: $.name: first rule\nx.yaml:3:7: $.name: second rule")
 		assert.Empty(t, order)
@@ -11956,7 +11923,7 @@ func TestChainValidator(t *testing.T) {
 			return ctx.Err()
 		})
 
-		err := newDoc(t).Validate(ctx, niceyaml.ChainValidator(canceling, record(&order, "unreached")))
+		err := newDoc(t).Validate(ctx, niceyaml.ChainValidator(canceling, recordingValidator(&order, "unreached")))
 		require.ErrorIs(t, err, context.Canceled)
 		assert.Empty(t, order)
 	})
@@ -12090,11 +12057,7 @@ func TestSkipEmpty(t *testing.T) {
 			v niceyaml.Validator
 		}{
 			"a type of its own": {v: &fieldValidator{err: located}},
-			"a ValidatorFunc": {
-				v: niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-					return located
-				}),
-			},
+			"a ValidatorFunc":   {v: rejectingValidator(located)},
 		}
 
 		for name, tc := range tcs {
