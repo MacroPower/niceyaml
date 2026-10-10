@@ -2877,29 +2877,24 @@ func TestPath_Node_Anchors(t *testing.T) {
 
 	doc := yamltest.FirstDocument(t, "base: &b {a: 1}\nother: *b\ntagged: !!str 5\n").DocumentAST()
 
-	t.Run("anchor is looked through", func(t *testing.T) {
-		t.Parallel()
+	tcs := map[string]struct {
+		want ast.Node
+		key  string
+	}{
+		"anchor is looked through": {key: "base", want: &ast.MappingNode{}},
+		"alias is looked through":  {key: "other", want: &ast.MappingNode{}},
+		"tag is kept":              {key: "tagged", want: &ast.TagNode{}},
+	}
 
-		node, err := paths.NewResolver(doc).Node(paths.Doc().Child("base"))
-		require.NoError(t, err)
-		assert.IsType(t, &ast.MappingNode{}, node)
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("alias is looked through", func(t *testing.T) {
-		t.Parallel()
-
-		node, err := paths.NewResolver(doc).Node(paths.Doc().Child("other"))
-		require.NoError(t, err)
-		assert.IsType(t, &ast.MappingNode{}, node)
-	})
-
-	t.Run("tag is kept", func(t *testing.T) {
-		t.Parallel()
-
-		node, err := paths.NewResolver(doc).Node(paths.Doc().Child("tagged"))
-		require.NoError(t, err)
-		assert.IsType(t, &ast.TagNode{}, node)
-	})
+			node, err := paths.NewResolver(doc).Node(paths.Doc().Child(tc.key))
+			require.NoError(t, err)
+			assert.IsType(t, tc.want, node)
+		})
+	}
 }
 
 func TestPath_Node_TaggedKey(t *testing.T) {
