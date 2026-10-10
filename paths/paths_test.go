@@ -2215,112 +2215,125 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 func TestPath_Token(t *testing.T) {
 	t.Parallel()
 
-	input := `
-name: test
-kind: Service
-metadata:
-  labels:
-    app: myapp
-items:
-  - first
-  - second
-tag_first:
-  !!str inner: 8
-anchor_first:
-  &ka inner: 9
-explicit_first:
-  ? inner
-  : 10
-`
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		name: test
+		kind: Service
+		metadata:
+		  labels:
+		    app: myapp
+		items:
+		  - first
+		  - second
+		tag_first:
+		  !!str inner: 8
+		anchor_first:
+		  &ka inner: 9
+		explicit_first:
+		  ? inner
+		  : 10
+		list:
+		  - name: first
+		    items:
+		      - a
+		      - b
+		  - name: second
+		    items:
+		      - c
+		      - d
+		nested:
+		  deep:
+		    deeper:
+		      value: found
+	`)).DocumentAST()
 
-	doc := yamltest.FirstDocument(t, input).DocumentAST()
-
+	// Each path points at a string token.
 	tcs := map[string]struct {
-		path      paths.Path
-		wantValue string
-		key       bool
-		wantType  token.Type
+		path paths.Path
+		want string
+		key  bool
 	}{
 		"root value returns the first key": {
-			path:      paths.Doc(),
-			wantValue: "name",
-			wantType:  token.StringType,
+			path: paths.Doc(),
+			want: "name",
 		},
 		"root key returns the first key": {
-			path:      paths.Doc(),
-			key:       true,
-			wantValue: "name",
-			wantType:  token.StringType,
+			path: paths.Doc(),
+			key:  true,
+			want: "name",
 		},
 		"mapping value target returns the entry key": {
-			path:      paths.Doc().Child("metadata"),
-			wantValue: "metadata",
-			wantType:  token.StringType,
+			path: paths.Doc().Child("metadata"),
+			want: "metadata",
 		},
 		"mapping with a tagged first key returns the entry key": {
-			path:      paths.Doc().Child("tag_first"),
-			wantValue: "tag_first",
-			wantType:  token.StringType,
+			path: paths.Doc().Child("tag_first"),
+			want: "tag_first",
 		},
 		"mapping with an anchored first key returns the entry key": {
-			path:      paths.Doc().Child("anchor_first"),
-			wantValue: "anchor_first",
-			wantType:  token.StringType,
+			path: paths.Doc().Child("anchor_first"),
+			want: "anchor_first",
 		},
 		"mapping with an explicit first key returns the entry key": {
-			path:      paths.Doc().Child("explicit_first"),
-			wantValue: "explicit_first",
-			wantType:  token.StringType,
+			path: paths.Doc().Child("explicit_first"),
+			want: "explicit_first",
 		},
 		"mapping key target returns the entry key": {
-			path:      paths.Doc().Child("metadata"),
-			key:       true,
-			wantValue: "metadata",
-			wantType:  token.StringType,
+			path: paths.Doc().Child("metadata"),
+			key:  true,
+			want: "metadata",
 		},
 		"sequence value target returns the entry key": {
-			path:      paths.Doc().Child("items"),
-			wantValue: "items",
-			wantType:  token.StringType,
+			path: paths.Doc().Child("items"),
+			want: "items",
 		},
 		"sequence key target returns the entry key": {
-			path:      paths.Doc().Child("items"),
-			key:       true,
-			wantValue: "items",
-			wantType:  token.StringType,
+			path: paths.Doc().Child("items"),
+			key:  true,
+			want: "items",
 		},
 		"simple key target returns key token": {
-			path:      paths.Doc().Child("name"),
-			key:       true,
-			wantValue: "name",
-			wantType:  token.StringType,
+			path: paths.Doc().Child("name"),
+			key:  true,
+			want: "name",
 		},
 		"simple value target returns value token": {
-			path:      paths.Doc().Child("name"),
-			wantValue: "test",
-			wantType:  token.StringType,
+			path: paths.Doc().Child("name"),
+			want: "test",
 		},
 		"nested key target": {
-			path:      paths.Doc().Child("metadata", "labels", "app"),
-			key:       true,
-			wantValue: "app",
-			wantType:  token.StringType,
+			path: paths.Doc().Child("metadata", "labels", "app"),
+			key:  true,
+			want: "app",
 		},
 		"nested value target": {
-			path:      paths.Doc().Child("metadata", "labels", "app"),
-			wantValue: "myapp",
-			wantType:  token.StringType,
+			path: paths.Doc().Child("metadata", "labels", "app"),
+			want: "myapp",
 		},
 		"array element value target": {
-			path:      paths.Doc().Child("items").Index(0),
-			wantValue: "first",
-			wantType:  token.StringType,
+			path: paths.Doc().Child("items").Index(0),
+			want: "first",
 		},
 		"array element key target returns value (no parent mapping)": {
-			path:      paths.Doc().Child("items").Index(1),
-			key:       true,
-			wantValue: "second",
-			wantType:  token.StringType,
+			path: paths.Doc().Child("items").Index(1),
+			key:  true,
+			want: "second",
+		},
+		"nested array first element name": {
+			path: paths.Doc().Child("list").Index(0).Child("name"),
+			want: "first",
+		},
+		"nested array second element items first": {
+			path: paths.Doc().Child("list").Index(1).Child("items").Index(0),
+			want: "c",
+		},
+		"deeply nested value": {
+			path: paths.Doc().Child("nested", "deep", "deeper", "value"),
+			want: "found",
+		},
+		"deeply nested key": {
+			path: paths.Doc().Child("nested", "deep", "deeper", "value"),
+			key:  true,
+			want: "value",
 		},
 	}
 
@@ -2329,8 +2342,8 @@ explicit_first:
 			t.Parallel()
 
 			tk := resolveToken(t, tc.path, tc.key, doc)
-			assert.Equal(t, tc.wantValue, tk.Value)
-			assert.Equal(t, tc.wantType, tk.Type)
+			assert.Equal(t, tc.want, tk.Value)
+			assert.Equal(t, token.StringType, tk.Type)
 		})
 	}
 }
@@ -2673,67 +2686,6 @@ func TestPath_Token_MultipleDocuments(t *testing.T) {
 	tk, err = paths.NewResolver(file.Docs[1]).Token(path)
 	require.NoError(t, err)
 	assert.Equal(t, "second", tk.Value)
-}
-
-func TestPath_Token_NestedStructures(t *testing.T) {
-	t.Parallel()
-
-	input := `
-list:
-  - name: first
-    items:
-      - a
-      - b
-  - name: second
-    items:
-      - c
-      - d
-nested:
-  deep:
-    deeper:
-      value: found
-`
-
-	doc := yamltest.FirstDocument(t, input).DocumentAST()
-
-	tcs := map[string]struct {
-		path      paths.Path
-		wantValue string
-		key       bool
-		wantType  token.Type
-	}{
-		"nested array first element name": {
-			path:      paths.Doc().Child("list").Index(0).Child("name"),
-			wantValue: "first",
-			wantType:  token.StringType,
-		},
-		"nested array second element items first": {
-			path:      paths.Doc().Child("list").Index(1).Child("items").Index(0),
-			wantValue: "c",
-			wantType:  token.StringType,
-		},
-		"deeply nested value": {
-			path:      paths.Doc().Child("nested", "deep", "deeper", "value"),
-			wantValue: "found",
-			wantType:  token.StringType,
-		},
-		"deeply nested key": {
-			path:      paths.Doc().Child("nested", "deep", "deeper", "value"),
-			key:       true,
-			wantValue: "value",
-			wantType:  token.StringType,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			tk := resolveToken(t, tc.path, tc.key, doc)
-			assert.Equal(t, tc.wantValue, tk.Value)
-			assert.Equal(t, tc.wantType, tk.Type)
-		})
-	}
 }
 
 func TestPath_Node(t *testing.T) {
