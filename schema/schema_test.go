@@ -1725,31 +1725,35 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 	t.Run("a Validate method returns the result", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := placeConfig{Request: placeRequest{schema: v}}
+		tcs := map[string]struct {
+			request placeRequest
+			want    string
+		}{
+			"as it is": {
+				request: placeRequest{schema: v},
+				want:    "app.yaml:2:9: $.request.port: 0 is less than 1",
+			},
+			"under a message of its own": {
+				request: placeRequest{schema: v, fixed: true},
+				want:    "app.yaml:2:9: $.request.port: invalid body",
+			},
+			"inside Invalid": {
+				request: placeRequest{schema: v, invalid: true},
+				want:    "app.yaml:2:9: $.request.port: 0 is less than 1",
+			},
+		}
 
-		err := doc.DecodeInto(t.Context(), &cfg)
-		require.EqualError(t, err, "app.yaml:2:9: $.request.port: 0 is less than 1")
-		assert.True(t, niceyaml.IsInvalid(err))
-	})
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-	t.Run("a Validate method returns the result under a message of its own", func(t *testing.T) {
-		t.Parallel()
+				cfg := placeConfig{Request: tc.request}
 
-		cfg := placeConfig{Request: placeRequest{schema: v, fixed: true}}
-
-		err := doc.DecodeInto(t.Context(), &cfg)
-		require.EqualError(t, err, "app.yaml:2:9: $.request.port: invalid body")
-		assert.True(t, niceyaml.IsInvalid(err))
-	})
-
-	t.Run("a Validate method returns the result inside Invalid", func(t *testing.T) {
-		t.Parallel()
-
-		cfg := placeConfig{Request: placeRequest{schema: v, invalid: true}}
-
-		err := doc.DecodeInto(t.Context(), &cfg)
-		require.EqualError(t, err, "app.yaml:2:9: $.request.port: 0 is less than 1")
-		assert.True(t, niceyaml.IsInvalid(err))
+				err := doc.DecodeInto(t.Context(), &cfg)
+				require.EqualError(t, err, tc.want)
+				assert.True(t, niceyaml.IsInvalid(err))
+			})
+		}
 	})
 
 	t.Run("an Error with no option places the result", func(t *testing.T) {
