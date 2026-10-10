@@ -56,9 +56,11 @@ import (
 // Any value with a Validate method takes part, including one from a
 // package that names its own check that way, such as a generated
 // message type. A decode runs those checks too and reports their errors
-// at the value that owns the method. A Validate that rewrites its value,
-// or that the value's own UnmarshalYAML already ran, runs again inside
-// the decode, so it should be idempotent.
+// at the value that owns the method. A Validate that the value's own
+// UnmarshalYAML already called runs a second time inside the decode, so
+// a Validate that rewrites its value should be idempotent. An error from
+// that first call reports as a decode error, which matches [ErrDecode],
+// rather than as a self-validation error.
 //
 // # Paths
 //
