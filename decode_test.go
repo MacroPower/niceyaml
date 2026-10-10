@@ -8660,6 +8660,8 @@ func TestDecodeOptions(t *testing.T) {
 	strict := niceyaml.WithDisallowUnknownFields(true)
 	lax := niceyaml.WithDisallowUnknownFields(false)
 
+	dd := yamltest.FirstDocument(t, input)
+
 	t.Run("decodes every document with the options stated once", func(t *testing.T) {
 		t.Parallel()
 
@@ -8684,8 +8686,6 @@ func TestDecodeOptions(t *testing.T) {
 	t.Run("without options decodes as a call without options does", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-
 		got, err := dd.Decode[validatorConfig](t.Context(), niceyaml.DecodeOptions())
 		require.NoError(t, err)
 		assert.Equal(t, "test", got.Name)
@@ -8703,8 +8703,6 @@ func TestDecodeOptions(t *testing.T) {
 			record(&order, "last"),
 		)
 
-		dd := yamltest.FirstDocument(t, input)
-
 		_, err := dd.Decode[strictConfig](t.Context(), record(&order, "before"), opts, record(&order, "after"))
 		require.NoError(t, err)
 		assert.Equal(t, []string{"before", "first", "nested", "last", "after"}, order)
@@ -8720,8 +8718,6 @@ func TestDecodeOptions(t *testing.T) {
 			niceyaml.WithValidator(rejectingValidator(errNameRequired)),
 			record(&order, "unreached"),
 		)
-
-		dd := yamltest.FirstDocument(t, input)
 
 		got, err := dd.Decode[strictConfig](t.Context(), opts, record(&order, "after"))
 		require.ErrorIs(t, err, errNameRequired)
@@ -8760,8 +8756,6 @@ func TestDecodeOptions(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, input)
-
 				got, err := dd.Decode[strictConfig](t.Context(), tc.opts...)
 				if tc.err != "" {
 					require.EqualError(t, err, tc.err)
@@ -8779,8 +8773,6 @@ func TestDecodeOptions(t *testing.T) {
 		t.Parallel()
 
 		off := niceyaml.DecodeOptions(niceyaml.WithSelfValidation(false))
-
-		dd := yamltest.FirstDocument(t, input)
 
 		got, err := dd.Decode[failingValidator](t.Context(), off)
 		require.NoError(t, err)
@@ -8800,8 +8792,6 @@ func TestDecodeOptions(t *testing.T) {
 
 		opts := niceyaml.DecodeOptions(record(&order, "schema"))
 
-		dd := yamltest.FirstDocument(t, input)
-
 		_, err := dd.Decode[strictConfig](t.Context(), opts, opts) //nolint:gocritic // The call gets the value twice.
 		require.NoError(t, err)
 		assert.Equal(t, []string{"schema", "schema"}, order)
@@ -8814,8 +8804,6 @@ func TestDecodeOptions(t *testing.T) {
 
 		base := niceyaml.DecodeOptions(record(&order, "base"), strict)
 		derived := niceyaml.DecodeOptions(base, record(&order, "derived"), lax)
-
-		dd := yamltest.FirstDocument(t, input)
 
 		got, err := dd.Decode[strictConfig](t.Context(), derived)
 		require.NoError(t, err)
@@ -8876,8 +8864,6 @@ func TestDecodeOptions(t *testing.T) {
 		opts := niceyaml.DecodeOptions(given...)
 		given[0] = record(&order, "edited")
 
-		dd := yamltest.FirstDocument(t, input)
-
 		_, err := dd.Decode[strictConfig](t.Context(), opts)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"given"}, order)
@@ -8891,8 +8877,6 @@ func TestDecodeOptions(t *testing.T) {
 		require.NotPanics(t, func() {
 			opts = niceyaml.DecodeOptions(nil)
 		})
-
-		dd := yamltest.FirstDocument(t, input)
 
 		assert.Panics(t, func() {
 			_, _ = dd.Decode[strictConfig](t.Context(), opts) //nolint:errcheck // The call panics before it returns.
