@@ -33,6 +33,19 @@ func reportExcerpts(rep niceyaml.ErrorReport) []string {
 	return got
 }
 
+// reportSourceExcerpts returns each excerpt of rep as its view as plain
+// text below the name of its source, whether or not the excerpt has
+// Named set.
+func reportSourceExcerpts(rep niceyaml.ErrorReport) []string {
+	var got []string
+
+	for _, excerpt := range rep.Excerpts {
+		got = append(got, excerpt.Source.Name()+"\n"+excerpt.View.String())
+	}
+
+	return got
+}
+
 // reportUnresolved returns the message of each unresolved binding of rep.
 func reportUnresolved(rep niceyaml.ErrorReport) []string {
 	var got []string
@@ -465,17 +478,6 @@ func TestNewErrorReport_Excerpts(t *testing.T) {
 	badC := yamltest.Bind(t, second, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c"))))
 	gone := yamltest.Bind(t, second, niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").Index(0))))
 
-	// Each excerpt reads as the name of its source on a row above it.
-	collect := func(rep niceyaml.ErrorReport) []string {
-		var got []string
-
-		for _, excerpt := range rep.Excerpts {
-			got = append(got, excerpt.Source.Name()+"\n"+excerpt.View.String())
-		}
-
-		return got
-	}
-
 	tcs := map[string]struct {
 		err  error
 		want []string
@@ -532,7 +534,9 @@ func TestNewErrorReport_Excerpts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, collect(niceyaml.NewErrorReport(tc.err, niceyaml.WithContextLines(0))))
+			rep := niceyaml.NewErrorReport(tc.err, niceyaml.WithContextLines(0))
+
+			assert.Equal(t, tc.want, reportSourceExcerpts(rep))
 		})
 	}
 
@@ -558,17 +562,6 @@ func TestNewErrorReport_ExcerptsOff(t *testing.T) {
 
 	badPort := yamltest.Bind(t, secrets, niceyaml.NewError("bad port", niceyaml.AtPath(port)))
 	openPort := yamltest.Bind(t, open, niceyaml.NewError("open port", niceyaml.AtPath(port)))
-
-	// Each excerpt reads as the name of its source on a row above it.
-	collect := func(rep niceyaml.ErrorReport) []string {
-		var got []string
-
-		for _, excerpt := range rep.Excerpts {
-			got = append(got, excerpt.Source.Name()+"\n"+excerpt.View.String())
-		}
-
-		return got
-	}
 
 	tcs := map[string]struct {
 		err error
@@ -608,12 +601,12 @@ func TestNewErrorReport_ExcerptsOff(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, collect(niceyaml.NewErrorReport(tc.err)))
+			assert.Equal(t, tc.want, reportSourceExcerpts(niceyaml.NewErrorReport(tc.err)))
 
 			var bound *niceyaml.SourceError
 
 			require.ErrorAs(t, tc.err, &bound)
-			assert.Equal(t, tc.wantOwn, collect(niceyaml.NewErrorReport(bound)))
+			assert.Equal(t, tc.wantOwn, reportSourceExcerpts(niceyaml.NewErrorReport(bound)))
 		})
 	}
 
