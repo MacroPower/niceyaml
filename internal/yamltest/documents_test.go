@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -21,7 +22,7 @@ func TestDocumentHelpers(t *testing.T) {
 
 		var tb testing.TB = t
 
-		doc := yamltest.FirstDocument(tb, "a: 1\n---\nb: 2\n")
+		doc := yamltest.FirstDocument(tb, stringtest.LinesLF("a: 1", "---", "b: 2"))
 
 		assert.Equal(t, 0, doc.DocumentIndex())
 	})

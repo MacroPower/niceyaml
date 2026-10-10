@@ -9,6 +9,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
@@ -140,11 +141,16 @@ func TestFormatTokens(t *testing.T) {
 		},
 		"single token": {
 			input: token.Tokens{first},
-			want:  "[0]\n" + yamltest.FormatToken(first),
+			want:  stringtest.JoinLF("[0]", yamltest.FormatToken(first)),
 		},
 		"multiple tokens": {
 			input: token.Tokens{first, second},
-			want:  "[0]\n" + yamltest.FormatToken(first) + "\n[1]\n" + yamltest.FormatToken(second),
+			want: stringtest.JoinLF(
+				"[0]",
+				yamltest.FormatToken(first),
+				"[1]",
+				yamltest.FormatToken(second),
+			),
 		},
 	}
 
@@ -174,7 +180,7 @@ func TestCompareContent(t *testing.T) {
 			got:  "line1\r\nline2",
 		},
 		"normalizes bare CR line endings": {
-			want: "line1\nline2\n\nline3",
+			want: stringtest.JoinLF("line1", "line2", "", "line3"),
 			got:  "line1\rline2\r\rline3\r",
 		},
 		"trims surrounding newlines": {
@@ -559,8 +565,10 @@ func TestCompareTokenSlices(t *testing.T) {
 		"only the tokens that differ are listed": {
 			want: token.Tokens{a, b, c},
 			got:  token.Tokens{a, x, y},
-			str: "token 1: " + yamltest.CompareTokens(b, x).String() +
-				"\ntoken 2: " + yamltest.CompareTokens(c, y).String(),
+			str: stringtest.JoinLF(
+				"token 1: "+yamltest.CompareTokens(b, x).String(),
+				"token 2: "+yamltest.CompareTokens(c, y).String(),
+			),
 		},
 	}
 

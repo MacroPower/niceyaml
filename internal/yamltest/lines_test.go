@@ -9,6 +9,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -42,21 +43,25 @@ func TestLines_Validate(t *testing.T) {
 	t.Run("valid cases", func(t *testing.T) {
 		t.Parallel()
 
-		tcs := map[string]struct {
-			input string
-		}{
-			"valid simple":                       {input: "key: value\n"},
-			"valid multi-line":                   {input: "first: 1\nsecond: 2\nthird: 3\n"},
-			"valid with join flags":              {input: "script: |\n  line1\n  line2\n"},
-			"block scalar with content after it": {input: "k: >\n  a\n\n  b\nz: 1\n"},
-			"empty":                              {input: ""},
+		tcs := map[string]string{
+			"valid simple":          "key: value\n",
+			"valid multi-line":      stringtest.LinesLF("first: 1", "second: 2", "third: 3"),
+			"valid with join flags": stringtest.LinesLF("script: |", "  line1", "  line2"),
+			"block scalar with content after it": stringtest.LinesLF(
+				"k: >",
+				"  a",
+				"",
+				"  b",
+				"z: 1",
+			),
+			"empty": "",
 		}
 
-		for name, tc := range tcs {
+		for name, input := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				tks := tokens.Tokenize(tc.input)
+				tks := tokens.Tokenize(input)
 				lines := line.NewLines(tks)
 
 				// Every token NewLines creates is valid.

@@ -20,7 +20,7 @@ func TestAliasBombs(t *testing.T) {
 		"alias levels without aliases": {
 			generate: yamltest.AliasLevels,
 			levels:   0,
-			want:     "a:\n  - &l0 [x]\n",
+			want:     stringtest.LinesLF("a:", "  - &l0 [x]"),
 		},
 		"one alias level": {
 			generate: yamltest.AliasLevels,
@@ -48,12 +48,23 @@ func TestAliasBombs(t *testing.T) {
 		"wide merge of one member": {
 			generate: yamltest.WideMerge,
 			levels:   1,
-			want:     "a: &a {z: 0}\nm:\n  0x1000: x\n  <<: [*a]\n",
+			want: stringtest.LinesLF(
+				"a: &a {z: 0}",
+				"m:",
+				"  0x1000: x",
+				"  <<: [*a]",
+			),
 		},
 		"wide merge of two members": {
 			generate: yamltest.WideMerge,
 			levels:   2,
-			want:     "a: &a {z: 0}\nm:\n  0x1000: x\n  0x1001: x\n  <<: [*a, *a]\n",
+			want: stringtest.LinesLF(
+				"a: &a {z: 0}",
+				"m:",
+				"  0x1000: x",
+				"  0x1001: x",
+				"  <<: [*a, *a]",
+			),
 		},
 	}
 
@@ -74,10 +85,14 @@ func TestGenerateLines(t *testing.T) {
 		want   string
 		lines  int
 	}{
-		"no lines":             {lines: 0, format: "k%d: v", want: ""},
-		"negative count":       {lines: -1, format: "k%d: v", want: ""},
-		"one line":             {lines: 1, format: "k%d: v", want: "k0: v\n"},
-		"index in each line":   {lines: 3, format: "k%d: v", want: "k0: v\nk1: v\nk2: v\n"},
+		"no lines":       {lines: 0, format: "k%d: v", want: ""},
+		"negative count": {lines: -1, format: "k%d: v", want: ""},
+		"one line":       {lines: 1, format: "k%d: v", want: "k0: v\n"},
+		"index in each line": {
+			lines:  3,
+			format: "k%d: v",
+			want:   stringtest.LinesLF("k0: v", "k1: v", "k2: v"),
+		},
 		"index twice in lines": {lines: 2, format: "k%[1]d: v%[1]d", want: "k0: v0\nk1: v1\n"},
 	}
 
@@ -93,7 +108,7 @@ func TestGenerateLines(t *testing.T) {
 func TestGenerateYAML(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "key_0: value_0\nkey_1: value_1\n", yamltest.GenerateYAML(2))
+	assert.Equal(t, stringtest.LinesLF("key_0: value_0", "key_1: value_1"), yamltest.GenerateYAML(2))
 	assert.Empty(t, yamltest.GenerateYAML(0))
 }
 
@@ -111,12 +126,24 @@ func TestWideMergeOf(t *testing.T) {
 		},
 		"another item": {
 			item: "0",
-			want: "a: &a {z: 0}\nm:\n  0x1000: x\n  0x1001: x\n  <<: [0, 0]\n",
+			want: stringtest.LinesLF(
+				"a: &a {z: 0}",
+				"m:",
+				"  0x1000: x",
+				"  0x1001: x",
+				"  <<: [0, 0]",
+			),
 		},
 		"tail after the items": {
 			item: "*a",
 			tail: []string{"*late", "x"},
-			want: "a: &a {z: 0}\nm:\n  0x1000: x\n  0x1001: x\n  <<: [*a, *a, *late, x]\n",
+			want: stringtest.LinesLF(
+				"a: &a {z: 0}",
+				"m:",
+				"  0x1000: x",
+				"  0x1001: x",
+				"  <<: [*a, *a, *late, x]",
+			),
 		},
 	}
 
