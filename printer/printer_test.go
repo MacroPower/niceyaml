@@ -606,55 +606,6 @@ func TestPrinter_PrintError_WrapFitsExcerpts(t *testing.T) {
 	}
 }
 
-func TestPrinter_PrintError_MarksRangeWithoutStyles(t *testing.T) {
-	t.Parallel()
-
-	// A childless bound error has no message beside its range, so without
-	// color the carets on the row below are all that shows its extent.
-	source := niceyaml.NewSourceFromString("spec:\n  sla: 99\n  hours:\n")
-	bound := yamltest.Bind(t, source, niceyaml.NewError("bad",
-		niceyaml.AtPath(paths.Current().Child("spec").Child("sla")),
-	))
-
-	tcs := map[string]struct {
-		gutter printer.Gutter
-		want   string
-	}{
-		"no gutter": {
-			gutter: printer.NoGutter,
-			want: stringtest.JoinLF(
-				"2:8: $.spec.sla: bad",
-				"",
-				"spec:",
-				"  sla: 99",
-				"       ^^",
-				"  hours:",
-			),
-		},
-		"line numbers": {
-			gutter: printer.DefaultGutter,
-			want: stringtest.JoinLF(
-				"2:8: $.spec.sla: bad",
-				"",
-				"   1  spec:",
-				"   2    sla: 99",
-				"             ^^",
-				"   3    hours:",
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			p := testPrinterWithGutter(tc.gutter)
-
-			assert.Equal(t, tc.want, p.PrintError(bound))
-		})
-	}
-}
-
 func TestPrinter_PrintError_MarksBindingsWithoutStyles(t *testing.T) {
 	t.Parallel()
 
@@ -719,16 +670,48 @@ func TestPrinter_PrintError_MarksBindingsWithoutStyles(t *testing.T) {
 	}
 }
 
-func TestPrinter_PrintError_MarksWrappedBindings(t *testing.T) {
+func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("ports: {http: eighty, https: ninety}\nname: x\n")
+	items := niceyaml.NewSourceFromString(itemsInput(12))
+
+	// A childless bound error has no message beside its range, so without
+	// color the carets on the row below are all that shows its extent.
+	sla := niceyaml.NewSourceFromString("spec:\n  sla: 99\n  hours:\n")
+	badSLA := yamltest.Bind(t, sla, niceyaml.NewError("bad",
+		niceyaml.AtPath(paths.Current().Child("spec").Child("sla")),
+	))
 
 	tcs := map[string]struct {
-		err   error
-		want  string
-		width int
+		err    error
+		gutter printer.Gutter // Nil for no gutter.
+		want   string
+		width  int
 	}{
+		"range": {
+			err: badSLA,
+			want: stringtest.JoinLF(
+				"2:8: $.spec.sla: bad",
+				"",
+				"spec:",
+				"  sla: 99",
+				"       ^^",
+				"  hours:",
+			),
+		},
+		"range behind line numbers": {
+			err:    badSLA,
+			gutter: printer.DefaultGutter,
+			want: stringtest.JoinLF(
+				"2:8: $.spec.sla: bad",
+				"",
+				"   1  spec:",
+				"   2    sla: 99",
+				"             ^^",
+				"   3    hours:",
+			),
+		},
 		// The message sits beside the carets of the wrapped row that holds
 		// its column, here the second.
 		"message beside the carets of a later row": {
@@ -794,13 +777,33 @@ func TestPrinter_PrintError_MarksWrappedBindings(t *testing.T) {
 				"      ^ bad name",
 			),
 		},
+		// The range runs from item02 on the first row to item05 on the
+		// second, so each of those rows gets carets below it under its own
+		// part of the range.
+		"range across a break behind line numbers": {
+			err: yamltest.Bind(t, items, niceyaml.NewError("bad", niceyaml.AtRange(
+				yamltest.LineRange(0, 24, 54),
+			))),
+			gutter: printer.DefaultGutter,
+			width:  40,
+			want: stringtest.JoinLF(
+				"1:25: bad",
+				"",
+				"   1  items: [item00, item01, item02,",
+				strings.Repeat(" ", 30)+"^^^^^^^",
+				"   -  item03, item04, item05, item06,",
+				strings.Repeat(" ", 6)+strings.Repeat("^", 22),
+				"   -  item07, item08, item09, item10,",
+				"   -  item11]",
+			),
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinter().With(printer.WithWrapWidth(tc.width))
+			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.width))
 
 			assert.Equal(t, tc.want, p.PrintError(tc.err))
 		})
@@ -867,33 +870,6 @@ func TestPrinter_MarksRangeUnderHighlight(t *testing.T) {
 			assert.Equal(t, tc.want, p.Print(annotated), "annotation before the highlight")
 		})
 	}
-}
-
-func TestPrinter_PrintError_MarksWrappedRange(t *testing.T) {
-	t.Parallel()
-
-	// The range runs from item02 on the first row to item05 on the second,
-	// so each of those rows gets carets below it under its own part of the
-	// range.
-	source := niceyaml.NewSourceFromString(itemsInput(12))
-	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtRange(
-		yamltest.LineRange(0, 24, 54),
-	)))
-
-	p := testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrapWidth(40))
-
-	want := stringtest.JoinLF(
-		"1:25: bad",
-		"",
-		"   1  items: [item00, item01, item02,",
-		strings.Repeat(" ", 30)+"^^^^^^^",
-		"   -  item03, item04, item05, item06,",
-		strings.Repeat(" ", 6)+strings.Repeat("^", 22),
-		"   -  item07, item08, item09, item10,",
-		"   -  item11]",
-	)
-
-	assert.Equal(t, want, p.PrintError(bound))
 }
 
 func TestPrinter_PrintError_MarksLongWrappedValue(t *testing.T) {
