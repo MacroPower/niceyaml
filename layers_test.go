@@ -257,7 +257,12 @@ func TestNewSourceFromLayers(t *testing.T) {
 
 		base := layerSources(t, baseInput)[0]
 		profiles := yamltest.FirstDocument(t,
-			"profiles:\n  prod:\n    server:\n      host: prod.example.com\n",
+			stringtest.LinesLF(
+				"profiles:",
+				"  prod:",
+				"    server:",
+				"      host: prod.example.com",
+			),
 			niceyaml.WithName("profiles.yaml"),
 		)
 		prod := yamltest.At(t, profiles, paths.Doc().Child("profiles", "prod"))
@@ -919,7 +924,12 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		t.Parallel()
 
 		base := yamltest.FirstDocument(t,
-			"defaults:\n  server:\n    host: example.com\n    port: 0\n",
+			stringtest.LinesLF(
+				"defaults:",
+				"  server:",
+				"    host: example.com",
+				"    port: 0",
+			),
 			niceyaml.WithName("base.yaml"),
 		)
 		prod := yamltest.FirstDocument(t, prodInput, niceyaml.WithName("prod.yaml"))
@@ -1057,9 +1067,14 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 func TestNewSourceFromLayers_Validate(t *testing.T) {
 	t.Parallel()
 
-	const (
-		baseInput = "# yaml-language-server: $schema=app.json\nname: shop\nserver:\n  host: example.com\n  port: 0\n"
-		prodInput = "server:\n  host: prod.example.com\n"
+	const prodInput = "server:\n  host: prod.example.com\n"
+
+	baseInput := stringtest.LinesLF(
+		"# yaml-language-server: $schema=app.json",
+		"name: shop",
+		"server:",
+		"  host: example.com",
+		"  port: 0",
 	)
 
 	requires := schema.MustCompile([]byte(`{
@@ -1132,7 +1147,13 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 		assert.Equal(t, "app.json", directive.Schema)
 
 		assert.Equal(t,
-			"# yaml-language-server: $schema=app.json\nname: shop\nserver:\n  host: prod.example.com\n  port: 0",
+			stringtest.JoinLF(
+				"# yaml-language-server: $schema=app.json",
+				"name: shop",
+				"server:",
+				"  host: prod.example.com",
+				"  port: 0",
+			),
 			seen.Source().View().Held().Content())
 	})
 
@@ -1185,11 +1206,17 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 func TestNewSourceFromLayers_Document(t *testing.T) {
 	t.Parallel()
 
+	const prodInput = "server:\n  host: prod.example.com\n"
+
 	// The blank line keeps the lines of base.yaml apart from the lines of
 	// the merged document.
-	const (
-		baseInput = "# base\nname: shop\n\nserver:\n  host: example.com\n  port: 0\n"
-		prodInput = "server:\n  host: prod.example.com\n"
+	baseInput := stringtest.LinesLF(
+		"# base",
+		"name: shop",
+		"",
+		"server:",
+		"  host: example.com",
+		"  port: 0",
 	)
 
 	var (
@@ -1211,7 +1238,13 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 		assert.Same(t, doc, doc.Document())
 		assert.Equal(t, "base.yaml", doc.Source().Name())
 		assert.Equal(t, niceyaml.NodeMapping, doc.Kind())
-		assert.Equal(t, "# base\nname: shop\nserver:\n  host: prod.example.com\n  port: 0",
+		assert.Equal(t, stringtest.JoinLF(
+			"# base",
+			"name: shop",
+			"server:",
+			"  host: prod.example.com",
+			"  port: 0",
+		),
 			doc.View().Held().Content())
 
 		// Every call returns the Node a validator gets.
@@ -1391,7 +1424,13 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 func TestNode_Origin(t *testing.T) {
 	t.Parallel()
 
-	const baseInput = "name: shop\nserver:\n  host: example.com\n  port: 80\ntags: [a, b]\n"
+	baseInput := stringtest.LinesLF(
+		"name: shop",
+		"server:",
+		"  host: example.com",
+		"  port: 80",
+		"tags: [a, b]",
+	)
 
 	var (
 		server = paths.Doc().Child("server")
@@ -1485,7 +1524,13 @@ func TestNode_Origin(t *testing.T) {
 		"a value a merge key brings in comes from the content of the anchor": {
 			inputs: []string{
 				baseInput,
-				"defaults: &defaults\n  port: 9\nserver:\n  <<: *defaults\n  host: prod.example.com\n",
+				stringtest.LinesLF(
+					"defaults: &defaults",
+					"  port: 9",
+					"server:",
+					"  <<: *defaults",
+					"  host: prod.example.com",
+				),
 			},
 			path:      port,
 			wantLayer: "prod.yaml",
@@ -1670,7 +1715,15 @@ func TestNode_Origin(t *testing.T) {
 		t.Parallel()
 
 		envs := yamltest.FirstDocument(t,
-			"defaults:\n  server:\n    host: example.com\n    port: 80\nprod:\n  server:\n    port: 8443\n",
+			stringtest.LinesLF(
+				"defaults:",
+				"  server:",
+				"    host: example.com",
+				"    port: 80",
+				"prod:",
+				"  server:",
+				"    port: 8443",
+			),
 			niceyaml.WithName("envs.yaml"))
 
 		defaults := yamltest.At(t, envs, paths.Doc().Child("defaults"))
@@ -1886,8 +1939,19 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 	t.Parallel()
 
 	nodes := layerNodes(t,
-		"server:\n  host: example.com\n  port: 8080\nservers:\n  - {host: a, port: 80}\n",
-		"server:\n  host: prod.example.com\nbackends:\n  a: {host: x, port: 80}\n",
+		stringtest.LinesLF(
+			"server:",
+			"  host: example.com",
+			"  port: 8080",
+			"servers:",
+			"  - {host: a, port: 80}",
+		),
+		stringtest.LinesLF(
+			"server:",
+			"  host: prod.example.com",
+			"backends:",
+			"  a: {host: x, port: 80}",
+		),
 	)
 	layers := yamltest.Layers(t, layersOf(nodes)...)
 
@@ -1973,7 +2037,14 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 		// The merged text keeps no comment of base.yaml, so it ends
 		// above the last lines of that file.
 		long := layerNodes(t,
-			"server:\n  host: example.com\n\n  # one\n  # two\n  port: 8080\n",
+			stringtest.LinesLF(
+				"server:",
+				"  host: example.com",
+				"",
+				"  # one",
+				"  # two",
+				"  port: 8080",
+			),
 			"server:\n  port: 80\n",
 		)
 		merged := yamltest.Layers(t, layersOf(long)...)
