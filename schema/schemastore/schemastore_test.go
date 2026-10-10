@@ -104,6 +104,11 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 				URL:       "HTTPS://json.schemastore.org/upper.json",
 				FileMatch: []string{"**/upper/*.yaml"},
 			},
+			{
+				Name:      "No URL",
+				URL:       "", // The registry has nothing to fetch.
+				FileMatch: []string{"**/no-url/*.yaml"},
+			},
 		},
 	}
 
@@ -114,6 +119,10 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 	}{
 		"no match for an entry with a file URL": {
 			filePath: "repo/local/config.yaml",
+			err:      schemastore.ErrNoCatalogMatch,
+		},
+		"no match for an entry without a URL": {
+			filePath: "repo/no-url/config.yaml",
 			err:      schemastore.ErrNoCatalogMatch,
 		},
 		"matches an entry with an uppercase HTTPS scheme": {
@@ -1412,36 +1421,6 @@ func TestSchemaStore_RefetchFails(t *testing.T) {
 			})
 		})
 	}
-}
-
-func TestSchemaStore_SkipsEntriesWithoutURL(t *testing.T) {
-	t.Parallel()
-
-	catalog := schemastore.Catalog{
-		Schemas: []schemastore.CatalogEntry{
-			{
-				Name:      "No URL",
-				URL:       "",
-				FileMatch: []string{"*.yaml"},
-			},
-			{
-				Name:      "Has URL",
-				URL:       "https://example.com/schema.json",
-				FileMatch: []string{"config.yaml"},
-			},
-		},
-	}
-
-	store := newStore(newCatalogClient(t, catalog))
-
-	// The store skips the entry without a URL, so random.yaml won't match.
-	_, err := store.FindMatch(t.Context(), "random.yaml")
-	require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
-
-	// Entry with URL should still match.
-	entry, err := store.FindMatch(t.Context(), "config.yaml")
-	require.NoError(t, err)
-	assert.Equal(t, "Has URL", entry.Name)
 }
 
 func TestSchemaStore_Resolve(t *testing.T) {
