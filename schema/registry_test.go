@@ -4044,24 +4044,29 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 	// beside it, which reads the type of a name through a $ref of its
 	// own. Each pair of files spells that in YAML, in JSON, or in both,
 	// under a name of either kind.
-	const (
-		defsYAML = `$defs:
-  name:
-    type: string
-  named:
-    properties:
-      name:
-        $ref: '#/$defs/name'
-`
-		defsJSON = `{
-			"$defs": {
-				"name": {"type": "string"},
-				"named": {"properties": {"name": {"$ref": "#/$defs/name"}}}
-			}
-		}`
-		// The schema of a named document, with no $ref.
-		namedYAML = "properties:\n  name:\n    type: string\n"
-	)
+	const defsJSON = `{
+		"$defs": {
+			"name": {"type": "string"},
+			"named": {"properties": {"name": {"$ref": "#/$defs/name"}}}
+		}
+	}`
+
+	defsYAML := stringtest.Input(`
+		$defs:
+		  name:
+		    type: string
+		  named:
+		    properties:
+		      name:
+		        $ref: '#/$defs/name'
+	`)
+
+	// The schema of a named document, with no $ref.
+	namedYAML := stringtest.Input(`
+		properties:
+		  name:
+		    type: string
+	`)
 
 	// A refFunc builds the Ref of a case and the options of its registry.
 	type refFunc func(t *testing.T) (schema.Ref, []schema.RegistryOption)
@@ -4208,6 +4213,9 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 		require.NoError(t, yamltest.FirstDocument(t, "v: 1000\n").Validate(t.Context(), s))
 	})
 
+	// A document whose flow mapping never closes.
+	unclosedDefs := stringtest.LinesLF("$defs:", "  named: {required: [name]")
+
 	// The schema is at fault for each of these, and the document it
 	// would validate is not.
 	broken := map[string]struct {
@@ -4227,7 +4235,7 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 			err:   schema.ErrCompile,
 		},
 		"fragment of a schema that does not parse": {
-			files: map[string]string{"defs.yaml": "$defs:\n  named: {required: [name]\n"},
+			files: map[string]string{"defs.yaml": unclosedDefs},
 			name:  "defs.yaml#/$defs/named",
 			at:    "defs.yaml",
 			err:   schema.ErrCompile,
@@ -4235,7 +4243,7 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 		"$ref target that does not parse": {
 			files: map[string]string{
 				"root.yaml": "$ref: defs.yaml#/$defs/named\n",
-				"defs.yaml": "$defs:\n  named: {required: [name]\n",
+				"defs.yaml": unclosedDefs,
 			},
 			name: "root.yaml",
 			at:   "defs.yaml",
@@ -4274,14 +4282,15 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 
 		defsURL := "file://" + filepath.ToSlash(filepath.Join(dir, "defs.json"))
 
+		refersTo := func(ref string) string {
+			return stringtest.LinesLF("properties:", "  a:", "    $ref: "+ref)
+		}
+
 		// The second document spells the scheme with an escape, which
 		// only the decoded value shows.
 		remote := map[string]string{
-			"/names-file.yaml": "properties:\n  a:\n    $ref: " + defsURL + "\n",
-			"/escapes-file.yaml": "properties:\n  a:\n    $ref: \"\\x66ile" + strings.TrimPrefix(
-				defsURL,
-				"file",
-			) + "\"\n",
+			"/names-file.yaml":   refersTo(defsURL),
+			"/escapes-file.yaml": refersTo(`"\x66ile` + strings.TrimPrefix(defsURL, "file") + `"`),
 		}
 
 		base := serve(t, remote)
