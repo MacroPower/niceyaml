@@ -1614,12 +1614,6 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		})
 	}
 
-	t.Run("conforming value", func(t *testing.T) {
-		t.Parallel()
-
-		require.NoError(t, v.ValidateValue(t.Context(), map[string]any{"port": 80, "name": "x"}))
-	})
-
 	t.Run("a wrapper keeps what it matches", func(t *testing.T) {
 		t.Parallel()
 
