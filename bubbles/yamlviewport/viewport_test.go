@@ -1878,7 +1878,7 @@ func TestViewport_ContainerBoxKeepsItsColumns(t *testing.T) {
 	// short of the viewport width. The viewport pins the box to the content
 	// width, so its border sits in the first and last column of every row at
 	// every offset.
-	src := "a: 1\nb: 2\nc: 3\nlong: " + strings.Repeat("x", 40) + "\nd: 4\ne: 5\n"
+	src := stringtest.LinesLF("a: 1", "b: 2", "c: 3", "long: "+strings.Repeat("x", 40), "d: 4", "e: 5")
 
 	tcs := map[string]struct {
 		mode yamlviewport.ViewMode
@@ -1926,7 +1926,7 @@ func TestViewport_SideBySideFillerRowsKeepTheFrame(t *testing.T) {
 	)
 
 	before := niceyaml.NewSourceFromString("a: 1\nb: short\nc: 3\n")
-	after := niceyaml.NewSourceFromString("a: 1\nb: " + strings.Repeat("y", 60) + "\nc: 3\n")
+	after := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: "+strings.Repeat("y", 60), "c: 3"))
 
 	m := testModel(framedPrinter(normalBorder()), width, height)
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
@@ -2001,7 +2001,7 @@ func TestViewport_HorizontalScrollKeepsFrameOfNarrowerPane(t *testing.T) {
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
 	m.SetWordWrap(false)
 	m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: s\nc: 3\n"))
-	m.AddRevision(niceyaml.NewSourceFromString("a: 1\nb: " + strings.Repeat("y", 50) + "\nc: 3\n"))
+	m.AddRevision(niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: "+strings.Repeat("y", 50), "c: 3")))
 
 	for _, offset := range []int{1, 10, 40} {
 		m.SetXOffset(offset)
@@ -2068,7 +2068,7 @@ func TestViewport_HorizontalScrollKeepsFrameAtWideCluster(t *testing.T) {
 				m.SetViewMode(mode.mode)
 				m.SetWordWrap(false)
 				m.SetRevision(niceyaml.NewSourceFromString(
-					"a: " + strings.Repeat("a", 34) + "\n" + tc.line + "\n",
+					stringtest.LinesLF("a: "+strings.Repeat("a", 34), tc.line),
 				))
 
 				for offset, want := range tc.wants {
@@ -2113,7 +2113,7 @@ func TestViewport_KeycapRowsFitWidth(t *testing.T) {
 			m.SetHeight(2)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(false)
-			m.SetRevision(niceyaml.NewSourceFromString("k: " + keycaps + "abcdefghij\nother: plain\n"))
+			m.SetRevision(niceyaml.NewSourceFromString(stringtest.LinesLF("k: "+keycaps+"abcdefghij", "other: plain")))
 
 			for i, row := range strings.Split(m.View(), "\n") {
 				assert.Equal(t, tc.width, ansi.StringWidth(row), "row %d: %q", i, ansi.Strip(row))
@@ -2131,9 +2131,10 @@ func TestViewport_SearchScrollsPastKeycap(t *testing.T) {
 	m.SetWidth(40)
 	m.SetHeight(2)
 	m.SetWordWrap(false)
-	m.SetRevision(niceyaml.NewSourceFromString(
-		"step: 1\ufe0f\u20e3 " + strings.Repeat("x", 60) + " needle\nother: plain\n",
-	))
+	m.SetRevision(niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"step: 1\ufe0f\u20e3 "+strings.Repeat("x", 60)+" needle",
+		"other: plain",
+	)))
 
 	m.SetSearchTerm("needle")
 	require.Positive(t, m.XOffset())
@@ -6016,9 +6017,11 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 			printer: testPrinterWithLineNumbers(),
 			setup: func(m *yamlviewport.Model) {
 				m.SetWidth(30)
-				m.SetRevision(niceyaml.NewSourceFromString(
-					"a: 1\nk: " + strings.Repeat("word ", 20) + "needle " + strings.Repeat("word ", 20) + "\nz: 2\n",
-				))
+				m.SetRevision(niceyaml.NewSourceFromString(stringtest.LinesLF(
+					"a: 1",
+					"k: "+strings.Repeat("word ", 20)+"needle "+strings.Repeat("word ", 20),
+					"z: 2",
+				)))
 			},
 			wantRow: 1,
 		},
