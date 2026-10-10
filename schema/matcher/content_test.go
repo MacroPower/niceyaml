@@ -915,7 +915,7 @@ func TestContent(t *testing.T) {
 		// alias. A plain string reads the list as a value, which shares
 		// the scalar, so it does not match.
 		input := "a: &a " + strings.Repeat("x", 2000) + "\n" +
-			"kind: [" + strings.TrimSuffix(strings.Repeat("*a, ", 500), ", ") + "]\n"
+			"kind: " + yamltest.FlowSequence("*a", 500) + "\n"
 
 		tcs := map[string]struct {
 			m    matcher.Matcher

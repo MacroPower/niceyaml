@@ -32,7 +32,7 @@ func BenchmarkCheckDecode_TaggedAliasChain(b *testing.B) {
 			fmt.Fprintf(&sb, "s%d: &s%d !t *s%d\n", i, i, i-1)
 		}
 
-		fmt.Fprintf(&sb, "l: %s\n", flowList(fmt.Sprintf("*s%d", sz.anchors), sz.anchors))
+		fmt.Fprintf(&sb, "l: %s\n", yamltest.FlowSequence(fmt.Sprintf("*s%d", sz.anchors), sz.anchors))
 
 		input := sb.String()
 

@@ -12118,7 +12118,7 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 	// with a copy of the long scalar at each alias. A plain string shares
 	// the scalar between the aliases, so it decodes.
 	manyAliases := "a: &a " + strings.Repeat("x", 2000) + "\n" +
-		"kind: [" + strings.TrimSuffix(strings.Repeat("*a, ", 500), ", ") + "]\n"
+		"kind: " + yamltest.FlowSequence("*a", 500) + "\n"
 	kind := paths.Current().Child("kind")
 
 	plainText := niceyaml.WithCustomUnmarshaler(func(_ context.Context, a *aliasPlain, decode func(any) error) error {

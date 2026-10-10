@@ -58,3 +58,28 @@ func TestAliasBombs(t *testing.T) {
 		})
 	}
 }
+
+func TestFlowSequence(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		item  string
+		want  string
+		tail  []string
+		count int
+	}{
+		"no items":            {item: "a", count: 0, want: "[]"},
+		"one item":            {item: "a", count: 1, want: "[a]"},
+		"repeated item":       {item: "*a", count: 3, want: "[*a, *a, *a]"},
+		"tail after the item": {item: "*a", count: 2, tail: []string{"x", "y"}, want: "[*a, *a, x, y]"},
+		"tail alone":          {item: "a", count: 0, tail: []string{"x"}, want: "[x]"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, yamltest.FlowSequence(tc.item, tc.count, tc.tail...))
+		})
+	}
+}

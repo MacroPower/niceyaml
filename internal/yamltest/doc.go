@@ -98,6 +98,8 @@
 //
 // [WideMerge] builds a mapping whose merge key lists one alias for each
 // of its keys, so a lookup of every key reads the whole list.
+// [FlowSequence] writes the flow sequence that repeats one item, for a
+// document that needs its own shape.
 //
 // # Error Trees
 //

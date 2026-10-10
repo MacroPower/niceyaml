@@ -2,6 +2,7 @@ package yamltest
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -24,6 +25,12 @@ func GenerateYAML(lines int) string {
 	return sb.String()
 }
 
+// FlowSequence creates a YAML flow sequence that lists item count times
+// and then each element of tail, such as "[*a, *a, x]".
+func FlowSequence(item string, count int, tail ...string) string {
+	return "[" + strings.Join(append(slices.Repeat([]string{item}, count), tail...), ", ") + "]"
+}
+
 // AliasLevels creates YAML content whose key a lists the items l0 through
 // l<levels>, each under an anchor of the same name. Item l0 is [x], and
 // each later item lists ten aliases of the item before it, so a copy of
@@ -34,8 +41,7 @@ func AliasLevels(levels int) string {
 	sb.WriteString("a:\n  - &l0 [x]\n")
 
 	for level := 1; level <= levels; level++ {
-		aliases := strings.Repeat(fmt.Sprintf("*l%d, ", level-1), 10)
-		fmt.Fprintf(&sb, "  - &l%d [%s]\n", level, strings.TrimSuffix(aliases, ", "))
+		fmt.Fprintf(&sb, "  - &l%d %s\n", level, FlowSequence(fmt.Sprintf("*l%d", level-1), 10))
 	}
 
 	return sb.String()
@@ -51,8 +57,7 @@ func MergeLevels(levels int) string {
 	sb.WriteString("m0: &m0 {a: x}\n")
 
 	for level := 1; level <= levels; level++ {
-		aliases := strings.Repeat(fmt.Sprintf("*m%d, ", level-1), 10)
-		fmt.Fprintf(&sb, "m%d: &m%d\n  <<: [%s]\n", level, level, strings.TrimSuffix(aliases, ", "))
+		fmt.Fprintf(&sb, "m%d: &m%d\n  <<: %s\n", level, level, FlowSequence(fmt.Sprintf("*m%d", level-1), 10))
 	}
 
 	return sb.String()
@@ -71,7 +76,7 @@ func WideMerge(members int) string {
 		fmt.Fprintf(&sb, "  %#x: x\n", 0x1000+i)
 	}
 
-	sb.WriteString("  <<: [" + strings.Repeat("*a, ", members-1) + "*a]\n")
+	sb.WriteString("  <<: " + FlowSequence("*a", members) + "\n")
 
 	return sb.String()
 }

@@ -3928,12 +3928,6 @@ func TestPath_Wildcards(t *testing.T) {
 	})
 }
 
-// flowSeq returns a flow sequence that holds elem n times and then each
-// element of tail.
-func flowSeq(elem string, n int, tail ...string) string {
-	return "[" + strings.Join(append(slices.Repeat([]string{elem}, n), tail...), ", ") + "]"
-}
-
 // wideMerge returns a document that holds the mapping a, and the mapping m
 // with n keys and then a merge key whose value lists elem n times and then
 // each element of tail. A lookup of each key of m reads that whole list.
@@ -3948,7 +3942,7 @@ func wideMerge(n int, elem string, tail ...string) string {
 		fmt.Fprintf(&sb, "  k%d: %d\n", i, i)
 	}
 
-	sb.WriteString("  <<: " + flowSeq(elem, n, tail...) + "\n")
+	sb.WriteString("  <<: " + yamltest.FlowSequence(elem, n, tail...) + "\n")
 
 	return sb.String()
 }
@@ -4000,7 +3994,7 @@ func TestPath_Matches_AliasFanOut(t *testing.T) {
 	// The document of aliasList holds n scalars under the key a and n
 	// aliases to a under the key b, so $.b[*][*] selects n*n nodes.
 	aliasList := func(n int) string {
-		return "a: &a " + flowSeq("x", n) + "\nb: " + flowSeq("*a", n) + "\n"
+		return "a: &a " + yamltest.FlowSequence("x", n) + "\nb: " + yamltest.FlowSequence("*a", n) + "\n"
 	}
 
 	// The document of aliasMap holds n entries under the key a and n
@@ -4130,20 +4124,32 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 	// The document of aliasChain adds to mergeChain the key l, which lists
 	// n aliases to the last mapping of the chain.
 	aliasChain := func(n int) string {
-		return mergeChain(n) + "l: " + flowSeq(fmt.Sprintf("*b%d", n-1), n) + "\n"
+		return mergeChain(n) + "l: " + yamltest.FlowSequence(fmt.Sprintf("*b%d", n-1), n) + "\n"
 	}
 
 	// The document of aliasWideMerge holds the mapping x, which merges n
 	// aliases to the mapping a, and the key l, which lists n aliases to x.
 	aliasWideMerge := func(n int) string {
-		return "a: &a {z: 0}\nx: &x {<<: " + flowSeq("*a", n) + "}\nl: " + flowSeq("*x", n) + "\n"
+		return "a: &a {z: 0}\nx: &x {<<: " + yamltest.FlowSequence(
+			"*a",
+			n,
+		) + "}\nl: " + yamltest.FlowSequence(
+			"*x",
+			n,
+		) + "\n"
 	}
 
 	// The document of sharedMerge holds the sequence s of n aliases to the
 	// mapping a, and the mapping d, which merges n inline mappings that
 	// each merge s. One lookup in d reads s once for each of them.
 	sharedMerge := func(n int) string {
-		return "a: &a {z: 0}\ns: &s " + flowSeq("*a", n) + "\nd: {<<: " + flowSeq("{<<: *s}", n) + "}\n"
+		return "a: &a {z: 0}\ns: &s " + yamltest.FlowSequence(
+			"*a",
+			n,
+		) + "\nd: {<<: " + yamltest.FlowSequence(
+			"{<<: *s}",
+			n,
+		) + "}\n"
 	}
 
 	tcs := map[string]struct {
