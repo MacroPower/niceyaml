@@ -1340,52 +1340,6 @@ func TestNewPrinter(t *testing.T) {
 	assert.Equal(t, "   1  key: value ", p.Print(view))
 }
 
-func TestPrinter_LineNumbers(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-		want  string
-	}{
-		"single line": {
-			input: "key: value",
-			want:  "   1 key: value",
-		},
-		"multiple lines": {
-			input: stringtest.JoinLF(
-				"key: value",
-				"number: 42",
-			),
-			want: stringtest.JoinLF(
-				"   1 key: value",
-				"   2 number: 42",
-			),
-		},
-		"multi-line value": {
-			input: stringtest.JoinLF(
-				"key: |",
-				"  line1",
-				"  line2",
-			),
-			want: stringtest.JoinLF(
-				"   1 key: |",
-				"   2   line1",
-				"   3   line2",
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).View()
-
-			assert.Equal(t, tc.want, testPrinterWithGutter(printer.LineNumberGutter).Print(view))
-		})
-	}
-}
-
 func TestPrinter_PrintSlice(t *testing.T) {
 	t.Parallel()
 
@@ -1713,6 +1667,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 
 	tcs := map[string]struct {
 		gutter printer.Gutter // Nil for no gutter.
+		rows   map[int]int    // Column of line 0 to the row that shows it.
 		input  string
 		want   string
 		width  int
@@ -1805,18 +1760,184 @@ func TestPrinter_WordWrap(t *testing.T) {
 			gutter: printer.DefaultGutter,
 			want:   "   1  key: this is a very long value that should not wrap",
 		},
+		"line numbers on a single line": {
+			gutter: printer.LineNumberGutter,
+			input:  "key: value",
+			want:   "   1 key: value",
+		},
+		"line numbers on multiple lines": {
+			gutter: printer.LineNumberGutter,
+			input: stringtest.JoinLF(
+				"key: value",
+				"number: 42",
+			),
+			want: stringtest.JoinLF(
+				"   1 key: value",
+				"   2 number: 42",
+			),
+		},
+		"line numbers on a multi-line value": {
+			gutter: printer.LineNumberGutter,
+			input: stringtest.JoinLF(
+				"key: |",
+				"  line1",
+				"  line2",
+			),
+			want: stringtest.JoinLF(
+				"   1 key: |",
+				"   2   line1",
+				"   3   line2",
+			),
+		},
+		"wide characters count two cells": {
+			input: "k: 日本語",
+			want:  "k: 日本語",
+			rows:  map[int]int{5: 0},
+		},
+
+		// The wrap emits empty rows for the word after a run of breakpoints
+		// longer than the width, and for a word wider than the width after
+		// leading spaces. Those rows hold no text, so they go.
+		"word wider than the width after leading spaces": {
+			input: stringtest.LinesLF(
+				"k: |",
+				"    abcdefghijkl",
+			),
+			width: 5,
+			want:  stringtest.JoinLF("k: |", "abcde", "fghij", "kl"),
+		},
+		"hyphenated value at one column": {
+			input: "key: long-word-here",
+			width: 1,
+			want:  stringtest.JoinLF(strings.Split("key:long-word-here", "")...),
+		},
+		"url at two columns": {
+			input: "u: https://x",
+			width: 2,
+			want:  stringtest.JoinLF("u:", "ht", "tp", "s:", "//", "x"),
+		},
+		"run of hyphens longer than the width": {
+			input: "x: " + strings.Repeat("-", 25) + "abc",
+			width: 10,
+			want:  stringtest.JoinLF("x: -------", "----------", "--------ab", "c"),
+		},
+
+		// A row that fills the width and then meets a space and a breakpoint
+		// drops the space at the break, as it drops the space at any other
+		// break, rather than showing it on a row of its own.
+		"hyphen after a full row": {
+			gutter: printer.DefaultGutter,
+			input:  "key: value -x",
+			width:  16,
+			want:   stringtest.JoinLF("   1  key: value", "   -  -x"),
+			rows:   map[int]int{9: 0, 10: 0, 11: 1, 12: 1},
+		},
+		"slash after a full row": {
+			input: "key: value /x",
+			width: 10,
+			want:  stringtest.JoinLF("key: value", "/x"),
+			rows:  map[int]int{9: 0, 10: 0, 11: 1, 12: 1},
+		},
+		"two spaces before a hyphen": {
+			input: "key: value  -x",
+			width: 10,
+			want:  stringtest.JoinLF("key: value", "-x"),
+			rows:  map[int]int{10: 0, 11: 0, 12: 1},
+		},
+		"flags and a path": {
+			input: "cmd: run --verbose --output /tmp/x",
+			width: 8,
+			want:  stringtest.JoinLF("cmd: run", "--verbos", "e --", "output /", "tmp/x"),
+			rows:  map[int]int{7: 0, 8: 0, 9: 1},
+		},
+		"space before a breakpoint past a hard wrap": {
+			gutter: printer.DefaultGutter,
+			input:  "k: aa/-/- /b",
+			width:  9,
+			want:   stringtest.JoinLF("   1  k:", "   -  aa/", "   -  -/-", "   -  /b"),
+			rows:   map[int]int{8: 2, 9: 2, 10: 3, 11: 3},
+		},
+		"space before a breakpoint past a wide cluster": {
+			input: "k: 中b-   // /c",
+			width: 6,
+			want:  stringtest.JoinLF("k: 中b", "-   //", "/c"),
+			rows:  map[int]int{10: 1, 11: 1, 12: 2, 13: 2},
+		},
+
+		// The printer escapes each control character to a one rune picture,
+		// so the escaped text keeps one rune per source column and the wrap
+		// falls at the same column in both.
+		"tabs and control characters keep columns aligned": {
+			input: "k: \"\tx\x1by zz ww\"",
+			width: 10,
+			want: stringtest.JoinLF(
+				"k: \"␉x␛y",
+				"zz ww\"",
+			),
+			rows: map[int]int{4: 0, 6: 0, 8: 0, 9: 1, 14: 1},
+		},
+		// The wrapper drops a Unicode space at a break as it drops an ASCII
+		// one, so each separator column belongs to the row before the break
+		// and the next word starts the next row.
+		"ideographic spaces dropped at each break": {
+			input: "k: aaaa　bbbb　cccc　dddd",
+			width: 7,
+			want:  stringtest.JoinLF("k: aaaa", "bbbb", "cccc", "dddd"),
+			rows:  map[int]int{6: 0, 7: 0, 8: 1, 12: 1, 13: 2, 17: 2, 18: 3},
+		},
+		"em spaces dropped at each break": {
+			input: "k: aaaa bbbb cccc dddd",
+			width: 7,
+			want:  stringtest.JoinLF("k: aaaa", "bbbb", "cccc", "dddd"),
+			rows:  map[int]int{6: 0, 7: 0, 8: 1, 12: 1, 13: 2, 17: 2, 18: 3},
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).View()
+			view := niceyaml.NewSourceFromString(tc.input).View()
 			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.width))
 
-			assert.Equal(t, tc.want, p.Print(view))
+			got := p.Print(view)
+			assert.Equal(t, tc.want, got)
+
+			// The layout counts the rows Print writes and measures the
+			// widest, and it names the row that shows each column.
+			l := p.Layout(view)
+			assertLayoutMeasures(t, l, got)
+
+			for col, want := range tc.rows {
+				assert.Equal(t, want, l.RowOf(position.New(0, col)), "column %d", col)
+			}
 		})
 	}
+
+	t.Run("no row shows the gutter alone", func(t *testing.T) {
+		t.Parallel()
+
+		// The gutter leaves one column of content.
+		view := niceyaml.NewSourceFromString("image: nginx-alpine").View()
+		p := testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrapWidth(7))
+
+		rows := strings.Split(p.Print(view), "\n")
+		for _, row := range rows {
+			assert.NotEmpty(t, strings.TrimSpace(strings.TrimPrefix(row, "   -")), "%q", rows)
+		}
+
+		assert.Len(t, rows, len("image:nginx-alpine"))
+		assert.Equal(t, []int{len(rows)}, layoutRows(p.Layout(view)))
+	})
+
+	t.Run("error message drops the space before a breakpoint", func(t *testing.T) {
+		t.Parallel()
+
+		p := testPrinter().With(printer.WithWrapWidth(10))
+
+		got := p.PrintError(errors.New("key: value -x"))
+		assert.Equal(t, stringtest.JoinLF("key: value", "-x"), got)
+	})
 }
 
 func TestPrinter_WordWrap_RowsFit(t *testing.T) {
@@ -2075,88 +2196,6 @@ func TestPrinter_WordWrap_SpaceCluster(t *testing.T) {
 	}
 }
 
-func TestPrinter_WordWrap_BreakSpaceBeforeBreakpoint(t *testing.T) {
-	t.Parallel()
-
-	// A row that fills the width and then meets a space and a breakpoint
-	// drops the space at the break, as it drops the space at any other
-	// break, rather than showing it on a row of its own.
-	tcs := map[string]struct {
-		gutter printer.Gutter // Nil for no gutter.
-		rows   map[int]int    // Column to row.
-		input  string
-		want   string
-		width  int
-	}{
-		"hyphen after a full row": {
-			gutter: printer.DefaultGutter,
-			input:  "key: value -x",
-			width:  16,
-			want:   stringtest.JoinLF("   1  key: value", "   -  -x"),
-			rows:   map[int]int{9: 0, 10: 0, 11: 1, 12: 1},
-		},
-		"slash after a full row": {
-			input: "key: value /x",
-			width: 10,
-			want:  stringtest.JoinLF("key: value", "/x"),
-			rows:  map[int]int{9: 0, 10: 0, 11: 1, 12: 1},
-		},
-		"two spaces before a hyphen": {
-			input: "key: value  -x",
-			width: 10,
-			want:  stringtest.JoinLF("key: value", "-x"),
-			rows:  map[int]int{10: 0, 11: 0, 12: 1},
-		},
-		"flags and a path": {
-			input: "cmd: run --verbose --output /tmp/x",
-			width: 8,
-			want:  stringtest.JoinLF("cmd: run", "--verbos", "e --", "output /", "tmp/x"),
-			rows:  map[int]int{7: 0, 8: 0, 9: 1},
-		},
-		"space before a breakpoint past a hard wrap": {
-			gutter: printer.DefaultGutter,
-			input:  "k: aa/-/- /b",
-			width:  9,
-			want:   stringtest.JoinLF("   1  k:", "   -  aa/", "   -  -/-", "   -  /b"),
-			rows:   map[int]int{8: 2, 9: 2, 10: 3, 11: 3},
-		},
-		"space before a breakpoint past a wide cluster": {
-			input: "k: 中b-   // /c",
-			width: 6,
-			want:  stringtest.JoinLF("k: 中b", "-   //", "/c"),
-			rows:  map[int]int{10: 1, 11: 1, 12: 2, 13: 2},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := niceyaml.NewSourceFromString(tc.input).View()
-			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.width))
-
-			got := p.Print(view)
-			assert.Equal(t, tc.want, got)
-
-			l := p.Layout(view)
-			assertLayoutMeasures(t, l, got)
-
-			for col, want := range tc.rows {
-				assert.Equal(t, want, l.RowOf(position.New(0, col)), "column %d", col)
-			}
-		})
-	}
-
-	t.Run("error message", func(t *testing.T) {
-		t.Parallel()
-
-		p := testPrinter().With(printer.WithWrapWidth(10))
-
-		got := p.PrintError(errors.New("key: value -x"))
-		assert.Equal(t, stringtest.JoinLF("key: value", "-x"), got)
-	})
-}
-
 func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 	t.Parallel()
 
@@ -2344,73 +2383,6 @@ func TestPrinter_Overlay_KeepsClusters(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestPrinter_WordWrap_NoEmptyRows(t *testing.T) {
-	t.Parallel()
-
-	// The wrap emits empty rows for the word after a run of breakpoints
-	// longer than the width, and for a word wider than the width after
-	// leading spaces. Those rows hold no text, so they go.
-	tcs := map[string]struct {
-		input string
-		want  string
-		width int
-	}{
-		"word wider than the width after leading spaces": {
-			input: stringtest.LinesLF(
-				"k: |",
-				"    abcdefghijkl",
-			),
-			width: 5,
-			want:  stringtest.JoinLF("k: |", "abcde", "fghij", "kl"),
-		},
-		"hyphenated value at one column": {
-			input: "key: long-word-here",
-			width: 1,
-			want:  stringtest.JoinLF(strings.Split("key:long-word-here", "")...),
-		},
-		"url at two columns": {
-			input: "u: https://x",
-			width: 2,
-			want:  stringtest.JoinLF("u:", "ht", "tp", "s:", "//", "x"),
-		},
-		"run of hyphens longer than the width": {
-			input: "x: " + strings.Repeat("-", 25) + "abc",
-			width: 10,
-			want:  stringtest.JoinLF("x: -------", "----------", "--------ab", "c"),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := niceyaml.NewSourceFromString(tc.input).View()
-			p := testPrinter().With(printer.WithWrapWidth(tc.width))
-
-			got := p.Print(view)
-			assert.Equal(t, tc.want, got)
-			assertLayoutMeasures(t, p.Layout(view), got)
-		})
-	}
-
-	t.Run("gutter", func(t *testing.T) {
-		t.Parallel()
-
-		// The gutter leaves one column of content, and no row shows the
-		// gutter alone.
-		view := niceyaml.NewSourceFromString("image: nginx-alpine").View()
-		p := testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrapWidth(7))
-
-		rows := strings.Split(p.Print(view), "\n")
-		for _, row := range rows {
-			assert.NotEmpty(t, strings.TrimSpace(strings.TrimPrefix(row, "   -")), "%q", rows)
-		}
-
-		assert.Len(t, rows, len("image:nginx-alpine"))
-		assert.Equal(t, []int{len(rows)}, layoutRows(p.Layout(view)))
-	})
 }
 
 func TestPrinter_WordWrap_BreakpointPastWidth_KeepsStyle(t *testing.T) {
@@ -6208,78 +6180,6 @@ func TestPrinter_Layout(t *testing.T) {
 		assert.Equal(t, 4, l.RowOf(position.New(0, 15)))
 		assert.Equal(t, 6, l.RowOf(position.New(2, 0)))
 		assert.Equal(t, -1, l.RowOf(position.New(1, 0)))
-	})
-
-	t.Run("tabs and control characters keep columns aligned", func(t *testing.T) {
-		t.Parallel()
-
-		// The printer escapes each control character to a one rune picture,
-		// so the escaped text keeps one rune per source column and the wrap
-		// falls at the same column in both.
-		view := niceyaml.NewSourceFromString("k: \"\tx\x1by zz ww\"").View()
-		p := testPrinter().With(printer.WithWrapWidth(10))
-
-		got := p.Print(view)
-		require.Equal(t, stringtest.JoinLF(
-			"k: \"␉x␛y",
-			"zz ww\"",
-		), got)
-
-		l := p.Layout(view)
-
-		assert.Equal(t, 2, l.Rows())
-		assert.Equal(t, 0, l.RowOf(position.New(0, 4)))
-		assert.Equal(t, 0, l.RowOf(position.New(0, 6)))
-		assert.Equal(t, 0, l.RowOf(position.New(0, 8)))
-		assert.Equal(t, 1, l.RowOf(position.New(0, 9)))
-		assert.Equal(t, 1, l.RowOf(position.New(0, 14)))
-	})
-
-	t.Run("unicode spaces the wrapper drops keep columns aligned", func(t *testing.T) {
-		t.Parallel()
-
-		// The wrapper drops a Unicode space at a break as it drops an ASCII
-		// one, so each separator column belongs to the row before the
-		// break and the next word starts the next row.
-		tcs := map[string]struct {
-			content string
-		}{
-			"ideographic space": {content: "k: aaaa\u3000bbbb\u3000cccc\u3000dddd"},
-			"em space":          {content: "k: aaaa\u2003bbbb\u2003cccc\u2003dddd"},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				view := niceyaml.NewSourceFromString(tc.content).View()
-				p := testPrinter().With(printer.WithWrapWidth(7))
-
-				require.Equal(t, stringtest.JoinLF("k: aaaa", "bbbb", "cccc", "dddd"), p.Print(view))
-
-				l := p.Layout(view)
-
-				assert.Equal(t, 4, l.Rows())
-
-				// Column to row.
-				for col, row := range map[int]int{6: 0, 7: 0, 8: 1, 12: 1, 13: 2, 17: 2, 18: 3} {
-					assert.Equal(t, row, l.RowOf(position.New(0, col)), "column %d", col)
-				}
-			})
-		}
-	})
-
-	t.Run("wide characters count two cells", func(t *testing.T) {
-		t.Parallel()
-
-		view := niceyaml.NewSourceFromString("k: 日本語").View()
-		p := testPrinter()
-
-		l := p.Layout(view)
-
-		assert.Equal(t, 9, l.Width())
-		assert.Equal(t, lipgloss.Width(p.Print(view)), l.Width())
-		assert.Equal(t, 0, l.RowOf(position.New(0, 5)))
 	})
 
 	t.Run("a style that rewrites runes keeps columns aligned", func(t *testing.T) {
