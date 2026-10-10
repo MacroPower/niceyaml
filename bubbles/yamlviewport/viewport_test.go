@@ -131,10 +131,7 @@ func TestViewport_SearchNextRefreshesRowCounts(t *testing.T) {
 
 				// The selected match sits on the center row unless the
 				// offset stops at either end.
-				rows := strings.Split(m.View(), "\n")
-				at := slices.IndexFunc(rows, func(row string) bool {
-					return strings.Contains(row, "<<")
-				})
+				at := rowIndex(m.View(), "<<")
 				require.NotEqual(t, -1, at, "step %d: the selected match is on screen", step)
 
 				if top := m.YOffset(); top > 0 && top < m.TotalRowCount()-height {
@@ -395,7 +392,7 @@ func TestViewport_SearchHighlightsMatchAcrossLines(t *testing.T) {
 
 			m.SetYOffset(tc.offset)
 
-			top, _, _ := strings.Cut(m.View(), "\n")
+			top := firstRow(m.View())
 			assert.Equal(t, tc.panes, strings.Count(top, tc.want), top)
 
 			// A width round trip on a copy drops every cached count, so the
@@ -495,6 +492,105 @@ func countingStyle(n *int) lipgloss.Style {
 
 		return s
 	})
+}
+
+// firstRow returns the first row of a rendered view.
+func firstRow(view string) string {
+	row, _, _ := strings.Cut(view, "\n")
+
+	return row
+}
+
+// lastRow returns the last row of a rendered view.
+func lastRow(view string) string {
+	return view[strings.LastIndex(view, "\n")+1:]
+}
+
+// rowIndex returns the index of the first row of a rendered view that
+// contains substr, or -1 when no row does.
+func rowIndex(view, substr string) int {
+	return slices.IndexFunc(strings.Split(view, "\n"), func(row string) bool {
+		return strings.Contains(row, substr)
+	})
+}
+
+// requireRows returns the rows of a rendered view. The test fails unless the
+// view holds n rows.
+func requireRows(t *testing.T, view string, n int, msgAndArgs ...any) []string {
+	t.Helper()
+
+	rows := strings.Split(view, "\n")
+	require.Len(t, rows, n, msgAndArgs...)
+
+	return rows
+}
+
+// panes returns the text of a side-by-side row on each side of the pane
+// separator, without its styling. The test fails when the row has no
+// separator.
+func panes(t *testing.T, row string) (string, string) {
+	t.Helper()
+
+	left, right, ok := strings.Cut(ansi.Strip(row), "│")
+	require.True(t, ok, "no pane separator in %q", row)
+
+	return left, right
+}
+
+// selectedPanes returns the panes of the row of a side-by-side view that
+// shows the selected search match, as [testPrinterWithSearch] tags it. The
+// test fails when no row shows it.
+func selectedPanes(t *testing.T, view string) (string, string) {
+	t.Helper()
+
+	i := rowIndex(view, "<genericHighlight>")
+	require.NotEqual(t, -1, i, "no selected match in:\n%s", view)
+
+	return panes(t, strings.Split(view, "\n")[i])
+}
+
+// requireFrame fails the test unless every row of the view of m is as wide
+// as m, shows the left side of a border in each of the columns left, and
+// shows the right side of one in each of the columns right.
+func requireFrame(t *testing.T, m *yamlviewport.Model, left, right []int) {
+	t.Helper()
+
+	for i, row := range strings.Split(m.View(), "\n") {
+		plain := []rune(ansi.Strip(row))
+		require.Len(t, plain, m.Width(), "offset %d, row %d: %q", m.YOffset(), i, row)
+
+		for _, col := range left {
+			assert.Contains(t, "┌│└", string(plain[col]), "offset %d, row %d, col %d: %q", m.YOffset(), i, col, row)
+		}
+
+		for _, col := range right {
+			assert.Contains(t, "┐│┘", string(plain[col]), "offset %d, row %d, col %d: %q", m.YOffset(), i, col, row)
+		}
+	}
+}
+
+// framedRows returns the n rows of the view of m without their styling.
+// The test fails unless every row between the top and bottom borders is as
+// wide as the top border and shows a side border in each column where the
+// top border shows a corner.
+func framedRows(t *testing.T, m *yamlviewport.Model, n int) []string {
+	t.Helper()
+
+	rows := requireRows(t, ansi.Strip(m.View()), n)
+	top := rows[0]
+
+	for i, row := range rows[1 : len(rows)-1] {
+		require.Equal(t, ansi.StringWidth(top), ansi.StringWidth(row), "x offset %d, row %d: %q", m.XOffset(), i, row)
+
+		for col, r := range []rune(top) {
+			if r == '┌' || r == '┐' {
+				assert.Equal(t, "│", printer.Cut(row, col, col+1),
+					"x offset %d, row %d, col %d: %q", m.XOffset(), i, col, row)
+			}
+		}
+	}
+
+	return rows
 }
 
 // testModel returns a model of the given size that prints with p.
@@ -1137,18 +1233,6 @@ func TestViewport_RowScrolling(t *testing.T) {
 		return &m
 	}
 
-	firstRow := func(view string) string {
-		row, _, _ := strings.Cut(view, "\n")
-
-		return row
-	}
-
-	lastRow := func(view string) string {
-		rows := strings.Split(view, "\n")
-
-		return rows[len(rows)-1]
-	}
-
 	t.Run("counts rows and lines separately", func(t *testing.T) {
 		t.Parallel()
 
@@ -1322,8 +1406,7 @@ func TestViewport_LayoutChangesKeepTopLine(t *testing.T) {
 			assert.Equal(t, tc.wantOffset, m.YOffset())
 
 			if tc.wantTop != "" {
-				top, _, _ := strings.Cut(m.View(), "\n")
-				assert.Contains(t, top, tc.wantTop)
+				assert.Contains(t, firstRow(m.View()), tc.wantTop)
 			}
 		})
 	}
@@ -1439,8 +1522,7 @@ func TestViewport_LayoutChangesKeepFrameRow(t *testing.T) {
 			}
 
 			if tc.wantTop != "" {
-				top, _, _ := strings.Cut(m.View(), "\n")
-				assert.Contains(t, top, tc.wantTop)
+				assert.Contains(t, firstRow(m.View()), tc.wantTop)
 			}
 		})
 	}
@@ -1469,8 +1551,7 @@ func TestViewport_ContainerStyleKeepsTopLine(t *testing.T) {
 
 	assert.Equal(t, 40, m.YOffset())
 
-	top, _, _ := strings.Cut(m.View(), "\n")
-	assert.Contains(t, top, "k20:")
+	assert.Contains(t, firstRow(m.View()), "k20:")
 }
 
 func TestViewport_ResizeClampsOffsetAtOnce(t *testing.T) {
@@ -1710,8 +1791,7 @@ func TestViewport_ContainerFrame(t *testing.T) {
 				// A top row in the frame reports the nearest line.
 				assert.Equal(t, min(max(offset-tc.top, 0), lines-1), m.TopLine(), "offset %d", offset)
 
-				rows := strings.Split(m.View(), "\n")
-				require.Len(t, rows, tc.height)
+				rows := requireRows(t, m.View(), tc.height)
 
 				for i, row := range rows {
 					r := offset + i
@@ -1780,8 +1860,7 @@ func TestViewport_ContainerFrameWidth(t *testing.T) {
 			for offset := range m.TotalRowCount() - height + 1 {
 				m.SetYOffset(offset)
 
-				rows := strings.Split(m.View(), "\n")
-				require.Len(t, rows, height, "offset %d", offset)
+				rows := requireRows(t, m.View(), height, "offset %d", offset)
 
 				for i, row := range rows {
 					assert.Equal(t, width, lipgloss.Width(row), "offset %d, row %d", offset, i)
@@ -1790,8 +1869,7 @@ func TestViewport_ContainerFrameWidth(t *testing.T) {
 
 			m.GotoBottom()
 
-			rows := strings.Split(m.View(), "\n")
-			assert.Contains(t, rows[len(rows)-1], tc.last)
+			assert.Contains(t, lastRow(m.View()), tc.last)
 			assert.Contains(t, m.View(), "END")
 		})
 	}
@@ -1833,13 +1911,7 @@ func TestViewport_ContainerBoxKeepsItsColumns(t *testing.T) {
 			for offset := range m.TotalRowCount() - height + 1 {
 				m.SetYOffset(offset)
 
-				for i, row := range strings.Split(m.View(), "\n") {
-					plain := []rune(ansi.Strip(row))
-					require.Len(t, plain, width, "offset %d, row %d", offset, i)
-
-					assert.Contains(t, "┌│└", string(plain[0]), "offset %d, row %d", offset, i)
-					assert.Contains(t, "┐│┘", string(plain[width-1]), "offset %d, row %d", offset, i)
-				}
+				requireFrame(t, &m, []int{0}, []int{width - 1})
 			}
 		})
 	}
@@ -1873,18 +1945,7 @@ func TestViewport_SideBySideFillerRowsKeepTheFrame(t *testing.T) {
 	for offset := range m.TotalRowCount() - height + 1 {
 		m.SetYOffset(offset)
 
-		for i, row := range strings.Split(m.View(), "\n") {
-			plain := []rune(ansi.Strip(row))
-			require.Len(t, plain, width, "offset %d, row %d", offset, i)
-
-			for _, col := range []int{0, width - pane} {
-				assert.Contains(t, "┌│└", string(plain[col]), "offset %d, row %d, col %d", offset, i, col)
-			}
-
-			for _, col := range []int{pane - 1, width - 1} {
-				assert.Contains(t, "┐│┘", string(plain[col]), "offset %d, row %d, col %d", offset, i, col)
-			}
-		}
+		requireFrame(t, &m, []int{0, width - pane}, []int{pane - 1, width - 1})
 	}
 }
 
@@ -1927,9 +1988,7 @@ func TestViewport_HorizontalScrollKeepsFrame(t *testing.T) {
 			m.SetXOffset(5)
 			require.Equal(t, 5, m.XOffset())
 
-			rows := strings.Split(m.View(), "\n")
-			require.Len(t, rows, 3)
-
+			rows := requireRows(t, m.View(), 3)
 			assert.Equal(t, tc.wantTop, rows[0])
 			assert.Equal(t, tc.wantRow, rows[1])
 			assert.Equal(t, strings.ReplaceAll(strings.ReplaceAll(tc.wantTop, "┌", "└"), "┐", "┘"), rows[2])
@@ -1953,18 +2012,7 @@ func TestViewport_HorizontalScrollKeepsFrameOfNarrowerPane(t *testing.T) {
 		m.SetXOffset(offset)
 		require.Equal(t, offset, m.XOffset())
 
-		rows := strings.Split(m.View(), "\n")
-		require.Len(t, rows, 3)
-
-		top := []rune(rows[0])
-		row := []rune(rows[1])
-		require.Len(t, row, len(top), "offset %d: %q", offset, rows[1])
-
-		for i, r := range top {
-			if r == '┌' || r == '┐' {
-				assert.Equal(t, '│', row[i], "offset %d column %d: %q", offset, i, rows[1])
-			}
-		}
+		framedRows(t, &m, 3)
 	}
 }
 
@@ -2005,20 +2053,7 @@ func TestViewport_HorizontalScrollKeepsFrameAtWideRune(t *testing.T) {
 			m.SetXOffset(5)
 			require.Equal(t, 5, m.XOffset())
 
-			rows := strings.Split(ansi.Strip(m.View()), "\n")
-			require.Len(t, rows, 4)
-
-			top := rows[0]
-			for i, row := range rows[1 : len(rows)-1] {
-				require.Equal(t, ansi.StringWidth(top), ansi.StringWidth(row), "row %d: %q", i, row)
-
-				for col, r := range []rune(top) {
-					if r == '┌' || r == '┐' {
-						assert.Equal(t, "│", ansi.Cut(row, col, col+1), "row %d, col %d: %q", i, col, row)
-					}
-				}
-			}
-
+			rows := framedRows(t, &m, 4)
 			assert.True(t, strings.HasPrefix(rows[2], "│ b"), "%q", rows[2])
 		})
 	}
@@ -2067,22 +2102,7 @@ func TestViewport_HorizontalScrollKeepsFrameAtKeycap(t *testing.T) {
 				m.SetXOffset(offset)
 				require.Equal(t, offset, m.XOffset())
 
-				rows := strings.Split(ansi.Strip(m.View()), "\n")
-				require.Len(t, rows, 4)
-
-				top := rows[0]
-				for i, row := range rows[1 : len(rows)-1] {
-					require.Equal(t, ansi.StringWidth(top), ansi.StringWidth(row),
-						"offset %d, row %d: %q", offset, i, row)
-
-					for col, r := range []rune(top) {
-						if r == '┌' || r == '┐' {
-							assert.Equal(t, "│", printer.Cut(row, col, col+1),
-								"offset %d, row %d, col %d: %q", offset, i, col, row)
-						}
-					}
-				}
-
+				rows := framedRows(t, &m, 4)
 				assert.True(t, strings.HasPrefix(rows[2], want), "offset %d: %q", offset, rows[2])
 			}
 		})
@@ -2424,8 +2444,7 @@ func TestViewport_PrinterContainerSizeIgnored(t *testing.T) {
 
 			m.GotoBottom()
 
-			rows := strings.Split(m.View(), "\n")
-			require.Len(t, rows, tc.height)
+			rows := requireRows(t, m.View(), tc.height)
 			assert.Contains(t, rows[len(rows)-1], tc.wantLast)
 		})
 	}
@@ -2466,8 +2485,7 @@ func TestViewport_ViewFillsContentArea(t *testing.T) {
 				m.SetRevision(niceyaml.NewSourceFromString(tc.yaml))
 			}
 
-			rows := strings.Split(m.View(), "\n")
-			require.Len(t, rows, height)
+			rows := requireRows(t, m.View(), height)
 
 			for i, row := range rows {
 				assert.Equal(t, width, lipgloss.Width(row), "row %d", i)
@@ -5661,13 +5679,7 @@ func TestViewport_SideBySideSelectedMatchOnInsertedLine(t *testing.T) {
 
 	// The panes sit either side of a vertical bar, and the highlight is in
 	// the right one.
-	rows := strings.Split(view, "\n")
-
-	i := slices.IndexFunc(rows, func(row string) bool { return strings.Contains(row, highlight) })
-	require.NotEqual(t, -1, i)
-
-	left, right, ok := strings.Cut(rows[i], "│")
-	require.True(t, ok)
+	left, right := selectedPanes(t, view)
 	assert.NotContains(t, left, highlight)
 	assert.Contains(t, right, highlight)
 }
@@ -5711,14 +5723,7 @@ func TestViewport_SideBySideMatchStartingOnPadding(t *testing.T) {
 				view := m.View()
 				require.Equal(t, 1, strings.Count(view, highlight))
 
-				rows := strings.Split(view, "\n")
-
-				i := slices.IndexFunc(rows, func(row string) bool { return strings.Contains(row, highlight) })
-				require.NotEqual(t, -1, i)
-
-				left, right, ok := strings.Cut(rows[i], "│")
-				require.True(t, ok)
-
+				left, right := selectedPanes(t, view)
 				leftCount += strings.Count(left, highlight)
 				rightCount += strings.Count(right, highlight)
 
@@ -6083,21 +6088,8 @@ func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
 			m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
 			require.True(t, m.WordWrap())
 
-			assertFrame := func(out string) {
-				t.Helper()
-
-				for i, row := range strings.Split(out, "\n") {
-					plain := []rune(ansi.Strip(row))
-					require.Len(t, plain, width, "row %d: %q", i, row)
-
-					for _, col := range tc.cols {
-						assert.Contains(t, "┐│┘", string(plain[col]), "row %d, col %d: %q", i, col, row)
-					}
-				}
-			}
-
 			out := m.View()
-			assertFrame(out)
+			requireFrame(t, &m, nil, tc.cols)
 			assert.NotContains(t, out, "^")
 			assert.Less(t, m.HorizontalScrollPercent(), 1.0)
 
@@ -6106,7 +6098,7 @@ func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
 			assert.InDelta(t, 1.0, m.HorizontalScrollPercent(), 0.01)
 
 			out = m.View()
-			assertFrame(out)
+			requireFrame(t, &m, nil, tc.cols)
 			assert.Contains(t, out, "^")
 
 			// Wrapped content fits the width, so moving to a search match
@@ -6278,10 +6270,7 @@ func TestViewport_SideBySidePanesShareGutterWidth(t *testing.T) {
 
 	// The first line is equal in both revisions, so both panes show it from
 	// the same column.
-	row, _, _ := strings.Cut(m.View(), "\n")
-	left, right, ok := strings.Cut(ansi.Strip(row), "\u2502")
-	require.True(t, ok, "no pane separator in %q", row)
-
+	left, right := panes(t, firstRow(m.View()))
 	assert.Equal(t, strings.TrimSpace(left), strings.TrimSpace(right))
 	assert.Contains(t, left, "k0: ")
 }
@@ -6319,8 +6308,7 @@ func TestViewport_SideBySideWithoutDiffPrintsOnce(t *testing.T) {
 	rows := strings.Split(m.View(), "\n")
 
 	for i, want := range []string{"a: 1", "b: 2", "c: 3"} {
-		left, right, ok := strings.Cut(ansi.Strip(rows[i]), "│")
-		require.True(t, ok, "no pane separator in %q", rows[i])
+		left, right := panes(t, rows[i])
 		assert.Contains(t, left, want)
 		assert.Contains(t, right, want)
 	}
@@ -6761,8 +6749,7 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 			// row of its line.
 			assert.Positive(t, m.YOffset())
 
-			rows := strings.Split(m.View(), "\n")
-			got := slices.IndexFunc(rows, func(row string) bool { return strings.Contains(row, "needle") })
+			got := rowIndex(m.View(), "needle")
 			require.NotEqual(t, -1, got, "match not on screen:\n%s", m.View())
 
 			if tc.wantRow >= 0 {
@@ -6839,8 +6826,7 @@ func TestViewport_ContentChangesScrollToTop(t *testing.T) {
 
 			assert.Equal(t, 0, m.YOffset())
 
-			top, _, _ := strings.Cut(m.View(), "\n")
-			assert.Contains(t, top, tc.wantTop)
+			assert.Contains(t, firstRow(m.View()), tc.wantTop)
 		})
 	}
 }
@@ -6998,20 +6984,8 @@ func TestViewport_SideBySideSearchOrder(t *testing.T) {
 	for i := range m.SearchCount() {
 		require.Equal(t, i, m.SearchIndex())
 
-		var selected string
-
-		for row := range strings.SplitSeq(m.View(), "\n") {
-			if strings.Contains(row, "<genericHighlight>") {
-				selected = row
-			}
-		}
-
-		require.NotEmpty(t, selected, "match %d", i)
-
-		left, right, ok := strings.Cut(selected, "│")
-		require.True(t, ok, "match %d", i)
-
-		assert.Contains(t, selected, fmt.Sprintf("k%02d:", i/2), "match %d", i)
+		left, right := selectedPanes(t, m.View())
+		assert.Contains(t, left+right, fmt.Sprintf("k%02d:", i/2), "match %d", i)
 
 		if i%2 == 0 {
 			assert.Contains(t, left, "<genericHighlight>", "match %d", i)
@@ -7213,8 +7187,7 @@ func TestViewport_ClipsRowsWiderThanContent(t *testing.T) {
 	gutterRows := func() []string {
 		t.Helper()
 
-		rows := strings.Split(m.View(), "\n")
-		require.Len(t, rows, 4)
+		rows := requireRows(t, m.View(), 4)
 
 		for _, row := range rows {
 			assert.True(t, strings.HasPrefix(row, "   "), "row %q", row)
