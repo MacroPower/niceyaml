@@ -216,7 +216,7 @@ func TestPrinter_PrintError_Report(t *testing.T) {
 	assert.Equal(t, want, p.PrintReport(rep))
 }
 
-func TestPrinter_PrintError_ExcerptOptions(t *testing.T) {
+func TestPrinter_PrintError_Excerpt(t *testing.T) {
 	t.Parallel()
 
 	// The printer draws no color and no gutter, so a test reads each row
@@ -225,7 +225,7 @@ func TestPrinter_PrintError_ExcerptOptions(t *testing.T) {
 
 	// The marked line sits in the middle of a source with more lines on
 	// each side than the default shows, so the count changes the excerpt.
-	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+	nine := niceyaml.NewSourceFromString(stringtest.LinesLF(
 		"a: 1",
 		"b: 2",
 		"c: 3",
@@ -236,14 +236,27 @@ func TestPrinter_PrintError_ExcerptOptions(t *testing.T) {
 		"h: 8",
 		"i: 9",
 	))
-	bound := yamltest.Bind(t, source, errAt("bad", "e"))
+	bound := yamltest.Bind(t, nine, errAt("bad", "e"))
+
+	// Among several bindings, each message sits beside the carets of its
+	// line, so without color the carets still show the extent of each
+	// range, as FormatError draws them.
+	ports := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"ports: {http: eighty, https: ninety}",
+		"name: Web-App",
+		"port: 8",
+	))
 
 	tcs := map[string]struct {
+		err  error
 		opts []niceyaml.ExcerptOption
 		want []string
 	}{
-		"default": {
+		"default context": {
+			err: bound,
 			want: []string{
+				"5:4: $.e: bad",
+				"",
 				"c: 3",
 				"d: 4",
 				"e: 5",
@@ -253,15 +266,21 @@ func TestPrinter_PrintError_ExcerptOptions(t *testing.T) {
 			},
 		},
 		"no context": {
+			err:  bound,
 			opts: []niceyaml.ExcerptOption{niceyaml.WithContextLines(0)},
 			want: []string{
+				"5:4: $.e: bad",
+				"",
 				"e: 5",
 				"   ^",
 			},
 		},
 		"more context": {
+			err:  bound,
 			opts: []niceyaml.ExcerptOption{niceyaml.WithContextLines(3)},
 			want: []string{
+				"5:4: $.e: bad",
+				"",
 				"b: 2",
 				"c: 3",
 				"d: 4",
@@ -273,10 +292,47 @@ func TestPrinter_PrintError_ExcerptOptions(t *testing.T) {
 			},
 		},
 		"last option wins": {
+			err:  bound,
 			opts: []niceyaml.ExcerptOption{niceyaml.WithContextLines(3), niceyaml.WithContextLines(0)},
 			want: []string{
+				"5:4: $.e: bad",
+				"",
 				"e: 5",
 				"   ^",
+			},
+		},
+		"bindings on one line": {
+			err: yamltest.Bind(t, ports, errors.Join(
+				errAt("not a number", "ports", "http"),
+				errAt("also not a number", "ports", "https"),
+			)),
+			want: []string{
+				"├── 1:15: $.ports.http: not a number",
+				"└── 1:30: $.ports.https: also not a number",
+				"",
+				"ports: {http: eighty, https: ninety}",
+				"              ^^^^^^         ^^^^^^ not a number; also not a number",
+				"name: Web-App",
+				"port: 8",
+			},
+		},
+		"bindings on separate lines": {
+			err: yamltest.Bind(t, ports, errors.Join(
+				errAt("not a number", "ports", "https"),
+				errAt("reserved name", "name"),
+				errAt("too small", "port"),
+			)),
+			want: []string{
+				"├── 1:30: $.ports.https: not a number",
+				"├── 2:7: $.name: reserved name",
+				"└── 3:7: $.port: too small",
+				"",
+				"ports: {http: eighty, https: ninety}",
+				"                             ^^^^^^ not a number",
+				"name: Web-App",
+				"      ^^^^^^^ reserved name",
+				"port: 8",
+				"      ^ too small",
 			},
 		},
 	}
@@ -285,13 +341,14 @@ func TestPrinter_PrintError_ExcerptOptions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := p.PrintError(bound, tc.opts...)
+			got := p.PrintError(tc.err, tc.opts...)
 
-			assert.Equal(t, stringtest.JoinLF(tc.want...), excerptOf(t, got))
+			assert.Equal(t, stringtest.JoinLF(tc.want...), got)
 
 			// PrintError and FormatError draw the same report, so the
-			// excerpt of FormatError shows the same lines behind its gutter.
-			assert.Equal(t, formattedExcerpt(t, bound, tc.opts...), excerptOf(t, got))
+			// excerpt of FormatError shows the same lines behind a gutter of
+			// its own, below a tree with ASCII connectors.
+			assert.Equal(t, formattedExcerpt(t, tc.err, tc.opts...), excerptOf(t, got))
 		})
 	}
 }
