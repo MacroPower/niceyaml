@@ -1621,8 +1621,10 @@ func TestParse(t *testing.T) {
 func TestParse_Invalid(t *testing.T) {
 	t.Parallel()
 
+	// A case that sets want pins the whole message of the error.
 	tcs := map[string]struct {
 		expr string
+		want string
 	}{
 		"empty": {
 			expr: "",
@@ -1644,9 +1646,11 @@ func TestParse_Invalid(t *testing.T) {
 		},
 		"bare text after current": {
 			expr: "@foo",
+			want: `parse path "@foo": invalid path: unexpected 'f' at 1`,
 		},
 		"leading dot without root": {
 			expr: ".foo",
+			want: `parse path ".foo": invalid path: expression must start with $ or @`,
 		},
 		"trailing dot": {
 			expr: "$.",
@@ -1665,6 +1669,7 @@ func TestParse_Invalid(t *testing.T) {
 		},
 		"index with a leading zero": {
 			expr: "$[01]",
+			want: `parse path "$[01]": invalid path: index "01": not a canonical non-negative integer`,
 		},
 		"index with a plus sign": {
 			expr: "$[+1]",
@@ -1674,9 +1679,12 @@ func TestParse_Invalid(t *testing.T) {
 		},
 		"index overflows int": {
 			expr: "$[99999999999999999999]",
+			want: `parse path "$[99999999999999999999]": invalid path: ` +
+				`index "99999999999999999999": out of range`,
 		},
 		"star before a name": {
 			expr: "$.*a",
+			want: `parse path "$.*a": invalid path: unexpected '*' in selector "*a"`,
 		},
 		"star after a name": {
 			expr: "$.a*",
@@ -1686,6 +1694,7 @@ func TestParse_Invalid(t *testing.T) {
 		},
 		"recursive star before a name": {
 			expr: "$..*a",
+			want: `parse path "$..*a": invalid path: unexpected '*' in selector "*a"`,
 		},
 		"recursive star after a name": {
 			expr: "$..a*",
@@ -1707,6 +1716,8 @@ func TestParse_Invalid(t *testing.T) {
 		},
 		"unicode escape with too few digits": {
 			expr: `$.'a\u00'`,
+			want: `parse path "$.'a\\u00'": invalid path: ` +
+				`\u escape in quoted selector needs four hexadecimal digits`,
 		},
 		"unicode escape at the end": {
 			expr: `$.'a\u`,
@@ -1716,49 +1727,15 @@ func TestParse_Invalid(t *testing.T) {
 		},
 		"unicode escape of a surrogate half": {
 			expr: `$.'a\ud800'`,
+			want: `parse path "$.'a\\ud800'": invalid path: ` +
+				`\ud800 in quoted selector is a surrogate half, which names no character`,
 		},
 		"bare text after root": {
 			expr: "$foo",
+			want: `parse path "$foo": invalid path: unexpected 'f' at 1`,
 		},
 		"bare text after key selector": {
 			expr: "$.a~b",
-		},
-		"non-ASCII after root": {
-			expr: "$é",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			p, err := paths.Parse(tc.expr)
-
-			require.ErrorIs(t, err, paths.ErrInvalidPath)
-			assert.Equal(t, paths.Path{}, p)
-			assert.Contains(t, err.Error(), "parse path")
-		})
-	}
-}
-
-func TestParse_ErrorMessage(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		expr string
-		want string
-	}{
-		"ASCII after root": {
-			expr: "$a",
-			want: `parse path "$a": invalid path: unexpected 'a' at 1`,
-		},
-		"ASCII after current": {
-			expr: "@a",
-			want: `parse path "@a": invalid path: unexpected 'a' at 1`,
-		},
-		"no anchor": {
-			expr: ".a",
-			want: `parse path ".a": invalid path: expression must start with $ or @`,
 		},
 		"non-ASCII after root": {
 			expr: "$é",
@@ -1772,41 +1749,21 @@ func TestParse_ErrorMessage(t *testing.T) {
 			expr: "$.'a'\xff",
 			want: `parse path "$.'a'\xff": invalid path: unexpected "\xff" at 5`,
 		},
-		"star before a name": {
-			expr: "$.jobs.*a",
-			want: `parse path "$.jobs.*a": invalid path: unexpected '*' in selector "*a"`,
-		},
-		"recursive star before a name": {
-			expr: "$..*a",
-			want: `parse path "$..*a": invalid path: unexpected '*' in selector "*a"`,
-		},
-		"index with a leading zero": {
-			expr: "$[01]",
-			want: `parse path "$[01]": invalid path: index "01": not a canonical non-negative integer`,
-		},
-		"index overflows int": {
-			expr: "$[99999999999999999999]",
-			want: `parse path "$[99999999999999999999]": invalid path: ` +
-				`index "99999999999999999999": out of range`,
-		},
-		"unicode escape with too few digits": {
-			expr: `$.'a\u00'`,
-			want: `parse path "$.'a\\u00'": invalid path: ` +
-				`\u escape in quoted selector needs four hexadecimal digits`,
-		},
-		"unicode escape of a surrogate half": {
-			expr: `$.'a\ud800'`,
-			want: `parse path "$.'a\\ud800'": invalid path: ` +
-				`\ud800 in quoted selector is a surrogate half, which names no character`,
-		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := paths.Parse(tc.expr)
-			require.EqualError(t, err, tc.want)
+			p, err := paths.Parse(tc.expr)
+
+			require.ErrorIs(t, err, paths.ErrInvalidPath)
+			assert.Equal(t, paths.Path{}, p)
+			assert.Contains(t, err.Error(), "parse path")
+
+			if tc.want != "" {
+				require.EqualError(t, err, tc.want)
+			}
 		})
 	}
 }
