@@ -3931,57 +3931,53 @@ func TestSource_ValidateDocuments_Context(t *testing.T) {
 		assert.Equal(t, []string{"f.yaml: context canceled"}, bindingMessages(err))
 	})
 
-	t.Run("ended by a validator that reports it", func(t *testing.T) {
+	t.Run("ended by the second call of a validator", func(t *testing.T) {
 		t.Parallel()
 
-		ctx, cancel := context.WithCancel(t.Context())
-		t.Cleanup(cancel)
+		tcs := map[string]struct {
+			// The error the validator returns from the call that ends ctx.
+			result func(ctx context.Context) error
+			// The message of each binding the result holds, in file order.
+			want []string
+		}{
+			"validator that reports it": {
+				result: func(ctx context.Context) error { return ctx.Err() },
+				want:   []string{"f.yaml:1:1: $: bad", "f.yaml: document 2: context canceled"},
+			},
+			"validator that passes": {
+				result: func(context.Context) error { return nil },
+				want:   []string{"f.yaml:1:1: $: bad", "f.yaml: context canceled"},
+			},
+		}
 
-		var calls atomic.Int32
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		v := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
-			if calls.Add(1) == 2 {
-				cancel()
+				ctx, cancel := context.WithCancel(t.Context())
+				t.Cleanup(cancel)
 
-				return ctx.Err()
-			}
+				var calls atomic.Int32
 
-			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Current()))
-		})
+				v := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+					if calls.Add(1) == 2 {
+						cancel()
 
-		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
+						return tc.result(ctx)
+					}
 
-		err := source.ValidateDocuments(ctx, v)
-		require.ErrorIs(t, err, context.Canceled)
-		assert.Equal(t, int32(2), calls.Load())
-		assert.Equal(t, []string{"f.yaml:1:1: $: bad", "f.yaml: document 2: context canceled"}, bindingMessages(err))
-		assert.Equal(t, 1, strings.Count(err.Error(), context.Canceled.Error()), err.Error())
-	})
+					return niceyaml.NewError("bad", niceyaml.AtPath(paths.Current()))
+				})
 
-	t.Run("ended by a validator that passes", func(t *testing.T) {
-		t.Parallel()
+				source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
 
-		ctx, cancel := context.WithCancel(t.Context())
-		t.Cleanup(cancel)
-
-		var calls atomic.Int32
-
-		v := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-			if calls.Add(1) == 2 {
-				cancel()
-
-				return nil
-			}
-
-			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Current()))
-		})
-
-		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
-
-		err := source.ValidateDocuments(ctx, v)
-		require.ErrorIs(t, err, context.Canceled)
-		assert.Equal(t, int32(2), calls.Load())
-		assert.Equal(t, []string{"f.yaml:1:1: $: bad", "f.yaml: context canceled"}, bindingMessages(err))
+				err := source.ValidateDocuments(ctx, v)
+				require.ErrorIs(t, err, context.Canceled)
+				assert.Equal(t, int32(2), calls.Load())
+				assert.Equal(t, tc.want, bindingMessages(err))
+				assert.Equal(t, 1, strings.Count(err.Error(), context.Canceled.Error()), err.Error())
+			})
+		}
 	})
 
 	t.Run("a deadline of a validator's own fails its document alone", func(t *testing.T) {
