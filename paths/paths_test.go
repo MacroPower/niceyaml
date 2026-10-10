@@ -2654,21 +2654,6 @@ func TestPath_WhitespaceDocument(t *testing.T) {
 	}
 }
 
-func TestPath_Token_UnresolvableAlias(t *testing.T) {
-	t.Parallel()
-
-	// Node looks through the alias and reports that it names no anchor, while
-	// Token returns the alias's own token.
-	doc := yamltest.FirstDocument(t, "a: *x\nb: &x 1\n").DocumentAST()
-
-	_, err := paths.NewResolver(doc).Node(paths.Doc().Child("a"))
-	require.ErrorIs(t, err, paths.ErrAlias)
-
-	tk, err := paths.NewResolver(doc).Token(paths.Doc().Child("a"))
-	require.NoError(t, err)
-	assert.Equal(t, token.AliasType, tk.Type)
-}
-
 func TestPath_Token_MultipleDocuments(t *testing.T) {
 	t.Parallel()
 
@@ -2980,15 +2965,47 @@ func TestPath_Node_TaggedKey(t *testing.T) {
 func TestPath_UnknownAlias(t *testing.T) {
 	t.Parallel()
 
-	doc := yamltest.FirstDocument(t, "base: &b {a: 1}\nother: *nope\n").DocumentAST()
+	// An alias refers to the last anchor of its name before it. With no
+	// such anchor, Node looks through the alias and reports that it names
+	// none, as a path below the alias does, while Token returns the
+	// alias's own token.
+	tcs := map[string]struct {
+		input string
+		key   string
+		want  string
+	}{
+		"no anchor of its name": {
+			input: "base: &b {a: 1}\nother: *nope\n",
+			key:   "other",
+			want:  "*nope has no anchor before it",
+		},
+		"anchor after the alias": {
+			input: "b: *x\na: &x\n  v: 1\n",
+			key:   "b",
+			want:  "*x has no anchor before it",
+		},
+	}
 
-	_, err := paths.NewResolver(doc).Token(paths.Doc().Child("other", "a"))
-	require.ErrorIs(t, err, paths.ErrAlias)
-	require.NotErrorIs(t, err, paths.ErrNotFound)
-	assert.Contains(t, err.Error(), "*nope")
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	_, err = paths.NewResolver(doc).Node(paths.Doc().Child("other"))
-	require.ErrorIs(t, err, paths.ErrAlias)
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
+			alias := paths.Doc().Child(tc.key)
+
+			_, err := paths.NewResolver(doc).Node(alias)
+			require.ErrorIs(t, err, paths.ErrAlias)
+
+			_, err = paths.NewResolver(doc).Token(alias.Child("v"))
+			require.ErrorIs(t, err, paths.ErrAlias)
+			require.NotErrorIs(t, err, paths.ErrNotFound)
+			assert.Contains(t, err.Error(), tc.want)
+
+			tk, err := paths.NewResolver(doc).Token(alias)
+			require.NoError(t, err)
+			assert.Equal(t, token.AliasType, tk.Type)
+		})
+	}
 }
 
 func TestPath_TaggedAlias(t *testing.T) {
@@ -3787,20 +3804,6 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 				assert.Equal(t, decoded[tc.key], got)
 			})
 		}
-	})
-
-	t.Run("alias before any anchor of its name", func(t *testing.T) {
-		t.Parallel()
-
-		forward := yamltest.FirstDocument(t, "b: *x\na: &x\n  v: 1\n").DocumentAST()
-
-		_, err := paths.NewResolver(forward).Token(paths.Doc().Child("b", "v"))
-		require.ErrorIs(t, err, paths.ErrAlias)
-		require.NotErrorIs(t, err, paths.ErrNotFound)
-		assert.Contains(t, err.Error(), "*x has no anchor before it")
-
-		_, err = paths.NewResolver(forward).Node(paths.Doc().Child("b"))
-		require.ErrorIs(t, err, paths.ErrAlias)
 	})
 }
 
