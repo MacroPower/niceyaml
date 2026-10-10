@@ -124,27 +124,12 @@ func assertRowOfRunes(t *testing.T, l printer.Layout, input string, rows []strin
 	}
 }
 
-// printDiff generates a full-file diff between two YAML strings.
-// It outputs the entire file with markers for inserted and deleted lines.
-func printDiff(p *printer.Printer, before, after string) string {
-	beforeTks := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
-	afterTks := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
-
-	return p.Print(diff.Diff(beforeTks.Lines(), afterTks.Lines()).Unified())
-}
-
-// printDiffSummary generates a summary diff showing only changed lines with context.
-func printDiffSummary(p *printer.Printer, before, after string, context int) string {
-	beforeTks := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
-	afterTks := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
-
-	source := diff.Diff(beforeTks.Lines(), afterTks.Lines()).Hunks(context)
-
-	if source.Count() == 0 {
-		return ""
-	}
-
-	return p.Print(source)
+// diffOf returns the diff between two YAML strings.
+func diffOf(before, after string) *diff.Result {
+	return diff.Diff(
+		niceyaml.NewSourceFromString(before).Lines(),
+		niceyaml.NewSourceFromString(after).Lines(),
+	)
 }
 
 func TestPrinter_AddStyleToRange(t *testing.T) {
@@ -1630,9 +1615,8 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			t.Parallel()
 
 			p := testPrinterWithGutter(printer.DefaultGutter)
-			got := printDiff(p, tc.before, tc.after)
 
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, p.Print(diffOf(tc.before, tc.after).Unified()))
 		})
 	}
 }
@@ -2510,10 +2494,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 
 			p := testPrinterWithGutter(printer.DiffGutter).With(printer.WithWrapWidth(tc.width))
 
-			view := diff.Diff(
-				niceyaml.NewSourceFromString(tc.before).Lines(),
-				niceyaml.NewSourceFromString(tc.after).Lines(),
-			).Unified()
+			view := diffOf(tc.before, tc.after).Unified()
 			view.AddOverlay(testOverlayHighlight, tc.overlays...)
 
 			got := p.Print(view)
@@ -2633,9 +2614,7 @@ func TestPrinter_PrintTokenDiff_Gutter(t *testing.T) {
 
 			p := testPrinterWithGutter(tc.gutterFunc)
 
-			got := printDiff(p, tc.before, tc.after)
-
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, p.Print(diffOf(tc.before, tc.after).Unified()))
 		})
 	}
 }
@@ -3771,9 +3750,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 
 			p := testPrinterWithGutter(printer.DefaultGutter)
 
-			got := printDiffSummary(p, tc.before, tc.after, tc.context)
-
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, p.Print(diffOf(tc.before, tc.after).Hunks(tc.context)))
 		})
 	}
 }
@@ -5568,21 +5545,19 @@ func TestPrinter_LineNumbers_Placeholder(t *testing.T) {
 
 	// A side-by-side diff pads the shorter side with zero-value lines, which
 	// have no number. The gutter renders a blank column for them.
-	before := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3").Lines()
-	after := niceyaml.NewSourceFromString("a: 1").Lines()
-
+	result := diffOf("a: 1\nb: 2\nc: 3", "a: 1")
 	p := testPrinterWithGutter(printer.DefaultGutter)
 
 	assert.Equal(t, stringtest.JoinLF(
 		"   1  a: 1",
 		"      ",
 		"      ",
-	), p.Print(diff.Diff(before, after).After()))
+	), p.Print(result.After()))
 	assert.Equal(t, stringtest.JoinLF(
 		"   1  a: 1",
 		"   2 -b: 2",
 		"   3 -c: 3",
-	), p.Print(diff.Diff(before, after).Before()))
+	), p.Print(result.Before()))
 }
 
 func TestPrinter_BlendKey_StyleNames(t *testing.T) {
