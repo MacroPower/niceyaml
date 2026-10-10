@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -148,8 +147,7 @@ func TestViewSignal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "a.yaml")
-			require.NoError(t, os.WriteFile(path, []byte("a: 1\n"), 0o600))
+			path := writeFile(t, t.TempDir(), "a.yaml", "a: 1\n")
 
 			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestViewSignal$")
 

@@ -15,6 +15,17 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 )
 
+// writeFile writes content to the file name in dir and returns the path
+// of the file.
+func writeFile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	return path
+}
+
 func TestContainsGlobChars(t *testing.T) {
 	t.Parallel()
 
@@ -79,8 +90,7 @@ func TestExpand(t *testing.T) {
 
 	files := []string{"002.yaml", "000.yaml", "001.yaml"}
 	for _, name := range files {
-		path := filepath.Join(tmpDir, name)
-		require.NoError(t, os.WriteFile(path, []byte("test"), 0o644))
+		path := writeFile(t, tmpDir, name, "test")
 		require.NoError(t, os.Chtimes(path, mtime, mtime))
 	}
 
@@ -89,17 +99,16 @@ func TestExpand(t *testing.T) {
 	// walk reports after them.
 	subdir := filepath.Join(tmpDir, "subdir")
 	require.NoError(t, os.MkdirAll(subdir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(subdir, "003.yaml"), []byte("test"), 0o644))
+	writeFile(t, subdir, "003.yaml", "test")
 
 	earlyDir := filepath.Join(tmpDir, "000dir")
 	require.NoError(t, os.MkdirAll(earlyDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(earlyDir, "x.yaml"), []byte("test"), 0o644))
+	writeFile(t, earlyDir, "x.yaml", "test")
 
 	// Create a file whose name contains a glob metacharacter, and one its
 	// name matches when read as a pattern.
-	bracketFile := filepath.Join(tmpDir, "cfg[1].txt")
-	require.NoError(t, os.WriteFile(bracketFile, []byte("test"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "cfg1.txt"), []byte("test"), 0o644))
+	bracketFile := writeFile(t, tmpDir, "cfg[1].txt", "test")
+	writeFile(t, tmpDir, "cfg1.txt", "test")
 
 	// Create a directory whose name contains a glob metacharacter.
 	bracketDir := filepath.Join(tmpDir, "data[1]")
@@ -107,9 +116,10 @@ func TestExpand(t *testing.T) {
 
 	// Create a file whose name is no valid pattern, out of the way of the
 	// wildcard cases.
-	strayFile := filepath.Join(tmpDir, "stray", "report[2024.txt")
-	require.NoError(t, os.MkdirAll(filepath.Dir(strayFile), 0o755))
-	require.NoError(t, os.WriteFile(strayFile, []byte("test"), 0o644))
+	strayDir := filepath.Join(tmpDir, "stray")
+	require.NoError(t, os.MkdirAll(strayDir, 0o755))
+
+	strayFile := writeFile(t, strayDir, "report[2024.txt", "test")
 
 	tests := map[string]struct {
 		args      []string
@@ -246,8 +256,6 @@ func TestExpandPathsSymlinks(t *testing.T) {
 	//   only[1].txt -> missing.txt
 	tmpDir := t.TempDir()
 	subdir := filepath.Join(tmpDir, "sub")
-	target := filepath.Join(subdir, "x.yaml")
-	top := filepath.Join(tmpDir, "x.yaml")
 	link := filepath.Join(tmpDir, "link.yaml")
 	dangling := filepath.Join(tmpDir, "dangling.yaml")
 	throughDir := filepath.Join(tmpDir, "ldir", "x.yaml")
@@ -263,8 +271,9 @@ func TestExpandPathsSymlinks(t *testing.T) {
 	dotDot := tmpDir + "/deeplink/../x.yaml"
 
 	require.NoError(t, os.MkdirAll(filepath.Join(subdir, "deep"), 0o755))
-	require.NoError(t, os.WriteFile(target, []byte("x"), 0o644))
-	require.NoError(t, os.WriteFile(top, []byte("top"), 0o644))
+
+	target := writeFile(t, subdir, "x.yaml", "x")
+	top := writeFile(t, tmpDir, "x.yaml", "top")
 
 	err := os.Symlink(filepath.Join("sub", "x.yaml"), link)
 	if err != nil {
@@ -274,7 +283,7 @@ func TestExpandPathsSymlinks(t *testing.T) {
 	require.NoError(t, os.Symlink("missing.yaml", dangling))
 	require.NoError(t, os.Symlink("sub", filepath.Join(tmpDir, "ldir")))
 	require.NoError(t, os.Symlink(filepath.Join("sub", "deep"), filepath.Join(tmpDir, "deeplink")))
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "cfg1.txt"), []byte("cfg"), 0o644))
+	writeFile(t, tmpDir, "cfg1.txt", "cfg")
 	require.NoError(t, os.Symlink("missing.txt", danglingMeta))
 	require.NoError(t, os.Symlink("missing.txt", danglingMetaAlone))
 
@@ -378,8 +387,7 @@ func TestFileSet(t *testing.T) {
 			second: func(t *testing.T, first string) string {
 				t.Helper()
 
-				other := filepath.Join(filepath.Dir(first), "b.yaml")
-				require.NoError(t, os.WriteFile(other, []byte("a: 1\n"), 0o644))
+				other := writeFile(t, filepath.Dir(first), "b.yaml", "a: 1\n")
 				require.NoError(t, os.Chtimes(other, mtime, mtime))
 
 				return other
@@ -392,8 +400,7 @@ func TestFileSet(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			first := filepath.Join(t.TempDir(), "a.yaml")
-			require.NoError(t, os.WriteFile(first, []byte("a: 1\n"), 0o644))
+			first := writeFile(t, t.TempDir(), "a.yaml", "a: 1\n")
 			require.NoError(t, os.Chtimes(first, mtime, mtime))
 
 			var set fileSet
@@ -429,13 +436,13 @@ func TestGlob(t *testing.T) {
 	subdirDeep := filepath.Join(subdir, "deep")
 	k8sDir := filepath.Join(tmpDir, "k8s")
 
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "a.yaml"), []byte("a"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "b.yml"), []byte("b"), 0o644))
+	writeFile(t, tmpDir, "a.yaml", "a")
+	writeFile(t, tmpDir, "b.yml", "b")
 	require.NoError(t, os.MkdirAll(subdirDeep, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(subdir, "c.yaml"), []byte("c"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(subdirDeep, "d.yaml"), []byte("d"), 0o644))
+	writeFile(t, subdir, "c.yaml", "c")
+	writeFile(t, subdirDeep, "d.yaml", "d")
 	require.NoError(t, os.MkdirAll(k8sDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(k8sDir, "deploy.yaml"), []byte("k8s"), 0o644))
+	writeFile(t, k8sDir, "deploy.yaml", "k8s")
 
 	tcs := map[string]struct {
 		pattern   string
@@ -609,12 +616,12 @@ func TestGlobEscapes(t *testing.T) {
 	commaDir := filepath.Join(tmpDir, "d,e")
 	backslashDir := tmpDir + `/b\s`
 
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "a,b.yaml"), []byte("a"), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "c.yaml"), []byte("c"), 0o644))
+	writeFile(t, tmpDir, "a,b.yaml", "a")
+	writeFile(t, tmpDir, "c.yaml", "c")
 	require.NoError(t, os.MkdirAll(commaDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(commaDir, "x.yaml"), []byte("x"), 0o644))
+	writeFile(t, commaDir, "x.yaml", "x")
 	require.NoError(t, os.MkdirAll(backslashDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(backslashDir, "y.yaml"), []byte("y"), 0o644))
+	writeFile(t, backslashDir, "y.yaml", "y")
 
 	tcs := map[string]struct {
 		pattern   string
@@ -685,7 +692,7 @@ func TestGlobSymlinks(t *testing.T) {
 	subdir := filepath.Join(tmpDir, "sub")
 
 	require.NoError(t, os.MkdirAll(filepath.Join(subdir, "deep"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(subdir, "x.yaml"), []byte("x"), 0o644))
+	writeFile(t, subdir, "x.yaml", "x")
 
 	err := os.Symlink("..", filepath.Join(subdir, "up"))
 	if err != nil {

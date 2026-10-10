@@ -90,8 +90,7 @@ func TestValidateFile(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "config.yaml")
-			require.NoError(t, os.WriteFile(path, []byte(tc.content), 0o600))
+			path := writeFile(t, t.TempDir(), "config.yaml", tc.content)
 
 			reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(nameSchema)))
 
@@ -151,8 +150,7 @@ func TestValidateFileEmpty(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "config.yaml")
-			require.NoError(t, os.WriteFile(path, []byte(tc.content), 0o600))
+			path := writeFile(t, t.TempDir(), "config.yaml", tc.content)
 
 			err := validateFile(t.Context(), path, tc.reg)
 			if tc.want == "" {
@@ -173,8 +171,7 @@ func TestValidateFileRoutesOnAbsolutePath(t *testing.T) {
 	// SchemaStore routes on patterns that name parent directories, so the
 	// resolver must see the absolute path even when the user types a
 	// relative one. Messages still name the file as the user typed it.
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(path, []byte("value: 1\n"), 0o600))
+	path := writeFile(t, t.TempDir(), "config.yaml", "value: 1\n")
 
 	wd, err := os.Getwd()
 	require.NoError(t, err)
@@ -212,12 +209,8 @@ func TestValidateFileDotDotAfterSymlink(t *testing.T) {
 	sub := filepath.Join(dir, "sub")
 
 	require.NoError(t, os.MkdirAll(filepath.Join(sub, "deep"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(sub, "s.json"), nameSchema, 0o600))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(sub, "x.yaml"),
-		[]byte("# yaml-language-server: $schema=./s.json\nname: a\n"),
-		0o600,
-	))
+	writeFile(t, sub, "s.json", string(nameSchema))
+	writeFile(t, sub, "x.yaml", "# yaml-language-server: $schema=./s.json\nname: a\n")
 
 	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, "ldir"))
 	if err != nil {
@@ -246,7 +239,7 @@ func TestBuildRegistryRefs(t *testing.T) {
 		"reaches.yaml": "# yaml-language-server: $schema=./s.json\nextra: 1\n",
 	}
 	for name, content := range files {
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
+		writeFile(t, dir, name, content)
 	}
 
 	t.Run("--schema fails before any file", func(t *testing.T) {
@@ -287,11 +280,10 @@ func TestBuildRegistrySchemaDotDotAfterSymlink(t *testing.T) {
 	sub := filepath.Join(dir, "sub")
 
 	require.NoError(t, os.MkdirAll(filepath.Join(sub, "deep"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(sub, "schema.json"), []byte(`{"type": "string"}`), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "schema.json"), []byte(`{"type": "integer"}`), 0o600))
+	writeFile(t, sub, "schema.json", `{"type": "string"}`)
+	writeFile(t, dir, "schema.json", `{"type": "integer"}`)
 
-	yamlPath := filepath.Join(dir, "x.yaml")
-	require.NoError(t, os.WriteFile(yamlPath, []byte("hello\n"), 0o600))
+	yamlPath := writeFile(t, dir, "x.yaml", "hello\n")
 
 	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, "ldir"))
 	if err != nil {
@@ -347,11 +339,10 @@ func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sub, "deep"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "cfg:v2"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "file:"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(sub, "schema.json"), []byte(`{"type": "string"}`), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "schema.json"), []byte(`{"type": "integer"}`), 0o600))
+	writeFile(t, sub, "schema.json", `{"type": "string"}`)
+	writeFile(t, dir, "schema.json", `{"type": "integer"}`)
 
-	yamlPath := filepath.Join(dir, "x.yaml")
-	require.NoError(t, os.WriteFile(yamlPath, []byte("hello\n"), 0o600))
+	yamlPath := writeFile(t, dir, "x.yaml", "hello\n")
 
 	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, "v1:ldir"))
 	if err != nil {
@@ -574,14 +565,15 @@ func TestValidateCmdSchemaError(t *testing.T) {
 				ref = srv.URL + "/schema.json"
 
 			case tc.content != "":
-				require.NoError(t, os.WriteFile(ref, []byte(tc.content), 0o600))
+				writeFile(t, dir, "schema.json", tc.content)
 			}
 
 			// Three documents across two files, so a schema loaded per
 			// document would report three times.
-			yamlPaths := []string{filepath.Join(dir, "one.yaml"), filepath.Join(dir, "two.yaml")}
-			require.NoError(t, os.WriteFile(yamlPaths[0], []byte("a: 1\n"), 0o600))
-			require.NoError(t, os.WriteFile(yamlPaths[1], []byte("a: 1\n---\nb: 2\n"), 0o600))
+			yamlPaths := []string{
+				writeFile(t, dir, "one.yaml", "a: 1\n"),
+				writeFile(t, dir, "two.yaml", "a: 1\n---\nb: 2\n"),
+			}
 
 			out := &bytes.Buffer{}
 
@@ -664,10 +656,7 @@ func TestValidateCmdCanceled(t *testing.T) {
 			var args []string
 
 			for _, name := range []string{"a.yaml", "b.yaml", "c.yaml"} {
-				path := filepath.Join(dir, name)
-				require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
-
-				args = append(args, path)
+				args = append(args, writeFile(t, dir, name, body))
 			}
 
 			out := &bytes.Buffer{}
@@ -720,8 +709,7 @@ func TestValidateCmdOutput(t *testing.T) {
 
 			dir := t.TempDir()
 
-			schemaPath := filepath.Join(dir, "schema.json")
-			require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type": "object"}`), 0o600))
+			schemaPath := writeFile(t, dir, "schema.json", `{"type": "object"}`)
 
 			for _, file := range tc.files {
 				err := os.WriteFile(filepath.Join(dir, file), []byte("name: a\n"), 0o600)
@@ -793,8 +781,7 @@ func TestValidateCmdErrorNames(t *testing.T) {
 
 			dir := t.TempDir()
 
-			schemaPath := filepath.Join(dir, "schema.json")
-			require.NoError(t, os.WriteFile(schemaPath, nameSchema, 0o600))
+			schemaPath := writeFile(t, dir, "schema.json", string(nameSchema))
 
 			path := filepath.Join(dir, file)
 

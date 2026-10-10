@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -39,12 +38,10 @@ func TestRootCmdProfileFlags(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 
-			yamlPath := filepath.Join(dir, "doc.yaml")
-			require.NoError(t, os.WriteFile(yamlPath, []byte("name: a\n"), 0o600))
+			yamlPath := writeFile(t, dir, "doc.yaml", "name: a\n")
 
 			// An explicit schema keeps validate from fetching the SchemaStore catalog.
-			schemaPath := filepath.Join(dir, "schema.json")
-			require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type": "object"}`), 0o600))
+			schemaPath := writeFile(t, dir, "schema.json", `{"type": "object"}`)
 
 			profilePath := filepath.Join(dir, "out.prof")
 
@@ -90,12 +87,10 @@ func TestRootCmdProfileRates(t *testing.T) {
 
 			dir := t.TempDir()
 
-			yamlPath := filepath.Join(dir, "doc.yaml")
-			require.NoError(t, os.WriteFile(yamlPath, []byte("name: a\n"), 0o600))
+			yamlPath := writeFile(t, dir, "doc.yaml", "name: a\n")
 
 			// An explicit schema keeps validate from fetching the SchemaStore catalog.
-			schemaPath := filepath.Join(dir, "schema.json")
-			require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type": "object"}`), 0o600))
+			schemaPath := writeFile(t, dir, "schema.json", `{"type": "object"}`)
 
 			args := []string{"validate", "--schema", schemaPath, yamlPath}
 			if tc.flag != "" {
@@ -304,10 +299,10 @@ func TestExitCode(t *testing.T) {
 			t.Parallel()
 
 			dir := t.TempDir()
-			require.NoError(t, os.WriteFile(filepath.Join(dir, "schema.json"), nameSchema, 0o600))
+			writeFile(t, dir, "schema.json", string(nameSchema))
 
 			for file, content := range tc.files {
-				require.NoError(t, os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600))
+				writeFile(t, dir, file, content)
 			}
 
 			args := make([]string, 0, len(tc.args))

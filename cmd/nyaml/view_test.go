@@ -67,7 +67,7 @@ func TestLoadSources(t *testing.T) {
 					continue
 				}
 
-				require.NoError(t, os.WriteFile(paths[i], []byte("a: 1\n"), 0o600))
+				writeFile(t, dir, file, "a: 1\n")
 			}
 
 			sources, err := loadSources(paths)
