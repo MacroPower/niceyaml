@@ -43,7 +43,8 @@
 //	}
 //
 // Tests of code that builds a [line.Lines] collection check its integrity
-// with [ValidateLines].
+// with [ValidateLines]. Tests of code that links tokens check the Prev and
+// Next of a stream with [ValidateTokenLinks].
 //
 // Most ranges a test names sit on one line, and [LineRange] writes one
 // from the line and its two columns:

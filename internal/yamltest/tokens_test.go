@@ -370,6 +370,84 @@ func TestValidateTokens(t *testing.T) {
 	}
 }
 
+func TestValidateTokenLinks(t *testing.T) {
+	t.Parallel()
+
+	// Chain returns three tokens that Prev and Next link in order.
+	chain := func() token.Tokens {
+		var tks token.Tokens
+
+		for _, origin := range []string{"a", "b", "c"} {
+			tks.Add(yamltest.NewTokenBuilder().Origin(origin).Build())
+		}
+
+		return tks
+	}
+
+	other := yamltest.NewTokenBuilder().Origin("x").Build()
+
+	tcs := map[string]struct {
+		// Breaks a link of the chain, or drops a token from it.
+		edit func(tks token.Tokens)
+		err  error // Nil when every link fits.
+		msg  string
+	}{
+		"linked chain": {
+			edit: func(token.Tokens) {},
+		},
+		"first token with a Prev": {
+			edit: func(tks token.Tokens) { tks[0].Prev = other },
+			err:  yamltest.ErrTokenLink,
+			msg:  `token 0 "a" Prev`,
+		},
+		"last token with a Next": {
+			edit: func(tks token.Tokens) { tks[2].Next = other },
+			err:  yamltest.ErrTokenLink,
+			msg:  `token 2 "c" Next`,
+		},
+		"Prev that skips a token": {
+			edit: func(tks token.Tokens) { tks[2].Prev = tks[0] },
+			err:  yamltest.ErrTokenLink,
+			msg:  `token 2 "c" Prev`,
+		},
+		"Next that is nil inside the chain": {
+			edit: func(tks token.Tokens) { tks[1].Next = nil },
+			err:  yamltest.ErrTokenLink,
+			msg:  `token 1 "b" Next`,
+		},
+		"nil token": {
+			edit: func(tks token.Tokens) { tks[1] = nil },
+			err:  yamltest.ErrNilToken,
+			msg:  "token 1 got",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := chain()
+			tc.edit(tks)
+
+			err := yamltest.ValidateTokenLinks(tks)
+			if tc.err == nil {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, tc.err)
+			assert.Contains(t, err.Error(), tc.msg)
+		})
+	}
+
+	t.Run("no tokens", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, yamltest.ValidateTokenLinks(nil))
+	})
+}
+
 func TestCompareTokens(t *testing.T) {
 	t.Parallel()
 

@@ -24,6 +24,8 @@ var (
 	ErrNilPosition = errors.New("token position is nil")
 	// ErrTokenCountMismatch indicates two token slices differ in length.
 	ErrTokenCountMismatch = errors.New("token count mismatch")
+	// ErrTokenLink indicates a token whose Prev or Next is not its neighbor.
+	ErrTokenLink = errors.New("token link mismatch")
 )
 
 // TokenValidationError indicates a token failed validation.
@@ -172,6 +174,44 @@ func ValidateTokens(want, got token.Tokens) error {
 
 		if got[i].Position == nil {
 			return &TokenValidationError{Index: i, Which: whichGot, Reason: ErrNilPosition}
+		}
+	}
+
+	return nil
+}
+
+// ValidateTokenLinks checks that Prev and Next link each token of tks to
+// its neighbors in the slice and that the chain stops at both ends, so the
+// first Prev and the last Next are nil. It returns an error that wraps
+// [ErrTokenLink] and names the first link that points elsewhere, a
+// [*TokenValidationError] for a nil token, or nil when every link fits. A
+// slice of no tokens has no links to check.
+func ValidateTokenLinks(tks token.Tokens) error {
+	for i, tk := range tks {
+		if tk == nil {
+			return &TokenValidationError{Index: i, Which: whichGot, Reason: ErrNilToken}
+		}
+	}
+
+	for i, tk := range tks {
+		var prev, next *token.Token
+
+		if i > 0 {
+			prev = tks[i-1]
+		}
+
+		if i < len(tks)-1 {
+			next = tks[i+1]
+		}
+
+		if tk.Prev != prev {
+			return fmt.Errorf("%w: token %d %q Prev\nwant: %s\ngot:  %s",
+				ErrTokenLink, i, tk.Origin, FormatToken(prev), FormatToken(tk.Prev))
+		}
+
+		if tk.Next != next {
+			return fmt.Errorf("%w: token %d %q Next\nwant: %s\ngot:  %s",
+				ErrTokenLink, i, tk.Origin, FormatToken(next), FormatToken(tk.Next))
 		}
 	}
 
