@@ -1459,10 +1459,7 @@ func TestView_String_FarAnnotationColumn(t *testing.T) {
 			view := newTestView(t, tc.input+"\n", 1)
 			view.Annotate(0, line.Annotation{Content: "msg", Placement: tc.placement, Col: tc.col})
 
-			var got string
-
-			require.NotPanics(t, func() { got = view.String() })
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, view.String())
 		})
 	}
 }
