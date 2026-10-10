@@ -42,20 +42,6 @@ func TestNewView(t *testing.T) {
 		assert.Panics(t, func() { view.Line(2) }, "the content ends where lines ends")
 	})
 
-	t.Run("over zero lines", func(t *testing.T) {
-		t.Parallel()
-
-		view := line.NewView(line.Lines{})
-
-		assert.Equal(t, 0, view.Count())
-		assert.Panics(t, func() { view.Line(0) })
-		assert.Empty(t, view.String())
-
-		for range view.All() {
-			t.Fatal("expected no lines")
-		}
-	})
-
 	t.Run("over empty lines", func(t *testing.T) {
 		t.Parallel()
 
@@ -64,6 +50,7 @@ func TestNewView(t *testing.T) {
 		tcs := map[string]struct {
 			lines line.Lines
 		}{
+			"zero Lines":            {lines: line.Lines{}},
 			"NewLines of no tokens": {lines: line.NewLines(tokens.Tokenize(""))},
 			"Collect of no lines":   {lines: line.Collect()},
 		}
@@ -77,6 +64,10 @@ func TestNewView(t *testing.T) {
 				assert.Equal(t, 0, view.Count())
 				assert.Panics(t, func() { view.Line(0) })
 				assert.Empty(t, view.String())
+
+				for range view.All() {
+					t.Fatal("expected no lines")
+				}
 			})
 		}
 	})
