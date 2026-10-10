@@ -20,6 +20,9 @@ type openHours struct {
 	Close int `yaml:"close"`
 }
 
+// openOnlyDoc is a document whose hours hold an open and no close.
+var openOnlyDoc = stringtest.LinesLF("spec:", "  hours:", "    open: 9")
+
 // requiresClose returns a [niceyaml.Validator] that reads the key close
 // of the node it gets, as a check for a required key does, and returns
 // the error of that read.
@@ -241,11 +244,7 @@ func TestNode_DecodeAt(t *testing.T) {
 	t.Run("a validator that reads a required key reports not found for a present node", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.LinesLF(
-			"spec:",
-			"  hours:",
-			"    open: 9",
-		), "cfg.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, openOnlyDoc, "cfg.yaml")
 
 		_, err := doc.At(hoursPath)
 		require.NoError(t, err)
@@ -369,9 +368,6 @@ func TestNode_DecodeIfPresent(t *testing.T) {
 	versionPath := paths.Current().Child("version")
 	portPath := paths.Current().Child("server", "port")
 	hoursPath := paths.Doc().Child("spec", "hours")
-
-	// A document whose hours hold an open and no close.
-	openOnly := stringtest.LinesLF("spec:", "  hours:", "    open: 9")
 
 	tcs := map[string]struct {
 		// The sentinel the error matches, or nil for a call that succeeds.
@@ -519,7 +515,7 @@ func TestNode_DecodeIfPresent(t *testing.T) {
 	t.Run("a validator that reads a required key fails a present node", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocumentWithPath(t, openOnly, "cfg.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, openOnlyDoc, "cfg.yaml")
 		h := openHours{Open: 8, Close: 17}
 
 		// The error matches paths.ErrNotFound, as the error of an absent
@@ -542,7 +538,7 @@ func TestNode_DecodeIfPresent(t *testing.T) {
 			return nil
 		})
 
-		doc := yamltest.FirstDocumentWithPath(t, openOnly, "cfg.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, openOnlyDoc, "cfg.yaml")
 
 		var h openHours
 
@@ -568,7 +564,7 @@ func TestNode_DecodeIfPresent(t *testing.T) {
 			found bool
 		}{
 			"a mapping that sets one field": {
-				input: openOnly,
+				input: openOnlyDoc,
 				want:  openHours{Open: 9, Close: 17},
 				found: true,
 			},
