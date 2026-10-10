@@ -630,28 +630,26 @@ func TestDocument_Decode_Problems(t *testing.T) {
 	strict := niceyaml.WithDisallowUnknownFields(true)
 
 	tcs := map[string]struct {
-		decode func(context.Context, *niceyaml.Node, ...niceyaml.DecodeOption) error
+		decode func(context.Context, *niceyaml.Node) error
 		input  string
 		scope  string
 		want   string
-		opts   []niceyaml.DecodeOption
 	}{
 		// One problem comes back as the error itself, with no summary.
 		"one problem": {
-			decode: decodeInto[problemConfig](),
+			decode: decodeAs[problemConfig](),
 			input:  "timeout: soon\nreplicas: 3\n",
 			want:   "1:10: $.timeout: expected integer, got string",
 		},
 		"one unknown field": {
-			decode: decodeInto[problemConfig](),
+			decode: decodeAs[problemConfig](strict),
 			input:  "tmeout: 1\n",
-			opts:   []niceyaml.DecodeOption{strict},
 			want:   `1:1: $.tmeout~: unknown field "tmeout"`,
 		},
 		// The rows come in the order of the source, whatever order the
 		// target declares its fields in.
 		"scalars of the wrong kind": {
-			decode: decodeInto[problemConfig](),
+			decode: decodeAs[problemConfig](),
 			input:  "timeout: soon\nreplicas: 1.5x\nservers:\n  - port: http\n  - name: [a]\nlabels: {a: x, b: 2, c: y}\n",
 			want: stringtest.JoinLF(
 				"6 problems",
@@ -666,7 +664,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// A mapping or a sequence where the target takes another kind is
 		// one problem, and the walk reads nothing below it.
 		"mappings and sequences of the wrong kind": {
-			decode: decodeInto[problemConfig](),
+			decode: decodeAs[problemConfig](),
 			input:  "timeout: {a: soon}\nreplicas: [x, y]\nservers:\n  - a\n  - [b]\nlabels: [c]\n",
 			want: stringtest.JoinLF(
 				"5 problems",
@@ -678,7 +676,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 			),
 		},
 		"numbers out of range": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Small int8   `yaml:"small"`
 				Wide  uint16 `yaml:"wide"`
 				Count uint   `yaml:"count"`
@@ -694,7 +692,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// The decoder parses a duration itself and reports the error of
 		// the parse with no token.
 		"durations": {
-			decode: decodeInto[problemConfig](),
+			decode: decodeAs[problemConfig](),
 			input: stringtest.LinesLF(
 				"servers:",
 				"  - {name: a, timeout: soon}",
@@ -715,7 +713,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// The decoder reads text that is no timestamp as the zero time,
 		// and rejects a value of another kind.
 		"timestamps": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				When  time.Time `yaml:"when"`
 				Until time.Time `yaml:"until"`
 				N     int       `yaml:"n"`
@@ -728,9 +726,8 @@ func TestDocument_Decode_Problems(t *testing.T) {
 			),
 		},
 		"unknown fields beside values": {
-			decode: decodeInto[problemConfig](),
+			decode: decodeAs[problemConfig](strict),
 			input:  "timeout: soon\nservers:\n  - {name: a, timeout: soon, prt: 1}\nlabels: {a: x}\nreplcas: 2\n",
-			opts:   []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				"5 problems",
 				"1:10: $.timeout: expected integer, got string",
@@ -743,12 +740,12 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// The decoder reads nothing from a null, so a null is no problem
 		// for any type.
 		"nulls": {
-			decode: decodeInto[problemConfig](),
+			decode: decodeAs[problemConfig](),
 			input:  "timeout: soon\nreplicas: ~\nservers:\n  - ~\n  - {port: ~, timeout: null}\nlabels: {a: ~}\n",
 			want:   "1:10: $.timeout: expected integer, got string",
 		},
 		"pointers and arrays": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				P   *int           `yaml:"p"`
 				PS  *problemServer `yaml:"ps"`
 				PP  **int          `yaml:"pp"`
@@ -766,7 +763,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// The decoder fills an interface with any value, so no value
 		// below one is a problem.
 		"values below an interface": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				A any            `yaml:"a"`
 				M map[string]any `yaml:"m"`
 				L []any          `yaml:"l"`
@@ -778,7 +775,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// The fields of an inline struct read the mapping of the struct
 		// that holds it.
 		"inline struct": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Name         string `yaml:"name"`
 				StrictNested `yaml:",inline"`
 			}](),
@@ -794,7 +791,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// no fixed order, so it rejects x in one decode and y in another.
 		// The report holds both in every decode.
 		"inline map": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Rest map[string]int `yaml:",inline"`
 				A    bool           `yaml:"a"`
 				B    bool           `yaml:"b"`
@@ -811,7 +808,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// The decoder names a value by the place its anchor defines it,
 		// so a value several aliases read is one problem.
 		"value several aliases read": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				A int `yaml:"a"`
 				B int `yaml:"b"`
 				C int `yaml:"c"`
@@ -827,7 +824,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// The error of a parse has no token, so it takes the path of the
 		// value that reads it, and each alias reads the duration anew.
 		"duration several aliases read": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				A any           `yaml:"a"`
 				B time.Duration `yaml:"b"`
 				C time.Duration `yaml:"c"`
@@ -844,7 +841,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// Two servers read the timeout of one anchor through a merge
 		// key, which is one value and one problem.
 		"values a merge key brings in": {
-			decode: decodeInto[problemConfig](),
+			decode: decodeAs[problemConfig](),
 			input: stringtest.LinesLF(
 				"base: &b {port: http, timeout: soon}",
 				"servers:",
@@ -866,7 +863,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// The decoder leaves out what the merge key brings in for a
 		// struct that ignores merge keys, so b is no problem.
 		"struct that ignores merge keys": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Defs *StrictBase   `yaml:"defs"`
 				V    strictAliased `yaml:"v"`
 			}](),
@@ -877,7 +874,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// decodes none of its fields, so b is no problem beside the
 		// refusal.
 		"struct whose merge key the decoder refuses": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				V strictInner `yaml:"v"`
 				N int         `yaml:"n"`
 			}](),
@@ -892,7 +889,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// does not read as a string, and takes no entry from one that a
 		// merge key brings in.
 		"mappings with a key that is no string": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				V strictInner `yaml:"v"`
 				W strictInner `yaml:"w"`
 				N int         `yaml:"n"`
@@ -908,7 +905,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// target of an alias that takes it, so the alias passes where
 		// the value alone does not decode.
 		"alias to a value the decoder assigns": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Defs any   `yaml:"defs"`
 				L    []int `yaml:"l"`
 				X    int   `yaml:"x"`
@@ -920,7 +917,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// The decoder rejects a tag that does not convert its value
 		// before it decodes any value, and the others still report.
 		"tag that does not convert its value": {
-			decode: decodeInto[problemConfig](),
+			decode: decodeAs[problemConfig](),
 			input:  "timeout: !!bool maybe\nreplicas: x\n",
 			want: stringtest.JoinLF(
 				"2 problems",
@@ -930,7 +927,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		},
 		// The paths read from the root of the document.
 		"scoped decode": {
-			decode: decodeInto[problemServer](),
+			decode: decodeAs[problemServer](),
 			input:  "base: &b {port: http}\nservers:\n  - {name: a, port: 1}\n  - {<<: *b, name: [b], timeout: soon}\n",
 			scope:  "$.servers[1]",
 			want: stringtest.JoinLF(
@@ -966,7 +963,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 					node = yamltest.At(t, node, paths.MustParse(tc.scope))
 				}
 
-				err := tc.decode(t.Context(), node, tc.opts...)
+				err := tc.decode(t.Context(), node)
 				require.EqualError(t, err, tc.want)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
@@ -1030,16 +1027,15 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 	registerPulled()
 
 	tcs := map[string]struct {
-		decode func(context.Context, *niceyaml.Node, ...niceyaml.DecodeOption) error
+		decode func(context.Context, *niceyaml.Node) error
 		is     error
 		input  string
 		want   string
-		opts   []niceyaml.DecodeOption
 	}{
 		// The unmarshaler reads pull as text, so the boolean field of
 		// the type is no problem, and its own error stays the report.
 		"unmarshaler whose fields do not mirror the document": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Image    problemImage `yaml:"image"`
 				Replicas int          `yaml:"replicas"`
 			}](),
@@ -1048,7 +1044,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			want:  "1:1: $.image: repo is required",
 		},
 		"unmarshaler error beside a value": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Image    problemImage `yaml:"image"`
 				Replicas int          `yaml:"replicas"`
 			}](),
@@ -1063,7 +1059,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The unmarshaler names a field of its value, and the report
 		// holds the error at that field beside the other problem.
 		"unmarshaler error at a path of its own beside a value": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Spans    []span `yaml:"spans"`
 				Replicas int    `yaml:"replicas"`
 			}](),
@@ -1076,7 +1072,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			),
 		},
 		"value beside an unmarshaler that passes": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Image    problemImage `yaml:"image"`
 				Replicas int          `yaml:"replicas"`
 			}](),
@@ -1086,12 +1082,11 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The option names the type its function decodes, so the error
 		// of the function binds at the value, beside the other problem.
 		"custom unmarshaler function": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Image    problemPulled `yaml:"image"`
 				Replicas int           `yaml:"replicas"`
-			}](),
+			}](custom),
 			input: "image: {pull: always}\nreplicas: x\n",
-			opts:  []niceyaml.DecodeOption{custom},
 			is:    errRepoRequired,
 			want: stringtest.JoinLF(
 				"2 problems",
@@ -1102,18 +1097,17 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The search leaves the image to the function, which takes pull
 		// as text, so the boolean field of the type is no problem.
 		"value beside a custom unmarshaler function that passes": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Image    problemPulled `yaml:"image"`
 				Replicas int           `yaml:"replicas"`
-			}](),
+			}](custom),
 			input: "replicas: x\nimage: {repo: r, pull: always}\n",
-			opts:  []niceyaml.DecodeOption{custom},
 			want:  "1:11: $.replicas: expected integer, got string",
 		},
 		// Nothing shows which type a registered function decodes, so the
 		// error of the function has no location and comes back alone.
 		"registered unmarshaler function": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Image    problemRegistered `yaml:"image"`
 				Replicas int               `yaml:"replicas"`
 			}](),
@@ -1124,7 +1118,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The struct the function decodes confirms each of its fields,
 		// so the function, which takes pull as text, has the last word.
 		"value beside a registered unmarshaler function that passes": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Image    problemRegistered `yaml:"image"`
 				Replicas int               `yaml:"replicas"`
 			}](),
@@ -1134,18 +1128,17 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The option turns the method on, so the search leaves the image
 		// to the method, which accepts it.
 		"json unmarshaler under its option": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Image    problemJSON `yaml:"image"`
 				Replicas int         `yaml:"replicas"`
-			}](),
+			}](niceyaml.WithJSONUnmarshalers(true)),
 			input: "replicas: x\nimage: {repo: [r], pull: always}\n",
-			opts:  []niceyaml.DecodeOption{niceyaml.WithJSONUnmarshalers(true)},
 			want:  "1:11: $.replicas: expected integer, got string",
 		},
 		// The decoder reads the fields of the type, so the search reads
 		// them too.
 		"json unmarshaler without its option": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Image    problemJSON `yaml:"image"`
 				Replicas int         `yaml:"replicas"`
 			}](),
@@ -1160,7 +1153,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The error of the unmarshaler keeps its wrapper and its
 		// sentinel beside the other problems.
 		"unmarshaler that wraps a sentinel": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Server   problemWrapped `yaml:"server"`
 				Replicas int            `yaml:"replicas"`
 				Limit    int            `yaml:"limit"`
@@ -1177,7 +1170,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// An enum reports every value its UnmarshalText method rejects,
 		// since the search hands the method each scalar again.
 		"values that decode themselves": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Tiers []tier `yaml:"tiers"`
 				N     int    `yaml:"n"`
 			}](),
@@ -1193,7 +1186,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The decoder rejects the port first, and the search finds the
 		// tier.
 		"text value beside a value of the wrong kind": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Port int  `yaml:"port"`
 				Tier tier `yaml:"tier"`
 			}](),
@@ -1208,7 +1201,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The decoder rejects the timeout first, the field its struct
 		// declares before the tier.
 		"text value beside a duration": {
-			decode: decodeInto[tierServer](),
+			decode: decodeAs[tierServer](),
 			input:  "tier: mid\ntimeout: soon\n",
 			is:     errUnknownTier,
 			want: stringtest.JoinLF(
@@ -1220,7 +1213,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The map holds pointers, and the search reads the value each
 		// points to.
 		"text values of a map": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Tiers map[string]*tier `yaml:"tiers"`
 			}](),
 			input: "tiers: {a: mid, b: low, c: top}\n",
@@ -1234,7 +1227,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// An alias reads the scalar into an element of its own, so the
 		// element reports at the alias, as a duration behind one does.
 		"alias to a text value": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Tiers []tier `yaml:"tiers"`
 			}](),
 			input: "tiers: [&t mid, *t, top]\n",
@@ -1249,7 +1242,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The document writes the tier once, so both servers that merge
 		// it report one problem.
 		"text value a merge key brings in": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Servers []problemTiered `yaml:"servers"`
 			}](),
 			input: "base: &b {tier: mid}\nservers:\n  - {<<: *b, name: a}\n  - {<<: *b, name: b, port: x}\n",
@@ -1263,7 +1256,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The search reads no key of a map, so the key reports in a
 		// later decode.
 		"text keys of a map": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				N     int          `yaml:"n"`
 				Tiers map[tier]int `yaml:"tiers"`
 			}](),
@@ -1273,7 +1266,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The error of the method points at a place of its own, so the
 		// search does not put it at the value.
 		"text error that names a place": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				N      int           `yaml:"n"`
 				Placed problemPlaced `yaml:"placed"`
 			}](),
@@ -1283,7 +1276,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The decoder refuses a mapping or a sequence for a text type
 		// with no call of its method, so the search reports each one.
 		"mappings and sequences in a text type": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Tiers []tier `yaml:"tiers"`
 				N     int    `yaml:"n"`
 			}](),
@@ -1300,7 +1293,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The decoder rejects the port first, and the search finds the
 		// sequence.
 		"sequence in a text type beside a value of the wrong kind": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Port int  `yaml:"port"`
 				Tier tier `yaml:"tier"`
 			}](),
@@ -1314,7 +1307,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The decoder rejects the sequence first, and the search finds
 		// it again, so the report holds it once.
 		"sequence in a text type the decoder rejects first": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Tier tier `yaml:"tier"`
 				Port int  `yaml:"port"`
 			}](),
@@ -1328,16 +1321,15 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The option hands the mapping to the UnmarshalJSON method of the
 		// type, so the search leaves it to that method.
 		"mapping in a text type with an UnmarshalJSON method under its option": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Either map[string]problemTextual `yaml:"either"`
 				Port   int                       `yaml:"port"`
-			}](),
+			}](niceyaml.WithJSONUnmarshalers(true)),
 			input: "either: {a: {b: 1}}\nport: x\n",
-			opts:  []niceyaml.DecodeOption{niceyaml.WithJSONUnmarshalers(true)},
 			want:  "2:7: $.port: expected integer, got string",
 		},
 		"mapping in a text type with an UnmarshalJSON method": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Either map[string]problemTextual `yaml:"either"`
 				Port   int                       `yaml:"port"`
 			}](),
@@ -1354,7 +1346,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input), tc.opts...)
+			err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input))
 			require.EqualError(t, err, tc.want)
 			require.ErrorIs(t, err, niceyaml.ErrDecode)
 			requireInvalid(t, err, max(strings.Count(tc.want, "\n"), 1))
@@ -1382,16 +1374,15 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		decode func(context.Context, *niceyaml.Node, ...niceyaml.DecodeOption) error
+		decode func(context.Context, *niceyaml.Node) error
 		input  string
 		scope  string
 		want   string
-		opts   []niceyaml.DecodeOption
 	}{
 		// An alias reads the anchor of its own document, so the port of
 		// the reference document is no part of the report.
 		"anchor name the reference document defines too": {
-			decode: decodeInto[problemConfig](),
+			decode: decodeAs[problemConfig](),
 			input:  "base: &b {port: bad}\nservers:\n  - *b\n  - {<<: *b, name: [a]}\nreplicas: x\n",
 			want: stringtest.JoinLF(
 				"3 problems",
@@ -1404,9 +1395,8 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		// so the search reads nothing behind an alias to one. The port the
 		// merge key brings in reports in a later decode.
 		"mapping that merges a reference document": {
-			decode: decodeInto[problemConfig](),
+			decode: decodeAs[problemConfig](strict),
 			input:  "servers:\n  - {<<: *defaults, name: [a], prt: 1}\n  - {port: y, nme: 2}\nreplicas: x\nrplicas: 2\n",
-			opts:   []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				"6 problems",
 				"2:21: $.servers[0].name: expected string, got sequence",
@@ -1421,7 +1411,7 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		// That rejection binds at the alias, and the others report beside
 		// it.
 		"rejection inside a reference document": {
-			decode: decodeInto[timeoutFirst](),
+			decode: decodeAs[timeoutFirst](),
 			input:  "replicas: x\ntimeout: *limit\nservers:\n  - {port: y}\n",
 			want: stringtest.JoinLF(
 				"3 problems",
@@ -1433,7 +1423,7 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		// The decoder rejects the port first, and the search reads nothing
 		// behind the alias, so the timeout reports in a later decode.
 		"value of a reference document beside a rejection": {
-			decode: decodeInto[problemConfig](),
+			decode: decodeAs[problemConfig](),
 			input:  "replicas: x\ntimeout: *limit\nservers:\n  - {port: y}\n",
 			want: stringtest.JoinLF(
 				"2 problems",
@@ -1445,12 +1435,12 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		// of them led to the rejection. It binds at no position, so it
 		// comes back alone.
 		"rejection with no position": {
-			decode: decodeInto[problemConfig](),
+			decode: decodeAs[problemConfig](),
 			input:  "replicas: x\ntimeout: *limit\nservers:\n  - *defaults\n  - {port: y}\n",
 			want:   "expected integer, got string",
 		},
 		"scoped decode": {
-			decode: decodeInto[problemServer](),
+			decode: decodeAs[problemServer](),
 			input:  "base: &b {port: bad}\nservers:\n  - {name: a}\n  - {<<: *b, name: [b], timeout: *limit}\n",
 			scope:  "$.servers[1]",
 			want: stringtest.JoinLF(
@@ -1472,7 +1462,7 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 					node = yamltest.At(t, node, paths.MustParse(tc.scope))
 				}
 
-				err := tc.decode(t.Context(), node, tc.opts...)
+				err := tc.decode(t.Context(), node)
 				require.EqualError(t, err, tc.want)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 				requireInvalid(t, err, max(strings.Count(tc.want, "\n"), 1))
@@ -1509,11 +1499,10 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 	// The unmarshaler takes each name once. A second call for a name it
 	// has seen would report a duplicate.
 	stateful := map[string]struct {
-		decode func(context.Context, *niceyaml.Node, ...niceyaml.DecodeOption) error
-		opts   []niceyaml.DecodeOption
+		decode func(context.Context, *niceyaml.Node) error
 	}{
 		"unmarshaler with state": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Names    []problemUnique `yaml:"names"`
 				Timeout  int             `yaml:"timeout"`
 				Replicas int             `yaml:"replicas"`
@@ -1523,7 +1512,7 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 		// never its UnmarshalText method, so the search hands the type no
 		// scalar again.
 		"unmarshaler with state and an UnmarshalText method": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Names    []problemUniqueText `yaml:"names"`
 				Timeout  int                 `yaml:"timeout"`
 				Replicas int                 `yaml:"replicas"`
@@ -1533,12 +1522,11 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 		// method of the type, so the search hands the type no scalar
 		// again.
 		"custom unmarshaler function with state": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Names    []tier `yaml:"names"`
 				Timeout  int    `yaml:"timeout"`
 				Replicas int    `yaml:"replicas"`
-			}](),
-			opts: []niceyaml.DecodeOption{niceyaml.WithCustomUnmarshaler(uniqueTier)},
+			}](niceyaml.WithCustomUnmarshaler(uniqueTier)),
 		},
 	}
 
@@ -1549,11 +1537,7 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 			calls := &problemCalls{seen: map[string]bool{}}
 			ctx := context.WithValue(t.Context(), callsKey{}, calls)
 
-			err := tc.decode(
-				ctx,
-				yamltest.FirstDocument(t, "names: [a, b, c]\ntimeout: soon\nreplicas: x\n"),
-				tc.opts...,
-			)
+			err := tc.decode(ctx, yamltest.FirstDocument(t, "names: [a, b, c]\ntimeout: soon\nreplicas: x\n"))
 			require.EqualError(t, err, stringtest.JoinLF(
 				"2 problems",
 				"2:10: $.timeout: expected integer, got string",

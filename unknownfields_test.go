@@ -105,16 +105,6 @@ type strictAliased struct {
 	B  int         `yaml:"b"`
 }
 
-// decodeInto returns a decode of a node into a new T, for a table of
-// decodes into different types.
-func decodeInto[T any]() func(context.Context, *niceyaml.Node, ...niceyaml.DecodeOption) error {
-	return func(ctx context.Context, n *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
-		var v T
-
-		return n.DecodeInto(ctx, &v, opts...)
-	}
-}
-
 // decodeAs returns a decode of a node as a T with opts that returns the
 // error alone, for a table of decodes as different types.
 func decodeAs[T any](opts ...niceyaml.DecodeOption) func(context.Context, *niceyaml.Node) error {
@@ -146,21 +136,19 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 	registerStrict()
 
 	tcs := map[string]struct {
-		decode     func(context.Context, *niceyaml.Node, ...niceyaml.DecodeOption) error
+		decode     func(context.Context, *niceyaml.Node) error
 		input      string
 		scope      string
 		want       string
 		sourceOpts []niceyaml.SourceOption
-		opts       []niceyaml.DecodeOption
 	}{
 		// The decoder reports one of the three, and not always the same
 		// one. The rows come in the order of the source.
 		"several in one mapping": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Name string `yaml:"name"`
-			}](),
+			}](strict),
 			input: "baz: 3\nname: x\nfoo: 1\nbar: 2\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`1:1: $.baz~: unknown field "baz"`,
 				`3:1: $.foo~: unknown field "foo"`,
@@ -168,13 +156,12 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			),
 		},
 		"several levels": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Name    string        `yaml:"name"`
 				One     strictInner   `yaml:"one"`
 				Servers []strictInner `yaml:"servers"`
-			}](),
+			}](strict),
 			input: "top: 1\none:\n  a: 1\n  x: 2\nservers:\n  - b: 1\n    y: 2\n  - z: 3\nname: n\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`1:1: $.top~: unknown field "top"`,
 				`4:3: $.one.x~: unknown field "x"`,
@@ -185,13 +172,12 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		// The fields of an inline struct are fields of the struct that
 		// holds it, however deep the inline structs nest.
 		"inline fields": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				In           *strictInner `yaml:",inline"`
 				Name         string       `yaml:"name"`
 				StrictNested `yaml:",inline"`
-			}](),
+			}](strict),
 			input: "name: x\nc: 1\nd: 2\na: 3\nzzz: 4\nyyy: 5\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`5:1: $.zzz~: unknown field "zzz"`,
 				`6:1: $.yyy~: unknown field "yyy"`,
@@ -201,15 +187,14 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		// lowercased name, and no other spelling. A field the decoder
 		// skips reads no key.
 		"field names": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Tagged   string `json:"nm"`
 				Upper    string
 				Dashed   string `yaml:"-"`
 				hidden   string
 				Embedded strictInner
-			}](),
+			}](strict),
 			input: "nm: a\nupper: b\nUpper: c\ntagged: d\ndashed: e\nhidden: f\nembedded: {a: 1}\nEmbedded: {a: 1}\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`3:1: $.Upper~: unknown field "Upper"`,
 				`4:1: $.tagged~: unknown field "tagged"`,
@@ -219,13 +204,12 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			),
 		},
 		"map, pointer, and array": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				M map[string]strictInner `yaml:"m"`
 				P *strictInner           `yaml:"p"`
 				L [2]strictInner         `yaml:"l"`
-			}](),
+			}](strict),
 			input: "m:\n  k:\n    x: 1\n  j:\n    y: 1\np:\n  z: 1\nl:\n  - w: 1\n  - a: 1\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`3:5: $.m.k.x~: unknown field "x"`,
 				`5:5: $.m.j.y~: unknown field "y"`,
@@ -236,24 +220,22 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		// Two elements merge one mapping, and its key reports once, at
 		// the place the anchor defines it.
 		"merge source read twice": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Defs    any           `yaml:"defs"`
 				Servers []strictInner `yaml:"servers"`
-			}](),
+			}](strict),
 			input: "defs: &d\n  zzz: 1\n  a: 1\nservers:\n  - <<: *d\n  - <<: *d\n    yyy: 2\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`2:3: $.defs.zzz~: unknown field "zzz"`,
 				`7:5: $.servers[1].yyy~: unknown field "yyy"`,
 			),
 		},
 		"value an alias reads twice": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				A strictInner `yaml:"a"`
 				B strictInner `yaml:"b"`
-			}](),
+			}](strict),
 			input: "a: &v\n  zzz: 1\n  yyy: 2\nb: *v\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`2:3: $.a.zzz~: unknown field "zzz"`,
 				`3:3: $.a.yyy~: unknown field "yyy"`,
@@ -262,14 +244,13 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		// The decoder allows the prefix, so the keys under it stay out
 		// of the report though no field has their names.
 		"prefix an option allows": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Name string `yaml:"name"`
-			}](),
-			input: "name: x\nx-foo: 1\nzzz: 2\nx-bar: 3\nyyy: 4\n",
-			opts: []niceyaml.DecodeOption{
+			}](
 				strict,
 				niceyaml.WithAllowedFieldPrefixes("x-"),
-			},
+			),
+			input: "name: x\nx-foo: 1\nzzz: 2\nx-bar: 3\nyyy: 4\n",
 			want: stringtest.JoinLF(
 				`3:1: $.zzz~: unknown field "zzz"`,
 				`5:1: $.yyy~: unknown field "yyy"`,
@@ -278,11 +259,10 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		// The unmarshaler of the type hands its fields to the decoder,
 		// which checks them, at the struct and below it.
 		"type that decodes itself": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				S strictSelf `yaml:"s"`
-			}](),
+			}](strict),
 			input: "s:\n  x: 1\n  zzz: 2\n  yyy: 3\n  n:\n    - a: 1\n      www: 2\n    - vvv: 3\nqqq: 1\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`3:3: $.s.zzz~: unknown field "zzz"`,
 				`4:3: $.s.yyy~: unknown field "yyy"`,
@@ -294,47 +274,43 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		// The option names the type its function decodes, so the function
 		// decides, at the struct and below it.
 		"type a custom unmarshaler decodes": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				S strictOption `yaml:"s"`
-			}](),
-			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
-			opts: []niceyaml.DecodeOption{
+			}](
 				strict,
 				niceyaml.WithCustomUnmarshaler(
 					func(context.Context, *strictOption, func(any) error) error { return nil },
 				),
-			},
-			want: `7:1: $.qqq~: unknown field "qqq"`,
+			),
+			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
+			want:  `7:1: $.qqq~: unknown field "qqq"`,
 		},
 		// Nothing shows which type a registered function decodes. The
 		// function still decides the keys of its own struct, and the
 		// search reports a key below it that the function accepts.
 		"type a registered function decodes": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				S strictRegistered `yaml:"s"`
-			}](),
+			}](strict),
 			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`6:5: $.s.n.www~: unknown field "www"`,
 				`7:1: $.qqq~: unknown field "qqq"`,
 			),
 		},
 		"type with an UnmarshalJSON method under its option": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				S strictJSON `yaml:"s"`
-			}](),
+			}](strict, niceyaml.WithJSONUnmarshalers(true)),
 			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
-			opts:  []niceyaml.DecodeOption{strict, niceyaml.WithJSONUnmarshalers(true)},
 			want:  `7:1: $.qqq~: unknown field "qqq"`,
 		},
 		// The decoder reads the fields of the type, and checks them.
 		"type with an UnmarshalJSON method without its option": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				S strictJSON `yaml:"s"`
-			}](),
+			}](strict),
 			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`3:3: $.s.zzz~: unknown field "zzz"`,
 				`6:5: $.s.n.www~: unknown field "www"`,
@@ -342,9 +318,8 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			),
 		},
 		"decode into a type that decodes itself": {
-			decode: decodeInto[strictSelf](),
+			decode: decodeAs[strictSelf](strict),
 			input:  "zzz: 2\nx: 1\nn:\n  - www: 2\n",
-			opts:   []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`1:1: $.zzz~: unknown field "zzz"`,
 				`4:5: $.n[0].www~: unknown field "www"`,
@@ -353,11 +328,10 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		// The unmarshaler of the type parses the text with a decoder of
 		// its own, which skips unknown fields, so none inside it reports.
 		"type that parses its own text": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				S strictText `yaml:"s"`
-			}](),
+			}](strict),
 			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    www: 2\nqqq: 1\nppp: 2\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`6:1: $.qqq~: unknown field "qqq"`,
 				`7:1: $.ppp~: unknown field "ppp"`,
@@ -366,26 +340,24 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		// The decoder leaves out the entries the merge key brings in, so
 		// neither www nor the field under in reports.
 		"struct that ignores merge keys": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Defs *StrictBase   `yaml:"defs"`
 				V    strictAliased `yaml:"v"`
-			}](),
+			}](strict),
 			input: "v:\n  <<: {in: {qqq: 1}, www: 1}\n  b: 1\n  yyy: 2\n  zzz: 3\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`4:3: $.v.yyy~: unknown field "yyy"`,
 				`5:3: $.v.zzz~: unknown field "zzz"`,
 			),
 		},
 		"struct that reads merge keys": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				V struct {
 					In strictInner `yaml:"in"`
 					B  int         `yaml:"b"`
 				} `yaml:"v"`
-			}](),
+			}](strict),
 			input: "v:\n  <<: {in: {qqq: 1}, www: 1}\n  b: 1\n  yyy: 2\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`2:13: $.v.<<.in.qqq~: unknown field "qqq"`,
 				`2:22: $.v.<<.www~: unknown field "www"`,
@@ -393,11 +365,10 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			),
 		},
 		"interface field": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				S any `yaml:"s"`
-			}](),
+			}](strict),
 			input: "s:\n  zzz: 2\nqqq: 1\nppp: 2\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`3:1: $.qqq~: unknown field "qqq"`,
 				`4:1: $.ppp~: unknown field "ppp"`,
@@ -406,12 +377,11 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		// The decoder decodes no field from a mapping with a key it does
 		// not read as a string, and rejects none of its keys.
 		"mapping with a key that is no string": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				A strictInner `yaml:"a"`
 				B strictInner `yaml:"b"`
-			}](),
+			}](strict),
 			input: "a:\n  zzz: 1\n  yyy: 1\nb:\n  1: x\n  www: 2\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`2:3: $.a.zzz~: unknown field "zzz"`,
 				`3:3: $.a.yyy~: unknown field "yyy"`,
@@ -421,14 +391,13 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		// brings in either, so it rejects the keys of the struct itself
 		// and neither www nor the key under in.
 		"merged mapping with a key that is no string": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				V struct {
 					In strictInner `yaml:"in"`
 					B  int         `yaml:"b"`
 				} `yaml:"v"`
-			}](),
+			}](strict),
 			input: "v:\n  <<: {1: x, in: {qqq: 1}, www: 1}\n  b: 1\n  yyy: 2\n  zzz: 3\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`4:3: $.v.yyy~: unknown field "yyy"`,
 				`5:3: $.v.zzz~: unknown field "zzz"`,
@@ -436,10 +405,9 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		},
 		// The paths read from the root of the document.
 		"scoped decode": {
-			decode: decodeInto[strictInner](),
+			decode: decodeAs[strictInner](strict),
 			input:  "servers:\n  - a: 1\n    zzz: 2\n    yyy: 3\n",
 			scope:  "$.servers[0]",
-			opts:   []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`3:5: $.servers[0].zzz~: unknown field "zzz"`,
 				`4:5: $.servers[0].yyy~: unknown field "yyy"`,
@@ -448,23 +416,21 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		// The later of two entries with one key is the one the decoder
 		// reads.
 		"duplicate keys": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Name string `yaml:"name"`
-			}](),
+			}](strict),
 			input:      "zzz: 1\nzzz: 2\nyyy: 3\n",
 			sourceOpts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
-			opts:       []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`2:1: $.zzz~: unknown field "zzz"`,
 				`3:1: $.yyy~: unknown field "yyy"`,
 			),
 		},
 		"quoted, tagged, and explicit keys": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Name string `yaml:"name"`
-			}](),
+			}](strict),
 			input: "\"q q\": 1\n!!str zzz: 2\n? yyy\n: 3\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`1:1: $.'q q'~: unknown field "q q"`,
 				`2:7: $.zzz~: unknown field "zzz"`,
@@ -474,20 +440,19 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		// The document reads a second parse, whose tokens the decoder
 		// reports.
 		"document that reuses an anchor name": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				X int         `yaml:"x"`
 				Y int         `yaml:"y"`
 				A strictInner `yaml:"a"`
-			}](),
+			}](strict),
 			input: "x: &n 1\ny: &n 2\na:\n  zzz: *n\n  yyy: 1\n",
-			opts:  []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				`4:3: $.a.zzz~: unknown field "zzz"`,
 				`5:3: $.a.yyy~: unknown field "yyy"`,
 			),
 		},
 		"unknown fields allowed": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Name string `yaml:"name"`
 			}](),
 			input: "foo: 1\nbar: 2\n",
@@ -509,7 +474,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 					node = yamltest.At(t, node, paths.MustParse(tc.scope))
 				}
 
-				err := tc.decode(t.Context(), node, tc.opts...)
+				err := tc.decode(t.Context(), node)
 				if tc.want == "" {
 					require.NoError(t, err)
 

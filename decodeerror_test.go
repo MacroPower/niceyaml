@@ -636,54 +636,54 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 	merge := "defs: &d\n  a: 1\nv:\n  <<: *d\n  b: 1\n"
 
 	tcs := map[string]struct {
-		decode func(context.Context, *niceyaml.Node, ...niceyaml.DecodeOption) error
+		decode func(context.Context, *niceyaml.Node) error
 		input  string
 		want   string
 	}{
 		"channel": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				V chan int `yaml:"v"`
 			}](),
 			input: "v: 5\n",
 			want:  "1:4: $.v: expected no value, got integer",
 		},
 		"pointer to a channel": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				V *chan int `yaml:"v"`
 			}](),
 			input: "v: {a: 1}\n",
 			want:  "1:1: $.v: expected no value, got mapping",
 		},
 		"function": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				V func() `yaml:"v"`
 			}](),
 			input: "v: abc\n",
 			want:  "1:4: $.v: expected no value, got string",
 		},
 		"complex number": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				V complex128 `yaml:"v"`
 			}](),
 			input: "v: 5\n",
 			want:  "1:4: $.v: expected no value, got integer",
 		},
 		"element of an array of complex numbers": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				V [2]complex64 `yaml:"v"`
 			}](),
 			input: "v: [1.5]\n",
 			want:  "1:5: $.v[0]: expected no value, got float",
 		},
 		"value of a map of functions": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				V map[string]func() `yaml:"v"`
 			}](),
 			input: "v: {a: true}\n",
 			want:  "1:8: $.v.a: expected no value, got boolean",
 		},
 		"unsafe pointer": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				V unsafe.Pointer `yaml:"v"`
 			}](),
 			input: "v: 5\n",
@@ -691,14 +691,14 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 		},
 		// The decoder fills one pointer around a value and no more.
 		"pointer to a pointer": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				V **int `yaml:"v"`
 			}](),
 			input: "v: 5\n",
 			want:  "1:4: $.v: expected integer, got integer of another type",
 		},
 		"anchor read into an interface": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Defs any     `yaml:"defs"`
 				V    aliased `yaml:"v"`
 			}](),
@@ -706,7 +706,7 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 			want:  "1:1: $.defs: expected mapping, got value of another type",
 		},
 		"anchor read into another struct": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Defs *other  `yaml:"defs"`
 				V    aliased `yaml:"v"`
 			}](),
@@ -714,7 +714,7 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 			want:  "1:1: $.defs: expected mapping, got mapping of another type",
 		},
 		"anchor read into a map": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				Defs map[string]int `yaml:"defs"`
 				V    aliased        `yaml:"v"`
 			}](),
@@ -722,7 +722,7 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 			want:  "1:1: $.defs: expected mapping, got mapping of another type",
 		},
 		"anchor read into no field": {
-			decode: decodeInto[struct {
+			decode: decodeAs[struct {
 				V aliased `yaml:"v"`
 			}](),
 			input: merge,
