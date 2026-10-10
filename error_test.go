@@ -1096,6 +1096,7 @@ func TestSourceError_Format_ListLimit(t *testing.T) {
 		fmt.Fprintf(&input, "k%02d: 0\n", i)
 	}
 
+	source := niceyaml.NewSourceFromString(input.String(), niceyaml.WithName("f.yaml"))
 	other := niceyaml.NewSourceFromString("port: 0\n", niceyaml.WithName("other.yaml"))
 
 	key := func(i int) string { return fmt.Sprintf("k%02d", i) }
@@ -1115,6 +1116,19 @@ func TestSourceError_Format_ListLimit(t *testing.T) {
 
 		return errs
 	}
+
+	// Bind returns each of errs bound to the source.
+	bind := func(errs ...error) []error {
+		bound := make([]error, 0, len(errs))
+		for _, err := range errs {
+			bound = append(bound, yamltest.Bind(t, source, err))
+		}
+
+		return bound
+	}
+
+	// A binding that the first problem and the last share as a detail.
+	declared := yamltest.Bind(t, source, at(15, "declared here"))
 
 	// Rows returns the row of the tree for each of those errors, behind
 	// prefix.
@@ -1155,7 +1169,7 @@ func TestSourceError_Format_ListLimit(t *testing.T) {
 	firstLines := lines(0, limit+2, firstMarks)
 
 	tcs := map[string]struct {
-		err func(t *testing.T, source *niceyaml.Source) error
+		err error
 		// The rows of the tree the %+v verb and LogValue draw.
 		tree []string
 		// The rows of the excerpts the %+v verb draws below the tree.
@@ -1164,39 +1178,31 @@ func TestSourceError_Format_ListLimit(t *testing.T) {
 		problems int
 	}{
 		"problems at the limit are whole": {
-			err: func(*testing.T, *niceyaml.Source) error {
-				return niceyaml.NewSummary("summary", located(0, limit)...)
-			},
+			err:      niceyaml.NewSummary("summary", located(0, limit)...),
 			tree:     append([]string{"f.yaml: summary"}, branches(rows("", 0, limit)...)...),
 			excerpt:  firstLines,
 			problems: limit,
 		},
 		"problems past the limit count as more": {
-			err: func(*testing.T, *niceyaml.Source) error {
-				return niceyaml.NewSummary("summary", located(0, limit+2)...)
-			},
+			err:      niceyaml.NewSummary("summary", located(0, limit+2)...),
 			tree:     append([]string{"f.yaml: summary"}, branches(append(rows("", 0, limit), "and 2 more")...)...),
 			excerpt:  firstLines,
 			problems: limit + 2,
 		},
 		"join past the limit counts the rest": {
-			err: func(*testing.T, *niceyaml.Source) error {
-				return errors.Join(located(0, limit+1)...)
-			},
+			err:      errors.Join(located(0, limit+1)...),
 			tree:     branches(append(rows("f.yaml:", 0, limit), "and 1 more")...),
 			excerpt:  firstLines,
 			problems: limit + 1,
 		},
 		"details stay with their problem and count as none": {
-			err: func(*testing.T, *niceyaml.Source) error {
-				first := at(0, "bad k00", niceyaml.WithDetails(
+			err: niceyaml.NewSummary("summary", append([]error{
+				at(0, "bad k00", niceyaml.WithDetails(
 					errors.New("reason one"),
 					errors.New("reason two"),
 					at(15, "declared here"),
-				))
-
-				return niceyaml.NewSummary("summary", append([]error{first}, located(1, limit+1)...)...)
-			},
+				)),
+			}, located(1, limit+1)...)...),
 			tree: slices.Concat(
 				[]string{
 					"f.yaml: summary",
@@ -1215,12 +1221,10 @@ func TestSourceError_Format_ListLimit(t *testing.T) {
 			problems: limit + 2,
 		},
 		"lists below a list share the limit": {
-			err: func(*testing.T, *niceyaml.Source) error {
-				return niceyaml.NewSummary("summary",
-					niceyaml.NewSummary("first", located(0, limit-2)...),
-					niceyaml.NewSummary("second", located(limit-2, limit)...),
-				)
-			},
+			err: niceyaml.NewSummary("summary",
+				niceyaml.NewSummary("first", located(0, limit-2)...),
+				niceyaml.NewSummary("second", located(limit-2, limit)...),
+			),
 			tree: slices.Concat(
 				[]string{"f.yaml: summary", "|-- first"},
 				indent("|   ", branches(rows("", 0, limit-2)...)),
@@ -1232,12 +1236,10 @@ func TestSourceError_Format_ListLimit(t *testing.T) {
 			problems: 2*limit - 2,
 		},
 		"heading with no problem left goes": {
-			err: func(*testing.T, *niceyaml.Source) error {
-				return niceyaml.NewSummary("summary",
-					niceyaml.NewSummary("first", located(0, limit)...),
-					niceyaml.NewSummary("second", located(limit, 3)...),
-				)
-			},
+			err: niceyaml.NewSummary("summary",
+				niceyaml.NewSummary("first", located(0, limit)...),
+				niceyaml.NewSummary("second", located(limit, 3)...),
+			),
 			tree: slices.Concat(
 				[]string{"f.yaml: summary", "|-- first"},
 				indent("|   ", branches(rows("", 0, limit)...)),
@@ -1247,34 +1249,19 @@ func TestSourceError_Format_ListLimit(t *testing.T) {
 			problems: limit + 3,
 		},
 		"problem left out in another source shows no excerpt of it": {
-			err: func(t *testing.T, source *niceyaml.Source) error {
-				t.Helper()
-
-				bound := make([]error, 0, limit+1)
-				for _, err := range located(0, limit) {
-					bound = append(bound, yamltest.Bind(t, source, err))
-				}
-
-				port := niceyaml.NewError("bad port", niceyaml.AtPath(paths.Current().Child("port")))
-
-				return errors.Join(append(bound, yamltest.Bind(t, other, port))...)
-			},
+			err: errors.Join(append(bind(located(0, limit)...), yamltest.Bind(t, other,
+				niceyaml.NewError("bad port", niceyaml.AtPath(paths.Current().Child("port"))),
+			))...),
 			tree:     branches(append(rows("f.yaml:", 0, limit), "and 1 more")...),
 			excerpt:  firstLines,
 			problems: limit + 1,
 		},
 		"binding a shown problem shares with one left out stays marked": {
-			err: func(t *testing.T, source *niceyaml.Source) error {
-				t.Helper()
-
-				declared := yamltest.Bind(t, source, at(15, "declared here"))
-				first := at(0, "bad k00", niceyaml.WithDetails(declared))
-				last := at(limit, "bad k10", niceyaml.WithDetails(declared))
-
-				problems := slices.Concat([]error{first}, located(1, limit-1), []error{last})
-
-				return niceyaml.NewSummary("summary", problems...)
-			},
+			err: niceyaml.NewSummary("summary", slices.Concat(
+				[]error{at(0, "bad k00", niceyaml.WithDetails(declared))},
+				located(1, limit-1),
+				[]error{at(limit, "bad k10", niceyaml.WithDetails(declared))},
+			)...),
 			tree: slices.Concat(
 				[]string{
 					"f.yaml: summary",
@@ -1296,8 +1283,7 @@ func TestSourceError_Format_ListLimit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString(input.String(), niceyaml.WithName("f.yaml"))
-			err := yamltest.Bind(t, source, tc.err(t, source))
+			err := yamltest.Bind(t, source, tc.err)
 
 			tree := stringtest.JoinLF(tc.tree...)
 
