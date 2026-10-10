@@ -915,15 +915,8 @@ func TestResolver_ConcurrentUse(t *testing.T) {
 	// Several goroutines look up keys in the same mappings through one
 	// Resolver, as the Nodes of one document do, and each finds the node
 	// a Resolver made for that path alone finds.
-	var sb strings.Builder
-
-	sb.WriteString("base: &base {shared: 1}\n")
-
-	for i := range 50 {
-		fmt.Fprintf(&sb, "k%d: {<<: *base, own: %d}\n", i, i)
-	}
-
-	doc := yamltest.FirstDocument(t, sb.String()).DocumentAST()
+	input := "base: &base {shared: 1}\n" + yamltest.GenerateLines(50, "k%[1]d: {<<: *base, own: %[1]d}")
+	doc := yamltest.FirstDocument(t, input).DocumentAST()
 
 	want := map[string]ast.Node{}
 

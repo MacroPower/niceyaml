@@ -3603,17 +3603,8 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 	// The document of inlineChain holds no aliases. Its mapping m holds n
 	// keys and then a merge key whose value nests n merge keys inline.
 	inlineChain := func(n int) string {
-		var sb strings.Builder
-
-		sb.WriteString("m:\n")
-
-		for i := range n {
-			fmt.Fprintf(&sb, "  k%d: %d\n", i, i)
-		}
-
-		sb.WriteString("  <<: " + strings.Repeat("{<<: ", n) + "{z: 0}" + strings.Repeat("}", n) + "\n")
-
-		return sb.String()
+		return "m:\n" + yamltest.GenerateLines(n, "  k%[1]d: %[1]d") +
+			"  <<: " + strings.Repeat("{<<: ", n) + "{z: 0}" + strings.Repeat("}", n) + "\n"
 	}
 
 	// The document of aliasChain adds to mergeChain the key l, which lists
