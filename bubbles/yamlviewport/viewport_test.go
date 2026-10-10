@@ -361,7 +361,9 @@ func TestViewport_SearchHighlightsMatchAcrossLines(t *testing.T) {
 	}
 }
 
-// testPrinter returns a printer without styles or line numbers for predictable golden output.
+// testPrinter returns a printer without styles, line numbers, or a
+// container frame, for predictable golden output. Its gutter marks the
+// lines of a diff.
 func testPrinter() *printer.Printer {
 	return printer.New(
 		printer.WithStyles(style.Styles{}),
@@ -370,41 +372,29 @@ func testPrinter() *printer.Printer {
 	)
 }
 
-// testPrinterWithLineNumbers returns a printer with line numbers (DefaultGutter).
+// testPrinterWithLineNumbers returns [testPrinter] with the default gutter,
+// which numbers the lines.
 func testPrinterWithLineNumbers() *printer.Printer {
-	return printer.New(
-		printer.WithStyles(style.Styles{}),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
+	return testPrinter().With(printer.WithGutter(printer.DefaultGutter))
 }
 
-// testPrinterWithColors returns a printer with default syntax highlighting.
+// testPrinterWithColors returns [testPrinterWithLineNumbers] with the
+// default syntax highlighting.
 func testPrinterWithColors() *printer.Printer {
-	return printer.New(
-		printer.WithStyles(theme.Charm.Styles()),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
+	return testPrinterWithLineNumbers().With(printer.WithStyles(theme.Charm.Styles()))
 }
 
-// testPrinterWithSearch returns a printer with XML-style search highlights for testing.
+// testPrinterWithSearch returns [testPrinter] with styles that wrap the
+// search highlights in XML tags.
 func testPrinterWithSearch() *printer.Printer {
-	return printer.New(
-		printer.WithStyles(yamltest.NewXMLStyles(
-			yamltest.XMLStyleInclude(kind.GenericHighlightDim, kind.GenericHighlight),
-		)),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.DiffGutter),
-	)
+	return testPrinter().With(printer.WithStyles(yamltest.NewXMLStyles(
+		yamltest.XMLStyleInclude(kind.GenericHighlightDim, kind.GenericHighlight),
+	)))
 }
 
-// barePrinter returns a printer with the given styles, no gutter, and no
-// container frame.
+// barePrinter returns [testPrinter] with the given styles and no gutter.
 func barePrinter(styles style.Styler) *printer.Printer {
-	return printer.New(
-		printer.WithStyles(styles),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.NoGutter),
-	)
+	return testPrinter().With(printer.WithStyles(styles), printer.WithGutter(printer.NoGutter))
 }
 
 // framedPrinter returns [testPrinter] with the given container style.
