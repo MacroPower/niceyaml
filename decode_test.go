@@ -5613,70 +5613,75 @@ func TestDocument_At(t *testing.T) {
 		}
 	})
 
-	t.Run("missing path returns ErrNotFound", func(t *testing.T) {
+	t.Run("returns the error of a path that selects no one node", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-
-		got, err := dd.At(paths.Current().Child("nonexistent"))
-		require.ErrorIs(t, err, paths.ErrNotFound)
-		require.NotErrorIs(t, err, paths.ErrAlias)
-		assert.Nil(t, got)
-	})
-
-	t.Run("document with no content returns ErrNotFound and ErrNoDocument", func(t *testing.T) {
-		t.Parallel()
-
-		for name, input := range map[string]string{
-			"empty document":     "---\n",
-			"file of whitespace": "\n",
-			"comments alone":     "# only a comment\n",
-		} {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				dd := yamltest.FirstDocument(t, input)
-
-				got, err := dd.At(paths.Current().Child("key"))
-				require.ErrorIs(t, err, paths.ErrNotFound)
-				require.ErrorIs(t, err, paths.ErrNoDocument)
-				assert.Contains(t, err.Error(), "$.key")
-				assert.Nil(t, got)
-				assert.Same(t, dd.Source(), yamltest.RequireSourceError(t, err).Source())
-			})
-		}
-	})
-
-	t.Run("alias without anchor returns ErrAlias", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "kind: *nope")
-
-		got, err := dd.At(paths.Current().Child("kind"))
-		require.ErrorIs(t, err, paths.ErrAlias)
-		require.NotErrorIs(t, err, paths.ErrNotFound)
-		assert.Contains(t, err.Error(), "*nope")
-		assert.Nil(t, got)
-	})
-
-	t.Run("wildcard path returns ErrWildcard", func(t *testing.T) {
-		t.Parallel()
+		jobs := stringtest.LinesLF("jobs:", "  build: 1")
 
 		tcs := map[string]struct {
 			input string
 			path  paths.Path
+			// The errors the result matches, and one it does not match.
+			is    []error
+			isNot error
+			// Text the message holds.
+			contains string
 		}{
+			"missing key": {
+				input:    input,
+				path:     paths.Current().Child("nonexistent"),
+				is:       []error{paths.ErrNotFound},
+				isNot:    paths.ErrAlias,
+				contains: "$.nonexistent",
+			},
+			"empty document": {
+				input:    "---\n",
+				path:     paths.Current().Child("key"),
+				is:       []error{paths.ErrNotFound, paths.ErrNoDocument},
+				isNot:    paths.ErrAlias,
+				contains: "$.key",
+			},
+			"file of whitespace": {
+				input:    "\n",
+				path:     paths.Current().Child("key"),
+				is:       []error{paths.ErrNotFound, paths.ErrNoDocument},
+				isNot:    paths.ErrAlias,
+				contains: "$.key",
+			},
+			"comments alone": {
+				input:    "# only a comment\n",
+				path:     paths.Current().Child("key"),
+				is:       []error{paths.ErrNotFound, paths.ErrNoDocument},
+				isNot:    paths.ErrAlias,
+				contains: "$.key",
+			},
+			"alias without anchor": {
+				input:    "kind: *nope",
+				path:     paths.Current().Child("kind"),
+				is:       []error{paths.ErrAlias},
+				isNot:    paths.ErrNotFound,
+				contains: "*nope",
+			},
 			"sequence wildcard": {
-				input: "tags: [a, b]",
-				path:  paths.Current().Child("tags").IndexAll(),
+				input:    "tags: [a, b]",
+				path:     paths.Current().Child("tags").IndexAll(),
+				is:       []error{paths.ErrWildcard},
+				isNot:    paths.ErrNotFound,
+				contains: "$.tags[*]",
 			},
 			"mapping wildcard": {
-				input: stringtest.LinesLF("jobs:", "  build: 1"),
-				path:  paths.Current().Child("jobs").ChildAll(),
+				input:    jobs,
+				path:     paths.Current().Child("jobs").ChildAll(),
+				is:       []error{paths.ErrWildcard},
+				isNot:    paths.ErrNotFound,
+				contains: "$.jobs.*",
 			},
 			"recursive wildcard": {
-				input: stringtest.LinesLF("jobs:", "  build: 1"),
-				path:  paths.Current().RecursiveAll(),
+				input:    jobs,
+				path:     paths.Current().RecursiveAll(),
+				is:       []error{paths.ErrWildcard},
+				isNot:    paths.ErrNotFound,
+				contains: "$..*",
 			},
 		}
 
@@ -5684,10 +5689,17 @@ func TestDocument_At(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				got, err := yamltest.FirstDocument(t, tc.input).At(tc.path)
-				require.ErrorIs(t, err, paths.ErrWildcard)
-				require.NotErrorIs(t, err, paths.ErrNotFound)
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				got, err := dd.At(tc.path)
+				for _, is := range tc.is {
+					require.ErrorIs(t, err, is)
+				}
+
+				require.NotErrorIs(t, err, tc.isNot)
+				assert.Contains(t, err.Error(), tc.contains)
 				assert.Nil(t, got)
+				assert.Same(t, dd.Source(), yamltest.RequireSourceError(t, err).Source())
 			})
 		}
 	})
