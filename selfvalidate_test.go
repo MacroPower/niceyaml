@@ -3039,6 +3039,18 @@ func TestNode_SelfValidate_Node(t *testing.T) {
 		    url: http://a
 	`)
 
+	// Scoped returns a function that scopes the document of the input to
+	// one of its keys.
+	scoped := func(key string) func(t *testing.T) *niceyaml.Node {
+		return func(t *testing.T) *niceyaml.Node {
+			t.Helper()
+
+			doc := yamltest.FirstDocument(t, input, niceyaml.WithName("app.yaml"))
+
+			return yamltest.At(t, doc, paths.Current().Child(key))
+		}
+	}
+
 	tcs := map[string]struct {
 		node       func(t *testing.T) *niceyaml.Node
 		v          any
@@ -3046,24 +3058,12 @@ func TestNode_SelfValidate_Node(t *testing.T) {
 		err        string
 	}{
 		"a scoped Node puts its path in front": {
-			node: func(t *testing.T) *niceyaml.Node {
-				t.Helper()
-
-				doc := yamltest.FirstDocument(t, input, niceyaml.WithName("app.yaml"))
-
-				return yamltest.At(t, doc, paths.Current().Child("db"))
-			},
-			v:   &database{Host: "localhost"},
-			err: "app.yaml:1:1: $.db.password: password is required",
+			node: scoped("db"),
+			v:    &database{Host: "localhost"},
+			err:  "app.yaml:1:1: $.db.password: password is required",
 		},
 		"an entry added under a scoped Node binds at the key of its map": {
-			node: func(t *testing.T) *niceyaml.Node {
-				t.Helper()
-
-				doc := yamltest.FirstDocument(t, input, niceyaml.WithName("app.yaml"))
-
-				return yamltest.At(t, doc, paths.Current().Child("upstreams"))
-			},
+			node: scoped("upstreams"),
 			v: &map[string]upstream{
 				"a": {URL: "http://a"},
 				"c": {URL: "ftp://c"},
