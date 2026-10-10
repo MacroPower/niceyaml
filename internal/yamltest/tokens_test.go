@@ -418,48 +418,48 @@ func TestCompareTokens(t *testing.T) {
 		assert.Equal(t, "tokens equal", diff.String())
 	})
 
-	t.Run("different Type", func(t *testing.T) {
+	t.Run("one field differs", func(t *testing.T) {
 		t.Parallel()
 
-		want := yamltest.NewTokenBuilder().Type(token.StringType).Build()
-		got := yamltest.NewTokenBuilder().Type(token.IntegerType).Build()
+		tkb := yamltest.NewTokenBuilder()
 
-		diff := yamltest.CompareTokens(want, got)
-		assert.False(t, diff.Equal())
-		assert.Contains(t, diff.Fields, "Type")
-	})
+		// Each case differs in the field that names it.
+		tcs := map[string]struct {
+			want *token.Token
+			got  *token.Token
+		}{
+			"Type": {
+				want: tkb.Clone().Type(token.StringType).Build(),
+				got:  tkb.Clone().Type(token.IntegerType).Build(),
+			},
+			"Value": {
+				want: tkb.Clone().Value("a").Build(),
+				got:  tkb.Clone().Value("b").Build(),
+			},
+			"Origin": {
+				want: tkb.Clone().Origin("a\n").Build(),
+				got:  tkb.Clone().Origin("b\n").Build(),
+			},
+			"Error": {
+				want: tkb.Clone().Error("bad").Build(),
+				got:  tkb.Build(),
+			},
+			"Position.Line": {
+				want: tkb.Clone().PositionLine(1).Build(),
+				got:  tkb.Clone().PositionLine(2).Build(),
+			},
+		}
 
-	t.Run("different Value", func(t *testing.T) {
-		t.Parallel()
+		for field, tc := range tcs {
+			t.Run(field, func(t *testing.T) {
+				t.Parallel()
 
-		want := yamltest.NewTokenBuilder().Value("a").Build()
-		got := yamltest.NewTokenBuilder().Value("b").Build()
-
-		diff := yamltest.CompareTokens(want, got)
-		assert.False(t, diff.Equal())
-		assert.Contains(t, diff.Fields, "Value")
-	})
-
-	t.Run("different Origin", func(t *testing.T) {
-		t.Parallel()
-
-		want := yamltest.NewTokenBuilder().Origin("a\n").Build()
-		got := yamltest.NewTokenBuilder().Origin("b\n").Build()
-
-		diff := yamltest.CompareTokens(want, got)
-		assert.False(t, diff.Equal())
-		assert.Contains(t, diff.Fields, "Origin")
-	})
-
-	t.Run("different Position.Line", func(t *testing.T) {
-		t.Parallel()
-
-		want := yamltest.NewTokenBuilder().PositionLine(1).Build()
-		got := yamltest.NewTokenBuilder().PositionLine(2).Build()
-
-		diff := yamltest.CompareTokens(want, got)
-		assert.False(t, diff.Equal())
-		assert.Contains(t, diff.Fields, "Position.Line")
+				diff := yamltest.CompareTokens(tc.want, tc.got)
+				assert.False(t, diff.Equal())
+				assert.Equal(t, []string{field}, diff.Fields)
+				assert.Equal(t, []string{field}, yamltest.DiffTokenFields(tc.want, tc.got))
+			})
+		}
 	})
 
 	t.Run("String() includes details", func(t *testing.T) {
@@ -688,28 +688,19 @@ func TestDiffTokenFields(t *testing.T) {
 			PositionIndentLevel(2).
 			Build()
 
-		diffs := yamltest.DiffTokenFields(want, got)
-		assert.Contains(t, diffs, "Type")
-		assert.Contains(t, diffs, "Value")
-		assert.Contains(t, diffs, "Origin")
-		assert.Contains(t, diffs, "CharacterType")
-		assert.Contains(t, diffs, "Indicator")
-		assert.Contains(t, diffs, "Error")
-		assert.Contains(t, diffs, "Position.Line")
-		assert.Contains(t, diffs, "Position.Column")
-		assert.Contains(t, diffs, "Position.Offset")
-		assert.Contains(t, diffs, "Position.IndentNum")
-		assert.Contains(t, diffs, "Position.IndentLevel")
-	})
-
-	t.Run("error is the only difference", func(t *testing.T) {
-		t.Parallel()
-
-		want := yamltest.NewTokenBuilder().Error("bad").Build()
-		got := yamltest.NewTokenBuilder().Build()
-
-		assert.Equal(t, []string{"Error"}, yamltest.DiffTokenFields(want, got))
-		assert.False(t, yamltest.CompareTokens(want, got).Equal())
+		assert.ElementsMatch(t, []string{
+			"Type",
+			"Value",
+			"Origin",
+			"CharacterType",
+			"Indicator",
+			"Error",
+			"Position.Line",
+			"Position.Column",
+			"Position.Offset",
+			"Position.IndentNum",
+			"Position.IndentLevel",
+		}, yamltest.DiffTokenFields(want, got))
 	})
 }
 
