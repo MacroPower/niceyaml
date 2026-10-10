@@ -4128,24 +4128,6 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 	})
 }
 
-func TestSourceError_Range_ClampsToTheLines(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n", niceyaml.WithName("f.yaml"))
-
-	// A range that starts on a line of the source binds, and its end past
-	// the last line clamps to the end of that line, so the range reported
-	// names lines the source has.
-	err := niceyaml.NewError("wide", niceyaml.AtRange(position.NewRange(position.New(1, 0), position.New(99, 3))))
-
-	bound := errorBinding(t, yamltest.Bind(t, source, err))
-
-	rng, ok := bound.Range()
-	require.True(t, ok)
-	assert.Equal(t, position.NewRange(position.New(1, 0), position.New(2, 4)), rng)
-	assert.Equal(t, "f.yaml:2:1: wide", bound.Error())
-}
-
 func TestSourceError_Range_Inverted(t *testing.T) {
 	t.Parallel()
 
@@ -4477,36 +4459,90 @@ func TestSourceError_Range_Collection(t *testing.T) {
 	})
 }
 
-func TestSourceError_Range_EmptyValue(t *testing.T) {
+func TestSourceError_Range_Tokens(t *testing.T) {
 	t.Parallel()
 
-	// A path to an empty value resolves to a token the parser makes for
-	// it, so the range is empty at the position the message reports, even
-	// when a comment or the spaces after the colon sit at that column.
+	// A plain scalar that spans two lines.
+	folded := stringtest.Input(`
+		text: first
+		  second
+	`)
+
+	// Empty returns the empty range at a position.
+	empty := func(line, col int) position.Range {
+		return position.NewRange(position.New(line, col), position.New(line, col))
+	}
+
 	tcs := map[string]struct {
+		at    niceyaml.ErrorOption
 		input string
-		path  paths.Path
-		want  position.Position
+		// The message, which opens with the position the binding reports.
+		want string
+		rng  position.Range
 	}{
-		"nothing after the colon": {
+		// A path to an empty value resolves to a token the parser makes for
+		// it, so the range is empty at the position the message reports, even
+		// when a comment or the spaces after the colon sit at that column.
+		"empty value with nothing after the colon": {
 			input: "a:\nb: 1\n",
-			path:  paths.Current().Child("a"),
-			want:  position.New(0, 2),
+			at:    niceyaml.AtPath(paths.Current().Child("a")),
+			want:  "1:3: $.a: bad",
+			rng:   empty(0, 2),
 		},
-		"comment after the colon": {
+		"empty value with a comment after the colon": {
 			input: "a: # c\nb: 1\n",
-			path:  paths.Current().Child("a"),
-			want:  position.New(0, 2),
+			at:    niceyaml.AtPath(paths.Current().Child("a")),
+			want:  "1:3: $.a: bad",
+			rng:   empty(0, 2),
 		},
-		"spaces after the colon": {
+		"empty value with spaces after the colon": {
 			input: "a:   \nb: 1\n",
-			path:  paths.Current().Child("a"),
-			want:  position.New(0, 2),
+			at:    niceyaml.AtPath(paths.Current().Child("a")),
+			want:  "1:3: $.a: bad",
+			rng:   empty(0, 2),
 		},
-		"comment after the dash": {
+		"empty value with a comment after the dash": {
 			input: "- # c\n- 1\n",
-			path:  paths.Current().Index(0),
-			want:  position.New(0, 1),
+			at:    niceyaml.AtPath(paths.Current().Index(0)),
+			want:  "1:2: $[0]: bad",
+			rng:   empty(0, 1),
+		},
+		// The lexer bundles the indentation of the third line into the plain
+		// scalar "x" above it, yet the range covers the key on the third line.
+		"position in the indentation": {
+			input: stringtest.Input(`
+				parent:
+				  child: x
+				  other: 1
+			`),
+			at:   niceyaml.AtPosition(position.New(2, 0)),
+			want: "3:1: bad",
+			rng:  position.NewRange(position.New(2, 2), position.New(2, 7)),
+		},
+		// The plain scalar spans two lines, so the range ends on the second.
+		"path to a token of two lines": {
+			input: folded,
+			at:    niceyaml.AtPath(paths.Current().Child("text")),
+			want:  "1:7: $.text: bad",
+			rng:   position.NewRange(position.New(0, 6), position.New(1, 8)),
+		},
+		// The position falls on the second line of the plain scalar, so the
+		// range starts on the first line where the token does, while the
+		// message reports the position as the error gave it.
+		"position inside a token of two lines": {
+			input: folded,
+			at:    niceyaml.AtPosition(position.New(1, 4)),
+			want:  "2:5: bad",
+			rng:   position.NewRange(position.New(0, 6), position.New(1, 8)),
+		},
+		// A range that starts on a line of the source binds, and its end past
+		// the last line clamps to the end of that line, so the range reported
+		// names lines the source has.
+		"range that ends past the last line": {
+			input: "a: 1\nb: 2\nc: 3\n",
+			at:    niceyaml.AtRange(position.NewRange(position.New(1, 0), position.New(99, 3))),
+			want:  "2:1: bad",
+			rng:   position.NewRange(position.New(1, 0), position.New(2, 4)),
 		},
 	}
 
@@ -4514,36 +4550,15 @@ func TestSourceError_Range_EmptyValue(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			bound := errorBinding(t, yamltest.Bind(t, niceyaml.NewSourceFromString(tc.input),
-				niceyaml.NewError("bad", niceyaml.AtPath(tc.path)),
-			))
+			source := niceyaml.NewSourceFromString(tc.input)
+			bound := errorBinding(t, yamltest.Bind(t, source, niceyaml.NewError("bad", tc.at)))
 
 			got, ok := bound.Range()
 			require.True(t, ok)
-			assert.Equal(t, position.NewRange(tc.want, tc.want), got)
+			assert.Equal(t, tc.rng, got)
+			assert.Equal(t, tc.want, bound.Error())
 		})
 	}
-}
-
-func TestSourceError_Range_Indentation(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString(stringtest.Input(`
-		parent:
-		  child: x
-		  other: 1
-	`))
-
-	bound := errorBinding(t, yamltest.Bind(t, source, niceyaml.NewError("bad",
-		niceyaml.AtPosition(position.New(2, 0)),
-	)))
-
-	got, ok := bound.Range()
-	require.True(t, ok)
-
-	// The lexer bundles the indentation of the third line into the plain
-	// scalar "x" above it, yet the range covers the key on the third line.
-	assert.Equal(t, position.NewRange(position.New(2, 2), position.New(2, 7)), got)
 }
 
 func TestSourceError_Range_TabLine(t *testing.T) {
@@ -4585,47 +4600,6 @@ func TestSourceError_Range_TabLine(t *testing.T) {
 			assert.Equal(t, position.NewRange(tc.pos, tc.pos), got)
 		})
 	}
-}
-
-func TestSourceError_Range_MultiLineToken(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString(stringtest.Input(`
-		text: first
-		  second
-	`))
-
-	bound := errorBinding(t, yamltest.Bind(t, source, niceyaml.NewError("bad",
-		niceyaml.AtPath(paths.Current().Child("text")),
-	)))
-
-	got, ok := bound.Range()
-	require.True(t, ok)
-
-	// The plain scalar spans two lines, so the range ends on the second.
-	assert.Equal(t, position.NewRange(position.New(0, 6), position.New(1, 8)), got)
-}
-
-func TestSourceError_Range_PositionInsideToken(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString(stringtest.Input(`
-		text: first
-		  second
-	`))
-
-	bound := errorBinding(t, yamltest.Bind(t, source, niceyaml.NewError("bad",
-		niceyaml.AtPosition(position.New(1, 4)),
-	)))
-
-	got, ok := bound.Range()
-	require.True(t, ok)
-
-	// The position falls on the second line of the plain scalar, so the
-	// range starts on the first line where the token does, while the
-	// message reports the position as the error gave it.
-	assert.Equal(t, position.NewRange(position.New(0, 6), position.New(1, 8)), got)
-	assert.Equal(t, "2:5: bad", bound.Error())
 }
 
 func TestSourceError_Position(t *testing.T) {
