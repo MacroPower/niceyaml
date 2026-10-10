@@ -41,18 +41,8 @@ func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
 	// A highlight style may transform the text it styles and change its
 	// width, so the row counts must follow the decoration of the current
 	// term and selection rather than the one before it.
-	widen := lipgloss.NewStyle().Transform(func(s string) string {
-		return "<<" + s + ">>"
-	})
-	styles := style.New(lipgloss.NewStyle(),
-		style.Set(kind.GenericHighlight, widen),
-		style.Set(kind.GenericHighlightDim, widen),
-	)
-	p := printer.New(
-		printer.WithStyles(styles),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.NoGutter),
-	)
+	widen := bracketStyle("<<", ">>")
+	p := barePrinter(highlightStyles(widen, widen))
 
 	m := testModel(p, 24, 2)
 	m.SetWordWrap(true)
@@ -79,18 +69,7 @@ func TestViewport_SearchNextRefreshesRowCounts(t *testing.T) {
 	// Only the selected match widens, so each move of the selection changes
 	// the rows and the width of the line it leaves and of the line it
 	// reaches. The row counts and the horizontal scroll bound follow both.
-	widen := lipgloss.NewStyle().Transform(func(s string) string {
-		return "<<" + s + ">>"
-	})
-	styles := style.New(lipgloss.NewStyle(),
-		style.Set(kind.GenericHighlight, widen),
-		style.Set(kind.GenericHighlightDim, lipgloss.NewStyle()),
-	)
-	p := printer.New(
-		printer.WithStyles(styles),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.NoGutter),
-	)
+	p := barePrinter(highlightStyles(bracketStyle("<<", ">>"), lipgloss.NewStyle()))
 
 	// Line i is 9+i columns wide, or 13+i with the selected match, so the
 	// widest row and the lines that wrap change with the selection.
@@ -273,17 +252,9 @@ func TestViewport_SearchTermRefreshesRowCounts(t *testing.T) {
 	// the rows and the width of the lines its matches leave and of the lines
 	// they reach. The row counts, the horizontal scroll bound, and the
 	// render follow every change of term.
-	widen := lipgloss.NewStyle().Transform(func(s string) string {
-		return "<<" + s + ">>"
-	})
-	styles := style.New(lipgloss.NewStyle(),
-		style.Set(kind.GenericHighlight, widen),
-		style.Set(kind.GenericHighlightDim, widen),
-	)
-	p := printer.New(
-		printer.WithStyles(styles),
-		printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1)),
-		printer.WithGutter(printer.NoGutter),
+	widen := bracketStyle("<<", ">>")
+	p := barePrinter(highlightStyles(widen, widen)).With(
+		printer.WithContainerStyle(normalBorder().Padding(0, 1)),
 	)
 
 	lines := make([]string, 0, 12)
@@ -474,6 +445,58 @@ func testPrinterWithSearch() *printer.Printer {
 	)
 }
 
+// barePrinter returns a printer with the given styles, no gutter, and no
+// container frame.
+func barePrinter(styles style.Styler) *printer.Printer {
+	return printer.New(
+		printer.WithStyles(styles),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.NoGutter),
+	)
+}
+
+// framedPrinter returns [testPrinter] with the given container style.
+//
+//nolint:gocritic // hugeParam: value semantics match lipgloss.
+func framedPrinter(container lipgloss.Style) *printer.Printer {
+	return testPrinter().With(printer.WithContainerStyle(container))
+}
+
+// normalBorder returns a style that draws a border one cell wide on every
+// side.
+func normalBorder() lipgloss.Style {
+	return lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+}
+
+// bracketStyle returns a style that renders text between left and right, so
+// the text takes more cells than its content.
+func bracketStyle(left, right string) lipgloss.Style {
+	return lipgloss.NewStyle().Transform(func(s string) string {
+		return left + s + right
+	})
+}
+
+// highlightStyles returns styles that render the selected search match with
+// selected, every other match with dim, and the rest of the text as it is.
+//
+//nolint:gocritic // hugeParam: value semantics match lipgloss.
+func highlightStyles(selected, dim lipgloss.Style) style.Styles {
+	return style.New(lipgloss.NewStyle(),
+		style.Set(kind.GenericHighlight, selected),
+		style.Set(kind.GenericHighlightDim, dim),
+	)
+}
+
+// countingStyle returns a style that renders text as it is and adds one to
+// n for each piece of text it styles.
+func countingStyle(n *int) lipgloss.Style {
+	return lipgloss.NewStyle().Transform(func(s string) string {
+		*n++
+
+		return s
+	})
+}
+
 // testModel returns a model of the given size that prints with p.
 func testModel(p *printer.Printer, width, height int, opts ...yamlviewport.Option) yamlviewport.Model {
 	m := yamlviewport.New(append([]yamlviewport.Option{yamlviewport.WithPrinter(p)}, opts...)...)
@@ -657,9 +680,7 @@ func TestViewport_Golden(t *testing.T) {
 		"StyledContainer": {
 			opts: []yamlviewport.Option{
 				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithContainerStyle(lipgloss.NewStyle().
-					Border(lipgloss.NormalBorder()).
-					Padding(1)),
+				yamlviewport.WithContainerStyle(normalBorder().Padding(1)),
 			},
 			yaml:   simpleYAML,
 			width:  80,
@@ -1311,11 +1332,7 @@ func TestViewport_LayoutChangesKeepTopLine(t *testing.T) {
 func TestViewport_LayoutChangesKeepFrameRow(t *testing.T) {
 	t.Parallel()
 
-	framed := func(s lipgloss.Style) *printer.Printer {
-		return testPrinter().With(printer.WithContainerStyle(s))
-	}
-
-	border := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+	border := normalBorder()
 	padding := lipgloss.NewStyle().PaddingTop(2).PaddingBottom(2)
 	tall := border.Padding(1, 1)
 
@@ -1336,7 +1353,7 @@ func TestViewport_LayoutChangesKeepFrameRow(t *testing.T) {
 			container: lipgloss.NewStyle(),
 			lines:     50,
 			height:    5,
-			change:    func(m *yamlviewport.Model) { m.SetPrinter(framed(border)) },
+			change:    func(m *yamlviewport.Model) { m.SetPrinter(framedPrinter(border)) },
 			want:      0,
 			wantTop:   "─",
 		},
@@ -1344,7 +1361,7 @@ func TestViewport_LayoutChangesKeepFrameRow(t *testing.T) {
 			container: border,
 			lines:     50,
 			height:    5,
-			change:    func(m *yamlviewport.Model) { m.SetPrinter(framed(tall)) },
+			change:    func(m *yamlviewport.Model) { m.SetPrinter(framedPrinter(tall)) },
 			want:      0,
 			wantTop:   "─",
 		},
@@ -1353,7 +1370,7 @@ func TestViewport_LayoutChangesKeepFrameRow(t *testing.T) {
 			lines:     50,
 			height:    5,
 			offset:    1,
-			change:    func(m *yamlviewport.Model) { m.SetPrinter(framed(border)) },
+			change:    func(m *yamlviewport.Model) { m.SetPrinter(framedPrinter(border)) },
 			want:      0,
 			wantTop:   "─",
 		},
@@ -1362,7 +1379,7 @@ func TestViewport_LayoutChangesKeepFrameRow(t *testing.T) {
 			lines:     5,
 			height:    1,
 			bottom:    true,
-			change:    func(m *yamlviewport.Model) { m.SetPrinter(framed(padding)) },
+			change:    func(m *yamlviewport.Model) { m.SetPrinter(framedPrinter(padding)) },
 			want:      8,
 		},
 		"bottom frame taller than height with the same layout": {
@@ -1370,7 +1387,7 @@ func TestViewport_LayoutChangesKeepFrameRow(t *testing.T) {
 			lines:     10,
 			height:    2,
 			bottom:    true,
-			change:    func(m *yamlviewport.Model) { m.SetPrinter(framed(tall)) },
+			change:    func(m *yamlviewport.Model) { m.SetPrinter(framedPrinter(tall)) },
 			want:      12,
 		},
 		"bottom frame taller than height at a new width": {
@@ -1401,7 +1418,7 @@ func TestViewport_LayoutChangesKeepFrameRow(t *testing.T) {
 				fmt.Fprintf(&src, "k%d: v\n", i)
 			}
 
-			m := testModel(framed(tc.container), 40, tc.height)
+			m := testModel(framedPrinter(tc.container), 40, tc.height)
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 
 			if tc.bottom {
@@ -1474,7 +1491,7 @@ func TestViewport_ResizeClampsOffsetAtOnce(t *testing.T) {
 
 	// A border leaves a content area 10 rows tall in a viewport 12 rows
 	// tall, and narrows the content width.
-	bordered := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+	bordered := normalBorder()
 
 	tcs := map[string]struct {
 		style  lipgloss.Style
@@ -1648,14 +1665,14 @@ func TestViewport_ContainerFrame(t *testing.T) {
 			height:    5,
 		},
 		"border": {
-			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
+			container: normalBorder(),
 			edge:      "─",
 			top:       1,
 			bottom:    1,
 			height:    5,
 		},
 		"border side by side": {
-			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
+			container: normalBorder(),
 			edge:      "─",
 			top:       1,
 			bottom:    1,
@@ -1663,7 +1680,7 @@ func TestViewport_ContainerFrame(t *testing.T) {
 			mode:      yamlviewport.ViewModeSideBySide,
 		},
 		"frame taller than height": {
-			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(1, 1),
+			container: normalBorder().Padding(1, 1),
 			edge:      "─",
 			top:       2,
 			bottom:    2,
@@ -1677,8 +1694,7 @@ func TestViewport_ContainerFrame(t *testing.T) {
 
 			const lines = 10
 
-			p := testPrinter().With(printer.WithContainerStyle(tc.container))
-			m := testModel(p, 40, tc.height)
+			m := testModel(framedPrinter(tc.container), 40, tc.height)
 			m.SetViewMode(tc.mode)
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 
@@ -1736,7 +1752,7 @@ func TestViewport_ContainerFrameWidth(t *testing.T) {
 		last      string
 	}{
 		"border": {
-			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
+			container: normalBorder(),
 			last:      "└",
 		},
 		"horizontal padding": {
@@ -1758,8 +1774,7 @@ func TestViewport_ContainerFrameWidth(t *testing.T) {
 				height = 6
 			)
 
-			p := testPrinter().With(printer.WithContainerStyle(tc.container))
-			m := testModel(p, width, height)
+			m := testModel(framedPrinter(tc.container), width, height)
 			m.SetRevision(niceyaml.NewSourceFromString(src))
 
 			for offset := range m.TotalRowCount() - height + 1 {
@@ -1810,8 +1825,7 @@ func TestViewport_ContainerBoxKeepsItsColumns(t *testing.T) {
 				height = 3
 			)
 
-			p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
-			m := testModel(p, width, height)
+			m := testModel(framedPrinter(normalBorder()), width, height)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(tc.wrap)
 			m.SetRevision(niceyaml.NewSourceFromString(src))
@@ -1847,8 +1861,7 @@ func TestViewport_SideBySideFillerRowsKeepTheFrame(t *testing.T) {
 	before := niceyaml.NewSourceFromString("a: 1\nb: short\nc: 3\n")
 	after := niceyaml.NewSourceFromString("a: 1\nb: " + strings.Repeat("y", 60) + "\nc: 3\n")
 
-	p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
-	m := testModel(p, width, height)
+	m := testModel(framedPrinter(normalBorder()), width, height)
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
 	m.AddRevision(before)
 	m.AddRevision(after)
@@ -1906,8 +1919,7 @@ func TestViewport_HorizontalScrollKeepsFrame(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
-			m := testModel(p, tc.width, 3)
+			m := testModel(framedPrinter(normalBorder()), tc.width, 3)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(false)
 			m.SetRevision(niceyaml.NewSourceFromString("k: 0123456789abcdefghijklmnopqrstuvwxyz\n"))
@@ -1931,8 +1943,7 @@ func TestViewport_HorizontalScrollKeepsFrameOfNarrowerPane(t *testing.T) {
 	// The offset runs to the widest row of either pane, so the window can
 	// reach past the content of the narrower pane. Its right border stays
 	// in its column, as the top and bottom borders do.
-	p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
-	m := testModel(p, 31, 3)
+	m := testModel(framedPrinter(normalBorder()), 31, 3)
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
 	m.SetWordWrap(false)
 	m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: s\nc: 3\n"))
@@ -1984,8 +1995,7 @@ func TestViewport_HorizontalScrollKeepsFrameAtWideRune(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
-			m := testModel(p, tc.width, 4)
+			m := testModel(framedPrinter(normalBorder()), tc.width, 4)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(false)
 			m.SetRevision(niceyaml.NewSourceFromString(
@@ -2046,8 +2056,7 @@ func TestViewport_HorizontalScrollKeepsFrameAtKeycap(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
-			m := testModel(p, tc.width, 4)
+			m := testModel(framedPrinter(normalBorder()), tc.width, 4)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(false)
 			m.SetRevision(niceyaml.NewSourceFromString(
@@ -2199,7 +2208,7 @@ func TestViewport_DiffOfRevisionsOverPartOfTheSource(t *testing.T) {
 func TestViewport_ViewFitsHeight(t *testing.T) {
 	t.Parallel()
 
-	border := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+	border := normalBorder()
 
 	// A view is as tall as the set height, and a height with no room for
 	// content, whether negative or swallowed by the frame of the container
@@ -2239,7 +2248,7 @@ func TestViewport_ViewFitsHeight(t *testing.T) {
 func TestViewport_FixedSizeContainerStyle(t *testing.T) {
 	t.Parallel()
 
-	box := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+	box := normalBorder()
 
 	// A fixed Width or Height on the container style caps the box as
 	// lipgloss draws it, and margins add to that size.
@@ -2287,7 +2296,7 @@ func TestViewport_FixedSizeContainerStyle(t *testing.T) {
 func TestViewport_MaxSizeContainerStyle(t *testing.T) {
 	t.Parallel()
 
-	box := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+	box := normalBorder()
 
 	// A MaxWidth or MaxHeight on the container style caps the box, margins
 	// included, so the whole border shows and a page moves by the rows on
@@ -2378,7 +2387,7 @@ func TestViewport_PrinterContainerSizeIgnored(t *testing.T) {
 			wantLast:  "hhhh",
 		},
 		"height": {
-			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Height(8),
+			container: normalBorder().Height(8),
 			line:      "k%d: v",
 			lines:     10,
 			width:     20,
@@ -2387,7 +2396,7 @@ func TestViewport_PrinterContainerSizeIgnored(t *testing.T) {
 			wantLast:  "└",
 		},
 		"max height": {
-			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()).MaxHeight(4),
+			container: normalBorder().MaxHeight(4),
 			line:      "k%d: v",
 			lines:     10,
 			width:     20,
@@ -2407,8 +2416,7 @@ func TestViewport_PrinterContainerSizeIgnored(t *testing.T) {
 				fmt.Fprintf(&src, tc.line+"\n", i)
 			}
 
-			p := testPrinter().With(printer.WithContainerStyle(tc.container))
-			m := testModel(p, tc.width, tc.height)
+			m := testModel(framedPrinter(tc.container), tc.width, tc.height)
 			m.SetWordWrap(true)
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 
@@ -5087,7 +5095,7 @@ func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
 	// printer and the pane width as they are keeps the row counts, so the
 	// next read lays out nothing. Without a diff, the full and hunks view
 	// modes show the same lines at the same pane width.
-	frame := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Width(30)
+	frame := normalBorder().Width(30)
 
 	tcs := map[string]struct {
 		change func(*yamlviewport.Model, *printer.Printer)
@@ -5125,16 +5133,7 @@ func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
 			t.Parallel()
 
 			renders := 0
-			base := lipgloss.NewStyle().Transform(func(s string) string {
-				renders++
-
-				return s
-			})
-			p := printer.New(
-				printer.WithStyles(style.New(base)),
-				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithGutter(printer.NoGutter),
-			)
+			p := barePrinter(style.New(countingStyle(&renders)))
 
 			var src strings.Builder
 
@@ -5518,19 +5517,11 @@ func TestViewport_SearchLaysOutOnlyHighlightedLines(t *testing.T) {
 	// which cells each highlight marks.
 	run := func(matches position.Ranges) ([]int, []string) {
 		renders := 0
-		base := lipgloss.NewStyle().Transform(func(s string) string {
-			renders++
-
-			return s
-		})
-		p := printer.New(
-			printer.WithStyles(style.New(base,
-				style.Set(kind.GenericHighlight, base.Underline(true)),
-				style.Set(kind.GenericHighlightDim, base.Italic(true)),
-			)),
-			printer.WithContainerStyle(lipgloss.NewStyle()),
-			printer.WithGutter(printer.NoGutter),
-		)
+		base := countingStyle(&renders)
+		p := barePrinter(style.New(base,
+			style.Set(kind.GenericHighlight, base.Underline(true)),
+			style.Set(kind.GenericHighlightDim, base.Italic(true)),
+		))
 
 		m := testModel(p, 40, 10, yamlviewport.WithSearcher(fixedSearcher{matches: matches}))
 		m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\n"))
@@ -5758,7 +5749,7 @@ func TestViewport_OffsetWithNoContentHeight(t *testing.T) {
 			lines:     20,
 		},
 		"frame as tall as height": {
-			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
+			container: normalBorder(),
 			height:    2,
 			lines:     20,
 		},
@@ -6085,7 +6076,7 @@ func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
 			view.Annotate(1, line.Annotation{Content: "BAD", Placement: line.Below, Col: 50})
 
 			p := testPrinterWithLineNumbers().With(
-				printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
+				printer.WithContainerStyle(normalBorder()),
 			)
 			m := testModel(p, width, 10)
 			m.SetViewMode(tc.mode)
@@ -6156,7 +6147,7 @@ func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
 		},
 		"line number gutter and border": {
 			printer: testPrinterWithLineNumbers().With(
-				printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
+				printer.WithContainerStyle(normalBorder()),
 			),
 			width: 20,
 			setup: func(m *yamlviewport.Model) {
@@ -6412,13 +6403,7 @@ func TestViewport_RevisionOverPartOfTheSource(t *testing.T) {
 	// A view over part of a source keeps the indices of the source, so the
 	// viewport windows it by those indices, and a search covers the whole
 	// source but keeps the matches on the lines the view holds.
-	p := printer.New(
-		printer.WithStyles(yamltest.NewXMLStyles(
-			yamltest.XMLStyleInclude(kind.GenericHighlight, kind.GenericHighlightDim),
-		)),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.LineNumberGutter),
-	)
+	p := testPrinterWithSearch().With(printer.WithGutter(printer.LineNumberGutter))
 
 	m := testModel(p, 80, 2)
 
@@ -6471,13 +6456,7 @@ func TestViewport_RevisionOverPartOfTheSource(t *testing.T) {
 func TestViewport_RevisionKeepsDecoration(t *testing.T) {
 	t.Parallel()
 
-	p := printer.New(
-		printer.WithStyles(yamltest.NewXMLStyles(
-			yamltest.XMLStyleInclude(kind.GenericHighlight, kind.GenericError),
-		)),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.NoGutter),
-	)
+	p := barePrinter(yamltest.NewXMLStyles(yamltest.XMLStyleInclude(kind.GenericHighlight, kind.GenericError)))
 
 	m := testModel(p, 80, 10)
 
@@ -6550,13 +6529,7 @@ func TestViewport_RevisionIgnoresLaterMarks(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := printer.New(
-				printer.WithStyles(yamltest.NewXMLStyles(
-					yamltest.XMLStyleInclude(kind.GenericHighlight),
-				)),
-				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithGutter(printer.NoGutter),
-			)
+			p := barePrinter(yamltest.NewXMLStyles(yamltest.XMLStyleInclude(kind.GenericHighlight)))
 
 			m := testModel(p, 80, 10)
 
@@ -6971,16 +6944,7 @@ func TestViewport_UnchangedSearchKeepsLayout(t *testing.T) {
 			// The base style counts every piece of text the printer styles,
 			// which a layout of the view does for each line.
 			renders := 0
-			count := lipgloss.NewStyle().Transform(func(s string) string {
-				renders++
-
-				return s
-			})
-			p := printer.New(
-				printer.WithStyles(style.New(count)),
-				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithGutter(printer.NoGutter),
-			)
+			p := barePrinter(style.New(countingStyle(&renders)))
 
 			m := testModel(p, 40, 10)
 			m.SetRevision(niceyaml.NewSourceFromString(sb.String()))
@@ -7183,16 +7147,7 @@ func TestViewport_SearchScrollsToTransformedMatch(t *testing.T) {
 	// before the selected one pushes it two cells further right than its
 	// column in the content. The X offset counts those cells, so the
 	// selected match stays on screen with wrap off.
-	dim := lipgloss.NewStyle().Transform(func(s string) string { return "[" + s + "]" })
-	sel := lipgloss.NewStyle().Transform(func(s string) string { return "{" + s + "}" })
-	p := printer.New(
-		printer.WithStyles(style.New(lipgloss.NewStyle(),
-			style.Set(kind.GenericHighlight, sel),
-			style.Set(kind.GenericHighlightDim, dim),
-		)),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.NoGutter),
-	)
+	p := barePrinter(highlightStyles(bracketStyle("{", "}"), bracketStyle("[", "]")))
 
 	tcs := map[string]struct {
 		next int
@@ -7386,10 +7341,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 		v2 = "a: 1\nb: 日本 y\nnew: line here\nc: 3\n"
 	)
 
-	framed := printer.New(
-		printer.WithStyles(style.Styles{}),
-		printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1)),
-	)
+	framed := testPrinterWithLineNumbers().With(printer.WithContainerStyle(normalBorder().Padding(0, 1)))
 
 	// Each want holds the hit map of the screen above it, which the
 	// comments draw with "·" for a space.
@@ -7668,17 +7620,11 @@ func TestViewport_HitAt(t *testing.T) {
 
 	clipped := yamlviewport.NewRevision("clipped", marked.Clip(10))
 
-	brackets := lipgloss.NewStyle().Transform(func(s string) string { return "[" + s + "]" })
-	bracketed := printer.New(
-		printer.WithStyles(style.New(lipgloss.NewStyle(), style.Set(kind.GenericHighlight, brackets))),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.DiffGutter),
+	bracketed := testPrinter().With(
+		printer.WithStyles(highlightStyles(bracketStyle("[", "]"), lipgloss.NewStyle())),
 	)
 
-	framed := printer.New(
-		printer.WithStyles(style.Styles{}),
-		printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1)),
-	)
+	framed := testPrinterWithLineNumbers().With(printer.WithContainerStyle(normalBorder().Padding(0, 1)))
 
 	// The default test printer draws a gutter one cell wide, so the
 	// content of a row starts at cell 1.
