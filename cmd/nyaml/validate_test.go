@@ -38,6 +38,19 @@ func nameRegistry() *schema.Registry {
 	return schema.NewRegistry(schema.WithResolvers(schema.Embedded(nameSchema)))
 }
 
+// relToWorkDir returns path relative to the working directory.
+func relToWorkDir(t *testing.T, path string) string {
+	t.Helper()
+
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	rel, err := filepath.Rel(wd, path)
+	require.NoError(t, err)
+
+	return rel
+}
+
 // directive returns the comment line that names ref as the schema of the
 // document below it.
 func directive(ref string) string {
@@ -229,11 +242,7 @@ func TestValidateFileRoutesOnAbsolutePath(t *testing.T) {
 	// relative one. Messages still name the file as the user typed it.
 	path := writeFile(t, t.TempDir(), "config.yaml", "value: 1\n")
 
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-
-	rel, err := filepath.Rel(wd, path)
-	require.NoError(t, err)
+	rel := relToWorkDir(t, path)
 	require.False(t, filepath.IsAbs(rel))
 
 	var got string
@@ -246,7 +255,7 @@ func TestValidateFileRoutesOnAbsolutePath(t *testing.T) {
 		}),
 	))
 
-	err = validateFile(t.Context(), rel, reg)
+	err := validateFile(t.Context(), rel, reg)
 	require.Error(t, err)
 	assert.Equal(t, path, got)
 	assert.Contains(t, err.Error(), rel+":1:1: ")
@@ -324,12 +333,7 @@ func TestBuildRegistrySchemaDotDotAfterSymlink(t *testing.T) {
 	writeFile(t, dir, "schema.json", `{"type": "integer"}`)
 
 	yamlPath := writeFile(t, dir, "x.yaml", "hello\n")
-
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-
-	rel, err := filepath.Rel(wd, dir)
-	require.NoError(t, err)
+	rel := relToWorkDir(t, dir)
 
 	// The test builds each ref as text, since filepath.Join would clean it.
 	tcs := map[string]struct {
@@ -444,11 +448,7 @@ func TestPhysicalAbs(t *testing.T) {
 	realDir, err := filepath.EvalSymlinks(dir)
 	require.NoError(t, err)
 
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-
-	rel, err := filepath.Rel(wd, dir)
-	require.NoError(t, err)
+	rel := relToWorkDir(t, dir)
 
 	// The test builds each path as text, since filepath.Join would clean it.
 	tcs := map[string]struct {
