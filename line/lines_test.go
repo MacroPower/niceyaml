@@ -34,36 +34,98 @@ func TestNewLines_Roundtrip(t *testing.T) {
 
 		// Simple cases.
 		"simple key-value": "key: value\n",
-		"multiple keys":    "first: 1\nsecond: 2\nthird: 3\n",
-		"nested map":       "parent:\n  child: value\n",
-		"simple list":      "items:\n  - one\n  - two\n",
-		"inline map":       "config: {key: value}\n",
-		"inline list":      "items: [a, b, c]\n",
-		"boolean values":   "enabled: true\ndisabled: false\n",
-		"numeric values":   "integer: 42\nfloat: 3.14\n",
-		"double quoted":    "message: \"hello world\"\n",
-		"single quoted":    "message: 'hello world'\n",
-		"comment only":     "# This is a comment\n",
-		"inline comment":   "key: value # inline comment\n",
-		"anchor and alias": "defaults: &defaults\n  timeout: 30\nproduction:\n  <<: *defaults\n",
+		"multiple keys": stringtest.LinesLF(
+			"first: 1",
+			"second: 2",
+			"third: 3",
+		),
+		"nested map": stringtest.LinesLF(
+			"parent:",
+			"  child: value",
+		),
+		"simple list": stringtest.LinesLF(
+			"items:",
+			"  - one",
+			"  - two",
+		),
+		"inline map":     "config: {key: value}\n",
+		"inline list":    "items: [a, b, c]\n",
+		"boolean values": "enabled: true\ndisabled: false\n",
+		"numeric values": "integer: 42\nfloat: 3.14\n",
+		"double quoted":  "message: \"hello world\"\n",
+		"single quoted":  "message: 'hello world'\n",
+		"comment only":   "# This is a comment\n",
+		"inline comment": "key: value # inline comment\n",
+		"anchor and alias": stringtest.LinesLF(
+			"defaults: &defaults",
+			"  timeout: 30",
+			"production:",
+			"  <<: *defaults",
+		),
 
 		// Split token cases (literal/folded blocks).
-		"literal block":      "script: |\n  line1\n  line2\n",
-		"folded block":       "desc: >\n  first\n  second\n",
-		"literal block long": "data: |\n  a\n  b\n  c\n  d\n",
+		"literal block": stringtest.LinesLF(
+			"script: |",
+			"  line1",
+			"  line2",
+		),
+		"folded block": stringtest.LinesLF(
+			"desc: >",
+			"  first",
+			"  second",
+		),
+		"literal block long": stringtest.LinesLF(
+			"data: |",
+			"  a",
+			"  b",
+			"  c",
+			"  d",
+		),
 
 		// Block scalar variants.
-		"literal strip":  "text: |-\n  line1\n  line2\n",
-		"literal keep":   "text: |+\n  line1\n  line2\n\n",
-		"folded strip":   "text: >-\n  line1\n  line2\n",
-		"folded keep":    "text: >+\n  line1\n  line2\n\n",
-		"literal indent": "code: |2\n    indented\n    content\n",
+		"literal strip": stringtest.LinesLF(
+			"text: |-",
+			"  line1",
+			"  line2",
+		),
+		"literal keep": stringtest.LinesLF(
+			"text: |+",
+			"  line1",
+			"  line2",
+			"",
+		),
+		"folded strip": stringtest.LinesLF(
+			"text: >-",
+			"  line1",
+			"  line2",
+		),
+		"folded keep": stringtest.LinesLF(
+			"text: >+",
+			"  line1",
+			"  line2",
+			"",
+		),
+		"literal indent": stringtest.LinesLF(
+			"code: |2",
+			"    indented",
+			"    content",
+		),
 
 		// Document markers.
-		"document start":          "---\nkey: value\n",
-		"document end":            "key: value\n...\n",
-		"multi-document":          "---\ndoc: 1\n...\n---\ndoc: 2\n",
-		"document with directive": "%YAML 1.2\n---\nkey: value\n",
+		"document start": "---\nkey: value\n",
+		"document end":   "key: value\n...\n",
+		"multi-document": stringtest.LinesLF(
+			"---",
+			"doc: 1",
+			"...",
+			"---",
+			"doc: 2",
+		),
+		"document with directive": stringtest.LinesLF(
+			"%YAML 1.2",
+			"---",
+			"key: value",
+		),
 
 		// Tags.
 		"explicit string tag": "value: !!str 12345\n",
@@ -89,22 +151,51 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		"empty value": "key:\n",
 
 		// Anchors and aliases.
-		"anchor definition":  "base: &base\n  key: value\n",
-		"alias reference":    "ref: *base\n",
-		"merge key":          "merged:\n  <<: *base\n  extra: data\n",
-		"anchor on sequence": "list: &items\n  - one\n  - two\n",
+		"anchor definition": stringtest.LinesLF(
+			"base: &base",
+			"  key: value",
+		),
+		"alias reference": "ref: *base\n",
+		"merge key": stringtest.LinesLF(
+			"merged:",
+			"  <<: *base",
+			"  extra: data",
+		),
+		"anchor on sequence": stringtest.LinesLF(
+			"list: &items",
+			"  - one",
+			"  - two",
+		),
 
 		// Flow styles.
-		"nested flow map":       "data: {outer: {inner: value}}\n",
-		"nested flow list":      "data: [[1, 2], [3, 4]]\n",
-		"mixed flow":            "data: {list: [a, b], map: {k: v}}\n",
-		"flow with anchor":      "data: {key: &val value, ref: *val}\n",
-		"flow map in block seq": "items:\n  - {name: a, value: 1}\n",
+		"nested flow map":  "data: {outer: {inner: value}}\n",
+		"nested flow list": "data: [[1, 2], [3, 4]]\n",
+		"mixed flow":       "data: {list: [a, b], map: {k: v}}\n",
+		"flow with anchor": "data: {key: &val value, ref: *val}\n",
+		"flow map in block seq": stringtest.LinesLF(
+			"items:",
+			"  - {name: a, value: 1}",
+		),
 
 		// Complex structures.
-		"deeply nested": "a:\n  b:\n    c:\n      d: value\n",
-		"list of maps":  "items:\n  - name: one\n    value: 1\n  - name: two\n    value: 2\n",
-		"map of lists":  "groups:\n  a: [1, 2]\n  b: [3, 4]\n",
+		"deeply nested": stringtest.LinesLF(
+			"a:",
+			"  b:",
+			"    c:",
+			"      d: value",
+		),
+		"list of maps": stringtest.LinesLF(
+			"items:",
+			"  - name: one",
+			"    value: 1",
+			"  - name: two",
+			"    value: 2",
+		),
+		"map of lists": stringtest.LinesLF(
+			"groups:",
+			"  a: [1, 2]",
+			"  b: [3, 4]",
+		),
 
 		// Quoted strings with escapes.
 		"double quote escapes": "text: \"line1\\nline2\\ttab\"\n",
@@ -127,17 +218,35 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		"colon in value":     "text: \"Note: important\"\n",
 		"hash in value":      "text: \"Item #1\"\n",
 		"special yaml chars": "text: \"[not] {a} list\"\n",
-		"multiline comment":  "# line 1\n# line 2\nkey: value\n",
-		"blank lines":        "key1: value1\n\nkey2: value2\n",
-		"trailing comment":   "key: value # comment\n",
+		"multiline comment": stringtest.LinesLF(
+			"# line 1",
+			"# line 2",
+			"key: value",
+		),
+		"blank lines": stringtest.LinesLF(
+			"key1: value1",
+			"",
+			"key2: value2",
+		),
+		"trailing comment": "key: value # comment\n",
 
 		// Directives and custom tags.
-		"tag directive":        "%TAG !custom! tag:example.com,2024:\n---\nvalue: !custom!price 10\n",
+		"tag directive": stringtest.LinesLF(
+			"%TAG !custom! tag:example.com,2024:",
+			"---",
+			"value: !custom!price 10",
+		),
 		"tag with nested flow": "price: !custom!price { amount: 12.50, currency: EUR }\n",
 
 		// Complex keys.
-		"emoji as key":           "🍣:\n  value: sushi\n",
-		"quoted unicode key":     "\"東京\":\n  flagship: true\n",
+		"emoji as key": stringtest.LinesLF(
+			"🍣:",
+			"  value: sushi",
+		),
+		"quoted unicode key": stringtest.LinesLF(
+			`"東京":`,
+			"  flagship: true",
+		),
 		"explicit key indicator": "? complex key\n: value\n",
 
 		// Advanced numeric formats.
@@ -146,22 +255,56 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		"timestamp timezone":   "time: 2024-11-20T14:30:00+01:00\n",
 
 		// Binary data.
-		"binary tag": "data: !!binary |\n  R0lGODlhAQABAIAAAAAAAP///w==\n",
+		"binary tag": stringtest.LinesLF(
+			"data: !!binary |",
+			"  R0lGODlhAQABAIAAAAAAAP///w==",
+		),
 
 		// Merge key variants.
-		"merge multiple anchors": "base1: &b1\n  a: 1\nbase2: &b2\n  b: 2\nmerged:\n  <<: [*b1, *b2]\n",
+		"merge multiple anchors": stringtest.LinesLF(
+			"base1: &b1",
+			"  a: 1",
+			"base2: &b2",
+			"  b: 2",
+			"merged:",
+			"  <<: [*b1, *b2]",
+		),
 
 		// Advanced block scalars.
-		"literal indent strip":         "code: |2-\n    indented\n    content\n",
-		"folded indent":                "text: >2\n    folded\n    indented\n",
-		"comment after literal header": "key: | # this is a comment\n  line1\n  line2\n",
-		"comment after folded header":  "key: > # this is a comment\n  line1\n  line2\n",
-		"folded with blank lines":      "text: >\n  first\n\n  second\n",
+		"literal indent strip": stringtest.LinesLF(
+			"code: |2-",
+			"    indented",
+			"    content",
+		),
+		"folded indent": stringtest.LinesLF(
+			"text: >2",
+			"    folded",
+			"    indented",
+		),
+		"comment after literal header": stringtest.LinesLF(
+			"key: | # this is a comment",
+			"  line1",
+			"  line2",
+		),
+		"comment after folded header": stringtest.LinesLF(
+			"key: > # this is a comment",
+			"  line1",
+			"  line2",
+		),
+		"folded with blank lines": stringtest.LinesLF(
+			"text: >",
+			"  first",
+			"",
+			"  second",
+		),
 
 		// Complex flow structures.
-		"flow map in block seq nested": "items:\n  - Pizza: { size: large, toppings: [a, b, c] }\n",
-		"nested flow with anchors":     "data: { key: &v value, list: [*v, *v] }\n",
-		"deep nested flow":             "a: {b: {c: {d: {e: value}}}}\n",
+		"flow map in block seq nested": stringtest.LinesLF(
+			"items:",
+			"  - Pizza: { size: large, toppings: [a, b, c] }",
+		),
+		"nested flow with anchors": "data: { key: &v value, list: [*v, *v] }\n",
+		"deep nested flow":         "a: {b: {c: {d: {e: value}}}}\n",
 
 		// Special unicode characters.
 		"zwsp":                  "text: \"foo\u200Bbar\"\n",
@@ -183,33 +326,81 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		"greek key":  "Ελληνικά: Greek\n",
 
 		// More edge cases.
-		"ampersand in value":      "text: \"Tom & Jerry\"\n",
-		"asterisk in value":       "rating: \"5* rating\"\n",
-		"pipe in value":           "options: \"A | B\"\n",
-		"greater in value":        "compare: \"A > B\"\n",
-		"question in value":       "ask: \"Why? Because!\"\n",
-		"empty document":          "---\n...\n",
-		"CRLF line endings":       "key: value\r\nother: data\r\n",
-		"block scalar with CRLF":  "key: |\r\n  line1\r\n  line2\r\n",
-		"nested with CRLF":        "parent:\r\n  child: value\r\n",
-		"multiple keys CRLF":      "a: 1\r\nb: 2\r\nc: 3\r\n",
-		"inline comment CRLF":     "key: value # comment\r\nnext: data\r\n",
-		"folded block CRLF":       "key: >\r\n  line1\r\n  line2\r\n",
-		"literal with keep CRLF":  "key: |+\r\n  content\r\n\r\n",
-		"mixed LF and CRLF":       "key: value\nother: data\r\n",
-		"quoted string CRLF":      "key: \"line1\r\nline2\"\r\n",
-		"plain multiline CRLF":    "key: text\r\n  continued\r\n",
-		"sequence CRLF":           "items:\r\n  - one\r\n  - two\r\n",
-		"flow map CRLF":           "config: {a: 1, b: 2}\r\nnext: value\r\n",
-		"document marker CRLF":    "---\r\nkey: value\r\n",
-		"comment only CRLF":       "# comment\r\nkey: value\r\n",
-		"anchor alias CRLF":       "base: &ref value\r\nuse: *ref\r\n",
-		"literal indent CRLF":     "code: |2\r\n    indented\r\n",
-		"literal strip CRLF":      "text: |-\r\n  content\r\n",
-		"deep nesting CRLF":       "a:\r\n  b:\r\n    c: val\r\n",
-		"blank line between CRLF": "key: value\r\n\r\nnext: data\r\n",
-		"list of maps CRLF":       "items:\r\n  - name: a\r\n    val: 1\r\n",
-		"plain multiline string":  "key: this is\n  a multiline\n  plain string\n",
+		"ampersand in value": "text: \"Tom & Jerry\"\n",
+		"asterisk in value":  "rating: \"5* rating\"\n",
+		"pipe in value":      "options: \"A | B\"\n",
+		"greater in value":   "compare: \"A > B\"\n",
+		"question in value":  "ask: \"Why? Because!\"\n",
+		"empty document":     "---\n...\n",
+		"CRLF line endings":  "key: value\r\nother: data\r\n",
+		"block scalar with CRLF": stringtest.LinesCRLF(
+			"key: |",
+			"  line1",
+			"  line2",
+		),
+		"nested with CRLF": stringtest.LinesCRLF(
+			"parent:",
+			"  child: value",
+		),
+		"multiple keys CRLF": stringtest.LinesCRLF(
+			"a: 1",
+			"b: 2",
+			"c: 3",
+		),
+		"inline comment CRLF": "key: value # comment\r\nnext: data\r\n",
+		"folded block CRLF": stringtest.LinesCRLF(
+			"key: >",
+			"  line1",
+			"  line2",
+		),
+		"literal with keep CRLF": stringtest.LinesCRLF(
+			"key: |+",
+			"  content",
+			"",
+		),
+		"mixed LF and CRLF":  "key: value\nother: data\r\n",
+		"quoted string CRLF": "key: \"line1\r\nline2\"\r\n",
+		"plain multiline CRLF": stringtest.LinesCRLF(
+			"key: text",
+			"  continued",
+		),
+		"sequence CRLF": stringtest.LinesCRLF(
+			"items:",
+			"  - one",
+			"  - two",
+		),
+		"flow map CRLF":        "config: {a: 1, b: 2}\r\nnext: value\r\n",
+		"document marker CRLF": "---\r\nkey: value\r\n",
+		"comment only CRLF":    "# comment\r\nkey: value\r\n",
+		"anchor alias CRLF":    "base: &ref value\r\nuse: *ref\r\n",
+		"literal indent CRLF": stringtest.LinesCRLF(
+			"code: |2",
+			"    indented",
+		),
+		"literal strip CRLF": stringtest.LinesCRLF(
+			"text: |-",
+			"  content",
+		),
+		"deep nesting CRLF": stringtest.LinesCRLF(
+			"a:",
+			"  b:",
+			"    c: val",
+		),
+		"blank line between CRLF": stringtest.LinesCRLF(
+			"key: value",
+			"",
+			"next: data",
+		),
+		"list of maps CRLF": stringtest.LinesCRLF(
+			"items:",
+			"  - name: a",
+			"    val: 1",
+		),
+		"plain multiline string": stringtest.LinesLF(
+			"key: this is",
+			"  a multiline",
+			"  plain string",
+		),
 		"double quoted multiline": "key: \"line1\nline2\"\n",
 		"single quoted multiline": "key: 'line1\nline2'\n",
 		"multiple keys CR":        "a: 1\rb: 2\r",
@@ -635,9 +826,30 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 		},
 		// The chain never crosses a line, including after a gap the
 		// builder flushes.
-		"gap after multi-part token": {input: "''\n\n:"},
-		"quoted scalar before a key": {input: "s: 'q\nr'\n\r\n: v\n   \nj: 1\n"},
-		"sequence end before a key":  {input: "]\n\n:"},
+		"gap after multi-part token": {
+			input: stringtest.JoinLF(
+				"''",
+				"",
+				":",
+			),
+		},
+		"quoted scalar before a key": {
+			input: stringtest.LinesLF(
+				"s: 'q",
+				"r'",
+				"\r",
+				": v",
+				"   ",
+				"j: 1",
+			),
+		},
+		"sequence end before a key": {
+			input: stringtest.JoinLF(
+				"]",
+				"",
+				":",
+			),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -730,16 +942,35 @@ func TestNewLines_PartPositionsMatchLexer(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]string{
-		"simple key-value":    "key: value\n",
-		"nested":              "parent:\n  child: value\n",
-		"sequence":            "items:\n  - one\n  - two\n",
-		"deep nesting":        "a:\n  b:\n    c: val\n",
-		"multiple keys":       "first: 1\nsecond: 2\nthird: 3\n",
-		"inline map":          "config: {key: value}\n",
-		"inline list":         "items: [a, b, c]\n",
-		"comment":             "key: value  # comment\n",
-		"anchor and alias":    "anchor: &name value\nref: *name\n",
-		"unindent after nest": "parent:\n  child: value\nsibling: other\n",
+		"simple key-value": "key: value\n",
+		"nested": stringtest.LinesLF(
+			"parent:",
+			"  child: value",
+		),
+		"sequence": stringtest.LinesLF(
+			"items:",
+			"  - one",
+			"  - two",
+		),
+		"deep nesting": stringtest.LinesLF(
+			"a:",
+			"  b:",
+			"    c: val",
+		),
+		"multiple keys": stringtest.LinesLF(
+			"first: 1",
+			"second: 2",
+			"third: 3",
+		),
+		"inline map":       "config: {key: value}\n",
+		"inline list":      "items: [a, b, c]\n",
+		"comment":          "key: value  # comment\n",
+		"anchor and alias": "anchor: &name value\nref: *name\n",
+		"unindent after nest": stringtest.LinesLF(
+			"parent:",
+			"  child: value",
+			"sibling: other",
+		),
 	}
 
 	for name, input := range tcs {
@@ -796,9 +1027,20 @@ func TestNewLines_SplitTokenOffsets(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]string{
-		"literal block":                    "script: |\n  line1\n  line2\n",
-		"folded block":                     "text: >\n  first\n  second\n",
-		"leading indent then continuation": "  b\ns:",
+		"literal block": stringtest.LinesLF(
+			"script: |",
+			"  line1",
+			"  line2",
+		),
+		"folded block": stringtest.LinesLF(
+			"text: >",
+			"  first",
+			"  second",
+		),
+		"leading indent then continuation": stringtest.JoinLF(
+			"  b",
+			"s:",
+		),
 		"multiline string": `key: "line1
   line2"
 `,
@@ -880,7 +1122,11 @@ func TestNewLines_OffsetRuneCount_Continuation(t *testing.T) {
 	// Continuation parts of a multi-line token take their offset from the
 	// builder's running count, which must advance by runes like the lexer.
 	// "key: héllo\n" is 11 runes, so the continuation starts at offset 12.
-	input := "key: h\u00e9llo\n  w\u00f6rld\nnext: v\n"
+	input := stringtest.LinesLF(
+		"key: h\u00e9llo",
+		"  w\u00f6rld",
+		"next: v",
+	)
 	lines := newLines(input)
 	require.Equal(t, 3, lines.Len())
 
@@ -996,9 +1242,14 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				want: []string{"", "line1\nline2\n\n", ""},
 			},
 			"literal followed by a key": {
-				input: "key: |\n  line1\n  line2\nnext: 1\n",
-				line:  2,
-				want:  []string{"", "line1\nline2\n"},
+				input: stringtest.LinesLF(
+					"key: |",
+					"  line1",
+					"  line2",
+					"next: 1",
+				),
+				line: 2,
+				want: []string{"", "line1\nline2\n"},
 			},
 		}
 
@@ -1087,21 +1338,95 @@ func TestNewLines_BlockScalars(t *testing.T) {
 			input string
 			want  string // Value of the block scalar.
 		}{
-			"literal keep with trailing blanks": {input: "key: |+\n  content\n\n", want: "content\n\n"},
-			"literal strip with content":        {input: "key: |-\n  content\n", want: "content"},
-			"literal clip default":              {input: "key: |\n  content\n", want: "content\n"},
-			"folded keep with trailing blanks":  {input: "key: >+\n  line1\n  line2\n\n", want: "line1 line2\n\n"},
-			"folded strip":                      {input: "key: >-\n  line1\n  line2\n", want: "line1 line2"},
-			"literal keep multiple trailing":    {input: "key: |+\n  content\n\n\n", want: "content\n\n\n"},
+			"literal keep with trailing blanks": {
+				input: stringtest.LinesLF(
+					"key: |+",
+					"  content",
+					"",
+				),
+				want: "content\n\n",
+			},
+			"literal strip with content": {
+				input: stringtest.LinesLF(
+					"key: |-",
+					"  content",
+				),
+				want: "content",
+			},
+			"literal clip default": {
+				input: stringtest.LinesLF(
+					"key: |",
+					"  content",
+				),
+				want: "content\n",
+			},
+			"folded keep with trailing blanks": {
+				input: stringtest.LinesLF(
+					"key: >+",
+					"  line1",
+					"  line2",
+					"",
+				),
+				want: "line1 line2\n\n",
+			},
+			"folded strip": {
+				input: stringtest.LinesLF(
+					"key: >-",
+					"  line1",
+					"  line2",
+				),
+				want: "line1 line2",
+			},
+			"literal keep multiple trailing": {
+				input: stringtest.LinesLF(
+					"key: |+",
+					"  content",
+					"",
+					"",
+				),
+				want: "content\n\n\n",
+			},
 
 			// Adjacent lines of a folded scalar fold to a space. A blank
 			// line between them keeps a line break instead, and each blank
 			// line after the first keeps one more.
-			"folded without a blank line":      {input: "text: >\n  first\n  second\n", want: "first second\n"},
-			"folded with a blank line":         {input: "text: >\n  first\n\n  second\n", want: "first\nsecond\n"},
-			"folded with multiple blank lines": {input: "text: >\n  first\n\n\n  second\n", want: "first\n\nsecond\n"},
+			"folded without a blank line": {
+				input: stringtest.LinesLF(
+					"text: >",
+					"  first",
+					"  second",
+				),
+				want: "first second\n",
+			},
+			"folded with a blank line": {
+				input: stringtest.LinesLF(
+					"text: >",
+					"  first",
+					"",
+					"  second",
+				),
+				want: "first\nsecond\n",
+			},
+			"folded with multiple blank lines": {
+				input: stringtest.LinesLF(
+					"text: >",
+					"  first",
+					"",
+					"",
+					"  second",
+				),
+				want: "first\n\nsecond\n",
+			},
 			// A literal scalar keeps its blank lines as they are.
-			"literal with a blank line": {input: "text: |\n  first\n\n  second\n", want: "first\n\nsecond\n"},
+			"literal with a blank line": {
+				input: stringtest.LinesLF(
+					"text: |",
+					"  first",
+					"",
+					"  second",
+				),
+				want: "first\n\nsecond\n",
+			},
 		}
 
 		for name, tc := range tcs {
@@ -1251,7 +1576,11 @@ func TestNewLines_QuotedMultilineActualNewlines(t *testing.T) {
 			wantTokenType: token.DoubleQuoteType,
 		},
 		"double quoted with multiple newlines": {
-			input:         "key: \"a\nb\nc\"\n",
+			input: stringtest.LinesLF(
+				`key: "a`,
+				"b",
+				`c"`,
+			),
 			want:          3,
 			wantTokenType: token.DoubleQuoteType,
 		},
@@ -1365,36 +1694,74 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 		want  map[int]int // Column of the first part on each 1-indexed line.
 	}{
 		"single-line with following content": {
-			input: "key: |\n  content\nnext: value\n",
-			want:  map[int]int{2: 3},
+			input: stringtest.LinesLF(
+				"key: |",
+				"  content",
+				"next: value",
+			),
+			want: map[int]int{2: 3},
 		},
 		"single-line standalone": {
-			input: "key: |\n  content\n",
-			want:  map[int]int{2: 3},
+			input: stringtest.LinesLF(
+				"key: |",
+				"  content",
+			),
+			want: map[int]int{2: 3},
 		},
 		"multi-line with following content": {
-			input: "key: |\n  line1\n  line2\nnext: data\n",
-			want:  map[int]int{2: 3, 3: 1},
+			input: stringtest.LinesLF(
+				"key: |",
+				"  line1",
+				"  line2",
+				"next: data",
+			),
+			want: map[int]int{2: 3, 3: 1},
 		},
 		"multi-line standalone": {
-			input: "key: |\n  line1\n  line2\n",
-			want:  map[int]int{2: 3, 3: 1},
+			input: stringtest.LinesLF(
+				"key: |",
+				"  line1",
+				"  line2",
+			),
+			want: map[int]int{2: 3, 3: 1},
 		},
 		"three-line with following content": {
-			input: "key: |\n  a\n  b\n  c\nnext: data\n",
-			want:  map[int]int{2: 3, 3: 1, 4: 1},
+			input: stringtest.LinesLF(
+				"key: |",
+				"  a",
+				"  b",
+				"  c",
+				"next: data",
+			),
+			want: map[int]int{2: 3, 3: 1, 4: 1},
 		},
 		"three-line standalone": {
-			input: "key: |\n  a\n  b\n  c\n",
-			want:  map[int]int{2: 3, 3: 1, 4: 1},
+			input: stringtest.LinesLF(
+				"key: |",
+				"  a",
+				"  b",
+				"  c",
+			),
+			want: map[int]int{2: 3, 3: 1, 4: 1},
 		},
 		"deeper indentation": {
-			input: "a:\n  key: |\n    line1\n    line2\n  next: 1\n",
-			want:  map[int]int{3: 5, 4: 1},
+			input: stringtest.LinesLF(
+				"a:",
+				"  key: |",
+				"    line1",
+				"    line2",
+				"  next: 1",
+			),
+			want: map[int]int{3: 5, 4: 1},
 		},
 		"leading blank line": {
-			input: "key: |\n\n  line2\nnext: 1\n",
-			want:  map[int]int{2: 1, 3: 3},
+			input: stringtest.LinesLF(
+				"key: |",
+				"",
+				"  line2",
+				"next: 1",
+			),
+			want: map[int]int{2: 1, 3: 3},
 		},
 	}
 
@@ -1440,8 +1807,23 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 			input string
 			want  string // Origin of the token for "value".
 		}{
-			"single blank line":    {input: "key: value\n\nnext: data\n", want: " value\n\n"},
-			"multiple blank lines": {input: "key: value\n\n\nnext: data\n", want: " value\n\n\n"},
+			"single blank line": {
+				input: stringtest.LinesLF(
+					"key: value",
+					"",
+					"next: data",
+				),
+				want: " value\n\n",
+			},
+			"multiple blank lines": {
+				input: stringtest.LinesLF(
+					"key: value",
+					"",
+					"",
+					"next: data",
+				),
+				want: " value\n\n\n",
+			},
 		}
 
 		for name, tc := range tcs {
@@ -1461,35 +1843,91 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]string{
-			"blank line between keys": "key: value\n\nnext: data\n",
+			"blank line between keys": stringtest.LinesLF(
+				"key: value",
+				"",
+				"next: data",
+			),
 
 			// The lexer folds the lines before a merge key into its token and
 			// positions the token on the line of the key, so the lines start
 			// that many lines earlier. Other first tokens open on an earlier
 			// line the same way.
-			"plain lines before a merge key":          "x\nx\n<<: *an\n",
-			"indented text before a merge key":        "  text\n<<: *an\n",
-			"alias and blank line before a merge key": "x\n*a\n\n<<: *an\n",
-			"blank lines before the first key":        "\n\nfoo: 1\n",
-			"quoted scalar of two lines":              "\"a\n b\"\n",
-			"bare literal block":                      "|\n  a\n  b\n",
-			"comment before the first key":            "# c\nk: v\n",
+			"plain lines before a merge key": stringtest.LinesLF(
+				"x",
+				"x",
+				"<<: *an",
+			),
+			"indented text before a merge key": stringtest.LinesLF(
+				"  text",
+				"<<: *an",
+			),
+			"alias and blank line before a merge key": stringtest.LinesLF(
+				"x",
+				"*a",
+				"",
+				"<<: *an",
+			),
+			"blank lines before the first key": "\n\nfoo: 1\n",
+			"quoted scalar of two lines": stringtest.LinesLF(
+				`"a`,
+				` b"`,
+			),
+			"bare literal block": stringtest.LinesLF(
+				"|",
+				"  a",
+				"  b",
+			),
+			"comment before the first key": "# c\nk: v\n",
 
 			// The lexer emits the blank line after a bare block scalar header
 			// as a token that is a line ending alone, positioned on its own
 			// line. It ends the header's line rather than syncing past it, so
 			// the blank line keeps its row.
-			"blank line after a bare folded header":  ">\n\na: 1\n",
-			"blank line after a bare literal header": "|\n\nr\n",
-			"blank lines after bare folded headers":  "\n>\n\n>\n# c\n",
+			"blank line after a bare folded header": stringtest.LinesLF(
+				">",
+				"",
+				"a: 1",
+			),
+			"blank line after a bare literal header": stringtest.LinesLF(
+				"|",
+				"",
+				"r",
+			),
+			"blank lines after bare folded headers": stringtest.LinesLF(
+				"",
+				">",
+				"",
+				">",
+				"# c",
+			),
 
 			// The lexer reports a block scalar content token at the line of
 			// its last content line, so the builder must not treat that line
 			// as a gap to sync forward to.
-			"blank content then key":    "b: |\n  \nlast: 1\n# c\n",
-			"blank content then marker": "b: |\n  \n---\n",
-			"content then marker":       "b: |\n   y\n---\n---\nlast: 1\n",
-			"blank content then tagged": "b: |\n\n!!str s: 1\n",
+			"blank content then key": stringtest.LinesLF(
+				"b: |",
+				"  ",
+				"last: 1",
+				"# c",
+			),
+			"blank content then marker": stringtest.LinesLF(
+				"b: |",
+				"  ",
+				"---",
+			),
+			"content then marker": stringtest.LinesLF(
+				"b: |",
+				"   y",
+				"---",
+				"---",
+				"last: 1",
+			),
+			"blank content then tagged": stringtest.LinesLF(
+				"b: |",
+				"",
+				"!!str s: 1",
+			),
 		}
 
 		for name, input := range tcs {
@@ -1555,7 +1993,14 @@ func TestNewLines_TrailingBlankLines(t *testing.T) {
 		"one trailing blank line":  {input: "a: 1\n\n", want: 2},
 		"two trailing blank lines": {input: "a: 1\n\n\n", want: 3},
 		"crlf trailing blank line": {input: "a: 1\r\n\r\n", want: 2},
-		"comment then blank line":  {input: "a: 1\n# c\n\n", want: 3},
+		"comment then blank line": {
+			input: stringtest.LinesLF(
+				"a: 1",
+				"# c",
+				"",
+			),
+			want: 3,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1626,20 +2071,37 @@ func TestLines_TokenAt(t *testing.T) {
 			line  int
 		}{
 			"after plain value": {
-				input: "parent:\n  child: x\n  other: 1\n",
-				line:  2,
+				input: stringtest.LinesLF(
+					"parent:",
+					"  child: x",
+					"  other: 1",
+				),
+				line: 2,
 			},
 			"after quoted value": {
-				input: "parent:\n  child: \"x\"\n  other: 1\n",
-				line:  2,
+				input: stringtest.LinesLF(
+					"parent:",
+					`  child: "x"`,
+					"  other: 1",
+				),
+				line: 2,
 			},
 			"after bool value": {
-				input: "parent:\n  child: true\n  other: 1\n",
-				line:  2,
+				input: stringtest.LinesLF(
+					"parent:",
+					"  child: true",
+					"  other: 1",
+				),
+				line: 2,
 			},
 			"after block scalar": {
-				input: "parent:\n  child: |\n    a\n  other: 1\n",
-				line:  3,
+				input: stringtest.LinesLF(
+					"parent:",
+					"  child: |",
+					"    a",
+					"  other: 1",
+				),
+				line: 3,
 			},
 		}
 
@@ -1676,10 +2138,39 @@ func TestLines_TokenAt(t *testing.T) {
 			// token before it, as it does with indentation. The token after
 			// it starts with the line ending, so no token holds text on the
 			// whitespace line after the tab.
-			"tab line in mapping":         {input: "a: 1\n\t\nb: 2\n", pos: position.New(1, 0)},
-			"tab line in sequence":        {input: "- a\n\t\n- b\n", pos: position.New(1, 0)},
-			"tab line in nested sequence": {input: "a:\n  - 1\n\t\n  - 2\n", pos: position.New(2, 0)},
-			"tab line with CRLF":          {input: "a: 1\r\n\t\r\nb: 2\r\n", pos: position.New(1, 0)},
+			"tab line in mapping": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"\t",
+					"b: 2",
+				),
+				pos: position.New(1, 0),
+			},
+			"tab line in sequence": {
+				input: stringtest.LinesLF(
+					"- a",
+					"\t",
+					"- b",
+				),
+				pos: position.New(1, 0),
+			},
+			"tab line in nested sequence": {
+				input: stringtest.LinesLF(
+					"a:",
+					"  - 1",
+					"\t",
+					"  - 2",
+				),
+				pos: position.New(2, 0),
+			},
+			"tab line with CRLF": {
+				input: stringtest.LinesCRLF(
+					"a: 1",
+					"\t",
+					"b: 2",
+				),
+				pos: position.New(1, 0),
+			},
 		}
 
 		for name, tc := range tcs {
@@ -1706,7 +2197,11 @@ func TestLines_TokenRanges(t *testing.T) {
 	// A block scalar whose content is one lexer token on lines 1 and 2,
 	// and the same two lines collected in reverse order. A position inside
 	// the content resolves to the whole token.
-	srcTks := tokens.Tokenize("key: |\n  line1\n  line2\n")
+	srcTks := tokens.Tokenize(stringtest.LinesLF(
+		"key: |",
+		"  line1",
+		"  line2",
+	))
 	src := line.NewLines(srcTks)
 	reversed := line.Collect(src.Line(2), src.Line(1))
 
@@ -1718,7 +2213,11 @@ func TestLines_TokenRanges(t *testing.T) {
 	// numbers of the tokens differ from the indices of their lines.
 	gapped := line.NewLines(joinTokens(
 		tokenizeAt("key1: value1\nkey2: value2\n", 10),
-		tokenizeAt("key3: |\n  a\n  b\n", 40),
+		tokenizeAt(stringtest.LinesLF(
+			"key3: |",
+			"  a",
+			"  b",
+		), 40),
 	))
 	require.Equal(t, 5, gapped.Len())
 	require.Equal(t, 40, gapped.Line(2).Number())
@@ -1862,7 +2361,11 @@ func TestLines_TokenRanges(t *testing.T) {
 		// This token from another stream sits at the same position as the
 		// block scalar content but differs in its text, so it matches
 		// nothing.
-		other := tokens.Tokenize("key: |\n  other\n  lines\n")
+		other := tokens.Tokenize(stringtest.LinesLF(
+			"key: |",
+			"  other",
+			"  lines",
+		))
 		assert.Nil(t, src.TokenRanges(other[len(other)-1]))
 	})
 }
@@ -1987,7 +2490,11 @@ func TestLines_ContentRanges(t *testing.T) {
 	t.Run("space-only part contributes no range", func(t *testing.T) {
 		t.Parallel()
 
-		tks := tokens.Tokenize("a: 'x\n   \n  y'\n")
+		tks := tokens.Tokenize(stringtest.LinesLF(
+			"a: 'x",
+			"   ",
+			"  y'",
+		))
 		lines := line.NewLines(tks)
 		require.Len(t, tks, 3)
 
@@ -2322,7 +2829,11 @@ func TestLines_SliceLines(t *testing.T) {
 	t.Parallel()
 
 	// Widths 4, 6, and 8.
-	lines := newLines("a: 1\nbb: 22\nccc: 333\n")
+	lines := newLines(stringtest.LinesLF(
+		"a: 1",
+		"bb: 22",
+		"ccc: 333",
+	))
 
 	tcs := map[string]struct {
 		input position.Range

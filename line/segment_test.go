@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -63,9 +64,12 @@ func TestLine_Kind(t *testing.T) {
 			want:  []kind.Kind{kind.PunctuationSequenceEntry, kind.PunctuationMappingValue, kind.LiteralString},
 		},
 		"block scalar continuation is a string": {
-			input: "text: |\n  hello\n",
-			line:  1,
-			want:  []kind.Kind{kind.LiteralString},
+			input: stringtest.LinesLF(
+				"text: |",
+				"  hello",
+			),
+			line: 1,
+			want: []kind.Kind{kind.LiteralString},
 		},
 	}
 
@@ -183,14 +187,22 @@ func TestView_Segments(t *testing.T) {
 				want:     "literalString(abc) literalString(def)",
 			},
 			"the indentation before a comment is Text": {
-				input: "a: 1\n   # c\n",
-				line:  1,
-				want:  "text(   ) comment(# c)",
+				input: stringtest.LinesLF(
+					"a: 1",
+					"   # c",
+				),
+				line: 1,
+				want: "text(   ) comment(# c)",
 			},
 			"a line of only spaces in a block scalar is Text": {
-				input: "k: |\n  a\n    \n  b\n",
-				line:  2,
-				want:  "text(    )",
+				input: stringtest.LinesLF(
+					"k: |",
+					"  a",
+					"    ",
+					"  b",
+				),
+				line: 2,
+				want: "text(    )",
 			},
 			"the line ending is not part of any segment": {
 				input: "a: 1\r\nb: 2\r\n",
@@ -213,7 +225,11 @@ func TestView_Segments(t *testing.T) {
 	t.Run("segments cover the content once in column order", func(t *testing.T) {
 		t.Parallel()
 
-		input := "list:\n  - &a [1, 2]\n  - *a\n"
+		input := stringtest.LinesLF(
+			"list:",
+			"  - &a [1, 2]",
+			"  - *a",
+		)
 		view := newTestView(t, input, 3)
 
 		for i, ln := range view.All() {
@@ -319,7 +335,11 @@ func TestView_Segments(t *testing.T) {
 	t.Run("an empty line has no segments", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, "a: 1\n\nb: 2\n", 3)
+		view := newTestView(t, stringtest.LinesLF(
+			"a: 1",
+			"",
+			"b: 2",
+		), 3)
 
 		assert.Empty(t, slices.Collect(view.Segments(1)))
 	})

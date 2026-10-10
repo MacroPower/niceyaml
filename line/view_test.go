@@ -104,7 +104,13 @@ func TestNewView(t *testing.T) {
 func TestNewView_Spans(t *testing.T) {
 	t.Parallel()
 
-	lines := newLines("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n")
+	lines := newLines(stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+		"d: 4",
+		"e: 5",
+	))
 
 	tcs := map[string]struct {
 		spans []position.Span
@@ -152,7 +158,11 @@ func TestNewView_Spans(t *testing.T) {
 func TestView_Contains(t *testing.T) {
 	t.Parallel()
 
-	view := newTestView(t, "a: 1\nb: 2\nc: 3\n", 3)
+	view := newTestView(t, stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+	), 3)
 	sliced := view.Slice(position.NewSpan(1, 3))
 
 	var nilView *line.View
@@ -306,7 +316,11 @@ func TestView_All(t *testing.T) {
 func TestView_Flag(t *testing.T) {
 	t.Parallel()
 
-	view := newTestView(t, "a: 1\nb: 2\nc: 3\n", 3)
+	view := newTestView(t, stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+	), 3)
 	assert.Equal(t, []line.Flag{line.FlagDefault, line.FlagDefault, line.FlagDefault}, flagsOf(view))
 
 	view.SetFlag(1, line.FlagInserted)
@@ -434,7 +448,11 @@ func TestView_AddOverlay(t *testing.T) {
 		// Both ranges end on the line before they start, one at column 0
 		// and one past it.
 		"inverted ranges add nothing": {
-			input: "a: 1\nb: 2\nc: 3\n",
+			input: stringtest.LinesLF(
+				"a: 1",
+				"b: 2",
+				"c: 3",
+			),
 			ranges: []position.Range{
 				position.NewRange(position.New(2, 0), position.New(1, 0)),
 				position.NewRange(position.New(2, 0), position.New(1, 3)),
@@ -1149,7 +1167,11 @@ func TestView_String(t *testing.T) {
 	t.Run("annotations on several lines", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, "a: 1\nb: 2\nc: 3\n", 3)
+		view := newTestView(t, stringtest.LinesLF(
+			"a: 1",
+			"b: 2",
+			"c: 3",
+		), 3)
 		view.Annotate(0, line.Annotation{Content: "top", Placement: line.Above})
 		view.Annotate(2, line.Annotation{Content: "bottom", Placement: line.Below, Col: 3})
 

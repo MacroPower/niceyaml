@@ -6,6 +6,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -26,7 +27,11 @@ func TestSplit(t *testing.T) {
 			wantNumbers: []int{1},
 		},
 		"block scalar splits per line": {
-			input:       "foo: |-\n  hello\n  world\n",
+			input: stringtest.LinesLF(
+				"foo: |-",
+				"  hello",
+				"  world",
+			),
 			wantContent: []string{"foo: |-", "  hello", "  world"},
 			wantNumbers: []int{1, 2, 3},
 		},
@@ -35,7 +40,12 @@ func TestSplit(t *testing.T) {
 		// directive. Tokenize restores it, so the token opens a new line
 		// rather than joining the one before it.
 		"explicit key after header": {
-			input:       "x: 1\n---\n? a\n: b\n",
+			input: stringtest.LinesLF(
+				"x: 1",
+				"---",
+				"? a",
+				": b",
+			),
 			wantContent: []string{"x: 1", "---", "? a", ": b"},
 			wantNumbers: []int{1, 2, 3, 4},
 		},
@@ -85,17 +95,42 @@ func TestLine_Runes(t *testing.T) {
 		"multibyte runes":                  {input: "k: héllo\nz: 1", want: []string{"k: héllo\n", "z: 1"}},
 		// The lexer repeats the newline after a tag at the start of the next
 		// token. The line still yields it once.
-		"newline repeated after tag": {input: "a: !!map\n  b: 1\n", want: []string{"a: !!map\n", "  b: 1\n"}},
-		"crlf repeated after tag":    {input: "a: !t\r\n  b: 1\r\n", want: []string{"a: !t\n", "  b: 1\n"}},
-		"crlf cut after comment":     {input: "a: b # c\r\nd: e\r\n", want: []string{"a: b # c\n", "d: e\n"}},
-		"bare cr ending":             {input: "a: 1\rb: 2\r", want: []string{"a: 1\n", "b: 2\n"}},
-		"blank line after tag":       {input: "a: !t\n\n  b: 1\n", want: []string{"a: !t\n", "\n", "  b: 1\n"}},
+		"newline repeated after tag": {
+			input: stringtest.LinesLF(
+				"a: !!map",
+				"  b: 1",
+			),
+			want: []string{"a: !!map\n", "  b: 1\n"},
+		},
+		"crlf repeated after tag": {
+			input: stringtest.LinesCRLF(
+				"a: !t",
+				"  b: 1",
+			),
+			want: []string{"a: !t\n", "  b: 1\n"},
+		},
+		"crlf cut after comment": {input: "a: b # c\r\nd: e\r\n", want: []string{"a: b # c\n", "d: e\n"}},
+		"bare cr ending":         {input: "a: 1\rb: 2\r", want: []string{"a: 1\n", "b: 2\n"}},
+		"blank line after tag": {
+			input: stringtest.LinesLF(
+				"a: !t",
+				"",
+				"  b: 1",
+			),
+			want: []string{"a: !t\n", "\n", "  b: 1\n"},
+		},
 		// The empty content of a block scalar that keeps its trailing
 		// lines joins the last line after its ending. The line still
 		// yields the ending.
-		"keep block scalar at the end":        {input: "a: |+\n", want: []string{"a: |+\n"}},
-		"keep block scalar with crlf":         {input: "a: |+\r\n", want: []string{"a: |+\n"}},
-		"nested keep block scalar at the end": {input: "a:\n  b: |+\n", want: []string{"a:\n", "  b: |+\n"}},
+		"keep block scalar at the end": {input: "a: |+\n", want: []string{"a: |+\n"}},
+		"keep block scalar with crlf":  {input: "a: |+\r\n", want: []string{"a: |+\n"}},
+		"nested keep block scalar at the end": {
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: |+",
+			),
+			want: []string{"a:\n", "  b: |+\n"},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -157,7 +192,12 @@ func TestLine_Runes(t *testing.T) {
 func TestLine_Tokens(t *testing.T) {
 	t.Parallel()
 
-	src := tokens.Tokenize("foo: |-\n  hello\n  world\nbar: baz\n")
+	src := tokens.Tokenize(stringtest.LinesLF(
+		"foo: |-",
+		"  hello",
+		"  world",
+		"bar: baz",
+	))
 	lines := line.NewLines(src)
 	require.Equal(t, 4, lines.Len())
 
@@ -203,7 +243,12 @@ func TestLine_Tokens(t *testing.T) {
 func TestLine_TokenSpan(t *testing.T) {
 	t.Parallel()
 
-	lines := newLines("foo: |-\n  hello\n  world\nbar:   baz\n")
+	lines := newLines(stringtest.LinesLF(
+		"foo: |-",
+		"  hello",
+		"  world",
+		"bar:   baz",
+	))
 	require.Equal(t, 4, lines.Len())
 
 	content := lines.Line(1).TokenAt(2)
