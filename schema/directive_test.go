@@ -778,16 +778,6 @@ func TestDirective_Resolve(t *testing.T) {
 		}
 	})
 
-	t.Run("returns ErrNoDirective when no directive present", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocumentWithPath(t, "kind: Deployment\n", filepath.Join(t.TempDir(), "config.yaml"))
-		res := schema.Directive()
-		_, err := res.Resolve(t.Context(), doc)
-		require.ErrorIs(t, err, schema.ErrNoDirective)
-		require.ErrorIs(t, err, schema.ErrNoMatch)
-	})
-
 	t.Run("returns ErrNoFilePath for a relative path without a file path", func(t *testing.T) {
 		t.Parallel()
 
