@@ -3580,76 +3580,49 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 		---
 		name: second
 	`)
-	namePath := paths.Current().Child("name")
 
-	// The first line of each error's message.
-	headlines := func(t *testing.T, errs []error) []string {
-		t.Helper()
+	validator := rejectingValidator(niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name"))))
 
-		got := make([]string, 0, len(errs))
-
-		for _, err := range errs {
-			require.Error(t, err)
-
-			got = append(got, strings.SplitN(err.Error(), "\n", 2)[0])
-		}
-
-		return got
+	tcs := map[string]struct {
+		// Returns the error of one document.
+		call func(ctx context.Context, doc *niceyaml.Node) error
+		// The first line of the error of each document.
+		want []string
+	}{
+		"validator errors": {
+			call: func(ctx context.Context, doc *niceyaml.Node) error {
+				return doc.Validate(ctx, validator)
+			},
+			want: []string{"1:7: $.name: bad name", "3:7: $.name: bad name"},
+		},
+		"self validation errors": {
+			call: decodeErrorAs[failingValidator],
+			want: []string{"1:7: $.name: rejected", "3:7: $.name: rejected"},
+		},
+		"decode errors": {
+			call: decodeErrorAs[struct {
+				Name int `yaml:"name"`
+			}],
+			want: []string{"1:7: $.name: expected integer, got string", "3:7: $.name: expected integer, got string"},
+		},
 	}
 
-	t.Run("validator errors resolve in their own document", func(t *testing.T) {
-		t.Parallel()
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		source := niceyaml.NewSourceFromString(input)
-		d := source.Documents()
+			var got []string
 
-		validator := rejectingValidator(niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
+			for _, doc := range niceyaml.NewSourceFromString(input).Documents() {
+				err := tc.call(t.Context(), doc)
+				require.Error(t, err)
 
-		var errs []error
+				got = append(got, strings.SplitN(err.Error(), "\n", 2)[0])
+			}
 
-		for _, dd := range d {
-			errs = append(errs, dd.Validate(t.Context(), validator))
-		}
-
-		assert.Equal(t, []string{"1:7: $.name: bad name", "3:7: $.name: bad name"}, headlines(t, errs))
-	})
-
-	t.Run("self validation errors resolve in their own document", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(input)
-		d := source.Documents()
-
-		var errs []error
-
-		for _, dd := range d {
-			_, err := dd.Decode[failingValidator](t.Context())
-			errs = append(errs, err)
-		}
-
-		assert.Equal(t, []string{"1:7: $.name: rejected", "3:7: $.name: rejected"}, headlines(t, errs))
-	})
-
-	t.Run("decode errors report their own document's line", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(input)
-		d := source.Documents()
-
-		var errs []error
-
-		for _, dd := range d {
-			_, err := dd.Decode[struct {
-				Name int `yaml:"name"`
-			}](t.Context())
-			errs = append(errs, err)
-		}
-
-		got := headlines(t, errs)
-		require.Len(t, got, 2)
-		assert.True(t, strings.HasPrefix(got[0], "1:7: "), got[0])
-		assert.True(t, strings.HasPrefix(got[1], "3:7: "), got[1])
-	})
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestWithDisallowUnknownFields_ControlCharacters(t *testing.T) {
