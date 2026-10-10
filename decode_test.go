@@ -8239,8 +8239,11 @@ func TestNode_At_NotFound(t *testing.T) {
 
 				var bound *niceyaml.SourceError
 
+				// The error binds to the receiver, not to a copy scoped to
+				// the path that did not resolve.
 				require.ErrorAs(t, err, &bound, method)
 				assert.Same(t, node, bound.Node(), method)
+				assert.Same(t, doc, bound.Document(), method)
 
 				rng, ok := bound.Range()
 				assert.Equal(t, located, ok, method)
@@ -8302,22 +8305,6 @@ func TestNode_At_NotFound(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, nodes)
 	})
-}
-
-func TestDocument_At_ErrorBoundToReceiver(t *testing.T) {
-	t.Parallel()
-
-	dd := yamltest.FirstDocument(t, "a:\n  b: 1\nc: 2\n")
-	scoped := yamltest.At(t, dd, paths.Current().Child("a"))
-
-	_, err := scoped.At(paths.Current().Child("missing"))
-	require.ErrorIs(t, err, paths.ErrNotFound)
-
-	// At binds the error to its receiver, not to a copy scoped to the
-	// path that did not resolve.
-	bound := yamltest.RequireSourceError(t, err)
-	assert.Same(t, scoped, bound.Node())
-	assert.Same(t, dd, bound.Document())
 }
 
 func TestDocument_PathAnchors(t *testing.T) {
