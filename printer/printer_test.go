@@ -3111,12 +3111,14 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
+		gutter     printer.Gutter
 		input      string
 		annotation line.Annotation
 		lineIndex  int
 		want       string
 	}{
 		"above annotation at col 0": {
+			gutter:    printer.NoGutter,
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -3127,6 +3129,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			want: "# comment\nkey: value",
 		},
 		"above annotation with col padding": {
+			gutter:    printer.NoGutter,
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -3137,6 +3140,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			want: "     ^-- error here\nkey: value",
 		},
 		"below annotation at col 0": {
+			gutter:    printer.NoGutter,
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -3147,6 +3151,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			want: "key: value\n^ comment below",
 		},
 		"below annotation with col padding": {
+			gutter:    printer.NoGutter,
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -3157,6 +3162,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			want: "key: value\n     ^ error here",
 		},
 		"below annotation under wide runes": {
+			gutter:    printer.NoGutter,
 			input:     "日本語: 値",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -3169,6 +3175,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			want: "日本語: 値\n        ^ bad value",
 		},
 		"below annotation past the end of wide runes": {
+			gutter:    printer.NoGutter,
 			input:     "日本",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -3179,6 +3186,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			want: "日本\n      ^ after",
 		},
 		"below annotation on second line": {
+			gutter: printer.NoGutter,
 			input: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -3196,6 +3204,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			),
 		},
 		"above annotation on second line": {
+			gutter: printer.NoGutter,
 			input: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -3213,6 +3222,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			),
 		},
 		"below annotation with empty content marks its column": {
+			gutter:    printer.NoGutter,
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -3224,6 +3234,46 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 				"  ^",
 			),
 		},
+		"above annotation with line numbers": {
+			gutter:    printer.LineNumberGutter,
+			input:     "key: value",
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:   "@@ -1 +1 @@",
+				Placement: line.Above,
+				Col:       0,
+			},
+			want: "     @@ -1 +1 @@\n   1 key: value",
+		},
+		"below annotation with line numbers": {
+			gutter:    printer.LineNumberGutter,
+			input:     "key: value",
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:   "error",
+				Placement: line.Below,
+				Col:       5,
+			},
+			want: "   1 key: value\n          ^ error",
+		},
+		"below annotation with col padding and line numbers": {
+			gutter: printer.LineNumberGutter,
+			input: stringtest.JoinLF(
+				"first: 1",
+				"second: 2",
+			),
+			lineIndex: 0,
+			annotation: line.Annotation{
+				Content:   "note",
+				Placement: line.Below,
+				Col:       7,
+			},
+			want: stringtest.JoinLF(
+				"   1 first: 1",
+				"            ^ note",
+				"   2 second: 2",
+			),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -3233,7 +3283,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			view := niceyaml.NewSourceFromString(tc.input).View()
 			view.Annotate(tc.lineIndex, tc.annotation)
 
-			p := testPrinter()
+			p := testPrinterWithGutter(tc.gutter)
 			got := p.Print(view)
 
 			assert.Equal(t, tc.want, got)
@@ -3300,69 +3350,6 @@ func TestPrinter_AnnotationFarColumn(t *testing.T) {
 
 			require.NotPanics(t, func() { l = p.Layout(view) })
 			assertLayoutMeasures(t, l, got)
-		})
-	}
-}
-
-func TestPrinter_AnnotationPosition_WithGutter(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input      string
-		annotation line.Annotation
-		lineIndex  int
-		want       string
-	}{
-		"above annotation with line numbers": {
-			input:     "key: value",
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "@@ -1 +1 @@",
-				Placement: line.Above,
-				Col:       0,
-			},
-			want: "     @@ -1 +1 @@\n   1 key: value",
-		},
-		"below annotation with line numbers": {
-			input:     "key: value",
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "error",
-				Placement: line.Below,
-				Col:       5,
-			},
-			want: "   1 key: value\n          ^ error",
-		},
-		"below annotation with col padding and line numbers": {
-			input: stringtest.JoinLF(
-				"first: 1",
-				"second: 2",
-			),
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "note",
-				Placement: line.Below,
-				Col:       7,
-			},
-			want: stringtest.JoinLF(
-				"   1 first: 1",
-				"            ^ note",
-				"   2 second: 2",
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := niceyaml.NewSourceFromString(tc.input).View()
-			view.Annotate(tc.lineIndex, tc.annotation)
-
-			p := testPrinterWithGutter(printer.LineNumberGutter)
-			got := p.Print(view)
-
-			assert.Equal(t, tc.want, got)
 		})
 	}
 }
