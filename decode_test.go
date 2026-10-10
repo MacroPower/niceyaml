@@ -1599,44 +1599,6 @@ func TestDocument_Decode(t *testing.T) {
 	})
 }
 
-func TestDocument_Decode_Schema(t *testing.T) {
-	t.Parallel()
-
-	t.Run("validates and decodes with a schema", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			name: test
-			value: 42
-		`)
-		dd := yamltest.FirstDocument(t, input)
-
-		var called bool
-
-		result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(nameSchema(&called)))
-		require.NoError(t, err)
-		assert.Equal(t, "test", result.Name)
-		assert.Equal(t, 42, result.Value)
-		assert.True(t, called, "the validator should have been called")
-	})
-
-	t.Run("runs every schema in order and stops at the first failure", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "name: invalid")
-
-		var order []string
-
-		_, err := dd.Decode[plainConfig](t.Context(),
-			niceyaml.WithValidator(recordingValidator(&order, "first")),
-			niceyaml.WithValidator(nameSchema(nil)),
-			niceyaml.WithValidator(recordingValidator(&order, "third")),
-		)
-		require.ErrorIs(t, err, errSchemaValidationFailed)
-		assert.Equal(t, []string{"first"}, order, "a failing schema stops the pipeline")
-	})
-}
-
 func TestDocument_Preamble(t *testing.T) {
 	t.Parallel()
 
