@@ -10303,46 +10303,84 @@ func TestErrDecode(t *testing.T) {
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 	})
 
-	t.Run("validator error does not match", func(t *testing.T) {
+	t.Run("error of another kind does not match", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "value: 1\n")
+		tooLow := niceyaml.NewError("too low", niceyaml.AtPath(paths.Current().Child("value")))
 
-		rejects := rejectingValidator(niceyaml.NewError("too low", niceyaml.AtPath(paths.Current().Child("value"))))
+		tcs := map[string]struct {
+			decode func(ctx context.Context, dd *niceyaml.Node) error
+			is     error
+			input  string
+			// The message of the error, for a case that checks it.
+			want string
+		}{
+			"validator error": {
+				input: "value: 1\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct{ Value int }](ctx, niceyaml.WithValidator(rejectingValidator(tooLow)))
 
-		_, err := dd.Decode[struct{ Value int }](t.Context(), niceyaml.WithValidator(rejects))
-		require.EqualError(t, err, "1:8: $.value: too low")
-		require.NotErrorIs(t, err, niceyaml.ErrDecode)
-	})
+					return err
+				},
+				is:   tooLow,
+				want: "1:8: $.value: too low",
+			},
+			"self validator error": {
+				input:  "value: 1\n",
+				decode: decodeErrorAs[selfRejecting],
+				is:     errUnmarshal,
+			},
+			"excessive aliasing": {
+				input:  yamltest.AliasLevels(10),
+				decode: decodeErrorAs[any],
+				is:     niceyaml.ErrExcessiveAliasing,
+			},
+			"decode target": {
+				input: "value: 1",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					return dd.DecodeInto(ctx, nil)
+				},
+				is: niceyaml.ErrDecodeTarget,
+			},
+			"canceled context": {
+				input: "value: 1",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					ctx, cancel := context.WithCancel(ctx)
+					cancel()
 
-	t.Run("self validator error does not match", func(t *testing.T) {
-		t.Parallel()
+					return decodeErrorAs[cancelAwareUnmarshaler](ctx, dd)
+				},
+				is: context.Canceled,
+			},
+			// The context of the decode has not ended, and the value reports
+			// the error of a deadline of its own.
+			"context error of a value the decode locates": {
+				input:  "value: 1\n",
+				decode: decodeErrorAs[struct{ Value deadlineUnmarshaler }],
+				is:     context.DeadlineExceeded,
+				want:   "lookup stopped: context deadline exceeded",
+			},
+			"context error of the node the decode reads": {
+				input:  "value: 1\n",
+				decode: decodeErrorAs[deadlineUnmarshaler],
+				is:     context.DeadlineExceeded,
+				want:   "lookup stopped: context deadline exceeded",
+			},
+		}
 
-		dd := yamltest.FirstDocument(t, "value: 1\n")
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		_, err := dd.Decode[selfRejecting](t.Context())
-		require.ErrorIs(t, err, errUnmarshal)
-		require.NotErrorIs(t, err, niceyaml.ErrDecode)
-	})
+				err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input))
+				require.ErrorIs(t, err, tc.is)
+				require.NotErrorIs(t, err, niceyaml.ErrDecode)
 
-	t.Run("excessive aliasing does not match", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, yamltest.AliasLevels(10))
-
-		_, err := dd.Decode[any](t.Context())
-		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
-		require.NotErrorIs(t, err, niceyaml.ErrDecode)
-	})
-
-	t.Run("decode target does not match", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "value: 1")
-
-		err := dd.DecodeInto(t.Context(), nil)
-		require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
-		require.NotErrorIs(t, err, niceyaml.ErrDecode)
+				if tc.want != "" {
+					require.EqualError(t, err, tc.want)
+				}
+			})
+		}
 	})
 
 	t.Run("parse error does not match", func(t *testing.T) {
@@ -10360,52 +10398,6 @@ func TestErrDecode(t *testing.T) {
 		_, err = docs[0].Decode[any](t.Context())
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
 		require.NotErrorIs(t, err, niceyaml.ErrDecode)
-	})
-
-	t.Run("canceled context does not match", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "value: 1")
-
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-
-		_, err := dd.Decode[cancelAwareUnmarshaler](ctx)
-		require.ErrorIs(t, err, context.Canceled)
-		require.NotErrorIs(t, err, niceyaml.ErrDecode)
-	})
-
-	t.Run("context error an unmarshaler wraps does not match", func(t *testing.T) {
-		t.Parallel()
-
-		// The context of the decode has not ended, and the value reports
-		// the error of a deadline of its own.
-		tcs := map[string]struct {
-			decode func(ctx context.Context, dd *niceyaml.Node) error
-			want   string
-		}{
-			"value the decode locates": {
-				decode: decodeErrorAs[struct{ Value deadlineUnmarshaler }],
-				want:   "lookup stopped: context deadline exceeded",
-			},
-			"node the decode reads": {
-				decode: decodeErrorAs[deadlineUnmarshaler],
-				want:   "lookup stopped: context deadline exceeded",
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				dd := yamltest.FirstDocument(t, "value: 1\n")
-
-				err := tc.decode(t.Context(), dd)
-				require.EqualError(t, err, tc.want)
-				require.ErrorIs(t, err, context.DeadlineExceeded)
-				require.NotErrorIs(t, err, niceyaml.ErrDecode)
-			})
-		}
 	})
 
 	t.Run("canceled context stops a decode that reads an anchor", func(t *testing.T) {
