@@ -6442,36 +6442,30 @@ func TestViewport_UnchangedModeKeepsPosition(t *testing.T) {
 	require.Equal(t, 3, m.SearchIndex())
 	require.Equal(t, 30, m.YOffset())
 
-	// One revision shows no diff in any diff mode.
-	m.ToggleDiffMode()
-	assert.Equal(t, 3, m.SearchIndex(), "toggle diff mode")
-	assert.Equal(t, 30, m.YOffset(), "toggle diff mode")
+	// The changes run in turn on the one model.
+	steps := []struct {
+		name   string
+		change func()
+	}{
+		// One revision shows no diff in any diff mode.
+		{name: "toggle diff mode", change: m.ToggleDiffMode},
+		{name: "set diff mode", change: func() { m.SetDiffMode(yamlviewport.DiffModeNone) }},
+		{name: "same view mode", change: func() { m.SetViewMode(m.ViewMode()) }},
+		{name: "same revision", change: func() { m.GotoRevision(m.RevisionIndex()) }},
+		{name: "same hunk context", change: func() { m.SetHunkContext(m.HunkContext()) }},
 
-	m.SetDiffMode(yamlviewport.DiffModeNone)
-	assert.Equal(t, 3, m.SearchIndex(), "set diff mode")
-	assert.Equal(t, 30, m.YOffset(), "set diff mode")
+		// Without a diff, hunks mode shows the same lines and the hunk
+		// context shapes nothing on screen.
+		{name: "hunks mode without diff", change: func() { m.SetViewMode(yamlviewport.ViewModeHunks) }},
+		{name: "hunk context without diff", change: func() { m.SetHunkContext(m.HunkContext() + 2) }},
+	}
 
-	m.SetViewMode(m.ViewMode())
-	assert.Equal(t, 3, m.SearchIndex(), "same view mode")
-	assert.Equal(t, 30, m.YOffset(), "same view mode")
+	for _, step := range steps {
+		step.change()
 
-	m.GotoRevision(m.RevisionIndex())
-	assert.Equal(t, 3, m.SearchIndex(), "same revision")
-	assert.Equal(t, 30, m.YOffset(), "same revision")
-
-	m.SetHunkContext(m.HunkContext())
-	assert.Equal(t, 3, m.SearchIndex(), "same hunk context")
-	assert.Equal(t, 30, m.YOffset(), "same hunk context")
-
-	// Without a diff, hunks mode shows the same lines and the hunk context
-	// shapes nothing on screen.
-	m.SetViewMode(yamlviewport.ViewModeHunks)
-	assert.Equal(t, 3, m.SearchIndex(), "hunks mode without diff")
-	assert.Equal(t, 30, m.YOffset(), "hunks mode without diff")
-
-	m.SetHunkContext(m.HunkContext() + 2)
-	assert.Equal(t, 3, m.SearchIndex(), "hunk context without diff")
-	assert.Equal(t, 30, m.YOffset(), "hunk context without diff")
+		assert.Equal(t, 3, m.SearchIndex(), step.name)
+		assert.Equal(t, 30, m.YOffset(), step.name)
+	}
 }
 
 // hitMap returns one row for each row of the viewport, with one character
