@@ -1,6 +1,7 @@
 package yamlviewport_test
 
 import (
+	"cmp"
 	"fmt"
 	"math"
 	"os"
@@ -3816,10 +3817,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 			t.Parallel()
 
 			m := testModel(testPrinter(), tc.width, tc.height)
-
-			if tc.setupFunc != nil {
-				tc.setupFunc(&m)
-			}
+			tc.setupFunc(&m)
 
 			golden.RequireEqual(t, m.View())
 		})
@@ -4119,10 +4117,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			t.Parallel()
 
 			m := testModel(testPrinter(), tc.width, tc.height)
-
-			if tc.setupFunc != nil {
-				tc.setupFunc(&m)
-			}
+			tc.setupFunc(&m)
 
 			golden.RequireEqual(t, m.View())
 		})
@@ -5401,15 +5396,13 @@ func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
 
 	m.SetRevision(niceyaml.NewSourceFromString("key: very long value that exceeds width\n"))
 
-	// Disable wrapping first.
 	m.ToggleWordWrap()
 	assert.False(t, m.WordWrap())
 
-	// Scroll right.
 	m.ScrollRight(5)
 	assert.Equal(t, 5, m.XOffset())
 
-	// Toggle back to enable wrapping, which resets xOffset.
+	// Turning wrap back on returns the view to its first column.
 	m.ToggleWordWrap()
 	assert.True(t, m.WordWrap())
 	assert.Equal(t, 0, m.XOffset())
@@ -5605,10 +5598,7 @@ func TestViewport_HorizontalScrollReachesEnd(t *testing.T) {
 
 			assert.InDelta(t, 0.0, m.HorizontalScrollPercent(), 0.01)
 
-			tail := tc.tail
-			if tail == "" {
-				tail = "END"
-			}
+			tail := cmp.Or(tc.tail, "END")
 
 			m.SetXOffset(1000)
 			assert.Equal(t, tc.wantMax, m.XOffset())
