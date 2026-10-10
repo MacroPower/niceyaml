@@ -1372,7 +1372,7 @@ func TestDocument_Preamble(t *testing.T) {
 			want:  []doc{{preamble: "# note\n", content: "a: 1\n"}},
 		},
 		"comment above the header": {
-			input: "# license\n---\na: 1\n",
+			input: stringtest.LinesLF("# license", "---", "a: 1"),
 			want:  []doc{{preamble: "# license\n---\n", content: "a: 1\n"}},
 		},
 		"comment below the header": {
@@ -1380,7 +1380,7 @@ func TestDocument_Preamble(t *testing.T) {
 			want:  []doc{{preamble: "--- # note\n", content: "a: 1\n"}},
 		},
 		"directive above the header": {
-			input: "%YAML 1.2\n---\na: 1\n",
+			input: stringtest.LinesLF("%YAML 1.2", "---", "a: 1"),
 			want:  []doc{{preamble: "%YAML 1.2\n---\n", content: "a: 1\n"}},
 		},
 		"explicit empty": {
@@ -1388,7 +1388,7 @@ func TestDocument_Preamble(t *testing.T) {
 			want:  []doc{{preamble: "---\n"}},
 		},
 		"explicit empty with a comment": {
-			input: "---\n# note\n---\nb: 2\n",
+			input: stringtest.LinesLF("---", "# note", "---", "b: 2"),
 			want: []doc{
 				{preamble: "---\n# note\n"},
 				{preamble: "---\n", content: "b: 2\n"},
@@ -1403,229 +1403,372 @@ func TestDocument_Preamble(t *testing.T) {
 			want:  []doc{{preamble: "# note\n"}},
 		},
 		"trailing comment after an end marker": {
-			input: "a: 1\n...\n# trailing\n",
-			want:  []doc{{content: "a: 1\n...\n# trailing\n"}},
+			input: stringtest.LinesLF("a: 1", "...", "# trailing"),
+			want:  []doc{{content: stringtest.LinesLF("a: 1", "...", "# trailing")}},
 		},
 		"leading end marker": {
 			input: "...\na: 1\n",
 			want:  []doc{{preamble: "...\n", content: "a: 1\n"}},
 		},
 		"leading end marker above a header": {
-			input: "...\n---\na: 1\n",
+			input: stringtest.LinesLF("...", "---", "a: 1"),
 			want:  []doc{{preamble: "...\n---\n", content: "a: 1\n"}},
 		},
 		"comment on the line of an end marker": {
-			input: "a: 1\n... # e\nk: v\n",
+			input: stringtest.LinesLF("a: 1", "... # e", "k: v"),
 			want: []doc{
 				{content: "a: 1\n... # e\n"},
 				{content: "k: v\n"},
 			},
 		},
 		"comment on the line of an end marker above a header": {
-			input: "a: 1\n... # e\n---\nk: v\n",
+			input: stringtest.LinesLF("a: 1", "... # e", "---", "k: v"),
 			want: []doc{
 				{content: "a: 1\n... # e\n"},
 				{preamble: "---\n", content: "k: v\n"},
 			},
 		},
 		"comment between documents": {
-			input: "a: 1\n...\n# note\n---\nb: 2\n",
+			input: stringtest.LinesLF(
+				"a: 1",
+				"...",
+				"# note",
+				"---",
+				"b: 2",
+			),
 			want: []doc{
 				{content: "a: 1\n...\n"},
 				{preamble: "# note\n---\n", content: "b: 2\n"},
 			},
 		},
 		"directive below an empty document": {
-			input: "---\n...\n# note\n%YAML 1.2\n---\na: 1\n",
+			input: stringtest.LinesLF(
+				"---",
+				"...",
+				"# note",
+				"%YAML 1.2",
+				"---",
+				"a: 1",
+			),
 			want: []doc{
 				{preamble: "---\n...\n"},
-				{preamble: "# note\n%YAML 1.2\n---\n", content: "a: 1\n"},
+				{preamble: stringtest.LinesLF("# note", "%YAML 1.2", "---"), content: "a: 1\n"},
 			},
 		},
 		"version directive on each side of an empty document": {
-			input: "%YAML 1.2\n---\n...\n%YAML 1.2\n---\na: 1\n",
+			input: stringtest.LinesLF(
+				"%YAML 1.2",
+				"---",
+				"...",
+				"%YAML 1.2",
+				"---",
+				"a: 1",
+			),
 			want: []doc{
-				{preamble: "%YAML 1.2\n---\n...\n"},
+				{preamble: stringtest.LinesLF("%YAML 1.2", "---", "...")},
 				{preamble: "%YAML 1.2\n---\n", content: "a: 1\n"},
 			},
 		},
 		"tag directive below an empty document": {
-			input: "%YAML 1.2\n---\n...\n%TAG ! tag:x,2000:\n---\n!a b\n",
+			input: stringtest.LinesLF(
+				"%YAML 1.2",
+				"---",
+				"...",
+				"%TAG ! tag:x,2000:",
+				"---",
+				"!a b",
+			),
 			want: []doc{
-				{preamble: "%YAML 1.2\n---\n...\n"},
+				{preamble: stringtest.LinesLF("%YAML 1.2", "---", "...")},
 				{preamble: "%TAG ! tag:x,2000:\n---\n", content: "!a b\n"},
 			},
 		},
 		"comments on the markers of an empty document": {
-			input: "--- # c\n... # d\n# e\n%YAML 1.2\n--- # f\na: 1\n",
+			input: stringtest.LinesLF(
+				"--- # c",
+				"... # d",
+				"# e",
+				"%YAML 1.2",
+				"--- # f",
+				"a: 1",
+			),
 			want: []doc{
 				{preamble: "--- # c\n... # d\n"},
-				{preamble: "# e\n%YAML 1.2\n--- # f\n", content: "a: 1\n"},
+				{preamble: stringtest.LinesLF("# e", "%YAML 1.2", "--- # f"), content: "a: 1\n"},
 			},
 		},
 		"document without a header below an empty document": {
-			input: "---\n...\n# note\nb: 1\n",
+			input: stringtest.LinesLF("---", "...", "# note", "b: 1"),
 			want: []doc{
 				{preamble: "---\n...\n"},
 				{preamble: "# note\n", content: "b: 1\n"},
 			},
 		},
 		"scalar document below an end marker": {
-			input: "a: 1\n...\nb\n",
+			input: stringtest.LinesLF("a: 1", "...", "b"),
 			want: []doc{
 				{content: "a: 1\n...\n"},
 				{content: "b\n"},
 			},
 		},
 		"headers": {
-			input: "a: 1\n---\nb: 2\n",
+			input: stringtest.LinesLF("a: 1", "---", "b: 2"),
 			want: []doc{
 				{content: "a: 1\n"},
 				{preamble: "---\n", content: "b: 2\n"},
 			},
 		},
 		"comment above a later header": {
-			input: "a: 1\n# note\n---\nb: 2\n",
+			input: stringtest.LinesLF("a: 1", "# note", "---", "b: 2"),
 			want: []doc{
 				{content: "a: 1\n"},
 				{preamble: "# note\n---\n", content: "b: 2\n"},
 			},
 		},
 		"comments and a blank line above a later header": {
-			input: "a: 1\n# one\n\n# two\n---\nb: 2\n",
+			input: stringtest.LinesLF(
+				"a: 1",
+				"# one",
+				"",
+				"# two",
+				"---",
+				"b: 2",
+			),
 			want: []doc{
 				{content: "a: 1\n"},
-				{preamble: "# one\n\n# two\n---\n", content: "b: 2\n"},
+				{preamble: stringtest.LinesLF("# one", "", "# two", "---"), content: "b: 2\n"},
 			},
 		},
 		"comment above a later header with crlf": {
-			input: "a: 1\r\n# note\r\n---\r\nb: 2\r\n",
+			input: stringtest.LinesCRLF("a: 1", "# note", "---", "b: 2"),
 			want: []doc{
 				{content: "a: 1\r\n"},
 				{preamble: "# note\r\n---\r\n", content: "b: 2\r\n"},
 			},
 		},
 		"comment after a block scalar above a later header": {
-			input: "a: |\n  x\n  y\n# note\n---\nb: 2\n",
+			input: stringtest.LinesLF(
+				"a: |",
+				"  x",
+				"  y",
+				"# note",
+				"---",
+				"b: 2",
+			),
 			want: []doc{
-				{content: "a: |\n  x\n  y\n"},
+				{content: stringtest.LinesLF("a: |", "  x", "  y")},
 				{preamble: "# note\n---\n", content: "b: 2\n"},
 			},
 		},
 		"comment after a block scalar that opens with a blank line": {
-			input: "a: |\n\n  x\n\n# note\n---\nb: 2\n",
+			input: stringtest.LinesLF(
+				"a: |",
+				"",
+				"  x",
+				"",
+				"# note",
+				"---",
+				"b: 2",
+			),
 			want: []doc{
-				{content: "a: |\n\n  x\n\n"},
+				{content: stringtest.LinesLF(
+					"a: |",
+					"",
+					"  x",
+					"",
+				)},
 				{preamble: "# note\n---\n", content: "b: 2\n"},
 			},
 		},
 		"comment after an empty block scalar": {
-			input: "a: |\n# note\n---\nb: 2\n",
+			input: stringtest.LinesLF("a: |", "# note", "---", "b: 2"),
 			want: []doc{
 				{content: "a: |\n"},
 				{preamble: "# note\n---\n", content: "b: 2\n"},
 			},
 		},
 		"comment after a value on the next line": {
-			input: "a:\n  b\n# note\n---\nc: 1\n",
+			input: stringtest.LinesLF(
+				"a:",
+				"  b",
+				"# note",
+				"---",
+				"c: 1",
+			),
 			want: []doc{
-				{content: "a:\n  b\n"},
+				{content: stringtest.LinesLF("a:", "  b")},
 				{preamble: "# note\n---\n", content: "c: 1\n"},
 			},
 		},
 		"comment after a quoted value on the next line": {
-			input: "a:\n  'q'\n# note\n---\nc: 1\n",
+			input: stringtest.LinesLF(
+				"a:",
+				"  'q'",
+				"# note",
+				"---",
+				"c: 1",
+			),
 			want: []doc{
-				{content: "a:\n  'q'\n"},
+				{content: stringtest.LinesLF("a:", "  'q'")},
 				{preamble: "# note\n---\n", content: "c: 1\n"},
 			},
 		},
 		"comment after a sequence entry on the next line": {
-			input: "-\n  y\n# note\n---\nc: 1\n",
+			input: stringtest.LinesLF(
+				"-",
+				"  y",
+				"# note",
+				"---",
+				"c: 1",
+			),
 			want: []doc{
-				{content: "-\n  y\n"},
+				{content: stringtest.LinesLF("-", "  y")},
 				{preamble: "# note\n---\n", content: "c: 1\n"},
 			},
 		},
 		"comment after a value below blank lines": {
-			input: "a:\n\n\n  x\n# note\n---\nc: 1\n",
+			input: stringtest.LinesLF(
+				"a:",
+				"",
+				"",
+				"  x",
+				"# note",
+				"---",
+				"c: 1",
+			),
 			want: []doc{
-				{content: "a:\n\n\n  x\n"},
+				{content: stringtest.LinesLF(
+					"a:",
+					"",
+					"",
+					"  x",
+				)},
 				{preamble: "# note\n---\n", content: "c: 1\n"},
 			},
 		},
 		"comment after a value on the next line with crlf": {
-			input: "a:\r\n  b\r\n# note\r\n---\r\nb: 2\r\n",
+			input: stringtest.LinesCRLF(
+				"a:",
+				"  b",
+				"# note",
+				"---",
+				"b: 2",
+			),
 			want: []doc{
-				{content: "a:\r\n  b\r\n"},
+				{content: stringtest.LinesCRLF("a:", "  b")},
 				{preamble: "# note\r\n---\r\n", content: "b: 2\r\n"},
 			},
 		},
 		"indented comment after a value": {
-			input: "a: 1\n  # note\n---\nb: 2\n",
+			input: stringtest.LinesLF(
+				"a: 1",
+				"  # note",
+				"---",
+				"b: 2",
+			),
 			want: []doc{
 				{content: "a: 1\n"},
 				{preamble: "# note\n---\n", content: "b: 2\n"},
 			},
 		},
 		"indented comment after a nested value": {
-			input: "a:\n  b: 1\n  # note\n---\nc: 1\n",
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: 1",
+				"  # note",
+				"---",
+				"c: 1",
+			),
 			want: []doc{
-				{content: "a:\n  b: 1\n"},
+				{content: stringtest.LinesLF("a:", "  b: 1")},
 				{preamble: "# note\n---\n", content: "c: 1\n"},
 			},
 		},
 		"indented comment after a nested block scalar": {
-			input: "a:\n  b: |\n    x\n  # note\n---\nc: 1\n",
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: |",
+				"    x",
+				"  # note",
+				"---",
+				"c: 1",
+			),
 			want: []doc{
-				{content: "a:\n  b: |\n    x\n"},
+				{content: stringtest.LinesLF("a:", "  b: |", "    x")},
 				{preamble: "# note\n---\n", content: "c: 1\n"},
 			},
 		},
 		"indented comment after a nested value with crlf": {
-			input: "a:\r\n  b: 1\r\n  # note\r\n---\r\nc: 1\r\n",
+			input: stringtest.LinesCRLF(
+				"a:",
+				"  b: 1",
+				"  # note",
+				"---",
+				"c: 1",
+			),
 			want: []doc{
-				{content: "a:\r\n  b: 1\r\n"},
+				{content: stringtest.LinesCRLF("a:", "  b: 1")},
 				{preamble: "# note\r\n---\r\n", content: "c: 1\r\n"},
 			},
 		},
 		"comment on the line of a value on the next line": {
-			input: "a:\n  b # same\n---\nc: 1\n",
+			input: stringtest.LinesLF(
+				"a:",
+				"  b # same",
+				"---",
+				"c: 1",
+			),
 			want: []doc{
-				{content: "a:\n  b # same\n"},
+				{content: stringtest.LinesLF("a:", "  b # same")},
 				{preamble: "---\n", content: "c: 1\n"},
 			},
 		},
 		"comment on the line of a no-break space value": {
-			input: "a:\n  \u00a0 # same\n---\nc: 1\n",
+			input: stringtest.LinesLF(
+				"a:",
+				"  \u00a0 # same",
+				"---",
+				"c: 1",
+			),
 			want: []doc{
-				{content: "a:\n  \u00a0 # same\n"},
+				{content: stringtest.LinesLF("a:", "  \u00a0 # same")},
 				{preamble: "---\n", content: "c: 1\n"},
 			},
 		},
 		"comment on the last line of a value that opens with a no-break space": {
-			input: "a:\n  \u00a0\n  x # same\n---\nc: 1\n",
+			input: stringtest.LinesLF(
+				"a:",
+				"  \u00a0",
+				"  x # same",
+				"---",
+				"c: 1",
+			),
 			want: []doc{
-				{content: "a:\n  \u00a0\n  x # same\n"},
+				{content: stringtest.LinesLF("a:", "  \u00a0", "  x # same")},
 				{preamble: "---\n", content: "c: 1\n"},
 			},
 		},
 		"comment on the last line of a value that opens with an ideographic space": {
-			input: "a: \u3000\n  x # same\n---\nc: 1\n",
+			input: stringtest.LinesLF(
+				"a: \u3000",
+				"  x # same",
+				"---",
+				"c: 1",
+			),
 			want: []doc{
-				{content: "a: \u3000\n  x # same\n"},
+				{content: stringtest.LinesLF("a: \u3000", "  x # same")},
 				{preamble: "---\n", content: "c: 1\n"},
 			},
 		},
 		"comment on the content line above a later header": {
-			input: "a: 1 # same line\n---\nb: 2\n",
+			input: stringtest.LinesLF("a: 1 # same line", "---", "b: 2"),
 			want: []doc{
 				{content: "a: 1 # same line\n"},
 				{preamble: "---\n", content: "b: 2\n"},
 			},
 		},
 		"comment above a trailing header": {
-			input: "a: 1\n# note\n---\n",
+			input: stringtest.LinesLF("a: 1", "# note", "---"),
 			want: []doc{
 				{content: "a: 1\n"},
 				{preamble: "# note\n---\n"},
@@ -1640,30 +1783,45 @@ func TestDocument_Preamble(t *testing.T) {
 			want:  []doc{{content: "[1, 2]\n# note\n"}},
 		},
 		"comment after a flow sequence above a later header": {
-			input: "[1, 2]\n# note\n---\n[3]\n",
+			input: stringtest.LinesLF("[1, 2]", "# note", "---", "[3]"),
 			want: []doc{
 				{content: "[1, 2]\n"},
 				{preamble: "# note\n---\n", content: "[3]\n"},
 			},
 		},
 		"comment left of an indented mapping": {
-			input: "---\n  a: 1\n# note\n",
+			input: stringtest.LinesLF("---", "  a: 1", "# note"),
 			want:  []doc{{preamble: "---\n", content: "a: 1\n# note\n"}},
 		},
 		"comment left of an indented mapping above a later header": {
-			input: "  a: 1\n# note\n---\nb: 2\n",
+			input: stringtest.LinesLF(
+				"  a: 1",
+				"# note",
+				"---",
+				"b: 2",
+			),
 			want: []doc{
 				{content: "a: 1\n"},
 				{preamble: "# note\n---\n", content: "b: 2\n"},
 			},
 		},
 		"comment between a directive and its header": {
-			input: "%YAML 1.2\n# note\n---\na: 1\n",
-			want:  []doc{{preamble: "%YAML 1.2\n# note\n---\n", content: "a: 1\n"}},
+			input: stringtest.LinesLF("%YAML 1.2", "# note", "---", "a: 1"),
+			want:  []doc{{preamble: stringtest.LinesLF("%YAML 1.2", "# note", "---"), content: "a: 1\n"}},
 		},
 		"comment inside a flow mapping": {
-			input: "{\n  # note\n  a: 1\n}\n",
-			want:  []doc{{content: "{\n  # note\n  a: 1\n}\n"}},
+			input: stringtest.LinesLF(
+				"{",
+				"  # note",
+				"  a: 1",
+				"}",
+			),
+			want: []doc{{content: stringtest.LinesLF(
+				"{",
+				"  # note",
+				"  a: 1",
+				"}",
+			)}},
 		},
 	}
 
@@ -1714,7 +1872,14 @@ func TestDocument_Span(t *testing.T) {
 			want:  []position.Span{position.NewSpan(0, 2)},
 		},
 		"headers": {
-			input: "a: 1\n---\nb: 2\nc: 3\n---\nd: 4\n",
+			input: stringtest.LinesLF(
+				"a: 1",
+				"---",
+				"b: 2",
+				"c: 3",
+				"---",
+				"d: 4",
+			),
 			want: []position.Span{
 				position.NewSpan(0, 1),
 				position.NewSpan(1, 4),
@@ -1722,53 +1887,72 @@ func TestDocument_Span(t *testing.T) {
 			},
 		},
 		"end marker": {
-			input: "a: 1\n...\nb: 2\n",
+			input: stringtest.LinesLF("a: 1", "...", "b: 2"),
 			want: []position.Span{
 				position.NewSpan(0, 2),
 				position.NewSpan(2, 3),
 			},
 		},
 		"block scalar at the end of a document": {
-			input: "a: |\n  one\n  two\n---\nb: 2\n",
+			input: stringtest.LinesLF(
+				"a: |",
+				"  one",
+				"  two",
+				"---",
+				"b: 2",
+			),
 			want: []position.Span{
 				position.NewSpan(0, 3),
 				position.NewSpan(3, 5),
 			},
 		},
 		"comment preamble": {
-			input: "# license\n---\na: 1\n",
+			input: stringtest.LinesLF("# license", "---", "a: 1"),
 			want:  []position.Span{position.NewSpan(0, 3)},
 		},
 		"comment on the line of an end marker": {
-			input: "a: 1\n... # e\nk: v\n",
+			input: stringtest.LinesLF("a: 1", "... # e", "k: v"),
 			want: []position.Span{
 				position.NewSpan(0, 2),
 				position.NewSpan(2, 3),
 			},
 		},
 		"comment between documents": {
-			input: "a: 1\n...\n# note\n---\nb: 2\n",
+			input: stringtest.LinesLF(
+				"a: 1",
+				"...",
+				"# note",
+				"---",
+				"b: 2",
+			),
 			want: []position.Span{
 				position.NewSpan(0, 2),
 				position.NewSpan(2, 5),
 			},
 		},
 		"comment above a later header": {
-			input: "a: 1\n# note\n---\nb: 2\n",
+			input: stringtest.LinesLF("a: 1", "# note", "---", "b: 2"),
 			want: []position.Span{
 				position.NewSpan(0, 1),
 				position.NewSpan(1, 4),
 			},
 		},
 		"directive below an empty document": {
-			input: "---\n...\n# note\n%YAML 1.2\n---\na: 1\n",
+			input: stringtest.LinesLF(
+				"---",
+				"...",
+				"# note",
+				"%YAML 1.2",
+				"---",
+				"a: 1",
+			),
 			want: []position.Span{
 				position.NewSpan(0, 2),
 				position.NewSpan(2, 6),
 			},
 		},
 		"trailing comment": {
-			input: "a: 1\n...\n# note\n",
+			input: stringtest.LinesLF("a: 1", "...", "# note"),
 			want:  []position.Span{position.NewSpan(0, 3)},
 		},
 		"leading blank lines": {
@@ -1780,14 +1964,20 @@ func TestDocument_Span(t *testing.T) {
 			want:  []position.Span{position.NewSpan(0, 2)},
 		},
 		"leading blank lines before a header": {
-			input: "\n---\na: 1\n---\nb: 2\n",
+			input: stringtest.LinesLF(
+				"",
+				"---",
+				"a: 1",
+				"---",
+				"b: 2",
+			),
 			want: []position.Span{
 				position.NewSpan(0, 3),
 				position.NewSpan(3, 5),
 			},
 		},
 		"leading end marker": {
-			input: "...\na: 1\n---\nb: 2\n",
+			input: stringtest.LinesLF("...", "a: 1", "---", "b: 2"),
 			want: []position.Span{
 				position.NewSpan(0, 2),
 				position.NewSpan(2, 4),
