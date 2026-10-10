@@ -1409,6 +1409,8 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 		}
 
 		items := "name: api\nitems:\n  - from: 9\n    to: 3\n"
+		oneSpan := "spans:\n  - from: 9\n    to: 3\n"
+		twoSpans := "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n"
 
 		tcs := map[string]struct {
 			decode func(ctx context.Context, dd *niceyaml.Node) error
@@ -1417,7 +1419,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			want   string
 		}{
 			"method that takes a decode function": {
-				input: "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n",
+				input: twoSpans,
 				decode: decodeAs[struct {
 					Spans []span `yaml:"spans"`
 				}](),
@@ -1425,7 +1427,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: "4:9: $.spans[1].to: to is below from",
 			},
 			"method that takes the node": {
-				input: "spans:\n  - from: 9\n    to: 3\n",
+				input: oneSpan,
 				decode: decodeAs[struct {
 					Spans []spanNode `yaml:"spans"`
 				}](),
@@ -1433,7 +1435,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: "3:9: $.spans[0].to: to is below from",
 			},
 			"method that takes bytes": {
-				input: "spans:\n  - from: 9\n    to: 3\n",
+				input: oneSpan,
 				decode: decodeAs[struct {
 					Spans []spanBytes `yaml:"spans"`
 				}](),
@@ -1484,7 +1486,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: "1:18: $.spans[0].to: to is below from",
 			},
 			"value below a scoped node": {
-				input: "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n",
+				input: twoSpans,
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
 					_, err := dd.DecodeAt[[]span](ctx, paths.Current().Child("spans"))
 
@@ -1502,7 +1504,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want:   "2:5: $.to: to is below from",
 			},
 			"mapping a scoped decode reads": {
-				input: "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n",
+				input: twoSpans,
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
 					_, err := dd.DecodeAt[span](ctx, paths.Current().Child("spans").Index(1))
 

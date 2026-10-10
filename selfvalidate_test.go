@@ -2582,7 +2582,7 @@ func TestDocument_Decode_SelfValidatorAnchors(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t,
-				"spec:\n  hours:\n    open: "+tc.open+"\nname: x\n",
+				stringtest.LinesLF("spec:", "  hours:", "    open: "+tc.open, "name: x"),
 				niceyaml.WithName("c.yaml"),
 			)
 

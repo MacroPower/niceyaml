@@ -135,6 +135,18 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 
 	registerStrict()
 
+	// The mapping of s holds a key no field reads, and so do the mapping
+	// below it and the root.
+	nestedUnknown := stringtest.LinesLF(
+		"s:",
+		"  x: 1",
+		"  zzz: 2",
+		"  n:",
+		"    a: 1",
+		"    www: 2",
+		"qqq: 1",
+	)
+
 	tcs := map[string]struct {
 		decode     func(context.Context, *niceyaml.Node) error
 		input      string
@@ -282,7 +294,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 					func(context.Context, *strictOption, func(any) error) error { return nil },
 				),
 			),
-			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
+			input: nestedUnknown,
 			want:  `7:1: $.qqq~: unknown field "qqq"`,
 		},
 		// Nothing shows which type a registered function decodes. The
@@ -292,7 +304,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			decode: decodeAs[struct {
 				S strictRegistered `yaml:"s"`
 			}](strict),
-			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
+			input: nestedUnknown,
 			want: stringtest.JoinLF(
 				`6:5: $.s.n.www~: unknown field "www"`,
 				`7:1: $.qqq~: unknown field "qqq"`,
@@ -302,7 +314,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			decode: decodeAs[struct {
 				S strictJSON `yaml:"s"`
 			}](strict, niceyaml.WithJSONUnmarshalers(true)),
-			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
+			input: nestedUnknown,
 			want:  `7:1: $.qqq~: unknown field "qqq"`,
 		},
 		// The decoder reads the fields of the type, and checks them.
@@ -310,7 +322,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			decode: decodeAs[struct {
 				S strictJSON `yaml:"s"`
 			}](strict),
-			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
+			input: nestedUnknown,
 			want: stringtest.JoinLF(
 				`3:3: $.s.zzz~: unknown field "zzz"`,
 				`6:5: $.s.n.www~: unknown field "www"`,
@@ -625,7 +637,7 @@ func TestDocument_Decode_UnknownFields_KeyKinds(t *testing.T) {
 			t.Parallel()
 
 			anchors := "s: &s str\ni: &i 5\n"
-			b := "b:\n  www: 2\n  " + tc.key + "\n"
+			b := stringtest.LinesLF("b:", "  www: 2", "  "+tc.key)
 
 			// The decoder alone says whether it rejects www beside the
 			// key.

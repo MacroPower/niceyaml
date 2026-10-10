@@ -452,6 +452,9 @@ func TestNewErrorReport_Excerpts(t *testing.T) {
 	badC := yamltest.Bind(t, second, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c"))))
 	gone := yamltest.Bind(t, second, niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").Index(0))))
 
+	// The excerpt of the first source with a mark at a alone.
+	markedA := "first.yaml\n   1 | a: 1\n     |    ^ bad a"
+
 	tcs := map[string]struct {
 		err  error
 		want []string
@@ -485,18 +488,18 @@ func TestNewErrorReport_Excerpts(t *testing.T) {
 		},
 		"a binding the error reaches twice marks its line once": {
 			err:  errors.Join(badA, fmt.Errorf("again: %w", badA)),
-			want: []string{"first.yaml\n   1 | a: 1\n     |    ^ bad a"},
+			want: []string{markedA},
 		},
 		"a nested binding joined beside its parent marks its line once": {
 			err: errors.Join(
 				yamltest.Bind(t, first, niceyaml.NewError("parent", niceyaml.WithDetails(badA))),
 				badA,
 			),
-			want: []string{"first.yaml\n   1 | a: 1\n     |    ^ bad a"},
+			want: []string{markedA},
 		},
 		"a source with nothing resolved yields nothing": {
 			err:  errors.Join(badA, gone),
-			want: []string{"first.yaml\n   1 | a: 1\n     |    ^ bad a"},
+			want: []string{markedA},
 		},
 	}
 
@@ -533,6 +536,11 @@ func TestNewErrorReport_ExcerptsOff(t *testing.T) {
 	badPort := yamltest.Bind(t, secrets, niceyaml.NewError("bad port", niceyaml.AtPath(port)))
 	openPort := yamltest.Bind(t, open, niceyaml.NewError("open port", niceyaml.AtPath(port)))
 
+	// The excerpt of the open source, with the message of the error at
+	// its port and without it.
+	marked := "open.yaml\n   1 | port: 0\n     |       ^ open port"
+	bare := "open.yaml\n   1 | port: 0\n     |       ^"
+
 	tcs := map[string]struct {
 		err error
 		// The excerpts of the report of err.
@@ -549,21 +557,21 @@ func TestNewErrorReport_ExcerptsOff(t *testing.T) {
 		},
 		"a binding in another source yields its excerpt": {
 			err:  errors.Join(badPort, openPort),
-			want: []string{"open.yaml\n   1 | port: 0\n     |       ^ open port"},
+			want: []string{marked},
 		},
 		"a detail in another source yields its excerpt": {
 			err: yamltest.Bind(t, secrets, niceyaml.NewError(
 				"ports differ", niceyaml.AtPath(port), niceyaml.WithDetails(openPort),
 			)),
-			want:    []string{"open.yaml\n   1 | port: 0\n     |       ^ open port"},
-			wantOwn: []string{"open.yaml\n   1 | port: 0\n     |       ^ open port"},
+			want:    []string{marked},
+			wantOwn: []string{marked},
 		},
 		"a detail in the source leaves the excerpt of its parent": {
 			err: yamltest.Bind(t, open, niceyaml.NewError(
 				"ports differ", niceyaml.AtPath(port), niceyaml.WithDetails(badPort),
 			)),
-			want:    []string{"open.yaml\n   1 | port: 0\n     |       ^"},
-			wantOwn: []string{"open.yaml\n   1 | port: 0\n     |       ^"},
+			want:    []string{bare},
+			wantOwn: []string{bare},
 		},
 	}
 

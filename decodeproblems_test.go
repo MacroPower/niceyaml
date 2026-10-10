@@ -1617,6 +1617,7 @@ func TestDocument_Decode_Problems_Context(t *testing.T) {
 	}
 
 	input := "ending: now\nreplicas: x\ntimeout: soon\n"
+	imageInput := "replicas: x\ntimeout: soon\nimage: {pull: always}\n"
 
 	t.Run("context that goes on", func(t *testing.T) {
 		t.Parallel()
@@ -1668,7 +1669,7 @@ func TestDocument_Decode_Problems_Context(t *testing.T) {
 			return nil
 		})
 
-		_, err := yamltest.FirstDocument(t, "replicas: x\ntimeout: soon\nimage: {pull: always}\n").Decode[struct {
+		_, err := yamltest.FirstDocument(t, imageInput).Decode[struct {
 			Replicas int   `yaml:"replicas"`
 			Timeout  int   `yaml:"timeout"`
 			Image    ended `yaml:"image"`
@@ -1689,7 +1690,7 @@ func TestDocument_Decode_Problems_Context(t *testing.T) {
 			return nil
 		})
 
-		_, err := yamltest.FirstDocument(t, "replicas: x\ntimeout: soon\nimage: {pull: always}\n").Decode[struct {
+		_, err := yamltest.FirstDocument(t, imageInput).Decode[struct {
 			Replicas int           `yaml:"replicas"`
 			Timeout  int           `yaml:"timeout"`
 			Image    problemPulled `yaml:"image"`
@@ -1719,6 +1720,12 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 	t.Parallel()
 
 	strict := niceyaml.WithDisallowUnknownFields(true)
+
+	// Own returns a file whose own key holds word, below a comment and a
+	// blank line and between a port and a timeout the decoder rejects.
+	own := func(word string) string {
+		return stringtest.LinesLF("# prod", "", "port: 70000", "own: "+word, "timeout: soon")
+	}
 
 	// The decoder names no token for the value it rejects first in each
 	// input. The layers hold one file, so their decode reports what a
@@ -1800,7 +1807,7 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 		// so the unmarshaler reads another position than the file has for
 		// its value.
 		"unmarshaler error with no location": {
-			input: "# prod\n\nport: 70000\nown: plain\ntimeout: soon\n",
+			input: own("plain"),
 			err:   errBadServer,
 			want: stringtest.JoinLF(
 				"base.yaml: 3 problems",
@@ -1810,7 +1817,7 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 			),
 		},
 		"unmarshaler error at a position": {
-			input: "# prod\n\nport: 70000\nown: position\ntimeout: soon\n",
+			input: own("position"),
 			err:   errBadServer,
 			want: stringtest.JoinLF(
 				"base.yaml: 3 problems",
@@ -1820,7 +1827,7 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 			),
 		},
 		"unmarshaler error at a range": {
-			input: "# prod\n\nport: 70000\nown: range\ntimeout: soon\n",
+			input: own("range"),
 			err:   errBadServer,
 			want: stringtest.JoinLF(
 				"base.yaml: 3 problems",
@@ -1832,7 +1839,7 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 		// The error names the port, so it stands for the problem the
 		// search finds there.
 		"unmarshaler error at the path of another problem": {
-			input: "# prod\n\nport: 70000\nown: path\ntimeout: soon\n",
+			input: own("path"),
 			err:   errBadServer,
 			want: stringtest.JoinLF(
 				"base.yaml: 2 problems",
@@ -1841,7 +1848,7 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 			),
 		},
 		"unmarshaler error from BindValue": {
-			input: "# prod\n\nport: 70000\nown: unplaced\ntimeout: soon\n",
+			input: own("unplaced"),
 			err:   errBadServer,
 			want: stringtest.JoinLF(
 				"base.yaml: 2 problems",
@@ -1851,7 +1858,7 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 		},
 		// The error binds at the key of the mapping that lacks the key.
 		"unmarshaler error at a path the document leaves out": {
-			input: "# prod\n\nport: 70000\nown: absent\ntimeout: soon\n",
+			input: own("absent"),
 			err:   errBadServer,
 			want: stringtest.JoinLF(
 				"base.yaml: 3 problems",
@@ -1876,23 +1883,23 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 		// An error with no position comes back alone, since nothing tells
 		// it apart from a problem the search finds.
 		"unmarshaler error at a range no line holds": {
-			input: "# prod\n\nport: 70000\nown: far\ntimeout: soon\n",
+			input: own("far"),
 			err:   errBadServer,
 			want:  "base.yaml: bad server",
 		},
 		"unmarshaler error at a path that resolves nowhere": {
-			input: "# prod\n\nport: 70000\nown: below\ntimeout: soon\n",
+			input: own("below"),
 			err:   errBadServer,
 			want:  "base.yaml: $.port.unit: bad server",
 		},
 		"unmarshaler error at a path several keys share": {
-			input: "# prod\n\nport: 70000\nown: ambiguous\ntimeout: soon\n",
+			input: own("ambiguous"),
 			want:  "base.yaml: $.1.limit: limit must be at least 1",
 		},
 		// The position of the error lies in the other source, so nothing
 		// joins it either.
 		"unmarshaler error bound to another source": {
-			input: "# prod\n\nport: 70000\nown: elsewhere\ntimeout: soon\n",
+			input: own("elsewhere"),
 			err:   errBadServer,
 			want:  "inner.yaml:1:7: $.port: bad server",
 		},

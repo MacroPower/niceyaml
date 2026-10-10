@@ -368,6 +368,9 @@ func TestNode_DecodeIfPresent(t *testing.T) {
 	portPath := paths.Current().Child("server", "port")
 	hoursPath := paths.Doc().Child("spec", "hours")
 
+	// A document whose hours hold an open and no close.
+	openOnly := stringtest.LinesLF("spec:", "  hours:", "    open: 9")
+
 	tcs := map[string]struct {
 		// The sentinel the error matches, or nil for a call that succeeds.
 		err   error
@@ -514,7 +517,7 @@ func TestNode_DecodeIfPresent(t *testing.T) {
 	t.Run("a validator that reads a required key fails a present node", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocumentWithPath(t, "spec:\n  hours:\n    open: 9\n", "cfg.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, openOnly, "cfg.yaml")
 		h := openHours{Open: 8, Close: 17}
 
 		// The error matches paths.ErrNotFound, as the error of an absent
@@ -537,7 +540,7 @@ func TestNode_DecodeIfPresent(t *testing.T) {
 			return nil
 		})
 
-		doc := yamltest.FirstDocumentWithPath(t, "spec:\n  hours:\n    open: 9\n", "cfg.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, openOnly, "cfg.yaml")
 
 		var h openHours
 
@@ -563,7 +566,7 @@ func TestNode_DecodeIfPresent(t *testing.T) {
 			found bool
 		}{
 			"a mapping that sets one field": {
-				input: "spec:\n  hours:\n    open: 9\n",
+				input: openOnly,
 				want:  openHours{Open: 9, Close: 17},
 				found: true,
 			},
