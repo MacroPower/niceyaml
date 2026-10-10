@@ -85,6 +85,24 @@ func layoutRows(l printer.Layout) []int {
 	return rows
 }
 
+// assertRowsFit asserts that no row of printed is wider than width.
+func assertRowsFit(t *testing.T, printed string, width int) {
+	t.Helper()
+
+	for i, row := range strings.Split(printed, "\n") {
+		assert.LessOrEqual(t, lipgloss.Width(row), width, "row %d: %q", i, row)
+	}
+}
+
+// assertLayoutMeasures asserts that l counts the rows of printed and
+// measures the widest of them.
+func assertLayoutMeasures(t *testing.T, l printer.Layout, printed string) {
+	t.Helper()
+
+	assert.Equal(t, lipgloss.Height(printed), l.Rows())
+	assert.Equal(t, lipgloss.Width(printed), l.Width())
+}
+
 // printDiff generates a full-file diff between two YAML strings.
 // It outputs the entire file with markers for inserted and deleted lines.
 func printDiff(p *printer.Printer, before, after string) string {
@@ -545,12 +563,8 @@ func TestPrinter_PrintError_Wrap(t *testing.T) {
 	))
 
 	got := p.PrintError(err)
-	rows := strings.Split(got, "\n")
-	require.Greater(t, len(rows), 3, "every message wraps")
-
-	for i, row := range rows {
-		assert.LessOrEqual(t, lipgloss.Width(row), width, "row %d: %q", i, row)
-	}
+	require.Greater(t, lipgloss.Height(got), 3, "every message wraps")
+	assertRowsFit(t, got, width)
 
 	// A wrapped row of a nested message stays under its connector, so the
 	// second row of the first branch starts with the indent of the tree,
@@ -560,13 +574,8 @@ func TestPrinter_PrintError_Wrap(t *testing.T) {
 
 	// An error with no nested errors wraps to the full width.
 	got = p.PrintError(errors.New(long))
-	rows = strings.Split(got, "\n")
-	require.Greater(t, len(rows), 1, "the message wraps")
-
-	for i, row := range rows {
-		assert.LessOrEqual(t, lipgloss.Width(row), width, "row %d: %q", i, row)
-	}
-
+	require.Greater(t, lipgloss.Height(got), 1, "the message wraps")
+	assertRowsFit(t, got, width)
 	assert.NotContains(t, got, " \n")
 }
 
@@ -602,17 +611,14 @@ func TestPrinter_PrintError_WrapFitsExcerpts(t *testing.T) {
 			p := printer.New(append(tc.opts, printer.WithWrapWidth(tc.width))...)
 
 			got := p.PrintError(bound)
-			rows := strings.Split(got, "\n")
 
 			// The tree, the blank row after it, the three source lines, and
 			// the caret row would fit in six rows without wrapping.
-			require.Greater(t, len(rows), 6, "the excerpt wraps")
+			require.Greater(t, lipgloss.Height(got), 6, "the excerpt wraps")
 
 			// The container's frame counts toward the width, so every row of
 			// the excerpt fits it.
-			for i, row := range rows {
-				assert.LessOrEqual(t, lipgloss.Width(row), tc.width, "row %d: %q", i, row)
-			}
+			assertRowsFit(t, got, tc.width)
 		})
 	}
 }
@@ -1255,16 +1261,7 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
 
-			rows := strings.Split(got, "\n")
-			l := p.Layout(view)
-			assert.Len(t, rows, l.Rows())
-
-			widest := 0
-			for _, row := range rows {
-				widest = max(widest, lipgloss.Width(row))
-			}
-
-			assert.Equal(t, widest, l.Width())
+			assertLayoutMeasures(t, p.Layout(view), got)
 		})
 	}
 }
@@ -1979,10 +1976,7 @@ func TestPrinter_WordWrap_NarrowWidth(t *testing.T) {
 
 			assert.Greater(t, len(rows), 1)
 			assert.Equal(t, []int{len(rows)}, layoutRows(p.Layout(view)))
-
-			for _, row := range rows {
-				assert.LessOrEqual(t, lipgloss.Width(row), 6, row)
-			}
+			assertRowsFit(t, got, 6)
 		})
 	}
 }
@@ -2217,18 +2211,12 @@ func TestPrinter_WordWrap_SpaceCluster(t *testing.T) {
 			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
 
-			rows := strings.Split(got, "\n")
 			l := p.Layout(view)
-			assert.Len(t, rows, l.Rows())
-
-			widest := 0
-			for _, row := range rows {
-				widest = max(widest, lipgloss.Width(row))
-			}
-
-			assert.Equal(t, widest, l.Width())
+			assertLayoutMeasures(t, l, got)
 
 			// Each letter shows on one row, which RowOf must name.
+			rows := strings.Split(got, "\n")
+
 			for col, r := range []rune(tc.input) {
 				if !unicode.IsLetter(r) {
 					continue
@@ -2255,13 +2243,9 @@ func TestPrinter_WordWrap_BreakpointPastWidth(t *testing.T) {
 		p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(width))
 
 		got := p.Print(view)
-		rows := strings.Split(got, "\n")
 
-		assert.Equal(t, []int{len(rows)}, layoutRows(p.Layout(view)))
-
-		for _, row := range rows {
-			assert.LessOrEqual(t, lipgloss.Width(row), width, "width %d: %q", width, row)
-		}
+		assert.Equal(t, []int{lipgloss.Height(got)}, layoutRows(p.Layout(view)))
+		assertRowsFit(t, got, width)
 	}
 }
 
@@ -2726,10 +2710,7 @@ func TestPrinter_WordWrap_WideLineNumbers(t *testing.T) {
 	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(30))
 
 	got := p.Print(source.View().Slice(position.NewSpan(10000, 10001)))
-	for row := range strings.SplitSeq(got, "\n") {
-		assert.LessOrEqual(t, lipgloss.Width(row), 30, row)
-	}
-
+	assertRowsFit(t, got, 30)
 	assert.Equal(t, stringtest.JoinLF(
 		"10001 last: this is a long",
 		"    - value that wraps",
@@ -2834,11 +2815,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 			view.AddOverlay(testOverlayHighlight, tc.overlays...)
 
 			got := p.Print(view)
-
-			for row := range strings.SplitSeq(got, "\n") {
-				assert.LessOrEqual(t, lipgloss.Width(row), tc.width, row)
-			}
-
+			assertRowsFit(t, got, tc.width)
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -3634,16 +3611,7 @@ func TestPrinter_AnnotationFarColumn(t *testing.T) {
 			var l printer.Layout
 
 			require.NotPanics(t, func() { l = p.Layout(view) })
-
-			rows := strings.Split(got, "\n")
-			widest := 0
-
-			for _, row := range rows {
-				widest = max(widest, lipgloss.Width(row))
-			}
-
-			assert.Len(t, rows, l.Rows())
-			assert.Equal(t, widest, l.Width())
+			assertLayoutMeasures(t, l, got)
 		})
 	}
 }
@@ -5881,18 +5849,7 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
 
-			// The layout counts the rows Print writes and measures the
-			// widest of them.
-			rows := strings.Split(got, "\n")
-			layout := p.Layout(view)
-			assert.Len(t, rows, layout.Rows())
-
-			widest := 0
-			for _, row := range rows {
-				widest = max(widest, lipgloss.Width(row))
-			}
-
-			assert.Equal(t, widest, layout.Width())
+			assertLayoutMeasures(t, p.Layout(view), got)
 		})
 	}
 }
@@ -5990,11 +5947,7 @@ func TestPrinter_PrintError_WrappedAnnotation(t *testing.T) {
 	)))
 
 	got := p.PrintError(err)
-
-	for i, row := range strings.Split(got, "\n") {
-		assert.LessOrEqual(t, lipgloss.Width(row), width, "row %d: %q", i, row)
-	}
-
+	assertRowsFit(t, got, width)
 	assert.Contains(t, got, "^ expected string")
 }
 
@@ -6084,13 +6037,12 @@ func TestPrinter_PrintError_AnnotationNearEdge(t *testing.T) {
 	)))
 
 	got := p.PrintError(err)
+	assertRowsFit(t, got, width)
 
 	var trimmed []string
 
-	for i, row := range strings.Split(got, "\n") {
-		assert.LessOrEqual(t, lipgloss.Width(row), width, "row %d: %q", i, row)
-
-		trimmed = append(trimmed, strings.TrimSpace(ansi.Strip(row)))
+	for row := range strings.SplitSeq(ansi.Strip(got), "\n") {
+		trimmed = append(trimmed, strings.TrimSpace(row))
 	}
 
 	// The header holds the whole message on one row, so these two rows
@@ -6163,10 +6115,7 @@ func TestPrinter_LineNumbers_MaxNumber(t *testing.T) {
 	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(30))
 
 	got := p.Print(view)
-	for row := range strings.SplitSeq(got, "\n") {
-		assert.LessOrEqual(t, lipgloss.Width(row), 30, row)
-	}
-
+	assertRowsFit(t, got, 30)
 	assert.Equal(t, stringtest.JoinLF(
 		"10001 last: this is a long",
 		"            ^ note",
@@ -6566,13 +6515,8 @@ func TestPrinter_Layout_Width(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 
 			// The width is the widest row Print renders.
-			widest := 0
-			for row := range strings.SplitSeq(p.Print(view), "\n") {
-				widest = max(widest, lipgloss.Width(row))
-			}
-
 			if view.Count() > 0 {
-				assert.Equal(t, got, widest)
+				assert.Equal(t, got, lipgloss.Width(p.Print(view)))
 			}
 		})
 	}
@@ -6615,12 +6559,8 @@ func TestPrinter_Layout_LineWidth(t *testing.T) {
 
 			// Each width is the widest row Print renders for the line.
 			for i := range sliced.All() {
-				widest := 0
-				for row := range strings.SplitSeq(p.Print(view.Slice(position.NewSpan(i, i+1))), "\n") {
-					widest = max(widest, lipgloss.Width(row))
-				}
-
-				assert.Equal(t, widest, l.LineWidth(i), "line %d", i)
+				printed := p.Print(view.Slice(position.NewSpan(i, i+1)))
+				assert.Equal(t, lipgloss.Width(printed), l.LineWidth(i), "line %d", i)
 			}
 
 			assert.Equal(t, 0, l.LineWidth(-1))
@@ -6637,10 +6577,7 @@ func TestPrinter_Layout_Width_StyledAnnotation(t *testing.T) {
 
 	p := testPrinterWithStyles(style.Set(kind.UIAnnotation, lipgloss.NewStyle().PaddingLeft(6)))
 
-	widest := 0
-	for row := range strings.SplitSeq(p.Print(view), "\n") {
-		widest = max(widest, lipgloss.Width(row))
-	}
+	widest := lipgloss.Width(p.Print(view))
 
 	// The style pads the annotation row past the content, and the layout
 	// measures that row styled, as Print renders it.
@@ -6701,21 +6638,14 @@ func TestPrinter_Layout_StyledAnnotationRows(t *testing.T) {
 				printer.WithWrapWidth(tc.wrap),
 			)
 
-			printed := strings.Split(p.Print(view), "\n")
+			printed := p.Print(view)
 			l := p.Layout(view)
 
-			require.Len(t, printed, l.Rows())
+			assertLayoutMeasures(t, l, printed)
 			assert.Greater(t, l.Rows(), 2, "the annotation takes several rows")
 
-			widest := 0
-			for _, row := range printed {
-				widest = max(widest, lipgloss.Width(row))
-			}
-
-			assert.Equal(t, widest, l.Width())
-
 			gutter := strings.Repeat(" ", l.GutterWidth())
-			for i, row := range printed[1:] {
+			for i, row := range strings.Split(printed, "\n")[1:] {
 				assert.True(t, strings.HasPrefix(ansi.Strip(row), gutter), "row %d: %q", i+1, row)
 			}
 		})
@@ -7367,14 +7297,13 @@ func TestPrinter_Layout(t *testing.T) {
 
 		view := newView()
 		l := p.Layout(view)
+		got := p.Print(view)
 
-		widest := 0
-		for row := range strings.SplitSeq(p.Print(view), "\n") {
-			widest = max(widest, lipgloss.Width(row))
+		for row := range strings.SplitSeq(got, "\n") {
 			assert.GreaterOrEqual(t, lipgloss.Width(row), l.GutterWidth())
 		}
 
-		assert.Equal(t, widest, l.Width())
+		assert.Equal(t, lipgloss.Width(got), l.Width())
 		assert.LessOrEqual(t, l.Width(), 20)
 		assert.Equal(t, 5, l.GutterWidth())
 		assert.Equal(t, lipgloss.Width("   1 "), l.GutterWidth())
@@ -7537,11 +7466,8 @@ func TestPrinter_WrapWidth_FitsFrame(t *testing.T) {
 
 			p := printer.New(printer.WithWrapWidth(width)).With(tc.opts...)
 
-			for _, out := range []string{p.Print(src.View()), p.PrintError(err)} {
-				for row := range strings.SplitSeq(out, "\n") {
-					assert.LessOrEqual(t, lipgloss.Width(row), width, "%q", ansi.Strip(row))
-				}
-			}
+			assertRowsFit(t, p.Print(src.View()), width)
+			assertRowsFit(t, p.PrintError(err), width)
 		})
 	}
 }
