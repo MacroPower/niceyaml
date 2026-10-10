@@ -5554,39 +5554,15 @@ func TestPath_EmptyDocument(t *testing.T) {
 	t.Run("the root is the null below the header", func(t *testing.T) {
 		t.Parallel()
 
-		doc := emptyDocument(t, "a: 1\n---\n")
-
-		node, err := paths.NewResolver(doc).Node(paths.Doc())
-		require.NoError(t, err)
-		assert.Equal(t, ast.NullType, node.Type())
-
-		tk, err := paths.NewResolver(doc).Token(paths.Doc())
-		require.NoError(t, err)
-		assert.Equal(t, token.DocumentHeaderType, tk.Type)
-		assert.Equal(t, 2, tk.Position.Line)
-	})
-
-	t.Run("the key of the root is the same null", func(t *testing.T) {
-		t.Parallel()
-
-		doc := emptyDocument(t, "a: 1\n---\n")
-
-		tk, err := paths.NewResolver(doc).Token(paths.Doc().Key())
-		require.NoError(t, err)
-		assert.Equal(t, token.DocumentHeaderType, tk.Type)
-	})
-
-	t.Run("a header over comments is the same null", func(t *testing.T) {
-		t.Parallel()
-
-		// A parse that keeps comments makes the comment group the body of
-		// the document, which still holds no content.
+		// A parse that keeps comments makes a comment group below the
+		// header the body of the document, which still holds no content.
 		tcs := map[string]struct {
 			input string
 			line  int
 		}{
-			"after a document": {input: "a: 1\n---\n# comment\n", line: 2},
-			"first document":   {input: "---\n# comment\n", line: 1},
+			"header after a document":                {input: "a: 1\n---\n", line: 2},
+			"header over a comment":                  {input: "---\n# comment\n", line: 1},
+			"header over a comment after a document": {input: "a: 1\n---\n# comment\n", line: 2},
 		}
 
 		for name, tc := range tcs {
@@ -5602,10 +5578,13 @@ func TestPath_EmptyDocument(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, ast.NullType, node.Type())
 
-				tk, err := paths.NewResolver(doc).Token(paths.Doc())
-				require.NoError(t, err)
-				assert.Equal(t, token.DocumentHeaderType, tk.Type)
-				assert.Equal(t, tc.line, tk.Position.Line)
+				// The key of the root is the same null.
+				for _, path := range []paths.Path{paths.Doc(), paths.Doc().Key()} {
+					tk, err := paths.NewResolver(doc).Token(path)
+					require.NoError(t, err)
+					assert.Equal(t, token.DocumentHeaderType, tk.Type)
+					assert.Equal(t, tc.line, tk.Position.Line)
+				}
 
 				_, err = paths.NewResolver(doc).Node(paths.Doc().Child("a"))
 				require.ErrorIs(t, err, paths.ErrNoDocument)
