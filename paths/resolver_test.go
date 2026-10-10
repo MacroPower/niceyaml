@@ -626,57 +626,49 @@ func TestResolver_Matches(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input      string
-		path       string
-		want       []string
-		wantValues []string
-		err        error
+		input string
+		path  string
+		want  []string
+		err   error
 	}{
 		"index all": {
-			input:      "a: [x, y]\n",
-			path:       "$.a[*]",
-			want:       []string{"$.a[0]", "$.a[1]"},
-			wantValues: []string{"x", "y"},
+			input: "a: [x, y]\n",
+			path:  "$.a[*]",
+			want:  []string{"$.a[0]=x", "$.a[1]=y"},
 		},
 		"recursive": {
-			input:      "a: {name: x}\nb: {c: {name: y}}\n",
-			path:       "$..name",
-			want:       []string{"$.a.name", "$.b.c.name"},
-			wantValues: []string{"x", "y"},
+			input: "a: {name: x}\nb: {c: {name: y}}\n",
+			path:  "$..name",
+			want:  []string{"$.a.name=x", "$.b.c.name=y"},
 		},
 		"each alias to one anchor": {
-			input:      "base: &b {k: x}\nrefs: [*b, *b]\n",
-			path:       "$.refs[*].k",
-			want:       []string{"$.refs[0].k", "$.refs[1].k"},
-			wantValues: []string{"x", "x"},
+			input: "base: &b {k: x}\nrefs: [*b, *b]\n",
+			path:  "$.refs[*].k",
+			want:  []string{"$.refs[0].k=x", "$.refs[1].k=x"},
 		},
 		"key a merge brings in": {
-			input:      "base: &b {k: x}\nm:\n  <<: *b\n  own: 1\n",
-			path:       "$.m.k",
-			want:       []string{"$.m.k"},
-			wantValues: []string{"x"},
+			input: "base: &b {k: x}\nm:\n  <<: *b\n  own: 1\n",
+			path:  "$.m.k",
+			want:  []string{"$.m.k=x"},
 		},
 		"key of each entry": {
-			input:      "a: {name: x}\nb: {name: y}\n",
-			path:       "$..name~",
-			want:       []string{"$.a.name~", "$.b.name~"},
-			wantValues: []string{"name", "name"},
+			input: "a: {name: x}\nb: {name: y}\n",
+			path:  "$..name~",
+			want:  []string{"$.a.name~=name", "$.b.name~=name"},
 		},
 		"every entry of a mapping": {
-			input:      "base: &b {k: x}\nm:\n  <<: *b\n  0x10: y\n",
-			path:       "$.m.*",
-			want:       []string{"$.m.k", "$.m.0x10"},
-			wantValues: []string{"x", "y"},
+			input: "base: &b {k: x}\nm:\n  <<: *b\n  0x10: y\n",
+			path:  "$.m.*",
+			want:  []string{"$.m.k=x", "$.m.0x10=y"},
 		},
 		"every entry of a sequence": {
 			input: "a: [x, y]\n",
 			path:  "$.a.*",
 		},
 		"every node below a mapping": {
-			input:      "base: &b {k: x}\nm:\n  <<: *b\n  l: [y]\n",
-			path:       "$.m..*",
-			want:       []string{"$.m.l", "$.m.l[0]"},
-			wantValues: []string{"[y]", "y"},
+			input: "base: &b {k: x}\nm:\n  <<: *b\n  l: [y]\n",
+			path:  "$.m..*",
+			want:  []string{"$.m.l=[y]", "$.m.l[0]=y"},
 		},
 		"nothing": {
 			input: "a: x\n",
@@ -700,10 +692,9 @@ func TestResolver_Matches(t *testing.T) {
 			path:  "$.a[*]",
 		},
 		"root of an empty document below a header": {
-			input:      "---\n",
-			path:       "$",
-			want:       []string{"$"},
-			wantValues: []string{"null"},
+			input: "---\n",
+			path:  "$",
+			want:  []string{"$=null"},
 		},
 		"nil document": {
 			path: "$.a",
@@ -727,16 +718,7 @@ func TestResolver_Matches(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-
-			var got, gotValues []string
-
-			for _, m := range matches {
-				got = append(got, m.Path.String())
-				gotValues = append(gotValues, m.Node.String())
-			}
-
-			assert.Equal(t, tc.want, got)
-			assert.Equal(t, tc.wantValues, gotValues)
+			assert.Equal(t, tc.want, matchValues(matches))
 		})
 	}
 }

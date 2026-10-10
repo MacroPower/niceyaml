@@ -3209,16 +3209,8 @@ func TestPath_UnnamedKey(t *testing.T) {
 				assert.Equal(t, tc.want, node.String())
 			}
 
-			matches, err := paths.NewResolver(doc).Matches(paths.MustParse(tc.recursive))
-			require.NoError(t, err)
-
-			var got []string
-
-			for _, m := range matches {
-				got = append(got, m.Path.String()+"="+m.Node.String())
-			}
-
-			assert.Equal(t, tc.matches, got)
+			matches := requireMatches(t, doc, paths.MustParse(tc.recursive))
+			assert.Equal(t, tc.matches, matchValues(matches))
 		})
 	}
 }
@@ -3656,13 +3648,7 @@ func TestPath_Matches_HandBuiltTreeRecursive(t *testing.T) {
 
 			matches, err := paths.NewResolver(doc).Matches(paths.MustParse(tc.path))
 			require.NoError(t, err)
-
-			got := make([]string, 0, len(matches))
-			for _, m := range matches {
-				got = append(got, m.Path.String())
-			}
-
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, matchPaths(matches))
 		})
 	}
 }
@@ -3743,13 +3729,7 @@ func TestPath_Matches_HandBuiltTreeChildAll(t *testing.T) {
 
 			matches, err := paths.NewResolver(doc).Matches(paths.MustParse(tc.path))
 			require.NoError(t, err)
-
-			got := make([]string, 0, len(matches))
-			for _, m := range matches {
-				got = append(got, m.Path.String())
-			}
-
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, matchPaths(matches))
 		})
 	}
 }
@@ -4845,16 +4825,8 @@ func TestPath_OwnKeyBetweenMergeKeys(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, node.String())
 
-			matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$.t..k"))
-			require.NoError(t, err)
-
-			var found []string
-
-			for _, m := range matches {
-				found = append(found, m.Path.String())
-			}
-
-			assert.Equal(t, tc.found, found)
+			matches := requireMatches(t, doc, paths.MustParse("$.t..k"))
+			assert.Equal(t, tc.found, matchPaths(matches))
 		})
 	}
 }
@@ -4868,18 +4840,8 @@ func TestPath_Matches_RepeatedMergeKey(t *testing.T) {
 
 	doc := yamltest.FirstDocument(t, src, niceyaml.WithAllowDuplicateKeys(true)).DocumentAST()
 
-	matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$..a"))
-	require.NoError(t, err)
-	assert.Empty(t, matches)
-
-	matches, err = paths.NewResolver(doc).Matches(paths.MustParse("$..b"))
-	require.NoError(t, err)
-	require.Len(t, matches, 1)
-	assert.Equal(t, "$.t.<<.b", matches[0].Path.String())
-
-	single, err := paths.NewResolver(doc).Node(matches[0].Path)
-	require.NoError(t, err)
-	assert.Same(t, matches[0].Node, single)
+	assert.Empty(t, requireMatches(t, doc, paths.MustParse("$..a")))
+	assert.Equal(t, []string{"$.t.<<.b"}, matchPaths(requireMatches(t, doc, paths.MustParse("$..b"))))
 
 	node, err := paths.NewResolver(doc).Node(paths.MustParse("$.t.a"))
 	require.NoError(t, err)
@@ -4932,20 +4894,8 @@ func TestPath_Matches_InlineMergeSource(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
-			matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$.m..name"))
-			require.NoError(t, err)
-
-			var got []string
-
-			for _, m := range matches {
-				got = append(got, m.Path.String())
-
-				node, err := paths.NewResolver(doc).Node(m.Path)
-				require.NoError(t, err)
-				assert.Same(t, m.Node, node)
-			}
-
-			assert.Equal(t, tc.want, got)
+			matches := requireMatches(t, doc, paths.MustParse("$.m..name"))
+			assert.Equal(t, tc.want, matchPaths(matches))
 
 			node, err := paths.NewResolver(doc).Node(paths.MustParse("$.m.name"))
 			require.NoError(t, err)
@@ -4990,15 +4940,8 @@ func TestPath_MergeKeyAndLiteralMergeName(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, "2", node.String())
 
-			matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$.m..k"))
-			require.NoError(t, err)
-			require.Len(t, matches, 1)
-			assert.Equal(t, "1", matches[0].Node.String())
-			assert.Equal(t, "$.m.<<.k", matches[0].Path.String())
-
-			node, err = paths.NewResolver(doc).Node(matches[0].Path)
-			require.NoError(t, err)
-			assert.Same(t, matches[0].Node, node)
+			matches := requireMatches(t, doc, paths.MustParse("$.m..k"))
+			assert.Equal(t, []string{"$.m.<<.k=1"}, matchValues(matches))
 		})
 	}
 }
@@ -5053,20 +4996,8 @@ func TestPath_MergeBringsInLiteralMergeName(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, "real", node.String())
 
-			matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$..'<<'"))
-			require.NoError(t, err)
-
-			var found []string
-
-			for _, m := range matches {
-				found = append(found, m.Path.String())
-
-				single, err := paths.NewResolver(doc).Node(m.Path)
-				require.NoError(t, err)
-				assert.Same(t, m.Node, single)
-			}
-
-			assert.Equal(t, tc.want, found)
+			matches := requireMatches(t, doc, paths.MustParse("$..'<<'"))
+			assert.Equal(t, tc.want, matchPaths(matches))
 		})
 	}
 }
@@ -5089,14 +5020,7 @@ func TestPath_Node_LaterDuplicateKeyWins(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, key.Position.Line)
 
-	matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$..a"))
-	require.NoError(t, err)
-	require.Len(t, matches, 1)
-	assert.Equal(t, "$.m.a", matches[0].Path.String())
-
-	single, err := paths.NewResolver(doc).Node(matches[0].Path)
-	require.NoError(t, err)
-	assert.Same(t, matches[0].Node, single)
+	assert.Equal(t, []string{"$.m.a"}, matchPaths(requireMatches(t, doc, paths.MustParse("$..a"))))
 }
 
 // nestedChain returns depth flow mappings nested in one another, each with
@@ -5193,25 +5117,64 @@ func TestPath_Matches_RecursiveReachedTwice(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
-			matches, err := paths.NewResolver(doc).Matches(paths.MustParse(tc.path))
-			require.NoError(t, err)
+			matches := requireMatches(t, doc, paths.MustParse(tc.path))
 
-			got := make([]string, 0, len(matches))
-			for _, m := range matches {
-				got = append(got, m.Path.String())
-			}
-
-			assert.Equal(t, tc.want, got)
-
-			nodes, err := paths.NewResolver(doc).Nodes(paths.MustParse(tc.path))
-			require.NoError(t, err)
-			require.Len(t, nodes, len(matches))
-
-			for i, m := range matches {
-				assert.Same(t, m.Node, nodes[i])
-			}
+			assert.Equal(t, tc.want, matchPaths(matches))
 		})
 	}
+}
+
+// matchPaths returns the path of each match as text, and nil for no
+// matches.
+func matchPaths(matches []paths.Match) []string {
+	var got []string
+
+	for _, m := range matches {
+		got = append(got, m.Path.String())
+	}
+
+	return got
+}
+
+// matchValues returns each match as its path and the text of its node,
+// joined by "=", and nil for no matches.
+func matchValues(matches []paths.Match) []string {
+	var got []string
+
+	for _, m := range matches {
+		got = append(got, m.Path.String()+"="+m.Node.String())
+	}
+
+	return got
+}
+
+// requireMatches returns the matches of path in doc. The test fails
+// unless Nodes lists the node of each match in the same order, and unless
+// the path of each match selects the node of that match alone and reads
+// back from its text.
+func requireMatches(t *testing.T, doc *ast.DocumentNode, path paths.Path) []paths.Match {
+	t.Helper()
+
+	matches, err := paths.NewResolver(doc).Matches(path)
+	require.NoError(t, err)
+
+	nodes, err := paths.NewResolver(doc).Nodes(path)
+	require.NoError(t, err)
+	require.Len(t, nodes, len(matches))
+
+	for i, m := range matches {
+		assert.Same(t, nodes[i], m.Node)
+
+		single, err := paths.NewResolver(doc).Node(m.Path)
+		require.NoError(t, err)
+		assert.Same(t, m.Node, single)
+
+		parsed, err := paths.Parse(m.Path.String())
+		require.NoError(t, err)
+		assert.Equal(t, m.Path, parsed)
+	}
+
+	return matches
 }
 
 func TestPath_Matches(t *testing.T) {
@@ -5342,29 +5305,7 @@ func TestPath_Matches(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			matches, err := paths.NewResolver(doc).Matches(tc.path)
-			require.NoError(t, err)
-
-			var got []string
-
-			for _, m := range matches {
-				got = append(got, m.Path.String())
-			}
-
-			assert.Equal(t, tc.want, got)
-
-			nodes, err := paths.NewResolver(doc).Nodes(tc.path)
-			require.NoError(t, err)
-			require.Len(t, nodes, len(matches))
-
-			for i, m := range matches {
-				assert.Same(t, nodes[i], m.Node)
-
-				// The path of a match selects its node alone.
-				single, err := paths.NewResolver(doc).Node(m.Path)
-				require.NoError(t, err)
-				assert.Same(t, m.Node, single)
-			}
+			assert.Equal(t, tc.want, matchPaths(requireMatches(t, doc, tc.path)))
 		})
 	}
 }
@@ -5558,35 +5499,9 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, tc.input, tc.opts...).DocumentAST()
+			matches := requireMatches(t, doc, paths.MustParse(tc.path))
 
-			path := paths.MustParse(tc.path)
-
-			matches, err := paths.NewResolver(doc).Matches(path)
-			require.NoError(t, err)
-
-			var got []string
-
-			for _, m := range matches {
-				got = append(got, m.Path.String()+"="+m.Node.String())
-			}
-
-			assert.Equal(t, tc.want, got)
-
-			nodes, err := paths.NewResolver(doc).Nodes(path)
-			require.NoError(t, err)
-			require.Len(t, nodes, len(matches))
-
-			for i, m := range matches {
-				assert.Same(t, nodes[i], m.Node)
-
-				single, err := paths.NewResolver(doc).Node(m.Path)
-				require.NoError(t, err)
-				assert.Same(t, m.Node, single)
-
-				parsed, err := paths.Parse(m.Path.String())
-				require.NoError(t, err)
-				assert.Equal(t, m.Path, parsed)
-			}
+			assert.Equal(t, tc.want, matchValues(matches))
 		})
 	}
 }
@@ -5791,35 +5706,9 @@ func TestPath_Matches_RecursiveAll(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, tc.input, tc.opts...).DocumentAST()
+			matches := requireMatches(t, doc, paths.MustParse(tc.path))
 
-			path := paths.MustParse(tc.path)
-
-			matches, err := paths.NewResolver(doc).Matches(path)
-			require.NoError(t, err)
-
-			var got []string
-
-			for _, m := range matches {
-				got = append(got, m.Path.String()+"="+m.Node.String())
-			}
-
-			assert.Equal(t, tc.want, got)
-
-			nodes, err := paths.NewResolver(doc).Nodes(path)
-			require.NoError(t, err)
-			require.Len(t, nodes, len(matches))
-
-			for i, m := range matches {
-				assert.Same(t, nodes[i], m.Node)
-
-				single, err := paths.NewResolver(doc).Node(m.Path)
-				require.NoError(t, err)
-				assert.Same(t, m.Node, single)
-
-				parsed, err := paths.Parse(m.Path.String())
-				require.NoError(t, err)
-				assert.Equal(t, m.Path, parsed)
-			}
+			assert.Equal(t, tc.want, matchValues(matches))
 		})
 	}
 }
