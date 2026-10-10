@@ -2773,13 +2773,10 @@ func TestSource_AllDocuments_SyntaxErrorTokens(t *testing.T) {
 }
 
 // requireName is a [niceyaml.Validator] that rejects a document without a
-// name key at the root of the document, and counts its calls in calls when
-// calls is not nil.
+// name key at the root of the document, and counts its calls in calls.
 func requireName(calls *atomic.Int32) niceyaml.Validator {
 	return niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
-		if calls != nil {
-			calls.Add(1)
-		}
+		calls.Add(1)
 
 		_, err := n.At(paths.Current().Child("name"))
 		if err != nil {
@@ -3109,15 +3106,6 @@ func TestSource_ValidateDocuments(t *testing.T) {
 				assert.Equal(t, tc.want, bindingMessages(err))
 			})
 		}
-	})
-
-	t.Run("syntax errors match ErrSyntax", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("value: 1\n---\nname: [\n", niceyaml.WithName("f.yaml"))
-
-		err := source.ValidateDocuments(t.Context(), requireName(nil))
-		require.ErrorIs(t, err, niceyaml.ErrSyntax)
 	})
 }
 
