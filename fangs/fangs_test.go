@@ -45,6 +45,33 @@ func testStyles() fang.Styles {
 	}
 }
 
+// xmlPrinter returns a printer that renders styles as XML tags, with no
+// gutter and no container frame.
+func xmlPrinter() *printer.Printer {
+	return printer.New(
+		printer.WithStyles(yamltest.NewXMLStyles()),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+	)
+}
+
+// errAt returns an error that reports msg at the node path selects.
+func errAt(msg, path string) error {
+	return niceyaml.NewError(msg, niceyaml.AtPath(paths.MustParse(path)))
+}
+
+// report returns what a handler writes for msg under [testStyles]: the
+// header, each line of msg behind the indent, and a blank line.
+func report(msg string) string {
+	rows := []string{"Error"}
+
+	for row := range strings.SplitSeq(msg, "\n") {
+		rows = append(rows, strings.Repeat(" ", fangs.Indent)+row)
+	}
+
+	return stringtest.JoinLF(append(rows, "", "")...)
+}
+
 func TestErrorHandler(t *testing.T) {
 	t.Parallel()
 
@@ -53,35 +80,18 @@ func TestErrorHandler(t *testing.T) {
 		name: test
 		value: 123
 	`)
-	xmlPrinter := func() *printer.Printer {
-		return printer.New(
-			printer.WithStyles(yamltest.NewXMLStyles()),
-			printer.WithGutter(printer.NoGutter),
-			printer.WithContainerStyle(lipgloss.NewStyle()),
-		)
-	}
 
 	src := niceyaml.NewSourceFromTokens(tokens.Tokenize(source))
 
-	niceyamlErr := yamltest.Bind(t, src, niceyaml.NewError(
-		"invalid name",
-		niceyaml.AtPath(paths.MustParse("$.name~")),
-	))
+	niceyamlErr := yamltest.Bind(t, src, errAt("invalid name", "$.name~"))
 
 	// Two named sources with the same content, so a joined error names the
 	// file each branch came from and renders one excerpt per file.
 	fileA := niceyaml.NewSourceFromTokens(tokens.Tokenize(source), niceyaml.WithName("a.yaml"))
 	fileB := niceyaml.NewSourceFromTokens(tokens.Tokenize(source), niceyaml.WithName("b.yaml"))
 
-	badName := yamltest.Bind(t, fileA, niceyaml.NewError(
-		"bad name",
-		niceyaml.AtPath(paths.MustParse("$.name~")),
-	))
-
-	badValue := yamltest.Bind(t, fileB, niceyaml.NewError(
-		"bad value",
-		niceyaml.AtPath(paths.MustParse("$.value")),
-	))
+	badName := yamltest.Bind(t, fileA, errAt("bad name", "$.name~"))
+	badValue := yamltest.Bind(t, fileB, errAt("bad value", "$.value"))
 
 	// A source whose name opens with Cobra's wording for an unknown flag,
 	// so the message of an error bound to it does too.
@@ -90,29 +100,21 @@ func TestErrorHandler(t *testing.T) {
 		niceyaml.WithName("unknown flag: a.yaml"),
 	)
 
-	flagLikeNameErr := yamltest.Bind(t, flagLikeFile, niceyaml.NewError(
-		"bad name",
-		niceyaml.AtPath(paths.MustParse("$.name~")),
-	))
+	flagLikeNameErr := yamltest.Bind(t, flagLikeFile, errAt("bad name", "$.name~"))
 
-	emptyMessageErr := yamltest.Bind(t, src,
-		silentError{niceyaml.NewError("bad name", niceyaml.AtPath(paths.MustParse("$.name~")))},
-	)
+	emptyMessageErr := yamltest.Bind(t, src, silentError{errAt("bad name", "$.name~")})
 
 	// A wrapper around a join heads the problems of the join, here and in
 	// the niceyaml version the go.mod of this module requires.
 	nestedErr := yamltest.Bind(t, src, fmt.Errorf("two problems: %w", errors.Join(
-		niceyaml.NewError("bad name", niceyaml.AtPath(paths.MustParse("$.name~"))),
-		niceyaml.NewError("bad value", niceyaml.AtPath(paths.MustParse("$.value"))),
+		errAt("bad name", "$.name~"),
+		errAt("bad value", "$.value"),
 	)))
 
 	// A source that ends with blank lines, which an excerpt of its last
 	// key shows as context below the caret.
 	spaced := niceyaml.NewSourceFromString("name: test\n\n\n")
-	spacedErr := yamltest.Bind(t, spaced, niceyaml.NewError(
-		"bad name",
-		niceyaml.AtPath(paths.MustParse("$.name")),
-	))
+	spacedErr := yamltest.Bind(t, spaced, errAt("bad name", "$.name"))
 
 	tcs := map[string]struct {
 		err  error
@@ -496,10 +498,7 @@ func TestNewErrorHandler_Width(t *testing.T) {
 				"name: " + strings.Repeat("x", 3*tc.width) + "\n",
 			))
 
-			err := yamltest.Bind(t, src, niceyaml.NewError(
-				"invalid name",
-				niceyaml.AtPath(paths.MustParse("$.name")),
-			))
+			err := yamltest.Bind(t, src, errAt("invalid name", "$.name"))
 
 			p := printer.New(printer.WithWrapWidth(tc.width))
 
@@ -529,30 +528,14 @@ func TestErrorHandler_ColorProfile(t *testing.T) {
 	`)))
 
 	err := yamltest.Bind(t, src, fmt.Errorf("two problems: %w", errors.Join(
-		niceyaml.NewError("bad name", niceyaml.AtPath(paths.MustParse("$.name~"))),
-		niceyaml.NewError("bad value", niceyaml.AtPath(paths.MustParse("$.value"))),
+		errAt("bad name", "$.name~"),
+		errAt("bad value", "$.value"),
 	)))
 
-	p := printer.New(
-		printer.WithStyles(yamltest.NewXMLStyles()),
-		printer.WithGutter(printer.NoGutter),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
+	p := xmlPrinter()
 
-	// The handler writes the header, each line of the message behind the
-	// indent, and a blank line.
-	output := func(msg string) string {
-		rows := []string{"Error"}
-
-		for row := range strings.SplitSeq(msg, "\n") {
-			rows = append(rows, strings.Repeat(" ", fangs.Indent)+row)
-		}
-
-		return stringtest.JoinLF(append(rows, "", "")...)
-	}
-
-	styled := output(p.PrintError(err, niceyaml.WithContextLines(0)))
-	plain := output(niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
+	styled := report(p.PrintError(err, niceyaml.WithContextLines(0)))
+	plain := report(niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 	// The plain form holds no style and draws a caret run under each range.
 	assert.NotContains(t, plain, "<")
@@ -608,25 +591,9 @@ func TestNewErrorHandler_WithExcerptOptions(t *testing.T) {
 	// The marked line sits in the middle of a source with more lines on
 	// each side than the default shows, so the count changes the excerpt.
 	src := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nh: 8\ni: 9\n")
-	err := yamltest.Bind(t, src, niceyaml.NewError("bad", niceyaml.AtPath(paths.MustParse("$.e"))))
+	err := yamltest.Bind(t, src, errAt("bad", "$.e"))
 
-	p := printer.New(
-		printer.WithStyles(yamltest.NewXMLStyles()),
-		printer.WithGutter(printer.NoGutter),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
-
-	// The handler writes the header, each line of the message behind the
-	// indent, and a blank line.
-	output := func(msg string) string {
-		rows := []string{"Error"}
-
-		for row := range strings.SplitSeq(msg, "\n") {
-			rows = append(rows, strings.Repeat(" ", fangs.Indent)+row)
-		}
-
-		return stringtest.JoinLF(append(rows, "", "")...)
-	}
+	p := xmlPrinter()
 
 	tcs := map[string]struct {
 		opts   []fangs.Option
@@ -674,8 +641,8 @@ func TestNewErrorHandler_WithExcerptOptions(t *testing.T) {
 
 			// Both paths draw the report the options build, so each shows
 			// the lines of its renderer at those settings.
-			assert.Equal(t, output(p.PrintError(err, tc.want...)), styled.String())
-			assert.Equal(t, output(niceyaml.FormatError(err, tc.want...)), plain.String())
+			assert.Equal(t, report(p.PrintError(err, tc.want...)), styled.String())
+			assert.Equal(t, report(niceyaml.FormatError(err, tc.want...)), plain.String())
 
 			// The plain output holds each line of the source as text, where
 			// the styled output splits it into tags.
@@ -701,7 +668,7 @@ func TestNewErrorHandler_WithExcerptOptions(t *testing.T) {
 
 		handler(&colorprofile.Writer{Forward: &plain, Profile: colorprofile.ASCII}, testStyles(), err)
 
-		assert.Equal(t, output(niceyaml.FormatError(err, niceyaml.WithContextLines(0))), plain.String())
+		assert.Equal(t, report(niceyaml.FormatError(err, niceyaml.WithContextLines(0))), plain.String())
 	})
 }
 
