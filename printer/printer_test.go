@@ -2748,63 +2748,60 @@ func TestGutter(t *testing.T) {
 	view := niceyaml.NewSourceFromString("a: 1\nb: 2\n").View()
 	view.SetFlag(1, line.FlagInserted)
 
-	t.Run("pads a row that renders less than the width", func(t *testing.T) {
-		t.Parallel()
-
-		p := testPrinterWithGutter(prefixGutter{inserted: "+ "})
-
-		assert.Equal(t, "  a: 1\n+ b: 2", p.Print(view))
-		assert.Equal(t, 2, p.Layout(view).GutterWidth())
-	})
-
-	t.Run("cuts a row that renders more than the width", func(t *testing.T) {
-		t.Parallel()
-
-		p := testPrinterWithGutter(fixedGutter{width: 1, text: "abc"})
-
-		assert.Equal(t, "aa: 1\nab: 2", p.Print(view))
-	})
-
-	t.Run("pads a row whose cut drops a wide rune", func(t *testing.T) {
-		t.Parallel()
-
+	tcs := map[string]struct {
+		gutter    printer.Gutter
+		want      string
+		wantWidth int
+	}{
+		"pads a row that renders less than the width": {
+			gutter:    prefixGutter{inserted: "+ "},
+			want:      "  a: 1\n+ b: 2",
+			wantWidth: 2,
+		},
+		"cuts a row that renders more than the width": {
+			gutter:    fixedGutter{width: 1, text: "abc"},
+			want:      "aa: 1\nab: 2",
+			wantWidth: 1,
+		},
 		// The two-cell rune does not fit in one cell, so the cut leaves
 		// nothing and the printer pads the row back to the width.
-		p := testPrinterWithGutter(fixedGutter{width: 1, text: "日"})
-
-		assert.Equal(t, " a: 1\n b: 2", p.Print(view))
-		assert.Equal(t, 1, p.Layout(view).GutterWidth())
-	})
-
-	t.Run("cuts a keycap by the two cells it takes", func(t *testing.T) {
-		t.Parallel()
-
+		"pads a row whose cut drops a wide rune": {
+			gutter:    fixedGutter{width: 1, text: "日"},
+			want:      " a: 1\n b: 2",
+			wantWidth: 1,
+		},
 		// Two keycaps take four cells, so a cut to three keeps the first
 		// and pads the row back to the width.
-		p := testPrinterWithGutter(fixedGutter{width: 3, text: strings.Repeat("1\ufe0f\u20e3", 2)})
-
-		assert.Equal(t, "1\ufe0f\u20e3 a: 1\n1\ufe0f\u20e3 b: 2", p.Print(view))
-	})
-
-	t.Run("cuts a zero-width cluster at the edge from text that fits", func(t *testing.T) {
-		t.Parallel()
-
+		"cuts a keycap by the two cells it takes": {
+			gutter:    fixedGutter{width: 3, text: strings.Repeat("1\ufe0f\u20e3", 2)},
+			want:      "1\ufe0f\u20e3 a: 1\n1\ufe0f\u20e3 b: 2",
+			wantWidth: 3,
+		},
 		// The zero-width space starts at the gutter width, past the last
 		// column the gutter holds, so the cut drops it whether or not the
 		// text before it runs over.
-		p := testPrinterWithGutter(fixedGutter{width: 2, text: "ab\u200b"})
+		"cuts a zero-width cluster at the edge from text that fits": {
+			gutter:    fixedGutter{width: 2, text: "ab\u200b"},
+			want:      "aba: 1\nabb: 2",
+			wantWidth: 2,
+		},
+		"a negative width counts as none": {
+			gutter:    fixedGutter{width: -3, text: "abc"},
+			want:      "a: 1\nb: 2",
+			wantWidth: 0,
+		},
+	}
 
-		assert.Equal(t, "aba: 1\nabb: 2", p.Print(view))
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("a negative width counts as none", func(t *testing.T) {
-		t.Parallel()
+			p := testPrinterWithGutter(tc.gutter)
 
-		p := testPrinterWithGutter(fixedGutter{width: -3, text: "abc"})
-
-		assert.Equal(t, "a: 1\nb: 2", p.Print(view))
-		assert.Equal(t, 0, p.Layout(view).GutterWidth())
-	})
+			assert.Equal(t, tc.want, p.Print(view))
+			assert.Equal(t, tc.wantWidth, p.Layout(view).GutterWidth())
+		})
+	}
 
 	t.Run("a func measures what it renders for the largest number", func(t *testing.T) {
 		t.Parallel()
@@ -5988,40 +5985,33 @@ func TestPrinter_WithMaxNumber(t *testing.T) {
 	t.Parallel()
 
 	short := niceyaml.NewSourceFromString("a: 1\nb: 2").View()
+	long := niceyaml.NewSourceFromString(strings.Repeat("k: v\n", 10000)).View()
 
-	t.Run("sizes the gutter for the given number", func(t *testing.T) {
-		t.Parallel()
-
-		p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithMaxNumber(10000))
-
-		assert.Equal(t, 10000, p.MaxNumber(short))
-		assert.Equal(t, 6, p.Layout(short).GutterWidth())
-
+	tcs := map[string]struct {
+		view      *line.View
+		given     int
+		want      int
+		wantWidth int
+	}{
+		"sizes the gutter for the given number": {view: short, given: 10000, want: 10000, wantWidth: 6},
 		// Two views of different lengths then share a gutter width.
-		long := niceyaml.NewSourceFromString(strings.Repeat("k: v\n", 10000)).View()
-		assert.Equal(t, p.Layout(long).GutterWidth(), p.Layout(short).GutterWidth())
-	})
-
-	t.Run("zero takes the number from the view", func(t *testing.T) {
-		t.Parallel()
-
-		p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithMaxNumber(0))
-
-		assert.Equal(t, 2, p.MaxNumber(short))
-		assert.Equal(t, 5, p.Layout(short).GutterWidth())
-	})
-
-	t.Run("a longer view widens the gutter past the given number", func(t *testing.T) {
-		t.Parallel()
-
+		"a view as long as the given number shares that width": {view: long, given: 10000, want: 10000, wantWidth: 6},
+		"zero takes the number from the view":                  {view: short, given: 0, want: 2, wantWidth: 5},
 		// A number below the view's own largest would let the last rows
 		// overflow the gutter the layout reports, so the view wins.
-		long := niceyaml.NewSourceFromString(strings.Repeat("k: v\n", 10000)).View()
-		p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithMaxNumber(3))
+		"a longer view widens the gutter past the given number": {view: long, given: 3, want: 10000, wantWidth: 6},
+	}
 
-		assert.Equal(t, 10000, p.MaxNumber(long))
-		assert.Equal(t, 6, p.Layout(long).GutterWidth())
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithMaxNumber(tc.given))
+
+			assert.Equal(t, tc.want, p.MaxNumber(tc.view))
+			assert.Equal(t, tc.wantWidth, p.Layout(tc.view).GutterWidth())
+		})
+	}
 }
 
 func TestPrinter_Layout_Width(t *testing.T) {
