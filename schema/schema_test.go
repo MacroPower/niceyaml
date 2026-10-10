@@ -1391,11 +1391,16 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 	doc := yamltest.FirstDocument(t, "request:\n  port: 0\n", niceyaml.WithName("app.yaml"))
 	base := paths.Doc().Child("request")
 
+	// A port of 0 breaks the schema once, and a request with no name
+	// breaks it a second time.
+	one := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
+	two := v.ValidateValue(t.Context(), map[string]any{"port": 0})
+
 	// The result stands in no document, so Rebase and Bind place it as
 	// they place an error that no source bound yet. Each path then shows
 	// once, with or without a wrapper around the result.
 	tcs := map[string]struct {
-		data        map[string]any
+		result      error
 		wantBound   string
 		wantWrapped string
 		// The result bound through the root with no Rebase, where each
@@ -1403,13 +1408,13 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		wantRoot string
 	}{
 		"one violation": {
-			data:        map[string]any{"port": 0, "name": "x"},
+			result:      one,
 			wantBound:   "app.yaml:2:9: $.request.port: 0 is less than 1",
 			wantWrapped: "app.yaml:2:9: $.request.port: check: 0 is less than 1",
 			wantRoot:    "app.yaml:1:1: $.port: 0 is less than 1",
 		},
 		"two violations": {
-			data: map[string]any{"port": 0},
+			result: two,
 			wantBound: stringtest.JoinLF(
 				"app.yaml: 2 schema violations",
 				`app.yaml:1:1: $.request.name: missing required property "name"`,
@@ -1432,7 +1437,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := v.ValidateValue(t.Context(), tc.data)
+			err := tc.result
 
 			placed := doc.Bind(niceyaml.Rebase(err, base))
 			require.EqualError(t, placed, tc.wantBound)
@@ -1478,7 +1483,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 	t.Run("a wrapper keeps what it matches", func(t *testing.T) {
 		t.Parallel()
 
-		wrapped := &placeCheckError{err: v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})}
+		wrapped := &placeCheckError{err: one}
 		require.EqualError(t, wrapped, "check: $.port: 0 is less than 1")
 
 		placed := doc.Bind(niceyaml.Rebase(wrapped, base))
@@ -1496,9 +1501,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 		typed := &placeCheckError{err: errPlaceCheck}
 
-		err := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
-
-		placed := doc.Bind(niceyaml.Rebase(fmt.Errorf("%w: %w", typed, err), base))
+		placed := doc.Bind(niceyaml.Rebase(fmt.Errorf("%w: %w", typed, one), base))
 		require.EqualError(t, placed, "app.yaml:2:9: $.request.port: check: check: 0 is less than 1")
 		require.ErrorIs(t, placed, errPlaceCheck)
 		assert.True(t, niceyaml.IsInvalid(placed))
@@ -1515,9 +1518,6 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 	t.Run("a wrapper that rewrites the text keeps its text", func(t *testing.T) {
 		t.Parallel()
-
-		one := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
-		two := v.ValidateValue(t.Context(), map[string]any{"port": 0})
 
 		// The text of each wrapper holds the text of the result nowhere, or
 		// twice, so no path could leave it. The document places every
@@ -1620,26 +1620,25 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 	t.Run("an Error with no option places the result", func(t *testing.T) {
 		t.Parallel()
 
-		err := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
 		request := yamltest.At(t, doc, base)
 
 		const want = "app.yaml:2:9: $.request.port: 0 is less than 1"
 
 		// Invalid and Place with no option add nothing to the result, so
 		// it places as it does alone.
-		require.EqualError(t, request.Bind(niceyaml.Invalid(err)), want)
-		require.EqualError(t, request.Bind(niceyaml.Place(err)), want)
-		require.EqualError(t, doc.Bind(niceyaml.Rebase(niceyaml.Invalid(err), base)), want)
+		require.EqualError(t, request.Bind(niceyaml.Invalid(one)), want)
+		require.EqualError(t, request.Bind(niceyaml.Place(one)), want)
+		require.EqualError(t, doc.Bind(niceyaml.Rebase(niceyaml.Invalid(one), base)), want)
 		require.EqualError(t,
-			doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", niceyaml.Invalid(err)), base)),
+			doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", niceyaml.Invalid(one)), base)),
 			"app.yaml:2:9: $.request.port: check: 0 is less than 1",
 		)
 		require.EqualError(t,
-			doc.Bind(niceyaml.Rebase(fmt.Errorf("%w: %w", errPlaceCheck, niceyaml.Place(err)), base)),
+			doc.Bind(niceyaml.Rebase(fmt.Errorf("%w: %w", errPlaceCheck, niceyaml.Place(one)), base)),
 			"app.yaml:2:9: $.request.port: check: 0 is less than 1",
 		)
 
-		for _, b := range yamltest.BoundIn(request.Bind(niceyaml.Invalid(err))) {
+		for _, b := range yamltest.BoundIn(request.Bind(niceyaml.Invalid(one))) {
 			assert.Same(t, doc.Source(), b.Source())
 		}
 	})
@@ -1647,8 +1646,6 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 	t.Run("an Error with a location or details places the result", func(t *testing.T) {
 		t.Parallel()
 
-		one := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
-		two := v.ValidateValue(t.Context(), map[string]any{"port": 0})
 		at := niceyaml.AtPath(paths.Current())
 		why := niceyaml.WithDetails(errors.New("the body of the request"))
 
@@ -1735,11 +1732,9 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 	t.Run("a summary and a detail place the results they hold", func(t *testing.T) {
 		t.Parallel()
 
-		err := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
-
 		unnamed := v.ValidateValue(t.Context(), map[string]any{"port": 80})
 
-		summary := niceyaml.NewSummary("request checks", err, unnamed)
+		summary := niceyaml.NewSummary("request checks", one, unnamed)
 		require.EqualError(t, doc.Bind(niceyaml.Rebase(summary, base)), stringtest.JoinLF(
 			"app.yaml: request checks",
 			`app.yaml:1:1: $.request.name: missing required property "name"`,
@@ -1749,7 +1744,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		detailed := niceyaml.NewError(
 			"bad request",
 			niceyaml.AtPath(base),
-			niceyaml.WithDetails(niceyaml.Rebase(err, base)),
+			niceyaml.WithDetails(niceyaml.Rebase(one, base)),
 		)
 
 		bound := yamltest.RequireSourceError(t, doc.Bind(detailed))
@@ -1760,9 +1755,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 	t.Run("each violation places on its own", func(t *testing.T) {
 		t.Parallel()
 
-		err := v.ValidateValue(t.Context(), map[string]any{"port": 0})
-
-		result := yamltest.RequireSourceError(t, err)
+		result := yamltest.RequireSourceError(t, two)
 
 		violations := yamltest.ProblemsOf(result)
 		require.Len(t, violations, 2)
