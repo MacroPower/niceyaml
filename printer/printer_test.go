@@ -1303,8 +1303,8 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		want   string
 		spans  position.Spans
 	}{
+		// Without a span, the view holds every line.
 		"full range": {
-			spans: nil, // Empty variadic prints all lines.
 			want: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -1314,7 +1314,6 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			),
 		},
 		"full range with line numbers": {
-			spans:  nil,
 			gutter: printer.LineNumberGutter,
 			want: stringtest.JoinLF(
 				"   1 first: 1",
@@ -1824,13 +1823,10 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 			),
 		},
 		"wide annotation above": {
-			input: "k: v",
-			width: 1,
-			annotation: line.Annotation{
-				Content:   "日本",
-				Placement: line.Above,
-			},
-			want: stringtest.JoinLF("日", "本", "k", ":", "v"),
+			input:      "k: v",
+			width:      1,
+			annotation: line.Annotation{Content: "日本", Placement: line.Above},
+			want:       stringtest.JoinLF("日", "本", "k", ":", "v"),
 		},
 	}
 
@@ -3042,78 +3038,44 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 		want       string
 	}{
 		"above annotation at col 0": {
-			input:     "key: value",
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "# comment",
-				Placement: line.Above,
-				Col:       0,
-			},
-			want: "# comment\nkey: value",
+			input:      "key: value",
+			annotation: line.Annotation{Content: "# comment", Placement: line.Above},
+			want:       "# comment\nkey: value",
 		},
 		"above annotation with col padding": {
-			input:     "key: value",
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "^-- error here",
-				Placement: line.Above,
-				Col:       5,
-			},
-			want: "     ^-- error here\nkey: value",
+			input:      "key: value",
+			annotation: line.Annotation{Content: "^-- error here", Placement: line.Above, Col: 5},
+			want:       "     ^-- error here\nkey: value",
 		},
 		"below annotation at col 0": {
-			input:     "key: value",
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "comment below",
-				Placement: line.Below,
-				Col:       0,
-			},
-			want: "key: value\n^ comment below",
+			input:      "key: value",
+			annotation: line.Annotation{Content: "comment below", Placement: line.Below},
+			want:       "key: value\n^ comment below",
 		},
 		"below annotation with col padding": {
-			input:     "key: value",
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "error here",
-				Placement: line.Below,
-				Col:       5,
-			},
-			want: "key: value\n     ^ error here",
+			input:      "key: value",
+			annotation: line.Annotation{Content: "error here", Placement: line.Below, Col: 5},
+			want:       "key: value\n     ^ error here",
 		},
 		"below annotation under wide runes": {
-			input:     "日本語: 値",
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "bad value",
-				Placement: line.Below,
-				Col:       5,
-			},
+			input:      "日本語: 値",
+			annotation: line.Annotation{Content: "bad value", Placement: line.Below, Col: 5},
 			// The three wide runes take six cells, so the marker sits eight
 			// cells in, under the value.
 			want: "日本語: 値\n        ^ bad value",
 		},
 		"below annotation past the end of wide runes": {
-			input:     "日本",
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "after",
-				Placement: line.Below,
-				Col:       4,
-			},
-			want: "日本\n      ^ after",
+			input:      "日本",
+			annotation: line.Annotation{Content: "after", Placement: line.Below, Col: 4},
+			want:       "日本\n      ^ after",
 		},
 		"below annotation on second line": {
 			input: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
 			),
-			lineIndex: 1,
-			annotation: line.Annotation{
-				Content:   "note",
-				Placement: line.Below,
-				Col:       8,
-			},
+			lineIndex:  1,
+			annotation: line.Annotation{Content: "note", Placement: line.Below, Col: 8},
 			want: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -3125,12 +3087,8 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 				"first: 1",
 				"second: 2",
 			),
-			lineIndex: 1,
-			annotation: line.Annotation{
-				Content:   "@@ -1 +1 @@",
-				Placement: line.Above,
-				Col:       0,
-			},
+			lineIndex:  1,
+			annotation: line.Annotation{Content: "@@ -1 +1 @@", Placement: line.Above},
 			want: stringtest.JoinLF(
 				"first: 1",
 				"@@ -1 +1 @@",
@@ -3138,38 +3096,24 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			),
 		},
 		"below annotation with empty content marks its column": {
-			input:     "key: value",
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Placement: line.Below,
-				Col:       2,
-			},
+			input:      "key: value",
+			annotation: line.Annotation{Placement: line.Below, Col: 2},
 			want: stringtest.JoinLF(
 				"key: value",
 				"  ^",
 			),
 		},
 		"above annotation with line numbers": {
-			gutter:    printer.LineNumberGutter,
-			input:     "key: value",
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "@@ -1 +1 @@",
-				Placement: line.Above,
-				Col:       0,
-			},
-			want: "     @@ -1 +1 @@\n   1 key: value",
+			gutter:     printer.LineNumberGutter,
+			input:      "key: value",
+			annotation: line.Annotation{Content: "@@ -1 +1 @@", Placement: line.Above},
+			want:       "     @@ -1 +1 @@\n   1 key: value",
 		},
 		"below annotation with line numbers": {
-			gutter:    printer.LineNumberGutter,
-			input:     "key: value",
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "error",
-				Placement: line.Below,
-				Col:       5,
-			},
-			want: "   1 key: value\n          ^ error",
+			gutter:     printer.LineNumberGutter,
+			input:      "key: value",
+			annotation: line.Annotation{Content: "error", Placement: line.Below, Col: 5},
+			want:       "   1 key: value\n          ^ error",
 		},
 		"below annotation with col padding and line numbers": {
 			gutter: printer.LineNumberGutter,
@@ -3177,12 +3121,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 				"first: 1",
 				"second: 2",
 			),
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "note",
-				Placement: line.Below,
-				Col:       7,
-			},
+			annotation: line.Annotation{Content: "note", Placement: line.Below, Col: 7},
 			want: stringtest.JoinLF(
 				"   1 first: 1",
 				"            ^ note",
@@ -4823,13 +4762,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"above rows align under the column": {
-			input: "key: value",
-			width: 16,
-			annotation: line.Annotation{
-				Content:   "one two three four five",
-				Placement: line.Above,
-				Col:       4,
-			},
+			input:      "key: value",
+			width:      16,
+			annotation: line.Annotation{Content: "one two three four five", Placement: line.Above, Col: 4},
 			want: stringtest.JoinLF(
 				"    one two",
 				"    three four",
@@ -4838,13 +4773,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"column past the width keeps the marker at its column": {
-			input: "key: value",
-			width: 25,
-			annotation: line.Annotation{
-				Content:   "x",
-				Placement: line.Below,
-				Col:       30,
-			},
+			input:      "key: value",
+			width:      25,
+			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: 30},
 			want: stringtest.JoinLF(
 				"key: value",
 				strings.Repeat(" ", 30)+"^",
@@ -4852,13 +4783,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"one-cell word at the last column hangs": {
-			input: "key: aaaaaaaaaaaaaaa",
-			width: 20,
-			annotation: line.Annotation{
-				Content:   "x",
-				Placement: line.Below,
-				Col:       19,
-			},
+			input:      "key: aaaaaaaaaaaaaaa",
+			width:      20,
+			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: 19},
 			want: stringtest.JoinLF(
 				"key: aaaaaaaaaaaaaaa",
 				strings.Repeat(" ", 19)+"^",
@@ -4866,13 +4793,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"one-cell words with no room beside the marker hang": {
-			input: "key: aaaaaaaaaaaaaaa",
-			width: 20,
-			annotation: line.Annotation{
-				Content:   "a b c",
-				Placement: line.Below,
-				Col:       18,
-			},
+			input:      "key: aaaaaaaaaaaaaaa",
+			width:      20,
+			annotation: line.Annotation{Content: "a b c", Placement: line.Below, Col: 18},
 			want: stringtest.JoinLF(
 				"key: aaaaaaaaaaaaaaa",
 				strings.Repeat(" ", 18)+"^",
@@ -4880,39 +4803,28 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"marker with empty text at the last column keeps one row": {
-			input:   "key: aaaaaaaaaaaaaaa",
-			width:   20,
-			annFunc: arrow,
-			annotation: line.Annotation{
-				Placement: line.Below,
-				Col:       19,
-			},
+			input:      "key: aaaaaaaaaaaaaaa",
+			width:      20,
+			annFunc:    arrow,
+			annotation: line.Annotation{Placement: line.Below, Col: 19},
 			want: stringtest.JoinLF(
 				"key: aaaaaaaaaaaaaaa",
 				strings.Repeat(" ", 19)+"-> ",
 			),
 		},
 		"one-cell word with one cell of room stays beside the marker": {
-			input: "key: aaaaaaaaaaaaaaa",
-			width: 20,
-			annotation: line.Annotation{
-				Content:   "x",
-				Placement: line.Below,
-				Col:       17,
-			},
+			input:      "key: aaaaaaaaaaaaaaa",
+			width:      20,
+			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: 17},
 			want: stringtest.JoinLF(
 				"key: aaaaaaaaaaaaaaa",
 				strings.Repeat(" ", 17)+"^ x",
 			),
 		},
 		"below column on the last wrapped row pads from that row's start": {
-			input: "key: aaaa bbbb cccc",
-			width: 10,
-			annotation: line.Annotation{
-				Content:   "x",
-				Placement: line.Below,
-				Col:       15,
-			},
+			input:      "key: aaaa bbbb cccc",
+			width:      10,
+			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: 15},
 			want: stringtest.JoinLF(
 				"key: aaaa",
 				"bbbb cccc",
@@ -4922,13 +4834,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 		// The wrap drops the space before the accent, so the next row
 		// starts with the accent alone, which takes no cell.
 		"below column on a row that starts with a combining accent": {
-			input: "k: aaaa ́bbbb",
-			width: 8,
-			annotation: line.Annotation{
-				Content:   "here",
-				Placement: line.Below,
-				Col:       9,
-			},
+			input:      "k: aaaa ́bbbb",
+			width:      8,
+			annotation: line.Annotation{Content: "here", Placement: line.Below, Col: 9},
 			want: stringtest.JoinLF(
 				"k: aaaa",
 				"́bbbb",
@@ -4937,13 +4845,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 		},
 		// A spacing mark takes a cell on its own at the start of the row.
 		"below column on a row that starts with a spacing mark": {
-			input: "k: aaaa िbbbb",
-			width: 8,
-			annotation: line.Annotation{
-				Content:   "here",
-				Placement: line.Below,
-				Col:       9,
-			},
+			input:      "k: aaaa िbbbb",
+			width:      8,
+			annotation: line.Annotation{Content: "here", Placement: line.Below, Col: 9},
 			want: stringtest.JoinLF(
 				"k: aaaa",
 				"िbbbb",
@@ -4951,13 +4855,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"above column on a wrapped row sits above that row": {
-			input: "key: aaaa bbbb cccc",
-			width: 10,
-			annotation: line.Annotation{
-				Content:   "hi",
-				Placement: line.Above,
-				Col:       15,
-			},
+			input:      "key: aaaa bbbb cccc",
+			width:      10,
+			annotation: line.Annotation{Content: "hi", Placement: line.Above, Col: 15},
 			want: stringtest.JoinLF(
 				"key: aaaa",
 				"     hi",
@@ -4965,13 +4865,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"below column on an earlier wrapped row sits below that row": {
-			input: "key: aaaa bbbb cccc",
-			width: 10,
-			annotation: line.Annotation{
-				Content:   "x",
-				Placement: line.Below,
-				Col:       5,
-			},
+			input:      "key: aaaa bbbb cccc",
+			width:      10,
+			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: 5},
 			want: stringtest.JoinLF(
 				"key: aaaa",
 				"     ^ x",
@@ -4979,14 +4875,10 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"column on a wrapped row pads from that row's start past the gutter": {
-			input:  "key: aaaa bbbb cccc",
-			gutter: printer.LineNumberGutter,
-			width:  15,
-			annotation: line.Annotation{
-				Content:   "x",
-				Placement: line.Below,
-				Col:       15,
-			},
+			input:      "key: aaaa bbbb cccc",
+			gutter:     printer.LineNumberGutter,
+			width:      15,
+			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: 15},
 			want: stringtest.JoinLF(
 				"   1 key: aaaa",
 				"   - bbbb cccc",
@@ -4994,13 +4886,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"column near the edge moves the text off the marker row": {
-			input: "key: value",
-			width: 16,
-			annotation: line.Annotation{
-				Content:   "string does not match pattern",
-				Placement: line.Below,
-				Col:       8,
-			},
+			input:      "key: value",
+			width:      16,
+			annotation: line.Annotation{Content: "string does not match pattern", Placement: line.Below, Col: 8},
 			want: stringtest.JoinLF(
 				"key: value",
 				strings.Repeat(" ", 8)+"^",
@@ -5012,13 +4900,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			// The wrap keeps the hyphen with the word before it, so
 			// "abc-" needs four cells and the three beside the marker
 			// would split "def".
-			input: "key: value",
-			width: 10,
-			annotation: line.Annotation{
-				Content:   "abc-def",
-				Placement: line.Below,
-				Col:       5,
-			},
+			input:      "key: value",
+			width:      10,
+			annotation: line.Annotation{Content: "abc-def", Placement: line.Below, Col: 5},
 			want: stringtest.JoinLF(
 				"key: value",
 				strings.Repeat(" ", 5)+"^",
@@ -5026,13 +4910,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"word with a slash wider than the room beside the marker hangs": {
-			input: "key: value",
-			width: 10,
-			annotation: line.Annotation{
-				Content:   "abc/def",
-				Placement: line.Below,
-				Col:       5,
-			},
+			input:      "key: value",
+			width:      10,
+			annotation: line.Annotation{Content: "abc/def", Placement: line.Below, Col: 5},
 			want: stringtest.JoinLF(
 				"key: value",
 				strings.Repeat(" ", 5)+"^",
@@ -5042,13 +4922,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 		"words split at ideographic spaces fit beside the marker": {
 			// The wrap breaks at every Unicode space but the no-break
 			// space, so each word fits the room beside the marker.
-			input: "key: value",
-			width: 16,
-			annotation: line.Annotation{
-				Content:   "aaaa　bbbb　cccc",
-				Placement: line.Below,
-				Col:       5,
-			},
+			input:      "key: value",
+			width:      16,
+			annotation: line.Annotation{Content: "aaaa　bbbb　cccc", Placement: line.Below, Col: 5},
 			want: stringtest.JoinLF(
 				"key: value",
 				strings.Repeat(" ", 5)+"^ aaaa",
@@ -5057,13 +4933,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"words split at em spaces fit beside the marker": {
-			input: "key: value",
-			width: 16,
-			annotation: line.Annotation{
-				Content:   "aaaa bbbb cccc",
-				Placement: line.Below,
-				Col:       5,
-			},
+			input:      "key: value",
+			width:      16,
+			annotation: line.Annotation{Content: "aaaa bbbb cccc", Placement: line.Below, Col: 5},
 			want: stringtest.JoinLF(
 				"key: value",
 				strings.Repeat(" ", 5)+"^ aaaa bbbb",
@@ -5071,13 +4943,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"words joined by a no-break space wider than the room hang": {
-			input: "key: value",
-			width: 15,
-			annotation: line.Annotation{
-				Content:   "aaaa bbbb",
-				Placement: line.Below,
-				Col:       5,
-			},
+			input:      "key: value",
+			width:      15,
+			annotation: line.Annotation{Content: "aaaa bbbb", Placement: line.Below, Col: 5},
 			want: stringtest.JoinLF(
 				"key: value",
 				strings.Repeat(" ", 5)+"^",
@@ -5085,13 +4953,9 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"column near the edge hangs the text under a narrower indent": {
-			input: "key: value",
-			width: 40,
-			annotation: line.Annotation{
-				Content:   "string does not match pattern",
-				Placement: line.Below,
-				Col:       34,
-			},
+			input:      "key: value",
+			width:      40,
+			annotation: line.Annotation{Content: "string does not match pattern", Placement: line.Below, Col: 34},
 			want: stringtest.JoinLF(
 				"key: value",
 				strings.Repeat(" ", 34)+"^",
@@ -5100,39 +4964,27 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"negative column renders at column zero": {
-			input: "key: value",
-			width: 0,
-			annotation: line.Annotation{
-				Content:   "x",
-				Placement: line.Below,
-				Col:       -1,
-			},
+			input:      "key: value",
+			width:      0,
+			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: -1},
 			want: stringtest.JoinLF(
 				"key: value",
 				"^ x",
 			),
 		},
 		"negative column renders at column zero when wrapping": {
-			input: "key: value",
-			width: 10,
-			annotation: line.Annotation{
-				Content:   "x",
-				Placement: line.Below,
-				Col:       -1,
-			},
+			input:      "key: value",
+			width:      10,
+			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: -1},
 			want: stringtest.JoinLF(
 				"key: value",
 				"^ x",
 			),
 		},
 		"control characters are escaped before wrapping": {
-			input: "key: value",
-			width: 20,
-			annotation: line.Annotation{
-				Content:   "\x1b[31mred\x1b[0m w w w w w w w w",
-				Placement: line.Below,
-				Col:       0,
-			},
+			input:      "key: value",
+			width:      20,
+			annotation: line.Annotation{Content: "\x1b[31mred\x1b[0m w w w w w w w w", Placement: line.Below},
 			want: stringtest.JoinLF(
 				"key: value",
 				"^ ␛[31mred␛[0m w w w",
@@ -5140,40 +4992,28 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"embedded newline renders as a picture without wrapping": {
-			input: "key: value",
-			width: 0,
-			annotation: line.Annotation{
-				Content:   "a\nb",
-				Placement: line.Below,
-				Col:       0,
-			},
+			input:      "key: value",
+			width:      0,
+			annotation: line.Annotation{Content: "a\nb", Placement: line.Below},
 			want: stringtest.JoinLF(
 				"key: value",
 				"^ a␊b",
 			),
 		},
 		"embedded newline renders as a picture when wrapping": {
-			input: "key: value",
-			width: 20,
-			annotation: line.Annotation{
-				Content:   "a\nb",
-				Placement: line.Below,
-				Col:       0,
-			},
+			input:      "key: value",
+			width:      20,
+			annotation: line.Annotation{Content: "a\nb", Placement: line.Below},
 			want: stringtest.JoinLF(
 				"key: value",
 				"^ a␊b",
 			),
 		},
 		"custom annotation func gets no column indent": {
-			input:   "k: v",
-			width:   6,
-			annFunc: bare,
-			annotation: line.Annotation{
-				Content:   "w w w w w w",
-				Placement: line.Below,
-				Col:       10,
-			},
+			input:      "k: v",
+			width:      6,
+			annFunc:    bare,
+			annotation: line.Annotation{Content: "w w w w w w", Placement: line.Below, Col: 10},
 			want: stringtest.JoinLF(
 				"k: v",
 				"w w w",
@@ -5181,14 +5021,10 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"custom marker rows align under the text": {
-			input:   "key: value",
-			width:   18,
-			annFunc: arrow,
-			annotation: line.Annotation{
-				Content:   "alpha beta gamma delta epsilon",
-				Placement: line.Below,
-				Col:       5,
-			},
+			input:      "key: value",
+			width:      18,
+			annFunc:    arrow,
+			annotation: line.Annotation{Content: "alpha beta gamma delta epsilon", Placement: line.Below, Col: 5},
 			want: stringtest.JoinLF(
 				"key: value",
 				"     -> alpha beta",
