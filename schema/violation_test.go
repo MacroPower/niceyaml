@@ -821,7 +821,7 @@ func TestViolation_Alternatives(t *testing.T) {
 			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
 			require.Error(t, err)
 
-			assert.Equal(t, strings.Join(tc.want, "\n")+"\n", treeText(err))
+			assert.Equal(t, stringtest.LinesLF(tc.want...), treeText(err))
 		})
 	}
 }
