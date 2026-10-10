@@ -4692,6 +4692,17 @@ func caretAt(col int, msg string) line.Annotation {
 	return line.Annotation{Content: msg, Kind: kind.TextError, Placement: line.Below, Col: col}
 }
 
+// errorOverlays returns the overlays the binding of an error leaves on a
+// line it marks at each of spans.
+func errorOverlays(spans ...position.Span) line.Overlays {
+	overlays := make(line.Overlays, 0, len(spans))
+	for _, span := range spans {
+		overlays = append(overlays, line.Overlay{Kind: kind.GenericError, Cols: span})
+	}
+
+	return overlays
+}
+
 // lineNumbers returns the source line number of every line in view.
 func lineNumbers(view *line.View) []int {
 	numbers := make([]int, 0, view.Count())
@@ -4722,7 +4733,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 
 		excerpt := requireExcerpt(t, excerptError(t), niceyaml.WithContextLines(1))
 
-		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
+		want := errorOverlays(position.NewSpan(3, 4))
 		assert.Equal(t, want, excerpt.Overlays(1), "the main error covers the value of b")
 		assert.Equal(t, want, excerpt.Overlays(7), "the nested error covers the value of h")
 
@@ -4751,10 +4762,10 @@ func TestSourceError_Excerpt(t *testing.T) {
 			caretAt(5, "about value"),
 			caretAt(0, "about key"),
 		}, excerpt.Annotations(0))
-		assert.Equal(t, line.Overlays{
-			{Kind: kind.GenericError, Cols: position.NewSpan(5, 10)},
-			{Kind: kind.GenericError, Cols: position.NewSpan(0, 3)},
-		}, excerpt.Overlays(0))
+		assert.Equal(t,
+			errorOverlays(position.NewSpan(5, 10), position.NewSpan(0, 3)),
+			excerpt.Overlays(0),
+		)
 
 		// A renderer joins the messages in the order of their columns.
 		assert.Equal(t, stringtest.JoinLF(
@@ -4986,7 +4997,7 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, lineNumbers(view))
 
-		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
+		want := errorOverlays(position.NewSpan(3, 4))
 		assert.Equal(t, want, view.Overlays(1))
 		assert.Equal(t, want, view.Overlays(7))
 		assert.Equal(t, line.Annotations{caretAt(3, "bad b")}, view.Annotations(1))
@@ -5110,7 +5121,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		require.True(t, first.Annotate(view))
 		require.True(t, second.Annotate(view), "the detail marks its line for an error with no location of its own")
 
-		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
+		want := errorOverlays(position.NewSpan(3, 4))
 		assert.Equal(t, want, view.Overlays(1))
 		assert.Equal(t, want, view.Overlays(3))
 		assert.Equal(t, line.Annotations{caretAt(3, "bad b")}, view.Annotations(1))
@@ -5155,7 +5166,7 @@ func TestSourceError_Annotate(t *testing.T) {
 			require.True(t, bound.Annotate(view), "the view holds the line, marked or not")
 		}
 
-		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(1))
+		assert.Equal(t, errorOverlays(position.NewSpan(3, 4)), view.Overlays(1))
 		assert.Equal(t, line.Annotations{caretAt(3, "bad b")}, view.Annotations(1))
 	})
 
@@ -5264,7 +5275,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		))
 		require.True(t, bound.Annotate(view))
 
-		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(4, 4)}}, view.Overlays(0))
+		assert.Equal(t, errorOverlays(position.NewSpan(4, 4)), view.Overlays(0))
 		assert.Equal(t, line.Annotations{caretAt(4, "far")}, view.Annotations(0))
 		assert.Equal(t, stringtest.JoinLF(
 			"   1 | a: 1",
@@ -5283,7 +5294,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		require.True(t, bound.Annotate(view), "the slice holds the line of the detail")
 
 		assert.Equal(t, []int{7, 8, 9, 10}, lineNumbers(view))
-		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(7))
+		assert.Equal(t, errorOverlays(position.NewSpan(3, 4)), view.Overlays(7))
 		assert.Equal(t, line.Annotations{caretAt(3, "bad h")}, view.Annotations(7))
 
 		unmarked(t, view, 7)
@@ -5302,7 +5313,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		require.True(t, bound.Annotate(view))
 
 		require.Equal(t, 1, view.Count())
-		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(1))
+		assert.Equal(t, errorOverlays(position.NewSpan(3, 4)), view.Overlays(1))
 		assert.Equal(t, stringtest.JoinLF(
 			"   2 | b: 2",
 			"     |    ^ bad b",
@@ -5328,7 +5339,7 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		assert.Empty(t, view.Overlays(0))
 		assert.Empty(t, view.Overlays(1), "the deleted line of the other revision stays unmarked")
-		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(2))
+		assert.Equal(t, errorOverlays(position.NewSpan(3, 4)), view.Overlays(2))
 	})
 
 	t.Run("marks a diff on the deleted lines of the before revision", func(t *testing.T) {
@@ -5391,7 +5402,7 @@ func TestSourceError_Annotate(t *testing.T) {
 				for i := range view.All() {
 					if tc.want && i == tc.index {
 						assert.Equal(t,
-							line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}},
+							errorOverlays(position.NewSpan(3, 4)),
 							view.Overlays(i))
 
 						continue
