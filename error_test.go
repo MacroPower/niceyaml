@@ -4021,11 +4021,7 @@ func TestSourceError_Range(t *testing.T) {
 	tcs := map[string]struct {
 		err  *niceyaml.Error
 		want position.Range
-		is   error
-		// The error carries no location, so nothing resolves and there
-		// is no reason to report.
-		unlocated bool
-		doc       int
+		doc  int
 	}{
 		"path targets the value token": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("value"))),
@@ -4054,45 +4050,11 @@ func TestSourceError_Range(t *testing.T) {
 			err:  niceyaml.NewError("bad", niceyaml.AtPosition(position.New(1, 8))),
 			want: yamltest.LineRange(1, 7, 10),
 		},
-		"no location": {
-			err:       niceyaml.NewError("bad"),
-			unlocated: true,
-		},
-		"path that does not resolve": {
-			err: niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("missing").Index(0))),
-			is:  paths.ErrNotFound,
-		},
-		"range past the last line": {
-			err: niceyaml.NewError("bad",
-				niceyaml.AtRange(yamltest.LineRange(9, 0, 3)),
-			),
-			is: niceyaml.ErrOutOfRange,
-		},
-		"range before the first line": {
-			err: niceyaml.NewError("bad",
-				niceyaml.AtRange(yamltest.LineRange(-1, 0, 2)),
-			),
-			is: niceyaml.ErrOutOfRange,
-		},
-		"range before the first column": {
-			err: niceyaml.NewError("bad",
-				niceyaml.AtRange(yamltest.LineRange(0, -2, 2)),
-			),
-			is: niceyaml.ErrOutOfRange,
-		},
 		"range end before the first column on a later line": {
 			err: niceyaml.NewError("bad",
 				niceyaml.AtRange(position.NewRange(position.New(0, 1), position.New(1, -3))),
 			),
 			want: position.NewRange(position.New(0, 1), position.New(1, 0)),
-		},
-		"position from other text": {
-			err: niceyaml.NewError("bad", niceyaml.AtPosition(position.New(8, 0))),
-			is:  niceyaml.ErrOutOfRange,
-		},
-		"position before the first column": {
-			err: niceyaml.NewError("bad", niceyaml.AtPosition(position.New(1, -5))),
-			is:  niceyaml.ErrOutOfRange,
 		},
 	}
 
@@ -4101,12 +4063,6 @@ func TestSourceError_Range(t *testing.T) {
 			t.Parallel()
 
 			bound := yamltest.RequireSourceError(t, docs[tc.doc].Bind(tc.err))
-
-			if tc.unlocated || tc.is != nil {
-				requireUnresolved(t, bound, tc.is)
-
-				return
-			}
 
 			got, ok := bound.Range()
 			require.True(t, ok)
@@ -4508,6 +4464,16 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 			),
 			is:         niceyaml.ErrOutOfRange,
 			wantRender: "bad\n\nno excerpt: location outside source: column -1 of line 1",
+		},
+		"position from other text": {
+			err:        niceyaml.NewError("bad", niceyaml.AtPosition(position.New(8, 0))),
+			is:         niceyaml.ErrOutOfRange,
+			wantRender: "bad\n\nno excerpt: location outside source: line 9 not in lines 1-2",
+		},
+		"position before the first column": {
+			err:        niceyaml.NewError("bad", niceyaml.AtPosition(position.New(1, -5))),
+			is:         niceyaml.ErrOutOfRange,
+			wantRender: "bad\n\nno excerpt: location outside source: column -4 of line 2",
 		},
 		"nested range before the first line": {
 			err: niceyaml.NewError("bad",
