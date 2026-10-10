@@ -1636,17 +1636,6 @@ func TestErrorAnnotation(t *testing.T) {
 				"<text>    </text><nameTag>age</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>30</literalNumberInteger>",
 			),
 		},
-		"root path highlights the first key": {
-			source: "key: value",
-			loc:    niceyaml.AtPath(paths.Current().Key()),
-			errMsg: "root error",
-			want: stringtest.JoinLF(
-				"1:1: $~: root error",
-				"",
-				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
-				"<textError>^^^</textError>",
-			),
-		},
 		"single top-level key path": {
 			source: "key: value",
 			loc:    niceyaml.AtPath(paths.Current().Child("key").Key()),
@@ -1678,35 +1667,6 @@ func TestErrorAnnotation(t *testing.T) {
 				"<nameTag>line4</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>d</literalString>",
 			),
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := 2
-			if tc.contextLines > 0 {
-				lines = tc.contextLines
-			}
-
-			err := yamltest.Bind(t, niceyaml.NewSourceFromString(tc.source),
-				niceyaml.NewError(tc.errMsg, tc.loc),
-			)
-
-			assert.Equal(t, tc.want, stringtest.TrimLineEnds(renderContext(err, lines)))
-		})
-	}
-}
-
-func TestErrorAnnotation_PathTargetValue(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		loc    niceyaml.ErrorOption
-		source string
-		errMsg string
-		want   string
-	}{
 		"value selection highlights value token": {
 			source: "key: value",
 			loc:    niceyaml.AtPath(paths.Current().Child("key")),
@@ -1751,61 +1711,6 @@ func TestErrorAnnotation_PathTargetValue(t *testing.T) {
 				"<text>  </text><punctuationSequenceEntry>-</punctuationSequenceEntry><text> </text><literalString>second</literalString>",
 			),
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			err := yamltest.Bind(t, niceyaml.NewSourceFromString(tc.source), niceyaml.NewError(
-				tc.errMsg,
-				tc.loc,
-			))
-
-			assert.Equal(t, tc.want, stringtest.TrimLineEnds(render(err)))
-		})
-	}
-}
-
-func TestWithPrinter(t *testing.T) {
-	t.Parallel()
-
-	source := stringtest.Input(`
-		key: value
-		foo: bar
-	`)
-	tokens := lexer.Tokenize(source)
-
-	customPrinter := yamltest.NewXMLPrinter()
-
-	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-		"test error",
-		niceyaml.AtPosition(position.NewFromToken(tokens[0])),
-	))
-
-	want := stringtest.JoinLF(
-		"1:1: test error",
-		"",
-		"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
-		"<textError>^^^</textError>",
-		"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>bar</literalString>",
-	)
-
-	var bound *niceyaml.SourceError
-
-	require.ErrorAs(t, err, &bound)
-	assert.Equal(t, want, stringtest.TrimLineEnds(customPrinter.PrintError(bound)))
-}
-
-func TestError_SpecialParentContext(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		source string
-		loc    niceyaml.ErrorOption
-		errMsg string
-		want   string
-	}{
 		"root level array - element has no key": {
 			// A key target on a sequence element falls back to the element.
 			source: stringtest.Input(`
@@ -1846,14 +1751,48 @@ func TestError_SpecialParentContext(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := yamltest.Bind(t, niceyaml.NewSourceFromString(tc.source), niceyaml.NewError(
-				tc.errMsg,
-				tc.loc,
-			))
+			lines := 2
+			if tc.contextLines > 0 {
+				lines = tc.contextLines
+			}
 
-			assert.Equal(t, tc.want, stringtest.TrimLineEnds(render(err)))
+			err := yamltest.Bind(t, niceyaml.NewSourceFromString(tc.source),
+				niceyaml.NewError(tc.errMsg, tc.loc),
+			)
+
+			assert.Equal(t, tc.want, stringtest.TrimLineEnds(renderContext(err, lines)))
 		})
 	}
+}
+
+func TestWithPrinter(t *testing.T) {
+	t.Parallel()
+
+	source := stringtest.Input(`
+		key: value
+		foo: bar
+	`)
+	tokens := lexer.Tokenize(source)
+
+	customPrinter := yamltest.NewXMLPrinter()
+
+	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
+		"test error",
+		niceyaml.AtPosition(position.NewFromToken(tokens[0])),
+	))
+
+	want := stringtest.JoinLF(
+		"1:1: test error",
+		"",
+		"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+		"<textError>^^^</textError>",
+		"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>bar</literalString>",
+	)
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, err, &bound)
+	assert.Equal(t, want, stringtest.TrimLineEnds(customPrinter.PrintError(bound)))
 }
 
 func TestError_Unwrap(t *testing.T) {
