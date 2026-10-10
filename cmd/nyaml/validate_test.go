@@ -32,6 +32,12 @@ var nameSchema = []byte(`{
 	"required": ["name"]
 }`)
 
+// directive returns the comment line that names ref as the schema of the
+// document below it.
+func directive(ref string) string {
+	return "# yaml-language-server: $schema=" + ref + "\n"
+}
+
 // quietValidateCmd returns nyaml validate set to run with args, to write
 // its output to out, and to print no error itself.
 func quietValidateCmd(out io.Writer, args ...string) *cobra.Command {
@@ -92,7 +98,7 @@ func TestValidateFile(t *testing.T) {
 			want:    []string{"3:1:"},
 		},
 		"comment above the first header": {
-			content: stringtest.LinesLF("# yaml-language-server: $schema=./s.json", "---", "name: a"),
+			content: directive("./s.json") + stringtest.LinesLF("---", "name: a"),
 		},
 		"comment above an invalid document": {
 			content: stringtest.LinesLF("# a preamble", "---", "value: 1"),
@@ -251,7 +257,7 @@ func TestValidateFileDotDotAfterSymlink(t *testing.T) {
 	sub := filepath.Join(dir, "sub")
 
 	writeFile(t, sub, "s.json", string(nameSchema))
-	writeFile(t, sub, "x.yaml", "# yaml-language-server: $schema=./s.json\nname: a\n")
+	writeFile(t, sub, "x.yaml", directive("./s.json")+"name: a\n")
 
 	// Joining the name with filepath.Join would clean it to x.yaml.
 	path := dir + "/ldir/../x.yaml"
@@ -271,8 +277,8 @@ func TestBuildRegistryRefs(t *testing.T) {
 
 	files := map[string]string{
 		"s.json":       `{"properties": {"name": {"type": "string"}, "extra": {"$ref": "missing.json"}}}`,
-		"skips.yaml":   "# yaml-language-server: $schema=./s.json\nname: a\n",
-		"reaches.yaml": "# yaml-language-server: $schema=./s.json\nextra: 1\n",
+		"skips.yaml":   directive("./s.json") + "name: a\n",
+		"reaches.yaml": directive("./s.json") + "extra: 1\n",
 	}
 	for name, content := range files {
 		writeFile(t, dir, name, content)
@@ -626,7 +632,7 @@ func TestValidateCmdCanceled(t *testing.T) {
 				}))
 				t.Cleanup(srv.Close)
 
-				doc = "# yaml-language-server: $schema=" + srv.URL + "/s.json\n" + doc
+				doc = directive(srv.URL+"/s.json") + doc
 			} else {
 				cancel()
 			}

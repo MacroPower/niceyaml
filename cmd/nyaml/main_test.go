@@ -206,8 +206,8 @@ func TestExitCode(t *testing.T) {
 		},
 		"invalid document beside a directive that does not load": {
 			files: map[string]string{
-				"a.yaml": "# yaml-language-server: $schema=./schema.json\nvalue: 1\n",
-				"b.yaml": "# yaml-language-server: $schema=./missing.json\nname: b\n",
+				"a.yaml": directive("./schema.json") + "value: 1\n",
+				"b.yaml": directive("./missing.json") + "name: b\n",
 			},
 			args: []string{"a.yaml", "b.yaml"},
 			want: exitFailure,
@@ -230,7 +230,7 @@ func TestExitCode(t *testing.T) {
 		"valid document under a directive that names a YAML schema": {
 			files: map[string]string{
 				"schema.yaml": "required: [name]\n",
-				"a.yaml":      "# yaml-language-server: $schema=./schema.yaml\nname: a\n",
+				"a.yaml":      directive("./schema.yaml") + "name: a\n",
 			},
 			args: []string{"a.yaml"},
 			want: 0,
@@ -238,7 +238,7 @@ func TestExitCode(t *testing.T) {
 		"violation of a YAML schema that a directive names": {
 			files: map[string]string{
 				"schema.yaml": "required: [name]\n",
-				"a.yaml":      "# yaml-language-server: $schema=./schema.yaml\nvalue: 1\n",
+				"a.yaml":      directive("./schema.yaml") + "value: 1\n",
 			},
 			args: []string{"a.yaml"},
 			want: exitInvalid,
@@ -246,8 +246,8 @@ func TestExitCode(t *testing.T) {
 		"invalid document beside a directive whose YAML schema does not parse": {
 			files: map[string]string{
 				"schema.yaml": "required: [name\n",
-				"a.yaml":      "# yaml-language-server: $schema=./schema.json\nvalue: 1\n",
-				"b.yaml":      "# yaml-language-server: $schema=./schema.yaml\nname: b\n",
+				"a.yaml":      directive("./schema.json") + "value: 1\n",
+				"b.yaml":      directive("./schema.yaml") + "name: b\n",
 			},
 			args: []string{"a.yaml", "b.yaml"},
 			want: exitFailure,
