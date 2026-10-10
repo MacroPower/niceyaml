@@ -39,6 +39,20 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
+var (
+	// The error a failing reader reports.
+	errReadFailed = errors.New("read failed")
+
+	// A mapping of five keys, one on each line.
+	sourceFiveLines = stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+		"d: 4",
+		"e: 5",
+	)
+)
+
 func TestTokens_String_Annotation(t *testing.T) {
 	t.Parallel()
 
@@ -195,7 +209,10 @@ func TestSource_Runes(t *testing.T) {
 			},
 		},
 		"nested with indent": {
-			input: "p:\n  c: v\n",
+			input: stringtest.LinesLF(
+				"p:",
+				"  c: v",
+			),
 			want: []runePosition{
 				{R: 'p', Pos: position.New(0, 0)},
 				{R: ':', Pos: position.New(0, 1)},
@@ -211,7 +228,11 @@ func TestSource_Runes(t *testing.T) {
 		// The content of a literal block lies on the lines below its
 		// header, and the block keeps its final line break.
 		"literal block": {
-			input: "s: |\n  a\n  b\n",
+			input: stringtest.LinesLF(
+				"s: |",
+				"  a",
+				"  b",
+			),
 			want: []runePosition{
 				{R: 's', Pos: position.New(0, 0)},
 				{R: ':', Pos: position.New(0, 1)},
@@ -274,7 +295,11 @@ func TestSource_Runes_DiffBuiltLines(t *testing.T) {
 func TestSource_All_EarlyBreak(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromTokens(lexer.Tokenize("a: 1\nb: 2\nc: 3\n"))
+	source := niceyaml.NewSourceFromTokens(lexer.Tokenize(stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+	)))
 
 	var collected []int
 
@@ -291,7 +316,7 @@ func TestSource_All_EarlyBreak(t *testing.T) {
 func TestSource_All_WithSpans(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n")
+	source := niceyaml.NewSourceFromString(sourceFiveLines)
 
 	require.Equal(t, 5, source.Lines().Len())
 
@@ -354,24 +379,31 @@ func TestSource_Lines(t *testing.T) {
 			want:  []string{"key: value", "foo: bar"},
 		},
 		"multiple lines": {
-			input: "a: 1\nb: 2\nc: 3\n",
+			input: stringtest.LinesLF("a: 1", "b: 2", "c: 3"),
 			want:  []string{"a: 1", "b: 2", "c: 3"},
 		},
 		"empty": {input: ""},
 		"nested yaml": {
-			input: "parent:\n  child: value\n",
-			want:  []string{"parent:", "  child: value"},
+			input: stringtest.LinesLF(
+				"parent:",
+				"  child: value",
+			),
+			want: []string{"parent:", "  child: value"},
 		},
 		"literal block": {
-			input: "key: |\n  line1\n  line2\n",
-			want:  []string{"key: |", "  line1", "  line2"},
+			input: stringtest.LinesLF(
+				"key: |",
+				"  line1",
+				"  line2",
+			),
+			want: []string{"key: |", "  line1", "  line2"},
 		},
 		"blank line before an explicit key": {
-			input: "tags: [a, b]\n\n? key\n: value\n",
+			input: stringtest.LinesLF("tags: [a, b]", "", "? key", ": value"),
 			want:  []string{"tags: [a, b]", "", "? key", ": value"},
 		},
 		"explicit key after a leading blank line": {
-			input: "\n? key\n: value\n",
+			input: stringtest.LinesLF("", "? key", ": value"),
 			want:  []string{"", "? key", ": value"},
 		},
 		"text after a block scalar header at the end": {
@@ -405,10 +437,17 @@ func TestSource_Tokens(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 	}{
-		"mapping":      {input: "key: value\nfoo: bar\n"},
-		"block scalar": {input: "key: |\n  one\n  two\nfoo: bar\n"},
-		"documents":    {input: "a: 1\n---\nb: 2\n"},
-		"empty":        {input: ""},
+		"mapping": {input: "key: value\nfoo: bar\n"},
+		"block scalar": {
+			input: stringtest.LinesLF(
+				"key: |",
+				"  one",
+				"  two",
+				"foo: bar",
+			),
+		},
+		"documents": {input: stringtest.LinesLF("a: 1", "---", "b: 2")},
+		"empty":     {input: ""},
 	}
 
 	for name, tc := range tcs {
@@ -496,7 +535,7 @@ func TestSource_Runes_EarlyBreak(t *testing.T) {
 func TestSource_Runes_WithRanges(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n")
+	source := niceyaml.NewSourceFromString(sourceFiveLines)
 
 	require.Equal(t, 5, source.Lines().Len())
 
@@ -632,7 +671,7 @@ func TestSource_Lines_DroppedText(t *testing.T) {
 		"blank line of a tab before the first key":    {input: "\t\na: 1\n"},
 		"space before a colon after a quoted key":     {input: "{\"a\" : 1, \"b\" : \"x\"}\n"},
 		"trailing spaces":                             {input: "a: 1   \nb: 2\n"},
-		"blank line of spaces":                        {input: "a: 1\n   \nb: 2\n"},
+		"blank line of spaces":                        {input: stringtest.LinesLF("a: 1", "   ", "b: 2")},
 	}
 
 	for name, tc := range tcs {
@@ -664,9 +703,9 @@ func TestSource_File_BlankLineBeforeFirstKey(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 	}{
-		"blank line of spaces":  {input: "  \na: 1\nb: 2\n"},
-		"blank line with a tab": {input: " \t\na: 1\nb: 2\n"},
-		"blank line of a tab":   {input: "\t\na: 1\nb: 2\n"},
+		"blank line of spaces":  {input: stringtest.LinesLF("  ", "a: 1", "b: 2")},
+		"blank line with a tab": {input: stringtest.LinesLF(" \t", "a: 1", "b: 2")},
+		"blank line of a tab":   {input: stringtest.LinesLF("\t", "a: 1", "b: 2")},
 	}
 
 	for name, tc := range tcs {
@@ -714,8 +753,13 @@ func TestSource_File_BlankBlockScalarContent(t *testing.T) {
 		input       string
 		wantComment string
 	}{
-		"comment below the content": {input: "a: |+\n  \n# c\nb: 1\n", wantComment: "# c"},
-		"key below the content":     {input: "a: |+\n  \nb: 1\n"},
+		"comment below the content": {
+			input:       stringtest.LinesLF("a: |+", "  ", "# c", "b: 1"),
+			wantComment: "# c",
+		},
+		"key below the content": {
+			input: stringtest.LinesLF("a: |+", "  ", "b: 1"),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -4309,9 +4353,6 @@ func TestSource_Bind_RoutesDocuments(t *testing.T) {
 		})
 	}
 }
-
-// errReadFailed is the error a failing reader reports.
-var errReadFailed = errors.New("read failed")
 
 func TestNewSourceFromReader(t *testing.T) {
 	t.Parallel()
