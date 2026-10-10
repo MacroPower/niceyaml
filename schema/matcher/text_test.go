@@ -123,11 +123,9 @@ func TestText(t *testing.T) {
 	t.Run("alias bomb is an error", func(t *testing.T) {
 		t.Parallel()
 
-		// Each level lists the level below ten times, so a decode of the
-		// alias key reads 10^7 scalars. Match refuses the document before
-		// it decodes anything, as Content does.
-		input := yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n"
-		doc := yamltest.FirstDocument(t, input)
+		// Match refuses the document before it decodes anything, as
+		// Content does.
+		doc := yamltest.FirstDocument(t, aliasBomb)
 
 		ok, err := matcher.Text(kindPath, acceptAll).Match(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
@@ -141,17 +139,13 @@ func TestText(t *testing.T) {
 	t.Run("alias bomb in a source with the limit off is read", func(t *testing.T) {
 		t.Parallel()
 
-		// The tag keeps the alias in the node at kind, so Match counts the
-		// document before it reads the node, and the levels put it past
-		// the limit.
-		input := "name: &name Deployment\n" + yamltest.AliasLevels(4) + "kind: !!str *name\n"
 		m := matcher.Text(kindPath, func(text string) bool { return text == "Deployment" })
 
-		ok, err := m.Match(t.Context(), yamltest.FirstDocument(t, input))
+		ok, err := m.Match(t.Context(), yamltest.FirstDocument(t, taggedAliasBomb))
 		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
 		assert.False(t, ok)
 
-		ok, err = m.Match(t.Context(), yamltest.FirstDocument(t, input, niceyaml.WithAliasLimit(false)))
+		ok, err = m.Match(t.Context(), yamltest.FirstDocument(t, taggedAliasBomb, niceyaml.WithAliasLimit(false)))
 		require.NoError(t, err)
 		assert.True(t, ok)
 	})

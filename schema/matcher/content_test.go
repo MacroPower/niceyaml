@@ -877,13 +877,10 @@ func TestContent(t *testing.T) {
 	t.Run("alias bomb is an error", func(t *testing.T) {
 		t.Parallel()
 
-		// Each level lists the level below ten times, so a decode of the
-		// alias key reads 10^7 scalars. Match refuses the document before
-		// it decodes anything, as the schema validator does.
-		input := yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n"
-
+		// Match refuses the document before it decodes anything, as the
+		// schema validator does.
 		m := matcher.Content(kindPath, "Deployment")
-		doc := yamltest.FirstDocument(t, input)
+		doc := yamltest.FirstDocument(t, aliasBomb)
 
 		ok, err := m.Match(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
@@ -897,17 +894,13 @@ func TestContent(t *testing.T) {
 	t.Run("alias bomb in a source with the limit off is read", func(t *testing.T) {
 		t.Parallel()
 
-		// The tag keeps the alias in the node at kind, so Match counts the
-		// document before it reads the node, and the levels put it past
-		// the limit.
-		input := "name: &name Deployment\n" + yamltest.AliasLevels(4) + "kind: !!str *name\n"
 		m := matcher.Content(kindPath, "Deployment")
 
-		ok, err := m.Match(t.Context(), yamltest.FirstDocument(t, input))
+		ok, err := m.Match(t.Context(), yamltest.FirstDocument(t, taggedAliasBomb))
 		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
 		assert.False(t, ok)
 
-		ok, err = m.Match(t.Context(), yamltest.FirstDocument(t, input, niceyaml.WithAliasLimit(false)))
+		ok, err = m.Match(t.Context(), yamltest.FirstDocument(t, taggedAliasBomb, niceyaml.WithAliasLimit(false)))
 		require.NoError(t, err)
 		assert.True(t, ok)
 	})
@@ -1277,8 +1270,22 @@ func (m *millis) UnmarshalYAML(data []byte) error {
 	return nil
 }
 
-// The errors the types below report.
+// The documents whose aliases put a read of kind past the alias limit, and
+// the errors the types below report.
 var (
+	// Each level lists the level below ten times, so a decode of the
+	// alias key at kind reads 10^7 scalars.
+	aliasBomb = yamltest.AliasLevels(7) + stringtest.LinesLF(
+		"kind:",
+		"  ? *l7",
+		"  : v",
+	)
+
+	// The tag keeps the alias in the node at kind, so Match counts the
+	// document before it reads the node, and the levels put it past the
+	// limit. With the limit off, kind reads as Deployment.
+	taggedAliasBomb = "name: &name Deployment\n" + yamltest.AliasLevels(4) + "kind: !!str *name\n"
+
 	// The error rejecting reports from its own decode.
 	errRejecting = errors.New("value rejected itself")
 
