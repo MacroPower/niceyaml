@@ -1377,11 +1377,7 @@ func TestDocument_Decode_TypeMismatch(t *testing.T) {
 
 		_, err := dd.Decode[struct{ Value int }](t.Context())
 
-		require.Error(t, err)
-
-		var yamlErr *niceyaml.Error
-
-		require.ErrorAs(t, err, &yamlErr)
+		require.ErrorAs(t, err, new(*niceyaml.Error))
 	})
 }
 
@@ -3033,11 +3029,7 @@ func TestDocument_Decode_SchemaThenDecodeError(t *testing.T) {
 		niceyaml.WithValidator(passingValidator()),
 	)
 
-	require.Error(t, err)
-
-	var yamlErr *niceyaml.Error
-
-	require.ErrorAs(t, err, &yamlErr)
+	require.ErrorAs(t, err, new(*niceyaml.Error))
 }
 
 func TestDocument_Decode_SelfValidator(t *testing.T) {
@@ -3951,11 +3943,7 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 			t.Context(),
 			niceyaml.WithDisallowUnknownFields(true),
 		)
-		require.Error(t, err)
-
-		var yamlErr *niceyaml.Error
-
-		require.ErrorAs(t, err, &yamlErr)
+		require.ErrorAs(t, err, new(*niceyaml.Error))
 
 		result, err := yamltest.At(t, dd, innerPath).Decode[strictConfig](t.Context())
 		require.NoError(t, err)
@@ -5490,11 +5478,7 @@ func TestDocument_At(t *testing.T) {
 		dd := yamltest.FirstDocument(t, input)
 
 		got, err := yamltest.At(t, dd, paths.Current().Child("kind")).Decode[int](t.Context())
-		require.Error(t, err)
-
-		var yamlErr *niceyaml.Error
-
-		require.ErrorAs(t, err, &yamlErr)
+		require.ErrorAs(t, err, new(*niceyaml.Error))
 		assert.Zero(t, got)
 	})
 
@@ -5734,8 +5718,6 @@ func TestDocument_At(t *testing.T) {
 		// The document defines the anchor after the alias, so the value's
 		// own decode reports the alias error, bound to the source.
 		_, err := yamltest.At(t, dd, paths.Current().Child("item")).Decode[map[string]any](t.Context())
-		require.Error(t, err)
-
 		require.ErrorAs(t, err, new(*niceyaml.SourceError))
 		assert.Contains(t, err.Error(), "could not find alias")
 	})
@@ -7889,8 +7871,6 @@ func TestDocument_At_Scope(t *testing.T) {
 		dd := yamltest.FirstDocument(t, input)
 
 		_, err := yamltest.At(t, dd, hoursPath).Decode[hoursConfig](t.Context())
-		require.Error(t, err)
-
 		bound := sourceErrorIn(t, err)
 
 		rng, ok := bound.Range()
@@ -8299,8 +8279,6 @@ func TestDocument_At_Scope(t *testing.T) {
 		dd := yamltest.FirstDocument(t, input)
 
 		_, err := yamltest.At(t, dd, hoursPath).Decode[hoursConfig](t.Context())
-		require.Error(t, err)
-
 		bound := sourceErrorIn(t, err)
 
 		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
