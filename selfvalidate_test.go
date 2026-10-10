@@ -2086,8 +2086,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				target: func() any {
 					return &pointers{M: map[*[]any]signed{{2}: {N: -2}, {1}: {N: -1}}}
 				},
-				want: "$.m.'(*[]interface {})'.n: negative -1\n" +
+				want: stringtest.JoinLF(
+					"$.m.'(*[]interface {})'.n: negative -1",
 					"$.m.'(*[]interface {})'.n: negative -2",
+				),
 			},
 			"slice that holds itself": {
 				target: func() any {
@@ -2239,11 +2241,13 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				)},
 			},
 			"maps at every link of a chain": {
-				input: "items: {0x10: {price: -1}}\n" +
-					"next:\n" +
-					"  items: {0x10: {price: -2}}\n" +
-					"  next:\n" +
-					"    items: {0x10: {price: -3}}\n",
+				input: stringtest.LinesLF(
+					"items: {0x10: {price: -1}}",
+					"next:",
+					"  items: {0x10: {price: -2}}",
+					"  next:",
+					"    items: {0x10: {price: -3}}",
+				),
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
 					_, err := dd.Decode[chain](ctx)
 

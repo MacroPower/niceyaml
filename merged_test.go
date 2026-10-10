@@ -13,6 +13,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -39,8 +40,16 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				"services:\n  web: {image: nginx, replicas: 1}\n  db: {image: postgres}\n",
 				"services:\n  web: {replicas: 5}\n  api:\n    image: api\n",
 			},
-			want: "services:\n  web:\n    image: nginx\n    replicas: 5\n" +
-				"  db:\n    image: postgres\n  api:\n    image: api\n",
+			want: stringtest.LinesLF(
+				"services:",
+				"  web:",
+				"    image: nginx",
+				"    replicas: 5",
+				"  db:",
+				"    image: postgres",
+				"  api:",
+				"    image: api",
+			),
 			binds: map[string]string{
 				"$.services.web.image":    "base.yaml:2:16",
 				"$.services.web.replicas": "prod.yaml:2:19",
@@ -167,8 +176,16 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				"x: &d {image: base, replicas: 1}\nweb: *d\n",
 				"x: &d {image: prod}\napi: *d\n",
 			},
-			want: "x:\n  image: prod\n  replicas: 1\n" +
-				"web:\n  image: base\n  replicas: 1\napi:\n  image: prod\n",
+			want: stringtest.LinesLF(
+				"x:",
+				"  image: prod",
+				"  replicas: 1",
+				"web:",
+				"  image: base",
+				"  replicas: 1",
+				"api:",
+				"  image: prod",
+			),
 			binds: map[string]string{
 				"$.x.image":      "prod.yaml:1:15",
 				"$.x.replicas":   "base.yaml:1:31",
@@ -203,9 +220,18 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				"d: &d {image: nginx, replicas: 1}\nweb: {<<: *d, replicas: 2}\n",
 				"p: &p {image: prod, port: 80}\nweb: {<<: *p}\n",
 			},
-			want: "d:\n  image: nginx\n  replicas: 1\n" +
-				"web:\n  image: prod\n  replicas: 2\n  port: 80\n" +
-				"p:\n  image: prod\n  port: 80\n",
+			want: stringtest.LinesLF(
+				"d:",
+				"  image: nginx",
+				"  replicas: 1",
+				"web:",
+				"  image: prod",
+				"  replicas: 2",
+				"  port: 80",
+				"p:",
+				"  image: prod",
+				"  port: 80",
+			),
 			binds: map[string]string{
 				"$.web.image":    "prod.yaml:1:15",
 				"$.web.replicas": "base.yaml:2:25",
@@ -222,8 +248,19 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 		},
 		"the sources of a merge key apply in order": {
 			layers: []string{"x: &x {a: 1, b: 1}\ny: &y {a: 2, c: 2}\nm: {<<: [*x, *y, {d: 4}]}\n"},
-			want: "x:\n  a: 1\n  b: 1\ny:\n  a: 2\n  c: 2\n" +
-				"m:\n  a: 2\n  b: 1\n  c: 2\n  d: 4\n",
+			want: stringtest.LinesLF(
+				"x:",
+				"  a: 1",
+				"  b: 1",
+				"y:",
+				"  a: 2",
+				"  c: 2",
+				"m:",
+				"  a: 2",
+				"  b: 1",
+				"  c: 2",
+				"  d: 4",
+			),
 		},
 		"a merge key of a merge source brings its keys in": {
 			layers: []string{"a: &a {k: 1}\nb: &b {<<: *a, l: 2}\nc: {<<: *b}\n"},
@@ -234,7 +271,7 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 			want:   "m:\n  '<<':\n    a: 1\n    b: 2\n",
 		},
 		"a scalar keeps the text of its layer": {
-			layers: []string{strings.Join([]string{
+			layers: []string{stringtest.LinesLF(
 				"plain: hello world",
 				"single: 'it''s'",
 				`double: "a\tb"`,
@@ -253,9 +290,8 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				`"quoted: key": v`,
 				"? explicit",
 				": v",
-				"",
-			}, "\n")},
-			want: strings.Join([]string{
+			)},
+			want: stringtest.LinesLF(
 				"plain: hello world",
 				"single: 'it''s'",
 				`double: "a\tb"`,
@@ -273,16 +309,36 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				"~: key",
 				`"quoted: key": v`,
 				"explicit: v",
-				"",
-			}, "\n"),
+			),
 		},
 		"a string of several lines reads as one double-quoted line": {
 			layers: []string{
-				"lit: |\n  one\n  two\nfold: >-\n  one\n  two\nplain: one\n  two\n\n  three\n" +
-					"single: 'one\n\n  two'\n? |\n  key\n: v\n",
+				stringtest.LinesLF(
+					"lit: |",
+					"  one",
+					"  two",
+					"fold: >-",
+					"  one",
+					"  two",
+					"plain: one",
+					"  two",
+					"",
+					"  three",
+					"single: 'one",
+					"",
+					"  two'",
+					"? |",
+					"  key",
+					": v",
+				),
 			},
-			want: `lit: "one\ntwo\n"` + "\n" + `fold: "one two"` + "\nplain: \"one two\\nthree\"\n" +
-				`single: "one\ntwo"` + "\n" + `"key\n": v` + "\n",
+			want: stringtest.LinesLF(
+				`lit: "one\ntwo\n"`,
+				`fold: "one two"`,
+				`plain: "one two\nthree"`,
+				`single: "one\ntwo"`,
+				`"key\n": v`,
+			),
 		},
 		"a plain scalar that a block line reads another way takes quotes": {
 			layers: []string{"a: [-, ?, a b, -x]\nb: {k: -}\n"},
@@ -290,13 +346,41 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 		},
 		"a tag stays on its value": {
 			layers: []string{
-				"bin: !!binary aGVsbG8=\nstr: !!str 5\nset: !!set {a, b}\nobj: !obj {k: v}\n" +
-					"list: !list [x]\nitems:\n  - !obj {k: v}\n  - !list [y]\n  - !!str 7\n" +
-					"none: !obj {}\n!!str 1: key\nnul: !!str ~\n",
+				stringtest.LinesLF(
+					"bin: !!binary aGVsbG8=",
+					"str: !!str 5",
+					"set: !!set {a, b}",
+					"obj: !obj {k: v}",
+					"list: !list [x]",
+					"items:",
+					"  - !obj {k: v}",
+					"  - !list [y]",
+					"  - !!str 7",
+					"none: !obj {}",
+					"!!str 1: key",
+					"nul: !!str ~",
+				),
 			},
-			want: "bin: !!binary aGVsbG8=\nstr: !!str 5\nset: !!set\n  a: null\n  b: null\n" +
-				"obj: !obj\n  k: v\nlist: !list\n  - x\nitems:\n  - !obj\n    k: v\n  - !list\n    - y\n" +
-				"  - !!str 7\nnone: !obj {}\n!!str 1: key\nnul: !!str ~\n",
+			want: stringtest.LinesLF(
+				"bin: !!binary aGVsbG8=",
+				"str: !!str 5",
+				"set: !!set",
+				"  a: null",
+				"  b: null",
+				"obj: !obj",
+				"  k: v",
+				"list: !list",
+				"  - x",
+				"items:",
+				"  - !obj",
+				"    k: v",
+				"  - !list",
+				"    - y",
+				"  - !!str 7",
+				"none: !obj {}",
+				"!!str 1: key",
+				"nul: !!str ~",
+			),
 		},
 		"a merged mapping takes the tag of the highest layer that writes one": {
 			layers: []string{"m: !a {x: 1}\nn: !a {x: 1}\n", "m: {y: 2}\nn: !b {y: 2}\n"},
@@ -310,8 +394,24 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 			layers: []string{
 				"a: [[x, y], {k: v, l: [1, 2]}, [], {}, [[z]]]\nb: {c: {d: [{e: f, g: {h: i}}]}}\n",
 			},
-			want: "a:\n  - - x\n    - y\n  - k: v\n    l:\n      - 1\n      - 2\n  - []\n  - {}\n  - - - z\n" +
-				"b:\n  c:\n    d:\n      - e: f\n        g:\n          h: i\n",
+			want: stringtest.LinesLF(
+				"a:",
+				"  - - x",
+				"    - y",
+				"  - k: v",
+				"    l:",
+				"      - 1",
+				"      - 2",
+				"  - []",
+				"  - {}",
+				"  - - - z",
+				"b:",
+				"  c:",
+				"    d:",
+				"      - e: f",
+				"        g:",
+				"          h: i",
+			),
 		},
 		"the preamble of the lowest layer stays and other comments go": {
 			layers: []string{
@@ -367,8 +467,16 @@ var mergedCorpus = map[string]struct {
 	input string
 }{
 	"tagged scalars": {
-		input: "str: !!str 3.10\nbin: !!binary aGVsbG8=\nint: !!int 7\nfloat: !!float 1\n" +
-			"bool: !!bool true\nnul: !!null null\ntime: !!timestamp 2001-12-14\nquoted: !!str \"5\"\n",
+		input: stringtest.LinesLF(
+			"str: !!str 3.10",
+			"bin: !!binary aGVsbG8=",
+			"int: !!int 7",
+			"float: !!float 1",
+			"bool: !!bool true",
+			"nul: !!null null",
+			"time: !!timestamp 2001-12-14",
+			`quoted: !!str "5"`,
+		),
 		typed: func() any {
 			return new(struct {
 				Time  time.Time `yaml:"time"`
@@ -381,8 +489,18 @@ var mergedCorpus = map[string]struct {
 		},
 	},
 	"custom tags": {
-		input: "scalar: !custom value\nmapping: !custom {k: v}\nsequence: !custom [x, y]\n" +
-			"block: !custom\n  k: v\nitems:\n  - !custom {k: v}\n  - !custom\n    - x\n  - !custom 7\n",
+		input: stringtest.LinesLF(
+			"scalar: !custom value",
+			"mapping: !custom {k: v}",
+			"sequence: !custom [x, y]",
+			"block: !custom",
+			"  k: v",
+			"items:",
+			"  - !custom {k: v}",
+			"  - !custom",
+			"    - x",
+			"  - !custom 7",
+		),
 	},
 	"a local tag over no value": {
 		input: "first: 1\nlast: !custom\n",
@@ -397,28 +515,99 @@ var mergedCorpus = map[string]struct {
 		input: "first: 1\nlast: !!str\n",
 	},
 	"literal block scalars": {
-		input: "clip: |\n  one\n  two\nstrip: |-\n  one\n  two\nkeep: |+\n  one\n  two\n\n" +
-			"indent: |2\n   lead\n  rest\nblank: |\n  one\n\n  two\nlast: |\n  end\n",
+		input: stringtest.LinesLF(
+			"clip: |",
+			"  one",
+			"  two",
+			"strip: |-",
+			"  one",
+			"  two",
+			"keep: |+",
+			"  one",
+			"  two",
+			"",
+			"indent: |2",
+			"   lead",
+			"  rest",
+			"blank: |",
+			"  one",
+			"",
+			"  two",
+			"last: |",
+			"  end",
+		),
 		typed: func() any { return new(map[string]string) },
 	},
 	"folded block scalars": {
-		input: "clip: >\n  one\n  two\nstrip: >-\n  one\n  two\nkeep: >+\n  one\n  two\n\n" +
-			"more: >\n  one\n\n  two\n    indented\n  three\nlast: >\n  end\n",
+		input: stringtest.LinesLF(
+			"clip: >",
+			"  one",
+			"  two",
+			"strip: >-",
+			"  one",
+			"  two",
+			"keep: >+",
+			"  one",
+			"  two",
+			"",
+			"more: >",
+			"  one",
+			"",
+			"  two",
+			"    indented",
+			"  three",
+			"last: >",
+			"  end",
+		),
 		typed: func() any { return new(map[string]string) },
 	},
 	"quoted strings": {
-		input: `dq: "tab\there \"quoted\" \\ back \u00e9 \x41 \n line"` + "\n" +
-			"sq: 'it''s \\n kept'\nempty: \"\"\nnone: ''\npadded: \"  wide  \"\n" +
-			"colon: \"a: b\"\nhash: 'a #b'\ndash: \"- item\"\nmarker: \"---\"\n" +
-			"folded: \"one\n  two\"\nword: 'true'\nnumber: \"1\"\n",
+		input: stringtest.LinesLF(
+			`dq: "tab\there \"quoted\" \\ back \u00e9 \x41 \n line"`,
+			`sq: 'it''s \n kept'`,
+			`empty: ""`,
+			"none: ''",
+			`padded: "  wide  "`,
+			`colon: "a: b"`,
+			"hash: 'a #b'",
+			`dash: "- item"`,
+			`marker: "---"`,
+			`folded: "one`,
+			`  two"`,
+			"word: 'true'",
+			`number: "1"`,
+		),
 		typed: func() any { return new(map[string]string) },
 	},
 	"plain scalars": {
-		input: "int: 42\nneg: -7\nhex: 0x1F\noct: 0o17\nbin: 0b101\nfloat: 1.50\nexp: 1e3\n" +
-			"inf: .inf\nunder: 1_000\nplus: +1\nversion: 1.10.0\ndate: 2001-12-14\n" +
-			"stamp: 2001-12-14T21:59:43Z\nyes: yes\nbool: True\nnul: Null\ntilde: ~\nabsent:\n" +
-			"url: http://example.com/a?b=c#d\nlead: -dash\ninner: a:b\nwords: one two  three\n" +
-			"lines: one\n  two\n\n  three\n",
+		input: stringtest.LinesLF(
+			"int: 42",
+			"neg: -7",
+			"hex: 0x1F",
+			"oct: 0o17",
+			"bin: 0b101",
+			"float: 1.50",
+			"exp: 1e3",
+			"inf: .inf",
+			"under: 1_000",
+			"plus: +1",
+			"version: 1.10.0",
+			"date: 2001-12-14",
+			"stamp: 2001-12-14T21:59:43Z",
+			"yes: yes",
+			"bool: True",
+			"nul: Null",
+			"tilde: ~",
+			"absent:",
+			"url: http://example.com/a?b=c#d",
+			"lead: -dash",
+			"inner: a:b",
+			"words: one two  three",
+			"lines: one",
+			"  two",
+			"",
+			"  three",
+		),
 		typed: func() any {
 			return new(struct {
 				Stamp   time.Time `yaml:"stamp"`
@@ -440,35 +629,112 @@ var mergedCorpus = map[string]struct {
 		},
 	},
 	"keys": {
-		input: "\"quoted key\": 1\n'single key': 2\n\"key: colon\": 3\n\"#hash\": 4\n" +
-			"1: int\n1.5: float\n0x10: hex\ntrue: bool\n~: nul\n? explicit\n: value\n" +
-			"\"- dash\": 5\n\"multi\\nline\": 6\n? |\n  block\n: 7\n!!str 9: tagged\n",
+		input: stringtest.LinesLF(
+			`"quoted key": 1`,
+			"'single key': 2",
+			`"key: colon": 3`,
+			`"#hash": 4`,
+			"1: int",
+			"1.5: float",
+			"0x10: hex",
+			"true: bool",
+			"~: nul",
+			"? explicit",
+			": value",
+			`"- dash": 5`,
+			`"multi\nline": 6`,
+			"? |",
+			"  block",
+			": 7",
+			"!!str 9: tagged",
+		),
 	},
 	"flow collections": {
-		input: "seq: [a, [b, c], {d: e}, [], {}]\nmap: {a: 1, b: [2, 3], c: {d: {e: f}}}\n" +
-			"lines: [a,\n  b,\n  c]\nset: {a, b}\nodd: [-, ?, a b, \"x, y\"]\npair: [a: 1]\n",
+		input: stringtest.LinesLF(
+			"seq: [a, [b, c], {d: e}, [], {}]",
+			"map: {a: 1, b: [2, 3], c: {d: {e: f}}}",
+			"lines: [a,",
+			"  b,",
+			"  c]",
+			"set: {a, b}",
+			`odd: [-, ?, a b, "x, y"]`,
+			"pair: [a: 1]",
+		),
 	},
 	"block collections": {
-		input: "items:\n  - name: a\n    ports: [1, 2]\n  - name: b\n    nested:\n      - - x\n        - y\n" +
-			"      - k:\n          - z\n  - plain\n  -\n  - ~\ndeep:\n  a:\n    b:\n      c: [1]\n",
+		input: stringtest.LinesLF(
+			"items:",
+			"  - name: a",
+			"    ports: [1, 2]",
+			"  - name: b",
+			"    nested:",
+			"      - - x",
+			"        - y",
+			"      - k:",
+			"          - z",
+			"  - plain",
+			"  -",
+			"  - ~",
+			"deep:",
+			"  a:",
+			"    b:",
+			"      c: [1]",
+		),
 	},
 	"anchors and aliases": {
-		input: "base: &base {a: 1, b: [x, y]}\ncopy: *base\nscalar: &s hello\nagain: *s\n" +
-			"list: [*s, *base, &t tail, *t]\nnested: &n\n  inner: &i {deep: 1}\n  again: *i\n" +
-			"whole: *n\n*s : key\ntagged: &g !!str 5\nread: *g\n",
+		input: stringtest.LinesLF(
+			"base: &base {a: 1, b: [x, y]}",
+			"copy: *base",
+			"scalar: &s hello",
+			"again: *s",
+			"list: [*s, *base, &t tail, *t]",
+			"nested: &n",
+			"  inner: &i {deep: 1}",
+			"  again: *i",
+			"whole: *n",
+			"*s : key",
+			"tagged: &g !!str 5",
+			"read: *g",
+		),
 	},
 	"aliases inside their own anchor": {
-		input: "outer: &outer\n  inner: &inner\n    self: *inner\n    list: [1, *inner]\n" +
-			"  merged:\n    <<: *inner\n    more: 2\n  nested: &nested {up: *outer}\ncopy: *nested\n",
+		input: stringtest.LinesLF(
+			"outer: &outer",
+			"  inner: &inner",
+			"    self: *inner",
+			"    list: [1, *inner]",
+			"  merged:",
+			"    <<: *inner",
+			"    more: 2",
+			"  nested: &nested {up: *outer}",
+			"copy: *nested",
+		),
 	},
 	"merge keys": {
-		input: "base: &base {a: 1, b: 2}\nmore: &more {c: 3}\none: {<<: *base, d: 4}\n" +
-			"many: {<<: [*base, *more], e: 5}\nblock:\n  <<: *more\n  f: 6\ninline: {<<: {g: 7}, h: 8}\n" +
-			"chain: &chain {<<: *base, i: 9}\nlast: {<<: *chain}\n",
+		input: stringtest.LinesLF(
+			"base: &base {a: 1, b: 2}",
+			"more: &more {c: 3}",
+			"one: {<<: *base, d: 4}",
+			"many: {<<: [*base, *more], e: 5}",
+			"block:",
+			"  <<: *more",
+			"  f: 6",
+			"inline: {<<: {g: 7}, h: 8}",
+			"chain: &chain {<<: *base, i: 9}",
+			"last: {<<: *chain}",
+		),
 	},
 	"unicode": {
-		input: "名前: 値\nemoji: \"😀\"\naccent: héllo wörld\nrtl: \"שלום\"\n" +
-			"nbsp: \"a\\u00a0b\"\nline: \"a\\u2028b\"\nbom: \"\\ufeffx\"\nwide: ｆｕｌｌ\n",
+		input: stringtest.LinesLF(
+			"名前: 値",
+			`emoji: "😀"`,
+			"accent: héllo wörld",
+			`rtl: "שלום"`,
+			`nbsp: "a\u00a0b"`,
+			`line: "a\u2028b"`,
+			`bom: "\ufeffx"`,
+			"wide: ｆｕｌｌ",
+		),
 		typed: func() any { return new(map[string]string) },
 	},
 	"comments": {
@@ -541,9 +807,20 @@ func TestNewSourceFromLayers_Decode_Equivalence(t *testing.T) {
 func TestNewSourceFromLayers_Decode_Equivalence_Errors(t *testing.T) {
 	t.Parallel()
 
-	const input = "name: [shop]\nserver:\n  host: example.com\n  port: many\n  prot: 1\n" +
-		"servers:\n  - host: a\nbackup: &b {host: b}\nnested:\n  inner: *b\n" +
-		"nul: !!null null\nlimits: {timeout: ~}\n"
+	input := stringtest.LinesLF(
+		"name: [shop]",
+		"server:",
+		"  host: example.com",
+		"  port: many",
+		"  prot: 1",
+		"servers:",
+		"  - host: a",
+		"backup: &b {host: b}",
+		"nested:",
+		"  inner: *b",
+		"nul: !!null null",
+		"limits: {timeout: ~}",
+	)
 
 	type strict struct {
 		layerConfig `yaml:",inline"`
@@ -666,8 +943,12 @@ func TestNewSourceFromLayers_Decode_Maps(t *testing.T) {
 	}
 
 	layers := yamltest.Layers(t, layersOf(layerSources(t,
-		"services:\n  web: {image: nginx, replicas: 1}\n  db: {image: postgres, replicas: 1}\n"+
-			"extra: {a: {b: 1, c: 2}, z: 1}\n",
+		stringtest.LinesLF(
+			"services:",
+			"  web: {image: nginx, replicas: 1}",
+			"  db: {image: postgres, replicas: 1}",
+			"extra: {a: {b: 1, c: 2}, z: 1}",
+		),
 		"services:\n  web: {replicas: 5}\nextra: {a: {b: 9}}\n",
 	))...)
 
@@ -849,10 +1130,20 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 
 		layers := yamltest.Layers(t, base, prod)
 
-		assert.Equal(t, "db:\n  port: 1\n  host: x\n"+
-			"web:\n  port: 9\n  host: shared\n  tls: true\n"+
-			"api:\n  port: 2\n  host: shared\n"+
-			"base:\n  port: 3\n", mergedText(t, layers))
+		assert.Equal(t, stringtest.LinesLF(
+			"db:",
+			"  port: 1",
+			"  host: x",
+			"web:",
+			"  port: 9",
+			"  host: shared",
+			"  tls: true",
+			"api:",
+			"  port: 2",
+			"  host: shared",
+			"base:",
+			"  port: 3",
+		), mergedText(t, layers))
 
 		// A decode of each layer alone reads the same values.
 		alone, err := prod.Decode[map[string]any](t.Context())

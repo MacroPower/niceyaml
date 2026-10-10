@@ -599,9 +599,11 @@ func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
 				paths.Current().Child("server", "host"),
 				paths.Current().Child("backends", "a", "port"),
 			},
-			err: "base.yaml: config checks\n" +
-				"base.yaml:1:16: $.server.host: odd value\n" +
+			err: stringtest.JoinLF(
+				"base.yaml: config checks",
+				"base.yaml:1:16: $.server.host: odd value",
 				"prod.yaml:2:22: $.backends.a.port: odd value",
+			),
 		},
 		"a value no layer sets binds at the deepest mapping that lacks it": {
 			layers: []string{"name: base\nserver:\n  host: example.com\n", "name: prod\n"},
@@ -774,9 +776,11 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		var cfg layerConfig
 
 		err := yamltest.Layers(t, layersOf(nodes)...).DecodeInto(t.Context(), &cfg)
-		require.EqualError(t, err, "base.yaml: 2 problems\n"+
-			"base.yaml:2:9: $.server.port: expected integer, got string\n"+
-			"prod.yaml:1:1: $.name: expected string, got sequence")
+		require.EqualError(t, err, stringtest.JoinLF(
+			"base.yaml: 2 problems",
+			"base.yaml:2:9: $.server.port: expected integer, got string",
+			"prod.yaml:1:1: $.name: expected string, got sequence",
+		))
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 	})
 
@@ -797,18 +801,22 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		}{
 			"the other problems lie in the layer above": {
 				layers: []string{"server:\n  timeout: soon\n", "server:\n  port: 70000\ntier: mid\nzone: prod\n"},
-				want: "base.yaml: 4 problems\n" +
-					"base.yaml:2:12: $.server.timeout: time: invalid duration \"soon\"\n" +
-					"prod.yaml:2:9: $.server.port: expected integer from 0 to 65535, got 70000\n" +
-					"prod.yaml:3:7: $.tier: unknown tier \"mid\"\n" +
-					"prod.yaml:4:1: $.zone~: unknown field \"zone\"",
+				want: stringtest.JoinLF(
+					"base.yaml: 4 problems",
+					`base.yaml:2:12: $.server.timeout: time: invalid duration "soon"`,
+					"prod.yaml:2:9: $.server.port: expected integer from 0 to 65535, got 70000",
+					`prod.yaml:3:7: $.tier: unknown tier "mid"`,
+					`prod.yaml:4:1: $.zone~: unknown field "zone"`,
+				),
 			},
 			"the other problems lie in the layer below": {
 				layers: []string{"server:\n  port: 70000\nzone: base\n", "server:\n  tier: mid\n"},
-				want: "base.yaml: 3 problems\n" +
-					"base.yaml:2:9: $.server.port: expected integer from 0 to 65535, got 70000\n" +
-					"base.yaml:3:1: $.zone~: unknown field \"zone\"\n" +
-					"prod.yaml:2:9: $.server.tier: unknown tier \"mid\"",
+				want: stringtest.JoinLF(
+					"base.yaml: 3 problems",
+					"base.yaml:2:9: $.server.port: expected integer from 0 to 65535, got 70000",
+					`base.yaml:3:1: $.zone~: unknown field "zone"`,
+					`prod.yaml:2:9: $.server.tier: unknown tier "mid"`,
+				),
 			},
 			// The merged text is block style, so it holds no value at the
 			// position either file has for it, and each value reports once.
@@ -817,27 +825,33 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 					"{server: {timeout: soon}}\n",
 					"# prod\n\n{server: {port: 70000}, tier: mid, zone: prod}\n",
 				},
-				want: "base.yaml: 4 problems\n" +
-					"base.yaml:1:20: $.server.timeout: time: invalid duration \"soon\"\n" +
-					"prod.yaml:3:17: $.server.port: expected integer from 0 to 65535, got 70000\n" +
-					"prod.yaml:3:31: $.tier: unknown tier \"mid\"\n" +
-					"prod.yaml:3:36: $.zone~: unknown field \"zone\"",
+				want: stringtest.JoinLF(
+					"base.yaml: 4 problems",
+					`base.yaml:1:20: $.server.timeout: time: invalid duration "soon"`,
+					"prod.yaml:3:17: $.server.port: expected integer from 0 to 65535, got 70000",
+					`prod.yaml:3:31: $.tier: unknown tier "mid"`,
+					`prod.yaml:3:36: $.zone~: unknown field "zone"`,
+				),
 			},
 			"a layer above replaces the value": {
 				layers: []string{
 					"server:\n  timeout: soon\n  port: 1\n",
 					"server:\n  timeout: later\n  port: 70000\n",
 				},
-				want: "base.yaml: 2 problems\n" +
-					"prod.yaml:2:12: $.server.timeout: time: invalid duration \"later\"\n" +
+				want: stringtest.JoinLF(
+					"base.yaml: 2 problems",
+					`prod.yaml:2:12: $.server.timeout: time: invalid duration "later"`,
 					"prod.yaml:3:9: $.server.port: expected integer from 0 to 65535, got 70000",
+				),
 			},
 			"three layers": {
 				layers: []string{"server:\n  timeout: soon\n", "server:\n  tier: mid\n", "server:\n  port: 70000\n"},
-				want: "base.yaml: 3 problems\n" +
-					"base.yaml:2:12: $.server.timeout: time: invalid duration \"soon\"\n" +
-					"mid.yaml:2:9: $.server.tier: unknown tier \"mid\"\n" +
+				want: stringtest.JoinLF(
+					"base.yaml: 3 problems",
+					`base.yaml:2:12: $.server.timeout: time: invalid duration "soon"`,
+					`mid.yaml:2:9: $.server.tier: unknown tier "mid"`,
 					"prod.yaml:2:9: $.server.port: expected integer from 0 to 65535, got 70000",
+				),
 			},
 		}
 
@@ -871,9 +885,11 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		_, err := yamltest.Layers(t, layersOf(nodes)...).Decode[layerConfig](
 			t.Context(), niceyaml.WithDisallowUnknownFields(true),
 		)
-		require.EqualError(t, err, "base.yaml: 2 unknown fields\n"+
-			"base.yaml:2:3: $.server.prot~: unknown field \"prot\"\n"+
-			"prod.yaml:4:1: $.zone~: unknown field \"zone\"")
+		require.EqualError(t, err, stringtest.JoinLF(
+			"base.yaml: 2 unknown fields",
+			`base.yaml:2:3: $.server.prot~: unknown field "prot"`,
+			`prod.yaml:4:1: $.zone~: unknown field "zone"`,
+		))
 	})
 
 	t.Run("a value that holds defaults follows the rule of a decode", func(t *testing.T) {
@@ -1073,9 +1089,11 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 		// Each violation binds in the layer that holds its value, and the
 		// key no layer holds in the highest layer that holds its mapping.
 		err = yamltest.Layers(t, layersOf(nodes)...).ValidateDocuments(t.Context(), requires)
-		require.EqualError(t, err, "base.yaml: 2 schema violations\n"+
-			"base.yaml:5:9: $.server.port: 0 is less than 1\n"+
-			"prod.yaml:1:1: $.server.tls: missing required property \"tls\"")
+		require.EqualError(t, err, stringtest.JoinLF(
+			"base.yaml: 2 schema violations",
+			"base.yaml:5:9: $.server.port: 0 is less than 1",
+			`prod.yaml:1:1: $.server.tls: missing required property "tls"`,
+		))
 		assert.True(t, niceyaml.IsInvalid(err))
 
 		_, err = yamltest.Layers(t, layersOf(nodes)...).Decode[layerConfig](
@@ -1149,13 +1167,15 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 		})
 
 		err := yamltest.Layers(t, layersOf(nodes)...).ValidateDocuments(t.Context(), byPosition)
-		require.EqualError(t, err, "base.yaml:2:7: $.name: in the preamble\n"+
-			"base.yaml:5:9: at a position\n"+
-			"base.yaml:5:9: at a range\n"+
-			"base.yaml:5:9: $.server: beside a path\n"+
-			"prod.yaml:2:3: at a key\n"+
-			"prod.yaml:2:9: $.server.host: through the Node\n"+
-			"base.yaml: in the preamble alone")
+		require.EqualError(t, err, stringtest.JoinLF(
+			"base.yaml:2:7: $.name: in the preamble",
+			"base.yaml:5:9: at a position",
+			"base.yaml:5:9: at a range",
+			"base.yaml:5:9: $.server: beside a path",
+			"prod.yaml:2:3: at a key",
+			"prod.yaml:2:9: $.server.host: through the Node",
+			"base.yaml: in the preamble alone",
+		))
 	})
 
 	t.Run("a nil validator runs nothing", func(t *testing.T) {
@@ -1263,9 +1283,11 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 		// The decoder rejects the timeout first, with no token of the
 		// document, and the port lies in the other file.
 		_, err = doc.DecodeAt[problemTimed](t.Context(), server)
-		require.EqualError(t, err, "base.yaml: 2 problems\n"+
-			"base.yaml:2:12: $.server.timeout: time: invalid duration \"soon\"\n"+
-			"prod.yaml:2:9: $.server.port: expected integer from 0 to 65535, got 70000")
+		require.EqualError(t, err, stringtest.JoinLF(
+			"base.yaml: 2 problems",
+			`base.yaml:2:12: $.server.timeout: time: invalid duration "soon"`,
+			"prod.yaml:2:9: $.server.port: expected integer from 0 to 65535, got 70000",
+		))
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 		// One layer reports what a decode of its file reports.
@@ -1274,10 +1296,12 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 			niceyaml.WithName("base.yaml"))
 
 		_, want := file.DecodeAt[problemTimed](t.Context(), server)
-		require.EqualError(t, want, "base.yaml: 3 problems\n"+
-			"base.yaml:2:16: $.server.port: expected integer from 0 to 65535, got 70000\n"+
-			"base.yaml:2:29: $.server.tier: unknown tier \"mid\"\n"+
-			"base.yaml:2:43: $.server.timeout: time: invalid duration \"soon\"")
+		require.EqualError(t, want, stringtest.JoinLF(
+			"base.yaml: 3 problems",
+			"base.yaml:2:16: $.server.port: expected integer from 0 to 65535, got 70000",
+			`base.yaml:2:29: $.server.tier: unknown tier "mid"`,
+			`base.yaml:2:43: $.server.timeout: time: invalid duration "soon"`,
+		))
 
 		doc, err = yamltest.Layers(t, file).Document()
 		require.NoError(t, err)
@@ -1954,8 +1978,10 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 				niceyaml.NewError("port is taken", niceyaml.AtPath(portPath)),
 				niceyaml.NewError("unknown host", niceyaml.AtPath(paths.Doc().Child("server", "host"))),
 			),
-			want: "base.yaml:3:9: $.server.port: port is taken\n" +
+			want: stringtest.JoinLF(
+				"base.yaml:3:9: $.server.port: port is taken",
 				"prod.yaml:2:9: $.server.host: unknown host",
+			),
 		},
 	}
 
