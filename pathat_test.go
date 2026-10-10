@@ -82,7 +82,15 @@ func TestNode_PathAt(t *testing.T) {
 		opts  []niceyaml.SourceOption
 	}{
 		"block mapping and sequence": {
-			input: "# head\nservers:\n  - host: h  # note\n    port: 1\n\n  - host: g\nname: x",
+			input: stringtest.JoinLF(
+				"# head",
+				"servers:",
+				"  - host: h  # note",
+				"    port: 1",
+				"",
+				"  - host: g",
+				"name: x",
+			),
 			want: stringtest.JoinLF(
 				"0:0 -",
 				"1:0 $.servers~",
@@ -106,7 +114,7 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"flow collections": {
-			input: "x: [a: 1, {b: 2}, [c],]\ny: {p: 1, q: 2,}",
+			input: stringtest.JoinLF("x: [a: 1, {b: 2}, [c],]", "y: {p: 1, q: 2,}"),
 			want: stringtest.JoinLF(
 				"0:0 $.x~",
 				"0:1 $.x",
@@ -135,7 +143,11 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"explicit key, anchor, tag, and alias": {
-			input: "? k\n: &anc !!str w\nz: *anc",
+			input: stringtest.JoinLF(
+				"? k",
+				": &anc !!str w",
+				"z: *anc",
+			),
 			want: stringtest.JoinLF(
 				"0:0 $.k~",
 				"0:3 -",
@@ -147,7 +159,15 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"scalars over several lines": {
-			input: "a: |\nb:\nc: |\n  text\n  more\nd: \"q\n  r\"",
+			input: stringtest.JoinLF(
+				"a: |",
+				"b:",
+				"c: |",
+				"  text",
+				"  more",
+				`d: "q`,
+				`  r"`,
+			),
 			want: stringtest.JoinLF(
 				"0:0 $.a~",
 				"0:1 $.a",
@@ -177,7 +197,14 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"sequence at the root": {
-			input: "- a\n-\n- b: 1\n  c: 2\n- - x\n  - y",
+			input: stringtest.JoinLF(
+				"- a",
+				"-",
+				"- b: 1",
+				"  c: 2",
+				"- - x",
+				"  - y",
+			),
 			want: stringtest.JoinLF(
 				"0:0 $[0]",
 				"0:3 -",
@@ -198,7 +225,11 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"tag at the root between markers": {
-			input: "--- !!map\na: 1\n...",
+			input: stringtest.JoinLF(
+				"--- !!map",
+				"a: 1",
+				"...",
+			),
 			want: stringtest.JoinLF(
 				"0:0 -",
 				"0:3 $",
@@ -210,7 +241,12 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"directive and comments": {
-			input: "%YAML 1.2\n---\na: 1 # c\n# foot",
+			input: stringtest.JoinLF(
+				"%YAML 1.2",
+				"---",
+				"a: 1 # c",
+				"# foot",
+			),
 			want: stringtest.JoinLF(
 				"0:0 -",
 				"1:0 -",
@@ -221,7 +257,14 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"merge key and the content of its anchor": {
-			input: "defs: &d\n  port: 1\nservers:\n  - <<: *d\n    host: &h x\n    other: *h",
+			input: stringtest.JoinLF(
+				"defs: &d",
+				"  port: 1",
+				"servers:",
+				"  - <<: *d",
+				"    host: &h x",
+				"    other: *h",
+			),
 			want: stringtest.JoinLF(
 				"0:0 $.defs~",
 				"0:4 $.defs",
@@ -245,7 +288,14 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"entry a later merge key overrides": {
-			input: "base: &b\n  k: 1\nm:\n  k: 2\n  <<: *b\n  j: 3",
+			input: stringtest.JoinLF(
+				"base: &b",
+				"  k: 1",
+				"m:",
+				"  k: 2",
+				"  <<: *b",
+				"  j: 3",
+			),
 			want: stringtest.JoinLF(
 				"0:0 $.base~",
 				"0:4 $.base",
@@ -266,7 +316,13 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"entry after the merge key that holds its name": {
-			input: "base: &b\n  k: 1\nm:\n  <<: *b\n  k: 2",
+			input: stringtest.JoinLF(
+				"base: &b",
+				"  k: 1",
+				"m:",
+				"  <<: *b",
+				"  k: 2",
+			),
 			want: stringtest.JoinLF(
 				"0:0 $.base~",
 				"0:4 $.base",
@@ -286,8 +342,14 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"earlier of two entries with one key": {
-			input: "a:\n  x: 1\na:\n  x: 2\nb: 3",
-			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			input: stringtest.JoinLF(
+				"a:",
+				"  x: 1",
+				"a:",
+				"  x: 2",
+				"b: 3",
+			),
+			opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 			want: stringtest.JoinLF(
 				"0:0 -",
 				"1:0 -",
@@ -303,8 +365,12 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"earlier of two merge keys": {
-			input: "k: v\n<<: {a: 1}\n<<: {b: 2}",
-			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			input: stringtest.JoinLF(
+				"k: v",
+				"<<: {a: 1}",
+				"<<: {b: 2}",
+			),
+			opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 			want: stringtest.JoinLF(
 				"0:0 $.k~",
 				"0:1 $.k",
@@ -319,7 +385,7 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"alias key": {
-			input: "a: &k name\n*k : w",
+			input: stringtest.JoinLF("a: &k name", "*k : w"),
 			want: stringtest.JoinLF(
 				"0:0 $.a~",
 				"0:1 $.a",
@@ -330,7 +396,7 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"key with no name": {
-			input: "b: 2\n*nope : 1",
+			input: stringtest.JoinLF("b: 2", "*nope : 1"),
 			want: stringtest.JoinLF(
 				"0:0 $.b~",
 				"0:1 $.b",
@@ -339,7 +405,11 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"keys a path quotes": {
-			input: "0x10: a\n'a.b': {\"c d\": 1}\n\"\": e",
+			input: stringtest.JoinLF(
+				"0x10: a",
+				`'a.b': {"c d": 1}`,
+				`"": e`,
+			),
 			want: stringtest.JoinLF(
 				"0:0 $.0x10~",
 				"0:4 $.0x10",
@@ -356,7 +426,13 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"several documents": {
-			input: "a: 1\n---\nb: 2\n---\n- c",
+			input: stringtest.JoinLF(
+				"a: 1",
+				"---",
+				"b: 2",
+				"---",
+				"- c",
+			),
 			want: stringtest.JoinLF(
 				"0:0 #0 $.a~",
 				"0:1 #0 $.a",
@@ -371,7 +447,11 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"document that does not parse": {
-			input: "a: [1, 2\n---\nb: 2",
+			input: stringtest.JoinLF(
+				"a: [1, 2",
+				"---",
+				"b: 2",
+			),
 			want: stringtest.JoinLF(
 				"0:0 -",
 				"1:0 -",
@@ -380,27 +460,12 @@ func TestNode_PathAt(t *testing.T) {
 				"2:4 -",
 			),
 		},
-		"comment alone": {
-			input: "# only",
-			want: stringtest.JoinLF(
-				"0:0 -",
-			),
-		},
-		"empty source": {input: ""},
-		"whitespace alone": {
-			input: "   ",
-			want: stringtest.JoinLF(
-				"0:0 -",
-			),
-		},
-		"header alone": {
-			input: "---",
-			want: stringtest.JoinLF(
-				"0:0 -",
-			),
-		},
+		"comment alone":    {input: "# only", want: "0:0 -"},
+		"empty source":     {input: ""},
+		"whitespace alone": {input: "   ", want: "0:0 -"},
+		"header alone":     {input: "---", want: "0:0 -"},
 		"characters wider than a byte": {
-			input: "名前: 値\né: [ü]",
+			input: stringtest.JoinLF("名前: 値", "é: [ü]"),
 			want: stringtest.JoinLF(
 				"0:0 $.名前~",
 				"0:2 $.名前",
@@ -413,7 +478,11 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"CRLF line endings": {
-			input: "a: 1\r\nb:\r\n  - c\r\n",
+			input: stringtest.LinesCRLF(
+				"a: 1",
+				"b:",
+				"  - c",
+			),
 			want: stringtest.JoinLF(
 				"0:0 $.a~",
 				"0:1 $.a",
@@ -426,7 +495,7 @@ func TestNode_PathAt(t *testing.T) {
 			),
 		},
 		"tab after a value": {
-			input: "a: 1\t# c\nb: 2",
+			input: stringtest.JoinLF("a: 1\t# c", "b: 2"),
 			want: stringtest.JoinLF(
 				"0:0 $.a~",
 				"0:1 $.a",
