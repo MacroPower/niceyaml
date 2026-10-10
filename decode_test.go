@@ -10050,10 +10050,13 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 func TestNode_Validate(t *testing.T) {
 	t.Parallel()
 
+	// The document of the subtests that scope a Node to its key meta.
+	input := stringtest.LinesLF("meta:", "  name: test")
+
 	t.Run("runs the validator on the receiver", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, stringtest.LinesLF("meta:", "  name: test"))
+		dd := yamltest.FirstDocument(t, input)
 		scoped := yamltest.At(t, dd, paths.Current().Child("meta"))
 
 		var got []*niceyaml.Node
@@ -10073,7 +10076,7 @@ func TestNode_Validate(t *testing.T) {
 
 		var order []string
 
-		doc := yamltest.FirstDocument(t, stringtest.LinesLF("meta:", "  name: test"), niceyaml.WithName("x.yaml"))
+		doc := yamltest.FirstDocument(t, input, niceyaml.WithName("x.yaml"))
 
 		scoped := yamltest.At(t, doc, paths.Current().Child("meta"))
 
@@ -10124,7 +10127,7 @@ func TestNode_Validate(t *testing.T) {
 	t.Run("binds the error a validator leaves unbound", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, stringtest.LinesLF("meta:", "  name: test"), niceyaml.WithName("x.yaml"))
+		doc := yamltest.FirstDocument(t, input, niceyaml.WithName("x.yaml"))
 
 		scoped := yamltest.At(t, doc, paths.Current().Child("meta"))
 		unbound := &fieldValidator{
@@ -10145,7 +10148,7 @@ func TestNode_Validate(t *testing.T) {
 	t.Run("returns a bound error as it is", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, stringtest.LinesLF("meta:", "  name: test"))
+		dd := yamltest.FirstDocument(t, input)
 		scoped := yamltest.At(t, dd, paths.Current().Child("meta"))
 
 		want := scoped.Bind(niceyaml.Invalid(errNameRequired, niceyaml.AtPath(paths.Current().Child("name"))))
