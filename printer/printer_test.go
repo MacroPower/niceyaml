@@ -1623,6 +1623,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"addition with context": {
+			// Equal lines show afterLine, inserted line shows afterLine.
 			before: stringtest.LinesLF(
 				"line1: a",
 				"line3: c",
@@ -1639,6 +1640,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"deletion with context": {
+			// Equal lines show afterLine, deleted line shows beforeLine.
 			before: stringtest.LinesLF(
 				"line1: a",
 				"line2: b",
@@ -1652,6 +1654,25 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 				"   1  line1: a",
 				"   2 -line2: b",
 				"   2  line3: c",
+			),
+		},
+		"modifications around an equal line": {
+			before: stringtest.LinesLF(
+				"line1: a",
+				"line2: b",
+				"line3: c",
+			),
+			after: stringtest.LinesLF(
+				"line1: x",
+				"line2: b",
+				"line3: y",
+			),
+			want: stringtest.JoinLF(
+				"   1 -line1: a",
+				"   1 +line1: x",
+				"   2  line2: b",
+				"   3 -line3: c",
+				"   3 +line3: y",
 			),
 		},
 		"multiline yaml modification": {
@@ -1680,6 +1701,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"multiple scattered changes": {
+			// Delete shows beforeLine (2), insert shows afterLine (2).
 			before: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
@@ -2718,98 +2740,6 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 
 			got := p.Print(view)
 			assertRowsFit(t, got, tc.width)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		before string
-		after  string
-		want   string
-	}{
-		"modification shows correct line numbers": {
-			// Delete shows beforeLine (2), insert shows afterLine (2).
-			before: stringtest.LinesLF(
-				"key: value",
-				"old: line",
-			),
-			after: stringtest.LinesLF(
-				"key: value",
-				"new: line",
-			),
-			want: stringtest.JoinLF(
-				"   1  key: value",
-				"   2 -old: line",
-				"   2 +new: line",
-			),
-		},
-		"addition shows afterLine numbers": {
-			// Equal lines show afterLine, inserted line shows afterLine.
-			before: stringtest.LinesLF(
-				"a: 1",
-				"c: 3",
-			),
-			after: stringtest.LinesLF(
-				"a: 1",
-				"b: 2",
-				"c: 3",
-			),
-			want: stringtest.JoinLF(
-				"   1  a: 1",
-				"   2 +b: 2",
-				"   3  c: 3",
-			),
-		},
-		"deletion shows beforeLine numbers": {
-			// Equal lines show afterLine, deleted line shows beforeLine.
-			before: stringtest.LinesLF(
-				"a: 1",
-				"b: 2",
-				"c: 3",
-			),
-			after: stringtest.LinesLF(
-				"a: 1",
-				"c: 3",
-			),
-			want: stringtest.JoinLF(
-				"   1  a: 1",
-				"   2 -b: 2",
-				"   2  c: 3",
-			),
-		},
-		"multiple changes track line numbers correctly": {
-			before: stringtest.LinesLF(
-				"line1: a",
-				"line2: b",
-				"line3: c",
-			),
-			after: stringtest.LinesLF(
-				"line1: x",
-				"line2: b",
-				"line3: y",
-			),
-			want: stringtest.JoinLF(
-				"   1 -line1: a",
-				"   1 +line1: x",
-				"   2  line2: b",
-				"   3 -line3: c",
-				"   3 +line3: y",
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			p := testPrinterWithGutter(printer.DefaultGutter)
-
-			got := printDiff(p, tc.before, tc.after)
-
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -4053,30 +3983,6 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"c: 3",
 			),
 			context: 100, // Much larger than 3 lines.
-			want: stringtest.JoinLF(
-				"      @@ -1,3 +1,3 @@",
-				"   1  a: 1",
-				"   2 -b: 2",
-				"   2 +b: changed",
-				"   3  c: 3",
-			),
-		},
-		"line numbers with hunk alignment": {
-			before: stringtest.LinesLF(
-				"a: 1",
-				"b: 2",
-				"c: 3",
-				"d: 4",
-				"e: 5",
-			),
-			after: stringtest.LinesLF(
-				"a: 1",
-				"b: changed",
-				"c: 3",
-				"d: 4",
-				"e: 5",
-			),
-			context: 1,
 			want: stringtest.JoinLF(
 				"      @@ -1,3 +1,3 @@",
 				"   1  a: 1",
