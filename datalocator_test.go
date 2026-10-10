@@ -75,9 +75,7 @@ func locatorDoc(tb testing.TB, input string) *niceyaml.Node {
 func located(tb testing.TB, n *niceyaml.Node, opt niceyaml.ErrorOption) (string, string) {
 	tb.Helper()
 
-	var bound *niceyaml.SourceError
-
-	require.ErrorAs(tb, n.Bind(niceyaml.NewError("x", opt)), &bound)
+	bound := yamltest.RequireSourceError(tb, n.Bind(niceyaml.NewError("x", opt)))
 
 	near := ""
 	if path, ok := bound.Nearest(); ok {
@@ -549,9 +547,7 @@ func TestDataLocator_Names(t *testing.T) {
 	loc := doc.DataLocator()
 
 	for name, line := range want {
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, doc.Bind(niceyaml.NewError("x", loc.AtKey(name))), &bound)
+		bound := yamltest.RequireSourceError(t, doc.Bind(niceyaml.NewError("x", loc.AtKey(name))))
 
 		pos, ok := bound.Position()
 		require.True(t, ok, "name %q binds with no position", name)
@@ -627,9 +623,7 @@ func TestDataLocator_SyntaxError(t *testing.T) {
 	doc := docs[0]
 	require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
 
-	var bound *niceyaml.SourceError
-
-	require.ErrorAs(t, doc.Bind(niceyaml.NewError("x", doc.DataLocator().At("a", "0"))), &bound)
+	bound := yamltest.RequireSourceError(t, doc.Bind(niceyaml.NewError("x", doc.DataLocator().At("a", "0"))))
 	require.EqualError(t, bound, "f.yaml: $.a.0: x")
 	require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrPathNeedsDocument)
 }
@@ -709,9 +703,7 @@ func locatorLocations(t *testing.T, doc *niceyaml.Node, v *jsonschema.Validator)
 			opt = loc.At(names...)
 		}
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, doc.Bind(niceyaml.NewError("x", opt)), &bound)
+		bound := yamltest.RequireSourceError(t, doc.Bind(niceyaml.NewError("x", opt)))
 
 		got = append(got, describeLocation(bound))
 	}
@@ -935,9 +927,7 @@ func TestDataLocator_MergeReads(t *testing.T) {
 		path, ok := err.Path()
 		require.True(t, ok)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, doc.Bind(err), &bound)
+		bound := yamltest.RequireSourceError(t, doc.Bind(err))
 
 		pos, ok := bound.Position()
 		require.True(t, ok, "member %d binds with no position", i)

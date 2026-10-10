@@ -530,9 +530,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				require.EqualError(t, err, fmt.Sprintf("%d unknown fields\n%s", rows, tc.want))
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-				var srcErr *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &srcErr)
+				srcErr := yamltest.RequireSourceError(t, err)
 				assert.Same(t, node, srcErr.Node())
 
 				// The summary counts the fields and points at none.
@@ -583,9 +581,7 @@ func TestDocument_Decode_UnknownFields_BesideValues(t *testing.T) {
 	require.ErrorIs(t, err, niceyaml.ErrDecode)
 	requireInvalid(t, err, 3)
 
-	var srcErr *niceyaml.SourceError
-
-	require.ErrorAs(t, err, &srcErr)
+	srcErr := yamltest.RequireSourceError(t, err)
 
 	problems := yamltest.ProblemsOf(srcErr)
 	require.Len(t, problems, 3)

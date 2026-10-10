@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -41,9 +39,7 @@ func BenchmarkSourceError_ExcerptOneLine(b *testing.B) {
 				niceyaml.AtPath(paths.Current().Index(i))))
 		}
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(b, doc.Bind(niceyaml.NewSummary("schema violations", errs...)), &bound)
+		bound := yamltest.RequireSourceError(b, doc.Bind(niceyaml.NewSummary("schema violations", errs...)))
 
 		b.Run(fmt.Sprintf("errors_%d", n), func(b *testing.B) {
 			b.ReportAllocs()

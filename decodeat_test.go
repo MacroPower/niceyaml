@@ -234,9 +234,7 @@ func TestNode_DecodeAt(t *testing.T) {
 		assert.Equal(t, openHours{}, got)
 
 		// The error is bound through the Node the validator got.
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, "$.spec.hours", bound.Node().Path().String())
 	})
 

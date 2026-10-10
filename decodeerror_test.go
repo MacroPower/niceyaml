@@ -570,9 +570,7 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			require.EqualError(t, err, tc.want)
 			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-			var srcErr *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &srcErr)
+			srcErr := yamltest.RequireSourceError(t, err)
 			require.NoError(t, srcErr.Unresolved())
 
 			path, ok := srcErr.Path()
@@ -586,9 +584,7 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 
 			// The rejection binds where an error at its path binds, as one
 			// from a validator does.
-			var atPath *niceyaml.SourceError
-
-			require.ErrorAs(t, dd.Bind(niceyaml.NewError("at the path", niceyaml.AtPath(path))), &atPath)
+			atPath := yamltest.RequireSourceError(t, dd.Bind(niceyaml.NewError("at the path", niceyaml.AtPath(path))))
 			require.NoError(t, atPath.Unresolved())
 
 			_, near := atPath.Nearest()
@@ -750,9 +746,7 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 
 			require.ErrorAs(t, err, &typeErr)
 
-			var srcErr *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &srcErr)
+			srcErr := yamltest.RequireSourceError(t, err)
 
 			for _, typ := range []reflect.Type{typeErr.DstType, typeErr.SrcType} {
 				// The kinds integer, string, and boolean hold the names of
@@ -874,9 +868,7 @@ func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
 			require.EqualError(t, err, tc.want)
 			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-			var srcErr *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &srcErr)
+			srcErr := yamltest.RequireSourceError(t, err)
 
 			path, ok := srcErr.Path()
 			require.True(t, ok)
@@ -915,9 +907,7 @@ func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
 		require.EqualError(t, err, "2:7: $.name: expected integer, got string")
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-		var srcErr *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &srcErr)
+		srcErr := yamltest.RequireSourceError(t, err)
 		require.NoError(t, srcErr.Unresolved())
 
 		path, ok := srcErr.Path()
@@ -948,9 +938,7 @@ func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
 		require.EqualError(t, err, `2:2: could not find alias "nope"`)
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-		var srcErr *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &srcErr)
+		srcErr := yamltest.RequireSourceError(t, err)
 
 		_, ok := srcErr.Path()
 		assert.False(t, ok)
@@ -1185,9 +1173,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				err := tc.decode(t.Context(), dd)
 				require.EqualError(t, err, tc.want)
 
-				var srcErr *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &srcErr)
+				srcErr := yamltest.RequireSourceError(t, err)
 
 				path, ok := srcErr.Path()
 				require.True(t, ok, "the error carries no path")
@@ -1305,9 +1291,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 				assert.True(t, niceyaml.IsInvalid(err))
 
-				var srcErr *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &srcErr)
+				srcErr := yamltest.RequireSourceError(t, err)
 
 				path, ok := srcErr.Path()
 				require.True(t, ok, "the error carries no path")
@@ -1424,9 +1408,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				require.EqualError(t, err, tc.want)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-				var srcErr *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &srcErr)
+				srcErr := yamltest.RequireSourceError(t, err)
 
 				_, ok := srcErr.Path()
 				assert.False(t, ok, "the error took a path")
@@ -1715,9 +1697,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					require.ErrorIs(t, err, tc.is)
 				}
 
-				var srcErr *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &srcErr)
+				srcErr := yamltest.RequireSourceError(t, err)
 
 				// A summary points at no value, so it carries no path.
 				path, ok := srcErr.Path()
@@ -1791,9 +1771,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 		}](context.WithValue(t.Context(), reportKey{}, error(report)))
 		require.EqualError(t, err, "2:3: $.spans[0]: span is odd")
 
-		var srcErr *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &srcErr)
+		srcErr := yamltest.RequireSourceError(t, err)
 		require.Len(t, yamltest.DetailsOf(srcErr), 1)
 		assert.EqualError(t, yamltest.DetailsOf(srcErr)[0].Bound, "3:9: $.spans[0].to: to set here")
 	})
@@ -1811,9 +1789,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 		require.ErrorIs(t, err, errUnmarshal)
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-		var srcErr *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &srcErr)
+		srcErr := yamltest.RequireSourceError(t, err)
 
 		_, ok := srcErr.Path()
 		assert.False(t, ok, "the error took a path")

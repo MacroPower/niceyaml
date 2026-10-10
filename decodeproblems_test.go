@@ -576,9 +576,7 @@ func TestSource_Decode_Problems(t *testing.T) {
 		"     |           ^^^^ expected integer, got string",
 	), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
-	var srcErr *niceyaml.SourceError
-
-	require.ErrorAs(t, err, &srcErr)
+	srcErr := yamltest.RequireSourceError(t, err)
 
 	// The summary counts the problems and points at none.
 	_, ok := srcErr.Position()
@@ -972,9 +970,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				require.EqualError(t, err, tc.want)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-				var srcErr *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &srcErr)
+				srcErr := yamltest.RequireSourceError(t, err)
 				assert.Same(t, node, srcErr.Node())
 
 				rows := strings.Count(tc.want, "\n")
@@ -1978,9 +1974,7 @@ func TestDocument_Decode_Problems_Deep(t *testing.T) {
 	_, err := yamltest.FirstDocument(t, deepDocument(depth)).Decode[problemDeep](t.Context())
 	require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-	var srcErr *niceyaml.SourceError
-
-	require.ErrorAs(t, err, &srcErr)
+	srcErr := yamltest.RequireSourceError(t, err)
 	assert.Empty(t, yamltest.ProblemsOf(srcErr))
 	assert.Equal(t, "expected integer, got string", srcErr.Message())
 
@@ -2000,9 +1994,7 @@ func TestDocument_Decode_Problems_Many(t *testing.T) {
 		Decode[problemConfig](t.Context())
 	require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-	var srcErr *niceyaml.SourceError
-
-	require.ErrorAs(t, err, &srcErr)
+	srcErr := yamltest.RequireSourceError(t, err)
 	require.Len(t, yamltest.ProblemsOf(srcErr), servers)
 
 	lines := strings.Split(err.Error(), "\n")

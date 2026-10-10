@@ -876,9 +876,7 @@ func TestPrinter_MarksRangeUnderHighlight(t *testing.T) {
 				niceyaml.AtPath(paths.Current().Child(tc.key)),
 			))
 
-			var se *niceyaml.SourceError
-
-			require.ErrorAs(t, bound, &se)
+			se := yamltest.RequireSourceError(t, bound)
 
 			highlighted := source.View()
 			highlighted.BlendOverlay(kind.GenericHighlight, tc.highlight)

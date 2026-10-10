@@ -287,9 +287,7 @@ func TestNewErrorReport_SeveralSources(t *testing.T) {
 		niceyaml.WithDetails(port, host),
 	))
 
-	var bound *niceyaml.SourceError
-
-	require.ErrorAs(t, err, &bound)
+	bound := yamltest.RequireSourceError(t, err)
 
 	t.Run("one excerpt per source, the binding's source first", func(t *testing.T) {
 		t.Parallel()
@@ -599,9 +597,7 @@ func TestNewErrorReport_ExcerptsOff(t *testing.T) {
 
 			assert.Equal(t, tc.want, reportSourceExcerpts(niceyaml.NewErrorReport(tc.err)))
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, tc.err, &bound)
+			bound := yamltest.RequireSourceError(t, tc.err)
 			assert.Equal(t, tc.wantOwn, reportSourceExcerpts(niceyaml.NewErrorReport(bound)))
 		})
 	}
@@ -609,9 +605,7 @@ func TestNewErrorReport_ExcerptsOff(t *testing.T) {
 	t.Run("Excerpt reports false for a location that resolved", func(t *testing.T) {
 		t.Parallel()
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, badPort, &bound)
+		bound := yamltest.RequireSourceError(t, badPort)
 
 		excerpt, ok := bound.Excerpt()
 		assert.False(t, ok)

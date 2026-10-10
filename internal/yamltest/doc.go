@@ -110,6 +110,11 @@
 //		assert.Same(t, source, problem.Source())
 //	}
 //
+// [ErrsOf] reads the error of each of those nodes, and
+// [RequireSourceError] returns the binding of an error or fails the test:
+//
+//	bound := yamltest.RequireSourceError(t, err)
+//
 // # Mocks
 //
 // [NormalizerFunc] adapts a function so it can stand in for a normalizer

@@ -452,7 +452,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 		_, err := niceyaml.NewSourceFromLayers(t.Context(), layersOf(nodes)...)
 		require.EqualError(t, err, alone.Error())
 
-		bound := sourceErrorOf(t, err)
+		bound := yamltest.RequireSourceError(t, err)
 		assert.Same(t, nodes[0], bound.Node())
 	})
 
@@ -470,7 +470,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 		assert.Nil(t, merged)
 
-		bound := sourceErrorOf(t, err)
+		bound := yamltest.RequireSourceError(t, err)
 		assert.Same(t, sources[0], bound.Source())
 
 		// A merge of no layer reads nothing.
@@ -691,7 +691,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		assert.True(t, niceyaml.IsInvalid(err))
 		assert.Equal(t, "prod.example.com", cfg.Server.Host)
 
-		bound := sourceErrorOf(t, err)
+		bound := yamltest.RequireSourceError(t, err)
 		assert.Same(t, base, bound.Node())
 		assert.Same(t, base, bound.Document())
 		assert.Same(t, base.Source(), bound.Source())
@@ -933,7 +933,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		_, err = layers.Decode[layerServer](t.Context())
 		require.EqualError(t, err, "base.yaml:4:11: $.defaults.server.port: port must be at least 1")
 
-		bound := sourceErrorOf(t, err)
+		bound := yamltest.RequireSourceError(t, err)
 		assert.Same(t, baseServer, bound.Node())
 		assert.Same(t, base, bound.Document())
 
@@ -1362,7 +1362,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 		// the value.
 		err = doc.Bind(niceyaml.NewError("here", niceyaml.AtPath(port)))
 
-		bound := sourceErrorOf(t, err)
+		bound := yamltest.RequireSourceError(t, err)
 		assert.Same(t, nodes[0], bound.Node())
 		assert.Same(t, nodes[0].Source(), bound.Source())
 
@@ -1536,7 +1536,10 @@ func TestNode_Origin(t *testing.T) {
 			assert.Equal(t, tc.want, origin.View().Held().Content())
 
 			// An error at the Node binds in the layer of its origin.
-			bound := sourceErrorOf(t, node.Bind(niceyaml.NewError("bad value", niceyaml.AtPath(paths.Current()))))
+			bound := yamltest.RequireSourceError(
+				t,
+				node.Bind(niceyaml.NewError("bad value", niceyaml.AtPath(paths.Current()))),
+			)
 			assert.Same(t, origin.Source(), bound.Source())
 
 			// The origin belongs to a file, so it is its own origin.
@@ -2002,7 +2005,7 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 				require.EqualError(t, merged.Bind(tc.err), tc.want)
 				require.EqualError(t, doc.Bind(tc.err), tc.want)
 
-				bound := sourceErrorOf(t, merged.Bind(tc.err))
+				bound := yamltest.RequireSourceError(t, merged.Bind(tc.err))
 				require.NoError(t, bound.Unresolved())
 			})
 		}
@@ -2013,13 +2016,13 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 
 		// An error with no location belongs to the lowest layer.
 		err := layers.Bind(errors.New("quota service: connection refused"))
-		bound := sourceErrorOf(t, err)
+		bound := yamltest.RequireSourceError(t, err)
 		assert.Same(t, nodes[0], bound.Node())
 		assert.Same(t, nodes[0].Source(), bound.Source())
 
 		// A located one belongs to the layer that holds its value.
 		err = layers.Bind(niceyaml.NewError("unknown host", niceyaml.AtPath(paths.Doc().Child("server", "host"))))
-		bound = sourceErrorOf(t, err)
+		bound = yamltest.RequireSourceError(t, err)
 		assert.Same(t, nodes[1], bound.Node())
 		assert.Same(t, nodes[1].Source(), bound.Source())
 	})
@@ -2201,7 +2204,7 @@ func TestNewSourceFromLayers_Alias(t *testing.T) {
 			require.EqualError(t, err, tc.err)
 			assert.Equal(t, "shared.example.com", cfg.Server.Host)
 
-			bound := sourceErrorOf(t, err)
+			bound := yamltest.RequireSourceError(t, err)
 
 			if tc.unresolved {
 				require.ErrorIs(t, bound.Unresolved(), paths.ErrAlias)

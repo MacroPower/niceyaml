@@ -1,6 +1,12 @@
 package yamltest
 
-import "go.jacobcolvin.com/niceyaml"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"go.jacobcolvin.com/niceyaml"
+)
 
 // ProblemsOf returns the children of the node of err in the tree
 // [niceyaml.NewErrorTree] builds that stand for the problems err heads,
@@ -14,6 +20,31 @@ func ProblemsOf(err error) []niceyaml.ErrorTree {
 // shows them.
 func DetailsOf(err error) []niceyaml.ErrorTree {
 	return childrenOf(err, true)
+}
+
+// ErrsOf returns the error of each node in nodes, or nil when nodes is
+// empty. It reads the errors of what [ProblemsOf] and [DetailsOf] return.
+func ErrsOf(nodes []niceyaml.ErrorTree) []error {
+	var errs []error
+
+	for _, n := range nodes {
+		errs = append(errs, n.Err)
+	}
+
+	return errs
+}
+
+// RequireSourceError returns the first [*niceyaml.SourceError] in the
+// chain of err, as [errors.As] finds it. The test fails when err holds
+// none.
+func RequireSourceError(tb testing.TB, err error) *niceyaml.SourceError {
+	tb.Helper()
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(tb, err, &bound)
+
+	return bound
 }
 
 // childrenOf returns the children of the node of err whose Detail is

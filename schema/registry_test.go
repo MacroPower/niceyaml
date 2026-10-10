@@ -290,9 +290,7 @@ func TestRegistry_Check_ScopedNode(t *testing.T) {
 				require.ErrorIs(t, err, schema.ErrScopedDocument)
 				require.EqualError(t, err, "registry needs a whole document: node is scoped to $.spec")
 
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &bound)
+				bound := yamltest.RequireSourceError(t, err)
 				assert.Same(t, doc.Source(), bound.Source())
 
 				// The refusal is about the call, so it binds to the root
@@ -1728,9 +1726,7 @@ func TestRegistry_Validator_ErrorBoundToReceiver(t *testing.T) {
 					require.ErrorIs(t, err, tc.err)
 				}
 
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &bound)
+				bound := yamltest.RequireSourceError(t, err)
 				assert.Same(t, doc, bound.Node())
 				assert.Same(t, doc, bound.Document())
 			}
@@ -3244,9 +3240,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 			fmt.Sprintf("%+v", err),
 		)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := yamltest.RequireSourceError(t, err)
 
 		assert.Empty(t, yamltest.ProblemsOf(bound), "a reason is a detail, not a problem the error heads")
 
@@ -3285,9 +3279,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 			fmt.Sprintf("%+v", err),
 		)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, "no matching schema", bound.Message())
 
 		index, ok := bound.DocumentIndex()
@@ -3308,9 +3300,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 		assert.Equal(t, "app.yaml: no matching schema", err.Error())
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := yamltest.RequireSourceError(t, err)
 
 		assert.Empty(t, yamltest.ProblemsOf(bound), "a reason is a detail, not a problem the error heads")
 	})

@@ -21,17 +21,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// errsOf returns the error of each node.
-func errsOf(nodes []niceyaml.ErrorTree) []error {
-	errs := make([]error, 0, len(nodes))
-
-	for _, n := range nodes {
-		errs = append(errs, n.Err)
-	}
-
-	return errs
-}
-
 // countNodes returns the number of nodes with text in t.
 func countNodes(t niceyaml.ErrorTree) int {
 	n := 0
@@ -1236,9 +1225,7 @@ func TestErrorTree_Bound(t *testing.T) {
 	bind := func(t *testing.T, err error) *niceyaml.SourceError {
 		t.Helper()
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, yamltest.Bind(t, source, err), &bound)
+		bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, err))
 
 		return bound
 	}

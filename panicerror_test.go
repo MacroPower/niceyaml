@@ -213,9 +213,7 @@ func TestPanicError_Recovered(t *testing.T) {
 				assert.Equal(t, tc.is, value)
 			}
 
-			var srcErr *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &srcErr)
+			require.ErrorAs(t, err, new(*niceyaml.SourceError))
 		})
 	}
 
@@ -354,9 +352,7 @@ func TestPanicError_Recovered_Value(t *testing.T) {
 			require.Len(t, problems, 1)
 			assert.False(t, problems[0].IsInvalid())
 
-			var srcErr *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &srcErr)
+			srcErr := yamltest.RequireSourceError(t, err)
 
 			pos, ok := srcErr.Position()
 			require.True(t, ok, "the panic has no position")

@@ -1054,9 +1054,7 @@ func TestSchema_PathTarget(t *testing.T) {
 			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
 			require.Error(t, err)
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := yamltest.RequireSourceError(t, err)
 
 			assert.Contains(t, yamltest.NewXMLPrinter().PrintError(bound), tc.wantContains,
 				"expected error output to contain specific highlighting pattern")
@@ -1421,9 +1419,7 @@ func TestSchema_ValidateValue(t *testing.T) {
 			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(err))
 			assert.Equal(t, tc.wantFormat, fmt.Sprintf("%+v", err))
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := yamltest.RequireSourceError(t, err)
 			assert.Empty(t, bound.Source().Name())
 			assert.Zero(t, bound.Source().Lines().Len())
 
@@ -1480,9 +1476,7 @@ func TestSchema_ValidateValue(t *testing.T) {
 		require.EqualError(t, got, "app.yaml:2:9: $.request.port: 0 is less than 1")
 		assert.NotSame(t, err, got)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, got, &bound)
+		bound := yamltest.RequireSourceError(t, got)
 		assert.Same(t, doc.Source(), bound.Source())
 
 		// Placing the result builds a new error and leaves the result as
@@ -1815,9 +1809,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 				require.EqualError(t, placed, tc.want)
 				assert.True(t, niceyaml.IsInvalid(placed))
 
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, placed, &bound)
+				bound := yamltest.RequireSourceError(t, placed)
 
 				var gotDetails []string
 
@@ -1865,9 +1857,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			niceyaml.WithDetails(niceyaml.Rebase(err, base)),
 		)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, doc.Bind(detailed), &bound)
+		bound := yamltest.RequireSourceError(t, doc.Bind(detailed))
 		require.Len(t, yamltest.DetailsOf(bound), 1)
 		assert.Same(t, doc.Source(), yamltest.DetailsOf(bound)[0].Source())
 	})
@@ -1877,9 +1867,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 		err := v.ValidateValue(t.Context(), map[string]any{"port": 0})
 
-		var result *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &result)
+		result := yamltest.RequireSourceError(t, err)
 
 		violations := yamltest.ProblemsOf(result)
 		require.Len(t, violations, 2)
@@ -1922,9 +1910,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		// source that spells it another way.
 		err = ports.ValidateValue(t.Context(), data)
 
-		var located *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &located)
+		located := yamltest.RequireSourceError(t, err)
 
 		path, ok := located.Path()
 		require.True(t, ok)
@@ -2877,9 +2863,7 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
 			require.Error(t, err)
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := yamltest.RequireSourceError(t, err)
 
 			errOutput := fmt.Sprintf("%+v", bound)
 
@@ -3130,9 +3114,7 @@ func TestSchema_Check_Scope(t *testing.T) {
 
 			err := yamltest.At(t, dd, tc.path).Validate(t.Context(), tc.schema)
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := yamltest.RequireSourceError(t, err)
 
 			rng, ok := bound.Range()
 			require.True(t, ok)
@@ -3302,9 +3284,7 @@ func TestSchema_Check_Bound(t *testing.T) {
 				requireExcessiveAliasing(t, err)
 			}
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := yamltest.RequireSourceError(t, err)
 			assert.Same(t, node, bound.Node())
 		})
 	}
@@ -3730,9 +3710,7 @@ func TestSchema_SourcePath(t *testing.T) {
 
 			err := dd.Validate(t.Context(), v)
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := yamltest.RequireSourceError(t, err)
 
 			gotPath, ok := bound.Path()
 			require.True(t, ok, "bound error carries no path")
@@ -3795,9 +3773,7 @@ func TestSchema_SourcePath_ReferenceAlias(t *testing.T) {
 
 			_, err := doc.Decode[any](t.Context(), niceyaml.WithValidator(v))
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := yamltest.RequireSourceError(t, err)
 
 			gotPath, ok := bound.Path()
 			require.True(t, ok, "bound error carries no path")
@@ -3871,9 +3847,7 @@ func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 
 			err := doc.Validate(t.Context(), v)
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := yamltest.RequireSourceError(t, err)
 			assert.Equal(t, tc.want+": $.user.16: expected \"integer\", got \"string\"", bound.Error())
 
 			path, ok := bound.Path()
@@ -3945,9 +3919,7 @@ func TestSchema_SourcePath_BelowHiddenKey(t *testing.T) {
 
 			err := dd.Validate(t.Context(), v)
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := yamltest.RequireSourceError(t, err)
 			assert.Equal(t, tc.want, bound.Error())
 
 			path, ok := bound.Path()
@@ -3975,9 +3947,7 @@ func TestSchema_SourcePath_HiddenKeyName(t *testing.T) {
 
 	err := dd.Validate(t.Context(), v)
 
-	var bound *niceyaml.SourceError
-
-	require.ErrorAs(t, err, &bound)
+	bound := yamltest.RequireSourceError(t, err)
 
 	var got []string
 
@@ -4012,9 +3982,7 @@ func TestSchema_SourcePath_SeveralViolations(t *testing.T) {
 
 	err := dd.Validate(t.Context(), v)
 
-	var bound *niceyaml.SourceError
-
-	require.ErrorAs(t, err, &bound)
+	bound := yamltest.RequireSourceError(t, err)
 
 	var got []string
 

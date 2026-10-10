@@ -182,9 +182,7 @@ func TestViolation_Binding(t *testing.T) {
 
 		err := yamltest.FirstDocument(t, "name: 123\n").Validate(t.Context(), v)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := yamltest.RequireSourceError(t, err)
 
 		got, ok := errors.AsType[*schema.Violation](bound)
 		require.True(t, ok)
@@ -199,9 +197,7 @@ func TestViolation_Binding(t *testing.T) {
 
 		err := yamltest.FirstDocument(t, "name: 123\nage: old\n").Validate(t.Context(), v)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := yamltest.RequireSourceError(t, err)
 		require.Len(t, yamltest.ProblemsOf(bound), 2)
 
 		// The summary counts the violations and is none itself, so a search
@@ -492,9 +488,7 @@ func TestViolation_MissingMember(t *testing.T) {
 
 		err := yamltest.At(t, doc, paths.Current().Child("server")).Validate(t.Context(), v)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, `2:1: $.server.name: missing required property "name"`, bound.Error())
 
 		near, ok := bound.Nearest()
@@ -511,9 +505,7 @@ func TestViolation_MissingMember(t *testing.T) {
 
 		// The value came from no document, so the message names the field
 		// and no position.
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, `$.server.name: missing required property "name"`, bound.Error())
 
 		path, ok := bound.Path()
@@ -839,9 +831,7 @@ func TestViolation_Forms(t *testing.T) {
 
 		err := yamltest.FirstDocument(t, "v: ab\n").Validate(t.Context(), v)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := yamltest.RequireSourceError(t, err)
 
 		// The value has one violation, which carries the path to the
 		// value and names the keyword.
@@ -913,9 +903,7 @@ func TestViolation_Forms(t *testing.T) {
 
 		err := v.ValidateValue(t.Context(), map[string]any{"v": "ab"})
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := yamltest.RequireSourceError(t, err)
 
 		path, ok := bound.Path()
 		require.True(t, ok)

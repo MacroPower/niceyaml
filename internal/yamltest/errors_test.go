@@ -2,6 +2,7 @@ package yamltest_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,8 +42,8 @@ func TestProblemsOf(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.wantProblem, errsOf(yamltest.ProblemsOf(tc.err)))
-			assert.Equal(t, tc.wantDetail, errsOf(yamltest.DetailsOf(tc.err)))
+			assert.Equal(t, tc.wantProblem, yamltest.ErrsOf(yamltest.ProblemsOf(tc.err)))
+			assert.Equal(t, tc.wantDetail, yamltest.ErrsOf(yamltest.DetailsOf(tc.err)))
 		})
 	}
 }
@@ -81,13 +82,37 @@ func TestBoundIn(t *testing.T) {
 	})
 }
 
-// errsOf returns the error of each node, or nil when nodes is empty.
-func errsOf(nodes []niceyaml.ErrorTree) []error {
-	var errs []error
+func TestRequireSourceError(t *testing.T) {
+	t.Parallel()
 
-	for _, n := range nodes {
-		errs = append(errs, n.Err)
-	}
+	source := niceyaml.NewSourceFromString("a: 1\n")
+	bound := yamltest.Bind(t, source, niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a"))))
 
-	return errs
+	t.Run("a wrapped binding comes back", func(t *testing.T) {
+		t.Parallel()
+
+		got := yamltest.RequireSourceError(t, fmt.Errorf("context: %w", bound))
+		assert.Same(t, bound, got)
+	})
+
+	t.Run("an error with no binding fails the test", func(t *testing.T) {
+		t.Parallel()
+
+		var got *niceyaml.SourceError
+
+		rec := &recordingTB{}
+		done := make(chan struct{})
+
+		// FailNow ends the goroutine it runs on, so the helper runs on its own.
+		go func() {
+			defer close(done)
+
+			got = yamltest.RequireSourceError(rec, errors.New("plain"))
+		}()
+
+		<-done
+
+		assert.True(t, rec.failed)
+		assert.Nil(t, got)
+	})
 }
