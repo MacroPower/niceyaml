@@ -597,37 +597,23 @@ func TestSource_Lines_TokenLookup(t *testing.T) {
 	}, content)
 }
 
-func TestSource_Lines_EscapedScalar(t *testing.T) {
+func TestSource_Lines_DroppedText(t *testing.T) {
 	t.Parallel()
 
-	// The lexer drops the code of an escape from a double-quoted scalar,
-	// and the lines still hold the whole source, so the position of each
-	// token leads back to it.
-	input := "m: {a: \"\\u00e9\", b: xx, c: yy}\n"
-	source := niceyaml.NewSourceFromString(input)
-
-	assert.Equal(t, strings.TrimSuffix(input, "\n"), source.Lines().Content())
-
-	for _, tk := range source.Tokens() {
-		assert.Same(t, tk, source.Lines().TokenAt(position.NewFromToken(tk)), "token %q", tk.Origin)
-	}
-}
-
-func TestSource_Lines_DroppedWhitespace(t *testing.T) {
-	t.Parallel()
-
-	// The lexer drops trailing spaces, the whitespace of a blank line, and
-	// the space in front of a ":" after a quoted key. The lines still hold
-	// the whole source, the position of each token leads back to it, and
-	// a blank line with a tab before the first key still parses.
+	// The lexer drops trailing spaces, the whitespace of a blank line, the
+	// space in front of a ":" after a quoted key, and the code of an escape
+	// in a double-quoted scalar. The lines still hold the whole source, the
+	// position of each token leads back to it, and a blank line with a tab
+	// before the first key still parses.
 	tcs := map[string]struct {
 		input string
 	}{
-		"blank line with a tab before the first key": {input: " \t\na: 1\n"},
-		"blank line of a tab before the first key":   {input: "\t\na: 1\n"},
-		"space before a colon after a quoted key":    {input: "{\"a\" : 1, \"b\" : \"x\"}\n"},
-		"trailing spaces":                            {input: "a: 1   \nb: 2\n"},
-		"blank line of spaces":                       {input: "a: 1\n   \nb: 2\n"},
+		"code of an escape in a double-quoted scalar": {input: "m: {a: \"\\u00e9\", b: xx, c: yy}\n"},
+		"blank line with a tab before the first key":  {input: " \t\na: 1\n"},
+		"blank line of a tab before the first key":    {input: "\t\na: 1\n"},
+		"space before a colon after a quoted key":     {input: "{\"a\" : 1, \"b\" : \"x\"}\n"},
+		"trailing spaces":      {input: "a: 1   \nb: 2\n"},
+		"blank line of spaces": {input: "a: 1\n   \nb: 2\n"},
 	}
 
 	for name, tc := range tcs {
