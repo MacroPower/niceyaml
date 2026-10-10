@@ -110,9 +110,9 @@ var (
 	}
 )
 
-// countingLoader returns a resolver that names key, serves data, and counts
+// countingLoader returns a ref that names key, serves data, and counts
 // how many times its Load runs.
-func countingLoader(key string, data []byte) (schema.Resolver, *atomic.Int32) {
+func countingLoader(key string, data []byte) (schema.Ref, *atomic.Int32) {
 	var loads atomic.Int32
 
 	r := schema.Loadable(key, func(_ context.Context) ([]byte, error) {
@@ -3082,13 +3082,7 @@ func TestRegistry_Schema(t *testing.T) {
 	t.Run("compiles a loadable ref once and serves the cache after", func(t *testing.T) {
 		t.Parallel()
 
-		var loads atomic.Int32
-
-		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
-			loads.Add(1)
-
-			return []byte(`{"type": "object", "required": ["port"]}`), nil
-		})
+		ref, loads := countingLoader("k", []byte(`{"type": "object", "required": ["port"]}`))
 
 		reg := schema.NewRegistry()
 
@@ -3108,13 +3102,7 @@ func TestRegistry_Schema(t *testing.T) {
 	t.Run("shares the cache with Lookup", func(t *testing.T) {
 		t.Parallel()
 
-		var loads atomic.Int32
-
-		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
-			loads.Add(1)
-
-			return []byte(`{"type": "object"}`), nil
-		})
+		ref, loads := countingLoader("k", []byte(`{"type": "object"}`))
 
 		reg := schema.NewRegistry(schema.WithResolvers(ref))
 
@@ -3193,13 +3181,7 @@ func TestRegistry_Schema(t *testing.T) {
 	t.Run("a load whose bytes do not compile runs again", func(t *testing.T) {
 		t.Parallel()
 
-		var loads atomic.Int32
-
-		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
-			loads.Add(1)
-
-			return []byte(`{"type": 42}`), nil
-		})
+		ref, loads := countingLoader("k", []byte(`{"type": 42}`))
 
 		reg := schema.NewRegistry()
 
