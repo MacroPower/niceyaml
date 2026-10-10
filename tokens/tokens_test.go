@@ -840,7 +840,8 @@ func TestTokenize_ByteOrderMark(t *testing.T) {
 
 	tcs := map[string]struct {
 		input string
-		want  string
+		// The joined Origins, where they differ from the input.
+		want string
 		// The line and column of the key b, when the input holds one.
 		line, col int
 	}{
@@ -898,18 +899,9 @@ func TestTokenize_ByteOrderMark(t *testing.T) {
 			line:  3,
 			col:   1,
 		},
-		"inside a document": {
-			input: "a: 1\n\ufeffb: 2\n",
-			want:  "a: 1\n\ufeffb: 2\n",
-		},
-		"inside a document mixed endings": {
-			input: "# c\ra: 1\n\ufeffb: 2\n",
-			want:  "# c\ra: 1\n\ufeffb: 2\n",
-		},
-		"after a marker with content": {
-			input: "--- a\n\ufeffb\n",
-			want:  "--- a\n\ufeffb\n",
-		},
+		"inside a document":               {input: "a: 1\n\ufeffb: 2\n"},
+		"inside a document mixed endings": {input: "# c\ra: 1\n\ufeffb: 2\n"},
+		"after a marker with content":     {input: "--- a\n\ufeffb\n"},
 	}
 
 	for name, tc := range tcs {
@@ -917,7 +909,7 @@ func TestTokenize_ByteOrderMark(t *testing.T) {
 			t.Parallel()
 
 			tks := tokens.Tokenize(tc.input)
-			assert.Equal(t, tc.want, yamltest.DumpTokenOrigins(tks))
+			assert.Equal(t, cmp.Or(tc.want, tc.input), yamltest.DumpTokenOrigins(tks))
 
 			if tc.line == 0 {
 				return
@@ -1368,7 +1360,7 @@ func TestForParser(t *testing.T) {
 	// The tokens passed in keep their Origins.
 	tcs := map[string]struct {
 		input string
-		want  string
+		want  string // The joined Origins, where they differ from the input.
 	}{
 		"blank line of a tab": {
 			input: "\t\nb: 1\n",
@@ -1386,10 +1378,7 @@ func TestForParser(t *testing.T) {
 			input: "\t\n# c\nb: 1\n",
 			want:  "\n# c\nb: 1\n",
 		},
-		"blank line of spaces after the first key": {
-			input: "a: 1\n  \nb: 2\n",
-			want:  "a: 1\n  \nb: 2\n",
-		},
+		"blank line of spaces after the first key": {input: "a: 1\n  \nb: 2\n"},
 	}
 
 	for name, tc := range tcs {
@@ -1399,7 +1388,7 @@ func TestForParser(t *testing.T) {
 			tks := tokens.Tokenize(tc.input)
 			got := tokens.ForParser(tks)
 
-			assert.Equal(t, tc.want, yamltest.DumpTokenOrigins(got))
+			assert.Equal(t, cmp.Or(tc.want, tc.input), yamltest.DumpTokenOrigins(got))
 			assert.Equal(t, tc.input, yamltest.DumpTokenOrigins(tks))
 
 			require.Len(t, got, len(tks))
