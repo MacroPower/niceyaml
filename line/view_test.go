@@ -81,7 +81,7 @@ func TestNewView(t *testing.T) {
 		assert.Empty(t, view.String())
 
 		// Range-taking methods are safe on an empty view.
-		view.AddOverlay("test1", lineRange(0, 0, 5))
+		view.AddOverlay("test1", yamltest.LineRange(0, 0, 5))
 
 		assert.Equal(t, 0, view.Slice(position.NewSpan(0, 5)).Count())
 	})
@@ -497,19 +497,19 @@ func TestView_AddOverlay(t *testing.T) {
 	}{
 		"single line range": {
 			input:  "key: value\n",
-			ranges: []position.Range{lineRange(0, 0, 5)},
+			ranges: []position.Range{yamltest.LineRange(0, 0, 5)},
 			want:   []position.Spans{{position.NewSpan(0, 5)}},
 		},
 		"columns are clamped to the line": {
 			input:  "key: value\n",
-			ranges: []position.Range{lineRange(0, -3, 99)},
+			ranges: []position.Range{yamltest.LineRange(0, -3, 99)},
 			want:   []position.Spans{{position.NewSpan(0, len("key: value"))}},
 		},
 		// Empty at a column inside the line, and a range starting past the
 		// end.
 		"range covering no columns adds nothing": {
 			input:  "key: value\n",
-			ranges: []position.Range{lineRange(0, 3, 3), lineRange(0, 50, 60)},
+			ranges: []position.Range{yamltest.LineRange(0, 3, 3), yamltest.LineRange(0, 50, 60)},
 			want:   []position.Spans{nil},
 		},
 		// The first line takes column 3 to its end, the middle line all of
@@ -525,7 +525,7 @@ func TestView_AddOverlay(t *testing.T) {
 		},
 		"multiple ranges": {
 			input:  three,
-			ranges: []position.Range{lineRange(0, 0, 4), lineRange(1, 0, 4)},
+			ranges: []position.Range{yamltest.LineRange(0, 0, 4), yamltest.LineRange(1, 0, 4)},
 			want:   []position.Spans{{position.NewSpan(0, 4)}, {position.NewSpan(0, 4)}, nil},
 		},
 		// A range that starts before the first line and ends past the last
@@ -535,7 +535,7 @@ func TestView_AddOverlay(t *testing.T) {
 			input: "a: 1\nb: 2\n",
 			ranges: []position.Range{
 				position.NewRange(position.New(-1, 0), position.New(5, 3)),
-				lineRange(7, 0, 3),
+				yamltest.LineRange(7, 0, 3),
 			},
 			want: []position.Spans{{position.NewSpan(0, 4)}, {position.NewSpan(0, 4)}},
 		},
@@ -578,7 +578,7 @@ func TestView_AddOverlay(t *testing.T) {
 		view := line.NewView(line.Lines{})
 
 		// AddOverlay on an empty view does not panic.
-		view.AddOverlay("test1", lineRange(0, 0, 5))
+		view.AddOverlay("test1", yamltest.LineRange(0, 0, 5))
 
 		assert.Equal(t, 0, view.Count())
 	})
@@ -609,7 +609,7 @@ func TestView_BlendOverlay(t *testing.T) {
 		view := newTestView(t, "key: value\n", 1)
 		view.BlendOverlay("test1",
 			position.NewRange(position.New(-1, -5), position.New(9, 99)),
-			lineRange(0, 50, 60),
+			yamltest.LineRange(0, 50, 60),
 		)
 
 		require.Len(t, view.Overlays(0), 1)
@@ -620,8 +620,8 @@ func TestView_BlendOverlay(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "key: value\n", 1)
-		view.AddOverlay("test1", lineRange(0, 0, 3))
-		view.BlendOverlay("test2", lineRange(0, 0, 3))
+		view.AddOverlay("test1", yamltest.LineRange(0, 0, 3))
+		view.BlendOverlay("test2", yamltest.LineRange(0, 0, 3))
 
 		require.Len(t, view.Overlays(0), 2)
 		assert.False(t, view.Overlays(0)[0].Blend)
@@ -721,7 +721,7 @@ func TestView_Clone(t *testing.T) {
 		view := newTestView(t, input, 3)
 		clone := view.Clone()
 
-		clone.AddOverlay(kind.GenericHighlight, lineRange(0, 0, 3))
+		clone.AddOverlay(kind.GenericHighlight, yamltest.LineRange(0, 0, 3))
 		clone.Annotate(1, line.Annotation{Content: "note", Placement: line.Below})
 		clone.SetFlag(2, line.FlagInserted)
 
@@ -729,7 +729,7 @@ func TestView_Clone(t *testing.T) {
 		assert.Empty(t, view.Annotations(1))
 		assert.Equal(t, line.FlagDefault, view.Flag(2))
 
-		view.AddOverlay(kind.GenericError, lineRange(1, 0, 3))
+		view.AddOverlay(kind.GenericError, yamltest.LineRange(1, 0, 3))
 		view.Annotate(0, line.Annotation{Content: "other", Placement: line.Above})
 		view.SetFlag(0, line.FlagDeleted)
 
@@ -1058,7 +1058,7 @@ func TestView_Slice(t *testing.T) {
 
 		// Decorating before or after slicing renders the same, since a
 		// slice takes ranges and indices in the coordinates of its content.
-		rng := lineRange(2, 3, 4)
+		rng := yamltest.LineRange(2, 3, 4)
 		ann := line.Annotation{Content: "here", Placement: line.Below, Col: 3}
 
 		before := newTestView(t, input, 4)
@@ -1096,7 +1096,7 @@ func TestView_Slice(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, input, 4).Slice(position.NewSpan(0, 2))
-		view.AddOverlay("test", lineRange(3, 0, 4))
+		view.AddOverlay("test", yamltest.LineRange(3, 0, 4))
 		view.Annotate(3, line.Annotation{Content: "hidden", Placement: line.Below})
 
 		assert.Len(t, view.Overlays(3), 1)
@@ -1329,8 +1329,8 @@ func TestView_String(t *testing.T) {
 
 		view := newTestView(t, "key: value\n", 1)
 		view.SetFlag(0, line.FlagDeleted)
-		view.AddOverlay("test1", lineRange(0, 0, 3))
-		view.BlendOverlay("test2", lineRange(0, 5, 7))
+		view.AddOverlay("test1", yamltest.LineRange(0, 0, 3))
+		view.BlendOverlay("test2", yamltest.LineRange(0, 5, 7))
 
 		assert.Equal(t, "   1 | key: value\n     | ^^^  ^^", view.String())
 	})
@@ -1393,7 +1393,7 @@ func TestView_String(t *testing.T) {
 		}{
 			"overlay and annotation share the marker row": {
 				input:       "key: value",
-				ranges:      []position.Range{lineRange(0, 5, 10)},
+				ranges:      []position.Range{yamltest.LineRange(0, 5, 10)},
 				annotations: []line.Annotation{{Content: "bad value", Placement: line.Below, Col: 5}},
 				want: stringtest.JoinLF(
 					"   1 | key: value",
@@ -1404,7 +1404,7 @@ func TestView_String(t *testing.T) {
 			// the marked ones are worth two carets each.
 			"carets sit under wide runes": {
 				input:       "名前: value",
-				ranges:      []position.Range{lineRange(0, 4, 9)},
+				ranges:      []position.Range{yamltest.LineRange(0, 4, 9)},
 				annotations: []line.Annotation{{Content: "bad", Placement: line.Below, Col: 4}},
 				want: stringtest.JoinLF(
 					"   1 | 名前: value",
@@ -1431,7 +1431,7 @@ func TestView_String(t *testing.T) {
 			// column starts there too.
 			"carets on a combining mark sit under its base": {
 				input:       "k: e\u0301x",
-				ranges:      []position.Range{lineRange(0, 4, 5)},
+				ranges:      []position.Range{yamltest.LineRange(0, 4, 5)},
 				annotations: []line.Annotation{{Content: "here", Placement: line.Below, Col: 4}},
 				want: stringtest.JoinLF(
 					"   1 | k: e\u0301x",
@@ -1444,7 +1444,7 @@ func TestView_String(t *testing.T) {
 			// above starts there.
 			"carets sit under a zwj sequence": {
 				input:  "a: \"\U0001F468\u200d\U0001F469\" x",
-				ranges: []position.Range{lineRange(0, 9, 10)},
+				ranges: []position.Range{yamltest.LineRange(0, 9, 10)},
 				annotations: []line.Annotation{
 					{Content: "above", Placement: line.Above, Col: 9},
 					{Content: "below", Placement: line.Below, Col: 9},
@@ -1457,7 +1457,7 @@ func TestView_String(t *testing.T) {
 			},
 			"carets sit under a keycap": {
 				input:  "a: 1\ufe0f\u20e3 x",
-				ranges: []position.Range{lineRange(0, 7, 8)},
+				ranges: []position.Range{yamltest.LineRange(0, 7, 8)},
 				annotations: []line.Annotation{
 					{Content: "above", Placement: line.Above, Col: 7},
 					{Content: "below", Placement: line.Below, Col: 7},
@@ -1472,7 +1472,7 @@ func TestView_String(t *testing.T) {
 			// the first emoji starts, so a mark on either lands under it.
 			"a mark inside a grapheme cluster sits under its first rune": {
 				input:  "a: \U0001F468\u200d\U0001F469 x",
-				ranges: []position.Range{lineRange(0, 5, 6)},
+				ranges: []position.Range{yamltest.LineRange(0, 5, 6)},
 				want: stringtest.JoinLF(
 					"   1 | a: \U0001F468\u200d\U0001F469 x",
 					"     |    ^^",
@@ -1480,7 +1480,7 @@ func TestView_String(t *testing.T) {
 			},
 			"control characters render as pictures": {
 				input:       "a: \"x\ty\x1b\"",
-				ranges:      []position.Range{lineRange(0, 3, 9)},
+				ranges:      []position.Range{yamltest.LineRange(0, 3, 9)},
 				annotations: []line.Annotation{{Content: "tab\x1bhere", Placement: line.Above}},
 				want: stringtest.JoinLF(
 					"     | tab\u241bhere",
@@ -1743,7 +1743,7 @@ func TestView_Hunks(t *testing.T) {
 
 		view := newTestView(t, input, 8)
 		view.SetFlag(0, line.FlagInserted)
-		view.AddOverlay("test", lineRange(7, 0, 1))
+		view.AddOverlay("test", yamltest.LineRange(7, 0, 1))
 		view.Annotate(4, line.Annotation{Content: "here", Placement: line.Below})
 
 		got := view.Hunks(1)
@@ -2277,7 +2277,7 @@ func TestView_Clip_KeepsView(t *testing.T) {
 
 		view := newTestView(t, input, 4)
 		view.SetFlag(1, line.FlagInserted)
-		view.AddOverlay(kind.GenericError, lineRange(1, 30, 32))
+		view.AddOverlay(kind.GenericError, yamltest.LineRange(1, 30, 32))
 		view.Annotate(1, line.Annotation{Content: "bad", Placement: line.Below, Col: 30})
 
 		return view

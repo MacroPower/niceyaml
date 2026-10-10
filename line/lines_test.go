@@ -1413,7 +1413,7 @@ func TestEmptyAndZeroValues(t *testing.T) {
 			assert.Nil(t, lines.Tokens())
 			assert.Empty(t, lines.Content())
 			assert.Empty(t, lines.String())
-			assert.Nil(t, lines.SliceLines(lineRange(0, 0, 3)))
+			assert.Nil(t, lines.SliceLines(yamltest.LineRange(0, 0, 3)))
 
 			for range lines.All() {
 				t.Fatal("expected no lines")
@@ -1729,7 +1729,7 @@ func TestLines_TokenAt(t *testing.T) {
 					require.NotNil(t, tk)
 					assert.Equal(t, "other", tk.Value)
 					assert.Equal(t,
-						position.Ranges{lineRange(tc.line, 2, 7)},
+						position.Ranges{yamltest.LineRange(tc.line, 2, 7)},
 						lines.ContentRanges(tk))
 				}
 			})
@@ -1816,104 +1816,104 @@ func TestLines_TokenRanges(t *testing.T) {
 		"lexer token": {
 			lines:       single,
 			tk:          singleTks[0],
-			wantToken:   position.Ranges{lineRange(0, 0, 3)},
-			wantContent: position.Ranges{lineRange(0, 0, 3)},
+			wantToken:   position.Ranges{yamltest.LineRange(0, 0, 3)},
+			wantContent: position.Ranges{yamltest.LineRange(0, 0, 3)},
 		},
 		// The range of the value starts after the key, with the space
 		// between them.
 		"value token": {
 			lines:       single,
 			tk:          single.TokenAt(position.New(0, 5)),
-			wantToken:   position.Ranges{lineRange(0, 4, 10)},
-			wantContent: position.Ranges{lineRange(0, 5, 10)},
+			wantToken:   position.Ranges{yamltest.LineRange(0, 4, 10)},
+			wantContent: position.Ranges{yamltest.LineRange(0, 5, 10)},
 		},
 		"multiline token has one range per line": {
 			lines:       src,
 			tk:          block,
-			wantToken:   position.Ranges{lineRange(1, 0, 7), lineRange(2, 0, 7)},
-			wantContent: position.Ranges{lineRange(1, 2, 7), lineRange(2, 2, 7)},
+			wantToken:   position.Ranges{yamltest.LineRange(1, 0, 7), yamltest.LineRange(2, 0, 7)},
+			wantContent: position.Ranges{yamltest.LineRange(1, 2, 7), yamltest.LineRange(2, 2, 7)},
 		},
 		"part token from Line.Tokens matches its own line": {
 			lines:       src,
 			tk:          src.Line(2).Token(0),
-			wantToken:   position.Ranges{lineRange(2, 0, 7)},
-			wantContent: position.Ranges{lineRange(2, 2, 7)},
+			wantToken:   position.Ranges{yamltest.LineRange(2, 0, 7)},
+			wantContent: position.Ranges{yamltest.LineRange(2, 2, 7)},
 		},
 		// A parser hands out copies of the tokens the caller gave it, and a
 		// copy finds the same ranges as the original.
 		"copy of a multiline token matches by its fields": {
 			lines:       src,
 			tk:          block.Clone(),
-			wantToken:   position.Ranges{lineRange(1, 0, 7), lineRange(2, 0, 7)},
-			wantContent: position.Ranges{lineRange(1, 2, 7), lineRange(2, 2, 7)},
+			wantToken:   position.Ranges{yamltest.LineRange(1, 0, 7), yamltest.LineRange(2, 0, 7)},
+			wantContent: position.Ranges{yamltest.LineRange(1, 2, 7), yamltest.LineRange(2, 2, 7)},
 		},
 		"copy of a part token matches by its fields": {
 			lines:       src,
 			tk:          src.Line(1).Token(0).Clone(),
-			wantToken:   position.Ranges{lineRange(1, 0, 7)},
-			wantContent: position.Ranges{lineRange(1, 2, 7)},
+			wantToken:   position.Ranges{yamltest.LineRange(1, 0, 7)},
+			wantContent: position.Ranges{yamltest.LineRange(1, 2, 7)},
 		},
 		"collected lexer token": {
 			lines:       reversed,
 			tk:          block,
-			wantToken:   position.Ranges{lineRange(0, 0, 7), lineRange(1, 0, 7)},
-			wantContent: position.Ranges{lineRange(0, 2, 7), lineRange(1, 2, 7)},
+			wantToken:   position.Ranges{yamltest.LineRange(0, 0, 7), yamltest.LineRange(1, 0, 7)},
+			wantContent: position.Ranges{yamltest.LineRange(0, 2, 7), yamltest.LineRange(1, 2, 7)},
 		},
 		"collected part token": {
 			lines:       reversed,
 			tk:          src.Line(1).Token(0),
-			wantToken:   position.Ranges{lineRange(1, 0, 7)},
-			wantContent: position.Ranges{lineRange(1, 2, 7)},
+			wantToken:   position.Ranges{yamltest.LineRange(1, 0, 7)},
+			wantContent: position.Ranges{yamltest.LineRange(1, 2, 7)},
 		},
 		"collected copy of a token": {
 			lines:       reversed,
 			tk:          block.Clone(),
-			wantToken:   position.Ranges{lineRange(0, 0, 7), lineRange(1, 0, 7)},
-			wantContent: position.Ranges{lineRange(0, 2, 7), lineRange(1, 2, 7)},
+			wantToken:   position.Ranges{yamltest.LineRange(0, 0, 7), yamltest.LineRange(1, 0, 7)},
+			wantContent: position.Ranges{yamltest.LineRange(0, 2, 7), yamltest.LineRange(1, 2, 7)},
 		},
 		"gapped lexer token": {
 			lines:       gapped,
 			tk:          gapped.TokenAt(position.New(3, 2)),
-			wantToken:   position.Ranges{lineRange(3, 0, 3), lineRange(4, 0, 3)},
-			wantContent: position.Ranges{lineRange(3, 2, 3), lineRange(4, 2, 3)},
+			wantToken:   position.Ranges{yamltest.LineRange(3, 0, 3), yamltest.LineRange(4, 0, 3)},
+			wantContent: position.Ranges{yamltest.LineRange(3, 2, 3), yamltest.LineRange(4, 2, 3)},
 		},
 		"gapped part token": {
 			lines:       gapped,
 			tk:          gapped.Line(4).Token(0),
-			wantToken:   position.Ranges{lineRange(4, 0, 3)},
-			wantContent: position.Ranges{lineRange(4, 2, 3)},
+			wantToken:   position.Ranges{yamltest.LineRange(4, 0, 3)},
+			wantContent: position.Ranges{yamltest.LineRange(4, 2, 3)},
 		},
 		"gapped copy of a token": {
 			lines:       gapped,
 			tk:          gapped.TokenAt(position.New(1, 6)).Clone(),
-			wantToken:   position.Ranges{lineRange(1, 5, 12)},
-			wantContent: position.Ranges{lineRange(1, 6, 12)},
+			wantToken:   position.Ranges{yamltest.LineRange(1, 5, 12)},
+			wantContent: position.Ranges{yamltest.LineRange(1, 6, 12)},
 		},
 		"inserted revision token": {
 			lines:       revisions,
 			tk:          revisions.TokenAt(position.New(2, 0)),
-			wantToken:   position.Ranges{lineRange(2, 0, 1)},
-			wantContent: position.Ranges{lineRange(2, 0, 1)},
+			wantToken:   position.Ranges{yamltest.LineRange(2, 0, 1)},
+			wantContent: position.Ranges{yamltest.LineRange(2, 0, 1)},
 		},
 		"deleted revision token": {
 			lines:       revisions,
 			tk:          revisions.TokenAt(position.New(1, 0)),
-			wantToken:   position.Ranges{lineRange(1, 0, 1)},
-			wantContent: position.Ranges{lineRange(1, 0, 1)},
+			wantToken:   position.Ranges{yamltest.LineRange(1, 0, 1)},
+			wantContent: position.Ranges{yamltest.LineRange(1, 0, 1)},
 		},
 		"revision part token": {
 			lines:       revisions,
 			tk:          revisions.Line(2).Token(0),
-			wantToken:   position.Ranges{lineRange(2, 0, 1)},
-			wantContent: position.Ranges{lineRange(2, 0, 1)},
+			wantToken:   position.Ranges{yamltest.LineRange(2, 0, 1)},
+			wantContent: position.Ranges{yamltest.LineRange(2, 0, 1)},
 		},
 		"copy of a revision token": {
 			// A copy holds no pointer to tell the revisions apart, so it
 			// matches the token of each.
 			lines:       revisions,
 			tk:          revisions.TokenAt(position.New(2, 0)).Clone(),
-			wantToken:   position.Ranges{lineRange(1, 0, 1), lineRange(2, 0, 1)},
-			wantContent: position.Ranges{lineRange(1, 0, 1), lineRange(2, 0, 1)},
+			wantToken:   position.Ranges{yamltest.LineRange(1, 0, 1), yamltest.LineRange(2, 0, 1)},
+			wantContent: position.Ranges{yamltest.LineRange(1, 0, 1), yamltest.LineRange(2, 0, 1)},
 		},
 	}
 
@@ -1940,12 +1940,6 @@ func TestLines_TokenRanges(t *testing.T) {
 		other := tokens.Tokenize("key: |\n  other\n  lines\n")
 		assert.Nil(t, src.TokenRanges(other[len(other)-1]))
 	})
-}
-
-// lineRange returns the range of the columns from start to end on the line
-// at index i.
-func lineRange(i, start, end int) position.Range {
-	return position.NewRange(position.New(i, start), position.New(i, end))
 }
 
 func TestLines_String(t *testing.T) {
@@ -2074,7 +2068,7 @@ func TestLines_ContentRanges(t *testing.T) {
 		tk := lines.TokenAt(position.New(0, 6))
 		require.Same(t, tks[2], tk)
 
-		assert.Equal(t, position.Ranges{lineRange(0, 7, 12)}, lines.ContentRanges(tk))
+		assert.Equal(t, position.Ranges{yamltest.LineRange(0, 7, 12)}, lines.ContentRanges(tk))
 	})
 
 	t.Run("excludes leading and trailing tabs", func(t *testing.T) {
@@ -2086,8 +2080,8 @@ func TestLines_ContentRanges(t *testing.T) {
 		require.NotNil(t, tk)
 		require.Equal(t, "\tb\t", tk.Origin)
 
-		assert.Equal(t, position.Ranges{lineRange(0, 2, 5)}, lines.TokenRanges(tk))
-		assert.Equal(t, position.Ranges{lineRange(0, 3, 4)}, lines.ContentRanges(tk))
+		assert.Equal(t, position.Ranges{yamltest.LineRange(0, 2, 5)}, lines.TokenRanges(tk))
+		assert.Equal(t, position.Ranges{yamltest.LineRange(0, 3, 4)}, lines.ContentRanges(tk))
 	})
 
 	t.Run("space-only part contributes no range", func(t *testing.T) {
@@ -2100,8 +2094,12 @@ func TestLines_ContentRanges(t *testing.T) {
 		tk := lines.TokenAt(position.New(1, 0))
 		require.Same(t, tks[2], tk)
 
-		assert.Contains(t, lines.TokenRanges(tk), lineRange(1, 0, 3))
-		assert.Equal(t, position.Ranges{lineRange(0, 3, 5), lineRange(2, 2, 4)}, lines.ContentRanges(tk))
+		assert.Contains(t, lines.TokenRanges(tk), yamltest.LineRange(1, 0, 3))
+		assert.Equal(
+			t,
+			position.Ranges{yamltest.LineRange(0, 3, 5), yamltest.LineRange(2, 2, 4)},
+			lines.ContentRanges(tk),
+		)
 	})
 
 	t.Run("nil and missing tokens return nil", func(t *testing.T) {
@@ -2218,19 +2216,19 @@ func TestLines_View(t *testing.T) {
 			want   []position.Position
 		}{
 			"overlapping": {
-				ranges: []position.Range{lineRange(0, 0, 3), lineRange(0, 1, 4)},
+				ranges: []position.Range{yamltest.LineRange(0, 0, 3), yamltest.LineRange(0, 1, 4)},
 				want: []position.Position{
 					position.New(0, 0), position.New(0, 1), position.New(0, 2), position.New(0, 3),
 				},
 			},
 			"reverse line order": {
-				ranges: []position.Range{lineRange(2, 0, 2), lineRange(0, 0, 2)},
+				ranges: []position.Range{yamltest.LineRange(2, 0, 2), yamltest.LineRange(0, 0, 2)},
 				want: []position.Position{
 					position.New(0, 0), position.New(0, 1), position.New(2, 0), position.New(2, 1),
 				},
 			},
 			"reverse column order on one line": {
-				ranges: []position.Range{lineRange(1, 3, 5), lineRange(1, 0, 2)},
+				ranges: []position.Range{yamltest.LineRange(1, 3, 5), yamltest.LineRange(1, 0, 2)},
 				want: []position.Position{
 					position.New(1, 0), position.New(1, 1), position.New(1, 3), position.New(1, 4),
 				},
@@ -2265,13 +2263,13 @@ func TestLines_View(t *testing.T) {
 				},
 			},
 			"negative start column": {
-				ranges: []position.Range{lineRange(1, -2, 1)},
+				ranges: []position.Range{yamltest.LineRange(1, -2, 1)},
 				want:   []position.Position{position.New(1, 0)},
 			},
 			"inverted": {
 				ranges: []position.Range{
 					position.NewRange(position.New(1, 3), position.New(0, 0)),
-					lineRange(2, 3, 1),
+					yamltest.LineRange(2, 3, 1),
 				},
 			},
 		}
@@ -2431,35 +2429,43 @@ func TestLines_SliceLines(t *testing.T) {
 		want  position.Ranges
 	}{
 		"single line range": {
-			input: lineRange(1, 1, 3),
-			want:  position.Ranges{lineRange(1, 1, 3)},
+			input: yamltest.LineRange(1, 1, 3),
+			want:  position.Ranges{yamltest.LineRange(1, 1, 3)},
 		},
 		"every line but the last ends at its width": {
 			input: position.NewRange(position.New(0, 3), position.New(2, 3)),
-			want:  position.Ranges{lineRange(0, 3, 4), lineRange(1, 0, 6), lineRange(2, 0, 3)},
+			want: position.Ranges{
+				yamltest.LineRange(0, 3, 4),
+				yamltest.LineRange(1, 0, 6),
+				yamltest.LineRange(2, 0, 3),
+			},
 		},
 		"end at column 0 stops on the line before": {
 			input: position.NewRange(position.New(0, 1), position.New(2, 0)),
-			want:  position.Ranges{lineRange(0, 1, 4), lineRange(1, 0, 6)},
+			want:  position.Ranges{yamltest.LineRange(0, 1, 4), yamltest.LineRange(1, 0, 6)},
 		},
 		"columns clamp to the line": {
-			input: lineRange(1, -2, 100),
-			want:  position.Ranges{lineRange(1, 0, 6)},
+			input: yamltest.LineRange(1, -2, 100),
+			want:  position.Ranges{yamltest.LineRange(1, 0, 6)},
 		},
 		"lines outside the collection are left out": {
 			input: position.NewRange(position.New(-1, 0), position.New(5, 2)),
-			want:  position.Ranges{lineRange(0, 0, 4), lineRange(1, 0, 6), lineRange(2, 0, 8)},
+			want: position.Ranges{
+				yamltest.LineRange(0, 0, 4),
+				yamltest.LineRange(1, 0, 6),
+				yamltest.LineRange(2, 0, 8),
+			},
 		},
 		"start past the width covers nothing on that line": {
 			input: position.NewRange(position.New(0, 9), position.New(1, 2)),
-			want:  position.Ranges{lineRange(1, 0, 2)},
+			want:  position.Ranges{yamltest.LineRange(1, 0, 2)},
 		},
 		"empty range": {
-			input: lineRange(1, 3, 3),
+			input: yamltest.LineRange(1, 3, 3),
 			want:  nil,
 		},
 		"inverted columns on one line": {
-			input: lineRange(1, 3, 1),
+			input: yamltest.LineRange(1, 3, 1),
 			want:  nil,
 		},
 		"inverted lines": {
@@ -2467,7 +2473,7 @@ func TestLines_SliceLines(t *testing.T) {
 			want:  nil,
 		},
 		"inverted columns at the MinInt line": {
-			input: lineRange(math.MinInt, 5, 2),
+			input: yamltest.LineRange(math.MinInt, 5, 2),
 			want:  nil,
 		},
 	}

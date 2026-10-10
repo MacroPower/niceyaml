@@ -541,7 +541,7 @@ func TestSource_Runes_WithRanges(t *testing.T) {
 	}{
 		// The range covers "b: 2" on line 1, and leaves its end out.
 		"single range filters runes correctly": {
-			ranges: []position.Range{position.NewRange(position.New(1, 0), position.New(1, 4))},
+			ranges: []position.Range{yamltest.LineRange(1, 0, 4)},
 			want: []runePosition{
 				{R: 'b', Pos: position.New(1, 0)},
 				{R: ':', Pos: position.New(1, 1)},
@@ -562,12 +562,12 @@ func TestSource_Runes_WithRanges(t *testing.T) {
 			},
 		},
 		"out-of-range yields nothing": {
-			ranges: []position.Range{position.NewRange(position.New(100, 0), position.New(100, 10))},
+			ranges: []position.Range{yamltest.LineRange(100, 0, 10)},
 		},
 		"multiple ranges": {
 			ranges: []position.Range{
-				position.NewRange(position.New(0, 0), position.New(0, 1)),
-				position.NewRange(position.New(2, 0), position.New(2, 1)),
+				yamltest.LineRange(0, 0, 1),
+				yamltest.LineRange(2, 0, 1),
 			},
 			want: []runePosition{
 				{R: 'a', Pos: position.New(0, 0)},
@@ -598,7 +598,7 @@ func TestSource_Runes_WithRanges(t *testing.T) {
 	t.Run("empty source returns nothing", func(t *testing.T) {
 		t.Parallel()
 
-		rng := position.NewRange(position.New(0, 0), position.New(0, 5))
+		rng := yamltest.LineRange(0, 0, 5)
 		assert.Nil(t, runePositions(niceyaml.NewSourceFromString("").Lines(), rng))
 	})
 
@@ -644,8 +644,8 @@ func TestSource_Lines_TokenLookup(t *testing.T) {
 
 	content := source.Lines().ContentRanges(tk)
 	assert.Equal(t, position.Ranges{
-		position.NewRange(position.New(1, 2), position.New(1, 7)),
-		position.NewRange(position.New(2, 2), position.New(2, 7)),
+		yamltest.LineRange(1, 2, 7),
+		yamltest.LineRange(2, 2, 7),
 	}, content)
 }
 
@@ -721,7 +721,7 @@ func TestSource_File_BlankLineBeforeFirstKey(t *testing.T) {
 			require.NotNil(t, original)
 			assert.Equal(t, original.Origin, keyTk.Origin)
 			assert.Equal(t, position.Ranges{
-				position.NewRange(position.New(1, 0), position.New(1, 1)),
+				yamltest.LineRange(1, 0, 1),
 			}, source.Lines().ContentRanges(keyTk))
 
 			assert.Equal(t,
@@ -1068,7 +1068,7 @@ func TestSource_File_TokensFindLines(t *testing.T) {
 		assert.NotSame(t, original, tk)
 
 		assert.Equal(t, position.Ranges{
-			position.NewRange(position.New(3, 7), position.New(3, 12)),
+			yamltest.LineRange(3, 7, 12),
 		}, source.Lines().ContentRanges(tk))
 		assert.Equal(t, source.Lines().TokenRanges(original), source.Lines().TokenRanges(tk))
 
@@ -1077,13 +1077,13 @@ func TestSource_File_TokensFindLines(t *testing.T) {
 		keyTk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Current().Child("other").Key())
 		require.NoError(t, err)
 		assert.Equal(t, position.Ranges{
-			position.NewRange(position.New(3, 0), position.New(3, 5)),
+			yamltest.LineRange(3, 0, 5),
 		}, source.Lines().ContentRanges(keyTk))
 
 		blockTk, err := paths.NewResolver(doc.DocumentAST()).Token(paths.Current().Child("key"))
 		require.NoError(t, err)
 		assert.Equal(t, position.Ranges{
-			position.NewRange(position.New(0, 5), position.New(0, 6)),
+			yamltest.LineRange(0, 5, 6),
 		}, source.Lines().ContentRanges(blockTk))
 	})
 
@@ -1160,7 +1160,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 
 		rng, ok := bound.Range()
 		require.True(t, ok)
-		assert.Equal(t, position.NewRange(position.New(1, 3), position.New(1, 4)), rng)
+		assert.Equal(t, yamltest.LineRange(1, 3, 4), rng)
 
 		got := stringtest.TrimLineEnds(render(bound))
 		assert.Contains(t, got, "<genericError>2</genericError>")
@@ -3880,7 +3880,7 @@ func TestDocument_BindChain(t *testing.T) {
 
 				rng, ok := problems[0].Range()
 				require.True(t, ok)
-				assert.Equal(t, position.NewRange(position.New(0, 6), position.New(0, 11)), rng)
+				assert.Equal(t, yamltest.LineRange(0, 6, 11), rng)
 
 				docs := source.Documents()
 
@@ -3930,7 +3930,7 @@ func TestSource_View_IsIndependent(t *testing.T) {
 
 	// A change to one view reaches neither the Source nor another view.
 	view := source.View()
-	view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
+	view.AddOverlay("test1", yamltest.LineRange(0, 0, 5))
 	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below})
 
 	assert.Empty(t, source.View().Overlays(0))
@@ -3965,7 +3965,7 @@ func TestSource_Bind(t *testing.T) {
 
 		docs := source.Documents()
 
-		rng := position.NewRange(position.New(2, 3), position.New(2, 5))
+		rng := yamltest.LineRange(2, 3, 5)
 		err := source.Bind(niceyaml.NewError("too wide", niceyaml.AtRange(rng)))
 
 		bound := yamltest.RequireSourceError(t, err)
@@ -3999,7 +3999,7 @@ func TestSource_Bind(t *testing.T) {
 
 		got, ok := bound.Range()
 		require.True(t, ok)
-		assert.Equal(t, position.NewRange(position.New(2, 3), position.New(2, 5)), got)
+		assert.Equal(t, yamltest.LineRange(2, 3, 5), got)
 	})
 
 	t.Run("position in the first document binds there", func(t *testing.T) {
@@ -4078,7 +4078,7 @@ func TestSource_Bind(t *testing.T) {
 				msg:  "broken.yaml:5:4: bad",
 			},
 			"range in the document below the syntax error": {
-				opt:  niceyaml.AtRange(position.NewRange(position.New(4, 0), position.New(4, 1))),
+				opt:  niceyaml.AtRange(yamltest.LineRange(4, 0, 1)),
 				want: 2,
 				msg:  "broken.yaml:5:1: bad",
 			},
@@ -4126,7 +4126,7 @@ func TestSource_Bind(t *testing.T) {
 
 		got, ok := bound.Range()
 		require.True(t, ok)
-		assert.Equal(t, position.NewRange(position.New(2, 3), position.New(2, 5)), got)
+		assert.Equal(t, yamltest.LineRange(2, 3, 5), got)
 
 		assert.Equal(t, stringtest.JoinLF(
 			"one.yaml:3:4: $.b: bad",
@@ -4176,7 +4176,7 @@ func TestSource_Bind(t *testing.T) {
 
 		got, ok := bound.Range()
 		require.True(t, ok)
-		assert.Equal(t, position.NewRange(position.New(4, 6), position.New(4, 10)), got)
+		assert.Equal(t, yamltest.LineRange(4, 6, 10), got)
 
 		assert.Equal(t, stringtest.JoinLF(
 			"f.yaml:5:7: $.port: bad port",
@@ -4374,7 +4374,7 @@ func TestSource_Bind_RoutesDocuments(t *testing.T) {
 			// Documents leaves out beside one with content.
 			docs := source.AllDocuments()
 
-			rng := position.NewRange(position.New(tc.line, 0), position.New(tc.line, 1))
+			rng := yamltest.LineRange(tc.line, 0, 1)
 
 			bound := yamltest.RequireSourceError(t, source.Bind(niceyaml.NewError("bad", niceyaml.AtRange(rng))))
 
@@ -5293,7 +5293,7 @@ func TestWithReferences(t *testing.T) {
 			got, err := doc.Ranges(alias)
 			require.NoError(t, err)
 			assert.Equal(t, position.Ranges{
-				position.NewRange(position.New(1, 8), position.New(1, 9)),
+				yamltest.LineRange(1, 8, 9),
 			}, got)
 		})
 	})

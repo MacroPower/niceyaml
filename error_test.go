@@ -1403,7 +1403,7 @@ func TestError_Location(t *testing.T) {
 
 	path := paths.Current().Child("foo")
 	pos := position.New(1, 4)
-	rng := position.NewRange(position.New(1, 2), position.New(1, 5))
+	rng := yamltest.LineRange(1, 2, 5)
 
 	// The accessors of an Error report a path, and a position or a range,
 	// each nil here when the accessor reports false.
@@ -2492,7 +2492,7 @@ func TestSourceError_Format_Plain(t *testing.T) {
 		"control characters render as pictures": {
 			input: "a: \"x\\ty\"\n",
 			err: niceyaml.NewError("bad", niceyaml.AtRange(
-				position.NewRange(position.New(0, 3), position.New(0, 9)),
+				yamltest.LineRange(0, 3, 9),
 			)),
 			want: stringtest.JoinLF(
 				"1:4: bad",
@@ -2747,7 +2747,7 @@ func TestError_EmptyMessageWithLocation(t *testing.T) {
 		},
 		"range": {
 			err: niceyaml.NewError("",
-				niceyaml.AtRange(position.NewRange(position.New(1, 3), position.New(1, 4))),
+				niceyaml.AtRange(yamltest.LineRange(1, 3, 4)),
 			),
 			wantTree:  "",
 			wantBound: "2:4:",
@@ -3988,7 +3988,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 			"range": {
 				err: niceyaml.Invalid(
 					niceyaml.NewError("bad range",
-						niceyaml.AtRange(position.NewRange(position.New(2, 6), position.New(2, 12))),
+						niceyaml.AtRange(yamltest.LineRange(2, 6, 12)),
 					),
 					niceyaml.WithDetails(nested),
 				),
@@ -4064,15 +4064,15 @@ func TestSourceError_Range_Inverted(t *testing.T) {
 	}{
 		"end on an earlier line": {
 			rng:  position.NewRange(position.New(2, 2), position.New(0, 1)),
-			want: position.NewRange(position.New(2, 2), position.New(2, 2)),
+			want: yamltest.LineRange(2, 2, 2),
 		},
 		"end at an earlier column": {
-			rng:  position.NewRange(position.New(1, 3), position.New(1, 1)),
-			want: position.NewRange(position.New(1, 3), position.New(1, 3)),
+			rng:  yamltest.LineRange(1, 3, 1),
+			want: yamltest.LineRange(1, 3, 3),
 		},
 		"start past the end of the last line, end past it": {
 			rng:  position.NewRange(position.New(2, 10), position.New(9, 0)),
-			want: position.NewRange(position.New(2, 10), position.New(2, 10)),
+			want: yamltest.LineRange(2, 10, 10),
 		},
 	}
 
@@ -4122,7 +4122,7 @@ func TestError_RangeRendersFromSource(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("key: some value\n")
-	rng := position.NewRange(position.New(0, 5), position.New(0, 9))
+	rng := yamltest.LineRange(0, 5, 9)
 
 	err := yamltest.Bind(t, source, niceyaml.NewError("bad word", niceyaml.AtRange(rng)))
 
@@ -4166,30 +4166,30 @@ func TestSourceError_Range(t *testing.T) {
 	}{
 		"path targets the value token": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("value"))),
-			want: position.NewRange(position.New(1, 7), position.New(1, 10)),
+			want: yamltest.LineRange(1, 7, 10),
 		},
 		"path targets the key token": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("value").Key())),
-			want: position.NewRange(position.New(1, 0), position.New(1, 5)),
+			want: yamltest.LineRange(1, 0, 5),
 		},
 		"path resolves in the bound document": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("name"))),
-			want: position.NewRange(position.New(3, 6), position.New(3, 12)),
+			want: yamltest.LineRange(3, 6, 12),
 			doc:  1,
 		},
 		"range is returned as given": {
 			err: niceyaml.NewError("bad",
-				niceyaml.AtRange(position.NewRange(position.New(0, 1), position.New(0, 3))),
+				niceyaml.AtRange(yamltest.LineRange(0, 1, 3)),
 			),
-			want: position.NewRange(position.New(0, 1), position.New(0, 3)),
+			want: yamltest.LineRange(0, 1, 3),
 		},
 		"position covers the content of its token": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 6))),
-			want: position.NewRange(position.New(0, 6), position.New(0, 10)),
+			want: yamltest.LineRange(0, 6, 10),
 		},
 		"position inside its token covers the whole token": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPosition(position.New(1, 8))),
-			want: position.NewRange(position.New(1, 7), position.New(1, 10)),
+			want: yamltest.LineRange(1, 7, 10),
 		},
 		"no location": {
 			err:       niceyaml.NewError("bad"),
@@ -4201,19 +4201,19 @@ func TestSourceError_Range(t *testing.T) {
 		},
 		"range past the last line": {
 			err: niceyaml.NewError("bad",
-				niceyaml.AtRange(position.NewRange(position.New(9, 0), position.New(9, 3))),
+				niceyaml.AtRange(yamltest.LineRange(9, 0, 3)),
 			),
 			is: niceyaml.ErrOutOfRange,
 		},
 		"range before the first line": {
 			err: niceyaml.NewError("bad",
-				niceyaml.AtRange(position.NewRange(position.New(-1, 0), position.New(-1, 2))),
+				niceyaml.AtRange(yamltest.LineRange(-1, 0, 2)),
 			),
 			is: niceyaml.ErrOutOfRange,
 		},
 		"range before the first column": {
 			err: niceyaml.NewError("bad",
-				niceyaml.AtRange(position.NewRange(position.New(0, -2), position.New(0, 2))),
+				niceyaml.AtRange(yamltest.LineRange(0, -2, 2)),
 			),
 			is: niceyaml.ErrOutOfRange,
 		},
@@ -4280,67 +4280,67 @@ func TestSourceError_Range_Collection(t *testing.T) {
 		"block mapping at the root covers its first key": {
 			path: "$",
 			want: "x.yaml:1:1: $: bad",
-			rng:  position.NewRange(position.New(0, 0), position.New(0, 4)),
+			rng:  yamltest.LineRange(0, 0, 4),
 		},
 		"block mapping under a key covers the key": {
 			path: "$.spec",
 			want: "x.yaml:2:1: $.spec: bad",
-			rng:  position.NewRange(position.New(1, 0), position.New(1, 4)),
+			rng:  yamltest.LineRange(1, 0, 4),
 		},
 		"block sequence under a key covers the key": {
 			path: "$.spec.ports",
 			want: "x.yaml:3:3: $.spec.ports: bad",
-			rng:  position.NewRange(position.New(2, 2), position.New(2, 7)),
+			rng:  yamltest.LineRange(2, 2, 7),
 		},
 		"block mapping element covers its dash": {
 			path: "$.spec.ports[0]",
 			want: "x.yaml:4:5: $.spec.ports[0]: bad",
-			rng:  position.NewRange(position.New(3, 4), position.New(3, 5)),
+			rng:  yamltest.LineRange(3, 4, 5),
 		},
 		"key selector on an element covers its dash": {
 			path: "$.spec.ports[0]~",
 			want: "x.yaml:4:5: $.spec.ports[0]~: bad",
-			rng:  position.NewRange(position.New(3, 4), position.New(3, 5)),
+			rng:  yamltest.LineRange(3, 4, 5),
 		},
 		"flow mapping element of a block sequence covers its dash": {
 			path: "$.spec.ports[1]",
 			want: "x.yaml:6:5: $.spec.ports[1]: bad",
-			rng:  position.NewRange(position.New(5, 4), position.New(5, 5)),
+			rng:  yamltest.LineRange(5, 4, 5),
 		},
 		"flow sequence under a key covers the key": {
 			path: "$.spec.tags",
 			want: "x.yaml:7:3: $.spec.tags: bad",
-			rng:  position.NewRange(position.New(6, 2), position.New(6, 6)),
+			rng:  yamltest.LineRange(6, 2, 6),
 		},
 		"flow sequence in a flow sequence covers its bracket": {
 			path: "$.spec.matrix[0]",
 			want: "x.yaml:8:12: $.spec.matrix[0]: bad",
-			rng:  position.NewRange(position.New(7, 11), position.New(7, 12)),
+			rng:  yamltest.LineRange(7, 11, 12),
 		},
 		"flow mapping in a flow sequence covers its brace": {
 			path: "$.spec.matrix[1]",
 			want: "x.yaml:8:17: $.spec.matrix[1]: bad",
-			rng:  position.NewRange(position.New(7, 16), position.New(7, 17)),
+			rng:  yamltest.LineRange(7, 16, 17),
 		},
 		"empty mapping under a key covers the key": {
 			path: "$.spec.empty",
 			want: "x.yaml:9:3: $.spec.empty: bad",
-			rng:  position.NewRange(position.New(8, 2), position.New(8, 7)),
+			rng:  yamltest.LineRange(8, 2, 7),
 		},
 		"anchored mapping under a key covers the key": {
 			path: "$.base",
 			want: "x.yaml:10:1: $.base: bad",
-			rng:  position.NewRange(position.New(9, 0), position.New(9, 4)),
+			rng:  yamltest.LineRange(9, 0, 4),
 		},
 		"alias to a mapping covers the alias": {
 			path: "$.copy",
 			want: "x.yaml:12:7: $.copy: bad",
-			rng:  position.NewRange(position.New(11, 6), position.New(11, 7)),
+			rng:  yamltest.LineRange(11, 6, 7),
 		},
 		"scalar under a key covers the scalar": {
 			path: "$.spec.ports[0].name",
 			want: "x.yaml:4:13: $.spec.ports[0].name: bad",
-			rng:  position.NewRange(position.New(3, 12), position.New(3, 15)),
+			rng:  yamltest.LineRange(3, 12, 15),
 		},
 	}
 
@@ -4393,7 +4393,7 @@ func TestSourceError_Range_Tokens(t *testing.T) {
 
 	// Empty returns the empty range at a position.
 	empty := func(line, col int) position.Range {
-		return position.NewRange(position.New(line, col), position.New(line, col))
+		return yamltest.LineRange(line, col, col)
 	}
 
 	tcs := map[string]struct {
@@ -4440,7 +4440,7 @@ func TestSourceError_Range_Tokens(t *testing.T) {
 			`),
 			at:   niceyaml.AtPosition(position.New(2, 0)),
 			want: "3:1: bad",
-			rng:  position.NewRange(position.New(2, 2), position.New(2, 7)),
+			rng:  yamltest.LineRange(2, 2, 7),
 		},
 		// The plain scalar spans two lines, so the range ends on the second.
 		"path to a token of two lines": {
@@ -4546,7 +4546,7 @@ func TestSourceError_Position(t *testing.T) {
 		},
 		"range": {
 			err: niceyaml.NewError("bad", niceyaml.AtRange(
-				position.NewRange(position.New(0, 6), position.New(0, 9)),
+				yamltest.LineRange(0, 6, 9),
 			)),
 			want:  position.New(0, 6),
 			start: position.New(0, 6),
@@ -4627,21 +4627,21 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 		},
 		"range past the last line": {
 			err: niceyaml.NewError("bad",
-				niceyaml.AtRange(position.NewRange(position.New(9, 0), position.New(9, 3))),
+				niceyaml.AtRange(yamltest.LineRange(9, 0, 3)),
 			),
 			is:         niceyaml.ErrOutOfRange,
 			wantRender: "bad\n\nno excerpt: location outside source: line 10 not in lines 1-2",
 		},
 		"range before the first line": {
 			err: niceyaml.NewError("bad",
-				niceyaml.AtRange(position.NewRange(position.New(-1, 0), position.New(-1, 2))),
+				niceyaml.AtRange(yamltest.LineRange(-1, 0, 2)),
 			),
 			is:         niceyaml.ErrOutOfRange,
 			wantRender: "bad\n\nno excerpt: location outside source: line 0 not in lines 1-2",
 		},
 		"range before the first column": {
 			err: niceyaml.NewError("bad",
-				niceyaml.AtRange(position.NewRange(position.New(0, -2), position.New(0, 2))),
+				niceyaml.AtRange(yamltest.LineRange(0, -2, 2)),
 			),
 			is:         niceyaml.ErrOutOfRange,
 			wantRender: "bad\n\nno excerpt: location outside source: column -1 of line 1",
@@ -4651,7 +4651,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 				niceyaml.AtPath(paths.Current().Child("missing").Index(0)),
 				niceyaml.WithDetails(
 					niceyaml.NewError("first",
-						niceyaml.AtRange(position.NewRange(position.New(-1, 0), position.New(-1, 2))),
+						niceyaml.AtRange(yamltest.LineRange(-1, 0, 2)),
 					),
 				),
 			),
@@ -4830,10 +4830,10 @@ func TestSourceError_Excerpt(t *testing.T) {
 			rng position.Range
 		}{
 			"empty range": {
-				rng: position.NewRange(position.New(1, 2), position.New(1, 2)),
+				rng: yamltest.LineRange(1, 2, 2),
 			},
 			"range past the end of the line": {
-				rng: position.NewRange(position.New(1, 10), position.New(1, 12)),
+				rng: yamltest.LineRange(1, 10, 12),
 			},
 		}
 
@@ -5545,7 +5545,7 @@ func TestSourceError_Annotate(t *testing.T) {
 			},
 			"range past the last line": {
 				err: niceyaml.NewError("bad",
-					niceyaml.AtRange(position.NewRange(position.New(20, 0), position.New(20, 1))),
+					niceyaml.AtRange(yamltest.LineRange(20, 0, 1)),
 				),
 				is: niceyaml.ErrOutOfRange,
 			},
@@ -9596,7 +9596,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		t.Parallel()
 
 		// The key "b" on line 2, not the value the path selects.
-		rng := position.NewRange(position.New(1, 2), position.New(1, 3))
+		rng := yamltest.LineRange(1, 2, 3)
 		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(bPath), niceyaml.AtRange(rng)))
 
 		assert.Equal(t, "x.yaml:2:3: $.a.b: bad", bound.Error())
@@ -9635,7 +9635,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 	t.Run("a range locates the error whether or not the path resolves", func(t *testing.T) {
 		t.Parallel()
 
-		rng := position.NewRange(position.New(1, 2), position.New(1, 3))
+		rng := yamltest.LineRange(1, 2, 3)
 		nope := paths.Current().Child("nope")
 		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(nope), niceyaml.AtRange(rng)))
 
@@ -9652,7 +9652,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 	t.Run("a rebased path beside a range joins the base and keeps the range", func(t *testing.T) {
 		t.Parallel()
 
-		rng := position.NewRange(position.New(1, 2), position.New(1, 3))
+		rng := yamltest.LineRange(1, 2, 3)
 		inner := niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")), niceyaml.AtRange(rng))
 		bound := bind(t, niceyaml.Rebase(inner, paths.Current().Child("a")))
 
@@ -9803,19 +9803,19 @@ func TestSourceError_Nearest(t *testing.T) {
 			err:  niceyaml.NewError("name is required", niceyaml.AtPath(name)),
 			want: "cfg.yaml:4:3: $.servers[1].name: name is required",
 			near: "$.servers[1]",
-			rng:  position.NewRange(position.New(3, 2), position.New(3, 3)),
+			rng:  yamltest.LineRange(3, 2, 3),
 		},
 		"key the root leaves out": {
 			err:  niceyaml.NewError("owner is required", niceyaml.AtPath(paths.Current().Child("owner"))),
 			want: "cfg.yaml:1:1: $.owner: owner is required",
 			near: "$",
-			rng:  position.NewRange(position.New(0, 0), position.New(0, 7)),
+			rng:  yamltest.LineRange(0, 0, 7),
 		},
 		"several names below a null": {
 			err:  niceyaml.NewError("cert is required", niceyaml.AtPath(paths.Current().Child("tls", "cert", "file"))),
 			want: "cfg.yaml:5:1: $.tls.cert.file: cert is required",
 			near: "$.tls",
-			rng:  position.NewRange(position.New(4, 0), position.New(4, 3)),
+			rng:  yamltest.LineRange(4, 0, 3),
 		},
 		"rebased under the mapping": {
 			err: niceyaml.Rebase(
@@ -9824,7 +9824,7 @@ func TestSourceError_Nearest(t *testing.T) {
 			),
 			want: "cfg.yaml:4:3: $.servers[1].name: name is required",
 			near: "$.servers[1]",
-			rng:  position.NewRange(position.New(3, 2), position.New(3, 3)),
+			rng:  yamltest.LineRange(3, 2, 3),
 		},
 		"key the document holds": {
 			err: niceyaml.NewError(
@@ -9832,15 +9832,15 @@ func TestSourceError_Nearest(t *testing.T) {
 				niceyaml.AtPath(paths.Current().Child("servers").Index(0).Child("name")),
 			),
 			want: "cfg.yaml:3:11: $.servers[0].name: bad name",
-			rng:  position.NewRange(position.New(2, 10), position.New(2, 11)),
+			rng:  yamltest.LineRange(2, 10, 11),
 		},
 		"path beside a range": {
 			err: niceyaml.NewError("name is required",
 				niceyaml.AtPath(name),
-				niceyaml.AtRange(position.NewRange(position.New(3, 2), position.New(3, 3))),
+				niceyaml.AtRange(yamltest.LineRange(3, 2, 3)),
 			),
 			want: "cfg.yaml:4:3: $.servers[1].name: name is required",
-			rng:  position.NewRange(position.New(3, 2), position.New(3, 3)),
+			rng:  yamltest.LineRange(3, 2, 3),
 		},
 		"name in a scalar": {
 			err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("note", "text"))),
@@ -10003,7 +10003,7 @@ func TestSourceError_Nearest(t *testing.T) {
 		`), niceyaml.WithName("app.yaml"))
 
 		server := paths.Doc().Child("server")
-		star := position.NewRange(position.New(0, 8), position.New(0, 9))
+		star := yamltest.LineRange(0, 8, 9)
 
 		tcs := map[string]struct {
 			err error
@@ -10050,28 +10050,28 @@ func TestSourceError_Nearest(t *testing.T) {
 				err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("servers").Index(0).Child("port"))),
 				want:   "app.yaml:3:5: $.servers[0].port: bad",
 				near:   "$.servers[0]",
-				rng:    position.NewRange(position.New(2, 4), position.New(2, 5)),
+				rng:    yamltest.LineRange(2, 4, 5),
 				reason: paths.ErrAlias,
 			},
 			"alias inside an anchor the path reads through": {
 				err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("copy", "tls", "cert"))),
 				want:   "app.yaml:5:8: $.copy.tls.cert: bad",
 				near:   "$.copy.tls",
-				rng:    position.NewRange(position.New(4, 7), position.New(4, 8)),
+				rng:    yamltest.LineRange(4, 7, 8),
 				reason: paths.ErrAlias,
 			},
 			"alias inside the anchor it names": {
 				err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("loop", "self", "port"))),
 				want:   "app.yaml:8:9: $.loop.self.port: bad",
 				near:   "$.loop.self",
-				rng:    position.NewRange(position.New(7, 8), position.New(7, 9)),
+				rng:    yamltest.LineRange(7, 8, 9),
 				reason: paths.ErrAlias,
 			},
 			"alias below a merge key": {
 				err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("after", "server", "port"))),
 				want:   "app.yaml:14:11: $.after.server.port: bad",
 				near:   "$.after.server",
-				rng:    position.NewRange(position.New(13, 10), position.New(13, 11)),
+				rng:    yamltest.LineRange(13, 10, 11),
 				reason: paths.ErrAlias,
 			},
 			"the alias itself": {
@@ -10548,7 +10548,7 @@ func TestInvalid(t *testing.T) {
 
 	hoursPath := paths.Current().Child("hours")
 	licensePath := paths.Current().Child("license")
-	licenseRange := position.NewRange(position.New(3, 9), position.New(3, 16))
+	licenseRange := yamltest.LineRange(3, 9, 16)
 
 	errStat := fmt.Errorf("stat license: %w", fs.ErrPermission)
 
@@ -11186,7 +11186,7 @@ func TestIsInvalid(t *testing.T) {
 	explained := func(*testing.T) error {
 		return niceyaml.Place(
 			fmt.Errorf("stat license: %w", fs.ErrPermission),
-			niceyaml.AtRange(position.NewRange(position.New(0, 6), position.New(0, 10))),
+			niceyaml.AtRange(yamltest.LineRange(0, 6, 10)),
 			niceyaml.WithDetails(niceyaml.NewError("license named here", niceyaml.AtPath(namePath))),
 		)
 	}
@@ -11928,7 +11928,7 @@ func TestIsInvalid(t *testing.T) {
 		"unbound NewError over a range": {
 			build: func(*testing.T) error {
 				return niceyaml.NewError("bad name",
-					niceyaml.AtRange(position.NewRange(position.New(0, 6), position.New(0, 10))))
+					niceyaml.AtRange(yamltest.LineRange(0, 6, 10)))
 			},
 			want: true,
 		},

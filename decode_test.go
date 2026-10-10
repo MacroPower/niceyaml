@@ -2404,7 +2404,7 @@ func TestDocument_Bind_Check(t *testing.T) {
 
 		rng, ok := bound.Range()
 		require.True(t, ok)
-		assert.Equal(t, position.NewRange(position.New(4, 11), position.New(4, 18)), rng)
+		assert.Equal(t, yamltest.LineRange(4, 11, 18), rng)
 		assert.Equal(t, "5:12: $.spec.hours.close: closes too early", err.Error())
 	})
 
@@ -2563,7 +2563,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 		"a path beside a range joins the scope and binds at the range": {
 			err: niceyaml.NewError("bad",
 				niceyaml.AtPath(closePath),
-				niceyaml.AtRange(position.NewRange(position.New(4, 6), position.New(4, 11))),
+				niceyaml.AtRange(yamltest.LineRange(4, 6, 11)),
 			),
 			want: "cfg.yaml:5:7: $.shops[0].hours.close: bad",
 			path: "$.shops[0].hours.close",
@@ -5103,57 +5103,57 @@ func TestDocument_Ranges(t *testing.T) {
 	}{
 		"value": {
 			path: paths.Current().Child("kind"),
-			want: position.Ranges{position.NewRange(position.New(0, 6), position.New(0, 16))},
+			want: position.Ranges{yamltest.LineRange(0, 6, 16)},
 		},
 		"key": {
 			path: paths.Current().Child("kind"),
 			key:  true,
-			want: position.Ranges{position.NewRange(position.New(0, 0), position.New(0, 4))},
+			want: position.Ranges{yamltest.LineRange(0, 0, 4)},
 		},
 		"key of a sequence element is the element": {
 			path: paths.Current().Child("list").Index(0),
 			key:  true,
-			want: position.Ranges{position.NewRange(position.New(8, 4), position.New(8, 5))},
+			want: position.Ranges{yamltest.LineRange(8, 4, 5)},
 		},
 		"mapping with a tagged first key covers the key of its entry": {
 			path: paths.Current().Child("tagged"),
-			want: position.Ranges{position.NewRange(position.New(12, 0), position.New(12, 6))},
+			want: position.Ranges{yamltest.LineRange(12, 0, 6)},
 		},
 		"value across lines": {
 			path: paths.Current().Child("text"),
 			want: position.Ranges{
-				position.NewRange(position.New(1, 6), position.New(1, 11)),
-				position.NewRange(position.New(2, 2), position.New(2, 8)),
+				yamltest.LineRange(1, 6, 11),
+				yamltest.LineRange(2, 2, 8),
 			},
 		},
 		"block scalar covers its indicator": {
 			path: paths.Current().Child("block"),
-			want: position.Ranges{position.NewRange(position.New(3, 7), position.New(3, 8))},
+			want: position.Ranges{yamltest.LineRange(3, 7, 8)},
 		},
 		"mapping covers the key of its entry": {
 			path: paths.Current().Child("map"),
-			want: position.Ranges{position.NewRange(position.New(9, 0), position.New(9, 3))},
+			want: position.Ranges{yamltest.LineRange(9, 0, 3)},
 		},
 		"sequence covers the key of its entry": {
 			path: paths.Current().Child("list"),
-			want: position.Ranges{position.NewRange(position.New(7, 0), position.New(7, 4))},
+			want: position.Ranges{yamltest.LineRange(7, 0, 4)},
 		},
 		"mapping element covers its dash": {
 			path: paths.Current().Child("items").Index(0),
-			want: position.Ranges{position.NewRange(position.New(15, 2), position.New(15, 3))},
+			want: position.Ranges{yamltest.LineRange(15, 2, 3)},
 		},
 		"key of a mapping element is the element": {
 			path: paths.Current().Child("items").Index(0),
 			key:  true,
-			want: position.Ranges{position.NewRange(position.New(15, 2), position.New(15, 3))},
+			want: position.Ranges{yamltest.LineRange(15, 2, 3)},
 		},
 		"flow mapping in a flow sequence covers its brace": {
 			path: paths.Current().Child("flow").Index(0),
-			want: position.Ranges{position.NewRange(position.New(16, 7), position.New(16, 8))},
+			want: position.Ranges{yamltest.LineRange(16, 7, 8)},
 		},
 		"block mapping at the root covers its first key": {
 			path: paths.Current(),
-			want: position.Ranges{position.NewRange(position.New(0, 0), position.New(0, 4))},
+			want: position.Ranges{yamltest.LineRange(0, 0, 4)},
 		},
 		"missing path": {
 			path: paths.Current().Child("missing"),
@@ -5196,7 +5196,7 @@ func TestDocument_Ranges(t *testing.T) {
 
 		got, err := dd.Ranges(paths.Current().Child("m").Child("b"))
 		require.NoError(t, err)
-		assert.Equal(t, position.Ranges{position.NewRange(position.New(0, 20), position.New(0, 22))}, got)
+		assert.Equal(t, position.Ranges{yamltest.LineRange(0, 20, 22)}, got)
 	})
 
 	t.Run("empty value", func(t *testing.T) {
@@ -5260,7 +5260,7 @@ func TestDocument_Ranges(t *testing.T) {
 						continue
 					}
 
-					got = append(got, position.NewRange(position.New(i, o.Cols.Start), position.New(i, o.Cols.End)))
+					got = append(got, yamltest.LineRange(i, o.Cols.Start, o.Cols.End))
 				}
 			}
 
@@ -10189,7 +10189,7 @@ func TestNode_ConcurrentPaths(t *testing.T) {
 
 			ranges, err := spec.Ranges(paths.Current().Child("replicas"))
 			if assert.NoError(t, err) {
-				want := position.NewRange(position.New(4, 12), position.New(4, 13))
+				want := yamltest.LineRange(4, 12, 13)
 				assert.Equal(t, position.Ranges{want}, ranges)
 			}
 		})

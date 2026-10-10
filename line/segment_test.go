@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -128,7 +129,7 @@ func flowMappingView(n int, highlight bool) *line.View {
 		fmt.Fprintf(&sb, "k%d: ", i)
 
 		col := sb.Len()
-		ranges = append(ranges, lineRange(0, col, col+1))
+		ranges = append(ranges, yamltest.LineRange(0, col, col+1))
 
 		sb.WriteString("v")
 	}
@@ -239,8 +240,8 @@ func TestView_Segments(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "abcdef\n", 1)
-		view.AddOverlay("outer", lineRange(0, 0, 6))
-		view.BlendOverlay("inner", lineRange(0, 2, 4))
+		view.AddOverlay("outer", yamltest.LineRange(0, 0, 6))
+		view.BlendOverlay("inner", yamltest.LineRange(0, 2, 4))
 
 		assert.Equal(t,
 			"literalString(ab)[outer] literalString(cd)[outer,inner] literalString(ef)[outer]",
@@ -258,7 +259,7 @@ func TestView_Segments(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "key: value\n", 1)
-		view.AddOverlay("w", lineRange(0, 0, 10))
+		view.AddOverlay("w", yamltest.LineRange(0, 0, 10))
 
 		want := slices.Clone(view.Overlays(0))
 
@@ -306,7 +307,7 @@ func TestView_Segments(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "a: 1\nb: 2\n", 2)
-		view.AddOverlay("hl", lineRange(1, 0, 1))
+		view.AddOverlay("hl", yamltest.LineRange(1, 0, 1))
 
 		assert.Equal(t, "nameTag(a) punctuationMappingValue(:) text( ) literalNumberInteger(1)", segmentText(view, 0))
 		assert.Equal(t,

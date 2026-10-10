@@ -56,30 +56,30 @@ func TestFinder_Find(t *testing.T) {
 			input:  "key: value",
 			search: "value",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 5), position.New(0, 10)),
+				yamltest.LineRange(0, 5, 10),
 			},
 		},
 		"match key": {
 			input:  "key: value",
 			search: "key",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 0), position.New(0, 3)),
+				yamltest.LineRange(0, 0, 3),
 			},
 		},
 		"cross-token match": {
 			input:  "key: value",
 			search: ": ",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 3), position.New(0, 5)),
+				yamltest.LineRange(0, 3, 5),
 			},
 		},
 		"multiple matches": {
 			input:  "a: test\nb: test\nc: test",
 			search: "test",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 3), position.New(0, 7)),
-				position.NewRange(position.New(1, 3), position.New(1, 7)),
-				position.NewRange(position.New(2, 3), position.New(2, 7)),
+				yamltest.LineRange(0, 3, 7),
+				yamltest.LineRange(1, 3, 7),
+				yamltest.LineRange(2, 3, 7),
 			},
 		},
 		"no match": {
@@ -96,7 +96,7 @@ func TestFinder_Find(t *testing.T) {
 			input:  "text: |\n  line1\n  line2",
 			search: "line2",
 			want: position.Ranges{
-				position.NewRange(position.New(2, 2), position.New(2, 7)),
+				yamltest.LineRange(2, 2, 7),
 			},
 		},
 		"match spans lines": {
@@ -111,7 +111,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "Thais",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 11)),
+				yamltest.LineRange(0, 6, 11),
 			},
 		},
 		"with normalizer - search has diacritic": {
@@ -119,7 +119,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "Thaïs",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 11)),
+				yamltest.LineRange(0, 6, 11),
 			},
 		},
 		"with normalizer - kana voicing mark distinguishes": {
@@ -139,7 +139,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "ガ",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 7)),
+				yamltest.LineRange(0, 6, 7),
 			},
 		},
 		"with normalizer - katakana decomposed source, precomposed search": {
@@ -147,7 +147,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "ガ",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 8)),
+				yamltest.LineRange(0, 6, 8),
 			},
 		},
 		"with normalizer - hiragana decomposed source, precomposed search": {
@@ -155,7 +155,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "が",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 8)),
+				yamltest.LineRange(0, 6, 8),
 			},
 		},
 		"with normalizer - hangul precomposed source, decomposed search": {
@@ -163,7 +163,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "한국",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 8)),
+				yamltest.LineRange(0, 6, 8),
 			},
 		},
 		"with normalizer - hangul decomposed source, precomposed search": {
@@ -171,7 +171,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "한국",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 12)),
+				yamltest.LineRange(0, 6, 12),
 			},
 		},
 		"with normalizer - width fold matches halfwidth voiced katakana": {
@@ -179,7 +179,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "ｶﾞ",
 			normalizer: normalizer.New(normalizer.WithWidthFold(true)),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 7)),
+				yamltest.LineRange(0, 6, 7),
 			},
 		},
 		"with normalizer - width fold finds halfwidth voiced katakana": {
@@ -187,7 +187,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "ガ",
 			normalizer: normalizer.New(normalizer.WithWidthFold(true)),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 8)),
+				yamltest.LineRange(0, 6, 8),
 			},
 		},
 		"with normalizer - cherokee uppercase search": {
@@ -195,7 +195,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "\u13a0",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 7)),
+				yamltest.LineRange(0, 6, 7),
 			},
 		},
 		"with normalizer - cherokee lowercase search": {
@@ -203,7 +203,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "\uab70",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 7)),
+				yamltest.LineRange(0, 6, 7),
 			},
 		},
 		"exact matching - no match": {
@@ -217,7 +217,7 @@ func TestFinder_Find(t *testing.T) {
 			search: "cafe",
 			exact:  true,
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 11)),
+				yamltest.LineRange(0, 6, 11),
 			},
 		},
 		"nil normalizer pointer - no match": {
@@ -231,7 +231,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "VALUE",
 			normalizer: (*normalizer.Normalizer)(nil),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 5), position.New(0, 10)),
+				yamltest.LineRange(0, 5, 10),
 			},
 		},
 		"case insensitive with normalizer": {
@@ -239,7 +239,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "value",
 			normalizer: yamltest.NormalizerFunc(strings.ToLower),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 5), position.New(0, 10)),
+				yamltest.LineRange(0, 5, 10),
 			},
 		},
 		"normalizer dropping whitespace joins lines": {
@@ -255,49 +255,49 @@ func TestFinder_Find(t *testing.T) {
 			search:     "ab",
 			normalizer: noSpace(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 3), position.New(0, 6)),
+				yamltest.LineRange(0, 3, 6),
 			},
 		},
 		"single character match": {
 			input:  "a: b",
 			search: "a",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 0), position.New(0, 1)),
+				yamltest.LineRange(0, 0, 1),
 			},
 		},
 		"overlapping potential matches": {
 			input:  "aaa",
 			search: "aa",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 0), position.New(0, 2)),
+				yamltest.LineRange(0, 0, 2),
 			},
 		},
 		"utf8 - search text after multibyte char": {
 			input:  "name: Thaïs test",
 			search: "test",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 12), position.New(0, 16)),
+				yamltest.LineRange(0, 12, 16),
 			},
 		},
 		"utf8 - search for multibyte char": {
 			input:  "name: Thaïs",
 			search: "ï",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 9), position.New(0, 10)),
+				yamltest.LineRange(0, 9, 10),
 			},
 		},
 		"utf8 - search spanning multibyte char": {
 			input:  "name: Thaïs",
 			search: "ïs",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 9), position.New(0, 11)),
+				yamltest.LineRange(0, 9, 11),
 			},
 		},
 		"utf8 - multiple multibyte chars": {
 			input:  "key: über öffentlich",
 			search: "öffentlich",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 10), position.New(0, 20)),
+				yamltest.LineRange(0, 10, 20),
 			},
 		},
 		"utf8 - normalizer finds diacritic as ascii": {
@@ -305,7 +305,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "o",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 10), position.New(0, 11)),
+				yamltest.LineRange(0, 10, 11),
 			},
 		},
 		"utf8 - combined normalizer case and diacritics": {
@@ -313,28 +313,28 @@ func TestFinder_Find(t *testing.T) {
 			search:     "thais",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 11)),
+				yamltest.LineRange(0, 6, 11),
 			},
 		},
 		"utf8 - japanese characters partial match": {
 			input:  "key: 日本酒",
 			search: "日本",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 5), position.New(0, 7)),
+				yamltest.LineRange(0, 5, 7),
 			},
 		},
 		"utf8 - japanese after other japanese": {
 			input:  "- 寿司: 日本酒",
 			search: "日本",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 8)),
+				yamltest.LineRange(0, 6, 8),
 			},
 		},
 		"utf8 - multiline with japanese": {
 			input:  "a: test\n- 寿司: 日本酒",
 			search: "日本",
 			want: position.Ranges{
-				position.NewRange(position.New(1, 6), position.New(1, 8)),
+				yamltest.LineRange(1, 6, 8),
 			},
 		},
 		"utf8 - box drawing chars not matched by japanese": {
@@ -346,7 +346,7 @@ func TestFinder_Find(t *testing.T) {
 			input:  "icon: 🎉",
 			search: "🎉",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 7)),
+				yamltest.LineRange(0, 6, 7),
 			},
 		},
 		"search longer than input": {
@@ -358,30 +358,30 @@ func TestFinder_Find(t *testing.T) {
 			input:  "key: value",
 			search: "key: value",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 0), position.New(0, 10)),
+				yamltest.LineRange(0, 0, 10),
 			},
 		},
 		"whitespace only search": {
 			input:  "key: value",
 			search: " ",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 4), position.New(0, 5)),
+				yamltest.LineRange(0, 4, 5),
 			},
 		},
 		"consecutive matches": {
 			input:  "aaa: bbb",
 			search: "a",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 0), position.New(0, 1)),
-				position.NewRange(position.New(0, 1), position.New(0, 2)),
-				position.NewRange(position.New(0, 2), position.New(0, 3)),
+				yamltest.LineRange(0, 0, 1),
+				yamltest.LineRange(0, 1, 2),
+				yamltest.LineRange(0, 2, 3),
 			},
 		},
 		"special yaml chars in search": {
 			input:  "text: \"[not] {a} list\"",
 			search: "[not]",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 7), position.New(0, 12)),
+				yamltest.LineRange(0, 7, 12),
 			},
 		},
 		"empty input": {
@@ -393,8 +393,8 @@ func TestFinder_Find(t *testing.T) {
 			input:  "key: value",
 			search: "e",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 1), position.New(0, 2)),
-				position.NewRange(position.New(0, 9), position.New(0, 10)),
+				yamltest.LineRange(0, 1, 2),
+				yamltest.LineRange(0, 9, 10),
 			},
 		},
 		// The loaded text reads every line ending as "\n", so a search string
@@ -430,7 +430,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "café",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 3), position.New(0, 8)),
+				yamltest.LineRange(0, 3, 8),
 			},
 		},
 		"match starting at a character with a dropped combining mark": {
@@ -438,7 +438,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "ex",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 6), position.New(0, 9)),
+				yamltest.LineRange(0, 6, 9),
 			},
 		},
 		// Title casing would produce "Abc" for a whole string but "ABC" rune
@@ -449,7 +449,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "abc",
 			normalizer: titleCase,
 			want: position.Ranges{
-				position.NewRange(position.New(0, 3), position.New(0, 6)),
+				yamltest.LineRange(0, 3, 6),
 			},
 		},
 		"context-sensitive normalizer - uppercase search": {
@@ -457,7 +457,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "ABC",
 			normalizer: titleCase,
 			want: position.Ranges{
-				position.NewRange(position.New(0, 3), position.New(0, 6)),
+				yamltest.LineRange(0, 3, 6),
 			},
 		},
 		// Case folding turns one source rune into two normalized chars, so a
@@ -468,7 +468,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "s",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 3), position.New(0, 4)),
+				yamltest.LineRange(0, 3, 4),
 			},
 		},
 		"needle covering the expansion": {
@@ -476,7 +476,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "ss",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 3), position.New(0, 4)),
+				yamltest.LineRange(0, 3, 4),
 			},
 		},
 		"needle ending inside an expansion covers the rune": {
@@ -484,7 +484,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "as",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 3), position.New(0, 5)),
+				yamltest.LineRange(0, 3, 5),
 			},
 		},
 		"needle starting inside an expansion does not match": {
@@ -498,8 +498,8 @@ func TestFinder_Find(t *testing.T) {
 			search:     "s",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 3), position.New(0, 4)),
-				position.NewRange(position.New(0, 4), position.New(0, 5)),
+				yamltest.LineRange(0, 3, 4),
+				yamltest.LineRange(0, 4, 5),
 			},
 		},
 		"multibyte character between expansions": {
@@ -507,8 +507,8 @@ func TestFinder_Find(t *testing.T) {
 			search:     "ss",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 3), position.New(0, 4)),
-				position.NewRange(position.New(0, 6), position.New(0, 7)),
+				yamltest.LineRange(0, 3, 4),
+				yamltest.LineRange(0, 6, 7),
 			},
 		},
 		// A stray continuation byte must not match inside a multi-byte rune and
@@ -533,7 +533,7 @@ func TestFinder_Find(t *testing.T) {
 			input:  "x: a\xa9b",
 			search: "\xa9",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 4), position.New(0, 5)),
+				yamltest.LineRange(0, 4, 5),
 			},
 		},
 		"other invalid byte with exact matching": {
@@ -543,7 +543,7 @@ func TestFinder_Find(t *testing.T) {
 			search: "\xff",
 			exact:  true,
 			want: position.Ranges{
-				position.NewRange(position.New(0, 4), position.New(0, 5)),
+				yamltest.LineRange(0, 4, 5),
 			},
 		},
 		"U+FFFD needle with exact matching": {
@@ -551,7 +551,7 @@ func TestFinder_Find(t *testing.T) {
 			search: "\ufffd",
 			exact:  true,
 			want: position.Ranges{
-				position.NewRange(position.New(0, 4), position.New(0, 5)),
+				yamltest.LineRange(0, 4, 5),
 			},
 		},
 		"normalizer emitting an invalid byte": {
@@ -567,7 +567,7 @@ func TestFinder_Find(t *testing.T) {
 				return in
 			}),
 			want: position.Ranges{
-				position.NewRange(position.New(0, 3), position.New(0, 4)),
+				yamltest.LineRange(0, 3, 4),
 			},
 		},
 	}
@@ -683,7 +683,7 @@ func TestFinder_Find_View(t *testing.T) {
 			view:   docs[1].View(),
 			search: "port",
 			want: position.Ranges{
-				position.NewRange(position.New(4, 0), position.New(4, 4)),
+				yamltest.LineRange(4, 0, 4),
 			},
 		},
 		"line the view does not hold": {
@@ -694,7 +694,7 @@ func TestFinder_Find_View(t *testing.T) {
 			view:   docs[0].View(),
 			search: "2\n",
 			want: position.Ranges{
-				position.NewRange(position.New(1, 3), position.New(1, 5)),
+				yamltest.LineRange(1, 3, 5),
 			},
 		},
 		"match does not run past the last held line": {
@@ -740,30 +740,30 @@ func TestFinder_Find_View(t *testing.T) {
 			view:   hunks,
 			search: "k7",
 			want: position.Ranges{
-				position.NewRange(position.New(7, 0), position.New(7, 2)),
-				position.NewRange(position.New(8, 0), position.New(8, 2)),
+				yamltest.LineRange(7, 0, 2),
+				yamltest.LineRange(8, 0, 2),
 			},
 		},
 		"unified diff reports the row of a deleted line": {
 			view:   unified,
 			search: "old",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 5), position.New(0, 8)),
+				yamltest.LineRange(0, 5, 8),
 			},
 		},
 		"unified diff reports the row of an inserted line": {
 			view:   unified,
 			search: "new",
 			want: position.Ranges{
-				position.NewRange(position.New(1, 5), position.New(1, 8)),
+				yamltest.LineRange(1, 5, 8),
 			},
 		},
 		"unified diff reports both rows of a change": {
 			view:   unified,
 			search: "key",
 			want: position.Ranges{
-				position.NewRange(position.New(0, 0), position.New(0, 3)),
-				position.NewRange(position.New(1, 0), position.New(1, 3)),
+				yamltest.LineRange(0, 0, 3),
+				yamltest.LineRange(1, 0, 3),
 			},
 		},
 		"match spans the rows of one hunk": {
@@ -781,7 +781,7 @@ func TestFinder_Find_View(t *testing.T) {
 			view:   host.View(),
 			search: "port",
 			want: position.Ranges{
-				position.NewRange(position.New(2, 18), position.New(2, 22)),
+				yamltest.LineRange(2, 18, 22),
 			},
 		},
 	}

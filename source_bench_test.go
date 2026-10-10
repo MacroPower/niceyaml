@@ -11,7 +11,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
-	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // generateNestedYAML creates YAML nested to the given depth, where each
@@ -571,7 +570,7 @@ func BenchmarkSourceBind_ManyDocuments(b *testing.B) {
 		findings := make([]error, 0, total)
 
 		for i := range total {
-			rng := position.NewRange(position.New(i, 0), position.New(i, 1))
+			rng := yamltest.LineRange(i, 0, 1)
 			findings = append(findings, niceyaml.NewError("finding", niceyaml.AtRange(rng)))
 		}
 

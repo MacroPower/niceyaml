@@ -2768,7 +2768,7 @@ func TestErrorTree_Accessors(t *testing.T) {
 
 		rng, ok := node.Range()
 		require.True(t, ok)
-		assert.Equal(t, position.NewRange(position.New(2, 3), position.New(2, 4)), rng)
+		assert.Equal(t, yamltest.LineRange(2, 3, 4), rng)
 
 		index, ok := node.DocumentIndex()
 		require.True(t, ok)

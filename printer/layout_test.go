@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
@@ -402,8 +403,8 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			view: func() *line.View {
 				view := niceyaml.NewSourceFromString("k: ab cd ef gh\nb: 2\n").View()
 				view.AddOverlay(testOverlayHighlight,
-					position.NewRange(position.New(0, 3), position.New(0, 5)),
-					position.NewRange(position.New(0, 9), position.New(0, 14)),
+					yamltest.LineRange(0, 3, 5),
+					yamltest.LineRange(0, 9, 14),
 				)
 
 				return view
@@ -446,7 +447,7 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			printer: testPrinter(),
 			view: func() *line.View {
 				view := niceyaml.NewSourceFromString("k: 日本語日本語 abcdefgh 日本語日本語\n").View()
-				view.AddOverlay(testOverlayHighlight, position.NewRange(position.New(0, 12), position.New(0, 15)))
+				view.AddOverlay(testOverlayHighlight, yamltest.LineRange(0, 12, 15))
 
 				return view.Clip(8)
 			},

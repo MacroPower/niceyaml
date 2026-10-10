@@ -18,7 +18,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
-	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -477,7 +476,7 @@ func TestDataLocator_At_Options(t *testing.T) {
 	loc := doc.DataLocator()
 
 	other := niceyaml.AtPath(paths.Doc().Child("other"))
-	marked := niceyaml.AtRange(position.NewRange(position.New(0, 0), position.New(0, 4)))
+	marked := niceyaml.AtRange(yamltest.LineRange(0, 0, 4))
 
 	tcs := map[string]struct {
 		want string

@@ -12,6 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/diff/lcs"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -25,7 +26,7 @@ func TestDiffer_Views(t *testing.T) {
 
 	// The decoration of an input view stays on that view.
 	decorated := before.View()
-	decorated.AddOverlay(kind.GenericHighlight, position.NewRange(position.New(1, 0), position.New(1, 1)))
+	decorated.AddOverlay(kind.GenericHighlight, yamltest.LineRange(1, 0, 1))
 	decorated.Annotate(1, line.Annotation{Content: "note", Placement: line.Below})
 	decorated.SetFlag(0, line.FlagInserted)
 
@@ -52,7 +53,7 @@ func TestDiffer_Views(t *testing.T) {
 	assert.Equal(t, line.FlagInserted, decorated.Flag(0))
 
 	// Each result view owns its decoration.
-	got.AddOverlay(kind.GenericHighlight, position.NewRange(position.New(2, 0), position.New(2, 1)))
+	got.AddOverlay(kind.GenericHighlight, yamltest.LineRange(2, 0, 1))
 	assert.Len(t, got.Overlays(2), 1)
 	assert.Empty(t, result.Unified().Overlays(2))
 
@@ -865,7 +866,7 @@ func TestDiffer_Hunks(t *testing.T) {
 				assert.Equal(t, 0, got.Count())
 
 				// The empty view takes decoration as any other.
-				got.AddOverlay(kind.GenericHighlight, position.NewRange(position.New(0, 0), position.New(0, 1)))
+				got.AddOverlay(kind.GenericHighlight, yamltest.LineRange(0, 0, 1))
 				assert.Empty(t, got.String())
 
 				return
@@ -932,7 +933,7 @@ func TestDiffResult_HunksKeepUnifiedIndices(t *testing.T) {
 			assert.Equal(t, tc.wantHeld, held)
 
 			// A unified index marks the same line in the hunks.
-			got.AddOverlay(kind.GenericHighlight, position.NewRange(position.New(tc.mark, 0), position.New(tc.mark, 1)))
+			got.AddOverlay(kind.GenericHighlight, yamltest.LineRange(tc.mark, 0, 1))
 
 			for i := range unified.All() {
 				if i == tc.mark {
@@ -1768,7 +1769,7 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 	after := niceyaml.NewSourceFromString("a: 1\nb: 3\n", niceyaml.WithName("b"))
 	result := diff.Diff(before.Lines(), after.Lines())
 
-	highlight := position.NewRange(position.New(0, 0), position.New(0, 1))
+	highlight := yamltest.LineRange(0, 0, 1)
 
 	t.Run("Unified", func(t *testing.T) {
 		t.Parallel()

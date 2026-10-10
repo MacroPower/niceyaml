@@ -69,7 +69,7 @@ func testPrinterWithStyles(opts ...style.Option) *printer.Printer {
 
 // colsRange returns the range of the columns of cols on line ln.
 func colsRange(ln int, cols position.Span) position.Range {
-	return position.NewRange(position.New(ln, cols.Start), position.New(ln, cols.End))
+	return yamltest.LineRange(ln, cols.Start, cols.End)
 }
 
 // layoutRows returns the rows each line of l takes, in layout order.
@@ -172,36 +172,24 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 			input: "key: value",
 			want:  "key: va[lue]",
 			// 0-indexed: col 7-10 = 1-indexed col 8-11
-			rng: position.NewRange(
-				position.New(0, 7),
-				position.New(0, 10),
-			),
+			rng: yamltest.LineRange(0, 7, 10),
 		},
 		"partial token - start of value (0-indexed)": {
 			input: "key: value",
 			want:  "key: [val]ue",
 			// 0-indexed: col 5-8 = 1-indexed col 6-9
-			rng: position.NewRange(
-				position.New(0, 5),
-				position.New(0, 8),
-			),
+			rng: yamltest.LineRange(0, 5, 8),
 		},
 		"full token (0-indexed)": {
 			input: "key: value",
 			want:  "key: [value]",
 			// 0-indexed: col 5-10 = 1-indexed col 6-11
-			rng: position.NewRange(
-				position.New(0, 5),
-				position.New(0, 10),
-			),
+			rng: yamltest.LineRange(0, 5, 10),
 		},
 		"first character (line 0, col 0)": {
 			input: "key: value",
 			want:  "[k]ey: value",
-			rng: position.NewRange(
-				position.New(0, 0),
-				position.New(0, 1),
-			),
+			rng:   yamltest.LineRange(0, 0, 1),
 		},
 		"multi-line range (0-indexed)": {
 			input: stringtest.JoinLF(
@@ -349,7 +337,7 @@ func TestPrinter_PrintError(t *testing.T) {
 		// second rune of the first flag.
 		"bound error after a multi-rune cluster": {
 			err: yamltest.Bind(t, flags, niceyaml.NewError("", niceyaml.AtRange(
-				position.NewRange(position.New(0, 9), position.New(0, 11)),
+				yamltest.LineRange(0, 9, 11),
 			))),
 			want: "1:10:\n\n" + stringtest.JoinLF(
 				"<nameTag>flags</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text>"+
@@ -802,7 +790,7 @@ func TestPrinter_PrintError_MarksWrappedBindings(t *testing.T) {
 		// the message sits with the carets of the first.
 		"range across a break": {
 			err: yamltest.Bind(t, source, errors.Join(
-				niceyaml.NewError("bad", niceyaml.AtRange(position.NewRange(position.New(0, 14), position.New(0, 35)))),
+				niceyaml.NewError("bad", niceyaml.AtRange(yamltest.LineRange(0, 14, 35))),
 				niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name"))),
 			)),
 			width: 30,
@@ -847,7 +835,7 @@ func TestPrinter_MarksRangeUnderHighlight(t *testing.T) {
 		"highlight on the key": {
 			source:    "key: value\nname: other value\n",
 			key:       "name",
-			highlight: position.NewRange(position.New(1, 0), position.New(1, 4)),
+			highlight: yamltest.LineRange(1, 0, 4),
 			want: stringtest.JoinLF(
 				"key: value",
 				"name: other value",
@@ -857,7 +845,7 @@ func TestPrinter_MarksRangeUnderHighlight(t *testing.T) {
 		"empty value": {
 			source:    "a: 1\nb:\nc: 2\n",
 			key:       "b",
-			highlight: position.NewRange(position.New(1, 0), position.New(1, 1)),
+			highlight: yamltest.LineRange(1, 0, 1),
 			want: stringtest.JoinLF(
 				"a: 1",
 				"b:",
@@ -902,7 +890,7 @@ func TestPrinter_PrintError_MarksWrappedRange(t *testing.T) {
 	// range.
 	source := niceyaml.NewSourceFromString(itemsInput(12))
 	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtRange(
-		position.NewRange(position.New(0, 24), position.New(0, 54)),
+		yamltest.LineRange(0, 24, 54),
 	)))
 
 	p := testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrapWidth(40))
@@ -2483,7 +2471,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 		"overlay on a continuation row": {
 			before:   "key: x\n",
 			after:    "key: aaaa bbbb cccc dddd\n",
-			overlays: []position.Range{position.NewRange(position.New(1, 20), position.New(1, 24))},
+			overlays: []position.Range{yamltest.LineRange(1, 20, 24)},
 			width:    13,
 			want: stringtest.JoinLF(
 				"-key: x",
@@ -7041,8 +7029,8 @@ func TestPrinter_AnnotationGutterSoftPerWrappedRow(t *testing.T) {
 	// The annotation rows below each wrapped row form a block of their
 	// own, so the first row of each block is not a continuation.
 	view := niceyaml.NewSourceFromString("key: aaaa bbbb cccc dddd\n").View()
-	view.AddOverlay(kind.GenericError, position.NewRange(position.New(0, 5), position.New(0, 9)))
-	view.AddOverlay(kind.GenericError, position.NewRange(position.New(0, 17), position.New(0, 19)))
+	view.AddOverlay(kind.GenericError, yamltest.LineRange(0, 5, 9))
+	view.AddOverlay(kind.GenericError, yamltest.LineRange(0, 17, 19))
 	view.Annotate(0,
 		line.Annotation{Placement: line.Below},
 		line.Annotation{Content: "n", Placement: line.Below, Kind: kind.TextError, Col: 5},

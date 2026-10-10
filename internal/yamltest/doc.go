@@ -45,6 +45,11 @@
 // Tests of code that builds a [line.Lines] collection check its integrity
 // with [ValidateLines].
 //
+// Most ranges a test names sit on one line, and [LineRange] writes one
+// from the line and its two columns:
+//
+//	want := yamltest.LineRange(0, 5, 10)
+//
 // # Styled Output
 //
 // niceyaml applies terminal styles to YAML syntax elements.
