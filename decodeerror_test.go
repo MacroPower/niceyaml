@@ -974,122 +974,82 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			path   string
 		}{
 			"duration field": {
-				input: "name: api\ntimeout: soon\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[tierServer](ctx)
-
-					return err
-				},
-				want: `2:10: $.timeout: time: invalid duration "soon"`,
-				path: "$.timeout",
+				input:  "name: api\ntimeout: soon\n",
+				decode: decodeAs[tierServer](),
+				want:   `2:10: $.timeout: time: invalid duration "soon"`,
+				path:   "$.timeout",
 			},
 			"text unmarshaler in a sequence of structs": {
-				input: "- name: a\n  tier: low\n- name: b\n  tier: mid\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[[]tierServer](ctx)
-
-					return err
-				},
-				want: `4:9: $[1].tier: unknown tier "mid"`,
-				path: "$[1].tier",
+				input:  "- name: a\n  tier: low\n- name: b\n  tier: mid\n",
+				decode: decodeAs[[]tierServer](),
+				want:   `4:9: $[1].tier: unknown tier "mid"`,
+				path:   "$[1].tier",
 			},
 			"pointer element": {
 				input: "tiers: [low, mid]\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Tiers []*tier `yaml:"tiers"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Tiers []*tier `yaml:"tiers"`
+				}](),
 				want: `1:14: $.tiers[1]: unknown tier "mid"`,
 				path: "$.tiers[1]",
 			},
 			"map key": {
 				input: "hosts:\n  10.0.0.1: a\n  nope: b\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Hosts map[netip.Addr]string `yaml:"hosts"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Hosts map[netip.Addr]string `yaml:"hosts"`
+				}](),
 				want: `3:3: $.hosts.nope~: ParseAddr("nope"): unable to parse IP`,
 				path: "$.hosts.nope~",
 			},
 			"map value": {
-				input: "a: low\nb: mid\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[map[string]tier](ctx)
-
-					return err
-				},
-				want: `2:4: $.b: unknown tier "mid"`,
-				path: "$.b",
+				input:  "a: low\nb: mid\n",
+				decode: decodeAs[map[string]tier](),
+				want:   `2:4: $.b: unknown tier "mid"`,
+				path:   "$.b",
 			},
 			// The path through a merge key resolves to the entry of the
 			// mapping the key brings in.
 			"map value a merge key brings in": {
 				input: "base: &base\n  timeout: soon\nservers:\n  api:\n    <<: *base\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Servers map[string]tierServer `yaml:"servers"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Servers map[string]tierServer `yaml:"servers"`
+				}](),
 				want: `2:12: $.servers.api.timeout: time: invalid duration "soon"`,
 				path: "$.servers.api.timeout",
 			},
 			"map entry a merge key brings in": {
 				input: "base: &base\n  b: mid\ntiers:\n  a: low\n  <<: *base\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Tiers map[string]tier `yaml:"tiers"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Tiers map[string]tier `yaml:"tiers"`
+				}](),
 				want: `2:6: $.tiers.b: unknown tier "mid"`,
 				path: "$.tiers.b",
 			},
 			// The path of a value an alias holds points at the alias.
 			"alias": {
 				input: "label: &label mid\ntiers: [low, *label]\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Label string `yaml:"label"`
-						Tiers []tier `yaml:"tiers"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Label string `yaml:"label"`
+					Tiers []tier `yaml:"tiers"`
+				}](),
 				want: `2:14: $.tiers[1]: unknown tier "mid"`,
 				path: "$.tiers[1]",
 			},
 			"inline struct": {
 				input: "id: 1\nname: api\ntier: mid\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Server tierServer `yaml:",inline"`
-						ID     int        `yaml:"id"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Server tierServer `yaml:",inline"`
+					ID     int        `yaml:"id"`
+				}](),
 				want: `3:7: $.tier: unknown tier "mid"`,
 				path: "$.tier",
 			},
 			"inline map": {
 				input: "id: low\nextra: mid\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Tiers map[string]tier `yaml:",inline"`
-						ID    string          `yaml:"id"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Tiers map[string]tier `yaml:",inline"`
+					ID    string          `yaml:"id"`
+				}](),
 				want: `2:8: $.extra: unknown tier "mid"`,
 				path: "$.extra",
 			},
@@ -1100,36 +1060,24 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// error comes back alone.
 			"first field in struct order": {
 				input: "value: bad\ntimeout: soon\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Timeout time.Duration `yaml:"timeout"`
-						Value   opaqueValue   `yaml:"value"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Timeout time.Duration `yaml:"timeout"`
+					Value   opaqueValue   `yaml:"value"`
+				}](),
 				want: `2:10: $.timeout: time: invalid duration "soon"`,
 				path: "$.timeout",
 			},
 			"value that decodes through a second type": {
-				input: "name: prod\nservers:\n  - name: a\n    tier: low\n  - name: b\n    tier: mid\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[mirrored](ctx)
-
-					return err
-				},
-				want: `6:11: $.servers[1].tier: unknown tier "mid"`,
-				path: "$.servers[1].tier",
+				input:  "name: prod\nservers:\n  - name: a\n    tier: low\n  - name: b\n    tier: mid\n",
+				decode: decodeAs[mirrored](),
+				want:   `6:11: $.servers[1].tier: unknown tier "mid"`,
+				path:   "$.servers[1].tier",
 			},
 			"field that decodes through a second type": {
 				input: "prod:\n  servers:\n    - timeout: soon\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Prod mirrored `yaml:"prod"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Prod mirrored `yaml:"prod"`
+				}](),
 				want: `3:16: $.prod.servers[0].timeout: time: invalid duration "soon"`,
 				path: "$.prod.servers[0].timeout",
 			},
@@ -1137,54 +1085,38 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// the value put in front, so the error points at the value.
 			"value that adds text to the error of a field": {
 				input: "main:\n  name: api\n  tier: mid\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Main prefixing `yaml:"main"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Main prefixing `yaml:"main"`
+				}](),
 				want: `1:1: $.main: server: unknown tier "mid"`,
 				path: "$.main",
 			},
 			"value whose fields mirror nothing": {
 				input: "name: api\nvalue:\n  a: 1\n  b: bad\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Name  string      `yaml:"name"`
-						Value opaqueValue `yaml:"value"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Name  string      `yaml:"name"`
+					Value opaqueValue `yaml:"value"`
+				}](),
 				want: `2:1: $.value: unmarshaler rejected the value`,
 				path: "$.value",
 			},
 			"json unmarshaler under its option": {
 				input: "name: api\nvalue:\n  v: 1\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Name  string      `yaml:"name"`
-						Value jsonDecoded `yaml:"value"`
-					}](ctx, niceyaml.WithJSONUnmarshalers(true))
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Name  string      `yaml:"name"`
+					Value jsonDecoded `yaml:"value"`
+				}](niceyaml.WithJSONUnmarshalers(true)),
 				want: `2:1: $.value: unmarshaler rejected the value`,
 				path: "$.value",
 			},
 			"type an option decodes": {
 				input: "name: api\nvalue: bad\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Name  string        `yaml:"name"`
-						Value optionDecoded `yaml:"value"`
-					}](ctx, niceyaml.WithCustomUnmarshaler(
-						func(context.Context, *optionDecoded, func(any) error) error { return errUnmarshal },
-					))
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Name  string        `yaml:"name"`
+					Value optionDecoded `yaml:"value"`
+				}](niceyaml.WithCustomUnmarshaler(
+					func(context.Context, *optionDecoded, func(any) error) error { return errUnmarshal },
+				)),
 				want: `2:8: $.value: unmarshaler rejected the value`,
 				path: "$.value",
 			},
@@ -1192,14 +1124,10 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// reported the error.
 			"json unmarshaler without its option": {
 				input: "name: api\nvalue:\n  tier: mid\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Name  string      `yaml:"name"`
-						Value jsonFielded `yaml:"value"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Name  string      `yaml:"name"`
+					Value jsonFielded `yaml:"value"`
+				}](),
 				want: `3:9: $.value.tier: unknown tier "mid"`,
 				path: "$.value.tier",
 			},
@@ -1284,61 +1212,41 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 		}{
 			"sequence element": {
 				input: "addrs:\n  - 10.0.0.1\n  - [a, b]\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Addrs []netip.Addr `yaml:"addrs"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Addrs []netip.Addr `yaml:"addrs"`
+				}](),
 				want: "3:3: $.addrs[1]: expected string, got sequence",
 				path: "$.addrs[1]",
 			},
 			"mapping field": {
 				input: "name: api\naddr: {a: b}\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Name string     `yaml:"name"`
-						Addr netip.Addr `yaml:"addr"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Name string     `yaml:"name"`
+					Addr netip.Addr `yaml:"addr"`
+				}](),
 				want: "2:1: $.addr: expected string, got mapping",
 				path: "$.addr",
 			},
 			"pointer field": {
 				input: "tier:\n  a: b\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Tier *tier `yaml:"tier"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Tier *tier `yaml:"tier"`
+				}](),
 				want: "1:1: $.tier: expected string, got mapping",
 				path: "$.tier",
 			},
 			"map value": {
-				input: "a: low\nb: [mid]\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[map[string]tier](ctx)
-
-					return err
-				},
-				want: "2:1: $.b: expected string, got sequence",
-				path: "$.b",
+				input:  "a: low\nb: [mid]\n",
+				decode: decodeAs[map[string]tier](),
+				want:   "2:1: $.b: expected string, got sequence",
+				path:   "$.b",
 			},
 			// The path of a value an alias holds points at the alias.
 			"alias to a sequence": {
 				input: "all: &all [low, high]\ntier: *all\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Tier tier `yaml:"tier"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Tier tier `yaml:"tier"`
+				}](),
 				want: "2:7: $.tier: expected string, got sequence",
 				path: "$.tier",
 			},
@@ -1346,13 +1254,9 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// it reports nothing.
 			"mapping that holds a sequence": {
 				input: "holder:\n  tier: [a]\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Holder tierHolder `yaml:"holder"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Holder tierHolder `yaml:"holder"`
+				}](),
 				want: "1:1: $.holder: expected string, got mapping",
 				path: "$.holder",
 			},
@@ -1360,35 +1264,23 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// under its option.
 			"type with an UnmarshalJSON method too": {
 				input: "either: {a: 1}\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Either problemTextual `yaml:"either"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Either problemTextual `yaml:"either"`
+				}](),
 				want: "1:1: $.either: expected string, got mapping",
 				path: "$.either",
 			},
 			"sequence the decode reads": {
-				input: "[a, b]\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[tier](ctx)
-
-					return err
-				},
-				want: "1:1: $: expected string, got sequence",
-				path: "$",
+				input:  "[a, b]\n",
+				decode: decodeAs[tier](),
+				want:   "1:1: $: expected string, got sequence",
+				path:   "$",
 			},
 			"empty mapping the decode reads": {
-				input: "{}\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[*tier](ctx)
-
-					return err
-				},
-				want: "1:1: $: expected string, got mapping",
-				path: "$",
+				input:  "{}\n",
+				decode: decodeAs[*tier](),
+				want:   "1:1: $: expected string, got mapping",
+				path:   "$",
 			},
 			"mapping a scoped decode reads": {
 				input: "name: api\ntier: {a: b}\n",
@@ -1436,22 +1328,14 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// The fields of the value mirror nothing, and the mapping the
 			// decode reads is the whole of what the caller asked for.
 			"mapping the decode reads": {
-				input: "a: 1\nb: bad\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[opaqueValue](ctx)
-
-					return err
-				},
-				want: "unmarshaler rejected the value",
+				input:  "a: 1\nb: bad\n",
+				decode: decodeAs[opaqueValue](),
+				want:   "unmarshaler rejected the value",
 			},
 			"value that adds text at the node the decode reads": {
-				input: "name: api\ntier: mid\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[prefixing](ctx)
-
-					return err
-				},
-				want: `server: unknown tier "mid"`,
+				input:  "name: api\ntier: mid\n",
+				decode: decodeAs[prefixing](),
+				want:   `server: unknown tier "mid"`,
 			},
 			// The second decode reads a new value, which is not locked.
 			"unmarshaler that reads the value the caller filled": {
@@ -1502,12 +1386,8 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				source: []niceyaml.SourceOption{
 					niceyaml.WithReferences(niceyaml.NewSourceFromString("limit: &limit soon\n")),
 				},
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[tierServer](ctx)
-
-					return err
-				},
-				want: `time: invalid duration "soon"`,
+				decode: decodeAs[tierServer](),
+				want:   `time: invalid duration "soon"`,
 			},
 			// Every decode of the node fails the same way, whatever the
 			// target, so no value of the target reported the error.
@@ -1516,12 +1396,8 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				source: []niceyaml.SourceOption{
 					niceyaml.WithReferences(niceyaml.NewSourceFromString("limit: [\n")),
 				},
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[tierServer](ctx)
-
-					return err
-				},
-				want: "[1:8] sequence end token ']' not found\n>  1 | limit: [\n              ^\n",
+				decode: decodeAs[tierServer](),
+				want:   "[1:8] sequence end token ']' not found\n>  1 | limit: [\n              ^\n",
 			},
 			// The walk decodes nothing once the context has ended.
 			"context an unmarshaler ends": {
@@ -1570,31 +1446,19 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			want   string
 		}{
 			"field": {
-				input: "name: api\ntimeout: 5 minutes\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[tierServer](ctx)
-
-					return err
-				},
-				want: `2:10: $.timeout: time: unknown unit " minutes" in duration "5 minutes"`,
+				input:  "name: api\ntimeout: 5 minutes\n",
+				decode: decodeAs[tierServer](),
+				want:   `2:10: $.timeout: time: unknown unit " minutes" in duration "5 minutes"`,
 			},
 			"scalar the decode reads": {
-				input: "5 minutes\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[time.Duration](ctx)
-
-					return err
-				},
-				want: `1:1: $: time: unknown unit " minutes" in duration "5 minutes"`,
+				input:  "5 minutes\n",
+				decode: decodeAs[time.Duration](),
+				want:   `1:1: $: time: unknown unit " minutes" in duration "5 minutes"`,
 			},
 			"map key": {
-				input: "5 minutes: a\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[map[time.Duration]string](ctx)
-
-					return err
-				},
-				want: `1:1: $.'5 minutes'~: time: unknown unit " minutes" in duration "5 minutes"`,
+				input:  "5 minutes: a\n",
+				decode: decodeAs[map[time.Duration]string](),
+				want:   `1:1: $.'5 minutes'~: time: unknown unit " minutes" in duration "5 minutes"`,
 			},
 		}
 
@@ -1648,79 +1512,55 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 		}{
 			"method that takes a decode function": {
 				input: "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Spans []span `yaml:"spans"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Spans []span `yaml:"spans"`
+				}](),
 				is:   errSpan,
 				want: "4:9: $.spans[1].to: to is below from",
 				path: "$.spans[1].to",
 			},
 			"method that takes the node": {
 				input: "spans:\n  - from: 9\n    to: 3\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Spans []spanNode `yaml:"spans"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Spans []spanNode `yaml:"spans"`
+				}](),
 				is:   errSpan,
 				want: "3:9: $.spans[0].to: to is below from",
 				path: "$.spans[0].to",
 			},
 			"method that takes bytes": {
 				input: "spans:\n  - from: 9\n    to: 3\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Spans []spanBytes `yaml:"spans"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Spans []spanBytes `yaml:"spans"`
+				}](),
 				is:   errSpan,
 				want: "3:9: $.spans[0].to: to is below from",
 				path: "$.spans[0].to",
 			},
 			"function of an option": {
 				input: "name: api\nvalue: {from: 9, to: 3}\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Name  string        `yaml:"name"`
-						Value optionDecoded `yaml:"value"`
-					}](ctx, niceyaml.WithCustomUnmarshaler(
-						func(context.Context, *optionDecoded, func(any) error) error { return spanError() },
-					))
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Name  string        `yaml:"name"`
+					Value optionDecoded `yaml:"value"`
+				}](niceyaml.WithCustomUnmarshaler(
+					func(context.Context, *optionDecoded, func(any) error) error { return spanError() },
+				)),
 				is:   errSpan,
 				want: "2:22: $.value.to: to is below from",
 				path: "$.value.to",
 			},
 			"map value": {
-				input: "a: {from: 1, to: 2}\nb: {from: 9, to: 3}\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[map[string]span](ctx)
-
-					return err
-				},
-				is:   errSpan,
-				want: "2:18: $.b.to: to is below from",
-				path: "$.b.to",
+				input:  "a: {from: 1, to: 2}\nb: {from: 9, to: 3}\n",
+				decode: decodeAs[map[string]span](),
+				is:     errSpan,
+				want:   "2:18: $.b.to: to is below from",
+				path:   "$.b.to",
 			},
 			"pointer field": {
 				input: "span:\n  from: 9\n  to: 3\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Span *span `yaml:"span"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Span *span `yaml:"span"`
+				}](),
 				is:   errSpan,
 				want: "3:7: $.span.to: to is below from",
 				path: "$.span.to",
@@ -1729,26 +1569,18 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// value.
 			"value an alias holds": {
 				input: "base: &base {from: 9, to: 3}\nspans: [*base]\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Spans []span `yaml:"spans"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Spans []span `yaml:"spans"`
+				}](),
 				is:   errSpan,
 				want: "1:27: $.spans[0].to: to is below from",
 				path: "$.spans[0].to",
 			},
 			"field a merge key brings in": {
 				input: "base: &base {to: 3}\nspans:\n  - <<: *base\n    from: 9\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Spans []span `yaml:"spans"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Spans []span `yaml:"spans"`
+				}](),
 				is:   errSpan,
 				want: "1:18: $.spans[0].to: to is below from",
 				path: "$.spans[0].to",
@@ -1767,15 +1599,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// No value below the node reports the error, so the path reads
 			// from the node, which is the value.
 			"mapping the decode reads": {
-				input: "from: 9\nto: 3\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[span](ctx)
-
-					return err
-				},
-				is:   errSpan,
-				want: "2:5: $.to: to is below from",
-				path: "$.to",
+				input:  "from: 9\nto: 3\n",
+				decode: decodeAs[span](),
+				is:     errSpan,
+				want:   "2:5: $.to: to is below from",
+				path:   "$.to",
 			},
 			"mapping a scoped decode reads": {
 				input: "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n",
@@ -1792,26 +1620,18 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// not under the value that handed its error on.
 			"value that returns the error of a field": {
 				input: "mirrors:\n  - name: a\n    span: {from: 9, to: 3}\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Mirrors []spanMirror `yaml:"mirrors"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Mirrors []spanMirror `yaml:"mirrors"`
+				}](),
 				is:   errSpan,
 				want: "3:25: $.mirrors[0].span.to: to is below from",
 				path: "$.mirrors[0].span.to",
 			},
 			"value that adds text to the error of a field": {
 				input: "main:\n  span: {from: 9, to: 3}\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Main spanWrapper `yaml:"main"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Main spanWrapper `yaml:"main"`
+				}](),
 				is:   errSpan,
 				want: "2:23: $.main.span.to: wrapper: to is below from",
 				path: "$.main.span.to",
@@ -1820,26 +1640,18 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// under the value once, and not under the field too.
 			"value that rebases the error of a field": {
 				input: "main:\n  span: {from: 9, to: 3}\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Main spanRebaser `yaml:"main"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Main spanRebaser `yaml:"main"`
+				}](),
 				is:   errSpan,
 				want: "2:23: $.main.span.to: to is below from",
 				path: "$.main.span.to",
 			},
 			"value that names a field in the error of that field": {
 				input: "main:\n  tier: mid\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Main tierNamer `yaml:"main"`
-					}](ctx)
-
-					return err
-				},
+				decode: decodeAs[struct {
+					Main tierNamer `yaml:"main"`
+				}](),
 				is:   errUnknownTier,
 				want: `2:9: $.main.tier: unknown tier "mid"`,
 				path: "$.main.tier",

@@ -115,6 +115,16 @@ func decodeInto[T any]() func(context.Context, *niceyaml.Node, ...niceyaml.Decod
 	}
 }
 
+// decodeAs returns a decode of a node as a T with opts that returns the
+// error alone, for a table of decodes as different types.
+func decodeAs[T any](opts ...niceyaml.DecodeOption) func(context.Context, *niceyaml.Node) error {
+	return func(ctx context.Context, n *niceyaml.Node) error {
+		_, err := n.Decode[T](ctx, opts...)
+
+		return err
+	}
+}
+
 // rejectionRows returns the text of each problem [niceyaml.ErrorTree]
 // lists for err, one per line, with the position and the path in front
 // of each message.
