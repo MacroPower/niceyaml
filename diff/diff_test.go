@@ -73,7 +73,11 @@ func TestDiffer_Views_LineNumbers(t *testing.T) {
 	// insertion at the top of the after revision leaves the before view's
 	// numbers alone.
 	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n").Lines()
-	after := niceyaml.NewSourceFromString("x: 0\na: 1\nb: 2\n").Lines()
+	after := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"x: 0",
+		"a: 1",
+		"b: 2",
+	)).Lines()
 
 	result := diff.New().Diff(before, after)
 
@@ -102,8 +106,17 @@ func (f sequenceFunc) All(...position.Span) iter.Seq2[int, *line.Line] {
 func TestDiffer_Diff_Sequences(t *testing.T) {
 	t.Parallel()
 
-	before := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n")
-	after := niceyaml.NewSourceFromString("a: 1\nb: 9\nc: 3\nd: 4\n")
+	before := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+	))
+	after := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"b: 9",
+		"c: 3",
+		"d: 4",
+	))
 
 	whole := stringtest.JoinLF(
 		"   1 | a: 1",
@@ -279,8 +292,16 @@ func TestDiffer_Full(t *testing.T) {
 			want:   "",
 		},
 		"multi-line modification": {
-			before: "first: 1\nsecond: 2\nthird: 3\n",
-			after:  "first: 1\nsecond: changed\nthird: 3\n",
+			before: stringtest.LinesLF(
+				"first: 1",
+				"second: 2",
+				"third: 3",
+			),
+			after: stringtest.LinesLF(
+				"first: 1",
+				"second: changed",
+				"third: 3",
+			),
 			want: stringtest.JoinLF(
 				"   1 | first: 1",
 				"   2 | second: 2",
@@ -850,7 +871,13 @@ func TestDiffer_Hunks(t *testing.T) {
 func TestDiffResult_HunksKeepUnifiedIndices(t *testing.T) {
 	t.Parallel()
 
-	before := "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"
+	before := stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+		"d: 4",
+		"e: 5",
+	)
 
 	tcs := map[string]struct {
 		after    string
@@ -858,7 +885,13 @@ func TestDiffResult_HunksKeepUnifiedIndices(t *testing.T) {
 		wantHeld []int
 	}{
 		"changes": {
-			after:    "a: 1\nb: 2\nc: 3\nd: 4\ne: 6\n",
+			after: stringtest.LinesLF(
+				"a: 1",
+				"b: 2",
+				"c: 3",
+				"d: 4",
+				"e: 6",
+			),
 			mark:     5,
 			wantHeld: []int{3, 4, 5},
 		},
@@ -907,9 +940,21 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 
 	// The second document starts after the separator on line 4, so its
 	// body lines are 5, 6, and 7 in the file.
-	head := "x: 1\ny: 2\nz: 3\n"
-	body := "a: 1\nb: 2\nc: 3\n"
-	changed := "a: 1\nb: 9\nc: 3\n"
+	head := stringtest.LinesLF(
+		"x: 1",
+		"y: 2",
+		"z: 3",
+	)
+	body := stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+	)
+	changed := stringtest.LinesLF(
+		"a: 1",
+		"b: 9",
+		"c: 3",
+	)
 
 	tcs := map[string]struct {
 		// Holds the second document of the before side, when it is not body.
@@ -925,21 +970,43 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 			want:  []string{"@@ -6 +6 @@"},
 		},
 		"insert after the separator": {
-			after: "w: 0\na: 1\nb: 2\nc: 3\n",
-			want:  []string{"@@ -4,0 +5 @@"},
+			after: stringtest.LinesLF(
+				"w: 0",
+				"a: 1",
+				"b: 2",
+				"c: 3",
+			),
+			want: []string{"@@ -4,0 +5 @@"},
 		},
 		"append at end": {
-			after: "a: 1\nb: 2\nc: 3\nd: 4\n",
-			want:  []string{"@@ -7,0 +8 @@"},
+			after: stringtest.LinesLF(
+				"a: 1",
+				"b: 2",
+				"c: 3",
+				"d: 4",
+			),
+			want: []string{"@@ -7,0 +8 @@"},
 		},
 		"delete the last line": {
 			after: "a: 1\nb: 2\n",
 			want:  []string{"@@ -7 +6,0 @@"},
 		},
 		"two separate hunks": {
-			before: "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n",
-			after:  "a: 0\nb: 2\nc: 3\nd: 4\ne: 0\n",
-			want:   []string{"@@ -5 +5 @@", "@@ -9 +9 @@"},
+			before: stringtest.LinesLF(
+				"a: 1",
+				"b: 2",
+				"c: 3",
+				"d: 4",
+				"e: 5",
+			),
+			after: stringtest.LinesLF(
+				"a: 0",
+				"b: 2",
+				"c: 3",
+				"d: 4",
+				"e: 0",
+			),
+			want: []string{"@@ -5 +5 @@", "@@ -9 +9 @@"},
 		},
 		"context 1": {
 			after:   changed,
@@ -983,7 +1050,14 @@ func TestDiffer_HunksOfHeldLines(t *testing.T) {
 	t.Parallel()
 
 	// The before side holds lines 4-6 of a six-line file.
-	before := niceyaml.NewSourceFromString("x: 1\ny: 2\nz: 3\na: 1\nb: 2\nc: 3\n")
+	before := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"x: 1",
+		"y: 2",
+		"z: 3",
+		"a: 1",
+		"b: 2",
+		"c: 3",
+	))
 	beforeView := before.View().Slice(position.NewSpan(3, 6))
 
 	tcs := map[string]struct {
@@ -992,12 +1066,26 @@ func TestDiffer_HunksOfHeldLines(t *testing.T) {
 		want      []string
 	}{
 		"insert before the first held line": {
-			after:     "x: 1\ny: 2\nz: 3\nw: 0\na: 1\nb: 2\nc: 3\n",
+			after: stringtest.LinesLF(
+				"x: 1",
+				"y: 2",
+				"z: 3",
+				"w: 0",
+				"a: 1",
+				"b: 2",
+				"c: 3",
+			),
 			afterSpan: position.NewSpan(3, 7),
 			want:      []string{"@@ -3,0 +4 @@"},
 		},
 		"delete the first held line": {
-			after:     "x: 1\ny: 2\nz: 3\nb: 2\nc: 3\n",
+			after: stringtest.LinesLF(
+				"x: 1",
+				"y: 2",
+				"z: 3",
+				"b: 2",
+				"c: 3",
+			),
 			afterSpan: position.NewSpan(3, 5),
 			want:      []string{"@@ -4 +3,0 @@"},
 		},
@@ -1029,7 +1117,15 @@ func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
 	t.Parallel()
 
 	// The before side holds lines 1-2 and 6-7 of a seven-line file.
-	before := "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\n"
+	before := stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+		"d: 4",
+		"e: 5",
+		"f: 6",
+		"g: 7",
+	)
 	beforeSpans := []position.Span{position.NewSpan(0, 2), position.NewSpan(5, 7)}
 
 	tcs := map[string]struct {
@@ -1039,13 +1135,29 @@ func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
 		want       []string
 	}{
 		"context stops at the gap": {
-			after:      "a: 1\nb: 9\nc: 3\nd: 4\ne: 5\nf: 6\ng: 8\n",
+			after: stringtest.LinesLF(
+				"a: 1",
+				"b: 9",
+				"c: 3",
+				"d: 4",
+				"e: 5",
+				"f: 6",
+				"g: 8",
+			),
 			afterSpans: beforeSpans,
 			context:    1,
 			want:       []string{"@@ -1,2 +1,2 @@", "@@ -6,2 +6,2 @@"},
 		},
 		"no context past the gap": {
-			after:      "a: 1\nb: 9\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\n",
+			after: stringtest.LinesLF(
+				"a: 1",
+				"b: 9",
+				"c: 3",
+				"d: 4",
+				"e: 5",
+				"f: 6",
+				"g: 7",
+			),
 			afterSpans: beforeSpans,
 			context:    1,
 			want:       []string{"@@ -1,2 +1,2 @@"},
@@ -1053,7 +1165,15 @@ func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
 		"changes on both sides of the gap": {
 			// The run of changes deletes lines 2 and 6 before it
 			// inserts them, so it splits wherever a side skips lines.
-			after:      "a: 1\nb: 9\nc: 3\nd: 4\ne: 5\nf: 9\ng: 7\n",
+			after: stringtest.LinesLF(
+				"a: 1",
+				"b: 9",
+				"c: 3",
+				"d: 4",
+				"e: 5",
+				"f: 9",
+				"g: 7",
+			),
 			afterSpans: beforeSpans,
 			context:    0,
 			want:       []string{"@@ -2 +1,0 @@", "@@ -6 +2 @@", "@@ -6,0 +6 @@"},
@@ -1061,7 +1181,16 @@ func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
 		"insert after the gap": {
 			// Line 6 of the after side starts its part, so the insert
 			// comes before line 6 of the before side, not after line 2.
-			after:      "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nx: 0\nf: 6\ng: 7\n",
+			after: stringtest.LinesLF(
+				"a: 1",
+				"b: 2",
+				"c: 3",
+				"d: 4",
+				"e: 5",
+				"x: 0",
+				"f: 6",
+				"g: 7",
+			),
 			afterSpans: []position.Span{position.NewSpan(0, 2), position.NewSpan(5, 8)},
 			context:    0,
 			want:       []string{"@@ -5,0 +6 @@"},
@@ -1069,7 +1198,14 @@ func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
 		"delete after the gap": {
 			// Line 6 of the before side starts its part, so the delete
 			// comes before line 6 of the after side, not after line 2.
-			after:      "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\ng: 7\n",
+			after: stringtest.LinesLF(
+				"a: 1",
+				"b: 2",
+				"c: 3",
+				"d: 4",
+				"e: 5",
+				"g: 7",
+			),
 			afterSpans: []position.Span{position.NewSpan(0, 2), position.NewSpan(5, 6)},
 			context:    0,
 			want:       []string{"@@ -6 +5,0 @@"},
@@ -1227,8 +1363,19 @@ func TestDiffer_WithNilAlgorithm(t *testing.T) {
 func TestDiff_Concurrent(t *testing.T) {
 	t.Parallel()
 
-	before := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\n").Lines()
-	after := niceyaml.NewSourceFromString("a: 1\nb: 5\nc: 3\ne: 6\nd: 4\n").Lines()
+	before := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+		"d: 4",
+	)).Lines()
+	after := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"b: 5",
+		"c: 3",
+		"e: 6",
+		"d: 4",
+	)).Lines()
 	want := diff.New().Diff(before, after).Unified()
 	wantFlags := changedFlags(want)
 
@@ -1255,7 +1402,18 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 	t.Parallel()
 
 	oneChange := struct{ before, after string }{"a: 1\nb: 2\n", "a: 1\nb: 3\n"}
-	twoChanges := struct{ before, after string }{"a: 1\nb: 2\nc: 3\n", "a: 1\nb: 3\nc: 4\n"}
+	twoChanges := struct{ before, after string }{
+		stringtest.LinesLF(
+			"a: 1",
+			"b: 2",
+			"c: 3",
+		),
+		stringtest.LinesLF(
+			"a: 1",
+			"b: 3",
+			"c: 4",
+		),
+	}
 
 	tcs := map[string]struct {
 		before string
@@ -1615,11 +1773,19 @@ func TestDiffResult_PlaceholdersAreDistinct(t *testing.T) {
 	}{
 		"opposite standalone inserts": {
 			before: "a: 1\n",
-			after:  "a: 1\nb: 2\nc: 3\n",
+			after: stringtest.LinesLF(
+				"a: 1",
+				"b: 2",
+				"c: 3",
+			),
 		},
 		"opposite inserts paired with a delete": {
 			before: "a: 1\n",
-			after:  "x: 1\nb: 2\nc: 3\n",
+			after: stringtest.LinesLF(
+				"x: 1",
+				"b: 2",
+				"c: 3",
+			),
 		},
 	}
 
