@@ -1752,9 +1752,9 @@ func TestDiffer_MultipleRenders(t *testing.T) {
 	summary2 := result.Hunks(2)
 
 	// All should have 1 hunk.
-	assert.Equal(t, 1, hunkCount(summary0))
-	assert.Equal(t, 1, hunkCount(summary1))
-	assert.Equal(t, 1, hunkCount(summary2))
+	assert.Len(t, hunkHeaders(summary0), 1)
+	assert.Len(t, hunkHeaders(summary1), 1)
+	assert.Len(t, hunkHeaders(summary2), 1)
 
 	// Different contexts should produce different hunk sizes.
 	assert.Less(t, summary0.Count(), summary1.Count())
@@ -1845,20 +1845,6 @@ func hunkHeaders(view *line.View) []string {
 	}
 
 	return headers
-}
-
-// hunkCount returns the number of hunks in a view from [diff.Result.Hunks],
-// which is the number of lines carrying a hunk header above them.
-func hunkCount(view *line.View) int {
-	count := 0
-
-	for i := range view.All() {
-		if len(view.Annotations(i).Filter(line.Above)) > 0 {
-			count++
-		}
-	}
-
-	return count
 }
 
 // assertSameContent asserts that got is a view over the content unified
