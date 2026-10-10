@@ -181,15 +181,19 @@ func TestViolation(t *testing.T) {
 	}
 }
 
+// nameAndAge is a schema that takes a string for the member name and an
+// integer for the member age.
+const nameAndAge = `{
+	"properties": {
+		"name": {"type": "string"},
+		"age": {"type": "integer"}
+	}
+}`
+
 func TestViolation_Binding(t *testing.T) {
 	t.Parallel()
 
-	v := compileSchema(t, `{
-		"properties": {
-			"name": {"type": "string"},
-			"age": {"type": "integer"}
-		}
-	}`)
+	v := compileSchema(t, nameAndAge)
 
 	t.Run("single violation", func(t *testing.T) {
 		t.Parallel()
@@ -594,12 +598,7 @@ func TestViolation_MissingMember(t *testing.T) {
 func TestViolation_Value(t *testing.T) {
 	t.Parallel()
 
-	v := compileSchema(t, `{
-		"properties": {
-			"name": {"type": "string"},
-			"age": {"type": "integer"}
-		}
-	}`)
+	v := compileSchema(t, nameAndAge)
 
 	t.Run("single violation", func(t *testing.T) {
 		t.Parallel()

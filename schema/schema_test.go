@@ -46,6 +46,34 @@ func requireExcessiveAliasing(t *testing.T, err error) {
 	assert.True(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
 }
 
+// Schemas that several tests share. A stringMembers document holds only
+// strings, and a closedName document holds only a name, which is a string.
+// The integersInM and integersInUser schemas take integers for the members
+// of the mapping under m or under user.
+const (
+	stringMembers = `{
+		"type": "object",
+		"additionalProperties": {"type": "string"}
+	}`
+	closedName = `{
+		"type": "object",
+		"properties": {"name": {"type": "string"}},
+		"additionalProperties": false
+	}`
+	integersInM = `{
+		"type": "object",
+		"properties": {
+			"m": {"additionalProperties": {"type": "integer"}}
+		}
+	}`
+	integersInUser = `{
+		"type": "object",
+		"properties": {
+			"user": {"additionalProperties": {"type": "integer"}}
+		}
+	}`
+)
+
 func TestSchema_Check(t *testing.T) {
 	t.Parallel()
 
@@ -758,13 +786,7 @@ func TestSchema_PathTarget(t *testing.T) {
 			want:  "123",
 		},
 		"additional property highlights key": {
-			schema: `{
-				"type": "object",
-				"properties": {
-					"name": {"type": "string"}
-				},
-				"additionalProperties": false
-			}`,
+			schema: closedName,
 			input: stringtest.Input(`
 				name: valid
 				extra: notAllowed
@@ -918,31 +940,19 @@ func TestSchema_PathTarget(t *testing.T) {
 		"tilde null key highlights value": {
 			// The key decodes to the member name null, which the source
 			// spells ~, so the path names the member by its source spelling.
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
-			input: "~: 5",
-			want:  "5",
+			schema: stringMembers,
+			input:  "~: 5",
+			want:   "5",
 		},
 		"spelled-out null key highlights value": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
-			input: "NULL: 5",
-			want:  "5",
+			schema: stringMembers,
+			input:  "NULL: 5",
+			want:   "5",
 		},
 		"boolean key highlights the key": {
-			schema: `{
-				"type": "object",
-				"properties": {
-					"name": {"type": "string"}
-				},
-				"additionalProperties": false
-			}`,
-			input: "True: nope",
-			want:  "True",
+			schema: closedName,
+			input:  "True: nope",
+			want:   "True",
 		},
 		"false subschema on a keyword-named property highlights value": {
 			// A property named like a keyword that constrains a key
@@ -1941,6 +1951,12 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 		fmt.Fprintf(&bomb, "l%d: &l%d {%s}\n", level, level, strings.Join(members, ", "))
 	}
 
+	// Two cases share a schema, which takes a string for the member a.
+	const stringA = `{
+		"type": "object",
+		"properties": {"a": {"type": "string"}}
+	}`
+
 	tcs := map[string]struct {
 		schema    string
 		input     string
@@ -1948,19 +1964,13 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 		excessive bool
 	}{
 		"conforming ordered mapping": {
-			schema: `{
-				"type": "object",
-				"properties": {"a": {"type": "string"}}
-			}`,
-			input: "a: x",
+			schema: stringA,
+			input:  "a: x",
 		},
 		"top-level violation": {
-			schema: `{
-				"type": "object",
-				"properties": {"a": {"type": "string"}}
-			}`,
-			input: "a: 1",
-			err:   `$.a: expected "string", got "integer"`,
+			schema: stringA,
+			input:  "a: 1",
+			err:    `$.a: expected "string", got "integer"`,
 		},
 		"nested ordered mapping": {
 			schema: `{
@@ -3225,22 +3235,22 @@ func TestSchema_SourcePath(t *testing.T) {
 	//
 	// Several cases share a schema, which takes strings for the members of
 	// the document, or integers for the members of the mapping under m or
-	// under user.
+	// under user. Others take an integer for the member 16, a string or a
+	// mapping for each member, or strings for the members of the mapping
+	// under b.
 	const (
-		stringMembers = `{
+		integer16 = `{
 			"type": "object",
-			"additionalProperties": {"type": "string"}
+			"properties": {"16": {"type": "integer"}}
 		}`
-		integersInM = `{
+		stringOrObjectMembers = `{
+			"type": "object",
+			"additionalProperties": {"type": ["string", "object"]}
+		}`
+		stringsInB = `{
 			"type": "object",
 			"properties": {
-				"m": {"additionalProperties": {"type": "integer"}}
-			}
-		}`
-		integersInUser = `{
-			"type": "object",
-			"properties": {
-				"user": {"additionalProperties": {"type": "integer"}}
+				"b": {"additionalProperties": {"type": "string"}}
 			}
 		}`
 	)
@@ -3252,12 +3262,9 @@ func TestSchema_SourcePath(t *testing.T) {
 		unresolved bool
 	}{
 		"hexadecimal key": {
-			schema: `{
-				"type": "object",
-				"properties": {"16": {"type": "integer"}}
-			}`,
-			input: "0x10: hello\n",
-			want:  `1:7: $.0x10: expected "integer", got "string"`,
+			schema: integer16,
+			input:  "0x10: hello\n",
+			want:   `1:7: $.0x10: expected "integer", got "string"`,
 		},
 		"tilde null key": {
 			schema: stringMembers,
@@ -3265,18 +3272,12 @@ func TestSchema_SourcePath(t *testing.T) {
 			want:   `1:4: $.'~': expected "string", got "integer"`,
 		},
 		"merge key ahead of a null key": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": ["string", "object"]}
-			}`,
-			input: "<<: {a: x}\n~: 5\n",
-			want:  `2:4: $.'~': expected ["string", "object"], got "integer"`,
+			schema: stringOrObjectMembers,
+			input:  "<<: {a: x}\n~: 5\n",
+			want:   `2:4: $.'~': expected ["string", "object"], got "integer"`,
 		},
 		"merge key ahead of an empty key": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": ["string", "object"]}
-			}`,
+			schema: stringOrObjectMembers,
 			input: stringtest.Input(`
 				<<: {a: x}
 				"": 5
@@ -3363,13 +3364,9 @@ func TestSchema_SourcePath(t *testing.T) {
 			want:   `1:7: $.NULL: expected "string", got "integer"`,
 		},
 		"boolean key targeted by the failure": {
-			schema: `{
-				"type": "object",
-				"properties": {"name": {"type": "string"}},
-				"additionalProperties": false
-			}`,
-			input: "True: nope\n",
-			want:  "1:1: $.True~: value is not allowed",
+			schema: closedName,
+			input:  "True: nope\n",
+			want:   "1:1: $.True~: value is not allowed",
 		},
 		"bool-tagged key": {
 			schema: stringMembers,
@@ -3492,10 +3489,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			want: `3:13: $.name.0x10: expected "integer", got "string"`,
 		},
 		"alias key overrides a respelled key": {
-			schema: `{
-				"type": "object",
-				"properties": {"16": {"type": "integer"}}
-			}`,
+			schema: integer16,
 			input: stringtest.Input(`
 				a: &k 16
 				0x10: hello
@@ -3513,22 +3507,12 @@ func TestSchema_SourcePath(t *testing.T) {
 			want: `3:3: $.n: expected "string", got "integer"`,
 		},
 		"respelled key behind an alias": {
-			schema: `{
-				"type": "object",
-				"properties": {
-					"b": {"additionalProperties": {"type": "string"}}
-				}
-			}`,
-			input: "a: &a {0x10: 1}\nb: *a\n",
-			want:  `1:14: $.b.0x10: expected "string", got "integer"`,
+			schema: stringsInB,
+			input:  "a: &a {0x10: 1}\nb: *a\n",
+			want:   `1:14: $.b.0x10: expected "string", got "integer"`,
 		},
 		"respelled key behind an alias to a block mapping": {
-			schema: `{
-				"type": "object",
-				"properties": {
-					"b": {"additionalProperties": {"type": "string"}}
-				}
-			}`,
+			schema: stringsInB,
 			input: stringtest.Input(`
 				a: &a
 				  0x10: 1
@@ -3669,12 +3653,7 @@ func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 	// and the error binds at the x rather than at the valid 1. The quoted
 	// "0x10" decodes to the member 0x10, as does an alias key whose anchor
 	// holds it.
-	v := compileSchema(t, `{
-		"type": "object",
-		"properties": {
-			"user": {"additionalProperties": {"type": "integer"}}
-		}
-	}`)
+	v := compileSchema(t, integersInUser)
 
 	tcs := map[string]struct {
 		input string
@@ -3914,12 +3893,7 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 	// Check share one limit on the nodes they read under the merge key.
 	// Check reports each violation past that limit too, with a path
 	// that keeps the decoded name of its key, which selects no entry.
-	v := compileSchema(t, `{
-		"type": "object",
-		"properties": {
-			"m": {"additionalProperties": {"type": "integer"}}
-		}
-	}`)
+	v := compileSchema(t, integersInM)
 
 	tcs := map[string]struct {
 		members int
