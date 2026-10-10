@@ -103,31 +103,25 @@ func TestUpdateSearchInputBackspace(t *testing.T) {
 	}
 }
 
-func TestUpdatePasteIntoSearch(t *testing.T) {
+func TestUpdatePaste(t *testing.T) {
 	t.Parallel()
 
-	m := newModel(&modelOptions{})
-	m.searching = true
-	m.searchInput = "a"
-
-	got := update(t, m, tea.PasteMsg{Content: "bc"})
-	assert.Equal(t, "abc", got.searchInput)
-	assert.True(t, got.searching)
-
-	// A paste outside the prompt changes nothing.
-	m.searching = false
-
-	got = update(t, m, tea.PasteMsg{Content: "xyz"})
-	assert.Equal(t, "a", got.searchInput)
-}
-
-func TestUpdatePasteControlCharacters(t *testing.T) {
-	t.Parallel()
-
+	// The search input holds "a" before each paste.
 	tcs := map[string]struct {
 		content string
 		want    string
+		// Pastes while the search prompt is closed.
+		closed bool
 	}{
+		"text is appended": {
+			content: "bc",
+			want:    "abc",
+		},
+		"paste outside the prompt changes nothing": {
+			content: "xyz",
+			want:    "a",
+			closed:  true,
+		},
 		"newline keeps the first line": {
 			content: "b\nc",
 			want:    "ab",
@@ -159,11 +153,12 @@ func TestUpdatePasteControlCharacters(t *testing.T) {
 			t.Parallel()
 
 			m := newModel(&modelOptions{})
-			m.searching = true
+			m.searching = !tc.closed
 			m.searchInput = "a"
 
 			got := update(t, m, tea.PasteMsg{Content: tc.content})
 			assert.Equal(t, tc.want, got.searchInput)
+			assert.Equal(t, !tc.closed, got.searching)
 		})
 	}
 }
