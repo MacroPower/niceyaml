@@ -850,18 +850,6 @@ func TestDirective_Resolve(t *testing.T) {
 	t.Run("none turns validation off", func(t *testing.T) {
 		t.Parallel()
 
-		// Each level lists ten aliases of the level before it, so a decode
-		// expands the last level to a million values.
-		fanOut := stringtest.LinesLF(
-			"a: &a [x, x, x, x, x, x, x, x, x, x]",
-			"b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]",
-			"c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]",
-			"d: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]",
-			"e: &e [*d, *d, *d, *d, *d, *d, *d, *d, *d, *d]",
-			"f: &f [*e, *e, *e, *e, *e, *e, *e, *e, *e, *e]",
-			"g: &g [*f, *f, *f, *f, *f, *f, *f, *f, *f, *f]",
-		)
-
 		tests := map[string]struct {
 			ref  string
 			body string
@@ -874,7 +862,7 @@ func TestDirective_Resolve(t *testing.T) {
 			"undefined alias": {ref: "none", body: "a: *nope\n"},
 			// The document passes without a decode, which would reject
 			// aliases that expand past the limit.
-			"excessive aliasing": {ref: "none", body: fanOut},
+			"excessive aliasing": {ref: "none", body: yamltest.AliasLevels(7)},
 		}
 
 		for name, tt := range tests {
