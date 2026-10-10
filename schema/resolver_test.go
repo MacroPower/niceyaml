@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -128,7 +127,7 @@ func TestResolverFunc(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, stringtest.Input(tc.input))
+			doc := yamltest.FirstDocument(t, tc.input)
 			ref, err := r.Resolve(t.Context(), doc)
 
 			if tc.err != nil {

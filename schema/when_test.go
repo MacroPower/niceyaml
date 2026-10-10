@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -50,7 +49,7 @@ func TestWhen(t *testing.T) {
 				schema.Embedded(schemaData),
 			)
 
-			doc := yamltest.FirstDocument(t, stringtest.Input(tc.input))
+			doc := yamltest.FirstDocument(t, tc.input)
 			ref, err := r.Resolve(t.Context(), doc)
 
 			if tc.wantErr != nil {
@@ -74,7 +73,7 @@ func TestWhen(t *testing.T) {
 		inner := errors.New("inner")
 		r := schema.When(matcher.Content(kindPath, "Deployment"), failing(inner))
 
-		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+		doc := yamltest.FirstDocument(t, "kind: Deployment")
 		_, err := r.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, inner)
 	})
@@ -95,7 +94,7 @@ func TestWhen(t *testing.T) {
 			}),
 		)
 
-		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+		doc := yamltest.FirstDocument(t, "kind: Deployment")
 		_, err := r.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, undecided)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
@@ -157,7 +156,7 @@ func TestWhen(t *testing.T) {
 			}),
 		)
 
-		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
+		doc := yamltest.FirstDocument(t, "kind: Service")
 		_, err := r.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 		assert.False(t, called)
