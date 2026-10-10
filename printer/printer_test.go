@@ -271,15 +271,15 @@ func TestPrinter_PrintError(t *testing.T) {
 		},
 		"bound error": {
 			err:  bound,
-			want: "2:4: $.b: bad\n\n" + excerpt,
+			want: stringtest.JoinLF("2:4: $.b: bad", "", excerpt),
 		},
 		"wrapped bound error keeps the wrapper's context": {
 			err:  fmt.Errorf("document 0: %w", bound),
-			want: "document 0: 2:4: $.b: bad\n\n" + excerpt,
+			want: stringtest.JoinLF("document 0: 2:4: $.b: bad", "", excerpt),
 		},
 		"bound error on an indented line": {
 			err:  yamltest.Bind(t, nested, errAt("bad", "a", "b")),
-			want: "2:6: $.a.b: bad\n\n" + nestedExcerpt,
+			want: stringtest.JoinLF("2:6: $.a.b: bad", "", nestedExcerpt),
 		},
 		"bound error without a location": {
 			err:  yamltest.Bind(t, source, niceyaml.NewError("bad")),
@@ -289,7 +289,9 @@ func TestPrinter_PrintError(t *testing.T) {
 		// caret marks its spot.
 		"bound error at an empty value": {
 			err: yamltest.Bind(t, empty, errAt("required", "a")),
-			want: "1:3: $.a: required\n\n" + stringtest.JoinLF(
+			want: stringtest.JoinLF(
+				"1:3: $.a: required",
+				"",
 				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
 				"<textError>  ^</textError>",
 				"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>2</literalNumberInteger>",
@@ -297,7 +299,9 @@ func TestPrinter_PrintError(t *testing.T) {
 		},
 		"bound error past the end of a line": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 500)))),
-			want: "1:501: bad\n\n" + stringtest.JoinLF(
+			want: stringtest.JoinLF(
+				"1:501: bad",
+				"",
 				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>1</literalNumberInteger>",
 				"<textError>    ^</textError>",
 				"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>2</literalNumberInteger>",
@@ -309,7 +313,9 @@ func TestPrinter_PrintError(t *testing.T) {
 			err: yamltest.Bind(t, flags, niceyaml.NewError("", niceyaml.AtRange(
 				yamltest.LineRange(0, 9, 11),
 			))),
-			want: "1:10:\n\n" + stringtest.JoinLF(
+			want: stringtest.JoinLF(
+				"1:10:",
+				"",
 				"<nameTag>flags</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text>"+
 					"<literalString>🇺🇸</literalString><genericError>🇫🇷</genericError>",
 				"<textError>         ^^</textError>",
@@ -317,29 +323,49 @@ func TestPrinter_PrintError(t *testing.T) {
 		},
 		"bound error with an empty message": {
 			err:  yamltest.Bind(t, source, errAt("", "b")),
-			want: "2:4: $.b:\n\n" + excerpt,
+			want: stringtest.JoinLF("2:4: $.b:", "", excerpt),
 		},
 		"joined bound errors print one excerpt per source": {
 			err: errors.Join(
 				fmt.Errorf("first: %w", bound),
 				fmt.Errorf("second: %w", yamltest.Bind(t, other, errAt("bad", "c"))),
 			),
-			want: "├── first: 2:4: $.b: bad\n└── second: 1:4: $.c: bad\n\n" + labeled + "\n\n" + otherLabeled,
+			want: stringtest.JoinLF(
+				"├── first: 2:4: $.b: bad",
+				"└── second: 1:4: $.c: bad",
+				"",
+				labeled,
+				"",
+				otherLabeled,
+			),
 		},
 		"joined bound errors of one source share an excerpt": {
 			err: errors.Join(
 				yamltest.Bind(t, source, errAt("bad a", "a")),
 				yamltest.Bind(t, source, errAt("bad b", "b")),
 			),
-			want: "├── 1:4: $.a: bad a\n└── 2:4: $.b: bad b\n\n" + annotated,
+			want: stringtest.JoinLF(
+				"├── 1:4: $.a: bad a",
+				"└── 2:4: $.b: bad b",
+				"",
+				annotated,
+			),
 		},
 		"joined bound errors of named sources print each name": {
 			err: errors.Join(
 				yamltest.Bind(t, named, errAt("bad", "c")),
 				yamltest.Bind(t, tabbed, errAt("bad", "c")),
 			),
-			want: "├── c.yaml:1:4: $.c: bad\n└── t    ␛.yaml:1:4: $.c: bad\n\n" +
-				"c.yaml\n" + otherLabeled + "\n\n" + "t    ␛.yaml\n" + otherLabeled,
+			want: stringtest.JoinLF(
+				"├── c.yaml:1:4: $.c: bad",
+				"└── t    ␛.yaml:1:4: $.c: bad",
+				"",
+				"c.yaml",
+				otherLabeled,
+				"",
+				"t    ␛.yaml",
+				otherLabeled,
+			),
 		},
 		"joined bound error that marks nothing names its reason last": {
 			err: errors.Join(
@@ -350,7 +376,14 @@ func TestPrinter_PrintError(t *testing.T) {
 				),
 				bound,
 			),
-			want: "├── $.x[0]: gone\n└── 2:4: $.b: bad\n\n" + labeled + "\n\nno excerpt: resolve $.x[0]: not found",
+			want: stringtest.JoinLF(
+				"├── $.x[0]: gone",
+				"└── 2:4: $.b: bad",
+				"",
+				labeled,
+				"",
+				"no excerpt: resolve $.x[0]: not found",
+			),
 		},
 		// No path resolves in a document with no content, so the tree
 		// names each path and no reason follows it.
@@ -360,7 +393,7 @@ func TestPrinter_PrintError(t *testing.T) {
 		},
 		"bound errors in a source with no content": {
 			err:  yamltest.Bind(t, blank, niceyaml.NewSummary("2 problems", errAt("bad a", "a"), errAt("bad b", "b"))),
-			want: "2 problems\n├── $.a: bad a\n└── $.b: bad b",
+			want: stringtest.JoinLF("2 problems", "├── $.a: bad a", "└── $.b: bad b"),
 		},
 		"bound error at the root of a file of comments": {
 			err:  yamltest.Bind(t, comments, niceyaml.NewError("bad", niceyaml.AtPath(paths.Current()))),
@@ -370,13 +403,13 @@ func TestPrinter_PrintError(t *testing.T) {
 		// hold, so its reason stays.
 		"bound error at a position in a source with no content": {
 			err:  yamltest.Bind(t, blank, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(3, 0)))),
-			want: "bad\n\nno excerpt: location outside source: line 4 of an empty source",
+			want: stringtest.JoinLF("bad", "", "no excerpt: location outside source: line 4 of an empty source"),
 		},
 		// A row drops its trailing spaces: the space after "b", and the
 		// blank indent in front of the blank line of the last branch.
 		"joined error with a blank line in a branch": {
 			err:  errors.Join(errors.New("a"), errors.New("b \n\nc")),
-			want: "├── a\n└── b\n\n    c",
+			want: stringtest.JoinLF("├── a", "└── b", "", "    c"),
 		},
 		// Each tab becomes four spaces, wherever it falls in its row.
 		"tabs in messages expand to spaces": {
@@ -392,7 +425,7 @@ func TestPrinter_PrintError(t *testing.T) {
 		},
 		"tab in a message with no nested errors": {
 			err:  errors.New("Did you mean this?\n\tvalidate"),
-			want: "Did you mean this?\n    validate",
+			want: stringtest.JoinLF("Did you mean this?", "    validate"),
 		},
 		// The excerpt spells the message beside the caret as the tree
 		// spells it.
@@ -422,16 +455,30 @@ func TestPrinter_PrintError(t *testing.T) {
 			),
 		},
 		"nested errors draw as branches in position order": {
-			err:  yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", errAt("bad b", "b"), errAt("bad a", "a"))),
-			want: "2 problems\n├── 1:4: $.a: bad a\n└── 2:4: $.b: bad b\n\n" + annotated,
+			err: yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", errAt("bad b", "b"), errAt("bad a", "a"))),
+			want: stringtest.JoinLF(
+				"2 problems",
+				"├── 1:4: $.a: bad a",
+				"└── 2:4: $.b: bad b",
+				"",
+				annotated,
+			),
 		},
 		"joined nested errors draw as a forest of subtrees": {
 			err: errors.Join(
 				yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", errAt("bad a", "a"), errAt("bad b", "b"))),
 				yamltest.Bind(t, other, errAt("bad", "c")),
 			),
-			want: "├── 2 problems\n│   ├── 1:4: $.a: bad a\n│   └── 2:4: $.b: bad b\n└── 1:4: $.c: bad\n\n" +
-				annotated + "\n\n" + otherLabeled,
+			want: stringtest.JoinLF(
+				"├── 2 problems",
+				"│   ├── 1:4: $.a: bad a",
+				"│   └── 2:4: $.b: bad b",
+				"└── 1:4: $.c: bad",
+				"",
+				annotated,
+				"",
+				otherLabeled,
+			),
 		},
 	}
 
