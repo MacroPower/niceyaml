@@ -842,11 +842,10 @@ func TestPrinter_MarksRangeUnderHighlight(t *testing.T) {
 	// carets below the line still mark the range of the error alone, in
 	// whichever order the view gets the two.
 	tcs := map[string]struct {
-		source         string
-		key            string
-		highlight      position.Range
-		highlightFirst bool
-		want           string
+		source    string
+		key       string
+		highlight position.Range
+		want      string
 	}{
 		"highlight on the key": {
 			source:    "key: value\nname: other value\n",
@@ -858,33 +857,10 @@ func TestPrinter_MarksRangeUnderHighlight(t *testing.T) {
 				"      ^^^^^^^^^^^",
 			),
 		},
-		"highlight before the annotation": {
-			source:         "key: value\nname: other value\n",
-			key:            "name",
-			highlight:      position.NewRange(position.New(1, 0), position.New(1, 4)),
-			highlightFirst: true,
-			want: stringtest.JoinLF(
-				"key: value",
-				"name: other value",
-				"      ^^^^^^^^^^^",
-			),
-		},
 		"empty value": {
 			source:    "a: 1\nb:\nc: 2\n",
 			key:       "b",
 			highlight: position.NewRange(position.New(1, 0), position.New(1, 1)),
-			want: stringtest.JoinLF(
-				"a: 1",
-				"b:",
-				"  ^",
-				"c: 2",
-			),
-		},
-		"empty value highlighted before the annotation": {
-			source:         "a: 1\nb:\nc: 2\n",
-			key:            "b",
-			highlight:      position.NewRange(position.New(1, 0), position.New(1, 1)),
-			highlightFirst: true,
 			want: stringtest.JoinLF(
 				"a: 1",
 				"b:",
@@ -907,20 +883,18 @@ func TestPrinter_MarksRangeUnderHighlight(t *testing.T) {
 
 			require.ErrorAs(t, bound, &se)
 
-			view := source.View()
-			if tc.highlightFirst {
-				view.BlendOverlay(kind.GenericHighlight, tc.highlight)
-			}
+			highlighted := source.View()
+			highlighted.BlendOverlay(kind.GenericHighlight, tc.highlight)
+			se.Annotate(highlighted)
 
-			se.Annotate(view)
-
-			if !tc.highlightFirst {
-				view.BlendOverlay(kind.GenericHighlight, tc.highlight)
-			}
+			annotated := source.View()
+			se.Annotate(annotated)
+			annotated.BlendOverlay(kind.GenericHighlight, tc.highlight)
 
 			p := testPrinter()
 
-			assert.Equal(t, tc.want, p.Print(view))
+			assert.Equal(t, tc.want, p.Print(highlighted), "highlight before the annotation")
+			assert.Equal(t, tc.want, p.Print(annotated), "annotation before the highlight")
 		})
 	}
 }
