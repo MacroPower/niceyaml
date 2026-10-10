@@ -1356,10 +1356,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		store := newCatalogStore(t, workflowCatalog)
 
-		doc := yamltest.FirstDocumentWithPath(t, `on: push`, ".github/workflows/ci.yaml")
-		ref, err := store.Resolve(t.Context(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, workflowSchemaURL, ref.Key())
+		requireRef(t, store, ".github/workflows/ci.yaml", workflowSchemaURL)
 	})
 
 	t.Run("no match for unknown file", func(t *testing.T) {
@@ -1396,10 +1393,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		store := newCatalogStore(t, catalog)
 
-		doc := yamltest.FirstDocumentWithPath(t, `on: push`, "ci.yml")
-		ref, err := store.Resolve(t.Context(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, "https://example.com/local.json", ref.Key())
+		requireRef(t, store, "ci.yml", "https://example.com/local.json")
 
 		entry, err := store.FindMatch(t.Context(), "./ci.yml")
 		require.NoError(t, err)
@@ -1420,13 +1414,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 			testSchemaURL: schemaData,
 		})
 
-		store := newStore(client)
-
-		doc := yamltest.FirstDocumentWithPath(t, `key: value`, "config.yaml")
-
-		ref, err := store.Resolve(t.Context(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, testSchemaURL, ref.Key())
+		ref := requireRef(t, newStore(client), "config.yaml", testSchemaURL)
 
 		data, err := schema.NewRegistry(schema.WithHTTPClient(client)).Load(t.Context(), ref)
 		require.NoError(t, err)
@@ -1442,17 +1430,11 @@ func TestSchemaStore_Resolve(t *testing.T) {
 			catalogURL: marshalCatalog(t, testCatalog),
 		})
 
-		store := newStore(client)
-
-		doc := yamltest.FirstDocumentWithPath(t, `key: value`, "config.yaml")
-
 		// The path matches, so Resolve names the schema. Only the load fails,
 		// and a failed load is not a no-match.
-		ref, err := store.Resolve(t.Context(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, testSchemaURL, ref.Key())
+		ref := requireRef(t, newStore(client), "config.yaml", testSchemaURL)
 
-		_, err = schema.NewRegistry(schema.WithHTTPClient(client)).Load(t.Context(), ref)
+		_, err := schema.NewRegistry(schema.WithHTTPClient(client)).Load(t.Context(), ref)
 		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorContains(t, err, "fetch "+testSchemaURL+": status 404")
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
@@ -1695,6 +1677,20 @@ func requireEntry(t *testing.T, store *schemastore.Store, want string) {
 	entry, err := store.FindMatch(t.Context(), "config.yaml")
 	require.NoError(t, err)
 	assert.Equal(t, want, entry.Name)
+}
+
+// requireRef resolves a document at filePath through store and returns its
+// reference, which must name the schema at wantURL.
+func requireRef(t *testing.T, store *schemastore.Store, filePath, wantURL string) schema.Ref {
+	t.Helper()
+
+	doc := yamltest.FirstDocumentWithPath(t, `key: value`, filePath)
+
+	ref, err := store.Resolve(t.Context(), doc)
+	require.NoError(t, err)
+	assert.Equal(t, wantURL, ref.Key())
+
+	return ref
 }
 
 // findMatchResult holds what a FindMatch call started by findMatchAsync
