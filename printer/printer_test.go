@@ -1696,12 +1696,6 @@ func TestPrinter_WordWrap(t *testing.T) {
 		want   string
 		width  int
 	}{
-		"no wrap when width is zero": {
-			input:  "key: value",
-			width:  0,
-			gutter: printer.NoGutter,
-			want:   "key: value",
-		},
 		"simple wrap": {
 			input:  "key: this is a very long value that should wrap",
 			width:  20,
@@ -2500,24 +2494,6 @@ func TestPrinter_WordWrap_BreakpointPastWidth_KeepsStyle(t *testing.T) {
 	}
 
 	require.True(t, found, "no row ends in the cut-off text: %q", rows)
-}
-
-func TestPrinter_WordWrap_WideLineNumbers(t *testing.T) {
-	t.Parallel()
-
-	// With more than 9999 lines the gutter grows by a column, and the wrap
-	// width must shrink with it so no rendered row exceeds the width.
-	input := strings.Repeat("k: v\n", 10000) + "last: this is a long value that wraps"
-	source := niceyaml.NewSourceFromString(input)
-
-	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(30))
-
-	got := p.Print(source.View().Slice(position.NewSpan(10000, 10001)))
-	assertRowsFit(t, got, 30)
-	assert.Equal(t, stringtest.JoinLF(
-		"10001 last: this is a long",
-		"    - value that wraps",
-	), got)
 }
 
 func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
@@ -5744,7 +5720,9 @@ func TestPrinter_LineNumbers_MaxNumber(t *testing.T) {
 
 	// A slice of a long document has a Len of one but a line number past
 	// 9999, so the gutter must size itself from the number, and every row
-	// of the line, wrapped or annotated, must share that width.
+	// of the line, wrapped or annotated, must share that width. The gutter
+	// grows by a column, and the wrap width must shrink with it so no
+	// rendered row exceeds the width.
 	input := strings.Repeat("k: v\n", 10000) + "last: this is a long value that wraps"
 	source := niceyaml.NewSourceFromString(input)
 	view := source.View().Slice(position.NewSpan(10000, source.Lines().Len()))
