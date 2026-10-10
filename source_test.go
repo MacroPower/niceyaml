@@ -2218,8 +2218,11 @@ func TestSource_Parse(t *testing.T) {
 			want  string
 		}{
 			"tab indents a key": {
-				input: "a:\n\tb: 1\n",
-				err:   "t.yaml:2:2: found character '\u2409' that cannot start any token",
+				input: stringtest.LinesLF(
+					"a:",
+					"\tb: 1",
+				),
+				err: "t.yaml:2:2: found character '\u2409' that cannot start any token",
 				want: stringtest.JoinLF(
 					"t.yaml:2:2: found character '\u2409' that cannot start any token",
 					"",
@@ -2229,7 +2232,7 @@ func TestSource_Parse(t *testing.T) {
 				),
 			},
 			"tab alone on a line": {
-				input: "a:\n\t\nb: 1\n",
+				input: stringtest.LinesLF("a:", "\t", "b: 1"),
 				err:   "t.yaml:3:1: found character '\u2409' that cannot start any token",
 				want: stringtest.JoinLF(
 					"t.yaml:3:1: found character '\u2409' that cannot start any token",
@@ -2240,8 +2243,11 @@ func TestSource_Parse(t *testing.T) {
 				),
 			},
 			"tab indents a sequence entry": {
-				input: "a: 1\n\t- x\n",
-				err:   "t.yaml:1:4: found character '\u2409' that cannot start any token",
+				input: stringtest.LinesLF(
+					"a: 1",
+					"\t- x",
+				),
+				err: "t.yaml:1:4: found character '\u2409' that cannot start any token",
 				want: stringtest.JoinLF(
 					"t.yaml:1:4: found character '\u2409' that cannot start any token",
 					"",
@@ -2288,20 +2294,35 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			want:  []bool{false},
 		},
 		"tab indents a key": {
-			input: "a:\n\tb: 1\n",
-			want:  []bool{true},
+			input: stringtest.LinesLF(
+				"a:",
+				"\tb: 1",
+			),
+			want: []bool{true},
 		},
 		"unknown escape": {
 			input: "a: \"\\q\"\n",
 			want:  []bool{true},
 		},
 		"second of three documents": {
-			input: "a: 1\n---\nb: [\n---\nc: 3\n",
-			want:  []bool{false, true, false},
+			input: stringtest.LinesLF(
+				"a: 1",
+				"---",
+				"b: [",
+				"---",
+				"c: 3",
+			),
+			want: []bool{false, true, false},
 		},
 		"first and third of three documents": {
-			input: "a: [\n---\nb: 2\n---\nc: @x\n",
-			want:  []bool{true, false, true},
+			input: stringtest.LinesLF(
+				"a: [",
+				"---",
+				"b: 2",
+				"---",
+				"c: @x",
+			),
+			want: []bool{true, false, true},
 		},
 		// The parser takes an alias with no anchor, and a decode rejects
 		// it.
@@ -2376,7 +2397,7 @@ func TestSource_AllDocuments(t *testing.T) {
 	t.Run("file that parses holds the Nodes Documents returns", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
+		source := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "---", "b: 2"))
 
 		docs := source.Documents()
 		require.Len(t, docs, 2)
@@ -2398,7 +2419,15 @@ func TestSource_AllDocuments(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString(
-			"a: 1\n---\nb: 2\n---\na: [\n---\nc: 3\n",
+			stringtest.LinesLF(
+				"a: 1",
+				"---",
+				"b: 2",
+				"---",
+				"a: [",
+				"---",
+				"c: 3",
+			),
 			niceyaml.WithName("cfg.yaml"),
 		)
 
@@ -2428,7 +2457,7 @@ func TestSource_AllDocuments(t *testing.T) {
 	t.Run("two documents that parse together return one syntax error", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("a: &x\n---\nb: [\n")
+		source := niceyaml.NewSourceFromString(stringtest.LinesLF("a: &x", "---", "b: ["))
 
 		all := source.AllDocuments()
 		require.Len(t, all, 2)
@@ -2461,32 +2490,64 @@ func TestSource_AllDocuments(t *testing.T) {
 				want:  []int{0},
 			},
 			"first of three": {
-				input: "a: [1\n---\nb: 2\n---\nc: 3\n",
-				want:  []int{0},
+				input: stringtest.LinesLF(
+					"a: [1",
+					"---",
+					"b: 2",
+					"---",
+					"c: 3",
+				),
+				want: []int{0},
 			},
 			"second of three": {
-				input: "a: 1\n---\nb: [1, 2\n---\nc: 3\n",
-				want:  []int{1},
+				input: stringtest.LinesLF(
+					"a: 1",
+					"---",
+					"b: [1, 2",
+					"---",
+					"c: 3",
+				),
+				want: []int{1},
 			},
 			"last of three": {
-				input: "a: 1\n---\nb: 2\n---\nc: [3\n",
-				want:  []int{2},
+				input: stringtest.LinesLF(
+					"a: 1",
+					"---",
+					"b: 2",
+					"---",
+					"c: [3",
+				),
+				want: []int{2},
 			},
 			"first and last of three": {
-				input: "a: [1\n---\nb: 2\n---\nc: [3\n",
-				want:  []int{0, 2},
+				input: stringtest.LinesLF(
+					"a: [1",
+					"---",
+					"b: 2",
+					"---",
+					"c: [3",
+				),
+				want: []int{0, 2},
 			},
 			"second of two that parse together": {
-				input: "a: &x\n---\nb: [1\n",
+				input: stringtest.LinesLF("a: &x", "---", "b: [1"),
 				want:  []int{1},
 			},
 			"first of two that parse together": {
-				input: "a: [1\nb: &x\n---\nc: 1\n",
+				input: stringtest.LinesLF("a: [1", "b: &x", "---", "c: 1"),
 				want:  []int{0},
 			},
 			"second of two that parse together below another": {
-				input: "k: 1\n---\na: &x\n---\nb: [1\n---\nc: 2\n",
-				want:  []int{2},
+				input: stringtest.LinesLF(
+					"k: 1",
+					"---",
+					"a: &x",
+					"---",
+					"b: [1",
+					"---",
+					"c: 2",
+				),
+				want: []int{2},
 			},
 		}
 
@@ -2528,7 +2589,7 @@ func TestSource_AllDocuments(t *testing.T) {
 		// The parser panics on a token with no position, and no token of
 		// the run has one to locate the error at. The header follows an
 		// anchor with no value, so both documents parse together.
-		tks := lexer.Tokenize("a: &x\n---\nb: 1\n")
+		tks := lexer.Tokenize(stringtest.LinesLF("a: &x", "---", "b: 1"))
 		for _, tk := range tks {
 			tk.Position = nil
 		}
@@ -2561,7 +2622,13 @@ func TestSource_AllDocuments(t *testing.T) {
 		// race detector fails the test when one goroutine reads the error
 		// File returned while the other still builds the documents.
 		for range 20 {
-			source := niceyaml.NewSourceFromString("a: 1\n---\nb: [1, 2\n---\nc: 3\n")
+			source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+				"a: 1",
+				"---",
+				"b: [1, 2",
+				"---",
+				"c: 3",
+			))
 
 			var (
 				wg                 sync.WaitGroup
@@ -2640,21 +2707,35 @@ func TestSource_Documents_CollectErrors(t *testing.T) {
 		// The message of each binding a loop over Documents collects.
 		tolerant []string
 	}{
-		"file that parses": {input: "a: 1\n---\nb: 2\n"},
+		"file that parses": {input: stringtest.LinesLF("a: 1", "---", "b: 2")},
 		"one syntax error": {
-			input:    "a: 1\n---\nb: 2\n---\na: [\n---\nc: 3\n",
+			input: stringtest.LinesLF(
+				"a: 1",
+				"---",
+				"b: 2",
+				"---",
+				"a: [",
+				"---",
+				"c: 3",
+			),
 			strict:   []string{"cfg.yaml:5:4: " + unclosedSequence},
 			tolerant: []string{"cfg.yaml:5:4: " + unclosedSequence},
 		},
 		"two syntax errors": {
-			input:    "a: [\n---\nb: 1\n---\nc: [\n",
+			input: stringtest.LinesLF(
+				"a: [",
+				"---",
+				"b: 1",
+				"---",
+				"c: [",
+			),
 			strict:   []string{"cfg.yaml:1:4: " + unclosedSequence, "cfg.yaml:5:4: " + unclosedSequence},
 			tolerant: []string{"cfg.yaml:1:4: " + unclosedSequence, "cfg.yaml:5:4: " + unclosedSequence},
 		},
 		// The header parses together with the document above it, so both
 		// documents return the one error.
 		"syntax error two documents share": {
-			input:    "a: &x\n---\nb: [\n",
+			input:    stringtest.LinesLF("a: &x", "---", "b: ["),
 			strict:   []string{"cfg.yaml:3:4: " + unclosedSequence},
 			tolerant: []string{"cfg.yaml:3:4: " + unclosedSequence, "cfg.yaml:3:4: " + unclosedSequence},
 		},
@@ -2711,17 +2792,33 @@ func TestSource_AllDocuments_SyntaxError(t *testing.T) {
 			spans: []position.Span{position.NewSpan(0, 1)},
 		},
 		"first of two": {
-			input: "a: [\n---\nb: 1\n",
+			input: stringtest.LinesLF("a: [", "---", "b: 1"),
 			want:  []string{"f.yaml:1:4: " + unclosedSequence, ""},
 			spans: []position.Span{position.NewSpan(0, 1), position.NewSpan(1, 3)},
 		},
 		"last of three": {
-			input: "a: 1\n---\nb: 2\n---\nc: [\n",
+			input: stringtest.LinesLF(
+				"a: 1",
+				"---",
+				"b: 2",
+				"---",
+				"c: [",
+			),
 			want:  []string{"", "", "f.yaml:5:4: " + unclosedSequence},
 			spans: []position.Span{position.NewSpan(0, 1), position.NewSpan(1, 3), position.NewSpan(3, 5)},
 		},
 		"second and fourth of five": {
-			input: "a: 1\n---\nb: [\n---\nc: 3\n---\nd: @x\n---\ne: 5\n",
+			input: stringtest.LinesLF(
+				"a: 1",
+				"---",
+				"b: [",
+				"---",
+				"c: 3",
+				"---",
+				"d: @x",
+				"---",
+				"e: 5",
+			),
 			want: []string{
 				"",
 				"f.yaml:3:4: " + unclosedSequence,
@@ -2738,35 +2835,62 @@ func TestSource_AllDocuments_SyntaxError(t *testing.T) {
 			},
 		},
 		"unclosed quote ends at the next header": {
-			input: "a: \"x\n---\nb: 2\n",
+			input: stringtest.LinesLF(`a: "x`, "---", "b: 2"),
 			want:  []string{"f.yaml:1:4: found unexpected document separator", ""},
 			spans: []position.Span{position.NewSpan(0, 1), position.NewSpan(1, 3)},
 		},
 		"document without a header after an end marker": {
-			input: "a: 1\n...\nb: [\n...\nc: 3\n",
+			input: stringtest.LinesLF(
+				"a: 1",
+				"...",
+				"b: [",
+				"...",
+				"c: 3",
+			),
 			want:  []string{"", "f.yaml:3:4: " + unclosedSequence, ""},
 			spans: []position.Span{position.NewSpan(0, 2), position.NewSpan(2, 4), position.NewSpan(4, 5)},
 		},
 		"comment and directive above the header": {
-			input: "a: 1\n...\n# top\n%YAML 1.2\n---\nb: [\n---\nc: 3\n",
+			input: stringtest.LinesLF(
+				"a: 1",
+				"...",
+				"# top",
+				"%YAML 1.2",
+				"---",
+				"b: [",
+				"---",
+				"c: 3",
+			),
 			want:  []string{"", "f.yaml:6:4: " + unclosedSequence, ""},
 			spans: []position.Span{position.NewSpan(0, 2), position.NewSpan(2, 6), position.NewSpan(6, 8)},
 		},
 		"directive that no document follows": {
-			input: "a: 1\n...\n%YAML 1.2\n",
+			input: stringtest.LinesLF("a: 1", "...", "%YAML 1.2"),
 			want:  []string{"", "f.yaml:3:1: unexpected directive value. document not started"},
 			spans: []position.Span{position.NewSpan(0, 2), position.NewSpan(2, 3)},
 		},
 		// The header parses together with the document above it, so the
 		// error of either document fails both.
 		"header after an anchor with no value": {
-			input: "a: &x\n---\nb: [\n---\nc: 3\n",
+			input: stringtest.LinesLF(
+				"a: &x",
+				"---",
+				"b: [",
+				"---",
+				"c: 3",
+			),
 			want:  []string{"f.yaml:3:4: " + unclosedSequence, "f.yaml:3:4: " + unclosedSequence, ""},
 			spans: []position.Span{position.NewSpan(0, 1), position.NewSpan(1, 3), position.NewSpan(3, 5)},
 		},
 		"empty documents around the failure": {
-			input: "---\n---\na: [\n---\n---\n",
-			want:  []string{"", "f.yaml:3:4: " + unclosedSequence, "", ""},
+			input: stringtest.LinesLF(
+				"---",
+				"---",
+				"a: [",
+				"---",
+				"---",
+			),
+			want: []string{"", "f.yaml:3:4: " + unclosedSequence, "", ""},
 			spans: []position.Span{
 				position.NewSpan(0, 1),
 				position.NewSpan(1, 3),
