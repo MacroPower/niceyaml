@@ -1103,9 +1103,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 		err := yamltest.Bind(t, source, niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b"))))
 		assert.Equal(t, "2:4: $.b: bad b", err.Error())
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 
 		rng, ok := bound.Range()
 		require.True(t, ok)
@@ -1136,13 +1134,8 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 		last := full.Lines().TokenAt(position.New(4, 0))
 		require.NotNil(t, last)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(
-			t,
-			yamltest.Bind(t, source, niceyaml.NewError("bad d", niceyaml.AtPosition(position.NewFromToken(last)))),
-			&bound,
-		)
+		bound := sourceErrorOf(t,
+			yamltest.Bind(t, source, niceyaml.NewError("bad d", niceyaml.AtPosition(position.NewFromToken(last)))))
 
 		err := bound.Unresolved()
 		require.ErrorIs(t, err, niceyaml.ErrOutOfRange)
@@ -2023,9 +2016,7 @@ func TestSource_Parse(t *testing.T) {
 		_, ok := value.(runtime.Error)
 		assert.True(t, ok, "got %T", value)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Same(t, source, bound.Source())
 
 		file, again := source.File()
@@ -2299,9 +2290,7 @@ func TestSource_AllDocuments(t *testing.T) {
 		// whichever of the two returns it.
 		var cfg map[string]any
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, all[0].DecodeInto(t.Context(), &cfg), &bound)
+		bound := sourceErrorOf(t, all[0].DecodeInto(t.Context(), &cfg))
 		assert.Same(t, all[1], bound.Document())
 	})
 
@@ -2398,9 +2387,7 @@ func TestSource_AllDocuments(t *testing.T) {
 		requirePanic(t, all[0].Err())
 		assert.Same(t, all[0].Err(), all[1].Err())
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, all[1].Err(), &bound)
+		bound := sourceErrorOf(t, all[1].Err())
 		assert.Same(t, all[0], bound.Document())
 
 		_, ok := bound.Position()
@@ -3011,6 +2998,18 @@ func TestSource_Documents_LeavesOutEmpty(t *testing.T) {
 	}
 }
 
+// sourceErrorOf returns the first [*niceyaml.SourceError] in the chain of
+// err. The test fails when the chain holds none.
+func sourceErrorOf(tb testing.TB, err error) *niceyaml.SourceError {
+	tb.Helper()
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(tb, err, &bound)
+
+	return bound
+}
+
 // bindingMessages returns the message of each binding in the tree of err,
 // in order.
 func bindingMessages(err error) []string {
@@ -3545,9 +3544,7 @@ func TestSource_ValidateDocuments_Context(t *testing.T) {
 		assert.Equal(t, int32(0), calls.Load())
 		assert.Equal(t, []string{"f.yaml: context canceled"}, bindingMessages(err))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Same(t, source, bound.Source())
 
 		// With a nil validator, the ended ctx still fails the call.
@@ -3911,9 +3908,7 @@ func TestDocument_BindChain(t *testing.T) {
 				wrapped := yamltest.Bind(t, source, stdErr)
 				require.ErrorIs(t, wrapped, stdErr)
 
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, wrapped, &bound)
+				bound := sourceErrorOf(t, wrapped)
 				assert.Same(t, source, bound.Source())
 				assert.Equal(t, tc.want, wrapped.Error())
 				assert.Equal(t, tc.want, fmt.Sprintf("%+v", wrapped), "no location, so no excerpt")
@@ -3977,9 +3972,7 @@ func TestDocument_BindChain(t *testing.T) {
 				// resolves there.
 				wrapped := yamltest.Bind(t, source, err)
 
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, wrapped, &bound)
+				bound := sourceErrorOf(t, wrapped)
 				assert.Same(t, source, bound.Source())
 				require.ErrorIs(t, wrapped, pathErr)
 
@@ -3992,7 +3985,7 @@ func TestDocument_BindChain(t *testing.T) {
 
 				docs := source.Documents()
 
-				require.ErrorAs(t, docs[0].Bind(err), &bound)
+				bound = sourceErrorOf(t, docs[0].Bind(err))
 				assert.Same(t, source, bound.Source())
 			})
 		}
@@ -4025,9 +4018,7 @@ func TestDocument_BindChain(t *testing.T) {
 		// it nor adds its name.
 		require.Same(t, once, twice)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, twice, &bound)
+		bound := sourceErrorOf(t, twice)
 		assert.Same(t, first, bound.Source())
 		assert.Equal(t, "1:7: $.name: bad name", twice.Error())
 	})
@@ -4078,9 +4069,7 @@ func TestSource_Bind(t *testing.T) {
 		rng := position.NewRange(position.New(2, 3), position.New(2, 5))
 		err := source.Bind(niceyaml.NewError("too wide", niceyaml.AtRange(rng)))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Same(t, source, bound.Source())
 		assert.Same(t, docs[1], bound.Document())
 		assert.Equal(t, "two.yaml:3:4: too wide", err.Error())
@@ -4106,9 +4095,7 @@ func TestSource_Bind(t *testing.T) {
 
 		err := source.Bind(niceyaml.NewError("bad value", niceyaml.AtPosition(position.New(2, 3))))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Same(t, docs[1], bound.Document())
 
 		got, ok := bound.Range()
@@ -4123,9 +4110,7 @@ func TestSource_Bind(t *testing.T) {
 
 		err := source.Bind(niceyaml.NewError("bad value", niceyaml.AtPosition(position.New(0, 3))))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Same(t, docs[0], bound.Document())
 		assert.Equal(t, "two.yaml:1:4: bad value", err.Error())
 	})
@@ -4135,9 +4120,7 @@ func TestSource_Bind(t *testing.T) {
 
 		err := source.Bind(niceyaml.NewError("far", niceyaml.AtPosition(position.New(9, 0))))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Nil(t, bound.Document())
 
 		rangeErr := bound.Unresolved()
@@ -4151,9 +4134,7 @@ func TestSource_Bind(t *testing.T) {
 
 		err := source.Bind(niceyaml.NewError("far", niceyaml.AtPosition(position.New(2, -3))))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Equal(t, "two.yaml: document 2: far", err.Error())
 		assert.Same(t, docs[1], bound.Document())
 
@@ -4210,9 +4191,7 @@ func TestSource_Bind(t *testing.T) {
 
 				err := broken.Bind(niceyaml.NewError("bad", tc.opt))
 
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &bound)
+				bound := sourceErrorOf(t, err)
 				assert.Same(t, docs[tc.want], bound.Document())
 				assert.Equal(t, tc.msg, err.Error())
 				require.NoError(t, bound.Unresolved())
@@ -4226,9 +4205,7 @@ func TestSource_Bind(t *testing.T) {
 		broken := niceyaml.NewSourceFromString("a: [\n", niceyaml.WithName("broken.yaml"))
 		err := broken.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 0))))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Same(t, broken.AllDocuments()[0], bound.Document())
 		assert.Equal(t, "broken.yaml:1:1: bad", err.Error())
 	})
@@ -4244,9 +4221,7 @@ func TestSource_Bind(t *testing.T) {
 
 		err = one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Equal(t, "one.yaml:3:4: $.b: bad", err.Error())
 		assert.Same(t, doc, bound.Document())
 
@@ -4273,9 +4248,7 @@ func TestSource_Bind(t *testing.T) {
 
 		err = one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("zz").Index(0))))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Equal(t, "one.yaml: $.zz[0]: bad", err.Error())
 		assert.Same(t, doc, bound.Document())
 
@@ -4299,9 +4272,7 @@ func TestSource_Bind(t *testing.T) {
 
 		err := keyed.Bind(niceyaml.NewError("bad port", niceyaml.AtPath(paths.Current().Child("port"))))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Equal(t, "f.yaml:5:7: $.port: bad port", err.Error())
 
 		got, ok := bound.Range()
@@ -4326,9 +4297,7 @@ func TestSource_Bind(t *testing.T) {
 		// reason in place of the excerpt.
 		err := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Equal(t, "two.yaml: $.b: bad", err.Error())
 		assert.Nil(t, bound.Document())
 
@@ -4358,9 +4327,7 @@ func TestSource_Bind(t *testing.T) {
 			doc, docErr := src.Document()
 			require.NoError(t, docErr)
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := sourceErrorOf(t, err)
 			assert.Equal(t, want, err.Error())
 			assert.Same(t, doc, bound.Document(), input)
 			require.NoError(t, bound.Unresolved(), input)
@@ -4380,9 +4347,7 @@ func TestSource_Bind(t *testing.T) {
 			doc, docErr := src.Document()
 			require.NoError(t, docErr)
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := sourceErrorOf(t, err)
 			assert.Same(t, doc, bound.Document(), input)
 
 			rangeErr := bound.Unresolved()
@@ -4400,9 +4365,7 @@ func TestSource_Bind(t *testing.T) {
 
 		err := broken.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a"))))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Nil(t, bound.Document())
 
 		rangeErr := bound.Unresolved()
@@ -4420,9 +4383,7 @@ func TestSource_Bind(t *testing.T) {
 			niceyaml.NewError("bad b", niceyaml.AtPosition(position.New(2, 3))),
 		))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Nil(t, bound.Document())
 
 		children := yamltest.ProblemsOf(bound)
@@ -4439,9 +4400,7 @@ func TestSource_Bind(t *testing.T) {
 			niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b"))),
 		))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 
 		for _, child := range yamltest.ProblemsOf(bound) {
 			rangeErr := child.Bound.Unresolved()
@@ -4462,9 +4421,7 @@ func TestSource_Bind(t *testing.T) {
 
 		err := source.Bind(errors.New("plain"))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		assert.Same(t, source, sourceErrorOf(t, err).Source())
 		assert.Equal(t, "two.yaml: plain", err.Error())
 	})
 
@@ -4520,9 +4477,7 @@ func TestSource_Bind_RoutesDocuments(t *testing.T) {
 
 			rng := position.NewRange(position.New(tc.line, 0), position.New(tc.line, 1))
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, source.Bind(niceyaml.NewError("bad", niceyaml.AtRange(rng))), &bound)
+			bound := sourceErrorOf(t, source.Bind(niceyaml.NewError("bad", niceyaml.AtRange(rng))))
 
 			if tc.want < 0 {
 				assert.Nil(t, bound.Document())
@@ -4824,9 +4779,7 @@ func TestSource_Decode(t *testing.T) {
 		_, err := source.Decode[config](t.Context())
 		require.Error(t, err)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Same(t, source, bound.Source())
 	})
 }
@@ -4912,9 +4865,7 @@ func TestSource_SelfValidate(t *testing.T) {
 			assert.True(t, niceyaml.IsInvalid(err))
 			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := sourceErrorOf(t, err)
 			assert.Same(t, source, bound.Source())
 
 			_, ok := bound.Position()
@@ -5430,9 +5381,7 @@ func TestWithReferences(t *testing.T) {
 				require.ErrorIs(t, err, paths.ErrAlias)
 				assert.False(t, niceyaml.IsInvalid(err))
 
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &bound)
+				bound := sourceErrorOf(t, err)
 
 				_, ok := bound.Position()
 				assert.False(t, ok)
@@ -5498,9 +5447,7 @@ func TestWithReferences(t *testing.T) {
 					"     |         ^",
 				), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &bound)
+				bound := sourceErrorOf(t, err)
 
 				near, ok := bound.Nearest()
 				require.True(t, ok)
@@ -5535,9 +5482,7 @@ func TestWithReferences(t *testing.T) {
 			"no excerpt: resolve $.kind: alias does not resolve: *base has no anchor before it",
 		), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 
 		_, ok := bound.Nearest()
 		assert.False(t, ok)
@@ -5657,9 +5602,7 @@ func TestWithExcerpts(t *testing.T) {
 
 			err := yamltest.Bind(t, source, niceyaml.NewError("bad port", niceyaml.AtPath(paths.Doc().Child("port"))))
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := sourceErrorOf(t, err)
 
 			excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 			require.Equal(t, tc.want, ok)

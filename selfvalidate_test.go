@@ -348,9 +348,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		// joined path once, in front of the context.
 		require.EqualError(t, err, "cafe.yaml:3:10: $.hours.close: hours check: closes before it opens")
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		assert.Equal(t, "hours check: closes before it opens", bound.Message())
 
 		p, ok := bound.Path()
@@ -391,9 +389,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"cafe.yaml:3:10: $.schedule.close: close is empty",
 		))
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 		require.Len(t, yamltest.ProblemsOf(bound), 2)
 
 		assert.Equal(t, "cafe.yaml:2:9: $.schedule.open: open is empty", yamltest.ProblemsOf(bound)[0].Bound.Error())
@@ -481,9 +477,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		_, err = doc.Decode[nested](t.Context())
 		require.Error(t, err)
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 
 		var got []string
 
@@ -1327,9 +1321,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				"4:12: $.a.price: negative price",
 			))
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := sourceErrorOf(t, err)
 
 			got := make([]string, 0, len(want))
 			for _, child := range yamltest.ProblemsOf(bound) {
@@ -1606,9 +1598,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err := dd.Decode[map[string]map[float64]item](t.Context())
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 
 		var got []string
 
@@ -1649,9 +1639,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				_, err = dd.Decode[merged](t.Context())
 
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &bound)
+				bound := sourceErrorOf(t, err)
 
 				var got []string
 
@@ -1892,9 +1880,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 					return
 				}
 
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &bound)
+				bound := sourceErrorOf(t, err)
 
 				got := []string{err.Error()}
 				if children := yamltest.ProblemsOf(bound); len(children) > 0 {
@@ -1934,9 +1920,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				err := dd.DecodeInto(t.Context(), tc.target)
 
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &bound)
+				bound := sourceErrorOf(t, err)
 
 				var got []string
 
@@ -1978,9 +1962,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				for range 20 {
 					err := dd.DecodeInto(t.Context(), tc.target())
 
-					var bound *niceyaml.SourceError
-
-					require.ErrorAs(t, err, &bound)
+					bound := sourceErrorOf(t, err)
 
 					var got []string
 
@@ -2151,9 +2133,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err := dd.Decode[map[time.Time]item](t.Context())
 
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
+		bound := sourceErrorOf(t, err)
 
 		var got []string
 
@@ -2309,9 +2289,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				err := tc.decode(t.Context(), dd)
 
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &bound)
+				bound := sourceErrorOf(t, err)
 
 				got := []string{err.Error()}
 				if children := yamltest.ProblemsOf(bound); len(children) > 0 {
@@ -3014,9 +2992,7 @@ func TestNode_Decode_SelfValidatorContext(t *testing.T) {
 			require.EqualError(t, err, tc.err)
 			assert.Equal(t, tc.calls, p.calls.Load())
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := sourceErrorOf(t, err)
 
 			_, ok := bound.Position()
 			assert.False(t, ok)
@@ -3213,9 +3189,7 @@ func TestNode_SelfValidate_Target(t *testing.T) {
 			require.ErrorIs(t, err, niceyaml.ErrSelfValidateTarget)
 			require.EqualError(t, err, tc.err)
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := sourceErrorOf(t, err)
 
 			_, ok := bound.Position()
 			assert.False(t, ok)
@@ -3307,9 +3281,7 @@ func TestNode_SelfValidate_Node(t *testing.T) {
 				return
 			}
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := sourceErrorOf(t, err)
 
 			_, ok := bound.Position()
 			assert.False(t, ok)
@@ -3702,9 +3674,7 @@ func TestSelfValidateValue_Target(t *testing.T) {
 			require.EqualError(t, err, tc.err)
 			assert.False(t, niceyaml.IsInvalid(err))
 
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
+			bound := sourceErrorOf(t, err)
 			assert.Nil(t, bound.Node())
 
 			_, ok := bound.Position()
@@ -3755,9 +3725,7 @@ func TestSelfValidateValue_SharedPath(t *testing.T) {
 			for range 20 {
 				err := niceyaml.SelfValidateValue(t.Context(), tc.value())
 
-				var bound *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &bound)
+				bound := sourceErrorOf(t, err)
 
 				var got []string
 
