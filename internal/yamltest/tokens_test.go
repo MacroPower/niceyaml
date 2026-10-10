@@ -539,36 +539,31 @@ func (r *recordingTB) FailNow() {
 func TestRequireTokensEqual(t *testing.T) {
 	t.Parallel()
 
+	// The clones hold the fields of a and b under pointers of their own.
+	a := yamltest.NewTokenBuilder().Value("a").Build()
+	b := yamltest.NewTokenBuilder().Value("b").Build()
+
 	tcs := map[string]struct {
 		want token.Tokens
 		got  token.Tokens
 		msgs []string // Empty when the helper passes.
 	}{
 		"equal slices pass": {
-			want: token.Tokens{
-				yamltest.NewTokenBuilder().Value("a").Build(),
-				yamltest.NewTokenBuilder().Value("b").Build(),
-			},
-			got: token.Tokens{
-				yamltest.NewTokenBuilder().Value("a").Build(),
-				yamltest.NewTokenBuilder().Value("b").Build(),
-			},
+			want: token.Tokens{a, b},
+			got:  token.Tokens{a.Clone(), b.Clone()},
 		},
 		"value mismatch fails": {
-			want: token.Tokens{yamltest.NewTokenBuilder().Value("a").Build()},
-			got:  token.Tokens{yamltest.NewTokenBuilder().Value("b").Build()},
+			want: token.Tokens{a},
+			got:  token.Tokens{b},
 			msgs: []string{"token 0", "Value"},
 		},
 		"count mismatch fails": {
-			want: token.Tokens{yamltest.NewTokenBuilder().Build()},
-			got: token.Tokens{
-				yamltest.NewTokenBuilder().Build(),
-				yamltest.NewTokenBuilder().Build(),
-			},
+			want: token.Tokens{a},
+			got:  token.Tokens{a, a},
 			msgs: []string{"token count mismatch"},
 		},
 		"nil got token fails": {
-			want: token.Tokens{yamltest.NewTokenBuilder().Build()},
+			want: token.Tokens{a},
 			got:  token.Tokens{nil},
 			msgs: []string{"token 0 got: token is nil"},
 		},
