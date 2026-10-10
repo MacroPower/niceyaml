@@ -359,20 +359,9 @@ func TestPath_ChildAll(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, tc.path.String())
-
-			got, err := paths.Parse(tc.want)
-			require.NoError(t, err)
-			assert.Equal(t, tc.path, got)
-
 			// The goccy syntax has no selector for every entry of a
 			// mapping, and a path without it would name the mapping.
-			yp, err := tc.path.YAMLPath()
-			require.ErrorIs(t, err, paths.ErrNoYAMLPath)
-			assert.Nil(t, yp)
-
-			_, err = yaml.PathString(tc.want)
-			require.Error(t, err)
+			assertNoYAMLPath(t, tc.path, tc.want)
 		})
 	}
 
@@ -385,13 +374,27 @@ func TestPath_ChildAll(t *testing.T) {
 		assert.Equal(t, "$.jobs.'*'", star.String())
 		assert.Equal(t, "$.jobs.'*'", yamlPath(t, star).String())
 	})
+}
 
-	t.Run("YAMLPath names the path it cannot convert", func(t *testing.T) {
-		t.Parallel()
+// assertNoYAMLPath asserts that path prints as want and parses back from
+// it, and that goccy/go-yaml has no form for it. YAMLPath names the path
+// it cannot convert, and the goccy parser rejects the text.
+func assertNoYAMLPath(t *testing.T, path paths.Path, want string) {
+	t.Helper()
 
-		_, err := paths.Doc().Child("jobs").ChildAll().Child("steps").YAMLPath()
-		require.EqualError(t, err, "convert $.jobs.*.steps: selector has no goccy/go-yaml equivalent")
-	})
+	assert.Equal(t, want, path.String())
+
+	got, err := paths.Parse(want)
+	require.NoError(t, err)
+	assert.Equal(t, path, got)
+
+	yp, err := path.YAMLPath()
+	require.ErrorIs(t, err, paths.ErrNoYAMLPath)
+	require.EqualError(t, err, "convert "+want+": selector has no goccy/go-yaml equivalent")
+	assert.Nil(t, yp)
+
+	_, err = yaml.PathString(want)
+	require.Error(t, err)
 }
 
 func TestPath_RecursiveAll(t *testing.T) {
@@ -447,19 +450,8 @@ func TestPath_RecursiveAll(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, tc.path.String())
-
-			got, err := paths.Parse(tc.want)
-			require.NoError(t, err)
-			assert.Equal(t, tc.path, got)
-
 			// The goccy syntax takes a name alone after `..`.
-			yp, err := tc.path.YAMLPath()
-			require.ErrorIs(t, err, paths.ErrNoYAMLPath)
-			assert.Nil(t, yp)
-
-			_, err = yaml.PathString(tc.want)
-			require.Error(t, err)
+			assertNoYAMLPath(t, tc.path, tc.want)
 		})
 	}
 
@@ -471,13 +463,6 @@ func TestPath_RecursiveAll(t *testing.T) {
 		assert.False(t, paths.Doc().RecursiveAll().Equal(star))
 		assert.Equal(t, "$..'*'", star.String())
 		assert.Equal(t, star, paths.MustParse("$..'*'"))
-	})
-
-	t.Run("YAMLPath names the path it cannot convert", func(t *testing.T) {
-		t.Parallel()
-
-		_, err := paths.Doc().Child("spec").RecursiveAll().YAMLPath()
-		require.EqualError(t, err, "convert $.spec..*: selector has no goccy/go-yaml equivalent")
 	})
 }
 
