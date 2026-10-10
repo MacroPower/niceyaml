@@ -1206,12 +1206,8 @@ func TestDiffer_WithNilAlgorithm(t *testing.T) {
 	tcs := map[string]struct {
 		algo lcs.Algorithm
 	}{
-		"untyped nil": {
-			algo: nil,
-		},
-		"nil *lcs.Hirschberg": {
-			algo: (*lcs.Hirschberg)(nil),
-		},
+		"untyped nil":         {algo: nil},
+		"nil *lcs.Hirschberg": {algo: (*lcs.Hirschberg)(nil)},
 	}
 
 	for name, tc := range tcs {
