@@ -2834,54 +2834,57 @@ func (c accumulatingConfig) Validate() error {
 func TestDocument_Decode_SelfValidator(t *testing.T) {
 	t.Parallel()
 
-	t.Run("calls Validate on a SelfValidator struct", func(t *testing.T) {
+	t.Run("runs Validate unless the last WithSelfValidation turns it off", func(t *testing.T) {
 		t.Parallel()
 
-		input := stringtest.Input(`
-			name: test
-			value: 42
-		`)
-		dd := yamltest.FirstDocument(t, input)
+		off := niceyaml.WithSelfValidation(false)
 
-		result, err := dd.Decode[validatorConfig](t.Context())
-		require.NoError(t, err)
-		assert.True(t, result.validated, "Validate() should have been called by Decode()")
-		assert.Equal(t, "test", result.Name)
-		assert.Equal(t, 42, result.Value)
-	})
+		tcs := map[string]struct {
+			err   error
+			input string
+			opts  []niceyaml.DecodeOption
+			// Whether Validate ran on the value a decode returns.
+			validated bool
+		}{
+			"no option": {
+				input:     "name: test\nvalue: 42",
+				validated: true,
+			},
+			"no option returns the error of Validate": {
+				input: "name: \"\"\nvalue: 42",
+				err:   errNameRequired,
+			},
+			"false skips Validate": {
+				input: `name: ""`,
+				opts:  []niceyaml.DecodeOption{off},
+			},
+			"false keeps schemas": {
+				input: "name: invalid",
+				opts:  []niceyaml.DecodeOption{niceyaml.WithValidator(nameSchema(nil)), off},
+				err:   errSchemaValidationFailed,
+			},
+			"a later true turns Validate back on": {
+				input: `name: ""`,
+				opts:  []niceyaml.DecodeOption{off, niceyaml.WithSelfValidation(true)},
+				err:   errNameRequired,
+			},
+		}
 
-	t.Run("WithoutValidator skips Validate", func(t *testing.T) {
-		t.Parallel()
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		dd := yamltest.FirstDocument(t, `name: ""`)
+				got, err := yamltest.FirstDocument(t, tc.input).Decode[validatorConfig](t.Context(), tc.opts...)
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err)
 
-		result, err := dd.Decode[validatorConfig](t.Context(), niceyaml.WithSelfValidation(false))
-		require.NoError(t, err)
-		assert.False(t, result.validated, "Validate() should NOT have been called with WithoutValidator")
-	})
+					return
+				}
 
-	t.Run("WithoutValidator keeps schemas", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "name: invalid")
-
-		_, err := dd.Decode[validatorConfig](t.Context(),
-			niceyaml.WithValidator(nameSchema(nil)),
-			niceyaml.WithSelfValidation(false),
-		)
-		require.ErrorIs(t, err, errSchemaValidationFailed)
-	})
-
-	t.Run("a later true turns Validate back on", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, `name: ""`)
-
-		_, err := dd.Decode[validatorConfig](t.Context(),
-			niceyaml.WithSelfValidation(false),
-			niceyaml.WithSelfValidation(true),
-		)
-		require.ErrorIs(t, err, errNameRequired, "Validate() should have been called")
+				require.NoError(t, err)
+				assert.Equal(t, tc.validated, got.validated)
+			})
+		}
 	})
 
 	t.Run("a typed nil from Validate decodes without error", func(t *testing.T) {
@@ -2922,20 +2925,7 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 		)
 		require.NoError(t, err)
 		assert.True(t, called, "the validator should have been called")
-		assert.True(t, result.validated, "Validate() should have been called after decode")
-	})
-
-	t.Run("returns SelfValidator error", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			name: ""
-			value: 42
-		`)
-		dd := yamltest.FirstDocument(t, input)
-
-		_, err := dd.Decode[validatorConfig](t.Context())
-		require.ErrorIs(t, err, errNameRequired)
+		assert.Equal(t, validatorConfig{Name: "test", Value: 42, validated: true}, result)
 	})
 }
 
