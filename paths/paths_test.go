@@ -3341,12 +3341,6 @@ func TestPath_Wildcards(t *testing.T) {
 		      a: 1
 		merged:
 		  <<: *r
-		nest:
-		  a:
-		    b:
-		      a:
-		        c: 1
-		    c: 2
 		nestseq:
 		  a:
 		    - a: [x, y]
@@ -3377,9 +3371,6 @@ func TestPath_Wildcards(t *testing.T) {
 		// The inner ..a reaches the scalar 1 from two outer matches. The
 		// mapping {a: 1} prints as its ":" token.
 		"chained recursive yields each node once": {path: "$.chain..a..a", want: []string{":", "1"}},
-		// The outer entry a comes first, but its c follows the c of
-		// the inner one in the source.
-		"recursive then child keeps document order": {path: "$.nest..a.c", want: []string{"1", "2"}},
 		// The mapping {a: [x, y]} prints as its ":" token.
 		"recursive then index all keeps document order": {path: "$.nestseq..a[*]", want: []string{":", "x", "y", "z"}},
 		"index all through an alias keeps path order": {
@@ -4508,6 +4499,8 @@ func TestPath_Matches(t *testing.T) {
 			want: []string{"$.twice[0]", "$.twice[1]"},
 		},
 		"recursive then child keeps document order": {
+			// The outer entry a comes first, but its c follows the c of
+			// the inner one in the source.
 			path: "$.nest..a.c",
 			want: []string{"$.nest.a.b.a.c", "$.nest.a.c"},
 		},
