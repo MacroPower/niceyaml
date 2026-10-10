@@ -839,16 +839,22 @@ func TestContent(t *testing.T) {
 		}
 	})
 
-	t.Run("alias that does not resolve is an error", func(t *testing.T) {
+	t.Run("path that cannot resolve is an error", func(t *testing.T) {
 		t.Parallel()
+
+		kind := matcher.Content(kindPath, "Deployment")
+		items := matcher.Content(paths.Current().Child("items").IndexAll(), "x")
 
 		// A tag on the alias changes nothing.
 		tcs := map[string]struct {
-			input string
+			matcher matcher.Matcher
+			err     error
+			input   string
 		}{
-			"alias without an anchor":        {input: `kind: *missing`},
-			"tagged alias without an anchor": {input: `kind: !!str *missing`},
-			"tagged alias to itself":         {input: `kind: &a !!str *a`},
+			"alias without an anchor":        {matcher: kind, input: `kind: *missing`, err: paths.ErrAlias},
+			"tagged alias without an anchor": {matcher: kind, input: `kind: !!str *missing`, err: paths.ErrAlias},
+			"tagged alias to itself":         {matcher: kind, input: `kind: &a !!str *a`, err: paths.ErrAlias},
+			"wildcard path":                  {matcher: items, input: `items: [x]`, err: paths.ErrWildcard},
 		}
 
 		for name, tc := range tcs {
@@ -857,21 +863,11 @@ func TestContent(t *testing.T) {
 
 				doc := yamltest.FirstDocument(t, tc.input)
 
-				ok, err := matcher.Content(kindPath, "Deployment").Match(t.Context(), doc)
-				require.ErrorIs(t, err, paths.ErrAlias)
+				ok, err := tc.matcher.Match(t.Context(), doc)
+				require.ErrorIs(t, err, tc.err)
 				assert.False(t, ok)
 			})
 		}
-	})
-
-	t.Run("wildcard path is an error", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.Content(paths.Current().Child("items").IndexAll(), "x")
-		doc := yamltest.FirstDocument(t, `items: [x]`)
-
-		_, err := m.Match(t.Context(), doc)
-		require.ErrorIs(t, err, paths.ErrWildcard)
 	})
 
 	t.Run("alias bomb is an error", func(t *testing.T) {
