@@ -94,15 +94,7 @@ func TestCatalog_With(t *testing.T) {
 		got, ok := c.Get("vulcan")
 		require.True(t, ok)
 		assert.True(t, isMarked(got.Styles(), kind.NameTag))
-		assert.Equal(t, theme.Builtin().Len(), c.Len())
-
-		names := make([]string, 0, c.Len())
-		for _, th := range c.All() {
-			names = append(names, th.Name)
-		}
-
-		assert.Equal(t, 1, countOf(names, "vulcan"))
-		assert.True(t, slices.IsSorted(names), "replacing keeps the position")
+		assert.Equal(t, namesOf(theme.Builtin()), namesOf(c), "replacing keeps the position")
 	})
 
 	t.Run("receiver is unchanged", func(t *testing.T) {
@@ -171,15 +163,14 @@ func TestCatalog_Mode(t *testing.T) {
 
 	dark := c.Mode(theme.Dark)
 	assert.Equal(t, 2, dark.Len())
-	assert.Equal(t, "a-dark", dark.All()[0].Name)
-	assert.Equal(t, "c-dark", dark.All()[1].Name)
+	assert.Equal(t, []string{"a-dark", "c-dark"}, namesOf(dark))
 
 	_, ok := dark.Get("b-light")
 	assert.False(t, ok)
 
 	light := c.Mode(theme.Light)
 	assert.Equal(t, 1, light.Len())
-	assert.Equal(t, "b-light", light.All()[0].Name)
+	assert.Equal(t, []string{"b-light"}, namesOf(light))
 
 	none := light.Mode(theme.Dark)
 	assert.Equal(t, 0, none.Len())
@@ -189,25 +180,18 @@ func TestCatalog_Mode(t *testing.T) {
 	builtinLight := theme.Builtin().Mode(theme.Light)
 	assert.Equal(t, theme.Builtin().Len(), builtinDark.Len()+builtinLight.Len())
 
-	darkNames := make([]string, 0, builtinDark.Len())
 	for _, th := range builtinDark.All() {
 		assert.Equal(t, theme.Dark, th.Mode, th.Name)
-
-		darkNames = append(darkNames, th.Name)
 	}
 
-	assert.True(t, slices.IsSorted(darkNames), "filtering keeps the name order")
+	assert.True(t, slices.IsSorted(namesOf(builtinDark)), "filtering keeps the name order")
 }
 
 func TestBuiltin(t *testing.T) {
 	t.Parallel()
 
 	all := theme.Builtin().All()
-
-	names := make([]string, 0, len(all))
-	for _, th := range all {
-		names = append(names, th.Name)
-	}
+	names := namesOf(theme.Builtin())
 
 	assert.Equal(t, "abap", names[0])
 	assert.Contains(t, names, "charm")
@@ -955,17 +939,14 @@ func distance(a, b color.Color) float64 {
 	return ca.DistanceCIEDE2000(cb)
 }
 
-// countOf returns how many times name appears in names.
-func countOf(names []string, name string) int {
-	n := 0
-
-	for _, s := range names {
-		if s == name {
-			n++
-		}
+// namesOf returns the names of the themes in c, in the order of c.
+func namesOf(c theme.Catalog) []string {
+	names := make([]string, 0, c.Len())
+	for _, th := range c.All() {
+		names = append(names, th.Name)
 	}
 
-	return n
+	return names
 }
 
 // marker is the foreground that marked gives one kind, so a test can tell
