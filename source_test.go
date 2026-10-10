@@ -1165,27 +1165,18 @@ func TestNewSourceFromTokens_WhitespaceDocument(t *testing.T) {
 
 	// A document of whitespace alone cut after "..." counts its lines from
 	// 1, as a document with text does.
-	tcs := map[string]struct {
-		input string
-		want  []int
-	}{
-		"between document end and header": {
-			input: "a: 1\n...\n\t\n---\nb: 2\n",
-			want:  []int{1, 2},
-		},
-		"after document end at the end": {
-			input: "a: 1\n...\n\t\n",
-			want:  []int{1, 2},
-		},
+	tcs := map[string]string{
+		"between document end and header": "a: 1\n...\n\t\n---\nb: 2\n",
+		"after document end at the end":   "a: 1\n...\n\t\n",
 	}
 
-	for name, tc := range tcs {
+	for name, input := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
 			var doc token.Tokens
 
-			for i, d := range tokens.SplitDocuments(tokens.Tokenize(tc.input)) {
+			for i, d := range tokens.SplitDocuments(tokens.Tokenize(input)) {
 				if i == 1 {
 					doc = d
 				}
@@ -1200,7 +1191,7 @@ func TestNewSourceFromTokens_WhitespaceDocument(t *testing.T) {
 				got = append(got, l.Number())
 			}
 
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, []int{1, 2}, got)
 		})
 	}
 }
@@ -3640,42 +3631,20 @@ func TestSource_NilReceiver(t *testing.T) {
 func TestSource_TokenAt(t *testing.T) {
 	t.Parallel()
 
-	input := "key: value\n"
-	source := niceyaml.NewSourceFromString(input)
+	source := niceyaml.NewSourceFromString("key: value\n")
 
 	tcs := map[string]struct {
-		pos       position.Position
-		wantValue string
-		wantNil   bool
+		pos position.Position
+		// The value of the token at pos, empty where no token lies.
+		want string
 	}{
-		"key token at start": {
-			pos:       position.New(0, 0),
-			wantValue: "key",
-		},
-		"key token at end of key": {
-			pos:       position.New(0, 2),
-			wantValue: "key",
-		},
-		"colon token": {
-			pos:       position.New(0, 3),
-			wantValue: ":",
-		},
-		"value token": {
-			pos:       position.New(0, 5),
-			wantValue: "value",
-		},
-		"out of bounds line": {
-			pos:     position.New(10, 0),
-			wantNil: true,
-		},
-		"negative line": {
-			pos:     position.New(-1, 0),
-			wantNil: true,
-		},
-		"out of bounds column": {
-			pos:     position.New(0, 100),
-			wantNil: true,
-		},
+		"key token at start":      {pos: position.New(0, 0), want: "key"},
+		"key token at end of key": {pos: position.New(0, 2), want: "key"},
+		"colon token":             {pos: position.New(0, 3), want: ":"},
+		"value token":             {pos: position.New(0, 5), want: "value"},
+		"out of bounds line":      {pos: position.New(10, 0)},
+		"negative line":           {pos: position.New(-1, 0)},
+		"out of bounds column":    {pos: position.New(0, 100)},
 	}
 
 	for name, tc := range tcs {
@@ -3683,13 +3652,14 @@ func TestSource_TokenAt(t *testing.T) {
 			t.Parallel()
 
 			got := source.Lines().TokenAt(tc.pos)
-
-			if tc.wantNil {
+			if tc.want == "" {
 				assert.Nil(t, got)
-			} else {
-				require.NotNil(t, got)
-				assert.Equal(t, tc.wantValue, got.Value)
+
+				return
 			}
+
+			require.NotNil(t, got)
+			assert.Equal(t, tc.want, got.Value)
 		})
 	}
 }
@@ -5413,40 +5383,34 @@ func TestWithExcerpts(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 		// The excerpt of an error at the port, which is empty when the
-		// error has none.
-		excerpt string
-		opts    []niceyaml.SourceOption
-		want    bool
+		// Source shows none.
+		want string
+		opts []niceyaml.SourceOption
 	}{
 		"no option": {
-			input:   "port: 0\n",
-			want:    true,
-			excerpt: "   1 | port: 0\n     |       ^",
+			input: "port: 0\n",
+			want:  "   1 | port: 0\n     |       ^",
 		},
 		"on": {
-			input:   "port: 0\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithExcerpts(true)},
-			want:    true,
-			excerpt: "   1 | port: 0\n     |       ^",
+			input: "port: 0\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithExcerpts(true)},
+			want:  "   1 | port: 0\n     |       ^",
 		},
 		"off": {
 			input: "port: 0\n",
 			opts:  []niceyaml.SourceOption{niceyaml.WithExcerpts(false)},
-			want:  false,
 		},
 		"the last option wins": {
-			input:   "port: 0\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithExcerpts(false), niceyaml.WithExcerpts(true)},
-			want:    true,
-			excerpt: "   1 | port: 0\n     |       ^",
+			input: "port: 0\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithExcerpts(false), niceyaml.WithExcerpts(true)},
+			want:  "   1 | port: 0\n     |       ^",
 		},
 		// The lines of the Source hold the alias and none of the text of
 		// the reference document, so its own option decides.
 		"a reference document with excerpts off": {
-			input:   "port: *port\n",
-			opts:    []niceyaml.SourceOption{niceyaml.WithReferences(refs)},
-			want:    true,
-			excerpt: "   1 | port: *port\n     |       ^",
+			input: "port: *port\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithReferences(refs)},
+			want:  "   1 | port: *port\n     |       ^",
 		},
 	}
 
@@ -5455,21 +5419,21 @@ func TestWithExcerpts(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input, tc.opts...)
-			assert.Equal(t, tc.want, source.ShowsExcerpts())
+			assert.Equal(t, tc.want != "", source.ShowsExcerpts())
 
 			err := yamltest.Bind(t, source, niceyaml.NewError("bad port", niceyaml.AtPath(paths.Doc().Child("port"))))
 
 			bound := yamltest.RequireSourceError(t, err)
 
 			excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
-			require.Equal(t, tc.want, ok)
+			require.Equal(t, tc.want != "", ok)
 
 			got := ""
 			if ok {
 				got = excerpt.String()
 			}
 
-			assert.Equal(t, tc.excerpt, got)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
