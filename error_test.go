@@ -7279,13 +7279,33 @@ func TestSourceError_Document(t *testing.T) {
 	brokenDocs := broken.AllDocuments()
 	require.Len(t, brokenDocs, 3)
 
+	// The header follows an anchor with no value, so both documents parse
+	// together and share the syntax error of the second.
+	together := niceyaml.NewSourceFromString("a: &x\n---\nb: [1\n").AllDocuments()
+	require.Len(t, together, 2)
+
+	_, errBroken := broken.File()
+
 	tcs := map[string]struct {
-		err  error
+		err error
+		// The document of the binding, or nil for a binding to none.
 		want *niceyaml.Node
+		// The index DocumentIndex reports, which is that of the document.
+		index int
 	}{
-		"bound by a document": {
-			err:  docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")))),
-			want: docs[1],
+		"bound by the first document": {
+			err:  docs[0].Bind(niceyaml.NewError("bad")),
+			want: docs[0],
+		},
+		"bound by the second document": {
+			err:   docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")))),
+			want:  docs[1],
+			index: 1,
+		},
+		"bound by a scoped node of the second document": {
+			err:   yamltest.At(t, docs[1], paths.Current().Child("b")).Bind(niceyaml.NewError("bad")),
+			want:  docs[1],
+			index: 1,
 		},
 		"produced by a document": {
 			err: func() error {
@@ -7295,28 +7315,43 @@ func TestSourceError_Document(t *testing.T) {
 			}(),
 			want: docs[0],
 		},
-		"bound by the source at a position": {
+		"bound by the source at a position in the first document": {
 			err:  source.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 0)))),
 			want: docs[0],
+		},
+		"bound by the source at a position in the second document": {
+			err:   source.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(2, 0)))),
+			want:  docs[1],
+			index: 1,
 		},
 		"bound by the source at no location": {
 			err: source.Bind(niceyaml.NewError("bad")),
 		},
+		"bound by the source on a line no document holds": {
+			err: source.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(9, 0)))),
+		},
+		"bound by the source at a path among several documents": {
+			err: source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")))),
+		},
 		"syntax error of the second document of three": {
-			err: func() error {
-				_, err := broken.File()
-
-				return err
-			}(),
-			want: brokenDocs[1],
+			err:   errBroken,
+			want:  brokenDocs[1],
+			index: 1,
 		},
 		"syntax error from the document that holds it": {
-			err:  brokenDocs[1].Validate(t.Context(), nil),
-			want: brokenDocs[1],
+			err:   brokenDocs[1].Validate(t.Context(), nil),
+			want:  brokenDocs[1],
+			index: 1,
+		},
+		"syntax error from the document that parsed together with its own": {
+			err:   together[0].Validate(t.Context(), nil),
+			want:  together[1],
+			index: 1,
 		},
 		"bound by the source at a position beside a syntax error": {
-			err:  broken.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(4, 0)))),
-			want: brokenDocs[2],
+			err:   broken.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(4, 0)))),
+			want:  brokenDocs[2],
+			index: 2,
 		},
 		"bound by the source at a path beside a syntax error": {
 			err: broken.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("c")))),
@@ -7346,107 +7381,11 @@ func TestSourceError_Document(t *testing.T) {
 
 			bound := yamltest.RequireSourceError(t, tc.err)
 
-			if tc.want == nil {
-				assert.Nil(t, bound.Document())
-			} else {
-				assert.Same(t, tc.want, bound.Document())
-			}
-		})
-	}
-}
+			assert.Same(t, tc.want, bound.Document())
 
-func TestSourceError_DocumentIndex(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
-	docs := source.Documents()
-
-	// The second document of three does not parse.
-	broken := niceyaml.NewSourceFromString("a: 1\n---\nb: [\n---\nc: 3\n")
-	brokenDocs := broken.AllDocuments()
-	require.Len(t, brokenDocs, 3)
-
-	// The header follows an anchor with no value, so both documents parse
-	// together and share the syntax error of the second.
-	together := niceyaml.NewSourceFromString("a: &x\n---\nb: [1\n").AllDocuments()
-	require.Len(t, together, 2)
-
-	tcs := map[string]struct {
-		err  error
-		want int
-		ok   bool
-	}{
-		"bound by the first document": {
-			err:  docs[0].Bind(niceyaml.NewError("bad")),
-			want: 0,
-			ok:   true,
-		},
-		"bound by the second document": {
-			err:  docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")))),
-			want: 1,
-			ok:   true,
-		},
-		"bound by a scoped node of the second document": {
-			err:  yamltest.At(t, docs[1], paths.Current().Child("b")).Bind(niceyaml.NewError("bad")),
-			want: 1,
-			ok:   true,
-		},
-		"bound by the source at a position": {
-			err:  source.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(2, 0)))),
-			want: 1,
-			ok:   true,
-		},
-		"bound by the source at no location": {
-			err: source.Bind(niceyaml.NewError("bad")),
-		},
-		"bound by the source on a line no document holds": {
-			err: source.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(9, 0)))),
-		},
-		"bound by the source at a path among several documents": {
-			err: source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")))),
-		},
-		"syntax error of the second document of three": {
-			err: func() error {
-				_, err := broken.File()
-
-				return err
-			}(),
-			want: 1,
-			ok:   true,
-		},
-		"syntax error from the document that parsed together with its own": {
-			err:  together[0].Validate(t.Context(), nil),
-			want: 1,
-			ok:   true,
-		},
-		"bound by the source at a position beside a syntax error": {
-			err:  broken.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(4, 0)))),
-			want: 2,
-			ok:   true,
-		},
-		"wrapping a binding keeps its document": {
-			err:  docs[1].Bind(fmt.Errorf("context: %w", docs[0].Bind(niceyaml.NewError("bad")))),
-			want: 0,
-			ok:   true,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			bound := yamltest.RequireSourceError(t, tc.err)
-
-			got, ok := bound.DocumentIndex()
-			assert.Equal(t, tc.ok, ok)
-			assert.Equal(t, tc.want, got)
-
-			// The index is that of the document, where the error has one.
-			if doc := bound.Document(); doc != nil {
-				assert.Equal(t, doc.DocumentIndex(), got)
-			} else {
-				assert.False(t, ok)
-			}
+			index, ok := bound.DocumentIndex()
+			assert.Equal(t, tc.want != nil, ok)
+			assert.Equal(t, tc.index, index)
 		})
 	}
 
