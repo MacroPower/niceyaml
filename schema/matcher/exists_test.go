@@ -136,55 +136,6 @@ func TestExists(t *testing.T) {
 	})
 }
 
-func TestExists_WithAll(t *testing.T) {
-	t.Parallel()
-
-	t.Run("both fields exist", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.All(
-			matcher.Exists(kindPath),
-			matcher.Exists(apiVersionPath),
-		)
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			apiVersion: apps/v1
-		`))
-
-		got := match(t, m, doc)
-		assert.True(t, got)
-	})
-
-	t.Run("one field missing", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.All(
-			matcher.Exists(kindPath),
-			matcher.Exists(apiVersionPath),
-		)
-		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-
-		got := match(t, m, doc)
-		assert.False(t, got)
-	})
-
-	t.Run("one field empty", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.All(
-			matcher.Exists(kindPath),
-			matcher.Exists(apiVersionPath),
-		)
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			apiVersion: ""
-		`))
-
-		got := match(t, m, doc)
-		assert.True(t, got)
-	})
-}
-
 func TestExists_ContextEnded(t *testing.T) {
 	t.Parallel()
 

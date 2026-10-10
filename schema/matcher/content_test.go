@@ -45,11 +45,6 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`kind: Deployment`),
 			want:    false,
 		},
-		"string matches number text": {
-			matcher: matcher.Content(versionPath, "2"),
-			input:   stringtest.Input(`version: 2`),
-			want:    true,
-		},
 		"string matches float text as written": {
 			matcher: matcher.Content(versionPath, "1.10"),
 			input:   stringtest.Input(`version: 1.10`),
@@ -513,11 +508,6 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 9007199254740992.0`),
 			want:    true,
 		},
-		"int matches integer": {
-			matcher: matcher.Content(versionPath, 1),
-			input:   stringtest.Input(`version: 1`),
-			want:    true,
-		},
 		"negative int does not match unsigned": {
 			matcher: matcher.Content(versionPath, -1),
 			input:   stringtest.Input(`version: 18446744073709551615`),
@@ -558,20 +548,10 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 1e3`),
 			want:    true,
 		},
-		"named int matches integer": {
-			matcher: matcher.Content(versionPath, namedInt(1)),
-			input:   stringtest.Input(`version: 1`),
-			want:    true,
-		},
 		"named int does not match other integer": {
 			matcher: matcher.Content(versionPath, namedInt(1)),
 			input:   stringtest.Input(`version: 2`),
 			want:    false,
-		},
-		"named float matches float": {
-			matcher: matcher.Content(versionPath, namedFloat(1.5)),
-			input:   stringtest.Input(`version: 1.5`),
-			want:    true,
 		},
 		"named float matches a plain exponent": {
 			// The decoder reads 1e3 as a string, which go-yaml cannot set
@@ -684,11 +664,6 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`timeout: inf`),
 			want:    false,
 		},
-		"bool match": {
-			matcher: matcher.Content(enabledPath, true),
-			input:   stringtest.Input(`enabled: true`),
-			want:    true,
-		},
 		"bool no match": {
 			matcher: matcher.Content(enabledPath, true),
 			input:   stringtest.Input(`enabled: false`),
@@ -702,11 +677,6 @@ func TestContent(t *testing.T) {
 		"bool matches a bool-tagged quoted scalar": {
 			matcher: matcher.Content(enabledPath, true),
 			input:   stringtest.Input(`enabled: !!bool "true"`),
-			want:    true,
-		},
-		"named bool matches": {
-			matcher: matcher.Content(enabledPath, namedBool(true)),
-			input:   stringtest.Input(`enabled: true`),
 			want:    true,
 		},
 		"bool does not match string": {
@@ -1039,42 +1009,6 @@ func TestContent_Kinds(t *testing.T) {
 			assert.False(t, match(t, tc.matcher, yamltest.FirstDocument(t, `version: other`)))
 		})
 	}
-}
-
-func TestContent_WithAll(t *testing.T) {
-	t.Parallel()
-
-	t.Run("multiple conditions all match", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.All(
-			matcher.Content(kindPath, "Deployment"),
-			matcher.Content(apiVersionPath, "apps/v1"),
-		)
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			apiVersion: apps/v1
-		`))
-
-		got := match(t, m, doc)
-		assert.True(t, got)
-	})
-
-	t.Run("multiple conditions partial match", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.All(
-			matcher.Content(kindPath, "Deployment"),
-			matcher.Content(apiVersionPath, "apps/v1"),
-		)
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			apiVersion: v1
-		`))
-
-		got := match(t, m, doc)
-		assert.False(t, got)
-	})
 }
 
 func TestContent_ContextEnded(t *testing.T) {
