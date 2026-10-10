@@ -11,6 +11,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/examples/schemas/cafe"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -31,12 +32,8 @@ func cafeConfig(ctx context.Context, in string) (*cafe.Config, error) {
 func violationPaths(err error) []string {
 	got := []string{}
 
-	for node := range niceyaml.NewErrorTree(err).All() {
-		if node.Bound == nil {
-			continue
-		}
-
-		if path, ok := node.Bound.Path(); ok {
+	for _, bound := range yamltest.BoundIn(err) {
+		if path, ok := bound.Path(); ok {
 			got = append(got, path.String())
 		}
 	}
