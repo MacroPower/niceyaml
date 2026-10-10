@@ -25,7 +25,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
-	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
@@ -146,17 +145,6 @@ func printDiffSummary(p *printer.Printer, before, after string, context int) str
 	}
 
 	return p.Print(source)
-}
-
-// testFinder returns a Finder configured for testing.
-func testFinder(norm finder.Normalizer) *finder.Finder {
-	var opts []finder.Option
-
-	if norm != nil {
-		opts = append(opts, finder.WithNormalizer(norm))
-	}
-
-	return finder.New(opts...)
 }
 
 func TestPrinter_AddStyleToRange(t *testing.T) {
@@ -3789,7 +3777,6 @@ func TestFinderPrinter_Integration(t *testing.T) {
 	tcs := map[string]struct {
 		input        string
 		search       string
-		normalizer   finder.Normalizer
 		want         string
 		wantNoRanges bool // If true, assert no ranges found.
 	}{
@@ -3851,28 +3838,24 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			want:   "key: über öffentlich [test]",
 		},
 		"utf8 - normalizer diacritic to ascii": {
-			input:      "name: Thaïs",
-			search:     "Thais",
-			normalizer: normalizer.New(),
-			want:       "name: [Thaïs]",
+			input:  "name: Thaïs",
+			search: "Thais",
+			want:   "name: [Thaïs]",
 		},
 		"utf8 - case insensitive with diacritics": {
-			input:      "name: THAÏS test",
-			search:     "thais",
-			normalizer: normalizer.New(),
-			want:       "name: [THAÏS] test",
+			input:  "name: THAÏS test",
+			search: "thais",
+			want:   "name: [THAÏS] test",
 		},
 		"utf8 - search ascii finds normalized diacritic": {
-			input:      "key: über",
-			search:     "u",
-			normalizer: normalizer.New(),
-			want:       "key: [ü]ber",
+			input:  "key: über",
+			search: "u",
+			want:   "key: [ü]ber",
 		},
 		"utf8 - normalizer search after multiple multibyte": {
-			input:      "key: über Yamüll test",
-			search:     "ya",
-			normalizer: normalizer.New(),
-			want:       "key: über [Ya]müll test",
+			input:  "key: über Yamüll test",
+			search: "ya",
+			want:   "key: über [Ya]müll test",
 		},
 		"utf8 - japanese characters": {
 			input:  "名前: テスト value",
@@ -3934,7 +3917,7 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			idx := testFinder(tc.normalizer).Load(source.Lines())
+			idx := finder.New().Load(source.Lines())
 
 			p := testPrinter()
 
