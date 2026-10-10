@@ -131,8 +131,11 @@ func TestContent(t *testing.T) {
 		},
 		"string matches a block scalar with its newline": {
 			matcher: matcher.Content(versionPath, "1.10\n"),
-			input:   "version: |\n  1.10\n",
-			want:    true,
+			input: stringtest.LinesLF(
+				"version: |",
+				"  1.10",
+			),
+			want: true,
 		},
 		"string matches the respelling of a float-tagged quoted scalar": {
 			// The tag makes the quoted text a float, which the decoder
@@ -592,8 +595,11 @@ func TestContent(t *testing.T) {
 		},
 		"duration matches block scalar": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
-			input:   "timeout: |-\n  5s\n",
-			want:    true,
+			input: stringtest.LinesLF(
+				"timeout: |-",
+				"  5s",
+			),
+			want: true,
 		},
 		"duration matches str tag": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
@@ -913,8 +919,10 @@ func TestContent(t *testing.T) {
 		// the node written out, with a copy of the long scalar for each
 		// alias. A plain string reads the list as a value, which shares
 		// the scalar, so it does not match.
-		input := "a: &a " + strings.Repeat("x", 2000) + "\n" +
-			"kind: " + yamltest.FlowSequence("*a", 500) + "\n"
+		input := stringtest.LinesLF(
+			"a: &a "+strings.Repeat("x", 2000),
+			"kind: "+yamltest.FlowSequence("*a", 500),
+		)
 
 		tcs := map[string]struct {
 			m    matcher.Matcher

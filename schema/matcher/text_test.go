@@ -174,15 +174,24 @@ func TestText_Reads(t *testing.T) {
 		"plain infinity":                             {input: `version: .inf`, want: ".inf"},
 		"plain capitalized bool":                     {input: `version: True`, want: "True"},
 		"plain date":                                 {input: `version: 2001-12-14`, want: "2001-12-14"},
-		"plain scalar over two lines":                {input: "version: a\n  b\n", want: "a b"},
+		"plain scalar over two lines":                {input: stringtest.LinesLF("version: a", "  b"), want: "a b"},
 		"double-quoted number":                       {input: `version: "2.0"`, want: "2.0"},
 		"double-quoted escape":                       {input: `version: "a\tb"`, want: "a\tb"},
 		"single-quoted quote":                        {input: `version: 'it''s'`, want: "it's"},
 		"empty string":                               {input: `version: ""`, want: ""},
-		"literal block":                              {input: "version: |\n  1.10\n", want: "1.10\n"},
-		"literal block that strips its line break":   {input: "version: |-\n  1.10\n", want: "1.10"},
-		"folded block":                               {input: "version: >\n  a\n  b\n", want: "a b\n"},
-		"anchored float":                             {input: `version: &v 1.10`, want: "1.10"},
+		"literal block": {
+			input: stringtest.LinesLF("version: |", "  1.10"),
+			want:  "1.10\n",
+		},
+		"literal block that strips its line break": {
+			input: stringtest.LinesLF("version: |-", "  1.10"),
+			want:  "1.10",
+		},
+		"folded block": {
+			input: stringtest.LinesLF("version: >", "  a", "  b"),
+			want:  "a b\n",
+		},
+		"anchored float": {input: `version: &v 1.10`, want: "1.10"},
 		"aliased float": {
 			input: stringtest.Input(`
 				v: &v 1.10
