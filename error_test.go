@@ -653,81 +653,49 @@ func TestSourceError_Error_Document(t *testing.T) {
 	})
 }
 
-func TestSourceError_Error_JoinLead(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
-	bound := yamltest.Bind(t, source, niceyaml.NewError(
-		"bad a",
-		niceyaml.AtPath(paths.Current().Child("a")),
-	))
-
-	// A bound join lists its branches, each behind the name of its own
-	// source, so the line of a binding stays as it is and a plain branch
-	// takes the name. A branch with no message adds no line, whether it
-	// is an empty message or a nil pointer.
-	tcs := map[string]struct {
-		// The branches in front of the binding.
-		lead []error
-		want string
-	}{
-		"binding leads": {
-			want: "f.yaml:1:4: $.a: bad a\nf.yaml: plain",
-		},
-		"empty message leads": {
-			lead: []error{errors.New("")},
-			want: "f.yaml:1:4: $.a: bad a\nf.yaml: plain",
-		},
-		"nil Error leads": {
-			lead: []error{(*niceyaml.Error)(nil)},
-			want: "f.yaml:1:4: $.a: bad a\nf.yaml: plain",
-		},
-		"nil SourceError leads": {
-			lead: []error{(*niceyaml.SourceError)(nil)},
-			want: "f.yaml:1:4: $.a: bad a\nf.yaml: plain",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			branches := append(slices.Clone(tc.lead), bound, errors.New("plain"))
-			err := source.Bind(errors.Join(branches...))
-
-			require.Error(t, err)
-			assert.Equal(t, tc.want, err.Error())
-		})
-	}
-}
-
-func TestSourceError_Error_MultiErrorLead(t *testing.T) {
+func TestSourceError_Error_MultiError(t *testing.T) {
 	t.Parallel()
 
 	errSentinel := errors.New("sentinel")
 	plain := errors.New("plain")
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
-	boundA := yamltest.Bind(t, source, niceyaml.NewError(
-		"bad a",
-		niceyaml.AtPath(paths.Current().Child("a")),
-	))
-	boundB := yamltest.Bind(t, source, niceyaml.NewError(
-		"bad b",
-		niceyaml.AtPath(paths.Current().Child("b")),
-	))
+	pathA := paths.Current().Child("a")
+	pathB := paths.Current().Child("b")
+	boundA := yamltest.Bind(t, source, niceyaml.NewError("bad a", niceyaml.AtPath(pathA)))
+	boundB := yamltest.Bind(t, source, niceyaml.NewError("bad b", niceyaml.AtPath(pathB)))
 
-	// A wrapper with several %w verbs leads with the binding it keeps, as
-	// a wrapper with one %w verb does, so its first line names the source
-	// already. A multi-error of its own type leads with its first branch
-	// when its message starts with the message of that branch, as a list
-	// does. A count of the branches starts with no binding, so the name
-	// goes in front whichever branch holds the binding. The message of a
-	// list holds its branches, so nothing follows it, and a count holds
-	// none, so each branch follows on a line of its own.
 	tcs := map[string]struct {
 		err  error
 		want string
 	}{
+		// A bound join lists its branches, each behind the name of its own
+		// source, so the line of a binding stays as it is and a plain branch
+		// takes the name. A branch with no message adds no line, whether it
+		// is an empty message or a nil pointer.
+		"join led by the binding": {
+			err:  errors.Join(boundA, plain),
+			want: "f.yaml:1:4: $.a: bad a\nf.yaml: plain",
+		},
+		"join led by an empty message": {
+			err:  errors.Join(errors.New(""), boundA, plain),
+			want: "f.yaml:1:4: $.a: bad a\nf.yaml: plain",
+		},
+		"join led by a nil Error": {
+			err:  errors.Join((*niceyaml.Error)(nil), boundA, plain),
+			want: "f.yaml:1:4: $.a: bad a\nf.yaml: plain",
+		},
+		"join led by a nil SourceError": {
+			err:  errors.Join((*niceyaml.SourceError)(nil), boundA, plain),
+			want: "f.yaml:1:4: $.a: bad a\nf.yaml: plain",
+		},
+		// A wrapper with several %w verbs leads with the binding it keeps, as
+		// a wrapper with one %w verb does, so its first line names the source
+		// already. A multi-error of its own type leads with its first branch
+		// when its message starts with the message of that branch, as a list
+		// does. A count of the branches starts with no binding, so the name
+		// goes in front whichever branch holds the binding. The message of a
+		// list holds its branches, so nothing follows it, and a count holds
+		// none, so each branch follows on a line of its own.
 		"wrapper with one verb": {
 			err:  errors.Join(fmt.Errorf("ctx: %w", boundA), plain),
 			want: "ctx: f.yaml:1:4: $.a: bad a\nf.yaml: plain",
@@ -756,54 +724,12 @@ func TestSourceError_Error_MultiErrorLead(t *testing.T) {
 			err:  listError{plain, boundA},
 			want: "f.yaml: plain; f.yaml:1:4: $.a: bad a",
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			err := source.Bind(tc.err)
-
-			require.Error(t, err)
-			assert.Equal(t, tc.want, err.Error())
-		})
-	}
-}
-
-// headedError is a multi-error of its own type whose message is a heading
-// of its own, which can hold the message of a branch by chance.
-type headedError struct {
-	msg  string
-	errs []error
-}
-
-// Error returns the heading.
-func (e headedError) Error() string {
-	return e.msg
-}
-
-// Unwrap returns the branches.
-func (e headedError) Unwrap() []error {
-	return e.errs
-}
-
-func TestSourceError_Error_MultiErrorBranches(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
-	pathA := paths.Current().Child("a")
-	pathB := paths.Current().Child("b")
-
-	// A multi-error of its own type keeps the message it wrote. That
-	// message holds the text of a branch at most and never the location a
-	// binding gives it, so each branch the binding locates follows on a
-	// line of its own, whatever the message holds. A branch with no
-	// location follows only when the message does not hold the first
-	// branch.
-	tcs := map[string]struct {
-		err  error
-		want string
-	}{
+		// A multi-error of its own type keeps the message it wrote. That
+		// message holds the text of a branch at most and never the location a
+		// binding gives it, so each branch the binding locates follows on a
+		// line of its own, whatever the message holds. A branch with no
+		// location follows only when the message does not hold the first
+		// branch.
 		"a list of located errors": {
 			err: listError{
 				niceyaml.NewError("bad a", niceyaml.AtPath(pathA)),
@@ -866,6 +792,23 @@ func TestSourceError_Error_MultiErrorBranches(t *testing.T) {
 			assert.Equal(t, tc.want, err.Error())
 		})
 	}
+}
+
+// headedError is a multi-error of its own type whose message is a heading
+// of its own, which can hold the message of a branch by chance.
+type headedError struct {
+	msg  string
+	errs []error
+}
+
+// Error returns the heading.
+func (e headedError) Error() string {
+	return e.msg
+}
+
+// Unwrap returns the branches.
+func (e headedError) Unwrap() []error {
+	return e.errs
 }
 
 func TestSourceError_Error_List(t *testing.T) {
