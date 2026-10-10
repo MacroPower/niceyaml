@@ -199,10 +199,7 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).View()
 			view.AddOverlay(testOverlayHighlight, tc.rng)
 
-			p := testPrinter()
-
-			got := p.Print(view)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, testPrinter().Print(view))
 		})
 	}
 }
@@ -1289,12 +1286,9 @@ func TestPrinter_LineNumbers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := lexer.Tokenize(tc.input)
+			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).View()
 
-			p := testPrinterWithGutter(printer.LineNumberGutter)
-
-			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, testPrinterWithGutter(printer.LineNumberGutter).Print(view))
 		})
 	}
 }
@@ -1432,11 +1426,9 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(tc.gutter)
-			lines := niceyaml.NewSourceFromString(input)
+			view := niceyaml.NewSourceFromString(input).View().Slice(tc.spans...)
 
-			got := p.Print(lines.View().Slice(tc.spans...))
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, testPrinterWithGutter(tc.gutter).Print(view))
 		})
 	}
 }
@@ -1727,12 +1719,10 @@ func TestPrinter_WordWrap(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := lexer.Tokenize(tc.input)
-
+			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).View()
 			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.width))
 
-			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, p.Print(view))
 		})
 	}
 }
@@ -3020,9 +3010,7 @@ func TestPrinter_WithAnnotation(t *testing.T) {
 
 			p := testPrinter().With(printer.WithAnnotation(tc.fn))
 
-			got := p.Print(view)
-
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, p.Print(view))
 		})
 	}
 }
@@ -3137,10 +3125,7 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			view := niceyaml.NewSourceFromString(tc.input).View()
 			view.Annotate(tc.lineIndex, tc.annotation)
 
-			p := testPrinterWithGutter(tc.gutter)
-			got := p.Print(view)
-
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, testPrinterWithGutter(tc.gutter).Print(view))
 		})
 	}
 }
@@ -3393,11 +3378,9 @@ func TestPrinter_TokenTypes_XMLStyler(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := lexer.Tokenize(tc.input)
-			p := yamltest.NewXMLPrinter()
+			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).View()
 
-			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, yamltest.NewXMLPrinter().Print(view))
 		})
 	}
 }
@@ -3469,11 +3452,9 @@ func TestPrinter_Print_Tokens(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := lexer.Tokenize(tc.input)
-			p := testPrinter()
+			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input)).View()
 
-			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
-			assert.Equal(t, tc.input, got)
+			assert.Equal(t, tc.input, testPrinter().Print(view))
 		})
 	}
 }
@@ -3806,11 +3787,7 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			idx := finder.New().Load(source.Lines())
-
-			p := testPrinter()
-
-			ranges := idx.Find(tc.search)
+			ranges := finder.New().Load(source.Lines()).Find(tc.search)
 
 			if tc.wantNoRanges {
 				assert.Empty(t, ranges)
@@ -3819,8 +3796,7 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			view := source.View()
 			view.AddOverlay(testOverlayHighlight, ranges...)
 
-			got := p.Print(view)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, testPrinter().Print(view))
 		})
 	}
 }
@@ -4057,16 +4033,12 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString(tc.input)
-			p := yamltest.NewXMLPrinter(printer.WithStyles(styles))
-
-			view := source.View()
+			view := niceyaml.NewSourceFromString(tc.input).View()
 			for _, or := range tc.ranges {
 				view.BlendOverlay(or.kind, or.rng)
 			}
 
-			got := p.Print(view)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, yamltest.NewXMLPrinter(printer.WithStyles(styles)).Print(view))
 		})
 	}
 }
@@ -4169,10 +4141,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 				view.BlendOverlay(kinds[i], od.rng)
 			}
 
-			p := testPrinterWithStyles(overlayOpts...)
-
-			got := p.Print(view)
-			golden.RequireEqual(t, got)
+			golden.RequireEqual(t, testPrinterWithStyles(overlayOpts...).Print(view))
 		})
 	}
 }
