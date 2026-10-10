@@ -3224,43 +3224,85 @@ func TestError_TokenRendersFromSource(t *testing.T) {
 	assert.Contains(t, got, "^ bad c")
 }
 
+// nameDocuments returns the two documents of a source whose first
+// document holds the name "first" and whose second holds "second".
+func nameDocuments(t *testing.T) []*niceyaml.Node {
+	t.Helper()
+
+	docs := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"name: first",
+		"---",
+		"name: second",
+	)).Documents()
+	require.Len(t, docs, 2)
+
+	return docs
+}
+
 func TestError_BoundDocument(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
-	namePath := paths.Current().Child("name")
+	docs := nameDocuments(t)
+	names := []string{"first", "second"}
+	located := niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name")))
 
-	docs := source.Documents()
-	require.Len(t, docs, 2)
+	// A path resolves in the document that binds its error, so the excerpt
+	// marks the name of that document and leaves the other alone.
+	tcs := map[string]struct {
+		err error
+		// The message of the binding, which the rendering opens with.
+		want string
+		// The row below the marked name.
+		wantCaret string
+		// The index of the document that binds the error.
+		doc int
+	}{
+		"path resolves in the document that bound it": {
+			err:       located,
+			doc:       1,
+			want:      "3:7: $.name: bad name",
+			wantCaret: "<textError>      ^^^^^^</textError>",
+		},
+		"nested errors resolve in the same document": {
+			err:       niceyaml.NewError("validation failed", niceyaml.WithDetails(located)),
+			doc:       1,
+			want:      "document 2: validation failed",
+			wantCaret: "<textError>      ^^^^^^ bad name</textError>",
+		},
+		// A producer that wraps its own Error with context, the way a
+		// SelfValidator does, leaves the document to the binder above that
+		// wrapping. The producer's context stays as written, behind the
+		// resolved position and the path.
+		"context above the location": {
+			err:       niceyaml.Invalid(fmt.Errorf("validate: %w", located)),
+			doc:       1,
+			want:      "3:7: $.name: validate: bad name",
+			wantCaret: "<textError>      ^^^^^^</textError>",
+		},
+		// Error wrappers add no message text of their own, so the document
+		// attached above them still resolves the location in the message.
+		"Error wrapper around the location": {
+			err:       niceyaml.Invalid(located),
+			doc:       0,
+			want:      "1:7: $.name: bad name",
+			wantCaret: "<textError>      ^^^^^</textError>",
+		},
+	}
 
-	t.Run("path resolves in the document that bound it", func(t *testing.T) {
-		t.Parallel()
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		err := docs[1].Bind(niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
+			err := docs[tc.doc].Bind(tc.err)
+			require.EqualError(t, err, tc.want)
 
-		got := stringtest.TrimLineEnds(render(err))
+			got := stringtest.TrimLineEnds(render(err))
 
-		assert.True(t, strings.HasPrefix(got, "3:7: $.name: bad name"), got)
-		assert.Contains(t, got, "<genericError>second</genericError>")
-		assert.NotContains(t, got, "<genericError>first</genericError>")
-	})
-
-	t.Run("nested errors resolve in the same document", func(t *testing.T) {
-		t.Parallel()
-
-		err := docs[1].Bind(niceyaml.NewError(
-			"validation failed",
-			niceyaml.WithDetails(
-				niceyaml.NewError("bad name", niceyaml.AtPath(namePath)),
-			),
-		))
-
-		got := stringtest.TrimLineEnds(render(err))
-
-		assert.Contains(t, got, "<genericError>second</genericError>")
-		assert.Contains(t, got, "^ bad name")
-		assert.NotContains(t, got, "<genericError>first</genericError>")
-	})
+			assert.True(t, strings.HasPrefix(got, tc.want), got)
+			assert.Contains(t, got, "<genericError>"+names[tc.doc]+"</genericError>\n"+tc.wantCaret)
+			assert.NotContains(t, got, "<genericError>"+names[1-tc.doc]+"</genericError>")
+		})
+	}
 }
 
 func TestError_DoesNotMutateSource(t *testing.T) {
@@ -3478,10 +3520,7 @@ func TestWithDetails(t *testing.T) {
 func TestError_WrappedContext(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
-
-	docs := source.Documents()
-	require.Len(t, docs, 2)
+	docs := nameDocuments(t)
 
 	inner := niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name")))
 
@@ -3519,34 +3558,6 @@ func TestError_WrappedContext(t *testing.T) {
 	twice := docs[1].Bind(direct)
 	assert.Equal(t, direct.Error(), twice.Error())
 	assert.Equal(t, fmt.Sprintf("%+v", direct), fmt.Sprintf("%+v", twice))
-}
-
-func TestError_ContextAboveLocation(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
-
-	docs := source.Documents()
-	require.Len(t, docs, 2)
-
-	// A producer that wraps its own Error with context, the way a SelfValidator
-	// does, leaves the document to the binder above that wrapping.
-	located := niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name")))
-	wrapped := docs[1].Bind(niceyaml.Invalid(fmt.Errorf("validate: %w", located)))
-
-	// The producer's context stays as written, behind the resolved position
-	// and the path.
-	assert.Equal(t, "3:7: $.name: validate: bad name", wrapped.Error())
-
-	// The highlight lands on the second document's value, not the first's.
-	bound := yamltest.RequireSourceError(t, wrapped)
-
-	excerpt, ok := bound.Excerpt()
-	require.True(t, ok)
-
-	detail := yamltest.NewXMLPrinter().Print(excerpt)
-	assert.Contains(t, detail, "<genericError>second</genericError>")
-	assert.NotContains(t, detail, "<genericError>first</genericError>")
 }
 
 func TestError_NestedErrorsRenderAsAnnotations(t *testing.T) {
@@ -4028,29 +4039,6 @@ func TestSourceError_Range_Inverted(t *testing.T) {
 			assert.Equal(t, []int{tc.want.Start.Line + 1}, lineNumbers(excerpt))
 		})
 	}
-}
-
-func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
-	located := niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name")))
-
-	docs := source.Documents()
-	require.Len(t, docs, 2)
-
-	// Error wrappers add no message text of their own, so the document
-	// attached above them still resolves the location in the message.
-	wrapped := docs[0].Bind(niceyaml.Invalid(located))
-
-	assert.Equal(t, "1:7: $.name: bad name", wrapped.Error())
-
-	got := yamltest.RequireSourceError(t, wrapped)
-
-	excerpt, ok := got.Excerpt()
-	require.True(t, ok)
-	require.NotNil(t, excerpt)
-	assert.Positive(t, excerpt.Count())
 }
 
 func TestError_RangeRendersFromSource(t *testing.T) {
