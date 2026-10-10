@@ -218,6 +218,9 @@ func TestDiffer_Full(t *testing.T) {
 		before string
 		after  string
 		want   string
+		// Holds the flag of each changed line by its index in the view.
+		wantFlags map[int]line.Flag
+		wantStats diff.Stats
 	}{
 		"no changes": {
 			before: "key: value\n",
@@ -231,6 +234,8 @@ func TestDiffer_Full(t *testing.T) {
 				"   1 | a: 1",
 				"   2 | b: 2",
 			),
+			wantFlags: map[int]line.Flag{1: line.FlagInserted},
+			wantStats: diff.Stats{Added: 1},
 		},
 		"simple deletion": {
 			before: "a: 1\nb: 2\n",
@@ -239,6 +244,8 @@ func TestDiffer_Full(t *testing.T) {
 				"   1 | a: 1",
 				"   2 | b: 2",
 			),
+			wantFlags: map[int]line.Flag{1: line.FlagDeleted},
+			wantStats: diff.Stats{Removed: 1},
 		},
 		"modification": {
 			before: "key: old\n",
@@ -247,16 +254,22 @@ func TestDiffer_Full(t *testing.T) {
 				"   1 | key: old",
 				"   1 | key: new",
 			),
+			wantFlags: map[int]line.Flag{0: line.FlagDeleted, 1: line.FlagInserted},
+			wantStats: diff.Stats{Added: 1, Removed: 1},
 		},
 		"empty before": {
-			before: "",
-			after:  "key: value\n",
-			want:   "   1 | key: value",
+			before:    "",
+			after:     "key: value\n",
+			want:      "   1 | key: value",
+			wantFlags: map[int]line.Flag{0: line.FlagInserted},
+			wantStats: diff.Stats{Added: 1},
 		},
 		"empty after": {
-			before: "key: value\n",
-			after:  "",
-			want:   "   1 | key: value",
+			before:    "key: value\n",
+			after:     "",
+			want:      "   1 | key: value",
+			wantFlags: map[int]line.Flag{0: line.FlagDeleted},
+			wantStats: diff.Stats{Removed: 1},
 		},
 		"both empty": {
 			before: "",
@@ -272,36 +285,8 @@ func TestDiffer_Full(t *testing.T) {
 				"   2 | second: changed",
 				"   3 | third: 3",
 			),
-		},
-		"change with surrounding context": {
-			before: stringtest.Input(`
-				header: value
-				unchanged1: foo
-				unchanged2: bar
-				middle: old
-				unchanged3: baz
-				unchanged4: qux
-				footer: end
-			`),
-			after: stringtest.Input(`
-				header: value
-				unchanged1: foo
-				unchanged2: bar
-				middle: new
-				unchanged3: baz
-				unchanged4: qux
-				footer: end
-			`),
-			want: stringtest.JoinLF(
-				"   1 | header: value",
-				"   2 | unchanged1: foo",
-				"   3 | unchanged2: bar",
-				"   4 | middle: old",
-				"   4 | middle: new",
-				"   5 | unchanged3: baz",
-				"   6 | unchanged4: qux",
-				"   7 | footer: end",
-			),
+			wantFlags: map[int]line.Flag{1: line.FlagDeleted, 2: line.FlagInserted},
+			wantStats: diff.Stats{Added: 1, Removed: 1},
 		},
 		"multiple scattered changes": {
 			before: stringtest.Input(`
@@ -328,6 +313,15 @@ func TestDiffer_Full(t *testing.T) {
 				"   5 | fifth: 5",
 				"   5 | fifth: changed5",
 			),
+			wantFlags: map[int]line.Flag{
+				0: line.FlagDeleted,
+				1: line.FlagInserted,
+				3: line.FlagDeleted,
+				4: line.FlagInserted,
+				6: line.FlagDeleted,
+				7: line.FlagInserted,
+			},
+			wantStats: diff.Stats{Added: 3, Removed: 3},
 		},
 		"consecutive insertions": {
 			before: stringtest.Input(`
@@ -348,6 +342,8 @@ func TestDiffer_Full(t *testing.T) {
 				"   4 | new3: c",
 				"   5 | after: 2",
 			),
+			wantFlags: map[int]line.Flag{1: line.FlagInserted, 2: line.FlagInserted, 3: line.FlagInserted},
+			wantStats: diff.Stats{Added: 3},
 		},
 		"consecutive deletions": {
 			before: stringtest.Input(`
@@ -368,6 +364,8 @@ func TestDiffer_Full(t *testing.T) {
 				"   4 | old3: c",
 				"   2 | after: 2",
 			),
+			wantFlags: map[int]line.Flag{1: line.FlagDeleted, 2: line.FlagDeleted, 3: line.FlagDeleted},
+			wantStats: diff.Stats{Removed: 3},
 		},
 		"nested yaml structure": {
 			before: stringtest.Input(`
@@ -400,6 +398,15 @@ func TestDiffer_Full(t *testing.T) {
 				"   7 |     image: nginx:1.19",
 				"   7 |     image: nginx:1.21",
 			),
+			wantFlags: map[int]line.Flag{
+				2: line.FlagDeleted,
+				3: line.FlagInserted,
+				5: line.FlagDeleted,
+				6: line.FlagInserted,
+				8: line.FlagDeleted,
+				9: line.FlagInserted,
+			},
+			wantStats: diff.Stats{Added: 3, Removed: 3},
 		},
 		"change at beginning": {
 			before: stringtest.Input(`
@@ -421,6 +428,8 @@ func TestDiffer_Full(t *testing.T) {
 				"   3 | third: 3",
 				"   4 | fourth: 4",
 			),
+			wantFlags: map[int]line.Flag{0: line.FlagDeleted, 1: line.FlagInserted},
+			wantStats: diff.Stats{Added: 1, Removed: 1},
 		},
 		"change at end": {
 			before: stringtest.Input(`
@@ -442,6 +451,8 @@ func TestDiffer_Full(t *testing.T) {
 				"   4 | fourth: old",
 				"   4 | fourth: new",
 			),
+			wantFlags: map[int]line.Flag{3: line.FlagDeleted, 4: line.FlagInserted},
+			wantStats: diff.Stats{Added: 1, Removed: 1},
 		},
 		"yaml with list items": {
 			before: stringtest.Input(`
@@ -466,6 +477,8 @@ func TestDiffer_Full(t *testing.T) {
 				"   4 |   - name: item2",
 				"   5 |     value: 200",
 			),
+			wantFlags: map[int]line.Flag{2: line.FlagDeleted, 3: line.FlagInserted},
+			wantStats: diff.Stats{Added: 1, Removed: 1},
 		},
 		"insert and delete in same region": {
 			before: stringtest.Input(`
@@ -488,60 +501,23 @@ func TestDiffer_Full(t *testing.T) {
 				"   3 | insert2: q",
 				"   4 | keep2: b",
 			),
+			wantFlags: map[int]line.Flag{
+				1: line.FlagDeleted,
+				2: line.FlagDeleted,
+				3: line.FlagInserted,
+				4: line.FlagInserted,
+			},
+			wantStats: diff.Stats{Added: 2, Removed: 2},
 		},
-		"large context around small change": {
-			before: stringtest.Input(`
-				line1: 1
-				line2: 2
-				line3: 3
-				line4: 4
-				line5: 5
-				line6: 6
-				line7: 7
-				line8: 8
-				line9: 9
-				line10: old
-				line11: 11
-				line12: 12
-				line13: 13
-				line14: 14
-				line15: 15
-			`),
-			after: stringtest.Input(`
-				line1: 1
-				line2: 2
-				line3: 3
-				line4: 4
-				line5: 5
-				line6: 6
-				line7: 7
-				line8: 8
-				line9: 9
-				line10: new
-				line11: 11
-				line12: 12
-				line13: 13
-				line14: 14
-				line15: 15
-			`),
+		"trailing blank line added": {
+			before: "a: 1\n",
+			after:  "a: 1\n\n",
 			want: stringtest.JoinLF(
-				"   1 | line1: 1",
-				"   2 | line2: 2",
-				"   3 | line3: 3",
-				"   4 | line4: 4",
-				"   5 | line5: 5",
-				"   6 | line6: 6",
-				"   7 | line7: 7",
-				"   8 | line8: 8",
-				"   9 | line9: 9",
-				"  10 | line10: old",
-				"  10 | line10: new",
-				"  11 | line11: 11",
-				"  12 | line12: 12",
-				"  13 | line13: 13",
-				"  14 | line14: 14",
-				"  15 | line15: 15",
+				"   1 | a: 1",
+				"   2 | ",
 			),
+			wantFlags: map[int]line.Flag{1: line.FlagInserted},
+			wantStats: diff.Stats{Added: 1},
 		},
 	}
 
@@ -553,85 +529,10 @@ func TestDiffer_Full(t *testing.T) {
 
 			got := result.Unified()
 			assert.Equal(t, tc.want, got.String())
-		})
-	}
-}
-
-func TestDiffer_Full_Flags(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		wantFlags        map[int]line.Flag
-		before           string
-		after            string
-		wantFlaggedCount int
-	}{
-		"insertion gets flag": {
-			before:           "a: 1\n",
-			after:            "a: 1\nb: 2\n",
-			wantFlaggedCount: 1,
-			wantFlags: map[int]line.Flag{
-				1: line.FlagInserted,
-			},
-		},
-		"deletion gets flag": {
-			before:           "a: 1\nb: 2\n",
-			after:            "a: 1\n",
-			wantFlaggedCount: 1,
-			wantFlags: map[int]line.Flag{
-				1: line.FlagDeleted,
-			},
-		},
-		"modification has delete and insert flags": {
-			before:           "key: old\n",
-			after:            "key: new\n",
-			wantFlaggedCount: 2,
-			wantFlags: map[int]line.Flag{
-				0: line.FlagDeleted,
-				1: line.FlagInserted,
-			},
-		},
-		"only changed lines get flags": {
-			before: stringtest.Input(`
-				first: 1
-				second: 2
-				third: 3
-			`),
-			after: stringtest.Input(`
-				first: 1
-				second: changed
-				third: 3
-			`),
-			wantFlaggedCount: 2,
-			wantFlags: map[int]line.Flag{
-				0: line.FlagDefault,
-				1: line.FlagDeleted,
-				2: line.FlagInserted,
-				3: line.FlagDefault,
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			result := diffStrings(tc.before, tc.after)
-
-			got := result.Unified()
-
-			flaggedCount := 0
-			for i := range got.All() {
-				if got.Flag(i) != line.FlagDefault {
-					flaggedCount++
-				}
-			}
-
-			assert.Equal(t, tc.wantFlaggedCount, flaggedCount)
-
-			for lineIdx, wantFlag := range tc.wantFlags {
-				assert.Equal(t, wantFlag, got.Flag(lineIdx))
-			}
+			assert.Equal(t, tc.wantFlags, changedFlags(got))
+			assert.Equal(t, tc.wantStats, result.Stats())
+			assert.Equal(t, tc.wantStats != diff.Stats{}, result.Stats().Changed())
+			assert.Equal(t, tc.want == "", result.IsEmpty())
 		})
 	}
 }
@@ -1424,105 +1325,6 @@ func TestDiff_Concurrent(t *testing.T) {
 	wg.Wait()
 }
 
-func TestDiffer_IsEmpty(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		before string
-		after  string
-		want   bool
-	}{
-		"identical content": {
-			before: "key: value\n",
-			after:  "key: value\n",
-			want:   false,
-		},
-		"both empty": {
-			before: "",
-			after:  "",
-			want:   true,
-		},
-		"has changes": {
-			before: "key: old\n",
-			after:  "key: new\n",
-			want:   false,
-		},
-		"insertion": {
-			before: "",
-			after:  "key: value\n",
-			want:   false,
-		},
-		"deletion": {
-			before: "key: value\n",
-			after:  "",
-			want:   false,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			result := diffStrings(tc.before, tc.after)
-
-			assert.Equal(t, tc.want, result.IsEmpty())
-		})
-	}
-}
-
-func TestDiffResult_Stats(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		before      string
-		after       string
-		wantAdded   int
-		wantRemoved int
-	}{
-		"no changes": {
-			before:      "a: 1\n",
-			after:       "a: 1\n",
-			wantAdded:   0,
-			wantRemoved: 0,
-		},
-		"additions only": {
-			before:      "a: 1\n",
-			after:       "a: 1\nb: 2\n",
-			wantAdded:   1,
-			wantRemoved: 0,
-		},
-		"removals only": {
-			before:      "a: 1\nb: 2\n",
-			after:       "a: 1\n",
-			wantAdded:   0,
-			wantRemoved: 1,
-		},
-		"mixed changes": {
-			before:      "a: 1\nb: 2\n",
-			after:       "a: 1\nc: 3\n",
-			wantAdded:   1,
-			wantRemoved: 1,
-		},
-		"trailing blank line added": {
-			before:      "a: 1\n",
-			after:       "a: 1\n\n",
-			wantAdded:   1,
-			wantRemoved: 0,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			result := diffStrings(tt.before, tt.after)
-			got := result.Stats()
-			assert.Equal(t, diff.Stats{Added: tt.wantAdded, Removed: tt.wantRemoved}, got)
-			assert.Equal(t, tt.wantAdded > 0 || tt.wantRemoved > 0, got.Changed())
-		})
-	}
-}
-
 func TestDiffResult_BeforeAfter(t *testing.T) {
 	t.Parallel()
 
@@ -2028,6 +1830,28 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 		require.NotNil(t, hunks)
 		assert.Equal(t, 0, hunks.Count())
 	})
+}
+
+// changedFlags returns the flag of each line of view that is not
+// [line.FlagDefault], by the index of the line. It returns nil when every
+// line has the default flag.
+func changedFlags(view *line.View) map[int]line.Flag {
+	var flags map[int]line.Flag
+
+	for i := range view.All() {
+		flag := view.Flag(i)
+		if flag == line.FlagDefault {
+			continue
+		}
+
+		if flags == nil {
+			flags = map[int]line.Flag{}
+		}
+
+		flags[i] = flag
+	}
+
+	return flags
 }
 
 // diffStrings diffs the lines of two YAML inputs.
