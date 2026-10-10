@@ -31,41 +31,6 @@ func mustEncode(t *testing.T, input any, opts ...encoder.Option) string {
 	return buf.String()
 }
 
-func TestEncoder_Encode(t *testing.T) {
-	t.Parallel()
-
-	type nested struct {
-		Name  string `yaml:"name"`
-		Value int    `yaml:"value"`
-	}
-
-	tcs := map[string]struct {
-		input any
-		want  string
-	}{
-		"simple string": {
-			input: "hello",
-			want:  "hello\n",
-		},
-		"simple map": {
-			input: map[string]string{"key": "value"},
-			want:  "key: value\n",
-		},
-		"nested struct": {
-			input: nested{Name: "test", Value: 42},
-			want:  stringtest.LinesLF("name: test", "value: 42"),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, mustEncode(t, tc.input))
-		})
-	}
-}
-
 // literalBlock is a string whose marshaler returns it as a literal block.
 type literalBlock string
 
@@ -657,6 +622,11 @@ func TestEncoder_Encode_writeError(t *testing.T) {
 func TestMarshal(t *testing.T) {
 	t.Parallel()
 
+	type pair struct {
+		Name  string `yaml:"name"`
+		Value int    `yaml:"value"`
+	}
+
 	tcs := map[string]struct {
 		input any
 		want  string
@@ -670,9 +640,21 @@ func TestMarshal(t *testing.T) {
 			input: 1,
 			want:  "1\n",
 		},
+		"string": {
+			input: "hello",
+			want:  "hello\n",
+		},
 		"empty string": {
 			input: "",
 			want:  "\"\"\n",
+		},
+		"mapping": {
+			input: map[string]string{"key": "value"},
+			want:  "key: value\n",
+		},
+		"struct": {
+			input: pair{Name: "test", Value: 42},
+			want:  stringtest.LinesLF("name: test", "value: 42"),
 		},
 		"empty mapping": {
 			input: map[string]int{},
@@ -713,6 +695,11 @@ func TestMarshal(t *testing.T) {
 				encoder.WithYAMLComments(yaml.CommentMap{"$.k": {yaml.HeadComment(" head")}}),
 			},
 			want: stringtest.LinesLF("# head", "k:", "  items:", "    - one"),
+		},
+		"go-yaml option": {
+			input: map[string][]string{"items": {"one", "two"}},
+			opts:  []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+			want:  "{items: [one, two]}\n",
 		},
 	}
 
@@ -1315,15 +1302,4 @@ func TestWithYAMLComments_documents(t *testing.T) {
 	require.NoError(t, enc.Encode(t.Context(), map[string]int{"a": 1}))
 	require.NoError(t, enc.Encode(t.Context(), map[string]int{"a": 2}))
 	assert.Equal(t, stringtest.LinesLF("a: 1 # count", "---", "a: 2 # count"), buf.String())
-}
-
-func TestWithYAMLOptions(t *testing.T) {
-	t.Parallel()
-
-	type config struct {
-		Items []string `yaml:"items"`
-	}
-
-	got := mustEncode(t, config{Items: []string{"one", "two"}}, encoder.WithYAMLOptions(yaml.Flow(true)))
-	assert.Equal(t, "{items: [one, two]}\n", got)
 }
