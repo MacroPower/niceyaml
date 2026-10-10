@@ -325,6 +325,25 @@ func TestNewSourceFromLayers(t *testing.T) {
 		assert.Equal(t, layerServer{Host: "example.com", Port: 80}, cfg.Server)
 	})
 
+	t.Run("a Source of empty documents alone adds nothing", func(t *testing.T) {
+		t.Parallel()
+
+		// An overlay that a template comments out renders as headers
+		// alone, and it layers as an empty file does.
+		base := layerSources(t, baseInput)[0]
+		overlay := niceyaml.NewSourceFromString("---\n# off\n---\n", niceyaml.WithName("overlay.yaml"))
+
+		placements := map[string][]niceyaml.Layer{
+			"on top": {base, overlay},
+			"lowest": {overlay, base},
+		}
+
+		for placement, layers := range placements {
+			_, err := yamltest.Layers(t, layers...).Decode[layerConfig](t.Context())
+			require.EqualError(t, err, want, placement)
+		}
+	})
+
 	t.Run("the documents of one file layer in order", func(t *testing.T) {
 		t.Parallel()
 
