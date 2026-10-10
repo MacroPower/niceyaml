@@ -237,7 +237,7 @@ func TestIndex_Element(t *testing.T) {
 			wantStart: "-@3:3",
 		},
 		"element behind an alias": {
-			input:     "base: &base [a, b]\nal: *base\n",
+			input:     stringtest.LinesLF("base: &base [a, b]", "al: *base"),
 			steps:     []any{"al", 1},
 			want:      "@.al[1]",
 			wantStart: "b@1:17",
@@ -596,7 +596,7 @@ func TestIndex_SelectsEntry(t *testing.T) {
 			want:  true,
 		},
 		"mapping behind an alias": {
-			input: "base: &base {a: b}\nal: *base\n",
+			input: stringtest.LinesLF("base: &base {a: b}", "al: *base"),
 			steps: []any{"al"},
 			name:  "a",
 			want:  true,
@@ -673,7 +673,7 @@ func TestIndex_Lacks(t *testing.T) {
 			name:  "16",
 		},
 		"mapping behind an alias": {
-			input: "base: &base {a: b}\nal: *base\n",
+			input: stringtest.LinesLF("base: &base {a: b}", "al: *base"),
 			steps: []any{"al"},
 			name:  "c",
 			want:  true,
