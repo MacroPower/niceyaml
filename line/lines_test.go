@@ -269,6 +269,7 @@ func requireRoundtrip(t *testing.T, input string) line.Lines {
 func TestNewLines_PerLine(t *testing.T) {
 	t.Parallel()
 
+	// Each row carries a line number prefix.
 	tcs := map[string]struct {
 		input string
 		want  []string
@@ -347,6 +348,9 @@ func TestNewLines_PerLine(t *testing.T) {
 			for i, want := range tc.want {
 				assert.Equal(t, want, lines.Line(i).String(), "line %d", i)
 			}
+
+			// Lines.String joins the rows of its lines.
+			assert.Equal(t, stringtest.JoinLF(tc.want...), lines.String())
 		})
 	}
 }
@@ -1898,36 +1902,6 @@ func TestLines_TokenRanges(t *testing.T) {
 		other := tokens.Tokenize("key: |\n  other\n  lines\n")
 		assert.Nil(t, src.TokenRanges(other[len(other)-1]))
 	})
-}
-
-func TestLines_String(t *testing.T) {
-	t.Parallel()
-
-	// Each row carries a line number prefix.
-	tcs := map[string]struct {
-		input string
-		want  string
-	}{
-		"single line": {
-			input: "key: value\n",
-			want:  "   1 | key: value",
-		},
-		"multiple lines": {
-			input: "key1: value1\nkey2: value2\n",
-			want: stringtest.JoinLF(
-				"   1 | key1: value1",
-				"   2 | key2: value2",
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, newLines(tc.input).String())
-		})
-	}
 }
 
 // TestNewLines_WhitespaceType verifies that NewLines assigns SpaceType to
