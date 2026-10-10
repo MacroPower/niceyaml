@@ -3886,7 +3886,9 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 
 	// The search closure returns a setup func that shows the same diff with
 	// tagged search highlights, searches for term, and moves the selection
-	// next matches ahead.
+	// next matches ahead. The XML tags of the test styles take up columns,
+	// so its cases use a viewport wide enough that highlighted lines fit on
+	// one row.
 	search := func(term string, next int) func(m *yamlviewport.Model) {
 		return func(m *yamlviewport.Model) {
 			m.SetPrinter(testPrinterWithSearch())
@@ -4030,15 +4032,6 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			},
 			width:  80,
 			height: 16,
-		},
-		"SideBySideSearch": {
-			// Verifies search highlights work in side-by-side mode.
-			// The XML tags of the test styles take up columns, so this
-			// case and the search cases below use a viewport wide enough
-			// that highlighted lines fit on one row.
-			setupFunc: search("modified", 0),
-			width:     190,
-			height:    24,
 		},
 		"SideBySideSearchNavigate": {
 			// Verifies search navigation moves the selection in side-by-side
