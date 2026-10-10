@@ -826,7 +826,7 @@ func TestDirective_Resolve(t *testing.T) {
 				// directive.
 				reg := schema.NewRegistry(schema.WithResolvers(
 					schema.Directive(),
-					schema.MustCompile([]byte("false")),
+					compileSchema(t, "false"),
 				))
 				require.NoError(t, reg.Check(t.Context(), doc))
 			})

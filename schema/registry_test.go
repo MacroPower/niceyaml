@@ -1629,8 +1629,8 @@ func TestRegistry_Lookup_MatcherError(t *testing.T) {
 func TestRegistry_CompiledSchema(t *testing.T) {
 	t.Parallel()
 
-	deployment := schema.MustCompile([]byte(`{"type": "object", "required": ["replicas"]}`))
-	service := schema.MustCompile([]byte(`{"type": "object", "required": ["port"]}`))
+	deployment := compileSchema(t, `{"type": "object", "required": ["replicas"]}`)
+	service := compileSchema(t, `{"type": "object", "required": ["port"]}`)
 
 	t.Run("a schema is a resolver the registry validates with as it is", func(t *testing.T) {
 		t.Parallel()
@@ -1700,7 +1700,7 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 
 		// The registry asserts formats, and the schema compiled without
 		// them, so the value passes. The registry compiles nothing here.
-		lax := schema.MustCompile([]byte(`{"type": "string", "format": "ipv4"}`))
+		lax := compileSchema(t, `{"type": "string", "format": "ipv4"}`)
 
 		reg := schema.NewRegistry(
 			schema.WithCompileOptions(schema.WithJSONSchemaOptions(jsonschema.WithFormats(true))),
@@ -2865,7 +2865,7 @@ func TestRegistry_Load(t *testing.T) {
 
 		reg := schema.NewRegistry()
 
-		_, err := reg.Load(t.Context(), schema.MustCompile([]byte(`{}`)).Ref())
+		_, err := reg.Load(t.Context(), compileSchema(t, `{}`).Ref())
 		require.ErrorIs(t, err, schema.ErrLoad)
 
 		_, err = reg.Load(t.Context(), schema.Ref{})
@@ -2933,7 +2933,7 @@ func TestRegistry_Schema(t *testing.T) {
 	t.Run("a compiled schema comes back as it is", func(t *testing.T) {
 		t.Parallel()
 
-		compiled := schema.MustCompile([]byte(`{}`))
+		compiled := compileSchema(t, `{}`)
 
 		got, err := schema.NewRegistry().Schema(t.Context(), compiled.Ref())
 		require.NoError(t, err)
