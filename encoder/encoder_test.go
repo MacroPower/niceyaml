@@ -12,6 +12,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/encoder"
@@ -52,7 +53,7 @@ func TestEncoder_Encode(t *testing.T) {
 		},
 		"nested struct": {
 			input: nested{Name: "test", Value: 42},
-			want:  "name: test\nvalue: 42\n",
+			want:  stringtest.LinesLF("name: test", "value: 42"),
 		},
 	}
 
@@ -221,7 +222,7 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 		},
 		"line breaks alone before sequence entry": {
 			input: []string{"\n\n", "z"},
-			want:  "- \"\\n\\n\"\n- z\n",
+			want:  stringtest.LinesLF(`- "\n\n"`, "- z"),
 		},
 		"line break in flow mapping": {
 			input: map[string]string{"k": "x\ny"},
@@ -249,7 +250,7 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 		"indented line in indented sequence at indent 1": {
 			input: map[string][]string{"k": {"x\n  y"}},
 			opts:  []encoder.Option{encoder.WithIndent(1), encoder.WithIndentSequence(true)},
-			want:  "k:\n - \"x\\n  y\"\n",
+			want:  stringtest.LinesLF("k:", ` - "x\n  y"`),
 		},
 		"marshaled literal block in flow mapping": {
 			input: map[string]literalBlock{"k": "x\ny"},
@@ -302,7 +303,7 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 		"marshaled plain scalar over a blank line in nested mapping": {
 			input:   map[string]map[string]rawYAML{"a": {"k": "a\n\n  b"}},
 			decoded: map[string]map[string]rawYAML{"a": {"k": "a\nb"}},
-			want:    "a:\n  k: \"a\\nb\"\n",
+			want:    stringtest.LinesLF("a:", `  k: "a\nb"`),
 		},
 		"marshaled single-quoted line break": {
 			input:   map[string]rawYAML{"k": "'a\n\n  b'"},
@@ -333,7 +334,7 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 			input:   map[string]rawYAML{"k": "? a\n: |"},
 			decoded: map[string]map[string]string{"k": {"a": ""}},
 			opts:    []encoder.Option{flow},
-			want:    "{k:\n  ? a: |\n}\n",
+			want:    stringtest.LinesLF("{k:", "  ? a: |", "}"),
 		},
 		"marshaled single-quoted string": {
 			input:   map[string]rawYAML{"k": "'a b'"},
@@ -342,32 +343,32 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 		},
 		"literal block": {
 			input: map[string]string{"k": "x\ny"},
-			want:  "k: |-\n  x\n  y\n",
+			want:  stringtest.LinesLF("k: |-", "  x", "  y"),
 		},
 		"literal block with space before line break": {
 			input: map[string]string{"k": "x  \ny"},
-			want:  "k: |-\n  x  \n  y\n",
+			want:  stringtest.LinesLF("k: |-", "  x  ", "  y"),
 		},
 		"literal block with tab before line break": {
 			input: map[string]string{"k": "x\t\ny"},
-			want:  "k: |-\n  x\t\n  y\n",
+			want:  stringtest.LinesLF("k: |-", "  x\t", "  y"),
 		},
 		"literal block with tab at end": {
 			input: map[string]string{"k": "x\ny\t"},
-			want:  "k: |-\n  x\n  y\t\n",
+			want:  stringtest.LinesLF("k: |-", "  x", "  y\t"),
 		},
 		"literal block with space before final line breaks": {
 			input: map[string]string{"k": "x \n\n"},
-			want:  "k: |+\n  x \n\n",
+			want:  stringtest.LinesLF("k: |+", "  x ", ""),
 		},
 		"literal block in sequence at indent 1": {
 			input: []string{"x\ny"},
 			opts:  []encoder.Option{encoder.WithIndent(1)},
-			want:  "- |-\n   x\n   y\n",
+			want:  stringtest.LinesLF("- |-", "   x", "   y"),
 		},
 		"marshaled literal block": {
 			input: map[string]literalBlock{"k": "x\ny"},
-			want:  "k: |-\n  x\n  y\n",
+			want:  stringtest.LinesLF("k: |-", "  x", "  y"),
 		},
 		"plain string": {
 			input: map[string]string{"k": "a-b ?c"},
@@ -429,25 +430,37 @@ func TestEncoder_Encode_documents(t *testing.T) {
 	}{
 		"separator between documents": {
 			steps: []step{{value: "a"}, {value: "b"}},
-			want:  "a\n---\nb\n",
+			want:  stringtest.LinesLF("a", "---", "b"),
 		},
 		"document marker strings": {
 			steps: []step{{value: "---"}, {value: "..."}, {value: "next"}},
-			want:  "\"---\"\n---\n\"...\"\n---\nnext\n",
+			want: stringtest.LinesLF(
+				`"---"`,
+				"---",
+				`"..."`,
+				"---",
+				"next",
+			),
 		},
 		"anchor in every document": {
 			steps: []step{
 				{value: anchoredDoc{A: s}},
 				{value: anchoredDoc{A: s}},
 			},
-			want: "a: &a\n  name: x\n---\na: &a\n  name: x\n",
+			want: stringtest.LinesLF(
+				"a: &a",
+				"  name: x",
+				"---",
+				"a: &a",
+				"  name: x",
+			),
 		},
 		"no anchor from a failed encode": {
 			steps: []step{
 				{value: unencodableDoc{A: s, C: make(chan int)}, fails: true},
 				{value: anchoredDoc{A: s}},
 			},
-			want: "a: &a\n  name: x\n",
+			want: stringtest.LinesLF("a: &a", "  name: x"),
 		},
 	}
 
@@ -590,7 +603,12 @@ func TestEncoder_Encode_writes(t *testing.T) {
 	assert.Equal(t, []string{"a: 1\n"}, w.writes, "the document reaches the writer before Encode returns")
 
 	require.NoError(t, enc.Encode(t.Context(), []string{"b", "c"}))
-	assert.Equal(t, []string{"a: 1\n", "---\n- b\n- c\n"}, w.writes, "a separator shares the write of its document")
+	assert.Equal(
+		t,
+		[]string{"a: 1\n", stringtest.LinesLF("---", "- b", "- c")},
+		w.writes,
+		"a separator shares the write of its document",
+	)
 
 	require.ErrorIs(t, enc.Encode(t.Context(), emptyMarshaler{}), encoder.ErrNoNode)
 	assert.Len(t, w.writes, 2, "an Encode that returns an error makes no write")
@@ -670,15 +688,15 @@ func TestMarshal(t *testing.T) {
 		},
 		"root sequence": {
 			input: []string{"a", "b"},
-			want:  "- a\n- b\n",
+			want:  stringtest.LinesLF("- a", "- b"),
 		},
 		"literal block": {
 			input: map[string]string{"k": "a\nb\n"},
-			want:  "k: |\n  a\n  b\n",
+			want:  stringtest.LinesLF("k: |", "  a", "  b"),
 		},
 		"literal block that keeps its final line breaks": {
 			input: map[string]string{"k": "a\nb\n\n"},
-			want:  "k: |+\n  a\n  b\n\n",
+			want:  stringtest.LinesLF("k: |+", "  a", "  b", ""),
 		},
 		"marshaled YAML with no final line break": {
 			input: rawYAML("a: 1"),
@@ -694,7 +712,7 @@ func TestMarshal(t *testing.T) {
 				encoder.Pretty(),
 				encoder.WithYAMLComments(yaml.CommentMap{"$.k": {yaml.HeadComment(" head")}}),
 			},
-			want: "# head\nk:\n  items:\n    - one\n",
+			want: stringtest.LinesLF("# head", "k:", "  items:", "    - one"),
 		},
 	}
 
@@ -807,39 +825,53 @@ func TestPretty(t *testing.T) {
 	}{
 		"sequence under a key": {
 			inputs: []any{config{Items: []string{"one", "two"}}},
-			want:   "items:\n  - one\n  - two\n",
+			want:   stringtest.LinesLF("items:", "  - one", "  - two"),
 		},
 		"root sequence": {
 			inputs: []any{[]string{"one", "two"}},
-			want:   "- one\n- two\n",
+			want:   stringtest.LinesLF("- one", "- two"),
 		},
 		"root sequence of mappings": {
 			inputs: []any{[]server{{Name: "a", Ports: []int{1, 2}}, {Name: "b"}}},
-			want:   "- name: a\n  ports:\n    - 1\n    - 2\n- name: b\n  ports: []\n",
+			want: stringtest.LinesLF(
+				"- name: a",
+				"  ports:",
+				"    - 1",
+				"    - 2",
+				"- name: b",
+				"  ports: []",
+			),
 		},
 		"root sequence of sequences": {
 			inputs: []any{[][]string{{"a", "b"}, {"c"}}},
-			want:   "- - a\n  - b\n- - c\n",
+			want:   stringtest.LinesLF("- - a", "  - b", "- - c"),
 		},
 		"literal block in a root sequence": {
 			inputs: []any{[]string{"one\ntwo\n"}},
-			want:   "- |\n  one\n  two\n",
+			want:   stringtest.LinesLF("- |", "  one", "  two"),
 		},
 		"literal block in a mapping in a root sequence": {
 			inputs: []any{[]map[string]string{{"k": "one\ntwo\n"}}},
-			want:   "- k: |\n    one\n    two\n",
+			want:   stringtest.LinesLF("- k: |", "    one", "    two"),
 		},
 		"root sequence in each document": {
 			inputs: []any{[]string{"a"}, config{Items: []string{"b"}}, []string{"c"}},
-			want:   "- a\n---\nitems:\n  - b\n---\n- c\n",
+			want: stringtest.LinesLF(
+				"- a",
+				"---",
+				"items:",
+				"  - b",
+				"---",
+				"- c",
+			),
 		},
 		"root sequence that a marshaler returned": {
 			inputs: []any{rawYAML("- a\n- b\n")},
-			want:   "- a\n- b\n",
+			want:   stringtest.LinesLF("- a", "- b"),
 		},
 		"root sequence that holds YAML a marshaler returned": {
 			inputs: []any{[]rawYAML{"- a\n- b\n"}},
-			want:   "  - - a\n    - b\n",
+			want:   stringtest.LinesLF("  - - a", "    - b"),
 		},
 	}
 
@@ -863,10 +895,10 @@ func TestPretty(t *testing.T) {
 func TestPretty_order(t *testing.T) {
 	t.Parallel()
 
-	const (
-		pretty     = "k:\n  items:\n    - one\n"
-		fourSpaces = "k:\n    items:\n        - one\n"
-		atParent   = "k:\n  items:\n  - one\n"
+	var (
+		pretty     = stringtest.LinesLF("k:", "  items:", "    - one")
+		fourSpaces = stringtest.LinesLF("k:", "    items:", "        - one")
+		atParent   = stringtest.LinesLF("k:", "  items:", "  - one")
 	)
 
 	tcs := map[string]struct {
@@ -934,8 +966,13 @@ func TestPretty_reuse(t *testing.T) {
 	wide := mustEncode(t, input, pretty, encoder.WithIndent(4))
 	plain := mustEncode(t, input, pretty)
 
-	assert.Equal(t, "items:\n    - one\n", wide)
-	assert.Equal(t, "items:\n  - one\n", plain, "an option after Pretty in one call reaches no other call")
+	assert.Equal(t, stringtest.LinesLF("items:", "    - one"), wide)
+	assert.Equal(
+		t,
+		stringtest.LinesLF("items:", "  - one"),
+		plain,
+		"an option after Pretty in one call reaches no other call",
+	)
 }
 
 // TestPretty_indentOptions checks that Pretty writes what WithIndent(2) and
@@ -1070,19 +1107,19 @@ func TestWithIndentSequence(t *testing.T) {
 		"sequence under a key": {
 			input:  []map[string][]string{{"k": {"a"}}},
 			indent: 2,
-			want:   "- k:\n  - a\n",
+			want:   stringtest.LinesLF("- k:", "  - a"),
 		},
 		"indented sequence under a key": {
 			input:  []map[string][]string{{"k": {"a"}}},
 			indent: 2,
 			seq:    true,
-			want:   "- k:\n    - a\n",
+			want:   stringtest.LinesLF("- k:", "    - a"),
 		},
 		"indented sequence under a key at indent 4": {
 			input:  []map[string][]string{{"k": {"a"}}},
 			indent: 4,
 			seq:    true,
-			want:   "- k:\n      - a\n",
+			want:   stringtest.LinesLF("- k:", "      - a"),
 		},
 	}
 
@@ -1112,7 +1149,13 @@ func TestWithYAMLComments(t *testing.T) {
 				"$.b.c": {yaml.LineComment(" line c")},
 				"$.b":   {yaml.FootComment(" foot b")},
 			},
-			want: "# head a\na: 1 # line a\nb:\n  c: x # line c\n# foot b\n",
+			want: stringtest.LinesLF(
+				"# head a",
+				"a: 1 # line a",
+				"b:",
+				"  c: x # line c",
+				"# foot b",
+			),
 		},
 		"line comment on a quoted keyword": {
 			input:    map[string]string{"k": ".inf"},
@@ -1127,7 +1170,7 @@ func TestWithYAMLComments(t *testing.T) {
 		"line comment on a mapping": {
 			input:    map[string]any{"b": map[string]any{"c": "x"}},
 			comments: yaml.CommentMap{"$.b": {yaml.LineComment(" nested")}},
-			want:     "b: # nested\n  c: x\n",
+			want:     stringtest.LinesLF("b: # nested", "  c: x"),
 		},
 		"line comment on a root scalar": {
 			input:    "x",
@@ -1137,28 +1180,28 @@ func TestWithYAMLComments(t *testing.T) {
 		"head comment of two lines": {
 			input:    map[string]int{"a": 1},
 			comments: yaml.CommentMap{"$.a": {yaml.HeadComment(" one", " two")}},
-			want:     "# one\n# two\na: 1\n",
+			want:     stringtest.LinesLF("# one", "# two", "a: 1"),
 		},
 		"head comment on a sequence entry": {
 			input:    map[string][]string{"items": {"one", "two"}},
 			comments: yaml.CommentMap{"$.items[1]": {yaml.HeadComment(" second")}},
 			opts:     []encoder.Option{encoder.Pretty()},
-			want:     "items:\n  - one\n  # second\n  - two\n",
+			want:     stringtest.LinesLF("items:", "  - one", "  # second", "  - two"),
 		},
 		"head comment on a root sequence": {
 			input:    []string{"a"},
 			comments: yaml.CommentMap{"$": {yaml.HeadComment(" list")}},
-			want:     "# list\n- a\n",
+			want:     stringtest.LinesLF("# list", "- a"),
 		},
 		"line comment on a sequence entry": {
 			input:    map[string][]string{"items": {"one", "two"}},
 			comments: yaml.CommentMap{"$.items[0]": {yaml.LineComment(" first")}},
-			want:     "items:\n- one # first\n- two\n",
+			want:     stringtest.LinesLF("items:", "- one # first", "- two"),
 		},
 		"foot comment on a sequence": {
 			input:    map[string][]string{"items": {"one", "two"}},
 			comments: yaml.CommentMap{"$.items[0]": {yaml.FootComment(" end")}},
-			want:     "items:\n- one\n- two\n# end\n",
+			want:     stringtest.LinesLF("items:", "- one", "- two", "# end"),
 		},
 		"path that selects no node": {
 			input:    map[string]int{"a": 1},
@@ -1271,7 +1314,7 @@ func TestWithYAMLComments_documents(t *testing.T) {
 
 	require.NoError(t, enc.Encode(t.Context(), map[string]int{"a": 1}))
 	require.NoError(t, enc.Encode(t.Context(), map[string]int{"a": 2}))
-	assert.Equal(t, "a: 1 # count\n---\na: 2 # count\n", buf.String())
+	assert.Equal(t, stringtest.LinesLF("a: 1 # count", "---", "a: 2 # count"), buf.String())
 }
 
 func TestWithYAMLOptions(t *testing.T) {
