@@ -1592,21 +1592,7 @@ func TestIntegration(t *testing.T) {
 		assert.Equal(t, int32(1), schemaFetches.Load(), "the registry should fetch the schema once")
 	})
 
-	t.Run("reports an unreachable catalog through the registry", func(t *testing.T) {
-		t.Parallel()
-
-		store := schemastore.New(schemastore.WithCatalogURL("http://localhost:1"))
-		reg := schema.NewRegistry(schema.WithResolvers(store))
-
-		doc := yamltest.FirstDocumentWithPath(t, `key: value`, "config.yaml")
-
-		err := reg.Check(t.Context(), doc)
-		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
-		require.ErrorIs(t, err, schema.ErrResolve)
-		require.NotErrorIs(t, err, schema.ErrNoMatch)
-	})
-
-	t.Run("stops before resolvers registered after an unreachable catalog", func(t *testing.T) {
+	t.Run("reports an unreachable catalog and stops at the store", func(t *testing.T) {
 		t.Parallel()
 
 		var fallbackCalls atomic.Int32
@@ -1625,6 +1611,8 @@ func TestIntegration(t *testing.T) {
 
 		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+		require.ErrorIs(t, err, schema.ErrResolve)
+		require.NotErrorIs(t, err, schema.ErrNoMatch)
 		assert.Zero(t, fallbackCalls.Load(), "the registry should not try resolvers after the store")
 	})
 }
