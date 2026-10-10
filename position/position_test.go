@@ -55,8 +55,7 @@ func TestNewFromToken(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := position.NewFromToken(tc.token)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, position.NewFromToken(tc.token))
 		})
 	}
 }
@@ -68,22 +67,15 @@ func TestPosition_String(t *testing.T) {
 		pos  position.Position
 		want string
 	}{
-		"zero position": {
-			pos:  position.New(0, 0),
-			want: "0:0",
-		},
-		"line 5 col 15 (0-indexed)": {
-			pos:  position.New(4, 14),
-			want: "4:14",
-		},
+		"zero position":             {pos: position.New(0, 0), want: "0:0"},
+		"line 5 col 15 (0-indexed)": {pos: position.New(4, 14), want: "4:14"},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.pos.String()
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.pos.String())
 		})
 	}
 }
@@ -95,26 +87,16 @@ func TestRange_String(t *testing.T) {
 		r    position.Range
 		want string
 	}{
-		"single point": {
-			r:    position.NewRange(position.New(0, 0), position.New(0, 0)),
-			want: "0:0-0:0",
-		},
-		"single line range": {
-			r:    position.NewRange(position.New(0, 5), position.New(0, 10)),
-			want: "0:5-0:10",
-		},
-		"multi-line range": {
-			r:    position.NewRange(position.New(2, 3), position.New(5, 8)),
-			want: "2:3-5:8",
-		},
+		"single point":      {r: position.NewRange(position.New(0, 0), position.New(0, 0)), want: "0:0-0:0"},
+		"single line range": {r: position.NewRange(position.New(0, 5), position.New(0, 10)), want: "0:5-0:10"},
+		"multi-line range":  {r: position.NewRange(position.New(2, 3), position.New(5, 8)), want: "2:3-5:8"},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.r.String()
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.r.String())
 		})
 	}
 }
@@ -149,8 +131,7 @@ func TestRanges_String(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.ranges.String()
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.ranges.String())
 		})
 	}
 }
@@ -165,89 +146,36 @@ func TestNewRange(t *testing.T) {
 func TestRange_Contains(t *testing.T) {
 	t.Parallel()
 
+	multi := position.NewRange(position.New(1, 5), position.New(3, 10))
+	single := position.NewRange(position.New(5, 10), position.New(5, 20))
+	empty := position.NewRange(position.New(2, 5), position.New(2, 5))
+
 	tcs := map[string]struct {
 		r    position.Range
 		pos  position.Position
 		want bool
 	}{
-		"position at start": {
-			r:    position.NewRange(position.New(1, 5), position.New(3, 10)),
-			pos:  position.New(1, 5),
-			want: true,
-		},
-		"position at end": {
-			r:    position.NewRange(position.New(1, 5), position.New(3, 10)),
-			pos:  position.New(3, 10),
-			want: false,
-		},
-		"position between start and end": {
-			r:    position.NewRange(position.New(1, 5), position.New(3, 10)),
-			pos:  position.New(2, 0),
-			want: true,
-		},
-		"position before start same line": {
-			r:    position.NewRange(position.New(1, 5), position.New(3, 10)),
-			pos:  position.New(1, 4),
-			want: false,
-		},
-		"position before start earlier line": {
-			r:    position.NewRange(position.New(1, 5), position.New(3, 10)),
-			pos:  position.New(0, 10),
-			want: false,
-		},
-		"position after end same line": {
-			r:    position.NewRange(position.New(1, 5), position.New(3, 10)),
-			pos:  position.New(3, 11),
-			want: false,
-		},
-		"position after end later line": {
-			r:    position.NewRange(position.New(1, 5), position.New(3, 10)),
-			pos:  position.New(4, 0),
-			want: false,
-		},
-		"single line range position inside": {
-			r:    position.NewRange(position.New(5, 10), position.New(5, 20)),
-			pos:  position.New(5, 15),
-			want: true,
-		},
-		"single line range position at start col": {
-			r:    position.NewRange(position.New(5, 10), position.New(5, 20)),
-			pos:  position.New(5, 10),
-			want: true,
-		},
-		"single line range position at end col": {
-			r:    position.NewRange(position.New(5, 10), position.New(5, 20)),
-			pos:  position.New(5, 20),
-			want: false,
-		},
-		"multi-line range middle line any col": {
-			r:    position.NewRange(position.New(1, 50), position.New(5, 2)),
-			pos:  position.New(3, 999),
-			want: true,
-		},
-		"empty range start equals end": {
-			r:    position.NewRange(position.New(2, 5), position.New(2, 5)),
-			pos:  position.New(2, 5),
-			want: false,
-		},
-		"position on start line after start col": {
-			r:    position.NewRange(position.New(1, 5), position.New(3, 10)),
-			pos:  position.New(1, 6),
-			want: true,
-		},
-		"position on end line before end col": {
-			r:    position.NewRange(position.New(1, 5), position.New(3, 10)),
-			pos:  position.New(3, 9),
-			want: true,
-		},
+		"at start":                            {r: multi, pos: position.New(1, 5), want: true},
+		"at end":                              {r: multi, pos: position.New(3, 10), want: false},
+		"on a line between start and end":     {r: multi, pos: position.New(2, 0), want: true},
+		"before start on its line":            {r: multi, pos: position.New(1, 4), want: false},
+		"on a line before start":              {r: multi, pos: position.New(0, 10), want: false},
+		"after end on its line":               {r: multi, pos: position.New(3, 11), want: false},
+		"on a line after end":                 {r: multi, pos: position.New(4, 0), want: false},
+		"inside a range on one line":          {r: single, pos: position.New(5, 15), want: true},
+		"at start of a range on one line":     {r: single, pos: position.New(5, 10), want: true},
+		"at end of a range on one line":       {r: single, pos: position.New(5, 20), want: false},
+		"past both columns on a line between": {r: multi, pos: position.New(2, 999), want: true},
+		"at an empty range":                   {r: empty, pos: position.New(2, 5), want: false},
+		"after start on its line":             {r: multi, pos: position.New(1, 6), want: true},
+		"before end on its line":              {r: multi, pos: position.New(3, 9), want: true},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.r.Contains(tc.pos)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.r.Contains(tc.pos))
 		})
 	}
 }
@@ -418,38 +346,19 @@ func TestSpan_Len(t *testing.T) {
 		input position.Span
 		want  int
 	}{
-		"zero length": {
-			input: position.NewSpan(5, 5),
-			want:  0,
-		},
-		"positive length": {
-			input: position.NewSpan(0, 10),
-			want:  10,
-		},
-		"non-zero start": {
-			input: position.NewSpan(5, 15),
-			want:  10,
-		},
-		"inverted span": {
-			input: position.NewSpan(15, 5),
-			want:  -10,
-		},
-		"span wider than MaxInt saturates": {
-			input: position.NewSpan(math.MinInt, math.MaxInt),
-			want:  math.MaxInt,
-		},
-		"inverted span wider than MaxInt saturates": {
-			input: position.NewSpan(math.MaxInt, math.MinInt),
-			want:  math.MinInt,
-		},
+		"zero length":                    {input: position.NewSpan(5, 5), want: 0},
+		"positive length":                {input: position.NewSpan(0, 10), want: 10},
+		"non-zero start":                 {input: position.NewSpan(5, 15), want: 10},
+		"inverted span":                  {input: position.NewSpan(15, 5), want: -10},
+		"wider than MaxInt":              {input: position.NewSpan(math.MinInt, math.MaxInt), want: math.MaxInt},
+		"inverted and wider than MaxInt": {input: position.NewSpan(math.MaxInt, math.MinInt), want: math.MinInt},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.input.Len()
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.input.Len())
 		})
 	}
 }
@@ -462,44 +371,19 @@ func TestSpan_Contains(t *testing.T) {
 		v     int
 		want  bool
 	}{
-		"value at start": {
-			input: position.NewSpan(5, 10),
-			v:     5,
-			want:  true,
-		},
-		"value at end": {
-			input: position.NewSpan(5, 10),
-			v:     10,
-			want:  false,
-		},
-		"value inside": {
-			input: position.NewSpan(5, 10),
-			v:     7,
-			want:  true,
-		},
-		"value before start": {
-			input: position.NewSpan(5, 10),
-			v:     4,
-			want:  false,
-		},
-		"value after end": {
-			input: position.NewSpan(5, 10),
-			v:     11,
-			want:  false,
-		},
-		"empty interval": {
-			input: position.NewSpan(5, 5),
-			v:     5,
-			want:  false,
-		},
+		"value at start":     {input: position.NewSpan(5, 10), v: 5, want: true},
+		"value at end":       {input: position.NewSpan(5, 10), v: 10, want: false},
+		"value inside":       {input: position.NewSpan(5, 10), v: 7, want: true},
+		"value before start": {input: position.NewSpan(5, 10), v: 4, want: false},
+		"value after end":    {input: position.NewSpan(5, 10), v: 11, want: false},
+		"empty interval":     {input: position.NewSpan(5, 5), v: 5, want: false},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.input.Contains(tc.v)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.input.Contains(tc.v))
 		})
 	}
 }
@@ -540,22 +424,15 @@ func TestSpan_String(t *testing.T) {
 		input position.Span
 		want  string
 	}{
-		"zero values": {
-			input: position.NewSpan(0, 0),
-			want:  "0-0",
-		},
-		"positive values": {
-			input: position.NewSpan(5, 10),
-			want:  "5-10",
-		},
+		"zero values":     {input: position.NewSpan(0, 0), want: "0-0"},
+		"positive values": {input: position.NewSpan(5, 10), want: "5-10"},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.input.String()
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.input.String())
 		})
 	}
 }
@@ -667,8 +544,7 @@ func TestGroupIndices(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := position.GroupIndices(tc.indices, tc.context)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, position.GroupIndices(tc.indices, tc.context))
 		})
 	}
 }
@@ -727,8 +603,7 @@ func TestSpans_Expand(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.input.Expand(tc.amount)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.input.Expand(tc.amount))
 		})
 	}
 }
@@ -817,8 +692,7 @@ func TestSpans_Clamp(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.input.Clamp(tc.min, tc.max)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.input.Clamp(tc.min, tc.max))
 		})
 	}
 }
@@ -940,9 +814,7 @@ func TestContextSpans(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := position.ContextSpans(tc.indices, tc.context, tc.total)
-
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, position.ContextSpans(tc.indices, tc.context, tc.total))
 		})
 	}
 }
