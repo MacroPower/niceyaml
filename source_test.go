@@ -1749,8 +1749,14 @@ func TestSource_Parse(t *testing.T) {
 				// into the second, it made the parser panic on the !!str
 				// tag with no value. The parser puts the directive in a
 				// node of its own.
-				input: "%TAG !! tag:example.com,2000:app/\n---\n!!int 1 - 3\n---\n- !!str\n",
-				want:  3,
+				input: stringtest.LinesLF(
+					"%TAG !! tag:example.com,2000:app/",
+					"---",
+					"!!int 1 - 3",
+					"---",
+					"- !!str",
+				),
+				want: 3,
 			},
 			"list": {
 				input: stringtest.Input(`
@@ -2593,49 +2599,85 @@ func TestSource_AllDocuments_UnclosedFlow(t *testing.T) {
 		want []any
 	}{
 		"nested mapping after an open mapping": {
-			input: "name: web\nlabels: {app: web\n---\nname: worker\nspec:\n  tier: db\n",
+			input: stringtest.LinesLF(
+				"name: web",
+				"labels: {app: web",
+				"---",
+				"name: worker",
+				"spec:",
+				"  tier: db",
+			),
 			want: []any{
 				nil,
 				map[string]any{"name": "worker", "spec": map[string]any{"tier": "db"}},
 			},
 		},
 		"comma in a plain scalar after an open mapping": {
-			input: "name: web\nlabels: {app: web\n---\nname: worker\ncommand: sleep 1, 2\n",
+			input: stringtest.LinesLF(
+				"name: web",
+				"labels: {app: web",
+				"---",
+				"name: worker",
+				"command: sleep 1, 2",
+			),
 			want: []any{
 				nil,
 				map[string]any{"name": "worker", "command": "sleep 1, 2"},
 			},
 		},
 		"comma in a plain scalar after an open sequence": {
-			input: "ports: [80, 443\n---\ncommand: sleep 1, 2\n",
+			input: stringtest.LinesLF("ports: [80, 443", "---", "command: sleep 1, 2"),
 			want: []any{
 				nil,
 				map[string]any{"command": "sleep 1, 2"},
 			},
 		},
 		"flow sequence after a sequence end that closes nothing": {
-			input: "a: ]\n---\nx: [a, b]\n",
+			input: stringtest.LinesLF("a: ]", "---", "x: [a, b]"),
 			want: []any{
 				nil,
 				map[string]any{"x": []any{"a", "b"}},
 			},
 		},
 		"document end marker": {
-			input: "a: [b\n...\nspec:\n  tier: db\ncommand: sleep 1, 2\n",
+			input: stringtest.LinesLF(
+				"a: [b",
+				"...",
+				"spec:",
+				"  tier: db",
+				"command: sleep 1, 2",
+			),
 			want: []any{
 				nil,
 				map[string]any{"spec": map[string]any{"tier": "db"}, "command": "sleep 1, 2"},
 			},
 		},
 		"crlf": {
-			input: "a: {b\r\n---\r\nspec:\r\n  tier: db\r\ncommand: sleep 1, 2\r\n",
+			input: stringtest.LinesCRLF(
+				"a: {b",
+				"---",
+				"spec:",
+				"  tier: db",
+				"command: sleep 1, 2",
+			),
 			want: []any{
 				nil,
 				map[string]any{"spec": map[string]any{"tier": "db"}, "command": "sleep 1, 2"},
 			},
 		},
 		"each of several documents leaves a flow open": {
-			input: "a: {\n---\nb: [\n---\nspec:\n  tier: db\n---\nz: ]\n---\nx: [a, b]\n",
+			input: stringtest.LinesLF(
+				"a: {",
+				"---",
+				"b: [",
+				"---",
+				"spec:",
+				"  tier: db",
+				"---",
+				"z: ]",
+				"---",
+				"x: [a, b]",
+			),
 			want: []any{
 				nil,
 				nil,
@@ -3114,7 +3156,7 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 	// A chart renders each template below a header and a comment that
 	// names it, and a template that renders nothing else leaves an empty
 	// document.
-	helm := stringtest.JoinLF(
+	helm := stringtest.LinesLF(
 		"---",
 		"# Source: demo/templates/cm.yaml",
 		"apiVersion: v1",
@@ -3129,6 +3171,13 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		"# Source: demo/templates/svc.yaml",
 		"apiVersion: v1",
 		"kind: Service",
+	)
+
+	// The output of a chart whose one template renders a comment alone.
+	commentAlone := stringtest.LinesLF(
+		"---",
+		"# Source: demo/templates/ingress.yaml",
+		"# Ingress is optional.",
 		"",
 	)
 
@@ -3189,12 +3238,12 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		},
 		"schema, template that renders a comment alone": {
 			v:      manifest,
-			input:  "---\n# Source: demo/templates/ingress.yaml\n# Ingress is optional.\n\n",
+			input:  commentAlone,
 			strict: []string{"f.yaml:1:1: " + notNull},
 		},
 		"registry, template that renders a comment alone": {
 			v:      registry,
-			input:  "---\n# Source: demo/templates/ingress.yaml\n# Ingress is optional.\n\n",
+			input:  commentAlone,
 			strict: []string{"f.yaml: " + noMatch},
 		},
 		// A document that holds a value answers to the validator.
@@ -4040,7 +4089,13 @@ func TestSource_Bind(t *testing.T) {
 		// the "?", and the source keeps it, so the key after the explicit
 		// entry keeps its line number and the excerpt shows its line.
 		keyed := niceyaml.NewSourceFromString(
-			"tags: [a, b]\n\n? key\n: value\nport: http\n",
+			stringtest.LinesLF(
+				"tags: [a, b]",
+				"",
+				"? key",
+				": value",
+				"port: http",
+			),
 			niceyaml.WithName("f.yaml"),
 		)
 
