@@ -101,7 +101,10 @@ func TestViolation(t *testing.T) {
 				"properties": {"spec": {"$ref": "#/$defs/Spec"}},
 				"$defs": {"Spec": {"properties": {"port": {"type": "integer"}}}}
 			}`,
-			input: "spec:\n  port: http\n",
+			input: stringtest.Input(`
+				spec:
+				  port: http
+			`),
 			want: []schema.Violation{{
 				Keyword:    "type",
 				SchemaPath: "/properties/spec/$ref/properties/port/type",
@@ -217,7 +220,10 @@ func TestViolation_Binding(t *testing.T) {
 	t.Run("scoped node", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "spec:\n  name: 123\n")
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			spec:
+			  name: 123
+		`))
 
 		err := yamltest.At(t, doc, paths.Current().Child("spec")).Validate(t.Context(), v)
 
@@ -247,13 +253,21 @@ func TestViolation_Collection(t *testing.T) {
 		},
 		"minItems of a block sequence under a nested key": {
 			schema: `{"properties": {"pool": {"properties": {"members": {"minItems": 2}}}}}`,
-			input:  "pool:\n  members:\n    - x\n",
-			want:   `2:3: $.pool.members: array has 1 items, minimum is 2`,
+			input: stringtest.Input(`
+				pool:
+				  members:
+				    - x
+			`),
+			want: `2:3: $.pool.members: array has 1 items, minimum is 2`,
 		},
 		"uniqueItems of a block sequence under a key": {
 			schema: `{"properties": {"tags": {"uniqueItems": true}}}`,
-			input:  "tags:\n  - a\n  - a\n",
-			want:   `1:1: $.tags: array contains duplicate items`,
+			input: stringtest.Input(`
+				tags:
+				  - a
+				  - a
+			`),
+			want: `1:1: $.tags: array contains duplicate items`,
 		},
 		"contains of a flow sequence under a key": {
 			schema: `{"properties": {"tags": {"contains": {"const": "x"}}}}`,
@@ -262,13 +276,21 @@ func TestViolation_Collection(t *testing.T) {
 		},
 		"maxProperties of a block mapping under a key": {
 			schema: `{"properties": {"hours": {"maxProperties": 1}}}`,
-			input:  "hours:\n  open: 9\n  close: 5\n",
-			want:   `1:1: $.hours: object has 2 properties, maximum is 1`,
+			input: stringtest.Input(`
+				hours:
+				  open: 9
+				  close: 5
+			`),
+			want: `1:1: $.hours: object has 2 properties, maximum is 1`,
 		},
 		"maxProperties of a block mapping element": {
 			schema: `{"properties": {"items": {"items": {"maxProperties": 1}}}}`,
-			input:  "items:\n  - a: 1\n    b: 2\n",
-			want:   `2:3: $.items[0]: object has 2 properties, maximum is 1`,
+			input: stringtest.Input(`
+				items:
+				  - a: 1
+				    b: 2
+			`),
+			want: `2:3: $.items[0]: object has 2 properties, maximum is 1`,
 		},
 		"maxProperties of a flow mapping in a flow sequence": {
 			schema: `{"properties": {"items": {"items": {"maxProperties": 1}}}}`,
@@ -287,8 +309,11 @@ func TestViolation_Collection(t *testing.T) {
 		},
 		"type of a block mapping under a key": {
 			schema: `{"properties": {"name": {"type": "string"}}}`,
-			input:  "name:\n  first: Ada\n",
-			want:   `1:1: $.name: expected "string", got "object"`,
+			input: stringtest.Input(`
+				name:
+				  first: Ada
+			`),
+			want: `1:1: $.name: expected "string", got "object"`,
 		},
 		"additionalProperties points at the key of the member": {
 			schema: `{"properties": {"name": {}}, "additionalProperties": false}`,
@@ -332,9 +357,13 @@ func TestViolation_MissingMember(t *testing.T) {
 	}{
 		"required": {
 			schema: server,
-			input:  "a: 1\nserver:\n  port: 1\n",
-			want:   []string{`2:1: $.server.name: missing required property "name"`},
-			near:   []string{"$.server"},
+			input: stringtest.Input(`
+				a: 1
+				server:
+				  port: 1
+			`),
+			want: []string{`2:1: $.server.name: missing required property "name"`},
+			near: []string{"$.server"},
 		},
 		"required at the root": {
 			schema: `{"required": ["name", "kind"]}`,
@@ -347,9 +376,13 @@ func TestViolation_MissingMember(t *testing.T) {
 		},
 		"element of a sequence": {
 			schema: `{"properties": {"items": {"items": {"required": ["name"]}}}}`,
-			input:  "items:\n  - name: a\n  - port: 1\n",
-			want:   []string{`3:3: $.items[1].name: missing required property "name"`},
-			near:   []string{"$.items[1]"},
+			input: stringtest.Input(`
+				items:
+				  - name: a
+				  - port: 1
+			`),
+			want: []string{`3:3: $.items[1].name: missing required property "name"`},
+			near: []string{"$.items[1]"},
 		},
 		"empty mapping": {
 			schema: server,
@@ -359,19 +392,30 @@ func TestViolation_MissingMember(t *testing.T) {
 		},
 		"mapping behind an alias": {
 			schema: server,
-			input:  "base: &b\n  port: 1\nserver: *b\n",
-			want:   []string{`3:1: $.server.name: missing required property "name"`},
-			near:   []string{"$.server"},
+			input: stringtest.Input(`
+				base: &b
+				  port: 1
+				server: *b
+			`),
+			want: []string{`3:1: $.server.name: missing required property "name"`},
+			near: []string{"$.server"},
 		},
 		"mapping with a merge key": {
 			schema: server,
-			input:  "base: &b {port: 1}\nserver:\n  <<: *b\n",
-			want:   []string{`2:1: $.server.name: missing required property "name"`},
-			near:   []string{"$.server"},
+			input: stringtest.Input(`
+				base: &b {port: 1}
+				server:
+				  <<: *b
+			`),
+			want: []string{`2:1: $.server.name: missing required property "name"`},
+			near: []string{"$.server"},
 		},
 		"dependentRequired": {
 			schema: `{"properties": {"server": {"dependentRequired": {"port": ["name", "host"]}}}}`,
-			input:  "server:\n  port: 1\n",
+			input: stringtest.Input(`
+				server:
+				  port: 1
+			`),
 			want: []string{
 				`1:1: $.server.name: property "port" requires property "name"`,
 				`1:1: $.server.host: property "port" requires property "host"`,
@@ -383,13 +427,19 @@ func TestViolation_MissingMember(t *testing.T) {
 				"$schema": "http://json-schema.org/draft-07/schema#",
 				"properties": {"server": {"dependencies": {"port": ["name"]}}}
 			}`,
-			input: "server:\n  port: 1\n",
-			want:  []string{`1:1: $.server.name: property "port" requires property "name"`},
-			near:  []string{"$.server"},
+			input: stringtest.Input(`
+				server:
+				  port: 1
+			`),
+			want: []string{`1:1: $.server.name: property "port" requires property "name"`},
+			near: []string{"$.server"},
 		},
 		"names a selector quotes": {
 			schema: `{"properties": {"server": {"required": ["a.b", "c d", ""]}}}`,
-			input:  "server:\n  port: 1\n",
+			input: stringtest.Input(`
+				server:
+				  port: 1
+			`),
 			want: []string{
 				`1:1: $.server.'a.b': missing required property "a.b"`,
 				`1:1: $.server.'c d': missing required property "c d"`,
@@ -412,24 +462,37 @@ func TestViolation_MissingMember(t *testing.T) {
 		// The violation binds at the key of the mapping by a position.
 		"key spelled as the missing member": {
 			schema: `{"properties": {"server": {"required": ["0x10"]}}}`,
-			input:  "a: 1\nserver:\n  0x10: 1\n",
-			want:   []string{`2:1: $.server.0x10: missing required property "0x10"`},
-			near:   []string{""},
+			input: stringtest.Input(`
+				a: 1
+				server:
+				  0x10: 1
+			`),
+			want: []string{`2:1: $.server.0x10: missing required property "0x10"`},
+			near: []string{""},
 		},
 		"merged key spelled as the missing member": {
 			schema: `{"properties": {"server": {"required": ["0x10"]}}}`,
-			input:  "base: &b {0x10: 1}\nserver:\n  <<: *b\n  x: 1\n",
-			want:   []string{`2:1: $.server.0x10: missing required property "0x10"`},
-			near:   []string{""},
+			input: stringtest.Input(`
+				base: &b {0x10: 1}
+				server:
+				  <<: *b
+				  x: 1
+			`),
+			want: []string{`2:1: $.server.0x10: missing required property "0x10"`},
+			near: []string{""},
 		},
 		// The quoted "0x10" wins the selector 0x10, so no path selects the
 		// mapping the key 0x10 holds, and the path names it as the decoder
 		// does.
 		"mapping no path selects": {
 			schema: `{"properties": {"user": {"properties": {"16": {"required": ["name"]}}}}}`,
-			input:  "user:\n  <<: {0x10: {port: 1}}\n  \"0x10\": 1\n",
-			want:   []string{`2:8: $.user.16.name: missing required property "name"`},
-			near:   []string{""},
+			input: stringtest.Input(`
+				user:
+				  <<: {0x10: {port: 1}}
+				  "0x10": 1
+			`),
+			want: []string{`2:8: $.user.16.name: missing required property "name"`},
+			near: []string{""},
 		},
 	}
 
@@ -483,7 +546,11 @@ func TestViolation_MissingMember(t *testing.T) {
 	t.Run("scoped node", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "a: 1\nserver:\n  port: 1\n")
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			a: 1
+			server:
+			  port: 1
+		`))
 		v := compileSchema(t, []byte(`{"required": ["name"]}`))
 
 		err := yamltest.At(t, doc, paths.Current().Child("server")).Validate(t.Context(), v)
@@ -630,7 +697,12 @@ func TestViolation_Alternatives(t *testing.T) {
 					"additionalProperties": false
 				}}
 			}`,
-			input: "settings:\n  wifi: yes please\n  theme: neon\n  extra: 1\n",
+			input: stringtest.Input(`
+				settings:
+				  wifi: yes please
+				  theme: neon
+				  extra: 1
+			`),
 			want: []string{
 				`3 schema violations`,
 				`  2:9: $.settings.wifi: expected "boolean", got "string"`,
@@ -693,7 +765,12 @@ func TestViolation_Alternatives(t *testing.T) {
 			// The string branch fails by type alone and drops out. The
 			// two object branches both remain, each with its own failures.
 			schema: step,
-			input:  "step:\n  kind: copy\n  from: a\n  dest: b\n",
+			input: stringtest.Input(`
+				step:
+				  kind: copy
+				  from: a
+				  dest: b
+			`),
 			want: []string{
 				`1:1: $.step: value matches none of the allowed forms`,
 				`  form 1`,
@@ -745,7 +822,10 @@ func TestViolation_Alternatives(t *testing.T) {
 				{"properties": {"a": {"type": "integer"}}},
 				{"type": "array"}
 			]}}}`,
-			input: "v:\n  a: x\n",
+			input: stringtest.Input(`
+				v:
+				  a: x
+			`),
 			want: []string{
 				`2:6: $.v.a: expected "integer", got "string"`,
 			},
@@ -755,7 +835,10 @@ func TestViolation_Alternatives(t *testing.T) {
 				{"properties": {"a": {"type": "integer"}}},
 				{"properties": {"a": {"type": "boolean"}}}
 			]}}}`,
-			input: "v:\n  a: x\n",
+			input: stringtest.Input(`
+				v:
+				  a: x
+			`),
 			want: []string{
 				`1:1: $.v: value matches none of the allowed forms`,
 				`  form 1`,
@@ -774,7 +857,10 @@ func TestViolation_Alternatives(t *testing.T) {
 				},
 				{"type": "array"}
 			]}}}`,
-			input: "v:\n  n: 0\n",
+			input: stringtest.Input(`
+				v:
+				  n: 0
+			`),
 			want: []string{
 				`2:6: $.v.n: 0 is less than 1`,
 			},
@@ -967,7 +1053,11 @@ func TestViolation_Problems(t *testing.T) {
 			want:    []string{"value matches none of the allowed forms (2)"},
 		},
 		"the problems of a validation match the count of its summary": {
-			input: "v: ab\nport: 0\nextra: 1\n",
+			input: stringtest.Input(`
+				v: ab
+				port: 0
+				extra: 1
+			`),
 			wantMsg: stringtest.JoinLF(
 				"3 schema violations",
 				"1:4: $.v: value matches none of the allowed forms",

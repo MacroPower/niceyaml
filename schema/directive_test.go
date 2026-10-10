@@ -290,8 +290,12 @@ func TestParseDocumentDirective(t *testing.T) {
 			want: map[int]string{0: "./schema.json"},
 		},
 		"directive as a trailing comment on a %YAML line": {
-			input: "%YAML 1.2 # yaml-language-server: $schema=./schema.json\n---\nkey: value\n",
-			want:  map[int]string{0: "./schema.json"},
+			input: stringtest.Input(`
+				%YAML 1.2 # yaml-language-server: $schema=./schema.json
+				---
+				key: value
+			`),
+			want: map[int]string{0: "./schema.json"},
 		},
 		"comment between header and content": {
 			input: stringtest.Input(`
@@ -469,8 +473,19 @@ func TestDirective(t *testing.T) {
 		// beside it.
 		dir := t.TempDir()
 		writeFiles(t, dir, map[string]string{
-			"schema.yaml": "required: [name]\nproperties:\n  name:\n    $ref: defs.yaml#/$defs/name\n",
-			"defs.yaml":   "$defs:\n  name:\n    type: string\n  kinded:\n    required: [kind]\n",
+			"schema.yaml": stringtest.Input(`
+				required: [name]
+				properties:
+				  name:
+				    $ref: defs.yaml#/$defs/name
+			`),
+			"defs.yaml": stringtest.Input(`
+				$defs:
+				  name:
+				    type: string
+				  kinded:
+				    required: [kind]
+			`),
 		})
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
@@ -566,8 +581,12 @@ func TestDirective_Resolve_Match(t *testing.T) {
 			want:  false,
 		},
 		"returns true when directive follows document header": {
-			input: "---\n# yaml-language-server: $schema=./schema.json\nkind: Deployment\n",
-			want:  true,
+			input: stringtest.Input(`
+				---
+				# yaml-language-server: $schema=./schema.json
+				kind: Deployment
+			`),
+			want: true,
 		},
 	}
 
@@ -905,48 +924,104 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 		want  []string
 	}{
 		"directive above the first header": {
-			input: "# yaml-language-server: $schema=./schema.json\n---\nb: 2\n",
-			want:  []string{valid},
+			input: stringtest.Input(`
+				# yaml-language-server: $schema=./schema.json
+				---
+				b: 2
+			`),
+			want: []string{valid},
 		},
 		"directive above the first header with invalid content": {
-			input: "# yaml-language-server: $schema=./schema.json\n---\nc: 3\n",
-			want:  []string{invalid},
+			input: stringtest.Input(`
+				# yaml-language-server: $schema=./schema.json
+				---
+				c: 3
+			`),
+			want: []string{invalid},
 		},
 		"directive above a YAML directive": {
-			input: "# yaml-language-server: $schema=./schema.json\n%YAML 1.2\n---\nb: 2\n",
-			want:  []string{valid},
+			input: stringtest.Input(`
+				# yaml-language-server: $schema=./schema.json
+				%YAML 1.2
+				---
+				b: 2
+			`),
+			want: []string{valid},
 		},
 		"directive below a YAML directive": {
-			input: "%YAML 1.2\n# yaml-language-server: $schema=./schema.json\n---\nc: 3\n",
-			want:  []string{invalid},
+			input: stringtest.Input(`
+				%YAML 1.2
+				# yaml-language-server: $schema=./schema.json
+				---
+				c: 3
+			`),
+			want: []string{invalid},
 		},
 		"directive does not reach past its document": {
-			input: "# yaml-language-server: $schema=./schema.json\n---\nb: 2\n---\nc: 3\n",
-			want:  []string{valid, valid},
+			input: stringtest.Input(`
+				# yaml-language-server: $schema=./schema.json
+				---
+				b: 2
+				---
+				c: 3
+			`),
+			want: []string{valid, valid},
 		},
 		"directive applies to an explicit empty document": {
-			input: "# yaml-language-server: $schema=./schema.json\n---\n# note\n---\nc: 3\n",
-			want:  []string{invalid, valid},
+			input: stringtest.Input(`
+				# yaml-language-server: $schema=./schema.json
+				---
+				# note
+				---
+				c: 3
+			`),
+			want: []string{invalid, valid},
 		},
 		"directive above a later header": {
-			input: "a: 1\n# yaml-language-server: $schema=./schema.json\n---\nc: 3\n",
-			want:  []string{valid, invalid},
+			input: stringtest.Input(`
+				a: 1
+				# yaml-language-server: $schema=./schema.json
+				---
+				c: 3
+			`),
+			want: []string{valid, invalid},
 		},
 		"directive above a later header after a value on its own line": {
-			input: "a:\n  b\n# yaml-language-server: $schema=./schema.json\n---\nc: 3\n",
-			want:  []string{valid, invalid},
+			input: stringtest.Input(`
+				a:
+				  b
+				# yaml-language-server: $schema=./schema.json
+				---
+				c: 3
+			`),
+			want: []string{valid, invalid},
 		},
 		"directive above a later header after an end marker": {
-			input: "a: 1\n...\n# yaml-language-server: $schema=./schema.json\n---\nc: 3\n",
-			want:  []string{valid, invalid},
+			input: stringtest.Input(`
+				a: 1
+				...
+				# yaml-language-server: $schema=./schema.json
+				---
+				c: 3
+			`),
+			want: []string{valid, invalid},
 		},
 		"first directive in the preamble wins": {
-			input: "# yaml-language-server: $schema=./schema.json\n---\n# yaml-language-server: $schema=./missing.json\nb: 2\n",
-			want:  []string{valid},
+			input: stringtest.Input(`
+				# yaml-language-server: $schema=./schema.json
+				---
+				# yaml-language-server: $schema=./missing.json
+				b: 2
+			`),
+			want: []string{valid},
 		},
 		"comment above the header without a directive": {
-			input: "# note\n---\nc: 3\n",
-			want:  []string{valid},
+			input: stringtest.Input(`
+				# note
+				---
+				c: 3
+			`),
+			want: []string{valid},
 		},
 		"comment-only file is the null document": {
 			input: "# yaml-language-server: $schema=./schema.json\n",
