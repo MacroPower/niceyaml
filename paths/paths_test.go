@@ -1,6 +1,7 @@
 package paths_test
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1411,70 +1412,32 @@ func TestPath_UnmarshalText(t *testing.T) {
 func TestParse(t *testing.T) {
 	t.Parallel()
 
+	// A case that leaves want empty reads back as the expression it parses.
 	tcs := map[string]struct {
 		expr string
 		want string
 	}{
-		"simple path": {
-			expr: "$.foo",
-			want: "$.foo",
-		},
-		"nested path": {
-			expr: "$.foo.bar.baz",
-			want: "$.foo.bar.baz",
-		},
-		"array index": {
-			expr: "$.items[0]",
-			want: "$.items[0]",
-		},
-		"array wildcard": {
-			expr: "$.items[*]",
-			want: "$.items[*]",
-		},
-		"recursive descent": {
-			expr: "$..name",
-			want: "$..name",
-		},
-		"root only": {
-			expr: "$",
-			want: "$",
-		},
-		"root index": {
-			expr: "$[2]",
-			want: "$[2]",
-		},
-		"quoted key": {
-			expr: "$.'kubernetes.io/name'",
-			want: "$.'kubernetes.io/name'",
-		},
+		"simple path":       {expr: "$.foo"},
+		"nested path":       {expr: "$.foo.bar.baz"},
+		"array index":       {expr: "$.items[0]"},
+		"array wildcard":    {expr: "$.items[*]"},
+		"recursive descent": {expr: "$..name"},
+		"root only":         {expr: "$"},
+		"root index":        {expr: "$[2]"},
+		"quoted key":        {expr: "$.'kubernetes.io/name'"},
 		"quoted key without reserved characters is unquoted": {
 			expr: "$.'plain'",
 			want: "$.plain",
 		},
-		"quoted key with escaped quote": {
-			expr: `$.'it\'s'`,
-			want: `$.'it\'s'`,
-		},
-		"quoted key with escaped backslash": {
-			expr: `$.'a\\b.c'`,
-			want: `$.'a\\b.c'`,
-		},
+		"quoted key with escaped quote":     {expr: `$.'it\'s'`},
+		"quoted key with escaped backslash": {expr: `$.'a\\b.c'`},
 		"backslash before another character is dropped": {
 			expr: `$.'C:\docs'`,
 			want: `$.'C:docs'`,
 		},
-		"escaped line feed": {
-			expr: `$.'a\nb'`,
-			want: `$.'a\nb'`,
-		},
-		"escaped tab and carriage return": {
-			expr: `$.'a\tb\rc'`,
-			want: `$.'a\tb\rc'`,
-		},
-		"unicode escape of a control character": {
-			expr: `$.'a\u001bb'`,
-			want: `$.'a\u001bb'`,
-		},
+		"escaped line feed":                     {expr: `$.'a\nb'`},
+		"escaped tab and carriage return":       {expr: `$.'a\tb\rc'`},
+		"unicode escape of a control character": {expr: `$.'a\u001bb'`},
 		"unicode escape in upper case": {
 			expr: `$.'a\u001Bb'`,
 			want: `$.'a\u001bb'`,
@@ -1491,102 +1454,30 @@ func TestParse(t *testing.T) {
 			expr: `$.'a\\nb'`,
 			want: `$.a\nb`,
 		},
-		"quoted key followed by index": {
-			expr: "$.'a.b'[1].c",
-			want: "$.'a.b'[1].c",
-		},
-		"empty quoted key": {
-			expr: "$.''",
-			want: "$.''",
-		},
-		"empty quoted recursive key": {
-			expr: "$..''[0]",
-			want: "$..''[0]",
-		},
-		"key selector": {
-			expr: "$.spec.name~",
-			want: "$.spec.name~",
-		},
-		"key selector on the root": {
-			expr: "$~",
-			want: "$~",
-		},
-		"key selector after an index": {
-			expr: "$.items[0]~",
-			want: "$.items[0]~",
-		},
-		"mapping wildcard": {
-			expr: "$.jobs.*",
-			want: "$.jobs.*",
-		},
-		"mapping wildcard on the root": {
-			expr: "$.*",
-			want: "$.*",
-		},
-		"mapping wildcard then child": {
-			expr: "$.jobs.*.steps[*].uses",
-			want: "$.jobs.*.steps[*].uses",
-		},
-		"mapping wildcard then index": {
-			expr: "$.*[0]",
-			want: "$.*[0]",
-		},
-		"mapping wildcard then key selector": {
-			expr: "$.jobs.*~",
-			want: "$.jobs.*~",
-		},
-		"quoted star is a name": {
-			expr: "$.'*'",
-			want: "$.'*'",
-		},
-		"recursive wildcard": {
-			expr: "$..*",
-			want: "$..*",
-		},
-		"recursive wildcard then child": {
-			expr: "$.spec..*.name",
-			want: "$.spec..*.name",
-		},
-		"recursive wildcard then index": {
-			expr: "$..*[0]",
-			want: "$..*[0]",
-		},
-		"recursive wildcard then key selector": {
-			expr: "$..*~",
-			want: "$..*~",
-		},
-		"recursive wildcard twice": {
-			expr: "$..*..*",
-			want: "$..*..*",
-		},
-		"quoted recursive star is a name": {
-			expr: "$..'*'",
-			want: "$..'*'",
-		},
-		"current node": {
-			expr: "@",
-			want: "@",
-		},
-		"relative child": {
-			expr: "@.foo.bar",
-			want: "@.foo.bar",
-		},
-		"relative index": {
-			expr: "@[2]",
-			want: "@[2]",
-		},
-		"relative key": {
-			expr: "@~",
-			want: "@~",
-		},
-		"relative wildcards": {
-			expr: "@.jobs.*..name[*]",
-			want: "@.jobs.*..name[*]",
-		},
-		"at sign in a name": {
-			expr: "$.@ref",
-			want: "$.@ref",
-		},
+		"quoted key followed by index":         {expr: "$.'a.b'[1].c"},
+		"empty quoted key":                     {expr: "$.''"},
+		"empty quoted recursive key":           {expr: "$..''[0]"},
+		"key selector":                         {expr: "$.spec.name~"},
+		"key selector on the root":             {expr: "$~"},
+		"key selector after an index":          {expr: "$.items[0]~"},
+		"mapping wildcard":                     {expr: "$.jobs.*"},
+		"mapping wildcard on the root":         {expr: "$.*"},
+		"mapping wildcard then child":          {expr: "$.jobs.*.steps[*].uses"},
+		"mapping wildcard then index":          {expr: "$.*[0]"},
+		"mapping wildcard then key selector":   {expr: "$.jobs.*~"},
+		"quoted star is a name":                {expr: "$.'*'"},
+		"recursive wildcard":                   {expr: "$..*"},
+		"recursive wildcard then child":        {expr: "$.spec..*.name"},
+		"recursive wildcard then index":        {expr: "$..*[0]"},
+		"recursive wildcard then key selector": {expr: "$..*~"},
+		"recursive wildcard twice":             {expr: "$..*..*"},
+		"quoted recursive star is a name":      {expr: "$..'*'"},
+		"current node":                         {expr: "@"},
+		"relative child":                       {expr: "@.foo.bar"},
+		"relative index":                       {expr: "@[2]"},
+		"relative key":                         {expr: "@~"},
+		"relative wildcards":                   {expr: "@.jobs.*..name[*]"},
+		"at sign in a name":                    {expr: "$.@ref"},
 	}
 
 	for name, tc := range tcs {
@@ -1596,8 +1487,7 @@ func TestParse(t *testing.T) {
 			p, err := paths.Parse(tc.expr)
 
 			require.NoError(t, err)
-			require.NotNil(t, p)
-			assert.Equal(t, tc.want, p.String())
+			assert.Equal(t, cmp.Or(tc.want, tc.expr), p.String())
 			assert.Equal(t, tc.expr[0] == '$', p.IsAbsolute())
 		})
 	}
