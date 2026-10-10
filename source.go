@@ -1047,9 +1047,9 @@ func (s *Source) Documents() []*Node {
 // AllDocuments divides the file into documents as Source.Documents
 // describes, and it returns the empty documents Documents leaves out. The
 // Node at index i is the one whose [Node.DocumentIndex] is i. For a file
-// with no syntax error and no empty document beside one with content,
-// AllDocuments returns the Nodes Documents returns. The slice itself is a
-// copy, so reordering it reaches nothing.
+// with no syntax error that holds no empty document, or one empty
+// document alone, AllDocuments returns the Nodes Documents returns. The
+// slice itself is a copy, so reordering it reaches nothing.
 func (s *Source) AllDocuments() []*Node {
 	return slices.Clone(s.documents())
 }
