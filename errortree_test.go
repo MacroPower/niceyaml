@@ -1984,7 +1984,7 @@ func TestErrorTree_Problems_Err(t *testing.T) {
 func TestErrorTree_Problems_WrappedJoin(t *testing.T) {
 	t.Parallel()
 
-	doc := yamltest.FirstDocument(t, "hours:\n  open: a\n", niceyaml.WithName("f.yaml"))
+	doc := errorTreeHours(t)
 
 	hours := yamltest.At(t, doc, paths.Current().Child("hours"))
 
@@ -2032,6 +2032,14 @@ func TestErrorTree_Problems_WrappedJoin(t *testing.T) {
 	}
 }
 
+// errorTreeHours returns the root Node of a document named f.yaml whose
+// hours mapping holds the key open.
+func errorTreeHours(t *testing.T) *niceyaml.Node {
+	t.Helper()
+
+	return yamltest.FirstDocument(t, stringtest.LinesLF("hours:", "  open: a"), niceyaml.WithName("f.yaml"))
+}
+
 // reasonedHours is a [niceyaml.SelfValidator] whose error names no
 // location and gives two reasons.
 type reasonedHours struct {
@@ -2049,7 +2057,7 @@ func (reasonedHours) Validate() error {
 func TestErrorTree_Problems_SelfValidator(t *testing.T) {
 	t.Parallel()
 
-	doc := yamltest.FirstDocument(t, "hours:\n  open: a\n", niceyaml.WithName("f.yaml"))
+	doc := errorTreeHours(t)
 
 	var cfg struct {
 		Hours reasonedHours `yaml:"hours"`
@@ -2080,7 +2088,7 @@ func TestErrorTree_Problems_SelfValidator(t *testing.T) {
 func TestErrorTree_Problems_Scope(t *testing.T) {
 	t.Parallel()
 
-	doc := yamltest.FirstDocument(t, "hours:\n  open: a\n", niceyaml.WithName("f.yaml"))
+	doc := errorTreeHours(t)
 
 	hours := yamltest.At(t, doc, paths.Current().Child("hours"))
 
