@@ -75,7 +75,6 @@ func report(msg string) string {
 func TestErrorHandler(t *testing.T) {
 	t.Parallel()
 
-	// Set up the source the niceyaml error cases render against.
 	source := stringtest.Input(`
 		name: test
 		value: 123

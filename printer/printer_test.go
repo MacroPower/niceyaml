@@ -155,20 +155,17 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 		"partial token - middle of value (0-indexed)": {
 			input: "key: value",
 			want:  "key: va[lue]",
-			// 0-indexed: col 7-10 = 1-indexed col 8-11
-			rng: yamltest.LineRange(0, 7, 10),
+			rng:   yamltest.LineRange(0, 7, 10),
 		},
 		"partial token - start of value (0-indexed)": {
 			input: "key: value",
 			want:  "key: [val]ue",
-			// 0-indexed: col 5-8 = 1-indexed col 6-9
-			rng: yamltest.LineRange(0, 5, 8),
+			rng:   yamltest.LineRange(0, 5, 8),
 		},
 		"full token (0-indexed)": {
 			input: "key: value",
 			want:  "key: [value]",
-			// 0-indexed: col 5-10 = 1-indexed col 6-11
-			rng: yamltest.LineRange(0, 5, 10),
+			rng:   yamltest.LineRange(0, 5, 10),
 		},
 		"first character (line 0, col 0)": {
 			input: "key: value",
@@ -184,11 +181,7 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 				"first: [1]",
 				"[second][:][ ]2",
 			),
-			// 0-indexed: line 0 col 7 to line 1 col 8
-			rng: position.NewRange(
-				position.New(0, 7),
-				position.New(1, 8),
-			),
+			rng: position.NewRange(position.New(0, 7), position.New(1, 8)),
 		},
 	}
 
@@ -1644,7 +1637,6 @@ func TestPrinter_WordWrap(t *testing.T) {
 				"here",
 			),
 		},
-		// Line number gutter tests.
 		"wrapped line continuation marker": {
 			input:  "key: this is a very long value",
 			width:  22,
@@ -2744,7 +2736,6 @@ func TestGutterFunctions(t *testing.T) {
 			ctx:        printer.GutterContext{Styles: (*theme.Theme)(nil)},
 			want:       " ",
 		},
-		// DiffGutter tests.
 		"diff/default flag": {
 			gutterFunc: printer.DiffGutter,
 			ctx:        printer.GutterContext{Flag: line.FlagDefault, Styles: styles},
@@ -2775,7 +2766,6 @@ func TestGutterFunctions(t *testing.T) {
 			ctx:        printer.GutterContext{Flag: line.FlagDeleted, Soft: true, Styles: styles},
 			want:       " ",
 		},
-		// DefaultGutter tests.
 		"default/annotation row renders empty": {
 			gutterFunc: printer.DefaultGutter,
 			ctx:        printer.GutterContext{Flag: line.FlagInserted, Annotation: true, Number: 1, Styles: styles},
@@ -2801,7 +2791,6 @@ func TestGutterFunctions(t *testing.T) {
 			ctx:        printer.GutterContext{Flag: line.FlagDeleted, Number: 1, Styles: styles},
 			want:       "   1 -",
 		},
-		// LineNumberGutter tests.
 		"lineNumber/annotation row renders empty": {
 			gutterFunc: printer.LineNumberGutter,
 			ctx:        printer.GutterContext{Flag: line.FlagDeleted, Annotation: true, Number: 1, Styles: styles},
@@ -3592,7 +3581,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 				"b: changed",
 				"c: 3",
 			),
-			context: 100, // Much larger than 3 lines.
+			context: 100,
 			want: stringtest.JoinLF(
 				"      @@ -1,3 +1,3 @@",
 				"   1  a: 1",
@@ -3873,7 +3862,6 @@ func TestPrinter_Golden(t *testing.T) {
 func TestPrinter_BlendStyles(t *testing.T) {
 	t.Parallel()
 
-	// The overlayRange type holds an overlay kind and its range.
 	type overlayRange struct {
 		kind kind.Kind
 		rng  position.Range
@@ -3997,7 +3985,6 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			ranges: []overlayRange{
 				{kindSpan, position.NewRange(position.New(0, 3), position.New(1, 1))},
 			},
-			// Range spans from line 0 col 3 to line 1 col 1.
 			want: stringtest.JoinLF("a: <span>1</span>", "<span>b</span>: 2"),
 		},
 	}
@@ -4027,7 +4014,6 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 		rng   position.Range
 	}
 
-	// Overlay kinds for color blending tests.
 	const (
 		colorKind1 kind.Kind = "colorKind1"
 		colorKind2 kind.Kind = "colorKind2"
@@ -4105,7 +4091,6 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 
 			view := niceyaml.NewSourceFromString("key: value").View()
 
-			// Build overlay styler with styles from test case.
 			kinds := []kind.Kind{colorKind1, colorKind2, colorKind3}
 
 			overlayOpts := make([]style.Option, 0, len(tc.overlays))

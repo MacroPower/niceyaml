@@ -229,7 +229,6 @@ func BenchmarkPrinterWithGutter(b *testing.B) {
 }
 
 func BenchmarkPrinterWithWrapping(b *testing.B) {
-	// Generate YAML with long lines.
 	var sb strings.Builder
 
 	for i := range 200 {
