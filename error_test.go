@@ -10205,6 +10205,15 @@ func logged(t *testing.T, err error) string {
 	return record.Err
 }
 
+// loggedText returns the record a text handler writes for err.
+func loggedText(err error) string {
+	var buf bytes.Buffer
+
+	slog.New(slog.NewTextHandler(&buf, nil)).Error("load", slog.Any("err", err))
+
+	return buf.String()
+}
+
 func TestError_LogValue(t *testing.T) {
 	t.Parallel()
 
@@ -10244,12 +10253,7 @@ func TestError_LogValue(t *testing.T) {
 		wrapped := fmt.Errorf("check: %w", niceyaml.NewError("bad x", niceyaml.AtPath(paths.Current().Child("x"))))
 
 		assert.Equal(t, "check: bad x", logged(t, wrapped))
-
-		var buf bytes.Buffer
-
-		slog.New(slog.NewTextHandler(&buf, nil)).Error("load", slog.Any("err", wrapped))
-
-		assert.Contains(t, buf.String(), `err="check: bad x"`)
+		assert.Contains(t, loggedText(wrapped), `err="check: bad x"`)
 	})
 
 	t.Run("a join of typed-nil errors logs its message", func(t *testing.T) {
@@ -10293,13 +10297,11 @@ func TestSourceError_LogValue(t *testing.T) {
 
 		assert.Equal(t, want, logged(t, err))
 
-		var buf bytes.Buffer
+		text := loggedText(err)
 
-		slog.New(slog.NewTextHandler(&buf, nil)).Error("load", slog.Any("err", err))
-
-		assert.Contains(t, buf.String(), `err="cfg.yaml: 2 schema violations\n|-- 1:4: $.x: bad x\n`)
-		assert.Contains(t, buf.String(), "`-- 2:4: $.y: bad y\"")
-		assert.NotContains(t, buf.String(), "   1 | x: 1")
+		assert.Contains(t, text, `err="cfg.yaml: 2 schema violations\n|-- 1:4: $.x: bad x\n`)
+		assert.Contains(t, text, "`-- 2:4: $.y: bad y\"")
+		assert.NotContains(t, text, "   1 | x: 1")
 	})
 
 	t.Run("a wrapper logs its own message", func(t *testing.T) {
@@ -10321,12 +10323,7 @@ func TestSourceError_LogValue(t *testing.T) {
 
 		assert.Equal(t, "cfg.yaml: \n", logged(t, err))
 		assert.Equal(t, niceyaml.FormatError(err), logged(t, err))
-
-		var buf bytes.Buffer
-
-		slog.New(slog.NewTextHandler(&buf, nil)).Error("load", slog.Any("err", err))
-
-		assert.Contains(t, buf.String(), `err="cfg.yaml: \n"`)
+		assert.Contains(t, loggedText(err), `err="cfg.yaml: \n"`)
 	})
 
 	t.Run("a nil error logs nothing", func(t *testing.T) {
