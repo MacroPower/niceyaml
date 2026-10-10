@@ -983,6 +983,9 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			decode func(ctx context.Context, dd *niceyaml.Node) error
 			input  string
 			want   string
+			// The path of the node that decodes, for a case that decodes
+			// below the root.
+			scope paths.Path
 		}{
 			"duration field": {
 				input:  "name: api\ntimeout: soon\n",
@@ -1181,18 +1184,10 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// points at the node itself, which the path names from the
 			// root of the document.
 			"scalar the decode reads": {
-				input: midTier,
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					node, err := dd.At(paths.Current().Child("tier"))
-					if err != nil {
-						return err //nolint:wrapcheck // The test inspects the error as it is.
-					}
-
-					_, err = node.Decode[tier](ctx)
-
-					return err
-				},
-				want: `2:7: $.tier: unknown tier "mid"`,
+				input:  midTier,
+				scope:  paths.Current().Child("tier"),
+				decode: decodeAs[tier](),
+				want:   `2:7: $.tier: unknown tier "mid"`,
 			},
 			"value below a scoped node": {
 				input: stringtest.LinesLF(
@@ -1200,17 +1195,9 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					"  - name: a",
 					"    tier: mid",
 				),
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					node, err := dd.At(paths.Current().Child("servers").Index(0))
-					if err != nil {
-						return err //nolint:wrapcheck // The test inspects the error as it is.
-					}
-
-					_, err = node.Decode[tierServer](ctx)
-
-					return err
-				},
-				want: `3:11: $.servers[0].tier: unknown tier "mid"`,
+				scope:  paths.Current().Child("servers").Index(0),
+				decode: decodeAs[tierServer](),
+				want:   `3:11: $.servers[0].tier: unknown tier "mid"`,
 			},
 			"DecodeInto": {
 				input: midTier,
@@ -1227,7 +1214,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
+				dd := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.scope)
 
 				err := tc.decode(t.Context(), dd)
 				require.EqualError(t, err, tc.want)
