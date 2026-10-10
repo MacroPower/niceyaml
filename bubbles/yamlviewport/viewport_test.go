@@ -3926,6 +3926,13 @@ func TestViewModeHunks_Golden(t *testing.T) {
 		  retries: 10
 	`)
 
+	// The hunks closure shows the diff of the first two revisions as hunks.
+	hunks := func(m *yamlviewport.Model) {
+		addRevisions(m, rev1YAML, rev2YAML)
+		m.GotoRevision(1)
+		m.SetViewMode(yamlviewport.ViewModeHunks)
+	}
+
 	type goldenTest struct {
 		setupFunc func(m *yamlviewport.Model)
 		width     int
@@ -3934,13 +3941,9 @@ func TestViewModeHunks_Golden(t *testing.T) {
 
 	tcs := map[string]goldenTest{
 		"BasicHunks": {
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
-			},
-			width:  80,
-			height: 30,
+			setupFunc: hunks,
+			width:     80,
+			height:    30,
 		},
 		"AtFirstRevision": {
 			setupFunc: func(m *yamlviewport.Model) {
@@ -3993,9 +3996,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 		"HunksScrolled": {
 			// The offset counts rows, and the hunk header is a row.
 			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
+				hunks(m)
 				m.SetYOffset(2)
 			},
 			width:  80,
@@ -4003,9 +4004,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 		},
 		"HunksScrolledToBottom": {
 			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
+				hunks(m)
 				m.GotoBottom()
 			},
 			width:  80,
@@ -4014,9 +4013,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 		"HunksSearch": {
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
+				hunks(m)
 				m.SetSearchTerm("name")
 			},
 			width:  80,
@@ -4025,9 +4022,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 		"HunksSearchNavigate": {
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
+				hunks(m)
 				m.SetSearchTerm("name")
 				m.SearchNext() // Navigate to second match.
 			},
@@ -4103,6 +4098,14 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 		  retries: 10
 	`)
 
+	// The sideBySide closure shows the diff of the first two revisions in two
+	// panes.
+	sideBySide := func(m *yamlviewport.Model) {
+		addRevisions(m, rev1YAML, rev2YAML)
+		m.GotoRevision(1)
+		m.SetViewMode(yamlviewport.ViewModeSideBySide)
+	}
+
 	type goldenTest struct {
 		setupFunc func(m *yamlviewport.Model)
 		width     int
@@ -4111,13 +4114,9 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 
 	tcs := map[string]goldenTest{
 		"SideBySide": {
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			},
-			width:  80,
-			height: 24,
+			setupFunc: sideBySide,
+			width:     80,
+			height:    24,
 		},
 		"SideBySideNoChanges": {
 			// Same content on both sides renders identical panes.
@@ -4142,9 +4141,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 		"SideBySideScrolled": {
 			// Side-by-side with vertical scrolling.
 			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				sideBySide(m)
 				m.SetYOffset(3)
 			},
 			width:  80,
@@ -4174,34 +4171,22 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 		},
 		"SideBySideNarrow": {
 			// Narrower viewport to test pane width calculation.
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			},
-			width:  60,
-			height: 16,
+			setupFunc: sideBySide,
+			width:     60,
+			height:    16,
 		},
 		"SideBySideTooNarrow": {
 			// Width <=4: paneWidth = (4-3)/2 = 0, so it renders empty
 			// without panic.
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			},
-			width:  4,
-			height: 10,
+			setupFunc: sideBySide,
+			width:     4,
+			height:    10,
 		},
 		"SideBySideMinimal": {
 			// Width 5: paneWidth = (5-3)/2 = 1, minimum to render content.
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			},
-			width:  5,
-			height: 10,
+			setupFunc: sideBySide,
+			width:     5,
+			height:    10,
 		},
 		"SideBySideMoreDeletions": {
 			// With more deletions than insertions, the right pane gets placeholders.
@@ -4260,9 +4245,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			// that highlighted lines fit on one row.
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				sideBySide(m)
 				m.SetSearchTerm("modified")
 			},
 			width:  190,
@@ -4275,9 +4258,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			// first within a row.
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				sideBySide(m)
 				m.SetSearchTerm("key")
 				m.SearchNext() // Second match, key1 in the after pane.
 				m.SearchNext() // Third match, key2 in the before pane.
@@ -4289,9 +4270,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			// Verifies SearchSelected appears on deleted line (before pane only).
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				sideBySide(m)
 				m.SetSearchTerm("original") // Only in deleted line.
 			},
 			width:  190,
@@ -4301,9 +4280,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			// Verifies SearchSelected appears on inserted line (after pane only).
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				sideBySide(m)
 				m.SetSearchTerm("modified") // Only in inserted line.
 			},
 			width:  190,
@@ -4314,9 +4291,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			// The selection sits on the first match, in the before pane.
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				sideBySide(m)
 				m.SetSearchTerm("name") // Appears on both deleted and inserted lines.
 
 				// The search selects the first match by default, on the
@@ -4350,9 +4325,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			// The selection sits on the second match, in the after pane.
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				sideBySide(m)
 				m.SetSearchTerm("name") // Appears on both deleted and inserted lines.
 				m.SearchNext()          // Move to second match (after/inserted line).
 			},
