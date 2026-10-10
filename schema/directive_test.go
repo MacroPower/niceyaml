@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"cmp"
 	"errors"
 	"net/http"
 	"os"
@@ -617,7 +618,8 @@ func TestDirective_Resolve(t *testing.T) {
 		schemaData := []byte(`{"type": "object"}`)
 
 		// Each case writes the schema to file under a temporary directory
-		// and names it by a directive in a document at doc there.
+		// and names it by a directive in a document at doc there, or at
+		// config.yaml when it names no doc.
 		tcs := map[string]struct {
 			file      string
 			doc       string
@@ -625,24 +627,20 @@ func TestDirective_Resolve(t *testing.T) {
 		}{
 			"file beside the document": {
 				file:      "schema.json",
-				doc:       "config.yaml",
 				directive: "schema.json",
 			},
 			"trailing whitespace": {
 				file:      "schema.json",
-				doc:       "config.yaml",
 				directive: "./schema.json   ",
 			},
 			// A path splits only at a '#' after its first character, as in
 			// yaml-language-server, so "#schema.json" names a file.
 			"leading '#' in a path": {
 				file:      "#schema.json",
-				doc:       "config.yaml",
 				directive: "#schema.json",
 			},
 			"./none names a file": {
 				file:      "none",
-				doc:       "config.yaml",
 				directive: "./none",
 			},
 			// The directive climbs from configs/ to its sibling schemas/.
@@ -662,7 +660,7 @@ func TestDirective_Resolve(t *testing.T) {
 
 				doc := yamltest.FirstDocumentWithPath(t,
 					"# yaml-language-server: $schema="+tc.directive+"\nkind: Deployment\n",
-					filepath.Join(tmpDir, filepath.FromSlash(tc.doc)),
+					filepath.Join(tmpDir, filepath.FromSlash(cmp.Or(tc.doc, "config.yaml"))),
 				)
 				url, data, err := loadFor(t, schema.Directive(), doc)
 				require.NoError(t, err)

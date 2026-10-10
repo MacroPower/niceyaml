@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"cmp"
 	"context"
 	"io/fs"
 	"net/http"
@@ -38,7 +39,8 @@ func TestFileOrURL(t *testing.T) {
 
 		schemaData := []byte(`{"type": "object"}`)
 
-		// Each case writes the schema to file in a temporary directory.
+		// Each case writes the schema to file in a temporary directory, or
+		// to schema.json when it names no file.
 		// In baseDir and ref, "{dir}" stands for that directory, "{path}"
 		// for the path of the file, and "{slash}" for that path with
 		// forward slashes. The key is the URL of the file and then
@@ -50,22 +52,18 @@ func TestFileOrURL(t *testing.T) {
 			fragment string
 		}{
 			"relative path": {
-				file:    "schema.json",
 				baseDir: "{dir}",
 				ref:     "schema.json",
 			},
 			"absolute path ignores baseDir": {
-				file:    "schema.json",
 				baseDir: "/some/other/dir",
 				ref:     "{path}",
 			},
 			"absolute path without base directory": {
-				file: "schema.json",
-				ref:  "{path}",
+				ref: "{path}",
 			},
 			// A file URL names a local path, so it ignores baseDir.
 			"file URL": {
-				file:    "schema.json",
 				baseDir: "/some/other/dir",
 				ref:     "file://{path}",
 			},
@@ -73,12 +71,10 @@ func TestFileOrURL(t *testing.T) {
 			// name the same absolute path rather than a path relative to
 			// baseDir.
 			"file URL without authority": {
-				file:    "schema.json",
 				baseDir: "/some/other/dir",
 				ref:     "file:{slash}",
 			},
 			"file URL scheme in upper case": {
-				file:    "schema.json",
 				baseDir: "/some/other/dir",
 				ref:     "FILE://{path}",
 			},
@@ -90,7 +86,6 @@ func TestFileOrURL(t *testing.T) {
 			// The key keeps the fragment that names the subschema, and the
 			// registry loads the whole file.
 			"file URL with fragment": {
-				file:     "schema.json",
 				baseDir:  "/some/other/dir",
 				ref:      "file://{slash}#/definitions/Foo",
 				fragment: "#/definitions/Foo",
@@ -109,7 +104,7 @@ func TestFileOrURL(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				schemaPath := writeSchema(t, tc.file, schemaData)
+				schemaPath := writeSchema(t, cmp.Or(tc.file, "schema.json"), schemaData)
 				fill := strings.NewReplacer(
 					"{dir}", filepath.Dir(schemaPath),
 					"{path}", schemaPath,
