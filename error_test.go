@@ -5128,46 +5128,57 @@ func TestSourceError_Annotate(t *testing.T) {
 		assert.Equal(t, line.Annotations{caretAt(3, "too big")}, view.Annotations(3))
 	})
 
-	t.Run("two errors on one line each add an annotation", func(t *testing.T) {
+	t.Run("each error at one value marks its line", func(t *testing.T) {
 		t.Parallel()
 
-		source := excerptSource()
-		view := source.View()
-
-		for _, msg := range []string{"bad b", "too big"} {
-			bound := requireBound(t, source, niceyaml.NewError(
-				msg, niceyaml.AtPath(paths.Current().Child("b")),
-			))
-			require.True(t, bound.Annotate(view))
+		tcs := map[string]struct {
+			// The message of each error bound at the value of b, in order.
+			msgs []string
+			want line.Annotations
+			// The row a renderer draws below the line.
+			row string
+		}{
+			"two errors on one line each add an annotation": {
+				msgs: []string{"bad b", "too big"},
+				want: line.Annotations{caretAt(3, "bad b"), caretAt(3, "too big")},
+				row:  "     |    ^ bad b; too big",
+			},
+			// Two bindings say the same of one value, as two branches of an
+			// anyOf do.
+			"a message that repeats at one column reads once": {
+				msgs: []string{"bad b", "bad b"},
+				want: line.Annotations{caretAt(3, "bad b")},
+				row:  "     |    ^ bad b",
+			},
+			"an error with no message marks a caret run alone": {
+				msgs: []string{""},
+				want: line.Annotations{caretAt(3, "")},
+				row:  "     |    ^",
+			},
 		}
 
-		assert.Equal(t, line.Annotations{
-			caretAt(3, "bad b"),
-			caretAt(3, "too big"),
-		}, view.Annotations(1))
-		assert.Equal(t, stringtest.JoinLF(
-			"   2 | b: 2",
-			"     |    ^ bad b; too big",
-		), view.Slice(position.NewSpan(1, 2)).String())
-	})
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-	t.Run("a message that repeats at one column reads once", func(t *testing.T) {
-		t.Parallel()
+				source := excerptSource()
+				view := source.View()
 
-		source := excerptSource()
-		view := source.View()
+				for _, msg := range tc.msgs {
+					bound := requireBound(t, source, niceyaml.NewError(
+						msg, niceyaml.AtPath(paths.Current().Child("b")),
+					))
+					require.True(t, bound.Annotate(view), "the view holds the line, marked or not")
+				}
 
-		// Two bindings say the same of one value, as two branches of an
-		// anyOf do.
-		for range 2 {
-			bound := requireBound(t, source, niceyaml.NewError(
-				"bad b", niceyaml.AtPath(paths.Current().Child("b")),
-			))
-			require.True(t, bound.Annotate(view), "the view holds the line, marked or not")
+				assert.Equal(t, errorOverlays(position.NewSpan(3, 4)), view.Overlays(1))
+				assert.Equal(t, tc.want, view.Annotations(1))
+				assert.Equal(t, stringtest.JoinLF(
+					"   2 | b: 2",
+					tc.row,
+				), view.Slice(position.NewSpan(1, 2)).String())
+			})
 		}
-
-		assert.Equal(t, errorOverlays(position.NewSpan(3, 4)), view.Overlays(1))
-		assert.Equal(t, line.Annotations{caretAt(3, "bad b")}, view.Annotations(1))
 	})
 
 	t.Run("marking a view twice leaves it as marking it once does", func(t *testing.T) {
@@ -5248,20 +5259,6 @@ func TestSourceError_Annotate(t *testing.T) {
 				assert.Equal(t, once.String(), twice.String())
 			})
 		}
-	})
-
-	t.Run("an error with no message marks a caret run alone", func(t *testing.T) {
-		t.Parallel()
-
-		source := excerptSource()
-		view := source.View()
-
-		bound := requireBound(t, source, niceyaml.NewError(
-			"", niceyaml.AtPath(paths.Current().Child("b")),
-		))
-		require.True(t, bound.Annotate(view))
-
-		assert.Equal(t, line.Annotations{caretAt(3, "")}, view.Annotations(1))
 	})
 
 	t.Run("a position past the end of its line marks the column after the last rune", func(t *testing.T) {
