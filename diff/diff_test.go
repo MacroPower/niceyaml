@@ -1,6 +1,7 @@
 package diff_test
 
 import (
+	"cmp"
 	"iter"
 	"sync"
 	"testing"
@@ -955,62 +956,44 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 	body := "a: 1\nb: 2\nc: 3\n"
 
 	tcs := map[string]struct {
-		beforeHead string
-		before     string
-		afterHead  string
-		after      string
-		context    int
-		want       []string
+		// Holds the second document of the before side, when it is not body.
+		before string
+		// Holds the first document of the after side, when it is not head.
+		afterHead string
+		after     string
+		context   int
+		want      []string
 	}{
 		"modify one line": {
-			beforeHead: head,
-			before:     body,
-			afterHead:  head,
-			after:      "a: 1\nb: 9\nc: 3\n",
-			want:       []string{"@@ -6 +6 @@"},
+			after: "a: 1\nb: 9\nc: 3\n",
+			want:  []string{"@@ -6 +6 @@"},
 		},
 		"insert after the separator": {
-			beforeHead: head,
-			before:     body,
-			afterHead:  head,
-			after:      "w: 0\na: 1\nb: 2\nc: 3\n",
-			want:       []string{"@@ -4,0 +5 @@"},
+			after: "w: 0\na: 1\nb: 2\nc: 3\n",
+			want:  []string{"@@ -4,0 +5 @@"},
 		},
 		"append at end": {
-			beforeHead: head,
-			before:     body,
-			afterHead:  head,
-			after:      "a: 1\nb: 2\nc: 3\nd: 4\n",
-			want:       []string{"@@ -7,0 +8 @@"},
+			after: "a: 1\nb: 2\nc: 3\nd: 4\n",
+			want:  []string{"@@ -7,0 +8 @@"},
 		},
 		"delete the last line": {
-			beforeHead: head,
-			before:     body,
-			afterHead:  head,
-			after:      "a: 1\nb: 2\n",
-			want:       []string{"@@ -7 +6,0 @@"},
+			after: "a: 1\nb: 2\n",
+			want:  []string{"@@ -7 +6,0 @@"},
 		},
 		"two separate hunks": {
-			beforeHead: head,
-			before:     "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n",
-			afterHead:  head,
-			after:      "a: 0\nb: 2\nc: 3\nd: 4\ne: 0\n",
-			want:       []string{"@@ -5 +5 @@", "@@ -9 +9 @@"},
+			before: "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n",
+			after:  "a: 0\nb: 2\nc: 3\nd: 4\ne: 0\n",
+			want:   []string{"@@ -5 +5 @@", "@@ -9 +9 @@"},
 		},
 		"context 1": {
-			beforeHead: head,
-			before:     body,
-			afterHead:  head,
-			after:      "a: 1\nb: 9\nc: 3\n",
-			context:    1,
-			want:       []string{"@@ -5,3 +5,3 @@"},
+			after:   "a: 1\nb: 9\nc: 3\n",
+			context: 1,
+			want:    []string{"@@ -5,3 +5,3 @@"},
 		},
 		"earlier document grew": {
-			beforeHead: head,
-			before:     body,
-			afterHead:  head + "v: 4\nu: 5\n",
-			after:      "a: 1\nb: 9\nc: 3\n",
-			want:       []string{"@@ -6 +8 @@"},
+			afterHead: head + "v: 4\nu: 5\n",
+			after:     "a: 1\nb: 9\nc: 3\n",
+			want:      []string{"@@ -6 +8 @@"},
 		},
 	}
 
@@ -1018,8 +1001,8 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			before := niceyaml.NewSourceFromString(tc.beforeHead + "---\n" + tc.before)
-			after := niceyaml.NewSourceFromString(tc.afterHead + "---\n" + tc.after)
+			before := niceyaml.NewSourceFromString(head + "---\n" + cmp.Or(tc.before, body))
+			after := niceyaml.NewSourceFromString(cmp.Or(tc.afterHead, head) + "---\n" + tc.after)
 
 			beforeDocs := before.Documents()
 			require.Len(t, beforeDocs, 2)
@@ -1032,7 +1015,7 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 
 			// With the same first document, a diff of the whole file
 			// names the same lines.
-			if tc.beforeHead == tc.afterHead {
+			if tc.afterHead == "" {
 				whole := diff.Diff(before.Lines(), after.Lines()).Hunks(tc.context)
 				assert.Equal(t, tc.want, hunkHeaders(whole))
 			}
