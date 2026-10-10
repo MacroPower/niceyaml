@@ -416,11 +416,11 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			want:  "1:6: $.one: expected mapping, got string",
 		},
 		"block sequence for a mapping": {
-			input: "one:\n  - a\n",
+			input: stringtest.LinesLF("one:", "  - a"),
 			want:  "1:1: $.one: expected mapping, got sequence",
 		},
 		"sequence element for a mapping": {
-			input: "servers:\n  - - a\n",
+			input: stringtest.LinesLF("servers:", "  - - a"),
 			want:  "2:3: $.servers[0]: expected mapping, got sequence",
 		},
 		"integer for a sequence": {
@@ -432,7 +432,7 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			want:  "1:6: $.one: expected mapping, got boolean",
 		},
 		"block scalar for a mapping": {
-			input: "one: |\n  abc\n",
+			input: stringtest.LinesLF("one: |", "  abc"),
 			want:  "1:6: $.one: expected mapping, got string",
 		},
 		"anchored scalar": {
@@ -463,7 +463,7 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			want: "2:9: $.defs.port: expected integer, got string",
 		},
 		"map key": {
-			input: "counts:\n  x: 1\n",
+			input: stringtest.LinesLF("counts:", "  x: 1"),
 			want:  "2:3: $.counts.x~: expected integer, got string",
 		},
 		"explicit map key": {
@@ -475,19 +475,19 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			want: "2:5: $.counts.x~: expected integer, got string",
 		},
 		"map value": {
-			input: "counts:\n  1: x\n",
+			input: stringtest.LinesLF("counts:", "  1: x"),
 			want:  "2:6: $.counts.1: expected integer, got string",
 		},
 		"key a path quotes": {
-			input: "labels:\n  \"a.b\": [1]\n",
+			input: stringtest.LinesLF("labels:", "  \"a.b\": [1]"),
 			want:  "2:3: $.labels.'a.b': expected string, got sequence",
 		},
 		"overflow of a signed integer": {
-			input: "servers:\n  - small: 300\n",
+			input: stringtest.LinesLF("servers:", "  - small: 300"),
 			want:  "2:12: $.servers[0].small: expected integer from -128 to 127, got 300",
 		},
 		"negative for an unsigned integer": {
-			input: "servers:\n  - wide: -1\n",
+			input: stringtest.LinesLF("servers:", "  - wide: -1"),
 			want:  "2:11: $.servers[0].wide: expected integer from 0 to 65535, got -1",
 		},
 		"overflow of an unsigned integer": {
@@ -541,7 +541,7 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			want:  "2:1: $.foo~: unknown field \"foo\"",
 		},
 		"unknown field in an element": {
-			input: "servers:\n  - zzz: 1\n",
+			input: stringtest.LinesLF("servers:", "  - zzz: 1"),
 			opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
 			want:  "2:5: $.servers[0].zzz~: unknown field \"zzz\"",
 		},
@@ -1042,7 +1042,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			},
 			// The path of a value an alias holds points at the alias.
 			"alias": {
-				input: "label: &label mid\ntiers: [low, *label]\n",
+				input: stringtest.LinesLF("label: &label mid", "tiers: [low, *label]"),
 				decode: decodeAs[struct {
 					Label string `yaml:"label"`
 					Tiers []tier `yaml:"tiers"`
@@ -1262,7 +1262,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: "2:1: $.addr: expected string, got mapping",
 			},
 			"pointer field": {
-				input: "tier:\n  a: b\n",
+				input: stringtest.LinesLF("tier:", "  a: b"),
 				decode: decodeAs[struct {
 					Tier *tier `yaml:"tier"`
 				}](),
@@ -1284,7 +1284,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// The decoder reads nothing below the mapping, so the tier in
 			// it reports nothing.
 			"mapping that holds a sequence": {
-				input: "holder:\n  tier: [a]\n",
+				input: stringtest.LinesLF("holder:", "  tier: [a]"),
 				decode: decodeAs[struct {
 					Holder tierHolder `yaml:"holder"`
 				}](),
@@ -1583,7 +1583,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: "2:22: $.value.to: to is below from",
 			},
 			"map value": {
-				input:  "a: {from: 1, to: 2}\nb: {from: 9, to: 3}\n",
+				input:  stringtest.LinesLF("a: {from: 1, to: 2}", "b: {from: 9, to: 3}"),
 				decode: decodeAs[map[string]span](),
 				is:     errSpan,
 				want:   "2:18: $.b.to: to is below from",
@@ -1603,7 +1603,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// The path goes through the alias to the line that holds the
 			// value.
 			"value an alias holds": {
-				input: "base: &base {from: 9, to: 3}\nspans: [*base]\n",
+				input: stringtest.LinesLF("base: &base {from: 9, to: 3}", "spans: [*base]"),
 				decode: decodeAs[struct {
 					Spans []span `yaml:"spans"`
 				}](),
@@ -1666,7 +1666,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: "3:25: $.mirrors[0].span.to: to is below from",
 			},
 			"value that adds text to the error of a field": {
-				input: "main:\n  span: {from: 9, to: 3}\n",
+				input: stringtest.LinesLF("main:", "  span: {from: 9, to: 3}"),
 				decode: decodeAs[struct {
 					Main spanWrapper `yaml:"main"`
 				}](),
@@ -1676,7 +1676,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// The value wrote the path of its field, so the path goes
 			// under the value once, and not under the field too.
 			"value that rebases the error of a field": {
-				input: "main:\n  span: {from: 9, to: 3}\n",
+				input: stringtest.LinesLF("main:", "  span: {from: 9, to: 3}"),
 				decode: decodeAs[struct {
 					Main spanRebaser `yaml:"main"`
 				}](),
@@ -1684,7 +1684,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: "2:23: $.main.span.to: to is below from",
 			},
 			"value that names a field in the error of that field": {
-				input: "main:\n  tier: mid\n",
+				input: stringtest.LinesLF("main:", "  tier: mid"),
 				decode: decodeAs[struct {
 					Main tierNamer `yaml:"main"`
 				}](),
