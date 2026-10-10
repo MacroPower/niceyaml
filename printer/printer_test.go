@@ -1845,7 +1845,7 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 
 			l := p.Layout(view)
-			assert.Equal(t, strings.Count(got, "\n")+1, l.Rows())
+			assertLayoutMeasures(t, l, got)
 			assertRowOfRunes(t, l, tc.input, strings.Split(got, "\n"), wide)
 		})
 	}
@@ -2052,7 +2052,7 @@ func TestPrinter_WordWrap_BreakSpaceBeforeBreakpoint(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 
 			l := p.Layout(view)
-			assert.Equal(t, strings.Count(got, "\n")+1, l.Rows())
+			assertLayoutMeasures(t, l, got)
 
 			for col, want := range tc.rows {
 				assert.Equal(t, want, l.RowOf(position.New(0, col)), "column %d", col)
@@ -2313,7 +2313,7 @@ func TestPrinter_WordWrap_NoEmptyRows(t *testing.T) {
 
 			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
-			assert.Equal(t, strings.Count(got, "\n")+1, p.Layout(view).Rows())
+			assertLayoutMeasures(t, p.Layout(view), got)
 		})
 	}
 
@@ -6063,7 +6063,7 @@ func TestPrinter_Layout(t *testing.T) {
 
 		l := p.Layout(view)
 
-		assert.Equal(t, len(strings.Split(got, "\n")), l.Rows())
+		assertLayoutMeasures(t, l, got)
 		assert.Equal(t, 3, l.Count())
 		assert.Equal(t, []int{6, 1, 2}, layoutRows(l))
 	})
@@ -6173,7 +6173,7 @@ func TestPrinter_Layout(t *testing.T) {
 
 		l := p.Layout(view)
 
-		assert.Equal(t, len(strings.Split(got, "\n")), l.Rows())
+		assertLayoutMeasures(t, l, got)
 		assert.Equal(t, 2, l.Count())
 		assert.Equal(t, []int{6, 2}, layoutRows(l))
 
@@ -6439,7 +6439,7 @@ func TestPrinter_Layout(t *testing.T) {
 
 		l := p.Layout(view)
 
-		assert.Equal(t, len(strings.Split(got, "\n")), l.Rows())
+		assertLayoutMeasures(t, l, got)
 		assert.Equal(t, []int{3, 1, 2}, layoutRows(l))
 		assert.Equal(t, 1, l.RowOf(position.New(0, 0)))
 		assert.Equal(t, 1, l.RowOf(position.New(0, 1000)))
@@ -6463,7 +6463,7 @@ func TestPrinter_Layout(t *testing.T) {
 
 		l := p.Layout(view)
 
-		assert.Equal(t, len(strings.Split(got, "\n")), l.Rows())
+		assertLayoutMeasures(t, l, got)
 		assert.Equal(t, []int{3, 1, 1}, layoutRows(l))
 		assert.Equal(t, 0, l.RowOf(position.New(0, 0)))
 		assert.Equal(t, 1, l.RowOf(position.New(0, 15)))
