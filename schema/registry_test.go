@@ -2172,59 +2172,40 @@ func TestRegistry_FileSystems(t *testing.T) {
 
 	const (
 		directive = "# yaml-language-server: $schema=./schema.json\n"
-
-		wantsString  = `{"properties": {"v": {"$ref": "defs.json"}}}`
-		stringDef    = `{"type": "string"}`
-		wantsInteger = `{"properties": {"v": {"$ref": "defs.json"}}}`
-		integerDef   = `{"type": "integer"}`
+		refsDefs  = `{"properties": {"v": {"$ref": "defs.json"}}}`
 	)
 
-	// Both file systems and the directory on disk hold the same paths.
-	// The schemas differ, and so do the documents their $ref names.
+	// Both file systems and the directory on disk hold the same paths and
+	// the same schema. The documents its $ref names differ.
 	stringFS := mapFS(map[string]string{
 		"configs/app.yaml":    directive + "v: x\n",
-		"configs/schema.json": wantsString,
-		"configs/defs.json":   stringDef,
+		"configs/schema.json": refsDefs,
+		"configs/defs.json":   `{"type": "string"}`,
 	})
 	integerFS := mapFS(map[string]string{
 		"configs/app.yaml":    directive + "v: 5\n",
-		"configs/schema.json": wantsInteger,
-		"configs/defs.json":   integerDef,
+		"configs/schema.json": refsDefs,
+		"configs/defs.json":   `{"type": "integer"}`,
 	})
 
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{
 		"configs/app.yaml":    directive + "v: true\n",
-		"configs/schema.json": `{"properties": {"v": {"$ref": "defs.json"}}}`,
+		"configs/schema.json": refsDefs,
 		"configs/defs.json":   `{"type": "boolean"}`,
 	})
 
 	reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
-	open := map[string]func(t *testing.T) *niceyaml.Source{
-		"strings": func(t *testing.T) *niceyaml.Source {
-			t.Helper()
-
-			source, err := niceyaml.NewSourceFromFS(stringFS, "configs/app.yaml")
-			require.NoError(t, err)
-
-			return source
+	open := map[string]func() (*niceyaml.Source, error){
+		"strings": func() (*niceyaml.Source, error) {
+			return niceyaml.NewSourceFromFS(stringFS, "configs/app.yaml")
 		},
-		"integers": func(t *testing.T) *niceyaml.Source {
-			t.Helper()
-
-			source, err := niceyaml.NewSourceFromFS(integerFS, "configs/app.yaml")
-			require.NoError(t, err)
-
-			return source
+		"integers": func() (*niceyaml.Source, error) {
+			return niceyaml.NewSourceFromFS(integerFS, "configs/app.yaml")
 		},
-		"disk": func(t *testing.T) *niceyaml.Source {
-			t.Helper()
-
-			source, err := niceyaml.NewSourceFromFile(filepath.Join(dir, "configs", "app.yaml"))
-			require.NoError(t, err)
-
-			return source
+		"disk": func() (*niceyaml.Source, error) {
+			return niceyaml.NewSourceFromFile(filepath.Join(dir, "configs", "app.yaml"))
 		},
 	}
 
@@ -2236,7 +2217,9 @@ func TestRegistry_FileSystems(t *testing.T) {
 		{"integers", "disk", "strings"},
 	} {
 		for _, name := range order {
-			require.NoError(t, open[name](t).ValidateDocuments(t.Context(), reg), "%s in %v", name, order)
+			source, err := open[name]()
+			require.NoError(t, err)
+			require.NoError(t, source.ValidateDocuments(t.Context(), reg), "%s in %v", name, order)
 		}
 	}
 
