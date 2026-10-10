@@ -3083,14 +3083,14 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		// ErrNoMatch alone adds no reason, and the reasons read without the
 		// sentinel the message states already.
 		require.EqualError(t, err, "app.yaml: no matching schema")
-		assert.Equal(t,
-			"app.yaml: no matching schema\n|-- no schema directive\n`-- no kind",
-			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
+
+		wantTree := stringtest.JoinLF(
+			"app.yaml: no matching schema",
+			"|-- no schema directive",
+			"`-- no kind",
 		)
-		assert.Equal(t,
-			"app.yaml: no matching schema\n|-- no schema directive\n`-- no kind",
-			fmt.Sprintf("%+v", err),
-		)
+		assert.Equal(t, wantTree, niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
+		assert.Equal(t, wantTree, fmt.Sprintf("%+v", err))
 
 		bound := yamltest.RequireSourceError(t, err)
 
@@ -3122,14 +3122,13 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		err := docs[2].Validate(t.Context(), reg)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 		require.EqualError(t, err, "m.yaml: document 3: no matching schema")
-		assert.Equal(t,
-			"m.yaml: document 3: no matching schema\n`-- no schema directive",
-			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
+
+		wantTree := stringtest.JoinLF(
+			"m.yaml: document 3: no matching schema",
+			"`-- no schema directive",
 		)
-		assert.Equal(t,
-			"m.yaml: document 3: no matching schema\n`-- no schema directive",
-			fmt.Sprintf("%+v", err),
-		)
+		assert.Equal(t, wantTree, niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
+		assert.Equal(t, wantTree, fmt.Sprintf("%+v", err))
 
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, "no matching schema", bound.Message())
@@ -3211,7 +3210,11 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		require.NotErrorIs(t, err, context.DeadlineExceeded)
 		assert.True(t, niceyaml.IsInvalid(err))
 		assert.Equal(t,
-			"app.yaml: no matching schema\n|-- read catalog: context deadline exceeded\n`-- no label",
+			stringtest.JoinLF(
+				"app.yaml: no matching schema",
+				"|-- read catalog: context deadline exceeded",
+				"`-- no label",
+			),
 			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
 		)
 	})
