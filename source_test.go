@@ -338,85 +338,50 @@ func TestSource_All_EarlyBreak(t *testing.T) {
 func TestSource_All_WithSpans(t *testing.T) {
 	t.Parallel()
 
-	input := "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"
-	source := niceyaml.NewSourceFromString(input)
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n")
 
 	require.Equal(t, 5, source.Lines().Len())
 
-	t.Run("no spans returns all lines", func(t *testing.T) {
-		t.Parallel()
+	tcs := map[string]struct {
+		spans []position.Span
+		want  []int
+	}{
+		"no spans returns all lines": {
+			want: []int{0, 1, 2, 3, 4},
+		},
+		"single span filters lines": {
+			spans: []position.Span{position.NewSpan(1, 3)},
+			want:  []int{1, 2},
+		},
+		"multiple spans iterate in order": {
+			spans: []position.Span{position.NewSpan(0, 1), position.NewSpan(3, 5)},
+			want:  []int{0, 3, 4},
+		},
+		"span clamped to bounds": {
+			spans: []position.Span{position.NewSpan(-5, 100)},
+			want:  []int{0, 1, 2, 3, 4},
+		},
+		"empty span yields nothing": {
+			spans: []position.Span{position.NewSpan(2, 2)},
+		},
+		"span beyond length yields nothing": {
+			spans: []position.Span{position.NewSpan(10, 20)},
+		},
+	}
 
-		var collected []int
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		for idx := range source.Lines().All() {
-			collected = append(collected, idx)
-		}
+			var got []int
 
-		assert.Equal(t, []int{0, 1, 2, 3, 4}, collected)
-	})
+			for idx := range source.Lines().All(tc.spans...) {
+				got = append(got, idx)
+			}
 
-	t.Run("single span filters lines", func(t *testing.T) {
-		t.Parallel()
-
-		var collected []int
-
-		for idx := range source.Lines().All(position.NewSpan(1, 3)) {
-			collected = append(collected, idx)
-		}
-
-		assert.Equal(t, []int{1, 2}, collected)
-	})
-
-	t.Run("multiple spans iterate in order", func(t *testing.T) {
-		t.Parallel()
-
-		var collected []int
-
-		for idx := range source.Lines().All(
-			position.NewSpan(0, 1),
-			position.NewSpan(3, 5),
-		) {
-			collected = append(collected, idx)
-		}
-
-		assert.Equal(t, []int{0, 3, 4}, collected)
-	})
-
-	t.Run("span clamped to bounds", func(t *testing.T) {
-		t.Parallel()
-
-		var collected []int
-
-		for idx := range source.Lines().All(position.NewSpan(-5, 100)) {
-			collected = append(collected, idx)
-		}
-
-		assert.Equal(t, []int{0, 1, 2, 3, 4}, collected)
-	})
-
-	t.Run("empty span yields nothing", func(t *testing.T) {
-		t.Parallel()
-
-		var collected []int
-
-		for idx := range source.Lines().All(position.NewSpan(2, 2)) {
-			collected = append(collected, idx)
-		}
-
-		assert.Nil(t, collected)
-	})
-
-	t.Run("span beyond length yields nothing", func(t *testing.T) {
-		t.Parallel()
-
-		var collected []int
-
-		for idx := range source.Lines().All(position.NewSpan(10, 20)) {
-			collected = append(collected, idx)
-		}
-
-		assert.Nil(t, collected)
-	})
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestSource_Lines(t *testing.T) {
