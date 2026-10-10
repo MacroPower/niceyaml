@@ -56,48 +56,30 @@ func TestFinder_Find(t *testing.T) {
 			input:  "key: value",
 			search: "value",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 5),
-					position.New(0, 10),
-				),
+				position.NewRange(position.New(0, 5), position.New(0, 10)),
 			},
 		},
 		"match key": {
 			input:  "key: value",
 			search: "key",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 0),
-					position.New(0, 3),
-				),
+				position.NewRange(position.New(0, 0), position.New(0, 3)),
 			},
 		},
 		"cross-token match": {
 			input:  "key: value",
 			search: ": ",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 3),
-					position.New(0, 5),
-				),
+				position.NewRange(position.New(0, 3), position.New(0, 5)),
 			},
 		},
 		"multiple matches": {
 			input:  "a: test\nb: test\nc: test",
 			search: "test",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 3),
-					position.New(0, 7),
-				),
-				position.NewRange(
-					position.New(1, 3),
-					position.New(1, 7),
-				),
-				position.NewRange(
-					position.New(2, 3),
-					position.New(2, 7),
-				),
+				position.NewRange(position.New(0, 3), position.New(0, 7)),
+				position.NewRange(position.New(1, 3), position.New(1, 7)),
+				position.NewRange(position.New(2, 3), position.New(2, 7)),
 			},
 		},
 		"no match": {
@@ -114,20 +96,14 @@ func TestFinder_Find(t *testing.T) {
 			input:  "text: |\n  line1\n  line2",
 			search: "line2",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(2, 2),
-					position.New(2, 7),
-				),
+				position.NewRange(position.New(2, 2), position.New(2, 7)),
 			},
 		},
 		"match spans lines": {
 			input:  "a: 1\nb: 2",
 			search: "1\nb",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 3),
-					position.New(1, 1),
-				),
+				position.NewRange(position.New(0, 3), position.New(1, 1)),
 			},
 		},
 		"with normalizer - diacritic match": {
@@ -135,10 +111,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "Thais",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 6),
-					position.New(0, 11),
-				),
+				position.NewRange(position.New(0, 6), position.New(0, 11)),
 			},
 		},
 		"with normalizer - search has diacritic": {
@@ -146,10 +119,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "Thaïs",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 6),
-					position.New(0, 11),
-				),
+				position.NewRange(position.New(0, 6), position.New(0, 11)),
 			},
 		},
 		"with normalizer - kana voicing mark distinguishes": {
@@ -225,10 +195,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "\u13a0",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 6),
-					position.New(0, 7),
-				),
+				position.NewRange(position.New(0, 6), position.New(0, 7)),
 			},
 		},
 		"with normalizer - cherokee lowercase search": {
@@ -236,10 +203,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "\uab70",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 6),
-					position.New(0, 7),
-				),
+				position.NewRange(position.New(0, 6), position.New(0, 7)),
 			},
 		},
 		"exact matching - no match": {
@@ -267,10 +231,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "VALUE",
 			normalizer: (*normalizer.Normalizer)(nil),
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 5),
-					position.New(0, 10),
-				),
+				position.NewRange(position.New(0, 5), position.New(0, 10)),
 			},
 		},
 		"case insensitive with normalizer": {
@@ -278,10 +239,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "value",
 			normalizer: yamltest.NormalizerFunc(strings.ToLower),
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 5),
-					position.New(0, 10),
-				),
+				position.NewRange(position.New(0, 5), position.New(0, 10)),
 			},
 		},
 		"normalizer dropping whitespace joins lines": {
@@ -289,10 +247,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "1b",
 			normalizer: noSpace(),
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 3),
-					position.New(1, 1),
-				),
+				position.NewRange(position.New(0, 3), position.New(1, 1)),
 			},
 		},
 		"normalizer dropping whitespace covers the dropped space": {
@@ -300,70 +255,49 @@ func TestFinder_Find(t *testing.T) {
 			search:     "ab",
 			normalizer: noSpace(),
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 3),
-					position.New(0, 6),
-				),
+				position.NewRange(position.New(0, 3), position.New(0, 6)),
 			},
 		},
 		"single character match": {
 			input:  "a: b",
 			search: "a",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 0),
-					position.New(0, 1),
-				),
+				position.NewRange(position.New(0, 0), position.New(0, 1)),
 			},
 		},
 		"overlapping potential matches": {
 			input:  "aaa",
 			search: "aa",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 0),
-					position.New(0, 2),
-				),
+				position.NewRange(position.New(0, 0), position.New(0, 2)),
 			},
 		},
 		"utf8 - search text after multibyte char": {
 			input:  "name: Thaïs test",
 			search: "test",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 12),
-					position.New(0, 16),
-				),
+				position.NewRange(position.New(0, 12), position.New(0, 16)),
 			},
 		},
 		"utf8 - search for multibyte char": {
 			input:  "name: Thaïs",
 			search: "ï",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 9),
-					position.New(0, 10),
-				),
+				position.NewRange(position.New(0, 9), position.New(0, 10)),
 			},
 		},
 		"utf8 - search spanning multibyte char": {
 			input:  "name: Thaïs",
 			search: "ïs",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 9),
-					position.New(0, 11),
-				),
+				position.NewRange(position.New(0, 9), position.New(0, 11)),
 			},
 		},
 		"utf8 - multiple multibyte chars": {
 			input:  "key: über öffentlich",
 			search: "öffentlich",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 10),
-					position.New(0, 20),
-				),
+				position.NewRange(position.New(0, 10), position.New(0, 20)),
 			},
 		},
 		"utf8 - normalizer finds diacritic as ascii": {
@@ -371,10 +305,7 @@ func TestFinder_Find(t *testing.T) {
 			search:     "o",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 10),
-					position.New(0, 11),
-				),
+				position.NewRange(position.New(0, 10), position.New(0, 11)),
 			},
 		},
 		"utf8 - combined normalizer case and diacritics": {
@@ -382,40 +313,28 @@ func TestFinder_Find(t *testing.T) {
 			search:     "thais",
 			normalizer: normalizer.New(),
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 6),
-					position.New(0, 11),
-				),
+				position.NewRange(position.New(0, 6), position.New(0, 11)),
 			},
 		},
 		"utf8 - japanese characters partial match": {
 			input:  "key: 日本酒",
 			search: "日本",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 5),
-					position.New(0, 7),
-				),
+				position.NewRange(position.New(0, 5), position.New(0, 7)),
 			},
 		},
 		"utf8 - japanese after other japanese": {
 			input:  "- 寿司: 日本酒",
 			search: "日本",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 6),
-					position.New(0, 8),
-				),
+				position.NewRange(position.New(0, 6), position.New(0, 8)),
 			},
 		},
 		"utf8 - multiline with japanese": {
 			input:  "a: test\n- 寿司: 日本酒",
 			search: "日本",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(1, 6),
-					position.New(1, 8),
-				),
+				position.NewRange(position.New(1, 6), position.New(1, 8)),
 			},
 		},
 		"utf8 - box drawing chars not matched by japanese": {
@@ -427,10 +346,7 @@ func TestFinder_Find(t *testing.T) {
 			input:  "icon: 🎉",
 			search: "🎉",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 6),
-					position.New(0, 7),
-				),
+				position.NewRange(position.New(0, 6), position.New(0, 7)),
 			},
 		},
 		"search longer than input": {
@@ -442,48 +358,30 @@ func TestFinder_Find(t *testing.T) {
 			input:  "key: value",
 			search: "key: value",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 0),
-					position.New(0, 10),
-				),
+				position.NewRange(position.New(0, 0), position.New(0, 10)),
 			},
 		},
 		"whitespace only search": {
 			input:  "key: value",
 			search: " ",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 4),
-					position.New(0, 5),
-				),
+				position.NewRange(position.New(0, 4), position.New(0, 5)),
 			},
 		},
 		"consecutive matches": {
 			input:  "aaa: bbb",
 			search: "a",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 0),
-					position.New(0, 1),
-				),
-				position.NewRange(
-					position.New(0, 1),
-					position.New(0, 2),
-				),
-				position.NewRange(
-					position.New(0, 2),
-					position.New(0, 3),
-				),
+				position.NewRange(position.New(0, 0), position.New(0, 1)),
+				position.NewRange(position.New(0, 1), position.New(0, 2)),
+				position.NewRange(position.New(0, 2), position.New(0, 3)),
 			},
 		},
 		"special yaml chars in search": {
 			input:  "text: \"[not] {a} list\"",
 			search: "[not]",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 7),
-					position.New(0, 12),
-				),
+				position.NewRange(position.New(0, 7), position.New(0, 12)),
 			},
 		},
 		"empty input": {
@@ -495,14 +393,8 @@ func TestFinder_Find(t *testing.T) {
 			input:  "key: value",
 			search: "e",
 			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 1),
-					position.New(0, 2),
-				),
-				position.NewRange(
-					position.New(0, 9),
-					position.New(0, 10),
-				),
+				position.NewRange(position.New(0, 1), position.New(0, 2)),
+				position.NewRange(position.New(0, 9), position.New(0, 10)),
 			},
 		},
 		// The loaded text reads every line ending as "\n", so a search string
