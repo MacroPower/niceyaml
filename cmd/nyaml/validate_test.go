@@ -82,8 +82,7 @@ func linkedDir(t *testing.T, link string) string {
 	}
 
 	dir := t.TempDir()
-
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub", "deep"), 0o755))
+	makeDir(t, dir, "sub", "deep")
 
 	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, link))
 	if err != nil {
@@ -366,8 +365,8 @@ func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
 	// does not exist.
 	dir := linkedDir(t, "v1:ldir")
 
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "cfg:v2"), 0o755))
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "file:"), 0o755))
+	makeDir(t, dir, "cfg:v2")
+	makeDir(t, dir, "file:")
 	writeFile(t, filepath.Join(dir, "sub"), "schema.json", `{"type": "string"}`)
 	writeFile(t, dir, "schema.json", `{"type": "integer"}`)
 
