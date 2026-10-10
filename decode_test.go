@@ -1830,7 +1830,7 @@ func TestDocument_Span(t *testing.T) {
 func TestDocument_View(t *testing.T) {
 	t.Parallel()
 
-	input := stringtest.Input(`
+	source := niceyaml.NewSourceFromString(stringtest.Input(`
 		a: 1
 		---
 		spec:
@@ -1838,33 +1838,27 @@ func TestDocument_View(t *testing.T) {
 		    open: "09:00"
 		    close: "17:00"
 		b: 2
-	`)
+	`))
+
+	docs := source.Documents()
+	require.Len(t, docs, 2)
+
+	second := docs[1]
+	hours := yamltest.At(t, second, paths.Current().Child("spec", "hours"))
 
 	t.Run("covers the document with the file's line numbers", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(input)
+		view := second.View()
 
-		docs := source.Documents()
-		require.Len(t, docs, 2)
-
-		view := docs[1].View()
-
-		assert.Equal(t, source.View().Slice(docs[1].Span()).String(), view.String())
-		assert.Equal(t, docs[1].Span().Len(), view.Count())
-		assert.Equal(t, 2, view.Line(docs[1].Span().Start).Number())
+		assert.Equal(t, source.View().Slice(second.Span()).String(), view.String())
+		assert.Equal(t, second.Span().Len(), view.Count())
+		assert.Equal(t, 2, view.Line(second.Span().Start).Number())
 		assert.False(t, view.Contains(0), "the view keeps the indices of the source")
 	})
 
 	t.Run("covers only the lines of a scoped Node", func(t *testing.T) {
 		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(input)
-
-		docs := source.Documents()
-		require.Len(t, docs, 2)
-
-		hours := yamltest.At(t, docs[1], paths.Current().Child("spec", "hours"))
 
 		assert.Equal(t, stringtest.JoinLF(
 			`   5 |     open: "09:00"`,
@@ -1875,28 +1869,23 @@ func TestDocument_View(t *testing.T) {
 	t.Run("each call returns a view of its own", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, input)
+		doc := docs[0]
 
 		first := doc.View()
 		first.Annotate(0, line.Annotation{Content: "here", Placement: line.Below})
 
 		assert.NotEqual(t, first.String(), doc.View().String())
-		assert.Equal(t, doc.Source().View().Slice(doc.Span()).String(), doc.View().String())
+		assert.Equal(t, source.View().Slice(doc.Span()).String(), doc.View().String())
 	})
 
 	t.Run("a bound error marks the view", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(input)
-
-		docs := source.Documents()
-		require.Len(t, docs, 2)
-
 		bound := yamltest.RequireSourceError(
-			t, docs[1].Bind(niceyaml.NewError("closed", niceyaml.AtPath(paths.Current().Child("b")))),
+			t, second.Bind(niceyaml.NewError("closed", niceyaml.AtPath(paths.Current().Child("b")))),
 		)
 
-		view := docs[1].View()
+		view := second.View()
 		require.True(t, bound.Annotate(view))
 
 		assert.Contains(t, view.String(), "   7 | b: 2\n     |    ^")
@@ -1904,13 +1893,6 @@ func TestDocument_View(t *testing.T) {
 
 	t.Run("an error at the root of a scoped block mapping lies above its view", func(t *testing.T) {
 		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(input)
-
-		docs := source.Documents()
-		require.Len(t, docs, 2)
-
-		hours := yamltest.At(t, docs[1], paths.Current().Child("spec", "hours"))
 
 		bound := yamltest.RequireSourceError(t, hours.Bind(errors.New("closed")))
 		require.EqualError(t, bound, "4:3: $.spec.hours: closed")
@@ -1954,31 +1936,12 @@ func TestDocument_View(t *testing.T) {
 			"   3 |     port: 1",
 		), view.String())
 	})
-}
-
-func TestDocument_View_Lines(t *testing.T) {
-	t.Parallel()
-
-	input := stringtest.Input(`
-		a: 1
-		---
-		spec:
-		  hours:
-		    open: "09:00"
-		    close: "17:00"
-		b: 2
-	`)
 
 	t.Run("holds the lines of the document at their indices in the file", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(input)
-
-		docs := source.Documents()
-		require.Len(t, docs, 2)
-
-		view := docs[1].View()
-		span := docs[1].Span()
+		view := second.View()
+		span := second.Span()
 
 		require.Equal(t, span.Len(), view.Count())
 
@@ -2002,11 +1965,6 @@ func TestDocument_View_Lines(t *testing.T) {
 	t.Run("holds only the lines of a scoped Node", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(input)
-
-		docs := source.Documents()
-
-		hours := yamltest.At(t, docs[1], paths.Current().Child("spec", "hours"))
 		lines := hours.View().Held()
 
 		require.Equal(t, 2, lines.Len())
