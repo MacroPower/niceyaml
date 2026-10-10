@@ -3637,6 +3637,12 @@ func TestPrinter_With(t *testing.T) {
 	// A negative width disables wrapping, and WrapWidth reports that as 0.
 	assert.Equal(t, 0, base.With(printer.WithWrapWidth(-5)).WrapWidth())
 
+	// A negative container width is no width at all, so the box keeps
+	// shrinking to the widest row.
+	assert.Equal(t, 0, base.ContainerWidth())
+	assert.Equal(t, 40, base.With(printer.WithContainerWidth(40)).ContainerWidth())
+	assert.Equal(t, 0, base.With(printer.WithContainerWidth(-1)).ContainerWidth())
+
 	// The receiver still renders on one line; the copy wraps.
 	assert.Equal(t, "key: this is a very long value that should wrap", base.Print(source.View()))
 	assert.Equal(t, stringtest.JoinLF(
@@ -6395,16 +6401,6 @@ func TestPrinter_WrapWidth_FitsFrame(t *testing.T) {
 			assertRowsFit(t, got, tc.width)
 		})
 	}
-}
-
-func TestPrinter_ContainerWidth_Accessor(t *testing.T) {
-	t.Parallel()
-
-	// A negative width is no width at all, so the box keeps shrinking to the
-	// widest row.
-	assert.Equal(t, 0, testPrinter().ContainerWidth())
-	assert.Equal(t, 40, testPrinter().With(printer.WithContainerWidth(40)).ContainerWidth())
-	assert.Equal(t, 0, testPrinter().With(printer.WithContainerWidth(-1)).ContainerWidth())
 }
 
 func TestPrinter_PrintError_JoinOfNothing(t *testing.T) {
