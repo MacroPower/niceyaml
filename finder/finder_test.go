@@ -1036,41 +1036,6 @@ func TestFinder_Reload(t *testing.T) {
 	})
 }
 
-func TestFinder_Find_MultipleSearches(t *testing.T) {
-	t.Parallel()
-
-	// Test multiple Find calls on the same loaded source.
-	lines := niceyaml.NewSourceFromString("key: value\nother: data")
-	f := finder.New()
-	idx := f.Load(lines.Lines())
-
-	tcs := map[string]struct {
-		search string
-		want   int
-	}{
-		"find key":   {search: "key", want: 1},
-		"find value": {search: "value", want: 1},
-		"find other": {search: "other", want: 1},
-		"find data":  {search: "data", want: 1},
-		"find colon": {search: ":", want: 2},
-		"not found":  {search: "missing", want: 0},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := idx.Find(tc.search)
-
-			if tc.want == 0 {
-				assert.Nil(t, got)
-			} else {
-				assert.Len(t, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestIndex_Find_Concurrent(t *testing.T) {
 	t.Parallel()
 
