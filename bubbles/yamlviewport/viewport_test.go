@@ -2043,16 +2043,41 @@ func TestViewport_HorizontalScrollKeepsFrameOfNarrowerPane(t *testing.T) {
 	}
 }
 
-func TestViewport_HorizontalScrollKeepsFrameAtWideRune(t *testing.T) {
+func TestViewport_HorizontalScrollKeepsFrameAtWideCluster(t *testing.T) {
 	t.Parallel()
 
-	// A wide character that begins before the horizontal offset has only its
-	// right cell inside the window. The cut once kept the whole character,
-	// which pushed the rest of the row one column right and the right border
-	// out of the view. The window shows that cell as a blank, so the border
-	// keeps its column. The gutter and "k: " take four columns, so an offset
-	// of 5 falls inside the character.
 	tcs := map[string]struct {
+		// The line that holds the cluster, below a line of plain text.
+		line string
+		// The start of the row of that line at each horizontal offset.
+		wants map[int]string
+	}{
+		// A wide character that begins before the horizontal offset has only
+		// its right cell inside the window. The cut once kept the whole
+		// character, which pushed the rest of the row one column right and
+		// the right border out of the view. The window shows that cell as a
+		// blank, so the border keeps its column. The gutter and "k: " take
+		// four columns, so an offset of 5 falls inside the character.
+		"wide rune": {
+			line:  "k: 日" + strings.Repeat("b", 36),
+			wants: map[int]string{5: "│ b"},
+		},
+		// A keycap takes two cells, where ansi.Cut counts one for its ASCII
+		// base. The cut once took an extra cell at an offset before the
+		// keycap, which pushed the right border out of the view, and showed
+		// a blank row at an offset past it. The gutter and "k: ab" take six
+		// columns, so the keycap takes columns 6 and 7.
+		"keycap": {
+			line: "k: ab1\ufe0f\u20e3" + strings.Repeat("b", 36),
+			wants: map[int]string{
+				0: "│ k: ab1\ufe0f\u20e3bbb",
+				7: "│ bbb",
+				8: "│bbb",
+			},
+		},
+	}
+
+	modes := map[string]struct {
 		mode  yamlviewport.ViewMode
 		width int
 	}{
@@ -2067,72 +2092,26 @@ func TestViewport_HorizontalScrollKeepsFrameAtWideRune(t *testing.T) {
 	}
 
 	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+		for modeName, mode := range modes {
+			t.Run(name+"/"+modeName, func(t *testing.T) {
+				t.Parallel()
 
-			m := testModel(framedPrinter(normalBorder()), tc.width, 4)
-			m.SetViewMode(tc.mode)
-			m.SetWordWrap(false)
-			m.SetRevision(niceyaml.NewSourceFromString(
-				"a: " + strings.Repeat("a", 34) + "\nk: 日" + strings.Repeat("b", 36) + "\n",
-			))
+				m := testModel(framedPrinter(normalBorder()), mode.width, 4)
+				m.SetViewMode(mode.mode)
+				m.SetWordWrap(false)
+				m.SetRevision(niceyaml.NewSourceFromString(
+					"a: " + strings.Repeat("a", 34) + "\n" + tc.line + "\n",
+				))
 
-			m.SetXOffset(5)
-			require.Equal(t, 5, m.XOffset())
+				for offset, want := range tc.wants {
+					m.SetXOffset(offset)
+					require.Equal(t, offset, m.XOffset())
 
-			rows := framedRows(t, &m, 4)
-			assert.True(t, strings.HasPrefix(rows[2], "│ b"), "%q", rows[2])
-		})
-	}
-}
-
-func TestViewport_HorizontalScrollKeepsFrameAtKeycap(t *testing.T) {
-	t.Parallel()
-
-	// A keycap takes two cells, where ansi.Cut counts one for its ASCII
-	// base. The cut once took an extra cell at an offset before the
-	// keycap, which pushed the right border out of the view, and showed a
-	// blank row at an offset past it. The gutter and "k: ab" take six
-	// columns, so the keycap takes columns 6 and 7.
-	tcs := map[string]struct {
-		mode  yamlviewport.ViewMode
-		width int
-	}{
-		"full": {
-			mode:  yamlviewport.ViewModeFull,
-			width: 20,
-		},
-		"side by side": {
-			mode:  yamlviewport.ViewModeSideBySide,
-			width: 41,
-		},
-	}
-
-	wants := map[int]string{
-		0: "│ k: ab1\ufe0f\u20e3bbb",
-		7: "│ bbb",
-		8: "│bbb",
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			m := testModel(framedPrinter(normalBorder()), tc.width, 4)
-			m.SetViewMode(tc.mode)
-			m.SetWordWrap(false)
-			m.SetRevision(niceyaml.NewSourceFromString(
-				"a: " + strings.Repeat("a", 34) + "\nk: ab1\ufe0f\u20e3" + strings.Repeat("b", 36) + "\n",
-			))
-
-			for offset, want := range wants {
-				m.SetXOffset(offset)
-				require.Equal(t, offset, m.XOffset())
-
-				rows := framedRows(t, &m, 4)
-				assert.True(t, strings.HasPrefix(rows[2], want), "offset %d: %q", offset, rows[2])
-			}
-		})
+					rows := framedRows(t, &m, 4)
+					assert.True(t, strings.HasPrefix(rows[2], want), "offset %d: %q", offset, rows[2])
+				}
+			})
+		}
 	}
 }
 
