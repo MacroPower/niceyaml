@@ -1,7 +1,6 @@
 package style_test
 
 import (
-	"image/color"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -29,144 +28,72 @@ func TestNew(t *testing.T) {
 	base := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
 	red := base.Foreground(lipgloss.Color("#ff0000"))
 	green := base.Foreground(lipgloss.Color("#00ff00"))
-
-	styles := style.New(
-		base,
-		style.Set(kind.LiteralNumber, red),
-		style.Set(kind.Comment, green),
-	)
-
-	t.Run("base style used for Text", func(t *testing.T) {
-		t.Parallel()
-
-		got := styles.Style(kind.Text)
-		assert.Equal(t, lipgloss.Color("#ffffff"), got.GetForeground())
-	})
-
-	t.Run("direct override is used", func(t *testing.T) {
-		t.Parallel()
-
-		got := styles.Style(kind.LiteralNumber)
-		assert.Equal(t, lipgloss.Color("#ff0000"), got.GetForeground())
-	})
-
-	t.Run("child inherits from parent override", func(t *testing.T) {
-		t.Parallel()
-
-		got := styles.Style(kind.LiteralNumberFloat)
-		assert.Equal(t, lipgloss.Color("#ff0000"), got.GetForeground())
-	})
-
-	t.Run("chrome inherits from Comment", func(t *testing.T) {
-		t.Parallel()
-
-		got := styles.Style(kind.UILineNumber)
-		assert.Equal(t, lipgloss.Color("#00ff00"), got.GetForeground())
-	})
-
-	t.Run("unrelated style inherits from base", func(t *testing.T) {
-		t.Parallel()
-
-		got := styles.Style(kind.NameTag)
-		assert.Equal(t, lipgloss.Color("#ffffff"), got.GetForeground())
-	})
-
-	t.Run("each kind resolves to its closest set ancestor", func(t *testing.T) {
-		t.Parallel()
-
-		tests := map[string]struct {
-			want color.Color
-			kind kind.Kind
-		}{
-			"Text":                    {kind: kind.Text, want: lipgloss.Color("#ffffff")},
-			"Comment":                 {kind: kind.Comment, want: lipgloss.Color("#00ff00")},
-			"LiteralNumber":           {kind: kind.LiteralNumber, want: lipgloss.Color("#ff0000")},
-			"LiteralNumberFloat":      {kind: kind.LiteralNumberFloat, want: lipgloss.Color("#ff0000")},
-			"LiteralString":           {kind: kind.LiteralString, want: lipgloss.Color("#ffffff")},
-			"NameTag":                 {kind: kind.NameTag, want: lipgloss.Color("#ffffff")},
-			"Punctuation":             {kind: kind.Punctuation, want: lipgloss.Color("#ffffff")},
-			"PunctuationMappingValue": {kind: kind.PunctuationMappingValue, want: lipgloss.Color("#ffffff")},
-			"TextAccentDim":           {kind: kind.TextAccentDim, want: lipgloss.Color("#ffffff")},
-			"TextSubtleDim":           {kind: kind.TextSubtleDim, want: lipgloss.Color("#ffffff")},
-			"GenericHeading":          {kind: kind.GenericHeading, want: lipgloss.Color("#ffffff")},
-			"UILineNumber":            {kind: kind.UILineNumber, want: lipgloss.Color("#00ff00")},
-		}
-
-		for name, tt := range tests {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				assert.Equal(t, tt.want, styles.Style(tt.kind).GetForeground())
-			})
-		}
-	})
-}
-
-func TestNew_TextStyles(t *testing.T) {
-	t.Parallel()
-
-	base := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
-
-	t.Run("inherit from Text when not explicitly set", func(t *testing.T) {
-		t.Parallel()
-
-		styles := style.New(base)
-
-		for _, s := range []kind.Kind{kind.TextAccentDim, kind.TextSubtleDim, kind.GenericHeading} {
-			got := styles.Style(s)
-			assert.Equal(t, lipgloss.Color("#ffffff"), got.GetForeground(),
-				"style %q should inherit foreground from Text", s)
-		}
-	})
-
-	t.Run("explicit Set overrides inherited default", func(t *testing.T) {
-		t.Parallel()
-
-		accent := base.Foreground(lipgloss.Color("#ff0000"))
-		subtle := base.Foreground(lipgloss.Color("#808080"))
-		title := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
-			Background(lipgloss.Color("#ff0000"))
-
-		styles := style.New(base,
-			style.Set(kind.TextAccentDim, accent),
-			style.Set(kind.TextSubtleDim, subtle),
-			style.Set(kind.GenericHeading, title),
-		)
-
-		assert.Equal(t, lipgloss.Color("#ff0000"), styles.Style(kind.TextAccentDim).GetForeground())
-		assert.Equal(t, lipgloss.Color("#808080"), styles.Style(kind.TextSubtleDim).GetForeground())
-		assert.Equal(t, lipgloss.Color("#000000"), styles.Style(kind.GenericHeading).GetForeground())
-		assert.Equal(t, lipgloss.Color("#ff0000"), styles.Style(kind.GenericHeading).GetBackground())
-	})
-}
-
-func TestNew_Override(t *testing.T) {
-	t.Parallel()
-
-	base := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
-	red := base.Foreground(lipgloss.Color("#ff0000"))
 	blue := base.Foreground(lipgloss.Color("#0000ff"))
+	gray := base.Foreground(lipgloss.Color("#808080"))
+	title := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#000000")).
+		Background(lipgloss.Color("#ff0000"))
 
-	styles := style.New(
-		base,
-		style.Set(kind.Text, red),
-		style.Set(kind.LiteralNumber, blue),
-	)
+	// Each case builds its styles over base.
+	tcs := map[string]struct {
+		want map[kind.Kind]lipgloss.Style
+		opts []style.Option
+	}{
+		"each kind resolves to its closest set ancestor": {
+			opts: []style.Option{
+				style.Set(kind.LiteralNumber, red),
+				style.Set(kind.Comment, green),
+			},
+			want: map[kind.Kind]lipgloss.Style{
+				kind.Text:                    base,
+				kind.Comment:                 green,
+				kind.LiteralNumber:           red,
+				kind.LiteralNumberFloat:      red,
+				kind.LiteralString:           base,
+				kind.NameTag:                 base,
+				kind.Punctuation:             base,
+				kind.PunctuationMappingValue: base,
+				kind.TextAccentDim:           base,
+				kind.TextSubtleDim:           base,
+				kind.GenericHeading:          base,
+				kind.UILineNumber:            green,
+			},
+		},
+		"explicit Set overrides inherited default": {
+			opts: []style.Option{
+				style.Set(kind.TextAccentDim, red),
+				style.Set(kind.TextSubtleDim, gray),
+				style.Set(kind.GenericHeading, title),
+			},
+			want: map[kind.Kind]lipgloss.Style{
+				kind.TextAccentDim:  red,
+				kind.TextSubtleDim:  gray,
+				kind.GenericHeading: title,
+			},
+		},
+		"Text override takes precedence over base": {
+			opts: []style.Option{
+				style.Set(kind.Text, red),
+				style.Set(kind.LiteralNumber, blue),
+			},
+			want: map[kind.Kind]lipgloss.Style{
+				kind.Text:          red,
+				kind.LiteralNumber: blue,
+			},
+		},
+	}
 
-	t.Run("Text override takes precedence over base", func(t *testing.T) {
-		t.Parallel()
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		got := styles.Style(kind.Text)
-		assert.Equal(t, lipgloss.Color("#ff0000"), got.GetForeground())
-	})
+			styles := style.New(base, tc.opts...)
 
-	t.Run("other overrides still work", func(t *testing.T) {
-		t.Parallel()
-
-		got := styles.Style(kind.LiteralNumber)
-		assert.Equal(t, lipgloss.Color("#0000ff"), got.GetForeground())
-	})
+			for k := range tc.want {
+				assert.Equal(t, tc.want[k], styles.Style(k), "kind %q", k)
+			}
+		})
+	}
 }
 
 func TestStyles_With(t *testing.T) {
@@ -273,11 +200,98 @@ func TestInherit(t *testing.T) {
 	const (
 		match kind.Kind = "customMatch"
 		focus kind.Kind = "customFocus"
+		other kind.Kind = "customOther"
 	)
 
 	base := lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff"))
 	red := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000"))
 	green := lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00"))
+
+	// Each case builds its styles over base.
+	tcs := map[string]struct {
+		want map[kind.Kind]lipgloss.Style
+		opts []style.Option
+	}{
+		"explicit Set before Inherit wins": {
+			opts: []style.Option{
+				style.Set(match, red),
+				style.Inherit(match, kind.GenericHighlight),
+				style.Set(kind.GenericHighlight, green),
+			},
+			want: map[kind.Kind]lipgloss.Style{match: red},
+		},
+		"explicit Set after Inherit wins": {
+			opts: []style.Option{
+				style.Inherit(match, kind.GenericHighlight),
+				style.Set(kind.GenericHighlight, green),
+				style.Set(match, red),
+			},
+			want: map[kind.Kind]lipgloss.Style{match: red},
+		},
+		"later Inherit replaces the parent": {
+			opts: []style.Option{
+				style.Set(kind.GenericHighlight, green),
+				style.Set(kind.TextAccent, red),
+				style.Inherit(match, kind.GenericHighlight),
+				style.Inherit(match, kind.TextAccent),
+			},
+			want: map[kind.Kind]lipgloss.Style{match: red},
+		},
+		"custom kinds chain to a predefined ancestor": {
+			opts: []style.Option{
+				style.Set(kind.GenericHighlight, green),
+				style.Inherit(focus, match),
+				style.Inherit(match, kind.GenericHighlight),
+			},
+			want: map[kind.Kind]lipgloss.Style{focus: green, match: green},
+		},
+		"predefined kind moves under a new parent": {
+			opts: []style.Option{
+				style.Set(kind.Comment, green),
+				style.Inherit(kind.UI, kind.Text),
+			},
+			want: map[kind.Kind]lipgloss.Style{
+				kind.UI:           base,
+				kind.UILineNumber: base,
+				kind.Comment:      green,
+			},
+		},
+		"cycle resolves to the base style": {
+			opts: []style.Option{
+				style.Inherit(match, focus),
+				style.Inherit(focus, match),
+			},
+			want: map[kind.Kind]lipgloss.Style{match: base, focus: base},
+		},
+		"cycle through a set kind resolves to that kind": {
+			opts: []style.Option{
+				style.Inherit(match, focus),
+				style.Inherit(focus, match),
+				style.Set(focus, red),
+			},
+			want: map[kind.Kind]lipgloss.Style{match: red, focus: red},
+		},
+		"cycle above the child resolves to the base style": {
+			opts: []style.Option{
+				style.Inherit(match, focus),
+				style.Inherit(focus, other),
+				style.Inherit(other, focus),
+			},
+			want: map[kind.Kind]lipgloss.Style{match: base},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := style.New(base, tc.opts...)
+
+			for k := range tc.want {
+				assert.Equal(t, tc.want[k], styles.Style(k), "kind %q", k)
+			}
+		})
+	}
 
 	t.Run("custom kind takes the style of its parent under built-in themes", func(t *testing.T) {
 		t.Parallel()
@@ -293,109 +307,13 @@ func TestInherit(t *testing.T) {
 		}
 	})
 
-	t.Run("explicit Set wins in either order", func(t *testing.T) {
-		t.Parallel()
-
-		first := style.New(base,
-			style.Set(match, red),
-			style.Inherit(match, kind.GenericHighlight),
-			style.Set(kind.GenericHighlight, green),
-		)
-		second := style.New(base,
-			style.Inherit(match, kind.GenericHighlight),
-			style.Set(kind.GenericHighlight, green),
-			style.Set(match, red),
-		)
-
-		assert.Equal(t, lipgloss.Color("#ff0000"), first.Style(match).GetForeground())
-		assert.Equal(t, lipgloss.Color("#ff0000"), second.Style(match).GetForeground())
-	})
-
-	t.Run("later Inherit replaces the parent", func(t *testing.T) {
-		t.Parallel()
-
-		styles := style.New(base,
-			style.Set(kind.GenericHighlight, green),
-			style.Set(kind.TextAccent, red),
-			style.Inherit(match, kind.GenericHighlight),
-			style.Inherit(match, kind.TextAccent),
-		)
-
-		assert.Equal(t, lipgloss.Color("#ff0000"), styles.Style(match).GetForeground())
-	})
-
-	t.Run("custom kinds chain to a predefined ancestor", func(t *testing.T) {
-		t.Parallel()
-
-		styles := style.New(base,
-			style.Set(kind.GenericHighlight, green),
-			style.Inherit(focus, match),
-			style.Inherit(match, kind.GenericHighlight),
-		)
-
-		assert.Equal(t, lipgloss.Color("#00ff00"), styles.Style(focus).GetForeground())
-		assert.Equal(t, lipgloss.Color("#00ff00"), styles.Style(match).GetForeground())
-	})
-
-	t.Run("predefined kind moves under a new parent", func(t *testing.T) {
-		t.Parallel()
-
-		styles := style.New(base,
-			style.Set(kind.Comment, green),
-			style.Inherit(kind.UI, kind.Text),
-		)
-
-		assert.Equal(t, lipgloss.Color("#ffffff"), styles.Style(kind.UI).GetForeground())
-		assert.Equal(t, lipgloss.Color("#ffffff"), styles.Style(kind.UILineNumber).GetForeground())
-		assert.Equal(t, lipgloss.Color("#00ff00"), styles.Style(kind.Comment).GetForeground())
-	})
-
-	t.Run("cycle resolves to the base style", func(t *testing.T) {
-		t.Parallel()
-
-		styles := style.New(base,
-			style.Inherit(match, focus),
-			style.Inherit(focus, match),
-		)
-
-		assert.Equal(t, styles.Style(kind.Text), styles.Style(match))
-		assert.Equal(t, styles.Style(kind.Text), styles.Style(focus))
-	})
-
-	t.Run("cycle through a set kind resolves to that kind", func(t *testing.T) {
-		t.Parallel()
-
-		styles := style.New(base,
-			style.Inherit(match, focus),
-			style.Inherit(focus, match),
-			style.Set(focus, red),
-		)
-
-		assert.Equal(t, lipgloss.Color("#ff0000"), styles.Style(match).GetForeground())
-		assert.Equal(t, lipgloss.Color("#ff0000"), styles.Style(focus).GetForeground())
-	})
-
-	t.Run("cycle above the child resolves to the base style", func(t *testing.T) {
-		t.Parallel()
-
-		const other kind.Kind = "customOther"
-
-		styles := style.New(base,
-			style.Inherit(match, focus),
-			style.Inherit(focus, other),
-			style.Inherit(other, focus),
-		)
-
-		assert.Equal(t, styles.Style(kind.Text), styles.Style(match))
-	})
-
 	t.Run("With re-resolves through the inherited parent", func(t *testing.T) {
 		t.Parallel()
 
 		original := style.New(base, style.Inherit(match, kind.GenericHighlight))
 		result := original.With(style.Set(kind.GenericHighlight, red))
 
-		assert.Equal(t, lipgloss.Color("#ff0000"), result.Style(match).GetForeground())
-		assert.Equal(t, lipgloss.Color("#ffffff"), original.Style(match).GetForeground())
+		assert.Equal(t, red, result.Style(match))
+		assert.Equal(t, base, original.Style(match))
 	})
 }
