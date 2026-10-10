@@ -4618,27 +4618,6 @@ func (e *SourceError) Excerpt(opts ...ExcerptOption) (*line.View, bool) {
 	return e.source.excerpt(positions[e.source], newExcerptConfig(opts))
 }
 
-// yieldExcerpts yields the excerpt of each of sources that has one, in
-// order, as [Source.excerpt] builds it from the positions of that source
-// with the settings of cfg.
-func yieldExcerpts(
-	sources []*Source,
-	positions map[*Source][]errorPosition,
-	cfg excerptConfig,
-	yield func(*Source, *line.View) bool,
-) {
-	for _, src := range sources {
-		excerpt, ok := src.excerpt(positions[src], cfg)
-		if !ok {
-			continue
-		}
-
-		if !yield(src, excerpt) {
-			return
-		}
-	}
-}
-
 // excerpt returns the excerpt of s for positions, the resolved locations
 // of the nodes bound to s: a fresh view of the source with the positions
 // marked, cut to the hunks around them with the context lines of cfg and

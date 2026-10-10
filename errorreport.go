@@ -120,15 +120,18 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 
 	var rep ErrorReport
 
-	yieldExcerpts(sources, positions, cfg, func(src *Source, view *line.View) bool {
+	for _, src := range sources {
+		view, ok := src.excerpt(positions[src], cfg)
+		if !ok {
+			continue
+		}
+
 		rep.Excerpts = append(rep.Excerpts, ErrorExcerpt{
 			Source: src,
 			View:   view,
 			Named:  len(sources) > 1 && src.Name() != "",
 		})
-
-		return true
-	})
+	}
 
 	for _, bound := range bindings {
 		if skipped[bound] || bound.marks() {
