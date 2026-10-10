@@ -564,7 +564,7 @@ func TestDirective_Resolve_Match(t *testing.T) {
 
 	// A resolver "matches" when it reports anything other than ErrNoMatch.
 	// Loading the named schema may still fail, which is a match.
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		input string
 		want  bool
 	}{
@@ -590,18 +590,18 @@ func TestDirective_Resolve_Match(t *testing.T) {
 		},
 	}
 
-	for name, tt := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocumentWithPath(t, tt.input, filepath.Join(t.TempDir(), "config.yaml"))
+			doc := yamltest.FirstDocumentWithPath(t, tc.input, filepath.Join(t.TempDir(), "config.yaml"))
 			res := schema.Directive()
 			_, err := res.Resolve(t.Context(), doc)
 
 			got := !errors.Is(err, schema.ErrNoMatch)
-			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tc.want, got)
 
-			if !tt.want {
+			if !tc.want {
 				require.ErrorIs(t, err, schema.ErrNoDirective)
 			}
 		})
@@ -731,18 +731,18 @@ func TestDirective_Resolve(t *testing.T) {
 		schemaPath := writeSchema(t, "schema.json", schemaData)
 		yamlPath := filepath.Join(filepath.Dir(schemaPath), "config.yaml")
 
-		tests := map[string]struct {
+		tcs := map[string]struct {
 			ref string
 		}{
 			"relative path": {ref: "./schema.json#/definitions/Foo"},
 			"absolute path": {ref: schemaPath + "#/definitions/Foo"},
 		}
 
-		for name, tt := range tests {
+		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				directive := "# yaml-language-server: $schema=" + tt.ref + "\n"
+				directive := "# yaml-language-server: $schema=" + tc.ref + "\n"
 
 				// The key keeps the fragment, and the load reads the whole
 				// file.
@@ -795,7 +795,7 @@ func TestDirective_Resolve(t *testing.T) {
 	t.Run("none turns validation off", func(t *testing.T) {
 		t.Parallel()
 
-		tests := map[string]struct {
+		tcs := map[string]struct {
 			ref  string
 			body string
 		}{
@@ -810,11 +810,11 @@ func TestDirective_Resolve(t *testing.T) {
 			"excessive aliasing": {ref: "none", body: yamltest.AliasLevels(7)},
 		}
 
-		for name, tt := range tests {
+		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, "# yaml-language-server: $schema="+tt.ref+"\n"+tt.body)
+				doc := yamltest.FirstDocument(t, "# yaml-language-server: $schema="+tc.ref+"\n"+tc.body)
 
 				ref, err := schema.Directive().Resolve(t.Context(), doc)
 				require.NoError(t, err)
@@ -864,7 +864,7 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 	// against its own schema.
 	embedded := []byte(`{"type": "object", "properties": {"name": {"type": "integer"}}}`)
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		order []string
 	}{
 		"embedded document first": {
@@ -875,7 +875,7 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 		},
 	}
 
-	for name, tt := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -895,7 +895,7 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 				),
 			}
 
-			for _, key := range tt.order {
+			for _, key := range tc.order {
 				err := reg.Check(t.Context(), docs[key])
 				require.NoError(t, err, "%s document", key)
 			}

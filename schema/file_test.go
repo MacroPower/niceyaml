@@ -149,7 +149,7 @@ func TestFile_DirectoryNamedLikeADrive(t *testing.T) {
 func TestFile_URL(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		path string
 		want string
 	}{
@@ -183,11 +183,11 @@ func TestFile_URL(t *testing.T) {
 		},
 	}
 
-	for name, tt := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tt.want, fileURL(t, tt.path))
+			assert.Equal(t, tc.want, fileURL(t, tc.path))
 		})
 	}
 }
