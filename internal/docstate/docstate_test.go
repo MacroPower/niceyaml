@@ -63,14 +63,19 @@ func TestState_AliasLimit(t *testing.T) {
 	}
 }
 
-func TestState_ExcessiveAliasing(t *testing.T) {
+func TestState_KeepsFirstResult(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
+		keep func(s *docstate.State, check func() bool) bool
 		want bool
 	}{
-		"excessive":     {want: true},
-		"not excessive": {want: false},
+		"excessive aliasing":         {keep: (*docstate.State).ExcessiveAliasing, want: true},
+		"no excessive aliasing":      {keep: (*docstate.State).ExcessiveAliasing, want: false},
+		"reference alias":            {keep: (*docstate.State).ReferenceAlias, want: true},
+		"no reference alias":         {keep: (*docstate.State).ReferenceAlias, want: false},
+		"excessive text aliasing":    {keep: (*docstate.State).ExcessiveTextAliasing, want: true},
+		"no excessive text aliasing": {keep: (*docstate.State).ExcessiveTextAliasing, want: false},
 	}
 
 	for name, tc := range tcs {
@@ -80,44 +85,14 @@ func TestState_ExcessiveAliasing(t *testing.T) {
 			s := docstate.New()
 
 			calls := 0
-			count := func() bool {
+			check := func() bool {
 				calls++
 
 				return tc.want
 			}
 
-			assert.Equal(t, tc.want, s.ExcessiveAliasing(count))
-			assert.Equal(t, tc.want, s.ExcessiveAliasing(count))
-			assert.Equal(t, 1, calls)
-		})
-	}
-}
-
-func TestState_ReferenceAlias(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		want bool
-	}{
-		"reference alias":    {want: true},
-		"no reference alias": {want: false},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			s := docstate.New()
-
-			calls := 0
-			find := func() bool {
-				calls++
-
-				return tc.want
-			}
-
-			assert.Equal(t, tc.want, s.ReferenceAlias(find))
-			assert.Equal(t, tc.want, s.ReferenceAlias(find))
+			assert.Equal(t, tc.want, tc.keep(s, check))
+			assert.Equal(t, tc.want, tc.keep(s, check))
 			assert.Equal(t, 1, calls)
 		})
 	}
