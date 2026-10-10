@@ -24,16 +24,12 @@ import (
 func TestNewLines_Roundtrip(t *testing.T) {
 	t.Parallel()
 
-	t.Run("testdata/full.yaml", func(t *testing.T) {
-		t.Parallel()
-
-		input, err := os.ReadFile(filepath.Join("..", "testdata", "full.yaml"))
-		require.NoError(t, err)
-
-		requireRoundtrip(t, string(input))
-	})
+	full, err := os.ReadFile(filepath.Join("..", "testdata", "full.yaml"))
+	require.NoError(t, err)
 
 	tcs := map[string]string{
+		"testdata/full.yaml": string(full),
+
 		// Simple cases.
 		"simple key-value": "key: value\n",
 		"multiple keys":    "first: 1\nsecond: 2\nthird: 3\n",
