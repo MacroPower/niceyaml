@@ -595,13 +595,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				t.Parallel()
 
 				err := yamltest.FirstDocument(t, tc.input).DecodeInto(t.Context(), tc.target)
-				if tc.err != "" {
-					require.EqualError(t, err, tc.err)
-
-					return
-				}
-
-				require.NoError(t, err)
+				requireValidation(t, err, tc.err)
 			})
 		}
 	})
@@ -803,13 +797,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				t.Parallel()
 
 				_, err := yamltest.FirstDocument(t, tc.input).Decode[parent](t.Context())
-				if tc.err == "" {
-					require.NoError(t, err)
-
-					return
-				}
-
-				require.EqualError(t, err, tc.err)
+				requireValidation(t, err, tc.err)
 			})
 		}
 	})
@@ -894,13 +882,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				got := tc.start
 
 				err := yamltest.FirstDocument(t, tc.input).DecodeInto(t.Context(), &got)
-				if tc.err == "" {
-					require.NoError(t, err)
-
-					return
-				}
-
-				require.EqualError(t, err, tc.err)
+				requireValidation(t, err, tc.err)
 			})
 		}
 	})
@@ -1156,13 +1138,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				dd := yamltest.FirstDocument(t, "name: x\n")
 
 				err := dd.DecodeInto(t.Context(), &withMesh{Mesh: nodes[0]})
-				if tc.err == "" {
-					require.NoError(t, err)
-
-					return
-				}
-
-				require.EqualError(t, err, tc.err)
+				requireValidation(t, err, tc.err)
 			})
 		}
 	})
@@ -2963,13 +2939,7 @@ func TestNode_SelfValidate(t *testing.T) {
 			}
 
 			err = doc.SelfValidate(ctx, target)
-			if tc.err == "" {
-				require.NoError(t, err)
-
-				return
-			}
-
-			require.EqualError(t, err, tc.err)
+			requireValidation(t, err, tc.err)
 		})
 	}
 }
@@ -4187,6 +4157,20 @@ func (r *ring) Validate() error {
 type mesh struct {
 	Next []*mesh `yaml:"next"`
 	Port *port   `yaml:"port"`
+}
+
+// requireValidation requires err to have the message want, and to be nil
+// when want is empty.
+func requireValidation(t *testing.T, err error, want string) {
+	t.Helper()
+
+	if want == "" {
+		require.NoError(t, err)
+
+		return
+	}
+
+	require.EqualError(t, err, want)
 }
 
 // validationTexts returns the message of each problem that err heads, or
