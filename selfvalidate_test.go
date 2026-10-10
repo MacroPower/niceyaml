@@ -394,12 +394,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
-		require.Len(t, bound.Members(), 2)
+		require.Len(t, problemsOf(bound), 2)
 
-		assert.Equal(t, "cafe.yaml:2:9: $.schedule.open: open is empty", bound.Members()[0].Error())
-		assert.Equal(t, "cafe.yaml:3:10: $.schedule.close: close is empty", bound.Members()[1].Error())
+		assert.Equal(t, "cafe.yaml:2:9: $.schedule.open: open is empty", problemsOf(bound)[0].Bound.Error())
+		assert.Equal(t, "cafe.yaml:3:10: $.schedule.close: close is empty", problemsOf(bound)[1].Bound.Error())
 
-		p, ok := bound.Members()[1].Path()
+		p, ok := problemsOf(bound)[1].Path()
 		require.True(t, ok)
 		assert.Equal(t, "$.schedule.close", p.String())
 
@@ -487,8 +487,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		var got []string
 
-		for _, child := range bound.Members() {
-			got = append(got, child.Error())
+		for _, child := range problemsOf(bound) {
+			got = append(got, child.Bound.Error())
 		}
 
 		// The deep any holds maps and slices of any, which hold no item.
@@ -1303,18 +1303,19 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
-	t.Run("map entries report in key order", func(t *testing.T) {
+	t.Run("map entries report by position", func(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, "d: {price: -1}\nb: {price: -1}\nc: {price: -1}\na: {price: -1}\n")
 
-		// The message lists the errors by position, so the children show
-		// the order the walk reports them in.
+		// The message and the tree both list the errors by position,
+		// whatever order the walk reports them in, so every decode reads
+		// the same.
 		want := []string{
-			"4:12: $.a.price: negative price",
+			"1:12: $.d.price: negative price",
 			"2:12: $.b.price: negative price",
 			"3:12: $.c.price: negative price",
-			"1:12: $.d.price: negative price",
+			"4:12: $.a.price: negative price",
 		}
 
 		for range 20 {
@@ -1331,8 +1332,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			require.ErrorAs(t, err, &bound)
 
 			got := make([]string, 0, len(want))
-			for _, child := range bound.Members() {
-				got = append(got, child.Error())
+			for _, child := range problemsOf(bound) {
+				got = append(got, child.Bound.Error())
 			}
 
 			assert.Equal(t, want, got)
@@ -1409,7 +1410,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				var got []string
 
-				for bound := range niceyaml.AllBindings(err) {
+				for _, bound := range boundIn(err) {
 					if _, ok := bound.Path(); !ok {
 						continue
 					}
@@ -1611,8 +1612,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		var got []string
 
-		for _, child := range bound.Members() {
-			got = append(got, child.Error())
+		for _, child := range problemsOf(bound) {
+			got = append(got, child.Bound.Error())
 		}
 
 		assert.Equal(t, []string{
@@ -1654,8 +1655,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				var got []string
 
-				for _, child := range bound.Members() {
-					got = append(got, child.Error())
+				for _, child := range problemsOf(bound) {
+					got = append(got, child.Bound.Error())
 				}
 
 				assert.Equal(t, []string{
@@ -1764,11 +1765,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			input string
 			want  []string
 		}{
-			"strings in key order": {
+			"strings by position": {
 				input: "s:\n  b: {n: -2}\n  a: {n: -1}\n",
 				want: []string{
-					"3:10: $.s.a.n: negative -1",
 					"2:10: $.s.b.n: negative -2",
+					"3:10: $.s.a.n: negative -1",
 				},
 			},
 			"hexadecimal int": {
@@ -1782,8 +1783,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"null beside a string": {
 				input: "s:\n  ~: {n: -1}\n  b: {n: -2}\n",
 				want: []string{
-					"3:10: $.s.b.n: negative -2",
 					"2:10: $.s.'~'.n: negative -1",
+					"3:10: $.s.b.n: negative -2",
 				},
 			},
 			"anchored null": {
@@ -1810,7 +1811,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				var got []string
 
-				for bound := range niceyaml.AllBindings(err) {
+				for _, bound := range boundIn(err) {
 					if _, ok := bound.Path(); ok {
 						got = append(got, bound.Error())
 					}
@@ -1863,9 +1864,9 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 					return err
 				},
 				want: []string{
-					"3:3: $.m.70000~: port out of range",
 					"2:3: $.m.70001~: port out of range",
 					"2:10: $.m.70001: port out of range",
+					"3:3: $.m.70000~: port out of range",
 				},
 			},
 			"valid key": {
@@ -1896,11 +1897,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				require.ErrorAs(t, err, &bound)
 
 				got := []string{err.Error()}
-				if children := bound.Members(); len(children) > 0 {
+				if children := problemsOf(bound); len(children) > 0 {
 					got = got[:0]
 
 					for _, child := range children {
-						got = append(got, child.Error())
+						got = append(got, child.Bound.Error())
 					}
 				}
 
@@ -1939,8 +1940,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				var got []string
 
-				for _, child := range bound.Members() {
-					got = append(got, child.Error())
+				for _, child := range problemsOf(bound) {
+					got = append(got, child.Bound.Error())
 				}
 
 				assert.Equal(t, []string{
@@ -1983,8 +1984,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 					var got []string
 
-					for _, child := range bound.Members() {
-						got = append(got, child.Error())
+					for _, child := range problemsOf(bound) {
+						got = append(got, child.Bound.Error())
 					}
 
 					assert.Equal(t, []string{
@@ -2008,7 +2009,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		var got []string
 
-		for bound := range niceyaml.AllBindings(err) {
+		for _, bound := range boundIn(err) {
 			if _, ok := bound.Path(); !ok {
 				continue
 			}
@@ -2154,8 +2155,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		var got []string
 
-		for _, child := range bound.Members() {
-			got = append(got, child.Error())
+		for _, child := range problemsOf(bound) {
+			got = append(got, child.Bound.Error())
 		}
 
 		assert.Equal(t, []string{
@@ -2249,9 +2250,9 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 					return err
 				},
 				want: []string{
-					"5:27: $.next.next.items.0x10.price: negative price",
-					"3:25: $.next.items.0x10.price: negative price",
 					"1:23: $.items.0x10.price: negative price",
+					"3:25: $.next.items.0x10.price: negative price",
+					"5:27: $.next.next.items.0x10.price: negative price",
 				},
 			},
 			"key below list elements": {
@@ -2309,11 +2310,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				require.ErrorAs(t, err, &bound)
 
 				got := []string{err.Error()}
-				if children := bound.Members(); len(children) > 0 {
+				if children := problemsOf(bound); len(children) > 0 {
 					got = got[:0]
 
 					for _, child := range children {
-						got = append(got, child.Error())
+						got = append(got, child.Bound.Error())
 					}
 				}
 
@@ -3015,7 +3016,7 @@ func TestNode_Decode_SelfValidatorContext(t *testing.T) {
 
 			_, ok := bound.Position()
 			assert.False(t, ok)
-			assert.Empty(t, bound.Members())
+			assert.Empty(t, problemsOf(bound))
 		})
 	}
 }
@@ -3660,7 +3661,7 @@ func TestSelfValidateValue(t *testing.T) {
 			assert.Equal(t, !tc.cancel, niceyaml.IsInvalid(err))
 
 			// The result stands in no document, as one from BindValue does.
-			for bound := range niceyaml.AllBindings(err) {
+			for _, bound := range boundIn(err) {
 				assert.Nil(t, bound.Node())
 				assert.Nil(t, bound.Document())
 
@@ -3756,10 +3757,10 @@ func TestSelfValidateValue_SharedPath(t *testing.T) {
 
 				var got []string
 
-				for _, child := range bound.Members() {
-					require.ErrorIs(t, child.Unresolved(), niceyaml.ErrAmbiguousPath)
+				for _, child := range problemsOf(bound) {
+					require.ErrorIs(t, child.Bound.Unresolved(), niceyaml.ErrAmbiguousPath)
 
-					got = append(got, child.Error())
+					got = append(got, child.Bound.Error())
 				}
 
 				assert.Equal(t, tc.want, got)
@@ -3837,7 +3838,7 @@ func TestSelfValidateValue_Place(t *testing.T) {
 			require.EqualError(t, placed, tc.want)
 			assert.True(t, niceyaml.IsInvalid(placed))
 
-			for bound := range niceyaml.AllBindings(placed) {
+			for _, bound := range boundIn(placed) {
 				assert.Same(t, doc.Source(), bound.Source())
 
 				if _, ok := bound.Path(); ok && tc.shared {
@@ -4201,7 +4202,7 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 
 			var nearest map[string]string
 
-			for bound := range niceyaml.AllBindings(err) {
+			for _, bound := range boundIn(err) {
 				near, ok := bound.Nearest()
 				if !ok {
 					continue

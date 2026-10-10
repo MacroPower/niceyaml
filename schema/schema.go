@@ -691,10 +691,10 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 //
 // Each violation the result heads places the same way on its own, so a
 // caller that drops some of them places the rest. The violations are
-// the bindings [niceyaml.SourceError.Members] returns for the result:
+// the problems [niceyaml.Problems] yields for the result:
 //
-//	for _, violation := range bound.Members() {
-//		errs = append(errs, doc.Bind(niceyaml.Rebase(violation, base)))
+//	for violation := range niceyaml.Problems(bound) {
+//		errs = append(errs, doc.Bind(niceyaml.Rebase(violation.Err, base)))
 //	}
 //
 // # Key Names

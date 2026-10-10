@@ -538,19 +538,19 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				_, ok = srcErr.Range()
 				assert.False(t, ok)
 
-				fields := srcErr.Members()
+				fields := problemsOf(srcErr)
 				require.Len(t, fields, rows)
 
 				for _, field := range fields {
-					require.ErrorIs(t, field, niceyaml.ErrDecode)
-					require.NoError(t, field.Unresolved())
+					require.ErrorIs(t, field.Err, niceyaml.ErrDecode)
+					require.NoError(t, field.Bound.Unresolved())
 
 					path, ok := field.Path()
 					require.True(t, ok)
 					assert.True(t, strings.HasSuffix(path.String(), "~"), "path %s", path)
 
 					// Each field holds a rejection the decoder returned.
-					rejected, ok := errors.AsType[*yaml.UnknownFieldError](field)
+					rejected, ok := errors.AsType[*yaml.UnknownFieldError](field.Err)
 					require.True(t, ok)
 					assert.Equal(t, rejected.GetMessage(), field.Message())
 				}
@@ -583,17 +583,17 @@ func TestDocument_Decode_UnknownFields_BesideValues(t *testing.T) {
 
 	require.ErrorAs(t, err, &srcErr)
 
-	problems := srcErr.Members()
+	problems := problemsOf(srcErr)
 	require.Len(t, problems, 3)
 
 	var mismatch *yaml.TypeError
 
-	require.ErrorAs(t, problems[0], &mismatch)
+	require.ErrorAs(t, problems[0].Err, &mismatch)
 
 	for _, field := range problems[1:] {
 		var unknown *yaml.UnknownFieldError
 
-		require.ErrorAs(t, field, &unknown)
+		require.ErrorAs(t, field.Err, &unknown)
 	}
 
 	// Without the option the decoder skips both keys, and the decode

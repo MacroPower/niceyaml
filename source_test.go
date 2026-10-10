@@ -4200,7 +4200,7 @@ func TestDocument_BindChain(t *testing.T) {
 				t.Parallel()
 
 				// The nil pointer binds nothing, so the join binds to this
-				// source with the Error as its only child, and the path
+				// source with the Error as its only problem, and the path
 				// resolves there.
 				wrapped := yamltest.Bind(t, source, err)
 
@@ -4209,9 +4209,11 @@ func TestDocument_BindChain(t *testing.T) {
 				require.ErrorAs(t, wrapped, &bound)
 				assert.Same(t, source, bound.Source())
 				require.ErrorIs(t, wrapped, pathErr)
-				require.Len(t, bound.Members(), 1)
 
-				rng, ok := bound.Members()[0].Range()
+				problems := slices.Collect(niceyaml.Problems(bound))
+				require.Len(t, problems, 1)
+
+				rng, ok := problems[0].Range()
 				require.True(t, ok)
 				assert.Equal(t, position.NewRange(position.New(0, 6), position.New(0, 11)), rng)
 
@@ -4644,10 +4646,10 @@ func TestSource_Bind(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 		assert.Nil(t, bound.Document())
 
-		children := bound.Members()
+		children := problemsOf(bound)
 		require.Len(t, children, 2)
-		assert.Same(t, docs[0], children[0].Document())
-		assert.Same(t, docs[1], children[1].Document())
+		assert.Same(t, docs[0], children[0].Bound.Document())
+		assert.Same(t, docs[1], children[1].Bound.Document())
 	})
 
 	t.Run("nested path errors resolve nowhere in several documents", func(t *testing.T) {
@@ -4662,8 +4664,8 @@ func TestSource_Bind(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		for _, child := range bound.Members() {
-			rangeErr := child.Unresolved()
+		for _, child := range problemsOf(bound) {
+			rangeErr := child.Bound.Unresolved()
 			require.ErrorIs(t, rangeErr, niceyaml.ErrPathNeedsDocument)
 		}
 

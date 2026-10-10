@@ -31,8 +31,12 @@ func cafeConfig(ctx context.Context, in string) (*cafe.Config, error) {
 func violationPaths(err error) []string {
 	got := []string{}
 
-	for bound := range niceyaml.AllBindings(err) {
-		if path, ok := bound.Path(); ok {
+	for node := range niceyaml.NewErrorTree(err).All() {
+		if node.Bound == nil {
+			continue
+		}
+
+		if path, ok := node.Bound.Path(); ok {
 			got = append(got, path.String())
 		}
 	}

@@ -21,6 +21,63 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
+// problemsOf returns the children of the node of err in the tree
+// [niceyaml.NewErrorTree] builds that stand for the problems err heads,
+// in the order the tree shows them.
+func problemsOf(err error) []niceyaml.ErrorTree {
+	return childrenOf(err, false)
+}
+
+// detailsOf returns the children of the node of err in the tree
+// [niceyaml.NewErrorTree] builds that explain it, in the order the tree
+// shows them.
+func detailsOf(err error) []niceyaml.ErrorTree {
+	return childrenOf(err, true)
+}
+
+// childrenOf returns the children of the node of err whose Detail is
+// detail.
+func childrenOf(err error, detail bool) []niceyaml.ErrorTree {
+	var out []niceyaml.ErrorTree
+
+	for _, c := range niceyaml.NewErrorTree(err).Children {
+		if c.Detail == detail {
+			out = append(out, c)
+		}
+	}
+
+	return out
+}
+
+// errsOf returns the error of each node.
+func errsOf(nodes []niceyaml.ErrorTree) []error {
+	errs := make([]error, 0, len(nodes))
+
+	for _, n := range nodes {
+		errs = append(errs, n.Err)
+	}
+
+	return errs
+}
+
+// boundIn returns each distinct binding in the tree of err, a node before
+// the nodes below it, as [niceyaml.ErrorTree.All] yields them.
+func boundIn(err error) []*niceyaml.SourceError {
+	var (
+		out  []*niceyaml.SourceError
+		seen = map[*niceyaml.SourceError]bool{}
+	)
+
+	for n := range niceyaml.NewErrorTree(err).All() {
+		if n.Bound != nil && !seen[n.Bound] {
+			seen[n.Bound] = true
+			out = append(out, n.Bound)
+		}
+	}
+
+	return out
+}
+
 // countNodes returns the number of nodes with text in t.
 func countNodes(t niceyaml.ErrorTree) int {
 	n := 0
@@ -1341,15 +1398,15 @@ func TestErrorTree_Bound(t *testing.T) {
 				t.Helper()
 
 				bound := bind(t, niceyaml.NewSummary("2 problems", badB(), badA()))
-				kids := bound.Members()
+				kids := problemsOf(bound)
 				require.Len(t, kids, 2)
 
 				// The tree sorts the children by position, so the second
-				// child of the binding comes first.
+				// error of the summary comes first.
 				return tree{err: bound, want: []node{
 					{text: "f.yaml: 2 problems", err: bound, bound: bound},
-					{text: "1:4: $.a: bad a", err: kids[1], bound: kids[1]},
-					{text: "2:4: $.b: bad b", err: kids[0], bound: kids[0]},
+					{text: "1:4: $.a: bad a", err: kids[0].Bound, bound: kids[0].Bound},
+					{text: "2:4: $.b: bad b", err: kids[1].Bound, bound: kids[1].Bound},
 				}}
 			},
 		},
@@ -1358,12 +1415,12 @@ func TestErrorTree_Bound(t *testing.T) {
 				t.Helper()
 
 				bound := bind(t, errors.Join(badA(), badB()))
-				kids := bound.Members()
+				kids := problemsOf(bound)
 				require.Len(t, kids, 2)
 
 				return tree{err: bound, want: []node{
-					{text: "f.yaml:1:4: $.a: bad a", err: kids[0], bound: kids[0]},
-					{text: "f.yaml:2:4: $.b: bad b", err: kids[1], bound: kids[1]},
+					{text: "f.yaml:1:4: $.a: bad a", err: kids[0].Bound, bound: kids[0].Bound},
+					{text: "f.yaml:2:4: $.b: bad b", err: kids[1].Bound, bound: kids[1].Bound},
 				}}
 			},
 		},

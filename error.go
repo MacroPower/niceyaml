@@ -264,12 +264,12 @@ var (
 // wrapper, as the Error wrote it, such as "@.path: msg". A program that
 // returns or logs such an Error binds it with [BindValue], and the text
 // of that error names each path. The errors a summary heads and the
-// details of an Error are structure rather than text. [Error.Members]
-// and [Error.Details] return them through any Error that wraps the
-// summary or the problem, such as one from [Rebase] or [Invalid], with
-// the base of every Rebase joined in front of their paths. The
-// [SourceError] that binds the Error binds each one as a child at the
-// location its own error carries, if any.
+// details of an Error are structure rather than text. The tree
+// [NewErrorTree] builds holds them as the children of the node of the
+// Error, through any Error that wraps the summary or the problem, such
+// as one from [Rebase] or [Invalid], with the base of every Rebase joined
+// in front of their paths. The [SourceError] that binds the Error binds
+// each one as a child at the location its own error carries, if any.
 // [Error.Format] prints them as a tree under the %+v verb.
 //
 // # Matching
@@ -457,8 +457,7 @@ func wrapUndeclared(err error, opts ...ErrorOption) *Error {
 // one error per violation. The summary is a heading and never a problem
 // itself. [SourceError.Error] lists each of errs below the line of the
 // summary, [ErrorTree.Problems] yields each of them and never the
-// summary, and [FormatError] draws each as a branch. [Error.Members]
-// returns them.
+// summary, and [FormatError] draws each as a branch.
 //
 // A summary carries no location. [Rebase] and a scoped [Node.Bind] give
 // none to it, and they locate each of errs on its own, as they locate
@@ -821,9 +820,9 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // One binding stands in no document, which is the error [BindValue]
 // returns for a value that came from none. Rebase reads it as the error
 // it was made from, so each problem takes the base, and a Node then
-// binds them in its document. Each binding below that one, as
-// [SourceError.Members] and [SourceError.Details] return them, rebases
-// the same way on its own.
+// binds them in its document. Each binding below that one, as the
+// children of its node in the tree [NewErrorTree] builds, rebases the
+// same way on its own.
 func Rebase(err error, base paths.Path) error {
 	return rebase(err, base, false, false, false, fallback{})
 }
@@ -1178,9 +1177,10 @@ func AtRange(r position.Range) ErrorOption {
 // each detail as a branch below it.
 //
 // A detail is any error, and one that is an [*Error] can carry a location
-// of its own. [Error.Details] returns them, and the [SourceError] that
-// binds the Error binds each one as a detail at the location its own
-// error carries, if any. [SourceError.Excerpt] annotates the line of each
+// of its own. The tree [NewErrorTree] builds holds them as the children
+// of the node that have Detail set, and the [SourceError] that binds the
+// Error binds each one as a detail at the location its own error
+// carries, if any. [SourceError.Excerpt] annotates the line of each
 // detail whose location resolves, and a detail from [NewError] with an
 // empty message marks its location with no text beside it. A detail that
 // is a [*SourceError] already, or wraps one, binds as it is, so a detail
@@ -1191,10 +1191,10 @@ func AtRange(r position.Range) ErrorOption {
 // [errors.Is] and [errors.As] on the Error search the problem and pass
 // over its details, which [Error.Unwrap] leaves out. A detail that wraps
 // a sentinel or a typed error thus never matches for the problem it
-// explains. A caller reads the error of a detail from [Error.Details],
-// or from the Err of each child of a node [ErrorTree.Problems] yields. An
-// error type that matches its reasons too says so with Is and As methods
-// of its own.
+// explains. A caller reads the error of a detail from the Err of each
+// child with Detail set of a node [ErrorTree.Problems] yields. An error
+// type that matches its reasons too says so with Is and As methods of
+// its own.
 //
 // To report several separate problems, join them with [errors.Join] or
 // head them with [NewSummary].
@@ -1424,9 +1424,10 @@ func (e *Error) hasLocation() bool {
 //
 // Unwrap leaves out the details from [WithDetails], which explain a
 // problem and are none themselves. A sentinel or a typed error that a
-// detail wraps thus never matches for the problem it explains.
-// [Error.Details] returns the details. A nil Error unwraps to nothing, so
-// a chain that holds one is safe to walk.
+// detail wraps thus never matches for the problem it explains. The
+// children with Detail set of the node of the Error in the tree
+// [NewErrorTree] builds are the details. A nil Error unwraps to nothing,
+// so a chain that holds one is safe to walk.
 func (e *Error) Unwrap() []error {
 	if e == nil || (e.err == nil && len(e.errors) == 0) {
 		return nil
@@ -1438,81 +1439,6 @@ func (e *Error) Unwrap() []error {
 	}
 
 	return append(result, e.errors...)
-}
-
-// Members returns the errors the [Error] heads as a summary from
-// [NewSummary], in the order NewSummary received them and without the nil
-// ones. Members looks through wrapping as [Error.Path] does, so an Error
-// from [Rebase], [Invalid], or a scoped [Node.Bind] around a summary
-// heads what the summary heads. Each member comes with the base of every
-// Rebase on the way joined in front of its paths, and marked as the
-// document's fault below an Error from Invalid, as the tree
-// [NewErrorTree] builds and a binding place it. The walk follows a
-// wrapper that [fmt.Errorf] builds with several %w verbs to the one
-// branch it keeps, as Error.Path does. It ends at the first Error that
-// heads any, at a [*SourceError], and at any other error that unwraps to
-// several, so an Error above a join heads none, and [Problems] lists the
-// problems of a join. A nil Error heads none. The slice is new, so a
-// caller may keep or sort it.
-func (e *Error) Members() []error {
-	var base childBase
-
-	for cur := error(e); !isNothing(cur); {
-		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
-		case *Error:
-			base = base.cross(x)
-
-			if len(x.errors) > 0 {
-				members := make([]error, 0, len(x.errors))
-				for _, n := range x.errors {
-					members = append(members, base.rebase(n, false))
-				}
-
-				return members
-			}
-
-			cur = x.err
-
-		case *SourceError:
-			return nil
-
-		case interface{ Unwrap() error }:
-			cur = x.Unwrap()
-
-		case interface{ Unwrap() []error }:
-			// The one branch a wrapper keeps goes on as the chain, as
-			// [walkChildren] follows it.
-			_, cur = followBranches(cur, x.Unwrap())
-
-		default:
-			return nil
-		}
-	}
-
-	return nil
-}
-
-// Details returns the errors that explain the [Error]: the ones
-// [WithDetails] added to it and to each Error along its cause chain,
-// outermost first and in the order each received them, without the nil
-// ones. Each detail comes with the base of every [Rebase] above it
-// joined in front of its paths, and points nothing at that base, as the
-// tree [NewErrorTree] builds and a binding place it. The chain follows a
-// wrapper that [fmt.Errorf] builds with several %w verbs to the one
-// branch it keeps, as [Error.Members] does. It ends at a [*SourceError],
-// which holds its own details, and at any other error that unwraps to
-// several. A nil Error has none. The slice is new, so a caller may keep
-// or sort it.
-func (e *Error) Details() []error {
-	var details []error
-
-	walkChildren(e, func(*SourceError) {}, func(n error, base childBase, detail bool) {
-		if detail {
-			details = append(details, base.rebase(n, true))
-		}
-	})
-
-	return details
 }
 
 // location returns the locus of the [Error]: a path from [AtPath], a
@@ -1806,8 +1732,8 @@ func locateMerged(b binder, node *Node, at position.Position, l locus) (location
 // SourceError never changes. [SourceError.Error] puts the position and
 // the `$` path in front of the message, and [SourceError.Excerpt] returns
 // the surrounding lines with the location highlighted. The bound error is
-// a tree. [SourceError.Members] returns the problems the binding heads
-// and [SourceError.Details] its details, each a SourceError of its own. A
+// a tree, which [NewErrorTree] builds with a node per problem the binding
+// heads and per detail, each bound as a SourceError of its own. A
 // SourceError implements the error interface and unwraps to the error it
 // binds, so [errors.Is] and [errors.As] see through it.
 //
@@ -1867,9 +1793,10 @@ func locateMerged(b binder, node *Node, at position.Position, l locus) (location
 // its branches that carry a location or errors below them, since its
 // message shows the text of the rest already. When one branch remains,
 // the chain goes on through it as it does through a wrapper with one %w
-// verb. [SourceError.Members] returns the problems the binding heads and
-// [SourceError.Details] its details, each a SourceError with its own
-// children, if any, and its own location when its error carries one. A
+// verb. Each problem the binding heads and each of its details binds as
+// a SourceError of its own, with its own children, if any, and its own
+// location when its error carries one, and the tree [NewErrorTree]
+// builds holds each in the Bound of its node. A
 // validator's report of several violations therefore binds to one
 // SourceError per violation whether it heads them with a summary or
 // joins them. An error that is or wraps a SourceError, with no Error
@@ -2397,8 +2324,8 @@ func (b binder) nodeAt(idx int) *Node {
 // A decode places the result the same way, at the value it checked, when
 // a Validate method of a type or a [Validator] returns it. Each binding
 // below the result places on its own too, so a caller that drops some of
-// the problems places the rest. Those bindings are the ones
-// [SourceError.Members] and [SourceError.Details] return for the result.
+// the problems places the rest. Those bindings are the ones the tree
+// [NewErrorTree] builds for the result holds below its root.
 //
 // A wrapper such as [fmt.Errorf] around the result keeps its text
 // through both calls, behind the position and the path, as in
@@ -3396,48 +3323,6 @@ func (e *SourceError) Unwrap() error {
 	return e.err
 }
 
-// Members returns the bound problems the [SourceError] heads. Each error a
-// summary from [NewSummary] heads along the cause chain of the bound
-// error becomes one, and so does each branch of the error that ends the
-// chain by unwrapping to several, such as one from [errors.Join]. A
-// validator's report of several violations therefore unwraps to one
-// binding per violation, in the order the validator gave them. A wrapper
-// that [fmt.Errorf] builds with several %w verbs keeps only its branches
-// that carry a location or errors below them, and when one remains, the
-// chain goes on through it. Each binding carries its own problems or
-// details, if any, and a location when its error carries one, so a
-// caller checks [SourceError.Range] before it uses the position:
-//
-//	for _, violation := range bound.Members() {
-//		if rng, ok := violation.Range(); ok {
-//			...
-//		}
-//	}
-//
-// A binding of one problem heads none, and [SourceError.Details] returns
-// the errors that explain it. The slice is a copy, so a caller may keep
-// or sort it. A nil SourceError heads nothing.
-func (e *SourceError) Members() []*SourceError {
-	if e == nil {
-		return nil
-	}
-
-	return filtered(e.below, false)
-}
-
-// Details returns the bound details of the [SourceError]: the errors
-// [WithDetails] added to an [*Error] along the cause chain of the bound
-// error, each bound at the location its own error carries, if any. They
-// explain the error and are no problems of their own. The slice is a
-// copy, so a caller may keep or sort it. A nil SourceError has none.
-func (e *SourceError) Details() []*SourceError {
-	if e == nil {
-		return nil
-	}
-
-	return filtered(e.below, true)
-}
-
 // Error returns the message of the bound error with its resolved position
 // in front. It reads "name:line:col: $.path: msg" when the error carries
 // a path and "name:line:col: msg" for a position or a range alone. An
@@ -3502,8 +3387,8 @@ func (e *SourceError) Details() []*SourceError {
 //	cafe.yaml:6:8: $.spec.sla: string does not match pattern
 //	cafe.yaml:22:11: $.spec.hours.days: expected "array", got "string"
 //
-// Each line is the message of a problem from [SourceError.Members], behind
-// the name of its own source. The lines come in the order [NewErrorTree]
+// Each line is the message of a problem the binding heads, behind the
+// name of its own source. The lines come in the order [NewErrorTree]
 // shows the children, which is the order of their positions, and they
 // match the rows [ErrorTree.Problems] yields, but for the branches a
 // multi-error holds in its message, as the next paragraph describes. A
@@ -3955,28 +3840,16 @@ func eachBinding(err error, visit func(*SourceError) bool) bool {
 	return true
 }
 
-// AllBindings returns an iterator over every binding in the tree of
+// allBindings returns an iterator over every binding in the tree of
 // err: each [*SourceError] [Bindings] yields, in the same order, and
 // every binding below each one. A parent comes before the bindings under
 // it, and the children of a child come right after it, whatever source
 // each binds to. A binding the tree reaches twice, such as one bound
 // before a summary headed it and joined beside that summary, comes once.
-// A caller that reads something from every binding walks it, such as one
-// that collects the sources an error touches:
-//
-//	sources := make(map[*niceyaml.Source]bool)
-//	for bound := range niceyaml.AllBindings(err) {
-//		sources[bound.Source()] = true
-//	}
-//
-// [Annotate] marks a view with the bindings AllBindings yields, so a
-// caller that marks a view calls it and walks nothing. A report that
-// lists the problems of an error walks [ErrorTree.Problems] instead, as
-// the example on [SourceError.Message] shows. AllBindings yields a
-// summary beside the violations under it and each detail beside the
-// error it explains, and it passes over every error bound to no source.
-// A nil err has no bindings.
-func AllBindings(err error) iter.Seq[*SourceError] {
+// It yields a summary beside the violations under it and each detail
+// beside the error it explains, and it passes over every error bound to
+// no source. A nil err has no bindings.
+func allBindings(err error) iter.Seq[*SourceError] {
 	return func(yield func(*SourceError) bool) {
 		seen := make(map[*SourceError]bool)
 
@@ -4467,7 +4340,7 @@ func rangeOf(ranges position.Ranges, at position.Position) position.Range {
 // A binding with no location of its own, such as the summary a validator
 // puts above its violations or the join of several errors, adds no mark
 // for itself. The bindings below it still mark their lines, and Annotate
-// reports true when any of them does. A loop over [AllBindings] that
+// reports true when any of them does. A loop over [Bindings] that
 // skips some bindings therefore still marks each one below a binding it
 // keeps. A caller that marks some problems and leaves others out walks
 // [ErrorTree.Problems] and marks the binding of each node it keeps, which
@@ -4477,7 +4350,7 @@ func (e *SourceError) Annotate(view *line.View) bool {
 }
 
 // Annotate marks err on view. It marks every binding in the tree of err,
-// each [*SourceError] [AllBindings] yields, once, on the lines of its
+// the ones below a binding included, once each, on the lines of its
 // source that view holds, and reports whether it marked any line. A
 // viewer that shows a document with its errors in place marks its view
 // with one call and renders it as it is:
@@ -4602,10 +4475,9 @@ func Annotate(err error, view *line.View) bool {
 // to another source resolves in its own. [SourceError.Unresolved] names
 // why the location of the error itself did not resolve, and returns nil
 // for an error that carries no location of its own, such as a join or a
-// summary, whose problems from [SourceError.Members] each name their own
-// reason. Excerpt leaves out a node whose location does not resolve. Its
-// message is still part of the tree [FormatError] prints. A nil
-// SourceError carries no location.
+// summary, whose problems each name their own reason. Excerpt leaves out
+// a node whose location does not resolve. Its message is still part of
+// the tree [FormatError] prints. A nil SourceError carries no location.
 //
 // Excerpt also reports false for an error bound to a source with
 // excerpts off, as [WithExcerpts] describes, whatever resolves there.

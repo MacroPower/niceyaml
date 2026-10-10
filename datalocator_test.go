@@ -673,11 +673,10 @@ func schemaLocations(t *testing.T, doc *niceyaml.Node, v *jsonschema.Validator) 
 
 	var got []string
 
-	for bound := range niceyaml.AllBindings(err) {
-		// The summary of several violations is no violation.
-		if len(bound.Members()) == 0 {
-			got = append(got, describeLocation(bound))
-		}
+	// The summary of several violations is no violation, so Problems
+	// passes over it.
+	for problem := range niceyaml.Problems(err) {
+		got = append(got, describeLocation(problem.Bound))
 	}
 
 	slices.Sort(got)

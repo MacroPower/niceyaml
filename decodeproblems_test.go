@@ -587,7 +587,7 @@ func TestSource_Decode_Problems(t *testing.T) {
 	_, ok = srcErr.Path()
 	assert.False(t, ok)
 
-	problems := srcErr.Members()
+	problems := problemsOf(srcErr)
 	require.Len(t, problems, 3)
 
 	want := []struct {
@@ -600,8 +600,8 @@ func TestSource_Decode_Problems(t *testing.T) {
 	}
 
 	for i, problem := range problems {
-		require.ErrorIs(t, problem, niceyaml.ErrDecode)
-		require.NoError(t, problem.Unresolved())
+		require.ErrorIs(t, problem.Err, niceyaml.ErrDecode)
+		require.NoError(t, problem.Bound.Unresolved())
 
 		path, ok := problem.Path()
 		require.True(t, ok)
@@ -615,13 +615,13 @@ func TestSource_Decode_Problems(t *testing.T) {
 	// Each problem holds the rejection the decoder returned for it.
 	var unknown *yaml.UnknownFieldError
 
-	require.ErrorAs(t, problems[0], &unknown)
+	require.ErrorAs(t, problems[0].Err, &unknown)
 	assert.Equal(t, "replcas", unknown.Token.Value)
 
 	for i, value := range []string{"soon", "http"} {
 		var mismatch *yaml.TypeError
 
-		require.ErrorAs(t, problems[i+1], &mismatch)
+		require.ErrorAs(t, problems[i+1].Err, &mismatch)
 		assert.Equal(t, value, mismatch.Token.Value)
 	}
 }
@@ -976,12 +976,12 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				_, ok = srcErr.Path()
 				assert.Equal(t, rows == 0, ok)
 
-				problems := srcErr.Members()
+				problems := problemsOf(srcErr)
 				require.Len(t, problems, rows)
 
 				for _, problem := range problems {
-					require.ErrorIs(t, problem, niceyaml.ErrDecode)
-					require.NoError(t, problem.Unresolved())
+					require.ErrorIs(t, problem.Err, niceyaml.ErrDecode)
+					require.NoError(t, problem.Bound.Unresolved())
 
 					_, ok := problem.Position()
 					assert.True(t, ok)
@@ -1970,7 +1970,7 @@ func TestDocument_Decode_Problems_Deep(t *testing.T) {
 	var srcErr *niceyaml.SourceError
 
 	require.ErrorAs(t, err, &srcErr)
-	assert.Empty(t, srcErr.Members())
+	assert.Empty(t, problemsOf(srcErr))
 	assert.Equal(t, "expected integer, got string", srcErr.Message())
 
 	path, ok := srcErr.Path()
@@ -1992,7 +1992,7 @@ func TestDocument_Decode_Problems_Many(t *testing.T) {
 	var srcErr *niceyaml.SourceError
 
 	require.ErrorAs(t, err, &srcErr)
-	require.Len(t, srcErr.Members(), servers)
+	require.Len(t, problemsOf(srcErr), servers)
 
 	lines := strings.Split(err.Error(), "\n")
 	require.Len(t, lines, niceyaml.ErrorListLimit+2)

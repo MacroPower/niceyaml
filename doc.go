@@ -131,10 +131,10 @@
 // [SourceError.Excerpt] returns the surrounding lines with the location
 // highlighted.
 // The errors a summary heads and the details of an Error are part of the
-// Error, and binding binds each of them too. [SourceError.Members] returns
-// one SourceError per problem a summary heads and [SourceError.Details]
-// one per detail, each with its own children, if any, and its own
-// location when its error carries one. A validator's report of several
+// Error, and binding binds each of them too. Each problem a summary heads
+// and each detail binds as a SourceError of its own, with its own
+// children, if any, and its own location when its error carries one. A
+// validator's report of several
 // violations is therefore a tree of bound errors. [FormatError] prints
 // the message as a tree with a branch per error below another behind its
 // position, details included, then the excerpt, so a log names every

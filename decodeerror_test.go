@@ -1982,8 +1982,8 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 		var srcErr *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &srcErr)
-		require.Len(t, srcErr.Details(), 1)
-		assert.EqualError(t, srcErr.Details()[0], "3:9: $.spans[0].to: to set here")
+		require.Len(t, detailsOf(srcErr), 1)
+		assert.EqualError(t, detailsOf(srcErr)[0].Bound, "3:9: $.spans[0].to: to set here")
 	})
 
 	t.Run("keeps the location the error carries", func(t *testing.T) {

@@ -3364,11 +3364,13 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
-		assert.Empty(t, bound.Members())
 
-		reasons := make([]string, 0, 2)
-		for _, detail := range bound.Details() {
-			reasons = append(reasons, detail.Unwrap().Error())
+		var reasons []string
+
+		for _, child := range niceyaml.NewErrorTree(bound).Children {
+			require.True(t, child.Detail, "a reason is a detail, not a problem the error heads")
+
+			reasons = append(reasons, child.Bound.Unwrap().Error())
 		}
 
 		assert.Equal(t, []string{"no schema directive", "no kind"}, reasons)
@@ -3426,7 +3428,10 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
-		assert.Empty(t, bound.Members())
+
+		for _, child := range niceyaml.NewErrorTree(bound).Children {
+			assert.True(t, child.Detail, "a reason is a detail, not a problem the error heads")
+		}
 	})
 
 	t.Run("matches each reason, which is a detail the error does not unwrap to", func(t *testing.T) {

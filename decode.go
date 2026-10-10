@@ -693,7 +693,7 @@ func bindSyntaxErrors(docs []*Node) {
 			continue
 		}
 
-		for bound := range AllBindings(doc.doc.err) {
+		for bound := range allBindings(doc.doc.err) {
 			// An earlier document of the run bound the error already.
 			if bound.node != nil {
 				continue
@@ -2332,9 +2332,9 @@ func (n *Node) firstFailure(ctx context.Context, validators []Validator) error {
 //
 // Binding binds the whole tree of err. The [Error] that anchors it gives
 // the [SourceError] its location. Every error a summary along the way
-// heads becomes a child that [SourceError.Members] returns, and every
-// detail of an Error along the way becomes one that [SourceError.Details]
-// returns. An error that unwraps to several, such as one from
+// heads becomes a child of the binding in the tree [NewErrorTree] builds,
+// and every detail of an Error along the way becomes a child with Detail
+// set. An error that unwraps to several, such as one from
 // [errors.Join], binds the same way whatever wraps it. The SourceError
 // carries no location of its own, and each branch is a child. A wrapper
 // that [fmt.Errorf] builds with several %w verbs keeps only its branches
@@ -2640,8 +2640,8 @@ func WithSelfValidation(enabled bool) DecodeOption {
 //
 // The error is a summary from [NewSummary] that counts the fields on the
 // first line of its message and heads one error for each. The message
-// lists them, and [SourceError.Members] and [ErrorTree.Problems] return
-// them. Each of those errors matches [ErrDecode] and holds the
+// lists them, and [ErrorTree.Problems] yields them. Each of those errors
+// matches [ErrDecode] and holds the
 // [yaml.UnknownFieldError] the go-yaml decoder returns for that field. A
 // document with one unknown field reports that field as the error itself.
 // A document that holds another problem too, such as a value of the
@@ -3104,12 +3104,12 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 //
 // The error is a summary from [NewSummary] whose first line counts the
 // problems, and reads "3 unknown fields" when each is an unknown field.
-// It heads one error for each problem, which [SourceError.Members] and
-// [ErrorTree.Problems] return, and the rejection of the decoder is
+// It heads one error for each problem, which [ErrorTree.Problems]
+// yields, and the rejection of the decoder is
 // always one of them. The summary points at no value, so its
 // [SourceError.Position] and [SourceError.Path] report false, and each
 // error below it reports its own. The message lists [ErrorListLimit]
-// problems at most and counts the rest, and SourceError.Members returns
+// problems at most and counts the rest, and ErrorTree.Problems yields
 // every one. A document with one problem returns that problem as the
 // error itself.
 //

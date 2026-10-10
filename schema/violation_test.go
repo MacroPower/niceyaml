@@ -202,7 +202,7 @@ func TestViolation_Binding(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
-		require.Len(t, bound.Members(), 2)
+		require.Len(t, problemsOf(bound), 2)
 
 		// The summary counts the violations and is none itself, so a search
 		// of the whole binding descends into the first violation under it.
@@ -210,8 +210,8 @@ func TestViolation_Binding(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "type", first.Keyword)
 
-		for _, child := range bound.Members() {
-			got, ok := errors.AsType[*schema.Violation](child)
+		for _, child := range problemsOf(bound) {
+			got, ok := errors.AsType[*schema.Violation](child.Err)
 			require.True(t, ok)
 			assert.Equal(t, "type", got.Keyword)
 			assert.Equal(t, got.Message, child.Message())
@@ -562,13 +562,13 @@ func TestViolation_Value(t *testing.T) {
 
 		require.ErrorAs(t, err, &summary)
 
-		nested := summary.Members()
+		nested := problemsOf(summary)
 		require.Len(t, nested, 2)
 
 		for _, n := range nested {
 			var located *niceyaml.Error
 
-			require.ErrorAs(t, n, &located)
+			require.ErrorAs(t, n.Err, &located)
 
 			got, ok := errors.AsType[*schema.Violation](located)
 			require.True(t, ok)
@@ -863,9 +863,9 @@ func TestViolation_Forms(t *testing.T) {
 		// The value is one problem, so the binding heads none, and the
 		// forms are its details. Each form carries no location and wraps
 		// no Violation, and the violation of its branch carries both.
-		assert.Empty(t, bound.Members())
+		assert.Empty(t, problemsOf(bound))
 
-		forms := bound.Details()
+		forms := detailsOf(bound)
 		require.Len(t, forms, 2)
 
 		want := []schema.Violation{
@@ -889,20 +889,20 @@ func TestViolation_Forms(t *testing.T) {
 
 			_, ok = form.Range()
 			assert.False(t, ok)
-			require.NoError(t, form.Unresolved())
+			require.NoError(t, form.Bound.Unresolved())
 
-			own, ok := errors.AsType[*schema.Violation](form)
+			own, ok := errors.AsType[*schema.Violation](form.Err)
 			assert.False(t, ok)
 			assert.Nil(t, own)
 
-			nested := form.Details()
+			nested := detailsOf(form.Bound)
 			require.Len(t, nested, 1)
 
 			path, ok := nested[0].Path()
 			require.True(t, ok)
 			assert.Equal(t, "$.v", path.String())
 
-			got, ok := errors.AsType[*schema.Violation](nested[0])
+			got, ok := errors.AsType[*schema.Violation](nested[0].Err)
 			require.True(t, ok)
 			assert.Equal(t, want[i], *got)
 		}
@@ -928,9 +928,9 @@ func TestViolation_Forms(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "anyOf", got.Keyword)
 
-		assert.Empty(t, bound.Members())
+		assert.Empty(t, problemsOf(bound))
 
-		forms := bound.Details()
+		forms := detailsOf(bound)
 		require.Len(t, forms, 2)
 
 		for i, form := range forms {
@@ -938,7 +938,7 @@ func TestViolation_Forms(t *testing.T) {
 
 			_, ok := form.Path()
 			assert.False(t, ok)
-			assert.Len(t, form.Details(), 1)
+			assert.Len(t, detailsOf(form.Bound), 1)
 		}
 
 		// A document places the violation, and its forms come with it.
@@ -948,7 +948,7 @@ func TestViolation_Forms(t *testing.T) {
 
 		_, ok = bound.Range()
 		assert.True(t, ok)
-		assert.Len(t, bound.Details(), 2)
+		assert.Len(t, detailsOf(bound), 2)
 	})
 }
 

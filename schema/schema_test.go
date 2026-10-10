@@ -24,6 +24,52 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
+// problemsOf returns the children of the node of err in the tree
+// [niceyaml.NewErrorTree] builds that stand for the problems err heads,
+// in the order the tree shows them.
+func problemsOf(err error) []niceyaml.ErrorTree {
+	return childrenOf(err, false)
+}
+
+// detailsOf returns the children of the node of err in the tree
+// [niceyaml.NewErrorTree] builds that explain it, in the order the tree
+// shows them.
+func detailsOf(err error) []niceyaml.ErrorTree {
+	return childrenOf(err, true)
+}
+
+// childrenOf returns the children of the node of err whose Detail is
+// detail.
+func childrenOf(err error, detail bool) []niceyaml.ErrorTree {
+	var out []niceyaml.ErrorTree
+
+	for _, c := range niceyaml.NewErrorTree(err).Children {
+		if c.Detail == detail {
+			out = append(out, c)
+		}
+	}
+
+	return out
+}
+
+// boundIn returns each distinct binding in the tree of err, a node before
+// the nodes below it, as [niceyaml.ErrorTree.All] yields them.
+func boundIn(err error) []*niceyaml.SourceError {
+	var (
+		out  []*niceyaml.SourceError
+		seen = map[*niceyaml.SourceError]bool{}
+	)
+
+	for n := range niceyaml.NewErrorTree(err).All() {
+		if n.Bound != nil && !seen[n.Bound] {
+			seen[n.Bound] = true
+			out = append(out, n.Bound)
+		}
+	}
+
+	return out
+}
+
 // compileSchema compiles schemaData into a [*schema.Schema] and fails the
 // test if the schema does not compile.
 func compileSchema(t *testing.T, schemaData []byte) *schema.Schema {
@@ -1493,7 +1539,7 @@ func TestSchema_ValidateValue(t *testing.T) {
 
 			// The value came from no document, so no binding of the
 			// result names a Node, a document, or the index of one.
-			for b := range niceyaml.AllBindings(err) {
+			for _, b := range boundIn(err) {
 				assert.Nil(t, b.Node())
 				assert.Nil(t, b.Document())
 
@@ -1601,7 +1647,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 			require.ErrorAs(t, placed, &violation)
 
-			for b := range niceyaml.AllBindings(placed) {
+			for _, b := range boundIn(placed) {
 				assert.Same(t, doc.Source(), b.Source())
 			}
 
@@ -1741,7 +1787,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 				require.ErrorAs(t, placed, &violation)
 
-				for b := range niceyaml.AllBindings(placed) {
+				for _, b := range boundIn(placed) {
 					assert.Same(t, doc.Source(), b.Source())
 				}
 			})
@@ -1800,7 +1846,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			"app.yaml:2:9: $.request.port: check: 0 is less than 1",
 		)
 
-		for b := range niceyaml.AllBindings(request.Bind(niceyaml.Invalid(err))) {
+		for _, b := range boundIn(request.Bind(niceyaml.Invalid(err))) {
 			assert.Same(t, doc.Source(), b.Source())
 		}
 	})
@@ -1871,13 +1917,13 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 				var gotDetails []string
 
-				for _, detail := range bound.Details() {
+				for _, detail := range detailsOf(bound) {
 					gotDetails = append(gotDetails, detail.Message())
 				}
 
 				assert.Equal(t, tc.wantDetails, gotDetails)
 
-				for _, problem := range bound.Members() {
+				for _, problem := range problemsOf(bound) {
 					assert.Same(t, doc.Source(), problem.Source())
 				}
 			})
@@ -1918,8 +1964,8 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, doc.Bind(detailed), &bound)
-		require.Len(t, bound.Details(), 1)
-		assert.Same(t, doc.Source(), bound.Details()[0].Source())
+		require.Len(t, detailsOf(bound), 1)
+		assert.Same(t, doc.Source(), detailsOf(bound)[0].Source())
 	})
 
 	t.Run("each violation places on its own", func(t *testing.T) {
@@ -1930,7 +1976,9 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		var result *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &result)
-		require.Len(t, result.Members(), 2)
+
+		violations := problemsOf(result)
+		require.Len(t, violations, 2)
 
 		// A caller that keeps only some of the violations places the
 		// ones it keeps, and each stands in the document as it does
@@ -1940,12 +1988,12 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			`app.yaml:1:1: $.request.name: missing required property "name"`,
 		}
 
-		for i, violation := range result.Members() {
-			placed := doc.Bind(niceyaml.Rebase(violation, base))
+		for i, violation := range violations {
+			placed := doc.Bind(niceyaml.Rebase(violation.Err, base))
 			require.EqualError(t, placed, want[i])
 			assert.True(t, niceyaml.IsInvalid(placed))
 
-			for b := range niceyaml.AllBindings(placed) {
+			for _, b := range boundIn(placed) {
 				assert.Same(t, doc.Source(), b.Source())
 			}
 
@@ -1953,7 +2001,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			assert.NotSame(t, doc.Source(), violation.Source())
 		}
 
-		kept := errors.Join(result.Members()[1], result.Members()[0])
+		kept := errors.Join(violations[1].Err, violations[0].Err)
 		require.EqualError(t, yamltest.At(t, doc, base).Bind(kept), stringtest.JoinLF(want[1], want[0]))
 	})
 
@@ -4144,8 +4192,8 @@ func TestSchema_SourcePath_HiddenKeyName(t *testing.T) {
 
 	var got []string
 
-	for _, child := range bound.Members() {
-		got = append(got, child.Error())
+	for _, child := range problemsOf(bound) {
+		got = append(got, child.Bound.Error())
 	}
 
 	assert.ElementsMatch(t, []string{
@@ -4181,7 +4229,7 @@ func TestSchema_SourcePath_SeveralViolations(t *testing.T) {
 
 	var got []string
 
-	for _, child := range bound.Members() {
+	for _, child := range problemsOf(bound) {
 		path, ok := child.Path()
 		require.True(t, ok, "violation carries no path")
 
@@ -4251,7 +4299,7 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 
 			require.ErrorAs(t, err, &ve)
 
-			violations := ve.Members()
+			violations := problemsOf(ve)
 			require.Len(t, violations, tc.members)
 
 			spelled := 0
@@ -4259,7 +4307,7 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 			for _, violation := range violations {
 				var child *niceyaml.Error
 
-				require.ErrorAs(t, violation, &child)
+				require.ErrorAs(t, violation.Err, &child)
 
 				path, ok := child.Path()
 				require.True(t, ok, "violation carries no path")
