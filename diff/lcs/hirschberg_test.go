@@ -467,16 +467,7 @@ func TestHirschberg_DiffIsMinimal(t *testing.T) {
 				got := h.Diff(before, after)
 
 				requireValidOps(t, before, after, got)
-
-				equal := 0
-
-				for _, op := range got {
-					if op.Kind == lcs.OpEqual {
-						equal++
-					}
-				}
-
-				require.Equal(t, naiveLCSLen(before, after), equal,
+				require.Equal(t, naiveLCSLen(before, after), equalOps(got),
 					"not minimal: before=%q after=%q ops=%v", before, after, got)
 			}
 		})
@@ -574,16 +565,7 @@ func TestHirschberg_DiffUniqueLines(t *testing.T) {
 			elapsed := time.Since(start)
 
 			requireValidOps(t, before, after, got)
-
-			equal := 0
-
-			for _, op := range got {
-				if op.Kind == lcs.OpEqual {
-					equal++
-				}
-			}
-
-			assert.Equal(t, tc.wantEqual, equal)
+			assert.Equal(t, tc.wantEqual, equalOps(got))
 			assert.Less(t, elapsed, time.Second)
 		})
 	}
@@ -649,6 +631,19 @@ func requireValidOps(t *testing.T, before, after []string, ops []lcs.Op) {
 
 	require.Equal(t, len(before), nextBefore, "before=%q after=%q ops=%v", before, after, ops)
 	require.Equal(t, len(after), nextAfter, "before=%q after=%q ops=%v", before, after, ops)
+}
+
+// equalOps returns the number of [lcs.OpEqual] ops in ops.
+func equalOps(ops []lcs.Op) int {
+	equal := 0
+
+	for _, op := range ops {
+		if op.Kind == lcs.OpEqual {
+			equal++
+		}
+	}
+
+	return equal
 }
 
 // naiveLCSLen returns the length of the longest common subsequence of
