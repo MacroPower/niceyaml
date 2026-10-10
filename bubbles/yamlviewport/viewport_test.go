@@ -2727,12 +2727,13 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Empty(t, m.RevisionName())
 			},
 		},
-		"AtFirstRevision/Empty": {
+		"Empty": {
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				// With no revisions, both checks return true.
 				assert.True(t, m.AtFirstRevision())
 				assert.True(t, m.AtLatestRevision())
+				assert.Empty(t, m.RevisionNames())
 			},
 		},
 		"AtFirstRevision/Multiple": {
@@ -2757,6 +2758,7 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.True(t, m.AtLatestRevision())
 				assert.False(t, m.ShowingDiff()) // Only one revision, no diff possible.
 				assert.Equal(t, "v1", m.RevisionName())
+				assert.Equal(t, []string{"v1"}, m.RevisionNames())
 			},
 		},
 		"AddRevision/Multiple": {
@@ -2768,6 +2770,8 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.True(t, m.AtLatestRevision())
 				assert.True(t, m.ShowingDiff()) // At index > 0 with default diffMode.
 				assert.Equal(t, "v3", m.RevisionName())
+				assert.Equal(t, []string{"v1", "v2", "v3"}, m.RevisionNames())
+				assert.Positive(t, m.TotalLineCount())
 			},
 		},
 		"AddRevisions/Multiple": {
@@ -2806,15 +2810,6 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Equal(t, 2, m.RevisionCount())
 				assert.Equal(t, 0, m.RevisionIndex()) // Stays on the revision it was at.
 				assert.Equal(t, "v1", m.RevisionName())
-			},
-		},
-		"AddRevision": {
-			revisions: 2,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, 2, m.RevisionCount())
-				assert.Equal(t, 1, m.RevisionIndex()) // At latest (0-indexed).
-				assert.Equal(t, "v2", m.RevisionName())
 			},
 		},
 		"ClearRevisions": {
@@ -2936,36 +2931,30 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Equal(t, "v3", m.RevisionName())
 			},
 		},
-		"SetTokensReplacesSingleRevision": {
+		"SetRevision/Single": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetRevision(niceyaml.NewSourceFromString(rev1))
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 2, m.TotalLineCount())
+				assert.Equal(t, 1, m.RevisionCount())
+				assert.False(t, m.ShowingDiff())
+			},
+		},
+		"SetRevision/ReplacesRevisions": {
 			revisions: 2,
 			setup: func(m *yamlviewport.Model) {
 				m.SetRevision(niceyaml.NewSourceFromString(rev3)) // SetRevision uses the Source's name.
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
+				// SetRevision replaces the history with a single revision.
 				assert.Equal(t, 1, m.RevisionCount())
 				assert.Equal(t, 0, m.RevisionIndex()) // Only one revision at index 0.
 				assert.Empty(t, m.RevisionName())     // A source without a name.
-			},
-		},
-		"RevisionNames/Empty": {
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Empty(t, m.RevisionNames())
-			},
-		},
-		"RevisionNames/Single": {
-			revisions: 1,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, []string{"v1"}, m.RevisionNames())
-			},
-		},
-		"RevisionNames/Multiple": {
-			revisions: 3,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, []string{"v1", "v2", "v3"}, m.RevisionNames())
+				assert.False(t, m.ShowingDiff())
+				assert.Equal(t, 3, m.TotalLineCount())
 			},
 		},
 	}
@@ -3041,55 +3030,6 @@ func TestViewport_DiffMode(t *testing.T) {
 		// How many of the revisions the model holds before setup runs.
 		revisions int
 	}{
-		"DefaultModeIsAdjacent": {
-			revisions: 3,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
-			},
-		},
-		"SetDiffMode": {
-			revisions: 2,
-			setup: func(m *yamlviewport.Model) {
-				m.SetDiffMode(yamlviewport.DiffModeOrigin)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
-			},
-		},
-		"ToggleDiffMode/AdjacentToOrigin": {
-			revisions: 2,
-			setup: func(m *yamlviewport.Model) {
-				m.ToggleDiffMode()
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
-			},
-		},
-		"ToggleDiffMode/OriginToNone": {
-			revisions: 2,
-			setup: func(m *yamlviewport.Model) {
-				m.SetDiffMode(yamlviewport.DiffModeOrigin)
-				m.ToggleDiffMode()
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, yamlviewport.DiffModeNone, m.DiffMode())
-			},
-		},
-		"ToggleDiffMode/NoneToAdjacent": {
-			revisions: 2,
-			setup: func(m *yamlviewport.Model) {
-				m.SetDiffMode(yamlviewport.DiffModeNone)
-				m.ToggleDiffMode()
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
-			},
-		},
 		"ToggleDiffMode/FullCycle": {
 			revisions: 2,
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -3129,16 +3069,6 @@ func TestViewport_DiffMode(t *testing.T) {
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
-			},
-		},
-		"SetDiffMode/None": {
-			revisions: 2,
-			setup: func(m *yamlviewport.Model) {
-				m.SetDiffMode(yamlviewport.DiffModeNone)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, yamlviewport.DiffModeNone, m.DiffMode())
 			},
 		},
 		"ModeNone/NotShowingDiff": {
@@ -3510,94 +3440,6 @@ func TestViewport_State(t *testing.T) {
 
 			if tc.setup != nil {
 				tc.setup(&m)
-			}
-
-			tc.test(t, &m)
-		})
-	}
-}
-
-func TestViewport_SetFile(t *testing.T) {
-	t.Parallel()
-
-	simpleYAML := stringtest.Input(`
-		key: value
-		number: 42
-	`)
-
-	beforeYAML := stringtest.Input(`
-		name: original
-		count: 10
-	`)
-
-	afterYAML := stringtest.Input(`
-		name: modified
-		count: 20
-		new: added
-	`)
-
-	tcs := map[string]struct {
-		test       func(t *testing.T, m *yamlviewport.Model)
-		yaml       string
-		beforeYAML string
-		afterYAML  string
-	}{
-		"SetFile": {
-			yaml: simpleYAML,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, 2, m.TotalLineCount())
-				assert.Equal(t, 1, m.RevisionCount())
-				assert.False(t, m.ShowingDiff())
-			},
-		},
-		"AddRevisionFromFile": {
-			beforeYAML: beforeYAML,
-			afterYAML:  afterYAML,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, 2, m.RevisionCount())
-				assert.Equal(t, 1, m.RevisionIndex()) // At latest (0-indexed).
-				assert.True(t, m.ShowingDiff())       // Index > 0 shows a diff.
-				assert.Equal(t, "after", m.RevisionName())
-				assert.Positive(t, m.TotalLineCount())
-
-				m.GotoRevision(0)
-				assert.Equal(t, "before", m.RevisionName())
-				assert.False(t, m.ShowingDiff()) // First revision, no diff.
-			},
-		},
-		"SetTokensClearsRevisions": {
-			beforeYAML: beforeYAML,
-			afterYAML:  afterYAML,
-			yaml:       simpleYAML,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				// SetRevision replaces the history with a single revision.
-				assert.Equal(t, 1, m.RevisionCount())
-				assert.False(t, m.ShowingDiff())
-				assert.Equal(t, 2, m.TotalLineCount())
-				assert.Empty(t, m.RevisionName()) // SetRevision uses the Source's name.
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			m := testModel(testPrinter(), 80, 24)
-
-			if tc.beforeYAML != "" && tc.afterYAML != "" {
-				beforeLines := niceyaml.NewSourceFromString(tc.beforeYAML, niceyaml.WithName("before"))
-				m.AddRevision(beforeLines)
-
-				afterLines := niceyaml.NewSourceFromString(tc.afterYAML, niceyaml.WithName("after"))
-				m.AddRevision(afterLines)
-			}
-
-			if tc.yaml != "" {
-				m.SetRevision(niceyaml.NewSourceFromString(tc.yaml))
 			}
 
 			tc.test(t, &m)
@@ -3995,105 +3837,80 @@ func TestViewport_KeyMap(t *testing.T) {
 func TestViewport_RevisionDeduplication(t *testing.T) {
 	t.Parallel()
 
-	content := stringtest.Input(`
+	same := stringtest.Input(`
 		name: same
 		value: 10
 	`)
 
-	sameTokens1 := tokens.Tokenize(content)
-	sameTokens2 := tokens.Tokenize(content)
-
-	differentContent := stringtest.Input(`
+	different := stringtest.Input(`
 		name: different
 		value: 20
 	`)
-	differentTokens := tokens.Tokenize(differentContent)
+
+	// The first two revisions hold identical content.
+	revs := []string{same, same, different}
 
 	tcs := map[string]struct {
-		setup func(m *yamlviewport.Model)
-		test  func(t *testing.T, m *yamlviewport.Model)
+		test func(t *testing.T, m *yamlviewport.Model)
+		// How many of the revisions the model holds.
+		revisions int
 	}{
 		"DuplicateRevisions/CountIsCorrect": {
-			setup: func(m *yamlviewport.Model) {
-				// Add two revisions with identical content.
-				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
-				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
-			},
+			revisions: 2,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				// Should still report 2 revisions (the logical count).
 				assert.Equal(t, 2, m.RevisionCount())
+				assert.True(t, m.AtLatestRevision())
 				// At latest (index 1), RevisionName returns the current revision name.
-				assert.Equal(t, "second", m.RevisionName())
+				assert.Equal(t, "v2", m.RevisionName())
 			},
 		},
 		"DuplicateRevisions/NavigationWorks": {
-			setup: func(m *yamlviewport.Model) {
-				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
-				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
-			},
+			revisions: 2,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				// Should be able to navigate through all revisions.
 				m.GotoRevision(0)
 				assert.Equal(t, 0, m.RevisionIndex())
 				assert.True(t, m.AtFirstRevision())
-				assert.Equal(t, "first", m.RevisionName())
+				assert.Equal(t, "v1", m.RevisionName())
 
 				m.NextRevision()
 				assert.Equal(t, 1, m.RevisionIndex())
-				assert.Equal(t, "second", m.RevisionName())
+				assert.Equal(t, "v2", m.RevisionName())
 				assert.True(t, m.AtLatestRevision())
 
 				// Already at latest, NextRevision does nothing.
 				m.NextRevision()
 				assert.Equal(t, 1, m.RevisionIndex())
-				assert.Equal(t, "second", m.RevisionName())
+				assert.Equal(t, "v2", m.RevisionName())
 			},
 		},
 		"DuplicateRevisions/ContentRendersCorrectly": {
-			setup: func(m *yamlviewport.Model) {
-				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
-				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
-				m.GotoRevision(0)
-			},
+			revisions: 2,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
+
+				m.GotoRevision(0)
 
 				// Content should render (not crash).
 				view := m.View()
 				assert.Contains(t, view, "name")
 				assert.Contains(t, view, "same")
-				assert.Equal(t, "first", m.RevisionName())
+				assert.Equal(t, "v1", m.RevisionName())
 			},
 		},
 		"MixedRevisions/Works": {
-			setup: func(m *yamlviewport.Model) {
-				// Two identical + one different.
-				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
-				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
-				m.AddRevision(niceyaml.NewSourceFromTokens(differentTokens, niceyaml.WithName("different")))
-			},
+			revisions: 3, // Two identical + one different.
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Equal(t, 3, m.RevisionCount())
 
 				// At latest (index 2).
 				assert.True(t, m.AtLatestRevision())
-				assert.Equal(t, "different", m.RevisionName())
+				assert.Equal(t, "v3", m.RevisionName())
 				assert.True(t, m.ShowingDiff()) // Index > 0 shows a diff.
-			},
-		},
-		"AppendDuplicate/Works": {
-			setup: func(m *yamlviewport.Model) {
-				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens1, niceyaml.WithName("first")))
-				m.AddRevision(niceyaml.NewSourceFromTokens(sameTokens2, niceyaml.WithName("second")))
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, 2, m.RevisionCount())
-				assert.True(t, m.AtLatestRevision())
-				assert.Equal(t, "second", m.RevisionName())
 			},
 		},
 	}
@@ -4103,10 +3920,7 @@ func TestViewport_RevisionDeduplication(t *testing.T) {
 			t.Parallel()
 
 			m := testModel(testPrinter(), 80, 24)
-
-			if tc.setup != nil {
-				tc.setup(&m)
-			}
+			addRevisions(&m, revs[:tc.revisions]...)
 
 			tc.test(t, &m)
 		})
