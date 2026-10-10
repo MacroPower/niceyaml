@@ -3664,13 +3664,6 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		})
 	}
 
-	// A file subtest writes defs.json to a directory of its own.
-	defsFile := func(t *testing.T) string {
-		t.Helper()
-
-		return writeSchema(t, "defs.json", []byte(defsSchema))
-	}
-
 	// A caller's resolver that serves an unrelated URN. The registry
 	// alone holds the document a fragment names, so this resolver must
 	// not replace the registry's.
@@ -3678,105 +3671,60 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		jsonschema.WithRefResolver(jsonschema.SchemaMap{"urn:x": {}}),
 	))
 
+	// The registry fetches the document of each URL once.
 	tcs := map[string]struct {
-		ref      func(t *testing.T) schema.Ref
-		valid    string
-		invalid  string
-		want     string
-		opts     []schema.RegistryOption
-		requests int32
+		url     string
+		valid   string
+		invalid string
+		want    string
+		opts    []schema.RegistryOption
 	}{
 		"url pointer": {
-			ref: func(_ *testing.T) schema.Ref {
-				return schema.URL(baseURL + "/defs.json#/$defs/Foo")
-			},
-			valid:    "name: x\n",
-			invalid:  "other: 1\n",
-			want:     `missing required property "name"`,
-			requests: 1,
+			url:     baseURL + "/defs.json#/$defs/Foo",
+			valid:   "name: x\n",
+			invalid: "other: 1\n",
+			want:    `missing required property "name"`,
 		},
 		"url pointer with an escaped unreserved character": {
-			ref: func(_ *testing.T) schema.Ref {
-				return schema.URL(baseURL + "/%64efs.json#/$defs/Foo")
-			},
-			valid:    "name: x\n",
-			invalid:  "other: 1\n",
-			want:     `missing required property "name"`,
-			requests: 1,
+			url:     baseURL + "/%64efs.json#/$defs/Foo",
+			valid:   "name: x\n",
+			invalid: "other: 1\n",
+			want:    `missing required property "name"`,
 		},
 		"url pointer with a dot segment": {
-			ref: func(_ *testing.T) schema.Ref {
-				return schema.URL(baseURL + "/x/../defs.json#/$defs/Foo")
-			},
-			valid:    "name: x\n",
-			invalid:  "other: 1\n",
-			want:     `missing required property "name"`,
-			requests: 1,
+			url:     baseURL + "/x/../defs.json#/$defs/Foo",
+			valid:   "name: x\n",
+			invalid: "other: 1\n",
+			want:    `missing required property "name"`,
 		},
 		"url pointer with an upper-case host": {
-			ref: func(_ *testing.T) schema.Ref {
-				return schema.URL("http://Schemas.Test/defs.json#/$defs/Foo")
-			},
-			valid:    "name: x\n",
-			invalid:  "other: 1\n",
-			want:     `missing required property "name"`,
-			requests: 1,
+			url:     "http://Schemas.Test/defs.json#/$defs/Foo",
+			valid:   "name: x\n",
+			invalid: "other: 1\n",
+			want:    `missing required property "name"`,
 		},
+		// The registry decodes the unreserved %7e and spells the reserved
+		// %2f in upper-case hex, as the compiler does.
 		"url pointer with escapes in the query": {
-			// The registry decodes the unreserved %7e and spells the
-			// reserved %2f in upper-case hex, as the compiler does.
-			ref: func(_ *testing.T) schema.Ref {
-				return schema.URL(baseURL + "/defs.json?v=%7e1&q=%2f#/$defs/Foo")
-			},
-			valid:    "name: x\n",
-			invalid:  "other: 1\n",
-			want:     `missing required property "name"`,
-			requests: 1,
+			url:     baseURL + "/defs.json?v=%7e1&q=%2f#/$defs/Foo",
+			valid:   "name: x\n",
+			invalid: "other: 1\n",
+			want:    `missing required property "name"`,
 		},
 		"url anchor": {
-			ref: func(_ *testing.T) schema.Ref {
-				return schema.URL(baseURL + "/defs.json#named")
-			},
-			valid:    "name: x\n",
-			invalid:  "other: 1\n",
-			want:     `missing required property "name"`,
-			requests: 1,
-		},
-		"file url pointer": {
-			ref: func(t *testing.T) schema.Ref {
-				t.Helper()
-
-				return fileOrURL(t, "", "file://"+filepath.ToSlash(defsFile(t))+"#/$defs/Foo")
-			},
+			url:     baseURL + "/defs.json#named",
 			valid:   "name: x\n",
 			invalid: "other: 1\n",
 			want:    `missing required property "name"`,
 		},
 		"empty fragment names the root": {
-			ref: func(_ *testing.T) schema.Ref {
-				return schema.URL(baseURL + "/defs.json#")
-			},
-			valid:    "other: 1\n",
-			invalid:  "- x\n",
-			want:     `expected "object", got "array"`,
-			requests: 1,
+			url:     baseURL + "/defs.json#",
+			valid:   "other: 1\n",
+			invalid: "- x\n",
+			want:    `expected "object", got "array"`,
 		},
 		"url pointer with a caller's ref resolver": {
-			ref: func(_ *testing.T) schema.Ref {
-				return schema.URL(baseURL + "/defs.json#/$defs/Foo")
-			},
-			valid:    "name: x\n",
-			invalid:  "other: 1\n",
-			want:     `missing required property "name"`,
-			opts:     []schema.RegistryOption{urnResolver},
-			requests: 1,
-		},
-		"file url pointer with a caller's ref resolver": {
-			ref: func(t *testing.T) schema.Ref {
-				t.Helper()
-
-				return fileOrURL(t, "", "file://"+filepath.ToSlash(defsFile(t))+"#/$defs/Foo")
-			},
+			url:     baseURL + "/defs.json#/$defs/Foo",
 			valid:   "name: x\n",
 			invalid: "other: 1\n",
 			want:    `missing required property "name"`,
@@ -3791,7 +3739,7 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			client, requests := newClient()
 			opts := append([]schema.RegistryOption{
 				schema.WithHTTPClient(client),
-				schema.WithResolvers(tc.ref(t)),
+				schema.WithResolvers(schema.URL(tc.url)),
 			}, tc.opts...)
 			reg := schema.NewRegistry(opts...)
 
@@ -3799,9 +3747,44 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 
 			requireRejects(t, reg, tc.invalid, tc.want)
 
-			assert.Equal(t, tc.requests, requests.Load())
+			assert.Equal(t, int32(1), requests.Load())
 		})
 	}
+
+	t.Run("file url pointer", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			opts []schema.RegistryOption
+		}{
+			"registry's ref resolver": {},
+			"caller's ref resolver":   {opts: []schema.RegistryOption{urnResolver}},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				// Each case writes defs.json to a directory of its own,
+				// and the registry sends no request for it.
+				defsFile := writeSchema(t, "defs.json", []byte(defsSchema))
+				ref := fileOrURL(t, "", "file://"+filepath.ToSlash(defsFile)+"#/$defs/Foo")
+
+				client, requests := newClient()
+				opts := append([]schema.RegistryOption{
+					schema.WithHTTPClient(client),
+					schema.WithResolvers(ref),
+				}, tc.opts...)
+				reg := schema.NewRegistry(opts...)
+
+				require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "name: x\n")))
+
+				requireRejects(t, reg, "other: 1\n", `missing required property "name"`)
+
+				assert.Equal(t, int32(0), requests.Load())
+			})
+		}
+	})
 
 	t.Run("fragments of one document apply their own subschemas", func(t *testing.T) {
 		t.Parallel()
