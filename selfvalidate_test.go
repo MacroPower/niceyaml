@@ -3163,11 +3163,11 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 
 	// A decode with the walk on fills one new value, and a decode with the
 	// walk off fills another, which SelfValidate then checks. Both report
-	// err for the node the at selectors lead to.
+	// err for the node the at path leads to.
 	tcs := map[string]struct {
 		value  func() any
 		input  string
-		at     []string
+		at     paths.Path
 		source []niceyaml.SourceOption
 		opts   []niceyaml.DecodeOption
 		err    string
@@ -3268,7 +3268,7 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 				spec:
 				  hours: {open: "09:00", close: "08:00"}
 			`),
-			at:  []string{"spec"},
+			at:  paths.Current().Child("spec"),
 			err: "2:33: $.spec.hours.close: closes before it opens",
 		},
 		"nothing fails": {
@@ -3281,10 +3281,7 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			n := yamltest.FirstDocument(t, tc.input, tc.source...)
-			if len(tc.at) > 0 {
-				n = yamltest.At(t, n, paths.Current().Child(tc.at...))
-			}
+			n := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input, tc.source...), tc.at)
 
 			decoded := n.DecodeInto(t.Context(), tc.value(), tc.opts...)
 
