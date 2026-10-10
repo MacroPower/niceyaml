@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,6 +33,11 @@ func compileSchema(t *testing.T, schemaData []byte, opts ...schema.CompileOption
 	require.NoError(t, err)
 
 	return v
+}
+
+// flowSequence returns a flow sequence that lists item count times.
+func flowSequence(item string, count int) string {
+	return "[" + strings.Join(slices.Repeat([]string{item}, count), ", ") + "]"
 }
 
 // requireExcessiveAliasing fails the test unless err is a refusal of the
@@ -2238,9 +2244,8 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		// !!binary and lists count aliases of it.
 		binaryAliases := func(size, count int) string {
 			text := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, size))
-			list := strings.TrimSuffix(strings.Repeat("*bin, ", count), ", ")
 
-			return fmt.Sprintf("bin: &bin !!binary %s\nlist: [%s]\n", text, list)
+			return fmt.Sprintf("bin: &bin !!binary %s\nlist: %s\n", text, flowSequence("*bin", count))
 		}
 
 		tcs := map[string]struct {
@@ -2370,8 +2375,10 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		lists := "k: &k a\n" + yamltest.AliasLevels(7) + "*k : small\n"
 
 		// The sequence k lists 500 aliases to a scalar of 2000 bytes.
-		scalarAliases := "a: &a " + strings.Repeat("x", 2000) + "\n" +
-			"k: &k [" + strings.TrimSuffix(strings.Repeat("*a, ", 500), ", ") + "]\n"
+		scalarAliases := stringtest.LinesLF(
+			"a: &a "+strings.Repeat("x", 2000),
+			"k: &k "+flowSequence("*a", 500),
+		)
 
 		v := compileSchema(t, []byte(`{"maxProperties": 5}`))
 
@@ -2424,7 +2431,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 					strings.Repeat("    - {name: c, parent: *t}\n", 120),
 			},
 			"aliases to an enclosing anchor inside a nested one": {
-				input: "a: &A {inner: &B [" + strings.Repeat("*A, ", 299) + "*A]}\n",
+				input: "a: &A {inner: &B " + flowSequence("*A", 300) + "}\n",
 			},
 		}
 
@@ -2457,45 +2464,42 @@ func TestSchema_AliasExpansion(t *testing.T) {
 
 			bomb := yamltest.FirstDocument(t, lists+"b:\n  ? *l7\n  : v\nc: [*k]\nd: [*k]\ne: [x]\n")
 
-			// Each flow sequence from repeated lists item count times.
-			repeated := func(item string, count int) string {
-				return "[" + strings.TrimSuffix(strings.Repeat(item+", ", count), ", ") + "]"
-			}
-
 			// The 200 aliases in list repeat a sequence of 1000 numbers, so
 			// they make up more of list than the limit allows. The 2000
 			// numbers in filler keep their share of the document within it.
-			diluted := yamltest.FirstDocument(t,
-				"filler: "+repeated("0", 2000)+"\n"+
-					"big: &big "+repeated("0", 1000)+"\n"+
-					"list: "+repeated("*big", 200)+"\n",
-			)
+			diluted := yamltest.FirstDocument(t, stringtest.LinesLF(
+				"filler: "+flowSequence("0", 2000),
+				"big: &big "+flowSequence("0", 1000),
+				"list: "+flowSequence("*big", 200),
+			))
 
-			// The 1000 aliases in list each repeat 22 KB of base64 text,
-			// and other holds one more.
-			binary := yamltest.FirstDocument(t,
-				"bin: &bin !!binary "+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, 16<<10))+"\n"+
-					"list: "+repeated("*bin", 1000)+"\n"+
-					"other: [*bin]\n",
-			)
+			// The base64 text of 16 KB of bytes, which takes 22 KB.
+			text := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, 16<<10))
+
+			// The 1000 aliases in list each repeat the base64 text, and
+			// other holds one more.
+			binary := yamltest.FirstDocument(t, stringtest.LinesLF(
+				"bin: &bin !!binary "+text,
+				"list: "+flowSequence("*bin", 1000),
+				"other: [*bin]",
+			))
 
 			// The aliases repeat the same text through the tagged alias
 			// under s.
-			chained := yamltest.FirstDocument(t,
-				"bin: &bin !!binary "+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, 16<<10))+"\n"+
-					"s: &s !foo *bin\n"+
-					"list: "+repeated("*s", 1000)+"\n"+
-					"other: [*s]\n",
-			)
+			chained := yamltest.FirstDocument(t, stringtest.LinesLF(
+				"bin: &bin !!binary "+text,
+				"s: &s !foo *bin",
+				"list: "+flowSequence("*s", 1000),
+				"other: [*s]",
+			))
 
 			// The aliases repeat the same text, which lies under another
 			// tag and anchor of bin.
-			wrapped := yamltest.FirstDocument(t,
-				"bin: &bin !foo &raw !!binary "+
-					base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, 16<<10))+"\n"+
-					"list: "+repeated("*bin", 1000)+"\n"+
-					"other: [*bin]\n",
-			)
+			wrapped := yamltest.FirstDocument(t, stringtest.LinesLF(
+				"bin: &bin !foo &raw !!binary "+text,
+				"list: "+flowSequence("*bin", 1000),
+				"other: [*bin]",
+			))
 
 			tcs := map[string]struct {
 				doc       *niceyaml.Node
@@ -2646,11 +2650,6 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("defaults: &defaults\n" + entries.String()))
 		v := compileSchema(t, []byte(`{"maxProperties": 5}`))
 
-		// Each flow sequence from repeated lists *defaults count times.
-		repeated := func(count int) string {
-			return "[" + strings.TrimSuffix(strings.Repeat("*defaults, ", count), ", ") + "]"
-		}
-
 		// The refusal carries no location, so each case names where the
 		// node that binds it puts it.
 		tcs := map[string]struct {
@@ -2661,21 +2660,20 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			want string
 		}{
 			"aliases to a mapping of a reference document": {
-				input: "items: " + repeated(300) + "\n",
+				input: "items: " + flowSequence("*defaults", 300) + "\n",
 				want:  "app.yaml: excessive aliasing",
 			},
 			"node of aliases to a mapping of a reference document": {
 				path:  paths.Current().Child("items"),
-				input: "items: " + repeated(300) + "\n",
+				input: "items: " + flowSequence("*defaults", 300) + "\n",
 				want:  "app.yaml:1:1: $.items: excessive aliasing",
 			},
 			"aliases to an anchor on a tagged alias to a reference document": {
-				input: "local: &local !foo *defaults\nitems: " +
-					strings.ReplaceAll(repeated(300), "*defaults", "*local") + "\n",
-				want: "app.yaml: excessive aliasing",
+				input: "local: &local !foo *defaults\nitems: " + flowSequence("*local", 300) + "\n",
+				want:  "app.yaml: excessive aliasing",
 			},
 			"a few aliases to a mapping of a reference document": {
-				input: "items: " + repeated(2) + "\n",
+				input: "items: " + flowSequence("*defaults", 2) + "\n",
 			},
 		}
 
