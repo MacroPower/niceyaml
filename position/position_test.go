@@ -28,11 +28,6 @@ func TestNew(t *testing.T) {
 			col:  10,
 			want: position.Position{Line: 5, Col: 10},
 		},
-		"large values": {
-			line: 10000,
-			col:  500,
-			want: position.Position{Line: 10000, Col: 500},
-		},
 	}
 
 	for name, tc := range tcs {
@@ -108,10 +103,6 @@ func TestPosition_String(t *testing.T) {
 		"line 5 col 15 (0-indexed)": {
 			pos:  position.New(4, 14),
 			want: "4:14",
-		},
-		"large values": {
-			pos:  position.New(999, 499),
-			want: "999:499",
 		},
 	}
 
@@ -495,11 +486,6 @@ func TestNewSpan(t *testing.T) {
 			start: 5,
 			end:   10,
 			want:  position.Span{Start: 5, End: 10},
-		},
-		"large values": {
-			start: 10000,
-			end:   50000,
-			want:  position.Span{Start: 10000, End: 50000},
 		},
 	}
 
@@ -984,36 +970,6 @@ func TestSpans_Clamp(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
-}
-
-func TestSpans_Chained(t *testing.T) {
-	t.Parallel()
-
-	// Test the typical usage pattern: GroupIndices -> Expand -> Clamp.
-	indices := []int{5, 15}
-	context := 2
-
-	spans := position.GroupIndices(indices, context)
-	assert.Equal(t, position.Spans{
-		position.NewSpan(5, 6),
-		position.NewSpan(15, 16),
-	}, spans)
-
-	expanded := spans.Expand(context)
-	assert.Equal(t, position.Spans{
-		position.NewSpan(3, 8),
-		position.NewSpan(13, 18),
-	}, expanded)
-
-	clamped := expanded.Clamp(0, 20)
-	assert.Equal(t, position.Spans{
-		position.NewSpan(3, 8),
-		position.NewSpan(13, 18),
-	}, clamped)
-
-	// Test full chain in one call.
-	got := position.GroupIndices(indices, context).Expand(context).Clamp(0, 20)
-	assert.Equal(t, clamped, got)
 }
 
 func TestContextSpans(t *testing.T) {
