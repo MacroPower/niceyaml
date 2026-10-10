@@ -116,6 +116,18 @@ func errorTexts(nodes []niceyaml.ErrorTree) []string {
 	return texts
 }
 
+// bindingTexts returns the message of each binding in the tree of err, in
+// the order [yamltest.BoundIn] returns them. The result is empty rather
+// than nil when the tree holds no binding.
+func bindingTexts(err error) []string {
+	texts := []string{}
+	for _, bound := range yamltest.BoundIn(err) {
+		texts = append(texts, bound.Error())
+	}
+
+	return texts
+}
+
 func TestError(t *testing.T) {
 	t.Parallel()
 
@@ -7530,12 +7542,7 @@ func TestSourceError_Errors_AboveBinding(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := []string{}
-			for _, se := range yamltest.BoundIn(dd.Bind(tc.err)) {
-				got = append(got, se.Error())
-			}
-
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, bindingTexts(dd.Bind(tc.err)))
 		})
 	}
 }
@@ -7996,15 +8003,10 @@ func TestRebase(t *testing.T) {
 
 		// The bound join is no node of the tree, so each branch is a
 		// binding of its own, by position.
-		got := []string{}
-		for _, se := range yamltest.BoundIn(dd.Bind(err)) {
-			got = append(got, se.Error())
-		}
-
 		assert.Equal(t, []string{
 			"2:1: $.hours: bad hours",
 			"3:9: $.hours.open: bad open",
-		}, got)
+		}, bindingTexts(dd.Bind(err)))
 	})
 
 	t.Run("an error that only wraps a join rebases as the join", func(t *testing.T) {
@@ -8024,15 +8026,10 @@ func TestRebase(t *testing.T) {
 
 		require.ErrorAs(t, err, &e)
 
-		got := []string{}
-		for _, se := range yamltest.BoundIn(dd.Bind(err)) {
-			got = append(got, se.Error())
-		}
-
 		assert.Equal(t, []string{
 			"3:9: $.hours.open: bad open",
 			"4:10: $.hours.close: bad close",
-		}, got)
+		}, bindingTexts(dd.Bind(err)))
 
 		bare := dd.Bind(niceyaml.Rebase(errors.Join(open, closeErr), hours))
 		assert.Equal(
@@ -8050,15 +8047,6 @@ func TestRebase(t *testing.T) {
 		open := niceyaml.NewError("bad open", niceyaml.AtPath(paths.Current().Child("open")))
 		closeErr := niceyaml.NewError("bad close", niceyaml.AtPath(closePath))
 		joined := sparseJoinError{errs: []error{open, nil, closeErr}}
-
-		bindings := func(err error) []string {
-			got := []string{}
-			for _, se := range yamltest.BoundIn(dd.Bind(err)) {
-				got = append(got, se.Error())
-			}
-
-			return got
-		}
 
 		bare := niceyaml.Rebase(errors.Join(open, closeErr), hours)
 
@@ -8087,7 +8075,7 @@ func TestRebase(t *testing.T) {
 				require.ErrorAs(t, err, &got)
 				assert.Equal(t, joined, got)
 
-				assert.Equal(t, bindings(bare), bindings(err))
+				assert.Equal(t, bindingTexts(dd.Bind(bare)), bindingTexts(dd.Bind(err)))
 				assert.Equal(
 					t,
 					niceyaml.FormatError(dd.Bind(bare), niceyaml.WithContextLines(-1)),
