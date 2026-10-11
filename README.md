@@ -132,6 +132,8 @@ A [`schema.Registry`][niceyaml/schema.Registry] picks the schema of each documen
 
 ### Layers
 
+- [examples/layers](examples/layers)
+
 [`niceyaml.NewSourceFromLayers`][niceyaml.NewSourceFromLayers] merges several files into one document, such as a base file with the file of one environment over it, and returns a [`Source`][niceyaml.Source] that decodes that document once. Pass a context and the `Source` of each file, lowest first:
 
 ```go

@@ -1,0 +1,12 @@
+---
+cafe:
+  name: Café Yamüll
+  seats: 24
+
+hours:
+  open: "07:00"
+  close: "17:00"
+
+menu:
+  - Kaffe
+  - Kanelbulle

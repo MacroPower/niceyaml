@@ -1,0 +1,12 @@
+---
+cafe:
+  seats: 40
+
+hours:
+  close: "21:00"
+
+menu:
+  - Kaffe
+  - Semla
+
+wifi: yamull-guest
