@@ -25,6 +25,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
+	"go.jacobcolvin.com/niceyaml/internal/pathindex"
 	"go.jacobcolvin.com/niceyaml/internal/rejection"
 	"go.jacobcolvin.com/niceyaml/internal/segment"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
@@ -713,6 +714,7 @@ func newDocuments(src *Source, docs []docparse.Document, errs []error) []*Node {
 
 		doc.node = &Node{source: src, doc: doc, content: doc.tokens, base: paths.Doc(), span: parsed.Span}
 		doc.tree = sync.OnceValue(doc.newDecodeTree)
+		doc.pathIndex = sync.OnceValue(func() *pathindex.Index { return pathindex.New(doc.root.Body) })
 		doc.state = aliasing.NewState(!src.skipAliasLimit, func() (ast.Node, *paths.Resolver) {
 			return doc.root.Body, doc.pathResolver()
 		})
@@ -811,9 +813,9 @@ type document struct {
 	// Returns the tree the go-yaml decoder reads for the document, and
 	// builds it on the first call.
 	tree func() *decodetree.Tree
-	// Finds the node of root at a position, which pathIndex builds for
-	// the first call of PathAt.
-	paths *pathIndex
+	// Returns the index that finds the node of root at a position, and
+	// builds it on the first call of PathAt.
+	pathIndex func() *pathindex.Index
 	// The state that the packages of the module reach through
 	// aliasing.StateOf.
 	state *aliasing.State
@@ -830,8 +832,6 @@ type document struct {
 	preamble int
 	// Creates resolver once, for the first path any Node resolves.
 	resolverOnce sync.Once
-	// Builds paths once, for the first call of PathAt.
-	pathsOnce sync.Once
 }
 
 // pathResolver returns the [paths.Resolver] for the document, and creates
@@ -3734,4 +3734,70 @@ func spellingTexts(tks token.Tokens) []string {
 	}
 
 	return append(values, text.String())
+}
+
+// PathAt returns the path of the innermost node of the document at pos,
+// and true. The position is in the coordinates of [Source.Lines], where
+// line 0 is line 1 of the text, as a cursor in a viewer, the start of a
+// [go.jacobcolvin.com/niceyaml/finder.Finder] match, or
+// [SourceError.Position] gives one. A viewer thus names the value under
+// its cursor:
+//
+//	if path, ok := doc.PathAt(cursor); ok {
+//		status = path.String() // $.spec.containers[0].image
+//	}
+//
+// The path starts at `$`, the root of the document, whichever [Node] of
+// the document the caller holds. A `$` path resolves from that root
+// through any Node, so the path goes back to the [Node.At] or the
+// [Node.Ranges] of the Node that returned it, or of any other Node of
+// the document. A position in another document of the source reports
+// false, so a caller with a file of several documents asks each one:
+//
+//	for _, doc := range docs {
+//		if path, ok := doc.PathAt(pos); ok {
+//			return doc, path
+//		}
+//	}
+//
+// The innermost node is an entry of a mapping or an element of a
+// sequence. A position on the key of an entry gives a path that ends in
+// `~`, as [paths.Path.Key] writes one, and a position on the ":" or the
+// value gives the path of the entry. The "-" of a block sequence belongs
+// to its element. A collection holds text of its own between its entries
+// or elements, such as "[", "{", ",", and the anchor or tag in front of
+// it. A position there gives the path of the collection, which is the
+// root for a collection or a scalar at the root of the document. A
+// position in the indentation of a line resolves to the token that
+// follows it, as [line.Lines.TokenAt] describes.
+//
+// The path is the place where the document writes the node. A position
+// on an alias gives the path of the entry or element that holds the
+// alias. A position inside the content of an anchor gives the path where
+// the anchor defines that content, though a path through an alias or a
+// `<<` merge key reaches the same node.
+//
+// PathAt reports false where no node of the document lies: on a comment,
+// on a blank line, on a "---" header, a "..." marker, or a directive, and
+// outside the lines of the source. It reports false for a document that
+// did not parse, as [Node.Err] describes, and for one with no content.
+// It also reports false for a position inside an entry that no path
+// selects. Such an entry is the earlier of two entries with one key, one
+// that a `<<` merge key after it overrides, or one whose key has no
+// name, as [paths.Resolver.KeyName] reports. A path it returns therefore
+// selects the node at pos, and none of its selectors is a wildcard.
+//
+// The first call reads the tree of the document once, and every Node of
+// the document shares what it found.
+func (n *Node) PathAt(pos position.Position) (paths.Path, bool) {
+	if n == nil || n.doc.err != nil {
+		return paths.Path{}, false
+	}
+
+	tk := n.source.lines.TokenAt(pos)
+	if tk == nil || tk.Position == nil || tk.Type == token.CommentType {
+		return paths.Path{}, false
+	}
+
+	return n.doc.pathIndex().PathAt(n.doc.pathResolver(), tk.Position.Offset)
 }

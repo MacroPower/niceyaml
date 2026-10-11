@@ -39,7 +39,7 @@ func rejectionLabel(label rejection.Label) error {
 // go-yaml decoder reported at tk, a token of the source.
 //
 // The first is the path of the node the decoder names by tk, as
-// [pathIndex.ownerPath] finds it, which starts at `$`. The
+// [pathindex.Index.OwnerPath] finds it, which starts at `$`. The
 // error then binds where that path resolves, which is where an error at
 // the same path from a [Validator] or a [SelfValidator] binds.
 //
@@ -51,7 +51,7 @@ func rejectionLabel(label rejection.Label) error {
 // A node under a key with no name has no path, so the position of tk
 // alone locates it.
 func (n *Node) rejectionLocation(tk *token.Token) []ErrorOption {
-	path, selects, ok := n.doc.pathIndex().ownerPath(n.doc.pathResolver(), tk)
+	path, selects, ok := n.doc.pathIndex().OwnerPath(n.doc.pathResolver(), tk)
 
 	switch {
 	case !ok:
