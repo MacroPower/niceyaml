@@ -1170,6 +1170,7 @@ func newDocuments(src *Source, docs []docparse.Document, errs []error) []*Node {
 		doc.node = &Node{source: src, doc: doc, content: doc.tokens, base: paths.Doc(), span: parsed.Span}
 		doc.tree = sync.OnceValue(doc.newDecodeTree)
 		doc.pathIndex = sync.OnceValue(func() *pathindex.Index { return pathindex.New(doc.root.Body) })
+		doc.resolver = sync.OnceValue(doc.newResolver)
 		doc.state = aliasing.NewState(!src.skipAliasLimit, func() (ast.Node, *paths.Resolver) {
 			return doc.root.Body, doc.pathResolver()
 		})

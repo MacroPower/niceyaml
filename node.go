@@ -7,7 +7,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -58,9 +57,9 @@ type document struct {
 	// Source and to the document bindSyntaxErrors picks for it, which is
 	// nil for one that parsed.
 	err error
-	// Resolves every path in root. The first call of pathResolver creates
-	// it, and since no Node edits the tree, it binds the aliases once.
-	resolver *paths.Resolver
+	// Returns the resolver of every path in root, and creates it on the
+	// first call. No Node edits the tree, so it binds the aliases once.
+	resolver func() *paths.Resolver
 	// Returns the tree the go-yaml decoder reads for the document, and
 	// builds it on the first call.
 	tree func() *decodetree.Tree
@@ -81,25 +80,22 @@ type document struct {
 	fileIndex int
 	// The number of tokens at the start of tokens before the content.
 	preamble int
-	// Creates resolver once, for the first path any Node resolves.
-	resolverOnce sync.Once
 }
 
-// pathResolver returns the [paths.Resolver] of the document, which it
-// creates on the first call. A document that did not parse gets one with
-// no document, so a path returns an error rather than an empty match.
+// pathResolver returns the [paths.Resolver] of the document.
 func (d *document) pathResolver() *paths.Resolver {
-	d.resolverOnce.Do(func() {
-		if d.err != nil {
-			d.resolver = paths.NewResolver(nil)
+	return d.resolver()
+}
 
-			return
-		}
+// newResolver creates the [paths.Resolver] of the document. A document
+// that did not parse gets one with no document, so a path returns an
+// error rather than an empty match.
+func (d *document) newResolver() *paths.Resolver {
+	if d.err != nil {
+		return paths.NewResolver(nil)
+	}
 
-		d.resolver = paths.NewResolver(d.root)
-	})
-
-	return d.resolver
+	return paths.NewResolver(d.root)
 }
 
 // Node is a scope in a YAML document: the root of the document, which
