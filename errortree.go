@@ -66,93 +66,32 @@ type ErrorTree struct {
 }
 
 // NewErrorTree creates a new [ErrorTree] from err. The root holds the
-// message of err without the errors below it. Each problem err heads and
-// each of its details is a child, and a child with children of its own
-// is a subtree. For an error bound to a source, the root keeps the
-// "name:line:col:" position and each child carries the "line:col:"
-// position its own location resolved to. The children of a binding sort
-// by position within their source. Each node holds its error in Err and
-// its binding in Bound. A nil err yields the zero ErrorTree.
+// message of err without the errors below it, so the context a wrapper
+// added stays in front and each error shows once. Each problem err heads
+// and each of its details is a child, and a child with children of its
+// own is a subtree. A nil err yields the zero ErrorTree.
 //
-// # Root Label
-//
-// The root label is the message of err without the errors below it, so
-// context a wrapper added stays in front. The message of a wrapper around
-// a join holds every branch of the join, and the message of one around a
-// binding holds the errors [SourceError.Error] lists. Those errors are
-// the children of the node, so each shows once. The root of a wrapper
-// around a binding keeps the text of the wrapper and the line of the
-// binding, as "load config: cafe.yaml: 2 schema violations" does. The
-// root of a wrapper around a join keeps the text of the wrapper alone,
-// such as "load config:". A wrapper that rewrites the message it wraps
-// leaves nothing to tell apart, so its text stays whole above its
-// children.
-//
-// The children come from the errors rather than from the text of the
-// message, so a wrapper that rewrites the message it wraps keeps its
-// children. Only the label of a node reads the message, to leave out what
-// the children show.
-//
-// # Bound Errors
-//
-// For an error bound to a source, the root keeps the "name:line:col:"
-// position [SourceError.Error] gives it, and each child, a binding of its
-// own, carries the "line:col:" position its location resolved to without
-// the name, since
-// the root names the source already. A child with no
-// position likewise drops the document its message names, unless it is
-// bound to another document than its parent, and then it reads as
-// "document 2: msg". The children of a
-// binding sort by position within the source they are bound to, with the
-// sources in the order they first appear, since a line number counts only
-// in the source that holds it. Children whose location did not resolve
-// follow the rest in the order their parent lists them. An [Error] or
-// join outside any binding keeps its children in the order it lists them,
-// bindings included. So a join of one binding per document shows the
-// documents in the order [errors.Join] took them. A child with children
-// of its own is a subtree.
-//
-// # Unbound Errors
-//
-// An error bound to no source has no position to show. When its cause
-// chain reaches a located [*Error] that carries a path before any
-// binding, the text of its node has that path in front, as the Error
-// wrote it, such as "@.path: msg" for a check of a value. A binding puts
-// the path there the same way, as a `$` path from the root of the
-// document, so the row names the value whatever wraps the Error.
-//
-// # Joins
+// The root of a binding keeps the "name:line:col:" position
+// [SourceError.Error] gives it. Each child reads "line:col:" without the
+// name, or names its document when it is bound to another document than
+// its parent, as "document 2: msg". The children of a binding sort by
+// position within their source, with the sources in the order they first
+// appear and the children whose location did not resolve last. Outside a
+// binding, children keep the order the error lists them in. The node of
+// an error bound to no source puts the path of its [*Error] in front of
+// the message, as "@.path: msg".
 //
 // An error that unwraps to several and whose message is theirs one per
-// line, such as one from [errors.Join], is a node with no text and one
-// child per error, so a run over several files reads as one tree with a
-// branch per file. An [Error] that only wraps such an error, with no
-// location and no details, is the same node. A
-// binding of such an error is the same node, with each child carrying
-// the name of its source in front of its position, since no root names
-// the source for it. So is an Error that only wraps such a binding, and
-// so are the children below a wrapper that keeps no line of the binding.
-// A node with no text adds nothing. Its children take its place in the
-// tree above it, and one with a single child is that child.
-//
-// # Other Multi-Errors
-//
-// Any other error that unwraps to several keeps its text and has a child
-// per branch. A wrapper that [fmt.Errorf] builds with several %w verbs
-// keeps only its branches that carry a location or errors below them,
-// since its text shows the rest already. With one such branch, its
-// children are the ones along the cause chain of that branch.
-//
-// # Node Fields
+// line, such as one from [errors.Join], is a node with no text, and its
+// children take its place in the tree above it. Any other error that
+// unwraps to several keeps its text and has a child per branch, except
+// that a wrapper [fmt.Errorf] builds with several %w verbs keeps only the
+// branches that carry a location or errors below them.
 //
 // Each node holds its error in Err and its binding in Bound. The node of
-// a binding holds that binding in both. The node of a wrapper around a
-// binding, such as one from [fmt.Errorf], holds the wrapper in Err and
-// the binding in Bound, so the node reports the location its text shows.
-// So does the node of an [Error] with details around a binding. A
-// located Error above a binding names a location no source resolved, so
-// its node has no Bound, as the node of any other error bound to no
-// source. A nil err yields the zero ErrorTree.
+// a wrapper around a binding holds the wrapper in Err and the binding in
+// Bound. A located [*Error] above a binding names a location no source
+// resolved, so its node has no Bound.
 func NewErrorTree(err error) ErrorTree {
 	return newTree(ErrorTree{}, appendTrees(nil, err))
 }
@@ -183,83 +122,28 @@ func (t ErrorTree) All() iter.Seq[ErrorTree] {
 // Problems returns an iterator over the nodes that each stand for one
 // problem, in the order [ErrorTree.All] yields them. It is the walk of a
 // report that lists the problems of an error as rows, such as JSON lines,
-// CI annotations, or editor diagnostics. A heading, such as a summary or
-// a join, yields no node of its own, and the walk goes on to the problems
-// below it. Every other node with text stands for one problem, and its
-// Children are the details of that problem.
+// CI annotations, or editor diagnostics. A heading, which is a summary
+// from [NewSummary], a join, any other error that unwraps to several, or
+// a wrapper around one, yields no node of its own, and the walk goes on to
+// the problems below it. Every other node with text is one problem, and
+// Problems yields it with exactly its details as its Children, each with
+// Detail set. A node yields whether or not it carries a location, so an
+// error bound to no source, such as a file that did not read, yields a row
+// too. The rows match the lines [SourceError.Error] lists.
 //
-// # Roles
-//
-// The errors declare which nodes are problems, so the walk reads no shape
-// of the tree:
-//
-//   - A summary from [NewSummary], a join from [errors.Join], and any
-//     other error that unwraps to several errors head separate problems.
-//     So does a wrapper around one, such as one from [fmt.Errorf].
-//     Problems never yields a heading and walks on to the problems below
-//     it.
-//   - Every other node with text stands for one problem, and Problems
-//     yields it. The walk goes no further below a node it yields, whose
-//     Children are exactly the details [WithDetails] added to its error,
-//     each with Detail set.
-//
-// A value that fails an anyOf of a schema therefore yields one row, with
-// the forms it failed below it, and a validation whose message counts
-// three violations yields three rows. The rows match the lines of the
-// problems [SourceError.Error] lists below each heading. Whether a node
-// carries a location plays no part, so an error bound to no source, such
-// as a file that failed to read, yields by the same rule, and the report
-// holds every problem.
-//
-// # Rows
-//
-// A row reads its message from [ErrorTree.Message] and its path from
-// [ErrorTree.Path], which answer for a node bound to no source as well,
-// and its file and position from [ErrorTree.Source] and
-// [ErrorTree.Position], which read the binding of the node and return
-// zero values for a node that has none. The Children of a node Problems
-// yields are its details, such as the reasons for the problem or the
-// related locations it names, and each answers Message the same way. The
-// function [Problems] walks the tree of an error the same way:
+// A row reads [ErrorTree.Message] and [ErrorTree.Path], which answer for
+// every node, and [ErrorTree.Source] and [ErrorTree.Position], which
+// return zero values for a node bound to no source. [errors.Is] and
+// [errors.As] on Err search the problem and pass over its details:
 //
 //	for problem := range niceyaml.Problems(err) {
-//		row := Row{Message: problem.Message()}
-//
-//		if path, ok := problem.Path(); ok {
-//			row.Path = path.String()
-//		}
-//
-//		if src := problem.Source(); src != nil {
-//			row.File = src.Name()
-//		}
-//
-//		if pos, ok := problem.Position(); ok {
-//			row.Line, row.Column = pos.Line+1, pos.Col+1
-//		}
-//
-//		for _, detail := range problem.Children {
-//			row.Related = append(row.Related, detail.Message())
+//		row := Row{Message: problem.Message(), Invalid: problem.IsInvalid()}
+//		if rule, ok := errors.AsType[*RuleError](problem.Err); ok {
+//			row.Rule = rule.ID
 //		}
 //
 //		report(row)
 //	}
-//
-// A row reads the typed error of its problem from Err. [errors.Is] and
-// [errors.As] there search that problem and pass over its details, for a
-// node bound to no source as well, so a rule that a detail wraps never
-// reads as the rule of the row:
-//
-//	if rule, ok := errors.AsType[*RuleError](problem.Err); ok {
-//		row.Rule = rule.ID
-//	}
-//
-// # Fault
-//
-// A row tells a fault of the document from a check that could not run
-// with [ErrorTree.IsInvalid], and [IsInvalid] asks the same of every row.
-// The document is at fault for each problem an [*Error] from [Invalid]
-// heads, so each branch of a join that Invalid wraps yields a row that
-// is invalid, while its text stays its own.
 func (t ErrorTree) Problems() iter.Seq[ErrorTree] {
 	return func(yield func(ErrorTree) bool) {
 		t.problems(yield)
@@ -312,30 +196,13 @@ func (t ErrorTree) heads() bool {
 }
 
 // IsInvalid reports whether the document is at fault for every problem at
-// or below the node, the ones [ErrorTree.Problems] yields for it. A node
-// that yields no problem, such as the zero ErrorTree, is not invalid.
-// The function [IsInvalid] answers for an error as the root of its tree
-// does, and it describes which problems the document is at fault for.
-//
-// A report that lists the problems of an error as rows asks each row, to
-// tell a fault of the document from a check that could not run:
-//
-//	for problem := range niceyaml.NewErrorTree(err).Problems() {
-//		row := Row{Message: problem.Message(), Invalid: problem.IsInvalid()}
-//		...
-//	}
-//
-// A heading answers through the problems it heads, whatever its own
-// error declares. The root of a join of a violation and a read error is
-// not invalid, and neither is a summary or a wrapper above that pair. The
-// details of a problem explain it and decide nothing, so a read error
-// that names a located detail from [NewError] is not invalid. A node with
-// Detail set answers as any other node does, for its own error or for the
-// problems it heads, and its answer changes nothing for the node it
-// explains.
-//
-// The method reads Err, so a node built by hand with no Err is not
-// invalid.
+// or below the node, the ones [ErrorTree.Problems] yields for it, as the
+// function [IsInvalid] describes. A node that yields no problem, such as
+// the zero ErrorTree, is not invalid. A heading answers through the
+// problems it heads, whatever its own error declares, and the details of
+// a problem decide nothing. A node with Detail set answers for its own
+// error, and its answer changes nothing for the node it explains. The
+// method reads Err, so a node built by hand with no Err is not invalid.
 func (t ErrorTree) IsInvalid() bool {
 	found := false
 
@@ -1378,41 +1245,23 @@ func (t ErrorTree) eachNode(yield func(ErrorTree) bool) bool {
 // a report as plain text and
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draws one with
 // styles. A renderer of its own, such as one that writes HTML, draws the
-// same parts, so it shows the excerpts, the names, and the reasons they
-// show:
+// same parts:
 //
 //	rep := niceyaml.NewErrorReport(err)
 //
 //	drawTree(rep.Tree)
 //
 //	for _, excerpt := range rep.Excerpts {
-//		if excerpt.Named {
-//			drawName(excerpt.Source.Name())
-//		}
-//
 //		drawView(excerpt.View)
 //	}
 //
-//	for _, bound := range rep.Unresolved {
-//		drawReason(bound.Unresolved())
-//	}
-//
-// The report holds every text as the error or the source wrote it. A key
-// of the document puts no control character into a message or a reason,
-// since a path writes one as an escape and the text of a decode
-// rejection draws one as its picture. A message can still hold one in
-// text the library did not write, such as the error of the program's own
-// unmarshaler or validator, which can quote a value of the document. The
-// name of a source can hold one too. A renderer therefore escapes each
+// The report holds every text as the error or the source wrote it. A
+// message from the program's own unmarshaler or validator, or the name of
+// a source, can hold a control character, so a renderer escapes each
 // message and each name for its output.
-// [go.jacobcolvin.com/niceyaml/escape.Control] draws each control
-// character of a text as its picture, a line feed among them, so a
-// renderer that keeps the rows of a message escapes each row on its own.
-// FormatError draws them as their pictures.
-//
-// A report a program reads, such as JSON lines or editor diagnostics,
-// lists the problems [ErrorTree.Problems] yields for [NewErrorTree]
-// instead.
+// [go.jacobcolvin.com/niceyaml/escape.Control] draws a line feed as its
+// picture too, so a renderer that keeps the rows of a message escapes
+// each row on its own.
 //
 // Create instances with [NewErrorReport].
 type ErrorReport struct {

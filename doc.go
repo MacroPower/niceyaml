@@ -74,86 +74,6 @@
 // one, [go.jacobcolvin.com/niceyaml/printer.Printer] renders with
 // [go.jacobcolvin.com/niceyaml/style.Default].
 //
-// [Error] points at a location in a YAML document: a path, a position, or a
-// range, so a validator can build one without holding the source.
-// [Error.Error] returns the message alone, with no location in it, and a
-// binding puts the location in front. [FormatError] reads an Error that no
-// binding holds yet, with its path in front as "@.path: msg".
-//
-// A path starts at one of two points, as in RFC 9535 JSONPath. A `$`
-// path, from [paths.Doc], reads from the root of the document. An `@`
-// path, from [paths.Current], reads from the current node: the [Node]
-// that resolves the path, binds an error that carries it, or rebases it.
-// A check written for a type reports `@` paths, which read from the value
-// it checked, and the Node of that value puts its own path in front when
-// it binds them. Every path the package hands out, such as [Node.Path],
-// [Node.PathAt], and [SourceError.Path], starts at `$`, so it names the
-// same value through any Node of the document.
-//
-// An Error is one problem. [WithDetails] adds the errors that explain it,
-// such as its reasons, the forms a value failed to match, or a related
-// location, and a detail is never a problem of its own. Several problems
-// are a join from [errors.Join], or a summary from [NewSummary] whose
-// message heads them, such as "2 schema violations":
-//
-//	conflict := niceyaml.NewError("port 80 conflicts", niceyaml.AtPath(portB),
-//		niceyaml.WithDetails(niceyaml.NewError("first declared here", niceyaml.AtPath(portA))))
-//
-//	return niceyaml.NewSummary(fmt.Sprintf("%d violations", len(errs)), errs...)
-//
-// Every reader keeps to these roles. The lines of a message, the rows of
-// a report, and the locations a scoped [Node] gives thus agree on what
-// the problems of an error are. So do [errors.Is] and [errors.As], which
-// match the problems of an error and pass over the details that explain
-// them.
-//
-// [SourceError] binds an error to its [Source] and to the document its
-// path resolves in. Every error a Source or one of its Nodes produces is
-// one. [Node.Bind] binds an error built elsewhere to that document, and
-// [Source.Bind] binds one to the document its location falls in. A
-// position or a range falls in the document whose span holds it, and a
-// path in the one document of a source that holds one.
-// [SourceError.Error] puts the resolved position in front of the
-// message, or the name of the source alone when the error carries no
-// location, and runs over several lines when the message does. An error
-// with no position in a file of several documents names its document
-// behind the name, as "cafe.yaml: document 3: no matching schema". Under a
-// summary or a join, it lists the problems below, one per line behind its
-// own position, and it leaves details out. The message of a validator's
-// report thus names each violation wherever the error goes, as a wrapper
-// from [fmt.Errorf] carries it:
-//
-//	load config: cafe.yaml: 2 schema violations
-//	cafe.yaml:6:8: $.spec.sla: string does not match pattern
-//	cafe.yaml:22:11: $.spec.hours.days: expected "array", got "string"
-//
-// The list stops after [ErrorListLimit] errors and counts the rest.
-// [SourceError.Excerpt] returns the surrounding lines with the location
-// highlighted.
-// The errors a summary heads and the details of an Error are part of the
-// Error, and binding binds each of them too. Each problem a summary heads
-// and each detail binds as a SourceError of its own, with its own
-// children, if any, and its own location when its error carries one. A
-// validator's report of several
-// violations is therefore a tree of bound errors. [FormatError] prints
-// the message as a tree with a branch per error below another behind its
-// position, details included, then the excerpt, so a log names every
-// violation and where it is. The excerpt marks every location in the
-// tree, with the message of each error below the root as an annotation
-// below its own line and distant errors in separate hunks. An error that
-// unwraps to several, such as one from [errors.Join], binds as one
-// SourceError with a child per branch. A wrapper from [fmt.Errorf] with
-// several %w verbs keeps only the branches that carry a location or
-// errors below them, so a sentinel it wraps beside a cause shows only in
-// its message.
-// [Bindings] finds every binding in an error joined from bound errors,
-// such as one per document of a file. FormatError prints the errors of
-// such a join on one excerpt per source, each with its message beside
-// its caret. A SourceError keeps the text it binds and puts the position
-// and the path in front of it, so context that [fmt.Errorf] adds around
-// an Error before the binding stays behind the path, and context it adds
-// around the binding stands in front of the position.
-//
 // # Lines
 //
 // YAML tokens can span multiple lines, as block scalars and multiline
@@ -177,115 +97,176 @@
 // so a token taken from a node finds its lines the same way. The [line]
 // package documents the view and its metadata in full.
 //
+// # Errors
+//
+// An [*Error] is what a check knows about a problem: a message, a
+// location, and whether the document is at fault, with no source. A
+// validator builds one without holding the document. Binding it through a
+// [Node] or a [Source] resolves the location against the text and
+// produces a [*SourceError], whose message puts the position and the path
+// in front of the text, as "cfg.yaml:4:10: $.license: no such file".
+// [Error.Error] returns the message alone, so a wrapper such as
+// [fmt.Errorf] may add context anywhere between the check and the
+// binding, and the bound line keeps that context behind the path.
+//
+// Each error plays one of three roles. A problem is one thing wrong, such
+// as an Error from [NewError]. A detail from [WithDetails] explains a
+// problem, as its reasons or a related location do, and is never a
+// problem of its own. A heading stands over several problems, as a join
+// from [errors.Join], a summary from [NewSummary], or a wrapper around
+// either does. Every reader keeps to these roles. [SourceError.Error]
+// prints one line per problem, [Problems] yields one node per problem,
+// and [errors.Is] and [errors.As] match problems and pass over details.
+// [Rebase] and a scoped [Node.Bind] give a location to each problem that
+// carries none and to no heading or detail:
+//
+//	conflict := niceyaml.NewError("port 80 conflicts", niceyaml.AtPath(portB),
+//		niceyaml.WithDetails(niceyaml.NewError("first declared here", niceyaml.AtPath(portA))))
+//
+//	return niceyaml.NewSummary(fmt.Sprintf("%d violations", len(errs)), errs...)
+//
+// A location is a path from [AtPath], a position from [AtPosition], a
+// range from [AtRange], or a path with a position or a range. A path
+// names the value the error is about, and a position or a range names the
+// characters at fault. An Error with both binds at the characters and
+// names the path in its message without resolving it. A path starts at
+// one of two points, as in RFC 9535 JSONPath. A `$` path reads from the
+// root of the document, and an `@` path reads from the [Node] that binds
+// the error, so a check written for a type writes `@` paths from the
+// value it checked. The binding puts the path of that Node in front, so
+// every path a [SourceError] reports starts at `$` and names the same
+// value through any Node of the document.
+//
+// The code that builds an error declares whether the document is at fault
+// for it or the check could not run, and a location never decides it.
+// [NewError] and [Invalid] declare a fault. [Place] takes the same
+// options and declares nothing, so it shows an I/O error at the value a
+// check read. The document is at fault for each problem the parse reports
+// with [ErrSyntax] and a decode reports with [ErrDecode], and for every
+// error a [SelfValidator] returns. Any other error declares nothing, and
+// a wrapper is a fault only when the error it wraps is one. The error of
+// a context that ended and a [PanicError] are never faults:
+//
+//	niceyaml.NewError("license file does not exist", niceyaml.AtPath(p)) // fault
+//	niceyaml.Invalid(checkErr, niceyaml.AtPath(p))                       // fault
+//	niceyaml.Place(statErr, niceyaml.AtPath(p))                          // check could not run
+//
+// [IsInvalid] reports whether the document is at fault for every problem
+// of an error, which picks a status code or an exit code, and
+// [ErrorTree.IsInvalid] asks the same of one row of a report. One problem
+// that is no fault makes the whole error not invalid, and a heading or a
+// detail decides nothing. A wrapper that [fmt.Errorf] builds with several
+// %w verbs is one problem, so an I/O error wrapped beside violations goes
+// uncounted where a join of the two counts it. A decode cannot tell the
+// I/O of an UnmarshalYAML or UnmarshalText method from its check of the
+// value, so an error such a method returns is a fault. A caller that must
+// tell them apart checks for its own errors first. A [PanicError] is
+// a bug in code. A document can still trip one in go-yaml, so a public
+// endpoint that answers such a document with a 4xx status tests for the
+// PanicError before it asks IsInvalid.
+//
+// A check run on a value inside a document reports `@` paths that read
+// from that value. [Rebase] puts the path of the value in front of each
+// `@` path in the tree of an error, details included, and points each
+// problem that carries no location at the value itself. A `$` path, a
+// position, and a range stay as they are, and rebases compose. A decode
+// rebases what every nested [SelfValidator] returns, and a [Node] from
+// [Node.At] or [Node.Nodes] binds an error as a Rebase under its own path
+// does, so a check bound through the Node of its value needs no Rebase.
+// A path names a map key as the document spells it, so a base built from
+// a decoded key can miss, as the key 0x10 of a map[int]T that decodes to
+// 16 does. A [DataLocator] finds an entry by its decoded key.
+//
+// Binding resolves each location once. A path the document leaves out,
+// as a check for a required field names, binds at the key of the mapping
+// that lacks the value. A path that enters an alias the document cannot
+// follow, such as one to an anchor in a reference document, binds at the
+// alias. An error a [SelfValidator] returns below a value that decodes
+// itself binds at that value when its path selects nothing.
+// [SourceError.Nearest] reports the node in each case. Any other location
+// that does not resolve costs the binding its position, and
+// [SourceError.Unresolved] returns the reason, such as [ErrOutOfRange]
+// for a line the source does not hold or [ErrPathNeedsDocument] for a
+// path with no single document to resolve in. Such a binding names its
+// source in front of the message, and [FormatError] prints the reason in
+// place of its excerpt.
+//
+// An error that is or wraps a [*SourceError], with no [*Error] above it
+// that carries a location, heads errors, or holds details, is bound
+// already, and every Bind and [Rebase] return it as it is. The exception
+// is the error [BindValue] returns for a value that came from no
+// document, such as the body of a request. Its text names each path from
+// that value, as "$.port: 0 is less than 1", and it stands in no
+// document, so a document can still place it. Rebase and every Bind read
+// it as the error it was made from, and a decode places it at the value
+// whose Validate method or [Validator] returned it. A wrapper around it
+// keeps its own text, behind the position and the path. Placing builds a
+// new error and leaves the result as it is:
+//
+//	err := engine.ValidateValue(cfg.Request)
+//
+//	return doc.Bind(niceyaml.Rebase(err, paths.Doc().Child("request")))
+//
 // # Error Presentation
 //
-// [FormatError] prints an error as plain text. The message comes first,
-// as a tree with a connector in front of each error below another. The
-// excerpt around the locations follows, with the context lines the
-// caller asks for and carets under the offending columns. FormatError
-// looks through the wrappers and joins around a [SourceError], so it
-// renders an error however a program wrapped it, and it renders the
-// excerpt of every SourceError in the error's tree. The excerpt is
-// [line.View.String], so a view a caller decorates, such as one with
-// search matches, renders the same way. The output holds no escape
-// sequences, so it goes into a log as it is:
+// [FormatError] prints an error as plain text for a log. The message
+// comes first, as a tree with a connector in front of each error below
+// another, and an excerpt of each source follows, with context lines
+// around each location and carets under the offending columns. It looks
+// through the wrappers and joins around every [SourceError], and its
+// output holds no escape sequences:
 //
 //	log.Print(niceyaml.FormatError(err))
 //
-// An [*Error] or a [*SourceError] logged as a [log/slog] attribute
-// logs the tree without the excerpt, through [Error.LogValue] and
-// [SourceError.LogValue], so a structured log names the errors of the
-// tree in one attribute whichever handler writes it. A logger calls
-// LogValue and the %+v verb for a program, so both show [ErrorListLimit]
-// problems at most, each with its details, and count the rest. An error
-// with thousands of problems thus reaches a log as a short text, and
-// FormatError renders every one of them.
+// A logger formats an error itself. The %+v verb of an [*Error] or a
+// [*SourceError] prints what FormatError prints, and [Error.LogValue] and
+// [SourceError.LogValue] give a [log/slog] handler the tree without the
+// excerpt. Both show [ErrorListLimit] problems and count the rest, so an
+// error with thousands of problems reaches a log as a short text, where
+// FormatError renders every one.
 //
-// An excerpt shows lines of the source to whoever reads the log or the
-// terminal. A program that loads a text with secrets in it, such as the
-// values of its environment, creates that [Source] with [WithExcerpts]
-// set to false. Every renderer then prints the position, the path, and
-// the message of an error bound there, and no line of the text.
-//
-// An excerpt shows part of a line longer than [DefaultExcerptWidth]
-// columns: a window of that many columns around each location on it,
-// with "..." in place of the rest. A document minified onto one line
-// thus adds a row of bounded length to a log. [WithExcerptWidth] and
-// [WithContextLines] set the width and the context lines of the excerpts
-// a renderer builds, as [ExcerptOption] describes, so a log and a
-// terminal render one error each their own way.
+// An excerpt shows lines of the source to whoever reads the log. A
+// program that loads a text with secrets in it, such as the values of its
+// environment, creates that [Source] with [WithExcerpts] set to false.
+// Every renderer then prints the position, the path, and the message of
+// an error bound there, and no line of the text. A line longer than
+// [DefaultExcerptWidth] columns shows a window around each location, so a
+// document minified onto one line adds a row of bounded length.
+// [WithContextLines] and [WithExcerptWidth] set both for each renderer.
 //
 // A report a program reads, such as JSON lines, CI annotations, or editor
-// diagnostics, lists the problems of an error as rows. [Problems] yields
-// one node of the [ErrorTree] per problem, by the roles the errors
-// declare. It passes over the summary a validator puts above its
-// violations, it keeps the details of each problem below its node, and
-// it yields an error bound to no source, such as a file that failed to
-// read. A row takes its fields from the node rather than from the label,
-// whose form depends on where the node sits in the tree.
-// [ErrorTree.Message] and [ErrorTree.Path] give the message and the path
-// of any node, and [ErrorTree.Source] and [ErrorTree.Position] give the
-// file and the position from the binding the node holds. In a file that
-// holds several documents, [ErrorTree.DocumentIndex] gives the document.
-// The node holds the error of its problem in Err, so [errors.As] there
-// finds the typed error of that row, such as the rule a validator
-// wrapped, and never one of a detail.
+// diagnostics, walks [Problems], which yields one node of the [ErrorTree]
+// per problem with its details below it. A row takes its fields from the
+// node through [ErrorTree.Message], [ErrorTree.Path], [ErrorTree.Source],
+// and [ErrorTree.Position], rather than from its label, and [errors.As]
+// on the Err of the node finds the typed error of that problem.
 //
 // A terminal gets color from
-// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which prints
-// the same tree and excerpts with the printer's styles and width, and
-// takes the same [ExcerptOption] values:
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which takes
+// the same options:
 //
 //	p := printer.New(printer.WithWrapWidth(width))
 //	lipgloss.Fprintln(os.Stderr, p.PrintError(err, niceyaml.WithContextLines(3)))
 //
-// Both draw the [ErrorReport] that [NewErrorReport] builds for the error.
-// The report holds the tree, the excerpt of each source, and the bindings
-// that get a reason in place of an excerpt. A renderer of its own, such
-// as one that writes HTML, draws the same report and so shows the same
-// parts.
+// Both renderers draw the [ErrorReport] that [NewErrorReport] builds,
+// which holds the tree, the excerpt of each source, and the bindings that
+// get a reason in place of an excerpt. A renderer of its own, such as one
+// that writes HTML, draws the same report.
 //
-// This package knows nothing of the printer. The marks of an error decorate a
-// [line.View], so a caller renders them with any renderer and composes them with
-// anything else it renders. [SourceError.Excerpt] returns the hunks around the
-// locations as a view, as [go.jacobcolvin.com/niceyaml/diff.Result.Hunks] does for a
-// diff, and [Annotate] marks a view that holds lines of the source with
-// every binding in an error, so a viewer shows a document with every
-// error in place:
+// The marks of an error decorate a [line.View], so this package knows
+// nothing of the printer. [Annotate] marks every binding of an error on a
+// view that holds lines of its source, such as the whole source, one
+// document of it, or a diff against another revision. [line.View.Hunks]
+// then keeps the marked lines with context around each:
 //
 //	view := source.View()
 //	niceyaml.Annotate(err, view)
-//	lipgloss.Println(p.Print(view))
-//
-// Annotate finds each line by identity, since every view over a source
-// shares its lines. The view may therefore be a slice of the source, such
-// as one document of a file from [Node.Span], or a diff against another
-// revision, where the marks of each error land on the lines of its own
-// source that the diff holds. A line keeps each mark once, so a caller
-// marks one view with several errors, or with the same error again, and
-// no message doubles. [SourceError.Annotate] makes the same marks for one
-// binding and the bindings below it.
-// [line.View.Hunks] then keeps the marked lines with context around
-// each, so a viewer shows the excerpt of every error at once, with
-// search matches or any other decoration in it:
-//
 //	lipgloss.Println(p.Print(view.Hunks(2)))
 //
-// [Node.Ranges] returns the ranges an error at a path highlights, those of
-// the token the path points at, for a caller that marks a value on a
-// view without an error to bind. [Node.PathAt] goes the other way, from a
-// position to the path of the node there. A viewer names the value under
-// its cursor with it, and a check that reads the lines of a file reports
-// the path of the value it found:
-//
-//	if path, ok := doc.PathAt(cursor); ok {
-//		status = path.String() // $.spec.replicas
-//	}
-//
-// This separates error production (validators, decoders) from error
-// presentation (source context, formatting). Each layer provides what it
-// knows. A validator provides the path, a source the document, and the
-// caller that prints the terminal width and theme.
+// [SourceError.Excerpt] returns those hunks for one binding. [Node.Ranges]
+// returns the ranges an error at a path would highlight, and
+// [Node.PathAt] goes from a position to the path of the node there, for a
+// viewer that names the value under its cursor.
 //
 // # Validation Pipeline
 //
@@ -612,25 +593,6 @@
 //	if err != nil {
 //		return err
 //	}
-//
-// [IsInvalid] tells a document at fault apart from a check that could
-// not run. The document is at fault for a syntax error, a decode
-// rejection, a schema violation, and an error a [SelfValidator] returns,
-// and it is not for a schema that does not load or a context that ended.
-// A [Validator] declares which of its errors is which by the constructor
-// it calls. [NewError] and [Invalid] declare the document at fault,
-// with a location or without. [Place] takes the same options and
-// declares nothing, as any other error does, so it shows a check that
-// could not run at the value the check read:
-//
-//	niceyaml.NewError("license file does not exist", niceyaml.AtPath(p)) // the document is at fault
-//	niceyaml.Invalid(checkErr, niceyaml.AtPath(p))                       // the document is at fault
-//	niceyaml.Place(statErr, niceyaml.AtPath(p))                          // the check could not run
-//
-// IsInvalid reports whether the document is at fault for every problem
-// of an error, which is the check that picks a status code or an exit
-// code. A report that lists the problems one by one asks
-// [ErrorTree.IsInvalid] of each.
 //
 // # Diffs
 //
