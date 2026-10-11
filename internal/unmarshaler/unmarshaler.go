@@ -64,13 +64,6 @@ var (
 	// types go-yaml sets whole.
 	astPackage = reflect.TypeFor[ast.StringNode]().PkgPath()
 
-	// The result of [decoderField] for each type it has read, with -1 for
-	// a type that has no such field.
-	decoderFields TypeCache[int]
-
-	// The result of [jsonDecoderField] for each type it has read.
-	jsonDecoderFields TypeCache[int]
-
 	// The result of [DecodesItself] for each type it has read.
 	decodesWhole TypeCache[bool]
 )
@@ -330,7 +323,7 @@ func (o Options) holdsInlineUnmarshaler(t reflect.Type, seen map[reflect.Type]bo
 // bool result is false when t declares the method go-yaml calls, or when
 // no embedded field has that method.
 func decoderField(t reflect.Type) (int, bool) {
-	i := decoderFields.Get(t, findDecoderField)
+	i := findDecoderField(t)
 
 	return i, i >= 0
 }
@@ -352,13 +345,11 @@ func findDecoderField(t reflect.Type) int {
 // UnmarshalYAML method, and holds only for a type go-yaml decodes
 // through UnmarshalJSON.
 func jsonDecoderField(t reflect.Type) int {
-	return jsonDecoderFields.Get(t, func(t reflect.Type) int {
-		if !reflect.PointerTo(t).Implements(JSONType) {
-			return -1
-		}
+	if !reflect.PointerTo(t).Implements(JSONType) {
+		return -1
+	}
 
-		return promotingField(t, JSONType)
-	})
+	return promotingField(t, JSONType)
 }
 
 // promotingField returns the index of the embedded field that gives t
