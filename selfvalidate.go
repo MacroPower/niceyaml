@@ -340,11 +340,10 @@ func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) e
 // One go-yaml decoder decodes every key, so the walk applies the
 // options, and reads any reference files they name, once too.
 //
-// Before it reads the keys of a map, or walks the elements of a slice or
-// array, the walker scans the values below for one that implements
-// [SelfValidator], and passes the value at once when none does. The
-// values go-yaml decodes into an interface never implement it, so a
-// value decoded as any walks no further than the scan.
+// Before it reads the keys of a map, the walker scans the values below
+// for one that implements [SelfValidator], and passes the map at once
+// when none does. The values go-yaml decodes into an interface never
+// implement it, so a map decoded as any walks no further than the scan.
 type selfWalker struct {
 	ctx     context.Context
 	node    *Node
@@ -777,8 +776,9 @@ func (w *selfWalker) children(v reflect.Value, at place, shadowed map[string]boo
 	case reflect.Slice, reflect.Array, reflect.Map:
 		// An element, map key, or map value whose type holds no validator
 		// passes the walk at once, so none needs a look. The same goes for
-		// those whose types may hold one, but that hold none.
-		if !entriesMayHoldValidator(v.Type()) || !w.holdsBelow(v) {
+		// the keys and values of a map whose types may hold one, but that
+		// hold none, so the walk reads no key of such a map.
+		if !entriesMayHoldValidator(v.Type()) || v.Kind() == reflect.Map && !w.holdsBelow(v) {
 			return true
 		}
 
@@ -991,17 +991,17 @@ func entriesMayHoldValidator(t reflect.Type) bool {
 	return mayHoldValidator(t.Elem())
 }
 
-// holdsBelow reports whether a value below v, a slice, array, or map
-// the walk is inside of, implements [SelfValidator] where the walk
-// would validate it. When it reports false, the walk of the values below
-// v validates nothing, so the walk passes v's children at once.
+// holdsBelow reports whether a value below v, a map the walk is inside
+// of, implements [SelfValidator] where the walk would validate it. When
+// it reports false, the walk of the values below v validates nothing, so
+// the walk passes v's children at once.
 //
 // The scan reads each pointer, map, and slice it reaches once, however
 // many paths lead there.
 func (w *selfWalker) holdsBelow(v reflect.Value) bool {
 	defer clear(w.scanning)
 
-	if v.Kind() != reflect.Array && ownsAddress(v) {
+	if ownsAddress(v) {
 		key := visitOf(v)
 		if held, ok := w.scanned[key]; ok {
 			return held
