@@ -1,6 +1,7 @@
 package niceyaml
 
 import (
+	"errors"
 	"iter"
 	"slices"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 	"unicode"
 
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
+	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -1368,4 +1370,179 @@ func (t ErrorTree) eachNode(yield func(ErrorTree) bool) bool {
 	}
 
 	return true
+}
+
+// ErrorReport holds the parts a renderer draws for an error: the tree of
+// its messages, one excerpt per source its bindings touch, and the
+// bindings that get a reason in place of an excerpt. [FormatError] draws
+// a report as plain text and
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draws one with
+// styles. A renderer of its own, such as one that writes HTML, draws the
+// same parts, so it shows the excerpts, the names, and the reasons they
+// show:
+//
+//	rep := niceyaml.NewErrorReport(err)
+//
+//	drawTree(rep.Tree)
+//
+//	for _, excerpt := range rep.Excerpts {
+//		if excerpt.Named {
+//			drawName(excerpt.Source.Name())
+//		}
+//
+//		drawView(excerpt.View)
+//	}
+//
+//	for _, bound := range rep.Unresolved {
+//		drawReason(bound.Unresolved())
+//	}
+//
+// The report holds every text as the error or the source wrote it. A key
+// of the document puts no control character into a message or a reason,
+// since a path writes one as an escape and the text of a decode
+// rejection draws one as its picture. A message can still hold one in
+// text the library did not write, such as the error of the program's own
+// unmarshaler or validator, which can quote a value of the document. The
+// name of a source can hold one too. A renderer therefore escapes each
+// message and each name for its output.
+// [go.jacobcolvin.com/niceyaml/escape.Control] draws each control
+// character of a text as its picture, a line feed among them, so a
+// renderer that keeps the rows of a message escapes each row on its own.
+// FormatError draws them as their pictures.
+//
+// A report a program reads, such as JSON lines or editor diagnostics,
+// lists the problems [ErrorTree.Problems] yields for [NewErrorTree]
+// instead.
+//
+// Create instances with [NewErrorReport].
+type ErrorReport struct {
+	// Excerpts holds one excerpt per source the bindings of the error
+	// touch, in the order the bindings reach the sources, with each
+	// binding [Bindings] yields and the bindings below it before the next.
+	// A source none of whose locations resolve has none, and neither has
+	// a source with excerpts off, as [WithExcerpts] sets it.
+	Excerpts []ErrorExcerpt
+	// Unresolved holds the bindings that get a reason in place of an
+	// excerpt, in the order [Bindings] yields them. Each is a binding
+	// Bindings finds whose tree resolves no location and whose own
+	// location did not resolve, for the reason [SourceError.Unresolved]
+	// returns. A binding that carries no location of its own has nothing
+	// to explain and is not among them. Neither is a binding whose reason
+	// wraps [paths.ErrNoDocument], since no path resolves in a document
+	// with no content and the tree names the path already. A binding the
+	// error reaches twice comes twice, as Bindings yields it.
+	Unresolved []*SourceError
+	// Tree is the [ErrorTree] of the error, as [NewErrorTree] builds it.
+	// That tree has no row for an error that holds nothing, such as a
+	// bound join of typed-nil errors. When the report then holds no
+	// excerpt and no unresolved binding either, Tree is one node with the
+	// message of the error as its Label and no Err, so a renderer draws
+	// that message in place of nothing.
+	Tree ErrorTree
+}
+
+// ErrorExcerpt is the excerpt of one source in an [ErrorReport].
+type ErrorExcerpt struct {
+	// Source is the source the excerpt shows.
+	Source *Source
+	// View holds the lines of Source around the locations the error marks
+	// in it, cut and clipped as [SourceError.Excerpt] cuts a view.
+	View *line.View
+	// Named reports whether the name of Source leads the excerpt on a row
+	// of its own, so a reader tells the excerpts of several sources apart.
+	// It is set when the bindings of the error touch more than one source
+	// and Source has a name. A source counts whether or not it has an
+	// excerpt, so the one excerpt of a report has Named set when the error
+	// also touches a source where no location resolved.
+	Named bool
+}
+
+// NewErrorReport creates a new [ErrorReport] from err. Each excerpt keeps
+// the context lines and the width the options set, as [ExcerptOption]
+// describes. A nil err yields the zero ErrorReport.
+func NewErrorReport(err error, opts ...ExcerptOption) ErrorReport {
+	return newErrorReport(err, newExcerptConfig(opts), 0)
+}
+
+// newErrorReport builds the report [NewErrorReport] documents. With a
+// limit above zero, the tree shows that many problems at most and counts
+// the rest, as [limitTree] cuts it. The bindings of the problems it
+// leaves out, as [skippedBindings] finds them, then mark no excerpt,
+// count toward no source, and get no reason, so the report shows the
+// problems its tree shows.
+func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
+	if err == nil {
+		return ErrorReport{}
+	}
+
+	tree := NewErrorTree(err)
+
+	var skipped map[*SourceError]bool
+
+	if limit > 0 {
+		var left []ErrorTree
+
+		tree, left = limitTree(tree, limit)
+		skipped = skippedBindings(tree, left)
+	}
+
+	bindings := slices.Collect(Bindings(err))
+
+	// The own location of a binding carries its message only among
+	// several bindings, where the message tells the carets of one excerpt
+	// apart.
+	sources, positions := treePositions(bindings, len(bindings) > 1, skipped)
+
+	var rep ErrorReport
+
+	for _, src := range sources {
+		view, ok := src.excerpt(positions[src], cfg)
+		if !ok {
+			continue
+		}
+
+		rep.Excerpts = append(rep.Excerpts, ErrorExcerpt{
+			Source: src,
+			View:   view,
+			Named:  len(sources) > 1 && src.Name() != "",
+		})
+	}
+
+	for _, bound := range bindings {
+		if skipped[bound] || bound.marks() {
+			continue
+		}
+
+		// A document with no content has no line to show for any path, so
+		// that reason explains nothing the tree leaves out.
+		reason := bound.Unresolved()
+		if reason == nil || errors.Is(reason, paths.ErrNoDocument) {
+			continue
+		}
+
+		rep.Unresolved = append(rep.Unresolved, bound)
+	}
+
+	rep.Tree = tree
+
+	// A bound join whose branches all carry nothing has an empty tree and
+	// nothing else to draw, so the message stands in for it.
+	if len(rep.Excerpts) == 0 && len(rep.Unresolved) == 0 {
+		rep.Tree = messageTree(tree, err)
+	}
+
+	return rep
+}
+
+// messageTree returns t, or the tree of one node that holds the message
+// of err when t has no row to draw, which is how a plain error with that
+// message lays out. An error that holds nothing, such as a join of
+// typed-nil errors, has such a tree, and a renderer draws its message
+// rather than nothing.
+func messageTree(t ErrorTree, err error) ErrorTree {
+	if t.Label != "" || len(t.Children) > 0 {
+		return t
+	}
+
+	return ErrorTree{Label: err.Error()}
 }

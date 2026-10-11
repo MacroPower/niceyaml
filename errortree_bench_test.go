@@ -1,6 +1,7 @@
 package niceyaml_test
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -37,6 +38,36 @@ func BenchmarkNewErrorReport(b *testing.B) {
 
 			for b.Loop() {
 				niceyaml.NewErrorReport(bound)
+			}
+		})
+	}
+}
+
+func BenchmarkErrorTree_LeftDeepJoin(b *testing.B) {
+	const n = 10000
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+
+	// A loop that joins each new error onto the ones before nests each
+	// join in the next.
+	var joined error
+
+	for i := range n {
+		joined = errors.Join(joined, niceyaml.NewError(fmt.Sprintf("error %d", i),
+			niceyaml.AtPath(paths.Current().Child("a"))))
+	}
+
+	tcs := map[string]error{
+		"unbound": joined,
+		"bound":   source.Bind(joined),
+	}
+
+	for name, err := range tcs {
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				_ = niceyaml.NewErrorTree(err)
 			}
 		})
 	}
