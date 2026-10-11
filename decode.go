@@ -43,15 +43,41 @@ import (
 // [Node.Decode] and [Node.DecodeInto] call Validate after decoding on
 // every value in the decoded value that implements it: the value
 // itself, and each field, element, or map entry below it, however deep,
-// unless [WithSelfValidation] switches that off. A check that belongs
-// to the caller rather than the type, such as one that needs a registry
-// of known names, runs on the decoded value after Decode returns, and
-// [Node.Bind] binds its result to the document the value came from. A
-// check that must run inside the decode, so a [DecodeOption] carries it
+// unless [WithSelfValidation] switches that off.
+//
+// A check that belongs to the caller rather than the type, such as one
+// that needs a registry of known names, runs on the decoded value after
+// Decode returns. [Node.DataLocator] finds each value the check names in
+// the document, and [Node.Bind] binds the result to the document the
+// value came from:
+//
+//	cfg, err := doc.Decode[Config](ctx, settings)
+//	if err != nil {
+//		return err
+//	}
+//
+//	loc := doc.DataLocator()
+//
+//	var errs []error
+//
+//	for port, server := range cfg.Ports {
+//		if !known[server.Name] {
+//			errs = append(errs, niceyaml.NewError("unknown server", loc.At("ports", strconv.Itoa(port), "name")))
+//		}
+//	}
+//
+//	return doc.Bind(errors.Join(errs...))
+//
+// The check costs no second decode and reads the value the options of
+// the caller decoded. The locator spells a key as the document does. The
+// error "c.yaml:3:11: $.ports.0x10.name: unknown server" thus names an
+// entry the document writes under 0x10.
+//
+// A check that must run inside the decode, so a [DecodeOption] carries it
 // to every decode and its failures report beside the others, is a
 // [Validator]. Such a Validator decodes the node itself with
-// [Node.Decode] and checks the value it gets, as the Validator example
-// shows.
+// [Node.Decode] and checks the value it gets, as the Decoded Data
+// section of Validator describes.
 //
 // Any value with a Validate method takes part, including one from a
 // package that names its own check that way, such as a generated
@@ -322,6 +348,28 @@ type SelfValidator interface {
 // validator that reports where a finding lies in the data takes each
 // location from [Node.DataLocator], which reads the names as the decoder
 // does.
+//
+// A validator that decodes into a type of the program follows three
+// rules. It takes the options of the decode that runs it and gives them
+// to its own decode. It passes [WithSelfValidation] off to that decode,
+// since the decode that runs it calls each Validate method on its own
+// result. And one validator decodes for every check on the type, since
+// each validator that decodes reads the node again, and two of them
+// under [MultiValidator] report one rejection of the decoder twice:
+//
+//	func typed(settings niceyaml.DecodeOption, check func(*niceyaml.DataLocator, *Config) error) niceyaml.Validator {
+//		return niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+//			cfg, err := n.Decode[Config](ctx, settings, niceyaml.WithSelfValidation(false))
+//			if err != nil {
+//				return err
+//			}
+//
+//			return check(n.DataLocator(), &cfg)
+//		})
+//	}
+//
+//	settings := niceyaml.DecodeOptions(niceyaml.WithDisallowUnknownFields(true))
+//	cfg, err := doc.Decode[Config](ctx, settings, niceyaml.WithValidator(typed(settings, check)))
 //
 // # Errors
 //
