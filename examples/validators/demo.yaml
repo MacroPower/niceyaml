@@ -1,0 +1,10 @@
+---
+# Breakfast at Café Yamüll, with prices in kr.
+breakfast:
+  - item: "Småkakor & Kaffe"
+    price: 200
+    dietry: [mjölk, gluten]
+  - item: "Småkakor & Kaffe"
+    price: 180
+  - item: "Kanelbulle"
+    price: 45

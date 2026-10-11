@@ -109,6 +109,12 @@ A [`paths.Path`][niceyaml/paths] such as `$.menu.lunch[0].price` names one node 
 
 An [`Error`][niceyaml.Error] names a path and holds no source. The example binds such errors to a `Source`, then renders them as a styled excerpt, as plain text for a log, as marks on the whole document, and as one row per problem.
 
+### Validators
+
+- [examples/validators](examples/validators)
+
+A validator checks a document before the decoder reads it. The example rejects an unknown field at decode time, then runs two rules of its own with `MultiValidator`, which reports every failure, and with `ChainValidator`, which stops at the first.
+
 ### Schemas
 
 - [examples/schemas/cafe](examples/schemas/cafe)
