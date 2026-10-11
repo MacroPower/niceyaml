@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"encoding"
 	"fmt"
 	"reflect"
 	"slices"
@@ -13,6 +12,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -349,51 +349,6 @@ type holder struct {
 	unmarshals bool
 }
 
-// The result of [inlinesUnmarshaler] for each struct type it has read,
-// in a decode whose options name no unmarshaler.
-var inlineUnmarshalers typeCache[bool]
-
-// inlinesUnmarshaler reports whether t, a struct type, holds an inline
-// field that decodes itself, as [reportsOwnError] lists those types for
-// the unmarshalers u, in its own fields or in those of a struct it holds
-// inline. A decode of t calls the unmarshaler of that field whatever the
-// mapping holds. The answer for a u that names a type holds for its
-// decode alone, so the cache serves only a u that names none.
-func inlinesUnmarshaler(t reflect.Type, u optionUnmarshalers) bool {
-	if len(u.custom) > 0 || u.json {
-		return holdsInlineUnmarshaler(t, u, map[reflect.Type]bool{})
-	}
-
-	return inlineUnmarshalers.get(t, func(t reflect.Type) bool {
-		return holdsInlineUnmarshaler(t, u, map[reflect.Type]bool{})
-	})
-}
-
-// holdsInlineUnmarshaler is [inlinesUnmarshaler] without its cache. The
-// seen set holds the structs the walk is inside of, so a struct that
-// holds itself inline ends the walk.
-func holdsInlineUnmarshaler(t reflect.Type, u optionUnmarshalers, seen map[reflect.Type]bool) bool {
-	if seen[t] {
-		return false
-	}
-
-	seen[t] = true
-
-	for field := range t.Fields() {
-		_, inline, skip := yamlfield.Name(field)
-		if skip || !inline || yamlfield.ReadsAnchor(field) {
-			continue
-		}
-
-		inner := pointerBase(field.Type)
-		if reportsOwnError(inner, u) || inner.Kind() == reflect.Struct && holdsInlineUnmarshaler(inner, u, seen) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // newProblemCollector creates a new [*problemCollector] for a decode of
 // n with cfg.
 func newProblemCollector(ctx context.Context, n *Node, cfg decodeConfig) *problemCollector {
@@ -554,29 +509,29 @@ func (c *problemCollector) walk(t reflect.Type, held ast.Node, from astnode.Pare
 		return
 	}
 
-	t = pointerBase(t)
+	t = unmarshaler.Base(t)
 
-	if t == durationType || t == timeType {
+	if t == unmarshaler.DurationType || t == unmarshaler.TimeType {
 		c.leaf(t, held, node, from, at, in)
 
 		return
 	}
 
-	if reportsOwnError(t, c.cfg.unmarshalers) {
+	if c.cfg.unmarshalers.ReportsOwnError(t) {
 		content := contentNode(c.resolver, node)
 
 		// The decoder calls an UnmarshalText method for a scalar alone. It
 		// refuses any other node itself, unless another unmarshaler of the
 		// type takes that node.
-		if refusesForText(t, c.cfg.unmarshalers, content) ||
-			astnode.IsScalar(content) && decodesFromText(t, c.cfg.unmarshalers) {
+		if c.cfg.unmarshalers.RefusesForText(t, content) ||
+			astnode.IsScalar(content) && c.cfg.unmarshalers.FromText(t) {
 			c.leaf(t, held, node, from, at, in)
 		}
 
 		return
 	}
 
-	if t.Kind() == reflect.Interface || t == mapSliceType {
+	if t.Kind() == reflect.Interface || t == unmarshaler.MapSliceType {
 		return
 	}
 
@@ -618,7 +573,7 @@ func (c *problemCollector) fields(t reflect.Type, mapping *ast.MappingNode, at p
 		return
 	}
 
-	in := holder{typ: t, unmarshals: inlinesUnmarshaler(t, c.cfg.unmarshalers)}
+	in := holder{typ: t, unmarshals: c.cfg.unmarshalers.InlinesUnmarshaler(t)}
 
 	c.below(in, t, mapping, merges, at, map[reflect.Type]bool{})
 }
@@ -650,10 +605,10 @@ func (c *problemCollector) below(
 			continue
 		}
 
-		inner := pointerBase(field.Type)
+		inner := unmarshaler.Base(field.Type)
 
 		switch {
-		case reportsOwnError(inner, c.cfg.unmarshalers):
+		case c.cfg.unmarshalers.ReportsOwnError(inner):
 			// The unmarshaler of the field reads the mapping.
 
 		case inner.Kind() == reflect.Map:
@@ -762,13 +717,13 @@ func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, from astnod
 	var cause error
 
 	switch {
-	case refusesForText(t, c.cfg.unmarshalers, content):
+	case c.cfg.unmarshalers.RefusesForText(t, content):
 		cause = textRejection(content)
 
 	// The decoder parses the text of a scalar as a duration, or hands it
 	// to an UnmarshalText method, and returns the error of that parse as
 	// it is.
-	case astnode.IsScalar(content) && (t == durationType || decodesFromText(t, c.cfg.unmarshalers)):
+	case astnode.IsScalar(content) && (t == unmarshaler.DurationType || c.cfg.unmarshalers.FromText(t)):
 		cause = asDecodeError(c.tree.restoreError(err))
 
 	default:
@@ -783,26 +738,6 @@ func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, from astnod
 	}
 
 	c.add(decodeProblem{err: Rebase(cause, path), at: loc.pos})
-}
-
-// decodesFromText reports whether the decoder decodes a scalar into a
-// value of type t through the UnmarshalText method of the type. The u
-// argument holds the unmarshalers the options of the decode name. The
-// decoder calls the first unmarshaler it finds on the pointer to the
-// type, in the order of [unmarshalerTypes], so a type with an
-// UnmarshalYAML method reports false. So does a type a
-// [WithCustomUnmarshaler] function decodes, since the decoder calls that
-// function ahead of any method. The decoder parses a [time.Time] itself,
-// ahead of the UnmarshalText method of the type, and
-// [problemCollector.walk] reads a time before it asks.
-func decodesFromText(t reflect.Type, u optionUnmarshalers) bool {
-	if u.decodesCustom(t) {
-		return false
-	}
-
-	k := slices.IndexFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
-
-	return k >= 0 && unmarshalerTypes[k] == reflect.TypeFor[encoding.TextUnmarshaler]()
 }
 
 // builtRejection returns err as a rejection the decoder builds itself

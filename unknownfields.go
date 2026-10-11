@@ -10,6 +10,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -73,14 +74,14 @@ type unknownFieldFinder struct {
 	// has read.
 	droppedEntries map[*ast.MappingNode]map[*ast.MappingValueNode]bool
 	// The types the options of the decode give an unmarshaler.
-	unmarshalers optionUnmarshalers
+	unmarshalers unmarshaler.Options
 }
 
 // newUnknownFieldFinder creates a new [*unknownFieldFinder] for a decode
 // of n whose options name the unmarshalers u, which asks dec about each
 // candidate. The decoder holds the anchors of that decode.
 func newUnknownFieldFinder(
-	ctx context.Context, n *Node, dec *yaml.Decoder, u optionUnmarshalers,
+	ctx context.Context, n *Node, dec *yaml.Decoder, u unmarshaler.Options,
 ) *unknownFieldFinder {
 	return &unknownFieldFinder{
 		ctx:      ctx,
@@ -148,7 +149,7 @@ func (f *unknownFieldFinder) walk(t reflect.Type, node ast.Node, chain *decodeCh
 		return
 	}
 
-	t = pointerBase(t)
+	t = unmarshaler.Base(t)
 
 	switch content := contentNode(f.resolver, node).(type) {
 	case *ast.MappingNode:
@@ -156,14 +157,14 @@ func (f *unknownFieldFinder) walk(t reflect.Type, node ast.Node, chain *decodeCh
 		case t.Kind() == reflect.Struct:
 			f.fields(t, content, chain)
 
-		case t.Kind() == reflect.Map && !reportsOwnError(t, f.unmarshalers):
+		case t.Kind() == reflect.Map && !f.unmarshalers.ReportsOwnError(t):
 			f.eachEntry(content, true, map[*ast.MappingNode]bool{}, func(entry *ast.MappingValueNode) {
 				f.value(t.Elem(), entry.Value, chain.through(entry))
 			})
 		}
 
 	case *ast.SequenceNode:
-		if reportsOwnError(t, f.unmarshalers) || (t.Kind() != reflect.Slice && t.Kind() != reflect.Array) {
+		if f.unmarshalers.ReportsOwnError(t) || (t.Kind() != reflect.Slice && t.Kind() != reflect.Array) {
 			return
 		}
 
@@ -221,7 +222,7 @@ func (f *unknownFieldFinder) fields(t reflect.Type, mapping *ast.MappingNode, ch
 
 	var names map[string]bool
 
-	if reportsOwnError(t, f.unmarshalers) {
+	if f.unmarshalers.ReportsOwnError(t) {
 		if chain == nil {
 			chain = &decodeChain{owner: t}
 		}
@@ -259,8 +260,8 @@ func (f *unknownFieldFinder) below(
 		}
 
 		if inline {
-			inner := pointerBase(field.Type)
-			if inner.Kind() != reflect.Struct || reportsOwnError(inner, f.unmarshalers) || inlined[inner] {
+			inner := unmarshaler.Base(field.Type)
+			if inner.Kind() != reflect.Struct || f.unmarshalers.ReportsOwnError(inner) || inlined[inner] {
 				continue
 			}
 
@@ -633,7 +634,7 @@ func fieldNames(t reflect.Type, seen map[reflect.Type]bool) map[string]bool {
 			continue
 		}
 
-		inner := pointerBase(field.Type)
+		inner := unmarshaler.Base(field.Type)
 		if inner.Kind() != reflect.Struct || seen[inner] {
 			continue
 		}

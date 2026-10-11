@@ -5,10 +5,10 @@ import (
 	"reflect"
 	"slices"
 	"sync"
-	"time"
 
 	"github.com/goccy/go-yaml"
 
+	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 )
 
@@ -41,16 +41,6 @@ var (
 	// text of its node, with each alias in the node written out in full.
 	textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
 
-	// The interface through which the go-yaml decoder hands a value its
-	// node as JSON, with each alias in the node written out in full. The
-	// decoder looks for the method only when a decode turns it on.
-	jsonUnmarshalerType = reflect.TypeFor[interface{ UnmarshalJSON(data []byte) error }]()
-
-	// The go-yaml decoder parses a [time.Time] from the value of a scalar
-	// before it looks for an UnmarshalText method, so it reads no text. A
-	// type that embeds one gets no such rule.
-	timeType = reflect.TypeFor[time.Time]()
-
 	// The result of [DecodesText] for each type it has read. A type never
 	// changes, so every decode shares the results.
 	decodesText sync.Map
@@ -79,79 +69,45 @@ func DecodesText(t reflect.Type) bool {
 		}
 	}
 
-	text := reachesText(t, map[reflect.Type]bool{}, Unmarshalers{})
+	text := reachesText(t, unmarshaler.Options{})
 	decodesText.Store(t, text)
 
 	return text
 }
 
-// Unmarshalers names the types that the options of one decode give an
-// unmarshaler, where no method of the type declares one the go-yaml
-// decoder calls on its own. The zero value names none.
-type Unmarshalers struct {
-	// Custom reports whether the decoder hands a value of type t to a
-	// function of the caller, as YAML bytes with each alias in the node
-	// written out in full. The decoder calls that function ahead of any
-	// method of t. A nil Custom reports no type.
-	Custom func(t reflect.Type) bool
-	// JSON has the decoder call the UnmarshalJSON method of a type that
-	// has none of the methods it looks for first. It hands the method the
-	// node as JSON, with each alias in the node written out in full.
-	JSON bool
-}
-
 // DecodesTextWith reports what [DecodesText] reports for a decode with
-// the unmarshalers u, where a type u names reads text too. The answer
-// holds for that decode alone, so each call reads t again.
-func DecodesTextWith(t reflect.Type, u Unmarshalers) bool {
-	if u.Custom == nil && !u.JSON {
+// the unmarshalers u, where a type u gives a function reads text too, as
+// does a type with an UnmarshalJSON method when u turns those on. The
+// decoder hands either one the node with each alias in it written out in
+// full. The answer holds for that decode alone, so each call reads t
+// again.
+func DecodesTextWith(t reflect.Type, u unmarshaler.Options) bool {
+	if u.Empty() {
 		return DecodesText(t)
 	}
 
-	return reachesText(t, map[reflect.Type]bool{}, u)
+	return reachesText(t, u)
 }
 
-// reachesText reports what [DecodesTextWith] reports for t and u,
-// skipping the types in seen, which it has checked already, so a
-// recursive type ends the walk.
-func reachesText(t reflect.Type, seen map[reflect.Type]bool, u Unmarshalers) bool {
-	if seen[t] {
-		return false
-	}
+// reachesText reports what [DecodesTextWith] reports for t and u.
+func reachesText(t reflect.Type, u unmarshaler.Options) bool {
+	return yamlfield.Reaches(t, func(t reflect.Type) (bool, bool) {
+		ptr := reflect.PointerTo(t)
 
-	seen[t] = true
-
-	ptr := reflect.PointerTo(t)
-
-	// The decoder looks for a function of u and then these methods in the
-	// order of the cases below, and decodes t through the first one it
-	// finds in place of the fields or elements of t.
-	switch {
-	case u.Custom != nil && u.Custom(t),
-		slices.ContainsFunc(bytesUnmarshalerTypes, ptr.Implements),
-		slices.ContainsFunc(callbackUnmarshalerTypes, ptr.Implements):
-		return true
-	case slices.ContainsFunc(nodeUnmarshalerTypes, ptr.Implements), t == timeType:
-		return false
-	case ptr.Implements(textUnmarshalerType), u.JSON && ptr.Implements(jsonUnmarshalerType):
-		return true
-	}
-
-	switch t.Kind() {
-	case reflect.Pointer, reflect.Array, reflect.Slice:
-		return reachesText(t.Elem(), seen, u)
-	case reflect.Map:
-		return reachesText(t.Key(), seen, u) || reachesText(t.Elem(), seen, u)
-	case reflect.Struct:
-		for field := range t.Fields() {
-			if _, _, skip := yamlfield.Name(field); !skip && reachesText(field.Type, seen, u) {
-				return true
-			}
+		// The decoder looks for a function of u and then these methods in
+		// the order of the cases below, and decodes t through the first one
+		// it finds in place of the fields or elements of t.
+		switch {
+		case u.Custom(t),
+			slices.ContainsFunc(bytesUnmarshalerTypes, ptr.Implements),
+			slices.ContainsFunc(callbackUnmarshalerTypes, ptr.Implements):
+			return true, true
+		case slices.ContainsFunc(nodeUnmarshalerTypes, ptr.Implements), t == unmarshaler.TimeType:
+			return false, true
+		case ptr.Implements(textUnmarshalerType), u.JSON && ptr.Implements(unmarshaler.JSONType):
+			return true, true
+		default:
+			return false, false
 		}
-
-		return false
-
-	default:
-		return false
-	}
+	})
 }

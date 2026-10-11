@@ -2,22 +2,20 @@ package matcher
 
 import (
 	"context"
-	"encoding"
 	"errors"
 	"math"
 	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
-	"time"
 
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -110,7 +108,7 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	// hands them to time.ParseDuration for a time.Duration, which returns
 	// its own error. A number never decodes into a time.Duration, so such
 	// a float does not match, as 1.5e3 does not.
-	if t == durationType && isFloatScalar(node, raw) {
+	if t == unmarshaler.DurationType && isFloatScalar(node, raw) {
 		return false, nil
 	}
 
@@ -276,24 +274,6 @@ func matchScalar(node *niceyaml.Node, raw any, got, want reflect.Value) bool {
 }
 
 var (
-	// The interfaces go-yaml decodes a value through when its pointer
-	// implements one. The decoder reads an UnmarshalJSON method only under
-	// [niceyaml.WithJSONUnmarshalers], which a match never sets.
-	unmarshalerTypes = []reflect.Type{
-		reflect.TypeFor[yaml.BytesUnmarshaler](),
-		reflect.TypeFor[yaml.BytesUnmarshalerContext](),
-		reflect.TypeFor[yaml.InterfaceUnmarshaler](),
-		reflect.TypeFor[yaml.InterfaceUnmarshalerContext](),
-		reflect.TypeFor[yaml.NodeUnmarshaler](),
-		reflect.TypeFor[yaml.NodeUnmarshalerContext](),
-		reflect.TypeFor[encoding.TextUnmarshaler](),
-	}
-
-	// The type go-yaml decodes by a rule of its own, as it decodes a type
-	// with an unmarshaler. It parses a [time.Duration] from the text of a
-	// scalar, and a type defined on one gets no such rule.
-	durationType = reflect.TypeFor[time.Duration]()
-
 	// The basic type of each kind a [Scalar] has.
 	basicTypes = map[reflect.Kind]reflect.Type{
 		reflect.String:  reflect.TypeFor[string](),
@@ -341,11 +321,15 @@ func isFloatScalar(node *niceyaml.Node, raw any) bool {
 
 // isPlain reports whether the decoder reads t as it reads the basic type
 // of its kind, which holds when t is no [time.Duration] and its pointer
-// implements no unmarshaler the decoder honors. Methods that play no
-// part in decoding, such as a String method, leave a type plain.
+// implements no unmarshaler the decoder honors. The decoder reads an
+// UnmarshalJSON method only under [niceyaml.WithJSONUnmarshalers], which
+// a match never sets. Methods that play no part in decoding, such as a
+// String method, leave a type plain. A [time.Duration] decodes by a rule
+// of its own, as a type with an unmarshaler does, and a type defined on
+// one gets no such rule.
 func isPlain(t reflect.Type) bool {
-	return t != durationType &&
-		!slices.ContainsFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
+	return t != unmarshaler.DurationType &&
+		!slices.ContainsFunc(unmarshaler.Interfaces, reflect.PointerTo(t).Implements)
 }
 
 // writtenText returns the text of the scalar node holds, where decoded

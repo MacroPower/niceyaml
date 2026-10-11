@@ -24,6 +24,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/internal/preamble"
 	"go.jacobcolvin.com/niceyaml/internal/segment"
+	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -2432,7 +2433,7 @@ type decodeConfig struct {
 	allowedFieldPrefixes []string
 	// The types the options hand to an unmarshaler that no method of the
 	// type declares.
-	unmarshalers          optionUnmarshalers
+	unmarshalers          unmarshaler.Options
 	skipSelfValidation    bool
 	disallowUnknownFields bool
 	orderedMaps           bool
@@ -2454,8 +2455,8 @@ func newDecodeConfig(opts []DecodeOption) decodeConfig {
 // yamlOptions returns the go-yaml options the settings stand for, which
 // every go-yaml decoder of the call applies. The function of each
 // [WithCustomUnmarshaler] reads its value through decode.
-func (c decodeConfig) yamlOptions(decode valueDecoder) []yaml.DecodeOption {
-	opts := c.unmarshalers.yamlOptions(decode)
+func (c decodeConfig) yamlOptions(decode unmarshaler.ValueDecoder) []yaml.DecodeOption {
+	opts := c.unmarshalers.YAMLOptions(decode)
 
 	if c.disallowUnknownFields {
 		opts = append(opts, yaml.DisallowUnknownField())
@@ -2470,128 +2471,6 @@ func (c decodeConfig) yamlOptions(decode valueDecoder) []yaml.DecodeOption {
 	}
 
 	return opts
-}
-
-// optionUnmarshalers holds the types that the options of a decode give
-// an unmarshaler, where no method of the type declares one the go-yaml
-// decoder calls on its own. [WithCustomUnmarshaler] names a type and the
-// function that decodes it, and [WithJSONUnmarshalers] turns on the
-// UnmarshalJSON method of every type that has one.
-//
-// The decoder decodes a value of such a type whole, through that
-// function or method, in place of its fields, elements, or entries. The
-// walks that read a type beside a document thus treat it as a type that
-// decodes itself, as [decodesItself] reports one. The zero value holds
-// no type.
-type optionUnmarshalers struct {
-	// The function of each [WithCustomUnmarshaler], with one entry for
-	// each type.
-	custom []customUnmarshaler
-	// Whether [WithJSONUnmarshalers] is on.
-	json bool
-}
-
-// customUnmarshaler is the function a [WithCustomUnmarshaler] gives a
-// type. The go-yaml decoder hands a function the text of a value, and
-// the function of the option reads the value through a decode. So the
-// option holds a function that builds the go-yaml option for one
-// decoder, from the [valueDecoder] of the decode that decoder serves.
-type customUnmarshaler struct {
-	typ reflect.Type
-	opt func(decode valueDecoder) yaml.DecodeOption
-}
-
-// valueDecoder decodes text into dst for the function of a
-// [WithCustomUnmarshaler]. The text is the YAML text the go-yaml decoder
-// hands that function for one value, and dst is the pointer the function
-// gave its decode callback. The error it returns reads from the value,
-// as [Node.decodeValue] describes.
-type valueDecoder func(ctx context.Context, text []byte, dst any) error
-
-// with returns u with the function that opt registers for the type t,
-// in place of the one an earlier option gave t.
-func (u optionUnmarshalers) with(t reflect.Type, opt func(valueDecoder) yaml.DecodeOption) optionUnmarshalers {
-	u.custom = slices.DeleteFunc(slices.Clone(u.custom), func(c customUnmarshaler) bool { return c.typ == t })
-	u.custom = append(u.custom, customUnmarshaler{typ: t, opt: opt})
-
-	return u
-}
-
-// yamlOptions returns the go-yaml options that register the unmarshalers
-// with a decoder, whose [WithCustomUnmarshaler] functions read their
-// values through decode.
-func (u optionUnmarshalers) yamlOptions(decode valueDecoder) []yaml.DecodeOption {
-	opts := make([]yaml.DecodeOption, 0, len(u.custom)+1)
-
-	for _, c := range u.custom {
-		opts = append(opts, c.opt(decode))
-	}
-
-	if u.json {
-		opts = append(opts, yaml.UseJSONUnmarshaler())
-	}
-
-	return opts
-}
-
-// decodesCustom reports whether a [WithCustomUnmarshaler] function
-// decodes a value of type t. The decoder calls that function ahead of
-// any unmarshaler method of t.
-func (u optionUnmarshalers) decodesCustom(t reflect.Type) bool {
-	return slices.ContainsFunc(u.custom, func(c customUnmarshaler) bool { return c.typ == t })
-}
-
-// decodesJSON reports whether the decoder decodes a value of type t
-// through its UnmarshalJSON method. It does under [WithJSONUnmarshalers],
-// for a type with that method that has no function from
-// [WithCustomUnmarshaler] and no method [decodesItself] reports, since
-// the decoder looks for both of those first.
-func (u optionUnmarshalers) decodesJSON(t reflect.Type) bool {
-	return u.json && !u.decodesCustom(t) && !decodesItself(t) &&
-		reflect.PointerTo(t).Implements(jsonUnmarshalerType)
-}
-
-// decodes reports whether the options give the type t an unmarshaler, so
-// the decoder decodes a value of t whole.
-func (u optionUnmarshalers) decodes(t reflect.Type) bool {
-	return u.decodesCustom(t) || u.decodesJSON(t)
-}
-
-// decodesWhole reports whether the decoder decodes a value of type t
-// whole, through a method of t, as [decodesItself] reports, or through
-// an unmarshaler the options give t. The field result is the index of
-// the embedded field of t whose method decodes t, which holds the
-// document in place of t, or -1 when t has no such field. A type that
-// declares its method has none, and neither does one a
-// [WithCustomUnmarshaler] function decodes.
-func (u optionUnmarshalers) decodesWhole(t reflect.Type) (int, bool) {
-	switch {
-	case u.decodesCustom(t):
-		return -1, true
-
-	case decodesItself(t):
-		field, _ := decoderField(t)
-
-		return field, true
-
-	case u.decodesJSON(t):
-		return jsonDecoderField(t), true
-
-	default:
-		return -1, false
-	}
-}
-
-// readsText reports whether a decode into t hands some value the text of
-// its node, through a method of the value, as [aliasing.DecodesText]
-// reports, or through an unmarshaler the options give its type.
-func (u optionUnmarshalers) readsText(t reflect.Type) bool {
-	text := aliasing.Unmarshalers{JSON: u.json}
-	if len(u.custom) > 0 {
-		text.Custom = u.decodesCustom
-	}
-
-	return aliasing.DecodesTextWith(t, text)
 }
 
 // WithValidator is a [DecodeOption] that validates the document with dv
@@ -2843,12 +2722,12 @@ func WithCustomUnmarshaler[T any](fn func(ctx context.Context, v *T, decode func
 			return
 		}
 
-		c.unmarshalers = c.unmarshalers.with(t, func(decode valueDecoder) yaml.DecodeOption {
+		c.unmarshalers = c.unmarshalers.With(t, func(decode unmarshaler.ValueDecoder) yaml.DecodeOption {
 			return yaml.CustomUnmarshalerContext(func(ctx context.Context, v *T, text []byte) error {
 				err := fn(ctx, v, func(dst any) error {
 					// A decode into T would call fn for the same value again,
 					// and so on without end.
-					if dt := reflect.TypeOf(dst); dt != nil && pointerBase(dt) == t {
+					if dt := reflect.TypeOf(dst); dt != nil && unmarshaler.Base(dt) == t {
 						return fmt.Errorf("decode target is the type the function decodes: got %T", dst)
 					}
 
@@ -2919,7 +2798,7 @@ func (e shieldedError) As(target any) bool {
 // validates at the path of the struct.
 func WithJSONUnmarshalers(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
-		c.unmarshalers.json = enabled
+		c.unmarshalers.JSON = enabled
 	}
 }
 
@@ -3400,7 +3279,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 	}
 
 	err = aliasing.CheckDecode(n)
-	if err == nil && cfg.unmarshalers.readsText(reflect.TypeOf(v).Elem()) {
+	if err == nil && aliasing.DecodesTextWith(reflect.TypeOf(v).Elem(), cfg.unmarshalers) {
 		err = aliasing.CheckDecodeText(n)
 	}
 

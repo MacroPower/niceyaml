@@ -7,10 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
+	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 )
 
 // textValue reads the text of its node.
@@ -233,13 +235,13 @@ type plainValue struct{}
 func TestDecodesTextWith(t *testing.T) {
 	t.Parallel()
 
-	custom := func(typ reflect.Type) func(reflect.Type) bool {
-		return func(t reflect.Type) bool { return t == typ }
+	custom := func(typ reflect.Type) unmarshaler.Options {
+		return unmarshaler.Options{}.With(typ, func(unmarshaler.ValueDecoder) yaml.DecodeOption { return nil })
 	}
 
 	tcs := map[string]struct {
 		typ  reflect.Type
-		u    aliasing.Unmarshalers
+		u    unmarshaler.Options
 		want bool
 	}{
 		"no unmarshalers reads a plain type by its fields": {typ: reflect.TypeFor[plainValue]()},
@@ -249,57 +251,57 @@ func TestDecodesTextWith(t *testing.T) {
 		},
 		"custom type": {
 			typ:  reflect.TypeFor[plainValue](),
-			u:    aliasing.Unmarshalers{Custom: custom(reflect.TypeFor[plainValue]())},
+			u:    custom(reflect.TypeFor[plainValue]()),
 			want: true,
 		},
 		"custom type behind a field, a pointer, and a slice": {
 			typ: reflect.TypeFor[struct {
 				Values []*plainValue `yaml:"values"`
 			}](),
-			u:    aliasing.Unmarshalers{Custom: custom(reflect.TypeFor[plainValue]())},
+			u:    custom(reflect.TypeFor[plainValue]()),
 			want: true,
 		},
 		"custom map key": {
 			typ:  reflect.TypeFor[map[plainValue]string](),
-			u:    aliasing.Unmarshalers{Custom: custom(reflect.TypeFor[plainValue]())},
+			u:    custom(reflect.TypeFor[plainValue]()),
 			want: true,
 		},
 		"custom function of another type": {
 			typ: reflect.TypeFor[plainValue](),
-			u:   aliasing.Unmarshalers{Custom: custom(reflect.TypeFor[jsonValue]())},
+			u:   custom(reflect.TypeFor[jsonValue]()),
 		},
 		// The decoder calls the function ahead of the method that reads
 		// the node.
 		"custom function for a node unmarshaler": {
 			typ:  reflect.TypeFor[nodeValue](),
-			u:    aliasing.Unmarshalers{Custom: custom(reflect.TypeFor[nodeValue]())},
+			u:    custom(reflect.TypeFor[nodeValue]()),
 			want: true,
 		},
 		"json unmarshaler without its option": {typ: reflect.TypeFor[jsonValue]()},
 		"json unmarshaler under its option": {
 			typ:  reflect.TypeFor[jsonValue](),
-			u:    aliasing.Unmarshalers{JSON: true},
+			u:    unmarshaler.Options{JSON: true},
 			want: true,
 		},
 		"json unmarshaler in a slice under its option": {
 			typ:  reflect.TypeFor[[]jsonValue](),
-			u:    aliasing.Unmarshalers{JSON: true},
+			u:    unmarshaler.Options{JSON: true},
 			want: true,
 		},
 		// The decoder calls the method that reads the node first.
 		"node unmarshaler with a json method under the option": {
 			typ: reflect.TypeFor[nodeJSONValue](),
-			u:   aliasing.Unmarshalers{JSON: true},
+			u:   unmarshaler.Options{JSON: true},
 		},
 		// The decoder parses a time from its value, though it has an
 		// UnmarshalJSON method.
 		"time under the json option": {
 			typ: reflect.TypeFor[time.Time](),
-			u:   aliasing.Unmarshalers{JSON: true},
+			u:   unmarshaler.Options{JSON: true},
 		},
 		"plain type under the json option": {
 			typ: reflect.TypeFor[plainValue](),
-			u:   aliasing.Unmarshalers{JSON: true},
+			u:   unmarshaler.Options{JSON: true},
 		},
 	}
 

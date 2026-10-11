@@ -9,34 +9,21 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
-	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-var (
-	// The go-yaml decoder parses a [time.Duration] from the text of a
-	// scalar and returns the error of [time.ParseDuration] as it is.
-	durationType = reflect.TypeFor[time.Duration]()
-
-	// The interface go-yaml decodes a value through under
-	// [WithJSONUnmarshalers].
-	jsonUnmarshalerType = reflect.TypeFor[interface{ UnmarshalJSON(data []byte) error }]()
-
-	// The types [kindOfType] names apart from their kind. The go-yaml
-	// decoder reads a !!timestamp tag as a [time.Time], a !!binary tag as
-	// a byte slice, and a mapping as a [yaml.MapSlice] under
-	// [WithYAMLOrderedMaps].
-	timeType     = reflect.TypeFor[time.Time]()
-	bytesType    = reflect.TypeFor[[]byte]()
-	mapSliceType = reflect.TypeFor[yaml.MapSlice]()
-)
+// The byte slice a !!binary tag reads as, which [kindOfType] names apart
+// from its kind, as it names [time.Time] for a !!timestamp tag and
+// [yaml.MapSlice] for a mapping under [WithYAMLOrderedMaps].
+var bytesType = reflect.TypeFor[[]byte]()
 
 // The names a rejection gives the kinds of YAML values, as
 // [rejectionMessage] writes them.
@@ -134,16 +121,16 @@ func kindOfType(t reflect.Type) string {
 		return kindNull
 	}
 
-	t = pointerBase(t)
+	t = unmarshaler.Base(t)
 
 	switch t {
-	case timeType:
+	case unmarshaler.TimeType:
 		return "timestamp"
-	case durationType:
+	case unmarshaler.DurationType:
 		return "duration"
 	case bytesType:
 		return "binary"
-	case mapSliceType:
+	case unmarshaler.MapSliceType:
 		return kindMapping
 	}
 
@@ -309,7 +296,7 @@ func (n *Node) locateDecodeError(
 		return err
 	}
 
-	t := pointerBase(reflect.TypeOf(v).Elem())
+	t := unmarshaler.Base(reflect.TypeOf(v).Elem())
 
 	// With no value below node, found is the place of node itself.
 	var found place
@@ -318,7 +305,7 @@ func (n *Node) locateDecodeError(
 		var ok bool
 
 		found, ok = l.below(t, node, place{})
-		if !ok && (!reportsOwnError(t, l.unmarshalers) || !astnode.IsScalar(l.content(node))) {
+		if !ok && (!l.unmarshalers.ReportsOwnError(t) || !astnode.IsScalar(l.content(node))) {
 			return err
 		}
 	}
@@ -381,41 +368,6 @@ func holdsLocation(err error) bool {
 	default:
 		return false
 	}
-}
-
-// reportsOwnError reports whether the decoder can return an error for a
-// value of type t with no token of the source, in a decode whose options
-// name the unmarshalers u. It can for a [time.Duration], for a type that
-// decodes itself, as [decodesItself] reads it, and for a type u gives an
-// unmarshaler: one a [WithCustomUnmarshaler] function decodes, and one
-// with an UnmarshalJSON method under [WithJSONUnmarshalers].
-//
-// A function from [yaml.RegisterCustomUnmarshaler] names a type the
-// decoder never shows, so reportsOwnError is false for a type only such
-// a function decodes.
-func reportsOwnError(t reflect.Type, u optionUnmarshalers) bool {
-	return t == durationType || decodesItself(t) || u.decodes(t)
-}
-
-// refusesForText reports whether the decoder refuses content for a value
-// of type t and calls no unmarshaler. The content argument is the
-// mapping, sequence, or scalar the value reads, as [contentNode] returns
-// it. The u argument holds the unmarshalers the options of the decode
-// name.
-//
-// The decoder hands an UnmarshalText method the string it reads from a
-// scalar. It reads no string from a mapping or a sequence, so it calls
-// no method for one and returns an error of its own, with no token of
-// the source. A type that [decodesFromText] reports thus takes a scalar
-// alone. Two such types take a mapping or a sequence another way. The
-// decoder parses a [time.Time] itself, and under [WithJSONUnmarshalers]
-// it hands the node to the UnmarshalJSON method of a type that has one.
-func refusesForText(t reflect.Type, u optionUnmarshalers, content ast.Node) bool {
-	if astnode.IsNil(content) || astnode.IsScalar(content) || t == timeType || !decodesFromText(t, u) {
-		return false
-	}
-
-	return !u.json || !reflect.PointerTo(t).Implements(jsonUnmarshalerType)
 }
 
 // textRejection returns the rejection of content, a mapping or a
@@ -505,16 +457,6 @@ func valueProblem(problem error) error {
 	return &located
 }
 
-// pointerBase returns the type t points to through every pointer on it,
-// since the decoder decodes a pointer as the value it points to.
-func pointerBase(t reflect.Type) reflect.Type {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-
-	return t
-}
-
 // errorLocator finds the value that reported an error of a decode with
 // no token. It walks the type the decode filled beside the node the
 // decode read, in the order the decoder reads them. The decoder reads
@@ -566,7 +508,7 @@ type errorLocator struct {
 	// The places the error to locate names, as [placesOf] lists them.
 	places []locus
 	// The types the options of the decode give an unmarshaler.
-	unmarshalers optionUnmarshalers
+	unmarshalers unmarshaler.Options
 	// The [*Error] in the error to locate that carries its location, and
 	// that location, or the zero anchor when the error names no place.
 	anchor anchor
@@ -589,9 +531,9 @@ type inlineVisit struct {
 // The value is the result as well when the decoder refuses node for it,
 // as [errorLocator.refuses] reports.
 func (l *errorLocator) find(t reflect.Type, node ast.Node, at place) (place, bool) {
-	t = pointerBase(t)
+	t = unmarshaler.Base(t)
 
-	if !reportsOwnError(t, l.unmarshalers) {
+	if !l.unmarshalers.ReportsOwnError(t) {
 		return l.below(t, node, at)
 	}
 
@@ -617,7 +559,7 @@ func (l *errorLocator) find(t reflect.Type, node ast.Node, at place) (place, boo
 // it.
 func (l *errorLocator) refuses(t reflect.Type, node ast.Node) bool {
 	content := l.content(node)
-	if !refusesForText(t, l.unmarshalers, content) {
+	if !l.unmarshalers.RefusesForText(t, content) {
 		return false
 	}
 
@@ -665,7 +607,7 @@ func (l *errorLocator) fields(t reflect.Type, node ast.Node, at place) (place, b
 		}
 
 		if inline {
-			visit := inlineVisit{typ: pointerBase(field.Type), node: mapping}
+			visit := inlineVisit{typ: unmarshaler.Base(field.Type), node: mapping}
 			if l.inlined[visit] {
 				continue
 			}
@@ -783,8 +725,8 @@ func (l *errorLocator) entries(
 
 		child := at.child(name)
 
-		key := pointerBase(t.Key())
-		if reportsOwnError(key, l.unmarshalers) && l.reproduces(entry.Key, reflect.New(key).Interface()) {
+		key := unmarshaler.Base(t.Key())
+		if l.unmarshalers.ReportsOwnError(key) && l.reproduces(entry.Key, reflect.New(key).Interface()) {
 			return child.key(), true
 		}
 

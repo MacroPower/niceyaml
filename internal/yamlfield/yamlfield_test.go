@@ -181,3 +181,55 @@ func TestOwnNames(t *testing.T) {
 
 	assert.Equal(t, want, yamlfield.OwnNames(reflect.TypeFor[fields]()))
 }
+
+// target is the type a [yamlfield.Reaches] search looks for.
+type target struct{}
+
+// stopper holds a target below it, where a search that stops at it
+// never looks.
+type stopper struct {
+	Target target `yaml:"target"`
+}
+
+// loop holds itself.
+type loop struct {
+	Next *loop `yaml:"next"`
+}
+
+func TestReaches(t *testing.T) {
+	t.Parallel()
+
+	targetType, stopperType := reflect.TypeFor[target](), reflect.TypeFor[stopper]()
+
+	at := func(t reflect.Type) (bool, bool) {
+		return t == targetType, t == stopperType
+	}
+
+	tcs := map[string]struct {
+		typ  reflect.Type
+		want bool
+	}{
+		"itself":        {typ: targetType, want: true},
+		"pointer":       {typ: reflect.TypeFor[*target](), want: true},
+		"slice":         {typ: reflect.TypeFor[[]target](), want: true},
+		"array":         {typ: reflect.TypeFor[[2]target](), want: true},
+		"map key":       {typ: reflect.TypeFor[map[target]int](), want: true},
+		"map element":   {typ: reflect.TypeFor[map[int]target](), want: true},
+		"field":         {typ: reflect.TypeFor[struct{ T target }](), want: true},
+		"skipped field": {typ: reflect.TypeFor[struct{ t target }]()},
+		"tag of dash": {typ: reflect.TypeFor[struct {
+			T target `yaml:"-"`
+		}]()},
+		"stops above it": {typ: reflect.TypeFor[[]stopper]()},
+		"recursive type": {typ: reflect.TypeFor[loop]()},
+		"other type":     {typ: reflect.TypeFor[int]()},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, yamlfield.Reaches(tc.typ, at))
+		})
+	}
+}

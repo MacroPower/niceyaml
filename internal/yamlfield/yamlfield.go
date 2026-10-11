@@ -15,6 +15,10 @@
 // struct alone. With an omitempty option beside the alias option, go-yaml
 // also leaves out the entries the `<<` keys of the mapping bring in, which
 // [IgnoresMerges] reports.
+//
+// A search for a type the decoder can reach from another, such as one
+// with a method a decode calls, goes through [Reaches], which follows
+// the fields the decoder reads.
 package yamlfield
 
 import (
@@ -116,4 +120,48 @@ func OwnNames(t reflect.Type) map[string]bool {
 	}
 
 	return names
+}
+
+// Reaches reports whether at finds a type that a decode into t reaches:
+// t itself, or a type the decoder reaches from t through a pointer, an
+// array or slice element, a map key or element, or a struct field it
+// does not skip, as [Name] reports. For each type, at returns whether it
+// found the type, and whether the search stops there without looking
+// below it. The search reads each type once, so it ends for a type that
+// holds itself.
+func Reaches(t reflect.Type, at func(reflect.Type) (bool, bool)) bool {
+	return reaches(t, at, map[reflect.Type]bool{})
+}
+
+// reaches is [Reaches] for a search that has read the types in seen.
+func reaches(t reflect.Type, at func(reflect.Type) (bool, bool), seen map[reflect.Type]bool) bool {
+	if seen[t] {
+		return false
+	}
+
+	seen[t] = true
+
+	if found, stop := at(t); found || stop {
+		return found
+	}
+
+	switch t.Kind() {
+	case reflect.Pointer, reflect.Array, reflect.Slice:
+		return reaches(t.Elem(), at, seen)
+
+	case reflect.Map:
+		return reaches(t.Key(), at, seen) || reaches(t.Elem(), at, seen)
+
+	case reflect.Struct:
+		for field := range t.Fields() {
+			if _, _, skip := Name(field); !skip && reaches(field.Type, at, seen) {
+				return true
+			}
+		}
+
+		return false
+
+	default:
+		return false
+	}
 }

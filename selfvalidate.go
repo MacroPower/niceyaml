@@ -4,14 +4,11 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"encoding"
 	"fmt"
 	"math"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 	"unsafe"
 
@@ -20,6 +17,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
+	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -271,7 +269,7 @@ func SelfValidateValue(ctx context.Context, v any) error {
 		return BindValue(err)
 	}
 
-	return BindValue(walkSelfValidators(ctx, v, nil, nil, optionUnmarshalers{}))
+	return BindValue(walkSelfValidators(ctx, v, nil, nil, unmarshaler.Options{}))
 }
 
 // checkSelfValidateTarget returns [ErrSelfValidateTarget] when v is nil
@@ -326,7 +324,7 @@ func checkSelfValidateTarget(v any) error {
 // context that ended, and returns that error alone, as it is, in place of
 // the errors it collected.
 func walkSelfValidators(
-	ctx context.Context, v any, n *Node, opts []yaml.DecodeOption, unmarshalers optionUnmarshalers,
+	ctx context.Context, v any, n *Node, opts []yaml.DecodeOption, unmarshalers unmarshaler.Options,
 ) error {
 	w := selfWalker{
 		ctx:      ctx,
@@ -379,7 +377,7 @@ type selfWalker struct {
 	decoder *yaml.Decoder
 	opts    []yaml.DecodeOption
 	// The types the options of the decode give an unmarshaler.
-	unmarshalers optionUnmarshalers
+	unmarshalers unmarshaler.Options
 	// The result of the walk through each pointer, map, and slice the walk
 	// has entered, as [walkResult] describes.
 	walked map[visit]walkResult
@@ -585,7 +583,7 @@ func (w *selfWalker) walkValue(v reflect.Value, at place, shadowed map[string]bo
 		v = addressable(v)
 	}
 
-	field, whole := w.unmarshalers.decodesWhole(v.Type())
+	field, whole := w.unmarshalers.Whole(v.Type())
 
 	mark, sealed := len(w.within), w.sealed
 	if whole {
@@ -761,223 +759,15 @@ func visitOf(v reflect.Value) visit {
 }
 
 var (
-	// The interfaces go-yaml decodes a value through when its pointer
-	// implements one, in place of decoding field by field. Go-yaml checks
-	// them in this order and calls the first one the pointer implements.
-	unmarshalerTypes = []reflect.Type{
-		reflect.TypeFor[yaml.BytesUnmarshalerContext](),
-		reflect.TypeFor[yaml.BytesUnmarshaler](),
-		reflect.TypeFor[yaml.InterfaceUnmarshalerContext](),
-		reflect.TypeFor[yaml.InterfaceUnmarshaler](),
-		reflect.TypeFor[yaml.NodeUnmarshaler](),
-		reflect.TypeFor[yaml.NodeUnmarshalerContext](),
-		reflect.TypeFor[encoding.TextUnmarshaler](),
-	}
-
-	// The import path of the go-yaml ast package, which declares the node
-	// types go-yaml sets whole.
-	astPackage = reflect.TypeFor[ast.StringNode]().PkgPath()
-
 	// The result of [mayHoldValidator] for each type it has read.
-	holdsValidator typeCache[bool]
+	holdsValidator unmarshaler.TypeCache[bool]
 
 	// The result of [implementsSelfValidator] for each type it has read.
-	ownsValidator typeCache[bool]
-
-	// The result of [decoderField] for each type it has read, with -1 for
-	// a type that has no such field.
-	decoderFields typeCache[int]
-
-	// The result of [jsonDecoderField] for each type it has read.
-	jsonDecoderFields typeCache[int]
-
-	// The result of [decodesItself] for each type it has read.
-	decodesWhole typeCache[bool]
+	ownsValidator unmarshaler.TypeCache[bool]
 
 	// The result of [fieldsOf] for each struct type it has read.
-	walkedFields typeCache[*structFields]
+	walkedFields unmarshaler.TypeCache[*structFields]
 )
-
-// typeCache holds a value computed once for each type it reads. A type
-// never changes, so every walk shares the values.
-type typeCache[V any] struct {
-	values sync.Map
-}
-
-// get returns the value of t. The first call for t runs compute and
-// stores its result for the calls after it.
-func (c *typeCache[V]) get(t reflect.Type, compute func(reflect.Type) V) V {
-	if cached, ok := c.values.Load(t); ok {
-		if v, ok := cached.(V); ok {
-			return v
-		}
-	}
-
-	v := compute(t)
-	c.values.Store(t, v)
-
-	return v
-}
-
-// decodesItself reports whether go-yaml decodes a value of type t whole,
-// so the fields, elements, or entries of the value need not mirror the
-// document. A type decodes itself through an unmarshaler method of its
-// own, or as an [ast.Node] the ast package declares, which the decoder
-// sets to the node it decodes rather than decoding field by field. The
-// tokens of a node also link to every other token of the file. A struct
-// that gets the methods of an [ast.Node] from an embedded field decodes
-// field by field. The method set of the pointer holds the methods of
-// both receivers, as the decoder checks it.
-func decodesItself(t reflect.Type) bool {
-	return decodesWhole.get(t, func(t reflect.Type) bool {
-		return isSyntaxNode(t) || slices.ContainsFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
-	})
-}
-
-// isSyntaxNode reports whether t is an [ast.Node] type the ast package
-// declares, which go-yaml sets to the node it decodes. The tokens of such
-// a node link to every other token of the file, so the self-validation
-// walk reads nothing below one.
-func isSyntaxNode(t reflect.Type) bool {
-	return t.PkgPath() == astPackage && reflect.PointerTo(t).Implements(reflect.TypeFor[ast.Node]())
-}
-
-// decoderField returns the index of the embedded field of t that decodes
-// t, when t is a struct that gets its unmarshaler method from that field.
-// Go-yaml checks the unmarshaler interfaces in a fixed order and calls
-// the first method the pointer to t has, so an UnmarshalYAML that t gets
-// from a field wins over an UnmarshalText that t declares. The method of
-// the field decodes the document into the field, so the field stands at
-// the path of the struct. When several embedded fields have the method,
-// Go promotes it from the field that has it at the shallowest depth. The
-// bool result is false when t declares the method go-yaml calls, or when
-// no embedded field has that method.
-func decoderField(t reflect.Type) (int, bool) {
-	i := decoderFields.get(t, findDecoderField)
-
-	return i, i >= 0
-}
-
-// findDecoderField returns the index [decoderField] returns, or -1 when
-// t has no such field.
-func findDecoderField(t reflect.Type) int {
-	k := slices.IndexFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
-	if k < 0 {
-		return -1
-	}
-
-	return promotingField(t, unmarshalerTypes[k])
-}
-
-// jsonDecoderField returns the index of the embedded field of t whose
-// UnmarshalJSON method decodes t under [WithJSONUnmarshalers], or -1
-// when t declares the method or has none. It reads t as [decoderField]
-// reads a type with an UnmarshalYAML method, and holds only for a type
-// go-yaml decodes through UnmarshalJSON, as
-// [optionUnmarshalers.decodesJSON] reports one.
-func jsonDecoderField(t reflect.Type) int {
-	return jsonDecoderFields.get(t, func(t reflect.Type) int {
-		if !reflect.PointerTo(t).Implements(jsonUnmarshalerType) {
-			return -1
-		}
-
-		return promotingField(t, jsonUnmarshalerType)
-	})
-}
-
-// promotingField returns the index of the embedded field that gives t
-// the one method of unmarshaler, an interface the pointer to t
-// implements, or -1 when t declares that method itself.
-func promotingField(t, unmarshaler reflect.Type) int {
-	if t.Kind() != reflect.Struct || !hasEmbedded(t) {
-		return -1
-	}
-
-	name := unmarshaler.Method(0).Name
-	if !promotesMethod(t, name) {
-		return -1
-	}
-
-	found, depth := -1, math.MaxInt
-
-	for i := range t.NumField() {
-		field := t.Field(i)
-		if !field.Anonymous {
-			continue
-		}
-
-		// The method set of the pointer to t holds the methods of the
-		// pointer to a field that is no pointer or interface.
-		methods := field.Type
-		if methods.Kind() != reflect.Pointer && methods.Kind() != reflect.Interface {
-			methods = reflect.PointerTo(methods)
-		}
-
-		if !methods.Implements(unmarshaler) {
-			continue
-		}
-
-		// Two fields that have the method at the same depth would leave
-		// it out of the method set of the pointer to t, so no other field
-		// has it at the shallowest depth.
-		if d := methodDepth(field.Type, name); d < depth {
-			found, depth = i, d
-		}
-	}
-
-	return found
-}
-
-// methodDepth returns how many embedded fields deep in t a type declares
-// the method of the given name. It returns 0 when t declares the method
-// itself, and [math.MaxInt] when the pointer to t has no such method. A
-// pointer type counts as the type it points to. The search reads one
-// depth at a time, so the first declaration it finds is the shallowest.
-// It reads each type once, so it ends for a type that embeds a pointer
-// to itself.
-func methodDepth(t reflect.Type, name string) int {
-	seen := map[reflect.Type]bool{}
-	level := []reflect.Type{t}
-
-	for depth := 0; len(level) > 0; depth++ {
-		var next []reflect.Type
-
-		for _, lt := range level {
-			if lt.Kind() == reflect.Pointer {
-				lt = lt.Elem()
-			}
-
-			if seen[lt] {
-				continue
-			}
-
-			seen[lt] = true
-
-			methods := lt
-			if methods.Kind() != reflect.Interface {
-				methods = reflect.PointerTo(methods)
-			}
-
-			if _, ok := methods.MethodByName(name); !ok {
-				continue
-			}
-
-			if !promotesMethod(lt, name) {
-				return depth
-			}
-
-			for field := range lt.Fields() {
-				if field.Anonymous {
-					next = append(next, field.Type)
-				}
-			}
-		}
-
-		level = next
-	}
-
-	return math.MaxInt
-}
 
 // mayHoldValidator reports whether a value of type t can implement
 // [SelfValidator], or can hold a value the walk reaches below it that
@@ -992,49 +782,12 @@ func methodDepth(t reflect.Type, name string) int {
 // the walk never reaches, and the walk then looks at the value and stops
 // there. A node of the syntax tree holds none the walk reaches.
 func mayHoldValidator(t reflect.Type) bool {
-	return holdsValidator.get(t, func(t reflect.Type) bool {
-		return reachesValidator(t, map[reflect.Type]bool{})
+	return holdsValidator.Get(t, func(t reflect.Type) bool {
+		// The walk reads nothing below a node of the syntax tree.
+		return yamlfield.Reaches(t, func(t reflect.Type) (bool, bool) {
+			return t.Kind() == reflect.Interface || implementsSelfValidator(t), unmarshaler.IsSyntaxNode(t)
+		})
 	})
-}
-
-// reachesValidator reports whether t, or a type below it, can hold a
-// [SelfValidator], as [mayHoldValidator] describes. The seen set holds
-// the types the search has reached, so the search reads a type that holds
-// itself once, and a validator below that type shows on the first read.
-func reachesValidator(t reflect.Type, seen map[reflect.Type]bool) bool {
-	if seen[t] {
-		return false
-	}
-
-	seen[t] = true
-
-	if t.Kind() == reflect.Interface || implementsSelfValidator(t) {
-		return true
-	}
-
-	// The walk reads nothing below a node of the syntax tree.
-	if isSyntaxNode(t) {
-		return false
-	}
-
-	switch t.Kind() {
-	case reflect.Map:
-		return reachesValidator(t.Key(), seen) || reachesValidator(t.Elem(), seen)
-
-	case reflect.Pointer, reflect.Slice, reflect.Array:
-		return reachesValidator(t.Elem(), seen)
-
-	case reflect.Struct:
-		for field := range t.Fields() {
-			if _, _, skip := yamlfield.Name(field); !skip && reachesValidator(field.Type, seen) {
-				return true
-			}
-		}
-
-	default:
-	}
-
-	return false
 }
 
 // children walks the values below v, and reports whether every one of
@@ -1289,7 +1042,7 @@ type heldField struct {
 // result leaves it out, along with each field go-yaml skips. Every walk
 // shares the result, so a caller must not change it.
 func fieldsOf(t reflect.Type) *structFields {
-	return walkedFields.get(t, readFields)
+	return walkedFields.Get(t, readFields)
 }
 
 // readFields returns the fields [fieldsOf] returns for t.
@@ -1447,7 +1200,7 @@ func (w *selfWalker) scanSelf(v reflect.Value) (bool, bool) {
 		return true, true
 	}
 
-	if field, _ := w.unmarshalers.decodesWhole(v.Type()); field >= 0 {
+	if field, _ := w.unmarshalers.Whole(v.Type()); field >= 0 {
 		return w.scanValue(v.Field(field))
 	}
 
@@ -1549,53 +1302,9 @@ func iterValue(iter *reflect.MapIter, holder reflect.Value) reflect.Value {
 // [decoderField] finds it. The method does not run when the field is nil
 // or go-yaml skips it, since the walk never reaches such a field.
 func implementsSelfValidator(t reflect.Type) bool {
-	return ownsValidator.get(t, func(t reflect.Type) bool {
-		return reflect.PointerTo(t).Implements(reflect.TypeFor[SelfValidator]()) && !promotesMethod(t, "Validate")
+	return ownsValidator.Get(t, func(t reflect.Type) bool {
+		return unmarshaler.Declares(t, reflect.TypeFor[SelfValidator]())
 	})
-}
-
-// promotesMethod reports whether the method of the given name in the
-// method set of the pointer to t comes from an embedded field of t
-// rather than from t itself. Only a struct with an embedded field can
-// promote a method. The compiler gives t a wrapper for a promoted
-// method and marks its source file as "<autogenerated>". Neither the
-// language spec nor the reflect package promises that, and reflect
-// offers no other way to tell a promoted method from a declared one, so
-// the tests of embedded fields that promote or shadow a method pin it.
-// The method set of the value comes first, since the pointer holds a
-// wrapper for a method declared on the value too.
-func promotesMethod(t reflect.Type, name string) bool {
-	if t.Kind() != reflect.Struct || !hasEmbedded(t) {
-		return false
-	}
-
-	method, ok := t.MethodByName(name)
-	if !ok {
-		method, ok = reflect.PointerTo(t).MethodByName(name)
-		if !ok {
-			return false
-		}
-	}
-
-	fn := runtime.FuncForPC(method.Func.Pointer())
-	if fn == nil {
-		return false
-	}
-
-	file, _ := fn.FileLine(fn.Entry())
-
-	return file == "<autogenerated>"
-}
-
-// hasEmbedded reports whether t, a struct type, has an embedded field.
-func hasEmbedded(t reflect.Type) bool {
-	for field := range t.Fields() {
-		if field.Anonymous {
-			return true
-		}
-	}
-
-	return false
 }
 
 // validate runs Validate on v when v implements [SelfValidator] through
