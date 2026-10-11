@@ -3,834 +3,13 @@ package niceyaml
 import (
 	"context"
 	"errors"
-	"fmt"
-	"slices"
-	"strconv"
 	"strings"
-	"unicode"
-
-	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/parser"
-	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/layermerge"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
-
-// errNoScalarText is the error of a node that [mergeLayers] cannot write into
-// the merged document, since it is no collection and holds no text.
-var errNoScalarText = errors.New("node has no text to merge")
-
-// mergedKind is the kind of a [mergedValue].
-type mergedKind int
-
-// [mergedKind] constants. A value of the zero kind is a null.
-const (
-	mergedNull mergedKind = iota
-	mergedScalar
-	mergedSequence
-	mergedMapping
-)
-
-// mergedValue is a value of the document that [mergeLayers] merges its
-// layers into. A [layerReader] reads one from each layer, with every
-// alias and `<<` merge key of the layer resolved, and
-// [mergedValue.merge] puts the value of a higher layer over it.
-type mergedValue struct {
-	// The highest layer whose document holds the value. For a mapping
-	// that several layers hold, the entries can belong to lower layers.
-	layer *Node
-	// The index in entries of each key name.
-	names map[string]int
-	// The tag the layer writes on the value, as the source spells it, or
-	// the empty string.
-	tag string
-	// The YAML text of a scalar or a null, which fits on one line.
-	text string
-	// The elements of a sequence.
-	items []*mergedValue
-	// The entries of a mapping, in the order the layers first name them.
-	// An entry that a layer removed stays among them, as [mergedEntry]
-	// describes.
-	entries []*mergedEntry
-	kind    mergedKind
-	// Reports a null that its layer writes, as `null` or `~`, for which
-	// go-yaml gives a token of [token.NullType]. A null with no text of
-	// its own, as in `key:`, is unwritten.
-	written bool
-}
-
-// mergedEntry is an entry of a mapping in a [mergedValue].
-type mergedEntry struct {
-	value *mergedValue
-	// The text a `.name` selector matches the key by, as
-	// [paths.Resolver.KeyName] gives it.
-	name string
-	// The YAML text of the key, with its tag, as the layer of value
-	// spells it.
-	key string
-	// Reports an entry that a layer removed with a written null. The
-	// merged document leaves the entry out, and value is the null that
-	// removed it, so an error about the key binds at that null. For an
-	// entry that a merged layer removed, value is a null of that layer,
-	// which stands for the null in a layer of its own.
-	removed bool
-}
-
-// merge puts upper over e, where upper is the entry a higher layer holds
-// under the name of e. A null in upper that removes, as
-// [mergedValue.removes] reports one, removes e when e holds a value, and
-// stays a null over a null. Any other null in upper keeps e, unless e is
-// such a null too, which upper replaces. Any other value of upper merges
-// over the value of e, as [mergedValue.merge] describes.
-//
-// A removed e stays removed under a null of either kind, and holds the
-// null of the highest layer whose null removes. A removed upper, which
-// the reader of a merged layer carries, removes e whatever e holds. Any
-// other value of upper takes the place of a removed e, with none of the
-// value the layers below held.
-func (e *mergedEntry) merge(upper *mergedEntry) {
-	value := upper.value
-
-	switch {
-	case upper.removed, value.removes() && (e.removed || e.value.kind != mergedNull):
-		e.value, e.removed = value, true
-
-	case value.kind == mergedNull && !value.removes() && (e.removed || e.value.removes()):
-		// The null keeps the removal, or the null below that removes.
-
-	case e.removed:
-		e.value, e.removed = value, false
-	default:
-		e.value = e.value.merge(value)
-	}
-
-	// The key reads as the layer of the value spells it, so a path to the
-	// key resolves in that layer.
-	if e.value.layer == value.layer {
-		e.key = upper.key
-	}
-}
-
-// removes reports whether v is a null that removes the value the layers
-// below hold under its key: a written null with no tag. A tag stays on a
-// null where it converts the null, as "!!str" does, and such a null
-// keeps the value below it, written or not. The merged text spells both
-// as a written null, since go-yaml parses no entry behind a tag with no
-// value, so the two must merge alike.
-func (v *mergedValue) removes() bool {
-	return v.kind == mergedNull && v.written && v.tag == ""
-}
-
-// merge returns upper merged over v, where upper comes from a higher
-// layer. Two mappings merge entry by entry, as [mergedEntry.merge]
-// describes, and v then holds the result. A null in upper keeps v,
-// unless v is a null too. Any other upper replaces v. Either value may
-// be nil, which stands for a layer that holds no value there.
-//
-// No null removes a value here. [mergedEntry.merge] decides that for the
-// value under a key, and the root of a layer has no key.
-func (v *mergedValue) merge(upper *mergedValue) *mergedValue {
-	switch {
-	case v == nil:
-		return upper
-	case upper == nil:
-		return v
-	case upper.kind == mergedNull:
-		if v.kind == mergedNull {
-			return upper
-		}
-
-		return v
-
-	case v.kind != mergedMapping || upper.kind != mergedMapping:
-		return upper
-	}
-
-	for _, entry := range upper.entries {
-		i, ok := v.names[entry.name]
-		if !ok {
-			v.names[entry.name] = len(v.entries)
-			v.entries = append(v.entries, entry)
-
-			continue
-		}
-
-		v.entries[i].merge(entry)
-	}
-
-	v.layer = upper.layer
-
-	if upper.tag != "" {
-		v.tag = upper.tag
-	}
-
-	return v
-}
-
-// block reports whether v takes lines of its own in the merged document:
-// a sequence that is not empty, or a mapping with an entry that no layer
-// removed.
-func (v *mergedValue) block() bool {
-	return len(v.items) > 0 || slices.ContainsFunc(v.entries, func(e *mergedEntry) bool { return !e.removed })
-}
-
-// inline returns the text of a value that is no block, with its tag in
-// front. With keyed set, the text goes behind the ":" of a key, where an
-// unwritten null with no tag has no text, as its layer spells it. A
-// written null there would remove a value once the merged document is a
-// layer.
-func (v *mergedValue) inline(keyed bool) string {
-	text := v.text
-
-	switch v.kind {
-	case mergedMapping:
-		text = "{}"
-	case mergedSequence:
-		text = "[]"
-	case mergedNull, mergedScalar:
-	}
-
-	switch {
-	case v.tag != "":
-		return v.tag + " " + text
-	case keyed && v.kind == mergedNull && !v.written:
-		return ""
-	}
-
-	return text
-}
-
-// layerReader reads the value of one layer of a merged [Source] as the go-yaml
-// decoder reads it, into a [mergedValue] that holds no alias and no `<<`
-// merge key.
-//
-// An alias reads the anchor the [paths.Resolver] of the document binds it
-// to, which is the anchor a decode of the layer reads, as [decodetree.Tree]
-// describes. An alias the resolver binds to no anchor reads an anchor of
-// the reference documents of the [Source] by name, and so does every
-// alias inside a reference document. An alias inside the anchor it refers
-// to reads as null, as the decoder reads it.
-//
-// Create instances with [newLayerReader].
-type layerReader struct {
-	ctx      context.Context
-	layer    *Node
-	resolver *paths.Resolver
-	// The anchors of the reference documents of the layer by name, which
-	// references fills on its first call.
-	refs map[string]*ast.AnchorNode
-	// The anchors whose content the reader is inside.
-	open map[*ast.AnchorNode]bool
-}
-
-// newLayerReader creates a new [*layerReader] for layer, which reads
-// with ctx.
-func newLayerReader(ctx context.Context, layer *Node) *layerReader {
-	return &layerReader{
-		ctx:      ctx,
-		layer:    layer,
-		resolver: layer.doc.pathResolver(),
-		open:     map[*ast.AnchorNode]bool{},
-	}
-}
-
-// read returns the value of the layer, or nil when the layer holds none,
-// as the document of comments alone does. A layer that a decode rejects
-// returns the error of that decode, bound in the layer, so a layer fails
-// here as it fails on its own. The reader writes each alias out in full,
-// so the layer must also pass the alias limit as a decode into a type
-// that reads text does. The read stops with the error of the context
-// once it ends, bound in the layer.
-func (r *layerReader) read() (*mergedValue, error) {
-	n := r.layer
-
-	if n.doc.err != nil {
-		return nil, n.doc.err
-	}
-
-	var discard any
-
-	err := n.decodeInto(r.ctx, &discard, decodeConfig{skipSelfValidation: true}, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	err = aliasing.CheckDecodeText(n)
-	if err != nil {
-		return nil, n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
-	}
-
-	if !astnode.HasContent(n.AST()) {
-		return nil, nil //nolint:nilnil // A layer with no content holds no value.
-	}
-
-	v, err := r.value(n.AST(), false)
-	if err != nil {
-		return nil, n.bindOwn(err)
-	}
-
-	r.carry(v, n.source.layers.value(n.base))
-
-	return v, nil
-}
-
-// carry adds each entry that held marks as removed to the value v. It
-// serves a layer that is a Node of a merged document, where held is the
-// value the layers of that document hold at the Node. The reader read v
-// from the merged text, which leaves out each key a layer removed. Each
-// such entry goes in where held has it, as an entry the layer removes,
-// so the layer removes what its own layers do. A nil held holds no
-// entry.
-func (r *layerReader) carry(v, held *mergedValue) {
-	if held == nil || v.kind != mergedMapping || held.kind != mergedMapping {
-		return
-	}
-
-	entries := make([]*mergedEntry, 0, len(held.entries))
-
-	// The text holds the entries of held that no layer removed, in the
-	// order held has them, and next is the first of them still to place.
-	next := 0
-
-	for _, entry := range held.entries {
-		switch {
-		case entry.removed:
-			entries = append(entries, &mergedEntry{
-				name:    entry.name,
-				key:     entry.key,
-				value:   &mergedValue{layer: r.layer},
-				removed: true,
-			})
-
-		case next < len(v.entries):
-			r.carry(v.entries[next].value, entry.value)
-
-			entries = append(entries, v.entries[next])
-			next++
-		}
-	}
-
-	v.entries = append(entries, v.entries[next:]...)
-
-	for i, entry := range v.entries {
-		v.names[entry.name] = i
-	}
-}
-
-// value returns the value under node. The ref flag says that node lies in
-// a reference document, where an alias reads the reference documents
-// alone. The read of a value ends with the error of the context once
-// it ends, since each alias writes its anchor out in full here.
-func (r *layerReader) value(node ast.Node, ref bool) (*mergedValue, error) {
-	err := r.ctx.Err()
-	if err != nil {
-		return nil, err //nolint:wrapcheck // The context names the reason, and read binds it.
-	}
-
-	var v *mergedValue
-
-	err = r.follow(node, ref, "", func(content ast.Node, tag string, ref bool) error {
-		var err error
-
-		v, err = r.content(content, ref)
-		if err != nil {
-			return err
-		}
-
-		v.tag = tag
-
-		return nil
-	})
-
-	return v, err
-}
-
-// follow calls visit with the content under node, which is the node
-// behind every anchor, alias, tag, and `?` indicator on the way. It passes
-// the first tag it looks through, as the source spells it, and whether
-// the content lies in a reference document. The tag starts as outer, the
-// tag a caller found above node, or the empty string. A tag over no
-// value that the decoder reads as null, as [astnode.IsTaggedNull]
-// reports, is no tag to pass, since the text "null" behind it reads as
-// another value. Each anchor on the way stays open while visit runs. The
-// content of an alias inside the anchor it refers to is nil, which reads
-// as null.
-func (r *layerReader) follow(
-	node ast.Node, ref bool, outer string, visit func(content ast.Node, tag string, ref bool) error,
-) error {
-	if astnode.IsNil(node) {
-		return visit(nil, outer, ref)
-	}
-
-	switch n := node.(type) {
-	case *ast.AnchorNode:
-		if r.open[n] {
-			return visit(nil, outer, ref)
-		}
-
-		r.open[n] = true
-		defer delete(r.open, n)
-
-		return r.follow(n.Value, ref, outer, visit)
-
-	case *ast.AliasNode:
-		// An alias that lies inside the anchor it refers to reads as null
-		// wherever the reader reaches it from. The open anchors alone miss
-		// one that a `<<` merge key brought in, since mapping reads that
-		// value once the anchor has closed.
-		if !ref && r.layer.doc.state.Facts().Enclosed[n] {
-			return visit(nil, outer, ref)
-		}
-
-		anchor, inRef, err := r.anchor(n, ref)
-		if err != nil {
-			return err
-		}
-
-		return r.follow(anchor, inRef, outer, visit)
-
-	case *ast.TagNode:
-		if outer == "" && !tagsNoValue(n) {
-			outer = n.GetToken().Value
-		}
-
-		return r.follow(n.Value, ref, outer, visit)
-
-	case *ast.MappingKeyNode:
-		return r.follow(n.Value, ref, outer, visit)
-	case *ast.DocumentNode:
-		return r.follow(n.Body, ref, outer, visit)
-	default:
-		return visit(node, outer, ref)
-	}
-}
-
-// tagsNoValue reports whether tag stands over no value and the go-yaml
-// decoder reads it as null, as [astnode.IsTaggedNull] describes. The merged
-// document writes that null as text. Behind a local tag the text reads
-// as a string, and behind a tag such as "!!map" it does not parse.
-func tagsNoValue(tag *ast.TagNode) bool {
-	return astnode.IsTaggedNull(tag) && (astnode.IsNil(tag.Value) || tag.Value.Type() == ast.NullType)
-}
-
-// anchor returns the anchor alias reads, and whether that anchor lies in
-// a reference document. An alias of the document reads the anchor the
-// resolver binds it to. An alias the resolver binds to no anchor, and
-// every alias of a reference document, reads the last anchor of its name
-// in the reference documents.
-func (r *layerReader) anchor(alias *ast.AliasNode, ref bool) (*ast.AnchorNode, bool, error) {
-	if !ref {
-		found, err := r.resolver.Anchor(alias)
-		if anchor, ok := found.(*ast.AnchorNode); err == nil && ok && anchor != nil {
-			return anchor, false, nil
-		}
-	}
-
-	name, _ := astnode.Name(alias.Value)
-
-	anchor, ok := r.references()[name]
-	if !ok {
-		err := fmt.Errorf("%w: *%s has no anchor to read", paths.ErrAlias, name)
-
-		return nil, false, r.invalid(err, alias, ref)
-	}
-
-	return anchor, true, nil
-}
-
-// references returns the anchors of the reference documents of the layer
-// by name, and reads the documents on the first call. The decoder reads
-// the reference documents in order and keeps the anchors by name, so the
-// last anchor of a name wins.
-func (r *layerReader) references() map[string]*ast.AnchorNode {
-	if r.refs != nil {
-		return r.refs
-	}
-
-	r.refs = map[string]*ast.AnchorNode{}
-
-	for _, text := range r.layer.source.references {
-		// The decode in read rejected a layer with a reference document
-		// that does not parse.
-		file, err := parser.ParseBytes(text, 0)
-		if err != nil {
-			continue
-		}
-
-		for _, doc := range file.Docs {
-			astnode.Inspect(doc, func(node ast.Node) bool {
-				if anchor, ok := node.(*ast.AnchorNode); ok {
-					if name, ok := astnode.Name(anchor.Name); ok {
-						r.refs[name] = anchor
-					}
-				}
-
-				return true
-			})
-		}
-	}
-
-	return r.refs
-}
-
-// content returns the value of content, a node [layerReader.follow]
-// found.
-func (r *layerReader) content(content ast.Node, ref bool) (*mergedValue, error) {
-	v := &mergedValue{layer: r.layer}
-
-	switch n := content.(type) {
-	case nil:
-		v.text = "null"
-	case *ast.NullNode:
-		tk := n.GetToken()
-
-		v.text, v.written = tk.Value, tk.Type == token.NullType
-
-	case *ast.MappingNode, *ast.MappingValueNode:
-		entries, _ := astnode.Entries(content)
-
-		return v, r.mapping(v, entries, ref)
-
-	case *ast.SequenceNode:
-		v.kind = mergedSequence
-
-		for _, elem := range n.Values {
-			item, err := r.value(elem, ref)
-			if err != nil {
-				return nil, err
-			}
-
-			v.items = append(v.items, item)
-		}
-
-	default:
-		text, ok := scalarText(content)
-		if !ok {
-			return nil, r.invalid(errNoScalarText, content, ref)
-		}
-
-		v.kind, v.text = mergedScalar, text
-	}
-
-	return v, nil
-}
-
-// invalid returns err as the error of node, a node the layer cannot
-// merge: an alias, a scalar, or the key of an entry. The error lies at
-// the token a path to such a node points at, as [astnode.PathToken] gives
-// it for a node with no parent. That is its own token, or the "{" or "["
-// of a key in flow style. A node of a reference document has no position
-// in the layer, so its error carries none.
-func (r *layerReader) invalid(err error, node ast.Node, ref bool) error {
-	if ref {
-		return Invalid(err)
-	}
-
-	return Invalid(err, atToken(astnode.PathToken(astnode.Content(node), astnode.Parent{})))
-}
-
-// flatEntry is an entry of a mapping as [layerReader.flatten] finds it:
-// the key and the value, and whether they lie in a reference document.
-type flatEntry struct {
-	key   ast.Node
-	value ast.Node
-	ref   bool
-}
-
-// mapping fills v with the entries of a mapping, which holds entries
-// itself and the entries its `<<` merge keys bring in. It reads the value
-// of each entry the mapping keeps, and no other.
-func (r *layerReader) mapping(v *mergedValue, entries []*ast.MappingValueNode, ref bool) error {
-	v.kind, v.names = mergedMapping, map[string]int{}
-
-	var order []string
-
-	kept := map[string]flatEntry{}
-
-	err := r.flatten(entries, ref, func(name string, entry flatEntry) {
-		if _, ok := kept[name]; !ok {
-			order = append(order, name)
-		}
-
-		kept[name] = entry
-	})
-	if err != nil {
-		return err
-	}
-
-	for _, name := range order {
-		entry := kept[name]
-
-		key, err := r.key(entry.key, entry.ref)
-		if err != nil {
-			return err
-		}
-
-		value, err := r.value(entry.value, entry.ref)
-		if err != nil {
-			return err
-		}
-
-		v.names[name] = len(v.entries)
-		v.entries = append(v.entries, &mergedEntry{name: name, key: key, value: value})
-	}
-
-	return nil
-}
-
-// flatten calls keep with each entry of entries under its key name, in
-// document order, and with the entries of each `<<` merge key where the
-// key stands. The go-yaml decoder sets the entries of a mapping in that
-// order, so the last call for a name holds the entry it keeps, as
-// [paths.Resolver.Entry] finds it. A key with no name returns an error.
-func (r *layerReader) flatten(entries []*ast.MappingValueNode, ref bool, keep func(string, flatEntry)) error {
-	for _, entry := range entries {
-		if entry == nil {
-			continue
-		}
-
-		if astnode.IsMergeKey(entry.Key) {
-			err := r.merged(entry.Value, ref, keep)
-			if err != nil {
-				return err
-			}
-
-			continue
-		}
-
-		name, ok := r.resolver.KeyName(entry.Key)
-		if !ok {
-			return r.invalid(ErrUnnamedKey, entry.Key, ref)
-		}
-
-		keep(name, flatEntry{key: entry.Key, value: entry.Value, ref: ref})
-	}
-
-	return nil
-}
-
-// merged calls keep with the entries the value of a `<<` merge key brings
-// in. The value is a mapping, or a sequence of mappings that apply in
-// order. Any other value brings in nothing, and so does an element of
-// the sequence that is no mapping.
-func (r *layerReader) merged(value ast.Node, ref bool, keep func(string, flatEntry)) error {
-	source := func(content ast.Node, _ string, ref bool) error {
-		if entries, ok := astnode.Entries(content); ok {
-			return r.flatten(entries, ref, keep)
-		}
-
-		return nil
-	}
-
-	return r.follow(value, ref, "", func(content ast.Node, tag string, ref bool) error {
-		seq, ok := content.(*ast.SequenceNode)
-		if !ok {
-			return source(content, tag, ref)
-		}
-
-		for _, elem := range seq.Values {
-			err := r.follow(elem, ref, "", source)
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
-}
-
-// key returns the YAML text of key, the key of a mapping entry, with its
-// tag in front.
-func (r *layerReader) key(key ast.Node, ref bool) (string, error) {
-	var text string
-
-	err := r.follow(key, ref, "", func(content ast.Node, tag string, _ bool) error {
-		scalar, ok := scalarText(content)
-		if !ok {
-			return r.invalid(ErrUnnamedKey, key, ref)
-		}
-
-		text = scalar
-		if tag != "" {
-			text = tag + " " + scalar
-		}
-
-		return nil
-	})
-
-	return text, err
-}
-
-// scalarText returns the YAML text that reads as the scalar node on one
-// line of a block collection, and reports false for a node that is no
-// scalar. A scalar that is no string keeps the text of the source, such
-// as 0x10 or 1.50. A string keeps its text and its quotes where they read
-// the same on one line, and takes double quotes otherwise, as a block
-// scalar does.
-func scalarText(node ast.Node) (string, bool) {
-	switch n := node.(type) {
-	case nil:
-		return "", false
-
-	case *ast.LiteralNode:
-		if n.Value == nil {
-			return `""`, true
-		}
-
-		return strconv.Quote(n.Value.Value), true
-
-	case *ast.StringNode:
-		return stringText(n), true
-
-	case ast.ScalarNode:
-		if tk := n.GetToken(); tk != nil {
-			return tk.Value, true
-		}
-	}
-
-	return "", false
-}
-
-// stringText returns the YAML text of the string n, as [scalarText]
-// describes.
-func stringText(n *ast.StringNode) string {
-	tk := n.GetToken()
-
-	switch {
-	case tk == nil, tk.Type == token.DoubleQuoteType, strings.ContainsFunc(n.Value, notPrintable):
-		return strconv.Quote(n.Value)
-	case tk.Type == token.SingleQuoteType:
-		return "'" + strings.ReplaceAll(n.Value, "'", "''") + "'"
-	case !plainSafe(n.Value):
-		return strconv.Quote(n.Value)
-	default:
-		return n.Value
-	}
-}
-
-// notPrintable reports whether r is a character a quoted scalar writes as
-// an escape, such as a line break or a tab.
-func notPrintable(r rune) bool {
-	return !unicode.IsPrint(r)
-}
-
-// plainSafe reports whether the text s of a plain scalar reads as that
-// scalar on a line of a block collection, as a key or as a value. A
-// flow collection takes plain scalars a block collection reads as
-// something else, and the root of a document reads "---" and "..." as
-// markers.
-func plainSafe(s string) bool {
-	if s == "" || strings.TrimSpace(s) != s {
-		return false
-	}
-
-	if strings.ContainsAny(s[:1], "[]{},#&*!|>'\"%@`") {
-		return false
-	}
-
-	for _, indicator := range []string{"-", "?", ":"} {
-		if s == indicator || strings.HasPrefix(s, indicator+" ") {
-			return false
-		}
-	}
-
-	return !strings.HasPrefix(s, "---") && !strings.HasPrefix(s, "...") &&
-		!strings.Contains(s, ": ") && !strings.Contains(s, " #") && !strings.HasSuffix(s, ":")
-}
-
-// mergedWriter writes a [mergedValue] as the text of a YAML document, in
-// block style, with one entry or element on each line.
-type mergedWriter struct {
-	sb strings.Builder
-}
-
-// document writes v as the content of a document. A nil v writes nothing.
-func (w *mergedWriter) document(v *mergedValue) {
-	switch {
-	case v == nil:
-	case !v.block():
-		w.sb.WriteString(v.inline(false))
-		w.sb.WriteByte('\n')
-
-	default:
-		if v.tag != "" {
-			w.sb.WriteString(v.tag)
-			w.sb.WriteByte('\n')
-		}
-
-		w.block(v, 0, false)
-	}
-}
-
-// block writes the lines of v, a mapping or a sequence that is not empty,
-// at indent. With first set, the first line goes on behind what the
-// current line holds, as the first entry of a mapping goes behind the "-"
-// of its element. An entry that a layer removed takes no line.
-func (w *mergedWriter) block(v *mergedValue, indent int, first bool) {
-	for _, entry := range v.entries {
-		if entry.removed {
-			continue
-		}
-
-		w.pad(indent, first)
-
-		first = false
-
-		w.sb.WriteString(entry.key)
-		w.sb.WriteByte(':')
-		w.nested(entry.value, indent+2, false)
-	}
-
-	for _, item := range v.items {
-		w.pad(indent, first)
-
-		first = false
-
-		w.sb.WriteByte('-')
-		w.nested(item, indent+2, true)
-	}
-}
-
-// pad writes the indentation of a line, unless the line holds text
-// already.
-func (w *mergedWriter) pad(indent int, started bool) {
-	if !started {
-		w.sb.WriteString(strings.Repeat(" ", indent))
-	}
-}
-
-// nested writes v behind the ":" of its key or the "-" of its element,
-// and ends the line. A block goes on the lines below at indent. With
-// compact set, v is the element of a sequence, and a block with no tag
-// starts on the line itself. Any other v stands under a key, where a
-// null with no text leaves the line as it is, as [mergedValue.inline]
-// describes.
-func (w *mergedWriter) nested(v *mergedValue, indent int, compact bool) {
-	switch {
-	case !v.block():
-		if text := v.inline(!compact); text != "" {
-			w.sb.WriteByte(' ')
-			w.sb.WriteString(text)
-		}
-
-		w.sb.WriteByte('\n')
-
-	case compact && v.tag == "":
-		w.sb.WriteByte(' ')
-		w.block(v, indent, true)
-
-	default:
-		if v.tag != "" {
-			w.sb.WriteByte(' ')
-			w.sb.WriteString(v.tag)
-		}
-
-		w.sb.WriteByte('\n')
-		w.block(v, indent, false)
-	}
-}
 
 // layering is what the [Source] that [NewSourceFromLayers] builds knows
 // of its layers: the merged value, which names the layer each
@@ -847,9 +26,10 @@ func (w *mergedWriter) nested(v *mergedValue, indent int, compact bool) {
 // built.
 type layering struct {
 	// The merged value, or nil when no layer holds a value.
-	root *mergedValue
-	// The lowest and the highest layer.
-	lowest, top resolvedLayer
+	root *layermerge.Value
+	// The layers the merge read, lowest first, which each value names by
+	// its index.
+	layers []resolvedLayer
 }
 
 // home returns the layer an error binds in when it found no layer of its
@@ -861,11 +41,13 @@ func (l *layering) home() resolvedLayer {
 		return resolvedLayer{}
 	}
 
-	if home := l.lowest.source.layers.home(); home.source != nil {
+	lowest := l.layers[0]
+
+	if home := lowest.source.layers.home(); home.source != nil {
 		return home
 	}
 
-	return l.lowest
+	return lowest
 }
 
 // layer returns the layer an error at path binds in, and two paths in
@@ -894,19 +76,10 @@ func (l *layering) layer(doc *Node, path paths.Path) (resolvedLayer, paths.Path,
 	// the path reads from the value of each layer.
 	rel, _ := path.CutPrefix(paths.Doc())
 
-	layer := l.top
+	layer := l.layers[len(l.layers)-1]
 
-	if at := l.root; at != nil {
-		for sel := range rel.Selectors() {
-			next := at.child(sel)
-			if next == nil {
-				break
-			}
-
-			at = next
-		}
-
-		layer = at.layer.resolveLayer()
+	if at, _ := l.root.Find(rel); at != nil {
+		layer = l.layers[at.Layer]
 	}
 
 	// The layer holds the merged value at its scope, and the search finds
@@ -920,49 +93,19 @@ func (l *layering) layer(doc *Node, path paths.Path) (resolvedLayer, paths.Path,
 
 // value returns the value the layers hold at path, which starts at `$`,
 // or nil when they hold none there. A nil l holds no value.
-func (l *layering) value(path paths.Path) *mergedValue {
+func (l *layering) value(path paths.Path) *layermerge.Value {
 	if l == nil {
 		return nil
 	}
 
 	rel, _ := path.CutPrefix(paths.Doc())
 
-	at := l.root
-
-	for sel := range rel.Selectors() {
-		if at == nil {
-			return nil
-		}
-
-		at = at.child(sel)
+	at, ok := l.root.Find(rel)
+	if !ok {
+		return nil
 	}
 
 	return at
-}
-
-// child returns the value sel selects in v, or nil when v holds none. The
-// `~` selector of a key selects v itself, since the key of an entry
-// belongs to the layer of its value. The name of an entry that a layer
-// removed selects the null that removed it.
-func (v *mergedValue) child(sel paths.Selector) *mergedValue {
-	switch sel.Kind {
-	case paths.SelectorKey:
-		return v
-
-	case paths.SelectorChild:
-		if i, ok := v.names[sel.Name]; ok {
-			return v.entries[i].value
-		}
-
-	case paths.SelectorIndex:
-		if v.kind == mergedSequence && sel.Index >= 0 && sel.Index < len(v.items) {
-			return v.items[sel.Index]
-		}
-
-	case paths.SelectorChildAll, paths.SelectorIndexAll, paths.SelectorRecursive, paths.SelectorRecursiveAll:
-	}
-
-	return nil
 }
 
 // resolvedLayer is one layer of a merged [Source], as [Layer] resolves it. The
@@ -1024,15 +167,64 @@ func resolveLayers(given []Layer) []resolvedLayer {
 	return layers
 }
 
-// read returns the value of the layer, as [layerReader.read] reads it
-// from the document of its Node. A layer from a [Source] that holds no
-// one document returns its error.
-func (l resolvedLayer) read(ctx context.Context) (*mergedValue, error) {
-	if l.node == nil {
+// read returns the value of the layer, the one at index i among the
+// layers of a merge, as a [layermerge.Reader] reads it from the document
+// of its Node, or nil when the layer holds none, as the document of
+// comments alone does. A layer from a [Source] that holds no one
+// document returns its error.
+//
+// A layer that a decode rejects returns the error of that decode, bound
+// in the layer, so a layer fails here as it fails on its own. The reader
+// writes each alias out in full, so the layer must also pass the alias
+// limit as a decode into a type that reads text does. The read stops
+// with the error of the context once it ends, bound in the layer.
+func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, error) {
+	n := l.node
+	if n == nil {
 		return nil, l.err
 	}
 
-	return newLayerReader(ctx, l.node).read()
+	if n.doc.err != nil {
+		return nil, n.doc.err
+	}
+
+	var discard any
+
+	err := n.decodeInto(ctx, &discard, decodeConfig{skipSelfValidation: true}, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	err = aliasing.CheckDecodeText(n)
+	if err != nil {
+		return nil, n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
+	}
+
+	if !astnode.HasContent(n.AST()) {
+		return nil, nil //nolint:nilnil // A layer with no content holds no value.
+	}
+
+	r := layermerge.Reader{
+		Ctx:        ctx,
+		Resolver:   n.doc.pathResolver(),
+		Enclosed:   n.doc.state.Facts().Enclosed,
+		References: n.source.references,
+		UnnamedKey: ErrUnnamedKey,
+		Layer:      i,
+	}
+
+	v, err := r.Read(n.AST())
+	if err != nil {
+		if nodeErr, ok := errors.AsType[*layermerge.NodeError](err); ok {
+			err = Invalid(nodeErr.Err, atToken(nodeErr.Token))
+		}
+
+		return nil, n.bindOwn(err)
+	}
+
+	v.Carry(n.source.layers.value(n.base), i)
+
+	return v, nil
 }
 
 // mergeLayers returns the [*Source] that given merge into, lowest first,
@@ -1057,23 +249,19 @@ func mergeLayers(ctx context.Context, given []Layer) (*Source, error) {
 		return NewSourceFromString(""), nil
 	}
 
-	var root *mergedValue
+	var root *layermerge.Value
 
-	for _, layer := range layers {
-		v, err := layer.read(ctx)
+	for i, layer := range layers {
+		v, err := layer.read(ctx, i)
 		if err != nil {
 			return nil, err
 		}
 
-		root = root.merge(v)
+		root = root.Merge(v)
 	}
 
 	lowest := layers[0]
-
-	var w mergedWriter
-
-	w.sb.WriteString(preambleText(lowest.node))
-	w.document(root)
+	text := layermerge.Text(preambleText(lowest.node), root)
 
 	// An error with no location binds in the lowest layer, as
 	// NewSourceFromLayers describes.
@@ -1082,8 +270,8 @@ func mergeLayers(ctx context.Context, given []Layer) (*Source, error) {
 		return nil, lowest.node.bindOwn(err)
 	}
 
-	src := newMergedSource(lowest.source, w.sb.String(), showsLayers(layers))
-	src.layers = &layering{root: root, lowest: lowest, top: layers[len(layers)-1]}
+	src := newMergedSource(lowest.source, text, showsLayers(layers))
+	src.layers = &layering{root: root, layers: layers}
 
 	return src, nil
 }
