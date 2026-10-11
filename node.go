@@ -818,7 +818,7 @@ func (n *Node) holdsToken(tk *token.Token) bool {
 		return false
 	}
 
-	if _, ok := n.source.parsed().result.Index[tk]; ok {
+	if _, ok := n.source.parsed.get(n.source.parse).result.Index[tk]; ok {
 		return true
 	}
 
@@ -831,7 +831,7 @@ func (d *document) newDecodeTree() *decodetree.Tree {
 
 	return decodetree.New(d.root.Body, d.state.Facts(), decodetree.Options{
 		Reparse: func() (ast.Node, map[*token.Token]int) {
-			r := src.decodeParse()
+			r := src.decodeParse.get(src.reparse)
 			if d.fileIndex < 0 || d.fileIndex >= len(r.File.Docs) {
 				return nil, nil
 			}
@@ -839,7 +839,7 @@ func (d *document) newDecodeTree() *decodetree.Tree {
 			return r.File.Docs[d.fileIndex].Body, r.Index
 		},
 		Texts: func() []string {
-			return append(spellingTexts(d.tokens), src.referenceTexts()...)
+			return append(spellingTexts(d.tokens), src.referenceTexts.get(src.spellReferences)...)
 		},
 		References: len(src.references) > 0,
 	})

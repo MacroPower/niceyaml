@@ -40,7 +40,8 @@ import (
 // file into documents. A Source never changes after creation, so it is
 // safe for concurrent use.
 //
-// A nil Source reads as a Source that holds no text and took no option.
+// The zero Source holds no tokens and one empty document. A nil Source
+// reads as a Source that holds no text and took no option.
 // [Source.Name], [Source.FilePath], [Source.FS], [Source.Text],
 // [Source.Offset], [Source.Tokens], and [Source.Lines] return zero values
 // for it, [Source.View] returns a view that holds no lines, and
@@ -61,27 +62,38 @@ type Source struct {
 	// Holds the text the Source read, which [Source.Text] returns. A
 	// Source built from tokens read none, and hasInput is false for it.
 	input string
-	// Returns the index that maps a position to an offset in input, and
-	// builds it on the first call of [Source.Offset].
-	offsets func() bom.Index
-	// Returns the stream that [Source.Tokens] rebuilds from lines, and
-	// rebuilds it on the first call.
-	stream func() token.Tokens
-	// Parses the tokens on the first call, and returns the same parse on
-	// every later one.
-	parsed func() *parsedFile
-	// Parses the tokens a second time on the first call, for the decoder,
-	// as reparse describes.
-	decodeParse func() *docparse.Result
-	// Returns the texts of the reference documents a new anchor name must
-	// not spell, as spellReferences reads them, and reads them on the
-	// first call.
-	referenceTexts func() []string
+	// The index that maps a position to an offset in input, built on the
+	// first call of [Source.Offset].
+	offsets lazy[bom.Index]
+	// The stream that [Source.Tokens] rebuilds from lines.
+	stream lazy[token.Tokens]
+	// The parse of the tokens, made on the first call that needs it.
+	parsed lazy[*parsedFile]
+	// The second parse of the tokens, for the decoder, as reparse
+	// describes.
+	decodeParse lazy[*docparse.Result]
 	// Holds the layers [NewSourceFromLayers] merged into the Source, or nil.
 	// An error bound in the merged document binds in a layer instead.
 	layers *layering
 	sourceConfig
-	hasInput bool
+	// The texts of the reference documents a new anchor name must not
+	// spell, as spellReferences reads them.
+	referenceTexts lazy[[]string]
+	hasInput       bool
+}
+
+// lazy holds a value that get computes on the first call. Its zero value
+// is ready, so the zero [Source] works.
+type lazy[T any] struct {
+	v    T
+	once sync.Once
+}
+
+// get returns the value, which f computes on the first call.
+func (l *lazy[T]) get(f func() T) T {
+	l.once.Do(func() { l.v = f() })
+
+	return l.v
 }
 
 // SourceOption configures [Source] creation.
@@ -447,11 +459,6 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 // it and [Source.Offset] reports false.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	t := &Source{lines: line.NewLines(tokens.ResetPositions(tks))}
-	t.offsets = sync.OnceValue(func() bom.Index { return bom.NewIndex(t.input) })
-	t.stream = sync.OnceValue(t.lines.Tokens)
-	t.parsed = sync.OnceValue(t.parse)
-	t.decodeParse = sync.OnceValue(t.reparse)
-	t.referenceTexts = sync.OnceValue(t.spellReferences)
 
 	for _, opt := range opts {
 		opt(&t.sourceConfig)
@@ -615,7 +622,7 @@ func (s *Source) Offset(pos position.Position) (int, bool) {
 		return 0, false
 	}
 
-	return s.offsets().Offset(pos.Line, pos.Col)
+	return s.offsets.get(func() bom.Index { return bom.NewIndex(s.input) }).Offset(pos.Line, pos.Col)
 }
 
 // Tokens returns the full [token.Tokens] stream of the [Source]. The first
@@ -635,7 +642,7 @@ func (s *Source) Tokens() token.Tokens {
 		return nil
 	}
 
-	return slices.Clone(s.stream())
+	return slices.Clone(s.stream.get(s.lines.Tokens))
 }
 
 // Documents returns the root [*Node] of each YAML document of this
@@ -765,13 +772,13 @@ func (s *Source) ValidateDocuments(ctx context.Context, v Validator) error {
 // [Source.AllDocuments] does, in the slice the Source keeps rather than a
 // copy, so a caller must not change it.
 func (s *Source) documents() []*Node {
-	return s.parsed().docs
+	return s.parsed.get(s.parse).docs
 }
 
 // contentDocuments returns the roots [Source.Documents] returns, in the
 // slice the Source keeps rather than a copy, so a caller must not change it.
 func (s *Source) contentDocuments() []*Node {
-	return s.parsed().content
+	return s.parsed.get(s.parse).content
 }
 
 // pickContentDocuments returns the documents of docs that are not empty,
@@ -971,7 +978,7 @@ func (d *document) anchorToken() *token.Token {
 // the parser was reading. It holds a [PanicError] and does not match
 // ErrSyntax.
 func (s *Source) File() (*ast.File, error) {
-	p := s.parsed()
+	p := s.parsed.get(s.parse)
 	if p.err != nil {
 		return nil, p.err
 	}
@@ -1060,7 +1067,7 @@ func markSyntax(err error) *markedError {
 func (s *Source) reparse() *docparse.Result {
 	r := docparse.Parse(s.Tokens(), s.parserOptions()...)
 
-	first := s.parsed().result.Index
+	first := s.parsed.get(s.parse).result.Index
 
 	for _, doc := range s.documents() {
 		for alias := range doc.doc.state.Facts().Enclosed {

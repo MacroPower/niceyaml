@@ -161,6 +161,26 @@ func runePositions(lines line.Lines, ranges ...position.Range) []runePosition {
 	return got
 }
 
+func TestSource_ZeroValue(t *testing.T) {
+	t.Parallel()
+
+	var s niceyaml.Source
+
+	assert.Empty(t, s.Tokens())
+	assert.Empty(t, s.Text())
+
+	_, ok := s.Offset(position.New(0, 0))
+	assert.False(t, ok)
+
+	file, err := s.File()
+	require.NoError(t, err)
+	assert.NotNil(t, file)
+
+	docs := s.Documents()
+	require.Len(t, docs, 1)
+	assert.True(t, docs[0].IsEmpty())
+}
+
 func TestSource_Runes(t *testing.T) {
 	t.Parallel()
 

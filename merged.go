@@ -390,7 +390,7 @@ func newMergedSource(from *Source, text string, excerpts bool) *Source {
 		c.noExcerpts = !excerpts
 	})
 
-	src.parsed()
+	src.parsed.get(src.parse)
 
 	return src
 }
