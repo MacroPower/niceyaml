@@ -28,4 +28,9 @@
 // with niceyaml.WithAliasLimit. Both checks then pass every node of the
 // document, and a caller that limits a decoded value asks [Limited]
 // whether the limit applies.
+//
+// Every Node of a document shares one [State], which [StateOf] returns,
+// so a check of each item of a list counts the document once. The State
+// holds the [Facts] of the document: its anchors and aliases from one
+// walk, which the decode tree and the layer merge read as well.
 package aliasing
