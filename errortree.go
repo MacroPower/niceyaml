@@ -539,7 +539,7 @@ func appendTrees(dst []ErrorTree, err error) []ErrorTree {
 	if x, ok := err.(*SourceError); ok { //nolint:errorlint // The node itself, not a chain search.
 		node.Label = x.headline()
 	} else {
-		node.Label, _, _ = end.cut(err.Error())
+		node.Label, _, _, _ = end.cut(err.Error())
 		node.Label = unboundText(err, node.Label)
 	}
 
@@ -786,21 +786,27 @@ type chainEnd struct {
 // gives it, so [SourceError.Error] still lists each of them that the
 // binding located.
 //
+// The third result is the number of children at the end of the list of
+// children whose text the message text holds, cut out of the line or not.
+// It is the second result, and for a join it is every branch, since the
+// cut takes the text of each one out of the line and text still holds
+// it.
+//
 // A wrapper that rewrites the message it wraps leaves nothing to find.
 // The text then comes back whole, and the last result is false.
-func (c chainEnd) cut(text string) (string, int, bool) {
+func (c chainEnd) cut(text string) (string, int, int, bool) {
 	var (
-		full, own string
-		shown     int
+		full, own   string
+		shown, held int
 	)
 
 	switch x := c.err.(type) { //nolint:errorlint // The end of the chain, found by the walk.
 	case nil:
-		return text, 0, true
+		return text, 0, 0, true
 
 	case *SourceError:
 		t := x.texts()
-		full, own, shown = t.msg, t.head, t.shown
+		full, own, shown, held = t.msg, t.head, t.shown, t.shown
 
 	case interface{ Unwrap() []error }:
 		msg := text
@@ -812,26 +818,26 @@ func (c chainEnd) cut(text string) (string, int, bool) {
 
 		switch {
 		case isJoinError(c.err) || isJoinMessage(msg, branches):
-			full = msg
+			full, held = msg, c.branches
 
 		case isWrapErrors(c.err) || holdsFirst(msg, branches):
-			return text, c.branches, true
+			return text, c.branches, c.branches, true
 
 		default:
-			return text, 0, true
+			return text, 0, 0, true
 		}
 	}
 
 	if full == own {
-		return text, shown, true
+		return text, shown, held, true
 	}
 
 	before, after, ok := strings.Cut(text, full)
 	if !ok {
-		return text, 0, false
+		return text, 0, 0, false
 	}
 
-	return strings.TrimRightFunc(before+own+after, unicode.IsSpace), shown, true
+	return strings.TrimRightFunc(before+own+after, unicode.IsSpace), shown, held, true
 }
 
 // holdsFirst reports whether msg holds the message of the first of

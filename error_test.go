@@ -841,6 +841,99 @@ func TestSourceError_Error_MultiError(t *testing.T) {
 			}},
 			want: "f.yaml: invalid config: 2 problems",
 		},
+		// The message holds the text a branch had before the binding bound
+		// it, and the text of a summary names none of the problems it
+		// heads. Those problems follow in place of the branch, each by the
+		// rule for a branch.
+		"summaries the heading holds": {
+			err: listError{
+				niceyaml.NewSummary("2 schema violations",
+					niceyaml.NewError("bad a", niceyaml.AtPath(pathA)),
+					niceyaml.NewError("bad b", niceyaml.AtPath(pathB))),
+				niceyaml.NewSummary("2 name violations",
+					niceyaml.NewError("long a", niceyaml.AtPath(pathA)),
+					niceyaml.NewError("long b", niceyaml.AtPath(pathB))),
+			},
+			want: stringtest.JoinLF(
+				"f.yaml: 2 schema violations; 2 name violations",
+				"f.yaml:1:4: $.a: bad a",
+				"f.yaml:1:4: $.a: long a",
+				"f.yaml:2:4: $.b: bad b",
+				"f.yaml:2:4: $.b: long b",
+			),
+		},
+		"summaries under two %w verbs": {
+			err: fmt.Errorf("%w; %w",
+				niceyaml.NewSummary("2 schema violations",
+					niceyaml.NewError("bad a", niceyaml.AtPath(pathA)),
+					niceyaml.NewError("bad b", niceyaml.AtPath(pathB))),
+				niceyaml.NewSummary("2 name violations",
+					niceyaml.NewError("long a", niceyaml.AtPath(pathA)),
+					niceyaml.NewError("long b", niceyaml.AtPath(pathB))),
+			),
+			want: stringtest.JoinLF(
+				"f.yaml: 2 schema violations; 2 name violations",
+				"f.yaml:1:4: $.a: bad a",
+				"f.yaml:1:4: $.a: long a",
+				"f.yaml:2:4: $.b: bad b",
+				"f.yaml:2:4: $.b: long b",
+			),
+		},
+		"a summary of plain errors the heading holds": {
+			err: listError{
+				niceyaml.NewSummary("2 problems", errors.New("first"), errors.New("second")),
+				plain,
+			},
+			want: stringtest.JoinLF(
+				"f.yaml: 2 problems; plain",
+				"f.yaml: first",
+				"f.yaml: second",
+			),
+		},
+		"a summary inside a list the heading holds": {
+			err: listError{
+				listError{niceyaml.NewSummary("2 schema violations",
+					niceyaml.NewError("bad a", niceyaml.AtPath(pathA)),
+					niceyaml.NewError("bad b", niceyaml.AtPath(pathB)))},
+				plain,
+			},
+			want: stringtest.JoinLF(
+				"f.yaml: 2 schema violations; plain",
+				"f.yaml:1:4: $.a: bad a",
+				"f.yaml:2:4: $.b: bad b",
+			),
+		},
+		// A branch that was a binding already lists its problems in its own
+		// text, which the message holds, so no line follows.
+		"a bound summary the heading holds": {
+			err: listError{
+				yamltest.Bind(t, source, niceyaml.NewSummary("2 schema violations",
+					niceyaml.NewError("bad a", niceyaml.AtPath(pathA)),
+					niceyaml.NewError("bad b", niceyaml.AtPath(pathB)))),
+				plain,
+			},
+			want: stringtest.JoinLF(
+				"f.yaml: 2 schema violations",
+				"f.yaml:1:4: $.a: bad a",
+				"f.yaml:2:4: $.b: bad b; plain",
+			),
+		},
+		// The message holds the text of each branch of a join inside a
+		// branch, so only the ones that branch located follow.
+		"a join of located and plain errors inside a branch": {
+			err: listError{
+				fmt.Errorf("check: %w", errors.Join(
+					niceyaml.NewError("bad a", niceyaml.AtPath(pathA)),
+					errors.New("unplaced"),
+				)),
+				plain,
+			},
+			want: stringtest.JoinLF(
+				"f.yaml: check: bad a",
+				"unplaced; plain",
+				"f.yaml:1:4: $.a: bad a",
+			),
+		},
 	}
 
 	for name, tc := range tcs {

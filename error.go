@@ -1988,11 +1988,15 @@ type SourceError struct {
 // an [*Error] that carries its location, so its line names a position or
 // a path the text of the child lacks. A child that was a binding already
 // names its own position in its text, and one with no location names
-// none.
+// none. An unbound child is one the binding bound anew from an error that
+// was no binding and wraps none. The text of such an error names none of
+// the problems a summary in it heads, where the text of a binding lists
+// them.
 type boundChild struct {
 	bound   *SourceError
 	detail  bool
 	located bool
+	unbound bool
 }
 
 // DefaultContextLines is the number of context lines the %+v verb of an
@@ -2140,6 +2144,11 @@ type boundTexts struct {
 	// text own holds already, so the list leaves out each of them that
 	// the binding did not locate.
 	shown int
+	// The number of children at the end of the list of children whose
+	// text the message of the bound error holds, as [chainEnd.cut]
+	// counts them. It counts the branches of a join too, whose text own
+	// lacks.
+	held int
 	// Whether msg lists the errors below the binding.
 	lists bool
 	// Whether the binding has neither a message nor a position, so it
@@ -3182,9 +3191,10 @@ func (e *SourceError) addChild(n error, b binder, base childBase, detail bool) {
 
 	// A binding that takes its location from an Error never reports
 	// errUnlocated, which only an error with no location gets.
-	located := !ok && !bound.adopted && !errors.Is(bound.locErr, errUnlocated)
+	unbound := !ok && !bound.adopted
+	located := unbound && !errors.Is(bound.locErr, errUnlocated)
 
-	e.below = append(e.below, boundChild{bound: bound, detail: detail, located: located})
+	e.below = append(e.below, boundChild{bound: bound, detail: detail, located: located, unbound: unbound})
 }
 
 // heads reports whether e heads separate problems: whether a child of e
@@ -3489,9 +3499,12 @@ func (e *SourceError) Unwrap() error {
 // it already. Error reads that from the first branch. A message that
 // holds the message of its first branch holds them all, as "a; b" does
 // and a wrapper [fmt.Errorf] builds with several %w verbs does. A count
-// such as "2 violations" holds none. A wrapper that rewrites the message
-// of an error with a list keeps the text it wrote, and no list follows
-// it.
+// such as "2 violations" holds none. The message holds the text a branch
+// had before the binding bound it, and the text of a summary names none
+// of the problems it heads. The problems below a branch the message
+// holds thus follow as lines too, each by the rule for a branch. A
+// wrapper that rewrites the message of an error with a list keeps the
+// text it wrote, and no list follows it.
 //
 // # Logs
 //
@@ -3556,8 +3569,10 @@ func (e *SourceError) buildTexts() boundTexts {
 	// A Node that binds a join through a scope binds a new join of the
 	// scoped branches, so the bound error says whether it is a join, where
 	// the end of the chain is the join the caller gave.
-	if _, joined := joinBranchesOf(e.err, full); !joined {
-		t.own, t.shown, cut = e.end.cut(full())
+	if _, joined := joinBranchesOf(e.err, full); joined {
+		t.held = e.end.branches
+	} else {
+		t.own, t.shown, t.held, cut = e.end.cut(full())
 	}
 
 	if cut && e.heads() {
@@ -3693,6 +3708,10 @@ func (e *SourceError) list(shown int) ([]string, int) {
 // them, without those among the last shown of them that e did not locate.
 // The text of e holds the text of each of the last shown, and it names
 // the location of none of them, so a problem e located keeps its line.
+// The text e holds for an unbound child among them is the text that child
+// had before e bound it, which lists no problem below the child. Those
+// problems thus stand in place of the child, without the ones that text
+// holds and the child did not locate, as [boundTexts.held] counts them.
 // That order is by position within the source each is bound to, as
 // [trees] sorts them, with the branches of a problem that binds a join in
 // place of that problem.
@@ -3702,8 +3721,19 @@ func (e *SourceError) ordered(shown int) []*SourceError {
 	var listed []*SourceError
 
 	for i, c := range e.below {
-		if !c.detail && (i < held || c.located) {
+		switch {
+		case c.detail:
+			continue
+
+		case i < held || c.located:
 			listed = append(listed, c.bound)
+
+		case c.unbound:
+			// A child that lists nothing under its own line gives no
+			// line here, as one a wrapper rewrote does not.
+			if t := c.bound.texts(); t.lists {
+				listed = append(listed, c.bound.ordered(t.held)...)
+			}
 		}
 	}
 
@@ -3816,7 +3846,7 @@ func (e *SourceError) text() string {
 // is, stays whole.
 func bareMessage(err error, end chainEnd) string {
 	msg := err.Error()
-	if own, _, _ := end.cut(msg); own != "" {
+	if own, _, _, _ := end.cut(msg); own != "" {
 		return own
 	}
 
