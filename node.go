@@ -30,10 +30,9 @@ func init() {
 	aliasing.StateOf = documentState
 }
 
-// documentState returns the [*aliasing.State] of the document of n, which
-// must be a [*Node], or nil for a nil Node. It is [aliasing.StateOf],
-// through which the packages of the module reach the state a document
-// keeps.
+// documentState returns the [*aliasing.State] of the document of n, a
+// [*Node], or nil for a nil Node. Other packages of the module call it as
+// [aliasing.StateOf].
 func documentState(n any) *aliasing.State {
 	node, ok := n.(*Node)
 	if !ok {
@@ -47,10 +46,8 @@ func documentState(n any) *aliasing.State {
 	return node.doc.state
 }
 
-// document is what describes one YAML document of a [Source] as a whole:
-// its root, the tokens of the whole document, its index in the file, the
-// length of its preamble, and the resolver its paths resolve through.
-// Every [Node] of the document shares it.
+// document holds the state of one YAML document of a [Source], which every
+// [Node] of the document shares.
 type document struct {
 	// The root Node of the document.
 	node *Node
@@ -61,10 +58,8 @@ type document struct {
 	// Source and to the document bindSyntaxErrors picks for it, which is
 	// nil for one that parsed.
 	err error
-	// Resolves every path in root, which pathResolver creates when the
-	// first path needs it. No Node edits the tree, so the resolver binds
-	// the aliases once however many paths the Nodes of the document
-	// resolve.
+	// Resolves every path in root. The first call of pathResolver creates
+	// it, and since no Node edits the tree, it binds the aliases once.
 	resolver *paths.Resolver
 	// Returns the tree the go-yaml decoder reads for the document, and
 	// builds it on the first call.
@@ -90,11 +85,9 @@ type document struct {
 	resolverOnce sync.Once
 }
 
-// pathResolver returns the [paths.Resolver] for the document, and creates
-// it on the first call. A document that did not parse gets a resolver
-// with no document, so every path returns an error there. A resolver for
-// its stand-in root would list no nodes for a path and return no error,
-// as it does for an empty document.
+// pathResolver returns the [paths.Resolver] of the document, which it
+// creates on the first call. A document that did not parse gets one with
+// no document, so a path returns an error rather than an empty match.
 func (d *document) pathResolver() *paths.Resolver {
 	d.resolverOnce.Do(func() {
 		if d.err != nil {
@@ -381,20 +374,9 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	return nodes, nil
 }
 
-// scoped returns a copy of n scoped at path, a `$` path that selects
-// node, for [Node.At] and [Node.Nodes]. The tokens of the copy are those
-// of node, as [Node.extent] finds them, and so are its lines, with one
-// addition. The key of an entry introduces a mapping or a
-// sequence that is its value, and the "-" of an element of a block
-// sequence introduces one that is the element. [astnode.PathToken] gives
-// that token. Where it lies on a line above the lines of node, the lines
-// start there, so they hold the token [paths.Resolver.Token] resolves for
-// path.
-//
-// A scalar is its own token, and nothing holds the root of a document or
-// the key of an entry, so each keeps the lines of its node. So does the
-// Node of a path that ends at an alias. Its node is the content of the
-// anchor, and the alias the path points at introduces none of it.
+// scoped returns a copy of n scoped at path, a `$` path that selects node.
+// The span of a mapping or a sequence starts at the key or "-" that
+// introduces it, so it holds the token [paths.Resolver.Token] gives path.
 func (n *Node) scoped(path paths.Path, node ast.Node) *Node {
 	c := *n
 	c.base = path
@@ -436,12 +418,8 @@ func (n *Node) scoped(path paths.Path, node ast.Node) *Node {
 }
 
 // extent returns the lines and the tokens of node in the document. The
-// tokens run from the first token under the node through the last, in
-// source order. The lines run from the one the first token starts on
-// through the last one that holds content of a token among them. A node
-// whose tokens carry no position covers no lines and holds no tokens. A
-// node with no token in the document, such as an implicit null the
-// parser adds, holds no tokens and covers the line its token names.
+// lines end at the last one that holds content of those tokens. A node
+// with no token in the document, such as an implicit null, covers its line.
 func (n *Node) extent(node ast.Node) (position.Span, token.Tokens) {
 	first, last := astnode.Bounds(node)
 	if len(first) == 0 {
@@ -456,11 +434,9 @@ func (n *Node) extent(node ast.Node) (position.Span, token.Tokens) {
 	to := sort.Search(len(all), func(i int) bool { return all[i].Position.Offset > hi })
 	tks := all[from:to:to]
 
-	// A token that holds no text can share its offset with a token of
-	// another node. The empty content of a block scalar sits where the
-	// next key starts, and an implicit null takes the offset of the ":"
-	// or "-" before it. A token at either end of the window therefore
-	// belongs to the node only when the node holds it.
+	// A token with no text, such as the empty content of a block scalar or
+	// an implicit null, can share its offset with a token of another node.
+	// A token at either end of the window counts only when node holds it.
 	outside := func(tk *token.Token) bool {
 		switch tk.Position.Offset {
 		case lo:
@@ -499,11 +475,9 @@ func (n *Node) extent(node ast.Node) (position.Span, token.Tokens) {
 	return position.NewSpan(min(max(start, 0), total), min(end+1, total)), tks
 }
 
-// lastContentLine returns the last line of the source that holds content
-// of tk other than spaces. The lexer folds the line breaks and the
-// indentation of the next line into a scalar, and a line where tk holds
-// only those does not count, so a sibling's line stays out of the span.
-// The boolean is false when tk holds no content on any line.
+// lastContentLine returns the last line that holds content of tk other
+// than spaces, or false for none. Skipping the indentation the lexer folds
+// into a scalar keeps the line of a sibling out of the span.
 func (n *Node) lastContentLine(tk *token.Token) (int, bool) {
 	lines := n.source.lines
 
@@ -512,10 +486,8 @@ func (n *Node) lastContentLine(tk *token.Token) (int, bool) {
 	for i := max(tk.Position.Line-1, 0); i < lines.Len(); i++ {
 		sp, ok := lines.Line(i).ContentSpan(tk)
 		if !ok {
-			// The lines of a token follow one another from the line its
-			// position names, so the first line without it ends the
-			// search. A token that holds no text, such as the empty
-			// content of a block scalar, is on no line.
+			// The lines of a token run on from the line its position
+			// names, so the first line without it ends the search.
 			break
 		}
 
@@ -702,11 +674,9 @@ func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
 	return loc.highlight(n.source.lines), nil
 }
 
-// pathLocation returns the location of the token that path resolves to in
-// the document, through [paths.Resolver.Token], with an `@` path resolving
-// from the scope. The location holds the token and its position. An error
-// from [paths.Resolver.Token] names the path already and comes back as it is,
-// and a token without a position is [ErrNoLocation].
+// pathLocation returns the location of the token path resolves to, with
+// an `@` path resolving from the scope. A token without a position gives
+// [ErrNoLocation].
 func (n *Node) pathLocation(path paths.Path) (location, error) {
 	tk, err := n.doc.pathResolver().Token(n.base.Join(path))
 	if err != nil {
@@ -721,13 +691,9 @@ func (n *Node) pathLocation(path paths.Path) (location, error) {
 	return location{pos: position.NewFromToken(tk), tk: tk}, nil
 }
 
-// nearestLocation returns the location an error binds at when its path
-// names a key the document leaves out: the key of the mapping that lacks
-// it, as [paths.Resolver.Nearest] finds that mapping, with an `@` path
-// resolving from the scope. The reason is the error the path failed to
-// resolve with. It reports false when that reason is not
-// [paths.ErrNotFound], when no mapping lacks the key, and when the key of
-// that mapping carries no position.
+// nearestLocation returns the location an error binds at when path names
+// a missing key, which is the key of the mapping that lacks it. It reports
+// false unless reason wraps [paths.ErrNotFound] and that key has a position.
 func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 	if !errors.Is(reason, paths.ErrNotFound) {
 		return location{}, false
@@ -748,17 +714,9 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 	return location{pos: position.NewFromToken(tk), tk: tk, near: &near}, true
 }
 
-// aliasLocation returns the location an error binds at when its path
-// enters an alias the document cannot follow: the token of that alias,
-// with an `@` path resolving from the scope. Such an alias names no
-// anchor before it, as one to an anchor of a reference document does, or
-// lies inside the anchor it names. The reason is the error the path
-// failed to resolve with, which the location keeps. It reports false when
-// that reason is not [paths.ErrAlias] and when the token of the alias
-// carries no position. It also reports false when the alias sits under a
-// `<<` merge key. A path enters no alias to read a key of such a mapping,
-// and the alias may set any key or none, so it says nothing of where the
-// value is.
+// aliasLocation returns the location of the alias that path cannot follow,
+// or false unless reason wraps [paths.ErrAlias]. It reports false for an
+// alias under a `<<` merge key too, which may set any key or none.
 func (n *Node) aliasLocation(path paths.Path, reason error) (location, bool) {
 	if !errors.Is(reason, paths.ErrAlias) {
 		return location{}, false
@@ -789,17 +747,9 @@ func (n *Node) aliasLocation(path paths.Path, reason error) (location, bool) {
 	return location{}, false
 }
 
-// bindUnresolved binds reason, the error path failed to resolve with from
-// the scope of n, as [Node.At] and [Node.Ranges] return it. A reason that
-// wraps [paths.ErrNotFound] says the document lacks the value, so it
-// binds inside an [Error] from [Invalid], which matches [errInvalid]. A
-// path that names a key a mapping leaves out binds as an Error with
-// [AtPath] of that path binds, at the key of the mapping that lacks it,
-// as [Node.nearestLocation] finds it. The binding writes the path in
-// front, so the message is the one of [paths.ErrNotFound] alone, which
-// leaves the path out. Any other path that selects nothing names no mapping, so its
-// error binds with no location, as [Node.bindOwn] binds it. Any other
-// reason is about the call, and it binds as it is.
+// bindUnresolved binds reason, the error path failed to resolve with. A
+// missing key binds as [Invalid] at the mapping that lacks it, with the
+// bare [paths.ErrNotFound] text, since the binding writes the path in front.
 func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 	if !errors.Is(reason, paths.ErrNotFound) {
 		return n.bindOwn(reason)
@@ -853,21 +803,16 @@ func (n *Node) Bind(err error) error {
 	return bindTree(err, binder{src: n.source, node: n, locate: true})
 }
 
-// bindOwn binds an error of an operation of n, as [Node.Bind] binds it,
-// with one difference. The error is about the call, such as a path that
-// resolves to no node or a decode target that is no pointer, so an error
-// that holds no location gains none, even when n is a Node from [Node.At]
-// or [Node.Nodes].
+// bindOwn binds an error of a call on n as [Node.Bind] does, except that an
+// error with no location gains none, even for a scoped Node, because the
+// error is about the call and not the value.
 func (n *Node) bindOwn(err error) error {
 	return bindTree(err, binder{src: n.source, node: n})
 }
 
-// holdsToken reports whether tk is a token of the source's parse, one of
-// the tokens the parser built its tree from, or a token of the parse the
-// [decodetree.Tree] of the document reads, as [decodetree.Tree.Holds] describes.
-// It compares pointers, so a token from another parse, such as the one an
-// UnmarshalYAML runs on its bytes, never matches, however closely it
-// resembles a token of the source.
+// holdsToken reports whether tk is a token of the parse of the source or
+// of the parse the [decodetree.Tree] reads. It compares pointers, so a
+// token from another parse, such as one in UnmarshalYAML, never matches.
 func (n *Node) holdsToken(tk *token.Token) bool {
 	if tk == nil {
 		return false
@@ -900,23 +845,18 @@ func (d *document) newDecodeTree() *decodetree.Tree {
 	})
 }
 
-// rejectionText returns the message [rejection.Classify] writes for err,
-// with each anchor named as the document names it, and the sentinel of
-// the label Classify gives err. The decoder writes text of the document
-// into some messages as it is, such as the name of an unknown field, so
-// each control character comes back as its picture and the message stays
-// on one line.
+// rejectionText returns the message and the sentinel [rejection.Classify]
+// gives err, with the anchor names of the document and each control
+// character escaped, since the decoder copies document text into messages.
 func (d *document) rejectionText(err yaml.Error) (string, error) {
 	msg, label := rejection.Classify(err)
 
 	return escape.Control(d.tree().RestoreNames(msg)), rejectionLabel(label)
 }
 
-// restoreError returns err with a message that spells each name the
-// [decodetree.Tree] of the document gave an anchor as the document does.
-// It returns err itself when the message names no such anchor, and when
-// err holds an [*Error] or a [*SourceError], whose message the binding
-// writes from its parts.
+// restoreError returns err with each anchor name the [decodetree.Tree]
+// gave spelled as the document spells it. It leaves an [*Error] or a
+// [*SourceError] alone, since the binding writes their messages.
 func (d *document) restoreError(err error) error {
 	var (
 		located *Error
@@ -937,11 +877,9 @@ func (d *document) restoreError(err error) error {
 	return markedError{err: err, msg: restored}
 }
 
-// spellingTexts returns the texts of tks that a new name must not spell:
-// the text of tks, which holds a spelling that runs across tokens, such
-// as a tag before a flow sequence, and the value of each token that holds
-// " [". A value differs from the text where a quoted scalar holds an
-// escape or a scalar folds a line break.
+// spellingTexts returns the texts a new anchor name must not spell, which
+// are the joined text of tks and the value of each token that holds " [".
+// A value differs from its text where a scalar holds an escape or a fold.
 func spellingTexts(tks token.Tokens) []string {
 	var (
 		text   strings.Builder

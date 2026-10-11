@@ -531,7 +531,7 @@ func (t *Tree) ReferenceAliases(scope ast.Node) []*token.Token {
 }
 
 // offsetAliases returns the aliases of the tree in the order of their
-// offsets, for [Tree.referenceAliases].
+// offsets, for [Tree.ReferenceAliases].
 func (t *Tree) offsetAliases() []aliasRead {
 	var aliases []aliasRead
 

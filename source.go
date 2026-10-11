@@ -77,10 +77,8 @@ type Source struct {
 	// not spell, as spellReferences reads them, and reads them on the
 	// first call.
 	referenceTexts func() []string
-	// Holds the layers the one document of the Source merges, for the
-	// Source [NewSourceFromLayers] builds, and nil for every other Source. An error
-	// bound in that document binds in a layer instead, as [layering]
-	// describes.
+	// Holds the layers [NewSourceFromLayers] merged into the Source, or nil.
+	// An error bound in the merged document binds in a layer instead.
 	layers *layering
 	sourceConfig
 	hasInput bool
@@ -486,10 +484,9 @@ func (s *Source) decodeOptions() []yaml.DecodeOption {
 	return opts
 }
 
-// tokenText returns the YAML text of the Source as the Origins of its
-// tokens spell it, which a Source built from tokens has too. The lexer
-// drops and repeats some text in the Origins, so [Source.Text] returns
-// the text the Source read instead.
+// tokenText returns the text the Origins of the tokens of the Source spell,
+// which a Source built from tokens has too. It can differ from
+// [Source.Text], since the lexer drops and repeats some text in Origins.
 func (s *Source) tokenText() []byte {
 	var b bytes.Buffer
 
@@ -519,11 +516,9 @@ func (s *Source) Name() string {
 	return s.name
 }
 
-// label returns the name of the [Source] as a message and the heading of
-// an excerpt show it, with each control character drawn as its picture
-// and each tab as spaces. A name that holds a line feed, as the name of
-// a file can, thus stays on the line it names. [Source.Name] returns the
-// name as the caller gave it.
+// label returns the name of the [Source] as messages and excerpt headings
+// show it, with control characters drawn as pictures and tabs as spaces,
+// so a file name that holds a line feed stays on one line.
 func (s *Source) label() string {
 	return escape.Line(s.Name())
 }
@@ -773,20 +768,15 @@ func (s *Source) documents() []*Node {
 	return s.parsed().docs
 }
 
-// contentDocuments returns the root [*Node] of each YAML document
-// [Source.Documents] describes, whether the file parsed or not, in the
-// slice the Source keeps rather than a copy, so a caller must not change
-// it.
+// contentDocuments returns the roots [Source.Documents] returns, in the
+// slice the Source keeps rather than a copy, so a caller must not change it.
 func (s *Source) contentDocuments() []*Node {
 	return s.parsed().content
 }
 
-// pickContentDocuments returns the documents among docs that are not
-// empty, in file order, or the first of docs when every one of them is
-// empty. An empty document beside one that is not empty is what a
-// separator left, and a file of empty documents alone reads as an empty
-// file does, which holds one empty document. A document that did not
-// parse is not empty, as [Node.IsEmpty] reports it.
+// pickContentDocuments returns the documents of docs that are not empty,
+// or the first one when all are, so a file of empty documents reads as an
+// empty file. An empty document beside content is what a separator left.
 func pickContentDocuments(docs []*Node) []*Node {
 	if !slices.ContainsFunc(docs, func(doc *Node) bool { return !doc.IsEmpty() }) {
 		// The result takes none of the capacity of docs, so an append to
@@ -912,11 +902,9 @@ func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, er
 	return v, nil
 }
 
-// single returns the one document of the Source among those
-// [Source.Documents] returns, or the reason it has no single one,
-// unbound: the error [Source.File] returns, or [ErrMultipleDocuments] at
-// the anchor of the second of them. Every Source holds at least one
-// document, as Source.Documents describes.
+// single returns the one document [Source.Documents] returns, or an
+// unbound error for a syntax error or more than one document. Every Source
+// holds at least one document, so docs[0] always exists.
 func (s *Source) single() (*Node, error) {
 	_, err := s.File()
 	if err != nil {
@@ -934,10 +922,9 @@ func (s *Source) single() (*Node, error) {
 	return docs[0], nil
 }
 
-// anchorToken returns the token that locates the document: its header, or
-// the first token of its content when it has no header, as a document after
-// a "..." marker has none, past the comments folded above it. It is nil
-// when the document has neither.
+// anchorToken returns the token that locates the document, which is its
+// header, or else the first token of its content past the preamble. It is
+// nil when the document has neither.
 func (d *document) anchorToken() *token.Token {
 	if d.root.Start != nil {
 		return d.root.Start
@@ -1007,11 +994,9 @@ type parsedFile struct {
 	content []*Node
 }
 
-// parse parses the tokens of the Source and builds the documents of the
-// file it parsed. [newDocuments] binds each syntax error to its document,
-// which writes to the error. The documents are therefore built here,
-// before any caller holds the error of the parse, and not when the first
-// caller asks for them.
+// parse parses the tokens of the Source and builds its documents now,
+// since [newDocuments] binds each syntax error to its document by writing
+// to the error, which must happen before any caller holds it.
 func (s *Source) parse() *parsedFile {
 	tks := s.Tokens()
 	r := docparse.Parse(tks, s.parserOptions()...)
@@ -1027,10 +1012,8 @@ func (s *Source) parse() *parsedFile {
 }
 
 // parseError returns the error of f, a run the parser rejected, bound to
-// the Source. A panic in the parser comes back as a [*PanicError],
-// located at the first token of the run that carries a position. The
-// panic is no fault of the text, whatever value the parser panicked
-// with, so the error matches neither [ErrSyntax] nor [errInvalid].
+// the Source. A parser panic is no fault of the text, so its [*PanicError]
+// matches neither [ErrSyntax] nor [errInvalid].
 func (s *Source) parseError(f docparse.Failure) error {
 	var err error
 
@@ -1070,21 +1053,10 @@ func markSyntax(err error) markedError {
 	return markedError{err: err, marks: []error{ErrSyntax, errInvalid}}
 }
 
-// reparse parses the tokens of the Source a second time and writes the
-// nulls of the enclosed aliases into the copies the parser read. Nothing
-// but the decoder reads its tree, so a document changes its own part of
-// that tree as [decodetree.Tree] describes, and the tree [Source.File] returns
-// stays as the parser built it. The parse holds its own copies of the
-// tokens, so the go-yaml formatter, which reads the text of each token
-// through the links between them, finds a renamed anchor or a verbatim
-// !!int tag with the text of the Source. The formatter reads the tokens
-// of every document, so reparse writes the nulls of all the documents
-// into the tokens before it returns the parse to any of them. The copy of
-// the token of each alias sits at the index of the token the first parse
-// read for it, so the null goes there, as [decodetree.WriteNull] writes it. A run
-// the first parse rejected fails the second parse too, so the file holds
-// a stand-in at each index where the first file holds one, and the
-// documents that parsed sit at the same indexes in both.
+// reparse parses the tokens again for the decoder, which edits the tree it
+// reads, so the tree [Source.File] returns stays as parsed. Both parses
+// give each token and document the same index. It writes the null of every
+// enclosed alias at once, since the go-yaml formatter reads every document.
 func (s *Source) reparse() *docparse.Result {
 	r := docparse.Parse(s.Tokens(), s.parserOptions()...)
 
@@ -1101,10 +1073,8 @@ func (s *Source) reparse() *docparse.Result {
 	return r
 }
 
-// spellReferences returns the texts of the reference documents of the
-// Source that a new anchor name must not spell, as [spellingTexts] reads
-// them from the tokens of all the reference documents in order. Those
-// hold the reference documents of each reference Source too.
+// spellReferences returns the [spellingTexts] of the reference documents,
+// which include those of each reference Source.
 func (s *Source) spellReferences() []string {
 	var tks token.Tokens
 
@@ -1170,10 +1140,9 @@ func (s *Source) View() *line.View {
 	return line.NewView(s.Lines())
 }
 
-// newDocuments creates the root [*Node] of each of docs, the YAML
-// documents of the file src parsed, in file order. A document that did not
-// parse gets a Node too, which carries the error in errs of its run, and
-// [bindSyntaxErrors] binds that error to its document.
+// newDocuments creates the root [*Node] of each of docs, in file order. A
+// document that did not parse gets a Node too, which carries the error of
+// its run from errs.
 func newDocuments(src *Source, docs []docparse.Document, errs []error) []*Node {
 	nodes := make([]*Node, len(docs))
 
@@ -1205,14 +1174,9 @@ func newDocuments(src *Source, docs []docparse.Document, errs []error) []*Node {
 	return nodes
 }
 
-// bindSyntaxErrors binds the syntax error of each of docs that did not
-// parse to the root of the document it belongs to. The parser reports an
-// error before any document exists, so the error arrives bound to the
-// source alone. The documents of one run follow one another and share its
-// error, so the error belongs to the one of them whose span holds its
-// line. An error that resolved no location belongs to the first of them.
-// The error stays one binding with one document, whichever of the
-// documents returns it.
+// bindSyntaxErrors binds each syntax error, which the parser bound to the
+// source alone, to the document of its run whose span holds its line, or
+// to the first of the run when it has no location.
 func bindSyntaxErrors(docs []*Node) {
 	for i, doc := range docs {
 		if doc.doc.err == nil {
