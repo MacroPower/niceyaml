@@ -2941,7 +2941,7 @@ func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) erro
 // also collects the comments of the node in comments, as
 // [Node.decodeNode] describes, unless comments is nil.
 func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments yaml.CommentMap) error {
-	err := checkDecodeTarget(v)
+	err := checkTarget(v, ErrDecodeTarget, true)
 	if err != nil {
 		return n.bindOwn(err)
 	}
@@ -2972,19 +2972,26 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 	return n.selfValidate(ctx, v, cfg)
 }
 
-// checkDecodeTarget returns [ErrDecodeTarget] unless v is a non-nil
-// pointer. The go-yaml decoder panics on a nil interface and decodes
-// nothing into a nil pointer, so the check runs before v reaches it.
-// When v points to a pointer, that pointer may be nil, since
-// [decodeTarget] allocates it.
-func checkDecodeTarget(v any) error {
+// checkTarget returns sentinel when v holds no value: when v is nil or a
+// nil pointer, or with needPointer set, when v is no pointer. A decode
+// needs a pointer, since the go-yaml decoder panics on a nil interface
+// and decodes nothing into a nil pointer, so the check runs before v
+// reaches it. When v points to a pointer, that pointer may be nil, as a
+// decode of a null leaves it, and [decodeTarget] allocates it. A nil v
+// reads "got nil" beside the sentinel of a decode, and the sentinel alone
+// for any other check.
+func checkTarget(v any, sentinel error, needPointer bool) error {
 	rv := reflect.ValueOf(v)
 	if !rv.IsValid() {
-		return fmt.Errorf("%w: got nil", ErrDecodeTarget)
+		if needPointer {
+			return fmt.Errorf("%w: got nil", sentinel)
+		}
+
+		return sentinel
 	}
 
-	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return fmt.Errorf("%w: got %T", ErrDecodeTarget, v)
+	if needPointer && rv.Kind() != reflect.Pointer || rv.Kind() == reflect.Pointer && rv.IsNil() {
+		return fmt.Errorf("%w: got %T", sentinel, v)
 	}
 
 	return nil
@@ -3065,7 +3072,7 @@ func (n *Node) yamlOptions(cfg decodeConfig) []yaml.DecodeOption {
 // that called the function to place. An error of ctx comes back as it
 // is.
 func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decodeConfig) error {
-	err := checkDecodeTarget(dst)
+	err := checkTarget(dst, ErrDecodeTarget, true)
 	if err != nil {
 		return err
 	}

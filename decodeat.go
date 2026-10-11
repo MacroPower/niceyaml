@@ -124,7 +124,7 @@ func (n *Node) DecodeAt[T any](ctx context.Context, path paths.Path, opts ...Dec
 func (n *Node) DecodeIfPresent(ctx context.Context, path paths.Path, v any, opts ...DecodeOption) (bool, error) {
 	// The target check runs first, so a wrong target fails for an absent
 	// path too, where no decode would run to reject it.
-	err := checkDecodeTarget(v)
+	err := checkTarget(v, ErrDecodeTarget, true)
 	if err != nil {
 		return false, n.bindOwn(err)
 	}

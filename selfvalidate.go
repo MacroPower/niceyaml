@@ -3,7 +3,6 @@ package niceyaml
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"math"
 	"reflect"
 	"slices"
@@ -161,14 +160,12 @@ func (n *Node) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) er
 // a later call of SelfValidate on the same value return the same error.
 // It binds what the walk returns as [Node.Bind] does.
 func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error {
-	err := checkSelfValidateTarget(v)
+	err := checkTarget(v, ErrSelfValidateTarget, false)
 	if err != nil {
 		return n.bindOwn(err)
 	}
 
-	walked := walkSelfValidators(ctx, v, n, n.yamlOptions(cfg), cfg.unmarshalers)
-
-	return bindTree(walked, binder{src: n.source, node: n, locate: true})
+	return n.Bind(walkSelfValidators(ctx, v, n, cfg))
 }
 
 // SelfValidateValue runs the self-validation step of [Node.DecodeInto]
@@ -263,41 +260,24 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // decodes itself, as [SelfValidator] describes, only for a type with
 // such a method.
 func SelfValidateValue(ctx context.Context, v any) error {
-	err := checkSelfValidateTarget(v)
+	err := checkTarget(v, ErrSelfValidateTarget, false)
 	if err != nil {
 		return BindValue(err)
 	}
 
-	return BindValue(walkSelfValidators(ctx, v, nil, nil, unmarshaler.Options{}))
-}
-
-// checkSelfValidateTarget returns [ErrSelfValidateTarget] when v is nil
-// or a nil pointer, which holds no value to validate. A pointer that v
-// points to may be nil, as a decode of a null leaves it.
-func checkSelfValidateTarget(v any) error {
-	rv := reflect.ValueOf(v)
-	if !rv.IsValid() {
-		return ErrSelfValidateTarget
-	}
-
-	if rv.Kind() == reflect.Pointer && rv.IsNil() {
-		return fmt.Errorf("%w: got %T", ErrSelfValidateTarget, v)
-	}
-
-	return nil
+	return BindValue(walkSelfValidators(ctx, v, nil, decodeConfig{}))
 }
 
 // walkSelfValidators runs Validate on every value in the tree of v that
 // implements [SelfValidator], where v is a non-nil pointer or a value
 // that is no pointer. The walk follows v rather than n, so v need not be
 // the value n decoded to. It reads n for the text the document spells
-// each map key with, and decodes those keys with ctx and opts, as the
-// decode of v did. The unmarshalers are the ones those options give a
-// type. It also reads n to bind the errors under a path that names
-// several keys. A map the document does not hold at its path has no node
-// there, so its keys take the text of their Go values. A nil n stands
-// for no document, as [SelfValidateValue] walks a value, so every key
-// takes that text and the walk reads no option.
+// each map key with, and decodes those keys with ctx and cfg, as the
+// decode of v did. It also reads n to bind the errors under a path that
+// names several keys. A map the document does not hold at its path has no
+// node there, so its keys take the text of their Go values. A nil n
+// stands for no document, as [SelfValidateValue] walks a value, so every
+// key takes that text and the walk reads nothing of cfg.
 //
 // The walk returns what the values report with the paths in each error
 // rebased under the path of the value in the document. That path is the
@@ -322,19 +302,15 @@ func checkSelfValidateTarget(v any) error {
 // The walk stops once ctx ends, or once a Validate returns the error of a
 // context that ended, and returns that error alone, as it is, in place of
 // the errors it collected.
-func walkSelfValidators(
-	ctx context.Context, v any, n *Node, opts []yaml.DecodeOption, unmarshalers unmarshaler.Options,
-) error {
+func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) error {
 	w := selfWalker{
 		ctx:      ctx,
 		node:     n,
-		opts:     opts,
+		cfg:      cfg,
 		walked:   map[visit]walkResult{},
 		reach:    math.MaxInt,
 		scanning: map[visit]bool{},
 		scanned:  map[visit]bool{},
-
-		unmarshalers: unmarshalers,
 	}
 	w.walk(reflect.ValueOf(v), place{}, nil)
 
@@ -374,9 +350,9 @@ type selfWalker struct {
 	ctx     context.Context
 	node    *Node
 	decoder *yaml.Decoder
-	opts    []yaml.DecodeOption
-	// The types the options of the decode give an unmarshaler.
-	unmarshalers unmarshaler.Options
+	// The settings of the decode, which name the types its options give
+	// an unmarshaler.
+	cfg decodeConfig
 	// The result of the walk through each pointer, map, and slice the walk
 	// has entered, as [walkResult] describes.
 	walked map[visit]walkResult
@@ -582,7 +558,7 @@ func (w *selfWalker) walkValue(v reflect.Value, at place, shadowed map[string]bo
 		v = addressable(v)
 	}
 
-	field, whole := w.unmarshalers.Whole(v.Type())
+	field, whole := w.cfg.unmarshalers.Whole(v.Type())
 
 	mark, sealed := len(w.within), w.sealed
 	if whole {
@@ -935,15 +911,14 @@ func (w *selfWalker) walkEntries(at place, entries []datapath.MapEntry, ambiguou
 }
 
 // bind binds err where the walk binds an error before it returns: through
-// the [Node] of the walk, as [Node.Bind] binds it at the root of a
-// document, or to no document when the walk has no Node, as [BindValue]
-// binds it.
+// the [Node] of the walk, as [Node.bindOwn] binds it, or to no document
+// when the walk has no Node, as [BindValue] binds it.
 func (w *selfWalker) bind(err error) error {
 	if w.node == nil {
 		return BindValue(err)
 	}
 
-	return bindTree(err, binder{src: w.node.source, node: w.node})
+	return w.node.bindOwn(err)
 }
 
 // structFields holds the fields of a struct type that the walk reads, as
@@ -1136,7 +1111,7 @@ func (w *selfWalker) scanSelf(v reflect.Value) (bool, bool) {
 		return true, true
 	}
 
-	if field, _ := w.unmarshalers.Whole(v.Type()); field >= 0 {
+	if field, _ := w.cfg.unmarshalers.Whole(v.Type()); field >= 0 {
 		return w.scanValue(v.Field(field))
 	}
 
@@ -1298,24 +1273,6 @@ func (w *selfWalker) stopped() bool {
 	return w.ended != nil
 }
 
-// keyNames returns the text the document spells each key of the mapping
-// node holds with, by the value the key decodes to as type t, so a key
-// such as 0x10 or 1.50 keeps the text a path resolves. A key any `<<`
-// merge key brings in counts, whether the merge names one mapping or a
-// list of them, directly or through an alias. Where the mapping and its
-// merges define one key more than once, the later entry in document
-// order wins, with the sources of one merge in sequence order, as in the
-// decode. A merge with an alias that does not resolve may set any key,
-// so no entry before it names a key. The map holds no key a path cannot
-// resolve to, and is empty when node holds no mapping, as for the nil
-// node of a value the document did not set.
-func (w *selfWalker) keyNames(node ast.Node, t reflect.Type) map[any]string {
-	names := map[any]string{}
-	w.collectKeyNames(node, t, names)
-
-	return names
-}
-
 // nodeOf returns the node the value at the end of s decoded from, as
 // [paths.Resolver.Node] gives it, or nil when the document holds nothing
 // there, as for a value the document did not set. A nil s stands for the
@@ -1366,16 +1323,28 @@ func (w *selfWalker) nodeOf(s *step) ast.Node {
 	return s.node
 }
 
-// collectKeyNames adds the keys of the mapping node holds, and of the
-// mappings it merges, to names, as [selfWalker.keyNames] describes. It
-// reaches the mapping through the anchors, tags, and aliases on node, as
-// [selfWalker.valueNode] does. The walk goes in reverse document order,
-// as [datapath.MembersBackward] does, so the first name it sets for a
-// value is the one the decode keeps.
-func (w *selfWalker) collectKeyNames(node ast.Node, t reflect.Type, names map[any]string) {
+// keyNames returns the text the document spells each key of the mapping
+// node holds with, by the value the key decodes to as type t, so a key
+// such as 0x10 or 1.50 keeps the text a path resolves. A key any `<<`
+// merge key brings in counts, whether the merge names one mapping or a
+// list of them, directly or through an alias. Where the mapping and its
+// merges define one key more than once, the later entry in document
+// order wins, with the sources of one merge in sequence order, as in the
+// decode. A merge with an alias that does not resolve may set any key,
+// so no entry before it names a key. The map holds no key a path cannot
+// resolve to, and is empty when node holds no mapping, as for the nil
+// node of a value the document did not set.
+//
+// KeyNames reaches the mapping through the anchors, tags, and aliases on
+// node, as [selfWalker.valueNode] does. It reads the keys in reverse
+// document order, as [datapath.MembersBackward] yields them, so the first
+// name it sets for a value is the one the decode keeps.
+func (w *selfWalker) keyNames(node ast.Node, t reflect.Type) map[any]string {
+	names := map[any]string{}
+
 	mapping, ok := astnode.Content(w.valueNode(node, false)).(*ast.MappingNode)
 	if !ok {
-		return
+		return names
 	}
 
 	// The decoder sets each entry in document order, and a merge sets
@@ -1384,6 +1353,8 @@ func (w *selfWalker) collectKeyNames(node ast.Node, t reflect.Type, names map[an
 	for entry := range datapath.MembersBackward(w.pathResolver(), mapping) {
 		w.addKeyName(entry.Key, t, names)
 	}
+
+	return names
 }
 
 // pathResolver returns the [paths.Resolver] for the document of the
@@ -1393,10 +1364,11 @@ func (w *selfWalker) pathResolver() *paths.Resolver {
 }
 
 // keyDecoder returns the go-yaml decoder for the keys of the walk, and
-// creates it when the walk first decodes a key.
+// creates it with the options of the decode when the walk first decodes
+// a key.
 func (w *selfWalker) keyDecoder() *yaml.Decoder {
 	if w.decoder == nil {
-		w.decoder = yaml.NewDecoder(bytes.NewReader(nil), w.opts...)
+		w.decoder = yaml.NewDecoder(bytes.NewReader(nil), w.node.yamlOptions(w.cfg)...)
 	}
 
 	return w.decoder
