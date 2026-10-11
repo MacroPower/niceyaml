@@ -42,14 +42,19 @@ import (
 // value, and then validates what it holds, so a required field that only
 // the environment sets passes:
 //
+//	settings := niceyaml.DecodeOptions(niceyaml.WithJSONUnmarshalers(true))
+//
 //	var cfg Config
-//	if err := doc.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
+//	if err := doc.DecodeInto(ctx, &cfg, settings, niceyaml.WithSelfValidation(false)); err != nil {
 //		return err
 //	}
 //
 //	applyEnv(&cfg)
 //
-//	return doc.SelfValidate(ctx, &cfg)
+//	return doc.SelfValidate(ctx, &cfg, settings)
+//
+// Both calls take settings, since the walk reads the options that say
+// how a value decodes, as Decode Options below describes.
 //
 // No [Validator] of the decode sees a value set this way. A schema thus
 // leaves the value unchecked, and reports a key it requires as missing
