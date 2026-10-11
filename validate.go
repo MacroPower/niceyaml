@@ -23,26 +23,17 @@ import (
 )
 
 // SelfValidate runs the self-validation step of [Node.DecodeInto] on its
-// own. The step walks v, calls Validate on every value in it that
-// implements [SelfValidator], and puts the `@` paths each one reports
-// under the path of the value in the node. SelfValidate binds the result
-// as [Node.Bind] binds an error, which a decode does too once it has
-// filled its target, and returns nil when nothing failed. It runs the
-// walk whatever [WithSelfValidation] says, and runs no [Validator].
+// own. It walks v, calls Validate on every value in it that implements
+// [SelfValidator], and binds what they report as [Node.Bind] binds an
+// error, with each `@` path under the path of its value in the node. It
+// returns nil when nothing failed. It runs the walk whatever
+// [WithSelfValidation] says, and runs no [Validator].
 //
-// # Environment and Flags
+// A program whose library writes its environment or its flags into the
+// value decodes with the walk off, sets the rest of the value, and then
+// validates it, as the Validation section of the package documentation
+// describes:
 //
-// A program that can list what its environment or its flags set passes
-// those values as a layer of [NewSourceFromLayers], which validates them as it
-// validates a file. SelfValidate is for the program whose library writes
-// them into the value instead, or that applies its defaults there. That
-// program decodes the file with the walk off, sets the rest of the
-// value, and then validates what it holds, so a required field that only
-// the environment sets passes:
-//
-//	settings := niceyaml.DecodeOptions(niceyaml.WithJSONUnmarshalers(true))
-//
-//	var cfg Config
 //	if err := doc.DecodeInto(ctx, &cfg, settings, niceyaml.WithSelfValidation(false)); err != nil {
 //		return err
 //	}
@@ -51,108 +42,26 @@ import (
 //
 //	return doc.SelfValidate(ctx, &cfg, settings)
 //
-// Both calls take settings, since the walk reads the options that say
-// how a value decodes, as Decode Options below describes.
+// On a value that nothing changed, SelfValidate returns what the decode
+// with the walk on returns. To spell each map key as the document does,
+// the walk decodes the keys with the settings of the [Source] and with
+// the options in opts that say how a value decodes:
+// [WithCustomUnmarshaler], [WithJSONUnmarshalers],
+// [WithDisallowUnknownFields], [WithAllowedFieldPrefixes], and
+// [WithYAMLOrderedMaps]. It reads no other option, so a caller passes the
+// options of the decode.
 //
-// No [Validator] of the decode sees a value set this way. A schema thus
-// leaves the value unchecked, and reports a key it requires as missing
-// when only the environment sets it.
+// The walk follows v, which need not mirror the node, and each error
+// binds where its path resolves in the document, so an error under a
+// value the caller changed marks what the document holds at that path.
+// In a document that did not parse, every error binds with no position,
+// and SelfValidate returns those errors rather than the syntax error
+// [Node.Err] returns.
 //
-// # Layers
-//
-// A program that layers one file over another merges them through
-// [NewSourceFromLayers]. [Source.SelfValidate] on the merged Source then
-// binds each error in the file that holds its value, where a
-// SelfValidate through the Node of one file binds every error in that
-// file:
-//
-//	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
-//	if err != nil {
-//		return err
-//	}
-//
-//	return merged.SelfValidate(ctx, &cfg)
-//
-// # Decode Options
-//
-// On a value that no layer changed, SelfValidate returns what the decode
-// with the walk on returns. The walk spells the key of each map entry as
-// the document does, so an error under a key such as 1.50 keeps that
-// text, and it decodes the keys of the mappings in the node to learn that
-// spelling. It decodes them with the settings of the [Source], such as
-// the reference documents of [WithReferences], and with the options in
-// opts that say how a value decodes: [WithCustomUnmarshaler],
-// [WithJSONUnmarshalers], [WithDisallowUnknownFields],
-// [WithAllowedFieldPrefixes], and [WithYAMLOrderedMaps]. It reads those
-// options and no other. A caller passes the options of the decode, and
-// the walk then reads each type they give an unmarshaler as the decode
-// did. A key type that a WithCustomUnmarshaler function decodes matches
-// no key of the document unless opts carry that option, and an error
-// under such an entry then binds at the key of the map.
-//
-// # Error Binding
-//
-// The walk follows v rather than the document, so v need not mirror the
-// node, and each error binds where its path resolves in the document. An
-// error under a field or map entry that the document lacks binds at the
-// key of the mapping that lacks it, as [Node.Bind] binds the path of a
-// missing key. An error under a value that an alias reads from a
-// reference document binds at that alias, as [SourceError.Nearest]
-// describes. An error under an element that the document lacks, such
-// as one the caller appended to a slice, binds with no position. An error
-// under a value the caller replaced, or under an element of a slice it
-// reordered or grew at the front, marks what the document holds at that
-// path. An error about a port the environment set to 0 thus marks the
-// 8080 of the file.
-// The keys of a map that the document lacks take the text of their
-// Go values. A field that go-yaml never decodes does not validate, as in
-// a decode. That holds for a field tagged `yaml:"-"` and for an
-// unexported field.
-//
-// The values below a value that decodes itself validate as in a decode.
-// An error at or below such a value binds at that value where an error
-// below any other value binds with no position, and every error below a
-// slice, an array, or a map that decodes itself binds at it.
-// [SelfValidator] describes both rules. They hold for a type with an
-// UnmarshalYAML or UnmarshalText method, and for one that
-// WithCustomUnmarshaler or WithJSONUnmarshalers gives an unmarshaler in
-// opts.
-//
-// # Target
-//
-// Any v works but nil and a nil pointer, which each return an error
+// Any v but nil and a nil pointer works, and those return an error
 // wrapping [ErrSelfValidateTarget], bound to the source. A v that is no
-// pointer validates as a copy, so a Validate with a pointer receiver
-// changes the copy and leaves v as it was.
-//
-// # Unparsed Documents
-//
-// A document that did not parse has no tree. Every key of v then takes
-// the text of its Go value, and each error binds with no position, as
-// [Node.Bind] describes. SelfValidate returns those errors rather than
-// the syntax error [Node.Err] returns.
-//
-// # Optional Files
-//
-// A program whose file is optional validates through an empty [Source]
-// when the file is missing. [Source.SelfValidate] runs the walk through
-// the one document of a Source, so the program makes the same call with
-// or without the file:
-//
-//	return niceyaml.NewSourceFromString("").SelfValidate(ctx, &cfg)
-//
-// Each error then binds with no position too, and its text names the
-// path from v, as in "$.servers[1].port: port is required". The error
-// is bound to that empty document, so no other document places it. A
-// value that came from no document, such as one a Validate walks,
-// validates through [SelfValidateValue], whose errors a document can
-// still place.
-//
-// # Cancellation
-//
-// The walk stops once ctx ends, or once a Validate returns the error of a
-// context that ended, and SelfValidate then returns that error alone, as
-// [SelfValidator] describes.
+// pointer validates as a copy. The walk stops once ctx ends, as the
+// Cancellation section of the package documentation describes.
 func (n *Node) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
 	return n.selfValidate(ctx, v, newDecodeConfig(opts))
 }
@@ -171,96 +80,33 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 }
 
 // SelfValidateValue runs the self-validation step of [Node.DecodeInto]
-// on a value that came from no document, such as a value the program
-// built or the body of a request. The step walks v and calls Validate on
-// every value in it that implements [SelfValidator], as
-// [Node.SelfValidate] walks a value through its document.
-// SelfValidateValue binds the result as [BindValue] binds an error, so
-// the text names each failing path from v, as in
-// "$.servers[1].port: port is required". It returns nil when nothing
+// on a value that came from no document, such as one the program built
+// or the body of a request. It walks v as [Node.SelfValidate] does, and
+// binds the result as [BindValue] binds an error, so the text names each
+// failing path from v, as in "$.servers[1].port: port is required", and
+// a document can still place the error. It returns nil when nothing
 // failed.
 //
-// # Skipped Fields
+// The walk names a field as a YAML decode names it, by its yaml tag, its
+// json tag, or its lowercased name. A map key takes the text of its Go
+// value, so where a document spells the key another way, such as 0x10
+// for 16, an error below the entry binds at the key of the map. A caller
+// that holds the document validates through the Node of the value with
+// Node.SelfValidate instead. Several keys of one map that share a text,
+// such as 1 and "1", bind with no position, as [ErrAmbiguousPath]
+// describes.
 //
-// The result stands in no document, so a document can still place it,
-// as BindValue describes. A decode places the result a Validate returns
-// at the value that owns the method. A Validate holds no [Node], so one
-// that validates values the decode does not reach calls
-// SelfValidateValue. A struct that decodes itself holds such values in a
-// field it tags `yaml:"-"`, as it tags one that it fills from a place no
-// tag can name. The Pool below reads its servers from the servers key
-// under spec:
+// SelfValidateValue takes no [DecodeOption], so it knows a type that
+// decodes itself only by its own unmarshaler method.
 //
-//	type Pool struct {
-//		Servers []Server `yaml:"-"`
-//	}
+// A Validate whose value holds fields a decode does not reach, such as
+// one tagged `yaml:"-"`, validates them with SelfValidateValue and
+// moves the result under their path with [Rebase]. It must not pass its
+// own receiver, which would call that Validate again without end.
 //
-//	func (p *Pool) Validate() error {
-//		err := niceyaml.SelfValidateValue(context.Background(), p.Servers)
-//
-//		return niceyaml.Rebase(err, paths.Current().Child("spec", "servers"))
-//	}
-//
-// A decode of a document that holds the Pool under pool then reports
-// "app.yaml:5:7: $.pool.spec.servers[1].port: port is required". A decode
-// reaches every field with any other tag itself, as [SelfValidator]
-// describes, so the Validate of such a struct leaves those fields to it.
-// A Validate must not pass its own receiver, since the walk then calls
-// that Validate again, without end.
-//
-// # Field Names
-//
-// The walk names each value as a decode of YAML into v names it. A
-// field takes its yaml tag, its json tag when it has no yaml tag, and
-// its lowercased name when it has neither. A struct embedded with no
-// inline option is such a field, under the lowercased name of its type.
-// A value that another format decoded, such as a JSON body, may thus
-// report paths that its own keys do not spell. A field that go-yaml
-// never decodes does not validate, as Node.SelfValidate describes.
-//
-// # Map Keys
-//
-// No document spells the key of a map entry, so each key takes the text
-// of its Go value. A document that spells a key another way, such as
-// 0x10 for 16, holds no entry under that text, so an error below the
-// entry binds at the key of the map, as [Rebase] describes. A caller
-// that holds the document therefore validates through the Node of the
-// value, which reads each key as the document spells it:
-//
-//	request, err := doc.At(paths.Doc().Child("request"))
-//	if err != nil {
-//		return err
-//	}
-//
-//	return request.SelfValidate(ctx, &cfg.Request)
-//
-// Several keys of one map that share a path, such as 1 and "1" in a
-// map[any]T, name no single entry. An error under such a key keeps its
-// path and binds with no position in every document that places it, for
-// the reason [ErrAmbiguousPath]. Below a slice, an array, or a map that
-// decodes itself, it binds at that value, as every error there does.
-//
-// # Target
-//
-// Any v works but nil and a nil pointer, which each return an error
-// wrapping [ErrSelfValidateTarget], bound to no document too.
-//
-// # Cancellation
-//
-// The walk stops once ctx ends, or once a Validate returns the error of a
-// context that ended, and SelfValidateValue then returns that error
-// alone, as [SelfValidator] describes.
-//
-// # Decode Options
-//
-// SelfValidateValue takes no [DecodeOption]. A walk through a document
-// reads those options to decode its keys, and to learn which types
-// [WithCustomUnmarshaler] or [WithJSONUnmarshalers] gives an
-// unmarshaler. This walk reads such a type as one that decodes field by
-// field, and knows a type that decodes itself by its own method alone.
-// A document that places the result thus binds an error at a value that
-// decodes itself, as [SelfValidator] describes, only for a type with
-// such a method.
+// Any v but nil and a nil pointer works, and those return an error
+// wrapping [ErrSelfValidateTarget]. The walk stops once ctx ends, as the
+// Cancellation section of the package documentation describes.
 func SelfValidateValue(ctx context.Context, v any) error {
 	err := checkTarget(v, ErrSelfValidateTarget, false)
 	if err != nil {
@@ -1503,100 +1349,38 @@ func (w *selfWalker) valueNode(node ast.Node, parsed bool) ast.Node {
 }
 
 // DataLocator finds where a location in decoded data lies in the document
-// the data came from. A check of decoded data names what it finds by the
-// member names and indices of that data, as an adapter for CUE, OPA, or
-// another JSON Schema library does. A path matches a key by its source
-// text instead. [AtPath] of those names therefore misses a key the
-// decoder respells, such as the key 0x10 of the member 16, and it reads
-// the index of an element as the name of a member. A DataLocator reads
-// the names as the decoder does, and its options give an error the
+// the data came from. A check of decoded data, such as an adapter for
+// CUE, OPA, or another JSON Schema library, names what it finds by the
+// member names and indices of that data. A path matches a key by its
+// source text instead, so [AtPath] of those names misses a key the
+// decoder respells, such as the key 0x10 of the member 16. A DataLocator
+// reads the names as the decoder does, and its options give an error the
 // location [go.jacobcolvin.com/niceyaml/schema.Schema] gives a violation
 // of the same value:
 //
-//	func (c *check) Check(ctx context.Context, n *niceyaml.Node) error {
-//		data, err := n.Decode[any](ctx)
-//		if err != nil {
-//			return err
-//		}
+//	loc := n.DataLocator()
 //
-//		loc := n.DataLocator()
-//
-//		var errs []error
-//
-//		for _, f := range c.findings(data) {
-//			errs = append(errs, niceyaml.NewError(f.Msg, loc.At(f.Path...)))
-//		}
-//
-//		return errors.Join(errs...)
+//	for _, f := range findings {
+//		errs = append(errs, niceyaml.NewError(f.Msg, loc.At(f.Path...))) // $.ports.0x10.name
 //	}
-//
-// In this document, a finding at ports, 16, name reports the key as the
-// source spells it, and one at items, 0, name reports an element:
-//
-//	ports:
-//	  0x10:
-//	    name: ""
-//	items:
-//	  - name: ""
-//
-//	cfg.yaml:3:11: $.ports.0x10.name: must not be empty
-//	cfg.yaml:5:11: $.items[0].name: must not be empty
 //
 // Create instances with [Node.DataLocator].
 //
-// # Names
+// The names are those of the data from Decode[any] of the Node. A string
+// key gives its text, and any other key gives its Go value as [fmt.Sprint]
+// prints it, so 0x10 is 16, 3.10 is 3.1, and True is true. An element has
+// its index in decimal digits, as [strconv.Itoa] writes it. A decode into
+// another type can name a key another way, such as 1e3 for the key 1000
+// of a map[int]string, and such a name leads nowhere. A check that
+// reports JSON Pointers splits each pointer into its names and unescapes
+// `~1` and `~0` in each.
 //
-// The names are those of the data from Decode[any] of the Node, as
-// [Node.Decode] yields it. A member has the name the decoder gives its
-// key. A string key gives its text, and any other key gives its Go value
-// as [fmt.Sprint] prints it. The key 0x10 is 16, 3.10 is 3.1, True is
-// true, 1234567.0 is 1.234567e+06, and !!binary aGk= is [104 105]. A null
-// key is null. An element has its index as its name, in decimal digits
-// with no sign and no leading zero, as [strconv.Itoa] writes it. Such a
-// name is an index where the names before it lead to a sequence, and the
-// name of a member anywhere else.
-//
-// A decode into another type can name a key another way. The key 1e3
-// decodes to the string 1e3 in a decode into any and to the key 1000 of
-// a map[int]string. The key ~ decodes to null in a decode into any and
-// to the empty key of a map[string]string. A name from such a decode
-// names no member of the data, so it leads nowhere, as [DataLocator.At]
-// describes.
-//
-// # JSON Pointers
-//
-// A check that reports JSON Pointers splits each pointer into its names
-// and unescapes `~1` and `~0` in each:
-//
-//	func names(pointer string) []string {
-//		if pointer == "" {
-//			return nil
-//		}
-//
-//		unescape := strings.NewReplacer("~1", "/", "~0", "~")
-//
-//		parts := strings.Split(strings.TrimPrefix(pointer, "/"), "/")
-//		for i, part := range parts {
-//			parts[i] = unescape.Replace(part)
-//		}
-//
-//		return parts
-//	}
-//
-//	niceyaml.NewError(f.Msg, loc.At(names(f.Pointer)...))
-//
-// # Lifetime
-//
-// A DataLocator is safe for concurrent use. It reads each mapping once
-// however many locations pass through it, so a check creates one for all
-// the findings of a run. To tell which key a spelling selects, it reads
-// the sources of each `<<` merge key that brings the key in or stands
-// after it. The locations of one DataLocator may read as many nodes that
-// way as [paths.ErrExcessiveMerging] allows one path selector. Past that
-// limit it still finds each location, and the path through such a key
-// names the member and each key below it as the decoder does. A check
-// therefore creates a DataLocator for each run and keeps none for the
-// life of the document.
+// A DataLocator is safe for concurrent use, and it reads each mapping
+// once, so a check creates one for all the findings of a run. Its reads
+// of `<<` merge keys share one budget, as large as
+// [paths.ErrExcessiveMerging] allows one path selector, so a check
+// creates a DataLocator for each run and keeps none for the life of the
+// document.
 type DataLocator struct {
 	// The node the names read from.
 	root ast.Node
@@ -1626,61 +1410,28 @@ func (n *Node) DataLocator() *DataLocator {
 }
 
 // At returns an [ErrorOption] that locates an error at the value the
-// names lead to in the data of the [DataLocator]. No names lead to the
-// whole of that data. The option sets the path of the error, as [AtPath]
-// does, to the `$` path of the value with each key spelled as the source
-// spells it:
+// names lead to in the data of the [DataLocator], and no names lead to
+// the whole of that data. The option sets the `$` path of the value, as
+// [AtPath] does, with each key spelled as the source spells it:
 //
 //	niceyaml.NewError("must not be empty", loc.At("ports", "16", "name"))
 //	// cfg.yaml:3:11: $.ports.0x10.name: must not be empty
 //
-// Where several keys of a mapping decode to one name, the name leads to
-// the last of them, whose value the decode keeps. The member 16 of
-// `m: {16: aaaa, 0x10: b}` holds b, so the names m, 16 lead to
-// `$.m.0x10`. The members a `<<` merge key brings in take the order a
-// decode gives them.
+// Where several keys of a mapping decode to one name, the names lead to
+// the last of them, whose value the decode keeps. Where no path selects
+// the value, since another key spells the same text, the option also sets
+// its position, as [AtPosition] does, and the path names the member as
+// the decoder does.
 //
-// A path selects a key by its text, and a later key or a later merge
-// source may spell the key of another member with the same text. No path
-// then selects the value, so the option also sets its position, as
-// [AtPosition] does. The error binds at the position, and the path names
-// the member and each key below it as the decoder does:
-//
-//	user:
-//	  <<: {0x10: x}
-//	  "0x10": 1
-//
-//	niceyaml.NewError("too short", loc.At("user", "16"))
-//	// cfg.yaml:2:14: $.user.16: too short
-//
-// The names may lead to a value the data lacks, as a check for a
-// required member reports one. The path then keeps the names from there
-// on as the caller wrote them, and the error binds where that path
-// binds. A member that a mapping lacks binds at the key of the mapping,
-// as [SourceError.Nearest] describes. A finding at ports, 16, name thus
-// binds at the key 0x10 when the mapping under it holds no name:
-//
-//	cfg.yaml:2:3: $.ports.0x10.name: name is required
-//
-// An index past the end of a sequence and a name below a scalar bind
-// with no position.
-//
-// The names may also lead through an alias the document cannot follow,
-// as one to an anchor of a document from [WithReferences] is. The
-// DataLocator cannot tell what lies behind such an alias, or every member
-// of a mapping that merges one. A name it cannot follow keeps the form
-// the caller wrote, as does each name below it, and the option sets no
-// position. The error then binds where its path binds, as
-// [SourceError.Nearest] describes. A path that enters the alias binds at
-// the alias, and a path to a key beside a merge of one has no position.
-//
-// A path the names do not lead down can select another value all the
-// same. A key can spell a name and set a member of another name, as the
-// key 3.10 sets the member 3.1. Under `python: {3.10: {image: a}}` the
-// names python, 3.10 lead nowhere, and the path `$.python.'3.10'` selects
-// that entry. The option then sets the position of the last value the
-// names lead to, here the key python, and the error binds there. It does
-// the same where no path selects that last value.
+// Names that lead past the data keep the form the caller wrote from there
+// on, and the error binds where that path binds, as [SourceError.Nearest]
+// describes. A member a mapping lacks binds at the key of the mapping,
+// and an index past the end of a sequence or a name below a scalar binds
+// with no position. A name behind an alias the document cannot follow,
+// such as one to an anchor of a document from [WithReferences], keeps its
+// form too, and the option sets no position. A name that matches no
+// member but whose text a path selects, such as 3.10 for the member 3.1,
+// binds at the last value the names lead to.
 func (l *DataLocator) At(names ...string) ErrorOption {
 	return l.option(names, false)
 }
@@ -1741,85 +1492,20 @@ func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token
 	return l.idx.Locate(datapath.Target{Path: l.base, Node: l.root}, names, key)
 }
 
-// SelfValidator is a type that validates itself after a decode. A decode
-// calls Validate on every value in the result that implements it, and on
-// the values below a value before the value itself. Validate reports a
-// problem as an [*Error] with an `@` path, which reads from the value,
-// and the decode puts that path under the path of the value in the
-// document. A type thus checks its invariants once and reports the right
-// lines in any document. The document is at fault for every error a
-// Validate returns, so [IsInvalid] reports it.
+// SelfValidator is a type that validates itself after a decode.
+// [Node.Decode] and [Node.DecodeInto] call Validate on every value in the
+// result that implements it, through a value or a pointer receiver,
+// unless [WithSelfValidation] turns that off. The values below a value
+// validate first, and the value validates only when every one of them
+// passed, so a parent that checks a relation between its fields sees
+// fields that hold together. A field that go-yaml never decodes, such as
+// one tagged `yaml:"-"` or an unexported one, does not validate.
 //
-// # Checked Values
-//
-// [Node.Decode] and [Node.DecodeInto] call Validate after decoding on
-// every value in the decoded value that implements it: the value
-// itself, and each field, element, or map entry below it, however deep,
-// unless [WithSelfValidation] switches that off.
-//
-// A check that belongs to the caller rather than the type, such as one
-// that needs a registry of known names, runs on the decoded value after
-// Decode returns. [Node.DataLocator] finds each value the check names in
-// the document, and [Node.Bind] binds the result to the document the
-// value came from:
-//
-//	cfg, err := doc.Decode[Config](ctx, settings)
-//	if err != nil {
-//		return err
-//	}
-//
-//	loc := doc.DataLocator()
-//
-//	var errs []error
-//
-//	for port, server := range cfg.Ports {
-//		if !known[server.Name] {
-//			errs = append(errs, niceyaml.NewError("unknown server", loc.At("ports", strconv.Itoa(port), "name")))
-//		}
-//	}
-//
-//	return doc.Bind(errors.Join(errs...))
-//
-// The check costs no second decode and reads the value the options of
-// the caller decoded. The locator spells a key as the document does. The
-// error "c.yaml:3:11: $.ports.0x10.name: unknown server" thus names an
-// entry the document writes under 0x10.
-//
-// A check that must run inside the decode, so a [DecodeOption] carries it
-// to every decode and its failures report beside the others, is a
-// [Validator]. Such a Validator decodes the node itself with
-// [Node.Decode] and checks the value it gets, as the Decoded Data
-// section of Validator describes.
-//
-// Any value with a Validate method takes part, including one from a
-// package that names its own check that way, such as a generated
-// message type. A decode runs those checks too and reports their errors
-// at the value that owns the method. A Validate that the value's own
-// UnmarshalYAML already called runs a second time inside the decode, so
-// a Validate that rewrites its value should be idempotent. An error from
-// that first call reports as a decode error, which matches [ErrDecode],
-// rather than as a self-validation error.
-//
-// # Paths
-//
-// An [*Error] the value returns writes an `@` path, which reads from the
-// value itself. The decode puts it under the path of the value in the
-// document, and leaves a `$` path, which reads from the root of the
-// document, as it is. The path of the value names a field by the name
-// go-yaml decoded it under, from its yaml tag, its json tag, or its
-// lowercased name. It names an element by its index and a map entry by
-// its key. A map key validates too, under the path of its entry with a
-// `~` after it, so its errors point at the key rather than the value. The
-// decode reads the roles of the errors as [Rebase] does. A problem with
-// no location points at the value, whether it stands alone or under a
-// summary from [NewSummary], and a detail from [WithDetails] gains no
-// location. A type thus checks its invariants once and reports the right
-// lines in any document:
-//
-//	type Config struct {
-//		Hours Hours  `yaml:"hours"`
-//		Items []Item `yaml:"items"`
-//	}
+// Validate reports a problem as an [*Error] with an `@` path, which reads
+// from the value, and the decode puts that path under the path of the
+// value in the document. A `$` path stays as it is, and a problem with no
+// location points at the value. A type thus checks its invariants once
+// and reports the right lines in any document:
 //
 //	func (h Hours) Validate() error {
 //		if h.Close.Before(h.Open) {
@@ -1829,392 +1515,71 @@ func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token
 //		return nil
 //	}
 //
-// A decode of Config reports $.hours.close from Hours and $.items[2].price
-// from an Item, with Config declaring no Validate of its own.
+// An error below a value that decodes itself, whose path the document
+// does not hold, binds at that value, and every error below a slice, an
+// array, or a map that decodes itself binds at it. The Validation section
+// of the package documentation describes how the decode names each value
+// and how a check of map entries belongs in the type of the entry.
 //
-// # Nested Values
-//
-// The values below a value validate first, and the value validates only
-// when every one of them passed. A parent that checks a relation between
-// its fields thus sees fields that hold together, and a decode reports
-// every value that failed. A field an inline tag flattens keeps the path
-// of the struct that holds it. A flattened field whose name a field of
-// that struct also uses does not validate, since go-yaml sets it to its
-// zero value and decodes the document into the other field. A node type
-// of the go-yaml ast package validates nothing below it, since go-yaml
-// sets it to the node it decodes. A struct that embeds a node decodes
-// field by field, so its fields validate. A parent need not call the
-// Validate of its fields, and [Rebase] is for a check run on a value
-// after Decode returns.
-//
-// # Self-Decoding Values
-//
-// A value whose type decodes itself validates as any other value does,
-// and so does every value below it. A type decodes itself through an
-// UnmarshalYAML or UnmarshalText method, through a function from
-// [WithCustomUnmarshaler], or through an UnmarshalJSON method under
-// [WithJSONUnmarshalers]. A method that sets defaults and then decodes
-// the fields thus keeps every check below its type.
-//
-//	func (s *Server) UnmarshalYAML(unmarshal func(any) error) error {
-//		type plain Server
-//
-//		*s = Server{Port: 8080}
-//
-//		return unmarshal((*plain)(s))
-//	}
-//
-// Such a method may fill its value from anything, so the fields need not
-// mirror the document. The decode names each field of the struct by its
-// tag all the same, as it names the fields of any struct. A field the
-// method leaves as it was, or fills from anything but the document,
-// validates too. The document may thus hold nothing at the path of an
-// error at or below such a value. A path that names a key a mapping
-// leaves out binds at the key of that mapping, as it does below any
-// struct. Any other path the document does not hold binds at the nearest
-// value that decodes itself, which is the value that returned the error
-// or one above it. The error keeps its path, and [SourceError.Nearest]
-// returns the path of the value it bound at. An Addr that decodes from
-// the text "db:0" thus reports its port on that text:
-//
-//	app.yaml:2:7: $.addr.port: port must be at least 1
-//
-// A slice, an array, or a map that decodes itself has no tags, and its
-// method may sort its elements, drop some, or key them anew. No path
-// below such a value says where an element sits in the document, so
-// every error below it binds at the value.
-//
-// The tags of a struct that decodes itself are how its author says where
-// each field sits. A field tagged `yaml:",inline"` reads the mapping of
-// the struct, so the errors below it report their own lines. That suits
-// a struct that holds one of several types, which a key of its mapping
-// names.
-//
-//	type Box struct {
-//		Store Store `yaml:",inline"`
-//	}
-//
-// Without the tag, the decode looks for the Store under a key named
-// store, and each error below it binds at the Box. A field tagged
-// `yaml:"-"` does not validate, so the Validate of the struct checks it,
-// and walks the values below it with [SelfValidateValue]. The decode
-// reads every other field itself and runs that Validate only when they
-// all pass, so no field reports twice. A struct whose method reorders a
-// slice field keeps the tag of that field, so an error under one of the
-// elements reports at the element the document holds at that index.
-//
-// The decode cannot see a type that a function from
-// [yaml.RegisterCustomUnmarshaler] decodes in every decode of the
-// program. The values below such a type validate the same way, but the
-// decode reads it as a type that decodes field by field. An error below
-// it whose path resolves to nothing thus has no value to bind at, and an
-// error below a slice or a map of such a type reports at the element its
-// path names. A program gives that function to WithCustomUnmarshaler
-// instead.
-//
-// # Map Keys
-//
-// A Validate holds no [Node], so it has no [DataLocator] to find how the
-// document spells a key. A parent that checks the entries of a map and
-// builds each path from the Go key names the key as the decoder read it,
-// such as 16 for the key 0x10, and that path misses the entry. The check
-// of an entry belongs in a Validate of the entry's own type instead. The
-// decode puts the errors of that Validate under the key as the document
-// spells it:
-//
-//	type Config struct {
-//		Ports map[int]Server `yaml:"ports"`
-//	}
-//
-//	func (s Server) Validate() error {
-//		if s.Name == "" {
-//			return niceyaml.NewError("name is required", niceyaml.AtPath(paths.Current().Child("name")))
-//		}
-//
-//		return nil
-//	}
-//
-// A decode of Config then reports $.ports.0x10.name for the entry under
-// the key 0x10.
-//
-// # Error Text
-//
-// [Error.Error] carries no location, so a Validate may add context
-// around an Error with [fmt.Errorf] at any depth. The text the wrapper
-// writes holds no path, and the decode puts the position and the joined
-// path in front of the whole text:
-//
-//	cafe.yaml:4:10: $.hours.close: hours check: closes before it opens
-//
-// A caller that calls Validate itself holds an error that no binding
-// holds yet, and its message names no path. Such a caller reads it with
-// [FormatError], which puts the path in front of the text the same way.
-// That path is the one the value wrote, so it reads from the value:
-//
-//	@.close: hours check: closes before it opens
-//
-// A caller that returns or logs the error binds it with [BindValue]
-// instead. The text of that error names each path wherever it prints,
-// and a document can still place it. [SelfValidateValue] runs the
-// Validate of every value below the value too, as a decode does, and
-// binds the result the same way.
-//
-// # Embedded Fields
-//
-// A struct does not own a Validate it gets from an embedded field, so the
-// method runs once, on that field at the field's own path. The method
-// does not run when the field is nil or ignored. A struct that decodes
-// itself through an UnmarshalYAML or UnmarshalText method it gets from an
-// embedded field decodes the document into that field, so the field
-// validates at the path of the struct. Go-yaml decodes no other field of
-// such a struct, so none of them validates.
-//
-// # Deferred Validation
-//
-// A check that reads state the caller fills in after the decode, such as
-// a field a library sets from the environment or a flag, runs through
-// [Node.SelfValidate]. The caller decodes with [WithSelfValidation] off,
-// fills in that state, and then calls SelfValidate on the value, which
-// walks it as the decode would have. SelfValidate describes where an
-// error binds when the value no longer mirrors the document, such as
-// under a field the document lacks.
-//
-// # Fault
-//
-// A Validate checks the value, so the document is at fault for every
-// error it returns, with a location or without, and [IsInvalid] reports
-// it. That holds for an error of I/O too, such as one from a check that a
-// named file exists, and for an error inside [Place]. A Validate whose
-// I/O can fail for reasons outside the document thus leaves that check to
-// the caller, or to a [Validator], which declares each error itself.
-//
-// # Cancellation
-//
-// A Validate that returns the error of a context that ended, one that
-// matches [context.Canceled] or [context.DeadlineExceeded], stops the
-// walk. The decode returns that error alone, with no location, in place
-// of every error the walk found before it, as [MultiValidator] does.
-// The walk stops the same way once the context of the decode ends, and
-// the decode then returns the error of that context.
+// The document is at fault for every error a Validate returns, an I/O
+// error included, so [IsInvalid] reports it. A check that can fail for
+// reasons outside the document belongs in a [Validator] or in the caller.
+// A Validate that returns the error of a context that ended stops the
+// walk, as the Cancellation section of the package documentation
+// describes.
 type SelfValidator interface {
 	Validate() error
 }
 
-// Validator validates a [*Node] before it decodes, as a JSON schema does,
-// or a schema registry that picks the schema from the document's content
-// or file path. Pass one to [Node.Decode] with [WithValidator], or run
-// one on its own with [Node.Validate]. Check checks the Node it gets,
-// which is the root of a document or a Node from [Node.At], and returns
-// its errors as it wrote them from that Node: an [*Error] whose `@` path
-// reads from the Node, a plain error, or an error a Node bound already.
-// Check is the raw step, and the validators this module ships return
-// their errors that way too. The Check of
-// [go.jacobcolvin.com/niceyaml/schema.Registry] is the exception and
-// binds every error it returns. Node.Validate and a decode bind what Check
-// returns, as [Node.Bind] binds an error, so the error names the source
-// the validator read and its `@` paths resolve from the Node. An Error
-// from [NewError] or [Invalid] says what is wrong with the document, and
-// any other error says the check could not run. A document that did not
-// parse never reaches a validator that a decode or Node.Validate runs.
+// Validator validates a [*Node] before it decodes, as a JSON schema does.
+// Pass one to a decode with [WithValidator], or run one on its own with
+// [Node.Validate]. The context carries cancellation and deadlines to a
+// validator that does work it can stop, such as resolving a remote schema
+// reference.
 //
 // See [ValidatorFunc], [MultiValidator], [ChainValidator], [SkipEmpty],
 // [go.jacobcolvin.com/niceyaml/schema.Schema], and
 // [go.jacobcolvin.com/niceyaml/schema.Registry] for implementations.
 //
-// # Scope
-//
-// The Node is the scope that runs the validator: the root of a whole
-// document, or the node a Node from [Node.At] selects, so a validator
-// given to a scoped decode checks that node and its `@` paths resolve
-// from it. A validator that needs the whole document reaches it through
-// [Node.Document]. One that can only check
-// a whole document, as a [go.jacobcolvin.com/niceyaml/schema.Registry]
-// can, refuses a scoped Node with an error instead of checking the
-// document around it, so a caller validates once at the root and decodes
-// the nodes below it without that validator.
-//
-// # Decoded Data
-//
-// A validator that checks the decoded data reads the node with
-// [Node.Decode], which runs the validators the caller passes and no
-// other, so a validator never runs itself again. That decode reads the
-// node with the settings of its [Source], such as the reference
-// documents of [WithReferences], so a validator reads an alias as every
-// decode of the Source reads it. A [DecodeOption] reaches the decode that
-// gets it and no other, so a validator that decodes a type a
-// [WithCustomUnmarshaler] function decodes gives that option to its own
-// decode. The context carries cancellation and deadlines to validators
-// doing cancellable work, such as remote schema reference resolution:
-//
-//	func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
-//		data, err := n.Decode[any](ctx)
-//		if err != nil {
-//			return err
-//		}
-//
-//		return s.check(ctx, data)
-//	}
-//
-// The names of that data are not the keys of the document, since the
-// decoder respells a key such as 0x10, which sets the member 16. A
-// validator that reports where a finding lies in the data takes each
-// location from [Node.DataLocator], which reads the names as the decoder
-// does.
-//
-// A validator that decodes into a type of the program follows three
-// rules. It takes the options of the decode that runs it and gives them
-// to its own decode. It passes [WithSelfValidation] off to that decode,
-// since the decode that runs it calls each Validate method on its own
-// result. And one validator decodes for every check on the type, since
-// each validator that decodes reads the node again, and two of them
-// under [MultiValidator] report one rejection of the decoder twice:
-//
-//	func typed(settings niceyaml.DecodeOption, check func(*niceyaml.DataLocator, *Config) error) niceyaml.Validator {
-//		return niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-//			cfg, err := n.Decode[Config](ctx, settings, niceyaml.WithSelfValidation(false))
-//			if err != nil {
-//				return err
-//			}
-//
-//			return check(n.DataLocator(), &cfg)
-//		})
-//	}
-//
-//	settings := niceyaml.DecodeOptions(niceyaml.WithDisallowUnknownFields(true))
-//	cfg, err := doc.Decode[Config](ctx, settings, niceyaml.WithValidator(typed(settings, check)))
-//
-// # Errors
-//
-// A validator writes the path of an error from the Node it got, as a
-// [SelfValidator] writes it from the value it checks. A key the
-// document lacks has no Node, so its error carries the path of the key,
-// and the Node that runs the validator points the error at the key of
-// the mapping that lacks the value, as Node.At describes:
-//
-//	return niceyaml.NewError("kind is required", niceyaml.AtPath(kindPath))
-//
-// A validator that read a value through a Node from [Node.At] names the
-// value the same way, with the path it scoped the Node by. A path that a
-// Node hands out, such as [Node.Path] of a Node from [Node.Nodes], starts
-// at `$`, so it names the same value through the Node the validator got,
-// whatever the scope of that Node:
-//
-//	for _, item := range items {
-//		errs = append(errs, niceyaml.NewError("bad item", niceyaml.AtPath(item.Path())))
-//	}
-//
-// An error with no location binds at the value the Node selects, as
-// [Node.Bind] describes, so a validator that runs on a Node from Node.At
-// or Node.Nodes reports a plain error at that value.
-//
-// A validator binds an error itself, through [Node.Bind], when it wants
-// the error somewhere other than the Node it got. One that scopes a Node
-// with Node.At and binds through it reports the value it read, and one
-// that binds through [Node.Document] gives an error that is no fault of
-// the value, such as a schema that does not load, no location. A bound
-// error comes back from the Node that runs the validator as it is, since
-// Node.Bind leaves a bound error as it is.
-//
-// A bound error keeps its text, so context a validator wraps around a
-// bound error stands in front of the position, as in
-// "config schema: svc.yaml:2:7: $.port: 0 is less than 1". The binding
-// puts the position in front of context wrapped around an unbound
-// error instead, as in "svc.yaml:2:7: $.port: config schema: 0 is less
-// than 1". A validator that wants its context in front thus binds first.
-//
-// # Nested Validators
-//
-// A validator that runs another on a Node of its own choosing, such as
-// each element of a list, runs it through [Node.Validate] and returns
-// the error as it is:
-//
-//	for _, item := range items {
-//		if err := item.Validate(ctx, inner); err != nil {
-//			return err // bound at $.items[i]
-//		}
-//	}
-//
-// A call to inner.Check(ctx, item) returns the error as inner wrote it,
-// with its `@` paths reading from item. The Node that runs the outer
-// validator then binds it and resolves those paths from itself. In the
-// c.yaml below, a rule that reserves the name admin rejects the second
-// item:
-//
-//	name: lunch
-//	items:
-//	  - name: soup
-//	  - name: admin
-//
-// The rule writes its error at `@.name`. The outer validator reports one
-// of these lines, by the call it makes:
-//
-//	item.Validate(ctx, inner)   c.yaml:4:11: $.items[1].name: reserved name
-//	inner.Check(ctx, item)      c.yaml:1:7: $.name: reserved name
-//
-// When the item is a Node of another source, the error names the wrong
-// file too, since it takes the source of the Node that binds it.
-//
-// # Fault
+// Check gets the Node that runs it, which is the root of a document or a
+// Node from [Node.At], and returns its errors as it wrote them from that
+// Node. An [*Error] writes an `@` path that reads from the Node, and an
+// error about a key the document lacks carries the path of the key.
+// Node.Validate and a decode bind what Check returns as [Node.Bind] binds
+// an error, and leave an error the validator bound itself as it is. The
+// validators of this module return their errors unbound, apart from
+// schema.Registry, which binds every error it returns.
 //
 // A validator declares which of its errors are the fault of the document.
-// It returns an [*Error] from [NewError] or [Invalid] to report what is
-// wrong with the document, with a location or without, and [IsInvalid]
-// reports that Error. An error of the validator's own type declares the
-// fault inside Invalid, where [errors.As] still finds it. The validator
-// returns any other error when the check itself could not run, such as an
-// I/O error, and IsInvalid does not report that error. A location changes
-// neither. [Place] shows an error of the second kind at the value the
-// check read, with the options NewError and Invalid take, and declares
-// no fault:
+// An error from [NewError] or [Invalid] says what is wrong with the
+// document, and [IsInvalid] reports it. Any other error says the check
+// could not run, and [Place] shows such an error at a value without
+// declaring a fault.
 //
-//	_, err := os.Stat(spec.License)
-//	switch {
-//	case errors.Is(err, fs.ErrNotExist):
-//		return niceyaml.NewError("license file does not exist", niceyaml.AtPath(licensePath))
-//	case err != nil:
-//		return niceyaml.Place(fmt.Errorf("stat license: %w", err), niceyaml.AtPath(licensePath))
-//	}
+// A validator that checks decoded data reads the Node with [Node.Decode],
+// which runs the validators that call passes and no other, and takes
+// each location from [Node.DataLocator]. A decode passes none of its
+// options to the validators it runs. A validator that needs the whole
+// document reaches it through [Node.Document], and one that can check
+// only a whole document refuses a scoped Node. The Validation section of
+// the package documentation describes these patterns.
 //
-// The first error is the fault of the document, which names a file that
-// does not exist. The second binds at the same value, as in
-// "c.yaml:3:12: $.spec.license: stat license: permission denied", and it
-// stays a check that could not run, which IsInvalid does not report.
-//
-// # Origin
-//
-// A validator that resolves such a file beside the file that names it
-// reads the directory from [Node.Origin] of the Node of the value, and
-// not from [Node.FilePath] of the Node it got. In the Source
-// [NewSourceFromLayers] builds, that Node belongs to the merged
-// document, which has the file path of the lowest layer, whichever layer
-// holds the value. Origin returns the Node of the value in the file of
-// its layer, and the receiver where the validator runs on one file.
-//
-// # Unparsed Documents
-//
-// A document with a YAML syntax error has no tree to check. Node.Validate
-// and a decode return the syntax error [Node.Err] returns before any
-// validator runs, so a validator they run always gets a document that
-// parsed. A caller that calls Check itself can hand it a Node whose
-// document did not parse. [Node.Decode], [Node.At], and [Node.Nodes]
-// return the syntax error for such a Node, and a validator passes that
-// error on. [ValidatorFunc], [MultiValidator], [ChainValidator], and the
-// validators of [go.jacobcolvin.com/niceyaml/schema] return it before
+// A decode and Node.Validate return the syntax error of a document that
+// did not parse before any validator runs. A caller that calls Check
+// itself on such a Node gets the syntax error from Node.Decode, Node.At,
+// and Node.Nodes, and the validators of this module return it before
 // they read the Node.
 type Validator interface {
 	Check(ctx context.Context, n *Node) error
 }
 
-// ValidatorFunc adapts a function to the [Validator] interface.
+// ValidatorFunc adapts a function to the [Validator] interface. The
+// function writes its errors from the Node it gets, as Validator
+// describes, and [ValidatorFunc.Check] returns what the function returns,
+// so the same body works as the Check method of a type:
 //
-//	kindPath := paths.Current().Child("kind")
 //	known := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-//		node, err := n.At(kindPath)
-//		if err != nil {
-//			return err
-//		}
-//
-//		kind, err := node.Decode[string](ctx)
+//		kind, err := n.DecodeAt[string](ctx, kindPath)
 //		if err != nil {
 //			return err
 //		}
@@ -2226,15 +1591,10 @@ type Validator interface {
 //		return nil
 //	})
 //
-// The function writes its errors from the Node it got, as [Validator]
-// asks, and Check returns what the function returns. The body of a
-// ValidatorFunc is thus also right as the Check method of a type, and
-// the two return the same error for the same Node.
-//
 // A check that knows nothing of YAML returns a plain error, which
-// declares no fault. The function declares the document at fault for
-// that error by returning the check inside [Invalid], which returns nil
-// for a value that passes:
+// declares no fault. The function declares the document at fault for that
+// error by returning the check inside [Invalid], which returns nil for a
+// value that passes:
 //
 //	return niceyaml.Invalid(check(v))
 type ValidatorFunc func(ctx context.Context, n *Node) error
@@ -2254,37 +1614,26 @@ func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 
 // MultiValidator returns a [Validator] that runs every validator in
 // order and reports every failure, where [ChainValidator] stops at the
-// first that fails. It suits rules that check a document independently,
-// as the rules of a linter do, such as a schema and a check on the names
-// it uses, so one run reports the violations of both:
+// first. It suits rules that check a document independently, as the
+// rules of a linter do:
 //
-//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(niceyaml.MultiValidator(schema, names)))
+//	err := doc.Validate(ctx, niceyaml.MultiValidator(schema, names))
 //
-// Each validator sees the node whatever the ones before it reported, so
-// a validator that decodes the node reports its own failure beside a
-// schema violation of the same value. A validator that needs an earlier
-// one to have passed goes in a ChainValidator instead. The run skips a
-// nil validator, and one that holds a nil pointer or func.
-//
-// Two or more failures come back joined in the order given, each as the
-// validator wrote it, so [errors.Is] matches any one of them. The Node
-// that runs the MultiValidator binds the join as one tree, as [Node.Bind]
-// describes, so each failure binds at its own location and each line of
-// the message carries the source and the position of its own failure:
+// Each validator sees the node whatever the ones before it reported. The
+// run skips a nil validator, and one that holds a nil pointer or func.
+// No failure is no error, and a lone failure comes back as that validator
+// wrote it. Two or more come back joined in the order given, so
+// [errors.Is] matches any one of them, and the Node that runs the
+// MultiValidator binds each at its own location, as [Node.Bind]
+// describes:
 //
 //	svc.yaml:1:7: $.name: reserved name
 //	svc.yaml:2:7: $.port: 0 is less than 1
 //
-// The message of that binding lists the failures in the order of their
-// positions, as the tree shows them.
-//
-// A lone failure comes back as it would if that validator ran alone. No
-// failure is no error. A context that ends stops the run, and the error
-// is then the one the context reports, or the one the validator that saw
-// it end returned.
-//
-// MultiValidator copies the validators it gets, so a caller that edits
-// the slice it passed changes nothing in the Validator.
+// A context that ends stops the run, as the Cancellation section of the
+// package documentation describes. MultiValidator copies the validators
+// it gets, so a caller that edits the slice it passed changes nothing in
+// the Validator.
 func MultiValidator(validators ...Validator) Validator {
 	validators = slices.Clone(validators)
 
@@ -2324,28 +1673,19 @@ func MultiValidator(validators ...Validator) Validator {
 // check that follows the references of a document once a schema has
 // accepted its shape:
 //
-//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(niceyaml.ChainValidator(schema, refs)))
+//	err := doc.Validate(ctx, niceyaml.ChainValidator(schema, refs))
 //
 // A validator runs only after every validator before it has passed, so
-// it can trust the shape the schema checked, and one that decodes the
-// node reports no value the schema already rejected. Rules that check a
-// document independently go in a MultiValidator instead, which reports
-// the failures of all of them. The run skips a nil validator, and one
-// that holds a nil pointer or func, and a ChainValidator of no
-// validators passes every Node.
-//
-// A decode runs the validators of repeated [WithValidator] options the
-// same way, so these two decodes return the same error:
-//
-//	doc.Decode[Config](ctx, niceyaml.WithValidator(niceyaml.ChainValidator(schema, refs)))
-//	doc.Decode[Config](ctx, niceyaml.WithValidator(schema), niceyaml.WithValidator(refs))
+// one that decodes the node reports no value the schema already
+// rejected. The run skips a nil validator, and one that holds a nil
+// pointer or func, and a ChainValidator of no validators passes every
+// Node. A decode runs the validators of repeated [WithValidator] options
+// the same way.
 //
 // The failure comes back as the validator wrote it, so the Node that
 // runs the ChainValidator binds it as it binds the failure of that
-// validator alone.
-//
-// ChainValidator copies the validators it gets, so a caller that edits
-// the slice it passed changes nothing in the Validator.
+// validator alone. ChainValidator copies the validators it gets, so a
+// caller that edits the slice it passed changes nothing in the Validator.
 func ChainValidator(validators ...Validator) Validator {
 	validators = slices.Clone(validators)
 
@@ -2354,38 +1694,20 @@ func ChainValidator(validators ...Validator) Validator {
 	})
 }
 
-// SkipEmpty returns a [Validator] that passes a document with no content
-// and runs v on every other Node. [Node.IsEmpty] reports such a
-// document: an empty file, a file of comments alone, or a "---" header
-// with nothing but comments below it.
-//
-// An empty document validates as any other, so a schema that wants a
-// mapping rejects it, and a registry that requires a schema finds none
-// for it. [Source.Documents] and [Source.ValidateDocuments] leave out the
-// empty documents of a file that holds a document with content, and keep
-// the one document of an empty file. A caller whose file may be empty as
-// a whole wraps its validator:
+// SkipEmpty returns a [Validator] that passes a document with no content,
+// which [Node.IsEmpty] reports, and runs v on every other Node. A caller
+// whose file may be empty as a whole wraps its validator, so an empty
+// file validates, and a decode of it returns the zero value:
 //
 //	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(reg))
 //
-// So does a caller that validates each document [Source.AllDocuments]
-// returns with [Node.Validate], where every empty document runs the
-// validator.
-//
-// A decode takes it the same way, so a configuration file that may be
-// empty decodes to the zero value:
-//
-//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(niceyaml.SkipEmpty(schema)))
-//
-// SkipEmpty passes only the documents IsEmpty reports. A document that
-// holds a value runs v, whatever the value, so v still checks an
-// explicit null such as `--- null` and an alias with no anchor before
-// it. A document that did not parse returns its syntax error. A Node
-// that [Node.At] or [Node.Nodes] scopes below the root is not a
-// document, so v runs on it.
+// A document that holds any value runs v, so v still checks an explicit
+// null such as `--- null` and an alias with no anchor before it. A Node
+// that [Node.At] or [Node.Nodes] scopes below the root is no document, so
+// v runs on it. A document that did not parse returns its syntax error.
 //
 // SkipEmpty returns the error of v as v wrote it, and a nil v passes
-// every Node. SkipEmpty takes one validator, and it wraps the one that
+// every Node. It takes one validator, so it wraps the one that
 // [MultiValidator] or [ChainValidator] makes of several.
 func SkipEmpty(v Validator) Validator {
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
@@ -2401,49 +1723,26 @@ func SkipEmpty(v Validator) Validator {
 // Validate runs v on the node. It is the validation step of [Node.Decode]
 // on its own, for a caller that checks a document without decoding it:
 //
-//	for _, doc := range docs {
-//		if err := doc.Validate(ctx, reg); err != nil {
-//			return err
-//		}
+//	if err := doc.Validate(ctx, reg); err != nil {
+//		return err
 //	}
 //
-// Validate takes one validator, and that validator decides how many
-// violations the node reports. A caller with several validators names how
-// they run together. [MultiValidator] runs every one and reports every
-// failure, which suits rules that check the node independently, as the
-// rules of a linter do. [ChainValidator] stops at the first that fails,
-// which suits a check that needs an earlier one to pass, such as one
-// that reads the values a schema requires:
+// Validate takes one validator, so a caller with several combines them
+// with [MultiValidator] or [ChainValidator], and [SkipEmpty] lets a
+// document with no content pass.
 //
-//	err := doc.Validate(ctx, niceyaml.MultiValidator(schema, names))
-//	err := doc.Validate(ctx, niceyaml.ChainValidator(schema, refs))
+// Validate binds what v returns through [Node.Bind], so an [*Error]
+// renders its location with its `@` paths read from the node, and an
+// error v bound itself comes back as it is. A Node from [Node.At] or
+// [Node.Nodes] points an error with no location at its own value. A
+// validator that runs another on a Node of its choosing, such as each
+// element of a list, calls Validate on that Node, where a call to Check
+// returns the error unbound.
 //
-// [SkipEmpty] wraps either one, so that a document with no content
-// passes.
-//
-// A nil v runs nothing, and neither does one that holds a nil pointer or
-// func, so Validate then returns what [Node.Err] returns. A validator
-// that returns a nil [*Error] or [*SourceError] pointer passes.
-//
-// A validator writes its errors from the Node it got, as [Validator]
-// describes, and Validate binds them to the source as a [SourceError]
-// through [Node.Bind], so an [*Error] renders its location and any other
-// error names the source. A Node from [Node.At] or [Node.Nodes] also
-// points an error with no location at its own value, as Node.Bind
-// describes. An error the validator bound itself comes back as it is.
-// A direct call to the Check method of a validator is the raw step. It
-// returns the error as the validator wrote it, whichever validator it
-// is: an unbound error names no source and its `@` paths read from the
-// Node the validator got, and an error the validator bound itself is
-// bound already. Validate is thus the way to run a validator, the
-// caller's own or one it did not write, and the way a validator runs
-// another on a Node of its choosing, as item.Validate(ctx, inner) runs
-// inner on an element.
-//
-// A document that did not parse fails before v runs, with the syntax
-// error [Node.Err] returns, even when v is nil. A caller that validates
-// each document of a file thus collects the syntax errors of the file in
-// the same loop, as [Source.ValidateDocuments] does.
+// A document that did not parse returns the syntax error [Node.Err]
+// returns before v runs, even when v is nil. Otherwise a nil v, or one
+// that holds a nil pointer or func, runs nothing and passes, and so does
+// a validator that returns a nil [*Error] or [*SourceError] pointer.
 func (n *Node) Validate(ctx context.Context, v Validator) error {
 	return n.validate(ctx, []Validator{v})
 }
