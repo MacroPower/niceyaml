@@ -1547,21 +1547,21 @@ func TestNode_Origin(t *testing.T) {
 			path:      server,
 			wantLayer: "prod.yaml",
 			wantPath:  "$.server",
-			want:      "  port: 8443",
+			want:      stringtest.JoinLF("server:", "  port: 8443"),
 		},
 		"a mapping one layer holds comes from that layer whole": {
 			inputs:    []string{baseInput, "name: prod\n"},
 			path:      server,
 			wantLayer: "base.yaml",
 			wantPath:  "$.server",
-			want:      stringtest.JoinLF("  host: example.com", "  port: 80"),
+			want:      stringtest.JoinLF("server:", "  host: example.com", "  port: 80"),
 		},
 		"a sequence comes whole from the layer that replaces it": {
 			inputs:    []string{baseInput, newTags},
 			path:      tags,
 			wantLayer: "prod.yaml",
 			wantPath:  "$.tags",
-			want:      stringtest.JoinLF("  - c", "  - d"),
+			want:      stringtest.JoinLF("tags:", "  - c", "  - d"),
 		},
 		"an element comes from the layer of its sequence": {
 			inputs:    []string{baseInput, newTags},
@@ -1663,6 +1663,68 @@ func TestNode_Origin(t *testing.T) {
 			assert.Same(t, origin, again)
 		})
 	}
+
+	t.Run("an error at a merged Node marks the view of its origin", func(t *testing.T) {
+		t.Parallel()
+
+		// Each case binds an error at the Node at path in the layers that
+		// inputs merge into, and lists the view of the origin of that
+		// Node with the error marked on it.
+		tcs := map[string]struct {
+			path   paths.Path
+			want   string
+			inputs []string
+		}{
+			"mapping": {
+				inputs: []string{baseInput, port8443},
+				path:   server,
+				want: stringtest.JoinLF(
+					"   1 | server:",
+					"     | ^^^^^^ bad value",
+					"   2 |   port: 8443",
+				),
+			},
+			"sequence": {
+				inputs: []string{baseInput, newTags},
+				path:   tags,
+				want: stringtest.JoinLF(
+					"   1 | tags:",
+					"     | ^^^^ bad value",
+					"   2 |   - c",
+					"   3 |   - d",
+				),
+			},
+			"scalar": {
+				inputs: []string{baseInput, port8443},
+				path:   port,
+				want: stringtest.JoinLF(
+					"   2 |   port: 8443",
+					"     |         ^^^^ bad value",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				node := yamltest.At(t, yamltest.Document(t, layerFiles(t, tc.inputs...)), tc.path)
+
+				bound := yamltest.RequireSourceError(t, node.Bind(errors.New("bad value")))
+
+				// The error binds in the file of a layer, so the view of
+				// the merged text holds no line of it.
+				assert.False(t, bound.Annotate(node.View()))
+
+				origin, err := node.Origin()
+				require.NoError(t, err)
+
+				view := origin.View()
+				require.True(t, bound.Annotate(view))
+				assert.Equal(t, tc.want, view.String())
+			})
+		}
+	})
 
 	t.Run("a Node of a plain file is its own origin", func(t *testing.T) {
 		t.Parallel()
@@ -1932,7 +1994,7 @@ func TestNode_Origin(t *testing.T) {
 		origin, err := yamltest.At(t, yamltest.Document(t, yamltest.Layers(t, base, prod)), server).Origin()
 		require.NoError(t, err)
 		assert.Same(t, prod, origin.Source())
-		assert.Equal(t, "  <<: *shared", origin.View().Held().Content())
+		assert.Equal(t, stringtest.JoinLF("server:", "  <<: *shared"), origin.View().Held().Content())
 	})
 }
 

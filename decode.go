@@ -1486,7 +1486,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 	}
 
 	c.node = node
-	c.span, c.content = n.extent(node)
+	c.span, c.content = n.scope(c.base, node)
 
 	return &c, nil
 }
@@ -1593,11 +1593,62 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 		c := *n
 		c.base = m.Path
 		c.node = m.Node
-		c.span, c.content = n.extent(m.Node)
+		c.span, c.content = n.scope(m.Path, m.Node)
 		nodes = append(nodes, &c)
 	}
 
 	return nodes, nil
+}
+
+// scope returns the lines and the tokens of the Node that [Node.At] or
+// [Node.Nodes] scopes at path, a `$` path that selects node. The tokens
+// are those of node, as [Node.extent] finds them, and so are the lines,
+// with one addition. The key of an entry introduces a mapping or a
+// sequence that is its value, and the "-" of an element of a block
+// sequence introduces one that is the element. [astnode.PathToken] gives
+// that token. Where it lies on a line above the lines of node, the lines
+// start there, so they hold the token [paths.Resolver.Token] resolves for
+// path.
+//
+// A scalar is its own token, and nothing holds the root of a document or
+// the key of an entry, so each keeps the lines of its node. So does the
+// Node of a path that ends at an alias. Its node is the content of the
+// anchor, and the alias the path points at introduces none of it.
+func (n *Node) scope(path paths.Path, node ast.Node) (position.Span, token.Tokens) {
+	span, tks := n.extent(node)
+
+	// A scalar is its own token, so no token above it introduces it.
+	if isScalar(astnode.Content(node)) {
+		return span, tks
+	}
+
+	in := parentAt(n.doc.pathResolver(), path)
+
+	var value ast.Node
+
+	switch {
+	case in.Entry != nil:
+		value = in.Entry.Value
+	case in.Sequence != nil && in.Index < len(in.Sequence.Values):
+		value = in.Sequence.Values[in.Index]
+	}
+
+	// The content behind an alias lies at its anchor, so the key or the
+	// "-" in front of the alias introduces none of the lines of node.
+	if _, ok := astnode.Content(value).(*ast.AliasNode); ok {
+		return span, tks
+	}
+
+	tk := astnode.PathToken(value, in)
+	if tk == nil || tk.Position == nil {
+		return span, tks
+	}
+
+	if at := tk.Position.Line - 1; at >= 0 && at < span.Start {
+		span = position.NewSpan(at, span.End)
+	}
+
+	return span, tks
 }
 
 // extent returns the lines and the tokens of node in the document. The
@@ -1884,44 +1935,68 @@ func (n *Node) FS() fs.FS {
 // first token, so the spans of a source cover every one of its lines. A
 // document after the first with no tokens covers no lines.
 //
-// A Node from [Node.At] covers the lines from the one the first token
-// under its node starts on through the one the last token ends on. The
-// node of a mapping entry is its value, so the line of the key is in the
-// span only when the value starts on it, and a scope from
-// [paths.Path.Key] covers the key. A scope that selects nothing covers no
-// lines.
+// A Node from [Node.At] or [Node.Nodes] covers the lines of its node,
+// from the one the first token under the node starts on through the one
+// the last token ends on. A scope that selects nothing covers no lines.
+//
+// A mapping or a sequence also covers the line of the token that
+// introduces it, where that token lies above its content. The token is
+// the key of the entry the mapping or the sequence is the value of, or
+// the "-" of the element it is in a block sequence:
+//
+//	hours:      # the span of $.hours starts here
+//	  open: 9
+//	  close: 5
+//
+// The span then runs from the line of that token through the last line
+// of the node. A flow collection on the line below its key thus starts at
+// the key, and so does a mapping or a sequence under an explicit key. A
+// line between the key and the content lies in the span too, such as one
+// that holds an anchor, a tag, or a comment. [Node.Tokens] returns the
+// tokens of the value alone, so the token that introduces it is not
+// among them.
+//
+// A scalar is its own token, so it covers its own lines alone. The line
+// of its key is in the span only when the scalar starts on it:
+//
+//	plain:
+//	  one       # the span of $.plain is this line
+//
+// A scope from [paths.Path.Key] covers the key.
 //
 // [Node.Ranges] of the scope and an error bound at its root resolve to
 // the token the path of the scope points at, as [paths.Resolver.Token]
-// describes. For a mapping or a sequence that token is the key of its
-// entry or the "-" of its element. It lies on the line above the span
-// when the value starts below it, as a block mapping under a key does:
+// describes. That token is the key or the "-" that introduces the node,
+// or else a token of the node itself, so the span holds its line.
+// [SourceError.Annotate] thus marks such an error on [Node.View].
 //
-//	hours:      # an error at $.hours binds here
-//	  open: 9   # the span of $.hours starts here
-//	  close: 5
-//
-// [SourceError.Annotate] marks the lines a view holds, so it marks
-// nothing on [Node.View] for such an error and reports false. A caller
-// that shows the scope with that error slices a view from the line of
-// the error:
+// A path that ends at an alias is the exception. The node of such a
+// path, such as `$.c` in `c: *x`, is the content of the anchor. The span
+// covers the lines of that content alone, which [Node.AST],
+// [Node.Decode], and [Node.Tokens] read. Node.Ranges of the scope and an
+// error bound at its root resolve to the alias, where the path points.
+// The alias lies outside the span unless it shares a line with that
+// content, as it can in a flow collection. Annotate then marks nothing on
+// Node.View and reports false. A caller that shows the scope with that
+// error adds the line of the error to the view:
 //
 //	view := hours.View()
-//	if pos, ok := bound.Position(); ok && pos.Line < hours.Span().Start {
-//		view = hours.Source().View().Slice(position.NewSpan(pos.Line, hours.Span().End))
+//	if !bound.Annotate(view) { // only a path that ends at an alias
+//		if pos, ok := bound.Position(); ok {
+//			view = hours.Source().View().Slice(hours.Span(), position.NewSpan(pos.Line, pos.Line+1))
+//			bound.Annotate(view)
+//		}
 //	}
 //
-//	bound.Annotate(view)
-//
-// The node of a path that ends at an alias, such as `$.c` in `c: *x`, is
-// the content of the anchor, so the span covers the lines of that
-// content, which [Node.AST], [Node.Decode], and [Node.Tokens] read.
-// Node.Ranges of the scope and an error bound at its root resolve to the
-// alias, where the path points. They lie outside the span unless the
-// alias shares a line with that content, as it can in a flow collection.
 // A tag on the alias keeps the node at the tag, as [paths.Resolver.Node]
 // describes, so the node of `$.c` in `c: !t *x` is the tag with the alias
 // under it, and the span covers the line of the alias instead.
+//
+// An error at a Node of the document [NewSourceFromLayers] builds binds
+// in the file of a layer, so it marks nothing on a view of the merged
+// text. A caller takes [Node.Origin] of that Node first and marks the
+// view of the origin, whose span follows the same rules in the file of
+// its layer.
 //
 // [Node.View] returns a view of the source sliced to the span, so a
 // caller that renders the node need not slice one itself. The span
@@ -1959,10 +2034,9 @@ func (n *Node) Span() position.Span {
 // view of the whole source when the location of the error lies in
 // [Node.Span]. An error outside the span marks nothing on the view, and
 // Annotate reports false for it. An error bound at the root of a scope
-// lies above the span when the scope is a block mapping or a block
-// sequence under a key. It lies below the span when the path of the scope
-// ends at an alias on a line below the content of the anchor. Node.Span
-// shows how to slice a view that holds the line of such an error.
+// lies in the span, unless the path of the scope ends at an alias on
+// another line than the content of the anchor. Node.Span shows how to
+// slice a view that holds the line of such an error.
 func (n *Node) View() *line.View {
 	return line.NewView(n.source.lines, n.span)
 }

@@ -2319,6 +2319,7 @@ func TestDocument_View(t *testing.T) {
 		t.Parallel()
 
 		assert.Equal(t, stringtest.JoinLF(
+			`   4 |   hours:`,
 			`   5 |     open: "09:00"`,
 			`   6 |     close: "17:00"`,
 		), hours.View().String())
@@ -2352,25 +2353,20 @@ func TestDocument_View(t *testing.T) {
 		))
 	})
 
-	t.Run("an error at the root of a scoped block mapping lies above its view", func(t *testing.T) {
+	t.Run("an error at the root of a scoped block mapping lies in its view", func(t *testing.T) {
 		t.Parallel()
 
 		bound := yamltest.RequireSourceError(t, hours.Bind(errors.New("closed")))
 		require.EqualError(t, bound, "4:3: $.spec.hours: closed")
 
-		// The error points at the key, on the line above the lines the
-		// mapping covers.
+		// The error points at the key, where the span of the mapping
+		// starts.
 		pos, ok := bound.Position()
 		require.True(t, ok)
 		assert.Equal(t, position.New(3, 2), pos)
-		assert.Equal(t, position.NewSpan(4, 6), hours.Span())
+		assert.Equal(t, position.NewSpan(3, 6), hours.Span())
 
 		view := hours.View()
-		require.False(t, bound.Annotate(view))
-		assert.Equal(t, hours.View().String(), view.String())
-
-		// A view from the line of the error holds the mark.
-		view = source.View().Slice(position.NewSpan(pos.Line, hours.Span().End))
 		require.True(t, bound.Annotate(view))
 		assert.Equal(t, stringtest.JoinLF(
 			"   4 |   hours:",
@@ -2432,9 +2428,9 @@ func TestDocument_View(t *testing.T) {
 
 		lines := hours.View().Held()
 
-		require.Equal(t, 2, lines.Len())
-		assert.Equal(t, `    open: "09:00"`, lines.Line(0).Content())
-		assert.Equal(t, 5, lines.Line(0).Number())
+		require.Equal(t, 3, lines.Len())
+		assert.Equal(t, "  hours:", lines.Line(0).Content())
+		assert.Equal(t, 4, lines.Line(0).Number())
 	})
 
 	t.Run("diffs one document of a file that holds several", func(t *testing.T) {
@@ -8400,8 +8396,10 @@ func TestDocument_At_Scope(t *testing.T) {
 			tokens []string
 		}{
 			"block mapping value": {
+				// The span starts at the key, which is not among the
+				// tokens of the value.
 				path:   hoursPath,
-				span:   position.NewSpan(3, 5),
+				span:   position.NewSpan(2, 5),
 				tokens: []string{"open", ":", "17:00", "close", ":", "09:00"},
 			},
 			"scalar on the key line": {
@@ -8497,22 +8495,22 @@ func TestDocument_At_Scope(t *testing.T) {
 			"mapping value": {
 				input: stringtest.LinesLF("base: &base", "  # c", "  restart: always"),
 				path:  paths.Current().Child("base"),
-				span:  position.NewSpan(1, 3),
+				span:  position.NewSpan(0, 3),
 			},
 			"sequence value": {
 				input: stringtest.LinesLF("base: &base", "  # c", "  - 1"),
 				path:  paths.Current().Child("base"),
-				span:  position.NewSpan(1, 3),
+				span:  position.NewSpan(0, 3),
 			},
 			"sequence in the column of the key": {
 				input: stringtest.LinesLF("base: &base", "# c", "- 1"),
 				path:  paths.Current().Child("base"),
-				span:  position.NewSpan(1, 3),
+				span:  position.NewSpan(0, 3),
 			},
 			"value of an anchored key": {
 				input: stringtest.LinesLF("&k a: &x", "# c", "  b: 1"),
 				path:  paths.Current().Child("a"),
-				span:  position.NewSpan(1, 3),
+				span:  position.NewSpan(0, 3),
 			},
 			"value of an explicit key": {
 				input: stringtest.LinesLF(
@@ -8522,7 +8520,7 @@ func TestDocument_At_Scope(t *testing.T) {
 					"  b: 2",
 				),
 				path: paths.Current().Child("a"),
-				span: position.NewSpan(2, 4),
+				span: position.NewSpan(0, 4),
 			},
 			"value in a flow mapping": {
 				input: stringtest.LinesLF("{a: &x", "# c", " b}"),
@@ -8532,7 +8530,7 @@ func TestDocument_At_Scope(t *testing.T) {
 			"sequence entry": {
 				input: stringtest.LinesLF("- &e", "  # c", "  name: x"),
 				path:  paths.Current().Index(0),
-				span:  position.NewSpan(1, 3),
+				span:  position.NewSpan(0, 3),
 			},
 			"root": {
 				input: stringtest.LinesLF("&x", "# c", "b: 1"),
@@ -8548,7 +8546,7 @@ func TestDocument_At_Scope(t *testing.T) {
 					"    b: 1",
 				),
 				path: paths.Current().Child("x", "a"),
-				span: position.NewSpan(3, 5),
+				span: position.NewSpan(1, 5),
 			},
 			"sequence below an anchor below the key": {
 				input: stringtest.LinesLF(
@@ -8559,7 +8557,7 @@ func TestDocument_At_Scope(t *testing.T) {
 					"  - 1",
 				),
 				path: paths.Current().Child("x", "a"),
-				span: position.NewSpan(3, 5),
+				span: position.NewSpan(1, 5),
 			},
 			"anchor below the key in a sequence entry": {
 				input: stringtest.LinesLF(
@@ -8569,7 +8567,7 @@ func TestDocument_At_Scope(t *testing.T) {
 					"    b: 1",
 				),
 				path: paths.Current().Index(0).Child("a"),
-				span: position.NewSpan(2, 4),
+				span: position.NewSpan(0, 4),
 			},
 			"anchor below the dash and comment left of the dash": {
 				input: stringtest.LinesLF(
@@ -8580,7 +8578,7 @@ func TestDocument_At_Scope(t *testing.T) {
 					"    b: 1",
 				),
 				path: paths.Current().Child("x").Index(0),
-				span: position.NewSpan(3, 5),
+				span: position.NewSpan(1, 5),
 			},
 			"anchor after a tag and comment left of the key": {
 				input: stringtest.LinesLF(
@@ -8609,8 +8607,13 @@ func TestDocument_At_Scope(t *testing.T) {
 				t.Parallel()
 
 				dd := yamltest.FirstDocument(t, tc.input)
+				scoped := yamltest.At(t, dd, tc.path)
 
-				assert.Equal(t, tc.span, yamltest.At(t, dd, tc.path).Span())
+				// The span of a mapping or a sequence starts at its key or
+				// its "-", above the comment, so the tokens of the value
+				// show that the Node holds the comment.
+				assert.Equal(t, tc.span, scoped.Span())
+				assert.Contains(t, valuesOfTokens(scoped.Tokens()), " c")
 				assert.Contains(t, dd.DocumentAST().String(), "# c")
 			})
 		}
@@ -9320,7 +9323,7 @@ func TestDocument_At_Extent(t *testing.T) {
 				"b: 1",
 			),
 			path:   paths.Current().Child("a"),
-			span:   position.NewSpan(1, 4),
+			span:   position.NewSpan(0, 4),
 			tokens: []string{"x", ":", "1", "y", ":", "|", "t\n"},
 		},
 		"element that ends in a trailing comment": {
@@ -9386,7 +9389,7 @@ func TestDocument_At_Extent(t *testing.T) {
 				"y: 1",
 			),
 			path:   paths.Current().Child("x"),
-			span:   position.NewSpan(1, 3),
+			span:   position.NewSpan(0, 3),
 			tokens: []string{"a", ":", "1", "b", ":", "|", ""},
 		},
 		"key after an empty block scalar": {
@@ -9413,7 +9416,7 @@ func TestDocument_At_Extent(t *testing.T) {
 				"y: 2",
 			),
 			path:   paths.Current().Child("x"),
-			span:   position.NewSpan(1, 3),
+			span:   position.NewSpan(0, 3),
 			tokens: []string{"a", ":", "1", "b", ":"},
 		},
 		"sequence that ends in an implicit null": {
@@ -9424,7 +9427,7 @@ func TestDocument_At_Extent(t *testing.T) {
 				"y: 1",
 			),
 			path:   paths.Current().Child("x"),
-			span:   position.NewSpan(1, 3),
+			span:   position.NewSpan(0, 3),
 			tokens: []string{"-", "a", "-"},
 		},
 	}
@@ -9436,6 +9439,484 @@ func TestDocument_At_Extent(t *testing.T) {
 			requireNodeExtent(t, yamltest.FirstDocument(t, tc.input), tc.path, tc.span, tc.tokens)
 		})
 	}
+}
+
+func TestNode_At_Span(t *testing.T) {
+	t.Parallel()
+
+	multiDocument := stringtest.LinesLF(
+		"a: 1",
+		"---",
+		"hours:",
+		"  open: 9",
+		"---",
+		"- - a",
+		"-",
+		"  - b",
+	)
+
+	// Each case lists the span of the Node that path selects in the
+	// document at index doc, and the view of that Node with an error
+	// bound at the Node marked on it.
+	tcs := map[string]struct {
+		input string
+		path  paths.Path
+		want  string
+		span  position.Span
+		doc   int
+	}{
+		"block mapping under a key": {
+			input: stringtest.LinesLF("hours:", "  open: 9", "  close: 5", "next: 1"),
+			path:  paths.Current().Child("hours"),
+			span:  position.NewSpan(0, 3),
+			want: stringtest.JoinLF(
+				"   1 | hours:",
+				"     | ^^^^^ bad",
+				"   2 |   open: 9",
+				"   3 |   close: 5",
+			),
+		},
+		"block sequence under a key": {
+			input: stringtest.LinesLF("days:", "  - mon", "  - tue", "next: 1"),
+			path:  paths.Current().Child("days"),
+			span:  position.NewSpan(0, 3),
+			want: stringtest.JoinLF(
+				"   1 | days:",
+				"     | ^^^^ bad",
+				"   2 |   - mon",
+				"   3 |   - tue",
+			),
+		},
+		"block sequence in the column of its key": {
+			input: stringtest.LinesLF("days:", "- mon", "- tue"),
+			path:  paths.Current().Child("days"),
+			span:  position.NewSpan(0, 3),
+			want: stringtest.JoinLF(
+				"   1 | days:",
+				"     | ^^^^ bad",
+				"   2 | - mon",
+				"   3 | - tue",
+			),
+		},
+		"element whose dash stands alone on its line": {
+			input: stringtest.LinesLF("items:", "  -", "    a: 1", "  - b"),
+			path:  paths.Current().Child("items").Index(0),
+			span:  position.NewSpan(1, 3),
+			want: stringtest.JoinLF(
+				"   2 |   -",
+				"     |   ^ bad",
+				"   3 |     a: 1",
+			),
+		},
+		"element that shares a line with its dash": {
+			input: stringtest.LinesLF("items:", "  - a: 1", "    b: 2", "  - c"),
+			path:  paths.Current().Child("items").Index(0),
+			span:  position.NewSpan(1, 3),
+			want: stringtest.JoinLF(
+				"   2 |   - a: 1",
+				"     |   ^ bad",
+				"   3 |     b: 2",
+			),
+		},
+		"sequence in an element whose dash stands alone": {
+			input: stringtest.LinesLF("-", "  - a", "  - b"),
+			path:  paths.Current().Index(0),
+			span:  position.NewSpan(0, 3),
+			want: stringtest.JoinLF(
+				"   1 | -",
+				"     | ^ bad",
+				"   2 |   - a",
+				"   3 |   - b",
+			),
+		},
+		"flow mapping below its key": {
+			input: stringtest.LinesLF("m:", "  {a: 1}", "next: 1"),
+			path:  paths.Current().Child("m"),
+			span:  position.NewSpan(0, 2),
+			want: stringtest.JoinLF(
+				"   1 | m:",
+				"     | ^ bad",
+				"   2 |   {a: 1}",
+			),
+		},
+		"flow sequence below its key": {
+			input: stringtest.LinesLF("s:", "  [1,", "   2]", "next: 1"),
+			path:  paths.Current().Child("s"),
+			span:  position.NewSpan(0, 3),
+			want: stringtest.JoinLF(
+				"   1 | s:",
+				"     | ^ bad",
+				"   2 |   [1,",
+				"   3 |    2]",
+			),
+		},
+		"flow mapping on the line of its key": {
+			input: stringtest.LinesLF("m: {a: 1,", "  b: 2}"),
+			path:  paths.Current().Child("m"),
+			span:  position.NewSpan(0, 2),
+			want: stringtest.JoinLF(
+				"   1 | m: {a: 1,",
+				"     | ^ bad",
+				"   2 |   b: 2}",
+			),
+		},
+		"explicit key": {
+			input: stringtest.LinesLF("? hours", ": open: 9", "  close: 5"),
+			path:  paths.Current().Child("hours"),
+			span:  position.NewSpan(0, 3),
+			want: stringtest.JoinLF(
+				"   1 | ? hours",
+				"     |   ^^^^^ bad",
+				"   2 | : open: 9",
+				"   3 |   close: 5",
+			),
+		},
+		"explicit key with the value below its colon": {
+			input: stringtest.LinesLF("? hours", ":", "  open: 9"),
+			path:  paths.Current().Child("hours"),
+			span:  position.NewSpan(0, 3),
+			want: stringtest.JoinLF(
+				"   1 | ? hours",
+				"     |   ^^^^^ bad",
+				"   2 | :",
+				"   3 |   open: 9",
+			),
+		},
+		"anchor on the key line": {
+			input: stringtest.LinesLF("hours: &h", "  open: 9"),
+			path:  paths.Current().Child("hours"),
+			span:  position.NewSpan(0, 2),
+			want: stringtest.JoinLF(
+				"   1 | hours: &h",
+				"     | ^^^^^ bad",
+				"   2 |   open: 9",
+			),
+		},
+		"tag on the key line": {
+			input: stringtest.LinesLF("hours: !t", "  open: 9"),
+			path:  paths.Current().Child("hours"),
+			span:  position.NewSpan(0, 2),
+			want: stringtest.JoinLF(
+				"   1 | hours: !t",
+				"     | ^^^^^ bad",
+				"   2 |   open: 9",
+			),
+		},
+		"comment on the key line": {
+			input: stringtest.LinesLF("hours: # note", "  open: 9"),
+			path:  paths.Current().Child("hours"),
+			span:  position.NewSpan(0, 2),
+			want: stringtest.JoinLF(
+				"   1 | hours: # note",
+				"     | ^^^^^ bad",
+				"   2 |   open: 9",
+			),
+		},
+		"anchor below the key": {
+			input: stringtest.LinesLF("hours:", "  &h", "  open: 9"),
+			path:  paths.Current().Child("hours"),
+			span:  position.NewSpan(0, 3),
+			want: stringtest.JoinLF(
+				"   1 | hours:",
+				"     | ^^^^^ bad",
+				"   2 |   &h",
+				"   3 |   open: 9",
+			),
+		},
+		"comment and blank line below the key": {
+			input: stringtest.LinesLF("hours:", "  # note", "", "  open: 9"),
+			path:  paths.Current().Child("hours"),
+			span:  position.NewSpan(0, 4),
+			want: stringtest.JoinLF(
+				"   1 | hours:",
+				"     | ^^^^^ bad",
+				"   2 |   # note",
+				"   3 | ",
+				"   4 |   open: 9",
+			),
+		},
+		"comment on the line of a dash": {
+			input: stringtest.LinesLF("- # note", "  a: 1"),
+			path:  paths.Current().Index(0),
+			span:  position.NewSpan(0, 2),
+			want: stringtest.JoinLF(
+				"   1 | - # note",
+				"     | ^ bad",
+				"   2 |   a: 1",
+			),
+		},
+		"mapping under a key of an element": {
+			input: stringtest.LinesLF("- hours:", "    open: 9", "  next: 1"),
+			path:  paths.Current().Index(0).Child("hours"),
+			span:  position.NewSpan(0, 2),
+			want: stringtest.JoinLF(
+				"   1 | - hours:",
+				"     |   ^^^^^ bad",
+				"   2 |     open: 9",
+			),
+		},
+		// The key is an alias, and the path ends at the mapping under it.
+		"mapping under an alias key": {
+			input: stringtest.LinesLF("x: &k hours", "*k :", "  open: 9"),
+			path:  paths.Current().Child("hours"),
+			span:  position.NewSpan(1, 3),
+			want: stringtest.JoinLF(
+				"   2 | *k :",
+				"     | ^ bad",
+				"   3 |   open: 9",
+			),
+		},
+		// The path goes through an alias and ends at a mapping, which
+		// its own key introduces where the anchor holds it.
+		"mapping below an alias": {
+			input: stringtest.LinesLF("base: &b", "  hours:", "    open: 9", "mid: 0", "shop: *b"),
+			path:  paths.Current().Child("shop", "hours"),
+			span:  position.NewSpan(1, 3),
+			want: stringtest.JoinLF(
+				"   2 |   hours:",
+				"     |   ^^^^^ bad",
+				"   3 |     open: 9",
+			),
+		},
+		"mapping a merge key brings in": {
+			input: stringtest.LinesLF("base: &b", "  hours:", "    open: 9", "mid: 0", "shop:", "  <<: *b"),
+			path:  paths.Current().Child("shop", "hours"),
+			span:  position.NewSpan(1, 3),
+			want: stringtest.JoinLF(
+				"   2 |   hours:",
+				"     |   ^^^^^ bad",
+				"   3 |     open: 9",
+			),
+		},
+		// A scalar is its own token, so its span leaves out the key
+		// above it.
+		"scalar below its key": {
+			input: stringtest.LinesLF("plain:", "  one", "next: 1"),
+			path:  paths.Current().Child("plain"),
+			span:  position.NewSpan(1, 2),
+			want: stringtest.JoinLF(
+				"   2 |   one",
+				"     |   ^^^ bad",
+			),
+		},
+		"scalar on the key line": {
+			input: stringtest.LinesLF("hours:", "  open: 9"),
+			path:  paths.Current().Child("hours", "open"),
+			span:  position.NewSpan(1, 2),
+			want: stringtest.JoinLF(
+				"   2 |   open: 9",
+				"     |         ^ bad",
+			),
+		},
+		"key": {
+			input: stringtest.LinesLF("hours:", "  open: 9"),
+			path:  paths.Current().Child("hours").Key(),
+			span:  position.NewSpan(0, 1),
+			want: stringtest.JoinLF(
+				"   1 | hours:",
+				"     | ^^^^^ bad",
+			),
+		},
+		"mapping of a later document": {
+			input: multiDocument,
+			doc:   1,
+			path:  paths.Current().Child("hours"),
+			span:  position.NewSpan(2, 4),
+			want: stringtest.JoinLF(
+				"   3 | hours:",
+				"     | ^^^^^ bad",
+				"   4 |   open: 9",
+			),
+		},
+		"element of a later document": {
+			input: multiDocument,
+			doc:   2,
+			path:  paths.Current().Index(1),
+			span:  position.NewSpan(6, 8),
+			want: stringtest.JoinLF(
+				"   7 | -",
+				"     | ^ bad",
+				"   8 |   - b",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			docs := niceyaml.NewSourceFromString(tc.input).Documents()
+			require.Greater(t, len(docs), tc.doc)
+
+			scoped := yamltest.At(t, docs[tc.doc], tc.path)
+			assert.Equal(t, tc.span, scoped.Span())
+
+			// Node.Nodes scopes the same lines.
+			found, err := docs[tc.doc].Nodes(tc.path)
+			require.NoError(t, err)
+			require.Len(t, found, 1)
+			assert.Equal(t, tc.span, found[0].Span())
+
+			// An error at the Node lies in its view.
+			bound := yamltest.RequireSourceError(t, scoped.Bind(errors.New("bad")))
+
+			view := scoped.View()
+			require.True(t, bound.Annotate(view))
+			assert.Equal(t, tc.want, view.String())
+		})
+	}
+
+	t.Run("a path that ends at an alias covers the content of the anchor", func(t *testing.T) {
+		t.Parallel()
+
+		// An error at such a Node binds at the alias, outside the span.
+		// Each case lists the span, and the view Node.Span documents for
+		// the error: the lines of the Node and the line of the error.
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+			want  string
+			span  position.Span
+		}{
+			"alias under a key": {
+				input: stringtest.LinesLF("base: &h", "  open: 9", "  close: 5", "mid: 0", "hours: *h"),
+				path:  paths.Current().Child("hours"),
+				span:  position.NewSpan(1, 3),
+				want: stringtest.JoinLF(
+					"   2 |   open: 9",
+					"   3 |   close: 5",
+					"   5 | hours: *h",
+					"     |        ^ bad",
+				),
+			},
+			"alias on the line below its key": {
+				input: stringtest.LinesLF("base: &h", "  open: 9", "hours:", "  *h"),
+				path:  paths.Current().Child("hours"),
+				span:  position.NewSpan(1, 2),
+				want: stringtest.JoinLF(
+					"   2 |   open: 9",
+					"   4 |   *h",
+					"     |   ^ bad",
+				),
+			},
+			"alias element": {
+				input: stringtest.LinesLF("base: &d", "  - mon", "days:", "  - *d"),
+				path:  paths.Current().Child("days").Index(0),
+				span:  position.NewSpan(1, 2),
+				want: stringtest.JoinLF(
+					"   2 |   - mon",
+					"   4 |   - *d",
+					"     |     ^ bad",
+				),
+			},
+			"alias to a scalar": {
+				input: stringtest.LinesLF("base: &v one", "mid: 0", "plain:", "  *v"),
+				path:  paths.Current().Child("plain"),
+				span:  position.NewSpan(0, 1),
+				want: stringtest.JoinLF(
+					"   1 | base: &v one",
+					"   4 |   *v",
+					"     |   ^ bad",
+				),
+			},
+			"alias key": {
+				input: stringtest.LinesLF("x: &k hours", "*k :", "  open: 9"),
+				path:  paths.Current().Child("hours").Key(),
+				span:  position.NewSpan(0, 1),
+				want: stringtest.JoinLF(
+					"   1 | x: &k hours",
+					"   2 | *k :",
+					"     | ^ bad",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				scoped := yamltest.At(t, doc, tc.path)
+				assert.Equal(t, tc.span, scoped.Span())
+
+				found, err := doc.Nodes(tc.path)
+				require.NoError(t, err)
+				require.Len(t, found, 1)
+				assert.Equal(t, tc.span, found[0].Span())
+
+				bound := yamltest.RequireSourceError(t, scoped.Bind(errors.New("bad")))
+
+				view := scoped.View()
+				require.False(t, bound.Annotate(view))
+				assert.Equal(t, scoped.View().String(), view.String())
+
+				pos, ok := bound.Position()
+				require.True(t, ok)
+
+				view = scoped.Source().View().Slice(scoped.Span(), position.NewSpan(pos.Line, pos.Line+1))
+				require.True(t, bound.Annotate(view))
+				assert.Equal(t, tc.want, view.String())
+			})
+		}
+	})
+
+	t.Run("an alias on a line of the span lies in the view", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+			want  string
+		}{
+			"alias in the flow sequence of its anchor": {
+				input: "hours: [&h {open: 9}, *h]\n",
+				path:  paths.Current().Child("hours").Index(1),
+				want: stringtest.JoinLF(
+					"   1 | hours: [&h {open: 9}, *h]",
+					"     |                       ^ bad",
+				),
+			},
+			// The node of a tagged alias is the tag, which sits on the
+			// line of the alias, and the span leaves out the key above it.
+			"tagged alias below its key": {
+				input: stringtest.LinesLF("x: &x {k: 1}", "mid: 2", "c:", "  !t *x"),
+				path:  paths.Current().Child("c"),
+				want: stringtest.JoinLF(
+					"   4 |   !t *x",
+					"     |      ^ bad",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				scoped := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.path)
+
+				bound := yamltest.RequireSourceError(t, scoped.Bind(errors.New("bad")))
+
+				view := scoped.View()
+				require.True(t, bound.Annotate(view))
+				assert.Equal(t, tc.want, view.String())
+			})
+		}
+	})
+
+	t.Run("the root keeps the lines of the document", func(t *testing.T) {
+		t.Parallel()
+
+		docs := niceyaml.NewSourceFromString(multiDocument).Documents()
+		require.Len(t, docs, 3)
+
+		assert.Equal(t, position.NewSpan(1, 4), docs[1].Span())
+		assert.Equal(t, position.NewSpan(4, 8), docs[2].Span())
+
+		// A Node that At scopes at the root covers the content alone.
+		assert.Equal(t, position.NewSpan(2, 4), yamltest.At(t, docs[1], paths.Current()).Span())
+		assert.Equal(t, position.NewSpan(5, 8), yamltest.At(t, docs[2], paths.Current()).Span())
+	})
 }
 
 func ExampleDecodeOptions() {
@@ -10303,8 +10784,9 @@ func TestNode_Nodes(t *testing.T) {
 		assert.Equal(t, []string{"lint", "build", "3.10"}, gotTexts)
 		assert.Equal(t, []string{"linux", "mac", "bsd"}, gotRunners)
 
-		// A merged entry lies where its anchor defines it.
-		assert.Equal(t, position.NewSpan(2, 3), jobs[0].Span())
+		// A merged entry lies where its anchor defines it, from its key
+		// there.
+		assert.Equal(t, position.NewSpan(1, 3), jobs[0].Span())
 		assert.Same(t, workflow, jobs[2].Document())
 
 		err = jobs[2].Bind(niceyaml.NewError("unknown runner", niceyaml.AtPath(paths.Current().Child("runs-on"))))
