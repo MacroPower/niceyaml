@@ -803,11 +803,6 @@ type document struct {
 	// the aliases once however many paths the Nodes of the document
 	// resolve.
 	resolver *paths.Resolver
-	// The tokens the nodes of root hold, which holdsNodeToken collects for
-	// the first decode error that needs them. They include the token the
-	// parser makes for a value the document leaves out, such as the null
-	// of a key without a value, which no lexer token stands for.
-	nodeTokens map[*token.Token]struct{}
 	// The tree the go-yaml decoder reads for the document, which
 	// decodeTree builds for the first decode.
 	tree *decodeTree
@@ -830,8 +825,6 @@ type document struct {
 	preamble int
 	// Creates resolver once, for the first path any Node resolves.
 	resolverOnce sync.Once
-	// Collects nodeTokens once.
-	nodeTokensOnce sync.Once
 	// Builds tree once, for the first decode.
 	treeOnce sync.Once
 	// Builds paths once, for the first call of PathAt.
@@ -855,26 +848,6 @@ func (d *document) pathResolver() *paths.Resolver {
 	})
 
 	return d.resolver
-}
-
-// holdsNodeToken reports whether tk is the token of a node of the
-// document, and collects those tokens on the first call.
-func (d *document) holdsNodeToken(tk *token.Token) bool {
-	d.nodeTokensOnce.Do(func() {
-		d.nodeTokens = map[*token.Token]struct{}{}
-
-		astnode.Inspect(d.root, func(node ast.Node) bool {
-			if tk := node.GetToken(); tk != nil {
-				d.nodeTokens[tk] = struct{}{}
-			}
-
-			return true
-		})
-	})
-
-	_, ok := d.nodeTokens[tk]
-
-	return ok
 }
 
 // Node is a scope in a YAML document: the root of the document, which
@@ -3313,11 +3286,11 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 
 	if errors.Is(err, yaml.ErrExceededMaxDepth) {
 		at, cause = astnode.StartToken(scope), tree.restoreError(err)
-	} else if m := tree.unresolvedMerge(scope, err); m != nil {
+	} else if tk, msg, ok := tree.unresolvedMerge(scope, err); ok {
 		// The decoder's failure for an alias inside its own anchor names
 		// the null it merges in its place, which the source does not hold,
 		// so the message is the one a decode of the whole document gives.
-		at, cause = m.token, restoredError{err: err, msg: m.message()}
+		at, cause = tk, restoredError{err: err, msg: msg}
 	}
 
 	if at == nil && ok {
@@ -3537,11 +3510,9 @@ func (n *Node) bindDecodeError(err error) error {
 	return n.bindOwn(n.decodeRejection(err))
 }
 
-// holdsToken reports whether tk is a token of the source's parse. That is
-// one of the tokens the parser built its tree from, or one it made for a
-// node of the document, such as the null of a key without a value. A
-// token of the second parse the [decodeTree] of the document comes from
-// counts too.
+// holdsToken reports whether tk is a token of the source's parse, one of
+// the tokens the parser built its tree from, or a token of the parse the
+// [decodeTree] of the document reads, as [decodeTree.holds] describes.
 // It compares pointers, so a token from another parse, such as the one an
 // UnmarshalYAML runs on its bytes, never matches, however closely it
 // resembles a token of the source.
@@ -3554,17 +3525,7 @@ func (n *Node) holdsToken(tk *token.Token) bool {
 		return true
 	}
 
-	tree := n.doc.decodeTree()
-
-	if _, ok := tree.tokens[tk]; ok {
-		return true
-	}
-
-	if _, ok := tree.parseTokens[tk]; ok {
-		return true
-	}
-
-	return n.doc.holdsNodeToken(tk)
+	return n.doc.decodeTree().holds(tk)
 }
 
 // errPlaced marks an error of a decode that [decodeWithRecover] or

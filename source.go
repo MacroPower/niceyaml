@@ -98,9 +98,10 @@ type Source struct {
 	// Parses the tokens a second time on the first call, for the decoder,
 	// as reparse describes.
 	decodeParse func() *docparse.Result
-	// Indexes the counts in brackets the reference documents spell, which
-	// referenceSpellings fills on its first call.
-	refSpellings *spellings
+	// Returns the texts of the reference documents a new anchor name must
+	// not spell, as spellReferences reads them, and reads them on the
+	// first call.
+	referenceTexts func() []string
 	// Holds the layers the one document of the Source merges, for the
 	// Source [NewSourceFromLayers] builds, and nil for every other Source. An error
 	// bound in that document binds in a layer instead, as [layering]
@@ -109,10 +110,9 @@ type Source struct {
 	parserOpts []parser.Option
 	decodeOpts []yaml.DecodeOption
 	sourceConfig
-	hasInput         bool
-	inputIndexOnce   sync.Once
-	streamOnce       sync.Once
-	refSpellingsOnce sync.Once
+	hasInput       bool
+	inputIndexOnce sync.Once
+	streamOnce     sync.Once
 }
 
 // SourceOption configures [Source] creation.
@@ -662,6 +662,7 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	t := &Source{}
 	t.parsed = sync.OnceValue(t.parse)
 	t.decodeParse = sync.OnceValue(t.reparse)
+	t.referenceTexts = sync.OnceValue(t.spellReferences)
 
 	for _, opt := range opts {
 		opt(&t.sourceConfig)
@@ -1563,35 +1564,42 @@ func (e syntaxError) Is(target error) bool {
 // stays as the parser built it. The parse holds its own copies of the
 // tokens, so the go-yaml formatter, which reads the text of each token
 // through the links between them, finds a renamed anchor or a verbatim
-// !!int tag with the text of the Source. The formatter reads the tokens of
-// every document, so reparse writes the nulls of all the documents into
-// the tokens, as [nullEnclosedAliases] describes, before it returns the
-// parse to any of them. A run the first parse rejected fails the second
-// parse too, so the file holds a stand-in at each index where the first
-// file holds one, and the documents that parsed sit at the same indexes
-// in both.
+// !!int tag with the text of the Source. The formatter reads the tokens
+// of every document, so reparse writes the nulls of all the documents
+// into the tokens before it returns the parse to any of them. The copy of
+// the token of each alias sits at the index of the token the first parse
+// read for it, so the null goes there, as [writeNull] writes it. A run
+// the first parse rejected fails the second parse too, so the file holds
+// a stand-in at each index where the first file holds one, and the
+// documents that parsed sit at the same indexes in both.
 func (s *Source) reparse() *docparse.Result {
 	r := docparse.Parse(s.Tokens(), s.parserOpts...)
 
-	nullEnclosedAliases(s.documents(), r.File)
+	first := s.parsed().result.Index
+
+	for _, doc := range s.documents() {
+		for alias := range doc.doc.state.Facts().Enclosed {
+			if i, ok := first[alias.Start]; ok {
+				writeNull(r.Tokens[i])
+			}
+		}
+	}
 
 	return r
 }
 
-// referenceSpellings returns the [*spellings] of the reference documents
-// of the Source, and builds it on the first call.
-func (s *Source) referenceSpellings() *spellings {
-	s.refSpellingsOnce.Do(func() {
-		var tks token.Tokens
+// spellReferences returns the texts of the reference documents of the
+// Source that a new anchor name must not spell, as [spellingTexts] reads
+// them from the tokens of all the reference documents in order. Those
+// hold the reference documents of each reference Source too.
+func (s *Source) spellReferences() []string {
+	var tks token.Tokens
 
-		for _, ref := range s.references {
-			tks = append(tks, tokens.Tokenize(string(ref))...)
-		}
+	for _, ref := range s.references {
+		tks = append(tks, tokens.Tokenize(string(ref))...)
+	}
 
-		s.refSpellings = newSpellings(tks)
-	})
-
-	return s.refSpellings
+	return spellingTexts(tks)
 }
 
 // Bind binds err to the [Source] and to the document each location in

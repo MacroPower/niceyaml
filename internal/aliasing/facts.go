@@ -2,6 +2,7 @@ package aliasing
 
 import (
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -49,12 +50,16 @@ type AnchorFact struct {
 	Node *ast.AnchorNode
 	// Name is the name of the anchor, or empty when it has none.
 	Name string
+	// Extent holds the offsets of the first and the last token under the
+	// anchor, comments included, as [astnode.Bounds] finds them.
+	Extent astnode.Extent
 }
 
 // NewFacts creates new [*Facts] for body, a document body whose aliases r
-// binds to their anchors. It walks body once, and keeps a set of the
+// binds to their anchors. It walks body once, and keeps a stack of the
 // anchors the walk is inside, so it knows which anchors each alias lies
-// in.
+// in. Each token the walk passes widens the Extent of the innermost
+// anchor, and a closing anchor widens the one around it.
 //
 // The decoder reads an alias inside the anchor it refers to as null. An
 // anchor on such an alias then holds the null, so an alias to that anchor
@@ -72,6 +77,9 @@ func NewFacts(body ast.Node, r *paths.Resolver) *Facts {
 	}
 
 	var (
+		// The indexes in Anchors of the anchors the walk is inside, the
+		// innermost last.
+		stack []int
 		// The anchors the walk is inside.
 		open = map[*ast.AnchorNode]bool{}
 		// Each anchor on an alias the decoder reads as null.
@@ -81,32 +89,75 @@ func NewFacts(body ast.Node, r *paths.Resolver) *Facts {
 		visit  func(ast.Node) bool
 	)
 
+	// Widens the Extent of the innermost open anchor to tk.
+	widen := func(tk *token.Token) {
+		if len(stack) > 0 {
+			top := &f.Anchors[stack[len(stack)-1]]
+			top.Extent = top.Extent.With(tk)
+		}
+	}
+
 	visit = func(node ast.Node) bool {
-		switch n := node.(type) {
-		case *ast.AnchorNode:
-			name, _ := astnode.Name(n.Name)
-			f.Anchors = append(f.Anchors, AnchorFact{Node: n, Name: name})
+		anchor, ok := node.(*ast.AnchorNode)
+		if ok {
+			name, _ := astnode.Name(anchor.Name)
 
-			open[n] = true
+			i := len(f.Anchors)
+			f.Anchors = append(f.Anchors, AnchorFact{Node: anchor, Name: name})
+			stack = append(stack, i)
 
-			astnode.Inspect(n.Value, visit)
-			delete(open, n)
+			widen(anchor.GetToken())
 
-			if alias, ok := n.Value.(*ast.AliasNode); ok && f.nulls[alias] {
-				nullAnchors[n] = true
+			if anchor.Comment != nil {
+				widen(anchor.Comment.GetToken())
+			}
+
+			astnode.Inspect(anchor.Name, visit)
+
+			open[anchor] = true
+
+			astnode.Inspect(anchor.Value, visit)
+			delete(open, anchor)
+
+			stack = stack[:len(stack)-1]
+
+			if len(stack) > 0 {
+				outer := &f.Anchors[stack[len(stack)-1]]
+				outer.Extent = outer.Extent.Union(f.Anchors[i].Extent)
+			}
+
+			if alias, ok := anchor.Value.(*ast.AliasNode); ok && f.nulls[alias] {
+				nullAnchors[anchor] = true
 			}
 
 			return false
+		}
 
+		// The walk visits the nodes of a collection, not the token that
+		// closes a flow collection or the "-" that opens each entry of a
+		// block sequence, which the node holds beside them.
+		widen(node.GetToken())
+
+		switch n := node.(type) {
 		case *ast.AliasNode:
 			f.Aliases = append(f.Aliases, f.alias(n, merged[n], open, nullAnchors))
-
-			return false
 
 		case *ast.MappingValueNode:
 			for _, source := range astnode.MergeValues(n) {
 				if alias, ok := source.(*ast.AliasNode); ok {
 					merged[alias] = true
+				}
+			}
+
+		case *ast.MappingNode:
+			widen(n.End)
+
+		case *ast.SequenceNode:
+			widen(n.End)
+
+			for _, entry := range n.Entries {
+				if entry != nil {
+					widen(entry.Start)
 				}
 			}
 		}

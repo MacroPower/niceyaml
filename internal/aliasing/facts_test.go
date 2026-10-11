@@ -7,6 +7,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
@@ -108,6 +109,34 @@ func TestNewFacts(t *testing.T) {
 			assert.Equal(t, tc.anchors, anchors)
 			assert.Equal(t, tc.enclosed, enclosed)
 			assert.Len(t, facts.Enclosed, len(tc.enclosed))
+		})
+	}
+}
+
+func TestNewFacts_Extent(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]string{
+		"a scalar":              "a: &x 1\n",
+		"a block mapping":       stringtest.LinesLF("a: &x", "  b: 1", "  c: [2, 3]", "d: 4"),
+		"nested anchors":        stringtest.LinesLF("a: &x", "  b: &y", "    - 1", "    - *x", "  c: 2"),
+		"a comment inside":      stringtest.LinesLF("a: &x", "  b: 1", "  # note", "  c: 2"),
+		"a flow sequence":       "a: &x [1, &y {b: *x}, 3]\n",
+		"an empty entry":        stringtest.LinesLF("a: &x", "  -", "  - 1"),
+		"a comment on an alias": stringtest.LinesLF("a: &x", "  - 1", "  - *x # note"),
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, input)
+			facts := aliasing.NewFacts(doc.AST(), doc.Resolver())
+			assert.NotEmpty(t, facts.Anchors)
+
+			for _, a := range facts.Anchors {
+				assert.Equal(t, astnode.ExtentOf(a.Node, true), a.Extent, "anchor %s", a.Name)
+			}
 		})
 	}
 }
