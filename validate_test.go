@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"math"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,11 +20,14 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/jsonschema"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/schema"
 )
 
 // hours validates itself with an `@` path that reads from the hours.
@@ -159,6 +164,104 @@ var (
 
 		return nil
 	})
+
+	// The documents the locator tests share.
+	// The key 0x10 sets the member 16, and items holds an element.
+	respelledDoc = stringtest.LinesLF(
+		"ports:",
+		"  0x10:",
+		`    name: ""`,
+		"items:",
+		`  - name: ""`,
+	)
+	// The mapping under 0x10 holds no name.
+	lackingDoc = stringtest.LinesLF(
+		"ports:",
+		"  0x10:",
+		"    proto: tcp",
+	)
+	// The key 3.10 sets the member 3.1, so no member has the name 3.10.
+	pythonDoc = stringtest.LinesLF(
+		"python:",
+		"  3.10:",
+		"    image: a",
+	)
+	// Both keys of m set the member 16, and a decode keeps b.
+	sameNameDoc = stringtest.LinesLF(
+		"m:",
+		"  16: aaaa",
+		"  0x10: b",
+	)
+	// The merge key sets the member 16 to x. The quoted key sets the
+	// member 0x10, and a path through 0x10 selects that entry.
+	hiddenDoc = stringtest.LinesLF(
+		"user:",
+		"  <<: {0x10: x}",
+		`  "0x10": 1`,
+	)
+	// The merge key of m sets the member true to b, the last value b1
+	// gives that name.
+	mergeDoc = stringtest.LinesLF(
+		"b0: &b0",
+		"  True: xxxx",
+		"b1: &b1",
+		"  <<: *b0",
+		"  true: aaaa",
+		"  True: b",
+		"m:",
+		"  <<: *b1",
+	)
+	// A sequence, a mapping with keys of digits, an alias to the
+	// sequence, a sequence in a sequence, a scalar, and a null.
+	shapesDoc = stringtest.LinesLF(
+		"seq: &s",
+		"  - a",
+		"  - b",
+		"map:",
+		"  0: x",
+		"  1: y",
+		"al: *s",
+		"nested:",
+		"  - - p",
+		"    - q",
+		"scalar: v",
+		"none: ~",
+	)
+	// The anchors a document of the tests refers to through
+	// [niceyaml.WithReferences].
+	referenceDoc = stringtest.LinesLF(
+		"defaults: &defaults",
+		"  timeout: 0",
+		"  3.10: r",
+		"list: &list [u, {0x10: v}]",
+	)
+	// The mapping server merges an anchor of referenceDoc, and items is
+	// an alias to one.
+	referringDoc = stringtest.LinesLF(
+		"server:",
+		"  <<: *defaults",
+		"  port: 0x10",
+		"  3.10: mine",
+		"items: *list",
+	)
+	// The tagged alias key of python has no name the locator can tell, so
+	// it may set a member of any name, such as one a key before it sets.
+	unnamedKeyDoc = stringtest.LinesLF(
+		"k: &k 0x10",
+		"python:",
+		"  3.10: {image: a}",
+		"  a: 1",
+		"  !!str *k : v",
+		"  b: 2",
+	)
+	// The key a/b~c holds both characters a JSON Pointer escapes, and the
+	// empty key takes an empty name.
+	pointerDoc = stringtest.LinesLF(
+		`"a/b~c":`,
+		`  "": x`,
+		"items:",
+		"  - 0x10: y",
+	)
 )
 
 // countStrings returns an option whose function decodes every string of
@@ -5111,4 +5214,2242 @@ func (l *sharedKeysList) UnmarshalYAML(unmarshal func(any) error) error {
 	*l = raw
 
 	return nil
+}
+
+// locatorDoc returns the first document of input, from a source named
+// f.yaml that resolves the anchors of [referenceDoc].
+func locatorDoc(tb testing.TB, input string) *niceyaml.Node {
+	tb.Helper()
+
+	return yamltest.FirstDocument(tb, input,
+		niceyaml.WithName("f.yaml"),
+		niceyaml.WithReferences(niceyaml.NewSourceFromString(referenceDoc)),
+	)
+}
+
+// located binds an error with the location opt gives it through n. It
+// returns the message of the binding, which puts the position and the
+// path in front. It also returns the path of the node the error binds at
+// when the document holds no value at its own path, as
+// [niceyaml.SourceError.Nearest] reports it.
+func located(tb testing.TB, n *niceyaml.Node, opt niceyaml.ErrorOption) (string, string) {
+	tb.Helper()
+
+	bound := yamltest.RequireSourceError(tb, n.Bind(niceyaml.NewError("x", opt)))
+
+	near := ""
+	if path, ok := bound.Nearest(); ok {
+		near = path.String()
+	}
+
+	return bound.Error(), near
+}
+
+// pointerNames returns the names in a JSON Pointer, as the documentation
+// of [niceyaml.DataLocator] splits one.
+func pointerNames(pointer string) []string {
+	if pointer == "" {
+		return nil
+	}
+
+	unescape := strings.NewReplacer("~1", "/", "~0", "~")
+
+	parts := strings.Split(strings.TrimPrefix(pointer, "/"), "/")
+	for i, part := range parts {
+		parts[i] = unescape.Replace(part)
+	}
+
+	return parts
+}
+
+func ExampleDataLocator() {
+	doc, err := niceyaml.NewSourceFromString(
+		stringtest.LinesLF(
+			"ports:",
+			"  0x10:",
+			`    name: ""`,
+			"items:",
+			`  - name: ""`,
+		),
+		niceyaml.WithName("cfg.yaml"),
+	).Document()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// A check of the decoded data reports each finding as a JSON Pointer.
+	findings := []string{"/ports/16/name", "/items/0/name"}
+
+	loc := doc.DataLocator()
+
+	for _, pointer := range findings {
+		fmt.Println(doc.Bind(niceyaml.NewError("must not be empty", loc.At(pointerNames(pointer)...))))
+	}
+
+	// Output:
+	// cfg.yaml:3:11: $.ports.0x10.name: must not be empty
+	// cfg.yaml:5:11: $.items[0].name: must not be empty
+}
+
+func TestDataLocator_At(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		names []string
+		want  string
+		// The path of the node the error binds at, for names the document
+		// holds no value for: the mapping that lacks a member, or an alias
+		// the document cannot follow.
+		wantNear string
+	}{
+		"key the decoder respells": {
+			input: respelledDoc,
+			names: []string{"ports", "16", "name"},
+			want:  "f.yaml:3:11: $.ports.0x10.name: x",
+		},
+		"element of a sequence": {
+			input: respelledDoc,
+			names: []string{"items", "0", "name"},
+			want:  "f.yaml:5:11: $.items[0].name: x",
+		},
+		"no names": {
+			input: respelledDoc,
+			want:  "f.yaml:1:1: $: x",
+		},
+		"float key with a trailing zero": {
+			input: pythonDoc,
+			names: []string{"python", "3.1", "image"},
+			want:  "f.yaml:3:12: $.python.'3.10'.image: x",
+		},
+		"last of two keys with one name": {
+			input: sameNameDoc,
+			names: []string{"m", "16"},
+			want:  "f.yaml:3:9: $.m.0x10: x",
+		},
+		"last merge source with the name": {
+			input: mergeDoc,
+			names: []string{"m", "true"},
+			want:  "f.yaml:6:9: $.m.True: x",
+		},
+		"member no path selects": {
+			input: hiddenDoc,
+			names: []string{"user", "16"},
+			want:  "f.yaml:2:14: $.user.16: x",
+		},
+		"member beside one no path selects": {
+			input: hiddenDoc,
+			names: []string{"user", "0x10"},
+			want:  "f.yaml:3:11: $.user.0x10: x",
+		},
+		"element of a root sequence": {
+			input: "- name: \"\"\n",
+			names: []string{"0", "name"},
+			want:  "f.yaml:1:9: $[0].name: x",
+		},
+		"element behind an alias": {
+			input: shapesDoc,
+			names: []string{"al", "1"},
+			want:  "f.yaml:3:5: $.al[1]: x",
+		},
+		"element of an element": {
+			input: shapesDoc,
+			names: []string{"nested", "0", "1"},
+			want:  "f.yaml:10:7: $.nested[0][1]: x",
+		},
+		"digits in a mapping name a member": {
+			input: shapesDoc,
+			names: []string{"map", "1"},
+			want:  "f.yaml:6:6: $.map.1: x",
+		},
+
+		// A member the data lacks.
+		"member a mapping lacks": {
+			input:    lackingDoc,
+			names:    []string{"ports", "16", "name"},
+			want:     "f.yaml:2:3: $.ports.0x10.name: x",
+			wantNear: "$.ports.0x10",
+		},
+		"names below a member a mapping lacks": {
+			input:    lackingDoc,
+			names:    []string{"ports", "16", "tls", "0"},
+			want:     "f.yaml:2:3: $.ports.0x10.tls.0: x",
+			wantNear: "$.ports.0x10",
+		},
+		"member the root lacks": {
+			input:    lackingDoc,
+			names:    []string{"nope", "x"},
+			want:     "f.yaml:1:1: $.nope.x: x",
+			wantNear: "$",
+		},
+		"member a null lacks": {
+			input:    shapesDoc,
+			names:    []string{"none", "x"},
+			want:     "f.yaml:12:1: $.none.x: x",
+			wantNear: "$.none",
+		},
+		"name a key spells for another member": {
+			input: pythonDoc,
+			names: []string{"python", "3.10"},
+			want:  "f.yaml:1:1: $.python.'3.10': x",
+		},
+		"names below a name a key spells for another member": {
+			input: pythonDoc,
+			names: []string{"python", "3.10", "image"},
+			want:  "f.yaml:1:1: $.python.'3.10'.image: x",
+		},
+		"member lacking below one no path selects": {
+			input: stringtest.LinesLF("user:", "  <<: {0x10: {a: b}}", `  "0x10": 1`),
+			names: []string{"user", "16", "name"},
+			want:  "f.yaml:2:8: $.user.16.name: x",
+		},
+		"name of a decode into map[int]": {
+			input: stringtest.LinesLF(
+				"m:",
+				"  1e3:",
+				`    n: ""`,
+			),
+			names:    []string{"m", "1000", "n"},
+			want:     "f.yaml:1:1: $.m.1000.n: x",
+			wantNear: "$.m",
+		},
+		"name of a decode into map[string]": {
+			input: stringtest.LinesLF(
+				"m:",
+				"  ~:",
+				`    n: ""`,
+			),
+			names:    []string{"m", "", "n"},
+			want:     "f.yaml:1:1: $.m.''.n: x",
+			wantNear: "$.m",
+		},
+
+		// A name that is no index of its sequence, or lies below a scalar.
+		"index past the end": {
+			input: shapesDoc,
+			names: []string{"seq", "9"},
+			want:  "f.yaml: $.seq[9]: x",
+		},
+		"names below an index past the end": {
+			input: shapesDoc,
+			names: []string{"seq", "9", "x"},
+			want:  "f.yaml: $.seq[9].x: x",
+		},
+		"index with a leading zero": {
+			input: shapesDoc,
+			names: []string{"seq", "01"},
+			want:  "f.yaml: $.seq.01: x",
+		},
+		"index with a sign": {
+			input: shapesDoc,
+			names: []string{"seq", "+1"},
+			want:  "f.yaml: $.seq.+1: x",
+		},
+		"index too large for an int": {
+			input: shapesDoc,
+			names: []string{"seq", "99999999999999999999"},
+			want:  "f.yaml: $.seq.99999999999999999999: x",
+		},
+		"member name in a sequence": {
+			input: shapesDoc,
+			names: []string{"seq", "name"},
+			want:  "f.yaml: $.seq.name: x",
+		},
+		"name below a scalar": {
+			input: shapesDoc,
+			names: []string{"scalar", "x"},
+			want:  "f.yaml: $.scalar.x: x",
+		},
+		"index past the end below a member no path selects": {
+			input: stringtest.LinesLF("user:", "  <<: {0x10: [a]}", `  "0x10": 1`),
+			names: []string{"user", "16", "1"},
+			want:  "f.yaml:2:8: $.user.16[1]: x",
+		},
+
+		// A value only a reference document holds, which the locator
+		// cannot follow. A path that enters the alias binds there.
+		"member after a merge of a reference document": {
+			input: referringDoc,
+			names: []string{"server", "port"},
+			want:  "f.yaml:3:9: $.server.port: x",
+		},
+		"member a merge of a reference document sets": {
+			input: referringDoc,
+			names: []string{"server", "timeout"},
+			want:  "f.yaml: $.server.timeout: x",
+		},
+		"name a key spells beside a merge of a reference document": {
+			input: referringDoc,
+			names: []string{"server", "3.10"},
+			want:  "f.yaml:1:1: $.server.'3.10': x",
+		},
+		"member below an alias to a reference document": {
+			input:    referringDoc,
+			names:    []string{"items", "1", "16"},
+			want:     "f.yaml:5:8: $.items.1.16: x",
+			wantNear: "$.items",
+		},
+
+		// A mapping with a key the locator cannot name.
+		"member before a key with no name": {
+			input: unnamedKeyDoc,
+			names: []string{"python", "a"},
+			want:  "f.yaml:4:6: $.python.a: x",
+		},
+		"member after a key with no name": {
+			input: unnamedKeyDoc,
+			names: []string{"python", "b"},
+			want:  "f.yaml:6:6: $.python.b: x",
+		},
+		"name a key spells before a key with no name": {
+			input: unnamedKeyDoc,
+			names: []string{"python", "3.10"},
+			want:  "f.yaml:2:1: $.python.'3.10': x",
+		},
+
+		// A document with no mapping at its root.
+		"member a null root lacks": {
+			input:    "~\n",
+			names:    []string{"a"},
+			want:     "f.yaml:1:1: $.a: x",
+			wantNear: "$",
+		},
+		"name below a scalar root": {
+			input: "scalar\n",
+			names: []string{"a", "0"},
+			want:  "f.yaml: $.a.0: x",
+		},
+		"empty document": {
+			input: "",
+			names: []string{"a", "0"},
+			want:  "f.yaml: $.a.0: x",
+		},
+		"document of a comment alone": {
+			input: "# empty\n",
+			names: []string{"a"},
+			want:  "f.yaml: $.a: x",
+		},
+
+		// The names of a JSON Pointer.
+		"pointer with an escaped slash and tilde": {
+			input: pointerDoc,
+			names: pointerNames("/a~1b~0c"),
+			want:  "f.yaml:1:1: $.'a/b~c': x",
+		},
+		"pointer with an empty name": {
+			input: pointerDoc,
+			names: pointerNames("/a~1b~0c/"),
+			want:  "f.yaml:2:7: $.'a/b~c'.'': x",
+		},
+		"pointer with an index and a respelled key": {
+			input: pointerDoc,
+			names: pointerNames("/items/0/16"),
+			want:  "f.yaml:4:11: $.items[0].0x10: x",
+		},
+		"pointer with an escape of an escape": {
+			input:    pointerDoc,
+			names:    pointerNames("/~01"),
+			want:     "f.yaml:1:1: $.'~1': x",
+			wantNear: "$",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := locatorDoc(t, tc.input)
+
+			got, gotNear := located(t, doc, doc.DataLocator().At(tc.names...))
+
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.wantNear, gotNear)
+		})
+	}
+}
+
+func TestDataLocator_AtKey(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input    string
+		names    []string
+		want     string
+		wantNear string
+	}{
+		"key the decoder respells": {
+			input: respelledDoc,
+			names: []string{"ports", "16"},
+			want:  "f.yaml:2:3: $.ports.0x10~: x",
+		},
+		"explicit key": {
+			input: "? 0x10\n: x\n",
+			names: []string{"16"},
+			want:  "f.yaml:1:3: $.0x10~: x",
+		},
+		"key of a merge source": {
+			input: mergeDoc,
+			names: []string{"m", "true"},
+			want:  "f.yaml:6:3: $.m.True~: x",
+		},
+		"key no path selects": {
+			input: hiddenDoc,
+			names: []string{"user", "16"},
+			want:  "f.yaml:2:8: $.user.16~: x",
+		},
+		"element has no key": {
+			input: respelledDoc,
+			names: []string{"items", "0"},
+			want:  "f.yaml:5:3: $.items[0]~: x",
+		},
+		"no names": {
+			input: respelledDoc,
+			want:  "f.yaml:1:1: $~: x",
+		},
+		"member a mapping lacks": {
+			input:    lackingDoc,
+			names:    []string{"ports", "16", "name"},
+			want:     "f.yaml:2:3: $.ports.0x10.name: x",
+			wantNear: "$.ports.0x10",
+		},
+		"name a key spells for another member": {
+			input: pythonDoc,
+			names: []string{"python", "3.10"},
+			want:  "f.yaml:1:1: $.python.'3.10': x",
+		},
+		"index past the end": {
+			input: shapesDoc,
+			names: []string{"seq", "9"},
+			want:  "f.yaml: $.seq[9]: x",
+		},
+		"member below an alias to a reference document": {
+			input:    referringDoc,
+			names:    []string{"items", "1", "16"},
+			want:     "f.yaml:5:8: $.items.1.16~: x",
+			wantNear: "$.items",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := locatorDoc(t, tc.input)
+
+			got, gotNear := located(t, doc, doc.DataLocator().AtKey(tc.names...))
+
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.wantNear, gotNear)
+		})
+	}
+}
+
+func TestDataLocator_At_Options(t *testing.T) {
+	t.Parallel()
+
+	doc := locatorDoc(t, hiddenDoc)
+	loc := doc.DataLocator()
+
+	other := niceyaml.AtPath(paths.Doc().Child("other"))
+	marked := niceyaml.AtRange(yamltest.LineRange(0, 0, 4))
+
+	tcs := map[string]struct {
+		want string
+		opts []niceyaml.ErrorOption
+	}{
+		"replaces a path set before it": {
+			opts: []niceyaml.ErrorOption{other, loc.At("user", "0x10")},
+			want: "f.yaml:3:11: $.user.0x10: x",
+		},
+		"a later path replaces it": {
+			opts: []niceyaml.ErrorOption{loc.At("user", "0x10"), niceyaml.AtPath(paths.Doc().Child("user"))},
+			want: "f.yaml:1:1: $.user: x",
+		},
+		"keeps a range set before it where the path selects the value": {
+			opts: []niceyaml.ErrorOption{marked, loc.At("user", "0x10")},
+			want: "f.yaml:1:1: $.user.0x10: x",
+		},
+		"replaces a range set before it where no path selects the value": {
+			opts: []niceyaml.ErrorOption{marked, loc.At("user", "16")},
+			want: "f.yaml:2:14: $.user.16: x",
+		},
+		"a later range replaces its position": {
+			opts: []niceyaml.ErrorOption{loc.At("user", "16"), marked},
+			want: "f.yaml:1:1: $.user.16: x",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := doc.Bind(niceyaml.NewError("x", tc.opts...))
+
+			require.EqualError(t, err, tc.want)
+		})
+	}
+}
+
+func TestDataLocator_Names(t *testing.T) {
+	t.Parallel()
+
+	// The names a locator reads are those go-yaml gives the keys of a
+	// decode into any, so each key here pins one of them.
+	input := stringtest.LinesLF(
+		"0x10: a",
+		"3.10: b",
+		"True: c",
+		"~: d",
+		"1234567.0: e",
+		"!!binary aGk=: f",
+		"1e3: g",
+		`"0x20": h`,
+	)
+	doc := locatorDoc(t, input)
+
+	// Each name, with the line of the key that sets its member.
+	want := map[string]int{
+		"16":           1,
+		"3.1":          2,
+		"true":         3,
+		"null":         4,
+		"1.234567e+06": 5,
+		"[104 105]":    6,
+		"1e3":          7,
+		"0x20":         8,
+	}
+
+	data, err := doc.Decode[any](t.Context())
+	require.NoError(t, err)
+
+	members, ok := data.(map[string]any)
+	require.True(t, ok, "decode into any gave %T", data)
+
+	assert.ElementsMatch(t, slices.Collect(maps.Keys(want)), slices.Collect(maps.Keys(members)))
+
+	loc := doc.DataLocator()
+
+	for name, line := range want {
+		bound := yamltest.RequireSourceError(t, doc.Bind(niceyaml.NewError("x", loc.AtKey(name))))
+
+		pos, ok := bound.Position()
+		require.True(t, ok, "name %q binds with no position", name)
+		assert.Equal(t, line-1, pos.Line, "name %q", name)
+	}
+
+	// A decode into another type names some of those keys another way,
+	// so the names of such a decode lead nowhere.
+	t.Run("typed decodes", func(t *testing.T) {
+		t.Parallel()
+
+		ints, err := locatorDoc(t, "1e3: a\n").Decode[map[int]string](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[int]string{1000: "a"}, ints)
+
+		texts, err := locatorDoc(t, "~: a\n").Decode[map[string]string](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"": "a"}, texts)
+	})
+}
+
+func TestDataLocator_Scope(t *testing.T) {
+	t.Parallel()
+
+	doc := locatorDoc(t, stringtest.LinesLF(
+		`- name: ""`,
+		"- spec:",
+		"    ports:",
+		"      0x10:",
+		`        name: ""`,
+	))
+	spec := yamltest.At(t, doc, paths.Doc().Index(1).Child("spec"))
+
+	// The names read from the scoped Node, and the path starts at the root
+	// of the document.
+	err := niceyaml.NewError("x", spec.DataLocator().At("ports", "16", "name"))
+
+	path, ok := err.Path()
+	require.True(t, ok)
+	assert.Equal(t, "$[1].spec.ports.0x10.name", path.String())
+
+	const want = "f.yaml:5:15: $[1].spec.ports.0x10.name: x"
+
+	require.EqualError(t, spec.Bind(err), want)
+	require.EqualError(t, doc.Bind(err), want)
+
+	// A base moves `@` paths alone, so the error binds at the same value
+	// under any base.
+	require.EqualError(t, doc.Bind(niceyaml.Rebase(err, paths.Doc().Child("other"))), want)
+
+	t.Run("names of the document miss from the scope", func(t *testing.T) {
+		t.Parallel()
+
+		got, _ := located(t, spec, spec.DataLocator().At("1", "spec", "ports"))
+
+		assert.Equal(t, "f.yaml:2:3: $[1].spec.1.spec.ports: x", got)
+	})
+
+	t.Run("scope behind an alias", func(t *testing.T) {
+		t.Parallel()
+
+		aliased := locatorDoc(t, stringtest.LinesLF("base: &base", "  0x10: x", "al: *base"))
+		al := yamltest.At(t, aliased, paths.Doc().Child("al"))
+
+		got, _ := located(t, al, al.DataLocator().At("16"))
+
+		assert.Equal(t, "f.yaml:2:9: $.al.0x10: x", got)
+	})
+}
+
+func TestDataLocator_SyntaxError(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.UnparsedDocument(t, "a: [1\n", niceyaml.WithName("f.yaml"))
+	require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
+
+	bound := yamltest.RequireSourceError(t, doc.Bind(niceyaml.NewError("x", doc.DataLocator().At("a", "0"))))
+	require.EqualError(t, bound, "f.yaml: $.a.0: x")
+	require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrPathNeedsDocument)
+}
+
+// schemaLocations returns where each violation of v in doc binds: its
+// position, its path, and the mapping it binds at for a member the
+// mapping lacks.
+func schemaLocations(t *testing.T, doc *niceyaml.Node, v *jsonschema.Validator) []string {
+	t.Helper()
+
+	err := doc.Validate(t.Context(), schema.FromJSONSchema(v))
+	require.Error(t, err)
+	require.True(t, niceyaml.IsInvalid(err), "validation did not run: %v", err)
+
+	var got []string
+
+	// The summary of several violations is no violation, so Problems
+	// passes over it.
+	for problem := range niceyaml.Problems(err) {
+		got = append(got, describeLocation(problem.Bound))
+	}
+
+	slices.Sort(got)
+
+	return got
+}
+
+// locatorLocations returns where a [niceyaml.DataLocator] of doc binds an
+// error for each failure v finds in the data of doc. The locator takes
+// the instance location of the failure as names. A failure about a
+// missing member takes the name of that member too. One about a key,
+// which additionalProperties and propertyNames report, goes through
+// [niceyaml.DataLocator.AtKey].
+func locatorLocations(t *testing.T, doc *niceyaml.Node, v *jsonschema.Validator) []string {
+	t.Helper()
+
+	data, err := doc.Decode[any](t.Context())
+	require.NoError(t, err)
+
+	var failure *jsonschema.ValidationError
+
+	require.ErrorAs(t, v.Validate(t.Context(), data), &failure)
+
+	loc := doc.DataLocator()
+
+	var got []string
+
+	for _, leaf := range failure.Leaves() {
+		var names []string
+
+		for _, seg := range leaf.InstanceSegments() {
+			if seg.IsIndex {
+				names = append(names, strconv.Itoa(seg.Index))
+			} else {
+				names = append(names, seg.Key)
+			}
+		}
+
+		// Each failure takes one lookup, as it does in the schema, so both
+		// read the merge sources of a document the same number of times.
+		var opt niceyaml.ErrorOption
+
+		quoted, required := strings.CutPrefix(leaf.Message, "missing required property ")
+
+		switch {
+		case required:
+			missing, err := strconv.Unquote(quoted)
+			require.NoError(t, err)
+
+			opt = loc.At(append(names, missing)...)
+
+		case leaf.Keyword == jsonschema.KeywordAdditionalProperties,
+			leaf.Keyword == jsonschema.KeywordPropertyNames:
+			opt = loc.AtKey(names...)
+
+		default:
+			opt = loc.At(names...)
+		}
+
+		bound := yamltest.RequireSourceError(t, doc.Bind(niceyaml.NewError("x", opt)))
+
+		got = append(got, describeLocation(bound))
+	}
+
+	slices.Sort(got)
+
+	return got
+}
+
+// describeLocation returns where bound binds: its position, its path,
+// and the mapping it binds at when its path names a key the document
+// leaves out.
+func describeLocation(bound *niceyaml.SourceError) string {
+	at := "-"
+	if pos, ok := bound.Position(); ok {
+		at = fmt.Sprintf("%d:%d", pos.Line+1, pos.Col+1)
+	}
+
+	path, _ := bound.Path()
+
+	near := "-"
+	if nearest, ok := bound.Nearest(); ok {
+		near = nearest.String()
+	}
+
+	return fmt.Sprintf("%s %s near %s", at, path, near)
+}
+
+func TestDataLocator_Schema(t *testing.T) {
+	t.Parallel()
+
+	// Each schema fails many values of a document: every scalar, every
+	// key, or every mapping, for members it lacks. Some of those members
+	// have the name another key is spelled with.
+	schemas := map[string]string{
+		"every scalar": `{
+			"$ref": "#/$defs/node",
+			"$defs": {"node": {
+				"if": {"type": ["object", "array"]},
+				"then": {
+					"additionalProperties": {"$ref": "#/$defs/node"},
+					"items": {"$ref": "#/$defs/node"}
+				},
+				"else": false
+			}}
+		}`,
+		"every key": `{
+			"$ref": "#/$defs/node",
+			"$defs": {"node": {
+				"propertyNames": false,
+				"additionalProperties": {"$ref": "#/$defs/node"},
+				"items": {"$ref": "#/$defs/node"}
+			}}
+		}`,
+		"every mapping": `{
+			"$ref": "#/$defs/node",
+			"$defs": {"node": {
+				"required": ["zz", "0x10", "16", "3.10", "True", "~", "0", "name"],
+				"additionalProperties": {"$ref": "#/$defs/node"},
+				"items": {"$ref": "#/$defs/node"}
+			}}
+		}`,
+	}
+
+	inputs := map[string]string{
+		"respelled keys":           respelledDoc,
+		"missing member":           lackingDoc,
+		"key spelled as no member": pythonDoc,
+		"two keys with one name":   sameNameDoc,
+		"member no path selects":   hiddenDoc,
+		"merge precedence":         mergeDoc,
+		"sequences and scalars":    shapesDoc,
+		"key with no name":         unnamedKeyDoc,
+		"alias key": stringtest.LinesLF(
+			"k: &k 0x10",
+			"m:",
+			"  *k : {0x20: v}",
+			`  "16": w`,
+		),
+		"merge sources in a list": stringtest.LinesLF(
+			"a: &a {0x10: 1, b: 2}",
+			"b: &b {16: 3, 0x10: 4}",
+			"m:",
+			"  <<: [*a, *b]",
+			"  b: 5",
+			"  <<: *a",
+		),
+		"merge key after its keys": stringtest.LinesLF(
+			"base: &base {0x10: {a: 1}}",
+			"m:",
+			"  0x10: {b: 2}",
+			"  0o20: {c: 3}",
+			"  <<: *base",
+		),
+		"keys below one no path selects": stringtest.LinesLF(
+			"user:",
+			"  <<: {0x10: {0x20: [x, {0x30: y}]}}",
+			`  "0x10": 1`,
+		),
+		"aliased mapping in a sequence": stringtest.LinesLF(
+			"base: &base {0x10: x, 3.10: y}",
+			"seq:",
+			"  - *base",
+			"  - [*base, {True: z}]",
+		),
+		"null and bool keys": stringtest.LinesLF(
+			"~: a",
+			"null: b",
+			"True: {true: c}",
+			"false: [d]",
+		),
+		// The lookups of both runs pass the limit on the merge sources they
+		// read, so each writes the same names past it.
+		"more merge reads than the limit allows": yamltest.WideMerge(2000),
+	}
+
+	for schemaName, schemaJSON := range schemas {
+		v, err := jsonschema.CompileJSON(t.Context(), []byte(schemaJSON))
+		require.NoError(t, err)
+
+		for inputName, input := range inputs {
+			t.Run(schemaName+"/"+inputName, func(t *testing.T) {
+				t.Parallel()
+
+				// The second key of some documents repeats the member of
+				// the first.
+				doc := yamltest.FirstDocument(t, input, niceyaml.WithAllowDuplicateKeys(true))
+
+				want := schemaLocations(t, doc, v)
+				require.NotEmpty(t, want)
+
+				got := locatorLocations(t, doc, v)
+				require.Len(t, got, len(want))
+
+				// A document of thousands of locations reports the first
+				// few that differ.
+				var differ []string
+
+				for i := range want {
+					if want[i] != got[i] && len(differ) < 10 {
+						differ = append(differ, fmt.Sprintf("schema %q, locator %q", want[i], got[i]))
+					}
+				}
+
+				assert.Empty(t, differ)
+			})
+		}
+	}
+}
+
+func TestDataLocator_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	// Each mapping of the document respells its keys, so every lookup
+	// reads a mapping and asks which entry a spelling selects.
+	const (
+		mappings = 24
+		members  = 24
+	)
+
+	var sb strings.Builder
+
+	sb.WriteString("base: &base {0x1: x}\n")
+
+	for m := range mappings {
+		fmt.Fprintf(&sb, "m%d:\n  <<: *base\n", m)
+
+		for i := range members {
+			fmt.Fprintf(&sb, "  %#x: {name: \"\"}\n", 0x10+i)
+		}
+	}
+
+	doc := locatorDoc(t, sb.String())
+
+	names := func(m, i int) []string {
+		return []string{"m" + strconv.Itoa(m), strconv.Itoa(0x10 + i), "name"}
+	}
+
+	// One goroutine finds every location first.
+	single := doc.DataLocator()
+	want := make([]string, 0, mappings*members)
+
+	for m := range mappings {
+		for i := range members {
+			got, _ := located(t, doc, single.At(names(m, i)...))
+			want = append(want, got)
+		}
+	}
+
+	require.Equal(t, "f.yaml:4:16: $.m0.0x10.name: x", want[0])
+
+	shared := doc.DataLocator()
+	results := make([][]niceyaml.ErrorOption, 8)
+
+	var wg sync.WaitGroup
+
+	for g := range results {
+		wg.Go(func() {
+			opts := make([]niceyaml.ErrorOption, 0, mappings*members)
+
+			for m := range mappings {
+				for i := range members {
+					opts = append(opts, shared.At(names(m, i)...))
+				}
+			}
+
+			// Each goroutine also reads members the others do not.
+			_ = shared.AtKey(names(g, g)...)
+			_ = shared.At("m"+strconv.Itoa(g), "1", "missing")
+
+			results[g] = opts
+		})
+	}
+
+	wg.Wait()
+
+	for _, opts := range results {
+		got := make([]string, 0, len(opts))
+
+		for _, opt := range opts {
+			message, _ := located(t, doc, opt)
+			got = append(got, message)
+		}
+
+		assert.Equal(t, want, got)
+	}
+}
+
+func TestDataLocator_MergeReads(t *testing.T) {
+	t.Parallel()
+
+	// To spell a key of m, the locator reads the whole list of its merge
+	// key, and the locations of one locator share one limit on those
+	// reads. Past it, each path keeps the decoded name of its key, and the
+	// error still binds at the value, by its position.
+	const members = 2000
+
+	doc := locatorDoc(t, yamltest.WideMerge(members))
+	loc := doc.DataLocator()
+
+	spelled := 0
+
+	for i := range members {
+		err := niceyaml.NewError("x", loc.At("m", strconv.Itoa(0x1000+i)))
+
+		path, ok := err.Path()
+		require.True(t, ok)
+
+		bound := yamltest.RequireSourceError(t, doc.Bind(err))
+
+		pos, ok := bound.Position()
+		require.True(t, ok, "member %d binds with no position", i)
+		require.Equal(t, i+2, pos.Line, "member %d", i)
+
+		if strings.HasPrefix(path.String(), "$.m.0x") {
+			spelled++
+
+			continue
+		}
+
+		require.Equal(t, "$.m."+strconv.Itoa(0x1000+i), path.String())
+	}
+
+	assert.Positive(t, spelled)
+	assert.Less(t, spelled, members)
+}
+
+// TestValidator_DirectCall calls the Check method of every validator the
+// library ships. Each returns the error as the validator it wraps wrote
+// it, and [niceyaml.Node.Validate] binds it. A Registry binds the error
+// of its lookup through the root of the document itself and runs the
+// schema it finds through Node.Validate, so a direct call to it returns
+// what Node.Validate returns.
+func TestValidator_DirectCall(t *testing.T) {
+	t.Parallel()
+
+	itemPath := paths.Doc().Child("items").Index(1)
+
+	// A rule of a type of its own that leaves its error unbound, as
+	// [niceyaml.Validator] asks.
+	rule := &fieldValidator{
+		err: niceyaml.NewError("reserved name", niceyaml.AtPath(paths.Current().Child("name"))),
+	}
+
+	nameSchema := schema.MustCompile([]byte(`{
+		"type": "object",
+		"properties": {"name": {"not": {"const": "admin"}}}
+	}`))
+	reg := schema.NewRegistry(schema.WithResolvers(nameSchema))
+
+	tcs := map[string]struct {
+		v niceyaml.Validator
+		// The Node the validator runs on.
+		path paths.Path
+		// The message of the error a direct call to Check returns.
+		raw string
+		// The message of the error Node.Validate returns.
+		want string
+	}{
+		"Schema": {
+			v:    nameSchema,
+			path: itemPath,
+			raw:  "should not validate against the schema",
+			want: "c.yaml:4:11: $.items[1].name: should not validate against the schema",
+		},
+		"Registry refuses a scoped Node": {
+			v:    reg,
+			path: itemPath,
+			raw:  "c.yaml: registry needs a whole document: node is scoped to $.items[1]",
+			want: "c.yaml: registry needs a whole document: node is scoped to $.items[1]",
+		},
+		"Registry at the root": {
+			v:    reg,
+			path: paths.Doc(),
+			raw:  "c.yaml:1:7: $.name: should not validate against the schema",
+			want: "c.yaml:1:7: $.name: should not validate against the schema",
+		},
+		"ValidatorFunc": {
+			v:    niceyaml.ValidatorFunc(rule.Check),
+			path: itemPath,
+			raw:  "reserved name",
+			want: "c.yaml:4:11: $.items[1].name: reserved name",
+		},
+		"MultiValidator": {
+			v:    niceyaml.MultiValidator(rule, nameSchema),
+			path: itemPath,
+			raw:  stringtest.JoinLF("reserved name", "should not validate against the schema"),
+			want: stringtest.JoinLF(
+				"c.yaml:4:11: $.items[1].name: reserved name",
+				"c.yaml:4:11: $.items[1].name: should not validate against the schema",
+			),
+		},
+		"ChainValidator": {
+			v:    niceyaml.ChainValidator(rule, nameSchema),
+			path: itemPath,
+			raw:  "reserved name",
+			want: "c.yaml:4:11: $.items[1].name: reserved name",
+		},
+		"SkipEmpty": {
+			v:    niceyaml.SkipEmpty(rule),
+			path: itemPath,
+			raw:  "reserved name",
+			want: "c.yaml:4:11: $.items[1].name: reserved name",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, stringtest.Input(`
+				name: admin
+				items:
+				  - name: soup
+				  - name: admin
+			`), niceyaml.WithName("c.yaml"))
+			node := yamltest.At(t, doc, tc.path)
+
+			require.EqualError(t, tc.v.Check(t.Context(), node), tc.raw)
+			require.EqualError(t, node.Validate(t.Context(), tc.v), tc.want)
+		})
+	}
+}
+
+func TestValidatorFunc_Check(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		price: 5
+		items:
+		  - price: 1
+		  - price: -2
+	`), niceyaml.WithName("menu.yaml"))
+
+	other := yamltest.FirstDocument(t, "# other\nprice: 0\n", niceyaml.WithName("other.yaml"))
+
+	pricePath := paths.Current().Child("price")
+	item := yamltest.At(t, doc, paths.Current().Child("items").Index(1))
+	negative := niceyaml.NewError("negative price", niceyaml.AtPath(pricePath))
+
+	var (
+		nilError       *niceyaml.Error
+		nilSourceError *niceyaml.SourceError
+	)
+
+	tcs := map[string]struct {
+		// The error the function returns, and the node it runs on, or none
+		// for doc.
+		returns error
+		node    *niceyaml.Node
+		// The message of the bound error, or none for no error.
+		want string
+	}{
+		"an unbound error binds through the node": {
+			returns: negative,
+			want:    "menu.yaml:1:8: $.price: negative price",
+		},
+		"a scoped node puts its path in front": {
+			returns: negative,
+			node:    item,
+			want:    "menu.yaml:4:12: $.items[1].price: negative price",
+		},
+		"an error with no location names the source": {
+			returns: errNameRequired,
+			want:    "menu.yaml: name is required",
+		},
+		"an error bound through another node stays as it is": {
+			returns: item.Bind(negative),
+			want:    "menu.yaml:4:12: $.items[1].price: negative price",
+		},
+		"an error bound to another source stays as it is": {
+			returns: other.Bind(negative),
+			want:    "other.yaml:2:8: $.price: negative price",
+		},
+		"no error is no error":                  {},
+		"a nil Error pointer is no error":       {returns: nilError},
+		"a nil SourceError pointer is no error": {returns: nilSourceError},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			node := cmp.Or(tc.node, doc)
+			validator := rejectingValidator(tc.returns)
+
+			// A direct call returns the error as the function wrote it.
+			assert.Equal(t, tc.returns, validator.Check(t.Context(), node))
+
+			err := node.Validate(t.Context(), validator)
+			if tc.want == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.EqualError(t, err, tc.want)
+
+			require.ErrorAs(t, err, new(*niceyaml.SourceError))
+		})
+	}
+
+	t.Run("returns what the same body returns as the method of a type", func(t *testing.T) {
+		t.Parallel()
+
+		method := negativePrice{}
+		fn := niceyaml.ValidatorFunc(method.Check)
+
+		tcs := map[string]struct {
+			node *niceyaml.Node
+		}{
+			"a value the rule accepts":     {node: doc},
+			"a value the rule rejects":     {node: item},
+			"a value that does not decode": {node: yamltest.FirstDocument(t, "price: high\n")},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.Equal(t, method.Check(t.Context(), tc.node), fn.Check(t.Context(), tc.node))
+				assert.Equal(t, tc.node.Validate(t.Context(), method), tc.node.Validate(t.Context(), fn))
+			})
+		}
+	})
+
+	t.Run("a validator that runs another on each element reports the element", func(t *testing.T) {
+		t.Parallel()
+
+		perItem := niceyaml.ValidatorFunc(negativePrice{}.Check)
+		each := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			items, err := n.Nodes(paths.Current().Child("items").IndexAll())
+			if err != nil {
+				return err //nolint:wrapcheck // The test inspects the error as it is.
+			}
+
+			for _, it := range items {
+				err := it.Validate(ctx, perItem)
+				if err != nil {
+					return err //nolint:wrapcheck // The test inspects the error as it is.
+				}
+			}
+
+			return nil
+		})
+
+		want := "menu.yaml:4:12: $.items[1].price: negative price"
+
+		require.EqualError(t, doc.Validate(t.Context(), each), want)
+
+		_, err := doc.Decode[map[string]any](t.Context(), niceyaml.WithValidator(each))
+		require.EqualError(t, err, want)
+	})
+
+	t.Run("a validator that checks another document names that document", func(t *testing.T) {
+		t.Parallel()
+
+		zero := rejectingValidator(niceyaml.NewError("no price", niceyaml.AtPath(pricePath)))
+		include := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+			return other.Validate(ctx, zero)
+		})
+
+		require.EqualError(t, doc.Validate(t.Context(), include), "other.yaml:2:8: $.price: no price")
+	})
+
+	t.Run("context a wrapper adds stands in front of the position", func(t *testing.T) {
+		t.Parallel()
+
+		wrapped := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			return fmt.Errorf("menu check: %w", n.Validate(ctx, rejectingValidator(negative)))
+		})
+
+		err := doc.Validate(t.Context(), wrapped)
+		require.EqualError(t, err, "menu check: menu.yaml:1:8: $.price: negative price")
+
+		bound := yamltest.RequireSourceError(t, err)
+		assert.Same(t, doc, yamltest.BoundNode(t, bound))
+	})
+}
+
+func TestMultiValidator(t *testing.T) {
+	t.Parallel()
+
+	errB := errors.New("bad b")
+	errC := errors.New("bad c")
+
+	badB := rejectingValidator(niceyaml.Invalid(errB, niceyaml.AtPath(paths.Current().Child("a", "b"))))
+	badC := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+		// A validator that binds its own error, as [niceyaml.Validator] allows.
+		return n.Bind(niceyaml.Invalid(errC, niceyaml.AtPath(paths.Current().Child("a", "c"))))
+	})
+	// A validator of a type of its own that leaves its error unbound.
+	unboundB := &fieldValidator{err: niceyaml.Invalid(errB, niceyaml.AtPath(paths.Current().Child("a", "b")))}
+	passing := passingValidator()
+	input := stringtest.LinesLF(
+		"a:",
+		"  b: 1",
+		"  c: 2",
+	)
+	dd := yamltest.FirstDocument(t, input)
+	// The same document under a file path.
+	doc := yamltest.FirstDocument(t, input, niceyaml.WithFilePath("x.yaml"))
+
+	t.Run("runs every validator and reports every failure in order", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		multi := niceyaml.MultiValidator(
+			recordingValidator(&order, "first"),
+			badB,
+			recordingValidator(&order, "second"),
+			badC,
+		)
+
+		err := dd.Validate(t.Context(), multi)
+		require.ErrorIs(t, err, errB)
+		require.ErrorIs(t, err, errC)
+		assert.Equal(t, []string{"first", "second"}, order)
+
+		var got []string
+
+		for _, b := range yamltest.BoundIn(err) {
+			if rng, ok := b.Range(); ok {
+				got = append(got, rng.Start.String()+" "+b.Message())
+			}
+		}
+
+		assert.Equal(t, []string{"1:5 bad b", "2:5 bad c"}, got)
+	})
+
+	t.Run("renders as one tree", func(t *testing.T) {
+		t.Parallel()
+
+		err := dd.Validate(t.Context(), niceyaml.MultiValidator(badB, badC))
+		require.Error(t, err)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"|-- 2:6: $.a.b: bad b",
+			"`-- 3:6: $.a.c: bad c",
+		), report(err))
+	})
+
+	t.Run("no failure is no error", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, dd.Validate(t.Context(), niceyaml.MultiValidator(passing, passing)))
+		require.NoError(t, dd.Validate(t.Context(), niceyaml.MultiValidator()))
+
+		// A typed nil pointer reports no failure, as it does from a
+		// validator given alone.
+		typedNil := typedNilValidator()
+
+		require.NoError(t, dd.Validate(t.Context(), typedNil))
+		require.NoError(t, dd.Validate(t.Context(), niceyaml.MultiValidator(typedNil, passing)))
+	})
+
+	t.Run("skips a nil validator", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		err := dd.Validate(t.Context(), niceyaml.MultiValidator(
+			badB,
+			nil,
+			(*fieldValidator)(nil),
+			niceyaml.ValidatorFunc(nil),
+			recordingValidator(&order, "after"),
+		))
+		require.ErrorIs(t, err, errB)
+		assert.Equal(t, []string{"after"}, order)
+	})
+
+	t.Run("keeps its validators when the caller edits the slice", func(t *testing.T) {
+		t.Parallel()
+
+		vs := []niceyaml.Validator{badB}
+		multi := niceyaml.MultiValidator(vs...)
+		vs[0] = passing
+
+		err := dd.Validate(t.Context(), multi)
+		require.ErrorIs(t, err, errB)
+	})
+
+	t.Run("WithValidator carries it to a decode", func(t *testing.T) {
+		t.Parallel()
+
+		multi := niceyaml.WithValidator(niceyaml.MultiValidator(badB, badC))
+
+		_, err := dd.Decode[map[string]any](t.Context(), multi)
+		require.ErrorIs(t, err, errB)
+		require.ErrorIs(t, err, errC)
+	})
+
+	t.Run("each line of the message carries its source and position", func(t *testing.T) {
+		t.Parallel()
+
+		want := stringtest.JoinLF(
+			"x.yaml:2:6: $.a.b: bad b",
+			"x.yaml:3:6: $.a.c: bad c",
+		)
+
+		tcs := map[string]struct {
+			first niceyaml.Validator
+		}{
+			"a ValidatorFunc that leaves its error unbound":   {first: badB},
+			"a type of its own that leaves its error unbound": {first: unboundB},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				multi := niceyaml.MultiValidator(tc.first, badC)
+
+				require.EqualError(t, doc.Validate(t.Context(), multi), want)
+
+				// A direct call joins the failures as the validators wrote
+				// them, so the one badC bound keeps its position and the
+				// other has none.
+				require.EqualError(t, multi.Check(t.Context(), doc), stringtest.JoinLF(
+					"bad b",
+					"x.yaml:3:6: $.a.c: bad c",
+				))
+			})
+		}
+	})
+
+	t.Run("a lone failure keeps its position", func(t *testing.T) {
+		t.Parallel()
+
+		err := doc.Validate(t.Context(), niceyaml.MultiValidator(badB, passing))
+		require.ErrorIs(t, err, errB)
+		assert.Equal(t, "x.yaml:2:6: $.a.b: bad b", err.Error())
+
+		serr := yamltest.RequireSourceError(t, err)
+
+		_, ok := serr.Range()
+		assert.True(t, ok)
+		assert.Empty(t, yamltest.ProblemsOf(serr))
+
+		// A validator that binds its own error names the source once.
+		err = doc.Validate(t.Context(), niceyaml.MultiValidator(passing, badC))
+		require.ErrorIs(t, err, errC)
+		assert.Equal(t, "x.yaml:3:6: $.a.c: bad c", err.Error())
+
+		// A validator that leaves its error unbound reads the same.
+		err = doc.Validate(t.Context(), niceyaml.MultiValidator(passing, unboundB))
+		require.ErrorIs(t, err, errB)
+		assert.Equal(t, "x.yaml:2:6: $.a.b: bad b", err.Error())
+	})
+
+	t.Run("a sentinel around a binding stands in front of its position", func(t *testing.T) {
+		t.Parallel()
+
+		errInvalid := errors.New("invalid")
+		classified := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			return fmt.Errorf("%w: %w", errInvalid, badC.Check(ctx, n))
+		})
+
+		err := doc.Validate(t.Context(), niceyaml.MultiValidator(classified, badB))
+		require.ErrorIs(t, err, errInvalid)
+		assert.Equal(t, stringtest.JoinLF(
+			"x.yaml:2:6: $.a.b: bad b",
+			"invalid: x.yaml:3:6: $.a.c: bad c",
+		), err.Error())
+	})
+
+	t.Run("a context that ends stops the run", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+
+		calls := 0
+		canceling := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+			calls++
+
+			cancel()
+
+			return ctx.Err()
+		})
+
+		err := dd.Validate(ctx, niceyaml.MultiValidator(badB, canceling, badC))
+		require.ErrorIs(t, err, context.Canceled)
+		require.NotErrorIs(t, err, errB)
+		assert.Equal(t, 1, calls)
+
+		require.ErrorIs(t, dd.Validate(ctx, niceyaml.MultiValidator(canceling)), context.Canceled)
+		assert.Equal(t, 1, calls, "an ended context runs no validator")
+	})
+}
+
+func TestChainValidator(t *testing.T) {
+	t.Parallel()
+
+	errFirst := errors.New("first rule")
+	errSecond := errors.New("second rule")
+
+	namePath := paths.Current().Child("name")
+
+	// Both validators fail at the same value, as a schema and a check
+	// that decodes the node do.
+	first := rejectingValidator(niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath)))
+	second := rejectingValidator(niceyaml.Invalid(errSecond, niceyaml.AtPath(namePath)))
+	passing := passingValidator()
+
+	// The message of both failures, as a MultiValidator joins them.
+	both := stringtest.JoinLF(
+		"x.yaml:3:7: $.name: first rule",
+		"x.yaml:3:7: $.name: second rule",
+	)
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"meta:",
+		"  name: 5",
+		"name: 7",
+	), niceyaml.WithName("x.yaml"))
+	meta := yamltest.At(t, doc, paths.Current().Child("meta"))
+
+	t.Run("runs the validators in order and stops at the first that fails", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		chain := niceyaml.ChainValidator(
+			recordingValidator(&order, "before"),
+			first,
+			recordingValidator(&order, "unreached"),
+			second,
+		)
+
+		err := doc.Validate(t.Context(), chain)
+		require.EqualError(t, err, "x.yaml:3:7: $.name: first rule")
+		require.NotErrorIs(t, err, errSecond)
+		assert.Equal(t, []string{"before"}, order)
+	})
+
+	t.Run("reports the first of two failures where MultiValidator reports both", func(t *testing.T) {
+		t.Parallel()
+
+		err := doc.Validate(t.Context(), niceyaml.ChainValidator(first, second))
+		require.EqualError(t, err, "x.yaml:3:7: $.name: first rule")
+
+		err = doc.Validate(t.Context(), niceyaml.ChainValidator(second, first))
+		require.EqualError(t, err, "x.yaml:3:7: $.name: second rule")
+
+		err = doc.Validate(t.Context(), niceyaml.MultiValidator(first, second))
+		require.EqualError(t, err, both)
+	})
+
+	t.Run("a later validator runs once the ones before it pass", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		// A typed nil pointer is no failure, so the chain goes on.
+		err := doc.Validate(t.Context(), niceyaml.ChainValidator(
+			recordingValidator(&order, "before"),
+			typedNilValidator(),
+			niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				var e *niceyaml.SourceError
+
+				return e
+			}),
+			recordingValidator(&order, "after"),
+			second,
+		))
+		require.EqualError(t, err, "x.yaml:3:7: $.name: second rule")
+		assert.Equal(t, []string{"before", "after"}, order)
+	})
+
+	t.Run("no failure is no error", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator()))
+		require.NoError(t, niceyaml.ChainValidator().Check(t.Context(), doc))
+		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator(passing, passing)))
+		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator(typedNilValidator())))
+	})
+
+	t.Run("skips a nil validator", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		err := doc.Validate(t.Context(), niceyaml.ChainValidator(
+			recordingValidator(&order, "before"),
+			nil,
+			(*fieldValidator)(nil),
+			niceyaml.ValidatorFunc(nil),
+			recordingValidator(&order, "after"),
+			first,
+		))
+		require.ErrorIs(t, err, errFirst)
+		assert.Equal(t, []string{"before", "after"}, order)
+
+		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator(nil)))
+	})
+
+	t.Run("keeps its validators when the caller edits the slice", func(t *testing.T) {
+		t.Parallel()
+
+		vs := []niceyaml.Validator{first}
+		chain := niceyaml.ChainValidator(vs...)
+		vs[0] = passing
+
+		require.ErrorIs(t, doc.Validate(t.Context(), chain), errFirst)
+	})
+
+	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
+		t.Parallel()
+
+		docs := niceyaml.NewSourceFromString("a: [\n").AllDocuments()
+		require.Len(t, docs, 1)
+		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
+
+		var order []string
+
+		chain := niceyaml.ChainValidator(recordingValidator(&order, "unreached"))
+
+		assert.Same(t, docs[0].Err(), docs[0].Validate(t.Context(), chain))
+		assert.Same(t, docs[0].Err(), chain.Check(t.Context(), docs[0]))
+		assert.Empty(t, order)
+	})
+
+	t.Run("returns the failure as the validator wrote it", func(t *testing.T) {
+		t.Parallel()
+
+		located := niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath))
+
+		tcs := map[string]struct {
+			v    niceyaml.Validator
+			node *niceyaml.Node
+			want string
+		}{
+			"a ValidatorFunc that leaves its error unbound": {
+				v:    first,
+				node: doc,
+				want: "x.yaml:3:7: $.name: first rule",
+			},
+			"a validator that leaves its error unbound": {
+				v:    &fieldValidator{err: located},
+				node: doc,
+				want: "x.yaml:3:7: $.name: first rule",
+			},
+			"an unbound error with an @ path on a scoped Node": {
+				v:    &fieldValidator{err: located},
+				node: meta,
+				want: "x.yaml:2:9: $.meta.name: first rule",
+			},
+			"an unbound error with no location on a scoped Node": {
+				v:    &fieldValidator{err: niceyaml.Invalid(errFirst)},
+				node: meta,
+				want: "x.yaml:1:1: $.meta: first rule",
+			},
+			"an unbound plain error on a scoped Node": {
+				v:    &fieldValidator{err: errFirst},
+				node: meta,
+				want: "x.yaml:1:1: $.meta: first rule",
+			},
+			"an unbound plain error on the root": {
+				v:    &fieldValidator{err: errFirst},
+				node: doc,
+				want: "x.yaml: first rule",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				alone := tc.node.Validate(t.Context(), tc.v)
+				require.EqualError(t, alone, tc.want)
+
+				chain := niceyaml.ChainValidator(passing, tc.v, second)
+
+				// A direct call returns the error as the validator wrote it.
+				assert.Equal(t, tc.v.Check(t.Context(), tc.node), chain.Check(t.Context(), tc.node))
+
+				err := tc.node.Validate(t.Context(), chain)
+				require.EqualError(t, err, tc.want)
+				assert.Equal(t, niceyaml.IsInvalid(alone), niceyaml.IsInvalid(err))
+				assert.Equal(t, niceyaml.FormatError(alone), niceyaml.FormatError(err))
+
+				bound := yamltest.RequireSourceError(t, err)
+				assert.Same(t, tc.node, yamltest.BoundNode(t, bound))
+			})
+		}
+	})
+
+	t.Run("returns a bound error as it is", func(t *testing.T) {
+		t.Parallel()
+
+		want := meta.Bind(niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath)))
+
+		assert.Same(t, want, doc.Validate(t.Context(), niceyaml.ChainValidator(&fieldValidator{err: want})))
+		assert.Same(t, want, doc.Validate(t.Context(), niceyaml.ChainValidator(rejectingValidator(want))))
+	})
+
+	t.Run("a decode runs repeated WithValidator options the same way", func(t *testing.T) {
+		t.Parallel()
+
+		unboundFirst := &fieldValidator{err: niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath))}
+		unboundSecond := &fieldValidator{err: niceyaml.Invalid(errSecond, niceyaml.AtPath(namePath))}
+
+		tcs := map[string]struct {
+			a, b niceyaml.Validator
+			want string
+			// Whether the Node at $.meta decodes, and not the root.
+			scoped bool
+		}{
+			"both fail": {
+				a:    first,
+				b:    second,
+				want: "x.yaml:3:7: $.name: first rule",
+			},
+			"both fail and leave their errors unbound": {
+				a:    unboundFirst,
+				b:    unboundSecond,
+				want: "x.yaml:3:7: $.name: first rule",
+			},
+			"the second fails": {
+				a:    passing,
+				b:    second,
+				want: "x.yaml:3:7: $.name: second rule",
+			},
+			"the second fails and leaves its error unbound": {
+				a:    typedNilValidator(),
+				b:    unboundSecond,
+				want: "x.yaml:3:7: $.name: second rule",
+			},
+			"the first is nil": {
+				a:    nil,
+				b:    second,
+				want: "x.yaml:3:7: $.name: second rule",
+			},
+			"an unbound error with an @ path on a scoped Node": {
+				a:      unboundFirst,
+				b:      unboundSecond,
+				scoped: true,
+				want:   "x.yaml:2:9: $.meta.name: first rule",
+			},
+			"an unbound plain error on a scoped Node": {
+				a:      passing,
+				b:      &fieldValidator{err: errSecond},
+				scoped: true,
+				want:   "x.yaml:1:1: $.meta: second rule",
+			},
+			"neither fails": {
+				a: passing,
+				b: typedNilValidator(),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				node := doc
+				if tc.scoped {
+					node = meta
+				}
+
+				chain := niceyaml.ChainValidator(tc.a, tc.b)
+
+				_, chainedDecode := node.Decode[map[string]any](t.Context(), niceyaml.WithValidator(chain))
+				_, repeatedDecode := node.Decode[map[string]any](t.Context(),
+					niceyaml.WithValidator(tc.a),
+					niceyaml.WithValidator(tc.b),
+				)
+
+				pairs := map[string][2]error{
+					"Decode":   {chainedDecode, repeatedDecode},
+					"Validate": {node.Validate(t.Context(), chain), repeatedDecode},
+				}
+
+				for step, pair := range pairs {
+					got, want := pair[0], pair[1]
+
+					if tc.want == "" {
+						require.NoError(t, got, step)
+						require.NoError(t, want, step)
+
+						continue
+					}
+
+					require.EqualError(t, want, tc.want, step)
+					require.EqualError(t, got, tc.want, step)
+					assert.Equal(t, niceyaml.FormatError(want), niceyaml.FormatError(got), step)
+					assert.Equal(t, fmt.Sprintf("%+v", want), fmt.Sprintf("%+v", got), step)
+					assert.Equal(t, niceyaml.IsInvalid(want), niceyaml.IsInvalid(got), step)
+
+					var gotBound, wantBound *niceyaml.SourceError
+
+					require.ErrorAs(t, got, &gotBound, step)
+					require.ErrorAs(t, want, &wantBound, step)
+					assert.Same(t, node, yamltest.BoundNode(t, wantBound), step)
+					assert.Same(t, node, yamltest.BoundNode(t, gotBound), step)
+
+					wantPath, wantOK := wantBound.Path()
+					gotPath, gotOK := gotBound.Path()
+					assert.Equal(t, wantOK, gotOK, step)
+					assert.Equal(t, wantPath.String(), gotPath.String(), step)
+				}
+			})
+		}
+	})
+
+	t.Run("takes its place inside MultiValidator and SkipEmpty", func(t *testing.T) {
+		t.Parallel()
+
+		// Inside a MultiValidator, the chain reports its first failure
+		// beside the failures of the validators around it.
+		multi := niceyaml.MultiValidator(niceyaml.ChainValidator(first, second), second)
+		require.EqualError(t, doc.Validate(t.Context(), multi), both)
+
+		// Around one, the chain stops once the MultiValidator fails.
+		var order []string
+
+		chain := niceyaml.ChainValidator(
+			niceyaml.MultiValidator(first, second),
+			recordingValidator(&order, "unreached"),
+		)
+		require.EqualError(t, doc.Validate(t.Context(), chain), both)
+		assert.Empty(t, order)
+
+		// A chain inside a chain runs as one chain.
+		nested := niceyaml.ChainValidator(niceyaml.ChainValidator(passing, second), first)
+		require.EqualError(t, doc.Validate(t.Context(), nested), "x.yaml:3:7: $.name: second rule")
+
+		empty := yamltest.FirstDocument(t, "# only a comment\n")
+
+		// Inside a SkipEmpty, no validator of the chain runs on a document
+		// with no content.
+		require.NoError(t, empty.Validate(t.Context(), niceyaml.SkipEmpty(niceyaml.ChainValidator(first, second))))
+		require.ErrorIs(
+			t,
+			doc.Validate(t.Context(), niceyaml.SkipEmpty(niceyaml.ChainValidator(first, second))),
+			errFirst,
+		)
+
+		// Around one, the validators after it still run.
+		skipFirst := niceyaml.ChainValidator(niceyaml.SkipEmpty(first), second)
+		require.ErrorIs(t, empty.Validate(t.Context(), skipFirst), errSecond)
+		require.ErrorIs(t, doc.Validate(t.Context(), skipFirst), errFirst)
+	})
+
+	t.Run("a context that ends stops the run at the validator that reports it", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+
+		var order []string
+
+		canceling := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+			cancel()
+
+			return ctx.Err()
+		})
+
+		err := doc.Validate(ctx, niceyaml.ChainValidator(canceling, recordingValidator(&order, "unreached")))
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Empty(t, order)
+	})
+}
+
+func TestSkipEmpty(t *testing.T) {
+	t.Parallel()
+
+	errBad := errors.New("bad")
+
+	// Rejecting returns a validator that fails every Node and counts its
+	// runs.
+	rejecting := func(calls *int) niceyaml.Validator {
+		return niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+			*calls++
+
+			return niceyaml.Invalid(errBad)
+		})
+	}
+
+	t.Run("passes a document with no content", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+		}{
+			"empty file":           {input: ""},
+			"whitespace":           {input: "\n"},
+			"comments alone":       {input: "# only a comment\n"},
+			"header alone":         {input: "---\n"},
+			"header and comment":   {input: "---\n# Source: chart/templates/empty.yaml\n"},
+			"directive and header": {input: "%YAML 1.2\n---\n"},
+			"end marker alone":     {input: "...\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				var calls int
+
+				skip := niceyaml.SkipEmpty(rejecting(&calls))
+
+				require.NoError(t, doc.Validate(t.Context(), skip))
+				require.NoError(t, skip.Check(t.Context(), doc))
+				assert.Zero(t, calls)
+
+				// The validator alone still runs on the document.
+				require.ErrorIs(t, doc.Validate(t.Context(), rejecting(&calls)), errBad)
+				assert.Equal(t, 1, calls)
+			})
+		}
+	})
+
+	t.Run("runs the validator on a document that holds a value", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+		}{
+			"null":                 {input: "null\n"},
+			"tilde":                {input: "~\n"},
+			"null below a header":  {input: "--- null\n"},
+			"empty mapping":        {input: "{}\n"},
+			"empty sequence":       {input: "[]\n"},
+			"empty string":         {input: "\"\"\n"},
+			"alias with no anchor": {input: "--- *nope\n"},
+			"mapping":              {input: "a: 1\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				var calls int
+
+				err := doc.Validate(t.Context(), niceyaml.SkipEmpty(rejecting(&calls)))
+				require.ErrorIs(t, err, errBad)
+				assert.Equal(t, 1, calls)
+			})
+		}
+	})
+
+	t.Run("runs the validator on a scoped Node", func(t *testing.T) {
+		t.Parallel()
+
+		// The key holds no value of its own, and its Node is no document.
+		value := yamltest.At(t, yamltest.FirstDocument(t, "a:\n"), paths.Current().Child("a"))
+
+		var calls int
+
+		err := value.Validate(t.Context(), niceyaml.SkipEmpty(rejecting(&calls)))
+		require.ErrorIs(t, err, errBad)
+		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
+		t.Parallel()
+
+		for _, input := range []string{"a: [\n", "---\na: [\n"} {
+			docs := niceyaml.NewSourceFromString(input).AllDocuments()
+			require.Len(t, docs, 1, input)
+			require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax, input)
+
+			var calls int
+
+			skip := niceyaml.SkipEmpty(rejecting(&calls))
+
+			assert.Same(t, docs[0].Err(), docs[0].Validate(t.Context(), skip), input)
+			assert.Same(t, docs[0].Err(), skip.Check(t.Context(), docs[0]), input)
+			assert.Zero(t, calls, input)
+		}
+	})
+
+	t.Run("runs the validator and the Node binds its error", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("a:", "  b: 1"), niceyaml.WithFilePath("x.yaml"))
+
+		located := niceyaml.Invalid(errBad, niceyaml.AtPath(paths.Current().Child("a", "b")))
+		want := "x.yaml:2:6: $.a.b: bad"
+
+		tcs := map[string]struct {
+			v niceyaml.Validator
+		}{
+			"a type of its own": {v: &fieldValidator{err: located}},
+			"a ValidatorFunc":   {v: rejectingValidator(located)},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				skip := niceyaml.SkipEmpty(tc.v)
+
+				// A direct call returns the error as the validator wrote it.
+				require.Same(t, located, skip.Check(t.Context(), doc))
+				require.EqualError(t, doc.Validate(t.Context(), skip), want)
+			})
+		}
+	})
+
+	t.Run("a nil validator passes every Node", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "a: 1\n")
+
+		for _, v := range []niceyaml.Validator{nil, (*fieldValidator)(nil), niceyaml.ValidatorFunc(nil)} {
+			require.NoError(t, doc.Validate(t.Context(), niceyaml.SkipEmpty(v)))
+		}
+
+		// A typed nil pointer reports no failure, as it does from a
+		// validator given alone.
+		typedNil := &fieldValidator{err: (*niceyaml.Error)(nil)}
+
+		require.NoError(t, doc.Validate(t.Context(), niceyaml.SkipEmpty(typedNil)))
+	})
+
+	t.Run("a decode of an empty document returns the zero value", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Name string `yaml:"name"`
+		}
+
+		named := schema.MustCompile([]byte(`{"type": "object", "required": ["name"]}`))
+
+		for name, input := range map[string]string{
+			"empty file":     "",
+			"comments alone": "# Defaults apply.\n",
+			"header alone":   "---\n",
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, input)
+
+				got, err := doc.Decode[config](t.Context(), niceyaml.WithValidator(niceyaml.SkipEmpty(named)))
+				require.NoError(t, err)
+				assert.Equal(t, config{}, got)
+
+				// The schema alone rejects the null the document decodes to.
+				_, err = doc.Decode[config](t.Context(), niceyaml.WithValidator(named))
+				require.ErrorContains(t, err, `expected "object", got "null"`)
+				assert.True(t, niceyaml.IsInvalid(err))
+			})
+		}
+
+		// A file with content still answers to the schema.
+		_, err := yamltest.FirstDocument(t, "port: 1\n").
+			Decode[config](t.Context(), niceyaml.WithValidator(niceyaml.SkipEmpty(named)))
+		require.ErrorContains(t, err, `missing required property "name"`)
+	})
+
+	t.Run("wraps one validator and takes its place among several", func(t *testing.T) {
+		t.Parallel()
+
+		empty := yamltest.FirstDocument(t, "# only a comment\n")
+
+		var first, second int
+
+		// Around a MultiValidator, it passes the document for all of them.
+		all := niceyaml.SkipEmpty(niceyaml.MultiValidator(rejecting(&first), rejecting(&second)))
+		require.NoError(t, empty.Validate(t.Context(), all))
+		assert.Zero(t, first)
+		assert.Zero(t, second)
+
+		// Inside one, the validators beside it still run.
+		one := niceyaml.MultiValidator(niceyaml.SkipEmpty(rejecting(&first)), rejecting(&second))
+		require.ErrorIs(t, empty.Validate(t.Context(), one), errBad)
+		assert.Zero(t, first)
+		assert.Equal(t, 1, second)
+	})
+}
+
+func TestNode_Validate(t *testing.T) {
+	t.Parallel()
+
+	// The document of the subtests that scope a Node to its key meta.
+	input := stringtest.LinesLF("meta:", "  name: test")
+
+	t.Run("runs the validator on the receiver", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+		scoped := yamltest.At(t, dd, paths.Current().Child("meta"))
+
+		var got []*niceyaml.Node
+
+		err := scoped.Validate(t.Context(), niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+			got = append(got, n)
+
+			return errNameRequired
+		}))
+		require.ErrorIs(t, err, errNameRequired)
+		require.Len(t, got, 1)
+		assert.Same(t, scoped, got[0])
+	})
+
+	t.Run("the validator decides how many failures the node reports", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		doc := yamltest.FirstDocument(t, input, niceyaml.WithName("x.yaml"))
+
+		scoped := yamltest.At(t, doc, paths.Current().Child("meta"))
+
+		namePath := paths.Current().Child("name")
+		reserved := &fieldValidator{err: niceyaml.NewError("reserved name", niceyaml.AtPath(namePath))}
+		short := &fieldValidator{err: niceyaml.NewError("name is too short", niceyaml.AtPath(namePath))}
+
+		// A ChainValidator stops at the first validator that fails.
+		err := scoped.Validate(t.Context(), niceyaml.ChainValidator(
+			recordingValidator(&order, "first"),
+			reserved,
+			recordingValidator(&order, "unreached"),
+			short,
+		))
+		require.EqualError(t, err, "x.yaml:2:9: $.meta.name: reserved name")
+		assert.Equal(t, []string{"first"}, order)
+
+		order = nil
+
+		// A MultiValidator runs every one and joins the failures.
+		err = scoped.Validate(t.Context(), niceyaml.MultiValidator(
+			recordingValidator(&order, "first"),
+			reserved,
+			recordingValidator(&order, "second"),
+			short,
+		))
+		require.EqualError(t, err, stringtest.JoinLF(
+			"x.yaml:2:9: $.meta.name: reserved name",
+			"x.yaml:2:9: $.meta.name: name is too short",
+		))
+		assert.Equal(t, []string{"first", "second"}, order)
+	})
+
+	t.Run("a typed nil pointer is no failure", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "name: test\n")
+
+		for _, v := range []niceyaml.Validator{
+			typedNilValidator(),
+			&fieldValidator{err: (*niceyaml.Error)(nil)},
+			&fieldValidator{err: (*niceyaml.SourceError)(nil)},
+		} {
+			require.NoError(t, dd.Validate(t.Context(), v))
+		}
+	})
+
+	t.Run("binds the error a validator leaves unbound", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, input, niceyaml.WithName("x.yaml"))
+
+		scoped := yamltest.At(t, doc, paths.Current().Child("meta"))
+		unbound := &fieldValidator{
+			err: niceyaml.Invalid(errNameRequired, niceyaml.AtPath(paths.Current().Child("name"))),
+		}
+
+		// A direct call returns the error as the validator wrote it, and
+		// the Node binds it from its own scope.
+		require.EqualError(t, unbound.Check(t.Context(), scoped), "name is required")
+
+		err := scoped.Validate(t.Context(), unbound)
+		require.EqualError(t, err, "x.yaml:2:9: $.meta.name: name is required")
+
+		bound := yamltest.RequireSourceError(t, err)
+		assert.Same(t, scoped, yamltest.BoundNode(t, bound))
+	})
+
+	t.Run("returns a bound error as it is", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+		scoped := yamltest.At(t, dd, paths.Current().Child("meta"))
+
+		want := scoped.Bind(niceyaml.Invalid(errNameRequired, niceyaml.AtPath(paths.Current().Child("name"))))
+
+		assert.Same(t, want, dd.Validate(t.Context(), &fieldValidator{err: want}))
+		assert.Same(t, want, dd.Validate(t.Context(), rejectingValidator(want)))
+	})
+
+	t.Run("a nil validator returns what Err returns", func(t *testing.T) {
+		t.Parallel()
+
+		docs := niceyaml.NewSourceFromString(stringtest.LinesLF(
+			"name: test",
+			"---",
+			"name: [",
+		), niceyaml.WithName("f.yaml")).AllDocuments()
+		require.Len(t, docs, 2)
+		require.NoError(t, docs[0].Err())
+		require.EqualError(t, docs[1].Err(), "f.yaml:3:7: sequence end token ']' not found")
+
+		scoped := yamltest.At(t, docs[0], paths.Current().Child("name"))
+
+		// A nil pointer to a fieldValidator panics if it runs.
+		for _, v := range []niceyaml.Validator{nil, (*fieldValidator)(nil), niceyaml.ValidatorFunc(nil)} {
+			require.NoError(t, docs[0].Validate(t.Context(), v))
+			require.NoError(t, scoped.Validate(t.Context(), v))
+			assert.Same(t, docs[1].Err(), docs[1].Validate(t.Context(), v))
+		}
+
+		// A context that ended changes neither result.
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		require.NoError(t, docs[0].Validate(ctx, nil))
+		assert.Same(t, docs[1].Err(), docs[1].Validate(ctx, nil))
+	})
+
+	t.Run("a validator of one call reaches no other decode", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		docs := niceyaml.NewSourceFromString(stringtest.LinesLF(
+			"name: a",
+			"---",
+			"name: b",
+		)).Documents()
+
+		_, err := docs[0].Decode[map[string]any](
+			t.Context(),
+			niceyaml.WithValidator(recordingValidator(&order, "call")),
+		)
+		require.NoError(t, err)
+
+		order = nil
+
+		_, err = docs[1].Decode[map[string]any](t.Context())
+		require.NoError(t, err)
+		assert.Empty(t, order, "the validator of one call ran on another")
+	})
+}
+
+func TestDocument_Validate_NodePaths(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		spec:
+		  containers:
+		    - name: a
+		      image: ""
+		    - name: b
+		      image: nginx
+	`), niceyaml.WithFilePath("m.yaml"))
+
+	// The check names each image by the path its Node reports, which starts
+	// at `$`, and binds through the Node it got.
+	images := func(selector paths.Path) niceyaml.Validator {
+		return niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			nodes, err := n.Nodes(selector)
+			if err != nil {
+				return fmt.Errorf("images: %w", err)
+			}
+
+			var errs []error
+
+			for _, image := range nodes {
+				got, err := image.Decode[string](ctx)
+				if err != nil {
+					return fmt.Errorf("image: %w", err)
+				}
+
+				if got == "" {
+					errs = append(errs, n.Bind(niceyaml.NewError("image is empty", niceyaml.AtPath(image.Path()))))
+				}
+			}
+
+			return niceyaml.NewSummary(fmt.Sprintf("%d empty images", len(errs)), errs...)
+		})
+	}
+
+	const want = "m.yaml:4:14: $.spec.containers[0].image: image is empty"
+
+	tcs := map[string]struct {
+		scope    paths.Path
+		selector paths.Path
+	}{
+		"root": {
+			scope:    paths.Doc(),
+			selector: paths.Current().Child("spec", "containers").IndexAll().Child("image"),
+		},
+		"scoped": {
+			scope:    paths.Doc().Child("spec"),
+			selector: paths.Current().Child("containers").IndexAll().Child("image"),
+		},
+		"scoped with an absolute selector": {
+			scope:    paths.Doc().Child("spec"),
+			selector: paths.Doc().Child("spec", "containers").IndexAll().Child("image"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			node := yamltest.At(t, doc, tc.scope)
+
+			err := node.Validate(t.Context(), images(tc.selector))
+			require.EqualError(t, err, want)
+
+			bound := yamltest.RequireSourceError(t, err)
+
+			path, ok := bound.Path()
+			require.True(t, ok)
+			assert.Equal(t, paths.MustParse("$.spec.containers[0].image"), path)
+
+			pos, ok := bound.Position()
+			require.True(t, ok)
+			assert.Equal(t, position.New(3, 13), pos)
+
+			_, err = node.Decode[any](t.Context(), niceyaml.WithValidator(images(tc.selector)))
+			require.EqualError(t, err, want)
+		})
+	}
 }
