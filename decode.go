@@ -2043,12 +2043,6 @@ func (n *Node) bindOwn(err error) error {
 	return bindTree(err, binder{src: n.source, node: n})
 }
 
-// contextEnded reports whether err is, or wraps, the error of a context
-// that ended: [context.Canceled] or [context.DeadlineExceeded].
-func contextEnded(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
-}
-
 // DecodeOption configures [Node.Decode], [Node.DecodeInto],
 // [Node.DecodeAt], and [Node.DecodeIfPresent]. [Source.Decode] and
 // [Source.DecodeInto] apply them to the one decode of the document of a
@@ -3285,29 +3279,6 @@ func (n *Node) holdsToken(tk *token.Token) bool {
 // looks for no value that reported it.
 var errPlaced = errors.New("placed")
 
-// markedError is an error with marks of its own on top of the error it
-// holds. [errors.Is] matches each of its marks, beside what that error
-// matches. A message that is not empty stands in for the message of the
-// error it holds.
-//
-// A sealed markedError unwraps to nothing, so every walk that reads an
-// error along its chain ends at it, and a reporter that prints each error
-// of a chain never prints what the error it holds carries, such as the
-// position and excerpt go-yaml writes into its own text. [errors.Is] and
-// [errors.As] still reach that error through it, apart from the targets
-// it refuses, which Is reports false for.
-type markedError struct {
-	err error
-	// The text that stands in for the message of err, or empty.
-	msg string
-	// The errors the error matches on top of what err matches.
-	marks []error
-	// The errors a sealed error matches for none of err.
-	refused []error
-	// The error unwraps to nothing.
-	sealed bool
-}
-
 // markDecode returns err as an error of a decode, which matches
 // [ErrDecode] and [errInvalid], and each of marks that is not nil, such
 // as the label of a rejection or [errPlaced]. It reads as err and
@@ -3332,54 +3303,6 @@ func yamlMessage(err yaml.Error, msg string) markedError {
 	}
 
 	return markedError{err: err, msg: msg, sealed: true}
-}
-
-func (e markedError) Error() string {
-	if e.msg != "" {
-		return e.msg
-	}
-
-	return e.err.Error()
-}
-
-// Unwrap returns the error e holds, or nil when e is sealed.
-func (e markedError) Unwrap() error {
-	if e.sealed {
-		return nil
-	}
-
-	return e.err
-}
-
-// Is reports whether target is one of the marks of e. A sealed e also
-// reports what the error it holds matches, apart from the targets it
-// refuses. [errors.Is] reads the error an e that is not sealed holds
-// through Unwrap.
-func (e markedError) Is(target error) bool {
-	if slices.Contains(e.marks, target) {
-		return true
-	}
-
-	if !e.sealed || slices.Contains(e.refused, target) {
-		return false
-	}
-
-	return errors.Is(e.err, target)
-}
-
-// As sets target to the first error in the chain of the error a sealed e
-// holds that matches it, as [errors.As] does. It reports false for an e
-// that is not sealed, whose error [errors.As] reads through Unwrap.
-func (e markedError) As(target any) bool {
-	return e.sealed && errors.As(e.err, target)
-}
-
-// without returns e without mark among its marks. It shares no marks
-// with e.
-func (e markedError) without(mark error) markedError {
-	e.marks = slices.DeleteFunc(slices.Clone(e.marks), func(m error) bool { return errors.Is(m, mark) })
-
-	return e
 }
 
 // asDecodeError returns err, an error the go-yaml decoder returned, as

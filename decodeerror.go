@@ -180,26 +180,6 @@ func (n *Node) lacksLocation(err error) bool {
 	return n.unplaced(err) && !holdsLocation(err)
 }
 
-// holdsLocation reports whether err, or an error anywhere in the tree it
-// unwraps to, is a [*SourceError] or an [*Error] that carries a location
-// or comes from [Rebase]. The details of an Error count as part of that
-// tree, though [Error.Unwrap] leaves them out.
-func holdsLocation(err error) bool {
-	for below := range errorsBelow(err) {
-		switch x := below.(type) { //nolint:errorlint // The node itself, not a chain search.
-		case *SourceError:
-			return true
-
-		case *Error:
-			if x.hasLocation() || x.move != nil {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
 // textRejection returns the rejection of content, a mapping or a
 // sequence the decoder refuses as [unmarshaler.Options.RefusesForText]
 // reports. The error the decoder returns for it names neither the value
