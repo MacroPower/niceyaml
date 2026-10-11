@@ -575,7 +575,7 @@ func drawn(err error) error {
 // Error returns the message of the error e draws, with its control
 // characters as pictures and each tab as four spaces.
 func (e drawnError) Error() string {
-	return escape.Control(escape.Tabs(e.err.Error()))
+	return escape.Line(e.err.Error())
 }
 
 // Unwrap returns the error e draws.

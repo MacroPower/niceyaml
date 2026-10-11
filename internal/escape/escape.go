@@ -91,3 +91,12 @@ func Tabs(s string) string {
 func Message(s string) string {
 	return Rows(Tabs(s))
 }
+
+// Line is like [Control], but it lays s out as one line of text, such as
+// the name of a source or a message on a row of its own, so it replaces
+// each tab as [Tabs] does first.
+//
+// For example, "a\tb\n" becomes "a    b␊".
+func Line(s string) string {
+	return Control(Tabs(s))
+}

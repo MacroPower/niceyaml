@@ -936,18 +936,11 @@ func rebase(err error, base paths.Path, movesOnly, invalid, ambiguous bool, fb f
 		}
 	}
 
-	if branches, ok := joinBranches(err); ok {
-		rebased := make([]error, 0, len(branches))
-		for _, branch := range branches {
-			r := rebase(branch, base, movesOnly, invalid, ambiguous, fb)
-			if r != nil {
-				rebased = append(rebased, r)
-			}
-		}
-
-		if len(rebased) > 0 {
-			return multierr.Rejoin(err, rebased)
-		}
+	joined := mapJoin(err, func(branch error) error {
+		return rebase(branch, base, movesOnly, invalid, ambiguous, fb)
+	})
+	if joined != nil {
+		return joined
 	}
 
 	return &Error{
@@ -1246,13 +1239,7 @@ func (e *Error) Error() string {
 // text for an Error that heads thousands of problems. FormatError
 // renders every problem.
 func (e *Error) Format(f fmt.State, verb rune) {
-	switch {
-	case verb == 'v' && f.Flag('+'):
-		writeString(f, formatError(e, defaultExcerptConfig(), ErrorListLimit))
-
-	default:
-		_, _ = fmt.Fprintf(f, fmt.FormatString(f, verb), e.Error()) //nolint:errcheck // Formatter has no error channel.
-	}
+	formatVerb(f, verb, e)
 }
 
 // LogValue implements [slog.LogValuer].
@@ -1270,7 +1257,7 @@ func (e *Error) Format(f fmt.State, verb rune) {
 // program that wants the path of any error, every problem, or the
 // excerpt, logs [FormatError] as a string.
 func (e *Error) LogValue() slog.Value {
-	return slog.StringValue(logTree(e))
+	return logValue(e)
 }
 
 // locus is the location an [Error] carries: a path when hasPath, a
@@ -2200,29 +2187,49 @@ func underScope(err error, scope paths.Path) (scopedError, bool) {
 		}
 	}
 
-	branches, ok := joinBranches(err)
-	if !ok {
+	changed := false
+
+	joined := mapJoin(err, func(branch error) error {
+		s, c := underScope(branch, scope)
+		changed = changed || c
+
+		return s.err
+	})
+	if joined == nil || !changed {
 		return unchanged, false
 	}
 
-	scoped := make([]error, 0, len(branches))
-	changed := false
+	return anchored(joined), true
+}
+
+// mapJoin applies f to each branch of err that is not nil, when err reads
+// as a join, as [joinBranches] reads it, and joins the results again as
+// [multierr.Rejoin] does. A branch f maps to nil drops out. It returns
+// nil when err reads as no join or every branch drops out.
+func mapJoin(err error, f func(error) error) error {
+	branches, ok := joinBranches(err)
+	if !ok {
+		return nil
+	}
+
+	mapped := make([]error, 0, len(branches))
 
 	for _, branch := range branches {
 		if branch == nil {
 			continue
 		}
 
-		s, c := underScope(branch, scope)
-		scoped = append(scoped, s.err)
-		changed = changed || c
+		m := f(branch)
+		if m != nil {
+			mapped = append(mapped, m)
+		}
 	}
 
-	if !changed {
-		return unchanged, false
+	if len(mapped) == 0 {
+		return nil
 	}
 
-	return anchored(multierr.Rejoin(err, scoped)), true
+	return multierr.Rejoin(err, mapped)
 }
 
 // anchored returns err with its anchor, as [anchorOf] finds it.
@@ -3843,13 +3850,7 @@ func allBindings(err error) iter.Seq[*SourceError] {
 // whose source holds secrets creates it with [WithExcerpts] set to
 // false, and no verb then prints a line of that source.
 func (e *SourceError) Format(f fmt.State, verb rune) {
-	switch {
-	case verb == 'v' && f.Flag('+'):
-		writeString(f, formatError(e, defaultExcerptConfig(), ErrorListLimit))
-
-	default:
-		_, _ = fmt.Fprintf(f, fmt.FormatString(f, verb), e.Error()) //nolint:errcheck // Formatter has no error channel.
-	}
+	formatVerb(f, verb, e)
 }
 
 // LogValue implements [slog.LogValuer].
@@ -3868,7 +3869,7 @@ func (e *SourceError) Format(f fmt.State, verb rune) {
 // returns. A program that wants every problem of any error, or the
 // excerpt, logs [FormatError] as a string.
 func (e *SourceError) LogValue() slog.Value {
-	return slog.StringValue(logTree(e))
+	return logValue(e)
 }
 
 // FormatError renders err as plain text for a log or a terminal without
@@ -3998,7 +3999,7 @@ func formatError(err error, cfg excerptConfig, limit int) string {
 		// its control characters as pictures like those of the tree,
 		// whatever text it holds. A tab becomes four spaces, as it does
 		// in the tree.
-		parts = append(parts, "no excerpt: "+escape.Control(escape.Tabs(bound.Unresolved().Error())))
+		parts = append(parts, "no excerpt: "+escape.Line(bound.Unresolved().Error()))
 	}
 
 	return joinParts(parts...)
@@ -4030,15 +4031,30 @@ func renderErrorTree(t ErrorTree) string {
 	return sb.String()
 }
 
-// logTree renders the tree of err as [renderErrorTree] lays it out, with
+// formatVerb formats err for verb, as [Error.Format] and
+// [SourceError.Format] describe. The %+v verb writes what [FormatError]
+// renders, with [ErrorListLimit] problems at most, and every other verb
+// formats the message as a string.
+func formatVerb(f fmt.State, verb rune, err error) {
+	switch {
+	case verb == 'v' && f.Flag('+'):
+		writeString(f, formatError(err, defaultExcerptConfig(), ErrorListLimit))
+
+	default:
+		//nolint:errcheck // Formatter has no error channel.
+		_, _ = fmt.Fprintf(f, fmt.FormatString(f, verb), err.Error())
+	}
+}
+
+// logValue returns the tree of err as [renderErrorTree] lays it out, with
 // [ErrorListLimit] problems at most and a last row that counts the rest,
 // as [limitTree] cuts it. When that tree has no row, such as for a bound
 // join of typed-nil errors, it renders the tree [messageTree] returns in
 // its place, as an [ErrorReport] with nothing else to draw holds it.
-func logTree(err error) string {
+func logValue(err error) slog.Value {
 	tree, _ := limitTree(NewErrorTree(err), ErrorListLimit)
 
-	return renderErrorTree(messageTree(tree, err))
+	return slog.StringValue(renderErrorTree(messageTree(tree, err)))
 }
 
 // writeErrorBranches writes children behind their connectors, indented
@@ -4051,7 +4067,7 @@ func writeErrorBranches(sb *strings.Builder, children []ErrorTree, indent string
 			connector, below = "`-- ", "    "
 		}
 
-		for j, row := range strings.Split(escape.Tabs(child.Label), "\n") {
+		for j, row := range strings.Split(escape.Message(child.Label), "\n") {
 			if broken {
 				sb.WriteByte('\n')
 			}
@@ -4059,9 +4075,9 @@ func writeErrorBranches(sb *strings.Builder, children []ErrorTree, indent string
 			broken = true
 
 			if j == 0 {
-				sb.WriteString(indent + connector + escape.Control(row))
+				sb.WriteString(indent + connector + row)
 			} else {
-				sb.WriteString(indent + below + escape.Control(row))
+				sb.WriteString(indent + below + row)
 			}
 		}
 

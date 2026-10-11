@@ -3599,8 +3599,7 @@ func isNullAlias(ctx context.Context, dec *yaml.Decoder, node, view ast.Node) bo
 // UnmarshalYAML, an ended context, or a panic [decodeWithRecover]
 // already placed. So does any error for a nil scope.
 func (n *Node) rejection(err error, scope ast.Node) error {
-	if err == nil || astnode.IsNil(scope) || errors.Is(err, errPlaced) ||
-		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if err == nil || astnode.IsNil(scope) || errors.Is(err, errPlaced) || contextEnded(err) {
 		return err
 	}
 

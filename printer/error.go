@@ -146,7 +146,7 @@ func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 		// as pictures like those of the tree. It sits outside the
 		// container, so it wraps to the whole width.
 		if excerpt.Named {
-			name := p.wrapTo(escape.Control(escape.Tabs(excerpt.Source.Name())), p.textWidth(0))
+			name := p.wrapTo(escape.Line(excerpt.Source.Name()), p.textWidth(0))
 			part = strings.Join(name, "\n") + "\n" + part
 		}
 
@@ -158,7 +158,7 @@ func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 		// the document spells, so its control characters render as
 		// pictures like those of the tree. A tab in the key becomes four
 		// spaces, as it does in the tree.
-		text := escape.Control(escape.Tabs("no excerpt: " + bound.Unresolved().Error()))
+		text := escape.Line("no excerpt: " + bound.Unresolved().Error())
 
 		parts = append(parts, strings.Join(p.wrapTo(text, p.textWidth(0)), "\n"))
 	}

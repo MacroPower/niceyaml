@@ -170,24 +170,12 @@ func NewErrorTree(err error) ErrorTree {
 //	}
 func (t ErrorTree) All() iter.Seq[ErrorTree] {
 	return func(yield func(ErrorTree) bool) {
-		t.all(yield)
-	}
-}
-
-// all yields t when it has text, then every node below it, each before the
-// nodes below it, and reports whether the caller wants more.
-func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
-	if t.Label != "" && !yield(t) {
-		return false
-	}
-
-	for _, child := range t.Children {
-		if !child.all(yield) {
-			return false
+		for node := range t.nodes() {
+			if node.Label != "" && !yield(node) {
+				return
+			}
 		}
 	}
-
-	return true
 }
 
 // Problems returns an iterator over the nodes that each stand for one
@@ -295,7 +283,7 @@ func Problems(err error) iter.Seq[ErrorTree] {
 // problems yields the nodes of t that [ErrorTree.Problems] yields and
 // reports whether the caller wants more.
 func (t ErrorTree) problems(yield func(ErrorTree) bool) bool {
-	if t.Label != "" && !t.heads() {
+	if t.isProblem() {
 		return yield(t)
 	}
 
@@ -306,6 +294,12 @@ func (t ErrorTree) problems(yield func(ErrorTree) bool) bool {
 	}
 
 	return true
+}
+
+// isProblem reports whether t stands for one problem: a node with text
+// that heads no separate problems.
+func (t ErrorTree) isProblem() bool {
+	return t.Label != "" && !t.heads()
 }
 
 // heads reports whether t stands over separate problems: whether a child
@@ -1300,7 +1294,7 @@ func skippedBindings(cut ErrorTree, left []ErrorTree) map[*SourceError]bool {
 // budget lasts, and goes to c.left once it runs out. A heading keeps its
 // details and the problems below it that stay, and goes when none does.
 func (c *treeCut) cut(t ErrorTree) (ErrorTree, bool) {
-	if t.Label != "" && !t.heads() {
+	if t.isProblem() {
 		if c.budget == 0 {
 			c.left = append(c.left, t)
 

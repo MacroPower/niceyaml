@@ -158,8 +158,7 @@ func (n *Node) locateDecodeError(
 // [Node.rejection] or [decodeWithRecover] placed, for the error of a
 // context that ended, and for a [yaml.Error] at a token of the source.
 func (n *Node) unplaced(err error) bool {
-	if errors.Is(err, errPlaced) ||
-		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, errPlaced) || contextEnded(err) {
 		return false
 	}
 

@@ -744,7 +744,7 @@ func (s *Source) Name() string {
 // a file can, thus stays on the line it names. [Source.Name] returns the
 // name as the caller gave it.
 func (s *Source) label() string {
-	return escape.Control(escape.Tabs(s.Name()))
+	return escape.Line(s.Name())
 }
 
 // FilePath returns the file path of the [Source], which schema routing

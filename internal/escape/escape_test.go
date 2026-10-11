@@ -289,3 +289,41 @@ func TestMessage(t *testing.T) {
 		})
 	}
 }
+
+func TestLine(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"empty string": {
+			input: "",
+			want:  "",
+		},
+		"normal text unchanged": {
+			input: "app.yaml",
+			want:  "app.yaml",
+		},
+		"tab expands to four spaces": {
+			input: "a\tb",
+			want:  "a    b",
+		},
+		"line feed becomes its picture": {
+			input: "a\nb",
+			want:  "a␊b",
+		},
+		"escape becomes its picture": {
+			input: "\x1b[31m",
+			want:  "␛[31m",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, escape.Line(tc.input))
+		})
+	}
+}
