@@ -179,6 +179,49 @@ func pastDeadline(t *testing.T) context.Context {
 	return ctx
 }
 
+// countingHandler returns a handler that answers as next does, and a
+// function that returns how many requests the handler has answered for
+// each path.
+func countingHandler(next http.Handler) (http.Handler, func() map[string]int) {
+	var (
+		mu   sync.Mutex
+		hits = map[string]int{}
+	)
+
+	count := func(path string) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		hits[path]++
+	}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count(r.URL.Path)
+		next.ServeHTTP(w, r)
+	})
+
+	return handler, func() map[string]int {
+		mu.Lock()
+		defer mu.Unlock()
+
+		return maps.Clone(hits)
+	}
+}
+
+// An openCountingFS is a file system that counts the files a registry
+// opens in files. It has no method but Open, so every read goes through
+// the count.
+type openCountingFS struct {
+	files fstest.MapFS
+	opens atomic.Int32
+}
+
+func (f *openCountingFS) Open(name string) (fs.File, error) {
+	f.opens.Add(1)
+
+	return f.files.Open(name) //nolint:wrapcheck // The test file system returns the error of the one it wraps.
+}
+
 func TestRegistry_Lookup(t *testing.T) {
 	t.Parallel()
 
@@ -844,30 +887,50 @@ func TestRegistry_Caching(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrEmptyPath)
 	})
 
-	t.Run("load failure is not cached", func(t *testing.T) {
+	t.Run("load failure is cached for the retry interval alone", func(t *testing.T) {
 		t.Parallel()
 
-		var loads atomic.Int32
+		// The bubble's clock stands still while goroutines run, so the
+		// second lookup lands inside the retry interval, and each sleep
+		// moves the clock past one.
+		synctest.Test(t, func(t *testing.T) {
+			var loads atomic.Int32
 
-		reg := schema.NewRegistry(
-			schema.WithResolvers(schema.Loadable("flaky.json", func(_ context.Context) ([]byte, error) {
-				if loads.Add(1) == 1 {
-					return nil, errors.New("transient")
-				}
+			reg := schema.NewRegistry(
+				schema.WithResolvers(schema.Loadable("flaky.json", func(_ context.Context) ([]byte, error) {
+					if loads.Add(1) == 1 {
+						return nil, errors.New("transient")
+					}
 
-				return []byte(`{"type": "object"}`), nil
-			})),
-		)
+					return []byte(`{"type": "object"}`), nil
+				})),
+			)
 
-		doc := document(t)
+			doc := document(t)
 
-		_, err := reg.Lookup(t.Context(), doc)
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorContains(t, err, "transient")
+			for range 2 {
+				_, err := reg.Lookup(t.Context(), doc)
+				require.ErrorIs(t, err, schema.ErrLoad)
+				require.ErrorContains(t, err, "transient")
+			}
 
-		_, err = reg.Lookup(t.Context(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, int32(2), loads.Load())
+			assert.Equal(t, int32(1), loads.Load())
+
+			time.Sleep(time.Minute)
+
+			first, err := reg.Lookup(t.Context(), doc)
+			require.NoError(t, err)
+			assert.Equal(t, int32(2), loads.Load())
+
+			// The schema that compiled stays for good, where the failure
+			// before it lasted one interval.
+			time.Sleep(time.Minute)
+
+			second, err := reg.Lookup(t.Context(), doc)
+			require.NoError(t, err)
+			assert.Same(t, first, second)
+			assert.Equal(t, int32(2), loads.Load())
+		})
 	})
 
 	t.Run("concurrent access is safe", func(t *testing.T) {
@@ -1734,6 +1797,310 @@ func TestRegistry_WithHTTPClient(t *testing.T) {
 
 		require.NoError(t, lookup(t, client, schema.URL(schemaURL)))
 		assert.Equal(t, int32(1), requests.Load())
+	})
+}
+
+func TestRegistry_WithRetryAfter(t *testing.T) {
+	t.Parallel()
+
+	const (
+		// The schema every document of these subtests names. The host
+		// resolves nowhere, and a client answers for it from memory.
+		schemaURL = "http://schemas.test/s.json"
+
+		// A schema whose $ref names the document /defs.json beside it.
+		rootSchema = `{"properties": {"a": {"$ref": "defs.json#/$defs/a"}}}`
+	)
+
+	// The registry of each subtest takes the schema of a document from
+	// its directive and fetches it from memory, with opts applied after.
+	// The handler behind it holds the body of each path in files and
+	// answers 404 for any other. The function beside the registry returns
+	// the requests the handler has answered, by path.
+	newRegistry := func(
+		files map[string]string, opts ...schema.RegistryOption,
+	) (*schema.Registry, func() map[string]int) {
+		handler, requests := countingHandler(schemaHandler(files))
+
+		reg := schema.NewRegistry(append([]schema.RegistryOption{
+			schema.WithHTTPClient(handlerTransport(handler).Client()),
+			schema.WithResolvers(schema.Directive()),
+		}, opts...)...)
+
+		return reg, requests
+	}
+
+	// Five documents that name schemaURL go through reg, one after
+	// another, and each must fail with want.
+	checkFive := func(t *testing.T, reg *schema.Registry, want error) {
+		t.Helper()
+
+		for range 5 {
+			err := reg.Check(t.Context(), yamltest.FirstDocument(t, withDirective(schemaURL, "a: 1\n")))
+			require.ErrorIs(t, err, want)
+		}
+	}
+
+	// A subtest that waits out an interval runs in a synctest bubble. Its
+	// clock stands still while goroutines run, so five documents in a row
+	// land inside one interval, and a sleep moves the clock past the
+	// interval without waiting in real time.
+	t.Run("failure costs one attempt per interval", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			// The sentinel each document fails with.
+			err   error
+			files map[string]string
+			// The requests by path after five documents inside the first
+			// interval, and after five more inside the second.
+			first  map[string]int
+			second map[string]int
+			opts   []schema.RegistryOption
+		}{
+			"schema that does not load": {
+				err:    schema.ErrLoad,
+				first:  map[string]int{"/s.json": 1},
+				second: map[string]int{"/s.json": 2},
+			},
+			"schema that does not decode": {
+				files:  map[string]string{"/s.json": `{"type": 5}`},
+				err:    schema.ErrCompile,
+				first:  map[string]int{"/s.json": 1},
+				second: map[string]int{"/s.json": 2},
+			},
+			"$ref that does not load": {
+				files:  map[string]string{"/s.json": rootSchema},
+				err:    schema.ErrLoad,
+				first:  map[string]int{"/s.json": 1, "/defs.json": 1},
+				second: map[string]int{"/s.json": 2, "/defs.json": 2},
+			},
+			// The schema compiles without the document, so the registry
+			// keeps the schema and fetches the document alone again.
+			"$ref that does not load in a schema that compiles without it": {
+				files:  map[string]string{"/s.json": rootSchema},
+				opts:   []schema.RegistryOption{requireRefs(false)},
+				err:    schema.ErrValidate,
+				first:  map[string]int{"/s.json": 1, "/defs.json": 1},
+				second: map[string]int{"/s.json": 1, "/defs.json": 2},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				synctest.Test(t, func(t *testing.T) {
+					reg, requests := newRegistry(tc.files, tc.opts...)
+
+					checkFive(t, reg, tc.err)
+					assert.Equal(t, tc.first, requests())
+
+					time.Sleep(time.Minute)
+
+					checkFive(t, reg, tc.err)
+					assert.Equal(t, tc.second, requests())
+				})
+			})
+		}
+	})
+
+	t.Run("schema that does not compile costs one fetch and one compile", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			// A compile asks the caller's resolver for the document the
+			// $ref names, so the calls of the resolver count the compiles.
+			// The document holds no subschema at the pointer of the $ref,
+			// so each compile fails.
+			defs, err := jsonschema.ParseSchema([]byte(`{}`))
+			require.NoError(t, err)
+
+			var compiles atomic.Int32
+
+			resolver := jsonschema.RefResolverFunc(func(context.Context, string) (*jsonschema.Schema, error) {
+				compiles.Add(1)
+
+				return defs, nil
+			})
+
+			reg, requests := newRegistry(
+				map[string]string{"/s.json": `{"$ref": "defs.json#/$defs/missing"}`},
+				schema.WithCompileOptions(schema.WithJSONSchemaOptions(jsonschema.WithRefResolver(resolver))),
+			)
+
+			checkFive(t, reg, schema.ErrCompile)
+			assert.Equal(t, map[string]int{"/s.json": 1}, requests())
+			assert.Equal(t, int32(1), compiles.Load())
+
+			time.Sleep(time.Minute)
+
+			checkFive(t, reg, schema.ErrCompile)
+			assert.Equal(t, map[string]int{"/s.json": 2}, requests())
+			assert.Equal(t, int32(2), compiles.Load())
+		})
+	})
+
+	t.Run("interval", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			opts []schema.RegistryOption
+			want time.Duration
+		}{
+			"defaults to one minute": {
+				want: time.Minute,
+			},
+			"positive replaces the default": {
+				opts: []schema.RegistryOption{schema.WithRetryAfter(20 * time.Millisecond)},
+				want: 20 * time.Millisecond,
+			},
+			"zero keeps the default": {
+				opts: []schema.RegistryOption{schema.WithRetryAfter(0)},
+				want: time.Minute,
+			},
+			"negative keeps the default": {
+				opts: []schema.RegistryOption{schema.WithRetryAfter(-time.Second)},
+				want: time.Minute,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				synctest.Test(t, func(t *testing.T) {
+					reg, requests := newRegistry(nil, tc.opts...)
+
+					checkFive(t, reg, schema.ErrLoad)
+					assert.Equal(t, map[string]int{"/s.json": 1}, requests())
+
+					// The interval has a nanosecond left.
+					time.Sleep(tc.want - time.Nanosecond)
+
+					checkFive(t, reg, schema.ErrLoad)
+					assert.Equal(t, map[string]int{"/s.json": 1}, requests())
+
+					time.Sleep(time.Nanosecond)
+
+					checkFive(t, reg, schema.ErrLoad)
+					assert.Equal(t, map[string]int{"/s.json": 2}, requests())
+				})
+			})
+		}
+	})
+
+	t.Run("failure under a context that ended is not remembered", func(t *testing.T) {
+		t.Parallel()
+
+		const defsSchema = `{"$defs": {"a": {"type": "integer"}}}`
+
+		tcs := map[string]struct {
+			files map[string]string
+			// The path whose first fetch fails with the error of its
+			// context.
+			held string
+			opts []schema.RegistryOption
+		}{
+			"schema": {
+				files: map[string]string{"/s.json": `{"type": "object"}`},
+				held:  "/s.json",
+			},
+			"document a $ref names": {
+				files: map[string]string{"/s.json": rootSchema, "/defs.json": defsSchema},
+				held:  "/defs.json",
+			},
+			"document a $ref names in a schema that compiles without it": {
+				files: map[string]string{"/s.json": rootSchema, "/defs.json": defsSchema},
+				held:  "/defs.json",
+				opts:  []schema.RegistryOption{requireRefs(false)},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				synctest.Test(t, func(t *testing.T) {
+					answer := handlerTransport(schemaHandler(tc.files))
+					release := make(chan struct{})
+
+					var fetches atomic.Int32
+
+					// The transport holds the first fetch of the path until
+					// release closes, and then fails it with the error of
+					// the context it ran under.
+					client := yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+						if r.URL.Path == tc.held && fetches.Add(1) == 1 {
+							<-release
+
+							return nil, r.Context().Err()
+						}
+
+						return answer(r)
+					}).Client()
+
+					ref := schema.URL(schemaURL)
+					reg := schema.NewRegistry(append(tc.opts,
+						schema.WithHTTPClient(client),
+						schema.WithResolvers(ref),
+					)...)
+
+					ctx, cancel := context.WithCancel(t.Context())
+					defer cancel()
+
+					var (
+						wg  sync.WaitGroup
+						err error
+					)
+
+					wg.Go(func() {
+						_, err = reg.Schema(ctx, ref)
+					})
+
+					// Cancel once the fetch waits in the transport. The
+					// request returns then, and the load fails after it,
+					// under the context that ended.
+					synctest.Wait()
+					cancel()
+					wg.Wait()
+					close(release)
+					synctest.Wait()
+
+					require.ErrorIs(t, err, schema.ErrLoad)
+					require.ErrorIs(t, err, context.Canceled)
+
+					// No interval has passed, so a remembered failure would
+					// fail this document too.
+					requireAccepts(t, reg, "a: 1\n")
+					assert.Equal(t, int32(2), fetches.Load())
+				})
+			})
+		}
+	})
+
+	t.Run("remembered failure names the Ref of each request", func(t *testing.T) {
+		t.Parallel()
+
+		// Two spellings of one path in one file system share a cache key,
+		// so the second request gets the failure of the first, and its
+		// message names the path the second Ref spells.
+		fsys := &openCountingFS{files: mapFS(nil)}
+		reg := schema.NewRegistry()
+
+		_, err := reg.Schema(t.Context(), schema.FileFS(fsys, "schemas/gone.json"))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		assert.True(t, strings.HasPrefix(err.Error(), `load schema: "schemas/gone.json": `), err.Error())
+
+		opens := fsys.opens.Load()
+		require.Positive(t, opens)
+
+		_, err = reg.Schema(t.Context(), schema.FileFS(fsys, "./schemas/gone.json"))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		assert.True(t, strings.HasPrefix(err.Error(), `load schema: "./schemas/gone.json": `), err.Error())
+		assert.Equal(t, opens, fsys.opens.Load())
 	})
 }
 
@@ -2965,7 +3332,7 @@ func TestRegistry_Schema(t *testing.T) {
 		assert.True(t, strings.HasPrefix(err.Error(), `compile schema: "k": `), err.Error())
 	})
 
-	t.Run("a load whose bytes do not compile runs again", func(t *testing.T) {
+	t.Run("a load whose bytes do not compile runs once in the retry interval", func(t *testing.T) {
 		t.Parallel()
 
 		ref, loads := countingLoader("k", []byte(`{"type": 42}`))
@@ -2975,9 +3342,10 @@ func TestRegistry_Schema(t *testing.T) {
 		for range 3 {
 			_, err := reg.Schema(t.Context(), ref)
 			require.ErrorIs(t, err, schema.ErrCompile)
+			assert.True(t, strings.HasPrefix(err.Error(), `compile schema: "k": `), err.Error())
 		}
 
-		assert.Equal(t, int32(3), loads.Load())
+		assert.Equal(t, int32(1), loads.Load())
 	})
 }
 
@@ -3808,7 +4176,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		hits[path] = &atomic.Int32{}
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		counter, ok := hits[r.URL.Path]
 		if !ok {
 			http.NotFound(w, r)
@@ -3830,8 +4198,19 @@ func TestRegistry_RefDocuments(t *testing.T) {
 			//nolint:errcheck // Test helper.
 			w.Write(data)
 		}
-	}))
+	})
+
+	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
+
+	// A subtest that waits out the retry interval runs in a synctest
+	// bubble, where a fetch over a socket never lets the clock move. A
+	// registry with the memory option fetches memoryURL from the handler
+	// itself, so it gets the answers of the server and adds to the same
+	// counts.
+	const memoryURL = "http://schemas.test"
+
+	memory := schema.WithHTTPClient(handlerTransport(handler).Client())
 
 	t.Run("a document several schemas reference loads once", func(t *testing.T) {
 		t.Parallel()
@@ -3849,62 +4228,96 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		assert.Equal(t, int32(1), hits["/defs.json"].Load())
 	})
 
-	t.Run("a document that missed at compile loads once after it recovers", func(t *testing.T) {
+	t.Run("a document that missed at compile loads once after the retry interval", func(t *testing.T) {
 		t.Parallel()
 
-		reg := schema.NewRegistry(requireRefs(false), schema.WithResolvers(schema.URL(server.URL+"/f.json")))
+		synctest.Test(t, func(t *testing.T) {
+			reg := schema.NewRegistry(
+				memory,
+				requireRefs(false),
+				schema.WithResolvers(schema.URL(memoryURL+"/f.json")),
+			)
 
-		for range 5 {
-			requireAccepts(t, reg, "b: 2\n")
-		}
+			// The compile missed the document. The registry remembers the
+			// miss, so a validation inside the interval fetches nothing,
+			// although the document has recovered.
+			for range 5 {
+				err := reg.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n"))
+				require.ErrorIs(t, err, schema.ErrValidate)
+			}
 
-		// The compile missed the document, and the first validation loaded
-		// it for every validation after.
-		assert.Equal(t, int32(2), hits["/flaky.json"].Load())
+			assert.Equal(t, int32(1), hits["/flaky.json"].Load())
 
-		requireRejects(t, reg, "b: x\n", `expected "integer"`)
+			time.Sleep(time.Minute)
+
+			// The first validation after the interval loads the document
+			// for every validation after.
+			for range 5 {
+				requireAccepts(t, reg, "b: 2\n")
+			}
+
+			assert.Equal(t, int32(2), hits["/flaky.json"].Load())
+
+			requireRejects(t, reg, "b: x\n", `expected "integer"`)
+		})
 	})
 
-	t.Run("a required document that missed at compile is not fetched again", func(t *testing.T) {
+	t.Run("a required document that missed at compile is fetched again after the retry interval", func(t *testing.T) {
 		t.Parallel()
 
-		ref := schema.URL(server.URL + "/kept/f.json")
-		reg := schema.NewRegistry(schema.WithResolvers(ref))
+		synctest.Test(t, func(t *testing.T) {
+			ref := schema.URL(memoryURL + "/kept/f.json")
+			reg := schema.NewRegistry(memory, schema.WithResolvers(ref))
 
-		for range 3 {
-			err := reg.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n"))
+			for range 3 {
+				err := reg.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n"))
+				require.ErrorIs(t, err, schema.ErrLoad)
+				assert.Contains(t, err.Error(), "/kept/flaky.json")
+			}
+
+			_, err := reg.Schema(t.Context(), ref)
 			require.ErrorIs(t, err, schema.ErrLoad)
-			assert.Contains(t, err.Error(), "/kept/flaky.json")
-		}
 
-		_, err := reg.Schema(t.Context(), ref)
-		require.ErrorIs(t, err, schema.ErrLoad)
+			// The registry remembers the miss in place of the schema, so
+			// inside the interval it fetches neither again, although the
+			// document has recovered.
+			assert.Equal(t, int32(1), hits["/kept/f.json"].Load())
+			assert.Equal(t, int32(1), hits["/kept/flaky.json"].Load())
 
-		// The registry keeps the miss in place of the schema, so it fetches
-		// neither again, although the document has recovered.
-		assert.Equal(t, int32(1), hits["/kept/f.json"].Load())
-		assert.Equal(t, int32(1), hits["/kept/flaky.json"].Load())
+			time.Sleep(time.Minute)
 
-		// A new registry fetches both and compiles the schema.
-		fresh := schema.NewRegistry(schema.WithResolvers(ref))
-		requireAccepts(t, fresh, "b: 2\n")
+			// The first request after the interval fetches both and
+			// compiles the schema.
+			requireAccepts(t, reg, "b: 2\n")
+			assert.Equal(t, int32(2), hits["/kept/f.json"].Load())
+			assert.Equal(t, int32(2), hits["/kept/flaky.json"].Load())
+		})
 	})
 
-	t.Run("a document that fails to load is fetched again", func(t *testing.T) {
+	t.Run("a document that fails to load is fetched again once per retry interval", func(t *testing.T) {
 		t.Parallel()
 
-		reg := schema.NewRegistry(requireRefs(false), schema.WithResolvers(schema.URL(server.URL+"/g.json")))
+		synctest.Test(t, func(t *testing.T) {
+			ref := schema.URL(memoryURL + "/g.json")
+			reg := schema.NewRegistry(memory, requireRefs(false), schema.WithResolvers(ref))
 
-		_, err := reg.Schema(t.Context(), schema.URL(server.URL+"/g.json"))
-		require.NoError(t, err)
+			_, err := reg.Schema(t.Context(), ref)
+			require.NoError(t, err)
 
-		for i := range 3 {
-			before := hits["/missing.json"].Load()
+			// The compile fetched the document in the first interval, and
+			// the validations of each later one fetch it once between
+			// them.
+			for interval := int32(1); interval <= 3; interval++ {
+				for range 3 {
+					err := reg.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n"))
+					require.ErrorIs(t, err, schema.ErrValidate)
+				}
 
-			err := reg.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n"))
-			require.ErrorIs(t, err, schema.ErrValidate)
-			assert.Equal(t, before+1, hits["/missing.json"].Load(), "validation %d", i)
-		}
+				assert.Equal(t, interval, hits["/missing.json"].Load(), "interval %d", interval)
+
+				time.Sleep(time.Minute)
+			}
+		})
 	})
 
 	t.Run("a url schema still reads no local file after a file schema loaded it", func(t *testing.T) {
@@ -4303,42 +4716,48 @@ func TestRegistry_Check_RedactsPassword(t *testing.T) {
 	t.Parallel()
 
 	// The referenced document answers 500 to its first request, so the
-	// compile misses it and the first validation loads it, and then holds
-	// an anchor the compiler rejects.
-	var lateHits atomic.Int32
+	// compile misses it. The first validation after the retry interval
+	// loads it, and it then holds an anchor the compiler rejects. The
+	// bubble's clock passes the interval without waiting in real time, and
+	// the handler answers from memory, since a fetch over a socket never
+	// lets that clock move.
+	synctest.Test(t, func(t *testing.T) {
+		var lateHits atomic.Int32
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/d/root.json":
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{"properties": {"a": {"$ref": "../late.json"}}}`))
+		client := handlerTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/d/root.json":
+				//nolint:errcheck // Test helper.
+				w.Write([]byte(`{"properties": {"a": {"$ref": "../late.json"}}}`))
 
-		case "/late.json":
-			if lateHits.Add(1) == 1 {
-				http.Error(w, "unavailable", http.StatusInternalServerError)
+			case "/late.json":
+				if lateHits.Add(1) == 1 {
+					http.Error(w, "unavailable", http.StatusInternalServerError)
 
-				return
+					return
+				}
+
+				//nolint:errcheck // Test helper.
+				w.Write([]byte(`{"$defs": {"a": {"$anchor": "1bad"}}}`))
+
+			default:
+				http.NotFound(w, r)
 			}
+		})).Client()
 
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{"$defs": {"a": {"$anchor": "1bad"}}}`))
+		ref := schema.URL(addPassword("http://schemas.test") + "/d/root.json")
+		reg := schema.NewRegistry(schema.WithHTTPClient(client), requireRefs(false), schema.WithResolvers(ref))
 
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(server.Close)
+		_, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
 
-	ref := schema.URL(addPassword(server.URL) + "/d/root.json")
-	reg := schema.NewRegistry(requireRefs(false), schema.WithResolvers(ref))
+		time.Sleep(time.Minute)
 
-	_, err := reg.Schema(t.Context(), ref)
-	require.NoError(t, err)
-
-	err = reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
-	require.ErrorIs(t, err, schema.ErrValidate)
-	assert.Contains(t, err.Error(), "1bad")
-	assert.NotContains(t, err.Error(), "secret")
+		err = reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+		require.ErrorIs(t, err, schema.ErrValidate)
+		assert.Contains(t, err.Error(), "1bad")
+		assert.NotContains(t, err.Error(), "secret")
+	})
 }
 
 func TestRegistry_RefCredentials(t *testing.T) {

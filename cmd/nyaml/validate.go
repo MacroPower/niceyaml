@@ -325,12 +325,12 @@ func buildRegistry(ctx context.Context, schemaRef string) (*schema.Registry, err
 			return nil, fmt.Errorf("--schema: %w", err)
 		}
 
-		// A registry keeps the failure of a schema only when a $ref of the
-		// schema does not load. With the Ref as its resolver, it would load
-		// any other broken schema again for every document. Compiling
-		// through Registry.Schema, rather than Compile on the loaded bytes,
-		// lets a $ref in the schema resolve against the schema's own file
-		// or URL.
+		// Compiling the schema here fails the command with one "--schema:"
+		// error before it reads any file. A registry with the Ref as its
+		// resolver would report a broken schema once for every document
+		// instead. Compiling through Registry.Schema, rather than Compile
+		// on the loaded bytes, lets a $ref in the schema resolve against
+		// the schema's own file or URL.
 		s, err := schema.NewRegistry().Schema(ctx, ref)
 		if err != nil {
 			return nil, fmt.Errorf("--schema: %w", err)

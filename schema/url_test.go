@@ -48,19 +48,24 @@ func serve(t *testing.T, files map[string]string) string {
 	return server.URL
 }
 
-// memoryClient returns a client that answers through [schemaHandler]
-// from memory, and the count of the requests it answered. No server
-// listens on a port, so a connection that another process opens cannot
-// add to the count.
-func memoryClient(files map[string]string) (*http.Client, *atomic.Int32) {
-	handler := schemaHandler(files)
-
-	return yamltest.CountingClient(yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+// handlerTransport returns a transport that answers each request through
+// handler from memory. No server listens on a port, so a connection that
+// another process opens cannot reach handler, and the transport works
+// inside a synctest bubble.
+func handlerTransport(handler http.Handler) yamltest.RoundTripFunc {
+	return func(r *http.Request) (*http.Response, error) {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, r)
 
 		return rec.Result(), nil
-	}))
+	}
+}
+
+// memoryClient returns a client that answers through [schemaHandler]
+// from memory, as [handlerTransport] does, and the count of the requests
+// it answered.
+func memoryClient(files map[string]string) (*http.Client, *atomic.Int32) {
+	return yamltest.CountingClient(handlerTransport(schemaHandler(files)))
 }
 
 // nonceServer starts a server that answers one path with a schema and

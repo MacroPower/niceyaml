@@ -62,6 +62,10 @@ var (
 // [WithHTTPClient] gave no client.
 const defaultHTTPTimeout = 30 * time.Second
 
+// defaultRetryAfter is how long a registry that [WithRetryAfter] gave no
+// interval remembers a failure.
+const defaultRetryAfter = 1 * time.Minute
+
 // Registry maps YAML documents to schemas using pluggable resolvers.
 //
 // Lookup tries the resolvers [WithResolvers] gave it in order, and the
@@ -69,14 +73,16 @@ const defaultHTTPTimeout = 30 * time.Second
 // caches the schemas it compiles by [Ref.Key], and a Ref from [FileFS]
 // by its file system too. It consults that cache
 // before loading, so once a schema compiles, the registry serves it to
-// every later document that names it without loading it again. A failed
-// load or compile stays out of the cache, so the next document that names
-// the Key loads it again. A schema whose $ref names a document that does
-// not load is the exception, since the registry keeps that failure with
-// the Key, as [Registry.Schema] describes. The cache never evicts, so
-// the registry keeps every schema it compiles for its whole lifetime,
-// and each distinct Key adds an entry, a URL that differs from another
-// only in its query string or fragment included. The registry compiles
+// every later document that names it without loading it again. The
+// registry remembers a failed load or compile for the interval
+// [WithRetryAfter] sets, one minute by default. Every document that names
+// the Key inside the interval gets the error of that attempt, and the
+// first one after the interval loads the schema again. The cache never
+// evicts, so
+// the registry keeps every schema it compiles for its whole lifetime.
+// Each distinct Key adds an entry, whether its schema compiled or
+// failed, and a URL that differs from another only in its query string
+// or fragment is a Key of its own. The registry compiles
 // every schema with the options
 // [WithCompileOptions] gave it. [Registry.Schema] hands out the compiled
 // schema a [Ref] names through that cache, for a caller that holds a Ref
@@ -100,8 +106,8 @@ const defaultHTTPTimeout = 30 * time.Second
 // is safe for concurrent use. Create instances with [NewRegistry].
 type Registry struct {
 	group   singleflight.Group    // one load and compile in flight per cacheKey
-	cache   map[string]cacheEntry // compiled schemas by cacheKey
-	refDocs map[string]refDoc     // the documents a $ref names, by URI without fragment
+	cache   map[string]cacheEntry // compiled schemas and remembered failures by cacheKey
+	refDocs map[string]refDoc     // the documents a $ref names, loaded or failed, by URI without fragment
 	fsIDs   map[any]int           // the number of each file system a Ref names its file in
 	fsKept  []fs.FS               // each file system in fsIDs, which keeps a map known by address alive
 	registryConfig
@@ -115,6 +121,7 @@ type Registry struct {
 //   - [WithCompileOptions]
 //   - [WithRequireSchema]
 //   - [WithHTTPClient]
+//   - [WithRetryAfter]
 //   - [WithFSAt]
 type RegistryOption func(*registryConfig)
 
@@ -127,6 +134,7 @@ type registryConfig struct {
 	fsAt        *fsDir       // the directory on disk the root of fsys stands for; nil when it stands for none
 	resolvers   []Resolver
 	compileOpts []CompileOption
+	retryAfter  time.Duration // how long the registry remembers a failure
 	// Makes Check report ErrNoMatch when no resolver applies.
 	requireSchema bool
 }
@@ -239,6 +247,32 @@ func WithHTTPClient(client *http.Client) RegistryOption {
 	}
 }
 
+// WithRetryAfter is a [RegistryOption] that sets how long the registry
+// remembers a schema that failed to load or compile before it tries the
+// schema again.
+//
+// Until the interval passes, every request for the schema returns the
+// error of that attempt and loads nothing. The documents that name a
+// broken schema, or a host that never answers, then cost one attempt per
+// interval between them. The first request after the interval loads the
+// schema again. The registry remembers a document that a $ref names and
+// that did not load for the same interval, as [Registry.Schema]
+// describes.
+//
+// The interval covers failures alone. The registry keeps a schema that
+// compiled for its whole lifetime, and it remembers no failure of a
+// request whose context ended.
+//
+// Defaults to 1 minute. An interval of zero or less keeps the default,
+// since it would load a broken schema again for every document.
+func WithRetryAfter(interval time.Duration) RegistryOption {
+	return func(c *registryConfig) {
+		if interval > 0 {
+			c.retryAfter = interval
+		}
+	}
+}
+
 // WithResolvers is a [RegistryOption] that appends resolvers to the end of
 // the lookup order. Lookup tries them in the order given, and the first
 // that does not report [ErrNoMatch] wins, so explicit user intent goes
@@ -342,6 +376,7 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 		refDocs:       make(map[string]refDoc),
 		fsIDs:         make(map[any]int),
 		client:        defaultHTTPClient,
+		retryAfter:    defaultRetryAfter,
 		requireSchema: true,
 	}
 	for _, opt := range opts {
@@ -686,10 +721,16 @@ func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 // # Errors
 //
 // The zero Ref names no schema, so it is [ErrResolve]. A load that fails
-// is [ErrLoad], and a compile that fails is [ErrCompile]. Schema caches
-// neither, so the next request for the cache key loads again. When ctx
-// ends before the schema loads, Schema returns [ErrLoad] wrapping the
-// context's error without waiting for the load to finish.
+// is [ErrLoad], and a compile that fails is [ErrCompile]. The registry
+// remembers either under the cache key for the interval [WithRetryAfter]
+// sets. Every request for the key inside the interval returns the error
+// of that attempt and loads nothing, so a schema that many documents name
+// costs one attempt per interval. The first request after the interval
+// loads again. When ctx ends before the schema loads, Schema returns
+// [ErrLoad] wrapping the context's error without waiting for the load to
+// finish. A load that fails under a context that ended says nothing about
+// the schema, so the registry does not remember it, and the next request
+// loads again.
 //
 // # References
 //
@@ -702,16 +743,18 @@ func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 //
 //	load schema: "file:///srv/root.json": cannot resolve $ref: read /srv/defs.json: ...
 //
-// The registry keeps those errors under the cache key in place of a
-// schema. Every later request for the key returns them and loads nothing
-// again, so a schema that many documents name costs one attempt. A new
-// registry tries again. The registry keeps nothing when a document did
+// The registry remembers those errors as it does any other failed load.
+// A request inside the retry interval returns them and loads nothing, and
+// the first request after the interval loads the schema and those
+// documents again. The registry remembers nothing when a document did
 // not load because ctx ended, and the next request compiles again.
 //
 // [WithRequireRefs] set false among the options of [WithCompileOptions]
-// makes the registry compile such a schema. Each validation that reaches
-// the $ref then loads the document again, and fails with an error
-// wrapping [ErrValidate] while it does not load. A schema the registry
+// makes the registry compile such a schema. A validation that reaches
+// the $ref then fails with an error wrapping [ErrValidate]. The registry
+// remembers the document that did not load for the retry interval, so
+// the validations inside the interval load nothing, and the first one
+// after it loads the document again. A schema the registry
 // holds as bytes, such as one from [Embedded], has no location to
 // resolve a $ref against, so a $ref to another document fails its
 // compile with [ErrCompile], as it does in [Compile].
@@ -727,7 +770,8 @@ func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 // failure reaches every caller that shared the load, including a timeout
 // inside the load whose error wraps a context error. A panic or a call to
 // [runtime.Goexit] in the load happens again in every caller that shared
-// it.
+// it. The registry does not remember either one, so the next request
+// runs the load again.
 func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 	if ref.Schema() != nil {
 		return ref.Schema(), nil
@@ -818,7 +862,9 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 // file system of the Ref. For a Ref from [URL], it fetches the URL
 // with the client [WithHTTPClient] gave the registry. For a Ref from
 // [Loadable], it returns the bytes the Ref's load returns. Load reads the
-// bytes on every call and caches nothing. [Registry.Schema] loads the
+// bytes on every call. It caches nothing, and it reads again after a
+// failure without waiting for the interval of [WithRetryAfter].
+// [Registry.Schema] loads the
 // same bytes once and compiles them, so Load is for a caller that wants
 // the bytes themselves, such as one that prints a schema. For a file or
 // URL whose fragment selects a subschema, Load returns the bytes of the
@@ -942,8 +988,15 @@ func isRefKeyword(key string) bool {
 	})
 }
 
-// refDoc is a document a $ref names, as the registry keeps it.
+// refDoc is what the registry keeps for a document a $ref names. That is
+// the document, or the error of the last attempt to load and parse it.
 type refDoc struct {
+	// When the attempt that returned err ended. The registry answers with
+	// err until the retry interval has passed since then.
+	failedAt time.Time
+	// The error of an attempt that loaded no document, and nil for a
+	// document that loaded.
+	err error
 	// The error the search for fileURL returned.
 	fileURLErr error
 	// The document, parsed. Every schema that references the document
@@ -957,19 +1010,41 @@ type refDoc struct {
 }
 
 // refDocument returns the document a $ref names by uri, a URI without a
-// fragment, which the registry keeps under that URI. The first call whose
+// fragment, which the registry keeps under key. The first call whose
 // load succeeds and whose bytes parse keeps the document in the registry,
-// and every later call for uri returns the kept document instead of
-// calling load. A load that fails and bytes that do not parse stay out of
-// the registry, so the next call loads again. When two calls load one
-// document at once, both return the document the first of them kept.
+// and every later call for key returns the kept document instead of
+// calling load. The registry remembers a load that fails, and bytes that
+// do not parse, for the retry interval. A call inside the interval
+// returns that error instead of calling load, and the first call after
+// the interval loads again. A failure under a context that ended says
+// nothing about the document, so the registry does not remember it. When
+// two calls load one document at once, both return the document the
+// first of them kept.
 func (r *Registry) refDocument(
 	ctx context.Context, key, uri string, load func() ([]byte, error),
 ) (refDoc, error) {
 	if doc, ok := r.keptRefDoc(key); ok {
-		return doc, nil
+		return doc, doc.err
 	}
 
+	doc, err := loadRefDoc(ctx, uri, load)
+	if err != nil {
+		if ctx.Err() != nil {
+			return refDoc{}, err
+		}
+
+		doc = refDoc{err: err, failedAt: time.Now()}
+	}
+
+	doc = r.keepRefDoc(key, doc)
+
+	return doc, doc.err
+}
+
+// loadRefDoc calls load for the bytes of the document a $ref names by
+// uri and parses them. For an HTTP or HTTPS uri, it also searches the
+// document for a file URL, as [localFileURL] describes.
+func loadRefDoc(ctx context.Context, uri string, load func() ([]byte, error)) (refDoc, error) {
 	data, err := load()
 	if err != nil {
 		return refDoc{}, err
@@ -985,27 +1060,33 @@ func (r *Registry) refDocument(
 		doc.fileURL, doc.fileURLErr = localFileURL(ctx, data)
 	}
 
-	return r.keepRefDoc(key, doc), nil
+	return doc, nil
 }
 
-// keptRefDoc returns the document the registry keeps under key, if any.
+// keptRefDoc returns what the registry answers a call for key with, if
+// anything. That is a document it keeps, or a failure it remembered less
+// than the retry interval ago.
 func (r *Registry) keptRefDoc(key string) (refDoc, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	doc, ok := r.refDocs[key]
+	if !ok || (doc.err != nil && time.Since(doc.failedAt) >= r.retryAfter) {
+		return refDoc{}, false
+	}
 
-	return doc, ok
+	return doc, true
 }
 
 // keepRefDoc keeps doc under key and returns it, unless the registry keeps
-// a document under key already, in which case it returns that document.
-// So every schema sees one document per key.
+// a document that loaded under key already, in which case it returns that
+// document. So every schema sees one document per key, and a document
+// that loads takes the place of a failure.
 func (r *Registry) keepRefDoc(key string, doc refDoc) refDoc {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if kept, ok := r.refDocs[key]; ok {
+	if kept, ok := r.refDocs[key]; ok && kept.err == nil {
 		return kept
 	}
 
@@ -1023,9 +1104,11 @@ func (r *Registry) keepRefDoc(key string, doc refDoc) refDoc {
 // names as it reads the schema, so a relative $ref resolves against the
 // file or URL that holds it. The registry loads each such document once
 // and keeps it for every schema that references it, at compile time and
-// during validation. A document that fails to load stays out of the
-// registry, so a later validation that reaches the reference loads it
-// again. A non-nil rec records the error of each such load for a
+// during validation. The registry remembers a document that fails to
+// load for the retry interval, as [WithRetryAfter] describes, so a
+// validation that reaches the reference loads it again only once the
+// interval has passed. A non-nil rec records the error of each such
+// load for a
 // registry that requires every $ref to resolve, which then hands out no
 // schema to validate with. A schema from [File] reaches local files and
 // URLs, and one from
@@ -1311,31 +1394,48 @@ func (r *Registry) name(ref Ref) string {
 }
 
 // A cacheEntry is what the registry keeps for a cache key. That is the
-// compiled schema, or the errors of the documents a $ref of the schema
-// names and the registry could not load. A registry that requires each
-// $ref to resolve keeps those errors in place of the schema, so it
-// returns them for every request without loading the documents again.
+// compiled schema, or the failure of the last attempt to load and compile
+// one. The registry keeps a schema for its lifetime. It answers with a
+// failure until the retry interval has passed since failedAt, so the
+// requests inside the interval load nothing.
 type cacheEntry struct {
-	schema     *Schema
-	unresolved error
+	failedAt time.Time
+	schema   *Schema
+	failed   *failure
 }
 
-// cached returns the entry cached under key, if any.
+// A failure is why an attempt to load and compile a schema gave none. It
+// holds no name, because two Refs that share a cache key can name one
+// file by two paths, and each request reads its own Ref in the message.
+type failure struct {
+	// The sentinel the error of a request wraps, [ErrLoad] or
+	// [ErrCompile].
+	kind error
+	// The error behind kind.
+	cause error
+}
+
+// cached returns the entry the registry answers a request for key with,
+// if any. That is a compiled schema, or a failure it remembered less than
+// the retry interval ago.
 func (r *Registry) cached(key string) (cacheEntry, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	e, ok := r.cache[key]
+	if !ok || (e.failed != nil && time.Since(e.failedAt) >= r.retryAfter) {
+		return cacheEntry{}, false
+	}
 
-	return e, ok
+	return e, true
 }
 
-// answer returns what a request for ref gets from e, the entry cached for
-// it. That is the schema of the entry, or an error wrapping [ErrLoad]
-// that names ref and holds the errors of the documents its $refs name.
+// answer returns what a request for ref gets from e, the entry for its
+// cache key. That is the schema of the entry, or an error that names ref
+// and wraps the sentinel and the cause of the entry's failure.
 func (r *Registry) answer(ref Ref, e cacheEntry) (*Schema, error) {
-	if e.unresolved != nil {
-		return nil, fmt.Errorf("%w: %q: cannot resolve $ref: %w", ErrLoad, r.name(ref), e.unresolved)
+	if e.failed != nil {
+		return nil, fmt.Errorf("%w: %q: %w", e.failed.kind, r.name(ref), e.failed.cause)
 	}
 
 	return e.schema, nil
@@ -1371,23 +1471,51 @@ func (r *Registry) compileRecovering(ctx context.Context, ref Ref, cacheKey stri
 	return s, err
 }
 
-// compile loads and compiles the schema ref names, caches it under
-// cacheKey, its [Registry.cacheKey], and returns it. When an earlier
-// flight cached a schema under that key, compile returns that schema. The
-// group runs one compile per key at a time and each compile checks the
-// cache first, so every caller sees one schema per key.
+// compile loads and compiles the schema ref names, keeps the outcome
+// under cacheKey, its [Registry.cacheKey], and returns it. When an earlier
+// flight left an entry under that key that [Registry.cached] still
+// returns, compile answers with that entry. The group runs one compile
+// per key at a time and each compile checks the cache first, so every
+// caller sees one schema per key.
 //
-// In a registry that requires every $ref to resolve, a schema whose
-// $refs name documents that did not load caches as the errors of those
-// loads, and compile returns them as [Registry.answer] does.
+// A failure goes into the cache with the time it happened, for the
+// requests of the retry interval. A failure under a context that ended
+// says nothing about the schema, so compile keeps none, and the next
+// request tries again.
 func (r *Registry) compile(ctx context.Context, ref Ref, cacheKey string) (*Schema, error) {
 	if e, ok := r.cached(cacheKey); ok {
 		return r.answer(ref, e)
 	}
 
-	data, err := r.Load(ctx, ref)
+	compiled, failed := r.attempt(ctx, ref)
+	entry := cacheEntry{schema: compiled, failed: failed}
+
+	if failed != nil {
+		if ctx.Err() != nil {
+			return r.answer(ref, entry)
+		}
+
+		entry.failedAt = time.Now()
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.cache[cacheKey] = entry
+
+	return r.answer(ref, entry)
+}
+
+// attempt loads and compiles the schema ref names once, and returns the
+// schema or the [failure] that left none.
+//
+// In a registry that requires every $ref to resolve, a schema whose
+// $refs name documents that did not load fails with the errors of those
+// loads behind [ErrLoad].
+func (r *Registry) attempt(ctx context.Context, ref Ref) (*Schema, *failure) {
+	data, err := r.load(ctx, ref)
 	if err != nil {
-		return nil, err
+		return nil, &failure{kind: ErrLoad, cause: err}
 	}
 
 	// The compiler resolves the references of the schema against base.
@@ -1402,7 +1530,7 @@ func (r *Registry) compile(ctx context.Context, ref Ref, cacheKey string) (*Sche
 	case ref.file != "":
 		base, err = fileBase(ref)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, r.name(ref), err)
+			return nil, &failure{kind: ErrLoad, cause: err}
 		}
 	}
 
@@ -1420,7 +1548,7 @@ func (r *Registry) compile(ctx context.Context, ref Ref, cacheKey string) (*Sche
 	if (ref.url || ref.file != "") && fragment != "" {
 		doc, err = parseDocument(ctx, data)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %q: %w", ErrCompile, r.name(ref), err)
+			return nil, &failure{kind: ErrCompile, cause: err}
 		}
 
 		wrapper := map[string]string{"$ref": base}
@@ -1430,7 +1558,7 @@ func (r *Registry) compile(ctx context.Context, ref Ref, cacheKey string) (*Sche
 
 		data, err = json.Marshal(wrapper)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %q: %w", ErrCompile, r.name(ref), err)
+			return nil, &failure{kind: ErrCompile, cause: err}
 		}
 	}
 
@@ -1445,32 +1573,28 @@ func (r *Registry) compile(ctx context.Context, ref Ref, cacheKey string) (*Sche
 
 	compiled, err := compileDocument(ctx, data, r.refOptions(ref, base, user, doc, rec))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %q: %w", ErrCompile, r.name(ref), err)
+		return nil, &failure{kind: ErrCompile, cause: err}
 	}
 
-	entry := cacheEntry{schema: compiled}
+	if rec == nil {
+		return compiled, nil
+	}
 
-	if rec != nil {
-		unresolved := rec.stop()
+	unresolved := rec.stop()
 
+	switch {
+	case unresolved == nil:
+		return compiled, nil
+
+	case ctx.Err() != nil:
 		// A document that did not load because the context ended says
-		// nothing about the document, so the registry keeps nothing, and
-		// the next request compiles again.
-		if unresolved != nil && ctx.Err() != nil {
-			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, r.name(ref), ctx.Err())
-		}
+		// nothing about the document, so the failure names the context's
+		// error in place of the load's.
+		return nil, &failure{kind: ErrLoad, cause: ctx.Err()}
 
-		if unresolved != nil {
-			entry = cacheEntry{unresolved: unresolved}
-		}
+	default:
+		return nil, &failure{kind: ErrLoad, cause: fmt.Errorf("cannot resolve $ref: %w", unresolved)}
 	}
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	r.cache[cacheKey] = entry
-
-	return r.answer(ref, entry)
 }
 
 // A keyUserinfo is the userinfo of a URL key, with the scheme and host
