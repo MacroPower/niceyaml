@@ -69,7 +69,7 @@ import (
 // Renaming, nulls, and verbatim tags change the tree, which the tree the
 // [Source] shares must not see. A document that renames an anchor, or
 // holds such an alias or such a tag, therefore reads a second parse of
-// the Source from [Source.decodeParse]. A renamed anchor keeps the text
+// the Source from [Source.reparse]. A renamed anchor keeps the text
 // of the Source, so the bytes the decoder hands an UnmarshalYAML method
 // hold the names the document spells. The decoder looks an alias up by
 // the text of its name, so an alias carries the new name in its text as
@@ -98,7 +98,7 @@ type decodeTree struct {
 	// The tokens of the second parse body comes from, if any, which the
 	// errors of the decoder may name. The Source shares the set between
 	// the trees of all its documents, and no tree writes to it.
-	parseTokens map[*token.Token]struct{}
+	parseTokens map[*token.Token]int
 	// Spells each name the tree gives an anchor as the document does,
 	// for the messages the decoder reports, or nil when no anchor has a
 	// name of its own.
@@ -156,7 +156,8 @@ func (d *document) newDecodeTree() *decodeTree {
 func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool) (*decodeTree, bool) {
 	src := d.node.source
 
-	file, fileTokens := src.decodeParse()
+	parse := src.decodeParse()
+	file := parse.File
 
 	i := d.fileIndex
 	if i < 0 || i >= len(file.Docs) {
@@ -277,7 +278,7 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 			continue
 		}
 
-		// Source.decodeParse has written a null into the token of the `*`.
+		// Source.reparse has written a null into the token of the `*`.
 		nulls[view] = ast.Null(view.Start)
 		nodes[alias] = nulls[view]
 	}
@@ -295,7 +296,7 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 		body:        body,
 		nodes:       nodes,
 		tokens:      tokens,
-		parseTokens: fileTokens,
+		parseTokens: parse.Index,
 		names:       replacer,
 	}, true
 }
@@ -307,7 +308,7 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 // names the alias. The go-yaml formatter writes the text of each token as
 // the chain of tokens holds it, so the token keeps its place in the chain
 // and reads null there. The formatter walks the whole chain, which runs
-// through every document of the Source, so [Source.decodeParse] writes
+// through every document of the Source, so [Source.reparse] writes
 // the nulls of all documents before a decode of any of them reads the
 // chain.
 func nullEnclosedAliases(docs []*Node, file *ast.File) {

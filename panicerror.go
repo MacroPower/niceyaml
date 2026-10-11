@@ -3,7 +3,6 @@ package niceyaml
 import (
 	"errors"
 	"fmt"
-	"runtime/debug"
 )
 
 // PanicError is the error of a panic that the parse or a decode
@@ -94,11 +93,11 @@ type recoveredError struct {
 }
 
 // recovered creates a new [recoveredError] for p, the value a recover
-// returned for a panic in the code that in names. The deferred function
-// that recovered p calls it, so the stack still holds the frames of the
-// panic.
-func recovered(in string, p any) recoveredError {
-	return recoveredError{err: &PanicError{Value: p, Stack: debug.Stack()}, in: in}
+// returned for a panic in the code that in names, and stack, which the
+// deferred function that recovered p takes, so it still holds the frames
+// of the panic.
+func recovered(in string, p any, stack []byte) recoveredError {
+	return recoveredError{err: &PanicError{Value: p, Stack: stack}, in: in}
 }
 
 func (e recoveredError) Error() string {
