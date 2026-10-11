@@ -10,6 +10,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -151,16 +152,16 @@ func (f *unknownFieldFinder) walk(t reflect.Type, node ast.Node, chain *decodeCh
 
 	t = unmarshaler.Base(t)
 
-	switch content := contentNode(f.resolver, node).(type) {
+	switch content := datapath.Deref(f.resolver, node).(type) {
 	case *ast.MappingNode:
 		switch {
 		case t.Kind() == reflect.Struct:
 			f.fields(t, content, chain)
 
 		case t.Kind() == reflect.Map && !f.unmarshalers.ReportsOwnError(t):
-			f.eachEntry(content, true, map[*ast.MappingNode]bool{}, func(entry *ast.MappingValueNode) {
+			for entry := range datapath.Members(f.resolver, content, true) {
 				f.value(t.Elem(), entry.Value, chain.through(entry))
-			})
+			}
 		}
 
 	case *ast.SequenceNode:
@@ -178,7 +179,7 @@ func (f *unknownFieldFinder) walk(t reflect.Type, node ast.Node, chain *decodeCh
 // value of type t from, where node is the value the document holds for
 // it. The decoder reads nothing from a null, as [readNode] describes.
 func (f *unknownFieldFinder) value(t reflect.Type, node ast.Node, chain *decodeChain) {
-	if value, ok := readNode(f.resolver, node); ok {
+	if value, ok := datapath.Read(f.resolver, node); ok {
 		f.walk(t, value, chain)
 	}
 }
@@ -230,16 +231,12 @@ func (f *unknownFieldFinder) fields(t reflect.Type, mapping *ast.MappingNode, ch
 		names = fieldNames(t, map[reflect.Type]bool{})
 	}
 
-	f.eachEntry(mapping, merges, map[*ast.MappingNode]bool{}, func(entry *ast.MappingValueNode) {
+	for entry := range datapath.Members(f.resolver, mapping, merges) {
 		name, ok := f.resolver.KeyName(entry.Key)
-		if !ok || names[name] {
-			return
-		}
-
-		if f.entry(mapping, name, merges) == entry {
+		if ok && !names[name] && f.entry(mapping, name, merges) == entry {
 			f.confirm(t, entry, chain)
 		}
-	})
+	}
 
 	f.below(t, mapping, merges, map[reflect.Type]bool{}, chain)
 }
@@ -313,64 +310,6 @@ func (f *unknownFieldFinder) entry(mapping *ast.MappingNode, name string, merges
 	return nil
 }
 
-// eachEntry calls visit for each entry of mapping, in document order. It
-// passes over an entry with no key and over the `<<` merge keys
-// themselves. With merges set, it visits the entries of the mappings
-// those merge keys bring in as well, each where its merge key stands.
-// The seen set holds the mappings the walk has read, so a mapping that
-// merges itself ends the walk.
-func (f *unknownFieldFinder) eachEntry(
-	mapping *ast.MappingNode, merges bool, seen map[*ast.MappingNode]bool, visit func(*ast.MappingValueNode),
-) {
-	if seen[mapping] {
-		return
-	}
-
-	seen[mapping] = true
-
-	for _, entry := range mapping.Values {
-		if entry == nil || entry.Key == nil {
-			continue
-		}
-
-		if !astnode.IsMergeKey(entry.Key) {
-			visit(entry)
-
-			continue
-		}
-
-		if !merges {
-			continue
-		}
-
-		for _, src := range f.sources(entry) {
-			f.eachEntry(src, merges, seen, visit)
-		}
-	}
-}
-
-// sources returns the mappings that entry, a `<<` merge key, brings in,
-// in the order the decoder applies them. It returns none when an alias
-// on the way does not resolve.
-func (f *unknownFieldFinder) sources(entry *ast.MappingValueNode) []*ast.MappingNode {
-	found, err := f.resolver.MergeSources(&ast.MappingNode{
-		Values: []*ast.MappingValueNode{entry},
-	})
-	if err != nil {
-		return nil
-	}
-
-	sources := make([]*ast.MappingNode, 0, len(found))
-
-	for _, src := range found {
-		if merged, ok := contentNode(f.resolver, src).(*ast.MappingNode); ok {
-			sources = append(sources, merged)
-		}
-	}
-
-	return sources
-}
-
 // dropped returns the entries the `<<` merge keys of mapping bring in
 // that the decoder gathers nothing of when it decodes a struct. The
 // decoder gathers the entries of each source before it reads a field. It
@@ -395,9 +334,9 @@ func (f *unknownFieldFinder) dropped(mapping *ast.MappingNode) map[*ast.MappingV
 			entries = map[*ast.MappingValueNode]bool{}
 		}
 
-		f.eachEntry(src, true, map[*ast.MappingNode]bool{}, func(entry *ast.MappingValueNode) {
+		for entry := range datapath.Members(f.resolver, src, true) {
 			entries[entry] = true
-		})
+		}
 
 		return false
 	})
@@ -426,7 +365,12 @@ func (f *unknownFieldFinder) eachSource(
 			continue
 		}
 
-		for _, src := range f.sources(entry) {
+		sources, err := datapath.MergeSources(f.resolver, entry)
+		if err != nil {
+			continue
+		}
+
+		for _, src := range sources {
 			if visit(src) {
 				f.eachSource(src, seen, visit)
 			}

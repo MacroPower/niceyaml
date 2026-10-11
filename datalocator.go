@@ -1,13 +1,11 @@
 package niceyaml
 
 import (
-	"strconv"
 	"sync"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
-	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -248,80 +246,5 @@ func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	t := datapath.Target{Path: l.base, Node: l.root}
-
-	for i, name := range names {
-		next, lacks := l.step(t, name)
-		if !lacks {
-			t = next
-
-			continue
-		}
-
-		path := next.Path.Child(names[i+1:]...)
-
-		if t.Unspelled || l.idx.SelectsEntry(t.Node, name) {
-			return path, t.Start(true)
-		}
-
-		return path, nil
-	}
-
-	path := t.Path
-	if key {
-		path = path.Key()
-	}
-
-	return path, t.Token(key)
-}
-
-// step returns the target one name down from t, and whether the data
-// holds no value there that the names could lead to. A name that
-// [elementIndex] reads as an index of the sequence at t leads to an
-// element, which the data lacks past the end of the sequence. Any other
-// name leads to a member. The data lacks that member where
-// [datapath.Index.Lacks] reports so. The walk treats the member as
-// missing too where a key of the mapping spells the name and sets a
-// member of another name, as [datapath.Index.SelectsOther] reports, so
-// no path through that key stands for it. The target of a value the data
-// lacks holds its path and no node.
-func (l *DataLocator) step(t datapath.Target, name string) (datapath.Target, bool) {
-	if index, ok := elementIndex(l.idx.Deref(t.Node), name); ok {
-		next := l.idx.Element(t, index)
-
-		return next, astnode.IsNil(next.Node)
-	}
-
-	// A member the data lacks never reaches [datapath.Index.Member],
-	// which asks which entry the name selects. The walk then reads the
-	// merge sources that a schema reads for a member it requires.
-	if l.idx.Lacks(t.Node, name) || l.idx.SelectsOther(t.Node, name) {
-		return datapath.Target{Path: t.Path.Child(name)}, true
-	}
-
-	return l.idx.Member(t, name), false
-}
-
-// elementIndex returns the index name stands for, and true, when node is
-// a sequence and name is an index as [strconv.Itoa] writes one: decimal
-// digits with no sign and no leading zero. Any other name is the name of
-// a member, and so is an index too large for an int.
-func elementIndex(node ast.Node, name string) (int, bool) {
-	if _, ok := node.(*ast.SequenceNode); !ok {
-		return 0, false
-	}
-
-	if name == "" || (len(name) > 1 && name[0] == '0') {
-		return 0, false
-	}
-
-	for i := range len(name) {
-		if name[i] < '0' || name[i] > '9' {
-			return 0, false
-		}
-	}
-
-	index, err := strconv.Atoi(name)
-
-	return index, err == nil
+	return l.idx.Locate(datapath.Target{Path: l.base, Node: l.root}, names, key)
 }

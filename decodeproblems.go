@@ -12,6 +12,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -372,7 +373,7 @@ func newProblemCollector(ctx context.Context, n *Node, cfg decodeConfig) *proble
 // decoder rejects those.
 func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 	c.register(node)
-	c.walk(t, node, parentAt(c.resolver, c.node.base), place{}, holder{})
+	c.walk(t, node, datapath.ParentAt(c.resolver, c.node.base), place{}, holder{})
 
 	if !c.cfg.disallowUnknownFields {
 		return
@@ -387,55 +388,6 @@ func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 			unknownField: true,
 		})
 	}
-}
-
-// parentAt returns what holds the node path selects in the document of
-// resolver, for [astnode.PathToken]. That is the entry the last `.name`
-// selector of path picks, or the sequence and the index its last `[n]`
-// selector picks. A `~` selector picks the key of an entry, which nothing
-// holds. Where no entry with a key holds the node the path before the `~`
-// selects, the `~` selects that node, and what holds it stands. The root
-// of the document has no parent, and neither does a path that selects
-// nothing.
-func parentAt(resolver *paths.Resolver, path paths.Path) astnode.Parent {
-	last, ok := path.Last()
-	if !ok {
-		return astnode.Parent{}
-	}
-
-	above, _ := path.Parent()
-
-	if last.Kind == paths.SelectorKey {
-		in := parentAt(resolver, above)
-		if in.Entry != nil && astnode.Content(in.Entry.Key) != nil {
-			return astnode.Parent{}
-		}
-
-		return in
-	}
-
-	node, err := resolver.Node(above)
-	if err != nil {
-		return astnode.Parent{}
-	}
-
-	switch last.Kind {
-	case paths.SelectorChild:
-		entry, err := resolver.Entry(node, last.Name)
-		if found, ok := entry.(*ast.MappingValueNode); err == nil && ok {
-			return astnode.Parent{Entry: found}
-		}
-
-	case paths.SelectorIndex:
-		if seq, ok := contentNode(resolver, node).(*ast.SequenceNode); ok {
-			return astnode.Parent{Sequence: seq, Index: last.Index}
-		}
-
-	default:
-		// A selector that can pick several nodes names no one of them.
-	}
-
-	return astnode.Parent{}
 }
 
 // register has the decoder of the pass read the anchors of node, the
@@ -504,7 +456,7 @@ func (c *problemCollector) walk(t reflect.Type, held ast.Node, from astnode.Pare
 		return
 	}
 
-	node, ok := readNode(c.resolver, held)
+	node, ok := datapath.Read(c.resolver, held)
 	if !ok {
 		return
 	}
@@ -518,7 +470,7 @@ func (c *problemCollector) walk(t reflect.Type, held ast.Node, from astnode.Pare
 	}
 
 	if c.cfg.unmarshalers.ReportsOwnError(t) {
-		content := contentNode(c.resolver, node)
+		content := datapath.Deref(c.resolver, node)
 
 		// The decoder calls an UnmarshalText method for a scalar alone. It
 		// refuses any other node itself, unless another unmarshaler of the
@@ -535,7 +487,7 @@ func (c *problemCollector) walk(t reflect.Type, held ast.Node, from astnode.Pare
 		return
 	}
 
-	switch content := contentNode(c.resolver, node).(type) {
+	switch content := datapath.Deref(c.resolver, node).(type) {
 	case *ast.MappingNode:
 		switch {
 		case t.Kind() == reflect.Struct:
@@ -629,13 +581,13 @@ func (c *problemCollector) below(
 // no fixed order. So one decode rejects one of the values the map does
 // not take, and not always the same one.
 func (c *problemCollector) inlineMap(in holder, t reflect.Type, mapping *ast.MappingNode, merges bool, at place) {
-	c.finder.eachEntry(mapping, merges, map[*ast.MappingNode]bool{}, func(entry *ast.MappingValueNode) {
+	for entry := range datapath.Members(c.resolver, mapping, merges) {
 		name, ok := c.resolver.KeyName(entry.Key)
 		if ok && c.finder.entry(mapping, name, merges) == entry {
 			in.entry = entry
 			c.walk(t.Elem(), entry.Value, astnode.Parent{Entry: entry}, at.child(name), in)
 		}
-	})
+	}
 }
 
 // elements walks each element of seq, which a slice or an array of type
@@ -659,11 +611,11 @@ func (c *problemCollector) entries(t reflect.Type, mapping *ast.MappingNode, at 
 		return
 	}
 
-	c.finder.eachEntry(mapping, true, map[*ast.MappingNode]bool{}, func(entry *ast.MappingValueNode) {
+	for entry := range datapath.Members(c.resolver, mapping, true) {
 		if name, ok := c.resolver.KeyName(entry.Key); ok {
 			c.walk(t.Elem(), entry.Value, astnode.Parent{Entry: entry}, at.child(name), holder{element: true})
 		}
-	})
+	}
 }
 
 // leaf decodes node into a new value of type t and adds the rejection
@@ -712,7 +664,7 @@ func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, from astnod
 		return
 	}
 
-	content := contentNode(c.resolver, node)
+	content := datapath.Deref(c.resolver, node)
 
 	var cause error
 

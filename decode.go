@@ -18,6 +18,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
@@ -1655,7 +1656,7 @@ func (n *Node) scope(path paths.Path, node ast.Node) (position.Span, token.Token
 		return span, tks
 	}
 
-	in := parentAt(n.doc.pathResolver(), path)
+	in := datapath.ParentAt(n.doc.pathResolver(), path)
 
 	var value ast.Node
 

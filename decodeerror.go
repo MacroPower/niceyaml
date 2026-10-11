@@ -12,6 +12,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/rejection"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
@@ -526,20 +527,13 @@ func (l *errorLocator) entries(
 		}
 
 		if astnode.IsMergeKey(entry.Key) {
-			sources, err := resolver.MergeSources(&ast.MappingNode{
-				Values: []*ast.MappingValueNode{entry},
-			})
+			sources, err := datapath.MergeSources(resolver, entry)
 			if err != nil {
 				continue
 			}
 
 			for _, src := range sources {
-				merged, ok := l.content(src).(*ast.MappingNode)
-				if !ok {
-					continue
-				}
-
-				if found, ok := l.entries(t, node, merged, at, seen); ok {
+				if found, ok := l.entries(t, node, src, at, seen); ok {
 					return found, true
 				}
 			}
@@ -589,72 +583,15 @@ func (l *errorLocator) value(entry ast.Node) (ast.Node, bool) {
 }
 
 // read returns the node the decoder reads a field, an element, or a map
-// value from, as [readNode] finds it in the document of the walk.
+// value from, as [datapath.Read] finds it in the document of the walk.
 func (l *errorLocator) read(node ast.Node) (ast.Node, bool) {
-	return readNode(l.node.doc.pathResolver(), node)
-}
-
-// readNode returns the node the decoder reads a field, an element, or a
-// map value from, where node is the value the document holds for it and
-// resolver binds the aliases of that document. It returns node itself
-// without the anchors on it, or the content of the anchor an alias
-// refers to. The bool result is false when the decoder reads no value
-// there. The decoder reads none from a null, or from an alias to one,
-// and leaves the target as it is, with no call to an unmarshaler. An
-// alias that does not resolve gives no node either.
-func readNode(resolver *paths.Resolver, node ast.Node) (ast.Node, bool) {
-	if astnode.IsNil(node) {
-		return nil, false
-	}
-
-	held := node
-	if alias, ok := node.(*ast.AliasNode); ok {
-		anchor, err := resolver.Anchor(alias)
-		if err != nil {
-			return nil, false
-		}
-
-		held = astnode.Content(anchor)
-	}
-
-	if astnode.IsNil(held) || held.Type() == ast.NullType {
-		return nil, false
-	}
-
-	content, err := resolver.Deref(node)
-	if err != nil || astnode.IsNil(content) {
-		return nil, false
-	}
-
-	return content, true
+	return datapath.Read(l.node.doc.pathResolver(), node)
 }
 
 // content returns the mapping, sequence, or scalar that node holds, as
-// [contentNode] finds it in the document of the walk.
+// [datapath.Deref] finds it in the document of the walk.
 func (l *errorLocator) content(node ast.Node) ast.Node {
-	return contentNode(l.node.doc.pathResolver(), node)
-}
-
-// contentNode returns the mapping, sequence, or scalar that node holds,
-// behind the anchors, tags, and aliases on it, or nil when an alias on
-// the way does not resolve. The resolver binds the aliases of the
-// document of node.
-func contentNode(resolver *paths.Resolver, node ast.Node) ast.Node {
-	for {
-		node = astnode.Content(node)
-
-		alias, ok := node.(*ast.AliasNode)
-		if !ok {
-			return node
-		}
-
-		next, err := resolver.Deref(alias)
-		if err != nil {
-			return nil
-		}
-
-		node = next
-	}
+	return datapath.Deref(l.node.doc.pathResolver(), node)
 }
 
 // reproduces reports whether a decode of node into v, a pointer to a new

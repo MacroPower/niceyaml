@@ -2,20 +2,19 @@ package niceyaml
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"fmt"
 	"math"
 	"reflect"
 	"slices"
 	"strings"
-	"time"
 	"unsafe"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
@@ -853,83 +852,20 @@ func (w *selfWalker) children(v reflect.Value, at place, shadowed map[string]boo
 		// itself included.
 		names := w.keyNames(w.nodeOf(at.last), v.Type().Key())
 
-		entries := make([]mapEntry, 0, v.Len())
-		shared := map[any]int{}
-
-		for iter := v.MapRange(); iter.Next(); {
-			key := iter.Key()
-			if k, ok := nameKey(key); ok {
-				shared[k]++
-			}
-
-			entries = append(entries, mapEntry{key: key, value: iter.Value()})
-		}
-
-		// The names cannot tell apart several keys that [nameKey] gives
-		// one value, so none of them takes the text of a document key.
-		// Several NaN keys give one value, and so do several time keys of
-		// one instant and zone, or several pointer keys to equal values.
-		// Such keys then share one path, as below.
-		for k, n := range shared {
-			if n > 1 {
-				delete(names, k)
-			}
-		}
-
-		for i := range entries {
-			entries[i].seg = mapKey(entries[i].key, names)
-			entries[i].typeName = keyTypeName(entries[i].key)
-		}
-
-		compareKeys := func(a, b mapEntry) int {
-			return cmp.Or(strings.Compare(a.seg, b.seg), strings.Compare(a.typeName, b.typeName))
-		}
-
-		slices.SortFunc(entries, compareKeys)
-
 		// A path names a key by its text alone, so keys that share a
 		// segment share a path, which resolves to the document entry of
-		// one of them at most. Keys of different types can share one,
-		// such as 1 and "1" in a map[any]T, and so can the keys above
-		// that no name tells apart, such as several NaN keys beside one
-		// the document spells NaN. A `<<` merge can bring in such a key
-		// beside one the mapping spells, even where the parser rejects
-		// duplicate keys. Several pointer keys of one type share a
-		// segment too, when [mapKey] names them by that type. The errors
-		// under such a path bind with no position.
-		ambiguous := map[string]bool{}
-
-		for i := 1; i < len(entries); i++ {
-			if entries[i].seg == entries[i-1].seg {
-				ambiguous[entries[i].seg] = true
-			}
-		}
-
-		for len(entries) > 0 {
-			n := 1
-			for n < len(entries) && compareKeys(entries[0], entries[n]) == 0 {
-				n++
-			}
-
-			seg := entries[0].seg
-			if !w.walkEntries(at.child(seg), entries[:n], ambiguous[seg]) {
+		// one of them at most. The errors under such a path bind with no
+		// position.
+		for _, group := range datapath.MapGroups(v, names) {
+			if !w.walkEntries(at.child(group.Seg), group.Entries, group.Ambiguous) {
 				ok = false
 			}
-
-			entries = entries[n:]
 		}
 
 	default:
 	}
 
 	return ok
-}
-
-// mapEntry holds one entry of a map the walk is inside of, with the path
-// segment and the type name its key orders by.
-type mapEntry struct {
-	key, value    reflect.Value
-	seg, typeName string
 }
 
 // walkEntries walks entries, the entries of a map that share the place
@@ -951,7 +887,7 @@ type mapEntry struct {
 // errors of entries bind with no position, for the reason
 // [ErrAmbiguousPath]. They bind here, so the text that orders the groups
 // names the path of each.
-func (w *selfWalker) walkEntries(at place, entries []mapEntry, ambiguous bool) bool {
+func (w *selfWalker) walkEntries(at place, entries []datapath.MapEntry, ambiguous bool) bool {
 	ok := true
 	start := len(w.errs)
 	groups := make([][]error, 0, len(entries))
@@ -964,11 +900,11 @@ func (w *selfWalker) walkEntries(at place, entries []mapEntry, ambiguous bool) b
 	w.ambiguous = outer || (ambiguous && !w.sealed)
 
 	for _, e := range entries {
-		if !w.walk(e.key, at.key(), nil) {
+		if !w.walk(e.Key, at.key(), nil) {
 			ok = false
 		}
 
-		if !w.walk(e.value, at, nil) {
+		if !w.walk(e.Value, at, nil) {
 			ok = false
 		}
 
@@ -1375,7 +1311,7 @@ func (w *selfWalker) stopped() bool {
 // node of a value the document did not set.
 func (w *selfWalker) keyNames(node ast.Node, t reflect.Type) map[any]string {
 	names := map[any]string{}
-	w.collectKeyNames(node, t, names, map[*ast.MappingNode]bool{})
+	w.collectKeyNames(node, t, names)
 
 	return names
 }
@@ -1433,56 +1369,21 @@ func (w *selfWalker) nodeOf(s *step) ast.Node {
 // collectKeyNames adds the keys of the mapping node holds, and of the
 // mappings it merges, to names, as [selfWalker.keyNames] describes. It
 // reaches the mapping through the anchors, tags, and aliases on node, as
-// [selfWalker.valueNode] does. It reports false when the walk stopped at
-// a merge with an alias that does not resolve, so the caller stops too.
-//
-// The walk goes in reverse document order, so the first name it sets
-// for a value is the one the decode keeps. The first time the walk
-// reaches a mapping is that mapping's last occurrence in document
-// order, so the seen set skips only occurrences whose names would lose,
-// and it also stops merge cycles.
-func (w *selfWalker) collectKeyNames(
-	node ast.Node, t reflect.Type, names map[any]string, seen map[*ast.MappingNode]bool,
-) bool {
+// [selfWalker.valueNode] does. The walk goes in reverse document order,
+// as [datapath.MembersBackward] does, so the first name it sets for a
+// value is the one the decode keeps.
+func (w *selfWalker) collectKeyNames(node ast.Node, t reflect.Type, names map[any]string) {
 	mapping, ok := astnode.Content(w.valueNode(node, false)).(*ast.MappingNode)
-	if !ok || seen[mapping] {
-		return true
+	if !ok {
+		return
 	}
-
-	seen[mapping] = true
 
 	// The decoder sets each entry in document order, and a merge sets
 	// the keys of its sources where it stands, so a later entry wins
-	// whether it is a key of the mapping or a merge. A merge with an
-	// alias that does not resolve may set any key, so the walk stops
-	// there and names no earlier entry, of this mapping or of a mapping
-	// that merges this one.
-	for _, entry := range slices.Backward(mapping.Values) {
-		if entry == nil || entry.Key == nil {
-			continue
-		}
-
-		if !astnode.IsMergeKey(entry.Key) {
-			w.addKeyName(entry.Key, t, names)
-
-			continue
-		}
-
-		sources, err := w.pathResolver().MergeSources(&ast.MappingNode{
-			Values: []*ast.MappingValueNode{entry},
-		})
-		if err != nil {
-			return false
-		}
-
-		for _, src := range slices.Backward(sources) {
-			if !w.collectKeyNames(src, t, names, seen) {
-				return false
-			}
-		}
+	// whether it is a key of the mapping or a merge.
+	for entry := range datapath.MembersBackward(w.pathResolver(), mapping) {
+		w.addKeyName(entry.Key, t, names)
 	}
-
-	return true
 }
 
 // pathResolver returns the [paths.Resolver] for the document of the
@@ -1541,7 +1442,7 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 		return
 	}
 
-	k, ok := nameKey(decoded.Elem())
+	k, ok := datapath.KeyOf(decoded.Elem())
 	if !ok {
 		return
 	}
@@ -1625,117 +1526,4 @@ func (w *selfWalker) valueNode(node ast.Node, parsed bool) ast.Node {
 	}
 
 	return nil
-}
-
-// nanKey stands in names for a NaN key, since a NaN equals no value,
-// itself included, and so finds no entry under its own value.
-type nanKey struct{}
-
-// timeKey stands in names for a [time.Time] key. A [time.Time] holds a
-// pointer to its location, and a decode of an offset such as +05:30
-// makes a new location each time, so the key in the map equals no key
-// that decodes from the same text. The fields together form the key in
-// names.
-//
-//nolint:unused // The fields tell the keys of names apart.
-type timeKey struct {
-	zone   string
-	sec    int64
-	nsec   int
-	offset int
-}
-
-// nameKey returns the value names holds the text of key under: [nanKey]
-// for a float NaN and [timeKey] for a [time.Time], alone or behind an
-// interface, or else the value of key itself. A pointer key stands for
-// the value it points to, as [pointee] gives it. The bool result is
-// false for a key that cannot key a map.
-func nameKey(key reflect.Value) (any, bool) {
-	key = pointee(key)
-	if !key.Comparable() {
-		return nil, false
-	}
-
-	v := key
-	if v.Kind() == reflect.Interface && !v.IsNil() {
-		v = v.Elem()
-	}
-
-	if v.CanFloat() && math.IsNaN(v.Float()) {
-		return nanKey{}, true
-	}
-
-	if tm, ok := reflect.TypeAssert[time.Time](v); ok {
-		zone, offset := tm.Zone()
-
-		return timeKey{zone: zone, sec: tm.Unix(), nsec: tm.Nanosecond(), offset: offset}, true
-	}
-
-	return key.Interface(), true
-}
-
-// pointee returns the value key points to when key is a non-nil pointer
-// to a value that can key a map, and key itself otherwise. Since go-yaml
-// decodes a pointer key as the value it points to, that value, rather
-// than the address, names the key. The value a pointer points to may
-// hold a slice or map that refers back to itself, which no formatting
-// finishes. So a pointer to a value that cannot key a map stays a
-// pointer, and [mapKey] names it by its type. A pointer held in an
-// interface stays too, since go-yaml decodes no key of an interface
-// type to one.
-func pointee(key reflect.Value) reflect.Value {
-	if key.Kind() == reflect.Pointer && !key.IsNil() && key.Elem().Comparable() {
-		return key.Elem()
-	}
-
-	return key
-}
-
-// mapKey returns the path segment for a map key: its text in names, as
-// the document spells it, under the value [nameKey] gives, or else the
-// string itself, or the formatted value of any other key. A pointer key
-// stands for the value it points to, as [pointee] gives it.
-//
-// A non-nil pointer left after [pointee], alone or behind an interface,
-// gives its type in parentheses, such as (*[]interface {}). Formatting
-// it would print either the value it points to, which may refer back
-// to itself so that no formatting finishes, or its address, which
-// changes from run to run. Several such keys of one type then share a
-// path.
-func mapKey(key reflect.Value, names map[any]string) string {
-	if k, ok := nameKey(key); ok {
-		if name, ok := names[k]; ok {
-			return name
-		}
-	}
-
-	key = pointee(key)
-	if key.Kind() == reflect.String {
-		return key.String()
-	}
-
-	v := key
-	if v.Kind() == reflect.Interface && !v.IsNil() {
-		v = v.Elem()
-	}
-
-	if v.Kind() == reflect.Pointer && !v.IsNil() {
-		return "(" + v.Type().String() + ")"
-	}
-
-	return fmt.Sprint(key.Interface())
-}
-
-// keyTypeName returns the name of the type a map key holds: the dynamic
-// type of a key an interface holds, or "" for a nil one.
-func keyTypeName(key reflect.Value) string {
-	if key.Kind() == reflect.Interface {
-		if key.IsNil() {
-			return ""
-		}
-
-		key = key.Elem()
-	}
-
-	return key.Type().String()
 }

@@ -4,6 +4,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/datapath"
 )
 
 // NodeKind is the structural kind of the value a [Node] holds, as
@@ -64,7 +65,7 @@ func (n *Node) Kind() NodeKind {
 		return NodeNone
 	}
 
-	switch contentNode(n.doc.pathResolver(), node).(type) {
+	switch datapath.Deref(n.doc.pathResolver(), node).(type) {
 	case nil:
 		return NodeNone
 	case *ast.MappingNode:

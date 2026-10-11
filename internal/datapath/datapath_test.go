@@ -1,7 +1,12 @@
 package datapath_test
 
 import (
+	"fmt"
+	"iter"
+	"math"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
@@ -848,4 +853,437 @@ func TestMemberName(t *testing.T) {
 			assert.Equal(t, tc.want, datapath.MemberName(tc.key))
 		})
 	}
+}
+
+// mappingAt returns the resolver of the first document of input and the
+// mapping the path $.name selects there.
+func mappingAt(tb testing.TB, input, name string) (*paths.Resolver, *ast.MappingNode) {
+	tb.Helper()
+
+	r := yamltest.FirstDocument(tb, input).Resolver()
+
+	node, err := r.Node(paths.Doc().Child(name))
+	require.NoError(tb, err)
+
+	mapping, ok := datapath.Deref(r, node).(*ast.MappingNode)
+	require.True(tb, ok)
+
+	return r, mapping
+}
+
+// keys returns the text of the key of each entry of seq.
+func keys(seq iter.Seq[*ast.MappingValueNode]) []string {
+	var out []string
+
+	for entry := range seq {
+		out = append(out, entry.Key.String())
+	}
+
+	return out
+}
+
+func TestDeref(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, "a: &a !!str x\nb: *a\nc: *missing\n")
+	r := doc.Resolver()
+
+	b, err := r.Node(paths.Doc().Child("b"))
+	require.NoError(t, err)
+
+	got := datapath.Deref(r, b)
+	require.NotNil(t, got)
+	assert.Equal(t, "x", got.String())
+
+	c, ok := doc.AST().(*ast.MappingNode)
+	require.True(t, ok)
+	assert.Nil(t, datapath.Deref(r, c.Values[2].Value))
+}
+
+func TestRead(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		name string
+		want string
+		ok   bool
+	}{
+		"value":            {name: "a", want: "x", ok: true},
+		"anchored value":   {name: "b", want: "y", ok: true},
+		"alias":            {name: "c", want: "y", ok: true},
+		"null":             {name: "g"},
+		"alias to a null":  {name: "e"},
+		"alias to nothing": {name: "f"},
+	}
+
+	input := stringtest.LinesLF(
+		"a: x",
+		"b: &b y",
+		"c: *b",
+		"d: &d null",
+		"e: *d",
+		"f: *missing",
+		"g: null",
+	)
+
+	doc := yamltest.FirstDocument(t, input)
+	r := doc.Resolver()
+
+	mapping, ok := doc.AST().(*ast.MappingNode)
+	require.True(t, ok)
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var value ast.Node
+
+			for _, entry := range mapping.Values {
+				if entry.Key.String() == tc.name {
+					value = entry.Value
+				}
+			}
+
+			got, ok := datapath.Read(r, value)
+			assert.Equal(t, tc.ok, ok)
+
+			if tc.ok {
+				assert.Equal(t, tc.want, got.String())
+			}
+		})
+	}
+
+	t.Run("nil", func(t *testing.T) {
+		t.Parallel()
+
+		_, ok := datapath.Read(r, nil)
+		assert.False(t, ok)
+	})
+}
+
+func TestParentAt(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.LinesLF(
+		"a: {k: v}",
+		"l: [x, y]",
+	)
+
+	r := yamltest.FirstDocument(t, input).Resolver()
+
+	tcs := map[string]struct {
+		path  paths.Path
+		entry string
+		index int
+		seq   bool
+	}{
+		"root":                 {path: paths.Doc()},
+		"entry":                {path: paths.Doc().Child("a"), entry: "a"},
+		"entry below an entry": {path: paths.Doc().Child("a", "k"), entry: "k"},
+		"element":              {path: paths.Doc().Child("l").Index(1), index: 1, seq: true},
+		"key of an entry":      {path: paths.Doc().Child("a").Key()},
+		"missing entry":        {path: paths.Doc().Child("z")},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := datapath.ParentAt(r, tc.path)
+
+			if tc.entry == "" {
+				assert.Nil(t, got.Entry)
+			} else {
+				require.NotNil(t, got.Entry)
+				assert.Equal(t, tc.entry, got.Entry.Key.String())
+			}
+
+			assert.Equal(t, tc.seq, got.Sequence != nil)
+			assert.Equal(t, tc.index, got.Index)
+		})
+	}
+}
+
+func TestMergeSources(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.LinesLF(
+		"a: &a {x: 1}",
+		"b: &b {y: 2}",
+		"m:",
+		"  <<: [*a, *b, scalar]",
+		"n:",
+		"  <<: *missing",
+	)
+
+	r, m := mappingAt(t, input, "m")
+
+	sources, err := datapath.MergeSources(r, m.Values[0])
+	require.NoError(t, err)
+	require.Len(t, sources, 2)
+	assert.Equal(t, "x", sources[0].Values[0].Key.String())
+	assert.Equal(t, "y", sources[1].Values[0].Key.String())
+
+	_, n := mappingAt(t, input, "n")
+
+	_, err = datapath.MergeSources(r, n.Values[0])
+	require.ErrorIs(t, err, paths.ErrAlias)
+}
+
+func TestMembers(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.LinesLF(
+		"b: &b {x: 1, y: 2}",
+		"m: &m",
+		"  a: 1",
+		"  <<: *b",
+		"  z: 3",
+		"u:",
+		"  a: 1",
+		"  <<: *missing",
+		"  z: 3",
+		"s:",
+		"  <<: [*b, *b]",
+	)
+
+	tcs := map[string]struct {
+		name     string
+		merges   bool
+		forward  []string
+		backward []string
+	}{
+		"merges where the key stands": {
+			name:     "m",
+			merges:   true,
+			forward:  []string{"a", "x", "y", "z"},
+			backward: []string{"z", "y", "x", "a"},
+		},
+		"no merges": {
+			name:    "m",
+			forward: []string{"a", "z"},
+		},
+		"unresolved merge": {
+			name:     "u",
+			merges:   true,
+			forward:  []string{"a", "z"},
+			backward: []string{"z"},
+		},
+		"each mapping once": {
+			name:     "s",
+			merges:   true,
+			forward:  []string{"x", "y"},
+			backward: []string{"y", "x"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r, m := mappingAt(t, input, tc.name)
+
+			assert.Equal(t, tc.forward, keys(datapath.Members(r, m, tc.merges)))
+
+			if tc.merges {
+				assert.Equal(t, tc.backward, keys(datapath.MembersBackward(r, m)))
+			}
+		})
+	}
+
+	t.Run("stop", func(t *testing.T) {
+		t.Parallel()
+
+		r, m := mappingAt(t, input, "m")
+
+		for range datapath.Members(r, m, true) {
+			break
+		}
+
+		for range datapath.MembersBackward(r, m) {
+			break
+		}
+	})
+}
+
+func TestIndex_Locate(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.LinesLF(
+		"ports:",
+		"  0x10: {name: x}",
+		"list: [a, b]",
+		"python:",
+		"  3.10: {image: a}",
+	)
+
+	tcs := map[string]struct {
+		names []string
+		key   bool
+		want  string
+		token string
+	}{
+		"member": {
+			names: []string{"ports", "16", "name"},
+			want:  "@.ports.0x10.name",
+		},
+		"key of a member": {
+			names: []string{"ports", "16"},
+			key:   true,
+			want:  "@.ports.0x10~",
+		},
+		"element": {
+			names: []string{"list", "1"},
+			want:  "@.list[1]",
+		},
+		"element past the end": {
+			names: []string{"list", "5", "x"},
+			want:  "@.list[5].x",
+		},
+		"missing member": {
+			names: []string{"ports", "16", "port"},
+			want:  "@.ports.0x10.port",
+		},
+		"key that sets another member": {
+			names: []string{"python", "3.10", "image"},
+			want:  "@.python.'3.10'.image",
+			token: "python@4:1",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, input)
+			idx := datapath.NewIndex(doc.Resolver())
+
+			path, tk := idx.Locate(datapath.Target{Path: paths.Current(), Node: doc.AST()}, tc.names, tc.key)
+
+			assert.Equal(t, tc.want, path.String())
+
+			if tc.token == "" {
+				assert.Nil(t, tk)
+			} else {
+				assert.Equal(t, tc.token, yamltest.TokenPlace(tk))
+			}
+		})
+	}
+}
+
+// keyed is a value a pointer key points to.
+type keyed struct{ N int }
+
+func TestKeyOf(t *testing.T) {
+	t.Parallel()
+
+	key := func(t *testing.T, v any) any {
+		t.Helper()
+
+		k, ok := datapath.KeyOf(reflect.ValueOf(v))
+		require.True(t, ok)
+
+		return k
+	}
+
+	t.Run("NaN keys share one value", func(t *testing.T) {
+		t.Parallel()
+
+		first, second := key(t, math.NaN()), key(t, math.NaN())
+
+		assert.Equal(t, first, second)
+		assert.NotEqual(t, first, key(t, 1.0))
+	})
+
+	t.Run("times of one instant and zone share one value", func(t *testing.T) {
+		t.Parallel()
+
+		a := time.Date(2024, 1, 2, 3, 4, 5, 6, time.FixedZone("x", 3600))
+		b := time.Date(2024, 1, 2, 3, 4, 5, 6, time.FixedZone("x", 3600))
+
+		assert.Equal(t, key(t, a), key(t, b))
+		assert.NotEqual(t, key(t, a), key(t, a.UTC()))
+	})
+
+	t.Run("pointer stands for its value", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, key(t, keyed{N: 1}), key(t, &keyed{N: 1}))
+	})
+
+	t.Run("value that cannot key a map", func(t *testing.T) {
+		t.Parallel()
+
+		_, ok := datapath.KeyOf(reflect.ValueOf([]int{1}))
+		assert.False(t, ok)
+	})
+}
+
+func TestMapGroups(t *testing.T) {
+	t.Parallel()
+
+	segs := func(groups []datapath.MapGroup) []string {
+		var out []string
+
+		for _, g := range groups {
+			out = append(out, fmt.Sprintf("%s:%d:%t", g.Seg, len(g.Entries), g.Ambiguous))
+		}
+
+		return out
+	}
+
+	tcs := map[string]struct {
+		value any
+		names map[any]string
+		want  []string
+	}{
+		"keys in order": {
+			value: map[string]int{"b": 1, "a": 2},
+			want:  []string{"a:1:false", "b:1:false"},
+		},
+		"names spell the keys": {
+			value: map[int]int{16: 1, 2: 2},
+			names: map[any]string{16: "0x10"},
+			want:  []string{"0x10:1:false", "2:1:false"},
+		},
+		"keys of two types share a segment": {
+			value: map[any]int{1: 1, "1": 2},
+			want:  []string{"1:1:true", "1:1:true"},
+		},
+		"keys of one value share a group": {
+			value: map[float64]int{math.NaN(): 1, math.NaN(): 2},
+			names: map[any]string{},
+			want:  []string{"NaN:2:true"},
+		},
+		"pointer keys name their type": {
+			value: map[*[]int]int{{1}: 1, {2}: 2},
+			want:  []string{"(*[]int):2:true"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			names := tc.names
+			if names == nil {
+				names = map[any]string{}
+			}
+
+			assert.Equal(t, tc.want, segs(datapath.MapGroups(reflect.ValueOf(tc.value), names)))
+		})
+	}
+
+	t.Run("keys of one value lose their names", func(t *testing.T) {
+		t.Parallel()
+
+		nan, ok := datapath.KeyOf(reflect.ValueOf(math.NaN()))
+		require.True(t, ok)
+
+		names := map[any]string{nan: ".nan"}
+		value := map[float64]int{math.NaN(): 1, math.NaN(): 2}
+
+		assert.Equal(t, []string{"NaN:2:true"}, segs(datapath.MapGroups(reflect.ValueOf(value), names)))
+		assert.Empty(t, names)
+	})
 }
