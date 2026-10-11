@@ -54,6 +54,10 @@
 // [ViewModeSideBySide] to render the before and after content in two
 // panes. [Model.ToggleViewMode] cycles through all three modes.
 //
+// A line of a diff keeps the overlays and annotations it has in its
+// revision, so a diff shows the error marks of the lines it holds.
+// [Revision] says which revision each line comes from.
+//
 // # Search
 //
 // Call [Model.SetSearchTerm] to highlight matches.

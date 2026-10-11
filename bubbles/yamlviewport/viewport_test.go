@@ -5844,6 +5844,339 @@ func TestViewport_RevisionIgnoresLaterMarks(t *testing.T) {
 	}
 }
 
+// markedRevision returns a revision named name over doc. Each line in marks
+// carries an error overlay on its key and an annotation below the key that
+// reads name and the key, so a mark on screen names the revision it came
+// from.
+func markedRevision(name, doc string, marks ...int) yamlviewport.Revision {
+	view := niceyaml.NewSourceFromString(doc, niceyaml.WithName(name)).View()
+
+	for _, i := range marks {
+		field, _, _ := strings.Cut(view.Line(i).Content(), ":")
+
+		view.AddOverlay(kind.GenericError, position.NewRange(position.New(i, 0), position.New(i, len(field))))
+		view.Annotate(i, line.Annotation{Content: name + " " + field, Placement: line.Below})
+	}
+
+	return yamlviewport.NewRevision(name, view)
+}
+
+// markPrinter returns [testPrinter] with styles that show the text under an
+// error overlay in upper case.
+func markPrinter() *printer.Printer {
+	upper := lipgloss.NewStyle().Transform(strings.ToUpper)
+
+	return testPrinter().With(printer.WithStyles(
+		style.New(lipgloss.NewStyle(), style.Set(kind.GenericError, upper)),
+	))
+}
+
+// plainRows returns the rows of the view of m down to the last one that
+// shows text, without their styling or the padding at the end of each.
+func plainRows(m *yamlviewport.Model) string {
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+	for i, row := range rows {
+		rows[i] = strings.TrimRight(row, " ")
+	}
+
+	for len(rows) > 0 && rows[len(rows)-1] == "" {
+		rows = rows[:len(rows)-1]
+	}
+
+	return stringtest.JoinLF(rows...)
+}
+
+func TestViewport_DiffKeepsMarks(t *testing.T) {
+	t.Parallel()
+
+	// Each revision marks the line every revision changes, an unchanged
+	// line beside it, and an unchanged line that a hunk context of 1
+	// leaves out.
+	doc := func(replicas int) string {
+		return stringtest.LinesLF(
+			"name: app",
+			fmt.Sprintf("replicas: %d", replicas),
+			"port: 80",
+			"mode: x",
+			"image: old",
+		)
+	}
+
+	// The viewport shows v3. A deleted line and every line of the left pane
+	// carry the marks of the revision the diff compares with, which is v2
+	// for an adjacent diff and v1 for a diff with the origin. Every other
+	// line carries the marks of v3.
+	tcs := map[string]struct {
+		want     string
+		diffMode yamlviewport.DiffMode
+		viewMode yamlviewport.ViewMode
+	}{
+		"adjacent full": {
+			diffMode: yamlviewport.DiffModeAdjacent,
+			viewMode: yamlviewport.ViewModeFull,
+			want: stringtest.JoinLF(
+				" name: app",
+				"-REPLICAS: 2",
+				" ^^^^^^^^ v2 replicas",
+				"+REPLICAS: 3",
+				" ^^^^^^^^ v3 replicas",
+				" PORT: 80",
+				" ^^^^ v3 port",
+				" mode: x",
+				" IMAGE: old",
+				" ^^^^^ v3 image",
+			),
+		},
+		"adjacent hunks": {
+			diffMode: yamlviewport.DiffModeAdjacent,
+			viewMode: yamlviewport.ViewModeHunks,
+			want: stringtest.JoinLF(
+				" @@ -1,3 +1,3 @@",
+				" name: app",
+				"-REPLICAS: 2",
+				" ^^^^^^^^ v2 replicas",
+				"+REPLICAS: 3",
+				" ^^^^^^^^ v3 replicas",
+				" PORT: 80",
+				" ^^^^ v3 port",
+			),
+		},
+		"adjacent side by side": {
+			diffMode: yamlviewport.DiffModeAdjacent,
+			viewMode: yamlviewport.ViewModeSideBySide,
+			want: stringtest.JoinLF(
+				" name: app               │  name: app",
+				"-REPLICAS: 2             │ +REPLICAS: 3",
+				" ^^^^^^^^ v2 replicas    │  ^^^^^^^^ v3 replicas",
+				" PORT: 80                │  PORT: 80",
+				" ^^^^ v2 port            │  ^^^^ v3 port",
+				" mode: x                 │  mode: x",
+				" IMAGE: old              │  IMAGE: old",
+				" ^^^^^ v2 image          │  ^^^^^ v3 image",
+			),
+		},
+		"origin full": {
+			diffMode: yamlviewport.DiffModeOrigin,
+			viewMode: yamlviewport.ViewModeFull,
+			want: stringtest.JoinLF(
+				" name: app",
+				"-REPLICAS: 1",
+				" ^^^^^^^^ v1 replicas",
+				"+REPLICAS: 3",
+				" ^^^^^^^^ v3 replicas",
+				" PORT: 80",
+				" ^^^^ v3 port",
+				" mode: x",
+				" IMAGE: old",
+				" ^^^^^ v3 image",
+			),
+		},
+		"origin hunks": {
+			diffMode: yamlviewport.DiffModeOrigin,
+			viewMode: yamlviewport.ViewModeHunks,
+			want: stringtest.JoinLF(
+				" @@ -1,3 +1,3 @@",
+				" name: app",
+				"-REPLICAS: 1",
+				" ^^^^^^^^ v1 replicas",
+				"+REPLICAS: 3",
+				" ^^^^^^^^ v3 replicas",
+				" PORT: 80",
+				" ^^^^ v3 port",
+			),
+		},
+		"origin side by side": {
+			diffMode: yamlviewport.DiffModeOrigin,
+			viewMode: yamlviewport.ViewModeSideBySide,
+			want: stringtest.JoinLF(
+				" name: app               │  name: app",
+				"-REPLICAS: 1             │ +REPLICAS: 3",
+				" ^^^^^^^^ v1 replicas    │  ^^^^^^^^ v3 replicas",
+				" PORT: 80                │  PORT: 80",
+				" ^^^^ v1 port            │  ^^^^ v3 port",
+				" mode: x                 │  mode: x",
+				" IMAGE: old              │  IMAGE: old",
+				" ^^^^^ v1 image          │  ^^^^^ v3 image",
+			),
+		},
+		"no diff": {
+			diffMode: yamlviewport.DiffModeNone,
+			viewMode: yamlviewport.ViewModeFull,
+			want: stringtest.JoinLF(
+				" name: app",
+				" REPLICAS: 3",
+				" ^^^^^^^^ v3 replicas",
+				" PORT: 80",
+				" ^^^^ v3 port",
+				" mode: x",
+				" IMAGE: old",
+				" ^^^^^ v3 image",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(markPrinter(), 51, 12)
+			m.SetHunkContext(1)
+			m.SetDiffMode(tc.diffMode)
+			m.SetViewMode(tc.viewMode)
+			m.AddRevisions(
+				markedRevision("v1", doc(1), 1, 2, 4),
+				markedRevision("v2", doc(2), 1, 2, 4),
+				markedRevision("v3", doc(3), 1, 2, 4),
+			)
+
+			assert.Equal(t, tc.want, plainRows(&m))
+
+			// Search highlights sit beside the marks rather than replacing
+			// them.
+			m.SetSearchTerm("app")
+			require.Equal(t, 1, m.SearchCount())
+
+			assert.Equal(t, tc.want, plainRows(&m))
+		})
+	}
+}
+
+func TestViewport_DiffKeepsMarksOfSharedLines(t *testing.T) {
+	t.Parallel()
+
+	// Two views of one source hold the same lines, so the line alone does
+	// not tell which revision a mark belongs to. Each line of the diff
+	// still carries the marks of one revision.
+	tcs := map[string]struct {
+		want     string
+		viewMode yamlviewport.ViewMode
+	}{
+		"full": {
+			viewMode: yamlviewport.ViewModeFull,
+			want: stringtest.JoinLF(
+				" x: 1",
+				" ^ after",
+				" y: 2",
+			),
+		},
+		"hunks": {
+			viewMode: yamlviewport.ViewModeHunks,
+			want:     "",
+		},
+		"side by side": {
+			viewMode: yamlviewport.ViewModeSideBySide,
+			want: stringtest.JoinLF(
+				" x: 1                 │  x: 1",
+				" ^ before             │  ^ after",
+				" y: 2                 │  y: 2",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(stringtest.LinesLF("x: 1", "y: 2"))
+
+			before, after := source.View(), source.View()
+			before.Annotate(0, line.Annotation{Content: "before", Placement: line.Below})
+			after.Annotate(0, line.Annotation{Content: "after", Placement: line.Below})
+
+			m := testModel(testPrinter(), 45, 5)
+			m.SetViewMode(tc.viewMode)
+			m.AddRevisions(
+				yamlviewport.NewRevision("before", before),
+				yamlviewport.NewRevision("after", after),
+			)
+			require.True(t, m.ShowingDiff())
+
+			assert.Equal(t, tc.want, plainRows(&m))
+		})
+	}
+}
+
+func TestViewport_DiffKeepsHunkHeaderAboveMarks(t *testing.T) {
+	t.Parallel()
+
+	// The first line of a hunk carries the header of the hunk, and an
+	// annotation a revision puts above that line renders below the header.
+	after := niceyaml.NewSourceFromString(threeChangedYAML).View()
+	after.Annotate(0, line.Annotation{Content: "note", Placement: line.Above})
+
+	m := testModel(testPrinter(), 30, 8)
+	m.SetViewMode(yamlviewport.ViewModeHunks)
+	m.AddRevisions(niceyaml.NewSourceFromString(threeYAML), yamlviewport.NewRevision("after", after))
+
+	want := stringtest.JoinLF(
+		" @@ -1,3 +1,3 @@",
+		" note",
+		" a: 1",
+		"-b: 2",
+		"+b: 9",
+		" c: 3",
+	)
+
+	assert.Equal(t, want, plainRows(&m))
+}
+
+func TestViewport_DiffIgnoresLaterMarks(t *testing.T) {
+	t.Parallel()
+
+	// The viewport keeps the marks the views carried when it computed the
+	// diff, so every view of that diff shows the same marks. A mark the
+	// caller adds later shows once the revisions are set again.
+	tcs := map[string]struct {
+		act func(*yamlviewport.Model)
+	}{
+		"hunks": {
+			act: func(m *yamlviewport.Model) { m.SetViewMode(yamlviewport.ViewModeHunks) },
+		},
+		"side by side": {
+			act: func(m *yamlviewport.Model) { m.SetViewMode(yamlviewport.ViewModeSideBySide) },
+		},
+		"hunk context": {
+			act: func(m *yamlviewport.Model) {
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+				m.SetHunkContext(1)
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			before := niceyaml.NewSourceFromString(threeYAML).View()
+			after := niceyaml.NewSourceFromString(threeChangedYAML).View()
+
+			revisions := []yamlviewport.Revision{
+				yamlviewport.NewRevision("before", before),
+				yamlviewport.NewRevision("after", after),
+			}
+
+			m := testModel(testPrinter(), 45, 10)
+			m.AddRevisions(revisions...)
+
+			before.Annotate(1, line.Annotation{Content: "late before", Placement: line.Below})
+			after.Annotate(1, line.Annotation{Content: "late after", Placement: line.Below})
+
+			tc.act(&m)
+
+			assert.NotContains(t, m.View(), "late")
+
+			viewMode := m.ViewMode()
+
+			m.ClearRevisions()
+			m.AddRevisions(revisions...)
+
+			require.Equal(t, viewMode, m.ViewMode())
+			assert.Contains(t, m.View(), "^ late before")
+			assert.Contains(t, m.View(), "^ late after")
+		})
+	}
+}
+
 func TestViewport_ContentChangesResetSearch(t *testing.T) {
 	t.Parallel()
 

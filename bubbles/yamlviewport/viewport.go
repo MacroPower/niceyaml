@@ -77,14 +77,23 @@ func (s finderSearcher) Load(lines line.Sequence) Index {
 // The viewport reads the view of a revision it shows without a diff when
 // the revision changes, or when [Model.SetDiffMode] turns the diff off, and
 // never decorates it. It computes the diff between two revisions from their
-// views and keeps it until it compares another pair or the history changes,
-// so a change of view mode or hunk context reuses the diff without reading
-// the views again. Search highlights go on a clone, so the marks a caller
-// adds stay, and the caller's view stays as the caller left it. Marks added
-// after the viewport read the view show once the revision is set again. A
-// diff between two revisions interleaves their lines in a view of its own,
-// so decoration shows only while the viewport displays a revision without a
-// diff.
+// views and keeps it until it compares another pair or the history changes.
+// The marks the views carry then stay with the diff, so a change of view
+// mode or hunk context reuses both without reading the views again. Search
+// highlights go on a clone, so the marks a caller adds stay, and the
+// caller's view stays as the caller left it. Marks added after the viewport
+// read the view show once the revision is set again.
+//
+// A diff shows lines of two revisions, and each line carries the overlays
+// and annotations it has in the view of the revision that holds it. That is
+// the revision the diff compares with for a deleted line and for every line
+// of the left pane of [ViewModeSideBySide], and the current revision for
+// any other line. Outside that pane an unchanged line comes from the
+// current revision, so a mark it has in the other revision does not show.
+// [ViewModeHunks] shows the lines around each change, and a mark on any
+// other line stays hidden with its line. The diff sets the flag of each
+// line and shows the line whole, so the flags of a view and its
+// [line.View.Clip] show only without a diff.
 //
 // The viewport renders the lines the view holds in the order
 // [line.View.All] yields them, which is content order, and windows them
@@ -302,8 +311,9 @@ type Model struct {
 	// Cached diff between the base and current revisions at the indexes in
 	// diffKey below.
 	diffResult *diff.Result
-	// The views of the base and current revisions that diffResult
-	// compares, which hold every line the diff shows.
+	// Copies of the views of the base and current revisions, taken when the
+	// Model computed diffResult from them. They hold every line the diff
+	// shows and the marks each line carries into the views of the diff.
 	diffViews [2]*line.View
 	// The content on display before search highlights, for the left pane or
 	// main content and for the right pane of a side-by-side diff.
@@ -981,13 +991,14 @@ func (m *Model) rebuildViews() {
 	switch {
 	case m.viewMode == ViewModeSideBySide && needsDiff:
 		result := m.getDiffResult()
-		m.baseLeft = result.Before()
-		m.baseRight = result.After()
+		m.baseLeft = m.carryMarks(result.Before(), true)
+		m.baseRight = m.carryMarks(result.After(), false)
 
 	case m.viewMode == ViewModeHunks && needsDiff:
 		// Hunks holds no lines when the diff has no changes, which leaves
-		// the view empty.
-		m.baseLeft = m.getDiffResult().Hunks(m.hunkContext)
+		// the view empty. The diff picks the hunks from its changes alone,
+		// so a marked line outside every hunk stays out of the view.
+		m.baseLeft = m.carryMarks(m.getDiffResult().Hunks(m.hunkContext), false)
 
 	default:
 		m.baseLeft = m.getDisplayLines()
@@ -1329,13 +1340,13 @@ func (m *Model) revision(index int) Revision {
 }
 
 // getDisplayLines returns the base view to display for the current
-// revision and [DiffMode]: a fresh unified diff, or a copy of the view the
-// revision hands out. The copy holds the marks the view carried when the
-// content changed, so marks the caller adds later stay off the display.
-// Returns nil when there is no revision.
+// revision and [DiffMode]: a fresh unified diff with the marks of its
+// revisions, or a copy of the view the revision hands out. The copy holds
+// the marks the view carried when the content changed, so marks the caller
+// adds later stay off the display. Returns nil when there is no revision.
 func (m *Model) getDisplayLines() *line.View {
 	if m.ShowingDiff() {
-		return m.getDiffResult().Unified()
+		return m.carryMarks(m.getDiffResult().Unified(), false)
 	}
 
 	if rev := m.currentRevision(); rev != nil {
@@ -1358,13 +1369,68 @@ func (m *Model) getDiffResult() *diff.Result {
 	if m.diffResult == nil || m.diffKey != pair {
 		// A diff compares the lines each view holds, as the other view
 		// modes render them, rather than every line of the content the
-		// view is over.
-		m.diffViews = [2]*line.View{m.revision(base).View(), m.currentRevision().View()}
+		// view is over. The copies keep the marks the views carry now, so
+		// every view of the cached diff shows the same marks.
+		m.diffViews = [2]*line.View{m.revision(base).View().Clone(), m.currentRevision().View().Clone()}
 		m.diffResult = diff.Diff(m.diffViews[0], m.diffViews[1])
 		m.diffKey = pair
 	}
 
 	return m.diffResult
+}
+
+// diffLine returns the revision that holds line i of pane, a view of the
+// diff on display, the index the line has in the view of that revision,
+// and true. The revision is 0 for the one the diff compares with and 1 for
+// the current one, as diffViews orders them. The before argument reports
+// that pane is the left pane of a side-by-side diff, which holds lines of
+// revision 0 alone. In any other view of the diff, the deleted lines come
+// from revision 0 and every other line from revision 1.
+//
+// Both revisions can hold one [*line.Line], as two views of one source do,
+// so diffLine picks the revision by the flag and the pane and looks the
+// line up in that revision alone. It reports false for a line neither
+// revision holds, such as the filler a side-by-side diff puts opposite an
+// inserted or deleted line.
+func (m *Model) diffLine(pane *line.View, before bool, i int) (int, int, bool) {
+	revision := 1
+	if before || pane.Flag(i) == line.FlagDeleted {
+		revision = 0
+	}
+
+	index, ok := m.diffViews[revision].Index(pane.Line(i))
+
+	return revision, index, ok
+}
+
+// carryMarks copies the overlays and annotations of the two revisions of
+// the diff on display onto view, a view of that diff, and returns view.
+// Each line view holds takes the marks it carries in the view of the
+// revision diffLine names for it. The before argument reports that view is
+// the left pane of a side-by-side diff.
+//
+// The marks follow any annotation the diff put on the line, so a hunk
+// header stays above an annotation a revision carries on the first line of
+// the hunk.
+func (m *Model) carryMarks(view *line.View, before bool) *line.View {
+	for i := range view.All() {
+		revision, index, ok := m.diffLine(view, before, i)
+		if !ok {
+			continue
+		}
+
+		marks := m.diffViews[revision]
+
+		if overlays := marks.Overlays(index); len(overlays) > 0 {
+			view.AddLineOverlay(i, overlays...)
+		}
+
+		if annotations := marks.Annotations(index); len(annotations) > 0 {
+			view.Annotate(i, annotations...)
+		}
+	}
+
+	return view
 }
 
 // paneWidth returns the width lines wrap to: the content width, or in
@@ -2234,17 +2300,14 @@ func (m *Model) revisionHit(right bool, pos position.Position) (Hit, bool) {
 		pane = m.baseRight
 	}
 
-	// The left pane of a side-by-side diff holds lines of the revision the
-	// diff compares with, and so does every deleted line of a unified
-	// diff. Every other line comes from the current revision.
-	index, view := m.revIndex, m.diffViews[1]
-	if pane.Flag(pos.Line) == line.FlagDeleted || (m.viewMode == ViewModeSideBySide && !right) {
-		index, view = m.diffBaseIndex(), m.diffViews[0]
-	}
-
-	i, ok := view.Index(pane.Line(pos.Line))
+	revision, i, ok := m.diffLine(pane, m.viewMode == ViewModeSideBySide && !right, pos.Line)
 	if !ok {
 		return Hit{}, false
+	}
+
+	index := m.revIndex
+	if revision == 0 {
+		index = m.diffBaseIndex()
 	}
 
 	return Hit{Revision: index, Position: position.New(i, pos.Col)}, true
