@@ -994,12 +994,11 @@ func trees(kids []positioned) []ErrorTree {
 		return nil
 	}
 
-	groupSources(kids)
-	slices.SortStableFunc(kids, comparePositioned)
+	kids = arrange(kids)
 
 	out := make([]ErrorTree, 0, len(kids))
-	for _, kid := range kids {
-		out = append(out, kid.tree)
+	for i := range kids {
+		out = append(out, kids[i].tree)
 	}
 
 	return out
@@ -1028,24 +1027,11 @@ func trees(kids []positioned) []ErrorTree {
 // branches of a join. The node of a detail has Detail set, as [asDetail]
 // sets it, and so do the branches that take the place of a detail.
 func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []positioned {
-	for _, c := range bound.below {
-		child, detail := c.bound, c.detail
+	flat := flatten(nil, bound.below, bound, named)
 
-		// The branches sit beside the other children, so they sort by
-		// position among them rather than under a node of their own.
-		joined := joinBinding(child)
-		if joined != nil {
-			from := len(kids)
-			kids = appendBoundChildren(kids, joined, named || joined.Source() != bound.Source())
-
-			for i := from; detail && i < len(kids); i++ {
-				kids[i].tree.Detail = true
-			}
-
-			continue
-		}
-
-		kid := placed(child)
+	for i := range flat {
+		kid := &flat[i]
+		child, parent := kid.bound, kid.parent
 
 		// The binding put the position in front of the message it wraps,
 		// so stripping it back to that message leaves the position to
@@ -1058,7 +1044,7 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 		src := textBinding(child)
 
 		text := src.headline()
-		if !named && src.Source() == bound.Source() {
+		if !kid.named && src.Source() == parent.Source() {
 			if inner := src.texts().own; inner != text {
 				text = inner
 
@@ -1066,7 +1052,7 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 				case kid.located:
 					text = prefix(editorPosition(kid.pos)+":", text)
 
-				case src.node.Document() != bound.node.Document():
+				case src.node.Document() != parent.node.Document():
 					// The parent names another document of the source, or
 					// none, so the child keeps the one it wrote.
 					text = prefix(suffixed(src.documentLabel()), text)
@@ -1077,10 +1063,44 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 		below, _ := children(child)
 
 		kid.tree = newTree(ErrorTree{Err: child, Bound: child, Label: text}, below)
-		if detail {
+		if kid.detail {
 			kid.tree = asDetail(kid.tree)
 		}
 
+		kid.tree.Detail = kid.tree.Detail || kid.underDetail
+
+		kids = append(kids, *kid)
+	}
+
+	return kids
+}
+
+// flatten appends each of children, the children of the binding parent,
+// to kids as [placed] returns it, and returns the extended slice. A child
+// that binds a join has no line of its own, so the bound children of the
+// join go in beside the other children in its place, with the join as
+// their parent. Those children name their source when named is set or
+// when the join is bound to another source than parent. A child records
+// whether it is a detail, and whether a detail that binds a join holds
+// it.
+func flatten(kids []positioned, children []boundChild, parent *SourceError, named bool) []positioned {
+	for _, c := range children {
+		// The branches sit beside the other children, so they sort by
+		// position among them rather than under a node of their own.
+		joined := joinBinding(c.bound)
+		if joined != nil {
+			from := len(kids)
+			kids = flatten(kids, joined.below, joined, named || joined.Source() != parent.Source())
+
+			for i := from; c.detail && i < len(kids); i++ {
+				kids[i].underDetail = true
+			}
+
+			continue
+		}
+
+		kid := placed(c.bound)
+		kid.parent, kid.named, kid.detail = parent, named, c.detail
 		kids = append(kids, kid)
 	}
 
@@ -1114,15 +1134,24 @@ func textBinding(e *SourceError) *SourceError {
 // positioned is a child of a node, the source it is bound to, and the
 // position it resolved to, when located, for the order the children take.
 // The child is a binding, with the node [appendBoundChildren] builds for
-// it, or the node of an error bound to no source. [groupSources] fills
-// group in.
+// it, or the node of an error bound to no source. [arrange] fills group
+// in.
 type positioned struct {
-	src     *Source
-	bound   *SourceError
-	tree    ErrorTree
-	pos     position.Position
-	group   int
+	src *Source
+	// The binding of the child, or nil for an error bound to no source.
+	bound *SourceError
+	// The binding whose children hold the child, as [flatten] finds it.
+	parent *SourceError
+	tree   ErrorTree
+	pos    position.Position
+	group  int
+	// The child names its source in its line, as [flatten] decides.
+	named   bool
 	located bool
+	// The child is a detail of the binding that holds it.
+	detail bool
+	// A detail that binds a join holds the child.
+	underDetail bool
 }
 
 // placed returns child with the source and the position [trees] orders it
@@ -1142,11 +1171,13 @@ func placed(child *SourceError) positioned {
 	return kid
 }
 
-// groupSources numbers the source of each of kids in the order the sources
-// first appear, so children of one source stay together in the order kids
-// lists them rather than interleaving with another source by position. A
-// line number counts only in the source that holds it.
-func groupSources(kids []positioned) {
+// arrange sorts kids in place by source and by position, as
+// [comparePositioned] orders them, and returns them. It numbers the source
+// of each of kids in the order the sources first appear, so children of
+// one source stay together in the order kids lists them rather than
+// interleaving with another source by position. A line number counts
+// only in the source that holds it.
+func arrange(kids []positioned) []positioned {
 	seen := make([]*Source, 0, 1)
 
 	for i := range kids {
@@ -1158,6 +1189,10 @@ func groupSources(kids []positioned) {
 
 		kids[i].group = group
 	}
+
+	slices.SortStableFunc(kids, comparePositioned)
+
+	return kids
 }
 
 // comparePositioned orders children by source group and then by position,

@@ -3059,20 +3059,6 @@ func (e *SourceError) heads() bool {
 	return slices.ContainsFunc(e.below, func(c boundChild) bool { return !c.detail })
 }
 
-// problemsBelow returns the bound children among below that are problems
-// their binding heads, in their order, without its details.
-func problemsBelow(below []boundChild) []*SourceError {
-	var out []*SourceError
-
-	for _, c := range below {
-		if !c.detail {
-			out = append(out, c.bound)
-		}
-	}
-
-	return out
-}
-
 // Source returns the [*Source] the error is bound to. A nil SourceError is
 // bound to none.
 func (e *SourceError) Source() *Source {
@@ -3604,36 +3590,25 @@ func (e *SourceError) ordered(shown int) []*SourceError {
 		}
 	}
 
-	kids := appendPlaced(nil, listed)
+	children := make([]boundChild, 0, len(listed))
+	for _, bound := range listed {
+		children = append(children, boundChild{bound: bound})
+	}
 
-	groupSources(kids)
-	slices.SortStableFunc(kids, comparePositioned)
+	// A detail is no problem, and the order numbers each source where it
+	// first appears among the problems alone.
+	kids := slices.DeleteFunc(flatten(nil, children, e, false), func(kid positioned) bool {
+		return kid.detail || kid.underDetail
+	})
+
+	kids = arrange(kids)
 
 	out := make([]*SourceError, 0, len(kids))
-	for _, kid := range kids {
-		out = append(out, kid.bound)
+	for i := range kids {
+		out = append(out, kids[i].bound)
 	}
 
 	return out
-}
-
-// appendPlaced appends each of children to kids as [placed] returns it,
-// and returns the extended slice. A child that binds a join has no line
-// of its own, so its branches go in beside the other children, as
-// [appendBoundChildren] puts them.
-func appendPlaced(kids []positioned, children []*SourceError) []positioned {
-	for _, child := range children {
-		joined := joinBinding(child)
-		if joined != nil {
-			kids = appendPlaced(kids, problemsBelow(joined.below))
-
-			continue
-		}
-
-		kids = append(kids, placed(child))
-	}
-
-	return kids
 }
 
 // formatPosition returns pos as "name:line:col:", the shape editors and
