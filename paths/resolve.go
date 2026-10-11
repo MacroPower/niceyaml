@@ -154,7 +154,7 @@ func (r *resolver) mappingKeys(mapping *ast.MappingNode) *mappingKeys {
 			continue
 		}
 
-		if isMergeKey(entry.Key) {
+		if astnode.IsMergeKey(entry.Key) {
 			keys.merges = append(keys.merges, i)
 
 			continue
@@ -197,9 +197,9 @@ func (k *mappingKeys) mergeAfter(i int) bool {
 // key, or on an element of a sequence there, counts for the aliases other
 // merge keys name. It counts for an alias in a value only when no other
 // anchor of its name comes before that alias, as [anchorSet] describes.
-// Once every alias is bound, an [enclosureFinder] finds the aliases that
-// lie inside the content of the anchor they refer to, and a [nodeCounter]
-// counts the nodes of doc.
+// Once every alias is bound, [enclosedAliases] finds the aliases that lie
+// inside the content of the anchor they refer to, and newResolver counts
+// the nodes of doc, comments included.
 func newResolver(doc *ast.DocumentNode) *resolver {
 	b := &aliasBinder{
 		anchors: newAnchorSet(),
@@ -214,79 +214,54 @@ func newResolver(doc *ast.DocumentNode) *resolver {
 
 	ast.Walk(b, doc.Body)
 
-	f := &enclosureFinder{
-		targets:  b.targets,
-		merges:   b.merges,
-		open:     map[ast.Node]bool{},
-		enclosed: map[*ast.AliasNode]bool{},
-	}
+	nodes := 0
 
-	ast.Walk(f, doc.Body)
+	astnode.Inspect(doc.Body, func(ast.Node) bool {
+		nodes++
 
-	var nodes nodeCounter
+		return true
+	})
 
-	ast.Walk(&nodes, doc.Body)
-
-	return &resolver{targets: b.targets, enclosed: f.enclosed, nodes: int(nodes)}
+	return &resolver{targets: b.targets, enclosed: enclosedAliases(doc, b.targets, b.merges), nodes: nodes}
 }
 
-// nodeCounter is an [ast.Visitor] that counts the nodes it visits. The
-// count takes in the anchors, tags, entries, and comments of a document
-// as well as its values.
-type nodeCounter int
+// enclosedAliases returns the aliases of doc that lie inside the content
+// of the anchor they refer to. The targets map holds the anchor each
+// alias refers to, and the merges set holds the aliases `<<` merge keys
+// name, which the result leaves out.
+func enclosedAliases(
+	doc *ast.DocumentNode,
+	targets map[*ast.AliasNode]*ast.AnchorNode,
+	merges map[*ast.AliasNode]bool,
+) map[*ast.AliasNode]bool {
+	open := map[ast.Node]bool{}
+	enclosed := map[*ast.AliasNode]bool{}
 
-// Visit adds node to the count, then returns c so [ast.Walk] continues
-// into the children of node. It returns nil for a nil node, including a
-// typed nil a hand-built tree may hold.
-func (c *nodeCounter) Visit(node ast.Node) ast.Visitor {
-	if astnode.IsNil(node) {
-		return nil
-	}
+	// The walk reads the content of an anchor itself, so it knows which
+	// anchors each alias lies in.
+	var visit func(ast.Node) bool
 
-	*c++
+	visit = func(node ast.Node) bool {
+		switch n := node.(type) {
+		case *ast.AnchorNode:
+			open[n.Value] = true
+			astnode.Inspect(n.Value, visit)
+			delete(open, n.Value)
 
-	return c
-}
+			return false
 
-// enclosureFinder finds the aliases that lie inside the content of the
-// anchor they refer to while [ast.Walk] visits a document. The targets
-// map holds the anchor each alias refers to, and the merges set holds
-// the aliases `<<` merge keys name, which the finder leaves out. The open
-// set holds the content of each anchor the walk is inside of, and the
-// enclosed set holds the aliases found so far.
-type enclosureFinder struct {
-	targets  map[*ast.AliasNode]*ast.AnchorNode
-	merges   map[*ast.AliasNode]bool
-	open     map[ast.Node]bool
-	enclosed map[*ast.AliasNode]bool
-}
-
-// Visit adds node to the enclosed set when it is an alias inside the
-// content of the anchor it refers to, then returns f so [ast.Walk]
-// continues into the children of node. It walks the content of an anchor
-// itself, holding that content open meanwhile, and returns nil for it. It
-// returns nil for a nil node, including a typed nil a hand-built tree may
-// hold.
-func (f *enclosureFinder) Visit(node ast.Node) ast.Visitor {
-	if astnode.IsNil(node) {
-		return nil
-	}
-
-	switch n := node.(type) {
-	case *ast.AnchorNode:
-		f.open[n.Value] = true
-		ast.Walk(f, n.Value)
-		delete(f.open, n.Value)
-
-		return nil
-
-	case *ast.AliasNode:
-		if target, ok := f.targets[n]; ok && f.open[target.Value] && !f.merges[n] {
-			f.enclosed[n] = true
+		case *ast.AliasNode:
+			if target, ok := targets[n]; ok && open[target.Value] && !merges[n] {
+				enclosed[n] = true
+			}
 		}
+
+		return true
 	}
 
-	return f
+	astnode.Inspect(doc.Body, visit)
+
+	return enclosed
 }
 
 // anchorSet holds the anchors the decoder has recorded so far, in the two
@@ -388,7 +363,7 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 
 	switch n := node.(type) {
 	case *ast.AnchorNode:
-		name := nodeToken(n.Name)
+		name := astnode.Token(n.Name)
 		b.anchors.record(name, n)
 
 		if mapping := anchoredMapping(n.Value); mapping != nil {
@@ -404,7 +379,7 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 		return nil
 
 	case *ast.AliasNode:
-		name := nodeToken(n.Value)
+		name := astnode.Token(n.Value)
 		if name == nil {
 			return b
 		}
@@ -414,7 +389,7 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 		}
 
 	case *ast.MappingValueNode:
-		if isMergeKey(n.Key) {
+		if astnode.IsMergeKey(n.Key) {
 			ast.Walk(b, n.Key)
 			b.merge(n.Value)
 
@@ -480,7 +455,7 @@ func (b *aliasBinder) findSources(
 		for !astnode.IsNil(node) {
 			switch n := node.(type) {
 			case *ast.AnchorNode:
-				if name := nodeToken(n.Name); name != nil {
+				if name := astnode.Token(n.Name); name != nil {
 					nodes[name.Value] = n
 				}
 
@@ -543,7 +518,7 @@ func (b *aliasBinder) findSources(
 // of its name in nodes, the nodes map of an [anchorSet], and adds it to the
 // merges set.
 func (b *aliasBinder) bindMergeAlias(alias *ast.AliasNode, nodes map[string]*ast.AnchorNode) {
-	name := nodeToken(alias.Value)
+	name := astnode.Token(alias.Value)
 	if name == nil {
 		return
 	}
@@ -738,7 +713,7 @@ func (r *anchorReader) Visit(node ast.Node) ast.Visitor {
 
 	switch n := node.(type) {
 	case *ast.AnchorNode:
-		name := nodeToken(n.Name)
+		name := astnode.Token(n.Name)
 		r.anchors.record(name, n)
 
 		ast.Walk(r, n.Value)
@@ -751,7 +726,7 @@ func (r *anchorReader) Visit(node ast.Node) ast.Visitor {
 		return nil
 
 	case *ast.MappingValueNode:
-		if isMergeKey(n.Key) {
+		if astnode.IsMergeKey(n.Key) {
 			r.merge(n.Value)
 
 			return nil
@@ -885,7 +860,7 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 		case *ast.AnchorNode:
 			node = n.Value
 		case *ast.AliasNode:
-			tk := nodeToken(n.Value)
+			tk := astnode.Token(n.Value)
 			if tk == nil {
 				return nil, fmt.Errorf("%w: alias has no name", ErrAlias)
 			}
@@ -1170,7 +1145,7 @@ func (r *resolver) entries(mapping *ast.MappingNode, m match, reads *lookupReads
 
 		names = names[:0]
 
-		if isMergeKey(entry.Key) {
+		if astnode.IsMergeKey(entry.Key) {
 			var err error
 
 			// A lookup in mapping does not search mapping again when a
@@ -1194,7 +1169,7 @@ func (r *resolver) entries(mapping *ast.MappingNode, m match, reads *lookupReads
 					return nil, err
 				}
 
-				if has && !isMergeKey(e.Key) {
+				if has && !astnode.IsMergeKey(e.Key) {
 					pe = placedEntry{entry: e, place: place}
 				}
 
@@ -1277,7 +1252,7 @@ func (r *resolver) mergedNames(
 		for _, entry := range src.Values {
 			switch {
 			case entry == nil:
-			case isMergeKey(entry.Key):
+			case astnode.IsMergeKey(entry.Key):
 				names, err = r.mergedNames(names, entry.Value, seen, reads)
 				if err != nil {
 					return nil, err
@@ -1332,7 +1307,7 @@ func (r *resolver) lookup(
 	// merge source holds a real key with that text, so lookup searches
 	// every merge key before it settles on that one.
 	own, hasOwn := keys.names[name]
-	realKey := hasOwn && !isMergeKey(mapping.Values[own].Key)
+	realKey := hasOwn && !astnode.IsMergeKey(mapping.Values[own].Key)
 
 	// A real key of the mapping with no merge key after it wins outright.
 	if realKey && !keys.mergeAfter(own) {
@@ -1422,7 +1397,7 @@ func (r *resolver) lookupMerge(
 		}
 
 		// A merge key in a source is not a key the merge brings in.
-		if ok && !isMergeKey(found.Key) {
+		if ok && !astnode.IsMergeKey(found.Key) {
 			return found, true, nil
 		}
 	}
@@ -1443,7 +1418,7 @@ func (r *resolver) overridden(
 	mapping *ast.MappingNode, keys *mappingKeys, name string, i int, reads *lookupReads,
 ) (bool, error) {
 	entry := mapping.Values[i]
-	if !keys.mergeAfter(i) && !isMergeKey(entry.Key) {
+	if !keys.mergeAfter(i) && !astnode.IsMergeKey(entry.Key) {
 		return false, nil
 	}
 
@@ -1561,7 +1536,7 @@ func (r *resolver) recurse(matches []match, seg segment) ([]match, error) {
 
 		// A match of `.'<<'` or `..'<<'` starts at the sources of a merge
 		// key.
-		sources := m.entry != nil && isMergeKey(m.entry.Key)
+		sources := m.entry != nil && astnode.IsMergeKey(m.entry.Key)
 
 		err := w.descend(contents[i], sources)
 		if err != nil {
@@ -1699,7 +1674,7 @@ func (w *recursiveWalk) descend(node ast.Node, sources bool) error {
 				w.found = append(w.found, match{node: entry.Value, entry: entry, segs: segs, order: order})
 			}
 
-			err = w.descend(entry.Value, isMergeKey(entry.Key))
+			err = w.descend(entry.Value, astnode.IsMergeKey(entry.Key))
 			if err != nil {
 				return err
 			}
@@ -1741,7 +1716,7 @@ func (w *recursiveWalk) descend(node ast.Node, sources bool) error {
 // lists every entry other than a `<<` merge key.
 func (w *recursiveWalk) lists(entry *ast.MappingValueNode, key string) bool {
 	if w.all {
-		return !isMergeKey(entry.Key)
+		return !astnode.IsMergeKey(entry.Key)
 	}
 
 	return key == w.name
@@ -1792,15 +1767,6 @@ func (w *recursiveWalk) hold() ([]segment, []int) {
 	return slices.Clip(w.segs), slices.Clip(w.order)
 }
 
-// isMergeKey reports whether key is a `<<` merge key, looking through the `?`
-// indicator, anchors, and tags. A nil key, including a typed nil a hand-built
-// tree may hold at any step, is not a merge key.
-func isMergeKey(key ast.MapKeyNode) bool {
-	_, ok := astnode.Content(key).(*ast.MergeKeyNode)
-
-	return ok
-}
-
 // keyName returns the key text a child selector compares against. A
 // string key gives its unquoted text, a literal or folded block scalar key
 // gives its content, as the decoder reads it, and any other key gives its
@@ -1835,7 +1801,7 @@ func (r *resolver) keyName(key ast.Node) (string, bool) {
 		return k.Value.Value, true
 
 	case ast.MapKeyNode:
-		tk := nodeToken(k)
+		tk := astnode.Token(k)
 		if tk == nil {
 			return "", false
 		}
@@ -1845,14 +1811,4 @@ func (r *resolver) keyName(key ast.Node) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-// nodeToken returns the token of node, or nil when node has none. A nil
-// node, including a typed nil a hand-built tree may hold, has no token.
-func nodeToken(node ast.Node) *token.Token {
-	if astnode.IsNil(node) {
-		return nil
-	}
-
-	return node.GetToken()
 }

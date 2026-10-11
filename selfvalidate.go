@@ -1760,7 +1760,7 @@ func (w *selfWalker) collectKeyNames(
 			continue
 		}
 
-		if !entry.Key.IsMergeKey() {
+		if !astnode.IsMergeKey(entry.Key) {
 			w.addKeyName(entry.Key, t, names)
 
 			continue

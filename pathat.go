@@ -107,7 +107,7 @@ func (d *document) pathIndex() *pathIndex {
 type pathIndex struct {
 	steps []pathStep
 	// The offsets of the tokens of the body.
-	body offsetRange
+	body astnode.Extent
 }
 
 // pathStep is one selector of a path, with the offsets of the tokens of
@@ -136,57 +136,89 @@ func (s pathStep) entry() *ast.MappingValueNode {
 	return s.mapping.Values[s.index]
 }
 
-// offsetRange holds the offsets of the first and the last of some tokens,
-// or nothing while ok is false.
-type offsetRange struct {
-	lo, hi int
-	ok     bool
-}
-
-// with returns r widened to hold the offset of tk. A nil token, or one
-// without a position, changes nothing.
-func (r offsetRange) with(tk *token.Token) offsetRange {
-	if tk == nil || tk.Position == nil {
-		return r
-	}
-
-	off := tk.Position.Offset
-
-	return r.union(offsetRange{lo: off, hi: off, ok: true})
-}
-
-// union returns the range that holds both r and other.
-func (r offsetRange) union(other offsetRange) offsetRange {
-	switch {
-	case !other.ok:
-		return r
-	case !r.ok:
-		return other
-	}
-
-	return offsetRange{lo: min(r.lo, other.lo), hi: max(r.hi, other.hi), ok: true}
-}
-
-// holds reports whether off lies in r.
-func (r offsetRange) holds(off int) bool {
-	return r.ok && r.lo <= off && off <= r.hi
-}
-
 // tokenOffsets returns the offsets of the first and the last token under
 // node, comments left out, as f finds them. The finder must skip comments
 // and hold no tokens.
-func tokenOffsets(f *boundsFinder, node ast.Node) offsetRange {
+func tokenOffsets(f *boundsFinder, node ast.Node) astnode.Extent {
 	if astnode.IsNil(node) {
-		return offsetRange{}
+		return astnode.Extent{}
 	}
 
 	ast.Walk(f, node)
 
 	if len(f.first) == 0 {
-		return offsetRange{}
+		return astnode.Extent{}
 	}
 
-	return offsetRange{lo: f.first[0].Position.Offset, hi: f.last[0].Position.Offset, ok: true}
+	return astnode.Extent{Lo: f.first[0].Position.Offset, Hi: f.last[0].Position.Offset, OK: true}
+}
+
+// boundsFinder is an [ast.Visitor] that records the tokens with the lowest
+// and the highest offset among the nodes it visits, all of them when
+// several share the offset. With skipComments set, it leaves out the
+// comments.
+type boundsFinder struct {
+	first, last  token.Tokens
+	skipComments bool
+}
+
+// Visit implements [ast.Visitor].
+func (b *boundsFinder) Visit(node ast.Node) ast.Visitor {
+	if astnode.IsNil(node) {
+		return nil
+	}
+
+	if b.skipComments && node.Type() == ast.CommentType {
+		return nil
+	}
+
+	b.consider(node.GetToken())
+
+	// The walk visits the nodes of a collection, not the token that closes
+	// a flow collection or the "-" that opens each entry of a block
+	// sequence, which the node holds beside them. An entry whose value is
+	// an implicit null shares the offset of its "-", which then ends the
+	// sequence.
+	switch n := node.(type) {
+	case *ast.SequenceNode:
+		b.consider(n.End)
+
+		for _, entry := range n.Entries {
+			if entry != nil {
+				b.consider(entry.Start)
+			}
+		}
+
+	case *ast.MappingNode:
+		b.consider(n.End)
+	}
+
+	return b
+}
+
+// consider widens the bounds to tk, or adds tk to the tokens at a bound
+// that it shares the offset of. A nil token, or one without a position,
+// changes nothing.
+func (b *boundsFinder) consider(tk *token.Token) {
+	if tk == nil || tk.Position == nil {
+		return
+	}
+
+	off := tk.Position.Offset
+
+	switch {
+	case len(b.first) == 0 || off < b.first[0].Position.Offset:
+		b.first = append(b.first[:0], tk)
+	case off == b.first[0].Position.Offset:
+		b.first = append(b.first, tk)
+	}
+
+	switch {
+	case len(b.last) == 0 || off > b.last[0].Position.Offset:
+		b.last = append(b.last[:0], tk)
+	case off == b.last[0].Position.Offset:
+		b.last = append(b.last, tk)
+	}
 }
 
 // newPathIndex creates a new [*pathIndex] for a document with the given
@@ -246,32 +278,32 @@ type pathIndexBuilder struct {
 // and returns the offsets of the tokens under node. It looks through an
 // anchor and a tag, whose own tokens belong to the node that holds them.
 // A comment belongs to no node.
-func (b *pathIndexBuilder) walk(node ast.Node, parent int) offsetRange {
+func (b *pathIndexBuilder) walk(node ast.Node, parent int) astnode.Extent {
 	if astnode.IsNil(node) {
-		return offsetRange{}
+		return astnode.Extent{}
 	}
 
 	switch n := node.(type) {
 	case *ast.AnchorNode:
-		return b.bounds(n.Name).with(n.GetToken()).union(b.walk(n.Value, parent))
+		return b.bounds(n.Name).With(n.GetToken()).Union(b.walk(n.Value, parent))
 
 	case *ast.TagNode:
-		return offsetRange{}.with(n.GetToken()).union(b.walk(n.Value, parent))
+		return astnode.Extent{}.With(n.GetToken()).Union(b.walk(n.Value, parent))
 
 	case *ast.MappingNode:
-		offsets := offsetRange{}.with(n.GetToken()).with(n.End)
+		offsets := astnode.Extent{}.With(n.GetToken()).With(n.End)
 
 		for i := range n.Values {
-			offsets = offsets.union(b.entry(n, i, parent))
+			offsets = offsets.Union(b.entry(n, i, parent))
 		}
 
 		return offsets
 
 	case *ast.SequenceNode:
-		offsets := offsetRange{}.with(n.GetToken()).with(n.End)
+		offsets := astnode.Extent{}.With(n.GetToken()).With(n.End)
 
 		for i, value := range n.Values {
-			offsets = offsets.union(b.element(n, i, value, parent))
+			offsets = offsets.Union(b.element(n, i, value, parent))
 		}
 
 		return offsets
@@ -284,57 +316,57 @@ func (b *pathIndexBuilder) walk(node ast.Node, parent int) offsetRange {
 // entry adds the step of the entry at index i of mapping, with the steps
 // under its value, and returns the offsets of its tokens. The walk does
 // not step into the key, so every token of the key belongs to the entry.
-func (b *pathIndexBuilder) entry(mapping *ast.MappingNode, i, parent int) offsetRange {
+func (b *pathIndexBuilder) entry(mapping *ast.MappingNode, i, parent int) astnode.Extent {
 	entry := mapping.Values[i]
 	if entry == nil {
-		return offsetRange{}
+		return astnode.Extent{}
 	}
 
 	id := len(b.steps)
 	b.steps = append(b.steps, pathStep{mapping: mapping, index: i, parent: parent})
 
-	offsets := b.bounds(entry.Key).with(entry.GetToken())
+	offsets := b.bounds(entry.Key).With(entry.GetToken())
 
-	return b.finish(id, offsets.union(b.walk(entry.Value, id)))
+	return b.finish(id, offsets.Union(b.walk(entry.Value, id)))
 }
 
 // element adds the step of the element at index i of seq, with the steps
 // under it, and returns the offsets of its tokens. The "-" of a block
 // sequence belongs to its element. A flow sequence holds the "," before
 // an element in the same place, which belongs to the sequence.
-func (b *pathIndexBuilder) element(seq *ast.SequenceNode, i int, value ast.Node, parent int) offsetRange {
+func (b *pathIndexBuilder) element(seq *ast.SequenceNode, i int, value ast.Node, parent int) astnode.Extent {
 	id := len(b.steps)
 	b.steps = append(b.steps, pathStep{index: i, parent: parent})
 
-	var offsets offsetRange
+	var offsets astnode.Extent
 
 	if i < len(seq.Entries) && seq.Entries[i] != nil {
 		if start := seq.Entries[i].Start; start != nil && start.Type == token.SequenceEntryType {
-			offsets = offsets.with(start)
+			offsets = offsets.With(start)
 		}
 	}
 
-	return b.finish(id, offsets.union(b.walk(value, id)))
+	return b.finish(id, offsets.Union(b.walk(value, id)))
 }
 
 // finish sets the offsets of the step at index id and returns them. A
 // step whose node holds no token with a position has no offset to find it
 // by, so finish drops it. Such a step holds no step, since the offsets of
 // a step hold those of every step under it.
-func (b *pathIndexBuilder) finish(id int, offsets offsetRange) offsetRange {
-	if !offsets.ok {
+func (b *pathIndexBuilder) finish(id int, offsets astnode.Extent) astnode.Extent {
+	if !offsets.OK {
 		b.steps = b.steps[:id]
 
 		return offsets
 	}
 
-	b.steps[id].lo, b.steps[id].hi = offsets.lo, offsets.hi
+	b.steps[id].lo, b.steps[id].hi = offsets.Lo, offsets.Hi
 
 	return offsets
 }
 
 // bounds returns the offsets of the tokens under node, comments left out.
-func (b *pathIndexBuilder) bounds(node ast.Node) offsetRange {
+func (b *pathIndexBuilder) bounds(node ast.Node) astnode.Extent {
 	b.finder.first, b.finder.last = b.finder.first[:0], b.finder.last[:0]
 
 	return tokenOffsets(&b.finder, node)
@@ -363,7 +395,7 @@ func (x *pathIndex) stepAt(off int) int {
 // the document. It reports false for a node that no path selects, as
 // [pathIndex.spell] finds.
 func (x *pathIndex) pathAt(r *paths.Resolver, off int) (paths.Path, bool) {
-	if !x.body.holds(off) {
+	if !x.body.Holds(off) {
 		return paths.Path{}, false
 	}
 
@@ -391,7 +423,7 @@ func (x *pathIndex) pathAt(r *paths.Resolver, off int) (paths.Path, bool) {
 // same ":" or "-", and its type tells it apart, so it gives the path of
 // the entry or the element.
 func (x *pathIndex) ownerPath(r *paths.Resolver, tk *token.Token) (paths.Path, bool, bool) {
-	if tk == nil || tk.Position == nil || !x.body.holds(tk.Position.Offset) {
+	if tk == nil || tk.Position == nil || !x.body.Holds(tk.Position.Offset) {
 		return paths.Path{}, false, false
 	}
 
@@ -434,7 +466,7 @@ func (x *pathIndex) inKey(at, off int) bool {
 		return false
 	}
 
-	return tokenOffsets(&boundsFinder{skipComments: true}, entry.Key).holds(off)
+	return tokenOffsets(&boundsFinder{skipComments: true}, entry.Key).Holds(off)
 }
 
 // spell returns the path of the node of the step at index at, or the

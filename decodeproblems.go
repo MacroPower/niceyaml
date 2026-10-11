@@ -569,7 +569,7 @@ func (c *problemCollector) walk(t reflect.Type, held ast.Node, from astnode.Pare
 		// refuses any other node itself, unless another unmarshaler of the
 		// type takes that node.
 		if refusesForText(t, c.cfg.unmarshalers, content) ||
-			isScalar(content) && decodesFromText(t, c.cfg.unmarshalers) {
+			astnode.IsScalar(content) && decodesFromText(t, c.cfg.unmarshalers) {
 			c.leaf(t, held, node, from, at, in)
 		}
 
@@ -768,7 +768,7 @@ func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, from astnod
 	// The decoder parses the text of a scalar as a duration, or hands it
 	// to an UnmarshalText method, and returns the error of that parse as
 	// it is.
-	case isScalar(content) && (t == durationType || decodesFromText(t, c.cfg.unmarshalers)):
+	case astnode.IsScalar(content) && (t == durationType || decodesFromText(t, c.cfg.unmarshalers)):
 		cause = asDecodeError(c.tree.restoreError(err))
 
 	default:

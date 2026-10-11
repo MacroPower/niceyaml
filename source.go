@@ -2143,7 +2143,7 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 // for it.
 func nullEmptyAnchors(file *ast.File) {
 	for _, doc := range file.Docs {
-		for _, node := range sourceNodes(doc) {
+		for _, node := range astnode.Nodes(doc) {
 			anchor, ok := node.(*ast.AnchorNode)
 			if !ok || astnode.HasContent(anchor.Value) {
 				continue

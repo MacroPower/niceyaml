@@ -169,10 +169,17 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 		return nil, false
 	}
 
-	tokens := tokenCollector{}
-	ast.Walk(tokens, body)
+	tokens := map[*token.Token]struct{}{}
 
-	source := sourceNodes(d.root.Body)
+	astnode.Inspect(body, func(node ast.Node) bool {
+		if tk := node.GetToken(); tk != nil {
+			tokens[tk] = struct{}{}
+		}
+
+		return true
+	})
+
+	source := astnode.Nodes(d.root.Body)
 
 	// Each anchor with a name in names gets the name followed by a count in
 	// brackets, higher than the count of the last anchor of that name, so
@@ -199,7 +206,7 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 			continue
 		}
 
-		name, ok := nodeName(anchor.Name)
+		name, ok := astnode.Name(anchor.Name)
 		if !ok || !names[name] {
 			continue
 		}
@@ -221,7 +228,7 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 		// The decoder names an anchor by the value of the token of its
 		// name, while the go-yaml formatter writes the token's text.
 		if view, ok := nodes[anchor].(*ast.AnchorNode); ok {
-			if tk := nodeToken(view.Name); tk != nil {
+			if tk := astnode.Token(view.Name); tk != nil {
 				tk.Value = unique
 			}
 		}
@@ -349,13 +356,13 @@ func (d *document) findEnclosedAliases() map[ast.Node]bool {
 
 	merged := map[ast.Node]bool{}
 
-	for _, n := range sourceNodes(d.root.Body) {
+	for _, n := range astnode.Nodes(d.root.Body) {
 		switch n := n.(type) {
 		case *ast.AliasNode:
 			aliases = append(aliases, n)
 
 		case *ast.MappingValueNode:
-			for _, source := range mergeSources(n) {
+			for _, source := range astnode.MergeValues(n) {
 				merged[source] = true
 			}
 		}
@@ -441,7 +448,7 @@ func (r nodeReplacer) replace(node ast.Node) ast.Node {
 // is not empty. The decoder looks an alias up by the value of the token
 // of its name, and by the text of the node of its name.
 func renameAlias(alias *ast.AliasNode, name string) {
-	tk := nodeToken(alias.Value)
+	tk := astnode.Token(alias.Value)
 	if tk == nil {
 		return
 	}
@@ -529,7 +536,7 @@ func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node, e
 		t.merges = unresolvedMerges(resolver, t.source)
 	})
 
-	first, last := tokenBounds(scope)
+	first, last := astnode.Bounds(scope)
 	if len(first) == 0 {
 		return nil
 	}
@@ -564,7 +571,7 @@ func (t *decodeTree) referenceAliases(resolver *paths.Resolver, scope ast.Node) 
 	t.aliasesOnce.Do(func() {
 		bounds := anchorBounds{}
 
-		for _, n := range sourceNodes(t.source) {
+		for _, n := range astnode.Nodes(t.source) {
 			alias, ok := n.(*ast.AliasNode)
 			if !ok || alias.Start == nil || alias.Start.Position == nil {
 				continue
@@ -597,7 +604,7 @@ func (t *decodeTree) referenceAliases(resolver *paths.Resolver, scope ast.Node) 
 		node := work[len(work)-1]
 		work = work[:len(work)-1]
 
-		first, last := tokenBounds(node)
+		first, last := astnode.Bounds(node)
 		if len(first) == 0 {
 			continue
 		}
@@ -686,17 +693,17 @@ func unresolvedMerges(resolver *paths.Resolver, body ast.Node) []mergeAlias {
 			enclosed = true
 		}
 
-		name, _ := nodeName(alias.Value)
+		name, _ := astnode.Name(alias.Value)
 		found = append(found, mergeAlias{token: alias.Start, name: name, enclosed: enclosed})
 	}
 
-	for _, n := range sourceNodes(body) {
+	for _, n := range astnode.Nodes(body) {
 		entry, ok := n.(*ast.MappingValueNode)
 		if !ok {
 			continue
 		}
 
-		for _, source := range mergeSources(entry) {
+		for _, source := range astnode.MergeValues(entry) {
 			check(source)
 		}
 	}
@@ -708,59 +715,20 @@ func unresolvedMerges(resolver *paths.Resolver, body ast.Node) []mergeAlias {
 	return found
 }
 
-// mergeSources returns the nodes the `<<` merge key of entry merges, the
-// value of the entry or each element of a sequence there, under their
-// anchors and tags. It returns nil when entry holds no merge key.
-func mergeSources(entry *ast.MappingValueNode) []ast.Node {
-	if entry.Key == nil || !entry.Key.IsMergeKey() {
-		return nil
-	}
-
-	value := astnode.Content(entry.Value)
-
-	seq, ok := value.(*ast.SequenceNode)
-	if !ok {
-		return []ast.Node{value}
-	}
-
-	sources := make([]ast.Node, 0, len(seq.Values))
-	for _, elem := range seq.Values {
-		sources = append(sources, astnode.Content(elem))
-	}
-
-	return sources
-}
-
 // anchorBounds keeps the offsets of the first and the last token under
-// each node it checks a token against, so a check of many aliases
-// against one anchor walks the anchor once. A node without tokens maps
-// to nil.
-type anchorBounds map[ast.Node]*tokenSpan
-
-// tokenSpan is the offsets of the first and the last token under a node.
-type tokenSpan struct {
-	start, end int
-}
+// each node it checks a token against, comments included, so a check of
+// many aliases against one anchor walks the anchor once.
+type anchorBounds map[ast.Node]astnode.Extent
 
 // encloses reports whether tk lies among the tokens under node.
 func (b anchorBounds) encloses(node ast.Node, tk *token.Token) bool {
-	span, ok := b[node]
+	extent, ok := b[node]
 	if !ok {
-		first, last := tokenBounds(node)
-		if len(first) > 0 {
-			span = &tokenSpan{start: first[0].Position.Offset, end: last[0].Position.Offset}
-		}
-
-		b[node] = span
+		extent = astnode.ExtentOf(node, true)
+		b[node] = extent
 	}
 
-	if span == nil {
-		return false
-	}
-
-	off := tk.Position.Offset
-
-	return off >= span.start && off <= span.end
+	return extent.Holds(tk.Position.Offset)
 }
 
 // rejectionText returns the message [rejectionMessage] writes for err,
@@ -841,10 +809,10 @@ func renamedAnchorNames(resolver *paths.Resolver, body ast.Node, references bool
 	anchors := map[string]int{}
 	unbound := map[string]bool{}
 
-	for _, n := range sourceNodes(body) {
+	for _, n := range astnode.Nodes(body) {
 		switch n := n.(type) {
 		case *ast.AnchorNode:
-			if name, ok := nodeName(n.Name); ok {
+			if name, ok := astnode.Name(n.Name); ok {
 				anchors[name]++
 			}
 
@@ -854,7 +822,7 @@ func renamedAnchorNames(resolver *paths.Resolver, body ast.Node, references bool
 				continue
 			}
 
-			if name, ok := nodeName(n.Value); ok {
+			if name, ok := astnode.Name(n.Value); ok {
 				unbound[name] = true
 			}
 		}
@@ -975,7 +943,7 @@ func (s *spellings) find(names, spelled map[string]bool) {
 // the same place under b. It reports false when the two trees differ in
 // shape.
 func pairNodes(a, b ast.Node) (map[ast.Node]ast.Node, bool) {
-	from, to := sourceNodes(a), sourceNodes(b)
+	from, to := astnode.Nodes(a), astnode.Nodes(b)
 	if len(from) != len(to) {
 		return nil, false
 	}
@@ -991,31 +959,6 @@ func pairNodes(a, b ast.Node) (map[ast.Node]ast.Node, bool) {
 	}
 
 	return pairs, true
-}
-
-// sourceNodes returns the nodes under node outside its comments, in the
-// order [ast.Walk] visits them.
-func sourceNodes(node ast.Node) []ast.Node {
-	var nodes nodeCollector
-
-	ast.Walk(&nodes, node)
-
-	return nodes
-}
-
-// nodeCollector is an [ast.Visitor] that collects the nodes it visits,
-// and leaves out comments.
-type nodeCollector []ast.Node
-
-// Visit implements [ast.Visitor].
-func (c *nodeCollector) Visit(node ast.Node) ast.Visitor {
-	if astnode.IsNil(node) || node.Type() == ast.CommentType {
-		return nil
-	}
-
-	*c = append(*c, node)
-
-	return c
 }
 
 // anchorIndex lists the anchors of a [decodeTree], so a decode of a node
@@ -1046,13 +989,13 @@ type anchorEntry struct {
 func newAnchorIndex(body ast.Node) *anchorIndex {
 	idx := &anchorIndex{named: map[string][]int{}}
 
-	for _, node := range sourceNodes(body) {
+	for _, node := range astnode.Nodes(body) {
 		anchor, ok := node.(*ast.AnchorNode)
 		if !ok {
 			continue
 		}
 
-		first, last := tokenBounds(anchor)
+		first, last := astnode.Bounds(anchor)
 		if len(first) == 0 {
 			continue
 		}
@@ -1088,7 +1031,7 @@ func newAnchorIndex(body ast.Node) *anchorIndex {
 
 		holders = append(holders, i)
 
-		if name, ok := nodeName(e.node.Name); ok {
+		if name, ok := astnode.Name(e.node.Name); ok {
 			idx.named[name] = append(idx.named[name], i)
 		}
 	}
@@ -1150,7 +1093,7 @@ func (n *Node) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast.Nod
 		return nil
 	}
 
-	first, _ := tokenBounds(node)
+	first, _ := astnode.Bounds(node)
 	if len(first) == 0 {
 		return nil
 	}
@@ -1252,48 +1195,17 @@ func pendingAnchor(anchor *ast.AnchorNode) *ast.AnchorNode {
 
 // aliasNames returns the names the aliases under node read.
 func aliasNames(node ast.Node) map[string]struct{} {
-	names := aliasVisitor{}
-	ast.Walk(names, node)
+	names := map[string]struct{}{}
+
+	astnode.Inspect(node, func(n ast.Node) bool {
+		if alias, ok := n.(*ast.AliasNode); ok {
+			if name, ok := astnode.Name(alias.Value); ok {
+				names[name] = struct{}{}
+			}
+		}
+
+		return true
+	})
 
 	return names
-}
-
-// aliasVisitor is an [ast.Visitor] that collects the names of the aliases
-// the nodes it visits hold.
-type aliasVisitor map[string]struct{}
-
-// Visit implements [ast.Visitor].
-func (a aliasVisitor) Visit(node ast.Node) ast.Visitor {
-	if astnode.IsNil(node) {
-		return nil
-	}
-
-	if n, ok := node.(*ast.AliasNode); ok {
-		if name, ok := nodeName(n.Value); ok {
-			a[name] = struct{}{}
-		}
-	}
-
-	return a
-}
-
-// nodeName returns the value of the token of node, the name the decoder
-// gives an anchor or looks an alias up by.
-func nodeName(node ast.Node) (string, bool) {
-	tk := nodeToken(node)
-	if tk == nil {
-		return "", false
-	}
-
-	return tk.Value, true
-}
-
-// nodeToken returns the token of node, or nil for a nil node, including
-// a typed nil a hand-built tree may hold.
-func nodeToken(node ast.Node) *token.Token {
-	if astnode.IsNil(node) {
-		return nil
-	}
-
-	return node.GetToken()
 }

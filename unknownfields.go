@@ -300,7 +300,7 @@ func (f *unknownFieldFinder) entry(mapping *ast.MappingNode, name string, merges
 	}
 
 	for _, entry := range slices.Backward(mapping.Values) {
-		if entry == nil || entry.Key == nil || entry.Key.IsMergeKey() {
+		if entry == nil || entry.Key == nil || astnode.IsMergeKey(entry.Key) {
 			continue
 		}
 
@@ -332,7 +332,7 @@ func (f *unknownFieldFinder) eachEntry(
 			continue
 		}
 
-		if !entry.Key.IsMergeKey() {
+		if !astnode.IsMergeKey(entry.Key) {
 			visit(entry)
 
 			continue
@@ -421,7 +421,7 @@ func (f *unknownFieldFinder) eachSource(
 	seen[mapping] = true
 
 	for _, entry := range mapping.Values {
-		if entry == nil || entry.Key == nil || !entry.Key.IsMergeKey() {
+		if entry == nil || !astnode.IsMergeKey(entry.Key) {
 			continue
 		}
 
@@ -438,7 +438,7 @@ func (f *unknownFieldFinder) eachSource(
 // mapping.
 func (f *unknownFieldFinder) readsAsStruct(mapping *ast.MappingNode) bool {
 	for _, entry := range mapping.Values {
-		if entry == nil || entry.Key == nil || entry.Key.IsMergeKey() {
+		if entry == nil || entry.Key == nil || astnode.IsMergeKey(entry.Key) {
 			continue
 		}
 
@@ -466,7 +466,7 @@ func (f *unknownFieldFinder) mergeRefused(mapping *ast.MappingNode) bool {
 	var merges []*ast.MappingValueNode
 
 	for _, entry := range mapping.Values {
-		if entry == nil || entry.Key == nil || !entry.Key.IsMergeKey() {
+		if entry == nil || !astnode.IsMergeKey(entry.Key) {
 			continue
 		}
 

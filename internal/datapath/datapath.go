@@ -381,7 +381,7 @@ func (idx *Index) memberNodes(node ast.Node) memberTable {
 	idx.members[node] = memberTable{}
 
 	table := memberTable{members: map[string]memberNode{}, complete: true}
-	members := mappingMembers(node)
+	members, _ := astnode.Entries(node)
 
 	for _, member := range slices.Backward(members) {
 		// A tree built by hand may hold a nil member, which sets nothing.
@@ -389,7 +389,7 @@ func (idx *Index) memberNodes(node ast.Node) memberTable {
 			continue
 		}
 
-		if isMergeKey(member.Key) {
+		if astnode.IsMergeKey(member.Key) {
 			if !idx.addMerged(table.members, member) {
 				table.complete = false
 
@@ -486,19 +486,6 @@ func aliasKeyName(r *paths.Resolver, key ast.MapKeyNode) (string, bool) {
 	return decodedKey(content)
 }
 
-// mappingMembers returns the members of the mapping node holds, or nil
-// for any other node, including a typed nil.
-func mappingMembers(node ast.Node) []*ast.MappingValueNode {
-	switch n := astnode.Content(node).(type) {
-	case *ast.MappingNode:
-		return n.Values
-	case *ast.MappingValueNode:
-		return []*ast.MappingValueNode{n}
-	}
-
-	return nil
-}
-
 // decodedKey returns the member name a decode gives the key node, with
 // the key's tag applied, and reports whether the key has a name. A
 // string key gives its unquoted text, and any other scalar gives its Go
@@ -510,7 +497,7 @@ func mappingMembers(node ast.Node) []*ast.MappingValueNode {
 // a key the decoder cannot read on its own, such as an alias. A nil key,
 // including a typed nil a tree built by hand may hold, has no name.
 func decodedKey(key ast.MapKeyNode) (string, bool) {
-	if _, ok := astnode.Content(key).(ast.ScalarNode); !ok || isMergeKey(key) {
+	if _, ok := astnode.Content(key).(ast.ScalarNode); !ok || astnode.IsMergeKey(key) {
 		return "", false
 	}
 
@@ -522,15 +509,6 @@ func decodedKey(key ast.MapKeyNode) (string, bool) {
 	}
 
 	return MemberName(v), true
-}
-
-// isMergeKey reports whether key is a `<<` merge key, looking through the
-// `?` indicator, anchors, and tags. A nil key, including a typed nil, is
-// not a merge key.
-func isMergeKey(key ast.Node) bool {
-	_, ok := astnode.Content(key).(*ast.MergeKeyNode)
-
-	return ok
 }
 
 // MemberName returns the member name a decode into a map gives a key it

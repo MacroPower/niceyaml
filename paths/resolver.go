@@ -482,7 +482,7 @@ func (r *Resolver) Anchor(node ast.Node) (ast.Node, error) {
 		return nil, fmt.Errorf("anchor: %w: not an alias", ErrAlias)
 	}
 
-	tk := nodeToken(alias.Value)
+	tk := astnode.Token(alias.Value)
 	if tk == nil {
 		return nil, fmt.Errorf("anchor: %w: alias has no name", ErrAlias)
 	}
@@ -518,7 +518,7 @@ func (r *Resolver) MergeSources(node ast.Node) ([]ast.Node, error) {
 	var sources []ast.Node
 
 	for _, entry := range mapping.Values {
-		if entry == nil || !isMergeKey(entry.Key) {
+		if entry == nil || !astnode.IsMergeKey(entry.Key) {
 			continue
 		}
 

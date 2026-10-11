@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
+	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -471,4 +473,585 @@ func TestKeyToken(t *testing.T) {
 		assert.Nil(t, astnode.KeyToken(&ast.MappingValueNode{}))
 		assert.Nil(t, astnode.KeyToken(&ast.MappingValueNode{Key: (*ast.StringNode)(nil)}))
 	})
+}
+
+// parse returns the body of the first document of input, comments
+// included.
+func parse(t *testing.T, input string) ast.Node {
+	t.Helper()
+
+	file, err := parser.ParseBytes([]byte(input), parser.ParseComments)
+	require.NoError(t, err)
+	require.NotEmpty(t, file.Docs)
+
+	return file.Docs[0].Body
+}
+
+// describe returns the type of node and the value of its token.
+func describe(node ast.Node) string {
+	tk := node.GetToken()
+	if tk == nil {
+		return node.Type().String()
+	}
+
+	return node.Type().String() + ":" + tk.Value
+}
+
+func TestInspect(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		node ast.Node
+		// The node types whose children the walk passes over.
+		prune map[ast.NodeType]bool
+		want  []string
+	}{
+		"nil": {
+			node: nil,
+		},
+		"typed nil": {
+			node: (*ast.MappingNode)(nil),
+		},
+		"typed nil below a node": {
+			node: &ast.TagNode{Value: (*ast.StringNode)(nil)},
+			want: []string{"Tag"},
+		},
+		"walk order": {
+			node: parse(t, "a: &x [1, 2] # c\nb: *x\n"),
+			want: []string{
+				"Mapping::", "MappingValue::", "String:a", "Anchor:&", "String:x",
+				"Sequence:[", "Comment: c", "Integer:1", "Integer:2",
+				"MappingValue::", "String:b", "Alias:*", "String:x",
+			},
+		},
+		"pruned": {
+			node:  parse(t, "a: [1, 2]\nb: 3\n"),
+			prune: map[ast.NodeType]bool{ast.SequenceType: true},
+			want: []string{
+				"Mapping::", "MappingValue::", "String:a", "Sequence:[",
+				"MappingValue::", "String:b", "Integer:3",
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var got []string
+
+			astnode.Inspect(tc.node, func(n ast.Node) bool {
+				got = append(got, describe(n))
+
+				return !tc.prune[n.Type()]
+			})
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestNodes(t *testing.T) {
+	t.Parallel()
+
+	var got []string
+
+	for _, n := range astnode.Nodes(parse(t, "# head\na: 1 # line\n")) {
+		got = append(got, describe(n))
+	}
+
+	assert.Equal(t, []string{"Mapping::", "MappingValue::", "String:a", "Integer:1"}, got)
+	assert.Empty(t, astnode.Nodes(nil))
+}
+
+func TestToken(t *testing.T) {
+	t.Parallel()
+
+	scalar := &ast.StringNode{Token: token.New("a", "a", nil), Value: "a"}
+
+	assert.Same(t, scalar.Token, astnode.Token(scalar))
+	assert.Nil(t, astnode.Token(nil))
+	assert.Nil(t, astnode.Token((*ast.StringNode)(nil)))
+}
+
+func TestName(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		node ast.Node
+		want string
+		ok   bool
+	}{
+		"scalar": {
+			node: &ast.StringNode{Token: token.New("x", "x", nil)},
+			want: "x",
+			ok:   true,
+		},
+		"no token": {
+			node: &ast.StringNode{},
+		},
+		"nil": {
+			node: nil,
+		},
+		"typed nil": {
+			node: (*ast.StringNode)(nil),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := astnode.Name(tc.node)
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.ok, ok)
+		})
+	}
+}
+
+func TestExtent(t *testing.T) {
+	t.Parallel()
+
+	at := func(off int) *token.Token {
+		return &token.Token{Position: &token.Position{Offset: off}}
+	}
+
+	tcs := map[string]struct {
+		extent astnode.Extent
+		want   astnode.Extent
+	}{
+		"empty": {
+			extent: astnode.Extent{},
+			want:   astnode.Extent{},
+		},
+		"one token": {
+			extent: astnode.Extent{}.With(at(4)),
+			want:   astnode.Extent{Lo: 4, Hi: 4, OK: true},
+		},
+		"tokens widen it": {
+			extent: astnode.Extent{}.With(at(4)).With(at(9)).With(at(2)),
+			want:   astnode.Extent{Lo: 2, Hi: 9, OK: true},
+		},
+		"no position changes nothing": {
+			extent: astnode.Extent{}.With(at(4)).With(&token.Token{}).With(nil),
+			want:   astnode.Extent{Lo: 4, Hi: 4, OK: true},
+		},
+		"union": {
+			extent: astnode.Extent{Lo: 1, Hi: 3, OK: true}.Union(astnode.Extent{Lo: 6, Hi: 8, OK: true}),
+			want:   astnode.Extent{Lo: 1, Hi: 8, OK: true},
+		},
+		"union with empty": {
+			extent: astnode.Extent{}.Union(astnode.Extent{Lo: 6, Hi: 8, OK: true}).Union(astnode.Extent{}),
+			want:   astnode.Extent{Lo: 6, Hi: 8, OK: true},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.extent)
+		})
+	}
+
+	t.Run("holds", func(t *testing.T) {
+		t.Parallel()
+
+		e := astnode.Extent{Lo: 2, Hi: 5, OK: true}
+
+		assert.False(t, e.Holds(1))
+		assert.True(t, e.Holds(2))
+		assert.True(t, e.Holds(5))
+		assert.False(t, e.Holds(6))
+		assert.False(t, astnode.Extent{}.Holds(0))
+	})
+}
+
+func TestExtentOf(t *testing.T) {
+	t.Parallel()
+
+	// The go-yaml parser counts the offsets of the first line from 1.
+	tcs := map[string]struct {
+		input    string
+		comments astnode.Extent
+		content  astnode.Extent
+	}{
+		"scalar": {
+			input:    "abc\n",
+			comments: astnode.Extent{Lo: 1, Hi: 1, OK: true},
+			content:  astnode.Extent{Lo: 1, Hi: 1, OK: true},
+		},
+		"flow mapping ends at its brace": {
+			input:    "{a: 1}\n",
+			comments: astnode.Extent{Lo: 1, Hi: 6, OK: true},
+			content:  astnode.Extent{Lo: 1, Hi: 6, OK: true},
+		},
+		"block sequence starts at its dash": {
+			input:    "- a\n- b\n",
+			comments: astnode.Extent{Lo: 1, Hi: 7, OK: true},
+			content:  astnode.Extent{Lo: 1, Hi: 7, OK: true},
+		},
+		"comment after a value": {
+			input:    "a: 1 # c\n",
+			comments: astnode.Extent{Lo: 1, Hi: 6, OK: true},
+			content:  astnode.Extent{Lo: 1, Hi: 4, OK: true},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			node := parse(t, tc.input)
+
+			assert.Equal(t, tc.comments, astnode.ExtentOf(node, true))
+			assert.Equal(t, tc.content, astnode.ExtentOf(node, false))
+		})
+	}
+
+	t.Run("matches the bounds", func(t *testing.T) {
+		t.Parallel()
+
+		inputs := []string{
+			"# head\na: 1 # line\nb: [x, y] # tail\n",
+			"- &a {k: v}\n- *a\n-\n",
+			"<<: [*a, *b]\n? k\n: v\n",
+			"a: |\n  text\n# foot\n",
+			"%YAML 1.2\n---\n!!map {a: 1}\n",
+		}
+
+		for _, input := range inputs {
+			file, err := parser.ParseBytes([]byte(input), parser.ParseComments)
+			require.NoError(t, err)
+
+			for _, n := range astnode.Nodes(file.Docs[0]) {
+				first, last := astnode.Bounds(n)
+
+				want := astnode.Extent{}
+				if len(first) > 0 {
+					want = astnode.Extent{Lo: first[0].Position.Offset, Hi: last[0].Position.Offset, OK: true}
+				}
+
+				assert.Equal(t, want, astnode.ExtentOf(n, true), "%q: %s", input, describe(n))
+
+				start := astnode.StartToken(n)
+				if start != nil {
+					assert.Equal(t, start.Position.Offset, astnode.ExtentOf(n, false).Lo)
+				}
+			}
+		}
+	})
+
+	t.Run("nil", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Equal(t, astnode.Extent{}, astnode.ExtentOf(nil, true))
+		assert.Equal(t, astnode.Extent{}, astnode.ExtentOf((*ast.MappingNode)(nil), false))
+	})
+}
+
+func TestBounds(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input       string
+		first, last []string
+	}{
+		"block mapping": {
+			input: "a: 1\nb: 2\n",
+			first: []string{"a@1:1"},
+			last:  []string{"2@2:4"},
+		},
+		"comment counts": {
+			input: "a: 1 # c\n",
+			first: []string{"a@1:1"},
+			last:  []string{" c@1:6"},
+		},
+		"flow sequence ends at its bracket": {
+			input: "[a, b]\n",
+			first: []string{"[@1:1"},
+			last:  []string{"]@1:6"},
+		},
+		"implicit null shares the offset of its dash": {
+			input: "- a\n-\n",
+			first: []string{"-@1:1", "-@1:1"},
+			last:  []string{"-@2:1", "null@2:3"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			first, last := astnode.Bounds(parse(t, tc.input))
+
+			assert.Equal(t, tc.first, places(first))
+			assert.Equal(t, tc.last, places(last))
+		})
+	}
+
+	t.Run("nil", func(t *testing.T) {
+		t.Parallel()
+
+		first, last := astnode.Bounds((*ast.MappingNode)(nil))
+		assert.Nil(t, first)
+		assert.Nil(t, last)
+	})
+}
+
+// places returns the place of each token, as [yamltest.TokenPlace]
+// writes it.
+func places(tks token.Tokens) []string {
+	var out []string
+
+	for _, tk := range tks {
+		out = append(out, yamltest.TokenPlace(tk))
+	}
+
+	return out
+}
+
+func TestStartToken(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		node ast.Node
+		want string
+	}{
+		"comment before a value": {
+			node: parse(t, "# c\na: 1\n"),
+			want: "a@2:1",
+		},
+		"anchor": {
+			node: parse(t, "&x [1]\n"),
+			want: "&@1:1",
+		},
+		"nil": {
+			node: nil,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := astnode.StartToken(tc.node)
+			if tc.want == "" {
+				assert.Nil(t, got)
+
+				return
+			}
+
+			assert.Equal(t, tc.want, yamltest.TokenPlace(got))
+		})
+	}
+}
+
+// firstEntry returns the first entry of the mapping that input holds.
+func firstEntry(t *testing.T, input string) *ast.MappingValueNode {
+	t.Helper()
+
+	entries, ok := astnode.Entries(parse(t, input))
+	require.True(t, ok)
+	require.NotEmpty(t, entries)
+
+	return entries[0]
+}
+
+func TestIsMergeKey(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		key  ast.Node
+		want bool
+	}{
+		"merge key": {
+			key:  firstEntry(t, "<<: {a: 1}\n").Key,
+			want: true,
+		},
+		"explicit merge key": {
+			key:  &ast.MappingKeyNode{Value: &ast.MergeKeyNode{}},
+			want: true,
+		},
+		"anchored merge key": {
+			key:  firstEntry(t, "&k <<: {a: 1}\n").Key,
+			want: true,
+		},
+		"quoted key": {
+			key:  firstEntry(t, "'<<': {a: 1}\n").Key,
+			want: false,
+		},
+		"plain key": {
+			key:  firstEntry(t, "a: 1\n").Key,
+			want: false,
+		},
+		"nil": {
+			key:  nil,
+			want: false,
+		},
+		"typed nil": {
+			key:  (*ast.MappingKeyNode)(nil),
+			want: false,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, astnode.IsMergeKey(tc.key))
+		})
+	}
+}
+
+func TestMergeValues(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  []string
+	}{
+		"one alias": {
+			input: "<<: *a\n",
+			want:  []string{"Alias:*"},
+		},
+		"sequence of aliases": {
+			input: "<<: [*a, &b !t {k: v}]\n",
+			want:  []string{"Alias:*", "Mapping:{"},
+		},
+		"no merge key": {
+			input: "a: *a\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var got []string
+
+			for _, n := range astnode.MergeValues(firstEntry(t, tc.input)) {
+				got = append(got, describe(n))
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("nil entry", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Nil(t, astnode.MergeValues(nil))
+	})
+}
+
+func TestEntries(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		node ast.Node
+		want int
+		ok   bool
+	}{
+		"mapping": {
+			node: parse(t, "a: 1\nb: 2\n"),
+			want: 2,
+			ok:   true,
+		},
+		"mapping of one entry": {
+			node: firstEntry(t, "a: 1\n"),
+			want: 1,
+			ok:   true,
+		},
+		"anchored mapping": {
+			node: parse(t, "&x {a: 1, b: 2, c: 3}\n"),
+			want: 3,
+			ok:   true,
+		},
+		"sequence": {
+			node: parse(t, "[a]\n"),
+		},
+		"typed nil": {
+			node: (*ast.MappingNode)(nil),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := astnode.Entries(tc.node)
+			assert.Len(t, got, tc.want)
+			assert.Equal(t, tc.ok, ok)
+		})
+	}
+}
+
+func TestIsTaggedNull(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  bool
+	}{
+		"null tag over a value": {
+			input: "a: !!null x\n",
+			want:  true,
+		},
+		"map tag over no value": {
+			input: "a: !!map\n",
+			want:  true,
+		},
+		"local tag over no value": {
+			input: "a: !local\n",
+			want:  true,
+		},
+		"anchor on a tagged null": {
+			input: "a: &x !!seq\n",
+			want:  true,
+		},
+		"string tag over no value": {
+			input: "a: !!str\n",
+			want:  false,
+		},
+		"local tag over a value": {
+			input: "a: !local x\n",
+			want:  false,
+		},
+		"no tag": {
+			input: "a: x\n",
+			want:  false,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, astnode.IsTaggedNull(firstEntry(t, tc.input).Value))
+		})
+	}
+}
+
+func TestIsScalar(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		node ast.Node
+		want bool
+	}{
+		"nil":      {node: nil, want: false},
+		"mapping":  {node: &ast.MappingNode{}, want: false},
+		"sequence": {node: &ast.SequenceNode{}, want: false},
+		"scalar":   {node: &ast.StringNode{}, want: true},
+		"alias":    {node: &ast.AliasNode{}, want: true},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, astnode.IsScalar(tc.node))
+		})
+	}
 }

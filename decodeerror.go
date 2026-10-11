@@ -318,7 +318,7 @@ func (n *Node) locateDecodeError(
 		var ok bool
 
 		found, ok = l.below(t, node, place{})
-		if !ok && (!reportsOwnError(t, l.unmarshalers) || !isScalar(l.content(node))) {
+		if !ok && (!reportsOwnError(t, l.unmarshalers) || !astnode.IsScalar(l.content(node))) {
 			return err
 		}
 	}
@@ -411,7 +411,7 @@ func reportsOwnError(t reflect.Type, u optionUnmarshalers) bool {
 // decoder parses a [time.Time] itself, and under [WithJSONUnmarshalers]
 // it hands the node to the UnmarshalJSON method of a type that has one.
 func refusesForText(t reflect.Type, u optionUnmarshalers, content ast.Node) bool {
-	if astnode.IsNil(content) || isScalar(content) || t == timeType || !decodesFromText(t, u) {
+	if astnode.IsNil(content) || astnode.IsScalar(content) || t == timeType || !decodesFromText(t, u) {
 		return false
 	}
 
@@ -513,17 +513,6 @@ func pointerBase(t reflect.Type) reflect.Type {
 	}
 
 	return t
-}
-
-// isScalar reports whether node holds a value with nothing below it,
-// which is any node but a mapping, a sequence, or nil.
-func isScalar(node ast.Node) bool {
-	switch node.(type) {
-	case nil, *ast.MappingNode, *ast.SequenceNode:
-		return false
-	default:
-		return true
-	}
 }
 
 // errorLocator finds the value that reported an error of a decode with
@@ -760,7 +749,7 @@ func (l *errorLocator) entries(
 			continue
 		}
 
-		if entry.Key.IsMergeKey() {
+		if astnode.IsMergeKey(entry.Key) {
 			sources, err := resolver.MergeSources(&ast.MappingNode{
 				Values: []*ast.MappingValueNode{entry},
 			})

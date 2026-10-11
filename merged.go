@@ -259,7 +259,7 @@ func (r *layerReader) read() (*mergedValue, error) {
 
 	err = aliasing.CheckDecodeText(n)
 	if err != nil {
-		return nil, n.Bind(Invalid(err, atToken(contentStart(n.AST()))))
+		return nil, n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
 	}
 
 	if !astnode.HasContent(n.AST()) {
@@ -352,10 +352,11 @@ func (r *layerReader) value(node ast.Node, ref bool) (*mergedValue, error) {
 // the first tag it looks through, as the source spells it, and whether
 // the content lies in a reference document. The tag starts as outer, the
 // tag a caller found above node, or the empty string. A tag over no
-// value that the decoder reads as null, as [isTaggedNull] reports, is no
-// tag to pass, since the text "null" behind it reads as another value.
-// Each anchor on the way stays open while visit runs. The content of an
-// alias inside the anchor it refers to is nil, which reads as null.
+// value that the decoder reads as null, as [astnode.IsTaggedNull]
+// reports, is no tag to pass, since the text "null" behind it reads as
+// another value. Each anchor on the way stays open while visit runs. The
+// content of an alias inside the anchor it refers to is nil, which reads
+// as null.
 func (r *layerReader) follow(
 	node ast.Node, ref bool, outer string, visit func(content ast.Node, tag string, ref bool) error,
 ) error {
@@ -407,11 +408,11 @@ func (r *layerReader) follow(
 }
 
 // tagsNoValue reports whether tag stands over no value and the go-yaml
-// decoder reads it as null, as [isTaggedNull] describes. The merged
+// decoder reads it as null, as [astnode.IsTaggedNull] describes. The merged
 // document writes that null as text. Behind a local tag the text reads
 // as a string, and behind a tag such as "!!map" it does not parse.
 func tagsNoValue(tag *ast.TagNode) bool {
-	return isTaggedNull(tag) && (astnode.IsNil(tag.Value) || tag.Value.Type() == ast.NullType)
+	return astnode.IsTaggedNull(tag) && (astnode.IsNil(tag.Value) || tag.Value.Type() == ast.NullType)
 }
 
 // anchor returns the anchor alias reads, and whether that anchor lies in
@@ -427,7 +428,7 @@ func (r *layerReader) anchor(alias *ast.AliasNode, ref bool) (*ast.AnchorNode, b
 		}
 	}
 
-	name, _ := nodeName(alias.Value)
+	name, _ := astnode.Name(alias.Value)
 
 	anchor, ok := r.references()[name]
 	if !ok {
@@ -459,26 +460,19 @@ func (r *layerReader) references() map[string]*ast.AnchorNode {
 		}
 
 		for _, doc := range file.Docs {
-			ast.Walk(anchorCollector(r.refs), doc)
+			astnode.Inspect(doc, func(node ast.Node) bool {
+				if anchor, ok := node.(*ast.AnchorNode); ok {
+					if name, ok := astnode.Name(anchor.Name); ok {
+						r.refs[name] = anchor
+					}
+				}
+
+				return true
+			})
 		}
 	}
 
 	return r.refs
-}
-
-// anchorCollector is an [ast.Visitor] that keeps each anchor it visits
-// under its name, with a later anchor in place of an earlier one.
-type anchorCollector map[string]*ast.AnchorNode
-
-// Visit implements [ast.Visitor].
-func (c anchorCollector) Visit(node ast.Node) ast.Visitor {
-	if anchor, ok := node.(*ast.AnchorNode); ok && anchor != nil {
-		if name, ok := nodeName(anchor.Name); ok {
-			c[name] = anchor
-		}
-	}
-
-	return c
 }
 
 // content returns the value of content, a node [layerReader.follow]
@@ -495,7 +489,7 @@ func (r *layerReader) content(content ast.Node, ref bool) (*mergedValue, error) 
 		v.text, v.written = tk.Value, tk.Type == token.NullType
 
 	case *ast.MappingNode, *ast.MappingValueNode:
-		entries, _ := mappingEntries(content)
+		entries, _ := astnode.Entries(content)
 
 		return v, r.mapping(v, entries, ref)
 
@@ -535,19 +529,6 @@ func (r *layerReader) invalid(err error, node ast.Node, ref bool) error {
 	}
 
 	return Invalid(err, atToken(astnode.PathToken(astnode.Content(node), astnode.Parent{})))
-}
-
-// mappingEntries returns the entries of content, and reports whether
-// content is a mapping.
-func mappingEntries(content ast.Node) ([]*ast.MappingValueNode, bool) {
-	switch n := content.(type) {
-	case *ast.MappingNode:
-		return n.Values, true
-	case *ast.MappingValueNode:
-		return []*ast.MappingValueNode{n}, true
-	default:
-		return nil, false
-	}
 }
 
 // flatEntry is an entry of a mapping as [layerReader.flatten] finds it:
@@ -610,7 +591,7 @@ func (r *layerReader) flatten(entries []*ast.MappingValueNode, ref bool, keep fu
 			continue
 		}
 
-		if _, merge := astnode.Content(entry.Key).(*ast.MergeKeyNode); merge {
+		if astnode.IsMergeKey(entry.Key) {
 			err := r.merged(entry.Value, ref, keep)
 			if err != nil {
 				return err
@@ -636,7 +617,7 @@ func (r *layerReader) flatten(entries []*ast.MappingValueNode, ref bool, keep fu
 // the sequence that is no mapping.
 func (r *layerReader) merged(value ast.Node, ref bool, keep func(string, flatEntry)) error {
 	source := func(content ast.Node, _ string, ref bool) error {
-		if entries, ok := mappingEntries(content); ok {
+		if entries, ok := astnode.Entries(content); ok {
 			return r.flatten(entries, ref, keep)
 		}
 

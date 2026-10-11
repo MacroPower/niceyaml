@@ -1169,32 +1169,20 @@ func (d *document) pathResolver() *paths.Resolver {
 // document, and collects those tokens on the first call.
 func (d *document) holdsNodeToken(tk *token.Token) bool {
 	d.nodeTokensOnce.Do(func() {
-		c := tokenCollector{}
-		ast.Walk(c, d.root)
+		d.nodeTokens = map[*token.Token]struct{}{}
 
-		d.nodeTokens = c
+		astnode.Inspect(d.root, func(node ast.Node) bool {
+			if tk := node.GetToken(); tk != nil {
+				d.nodeTokens[tk] = struct{}{}
+			}
+
+			return true
+		})
 	})
 
 	_, ok := d.nodeTokens[tk]
 
 	return ok
-}
-
-// tokenCollector is an [ast.Visitor] that adds the token of each node it
-// visits to the set.
-type tokenCollector map[*token.Token]struct{}
-
-// Visit implements [ast.Visitor].
-func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
-	if astnode.IsNil(node) {
-		return nil
-	}
-
-	if tk := node.GetToken(); tk != nil {
-		c[tk] = struct{}{}
-	}
-
-	return c
 }
 
 // Node is a scope in a YAML document: the root of the document, which
@@ -1668,7 +1656,7 @@ func (n *Node) scope(path paths.Path, node ast.Node) (position.Span, token.Token
 	span, tks := n.extent(node)
 
 	// A scalar is its own token, so no token above it introduces it.
-	if isScalar(astnode.Content(node)) {
+	if astnode.IsScalar(astnode.Content(node)) {
 		return span, tks
 	}
 
@@ -1709,7 +1697,7 @@ func (n *Node) scope(path paths.Path, node ast.Node) (position.Span, token.Token
 // node with no token in the document, such as an implicit null the
 // parser adds, holds no tokens and covers the line its token names.
 func (n *Node) extent(node ast.Node) (position.Span, token.Tokens) {
-	first, last := tokenBounds(node)
+	first, last := astnode.Bounds(node)
 	if len(first) == 0 {
 		return position.Span{}, nil
 	}
@@ -1791,107 +1779,6 @@ func (n *Node) lastContentLine(tk *token.Token) (int, bool) {
 	}
 
 	return last, found
-}
-
-// tokenBounds returns the tokens under node with the lowest and the
-// highest offset, comments included, each in walk order, or nil when no
-// token under node carries a position.
-func tokenBounds(node ast.Node) (token.Tokens, token.Tokens) {
-	if astnode.IsNil(node) {
-		return nil, nil
-	}
-
-	var b boundsFinder
-
-	ast.Walk(&b, node)
-
-	return b.first, b.last
-}
-
-// contentStart returns the token with the lowest offset under node that
-// is not a comment, or nil when no such token carries a position.
-func contentStart(node ast.Node) *token.Token {
-	if astnode.IsNil(node) {
-		return nil
-	}
-
-	b := boundsFinder{skipComments: true}
-
-	ast.Walk(&b, node)
-
-	if len(b.first) == 0 {
-		return nil
-	}
-
-	return b.first[0]
-}
-
-// boundsFinder is an [ast.Visitor] that records the tokens with the lowest
-// and the highest offset among the nodes it visits, all of them when
-// several share the offset. With skipComments set, it leaves out the
-// comments.
-type boundsFinder struct {
-	first, last  token.Tokens
-	skipComments bool
-}
-
-// Visit implements [ast.Visitor].
-func (b *boundsFinder) Visit(node ast.Node) ast.Visitor {
-	if astnode.IsNil(node) {
-		return nil
-	}
-
-	if b.skipComments && node.Type() == ast.CommentType {
-		return nil
-	}
-
-	b.consider(node.GetToken())
-
-	// The walk visits the nodes of a collection, not the token that closes
-	// a flow collection or the "-" that opens each entry of a block
-	// sequence, which the node holds beside them. An entry whose value is
-	// an implicit null shares the offset of its "-", which then ends the
-	// sequence.
-	switch n := node.(type) {
-	case *ast.SequenceNode:
-		b.consider(n.End)
-
-		for _, entry := range n.Entries {
-			if entry != nil {
-				b.consider(entry.Start)
-			}
-		}
-
-	case *ast.MappingNode:
-		b.consider(n.End)
-	}
-
-	return b
-}
-
-// consider widens the bounds to tk, or adds tk to the tokens at a bound
-// that it shares the offset of. A nil token, or one without a position,
-// changes nothing.
-func (b *boundsFinder) consider(tk *token.Token) {
-	if tk == nil || tk.Position == nil {
-		return
-	}
-
-	off := tk.Position.Offset
-
-	switch {
-	case len(b.first) == 0 || off < b.first[0].Position.Offset:
-		b.first = append(b.first[:0], tk)
-	case off == b.first[0].Position.Offset:
-		b.first = append(b.first, tk)
-	}
-
-	switch {
-	case len(b.last) == 0 || off > b.last[0].Position.Offset:
-		b.last = append(b.last[:0], tk)
-	case off == b.last[0].Position.Offset:
-		b.last = append(b.last, tk)
-	}
 }
 
 // Path returns the scope of the [Node]: the `$` path from the document
@@ -3524,7 +3411,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 	}
 
 	if err != nil {
-		return n.Bind(Invalid(err, atToken(contentStart(n.AST()))))
+		return n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
 	}
 
 	err = n.decodeNode(ctx, n.AST(), v, cfg, comments)
@@ -3715,7 +3602,7 @@ func (n *Node) decodeUnbound(
 		return err //nolint:wrapcheck // The caller binds the error.
 	}
 
-	if !astnode.HasContent(node) || isTaggedNull(node) || keepsNullTarget(node, v) {
+	if !astnode.HasContent(node) || astnode.IsTaggedNull(node) || keepsNullTarget(node, v) {
 		return nil
 	}
 
@@ -3857,7 +3744,7 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 	)
 
 	if errors.Is(err, yaml.ErrExceededMaxDepth) {
-		at, cause = contentStart(scope), tree.restoreError(err)
+		at, cause = astnode.StartToken(scope), tree.restoreError(err)
 	} else if m := tree.unresolvedMerge(resolver, scope, err); m != nil {
 		// The decoder's failure for an alias inside its own anchor names
 		// the null it merges in its place, which the source does not hold,
@@ -4223,60 +4110,15 @@ func isIntegerTag(node ast.Node) bool {
 // holdsIntegerTag reports whether node or any node below it is a tag
 // [isIntegerTag] reports.
 func holdsIntegerTag(node ast.Node) bool {
-	var found integerTagFinder
+	found := false
 
-	ast.Walk(&found, node)
+	astnode.Inspect(node, func(n ast.Node) bool {
+		found = found || isIntegerTag(n)
 
-	return bool(found)
-}
+		return !found
+	})
 
-// integerTagFinder is an [ast.Visitor] that records whether it visited a
-// tag [isIntegerTag] reports and stops the walk once it has.
-type integerTagFinder bool
-
-// Visit implements [ast.Visitor].
-func (f *integerTagFinder) Visit(node ast.Node) ast.Visitor {
-	if bool(*f) || astnode.IsNil(node) {
-		return nil
-	}
-
-	if isIntegerTag(node) {
-		*f = true
-
-		return nil
-	}
-
-	return f
-}
-
-// isTaggedNull reports whether node, or the value an anchor on node
-// names, is a tag the go-yaml decoder reads as null: a "!!null" tag over
-// any value, or a tag such as "!!seq", "!!map", or a local one over no
-// value. [yaml.Unmarshal] reads a document whose body is a tagged null as
-// empty. A tag that converts its value, such as "!!str" or "!!int",
-// reads as a value even over no value, as does any tag after a %TAG
-// directive that redefines the "!!" handle.
-func isTaggedNull(node ast.Node) bool {
-	if anchor, ok := node.(*ast.AnchorNode); ok {
-		node = anchor.Value
-	}
-
-	tag, ok := node.(*ast.TagNode)
-	if !ok || tag.Start == nil || tag.Directive != nil {
-		return false
-	}
-
-	switch token.ReservedTagKeyword(tag.Start.Value) {
-	case token.NullTag:
-		return true
-
-	case token.StringTag, token.IntegerTag, token.FloatTag, token.BooleanTag,
-		token.TimestampTag, token.BinaryTag:
-		return false
-
-	default:
-		return astnode.IsNil(tag.Value) || tag.Value.Type() == ast.NullType
-	}
+	return found
 }
 
 // decodeWithRecover decodes node into v with dec. It turns a panic in the
@@ -4298,7 +4140,7 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 		panicked := recovered("decoder", p)
 		panicked.placed = true
 
-		err = Place(panicked, atToken(contentStart(node)))
+		err = Place(panicked, atToken(astnode.StartToken(node)))
 	}()
 
 	err = dec.DecodeFromNodeContext(ctx, node, v)
