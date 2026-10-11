@@ -124,6 +124,12 @@ Types declare their constraints with `jsonschema` struct tags. The `gen` tool fr
 
 A [`schema.Registry`][niceyaml/schema.Registry] picks the schema of each document, so one file can hold documents of several kinds. Run `go run ./examples/schemas/registry` to route the documents of a stream by a `$schema` comment or by their `kind` and report the ones that fail.
 
+### Encoder
+
+- [examples/encoder](examples/encoder)
+
+[`encoder.Marshal`][niceyaml/encoder] writes a Go value as YAML. `encoder.Pretty` gives it the layout prettier writes, and `encoder.WithYAMLComments` puts a comment at each YAML path you name. A `Source` reads the result as it reads any document, so the printer highlights it.
+
 ### Layers
 
 [`niceyaml.NewSourceFromLayers`][niceyaml.NewSourceFromLayers] merges several files into one document, such as a base file with the file of one environment over it, and returns a [`Source`][niceyaml.Source] that decodes that document once. Pass a context and the `Source` of each file, lowest first:
