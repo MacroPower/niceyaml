@@ -4336,9 +4336,12 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 // A scoped Decode reads one typed value without decoding the whole
 // document, such as a version number or a list of tags. A scalar decodes
 // into a string whatever its type, so a Decode[string] reads a
-// discriminator field such as kind. A number decodes into a string in its
-// canonical spelling, so 1.10 reads as "1.1" and 0x10 as "16".
-// [Node.DecodeAt] scopes the Node and decodes it in one call:
+// discriminator field that holds a word, such as kind. A number decodes
+// into a string in its canonical spelling, so 1.10 reads as "1.1" and
+// 0x10 as "16". [go.jacobcolvin.com/niceyaml/schema/matcher.Text] hands
+// its function the text as the document wrote it, for a field whose
+// spelling matters, such as a version. [Node.DecodeAt] scopes the Node
+// and decodes it in one call:
 //
 //	kindPath := paths.Current().Child("kind")
 //	for _, doc := range docs {
@@ -4356,7 +4359,9 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 //	}
 //
 // For the YAML text of any node, including a mapping or a sequence, take
-// the node from [Node.AST] and call its String method.
+// the node from [Node.AST] and call its String method. The YAML text of
+// a scalar keeps its quotes and the comment after it, so "2.0" # two
+// reads as that whole text.
 //
 // To decode into a value you already hold, use [Node.DecodeInto]. To
 // decode many nodes with options stated once, hold them in
