@@ -781,6 +781,8 @@ func (m *Model) DiffMode() DiffMode {
 // It also stays when both modes compare against the same revision, as
 // [DiffModeAdjacent] and [DiffModeOrigin] do at revision index 1.
 // An undefined mode falls back to [DiffModeAdjacent], the default.
+// A rebuild moves the view back to the top, and a caller keeps its place
+// as [Model.SetViewMode] describes.
 func (m *Model) SetDiffMode(mode DiffMode) {
 	if mode < DiffModeAdjacent || mode > DiffModeNone {
 		mode = DiffModeAdjacent
@@ -824,6 +826,11 @@ func (m *Model) ViewMode() ViewMode {
 // switch between [ViewModeFull] and [ViewModeHunks] leaves the view where it
 // is, as does the mode already set. An undefined mode falls back to
 // [ViewModeFull], the default.
+//
+// A rebuild moves the view back to the top, since each mode of a diff
+// shows other rows. A caller that wants to keep its place takes a [Hit]
+// from [Model.HitAt] for a cell of the content before the change, and
+// passes it to [Model.Reveal] after it.
 func (m *Model) SetViewMode(mode ViewMode) {
 	if mode < ViewModeFull || mode > ViewModeSideBySide {
 		mode = ViewModeFull
