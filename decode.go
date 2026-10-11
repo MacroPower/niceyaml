@@ -270,7 +270,9 @@ type SelfValidator interface {
 // its errors as it wrote them from that Node: an [*Error] whose `@` path
 // reads from the Node, a plain error, or an error a Node bound already.
 // Check is the raw step, and the validators this module ships return
-// their errors that way too. Node.Validate and a decode bind what Check
+// their errors that way too. The Check of
+// [go.jacobcolvin.com/niceyaml/schema.Registry] is the exception and
+// binds every error it returns. Node.Validate and a decode bind what Check
 // returns, as [Node.Bind] binds an error, so the error names the source
 // the validator read and its `@` paths resolve from the Node. An Error
 // from [NewError] or [Invalid] says what is wrong with the document, and

@@ -70,9 +70,10 @@
 // path it would have, such as $.server.name, and the error binds at the
 // key of the mapping that lacks it.
 //
-// [Schema.Check] returns the same bound error, so a validator of the
-// program's own runs the schema on a node it picks and returns the
-// result.
+// [Schema.Check] is the raw step. It returns its violations as it wrote
+// them, with no source and no position, so a validator of the program's
+// own runs the schema on a node it picks through
+// [go.jacobcolvin.com/niceyaml.Node.Validate] and returns that error.
 //
 // [Schema.ValidateValue] checks decoded data that came from no document,
 // such as the body of a request. The text of its error names the path of
