@@ -4144,10 +4144,10 @@ func formatError(err error, cfg excerptConfig, limit int) string {
 	}
 
 	for _, bound := range rep.Unresolved {
-		// The reason names the path, which a key of the document spells,
-		// so its control characters render as pictures like those of the
-		// tree. A tab in the key becomes four spaces, as it does in the
-		// tree.
+		// The output promises no escape sequences, so the reason draws
+		// its control characters as pictures like those of the tree,
+		// whatever text it holds. A tab becomes four spaces, as it does
+		// in the tree.
 		parts = append(parts, "no excerpt: "+escape.Control(escape.Tabs(bound.Unresolved().Error())))
 	}
 
@@ -4163,10 +4163,11 @@ func formatError(err error, cfg excerptConfig, limit int) string {
 // so its children lead.
 //
 // Each text lays out as [escape.Message] returns it. Control characters
-// render as their pictures, so a key of the document that holds an escape
-// sequence cannot reach the terminal, and the output holds no escape
-// sequences as [FormatError] promises. A tab becomes four spaces instead,
-// since it lays out the text after it.
+// render as their pictures, so text the library did not write, such as
+// the message of the program's own validator, cannot write to the
+// terminal, and the output holds no escape sequences as [FormatError]
+// promises. A tab becomes four spaces instead, since it lays out the text
+// after it.
 func renderErrorTree(t ErrorTree) string {
 	var sb strings.Builder
 
