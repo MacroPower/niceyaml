@@ -34,38 +34,11 @@ import (
 // documents. It holds the text it read, the tokens lexed from the text,
 // the [*ast.File] they parse into, and the settings for parsing and for
 // reporting errors. [Source.Documents] returns the root [*Node] of each
-// document in the file but the empty ones a separator leaves, and
-// [Source.Document] returns the root of the one document of a file that
-// holds one, which is where decoding and validation live.
-//
-// Source separates two concerns. Parsing lives on Source itself, where [Source.File]
-// lazily parses the AST and [Source.Documents] builds the documents. Every error they
-// and their Nodes produce comes back bound to the Source as a [SourceError].
-// [Node.Bind] binds errors built elsewhere to the document the caller checked them
-// against, and [Source.Bind] binds one to the document its location falls in. Rendering
-// lives in a [line.View], which carries the overlays, annotations, and flags that a
-// [go.jacobcolvin.com/niceyaml/printer.Printer] renders over the [line.Lines] the
-// Source holds. [Source.Lines] returns those lines, which the
-// [go.jacobcolvin.com/niceyaml/finder.Finder] and
-// [go.jacobcolvin.com/niceyaml/diff.Differ] read, and [Source.View] returns a fresh
-// view over them for the [go.jacobcolvin.com/niceyaml/printer.Printer].
-//
-// Typical use creates a Source and renders a view of it:
-//
-//	source := niceyaml.NewSourceFromString(yamlContent)
-//	p := printer.New()
-//	lipgloss.Println(p.Print(source.View()))
-//
-// A Source never changes after creation. Overlays and annotations go on the
-// view, and a fresh view renders the document as parsed:
-//
-//	view := source.View()
-//	view.AddOverlay(kind.GenericHighlight, ranges...)
-//	lipgloss.Println(p.Print(view))
-//
-// Since nothing mutates a Source, it is safe for concurrent use. Every view
-// taken from it shares its lines and owns its decoration, so creating one
-// costs an index of the lines and no copy of their content.
+// document, and [Source.Document] returns the root of a file that holds
+// one, which is where decoding and validation start. The Documents
+// section of the package documentation describes how a Source divides a
+// file into documents. A Source never changes after creation, so it is
+// safe for concurrent use.
 //
 // A nil Source reads as a Source that holds no text and took no option.
 // [Source.Name], [Source.FilePath], [Source.FS], [Source.Text],
@@ -124,19 +97,13 @@ type Source struct {
 //   - [WithReferences]
 //   - [WithExcerpts]
 //
-// [WithAllowDuplicateKeys] and [WithReferences] change what the documents
-// mean, and [WithAliasLimit] says whether the program trusts their
-// aliases. All three describe the documents themselves, so the Source
-// applies them to every decode and every validation of its documents.
-// Settings of one decode, such as [WithDisallowUnknownFields], are
-// [DecodeOption] values. A caller passes them to [Node.Decode], and
-// holds them in [DecodeOptions] to decode every document with them.
-//
-// [WithExcerpts] says whether the text holds something an error must not
-// show, such as a secret. The code that loads the text knows that, and
-// the code that prints an error does not, so the Source carries the
-// answer to every renderer of its errors. How much of a line an excerpt
-// shows is a choice of the renderer, which [ExcerptOption] configures.
+// [WithAllowDuplicateKeys], [WithReferences], and [WithAliasLimit]
+// describe the documents themselves, so the Source applies them to every
+// decode and every validation of its documents. A setting of one decode,
+// such as [WithDisallowUnknownFields], is a [DecodeOption] instead.
+// [WithExcerpts] carries whether an error may show the text to every
+// renderer of the errors of the Source, and [ExcerptOption] sets how the
+// renderer lays an excerpt out.
 type SourceOption func(*sourceConfig)
 
 // sourceConfig holds the settings a [SourceOption] configures. An option
@@ -251,59 +218,28 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 }
 
 // WithAliasLimit is a [SourceOption] that sets whether the alias limit
-// applies to the documents of the [Source]. The default is true.
-//
-// The limit refuses a document whose aliases would make a reader read
-// far more than the document holds, as [ErrExcessiveAliasing] describes.
-// With the limit on, three readers refuse a node of such a document
-// that holds an alias:
-//
-//   - A decode, as [Node.DecodeInto] describes.
-//   - A [go.jacobcolvin.com/niceyaml/schema.Schema] that validates the
-//     node.
-//   - A [go.jacobcolvin.com/niceyaml/schema/matcher.Content] or
-//     [go.jacobcolvin.com/niceyaml/schema/matcher.Text] matcher that
-//     reads the node to route its document.
-//
-// Each returns an error matching ErrExcessiveAliasing. The aliases of
-// the document are the cause wherever the count runs, so [IsInvalid]
-// reports the error of all three.
+// applies to the documents of the [Source]. The default is true. The
+// limit refuses a document whose aliases would make a reader read far
+// more than the document holds. With it on, a decode, a
+// [go.jacobcolvin.com/niceyaml/schema.Schema], and a
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Content] or
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Text] matcher refuse a
+// node of such a document that holds an alias. The error matches
+// [ErrExcessiveAliasing], and [IsInvalid] reports it.
 //
 // Turn the limit off only for input the program trusts, such as a file
-// it ships:
+// it ships. With it off, a few hundred bytes of nested aliases can hold
+// a decode for minutes, since the go-yaml decoder never checks the
+// context, and a schema validation for seconds and hundreds of MiB:
 //
 //	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithAliasLimit(false))
-//	if err != nil {
-//		return err
-//	}
 //
-//	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(v))
-//
-// The decode, the schema, and the matcher then read the document
-// whatever its aliases hold. The go-yaml decoder can take minutes on a
-// few hundred bytes of nested aliases and never checks the context. A
-// schema reads every use of every alias. For a 369-byte document with
-// six levels of nested aliases, a validation against {"type": "object"}
-// held about 160 MiB for a tenth of a second. One against a schema whose
-// items keyword refers back to itself held about 300 MiB for five
-// seconds.
-//
-// Two limits stay on whatever the option says:
-//
-//   - [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] takes a
-//     Go value and no Source. It refuses a value that shares its maps
-//     and slices past the limit, including one a Source with the limit
-//     off decoded.
-//   - [Node.Nodes] refuses a path whose selectors reach far more nodes
-//     through aliases than the document holds.
-//
-// The option covers the documents of the Source alone. [WithReferences]
-// takes the text of a reference Source and none of its settings, so the
-// option on a reference Source changes nothing. The count behind the
-// limit reads the documents of the Source and no reference document.
-// Every decode reads each reference document in full, so nested `<<`
-// merge keys there cost every decode of the Source what they expand to,
-// with the limit on or off. Pass WithReferences trusted files only.
+// The option covers the documents of the Source alone. The limit counts
+// no reference document of [WithReferences], and the option on a
+// reference Source changes nothing.
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] and
+// [Node.Nodes] keep their limits whatever the option says. The Alias
+// Limit section of the package documentation describes each limit.
 func WithAliasLimit(enabled bool) SourceOption {
 	return func(c *sourceConfig) {
 		c.skipAliasLimit = !enabled
@@ -313,134 +249,28 @@ func WithAliasLimit(enabled bool) SourceOption {
 // WithReferences is a [SourceOption] that lets an alias in the documents
 // of the [Source] name an anchor that the documents of refs define, such
 // as a file of shared defaults. Every decode and every validation of
-// those documents reads the anchors. An alias reads an anchor of refs
-// only when no anchor of its name comes before it in its own document,
-// and an anchor of a later document of refs overrides one of the same
-// name in an earlier one. A path stops at an alias to a reference
-// document, so an error about a value of refs binds at that alias. A
-// program reads each reference file into a Source of its own:
-//
-//	defaults, err := niceyaml.NewSourceFromFile("defaults.yaml")
-//	if err != nil {
-//		return err
-//	}
+// those documents reads the anchors, which covers [Node.Decode],
+// [Node.Validate], [Node.SelfValidate], [Source.ValidateDocuments], and
+// the decode a [Validator] runs on the Node it gets. Each reference file
+// goes in as a Source of its own:
 //
 //	source, err := niceyaml.NewSourceFromFile("app.yaml", niceyaml.WithReferences(defaults))
-//	if err != nil {
-//		return err
-//	}
-//
-//	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(reg))
-//
-// # Readers
-//
-// The references change what an alias means, so the Source applies them
-// wherever one of its documents decodes: [Node.Decode], [Node.Validate],
-// [Node.SelfValidate], [Source.ValidateDocuments], and the decode a
-// [Validator] runs on the Node it gets. A schema thus reads
-// `server: *base` as the decode does, and a check of the whole file
-// reports what a decode of each document reports.
-//
-// # Precedence
 //
 // An alias reads an anchor of refs only when no anchor of its name comes
-// before it in its own document, as [Node.DecodeInto] describes. Each
-// decode reads the documents of refs in the order given, so an anchor of
-// a later document overrides one of the same name in an earlier one. A
-// Source in refs brings its own references, ahead of its own documents,
-// so its aliases resolve as they do in its own decodes.
+// before it in its own document, and an anchor of a later document of
+// refs overrides one of the same name in an earlier one. A Source in
+// refs brings its own references, ahead of its own documents, and none
+// of its other settings. WithReferences skips a nil Source, and a
+// reference document that does not parse fails every decode of the
+// Source.
 //
-// An alias inside refs reads the anchors of refs alone, whatever anchors
-// the document defines. Both files here define `base`:
-//
-//	# defaults.yaml
-//	base: &base {port: 443}
-//	server: &server {<<: *base}
-//
-//	# app.yaml
-//	base: &base {port: 80}
-//	server: *server
-//
-// The server of app.yaml has port 443 in every decode, into an any value
-// and into a struct alike, so a schema checks the value the decode
-// returns.
-//
-// One limit remains among the documents of refs themselves. When they
-// define an anchor name twice, a value of refs that holds an alias
-// between the two reads the first anchor in a decode into an any value,
-// which is the decode a schema runs. A decode into a typed value, such as
-// a struct or a []int, reads the second anchor. Give each anchor of refs
-// a name that no other anchor of refs has.
-//
-// # Paths
-//
-// The references reach the decoder alone, so a decode and a validation
-// read through an alias to a reference document. A path resolves in the
-// document itself and stops at that alias. [Node.At] and [Node.Nodes]
-// return an error wrapping [go.jacobcolvin.com/niceyaml/paths.ErrAlias]
-// for a path that reaches the alias, and [Node.Ranges] returns one for a
-// path that goes through it. [IsInvalid] does not report that error. A
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Content],
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Text], or
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Exists] matcher whose path
-// reaches the alias returns the error too, so a registry stops at that
-// document and routes it nowhere.
-//
-// # Error Binding
-//
-// An error whose path leads into a reference document binds at the alias
-// the path enters, since the document holds no line for the value:
-//
-//	app.yaml:2:9: $.server.port: port must be at least 1
-//
-//	   2 | server: *server
-//	     |         ^
-//
-// [SourceError.Nearest] reports the path of that alias, and
-// [SourceError.Unresolved] returns the error wrapping ErrAlias, so a
-// caller tells the position from one at the value itself. An error at a
-// key of a mapping that merges a reference document under a `<<` key
-// still binds with no position, as SourceError.Nearest describes.
-//
-// # Reference Sources
-//
-// A Source in refs brings no setting but its own references, so
-// [WithAliasLimit] on a Source in refs changes nothing, and the alias
-// limit counts no reference document, as WithAliasLimit describes.
-// WithReferences skips a nil Source. A reference document that does not
-// parse fails every decode of the Source. [NewSourceFromLayers] carries
-// what [WithExcerpts] says of a Source in refs to the document it
-// builds, which holds the values an alias reads from it.
-//
-// A reference document comes from wherever a Source does.
-// [NewSourceFromFile] reads a file, [NewSourceFromFS] reads a file of a
-// file system, and [NewSourceFromReader] reads a stream. A program that
-// keeps its reference documents in a directory reads each file into a
-// Source of its own. It picks the files and their order, which decides
-// the anchor that wins a name two of them define:
-//
-//	names, err := fs.Glob(fsys, "refs/*.yaml")
-//	if err != nil {
-//		return err
-//	}
-//
-//	refs := make([]*niceyaml.Source, 0, len(names))
-//
-//	for _, name := range names {
-//		ref, err := niceyaml.NewSourceFromFS(fsys, name)
-//		if err != nil {
-//			return err
-//		}
-//
-//		refs = append(refs, ref)
-//	}
-//
-//	source, err := niceyaml.NewSourceFromFile("app.yaml", niceyaml.WithReferences(refs...))
-//
-// [fs.WalkDir] finds the files of a whole tree the same way. A decode
-// takes no reference documents of its own, so these calls stand in for
-// the ReferenceFiles, ReferenceDirs, RecursiveDir, and ReferenceReaders
-// options of go-yaml.
+// A path stops at an alias to a reference document. [Node.At] and
+// [Node.Nodes] return an error wrapping
+// [go.jacobcolvin.com/niceyaml/paths.ErrAlias] for a path that reaches
+// such an alias, and [Node.Ranges] returns one for a path that goes
+// through it. An error about a value of refs binds at the alias. The
+// References section of the package documentation describes these rules
+// in full.
 func WithReferences(refs ...*Source) SourceOption {
 	return func(c *sourceConfig) {
 		for _, ref := range refs {
@@ -461,63 +291,33 @@ func WithReferences(refs ...*Source) SourceOption {
 // WithExcerpts is a [SourceOption] that says whether an error may show
 // the text of the [Source] in an excerpt. The default is true. Pass
 // false for a Source whose text holds secrets, such as the values a
-// program read from its environment:
-//
-//	env := niceyaml.NewSourceFromBytes(data,
-//		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
-//
-// The option states a fact about the text. The code that loads the text
-// knows whether it holds a secret, and the code that prints an error
-// does not, so the Source carries the fact to every renderer of its
-// errors.
+// program read from its environment.
 //
 // An error bound in a Source with excerpts off keeps its position, its
-// path, and its message, and no excerpt holds a line of the Source:
-//
-//	environment:3:9: $.db.port: port must be at least 1
-//
-// [SourceError.Excerpt] reports false for the error, and the
-// [ErrorReport] of the error holds no excerpt of the Source.
-// [FormatError], the %+v verb, and
-// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] thus print
-// the tree of the error and add no line in place of the excerpt, since
-// the tree names the position of the error already. An error that holds
+// path, and its message, as in "environment:3:9: $.db.port: port must be
+// at least 1". [SourceError.Excerpt] reports false for it, its
+// [ErrorReport] holds no excerpt of the Source, and [FormatError], the
+// %+v verb, and [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError]
+// print its tree with no line in place of the excerpt. An error with
 // bindings in several sources keeps the excerpt of each other source. A
-// renderer that builds an excerpt of its own, as one that reads an
-// [ErrorTree] can, checks [Source.ShowsExcerpts] first.
+// renderer that builds an excerpt of its own checks
+// [Source.ShowsExcerpts] first.
 //
-// The option covers the excerpts this module builds. The text still
-// reaches a reader in other ways:
+// The option covers the excerpts this module builds, and the text still
+// reaches a reader in other ways. [Annotate], [Source.View],
+// [Source.Lines], [Source.Tokens], and the methods of each [Node] hand
+// the text to the caller as they do for any Source. A
+// message quotes the value it rejects, as in `time: invalid duration
+// "sk-live-abcdef"`, the path of an error spells each key above it, and
+// the message for a missing anchor names the alias. The go-yaml error
+// that [errors.As] finds behind a syntax error or a decode error holds
+// an excerpt that go-yaml builds, which prints when a program prints
+// that error, and an UnmarshalYAML method that returns such an error
+// puts the excerpt in the message.
 //
-//   - [Annotate] and [SourceError.Annotate] mark a view the caller
-//     supplies, so the caller decides who sees it.
-//   - [Source.View], [Source.Lines], and [Source.Tokens] return the text
-//     as they do for any Source, and so do the methods of each [Node].
-//   - A message that quotes what it rejects prints it. A type that reads
-//     text quotes the value, as in `time: invalid duration
-//     "sk-live-abcdef"` and "invalid IP address: sk-live-abcdef". A
-//     number out of range prints too, as in "expected integer from 0 to
-//     255, got 300". A key prints in the path of each error at it or
-//     below it, and in a message such as `unknown field
-//     "sk-live-abcdef"`. The name of an alias prints in the message for
-//     an anchor the document lacks.
-//   - [errors.As] finds the go-yaml error behind the error of a
-//     document that did not parse, and behind the error of a value the
-//     go-yaml decoder rejects. The text of the go-yaml error holds an
-//     excerpt that go-yaml builds itself, so a program that prints the
-//     error it found shows lines of the Source. Neither chain unwraps
-//     to a go-yaml error with an excerpt, so a reporter that prints
-//     every error of a chain prints the message of each and not that
-//     excerpt. An UnmarshalYAML method that returns the go-yaml error
-//     of a parse of its bytes puts that excerpt in the message.
-//
-// The fact follows the text into the document [NewSourceFromLayers]
-// builds, which
-// holds the values of every layer and of each reference document a
-// layer reads through [WithReferences]. The Source of that document has
-// excerpts off when the Source of any of them has. A Source that reads a
-// reference document holds none of its text in its own lines, so its
-// excerpts stay as its own option says.
+// The Source that [NewSourceFromLayers] builds has excerpts off when the
+// Source of any layer, or of a reference document a layer reads through
+// [WithReferences], has them off.
 func WithExcerpts(enabled bool) SourceOption {
 	return func(c *sourceConfig) {
 		c.noExcerpts = !enabled
@@ -542,25 +342,16 @@ func referenceReaders(docs [][]byte) yaml.DecodeOption {
 //
 // It names the [Source] by path as given, so [Source.Name] and every
 // message spell the file as the caller did. It sets the file path of
-// the Source to the absolute form of path, which [filepath.Abs] builds
-// from the working directory at the time of the read. Each document
-// reports that file path for schema routing, so the same schema applies
-// however the caller spelled the path, and a later change of working
-// directory moves neither the routing nor the directory a schema
-// directive resolves in. [WithName] and [WithFilePath] replace the two.
-// [NewSourceFromFS] reads a file from an [fs.FS] and keeps its path as
-// given.
+// the Source, which schema routing reads and a schema directive resolves
+// beside on disk, to the absolute form of path that [filepath.Abs]
+// builds from the working directory at the time of the read. A later
+// change of working directory thus moves neither. [WithName] and
+// [WithFilePath] replace the two.
 //
 // Abs drops a ".." element together with the element before it, as
 // text. For a path that steps up out of a symbolic link, the file path
 // then names a directory the read did not open, and WithFilePath sets
 // the path the program resolved itself.
-//
-// A schema registry reads from disk the schema file that a directive in
-// the document names, and resolves a relative name against that path.
-// The registry option [go.jacobcolvin.com/niceyaml/schema.WithFSAt]
-// confines those reads to one directory. A document that NewSourceFromFS
-// opened resolves its directive in its own file system instead.
 //
 // Returns a nil Source and an error when it cannot read the file.
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
@@ -863,66 +654,31 @@ func (s *Source) Tokens() token.Tokens {
 //		}
 //	}
 //
-// Each document parses on its own, so a YAML syntax error fails the
-// document that holds it and no other. The Node of a document that did
-// not parse sits in the slice at its place in the file. [Node.Err]
-// returns its syntax error, and so do the Node methods that read the
-// tree, such as [Node.Decode] and [Node.Validate], so the loop above
-// meets the syntax error where it meets the errors of the documents
-// that parsed. [Node.AST] and [Node.DocumentAST] return nil for such a
-// document. A "---" header that directly follows an anchor with no value
-// parses together with the document above it, as [Source.AllDocuments]
-// describes, so two documents can return one error. A caller that wants
-// every syntax error of the file once, before it reads any document,
-// calls [Source.File], and one that validates each document calls
-// [Source.ValidateDocuments], which reports a shared error once.
+// It leaves out each empty document of a file that holds a document
+// with content, such as the one a trailing "---" leaves, where
+// [Source.AllDocuments] returns every document. For a file with no
+// content, Documents returns one empty document, which decodes to the
+// zero value. The Documents section of the package documentation
+// describes which documents are empty.
 //
-// The parser cuts the comments and %YAML or %TAG directives above a "---"
-// header, and the comments after a "..." marker, into a node of their own
-// with no header and no content. Documents folds each such node into the
-// document below it, or into the last document when no document follows,
-// and [Node.Preamble] returns the tokens it put above the content. A
-// document that opens with a "---" header and holds only comments is an
-// explicit empty document and stays one.
+// The Node of a document that did not parse keeps its place in the
+// slice. [Node.Err] returns its syntax error, and so do the methods that
+// read its tree, such as [Node.Decode], so the loop above meets each
+// syntax error where it meets the errors of the documents that parsed.
+// [Source.File] returns every syntax error of the file at once, and
+// [Source.ValidateDocuments] reports an error that two documents share
+// once.
 //
-// A file of several documents often holds empty ones, which
-// [Node.IsEmpty] reports, an explicit one included. A trailing "---"
-// leaves one, as in `name: x\n---\n`, and so does a Helm template that
-// renders to a comment alone. Documents leaves out each empty document of
-// a file that holds a document with content, so a loop over the slice
-// decodes and validates the documents with content. [Source.Document],
-// [Source.Decode], and [Source.ValidateDocuments] leave the same
-// documents out, and so does [Source.Bind] where it resolves a path, so
-// `name: x\n---\n` holds one document for each of them.
-// [Source.AllDocuments] returns the empty documents too, for a caller
-// that renders or formats the file. [Node.DocumentIndex] counts them as
-// well, so a document below an empty one has a DocumentIndex larger than
-// its index in the slice Documents returns.
-//
-// Every Source holds at least one document. An empty file, a file of
-// whitespace or comments alone, and a stream of "..." markers alone each
-// hold one empty document, which decodes to the zero value. The YAML spec
-// finds no document in a stream of markers alone. Documents departs from
-// it on purpose, so such a file reads as an empty file does. A file of
-// empty documents alone, such as `---\n---\n`, reads the same way, so
-// Documents returns the first of them alone, and AllDocuments returns
-// each. A loop over the documents of a file with no content therefore
-// meets one empty document. A schema that wants a mapping rejects that
-// document, and a decode with no such schema returns the zero value for
-// it. A caller that wants neither passes over the documents IsEmpty
-// reports.
-//
-// It parses the source and builds each Node once, so every call returns
-// the same pointers. The slice itself is a copy, so reordering it reaches
-// nothing.
+// The first call parses the Source. Every call returns the same Nodes in
+// a new slice, so reordering the slice reaches nothing.
 func (s *Source) Documents() []*Node {
 	return slices.Clone(s.contentDocuments())
 }
 
 // AllDocuments returns the root [*Node] of every YAML document of this
 // [Source], in file order, whether the document parsed or not and whether
-// it holds content or not. It serves a caller that renders, diffs, or
-// reports each document, and it returns no error:
+// it holds content or not, for a caller that renders, diffs, or reports
+// each document:
 //
 //	for _, doc := range source.AllDocuments() {
 //		if err := doc.Err(); err != nil {
@@ -934,97 +690,50 @@ func (s *Source) Documents() []*Node {
 //		lipgloss.Println(p.Print(doc.View()))
 //	}
 //
-// Each document parses on its own, so a YAML syntax error fails the
-// document that holds it and no other. The Node of a document that did
-// not parse sits in the slice at the index of the document, as it does
-// in the slice [Source.Documents] returns. [Node.Err] returns its syntax
-// error, and so do the [Node] methods that read the tree, such as
-// [Node.Validate] and [Node.Decode]. A loop over the documents thus
-// meets each syntax error beside the errors of the documents that
-// parsed. [Source.File] returns those syntax errors as one error.
+// The Node at index i is the one whose [Node.DocumentIndex] is i. For a
+// file with no syntax error that holds no empty document, or one empty
+// document alone, AllDocuments returns the Nodes [Source.Documents]
+// returns.
 //
 // A "---" header that directly follows an anchor with no value parses
-// together with the document above it. A syntax error in either of those
-// two documents fails both, and both return that error, so a loop that
-// collects the error of each document holds it twice. The error is bound
-// to the one of the two that holds its location, which
-// [SourceError.Document] returns whichever of them returned it. A caller
-// that validates the documents of a file calls
-// [Source.ValidateDocuments], which runs that loop without the empty
-// documents [Source.Documents] leaves out and reports a shared error
-// once:
+// together with the document above it. A syntax error in either fails
+// both, and both return that error, bound to the one of the two that
+// holds its location, so a loop that collects the error of each document
+// holds it twice. [Source.ValidateDocuments] reports it once.
 //
-//	err := source.ValidateDocuments(ctx, reg)
-//
-// AllDocuments divides the file into documents as Source.Documents
-// describes, and it returns the empty documents Documents leaves out. The
-// Node at index i is the one whose [Node.DocumentIndex] is i. For a file
-// with no syntax error that holds no empty document, or one empty
-// document alone, AllDocuments returns the Nodes Documents returns. The
-// slice itself is a copy, so reordering it reaches nothing.
+// Every call returns the same Nodes in a new slice.
 func (s *Source) AllDocuments() []*Node {
 	return slices.Clone(s.documents())
 }
 
-// ValidateDocuments validates the documents of the Source in file order
-// with v and joins what the documents return. One call thus reports each
-// syntax error of a file that holds several documents, beside what v
-// reports for each document that parsed:
+// ValidateDocuments validates each document [Source.Documents] returns
+// with v, in file order, as [Node.Validate] runs it, and joins what the
+// documents return. A document that did not parse reports its syntax
+// error, and two documents that parse together report theirs once, as
+// [Source.AllDocuments] describes. One call thus reports each syntax
+// error of the file beside what v reports for each document that parsed:
 //
-//	err := source.ValidateDocuments(ctx, reg)
+//	err := source.ValidateDocuments(ctx, niceyaml.MultiValidator(schema, names))
 //	if err != nil {
 //		log.Print(niceyaml.FormatError(err))
 //	}
 //
-// Each document runs v as [Node.Validate] runs it. ValidateDocuments
-// takes one validator, and that validator decides how many violations a
-// document reports. A caller with several validators names how they run
-// together. [MultiValidator] runs every one on each document and reports
-// every failure, which suits rules that check a document independently,
-// as the rules of a linter do. [ChainValidator] stops at the first that
-// fails in each document, which suits a check that needs an earlier one
-// to pass, such as one that reads the values a schema requires:
+// It leaves out the empty documents Source.Documents leaves out, so v
+// runs on the documents with content, or on the one empty document of a
+// file with no content. A schema that wants a mapping thus rejects an
+// empty file, unless [SkipEmpty] wraps v. A nil v checks the syntax
+// alone, so with a ctx that has not ended, ValidateDocuments returns the
+// error [Source.File] returns.
 //
-//	err := source.ValidateDocuments(ctx, niceyaml.MultiValidator(schema, names))
-//	err := source.ValidateDocuments(ctx, niceyaml.ChainValidator(schema, refs))
+// ValidateDocuments checks ctx before each document and once after the
+// last. Once ctx has ended, no further document validates, and the
+// result holds the error of ctx bound to the Source, unless an error in
+// the result already wraps it. A deadline that v reports of its own
+// fails its document alone.
 //
-// ValidateDocuments leaves out the empty documents [Source.Documents]
-// leaves out, which are the ones [Node.IsEmpty] reports in a file that
-// holds a document that is not empty. A trailing "---" leaves an empty
-// document, as in `name: x\n---\n`, and so does a Helm template that
-// renders to a comment alone, so v runs on the documents with content.
-// For a file with no syntax error, the result thus holds what a loop that
-// calls [Node.Validate] on each document Documents returns collects. A
-// document that did not parse is not empty. A file that holds empty
-// documents alone validates the first of them, so a schema that wants a
-// mapping still rejects an empty file. A caller whose file may be empty
-// as a whole wraps its validator in [SkipEmpty], which takes either
-// composition:
-//
-//	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(niceyaml.MultiValidator(schema, names)))
-//
-// A [Validator] that reads the comments of a document, as a schema
-// directive does, does not run on a document of comments alone that
-// ValidateDocuments leaves out.
-//
-// A document that did not parse reports its syntax error, as
-// Node.Validate returns it. Two documents that parse together share one
-// syntax error, as [Source.AllDocuments] describes, and ValidateDocuments
-// reports it once. A nil v checks the syntax alone, so with a ctx that
-// has not ended, ValidateDocuments then returns the error [Source.File]
-// returns.
-//
-// ValidateDocuments checks ctx before each document and once every
-// document has run. Once ctx has ended, no further document validates,
-// and the result includes the error of ctx bound to the Source, unless an
-// error in the result already wraps it. A ctx that ended before the call
-// thus returns its error. Only the ctx passed in stops the walk, so a
-// validator that reports a deadline of its own fails its document alone.
-//
-// [Source.Document] and [Source.Decode] need a Source that holds one of
-// those documents, where ValidateDocuments takes any number. A file of
-// two documents with content that ValidateDocuments passes therefore
-// fails Source.Decode with [ErrMultipleDocuments].
+// ValidateDocuments takes any number of documents, so a file of two
+// documents with content that passes it still fails [Source.Decode] with
+// [ErrMultipleDocuments].
 func (s *Source) ValidateDocuments(ctx context.Context, v Validator) error {
 	var (
 		errs []error
@@ -1089,10 +798,10 @@ func pickContentDocuments(docs []*Node) []*Node {
 }
 
 // Document returns the root [*Node] of a [Source] that holds a single
-// YAML document, for a caller that reads a configuration file in more
-// than one step, such as one that scopes a Node with [Node.At] or binds
-// a check with [Node.Bind]. [Source.Decode] decodes that document in
-// one step:
+// YAML document among those [Source.Documents] returns, for a caller
+// that reads a configuration file in more than one step, such as one
+// that scopes a Node with [Node.At] or binds a check with [Node.Bind].
+// [Source.Decode] decodes that document in one step:
 //
 //	doc, err := niceyaml.NewSourceFromString(yamlContent).Document()
 //	if err != nil {
@@ -1101,29 +810,18 @@ func pickContentDocuments(docs []*Node) []*Node {
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(validator))
 //
-// The comments above the first "---" are the preamble of the document
-// below them rather than a document of their own. A file that opens with
-// a license header therefore holds a single document. A file of comments
-// alone holds one that decodes to the zero value as an empty file does,
-// and so does a file of "..." markers alone, as [Source.Documents]
-// describes.
+// A file that opens with a comment header, ends in "---", or holds no
+// content holds a single document, as the Documents section of the
+// package documentation describes. [Node.DocumentIndex] gives the place
+// of the document among every document of the file.
 //
-// Document counts the documents Source.Documents returns, which leaves
-// out each empty document of a file that holds a document with content.
-// A file that ends in "---" therefore holds a single document, and so
-// does one whose content sits below an empty document. Document returns
-// the document with content, and [Node.DocumentIndex] gives its place
-// among every document of the file.
-//
-// When the file holds more than one of those documents, it returns an
-// error wrapping [ErrMultipleDocuments], bound to the Source. The error
-// points at the header of the second of them, or at the first token of
-// its content when a "..." marker rather than a header opens it. A file
-// of several empty documents alone, such as `---\n---\n`, holds a single
-// document, the first of them, as Source.Documents describes. A file
-// with a document that does not parse returns the error [Source.File]
-// returns, however many of its other documents parse. Use
-// [Source.Documents] for a file that may hold several.
+// A file with a document that does not parse returns the error
+// [Source.File] returns, however many of its other documents parse. A
+// file of more than one document returns an error wrapping
+// [ErrMultipleDocuments], bound to the Source at the header of the
+// second document, or at the first token of its content when a "..."
+// marker rather than a header opens it. Use Source.Documents for a file
+// that may hold several.
 func (s *Source) Document() (*Node, error) {
 	// The parse bound each syntax error already, and binding the join of
 	// several anew would return another error than File does.
@@ -1161,17 +859,8 @@ func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) er
 // returns. A Source that holds more than one document, or a document
 // that does not parse, returns the error Source.Document returns.
 //
-// An empty Source, which holds one document with no content, stands in
-// for a file that does not exist. A program whose configuration file is
-// optional thus runs the same calls whether or not the file exists:
-//
-//	source, err := niceyaml.NewSourceFromFile(path)
-//	switch {
-//	case errors.Is(err, fs.ErrNotExist):
-//		source = niceyaml.NewSourceFromString("")
-//	case err != nil:
-//		return err
-//	}
+// A program that fills v after the decode, such as from its environment,
+// runs the step once v is whole:
 //
 //	var cfg Config
 //	if err := source.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
@@ -1182,14 +871,12 @@ func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) er
 //
 //	return source.SelfValidate(ctx, &cfg)
 //
-// The decode of an empty Source leaves cfg as it was. Each error of the
-// walk then binds with no position, and its text names the path from v,
-// as in "$.servers[1].port: port is required". With the file, the same
-// error reads "app.yaml:3:3: $.servers[1].port: port is required".
-//
-// An error of an empty Source is bound to its document, so no other
-// document places it. [SelfValidateValue] validates a value that came
-// from no document, and a document can still place its errors.
+// An empty Source, such as one from NewSourceFromString(""), stands in
+// for an optional file that does not exist. Its decode leaves v as it
+// was, and each error of the step binds with no position, as in
+// "$.servers[1].port: port is required". No other document places such
+// an error. [SelfValidateValue] validates a value that came from no
+// document and leaves its errors free for a document to place.
 func (s *Source) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
 	doc, err := s.Document()
 	if err != nil {
@@ -1267,113 +954,35 @@ func (d *document) anchorToken() *token.Token {
 	return nil
 }
 
-// File returns an [*ast.File] for the [Source] tokens. The first call
-// parses the file, and every later call returns the same tree or the same
-// error. Every [Node] of the Source shares the tree, so a caller must not
-// modify it. A file with a YAML syntax error has no tree, so File returns
-// nil and an error that matches [ErrSyntax]. File binds that error to
-// this Source, and it covers every document that did not parse. The tree
-// leaves out some comments that the go-yaml parser rejects or misreads,
-// and the tokens of the Source still hold them.
+// File returns the [*ast.File] the tokens of the [Source] parse into,
+// with the duplicate keys [WithAllowDuplicateKeys] allows. The first call
+// parses the Source, and every later call returns the same tree or the
+// same error. Every [Node] of the Source shares the tree, and [Node.At],
+// [Node.Ranges], and every error binding resolve against it, so a caller
+// must not modify it. A caller that edits a document parses a tree of
+// its own, or edits the text and builds a new Source.
 //
-// # Parsing
+// The tokens of the tree are copies of the Source's own, which find
+// their lines as the Lines section of the package documentation
+// describes.
 //
-// The first call parses the file with [parser.Parse], which accepts a
-// duplicate key when [WithAllowDuplicateKeys] allows one. Subsequent
-// calls return the cached result. A "---" header that directly follows
-// another header starts a document of its own, and a "..." end marker
-// ends its document. [parser.Parse] alone drops the rest of the stream
-// after such a header, and it can reject what follows a marker or join
-// it to the document the marker ends.
-//
-// # Omitted Comments
-//
-// The tree leaves out a comment on a line of its own below a document whose
-// root is a scalar or a flow collection. Below a block mapping or a block
-// sequence at the root, it leaves out such a comment that starts left of
-// the first key or "-" of the root. It leaves out such a comment between
-// a %YAML or %TAG directive and its "---" header, between the
-// "?" of an explicit key and the key, and between the key and its ":".
-// Inside a flow collection, it also leaves out such a comment before a key
-// of a flow mapping or before a ",", "]", or "}". [parser.Parse] rejects or
-// misreads valid YAML that holds a comment in any of these places. A
-// comment on the last line of a scalar that spans several lines counts as
-// one on a line of its own. The parser attaches a comment to the token
-// before it only when that token starts on the line of the comment. The
-// tokens of the Source and of each [Node] still hold such a comment.
-//
-// The tree also leaves out the comments on lines of their own between an
-// anchor and the node below them where they make the parser reject or
-// misread that node. The anchor ends its line and directly follows a "-",
-// or a key and its ":", on that line. The key starts on that line too, at
-// its "?" when it has one. When the first of the comments starts left of
-// the "-" or key, the parser gives the anchor a null value. The tree then
-// leaves the comments out above a node that the parser takes as the value
-// of the anchor without them. That node starts right of the "-" or key, or
-// it is a "-" in the column of the key. When the first of the comments
-// starts in the column of the "-" or key or right of it, the parser gives
-// the anchor the node below them. The tree then leaves them out above a
-// node left of the "-" or key, above a key in the column of the key, and
-// above a "-" in the column of the "-".
-//
-// The parser takes the comments below an anchor with no value that ends its
-// document as the value of the anchor. The tree leaves them out and holds a
-// null as the value of that anchor. The exception is an anchor that
-// directly follows a "-", or a key and its ":", on its line as above. When
-// a "---" header or a "..." marker follows the comments, the tree leaves
-// out those that start left of the first key or "-" of the root. When the
-// first comment that remains starts left of the "-" or key of the anchor,
-// the parser itself gives the anchor a null value, and the comments that
-// remain stay in the tree. At the end of the source the tree leaves none of
-// them out first, since the parser rejects the anchor without the comments.
-// When the first comment there starts left of the "-" or key of the anchor,
-// the parser gives the anchor a null value too. The comments then stay in
-// the tree unless one starts left of the first key or "-" of the root, and
-// File returns the parser's error for that one.
-//
-// # Tokens
-//
-// The tokens of the file are copies of the Source's own, since the parser
-// relinks the tokens it receives. A copy matches the original by its type,
-// value, origin, and position, so a token taken from a node finds its
-// lines through [line.Lines.TokenRanges] and [line.Lines.ContentRanges] as
-// the original does.
-//
-// # Shared Tree
-//
-// Every [Node] of the Source shares the tree, and [Node.At],
-// [Node.Ranges], and every error binding resolve against it, so it is
-// read-only. A caller that modifies it corrupts the positions those
-// resolve to and races with any concurrent use of the Source. A caller
-// that edits a document parses a tree of its own, or edits the text and
-// builds a new Source from the result.
-//
-// # Syntax Errors
+// The tree leaves out some comments on lines of their own where the
+// go-yaml parser rejects or misreads them, such as below a document
+// whose root is a scalar or a flow collection. Others sit before a key
+// or a closing bracket inside a flow collection, or between an anchor
+// and the node below it. The tokens of the Source and of each Node still
+// hold those comments.
 //
 // A file with a YAML syntax error has no tree, so File returns nil and
-// the error. Each document parses on its own, so the error covers every
-// document that did not parse, not the first alone. One syntax error
-// comes back as a [*SourceError] bound to this Source, so [FormatError]
-// renders it with the offending token marked. Several come back joined,
-// each a SourceError of its own in file order, and FormatError marks them
-// all. [Bindings] iterates over them. Each is bound to the document it
-// belongs to, which [SourceError.Document] returns. [Source.Documents]
-// returns the documents of such a file, for a caller that reads the ones
-// that parsed, and [Node.Err] returns the syntax error of each one that
-// did not.
-//
-// The message of a syntax error names each control character by its
-// Unicode Control Picture, so a tab the parser rejects reads as "␉" there
-// as it does in the excerpt. Every error the parser returns matches
-// [ErrSyntax]. Every later call returns the same error.
-//
-// # Panics
-//
-// A panic in the parser comes back as a [*SourceError] too, bound at the
-// first token with a position among the ones the parser was reading. It
-// holds a [PanicError] and does not match ErrSyntax. The documents the
-// parser was reading have no tree, as the documents of a syntax error
-// have none, and every later call returns the same error.
+// an error that covers every document that did not parse, as the
+// Documents section of the package documentation describes. One syntax
+// error comes back as a [*SourceError], and several come back joined, in
+// file order, each bound to its own document. Every syntax error matches
+// [ErrSyntax], and its message draws each control character as its
+// Unicode Control Picture. A panic in the parser comes back as a
+// SourceError too, bound at the first token with a position among those
+// the parser was reading. It holds a [PanicError] and does not match
+// ErrSyntax.
 func (s *Source) File() (*ast.File, error) {
 	p := s.parsed()
 	if p.err != nil {
@@ -1508,43 +1117,27 @@ func (s *Source) spellReferences() []string {
 
 // Bind binds err to the [Source] and to the document each location in
 // it falls in, so a caller that holds the source binds without picking a
-// document. An error that carries a [position.Position] or a
-// [position.Range], as a check that runs on [Source.Lines] produces, binds
-// to the document whose [Node.Span] holds the line, whatever the
-// file holds, a YAML syntax error in that document or another included:
+// document. In every other way Bind is [Node.Bind], which describes what
+// comes back.
 //
-//	for i, ln := range source.Lines().All() {
-//		if ln.Width() > 120 {
-//			rng := position.NewRange(position.New(i, 120), position.New(i, ln.Width()))
+// A [position.Position] or a [position.Range], as a check that runs on
+// [Source.Lines] produces, binds to the document whose [Node.Span] holds
+// its line, even in a file with a YAML syntax error. That document may
+// be an empty one that [Source.Documents] leaves out:
 //
-//			return source.Bind(niceyaml.NewError("line exceeds 120 columns", niceyaml.AtRange(rng)))
-//		}
-//	}
+//	return source.Bind(niceyaml.NewError("line exceeds 120 columns", niceyaml.AtRange(rng)))
 //
-// Every line of the file belongs to one of the documents
-// [Source.AllDocuments] returns, so the document may be an empty one
-// that [Source.Documents] leaves out.
+// A path, whether it starts at `$` or `@`, resolves from the root of the
+// one document [Source.Document] returns, as [Node.Bind] of that root
+// resolves it. In a source with no single document, a path resolves
+// nowhere. The bound error keeps its message and the name of the
+// source, and [SourceError.Unresolved] returns [ErrPathNeedsDocument]
+// wrapping the reason Source.Document gives. Bind such an error through
+// Node.Bind with the document the caller checked it against.
 //
-// A path resolves in the one document of the source, the one
-// [Source.Document] returns, from its root whether it starts at `$` or
-// `@`, so a
-// check on a configuration file binds its errors here as it would through
-// [Node.Bind] of that root:
-//
-//	return source.Bind(check(cfg))
-//
-// A path in a source that holds several documents resolves nowhere. The
-// bound error keeps its message and the name of the source,
-// [SourceError.Unresolved] returns [ErrPathNeedsDocument] wrapping the
-// reason [Source.Document] gives, and [FormatError] names it in place of
-// the excerpt. Bind such an error through [Node.Bind] with the document
-// the caller checked it against. A Node from [Node.At] binds through
-// Node.Bind too and resolves each `@` path from its own scope.
-//
-// In every other way Bind is [Node.Bind], which describes what comes
-// back. [SourceError.Document] returns the document each location fell
-// in, whether or not the location resolves there, and reports false for
-// an error that fell in none, as [SourceError.Node] describes.
+// [SourceError.Document] returns the document each location fell in,
+// whether or not the location resolves there, and reports false for an
+// error that fell in none, as [SourceError.Node] describes.
 func (s *Source) Bind(err error) error {
 	return bindTree(err, binder{src: s, route: true})
 }

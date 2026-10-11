@@ -97,6 +97,55 @@
 // so a token taken from a node finds its lines the same way. The [line]
 // package documents the view and its metadata in full.
 //
+// # Documents
+//
+// A [Source] holds one YAML file, a stream of text with one or more
+// documents in it. Its constructor lexes the text, and the Source parses
+// the tokens the first time a caller asks for the tree or a document,
+// through [Source.File], [Source.Documents], or any method that reads
+// them. Every later call returns the same tree, the same Nodes, and the
+// same errors.
+//
+// The comments and the %YAML or %TAG directives above a "---" header,
+// and the comments after a "..." marker, belong to the document below
+// them, or to the last document when none follows. [Node.Preamble]
+// returns the ones above the content of a document. A file that opens
+// with a license header thus holds one document.
+//
+// Each document parses on its own, so a YAML syntax error fails the
+// document that holds it and no other. The [Node] of a document that did
+// not parse keeps its place among the documents of the file. [Node.Err]
+// returns its syntax error, and so does each method that reads its tree,
+// such as [Node.Decode] and [Node.Validate]. [Node.AST] returns nil for
+// it, and [Node.View] renders its lines as it renders those of any
+// document. A "---" header that directly follows an anchor with no value
+// parses together with the document above it, so a syntax error in
+// either fails both, and both return that one error. [Source.File]
+// returns the syntax errors of the file as one error, and every one of
+// them matches [ErrSyntax].
+//
+// A document with no content is empty, as [Node.IsEmpty] reports. A
+// trailing "---" leaves one, as in `name: x\n---\n`, and so does a Helm
+// template that renders to a comment alone or a "---" header with
+// comments alone below it. In a file that holds a document with content,
+// [Source.Documents] leaves out every empty document, and so do
+// [Source.Document], [Source.Decode], [Source.ValidateDocuments], and the
+// path resolution of [Source.Bind]. Kubernetes manifests and the output
+// of a Helm chart thus decode and validate as they are.
+// [Source.AllDocuments] returns every document, and [Node.DocumentIndex]
+// counts every document, so a document below an empty one has an index
+// larger than its place among the documents Source.Documents returns.
+//
+// A file with no content holds one empty document as far as
+// Source.Documents goes. That is the case for an empty file, a file of
+// whitespace or comments alone, a stream of "..." markers alone, and a
+// file of empty documents alone, where it is the first of them. The YAML
+// spec finds no document in a stream of markers alone, and niceyaml
+// departs from it so that such a file reads as an empty file does. The
+// empty document decodes to the zero value, and a schema that wants a
+// mapping rejects it. [SkipEmpty] wraps a validator so that it passes an
+// empty document, for a caller whose file may be empty as a whole.
+//
 // # Errors
 //
 // An [*Error] is what a check knows about a problem: a message, a
@@ -281,20 +330,11 @@
 //		}
 //	}
 //
-// Each document parses on its own, so a YAML syntax error fails the document
-// that holds it and no other. The Node of that document returns the syntax
-// error from [Node.Err], [Node.Decode], and [Node.Validate], so the loop
-// above meets it beside the errors of the documents that parsed.
-// [Source.ValidateDocuments] validates every document and joins what they
-// return. [Source.File], Source.Document, and Source.Decode return the
-// syntax errors of the whole file, and each matches [ErrSyntax].
-//
-// A file of several documents often holds empty ones, such as the one a
-// trailing "---" leaves, and [Node.IsEmpty] reports them. Source.Documents
-// leaves them out beside a document with content, and [Source.AllDocuments]
-// returns them. A file with no content holds one empty document, which
-// decodes to the zero value and which a schema that wants a mapping rejects,
-// unless [SkipEmpty] wraps the schema.
+// The Node of a document that did not parse returns its syntax error from
+// [Node.Decode], so the loop above meets it beside the errors of the
+// documents that parsed. [Source.ValidateDocuments] validates every document
+// and joins what they return. The Documents section describes syntax errors
+// and empty documents.
 //
 // [Node.Decode] returns a new value, and [Node.DecodeInto] fills one the
 // caller holds. A decode runs these steps in order, and the first that fails
@@ -384,12 +424,8 @@
 // which [IsInvalid] does not report. Nothing recovers a panic in a Validator
 // or in a Validate method.
 //
-// A program that layers one file over another merges them through
-// [NewSourceFromLayers], and the steps run once on the merged document. A
-// schema that requires a key thus passes when any file sets it, and each
-// error binds in the file that holds its value. The environment and the
-// flags of a program go in as the last layer, as NewSourceFromLayers
-// describes, so the same steps check what they set.
+// A Source from [NewSourceFromLayers] runs these steps once on the merged
+// document, as the Layers section describes.
 //
 // # Validation
 //
@@ -539,10 +575,6 @@
 // decode can return an error that matches paths.ErrNotFound for a node that
 // is present, so only the error of At tells that a value is absent.
 //
-// A Node of the document [NewSourceFromLayers] builds binds each error in
-// the file of the layer that holds its value, and [Node.Origin] returns the
-// Node of the value in that file.
-//
 // # Cancellation
 //
 // The context of a call reaches every [Validator] the call runs and every
@@ -572,6 +604,237 @@
 // location, even through a scoped Node, so its message names at most the
 // source, as in "cfg.yaml: context canceled". [Invalid] declares no fault
 // for it, and [IsInvalid] does not report it.
+//
+// # References
+//
+// A document whose aliases name the anchors of another file, such as a
+// file of shared defaults, reads that file as a reference document
+// through [WithReferences] on its Source. Every decode and every
+// validation of the document reads the anchors of its reference
+// documents, so a schema reads `server: *base` as the decode does. A
+// program reads each reference file into a Source of its own, with
+// [NewSourceFromFile], [NewSourceFromFS], or [NewSourceFromReader]. One
+// that keeps them in a directory picks the files and their order, which
+// decides the anchor that wins a name two of them define:
+//
+//	names, err := fs.Glob(fsys, "refs/*.yaml")
+//	if err != nil {
+//		return err
+//	}
+//
+//	refs := make([]*niceyaml.Source, 0, len(names))
+//
+//	for _, name := range names {
+//		ref, err := niceyaml.NewSourceFromFS(fsys, name)
+//		if err != nil {
+//			return err
+//		}
+//
+//		refs = append(refs, ref)
+//	}
+//
+//	source, err := niceyaml.NewSourceFromFile("app.yaml", niceyaml.WithReferences(refs...))
+//
+// These calls stand in for the ReferenceFiles, ReferenceDirs,
+// RecursiveDir, and ReferenceReaders options of go-yaml, which a decode
+// does not take.
+//
+// An alias reads an anchor of the reference documents only when no
+// anchor of its name comes before it in its own document. Each decode
+// reads the reference documents in the order given, so an anchor of a
+// later one overrides an anchor of the same name in an earlier one. A
+// Source among them puts its own reference documents ahead of its own
+// text, so its aliases resolve as they do in its own decodes. An alias
+// inside a reference document reads the anchors of the reference
+// documents alone, whatever anchors the document that reads it defines.
+// Where the reference documents define one anchor name twice, a value
+// between the two anchors reads the first in a decode into an any value,
+// the decode a schema runs. A decode into a typed value reads the second.
+// Each anchor of the reference documents thus needs a name of its own.
+//
+// A path resolves in the document itself and stops at an alias that
+// reads a reference document. [Node.At] and [Node.Nodes] return an error
+// wrapping [go.jacobcolvin.com/niceyaml/paths.ErrAlias] for a path that
+// reaches such an alias, and [Node.Ranges] returns one for a path that
+// goes through it. [IsInvalid] does not report that error. A
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Content],
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Text], or
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Exists] matcher whose path
+// reaches the alias returns it too, so a registry routes that document
+// nowhere.
+//
+// An error about a value of a reference document binds at the alias its
+// path enters, since the document holds no line for the value:
+//
+//	app.yaml:2:9: $.server.port: port must be at least 1
+//
+// [SourceError.Nearest] reports the path of that alias, and
+// [SourceError.Unresolved] returns the error wrapping ErrAlias, so a
+// caller tells the position from one at the value itself. An error at a
+// key of a mapping that merges a reference document under a `<<` key
+// binds with no position.
+//
+// A reference document brings its text and its own reference documents,
+// and none of the other settings of its Source. A reference document that
+// does not parse fails every decode of the Source that reads it.
+//
+// # Layers
+//
+// [NewSourceFromLayers] merges the documents of several files into one,
+// such as a base file with the file of one environment over it, and
+// returns a Source of the merged document. The layers go lowest first.
+// Each layer resolves its own aliases and `<<` merge keys first, with the
+// reference documents and the settings of its own Source, so an alias
+// reads the anchor of its own file and the merged document holds no
+// alias. A decode of the merged Source validates the merged document
+// once, so a schema that requires a key passes when any layer sets it.
+//
+// A mapping merges into the mapping below it key by key, at every depth,
+// so the file of one environment changes one field of one service and
+// keeps the rest of the base file. A sequence or a scalar replaces what
+// lies below it whole, and so does a mapping over a sequence or a scalar.
+// A sequence never merges element by element, and an empty sequence, as
+// in `tags: []`, clears the one below it. An empty mapping keeps the
+// mapping below it.
+//
+// A null written as `null` or `~` with no tag removes its key and the
+// value below it, at any depth:
+//
+//	# base.yaml                # prod.yaml
+//	proxy:                     proxy: ~
+//	  url: http://proxy:3128   env: {B: null}
+//	env: {A: 1, B: 2}
+//
+// The merged document holds env.A alone. A null of a higher layer keeps
+// the key removed, and a higher layer that sets a value there brings the
+// key back with that value alone. A written null over no value stays a
+// null. A null that a layer leaves unwritten, as a key with nothing after
+// it or a tag with no value holds, keeps the value below it, so a key
+// whose entries are all commented out changes nothing. A null at the root
+// of a layer keeps the document below it.
+//
+// Two keys are one key when a path selects them by the same name, as
+// [go.jacobcolvin.com/niceyaml/paths.Resolver.KeyName] gives it. The keys
+// 80 and "80" thus merge, and 80 and 0x50 stay apart. The merged document
+// spells a key as the highest layer that holds a value under it does. A
+// key that is a sequence or a mapping has no name, and the merge fails
+// with [ErrUnnamedKey].
+//
+// The merged Source holds the merged value as block-style YAML below the
+// preamble of the lowest layer, so a schema directive in the comments of
+// the base file names the schema of the merged document. It keeps no
+// other comment. Each scalar keeps the spelling of its layer, such as
+// 0x10 or 1.50, except that a block scalar or a string of several lines
+// becomes one double-quoted line. The Source takes its name, its file
+// path, its file system, and what [WithAllowDuplicateKeys] and
+// [WithAliasLimit] set from the Source of the lowest layer. Its text holds
+// the values of every layer, so it shows no excerpt when the Source of a
+// layer, or of a reference document a layer reads, has [WithExcerpts] set
+// to false.
+//
+// That text is no file of the program. [Node.View], [Node.Span],
+// [Node.Ranges], and [Node.PathAt] read the merged lines, so a position
+// taken from the file of a layer names whatever lies there in the merged
+// text. Every Node of the document has the [Node.FilePath] and [Node.FS]
+// of the lowest layer, and [Node.Origin] returns the Node that holds a
+// value in the file of its layer.
+//
+// Each error of the merged Source binds in the file of a layer and never
+// in the merged text, so it names the line a user edits:
+//
+//	base.yaml:3:9: $.server.port: port must be at least 1
+//
+// An error with a path binds in the highest layer whose document holds a
+// value at that path, through the aliases and merge keys of that layer,
+// and a layer that leaves a null unwritten there holds no value. An error
+// at a mapping that several layers hold binds in the highest of them. An
+// error under a sequence binds in the layer that holds the sequence. An
+// error with a position or a range in the merged text binds at the value
+// that lies there. An error for a key that no layer holds binds at the
+// key of the mapping that lacks it, in the layer whose mapping lies
+// deepest along the path, and in the highest of several such layers. An
+// error at a key that a layer removed binds at the null that removed it,
+// in the highest layer that writes one there. An error with no location
+// binds in the lowest layer with no position, as in "base.yaml: quota
+// service: connection refused".
+//
+// The bound error reports the [SourceError.Source], the
+// [SourceError.Node], and the [SourceError.Path] it has in the layer it
+// binds in. A layer from [Node.At] holds its value under a path of its
+// own file, so an error at `$.server.port` reads `$.defaults.server.port`
+// in a layer that holds the value under defaults. [Annotate] marks the
+// error on a view of that layer and nothing on the view of the merged
+// Source, and [SourceError.Excerpt] shows the lines of the layer.
+//
+// A merged Source is a layer like any other, and so is a Node of its
+// document. A merge that holds one reads it as a file of the same text
+// and keeps each key its layers removed. It binds each error in the file
+// that holds the value, so every error and every origin belongs to a
+// document that no merge built.
+//
+// The decode fills the Go value from the merged document by the rule of
+// [Node.DecodeInto], so a default the value holds survives where the
+// layers leave a field out or remove it. Defaults that should merge key
+// by key go in a layer of their own, such as an embedded file below the
+// others.
+//
+// A nil layer adds nothing, and [NewSourceFromFile] returns a nil Source
+// for a file it could not read, so a program passes an optional file as
+// it is once it has checked the error. A merge of no layer gives an empty
+// Source with no name. A decode of it leaves the value as it was, and
+// each error binds with no position, as in "$.servers[1].port: port is
+// required".
+//
+// An empty Source with a name, below every other layer, names the merged
+// Source and changes no value, as in "app config: 2 schema violations".
+// [SourceError.Source] of an error with no location then returns that
+// empty Source. Its empty preamble stands in for the preamble of the
+// layer above it, so a schema directive there no longer applies. The
+// merged Source has no file path or file system unless [WithFilePath] and
+// [WithFS] give them to the empty Source.
+//
+// A layer that a program builds from its environment or its flags merges
+// and binds as a file does. It cannot set one element of a sequence. A
+// key that no field of the target reads sets nothing, and
+// [WithDisallowUnknownFields] reports it. Once the layer sets one key of a
+// mapping, an error at that mapping, or for a key the mapping lacks,
+// binds in that layer, whichever layer the fix belongs in.
+// [go.jacobcolvin.com/niceyaml/encoder.Marshal] writes a nil pointer field
+// of a struct as `null`, so a layer encoded from a struct removes the
+// value under each nil pointer whose field lacks the omitempty option.
+// [WithExcerpts] set to false keeps the lines of a layer that holds
+// secrets out of every excerpt.
+//
+// # Alias Limit
+//
+// A document of a few hundred bytes can nest aliases so that a reader
+// that follows them reads far more than the document holds. The go-yaml
+// decoder can take minutes on such a document and never checks the
+// context, and a schema reads every use of every alias. A decode, a
+// [go.jacobcolvin.com/niceyaml/schema.Schema], and a
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Content] or
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Text] matcher therefore
+// refuse a node that holds an alias when the aliases of its document go
+// past the limit. The error matches [ErrExcessiveAliasing], and
+// [IsInvalid] reports it, since the aliases of the document are the cause
+// wherever the count runs.
+//
+// [WithAliasLimit] set to false turns the limit off for the documents of
+// one Source, for input the program trusts, such as a file it ships. Two
+// checks stay on whatever the option says.
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] takes a Go
+// value and no Source, and refuses a value that shares its maps and
+// slices past the limit, even one that a Source with the limit off
+// decoded. [Node.Nodes] refuses a path whose selectors reach far more
+// nodes through aliases than the document holds.
+//
+// The count reads the documents of a Source and no reference document of
+// [WithReferences], and the option on a reference Source changes nothing.
+// Every decode reads each reference document in full, so nested `<<`
+// merge keys there cost every decode what they expand to, with the limit
+// on or off. A program passes trusted files alone as reference documents.
+// [NewSourceFromLayers] writes each alias of a layer out in full, so a
+// layer must pass the limit as a decode into a type that reads text does.
 //
 // # Diffs
 //
