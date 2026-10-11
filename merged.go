@@ -207,7 +207,7 @@ func (v *mergedValue) inline(keyed bool) string {
 // merge key.
 //
 // An alias reads the anchor the [paths.Resolver] of the document binds it
-// to, which is the anchor a decode of the layer reads, as [decodeTree]
+// to, which is the anchor a decode of the layer reads, as [decodetree.Tree]
 // describes. An alias the resolver binds to no anchor reads an anchor of
 // the reference documents of the [Source] by name, and so does every
 // alias inside a reference document. An alias inside the anchor it refers

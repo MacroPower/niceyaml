@@ -1,8 +1,6 @@
-package niceyaml
+package decodetree
 
 import (
-	"context"
-	"errors"
 	"index/suffixarray"
 	"maps"
 	"slices"
@@ -17,11 +15,9 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/internal/escape"
-	"go.jacobcolvin.com/niceyaml/internal/rejection"
 )
 
-// decodeTree is the tree the go-yaml decoder reads for one document.
+// Tree is the tree the go-yaml decoder reads for one document.
 //
 // The decoder keeps the anchors it has read in maps keyed by name, so an
 // anchor it reads later hides an earlier one of the same name from every
@@ -42,8 +38,8 @@ import (
 // again for each target of another type. An alias among those nodes finds
 // its anchor by name at every read. The second read thus finds an anchor
 // of the document that shares the name, where the first found the anchor
-// of the reference document. When the [Source] has reference documents
-// from [WithReferences], the tree therefore gives every anchor of the
+// of the reference document. When the Source has reference documents from
+// niceyaml.WithReferences, the tree therefore gives every anchor of the
 // document a name of its own, so an alias of a reference document reads
 // the anchors of the reference documents alone.
 //
@@ -67,9 +63,9 @@ import (
 // holds.
 //
 // Renaming, nulls, and verbatim tags change the tree, which the tree the
-// [Source] shares must not see. A document that renames an anchor, or
+// Source shares must not see. A document that renames an anchor, or
 // holds such an alias or such a tag, therefore reads a second parse of
-// the Source from [Source.reparse]. A renamed anchor keeps the text
+// the Source that [Options] returns. A renamed anchor keeps the text
 // of the Source, so the bytes the decoder hands an UnmarshalYAML method
 // hold the names the document spells. The decoder looks an alias up by
 // the text of its name, so an alias carries the new name in its text as
@@ -77,12 +73,12 @@ import (
 // method, thus spells an alias to a renamed anchor with the new name,
 // such as `*x [2]`, and each anchor as the document does.
 //
-// Any other document reads the tree of the Source through [decodeView],
+// Any other document reads the tree of the Source through [DecodeView],
 // which copies only the aliases, and the nodes above them, to drop the
 // comments on their names.
 //
-// Create instances with [newDecodeTree].
-type decodeTree struct {
+// Create instances with [New].
+type Tree struct {
 	// The body of the document as the Source parsed it.
 	source ast.Node
 	// The body of the document as the decoder reads it.
@@ -116,58 +112,36 @@ type decodeTree struct {
 	aliases func() []aliasRead
 }
 
-// treeOptions says how [newDecodeTree] builds a tree that changes the
-// document.
-type treeOptions struct {
-	// Returns the body of the document in a second parse of the Source,
-	// with the index of that parse, or a nil index when the parse holds
-	// no such document.
-	reparse func() (ast.Node, map[*token.Token]int)
-	// Returns the texts a new name such as "x [2]" must not spell.
-	texts func() []string
-	// Whether the Source has reference documents, from [WithReferences].
-	references bool
+// Options says how [New] builds a tree that changes the document.
+type Options struct {
+	// Reparse returns the body of the document in a second parse of its
+	// Source, with the index of that parse, which maps each token the
+	// parser read to its index in the input. It returns a nil index when
+	// the parse holds no such document. The second parse holds a null in
+	// the token of each alias the facts hold as enclosed, as [WriteNull]
+	// writes it.
+	Reparse func() (ast.Node, map[*token.Token]int)
+	// Texts returns the texts a new name such as "x [2]" must not spell:
+	// those of the document and of its reference documents.
+	Texts func() []string
+	// References reports whether the Source has reference documents, from
+	// niceyaml.WithReferences.
+	References bool
 }
 
-// decodeTree returns the [*decodeTree] of the document, and builds it on
-// the first call.
-func (d *document) decodeTree() *decodeTree {
-	d.treeOnce.Do(func() {
-		src := d.node.source
+// New creates a new [*Tree] for body, a document body with facts. A body
+// that renames an anchor, holds an alias inside the anchor it refers to,
+// or holds a tag [isIntegerTag] reports reads a second parse of the
+// Source, which opts returns, as [Tree.parse] describes. Any other body
+// reads the tree of the Source through [DecodeView].
+func New(body ast.Node, facts *aliasing.Facts, opts Options) *Tree {
+	t := &Tree{source: body, facts: facts}
 
-		d.tree = newDecodeTree(d.root.Body, d.state.Facts(), treeOptions{
-			reparse: func() (ast.Node, map[*token.Token]int) {
-				r := src.decodeParse()
-				if d.fileIndex < 0 || d.fileIndex >= len(r.File.Docs) {
-					return nil, nil
-				}
-
-				return r.File.Docs[d.fileIndex].Body, r.Index
-			},
-			texts: func() []string {
-				return append(spellingTexts(d.tokens), src.referenceTexts()...)
-			},
-			references: len(src.references) > 0,
-		})
-	})
-
-	return d.tree
-}
-
-// newDecodeTree creates a new [*decodeTree] for body, a document body
-// with facts. A body that renames an anchor, holds an alias inside the
-// anchor it refers to, or holds a tag [isIntegerTag] reports reads a
-// second parse of the Source, which opts returns, as [decodeTree.parse]
-// describes. Any other body reads the tree of the Source through
-// [decodeView].
-func newDecodeTree(body ast.Node, facts *aliasing.Facts, opts treeOptions) *decodeTree {
-	t := &decodeTree{source: body, facts: facts}
-
-	names := renamedAnchorNames(facts, opts.references)
+	names := renamedAnchorNames(facts, opts.References)
 
 	changes := len(names) > 0 || len(facts.Enclosed) > 0 || holdsIntegerTag(body)
 	if !changes || !t.parse(names, opts) {
-		t.body = decodeView(body)
+		t.body = DecodeView(body)
 	}
 
 	t.nodeTokens = sync.OnceValue(func() map[*token.Token]struct{} {
@@ -197,8 +171,8 @@ func newDecodeTree(body ast.Node, facts *aliasing.Facts, opts treeOptions) *deco
 // spells each tag [isIntegerTag] reports in its verbatim form. It reports
 // false when the second parse does not give the document the same nodes,
 // which a parse of the same tokens always does.
-func (t *decodeTree) parse(names map[string]bool, opts treeOptions) bool {
-	body, index := opts.reparse()
+func (t *Tree) parse(names map[string]bool, opts Options) bool {
+	body, index := opts.Reparse()
 	if index == nil {
 		return false
 	}
@@ -214,11 +188,11 @@ func (t *decodeTree) parse(names map[string]bool, opts treeOptions) bool {
 	// name can hold the same text, so the count skips a new name that the
 	// document or a reference document spells anywhere, even in part. An
 	// alias that spells such a name would read the wrong anchor, and
-	// restoreNames would rewrite the text in any message that quotes it.
+	// RestoreNames would rewrite the text in any message that quotes it.
 	spelled := map[string]bool{}
 
 	if len(names) > 0 {
-		newSpellings(opts.texts()).find(names, spelled)
+		newSpellings(opts.Texts()).find(names, spelled)
 	}
 
 	anchors := make(map[*ast.AliasNode]*ast.AnchorNode, len(t.facts.Aliases))
@@ -269,7 +243,7 @@ func (t *decodeTree) parse(names map[string]bool, opts treeOptions) bool {
 			}
 
 			// The second parse holds a null in the token of the `*`, as
-			// [writeNull] writes it.
+			// [WriteNull] writes it.
 			if t.facts.Enclosed[n] && alias.Start != nil {
 				nulls[alias] = ast.Null(alias.Start)
 				nodes[n] = nulls[alias]
@@ -304,7 +278,7 @@ func (t *decodeTree) parse(names map[string]bool, opts treeOptions) bool {
 // newName returns a new name for an anchor named name: the name followed
 // by a count in brackets, one past the count of the last anchor of that
 // name, that spelled does not hold.
-func (*decodeTree) newName(name string, count map[string]int, spelled map[string]bool) string {
+func (*Tree) newName(name string, count map[string]int, spelled map[string]bool) string {
 	for {
 		count[name]++
 
@@ -315,12 +289,12 @@ func (*decodeTree) newName(name string, count map[string]int, spelled map[string
 	}
 }
 
-// writeNull writes a null into tk, the token of the `*` of an alias, in
+// WriteNull writes a null into tk, the token of the `*` of an alias, in
 // place. The null takes over the token, so an error at the null names the
 // alias. The go-yaml formatter writes the text of each token as the chain
 // of tokens holds it, so the token keeps its place in the chain and reads
 // null there.
-func writeNull(tk *token.Token) {
+func WriteNull(tk *token.Token) {
 	null := token.New("null", strings.TrimSuffix(tk.Origin, "*")+"null", tk.Position)
 	null.Prev, null.Next = tk.Prev, tk.Next
 	*tk = *null
@@ -380,7 +354,7 @@ func (r nodeReplacer) replace(node ast.Node) ast.Node {
 }
 
 // renameAlias gives alias, a node of a second parse, a name free of
-// comments, as [decodeView] does, and changes that name to name when name
+// comments, as [DecodeView] does, and changes that name to name when name
 // is not empty. The decoder looks an alias up by the value of the token
 // of its name, and by the text of the node of its name.
 func renameAlias(alias *ast.AliasNode, name string) {
@@ -396,12 +370,12 @@ func renameAlias(alias *ast.AliasNode, name string) {
 	alias.Value = ast.String(tk)
 }
 
-// view returns the node of the tree that stands for node, a node of the
+// View returns the node of the tree that stands for node, a node of the
 // document outside its comments. A tree that reads the Source through
-// [decodeView] holds no such nodes, so view returns the decodeView of
+// [DecodeView] holds no such nodes, so View returns the DecodeView of
 // node there, as it does for a node the tree does not hold, which no node
 // of the document is.
-func (t *decodeTree) view(node ast.Node) ast.Node {
+func (t *Tree) View(node ast.Node) ast.Node {
 	if node == t.source {
 		return t.body
 	}
@@ -410,16 +384,16 @@ func (t *decodeTree) view(node ast.Node) ast.Node {
 		return v
 	}
 
-	return decodeView(node)
+	return DecodeView(node)
 }
 
-// parsedView returns the node of the tree that stands for node, a node
+// Parsed returns the node of the tree that stands for node, a node
 // of the document outside its comments, when the tree comes from a
 // second parse, and node itself otherwise. A tree that reads the Source
-// through [decodeView] differs from it only in the names of its aliases,
+// through [DecodeView] differs from it only in the names of its aliases,
 // so a decoder that knows none of the anchors of the document reads node
 // as it reads the tree.
-func (t *decodeTree) parsedView(node ast.Node) ast.Node {
+func (t *Tree) Parsed(node ast.Node) ast.Node {
 	if v, ok := t.nodes[node]; ok {
 		return v
 	}
@@ -427,12 +401,12 @@ func (t *decodeTree) parsedView(node ast.Node) ast.Node {
 	return node
 }
 
-// holds reports whether tk is a token of the parse the tree reads: one of
+// Holds reports whether tk is a token of the parse the tree reads: one of
 // the tokens of its second parse, or the token of a node of its body,
 // such as the null the parser makes for a key without a value. A tree
-// that reads the Source through [decodeView] shares every token with the
+// that reads the Source through [DecodeView] shares every token with the
 // Source.
-func (t *decodeTree) holds(tk *token.Token) bool {
+func (t *Tree) Holds(tk *token.Token) bool {
 	if _, ok := t.index[tk]; ok {
 		return true
 	}
@@ -442,29 +416,29 @@ func (t *decodeTree) holds(tk *token.Token) bool {
 	return ok
 }
 
-// unresolvedMerge returns the token and the message of the first alias
+// UnresolvedMerge returns the token and the message of the first alias
 // under a `<<` merge key inside scope, a node of the tree, that the
 // decoder finds no mapping for and that err, which the decoder returned
 // for scope, reports. It reports false when scope holds no such alias.
 // The decoder finds no mapping for an alias that names no anchor before
-// it as the document's resolver binds it, or for one inside the anchor
-// it names, which the decoder has not finished reading when it merges.
+// it as the document's resolver binds it, or for one inside the anchor it
+// names, which the decoder has not finished reading when it merges.
 //
 // The document's resolver knows nothing of the reference documents a
-// decode may carry, from [WithReferences], and the decoder merges an
+// decode may carry, from niceyaml.WithReferences, and the decoder merges an
 // alias that one of them defines. So err reports an alias only when it
 // is the decoder's own failure for that alias. That is the message the
 // decoder gives an alias it finds no anchor for, and, for an alias
 // inside the anchor it names, any [yaml.Error] whose token is not one
 // of the tree's, such as the null the decoder merges in its place.
-func (t *decodeTree) unresolvedMerge(scope ast.Node, err error) (*token.Token, string, bool) {
+func (t *Tree) UnresolvedMerge(scope ast.Node, err error) (*token.Token, string, bool) {
 	first, last := astnode.Bounds(scope)
 	if len(first) == 0 {
 		return nil, "", false
 	}
 
 	lo, hi := first[0].Position.Offset, last[0].Position.Offset
-	msg := t.restoreNames(err.Error())
+	msg := t.RestoreNames(err.Error())
 	_, yamlErr := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 
 	for _, m := range t.merges() {
@@ -483,8 +457,8 @@ func (t *decodeTree) unresolvedMerge(scope ast.Node, err error) (*token.Token, s
 
 // unresolvedMerges returns the aliases under the `<<` merge keys of the
 // tree that the decoder finds no mapping for, as
-// [decodeTree.unresolvedMerge] describes, in document order.
-func (t *decodeTree) unresolvedMerges() []mergeAlias {
+// [Tree.unresolvedMerge] describes, in document order.
+func (t *Tree) unresolvedMerges() []mergeAlias {
 	var found []mergeAlias
 
 	for _, a := range t.facts.Aliases {
@@ -502,8 +476,8 @@ func (t *decodeTree) unresolvedMerges() []mergeAlias {
 	return found
 }
 
-// referenceAliases returns the tokens of the aliases to a reference
-// document, from [WithReferences], that scope, a node of the tree,
+// ReferenceAliases returns the tokens of the aliases to a reference
+// document, from niceyaml.WithReferences, that scope, a node of the tree,
 // holds, in document order. Those are the aliases that name no anchor
 // before them as the document's resolver binds them, inside scope or
 // inside an anchor of the document that an alias the walk reaches refers
@@ -511,7 +485,7 @@ func (t *decodeTree) unresolvedMerges() []mergeAlias {
 // of the decode, so it returns aliases the type never reads. An alias
 // inside the anchor it refers to reads null, so the walk does not follow
 // it.
-func (t *decodeTree) referenceAliases(scope ast.Node) []*token.Token {
+func (t *Tree) ReferenceAliases(scope ast.Node) []*token.Token {
 	aliases := t.aliases()
 
 	var refs []*token.Token
@@ -561,8 +535,8 @@ func (t *decodeTree) referenceAliases(scope ast.Node) []*token.Token {
 }
 
 // offsetAliases returns the aliases of the tree in the order of their
-// offsets, for [decodeTree.referenceAliases].
-func (t *decodeTree) offsetAliases() []aliasRead {
+// offsets, for [Tree.referenceAliases].
+func (t *Tree) offsetAliases() []aliasRead {
 	var aliases []aliasRead
 
 	for _, a := range t.facts.Aliases {
@@ -613,66 +587,14 @@ func (m mergeAlias) message() string {
 	return "cannot find anchor by alias name " + m.name
 }
 
-// rejectionText returns the message [rejection.Classify] writes for err,
-// with each anchor named as the document names it, and the sentinel of
-// the label Classify gives err. The decoder writes text of the document
-// into some messages as it is, such as the name of an unknown field, so
-// each control character comes back as its picture and the message stays
-// on one line.
-func (t *decodeTree) rejectionText(err yaml.Error) (string, error) {
-	msg, label := rejection.Classify(err)
-
-	return escape.Control(t.restoreNames(msg)), rejectionLabel(label)
-}
-
-// restoreNames returns msg with each name the tree gave an anchor spelled
+// RestoreNames returns msg with each name the tree gave an anchor spelled
 // as the document does. A nil tree gave no anchor a name.
-func (t *decodeTree) restoreNames(msg string) string {
+func (t *Tree) RestoreNames(msg string) string {
 	if t == nil || t.names == nil {
 		return msg
 	}
 
 	return t.names.Replace(msg)
-}
-
-// restoreError returns err with a message that spells each name the tree
-// gave an anchor as the document does. It returns err itself when the
-// message names no such anchor, and when err holds an [*Error] or a
-// [*SourceError], whose message the binding writes from its parts.
-func (t *decodeTree) restoreError(err error) error {
-	var (
-		located *Error
-		bound   *SourceError
-	)
-
-	if errors.As(err, &located) || errors.As(err, &bound) {
-		return err
-	}
-
-	msg := err.Error()
-
-	restored := t.restoreNames(msg)
-	if restored == msg {
-		return err
-	}
-
-	return restoredError{err: err, msg: restored}
-}
-
-// restoredError is an error from the decoder with a message that spells
-// the names of anchors as the document does. It unwraps to the error the
-// decoder returned.
-type restoredError struct {
-	err error
-	msg string
-}
-
-func (e restoredError) Error() string {
-	return e.msg
-}
-
-func (e restoredError) Unwrap() error {
-	return e.err
 }
 
 // renamedAnchorNames returns the names of the anchors of a document, as
@@ -682,7 +604,7 @@ func (e restoredError) Unwrap() error {
 // anchor. The decoder would read such an alias as the later anchor,
 // although it names no anchor of the document before it and reads a
 // reference document's anchor, if any. When references is set, the
-// [Source] has reference documents, which may define an anchor of any
+// Source has reference documents, which may define an anchor of any
 // name, so the result holds the name of every anchor.
 func renamedAnchorNames(facts *aliasing.Facts, references bool) map[string]bool {
 	anchors := map[string]int{}
@@ -728,32 +650,6 @@ type spellings struct {
 // bracket is a count in brackets in the data of a [spellings]. The string
 // that holds it starts at start, and the bracket ends before end.
 type bracket struct{ start, end int }
-
-// spellingTexts returns the texts of tks that a new name must not spell:
-// the text of tks, which holds a spelling that runs across tokens, such
-// as a tag before a flow sequence, and the value of each token that holds
-// " [". A value differs from the text where a quoted scalar holds an
-// escape or a scalar folds a line break.
-func spellingTexts(tks token.Tokens) []string {
-	var (
-		text   strings.Builder
-		values []string
-	)
-
-	for _, tk := range tks {
-		if tk == nil {
-			continue
-		}
-
-		text.WriteString(tk.Origin)
-
-		if strings.Contains(tk.Value, " [") {
-			values = append(values, tk.Value)
-		}
-	}
-
-	return append(values, text.String())
-}
 
 // newSpellings creates a new [*spellings] for texts.
 func newSpellings(texts []string) *spellings {
@@ -816,11 +712,11 @@ func (s *spellings) find(names, spelled map[string]bool) {
 	}
 }
 
-// anchorIndex lists the anchors of a [decodeTree], so a decode of a node
+// anchorIndex lists the anchors of a [Tree], so a decode of a node
 // below the body primes the anchors its aliases need without reading the
 // whole body.
 //
-// Create instances with [decodeTree.newAnchorIndex].
+// Create instances with [Tree.newAnchorIndex].
 type anchorIndex struct {
 	// The anchors of each name, as indexes into entries.
 	named map[string][]int
@@ -846,7 +742,7 @@ type anchorEntry struct {
 
 // newAnchorIndex creates a new [*anchorIndex] for the anchors of the
 // tree, each under the name the tree gives it.
-func (t *decodeTree) newAnchorIndex() *anchorIndex {
+func (t *Tree) newAnchorIndex() *anchorIndex {
 	idx := &anchorIndex{named: map[string][]int{}}
 
 	for _, a := range t.facts.Anchors {
@@ -881,7 +777,7 @@ func (t *decodeTree) newAnchorIndex() *anchorIndex {
 		holders = append(holders, i)
 
 		// A tree from a second parse names the anchor as the decoder does.
-		view, ok := t.parsedView(e.node).(*ast.AnchorNode)
+		view, ok := t.Parsed(e.node).(*ast.AnchorNode)
 		if !ok {
 			continue
 		}
@@ -897,12 +793,12 @@ func (t *decodeTree) newAnchorIndex() *anchorIndex {
 // reads returns the names the aliases under entry i of idx, an index of
 // the tree, read, and finds them on the first call. An alias the tree
 // holds a null in place of reads nothing.
-func (t *decodeTree) reads(idx *anchorIndex, i int) []string {
+func (t *Tree) reads(idx *anchorIndex, i int) []string {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
 	if idx.names[i] == nil {
-		view := t.parsedView(idx.entries[i].node)
+		view := t.Parsed(idx.entries[i].node)
 		idx.names[i] = slices.AppendSeq(make([]string, 0), maps.Keys(aliasNames(view)))
 	}
 
@@ -935,7 +831,7 @@ func (idx *anchorIndex) candidate(i, start int) int {
 	}
 }
 
-// prime returns the anchors that a decoder registers, in order, before it
+// Prime returns the anchors that a decoder registers, in order, before it
 // decodes node, a node of the tree below its body, so the aliases in node
 // find the anchors they refer to. Those are the anchors that end before
 // node, in document order. It lists only the ones that register a name
@@ -946,7 +842,7 @@ func (idx *anchorIndex) candidate(i, start int) int {
 // null. A decode of the whole document reads an alias inside an anchor to
 // that anchor as null too, into every target, since the tree holds a null
 // in its place.
-func (t *decodeTree) prime(node ast.Node) []*ast.AnchorNode {
+func (t *Tree) Prime(node ast.Node) []*ast.AnchorNode {
 	idx := t.anchors()
 	if len(idx.entries) == 0 {
 		return nil
@@ -1016,7 +912,7 @@ func (t *decodeTree) prime(node ast.Node) []*ast.AnchorNode {
 	anchors := make([]*ast.AnchorNode, 0, len(order))
 
 	for _, i := range order {
-		anchor, ok := t.view(idx.entries[i].node).(*ast.AnchorNode)
+		anchor, ok := t.View(idx.entries[i].node).(*ast.AnchorNode)
 		if !ok {
 			continue
 		}
@@ -1029,36 +925,6 @@ func (t *decodeTree) prime(node ast.Node) []*ast.AnchorNode {
 	}
 
 	return anchors
-}
-
-// primeAnchors registers with dec the anchors that the aliases in node,
-// a node of the [decodeTree] below its body, refer to, as
-// [decodeTree.prime] lists them. Each anchor decodes on its own.
-//
-// Every anchor of the tree has a name of its own, so the pass decodes
-// only anchors that node, or an anchor node reads, refers to. A failure
-// in one of them would leave an alias with nothing to read, so the pass
-// stops and returns it, as a decode of the whole document fails there
-// too, as [Node.rejection] reads it for that anchor. A context that ends
-// stops the pass, which then returns the error of the context.
-func (n *Node) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast.Node) error {
-	for _, anchor := range n.doc.decodeTree().prime(node) {
-		// Without an anchor it needs, the decode of the node would fail
-		// in its stead.
-		err := ctx.Err()
-		if err != nil {
-			return err //nolint:wrapcheck // The context names the reason, and the Node binds it.
-		}
-
-		var sink any
-
-		err = decodeWithRecover(ctx, dec, anchor, &sink)
-		if err != nil {
-			return n.rejection(err, anchor)
-		}
-	}
-
-	return nil
 }
 
 // pendingAnchor returns an anchor with the name of anchor over a null.

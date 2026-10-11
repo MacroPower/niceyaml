@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/goccy/go-yaml"
@@ -19,9 +20,12 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
+	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
+	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
+	"go.jacobcolvin.com/niceyaml/internal/rejection"
 	"go.jacobcolvin.com/niceyaml/internal/segment"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -708,6 +712,7 @@ func newDocuments(src *Source, docs []docparse.Document, errs []error) []*Node {
 		}
 
 		doc.node = &Node{source: src, doc: doc, content: doc.tokens, base: paths.Doc(), span: parsed.Span}
+		doc.tree = sync.OnceValue(doc.newDecodeTree)
 		doc.state = aliasing.NewState(!src.skipAliasLimit, func() (ast.Node, *paths.Resolver) {
 			return doc.root.Body, doc.pathResolver()
 		})
@@ -803,9 +808,9 @@ type document struct {
 	// the aliases once however many paths the Nodes of the document
 	// resolve.
 	resolver *paths.Resolver
-	// The tree the go-yaml decoder reads for the document, which
-	// decodeTree builds for the first decode.
-	tree *decodeTree
+	// Returns the tree the go-yaml decoder reads for the document, and
+	// builds it on the first call.
+	tree func() *decodetree.Tree
 	// Finds the node of root at a position, which pathIndex builds for
 	// the first call of PathAt.
 	paths *pathIndex
@@ -825,8 +830,6 @@ type document struct {
 	preamble int
 	// Creates resolver once, for the first path any Node resolves.
 	resolverOnce sync.Once
-	// Builds tree once, for the first decode.
-	treeOnce sync.Once
 	// Builds paths once, for the first call of PathAt.
 	pathsOnce sync.Once
 }
@@ -3102,7 +3105,7 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 // a null sets that pointer to nil, and so does an alias that reads as
 // null. A panic in the decoder comes back as an error that holds a
 // [*PanicError], bound at the first token of node that is not a
-// comment. The decoder reads node in the [decodeTree] of the document,
+// comment. The decoder reads node in the [decodetree.Tree] of the document,
 // and for a node below the body, a failure in an anchor outside node
 // that node reads comes back as its error. The error of a value that
 // decodes itself binds at the path [Node.locateDecodeError] finds for
@@ -3155,7 +3158,7 @@ func (n *Node) decodeUnbound(
 	}
 
 	dec := yaml.NewDecoder(bytes.NewReader(nil), yamlOpts...)
-	view := n.doc.decodeTree().view(node)
+	view := n.doc.tree().View(node)
 
 	// The decoder registers the anchors of the node it decodes, so an alias
 	// in a node below the body finds an anchor defined elsewhere in the
@@ -3246,18 +3249,18 @@ func isNullAlias(ctx context.Context, dec *yaml.Decoder, node, view ast.Node) bo
 }
 
 // rejection returns err, which the go-yaml decoder returned for scope, a
-// node of the [decodeTree], as an [*Error] that matches [ErrDecode] and
+// node of the [decodetree.Tree], as an [*Error] that matches [ErrDecode] and
 // [errPlaced] when the decoder reported the rejection without a token of
 // the source. The depth limit of the decoder binds at the first
 // token of scope that is not a comment. A `<<` merge key whose alias
 // names no mapping the decoder can find binds at the alias, when err is
-// the decoder's failure for that alias, as [decodeTree.unresolvedMerge]
+// the decoder's failure for that alias, as [decodetree.Tree.UnresolvedMerge]
 // describes, with the message a decode of the whole document gives that
 // alias. Any other [yaml.Error] without a token of the source comes back
 // that way when scope holds an alias to a reference document,
-// as [decodeTree.referenceAliases] finds them, with go-yaml's position
+// as [decodetree.Tree.ReferenceAliases] finds them, with go-yaml's position
 // and excerpt of that document left out and the message and the label
-// [decodeTree.rejectionText] gives it. It binds at the alias when
+// [document.rejectionText] gives it. It binds at the alias when
 // scope holds one such alias, and carries no location when it holds
 // several, since the token does not say which of them led to it. The
 // count ignores the target type, so a type that reads only one of
@@ -3277,7 +3280,7 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 		return err
 	}
 
-	tree := n.doc.decodeTree()
+	tree := n.doc.tree()
 
 	var (
 		at    *token.Token
@@ -3285,8 +3288,8 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 	)
 
 	if errors.Is(err, yaml.ErrExceededMaxDepth) {
-		at, cause = astnode.StartToken(scope), tree.restoreError(err)
-	} else if tk, msg, ok := tree.unresolvedMerge(scope, err); ok {
+		at, cause = astnode.StartToken(scope), n.doc.restoreError(err)
+	} else if tk, msg, ok := tree.UnresolvedMerge(scope, err); ok {
 		// The decoder's failure for an alias inside its own anchor names
 		// the null it merges in its place, which the source does not hold,
 		// so the message is the one a decode of the whole document gives.
@@ -3294,12 +3297,12 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 	}
 
 	if at == nil && ok {
-		refs := tree.referenceAliases(scope)
+		refs := tree.ReferenceAliases(scope)
 		if len(refs) == 0 {
 			return err
 		}
 
-		msg, label := tree.rejectionText(yamlErr)
+		msg, label := n.doc.rejectionText(yamlErr)
 		rejected := decodeError{err: yamlMessageError{err: yamlErr, msg: msg}, label: label, placed: true}
 
 		// The token does not say which anchor of a reference document
@@ -3321,160 +3324,9 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 	return Invalid(rejected, atToken(at))
 }
 
-// decodeView returns node as the go-yaml decoder reads it: the same tree,
-// with the name of each alias free of comments. The parser attaches a
-// comment on the line of an alias to its name, and the decoder looks the
-// anchor up by the text of the name, comment included, so `*x # note`
-// would name no anchor. The view copies each alias and the nodes above
-// it, and shares every other node and every token with node. The tree the
-// Source shares thus stays as the parser built it, and every error the
-// decoder reports names a token of the source.
-func decodeView(node ast.Node) ast.Node {
-	view, _ := viewOf(node)
-
-	return view
-}
-
-// viewOf returns the [decodeView] of node, and whether it differs from
-// node.
-func viewOf(node ast.Node) (ast.Node, bool) {
-	if astnode.IsNil(node) {
-		return node, false
-	}
-
-	switch n := node.(type) {
-	case *ast.AliasNode:
-		if astnode.IsNil(n.Value) || n.Value.GetToken() == nil {
-			return n, false
-		}
-
-		// The decoder registers an anchor under the value of its name
-		// token, which a plain string node of the same token spells.
-		c := *n
-		c.Value = ast.String(n.Value.GetToken())
-
-		return &c, true
-
-	case *ast.AnchorNode:
-		value, changed := viewOf(n.Value)
-		if !changed {
-			return n, false
-		}
-
-		c := *n
-		c.Value = value
-
-		return &c, true
-
-	case *ast.TagNode:
-		value, changed := viewOf(n.Value)
-		if !changed {
-			return n, false
-		}
-
-		c := *n
-		c.Value = value
-
-		return &c, true
-
-	case *ast.MappingKeyNode:
-		value, changed := viewOf(n.Value)
-		if !changed {
-			return n, false
-		}
-
-		c := *n
-		c.Value = value
-
-		return &c, true
-
-	case *ast.MappingValueNode:
-		return mappingValueView(n)
-
-	case *ast.MappingNode:
-		values, changed := viewsOf(n.Values, mappingValueView)
-		if !changed {
-			return n, false
-		}
-
-		c := *n
-		c.Values = values
-
-		return &c, true
-
-	case *ast.SequenceNode:
-		values, changed := viewsOf(n.Values, viewOf)
-		if !changed {
-			return n, false
-		}
-
-		c := *n
-		c.Values = values
-
-		return &c, true
-
-	default:
-		return node, false
-	}
-}
-
-// mappingValueView is [viewOf] for an entry of a mapping.
-func mappingValueView(n *ast.MappingValueNode) (*ast.MappingValueNode, bool) {
-	if n == nil {
-		return nil, false
-	}
-
-	key, keyChanged := viewOf(n.Key)
-	value, valueChanged := viewOf(n.Value)
-
-	if !keyChanged && !valueChanged {
-		return n, false
-	}
-
-	c := *n
-	c.Value = value
-
-	// A copy has the type of its original, so a key stays a key.
-	if k, ok := key.(ast.MapKeyNode); ok {
-		c.Key = k
-	}
-
-	return &c, true
-}
-
-// viewsOf applies view to each of nodes, and returns a new slice when any
-// of them changed, or nodes itself when none did.
-func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
-	var views []T
-
-	for i, node := range nodes {
-		v, changed := view(node)
-		if !changed {
-			if views != nil {
-				views[i] = node
-			}
-
-			continue
-		}
-
-		if views == nil {
-			views = make([]T, len(nodes))
-			copy(views, nodes[:i])
-		}
-
-		views[i] = v
-	}
-
-	if views == nil {
-		return nodes, false
-	}
-
-	return views, true
-}
-
 // bindDecodeError binds an error from the decoder to the source. A
 // [yaml.Error] at a token of the source binds as an [*Error] that matches
-// [ErrDecode], with the message and the label [decodeTree.rejectionText]
+// [ErrDecode], with the message and the label [document.rejectionText]
 // gives it. The Error carries the location [Node.rejectionLocation] gives
 // the token, which is the path of the node the decoder names by it. That
 // path starts at `$`, so the Node binds the Error with no scope in front
@@ -3498,7 +3350,7 @@ func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 // bytes it gets returns a [yaml.Error] of its own, whose token comes from
 // that parse rather than the source, so it stays the value's own error,
 // unless [Node.rejection] took it for a rejection of a value from a
-// reference document. A message that names an anchor the [decodeTree]
+// reference document. A message that names an anchor the [decodetree.Tree]
 // renamed names it as the document does. Returns nil for a nil err.
 func (n *Node) bindDecodeError(err error) error {
 	if err == nil {
@@ -3512,7 +3364,7 @@ func (n *Node) bindDecodeError(err error) error {
 
 // holdsToken reports whether tk is a token of the source's parse, one of
 // the tokens the parser built its tree from, or a token of the parse the
-// [decodeTree] of the document reads, as [decodeTree.holds] describes.
+// [decodetree.Tree] of the document reads, as [decodetree.Tree.Holds] describes.
 // It compares pointers, so a token from another parse, such as the one an
 // UnmarshalYAML runs on its bytes, never matches, however closely it
 // resembles a token of the source.
@@ -3525,7 +3377,7 @@ func (n *Node) holdsToken(tk *token.Token) bool {
 		return true
 	}
 
-	return n.doc.decodeTree().holds(tk)
+	return n.doc.tree().Holds(tk)
 }
 
 // errPlaced marks an error of a decode that [decodeWithRecover] or
@@ -3605,48 +3457,6 @@ func (e yamlMessageError) Is(target error) bool {
 // holds that matches it, as [errors.As] does.
 func (e yamlMessageError) As(target any) bool {
 	return errors.As(e.err, target)
-}
-
-// verbatimIntegerTag is the verbatim form of the !!int tag, which the
-// [decodeTree] gives the token of each tag [isIntegerTag] reports. The
-// go-yaml decoder reads an integer under the short form as a Go int,
-// which it then rejects for every integer type. It reserves only the
-// short forms of tags, so it reads an integer under the verbatim form as
-// it reads the integer alone.
-const verbatimIntegerTag = "!<tag:yaml.org,2002:int>"
-
-// isIntegerTag reports whether node is a !!int tag on an integer, or on
-// an anchor on one. A tag after a %TAG directive that redefines the "!!"
-// handle does not count, as the go-yaml decoder reads it as text.
-func isIntegerTag(node ast.Node) bool {
-	tag, ok := node.(*ast.TagNode)
-	if !ok || tag.Start == nil || tag.Directive != nil ||
-		token.ReservedTagKeyword(tag.Start.Value) != token.IntegerTag {
-		return false
-	}
-
-	value := tag.Value
-	if anchor, ok := value.(*ast.AnchorNode); ok {
-		value = anchor.Value
-	}
-
-	_, ok = value.(*ast.IntegerNode)
-
-	return ok
-}
-
-// holdsIntegerTag reports whether node or any node below it is a tag
-// [isIntegerTag] reports.
-func holdsIntegerTag(node ast.Node) bool {
-	found := false
-
-	astnode.Inspect(node, func(n ast.Node) bool {
-		found = found || isIntegerTag(n)
-
-		return !found
-	})
-
-	return found
 }
 
 // decodeWithRecover decodes node into v with dec. It turns a panic in the
@@ -3795,4 +3605,133 @@ func (n *Node) YAMLComments(ctx context.Context) (yaml.CommentMap, error) {
 	}
 
 	return comments, nil
+}
+
+// newDecodeTree creates the [*decodetree.Tree] of the document.
+func (d *document) newDecodeTree() *decodetree.Tree {
+	src := d.node.source
+
+	return decodetree.New(d.root.Body, d.state.Facts(), decodetree.Options{
+		Reparse: func() (ast.Node, map[*token.Token]int) {
+			r := src.decodeParse()
+			if d.fileIndex < 0 || d.fileIndex >= len(r.File.Docs) {
+				return nil, nil
+			}
+
+			return r.File.Docs[d.fileIndex].Body, r.Index
+		},
+		Texts: func() []string {
+			return append(spellingTexts(d.tokens), src.referenceTexts()...)
+		},
+		References: len(src.references) > 0,
+	})
+}
+
+// primeAnchors registers with dec the anchors that the aliases in node,
+// a node of the [decodetree.Tree] of the document below its body, refer
+// to, as [decodetree.Tree.Prime] lists them. Each anchor decodes on its own.
+//
+// Every anchor of the tree has a name of its own, so the pass decodes
+// only anchors that node, or an anchor node reads, refers to. A failure
+// in one of them would leave an alias with nothing to read, so the pass
+// stops and returns it, as a decode of the whole document fails there
+// too, as [Node.rejection] reads it for that anchor. A context that ends
+// stops the pass, which then returns the error of the context.
+func (n *Node) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast.Node) error {
+	for _, anchor := range n.doc.tree().Prime(node) {
+		// Without an anchor it needs, the decode of the node would fail
+		// in its stead.
+		err := ctx.Err()
+		if err != nil {
+			return err //nolint:wrapcheck // The context names the reason, and the Node binds it.
+		}
+
+		var sink any
+
+		err = decodeWithRecover(ctx, dec, anchor, &sink)
+		if err != nil {
+			return n.rejection(err, anchor)
+		}
+	}
+
+	return nil
+}
+
+// rejectionText returns the message [rejection.Classify] writes for err,
+// with each anchor named as the document names it, and the sentinel of
+// the label Classify gives err. The decoder writes text of the document
+// into some messages as it is, such as the name of an unknown field, so
+// each control character comes back as its picture and the message stays
+// on one line.
+func (d *document) rejectionText(err yaml.Error) (string, error) {
+	msg, label := rejection.Classify(err)
+
+	return escape.Control(d.tree().RestoreNames(msg)), rejectionLabel(label)
+}
+
+// restoreError returns err with a message that spells each name the
+// [decodetree.Tree] of the document gave an anchor as the document does.
+// It returns err itself when the message names no such anchor, and when
+// err holds an [*Error] or a [*SourceError], whose message the binding
+// writes from its parts.
+func (d *document) restoreError(err error) error {
+	var (
+		located *Error
+		bound   *SourceError
+	)
+
+	if errors.As(err, &located) || errors.As(err, &bound) {
+		return err
+	}
+
+	msg := err.Error()
+
+	restored := d.tree().RestoreNames(msg)
+	if restored == msg {
+		return err
+	}
+
+	return restoredError{err: err, msg: restored}
+}
+
+// restoredError is an error from the decoder with a message that spells
+// the names of anchors as the document does. It unwraps to the error the
+// decoder returned.
+type restoredError struct {
+	err error
+	msg string
+}
+
+func (e restoredError) Error() string {
+	return e.msg
+}
+
+func (e restoredError) Unwrap() error {
+	return e.err
+}
+
+// spellingTexts returns the texts of tks that a new name must not spell:
+// the text of tks, which holds a spelling that runs across tokens, such
+// as a tag before a flow sequence, and the value of each token that holds
+// " [". A value differs from the text where a quoted scalar holds an
+// escape or a scalar folds a line break.
+func spellingTexts(tks token.Tokens) []string {
+	var (
+		text   strings.Builder
+		values []string
+	)
+
+	for _, tk := range tks {
+		if tk == nil {
+			continue
+		}
+
+		text.WriteString(tk.Origin)
+
+		if strings.Contains(tk.Value, " [") {
+			values = append(values, tk.Value)
+		}
+	}
+
+	return append(values, text.String())
 }

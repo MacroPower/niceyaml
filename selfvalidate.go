@@ -1464,7 +1464,7 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 // itself.
 //
 // When parsed is true, the content and each tag come from the
-// [decodeTree] of the document, so an integer under a !!int tag decodes
+// [decodetree.Tree] of the document, so an integer under a !!int tag decodes
 // into an integer type, as in the decode. For a key with no anchor, no
 // `?`, and no alias, an UnmarshalYAML method of the key type then takes
 // the same text or node as in the decode. The decode hands such a method
@@ -1505,7 +1505,7 @@ func (w *selfWalker) valueNode(node ast.Node, parsed bool) ast.Node {
 		default:
 			view := func(n ast.Node) ast.Node { return n }
 			if parsed {
-				view = w.node.doc.decodeTree().parsedView
+				view = w.node.doc.tree().Parsed
 			}
 
 			node = view(node)

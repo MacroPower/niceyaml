@@ -405,7 +405,7 @@ func (f *unknownFieldFinder) readsAsStruct(mapping *ast.MappingNode) bool {
 // To ask the decoder, mergeRefused decodes a mapping that holds the
 // merge keys alone into a struct with no field. A decoder that rejects
 // unknown fields rejects a key of a source there, which is no refusal of
-// the merge. A merge key the [decodeTree] holds no entry for counts as
+// the merge. A merge key the [decodetree.Tree] holds no entry for counts as
 // refused.
 func (f *unknownFieldFinder) mergeRefused(mapping *ast.MappingNode) bool {
 	var merges []*ast.MappingValueNode
@@ -493,7 +493,7 @@ func readsAsString(resolver *paths.Resolver, key ast.Node) bool {
 // confirm asks the decoder whether the key of entry is an unknown field
 // of the struct type t, and adds the rejection it returns to the fields
 // the walk found. The decode reads a mapping that holds entry alone into
-// a new value of that type, as the [decodeTree] of the document reads the
+// a new value of that type, as the [decodetree.Tree] of the document reads the
 // entry. The decoder reads no value under a key it rejects, so the value
 // of the entry does not decide the result.
 //
@@ -549,10 +549,10 @@ func (f *unknownFieldFinder) confirm(t reflect.Type, entry *ast.MappingValueNode
 	}
 }
 
-// view returns entry as the [decodeTree] of the document reads it, or
+// view returns entry as the [decodetree.Tree] of the document reads it, or
 // nil when the tree holds no entry in its place.
 func (f *unknownFieldFinder) view(entry *ast.MappingValueNode) *ast.MappingValueNode {
-	view, ok := f.node.doc.decodeTree().view(entry).(*ast.MappingValueNode)
+	view, ok := f.node.doc.tree().View(entry).(*ast.MappingValueNode)
 	if !ok {
 		return nil
 	}

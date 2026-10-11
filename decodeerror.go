@@ -147,7 +147,7 @@ func (n *Node) locateDecodeError(
 
 	cause := l.refusal
 	if cause == nil {
-		cause = asDecodeError(n.doc.decodeTree().restoreError(err))
+		cause = asDecodeError(n.doc.restoreError(err))
 	}
 
 	return Rebase(cause, found.path())
@@ -605,7 +605,7 @@ func (l *errorLocator) reproduces(node ast.Node, v any) bool {
 	}
 
 	n := l.node
-	view := n.doc.decodeTree().view(node)
+	view := n.doc.tree().View(node)
 
 	if node != n.doc.root.Body {
 		err := n.primeAnchors(l.ctx, l.decoder, view)

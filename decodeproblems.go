@@ -13,6 +13,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
+	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -198,7 +199,7 @@ func (n *Node) mergedPosition(rejection error) (position.Position, bool) {
 func (n *Node) decodeRejection(err error) error {
 	yamlErr, ok := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 	if !ok || !n.holdsToken(yamlErr.GetToken()) {
-		return asDecodeError(n.doc.decodeTree().restoreError(err))
+		return asDecodeError(n.doc.restoreError(err))
 	}
 
 	return n.tokenRejection(yamlErr)
@@ -206,12 +207,12 @@ func (n *Node) decodeRejection(err error) error {
 
 // tokenRejection returns err, a rejection the decoder reported at a token
 // of the source, as an [*Error] that matches [ErrDecode]. The Error reads
-// as [decodeTree.rejectionText] writes err, with each anchor named as the
+// as [document.rejectionText] writes err, with each anchor named as the
 // document names it, matches the label rejectionText gives err, and
 // carries the location [Node.rejectionLocation] gives the token. The path
 // in that location starts at `$`.
 func (n *Node) tokenRejection(err yaml.Error) error {
-	msg, label := n.doc.decodeTree().rejectionText(err)
+	msg, label := n.doc.rejectionText(err)
 	rejected := decodeError{err: yamlMessageError{err: err, msg: msg}, label: label}
 
 	return Invalid(rejected, n.rejectionLocation(err.GetToken())...)
@@ -311,7 +312,7 @@ type problemCollector struct {
 	ctx      context.Context
 	node     *Node
 	resolver *paths.Resolver
-	tree     *decodeTree
+	tree     *decodetree.Tree
 	decoder  *yaml.Decoder
 	finder   *unknownFieldFinder
 	// The problems found, by the position that marks each.
@@ -359,7 +360,7 @@ func newProblemCollector(ctx context.Context, n *Node, cfg decodeConfig) *proble
 		ctx:      ctx,
 		node:     n,
 		resolver: n.doc.pathResolver(),
-		tree:     n.doc.decodeTree(),
+		tree:     n.doc.tree(),
 		decoder:  dec,
 		finder:   newUnknownFieldFinder(ctx, n, dec, cfg.unmarshalers),
 		cfg:      cfg,
@@ -407,7 +408,7 @@ func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 // that reads one of them through an alias adds no problem, since its
 // decode fails for the alias.
 func (c *problemCollector) register(node ast.Node) {
-	view := c.tree.view(node)
+	view := c.tree.View(node)
 
 	if node != c.node.doc.root.Body && c.node.primeAnchors(c.ctx, c.decoder, view) != nil {
 		return
@@ -676,7 +677,7 @@ func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, from astnod
 	// to an UnmarshalText method, and returns the error of that parse as
 	// it is.
 	case astnode.IsScalar(content) && (t == unmarshaler.DurationType || c.cfg.unmarshalers.FromText(t)):
-		cause = asDecodeError(c.tree.restoreError(err))
+		cause = asDecodeError(c.node.doc.restoreError(err))
 
 	default:
 		return
@@ -710,9 +711,9 @@ func builtRejection(err error) (yaml.Error, bool) {
 }
 
 // decode decodes node, a node of the document, into v with the decoder
-// of the pass, as the [decodeTree] of the document reads the node.
+// of the pass, as the [decodetree.Tree] of the document reads the node.
 func (c *problemCollector) decode(node ast.Node, v any) error {
-	return decodeWithRecover(c.ctx, c.decoder, c.tree.view(node), v)
+	return decodeWithRecover(c.ctx, c.decoder, c.tree.View(node), v)
 }
 
 // confirmed reports whether the value that reads a leaf rejects it as
@@ -721,7 +722,7 @@ func (c *problemCollector) decode(node ast.Node, v any) error {
 //
 // A struct reads the leaf from a mapping that holds the entry of its
 // field alone, into a new value of the type of that struct, as the
-// [decodeTree] of the document reads the entry. The decoder thus applies
+// [decodetree.Tree] of the document reads the entry. The decoder thus applies
 // what the walk cannot see, such as a [yaml.RegisterCustomUnmarshaler]
 // function for the struct. A struct that holds an inline field that
 // decodes itself confirms nothing, since any decode of it calls that
@@ -756,7 +757,7 @@ func (c *problemCollector) confirmed(err error, t reflect.Type, held ast.Node, i
 
 	case in.element:
 		elements := ast.Sequence(held.GetToken(), false)
-		elements.Values = append(elements.Values, c.tree.view(held))
+		elements.Values = append(elements.Values, c.tree.View(held))
 
 		node, target = elements, reflect.New(reflect.SliceOf(t))
 

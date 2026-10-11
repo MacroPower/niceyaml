@@ -19,6 +19,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/bom"
+	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
@@ -1560,7 +1561,7 @@ func (e syntaxError) Is(target error) bool {
 // reparse parses the tokens of the Source a second time and writes the
 // nulls of the enclosed aliases into the copies the parser read. Nothing
 // but the decoder reads its tree, so a document changes its own part of
-// that tree as [decodeTree] describes, and the tree [Source.File] returns
+// that tree as [decodetree.Tree] describes, and the tree [Source.File] returns
 // stays as the parser built it. The parse holds its own copies of the
 // tokens, so the go-yaml formatter, which reads the text of each token
 // through the links between them, finds a renamed anchor or a verbatim
@@ -1568,7 +1569,7 @@ func (e syntaxError) Is(target error) bool {
 // of every document, so reparse writes the nulls of all the documents
 // into the tokens before it returns the parse to any of them. The copy of
 // the token of each alias sits at the index of the token the first parse
-// read for it, so the null goes there, as [writeNull] writes it. A run
+// read for it, so the null goes there, as [decodetree.WriteNull] writes it. A run
 // the first parse rejected fails the second parse too, so the file holds
 // a stand-in at each index where the first file holds one, and the
 // documents that parsed sit at the same indexes in both.
@@ -1580,7 +1581,7 @@ func (s *Source) reparse() *docparse.Result {
 	for _, doc := range s.documents() {
 		for alias := range doc.doc.state.Facts().Enclosed {
 			if i, ok := first[alias.Start]; ok {
-				writeNull(r.Tokens[i])
+				decodetree.WriteNull(r.Tokens[i])
 			}
 		}
 	}
