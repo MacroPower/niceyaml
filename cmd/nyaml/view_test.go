@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/escape"
 )
 
 func TestLoadSources(t *testing.T) {

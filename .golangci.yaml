@@ -225,10 +225,15 @@ linters:
         # their non-test code builds on the public API of niceyaml alone. Go
         # allows the import because their module paths sit under the
         # library's. Their tests may still import internal/yamltest.
-        adapters:
+        public-api:
           files:
             - "**/bubbles/**"
             - "**/fangs/**"
+            # cmd/nyaml is the application example a caller reads, so an
+            # application written the same way outside this module has to
+            # compile. Its glob.go imports internal/filepaths under a nolint
+            # directive, with the reason in a comment at the import.
+            - "**/cmd/nyaml/**"
             - "!$test"
           deny:
             - pkg: "go.jacobcolvin.com/niceyaml/internal"

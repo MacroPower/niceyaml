@@ -20,7 +20,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -736,8 +736,12 @@ func TestValidateCmdErrorNames(t *testing.T) {
 	// Every error names a matched file with its control characters
 	// escaped. The error handler keeps each line break in a message as a
 	// row break, so a raw newline in this name would start a row that
-	// reads as a branch for a file named "other.yaml".
-	const file = "evil\n└── other.yaml"
+	// reads as a branch for a file named "other.yaml". The tab reads as
+	// its picture in every error, as it does in a result line. The
+	// library draws a tab in the name of a source as four spaces, so the
+	// error of an invalid document keeps the picture only while
+	// validateFile escapes the name it gives the source.
+	const file = "evil\t\n└── other.yaml"
 
 	tcs := map[string]struct {
 		err error

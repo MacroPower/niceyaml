@@ -10,7 +10,13 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 
-	"go.jacobcolvin.com/niceyaml/internal/filepaths"
+	// The rest of nyaml builds on the public API of niceyaml, so an
+	// application outside this module compiles when written the same way.
+	// This import is the exception. ExpandBraces expands the braces of a
+	// pattern and stops at a limit on that work, and a copy here would
+	// repeat its code and its tests. An application outside this module
+	// brings its own brace expansion.
+	"go.jacobcolvin.com/niceyaml/internal/filepaths" //nolint:depguard // The comment above gives the reason.
 )
 
 var (

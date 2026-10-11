@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/schemastore"
 )
@@ -133,13 +133,12 @@ func validateCmd() *cobra.Command {
 //
 // Each error it returns is bound to the source, and the source takes
 // yamlPath as the user typed it for its name, with its control characters
-// escaped. Each message then opens with "path:line:col:" when the error
-// has a position in the file, and the error handler in main renders the
-// excerpt with the terminal width. A document with no tokens, such as an
-// empty or comment-only file, has no position, so its messages open with
-// "path:" alone. The error handler keeps each line break in a message as
-// a row break, so a glob match whose name holds a newline would otherwise
-// split its message into rows that look like other branches of the tree.
+// escaped as the result line of the command escapes them. Each message
+// then opens with "path:line:col:" when the error has a position in the
+// file, and the error handler in main renders the excerpt with the
+// terminal width. A document with no tokens, such as an empty or
+// comment-only file, has no position, so its messages open with "path:"
+// alone.
 //
 // The file path of the source is the [physicalAbs] form of yamlPath.
 // SchemaStore patterns that name parent directories, such as
@@ -153,6 +152,12 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 	// Resolvers route on the absolute path, and WithName keeps messages
 	// naming the file as the user typed it. The read uses the typed path,
 	// so a read error names the file that way too.
+	//
+	// The library draws the control characters of a name in every
+	// message, so the escape here changes how one of them reads, the tab.
+	// The library draws a tab in a name as four spaces, and the result
+	// line and a read error draw it as "␉". With the name escaped here,
+	// every line of a run spells the file one way.
 	opts := []niceyaml.SourceOption{
 		niceyaml.WithName(escape.Control(yamlPath)),
 		niceyaml.WithFilePath(absPath),
