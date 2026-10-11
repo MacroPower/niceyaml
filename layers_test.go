@@ -155,6 +155,45 @@ func ExampleNewSourceFromLayers_environment() {
 	//      |         ^
 }
 
+func ExampleNewSourceFromLayers_name() {
+	ctx := context.Background()
+
+	// The program embeds its defaults, and the user edits config.yaml.
+	defaults := niceyaml.NewSourceFromString(`server:
+  host: localhost
+  port: 8080
+`, niceyaml.WithName("defaults.yaml"))
+
+	user := niceyaml.NewSourceFromString(`server:
+  port: 99999
+log:
+  level: loud
+`, niceyaml.WithName("config.yaml"))
+
+	limits := schema.MustCompile([]byte(`{
+		"properties": {
+			"server": {"properties": {"port": {"maximum": 65535}}},
+			"log": {"properties": {"level": {"enum": ["debug", "info"]}}}
+		}
+	}`))
+
+	// The merged Source takes its name from the lowest layer, so an empty
+	// Source below the defaults names it and changes no value.
+	app := niceyaml.NewSourceFromString("", niceyaml.WithName("app config"))
+
+	merged, err := niceyaml.NewSourceFromLayers(ctx, app, defaults, user)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(merged.ValidateDocuments(ctx, limits))
+
+	// Output:
+	// app config: 2 schema violations
+	// config.yaml:2:9: $.server.port: 99999 is greater than 65535
+	// config.yaml:4:10: $.log.level: value does not match any enum member
+}
+
 func ExampleNode_Origin() {
 	base := niceyaml.NewSourceFromString(`name: shop
 license: LICENSE
@@ -1359,6 +1398,53 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 				"  port: 0",
 			),
 			seen.Source().View().Held().Content())
+	})
+
+	t.Run("an empty Source with a name below the files names the merged document", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := fstest.MapFS{}
+		base := yamltest.FirstDocument(t, baseInput,
+			niceyaml.WithName("base.yaml"), niceyaml.WithFilePath("conf/base.yaml"), niceyaml.WithFS(fsys))
+		prod := yamltest.FirstDocument(t, layerProdHost, niceyaml.WithName("prod.yaml"))
+
+		app := niceyaml.NewSourceFromString("", niceyaml.WithName("app config"))
+		layers := yamltest.Layers(t, app, base, prod)
+		doc := yamltest.Document(t, layers)
+
+		assert.Equal(t, "app config", doc.Source().Name())
+		assert.Empty(t, doc.FilePath())
+		assert.Nil(t, doc.FS())
+
+		// The empty Source changes no value, and its empty preamble stands
+		// in for the preamble of base.yaml, which holds the directive.
+		assert.Nil(t, schema.ParseDocumentDirective(doc.Preamble()))
+		assert.Equal(t,
+			stringtest.LinesLF("name: shop", "server:", "  host: prod.example.com", "  port: 0"),
+			mergedText(t, layers),
+		)
+
+		// The heading reports the empty Source, and each violation the
+		// file that holds its value.
+		err := layers.ValidateDocuments(t.Context(), requires)
+		require.EqualError(t, err, stringtest.JoinLF(
+			"app config: 2 schema violations",
+			"base.yaml:5:9: $.server.port: 0 is less than 1",
+			`prod.yaml:1:1: $.server.tls: missing required property "tls"`,
+		))
+		assert.Same(t, app, yamltest.RequireSourceError(t, err).Source())
+
+		err = layers.Bind(errors.New("quota service: connection refused"))
+		require.EqualError(t, err, "app config: quota service: connection refused")
+
+		// A file path and a file system of the empty Source are those of
+		// the merged document.
+		placed := niceyaml.NewSourceFromString("",
+			niceyaml.WithName("app config"), niceyaml.WithFilePath("etc/app.yaml"), niceyaml.WithFS(fsys))
+		doc = yamltest.Document(t, yamltest.Layers(t, placed, base, prod))
+
+		assert.Equal(t, "etc/app.yaml", doc.FilePath())
+		assert.Equal(t, fsys, doc.FS())
 	})
 
 	t.Run("an error with a position in the merged text binds at the value there", func(t *testing.T) {

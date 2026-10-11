@@ -315,6 +315,38 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 // others, and a higher layer then removes one of them as it removes any
 // value.
 //
+// # Name
+//
+// The merged Source takes its name, its file path, its file system, and
+// its preamble from the lowest layer. A program whose lowest layer is a
+// file of embedded defaults thus reports under the name of that file, as
+// in "defaults.yaml: 2 schema violations". An empty Source with a name
+// goes in below the defaults and names the merged Source, and it changes
+// no value:
+//
+//	app := niceyaml.NewSourceFromString("", niceyaml.WithName("app config"))
+//
+//	merged, err := niceyaml.NewSourceFromLayers(ctx, app, defaults, user)
+//	if err != nil {
+//		return err
+//	}
+//
+// The heading then reads "app config: 2 schema violations", and each
+// violation under it still binds in the file that holds its value.
+//
+// The empty Source has two costs. [SourceError.Source] of the heading
+// returns the empty Source, as it does for every error with no location.
+// The empty preamble of that Source also stands in for the preamble of
+// defaults.yaml, so a `$schema` directive in the comments of
+// defaults.yaml no longer names the schema of the merged document.
+//
+// The merged Source then has no file path and no file system, unless
+// [WithFilePath] and [WithFS] give them to the empty Source. A relative
+// schema reference resolves beside the file path of the merged document,
+// in its file system, so the two options also move where such a
+// reference resolves. A program sets them only where the merged document
+// should read as a file at that path.
+//
 // # Override Limits
 //
 // A layer the program builds from its environment or its flags merges
