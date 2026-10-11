@@ -5970,3 +5970,243 @@ func TestWithAliasLimit(t *testing.T) {
 		assert.False(t, niceyaml.IsInvalid(err))
 	})
 }
+
+func TestSource_Documents(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString(stringtest.Input(`
+		---
+		a: 1
+		---
+		b: 2
+	`), niceyaml.WithFilePath("two.yaml"))
+
+	docs := source.Documents()
+	require.Len(t, docs, 2)
+
+	second := docs[1]
+	assert.Equal(t, 1, second.DocumentIndex())
+	assert.Equal(t, "two.yaml", second.FilePath())
+	assert.Same(t, source, second.Source())
+	assert.NotNil(t, second.Tokens())
+
+	// Every call hands out the same root Node for an index, in a slice of
+	// its own.
+	again := source.Documents()
+	assert.Same(t, second, again[1])
+
+	again[1] = nil
+
+	third := source.Documents()
+	assert.Same(t, second, third[1])
+}
+
+func TestSource_Document(t *testing.T) {
+	t.Parallel()
+
+	t.Run("rejects several documents", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			want  string
+		}{
+			"at the second header": {
+				input: stringtest.JoinLF("a: 1", "---", "b: 2"),
+				want:  "2:1: multiple documents in source: 2 documents",
+			},
+			// A "..." marker ends the first document, so the second has no
+			// header, and the error points at its first token instead.
+			"at a second document without a header": {
+				input: stringtest.JoinLF("a: 1", "...", "b: 2"),
+				want:  "3:1: multiple documents in source: 2 documents",
+			},
+			// The empty document between the two does not count, and the
+			// error points at the header of the second document with content.
+			"past an empty one between them": {
+				input: stringtest.JoinLF("a: 1", "---", "---", "b: 2"),
+				want:  "3:1: multiple documents in source: 2 documents",
+			},
+			// The comments after a "..." marker fold into the document below
+			// them as its preamble, and the error points past them at the
+			// first token of its content.
+			"past the comments above the second": {
+				input: stringtest.JoinLF("a: 1", "...", "# tail", "b: 2"),
+				want:  "4:1: multiple documents in source: 2 documents",
+			},
+			"below a comment block": {
+				input: stringtest.JoinLF(
+					"# Copyright notice.",
+					"---",
+					"a: 1",
+					"---",
+					"b: 2",
+				),
+				want: "4:1: multiple documents in source: 2 documents",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(tc.input)
+
+				_, err := source.Document()
+				require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
+				require.EqualError(t, err, tc.want)
+				assert.Same(t, source, yamltest.RequireSourceError(t, err).Source())
+			})
+		}
+	})
+
+	t.Run("returns the one document Documents lists", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			// The index in the file of the document Document returns, and
+			// the value it decodes to.
+			index int
+			want  map[string]int
+		}{
+			"single document": {
+				input: "a: 1",
+				want:  map[string]int{"a": 1},
+			},
+			"trailing header": {
+				input: "b: 2\n---\n",
+				want:  map[string]int{"b": 2},
+			},
+			"comment below a trailing header": {
+				input: stringtest.LinesLF("b: 2", "---", "# Source: t.yaml"),
+				want:  map[string]int{"b": 2},
+			},
+			// The first header holds an empty document, so the second
+			// header starts another one.
+			"header that follows another": {
+				input: stringtest.LinesLF("---", "---", "b: 2"),
+				index: 1,
+				want:  map[string]int{"b": 2},
+			},
+			"empty documents on both sides": {
+				input: stringtest.LinesLF(
+					"--- # head",
+					"---",
+					"b: 2",
+					"---",
+					"---",
+				),
+				index: 1,
+				want:  map[string]int{"b": 2},
+			},
+			"comment block above the first header": {
+				input: stringtest.JoinLF("# Copyright notice.", "---", "a: 1"),
+				want:  map[string]int{"a": 1},
+			},
+			"directive above the first header": {
+				input: stringtest.JoinLF("%YAML 1.2", "---", "a: 1"),
+				want:  map[string]int{"a": 1},
+			},
+			// A file of empty documents alone reads as an empty file does.
+			"empty file":                         {input: ""},
+			"several empty documents":            {input: stringtest.JoinLF("---", "# a", "---", "# b")},
+			"comments on both sides of a header": {input: stringtest.JoinLF("# a", "---", "# b")},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(tc.input)
+
+				doc := yamltest.Document(t, source)
+				assert.Equal(t, tc.index, doc.DocumentIndex())
+				assert.Same(t, source.AllDocuments()[tc.index], doc)
+				assert.Equal(t, tc.want == nil, doc.IsEmpty())
+
+				docs := source.Documents()
+				require.Len(t, docs, 1)
+				assert.Same(t, docs[0], doc)
+
+				got, err := source.Decode[map[string]int](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
+	t.Run("returns the empty document of a stream of markers alone", func(t *testing.T) {
+		t.Parallel()
+
+		// The parser finds no document in a stream of "..." markers alone,
+		// and the Source gives it one empty document, as it gives an
+		// empty file. The markers and any comment on their lines are the
+		// preamble of that document.
+		tcs := map[string]struct {
+			input string
+			lines int
+		}{
+			"lone marker": {
+				input: "...\n",
+				lines: 1,
+			},
+			"marker without a line break": {
+				input: "...",
+				lines: 1,
+			},
+			"marker with comment": {
+				input: "... # license\n",
+				lines: 1,
+			},
+			"two markers": {
+				input: "...\n...\n",
+				lines: 2,
+			},
+			"blank lines above a marker": {
+				input: "\n\n...\n",
+				lines: 3,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(tc.input)
+
+				docs := source.Documents()
+				require.Len(t, docs, 1)
+
+				doc := yamltest.Document(t, source)
+				assert.Same(t, docs[0], doc)
+
+				file, err := source.File()
+				require.NoError(t, err)
+				require.Len(t, file.Docs, 1)
+				assert.Same(t, file.Docs[0], doc.DocumentAST())
+
+				assert.Nil(t, doc.AST())
+				assert.Equal(t, source.Tokens(), doc.Tokens())
+				assert.Equal(t, doc.Tokens(), doc.Preamble())
+				assert.Equal(t, position.NewSpan(0, tc.lines), doc.Span())
+
+				got, err := source.Decode[map[string]int](t.Context())
+				require.NoError(t, err)
+				assert.Nil(t, got)
+			})
+		}
+	})
+
+	t.Run("returns the parse error", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: [")
+
+		_, err := source.Document()
+		require.Error(t, err)
+
+		_, fileErr := source.File()
+		assert.Equal(t, fileErr, err)
+	})
+}

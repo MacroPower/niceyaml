@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"runtime/debug"
 	"slices"
-	"sync"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -19,92 +18,11 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
-	"go.jacobcolvin.com/niceyaml/internal/docparse"
-	"go.jacobcolvin.com/niceyaml/internal/pathindex"
 	"go.jacobcolvin.com/niceyaml/internal/rejection"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
-
-// newDocuments creates the root [*Node] of each of docs, the YAML
-// documents of the file src parsed, in file order. A document that did not
-// parse gets a Node too, which carries the error in errs of its run, and
-// [bindSyntaxErrors] binds that error to its document.
-func newDocuments(src *Source, docs []docparse.Document, errs []error) []*Node {
-	nodes := make([]*Node, len(docs))
-
-	for i, parsed := range docs {
-		doc := &document{
-			root:       parsed.Root,
-			tokens:     parsed.Tokens,
-			positioned: parsed.Positioned,
-			index:      i,
-			fileIndex:  parsed.FileIndex,
-			preamble:   parsed.Preamble,
-		}
-
-		if parsed.Failure >= 0 {
-			doc.err = errs[parsed.Failure]
-		}
-
-		doc.node = &Node{source: src, doc: doc, content: doc.tokens, base: paths.Doc(), span: parsed.Span}
-		doc.tree = sync.OnceValue(doc.newDecodeTree)
-		doc.pathIndex = sync.OnceValue(func() *pathindex.Index { return pathindex.New(doc.root.Body) })
-		doc.state = aliasing.NewState(!src.skipAliasLimit, func() (ast.Node, *paths.Resolver) {
-			return doc.root.Body, doc.pathResolver()
-		})
-		nodes[i] = doc.node
-	}
-
-	bindSyntaxErrors(nodes)
-
-	return nodes
-}
-
-// bindSyntaxErrors binds the syntax error of each of docs that did not
-// parse to the root of the document it belongs to. The parser reports an
-// error before any document exists, so the error arrives bound to the
-// source alone. The documents of one run follow one another and share its
-// error, so the error belongs to the one of them whose span holds its
-// line. An error that resolved no location belongs to the first of them.
-// The error stays one binding with one document, whichever of the
-// documents returns it.
-func bindSyntaxErrors(docs []*Node) {
-	for i, doc := range docs {
-		if doc.doc.err == nil {
-			continue
-		}
-
-		for bound := range allBindings(doc.doc.err) {
-			// An earlier document of the run bound the error already.
-			if bound.node != nil {
-				continue
-			}
-
-			bound.node = doc
-
-			if bound.locErr != nil {
-				continue
-			}
-
-			// The parse hands every document of a run the one binding of
-			// its error, so the documents that follow with that error are
-			// the rest of the run.
-			for _, other := range docs[i:] {
-				if !errors.Is(other.doc.err, doc.doc.err) {
-					break
-				}
-
-				if other.span.Contains(bound.loc.pos.Line) {
-					bound.node = other
-
-					break
-				}
-			}
-		}
-	}
-}
 
 // DecodeOption configures [Node.Decode], [Node.DecodeInto],
 // [Node.DecodeAt], and [Node.DecodeIfPresent]. [Source.Decode] and
