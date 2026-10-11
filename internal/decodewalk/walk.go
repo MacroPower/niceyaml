@@ -1,0 +1,701 @@
+package decodewalk
+
+import (
+	"context"
+	"reflect"
+	"slices"
+
+	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
+
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/datapath"
+	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
+	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
+	"go.jacobcolvin.com/niceyaml/paths"
+)
+
+// Rules holds what a walk knows of the decode it follows.
+type Rules struct {
+	// Resolver binds the aliases of the document the decode reads.
+	Resolver *paths.Resolver
+	// View returns a node of the document as the decoder reads it.
+	View func(node ast.Node) ast.Node
+	// Decode decodes node into v as the decode does, with its options and
+	// its anchors. The node is one View returned, or one a walk built from
+	// such nodes.
+	Decode func(node ast.Node, v any) error
+	// Unmarshalers names the types the options of the decode give an
+	// unmarshaler.
+	Unmarshalers unmarshaler.Options
+}
+
+// Kind names what holds a [Value].
+type Kind uint8
+
+const (
+	// Root is the value the walk starts at.
+	Root Kind = iota
+	// Field is a field of a struct, which reads the entry of its name.
+	Field
+	// Inline is a field a struct holds inline, which reads the mapping of
+	// the struct. Its path is the path of the struct.
+	Inline
+	// Element is an element of a slice or an array.
+	Element
+	// Key is the key of a map entry, which the walk reaches before the
+	// value of the entry. The walk reads nothing below a key.
+	Key
+	// Member is the value of a map entry.
+	Member
+)
+
+// Reads names what the decoder reads below a [Value].
+type Reads uint8
+
+const (
+	// Whole is a value the decoder reads in one piece: a scalar, or a
+	// node of a kind the type does not take apart, such as a sequence
+	// where a struct takes a mapping.
+	Whole Reads = iota
+	// Nothing is an interface or a [yaml.MapSlice], which take any value
+	// the decoder holds no type for.
+	Nothing
+	// Fields is a struct that reads a mapping.
+	Fields
+	// Members is a map that reads a mapping.
+	Members
+	// Elements is a slice or an array that reads a sequence.
+	Elements
+)
+
+// Action tells a walk where to go after a [Value].
+type Action uint8
+
+const (
+	// Descend has the walk read the values below the value.
+	Descend Action = iota
+	// Skip has the walk go on past the value and the values below it.
+	Skip
+	// Stop ends the walk.
+	Stop
+)
+
+// Value is a value of the type a walk reads, beside the node the decoder
+// reads it from.
+type Value struct {
+	// The value that holds this one, or nil for the root.
+	Parent *Value
+	// The type of the value, with pointers removed.
+	Type reflect.Type
+	// The node the document holds for the value, which may be an alias.
+	// For a key, it is the key of the entry.
+	Held ast.Node
+	// The node the decoder reads the value from, as [datapath.Read]
+	// returns it for Held. For a key, it is the key of the entry. An
+	// inline field reads the node of the struct that holds it.
+	Node ast.Node
+	// The struct whose mapping holds Entry, for a field or for a member or
+	// key of an inline map. For a field of an inline struct, it is the
+	// struct the decoder decodes the mapping into, which holds the inline
+	// one. An inline field names that struct too.
+	Struct reflect.Type
+	// The entry the value comes from, for a field, a key, or a member.
+	Entry *ast.MappingValueNode
+	// The field or the key, for a field, a key, or a member.
+	Name string
+	// What holds Held in the document.
+	From astnode.Parent
+	// What holds the value.
+	Kind Kind
+	// What the decoder reads below the value.
+	Reads Reads
+	// Named is false for a key, and the member that follows it, that has
+	// no name a path can spell, as [paths.Resolver.KeyName] reports.
+	Named bool
+	// The struct reads the entries that `<<` merge keys bring in, for a
+	// struct and an inline field the walk has gone below.
+	merges bool
+}
+
+// Path returns the path of v under the value the walk starts at, as an
+// `@` path. An inline field adds no selector.
+func (v *Value) Path() paths.Path {
+	var selectors []paths.Path
+
+	for at := v; at != nil; at = at.Parent {
+		switch at.Kind {
+		case Field, Member:
+			selectors = append(selectors, paths.Current().Child(at.Name))
+		case Element:
+			selectors = append(selectors, paths.Current().Index(at.From.Index))
+		case Key:
+			selectors = append(selectors, paths.Current().Key(), paths.Current().Child(at.Name))
+		case Root, Inline:
+			// The value takes the path of the one that holds it.
+		}
+	}
+
+	slices.Reverse(selectors)
+
+	return paths.Current().Join(selectors...)
+}
+
+// Walk reads node as a value of type t, where from names what holds node
+// in the document, and calls visit for each value the decoder reads, in
+// the order it reads them. The [Action] visit returns tells the walk
+// whether to go below the value.
+//
+// A struct reads its fields in the order it declares them, and an inline
+// field where it stands. A sequence reads its elements in order, and a
+// map reads the entries of its mapping in document order, with the
+// entries a `<<` merge key brings in where the key stands, each key
+// before its value. A field reads the entry the decoder reads for its
+// name. That is the entry a path through the name selects, unless the
+// decoder gathers nothing of the source that entry comes from, or the
+// struct ignores merges, as [yamlfield.IgnoresMerges] reports.
+//
+// The walk reaches no value the decoder reads nothing for: a null, an
+// alias to one, an alias that does not resolve, or a field that
+// [yamlfield.ReadsAnchor] reports. It reads no field of a struct from a
+// mapping that holds a key the decoder does not read as a string, or a
+// merge key it refuses. Of the fields a struct holds inline, it reaches a
+// struct and a type that decodes itself as an [Inline] value, and the
+// members an inline map reads, one for each key the decoder reads.
+//
+// The walk goes below a struct, a map, or a sequence once for each type
+// it reads the node as, so it reads a node that several aliases reach
+// once, and ends at a node that holds itself. It ends too once ctx ends.
+func Walk(
+	ctx context.Context, r Rules, t reflect.Type, node ast.Node, from astnode.Parent, visit func(*Value) Action,
+) {
+	newWalker(ctx, r, visit).root(t, node, from)
+}
+
+// walker holds the state of one walk.
+type walker struct {
+	ctx context.Context
+	// Called for each struct whose fields the walk reads, before it reads
+	// them, with the mapping the struct reads. It may be nil.
+	onFields func(v *Value, mapping *ast.MappingNode)
+	visit    func(*Value) Action
+	// The structs, maps, and sequences the walk has gone below.
+	seen map[seenKey]bool
+	// The entries [walker.dropped] found for each mapping it has read.
+	dropped map[*ast.MappingNode]map[*ast.MappingValueNode]bool
+	rules   Rules
+}
+
+// seenKey names a node the walk has gone below, by the type it read the
+// node as. The fields together form the key of the set the [walker]
+// keeps.
+//
+//nolint:unused // The fields tell the keys of the set apart.
+type seenKey struct {
+	typ  reflect.Type
+	node ast.Node
+}
+
+// newWalker creates a new [*walker].
+func newWalker(ctx context.Context, r Rules, visit func(*Value) Action) *walker {
+	return &walker{
+		ctx:     ctx,
+		visit:   visit,
+		seen:    map[seenKey]bool{},
+		dropped: map[*ast.MappingNode]map[*ast.MappingValueNode]bool{},
+		rules:   r,
+	}
+}
+
+// root walks node as a value of type t, where from holds node.
+func (w *walker) root(t reflect.Type, node ast.Node, from astnode.Parent) {
+	w.value(&Value{Kind: Root, Type: t, Held: node, From: from, Named: true})
+}
+
+// value walks v, whose Held the caller set, unless the decoder reads
+// nothing from it. It reports false once the walk ends.
+func (w *walker) value(v *Value) bool {
+	node, ok := datapath.Read(w.rules.Resolver, v.Held)
+	if !ok {
+		return true
+	}
+
+	v.Node = node
+	v.Type = unmarshaler.Base(v.Type)
+
+	return w.yield(v)
+}
+
+// yield visits v, and walks the values below it when the visit asks for
+// that. It reports false once the walk ends.
+func (w *walker) yield(v *Value) bool {
+	if w.ctx.Err() != nil {
+		return false
+	}
+
+	v.Reads = w.reads(v)
+
+	switch w.visit(v) {
+	case Stop:
+		return false
+	case Skip:
+		return true
+	default:
+		return w.below(v)
+	}
+}
+
+// reads returns what the decoder reads below v.
+func (w *walker) reads(v *Value) Reads {
+	t := v.Type
+
+	switch {
+	case v.Kind == Key:
+		return Whole
+	case t.Kind() == reflect.Interface || t == unmarshaler.MapSliceType:
+		return Nothing
+	}
+
+	switch datapath.Deref(w.rules.Resolver, v.Node).(type) {
+	case *ast.MappingNode:
+		switch t.Kind() {
+		case reflect.Struct:
+			return Fields
+		case reflect.Map:
+			return Members
+		default:
+			return Whole
+		}
+
+	case *ast.SequenceNode:
+		if t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
+			return Elements
+		}
+	}
+
+	return Whole
+}
+
+// below walks the values below v. It reports false once the walk ends.
+func (w *walker) below(v *Value) bool {
+	content := datapath.Deref(w.rules.Resolver, v.Node)
+
+	if v.Kind != Inline && v.Reads != Whole && v.Reads != Nothing {
+		key := seenKey{typ: v.Type, node: content}
+		if w.seen[key] {
+			return true
+		}
+
+		w.seen[key] = true
+	}
+
+	switch v.Reads {
+	case Fields:
+		mapping, _ := content.(*ast.MappingNode) //nolint:errcheck // Fields reads a mapping.
+
+		return w.fields(v, mapping)
+
+	case Members:
+		mapping, _ := content.(*ast.MappingNode) //nolint:errcheck // Members reads a mapping.
+
+		for entry := range datapath.Members(w.rules.Resolver, mapping, true) {
+			name, named := w.rules.Resolver.KeyName(entry.Key)
+			if !w.entry(v, nil, v.Type, entry, name, named) {
+				return false
+			}
+		}
+
+	case Elements:
+		seq, _ := content.(*ast.SequenceNode) //nolint:errcheck // Elements reads a sequence.
+
+		for i, element := range seq.Values {
+			from := astnode.Parent{Sequence: seq, Index: i}
+			if !w.value(&Value{Parent: v, Kind: Element, Type: v.Type.Elem(), Held: element, From: from, Named: true}) {
+				return false
+			}
+		}
+
+	case Whole, Nothing:
+		// The decoder reads nothing below the value.
+	}
+
+	return true
+}
+
+// fields walks the fields of v, a struct that reads mapping. It reads no
+// field where the decoder decodes none, as [Walk] describes. An inline
+// struct reads the fields of its own type from the mapping of the struct
+// that holds it. It reports false once the walk ends.
+func (w *walker) fields(v *Value, mapping *ast.MappingNode) bool {
+	owner := v.Struct
+
+	if v.Kind != Inline {
+		owner = v.Type
+		v.merges = !yamlfield.IgnoresMerges(v.Type)
+
+		if !w.readsAsStruct(mapping) || v.merges && w.mergeRefused(mapping) {
+			return true
+		}
+
+		if w.onFields != nil {
+			w.onFields(v, mapping)
+		}
+	}
+
+	for field := range v.Type.Fields() {
+		name, inline, skip := yamlfield.Name(field)
+		if skip || yamlfield.ReadsAnchor(field) {
+			continue
+		}
+
+		var ok bool
+
+		if inline {
+			ok = w.inline(v, owner, unmarshaler.Base(field.Type), mapping)
+		} else {
+			ok = w.field(v, owner, field.Type, name, mapping)
+		}
+
+		if !ok {
+			return false
+		}
+	}
+
+	return true
+}
+
+// field walks the field name of type t, which a struct of type owner
+// reads from mapping, where parent is that struct or an inline field of
+// it. It reports false once the walk ends.
+func (w *walker) field(parent *Value, owner, t reflect.Type, name string, mapping *ast.MappingNode) bool {
+	entry := w.entryOf(mapping, name, parent.merges)
+	if entry == nil {
+		return true
+	}
+
+	return w.value(&Value{
+		Parent: parent,
+		Kind:   Field,
+		Type:   t,
+		Held:   entry.Value,
+		From:   astnode.Parent{Entry: entry},
+		Entry:  entry,
+		Struct: owner,
+		Name:   name,
+		Named:  true,
+	})
+}
+
+// inline walks a field of type t that a struct of type owner holds
+// inline, where parent is that struct or an inline field of it. A struct
+// and a type that decodes itself read mapping as an [Inline] value. A
+// map reads each entry the decoder reads for the struct, as a key and a
+// member. It reports false once the walk ends.
+func (w *walker) inline(parent *Value, owner, t reflect.Type, mapping *ast.MappingNode) bool {
+	switch {
+	case w.rules.Unmarshalers.ReportsOwnError(t) || t.Kind() == reflect.Struct:
+		if inlined(parent, t) {
+			return true
+		}
+
+		return w.yield(&Value{
+			Parent: parent,
+			Kind:   Inline,
+			Type:   t,
+			Held:   parent.Held,
+			Node:   parent.Node,
+			From:   parent.From,
+			Struct: owner,
+			Named:  true,
+			merges: parent.merges,
+		})
+
+	case t.Kind() == reflect.Map:
+		for entry := range datapath.Members(w.rules.Resolver, mapping, parent.merges) {
+			name, ok := w.rules.Resolver.KeyName(entry.Key)
+			if ok && w.entryOf(mapping, name, parent.merges) == entry && !w.entry(parent, owner, t, entry, name, true) {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// inlined reports whether an inline field of type t holds v, or v is
+// one, so a struct that holds itself inline ends the walk.
+func inlined(v *Value, t reflect.Type) bool {
+	for at := v; at != nil && at.Kind == Inline; at = at.Parent {
+		if at.Type == t {
+			return true
+		}
+	}
+
+	return false
+}
+
+// entry walks the key and then the value of entry, as a map of type t
+// reads them, where parent holds the map and owner is the struct that
+// holds it inline, if any. It reports false once the walk ends.
+func (w *walker) entry(
+	parent *Value,
+	owner, t reflect.Type,
+	entry *ast.MappingValueNode,
+	name string,
+	named bool,
+) bool {
+	key := &Value{
+		Parent: parent,
+		Kind:   Key,
+		Type:   unmarshaler.Base(t.Key()),
+		Held:   entry.Key,
+		Node:   entry.Key,
+		Entry:  entry,
+		Struct: owner,
+		Name:   name,
+		Named:  named,
+	}
+
+	if !w.yield(key) {
+		return false
+	}
+
+	return w.value(&Value{
+		Parent: parent,
+		Kind:   Member,
+		Type:   t.Elem(),
+		Held:   entry.Value,
+		From:   astnode.Parent{Entry: entry},
+		Entry:  entry,
+		Struct: owner,
+		Name:   name,
+		Named:  named,
+	})
+}
+
+// entryOf returns the entry of mapping that the decoder reads for the
+// key name when it decodes a struct, or nil when mapping holds none.
+// With merges set, that is the entry a path through name selects, which
+// a `<<` merge key may bring in. A path can select an entry the decoder
+// gathers nothing of, as [walker.droppedBy] finds them, and entryOf
+// returns nil for that one. Without merges, it is the last entry of
+// mapping itself with that name.
+func (w *walker) entryOf(mapping *ast.MappingNode, name string, merges bool) *ast.MappingValueNode {
+	if merges {
+		selected, err := w.rules.Resolver.Entry(mapping, name)
+		if err != nil {
+			return nil
+		}
+
+		entry, ok := selected.(*ast.MappingValueNode)
+		if !ok || w.droppedBy(mapping)[entry] {
+			return nil
+		}
+
+		return entry
+	}
+
+	for _, entry := range slices.Backward(mapping.Values) {
+		if entry == nil || entry.Key == nil || astnode.IsMergeKey(entry.Key) {
+			continue
+		}
+
+		if own, ok := w.rules.Resolver.KeyName(entry.Key); ok && own == name {
+			return entry
+		}
+	}
+
+	return nil
+}
+
+// droppedBy returns the entries the `<<` merge keys of mapping bring in
+// that the decoder gathers nothing of when it decodes a struct. The
+// decoder gathers the entries of each source before it reads a field. It
+// gathers none from a source that holds a key it does not read as a
+// string, as [walker.readsAsStruct] tells, and none from the sources that
+// one merges. It reports nothing then, and reads the struct from the
+// entries that remain. A path through such a source still selects its
+// entries, so [walker.entryOf] leaves them out.
+func (w *walker) droppedBy(mapping *ast.MappingNode) map[*ast.MappingValueNode]bool {
+	if entries, ok := w.dropped[mapping]; ok {
+		return entries
+	}
+
+	var entries map[*ast.MappingValueNode]bool
+
+	w.eachSource(mapping, map[*ast.MappingNode]bool{}, func(src *ast.MappingNode) bool {
+		if w.readsAsStruct(src) {
+			return true
+		}
+
+		if entries == nil {
+			entries = map[*ast.MappingValueNode]bool{}
+		}
+
+		for entry := range datapath.Members(w.rules.Resolver, src, true) {
+			entries[entry] = true
+		}
+
+		return false
+	})
+
+	w.dropped[mapping] = entries
+
+	return entries
+}
+
+// eachSource calls visit for each mapping the `<<` merge keys of mapping
+// bring in, in document order. Where visit reports true for a source, it
+// goes on to the mappings that source merges. The seen set holds the
+// mappings the walk has read, so a mapping that merges itself ends the
+// walk.
+func (w *walker) eachSource(
+	mapping *ast.MappingNode, seen map[*ast.MappingNode]bool, visit func(*ast.MappingNode) bool,
+) {
+	if seen[mapping] {
+		return
+	}
+
+	seen[mapping] = true
+
+	for _, entry := range mapping.Values {
+		if entry == nil || !astnode.IsMergeKey(entry.Key) {
+			continue
+		}
+
+		sources, err := datapath.MergeSources(w.rules.Resolver, entry)
+		if err != nil {
+			continue
+		}
+
+		for _, src := range sources {
+			if visit(src) {
+				w.eachSource(src, seen, visit)
+			}
+		}
+	}
+}
+
+// readsAsStruct reports whether the decoder reads every key of mapping
+// as a string, as [readsAsString] tells, so it decodes a struct from the
+// mapping.
+func (w *walker) readsAsStruct(mapping *ast.MappingNode) bool {
+	for _, entry := range mapping.Values {
+		if entry == nil || entry.Key == nil || astnode.IsMergeKey(entry.Key) {
+			continue
+		}
+
+		if !readsAsString(w.rules.Resolver, entry.Key) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// mergeRefused reports whether the decoder refuses the `<<` merge keys of
+// mapping when it decodes a struct that reads them. The decoder gathers
+// the entries those keys bring in before it reads a field. It refuses a
+// merge key whose value it reads as no mapping, such as a sequence of
+// sources or an alias to a scalar. It then decodes no field of the
+// struct and rejects none of its keys.
+//
+// To ask the decoder, mergeRefused decodes a mapping that holds the
+// merge keys alone into a struct with no field. A decoder that rejects
+// unknown fields rejects a key of a source there, which is no refusal of
+// the merge. A merge key the view of the decode holds no entry for
+// counts as refused.
+func (w *walker) mergeRefused(mapping *ast.MappingNode) bool {
+	var merges []*ast.MappingValueNode
+
+	for _, entry := range mapping.Values {
+		if entry == nil || !astnode.IsMergeKey(entry.Key) {
+			continue
+		}
+
+		view := w.view(entry)
+		if view == nil {
+			return true
+		}
+
+		merges = append(merges, view)
+	}
+
+	if len(merges) == 0 {
+		return false
+	}
+
+	var shell struct{}
+
+	err := w.rules.Decode(ast.Mapping(mapping.Start, false, merges...), &shell)
+	if err == nil {
+		return false
+	}
+
+	_, unknown := err.(*yaml.UnknownFieldError) //nolint:errorlint // The decoder returns it unwrapped.
+
+	return !unknown
+}
+
+// view returns entry as the decode reads it, or nil when the view of the
+// decode holds no entry in its place.
+func (w *walker) view(entry *ast.MappingValueNode) *ast.MappingValueNode {
+	view, ok := w.rules.View(entry).(*ast.MappingValueNode)
+	if !ok {
+		return nil
+	}
+
+	return view
+}
+
+// readsAsString reports whether the go-yaml decoder reads key, the key
+// of a mapping entry, as a string. It reads a plain, quoted, or block
+// scalar as one, and anything under a !!str tag. It reads a number, a
+// boolean, or a null as a value of that kind, with a tag of that kind or
+// without one. An alias reads as the content of its anchor, and an alias
+// that does not resolve counts as a string, since the decoder rejects
+// it before it reads the kind.
+func readsAsString(resolver *paths.Resolver, key ast.Node) bool {
+	for !astnode.IsNil(key) {
+		switch k := key.(type) {
+		case *ast.MappingKeyNode:
+			key = k.Value
+
+		case *ast.AnchorNode:
+			key = k.Value
+
+		case *ast.AliasNode:
+			content, err := resolver.Deref(k)
+			if err != nil {
+				return true
+			}
+
+			key = content
+
+		case *ast.TagNode:
+			if k.Directive != nil {
+				return true
+			}
+
+			switch token.ReservedTagKeyword(k.Start.Value) {
+			case token.StringTag:
+				return true
+			case token.IntegerTag, token.FloatTag, token.NullTag, token.BooleanTag,
+				token.BinaryTag, token.TimestampTag:
+				return false
+			default:
+				// Any other tag leaves the kind to the value under it.
+				key = k.Value
+			}
+
+		case *ast.StringNode, *ast.LiteralNode:
+			return true
+
+		default:
+			return false
+		}
+	}
+
+	return false
+}

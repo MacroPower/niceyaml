@@ -73,10 +73,6 @@ var (
 
 	// The result of [DecodesItself] for each type it has read.
 	decodesWhole TypeCache[bool]
-
-	// The result of [Options.InlinesUnmarshaler] for each struct type it
-	// has read, in a decode whose options name no unmarshaler.
-	inlineUnmarshalers TypeCache[bool]
 )
 
 // TypeCache holds a value computed once for each type it reads. A type
@@ -293,21 +289,14 @@ func (o Options) FromText(t reflect.Type) bool {
 // field that decodes itself, as [Options.ReportsOwnError] lists those
 // types, in its own fields or in those of a struct it holds inline. A
 // decode of t calls the unmarshaler of that field whatever the mapping
-// holds. The answer for an o that names a type holds for its decode
-// alone, so the cache serves only an [Options.Empty] o.
+// holds.
 func (o Options) InlinesUnmarshaler(t reflect.Type) bool {
-	if !o.Empty() {
-		return o.holdsInlineUnmarshaler(t, map[reflect.Type]bool{})
-	}
-
-	return inlineUnmarshalers.Get(t, func(t reflect.Type) bool {
-		return o.holdsInlineUnmarshaler(t, map[reflect.Type]bool{})
-	})
+	return o.holdsInlineUnmarshaler(t, map[reflect.Type]bool{})
 }
 
-// holdsInlineUnmarshaler is [Options.InlinesUnmarshaler] without its
-// cache. The seen set holds the structs the walk is inside of, so a
-// struct that holds itself inline ends the walk.
+// holdsInlineUnmarshaler is [Options.InlinesUnmarshaler]. The seen set
+// holds the structs the walk is inside of, so a struct that holds itself
+// inline ends the walk.
 func (o Options) holdsInlineUnmarshaler(t reflect.Type, seen map[reflect.Type]bool) bool {
 	if seen[t] {
 		return false
