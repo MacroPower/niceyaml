@@ -222,7 +222,7 @@ func (n *Node) decodeRejection(err error) error {
 // in that location starts at `$`.
 func (n *Node) tokenRejection(err yaml.Error) error {
 	msg, label := n.doc.rejectionText(err)
-	rejected := decodeError{err: yamlMessageError{err: err, msg: msg}, label: label}
+	rejected := markDecode(yamlMessage(err, msg), label)
 
 	return Invalid(rejected, n.rejectionLocation(err.GetToken())...)
 }

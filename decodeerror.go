@@ -207,10 +207,7 @@ func holdsLocation(err error) bool {
 // reads "expected string, got sequence", as [rejection.ExpectedString]
 // words it.
 func textRejection(content ast.Node) error {
-	return decodeError{
-		err:   errors.New(rejection.ExpectedString(content.Type())),
-		label: ErrWrongKind,
-	}
+	return markDecode(errors.New(rejection.ExpectedString(content.Type())), ErrWrongKind)
 }
 
 // valueError returns err as an error about one value of a document, for
@@ -267,14 +264,8 @@ func valueProblem(problem error) error {
 	located := *x
 	located.loc = nil
 
-	switch placed := x.err.(type) { //nolint:errorlint // The decode placed the error it built.
-	case decodeError:
-		placed.placed = false
-		located.err = placed
-
-	case recoveredError:
-		placed.placed = false
-		located.err = placed
+	if placed, ok := x.err.(markedError); ok { //nolint:errorlint // The decode placed the error it built.
+		located.err = placed.without(errPlaced)
 	}
 
 	rel, _ := x.path.CutPrefix(paths.Doc())

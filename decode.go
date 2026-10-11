@@ -1782,8 +1782,8 @@ func (n *Node) aliasLocation(path paths.Path, reason error) (location, bool) {
 // path that names a key a mapping leaves out binds as an Error with
 // [AtPath] of that path binds, at the key of the mapping that lacks it,
 // as [Node.nearestLocation] finds it. The binding writes the path in
-// front, so the message is the one of [notFoundError], which leaves the
-// path out. Any other path that selects nothing names no mapping, so its
+// front, so the message is the one of [paths.ErrNotFound] alone, which
+// leaves the path out. Any other path that selects nothing names no mapping, so its
 // error binds with no location, as [Node.bindOwn] binds it. Any other
 // reason is about the call, and it binds as it is.
 func (n *Node) bindUnresolved(path paths.Path, reason error) error {
@@ -1795,23 +1795,7 @@ func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 		return n.bindOwn(Invalid(reason))
 	}
 
-	return n.bindOwn(Invalid(notFoundError{err: reason}, AtPath(path)))
-}
-
-// notFoundError is the error of a path that names a key a mapping leaves
-// out. Its message is the message of [paths.ErrNotFound] alone, where the
-// error it unwraps to, the one the path failed to resolve with, names the
-// path too.
-type notFoundError struct {
-	err error
-}
-
-func (e notFoundError) Error() string {
-	return paths.ErrNotFound.Error()
-}
-
-func (e notFoundError) Unwrap() error {
-	return e.err
+	return n.bindOwn(Invalid(markedError{err: reason, msg: paths.ErrNotFound.Error()}, AtPath(path)))
 }
 
 // Validate runs v on the node. It is the validation step of [Node.Decode]
@@ -3066,7 +3050,7 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 		// A panic of the parser stays a panic, so the decode that called
 		// the function passes it on.
 		if p, ok := errors.AsType[*PanicError](err); ok {
-			return fmt.Errorf("parse the text of the value: %w", recoveredError{err: p, in: "parser"})
+			return fmt.Errorf("parse the text of the value: %w", panicked("parser", p))
 		}
 
 		// The decoder wrote the text from a node that parsed, and the
@@ -3247,7 +3231,7 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 		// The decoder's failure for an alias inside its own anchor names
 		// the null it merges in its place, which the source does not hold,
 		// so the message is the one a decode of the whole document gives.
-		at, cause = tk, restoredError{err: err, msg: msg}
+		at, cause = tk, markedError{err: err, msg: msg}
 	}
 
 	if at == nil && ok {
@@ -3257,7 +3241,7 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 		}
 
 		msg, label := n.doc.rejectionText(yamlErr)
-		rejected := decodeError{err: yamlMessageError{err: yamlErr, msg: msg}, label: label, placed: true}
+		rejected := markDecode(yamlMessage(yamlErr, msg), label, errPlaced)
 
 		// The token does not say which anchor of a reference document
 		// holds it, so only a decode that reads one alias from a
@@ -3273,7 +3257,7 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 		return err
 	}
 
-	rejected := decodeError{err: fmt.Errorf("decoder rejected the value: %w", cause), placed: true}
+	rejected := markDecode(fmt.Errorf("decoder rejected the value: %w", cause), errPlaced)
 
 	return Invalid(rejected, atToken(at))
 }
@@ -3301,33 +3285,101 @@ func (n *Node) holdsToken(tk *token.Token) bool {
 // looks for no value that reported it.
 var errPlaced = errors.New("placed")
 
-// decodeError is an error of a decode, which matches [ErrDecode] and
-// [errInvalid]. It reads as the error it holds and unwraps to it. An
-// error of the parse matches [ErrSyntax] instead, as a [syntaxError]
-// does.
-type decodeError struct {
+// markedError is an error with marks of its own on top of the error it
+// holds. [errors.Is] matches each of its marks, beside what that error
+// matches. A message that is not empty stands in for the message of the
+// error it holds.
+//
+// A sealed markedError unwraps to nothing, so every walk that reads an
+// error along its chain ends at it, and a reporter that prints each error
+// of a chain never prints what the error it holds carries, such as the
+// position and excerpt go-yaml writes into its own text. [errors.Is] and
+// [errors.As] still reach that error through it, apart from the targets
+// it refuses, which Is reports false for.
+type markedError struct {
 	err error
-	// The label the error matches too, which is [ErrUnknownField],
-	// [ErrWrongKind], or [ErrOverflow], or nil for an error with no label.
-	// The code that writes the message of the error sets it.
-	label error
-	// Whether the error matches [errPlaced] too.
-	placed bool
+	// The text that stands in for the message of err, or empty.
+	msg string
+	// The errors the error matches on top of what err matches.
+	marks []error
+	// The errors a sealed error matches for none of err.
+	refused []error
+	// The error unwraps to nothing.
+	sealed bool
 }
 
-func (e decodeError) Error() string {
+// markDecode returns err as an error of a decode, which matches
+// [ErrDecode] and [errInvalid], and each of marks that is not nil, such
+// as the label of a rejection or [errPlaced]. It reads as err and
+// unwraps to it. An error of the parse matches [ErrSyntax] instead.
+func markDecode(err error, marks ...error) markedError {
+	marks = slices.DeleteFunc(append([]error{ErrDecode, errInvalid}, marks...), func(mark error) bool {
+		return mark == nil
+	})
+
+	return markedError{err: err, marks: marks}
+}
+
+// yamlMessage returns err, a [yaml.Error], reduced to its message, or to
+// msg when msg is not empty. The go-yaml text carries its own position
+// and excerpt, which the [SourceError] binding the error renders itself,
+// so the message alone goes in the chain. The result is sealed, as
+// [markedError] describes, so a reporter never prints that excerpt,
+// which holds lines of a [Source] whatever [WithExcerpts] says of it.
+func yamlMessage(err yaml.Error, msg string) markedError {
+	if msg == "" {
+		msg = err.GetMessage()
+	}
+
+	return markedError{err: err, msg: msg, sealed: true}
+}
+
+func (e markedError) Error() string {
+	if e.msg != "" {
+		return e.msg
+	}
+
 	return e.err.Error()
 }
 
-func (e decodeError) Unwrap() error {
+// Unwrap returns the error e holds, or nil when e is sealed.
+func (e markedError) Unwrap() error {
+	if e.sealed {
+		return nil
+	}
+
 	return e.err
 }
 
-// Is reports whether target is [ErrDecode] or [errInvalid], the label
-// of the error, or [errPlaced] for an error the decode placed.
-func (e decodeError) Is(target error) bool {
-	return target == ErrDecode || target == errInvalid ||
-		e.label != nil && target == e.label || e.placed && target == errPlaced
+// Is reports whether target is one of the marks of e. A sealed e also
+// reports what the error it holds matches, apart from the targets it
+// refuses. [errors.Is] reads the error an e that is not sealed holds
+// through Unwrap.
+func (e markedError) Is(target error) bool {
+	if slices.Contains(e.marks, target) {
+		return true
+	}
+
+	if !e.sealed || slices.Contains(e.refused, target) {
+		return false
+	}
+
+	return errors.Is(e.err, target)
+}
+
+// As sets target to the first error in the chain of the error a sealed e
+// holds that matches it, as [errors.As] does. It reports false for an e
+// that is not sealed, whose error [errors.As] reads through Unwrap.
+func (e markedError) As(target any) bool {
+	return e.sealed && errors.As(e.err, target)
+}
+
+// without returns e without mark among its marks. It shares no marks
+// with e.
+func (e markedError) without(mark error) markedError {
+	e.marks = slices.DeleteFunc(slices.Clone(e.marks), func(m error) bool { return errors.Is(m, mark) })
+
+	return e
 }
 
 // asDecodeError returns err, an error the go-yaml decoder returned, as
@@ -3340,39 +3392,7 @@ func asDecodeError(err error) error {
 		return err
 	}
 
-	return decodeError{err: err}
-}
-
-// yamlMessageError is a [yaml.Error] reduced to its message. The go-yaml
-// text carries its own position and excerpt, which the [SourceError]
-// binding the error renders itself, so the message alone goes in the
-// chain. A yamlMessageError unwraps to nothing, so a reporter that
-// prints each error of a chain never prints that excerpt, which holds
-// lines of a [Source] whatever [WithExcerpts] says of it. [errors.Is]
-// and [errors.As] still reach the go-yaml error. A msg that is not empty
-// stands in for the message of err.
-type yamlMessageError struct {
-	err yaml.Error
-	msg string
-}
-
-func (e yamlMessageError) Error() string {
-	if e.msg != "" {
-		return e.msg
-	}
-
-	return e.err.GetMessage()
-}
-
-// Is reports whether the go-yaml error e holds matches target.
-func (e yamlMessageError) Is(target error) bool {
-	return errors.Is(e.err, target)
-}
-
-// As sets target to the first error in the chain of the go-yaml error e
-// holds that matches it, as [errors.As] does.
-func (e yamlMessageError) As(target any) bool {
-	return errors.As(e.err, target)
+	return markDecode(err)
 }
 
 // decodeWithRecover decodes node into v with dec. It turns a panic in the
@@ -3391,10 +3411,8 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 			return
 		}
 
-		panicked := recovered("decoder", p, debug.Stack())
-		panicked.placed = true
-
-		err = Place(panicked, atToken(astnode.StartToken(node)))
+		err = Place(panicked("decoder", &PanicError{Value: p, Stack: debug.Stack()}, errPlaced),
+			atToken(astnode.StartToken(node)))
 	}()
 
 	err = dec.DecodeFromNodeContext(ctx, node, v)
@@ -3616,23 +3634,7 @@ func (d *document) restoreError(err error) error {
 		return err
 	}
 
-	return restoredError{err: err, msg: restored}
-}
-
-// restoredError is an error from the decoder with a message that spells
-// the names of anchors as the document does. It unwraps to the error the
-// decoder returned.
-type restoredError struct {
-	err error
-	msg string
-}
-
-func (e restoredError) Error() string {
-	return e.msg
-}
-
-func (e restoredError) Unwrap() error {
-	return e.err
+	return markedError{err: err, msg: restored}
 }
 
 // spellingTexts returns the texts of tks that a new name must not spell:

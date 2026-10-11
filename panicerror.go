@@ -71,62 +71,29 @@ func (e *PanicError) Unwrap() error {
 	return nil
 }
 
-// recoveredError is a [*PanicError] as the recover of the parse or of a
-// decode returns it. Its message names the code that panicked in front
-// of the value, as "decoder panicked: boom" does.
+// panicRefused holds the targets the error [panicked] returns matches for
+// none of the [*PanicError] it holds.
+var panicRefused = []error{ErrDecode, ErrUnknownField, ErrWrongKind, ErrOverflow, ErrSyntax, errInvalid}
+
+// panicked returns p, a panic in the code that in names, as the recover
+// of the parse or of a decode returns it, with marks on top, as
+// [markedError] holds them. Its message names the code that panicked in
+// front of the value, as "decoder panicked: boom" does.
 //
-// A recoveredError unwraps to nothing, so every walk that reads an error
-// along its chain ends at it. The value of the panic thus adds no
-// location, no problem, and no fault of the document to the error, even
-// when the code panicked with an [*Error]. [errors.As] still finds the
-// PanicError and what it unwraps to. [errors.Is] matches what the
-// PanicError matches, apart from [ErrDecode] and each label on a decode
-// problem, [ErrSyntax], and [errInvalid].
-//
-// Create instances with [recovered].
-type recoveredError struct {
-	err *PanicError
-	// The code that panicked, which is "decoder" or "parser".
-	in string
-	// Whether the error matches [errPlaced].
-	placed bool
-}
-
-// recovered creates a new [recoveredError] for p, the value a recover
-// returned for a panic in the code that in names, and stack, which the
-// deferred function that recovered p takes, so it still holds the frames
-// of the panic.
-func recovered(in string, p any, stack []byte) recoveredError {
-	return recoveredError{err: &PanicError{Value: p, Stack: stack}, in: in}
-}
-
-func (e recoveredError) Error() string {
-	return fmt.Sprintf("%s panicked: %v", e.in, e.err.Value)
-}
-
-// Is reports whether the [*PanicError] e holds matches target, or whether
-// target is [errPlaced] for a panic a decode placed. It reports false
-// for [ErrDecode] and each label on a decode problem, for [ErrSyntax],
-// and for [errInvalid], even when the code panicked with an error that
-// matches one of them.
-func (e recoveredError) Is(target error) bool {
-	switch target {
-	case errPlaced:
-		return e.placed
-
-	case ErrDecode, ErrUnknownField, ErrWrongKind, ErrOverflow, ErrSyntax, errInvalid:
-		return false
-
-	default:
-		return errors.Is(e.err, target)
+// The error is sealed, so the value of the panic adds no location, no
+// problem, and no fault of the document to the error, even when the code
+// panicked with an [*Error]. [errors.As] still finds the PanicError and
+// what it unwraps to. [errors.Is] matches what the PanicError matches,
+// apart from [ErrDecode] and each label on a decode problem, [ErrSyntax],
+// and [errInvalid].
+func panicked(in string, p *PanicError, marks ...error) markedError {
+	return markedError{
+		err:     p,
+		msg:     fmt.Sprintf("%s panicked: %v", in, p.Value),
+		marks:   marks,
+		refused: panicRefused,
+		sealed:  true,
 	}
-}
-
-// As sets target to the [*PanicError] e holds, or to the first error in
-// the chain of the value of the panic that matches it, as [errors.As]
-// does.
-func (e recoveredError) As(target any) bool {
-	return errors.As(e.err, target)
 }
 
 // holdsPanic reports whether err is, or wraps, a [*PanicError]. The

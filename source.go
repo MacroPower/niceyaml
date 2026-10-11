@@ -1435,15 +1435,15 @@ func (s *Source) parseError(f docparse.Failure) error {
 			at = f.Run[i]
 		}
 
-		err = Place(recovered("parser", f.Panic, f.Stack), atToken(at))
+		err = Place(panicked("parser", &PanicError{Value: f.Panic, Stack: f.Stack}), atToken(at))
 
 	case ok:
 		msg := escape.Control(yamlErr.GetMessage())
 
-		err = Invalid(syntaxError{err: yamlMessageError{err: yamlErr, msg: msg}}, atToken(yamlErr.GetToken()))
+		err = Invalid(markSyntax(yamlMessage(yamlErr, msg)), atToken(yamlErr.GetToken()))
 
 	default:
-		err = syntaxError{err: f.Err}
+		err = markSyntax(f.Err)
 	}
 
 	// The documents come from the file this parse returns, so the error
@@ -1452,23 +1452,10 @@ func (s *Source) parseError(f docparse.Failure) error {
 	return bindTree(err, binder{src: s})
 }
 
-// syntaxError is an error of the parse, which matches [ErrSyntax] and
-// [errInvalid]. It reads as the error it holds and unwraps to it.
-type syntaxError struct {
-	err error
-}
-
-func (e syntaxError) Error() string {
-	return e.err.Error()
-}
-
-func (e syntaxError) Unwrap() error {
-	return e.err
-}
-
-// Is reports whether target is [ErrSyntax] or [errInvalid].
-func (e syntaxError) Is(target error) bool {
-	return target == ErrSyntax || target == errInvalid
+// markSyntax returns err as an error of the parse, which matches
+// [ErrSyntax] and [errInvalid]. It reads as err and unwraps to it.
+func markSyntax(err error) markedError {
+	return markedError{err: err, marks: []error{ErrSyntax, errInvalid}}
 }
 
 // reparse parses the tokens of the Source a second time and writes the
