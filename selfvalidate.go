@@ -1,7 +1,6 @@
 package niceyaml
 
 import (
-	"bytes"
 	"context"
 	"math"
 	"reflect"
@@ -1368,7 +1367,7 @@ func (w *selfWalker) pathResolver() *paths.Resolver {
 // a key.
 func (w *selfWalker) keyDecoder() *yaml.Decoder {
 	if w.decoder == nil {
-		w.decoder = yaml.NewDecoder(bytes.NewReader(nil), w.node.yamlOptions(w.cfg)...)
+		w.decoder = w.node.newDecoder(w.cfg)
 	}
 
 	return w.decoder

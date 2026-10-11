@@ -1,7 +1,6 @@
 package niceyaml
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"reflect"
@@ -117,7 +116,7 @@ func (n *Node) locateDecodeError(
 		return err
 	}
 
-	dec := yaml.NewDecoder(bytes.NewReader(nil), n.yamlOptions(cfg)...)
+	dec := n.newDecoder(cfg)
 	l := &errorLocator{
 		ctx:     ctx,
 		node:    n,
@@ -434,17 +433,12 @@ func (l *errorLocator) reproduces(node ast.Node, v any) bool {
 		return false
 	}
 
-	n := l.node
-	view := n.doc.tree().View(node)
-
-	if node != n.doc.root.Body {
-		err := n.primeAnchors(l.ctx, l.decoder, view)
-		if err != nil {
-			return false
-		}
+	view, err := l.node.prime(l.ctx, l.decoder, node)
+	if err != nil {
+		return false
 	}
 
-	err := decodeWithRecover(l.ctx, l.decoder, view, v)
+	err = decodeWithRecover(l.ctx, l.decoder, view, v)
 
 	return err != nil && l.same(err)
 }

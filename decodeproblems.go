@@ -1,7 +1,6 @@
 package niceyaml
 
 import (
-	"bytes"
 	"cmp"
 	"context"
 	"fmt"
@@ -111,8 +110,8 @@ func (n *Node) decodeProblems(
 // rejection is err as [Node.decodeRejection] returns it. The decoder
 // names a value it rejects by a token of the source, and the collector
 // marks a problem it decodes by the same token. Any other rejection lies
-// where [Node.bindDecodeError] resolves it, which is where the collector
-// marks a problem that takes a path.
+// where the Node binds it, which is where the collector marks a problem
+// that takes a path.
 //
 // The binding of a rejection in the document [NewSourceFromLayers] builds resolves in
 // the file of a layer, and the collector reads the merged text. Such a
@@ -133,7 +132,7 @@ func (n *Node) rejectedAt(err, rejection error) (position.Position, bool) {
 		return n.mergedPosition(rejection)
 	}
 
-	srcErr, ok := n.bindDecodeError(err).(*SourceError) //nolint:errorlint // A binding below a wrapper is not one n made.
+	srcErr, ok := n.bindOwn(n.decodeRejection(err)).(*SourceError) //nolint:errorlint // A binding below a wrapper is not one n made.
 	if !ok || srcErr.node != n {
 		return position.Position{}, false
 	}
@@ -188,12 +187,24 @@ func (n *Node) mergedPosition(rejection error) (position.Position, bool) {
 	return loc.pos, true
 }
 
-// decodeRejection returns err, an error from the decoder, as
-// [Node.bindDecodeError] binds it, before the binding. A [yaml.Error] at
-// a token of the source comes back as [Node.tokenRejection] returns it.
-// Any other error comes back as [asDecodeError] returns it, with a
-// message that names each anchor as the document does, and keeps the
-// location it carries.
+// decodeRejection returns err, an error from the decoder, for the Node to
+// bind. A [yaml.Error] at a token of the source comes back as
+// [Node.tokenRejection] returns it, at the path of the node the decoder
+// names by the token. That path starts at `$`, so the Node binds it with
+// no scope in front. Any other error comes back as [asDecodeError]
+// returns it, with a message that names each anchor as the document
+// does, and keeps the location it carries, such as one a value's own
+// UnmarshalYAML returns, or the path [Node.locateDecodeError] put it
+// under.
+//
+// Only a [yaml.Error] the decoder returns itself converts. One that an
+// UnmarshalYAML wraps stays the error of that unmarshaler, with the text
+// and sentinels of its wrapper. One from a parse an UnmarshalYAML runs on
+// its bytes has a token of that parse, so it stays the error of the
+// value too. The decoder builds the mapping an inline field decodes
+// from, with no token for the mapping or its keys, so a rejection of a
+// key of an inline map, or of an inline field whose type takes no
+// mapping, has no token of the source either.
 func (n *Node) decodeRejection(err error) error {
 	yamlErr, ok := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 	if !ok || !n.holdsToken(yamlErr.GetToken()) {
@@ -318,7 +329,7 @@ type problemCollector struct {
 // newProblemCollector creates a new [*problemCollector] for a decode of
 // n with cfg.
 func newProblemCollector(ctx context.Context, n *Node, cfg decodeConfig) *problemCollector {
-	dec := yaml.NewDecoder(bytes.NewReader(nil), n.yamlOptions(cfg)...)
+	dec := n.newDecoder(cfg)
 
 	return &problemCollector{
 		ctx:     ctx,
@@ -374,7 +385,7 @@ func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 // into a target. It keeps the value of each anchor, and assigns that
 // value to the target of an alias that takes it, with no decode. So the
 // pass reads node into an interface once, after the anchors outside node
-// that node refers to, as [Node.decodeNode] reads them. Every later
+// that node refers to, as [Node.prime] reads them. Every later
 // decode of the pass then reads an alias as the decode did.
 //
 // The decoder stops that read at a node it cannot read as a plain value,
@@ -384,9 +395,8 @@ func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 // that reads one of them through an alias adds no problem, since its
 // decode fails for the alias.
 func (c *problemCollector) register(node ast.Node) {
-	view := c.rules.View(node)
-
-	if node != c.node.doc.root.Body && c.node.primeAnchors(c.ctx, c.decoder, view) != nil {
+	view, err := c.node.prime(c.ctx, c.decoder, node)
+	if err != nil {
 		return
 	}
 

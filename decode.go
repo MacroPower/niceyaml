@@ -1181,20 +1181,16 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 		return nil, n.doc.err
 	}
 
-	c := *n
-	c.base = n.base.Join(path)
+	base := n.base.Join(path)
 
-	node, err := n.doc.pathResolver().Node(c.base)
+	node, err := n.doc.pathResolver().Node(base)
 	if err != nil {
-		// Bind to the receiver, a Node that exists, rather than to the
-		// copy, whose scope moved to a path that resolves to no node.
+		// Bind to the receiver, a Node that exists, rather than to a Node
+		// scoped at a path that resolves to no node.
 		return nil, n.bindUnresolved(path, err)
 	}
 
-	c.node = node
-	c.span, c.content = n.scope(c.base, node)
-
-	return &c, nil
+	return n.scoped(base, node), nil
 }
 
 // Nodes returns a [*Node] scoped to each node path selects, in document
@@ -1296,20 +1292,16 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	nodes := make([]*Node, 0, len(found))
 
 	for _, m := range found {
-		c := *n
-		c.base = m.Path
-		c.node = m.Node
-		c.span, c.content = n.scope(m.Path, m.Node)
-		nodes = append(nodes, &c)
+		nodes = append(nodes, n.scoped(m.Path, m.Node))
 	}
 
 	return nodes, nil
 }
 
-// scope returns the lines and the tokens of the Node that [Node.At] or
-// [Node.Nodes] scopes at path, a `$` path that selects node. The tokens
-// are those of node, as [Node.extent] finds them, and so are the lines,
-// with one addition. The key of an entry introduces a mapping or a
+// scoped returns a copy of n scoped at path, a `$` path that selects
+// node, for [Node.At] and [Node.Nodes]. The tokens of the copy are those
+// of node, as [Node.extent] finds them, and so are its lines, with one
+// addition. The key of an entry introduces a mapping or a
 // sequence that is its value, and the "-" of an element of a block
 // sequence introduces one that is the element. [astnode.PathToken] gives
 // that token. Where it lies on a line above the lines of node, the lines
@@ -1320,12 +1312,15 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 // the key of an entry, so each keeps the lines of its node. So does the
 // Node of a path that ends at an alias. Its node is the content of the
 // anchor, and the alias the path points at introduces none of it.
-func (n *Node) scope(path paths.Path, node ast.Node) (position.Span, token.Tokens) {
-	span, tks := n.extent(node)
+func (n *Node) scoped(path paths.Path, node ast.Node) *Node {
+	c := *n
+	c.base = path
+	c.node = node
+	c.span, c.content = n.extent(node)
 
 	// A scalar is its own token, so no token above it introduces it.
 	if astnode.IsScalar(astnode.Content(node)) {
-		return span, tks
+		return &c
 	}
 
 	in := datapath.ParentAt(n.doc.pathResolver(), path)
@@ -1342,19 +1337,19 @@ func (n *Node) scope(path paths.Path, node ast.Node) (position.Span, token.Token
 	// The content behind an alias lies at its anchor, so the key or the
 	// "-" in front of the alias introduces none of the lines of node.
 	if _, ok := astnode.Content(value).(*ast.AliasNode); ok {
-		return span, tks
+		return &c
 	}
 
 	tk := astnode.PathToken(value, in)
 	if tk == nil || tk.Position == nil {
-		return span, tks
+		return &c
 	}
 
-	if at := tk.Position.Line - 1; at >= 0 && at < span.Start {
-		span = position.NewSpan(at, span.End)
+	if at := tk.Position.Line - 1; at >= 0 && at < c.span.Start {
+		c.span = position.NewSpan(at, c.span.End)
 	}
 
-	return span, tks
+	return &c
 }
 
 // extent returns the lines and the tokens of node in the document. The
@@ -2123,27 +2118,6 @@ func newDecodeConfig(opts []DecodeOption) decodeConfig {
 	}
 
 	return cfg
-}
-
-// yamlOptions returns the go-yaml options the settings stand for, which
-// every go-yaml decoder of the call applies. The function of each
-// [WithCustomUnmarshaler] reads its value through decode.
-func (c decodeConfig) yamlOptions(decode unmarshaler.ValueDecoder) []yaml.DecodeOption {
-	opts := c.unmarshalers.YAMLOptions(decode)
-
-	if c.disallowUnknownFields {
-		opts = append(opts, yaml.DisallowUnknownField())
-	}
-
-	if len(c.allowedFieldPrefixes) > 0 {
-		opts = append(opts, yaml.AllowFieldPrefixes(c.allowedFieldPrefixes...))
-	}
-
-	if c.orderedMaps {
-		opts = append(opts, yaml.UseOrderedMap())
-	}
-
-	return opts
 }
 
 // WithValidator is a [DecodeOption] that validates the document with dv
@@ -2939,7 +2913,7 @@ func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) erro
 
 // decodeInto is [Node.DecodeInto] with its settings resolved. The decode
 // also collects the comments of the node in comments, as
-// [Node.decodeNode] describes, unless comments is nil.
+// [Node.decodeUnbound] describes, unless comments is nil.
 func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments yaml.CommentMap) error {
 	err := checkTarget(v, ErrDecodeTarget, true)
 	if err != nil {
@@ -2960,7 +2934,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 		return n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
 	}
 
-	err = n.decodeNode(ctx, n.AST(), v, cfg, comments)
+	err = n.bindOwn(n.decodeUnbound(ctx, n.AST(), v, cfg, comments))
 	if err != nil {
 		return err
 	}
@@ -2977,7 +2951,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 // needs a pointer, since the go-yaml decoder panics on a nil interface
 // and decodes nothing into a nil pointer, so the check runs before v
 // reaches it. When v points to a pointer, that pointer may be nil, as a
-// decode of a null leaves it, and [decodeTarget] allocates it. A nil v
+// decode of a null leaves it, and [allocate] allocates it. A nil v
 // reads "got nil" beside the sentinel of a decode, and the sentinel alone
 // for any other check.
 func checkTarget(v any, sentinel error, needPointer bool) error {
@@ -2997,29 +2971,20 @@ func checkTarget(v any, sentinel error, needPointer bool) error {
 	return nil
 }
 
-// maxPointerDepth caps the pointers [decodeTarget] allocates through. A
+// maxPointerDepth caps the pointers [allocate] allocates through. A
 // type that refers back to itself, such as "type P *P", never reaches a
 // value that is not a pointer, and the go-yaml decoder loops forever on
 // a non-nil one.
 const maxPointerDepth = 8
 
-// decodeTarget returns the pointer the go-yaml decoder decodes node into
-// for v, a non-nil pointer. The decoder decodes nothing into a nil
-// pointer and replaces the value behind a non-nil one. When v points to
-// a pointer, decodeTarget therefore allocates each nil pointer on the way
-// down and returns the last one, and the decoder fills its value in
-// place. For a node that reads as null, it returns v, so the decoder sets
-// *v to nil. It also returns v when the pointers go deeper than
+// allocate returns the pointer the go-yaml decoder decodes a value that
+// is no null into for v, a non-nil pointer. The decoder decodes nothing
+// into a nil pointer and replaces the value behind a non-nil one. When v
+// points to a pointer, allocate therefore allocates each nil pointer on
+// the way down and returns the last one, and the decoder fills its value
+// in place. It returns v when the pointers go deeper than
 // [maxPointerDepth].
-func decodeTarget(v any, node ast.Node) any {
-	if anchor, ok := node.(*ast.AnchorNode); ok {
-		node = anchor.Value
-	}
-
-	if astnode.IsNil(node) || node.Type() == ast.NullType {
-		return v
-	}
-
+func allocate(v any) any {
 	rv := reflect.ValueOf(v)
 
 	depth := 0
@@ -3042,16 +3007,31 @@ func decodeTarget(v any, node ast.Node) any {
 	return rv.Interface()
 }
 
-// yamlOptions returns the go-yaml options for a decoder of a call with
-// cfg: the source's decode options, then the ones the settings of cfg
-// stand for. The function of each [WithCustomUnmarshaler] in cfg reads
-// its value as [Node.decodeValue] decodes it with cfg.
-func (n *Node) yamlOptions(cfg decodeConfig) []yaml.DecodeOption {
+// newDecoder returns a go-yaml decoder for a decode of n with cfg. It
+// applies the decode options of the source, then the ones the settings
+// of cfg stand for, then extra. The function of each
+// [WithCustomUnmarshaler] in cfg reads its value as [Node.decodeValue]
+// decodes it with cfg.
+func (n *Node) newDecoder(cfg decodeConfig, extra ...yaml.DecodeOption) *yaml.Decoder {
 	decode := func(ctx context.Context, text []byte, dst any) error {
 		return n.decodeValue(ctx, text, dst, cfg)
 	}
 
-	return slices.Concat(n.source.decodeOptions(), cfg.yamlOptions(decode))
+	opts := slices.Concat(n.source.decodeOptions(), cfg.unmarshalers.YAMLOptions(decode))
+
+	if cfg.disallowUnknownFields {
+		opts = append(opts, yaml.DisallowUnknownField())
+	}
+
+	if len(cfg.allowedFieldPrefixes) > 0 {
+		opts = append(opts, yaml.AllowFieldPrefixes(cfg.allowedFieldPrefixes...))
+	}
+
+	if cfg.orderedMaps {
+		opts = append(opts, yaml.UseOrderedMap())
+	}
+
+	return yaml.NewDecoder(bytes.NewReader(nil), append(opts, extra...)...)
 }
 
 // decodeValue decodes text into dst with cfg, for the decode callback of
@@ -3062,7 +3042,7 @@ func (n *Node) yamlOptions(cfg decodeConfig) []yaml.DecodeOption {
 //
 // The text is a document of its own, so decodeValue reads it as a
 // [Source] that takes the settings of the source of n, and decodes the
-// document of that Source as [Node.decodeNode] does. The settings of cfg
+// document of that Source as [Node.decodeUnbound] does. The settings of cfg
 // that say how a value decodes thus apply below the value too, and a
 // failed decode reports every problem of the value. A [Validator] checks
 // a document, so decodeValue runs none.
@@ -3098,19 +3078,23 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 	return valueError(doc.decodeUnbound(ctx, doc.AST(), dst, cfg, nil))
 }
 
-// decodeNode decodes node to v with cfg, and binds the error to the
-// source: a rejection of the decoder as an [*Error] at the path of the
-// offending value, as [Node.bindDecodeError] describes, and any other,
-// such as a canceled context, as it is. A node without content,
+// decodeUnbound decodes node to v with cfg, and returns the error for
+// the Node to bind: a rejection of the decoder as an [*Error] at the path
+// of the offending value, as [Node.decodeRejection] describes, and any
+// other, such as a canceled context, as it is. [Node.decodeValue] writes
+// that error for another document to bind instead. A node without content,
 // the body of an empty document, leaves v as it is, so defaults already
 // in v survive, as [Node.DecodeInto] promises. [yaml.Unmarshal] instead
 // zeroes its target for input that holds no value. A tagged null, such
 // as a "!!seq" tag over no value, also leaves v as it is, since the
 // go-yaml decoder reads it as no value. A null with no tag, anchored or
 // not, leaves v as it is too, unless v points to a pointer or an
-// interface, as [keepsNullTarget] describes. When v points to a pointer,
-// a null sets that pointer to nil, and so does an alias that reads as
-// null. A panic in the decoder comes back as an error that holds a
+// interface. The decoder keeps the value of a field for such a null, so
+// the decode keeps the value of v as well, of any kind. [Node.At] and
+// [Node.Nodes] hand a decode the value an anchor names, so an anchored
+// null at the root reads as a scoped decode reads it. When v points to a
+// pointer, a null sets that pointer to nil, and so does an alias that
+// reads as null. A panic in the decoder comes back as an error that holds a
 // [*PanicError], bound at the first token of node that is not a
 // comment. The decoder reads node in the [decodetree.Tree] of the document,
 // and for a node below the body, a failure in an anchor outside node
@@ -3122,7 +3106,7 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 // The decoder that fills v also collects the comments of node in
 // comments, as [yaml.CommentToMap] collects them, unless comments is
 // nil. [Node.YAMLComments] passes an empty map of its own. A node that
-// starts no decoder adds nothing to the map. DecodeNode empties the map
+// starts no decoder adds nothing to the map. The decode empties the map
 // once the decoder has registered the anchors a node below the body
 // reads, since their comments lie outside node.
 //
@@ -3130,19 +3114,6 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 // ended before the decode starts, or while it registers the anchors node
 // needs, stops the decode, and its error comes back as it is, whatever
 // node holds.
-func (n *Node) decodeNode(
-	ctx context.Context,
-	node ast.Node,
-	v any,
-	cfg decodeConfig,
-	comments yaml.CommentMap,
-) error {
-	return n.bindOwn(n.decodeUnbound(ctx, node, v, cfg, comments))
-}
-
-// decodeUnbound decodes node to v with cfg, as [Node.decodeNode]
-// describes, and returns the error before the Node binds it.
-// [Node.decodeValue] writes that error for another document to bind.
 func (n *Node) decodeUnbound(
 	ctx context.Context,
 	node ast.Node,
@@ -3155,44 +3126,53 @@ func (n *Node) decodeUnbound(
 		return err //nolint:wrapcheck // The caller binds the error.
 	}
 
-	if !astnode.HasContent(node) || astnode.IsTaggedNull(node) || keepsNullTarget(node, v) {
+	value := node
+	if anchor, ok := node.(*ast.AnchorNode); ok {
+		value = anchor.Value
+	}
+
+	null := astnode.IsNil(value) || value.Type() == ast.NullType
+	kind := reflect.TypeOf(v).Elem().Kind()
+
+	if !astnode.HasContent(node) || astnode.IsTaggedNull(node) ||
+		null && kind != reflect.Pointer && kind != reflect.Interface {
 		return nil
 	}
 
-	yamlOpts := n.yamlOptions(cfg)
+	var extra []yaml.DecodeOption
+
 	if comments != nil {
-		yamlOpts = append(yamlOpts, yaml.CommentToMap(comments))
+		extra = append(extra, yaml.CommentToMap(comments))
 	}
 
-	dec := yaml.NewDecoder(bytes.NewReader(nil), yamlOpts...)
-	view := n.doc.tree().View(node)
+	dec := n.newDecoder(cfg, extra...)
 
-	// The decoder registers the anchors of the node it decodes, so an alias
-	// in a node below the body finds an anchor defined elsewhere in the
-	// document only after the decoder has seen that anchor.
-	if node != n.doc.root.Body {
-		err = n.primeAnchors(ctx, dec, view)
-		if err != nil {
-			return n.decodeRejection(err)
-		}
-
-		// The pass decoded anchors outside node with dec, which wrote
-		// their comments to the map.
-		clear(comments)
+	view, err := n.prime(ctx, dec, node)
+	if err != nil {
+		return n.decodeRejection(err)
 	}
+
+	// The pass decoded anchors outside node with dec, which wrote their
+	// comments to the map.
+	clear(comments)
 
 	// The decoder tests an alias for null, rather than the anchor it
 	// names, so it gives a pointer target a value for an alias to a null.
-	target := reflect.ValueOf(v).Elem()
-	if target.Kind() == reflect.Pointer && isNullAlias(ctx, dec, node, view) {
-		target.SetZero()
+	if kind == reflect.Pointer && isNullAlias(ctx, dec, value, view) {
+		reflect.ValueOf(v).Elem().SetZero()
 
 		return nil
+	}
+
+	// For a null, the decoder sets *v to nil.
+	target := v
+	if !null {
+		target = allocate(v)
 	}
 
 	// The recover turns a panic in the go-yaml decoder, or in a value's
 	// own UnmarshalYAML, into an error that holds a PanicError.
-	err = decodeWithRecover(ctx, dec, view, decodeTarget(v, node))
+	err = decodeWithRecover(ctx, dec, view, target)
 
 	// The decoder returns the error of a value that decodes itself with
 	// no token, so the Node finds the value that reported it.
@@ -3203,56 +3183,23 @@ func (n *Node) decodeUnbound(
 	return n.decodeProblems(ctx, err, node, v, cfg)
 }
 
-// keepsNullTarget reports whether node, or the value an anchor on node
-// names, is a null with no tag, and v points to a value that is neither
-// a pointer nor an interface. The go-yaml decoder keeps such a value for
-// a null with no tag or anchor in a struct field. For a null at the top
-// of a decode, it keeps some kinds, such as a string, and rejects
-// others, such as an int, a map, or a struct. [Node.decodeNode] skips
-// the decoder when this holds, so a null keeps the value of every such
-// kind, as it keeps the field. [Node.At] and [Node.Nodes] hand a decode
-// the value an anchor names, so keepsNullTarget looks through the anchor
-// to read an anchored null at the root as a scoped decode reads it. The
-// decoder still rejects an anchored null in a field, as it rejects a
-// tagged one.
-func keepsNullTarget(node ast.Node, v any) bool {
-	if anchor, ok := node.(*ast.AnchorNode); ok {
-		node = anchor.Value
-	}
-
-	if astnode.IsNil(node) || node.Type() != ast.NullType {
+// isNullAlias reports whether value is an alias that dec reads as null.
+// [Node.At] and [Node.Nodes] resolve every alias on a path to its
+// anchor, so only the body of a document reaches a decode as an alias.
+// Such an alias names an anchor of a reference document, which only dec
+// can read. The check reads view, the [decodetree.DecodeView] of the
+// node, with dec itself, which holds the anchors of the reference
+// documents for the decode that follows.
+func isNullAlias(ctx context.Context, dec *yaml.Decoder, value, view ast.Node) bool {
+	if _, ok := value.(*ast.AliasNode); !ok {
 		return false
 	}
 
-	switch reflect.TypeOf(v).Elem().Kind() {
-	case reflect.Pointer, reflect.Interface:
-		return false
-	default:
-		return true
-	}
-}
+	var sink any
 
-// isNullAlias reports whether node is an alias, or an anchor on one,
-// that dec reads as null. [Node.At] and [Node.Nodes] resolve every alias
-// on a path to its anchor, so only the body of a document reaches a
-// decode as an alias. Such an alias names an anchor of a reference
-// document, which only dec can read. The check reads view, the
-// [decodeView] of node, with dec itself, which holds the anchors of the
-// reference documents for the decode that follows.
-func isNullAlias(ctx context.Context, dec *yaml.Decoder, node, view ast.Node) bool {
-	if anchor, ok := node.(*ast.AnchorNode); ok {
-		node = anchor.Value
-	}
+	err := decodeWithRecover(ctx, dec, view, &sink)
 
-	if _, ok := node.(*ast.AliasNode); !ok {
-		return false
-	}
-
-	var value any
-
-	err := decodeWithRecover(ctx, dec, view, &value)
-
-	return err == nil && value == nil
+	return err == nil && sink == nil
 }
 
 // rejection returns err, which the go-yaml decoder returned for scope, a
@@ -3329,44 +3276,6 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 	rejected := decodeError{err: fmt.Errorf("decoder rejected the value: %w", cause), placed: true}
 
 	return Invalid(rejected, atToken(at))
-}
-
-// bindDecodeError binds an error from the decoder to the source. A
-// [yaml.Error] at a token of the source binds as an [*Error] that matches
-// [ErrDecode], with the message and the label [document.rejectionText]
-// gives it. The Error carries the location [Node.rejectionLocation] gives
-// the token, which is the path of the node the decoder names by it. That
-// path starts at `$`, so the Node binds the Error with no scope in front
-// of the path. Any other error binds with the location it carries, if
-// any, such as one a value's own UnmarshalYAML returns, or one the
-// decoder reports without a token of the source. It matches ErrDecode
-// too, as [asDecodeError] returns it, so the error of a canceled context
-// binds as it is. An error that [Node.locateDecodeError] put under a path
-// binds at that path. The decoder returns the error of a value that
-// decodes itself, and one for a target type whose definition it refuses,
-// as plain errors. It builds the mapping a field tagged inline decodes
-// from, with no token for the mapping or for its keys, around the values
-// of the source. So it returns a [yaml.Error] with no token for a key of
-// an inline map, such as the key `name` beside a map[int]int, and for an
-// inline field whose type cannot hold a mapping, such as an int. A
-// [yaml.Error] for a value of an inline map has the token of that value,
-// so it binds as it does for any other value. Only a [yaml.Error] the
-// decoder returns itself converts, so a [yaml.Error] that a value's
-// UnmarshalYAML wraps comes back as that unmarshaler's error, with the
-// text and sentinels of its wrapper. An UnmarshalYAML that parses the
-// bytes it gets returns a [yaml.Error] of its own, whose token comes from
-// that parse rather than the source, so it stays the value's own error,
-// unless [Node.rejection] took it for a rejection of a value from a
-// reference document. A message that names an anchor the [decodetree.Tree]
-// renamed names it as the document does. Returns nil for a nil err.
-func (n *Node) bindDecodeError(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	// The path of a rejection starts at `$`, so the scope of n does not
-	// go in front of it.
-	return n.bindOwn(n.decodeRejection(err))
 }
 
 // holdsToken reports whether tk is a token of the source's parse, one of
@@ -3634,9 +3543,13 @@ func (d *document) newDecodeTree() *decodetree.Tree {
 	})
 }
 
-// primeAnchors registers with dec the anchors that the aliases in node,
-// a node of the [decodetree.Tree] of the document below its body, refer
-// to, as [decodetree.Tree.Prime] lists them. Each anchor decodes on its own.
+// prime returns node as the [decodetree.Tree] of the document reads it,
+// and registers with dec the anchors that the aliases in it refer to, as
+// [decodetree.Tree.Prime] lists them. The decoder registers the anchors
+// of the node it decodes, so an alias in a node below the body finds an
+// anchor defined elsewhere in the document only after the decoder has
+// seen that anchor. The body holds every anchor it reads, so prime
+// registers none for it. Each anchor decodes on its own.
 //
 // Every anchor of the tree has a name of its own, so the pass decodes
 // only anchors that node, or an anchor node reads, refers to. A failure
@@ -3644,24 +3557,29 @@ func (d *document) newDecodeTree() *decodetree.Tree {
 // stops and returns it, as a decode of the whole document fails there
 // too, as [Node.rejection] reads it for that anchor. A context that ends
 // stops the pass, which then returns the error of the context.
-func (n *Node) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast.Node) error {
-	for _, anchor := range n.doc.tree().Prime(node) {
+func (n *Node) prime(ctx context.Context, dec *yaml.Decoder, node ast.Node) (ast.Node, error) {
+	view := n.doc.tree().View(node)
+	if node == n.doc.root.Body {
+		return view, nil
+	}
+
+	for _, anchor := range n.doc.tree().Prime(view) {
 		// Without an anchor it needs, the decode of the node would fail
 		// in its stead.
 		err := ctx.Err()
 		if err != nil {
-			return err //nolint:wrapcheck // The context names the reason, and the Node binds it.
+			return view, err //nolint:wrapcheck // The context names the reason, and the Node binds it.
 		}
 
 		var sink any
 
 		err = decodeWithRecover(ctx, dec, anchor, &sink)
 		if err != nil {
-			return n.rejection(err, anchor)
+			return view, n.rejection(err, anchor)
 		}
 	}
 
-	return nil
+	return view, nil
 }
 
 // rejectionText returns the message [rejection.Classify] writes for err,
