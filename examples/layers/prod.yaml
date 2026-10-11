@@ -9,4 +9,8 @@ menu:
   - Kaffe
   - Semla
 
-wifi: yamull-guest
+# This cafe has no terrace.
+terrace: ~
+
+wifi:
+  network: yamull-guest
