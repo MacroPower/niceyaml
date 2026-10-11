@@ -28,6 +28,7 @@ rules:
       - diff
       - docs
       - encoder
+      - escape
       - examples
       - fangs
       - finder

@@ -9,6 +9,7 @@ import (
 	_ "embed"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/printer"
 )
@@ -66,10 +67,15 @@ func main() {
 
 	fmt.Println("\nList each problem as a row:")
 
-	// A detail is no problem of its own, so the walk yields two rows.
+	// A detail is no problem of its own, so the walk yields two rows. A
+	// problem holds the name of its source and its message as written,
+	// and either can hold a control character, such as a line feed.
+	// Control draws each as its picture, so a problem takes one row.
 	for problem := range niceyaml.Problems(err) {
 		pos, _ := problem.Position()
 		path, _ := problem.Path()
-		fmt.Printf("%s:%d:%d\t%s\t%s\n", problem.Source().Name(), pos.Line+1, pos.Col+1, path, problem.Message())
+		name := escape.Control(problem.Source().Name())
+		msg := escape.Control(problem.Message())
+		fmt.Printf("%s:%d:%d\t%s\t%s\n", name, pos.Line+1, pos.Col+1, path, msg)
 	}
 }

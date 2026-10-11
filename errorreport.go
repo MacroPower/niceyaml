@@ -33,11 +33,18 @@ import (
 //		drawReason(bound.Unresolved())
 //	}
 //
-// The report holds every text as the error or the source wrote it. A
-// message, the name of a source, and a reason can each hold control
-// characters, such as an escape sequence in a key of the document, so a
-// renderer escapes them for its output. FormatError draws them as their
-// pictures.
+// The report holds every text as the error or the source wrote it. A key
+// of the document puts no control character into a message or a reason,
+// since a path writes one as an escape and the text of a decode
+// rejection draws one as its picture. A message can still hold one in
+// text the library did not write, such as the error of the program's own
+// unmarshaler or validator, which can quote a value of the document. The
+// name of a source can hold one too. A renderer therefore escapes each
+// message and each name for its output.
+// [go.jacobcolvin.com/niceyaml/escape.Control] draws each control
+// character of a text as its picture, a line feed among them, so a
+// renderer that keeps the rows of a message escapes each row on its own.
+// FormatError draws them as their pictures.
 //
 // A report a program reads, such as JSON lines or editor diagnostics,
 // lists the problems [ErrorTree.Problems] yields for [NewErrorTree]
