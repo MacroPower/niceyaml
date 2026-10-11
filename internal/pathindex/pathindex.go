@@ -70,91 +70,6 @@ func (s step) entry() *ast.MappingValueNode {
 	return s.mapping.Values[s.index]
 }
 
-// tokenOffsets returns the offsets of the first and the last token under
-// node, comments left out, as f finds them. The finder must skip comments
-// and hold no tokens.
-func tokenOffsets(f *boundsFinder, node ast.Node) astnode.Extent {
-	if astnode.IsNil(node) {
-		return astnode.Extent{}
-	}
-
-	ast.Walk(f, node)
-
-	if len(f.first) == 0 {
-		return astnode.Extent{}
-	}
-
-	return astnode.Extent{Lo: f.first[0].Position.Offset, Hi: f.last[0].Position.Offset, OK: true}
-}
-
-// boundsFinder is an [ast.Visitor] that records the tokens with the lowest
-// and the highest offset among the nodes it visits, all of them when
-// several share the offset. With skipComments set, it leaves out the
-// comments.
-type boundsFinder struct {
-	first, last  token.Tokens
-	skipComments bool
-}
-
-// Visit implements [ast.Visitor].
-func (b *boundsFinder) Visit(node ast.Node) ast.Visitor {
-	if astnode.IsNil(node) {
-		return nil
-	}
-
-	if b.skipComments && node.Type() == ast.CommentType {
-		return nil
-	}
-
-	b.consider(node.GetToken())
-
-	// The walk visits the nodes of a collection, not the token that closes
-	// a flow collection or the "-" that opens each entry of a block
-	// sequence, which the node holds beside them. An entry whose value is
-	// an implicit null shares the offset of its "-", which then ends the
-	// sequence.
-	switch n := node.(type) {
-	case *ast.SequenceNode:
-		b.consider(n.End)
-
-		for _, entry := range n.Entries {
-			if entry != nil {
-				b.consider(entry.Start)
-			}
-		}
-
-	case *ast.MappingNode:
-		b.consider(n.End)
-	}
-
-	return b
-}
-
-// consider widens the bounds to tk, or adds tk to the tokens at a bound
-// that it shares the offset of. A nil token, or one without a position,
-// changes nothing.
-func (b *boundsFinder) consider(tk *token.Token) {
-	if tk == nil || tk.Position == nil {
-		return
-	}
-
-	off := tk.Position.Offset
-
-	switch {
-	case len(b.first) == 0 || off < b.first[0].Position.Offset:
-		b.first = append(b.first[:0], tk)
-	case off == b.first[0].Position.Offset:
-		b.first = append(b.first, tk)
-	}
-
-	switch {
-	case len(b.last) == 0 || off > b.last[0].Position.Offset:
-		b.last = append(b.last[:0], tk)
-	case off == b.last[0].Position.Offset:
-		b.last = append(b.last, tk)
-	}
-}
-
 // New creates a new [*Index] for a document with the given
 // body. A body with no content, as [astnode.HasContent] reports it, has
 // no steps and no offsets, so the index finds nothing.
@@ -169,10 +84,7 @@ func New(body ast.Node) *Index {
 
 	ast.Walk(&count, body)
 
-	b := &builder{
-		steps:  make([]step, 0, int(count)),
-		finder: boundsFinder{skipComments: true},
-	}
+	b := &builder{steps: make([]step, 0, int(count))}
 	offsets := b.walk(body, -1)
 
 	return &Index{steps: b.steps, body: offsets}
@@ -199,13 +111,9 @@ func (c *stepCounter) Visit(node ast.Node) ast.Visitor {
 	return c
 }
 
-// builder collects the steps of a [Index] in one walk of the
-// tree.
+// builder collects the steps of an [Index] in one walk of the tree.
 type builder struct {
 	steps []step
-	// Finds the tokens of a node the walk does not step into, and keeps
-	// its buffers from one node to the next.
-	finder boundsFinder
 }
 
 // walk adds the steps under node, each held by the step at index parent,
@@ -219,7 +127,7 @@ func (b *builder) walk(node ast.Node, parent int) astnode.Extent {
 
 	switch n := node.(type) {
 	case *ast.AnchorNode:
-		return b.bounds(n.Name).With(n.GetToken()).Union(b.walk(n.Value, parent))
+		return astnode.ExtentOf(n.Name, false).With(n.GetToken()).Union(b.walk(n.Value, parent))
 
 	case *ast.TagNode:
 		return astnode.Extent{}.With(n.GetToken()).Union(b.walk(n.Value, parent))
@@ -243,7 +151,7 @@ func (b *builder) walk(node ast.Node, parent int) astnode.Extent {
 		return offsets
 
 	default:
-		return b.bounds(node)
+		return astnode.ExtentOf(node, false)
 	}
 }
 
@@ -259,7 +167,7 @@ func (b *builder) entry(mapping *ast.MappingNode, i, parent int) astnode.Extent 
 	id := len(b.steps)
 	b.steps = append(b.steps, step{mapping: mapping, index: i, parent: parent})
 
-	key := b.bounds(entry.Key)
+	key := astnode.ExtentOf(entry.Key, false)
 	b.steps[id].key = key
 
 	return b.finish(id, key.With(entry.GetToken()).Union(b.walk(entry.Value, id)))
@@ -298,13 +206,6 @@ func (b *builder) finish(id int, offsets astnode.Extent) astnode.Extent {
 	b.steps[id].lo, b.steps[id].hi = offsets.Lo, offsets.Hi
 
 	return offsets
-}
-
-// bounds returns the offsets of the tokens under node, comments left out.
-func (b *builder) bounds(node ast.Node) astnode.Extent {
-	b.finder.first, b.finder.last = b.finder.first[:0], b.finder.last[:0]
-
-	return tokenOffsets(&b.finder, node)
 }
 
 // stepAt returns the index of the innermost step whose tokens hold the
