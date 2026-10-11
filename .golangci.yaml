@@ -277,6 +277,12 @@ linters:
       - path: internal/
         linters:
           - wrapcheck
+      # Root files return the errors internal packages build on their
+      # behalf, as they would return their own.
+      - path: "^[^/]*\\.go$"
+        text: "niceyaml/internal/"
+        linters:
+          - wrapcheck
       - path: examples/
         text: "printf"
         linters:

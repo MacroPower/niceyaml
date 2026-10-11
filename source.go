@@ -23,6 +23,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/bom"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
+	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/preamble"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -1155,14 +1156,7 @@ func (s *Source) ValidateDocuments(ctx context.Context, v Validator) error {
 		errs = append(errs, s.Bind(err))
 	}
 
-	switch len(errs) {
-	case 0:
-		return nil
-	case 1:
-		return errs[0]
-	default:
-		return errors.Join(errs...)
-	}
+	return multierr.Join(errs)
 }
 
 // documents returns the root [*Node] of each YAML document, as
@@ -1508,13 +1502,7 @@ func (s *Source) parseOnce() {
 
 		s.file, s.fileTokens, s.standIns = p.file, p.tokens, p.standIns
 
-		switch len(p.errs) {
-		case 0:
-		case 1:
-			s.fileErr = p.errs[0]
-		default:
-			s.fileErr = errors.Join(p.errs...)
-		}
+		s.fileErr = multierr.Join(p.errs)
 
 		s.docs = newDocuments(s)
 		s.content = pickContentDocuments(s.docs)

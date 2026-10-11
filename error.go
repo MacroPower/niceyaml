@@ -7,7 +7,6 @@ import (
 	"iter"
 	"log/slog"
 	"math"
-	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -19,6 +18,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/fault"
+	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -946,11 +946,7 @@ func rebase(err error, base paths.Path, movesOnly, invalid, ambiguous bool, fb f
 		}
 
 		if len(rebased) > 0 {
-			if isJoinError(err) {
-				return errors.Join(rebased...)
-			}
-
-			return &rebasedJoinError{join: err, branches: rebased}
+			return multierr.Rejoin(err, rebased)
 		}
 	}
 
@@ -996,81 +992,6 @@ func headsInvalid(err error) bool {
 
 		err = x.err
 	}
-}
-
-// rebasedJoinError is a join of a type other than the one [errors.Join]
-// builds, rebased branch by branch. Its message is the messages of the
-// rebased branches one per line, the shape the message of the join had,
-// and it unwraps to those branches. It matches the join for [errors.Is]
-// and [errors.As] rather than unwrapping to it, since the branches of
-// the join still write their paths from the old base.
-type rebasedJoinError struct {
-	// The join Rebase received.
-	join error
-	// The rebased branches, which leave out the nil ones.
-	branches []error
-}
-
-// Error returns the messages of the branches one per line.
-func (j *rebasedJoinError) Error() string {
-	msgs := make([]string, 0, len(j.branches))
-	for _, branch := range j.branches {
-		msgs = append(msgs, branch.Error())
-	}
-
-	return strings.Join(msgs, "\n")
-}
-
-// Unwrap returns the rebased branches.
-func (j *rebasedJoinError) Unwrap() []error {
-	return j.branches
-}
-
-// Is reports whether target is the join, or whether the Is method of the
-// join, if it has one, matches target. Like [errors.Is], it compares the
-// join with target only when the type of target is comparable.
-func (j *rebasedJoinError) Is(target error) bool {
-	return matchesItself(j.join, target)
-}
-
-// As sets target to the join when target points at a type the join is
-// assignable to, as [errors.As] does for an error in the chain. Otherwise
-// it reports what the As method of the join, if it has one, reports.
-func (j *rebasedJoinError) As(target any) bool {
-	return asItself(j.join, target)
-}
-
-// matchesItself reports whether err itself matches target, as
-// [errors.Is] asks of one error in a chain. It compares err with target
-// when the type of target is comparable, and then calls the Is method of
-// err, if it has one. It reads no error err unwraps to, so a type that
-// stands for err above other errors calls it from its own Is method.
-func matchesItself(err, target error) bool {
-	//nolint:errorlint // The error itself, not a chain search.
-	if target != nil && reflect.TypeOf(target).Comparable() && err == target {
-		return true
-	}
-
-	x, ok := err.(interface{ Is(target error) bool }) //nolint:errorlint // The error itself, not a chain search.
-
-	return ok && x.Is(target)
-}
-
-// asItself sets target to err when target points at a type err is
-// assignable to, as [errors.As] does for one error in a chain. Otherwise
-// it reports what the As method of err, if it has one, reports. Like
-// [matchesItself], it reads no error err unwraps to.
-func asItself(err error, target any) bool {
-	val := reflect.ValueOf(target)
-	if val.Kind() == reflect.Pointer && !val.IsNil() && reflect.TypeOf(err).AssignableTo(val.Type().Elem()) {
-		val.Elem().Set(reflect.ValueOf(err))
-
-		return true
-	}
-
-	x, ok := err.(interface{ As(target any) bool }) //nolint:errorlint // The error itself, not a chain search.
-
-	return ok && x.As(target)
 }
 
 // ErrorOption configures an [Error]. [NewError], [Invalid], [Place],
@@ -2291,16 +2212,11 @@ func underScope(err error, scope paths.Path) (scopedError, bool) {
 		changed = changed || c
 	}
 
-	switch {
-	case !changed:
+	if !changed {
 		return unchanged, false
-
-	case isJoinError(err):
-		return anchored(errors.Join(scoped...)), true
-
-	default:
-		return anchored(&rebasedJoinError{join: err, branches: scoped}), true
 	}
+
+	return anchored(multierr.Rejoin(err, scoped)), true
 }
 
 // anchored returns err with its anchor, as [anchorOf] finds it.
@@ -2501,13 +2417,13 @@ func bindTree(err error, b binder) error {
 // [followBranches] keeps a single branch of it, as it does for a
 // sentinel beside the binding. The text of the binding names the paths
 // of its errors, and the text of the error it was made from names none.
-// Each wrapper therefore comes back as a [placedError], whose message is
-// the message of the wrapper with the text of the binding cut down to
-// that of its error. A wrapper whose message does not hold the text of
-// the binding once, such as one that quotes it or writes a message of
-// its own, keeps that message with every path it names. Its error
-// places all the same, as an error that no source bound yet places
-// under such a wrapper.
+// Each wrapper therefore comes back as the stand-in [multierr.Replace]
+// returns, whose message is the message of the wrapper with the text of
+// the binding cut down to that of its error. A wrapper whose message
+// does not hold the text of the binding once, such as one that quotes it
+// or writes a message of its own, keeps that message with every path it
+// names. Its error places all the same, as an error that no source bound
+// yet places under such a wrapper.
 //
 // An [*Error] writes the message of the error it wraps, so an Error
 // above the binding comes back as a copy around the error the binding
@@ -2555,7 +2471,7 @@ func replaceUnplaced(err error) (error, bool) {
 		// Both checks read no message, so a wrapper that holds no such
 		// binding, as nearly every one does, costs a walk of its errors
 		// and formats nothing.
-		if !isWrapErrors(err) || !holdsUnplaced(err) {
+		if !multierr.IsWrapErrors(err) || !holdsUnplaced(err) {
 			return err, false
 		}
 
@@ -2592,7 +2508,7 @@ func holdsUnplaced(err error) bool {
 			err = x.Unwrap()
 
 		case interface{ Unwrap() []error }:
-			return isWrapErrors(err) && slices.ContainsFunc(x.Unwrap(), holdsUnplaced)
+			return multierr.IsWrapErrors(err) && slices.ContainsFunc(x.Unwrap(), holdsUnplaced)
 
 		default:
 			return false
@@ -2604,7 +2520,8 @@ func holdsUnplaced(err error) bool {
 // chain goes on through below. The branches are every error wrapper
 // unwraps to when it unwraps to several, and nil otherwise. The ones
 // beside below add nothing to the tree, as a sentinel does, so the
-// [placedError] keeps them to match as wrapper does. The message of
+// stand-in [multierr.Replace] returns keeps them to match as wrapper
+// does. The message of
 // wrapper stays as it is unless it holds the message of below once.
 func replaceBelow(wrapper, below error, branches []error) (error, bool) {
 	if below == nil {
@@ -2632,70 +2549,9 @@ func replaceBelow(wrapper, below error, branches []error) (error, bool) {
 		}
 	}
 
-	return &placedError{
-		wrapper: wrapper,
-		err:     placed,
-		beside:  beside,
-		msg:     msg,
-	}, true
-}
-
-// placedError stands for a wrapper around a binding that stood in no
-// document, once [placeable] replaced that binding with its error. Its
-// message is the message of the wrapper with the text of the binding cut
-// down to the message of the error, or the message as the wrapper wrote
-// it when that text does not stand there once. It unwraps to the error.
-// It matches the wrapper for [errors.Is] and [errors.As] rather than
-// unwrapping to it, since the wrapper still unwraps to the binding. A
-// wrapper with several %w verbs unwraps to other errors beside the
-// binding, such as a sentinel, and the placedError matches those too.
-type placedError struct {
-	// The wrapper Bind or Rebase received.
-	wrapper error
-	// The error below the wrapper, with the binding replaced.
-	err error
-	msg string
-	// The errors the wrapper unwraps to beside the one that held the
-	// binding, when it unwraps to several.
-	beside []error
-}
-
-// Error returns the message of the wrapper, with the text of the binding
-// cut down to the message of its error where the wrapper holds that
-// text once.
-func (p *placedError) Error() string {
-	return p.msg
-}
-
-// Unwrap returns the error below the wrapper, with the binding replaced.
-func (p *placedError) Unwrap() error {
-	return p.err
-}
-
-// Is reports whether target is the wrapper, or whether the Is method of
-// the wrapper, if it has one, matches target. Like [errors.Is], it
-// compares the wrapper with target only when the type of target is
-// comparable. It also reports whether an error the wrapper unwraps to
-// beside the binding matches target, as [errors.Is] reports it.
-func (p *placedError) Is(target error) bool {
-	if matchesItself(p.wrapper, target) {
-		return true
-	}
-
-	return slices.ContainsFunc(p.beside, func(err error) bool { return errors.Is(err, target) })
-}
-
-// As sets target to the wrapper when target points at a type the wrapper
-// is assignable to, as [errors.As] does for an error in the chain.
-// Otherwise it reports what the As method of the wrapper, if it has one,
-// reports, and then what [errors.As] reports for each error the wrapper
-// unwraps to beside the binding.
-func (p *placedError) As(target any) bool {
-	if asItself(p.wrapper, target) {
-		return true
-	}
-
-	return slices.ContainsFunc(p.beside, func(err error) bool { return errors.As(err, target) })
+	// The stand-in unwraps to the placed error and matches the wrapper,
+	// since the wrapper still unwraps to the binding.
+	return multierr.Replace(wrapper, placed, msg, beside), true
 }
 
 // isBound reports whether err is a binding already: a [*SourceError], or
@@ -2777,12 +2633,12 @@ func leadingBinding(err error) *SourceError {
 			branches := x.Unwrap()
 
 			switch {
-			case isJoinError(cur):
-				cur = firstBranch(branches)
+			case multierr.IsJoin(cur):
+				cur = multierr.First(branches)
 
-			case isWrapErrors(cur):
-				if isJoinMessage(cur.Error(), branches) {
-					cur = firstBranch(branches)
+			case multierr.IsWrapErrors(cur):
+				if multierr.JoinMessage(cur.Error(), branches) {
+					cur = multierr.First(branches)
 
 					continue
 				}
@@ -2798,7 +2654,7 @@ func leadingBinding(err error) *SourceError {
 				// A message that reads as a join starts with the message
 				// of its first branch too, so one read of the message
 				// covers both.
-				lead := firstBranch(branches)
+				lead := multierr.First(branches)
 				if lead == nil || !strings.HasPrefix(cur.Error(), lead.Error()) {
 					return nil
 				}
@@ -2810,18 +2666,6 @@ func leadingBinding(err error) *SourceError {
 			return nil
 		}
 	}
-}
-
-// firstBranch returns the first of branches that is not a nil interface,
-// or nil when every branch is one.
-func firstBranch(branches []error) error {
-	for _, branch := range branches {
-		if branch != nil {
-			return branch
-		}
-	}
-
-	return nil
 }
 
 // passedLead returns the binding the first line of the message of e comes

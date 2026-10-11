@@ -1,15 +1,13 @@
 package niceyaml
 
 import (
-	"errors"
-	"fmt"
 	"iter"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"unicode"
 
+	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -622,7 +620,7 @@ func joinBinding(err error) *SourceError {
 // An error [errors.Join] built is a join by its type alone, since its
 // message is always its branches' messages one per line. Any other error
 // that unwraps to several is a join only when its message is that text,
-// as [isJoinMessage] reports.
+// as [multierr.JoinMessage] reports.
 func joinBranches(err error) ([]error, bool) {
 	return joinBranchesOf(err, func() string { return err.Error() })
 }
@@ -647,65 +645,11 @@ func joinBranchesOf(err error, msg func() string) ([]error, bool) {
 	}
 
 	branches := joined.Unwrap()
-	if !isJoinError(err) && !isJoinMessage(msg(), branches) {
+	if !multierr.IsJoin(err) && !multierr.JoinMessage(msg(), branches) {
 		return nil, false
 	}
 
 	return branches, true
-}
-
-var (
-	// The type of the errors [errors.Join] builds.
-	joinType = reflect.TypeOf(errors.Join(errors.New("")))
-
-	// The type of the errors [fmt.Errorf] builds with several %w verbs.
-	wrapErrorsType = reflect.TypeOf(fmt.Errorf("%w%w", errors.New(""), errors.New("")))
-)
-
-// isJoinError reports whether err is an error that [errors.Join] builds.
-func isJoinError(err error) bool {
-	return reflect.TypeOf(err) == joinType
-}
-
-// isWrapErrors reports whether err is a wrapper that [fmt.Errorf] builds
-// with several %w verbs.
-func isWrapErrors(err error) bool {
-	return reflect.TypeOf(err) == wrapErrorsType
-}
-
-// isJoinMessage reports whether msg is the messages of branches one per
-// line, which is how [errors.Join] writes the message of the error it
-// builds. A nil branch carries no message and no line of its own, so it
-// takes no separator either.
-//
-// It matches msg against the branches in place and stops at the first
-// mismatch. [followBranches] runs this check at every level of a chain
-// of wrappers, and building the joined text at each level would copy
-// the message below it once per level.
-func isJoinMessage(msg string, branches []error) bool {
-	first := true
-
-	for _, branch := range branches {
-		if branch == nil {
-			continue
-		}
-
-		var ok bool
-
-		if !first {
-			if msg, ok = strings.CutPrefix(msg, "\n"); !ok {
-				return false
-			}
-		}
-
-		first = false
-
-		if msg, ok = strings.CutPrefix(msg, branch.Error()); !ok {
-			return false
-		}
-	}
-
-	return msg == ""
 }
 
 // children returns the nodes of the children [walkChildren] finds along
@@ -817,10 +761,10 @@ func (c chainEnd) cut(text string) (string, int, int, bool) {
 		branches := x.Unwrap()
 
 		switch {
-		case isJoinError(c.err) || isJoinMessage(msg, branches):
+		case multierr.IsJoin(c.err) || multierr.JoinMessage(msg, branches):
 			full, held = msg, c.branches
 
-		case isWrapErrors(c.err) || holdsFirst(msg, branches):
+		case multierr.IsWrapErrors(c.err) || multierr.HoldsFirst(msg, branches):
 			return text, c.branches, c.branches, true
 
 		default:
@@ -838,14 +782,6 @@ func (c chainEnd) cut(text string) (string, int, int, bool) {
 	}
 
 	return strings.TrimRightFunc(before+own+after, unicode.IsSpace), shown, held, true
-}
-
-// holdsFirst reports whether msg holds the message of the first of
-// branches that is not a nil interface.
-func holdsFirst(msg string, branches []error) bool {
-	first := firstBranch(branches)
-
-	return first != nil && strings.Contains(msg, first.Error())
 }
 
 // walkChildren walks the cause chain of err and reports the children
@@ -937,11 +873,11 @@ func walkChildren(
 // where the branch does. Any other error that unwraps to several, such
 // as a join or a multi-error of its own type, reports several errors, so
 // it keeps each branch but the nil ones. So does a wrapper whose message
-// reads as a join, as [isJoinMessage] reports.
+// reads as a join, as [multierr.JoinMessage] reports.
 func followBranches(err error, branches []error) ([]error, error) {
 	// The type check runs first, so an error of any other type never
 	// formats its message here, where the result would go unused.
-	wrapper := isWrapErrors(err) && !isJoinMessage(err.Error(), branches)
+	wrapper := multierr.IsWrapErrors(err) && !multierr.JoinMessage(err.Error(), branches)
 
 	var kept []error
 

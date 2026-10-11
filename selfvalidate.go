@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"context"
 	"encoding"
-	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -20,6 +19,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -345,14 +345,7 @@ func walkSelfValidators(
 		return w.ended
 	}
 
-	switch len(w.errs) {
-	case 0:
-		return nil
-	case 1:
-		return w.errs[0]
-	default:
-		return errors.Join(w.errs...)
-	}
+	return multierr.Join(w.errs)
 }
 
 // selfWalker collects the errors of the [SelfValidator] values in a

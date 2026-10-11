@@ -20,6 +20,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
+	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/internal/preamble"
 	"go.jacobcolvin.com/niceyaml/internal/segment"
@@ -602,14 +603,7 @@ func MultiValidator(validators ...Validator) Validator {
 			errs = append(errs, err)
 		}
 
-		switch len(errs) {
-		case 0:
-			return nil
-		case 1:
-			return errs[0]
-		default:
-			return errors.Join(errs...)
-		}
+		return multierr.Join(errs)
 	})
 }
 
