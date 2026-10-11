@@ -93,10 +93,10 @@ type Tree struct {
 	// Source shares it between the trees of all its documents, and no
 	// tree writes to it.
 	index map[*token.Token]int
-	// Returns the tokens the nodes of body hold, including the ones the
-	// parser made for values the document leaves out, and collects them
-	// on the first call. The errors of the decoder may name them.
-	nodeTokens func() map[*token.Token]struct{}
+	// The tokens the nodes of body hold, including the ones the parser
+	// made for values the document leaves out. The errors of the decoder
+	// may name them.
+	nodeTokens map[*token.Token]struct{}
 	// Spells each name the tree gives an anchor as the document does,
 	// for the messages the decoder reports, or nil when no anchor has a
 	// name of its own.
@@ -144,18 +144,14 @@ func New(body ast.Node, facts *aliasing.Facts, opts Options) *Tree {
 		t.body = DecodeView(body)
 	}
 
-	t.nodeTokens = sync.OnceValue(func() map[*token.Token]struct{} {
-		tokens := map[*token.Token]struct{}{}
+	t.nodeTokens = map[*token.Token]struct{}{}
 
-		astnode.Inspect(t.body, func(node ast.Node) bool {
-			if tk := node.GetToken(); tk != nil {
-				tokens[tk] = struct{}{}
-			}
+	astnode.Inspect(t.body, func(node ast.Node) bool {
+		if tk := node.GetToken(); tk != nil {
+			t.nodeTokens[tk] = struct{}{}
+		}
 
-			return true
-		})
-
-		return tokens
+		return true
 	})
 
 	t.anchors = sync.OnceValue(t.newAnchorIndex)
@@ -411,7 +407,7 @@ func (t *Tree) Holds(tk *token.Token) bool {
 		return true
 	}
 
-	_, ok := t.nodeTokens()[tk]
+	_, ok := t.nodeTokens[tk]
 
 	return ok
 }
