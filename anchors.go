@@ -17,6 +17,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/internal/rejection"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -731,16 +732,16 @@ func (b anchorBounds) encloses(node ast.Node, tk *token.Token) bool {
 	return extent.Holds(tk.Position.Offset)
 }
 
-// rejectionText returns the message [rejectionMessage] writes for err,
-// with each anchor named as the document names it, and the label
-// rejectionMessage gives err. The decoder writes text of the document
+// rejectionText returns the message [rejection.Classify] writes for err,
+// with each anchor named as the document names it, and the sentinel of
+// the label Classify gives err. The decoder writes text of the document
 // into some messages as it is, such as the name of an unknown field, so
 // each control character comes back as its picture and the message stays
 // on one line.
 func (t *decodeTree) rejectionText(err yaml.Error) (string, error) {
-	msg, label := rejectionMessage(err)
+	msg, label := rejection.Classify(err)
 
-	return escape.Control(t.restoreNames(msg)), label
+	return escape.Control(t.restoreNames(msg)), rejectionLabel(label)
 }
 
 // restoreNames returns msg with each name the tree gave an anchor spelled

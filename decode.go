@@ -3587,7 +3587,7 @@ func isNullAlias(ctx context.Context, dec *yaml.Decoder, node, view ast.Node) bo
 // that way when scope holds an alias to a reference document,
 // as [decodeTree.referenceAliases] finds them, with go-yaml's position
 // and excerpt of that document left out and the message and the label
-// [rejectionMessage] gives it. It binds at the alias when
+// [decodeTree.rejectionText] gives it. It binds at the alias when
 // scope holds one such alias, and carries no location when it holds
 // several, since the token does not say which of them led to it. The
 // count ignores the target type, so a type that reads only one of
@@ -3805,34 +3805,33 @@ func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 }
 
 // bindDecodeError binds an error from the decoder to the source. A
-// [yaml.Error] at a token of the source binds as an [*Error] that
-// matches [ErrDecode], with the message and the label [rejectionMessage]
-// gives it. The Error carries the location [Node.rejectionLocation]
-// gives the token, which is the path of the node the decoder names by it.
-// That path starts at `$`, so the Node binds the Error with no scope in
-// front of the path. Any other error binds with the location it carries,
-// if any, such as one a value's own UnmarshalYAML returns, or one the
+// [yaml.Error] at a token of the source binds as an [*Error] that matches
+// [ErrDecode], with the message and the label [decodeTree.rejectionText]
+// gives it. The Error carries the location [Node.rejectionLocation] gives
+// the token, which is the path of the node the decoder names by it. That
+// path starts at `$`, so the Node binds the Error with no scope in front
+// of the path. Any other error binds with the location it carries, if
+// any, such as one a value's own UnmarshalYAML returns, or one the
 // decoder reports without a token of the source. It matches ErrDecode
 // too, as [asDecodeError] returns it, so the error of a canceled context
 // binds as it is. An error that [Node.locateDecodeError] put under a path
 // binds at that path. The decoder returns the error of a value that
-// decodes itself, and one for a target type whose definition it
-// refuses, as plain errors. It builds the mapping a field tagged inline
-// decodes from, with no token for the mapping or for its keys, around the
-// values of the source. So it returns a [yaml.Error] with no token for a
-// key of an inline map, such as the key `name` beside a map[int]int, and
-// for an inline field whose type cannot hold a mapping, such as an int. A
-// [yaml.Error] for a value of an inline map has the token of that
-// value, so it binds as it does for any other value. Only a
-// [yaml.Error] the decoder returns itself converts, so a [yaml.Error]
-// that a value's UnmarshalYAML wraps comes back as that unmarshaler's
-// error, with the text and sentinels of its wrapper. An UnmarshalYAML
-// that parses the bytes it gets returns a [yaml.Error] of its own, whose
-// token comes from that parse rather than the source, so it stays the
-// value's own error, unless [Node.rejection] took it for a rejection of
-// a value from a reference document. A message that names an anchor the
-// [decodeTree] renamed names it as the document does. Returns nil for a
-// nil err.
+// decodes itself, and one for a target type whose definition it refuses,
+// as plain errors. It builds the mapping a field tagged inline decodes
+// from, with no token for the mapping or for its keys, around the values
+// of the source. So it returns a [yaml.Error] with no token for a key of
+// an inline map, such as the key `name` beside a map[int]int, and for an
+// inline field whose type cannot hold a mapping, such as an int. A
+// [yaml.Error] for a value of an inline map has the token of that value,
+// so it binds as it does for any other value. Only a [yaml.Error] the
+// decoder returns itself converts, so a [yaml.Error] that a value's
+// UnmarshalYAML wraps comes back as that unmarshaler's error, with the
+// text and sentinels of its wrapper. An UnmarshalYAML that parses the
+// bytes it gets returns a [yaml.Error] of its own, whose token comes from
+// that parse rather than the source, so it stays the value's own error,
+// unless [Node.rejection] took it for a rejection of a value from a
+// reference document. A message that names an anchor the [decodeTree]
+// renamed names it as the document does. Returns nil for a nil err.
 func (n *Node) bindDecodeError(err error) error {
 	if err == nil {
 		return nil

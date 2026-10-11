@@ -203,12 +203,12 @@ func (n *Node) decodeRejection(err error) error {
 	return n.tokenRejection(yamlErr)
 }
 
-// tokenRejection returns err, a rejection the decoder reported at a
-// token of the source, as an [*Error] that matches [ErrDecode]. The
-// Error reads as [rejectionMessage] writes err, with each anchor named as
-// the document names it, matches the label rejectionMessage gives err,
-// and carries the location [Node.rejectionLocation] gives the token. The
-// path in that location starts at `$`.
+// tokenRejection returns err, a rejection the decoder reported at a token
+// of the source, as an [*Error] that matches [ErrDecode]. The Error reads
+// as [decodeTree.rejectionText] writes err, with each anchor named as the
+// document names it, matches the label rejectionText gives err, and
+// carries the location [Node.rejectionLocation] gives the token. The path
+// in that location starts at `$`.
 func (n *Node) tokenRejection(err yaml.Error) error {
 	msg, label := n.doc.decodeTree().rejectionText(err)
 	rejected := decodeError{err: yamlMessageError{err: err, msg: msg}, label: label}

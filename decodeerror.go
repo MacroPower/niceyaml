@@ -4,199 +4,33 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
-	"math"
 	"reflect"
 	"slices"
-	"strconv"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/rejection"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// The byte slice a !!binary tag reads as, which [kindOfType] names apart
-// from its kind, as it names [time.Time] for a !!timestamp tag and
-// [yaml.MapSlice] for a mapping under [WithYAMLOrderedMaps].
-var bytesType = reflect.TypeFor[[]byte]()
-
-// The names a rejection gives the kinds of YAML values, as
-// [rejectionMessage] writes them.
-const (
-	kindMapping  = "mapping"
-	kindSequence = "sequence"
-	kindString   = "string"
-	kindInteger  = "integer"
-	kindFloat    = "float"
-	kindBoolean  = "boolean"
-	kindNull     = "null"
-
-	// The name of a value whose kind its type does not tell, as for a
-	// value an interface holds.
-	kindValue = "value"
-
-	// The name a target takes when no YAML value but a null decodes into
-	// it, as for a channel.
-	kindNone = "no value"
-)
-
-// rejectionMessage returns the message of err, a rejection the go-yaml
-// decoder returned, worded for the document. The decoder words three of
-// its errors for the Go target, and names the outermost struct field on
-// the way to the value rather than the field that holds it.
-// Those errors carry what they compare in typed fields, so
-// rejectionMessage writes the message from the fields:
-//
-//   - A value of the wrong kind, a [yaml.TypeError] or a
-//     [yaml.UnexpectedNodeTypeError], reads "expected integer, got
-//     string", with the kinds [kindOfType] and [kindOfNode] name.
-//   - A number that overflows an integer type, a [yaml.OverflowError],
-//     reads "expected integer from -128 to 127, got 300", with the range
-//     of the type.
-//
-// The decoder also rejects a value by its Go type alone, as when it hands
-// the value of an anchor to an inline field with an alias option, or
-// fills a pointer to a pointer. The two types can then hold one kind of
-// value, as two struct types do, and an anchor the decoder read into an
-// interface has a type that names no kind. Kinds alone would read
-// "expected mapping, got mapping", so the message reads "expected
-// mapping, got mapping of another type" and names neither type.
-//
-// Any other error keeps the message the decoder gave it, such as the one
-// for an unknown field, a [yaml.UnknownFieldError], which names the field
-// as the document does.
-//
-// The error result is the label of the rejection, which the branch that
-// writes the message sets, so a rejection matches a label exactly when
-// it reads as that label describes. A value of the wrong kind or of
-// another type gets [ErrWrongKind], a number that overflows gets
-// [ErrOverflow], and an unknown field gets [ErrUnknownField]. Any other
-// error gets nil.
-func rejectionMessage(err yaml.Error) (string, error) {
-	switch e := err.(type) { //nolint:errorlint // The decoder returns these types unwrapped.
-	case *yaml.TypeError:
-		want, got := kindOfType(e.DstType), kindOfType(e.SrcType)
-		if want == got || got == kindValue {
-			return fmt.Sprintf("expected %s, got %s of another type", want, got), ErrWrongKind
-		}
-
-		return fmt.Sprintf("expected %s, got %s", want, got), ErrWrongKind
-
-	case *yaml.UnexpectedNodeTypeError:
-		return fmt.Sprintf("expected %s, got %s", kindOfNode(e.Expected), kindOfNode(e.Actual)), ErrWrongKind
-
-	case *yaml.OverflowError:
-		lo, hi, ok := integerRange(e.DstType)
-		if !ok {
-			return fmt.Sprintf("expected %s, got %s", kindOfType(e.DstType), e.SrcNum), ErrOverflow
-		}
-
-		return fmt.Sprintf("expected %s from %s to %s, got %s", kindInteger, lo, hi, e.SrcNum), ErrOverflow
-
-	case *yaml.UnknownFieldError:
-		return err.GetMessage(), ErrUnknownField
-
+// rejectionLabel returns the sentinel a rejection of the given label
+// matches, as [rejection.Classify] labels it: [ErrWrongKind],
+// [ErrOverflow], or [ErrUnknownField], or nil for [rejection.None].
+func rejectionLabel(label rejection.Label) error {
+	switch label {
+	case rejection.WrongKind:
+		return ErrWrongKind
+	case rejection.Overflow:
+		return ErrOverflow
+	case rejection.UnknownField:
+		return ErrUnknownField
 	default:
-		return err.GetMessage(), nil
-	}
-}
-
-// kindOfType returns the kind of YAML value that the Go type t holds, for
-// the message of a rejection. The type is the target of a decode, or the
-// type the go-yaml decoder read a value of the document as. A nil type
-// is the null the decoder reads as a nil value. A pointer names what it
-// points to.
-//
-// The result never names a Go type. An interface holds a value of any
-// kind, so it reads [kindValue]. No YAML value but a null decodes into a
-// channel, a function, a complex number, or an unsafe pointer, so a
-// target of one of those kinds reads [kindNone].
-func kindOfType(t reflect.Type) string {
-	if t == nil {
-		return kindNull
-	}
-
-	t = unmarshaler.Base(t)
-
-	switch t {
-	case unmarshaler.TimeType:
-		return "timestamp"
-	case unmarshaler.DurationType:
-		return "duration"
-	case bytesType:
-		return "binary"
-	case unmarshaler.MapSliceType:
-		return kindMapping
-	}
-
-	switch t.Kind() {
-	case reflect.Bool:
-		return kindBoolean
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return kindInteger
-	case reflect.Float32, reflect.Float64:
-		return kindFloat
-	case reflect.String:
-		return kindString
-	case reflect.Slice, reflect.Array:
-		return kindSequence
-	case reflect.Map, reflect.Struct:
-		return kindMapping
-	case reflect.Interface:
-		return kindValue
-	default:
-		return kindNone
-	}
-}
-
-// kindOfNode returns the kind of YAML value a node of type t holds, for
-// the message of a rejection. A type that holds no value, such as an
-// anchor, has the name go-yaml gives it.
-func kindOfNode(t ast.NodeType) string {
-	switch t {
-	case ast.MappingType, ast.MappingValueType:
-		return kindMapping
-	case ast.SequenceType:
-		return kindSequence
-	case ast.StringType, ast.LiteralType:
-		return kindString
-	case ast.IntegerType:
-		return kindInteger
-	case ast.FloatType, ast.InfinityType, ast.NanType:
-		return kindFloat
-	case ast.BoolType:
-		return kindBoolean
-	case ast.NullType:
-		return kindNull
-	default:
-		return t.YAMLName()
-	}
-}
-
-// integerRange returns the lowest and the highest value of the integer
-// type t in decimal, or false for a type of any other kind.
-func integerRange(t reflect.Type) (string, string, bool) {
-	if t == nil {
-		return "", "", false
-	}
-
-	switch t.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		shift := 64 - t.Bits()
-
-		return strconv.FormatInt(math.MinInt64>>shift, 10), strconv.FormatInt(math.MaxInt64>>shift, 10), true
-
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return "0", strconv.FormatUint(math.MaxUint64>>(64-t.Bits()), 10), true
-
-	default:
-		return "", "", false
+		return nil
 	}
 }
 
@@ -371,14 +205,14 @@ func holdsLocation(err error) bool {
 }
 
 // textRejection returns the rejection of content, a mapping or a
-// sequence the decoder refuses as [refusesForText] reports. The error
-// the decoder returns for it names neither the value nor its kind. The
-// rejection matches [ErrDecode] and [ErrWrongKind] and reads "expected
-// string, got sequence", as [rejectionMessage] writes the rejection of a
-// sequence that a string field reads.
+// sequence the decoder refuses as [unmarshaler.Options.RefusesForText]
+// reports. The error the decoder returns for it names neither the value
+// nor its kind. The rejection matches [ErrDecode] and [ErrWrongKind] and
+// reads "expected string, got sequence", as [rejection.ExpectedString]
+// words it.
 func textRejection(content ast.Node) error {
 	return decodeError{
-		err:   fmt.Errorf("expected %s, got %s", kindString, kindOfNode(content.Type())),
+		err:   errors.New(rejection.ExpectedString(content.Type())),
 		label: ErrWrongKind,
 	}
 }
