@@ -103,6 +103,12 @@ A [`line.View`][niceyaml/line.View] carries the notes and marks of one rendering
 
 A [`paths.Path`][niceyaml/paths] such as `$.menu.lunch[0].price` names one node of a document, and a path with a wildcard names several. A [`Node`][niceyaml.Node] decodes the value at a path, lists the nodes a path selects, and returns the path at a position.
 
+### Errors
+
+- [examples/errors](examples/errors)
+
+An [`Error`][niceyaml.Error] names a path and holds no source. The example binds such errors to a `Source`, then renders them as a styled excerpt, as plain text for a log, as marks on the whole document, and as one row per problem.
+
 ### Schemas
 
 - [examples/schemas/cafe](examples/schemas/cafe)
