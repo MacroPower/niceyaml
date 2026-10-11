@@ -1,0 +1,14 @@
+---
+restaurant:
+  name: Café Yamüll
+  established: 2026
+
+menu:
+  breakfast:
+    - item: "Småkakor & Kaffe"
+      price: "200 kr"
+    - item: "Kanelbulle"
+      price: "45 kr"
+  lunch:
+    - item: "Räksmörgås"
+      price: "180 kr"

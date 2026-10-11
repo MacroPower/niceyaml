@@ -97,6 +97,12 @@ A [`line.View`][niceyaml/line.View] carries the notes and marks of one rendering
 
 - [examples/finder](examples/finder)
 
+### Paths
+
+- [examples/paths](examples/paths)
+
+A [`paths.Path`][niceyaml/paths] such as `$.menu.lunch[0].price` names one node of a document, and a path with a wildcard names several. A [`Node`][niceyaml.Node] decodes the value at a path, lists the nodes a path selects, and returns the path at a position.
+
 ### Schemas
 
 - [examples/schemas/cafe](examples/schemas/cafe)
@@ -223,6 +229,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml/finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/finder
 [niceyaml/line]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line
 [niceyaml/line.View]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line#View
+[niceyaml/paths]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/paths
 [niceyaml/printer]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer
 [niceyaml/printer.Cut]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer#Cut
 [niceyaml/printer.Layout]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer#Layout
