@@ -3761,47 +3761,68 @@ func (e *SourceError) all(seen map[*SourceError]bool, yield func(*SourceError) b
 // [Problems]. A nil err has no bindings.
 func Bindings(err error) iter.Seq[*SourceError] {
 	return func(yield func(*SourceError) bool) {
-		eachBinding(err, yield)
+		for below := range errorsBelow(err) {
+			x, ok := below.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
+			if ok && !yield(x) {
+				return
+			}
+		}
 	}
 }
 
-// eachBinding calls visit for each [*SourceError] reached through the
-// wrappers and joins around err, in depth-first order, and stops when
-// visit reports false. Below an [*Error] it reaches the error the Error
+// errorsBelow returns an iterator over err and every error below it, in
+// depth-first order. Below an [*Error] it reaches the error the Error
 // wraps, then each error a summary heads, then each detail, which
-// [Error.Unwrap] leaves out. It does not look below a binding, whose
-// children visit reaches through the binding itself. Reports whether
-// every visit wanted more.
-func eachBinding(err error, visit func(*SourceError) bool) bool {
+// [Error.Unwrap] leaves out. Below any other error it reaches each error
+// that error wraps. It does not look below a [*SourceError], whose
+// children the binding holds itself. A nil err, and a nil pointer, yield
+// nothing.
+func errorsBelow(err error) iter.Seq[error] {
+	return func(yield func(error) bool) {
+		eachBelow(err, yield)
+	}
+}
+
+// eachBelow yields the errors [errorsBelow] yields for err, and reports
+// whether yield wanted more. It passes yield down rather than ranging
+// over the iterator of each error below, which would take time quadratic
+// in the depth of a long chain of joins.
+func eachBelow(err error, yield func(error) bool) bool {
+	if isNothing(err) {
+		return true
+	}
+
+	if !yield(err) {
+		return false
+	}
+
 	switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
 	case *SourceError:
-		if x == nil {
-			return true
-		}
-
-		return visit(x)
+		return true
 
 	case *Error:
-		if x == nil {
-			return true
-		}
-
-		if !eachBinding(x.err, visit) {
+		if !eachBelow(x.err, yield) {
 			return false
 		}
 
-		for _, inner := range slices.Concat(x.errors, x.details) {
-			if !eachBinding(inner, visit) {
+		for _, inner := range x.errors {
+			if !eachBelow(inner, yield) {
+				return false
+			}
+		}
+
+		for _, inner := range x.details {
+			if !eachBelow(inner, yield) {
 				return false
 			}
 		}
 
 	case interface{ Unwrap() error }:
-		return eachBinding(x.Unwrap(), visit)
+		return eachBelow(x.Unwrap(), yield)
 
 	case interface{ Unwrap() []error }:
 		for _, inner := range x.Unwrap() {
-			if !eachBinding(inner, visit) {
+			if !eachBelow(inner, yield) {
 				return false
 			}
 		}
@@ -3823,9 +3844,11 @@ func allBindings(err error) iter.Seq[*SourceError] {
 	return func(yield func(*SourceError) bool) {
 		seen := make(map[*SourceError]bool)
 
-		eachBinding(err, func(x *SourceError) bool {
-			return x.all(seen, yield)
-		})
+		for x := range Bindings(err) {
+			if !x.all(seen, yield) {
+				return
+			}
+		}
 	}
 }
 

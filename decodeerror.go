@@ -185,27 +185,19 @@ func (n *Node) lacksLocation(err error) bool {
 // or comes from [Rebase]. The details of an Error count as part of that
 // tree, though [Error.Unwrap] leaves them out.
 func holdsLocation(err error) bool {
-	switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
-	case *SourceError:
-		return x != nil
+	for below := range errorsBelow(err) {
+		switch x := below.(type) { //nolint:errorlint // The node itself, not a chain search.
+		case *SourceError:
+			return true
 
-	case *Error:
-		if x == nil {
-			return false
+		case *Error:
+			if x.hasLocation() || x.move != nil {
+				return true
+			}
 		}
-
-		return x.hasLocation() || x.move != nil ||
-			slices.ContainsFunc(x.Unwrap(), holdsLocation) || slices.ContainsFunc(x.details, holdsLocation)
-
-	case interface{ Unwrap() error }:
-		return holdsLocation(x.Unwrap())
-
-	case interface{ Unwrap() []error }:
-		return slices.ContainsFunc(x.Unwrap(), holdsLocation)
-
-	default:
-		return false
 	}
+
+	return false
 }
 
 // textRejection returns the rejection of content, a mapping or a
