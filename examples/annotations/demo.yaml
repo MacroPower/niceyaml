@@ -1,0 +1,10 @@
+---
+restaurant:
+  name: Café Yamüll
+
+menu:
+  breakfast:
+    - item: "Småkakor & Kaffe"
+      price: "200 kr"
+      note: Swedish cookies, served with a pot of coffee.
+      dietary: [dairy, gluten]

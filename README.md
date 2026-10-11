@@ -85,6 +85,9 @@ flowchart LR
 ### Printer
 
 - [examples/printer](examples/printer)
+- [examples/annotations](examples/annotations)
+
+A [`line.View`][niceyaml/line.View] carries the notes and marks of one rendering, and the printer decides how they look. The second example annotates lines, marks ranges, and prints the same view wrapped to a width and with a gutter of its own.
 
 ### Diffs
 
