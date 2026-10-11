@@ -14,15 +14,15 @@ import (
 var ErrUnnamedKey = errors.New("mapping key has no name")
 
 // NewSourceFromLayers creates a new [*Source] that holds the one document
-// the given layers merge into, in the order they apply: the lowest layer
-// first and the highest last, such as a base file with the file of one
-// environment over it. A mapping in a higher layer merges into the
-// mapping below it key by key, a sequence or a scalar replaces what lies
-// below it, and a null keeps it. [Source.Decode] and [Source.DecodeInto]
-// then validate, decode, and self-validate the merged document once, and
-// each error binds in the file that holds the value the error is about.
-// Each layer is a [Layer], and a program passes the Source of each file
-// as it read it:
+// the given layers merge into. The layers go in the order they apply,
+// the lowest first and the highest last, such as a base file with the
+// file of one environment over it. A mapping in a higher layer merges
+// into the mapping below it key by key, a sequence or a scalar replaces
+// what lies below it, and a null written as `null` or `~` removes its
+// key. [Source.Decode] and [Source.DecodeInto] then validate, decode,
+// and self-validate the merged document once, and each error binds in
+// the file that holds the value the error is about. Each layer is a
+// [Layer], and a program passes the Source of each file as it read it:
 //
 //	base, err := niceyaml.NewSourceFromFile("base.yaml")
 //	if err != nil {
@@ -159,12 +159,34 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 // element by element. An empty mapping holds no key to merge, so it
 // keeps the mapping below it as it is.
 //
-// A null in a higher layer keeps the value of the layers below, so a key
-// whose entries are all commented out changes nothing. That holds for
-// every Go type the value decodes into, a pointer field included, where
-// a null in one document sets the pointer to nil. A higher layer thus
-// has no way to unset a value that a lower layer sets. The merged
-// document holds a null only where no lower layer holds a value.
+// A null that a higher layer writes, as `null` or `~`, removes its key
+// from the merged document, with the value the layers below hold there.
+// Over a base.yaml that sets a proxy and two variables, prod.yaml
+// removes the proxy and one variable:
+//
+//	# base.yaml                # prod.yaml
+//	proxy:                     proxy: ~
+//	  url: http://proxy:3128   env: {B: null}
+//	env: {A: 1, B: 2}
+//
+// The merged document holds env.A alone. A written null removes its key
+// at every depth, whatever kind of value the layers below hold there. A
+// removed key stays removed under a null of a higher layer, and a higher
+// layer that sets a value there brings the key back with that value
+// alone. Where no lower layer holds a value at the key, a written null
+// stays a null.
+//
+// A null that a layer leaves unwritten keeps the value of the layers
+// below. A key with nothing after it holds such a null, so a key whose
+// entries are all commented out changes nothing:
+//
+//	server:
+//	  # port: 9090
+//
+// A tag with no value holds an unwritten null too, as in `tags: !!null`.
+// A null at the root of a layer has no key to remove, so it keeps the
+// document below it. An empty sequence replaces as any sequence does, so
+// `tags: []` clears the tags and leaves the key in place.
 //
 // # Keys
 //
@@ -186,6 +208,7 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 // anchors of that name the other layers define, and a value that an
 // alias or a merge key brings in merges as one written in its place
 // does. The merged document holds a copy of that value and no alias.
+// A written null that an alias or a merge key brings in removes its key.
 // The merge writes each alias out in full, so a layer must pass the
 // alias limit of [WithAliasLimit] as a decode into a type that reads
 // text does.
@@ -198,12 +221,15 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 // comment of a layer. Every scalar keeps the text its layer spells, such
 // as 0x10 or 1.50, and a string keeps its quotes, except that a block
 // scalar or a string of several lines reads as one double-quoted line.
-// The Source takes its [Source.Name], its [Source.FilePath], and its
+// A key with nothing after it stays that way in the merged text, so the
+// merged Source removes no value as a layer that its layers keep. The
+// Source takes its [Source.Name], its [Source.FilePath], and its
 // [Source.FS] from the Source of the lowest layer, with what
 // [WithAllowDuplicateKeys] and [WithAliasLimit] set there. Its text
-// holds values of every layer, so [Source.ShowsExcerpts] reports false for it
-// when the Source of any layer has excerpts off, as [WithExcerpts]
-// describes. A call with no layer gives an empty Source with no name.
+// holds values of every layer, so [Source.ShowsExcerpts] reports false
+// for it when the Source of any layer has excerpts off, as
+// [WithExcerpts] describes. A call with no layer gives an empty Source
+// with no name.
 //
 // [Source.Document] returns the root Node of the merged document, the
 // Node a [Validator] gets. A caller reads one value of the layers
@@ -235,19 +261,24 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 // An error never binds in the merged text. An error with a path binds in
 // the highest layer whose document holds the value at that path, and the
 // path resolves in the file of that layer, through its aliases and merge
-// keys as [Node.Bind] resolves it. A higher layer that holds a null
-// there holds no value. An error at a mapping that several layers hold
-// binds in the highest of them. An error under a sequence binds in the
-// layer that holds the sequence, and never in a layer below it, whose
-// elements the merge discarded. An error with a position or a range in
-// the merged text binds at the value that lies there, as a path to that
-// value does. An error with no location binds in the lowest layer with
-// no position, as in "base.yaml: quota service: connection refused".
+// keys as [Node.Bind] resolves it. A higher layer that holds an
+// unwritten null there holds no value. An error at a mapping that
+// several layers hold binds in the highest of them. An error under a
+// sequence binds in the layer that holds the sequence, and never in a
+// layer below it, whose elements the merge discarded. An error with a
+// position or a range in the merged text binds at the value that lies
+// there, as a path to that value does. An error with no location binds
+// in the lowest layer with no position, as in
+// "base.yaml: quota service: connection refused".
 //
 // When no layer holds the value, the error binds at the key of the
 // mapping that lacks it, as [Node.Bind] binds the path of a missing key.
 // It binds in the layer whose mapping lies deepest along the path, and
 // in the highest of several such layers.
+//
+// An error at a key that a layer removed binds at the null that removed
+// the key, as in "prod.yaml:1:8: $.proxy: proxy is required". It binds
+// in the highest layer that writes a null there.
 //
 // The bound error reports the [SourceError.Source] and the
 // [SourceError.Node] of the layer it binds in. Its message and
@@ -267,28 +298,40 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 //
 // The merged Source is a layer like any other, and so is the Node its
 // Document method returns. A merge that holds one reads its value as it
-// reads a file of the same text. Each error still binds in the file that
-// holds its value, with the path that file has for it.
+// reads a file of the same text. It removes each key that the layers of
+// that Source removed, though the text leaves those keys out. Each error
+// still binds in the file that holds its value, with the path that file
+// has for it.
 //
 // # Defaults
 //
 // The decode still fills the Go value by the rule of [Node.DecodeInto],
 // once, from the merged document. A value that holds defaults keeps each
 // field the merged document leaves out, and a mapping of the document
-// replaces a map the value holds, whole. Defaults that should merge key
-// by key go in a layer, such as an embedded file below the others.
+// replaces a map the value holds, whole. The merged document leaves out
+// a key that a layer removed, so a default the program set in the Go
+// value before the decode survives the removal. Defaults that should
+// merge key by key go in a layer, such as an embedded file below the
+// others, and a higher layer then removes one of them as it removes any
+// value.
 //
 // # Override Limits
 //
 // A layer the program builds from its environment or its flags merges
-// and binds as a file does, and those rules set its limits. A null keeps
-// the value below it, so the layer cannot unset a value. A sequence
+// and binds as a file does, and those rules set its limits. A sequence
 // replaces the one below it whole, so the layer cannot set one element.
 // A key that no field of the target reads sets nothing, and
 // [WithDisallowUnknownFields] reports such a key. An error at a mapping
 // binds in the highest layer that holds the mapping, and so does an
 // error for a key the mapping lacks. Both thus bind in such a layer once
 // it sets one key there, whichever layer the fix belongs in.
+//
+// A written null in such a layer removes its key, as one in a file does.
+// [go.jacobcolvin.com/niceyaml/encoder.Marshal] writes a nil pointer
+// field of a struct as `null`, so a layer encoded from a struct removes
+// the value under each pointer the program left nil. A map of the keys
+// the program set holds no such null, and neither does a struct whose
+// pointer fields have the omitempty option.
 //
 // # Secrets
 //
@@ -402,9 +445,9 @@ type Layer interface {
 // on one file or on a merged Source.
 //
 // The layer is the highest one whose document holds a value at the path,
-// and a null there holds none. The origin has the lines, the positions,
-// and the [Node.Path] of the document of that layer. For a layer from
-// [Node.At], that path differs from the path of n, as
+// and an unwritten null there holds none. The origin has the lines, the
+// positions, and the [Node.Path] of the document of that layer. For a
+// layer from [Node.At], that path differs from the path of n, as
 // `$.prod.server.port` differs from `$.server.port`.
 //
 // A mapping that several layers hold has its origin in the highest of

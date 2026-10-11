@@ -109,14 +109,14 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				"  l: w",
 			),
 		},
-		"a null keeps the value below it": {
+		"an unwritten null keeps the value below it": {
 			layers: []string{
 				stringtest.LinesLF("name: shop", "web: {image: nginx}", "tags: [x]"),
 				stringtest.LinesLF(
-					"name: ~",
+					"name:",
 					"web:",
 					"  # image: other",
-					"tags: null",
+					"tags: !!null",
 				),
 			},
 			want: stringtest.LinesLF(
@@ -132,18 +132,83 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				"$.tags[0]":   "base.yaml:3:8",
 			},
 		},
+		"a written null removes the key below it": {
+			layers: []string{
+				stringtest.LinesLF(
+					"name: shop",
+					"proxy:",
+					"  url: http://proxy:3128",
+					"tags: [x]",
+					"port: 8080",
+				),
+				stringtest.LinesLF("name: ~", "proxy: null", "tags: Null"),
+			},
+			want: "port: 8080\n",
+			binds: map[string]string{
+				"$.name":      "prod.yaml:1:7",
+				"$.proxy":     "prod.yaml:2:8",
+				"$.proxy~":    "prod.yaml:2:1",
+				"$.proxy.url": "prod.yaml:2:1",
+				"$.tags":      "prod.yaml:3:7",
+				"$.port":      "base.yaml:5:7",
+			},
+		},
+		"a written null removes a key at any depth": {
+			layers: []string{"env: {A: 1, B: 2}\n", "env: {B: ~}\n"},
+			want:   stringtest.LinesLF("env:", "  A: 1"),
+			binds: map[string]string{
+				"$.env":   "prod.yaml:1:1",
+				"$.env.A": "base.yaml:1:10",
+				"$.env.B": "prod.yaml:1:10",
+			},
+		},
+		"a mapping stays once a layer removed each of its keys": {
+			layers: []string{"env: {B: 2}\n", "env: {B: ~}\n"},
+			want:   "env: {}\n",
+			binds:  map[string]string{"$.env.B": "prod.yaml:1:10"},
+		},
+		"a removed key stays removed under a second written null": {
+			layers: []string{"name: shop\nproxy: {url: x}\n", "proxy: ~\n", "proxy: null\n"},
+			want:   "name: shop\n",
+			binds:  map[string]string{"$.proxy": "prod.yaml:1:8"},
+		},
+		"a removed key stays removed under an unwritten null": {
+			layers: []string{"name: shop\nproxy: {url: x}\n", "proxy: ~\n", "proxy:\n"},
+			want:   "name: shop\n",
+			binds:  map[string]string{"$.proxy": "mid.yaml:1:8"},
+		},
+		"a value over a removed key holds none of the value below": {
+			layers: []string{"proxy: {url: x, port: 1}\nname: shop\n", "proxy: ~\n", "proxy: {port: 2}\n"},
+			want:   stringtest.LinesLF("proxy:", "  port: 2", "name: shop"),
+			binds: map[string]string{
+				"$.proxy.port": "prod.yaml:1:15",
+				"$.proxy.url":  "prod.yaml:1:1",
+			},
+		},
 		"a null stays where no layer below holds a value": {
 			layers: []string{"a: 1\nd: null\n", stringtest.LinesLF("b: ~", "c:", "d: ~")},
 			want: stringtest.LinesLF(
 				"a: 1",
 				"d: ~",
 				"b: ~",
-				"c: null",
+				"c:",
 			),
 			binds: map[string]string{
 				"$.b": "prod.yaml:1:4",
 				"$.d": "prod.yaml:3:4",
 			},
+		},
+		"an unwritten null keeps the written null below it": {
+			layers: []string{"d: null\ne:\n", "d:\ne:\n"},
+			want:   stringtest.LinesLF("d: null", "e:"),
+			binds: map[string]string{
+				"$.d": "base.yaml:1:4",
+				"$.e": "prod.yaml:2:4",
+			},
+		},
+		"a null in a sequence stays, since the sequence replaces": {
+			layers: []string{"list: [{a: 1}, x]\n", "list: [{a: ~}, ~]\n"},
+			want:   stringtest.LinesLF("list:", "  - a: ~", "  - ~"),
 		},
 		"an empty mapping keeps the mapping below and an empty sequence replaces": {
 			layers: []string{"m: {a: 1}\ns: [x]\n", "m: {}\ns: []\n"},
@@ -201,7 +266,7 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 			},
 		},
 		"a key keeps the spelling of the layer its value comes from": {
-			layers: []string{"ports: {80: a}\n", "ports: {'80': ~}\n"},
+			layers: []string{"ports: {80: a}\n", "ports: {'80': }\n"},
 			want:   stringtest.LinesLF("ports:", "  80: a"),
 			binds:  map[string]string{"$.ports.80~": "base.yaml:1:9"},
 		},
@@ -261,10 +326,10 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 			want: stringtest.LinesLF(
 				"a:",
 				"  b: 1",
-				"  self: null",
+				"  self:",
 				"c:",
 				"  b: 1",
-				"  self: null",
+				"  self:",
 			),
 		},
 		"an alias to a scalar copies its text": {
@@ -453,14 +518,15 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 					"none: !obj {}",
 					"!!str 1: key",
 					"nul: !!str ~",
+					"blank: !!str",
 				),
 			},
 			want: stringtest.LinesLF(
 				"bin: !!binary aGVsbG8=",
 				"str: !!str 5",
 				"set: !!set",
-				"  a: null",
-				"  b: null",
+				"  a:",
+				"  b:",
 				"obj: !obj",
 				"  k: v",
 				"list: !list",
@@ -474,6 +540,7 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				"none: !obj {}",
 				"!!str 1: key",
 				"nul: !!str ~",
+				"blank: !!str null",
 			),
 		},
 		"a merged mapping takes the tag of the highest layer that writes one": {
@@ -563,6 +630,82 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, alone, got)
 			}
+		})
+	}
+}
+
+func TestNewSourceFromLayers_Decode_Nulls(t *testing.T) {
+	t.Parallel()
+
+	const (
+		// The document of base.yaml, which is the merged text where its
+		// proxy stays.
+		kept = "proxy:\n  url: http://proxy:3128\nport: 8080\n"
+		// The merged text where prod.yaml removed the proxy.
+		removed = "port: 8080\n"
+	)
+
+	// Each case puts prod.yaml over a base.yaml that sets a proxy and a
+	// port, and reads the text of the merged document. A null that
+	// prod.yaml writes removes the proxy, and one it leaves unwritten
+	// keeps the proxy, whatever layout holds the null.
+	tcs := map[string]struct {
+		prod string
+		want string
+	}{
+		"the word null removes":                {prod: "proxy: null\n", want: removed},
+		"a tilde removes":                      {prod: "proxy: ~\n", want: removed},
+		"a capitalized null removes":           {prod: "proxy: Null\n", want: removed},
+		"an upper-case null removes":           {prod: "proxy: NULL\n", want: removed},
+		"a null before a comment removes":      {prod: "proxy: null # none\n", want: removed},
+		"a null below its key removes":         {prod: "proxy:\n  ~\n", want: removed},
+		"a null in a flow mapping removes":     {prod: "{proxy: null}\n", want: removed},
+		"a null under a quoted key removes":    {prod: "\"proxy\": ~\n", want: removed},
+		"a null under an explicit key removes": {prod: "? proxy\n: ~\n", want: removed},
+		"a null before a CRLF removes":         {prod: "proxy: ~\r\n", want: removed},
+		"a null under a null tag removes":      {prod: "proxy: !!null ~\n", want: removed},
+		"an anchored null removes":             {prod: "proxy: &none ~\n", want: removed},
+		"an alias to a written null removes": {
+			prod: "none: &none ~\nproxy: *none\n",
+			want: removed + "none: ~\n",
+		},
+		"a written null that a merge key brings in removes": {
+			prod: "none: &none {proxy: ~}\n<<: *none\n",
+			want: removed + "none:\n  proxy: ~\n",
+		},
+		"a key with nothing after it keeps":           {prod: "proxy:\n", want: kept},
+		"a key before a comment keeps":                {prod: "proxy: # none\n", want: kept},
+		"a key above comments alone keeps":            {prod: "proxy:\n  # url: http://other:3128\n", want: kept},
+		"a key with no value in a flow mapping keeps": {prod: "{proxy: }\n", want: kept},
+		"a key alone in a flow mapping keeps":         {prod: "{proxy}\n", want: kept},
+		"an explicit key with no value keeps":         {prod: "? proxy\n", want: kept},
+		"a key before a CRLF keeps":                   {prod: "proxy:\r\n", want: kept},
+		"a tag with no value keeps":                   {prod: "proxy: !!null\n", want: kept},
+		"an anchor with no value keeps": {
+			prod: "proxy: &none\nother: *none\n",
+			want: kept + "other:\n",
+		},
+		"an alias to an unwritten null keeps": {
+			prod: "none: &none\nproxy: *none\n",
+			want: kept + "none:\n",
+		},
+		"an unwritten null that a merge key brings in keeps": {
+			prod: "none: &none\n  proxy:\n<<: *none\n",
+			want: kept + "none:\n  proxy:\n",
+		},
+		// A tag that converts a null stays on the null, which then keeps
+		// the value below it whether prod.yaml writes it or not.
+		"a written null under a string tag keeps":    {prod: "proxy: !!str ~\n", want: kept},
+		"an unwritten null under a string tag keeps": {prod: "proxy: !!str\n", want: kept},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			layers := layerFiles(t, kept, tc.prod)
+
+			assert.Equal(t, tc.want, mergedText(t, layers))
 		})
 	}
 }
@@ -1626,6 +1769,133 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 			require.EqualError(t, err, "base.yaml:6:9: $.server.port: expected boolean, got integer")
 		})
 	}
+
+	// Each case layers its three files in every arrangement of tcs. A key
+	// that a file removes stays out of the merged text and binds at the
+	// null that removed it, whichever layers merged first.
+	removals := map[string]struct {
+		binds map[string]string
+		base  string
+		mid   string
+		prod  string
+		want  string
+	}{
+		"a key that a file removed stays removed": {
+			base: stringtest.LinesLF("name: shop", "proxy: {url: x}", "env: {A: 1, B: 2}"),
+			mid:  stringtest.LinesLF("proxy: ~", "env: {B: ~}"),
+			prod: "name: prod\n",
+			want: stringtest.LinesLF("name: prod", "env:", "  A: 1"),
+			binds: map[string]string{
+				"$.proxy": "mid.yaml:1:8",
+				"$.env.B": "mid.yaml:2:10",
+				"$.env.A": "base.yaml:3:10",
+			},
+		},
+		"a second written null keeps the key removed": {
+			base: stringtest.LinesLF("name: shop", "proxy: {url: x}"),
+			mid:  "proxy: ~\n",
+			prod: "proxy: null\n",
+			want: "name: shop\n",
+			binds: map[string]string{
+				"$.proxy": "prod.yaml:1:8",
+			},
+		},
+		"an unwritten null removes nothing": {
+			base: stringtest.LinesLF("name: shop", "server: {port: 80}"),
+			mid:  stringtest.LinesLF("server:", "  # port: 9090"),
+			prod: "name: prod\n",
+			want: stringtest.LinesLF("name: prod", "server:", "  port: 80"),
+			binds: map[string]string{
+				"$.server.port": "base.yaml:2:16",
+			},
+		},
+		"an unwritten null above a written one removes": {
+			base: stringtest.LinesLF("name: shop", "proxy: {url: x}"),
+			mid:  "proxy: ~\n",
+			prod: "proxy:\n",
+			want: "name: shop\n",
+			binds: map[string]string{
+				"$.proxy": "mid.yaml:1:8",
+			},
+		},
+		// The merged text spells the null of mid.yaml as a written one
+		// behind its tag.
+		"an unwritten null under a string tag removes nothing": {
+			base: stringtest.LinesLF("name: shop", "proxy: {url: x}"),
+			mid:  "proxy: !!str\n",
+			prod: "name: prod\n",
+			want: stringtest.LinesLF("name: prod", "proxy:", "  url: x"),
+			binds: map[string]string{
+				"$.proxy.url": "base.yaml:2:14",
+			},
+		},
+	}
+
+	for name, tc := range removals {
+		for arrangement, arrange := range tcs {
+			t.Run(name+", "+arrangement, func(t *testing.T) {
+				t.Parallel()
+
+				nodes := layerNodes(t, tc.base, tc.mid, tc.prod)
+				layers := yamltest.Layers(t, arrange(t, nodes[0], nodes[1], nodes[2])...)
+
+				assert.Equal(t, tc.want, mergedText(t, layers))
+
+				requireLayerBinds(t, layers, tc.binds)
+			})
+		}
+	}
+
+	t.Run("a value over a key that a merged layer removed stands where the key stood", func(t *testing.T) {
+		t.Parallel()
+
+		nodes := layerNodes(t, "proxy: {url: x, port: 1}\nname: shop\n", "proxy: ~\n", "proxy: {port: 2}\n")
+
+		want := stringtest.LinesLF("proxy:", "  port: 2", "name: shop")
+
+		assert.Equal(t, want, mergedText(t, yamltest.Layers(t, layersOf(nodes)...)))
+
+		// The document of base.yaml and mid.yaml holds no proxy, and the
+		// mapping of prod.yaml takes the place the removed key had.
+		lower := yamltest.Document(t, yamltest.Layers(t, nodes[0], nodes[1]))
+		layers := yamltest.Layers(t, lower, nodes[2])
+
+		assert.Equal(t, want, mergedText(t, layers))
+
+		requireLayerBinds(t, layers, map[string]string{
+			"$.proxy.port": "prod.yaml:1:15",
+			"$.proxy.url":  "prod.yaml:1:1",
+		})
+
+		// The document of mid.yaml and prod.yaml holds the mapping of
+		// prod.yaml and no null, so it merges into the mapping of
+		// base.yaml as a file of its text does.
+		upper := yamltest.Document(t, yamltest.Layers(t, nodes[1], nodes[2]))
+
+		assert.Equal(t,
+			stringtest.LinesLF("proxy:", "  url: x", "  port: 2", "name: shop"),
+			mergedText(t, yamltest.Layers(t, nodes[0], upper)),
+		)
+	})
+
+	t.Run("a scoped Node of a merged document removes what its layers removed", func(t *testing.T) {
+		t.Parallel()
+
+		nodes := layerNodes(t,
+			"proxy: {url: default}\n",
+			stringtest.LinesLF("app:", "  name: shop", "  proxy: {url: x}"),
+			stringtest.LinesLF("app:", "  proxy: ~"),
+		)
+
+		// The merged text of the upper two files holds no proxy under app.
+		upper := yamltest.Document(t, yamltest.Layers(t, nodes[1], nodes[2]))
+		layers := yamltest.Layers(t, nodes[0], yamltest.At(t, upper, paths.Doc().Child("app")))
+
+		assert.Equal(t, "name: shop\n", mergedText(t, layers))
+
+		err := layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.Doc().Child("proxy"))))
+		require.EqualError(t, err, "prod.yaml:2:10: $.app.proxy: here")
+	})
 
 	t.Run("a scoped Node of a merged document binds in its files with their paths", func(t *testing.T) {
 		t.Parallel()

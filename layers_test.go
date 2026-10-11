@@ -564,13 +564,40 @@ func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
 			odd:    []paths.Path{paths.Current().Child("switch", "mode")},
 			err:    "base.yaml:1:26: $.switch.mode: odd value",
 		},
-		"a null field keeps the value of the layer below": {
-			layers: []string{layerBadPort, stringtest.LinesLF("server:", "  host: x", "  port: null")},
+		"an unwritten null keeps the field of the layer below": {
+			layers: []string{layerBadPort, stringtest.LinesLF("server:", "  host: x", "  port:")},
 			err:    "base.yaml:3:9: $.server.port: " + portMessage,
 		},
-		"a null mapping keeps the value of the layer below": {
-			layers: []string{layerBadPort, "server: null\n"},
+		"a key above comments alone keeps the mapping of the layer below": {
+			layers: []string{layerBadPort, stringtest.LinesLF("server:", "  # port: 80")},
 			err:    "base.yaml:3:9: $.server.port: " + portMessage,
+		},
+		"a field that a written null removed binds at the null": {
+			layers: []string{layerPort80, stringtest.LinesLF("server:", "  host: x", "  port: null")},
+			err:    "prod.yaml:3:9: $.server.port: " + portMessage,
+		},
+		"a pointer field that a written null removed binds at the null": {
+			layers: []string{
+				stringtest.LinesLF("limits:", "  timeout: 5"),
+				stringtest.LinesLF("limits:", "  timeout: ~"),
+			},
+			err: "prod.yaml:2:12: $.limits.timeout: timeout is required",
+		},
+		"a removed field binds in the highest layer that writes a null": {
+			layers: []string{
+				stringtest.LinesLF("limits:", "  timeout: 5"),
+				stringtest.LinesLF("limits:", "  timeout: null"),
+				stringtest.LinesLF("limits:", "  timeout: ~"),
+			},
+			err: "prod.yaml:2:12: $.limits.timeout: timeout is required",
+		},
+		"a removed field binds below an unwritten null": {
+			layers: []string{
+				stringtest.LinesLF("limits:", "  timeout: 5"),
+				stringtest.LinesLF("limits:", "  timeout: null"),
+				stringtest.LinesLF("limits:", "  timeout:"),
+			},
+			err: "mid.yaml:2:12: $.limits.timeout: timeout is required",
 		},
 		"an empty mapping keeps the value of the layer below": {
 			layers: []string{layerBadPort, "server: {}\n"},
@@ -591,8 +618,8 @@ func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
 			},
 			err: "mid.yaml:2:9: $.server.port: " + portMessage,
 		},
-		"the search passes over a null in a middle layer": {
-			layers: []string{layerBadPort, "name: mid\n", stringtest.LinesLF("server:", "  port: null")},
+		"the search passes over an unwritten null in a higher layer": {
+			layers: []string{layerBadPort, "name: mid\n", stringtest.LinesLF("server:", "  port:")},
 			err:    "base.yaml:3:9: $.server.port: " + portMessage,
 		},
 		"an inline struct binds in the layer that sets its field": {
@@ -791,12 +818,12 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("a null keeps the value below it in a pointer field too", func(t *testing.T) {
+	t.Run("an unwritten null keeps the value below it in a pointer field too", func(t *testing.T) {
 		t.Parallel()
 
 		nodes := layerNodes(t,
 			stringtest.LinesLF("limits:", "  timeout: 5"),
-			stringtest.LinesLF("limits:", "  timeout: null"),
+			stringtest.LinesLF("limits:", "  timeout:"),
 		)
 
 		cfg, err := yamltest.Layers(t, layersOf(nodes)...).Decode[layerConfig](t.Context())
@@ -804,6 +831,71 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		require.NotNil(t, cfg.Limits)
 		require.NotNil(t, cfg.Limits.Timeout)
 		assert.Equal(t, 5, *cfg.Limits.Timeout)
+	})
+
+	t.Run("a written null removes the value below it", func(t *testing.T) {
+		t.Parallel()
+
+		layers := layerFiles(t,
+			stringtest.LinesLF("limits:", "  timeout: 5"),
+			stringtest.LinesLF("limits:", "  timeout: null"),
+		)
+
+		cfg, err := layers.Decode[layerConfig](t.Context(), niceyaml.WithSelfValidation(false))
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Limits)
+		assert.Nil(t, cfg.Limits.Timeout)
+
+		// The limits need a timeout, and the error for the one prod.yaml
+		// removed binds at the null that removed it.
+		_, err = layers.Decode[layerConfig](t.Context())
+		require.EqualError(t, err, "prod.yaml:2:12: $.limits.timeout: timeout is required")
+	})
+
+	t.Run("a default of the value survives the removal of its key", func(t *testing.T) {
+		t.Parallel()
+
+		layers := layerFiles(t,
+			stringtest.LinesLF("name: shop", "backup: {host: b, port: 1}"),
+			stringtest.LinesLF("name: ~", "backup: null"),
+		)
+
+		// The merged document holds neither key, so the decode leaves both
+		// fields as the program set them.
+		cfg := layerConfig{Name: "default", Backup: &layerServer{Host: "d", Port: 9}}
+
+		err := layers.DecodeInto(t.Context(), &cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "default", cfg.Name)
+		assert.Equal(t, &layerServer{Host: "d", Port: 9}, cfg.Backup)
+	})
+
+	t.Run("a layer encoded from a struct removes the value under a nil pointer field", func(t *testing.T) {
+		t.Parallel()
+
+		type overrides struct {
+			Backup *layerServer `yaml:"backup"`
+			Name   string       `yaml:"name"`
+		}
+
+		// The encoder writes the nil pointer as a null.
+		data, err := encoder.Marshal(t.Context(), overrides{Name: "env"})
+		require.NoError(t, err)
+		assert.Equal(t, "backup: null\nname: env\n", string(data))
+
+		base := niceyaml.NewSourceFromString(
+			stringtest.LinesLF("name: shop", "backup: {host: b, port: 1}"),
+			niceyaml.WithName("base.yaml"),
+		)
+		env := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment"))
+
+		layers := yamltest.Layers(t, base, env)
+
+		assert.Equal(t, "name: env\n", mergedText(t, layers))
+
+		cfg, err := layers.Decode[layerConfig](t.Context())
+		require.NoError(t, err)
+		assert.Nil(t, cfg.Backup)
 	})
 
 	t.Run("one decode reports the values every layer gets wrong", func(t *testing.T) {
@@ -953,6 +1045,39 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 			`base.yaml:2:3: $.server.prot~: unknown field "prot"`,
 			`prod.yaml:4:1: $.zone~: unknown field "zone"`,
 		))
+	})
+
+	t.Run("a strict decode reads no key that a layer removed", func(t *testing.T) {
+		t.Parallel()
+
+		base := stringtest.LinesLF(
+			"server:",
+			"  host: example.com",
+			"  port: 80",
+			"  prot: 80",
+			"zone: base",
+		)
+
+		strict := niceyaml.WithDisallowUnknownFields(true)
+
+		_, err := layerFiles(t, base, "name: prod\n").Decode[layerConfig](t.Context(), strict)
+		require.EqualError(t, err, stringtest.JoinLF(
+			"base.yaml: 2 unknown fields",
+			`base.yaml:4:3: $.server.prot~: unknown field "prot"`,
+			`base.yaml:5:1: $.zone~: unknown field "zone"`,
+		))
+
+		// The merged document holds neither key once prod.yaml removes
+		// both.
+		layers := layerFiles(t, base, stringtest.LinesLF("server:", "  prot: ~", "zone: null"))
+
+		cfg, err := layers.Decode[layerConfig](t.Context(), strict)
+		require.NoError(t, err)
+		assert.Equal(t, layerServer{Host: "example.com", Port: 80}, cfg.Server)
+		assert.Equal(t,
+			stringtest.LinesLF("server:", "  host: example.com", "  port: 80"),
+			mergedText(t, layers),
+		)
 	})
 
 	t.Run("a value that holds defaults follows the rule of a decode", func(t *testing.T) {
@@ -1176,6 +1301,22 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 			niceyaml.WithValidator(requires),
 		)
 		require.ErrorContains(t, err, "base.yaml:5:9: $.server.port: 0 is less than 1")
+	})
+
+	t.Run("a key the schema requires reports at the null that removed it", func(t *testing.T) {
+		t.Parallel()
+
+		layers := layerFiles(t, baseInput, stringtest.LinesLF("name: ~", "server:", "  port: null", "  tls: on"))
+
+		// The merged document lacks the name and the port, which base.yaml
+		// sets and prod.yaml removes.
+		err := layers.ValidateDocuments(t.Context(), requires)
+		require.EqualError(t, err, stringtest.JoinLF(
+			"base.yaml: 2 schema violations",
+			`prod.yaml:1:7: $.name: missing required property "name"`,
+			`prod.yaml:3:9: $.server.port: missing required property "port"`,
+		))
+		assert.True(t, niceyaml.IsInvalid(err))
 	})
 
 	t.Run("the merged document takes the name and the preamble of the lowest layer", func(t *testing.T) {
@@ -1535,7 +1676,7 @@ func TestNode_Origin(t *testing.T) {
 			wantPath:  "$.server.host",
 			want:      "  host: mid.example.com",
 		},
-		"a null in a higher layer holds no value": {
+		"an unwritten null in a higher layer holds no value": {
 			inputs:    []string{baseInput, stringtest.LinesLF("server:", "  port:")},
 			path:      port,
 			wantLayer: "base.yaml",

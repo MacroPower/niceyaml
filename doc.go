@@ -500,11 +500,11 @@
 // [NewSourceFromLayers], which takes the Source of each file in the
 // order they apply and returns a Source of the one document the files
 // merge into. A mapping merges into the mapping below it key by key, a
-// sequence or a scalar replaces what lies below it, and a null keeps
-// it. Each file resolves its own aliases and merge
-// keys first. The pipeline runs once on the merged document, so a schema
-// that requires a key passes when any file sets it, and each error binds
-// in the file that holds its value:
+// sequence or a scalar replaces what lies below it, and a null written
+// as `null` or `~` removes its key. Each file resolves its own aliases
+// and merge keys first. The pipeline runs once on the merged document,
+// so a schema that requires a key passes when any file sets it, and each
+// error binds in the file that holds its value:
 //
 //	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
 //	if err != nil {
@@ -560,7 +560,7 @@
 // [WithExcerpts] set to false keeps the lines of that layer, and the
 // secrets they hold, out of the excerpt of such an error.
 // [NewSourceFromLayers] describes what such a layer cannot do, such as
-// unset a value.
+// set one element of a sequence.
 //
 // [Node.At] returns a Node scoped to the node a path selects, and the
 // same pipeline then runs on that node. Decode reads one value without

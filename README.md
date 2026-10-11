@@ -159,7 +159,8 @@ The merge returns the error of a file that did not parse, bound in that file, an
 
 - A mapping merges into the mapping of the file below it, key by key and at every depth, so `prod.yaml` changes one field of one entry of a map and keeps the rest of `base.yaml`.
 - A sequence or a scalar replaces what the file below holds.
-- A null keeps what the file below holds, so a key whose entries are all commented out changes nothing.
+- A null written as `null` or `~` removes its key from the merged document, so `proxy: ~` in `prod.yaml` removes the proxy that `base.yaml` sets.
+- A key with nothing after it keeps what the file below holds, so a key whose entries are all commented out changes nothing.
 - Each file resolves its own aliases and `<<` merge keys before it merges.
 
 Validators and self-validation run on the merged document, so a schema that requires a key passes when any file sets it. Each error reports the file and the line that hold its value:
@@ -168,7 +169,7 @@ Validators and self-validation run on the merged document, so a schema that requ
 base.yaml:3:9: $.server.port: port must be at least 1
 ```
 
-The decode fills the Go value from the merged document as any decode does, so defaults the value holds survive where the files leave a field out.
+The decode fills the Go value from the merged document as any decode does, so defaults the value holds survive where the files leave a field out or remove its key.
 
 A nil layer adds nothing, so a file that may be missing goes in as it is:
 
@@ -231,7 +232,7 @@ environment:2:9: $.server.port: port must be at least 1
 
 The environment holds secrets, and the excerpt of an error shows the lines around it. `WithExcerpts(false)` marks the text of that layer as one no error may show, so an error there prints its position, its path, and its message, and no line of the layer. An error in a file keeps its excerpt.
 
-The docs of [`NewSourceFromLayers`][niceyaml.NewSourceFromLayers] say what such a layer cannot do, such as unset a value.
+Encode a map and not a struct for that layer. `encoder.Marshal` writes a nil pointer field of a struct as `null`, which removes the value the files set there. The docs of [`NewSourceFromLayers`][niceyaml.NewSourceFromLayers] say what such a layer cannot do, such as set one element of a sequence.
 
 ### Viewport
 

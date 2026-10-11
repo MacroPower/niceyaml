@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -50,8 +51,14 @@ type mergedValue struct {
 	// The elements of a sequence.
 	items []*mergedValue
 	// The entries of a mapping, in the order the layers first name them.
+	// An entry that a layer removed stays among them, as [mergedEntry]
+	// describes.
 	entries []*mergedEntry
 	kind    mergedKind
+	// Reports a null that its layer writes, as `null` or `~`, for which
+	// go-yaml gives a token of [token.NullType]. A null with no text of
+	// its own, as in `key:`, is unwritten.
+	written bool
 }
 
 // mergedEntry is an entry of a mapping in a [mergedValue].
@@ -63,13 +70,67 @@ type mergedEntry struct {
 	// The YAML text of the key, with its tag, as the layer of value
 	// spells it.
 	key string
+	// Reports an entry that a layer removed with a written null. The
+	// merged document leaves the entry out, and value is the null that
+	// removed it, so an error about the key binds at that null. For an
+	// entry that a merged layer removed, value is a null of that layer,
+	// which stands for the null in a layer of its own.
+	removed bool
+}
+
+// merge puts upper over e, where upper is the entry a higher layer holds
+// under the name of e. A null in upper that removes, as
+// [mergedValue.removes] reports one, removes e when e holds a value, and
+// stays a null over a null. Any other null in upper keeps e, unless e is
+// such a null too, which upper replaces. Any other value of upper merges
+// over the value of e, as [mergedValue.merge] describes.
+//
+// A removed e stays removed under a null of either kind, and holds the
+// null of the highest layer whose null removes. A removed upper, which
+// the reader of a merged layer carries, removes e whatever e holds. Any
+// other value of upper takes the place of a removed e, with none of the
+// value the layers below held.
+func (e *mergedEntry) merge(upper *mergedEntry) {
+	value := upper.value
+
+	switch {
+	case upper.removed, value.removes() && (e.removed || e.value.kind != mergedNull):
+		e.value, e.removed = value, true
+
+	case value.kind == mergedNull && !value.removes() && (e.removed || e.value.removes()):
+		// The null keeps the removal, or the null below that removes.
+
+	case e.removed:
+		e.value, e.removed = value, false
+	default:
+		e.value = e.value.merge(value)
+	}
+
+	// The key reads as the layer of the value spells it, so a path to the
+	// key resolves in that layer.
+	if e.value.layer == value.layer {
+		e.key = upper.key
+	}
+}
+
+// removes reports whether v is a null that removes the value the layers
+// below hold under its key: a written null with no tag. A tag stays on a
+// null where it converts the null, as "!!str" does, and such a null
+// keeps the value below it, written or not. The merged text spells both
+// as a written null, since go-yaml parses no entry behind a tag with no
+// value, so the two must merge alike.
+func (v *mergedValue) removes() bool {
+	return v.kind == mergedNull && v.written && v.tag == ""
 }
 
 // merge returns upper merged over v, where upper comes from a higher
-// layer. Two mappings merge key by key, and v then holds the result. A
-// null in upper keeps v, unless v is a null too. Any other upper replaces
-// v. Either value may be nil, which stands for a layer that holds no
-// value there.
+// layer. Two mappings merge entry by entry, as [mergedEntry.merge]
+// describes, and v then holds the result. A null in upper keeps v,
+// unless v is a null too. Any other upper replaces v. Either value may
+// be nil, which stands for a layer that holds no value there.
+//
+// No null removes a value here. [mergedEntry.merge] decides that for the
+// value under a key, and the root of a layer has no key.
 func (v *mergedValue) merge(upper *mergedValue) *mergedValue {
 	switch {
 	case v == nil:
@@ -96,14 +157,7 @@ func (v *mergedValue) merge(upper *mergedValue) *mergedValue {
 			continue
 		}
 
-		held := v.entries[i]
-		held.value = held.value.merge(entry.value)
-
-		// The key reads as the layer of the value spells it, so a path
-		// to the key resolves in that layer.
-		if held.value.layer == entry.value.layer {
-			held.key = entry.key
-		}
+		v.entries[i].merge(entry)
 	}
 
 	v.layer = upper.layer
@@ -116,14 +170,18 @@ func (v *mergedValue) merge(upper *mergedValue) *mergedValue {
 }
 
 // block reports whether v takes lines of its own in the merged document:
-// a mapping or a sequence that is not empty.
+// a sequence that is not empty, or a mapping with an entry that no layer
+// removed.
 func (v *mergedValue) block() bool {
-	return len(v.entries) > 0 || len(v.items) > 0
+	return len(v.items) > 0 || slices.ContainsFunc(v.entries, func(e *mergedEntry) bool { return !e.removed })
 }
 
 // inline returns the text of a value that is no block, with its tag in
-// front.
-func (v *mergedValue) inline() string {
+// front. With keyed set, the text goes behind the ":" of a key, where an
+// unwritten null with no tag has no text, as its layer spells it. A
+// written null there would remove a value once the merged document is a
+// layer.
+func (v *mergedValue) inline(keyed bool) string {
 	text := v.text
 
 	switch v.kind {
@@ -134,11 +192,14 @@ func (v *mergedValue) inline() string {
 	case mergedNull, mergedScalar:
 	}
 
-	if v.tag == "" {
-		return text
+	switch {
+	case v.tag != "":
+		return v.tag + " " + text
+	case keyed && v.kind == mergedNull && !v.written:
+		return ""
 	}
 
-	return v.tag + " " + text
+	return text
 }
 
 // layerReader reads the value of one layer of a merged [Source] as the go-yaml
@@ -210,7 +271,52 @@ func (r *layerReader) read() (*mergedValue, error) {
 		return nil, n.bindOwn(err)
 	}
 
+	r.carry(v, n.source.layers.value(n.base))
+
 	return v, nil
+}
+
+// carry adds each entry that held marks as removed to the value v. It
+// serves a layer that is a Node of a merged document, where held is the
+// value the layers of that document hold at the Node. The reader read v
+// from the merged text, which leaves out each key a layer removed. Each
+// such entry goes in where held has it, as an entry the layer removes,
+// so the layer removes what its own layers do. A nil held holds no
+// entry.
+func (r *layerReader) carry(v, held *mergedValue) {
+	if held == nil || v.kind != mergedMapping || held.kind != mergedMapping {
+		return
+	}
+
+	entries := make([]*mergedEntry, 0, len(held.entries))
+
+	// The text holds the entries of held that no layer removed, in the
+	// order held has them, and next is the first of them still to place.
+	next := 0
+
+	for _, entry := range held.entries {
+		switch {
+		case entry.removed:
+			entries = append(entries, &mergedEntry{
+				name:    entry.name,
+				key:     entry.key,
+				value:   &mergedValue{layer: r.layer},
+				removed: true,
+			})
+
+		case next < len(v.entries):
+			r.carry(v.entries[next].value, entry.value)
+
+			entries = append(entries, v.entries[next])
+			next++
+		}
+	}
+
+	v.entries = append(entries, v.entries[next:]...)
+
+	for i, entry := range v.entries {
+		v.names[entry.name] = i
+	}
 }
 
 // value returns the value under node. The ref flag says that node lies in
@@ -384,7 +490,10 @@ func (r *layerReader) content(content ast.Node, ref bool) (*mergedValue, error) 
 	case nil:
 		v.text = "null"
 	case *ast.NullNode:
-		v.text = n.GetToken().Value
+		tk := n.GetToken()
+
+		v.text, v.written = tk.Value, tk.Type == token.NullType
+
 	case *ast.MappingNode, *ast.MappingValueNode:
 		entries, _ := mappingEntries(content)
 
@@ -661,7 +770,7 @@ func (w *mergedWriter) document(v *mergedValue) {
 	switch {
 	case v == nil:
 	case !v.block():
-		w.sb.WriteString(v.inline())
+		w.sb.WriteString(v.inline(false))
 		w.sb.WriteByte('\n')
 
 	default:
@@ -677,9 +786,13 @@ func (w *mergedWriter) document(v *mergedValue) {
 // block writes the lines of v, a mapping or a sequence that is not empty,
 // at indent. With first set, the first line goes on behind what the
 // current line holds, as the first entry of a mapping goes behind the "-"
-// of its element.
+// of its element. An entry that a layer removed takes no line.
 func (w *mergedWriter) block(v *mergedValue, indent int, first bool) {
 	for _, entry := range v.entries {
+		if entry.removed {
+			continue
+		}
+
 		w.pad(indent, first)
 
 		first = false
@@ -709,13 +822,18 @@ func (w *mergedWriter) pad(indent int, started bool) {
 
 // nested writes v behind the ":" of its key or the "-" of its element,
 // and ends the line. A block goes on the lines below at indent. With
-// compact set, a block with no tag starts on the line itself, as the
-// element of a sequence does.
+// compact set, v is the element of a sequence, and a block with no tag
+// starts on the line itself. Any other v stands under a key, where a
+// null with no text leaves the line as it is, as [mergedValue.inline]
+// describes.
 func (w *mergedWriter) nested(v *mergedValue, indent int, compact bool) {
 	switch {
 	case !v.block():
-		w.sb.WriteByte(' ')
-		w.sb.WriteString(v.inline())
+		if text := v.inline(!compact); text != "" {
+			w.sb.WriteByte(' ')
+			w.sb.WriteString(text)
+		}
+
 		w.sb.WriteByte('\n')
 
 	case compact && v.tag == "":
@@ -780,8 +898,9 @@ func (l *layering) home() resolvedLayer {
 // is the highest layer whose document holds that value. For a path the
 // merged value holds, that is the layer the value came from. For a path
 // that names a key a mapping leaves out, it is the highest layer that
-// holds the mapping. It is the highest layer of all when no layer holds a
-// value.
+// holds the mapping. For a path that names a key a layer removed, it is
+// the layer of the null that removed the key. It is the highest layer of
+// all when no layer holds a value.
 //
 // A layer that a merge built holds the value in a layer of its
 // own, so the search goes on there with the path as the layer reads it.
@@ -818,9 +937,32 @@ func (l *layering) layer(doc *Node, path paths.Path) (resolvedLayer, paths.Path,
 	return holder, base.Join(scope), held
 }
 
+// value returns the value the layers hold at path, which starts at `$`,
+// or nil when they hold none there. A nil l holds no value.
+func (l *layering) value(path paths.Path) *mergedValue {
+	if l == nil {
+		return nil
+	}
+
+	rel, _ := path.CutPrefix(paths.Doc())
+
+	at := l.root
+
+	for sel := range rel.Selectors() {
+		if at == nil {
+			return nil
+		}
+
+		at = at.child(sel)
+	}
+
+	return at
+}
+
 // child returns the value sel selects in v, or nil when v holds none. The
 // `~` selector of a key selects v itself, since the key of an entry
-// belongs to the layer of its value.
+// belongs to the layer of its value. The name of an entry that a layer
+// removed selects the null that removed it.
 func (v *mergedValue) child(sel paths.Selector) *mergedValue {
 	switch sel.Kind {
 	case paths.SelectorKey:
