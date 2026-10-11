@@ -339,8 +339,7 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 
 // dropStrandedComments returns the tokens of run without the comments on
 // lines of their own in places where the go-yaml parser can reject or
-// misread valid YAML when it keeps comments, or run itself when it holds
-// none.
+// misread valid YAML when it keeps comments.
 //
 // The parser (v1.19.3-0.20260407131736-edee2f91616c) attaches such a
 // comment below the content of a document only when the root of the
@@ -417,7 +416,7 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 // parser/parser.go:407, parser/parser.go:1042). Those comments drop, and
 // the comments before any other node stay.
 func dropStrandedComments(run token.Tokens) token.Tokens {
-	var kept token.Tokens
+	kept := make(token.Tokens, 0, len(run))
 
 	s := scan{run: run, rootCol: -1}
 
@@ -425,9 +424,7 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 		if run[i].Type != token.CommentType {
 			s.read(i)
 
-			if kept != nil {
-				kept = append(kept, run[i])
-			}
+			kept = append(kept, run[i])
 
 			i++
 
@@ -445,23 +442,13 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 			left := leftDrops && run[j].Position != nil && run[j].Position.Column < s.rootCol
 
 			if (stranded || left) && startsBelow(run[j], s.last) {
-				if kept == nil {
-					kept = slices.Clone(run[:j])
-				}
-
 				continue
 			}
 
-			if kept != nil {
-				kept = append(kept, run[j])
-			}
+			kept = append(kept, run[j])
 		}
 
 		i = next
-	}
-
-	if kept == nil {
-		return run
 	}
 
 	return kept
