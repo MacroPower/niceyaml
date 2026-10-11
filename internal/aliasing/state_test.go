@@ -1,85 +1,83 @@
-package docstate_test
+package aliasing_test
 
 import (
 	"testing"
 
+	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/docstate"
+	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-func TestOf(t *testing.T) {
+func TestStateOf(t *testing.T) {
 	t.Parallel()
 
 	docs := niceyaml.NewSourceFromString(stringtest.LinesLF("a: [1, 2]", "---", "b: 3")).Documents()
 	require.Len(t, docs, 2)
 
-	first := docstate.Of(docs[0])
+	first := aliasing.StateOf(docs[0])
 	require.NotNil(t, first)
 
 	scoped := yamltest.At(t, docs[0], paths.Current().Child("a").Index(1))
 
-	assert.Same(t, first, docstate.Of(scoped))
-	assert.NotSame(t, first, docstate.Of(docs[1]))
-	assert.Nil(t, docstate.Of((*niceyaml.Node)(nil)))
-	assert.PanicsWithValue(t, "docstate.Of: string is not a *niceyaml.Node", func() {
-		docstate.Of("a")
+	assert.Same(t, first, aliasing.StateOf(scoped))
+	assert.NotSame(t, first, aliasing.StateOf(docs[1]))
+	assert.Nil(t, aliasing.StateOf((*niceyaml.Node)(nil)))
+	assert.PanicsWithValue(t, "aliasing.StateOf: string is not a *niceyaml.Node", func() {
+		aliasing.StateOf("a")
 	})
 }
 
 func TestState_AliasLimit(t *testing.T) {
 	t.Parallel()
 
-	tcs := map[string]struct {
-		opts []docstate.Option
-		want bool
-	}{
-		"default": {want: true},
-		"limit on": {
-			opts: []docstate.Option{docstate.WithAliasLimit(true)},
-			want: true,
-		},
-		"limit off": {opts: []docstate.Option{docstate.WithAliasLimit(false)}},
-		"limit off and on again": {
-			opts: []docstate.Option{docstate.WithAliasLimit(false), docstate.WithAliasLimit(true)},
-			want: true,
-		},
-	}
+	assert.True(t, aliasing.NewState(true, nil).AliasLimit())
+	assert.False(t, aliasing.NewState(false, nil).AliasLimit())
+}
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+func TestState_Facts(t *testing.T) {
+	t.Parallel()
 
-			assert.Equal(t, tc.want, docstate.New(tc.opts...).AliasLimit())
-		})
-	}
+	calls := 0
+	doc := yamltest.FirstDocument(t, "a: &x 1\nb: *x\n")
+
+	s := aliasing.NewState(true, func() (ast.Node, *paths.Resolver) {
+		calls++
+
+		return doc.AST(), doc.Resolver()
+	})
+
+	first := s.Facts()
+	require.Len(t, first.Aliases, 1)
+
+	// Every call returns the facts of the first.
+	assert.Same(t, first, s.Facts())
+	assert.Equal(t, 1, calls)
 }
 
 func TestState_KeepsFirstResult(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		keep func(s *docstate.State, check func() bool) bool
+		keep func(s *aliasing.State, check func() bool) bool
 		want bool
 	}{
-		"excessive aliasing":         {keep: (*docstate.State).ExcessiveAliasing, want: true},
-		"no excessive aliasing":      {keep: (*docstate.State).ExcessiveAliasing, want: false},
-		"reference alias":            {keep: (*docstate.State).ReferenceAlias, want: true},
-		"no reference alias":         {keep: (*docstate.State).ReferenceAlias, want: false},
-		"excessive text aliasing":    {keep: (*docstate.State).ExcessiveTextAliasing, want: true},
-		"no excessive text aliasing": {keep: (*docstate.State).ExcessiveTextAliasing, want: false},
+		"excessive aliasing":         {keep: (*aliasing.State).ExcessiveAliasing, want: true},
+		"no excessive aliasing":      {keep: (*aliasing.State).ExcessiveAliasing, want: false},
+		"excessive text aliasing":    {keep: (*aliasing.State).ExcessiveTextAliasing, want: true},
+		"no excessive text aliasing": {keep: (*aliasing.State).ExcessiveTextAliasing, want: false},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			s := docstate.New()
+			s := aliasing.NewState(true, nil)
 
 			calls := 0
 			check := func() bool {
@@ -110,7 +108,7 @@ func TestState_ExcessiveTextAliasing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			s := docstate.New()
+			s := aliasing.NewState(true, nil)
 
 			calls := 0
 			count := func() bool {

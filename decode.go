@@ -20,7 +20,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
-	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/internal/segment"
@@ -709,7 +708,9 @@ func newDocuments(src *Source, docs []docparse.Document, errs []error) []*Node {
 		}
 
 		doc.node = &Node{source: src, doc: doc, content: doc.tokens, base: paths.Doc(), span: parsed.Span}
-		doc.state = docstate.New(docstate.WithAliasLimit(!src.skipAliasLimit))
+		doc.state = aliasing.NewState(!src.skipAliasLimit, func() (ast.Node, *paths.Resolver) {
+			return doc.root.Body, doc.pathResolver()
+		})
 		nodes[i] = doc.node
 	}
 
@@ -762,6 +763,27 @@ func bindSyntaxErrors(docs []*Node) {
 	}
 }
 
+func init() {
+	aliasing.StateOf = documentState
+}
+
+// documentState returns the [*aliasing.State] of the document of n, which
+// must be a [*Node], or nil for a nil Node. It is [aliasing.StateOf],
+// through which the packages of the module reach the state a document
+// keeps.
+func documentState(n any) *aliasing.State {
+	node, ok := n.(*Node)
+	if !ok {
+		panic(fmt.Sprintf("aliasing.StateOf: %T is not a *niceyaml.Node", n))
+	}
+
+	if node == nil {
+		return nil
+	}
+
+	return node.doc.state
+}
+
 // document is what describes one YAML document of a [Source] as a whole:
 // its root, the tokens of the whole document, its index in the file, the
 // length of its preamble, and the resolver its paths resolve through.
@@ -789,16 +811,12 @@ type document struct {
 	// The tree the go-yaml decoder reads for the document, which
 	// decodeTree builds for the first decode.
 	tree *decodeTree
-	// The aliases of root that lie inside the anchor they refer to, which
-	// enclosedAliases finds once for both newDecodeTree and
-	// Source.reparse.
-	enclosed map[ast.Node]bool
 	// Finds the node of root at a position, which pathIndex builds for
 	// the first call of PathAt.
 	paths *pathIndex
 	// The state that the packages of the module reach through
-	// docstate.Of.
-	state *docstate.State
+	// aliasing.StateOf.
+	state *aliasing.State
 	// The tokens of the whole document.
 	tokens token.Tokens
 	// The tokens that carry a position, in the order of their offsets,
@@ -816,8 +834,6 @@ type document struct {
 	nodeTokensOnce sync.Once
 	// Builds tree once, for the first decode.
 	treeOnce sync.Once
-	// Finds enclosed once.
-	enclosedOnce sync.Once
 	// Builds paths once, for the first call of PathAt.
 	pathsOnce sync.Once
 }
@@ -3289,7 +3305,6 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 	}
 
 	tree := n.doc.decodeTree()
-	resolver := n.doc.pathResolver()
 
 	var (
 		at    *token.Token
@@ -3298,7 +3313,7 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 
 	if errors.Is(err, yaml.ErrExceededMaxDepth) {
 		at, cause = astnode.StartToken(scope), tree.restoreError(err)
-	} else if m := tree.unresolvedMerge(resolver, scope, err); m != nil {
+	} else if m := tree.unresolvedMerge(scope, err); m != nil {
 		// The decoder's failure for an alias inside its own anchor names
 		// the null it merges in its place, which the source does not hold,
 		// so the message is the one a decode of the whole document gives.
@@ -3306,7 +3321,7 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 	}
 
 	if at == nil && ok {
-		refs := tree.referenceAliases(resolver, scope)
+		refs := tree.referenceAliases(scope)
 		if len(refs) == 0 {
 			return err
 		}

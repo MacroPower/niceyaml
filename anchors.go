@@ -15,10 +15,10 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/rejection"
-	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 // decodeTree is the tree the go-yaml decoder reads for one document.
@@ -83,41 +83,18 @@ import (
 //
 // Create instances with [document.newDecodeTree].
 type decodeTree struct {
-	// The body of the document as the Source parsed it.
-	source ast.Node
-	// The body of the document as the decoder reads it.
-	body ast.Node
-	// The node of body that stands for each node of source outside its
-	// comments, which scoped fills for the first decode of a node below
-	// the body when body does not come from a second parse.
-	nodes map[ast.Node]ast.Node
-	// The tokens the nodes of body hold, when body comes from a second
-	// parse, including the ones the parser made for values the document
-	// leaves out. The errors of the decoder may name them.
-	tokens map[*token.Token]struct{}
-	// The tokens of the second parse body comes from, if any, which the
-	// errors of the decoder may name. The Source shares the set between
-	// the trees of all its documents, and no tree writes to it.
+	source      ast.Node
+	body        ast.Node
+	anchors     *anchorIndex
+	tokens      map[*token.Token]struct{}
 	parseTokens map[*token.Token]int
-	// Spells each name the tree gives an anchor as the document does,
-	// for the messages the decoder reports, or nil when no anchor has a
-	// name of its own.
-	names *strings.Replacer
-	// The anchors of body, which scoped lists for the first decode of a
-	// node below the body.
-	anchors *anchorIndex
-	// The aliases under `<<` merge keys that the decoder finds no mapping
-	// for, which unresolvedMerge lists for the first decode that needs
-	// them.
-	merges []mergeAlias
-	// The aliases of source in document order, which referenceAliases
-	// lists for the first decode that needs them.
-	aliases []aliasRead
-	// Fills nodes and anchors once.
-	scopedOnce sync.Once
-	// Fills merges once.
-	mergesOnce sync.Once
-	// Fills aliases once.
+	names       *strings.Replacer
+	nodes       map[ast.Node]ast.Node
+	facts       *aliasing.Facts
+	merges      []mergeAlias
+	aliases     []aliasRead
+	scopedOnce  sync.Once
+	mergesOnce  sync.Once
 	aliasesOnce sync.Once
 }
 
@@ -134,26 +111,26 @@ func (d *document) decodeTree() *decodeTree {
 // newDecodeTree creates a new [*decodeTree] for the document.
 func (d *document) newDecodeTree() *decodeTree {
 	body := d.root.Body
+	facts := d.state.Facts()
 
-	names := renamedAnchorNames(d.pathResolver(), body, len(d.node.source.references) > 0)
-	enclosed := d.enclosedAliases()
+	names := renamedAnchorNames(facts, len(d.node.source.references) > 0)
 
-	if len(names) > 0 || len(enclosed) > 0 || holdsIntegerTag(body) {
-		if tree, ok := d.parsedTree(names, enclosed); ok {
+	if len(names) > 0 || len(facts.Enclosed) > 0 || holdsIntegerTag(body) {
+		if tree, ok := d.parsedTree(names, facts); ok {
 			return tree
 		}
 	}
 
-	return &decodeTree{source: body, body: decodeView(body)}
+	return &decodeTree{source: body, body: decodeView(body), facts: facts}
 }
 
 // parsedTree returns the [*decodeTree] of the document from a second
 // parse of the Source. The tree gives a name of its own to each anchor
-// whose name is in names, holds a null in place of each alias in
-// enclosed, and spells each tag [isIntegerTag] reports in its verbatim
-// form. It reports false when the second parse does not give the
+// whose name is in names, holds a null in place of each alias the facts
+// of the document hold as enclosed, and spells each tag [isIntegerTag]
+// reports in its verbatim form. It reports false when the second parse does not give the
 // document the same nodes, which a parse of the same tokens always does.
-func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool) (*decodeTree, bool) {
+func (d *document) parsedTree(names map[string]bool, facts *aliasing.Facts) (*decodeTree, bool) {
 	src := d.node.source
 
 	parse := src.decodeParse()
@@ -181,8 +158,6 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 		return true
 	})
 
-	source := astnode.Nodes(d.root.Body)
-
 	// Each anchor with a name in names gets the name followed by a count in
 	// brackets, higher than the count of the last anchor of that name, so
 	// no two new names match. A key, a value, a comment, or a quoted anchor
@@ -202,14 +177,9 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 
 	var pairs []string
 
-	for _, n := range source {
-		anchor, ok := n.(*ast.AnchorNode)
-		if !ok {
-			continue
-		}
-
-		name, ok := astnode.Name(anchor.Name)
-		if !ok || !names[name] {
+	for _, a := range facts.Anchors {
+		name := a.Name
+		if name == "" || !names[name] {
 			continue
 		}
 
@@ -224,12 +194,12 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 			}
 		}
 
-		renamed[anchor] = unique
+		renamed[a.Node] = unique
 		pairs = append(pairs, unique, name)
 
 		// The decoder names an anchor by the value of the token of its
 		// name, while the go-yaml formatter writes the token's text.
-		if view, ok := nodes[anchor].(*ast.AnchorNode); ok {
+		if view, ok := nodes[a.Node].(*ast.AnchorNode); ok {
 			if tk := astnode.Token(view.Name); tk != nil {
 				tk.Value = unique
 			}
@@ -272,7 +242,7 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 
 	nulls := nodeReplacer{}
 
-	for alias := range enclosed {
+	for alias := range facts.Enclosed {
 		view, ok := nodes[alias].(*ast.AliasNode)
 		if !ok || view.Start == nil {
 			continue
@@ -298,12 +268,13 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 		tokens:      tokens,
 		parseTokens: parse.Index,
 		names:       replacer,
+		facts:       facts,
 	}, true
 }
 
 // nullEnclosedAliases writes a null into the token of the `*` of each
-// alias of docs that lies inside the anchor it refers to, as
-// [document.enclosedAliases] finds them, in file, the second parse of
+// alias of docs that lies inside the anchor it refers to, as the facts of
+// its document hold them, in file, the second parse of
 // their [Source]. The null takes over the token, so an error at the null
 // names the alias. The go-yaml formatter writes the text of each token as
 // the chain of tokens holds it, so the token keeps its place in the chain
@@ -315,7 +286,7 @@ func nullEnclosedAliases(docs []*Node, file *ast.File) {
 	for _, root := range docs {
 		d := root.doc
 
-		enclosed := d.enclosedAliases()
+		enclosed := d.state.Facts().Enclosed
 		if len(enclosed) == 0 || d.fileIndex < 0 || d.fileIndex >= len(file.Docs) {
 			continue
 		}
@@ -337,59 +308,6 @@ func nullEnclosedAliases(docs []*Node, file *ast.File) {
 			*tk = *null
 		}
 	}
-}
-
-// enclosedAliases returns the aliases of the document that lie inside the
-// anchor they refer to, other than the ones a `<<` merge key merges, and
-// finds them on the first call. Every caller gets the same map, so no
-// caller may change it.
-func (d *document) enclosedAliases() map[ast.Node]bool {
-	d.enclosedOnce.Do(func() {
-		d.enclosed = d.findEnclosedAliases()
-	})
-
-	return d.enclosed
-}
-
-// findEnclosedAliases finds the aliases that [document.enclosedAliases]
-// returns.
-func (d *document) findEnclosedAliases() map[ast.Node]bool {
-	var aliases []*ast.AliasNode
-
-	merged := map[ast.Node]bool{}
-
-	for _, n := range astnode.Nodes(d.root.Body) {
-		switch n := n.(type) {
-		case *ast.AliasNode:
-			aliases = append(aliases, n)
-
-		case *ast.MappingValueNode:
-			for _, source := range astnode.MergeValues(n) {
-				merged[source] = true
-			}
-		}
-	}
-
-	if len(aliases) == 0 {
-		return nil
-	}
-
-	resolver := d.pathResolver()
-	bounds := anchorBounds{}
-	enclosed := map[ast.Node]bool{}
-
-	for _, alias := range aliases {
-		if merged[alias] || alias.Start == nil || alias.Start.Position == nil {
-			continue
-		}
-
-		anchor, err := resolver.Anchor(alias)
-		if err == nil && bounds.encloses(anchor, alias.Start) {
-			enclosed[alias] = true
-		}
-	}
-
-	return enclosed
 }
 
 // nodeReplacer is an [ast.Visitor] that puts the node each key maps to in
@@ -522,7 +440,8 @@ func (t *decodeTree) scoped() {
 // scope, a node of the tree, that the decoder finds no mapping for and
 // that err, which the decoder returned for scope, reports. It returns nil
 // when scope holds no such alias. The decoder finds no mapping for an
-// alias that names no anchor before it as resolver binds it, or for one
+// alias that names no anchor before it as the document's resolver binds
+// it, or for one
 // inside the anchor it names, which the decoder has not finished reading
 // when it merges.
 //
@@ -533,9 +452,9 @@ func (t *decodeTree) scoped() {
 // decoder gives an alias it finds no anchor for, and, for an alias
 // inside the anchor it names, any [yaml.Error] whose token is not one
 // of the tree's, such as the null the decoder merges in its place.
-func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node, err error) *mergeAlias {
+func (t *decodeTree) unresolvedMerge(scope ast.Node, err error) *mergeAlias {
 	t.mergesOnce.Do(func() {
-		t.merges = unresolvedMerges(resolver, t.source)
+		t.merges = unresolvedMerges(t.facts)
 	})
 
 	first, last := astnode.Bounds(scope)
@@ -564,31 +483,24 @@ func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node, e
 // referenceAliases returns the tokens of the aliases to a reference
 // document, from [WithReferences], that scope, a node of the tree,
 // holds, in document order. Those are the aliases that name no anchor
-// before them as resolver binds them, inside scope or inside an anchor
+// before them as the document's resolver binds them, inside scope or inside an anchor
 // of the document that an alias the walk reaches refers to, including
 // anchors outside scope. The walk ignores the target type of the
 // decode, so it returns aliases the type never reads. An alias inside
 // the anchor it refers to reads null, so the walk does not follow it.
-func (t *decodeTree) referenceAliases(resolver *paths.Resolver, scope ast.Node) []*token.Token {
+func (t *decodeTree) referenceAliases(scope ast.Node) []*token.Token {
 	t.aliasesOnce.Do(func() {
-		bounds := anchorBounds{}
-
-		for _, n := range astnode.Nodes(t.source) {
-			alias, ok := n.(*ast.AliasNode)
-			if !ok || alias.Start == nil || alias.Start.Position == nil {
+		for _, a := range t.facts.Aliases {
+			if a.Node.Start == nil || a.Node.Start.Position == nil {
 				continue
 			}
 
-			anchor, err := resolver.Anchor(alias)
-			if err != nil {
-				anchor = nil
+			read := aliasRead{token: a.Node.Start, enclosed: a.Inside}
+			if a.Anchor != nil {
+				read.anchor = a.Anchor
 			}
 
-			t.aliases = append(t.aliases, aliasRead{
-				token:    alias.Start,
-				anchor:   anchor,
-				enclosed: anchor != nil && bounds.encloses(anchor, alias.Start),
-			})
+			t.aliases = append(t.aliases, read)
 		}
 
 		sort.SliceStable(t.aliases, func(i, j int) bool {
@@ -670,44 +582,18 @@ func (m mergeAlias) message() string {
 	return "cannot find anchor by alias name " + m.name
 }
 
-// unresolvedMerges returns the aliases under the `<<` merge keys of body
-// that the decoder finds no mapping for, as
+// unresolvedMerges returns the aliases under the `<<` merge keys of a
+// document, as facts holds them, that the decoder finds no mapping for, as
 // [decodeTree.unresolvedMerge] describes, in document order.
-func unresolvedMerges(resolver *paths.Resolver, body ast.Node) []mergeAlias {
+func unresolvedMerges(facts *aliasing.Facts) []mergeAlias {
 	var found []mergeAlias
 
-	bounds := anchorBounds{}
-
-	check := func(node ast.Node) {
-		alias, ok := node.(*ast.AliasNode)
-		if !ok || alias.Start == nil || alias.Start.Position == nil {
-			return
-		}
-
-		enclosed := false
-
-		anchor, err := resolver.Anchor(alias)
-		if err == nil {
-			if !bounds.encloses(anchor, alias.Start) {
-				return
-			}
-
-			enclosed = true
-		}
-
-		name, _ := astnode.Name(alias.Value)
-		found = append(found, mergeAlias{token: alias.Start, name: name, enclosed: enclosed})
-	}
-
-	for _, n := range astnode.Nodes(body) {
-		entry, ok := n.(*ast.MappingValueNode)
-		if !ok {
+	for _, a := range facts.Aliases {
+		if !a.Merge || a.Node.Start == nil || a.Node.Start.Position == nil || a.Anchor != nil && !a.Inside {
 			continue
 		}
 
-		for _, source := range astnode.MergeValues(entry) {
-			check(source)
-		}
+		found = append(found, mergeAlias{token: a.Node.Start, name: a.Name, enclosed: a.Anchor != nil})
 	}
 
 	sort.SliceStable(found, func(i, j int) bool {
@@ -715,22 +601,6 @@ func unresolvedMerges(resolver *paths.Resolver, body ast.Node) []mergeAlias {
 	})
 
 	return found
-}
-
-// anchorBounds keeps the offsets of the first and the last token under
-// each node it checks a token against, comments included, so a check of
-// many aliases against one anchor walks the anchor once.
-type anchorBounds map[ast.Node]astnode.Extent
-
-// encloses reports whether tk lies among the tokens under node.
-func (b anchorBounds) encloses(node ast.Node, tk *token.Token) bool {
-	extent, ok := b[node]
-	if !ok {
-		extent = astnode.ExtentOf(node, true)
-		b[node] = extent
-	}
-
-	return extent.Holds(tk.Position.Offset)
 }
 
 // rejectionText returns the message [rejection.Classify] writes for err,
@@ -799,34 +669,28 @@ func (e restoredError) Unwrap() error {
 	return e.err
 }
 
-// renamedAnchorNames returns the names of the anchors under body that
-// the tree gives a name of their own. Those are the names more than one
-// anchor has, and the names of anchors that follow an alias of their name
-// that resolver binds to no anchor. The decoder would read such an alias
-// as the later anchor, although it names no anchor of the document before
-// it and reads a reference document's anchor, if any. When references is
-// set, the [Source] has reference documents, which may define an anchor
-// of any name, so the result holds the name of every anchor.
-func renamedAnchorNames(resolver *paths.Resolver, body ast.Node, references bool) map[string]bool {
+// renamedAnchorNames returns the names of the anchors of a document, as
+// facts holds them, that the tree gives a name of their own. Those are
+// the names more than one anchor has, and the names of anchors that
+// follow an alias of their name that the document's resolver binds to no
+// anchor. The decoder would read such an alias as the later anchor,
+// although it names no anchor of the document before it and reads a
+// reference document's anchor, if any. When references is set, the
+// [Source] has reference documents, which may define an anchor of any
+// name, so the result holds the name of every anchor.
+func renamedAnchorNames(facts *aliasing.Facts, references bool) map[string]bool {
 	anchors := map[string]int{}
 	unbound := map[string]bool{}
 
-	for _, n := range astnode.Nodes(body) {
-		switch n := n.(type) {
-		case *ast.AnchorNode:
-			if name, ok := astnode.Name(n.Name); ok {
-				anchors[name]++
-			}
+	for _, a := range facts.Anchors {
+		if a.Name != "" {
+			anchors[a.Name]++
+		}
+	}
 
-		case *ast.AliasNode:
-			_, err := resolver.Anchor(n)
-			if err == nil {
-				continue
-			}
-
-			if name, ok := astnode.Name(n.Value); ok {
-				unbound[name] = true
-			}
+	for _, a := range facts.Aliases {
+		if a.Anchor == nil && a.Name != "" {
+			unbound[a.Name] = true
 		}
 	}
 

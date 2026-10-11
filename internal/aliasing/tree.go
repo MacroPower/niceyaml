@@ -1,24 +1,21 @@
 package aliasing
 
 import (
+	"slices"
+
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 // Node is a node of a YAML document, such as a *niceyaml.Node, whose
-// document state [docstate.Of] returns.
+// document state [StateOf] returns.
 type Node interface {
 	// AST returns the go-yaml node the Node selects.
 	AST() ast.Node
-	// DocumentAST returns the document the node belongs to.
-	DocumentAST() *ast.DocumentNode
-	// Resolver returns the resolver every node of the document shares.
-	Resolver() *paths.Resolver
 }
 
 // CheckDecode returns [aliaslimit.ErrExcessiveAliasing] when n holds an
@@ -40,7 +37,7 @@ func CheckDecode(n Node) error {
 	}
 
 	excessive := state.ExcessiveAliasing(func() bool {
-		return excessiveRead(n, readValue)
+		return excessiveRead(state.Facts(), readValue)
 	})
 	if excessive {
 		return aliaslimit.ErrExcessiveAliasing
@@ -68,7 +65,7 @@ func CheckDecodeText(n Node) error {
 	}
 
 	excessive := state.ExcessiveTextAliasing(func() bool {
-		return excessiveRead(n, readText)
+		return excessiveRead(state.Facts(), readText)
 	})
 	if excessive {
 		return aliaslimit.ErrExcessiveAliasing
@@ -101,50 +98,34 @@ func Limited(n Node) bool {
 // reference alias and [Limited] reports that the limit applies. A nil
 // Node holds none.
 //
-// The answer depends on the document alone, so the document keeps it, as
-// it keeps the count of CheckDecode.
+// The answer depends on the document alone, so it reads the [Facts] the
+// document keeps.
 func HoldsReferenceAlias(n Node) bool {
 	state := stateOf(n)
 	if state == nil {
 		return false
 	}
 
-	return state.ReferenceAlias(func() bool {
-		found := referenceFinder{resolver: n.Resolver()}
-
-		ast.Walk(&found, n.DocumentAST().Body)
-
-		return found.found
+	return slices.ContainsFunc(state.Facts().Aliases, func(a AliasFact) bool {
+		return a.Anchor == nil
 	})
 }
 
 // stateOf returns the state of the document of n, or nil for a nil Node.
-func stateOf(n Node) *docstate.State {
+func stateOf(n Node) *State {
 	if n == nil {
 		return nil
 	}
 
-	return docstate.Of(n)
+	return StateOf(n)
 }
 
 // excessiveRead reports whether aliases make up too much of what a
-// decode of the document of n reads, with the document read as mode.
-func excessiveRead(n Node, mode readMode) bool {
-	resolver := n.Resolver()
-	body := n.DocumentAST().Body
-
-	nulls := nullFinder{
-		resolver: resolver,
-		open:     map[ast.Node]bool{},
-		anchors:  map[ast.Node]bool{},
-		aliases:  map[*ast.AliasNode]bool{},
-	}
-
-	ast.Walk(&nulls, body)
-
+// decode of the document of f reads, with the document read as mode.
+func excessiveRead(f *Facts, mode readMode) bool {
 	c := treeCounter{
-		resolver:    resolver,
-		nulls:       nulls.aliases,
+		resolver:    f.resolver,
+		nulls:       f.nulls,
 		sizes:       [readModes]map[ast.Node]int{{}, {}},
 		open:        map[ast.Node]bool{},
 		collections: map[*ast.AliasNode]bool{},
@@ -153,61 +134,9 @@ func excessiveRead(n Node, mode readMode) bool {
 		repeated:    map[ast.Node]bool{},
 	}
 
-	c.count(body, true, mode)
+	c.count(f.body, true, mode)
 
 	return aliaslimit.Excessive(c.distinct, c.aliased)
-}
-
-// nullFinder is an [ast.Visitor] that finds the aliases of a document the
-// decoder reads as null. The decoder puts a null in place of an alias
-// inside the content of the anchor it refers to. An anchor on such an
-// alias then holds the null, so an alias to that anchor reads null too.
-// The finder also takes in an alias that a `<<` merge key names inside
-// its own anchor, since the decoder rejects such a merge and reads
-// nothing there.
-//
-// The resolver binds each alias to its anchor. The open set holds the
-// anchors the walk is inside, the anchors set holds each anchor on an
-// alias the decoder reads as null, and the aliases set holds the aliases
-// the decoder reads as null.
-type nullFinder struct {
-	resolver *paths.Resolver
-	open     map[ast.Node]bool
-	anchors  map[ast.Node]bool
-	aliases  map[*ast.AliasNode]bool
-}
-
-// Visit implements [ast.Visitor]. It walks the content of an anchor itself
-// and returns nil for it, so it knows which anchors each alias lies in.
-// An alias refers to an anchor before it, so the walk has read that
-// anchor by the time it reaches an alias outside it.
-func (f *nullFinder) Visit(node ast.Node) ast.Visitor {
-	if astnode.IsNil(node) {
-		return nil
-	}
-
-	switch n := node.(type) {
-	case *ast.AnchorNode:
-		f.open[n] = true
-		ast.Walk(f, n.Value)
-		delete(f.open, n)
-
-		if alias, ok := n.Value.(*ast.AliasNode); ok && f.aliases[alias] {
-			f.anchors[n] = true
-		}
-
-		return nil
-
-	case *ast.AliasNode:
-		anchor, err := f.resolver.Anchor(n)
-		if err == nil && (f.open[anchor] || f.anchors[anchor]) {
-			f.aliases[n] = true
-		}
-
-		return nil
-	}
-
-	return f
 }
 
 // holdsAlias reports whether node or any node below it is an alias.
@@ -242,30 +171,6 @@ func (f *aliasFinder) Visit(node ast.Node) ast.Visitor {
 	return f
 }
 
-// referenceFinder is an [ast.Visitor] that records whether it visited an
-// alias the resolver binds to no anchor, and stops the walk once it has.
-type referenceFinder struct {
-	resolver *paths.Resolver
-	found    bool
-}
-
-// Visit implements [ast.Visitor].
-func (f *referenceFinder) Visit(node ast.Node) ast.Visitor {
-	if f.found || astnode.IsNil(node) {
-		return nil
-	}
-
-	alias, ok := node.(*ast.AliasNode)
-	if !ok {
-		return f
-	}
-
-	_, err := f.resolver.Anchor(alias)
-	f.found = err != nil
-
-	return nil
-}
-
 // readMode is how the decoder reads a node, which decides what a read of
 // an alias to a scalar costs.
 type readMode int
@@ -287,7 +192,8 @@ const (
 // key brings in, which the decoder reads again at every merge. The
 // resolver binds each alias to its content. An alias that does not
 // resolve counts as one unaliased node, as does one in the nulls set,
-// which [nullFinder] fills with the aliases the decoder reads as null.
+// which holds the aliases the decoder reads as null, as [NewFacts] finds
+// them.
 // Such an alias counts as one node wherever the counter reads it, so the
 // count does not depend on the order of the aliases.
 //

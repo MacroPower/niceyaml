@@ -380,7 +380,7 @@ func (r *layerReader) follow(
 		// wherever the reader reaches it from. The open anchors alone miss
 		// one that a `<<` merge key brought in, since mapping reads that
 		// value once the anchor has closed.
-		if !ref && r.layer.doc.enclosedAliases()[n] {
+		if !ref && r.layer.doc.state.Facts().Enclosed[n] {
 			return visit(nil, outer, ref)
 		}
 
