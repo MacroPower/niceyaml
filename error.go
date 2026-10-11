@@ -2052,7 +2052,8 @@ type boundTexts struct {
 	msg string
 	// The first lines of the list, [ErrorListLimit] at most.
 	entries []string
-	// The number of lines the whole list holds.
+	// The number of lines the whole list holds, which is zero when msg
+	// lists no error below the binding.
 	count int
 	// The number of children at the end of the list of children whose
 	// text own holds already, so the list leaves out each of them that
@@ -2063,11 +2064,6 @@ type boundTexts struct {
 	// counts them. It counts the branches of a join too, whose text own
 	// lacks.
 	held int
-	// Whether msg lists the errors below the binding.
-	lists bool
-	// Whether the binding has neither a message nor a position, so it
-	// adds no line to the list of the binding above it.
-	bare bool
 }
 
 // binder is where an error binds: the source, and the node that binds
@@ -2705,31 +2701,22 @@ func (e *SourceError) passedLead() *SourceError {
 		return nil
 	}
 
-	e.leadOnce.Do(func() { e.lead = e.findPassedLead() })
+	e.leadOnce.Do(func() {
+		if e.locErr == nil && !e.adopted {
+			return
+		}
+
+		if _, ok := e.ownPath(); ok {
+			return
+		}
+
+		lead := leadingBinding(e.err)
+		if lead != nil && (e.source.Name() == "" || lead.Source() == e.source || !holdsSource(e, e.source)) {
+			e.lead = lead
+		}
+	})
 
 	return e.lead
-}
-
-// findPassedLead finds the binding [SourceError.passedLead] returns.
-func (e *SourceError) findPassedLead() *SourceError {
-	if e.locErr == nil && !e.adopted {
-		return nil
-	}
-
-	if _, ok := e.ownPath(); ok {
-		return nil
-	}
-
-	lead := leadingBinding(e.err)
-	if lead == nil {
-		return nil
-	}
-
-	if e.source.Name() == "" || lead.Source() == e.source || !holdsSource(e, e.source) {
-		return lead
-	}
-
-	return nil
 }
 
 // ownPath returns the path e puts in front of the text of the error it
@@ -3459,12 +3446,10 @@ func (e *SourceError) buildTexts() boundTexts {
 		t.own = pathed(t.own)
 		t.head = e.prefixed(t.own)
 		t.msg = e.prefixed(pathed(full))
-		t.bare = t.own == "" && (e.locErr != nil || e.adopted)
 
 		return t
 	}
 
-	t.lists = true
 	t.own = pathed(t.own)
 
 	lines := make([]string, 0, len(t.entries)+2)
@@ -3483,6 +3468,14 @@ func (e *SourceError) buildTexts() boundTexts {
 	t.msg = strings.Join(lines, "\n")
 
 	return t
+}
+
+// bare reports whether e has neither a message nor a position, so it
+// adds no line to the list of the binding above it.
+func (e *SourceError) bare() bool {
+	t := e.texts()
+
+	return t.count == 0 && t.own == "" && (e.locErr != nil || e.adopted)
 }
 
 // more returns the line that ends a list which leaves n errors out. It
@@ -3545,10 +3538,10 @@ func (e *SourceError) list(shown int) ([]string, int) {
 		t := child.texts()
 
 		switch {
-		case t.bare:
+		case child.bare():
 			continue
 
-		case !t.lists:
+		case t.count == 0:
 			add(t.msg)
 
 			continue
@@ -3593,7 +3586,7 @@ func (e *SourceError) ordered(shown int) []*SourceError {
 		case c.unbound:
 			// A child that lists nothing under its own line gives no
 			// line here, as one a wrapper rewrote does not.
-			if t := c.bound.texts(); t.lists {
+			if t := c.bound.texts(); t.count > 0 {
 				listed = append(listed, c.bound.ordered(t.held)...)
 			}
 		}
