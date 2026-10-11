@@ -13,6 +13,7 @@ import (
 
 	slashpath "path"
 
+	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
 
@@ -376,26 +377,26 @@ func isRelative(path string) bool {
 func filePath(ref Ref) (string, error) {
 	if ref.fsys == nil {
 		if ref.abs == "" {
-			return "", fmt.Errorf("read %s: no absolute path: %w", ref.file, ref.absErr)
+			return "", drawn(fmt.Errorf("read %s: no absolute path: %w", ref.file, ref.absErr))
 		}
 
 		return ref.abs, nil
 	}
 
 	if !isRelative(ref.file) {
-		return "", fmt.Errorf(
+		return "", drawn(fmt.Errorf(
 			"read %s: %w: an absolute path names no file in the file system of the document or the Ref",
 			ref.file, fs.ErrInvalid,
-		)
+		))
 	}
 
 	name := slashpath.Clean(filepath.ToSlash(ref.file))
 	if !fs.ValidPath(name) {
-		return "", fmt.Errorf(
+		return "", drawn(fmt.Errorf(
 			"read %s: %w: not a path in the file system of the document or the Ref",
 			ref.file,
 			fs.ErrInvalid,
-		)
+		))
 	}
 
 	return slashpath.Join("/", name), nil
@@ -413,7 +414,22 @@ func filePath(ref Ref) (string, error) {
 // system of the registry stands for, where a path outside that directory
 // is [fs.ErrInvalid]. Its errors name path either way, and off Windows a
 // drive-letter path is invalid the same way.
+//
+// A document names the path through a $schema directive, and a schema
+// names it through a $ref, so the message of each error draws its control
+// characters as pictures, as [drawnError] describes.
 func (r *Registry) readFile(fsys fs.FS, path string) ([]byte, error) {
+	data, err := r.readPath(fsys, path)
+	if err != nil {
+		return nil, drawn(err)
+	}
+
+	return data, nil
+}
+
+// readPath reads the file at path as [Registry.readFile] describes, and
+// returns each error as the read wrote it.
+func (r *Registry) readPath(fsys fs.FS, path string) ([]byte, error) {
 	switch {
 	case fsys != nil:
 		rooted := slashpath.Clean(filepath.ToSlash(path))
@@ -534,6 +550,37 @@ func readBounded(f fs.File, name string) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+// drawnError is an error of a file read whose message draws its control
+// characters as pictures, and a tab as four spaces. The message names the
+// path of the file, and the text of the cause names it again. A document
+// or a schema can supply that path, so a message that held it as written
+// would let either one start a line of its own or write to a terminal.
+// The error unwraps to the error it draws, so [errors.Is] and [errors.As]
+// find the cause, whose own text stays as the file system wrote it.
+type drawnError struct {
+	err error
+}
+
+// drawn returns err as a [drawnError], or nil for a nil err.
+func drawn(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	return drawnError{err: err}
+}
+
+// Error returns the message of the error e draws, with its control
+// characters as pictures and each tab as four spaces.
+func (e drawnError) Error() string {
+	return escape.Control(escape.Tabs(e.err.Error()))
+}
+
+// Unwrap returns the error e draws.
+func (e drawnError) Unwrap() error {
+	return e.err
 }
 
 // notRegular returns the [fs.ErrInvalid] error for name, a path that

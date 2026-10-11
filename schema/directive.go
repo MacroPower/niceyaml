@@ -185,6 +185,12 @@ type directiveResolver struct{}
 // its cache without bound. A long-running program that validates such
 // documents builds a registry per batch or request. A program that trusts
 // no directive at all leaves Directive out of the resolvers.
+//
+// The path a directive names can hold control characters. The message of
+// an error that reads the file draws them as pictures, so a document
+// cannot start a line of its own or write to a terminal through it.
+// [errors.As] still finds the error of the file system, whose own text
+// holds the path as the directive wrote it.
 func Directive() Resolver {
 	return directiveResolver{}
 }

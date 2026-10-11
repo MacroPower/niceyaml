@@ -112,6 +112,75 @@ func TestFile(t *testing.T) {
 	})
 }
 
+func TestFile_ErrorDrawsControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	// A document names the path of its schema through a directive, so the
+	// path holds whatever the author of the document wrote.
+	const name = "a\x1b[2J\nb.json"
+
+	fsys := mapFS(map[string]string{"dir\x1b[2J/x.json": "{}"})
+
+	tcs := map[string]struct {
+		ref  schema.Ref
+		err  error
+		want string
+	}{
+		"missing file on disk": {
+			ref:  schema.File(filepath.Join(t.TempDir(), name)),
+			want: "a␛[2J␊b.json",
+		},
+		"missing file in a file system": {
+			ref:  schema.FileFS(fsys, name),
+			err:  fs.ErrNotExist,
+			want: "read a␛[2J␊b.json: ",
+		},
+		"directory in a file system": {
+			ref:  schema.FileFS(fsys, "dir\x1b[2J"),
+			err:  fs.ErrInvalid,
+			want: "read dir␛[2J: ",
+		},
+		"absolute path in a file system": {
+			ref:  schema.FileFS(fsys, "/"+name),
+			err:  fs.ErrInvalid,
+			want: "read /a␛[2J␊b.json: ",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := schema.NewRegistry().Schema(t.Context(), tc.ref)
+			require.ErrorIs(t, err, schema.ErrLoad)
+
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+			}
+
+			msg := err.Error()
+			assert.NotContains(t, msg, "\x1b")
+			assert.NotContains(t, msg, "\n")
+			assert.Contains(t, msg, tc.want)
+		})
+	}
+}
+
+// The cause keeps the path as the file system wrote it, for a caller that
+// reads the path and not the message.
+func TestFile_ErrorKeepsCause(t *testing.T) {
+	t.Parallel()
+
+	const name = "a\x1b[2Jb.json"
+
+	_, err := schema.NewRegistry().Schema(t.Context(), schema.FileFS(mapFS(nil), name))
+
+	var pathErr *fs.PathError
+
+	require.ErrorAs(t, err, &pathErr)
+	assert.Equal(t, name, pathErr.Path)
+}
+
 func TestFile_DriveLetter(t *testing.T) {
 	t.Parallel()
 
