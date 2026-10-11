@@ -88,6 +88,10 @@
 // A diff shows lines of two revisions, so the [Hit] names the revision
 // that holds the line under the cell with the position in it.
 //
+// [Model.Reveal] scrolls the viewport to a Hit, whether HitAt returned it
+// or the parent built it from a position in a revision, such as the place
+// of an error.
+//
 // # Customization
 //
 // Provide a custom [printer.Printer] via [WithPrinter] to control syntax

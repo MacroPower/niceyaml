@@ -170,10 +170,11 @@ const (
 	ViewModeSideBySide
 )
 
-// Hit is a place in a revision that a cell of the viewport shows.
-// [Model.HitAt] returns one for the cell under a pointer.
+// Hit is a place in a revision of the viewport's history. [Model.HitAt]
+// returns the Hit that the cell under a pointer shows, and [Model.Reveal]
+// scrolls the viewport to a Hit.
 type Hit struct {
-	// Position is the position the cell shows, in the coordinates of the
+	// Position is the place in the revision, in the coordinates of the
 	// content of the view the revision hands out. For a
 	// [*niceyaml.Source] those are the coordinates of
 	// [niceyaml.Source.Lines], so the position goes to
@@ -2313,6 +2314,124 @@ func (m *Model) revisionHit(right bool, pos position.Position) (Hit, bool) {
 	return Hit{Revision: index, Position: position.New(i, pos.Col)}, true
 }
 
+// Reveal scrolls the viewport to bring hit on screen and reports true. It
+// takes a [Hit] that [Model.HitAt] returned, or one the parent builds from
+// a position in a revision, such as the start of a line to go to:
+//
+//	m.viewport.Reveal(yamlviewport.Hit{
+//		Revision: m.viewport.RevisionIndex(),
+//		Position: position.New(line, 0),
+//	})
+//
+// Reveal scrolls as a search does for its current match. It centers the
+// row that shows the position. With wrapping off it scrolls sideways only
+// when the position lies past the right edge of the first screen, and then
+// centers the position.
+//
+// Reveal changes neither the revision on display nor the [ViewMode] nor
+// the [DiffMode]. It reports false and leaves the viewport as it is when
+// the view on display does not show the position. The viewport shows the
+// current revision and, with a diff, the revision the diff compares with,
+// so Reveal reports false for a Hit of any other revision. It reports
+// false as well for a line outside every hunk of [ViewModeHunks], for a
+// line the view of the revision does not hold, and for a column past the
+// end of its line. It reports false for every Hit on a zero Model.
+//
+// A diff shows an unchanged line of the revision it compares with in the
+// left pane of [ViewModeSideBySide]. Every other view of the diff shows
+// that line once, as a line of the current revision. Reveal scrolls to it
+// there, and [Model.HitAt] names the current revision for its cells.
+func (m *Model) Reveal(hit Hit) bool {
+	right, pos, ok := m.locate(hit)
+	if !ok {
+		return false
+	}
+
+	// The range covers the column of the position, so a sideways scroll
+	// brings the whole of its cell on screen.
+	return m.scrollTo(right, position.NewRange(pos, position.New(pos.Line, pos.Col+1)))
+}
+
+// locate finds hit in the views on display. It returns whether the right
+// pane shows hit rather than the left, the position that shows it in the
+// content of that pane, and true. The last result is false when no line on
+// display shows hit, as [Model.Reveal] lists the cases.
+func (m *Model) locate(hit Hit) (bool, position.Position, bool) {
+	pos := hit.Position
+
+	if !m.ShowingDiff() {
+		// Without a diff every pane shows the view of the current
+		// revision, which the left base view copies.
+		return false, pos, hit.Revision == m.revIndex && holds(m.baseLeft, pos)
+	}
+
+	var revision int
+
+	switch hit.Revision {
+	case m.diffBaseIndex():
+		revision = 0
+	case m.revIndex:
+		revision = 1
+	default:
+		return false, position.Position{}, false
+	}
+
+	view := m.diffViews[revision]
+	if !holds(view, pos) {
+		return false, position.Position{}, false
+	}
+
+	l := view.Line(pos.Line)
+
+	// A side-by-side diff holds every line of revision 0 in its left pane
+	// and every line of revision 1 in its right one.
+	if m.viewMode == ViewModeSideBySide {
+		right := revision == 1
+
+		pane := m.baseLeft
+		if right {
+			pane = m.baseRight
+		}
+
+		i, ok := pane.Index(l)
+
+		return right, position.New(i, pos.Col), ok
+	}
+
+	// Any other view of the diff holds the deleted lines of revision 0
+	// alone, and shows each of its unchanged lines as a line of revision 1.
+	if revision == 0 {
+		l = m.unifiedLine(l)
+	}
+
+	i, ok := m.baseLeft.Index(l)
+
+	return false, position.New(i, pos.Col), ok
+}
+
+// unifiedLine returns the line of the unified diff that shows l, a line of
+// the revision the diff compares with. A deleted line shows as itself. The
+// unified diff takes an unchanged line from the current revision, so the
+// line the side-by-side panes put beside l shows it.
+func (m *Model) unifiedLine(l *line.Line) *line.Line {
+	result := m.getDiffResult()
+	before := result.Before()
+
+	// The left pane holds every line of the revision, so it holds l.
+	i, ok := before.Index(l)
+	if !ok || before.Flag(i) == line.FlagDeleted {
+		return l
+	}
+
+	return result.After().Line(i)
+}
+
+// holds reports whether view holds the line of pos and the line reaches the
+// column of pos, which may be the end of the line.
+func holds(view *line.View, pos position.Position) bool {
+	return pos.Col >= 0 && view.Contains(pos.Line) && pos.Col <= view.Line(pos.Line).Width()
+}
+
 // SetSearchTerm sets the search term and updates highlights.
 // If the term is empty, clears all search highlights.
 //
@@ -2413,80 +2532,91 @@ func (m *Model) SearchCount() int {
 	return len(m.searchMatches)
 }
 
-// scrollToCurrentMatch scrolls to center the row that holds the start of the
-// current search match in the viewport.
+// scrollToCurrentMatch scrolls to the current search match, as scrollTo
+// does for its range.
 func (m *Model) scrollToCurrentMatch() {
 	if m.searchIndex < 0 || m.searchIndex >= len(m.searchMatches) {
 		return
 	}
 
 	match := m.searchMatches[m.searchIndex]
-	m.ensureRows()
 
-	right := m.baseRight != nil && !match.inLeft
+	m.scrollTo(m.baseRight != nil && !match.inLeft, match.rng)
+}
+
+// scrollTo scrolls to center the row that holds the start of rng, a range
+// in the content of the left pane, or of the right one when right is true.
+// It returns to the first screen sideways, unless wrap is off and rng ends
+// past that screen, and then it centers the start of rng. It reports
+// whether the pane renders the line rng starts on, and leaves both offsets
+// as they are when it does not.
+func (m *Model) scrollTo(right bool, rng position.Range) bool {
+	m.ensureRows()
 
 	view := m.baseLeft
 	if right {
 		view = m.baseRight
 	}
 
-	i := match.rng.Start.Line
+	i := rng.Start.Line
 
 	k, ok := slices.BinarySearch(m.rows.indices, i)
 	if !ok || view == nil {
-		return
+		return false
 	}
 
-	// The row of the match within its line comes from a layout of the line
+	// The row of the range within its line comes from a layout of the line
 	// alone in the pane it is in, and the line's first row from the sums
 	// that place the taller of the two panes.
 	layout := m.renderPrinter(m.paneWidth()).Layout(m.highlighted(right, position.NewSpan(i, i+1)))
 
-	matchRow := layout.RowOf(match.rng.Start)
-	if matchRow < 0 {
-		return
+	lineRow := layout.RowOf(rng.Start)
+	if lineRow < 0 {
+		return false
 	}
 
-	row := m.rows.sums[k] + matchRow
+	row := m.rows.sums[k] + lineRow
 
-	// (maxHeight-1)/2 puts the match on the visual center row. A height of
+	// (maxHeight-1)/2 puts the range on the visual center row. A height of
 	// 22 gives (22-1)/2 = 10, and a height of 21 gives (21-1)/2 = 10, so
-	// the match lands on row 10 in both cases.
+	// the range lands on row 10 in both cases.
 	m.SetYOffset(row - (m.maxHeight()-1)/2)
 
-	// Wrapped content fits the width, so the match sits in the first
+	// Wrapped content fits the width, so the range sits in the first
 	// screen. An offset left over from reading a wide annotation row could
 	// hide it.
 	if m.wrapEnabled {
 		m.SetXOffset(0)
 
-		return
+		return true
 	}
 
 	// With wrap off every line is one row that starts at the gutter, so
-	// the cells of the match are the gutter plus the cells the layout
+	// the cells of the range are the gutter plus the cells the layout
 	// gives each of its columns. The layout counts what a style's
-	// transform adds before them, as the rendered row shows it. A match
+	// transform adds before them, as the rendered row shows it. A range
 	// that ends on a later line runs to the end of this one.
-	end := match.rng.End
+	end := rng.End
 	if end.Line != i {
 		end = position.New(i, view.Line(i).Width())
 	}
 
-	x := layout.GutterWidth() + layout.CellOf(match.rng.Start)
+	x := layout.GutterWidth() + layout.CellOf(rng.Start)
 	xEnd := layout.GutterWidth() + layout.CellOf(end)
 
-	// A match that fits the first screen shows without scrolling, so the
+	// A range that fits the first screen shows without scrolling, so the
 	// view keeps the gutter and the start of the line in sight.
 	if xEnd <= m.scrollWidth() {
 		m.SetXOffset(0)
 
-		return
+		return true
 	}
 
-	// Any other match takes the offset that centers its first cell, the
+	// Any other range takes the offset that centers its first cell, the
 	// way the Y offset centers its row.
 	m.SetXOffset(x - (m.scrollWidth()-1)/2)
+
+	return true
 }
 
 // Update processes Bubble Tea messages and returns the updated model.

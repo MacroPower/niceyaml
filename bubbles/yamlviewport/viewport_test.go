@@ -4426,6 +4426,7 @@ func TestViewport_ZeroValue(t *testing.T) {
 
 	_, ok := m.HitAt(0, 0)
 	assert.False(t, ok)
+	assert.False(t, m.Reveal(yamlviewport.Hit{}))
 
 	m.ScrollDown(1)
 	m.PageDown()
@@ -7555,6 +7556,296 @@ func TestViewport_HitAt_PathAt(t *testing.T) {
 			path, ok := doc.PathAt(hit.Position)
 			require.True(t, ok)
 			assert.Equal(t, tc.want, path.String())
+		})
+	}
+}
+
+// hitRow returns the first row of the viewport with a cell that shows
+// want, as [yamlviewport.Model.HitAt] reports it, and true. It reports
+// false when no cell on screen shows want.
+func hitRow(m *yamlviewport.Model, want yamlviewport.Hit) (int, bool) {
+	for y := range m.Height() {
+		for x := range m.Width() {
+			if hit, ok := m.HitAt(x, y); ok && hit == want {
+				return y, true
+			}
+		}
+	}
+
+	return 0, false
+}
+
+func TestViewport_Reveal(t *testing.T) {
+	t.Parallel()
+
+	// The viewport shows revision 2. Revision 1 holds three lines in place
+	// of line 20 and another line 40, so its lines past the first change
+	// sit two below the lines they match in revision 2.
+	origin := numbered(60, "key%d: value")
+	before := replaceLine(replaceLine(origin, 40, "old: x"), 20, stringtest.JoinLF("gone: 1", "gone: 2", "gone: 3"))
+	after := replaceLine(origin, 40, "new: y")
+
+	const height = 5
+
+	hunks := func(m *yamlviewport.Model) { m.SetViewMode(yamlviewport.ViewModeHunks) }
+	sideBySide := func(m *yamlviewport.Model) { m.SetViewMode(yamlviewport.ViewModeSideBySide) }
+	withOrigin := func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeOrigin) }
+	noDiff := func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeNone) }
+
+	// Each case that wants true names in shows a Hit that the center row
+	// holds once Reveal returns.
+	tcs := map[string]struct {
+		setup func(m *yamlviewport.Model)
+		hit   yamlviewport.Hit
+		shows yamlviewport.Hit
+		want  bool
+	}{
+		"unchanged line": {
+			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
+			shows: yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
+			want:  true,
+		},
+		"inserted line": {
+			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(40, 0)},
+			shows: yamlviewport.Hit{Revision: 2, Position: position.New(40, 0)},
+			want:  true,
+		},
+		"deleted line": {
+			hit:   yamlviewport.Hit{Revision: 1, Position: position.New(21, 0)},
+			shows: yamlviewport.Hit{Revision: 1, Position: position.New(21, 0)},
+			want:  true,
+		},
+		"unchanged line of the compared revision": {
+			// The unified diff shows the line as line 50 of revision 2.
+			hit:   yamlviewport.Hit{Revision: 1, Position: position.New(52, 0)},
+			shows: yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
+			want:  true,
+		},
+		"end of a line": {
+			// No cell shows the column past the last rune, so the row
+			// shows the rune before it.
+			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(50, 12)},
+			shows: yamlviewport.Hit{Revision: 2, Position: position.New(50, 11)},
+			want:  true,
+		},
+		"column past the end of a line": {
+			hit: yamlviewport.Hit{Revision: 2, Position: position.New(50, 13)},
+		},
+		"negative column": {
+			hit: yamlviewport.Hit{Revision: 2, Position: position.New(50, -1)},
+		},
+		"line past the last": {
+			hit: yamlviewport.Hit{Revision: 2, Position: position.New(60, 0)},
+		},
+		"negative line": {
+			hit: yamlviewport.Hit{Revision: 2, Position: position.New(-1, 0)},
+		},
+		"revision the diff leaves out": {
+			hit: yamlviewport.Hit{Revision: 0, Position: position.New(50, 0)},
+		},
+		"revision past the history": {
+			hit: yamlviewport.Hit{Revision: 3, Position: position.New(50, 0)},
+		},
+		"negative revision": {
+			hit: yamlviewport.Hit{Revision: -1, Position: position.New(50, 0)},
+		},
+		"no revision": {
+			setup: func(m *yamlviewport.Model) { m.ClearRevisions() },
+			hit:   yamlviewport.Hit{},
+		},
+		"hunks inserted line": {
+			setup: hunks,
+			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(40, 0)},
+			shows: yamlviewport.Hit{Revision: 2, Position: position.New(40, 0)},
+			want:  true,
+		},
+		"hunks deleted line": {
+			setup: hunks,
+			hit:   yamlviewport.Hit{Revision: 1, Position: position.New(21, 0)},
+			shows: yamlviewport.Hit{Revision: 1, Position: position.New(21, 0)},
+			want:  true,
+		},
+		"hunks unchanged line of the compared revision": {
+			setup: hunks,
+			hit:   yamlviewport.Hit{Revision: 1, Position: position.New(41, 0)},
+			shows: yamlviewport.Hit{Revision: 2, Position: position.New(39, 0)},
+			want:  true,
+		},
+		"hunks line outside every hunk": {
+			setup: hunks,
+			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
+		},
+		"hunks line of the compared revision outside every hunk": {
+			setup: hunks,
+			hit:   yamlviewport.Hit{Revision: 1, Position: position.New(52, 0)},
+		},
+		"side by side left pane": {
+			setup: sideBySide,
+			hit:   yamlviewport.Hit{Revision: 1, Position: position.New(52, 0)},
+			shows: yamlviewport.Hit{Revision: 1, Position: position.New(52, 0)},
+			want:  true,
+		},
+		"side by side right pane": {
+			setup: sideBySide,
+			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
+			shows: yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
+			want:  true,
+		},
+		"origin deleted line": {
+			setup: withOrigin,
+			hit:   yamlviewport.Hit{Revision: 0, Position: position.New(40, 0)},
+			shows: yamlviewport.Hit{Revision: 0, Position: position.New(40, 0)},
+			want:  true,
+		},
+		"origin revision the diff leaves out": {
+			setup: withOrigin,
+			hit:   yamlviewport.Hit{Revision: 1, Position: position.New(21, 0)},
+		},
+		"no diff": {
+			setup: noDiff,
+			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
+			shows: yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
+			want:  true,
+		},
+		"no diff side by side": {
+			setup: func(m *yamlviewport.Model) {
+				noDiff(m)
+				sideBySide(m)
+			},
+			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
+			shows: yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
+			want:  true,
+		},
+		"no diff compared revision": {
+			setup: noDiff,
+			hit:   yamlviewport.Hit{Revision: 1, Position: position.New(21, 0)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 44, height)
+			addRevisions(&m, origin, before, after)
+
+			if tc.setup != nil {
+				tc.setup(&m)
+			}
+
+			m.SetYOffset(3)
+
+			y, x := m.YOffset(), m.XOffset()
+			revision, viewMode, diffMode := m.RevisionIndex(), m.ViewMode(), m.DiffMode()
+
+			require.Equal(t, tc.want, m.Reveal(tc.hit), "screen:\n%s", ansi.Strip(m.View()))
+
+			assert.Equal(t, revision, m.RevisionIndex())
+			assert.Equal(t, viewMode, m.ViewMode())
+			assert.Equal(t, diffMode, m.DiffMode())
+
+			if !tc.want {
+				assert.Equal(t, y, m.YOffset())
+				assert.Equal(t, x, m.XOffset())
+
+				return
+			}
+
+			row, ok := hitRow(&m, tc.shows)
+			require.True(t, ok, "screen:\n%s", ansi.Strip(m.View()))
+			assert.Equal(t, (height-1)/2, row, "screen:\n%s", ansi.Strip(m.View()))
+		})
+	}
+}
+
+func TestViewport_Reveal_Sideways(t *testing.T) {
+	t.Parallel()
+
+	// With wrap off, a position past the right edge of the first screen
+	// scrolls the view sideways, as a search match there does. A position
+	// whose cell fits the first screen returns the view to it, and so does
+	// wrap, which has no horizontal scroll.
+	dashes := "k: " + strings.Repeat("-", 60) + "NEEDLE"
+
+	tcs := map[string]struct {
+		revisions  []string
+		hit        yamlviewport.Hit
+		mode       yamlviewport.ViewMode
+		width      int
+		wrap       bool
+		wantScroll bool
+	}{
+		"column past the right edge": {
+			revisions:  []string{stringtest.LinesLF(dashes, "z: 1")},
+			hit:        yamlviewport.Hit{Position: position.New(0, 63)},
+			width:      30,
+			wantScroll: true,
+		},
+		"wide runes before the column": {
+			// Each rune before the needle takes two cells, so the cell of
+			// the column is twice its distance from the key.
+			revisions:  []string{stringtest.LinesLF("k: "+strings.Repeat("日本", 15)+"NEEDLE", "z: 1")},
+			hit:        yamlviewport.Hit{Position: position.New(0, 33)},
+			width:      30,
+			wantScroll: true,
+		},
+		"column inside the first screen": {
+			revisions: []string{stringtest.LinesLF(dashes, "z: 1")},
+			hit:       yamlviewport.Hit{Position: position.New(0, 3)},
+			width:     30,
+		},
+		"column on the last cell of the first screen": {
+			// The gutter takes one cell, so column 38 takes the last of
+			// the 40.
+			revisions: []string{stringtest.LinesLF(dashes, "z: 1")},
+			hit:       yamlviewport.Hit{Position: position.New(0, 38)},
+			width:     40,
+		},
+		"column one cell past the first screen": {
+			revisions:  []string{stringtest.LinesLF(dashes, "z: 1")},
+			hit:        yamlviewport.Hit{Position: position.New(0, 39)},
+			width:      40,
+			wantScroll: true,
+		},
+		"column in the right pane": {
+			revisions:  []string{"k: short\n", dashes + "\n"},
+			hit:        yamlviewport.Hit{Revision: 1, Position: position.New(0, 63)},
+			mode:       yamlviewport.ViewModeSideBySide,
+			width:      60,
+			wantScroll: true,
+		},
+		"wrap on": {
+			revisions: []string{stringtest.LinesLF(dashes, "z: 1")},
+			hit:       yamlviewport.Hit{Position: position.New(0, 63)},
+			width:     30,
+			wrap:      true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), tc.width, 5)
+			m.SetViewMode(tc.mode)
+			m.SetWordWrap(tc.wrap)
+
+			addRevisions(&m, tc.revisions...)
+
+			// The view starts away from the first screen wherever it can
+			// scroll.
+			m.SetXOffset(10)
+
+			require.True(t, m.Reveal(tc.hit))
+
+			if tc.wantScroll {
+				assert.Positive(t, m.XOffset())
+			} else {
+				assert.Equal(t, 0, m.XOffset())
+			}
+
+			_, ok := hitRow(&m, tc.hit)
+			assert.True(t, ok, "screen:\n%s", ansi.Strip(m.View()))
 		})
 	}
 }
