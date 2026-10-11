@@ -17,12 +17,12 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/internal/fault"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 var (
@@ -1535,6 +1535,12 @@ type location struct {
 	pos       position.Position
 }
 
+// highlight returns the ranges to highlight for l in lines, as
+// [excerpt.Ranges] finds them.
+func (l location) highlight(lines line.Lines) position.Ranges {
+	return excerpt.Ranges(lines, l.rng, l.tk, l.pos)
+}
+
 // locate resolves l, the location of an [Error], and returns the node it
 // is bound to. A range or a position is the location as it is, and a
 // path locates the error at the position of the token it resolves to in
@@ -2983,8 +2989,8 @@ func newSourceError(err error, b binder) *SourceError {
 		}
 
 		if e.locErr == nil {
-			e.ranges = highlightRanges(e.source.lines, e.loc)
-			e.rng = rangeOf(e.ranges, e.loc.pos)
+			e.ranges = e.loc.highlight(e.source.lines)
+			e.rng = excerpt.Cover(e.ranges, e.loc.pos)
 		}
 	}
 
@@ -3975,13 +3981,13 @@ func formatError(err error, cfg excerptConfig, limit int) string {
 	parts := make([]string, 0, 1+len(rep.Excerpts)+len(rep.Unresolved))
 	parts = append(parts, renderErrorTree(rep.Tree))
 
-	for _, excerpt := range rep.Excerpts {
-		part := excerpt.View.String()
+	for _, shown := range rep.Excerpts {
+		part := shown.View.String()
 
 		// The name is the caller's text, so its control characters render
 		// as pictures like those of the tree.
-		if excerpt.Named {
-			part = excerpt.Source.label() + "\n" + part
+		if shown.Named {
+			part = shown.Source.label() + "\n" + part
 		}
 
 		parts = append(parts, part)
@@ -4263,17 +4269,6 @@ func (e *SourceError) Nearest() (paths.Path, bool) {
 	return *e.loc.near, true
 }
 
-// rangeOf returns the one range that spans the highlight ranges from
-// [highlightRanges], from the start of the first to the end of the last.
-// With no ranges, it returns the empty range at the position at.
-func rangeOf(ranges position.Ranges, at position.Position) position.Range {
-	if len(ranges) == 0 {
-		return position.NewRange(at, at)
-	}
-
-	return position.NewRange(ranges[0].Start, ranges[len(ranges)-1].End)
-}
-
 // Annotate marks the error and every binding below it on view, and
 // reports whether it marked any line. It makes the marks [Annotate] makes
 // for the error, so a caller that holds one binding, such as one
@@ -4384,7 +4379,7 @@ func Annotate(err error, view *line.View) bool {
 	marked := false
 
 	for _, src := range sources {
-		if annotate(view, src, positions[src]) {
+		if excerpt.Annotate(view, src.lines, positions[src]) {
 			marked = true
 		}
 	}
@@ -4450,14 +4445,14 @@ func (e *SourceError) Excerpt(opts ...ExcerptOption) (*line.View, bool) {
 // stand in one place. It reports false, with no view, when positions
 // mark no line of s, and for a Source whose text WithExcerpts keeps out
 // of excerpts.
-func (s *Source) excerpt(positions []errorPosition, cfg excerptConfig) (*line.View, bool) {
+func (s *Source) excerpt(positions []excerpt.Mark, cfg excerptConfig) (*line.View, bool) {
 	if !s.ShowsExcerpts() {
 		return nil, false
 	}
 
 	view := s.View()
 
-	if !annotate(view, s, positions) {
+	if !excerpt.Annotate(view, s.lines, positions) {
 		return nil, false
 	}
 
@@ -4492,147 +4487,6 @@ func joinParts(parts ...string) string {
 	return strings.Join(kept, "\n\n")
 }
 
-// errorPosition holds a resolved error position with the text to
-// annotate its line with, which is empty for the root of an excerpt.
-type errorPosition struct {
-	message string
-	ranges  position.Ranges
-	pos     position.Position
-}
-
-// annotate marks positions, the resolved locations of the nodes bound to
-// src, on view with [annotateSource]. [markUnannotated] then adds an
-// annotation without content below each line it marked that has none.
-// It reports whether it marked any line, which it does not when
-// positions is empty or the view holds none of their lines.
-func annotate(view *line.View, src *Source, positions []errorPosition) bool {
-	marked := annotateSource(view, src, positions)
-
-	markUnannotated(view, marked)
-
-	return len(marked) > 0
-}
-
-// annotateSource marks positions, the resolved locations of the nodes bound
-// to src, on view and returns the indices of the lines it marked, with
-// repeats. The view may hold the lines of src at any indices, as a diff
-// does, so every mark goes to the index that holds its line. A position
-// whose highlight leaves out its own line gets an overlay of no width at
-// its column on that line. Such positions include one with no token under
-// it and a range that covers no column of its lines. They also include a
-// position on a line of only spaces inside a block scalar, and a range that
-// starts at the end of its first line. The overlay renders nothing and
-// still marks the line as decorated, so the line joins the hunks
-// [line.View.Hunks] keeps.
-//
-// Each position with a message adds one annotation below its line, so a
-// line several positions mark carries one annotation per message, and a
-// renderer joins them in column order. Each tab in a message becomes four
-// spaces, as [escape.Tabs] returns it, so the annotation spells the message
-// as the tree of [FormatError] does. A renderer draws the other control
-// characters of an annotation as their pictures. The annotation starts at
-// the first column the highlight of its position covers on that line, where
-// [markUnannotated] starts a caret run, so a position on the spaces around
-// a token puts its message under the token. A position with no highlight on
-// its line keeps its column. A column past the end of its line moves to the
-// column after its last rune, in the overlay and in the annotation below
-// the line. A far column then costs a renderer no more cells than a column
-// at the end.
-//
-// A line keeps each mark once. [addOverlay] and [addAnnotation] skip a mark
-// the line holds already, so positions that repeat, in one call or across
-// several, leave the view as the first of them does. A message that repeats
-// at one column thus reads once. Several errors say the same of one value
-// when a schema states a constraint twice, or when a value fails two
-// branches of an anyOf the same way.
-func annotateSource(view *line.View, src *Source, positions []errorPosition) []int {
-	if len(positions) == 0 {
-		return nil
-	}
-
-	index := src.lineIndex(view)
-
-	var marked []int
-
-	for _, pos := range positions {
-		var segments []position.Range
-
-		for _, r := range pos.ranges {
-			segments = append(segments, src.lines.SliceLines(r)...)
-		}
-
-		if i, ok := index(pos.pos.Line); ok {
-			marked = append(marked, i)
-
-			width := src.lines.Line(pos.pos.Line).Width()
-			start, onLine := highlightStart(pos.pos, segments)
-
-			if !onLine {
-				col := min(pos.pos.Col, width)
-				addOverlay(view, i, line.Overlay{
-					Cols: position.NewSpan(col, col),
-					Kind: kind.GenericError,
-				})
-			}
-
-			if pos.message != "" {
-				addAnnotation(view, i, line.Annotation{
-					Content:   escape.Tabs(pos.message),
-					Kind:      kind.TextError,
-					Placement: line.Below,
-					Col:       min(start, width),
-				})
-			}
-		}
-
-		// [line.Lines.SliceLines] already clamped each segment to its
-		// line, which the view holds at index i.
-		for _, lr := range segments {
-			if i, ok := index(lr.Start.Line); ok {
-				addOverlay(view, i, line.Overlay{
-					Cols: position.NewSpan(lr.Start.Col, lr.End.Col),
-					Kind: kind.GenericError,
-				})
-
-				marked = append(marked, i)
-			}
-		}
-	}
-
-	return marked
-}
-
-// addOverlay adds o to line i of view, unless the line holds an equal
-// overlay already.
-func addOverlay(view *line.View, i int, o line.Overlay) {
-	if !slices.Contains(view.Overlays(i), o) {
-		view.AddLineOverlay(i, o)
-	}
-}
-
-// addAnnotation adds a to line i of view, unless the line holds an equal
-// annotation already.
-func addAnnotation(view *line.View, i int, a line.Annotation) {
-	if !slices.Contains(view.Annotations(i), a) {
-		view.Annotate(i, a)
-	}
-}
-
-// highlightStart returns the first column that segments cover on the
-// line of at, or the column of at when no segment lies on that line. It
-// also reports whether any segment lies on that line.
-func highlightStart(at position.Position, segments []position.Range) (int, bool) {
-	col, found := at.Col, false
-
-	for _, lr := range segments {
-		if lr.Start.Line == at.Line && (!found || lr.Start.Col < col) {
-			col, found = lr.Start.Col, true
-		}
-	}
-
-	return col, found
-}
-
 // treePositions returns the sources the trees of bindings touch, with the
 // resolved locations of the nodes bound to each, from one walk of each
 // tree. The sources come in the order the walk reaches them: the source
@@ -4650,11 +4504,11 @@ func treePositions(
 	bindings []*SourceError,
 	labeled bool,
 	skipped map[*SourceError]bool,
-) ([]*Source, map[*Source][]errorPosition) {
+) ([]*Source, map[*Source][]excerpt.Mark) {
 	var sources []*Source
 
 	touched := make(map[*Source]bool)
-	positions := make(map[*Source][]errorPosition)
+	positions := make(map[*Source][]excerpt.Mark)
 	seen := make(map[*SourceError]bool)
 
 	for _, root := range bindings {
@@ -4672,9 +4526,9 @@ func treePositions(
 				return true
 			}
 
-			at := errorPosition{pos: n.loc.pos, ranges: n.ranges}
+			at := excerpt.Mark{Pos: n.loc.pos, Ranges: n.ranges}
 			if labeled || n != root {
-				at.message = n.text()
+				at.Message = n.text()
 			}
 
 			positions[n.source] = append(positions[n.source], at)
@@ -4684,56 +4538,6 @@ func treePositions(
 	}
 
 	return sources, positions
-}
-
-// markUnannotated adds an annotation without content, in [kind.TextError]
-// and at the first column its overlays without Blend set cover, so a
-// search highlight on the line moves no caret, below every line of view at
-// an index in marked that carries no annotation below it yet. A line
-// several locations mark, or that an earlier error marked, thus gets one.
-// [line.View.String] draws the marks of a line from its overlays. A
-// renderer that draws them from its annotations, as the printer does,
-// draws such an annotation as a caret run under the overlays. The range
-// of a location with no message beside it, such as the root of a bound
-// error, then shows its extent without color.
-func markUnannotated(view *line.View, marked []int) {
-	for _, i := range marked {
-		// A line repeats in marked once per location on it, so the check
-		// for an annotation below it comes before the scan of its overlays.
-		// Each repeat after the first then skips the scan.
-		if slices.ContainsFunc(view.Annotations(i), func(a line.Annotation) bool {
-			return a.Placement == line.Below
-		}) {
-			continue
-		}
-
-		col, found := 0, false
-
-		for _, o := range view.Overlays(i) {
-			if !o.Blend && (!found || o.Cols.Start < col) {
-				col, found = o.Cols.Start, true
-			}
-		}
-
-		if found {
-			view.Annotate(i, line.Annotation{Kind: kind.TextError, Placement: line.Below, Col: col})
-		}
-	}
-}
-
-// lineIndex returns a lookup from a line index of the source to the index
-// of view that holds that line, found by identity. A line index the
-// source does not hold, or a line the view does not hold, reports false.
-func (s *Source) lineIndex(view *line.View) func(int) (int, bool) {
-	lines := s.lines
-
-	return func(srcIdx int) (int, bool) {
-		if srcIdx < 0 || srcIdx >= lines.Len() {
-			return 0, false
-		}
-
-		return view.Index(lines.Line(srcIdx))
-	}
 }
 
 // checkInRange reports [ErrOutOfRange] when loc starts on a line lines
@@ -4757,45 +4561,4 @@ func checkInRange(loc location, lines line.Lines) error {
 	}
 
 	return nil
-}
-
-// highlightRanges returns the ranges to highlight for loc: the range itself
-// when the error carried one, the content of the token a path resolved
-// to, and otherwise the content of the token at its position. The parser
-// makes a token for an empty value that no line holds, so a path to one
-// has no ranges, where the token at its position would be a comment or
-// the spaces after the colon.
-func highlightRanges(view line.Lines, loc location) position.Ranges {
-	if loc.rng != nil {
-		return position.Ranges{clampRange(view, *loc.rng)}
-	}
-
-	if loc.tk != nil {
-		return view.ContentRanges(loc.tk)
-	}
-
-	return view.ContentRanges(view.TokenAt(loc.pos))
-}
-
-// clampRange returns r cut to lines. A range that runs past the last line
-// ends at the end of that line, so a range an error carried marks lines
-// the source has and [SourceError.Range] reports one of them. A range
-// that ends before its start, as given or after that cut, covers nothing,
-// as [position.Range.LastLine] counts it, so it becomes the empty range at
-// its start, and SourceError.Range never reports an end before the start.
-// An end on a later line at a column before the first moves to the start
-// of that line, so SourceError.Range never reports a negative column. A
-// range within the lines comes back as it is.
-func clampRange(lines line.Lines, r position.Range) position.Range {
-	if last := lines.Len() - 1; last >= 0 && r.End.Line > last {
-		r.End = position.New(last, lines.Line(last).Width())
-	}
-
-	if r.End.Line < r.Start.Line || (r.End.Line == r.Start.Line && r.End.Col < r.Start.Col) {
-		return position.NewRange(r.Start, r.Start)
-	}
-
-	r.End.Col = max(r.End.Col, 0)
-
-	return r
 }

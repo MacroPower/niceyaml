@@ -2017,7 +2017,7 @@ func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
 		return nil, n.bindUnresolved(path, err)
 	}
 
-	return highlightRanges(n.source.lines, loc), nil
+	return loc.highlight(n.source.lines), nil
 }
 
 // pathLocation returns the location of the token that path resolves to in
