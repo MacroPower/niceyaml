@@ -616,21 +616,12 @@ func joinBinding(err error) *SourceError {
 // that unwraps to several is a join only when its message is that text,
 // as [multierr.JoinMessage] reports.
 func joinBranches(err error) ([]error, bool) {
-	return joinBranchesOf(err, func() string { return err.Error() })
-}
-
-// joinBranchesOf is [joinBranches] for a caller that reads the message of
-// err itself. It calls msg for that message, and only for an error whose
-// type does not say whether it is a join, so a caller that keeps the
-// message reads it once. An Error that adds nothing has the message of
-// the error it wraps, so msg serves for that error too.
-func joinBranchesOf(err error, msg func() string) ([]error, bool) {
 	if x, ok := err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
 		if !x.addsNothing() {
 			return nil, false
 		}
 
-		return joinBranchesOf(x.err, msg)
+		return joinBranches(x.err)
 	}
 
 	joined, ok := err.(interface{ Unwrap() []error }) //nolint:errorlint // The node itself, not a chain search.
@@ -639,7 +630,7 @@ func joinBranchesOf(err error, msg func() string) ([]error, bool) {
 	}
 
 	branches := joined.Unwrap()
-	if !multierr.IsJoin(err) && !multierr.JoinMessage(msg(), branches) {
+	if !multierr.IsJoin(err) && !multierr.JoinMessage(err.Error(), branches) {
 		return nil, false
 	}
 

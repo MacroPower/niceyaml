@@ -3412,24 +3412,25 @@ func (e *SourceError) texts() boundTexts {
 // errors out of it, so the message stays the text as the wrapper wrote
 // it.
 func (e *SourceError) buildTexts() boundTexts {
-	// The message of a join is the messages of the bindings below it,
-	// and the list stands in for it, so nothing reads the text until a
-	// step needs it. Reading it for a join bound at each step of a loop
-	// would build the list of every join below.
-	full := sync.OnceValue(e.err.Error)
-
 	var (
-		t   boundTexts
-		cut = true
+		t    boundTexts
+		full string
+		cut  = true
 	)
 
 	// A Node that binds a join through a scope binds a new join of the
 	// scoped branches, so the bound error says whether it is a join, where
-	// the end of the chain is the join the caller gave.
-	if _, joined := joinBranchesOf(e.err, full); joined {
+	// the end of the chain is the join the caller gave. The message of a
+	// join is the messages of the bindings below it, and the list stands
+	// in for it, so only a join that lists nothing reads it. Reading it
+	// for a join bound at each step of a loop would build the list of
+	// every join below.
+	_, joined := joinBranches(e.err)
+	if joined {
 		t.held = e.end.branches
 	} else {
-		t.own, t.shown, t.held, cut = e.end.cut(full())
+		full = e.err.Error()
+		t.own, t.shown, t.held, cut = e.end.cut(full)
 	}
 
 	if cut && e.heads() {
@@ -3447,13 +3448,17 @@ func (e *SourceError) buildTexts() boundTexts {
 
 	// No error below e reaches the list, so the text stands as it is.
 	if t.count == 0 {
+		if joined {
+			full = e.err.Error()
+		}
+
 		if t.own == "" {
-			t.own = full()
+			t.own = full
 		}
 
 		t.own = pathed(t.own)
 		t.head = e.prefixed(t.own)
-		t.msg = e.prefixed(pathed(full()))
+		t.msg = e.prefixed(pathed(full))
 		t.bare = t.own == "" && (e.locErr != nil || e.adopted)
 
 		return t
