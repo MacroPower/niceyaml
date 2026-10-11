@@ -96,3 +96,37 @@ func TestDrop(t *testing.T) {
 		})
 	}
 }
+
+func TestIndex_Offset(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		src       string
+		line, col int
+		want      int
+		ok        bool
+	}{
+		"the start":                     {src: "a: 1\nb: 2\n", want: 0, ok: true},
+		"a later line":                  {src: "a: 1\nb: 2\n", line: 1, want: 5, ok: true},
+		"the end of a line":             {src: "a: 1\nb: 2\n", line: 1, col: 4, want: 9, ok: true},
+		"past the line ending":          {src: "a: 1\nb: 2\n", line: 1, col: 5, want: 10, ok: true},
+		"the empty last line":           {src: "a: 1\nb: 2\n", line: 2, want: 10, ok: true},
+		"a line past the last":          {src: "a: 1\nb: 2\n", line: 3},
+		"a column past the line ending": {src: "a: 1\n", col: 6},
+		"a mark before the text":        {src: bom.Mark + "a: 1\n", col: 1, want: 4, ok: true},
+		"a carriage return and a feed":  {src: "a\r\nb", col: 2, want: 3, ok: true},
+		"the end of text with no break": {src: "a\r\nb", line: 1, col: 1, want: 4, ok: true},
+		"a rune of two bytes":           {src: "é: 1\n", col: 1, want: 2, ok: true},
+		"a negative column":             {src: "a: 1\n", col: -1},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := bom.NewIndex(tc.src).Offset(tc.line, tc.col)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

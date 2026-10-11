@@ -3044,7 +3044,7 @@ func (n *Node) yamlOptions(cfg decodeConfig) []yaml.DecodeOption {
 		return n.decodeValue(ctx, text, dst, cfg)
 	}
 
-	return slices.Concat(n.source.decodeOpts, cfg.yamlOptions(decode))
+	return slices.Concat(n.source.decodeOptions(), cfg.yamlOptions(decode))
 }
 
 // decodeValue decodes text into dst with cfg, for the decode callback of

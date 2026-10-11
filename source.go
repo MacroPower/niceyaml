@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -22,7 +21,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
-	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -87,12 +85,12 @@ type Source struct {
 	// Holds the text the Source read, which [Source.Text] returns. A
 	// Source built from tokens read none, and hasInput is false for it.
 	input string
-	// Maps a position to an offset in input, which [Source.Offset] fills
-	// on its first call.
-	inputIndex textIndex
-	// Holds the stream that [Source.Tokens] rebuilds from lines on its
-	// first call.
-	stream token.Tokens
+	// Returns the index that maps a position to an offset in input, and
+	// builds it on the first call of [Source.Offset].
+	offsets func() bom.Index
+	// Returns the stream that [Source.Tokens] rebuilds from lines, and
+	// rebuilds it on the first call.
+	stream func() token.Tokens
 	// Parses the tokens on the first call, and returns the same parse on
 	// every later one.
 	parsed func() *parsedFile
@@ -107,13 +105,9 @@ type Source struct {
 	// Source [NewSourceFromLayers] builds, and nil for every other Source. An error
 	// bound in that document binds in a layer instead, as [layering]
 	// describes.
-	layers     *layering
-	parserOpts []parser.Option
-	decodeOpts []yaml.DecodeOption
+	layers *layering
 	sourceConfig
-	hasInput       bool
-	inputIndexOnce sync.Once
-	streamOnce     sync.Once
+	hasInput bool
 }
 
 // SourceOption configures [Source] creation.
@@ -660,7 +654,9 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 // The Source reads no text, so [Source.Text] returns an empty string for
 // it and [Source.Offset] reports false.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
-	t := &Source{}
+	t := &Source{lines: line.NewLines(tokens.ResetPositions(tks))}
+	t.offsets = sync.OnceValue(func() bom.Index { return bom.NewIndex(t.input) })
+	t.stream = sync.OnceValue(t.lines.Tokens)
 	t.parsed = sync.OnceValue(t.parse)
 	t.decodeParse = sync.OnceValue(t.reparse)
 	t.referenceTexts = sync.OnceValue(t.spellReferences)
@@ -669,22 +665,31 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 		opt(&t.sourceConfig)
 	}
 
-	if t.allowDuplicateKeys {
-		t.parserOpts = append(t.parserOpts, parser.AllowDuplicateMapKey())
+	return t
+}
+
+// parserOptions returns the options the Source parses its tokens with.
+func (s *Source) parserOptions() []parser.Option {
+	if s.allowDuplicateKeys {
+		return []parser.Option{parser.AllowDuplicateMapKey()}
 	}
 
+	return nil
+}
+
+// decodeOptions returns the options of every decode of a document of the
+// Source.
+func (s *Source) decodeOptions() []yaml.DecodeOption {
 	// The decoder counts a key that a `<<` merge brings in beside the
 	// keys of the mapping, so its check rejects a mapping that overrides
 	// a merged key. The parser rejects a key a mapping holds twice.
-	t.decodeOpts = append(t.decodeOpts, yaml.AllowDuplicateMapKey())
+	opts := []yaml.DecodeOption{yaml.AllowDuplicateMapKey()}
 
-	if len(t.references) > 0 {
-		t.decodeOpts = append(t.decodeOpts, referenceReaders(t.references))
+	if len(s.references) > 0 {
+		opts = append(opts, referenceReaders(s.references))
 	}
 
-	t.lines = line.NewLines(tokens.ResetPositions(tks))
-
-	return t
+	return opts
 }
 
 // tokenText returns the YAML text of the Source as the Origins of its
@@ -821,95 +826,7 @@ func (s *Source) Offset(pos position.Position) (int, bool) {
 		return 0, false
 	}
 
-	s.inputIndexOnce.Do(func() {
-		s.inputIndex = newTextIndex(s.input)
-	})
-
-	return s.inputIndex.offset(pos)
-}
-
-// textIndex maps a position in the lines of a [Source] to a byte offset
-// in the text the Source read. The lexer counts its lines and columns in
-// the text without the byte order marks the tokenizer drops, so the index
-// counts in that text and then adds the marks back.
-//
-// Create instances with [newTextIndex].
-type textIndex struct {
-	// The text without the marks the tokenizer dropped.
-	text string
-	// The offset in text where each line starts, as the lexer cuts lines.
-	// The end of a text that is empty or ends with a line ending starts
-	// a last line that holds nothing.
-	starts []int
-	// The offset in text of each place the tokenizer dropped a mark, in
-	// ascending order.
-	marks []int
-}
-
-// newTextIndex creates a new [textIndex] of input, the text a [Source]
-// read.
-func newTextIndex(input string) textIndex {
-	text, marks := bom.Drop(input)
-
-	// A text that lost no mark equals input, which the Source holds
-	// already, so the index reads input and holds no copy of it.
-	if len(marks) == 0 {
-		text = input
-	}
-
-	x := textIndex{text: text, marks: marks}
-
-	at := 0
-	for ln := range lineend.Lines(text) {
-		x.starts = append(x.starts, at)
-		at += len(ln)
-	}
-
-	if text == "" || tokens.TrimLineEnding(text) != text {
-		x.starts = append(x.starts, at)
-	}
-
-	return x
-}
-
-// offset returns the byte offset of pos in the text the [Source] read,
-// and true, as [Source.Offset] describes. It reports false for a line
-// the text does not hold and for a column past the end of its line.
-func (x textIndex) offset(pos position.Position) (int, bool) {
-	if pos.Line >= len(x.starts) {
-		return 0, false
-	}
-
-	start, end := x.starts[pos.Line], len(x.text)
-	if pos.Line+1 < len(x.starts) {
-		end = x.starts[pos.Line+1]
-	}
-
-	whole := x.text[start:end]
-	content := tokens.TrimLineEnding(whole)
-
-	at, col := 0, 0
-	for ; col < pos.Col && at < len(content); col++ {
-		_, size := utf8.DecodeRuneInString(content[at:])
-		at += size
-	}
-
-	switch {
-	case col == pos.Col:
-		at += start
-	case col+1 == pos.Col && len(content) < len(whole):
-		// The line ending takes the column after the content, so the
-		// column after that one is where the next line starts.
-		at = end
-	default:
-		return 0, false
-	}
-
-	// Every mark the tokenizer dropped at or before the offset lies in
-	// front of it in the text the Source read.
-	dropped, _ := slices.BinarySearch(x.marks, at+1)
-
-	return at + dropped*len(bom.Mark), true
+	return s.offsets().Offset(pos.Line, pos.Col)
 }
 
 // Tokens returns the full [token.Tokens] stream of the [Source]. The first
@@ -929,11 +846,7 @@ func (s *Source) Tokens() token.Tokens {
 		return nil
 	}
 
-	s.streamOnce.Do(func() {
-		s.stream = s.lines.Tokens()
-	})
-
-	return slices.Clone(s.stream)
+	return slices.Clone(s.stream())
 }
 
 // Documents returns the root [*Node] of each YAML document of this
@@ -1489,7 +1402,7 @@ type parsedFile struct {
 // caller asks for them.
 func (s *Source) parse() *parsedFile {
 	tks := s.Tokens()
-	r := docparse.Parse(tks, s.parserOpts...)
+	r := docparse.Parse(tks, s.parserOptions()...)
 
 	errs := make([]error, len(r.Failures))
 	for i, f := range r.Failures {
@@ -1574,7 +1487,7 @@ func (e syntaxError) Is(target error) bool {
 // a stand-in at each index where the first file holds one, and the
 // documents that parsed sit at the same indexes in both.
 func (s *Source) reparse() *docparse.Result {
-	r := docparse.Parse(s.Tokens(), s.parserOpts...)
+	r := docparse.Parse(s.Tokens(), s.parserOptions()...)
 
 	first := s.parsed().result.Index
 
