@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hours",
+  "type": "object",
+  "properties": {
+    "open": { "type": "string" },
+    "close": { "type": "string" }
+  },
+  "required": ["open", "close"],
+  "additionalProperties": false
+}

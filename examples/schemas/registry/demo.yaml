@@ -1,0 +1,15 @@
+---
+# yaml-language-server: $schema=./hours.v1.json
+open: "07:00"
+close: "19:00"
+---
+kind: MenuItem
+name: "Småkakor & Kaffe"
+price: 200
+---
+kind: MenuItem
+name: Kanelbulle
+price: 45 kr
+---
+kind: Playlist
+name: Fika Jazz

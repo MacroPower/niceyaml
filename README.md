@@ -118,8 +118,11 @@ A validator checks a document before the decoder reads it. The example rejects a
 ### Schemas
 
 - [examples/schemas/cafe](examples/schemas/cafe)
+- [examples/schemas/registry](examples/schemas/registry)
 
 Types declare their constraints with `jsonschema` struct tags. The `gen` tool from [go.jacobcolvin.com/x/jsonschema](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema) turns them into [cafe.v1.json](examples/schemas/cafe/cafe.v1.json). Run `go run ./examples/schemas/cafe/demo` to validate a config against that schema and render any failures as source-annotated errors.
+
+A [`schema.Registry`][niceyaml/schema.Registry] picks the schema of each document, so one file can hold documents of several kinds. Run `go run ./examples/schemas/registry` to route the documents of a stream by a `$schema` comment or by their `kind` and report the ones that fail.
 
 ### Layers
 
@@ -249,4 +252,5 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml/style/kind.Kind]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/kind#Kind
 [niceyaml/bubbles/yamlviewport]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/bubbles/yamlviewport
 [niceyaml/fangs]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/fangs
+[niceyaml/schema.Registry]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema#Registry
 [niceyaml/schema.Schema]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema#Schema
