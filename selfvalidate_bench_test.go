@@ -224,6 +224,69 @@ func BenchmarkNode_Decode_SelfValidation_Nested(b *testing.B) {
 	}
 }
 
+// BenchmarkNode_Decode_SelfValidation_DeepMap decodes a tree of maps with
+// and without self-validation. Only the leaf at the bottom validates
+// itself, so before the walk enters each map it scans the values below
+// the map for a validator. The scan reads each value once across the
+// walk, so the time per level should stay close to flat as the tree
+// deepens.
+func BenchmarkNode_Decode_SelfValidation_DeepMap(b *testing.B) {
+	for _, depth := range []int{250, 1000, 2000} {
+		yaml := strings.Repeat("{kids: {a: ", depth) + "{leaf: 80}" + strings.Repeat("}}", depth)
+
+		doc := yamltest.FirstDocument(b, yaml)
+
+		for _, mode := range selfValidationModes {
+			decode := decodeAs[mapTree](mode.opts...)
+
+			b.Run(fmt.Sprintf("depth_%d/%s", depth, mode.name), func(b *testing.B) {
+				b.ReportAllocs()
+				b.SetBytes(int64(len(yaml)))
+
+				for b.Loop() {
+					err := decode(b.Context(), doc)
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+
+				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*depth), "ns/level")
+			})
+		}
+	}
+}
+
+// BenchmarkNode_Decode_SelfValidation_Promoted decodes a list of rows
+// with and without self-validation. Each row embeds a struct and gets its
+// Validate from that struct, so the walk validates the embedded struct
+// rather than the row. The time per row should stay flat as the list
+// grows.
+func BenchmarkNode_Decode_SelfValidation_Promoted(b *testing.B) {
+	for _, rows := range []int{4000, 16000} {
+		yaml := yamltest.GenerateLines(rows, "- {name: n%[1]d, port: 80}")
+
+		doc := yamltest.FirstDocument(b, yaml)
+
+		for _, mode := range selfValidationModes {
+			decode := decodeAs[[]promotedRow](mode.opts...)
+
+			b.Run(fmt.Sprintf("rows_%d/%s", rows, mode.name), func(b *testing.B) {
+				b.ReportAllocs()
+				b.SetBytes(int64(len(yaml)))
+
+				for b.Loop() {
+					err := decode(b.Context(), doc)
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+
+				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*rows), "ns/row")
+			})
+		}
+	}
+}
+
 // selfValidationModes holds the options that decode with and without
 // self-validation.
 var selfValidationModes = []struct {
@@ -241,6 +304,27 @@ type branch struct {
 }
 
 func (*branch) Validate() error { return nil }
+
+// mapTree is a node of a tree that holds its children in a map. Only its
+// leaf validates itself.
+type mapTree struct {
+	Kids map[string]*mapTree `yaml:"kids"`
+	Leaf *port               `yaml:"leaf"`
+}
+
+// promotedRow is a row that gets its Validate from the struct it embeds.
+type promotedRow struct {
+	Checked `yaml:",inline"`
+
+	Name string `yaml:"name"`
+}
+
+// Checked validates the struct that embeds it.
+type Checked struct {
+	Port int `yaml:"port"`
+}
+
+func (*Checked) Validate() error { return nil }
 
 // structLink is a link of a chain that holds the next link in a struct
 // field, beside a map of values that validate themselves.

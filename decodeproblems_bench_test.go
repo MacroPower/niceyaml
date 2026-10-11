@@ -79,6 +79,37 @@ func BenchmarkNode_Decode_ProblemsWide(b *testing.B) {
 	}
 }
 
+// BenchmarkNode_Decode_ProblemsMap decodes a map of servers. In the first
+// layout the decoder rejects the last server alone, so the search reads
+// every server and finds nothing more. In the second it rejects each
+// server, so the search reports as many problems as the map holds. The
+// time per server stays flat as the map grows.
+func BenchmarkNode_Decode_ProblemsMap(b *testing.B) {
+	layouts := []struct {
+		name    string
+		servers int
+		every   bool
+	}{
+		{"last_of_2000", 2000, false},
+		{"last_of_20000", 20000, false},
+		{"each_of_2000", 2000, true},
+		{"each_of_20000", 20000, true},
+	}
+
+	for _, layout := range layouts {
+		server, last := "  s%[1]d: {name: n%[1]d, port: 80}", "  s%[1]d: {name: n%[1]d, port: http}"
+		if layout.every {
+			server = last
+		}
+
+		doc := yamltest.FirstDocument(b, benchProblemServers(layout.servers, server, last))
+
+		benchRejected[struct {
+			Servers map[string]problemServer `yaml:"servers"`
+		}](b, layout.name, doc, layout.servers, "server")
+	}
+}
+
 // BenchmarkNode_Decode_ProblemsText decodes a list of servers whose tier
 // decodes itself from text. In the first layout the decoder rejects the
 // port of the last server alone, so the search decodes every tier again

@@ -1126,6 +1126,49 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
+	t.Run("a cycle through shared map values scans in linear time", func(t *testing.T) {
+		t.Parallel()
+
+		// Every mesh links to the next one under two keys, and the last
+		// links back to the first, so a scan that reads a shared value
+		// again on every path takes 2^40 steps.
+		type withMesh struct {
+			Name string   `yaml:"name"`
+			Mesh *mapMesh `yaml:"mesh"`
+		}
+
+		tcs := map[string]struct {
+			port int
+			err  string
+		}{
+			"no port is set": {
+				port: -1,
+			},
+			"a port at the far end fails": {
+				port: 40,
+				err: "1:1: $.mesh" + strings.Repeat(".next.a", 40) +
+					".port: port out of range",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				nodes := mapMeshChain(40)
+				if tc.port >= 0 {
+					bad := port(-1)
+					nodes[tc.port].Port = &bad
+				}
+
+				dd := yamltest.FirstDocument(t, "name: x\n")
+
+				err := dd.DecodeInto(t.Context(), &withMesh{Mesh: nodes[0]})
+				requireValidation(t, err, tc.err)
+			})
+		}
+	})
+
 	t.Run("a value that leads back to a failed validator fails", func(t *testing.T) {
 		t.Parallel()
 
@@ -4298,6 +4341,30 @@ func meshChain(k int) []*mesh {
 	}
 
 	nodes[k].Next = []*mesh{nodes[0]}
+
+	return nodes
+}
+
+// mapMesh is a node of a graph that links to other nodes through a map,
+// and holds a port that validates itself.
+type mapMesh struct {
+	Next map[string]*mapMesh `yaml:"next"`
+	Port *port               `yaml:"port"`
+}
+
+// mapMeshChain returns the meshes n0 to nk, where each mesh links to the
+// next one under the keys a and b, and nk links back to n0.
+func mapMeshChain(k int) []*mapMesh {
+	nodes := make([]*mapMesh, k+1)
+	for i := range nodes {
+		nodes[i] = &mapMesh{}
+	}
+
+	for i := range k {
+		nodes[i].Next = map[string]*mapMesh{"a": nodes[i+1], "b": nodes[i+1]}
+	}
+
+	nodes[k].Next = map[string]*mapMesh{"a": nodes[0]}
 
 	return nodes
 }

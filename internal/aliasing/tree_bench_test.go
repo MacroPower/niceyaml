@@ -58,3 +58,49 @@ func BenchmarkCheckDecode_TaggedAliasChain(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkCheckDecode_NestedAnchors checks documents that nest anchors
+// many levels deep and list as many aliases at the bottom, each to one of
+// the anchors around it. The decoder reads such an alias as null, and the
+// check finds that in one walk, so the time per alias stays flat as the
+// document deepens.
+func BenchmarkCheckDecode_NestedAnchors(b *testing.B) {
+	for _, depth := range []int{1000, 3000} {
+		var sb strings.Builder
+
+		for i := range depth {
+			fmt.Fprintf(&sb, "{a: &a%d ", i)
+		}
+
+		aliases := make([]string, depth)
+		for i := range aliases {
+			aliases[i] = fmt.Sprintf("*a%d", i)
+		}
+
+		fmt.Fprintf(&sb, "[%s]", strings.Join(aliases, ", "))
+		sb.WriteString(strings.Repeat("}", depth))
+
+		input := sb.String()
+
+		b.Run(fmt.Sprintf("anchors_%d", depth), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				// A document keeps its count, so each iteration parses the
+				// input anew, outside the timer.
+				b.StopTimer()
+
+				doc := yamltest.FirstDocument(b, input)
+
+				b.StartTimer()
+
+				err := aliasing.CheckDecode(doc)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*depth), "ns/alias")
+		})
+	}
+}
