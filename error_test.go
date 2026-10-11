@@ -1894,6 +1894,89 @@ func TestError_Unwrap(t *testing.T) {
 	})
 }
 
+func TestError_ChainComparable(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err func(t *testing.T) error
+	}{
+		"a decode rejection": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				var v struct {
+					N int `yaml:"n"`
+				}
+
+				return yamltest.FirstDocument(t, "n: [1]\n").DecodeInto(t.Context(), &v)
+			},
+		},
+		"a syntax error": {
+			err: func(*testing.T) error {
+				_, err := niceyaml.NewSourceFromString("a: [\n").File()
+
+				return err
+			},
+		},
+		"a path that selects nothing": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				_, err := yamltest.FirstDocument(t, "a: 1\n").At(paths.Doc().Child("b"))
+
+				return err //nolint:wrapcheck // The test inspects the error as it is.
+			},
+		},
+		"a panic in an unmarshaler": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				ctx := context.WithValue(t.Context(), panicValueKey{}, "boom")
+
+				var v panicsWith
+
+				return yamltest.FirstDocument(t, "a: 1\n").DecodeInto(ctx, &v)
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.err(t)
+			require.Error(t, err)
+
+			// Every error in the chain works as a map key, as a caller that
+			// dedupes errors uses it.
+			seen := map[error]bool{}
+
+			var walk func(error)
+
+			walk = func(err error) {
+				if err == nil {
+					return
+				}
+
+				seen[err] = true
+
+				switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
+				case interface{ Unwrap() []error }:
+					for _, branch := range x.Unwrap() {
+						walk(branch)
+					}
+
+				case interface{ Unwrap() error }:
+					walk(x.Unwrap())
+				}
+			}
+
+			assert.NotPanics(t, func() { walk(err) })
+			assert.NotEmpty(t, seen)
+		})
+	}
+}
+
 func TestError_MultiError(t *testing.T) {
 	t.Parallel()
 

@@ -1049,8 +1049,8 @@ func (s *Source) parseError(f docparse.Failure) error {
 
 // markSyntax returns err as an error of the parse, which matches
 // [ErrSyntax] and [errInvalid]. It reads as err and unwraps to it.
-func markSyntax(err error) markedError {
-	return markedError{err: err, marks: []error{ErrSyntax, errInvalid}}
+func markSyntax(err error) *markedError {
+	return &markedError{err: err, marks: []error{ErrSyntax, errInvalid}}
 }
 
 // reparse parses the tokens again for the decoder, which edits the tree it

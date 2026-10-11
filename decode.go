@@ -625,7 +625,7 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 		// The decoder's failure for an alias inside its own anchor names
 		// the null it merges in its place, which the source does not hold,
 		// so the message is the one a decode of the whole document gives.
-		at, cause = tk, markedError{err: err, msg: msg}
+		at, cause = tk, &markedError{err: err, msg: msg}
 	}
 
 	if at == nil && ok {
@@ -664,23 +664,23 @@ var errPlaced = errors.New("placed")
 // markDecode returns err as an error of a decode, which matches
 // [ErrDecode], [errInvalid], and each mark that is not nil, such as the
 // label of a rejection or [errPlaced]. It reads as err and unwraps to it.
-func markDecode(err error, marks ...error) markedError {
+func markDecode(err error, marks ...error) *markedError {
 	marks = slices.DeleteFunc(append([]error{ErrDecode, errInvalid}, marks...), func(mark error) bool {
 		return mark == nil
 	})
 
-	return markedError{err: err, marks: marks}
+	return &markedError{err: err, marks: marks}
 }
 
 // yamlMessage returns err reduced to msg, or to its own message when msg
 // is empty. It seals the result, so no reporter prints the go-yaml excerpt,
 // which shows lines of the [Source] whatever [WithExcerpts] says.
-func yamlMessage(err yaml.Error, msg string) markedError {
+func yamlMessage(err yaml.Error, msg string) *markedError {
 	if msg == "" {
 		msg = err.GetMessage()
 	}
 
-	return markedError{err: err, msg: msg, sealed: true}
+	return &markedError{err: err, msg: msg, sealed: true}
 }
 
 // asDecodeError returns err, from the go-yaml decoder, as an error that
@@ -1458,7 +1458,7 @@ func valueProblem(problem error) error {
 	located := *x
 	located.loc = nil
 
-	if placed, ok := x.err.(markedError); ok { //nolint:errorlint // The decode placed the error it built.
+	if placed, ok := x.err.(*markedError); ok { //nolint:errorlint // The decode placed the error it built.
 		located.err = placed.without(errPlaced)
 	}
 

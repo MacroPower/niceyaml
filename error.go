@@ -3208,8 +3208,8 @@ func (e *PanicError) Unwrap() error {
 // panicked returns p, a panic in the code that in names, sealed with marks
 // on top, as "decoder panicked: boom". The seal keeps a panic value, even
 // an [*Error], from adding a location, a problem, or a fault.
-func panicked(in string, p *PanicError, marks ...error) markedError {
-	return markedError{
+func panicked(in string, p *PanicError, marks ...error) *markedError {
+	return &markedError{
 		err:     p,
 		msg:     fmt.Sprintf("%s panicked: %v", in, p.Value),
 		marks:   marks,
@@ -3232,7 +3232,8 @@ func holdsPanic(err error) bool {
 // position and excerpt go-yaml writes into the text of that error.
 type markedError struct {
 	err error
-	// The text that stands in for the message of err, or empty.
+	// The text that stands in for the message of err. A sealed error always
+	// returns it.
 	msg string
 	// The errors the error matches on top of what err matches.
 	marks []error
@@ -3242,8 +3243,8 @@ type markedError struct {
 	sealed bool
 }
 
-func (e markedError) Error() string {
-	if e.msg != "" {
+func (e *markedError) Error() string {
+	if e.sealed || e.msg != "" {
 		return e.msg
 	}
 
@@ -3251,7 +3252,7 @@ func (e markedError) Error() string {
 }
 
 // Unwrap returns the error e holds, or nil when e is sealed.
-func (e markedError) Unwrap() error {
+func (e *markedError) Unwrap() error {
 	if e.sealed {
 		return nil
 	}
@@ -3261,7 +3262,7 @@ func (e markedError) Unwrap() error {
 
 // Is reports whether target is one of the marks of e, or, for a sealed e,
 // what the error it holds matches apart from the refused targets.
-func (e markedError) Is(target error) bool {
+func (e *markedError) Is(target error) bool {
 	if slices.Contains(e.marks, target) {
 		return true
 	}
@@ -3276,16 +3277,17 @@ func (e markedError) Is(target error) bool {
 // As sets target to the first error in the chain of the error a sealed e
 // holds that matches it, as [errors.As] does. It reports false for an e
 // that is not sealed, whose error [errors.As] reads through Unwrap.
-func (e markedError) As(target any) bool {
+func (e *markedError) As(target any) bool {
 	return e.sealed && errors.As(e.err, target)
 }
 
 // without returns e without mark among its marks. It shares no marks
 // with e.
-func (e markedError) without(mark error) markedError {
-	e.marks = slices.DeleteFunc(slices.Clone(e.marks), func(m error) bool { return errors.Is(m, mark) })
+func (e *markedError) without(mark error) *markedError {
+	out := *e
+	out.marks = slices.DeleteFunc(slices.Clone(e.marks), func(m error) bool { return errors.Is(m, mark) })
 
-	return e
+	return &out
 }
 
 // contextEnded reports whether err is, or wraps, the error of a context

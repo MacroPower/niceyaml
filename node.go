@@ -759,7 +759,7 @@ func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 		return n.bindOwn(Invalid(reason))
 	}
 
-	return n.bindOwn(Invalid(markedError{err: reason, msg: paths.ErrNotFound.Error()}, AtPath(path)))
+	return n.bindOwn(Invalid(&markedError{err: reason, msg: paths.ErrNotFound.Error()}, AtPath(path)))
 }
 
 // Bind binds err to the source of the document, with each path in err
@@ -874,7 +874,7 @@ func (d *document) restoreError(err error) error {
 		return err
 	}
 
-	return markedError{err: err, msg: restored}
+	return &markedError{err: err, msg: restored}
 }
 
 // spellingTexts returns the texts a new anchor name must not spell, which
