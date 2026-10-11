@@ -507,11 +507,12 @@ func decodeRows(doc *niceyaml.Node, err error) []string {
 		path, pathed := node.Path()
 		pos, located := node.Bound.Position()
 		rng, _ := node.Bound.Range()
+		bound, _ := node.Bound.Node()
 
 		rows = append(rows, fmt.Sprintf(
 			"%s | %s | %s | %s %t | %s %s %t | bound=%t decode=%t invalid=%t",
 			node.Bound.Source().Name(), node.Label, node.Message(), path, pathed, pos, rng, located,
-			node.Bound.Node() == doc, errors.Is(node.Err, niceyaml.ErrDecode), node.IsInvalid(),
+			bound == doc, errors.Is(node.Err, niceyaml.ErrDecode), node.IsInvalid(),
 		))
 	}
 
@@ -1073,7 +1074,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 				srcErr := yamltest.RequireSourceError(t, err)
-				assert.Same(t, node, srcErr.Node())
+				assert.Same(t, node, yamltest.BoundNode(t, srcErr))
 
 				rows := strings.Count(tc.want, "\n")
 

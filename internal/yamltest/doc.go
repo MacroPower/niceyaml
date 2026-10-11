@@ -139,6 +139,9 @@
 //
 //	bound := yamltest.RequireSourceError(t, err)
 //
+// [BoundNode] and [BoundDocument] return the node and the document a
+// binding is bound to, and fail the test for a binding bound to none.
+//
 // # Mocks
 //
 // [NormalizerFunc] adapts a function so it can stand in for a normalizer

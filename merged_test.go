@@ -1371,7 +1371,7 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 		assert.True(t, niceyaml.IsInvalid(err))
 
 		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, nodes[1], bound.Node())
+		assert.Same(t, nodes[1], yamltest.BoundNode(t, bound))
 	})
 
 	t.Run("a layer reads a reference document from its own Source", func(t *testing.T) {
@@ -1391,7 +1391,7 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 		require.EqualError(t, err, "prod.yaml:1:9: $.server: could not find alias \"shared\"")
 
 		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, nodes[1], bound.Node())
+		assert.Same(t, nodes[1], yamltest.BoundNode(t, bound))
 
 		// The Source of the layer takes the reference document.
 		prod := yamltest.FirstDocument(t, prodInput, niceyaml.WithName("prod.yaml"),
@@ -1692,8 +1692,8 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 		require.EqualError(t, err, "base.yaml:4:11: $.defaults.server.port: port must be at least 1")
 
 		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, defaults, bound.Node())
-		assert.Same(t, base, bound.Document())
+		assert.Same(t, defaults, yamltest.BoundNode(t, bound))
+		assert.Same(t, base, yamltest.BoundDocument(t, bound))
 
 		path, ok := bound.Path()
 		require.True(t, ok)

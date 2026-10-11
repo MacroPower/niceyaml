@@ -297,7 +297,7 @@ func TestRegistry_Check_ScopedNode(t *testing.T) {
 
 				// The refusal is about the call, so it binds to the root
 				// of the document and points at no value.
-				assert.Same(t, doc, bound.Node())
+				assert.Same(t, doc, yamltest.BoundNode(t, bound))
 
 				_, ok := bound.Range()
 				assert.False(t, ok)
@@ -1587,8 +1587,8 @@ func TestRegistry_Validator_ErrorBoundToReceiver(t *testing.T) {
 				}
 
 				bound := yamltest.RequireSourceError(t, err)
-				assert.Same(t, doc, bound.Node())
-				assert.Same(t, doc, bound.Document())
+				assert.Same(t, doc, yamltest.BoundNode(t, bound))
+				assert.Same(t, doc, yamltest.BoundDocument(t, bound))
 			}
 		})
 	}

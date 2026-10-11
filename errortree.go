@@ -1146,7 +1146,7 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 				case kid.located:
 					text = prefix(editorPosition(kid.pos)+":", text)
 
-				case src.Document() != bound.Document():
+				case src.node.Document() != bound.node.Document():
 					// The parent names another document of the source, or
 					// none, so the child keeps the one it wrote.
 					text = prefix(suffixed(src.documentLabel()), text)

@@ -114,3 +114,52 @@ func TestRequireSourceError(t *testing.T) {
 		assert.Nil(t, got)
 	})
 }
+
+func TestBoundNode(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a:\n  b: 1\n")
+	doc := yamltest.Document(t, source)
+	scoped := yamltest.At(t, doc, paths.Doc().Child("a"))
+
+	helpers := map[string]struct {
+		get  func(testing.TB, *niceyaml.SourceError) *niceyaml.Node
+		want *niceyaml.Node
+	}{
+		"BoundNode":     {get: yamltest.BoundNode, want: scoped},
+		"BoundDocument": {get: yamltest.BoundDocument, want: doc},
+	}
+
+	for name, helper := range helpers {
+		t.Run(name+" returns what the error is bound to", func(t *testing.T) {
+			t.Parallel()
+
+			bound := yamltest.RequireSourceError(t, scoped.Bind(errors.New("plain")))
+
+			assert.Same(t, helper.want, helper.get(t, bound))
+		})
+
+		t.Run(name+" fails the test for an error bound to none", func(t *testing.T) {
+			t.Parallel()
+
+			bound := yamltest.RequireSourceError(t, source.Bind(errors.New("plain")))
+
+			var got *niceyaml.Node
+
+			rec := &recordingTB{}
+			done := make(chan struct{})
+
+			// FailNow ends the goroutine it runs on, so the helper runs on its own.
+			go func() {
+				defer close(done)
+
+				got = helper.get(rec, bound)
+			}()
+
+			<-done
+
+			assert.True(t, rec.failed)
+			assert.Nil(t, got)
+		})
+	}
+}

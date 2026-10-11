@@ -638,7 +638,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 				srcErr := yamltest.RequireSourceError(t, err)
-				assert.Same(t, node, srcErr.Node())
+				assert.Same(t, node, yamltest.BoundNode(t, srcErr))
 
 				// The summary counts the fields and points at none.
 				_, ok := srcErr.Path()

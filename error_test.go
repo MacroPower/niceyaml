@@ -2536,8 +2536,15 @@ func TestSourceError_NilReceiver(t *testing.T) {
 	assert.Empty(t, missing.Error())
 	assert.Empty(t, fmt.Sprintf("%+v", missing))
 	assert.Nil(t, missing.Source())
-	assert.Nil(t, missing.Document())
 	assert.Empty(t, yamltest.ProblemsOf(missing))
+
+	node, hasNode := missing.Node()
+	assert.Nil(t, node)
+	assert.False(t, hasNode)
+
+	doc, hasDocument := missing.Document()
+	assert.Nil(t, doc)
+	assert.False(t, hasDocument)
 
 	index, bound := missing.DocumentIndex()
 	assert.Zero(t, index)
@@ -7302,6 +7309,56 @@ func TestSourceError_Errors_AboveBinding(t *testing.T) {
 	}
 }
 
+func TestSourceError_Node(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF("a:", "  b: 1"))
+	doc := yamltest.Document(t, source)
+	scoped := yamltest.At(t, doc, paths.Doc().Child("a"))
+
+	several := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "---", "b: 2"))
+	bad := niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")))
+
+	tcs := map[string]struct {
+		err error
+		// The Node of the binding and the root of its document, or nil for
+		// a binding to none.
+		wantNode     *niceyaml.Node
+		wantDocument *niceyaml.Node
+	}{
+		"bound by a scoped node": {
+			err:          scoped.Bind(bad),
+			wantNode:     scoped,
+			wantDocument: doc,
+		},
+		"bound by the source at no location": {
+			err: source.Bind(errors.New("quota service down")),
+		},
+		"bound by the source at a path among several documents": {
+			err: several.Bind(bad),
+		},
+		"bound to a value that came from no document": {
+			err: niceyaml.BindValue(bad),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			bound := yamltest.RequireSourceError(t, tc.err)
+
+			node, ok := bound.Node()
+			assert.Equal(t, tc.wantNode != nil, ok)
+			assert.Same(t, tc.wantNode, node)
+
+			root, ok := bound.Document()
+			assert.Equal(t, tc.wantDocument != nil, ok)
+			assert.Same(t, tc.wantDocument, root)
+		})
+	}
+}
+
 func TestSourceError_Document(t *testing.T) {
 	t.Parallel()
 
@@ -7415,7 +7472,9 @@ func TestSourceError_Document(t *testing.T) {
 
 			bound := yamltest.RequireSourceError(t, tc.err)
 
-			assert.Same(t, tc.want, bound.Document())
+			doc, ok := bound.Document()
+			assert.Equal(t, tc.want != nil, ok)
+			assert.Same(t, tc.want, doc)
 
 			index, ok := bound.DocumentIndex()
 			assert.Equal(t, tc.want != nil, ok)
@@ -8292,12 +8351,16 @@ func TestBindValue(t *testing.T) {
 			var gotPaths []string
 
 			for _, b := range yamltest.BoundIn(got) {
-				assert.Nil(t, b.Node())
-				assert.Nil(t, b.Document())
+				_, ok := b.Node()
+				assert.False(t, ok)
+
+				_, ok = b.Document()
+				assert.False(t, ok)
+
 				assert.Empty(t, b.Source().Name())
 				assert.Zero(t, b.Source().Lines().Len())
 
-				_, ok := b.DocumentIndex()
+				_, ok = b.DocumentIndex()
 				assert.False(t, ok)
 
 				_, ok = b.Position()
@@ -8499,7 +8562,7 @@ func TestBindValue_Place(t *testing.T) {
 
 			for _, b := range yamltest.BoundIn(placed) {
 				assert.Same(t, doc.Source(), b.Source())
-				assert.Same(t, doc, b.Document())
+				assert.Same(t, doc, yamltest.BoundDocument(t, b))
 			}
 
 			// A plain error under the same base and the same Node binds
@@ -8537,7 +8600,9 @@ func TestBindValue_Place(t *testing.T) {
 
 			for _, b := range yamltest.BoundIn(err) {
 				assert.NotSame(t, doc.Source(), b.Source())
-				assert.Nil(t, b.Document())
+
+				_, ok := b.Document()
+				assert.False(t, ok)
 			}
 		})
 	}
@@ -8806,7 +8871,8 @@ func TestBindValue_Place(t *testing.T) {
 			}
 
 			// The problem itself stays where the result put it.
-			assert.Nil(t, problem.Bound.Document())
+			_, ok := problem.Bound.Document()
+			assert.False(t, ok)
 		}
 
 		kept := errors.Join(problems[1].Err, problems[0].Err)
@@ -9538,7 +9604,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 
 		assert.Equal(t, "x.yaml:2:6: $.a.b: bad", bound.Error())
 		assert.Equal(t, "bad", bound.Message())
-		assert.Same(t, scoped, bound.Node())
+		assert.Same(t, scoped, yamltest.BoundNode(t, bound))
 
 		assert.Equal(t, wantB, errorPath(t, bound))
 

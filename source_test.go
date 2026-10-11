@@ -2465,7 +2465,7 @@ func TestSource_AllDocuments(t *testing.T) {
 		var cfg map[string]any
 
 		bound := yamltest.RequireSourceError(t, all[0].DecodeInto(t.Context(), &cfg))
-		assert.Same(t, all[1], bound.Document())
+		assert.Same(t, all[1], yamltest.BoundDocument(t, bound))
 	})
 
 	t.Run("each syntax error is bound to the document that holds it", func(t *testing.T) {
@@ -2557,9 +2557,8 @@ func TestSource_AllDocuments(t *testing.T) {
 				var got []int
 
 				for bound := range niceyaml.Bindings(err) {
-					doc := bound.Document()
-					require.NotNil(t, doc)
-					assert.Same(t, bound.Node(), doc)
+					doc := yamltest.BoundDocument(t, bound)
+					assert.Same(t, yamltest.BoundNode(t, bound), doc)
 					assert.Same(t, docs[doc.DocumentIndex()], doc)
 					assert.Same(t, error(bound), doc.Err(), "the document returns the error bound to it")
 
@@ -2594,7 +2593,7 @@ func TestSource_AllDocuments(t *testing.T) {
 		assert.Same(t, all[0].Err(), all[1].Err())
 
 		bound := yamltest.RequireSourceError(t, all[1].Err())
-		assert.Same(t, all[0], bound.Document())
+		assert.Same(t, all[0], yamltest.BoundDocument(t, bound))
 
 		_, ok := bound.Position()
 		assert.False(t, ok)
@@ -2631,13 +2630,13 @@ func TestSource_AllDocuments(t *testing.T) {
 				_, err := source.File()
 
 				for bound := range niceyaml.Bindings(err) {
-					fromFile = bound.Document()
+					fromFile, _ = bound.Document()
 				}
 			})
 
 			wg.Go(func() {
 				for bound := range niceyaml.Bindings(source.AllDocuments()[1].Err()) {
-					fromDocs = bound.Document()
+					fromDocs, _ = bound.Document()
 				}
 			})
 
@@ -4361,7 +4360,7 @@ func TestSource_Bind(t *testing.T) {
 
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Same(t, source, bound.Source())
-		assert.Same(t, docs[1], bound.Document())
+		assert.Same(t, docs[1], yamltest.BoundDocument(t, bound))
 		assert.Equal(t, "two.yaml:3:4: too wide", err.Error())
 
 		got, ok := bound.Range()
@@ -4428,9 +4427,10 @@ func TestSource_Bind(t *testing.T) {
 				bound := yamltest.RequireSourceError(t, err)
 
 				if tc.doc < 0 {
-					assert.Nil(t, bound.Document())
+					_, ok := bound.Document()
+					assert.False(t, ok)
 				} else {
-					assert.Same(t, source.Documents()[tc.doc], bound.Document())
+					assert.Same(t, source.Documents()[tc.doc], yamltest.BoundDocument(t, bound))
 				}
 
 				got, ok := bound.Range()
@@ -4494,7 +4494,7 @@ func TestSource_Bind(t *testing.T) {
 				err := broken.Bind(niceyaml.NewError("bad", tc.opt))
 
 				bound := yamltest.RequireSourceError(t, err)
-				assert.Same(t, docs[tc.want], bound.Document())
+				assert.Same(t, docs[tc.want], yamltest.BoundDocument(t, bound))
 				assert.Equal(t, tc.msg, err.Error())
 				require.NoError(t, bound.Unresolved())
 			})
@@ -4508,7 +4508,7 @@ func TestSource_Bind(t *testing.T) {
 		err := broken.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 0))))
 
 		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, broken.AllDocuments()[0], bound.Document())
+		assert.Same(t, broken.AllDocuments()[0], yamltest.BoundDocument(t, bound))
 		assert.Equal(t, "broken.yaml:1:1: bad", err.Error())
 	})
 
@@ -4528,7 +4528,7 @@ func TestSource_Bind(t *testing.T) {
 
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, "one.yaml:3:4: $.b: bad", err.Error())
-		assert.Same(t, doc, bound.Document())
+		assert.Same(t, doc, yamltest.BoundDocument(t, bound))
 
 		got, ok := bound.Range()
 		require.True(t, ok)
@@ -4554,7 +4554,7 @@ func TestSource_Bind(t *testing.T) {
 
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, "one.yaml: $.zz[0]: bad", err.Error())
-		assert.Same(t, doc, bound.Document())
+		assert.Same(t, doc, yamltest.BoundDocument(t, bound))
 
 		rangeErr := bound.Unresolved()
 		require.ErrorIs(t, rangeErr, paths.ErrNotFound)
@@ -4609,7 +4609,9 @@ func TestSource_Bind(t *testing.T) {
 
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, "two.yaml: $.b: bad", err.Error())
-		assert.Nil(t, bound.Document())
+
+		_, ok := bound.Document()
+		assert.False(t, ok)
 
 		rangeErr := bound.Unresolved()
 		require.ErrorIs(t, rangeErr, niceyaml.ErrPathNeedsDocument)
@@ -4638,7 +4640,7 @@ func TestSource_Bind(t *testing.T) {
 
 			bound := yamltest.RequireSourceError(t, err)
 			assert.Equal(t, want, err.Error())
-			assert.Same(t, doc, bound.Document(), input)
+			assert.Same(t, doc, yamltest.BoundDocument(t, bound), input)
 			require.NoError(t, bound.Unresolved(), input)
 		}
 	})
@@ -4656,7 +4658,7 @@ func TestSource_Bind(t *testing.T) {
 			doc := yamltest.Document(t, src)
 
 			bound := yamltest.RequireSourceError(t, err)
-			assert.Same(t, doc, bound.Document(), input)
+			assert.Same(t, doc, yamltest.BoundDocument(t, bound), input)
 
 			rangeErr := bound.Unresolved()
 			require.ErrorIs(t, rangeErr, paths.ErrNoDocument, input)
@@ -4674,7 +4676,9 @@ func TestSource_Bind(t *testing.T) {
 		err := broken.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a"))))
 
 		bound := yamltest.RequireSourceError(t, err)
-		assert.Nil(t, bound.Document())
+
+		_, ok := bound.Document()
+		assert.False(t, ok)
 
 		rangeErr := bound.Unresolved()
 		require.ErrorIs(t, rangeErr, niceyaml.ErrPathNeedsDocument)
@@ -4692,12 +4696,14 @@ func TestSource_Bind(t *testing.T) {
 		))
 
 		bound := yamltest.RequireSourceError(t, err)
-		assert.Nil(t, bound.Document())
+
+		_, ok := bound.Document()
+		assert.False(t, ok)
 
 		children := yamltest.ProblemsOf(bound)
 		require.Len(t, children, 2)
-		assert.Same(t, docs[0], children[0].Bound.Document())
-		assert.Same(t, docs[1], children[1].Bound.Document())
+		assert.Same(t, docs[0], yamltest.BoundDocument(t, children[0].Bound))
+		assert.Same(t, docs[1], yamltest.BoundDocument(t, children[1].Bound))
 	})
 
 	t.Run("nested path errors resolve nowhere in several documents", func(t *testing.T) {
@@ -4798,12 +4804,13 @@ func TestSource_Bind_RoutesDocuments(t *testing.T) {
 			bound := yamltest.RequireSourceError(t, source.Bind(niceyaml.NewError("bad", niceyaml.AtRange(rng))))
 
 			if tc.want < 0 {
-				assert.Nil(t, bound.Document())
+				_, ok := bound.Document()
+				assert.False(t, ok)
 
 				return
 			}
 
-			assert.Same(t, docs[tc.want], bound.Document())
+			assert.Same(t, docs[tc.want], yamltest.BoundDocument(t, bound))
 		})
 	}
 }

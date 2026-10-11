@@ -3449,10 +3449,13 @@ func TestSelfValidateValue(t *testing.T) {
 
 			// The result stands in no document, as one from BindValue does.
 			for _, bound := range yamltest.BoundIn(err) {
-				assert.Nil(t, bound.Node())
-				assert.Nil(t, bound.Document())
+				_, ok := bound.Node()
+				assert.False(t, ok)
 
-				_, ok := bound.Position()
+				_, ok = bound.Document()
+				assert.False(t, ok)
+
+				_, ok = bound.Position()
 				assert.False(t, ok)
 			}
 		})
@@ -3486,9 +3489,11 @@ func TestSelfValidateValue_Target(t *testing.T) {
 			assert.False(t, niceyaml.IsInvalid(err))
 
 			bound := yamltest.RequireSourceError(t, err)
-			assert.Nil(t, bound.Node())
 
-			_, ok := bound.Position()
+			_, ok := bound.Node()
+			assert.False(t, ok)
+
+			_, ok = bound.Position()
 			assert.False(t, ok)
 		})
 	}

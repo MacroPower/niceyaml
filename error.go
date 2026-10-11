@@ -2352,8 +2352,8 @@ func (b binder) nodeAt(idx int) *Node {
 // # Result
 //
 // The result is a [*SourceError] bound to no [Node], and so is each
-// binding below it. [SourceError.Node] and [SourceError.Document] return
-// nil, and [SourceError.DocumentIndex], [SourceError.Position], and
+// binding below it. [SourceError.Node], [SourceError.Document],
+// [SourceError.DocumentIndex], [SourceError.Position], and
 // [SourceError.Range] report false. [SourceError.Source] returns a
 // source with no name and no lines. For a binding with a path,
 // [SourceError.Unresolved] returns a reason that wraps
@@ -3146,8 +3146,9 @@ func (e *SourceError) Source() *Source {
 	return e.source
 }
 
-// Node returns the [*Node] the error is bound to: the one whose methods
-// and validators produced it or whose [Node.Bind] bound it, from whose
+// Node returns the [*Node] the error is bound to and true, or nil and
+// false for an error bound to none. The Node is the one whose methods and
+// validators produced the error or whose [Node.Bind] bound it, from whose
 // scope an `@` path in the error resolves, or, for an error bound through
 // [Source.Bind], the root of the document its location falls in. The
 // error wrote such a path from that scope, and [SourceError.Path] reports
@@ -3172,53 +3173,54 @@ func (e *SourceError) Source() *Source {
 // Node.Bind keeps its node on every error it binds anew, except an error
 // that wraps a binding. Such an error keeps the node of the binding it
 // wraps, whether Node.Bind returns it as it is or binds it anew around
-// the binding with the details it holds, so its node can be nil or belong
-// to another document or source. An error bound in a merged [Source] is bound
-// to the Node of the layer its location resolved in, or to the Node of
-// the lowest layer when it carries no location.
+// the binding with the details it holds, so it can be bound to none or to
+// a Node of another document or source. An error bound in a merged
+// [Source] is bound to the Node of the layer its location resolved in, or
+// to the Node of the lowest layer when it carries no location.
 //
 // The error [BindValue] returns is about a value that came from no
 // document. It is bound to none, and so is each binding below it, with a
 // path or without.
 // A nil SourceError is bound to none.
-func (e *SourceError) Node() *Node {
-	if e == nil {
-		return nil
+func (e *SourceError) Node() (*Node, bool) {
+	if e == nil || e.node == nil {
+		return nil, false
 	}
 
-	return e.node
+	return e.node, true
 }
 
-// Document returns the root [*Node] of the document the error is bound
-// to, the one the node [SourceError.Node] returns belongs to. The root is
-// the one [Source.AllDocuments] returns at the index of the document. A
-// YAML syntax error is bound to the document it belongs to, so the syntax
+// Document returns the root [*Node] of the document the error is bound to
+// and true, or nil and false for an error bound to no Node. The root is
+// the [Node.Document] of the Node [SourceError.Node] returns, the one
+// [Source.AllDocuments] returns at the index of the document. A YAML
+// syntax error is bound to the document it belongs to, so the syntax
 // error of the second document of three returns the root of that
 // document, as a violation there does.
 //
-// Document returns nil for an error bound to no node, which
-// SourceError.Node lists: an error [Source.Bind] bound with no location,
-// with a position or a range on a line no document holds, or with a path
-// in a source that holds several documents or has a syntax error. A nil
-// SourceError is bound to none, and [ErrorTree.Bound] is nil for an error
-// bound to no source. [Node.DocumentIndex] panics on a nil Node, so a
-// caller that sorts the errors of a file by document reads
-// [SourceError.DocumentIndex], which reports false wherever Document
-// returns nil.
-func (e *SourceError) Document() *Node {
-	if e == nil {
-		return nil
+// Document reports false wherever SourceError.Node does. [Source.Bind]
+// binds an error to no Node when the error carries no location, a
+// position or a range on a line no document holds, or a path in a source
+// that holds several documents or has a syntax error. [BindValue] binds
+// every error to none. A nil SourceError is bound to none, and
+// [ErrorTree.Bound] is nil for an error bound to no source.
+// [SourceError.DocumentIndex] reports the index of the document, for a
+// caller that sorts the errors of a file by document.
+func (e *SourceError) Document() (*Node, bool) {
+	node, ok := e.Node()
+	if !ok {
+		return nil, false
 	}
 
-	return e.node.Document()
+	return node.Document(), true
 }
 
 // DocumentIndex returns the 0-indexed position within the file of the
 // document the error is bound to and true, or 0 and false for an error
 // bound to no document. It is the [Node.DocumentIndex] of the root
 // [SourceError.Document] returns, and it reports false wherever Document
-// returns nil. A report that groups the problems of a file by document
-// thus reads the index from the binding and never holds a nil Node:
+// does. A report that groups the problems of a file by document reads
+// the index from the binding:
 //
 //	byDocument := make(map[int][]string)
 //	for problem := range niceyaml.NewErrorTree(err).Problems() {
@@ -3234,8 +3236,8 @@ func (e *SourceError) Document() *Node {
 // message of a bound error counts documents from 1, as it counts lines,
 // so "document 3" in [SourceError.Error] is the document at index 2.
 func (e *SourceError) DocumentIndex() (int, bool) {
-	doc := e.Document()
-	if doc == nil {
+	doc, ok := e.Document()
+	if !ok {
 		return 0, false
 	}
 

@@ -134,7 +134,7 @@ func (n *Node) rejectedAt(err, rejection error) (position.Position, bool) {
 	}
 
 	srcErr, ok := n.bindDecodeError(err).(*SourceError) //nolint:errorlint // A binding below a wrapper is not one n made.
-	if !ok || srcErr.Node() != n {
+	if !ok || srcErr.node != n {
 		return position.Position{}, false
 	}
 

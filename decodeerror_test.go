@@ -886,10 +886,10 @@ func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
 
 			// The error stays bound to the Node that decoded, and its
 			// path resolves from the root of the document.
-			assert.Same(t, scoped, srcErr.Node())
-			assert.Same(t, doc, srcErr.Document())
+			assert.Same(t, scoped, yamltest.BoundNode(t, srcErr))
+			assert.Same(t, doc, yamltest.BoundDocument(t, srcErr))
 
-			ranges, err := srcErr.Document().Ranges(path)
+			ranges, err := yamltest.BoundDocument(t, srcErr).Ranges(path)
 			require.NoError(t, err)
 			require.Len(t, ranges, 1)
 

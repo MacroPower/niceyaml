@@ -66,6 +66,19 @@ import (
 // taken from it shares its lines and owns its decoration, so creating one
 // costs an index of the lines and no copy of their content.
 //
+// A nil Source reads as a Source that holds no text and took no option.
+// [Source.Name], [Source.FilePath], [Source.FS], [Source.Text],
+// [Source.Offset], [Source.Tokens], and [Source.Lines] return zero values
+// for it, [Source.View] returns a view that holds no lines, and
+// [Source.ShowsExcerpts] reports true. [ErrorTree.Source] returns nil for
+// an error bound to no Source, so a report reads the name and the lines
+// of the Source of each problem with no nil check. The methods that need
+// the parse panic on a nil Source. They are [Source.Documents],
+// [Source.AllDocuments], [Source.Document], [Source.File],
+// [Source.DecodeInto], [Source.Decode], [Source.SelfValidate],
+// [Source.ValidateDocuments], and [Source.Bind] of an error that is not
+// nil.
+//
 // Create instances with [NewSourceFromFile], [NewSourceFromFS],
 // [NewSourceFromReader], [NewSourceFromBytes], [NewSourceFromString],
 // [NewSourceFromTokens], or [NewSourceFromLayers].
@@ -2416,8 +2429,8 @@ func startsBelow(tk, mark *token.Token) bool {
 //
 // In every other way Bind is [Node.Bind], which describes what comes
 // back. [SourceError.Document] returns the document each location fell
-// in, whether or not the location resolves there, and nil for an error
-// that fell in none, as [SourceError.Node] describes.
+// in, whether or not the location resolves there, and reports false for
+// an error that fell in none, as [SourceError.Node] describes.
 func (s *Source) Bind(err error) error {
 	return bindTree(err, binder{src: s, route: true})
 }

@@ -1382,10 +1382,13 @@ func TestSchema_ValidateValue(t *testing.T) {
 			// The value came from no document, so no binding of the
 			// result names a Node, a document, or the index of one.
 			for _, b := range yamltest.BoundIn(err) {
-				assert.Nil(t, b.Node())
-				assert.Nil(t, b.Document())
+				_, ok := b.Node()
+				assert.False(t, ok)
 
-				_, ok := b.DocumentIndex()
+				_, ok = b.Document()
+				assert.False(t, ok)
+
+				_, ok = b.DocumentIndex()
 				assert.False(t, ok)
 
 				// The reason for a path is the one of a document with no
@@ -3163,7 +3166,7 @@ func TestSchema_Check_Bound(t *testing.T) {
 			}
 
 			bound := yamltest.RequireSourceError(t, err)
-			assert.Same(t, node, bound.Node())
+			assert.Same(t, node, yamltest.BoundNode(t, bound))
 		})
 	}
 

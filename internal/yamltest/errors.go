@@ -47,6 +47,30 @@ func RequireSourceError(tb testing.TB, err error) *niceyaml.SourceError {
 	return bound
 }
 
+// BoundNode returns the [*niceyaml.Node] bound is bound to, as
+// [niceyaml.SourceError.Node] returns it. The test fails when bound is
+// bound to none.
+func BoundNode(tb testing.TB, bound *niceyaml.SourceError) *niceyaml.Node {
+	tb.Helper()
+
+	node, ok := bound.Node()
+	require.True(tb, ok, "the error is bound to no Node")
+
+	return node
+}
+
+// BoundDocument returns the root of the document bound is bound to, as
+// [niceyaml.SourceError.Document] returns it. The test fails when bound
+// is bound to none.
+func BoundDocument(tb testing.TB, bound *niceyaml.SourceError) *niceyaml.Node {
+	tb.Helper()
+
+	doc, ok := bound.Document()
+	require.True(tb, ok, "the error is bound to no document")
+
+	return doc
+}
+
 // childrenOf returns the children of the node of err whose Detail is
 // detail.
 func childrenOf(err error, detail bool) []niceyaml.ErrorTree {

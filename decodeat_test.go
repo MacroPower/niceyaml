@@ -235,7 +235,7 @@ func TestNode_DecodeAt(t *testing.T) {
 
 		// The error is bound through the Node the validator got.
 		bound := yamltest.RequireSourceError(t, err)
-		assert.Equal(t, "$.spec.hours", bound.Node().Path().String())
+		assert.Equal(t, "$.spec.hours", yamltest.BoundNode(t, bound).Path().String())
 	})
 
 	t.Run("a validator that reads a required key reports not found for a present node", func(t *testing.T) {

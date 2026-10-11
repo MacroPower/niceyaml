@@ -3011,7 +3011,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 			require.EqualError(t, err, tc.want)
 
 			bound := yamltest.RequireSourceError(t, err)
-			assert.Same(t, hours, bound.Node())
+			assert.Same(t, hours, yamltest.BoundNode(t, bound))
 
 			path, ok := bound.Path()
 			assert.Equal(t, tc.path != "", ok)
@@ -3048,11 +3048,11 @@ func TestNode_Bind_Scope(t *testing.T) {
 		rng, ok := bound.Range()
 		require.True(t, ok)
 
-		ranges, err := bound.Document().Ranges(path)
+		ranges, err := yamltest.BoundDocument(t, bound).Ranges(path)
 		require.NoError(t, err)
 		assert.Equal(t, position.Ranges{rng}, ranges)
 
-		written, ok := path.CutPrefix(bound.Node().Path())
+		written, ok := path.CutPrefix(yamltest.BoundNode(t, bound).Path())
 		require.True(t, ok)
 		assert.Equal(t, closePath, written)
 	})
@@ -3081,7 +3081,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 		require.EqualError(t, err, "cfg.yaml: bad")
 
 		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, doc, bound.Node())
+		assert.Same(t, doc, yamltest.BoundNode(t, bound))
 
 		_, ok := bound.Range()
 		assert.False(t, ok)
@@ -3212,7 +3212,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 				require.EqualError(t, err, tc.want)
 
 				bound := yamltest.RequireSourceError(t, err)
-				assert.Same(t, hours, bound.Node())
+				assert.Same(t, hours, yamltest.BoundNode(t, bound))
 
 				_, ok := bound.Range()
 				assert.False(t, ok)
@@ -3881,8 +3881,8 @@ func TestDocument_Err(t *testing.T) {
 		bound, ok := doc.Err().(*niceyaml.SourceError) //nolint:errorlint // The value itself is the bound error.
 		require.True(t, ok, "want *niceyaml.SourceError, got %T", doc.Err())
 		assert.Same(t, doc.Source(), bound.Source())
-		assert.Same(t, doc, bound.Node())
-		assert.Same(t, doc, bound.Document())
+		assert.Same(t, doc, yamltest.BoundNode(t, bound))
+		assert.Same(t, doc, yamltest.BoundDocument(t, bound))
 
 		rng, ok := bound.Range()
 		require.True(t, ok)
@@ -3901,7 +3901,7 @@ func TestDocument_Err(t *testing.T) {
 		err := doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("d"))))
 
 		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, doc, bound.Document())
+		assert.Same(t, doc, yamltest.BoundDocument(t, bound))
 		assert.Equal(t, "f.yaml: document 2: $.d: bad", err.Error())
 
 		_, ok := bound.Range()
@@ -3919,7 +3919,7 @@ func TestDocument_Err(t *testing.T) {
 		err := doc.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(4, 0))))
 
 		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, doc, bound.Document())
+		assert.Same(t, doc, yamltest.BoundDocument(t, bound))
 		assert.Equal(t, "f.yaml:5:1: bad", err.Error())
 		require.NoError(t, bound.Unresolved())
 	})
@@ -8298,8 +8298,8 @@ func TestDocument_At_Scope(t *testing.T) {
 		rng, ok := bound.Range()
 		require.True(t, ok)
 		assert.Equal(t, openValue, rng.Start)
-		assert.Same(t, hours, bound.Node())
-		assert.Same(t, dd, bound.Document())
+		assert.Same(t, hours, yamltest.BoundNode(t, bound))
+		assert.Same(t, dd, yamltest.BoundDocument(t, bound))
 
 		// The whole document resolves the same path at its root.
 		err = dd.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("open"))))
@@ -8771,8 +8771,8 @@ func TestDocument_Decode_ValidatorErrorBoundToReceiver(t *testing.T) {
 				for _, err := range []error{decodeErr, validateErr, decodeIntoErr} {
 					bound := yamltest.RequireSourceError(t, err)
 					require.ErrorIs(t, err, errDocumentRejected)
-					assert.Same(t, dd, bound.Node())
-					assert.Same(t, dd, bound.Document())
+					assert.Same(t, dd, yamltest.BoundNode(t, bound))
+					assert.Same(t, dd, yamltest.BoundDocument(t, bound))
 				}
 			})
 		}
@@ -8832,8 +8832,8 @@ func TestDocument_Decode_ScopedValidatorErrorDocument(t *testing.T) {
 				require.EqualError(t, err, "4:8: $.items[1].x: bad")
 
 				bound := yamltest.RequireSourceError(t, err)
-				assert.Equal(t, itemPath, bound.Node().Path())
-				assert.Same(t, dd, bound.Document())
+				assert.Equal(t, itemPath, yamltest.BoundNode(t, bound).Path())
+				assert.Same(t, dd, yamltest.BoundDocument(t, bound))
 			})
 		}
 	}
@@ -8861,7 +8861,7 @@ func TestDocument_Decode_ValidatorAmbiguousErrorBoundToReceiver(t *testing.T) {
 			ambiguous := 0
 
 			for _, bound := range yamltest.BoundIn(err) {
-				assert.Same(t, dd, bound.Node())
+				assert.Same(t, dd, yamltest.BoundNode(t, bound))
 
 				if errors.Is(bound.Unresolved(), niceyaml.ErrAmbiguousPath) {
 					ambiguous++
@@ -8979,8 +8979,8 @@ func TestNode_At_NotFound(t *testing.T) {
 				// The error binds to the receiver, not to a copy scoped to
 				// the path that did not resolve.
 				require.ErrorAs(t, err, &bound, method)
-				assert.Same(t, node, bound.Node(), method)
-				assert.Same(t, doc, bound.Document(), method)
+				assert.Same(t, node, yamltest.BoundNode(t, bound), method)
+				assert.Same(t, doc, yamltest.BoundDocument(t, bound), method)
 
 				rng, ok := bound.Range()
 				assert.Equal(t, located, ok, method)
@@ -9533,7 +9533,7 @@ func TestDecodeOptions(t *testing.T) {
 			require.ErrorContains(t, err, `unknown field "extra"`)
 
 			bound := yamltest.RequireSourceError(t, err)
-			assert.Same(t, dd, bound.Node())
+			assert.Same(t, dd, yamltest.BoundNode(t, bound))
 		}
 
 		assert.Equal(t, []string{"schema", "schema"}, order)
@@ -10020,7 +10020,7 @@ func TestNode_Validate(t *testing.T) {
 		require.EqualError(t, err, "x.yaml:2:9: $.meta.name: name is required")
 
 		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, scoped, bound.Node())
+		assert.Same(t, scoped, yamltest.BoundNode(t, bound))
 	})
 
 	t.Run("returns a bound error as it is", func(t *testing.T) {
@@ -11582,7 +11582,7 @@ func TestValidatorFunc_Check(t *testing.T) {
 		require.EqualError(t, err, "menu check: menu.yaml:1:8: $.price: negative price")
 
 		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, doc, bound.Node())
+		assert.Same(t, doc, yamltest.BoundNode(t, bound))
 	})
 }
 
@@ -11990,7 +11990,7 @@ func TestChainValidator(t *testing.T) {
 				assert.Equal(t, niceyaml.FormatError(alone), niceyaml.FormatError(err))
 
 				bound := yamltest.RequireSourceError(t, err)
-				assert.Same(t, tc.node, bound.Node())
+				assert.Same(t, tc.node, yamltest.BoundNode(t, bound))
 			})
 		}
 	})
@@ -12101,8 +12101,8 @@ func TestChainValidator(t *testing.T) {
 
 					require.ErrorAs(t, got, &gotBound, step)
 					require.ErrorAs(t, want, &wantBound, step)
-					assert.Same(t, node, wantBound.Node(), step)
-					assert.Same(t, node, gotBound.Node(), step)
+					assert.Same(t, node, yamltest.BoundNode(t, wantBound), step)
+					assert.Same(t, node, yamltest.BoundNode(t, gotBound), step)
 
 					wantPath, wantOK := wantBound.Path()
 					gotPath, gotOK := gotBound.Path()
