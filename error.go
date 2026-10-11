@@ -358,38 +358,33 @@ var (
 // options and declares nothing, so it gives a location to an error of a
 // check that could not run.
 type Error struct {
-	err error
-	// The errors a summary from NewSummary heads, which leave out the nil
-	// ones. Only a summary has any.
+	err    error
+	move   *move
 	errors []error
-	// The path the errors under the Error write their `@` paths from,
-	// which Rebase sets, when rebased, since a path with no selectors is
-	// a base like any other.
-	base paths.Path
-	// Where a path below the Error binds when the document does not hold
-	// it. Its paths read from the node that base reads from. The rebase of
-	// the self-validation walk sets it below a value that decodes itself.
-	fallback fallback
 	errorConfig
-	rebased bool
-	// The Error comes from a Rebase that moves paths alone, as a detail
-	// takes the base of the problem it explains, so it points nothing at
-	// its base.
+	invalid bool
+}
+
+// move is how an [Error] from [Rebase] moves the paths below it.
+type move struct {
+	// The path the errors below write their `@` paths from, since a path
+	// with no selectors is a base like any other.
+	base paths.Path
+	// Where a path below binds when the document does not hold it. Its
+	// paths read from the node that base reads from. The rebase of the
+	// self-validation walk sets it below a value that decodes itself.
+	fallback fallback
+	// The move shifts paths alone, as a detail takes the base of the
+	// problem it explains, so it points nothing at its base.
 	movesOnly bool
-	// The Error comes from a binding in a layer of a merged [Source], so its
-	// base stands in place of the root of a `$` path below it, where a
+	// The move comes from a binding in a layer of a merged [Source], so
+	// its base stands in place of the root of a `$` path below it, where a
 	// Rebase leaves such a path as it is.
 	reroots bool
-	// The document is at fault for the Error, so it matches errInvalid.
-	// NewError sets it, Invalid sets it around any error but that of a
-	// context that ended, and so does the rebase of the self-validation
-	// walk. A binding or a tree marks each problem below the Error the
-	// same way, as childBase.rebase does.
-	invalid bool
-	// The path of the Error names the entries of several keys of a
-	// decoded map, so it resolves in no document, for the reason
-	// ErrAmbiguousPath. The rebase of the self-validation walk sets it
-	// under such an entry, and it holds for every error below the Error.
+	// The base names the entries of several keys of a decoded map, so it
+	// resolves in no document, for the reason ErrAmbiguousPath. The
+	// rebase of the self-validation walk sets it under such an entry, and
+	// it holds for every error below.
 	ambiguous bool
 }
 
@@ -895,21 +890,17 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // children of its node in the tree [NewErrorTree] builds, rebases the
 // same way on its own.
 func Rebase(err error, base paths.Path) error {
-	return rebase(err, base, false, false, false, fallback{})
+	return rebase(err, move{base: base}, false)
 }
 
-// rebase is [Rebase], and with movesOnly the result moves the paths of
-// err alone and points nothing at base, as a detail takes the base of the
-// problem it explains. With invalid, each Error the rebase builds matches
-// [errInvalid], as the self-validation walk marks what a [SelfValidator]
-// returns. With ambiguous, the path of each Error the rebase builds
-// resolves in no document, for the reason [ErrAmbiguousPath], as the walk
-// marks an error under a map entry that shares its path. Each Error the
-// rebase builds takes fb, which the walk gives an error below a value
-// that decodes itself. A binding takes no base, and with invalid it comes
-// back as [markInvalid] marks it. A binding that stands in no document
-// rebases as the error [placeable] returns for it.
-func rebase(err error, base paths.Path, movesOnly, invalid, ambiguous bool, fb fallback) error {
+// rebase is [Rebase] with the paths of err moved as m moves them. With
+// [move.movesOnly], the result points nothing at the base, as a detail
+// takes the base of the problem it explains. With invalid, each Error the
+// rebase builds matches [errInvalid], as the self-validation walk marks
+// what a [SelfValidator] returns. A binding takes no base, and with
+// invalid it comes back as [markInvalid] marks it. A binding that stands
+// in no document rebases as the error [placeable] returns for it.
+func rebase(err error, m move, invalid bool) error {
 	if isNothing(err) {
 		return nil
 	}
@@ -928,24 +919,23 @@ func rebase(err error, base paths.Path, movesOnly, invalid, ambiguous bool, fb f
 	}
 
 	// An Error that adds nothing to the join it wraps rebases as the join,
-	// and the copy keeps what the Error declared.
+	// with its mark on each branch, and the copy keeps what the Error
+	// declared.
 	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
 	if ok && x.addsNothing() {
-		if _, joined := joinBranches(x.err); joined {
-			return &Error{err: rebase(x.err, base, movesOnly, invalid, ambiguous, fb), invalid: x.invalid || invalid}
+		if _, _, joined := joinBranches(x.err); joined {
+			return &Error{err: rebase(x.err, m, invalid || x.invalid), invalid: x.invalid || invalid}
 		}
 	}
 
 	joined := mapJoin(err, func(branch error) error {
-		return rebase(branch, base, movesOnly, invalid, ambiguous, fb)
+		return rebase(branch, m, invalid)
 	})
 	if joined != nil {
 		return joined
 	}
 
-	return &Error{
-		err: err, base: base, rebased: true, movesOnly: movesOnly, invalid: invalid, ambiguous: ambiguous, fallback: fb,
-	}
+	return &Error{err: err, move: &m, invalid: invalid}
 }
 
 // markInvalid returns err as a problem the document is at fault for, as
@@ -966,25 +956,6 @@ func markInvalid(err error) error {
 	}
 
 	return &Error{err: err, invalid: true}
-}
-
-// headsInvalid reports whether err, an error that [joinBranches] reads as
-// a join, passes through an [*Error] that matches [errInvalid] on the way
-// to the join, as Invalid of a join does. Each problem of the join is
-// then the document's fault.
-func headsInvalid(err error) bool {
-	for {
-		x, ok := err.(*Error) //nolint:errorlint // Walks the chain one node at a time.
-		if !ok || !x.addsNothing() {
-			return false
-		}
-
-		if x.invalid {
-			return true
-		}
-
-		err = x.err
-	}
 }
 
 // ErrorOption configures an [Error]. [NewError], [Invalid], [Place],
@@ -1337,11 +1308,11 @@ func (f fallback) then(outer fallback) fallback {
 // locus returns the location e carries itself, without looking through
 // its cause chain or applying its base.
 func (e *Error) locus() locus {
-	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath, ambiguous: e.ambiguous}
+	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath}
 }
 
-// move returns l, the location of an error below e, with the base of e
-// applied, where e comes from [Rebase]. The base goes in front of an `@`
+// apply returns l, the location of an error below an [Error] that moves
+// it as m does, with the base of m applied. The base goes in front of an `@`
 // path, as [locus.rebase] puts it there. An Error that reroots puts it in
 // front of a `$` path too, in place of the root, since such a path reads
 // from the merged value and the base is where a layer holds it.
@@ -1352,28 +1323,71 @@ func (e *Error) locus() locus {
 // A fallback that binds every error below e stands in for the path of
 // each, so a key that shares its path there makes no path ambiguous, and
 // only the mark of e itself counts.
-func (e *Error) move(l locus) locus {
-	l.ambiguous = l.ambiguous || e.ambiguous
+func (m *move) apply(l locus) locus {
+	l.ambiguous = l.ambiguous || m.ambiguous
 
-	if e.reroots && l.hasPath {
+	if m.reroots && l.hasPath {
 		rel, _ := l.path.CutPrefix(paths.Doc())
-		l.path = e.base.Join(rel)
+		l.path = m.base.Join(rel)
 
 		return l
 	}
 
 	if !l.hasPath || l.path.IsAbsolute() {
-		return l.rebase(e.base)
+		return l.rebase(m.base)
 	}
 
-	l = l.rebase(e.base)
-	l.fallback = l.fallback.then(e.fallback)
+	l = l.rebase(m.base)
+	l.fallback = l.fallback.then(m.fallback)
 
-	if e.fallback.only {
-		l.ambiguous = e.ambiguous
+	if m.fallback.only {
+		l.ambiguous = m.ambiguous
 	}
 
 	return l
+}
+
+// at returns the location an [Error] that moves paths as m does points a
+// problem with no location of its own at: its base.
+func (m *move) at() locus {
+	return locus{path: m.base, hasPath: true, ambiguous: m.ambiguous, fallback: m.fallback}
+}
+
+// then returns the move of a child below an [Error] that moves paths as
+// m does, and below that an Error that moves them as inner does: the base
+// of m joined with the base of inner. A nil move moves nothing, so then
+// returns m for a nil inner. The fallback and the mark of inner join
+// those of m as [move.apply] joins them from below. A `$` base replaces
+// the base above it, so the fallback of inner then stands alone. A
+// fallback of m that binds every error below it makes no path below it
+// ambiguous. The move moves paths alone once either does, and never
+// reroots.
+func (m *move) then(inner *move) *move {
+	if inner == nil {
+		return m
+	}
+
+	var outer move
+
+	if m != nil {
+		outer = *m
+	}
+
+	covered := outer.fallback.only && !inner.base.IsAbsolute()
+
+	joined := move{
+		base:      outer.base.Join(inner.base),
+		movesOnly: outer.movesOnly || inner.movesOnly,
+		ambiguous: outer.ambiguous || inner.ambiguous && !covered,
+	}
+
+	if inner.base.IsAbsolute() {
+		joined.fallback = inner.fallback
+	} else {
+		joined.fallback = inner.fallback.rebase(outer.base).then(outer.fallback)
+	}
+
+	return &joined
 }
 
 // addsNothing reports whether e adds nothing to the error it wraps: e is
@@ -1381,7 +1395,7 @@ func (e *Error) move(l locus) locus {
 // summary, and holds no details. Such an Error has the text and the
 // children of the error it wraps.
 func (e *Error) addsNothing() bool {
-	return e != nil && !e.rebased && !e.hasLocation() && !e.nests()
+	return e != nil && e.move == nil && !e.hasLocation() && !e.nests()
 }
 
 // nests reports whether e holds errors below it of its own: the errors a
@@ -2164,7 +2178,7 @@ func underScope(err error, scope paths.Path) (scopedError, bool) {
 		// the base in front of its path, as anchorOf reads it.
 		a.locus = a.rebase(scope)
 
-		return scopedError{err: &Error{err: err, base: scope, rebased: true}, anchor: a}, true
+		return scopedError{err: &Error{err: err, move: &move{base: scope}}, anchor: a}, true
 	}
 
 	unchanged := scopedError{err: err, anchor: a}
@@ -2172,7 +2186,7 @@ func underScope(err error, scope paths.Path) (scopedError, bool) {
 	// An Error that adds nothing to the join it wraps reads as the join.
 	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
 	if ok && x.addsNothing() {
-		if _, joined := joinBranches(x.err); joined {
+		if _, _, joined := joinBranches(x.err); joined {
 			inner, changed := underScope(x.err, scope)
 			if !changed {
 				return unchanged, false
@@ -2203,7 +2217,7 @@ func underScope(err error, scope paths.Path) (scopedError, bool) {
 // [multierr.Rejoin] does. A branch f maps to nil drops out. It returns
 // nil when err reads as no join or every branch drops out.
 func mapJoin(err error, f func(error) error) error {
-	branches, ok := joinBranches(err)
+	branches, _, ok := joinBranches(err)
 	if !ok {
 		return nil
 	}
@@ -2866,8 +2880,8 @@ func findAnchor(err error) (anchor, bool) {
 
 		if x.hasLocation() {
 			l := x.locus()
-			if x.rebased {
-				l = x.move(l)
+			if x.move != nil {
+				l = x.move.apply(l)
 			}
 
 			return anchor{err: x, locus: l}, false
@@ -2875,8 +2889,8 @@ func findAnchor(err error) (anchor, bool) {
 
 		a, heading := findAnchor(x.err)
 		if a.err != nil {
-			if x.rebased {
-				a.locus = x.move(a.locus)
+			if x.move != nil {
+				a.locus = x.move.apply(a.locus)
 			}
 
 			return a, false
@@ -2884,10 +2898,8 @@ func findAnchor(err error) (anchor, bool) {
 
 		heading = heading || len(x.errors) > 0
 
-		if x.rebased && !x.movesOnly && !heading {
-			at := locus{path: x.base, hasPath: true, ambiguous: x.ambiguous, fallback: x.fallback}
-
-			return anchor{err: x, locus: at}, false
+		if x.move != nil && !x.move.movesOnly && !heading {
+			return anchor{err: x, locus: x.move.at()}, false
 		}
 
 		return anchor{}, heading
@@ -2956,7 +2968,7 @@ func newSourceError(err error, b binder) *SourceError {
 		// The binding reports it from the root of the document of the
 		// layer it bound in, as a bind through that layer would.
 		if root := e.loc.layerRoot; root != nil && found.hasPath && !root.IsRoot() {
-			e.err = &Error{err: e.err, base: *root, rebased: true, movesOnly: true, reroots: true}
+			e.err = &Error{err: e.err, move: &move{base: *root, movesOnly: true, reroots: true}}
 		}
 
 	case *SourceError:
@@ -3412,7 +3424,7 @@ func (e *SourceError) buildTexts() boundTexts {
 	// in for it, so only a join that lists nothing reads it. Reading it
 	// for a join bound at each step of a loop would build the list of
 	// every join below.
-	_, joined := joinBranches(e.err)
+	_, _, joined := joinBranches(e.err)
 	if joined {
 		t.held = e.end.branches
 	} else {

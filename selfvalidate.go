@@ -1255,7 +1255,7 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 		return false
 	}
 
-	w.errs = append(w.errs, rebase(err, at.path(), false, true, w.ambiguous, w.fallback()))
+	w.errs = append(w.errs, rebase(err, move{base: at.path(), ambiguous: w.ambiguous, fallback: w.fallback()}, true))
 
 	return false
 }

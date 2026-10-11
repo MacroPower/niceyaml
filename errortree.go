@@ -502,15 +502,9 @@ func appendTrees(dst []ErrorTree, err error) []ErrorTree {
 		return dst
 	}
 
-	if branches, ok := joinBranches(err); ok {
-		invalid := headsInvalid(err)
-
+	if branches, base, ok := joinBranches(err); ok {
 		for _, branch := range branches {
-			if invalid {
-				branch = markInvalid(branch)
-			}
-
-			dst = appendTrees(dst, branch)
+			dst = appendTrees(dst, base.rebase(branch, false))
 		}
 
 		return dst
@@ -584,7 +578,7 @@ func joinBinding(err error) *SourceError {
 				return nil
 			}
 
-			if _, joined := joinBranches(x.err); joined {
+			if _, _, joined := joinBranches(x.err); joined {
 				return x
 			}
 
@@ -615,26 +609,48 @@ func joinBinding(err error) *SourceError {
 // message is always its branches' messages one per line. Any other error
 // that unwraps to several is a join only when its message is that text,
 // as [multierr.JoinMessage] reports.
-func joinBranches(err error) ([]error, bool) {
-	if x, ok := err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
-		if !x.addsNothing() {
-			return nil, false
-		}
+//
+// The base is the one the branches take below the Errors that add
+// nothing on top of the join, as [peel] returns it.
+func joinBranches(err error) ([]error, childBase, bool) {
+	base, err := peel(err)
 
-		return joinBranches(x.err)
+	// An Error left after the peel is one node of the tree.
+	if _, ok := err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
+		return nil, childBase{}, false
 	}
 
 	joined, ok := err.(interface{ Unwrap() []error }) //nolint:errorlint // The node itself, not a chain search.
 	if !ok {
-		return nil, false
+		return nil, childBase{}, false
 	}
 
 	branches := joined.Unwrap()
 	if !multierr.IsJoin(err) && !multierr.JoinMessage(err.Error(), branches) {
-		return nil, false
+		return nil, childBase{}, false
 	}
 
-	return branches, true
+	return branches, base, true
+}
+
+// peel strips the [*Error]s on top of err that add nothing, as
+// [Error.addsNothing] reports, and returns err without them. Such an
+// Error has the text and the children of the error it wraps. The base
+// that peel returns too is the one the errors below those Errors take,
+// marked invalid when one of them matches [errInvalid], as one from
+// [Invalid] does.
+func peel(err error) (childBase, error) {
+	var base childBase
+
+	for {
+		x, ok := err.(*Error) //nolint:errorlint // Walks the chain one node at a time.
+		if !ok || !x.addsNothing() {
+			return base, err
+		}
+
+		base.invalid = base.invalid || x.invalid
+		err = x.err
+	}
 }
 
 // children returns the nodes of the children [walkChildren] finds along
@@ -898,7 +914,7 @@ func isLeaf(err error) bool {
 		case *Error:
 			// An Error from Rebase that points at its base anchors the
 			// chain there when nothing below it carries a location.
-			if x.hasLocation() || (x.rebased && !x.movesOnly) || x.nests() {
+			if x.hasLocation() || (x.move != nil && !x.move.movesOnly) || x.nests() {
 				return false
 			}
 
@@ -924,49 +940,23 @@ func isLeaf(err error) bool {
 }
 
 // childBase is the base the children along a cause chain rebase under:
-// the base of every Error from [Rebase] above them, joined, whether the
-// walk met such an Error, and whether one of them moves paths alone. It
-// also records whether an Error above them matches [errInvalid], and
-// whether the path of one of them is ambiguous, as [locus] describes. It
-// holds the fallback of those Errors too, with its paths under the base.
-// A Rebase at the root still locates a problem with no location at the
-// root, so the children rebase whenever the walk met one, and only a
-// chain that holds none leaves them as they are.
+// the move of every Error from [Rebase] above them, joined, and whether
+// an Error above them matches [errInvalid]. A Rebase at the root still
+// locates a problem with no location at the root, so the children rebase
+// whenever the walk met one, and only a chain that holds none leaves
+// them as they are.
 type childBase struct {
-	path      paths.Path
-	fallback  fallback
-	rebased   bool
-	movesOnly bool
-	invalid   bool
-	ambiguous bool
+	// The move of every Error from Rebase above the children, joined, or
+	// nil when the walk met none.
+	move    *move
+	invalid bool
 }
 
-// cross returns the base below x: c joined with the base of x when x is
-// an Error from [Rebase], and c as it is otherwise, marked invalid when x
-// matches [errInvalid]. The base is ambiguous once the path of such an x
-// is. The fallback and the mark of x join those of c as [Error.move]
-// joins them from below. A `$` base replaces the base above it, so the
-// fallback of x then stands alone. A fallback of c that binds every
-// error below it makes no path below it ambiguous.
+// cross returns the base below x: c with the move of x after its own, as
+// [move.then] joins them, and marked invalid when x matches
+// [errInvalid].
 func (c childBase) cross(x *Error) childBase {
-	if x.rebased {
-		covered := c.fallback.only && !x.base.IsAbsolute()
-
-		if x.base.IsAbsolute() {
-			c.fallback = x.fallback
-		} else {
-			c.fallback = x.fallback.rebase(c.path).then(c.fallback)
-		}
-
-		c.path = c.path.Join(x.base)
-		c.rebased = true
-		c.movesOnly = c.movesOnly || x.movesOnly
-		c.ambiguous = c.ambiguous || (x.ambiguous && !covered)
-	}
-
-	c.invalid = c.invalid || x.invalid
-
-	return c
+	return childBase{move: c.move.then(x.move), invalid: c.invalid || x.invalid}
 }
 
 // rebase returns n rebased under the base, or n as it is when the walk met
@@ -982,7 +972,7 @@ func (c childBase) cross(x *Error) childBase {
 func (c childBase) rebase(n error, detail bool) error {
 	invalid := c.invalid && !detail
 
-	if !c.rebased {
+	if c.move == nil {
 		if invalid {
 			return markInvalid(n)
 		}
@@ -990,7 +980,10 @@ func (c childBase) rebase(n error, detail bool) error {
 		return n
 	}
 
-	return rebase(n, c.path, detail || c.movesOnly, invalid, c.ambiguous, c.fallback)
+	m := *c.move
+	m.movesOnly = m.movesOnly || detail
+
+	return rebase(n, m, invalid)
 }
 
 // trees returns the nodes of kids in position order within the source

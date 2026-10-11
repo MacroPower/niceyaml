@@ -194,7 +194,7 @@ func holdsLocation(err error) bool {
 			return false
 		}
 
-		return x.hasLocation() || x.rebased ||
+		return x.hasLocation() || x.move != nil ||
 			slices.ContainsFunc(x.Unwrap(), holdsLocation) || slices.ContainsFunc(x.details, holdsLocation)
 
 	case interface{ Unwrap() error }:
@@ -263,7 +263,7 @@ func valueError(err error) error {
 // of the value, which stands over that position.
 func valueProblem(problem error) error {
 	x, ok := problem.(*Error) //nolint:errorlint // The decode returns the Error it located unwrapped.
-	if !ok || x == nil || x.rebased || !x.hasLocation() {
+	if !ok || x == nil || x.move != nil || !x.hasLocation() {
 		at := anchorOf(problem)
 		if at.loc == nil {
 			return problem
