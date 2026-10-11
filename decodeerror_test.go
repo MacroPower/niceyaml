@@ -58,6 +58,16 @@ type tierServer struct {
 	Tier    tier          `yaml:"tier"`
 }
 
+// aliasedServer is a [tierServer] whose inline field reads the anchor a
+// `<<` key names. With the omitempty option beside it, the decoder leaves
+// out the entries the `<<` keys bring in.
+type aliasedServer struct {
+	*StrictBase `yaml:",omitempty,inline,alias"`
+
+	Name string `yaml:"name"`
+	Tier tier   `yaml:"tier"`
+}
+
 // mirrored decodes itself through a second type with the same fields, so
 // the error of a field comes back as the field reported it.
 type mirrored struct {
@@ -1296,6 +1306,49 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					ID     int        `yaml:"id"`
 				}](),
 				want: `3:7: $.tier: unknown tier "mid"`,
+			},
+			// The decoder reads no field of a struct from a mapping that
+			// holds a key it does not read as a string, so the tier under s
+			// reported nothing.
+			"field of a mapping with a key of another kind": {
+				input: "s: {1: a, tier: mid}\nt: mid\n",
+				decode: decodeAs[struct {
+					S tierServer `yaml:"s"`
+					T tier       `yaml:"t"`
+				}](),
+				want: `2:4: $.t: unknown tier "mid"`,
+			},
+			// The decoder gathers nothing from a merge source that holds a
+			// key it does not read as a string.
+			"field a dropped merge source holds": {
+				input: stringtest.LinesLF(
+					"base: &base {1: a, tier: mid}",
+					"s: {<<: *base, name: api}",
+					"t: mid",
+				),
+				decode: decodeAs[struct {
+					Base any        `yaml:"base"`
+					S    tierServer `yaml:"s"`
+					T    tier       `yaml:"t"`
+				}](),
+				want: `3:4: $.t: unknown tier "mid"`,
+			},
+			// A struct whose inline field reads the anchor of a merge key
+			// reads none of the entries the merge key brings in. That field
+			// takes the value the decoder holds for the anchor, so base
+			// decodes into its type.
+			"field a merge brings in to a struct that ignores merges": {
+				input: stringtest.LinesLF(
+					"base: &base {tier: mid}",
+					"s: {<<: *base, name: api}",
+					"t: mid",
+				),
+				decode: decodeAs[struct {
+					Base *StrictBase   `yaml:"base"`
+					S    aliasedServer `yaml:"s"`
+					T    tier          `yaml:"t"`
+				}](),
+				want: `3:4: $.t: unknown tier "mid"`,
 			},
 			"inline map": {
 				input: "id: low\nextra: mid\n",

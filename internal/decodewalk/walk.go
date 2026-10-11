@@ -105,8 +105,13 @@ type Value struct {
 	Entry *ast.MappingValueNode
 	// The field or the key, for a field, a key, or a member.
 	Name string
+	// The resolver of the walk, for a key or a member.
+	resolver *paths.Resolver
 	// What holds Held in the document.
 	From astnode.Parent
+	// The number of values that hold this one, which is zero for the
+	// root.
+	Depth int
 	// What holds the value.
 	Kind Kind
 	// What the decoder reads below the value.
@@ -140,6 +145,21 @@ func (v *Value) Path() paths.Path {
 	slices.Reverse(selectors)
 
 	return paths.Current().Join(selectors...)
+}
+
+// Selected reports whether a path through the name of v, a key or a
+// member, selects the entry v comes from, in the mapping of the map that
+// holds v. A path names an entry by the text of its key, and the last
+// entry with that text wins the path, so no path points at an entry that
+// a later one hides. It reports false for any other value.
+func (v *Value) Selected() bool {
+	if v.Kind != Key && v.Kind != Member || !v.Named {
+		return false
+	}
+
+	selected, err := v.resolver.Entry(v.Parent.Node, v.Name)
+
+	return err == nil && selected == ast.Node(v.Entry)
 }
 
 // Walk reads node as a value of type t, where from names what holds node
@@ -235,6 +255,9 @@ func (w *walker) yield(v *Value) bool {
 	}
 
 	v.Reads = w.reads(v)
+	if v.Parent != nil {
+		v.Depth = v.Parent.Depth + 1
+	}
 
 	switch w.visit(v) {
 	case Stop:
@@ -446,15 +469,16 @@ func (w *walker) entry(
 	named bool,
 ) bool {
 	key := &Value{
-		Parent: parent,
-		Kind:   Key,
-		Type:   unmarshaler.Base(t.Key()),
-		Held:   entry.Key,
-		Node:   entry.Key,
-		Entry:  entry,
-		Struct: owner,
-		Name:   name,
-		Named:  named,
+		Parent:   parent,
+		Kind:     Key,
+		Type:     unmarshaler.Base(t.Key()),
+		Held:     entry.Key,
+		Node:     entry.Key,
+		Entry:    entry,
+		Struct:   owner,
+		Name:     name,
+		Named:    named,
+		resolver: w.rules.Resolver,
 	}
 
 	if !w.yield(key) {
@@ -462,15 +486,16 @@ func (w *walker) entry(
 	}
 
 	return w.value(&Value{
-		Parent: parent,
-		Kind:   Member,
-		Type:   t.Elem(),
-		Held:   entry.Value,
-		From:   astnode.Parent{Entry: entry},
-		Entry:  entry,
-		Struct: owner,
-		Name:   name,
-		Named:  named,
+		Parent:   parent,
+		Kind:     Member,
+		Type:     t.Elem(),
+		Held:     entry.Value,
+		From:     astnode.Parent{Entry: entry},
+		Entry:    entry,
+		Struct:   owner,
+		Name:     name,
+		Named:    named,
+		resolver: w.rules.Resolver,
 	})
 }
 

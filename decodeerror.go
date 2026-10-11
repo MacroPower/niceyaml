@@ -13,9 +13,9 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
+	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 	"go.jacobcolvin.com/niceyaml/internal/rejection"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
-	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -67,11 +67,14 @@ func (n *Node) rejectionLocation(tk *token.Token) []ErrorOption {
 // cfg returned, at the path of the value that reported it. The go-yaml
 // decoder returns the error of a value that decodes itself with no token
 // of the source. Such a value is a [time.Duration] or has an unmarshaler,
-// from a method or from an option of cfg, as [reportsOwnError] lists
-// them. To find that value, locateDecodeError walks the type of v beside
-// node, as [errorLocator] describes, and decodes each such value again
-// from its own node. The first one whose decode fails with err again, as
-// [errorLocator.same] compares the two, reported it.
+// from a method or from an option of cfg, as
+// [unmarshaler.Options.ReportsOwnError] lists them. To find that value,
+// locateDecodeError walks the type of v beside node, as [errorLocator]
+// describes, and decodes each such value again from its own node. The
+// first one whose decode fails with err again, as [errorLocator.same]
+// compares the two, reported it. The walk reads the entry the decoder
+// reads for each field, so a field the decoder never read reports
+// nothing.
 //
 // The result holds err under that path, as [Rebase] returns it, so the
 // [SourceError] that binds the result reports the path and marks the
@@ -88,8 +91,9 @@ func (n *Node) rejectionLocation(tk *token.Token) []ErrorOption {
 // The path of a value under the node the decode reads is never the root,
 // with two exceptions. When node holds a scalar and the type of v
 // decodes itself, the scalar is the value, so err points at node. When
-// the decoder refuses node for the type of v, as [refusesForText]
-// reports, node is the value it refused.
+// the decoder refuses node for the type of v, as
+// [unmarshaler.Options.RefusesForText] reports, node is the value it
+// refused.
 //
 // The decoder words that refusal for neither the value nor its kind, so
 // the result then holds the rejection [textRejection] writes in place of
@@ -113,14 +117,14 @@ func (n *Node) locateDecodeError(
 		return err
 	}
 
+	dec := yaml.NewDecoder(bytes.NewReader(nil), n.yamlOptions(cfg)...)
 	l := &errorLocator{
 		ctx:     ctx,
 		node:    n,
-		decoder: yaml.NewDecoder(bytes.NewReader(nil), n.yamlOptions(cfg)...),
+		decoder: dec,
 		msg:     err.Error(),
 		anchor:  anchorOf(err),
 		places:  placesOf(err),
-		inlined: map[inlineVisit]bool{},
 
 		unmarshalers: cfg.unmarshalers,
 	}
@@ -133,16 +137,17 @@ func (n *Node) locateDecodeError(
 
 	t := unmarshaler.Base(reflect.TypeOf(v).Elem())
 
-	// With no value below node, found is the place of node itself.
-	var found place
+	decodewalk.Walk(ctx, n.walkRules(ctx, dec, cfg.unmarshalers), t, node, astnode.Parent{}, l.visit)
 
-	if !l.refuses(t, node) {
-		var ok bool
+	// With no value below node, the value is node itself.
+	path := paths.Current()
 
-		found, ok = l.below(t, node, place{})
-		if !ok && (!l.unmarshalers.ReportsOwnError(t) || !astnode.IsScalar(l.content(node))) {
-			return err
-		}
+	switch {
+	case l.found != nil:
+		path = l.found.Path()
+
+	case !cfg.unmarshalers.ReportsOwnError(t) || !astnode.IsScalar(datapath.Deref(n.doc.pathResolver(), node)):
+		return err
 	}
 
 	cause := l.refusal
@@ -150,7 +155,7 @@ func (n *Node) locateDecodeError(
 		cause = asDecodeError(n.doc.restoreError(err))
 	}
 
-	return Rebase(cause, found.path())
+	return Rebase(cause, path)
 }
 
 // unplaced reports whether the decode has yet to find the value err is
@@ -293,27 +298,27 @@ func valueProblem(problem error) error {
 
 // errorLocator finds the value that reported an error of a decode with
 // no token. It walks the type the decode filled beside the node the
-// decode read, in the order the decoder reads them. The decoder reads
-// the fields of a struct in the order the struct declares them, the
-// elements of a sequence in order, and the entries of a mapping in
-// document order, each key before its value. A field reads the entry of
-// its name, an inline field reads the mapping of its struct, and a `<<`
-// merge key brings in the entries of its sources. The walk reads
-// nothing below an interface, since the decoder calls no unmarshaler
-// for the values it puts there.
+// decode read, as [decodewalk.Walk] pairs them, in the order the decoder
+// reads them. The walk reads nothing below an interface, since the
+// decoder calls no unmarshaler for the values it puts there.
 //
-// At each value whose type [reportsOwnError] names, the walk decodes the
-// node of the value into a new value of that type. A decode that fails
-// with the error the locator looks for reproduces the error, as
-// [errorLocator.same] compares the two. The walk then reads the fields,
-// elements, or entries of that value the same way, as if they mirrored
-// the document. A value that decodes itself through a second type with
-// the same fields, such as an UnmarshalYAML that decodes into `type
-// plain T`, returns the error of a field as it is, so the walk narrows
-// to that field. The walk stops at the first value that reproduces the
-// error with nothing below it that does. It stops too at a value whose
-// node the decoder refuses, as [refusesForText] reports, since the
-// decoder reads nothing below that node.
+// At each value whose type [unmarshaler.Options.ReportsOwnError] names,
+// the locator decodes the node of the value into a new value of that
+// type. A decode that fails with the error the locator looks for
+// reproduces the error, as [errorLocator.same] compares the two. The
+// walk then reads the fields, elements, or entries of that value the
+// same way, as if they mirrored the document. A value that decodes
+// itself through a second type with the same fields, such as an
+// UnmarshalYAML that decodes into `type plain T`, returns the error of a
+// field as it is, so the locator narrows to that field. The walk stops
+// at the first value that reproduces the error with nothing below it
+// that does. It stops too at a value whose node the decoder refuses, as
+// [unmarshaler.Options.RefusesForText] reports, since the decoder reads
+// nothing below that node.
+//
+// A path names an entry of a map by the text of its key, and the last
+// entry with that text wins the path. The walk passes over an entry that
+// loses its path to a later one, since no path points at it.
 //
 // The second decode runs the unmarshaler of each value the walk reaches
 // again, on a value of its own, so the first decode keeps what it set.
@@ -331,9 +336,8 @@ type errorLocator struct {
 	ctx     context.Context
 	node    *Node
 	decoder *yaml.Decoder
-	// The inline fields the walk is inside of, so a struct that holds
-	// itself inline ends the walk.
-	inlined map[inlineVisit]bool
+	// The value the walk found, or nil.
+	found *decodewalk.Value
 	// The message of the error to locate.
 	msg string
 	// The rejection of the value the walk found, as [textRejection]
@@ -348,249 +352,75 @@ type errorLocator struct {
 	anchor anchor
 }
 
-// inlineVisit names an inline field the walk is inside of, by the type
-// of the field and the mapping it reads. The fields together form the
-// key of the set the [errorLocator] keeps.
+// visit reads v, a value the walk reaches, and tells the walk where to
+// go next. A value that decodes itself and reproduces the error is the
+// one the locator found, unless a value below it reproduces the error
+// too, so the walk goes below it. The walk ends at a value the decoder
+// refuses, as [errorLocator.refuses] reports, and once it has left the
+// values below the one it found. The value the walk starts at decodes
+// in the decode itself, so only a refusal finds it there.
 //
-//nolint:unused // The fields tell the keys of the set apart.
-type inlineVisit struct {
-	typ  reflect.Type
-	node *ast.MappingNode
+// A key of a map is the value when its type decodes itself and its
+// decode reproduces the error. The walk reads nothing below a key, and
+// passes over an entry no path points at.
+func (l *errorLocator) visit(v *decodewalk.Value) decodewalk.Action {
+	u := l.unmarshalers
+
+	switch {
+	case l.found != nil && v.Depth <= l.found.Depth:
+		return decodewalk.Stop
+
+	case v.Kind == decodewalk.Root:
+		if l.refuses(v) {
+			l.found = v
+
+			return decodewalk.Stop
+		}
+
+		return decodewalk.Descend
+
+	case v.Kind == decodewalk.Key:
+		if v.Selected() && u.ReportsOwnError(v.Type) && l.reproduces(v.Node, reflect.New(v.Type).Interface()) {
+			l.found = v
+
+			return decodewalk.Stop
+		}
+
+		return decodewalk.Skip
+
+	case !v.Named, v.Kind == decodewalk.Member && !v.Selected():
+		return decodewalk.Skip
+
+	case !u.ReportsOwnError(v.Type):
+		return decodewalk.Descend
+
+	case !l.reproduces(v.Node, reflect.New(v.Type).Interface()):
+		return decodewalk.Skip
+	}
+
+	l.found = v
+
+	if l.refuses(v) {
+		return decodewalk.Stop
+	}
+
+	return decodewalk.Descend
 }
 
-// find returns the value at or below node, read as type t at the place
-// at, that reproduces the error. When t is a type [reportsOwnError]
-// names, a decode of node into t has to reproduce it, and the value
-// itself is the result unless a value below it reproduces the error too.
-// The value is the result as well when the decoder refuses node for it,
-// as [errorLocator.refuses] reports.
-func (l *errorLocator) find(t reflect.Type, node ast.Node, at place) (place, bool) {
-	t = unmarshaler.Base(t)
-
-	if !l.unmarshalers.ReportsOwnError(t) {
-		return l.below(t, node, at)
-	}
-
-	if !l.reproduces(node, reflect.New(t).Interface()) {
-		return place{}, false
-	}
-
-	if l.refuses(t, node) {
-		return at, true
-	}
-
-	if found, ok := l.below(t, node, at); ok {
-		return found, true
-	}
-
-	return at, true
-}
-
-// refuses reports whether the decoder refuses node for a value of type
-// t, as [refusesForText] reports. The value is then the one the walk
-// looks for, since its decode calls no unmarshaler and reads nothing
-// below node, so refuses keeps the rejection [textRejection] writes for
-// it.
-func (l *errorLocator) refuses(t reflect.Type, node ast.Node) bool {
-	content := l.content(node)
-	if !l.unmarshalers.RefusesForText(t, content) {
+// refuses reports whether the decoder refuses the node of v for its
+// type, as [unmarshaler.Options.RefusesForText] reports. The value is
+// then the one the walk looks for, since its decode calls no unmarshaler
+// and reads nothing below the node, so refuses keeps the rejection
+// [textRejection] writes for it.
+func (l *errorLocator) refuses(v *decodewalk.Value) bool {
+	content := datapath.Deref(l.node.doc.pathResolver(), v.Node)
+	if !l.unmarshalers.RefusesForText(v.Type, content) {
 		return false
 	}
 
 	l.refusal = textRejection(content)
 
 	return true
-}
-
-// below returns the first value below node, read as type t at the place
-// at, that reproduces the error.
-func (l *errorLocator) below(t reflect.Type, node ast.Node, at place) (place, bool) {
-	switch t.Kind() {
-	case reflect.Struct:
-		return l.fields(t, node, at)
-
-	case reflect.Slice, reflect.Array:
-		return l.elements(t, node, at)
-
-	case reflect.Map:
-		mapping, ok := l.content(node).(*ast.MappingNode)
-		if !ok {
-			return place{}, false
-		}
-
-		return l.entries(t, node, mapping, at, map[*ast.MappingNode]bool{})
-
-	default:
-		return place{}, false
-	}
-}
-
-// fields returns the first field of t, a struct type, that reproduces
-// the error when it reads the mapping at node. An inline field reads
-// that mapping itself, at the place of the struct.
-func (l *errorLocator) fields(t reflect.Type, node ast.Node, at place) (place, bool) {
-	mapping, ok := l.content(node).(*ast.MappingNode)
-	if !ok {
-		return place{}, false
-	}
-
-	for field := range t.Fields() {
-		name, inline, skip := yamlfield.Name(field)
-		if skip || yamlfield.ReadsAnchor(field) {
-			continue
-		}
-
-		if inline {
-			visit := inlineVisit{typ: unmarshaler.Base(field.Type), node: mapping}
-			if l.inlined[visit] {
-				continue
-			}
-
-			l.inlined[visit] = true
-			found, ok := l.find(field.Type, node, at)
-			delete(l.inlined, visit)
-
-			if ok {
-				return found, true
-			}
-
-			continue
-		}
-
-		entry, err := l.node.doc.pathResolver().Entry(node, name)
-		if err != nil {
-			continue
-		}
-
-		value, ok := l.value(entry)
-		if !ok {
-			continue
-		}
-
-		if found, ok := l.find(field.Type, value, at.child(name)); ok {
-			return found, true
-		}
-	}
-
-	return place{}, false
-}
-
-// elements returns the first element of t, a slice or array type, that
-// reproduces the error when it reads the sequence at node.
-func (l *errorLocator) elements(t reflect.Type, node ast.Node, at place) (place, bool) {
-	seq, ok := l.content(node).(*ast.SequenceNode)
-	if !ok {
-		return place{}, false
-	}
-
-	for i, element := range seq.Values {
-		value, ok := l.read(element)
-		if !ok {
-			continue
-		}
-
-		if found, ok := l.find(t.Elem(), value, at.index(i)); ok {
-			return found, true
-		}
-	}
-
-	return place{}, false
-}
-
-// entries returns the first key or value of t, a map type, that
-// reproduces the error when it reads mapping, the mapping of the map at
-// node or one a `<<` merge key of it brings in. The seen set holds the
-// mappings the walk has read for the map, so a mapping that merges
-// itself ends the walk.
-//
-// A path names an entry by the text of its key, and the last entry with
-// that text wins the path. The walk passes over an entry that loses its
-// path to a later one, since no path points at it.
-func (l *errorLocator) entries(
-	t reflect.Type,
-	node ast.Node,
-	mapping *ast.MappingNode,
-	at place,
-	seen map[*ast.MappingNode]bool,
-) (place, bool) {
-	if seen[mapping] {
-		return place{}, false
-	}
-
-	seen[mapping] = true
-	resolver := l.node.doc.pathResolver()
-
-	for _, entry := range mapping.Values {
-		if entry == nil || entry.Key == nil {
-			continue
-		}
-
-		if astnode.IsMergeKey(entry.Key) {
-			sources, err := datapath.MergeSources(resolver, entry)
-			if err != nil {
-				continue
-			}
-
-			for _, src := range sources {
-				if found, ok := l.entries(t, node, src, at, seen); ok {
-					return found, true
-				}
-			}
-
-			continue
-		}
-
-		name, ok := resolver.KeyName(entry.Key)
-		if !ok {
-			continue
-		}
-
-		named, err := resolver.Entry(node, name)
-		if err != nil || named != ast.Node(entry) {
-			continue
-		}
-
-		child := at.child(name)
-
-		key := unmarshaler.Base(t.Key())
-		if l.unmarshalers.ReportsOwnError(key) && l.reproduces(entry.Key, reflect.New(key).Interface()) {
-			return child.key(), true
-		}
-
-		value, ok := l.value(entry)
-		if !ok {
-			continue
-		}
-
-		if found, ok := l.find(t.Elem(), value, child); ok {
-			return found, true
-		}
-	}
-
-	return place{}, false
-}
-
-// value returns the node the decoder reads the value of entry from, an
-// entry of a mapping, as [errorLocator.read] returns it.
-func (l *errorLocator) value(entry ast.Node) (ast.Node, bool) {
-	mv, ok := entry.(*ast.MappingValueNode)
-	if !ok || mv == nil {
-		return nil, false
-	}
-
-	return l.read(mv.Value)
-}
-
-// read returns the node the decoder reads a field, an element, or a map
-// value from, as [datapath.Read] finds it in the document of the walk.
-func (l *errorLocator) read(node ast.Node) (ast.Node, bool) {
-	return datapath.Read(l.node.doc.pathResolver(), node)
-}
-
-// content returns the mapping, sequence, or scalar that node holds, as
-// [datapath.Deref] finds it in the document of the walk.
-func (l *errorLocator) content(node ast.Node) ast.Node {
-	return datapath.Deref(l.node.doc.pathResolver(), node)
 }
 
 // reproduces reports whether a decode of node into v, a pointer to a new

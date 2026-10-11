@@ -341,7 +341,8 @@ func TestWalk(t *testing.T) {
 func TestWalk_Value(t *testing.T) {
 	t.Parallel()
 
-	doc := yamltest.FirstDocument(t, "pairs: {x: {a: 1}, ? *k : 2}\nk: &k [1]\n")
+	doc := yamltest.FirstDocument(t, "pairs: {x: {a: 1}, x: 2, ? *k : 3}\nk: &k [1]\n",
+		niceyaml.WithAllowDuplicateKeys(true))
 
 	type holder struct {
 		Pairs map[string]any `yaml:"pairs"`
@@ -352,18 +353,20 @@ func TestWalk_Value(t *testing.T) {
 	decodewalk.Walk(t.Context(), rules(t, doc), reflect.TypeFor[holder](), doc.AST(), astnode.Parent{},
 		func(v *decodewalk.Value) decodewalk.Action {
 			if v.Kind == decodewalk.Key || v.Kind == decodewalk.Member {
-				held := strings.TrimSpace(v.Held.String())
-				got = append(got, fmt.Sprintf("%s %q named=%t held=%s", kinds[v.Kind], v.Name, v.Named, held))
+				got = append(got, fmt.Sprintf("%s %q depth=%d named=%t selected=%t held=%s",
+					kinds[v.Kind], v.Name, v.Depth, v.Named, v.Selected(), strings.TrimSpace(v.Held.String())))
 			}
 
 			return decodewalk.Descend
 		})
 
 	assert.Equal(t, []string{
-		`key "x" named=true held=x`,
-		`member "x" named=true held={a: 1}`,
-		`key "" named=false held=? *k`,
-		`member "" named=false held=2`,
+		`key "x" depth=2 named=true selected=false held=x`,
+		`member "x" depth=2 named=true selected=false held={a: 1}`,
+		`key "x" depth=2 named=true selected=true held=x`,
+		`member "x" depth=2 named=true selected=true held=2`,
+		`key "" depth=2 named=false selected=false held=? *k`,
+		`member "" depth=2 named=false selected=false held=3`,
 	}, got)
 }
 
