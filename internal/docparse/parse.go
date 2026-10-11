@@ -417,68 +417,16 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 // parser/parser.go:407, parser/parser.go:1042). Those comments drop, and
 // the comments before any other node stay.
 func dropStrandedComments(run token.Tokens) token.Tokens {
-	var (
-		kept token.Tokens
-		// What the document the scan is in has shown so far: a token of
-		// its content, an indicator of a block mapping or a block sequence
-		// at its top level, and a directive that awaits its header.
-		content, block, directive bool
-		// The column where the first key or "-" of the block mapping or
-		// block sequence at the root of the document starts, or -1.
-		rootCol = -1
-		// The types of the "[" and "{" tokens of the flow collections
-		// that hold the scan, the innermost last.
-		flows []token.Type
-		// The index of the last anchor in run.
-		anchor int
-		// The last two tokens other than comments that hold text.
-		last, beforeLast *token.Token
-	)
+	var kept token.Tokens
+
+	s := scan{run: run, rootCol: -1}
 
 	for i := 0; i < len(run); {
-		tk := run[i]
-
-		if tk.Type != token.CommentType {
-			switch tk.Type {
-			case token.DocumentHeaderType, token.DocumentEndType:
-				content, block, directive, flows = false, false, false, flows[:0]
-				rootCol = -1
-
-			case token.DirectiveType:
-				directive = true
-
-			case token.SequenceStartType, token.MappingStartType:
-				content = true
-
-				flows = append(flows, tk.Type)
-
-			case token.SequenceEndType, token.MappingEndType:
-				if len(flows) > 0 {
-					flows = flows[:len(flows)-1]
-				}
-
-			case token.MappingKeyType, token.MappingValueType, token.SequenceEntryType:
-				if !block && len(flows) == 0 {
-					rootCol = rootColumn(run, i)
-				}
-
-				content = true
-				block = block || len(flows) == 0
-
-			case token.AnchorType:
-				content = true
-				anchor = i
-
-			default:
-				content = true
-			}
-
-			if strings.Trim(tk.Origin, " \t\r\n") != "" {
-				beforeLast, last = last, tk
-			}
+		if run[i].Type != token.CommentType {
+			s.read(i)
 
 			if kept != nil {
-				kept = append(kept, tk)
+				kept = append(kept, run[i])
 			}
 
 			i++
@@ -491,57 +439,12 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 			next++
 		}
 
-		// A "&" with no name ends the content.
-		bare := last != nil && last.Type == token.AnchorType
-
-		// The name of an anchor ends the content when the anchor has no
-		// value.
-		anchored := beforeLast != nil && beforeLast.Type == token.AnchorType
-
-		// Whether the comments close the document.
-		closes := next == len(run) ||
-			run[next].Type == token.DocumentHeaderType || run[next].Type == token.DocumentEndType
-
-		// The parser takes a comment after a "?" or before a ":" as a key.
-		stranded := directive || last != nil && last.Type == token.MappingKeyType ||
-			next < len(run) && run[next].Type == token.MappingValueType
-
-		// Whether the comments that start left of rootCol drop.
-		leftDrops := false
-
-		switch {
-		case bare:
-			// Without the comments, the parser would take the token below
-			// them as the name of the anchor.
-			stranded = directive
-
-		case len(flows) > 0:
-			stranded = stranded || next < len(run) && endsFlowEntry(run[next]) ||
-				startsFlowKey(last, flows[len(flows)-1])
-
-		case anchored:
-			// The first comment on a line of its own, past any comment on
-			// the line where the last token starts.
-			below := i
-			for below < next && !startsBelow(run[below], last) {
-				below++
-			}
-
-			stranded = stranded ||
-				below < next && !closes && breaksAnchor(run, anchor, below, next)
-			leftDrops = closes && next < len(run) && rootCol >= 0 && takesNull(run, anchor)
-
-		case content && !block:
-			stranded = stranded || closes
-
-		case block:
-			leftDrops = closes && rootCol >= 0
-		}
+		stranded, leftDrops := s.drops(i, next)
 
 		for j := i; j < next; j++ {
-			left := leftDrops && run[j].Position != nil && run[j].Position.Column < rootCol
+			left := leftDrops && run[j].Position != nil && run[j].Position.Column < s.rootCol
 
-			if (stranded || left) && startsBelow(run[j], last) {
+			if (stranded || left) && startsBelow(run[j], s.last) {
 				if kept == nil {
 					kept = slices.Clone(run[:j])
 				}
@@ -562,6 +465,121 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 	}
 
 	return kept
+}
+
+// scan holds what [dropStrandedComments] has read of run so far.
+type scan struct {
+	// The last two tokens other than comments that hold text.
+	last, beforeLast *token.Token
+	run              token.Tokens
+	// The types of the "[" and "{" tokens of the flow collections that
+	// hold the scan, the innermost last.
+	flows []token.Type
+	// The column where the first key or "-" of the block mapping or block
+	// sequence at the root of the document starts, or -1.
+	rootCol int
+	// The index of the last anchor in run.
+	anchor int
+	// What the document the scan is in has shown so far: a token of its
+	// content, an indicator of a block mapping or a block sequence at its
+	// top level, and a directive that awaits its header.
+	content, block, directive bool
+}
+
+// read reads run[i], a token other than a comment.
+func (s *scan) read(i int) {
+	tk := s.run[i]
+
+	switch tk.Type {
+	case token.DocumentHeaderType, token.DocumentEndType:
+		s.content, s.block, s.directive, s.flows = false, false, false, s.flows[:0]
+		s.rootCol = -1
+
+	case token.DirectiveType:
+		s.directive = true
+
+	case token.SequenceStartType, token.MappingStartType:
+		s.content = true
+
+		s.flows = append(s.flows, tk.Type)
+
+	case token.SequenceEndType, token.MappingEndType:
+		if len(s.flows) > 0 {
+			s.flows = s.flows[:len(s.flows)-1]
+		}
+
+	case token.MappingKeyType, token.MappingValueType, token.SequenceEntryType:
+		if !s.block && len(s.flows) == 0 {
+			s.rootCol = rootColumn(s.run, i)
+		}
+
+		s.content = true
+		s.block = s.block || len(s.flows) == 0
+
+	case token.AnchorType:
+		s.content = true
+		s.anchor = i
+
+	default:
+		s.content = true
+	}
+
+	if strings.Trim(tk.Origin, " \t\r\n") != "" {
+		s.beforeLast, s.last = s.last, tk
+	}
+}
+
+// drops reports which of the comments at run[i:next] drop when they sit
+// on lines of their own. The first result reports that all of them drop,
+// and the second that those left of rootCol drop.
+func (s *scan) drops(i, next int) (bool, bool) {
+	run := s.run
+
+	// A "&" with no name ends the content.
+	bare := s.last != nil && s.last.Type == token.AnchorType
+
+	// The name of an anchor ends the content when the anchor has no
+	// value.
+	anchored := s.beforeLast != nil && s.beforeLast.Type == token.AnchorType
+
+	// Whether the comments close the document.
+	closes := next == len(run) ||
+		run[next].Type == token.DocumentHeaderType || run[next].Type == token.DocumentEndType
+
+	// The parser takes a comment after a "?" or before a ":" as a key.
+	stranded := s.directive || s.last != nil && s.last.Type == token.MappingKeyType ||
+		next < len(run) && run[next].Type == token.MappingValueType
+
+	switch {
+	case bare:
+		// Without the comments, the parser would take the token below
+		// them as the name of the anchor.
+		return s.directive, false
+
+	case len(s.flows) > 0:
+		return stranded || next < len(run) && endsFlowEntry(run[next]) ||
+			startsFlowKey(s.last, s.flows[len(s.flows)-1]), false
+
+	case anchored:
+		// The first comment on a line of its own, past any comment on
+		// the line where the last token starts.
+		below := i
+		for below < next && !startsBelow(run[below], s.last) {
+			below++
+		}
+
+		return stranded || below < next && !closes && breaksAnchor(run, s.anchor, below, next),
+			closes && next < len(run) && s.rootCol >= 0 && takesNull(run, s.anchor)
+
+	case s.content && !s.block:
+		return stranded || closes, false
+
+	case s.block:
+		return stranded, closes && s.rootCol >= 0
+
+	default:
+		return stranded, false
+	}
 }
 
 // nullEmptyAnchors puts a null in place of each comment that the parser
@@ -655,24 +673,8 @@ func breaksAnchor(run token.Tokens, at, below, next int) bool {
 		return false
 	}
 
-	// The "-" or ":" that the anchor directly follows on its line.
-	i := at - 1
-	if i < 0 || !sameLine(run[i], run[at]) {
-		return false
-	}
-
 	// The index of the "-" or the start of the key.
-	holder := i
-	mapping := run[i].Type == token.MappingValueType
-
-	switch {
-	case mapping:
-		holder = keyStart(run, i)
-
-	case run[i].Type != token.SequenceEntryType:
-		return false
-	}
-
+	holder, mapping := anchorHolder(run, at)
 	if holder < 0 || run[holder].Position == nil {
 		return false
 	}
@@ -734,20 +736,30 @@ func startsKey(run token.Tokens, at int) bool {
 // its ":", on its line (parser/parser.go:787, parser/parser.go:1186). The
 // parser rejects any other anchor that no node follows.
 func takesNull(run token.Tokens, at int) bool {
+	holder, _ := anchorHolder(run, at)
+
+	return holder >= 0
+}
+
+// anchorHolder returns the index of the "-" that the anchor at run[at]
+// directly follows on its line, or of the start of the key whose ":" it
+// directly follows there, as [keyStart] finds it. The boolean reports a
+// key. It returns -1 when the anchor follows neither.
+func anchorHolder(run token.Tokens, at int) (int, bool) {
 	i := at - 1
 	if i < 0 || !sameLine(run[i], run[at]) {
-		return false
+		return -1, false
 	}
 
 	switch run[i].Type {
 	case token.SequenceEntryType:
-		return true
+		return i, false
 
 	case token.MappingValueType:
-		return keyStart(run, i) >= 0
+		return keyStart(run, i), true
 
 	default:
-		return false
+		return -1, false
 	}
 }
 
