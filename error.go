@@ -79,6 +79,10 @@ var (
 	// the decoder runs, or an error that a [Validator] or a
 	// [SelfValidator] reports about the value it checks.
 	//
+	// [ErrUnknownField], [ErrWrongKind], and [ErrOverflow] each label some
+	// of the values the decoder rejects. A problem with a label matches
+	// ErrDecode too, and the rest match ErrDecode alone.
+	//
 	// A document that matches parsed, since text the parser rejects
 	// matches [ErrSyntax] instead. The document is at fault for each
 	// problem a decode reports with ErrDecode, as [IsInvalid] describes,
@@ -93,6 +97,71 @@ var (
 	// problem, so an error that names a decode error only among its
 	// details does not match.
 	ErrDecode = errors.New("value does not decode")
+
+	// ErrUnknownField indicates a mapping key that no field of the target
+	// struct reads, which a decode rejects under
+	// [WithDisallowUnknownFields]. The problem reads `unknown field
+	// "replicsa"` and carries the path of the key.
+	//
+	// ErrUnknownField, [ErrWrongKind], and [ErrOverflow] each label some
+	// of the problems that match [ErrDecode], and a problem with a label
+	// matches ErrDecode too. The rest carry no label, such as an error
+	// that a value's own unmarshaler builds, text that does not parse as a
+	// [time.Duration], and an alias with no anchor. A caller thus tests
+	// for ErrDecode after the labels.
+	//
+	// A label follows the message of a problem, not the go-yaml error
+	// behind it. The decode gives a problem a label where it writes the
+	// message of that label. A sequence in a string field and a sequence
+	// in a [net/netip.Addr] field both read "expected string, got
+	// sequence" and both match ErrWrongKind, though go-yaml reports a type
+	// error for the first alone. A problem that keeps the text of go-yaml
+	// or of an unmarshaler matches no label, even when [errors.As] finds a
+	// go-yaml error in it. The error of an UnmarshalYAML method that
+	// decodes its bytes with go-yaml is one. A [WithCustomUnmarshaler]
+	// function that returns the rejection of its decode function, or
+	// wraps it, keeps the label of that rejection.
+	//
+	// [errors.Is] reports whether any problem of an error matches a
+	// label, as it does for ErrDecode. A caller that sorts the problems of
+	// a decode walks [Problems] and tests the Err of each one:
+	//
+	//	for problem := range niceyaml.Problems(err) {
+	//		switch {
+	//		case errors.Is(problem.Err, niceyaml.ErrUnknownField):
+	//			code = "unknown_field"
+	//		case errors.Is(problem.Err, niceyaml.ErrWrongKind):
+	//			code = "wrong_kind"
+	//		case errors.Is(problem.Err, niceyaml.ErrOverflow):
+	//			code = "out_of_range"
+	//		case errors.Is(problem.Err, niceyaml.ErrDecode):
+	//			code = "invalid"
+	//		}
+	//	}
+	ErrUnknownField = errors.New("unknown field")
+
+	// ErrWrongKind indicates a value of a kind its target does not take,
+	// such as a string for an integer or a sequence for a mapping. The
+	// problem reads "expected integer, got string", with the kinds
+	// [Node.DecodeInto] lists. A value the decoder rejects for its Go type
+	// alone matches too, and reads "expected mapping, got mapping of
+	// another type".
+	//
+	// ErrWrongKind is a label on a problem that matches [ErrDecode], as
+	// [ErrUnknownField] describes. A number outside the range of its
+	// integer type matches [ErrOverflow] instead.
+	ErrWrongKind = errors.New("value of the wrong kind")
+
+	// ErrOverflow indicates a number outside the range of the integer
+	// type that reads it, such as 300 for an int8. The problem reads
+	// "expected integer from -128 to 127, got 300". An infinity for an
+	// integer matches too. A float field reports no overflow, so `1e400`
+	// there reads "expected float, got string" and matches [ErrWrongKind].
+	//
+	// ErrOverflow is a label on a problem that matches [ErrDecode], as
+	// [ErrUnknownField] describes. [ErrOutOfRange] is for a location
+	// outside the source and says nothing of a number.
+	ErrOverflow = errors.New("number outside the range of its type")
 
 	// ErrExcessiveAliasing indicates a node whose document holds so many
 	// nested aliases that a decode would read far more than the document
@@ -144,7 +213,9 @@ var (
 	// ErrOutOfRange indicates the error's location lies outside the source.
 	// The location starts on a line past the last or before the first,
 	// which happens when a position or range came from other text, or at a
-	// column before the first. [SourceError.Unresolved] reports it.
+	// column before the first. [SourceError.Unresolved] reports it. A
+	// number outside the range of its integer type matches [ErrOverflow]
+	// instead.
 	ErrOutOfRange = errors.New("location outside source")
 
 	// ErrPathNeedsDocument indicates that [Source.Bind] bound an error that

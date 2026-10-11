@@ -840,6 +840,229 @@ func TestDocument_Decode_Rejection_GoYAMLError(t *testing.T) {
 	})
 }
 
+// requireSentinels checks that err matches each sentinel in want, and
+// none of the other sentinels a decode or the parse reports a problem
+// with.
+func requireSentinels(t *testing.T, err error, want ...error) {
+	t.Helper()
+
+	sentinels := []error{
+		niceyaml.ErrDecode,
+		niceyaml.ErrSyntax,
+		niceyaml.ErrUnknownField,
+		niceyaml.ErrWrongKind,
+		niceyaml.ErrOverflow,
+		niceyaml.ErrOutOfRange,
+	}
+
+	for _, sentinel := range sentinels {
+		if slices.Contains(want, sentinel) {
+			require.ErrorIs(t, err, sentinel)
+		} else {
+			assert.NotErrorIs(t, err, sentinel)
+		}
+	}
+}
+
+func TestDocument_Decode_Rejection_Label(t *testing.T) {
+	t.Parallel()
+
+	// The target holds a field of each kind whose rejection a decode
+	// labels, and of each kind whose error it gives no label.
+	type target struct {
+		Addr   netip.Addr               `yaml:"addr"`
+		Bare   bareReparsingUnmarshaler `yaml:"bare"`
+		Deep   **int                    `yaml:"deep"`
+		Self   opaqueValue              `yaml:"self"`
+		Option optionDecoded            `yaml:"option"`
+		One    rejectionServer          `yaml:"one"`
+		Wait   time.Duration            `yaml:"wait"`
+		Ratio  float64                  `yaml:"ratio"`
+		Top    int                      `yaml:"top"`
+		Tier   tier                     `yaml:"tier"`
+	}
+
+	strict := niceyaml.WithDisallowUnknownFields(true)
+
+	// The function decodes the value as an int8 and puts text of its own
+	// in front of the rejection.
+	wrapping := niceyaml.WithCustomUnmarshaler(
+		func(_ context.Context, _ *optionDecoded, decode func(any) error) error {
+			var small int8
+
+			err := decode(&small)
+			if err != nil {
+				return fmt.Errorf("option: %w", err)
+			}
+
+			return nil
+		},
+	)
+
+	refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {small: 300}\n"))
+
+	tcs := map[string]struct {
+		input string
+		// The message of the one problem the decode reports.
+		want string
+		// The sentinels that problem matches.
+		err    []error
+		opts   []niceyaml.DecodeOption
+		source []niceyaml.SourceOption
+	}{
+		"unknown field": {
+			input: "other: 1\n",
+			opts:  []niceyaml.DecodeOption{strict},
+			want:  `unknown field "other"`,
+			err:   []error{niceyaml.ErrDecode, niceyaml.ErrUnknownField},
+		},
+		"scalar for a mapping": {
+			input: "one: abc\n",
+			want:  "expected mapping, got string",
+			err:   []error{niceyaml.ErrDecode, niceyaml.ErrWrongKind},
+		},
+		"mapping for a scalar": {
+			input: "top: {a: 1}\n",
+			want:  "expected integer, got mapping",
+			err:   []error{niceyaml.ErrDecode, niceyaml.ErrWrongKind},
+		},
+		// The decode words this rejection itself, so its chain holds no
+		// go-yaml error to name its kind.
+		"sequence for a value that decodes from text": {
+			input: "addr: [1]\n",
+			want:  "expected string, got sequence",
+			err:   []error{niceyaml.ErrDecode, niceyaml.ErrWrongKind},
+		},
+		// The decoder reports a type error for a number no float64 holds.
+		"number too large for a float": {
+			input: "ratio: 1e400\n",
+			want:  "expected float, got string",
+			err:   []error{niceyaml.ErrDecode, niceyaml.ErrWrongKind},
+		},
+		"value of another type": {
+			input: "deep: 1\n",
+			want:  "expected integer, got integer of another type",
+			err:   []error{niceyaml.ErrDecode, niceyaml.ErrWrongKind},
+		},
+		"number past the range of an int8": {
+			input: "one: {small: 300}\n",
+			want:  "expected integer from -128 to 127, got 300",
+			err:   []error{niceyaml.ErrDecode, niceyaml.ErrOverflow},
+		},
+		// The decoder reports an overflow for an infinity in an integer.
+		"infinity for an integer": {
+			input: "one: {small: .inf}\n",
+			want:  "expected integer from -128 to 127, got +Inf",
+			err:   []error{niceyaml.ErrDecode, niceyaml.ErrOverflow},
+		},
+		"number an alias reads from a reference document": {
+			input:  "one: *base\n",
+			source: []niceyaml.SourceOption{refs},
+			want:   "expected integer from -128 to 127, got 300",
+			err:    []error{niceyaml.ErrDecode, niceyaml.ErrOverflow},
+		},
+		"rejection a custom unmarshaler wraps": {
+			input: "option: 300\n",
+			opts:  []niceyaml.DecodeOption{wrapping},
+			want:  "option: expected integer from -128 to 127, got 300",
+			err:   []error{niceyaml.ErrDecode, niceyaml.ErrOverflow},
+		},
+		"error of an UnmarshalYAML method": {
+			input: "self: bad\n",
+			want:  "unmarshaler rejected the value",
+			err:   []error{niceyaml.ErrDecode},
+		},
+		"error of an UnmarshalText method": {
+			input: "tier: mid\n",
+			want:  `unknown tier "mid"`,
+			err:   []error{niceyaml.ErrDecode},
+		},
+		"duration that does not parse": {
+			input: "wait: soon\n",
+			want:  `time: invalid duration "soon"`,
+			err:   []error{niceyaml.ErrDecode},
+		},
+		"alias with no anchor": {
+			input: "top: *nope\n",
+			want:  `could not find alias "nope"`,
+			err:   []error{niceyaml.ErrDecode},
+		},
+		"syntax error": {
+			input: "top: [1\n",
+			want:  "sequence end token ']' not found",
+			err:   []error{niceyaml.ErrSyntax},
+		},
+		"duplicate key": {
+			input: "top: 1\ntop: 2\n",
+			want:  `mapping key "top" already defined at [1:1]`,
+			err:   []error{niceyaml.ErrSyntax},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := niceyaml.NewSourceFromString(tc.input, tc.source...).Decode[target](t.Context(), tc.opts...)
+			require.Error(t, err)
+
+			problems := slices.Collect(niceyaml.Problems(err))
+			require.Len(t, problems, 1)
+			assert.Equal(t, tc.want, problems[0].Message())
+			requireSentinels(t, problems[0].Err, tc.err...)
+		})
+	}
+
+	// The method returns the error of a go-yaml decode of its bytes, with
+	// go-yaml's text. The message decides the label, so the go-yaml error
+	// in the chain gives the problem none.
+	t.Run("go-yaml error of an UnmarshalYAML method", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := niceyaml.NewSourceFromString("bare: {name: abc}\n").Decode[target](t.Context())
+		require.Error(t, err)
+
+		problems := slices.Collect(niceyaml.Problems(err))
+		require.Len(t, problems, 1)
+		requireSentinels(t, problems[0].Err, niceyaml.ErrDecode)
+		require.ErrorAs(t, problems[0].Err, new(*yaml.UnexpectedNodeTypeError))
+	})
+
+	// A summary matches each label that one of its problems matches, and
+	// a problem matches no label but its own.
+	t.Run("several problems", func(t *testing.T) {
+		t.Parallel()
+
+		input := stringtest.LinesLF(
+			"other: 1",
+			"top: abc",
+			"one: {small: 300}",
+			"addr: [1]",
+			"wait: soon",
+		)
+
+		_, err := niceyaml.NewSourceFromString(input).Decode[target](t.Context(), strict)
+		require.Error(t, err)
+		requireSentinels(t, err,
+			niceyaml.ErrDecode, niceyaml.ErrUnknownField, niceyaml.ErrWrongKind, niceyaml.ErrOverflow)
+
+		want := [][]error{
+			{niceyaml.ErrDecode, niceyaml.ErrUnknownField},
+			{niceyaml.ErrDecode, niceyaml.ErrWrongKind},
+			{niceyaml.ErrDecode, niceyaml.ErrOverflow},
+			{niceyaml.ErrDecode, niceyaml.ErrWrongKind},
+			{niceyaml.ErrDecode},
+		}
+
+		problems := slices.Collect(niceyaml.Problems(err))
+		require.Len(t, problems, len(want))
+
+		for i, problem := range problems {
+			requireSentinels(t, problem.Err, want[i]...)
+		}
+	})
+}
+
 func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
 	t.Parallel()
 

@@ -2627,7 +2627,7 @@ func WithSelfValidation(enabled bool) DecodeOption {
 // key with no field in the target struct is an error. The default is false,
 // and the decode then skips unknown keys. With the option on, a decode
 // that fails reports every unknown field the document holds, and each of
-// those errors matches [ErrDecode]. The report holds only keys the
+// those errors matches [ErrUnknownField]. The report holds only keys the
 // go-yaml decoder rejects, so a key under a prefix that
 // [WithAllowedFieldPrefixes] allows stays out of it. It lists the fields
 // in the order of the source, each at the path of its key:
@@ -2641,13 +2641,16 @@ func WithSelfValidation(enabled bool) DecodeOption {
 // The error is a summary from [NewSummary] that counts the fields on the
 // first line of its message and heads one error for each. The message
 // lists them, and [ErrorTree.Problems] yields them. Each of those errors
-// matches [ErrDecode] and holds the
-// [yaml.UnknownFieldError] the go-yaml decoder returns for that field. A
+// matches [ErrUnknownField], and [ErrDecode] as every problem of a
+// decode does. A caller that needs go-yaml's type finds the
+// [yaml.UnknownFieldError] the decoder returns for that field with
+// [errors.As]. A
 // document with one unknown field reports that field as the error itself.
 // A document that holds another problem too, such as a value of the
 // wrong kind, lists its unknown fields among the problems
 // [Node.DecodeInto] reports for one decode, and the first line then
-// counts problems.
+// counts problems. ErrUnknownField tells the unknown fields from the
+// other problems of that report.
 //
 // # Search
 //
@@ -3066,10 +3069,19 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // integer type reads "expected integer from 0 to 65535, got 70000". A
 // rejection of a key, such as an unknown field or a key that does not
 // read as the key type of a map, carries the path of the key, which ends
-// in `~`. [errors.As] reaches the go-yaml error of a rejection for a
-// caller that needs the Go types, as a [yaml.TypeError], a
+// in `~`.
+//
+// Three sentinels label these rejections, and each problem with a label
+// matches ErrDecode too. A value of the wrong kind or of another type
+// matches [ErrWrongKind], a number outside the range of an integer type
+// matches [ErrOverflow], and an unknown field matches [ErrUnknownField].
+// Any other problem matches ErrDecode alone, as ErrUnknownField
+// describes. A caller that needs the Go types reaches the go-yaml error
+// of a rejection with [errors.As], as a [yaml.TypeError], a
 // [yaml.OverflowError], a [yaml.UnexpectedNodeTypeError], or a
-// [yaml.UnknownFieldError]. The text of a go-yaml error that names a
+// [yaml.UnknownFieldError]. A mapping or a sequence for a value with an
+// UnmarshalText method matches ErrWrongKind and holds no go-yaml error.
+// The text of a go-yaml error that names a
 // token holds an excerpt of the document, which go-yaml builds itself.
 // The chain of a rejection unwraps to no such error, so a reporter that
 // prints each error of a chain prints the message and not that excerpt.
@@ -3690,8 +3702,8 @@ func isNullAlias(ctx context.Context, dec *yaml.Decoder, node, view ast.Node) bo
 // alias. Any other [yaml.Error] without a token of the source comes back
 // that way when scope holds an alias to a reference document,
 // as [decodeTree.referenceAliases] finds them, with go-yaml's position
-// and excerpt of that document left out and the message
-// [rejectionMessage] writes. It binds at the alias when
+// and excerpt of that document left out and the message and the label
+// [rejectionMessage] gives it. It binds at the alias when
 // scope holds one such alias, and carries no location when it holds
 // several, since the token does not say which of them led to it. The
 // count ignores the target type, so a type that reads only one of
@@ -3735,8 +3747,8 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 			return err
 		}
 
-		msg := tree.rejectionText(yamlErr)
-		rejected := decodeError{err: yamlMessageError{err: yamlErr, msg: msg}, placed: true}
+		msg, label := tree.rejectionText(yamlErr)
+		rejected := decodeError{err: yamlMessageError{err: yamlErr, msg: msg}, label: label, placed: true}
 
 		// The token does not say which anchor of a reference document
 		// holds it, so only a decode that reads one alias from a
@@ -3910,8 +3922,8 @@ func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 
 // bindDecodeError binds an error from the decoder to the source. A
 // [yaml.Error] at a token of the source binds as an [*Error] that
-// matches [ErrDecode], with the message [rejectionMessage]
-// writes for it. The Error carries the location [Node.rejectionLocation]
+// matches [ErrDecode], with the message and the label [rejectionMessage]
+// gives it. The Error carries the location [Node.rejectionLocation]
 // gives the token, which is the path of the node the decoder names by it.
 // That path starts at `$`, so the Node binds the Error with no scope in
 // front of the path. Any other error binds with the location it carries,
@@ -3988,6 +4000,10 @@ var errPlaced = errors.New("placed")
 // does.
 type decodeError struct {
 	err error
+	// The label the error matches too, which is [ErrUnknownField],
+	// [ErrWrongKind], or [ErrOverflow], or nil for an error with no label.
+	// The code that writes the message of the error sets it.
+	label error
 	// Whether the error matches [errPlaced] too.
 	placed bool
 }
@@ -4000,10 +4016,11 @@ func (e decodeError) Unwrap() error {
 	return e.err
 }
 
-// Is reports whether target is [ErrDecode] or [errInvalid], or
-// [errPlaced] for an error the decode placed.
+// Is reports whether target is [ErrDecode] or [errInvalid], the label
+// of the error, or [errPlaced] for an error the decode placed.
 func (e decodeError) Is(target error) bool {
-	return target == ErrDecode || target == errInvalid || e.placed && target == errPlaced
+	return target == ErrDecode || target == errInvalid ||
+		e.label != nil && target == e.label || e.placed && target == errPlaced
 }
 
 // asDecodeError returns err, an error the go-yaml decoder returned, as

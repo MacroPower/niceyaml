@@ -303,6 +303,7 @@ func TestPanicError_Recovered_Value(t *testing.T) {
 		Port int `yaml:"port"`
 	}](t.Context())
 	require.ErrorIs(t, decodeErr, niceyaml.ErrDecode)
+	require.ErrorIs(t, decodeErr, niceyaml.ErrWrongKind)
 	require.True(t, niceyaml.IsInvalid(decodeErr))
 
 	_, syntaxErr := niceyaml.NewSourceFromString("a: [1\n", niceyaml.WithName("other.yaml")).File()
@@ -347,6 +348,7 @@ func TestPanicError_Recovered_Value(t *testing.T) {
 			// the stage nor the fault.
 			require.ErrorIs(t, err, tc.value)
 			require.NotErrorIs(t, err, niceyaml.ErrDecode)
+			require.NotErrorIs(t, err, niceyaml.ErrWrongKind)
 			require.NotErrorIs(t, err, niceyaml.ErrSyntax)
 
 			// The panic is one problem at the node, whatever the value

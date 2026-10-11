@@ -764,12 +764,15 @@ func (b anchorBounds) encloses(node ast.Node, tk *token.Token) bool {
 }
 
 // rejectionText returns the message [rejectionMessage] writes for err,
-// with each anchor named as the document names it. The decoder writes
-// text of the document into some messages as it is, such as the name of
-// an unknown field, so each control character comes back as its picture
-// and the message stays on one line.
-func (t *decodeTree) rejectionText(err yaml.Error) string {
-	return escape.Control(t.restoreNames(rejectionMessage(err)))
+// with each anchor named as the document names it, and the label
+// rejectionMessage gives err. The decoder writes text of the document
+// into some messages as it is, such as the name of an unknown field, so
+// each control character comes back as its picture and the message stays
+// on one line.
+func (t *decodeTree) rejectionText(err yaml.Error) (string, error) {
+	msg, label := rejectionMessage(err)
+
+	return escape.Control(t.restoreNames(msg)), label
 }
 
 // restoreNames returns msg with each name the tree gave an anchor spelled

@@ -81,30 +81,41 @@ const (
 // mapping, got mapping of another type" and names neither type.
 //
 // Any other error keeps the message the decoder gave it, such as the one
-// for an unknown field, which names the field as the document does.
-func rejectionMessage(err yaml.Error) string {
+// for an unknown field, a [yaml.UnknownFieldError], which names the field
+// as the document does.
+//
+// The error result is the label of the rejection, which the branch that
+// writes the message sets, so a rejection matches a label exactly when
+// it reads as that label describes. A value of the wrong kind or of
+// another type gets [ErrWrongKind], a number that overflows gets
+// [ErrOverflow], and an unknown field gets [ErrUnknownField]. Any other
+// error gets nil.
+func rejectionMessage(err yaml.Error) (string, error) {
 	switch e := err.(type) { //nolint:errorlint // The decoder returns these types unwrapped.
 	case *yaml.TypeError:
 		want, got := kindOfType(e.DstType), kindOfType(e.SrcType)
 		if want == got || got == kindValue {
-			return fmt.Sprintf("expected %s, got %s of another type", want, got)
+			return fmt.Sprintf("expected %s, got %s of another type", want, got), ErrWrongKind
 		}
 
-		return fmt.Sprintf("expected %s, got %s", want, got)
+		return fmt.Sprintf("expected %s, got %s", want, got), ErrWrongKind
 
 	case *yaml.UnexpectedNodeTypeError:
-		return fmt.Sprintf("expected %s, got %s", kindOfNode(e.Expected), kindOfNode(e.Actual))
+		return fmt.Sprintf("expected %s, got %s", kindOfNode(e.Expected), kindOfNode(e.Actual)), ErrWrongKind
 
 	case *yaml.OverflowError:
 		lo, hi, ok := integerRange(e.DstType)
 		if !ok {
-			return fmt.Sprintf("expected %s, got %s", kindOfType(e.DstType), e.SrcNum)
+			return fmt.Sprintf("expected %s, got %s", kindOfType(e.DstType), e.SrcNum), ErrOverflow
 		}
 
-		return fmt.Sprintf("expected %s from %s to %s, got %s", kindInteger, lo, hi, e.SrcNum)
+		return fmt.Sprintf("expected %s from %s to %s, got %s", kindInteger, lo, hi, e.SrcNum), ErrOverflow
+
+	case *yaml.UnknownFieldError:
+		return err.GetMessage(), ErrUnknownField
 
 	default:
-		return err.GetMessage()
+		return err.GetMessage(), nil
 	}
 }
 
@@ -410,11 +421,14 @@ func refusesForText(t reflect.Type, u optionUnmarshalers, content ast.Node) bool
 // textRejection returns the rejection of content, a mapping or a
 // sequence the decoder refuses as [refusesForText] reports. The error
 // the decoder returns for it names neither the value nor its kind. The
-// rejection matches [ErrDecode] and reads "expected string, got
-// sequence", as [rejectionMessage] writes the rejection of a sequence
-// that a string field reads.
+// rejection matches [ErrDecode] and [ErrWrongKind] and reads "expected
+// string, got sequence", as [rejectionMessage] writes the rejection of a
+// sequence that a string field reads.
 func textRejection(content ast.Node) error {
-	return decodeError{err: fmt.Errorf("expected %s, got %s", kindString, kindOfNode(content.Type()))}
+	return decodeError{
+		err:   fmt.Errorf("expected %s, got %s", kindString, kindOfNode(content.Type())),
+		label: ErrWrongKind,
+	}
 }
 
 // valueError returns err as an error about one value of a document, for

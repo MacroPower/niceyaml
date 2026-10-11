@@ -31,7 +31,8 @@ import (
 //
 // A panic is a bug in code, the caller's or go-yaml's, and it says
 // nothing about the document. A recovered panic thus matches neither
-// [ErrDecode] nor [ErrSyntax], whatever value the code panicked with. It
+// [ErrDecode] nor [ErrSyntax], whatever value the code panicked with,
+// and it matches no label on a decode problem, such as [ErrWrongKind]. It
 // declares no fault of the document either, so [IsInvalid] does not
 // report the error that a decode or the parse returns for it. A document
 // can still trip a panic in go-yaml, as a sequence of three elements does
@@ -80,8 +81,8 @@ func (e *PanicError) Unwrap() error {
 // location, no problem, and no fault of the document to the error, even
 // when the code panicked with an [*Error]. [errors.As] still finds the
 // PanicError and what it unwraps to. [errors.Is] matches what the
-// PanicError matches, apart from [ErrDecode], [ErrSyntax], and
-// [errInvalid].
+// PanicError matches, apart from [ErrDecode] and each label on a decode
+// problem, [ErrSyntax], and [errInvalid].
 //
 // Create instances with [recovered].
 type recoveredError struct {
@@ -106,14 +107,15 @@ func (e recoveredError) Error() string {
 
 // Is reports whether the [*PanicError] e holds matches target, or whether
 // target is [errPlaced] for a panic a decode placed. It reports false
-// for [ErrDecode], [ErrSyntax], and [errInvalid], even when the code
-// panicked with an error that matches one of them.
+// for [ErrDecode] and each label on a decode problem, for [ErrSyntax],
+// and for [errInvalid], even when the code panicked with an error that
+// matches one of them.
 func (e recoveredError) Is(target error) bool {
 	switch target {
 	case errPlaced:
 		return e.placed
 
-	case ErrDecode, ErrSyntax, errInvalid:
+	case ErrDecode, ErrUnknownField, ErrWrongKind, ErrOverflow, ErrSyntax, errInvalid:
 		return false
 
 	default:

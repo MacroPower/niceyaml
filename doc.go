@@ -458,7 +458,10 @@
 // for the other values the decoder rejects for their kind or range, so
 // one decode reports them together, as [Node.DecodeInto] describes.
 // Under [WithDisallowUnknownFields], the report also holds every key
-// that no field of the target reads, each at the path of the key.
+// that no field of the target reads, each at the path of the key. A
+// caller that walks the report with [Problems] tells a value of the
+// wrong kind, a number outside the range of its type, and an unknown
+// field apart with [ErrWrongKind], [ErrOverflow], and [ErrUnknownField].
 //
 // [Node.DecodeInto] runs the same pipeline on a value you already hold,
 // such as one pre-populated with defaults.
@@ -693,9 +696,12 @@
 // niceyaml's own types, and [paths.Path.YAMLPath] converts to go-yaml's
 // path type when a caller needs it. Text the go-yaml parser rejects
 // matches [ErrSyntax], and YAML that parsed and does not decode matches
-// [ErrDecode]. A caller thus tells both cases apart without naming
+// [ErrDecode]. A value of the wrong kind, a number outside the range of
+// its type, and an unknown field each match a sentinel of their own
+// beside ErrDecode, as [ErrUnknownField] describes. A caller thus tells
+// these cases apart without naming
 // go-yaml's error types. A panic in go-yaml, or in an unmarshaler it
-// calls, comes back as a [PanicError] that matches neither.
+// calls, comes back as a [PanicError] that matches none of them.
 //
 // The go-yaml settings niceyaml supports have named options, such as
 // [WithAllowDuplicateKeys], [WithCustomUnmarshaler], or
