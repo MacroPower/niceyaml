@@ -56,13 +56,15 @@ func main() {
 }
 
 // capped rejects a menu that lists more than two breakfasts.
-func capped(ctx context.Context, n *niceyaml.Node) error {
-	m, err := n.Decode[menu](ctx)
+func capped(_ context.Context, n *niceyaml.Node) error {
+	// A validator selects the nodes it checks, and the decode that runs
+	// it reads the menu.
+	breakfasts, err := n.Nodes(paths.Current().Child("breakfast").IndexAll())
 	if err != nil {
-		return fmt.Errorf("decode menu: %w", err)
+		return fmt.Errorf("select breakfasts: %w", err)
 	}
 
-	if len(m.Breakfast) > 2 {
+	if len(breakfasts) > 2 {
 		// The path starts at the node the validator checks.
 		return niceyaml.NewError("more than two breakfasts", niceyaml.AtPath(paths.Current().Child("breakfast")))
 	}
@@ -72,21 +74,26 @@ func capped(ctx context.Context, n *niceyaml.Node) error {
 
 // distinct rejects a menu that lists an item twice.
 func distinct(ctx context.Context, n *niceyaml.Node) error {
-	m, err := n.Decode[menu](ctx)
+	items, err := n.Nodes(paths.Current().Child("breakfast").IndexAll().Child("item"))
 	if err != nil {
-		return fmt.Errorf("decode menu: %w", err)
+		return fmt.Errorf("select items: %w", err)
 	}
 
 	seen := map[string]bool{}
 
-	for i, it := range m.Breakfast {
-		if seen[it.Item] {
-			at := paths.Current().Child("breakfast").Index(i).Child("item")
-
-			return niceyaml.NewError("item is listed twice", niceyaml.AtPath(at))
+	for _, item := range items {
+		// A scoped decode reads this one value.
+		name, err := item.Decode[string](ctx)
+		if err != nil {
+			return fmt.Errorf("decode item: %w", err)
 		}
 
-		seen[it.Item] = true
+		if seen[name] {
+			// The path of a Node starts at the root of the document.
+			return niceyaml.NewError("item is listed twice", niceyaml.AtPath(item.Path()))
+		}
+
+		seen[name] = true
 	}
 
 	return nil
