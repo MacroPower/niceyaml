@@ -20,7 +20,7 @@ vars:
   # Tests whose names match this regex are integration tests. test skips them,
   # and test:integration selects them.
   INTEGRATION_PATTERN: Integration
-  DEADCODE_VERSION: v0.50.0 # renovate: datasource=go depName=golang.org/x/tools
+  DEADCODE_VERSION: v0.52.0 # renovate: datasource=go depName=golang.org/x/tools
 
 tasks:
   # lint, format, tidy, and tidy:check declare `sources`, so Task skips them on
