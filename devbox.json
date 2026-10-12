@@ -11,7 +11,7 @@
       "platforms": ["aarch64-linux", "x86_64-linux"]
     },
     // vhs records the docs/tapes/*.tape demo GIFs on the host.
-    "vhs": "0.11.0",
+    "vhs": "0.12.1",
     "github:dagger/nix/21ee7262e0ccfffba6bd43c9044fb4c5c8db2d91#packages.aarch64-darwin.dagger": {
       "version": "",
       "platforms": ["aarch64-darwin"]
