@@ -42,10 +42,9 @@ func viewCmd() *cobra.Command {
 			// The context that notifyContext in main cancels on SIGINT or
 			// SIGTERM ends the viewer the way it ends validate. Bubble
 			// Tea's own signal handler would turn SIGTERM into a clean
-			// quit, and when it lost the race for a signal to
-			// notifyContext, the viewer would hang on exit. Ctrl+C at the
-			// keyboard still reaches the model as a key press, since
-			// Bubble Tea puts the terminal in raw mode.
+			// quit with exit status 0. Ctrl+C at the keyboard still
+			// reaches the model as a key press, because Bubble Tea puts
+			// the terminal in raw mode.
 			p := tea.NewProgram(m,
 				tea.WithContext(cmd.Context()),
 				tea.WithoutSignalHandler(),
