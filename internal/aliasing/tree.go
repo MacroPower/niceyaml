@@ -1,8 +1,6 @@
 package aliasing
 
 import (
-	"slices"
-
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
@@ -106,9 +104,7 @@ func HoldsReferenceAlias(n Node) bool {
 		return false
 	}
 
-	return slices.ContainsFunc(state.Facts().Aliases, func(a AliasFact) bool {
-		return a.Anchor == nil
-	})
+	return state.Facts().ReferenceAlias
 }
 
 // stateOf returns the state of the document of n, or nil for a nil Node.
