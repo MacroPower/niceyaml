@@ -770,10 +770,11 @@ func trees(kids []positioned) []ErrorTree {
 // A child in the source of its parent drops the name the parent row shows
 // and reads "line:col: msg", unless named is set for a parent with no row.
 func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []positioned {
-	flat := flatten(nil, bound.below, bound, named)
+	from := len(kids)
+	kids = flatten(kids, bound.below, bound, named)
 
-	for i := range flat {
-		kid := &flat[i]
+	for i := from; i < len(kids); i++ {
+		kid := &kids[i]
 		child, parent := kid.bound, kid.parent
 
 		// Strip the line back to the message and put the position back
@@ -806,8 +807,6 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 		}
 
 		kid.tree.Detail = kid.tree.Detail || kid.underDetail
-
-		kids = append(kids, *kid)
 	}
 
 	return kids
