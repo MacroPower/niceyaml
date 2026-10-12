@@ -59,12 +59,12 @@ Output docs/assets/themes.gif
 
 Set Shell "bash"
 Set Padding 20
-Set FontSize 22
+Set FontSize 24
+Set FontFamily "Fira Code"
 Set Columns 98
 Set Rows 30
 
 Hide
-  Type `go build -o dist/nyaml ./cmd/nyaml`  Enter
   Type `alias nyaml=./dist/nyaml`  Enter
   Type `nyaml view testdata/full.yaml`  Sleep 500ms Enter
   Sleep 1

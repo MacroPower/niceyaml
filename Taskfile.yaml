@@ -13,6 +13,7 @@ use_gitignore: true
 includes:
   dagger: ./.taskfiles/dagger/Taskfile.yaml
   dev: ./.taskfiles/dev/Taskfile.yaml
+  docs: ./.taskfiles/docs/Taskfile.yaml
   fmt: ./.taskfiles/fmt/Taskfile.yaml
   gh: ./.taskfiles/gh/Taskfile.yaml
   git: ./.taskfiles/git/Taskfile.yaml

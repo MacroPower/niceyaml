@@ -60,12 +60,12 @@ Output docs/assets/view.gif
 Set Theme "OneDark"
 Set Shell "bash"
 Set Padding 20
-Set FontSize 22
+Set FontSize 24
+Set FontFamily "Fira Code"
 Set Columns 98
 Set Rows 30
 
 Hide
-  Type `go build -o dist/nyaml ./cmd/nyaml`  Enter
   Type `alias nyaml=./dist/nyaml`  Enter
   Type `clear`  Enter
   Sleep 500ms

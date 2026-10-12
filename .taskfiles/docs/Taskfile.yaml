@@ -1,0 +1,37 @@
+version: "3"
+
+set: [errexit, nounset, pipefail]
+shopt: [globstar]
+
+# The tapes in TAPES_DIR record the demo GIFs that README.md embeds. vhs and the
+# fonts it renders with come from the devbox project in TAPES_DIR, so the root
+# devbox project does not install them.
+vars:
+  TAPES_DIR: docs/tapes
+
+tasks:
+  # tapes declares no `sources`. A recording depends on the nyaml build, the
+  # testdata, and the tapes project, and a skipped run would leave stale GIFs.
+  tapes:
+    desc: Records the demo GIFs from docs/tapes with vhs
+    summary: |
+      Builds dist/nyaml, then records each tape in docs/tapes with vhs. The
+      devbox project in docs/tapes pins vhs, an interactive bash, and the
+      fonts that docs/tapes/fonts.conf gives Chromium, so every host renders
+      the same glyphs. devbox installs that project on the first run.
+
+      Args:
+        TAPE: Name of one tape to record, e.g. view (default: every tape)
+    vars:
+      TAPE: '{{.TAPE | default ""}}'
+      TAPES:
+        sh: '{{if .TAPE}}echo {{.TAPES_DIR}}/{{.TAPE}}.tape{{else}}git ls-files "{{.TAPES_DIR}}/*.tape"{{end}}'
+    preconditions:
+      - sh: "{{if .TAPE}}test -f {{.TAPES_DIR}}/{{.TAPE}}.tape{{end}}"
+        msg: "No tape named {{.TAPE}} in {{.TAPES_DIR}}."
+    cmds:
+      - go build -o dist/nyaml ./cmd/nyaml
+      # devbox runs the command in the tapes project directory, and the tapes
+      # use paths relative to the repo root.
+      - for: { var: TAPES, split: "\n" }
+        cmd: devbox run -c {{.TAPES_DIR}} -- 'cd "{{.ROOT_DIR}}" && vhs "{{.ITEM}}"'

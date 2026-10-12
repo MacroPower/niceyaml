@@ -1,0 +1,338 @@
+{
+  "lockfile_version": "1",
+  "packages": {
+    "bashInteractive@5.3p15": {
+      "last_modified": "2026-10-08T19:21:32Z",
+      "resolved": "github:NixOS/nixpkgs/8edc0c72e3a38faf5434e40d1f19431125fe4b30#bashInteractive",
+      "source": "devbox-search",
+      "version": "5.3p15",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/s2vi23sgwpjv4qvnyfknv7l041m8vm94-bash-interactive-5.3p15",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/kakn9yyj2h86hqalm14wvfnxwaivs650-bash-interactive-5.3p15-man",
+              "default": true
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/sjzhqc66j881n9lyg3m15aqiykad4h5k-bash-interactive-5.3p15-dev"
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/a30rxgk909b7cizgv4q7m443znlj2643-bash-interactive-5.3p15-doc"
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/fps3rzxgdqqkcq80i5y1c9b89glrw9rk-bash-interactive-5.3p15-info"
+            }
+          ],
+          "store_path": "/nix/store/s2vi23sgwpjv4qvnyfknv7l041m8vm94-bash-interactive-5.3p15"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/wgxz9zr5a70v52nkqinbarf56f1c5jsi-bash-interactive-5.3p15",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/fabgday1m9ahl9pxx2dvmn22mxcc5ik2-bash-interactive-5.3p15-man",
+              "default": true
+            },
+            {
+              "name": "debug",
+              "path": "/nix/store/ibzrdbzm31azyk9jv2sqk1wz90svp64c-bash-interactive-5.3p15-debug"
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/2ssiw3jmlpf03cdrlf4df2qwpxska7xn-bash-interactive-5.3p15-dev"
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/zmirimd60fc2bdh1nlghi044k7y1qnfn-bash-interactive-5.3p15-doc"
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/p15v5l88lvcgl4i71w1bz0vkw6gy6wgx-bash-interactive-5.3p15-info"
+            }
+          ],
+          "store_path": "/nix/store/wgxz9zr5a70v52nkqinbarf56f1c5jsi-bash-interactive-5.3p15"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/1mv3qz005gkbalxfghk4y3s8ayv4d2dl-bash-interactive-5.3p15",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/7dnkkayima0chah3sm21nsp86zfgi6h9-bash-interactive-5.3p15-man",
+              "default": true
+            },
+            {
+              "name": "debug",
+              "path": "/nix/store/bxzrhigb7ji4712aa8id9kyak5q0q7z9-bash-interactive-5.3p15-debug"
+            },
+            {
+              "name": "dev",
+              "path": "/nix/store/rxgngn06ihrwh52bfi4vmm0i2ds69wsj-bash-interactive-5.3p15-dev"
+            },
+            {
+              "name": "doc",
+              "path": "/nix/store/lz3qj37l1h44jy1vn91f32hf5ghrabab-bash-interactive-5.3p15-doc"
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/3k8qpmnj7smafs2frihw0299gcivixh7-bash-interactive-5.3p15-info"
+            }
+          ],
+          "store_path": "/nix/store/1mv3qz005gkbalxfghk4y3s8ayv4d2dl-bash-interactive-5.3p15"
+        }
+      }
+    },
+    "fira-code@6.2": {
+      "last_modified": "2026-10-08T19:21:32Z",
+      "resolved": "github:NixOS/nixpkgs/8edc0c72e3a38faf5434e40d1f19431125fe4b30#fira-code",
+      "source": "devbox-search",
+      "version": "6.2",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/3y4isvmw53y2fiqavvmvywkm7rp8l63r-fira-code-6.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/3y4isvmw53y2fiqavvmvywkm7rp8l63r-fira-code-6.2"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/ghb53mi09c5m4ss9s9scbrwamj7f3r0y-fira-code-6.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/ghb53mi09c5m4ss9s9scbrwamj7f3r0y-fira-code-6.2"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/hzym44idd887s8v2z9f4j951dsidvssc-fira-code-6.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/hzym44idd887s8v2z9f4j951dsidvssc-fira-code-6.2"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/mj2spr08a286hbid9qrwzqiqjyqm0yix-fira-code-6.2",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/mj2spr08a286hbid9qrwzqiqjyqm0yix-fira-code-6.2"
+        }
+      }
+    },
+    "github:NixOS/nixpkgs/nixpkgs-unstable": {
+      "last_modified": "2026-10-08T19:21:32Z",
+      "resolved": "github:NixOS/nixpkgs/8edc0c72e3a38faf5434e40d1f19431125fe4b30?lastModified=1791487292&narHash=sha256-tqM7xDEsaeK1p6VvRygeZ9LkQRpUUkbRT02BHv6hnTM%3D"
+    },
+    "noto-fonts-cjk-sans@2.004": {
+      "last_modified": "2026-10-08T19:21:32Z",
+      "resolved": "github:NixOS/nixpkgs/8edc0c72e3a38faf5434e40d1f19431125fe4b30#noto-fonts-cjk-sans",
+      "source": "devbox-search",
+      "version": "2.004",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/qa1is7rbfyhqdqf5av2f76nf5x0agmba-noto-fonts-cjk-sans-2.004",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/qa1is7rbfyhqdqf5av2f76nf5x0agmba-noto-fonts-cjk-sans-2.004"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/ws8y3ms50apz4qxf53rp3sg3r2snl7r2-noto-fonts-cjk-sans-2.004",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/ws8y3ms50apz4qxf53rp3sg3r2snl7r2-noto-fonts-cjk-sans-2.004"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/r3qv9dv0yjfdcm3bjpqsplki7dbzqfck-noto-fonts-cjk-sans-2.004",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/r3qv9dv0yjfdcm3bjpqsplki7dbzqfck-noto-fonts-cjk-sans-2.004"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/ri29jyxixak8y78jzgfb3zdcyl8i244h-noto-fonts-cjk-sans-2.004",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/ri29jyxixak8y78jzgfb3zdcyl8i244h-noto-fonts-cjk-sans-2.004"
+        }
+      }
+    },
+    "noto-fonts-color-emoji@2.051": {
+      "last_modified": "2026-10-08T19:21:32Z",
+      "resolved": "github:NixOS/nixpkgs/8edc0c72e3a38faf5434e40d1f19431125fe4b30#noto-fonts-color-emoji",
+      "source": "devbox-search",
+      "version": "2.051",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/gi6y6r05365ksx0zvg8qhn94g2mzw6g8-noto-fonts-color-emoji-2.051",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/gi6y6r05365ksx0zvg8qhn94g2mzw6g8-noto-fonts-color-emoji-2.051"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/l41bn8rq8lg0k94amsi0pikr063995c8-noto-fonts-color-emoji-2.051",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/l41bn8rq8lg0k94amsi0pikr063995c8-noto-fonts-color-emoji-2.051"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/qk50nknyjxzlin9x2z8k6hcgqnwn13ab-noto-fonts-color-emoji-2.051",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/qk50nknyjxzlin9x2z8k6hcgqnwn13ab-noto-fonts-color-emoji-2.051"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/na15wi41vvq97gam0yvixvm8gl0jq51k-noto-fonts-color-emoji-2.051",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/na15wi41vvq97gam0yvixvm8gl0jq51k-noto-fonts-color-emoji-2.051"
+        }
+      }
+    },
+    "noto-fonts@2026.10.01": {
+      "last_modified": "2026-10-08T19:21:32Z",
+      "resolved": "github:NixOS/nixpkgs/8edc0c72e3a38faf5434e40d1f19431125fe4b30#noto-fonts",
+      "source": "devbox-search",
+      "version": "2026.10.01",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/4hq5v240lc71jik9hgxnhi4snlb6w6bp-noto-fonts-2026.10.01",
+              "default": true
+            },
+            {
+              "name": "megamerge",
+              "path": "/nix/store/8qyx0iyn7jz441hf2l0zh2hi2vdiylkz-noto-fonts-2026.10.01-megamerge"
+            }
+          ],
+          "store_path": "/nix/store/4hq5v240lc71jik9hgxnhi4snlb6w6bp-noto-fonts-2026.10.01"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/mlfy3anq49kcrfwxxpq87i7z41dfzzms-noto-fonts-2026.10.01",
+              "default": true
+            },
+            {
+              "name": "megamerge",
+              "path": "/nix/store/57sjxpf2pzbmqxyg8x3ng9m62hdc4hpv-noto-fonts-2026.10.01-megamerge"
+            }
+          ],
+          "store_path": "/nix/store/mlfy3anq49kcrfwxxpq87i7z41dfzzms-noto-fonts-2026.10.01"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/h099i3ifsrf61n7bi33jnn1yr0xjglp4-noto-fonts-2026.10.01",
+              "default": true
+            },
+            {
+              "name": "megamerge",
+              "path": "/nix/store/0nxyifz6p3awcw3r96dj58czcpd8bj80-noto-fonts-2026.10.01-megamerge"
+            }
+          ],
+          "store_path": "/nix/store/h099i3ifsrf61n7bi33jnn1yr0xjglp4-noto-fonts-2026.10.01"
+        }
+      }
+    },
+    "vhs@0.12.1": {
+      "last_modified": "2026-10-08T19:21:32Z",
+      "resolved": "github:NixOS/nixpkgs/8edc0c72e3a38faf5434e40d1f19431125fe4b30#vhs",
+      "source": "devbox-search",
+      "version": "0.12.1",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/lkcxf2jfsckxsjl5594d1vqnxi1s0rql-vhs-0.12.1",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/lkcxf2jfsckxsjl5594d1vqnxi1s0rql-vhs-0.12.1"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/kffbbn3dihz1054jz4j686c63880jn2q-vhs-0.12.1",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/kffbbn3dihz1054jz4j686c63880jn2q-vhs-0.12.1"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/aqzq0gzmj2fw7lilv1mqilacs5gpacy2-vhs-0.12.1",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/aqzq0gzmj2fw7lilv1mqilacs5gpacy2-vhs-0.12.1"
+        }
+      }
+    }
+  }
+}

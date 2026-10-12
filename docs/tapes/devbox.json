@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.18.0/.schema/devbox.schema.json",
+  // This project holds the tools that record the demo GIFs, so the root
+  // project does not install them. `task docs:tapes` runs vhs through it.
+  "packages": {
+    "vhs": "0.12.1",
+    // The vhs prompt needs readline, which the plain bash package lacks.
+    "bashInteractive": "5.3p15",
+    // fonts.conf limits Chromium to these fonts, so every host renders the
+    // tapes with the same glyphs.
+    "fira-code": "6.2",
+    "noto-fonts": "2026.10.01",
+    "noto-fonts-cjk-sans": "2.004",
+    "noto-fonts-color-emoji": "2.051"
+  },
+  "env": {
+    "FONTCONFIG_FILE": "${DEVBOX_PROJECT_ROOT}/fonts.conf"
+  }
+}
