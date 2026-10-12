@@ -118,10 +118,10 @@ func (d *document) newResolver() *paths.Resolver {
 // [Node.PathAt] describe the document as a whole, whatever Node of it a
 // caller holds.
 //
-// A document with a YAML syntax error has no tree. The methods that read
-// the tree return the error [Node.Err] returns, and the methods that read
-// the tokens and the lines work as they do for any document, so a caller
-// renders or diffs a document that does not parse yet.
+// A document with a YAML syntax error has no tree. The methods [Node.Err]
+// lists return the error it returns, and the methods that read the tokens
+// and the lines work as they do for any document, so a caller renders or
+// diffs a document that does not parse yet.
 //
 // A Node of the Source [NewSourceFromLayers] builds belongs to the
 // document its layers merge into, and each error it returns binds in the
@@ -275,15 +275,9 @@ func (n *Node) AST() ast.Node {
 // resolves from the receiver and a `$` path from the root of the
 // document, so a path from [Node.Path] or [Node.PathAt] of any Node of
 // the document scopes the node it names. The Node shares the source and
-// the document with the receiver, and reports what the Scoped Nodes
-// section of the package documentation describes:
-//
-//	hours, err := doc.At(paths.Doc().Child("spec", "hours"))
-//	if err != nil {
-//		return err
-//	}
-//
-//	h, err := hours.Decode[Hours](ctx, niceyaml.WithValidator(hoursSchema))
+// the document with the receiver, and decodes, validates, and binds
+// errors as the Scoped Nodes section of the package documentation
+// describes.
 //
 // A path that selects nothing returns the error [paths.Resolver.Node]
 // describes, bound to the source. It wraps [paths.ErrNotFound] when
@@ -293,14 +287,9 @@ func (n *Node) AST() ast.Node {
 // keys make the lookups read far more nodes than the document holds, and
 // [paths.ErrWildcard] for a path that could match several nodes, which
 // [Node.Nodes] scopes one by one. A document that did not parse returns
-// the syntax error [Node.Err] returns.
-//
-// The error for a key a mapping leaves out binds at the key of that
-// mapping, as in "cfg.yaml:3:1: $.server.name: not found", and any other
-// path that selects nothing gives no location. [IsInvalid] reports every
-// error that wraps paths.ErrNotFound. A caller that falls back to a
-// default tests the error of At, not of a later decode, as
-// [Node.DecodeIfPresent] does.
+// the syntax error [Node.Err] returns. The Scoped Nodes section describes
+// where a not-found error binds, and why only the error of At tells that
+// a value is absent.
 func (n *Node) At(path paths.Path) (*Node, error) {
 	if n.doc.err != nil {
 		return nil, n.doc.err
@@ -562,9 +551,10 @@ func (n *Node) Preamble() token.Tokens {
 // spelled its path. Returns an empty string when the source has none.
 //
 // The document [NewSourceFromLayers] builds came from no file, and its
-// Source has the path of the lowest layer. Every Node of it returns that path, whichever
-// layer holds its value. [Node.Origin] returns the Node of the value in
-// the file of its layer, and FilePath of that Node names the file.
+// Source has the path of the lowest layer. Every Node of it returns that
+// path, whichever layer holds its value. [Node.Origin] returns the Node
+// of the value in the file of its layer, and FilePath of that Node names
+// the file.
 func (n *Node) FilePath() string {
 	return n.source.FilePath()
 }
@@ -573,8 +563,7 @@ func (n *Node) FilePath() string {
 // names a file in, which is [Source.FS]. It returns nil when the source
 // has none, where a path names a file on disk. A Node of the document
 // [NewSourceFromLayers] builds returns the file system of the lowest
-// layer, as
-// [Node.FilePath] describes.
+// layer, as [Node.FilePath] describes.
 func (n *Node) FS() fs.FS {
 	return n.source.FS()
 }
@@ -769,32 +758,21 @@ func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 //
 //	return item.Bind(check(value))
 //
-// The message carries each path from the root, as a `$` path, behind the
-// position the path resolved to. The Node puts its [Node.Path] in front
-// of each `@` path, as [Rebase] does, in a join, a summary from
-// [NewSummary], and the details from [WithDetails] alike. A Node from
-// [Node.At] or [Node.Nodes] binds a problem with no location at its own
-// value. The root of a document gives such a problem no location, and
-// neither does any Node for the error of a context that ended. The
-// message of an error with no location names the source, and the
-// document in a source of several, as in "name: document 3: msg". An
-// Error with a position or a range binds there, and Bind leaves its path
-// unresolved. A location declares nothing, so [IsInvalid] reports the
-// bound error only when it reports err.
-//
 // Bind binds the whole tree of err, each problem and detail at its own
-// location, as the Architecture section of the package documentation
-// describes. To keep several errors as separate bindings, bind each one
-// before joining them.
+// location, as the Errors section of the package documentation
+// describes, and a Node from [Node.At] or [Node.Nodes] binds a problem
+// with no location at its own value, as the Scoped Nodes section
+// describes. The message of an error with no location names the source,
+// and the document in a source of several, as in
+// "name: document 3: msg". To keep several errors as separate bindings,
+// bind each one before joining them.
 //
 // Bind returns nil for a nil err, and for a nil [*Error] or
-// [*SourceError] pointer. An error that wraps a [*SourceError], with no
-// [*Error] above it that carries a location, heads errors, or holds
-// details, is bound already and comes back as it is, so Bind is
-// idempotent. Bind never modifies err, and binds the error [BindValue]
-// returns as one no source has bound. In a document that did not parse,
-// a path resolves nowhere, and [SourceError.Unresolved] returns
-// [ErrPathNeedsDocument] wrapping the syntax error.
+// [*SourceError] pointer. An error bound already, as the Errors section
+// defines it, comes back as it is, so Bind is idempotent. Bind never
+// modifies err. In a document that did not parse, a path resolves
+// nowhere, and [SourceError.Unresolved] returns [ErrPathNeedsDocument]
+// wrapping the syntax error.
 func (n *Node) Bind(err error) error {
 	return bindTree(err, binder{src: n.source, node: n, locate: true})
 }

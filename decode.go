@@ -185,23 +185,21 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 //		return nil
 //	})
 //
-// The function gets the context of the decode and a decode function. The
-// decode function decodes the value with the options of the decode that
-// called fn, reads an alias as the content of its anchor, and runs no
-// [Validator]. It returns an error for a pointer to T, which would call
-// fn again, so a function that decodes T by its fields decodes into a
-// second type with those fields, such as `type fields T`. A function that
-// needs the YAML text of the value decodes into a [yaml.RawMessage].
+// The function gets the context of the decode and a decode function,
+// which decodes the value with the options of the decode, reads an alias
+// as the content of its anchor, and runs no [Validator]. It returns an
+// error for a pointer to T, which would call fn again, so a function that
+// decodes T by its fields decodes into a second type with those fields,
+// such as `type fields T`. A function that needs the YAML text of the
+// value decodes into a [yaml.RawMessage].
 //
-// The decode binds an error fn returns at the value, and an `@` path in
-// an [*Error] from fn reads from the value. A rejection from the decode
+// The decode reads T as a type that decodes itself, so an error fn
+// returns binds at the value, as the Decoding and Validation sections of
+// the package documentation describe. A rejection from the decode
 // function already names its place in the document, so fn returns it as
-// it is. The decode reads T as a type that decodes itself, as the
-// Decoding and Validation sections of the package documentation describe.
-//
-// A later option for the same T replaces an earlier one, and a nil fn or
-// a pointer type T adds nothing. Give the function here rather than to
-// [yaml.RegisterCustomUnmarshaler], whose types a decode cannot see.
+// it is. A later option for the same T replaces an earlier one, and a nil
+// fn or a pointer type T adds nothing. Give the function here rather than
+// to [yaml.RegisterCustomUnmarshaler], whose types a decode cannot see.
 func WithCustomUnmarshaler[T any](fn func(ctx context.Context, v *T, decode func(any) error) error) DecodeOption {
 	return func(c *decodeConfig) {
 		t := reflect.TypeFor[T]()
@@ -266,12 +264,12 @@ func (e shieldedError) As(target any) bool {
 // calls an UnmarshalYAML method of the type in place of UnmarshalJSON,
 // and an UnmarshalText method for a node that reads as a string.
 //
-// The decode then reads such a type as one that decodes itself. The
-// values below a value of the type thus validate as [SelfValidator]
-// describes, and the error its method returns binds at the value, as
-// [Node.DecodeInto] describes. A struct that gets the method from an
-// embedded field decodes the document into that field, so the field
-// validates at the path of the struct.
+// The decode then reads such a type as one that decodes itself, so the
+// error its method returns binds at the value, and the values below it
+// validate, as the Decoding and Validation sections of the package
+// documentation describe. A struct that gets the method from an embedded
+// field decodes the document into that field, so the field validates at
+// the path of the struct.
 func WithJSONUnmarshalers(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.unmarshalers.JSON = enabled
@@ -335,39 +333,24 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // document. A program that decodes many nodes with the same options
 // states them once with [DecodeOptions].
 //
-// The steps run in the order the Decoding section of the package
-// documentation lists, and the first that fails ends the decode. A v that
-// is not a non-nil pointer returns an error wrapping [ErrDecodeTarget],
-// bound to the source, before anything runs. A document that did not
-// parse then returns the syntax error [Node.Err] returns. Each [Validator]
-// from [WithValidator] runs next, in the order given. When the node holds
-// an alias, the decode counts what a decode of the whole document reads,
-// with each alias reading its content in full, and returns an error
-// matching [ErrExcessiveAliasing] when aliases make up too much of it.
-// The go-yaml decoder then fills v, and once it accepts the node, every
-// value in v that implements [SelfValidator] validates itself, unless
-// [WithSelfValidation] turns that off. A step that fails before the
-// decoder runs leaves v as it is.
-//
-// Fields absent from the document keep their values, so a caller may
-// fill v with defaults first. A mapping merges into a struct field by
-// field at every depth, and the document replaces a slice, an array, a
-// map, or an interface value whole. A node without content, or a null,
-// leaves v as it is, unless v points to a pointer or an interface, which
-// a null with no tag sets to nil. An alias reads the anchor of its name
-// defined last before it in the document, inside the node or outside
-// it, and an alias with no such anchor reads one of a reference document
-// from [WithReferences].
+// The decode runs the steps the Decoding section of the package
+// documentation lists, and the first that fails ends it. A v that is not
+// a non-nil pointer returns an error wrapping [ErrDecodeTarget] before
+// anything runs. When the node holds an alias, the decode counts what a
+// decode of the whole document reads, with each alias reading its
+// content in full, and returns an error matching [ErrExcessiveAliasing]
+// when aliases make up too much of it. A step that fails before the
+// go-yaml decoder runs leaves v as it is. A field the document leaves out
+// keeps its value, so a caller may fill v with defaults first, and the
+// same section describes how a mapping, a null, and an alias fill v.
 //
 // Every error comes back bound to the source as a [SourceError]. An
-// error of the decode itself matches [ErrDecode] and carries the `$`
-// path of the value the decoder rejected. The error of an unmarshaler
-// binds at the value that returned it, and a decode that fails reports
-// every problem it finds in one error. A panic in the decoder or in an
-// unmarshaler comes back as an error that holds a [PanicError], bound at
-// the first token of the node, and does not match ErrDecode. The
-// Decoding section describes the messages, the sentinels of each
-// problem, and where each error binds.
+// error of the decoder matches [ErrDecode] and carries the `$` path of
+// the value it rejected, and a decode that fails reports every problem it
+// finds in one error. A panic in the decoder or in an unmarshaler comes
+// back as an error that holds a [PanicError] and does not match
+// ErrDecode. The Decoding section describes the messages, the sentinels
+// of each problem, and where each error binds.
 func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
 	return n.decodeInto(ctx, v, newDecodeConfig(opts), nil)
 }
@@ -1066,8 +1049,11 @@ type decodeProblem struct {
 }
 
 // problemCollector finds the problems of a decode beside the one rejection
-// the go-yaml decoder returned. It decodes each leaf of the walk alone, so
-// the pass decodes no value twice however deep it lies.
+// the go-yaml decoder returned. It decodes each leaf of the walk alone and
+// never inside the mapping or sequence that holds it, so a leaf costs the
+// pass the same however deep it lies. The pass confirms the rejection of
+// a field or an element by decoding it once more, as the one entry of a
+// mapping or the one element of a sequence.
 //
 // Create instances with [newProblemCollector].
 type problemCollector struct {

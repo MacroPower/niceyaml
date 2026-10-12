@@ -76,8 +76,9 @@ var (
 	// rejects matches [ErrSyntax] instead. [ErrUnknownField],
 	// [ErrWrongKind], and [ErrOverflow] label some of the rejections, and a
 	// problem with a label matches ErrDecode too. The document is at fault
-	// for each problem that matches, as [IsInvalid] describes, and
-	// [Node.DecodeInto] describes where each error binds.
+	// for each problem that matches, as [IsInvalid] describes, and the
+	// Decoding section of the package documentation describes where each
+	// error binds.
 	//
 	// [errors.Is] reports whether any problem of an error matches
 	// ErrDecode, so an error that matches can hold a problem of another
@@ -120,10 +121,10 @@ var (
 
 	// ErrWrongKind indicates a value of a kind its target does not take,
 	// such as a string for an integer or a sequence for a mapping. The
-	// problem reads "expected integer, got string", with the kinds
-	// [Node.DecodeInto] lists. A value the decoder rejects for its Go type
-	// alone matches too, and reads "expected mapping, got mapping of
-	// another type".
+	// problem reads "expected integer, got string", with the kinds the
+	// Decoding section of the package documentation lists. A value the
+	// decoder rejects for its Go type alone matches too, and reads
+	// "expected mapping, got mapping of another type".
 	//
 	// ErrWrongKind is a label on a problem that matches [ErrDecode], as
 	// [ErrUnknownField] describes. A number outside the range of its
@@ -213,7 +214,7 @@ var (
 	// position, so none points at the line of another entry.
 	// [SourceError.Unresolved] reports it. An error below a slice, an
 	// array, or a map that decodes itself binds at that value instead, as
-	// SelfValidator describes for every error there.
+	// the Validation section of the package documentation describes.
 	ErrAmbiguousPath = errors.New("path names the entries of several keys")
 
 	// The reason of a [SourceError] whose error carries no location at
@@ -233,8 +234,8 @@ var (
 		return NewSourceFromString("")
 	})
 
-	// The targets the error [panicked] returns matches for none of the
-	// [*PanicError] it holds.
+	// The targets an error from [panicked] never matches, even when the
+	// [*PanicError] it holds does.
 	panicRefused = []error{ErrDecode, ErrUnknownField, ErrWrongKind, ErrOverflow, ErrSyntax, errInvalid}
 )
 
@@ -284,8 +285,8 @@ type move struct {
 	// Rebase leaves such a path as it is.
 	reroots bool
 	// The base names the entries of several keys of a decoded map, so it
-	// resolves in no document, for the reason ErrAmbiguousPath. It holds
-	// for every error below.
+	// resolves in no document, and [SourceError.Unresolved] reports
+	// ErrAmbiguousPath for every error below.
 	ambiguous bool
 }
 
@@ -445,26 +446,17 @@ func (e *Error) Is(target error) bool {
 // of err, the question a caller asks to pick a status code, an exit code,
 // or whether to retry. The problems are the nodes [ErrorTree.Problems]
 // yields for err, so IsInvalid(err) and NewErrorTree(err).IsInvalid()
-// agree. A nil err is not invalid, and neither is an error with no
-// problem, such as one with an empty message.
+// agree. One problem that is no fault makes IsInvalid report false for
+// the whole error, and a heading or a detail decides nothing. IsInvalid
+// reports false for a nil err too, and for an error with no problem,
+// such as one with an empty message.
 //
-// The code that builds an error declares the fault, and a location never
-// decides it. The document is at fault for these problems:
-//
-//   - An [*Error] from [NewError] or [Invalid], and each problem it heads.
-//   - Each problem the parse reports with [ErrSyntax] or a decode reports
-//     with [ErrDecode].
-//   - Every error a [SelfValidator] returns.
-//   - [ErrMultipleDocuments], a value that [Node.At], [Node.Ranges], or
-//     [Node.Nodes] does not find, a schema violation, the ErrNoMatch of a
-//     schema registry, and [ErrExcessiveAliasing] from every reader but
-//     Node.Nodes.
-//
-// Any other error declares nothing, so a wrapper is a fault only when the
-// error it wraps is one. The error of a context that ended and a
-// [PanicError] are never faults. One problem that is no fault makes the
-// whole error not invalid, and a heading or a detail decides nothing. The
-// Errors section of the package documentation describes the cases in full.
+// The code that builds an error declares the fault, as the Errors section
+// of the package documentation describes. Beside the errors that section
+// names, the document is at fault for [ErrMultipleDocuments], a value
+// that [Node.At] or [Node.Ranges] does not find, a schema violation, the
+// ErrNoMatch of a schema registry, and [ErrExcessiveAliasing] from every
+// reader but [Node.Nodes].
 //
 // A server asks IsInvalid before it tests for a sentinel, since
 // [errors.Is] reports whether any problem matches:
@@ -962,12 +954,11 @@ func (e *Error) location() locus {
 // Path returns the [paths.Path] the [Error] is about and true, or the
 // zero Path and false when the Error carries none. The location is the
 // one [AtPath] set on the Error itself or on the nearest located Error
-// along its cause chain. An Error built with [Invalid] around a
-// located Error thus reports that location, with the base of every
-// [Rebase] on the way joined in front. A [*SourceError] along the chain
-// ends the walk, and the Error reports the path [SourceError.Path]
-// reports for that binding, with no base from a Rebase above the binding
-// in front.
+// along its cause chain. An Error built with [Invalid] around a located
+// Error thus reports that location, with the base of every [Rebase] on
+// the way joined in front. A [*SourceError] along the chain ends the
+// walk, and the Error reports the path [SourceError.Path] reports for
+// that binding, with no base from a Rebase above the binding in front.
 // An Error that carries a position or a range beside the path reports
 // both. A nil Error has none.
 func (e *Error) Path() (paths.Path, bool) {
@@ -2195,11 +2186,12 @@ func (e *SourceError) Message() string {
 // [Node.Path] of the Node that bound it in front of an `@` path, so it
 // starts at `$`. An error written as `@.price` and bound through the Node
 // at `$.items[1]` reports `$.items[1].price`. A rejection of the go-yaml
-// decoder reports the path where the document writes the value, as
-// [Node.DecodeInto] describes, which can lie outside the scope of the
-// Node. An error that binds at a range or a position beside its path
-// reports that path, resolved or not. A binding that wraps another
-// reports the path of the one it wraps, and a nil SourceError has none.
+// decoder reports the path where the document writes the value, which
+// can lie outside the scope of the Node, as the Decoding and Scoped Nodes
+// sections of the package documentation describe. An error that binds at
+// a range or a position beside its path reports that path, resolved or
+// not. A binding that wraps another reports the path of the one it
+// wraps, and a nil SourceError has none.
 func (e *SourceError) Path() (paths.Path, bool) {
 	if e == nil {
 		return paths.Path{}, false
@@ -3174,9 +3166,10 @@ func (e *PanicError) Unwrap() error {
 	return nil
 }
 
-// panicked returns p, a panic in the code that in names, sealed with marks
-// on top, as "decoder panicked: boom". The seal keeps a panic value, even
-// an [*Error], from adding a location, a problem, or a fault.
+// panicked returns p sealed with marks on top, with a message that
+// starts with in, the name of the code that panicked, as "decoder
+// panicked: boom". The seal keeps a panic value, even an [*Error], from
+// adding a location, a problem, or a fault.
 func panicked(in string, p *PanicError, marks ...error) *markedError {
 	return &markedError{
 		err:     p,
@@ -3206,7 +3199,7 @@ type markedError struct {
 	msg string
 	// The errors the error matches on top of what err matches.
 	marks []error
-	// The errors a sealed error matches for none of err.
+	// The targets the Is method never matches through err.
 	refused []error
 	// The error unwraps to nothing.
 	sealed bool

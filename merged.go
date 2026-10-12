@@ -332,8 +332,8 @@ func mergeLayers(ctx context.Context, given []Layer) (*Source, error) {
 	lowest := layers[0]
 	text := layermerge.Text(preambleText(lowest.node), root)
 
-	// An error with no location binds in the lowest layer, as
-	// NewSourceFromLayers describes.
+	// An error with no location binds in the lowest layer, as the Layers
+	// section of the package documentation describes.
 	err := ctx.Err()
 	if err != nil {
 		return nil, lowest.node.bindOwn(err)

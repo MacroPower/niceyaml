@@ -266,21 +266,12 @@ func WithAliasLimit(enabled bool) SourceOption {
 //
 //	source, err := niceyaml.NewSourceFromFile("app.yaml", niceyaml.WithReferences(defaults))
 //
-// An alias reads an anchor of refs only when no anchor of its name comes
-// before it in its own document, and an anchor of a later document of
-// refs overrides one of the same name in an earlier one. A Source in
-// refs brings its own references, ahead of its own documents, and none
-// of its other settings. WithReferences skips a nil Source, and a
-// reference document that does not parse fails every decode of the
-// Source.
-//
-// A path stops at an alias to a reference document. [Node.At] and
-// [Node.Nodes] return an error wrapping
-// [go.jacobcolvin.com/niceyaml/paths.ErrAlias] for a path that reaches
-// such an alias, and [Node.Ranges] returns one for a path that goes
-// through it. An error about a value of refs binds at the alias. The
-// References section of the package documentation describes these rules
-// in full.
+// The order of refs decides the anchor that wins a name two of them
+// define. WithReferences skips a nil Source, and a reference document
+// that does not parse fails every decode of the Source. The References
+// section of the package documentation describes how an alias finds its
+// anchor, what a reference Source brings, and how a path and an error
+// treat an alias to a reference document.
 func WithReferences(refs ...*Source) SourceOption {
 	return func(c *sourceConfig) {
 		for _, ref := range refs {
@@ -506,11 +497,8 @@ func (s *Source) tokenText() []byte {
 
 // Name returns the name of the [Source]: the one [WithName] set, the
 // path [NewSourceFromFile] read as its caller gave it, or else the file
-// path. Returns an empty string when the Source has none of them.
-//
-// A nil Source has no name and no file path. [SourceError.Source] returns
-// nil for an error bound to no Source, so a report can print the name of
-// the Source of any bound error without a nil check.
+// path. Returns an empty string when the Source has none of them, and for
+// a nil Source.
 func (s *Source) Name() string {
 	if s == nil {
 		return ""
@@ -536,8 +524,8 @@ func (s *Source) label() string {
 // [WithFilePath] set, as given. A message or a report names the file
 // with [Source.Name], which spells it as the caller did.
 //
-// Returns an empty string when none of the three set it. A nil Source
-// has no file path, as [Source.Name] describes.
+// Returns an empty string when none of the three set it, and for a nil
+// Source.
 func (s *Source) FilePath() string {
 	if s == nil {
 		return ""
@@ -909,9 +897,10 @@ func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, er
 	return v, nil
 }
 
-// single returns the one document [Source.Documents] returns, or an
-// unbound error for a syntax error or more than one document. Every Source
-// holds at least one document, so docs[0] always exists.
+// single returns the one document [Source.Documents] returns. For a
+// syntax error it returns the error [Source.File] returns, which the parse
+// bound already, and for more than one document an unbound error. Every
+// Source holds at least one document, so docs[0] always exists.
 func (s *Source) single() (*Node, error) {
 	_, err := s.File()
 	if err != nil {

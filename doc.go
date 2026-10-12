@@ -115,8 +115,8 @@
 // Each document parses on its own, so a YAML syntax error fails the
 // document that holds it and no other. The [Node] of a document that did
 // not parse keeps its place among the documents of the file. [Node.Err]
-// returns its syntax error, and so does each method that reads its tree,
-// such as [Node.Decode] and [Node.Validate]. [Node.AST] returns nil for
+// returns its syntax error, and so do the methods Node.Err lists, such
+// as [Node.Decode] and [Node.Validate]. [Node.AST] returns nil for
 // it, and [Node.View] renders its lines as it renders those of any
 // document. A "---" header that directly follows an anchor with no value
 // parses together with the document above it, so a syntax error in
@@ -203,16 +203,16 @@
 // [IsInvalid] reports whether the document is at fault for every problem
 // of an error, which picks a status code or an exit code, and
 // [ErrorTree.IsInvalid] asks the same of one row of a report. One problem
-// that is no fault makes the whole error not invalid, and a heading or a
-// detail decides nothing. A wrapper that [fmt.Errorf] builds with several
-// %w verbs is one problem, so an I/O error wrapped beside violations goes
-// uncounted where a join of the two counts it. A decode cannot tell the
-// I/O of an UnmarshalYAML or UnmarshalText method from its check of the
-// value, so an error such a method returns is a fault. A caller that must
-// tell them apart checks for its own errors first. A [PanicError] is
-// a bug in code. A document can still trip one in go-yaml, so a public
-// endpoint that answers such a document with a 4xx status tests for the
-// PanicError before it asks IsInvalid.
+// that is no fault makes IsInvalid report false for the whole error, and
+// a heading or a detail decides nothing. A wrapper that [fmt.Errorf]
+// builds with several %w verbs is one problem, so an I/O error wrapped
+// beside violations goes uncounted where a join of the two counts it. A
+// decode cannot tell the I/O of an UnmarshalYAML or UnmarshalText method
+// from its check of the value, so an error such a method returns is a
+// fault. A caller that must tell them apart checks for its own errors
+// first. A [PanicError] is a bug in code. A document can still trip one
+// in go-yaml, so a public endpoint that answers such a document with a
+// 4xx status tests for the PanicError before it asks IsInvalid.
 //
 // A check run on a value inside a document reports `@` paths that read
 // from that value. [Rebase] puts the path of the value in front of each
@@ -409,7 +409,8 @@
 // of the source. Such a value has an unmarshaler method the decoder calls, a
 // function from [WithCustomUnmarshaler], or the type [time.Duration]. The
 // decode decodes each such value again, in the order the decoder reads them,
-// and binds the error at the first that fails the same way:
+// and binds the error at the first that fails the same way, or at the
+// deepest value inside it that also fails that way:
 //
 //	config.yaml:7:14: $.servers[1].timeout: time: invalid duration "soon"
 //
@@ -446,7 +447,8 @@
 // as [Node.Bind] binds an error, and leaves an error the validator bound
 // itself as it is. A validator that runs another on a Node of its choosing,
 // such as each element of a list, calls Validate on that Node, so the error
-// binds there. A call to Check returns the error unbound.
+// binds there. A direct call of [Validator.Check] returns the error
+// unbound.
 //
 // A validator that checks the decoded data reads the node with
 // [Node.Decode], which runs only the validators that call passes. A decode
@@ -547,10 +549,10 @@
 // its `@` paths read from the node. A scoped Node binds a problem with no
 // location at its value, as an error with [AtPath] of [paths.Current] binds.
 // A summary or a join only heads its problems, and each binds on its own,
-// while a detail gains no location. The root of a document gives a problem
-// with no location none, since such an error can be about the whole
-// document. A location declares nothing, so [IsInvalid] reports a bound
-// error only when it reports the error the Node bound.
+// while a detail gains no location. The root of a document leaves a
+// problem with no location without one, since such an error can be about
+// the whole document. A location declares nothing, so [IsInvalid] reports
+// a bound error only when it reports the error the Node bound.
 //
 // [Node.Document] returns the root of the document. A validator that can
 // check only a whole document, as a
@@ -772,8 +774,8 @@
 // that holds the value, so every error and every origin belongs to a
 // document that no merge built.
 //
-// The decode fills the Go value from the merged document by the rule of
-// [Node.DecodeInto], so a default the value holds survives where the
+// The decode fills the Go value from the merged document as the Decoding
+// section describes, so a default the value holds survives where the
 // layers leave a field out or remove it. Defaults that should merge key
 // by key go in a layer of their own, such as an embedded file below the
 // others.

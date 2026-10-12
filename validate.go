@@ -27,12 +27,10 @@ import (
 // [SelfValidator], and binds what they report as [Node.Bind] binds an
 // error, with each `@` path under the path of its value in the node. It
 // returns nil when nothing failed. It runs the walk whatever
-// [WithSelfValidation] says, and runs no [Validator].
-//
-// A program whose library writes its environment or its flags into the
-// value decodes with the walk off, sets the rest of the value, and then
-// validates it, as the Validation section of the package documentation
-// describes:
+// [WithSelfValidation] says, and runs no [Validator]. A program that
+// fills v after the decode, such as from its environment, calls
+// SelfValidate once v is whole, as the Validation section of the package
+// documentation describes:
 //
 //	if err := doc.DecodeInto(ctx, &cfg, settings, niceyaml.WithSelfValidation(false)); err != nil {
 //		return err
@@ -51,17 +49,13 @@ import (
 // [WithYAMLOrderedMaps]. It reads no other option, so a caller passes the
 // options of the decode.
 //
-// The walk follows v, which need not mirror the node, and each error
-// binds where its path resolves in the document, so an error under a
-// value the caller changed marks what the document holds at that path.
 // In a document that did not parse, every error binds with no position,
 // and SelfValidate returns those errors rather than the syntax error
-// [Node.Err] returns.
-//
-// Any v but nil and a nil pointer works, and those return an error
-// wrapping [ErrSelfValidateTarget], bound to the source. A v that is no
-// pointer validates as a copy. The walk stops once ctx ends, as the
-// Cancellation section of the package documentation describes.
+// [Node.Err] returns. Any v but nil and a nil pointer works, and those
+// return an error wrapping [ErrSelfValidateTarget], bound to the source.
+// A v that is no pointer validates as a copy. The walk stops once ctx
+// ends, as the Cancellation section of the package documentation
+// describes.
 func (n *Node) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
 	return n.selfValidate(ctx, v, newDecodeConfig(opts))
 }
@@ -1258,17 +1252,10 @@ func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token
 // SelfValidator is a type that validates itself after a decode.
 // [Node.Decode] and [Node.DecodeInto] call Validate on every value in the
 // result that implements it, through a value or a pointer receiver,
-// unless [WithSelfValidation] turns that off. The values below a value
-// validate first, and the value validates only when every one of them
-// passed, so a parent that checks a relation between its fields sees
-// fields that hold together. A field that go-yaml never decodes, such as
-// one tagged `yaml:"-"` or an unexported one, does not validate.
-//
-// Validate reports a problem as an [*Error] with an `@` path, which reads
-// from the value, and the decode puts that path under the path of the
-// value in the document. A `$` path stays as it is, and a problem with no
-// location points at the value. A type thus checks its invariants once
-// and reports the right lines in any document:
+// unless [WithSelfValidation] turns that off. Validate reports a problem
+// as an [*Error] with an `@` path, which reads from the value, so a type
+// checks its invariants once and reports the right lines in any
+// document:
 //
 //	func (h Hours) Validate() error {
 //		if h.Close.Before(h.Open) {
@@ -1278,18 +1265,11 @@ func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token
 //		return nil
 //	}
 //
-// An error below a value that decodes itself, whose path the document
-// does not hold, binds at that value, and every error below a slice, an
-// array, or a map that decodes itself binds at it. The Validation section
-// of the package documentation describes how the decode names each value
-// and how a check of map entries belongs in the type of the entry.
-//
 // The document is at fault for every error a Validate returns, an I/O
-// error included, so [IsInvalid] reports it. A check that can fail for
-// reasons outside the document belongs in a [Validator] or in the caller.
-// A Validate that returns the error of a context that ended stops the
-// walk, as the Cancellation section of the package documentation
-// describes.
+// error included, so a check that can fail for reasons outside the
+// document belongs in a [Validator] or in the caller. The Validation
+// section of the package documentation describes the order the values
+// validate in, the path of each value, and where each error binds.
 type SelfValidator interface {
 	Validate() error
 }
@@ -1306,26 +1286,14 @@ type SelfValidator interface {
 //
 // Check gets the Node that runs it, which is the root of a document or a
 // Node from [Node.At], and returns its errors as it wrote them from that
-// Node. An [*Error] writes an `@` path that reads from the Node, and an
-// error about a key the document lacks carries the path of the key.
-// Node.Validate and a decode bind what Check returns as [Node.Bind] binds
-// an error, and leave an error the validator bound itself as it is. The
-// validators of this module return their errors unbound, apart from
-// schema.Registry, which binds every error it returns.
-//
-// A validator declares which of its errors are the fault of the document.
-// An error from [NewError] or [Invalid] says what is wrong with the
-// document, and [IsInvalid] reports it. Any other error says the check
-// could not run, and [Place] shows such an error at a value without
-// declaring a fault.
-//
-// A validator that checks decoded data reads the Node with [Node.Decode],
-// which runs the validators that call passes and no other, and takes
-// each location from [Node.DataLocator]. A decode passes none of its
-// options to the validators it runs. A validator that needs the whole
-// document reaches it through [Node.Document], and one that can check
-// only a whole document refuses a scoped Node. The Validation section of
-// the package documentation describes these patterns.
+// Node, with `@` paths that read from the Node. An error about a key the
+// document lacks carries the path of the key. Node.Validate and a decode
+// bind what Check returns as [Node.Bind] binds an error. The validators
+// of this module return their errors unbound, apart from schema.Registry,
+// which binds every error it returns. A validator that needs the whole
+// document reaches it through [Node.Document]. The Validation section of
+// the package documentation describes how a validator declares a fault
+// and how one checks decoded data.
 //
 // A decode and Node.Validate return the syntax error of a document that
 // did not parse before any validator runs. A caller that calls Check
