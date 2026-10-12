@@ -929,25 +929,6 @@ func (s *Source) single() (*Node, error) {
 	return docs[0], nil
 }
 
-// anchorToken returns the token that locates the document, which is its
-// header, or else the first token of its content past the preamble. It is
-// nil when the document has neither.
-func (d *document) anchorToken() *token.Token {
-	if d.root.Start != nil {
-		return d.root.Start
-	}
-
-	if d.preamble < len(d.tokens) {
-		return d.tokens[d.preamble]
-	}
-
-	if len(d.tokens) > 0 {
-		return d.tokens[0]
-	}
-
-	return nil
-}
-
 // File returns the [*ast.File] the tokens of the [Source] parse into,
 // with the duplicate keys [WithAllowDuplicateKeys] allows. The first call
 // parses the Source, and every later call returns the same tree or the

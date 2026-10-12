@@ -1135,37 +1135,6 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 	return loc, layer.node, err
 }
 
-// resolveLocation resolves path, which starts at `$`, in the document of
-// n, as [locatePath] describes for the document an error binds in.
-func (n *Node) resolveLocation(path paths.Path) (location, error) {
-	root := n.doc.node
-
-	if root.doc.err != nil {
-		return location{}, fmt.Errorf("%w: %s: %w", ErrPathNeedsDocument, path, root.doc.err)
-	}
-
-	loc, err := root.pathLocation(path)
-	if err != nil {
-		if near, ok := root.nearestLocation(path, err); ok {
-			return near, nil
-		}
-
-		if alias, ok := root.aliasLocation(path, err); ok {
-			return alias, nil
-		}
-
-		return location{}, err
-	}
-
-	return loc, nil
-}
-
-// merges reports whether n is a Node of a [NewSourceFromLayers] document,
-// whose errors bind in the layers. A nil n is none.
-func (n *Node) merges() bool {
-	return n != nil && n.source.layers != nil
-}
-
 // locateMerged resolves the position at in node, a merged document whose
 // text is no file of the caller, so the error binds at the value there in
 // the layer that holds it. With no value there, the path of l locates it.

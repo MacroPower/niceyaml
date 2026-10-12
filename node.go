@@ -1035,3 +1035,53 @@ func (n *Node) IsEmpty() bool {
 
 	return !astnode.HasContent(n.doc.root.Body)
 }
+
+// resolveLocation resolves path, which starts at `$`, in the document of
+// n, as [locatePath] describes for the document an error binds in.
+func (n *Node) resolveLocation(path paths.Path) (location, error) {
+	root := n.doc.node
+
+	if root.doc.err != nil {
+		return location{}, fmt.Errorf("%w: %s: %w", ErrPathNeedsDocument, path, root.doc.err)
+	}
+
+	loc, err := root.pathLocation(path)
+	if err != nil {
+		if near, ok := root.nearestLocation(path, err); ok {
+			return near, nil
+		}
+
+		if alias, ok := root.aliasLocation(path, err); ok {
+			return alias, nil
+		}
+
+		return location{}, err
+	}
+
+	return loc, nil
+}
+
+// merges reports whether n is a Node of a [NewSourceFromLayers] document,
+// whose errors bind in the layers. A nil n is none.
+func (n *Node) merges() bool {
+	return n != nil && n.source.layers != nil
+}
+
+// anchorToken returns the token that locates the document, which is its
+// header, or else the first token of its content past the preamble. It is
+// nil when the document has neither.
+func (d *document) anchorToken() *token.Token {
+	if d.root.Start != nil {
+		return d.root.Start
+	}
+
+	if d.preamble < len(d.tokens) {
+		return d.tokens[d.preamble]
+	}
+
+	if len(d.tokens) > 0 {
+		return d.tokens[0]
+	}
+
+	return nil
+}
