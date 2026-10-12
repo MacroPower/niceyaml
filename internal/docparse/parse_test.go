@@ -49,6 +49,105 @@ func TestParse(t *testing.T) {
 			input: "%YAML 1.2\n# c\n---\na: 1\n",
 			want:  []string{"%YAML 1.2", "---\na: 1"},
 		},
+		"a comment before a ',' of a flow sequence drops": {
+			input: "a: [1\n# c\n, 2]\n",
+			want:  []string{"a: [1, 2]"},
+		},
+		"a comment before the '}' of a flow mapping drops": {
+			input: "{a: 1\n# c\n}\n",
+			want:  []string{"{a: 1}"},
+		},
+		"a comment where a flow mapping expects a key drops": {
+			input: "a: {b: 1,\n# c\n  d: 2}\n",
+			want:  []string{"a: {b: 1, d: 2}"},
+		},
+		"a comment between the entries of a flow sequence stays": {
+			input: "a: [1,\n# c\n  2]\n",
+			want:  []string{"a: [1, 2 # c]"},
+		},
+		"a comment after a '?' drops": {
+			input: "? \n# c\n  a\n: 1\n",
+			want:  []string{"? a: 1"},
+		},
+		"a comment before a ':' drops": {
+			input: "? a\n# c\n: 1\n",
+			want:  []string{"? a: 1"},
+		},
+		"a comment left of the key of an anchor above its value drops": {
+			input: "m:\n  a: &x\n# c\n    1\n",
+			want:  []string{"m:\n  a: &x 1"},
+		},
+		"a comment left of the key of an anchor above its sequence drops": {
+			input: "m:\n  a: &x\n# c\n  - 1\n",
+			want:  []string{"m:\n  a: &x\n  - 1"},
+		},
+		"a comment at the key of an anchor above its value stays": {
+			input: "a: &x\n# c\n  1\n",
+			want:  []string{"a: &x 1 # c"},
+		},
+		"a comment left of the key of an anchor above the next key stays": {
+			input: "m:\n  a: &x\n# c\n  b: 1\n",
+			want:  []string{"m:\n  a: &x\n  # c\n  b: 1"},
+		},
+		"a comment above a key left of the key of an anchor drops": {
+			input: "m:\n  a: &x\n  # c\nb: 1\n",
+			want:  []string{"m:\n  a: &x\nb: 1"},
+		},
+		"a comment between an anchor and the next key drops": {
+			input: "a: &x\n# c\nb: 1\n",
+			want:  []string{"a: &x\nb: 1"},
+		},
+		"a comment on the line of an anchor stays as the one below drops": {
+			input: "a: &x # c\n# d\nb: 1\n",
+			want:  []string{"a: &x # c\nb: 1"},
+		},
+		"a comment between an anchor in an entry and the next key drops": {
+			input: "- a: &x\n  # c\n  b: 1\n",
+			want:  []string{"- a: &x\n  b: 1"},
+		},
+		"a comment between an anchor and the next '?' key drops": {
+			input: "a: &x\n# c\n? b\n: 1\n",
+			want:  []string{"a: &x\n? b: 1"},
+		},
+		"a comment above a flow value at the key of an anchor stays": {
+			input: "a: &x\n# c\n[1]\n",
+			want:  []string{"a: &x [1] # c"},
+		},
+		"a comment above a scalar at the key of an anchor stays": {
+			input: "a: &x\n# c\nb\n",
+			want:  []string{"a: &x b # c"},
+		},
+		"a comment between an anchor and the next '-' drops": {
+			input: "- &x\n# c\n- 1\n",
+			want:  []string{"- &x\n- 1"},
+		},
+		"a comment above a scalar at the '-' of an anchor stays": {
+			input: "- &x\n# c\na\n",
+			want:  []string{"- &x a # c"},
+		},
+		"a comment below a '&' with no name stays, and the run fails": {
+			input:    "a: &\n# c\nb: 1\n",
+			want:     []string{""},
+			failures: 1,
+		},
+		"a comment below an anchor at the root stays": {
+			input: "&x\n# c\na: 1\n",
+			want:  []string{"&x\n# c\na: 1"},
+		},
+		"a comment below an anchor after a tag stays": {
+			input: "a: !t &x\n# c\n  b\n",
+			want:  []string{"a: !t &x b # c"},
+		},
+		"a comment left of the root that closes the document of an anchor drops": {
+			input: "  a: &x\n# c\n---\nb: 1\n",
+			want:  []string{"  a: &x", "---\nb: 1"},
+		},
+		// The parser rejects the anchor without the comment, which it takes
+		// as the value of the anchor.
+		"a comment left of the root below an anchor on a line of its own stays": {
+			input: "  a:\n    &x\n# c\n---\nb: 1\n",
+			want:  []string{"  a: &x", "---\nb: 1"},
+		},
 	}
 
 	for name, tc := range tcs {

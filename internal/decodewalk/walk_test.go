@@ -243,6 +243,88 @@ func TestWalk(t *testing.T) {
 			typ:   reflect.TypeFor[pair](),
 			want:  []string{"root @ decodewalk_test.pair fields"},
 		},
+		"no field of a mapping with a key under an !!int tag": {
+			input: "!!int a: 1\nb: 2\n",
+			typ:   reflect.TypeFor[pair](),
+			want:  []string{"root @ decodewalk_test.pair fields"},
+		},
+		"the fields of a mapping with a key under a !!str tag": {
+			input: "!!str a: 1\nb: 2\n",
+			typ:   reflect.TypeFor[pair](),
+			want: []string{
+				"root @ decodewalk_test.pair fields",
+				"field @.a int whole",
+				"field @.b int whole",
+			},
+		},
+		"the fields of a mapping with a key under another tag": {
+			input: "!t x: 1\na: 2\n",
+			typ:   reflect.TypeFor[pair](),
+			want: []string{
+				"root @ decodewalk_test.pair fields",
+				"field @.a int whole",
+			},
+		},
+		"the fields of a mapping with a key under a !!int tag a directive renames": {
+			input: "%TAG !! tag:example.com,2000:\n---\n!!int a: 1\nb: 2\n",
+			typ:   reflect.TypeFor[pair](),
+			want: []string{
+				"root @ decodewalk_test.pair fields",
+				"field @.a int whole",
+				"field @.b int whole",
+			},
+		},
+		"no field of a mapping with a key of a tag alone": {
+			input: "? !t\n: 1\na: 2\n",
+			typ:   reflect.TypeFor[pair](),
+			want:  []string{"root @ decodewalk_test.pair fields"},
+		},
+		"the fields of a mapping with explicit, anchored, and literal keys": {
+			input: "? |\n  x\n: 1\n&k a: 2\n? b\n: 3\n",
+			typ:   reflect.TypeFor[pair](),
+			want: []string{
+				"root @ decodewalk_test.pair fields",
+				"field @.a int whole",
+				"field @.b int whole",
+			},
+		},
+		"the fields of a mapping with an alias to a string key": {
+			input: "x: &k a\nv: {*k : 1, b: 2}\n",
+			typ:   reflect.TypeFor[pairHolder](),
+			want: []string{
+				"root @ decodewalk_test.pairHolder fields",
+				"field @.v decodewalk_test.pair fields",
+				"field @.v.a int whole",
+				"field @.v.b int whole",
+			},
+		},
+		"no field of a mapping with an alias to an integer key": {
+			input: "n: &n 1\nv: {*n : 2, a: 3}\n",
+			typ:   reflect.TypeFor[pairHolder](),
+			want: []string{
+				"root @ decodewalk_test.pairHolder fields",
+				"field @.v decodewalk_test.pair fields",
+			},
+		},
+		// The decoder rejects the alias before it reads the kind of its key.
+		"the fields of a mapping with an alias that does not resolve": {
+			input: "v: {*missing : 1, a: 2}\n",
+			typ:   reflect.TypeFor[pairHolder](),
+			want: []string{
+				"root @ decodewalk_test.pairHolder fields",
+				"field @.v decodewalk_test.pair fields",
+				"field @.v.a int whole",
+			},
+		},
+		"no merged entry from a source with a key of another kind": {
+			input: "base: &base {1: x, b: 2}\nv: {<<: *base, a: 1}\n",
+			typ:   reflect.TypeFor[pairHolder](),
+			want: []string{
+				"root @ decodewalk_test.pairHolder fields",
+				"field @.v decodewalk_test.pair fields",
+				"field @.v.a int whole",
+			},
+		},
 		"no field of a mapping with a refused merge": {
 			input: "s: &s 1\nv: {a: 1, <<: *s}\n",
 			typ:   reflect.TypeFor[pairHolder](),

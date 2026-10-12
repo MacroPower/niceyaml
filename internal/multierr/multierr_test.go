@@ -3,6 +3,7 @@ package multierr_test
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,21 +21,87 @@ type listError struct {
 func (e *listError) Error() string   { return e.msg }
 func (e *listError) Unwrap() []error { return e.errs }
 
+// asError holds several errors, and its As method sets a target of type
+// [matchError], which it holds nowhere.
+type asError struct {
+	listError
+}
+
+func (*asError) As(target any) bool {
+	m, ok := target.(*matchError)
+	if ok {
+		*m = matchError{}
+	}
+
+	return ok
+}
+
+// matchError matches errA for errors.Is, and wraps nothing.
+type matchError struct{}
+
+func (matchError) Error() string        { return "match" }
+func (matchError) Is(target error) bool { return target == errA }
+
 var (
 	errA = errors.New("a")
 	errB = errors.New("b")
 	errC = errors.New("c")
 )
 
+// requireAs requires errors.As to find an error of the type of want in
+// err, and to set the target to want itself.
+func requireAs(tb testing.TB, err, want error) {
+	tb.Helper()
+
+	target := reflect.New(reflect.TypeOf(want))
+	require.ErrorAs(tb, err, target.Interface())
+	assert.True(tb, target.Elem().Equal(reflect.ValueOf(want)), "errors.As set %v", target.Elem())
+}
+
 func TestJoin(t *testing.T) {
 	t.Parallel()
 
-	require.NoError(t, multierr.Join(nil))
-	assert.Same(t, errA, multierr.Join([]error{errA}))
+	tcs := map[string]struct {
+		errs []error
+		// The message of the error Join returns, which is nil when want is
+		// empty.
+		want string
+		// Whether Join returns the first error itself.
+		same bool
+		join bool
+	}{
+		"no errors": {},
+		"one error": {
+			errs: []error{errA},
+			want: "a",
+			same: true,
+		},
+		"several errors": {
+			errs: []error{errA, errB},
+			want: "a\nb",
+			join: true,
+		},
+	}
 
-	joined := multierr.Join([]error{errA, errB})
-	assert.True(t, multierr.IsJoin(joined))
-	assert.EqualError(t, joined, "a\nb")
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := multierr.Join(tc.errs)
+			if tc.want == "" {
+				require.NoError(t, got)
+
+				return
+			}
+
+			require.EqualError(t, got, tc.want)
+			assert.Equal(t, tc.join, multierr.IsJoin(got))
+
+			if tc.same {
+				assert.Same(t, tc.errs[0], got)
+			}
+		})
+	}
 }
 
 func TestIsJoin(t *testing.T) {
@@ -122,9 +189,34 @@ func TestJoinMessage(t *testing.T) {
 func TestFirst(t *testing.T) {
 	t.Parallel()
 
-	assert.Same(t, errB, multierr.First([]error{nil, errB, errC}))
-	require.NoError(t, multierr.First([]error{nil}))
-	require.NoError(t, multierr.First(nil))
+	tcs := map[string]struct {
+		want     error
+		branches []error
+	}{
+		"past nil branches": {
+			branches: []error{nil, errB, errC},
+			want:     errB,
+		},
+		"nil branches alone": {
+			branches: []error{nil},
+		},
+		"no branches": {},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := multierr.First(tc.branches)
+			if tc.want == nil {
+				require.NoError(t, got)
+
+				return
+			}
+
+			assert.Same(t, tc.want, got)
+		})
+	}
 }
 
 func TestHoldsFirst(t *testing.T) {
@@ -161,69 +253,134 @@ func TestHoldsFirst(t *testing.T) {
 func TestRejoin(t *testing.T) {
 	t.Parallel()
 
-	t.Run("join", func(t *testing.T) {
-		t.Parallel()
+	list := &listError{msg: "a\nb", errs: []error{errA, errB}}
 
-		got := multierr.Rejoin(errors.Join(errA, errB), []error{errC, errB})
+	tcs := map[string]struct {
+		joined error
+		// The error errors.As finds in the result for a target of its
+		// type, or nil.
+		as       error
+		branches []error
+		// The errors the result matches for errors.Is, and those it does
+		// not.
+		is, isNot []error
+		want      string
+		join      bool
+	}{
+		"join": {
+			joined:   errors.Join(errA, errB),
+			branches: []error{errC, errB},
+			want:     "c\nb",
+			join:     true,
+			is:       []error{errC},
+		},
+		"join of another type": {
+			joined:   list,
+			branches: []error{errC},
+			want:     "c",
+			// The stand-in matches the join itself, not what the join
+			// wraps.
+			is:    []error{errC, list},
+			isNot: []error{errA},
+			as:    list,
+		},
+		"join with an As method": {
+			joined:   &asError{listError{msg: "a\nb", errs: []error{errA, errB}}},
+			branches: []error{errC},
+			want:     "c",
+			is:       []error{errC},
+			// The As method of the join sets the target.
+			as: matchError{},
+		},
+	}
 
-		assert.True(t, multierr.IsJoin(got))
-		require.EqualError(t, got, "c\nb")
-		require.ErrorIs(t, got, errC)
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("join of another type", func(t *testing.T) {
-		t.Parallel()
+			got := multierr.Rejoin(tc.joined, tc.branches)
 
-		joined := &listError{msg: "a\nb", errs: []error{errA, errB}}
+			assert.Equal(t, tc.join, multierr.IsJoin(got))
+			require.EqualError(t, got, tc.want)
 
-		got := multierr.Rejoin(joined, []error{errC})
+			for _, err := range tc.is {
+				require.ErrorIs(t, got, err)
+			}
 
-		assert.False(t, multierr.IsJoin(got))
-		require.EqualError(t, got, "c")
-		require.ErrorIs(t, got, errC)
-		require.ErrorIs(t, got, joined)
+			for _, err := range tc.isNot {
+				require.NotErrorIs(t, got, err)
+			}
 
-		// The stand-in matches the join itself, not what the join wraps.
-		require.NotErrorIs(t, got, errA)
-
-		var list *listError
-
-		require.ErrorAs(t, got, &list)
-		assert.Same(t, joined, list)
-	})
+			if tc.as != nil {
+				requireAs(t, got, tc.as)
+			}
+		})
+	}
 }
-
-// matchError matches errA for errors.Is, and wraps nothing.
-type matchError struct{}
-
-func (matchError) Error() string        { return "match" }
-func (matchError) Is(target error) bool { return target == errA }
 
 func TestReplace(t *testing.T) {
 	t.Parallel()
 
 	wrapper := fmt.Errorf("x: %w", errA)
+	list := &listError{msg: "a\nb", errs: []error{errA, errB}}
 
-	got := multierr.Replace(wrapper, errC, "x: c", []error{errB})
+	tcs := map[string]struct {
+		wrapper error
+		err     error
+		// The error errors.As finds in the result for a target of its
+		// type, or nil.
+		as     error
+		msg    string
+		beside []error
+		// The errors the result matches for errors.Is, and those it does
+		// not.
+		is, isNot []error
+	}{
+		"wrapper": {
+			wrapper: wrapper,
+			err:     errC,
+			msg:     "x: c",
+			beside:  []error{errB},
+			is:      []error{wrapper, errB, errC},
+			// The stand-in matches the wrapper itself, not what it wraps.
+			isNot: []error{errA},
+		},
+		"wrapper with an Is method": {
+			wrapper: matchError{},
+			err:     errC,
+			msg:     "match",
+			is:      []error{errA},
+			as:      matchError{},
+		},
+		"an error beside the wrapper sets the target": {
+			wrapper: wrapper,
+			err:     errC,
+			msg:     "x: c",
+			beside:  []error{list},
+			as:      list,
+		},
+	}
 
-	require.EqualError(t, got, "x: c")
-	assert.Same(t, errC, errors.Unwrap(got))
-	require.ErrorIs(t, got, wrapper)
-	require.ErrorIs(t, got, errB)
-	require.ErrorIs(t, got, errC)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	// The stand-in matches the wrapper itself, not what it wraps.
-	require.NotErrorIs(t, got, errA)
+			got := multierr.Replace(tc.wrapper, tc.err, tc.msg, tc.beside)
 
-	t.Run("wrapper with an Is method", func(t *testing.T) {
-		t.Parallel()
+			require.EqualError(t, got, tc.msg)
+			assert.Same(t, tc.err, errors.Unwrap(got))
 
-		got := multierr.Replace(matchError{}, errC, "match", nil)
+			for _, err := range tc.is {
+				require.ErrorIs(t, got, err)
+			}
 
-		require.ErrorIs(t, got, errA)
+			for _, err := range tc.isNot {
+				require.NotErrorIs(t, got, err)
+			}
 
-		var m matchError
-
-		require.ErrorAs(t, got, &m)
-	})
+			if tc.as != nil {
+				requireAs(t, got, tc.as)
+			}
+		})
+	}
 }
