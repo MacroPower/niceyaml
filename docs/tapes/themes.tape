@@ -60,8 +60,8 @@ Output docs/assets/themes.gif
 Set Shell "bash"
 Set Padding 20
 Set FontSize 22
-Set Width 1420
-Set Height 800
+Set Columns 98
+Set Rows 30
 
 Hide
   Type `go build -o dist/nyaml ./cmd/nyaml`  Enter
