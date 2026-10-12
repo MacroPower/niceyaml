@@ -352,7 +352,6 @@ func ParentAt(r *paths.Resolver, p paths.Path) astnode.Parent {
 func MergeSources(r *paths.Resolver, entry *ast.MappingValueNode) ([]*ast.MappingNode, error) {
 	found, err := r.MergeSources(&ast.MappingNode{Values: []*ast.MappingValueNode{entry}})
 	if err != nil {
-		//nolint:wrapcheck // The resolver names what failed.
 		return nil, err
 	}
 

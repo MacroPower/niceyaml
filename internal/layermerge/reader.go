@@ -91,7 +91,7 @@ func (r *Reader) Read(node ast.Node) (*Value, error) {
 func (r *Reader) value(node ast.Node, ref bool) (*Value, error) {
 	err := r.Ctx.Err()
 	if err != nil {
-		return nil, err //nolint:wrapcheck // The context names the reason, and the caller binds it.
+		return nil, err
 	}
 
 	var v *Value
