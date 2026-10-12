@@ -2702,6 +2702,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.ScrollLeft(m.horizontalStep)
 		case tea.MouseWheelRight:
 			m.ScrollRight(m.horizontalStep)
+
+		default:
+			// A MouseWheelMsg carries only wheel buttons.
 		}
 	}
 
