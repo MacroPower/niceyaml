@@ -14,6 +14,19 @@
     "gomodTidy",
     "gomodUpdateImportPaths",
   ],
+  packageRules: [
+    // This rule stops Renovate from updating the Dagger CLI version that
+    // workflows pass to dagger-for-github. That version moves in lockstep
+    // with the engineVersion in each dagger.json and the dagger/nix commit
+    // in devbox.json, so `task dagger:update` bumps all of them and reruns
+    // `dagger develop`. Renovate still updates the action ref itself.
+    {
+      matchManagers: ["github-actions"],
+      matchDepTypes: ["uses-with"],
+      matchPackageNames: ["dagger/dagger"],
+      enabled: false,
+    },
+  ],
   customManagers: [
     // This manager updates the tool and image versions that the ci module
     // pins as Go constants with `// renovate:` comments, for example:
