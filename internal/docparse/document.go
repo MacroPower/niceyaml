@@ -42,9 +42,9 @@ type Document struct {
 // Documents returns each YAML document of the file r holds, in file
 // order. The file holds a stand-in for each document the parser rejected,
 // so that document is one too, and its Failure names its run. Tks holds
-// the tokens r parsed, and lines is the number of lines they cover. See
-// alignDocumentTokens for how each document node finds its tokens and
-// foldPreambles for which nodes become documents.
+// the tokens r parsed, and lines is the number of lines they cover. The
+// comments and directives the parser cut into nodes of their own join the
+// document below them, or the last document when none follows.
 func (r *Result) Documents(tks token.Tokens, lines int) []Document {
 	docs := foldPreambles(r.File.Docs, alignDocumentTokens(r.File, tks, r.standIns), r.standIns)
 	liftHeaderComments(docs)
@@ -72,19 +72,10 @@ func (r *Result) Documents(tks token.Tokens, lines int) []Document {
 }
 
 // foldPreambles pairs each document node with its token group and folds
-// the nodes that are not YAML documents into the ones that are. The parser
-// makes a node with no header and no content from the comments and %YAML
-// or %TAG directives above a "---" header, and from the comments after a
-// "..." marker. Such a node joins the next document as its preamble,
-// whichever of the two it holds, or the last document when no document
-// follows it. A file that holds only such nodes, such as a file of
-// comments, keeps the first as its one document, which decodes to
-// nothing as an empty file does.
-//
-// A stand-in of standIns that carries a failure is a document that did not
-// parse, whatever it holds, and its document takes the failure. Any other
-// stand-in holds what the parser would have cut off, and it folds as a
-// node of the parser does.
+// each node [isPreambleNode] reports into the next document as its
+// preamble, or into the last document when none follows. A file of such
+// nodes alone keeps the first as its one document. A stand-in that
+// carries a failure stays a document, and its document takes the failure.
 func foldPreambles(
 	nodes []*ast.DocumentNode,
 	groups []token.Tokens,
@@ -128,13 +119,9 @@ func foldPreambles(
 
 // liftHeaderComments moves the whole-line comments that close the tokens
 // of each document to the front of the document below when that one has
-// a "---" header. The parser leaves such comments with the document above
-// as trailing comments of its content, while the same comments above the
-// first header of a file, or after a "..." marker, are the preamble of the
-// document below. Lifting them puts a schema directive written above any
-// header in the preamble of the document it describes. A comment on the
-// last line of content stays with the content, and a comment below the
-// header of a document without content stays with that document.
+// a "---" header. The parser leaves them with the document above, so
+// without the move a schema directive written above a header would miss
+// the preamble of the document it describes.
 func liftHeaderComments(docs []*Document) {
 	for i := 1; i < len(docs); i++ {
 		if docs[i].Root.Start == nil {
@@ -155,12 +142,9 @@ func liftHeaderComments(docs []*Document) {
 
 // returnSameLineComments moves the comments that open the tokens of each
 // document back to the document above when they sit on the line of its
-// last token. A comment on the line of a "..." marker starts the token
-// group after the marker. A document below without a "---" header would
-// take that comment, and the line of the marker with it, while a document
-// with a header leaves the comment with the marker. The function runs
-// after liftHeaderComments, which moves only comments on lines of their
-// own.
+// last token. A comment on the line of a "..." marker is one, since it
+// starts the token group after the marker. It runs after
+// liftHeaderComments, which moves only comments on lines of their own.
 func returnSameLineComments(docs []*Document) {
 	for i := 1; i < len(docs); i++ {
 		prev, cur := docs[i-1], docs[i]
@@ -237,12 +221,11 @@ func trailingCommentsStart(tks token.Tokens) int {
 	return start
 }
 
-// textEndLine returns the line where the text of tk ends, which is the
-// line where its text starts plus the line breaks within its text. The
-// spaces, tabs, and line breaks around the text do not count, because the
-// lexer can end a token with a line break and the indentation of the next
-// line. YAML reads other Unicode spaces, such as U+00A0, as text. The
-// position of tk must not be nil.
+// textEndLine returns the line where the text of tk ends, past the line
+// breaks within it. The spaces, tabs, and line breaks around the text do
+// not count, since the lexer can end a token with a line break and the
+// next line's indentation, while YAML reads other Unicode spaces as text.
+// The position of tk must not be nil.
 func textEndLine(tk *token.Token) int {
 	return tk.Position.Line + lineend.CountBreaks(strings.Trim(tk.Origin, " \t\r\n"))
 }
@@ -256,11 +239,10 @@ func isPreambleNode(node *ast.DocumentNode) bool {
 }
 
 // documentSpans returns the lines of a view of total lines that each token
-// group covers. The groups partition the file in order, so a group runs
-// from the line its first token starts on to the line the next group
-// starts on. The first group runs from the top of the view, and the last
-// group runs to the end of it. A group after the first with no tokens
-// covers no lines and sits where the next group starts.
+// group covers. A group runs from the line of its first token to the line
+// the next group starts on, the first from the top of the view and the
+// last to its end. A group after the first with no tokens covers no lines
+// and sits where the next group starts.
 func documentSpans(groups []token.Tokens, total int) []position.Span {
 	spans := make([]position.Span, len(groups))
 
@@ -287,19 +269,12 @@ func documentSpans(groups []token.Tokens, total int) []position.Span {
 	return spans
 }
 
-// alignDocumentTokens pairs every document in file with the token group it
-// starts in, and returns one entry per document in file order.
-//
-// The groups come from [tokens.SplitDocuments]. Each document anchors at
-// the offset of its header token, or of its body's first token when it has
-// no header. It takes the groups from the first one no earlier document
-// claimed up to the one the next document anchors in. A group that starts
-// ahead of the first anchor, such as a leading "..." marker, thus joins
-// the document below it. Matching by offset rather than by index keeps a
-// document paired with its own tokens when the parser and the splitter
-// disagree on boundaries, as they do for such a marker. A document with no
-// anchor gets nil tokens. A stand-in of standIns has no body to anchor
-// at, so it anchors at the token [Result.fail] gave it.
+// alignDocumentTokens returns the tokens of each document of file, from
+// the groups [tokens.SplitDocuments] cuts tks into. It pairs them by
+// offset, since the parser and the splitter can disagree on bounds, as
+// they do on a leading "..." marker. A document anchors at the offset
+// [documentOffset] or its stand-in gives, and takes the groups no earlier
+// document took, up to the one the next document anchors in.
 func alignDocumentTokens(file *ast.File, tks token.Tokens, standIns map[*ast.DocumentNode]standIn) []token.Tokens {
 	var (
 		groups []token.Tokens

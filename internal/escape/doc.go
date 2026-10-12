@@ -24,5 +24,8 @@
 //	escape.Message("did you mean this?\n\tvalidate") // "did you mean this?\n    validate"
 //
 // [Tabs] replaces the tabs alone, for a message that a renderer escapes
-// later, such as the message an annotation carries.
+// later, such as the message an annotation carries. [Line] replaces each
+// tab the same way for text that must stay on one row, such as the name
+// of a source, and replaces every other control character, line feeds
+// included, as [Control] does.
 package escape

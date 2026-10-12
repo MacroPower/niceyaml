@@ -85,36 +85,37 @@ const (
 // Value is a value of the type a walk reads, beside the node the decoder
 // reads it from.
 type Value struct {
-	// The value that holds this one, or nil for the root.
+	// Parent is the value that holds this one, or nil for the root.
 	Parent *Value
-	// The type of the value, with pointers removed.
+	// Type is the type of the value, with pointers removed.
 	Type reflect.Type
-	// The node the document holds for the value, which may be an alias.
-	// For a key, it is the key of the entry.
+	// Held is the node the document holds for the value, which may be an
+	// alias. For a key, it is the key of the entry.
 	Held ast.Node
-	// The node the decoder reads the value from, as [datapath.Read]
-	// returns it for Held. For a key, it is the key of the entry. An
-	// inline field reads the node of the struct that holds it.
+	// Node is the node the decoder reads the value from, as
+	// [datapath.Read] returns it for Held. For a key, it is the key of the
+	// entry. An inline field reads the node of the struct that holds it.
 	Node ast.Node
-	// The struct whose mapping holds Entry, for a field or for a member or
-	// key of an inline map. For a field of an inline struct, it is the
-	// struct the decoder decodes the mapping into, which holds the inline
-	// one. An inline field names that struct too.
+	// Struct is the struct whose mapping holds Entry, for a field or for a
+	// member or key of an inline map. For a field of an inline struct, it
+	// is the struct the decoder decodes the mapping into, which holds the
+	// inline one. An inline field names that struct too.
 	Struct reflect.Type
-	// The entry the value comes from, for a field, a key, or a member.
+	// Entry is the entry the value comes from, for a field, a key, or a
+	// member.
 	Entry *ast.MappingValueNode
-	// The field or the key, for a field, a key, or a member.
+	// Name is the field or the key, for a field, a key, or a member.
 	Name string
 	// The resolver of the walk, for a key or a member.
 	resolver *paths.Resolver
-	// What holds Held in the document.
+	// From is what holds Held in the document.
 	From astnode.Parent
-	// The number of values that hold this one, which is zero for the
-	// root.
+	// Depth is the number of values that hold this one, which is zero for
+	// the root.
 	Depth int
-	// What holds the value.
+	// Kind is what holds the value.
 	Kind Kind
-	// What the decoder reads below the value.
+	// Reads is what the decoder reads below the value.
 	Reads Reads
 	// Named is false for a key, and the member that follows it, that has
 	// no name a path can spell, as [paths.Resolver.KeyName] reports.
@@ -173,8 +174,10 @@ func (v *Value) Selected() bool {
 // entries a `<<` merge key brings in where the key stands, each key
 // before its value. A field reads the entry the decoder reads for its
 // name. That is the entry a path through the name selects, unless the
-// decoder gathers nothing of the source that entry comes from, or the
-// struct ignores merges, as [yamlfield.IgnoresMerges] reports.
+// entry comes from a `<<` merge source the decoder drops, or the struct
+// ignores merges, as [yamlfield.IgnoresMerges] reports. The decoder drops
+// a source that holds a key it does not read as a string, along with the
+// sources that one merges.
 //
 // The walk reaches no value the decoder reads nothing for: a null, an
 // alias to one, an alias that does not resolve, or a field that
@@ -202,7 +205,7 @@ type walker struct {
 	visit    func(*Value) Action
 	// The structs, maps, and sequences the walk has gone below.
 	seen map[seenKey]bool
-	// The entries [walker.dropped] found for each mapping it has read.
+	// The entries [walker.droppedBy] found for each mapping it has read.
 	dropped map[*ast.MappingNode]map[*ast.MappingValueNode]bool
 	rules   Rules
 }
@@ -501,10 +504,8 @@ func (w *walker) entry(
 
 // entryOf returns the entry of mapping that the decoder reads for the
 // key name when it decodes a struct, or nil when mapping holds none.
-// With merges set, that is the entry a path through name selects, which
-// a `<<` merge key may bring in. A path can select an entry the decoder
-// gathers nothing of, as [walker.droppedBy] finds them, and entryOf
-// returns nil for that one. Without merges, it is the last entry of
+// With merges set, that is the entry a path through name selects, unless
+// [walker.droppedBy] reports it. Without merges, it is the last entry of
 // mapping itself with that name.
 func (w *walker) entryOf(mapping *ast.MappingNode, name string, merges bool) *ast.MappingValueNode {
 	if merges {
@@ -535,13 +536,10 @@ func (w *walker) entryOf(mapping *ast.MappingNode, name string, merges bool) *as
 }
 
 // droppedBy returns the entries the `<<` merge keys of mapping bring in
-// that the decoder gathers nothing of when it decodes a struct. The
-// decoder gathers the entries of each source before it reads a field. It
-// gathers none from a source that holds a key it does not read as a
-// string, as [walker.readsAsStruct] tells, and none from the sources that
-// one merges. It reports nothing then, and reads the struct from the
-// entries that remain. A path through such a source still selects its
-// entries, so [walker.entryOf] leaves them out.
+// that the decoder drops when it decodes a struct. It drops, without an
+// error, each source with a key it does not read as a string, as
+// [walker.readsAsStruct] tells, and the sources that one merges. A path
+// through such a source still selects its entries.
 func (w *walker) droppedBy(mapping *ast.MappingNode) map[*ast.MappingValueNode]bool {
 	if entries, ok := w.dropped[mapping]; ok {
 		return entries
@@ -620,17 +618,11 @@ func (w *walker) readsAsStruct(mapping *ast.MappingNode) bool {
 }
 
 // mergeRefused reports whether the decoder refuses the `<<` merge keys of
-// mapping when it decodes a struct that reads them. The decoder gathers
-// the entries those keys bring in before it reads a field. It refuses a
-// merge key whose value it reads as no mapping, such as a sequence of
-// sources or an alias to a scalar. It then decodes no field of the
-// struct and rejects none of its keys.
-//
-// To ask the decoder, mergeRefused decodes a mapping that holds the
-// merge keys alone into a struct with no field. A decoder that rejects
-// unknown fields rejects a key of a source there, which is no refusal of
-// the merge. A merge key the view of the decode holds no entry for
-// counts as refused.
+// mapping when it decodes a struct, as it does a merge key whose value it
+// reads as no mapping, and then decodes no field and rejects no key. The
+// test decodes the merge keys alone into a struct with no field, where an
+// unknown field is a key of a source and no refusal. A merge key with no
+// entry in the view of the decode counts as refused.
 func (w *walker) mergeRefused(mapping *ast.MappingNode) bool {
 	var merges []*ast.MappingValueNode
 
@@ -675,12 +667,10 @@ func (w *walker) view(entry *ast.MappingValueNode) *ast.MappingValueNode {
 }
 
 // readsAsString reports whether the go-yaml decoder reads key, the key
-// of a mapping entry, as a string. It reads a plain, quoted, or block
-// scalar as one, and anything under a !!str tag. It reads a number, a
-// boolean, or a null as a value of that kind, with a tag of that kind or
-// without one. An alias reads as the content of its anchor, and an alias
-// that does not resolve counts as a string, since the decoder rejects
-// it before it reads the kind.
+// of a mapping entry, as a string, as it does a plain, quoted, or block
+// scalar and anything under a !!str tag. An alias reads as the content of
+// its anchor, and one that does not resolve counts as a string, since the
+// decoder rejects it before it reads the kind.
 func readsAsString(resolver *paths.Resolver, key ast.Node) bool {
 	for !astnode.IsNil(key) {
 		switch k := key.(type) {

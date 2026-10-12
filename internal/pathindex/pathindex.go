@@ -70,9 +70,9 @@ func (s step) entry() *ast.MappingValueNode {
 	return s.mapping.Values[s.index]
 }
 
-// New creates a new [*Index] for a document with the given
-// body. A body with no content, as [astnode.HasContent] reports it, has
-// no steps and no offsets, so the index finds nothing.
+// New creates a new [*Index] for a document with the given body. A body
+// with no content, as [astnode.HasContent] reports it, has no steps and no
+// offsets, so the index finds nothing.
 func New(body ast.Node) *Index {
 	if !astnode.HasContent(body) {
 		return &Index{}
@@ -91,8 +91,8 @@ func New(body ast.Node) *Index {
 }
 
 // stepCounter is an [ast.Visitor] that counts the entries of each mapping
-// and the elements of each sequence it visits, so [New] sizes
-// its steps once and a large document does not grow them many times.
+// and the elements of each sequence it visits, so [New] sizes its steps
+// once and a large document does not grow them many times.
 type stepCounter int
 
 // Visit implements [ast.Visitor].
@@ -209,13 +209,9 @@ func (b *builder) finish(id int, offsets astnode.Extent) astnode.Extent {
 }
 
 // stepAt returns the index of the innermost step whose tokens hold the
-// offset off, or -1 when no step holds it.
-//
-// A token that holds no text can share its offset with the first token of
-// the next node, as the empty content of a block scalar does with the key
-// below it. The step of that next node then starts where the one before
-// it ends, and the search picks the later one, whose token holds the
-// text at that offset.
+// offset off, or -1 when no step holds it. Where a token with no text,
+// such as the empty content of a block scalar, shares its offset with the
+// next node, stepAt picks the later step, whose token holds the text.
 func (x *Index) stepAt(off int) int {
 	i := sort.Search(len(x.steps), func(i int) bool { return x.steps[i].lo > off }) - 1
 
@@ -233,8 +229,8 @@ func (x *Index) stepAt(off int) int {
 // writes one, and any other offset in the entry gives the path of the
 // entry. The "-" of a block sequence belongs to its element. An offset in
 // the text a collection holds between its entries or elements gives the
-// path of the collection. It reports false for a node that no path selects, as
-// [Index.spell] finds.
+// path of the collection. It reports false for a node that no path
+// selects.
 func (x *Index) PathAt(r *paths.Resolver, off int) (paths.Path, bool) {
 	if !x.body.Holds(off) {
 		return paths.Path{}, false
@@ -253,8 +249,8 @@ func (x *Index) PathAt(r *paths.Resolver, off int) (paths.Path, bool) {
 // OwnerPath returns the path of the outermost node that has tk as its own
 // token, which is the node the go-yaml decoder names when it reports tk.
 // The second result reports whether the path selects that node, and the
-// third whether any path spells it, as [Index.spell] finds them. Both are
-// false for a token that no node of the body holds.
+// third whether any path spells it. Both are false for a token that no
+// node of the body holds.
 //
 // A node is the innermost one around its token, with one exception. A
 // block mapping has the ":" of its first entry as its token, and a block
@@ -302,18 +298,11 @@ func (x *Index) inKey(at, off int) bool {
 	return at >= 0 && x.steps[at].key.Holds(off)
 }
 
-// spell returns the path of the node of the step at index at, or the
-// root for -1, which stands for the body. With key set, the path ends in
-// the `~` selector, so it names the key of the entry. The resolver r
-// names the keys of the document.
-//
-// A path selects the entry of a step only when a lookup of its key name
-// in its mapping finds that entry, so spell runs that lookup for each
-// entry from the node up to the root. The selects result is false when
-// one of them finds another entry, or none. The path then names each
-// entry on the way as the source spells its key, and resolves to another
-// node or to none. The ok result is false when a key on the way has no
-// name, as [paths.Resolver.KeyName] reports, so no path spells the node.
+// spell returns the path of the node of the step at index at, or the root
+// path for -1, ending in `~` when key is set. The selects result is false
+// when a lookup of a key name on the way finds another entry or none. The
+// ok result is false when a key on the way has no name, as
+// [paths.Resolver.KeyName] reports, so no path spells the node.
 func (x *Index) spell(r *paths.Resolver, at int, key bool) (paths.Path, bool, bool) {
 	var selectors []paths.Path
 

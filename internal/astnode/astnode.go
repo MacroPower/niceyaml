@@ -642,8 +642,9 @@ func IsTaggedNull(node ast.Node) bool {
 	}
 }
 
-// IsScalar reports whether node holds a value with nothing below it,
-// which is any node but a mapping, a sequence, or nil.
+// IsScalar reports whether node is any node but a mapping, a sequence, or
+// nil. A node that wraps another, such as an anchor or a tag, counts
+// whatever it holds.
 func IsScalar(node ast.Node) bool {
 	switch node.(type) {
 	case nil, *ast.MappingNode, *ast.SequenceNode:

@@ -14,8 +14,8 @@ func Text(preamble string, v *Value) string {
 	return w.sb.String()
 }
 
-// writer writes a [Value] as the text of a YAML document, in
-// block style, with one entry or element on each line.
+// writer writes a [Value] as the text of a YAML document, in block style,
+// with one entry or element on each line.
 type writer struct {
 	sb strings.Builder
 }
@@ -77,10 +77,9 @@ func (w *writer) pad(indent int, started bool) {
 
 // nested writes v behind the ":" of its key or the "-" of its element,
 // and ends the line. A block goes on the lines below at indent. With
-// compact set, v is the element of a sequence, and a block with no tag
-// starts on the line itself. Any other v stands under a key, where a
-// null with no text leaves the line as it is, as [Value.inline]
-// describes.
+// compact set, v is an element, and a block with no tag starts on the
+// line itself. Under a key, a null with no text adds nothing to the line,
+// as [Value.inline] describes.
 func (w *writer) nested(v *Value, indent int, compact bool) {
 	switch {
 	case !v.block():

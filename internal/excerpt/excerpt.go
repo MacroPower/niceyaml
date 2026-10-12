@@ -30,11 +30,12 @@ type Mark struct {
 	Pos position.Position
 }
 
-// Annotate marks marks, the resolved locations of the errors in lines,
-// on view, and reports whether it marked any line. It adds an annotation
-// without content below each line it marked that has no annotation below
-// it, so a renderer draws a caret run there. It marks nothing when marks
-// is empty or the view holds none of their lines.
+// Annotate puts each mark in marks on view, where marks hold the resolved
+// locations of the errors in lines, and reports whether it marked any
+// line. It adds an annotation without content below each line it marked
+// that has no annotation below it, so a renderer draws a caret run there.
+// It marks nothing when marks is empty or the view holds none of their
+// lines.
 //
 // The view may hold the lines at any indices, as a diff does, so every
 // mark goes to the index that holds its line. A mark whose highlight
@@ -159,16 +160,11 @@ func highlightStart(at position.Position, segments []position.Range) (int, bool)
 	return col, found
 }
 
-// markUnannotated adds an annotation without content, in [kind.TextError]
-// and at the first column its overlays without Blend set cover, so a
-// search highlight on the line moves no caret, below every line of view at
-// an index in marked that carries no annotation below it yet. A line
-// several locations mark, or that an earlier error marked, thus gets one.
-// [line.View.String] draws the marks of a line from its overlays. A
-// renderer that draws them from its annotations, as the printer does,
-// draws such an annotation as a caret run under the overlays. The range
-// of a location with no message beside it, such as the root of a bound
-// error, then shows its extent without color.
+// markUnannotated adds an empty [kind.TextError] annotation below each
+// line of view at an index in marked that has none below it yet, at the
+// first column its overlays without Blend set cover, so a search highlight
+// moves no caret. The printer draws it as a caret run, so a location with
+// no message, such as the root of a bound error, still shows its extent.
 func markUnannotated(view *line.View, marked []int) {
 	for _, i := range marked {
 		// A line repeats in marked once per location on it, so the check
@@ -207,12 +203,12 @@ func lineIndex(view *line.View, lines line.Lines) func(int) (int, bool) {
 	}
 }
 
-// Ranges returns the ranges to highlight for a location in lines: rng
-// itself, cut to lines, when the location carries one, then the content
-// of tk, the token a path resolved to, and otherwise the content of the
-// token at pos. The parser makes a token for an empty value that no line
-// holds, so a path to one has no ranges, where the token at its position
-// would be a comment or the spaces after the colon.
+// Ranges returns the ranges to highlight for a location in lines: rng cut
+// to lines, or else the content of tk, the token a path resolved to, or
+// else the content of the token at pos. The parser makes a token for an
+// empty value that no line holds, so a path to one has no ranges, where
+// the token at its position would be a comment or the spaces after the
+// colon.
 func Ranges(lines line.Lines, rng *position.Range, tk *token.Token, pos position.Position) position.Ranges {
 	if rng != nil {
 		return position.Ranges{clampRange(lines, *rng)}
@@ -226,13 +222,9 @@ func Ranges(lines line.Lines, rng *position.Range, tk *token.Token, pos position
 }
 
 // clampRange returns r cut to lines. A range that runs past the last line
-// ends at the end of that line, so a range an error carried marks lines
-// the source has. A range that ends before its start, as given or after
-// that cut, covers nothing, as [position.Range.LastLine] counts it, so it
-// becomes the empty range at its start, and no range ends before its
-// start. An end on a later line at a column before the first moves to
-// the start of that line, so no range has a negative column. A range
-// within the lines comes back as it is.
+// ends at the end of that line. A range that ends before its start, as
+// given or after that cut, becomes the empty range at its start. An end
+// at a negative column moves to the start of its line.
 func clampRange(lines line.Lines, r position.Range) position.Range {
 	if last := lines.Len() - 1; last >= 0 && r.End.Line > last {
 		r.End = position.New(last, lines.Line(last).Width())

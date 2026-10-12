@@ -299,11 +299,11 @@ func Read(r *paths.Resolver, node ast.Node) (ast.Node, bool) {
 // ParentAt returns what holds the node p selects in the document of r,
 // for [astnode.PathToken]. That is the entry the last `.name` selector
 // of p picks, or the sequence and the index its last `[n]` selector
-// picks. A `~` selector picks the key of an entry, which nothing holds.
-// Where no entry with a key holds the node the path before the `~`
-// selects, the `~` selects that node, and what holds it stands. The root
-// of the document has no parent, and neither does a path that selects
-// nothing.
+// picks. Nothing holds the key of an entry, so a path that ends in `~`
+// has no parent, unless no entry with a key holds the node the path
+// before the `~` selects. The `~` then selects that node, and ParentAt
+// returns what holds it. The root of the document has no parent, and
+// neither does a path that selects nothing.
 func ParentAt(r *paths.Resolver, p paths.Path) astnode.Parent {
 	last, ok := p.Last()
 	if !ok {
@@ -776,16 +776,16 @@ func MemberName(key any) string {
 // A value the data lacks ends the walk. The data lacks an element past
 // the end of its sequence, and a member where [Index.Lacks] reports so.
 // The walk treats a member as missing too where a key of the mapping
-// spells the name and sets a member of another name, as
-// [Index.SelectsOther] reports, so no path through that key stands for
-// it. The location of a missing value takes the path of the last value
-// the walk reached, with each name from there on below it as the caller
-// wrote it. That path binds where a path to a key the document leaves
-// out binds, so the token is nil. It is the token of that last value
-// where the path would bind elsewhere instead. That holds where the path
-// to the value does not select it. It also holds where a key of the
-// mapping there spells the missing name, as [Index.SelectsEntry]
-// reports, since the member that key sets has another name.
+// spells the name but sets a member of another name, as
+// [Index.SelectsOther] reports, since no path through that key stands for
+// the member. A missing value takes the path of the last value the walk
+// reached, with the rest of the names below it as the caller wrote them.
+// That path binds as a path to a key the document leaves out does, so the
+// token is nil, unless the path would bind elsewhere. It would where the
+// path to the last value does not select that value, and where a key of
+// its mapping spells the missing name, as [Index.SelectsEntry] reports.
+// The token is then the one [Target.Start] gives the last value with key
+// set.
 func (idx *Index) Locate(t Target, names []string, key bool) (paths.Path, *token.Token) {
 	for i, name := range names {
 		next, lacks := idx.step(t, name)

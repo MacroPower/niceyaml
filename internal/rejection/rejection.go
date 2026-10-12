@@ -116,23 +116,18 @@ func Classify(err yaml.Error) (string, Label) {
 	}
 }
 
-// ExpectedString returns the message of the rejection of a node of type
-// t that a string reads, as [Classify] words a value of the wrong kind,
+// ExpectedString returns the message for a string target that rejects a
+// node of type t, worded as [Classify] words a value of the wrong kind,
 // such as "expected string, got sequence".
 func ExpectedString(t ast.NodeType) string {
 	return fmt.Sprintf("expected %s, got %s", kindString, kindOfNode(t))
 }
 
 // kindOfType returns the kind of YAML value that the Go type t holds, for
-// the message of a rejection. The type is the target of a decode, or the
-// type the go-yaml decoder read a value of the document as. A nil type
-// is the null the decoder reads as a nil value. A pointer names what it
-// points to.
-//
-// The result never names a Go type. An interface holds a value of any
-// kind, so it reads [kindValue]. No YAML value but a null decodes into a
-// channel, a function, a complex number, or an unsafe pointer, so a
-// target of one of those kinds reads [kindNone].
+// the message of a rejection, and never a Go type name. A nil t is a null,
+// a pointer names what it points to, and an interface is [kindValue]. A
+// channel, a function, a complex number, or an unsafe pointer takes no
+// YAML value but a null, so it is [kindNone].
 func kindOfType(t reflect.Type) string {
 	if t == nil {
 		return kindNull

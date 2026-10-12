@@ -159,11 +159,10 @@ func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 }
 
 // verbatimIntegerTag is the verbatim form of the !!int tag, which the
-// [Tree] gives the token of each tag [isIntegerTag] reports. The
-// go-yaml decoder reads an integer under the short form as a Go int,
-// which it then rejects for every integer type. It reserves only the
-// short forms of tags, so it reads an integer under the verbatim form as
-// it reads the integer alone.
+// [Tree] gives the token of each tag [isIntegerTag] reports. The go-yaml
+// decoder rejects an integer under the short form for every integer type,
+// but it reserves only short forms, so it reads an integer under this one
+// as it reads the integer alone.
 const verbatimIntegerTag = "!<tag:yaml.org,2002:int>"
 
 // isIntegerTag reports whether node is a !!int tag on an integer, or on

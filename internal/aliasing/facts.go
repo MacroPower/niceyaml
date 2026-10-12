@@ -60,9 +60,7 @@ type AnchorFact struct {
 
 // NewFacts creates new [*Facts] for body, a document body whose aliases r
 // binds to their anchors. It walks body once, and keeps a stack of the
-// anchors the walk is inside, so it knows which anchors each alias lies
-// in. Each token the walk passes widens the Extent of the innermost
-// anchor, and a closing anchor widens the one around it.
+// anchors the walk is inside, so it knows which anchors each alias lies in.
 //
 // The decoder reads an alias inside the anchor it refers to as null. An
 // anchor on such an alias then holds the null, so an alias to that anchor

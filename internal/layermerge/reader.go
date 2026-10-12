@@ -30,8 +30,8 @@ var errNoScalarText = errors.New("node has no text to merge")
 // document. An alias inside the anchor it refers to reads as null, as the
 // decoder reads it.
 type Reader struct {
-	// Ctx ends the read once it ends, since each alias writes its anchor
-	// out in full.
+	// Ctx cancels the read, which can run long, since the read copies the
+	// anchor of each alias in full.
 	Ctx context.Context
 	// Resolver resolves the aliases and the key names of the layer.
 	Resolver *paths.Resolver
@@ -48,15 +48,15 @@ type Reader struct {
 	open map[*ast.AnchorNode]bool
 	// References holds the text of each reference document of the layer.
 	References [][]byte
-	// Layer is the index of the layer among the layers the merge reads,
-	// which each value the read gives holds.
+	// Layer is the index of the layer among the layers the merge reads.
+	// Each value the read returns holds it as [Value.Layer].
 	Layer int
 }
 
 // NodeError is the error of a node the reader cannot merge: an alias with
 // no anchor, a scalar with no text, or a key with no name.
 type NodeError struct {
-	// Err is the error.
+	// Err is the reason the reader cannot merge the node.
 	Err error
 	// Token is the token the error lies at, which is nil inside a
 	// reference document, since a node there has no position in the layer.
@@ -86,8 +86,8 @@ func (r *Reader) Read(node ast.Node) (*Value, error) {
 
 // value returns the value under node. The ref flag says that node lies in
 // a reference document, where an alias reads the reference documents
-// alone. The read of a value ends with the error of the context once
-// it ends, since each alias writes its anchor out in full here.
+// alone. It returns the error of Ctx once Ctx is done, since the read
+// copies the anchor of each alias in full.
 func (r *Reader) value(node ast.Node, ref bool) (*Value, error) {
 	err := r.Ctx.Err()
 	if err != nil {
@@ -112,16 +112,11 @@ func (r *Reader) value(node ast.Node, ref bool) (*Value, error) {
 	return v, err
 }
 
-// follow calls visit with the content under node, which is the node
-// behind every anchor, alias, tag, and `?` indicator on the way. It passes
-// the first tag it looks through, as the source spells it, and whether
-// the content lies in a reference document. The tag starts as outer, the
-// tag a caller found above node, or the empty string. A tag over no
-// value that the decoder reads as null, as [astnode.IsTaggedNull]
-// reports, is no tag to pass, since the text "null" behind it reads as
-// another value. Each anchor on the way stays open while visit runs. The
-// content of an alias inside the anchor it refers to is nil, which reads
-// as null.
+// follow calls visit with the content behind the anchors, aliases, tags,
+// and `?` indicators under node, with whether that content lies in a
+// reference document, and with outer or else the first tag on the way
+// that [tagsNoValue] does not report. Each anchor on the way stays open
+// while visit runs. An alias inside its own anchor gives nil content.
 func (r *Reader) follow(
 	node ast.Node, ref bool, outer string, visit func(content ast.Node, tag string, ref bool) error,
 ) error {
@@ -240,8 +235,7 @@ func (r *Reader) references() map[string]*ast.AnchorNode {
 	return r.refs
 }
 
-// content returns the value of content, a node [Reader.follow]
-// found.
+// content returns the value of content, a node [Reader.follow] found.
 func (r *Reader) content(content ast.Node, ref bool) (*Value, error) {
 	v := &Value{Layer: r.Layer}
 
@@ -284,10 +278,9 @@ func (r *Reader) content(content ast.Node, ref bool) (*Value, error) {
 
 // invalid returns err as the [*NodeError] of node, a node the layer
 // cannot merge: an alias, a scalar, or the key of an entry. The error lies
-// at the token a path to such a node points at, as [astnode.PathToken]
-// gives it for a node with no parent. That is its own token, or the "{"
-// or "[" of a key in flow style. A node of a reference document has no
-// position in the layer, so its error carries no token.
+// at the token [astnode.PathToken] gives node with no parent, or at no
+// token for a node of a reference document, which has no position in the
+// layer.
 func (*Reader) invalid(err error, node ast.Node, ref bool) error {
 	if ref {
 		return &NodeError{Err: err}
@@ -432,8 +425,7 @@ func (r *Reader) key(key ast.Node, ref bool) (string, error) {
 // line of a block collection, and reports false for a node that is no
 // scalar. A scalar that is no string keeps the text of the source, such
 // as 0x10 or 1.50. A string keeps its text and its quotes where they read
-// the same on one line, and takes double quotes otherwise, as a block
-// scalar does.
+// the same on one line, and takes double quotes otherwise.
 func scalarText(node ast.Node) (string, bool) {
 	switch n := node.(type) {
 	case nil:
