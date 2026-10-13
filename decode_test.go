@@ -2724,6 +2724,637 @@ func (*yamlSize) UnmarshalJSON([]byte) error {
 	return errors.New("the decoder called UnmarshalJSON")
 }
 
+// checkedMirror has no Validate method, so only a function from
+// niceyaml.WithValueCheck checks it.
+type checkedMirror struct {
+	URL string `yaml:"url"`
+}
+
+// checkedOwner is a struct that [checkedService] inlines.
+type checkedOwner struct {
+	Owner string `yaml:"owner"`
+}
+
+// checkedService holds values whose types have no Validate method.
+type checkedService struct {
+	Backup *checkedMirror `yaml:"backup"`
+	Owner  checkedOwner   `yaml:",inline"`
+	Mirror checkedMirror  `yaml:"mirror"`
+	Addr   netip.Addr     `yaml:"addr"`
+}
+
+// checkedServices holds services under keys that a document can spell
+// as 0x10, and in a list.
+type checkedServices struct {
+	Services map[int]checkedService `yaml:"services"`
+	List     []checkedService       `yaml:"list"`
+}
+
+// hostName is a string type, which a check of string does not match.
+type hostName string
+
+// rejectLoopback rejects a loopback address.
+func rejectLoopback(_ context.Context, a *netip.Addr) error {
+	if a.IsLoopback() {
+		return niceyaml.NewError("loopback address " + a.String())
+	}
+
+	return nil
+}
+
+// requireHTTP rejects a mirror whose URL is not http, at the path of the
+// URL.
+func requireHTTP(_ context.Context, m *checkedMirror) error {
+	if !strings.HasPrefix(m.URL, "http://") {
+		return niceyaml.NewError(
+			fmt.Sprintf("url %q is not http", m.URL),
+			niceyaml.AtPath(paths.Current().Child("url")),
+		)
+	}
+
+	return nil
+}
+
+// recordCheck returns a check of T that appends name to order and returns
+// err.
+func recordCheck[T any](order *[]string, name string, err error) niceyaml.DecodeOption {
+	return niceyaml.WithValueCheck(func(context.Context, *T) error {
+		*order = append(*order, name)
+
+		return err
+	})
+}
+
+func ExampleWithValueCheck() {
+	ctx := context.Background()
+
+	type network struct {
+		Allow []netip.Prefix `yaml:"allow"`
+	}
+
+	type config struct {
+		Networks map[string]network `yaml:"networks"`
+		Admin    netip.Prefix       `yaml:"admin"`
+	}
+
+	// The type netip.Prefix comes from another package, so the program
+	// cannot give it a Validate method.
+	masked := niceyaml.WithValueCheck(func(_ context.Context, p *netip.Prefix) error {
+		if *p != p.Masked() {
+			return niceyaml.NewError(fmt.Sprintf("%s sets host bits, want %s", p, p.Masked()))
+		}
+
+		return nil
+	})
+
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"networks:",
+		"  office:",
+		"    allow: [10.0.0.0/8, 192.168.1.7/24]",
+		"admin: 172.16.0.0/12",
+	), niceyaml.WithName("app.yaml"))
+
+	_, err := source.Decode[config](ctx, masked)
+	fmt.Println(err)
+
+	// Output:
+	// app.yaml:3:25: $.networks.office.allow[1]: 192.168.1.7/24 sets host bits, want 192.168.1.0/24
+}
+
+func TestWithValueCheck(t *testing.T) {
+	t.Parallel()
+
+	noLoopback := niceyaml.WithValueCheck(rejectLoopback)
+
+	t.Run("checks every value of the type", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			err   string
+		}{
+			"a value below a key the document spells as 0x10": {
+				input: stringtest.Input(`
+					services:
+					  0x10:
+					    addr: 127.0.0.1
+					  2:
+					    addr: 10.0.0.1
+				`),
+				err: "3:11: $.services.0x10.addr: loopback address 127.0.0.1",
+			},
+			"an element of a list": {
+				input: stringtest.Input(`
+					list:
+					  - addr: 10.0.0.1
+					  - addr: ::1
+				`),
+				err: "3:11: $.list[1].addr: loopback address ::1",
+			},
+			"several values": {
+				input: stringtest.Input(`
+					services:
+					  0x10:
+					    addr: 127.0.0.1
+					list:
+					  - addr: ::1
+				`),
+				err: stringtest.JoinLF(
+					"3:11: $.services.0x10.addr: loopback address 127.0.0.1",
+					"5:11: $.list[0].addr: loopback address ::1",
+				),
+			},
+			"values that pass": {
+				input: stringtest.Input(`
+					services:
+					  0x10:
+					    addr: 10.0.0.1
+				`),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := yamltest.FirstDocument(t, tc.input).Decode[checkedServices](t.Context(), noLoopback)
+				if tc.err == "" {
+					require.NoError(t, err)
+
+					return
+				}
+
+				require.EqualError(t, err, tc.err)
+				assert.True(t, niceyaml.IsInvalid(err))
+			})
+		}
+	})
+
+	t.Run("a map whose values hold the type further down", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Nets map[string][]netip.Addr `yaml:"nets"`
+		}
+
+		_, err := yamltest.FirstDocument(t, stringtest.Input(`
+			nets:
+			  a: [10.0.0.1]
+			  b: [10.0.0.2, 127.0.0.1]
+		`)).Decode[config](t.Context(), noLoopback)
+		require.EqualError(t, err, "3:17: $.nets.b[1]: loopback address 127.0.0.1")
+	})
+
+	t.Run("an inline struct checks at the path of its parent", func(t *testing.T) {
+		t.Parallel()
+
+		owned := niceyaml.WithValueCheck(func(_ context.Context, o *checkedOwner) error {
+			if o.Owner == "" {
+				return niceyaml.NewError("owner is required", niceyaml.AtPath(paths.Current().Child("owner")))
+			}
+
+			return nil
+		})
+
+		// The second service leaves the owner out, so its error binds at
+		// the key of the mapping that lacks it.
+		_, err := yamltest.FirstDocument(t, stringtest.Input(`
+			services:
+			  0x10:
+			    owner: ""
+			  2:
+			    addr: 10.0.0.1
+		`)).Decode[checkedServices](t.Context(), owned)
+		require.EqualError(t, err, stringtest.JoinLF(
+			"3:12: $.services.0x10.owner: owner is required",
+			"4:3: $.services.2.owner: owner is required",
+		))
+	})
+
+	t.Run("reaches a pointer field through its value and the zero value of an absent field", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			want  []string
+		}{
+			"a pointer field": {
+				input: "backup: {url: http://b}\nmirror: {url: http://a}\n",
+				want:  []string{"http://b", "http://a"},
+			},
+			"a nil pointer field": {
+				input: "mirror: {url: http://a}\n",
+				want:  []string{"http://a"},
+			},
+			"an absent struct field": {
+				input: "backup: {url: http://b}\n",
+				want:  []string{"http://b", ""},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var got []string
+
+				record := niceyaml.WithValueCheck(func(_ context.Context, m *checkedMirror) error {
+					got = append(got, m.URL)
+
+					return nil
+				})
+
+				_, err := yamltest.FirstDocument(t, tc.input).Decode[checkedService](t.Context(), record)
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
+	t.Run("DecodeAt and DecodeIfPresent check the value they decode", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			services:
+			  0x10:
+			    addr: 127.0.0.1
+		`))
+
+		at := paths.Doc().Child("services", "0x10")
+		want := "3:11: $.services.0x10.addr: loopback address 127.0.0.1"
+
+		_, err := doc.DecodeAt[checkedService](t.Context(), at, noLoopback)
+		require.EqualError(t, err, want)
+
+		var svc checkedService
+
+		found, err := doc.DecodeIfPresent(t.Context(), at, &svc, noLoopback)
+		require.EqualError(t, err, want)
+		assert.False(t, found)
+
+		found, err = doc.DecodeIfPresent(t.Context(), paths.Doc().Child("services", "3"), &svc, noLoopback)
+		require.NoError(t, err)
+		assert.False(t, found)
+	})
+
+	t.Run("the checks of a value run in order and stop at the first that fails", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		stop := niceyaml.NewError("second check failed")
+
+		_, err := yamltest.FirstDocument(t, "mirror: {url: http://a}\n").Decode[checkedService](
+			t.Context(),
+			recordCheck[checkedMirror](&order, "first", nil),
+			recordCheck[checkedMirror](&order, "second", stop),
+			recordCheck[checkedMirror](&order, "third", nil),
+		)
+		require.EqualError(t, err, "1:1: $.mirror: second check failed")
+		require.ErrorIs(t, err, stop)
+		assert.Equal(t, []string{"first", "second"}, order)
+	})
+
+	t.Run("a value runs its checks once the values below it pass", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			mirror error
+			err    string
+			want   []string
+		}{
+			"the value below passes": {
+				want: []string{"mirror", "service"},
+			},
+			"the value below fails": {
+				mirror: niceyaml.NewError("mirror failed"),
+				err:    "1:1: $.mirror: mirror failed",
+				want:   []string{"mirror"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var order []string
+
+				_, err := yamltest.FirstDocument(t, "mirror: {url: http://a}\n").Decode[checkedService](
+					t.Context(),
+					recordCheck[checkedService](&order, "service", nil),
+					recordCheck[checkedMirror](&order, "mirror", tc.mirror),
+				)
+				if tc.err == "" {
+					require.NoError(t, err)
+				} else {
+					require.EqualError(t, err, tc.err)
+				}
+
+				assert.Equal(t, tc.want, order)
+			})
+		}
+	})
+
+	t.Run("a value runs its checks once its Validate passes", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			err   string
+			want  []bool
+		}{
+			"Validate passes": {
+				input: "name: test\n",
+				want:  []bool{true},
+			},
+			"Validate fails": {
+				input: "value: 1\n",
+				err:   "$.name~: name is required",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				// Validate marks the value, so the check sees whether
+				// Validate ran before it.
+				var got []bool
+
+				record := niceyaml.WithValueCheck(func(_ context.Context, c *validatorConfig) error {
+					got = append(got, c.validated)
+
+					return nil
+				})
+
+				_, err := yamltest.FirstDocument(t, tc.input).Decode[validatorConfig](t.Context(), record)
+				if tc.err == "" {
+					require.NoError(t, err)
+				} else {
+					require.EqualError(t, err, tc.err)
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
+	t.Run("the error declares the fault as the error of a validator does", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			err     error
+			invalid bool
+		}{
+			"NewError": {
+				err:     niceyaml.NewError(errPlainValidation.Error()),
+				invalid: true,
+			},
+			"Invalid": {
+				err:     niceyaml.Invalid(errPlainValidation),
+				invalid: true,
+			},
+			"Place": {
+				err: niceyaml.Place(errPlainValidation),
+			},
+			"a plain error": {
+				err: errPlainValidation,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				check := niceyaml.WithValueCheck(func(context.Context, *netip.Addr) error {
+					return tc.err
+				})
+
+				_, err := yamltest.FirstDocument(t, "addr: 10.0.0.1\n").Decode[checkedService](t.Context(), check)
+				require.EqualError(t, err, "1:7: $.addr: plain validation failure")
+				assert.Equal(t, tc.invalid, niceyaml.IsInvalid(err))
+			})
+		}
+	})
+
+	t.Run("a check gets the context of the call", func(t *testing.T) {
+		t.Parallel()
+
+		type ctxKey struct{}
+
+		var got []any
+
+		record := niceyaml.WithValueCheck(func(ctx context.Context, _ *netip.Addr) error {
+			got = append(got, ctx.Value(ctxKey{}))
+
+			return nil
+		})
+
+		ctx := context.WithValue(t.Context(), ctxKey{}, "decode")
+
+		_, err := yamltest.FirstDocument(t, "addr: 10.0.0.1\n").Decode[checkedService](ctx, record)
+		require.NoError(t, err)
+		assert.Equal(t, []any{"decode"}, got)
+	})
+
+	t.Run("the error of a context that ended stops the walk", func(t *testing.T) {
+		t.Parallel()
+
+		var calls int
+
+		canceled := niceyaml.WithValueCheck(func(context.Context, *netip.Addr) error {
+			calls++
+
+			return context.Canceled
+		})
+
+		_, err := yamltest.FirstDocument(t, stringtest.Input(`
+			list:
+			  - addr: 10.0.0.1
+			  - addr: 10.0.0.2
+		`)).Decode[checkedServices](t.Context(), canceled)
+		require.ErrorIs(t, err, context.Canceled)
+		require.EqualError(t, err, "context canceled")
+		assert.False(t, niceyaml.IsInvalid(err))
+		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("WithSelfValidation off runs no check", func(t *testing.T) {
+		t.Parallel()
+
+		var calls int
+
+		counted := niceyaml.WithValueCheck(func(ctx context.Context, a *netip.Addr) error {
+			calls++
+
+			return rejectLoopback(ctx, a)
+		})
+
+		doc := yamltest.FirstDocument(t, "addr: 127.0.0.1\n")
+
+		got, err := doc.Decode[checkedService](t.Context(), counted, niceyaml.WithSelfValidation(false))
+		require.NoError(t, err)
+		assert.Equal(t, netip.MustParseAddr("127.0.0.1"), got.Addr)
+		assert.Zero(t, calls)
+
+		_, err = doc.Decode[checkedService](
+			t.Context(), niceyaml.WithSelfValidation(false), counted, niceyaml.WithSelfValidation(true),
+		)
+		require.EqualError(t, err, "1:7: $.addr: loopback address 127.0.0.1")
+		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("a DecodeOptions value given twice runs its checks twice", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		opts := niceyaml.DecodeOptions(recordCheck[netip.Addr](&order, "addr", nil))
+
+		_, err := yamltest.FirstDocument(t, "addr: 10.0.0.1\n").Decode[checkedService](
+			t.Context(), opts, opts, //nolint:gocritic // The call gets the value twice.
+		)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"addr", "addr"}, order)
+	})
+
+	t.Run("each decode checks the types of its own checks", func(t *testing.T) {
+		t.Parallel()
+
+		// No value below checkedServices has a Validate method, so a decode
+		// finds the values only through the types of its checks.
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			services:
+			  0x10:
+			    addr: 127.0.0.1
+			    mirror: {url: ftp://m}
+		`))
+
+		loopback := "3:11: $.services.0x10.addr: loopback address 127.0.0.1"
+		notHTTP := `4:19: $.services.0x10.mirror.url: url "ftp://m" is not http`
+		mirrors := niceyaml.WithValueCheck(requireHTTP)
+
+		_, err := doc.Decode[checkedServices](t.Context(), noLoopback)
+		require.EqualError(t, err, loopback)
+
+		_, err = doc.Decode[checkedServices](t.Context(), mirrors)
+		require.EqualError(t, err, notHTTP)
+
+		_, err = doc.Decode[checkedServices](t.Context())
+		require.NoError(t, err)
+
+		_, err = doc.Decode[checkedServices](t.Context(), mirrors, noLoopback)
+		require.EqualError(t, err, stringtest.JoinLF(loopback, notHTTP))
+
+		_, err = doc.Decode[checkedServices](t.Context(), noLoopback, mirrors)
+		require.EqualError(t, err, stringtest.JoinLF(loopback, notHTTP))
+	})
+
+	t.Run("a check of a type matches that type alone", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Hosts map[string]hostName `yaml:"hosts"`
+			Name  hostName            `yaml:"name"`
+			Plain string              `yaml:"plain"`
+		}
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			name: web
+			plain: text
+			hosts:
+			  a: db
+		`))
+
+		var strs, hosts []string
+
+		_, err := doc.Decode[config](t.Context(),
+			niceyaml.WithValueCheck(func(_ context.Context, s *string) error {
+				strs = append(strs, *s)
+
+				return nil
+			}),
+			niceyaml.WithValueCheck(func(_ context.Context, h *hostName) error {
+				hosts = append(hosts, string(*h))
+
+				return nil
+			}),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"a", "text"}, strs, "a string check reads map keys and plain strings")
+		assert.Equal(t, []string{"db", "web"}, hosts)
+	})
+
+	t.Run("a check of a map key binds at the key", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Hosts map[hostName]string `yaml:"hosts"`
+		}
+
+		lower := niceyaml.WithValueCheck(func(_ context.Context, h *hostName) error {
+			if strings.ToLower(string(*h)) != string(*h) {
+				return niceyaml.NewError("host name is not lowercase")
+			}
+
+			return nil
+		})
+
+		_, err := yamltest.FirstDocument(t, "hosts:\n  web: a\n  DB: b\n").Decode[config](t.Context(), lower)
+		require.EqualError(t, err, "3:3: $.hosts.DB~: host name is not lowercase")
+	})
+
+	t.Run("a nil function adds nothing", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := yamltest.FirstDocument(t, "addr: 127.0.0.1\n").Decode[checkedService](
+			t.Context(), niceyaml.WithValueCheck[netip.Addr](nil),
+		)
+		require.NoError(t, err)
+	})
+
+	t.Run("panics for a pointer or interface type", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			call func()
+			want string
+		}{
+			"a pointer": {
+				call: func() {
+					niceyaml.WithValueCheck(func(context.Context, **checkedMirror) error { return nil })
+				},
+				want: "*niceyaml_test.checkedMirror",
+			},
+			"an interface": {
+				call: func() {
+					niceyaml.WithValueCheck(func(context.Context, *fmt.Stringer) error { return nil })
+				},
+				want: "fmt.Stringer",
+			},
+			"any": {
+				call: func() { niceyaml.WithValueCheck[any](nil) },
+				want: "interface {}",
+			},
+			"a pointer with a nil function": {
+				call: func() { niceyaml.WithValueCheck[*netip.Addr](nil) },
+				want: "*netip.Addr",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.PanicsWithValue(t,
+					"niceyaml.WithValueCheck: "+tc.want+" is a pointer or interface type, which the walk never checks",
+					tc.call,
+				)
+			})
+		}
+	})
+}
+
 func TestWithJSONUnmarshalers(t *testing.T) {
 	t.Parallel()
 

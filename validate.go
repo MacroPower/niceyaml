@@ -24,7 +24,8 @@ import (
 
 // SelfValidate runs the self-validation step of [Node.DecodeInto] on its
 // own. It walks v, calls Validate on every value in it that implements
-// [SelfValidator], and binds what they report as [Node.Bind] binds an
+// [SelfValidator], runs each function of [WithValueCheck] in opts on the
+// values of its type, and binds what they report as [Node.Bind] binds an
 // error, with each `@` path under the path of its value in the node. It
 // returns nil when nothing failed. It runs the walk whatever
 // [WithSelfValidation] says, and runs no [Validator]. A program that
@@ -41,10 +42,10 @@ import (
 //	return doc.SelfValidate(ctx, &cfg, settings)
 //
 // On a value that nothing changed, SelfValidate returns what the decode
-// with the walk on returns. To spell each map key as the document does,
-// the walk decodes the keys with the settings of the [Source] and with
-// the options in opts that say how a value decodes:
-// [WithCustomUnmarshaler], [WithJSONUnmarshalers],
+// with the walk on returns, given the same functions of WithValueCheck.
+// To spell each map key as the document does, the walk decodes the keys
+// with the settings of the [Source] and with the options in opts that say
+// how a value decodes: [WithCustomUnmarshaler], [WithJSONUnmarshalers],
 // [WithDisallowUnknownFields], [WithAllowedFieldPrefixes], and
 // [WithYAMLOrderedMaps]. It reads no other option, so a caller passes the
 // options of the decode.
@@ -89,8 +90,12 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // such as 1 and "1", bind with no position, as [ErrAmbiguousPath]
 // describes.
 //
-// SelfValidateValue takes no [DecodeOption], so it knows a type that
-// decodes itself only by its own unmarshaler method.
+// SelfValidateValue runs each function of [WithValueCheck] in opts on the
+// values of its type, as Node.SelfValidate does, so a server checks the
+// body of a request with the functions it gives a decode. It knows a type
+// that decodes itself by its own unmarshaler method, and by
+// [WithCustomUnmarshaler] and [WithJSONUnmarshalers] in opts. It reads no
+// other option.
 //
 // A Validate whose value holds fields a decode does not reach, such as
 // one tagged `yaml:"-"`, validates them with SelfValidateValue and
@@ -100,23 +105,26 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // Any v but nil and a nil pointer works, and those return an error
 // wrapping [ErrSelfValidateTarget]. The walk stops once ctx ends, as the
 // Cancellation section of the package documentation describes.
-func SelfValidateValue(ctx context.Context, v any) error {
+func SelfValidateValue(ctx context.Context, v any, opts ...DecodeOption) error {
 	err := checkTarget(v, ErrSelfValidateTarget, false)
 	if err != nil {
 		return BindValue(err)
 	}
 
-	return BindValue(walkSelfValidators(ctx, v, nil, decodeConfig{}))
+	return BindValue(walkSelfValidators(ctx, v, nil, newDecodeConfig(opts)))
 }
 
 // walkSelfValidators runs Validate on every [SelfValidator] in v, a non-nil
-// pointer or a value that is no pointer. It joins the errors under the path
-// of each value in the document of n, where a nil n stands for no document.
+// pointer or a value that is no pointer, and the functions of cfg from
+// [WithValueCheck] on the values of their types. It joins the errors under
+// the path of each value in the document of n, where a nil n stands for no
+// document.
 func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) error {
 	w := selfWalker{
 		ctx:      ctx,
 		node:     n,
 		cfg:      cfg,
+		checked:  checkedTypesOf(cfg.checks),
 		walked:   map[visit]walkResult{},
 		reach:    math.MaxInt,
 		scanning: map[visit]bool{},
@@ -132,15 +140,19 @@ func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) e
 }
 
 // selfWalker collects the errors of the [SelfValidator] values in a decoded
-// value. It walks each pointer, map, and slice once, so a value two paths
-// share reports its errors under the first, and a back edge of a cycle passes.
+// value, and of the functions from [WithValueCheck]. It walks each pointer,
+// map, and slice once, so a value two paths share reports its errors under
+// the first, and a back edge of a cycle passes.
 type selfWalker struct {
 	ctx     context.Context
 	node    *Node
 	decoder *yaml.Decoder
 	// The settings of the decode, which name the types its options give
-	// an unmarshaler.
+	// an unmarshaler and hold the functions from [WithValueCheck].
 	cfg decodeConfig
+	// The types the functions of cfg check, which the walk counts as
+	// validators where it skips a value that holds none.
+	checked *checkedTypes
 	// The result of the walk through each pointer, map, and slice the walk
 	// has entered, as [walkResult] describes.
 	walked map[visit]walkResult
@@ -267,7 +279,7 @@ func (w *selfWalker) walk(v reflect.Value, at place, shadowed map[string]bool) b
 
 	// A value whose type holds no validator, itself included, passes
 	// without a look at the values below it.
-	if !mayHoldValidator(v.Type()) {
+	if !w.checked.mayHold(v.Type()) {
 		return true
 	}
 
@@ -473,24 +485,94 @@ func visitOf(v reflect.Value) visit {
 }
 
 var (
-	// The result of [mayHoldValidator] for each type it has read.
-	holdsValidator unmarshaler.TypeCache[bool]
-
 	// The result of [implementsSelfValidator] for each type it has read.
 	ownsValidator unmarshaler.TypeCache[bool]
 
-	// The result of [fieldsOf] for each struct type it has read.
-	walkedFields unmarshaler.TypeCache[*structFields]
+	// The set of no types, from which [checkedTypesOf] reaches every other.
+	noCheckedTypes = &checkedTypes{}
 )
 
-// mayHoldValidator reports whether a value of type t, or one below it the
-// walk reaches, can implement [SelfValidator], as any interface can. It reads
-// no decode option, so every walk shares the answer, which may overreport.
-func mayHoldValidator(t reflect.Type) bool {
-	return holdsValidator.Get(t, func(t reflect.Type) bool {
+// checkedTypes is a set of types that functions from [WithValueCheck]
+// check, with the answers about each type that the walk prunes by. A
+// validator of the walk is a value that implements [SelfValidator] or
+// whose type the set holds. [checkedTypesOf] returns one instance for each
+// set, so every walk with the same set shares the answers, and the walks
+// with no function share those of [noCheckedTypes].
+type checkedTypes struct {
+	// The set that holds types and one more type, which sorts after them,
+	// by that type.
+	next map[reflect.Type]*checkedTypes
+	// The result of [checkedTypes.mayHold] for each type it has read.
+	holds unmarshaler.TypeCache[bool]
+	// The result of [checkedTypes.fieldsOf] for each struct type it has
+	// read.
+	fields unmarshaler.TypeCache[*structFields]
+	// The types of the set, in the order [checkedTypesOf] sorts them.
+	types []reflect.Type
+	// Guards next.
+	mu sync.Mutex
+}
+
+// checkedTypesOf returns the set of the types that checks check. It sorts
+// the types by their names, so the same types in another order return the
+// same instance. Two types with one name keep the order checks gives them,
+// so those types in another order return a second instance, which holds
+// answers of its own.
+func checkedTypesOf(checks []valueCheck) *checkedTypes {
+	var types []reflect.Type
+
+	for _, c := range checks {
+		if !slices.Contains(types, c.typ) {
+			types = append(types, c.typ)
+		}
+	}
+
+	slices.SortStableFunc(types, func(a, b reflect.Type) int {
+		return strings.Compare(a.String(), b.String())
+	})
+
+	set := noCheckedTypes
+	for _, t := range types {
+		set = set.with(t)
+	}
+
+	return set
+}
+
+// with returns the set that holds the types of c and t, which sorts after
+// them, and creates it when no walk has asked for it before.
+func (c *checkedTypes) with(t reflect.Type) *checkedTypes {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	next, ok := c.next[t]
+	if !ok {
+		next = &checkedTypes{types: append(slices.Clip(c.types), t)}
+
+		if c.next == nil {
+			c.next = map[reflect.Type]*checkedTypes{}
+		}
+
+		c.next[t] = next
+	}
+
+	return next
+}
+
+// validates reports whether the walk validates a value of type t itself,
+// through the Validate of [SelfValidator] or a function of the set.
+func (c *checkedTypes) validates(t reflect.Type) bool {
+	return implementsSelfValidator(t) || slices.Contains(c.types, t)
+}
+
+// mayHold reports whether a value of type t, or one below it the walk
+// reaches, can be a validator, as any interface can. It reads no value, so
+// every walk with the set shares the answer, which can overreport.
+func (c *checkedTypes) mayHold(t reflect.Type) bool {
+	return c.holds.Get(t, func(t reflect.Type) bool {
 		// The walk reads nothing below a node of the syntax tree.
 		return yamlfield.Reaches(t, func(t reflect.Type) (bool, bool) {
-			return t.Kind() == reflect.Interface || implementsSelfValidator(t), unmarshaler.IsSyntaxNode(t)
+			return t.Kind() == reflect.Interface || c.validates(t), unmarshaler.IsSyntaxNode(t)
 		})
 	})
 }
@@ -503,7 +585,7 @@ func (w *selfWalker) children(v reflect.Value, at place, shadowed map[string]boo
 	case reflect.Slice, reflect.Array, reflect.Map:
 		// Entries whose types hold no validator pass at once, as does a map
 		// whose entries hold none, so the walk reads no key of such a map.
-		if !entriesMayHoldValidator(v.Type()) || v.Kind() == reflect.Map && !w.holdsBelow(v) {
+		if !w.checked.entriesMayHold(v.Type()) || v.Kind() == reflect.Map && !w.holdsBelow(v) {
 			return true
 		}
 
@@ -514,7 +596,7 @@ func (w *selfWalker) children(v reflect.Value, at place, shadowed map[string]boo
 
 	switch v.Kind() {
 	case reflect.Struct:
-		fields := fieldsOf(v.Type())
+		fields := w.checked.fieldsOf(v.Type())
 
 		for _, field := range fields.held {
 			if shadowed[field.name] {
@@ -621,19 +703,19 @@ func (w *selfWalker) bind(err error) error {
 }
 
 // structFields holds the fields of a struct type that the walk reads, as
-// [fieldsOf] returns them.
+// [checkedTypes.fieldsOf] returns them.
 type structFields struct {
 	// The names of the fields of the struct that are not inline, as
 	// [yamlfield.OwnNames] returns them, or nil when no field in held
 	// is inline.
 	own map[string]bool
 
-	// The fields that go-yaml decodes and whose types may hold a
-	// [SelfValidator], in the order the struct declares them.
+	// The fields that go-yaml decodes and whose types can hold a
+	// validator, in the order the struct declares them.
 	held []heldField
 }
 
-// heldField is a field of a struct whose type may hold a [SelfValidator].
+// heldField is a field of a struct whose type can hold a validator.
 type heldField struct {
 	// The name go-yaml decodes the field under, as [yamlfield.Name]
 	// returns it.
@@ -649,18 +731,19 @@ type heldField struct {
 
 // fieldsOf returns the fields of t, a struct type, that the walk reads,
 // which leaves out each field go-yaml skips or that holds no validator.
-// Every walk shares the result, so a caller must not change it.
-func fieldsOf(t reflect.Type) *structFields {
-	return walkedFields.Get(t, readFields)
+// Every walk with the set shares the result, so a caller must not change
+// it.
+func (c *checkedTypes) fieldsOf(t reflect.Type) *structFields {
+	return c.fields.Get(t, c.readFields)
 }
 
-// readFields returns the fields [fieldsOf] returns for t.
-func readFields(t reflect.Type) *structFields {
+// readFields returns the fields [checkedTypes.fieldsOf] returns for t.
+func (c *checkedTypes) readFields(t reflect.Type) *structFields {
 	fields := &structFields{}
 
 	for i := range t.NumField() {
 		field := t.Field(i)
-		if !mayHoldValidator(field.Type) {
+		if !c.mayHold(field.Type) {
 			continue
 		}
 
@@ -679,20 +762,20 @@ func readFields(t reflect.Type) *structFields {
 	return fields
 }
 
-// entriesMayHoldValidator reports whether an element of a value of type t,
-// a slice, array, or map, or a key or value of a map, may hold a
-// [SelfValidator], as [mayHoldValidator] reads it.
-func entriesMayHoldValidator(t reflect.Type) bool {
-	if t.Kind() == reflect.Map && mayHoldValidator(t.Key()) {
+// entriesMayHold reports whether an element of a value of type t, a
+// slice, array, or map, or a key or value of a map, can hold a validator,
+// as [checkedTypes.mayHold] reads it.
+func (c *checkedTypes) entriesMayHold(t reflect.Type) bool {
+	if t.Kind() == reflect.Map && c.mayHold(t.Key()) {
 		return true
 	}
 
-	return mayHoldValidator(t.Elem())
+	return c.mayHold(t.Elem())
 }
 
 // holdsBelow reports whether a value below v, a map the walk is inside of,
-// implements [SelfValidator] where the walk would validate it. The scan
-// reads each pointer, map, and slice once, however many paths lead there.
+// is a validator where the walk validates it. The scan reads each
+// pointer, map, and slice once, however many paths lead there.
 func (w *selfWalker) holdsBelow(v reflect.Value) bool {
 	defer clear(w.scanning)
 
@@ -712,7 +795,7 @@ func (w *selfWalker) holdsBelow(v reflect.Value) bool {
 	// A false result holds for every value the scan reached, since each
 	// lies below v. When v validates itself, a value that leads back to v
 	// holds v below it, so the scan records nothing.
-	if !held && !implementsSelfValidator(v.Type()) {
+	if !held && !w.checked.validates(v.Type()) {
 		for key := range w.scanning {
 			w.scanned[key] = false
 		}
@@ -725,7 +808,7 @@ func (w *selfWalker) holdsBelow(v reflect.Value) bool {
 // Its second result is false when the scan met a value it was still reading,
 // so a false first result then holds for this scan alone.
 func (w *selfWalker) scanValue(v reflect.Value) (bool, bool) {
-	if !v.IsValid() || !mayHoldValidator(v.Type()) {
+	if !v.IsValid() || !w.checked.mayHold(v.Type()) {
 		return false, true
 	}
 
@@ -743,7 +826,7 @@ func (w *selfWalker) scanValue(v reflect.Value) (bool, bool) {
 				return false, true
 			}
 
-			return implementsSelfValidator(v.Type()), true
+			return w.checked.validates(v.Type()), true
 		}
 
 		if !ownsAddress(v) {
@@ -762,7 +845,7 @@ func (w *selfWalker) scanValue(v reflect.Value) (bool, bool) {
 		// The record of a map or slice covers only the values below it, as
 		// holdsBelow reads it, so a map or slice that validates itself
 		// reports a validator here and records nothing.
-		if v.Kind() != reflect.Pointer && implementsSelfValidator(v.Type()) {
+		if v.Kind() != reflect.Pointer && w.checked.validates(v.Type()) {
 			return true, true
 		}
 
@@ -793,7 +876,7 @@ func (w *selfWalker) scanOwned(v reflect.Value) (bool, bool) {
 // scanSelf scans v, a value that is no pointer or interface, as
 // [selfWalker.scanValue] describes.
 func (w *selfWalker) scanSelf(v reflect.Value) (bool, bool) {
-	if implementsSelfValidator(v.Type()) {
+	if w.checked.validates(v.Type()) {
 		return true, true
 	}
 
@@ -819,7 +902,7 @@ func (w *selfWalker) scanChildren(v reflect.Value) (bool, bool) {
 
 	switch v.Kind() {
 	case reflect.Struct:
-		for _, field := range fieldsOf(v.Type()).held {
+		for _, field := range w.checked.fieldsOf(v.Type()).held {
 			if scan(v.Field(field.index)) {
 				return true, true
 			}
@@ -834,7 +917,7 @@ func (w *selfWalker) scanChildren(v reflect.Value) (bool, bool) {
 
 	case reflect.Map:
 		t := v.Type()
-		scanKeys, scanValues := mayHoldValidator(t.Key()), mayHoldValidator(t.Elem())
+		scanKeys, scanValues := w.checked.mayHold(t.Key()), w.checked.mayHold(t.Elem())
 
 		// One holder each for the keys and values saves the copy iter.Key and
 		// iter.Value make per entry, but SetIterKey and SetIterValue panic on
@@ -897,11 +980,15 @@ func implementsSelfValidator(t reflect.Type) bool {
 }
 
 // validate runs Validate on v, through a copy when v has no address, and
-// reports whether v passed. Rebasing the result under at presumes every
-// problem invalid, so each matches [errInvalid] whether it has a location
-// or not, unless an Error from [Place] sits on its cause chain.
+// then each function of the walk from [WithValueCheck] for the type of v,
+// in order. It reports whether v passed, and stops at the first that
+// fails. Rebasing the error of Validate under at presumes every problem
+// invalid, so each matches [errInvalid] whether it has a location or not,
+// unless an Error from [Place] sits on its cause chain. The error of a
+// function declares what it declares itself, as that of a [Validator]
+// does.
 func (w *selfWalker) validate(v reflect.Value, at place) bool {
-	if !implementsSelfValidator(v.Type()) {
+	if !w.checked.validates(v.Type()) {
 		return true
 	}
 
@@ -911,12 +998,31 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 
 	v = addressable(v)
 
-	validator, ok := reflect.TypeAssert[SelfValidator](v.Addr())
-	if !ok {
-		return true
+	if implementsSelfValidator(v.Type()) {
+		validator, ok := reflect.TypeAssert[SelfValidator](v.Addr())
+		if ok && !w.report(validator.Validate(), at, presumed) {
+			return false
+		}
 	}
 
-	err := validator.Validate()
+	for _, check := range w.cfg.checks {
+		if check.typ != v.Type() {
+			continue
+		}
+
+		if w.stopped() || !w.report(check.run(w.ctx, v.Addr()), at, undeclared) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// report records err, the result of a check of one value, rebased with d
+// under the place of that value, and reports whether the value passed.
+// The error of a context that ended stops the walk, as
+// [selfWalker.stopped] describes.
+func (w *selfWalker) report(err error, at place, d declaration) bool {
 	if isNothing(err) {
 		return true
 	}
@@ -928,14 +1034,15 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 	}
 
 	m := move{base: at.path(), ambiguous: w.ambiguous, fallback: w.fallback()}
-	w.errs = append(w.errs, rebase(err, m, presumed))
+	w.errs = append(w.errs, rebase(err, m, d))
 
 	return false
 }
 
 // stopped reports whether the walk has stopped, which it does once its
-// context ends or a Validate returns the error of a context that ended.
-// The first such error replaces every other error of the walk.
+// context ends, or once a Validate or a function from [WithValueCheck]
+// returns the error of a context that ended. The first such error
+// replaces every other error of the walk.
 func (w *selfWalker) stopped() bool {
 	if w.ended == nil {
 		w.ended = w.ctx.Err()

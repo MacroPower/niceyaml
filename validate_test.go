@@ -3440,6 +3440,69 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 	}
 }
 
+func TestNode_SelfValidate_ValueChecks(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString(stringtest.Input(`
+		services:
+		  0x10:
+		    addr: 127.0.0.1
+	`), niceyaml.WithName("app.yaml"))
+
+	doc := yamltest.Document(t, source)
+	noLoopback := niceyaml.WithValueCheck(rejectLoopback)
+
+	// The decode turns the walk off, so it runs no check either.
+	var cfg checkedServices
+
+	err := doc.DecodeInto(t.Context(), &cfg, noLoopback, niceyaml.WithSelfValidation(false))
+	require.NoError(t, err)
+
+	tcs := map[string]struct {
+		validate func(ctx context.Context) error
+		err      string
+	}{
+		"Node.SelfValidate with the check": {
+			validate: func(ctx context.Context) error { return doc.SelfValidate(ctx, &cfg, noLoopback) },
+			err:      "app.yaml:3:11: $.services.0x10.addr: loopback address 127.0.0.1",
+		},
+		"Node.SelfValidate without the check": {
+			validate: func(ctx context.Context) error { return doc.SelfValidate(ctx, &cfg) },
+		},
+		"Source.SelfValidate with the check": {
+			validate: func(ctx context.Context) error { return source.SelfValidate(ctx, &cfg, noLoopback) },
+			err:      "app.yaml:3:11: $.services.0x10.addr: loopback address 127.0.0.1",
+		},
+		"Source.SelfValidate without the check": {
+			validate: func(ctx context.Context) error { return source.SelfValidate(ctx, &cfg) },
+		},
+		"a scoped Node with the check": {
+			validate: func(ctx context.Context) error {
+				svc := cfg.Services[16]
+
+				return yamltest.At(t, doc, paths.Doc().Child("services", "0x10")).SelfValidate(ctx, &svc, noLoopback)
+			},
+			err: "app.yaml:3:11: $.services.0x10.addr: loopback address 127.0.0.1",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.validate(t.Context())
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.EqualError(t, err, tc.err)
+			assert.True(t, niceyaml.IsInvalid(err))
+		})
+	}
+}
+
 func ExampleSelfValidateValue() {
 	ctx := context.Background()
 
@@ -3802,6 +3865,163 @@ func TestSelfValidateValue_Place(t *testing.T) {
 			require.EqualError(t, through, cmp.Or(tc.through, tc.want))
 		})
 	}
+}
+
+func TestSelfValidateValue_Options(t *testing.T) {
+	t.Parallel()
+
+	// CheckedRing leads from each element to the next, and the last
+	// element leads back to the first.
+	type checkedRing struct {
+		Next   *checkedRing  `yaml:"next"`
+		Mirror checkedMirror `yaml:"mirror"`
+	}
+
+	t.Run("runs the checks it gets", func(t *testing.T) {
+		t.Parallel()
+
+		// The value of the first two cases, which holds one mirror.
+		services := func() any {
+			return &checkedServices{Services: map[int]checkedService{16: {Mirror: checkedMirror{URL: "ftp://m"}}}}
+		}
+
+		tcs := map[string]struct {
+			value func() any
+			err   string
+			calls int
+			check bool
+		}{
+			"a map entry reports the text of its Go key": {
+				value: services,
+				check: true,
+				err:   `$.services.16.mirror.url: url "ftp://m" is not http`,
+				calls: 1,
+			},
+			"no check without the option": {
+				value: services,
+			},
+			"a value two paths share checks once, under the first": {
+				value: func() any {
+					m := &checkedMirror{URL: "ftp://m"}
+
+					return &struct {
+						A *checkedMirror `yaml:"a"`
+						B *checkedMirror `yaml:"b"`
+					}{A: m, B: m}
+				},
+				check: true,
+				err:   `$.a.url: url "ftp://m" is not http`,
+				calls: 1,
+			},
+			"a cycle checks each value once": {
+				value: func() any {
+					first := &checkedRing{Mirror: checkedMirror{URL: "ftp://a"}}
+					first.Next = &checkedRing{Mirror: checkedMirror{URL: "http://b"}, Next: first}
+
+					return first
+				},
+				check: true,
+				err:   `$.mirror.url: url "ftp://a" is not http`,
+				calls: 2,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var (
+					calls int
+					opts  []niceyaml.DecodeOption
+				)
+
+				if tc.check {
+					opts = append(opts, niceyaml.WithValueCheck(func(ctx context.Context, m *checkedMirror) error {
+						calls++
+
+						return requireHTTP(ctx, m)
+					}))
+				}
+
+				err := niceyaml.SelfValidateValue(t.Context(), tc.value(), opts...)
+				assert.Equal(t, tc.calls, calls)
+
+				if tc.err == "" {
+					require.NoError(t, err)
+
+					return
+				}
+
+				require.EqualError(t, err, tc.err)
+				assert.True(t, niceyaml.IsInvalid(err))
+			})
+		}
+	})
+
+	// A function from WithCustomUnmarshaler sorts the numbers, so their
+	// indices need not match the document, and an error below them binds
+	// at the list.
+	t.Run("reads the unmarshalers it gets", func(t *testing.T) {
+		t.Parallel()
+
+		type sortedNums []int
+
+		type request struct {
+			Nums sortedNums `yaml:"nums"`
+		}
+
+		sorted := niceyaml.WithCustomUnmarshaler(func(_ context.Context, s *sortedNums, decode func(any) error) error {
+			var nums []int
+
+			err := decode(&nums)
+			if err != nil {
+				return err
+			}
+
+			slices.Sort(nums)
+
+			*s = nums
+
+			return nil
+		})
+
+		small := niceyaml.WithValueCheck(func(_ context.Context, n *int) error {
+			if *n > 2 {
+				return niceyaml.NewError(fmt.Sprintf("%d is more than 2", *n))
+			}
+
+			return nil
+		})
+
+		tcs := map[string]struct {
+			want string
+			opts []niceyaml.DecodeOption
+		}{
+			"with the unmarshaler": {
+				opts: []niceyaml.DecodeOption{small, sorted},
+				want: "app.yaml:2:3: $.request.nums[2]: 3 is more than 2",
+			},
+			"without the unmarshaler": {
+				opts: []niceyaml.DecodeOption{small},
+				want: "app.yaml:2:16: $.request.nums[2]: 3 is more than 2",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, "request:\n  nums: [3, 1, 2]\n", niceyaml.WithName("app.yaml"))
+				value := request{Nums: sortedNums{1, 2, 3}}
+
+				err := niceyaml.SelfValidateValue(t.Context(), &value, tc.opts...)
+				require.EqualError(t, err, "$.nums[2]: 3 is more than 2")
+
+				placed := doc.Bind(niceyaml.Rebase(err, paths.Doc().Child("request")))
+				require.EqualError(t, placed, tc.want)
+			})
+		}
+	})
 }
 
 func TestSelfValidateValue_Validate(t *testing.T) {

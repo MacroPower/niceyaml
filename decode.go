@@ -27,13 +27,14 @@ import (
 // DecodeOption configures [Node.Decode], [Node.DecodeInto],
 // [Node.DecodeAt], and [Node.DecodeIfPresent], and [Source.Decode] and
 // [Source.DecodeInto], which decode the one document of a Source.
-// [Node.SelfValidate] and [Source.SelfValidate] take them too, and read
-// only the options that say how a value decodes, as Node.SelfValidate
-// lists them.
+// [Node.SelfValidate], [Source.SelfValidate], and [SelfValidateValue]
+// take them too, and read only the functions of [WithValueCheck] and the
+// options that say how a value decodes, as Node.SelfValidate lists them.
 //
 // Available options:
 //   - [WithValidator]
 //   - [WithSelfValidation]
+//   - [WithValueCheck]
 //   - [WithDisallowUnknownFields]
 //   - [WithAllowedFieldPrefixes]
 //   - [WithCustomUnmarshaler]
@@ -53,12 +54,21 @@ type DecodeOption func(*decodeConfig)
 type decodeConfig struct {
 	validators           []Validator
 	allowedFieldPrefixes []string
+	// The functions from [WithValueCheck], in the order given.
+	checks []valueCheck
 	// The types the options hand to an unmarshaler that no method of the
 	// type declares.
 	unmarshalers          unmarshaler.Options
 	skipSelfValidation    bool
 	disallowUnknownFields bool
 	orderedMaps           bool
+}
+
+// valueCheck is a function from [WithValueCheck] for the values of one
+// type. Run takes a pointer to the value.
+type valueCheck struct {
+	typ reflect.Type
+	run func(ctx context.Context, v reflect.Value) error
 }
 
 // newDecodeConfig returns the settings of a decode: the defaults, with
@@ -96,15 +106,86 @@ func WithValidator(dv Validator) DecodeOption {
 	}
 }
 
-// WithSelfValidation is a [DecodeOption] that sets whether the values
-// in a decoded value that implement [SelfValidator] validate themselves
-// after decoding. The default is true. Validators given with
+// WithSelfValidation is a [DecodeOption] that sets whether the decode
+// runs the self-validation walk on the decoded value, which calls the
+// Validate method of each [SelfValidator] in it and the functions from
+// [WithValueCheck]. The default is true. Validators given with
 // [WithValidator] run either way. [Node.SelfValidate] and
 // [Source.SelfValidate] run the walk whatever the option says, so a
-// caller that turns it off for the decode validates the value later.
+// caller that turns it off for the decode validates the value later. That
+// later call runs only the functions of WithValueCheck it gets, so the
+// caller passes them again.
 func WithSelfValidation(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.skipSelfValidation = !enabled
+	}
+}
+
+// WithValueCheck is a [DecodeOption] that checks every value of type T in
+// the decoded value with fn. It suits a check that needs the context of
+// the call, and a check of a type the program cannot give a Validate
+// method, such as one of another package:
+//
+//	allowed := niceyaml.WithValueCheck(func(ctx context.Context, p *netip.Prefix) error {
+//		ok, err := tenant.Allows(ctx, *p)
+//		if err != nil {
+//			return niceyaml.Place(err)
+//		}
+//
+//		if !ok {
+//			return niceyaml.NewError("prefix not allowed")
+//		}
+//
+//		return nil
+//	})
+//
+// The self-validation walk calls fn on a value once the values below it
+// and its own Validate method pass, as the Validation section of the
+// package documentation describes. Each WithValueCheck adds a function.
+// For one value, the walk runs the functions for its type in the order
+// given and stops at the first that fails, as a decode runs repeated
+// [WithValidator] options. T matches by its exact type, so a check of
+// string skips a value of a type such as `type Name string`. A field of
+// type *T reaches fn through the value it points to, and a nil pointer
+// skips fn.
+//
+// The `@` paths of an error from fn read from the value, and the walk puts
+// them under the path of the value, as it does for a Validate method. Fn
+// declares its faults as a [Validator] does. [NewError] and [Invalid]
+// declare a fault, and [Place] and a plain error declare none, where the
+// walk presumes the document at fault for a plain error from Validate. A
+// check moved from a Validate method thus keeps its fault only when it
+// wraps its error in Invalid.
+//
+// A struct field the document leaves out reaches fn as its zero value. A
+// map key, a map value, and a value inside an interface reach fn as a
+// pointer to a copy, so fn must not change v.
+//
+// The walk runs the functions one at a time, and only after the
+// validators and the decoder accept the document, so a check that fans
+// its I/O out runs after Decode returns. A decode with
+// [WithSelfValidation] off runs no function, and a later
+// [Node.SelfValidate] runs only the functions it gets. A call that gets
+// one [DecodeOptions] value twice runs each of its functions twice.
+//
+// WithValueCheck panics for a pointer or interface T, because the walk
+// checks no value of such a type. A nil fn adds nothing.
+func WithValueCheck[T any](fn func(ctx context.Context, v *T) error) DecodeOption {
+	t := reflect.TypeFor[T]()
+	if t.Kind() == reflect.Pointer || t.Kind() == reflect.Interface {
+		panic(fmt.Sprintf("niceyaml.WithValueCheck: %v is a pointer or interface type, which the walk never checks", t))
+	}
+
+	return func(c *decodeConfig) {
+		if fn == nil {
+			return
+		}
+
+		c.checks = append(c.checks, valueCheck{typ: t, run: func(ctx context.Context, p reflect.Value) error {
+			v, _ := reflect.TypeAssert[*T](p)
+
+			return fn(ctx, v)
+		}})
 	}
 }
 
@@ -313,10 +394,11 @@ func WithYAMLOrderedMaps(enabled bool) DecodeOption {
 // [Node.Nodes], that node is one value inside the document, so those
 // calls take the settings without the schema of the whole document.
 //
-// [WithValidator] and [WithAllowedFieldPrefixes] add to what the options
-// before them gave, and [WithCustomUnmarshaler] adds a type. Every other
-// option replaces what an earlier one of its kind set. A call that gets
-// the same DecodeOptions twice thus runs each of its validators twice.
+// [WithValidator], [WithValueCheck], and [WithAllowedFieldPrefixes] add to
+// what the options before them gave, and [WithCustomUnmarshaler] adds a
+// type. Every other option replaces what an earlier one of its kind set. A
+// call that gets the same DecodeOptions twice thus runs each of its
+// validators and each of its value checks twice.
 //
 // DecodeOptions copies opts, so the result keeps its options when the
 // caller changes the slice it passed. A nil DecodeOption among opts

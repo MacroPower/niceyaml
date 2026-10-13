@@ -209,7 +209,9 @@
 // hook places is no fault and does not match ErrDecode. A Place around a
 // join turns the presumption off for each branch it heads. A declared
 // fault still holds anywhere on the chain, so NewError inside Place and
-// Place inside Invalid are faults.
+// Place inside Invalid are faults. A function from [WithValueCheck] is
+// no such hook. It declares its faults as a [Validator] does, so a plain
+// error it returns is no fault.
 //
 // [IsInvalid] reports whether the document is at fault for every problem
 // of an error, which picks a status code or an exit code, and
@@ -227,9 +229,10 @@
 // `@` path in the tree of an error, details included, and points each
 // problem that carries no location at the value itself. A `$` path, a
 // position, and a range stay as they are, and rebases compose. A decode
-// rebases what every nested [SelfValidator] returns, and a [Node] from
-// [Node.At] or [Node.Nodes] binds an error as a Rebase under its own path
-// does, so a check bound through the Node of its value needs no Rebase.
+// rebases what every nested [SelfValidator] and every function from
+// WithValueCheck returns. A [Node] from [Node.At] or [Node.Nodes] binds an
+// error as a Rebase under its own path does, so a check bound through the
+// Node of its value does not need a Rebase.
 // A path names a map key as the document spells it, so a base built from
 // a decoded key can miss, as the key 0x10 of a map[int]T that decodes to
 // 16 does. A [DataLocator] finds an entry by its decoded key.
@@ -238,15 +241,15 @@
 // as a check for a required field names, binds at the key of the mapping
 // that lacks the value. A path that enters an alias the document cannot
 // follow, such as one to an anchor in a reference document, binds at the
-// alias. An error a [SelfValidator] returns below a value that decodes
-// itself binds at that value when its path selects nothing.
-// [SourceError.Nearest] reports the node in each case. Any other location
-// that does not resolve costs the binding its position, and
-// [SourceError.Unresolved] returns the reason, such as [ErrOutOfRange]
-// for a line the source does not hold or [ErrPathNeedsDocument] for a
-// path with no single document to resolve in. Such a binding names its
-// source in front of the message, and [FormatError] prints the reason in
-// place of its excerpt.
+// alias. An error that a [SelfValidator] or a function from WithValueCheck
+// returns below a value that decodes itself binds at that value when its
+// path selects nothing. [SourceError.Nearest] reports the node in each
+// case. Any other location that does not resolve costs the binding its
+// position, and [SourceError.Unresolved] returns the reason, such as
+// [ErrOutOfRange] for a line the source does not hold or
+// [ErrPathNeedsDocument] for a path with no single document to resolve in.
+// Such a binding names its source in front of the message, and
+// [FormatError] prints the reason in place of its excerpt.
 //
 // An error that is or wraps a [*SourceError], with no [*Error] above it
 // that carries a location, heads errors, or holds details, is bound
@@ -256,9 +259,9 @@
 // that value, as "$.port: 0 is less than 1", and it stands in no
 // document, so a document can still place it. Rebase and every Bind read
 // it as the error it was made from, and a decode places it at the value
-// whose Validate method or [Validator] returned it. A wrapper around it
-// keeps its own text, behind the position and the path. Placing builds a
-// new error and leaves the result as it is:
+// whose Validate method, [Validator], or function from WithValueCheck
+// returned it. A wrapper around it keeps its own text, behind the position
+// and the path. Placing builds a new error and leaves the result as it is:
 //
 //	err := engine.ValidateValue(cfg.Request)
 //
@@ -358,7 +361,8 @@
 //     the document read far more than the document holds.
 //  5. The go-yaml decoder fills the target.
 //  6. Every value in the result that implements [SelfValidator] validates
-//     itself, unless [WithSelfValidation] turns that off.
+//     itself, and each function from [WithValueCheck] checks the values of
+//     its type, unless [WithSelfValidation] turns that off.
 //
 // A field the document leaves out keeps its value, so a caller fills the
 // target with defaults first. A mapping merges into a struct field by field
@@ -431,18 +435,18 @@
 // The decode recovers a panic in the go-yaml decoder and in the unmarshalers
 // it calls. The panic comes back as an error that holds a [PanicError],
 // bound at the first token of the node, which does not match ErrDecode and
-// which [IsInvalid] does not report. Nothing recovers a panic in a Validator
-// or in a Validate method.
+// which [IsInvalid] does not report. Nothing recovers a panic in a Validator,
+// in a Validate method, or in a function from [WithValueCheck].
 //
 // A Source from [NewSourceFromLayers] runs these steps once on the merged
 // document, as the Layers section describes.
 //
 // # Validation
 //
-// A [Validator] checks the node before it decodes, as a JSON schema does,
-// and a [SelfValidator] checks a decoded value after. [Node.Validate] runs a
-// Validator without decoding. A [go.jacobcolvin.com/niceyaml/schema.Schema]
-// checks one JSON schema, and a
+// A [Validator] checks the node before it decodes, as a JSON schema does. A
+// [SelfValidator] checks a decoded value after, and so does a function from
+// [WithValueCheck]. [Node.Validate] runs a Validator without decoding. A
+// [go.jacobcolvin.com/niceyaml/schema.Schema] checks one JSON schema, and a
 // [go.jacobcolvin.com/niceyaml/schema.Registry] picks the schema for each
 // document. [MultiValidator] runs several validators and reports every
 // failure, which suits independent rules. [ChainValidator] stops at the
@@ -459,28 +463,29 @@
 // binds there. A direct call of [Validator.Check] returns the error
 // unbound.
 //
-// A validator that checks the decoded data reads the node with
-// [Node.Decode], which runs only the validators that call passes. A decode
-// passes none of its options to the validators it runs. A validator that
-// decodes into a type of the program therefore takes the settings of the
-// program and turns self-validation off, since the outer decode validates
-// its own result. It makes every check on the type in one decode, since two
-// such validators under MultiValidator report one rejection twice:
+// A check of the decoded values of one type goes to the decode with
+// [WithValueCheck]. It suits a check that needs the context of the call,
+// and a check of a type of another package, which the program cannot give
+// a Validate method. The decode runs the function on every value of the
+// type in the result, in the step where the values validate themselves:
 //
-//	func typed(settings niceyaml.DecodeOption, check func(*niceyaml.DataLocator, *Config) error) niceyaml.Validator {
-//		return niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-//			cfg, err := n.Decode[Config](ctx, settings, niceyaml.WithSelfValidation(false))
-//			if err != nil {
-//				return err
-//			}
+//	allowed := niceyaml.WithValueCheck(func(ctx context.Context, p *netip.Prefix) error {
+//		if !tenant.Allows(ctx, *p) {
+//			return niceyaml.NewError("prefix not allowed")
+//		}
 //
-//			return check(n.DataLocator(), &cfg)
-//		})
-//	}
+//		return nil
+//	})
 //
-// The decoder respells some keys, so the key 0x10 sets the member 16.
-// [Node.DataLocator] reads the names of decoded data as the decoder does, so
-// a check of the data reports a finding where a schema reports a violation
+//	cfg, err := doc.Decode[Config](ctx, niceyaml.WithValidator(schema), allowed)
+//
+// A validator that reads decoded data decodes the node itself with
+// [Node.Decode], and a decode passes none of its options to the validators
+// it runs. A check that runs after Decode returns, such as one that runs
+// its I/O in parallel, locates each finding with [Node.DataLocator]. The
+// decoder respells some keys, so the key 0x10 sets the member 16. A
+// DataLocator reads the names of decoded data as the decoder does, so a
+// check of the data reports a finding where a schema reports a violation
 // of the same value.
 //
 // A validator declares which of its errors are the fault of the document
@@ -488,49 +493,62 @@
 // and [Invalid] declare a fault, and [Place] shows an error at the value the
 // check read without declaring one. A schema reports a violation as a fault
 // and a schema that does not load as none, so [IsInvalid] tells the two
-// apart.
+// apart. A function from WithValueCheck declares its faults the same way,
+// where a decode presumes the document at fault for an error that a
+// Validate method returns and that declares nothing. A check moved from a
+// Validate method into such a function thus keeps its fault only when it
+// wraps its error in Invalid.
 //
 // A decode calls Validate on every value in the result that implements
-// SelfValidator. The values below a value validate first, and the value
-// validates only when every one of them passed. Validate writes `@` paths,
-// which read from the value, and the decode puts them under the path of the
-// value in the document. An Hours under spec that reports @.close thus
-// reports $.spec.hours.close. The path names a field by its yaml tag, its
-// json tag, or its lowercased name, an element by its index, and a map entry
-// by its key as the document spells it. A map key validates at the path of
-// its entry with a `~` after it, and a field an inline tag flattens keeps
-// the path of its struct. A field that go-yaml never decodes, such as one
-// tagged `yaml:"-"`, does not validate. A Validate that an embedded field
-// promotes runs once, on that field. A Validate that an UnmarshalYAML
-// already called runs again in the decode, so it must be idempotent.
+// SelfValidator, and then the functions from WithValueCheck for the type of
+// the value, in the order given. The values below a value validate first,
+// and the value validates only when every one of them passed. The functions
+// for a value run only once its Validate passes, and the first that fails
+// stops the rest. A Validate that an embedded field promotes runs once, on
+// that field. A Validate that an UnmarshalYAML already called runs again in
+// the decode, so it must be idempotent.
+//
+// Validate and each function write `@` paths, which read from the value,
+// and the decode puts them under the path of the value in the document. An
+// Hours under spec that reports @.close thus reports $.spec.hours.close. The
+// path names a field by its yaml tag, its json tag, or its lowercased name,
+// an element by its index, and a map entry by its key as the document
+// spells it. A map key validates at the path of its entry with a `~` after
+// it, and a field an inline tag flattens keeps the path of its struct. A
+// struct field the document leaves out validates too, with the value the
+// decode left in it, such as its zero value. A field that go-yaml never
+// decodes, such as one tagged `yaml:"-"`, does not validate.
 //
 // A value that decodes itself validates as any other, and so does every
 // value below it. Its fields need not mirror the document, so an error below
 // it whose path the document does not hold binds at the nearest such value,
 // which [SourceError.Nearest] names. Every error below a slice, an array, or
-// a map that decodes itself binds at that value. A Validate holds no Node,
-// so a check that needs one, such as a check against a registry, runs after
-// Decode returns and binds its result with Node.Bind. A check of map entries
-// belongs in a Validate of the type of the entry, which the decode puts
+// a map that decodes itself binds at that value. Neither a Validate nor a
+// function from WithValueCheck holds a Node, so a check that needs one, such
+// as a check against a registry, runs after Decode returns and binds its
+// result with Node.Bind. A check of map entries belongs in a Validate or a
+// WithValueCheck function of the type of the entry, which the decode puts
 // under the key as the document spells it.
 //
 // [Node.SelfValidate] runs the last step on its own, for a program whose
 // library writes its environment or its flags into the value. The program
 // decodes with [WithSelfValidation] off, lets the library fill the value,
-// and then calls SelfValidate. No Validator sees a value set this way. The
-// walk follows the value, and each error binds where its path resolves in
-// the document. An error under a field the document lacks binds at the key
-// of the mapping that lacks it, and an error under an element the document
-// lacks binds with no position. [Source.SelfValidate] runs the step through
-// the one document of a Source, and an empty Source stands in for an
-// optional file that does not exist.
+// and then calls SelfValidate. SelfValidate runs only the functions of
+// WithValueCheck it gets, so the program passes them to SelfValidate as
+// well. No Validator sees a value set this way. The walk follows the value,
+// and each error binds where its path resolves in the document. An error
+// under a field the document lacks binds at the key of the mapping that
+// lacks it, and an error under an element the document lacks binds with no
+// position. [Source.SelfValidate] runs the step through the one document of
+// a Source, and an empty Source stands in for an optional file that does
+// not exist.
 //
 // A check on a value that came from no document, such as the body of a
 // request, has no line to report. [SelfValidateValue] runs the Validate of
-// every value below such a value and binds the result with [BindValue], so
-// the text names each path, as in "$.close: closes before it opens". A
-// caller that later learns where the value stands places the error there
-// with [Rebase] and Node.Bind.
+// every value below such a value, and the functions of WithValueCheck it
+// gets, and binds the result with [BindValue], so the text names each path,
+// as in "$.close: closes before it opens". A caller that later learns where
+// the value stands places the error there with [Rebase] and Node.Bind.
 //
 // # Scoped Nodes
 //
@@ -589,8 +607,9 @@
 // # Cancellation
 //
 // The context of a call reaches every [Validator] the call runs and every
-// function from [WithCustomUnmarshaler]. A check that does remote work, such
-// as resolving a schema reference, thus stops when the caller gives up.
+// function from [WithCustomUnmarshaler] and [WithValueCheck]. A check that
+// does remote work, such as resolving a schema reference, thus stops when
+// the caller cancels the context.
 //
 // The go-yaml decoder never checks the context. A decode checks it before
 // the decoder starts and between the anchors it registers, and no deadline
@@ -604,8 +623,9 @@
 //   - The search for the other problems of a rejected decode stops, and
 //     the decode returns the rejection alone.
 //   - The self-validation walk stops, and returns the error of the context
-//     in place of the errors it found. A Validate that returns the error
-//     of a context that ended stops the walk the same way.
+//     in place of the errors it found. A Validate method or a function from
+//     WithValueCheck that returns the error of a context that ended stops
+//     the walk the same way.
 //   - [MultiValidator] runs no further validator, and returns the error of
 //     the context, or the error of the validator that saw it end.
 //   - [NewSourceFromLayers] returns the error of the context.
