@@ -2146,9 +2146,18 @@ func TestRegistry_FileFS(t *testing.T) {
 
 		require.NoError(t, reg.Check(t.Context(), doc))
 
-		// The same text with its path alone names a file on disk, where
-		// the schema does not exist.
-		onDisk := yamltest.FirstDocumentWithPath(t, string(bundle["configs/app.yaml"].Data), "configs/app.yaml")
+		// The same text with its relative path alone gives the directive
+		// no directory to resolve beside.
+		text := string(bundle["configs/app.yaml"].Data)
+		relative := yamltest.FirstDocumentWithPath(t, text, "configs/app.yaml")
+
+		err = reg.Check(t.Context(), relative)
+		require.ErrorIs(t, err, schema.ErrResolve)
+		require.ErrorIs(t, err, schema.ErrNoBaseDir)
+
+		// With an absolute path, it names a file on disk, where the schema
+		// does not exist.
+		onDisk := yamltest.FirstDocumentWithPath(t, text, filepath.Join(t.TempDir(), "configs", "app.yaml"))
 
 		err = reg.Check(t.Context(), onDisk)
 		require.ErrorIs(t, err, schema.ErrLoad)

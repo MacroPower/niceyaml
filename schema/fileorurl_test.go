@@ -551,6 +551,51 @@ func TestRefBeside(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrNoBaseDir)
 	})
 
+	t.Run("a relative path beside a relative file path needs a file system", func(t *testing.T) {
+		t.Parallel()
+
+		relative := yamltest.FirstDocumentWithPath(t, "kind: App\n", "configs/app.yaml")
+
+		tcs := map[string]struct {
+			ref string
+		}{
+			"beside the document": {ref: "./schema.json"},
+			"bare name":           {ref: "schema.json"},
+			"through the parent":  {ref: "../outside/schema.json"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := schema.RefBeside(relative, tc.ref)
+				require.ErrorIs(t, err, schema.ErrNoBaseDir)
+				assert.Equal(t, `relative schema path has no base directory: "`+tc.ref+
+					`": the document path "configs/app.yaml" is relative and names no file system`, err.Error())
+			})
+		}
+	})
+
+	t.Run("a URL or an absolute path beside a relative file path names its target", func(t *testing.T) {
+		t.Parallel()
+
+		relative := yamltest.FirstDocumentWithPath(t, "kind: App\n", "configs/app.yaml")
+
+		ref, err := schema.RefBeside(relative, "https://example.com/schema.json")
+		require.NoError(t, err)
+		assert.Equal(t, "https://example.com/schema.json", ref.Key())
+
+		abs := filepath.Join(dir, "schema.json")
+
+		ref, err = schema.RefBeside(relative, abs)
+		require.NoError(t, err)
+		assert.Equal(t, schema.File(abs).Key(), ref.Key())
+
+		data, err := reg.Load(t.Context(), ref)
+		require.NoError(t, err)
+		assert.JSONEq(t, schemaData, string(data))
+	})
+
 	t.Run("an empty reference names no schema", func(t *testing.T) {
 		t.Parallel()
 
@@ -576,4 +621,41 @@ func TestRefBeside(t *testing.T) {
 		err := byName.Check(t.Context(), invalid)
 		require.ErrorContains(t, err, `missing required property "kind"`)
 	})
+}
+
+// A relative file path with no file system names a file on disk only
+// against the working directory, which the author of the document does
+// not pick. A relative reference beside such a path resolves nowhere,
+// even when the working directory holds the file it names.
+// [niceyaml.NewSourceFromFile] makes its path absolute, so its documents
+// still resolve. The test changes the process's working directory, so it
+// does not run in parallel.
+//
+//nolint:paralleltest // The test changes the working directory.
+func TestRefBeside_WorkingDirectory(t *testing.T) {
+	wd := t.TempDir()
+	path := filepath.Join("configs", "app.yaml")
+
+	writeFiles(t, wd, map[string]string{
+		"configs/schema.json": `{"properties": {"name": {"type": "string"}}}`,
+		"configs/app.yaml":    withDirective("./schema.json", "name: 5\n"),
+	})
+
+	t.Chdir(wd)
+
+	reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	fromBytes := niceyaml.NewSourceFromBytes(data, niceyaml.WithFilePath(path))
+
+	err = fromBytes.ValidateDocuments(t.Context(), reg)
+	require.ErrorIs(t, err, schema.ErrNoBaseDir)
+
+	fromFile, err := niceyaml.NewSourceFromFile(path)
+	require.NoError(t, err)
+
+	err = fromFile.ValidateDocuments(t.Context(), reg)
+	require.ErrorContains(t, err, `expected "string", got "integer"`)
 }

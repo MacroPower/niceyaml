@@ -14,6 +14,8 @@ import (
 
 // ErrNoBaseDir reports a relative file path given to [FileOrURL] with an
 // empty baseDir, which leaves nothing to resolve the path against.
+// [RefBeside] reports it for a relative path beside a document that has
+// no file path, or whose file path is relative and names no file system.
 var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 
 // FileOrURL creates a [Ref] for a schema reference as written in a
@@ -41,11 +43,9 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 //
 // FileOrURL uses the reference as written, so whoever wrote it picks the
 // file or host, as the note on [File] says of a path. A registry that
-// takes references from another trust domain confines its reads with
-// [WithFSAt] and the file system of an [os.Root], and its fetches with a
-// client that restricts hosts. It also serves one batch or request rather
-// than the whole process, since it keeps a schema for every distinct URL
-// it fetches, and an allowed host can answer endless ones.
+// takes references from another trust domain confines its reads, its
+// fetches, and its cache, as the Untrusted Documents section of the
+// package documentation describes.
 //
 // FileOrURL names a file on disk. A reference that belongs to a document
 // goes through [RefBeside] instead, which takes the base directory from
@@ -120,6 +120,14 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 // path names a file beside the document. A document without a file path
 // has no such directory, and a relative path then reports [ErrNoBaseDir].
 //
+// A relative file path with no file system has no such directory either,
+// so a relative reference beside it reports ErrNoBaseDir too. Such a
+// path names a file on disk only against the working directory, which
+// the author of the document does not pick. [niceyaml.NewSourceFromFile]
+// sets an absolute path. A program that builds a document from bytes
+// passes an absolute path to [niceyaml.WithFilePath], or gives the
+// document a file system with [niceyaml.WithFS].
+//
 // A Node of the document [niceyaml.NewSourceFromLayers] builds has the
 // file path of the layer [niceyaml.MergeAs] names, or else of the lowest
 // layer, whichever layer holds the reference. A resolver that
@@ -148,15 +156,27 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 //	})
 //
 // RefBeside uses the reference as written, so whoever wrote it picks the
-// file or host, as the note on [FileOrURL] says.
+// file or host, as the note on [FileOrURL] says. The Untrusted Documents
+// section of the package documentation gives the registry options that
+// confine a reference from another trust domain.
 func RefBeside(doc *niceyaml.Node, ref string) (Ref, error) {
 	var baseDir string
 
-	if path := doc.FilePath(); path != "" {
+	// A relative path on disk names a file only against the working
+	// directory, which the document does not pick, so it gives no base
+	// directory.
+	path := doc.FilePath()
+	relativeOnDisk := path != "" && doc.FS() == nil && !filepath.IsAbs(path)
+
+	if path != "" && !relativeOnDisk {
 		baseDir = filepath.Dir(path)
 	}
 
 	r, err := FileOrURL(baseDir, ref)
+	if relativeOnDisk && errors.Is(err, ErrNoBaseDir) {
+		return Ref{}, fmt.Errorf("%w: the document path %q is relative and names no file system", err, path)
+	}
+
 	if err != nil {
 		return Ref{}, err
 	}

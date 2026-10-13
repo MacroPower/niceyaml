@@ -219,6 +219,10 @@
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
+// [Directive] lets each document pick its own schema. A decode of
+// documents from another trust domain confines the registry first, as
+// Untrusted Documents describes.
+//
 // # Loaders
 //
 // [Embedded], [File], and [URL] return a [Ref] that names one schema, and
@@ -307,19 +311,9 @@
 //
 // [WithFSAt] confines the files a registry reads from disk. It reads
 // them through a file system that stands for one directory, and a path
-// outside that directory fails to load, so the option suits a program
-// that validates documents from another trust domain:
-//
-//	root, err := os.OpenRoot(dir)
-//	if err != nil {
-//	    return err
-//	}
-//	defer root.Close()
-//
-//	reg := schema.NewRegistry(
-//	    schema.WithFSAt(dir, root.FS()),
-//	    schema.WithResolvers(schema.Directive()),
-//	)
+// outside that directory fails to load. Untrusted Documents pairs it
+// with the other options that confine a registry for documents from
+// another trust domain.
 //
 // [FileOrURL] routes a reference as written in a directive or on a command
 // line, which may be a file path or a URL, and returns an error for one
@@ -365,4 +359,75 @@
 // Store type is a resolver:
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schemastore.New()))
+//
+// # Untrusted Documents
+//
+// [Directive] lets the author of a document pick the files the registry
+// reads and the URLs it fetches, and the schema a directive names can
+// name more through its $refs. A program that validates documents from
+// another trust domain, such as uploads or pull requests, confines its
+// registry with three options. Each acts on every load the registry
+// performs: the schema a [Ref] names, each $ref, and each redirect. One
+// registry with these options serves the program for its whole
+// lifetime:
+//
+//	root, err := os.OpenRoot(tenantDir)
+//	if err != nil {
+//	    return err
+//	}
+//	defer root.Close()
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithFSAt(tenantDir, root.FS()),
+//	    schema.WithURLPrefixes("https://schemas.example.com/"),
+//	    schema.WithCacheLimit(1024),
+//	    schema.WithResolvers(schema.Directive()),
+//	)
+//
+//	source, err := niceyaml.NewSourceFromFile(filepath.Join(tenantDir, "app.yaml"))
+//
+// [WithFSAt] confines the reads from disk to tenantDir. A directive that
+// names ./schema.json reads schema.json in tenantDir. One that names
+// ../other/schema.json, or an absolute path outside tenantDir, fails to
+// load, and so does a $ref that leads there. The file system of an
+// [os.Root] refuses a symbolic link that leads out of the tree, but the
+// one [os.DirFS] returns follows it. The Root must stay open while the
+// registry is in use.
+//
+// WithFSAt confines every document on disk.
+// [go.jacobcolvin.com/niceyaml.NewSourceFromFile] gives each document
+// an absolute path. A program that builds a document from bytes passes
+// an absolute path to [go.jacobcolvin.com/niceyaml.WithFilePath]. A
+// relative reference beside a document whose path is relative and that
+// has no file system fails with [ErrNoBaseDir]. A document in the file
+// system [go.jacobcolvin.com/niceyaml.WithFS] gives it reads only that
+// file system.
+//
+// [WithURLPrefixes] confines the fetches to the URLs under its prefixes,
+// and with no prefixes the registry fetches nothing. The prefixes cover
+// the schemas of every resolver, so a registry that also holds a
+// [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] must list the
+// hosts of the schemas its catalog names. A prefix names a host, not an
+// address. A host whose DNS answer points at an internal address still
+// receives the request, as in DNS rebinding. A program that must keep the
+// fetches off its own network checks each address in the Dialer of the
+// client it gives [WithHTTPClient].
+//
+// [WithCacheLimit] bounds the number of schemas the registry keeps.
+// Without it, documents that name endless distinct schemas, such as one
+// URL with a new query string each time, grow the cache for the lifetime
+// of the registry.
+//
+// The options do not keep the author from turning validation off. A
+// directive of "$schema=none" passes its document, and so does a
+// directive that names a schema that accepts the document. A program
+// that must check every document against a schema of its own leaves
+// Directive out of the resolvers.
+//
+// The text of a load error names the file or URL the registry tried,
+// such as a path under tenantDir. A server that returns the formatted
+// error to the author of the document reveals that path.
+// [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for a load
+// error, so such a server can tell it apart from a fault of the document
+// and return a message of its own.
 package schema

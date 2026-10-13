@@ -777,6 +777,31 @@ func TestDirective_Resolve(t *testing.T) {
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
 	})
 
+	t.Run("returns ErrNoBaseDir for a relative path beside a relative file path", func(t *testing.T) {
+		t.Parallel()
+
+		// The document has a file path, so the error names that path
+		// rather than ErrNoFilePath.
+		doc := yamltest.FirstDocumentWithPath(
+			t,
+			withDirective("./schema.json", "kind: Deployment\n"),
+			"configs/app.yaml",
+		)
+
+		_, err := schema.Directive().Resolve(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrNoBaseDir)
+		require.NotErrorIs(t, err, schema.ErrNoFilePath)
+		require.NotErrorIs(t, err, schema.ErrNoMatch)
+		assert.Contains(t, err.Error(), `"configs/app.yaml"`)
+
+		// A registry reports the error of the resolver.
+		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+
+		err = reg.Check(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrResolve)
+		require.ErrorIs(t, err, schema.ErrNoBaseDir)
+	})
+
 	t.Run("resolves an absolute path without a file path", func(t *testing.T) {
 		t.Parallel()
 
@@ -884,11 +909,15 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 				),
 			))
 
+			// A directive resolves beside an absolute path on disk alone.
+			configPath, err := filepath.Abs(filepath.Join("testdata", "config.yaml"))
+			require.NoError(t, err)
+
 			docs := map[string]*niceyaml.Node{
 				"embedded": yamltest.FirstDocument(t, "kind: Embedded\nname: 1\n"),
 				"directive": yamltest.FirstDocumentWithPath(t,
 					withDirective("schemas/name.json", "name: text\n"),
-					filepath.Join("testdata", "config.yaml"),
+					configPath,
 				),
 			}
 

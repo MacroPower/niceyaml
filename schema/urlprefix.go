@@ -79,7 +79,9 @@ var ErrURLNotAllowed = errors.New("URL not under an allowed prefix")
 // at an internal address still receives the request, as in DNS
 // rebinding. A program that must keep the fetches off its own network
 // checks each address in the Dialer of the client it gives
-// [WithHTTPClient].
+// [WithHTTPClient]. The Untrusted Documents section of the package
+// documentation pairs the option with the others that confine a
+// registry.
 //
 // Given more than once, each call adds its prefixes to those of the
 // calls before it.

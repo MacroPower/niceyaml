@@ -163,32 +163,15 @@ type registryConfig struct {
 //
 // Panics if dir is empty.
 //
-// # Untrusted Documents
+// # Symbolic Links
 //
-// The option pairs with [niceyaml.NewSourceFromFile], whose documents
-// carry paths on disk. A program that validates documents from another
-// trust domain passes the file system of an [os.Root] and keeps the Root
-// open while the registry is in use:
-//
-//	root, err := os.OpenRoot(tenantDir)
-//	if err != nil {
-//	    return err
-//	}
-//	defer root.Close()
-//
-//	reg := schema.NewRegistry(
-//	    schema.WithFSAt(tenantDir, root.FS()),
-//	    schema.WithResolvers(schema.Directive()),
-//	)
-//
-//	source, err := niceyaml.NewSourceFromFile(filepath.Join(tenantDir, "app.yaml"))
-//
-// A directive in that document that names ./schema.json resolves to
-// schema.json in tenantDir, and one that names ../other/schema.json
-// fails to load. The registry checks only the path, and [os.DirFS]
-// follows symbolic links, so a link inside dir still reads a file
-// anywhere on disk. The file system [os.Root.FS] returns refuses a link
-// that leads out of the tree.
+// The registry checks only the path, and [os.DirFS] follows symbolic
+// links, so a link inside dir still reads a file anywhere on disk. The
+// file system [os.Root.FS] returns refuses a link that leads out of the
+// tree. A program that validates documents from another trust domain
+// therefore passes the file system of an [os.Root] and keeps the Root
+// open while the registry is in use. The Untrusted Documents section of
+// the package documentation gives the whole recipe.
 //
 // # Directory Paths
 //
@@ -335,6 +318,11 @@ func WithResolvers(res ...Resolver) RegistryOption {
 //	)
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
+//
+// [Directive] lets each document pick its own schema. A decode of
+// documents from another trust domain confines the registry first, as
+// the Untrusted Documents section of the package documentation
+// describes.
 //
 // [Registry.Lookup] reports [ErrNoMatch] either way, since a caller that
 // asks for the validator needs to know there is none.

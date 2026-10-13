@@ -31,7 +31,8 @@ import (
 // its own. Documents that name endless distinct Keys therefore grow the
 // memory of a long-lived registry without bound. A registry that serves
 // documents from another trust domain for its whole lifetime sets a
-// limit.
+// limit, as the Untrusted Documents section of the package documentation
+// describes.
 //
 // A limit of zero or less leaves the registry as it is, and by default
 // the registry keeps every entry. Given more than once, the last option

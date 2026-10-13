@@ -164,6 +164,15 @@ func WithName(name string) SourceOption {
 // pass an absolute path, since each later reader resolves a relative
 // one against the working directory it finds.
 //
+// A schema directive resolves a relative reference beside a relative
+// path only in the file system [WithFS] gives the Source. Without one,
+// the reference fails with
+// [go.jacobcolvin.com/niceyaml/schema.ErrNoBaseDir], whatever the
+// working directory holds. A program that validates a document from
+// another trust domain confines its schema registry, as the Untrusted
+// Documents section of the [go.jacobcolvin.com/niceyaml/schema] package
+// documentation describes.
+//
 // [NewSourceFromFile] sets the absolute path of the file it reads, and
 // [NewSourceFromFS] sets the path in its file system, so neither needs
 // the option.

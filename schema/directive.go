@@ -133,8 +133,10 @@ type directiveResolver struct{}
 // [niceyaml.Node.Preamble] and names the schema it references through
 // [RefBeside]. It resolves a relative path against the directory of the
 // document's file, so a document without a file path reports
-// [ErrNoFilePath] for a relative path. A URL or an absolute path needs no
-// file and resolves either way. A document without a directive reports
+// [ErrNoFilePath] for a relative path. A document with a relative file
+// path and without a file system reports [ErrNoBaseDir] for one, as
+// RefBeside describes. A URL or an absolute path does not need a file
+// and resolves either way. A document without a directive reports
 // [ErrNoDirective].
 //
 // The schema lives where the document does. A document that
@@ -173,18 +175,12 @@ type directiveResolver struct{}
 // so a directive can name any file the registry can read, a path outside
 // the document's directory included, and any host the client can reach.
 // A program that validates documents from another trust domain confines
-// the registry. [WithFSAt] with the file system of an [os.Root] restricts
-// the reads of documents on disk to one directory tree. A document in a
-// file system reads only that file system. A document built from bytes
-// with a file path and no file system counts as one on disk, so such a
-// program gives it one with [niceyaml.WithFS]. A client whose Transport or
-// CheckRedirect restricts hosts on every hop bounds the fetch. Neither
-// limits how many schemas documents can name. The registry keeps every
-// schema it compiles, so documents that name endless distinct URLs on an
-// allowed host, such as one URL with a new query string each time, grow
-// its cache without bound. A long-running program that validates such
-// documents builds a registry per batch or request. A program that trusts
-// no directive at all leaves Directive out of the resolvers.
+// the registry with [WithFSAt], [WithURLPrefixes], and [WithCacheLimit],
+// as the Untrusted Documents section of the package documentation
+// describes. WithFSAt alone confines a document on disk, whether
+// [niceyaml.NewSourceFromFile] read it or the program built it from
+// bytes with an absolute file path. A program that trusts no directive
+// at all leaves Directive out of the resolvers.
 //
 // The path a directive names can hold control characters. The message of
 // an error that reads the file draws them as pictures, so a document
@@ -220,7 +216,7 @@ func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Node) (Ref, er
 	}
 
 	ref, err := RefBeside(doc, path)
-	if errors.Is(err, ErrNoBaseDir) {
+	if errors.Is(err, ErrNoBaseDir) && doc.FilePath() == "" {
 		return Ref{}, fmt.Errorf("%w: %w", ErrNoFilePath, err)
 	}
 
