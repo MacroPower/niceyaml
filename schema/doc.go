@@ -256,7 +256,8 @@
 // compile for the interval [WithRetryAfter] sets, one minute by default.
 // The documents that name a broken schema inside the interval cost one
 // attempt between them, and the first document after the interval loads
-// the schema again. A
+// the schema again. [WithCacheLimit] bounds the number of schemas the
+// cache keeps. A
 // caller that holds a Ref of its own takes the compiled schema from the
 // same cache. A resolver that picks the schema from the document returns
 // the same Refs:
