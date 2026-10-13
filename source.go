@@ -2,7 +2,6 @@ package niceyaml
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -68,6 +67,10 @@ type Source struct {
 	// Holds the layers [NewSourceFromLayers] merged into the Source, or nil.
 	// An error bound in the merged document binds in a layer instead.
 	layers *layering
+	// Sends each error bound in the Source to the document its text stands
+	// for, in a working copy that a load of the manifest package edits, or
+	// nil.
+	relocation *relocation
 	// Holds the text the Source read, which [Source.Text] returns. A
 	// Source built from tokens read none, and hasInput is false for it.
 	input string
@@ -464,7 +467,11 @@ func WithReferences(refs ...*Source) SourceOption {
 			c.references = append(c.references, ref.tokenText())
 
 			if c.referenceErr == nil {
-				c.referenceErr = cmp.Or(ref.referenceErr, ref.limitFailure())
+				c.referenceErr = ref.referenceErr
+			}
+
+			if c.referenceErr == nil {
+				c.referenceErr = ref.limitFailure()
 			}
 
 			if ref.noExcerpts || ref.noReferenceExcerpts {
@@ -600,13 +607,6 @@ func referenceReaders(docs [][]byte) yaml.DecodeOption {
 //
 // Returns a nil Source and an error when it cannot read the file.
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
-	cfg := newSourceConfig(opts)
-
-	data, err := readFile(path, cfg.bytes())
-	if err != nil {
-		return nil, err
-	}
-
 	// Abs fails only when the working directory has no name, and the path
 	// as given is then the closest one left.
 	filePath, err := filepath.Abs(path)
@@ -616,9 +616,14 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 
 	// Prepend the name and file path options so user options can
 	// override them if needed.
-	opts = append([]SourceOption{WithName(path), WithFilePath(filePath)}, opts...)
+	cfg := newSourceConfig(append([]SourceOption{WithName(path), WithFilePath(filePath)}, opts...))
 
-	return NewSourceFromString(string(data), opts...), nil
+	data, err := readFile(path, cfg.bytes())
+	if err != nil {
+		return nil, err
+	}
+
+	return newStringSource(string(data), cfg), nil
 }
 
 // NewSourceFromFS creates a new [*Source] by reading the file at path
@@ -637,7 +642,7 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 //
 // Returns a nil Source and an error when it cannot read the file.
 func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, error) {
-	cfg := newSourceConfig(opts)
+	cfg := newSourceConfig(append([]SourceOption{WithFilePath(path), WithFS(fsys)}, opts...))
 
 	f, err := fsys.Open(path)
 	if err != nil {
@@ -655,7 +660,7 @@ func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, er
 		return nil, fmt.Errorf("read file: %w", err)
 	}
 
-	return NewSourceFromBytes(data, append([]SourceOption{WithFilePath(path), WithFS(fsys)}, opts...)...), nil
+	return newStringSource(string(data), cfg), nil
 }
 
 // NewSourceFromReader creates a new [*Source] by reading r to its end,
@@ -678,7 +683,7 @@ func NewSourceFromReader(r io.Reader, opts ...SourceOption) (*Source, error) {
 		return nil, fmt.Errorf("read: %w", err)
 	}
 
-	return NewSourceFromBytes(data, opts...), nil
+	return newStringSource(string(data), cfg), nil
 }
 
 // NewSourceFromBytes creates a new [*Source] from raw YAML bytes.
@@ -696,13 +701,18 @@ func NewSourceFromBytes(data []byte, opts ...SourceOption) *Source {
 // so the Source holds no lines and its one document fails with an error
 // that matches [ErrLimit].
 func NewSourceFromString(src string, opts ...SourceOption) *Source {
-	cfg := newSourceConfig(opts)
+	return newStringSource(src, newSourceConfig(opts))
+}
 
+// newStringSource returns the [Source] that [NewSourceFromString] creates
+// from src with the settings cfg. Each constructor resolves its options
+// once and hands the result here, so an option runs once per Source.
+func newStringSource(src string, cfg sourceConfig) *Source {
 	if limit := cfg.bytes(); limit > 0 && len(src) > limit {
 		return &Source{sourceConfig: cfg, input: src, hasInput: true, limitErr: limitError(limit)}
 	}
 
-	s := NewSourceFromTokens(tokens.Tokenize(src), opts...)
+	s := newTokenSource(tokens.Tokenize(src), cfg)
 	s.input, s.hasInput = src, true
 
 	return s
@@ -746,13 +756,13 @@ func readFile(path string, limit int) ([]byte, error) {
 // The Source reads no text, so [Source.Text] returns an empty string for
 // it and [Source.Offset] reports false.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
-	t := &Source{lines: line.NewLines(tokens.ResetPositions(tks))}
+	return newTokenSource(tks, newSourceConfig(opts))
+}
 
-	for _, opt := range opts {
-		opt(&t.sourceConfig)
-	}
-
-	return t
+// newTokenSource returns the [Source] that [NewSourceFromTokens] creates
+// from tks with the settings cfg.
+func newTokenSource(tks token.Tokens, cfg sourceConfig) *Source {
+	return &Source{lines: line.NewLines(tokens.ResetPositions(tks)), sourceConfig: cfg}
 }
 
 // parserOptions returns the options the Source parses its tokens with.

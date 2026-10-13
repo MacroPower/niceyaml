@@ -2114,6 +2114,11 @@ func newSourceError(err error, b binder) *SourceError {
 
 	e := &SourceError{err: scoped.err, source: b.src, node: b.node, locErr: errUnlocated}
 
+	var (
+		reloc     *relocation
+		relocated []error
+	)
+
 	switch a := found.err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
 	case *Error:
 		e.loc, e.node, e.locErr = locate(b, found.locus)
@@ -2135,6 +2140,11 @@ func newSourceError(err error, b binder) *SourceError {
 			e.err = &Error{err: e.err, move: &move{base: *root, movesOnly: true, reroots: true}}
 		}
 
+		// No error binds in a working copy, which is no file of the caller.
+		if reloc = e.source.relocation; reloc != nil {
+			relocated = e.relocate(reloc, found)
+		}
+
 	case *SourceError:
 		// The error wraps a binding, so it takes over what the binding
 		// resolved, and its message holds the binding's position.
@@ -2146,6 +2156,12 @@ func newSourceError(err error, b binder) *SourceError {
 	}
 
 	if !e.adopted {
+		// An error with no location binds in the document that a working
+		// copy stands for.
+		if r := e.source.relocation; r != nil {
+			e.source, e.node = r.home.source, r.home
+		}
+
 		// No error binds in the text [mergeLayers] merged, which is no file of
 		// the caller. One that found no layer binds in the layer the merged
 		// Source stands for.
@@ -2164,6 +2180,10 @@ func newSourceError(err error, b binder) *SourceError {
 	}
 
 	e.collect(err, b)
+
+	if len(relocated) > 0 {
+		e.addRelocatedDetails(reloc, relocated)
+	}
 
 	return e
 }
