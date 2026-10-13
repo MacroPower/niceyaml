@@ -21,6 +21,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 - String [`finder`][niceyaml/finder] for load-once, search-many scenarios
 - [`Node`][niceyaml.Node] decoding with validation hooks, and a matching [`encoder`][niceyaml/encoder]
 - JSON schema [validation][niceyaml/schema.Schema] with YAML path errors
+- [`manifest`][niceyaml/manifest] loading of configuration that declares its `apiVersion` and `kind`, as Kubernetes manifests do
 - Bubble [`yamlviewport`][niceyaml/bubbles/yamlviewport] for Bubble Tea, in a module of its own
 - [`fangs`][niceyaml/fangs] adapters for CLIs built with fang, in a module of their own
 - Generic building blocks for your own bubbles
@@ -155,6 +156,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml/finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/finder
 [niceyaml/line]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line
 [niceyaml/line.View]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line#View
+[niceyaml/manifest]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/manifest
 [niceyaml/paths]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/paths
 [niceyaml/printer]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer
 [niceyaml/printer.Cut]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer#Cut

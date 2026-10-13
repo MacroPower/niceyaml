@@ -1,0 +1,624 @@
+package manifest
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
+
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/hook"
+	"go.jacobcolvin.com/niceyaml/paths"
+)
+
+// docState is one document of a load, as its checks leave it.
+type docState struct {
+	l *loader
+	f *file
+	// The document as the user wrote it.
+	doc *niceyaml.Node
+	// The working copy of the document, in the layout of the current
+	// version once the steps ran, which the schema checks and the decode
+	// read, or nil.
+	work *niceyaml.Node
+	// The decoded value, once the decode passed.
+	value any
+	// The name, when the document reached the layout of the current version
+	// with a name that is a non-empty string.
+	name     string
+	nameRead fieldRead
+	route    route
+	// The problems of the checks, bound, in check order.
+	problems []error
+	// The warnings that the checks handed to the warning handler.
+	warned []error
+	mu     sync.Mutex
+	// The index of the file, and of the document within it.
+	file  int
+	index int
+	// A document of the file writes a type field.
+	typedFile bool
+	// The load skips the document, which holds no content or which
+	// [WithIgnore] accepts.
+	skipped bool
+	// The document reached the layout of the current version with a name
+	// that is a non-empty string.
+	hasName bool
+	// The document passed every check.
+	passed bool
+}
+
+// check runs the checks of the document in order, and stops at the first
+// that fails.
+func (d *docState) check(ctx context.Context) {
+	doc := d.doc
+
+	err := doc.Err()
+	if err != nil {
+		d.fail(err)
+
+		return
+	}
+
+	if doc.IsEmpty() {
+		d.skipped = true
+
+		return
+	}
+
+	reg := d.l.reg
+
+	if reg.cfg.ignore != nil {
+		ok, err := reg.cfg.ignore.Match(ctx, doc)
+		if err != nil {
+			d.fail(doc.Bind(err))
+
+			return
+		}
+
+		if ok {
+			d.skipped = true
+
+			return
+		}
+	}
+
+	ctx = niceyaml.WithWarningHandler(ctx, d.warn)
+
+	if !d.routeDoc(ctx) {
+		return
+	}
+
+	d.deprecations()
+
+	if !d.prepareWork() || !d.checkSchema(ctx, d.route.version) {
+		return
+	}
+
+	d.readName(ctx)
+
+	if !d.decode(ctx) || !d.checkName() {
+		return
+	}
+
+	d.passed = true
+}
+
+// fail adds err, a problem of a check, bound in the document.
+func (d *docState) fail(err error) {
+	d.problems = append(d.problems, d.doc.Bind(err))
+}
+
+// warn adds w, the warnings of a check that passed, as the warning handler
+// of the checks of the document.
+func (d *docState) warn(w error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.warned = append(d.warned, w)
+}
+
+// report adds the problems of the document to the report of the load. The
+// first error of a document that the load reads as a kind it does not
+// name carries the details of that choice.
+func (d *docState) report() {
+	adoption := d.route.adoption
+
+	for _, err := range append(d.problems, d.warned...) {
+		for problem := range niceyaml.Problems(err) {
+			e := problem.Err
+
+			if len(adoption) > 0 && niceyaml.HasErrors(e) {
+				e = d.doc.Bind(niceyaml.Place(e, niceyaml.WithDetails(adoption...)))
+				adoption = nil
+			}
+
+			d.l.add(&row{err: e, doc: d, file: d.file, index: d.index})
+		}
+	}
+}
+
+// rewritable reports whether a rewrite can write the file of the
+// document, so a problem that a rewrite clears carries the migrate hint.
+func (d *docState) rewritable() bool {
+	return d.f.target.kind == targetDisk && !d.f.target.outside
+}
+
+// hint returns the migrate hint as the last detail of a problem that a
+// rewrite clears, or nil when the registry has none or a rewrite cannot
+// write the file of the document.
+func (d *docState) hint() []error {
+	h := d.l.reg.errHint()
+	if h == nil || !d.rewritable() {
+		return nil
+	}
+
+	return []error{h}
+}
+
+// skipDetail returns the detail that says how to skip the file of the
+// document, which starts with what. It returns the detail when a directory
+// walk found the file and no document of the file writes a type field, and
+// nil otherwise.
+func (d *docState) skipDetail(what string) error {
+	if d.f.dir == "" || d.typedFile {
+		return nil
+	}
+
+	return fmt.Errorf("%s, or move the file out of %s", what, d.f.dir)
+}
+
+// routeDoc reads the type fields of the document and picks its kind and
+// its version. It reports whether the document routed.
+func (d *docState) routeDoc(ctx context.Context) bool {
+	reg := d.l.reg
+	cfg := &reg.cfg
+	doc := d.doc
+	rt := &d.route
+
+	err := d.checkLayers()
+	if err != nil {
+		d.fail(err)
+
+		return false
+	}
+
+	rt.versionTxt = readField(doc, cfg.versionField)
+	if rt.versionTxt.err != nil {
+		d.fail(rt.versionTxt.err)
+
+		return false
+	}
+
+	if !cfg.versionOnly {
+		rt.kindTxt = readField(doc, cfg.kindField)
+		if rt.kindTxt.err != nil {
+			d.fail(rt.kindTxt.err)
+
+			return false
+		}
+	}
+
+	switch {
+	case cfg.versionOnly:
+		if len(reg.kinds) == 0 {
+			d.fail(reg.missingTypeFields(doc, false, false, nil))
+
+			return false
+		}
+
+		rt.counted = reg.kinds[0]
+
+		return d.routeVersion(reg.kinds[0], "")
+
+	case rt.kindTxt.found:
+		name, version := rt.kindTxt.text, rt.versionTxt.text
+		rt.wroteKind = name
+
+		entry := reg.names[name]
+		rt.counted = entry
+
+		if rt.versionTxt.found {
+			if rm := reg.findRemoval(version, name); rm != nil && !listed(entry, rm) {
+				d.fail(reg.removedProblem(doc, rm, false))
+
+				return false
+			}
+		}
+
+		if entry == nil {
+			d.fail(reg.unknownKind(name, version))
+
+			return false
+		}
+
+		if !rt.versionTxt.found {
+			d.fail(reg.missingTypeFields(doc, false, true, nil))
+
+			return false
+		}
+
+		return d.routeVersion(entry, name)
+
+	default:
+		return d.adopt(ctx)
+	}
+}
+
+// listed reports whether rm names a version that the kind of entry still
+// lists, which a plan still migrates.
+func listed(entry *kindEntry, rm *removal) bool {
+	if entry == nil {
+		return false
+	}
+
+	for _, v := range entry.versions {
+		if v.removal == rm {
+			return true
+		}
+	}
+
+	return false
+}
+
+// routeVersion picks the version of entry that the document declares, for
+// a document that writes the kind name wrote, or "" without a kind field.
+// It reports whether the document routed.
+func (d *docState) routeVersion(entry *kindEntry, wrote string) bool {
+	reg := d.l.reg
+	rt := &d.route
+	rt.kind = entry
+
+	if !rt.versionTxt.found {
+		first := entry.versions[0]
+
+		switch {
+		case first.cfg.unversioned && first.removal != nil:
+			d.fail(reg.removedProblem(d.doc, first.removal, d.rewritable()))
+
+			return false
+
+		case first.cfg.unversioned:
+			rt.version = first
+
+			return true
+
+		case entry.removedUnversioned != nil:
+			d.fail(reg.removedProblem(d.doc, entry.removedUnversioned, false))
+
+			return false
+
+		default:
+			d.fail(reg.missingTypeFields(d.doc, false, true, nil))
+
+			return false
+		}
+	}
+
+	version := rt.versionTxt.text
+
+	v := entry.byName[version]
+	if v == nil {
+		name := wrote
+		if name == "" {
+			name = entry.kind.name
+		}
+
+		if rm := reg.findRemoval(version, name); rm != nil {
+			d.fail(reg.removedProblem(d.doc, rm, false))
+
+			return false
+		}
+
+		d.fail(reg.unknownVersion(entry, version, wrote))
+
+		return false
+	}
+
+	if wrote != "" && v.kindName != wrote {
+		d.fail(reg.kindMismatch(v, wrote))
+
+		return false
+	}
+
+	rt.version = v
+
+	if v.removal != nil {
+		d.fail(reg.removedProblem(d.doc, v.removal, d.rewritable()))
+
+		return false
+	}
+
+	return true
+}
+
+// adopt picks the kind of a document without a kind field: the first kind
+// whose [Claim] accepts it, or for a document without type fields, the
+// kind that reads the unversioned layout without a claim. It reports
+// whether the document routed.
+func (d *docState) adopt(ctx context.Context) bool {
+	reg := d.l.reg
+	rt := &d.route
+	doc := d.doc
+	hasVersion := rt.versionTxt.found
+
+	var (
+		entry   *kindEntry
+		claimed bool
+	)
+
+	for _, e := range reg.kinds {
+		if e.kind.cfg.claim == nil {
+			continue
+		}
+
+		ok, err := e.kind.cfg.claim.Match(ctx, doc)
+		if err != nil {
+			d.fail(err)
+
+			return false
+		}
+
+		if ok {
+			entry, claimed = e, true
+
+			break
+		}
+	}
+
+	if entry == nil && !hasVersion {
+		for _, e := range reg.kinds {
+			if e.kind.cfg.claim == nil && (e.versions[0].cfg.unversioned || e.removedUnversioned != nil) {
+				entry = e
+
+				break
+			}
+		}
+	}
+
+	if entry == nil {
+		var details []error
+
+		skip := d.skipDetail("add " + reg.typeFieldsText())
+		if skip != nil {
+			details = append(details, skip)
+		}
+
+		d.fail(reg.missingTypeFields(doc, hasVersion, false, details))
+
+		return false
+	}
+
+	rt.counted = entry
+
+	if !d.routeVersion(entry, "") {
+		return false
+	}
+
+	name := entry.kind.name
+	kindField, versionField := fieldName(reg.cfg.kindField), fieldName(reg.cfg.versionField)
+
+	if hasVersion && claimed {
+		rt.adoption = append(rt.adoption, fmt.Errorf("the document has no %s, so %s reads it as %s",
+			kindField, reg.app(), article(name)))
+	} else {
+		rt.adoption = append(rt.adoption, fmt.Errorf("the document has no %s and no %s, so %s reads it as an "+
+			"unversioned %s", versionField, kindField, reg.app(), name))
+	}
+
+	if d.f.dir != "" && !d.typedFile {
+		rt.adoption = append(rt.adoption, fmt.Errorf("move the file out of %s if it is not %s", d.f.dir,
+			article(name)))
+	}
+
+	return true
+}
+
+// article returns name after "a", or "an" before a vowel.
+func article(name string) string {
+	if name != "" && strings.ContainsRune("AEIOUaeiou", rune(name[0])) {
+		return "an " + name
+	}
+
+	return "a " + name
+}
+
+// checkLayers checks that the layers of a merged document write the same
+// text in each type field.
+func (d *docState) checkLayers() error {
+	layers := hook.Layers(d.doc.Source())
+	if len(layers) < 2 {
+		return nil
+	}
+
+	reg := d.l.reg
+
+	fields := []paths.Path{reg.cfg.versionField}
+	if !reg.cfg.versionOnly {
+		fields = append(fields, reg.cfg.kindField)
+	}
+
+	type writer struct {
+		node *niceyaml.Node
+		read fieldRead
+	}
+
+	for i, p := range fields {
+		var writers []writer
+
+		for _, l := range layers {
+			n, ok := l.(*niceyaml.Node)
+			if !ok {
+				continue
+			}
+
+			if r := readField(n, p); r.found {
+				writers = append(writers, writer{node: n, read: r})
+			}
+		}
+
+		if len(writers) < 2 {
+			continue
+		}
+
+		top := writers[len(writers)-1]
+
+		for _, w := range writers[:len(writers)-1] {
+			if w.read.text == top.read.text {
+				continue
+			}
+
+			what := "versions"
+			if i == 1 {
+				what = "kinds"
+			}
+
+			detail := top.node.Bind(niceyaml.NewError(fmt.Sprintf("%s overrides %s", top.read.text, w.read.text),
+				niceyaml.AtPath(p)))
+
+			//nolint:wrapcheck // The binding is the problem of the document.
+			return w.node.Bind(newProblem(ErrMixedLayers, "layers declare different "+what,
+				niceyaml.AtPath(p), niceyaml.WithDetails(detail)))
+		}
+	}
+
+	return nil
+}
+
+// deprecations adds the warnings of a deprecated version and of a
+// deprecated kind.
+func (d *docState) deprecations() {
+	reg := d.l.reg
+	rt := &d.route
+	v, entry := rt.version, rt.kind
+	current := entry.versions[len(entry.versions)-1]
+
+	if v.cfg.deprecated && v != current {
+		details := append(detailsOf(v.cfg.details), d.hint()...)
+
+		if v.cfg.unversioned {
+			d.fail(newWarning(ErrDeprecated, "deprecated unversioned layout of "+entry.kind.name,
+				startOf(d.doc), niceyaml.WithDetails(details...)))
+		} else {
+			d.fail(newWarning(ErrDeprecated, fmt.Sprintf("deprecated version %q", v.cfg.name),
+				niceyaml.AtPath(reg.cfg.versionField), niceyaml.WithDetails(details...)))
+		}
+	}
+
+	if current.cfg.deprecated {
+		at := startOf(d.doc)
+
+		switch {
+		case rt.kindTxt.found:
+			at = niceyaml.AtPath(reg.cfg.kindField)
+		case rt.versionTxt.found:
+			at = niceyaml.AtPath(reg.cfg.versionField)
+		}
+
+		d.fail(newWarning(ErrDeprecated, fmt.Sprintf("deprecated kind %q", entry.kind.name),
+			at, niceyaml.WithDetails(detailsOf(current.cfg.details)...)))
+	}
+}
+
+// detailsOf returns texts as errors, for the details of a problem.
+func detailsOf(texts []string) []error {
+	errs := make([]error, 0, len(texts))
+	for _, t := range texts {
+		errs = append(errs, errors.New(t))
+	}
+
+	return errs
+}
+
+// checkSchema checks the working copy against the schema of v, and reports
+// whether it passed. A version without a schema passes.
+func (d *docState) checkSchema(ctx context.Context, v *versionEntry) bool {
+	if !v.cfg.hasSchema {
+		return true
+	}
+
+	reg := d.l.reg
+
+	sch, err := reg.schemas.Schema(ctx, v.cfg.schema)
+	if err != nil {
+		what := fmt.Sprintf("%s cannot load its schema of %s %s", reg.app(), v.kind.kind.name, v.label())
+		d.fail(niceyaml.Place(&problemError{msg: what, marks: []error{err}}, niceyaml.WithDetails(err)))
+
+		return false
+	}
+
+	err = d.work.Validate(ctx, sch)
+	if niceyaml.HasErrors(err) {
+		d.problems = append(d.problems, err)
+
+		return false
+	}
+
+	return true
+}
+
+// decode decodes the working copy into a value of the Go type of the kind,
+// and reports whether the decode passed.
+func (d *docState) decode(ctx context.Context) bool {
+	reg := d.l.reg
+	entry := d.route.kind
+
+	opts := append([]niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)}, reg.cfg.decodeOptions...)
+	opts = append(opts, entry.kind.cfg.decodeOptions...)
+
+	v, err := entry.kind.decode(ctx, d.work, opts)
+	if err != nil {
+		d.problems = append(d.problems, err)
+
+		return false
+	}
+
+	d.value = v
+
+	return true
+}
+
+// readName reads the name of a document that reached the layout of the
+// current version, when the registry reads names. The name must be a
+// non-empty string, as a decode into an any value reads it.
+func (d *docState) readName(ctx context.Context) {
+	cfg := &d.l.reg.cfg
+	if !cfg.hasNameField {
+		return
+	}
+
+	d.nameRead = readField(d.work, cfg.nameField)
+	if d.nameRead.err != nil || !d.nameRead.found {
+		return
+	}
+
+	v, err := d.work.DecodeAt[any](ctx, cfg.nameField, niceyaml.WithSelfValidation(false))
+	if s, ok := v.(string); err == nil && ok && s != "" {
+		d.name, d.hasName = s, true
+	}
+}
+
+// checkName reports whether the document holds a name, when the registry
+// reads names, and adds the problem of one that does not.
+func (d *docState) checkName() bool {
+	cfg := &d.l.reg.cfg
+	if !cfg.hasNameField {
+		return true
+	}
+
+	switch {
+	case d.nameRead.err != nil:
+		d.problems = append(d.problems, d.work.Bind(d.nameRead.err))
+
+		return false
+
+	case !d.hasName:
+		d.problems = append(d.problems, d.work.Bind(newProblem(ErrMissingName, "name must be a non-empty string",
+			niceyaml.AtPath(cfg.nameField))))
+
+		return false
+	}
+
+	return true
+}

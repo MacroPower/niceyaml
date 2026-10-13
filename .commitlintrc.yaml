@@ -34,6 +34,7 @@ rules:
       - finder
       - internal
       - line
+      - manifest
       - normalizer
       - paths
       - position
