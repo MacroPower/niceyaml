@@ -178,7 +178,7 @@ func (n *Node) Origin() (*Node, error) {
 }
 
 // layering holds the layers of a [Source] from [NewSourceFromLayers]. An
-// error in it binds in a layer instead, since the merged text is no file of
+// error in it binds in a layer instead, because the merged text is no file of
 // the caller, and passes through a merged layer to one no merge built.
 type layering struct {
 	// The merged value, or nil when no layer holds a value.
@@ -336,7 +336,7 @@ func resolveLayers[L Layer](given []L, as Layer) ([]resolvedLayer, int, error) {
 
 // read returns the value of layer i, or nil when it holds none. It decodes
 // the layer first, so a layer fails here as it fails alone, and checks the
-// alias limit, since the reader writes each alias out in full.
+// alias limit, because the reader writes each alias out in full.
 func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, error) {
 	n := l.node
 	if n == nil {
@@ -445,7 +445,7 @@ func preambleText(n *Node) string {
 	return text + "\n"
 }
 
-// showsLayers reports whether an error may show the merged text of layers.
+// showsLayers reports whether an error can show the merged text of layers.
 // That text holds values of every layer and of the reference documents they
 // read, so it reports false when any of them has excerpts off.
 func showsLayers(layers []resolvedLayer) bool {
