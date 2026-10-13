@@ -722,24 +722,31 @@
 // key that is a sequence or a mapping has no name, and the merge fails
 // with [ErrUnnamedKey].
 //
-// The merged Source holds the merged value as block-style YAML below the
-// preamble of the lowest layer, so a schema directive in the comments of
-// the base file names the schema of the merged document. It keeps no
-// other comment. Each scalar keeps the spelling of its layer, such as
-// 0x10 or 1.50, except that a block scalar or a string of several lines
-// becomes one double-quoted line. The Source takes its name, its file
-// path, its file system, and what [WithAllowDuplicateKeys] and
-// [WithAliasLimit] set from the Source of the lowest layer. Its text holds
-// the values of every layer, so it shows no excerpt when the Source of a
-// layer, or of a reference document a layer reads, has [WithExcerpts] set
-// to false.
+// The merged Source stands for one layer, the one [MergeAs] names or else
+// the lowest. It holds the merged value as block-style YAML below the
+// preamble of that layer, so a schema directive in the comments of that
+// file names the schema of the merged document. It keeps no other
+// comment. Each scalar keeps the spelling of its layer, such as 0x10 or
+// 1.50, except that a block scalar or a string of several lines becomes
+// one double-quoted line. The Source takes its name, its file path, its
+// file system, and what [WithAllowDuplicateKeys] and [WithAliasLimit] set
+// from the Source of that layer. Its text holds the values of every
+// layer, so it shows no excerpt when the Source of a layer, or of a
+// reference document a layer reads, has [WithExcerpts] set to false.
 //
 // That text is no file of the program. [Node.View], [Node.Span],
 // [Node.Ranges], and [Node.PathAt] read the merged lines, so a position
 // taken from the file of a layer names whatever lies there in the merged
 // text. Every Node of the document has the [Node.FilePath] and [Node.FS]
-// of the lowest layer, and [Node.Origin] returns the Node that holds a
-// value in the file of its layer.
+// of the layer the Source stands for, and [Node.Origin] returns the Node
+// that holds a value in the file of its layer.
+//
+// A program that embeds its defaults below the file of the user passes
+// MergeAs with the Source of that file. The directive of the file then
+// picks the schema, a
+// [go.jacobcolvin.com/niceyaml/schema/matcher.FilePath] matcher routes on
+// the path of the file, and the heading of an error names the file and
+// not the defaults.
 //
 // Each error of the merged Source binds in the file of a layer and never
 // in the merged text, so it names the line a user edits:
@@ -757,8 +764,8 @@
 // deepest along the path, and in the highest of several such layers. An
 // error at a key that a layer removed binds at the null that removed it,
 // in the highest layer that writes one there. An error with no location
-// binds in the lowest layer with no position, as in "base.yaml: quota
-// service: connection refused".
+// binds with no position in the layer the Source stands for, as in
+// "base.yaml: quota service: connection refused".
 //
 // The bound error reports the [SourceError.Source], the
 // [SourceError.Node], and the [SourceError.Path] it has in the layer it
@@ -782,18 +789,11 @@
 //
 // A nil layer adds nothing, and [NewSourceFromFile] returns a nil Source
 // for a file it could not read, so a program passes an optional file as
-// it is once it has checked the error. A merge of no layer gives an empty
-// Source with no name. A decode of it leaves the value as it was, and
-// each error binds with no position, as in "$.servers[1].port: port is
-// required".
-//
-// An empty Source with a name, below every other layer, names the merged
-// Source and changes no value, as in "app config: 2 schema violations".
-// [SourceError.Source] of an error with no location then returns that
-// empty Source. Its empty preamble stands in for the preamble of the
-// layer above it, so a schema directive there no longer applies. The
-// merged Source has no file path or file system unless [WithFilePath] and
-// [WithFS] give them to the empty Source.
+// it is once it has checked the error. MergeAs with a nil Source keeps
+// the lowest layer, so an optional file goes to MergeAs as it is too. A
+// merge of no layer gives an empty Source with no name. A decode of it
+// leaves the value as it was, and each error binds with no position, as
+// in "$.servers[1].port: port is required".
 //
 // A layer that a program builds from its environment or its flags merges
 // and binds as a file does. It cannot set one element of a sequence. A

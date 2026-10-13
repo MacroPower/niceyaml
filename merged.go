@@ -3,6 +3,7 @@ package niceyaml
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
@@ -11,13 +12,20 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// ErrUnnamedKey indicates a mapping key that [NewSourceFromLayers] cannot
-// merge by. A key that is a sequence or a mapping has no name a path
-// selects it by, as
-// [go.jacobcolvin.com/niceyaml/paths.Resolver.KeyName] reports, so two
-// layers cannot hold it as one key. The error binds at the key, in the
-// layer that holds it.
-var ErrUnnamedKey = errors.New("mapping key has no name")
+var (
+	// ErrUnnamedKey indicates a mapping key that [NewSourceFromLayers] cannot
+	// merge by. A key that is a sequence or a mapping has no name a path
+	// selects it by, as
+	// [go.jacobcolvin.com/niceyaml/paths.Resolver.KeyName] reports, so two
+	// layers cannot hold it as one key. The error binds at the key, in the
+	// layer that holds it.
+	ErrUnnamedKey = errors.New("mapping key has no name")
+
+	// ErrUnknownLayer indicates a layer that [MergeAs] names and the layers
+	// of [NewSourceFromLayers] do not hold. It is a mistake of the caller,
+	// so the error binds in no layer, and [IsInvalid] does not report it.
+	ErrUnknownLayer = errors.New("layer is not among the merged layers")
+)
 
 // NewSourceFromLayers creates a new [*Source] that holds the one document
 // the given layers merge into. The layers go lowest first, such as a base
@@ -30,16 +38,22 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 // the package documentation gives the merge rules in full and says where
 // each error binds:
 //
-//	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+//	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod})
 //	if err != nil {
 //		return err
 //	}
 //
 //	cfg, err := merged.Decode[Config](ctx, niceyaml.WithValidator(schema))
 //
-// The layers merge in the call, which decodes each of them with ctx as a
-// decode of that layer alone reads it. A nil Layer adds nothing, and a
-// call with no layer left returns an empty Source with no name.
+// The layers come as a []*Source, as a []*Node, such as the documents
+// [Source.Documents] returns, or as a []Layer that holds both. They merge
+// in the call, which decodes each of them with ctx as a decode of that
+// layer alone reads it. A nil Layer adds nothing, and a call with no layer
+// left returns an empty Source with no name.
+//
+// The Source stands for the lowest layer, or for the layer [MergeAs]
+// names. It takes the name, the file path, the file system, and the
+// preamble of that layer, and an error with no location binds in it.
 //
 // The merge fails on the lowest layer that holds no value it can read. A
 // Source of several documents holds none, and neither does a document
@@ -48,9 +62,59 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 // that is a sequence or a mapping fails its layer with [ErrUnnamedKey].
 // The merge returns the error of that layer, bound in its file, and no
 // Source. It returns the error of ctx once ctx ends, so a deadline stops
-// a merge that writes many aliases out.
-func NewSourceFromLayers(ctx context.Context, layers ...Layer) (*Source, error) {
-	return mergeLayers(ctx, layers)
+// a merge that writes many aliases out. A layer of MergeAs that the
+// layers do not hold fails the call with [ErrUnknownLayer] before any
+// layer merges.
+func NewSourceFromLayers[L Layer](ctx context.Context, layers []L, opts ...MergeOption) (*Source, error) {
+	var cfg mergeConfig
+
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	return mergeLayers(ctx, layers, cfg)
+}
+
+// MergeOption configures [NewSourceFromLayers].
+//
+// Available options:
+//   - [MergeAs]
+type MergeOption func(*mergeConfig)
+
+// mergeConfig holds the settings a [MergeOption] configures.
+type mergeConfig struct {
+	// The layer the merged Source stands for, or nil for the lowest.
+	as Layer
+}
+
+// MergeAs is a [MergeOption] that makes the Source [NewSourceFromLayers]
+// builds stand for layer, such as the file of the user above defaults
+// that the program embeds. The Source takes the name, the file path, the
+// file system, and the preamble of that layer, and what
+// [WithAllowDuplicateKeys] and [WithAliasLimit] set on its Source, in
+// place of those of the lowest layer. An error with no location binds in
+// that layer. The layers merge in the order given whichever layer the
+// Source stands for, so a higher layer still sets the values it holds.
+//
+// The preamble holds the schema directive of the layer, so the directive
+// of that layer picks the schema of the merged document, and a relative
+// reference in it names a file beside that layer. A server that passes
+// MergeAs with an upload thus lets the upload pick its schema, as a
+// validation of the upload alone does. A server that picks the schema
+// itself leaves [go.jacobcolvin.com/niceyaml/schema.Directive] out of its
+// registry.
+//
+// A nil layer keeps the lowest layer, and so does a nil Source or a nil
+// Node, so an optional file goes to MergeAs as it is. For any other layer
+// that the layers do not hold, NewSourceFromLayers returns an error that
+// wraps [ErrUnknownLayer]. It compares pointers, so layer must be the
+// [*Source] or the [*Node] the layers hold, and a Node that another call
+// of [Node.At] returns does not match. The last of several MergeAs options
+// applies.
+func MergeAs(layer Layer) MergeOption {
+	return func(c *mergeConfig) {
+		c.as = layer
+	}
 }
 
 // Layer is one layer of the Source [NewSourceFromLayers] builds, a
@@ -61,23 +125,6 @@ func NewSourceFromLayers(ctx context.Context, layers ...Layer) (*Source, error) 
 // path of one. A nil Layer adds nothing, and neither does a nil Source or
 // a nil Node.
 //
-// Go spreads neither a []*Source nor a []*Node into the parameter of
-// NewSourceFromLayers, so a program that collects its layers in a loop
-// holds them in a []Layer:
-//
-//	layers := make([]niceyaml.Layer, 0, len(names))
-//
-//	for _, name := range names {
-//		source, err := niceyaml.NewSourceFromFS(fsys, name)
-//		if err != nil {
-//			return err
-//		}
-//
-//		layers = append(layers, source)
-//	}
-//
-//	merged, err := niceyaml.NewSourceFromLayers(ctx, layers...)
-//
 // See [*Source] and [*Node] for the implementations.
 type Layer interface {
 	// Resolves the layer as [NewSourceFromLayers] merges it.
@@ -87,9 +134,10 @@ type Layer interface {
 // Origin returns the [*Node] that holds the value of n in the file of a
 // layer of the Source [NewSourceFromLayers] builds, and returns n itself
 // for a Node of any other document. A Node of a merged Source reads the
-// merged text and has the [Node.FilePath] and [Node.FS] of the lowest
-// layer, so a [Validator] that resolves a file beside a value reads the
-// directory from the origin of that value:
+// merged text and has the [Node.FilePath] and [Node.FS] of the layer
+// [MergeAs] names, or else of the lowest layer, so a [Validator] that
+// resolves a file beside a value reads the directory from the origin of
+// that value:
 //
 //	origin, err := license.Origin()
 //	if err != nil {
@@ -138,22 +186,26 @@ type layering struct {
 	// The layers the merge read, lowest first, which each value names by
 	// its index.
 	layers []resolvedLayer
+	// The index of the layer the merged Source stands for, which [MergeAs]
+	// names, or 0 for the lowest.
+	identity int
 }
 
-// home returns the lowest layer, where an error with no layer of its own
-// binds, or the home of that layer when a merge built it. A nil l has none.
+// home returns the layer the merged Source stands for, where an error with
+// no layer of its own binds, or the home of that layer when a merge built
+// it. A nil l has none.
 func (l *layering) home() resolvedLayer {
 	if l == nil {
 		return resolvedLayer{}
 	}
 
-	lowest := l.layers[0]
+	layer := l.layers[l.identity]
 
-	if home := lowest.source.layers.home(); home.source != nil {
+	if home := layer.source.layers.home(); home.source != nil {
 		return home
 	}
 
-	return lowest
+	return layer
 }
 
 // layer returns the layer an error at path, a `$` path in doc, binds in,
@@ -240,21 +292,46 @@ func (s *Source) resolveLayer() resolvedLayer {
 }
 
 // resolveLayers returns the layers of given that add a layer, in the
-// order of given.
-func resolveLayers(given []Layer) []resolvedLayer {
+// order of given, and the index among them of the layer the merged Source
+// stands for. That layer is as, or the lowest at index 0 when as adds
+// nothing. It returns [ErrUnknownLayer] when given does not hold as.
+func resolveLayers[L Layer](given []L, as Layer) ([]resolvedLayer, int, error) {
+	var named resolvedLayer
+
+	if as != nil {
+		named = as.resolveLayer()
+	}
+
+	identity := 0
+	if named.source != nil {
+		identity = -1
+	}
+
 	layers := make([]resolvedLayer, 0, len(given))
 
-	for _, layer := range given {
+	for _, g := range given {
+		layer := Layer(g)
 		if layer == nil {
 			continue
 		}
 
-		if resolved := layer.resolveLayer(); resolved.source != nil {
-			layers = append(layers, resolved)
+		resolved := layer.resolveLayer()
+		if resolved.source == nil {
+			continue
 		}
+
+		if identity < 0 && layer == as {
+			identity = len(layers)
+		}
+
+		layers = append(layers, resolved)
 	}
 
-	return layers
+	if identity < 0 {
+		return nil, 0, fmt.Errorf("merge as %q: %w", named.source.Name(), ErrUnknownLayer)
+	}
+
+	return layers, identity, nil
 }
 
 // read returns the value of layer i, or nil when it holds none. It decodes
@@ -311,9 +388,14 @@ func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, erro
 
 // mergeLayers implements [NewSourceFromLayers]. It checks ctx again before
 // it parses the merged text, which aliases can make far longer than the
-// layers, and writes that text below the preamble of the lowest layer.
-func mergeLayers(ctx context.Context, given []Layer) (*Source, error) {
-	layers := resolveLayers(given)
+// layers, and writes that text below the preamble of the layer the merged
+// Source stands for.
+func mergeLayers[L Layer](ctx context.Context, given []L, cfg mergeConfig) (*Source, error) {
+	layers, identity, err := resolveLayers(given, cfg.as)
+	if err != nil {
+		return nil, err
+	}
+
 	if len(layers) == 0 {
 		return NewSourceFromString(""), nil
 	}
@@ -329,18 +411,19 @@ func mergeLayers(ctx context.Context, given []Layer) (*Source, error) {
 		root = root.Merge(v)
 	}
 
-	lowest := layers[0]
-	text := layermerge.Text(preambleText(lowest.node), root)
+	named := layers[identity]
+	text := layermerge.Text(preambleText(named.node), root)
 
-	// An error with no location binds in the lowest layer, as the Layers
-	// section of the package documentation describes.
-	err := ctx.Err()
+	// An error with no location binds in the layer the merged Source
+	// stands for, as the Layers section of the package documentation
+	// describes.
+	err = ctx.Err()
 	if err != nil {
-		return nil, lowest.node.bindOwn(err)
+		return nil, named.node.bindOwn(err)
 	}
 
-	src := newMergedSource(lowest.source, text, showsLayers(layers))
-	src.layers = &layering{root: root, layers: layers}
+	src := newMergedSource(named.source, text, showsLayers(layers))
+	src.layers = &layering{root: root, layers: layers, identity: identity}
 
 	return src, nil
 }

@@ -1176,7 +1176,7 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 		// A layer that does not allow one fails as it does alone.
 		strict := yamltest.UnparsedDocument(t, "a: 1\na: 2\n", niceyaml.WithName("prod.yaml"))
 
-		_, err := niceyaml.NewSourceFromLayers(t.Context(), base, strict)
+		_, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{base, strict})
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
 		require.ErrorIs(t, err, strict.Err())
 	})
@@ -1192,7 +1192,7 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 		_, alone := prod.Decode[any](t.Context())
 		require.ErrorIs(t, alone, niceyaml.ErrExcessiveAliasing)
 
-		_, err := niceyaml.NewSourceFromLayers(t.Context(), base, prod)
+		_, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{base, prod})
 		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
 		require.EqualError(t, err, alone.Error())
 	})
@@ -1210,7 +1210,7 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 		_, err := limited.Decode[any](t.Context())
 		require.NoError(t, err)
 
-		_, err = niceyaml.NewSourceFromLayers(t.Context(), limited)
+		_, err = niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{limited})
 		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
 		require.EqualError(t, err, "prod.yaml:1:1: excessive aliasing")
 		assert.True(t, niceyaml.IsInvalid(err))
@@ -1231,7 +1231,7 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 		_, alone := nodes[1].Decode[any](t.Context())
 		require.NoError(t, alone)
 
-		_, err := niceyaml.NewSourceFromLayers(t.Context(), layersOf(nodes)...)
+		_, err := niceyaml.NewSourceFromLayers(t.Context(), nodes)
 		require.EqualError(t, err, "prod.yaml:2:3: mapping key has no name")
 		require.ErrorIs(t, err, niceyaml.ErrUnnamedKey)
 		assert.True(t, niceyaml.IsInvalid(err))
@@ -1253,7 +1253,7 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 
 		// A layer whose Source holds no reference document fails as it
 		// does alone.
-		_, err := niceyaml.NewSourceFromLayers(t.Context(), layersOf(nodes)...)
+		_, err := niceyaml.NewSourceFromLayers(t.Context(), nodes)
 		require.EqualError(t, err, "prod.yaml:1:9: $.server: could not find alias \"shared\"")
 
 		bound := yamltest.RequireSourceError(t, err)
@@ -1752,7 +1752,7 @@ func TestNewSourceFromLayers_Context(t *testing.T) {
 		// context ends among the values the aliases of prod.yaml write.
 		ctx := &endingContext{Context: t.Context(), lasts: 100}
 
-		merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+		merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod})
 		require.EqualError(t, err, "prod.yaml: context canceled")
 		require.ErrorIs(t, err, context.Canceled)
 		assert.Nil(t, merged)
@@ -1766,20 +1766,31 @@ func TestNewSourceFromLayers_Context(t *testing.T) {
 
 		whole := &endingContext{Context: t.Context(), lasts: math.MaxInt64}
 
-		_, err := niceyaml.NewSourceFromLayers(whole, base, prod)
+		_, err := niceyaml.NewSourceFromLayers(whole, []*niceyaml.Source{base, prod})
 		require.NoError(t, err)
 
 		// The merge reads the context a last time before it parses the
 		// merged text, and binds that error in the lowest layer.
 		ctx := &endingContext{Context: t.Context(), lasts: whole.calls.Load() - 1}
 
-		merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+		merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod})
 		require.EqualError(t, err, "base.yaml: context canceled")
 		require.ErrorIs(t, err, context.Canceled)
 		assert.Nil(t, merged)
 
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Same(t, base, bound.Source())
+
+		// With MergeAs, that error binds in the layer it names.
+		ctx = &endingContext{Context: t.Context(), lasts: whole.calls.Load() - 1}
+
+		merged, err = niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod}, niceyaml.MergeAs(prod))
+		require.EqualError(t, err, "prod.yaml: context canceled")
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Nil(t, merged)
+
+		bound = yamltest.RequireSourceError(t, err)
+		assert.Same(t, prod, bound.Source())
 	})
 }
 
@@ -1824,7 +1835,7 @@ servers:
   - host: cache.internal
 `, niceyaml.WithName("prod.yaml"))
 
-	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1861,7 +1872,7 @@ server:
   host: prod.example.com
 `, niceyaml.WithName("prod.yaml"))
 
-	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1925,7 +1936,7 @@ func ExampleNewSourceFromLayers_environment() {
 		"properties": {"server": {"required": ["host", "port"]}}
 	}`))
 
-	merged, err := niceyaml.NewSourceFromLayers(ctx, base, env)
+	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, env})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -1942,43 +1953,51 @@ func ExampleNewSourceFromLayers_environment() {
 	//      |         ^
 }
 
-func ExampleNewSourceFromLayers_name() {
+func ExampleMergeAs() {
 	ctx := context.Background()
 
-	// The program embeds its defaults, and the user edits config.yaml.
+	// The user edits config.yaml, whose directive names its schema.
+	fsys := fstest.MapFS{
+		"config.yaml": {Data: []byte(`# yaml-language-server: $schema=./config.schema.json
+server:
+  port: 99999
+log:
+  level: loud
+`)},
+		"config.schema.json": {Data: []byte(`{
+			"properties": {
+				"server": {"properties": {"port": {"maximum": 65535}}},
+				"log": {"properties": {"level": {"enum": ["debug", "info"]}}}
+			}
+		}`)},
+	}
+
+	user, err := niceyaml.NewSourceFromFS(fsys, "config.yaml")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// The program embeds its defaults below the file of the user.
 	defaults := niceyaml.NewSourceFromString(`server:
   host: localhost
   port: 8080
 `, niceyaml.WithName("defaults.yaml"))
 
-	user := niceyaml.NewSourceFromString(`server:
-  port: 99999
-log:
-  level: loud
-`, niceyaml.WithName("config.yaml"))
-
-	limits := schema.MustCompile([]byte(`{
-		"properties": {
-			"server": {"properties": {"port": {"maximum": 65535}}},
-			"log": {"properties": {"level": {"enum": ["debug", "info"]}}}
-		}
-	}`))
-
-	// The merged Source takes its name from the lowest layer, so an empty
-	// Source below the defaults names it and changes no value.
-	app := niceyaml.NewSourceFromString("", niceyaml.WithName("app config"))
-
-	merged, err := niceyaml.NewSourceFromLayers(ctx, app, defaults, user)
+	// The merged Source stands for config.yaml, so the directive of that
+	// file picks the schema, and the heading names the file.
+	merged, err := niceyaml.NewSourceFromLayers(ctx,
+		[]*niceyaml.Source{defaults, user}, niceyaml.MergeAs(user))
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println(merged.ValidateDocuments(ctx, limits))
+	registry := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+	fmt.Println(merged.ValidateDocuments(ctx, registry))
 
 	// Output:
-	// app config: 2 schema violations
-	// config.yaml:2:9: $.server.port: 99999 is greater than 65535
-	// config.yaml:4:10: $.log.level: value does not match any enum member
+	// config.yaml: 2 schema violations
+	// config.yaml:3:9: $.server.port: 99999 is greater than 65535
+	// config.yaml:5:10: $.log.level: value does not match any enum member
 }
 
 func ExampleNode_Origin() {
@@ -1991,7 +2010,7 @@ license: LICENSE
 license: LICENSE.prod
 `, niceyaml.WithFilePath("conf/prod/app.yaml"))
 
-	merged, err := niceyaml.NewSourceFromLayers(context.Background(), base, prod)
+	merged, err := niceyaml.NewSourceFromLayers(context.Background(), []*niceyaml.Source{base, prod})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -2267,7 +2286,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 					t.Run(placement, func(t *testing.T) {
 						t.Parallel()
 
-						merged, err := niceyaml.NewSourceFromLayers(t.Context(), layers...)
+						merged, err := niceyaml.NewSourceFromLayers(t.Context(), layers)
 						require.EqualError(t, err, tc.want)
 						require.ErrorIs(t, err, tc.err)
 						assert.Nil(t, merged)
@@ -2285,7 +2304,10 @@ func TestNewSourceFromLayers(t *testing.T) {
 		broken := yamltest.UnparsedDocument(t, "server: [\n", niceyaml.WithName("prod.yaml"))
 		require.ErrorIs(t, broken.Err(), niceyaml.ErrSyntax)
 
-		merged, err := niceyaml.NewSourceFromLayers(t.Context(), layerNodes(t, layerBadPort)[0], broken)
+		merged, err := niceyaml.NewSourceFromLayers(
+			t.Context(),
+			[]*niceyaml.Node{layerNodes(t, layerBadPort)[0], broken},
+		)
 		require.EqualError(t, err, "prod.yaml:1:9: "+unclosedSequence)
 		require.ErrorIs(t, err, broken.Err())
 		assert.Nil(t, merged)
@@ -2300,7 +2322,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 		_, alone := nodes[0].Decode[any](t.Context())
 		require.EqualError(t, alone, "base.yaml:1:9: $.server: could not find alias \"missing\"")
 
-		_, err := niceyaml.NewSourceFromLayers(t.Context(), layersOf(nodes)...)
+		_, err := niceyaml.NewSourceFromLayers(t.Context(), nodes)
 		require.EqualError(t, err, alone.Error())
 
 		bound := yamltest.RequireSourceError(t, err)
@@ -2316,7 +2338,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 		sources := layerSources(t, layerBadPort, layerProdHost)
 
 		// The error binds in the layer the merge was reading.
-		merged, err := niceyaml.NewSourceFromLayers(ctx, sources[0], sources[1])
+		merged, err := niceyaml.NewSourceFromLayers(ctx, sources)
 		require.EqualError(t, err, "base.yaml: context canceled")
 		require.ErrorIs(t, err, context.Canceled)
 		assert.Nil(t, merged)
@@ -2325,10 +2347,316 @@ func TestNewSourceFromLayers(t *testing.T) {
 		assert.Same(t, sources[0], bound.Source())
 
 		// A merge of no layer reads nothing.
-		merged, err = niceyaml.NewSourceFromLayers(ctx)
+		merged, err = niceyaml.NewSourceFromLayers(ctx, []niceyaml.Layer{})
 		require.NoError(t, err)
 		require.NotNil(t, merged)
 	})
+}
+
+func TestMergeAs(t *testing.T) {
+	t.Parallel()
+
+	// Each layer has a name, a file path, a file system, and a directive of
+	// its own. The directive names a schema beside the file that requires a
+	// key named after the layer.
+	defaults := identityLayer(t, "usr/share/app", "defaults", stringtest.LinesLF(
+		"server:",
+		"  host: localhost",
+		"  port: 8080",
+		"log: info",
+	))
+	user := identityLayer(t, "etc/app", "user", stringtest.LinesLF("server:", "  port: 9090"))
+	env := identityLayer(t, "run/app", "env", "log: debug\n")
+	stranger := identityLayer(t, "tmp", "stranger", "log: warn\n")
+
+	sources := []*niceyaml.Source{defaults, user, env}
+
+	registry := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+
+	t.Run("the merged Source stands for one layer", func(t *testing.T) {
+		t.Parallel()
+
+		var (
+			source *niceyaml.Source
+			node   *niceyaml.Node
+		)
+
+		tcs := map[string]struct {
+			want *niceyaml.Source
+			opts []niceyaml.MergeOption
+		}{
+			"no option keeps the lowest layer": {
+				want: defaults,
+			},
+			"a middle layer": {
+				opts: []niceyaml.MergeOption{niceyaml.MergeAs(user)},
+				want: user,
+			},
+			"the top layer": {
+				opts: []niceyaml.MergeOption{niceyaml.MergeAs(env)},
+				want: env,
+			},
+			"a nil Layer keeps the lowest layer": {
+				opts: []niceyaml.MergeOption{niceyaml.MergeAs(nil)},
+				want: defaults,
+			},
+			"a nil Source keeps the lowest layer": {
+				opts: []niceyaml.MergeOption{niceyaml.MergeAs(source)},
+				want: defaults,
+			},
+			"a nil Node keeps the lowest layer": {
+				opts: []niceyaml.MergeOption{niceyaml.MergeAs(node)},
+				want: defaults,
+			},
+			"the last of several options applies": {
+				opts: []niceyaml.MergeOption{niceyaml.MergeAs(env), niceyaml.MergeAs(user)},
+				want: user,
+			},
+			"a last nil option keeps the lowest layer": {
+				opts: []niceyaml.MergeOption{niceyaml.MergeAs(user), niceyaml.MergeAs(nil)},
+				want: defaults,
+			},
+			"a last option replaces a layer the layers do not hold": {
+				opts: []niceyaml.MergeOption{niceyaml.MergeAs(stranger), niceyaml.MergeAs(env)},
+				want: env,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				merged, err := niceyaml.NewSourceFromLayers(t.Context(), sources, tc.opts...)
+				require.NoError(t, err)
+
+				doc := yamltest.Document(t, merged)
+				key := strings.TrimSuffix(tc.want.Name(), ".yaml")
+
+				assert.Equal(t, tc.want.Name(), merged.Name())
+				assert.Equal(t, tc.want.FilePath(), doc.FilePath())
+				assert.Equal(t, tc.want.FS(), doc.FS())
+
+				directive := schema.ParseDocumentDirective(doc.Preamble())
+				require.NotNil(t, directive)
+				assert.Equal(t, "./"+key+".json", directive.Schema)
+
+				// The directive resolves beside the file of the layer.
+				err = merged.ValidateDocuments(t.Context(), registry)
+				require.ErrorContains(t, err, fmt.Sprintf("missing required property %q", key))
+
+				// An error with no location binds in the layer.
+				err = merged.Bind(errors.New("quota service: connection refused"))
+				require.EqualError(t, err, tc.want.Name()+": quota service: connection refused")
+				assert.Same(t, tc.want, yamltest.RequireSourceError(t, err).Source())
+
+				// The layers merge in the order given, whichever layer the
+				// Source stands for.
+				got, err := merged.Decode[map[string]any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, map[string]any{
+					"server": map[string]any{"host": "localhost", "port": uint64(9090)},
+					"log":    "debug",
+				}, got)
+			})
+		}
+	})
+
+	t.Run("a layer the layers do not hold returns ErrUnknownLayer", func(t *testing.T) {
+		t.Parallel()
+
+		base := yamltest.Document(t, defaults)
+		scoped := yamltest.At(t, base, paths.Doc().Child("server"))
+		again := yamltest.At(t, base, paths.Doc().Child("server"))
+		broken := niceyaml.NewSourceFromString("server: [\n", niceyaml.WithName("broken.yaml"))
+
+		tcs := map[string]func(ctx context.Context) (*niceyaml.Source, error){
+			"another Source": func(ctx context.Context) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromLayers(ctx, sources, niceyaml.MergeAs(stranger))
+			},
+			"the Source of a Node layer": func(ctx context.Context) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Node{base}, niceyaml.MergeAs(defaults))
+			},
+			"the Node of a Source layer": func(ctx context.Context) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{defaults}, niceyaml.MergeAs(base))
+			},
+			"a Node another call of At returns": func(ctx context.Context) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Node{scoped}, niceyaml.MergeAs(again))
+			},
+			"no layer": func(ctx context.Context) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromLayers(ctx, []niceyaml.Layer{}, niceyaml.MergeAs(stranger))
+			},
+			"nil layers alone": func(ctx context.Context) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{nil, nil}, niceyaml.MergeAs(stranger))
+			},
+			"a layer that holds no value": func(ctx context.Context) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{broken}, niceyaml.MergeAs(stranger))
+			},
+		}
+
+		for name, merge := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				merged, err := merge(t.Context())
+				require.ErrorIs(t, err, niceyaml.ErrUnknownLayer)
+				require.NotErrorIs(t, err, niceyaml.ErrSyntax)
+				assert.False(t, niceyaml.IsInvalid(err))
+				assert.Nil(t, merged)
+			})
+		}
+
+		_, err := niceyaml.NewSourceFromLayers(t.Context(), sources, niceyaml.MergeAs(stranger))
+		require.EqualError(t, err, `merge as "stranger.yaml": layer is not among the merged layers`)
+	})
+
+	t.Run("each kind of slice takes MergeAs", func(t *testing.T) {
+		t.Parallel()
+
+		docs := []*niceyaml.Node{
+			yamltest.Document(t, defaults),
+			yamltest.Document(t, user),
+			yamltest.Document(t, env),
+		}
+
+		// A nil element of each slice adds nothing.
+		tcs := map[string]func(ctx context.Context) (*niceyaml.Source, error){
+			"Sources": func(ctx context.Context) (*niceyaml.Source, error) {
+				layers := []*niceyaml.Source{nil, defaults, user, nil, env}
+
+				return niceyaml.NewSourceFromLayers(ctx, layers, niceyaml.MergeAs(user))
+			},
+			"Nodes": func(ctx context.Context) (*niceyaml.Source, error) {
+				layers := []*niceyaml.Node{nil, docs[0], docs[1], nil, docs[2]}
+
+				return niceyaml.NewSourceFromLayers(ctx, layers, niceyaml.MergeAs(docs[1]))
+			},
+			"Layers": func(ctx context.Context) (*niceyaml.Source, error) {
+				layers := []niceyaml.Layer{nil, (*niceyaml.Source)(nil), defaults, docs[1], (*niceyaml.Node)(nil), env}
+
+				return niceyaml.NewSourceFromLayers(ctx, layers, niceyaml.MergeAs(docs[1]))
+			},
+		}
+
+		for name, merge := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				merged, err := merge(t.Context())
+				require.NoError(t, err)
+
+				assert.Equal(t, "user.yaml", merged.Name())
+				assert.Equal(t, user.FilePath(), yamltest.Document(t, merged).FilePath())
+
+				err = merged.Bind(errors.New("quota service: connection refused"))
+				require.EqualError(t, err, "user.yaml: quota service: connection refused")
+				assert.Same(t, docs[1], yamltest.BoundNode(t, yamltest.RequireSourceError(t, err)))
+
+				got, err := merged.Decode[map[string]any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, "debug", got["log"])
+			})
+		}
+	})
+
+	t.Run("the documents of one file take the preamble of the one MergeAs names", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(
+			stringtest.LinesLF(
+				"# yaml-language-server: $schema=./one.json",
+				"a: 1",
+				"---",
+				"# yaml-language-server: $schema=./two.json",
+				"b: 2",
+			),
+			niceyaml.WithName("app.yaml"),
+		)
+
+		docs := source.Documents()
+		require.Len(t, docs, 2)
+
+		tcs := map[string]struct {
+			want string
+			text string
+			opts []niceyaml.MergeOption
+		}{
+			"the first document": {
+				want: "./one.json",
+				text: stringtest.LinesLF("# yaml-language-server: $schema=./one.json", "a: 1", "b: 2"),
+			},
+			"the second document": {
+				opts: []niceyaml.MergeOption{niceyaml.MergeAs(docs[1])},
+				want: "./two.json",
+				// The preamble of the second document holds its header.
+				text: stringtest.LinesLF("---", "# yaml-language-server: $schema=./two.json", "a: 1", "b: 2"),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				merged, err := niceyaml.NewSourceFromLayers(t.Context(), docs, tc.opts...)
+				require.NoError(t, err)
+
+				directive := schema.ParseDocumentDirective(yamltest.Document(t, merged).Preamble())
+				require.NotNil(t, directive)
+				assert.Equal(t, tc.want, directive.Schema)
+				assert.Equal(t, tc.text, mergedText(t, merged))
+			})
+		}
+	})
+
+	t.Run("a merged layer passes on the layer it stands for", func(t *testing.T) {
+		t.Parallel()
+
+		inner, err := niceyaml.NewSourceFromLayers(t.Context(),
+			[]*niceyaml.Source{defaults, user}, niceyaml.MergeAs(user))
+		require.NoError(t, err)
+
+		tcs := map[string]func(ctx context.Context) (*niceyaml.Source, error){
+			"as the lowest layer": func(ctx context.Context) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{inner, env})
+			},
+			"named by MergeAs": func(ctx context.Context) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{env, inner}, niceyaml.MergeAs(inner))
+			},
+		}
+
+		for name, merge := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				merged, err := merge(t.Context())
+				require.NoError(t, err)
+
+				assert.Equal(t, "user.yaml", merged.Name())
+				assert.Equal(t, user.FilePath(), yamltest.Document(t, merged).FilePath())
+
+				err = merged.Bind(errors.New("quota service: connection refused"))
+				require.EqualError(t, err, "user.yaml: quota service: connection refused")
+				assert.Same(t, user, yamltest.RequireSourceError(t, err).Source())
+			})
+		}
+	})
+}
+
+// identityLayer returns a Source of input, named name.yaml in dir of a file
+// system of its own. Its directive names name.json beside it, a schema
+// that requires the key name.
+func identityLayer(t *testing.T, dir, name, input string) *niceyaml.Source {
+	t.Helper()
+
+	path := dir + "/" + name + ".yaml"
+	fsys := fstest.MapFS{
+		path:                       {Data: []byte("# yaml-language-server: $schema=./" + name + ".json\n" + input)},
+		dir + "/" + name + ".json": {Data: []byte(`{"required": ["` + name + `"]}`)},
+	}
+
+	source, err := niceyaml.NewSourceFromFS(fsys, path, niceyaml.WithName(name+".yaml"))
+	require.NoError(t, err)
+
+	return source
 }
 
 func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
@@ -3187,51 +3515,22 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 			seen.Source().View().Held().Content())
 	})
 
-	t.Run("an empty Source with a name below the files names the merged document", func(t *testing.T) {
+	t.Run("the heading reports the layer MergeAs names", func(t *testing.T) {
 		t.Parallel()
 
-		fsys := fstest.MapFS{}
-		base := yamltest.FirstDocument(t, baseInput,
-			niceyaml.WithName("base.yaml"), niceyaml.WithFilePath("conf/base.yaml"), niceyaml.WithFS(fsys))
-		prod := yamltest.FirstDocument(t, layerProdHost, niceyaml.WithName("prod.yaml"))
+		nodes := layerNodes(t, baseInput, layerProdHost)
 
-		app := niceyaml.NewSourceFromString("", niceyaml.WithName("app config"))
-		layers := yamltest.Layers(t, app, base, prod)
-		doc := yamltest.Document(t, layers)
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), nodes, niceyaml.MergeAs(nodes[1]))
+		require.NoError(t, err)
 
-		assert.Equal(t, "app config", doc.Source().Name())
-		assert.Empty(t, doc.FilePath())
-		assert.Nil(t, doc.FS())
-
-		// The empty Source changes no value, and its empty preamble stands
-		// in for the preamble of base.yaml, which holds the directive.
-		assert.Nil(t, schema.ParseDocumentDirective(doc.Preamble()))
-		assert.Equal(t,
-			stringtest.LinesLF("name: shop", "server:", "  host: prod.example.com", "  port: 0"),
-			mergedText(t, layers),
-		)
-
-		// The heading reports the empty Source, and each violation the
-		// file that holds its value.
-		err := layers.ValidateDocuments(t.Context(), requires)
+		// Each violation still binds in the file that holds its value.
+		err = merged.ValidateDocuments(t.Context(), requires)
 		require.EqualError(t, err, stringtest.JoinLF(
-			"app config: 2 schema violations",
+			"prod.yaml: 2 schema violations",
 			"base.yaml:5:9: $.server.port: 0 is less than 1",
 			`prod.yaml:1:1: $.server.tls: missing required property "tls"`,
 		))
-		assert.Same(t, app, yamltest.RequireSourceError(t, err).Source())
-
-		err = layers.Bind(errors.New("quota service: connection refused"))
-		require.EqualError(t, err, "app config: quota service: connection refused")
-
-		// A file path and a file system of the empty Source are those of
-		// the merged document.
-		placed := niceyaml.NewSourceFromString("",
-			niceyaml.WithName("app config"), niceyaml.WithFilePath("etc/app.yaml"), niceyaml.WithFS(fsys))
-		doc = yamltest.Document(t, yamltest.Layers(t, placed, base, prod))
-
-		assert.Equal(t, "etc/app.yaml", doc.FilePath())
-		assert.Equal(t, fsys, doc.FS())
+		assert.Same(t, nodes[1].Source(), yamltest.RequireSourceError(t, err).Source())
 	})
 
 	t.Run("an error with a position in the merged text binds at the value there", func(t *testing.T) {
@@ -4816,9 +5115,9 @@ func layerFiles(t *testing.T, inputs ...string) *niceyaml.Source {
 	return yamltest.Layers(t, layersOf(layerSources(t, inputs...))...)
 }
 
-// layersOf returns given as the layers [niceyaml.NewSourceFromLayers] takes, since
-// Go spreads neither a []*niceyaml.Node nor a []*niceyaml.Source into its
-// parameter.
+// layersOf returns given as a []niceyaml.Layer, which spreads into the
+// variadic parameter of [yamltest.Layers]. Go spreads neither a
+// []*niceyaml.Node nor a []*niceyaml.Source into it.
 func layersOf[L niceyaml.Layer](given []L) []niceyaml.Layer {
 	layers := make([]niceyaml.Layer, len(given))
 

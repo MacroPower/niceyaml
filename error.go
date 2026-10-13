@@ -2024,7 +2024,8 @@ func newSourceError(err error, b binder) *SourceError {
 
 	if !e.adopted {
 		// No error binds in the text [mergeLayers] merged, which is no file of
-		// the caller. One that found no layer binds in the lowest.
+		// the caller. One that found no layer binds in the layer the merged
+		// Source stands for.
 		if home := e.source.layers.home(); home.source != nil {
 			e.source, e.node = home.source, home.node
 		}
@@ -2117,8 +2118,9 @@ func (e *SourceError) Source() *Source {
 // holds its location, or to the first document it fails when it has no
 // location in the source. An error that wraps a binding keeps the Node of
 // that binding. An error bound in a merged [Source] is bound to the Node
-// of the layer its location resolved in, or of the lowest layer when it
-// carries no location. The error [BindValue] returns and each binding
+// of the layer its location resolved in. When it carries no location, it
+// is bound to the Node of the layer [MergeAs] names, or else of the lowest
+// layer. The error [BindValue] returns and each binding
 // below it are bound to none, and so is a nil SourceError.
 func (e *SourceError) Node() (*Node, bool) {
 	if e == nil || e.node == nil {

@@ -58,7 +58,7 @@ func main() {
 	// Pass the layers lowest first. A mapping merges key by key, a
 	// sequence or a scalar replaces what the layer below holds, and a
 	// null removes its key.
-	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
+	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod})
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
 
@@ -120,7 +120,7 @@ func main() {
 		return
 	}
 
-	merged, err = niceyaml.NewSourceFromLayers(ctx, base, prod, late)
+	merged, err = niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod, late})
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
 
@@ -149,11 +149,7 @@ func main() {
 		return
 	}
 
-	// A program that collects its layers holds them in a []Layer, since Go
-	// spreads neither a []*Source nor a []*Node into NewSourceFromLayers.
-	layers := []niceyaml.Layer{base, prod, user, early}
-
-	merged, err = niceyaml.NewSourceFromLayers(ctx, layers...)
+	merged, err = niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod, user, early})
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
 

@@ -78,7 +78,7 @@ func Bind(tb testing.TB, source *niceyaml.Source, err error) error {
 func Layers(tb testing.TB, layers ...niceyaml.Layer) *niceyaml.Source {
 	tb.Helper()
 
-	merged, err := niceyaml.NewSourceFromLayers(tb.Context(), layers...)
+	merged, err := niceyaml.NewSourceFromLayers(tb.Context(), layers)
 	require.NoError(tb, err)
 
 	return merged

@@ -13,7 +13,7 @@ import (
 // value once per layer above the first.
 func BenchmarkNewSourceFromLayers(b *testing.B) {
 	for _, count := range []int{2, 8} {
-		layers := make([]niceyaml.Layer, count)
+		layers := make([]*niceyaml.Source, count)
 		for i := range layers {
 			layers[i] = niceyaml.NewSourceFromString(
 				yamltest.GenerateLines(2000, fmt.Sprintf("k%%[1]d: {name: n%%[1]d, layer: %d}", i)),
@@ -25,7 +25,7 @@ func BenchmarkNewSourceFromLayers(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				_, err := niceyaml.NewSourceFromLayers(b.Context(), layers...)
+				_, err := niceyaml.NewSourceFromLayers(b.Context(), layers)
 				if err != nil {
 					b.Fatal(err)
 				}

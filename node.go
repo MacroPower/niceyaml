@@ -551,10 +551,10 @@ func (n *Node) Preamble() token.Tokens {
 // spelled its path. Returns an empty string when the source has none.
 //
 // The document [NewSourceFromLayers] builds came from no file, and its
-// Source has the path of the lowest layer. Every Node of it returns that
-// path, whichever layer holds its value. [Node.Origin] returns the Node
-// of the value in the file of its layer, and FilePath of that Node names
-// the file.
+// Source has the path of the layer [MergeAs] names, or else of the lowest
+// layer. Every Node of it returns that path, whichever layer holds its
+// value. [Node.Origin] returns the Node of the value in the file of its
+// layer, and FilePath of that Node names the file.
 func (n *Node) FilePath() string {
 	return n.source.FilePath()
 }
@@ -562,8 +562,9 @@ func (n *Node) FilePath() string {
 // FS returns the file system the path of the file the document came from
 // names a file in, which is [Source.FS]. It returns nil when the source
 // has none, where a path names a file on disk. A Node of the document
-// [NewSourceFromLayers] builds returns the file system of the lowest
-// layer, as [Node.FilePath] describes.
+// [NewSourceFromLayers] builds returns the file system of the layer
+// [MergeAs] names, or else of the lowest layer, as [Node.FilePath]
+// describes.
 func (n *Node) FS() fs.FS {
 	return n.source.FS()
 }
