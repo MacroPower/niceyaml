@@ -290,11 +290,27 @@ func (d *Doc) record(err error) {
 
 // moved updates the handles after the value at from moved to the path to.
 func (d *Doc) moved(from, to paths.Path) {
-	for _, h := range d.handles {
-		if h.gone {
-			continue
-		}
+	repoint(d.handlesAt(from), from, to)
+}
 
+// handlesAt returns the handles at path and below it that no edit took
+// away.
+func (d *Doc) handlesAt(path paths.Path) []*Handle {
+	var out []*Handle
+
+	for _, h := range d.handles {
+		if _, ok := h.path.CutPrefix(path); ok && !h.gone {
+			out = append(out, h)
+		}
+	}
+
+	return out
+}
+
+// repoint moves each of handles, a handle at from or below it, to the
+// same place below to.
+func repoint(handles []*Handle, from, to paths.Path) {
+	for _, h := range handles {
 		if rest, ok := h.path.CutPrefix(from); ok {
 			h.path = to.Join(rest)
 		}
@@ -320,36 +336,40 @@ func (d *Doc) took(path paths.Path, self bool) {
 // the item at index left it, so each later item takes the index before it.
 func (d *Doc) shifted(seq paths.Path, index int) {
 	for _, h := range d.handles {
-		if h.gone {
-			continue
-		}
-
-		rest, ok := h.path.CutPrefix(seq)
-		if !ok || rest.Len() == 0 {
-			continue
-		}
-
-		var (
-			sels  []paths.Selector
-			first = true
-			moved bool
-		)
-
-		for sel := range rest.Selectors() {
-			if first && sel.Kind == paths.SelectorIndex && sel.Index > index {
-				sel.Index--
-				moved = true
-			}
-
-			first = false
-
-			sels = append(sels, sel)
-		}
-
-		if moved {
-			h.path = appendSelectors(seq, sels)
+		if !h.gone {
+			h.path = shiftedPath(h.path, seq, index)
 		}
 	}
+}
+
+// shiftedPath returns path after the item at index left the sequence at
+// seq. A path below a later item takes the index before it, and any other
+// path stays as it is.
+func shiftedPath(path, seq paths.Path, index int) paths.Path {
+	rest, ok := path.CutPrefix(seq)
+	if !ok || rest.Len() == 0 {
+		return path
+	}
+
+	var (
+		sels  []paths.Selector
+		moved bool
+	)
+
+	for sel := range rest.Selectors() {
+		if len(sels) == 0 && sel.Kind == paths.SelectorIndex && sel.Index > index {
+			sel.Index--
+			moved = true
+		}
+
+		sels = append(sels, sel)
+	}
+
+	if !moved {
+		return path
+	}
+
+	return appendSelectors(seq, sels)
 }
 
 // appendSelectors returns p with sels after it.

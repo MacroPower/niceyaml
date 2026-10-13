@@ -5,6 +5,8 @@ import (
 	"reflect"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/manifest/migrate"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
@@ -141,6 +143,7 @@ func DecodeOptions(opts ...niceyaml.DecodeOption) KindOption {
 //
 // Available options:
 //   - [Schema]
+//   - [Migrate]
 //   - [Deprecated]
 //   - [KindName]
 //   - [Written]
@@ -153,6 +156,7 @@ type versionConfig struct {
 	name        string
 	kindName    string
 	details     []string
+	steps       []step
 	unversioned bool
 	hasSchema   bool
 	deprecated  bool
@@ -168,6 +172,24 @@ type versionConfig struct {
 func Schema(ref schema.Ref) VersionOption {
 	return func(c *versionConfig) {
 		c.schema, c.hasSchema = ref, true
+	}
+}
+
+// step is one step of a version, which [Migrate] adds.
+type step struct {
+	fn   migrate.Func
+	path paths.Path
+}
+
+// Migrate is a [VersionOption] that adds a step to the version, after the
+// steps before it. The steps of a version bring a document from the version
+// before it, so the oldest version takes none. The step calls fn once for
+// each place that p selects, in document order, and a path that selects
+// nothing calls it zero times. The path starts at `$` and holds no `~`.
+// "Steps" in the package documentation describes the calls.
+func Migrate(p paths.Path, fn migrate.Func) VersionOption {
+	return func(c *versionConfig) {
+		c.steps = append(c.steps, step{path: p, fn: fn})
 	}
 }
 

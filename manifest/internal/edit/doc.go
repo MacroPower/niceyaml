@@ -40,14 +40,21 @@ type Options struct {
 //
 // Create instances with [New].
 type Doc struct {
+	// The first problem of the call that runs, which fails the document
+	// unless the step returns its own.
+	callErr error
 	// The document as the user wrote it.
 	user *niceyaml.Node
 	// The parse of the current text, and its document.
 	src  *niceyaml.Source
 	node *niceyaml.Node
-	// The first problem of the call that runs, which fails the document
-	// unless the step returns its own.
-	callErr error
+	// The places that the calls of the step running edited, by the origin
+	// of the first byte of each.
+	stepEdits map[int]stepEdit
+	// What each mapping that merges or repeats a key read before the step
+	// running, and the last edit of the step.
+	merges   map[position.Position]*mergeView
+	lastEdit *editRecord
 	// The text of the lines of the user's document.
 	orig string
 	// The byte order mark the text starts with, which the parse leaves out.
@@ -57,10 +64,7 @@ type Doc struct {
 	// The label of the version whose step runs, as messages name it.
 	label string
 	opts  Options
-	// The place in orig that each byte of cur came from, or for a byte an
-	// edit wrote, -1 minus the index of its note.
-	origin []int
-	notes  []note
+	notes []note
 	// The line starts of orig and of cur.
 	origLines []int
 	curLines  []int
@@ -70,6 +74,9 @@ type Doc struct {
 	// The values that the calls of the step running wrote, which the check
 	// after the step compares with what the document reads.
 	written []writtenValue
+	// The place in orig that each byte of cur came from, or for a byte an
+	// edit wrote, -1 minus the index of its note.
+	origin []int
 	// The line of the user's text where orig starts.
 	base int
 	// An edit changed the text.

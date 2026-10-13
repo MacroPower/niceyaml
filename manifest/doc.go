@@ -28,6 +28,39 @@
 // one. [Registry.Verify] loads and compiles the schema of each version, so
 // a test catches a broken schema before a user meets it.
 //
+// # Versions
+//
+// Each version except the oldest can hold steps, which [Migrate] adds, and
+// which bring a document from the version before it. A load runs the steps
+// of every later version in order, so the app reads one version of each
+// kind and the file of the user stays as it is. The author of a new
+// version writes its steps against the previous version alone:
+//
+//	manifest.Version("cafe.jacobcolvin.com/v1",
+//		manifest.Written(),
+//		manifest.Migrate(spec.Child("cost"), func(_ context.Context, n *migrate.Node) error {
+//			return n.SetKey("price")
+//		}),
+//	),
+//
+// A step is a [go.jacobcolvin.com/niceyaml/manifest/migrate.Func]. It runs
+// once for each place that its path selects, in document order, and gets a
+// handle that reads the value there and edits the document. Each call sees
+// the edits of the calls before it. A document that moves into the next
+// version gets both type fields of that version, so a step never writes
+// them. An error from a step fails the document, and a panic in a step
+// fails it with a [niceyaml.PanicError].
+//
+// Every error and every warning about a migrated document binds at the
+// line that the user wrote, under the path that the file spells. An error
+// at a value that a step set carries a detail that names the version of
+// the step. A value that a step removes warns with the reason that the
+// step gave, and the warning matches [ErrRemoved].
+//
+// Versions compare by their place in the list and never by their text.
+// [Written] marks the version that a rewrite writes, and [Object.UpToDate]
+// reports whether a document declares that version or a newer one.
+//
 // # Loading
 //
 // [Registry.Load] reads an [Input] and returns a [Set]. [Path] reads a
@@ -81,9 +114,12 @@
 //     a kind and a version that the registry holds and that no removal
 //     names.
 //  3. The document must pass the schema of the version it declares.
-//  4. The document decodes into the Go type of its kind, and every value
+//  4. For each later version in turn, up to the current version, the steps
+//     of the version run, and the result must pass the schema of the
+//     version.
+//  5. The result decodes into the Go type of its kind, and every value
 //     that implements [niceyaml.SelfValidator] validates itself.
-//  5. The document must hold a name, when [WithNameField] reads names.
+//  6. The document must hold a name, when [WithNameField] reads names.
 //
 // The schema check and the decode admit the type fields, whatever the
 // schema and the Go type declare. The decode rejects every other key that
@@ -140,7 +176,9 @@
 // [WithWarningFilter] decides which warnings a load keeps, so a team
 // accepts one deprecation for a while. [WithWarningsAsErrors] turns each
 // warning that the filter keeps into an error, so a strict load in CI fails
-// on a deprecated file:
+// on a deprecated file. The warning about a value that a step of a version
+// newer than the written one removes stays a warning, because no rewrite
+// deletes the value before [Written] moves:
 //
 //	set, err := config.Registry.Load(ctx, manifest.Path(dir),
 //		manifest.WithWarningsAsErrors(strict))

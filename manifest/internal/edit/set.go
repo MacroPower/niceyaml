@@ -80,6 +80,13 @@ func (h *Handle) set(ctx context.Context, v any, typeField bool) error {
 	}
 
 	if p.exists {
+		err = d.editOnce(h, p)
+		if err != nil {
+			return err
+		}
+
+		d.recordEdit(h, p, "sets "+h.path.String())
+
 		err = d.replaceValue(ctx, h, p, v)
 	} else {
 		err = d.createValue(ctx, h, p, v)
@@ -87,6 +94,13 @@ func (h *Handle) set(ctx context.Context, v any, typeField bool) error {
 
 	if err != nil {
 		return err
+	}
+
+	if !p.exists {
+		created, err := d.resolve(h.path)
+		if err == nil && created.exists {
+			d.recordEdit(h, created, "sets "+h.path.String())
+		}
 	}
 
 	d.invalidate(h.path)
@@ -670,6 +684,21 @@ func (d *Doc) appendItem(
 	if err != nil {
 		return err
 	}
+
+	return d.appendPayload(h, holderPath, holder, seq, pl, origin)
+}
+
+// appendPayload appends the payload pl as the last item of the sequence
+// seq, the value of holder.
+func (d *Doc) appendPayload(
+	h *Handle,
+	holderPath paths.Path,
+	holder *place,
+	seq *ast.SequenceNode,
+	pl payload,
+	origin int,
+) error {
+	step := d.stepOf(holderPath)
 
 	if seq.IsFlowStyle {
 		block, ok := d.blockOpening(holder, seq)

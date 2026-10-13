@@ -1,12 +1,14 @@
 package manifest_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/manifest"
+	"go.jacobcolvin.com/niceyaml/manifest/migrate"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
@@ -36,13 +38,10 @@ type Hours struct {
 	Spec     HoursSpec `json:"spec"`
 }
 
-// HoursSpec describes opening hours. It reads the keys of both versions
-// until the steps of phase 3 rename them.
+// HoursSpec describes opening hours.
 type HoursSpec struct {
-	Open   string `json:"open,omitzero"`
-	Close  string `json:"close,omitzero"`
-	Opens  string `json:"opens,omitzero"`
-	Closes string `json:"closes,omitzero"`
+	Open  string `json:"open,omitzero"`
+	Close string `json:"close,omitzero"`
 }
 
 // MenuItem is a kind whose older version called it Dish.
@@ -53,10 +52,9 @@ type MenuItem struct {
 
 // MenuItemSpec describes a menu item.
 type MenuItemSpec struct {
-	Tags          any  `json:"tags,omitzero"`
-	Price         int  `json:"price,omitzero"`
-	Cost          int  `json:"cost,omitzero"`
-	LegacyPricing bool `json:"legacyPricing,omitzero"`
+	Tags          []string `json:"tags,omitzero"`
+	Price         int      `json:"price,omitzero"`
+	LegacyPricing bool     `json:"legacyPricing,omitzero"`
 }
 
 // Tip is a kind whose current version is deprecated.
@@ -100,7 +98,27 @@ const itemSchema = `{
   }
 }`
 
-var meta = paths.Doc().Child("metadata")
+var (
+	meta = paths.Doc().Child("metadata")
+	spec = paths.Doc().Child("spec")
+)
+
+// rename returns a step that renames the key of each value it gets.
+func rename(key string) migrate.Func {
+	return func(_ context.Context, n *migrate.Node) error {
+		return n.SetKey(key)
+	}
+}
+
+// tagList is a step that turns a single tag into a list of one.
+func tagList(ctx context.Context, n *migrate.Node) error {
+	tag, err := n.Decode[string](ctx)
+	if err != nil {
+		return err
+	}
+
+	return n.Set(ctx, []string{tag})
+}
 
 // cafeOptions returns the options of the registry that most tests load
 // with, followed by extra.
@@ -121,13 +139,19 @@ func cafeOptions(extra ...manifest.RegistryOption) []manifest.RegistryOption {
 				manifest.Version("cafe.jacobcolvin.com/v1alpha1",
 					manifest.Deprecated("cafe 4.0 removes cafe.jacobcolvin.com/v1alpha1"),
 				),
-				manifest.Version("cafe.jacobcolvin.com/v1", manifest.Written()),
+				manifest.Version("cafe.jacobcolvin.com/v1",
+					manifest.Written(),
+					manifest.Migrate(spec.Child("opens"), rename("open")),
+					manifest.Migrate(spec.Child("closes"), rename("close")),
+				),
 			),
 			manifest.NewKind[MenuItem]("MenuItem",
 				manifest.Version("cafe.jacobcolvin.com/v1beta1", manifest.KindName("Dish")),
 				manifest.Version("cafe.jacobcolvin.com/v1",
 					manifest.Written(),
 					manifest.Schema(schema.Embedded([]byte(itemSchema))),
+					manifest.Migrate(spec.Child("cost"), rename("price")),
+					manifest.Migrate(spec.Child("tags"), tagList),
 				),
 			),
 		),
@@ -193,6 +217,39 @@ func TestNewRegistry(t *testing.T) {
 				manifest.Version("v2", manifest.Written(), manifest.Loosened()),
 			))},
 			err: "kind Hours: v2 carries manifest.Loosened",
+		},
+		"step on the oldest version": {
+			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1", manifest.Migrate(spec.Child("opens"), rename("open"))),
+			))},
+			err: "kind Hours: v1 is the oldest version, so it takes no manifest.Migrate",
+		},
+		"step on the unversioned layout": {
+			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Unversioned(manifest.Migrate(spec.Child("opens"), rename("open"))),
+			))},
+			err: "kind Hours: the unversioned layout takes no manifest.Migrate, because no version comes before it",
+		},
+		"step with a relative path": {
+			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1"),
+				manifest.Version("v2", manifest.Migrate(paths.Current().Child("opens"), rename("open"))),
+			))},
+			err: "kind Hours: step 1 of v2 takes a $ path, not @.opens",
+		},
+		"step with a key path": {
+			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1"),
+				manifest.Version("v2", manifest.Migrate(spec.Child("opens").Key(), rename("open"))),
+			))},
+			err: "kind Hours: step 1 of v2 takes a path without ~, not $.spec.opens~",
+		},
+		"step without a function": {
+			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1"),
+				manifest.Version("v2", manifest.Migrate(spec.Child("opens"), nil)),
+			))},
+			err: "kind Hours: step 1 of v2 has a nil function",
 		},
 		"kind name on current version": {
 			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[MenuItem]("MenuItem",

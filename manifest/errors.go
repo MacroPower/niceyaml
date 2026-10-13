@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -198,4 +199,22 @@ func (e *LoadError) Unwrap() []error {
 // [niceyaml.AsErrors] calls it.
 func (e *LoadError) AsErrors() error {
 	return &LoadError{err: niceyaml.AsErrors(e.err)}
+}
+
+// panicError is the error of a panic in a function of the app, such as a
+// step, with a message such as "check panicked: boom".
+type panicError struct {
+	p *niceyaml.PanicError
+	// The name of the function that panicked.
+	in string
+}
+
+// Error returns the name of the function and the value of the panic.
+func (e *panicError) Error() string {
+	return fmt.Sprintf("%s panicked: %v", e.in, e.p.Value)
+}
+
+// Unwrap returns the [niceyaml.PanicError] of the panic.
+func (e *panicError) Unwrap() error {
+	return e.p
 }

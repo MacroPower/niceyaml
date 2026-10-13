@@ -47,6 +47,13 @@ func (h *Handle) SetKey(key string) error {
 		return nil
 	}
 
+	err = d.editOnce(h, p)
+	if err != nil {
+		return err
+	}
+
+	d.recordEdit(h, p, fmt.Sprintf("renames %q to %q", h.Key(), key))
+
 	parent, _ := h.path.Parent()
 
 	if other := d.sibling(p, name); other != nil {
@@ -141,6 +148,17 @@ func (h *Handle) Remove(reason string) error {
 		return d.fail(h, "%s removes the root of the document", d.label)
 	case d.holdsTypeField(h.path):
 		return d.fail(h, "%s removes %s, which holds a type field", d.label, h.path)
+	}
+
+	err = d.editOnce(h, p)
+	if err != nil {
+		return err
+	}
+
+	if p.entry != nil {
+		d.recordEdit(h, p, fmt.Sprintf("removes %q", h.Key()))
+	} else {
+		d.recordEdit(h, p, "removes this item")
 	}
 
 	d.recordRemoval(h, p, reason)

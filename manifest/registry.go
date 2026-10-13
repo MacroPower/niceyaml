@@ -413,6 +413,8 @@ func (b *registryBuilder) addVersions(entry *kindEntry) {
 			}
 		}
 
+		b.checkSteps(k, vc, i, label)
+
 		if vc.hasSchema && vc.schema.Key() == "" && vc.schema.Schema() == nil {
 			b.failf("kind %s: %s has a schema.Ref that names no schema", k.name, label)
 		}
@@ -445,6 +447,40 @@ func (b *registryBuilder) addVersions(entry *kindEntry) {
 	if entry.written == nil {
 		entry.written = entry.versions[0]
 	}
+}
+
+// checkSteps checks the steps of vc, the version of k at index i.
+func (b *registryBuilder) checkSteps(k *Kind, vc *versionConfig, i int, label string) {
+	switch {
+	case len(vc.steps) == 0:
+		return
+	case vc.unversioned:
+		b.failf("kind %s: the unversioned layout takes no manifest.Migrate, because no version comes before it", k.name)
+	case i == 0:
+		b.failf("kind %s: %s is the oldest version, so it takes no manifest.Migrate", k.name, label)
+	}
+
+	for j, s := range vc.steps {
+		switch {
+		case s.fn == nil:
+			b.failf("kind %s: step %d of %s has a nil function", k.name, j+1, label)
+		case !s.path.IsAbsolute():
+			b.failf("kind %s: step %d of %s takes a $ path, not %s", k.name, j+1, label, s.path)
+		case holdsKey(s.path):
+			b.failf("kind %s: step %d of %s takes a path without ~, not %s", k.name, j+1, label, s.path)
+		}
+	}
+}
+
+// holdsKey reports whether p holds a `~` selector.
+func holdsKey(p paths.Path) bool {
+	for sel := range p.Selectors() {
+		if sel.Kind == paths.SelectorKey {
+			return true
+		}
+	}
+
+	return false
 }
 
 // claimName records that the version of entry with label gives the old

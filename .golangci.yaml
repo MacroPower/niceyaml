@@ -269,6 +269,11 @@ linters:
       - text: "go\\.jacobcolvin\\.com/niceyaml\\.(Invalid|Place)"
         linters:
           - wrapcheck
+      # A migration step returns the errors of its handle as they are,
+      # because each method binds its error at the handle already.
+      - text: "go\\.jacobcolvin\\.com/niceyaml/manifest/migrate\\.Node"
+        linters:
+          - wrapcheck
       - path: cmd/
         linters:
           - wrapcheck

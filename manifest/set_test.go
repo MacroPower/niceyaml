@@ -80,7 +80,7 @@ func TestSet_Get(t *testing.T) {
 
 	hours, ok := set.Get[Hours]("weekday")
 	require.True(t, ok)
-	assert.Equal(t, "07:00", hours.Value.Spec.Opens)
+	assert.Equal(t, "07:00", hours.Value.Spec.Open)
 	assert.False(t, hours.UpToDate)
 
 	_, ok = set.Get[Hours]("weekend")
@@ -131,4 +131,51 @@ func TestObject_Bind(t *testing.T) {
 	doc := yamltest.FirstDocument(t, "a: 1\n", niceyaml.WithName("a.yaml"))
 	built := manifest.Object[Cafe]{Node: doc}
 	assert.Equal(t, "a.yaml: bad", built.Bind(errBad).Error())
+
+	set := loadExample(t, newCafeRegistry(t))
+
+	item, ok := set.Get[MenuItem]("kanelbulle")
+	require.True(t, ok)
+
+	err := item.Bind(niceyaml.NewError(`unknown tag "vegan"`, niceyaml.AtPath(spec.Child("tags").Index(0))))
+	assert.Equal(t, ""+
+		"config/menu.yaml:8:9: $.spec.tags: unknown tag \"vegan\"\n"+
+		"`-- cafe.jacobcolvin.com/v1 sets $.spec.tags[0] from this value\n"+
+		"\n"+
+		"   6 | spec:\n"+
+		"   7 |   cost: 45 # kr\n"+
+		"   8 |   tags: vegan\n"+
+		"     |         ^^^^^\n"+
+		"   9 | ---\n"+
+		"  10 | apiVersion: cafe.jacobcolvin.com/v1", niceyaml.FormatError(err))
+
+	err = item.Bind(niceyaml.NewError("too cheap", niceyaml.AtPath(spec.Child("price"))))
+	assert.Equal(t, "config/menu.yaml:7:9: $.spec.cost: too cheap", err.Error())
+
+	left, err := newCafeRegistry(t).Load(t.Context(), manifest.FS(mapFS(map[string]string{
+		"cafe.yaml":  "apiVersion: cafe.jacobcolvin.com/v1\nkind: Cafe\nmetadata:\n  name: yamull\nspec:\n  currency: SEK\n",
+		"hours.yaml": "apiVersion: cafe.jacobcolvin.com/v1alpha1\nkind: Hours\nmetadata:\n  name: weekday\nspec:\n  opens: \"18:00\"\n",
+	}), "config"))
+	require.NoError(t, err)
+
+	cafe, ok := left.One[Cafe]()
+	require.True(t, ok)
+
+	err = cafe.Bind(niceyaml.NewError("20 seats exceed capacity 10", niceyaml.AtPath(spec.Child("seats"))))
+	assert.Equal(t, ""+
+		"config/cafe.yaml:5:1: $.spec.seats: 20 seats exceed capacity 10\n"+
+		"`-- the file leaves out seats, so it holds its default", firstTwoLines(niceyaml.FormatError(err)))
+
+	hours, ok := left.Get[Hours]("weekday")
+	require.True(t, ok)
+
+	err = hours.Bind(niceyaml.NewError("closes at 17:00, before it opens at 18:00",
+		niceyaml.AtPath(spec.Child("close"))))
+	assert.Equal(t, ""+
+		"config/hours.yaml:5:1: $.spec.close: closes at 17:00, before it opens at 18:00\n"+
+		"`-- the file leaves out the field that cafe.jacobcolvin.com/v1 names close, so it holds its default",
+		firstTwoLines(niceyaml.FormatError(err)))
+
+	err = hours.Bind(niceyaml.NewError("too early", niceyaml.AtPath(spec.Child("open"))))
+	assert.Equal(t, "config/hours.yaml:6:10: $.spec.opens: too early", firstLine(niceyaml.FormatError(err)))
 }

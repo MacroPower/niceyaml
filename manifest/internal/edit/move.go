@@ -2,6 +2,7 @@ package edit
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/goccy/go-yaml/ast"
 
@@ -54,6 +55,8 @@ func (h *Handle) Move(target paths.Path) error {
 	pl := d.extract(h, p)
 	anchors := d.anchorsIn(p.value)
 
+	d.recordEdit(h, p, fmt.Sprintf("moves %q to %s", name, target))
+
 	d.invalidate(h.path)
 	d.invalidate(target)
 
@@ -69,9 +72,16 @@ func (h *Handle) Move(target paths.Path) error {
 
 	from := h.path
 
+	// The handles to move come first, because the shift below moves the
+	// handle of the next item to the place the value left.
+	moving := d.handlesAt(from)
+
 	if p.seq != nil {
 		parent, _ := from.Parent()
 		d.shifted(parent, p.index)
+
+		// The target names a place of the document before the removal.
+		target = shiftedPath(target, parent, p.index)
 	}
 
 	err = d.insertAt(h, target, pl)
@@ -79,7 +89,7 @@ func (h *Handle) Move(target paths.Path) error {
 		return err
 	}
 
-	d.moved(from, target)
+	repoint(moving, from, target)
 
 	return d.keepAnchors(h, anchors)
 }
@@ -246,6 +256,17 @@ func (d *Doc) insertAt(h *Handle, target paths.Path, pl payload) error {
 	content := astnode.Content(holder.value)
 	origin := d.addNote(d.createdNote(holder))
 	holderName := d.describe(holderPath)
+
+	// The index past the last item of a sequence appends the value there,
+	// as Set does.
+	if next := sels[tp.found]; next.Kind == paths.SelectorIndex {
+		seq, ok := content.(*ast.SequenceNode)
+		if !ok || next.Index != len(seq.Values) || tp.found != len(sels)-1 {
+			return d.fail(h, "%s moves %q to %s, but %s holds no such item", d.label, h.Key(), target, holderName)
+		}
+
+		return d.appendPayload(h, holderPath, holder, seq, pl, origin)
+	}
 
 	var keys []run
 

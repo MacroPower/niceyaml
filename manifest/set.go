@@ -91,7 +91,7 @@ func (l *loader) newSet() *Set {
 		obj := Object[any]{
 			Value:    d.value,
 			Node:     d.doc,
-			bind:     d.work.Bind,
+			bind:     d.bindObject,
 			Name:     d.name,
 			Kind:     entry.kind.name,
 			UpToDate: v.index >= entry.written.index,

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 
@@ -12,6 +13,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // BeginStep starts the calls of a step of the version that messages name
@@ -19,6 +21,9 @@ import (
 func (d *Doc) BeginStep(label string) {
 	d.label = label
 	d.written = nil
+	d.stepEdits = nil
+	d.merges = d.mergeViews(nil)
+	d.lastEdit = nil
 }
 
 // EndCall ends one call of a step on the handle h, and takes err, the
@@ -44,7 +49,12 @@ func (d *Doc) Check(ctx context.Context) error {
 	written := d.written
 	d.written = nil
 
-	_, err := d.node.Decode[any](ctx, niceyaml.WithSelfValidation(false))
+	err := d.checkMerges()
+	if err != nil {
+		return err
+	}
+
+	_, err = d.node.Decode[any](ctx, niceyaml.WithSelfValidation(false))
 	if err != nil {
 		return d.bug(d.rootHandle(), err)
 	}
@@ -233,4 +243,83 @@ func (d *Doc) insertTypeField(ctx context.Context, h *Handle, p *place, path pat
 	}
 
 	return nil
+}
+
+// stepEdit is a place that a call of the step running edited.
+type stepEdit struct {
+	// The alias or the merge key that the call went through, as the text
+	// writes it, or "" for a call that reached the place directly.
+	via string
+	// The path of the place, and its range in the user's text.
+	path paths.Path
+	at   position.Range
+	// The range of via in the user's text.
+	viaAt position.Range
+}
+
+// editOnce records an edit of p through h, and returns the problem of a
+// place that an earlier call of the step edited too, where one of the
+// calls reached it through an alias or a merge key. A step that reaches a
+// shared value from several calls thus never edits it twice.
+func (d *Doc) editOnce(h *Handle, p *place) error {
+	start, ok := d.startOf(p)
+	if !ok || start >= len(d.origin) {
+		return nil
+	}
+
+	key := d.origin[start]
+	cur := d.stepEdit(h, p)
+
+	prev, seen := d.stepEdits[key]
+	if !seen {
+		if d.stepEdits == nil {
+			d.stepEdits = make(map[int]stepEdit)
+		}
+
+		d.stepEdits[key] = cur
+
+		return nil
+	}
+
+	if prev.via == "" && cur.via == "" {
+		return nil
+	}
+
+	at := cur
+	if at.via == "" {
+		at = prev
+	}
+
+	first := d.user.Bind(niceyaml.NewError(d.label+" changes it here first",
+		niceyaml.AtPath(prev.path), niceyaml.AtRange(prev.at)))
+
+	err := d.user.Bind(niceyaml.NewError(d.label+" changes this value a second time",
+		niceyaml.AtPath(cur.path), niceyaml.AtRange(at.viaAt),
+		niceyaml.WithDetails(first, fmt.Errorf("write the value out in place of %s", at.via)),
+	))
+	d.record(err)
+
+	return err
+}
+
+// stepEdit returns the record of an edit of p through h.
+func (d *Doc) stepEdit(h *Handle, p *place) stepEdit {
+	vs, ve := d.valueStart(p), d.valueEnd(p)
+	at := d.userRange(vs, max(vs, ve))
+	e := stepEdit{path: d.userPath(h.path, at.Start), at: at}
+
+	if p.via == nil {
+		return e
+	}
+
+	// The value lies under another path in the text, so the path of the
+	// handle names the place that the call reached.
+	e.path = h.path
+
+	if s, ok := d.nodeSpan(p.via); ok {
+		e.via = strings.TrimSpace(d.cur[s.start:s.end])
+		e.viaAt = d.userRange(s.start, s.end)
+	}
+
+	return e
 }

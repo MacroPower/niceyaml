@@ -7,7 +7,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/goccy/go-yaml/ast"
+
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -33,7 +36,9 @@ type docState struct {
 	problems []error
 	// The warnings that the checks handed to the warning handler.
 	warned []error
-	mu     sync.Mutex
+	// The warnings that strict mode leaves warnings.
+	lenient []error
+	mu      sync.Mutex
 	// The index of the file, and of the document within it.
 	file  int
 	index int
@@ -92,7 +97,8 @@ func (d *docState) check(ctx context.Context) {
 
 	d.deprecations()
 
-	if !d.prepareWork() || !d.checkSchema(ctx, d.route.version) {
+	if !d.prepareWork(d.doc, nil) || !d.checkSchema(ctx, d.route.version, nil) ||
+		!d.migrate(ctx) {
 		return
 	}
 
@@ -136,6 +142,10 @@ func (d *docState) report() {
 
 			d.l.add(&row{err: e, doc: d, file: d.file, index: d.index})
 		}
+	}
+
+	for _, w := range d.lenient {
+		d.l.add(&row{err: w, doc: d, file: d.file, index: d.index, lenient: true})
 	}
 }
 
@@ -532,8 +542,9 @@ func detailsOf(texts []string) []error {
 }
 
 // checkSchema checks the working copy against the schema of v, and reports
-// whether it passed. A version without a schema passes.
-func (d *docState) checkSchema(ctx context.Context, v *versionEntry) bool {
+// whether it passed. A version without a schema passes. Each problem of
+// the check takes detail as its last detail, when detail is not nil.
+func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail error) bool {
 	if !v.cfg.hasSchema {
 		return true
 	}
@@ -549,13 +560,26 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry) bool {
 	}
 
 	err = d.work.Validate(ctx, sch)
-	if niceyaml.HasErrors(err) {
+	if !niceyaml.HasErrors(err) {
+		return true
+	}
+
+	if detail == nil {
 		d.problems = append(d.problems, err)
 
 		return false
 	}
 
-	return true
+	for problem := range niceyaml.Problems(err) {
+		e := problem.Err
+		if niceyaml.HasErrors(e) {
+			e = d.doc.Bind(niceyaml.Place(e, niceyaml.WithDetails(detail)))
+		}
+
+		d.problems = append(d.problems, e)
+	}
+
+	return false
 }
 
 // decode decodes the working copy into a value of the Go type of the kind,
@@ -567,9 +591,13 @@ func (d *docState) decode(ctx context.Context) bool {
 	opts := append([]niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)}, reg.cfg.decodeOptions...)
 	opts = append(opts, entry.kind.cfg.decodeOptions...)
 
+	// A Validate method reports a field that the document leaves out at
+	// the mapping that lacks it, with a detail that names the field.
+	ctx = niceyaml.WithWarningHandler(ctx, func(w error) { d.warn(d.leftOut(w)) })
+
 	v, err := entry.kind.decode(ctx, d.work, opts)
 	if err != nil {
-		d.problems = append(d.problems, err)
+		d.problems = append(d.problems, d.leftOut(err))
 
 		return false
 	}
@@ -621,4 +649,106 @@ func (d *docState) checkName() bool {
 	}
 
 	return true
+}
+
+// bindObject binds err in the working copy of the document, as
+// [Object.Bind] does.
+func (d *docState) bindObject(err error) error {
+	return d.leftOut(d.work.Bind(err))
+}
+
+// leftOut returns err, an error bound in the document, with a detail on
+// each problem at a field that the document leaves out. The detail names
+// the first key of the path of the problem that the document lacks, and
+// says that the field holds its default, because a check of the decoded
+// value reported it. It returns err as it is when no problem needs the
+// detail.
+func (d *docState) leftOut(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var problems []error
+
+	changed := false
+
+	for problem := range niceyaml.Problems(err) {
+		e := problem.Err
+
+		detail := d.leftOutDetail(problem)
+		if detail != nil {
+			e = d.doc.Bind(niceyaml.Place(e, niceyaml.WithDetails(detail)))
+			changed = true
+		}
+
+		problems = append(problems, e)
+	}
+
+	if !changed {
+		return err
+	}
+
+	return d.doc.Bind(hook.Tally(problems)) //nolint:wrapcheck // The binding is the error of the caller.
+}
+
+// leftOutDetail returns the detail of problem when its path names a field
+// that the document leaves out, below a mapping that the decode reads
+// field by field, or nil. The path names the field as the current version
+// does, so the detail names that version for a document that declares an
+// older one.
+func (d *docState) leftOutDetail(problem niceyaml.ErrorTree) error {
+	p, ok := problem.Path()
+	if !ok || d.work == nil {
+		return nil
+	}
+
+	if exists(d.doc, p) || exists(d.work, p) {
+		return nil
+	}
+
+	res := d.work.Resolver()
+	prefix := paths.Doc()
+
+	for sel := range p.Selectors() {
+		if sel.Kind != paths.SelectorChild {
+			return nil
+		}
+
+		next := prefix.Child(sel.Name)
+		if exists(d.work, next) {
+			prefix = next
+
+			continue
+		}
+
+		holder, err := res.Node(prefix)
+		if err != nil || !isMapping(holder) {
+			return nil
+		}
+
+		current := d.route.kind.versions[len(d.route.kind.versions)-1]
+		if d.route.version == current {
+			return fmt.Errorf("the file leaves out %s, so it holds its default", sel.Name)
+		}
+
+		return fmt.Errorf("the file leaves out the field that %s names %s, so it holds its default",
+			d.l.reg.label(current), sel.Name)
+	}
+
+	return nil
+}
+
+// exists reports whether doc holds a value at p.
+func exists(doc *niceyaml.Node, p paths.Path) bool {
+	n, err := doc.Resolver().Node(p)
+
+	return err == nil && !astnode.IsNil(n)
+}
+
+// isMapping reports whether node holds a mapping under its anchors and
+// tags.
+func isMapping(node ast.Node) bool {
+	_, ok := astnode.Entries(astnode.Content(node))
+
+	return ok
 }

@@ -26,6 +26,9 @@ type place struct {
 	// The value as the text writes it, with its anchor or tag, or nil when
 	// the place holds none.
 	value ast.Node
+	// The first alias, or the value of the first `<<` merge key, that the
+	// path went through, or nil.
+	via ast.Node
 	// The path of the place, from `$`.
 	path paths.Path
 	// The index of the item in seq.
@@ -74,6 +77,10 @@ func (d *Doc) resolve(path paths.Path) (*place, error) {
 
 			p.shared = true
 			content = astnode.Content(target)
+
+			if p.via == nil {
+				p.via = astnode.Content(cur)
+			}
 		}
 
 		p.container = content
@@ -97,6 +104,10 @@ func (d *Doc) resolve(path paths.Path) (*place, error) {
 			if merged != nil {
 				p.shared = true
 				p.container = merged
+
+				if p.via == nil {
+					p.via = mergeValue(content)
+				}
 			}
 
 			p.entry = entry
@@ -181,6 +192,22 @@ func findChild(res *paths.Resolver, node ast.Node, name string) (*ast.MappingVal
 	}
 
 	return nil, nil, nil
+}
+
+// mergeValue returns the value of the last `<<` merge key of the mapping
+// node, or nil.
+func mergeValue(node ast.Node) ast.Node {
+	entries, _ := astnode.Entries(node)
+
+	var value ast.Node
+
+	for _, e := range entries {
+		if astnode.IsMergeKey(e.Key) {
+			value = e.Value
+		}
+	}
+
+	return value
 }
 
 // isFlow reports whether node is a flow mapping or a flow sequence.

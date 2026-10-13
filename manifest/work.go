@@ -13,13 +13,14 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// prepareWork builds the working copy of the document: the lines of the
-// document with each type field blanked, so the schema checks and the
-// decode admit the type fields whatever the schema and the Go type
-// declare. Every line and column of the copy matches the document, so an
-// error in the copy binds at the same place in the file.
-func (d *docState) prepareWork() bool {
-	doc := d.doc
+// prepareWork builds the working copy of doc, the document or a migrated
+// copy of it. The copy holds the lines of doc with each type field
+// blanked. The schema checks and the decode thus admit the type fields,
+// whatever the schema and the Go type declare. Every line and column of
+// the copy matches doc, so locate moves a location of the copy, as doc
+// places it, into the document. A nil locate leaves the location as it
+// is, for doc itself.
+func (d *docState) prepareWork(doc *niceyaml.Node, locate func(hook.Located) hook.Place) bool {
 	src := doc.Source()
 	text := src.Text()
 	span := doc.Span()
@@ -39,30 +40,23 @@ func (d *docState) prepareWork() bool {
 	work := []rune(text[start:end])
 	blank := &blanker{doc: doc, src: src, base: start, text: text, work: work, first: -1}
 
-	reg := d.l.reg
-	fields := []paths.Path{reg.cfg.versionField}
-
-	if !reg.cfg.versionOnly {
-		fields = append(fields, reg.cfg.kindField)
-	}
-
-	for _, p := range fields {
+	for _, p := range d.l.reg.typeFields() {
 		blank.field(p)
 	}
 
 	blank.fillEmptyRoot()
 
-	working, ok := hook.WorkingSource(string(blank.work), doc, func(at hook.Located) hook.Place {
-		place := hook.Place{Path: at.Path, HasPath: at.HasPath}
-
+	working, ok := hook.WorkingSource(string(blank.work), d.doc, func(at hook.Located) hook.Place {
 		if at.HasRange {
-			rng := at.Range
-			rng.Start.Line += span.Start
-			rng.End.Line += span.Start
-			place.Range, place.HasRange = rng, true
+			at.Range.Start.Line += span.Start
+			at.Range.End.Line += span.Start
 		}
 
-		return place
+		if locate != nil {
+			return locate(at)
+		}
+
+		return hook.Place{Path: at.Path, HasPath: at.HasPath, Range: at.Range, HasRange: at.HasRange}
 	}).(*niceyaml.Source)
 	if !ok {
 		return false

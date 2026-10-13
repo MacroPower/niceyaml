@@ -738,7 +738,7 @@ func TestRegistry_Load_Checks(t *testing.T) {
 		},
 		"panic": {
 			check: func(context.Context, *manifest.Set) error { panic("boom") },
-			err:   "config: check panicked: panic: boom",
+			err:   "config: check panicked: boom",
 		},
 	}
 
@@ -885,7 +885,7 @@ func TestRegistry_Load_Layers(t *testing.T) {
 			set, err := newCafeRegistry(t).Load(t.Context(), manifest.Sources(merged), manifest.WithSetChecks(false))
 			if tc.err != "" {
 				require.ErrorIs(t, err, manifest.ErrMixedLayers)
-				assert.Equal(t, tc.err, firstLines(niceyaml.FormatError(err), 2))
+				assert.Equal(t, tc.err, firstTwoLines(niceyaml.FormatError(err)))
 
 				return
 			}
@@ -924,9 +924,63 @@ func TestRegistry_Load_Hint(t *testing.T) {
 	assert.Equal(t, `tab.yaml:1:13: $.apiVersion: removed version "v0" of Tab`, err.Error())
 }
 
-// firstLines returns the first n lines of s.
-func firstLines(s string, n int) string {
-	lines := strings.SplitN(s, "\n", n+1)
+// firstTwoLines returns the first two lines of s: the headline of a
+// problem and its first detail.
+func firstTwoLines(s string) string {
+	lines := strings.SplitN(s, "\n", 3)
 
-	return strings.Join(lines[:min(n, len(lines))], "\n")
+	return strings.Join(lines[:min(2, len(lines))], "\n")
+}
+
+// Shift is a kind whose spec checks its hours.
+type Shift struct {
+	Spec ShiftSpec `json:"spec"`
+}
+
+// ShiftSpec holds the hours of a shift, which must not close before it
+// opens, and warns about a shift that opens before six.
+type ShiftSpec struct {
+	Open  string `json:"open,omitzero"`
+	Close string `json:"close,omitzero"`
+}
+
+// Validate reports a shift that closes before it opens, where a shift
+// without a close closes at 17:00.
+func (s ShiftSpec) Validate() error {
+	closes := s.Close
+	if closes == "" {
+		closes = "17:00"
+	}
+
+	if closes < s.Open {
+		return niceyaml.NewError(fmt.Sprintf("closes at %s, before it opens at %s", closes, s.Open),
+			niceyaml.AtPath(paths.Current().Child("close")))
+	}
+
+	return nil
+}
+
+func TestRegistry_Load_LeftOut(t *testing.T) {
+	t.Parallel()
+
+	reg, err := manifest.NewRegistry(
+		manifest.WithAppName("cafe"),
+		manifest.WithKinds(manifest.NewKind[Shift]("Shift",
+			manifest.Version("cafe.jacobcolvin.com/v1alpha1"),
+			manifest.Version("cafe.jacobcolvin.com/v1", manifest.Migrate(spec.Child("opens"), rename("open"))),
+		)),
+	)
+	require.NoError(t, err)
+
+	src := niceyaml.NewSourceFromString(
+		"apiVersion: cafe.jacobcolvin.com/v1alpha1\nkind: Shift\nspec:\n  opens: \"18:00\"\n",
+		niceyaml.WithName("hours.yaml"),
+	)
+
+	_, err = reg.Load(t.Context(), manifest.Sources(src))
+	require.Error(t, err)
+	assert.Equal(t, ""+
+		"hours.yaml:3:1: $.spec.close: closes at 17:00, before it opens at 18:00\n"+
+		"`-- the file leaves out the field that cafe.jacobcolvin.com/v1 names close, so it holds its default",
+		firstTwoLines(niceyaml.FormatError(err)))
 }

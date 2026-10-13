@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"runtime/debug"
 	"slices"
 	"sync"
@@ -163,6 +162,8 @@ type row struct {
 	pos   position.Position
 	// The problem has no position, so it sorts first within its document.
 	unplaced bool
+	// The problem is a warning that strict mode leaves a warning.
+	lenient bool
 }
 
 // check reads the files of in and runs the checks of each document.
@@ -310,7 +311,7 @@ func (l *loader) finish() []error {
 
 			r.err = wrapped
 
-			if l.cfg.strict {
+			if l.cfg.strict && !r.lenient {
 				r.err = niceyaml.AsErrors(r.err)
 			}
 		}
@@ -442,7 +443,7 @@ func (l *loader) addChecked(err error) {
 func runCheck(ctx context.Context, check func(context.Context, *Set) error, set *Set) (err error) {
 	defer func() {
 		if v := recover(); v != nil {
-			err = fmt.Errorf("check panicked: %w", &niceyaml.PanicError{Value: v, Stack: debug.Stack()})
+			err = &panicError{in: "check", p: &niceyaml.PanicError{Value: v, Stack: debug.Stack()}}
 		}
 	}()
 
