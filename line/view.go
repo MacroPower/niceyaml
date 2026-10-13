@@ -12,6 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/internal/clip"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/internal/severity"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
@@ -679,6 +680,13 @@ func (v *View) shown(i int, ln *Line) shownRow {
 // more than [MaxColPastEnd] columns past the end of the content start at
 // that bound, as the printer starts them.
 //
+// A line that holds the [kind.TextError] annotations of an error and the
+// [kind.TextWarn] annotations of a warning gives each severity its own
+// row, the row of the error first. Each of the two rows marks the overlays
+// of its own severity, so the warning row marks the [kind.GenericWarn]
+// overlays and the error row marks the rest. No caret thus sits beside
+// the message of the other severity.
+//
 // Control characters render as their pictures, and a rune that takes two
 // cells in a terminal gets two carets, so the carets stay under the runes
 // they mark in a fixed-width font. The output holds no escape sequences,
@@ -732,15 +740,22 @@ func (v *View) String() string {
 		// Each kind of annotation below the line gets a row of its own as
 		// well, in the order the kinds first appear. The overlays mark the
 		// first row, so a line with overlays but no annotation below it
-		// still gets that row.
-		groups := anns.Filter(Below).ByKind()
+		// still gets that row. A line that holds both an error and a
+		// warning gives each severity a row, errors first, and each row
+		// marks the overlays of its own severity.
+		groups, split := severityRows(anns.Filter(Below).ByKind())
 		if len(groups) == 0 {
 			groups = []Annotations{nil}
 		}
 
 		overlays := row.overlays
 		for _, group := range groups {
-			if marker := markerRow(row.content, row.width, overlays, group); marker != "" {
+			drawn := overlays
+			if split {
+				drawn = severityOverlays(row.overlays, group)
+			}
+
+			if marker := markerRow(row.content, row.width, drawn, group); marker != "" {
 				rows = append(rows, blank+marker)
 			}
 
@@ -749,6 +764,38 @@ func (v *View) String() string {
 	}
 
 	return strings.Join(rows, "\n")
+}
+
+// severityRows returns groups, the annotations below a line grouped by
+// kind, in the order a renderer draws them, and whether the line holds
+// both an error and a warning, as [severity.Split] reports.
+func severityRows(groups []Annotations) ([]Annotations, bool) {
+	kinds := make([]kind.Kind, 0, len(groups))
+	for _, group := range groups {
+		kinds = append(kinds, group[0].RenderKind())
+	}
+
+	ordered := make([]Annotations, 0, len(groups))
+	for _, i := range severity.Order(kinds) {
+		ordered = append(ordered, groups[i])
+	}
+
+	return ordered, severity.Split(kinds)
+}
+
+// severityOverlays returns the overlays that the row of group marks on a
+// line that holds both an error and a warning, as [severity.Draws] picks
+// them.
+func severityOverlays(overlays Overlays, group Annotations) Overlays {
+	var drawn Overlays
+
+	for _, o := range overlays {
+		if severity.Draws(group[0].RenderKind(), o.Kind) {
+			drawn = append(drawn, o)
+		}
+	}
+
+	return drawn
 }
 
 // contentRow returns the row that renders content, the text of a line,

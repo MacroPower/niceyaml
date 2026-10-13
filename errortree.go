@@ -63,6 +63,12 @@ type ErrorTree struct {
 	// from [WithDetails] does, rather than standing for a problem the
 	// parent heads.
 	Detail bool
+	// Warning reports whether the problem of the node is a warning, as
+	// [NewWarning] and [Node.Warn] mark one, rather than an error. A
+	// heading sets it when every problem below it is a warning. A type that
+	// [errors.As] finds in Err tells what a problem is about, never its
+	// severity, so a renderer reads Warning.
+	Warning bool
 }
 
 // NewErrorTree creates a new [ErrorTree] from err. The root holds the
@@ -195,26 +201,41 @@ func (t ErrorTree) heads() bool {
 	return slices.ContainsFunc(t.Children, func(c ErrorTree) bool { return !c.Detail })
 }
 
-// IsInvalid reports whether the document is at fault for every problem at
+// IsInvalid reports whether the document is at fault for the problems at
 // or below the node, the ones [ErrorTree.Problems] yields for it, as the
-// function [IsInvalid] describes. A node that yields no problem, such as
-// the zero ErrorTree, is not invalid. A heading answers through the
-// problems it heads, whatever its own error declares, and the details of
-// a problem decide nothing. A node with Detail set answers for its own
-// error, and its answer changes nothing for the node it explains. The
-// method reads Err, so a node built by hand with no Err is not invalid.
+// function [IsInvalid] describes. It decides from the errors among them
+// and passes over the warnings. A node whose every problem is a warning
+// answers for the warnings, so the row of a deprecation reports true. A
+// node that yields no problem, such as the zero ErrorTree, is not
+// invalid. A heading answers through the problems it heads, whatever its
+// own error declares, and the details of a problem decide nothing. A node
+// with Detail set answers for its own error, and its answer changes
+// nothing for the node it explains. The method reads Err, so a node built
+// by hand with no Err is not invalid.
 func (t ErrorTree) IsInvalid() bool {
-	found := false
+	var errs, warns int
+
+	errsInvalid, warnsInvalid := true, true
 
 	for problem := range t.Problems() {
-		if !declaresInvalid(problem.Err) {
-			return false
+		invalid := declaresInvalid(problem.Err)
+
+		if isWarning(problem.Err) {
+			warns++
+			warnsInvalid = warnsInvalid && invalid
+
+			continue
 		}
 
-		found = true
+		errs++
+		errsInvalid = errsInvalid && invalid
 	}
 
-	return found
+	if errs > 0 {
+		return errsInvalid
+	}
+
+	return warns > 0 && warnsInvalid
 }
 
 // declaresInvalid reports whether an error on the cause chain of err
@@ -376,14 +397,45 @@ func appendTrees(dst []ErrorTree, err error) []ErrorTree {
 	kids, end := children(err)
 	node := ErrorTree{Err: err, Bound: bindingOf(err)}
 
-	if x, ok := err.(*SourceError); ok { //nolint:errorlint // The node itself, not a chain search.
+	x, binds := err.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
+	if binds {
 		node.Label = x.headline()
 	} else {
 		node.Label, _, _, _ = end.cut(err.Error())
 		node.Label = unboundText(err, node.Label)
 	}
 
-	return appendTree(dst, newTree(node, kids))
+	t := newTree(node, kids)
+
+	// A binding writes the label of a warning into its own text, so only a
+	// problem that no binding holds gets it here.
+	if !binds && node.Label != "" && t.Warning && t.isProblem() && !holdsBinding(err) {
+		t.Label = prefix("warning:", t.Label)
+	}
+
+	return appendTree(dst, t)
+}
+
+// holdsBinding reports whether a [*SourceError] lies on the cause chain of
+// err, whose text then holds the text of the binding.
+func holdsBinding(err error) bool {
+	for cur := err; !isNothing(cur); {
+		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *SourceError:
+			return true
+
+		case *Error:
+			cur = x.err
+
+		case interface{ Unwrap() error }:
+			cur = x.Unwrap()
+
+		default:
+			return false
+		}
+	}
+
+	return false
 }
 
 // unboundText puts the path of the first located [*Error] on the cause
@@ -944,6 +996,8 @@ func comparePositioned(a, b positioned) int {
 // node with no text and a single child is that child.
 func newTree(node ErrorTree, children []ErrorTree) ErrorTree {
 	if len(children) == 0 {
+		node.Warning = node.Err != nil && isWarning(node.Err)
+
 		return node
 	}
 
@@ -961,7 +1015,26 @@ func newTree(node ErrorTree, children []ErrorTree) ErrorTree {
 		node.Children = flat
 	}
 
+	node.Warning = treeWarning(node)
+
 	return node
+}
+
+// treeWarning reports whether t is a warning: a heading whose every
+// problem is a warning, or a problem whose error is one. The details of a
+// problem decide nothing.
+func treeWarning(t ErrorTree) bool {
+	if !t.heads() {
+		return t.Err != nil && isWarning(t.Err)
+	}
+
+	for _, child := range t.Children {
+		if !child.Detail && !child.Warning {
+			return false
+		}
+	}
+
+	return true
 }
 
 // treeCut cuts an [ErrorTree] down to its first problems, as
@@ -1130,12 +1203,17 @@ type ErrorReport struct {
 	// with no content and the tree names the path already. A binding the
 	// error reaches twice comes twice, as Bindings yields it.
 	Unresolved []*SourceError
-	// Tree is the [ErrorTree] of the error, as [NewErrorTree] builds it.
-	// That tree has no row for an error that holds nothing, such as a
-	// bound join of typed-nil errors. When the report then holds no
-	// excerpt and no unresolved binding either, Tree is one node with the
-	// message of the error as its Label and no Err, so a renderer draws
-	// that message in place of nothing.
+	// Tree is the [ErrorTree] of the error. Under one heading, a warning
+	// whose message and details match those of an earlier warning keeps
+	// its row and loses its details, so fifteen files with one deprecated
+	// version print fifteen rows and one set of details. Such a warning
+	// marks nothing in the excerpts either. Every other node is the node
+	// that [NewErrorTree] builds, which keeps every detail. The tree has
+	// no row for an error that holds nothing, such as a bound join of
+	// typed-nil errors. When the report then holds no excerpt and no
+	// unresolved binding either, Tree is one node with the message of the
+	// error as its Label and no Err, so a renderer draws that message in
+	// place of nothing.
 	Tree ErrorTree
 }
 
@@ -1170,7 +1248,10 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 		return ErrorReport{}
 	}
 
-	tree := NewErrorTree(err)
+	// A repeated warning still names its source, so the excerpts of a
+	// report that reaches several sources keep their names.
+	quiet := make(map[*SourceError]bool)
+	tree := dropRepeats(NewErrorTree(err), quiet)
 
 	var skipped map[*SourceError]bool
 
@@ -1186,7 +1267,7 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 	// The own location of a binding carries its message only among
 	// several bindings, where the message tells the carets of one excerpt
 	// apart.
-	sources, positions := treePositions(bindings, len(bindings) > 1, skipped)
+	sources, positions := treePositions(bindings, len(bindings) > 1, skipped, quiet)
 
 	var rep ErrorReport
 
@@ -1227,6 +1308,65 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 	}
 
 	return rep
+}
+
+// dropRepeats returns t with the details of each repeated warning left
+// out, and adds the bindings of such a warning to skip, so no excerpt
+// marks it. A warning repeats when its message and its details match those
+// of an earlier warning under the same heading. Its row stays, so each
+// file with the warning still shows in the tree.
+func dropRepeats(t ErrorTree, skip map[*SourceError]bool) ErrorTree {
+	if !t.heads() {
+		return t
+	}
+
+	every := func(*SourceError) bool { return true }
+	seen := make(map[string]bool)
+	children := make([]ErrorTree, 0, len(t.Children))
+
+	for _, child := range t.Children {
+		switch {
+		case child.Detail:
+
+		case child.isProblem() && child.Warning:
+			key := repeatKey(child)
+			if seen[key] {
+				for node := range child.nodes() {
+					node.Bound.all(skip, every)
+				}
+
+				child.Children = nil
+			}
+
+			seen[key] = true
+
+		default:
+			child = dropRepeats(child, skip)
+		}
+
+		children = append(children, child)
+	}
+
+	t.Children = children
+
+	return t
+}
+
+// repeatKey returns the text that two warnings share when one repeats the
+// other: the message of t and the rows of its details.
+func repeatKey(t ErrorTree) string {
+	var sb strings.Builder
+
+	sb.WriteString(t.Message())
+
+	for node := range t.nodes() {
+		if node.Detail {
+			sb.WriteString("\x00")
+			sb.WriteString(node.Label)
+		}
+	}
+
+	return sb.String()
 }
 
 // messageTree returns t, or a single node with the message of err when t

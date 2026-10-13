@@ -180,7 +180,7 @@ func (p *Printer) renderErrorTree(t niceyaml.ErrorTree) string {
 
 	// A root with nothing to show, such as a join, takes no row, so its
 	// children start the tree.
-	if root := p.errorText(t.Label, 0); strings.Join(root, "\n") != "" {
+	if root := p.errorRows(t, 0); strings.Join(root, "\n") != "" {
 		rows = root
 	}
 
@@ -218,7 +218,7 @@ func (p *Printer) appendErrorBranches(
 
 		first, rest := indent+branch.Render(connector), indent+branch.Render(below)
 
-		for j, row := range p.errorText(child.Label, depth) {
+		for j, row := range p.errorRows(child, depth) {
 			if j == 0 {
 				rows = append(rows, first+row)
 			} else {
@@ -231,6 +231,24 @@ func (p *Printer) appendErrorBranches(
 
 	return rows
 }
+
+// errorRows returns the rows of the message of t at depth connectors from
+// the left edge, as errorText lays them out. The "warning:" label of a
+// warning renders in [kind.TextWarn].
+func (p *Printer) errorRows(t niceyaml.ErrorTree, depth int) []string {
+	rows := p.errorText(t.Label, depth)
+
+	if t.Warning && !t.Detail && len(rows) > 0 {
+		label := p.styles.Style(kind.TextWarn).Render(warningLabel)
+		rows[0] = strings.Replace(rows[0], warningLabel, label, 1)
+	}
+
+	return rows
+}
+
+// warningLabel is the label that the row of a warning carries after its
+// position.
+const warningLabel = "warning:"
 
 // errorText returns the rows of one message of the tree at depth
 // connectors from the left edge, wrapped to the width left of the

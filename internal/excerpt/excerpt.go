@@ -28,6 +28,28 @@ type Mark struct {
 	Ranges position.Ranges
 	// The position of the error.
 	Pos position.Position
+	// The mark belongs to a warning, so it highlights in
+	// [kind.GenericWarn] and annotates in [kind.TextWarn] rather than in
+	// the kinds of an error.
+	Warning bool
+}
+
+// overlayKind returns the kind m highlights its location in.
+func (m Mark) overlayKind() kind.Kind {
+	if m.Warning {
+		return kind.GenericWarn
+	}
+
+	return kind.GenericError
+}
+
+// textKind returns the kind m annotates its line in.
+func (m Mark) textKind() kind.Kind {
+	if m.Warning {
+		return kind.TextWarn
+	}
+
+	return kind.TextError
 }
 
 // Annotate puts each mark in marks on view, where marks hold the resolved
@@ -45,6 +67,11 @@ type Mark struct {
 // of only spaces inside a block scalar, and a range that starts at the
 // end of its first line. The overlay renders nothing and still marks the
 // line as decorated, so the line joins the hunks [line.View.Hunks] keeps.
+//
+// A mark of a warning highlights in [kind.GenericWarn] and annotates in
+// [kind.TextWarn], and a mark of an error in [kind.GenericError] and
+// [kind.TextError]. A line that holds marks of both gets an annotation of
+// each kind, so a renderer gives each severity a row of its own.
 //
 // Each mark with a message adds one annotation below its line, so a line
 // several marks mark carries one annotation per message, and a renderer
@@ -72,14 +99,14 @@ func Annotate(view *line.View, lines line.Lines, marks []Mark) bool {
 
 // annotateLines marks marks on view as [Annotate] describes, and returns
 // the indices of the lines it marked, with repeats.
-func annotateLines(view *line.View, lines line.Lines, marks []Mark) []int {
+func annotateLines(view *line.View, lines line.Lines, marks []Mark) []markedLine {
 	if len(marks) == 0 {
 		return nil
 	}
 
 	index := lineIndex(view, lines)
 
-	var marked []int
+	var marked []markedLine
 
 	for _, m := range marks {
 		var segments []position.Range
@@ -89,7 +116,7 @@ func annotateLines(view *line.View, lines line.Lines, marks []Mark) []int {
 		}
 
 		if i, ok := index(m.Pos.Line); ok {
-			marked = append(marked, i)
+			marked = append(marked, markedLine{index: i, warning: m.Warning})
 
 			width := lines.Line(m.Pos.Line).Width()
 			start, onLine := highlightStart(m.Pos, segments)
@@ -98,14 +125,14 @@ func annotateLines(view *line.View, lines line.Lines, marks []Mark) []int {
 				col := min(m.Pos.Col, width)
 				addOverlay(view, i, line.Overlay{
 					Cols: position.NewSpan(col, col),
-					Kind: kind.GenericError,
+					Kind: m.overlayKind(),
 				})
 			}
 
 			if m.Message != "" {
 				addAnnotation(view, i, line.Annotation{
 					Content:   escape.Tabs(m.Message),
-					Kind:      kind.TextError,
+					Kind:      m.textKind(),
 					Placement: line.Below,
 					Col:       min(start, width),
 				})
@@ -118,10 +145,10 @@ func annotateLines(view *line.View, lines line.Lines, marks []Mark) []int {
 			if i, ok := index(lr.Start.Line); ok {
 				addOverlay(view, i, line.Overlay{
 					Cols: position.NewSpan(lr.Start.Col, lr.End.Col),
-					Kind: kind.GenericError,
+					Kind: m.overlayKind(),
 				})
 
-				marked = append(marked, i)
+				marked = append(marked, markedLine{index: i, warning: m.Warning})
 			}
 		}
 	}
@@ -160,34 +187,67 @@ func highlightStart(at position.Position, segments []position.Range) (int, bool)
 	return col, found
 }
 
-// markUnannotated adds an empty [kind.TextError] annotation below each
-// line of view at an index in marked that has none below it yet, at the
-// first column its overlays without Blend set cover, so a search highlight
-// moves no caret. The printer draws it as a caret run, so a location with
-// no message, such as the root of a bound error, still shows its extent.
-func markUnannotated(view *line.View, marked []int) {
-	for _, i := range marked {
+// markedLine is the index of a line of a view that [Annotate] marked, and
+// whether the mark there belongs to a warning.
+type markedLine struct {
+	index   int
+	warning bool
+}
+
+// markUnannotated adds an empty annotation below each line of view in
+// marked that has none of the kind of its mark below it yet: a
+// [kind.TextError] one for the mark of an error and a [kind.TextWarn] one
+// for the mark of a warning. An annotation of another kind counts too,
+// apart from one of the other severity, so a line that holds both
+// severities gets a row for each. The annotation goes at the first column
+// that the overlays of its kind cover, or else any overlay without Blend
+// set, so a search highlight moves no caret. The printer draws it as a
+// caret run, so a location with no message, such as the root of a bound
+// error, still shows its extent.
+func markUnannotated(view *line.View, marked []markedLine) {
+	for _, m := range marked {
+		own, other := kind.TextError, kind.TextWarn
+		highlight := kind.GenericError
+
+		if m.warning {
+			own, other = other, own
+			highlight = kind.GenericWarn
+		}
+
 		// A line repeats in marked once per location on it, so the check
 		// for an annotation below it comes before the scan of its overlays.
 		// Each repeat after the first then skips the scan.
-		if slices.ContainsFunc(view.Annotations(i), func(a line.Annotation) bool {
-			return a.Placement == line.Below
+		if slices.ContainsFunc(view.Annotations(m.index), func(a line.Annotation) bool {
+			return a.Placement == line.Below && a.Kind != other
 		}) {
 			continue
 		}
 
-		col, found := 0, false
-
-		for _, o := range view.Overlays(i) {
-			if !o.Blend && (!found || o.Cols.Start < col) {
-				col, found = o.Cols.Start, true
-			}
+		col, found := firstCol(view.Overlays(m.index), func(o line.Overlay) bool {
+			return !o.Blend && o.Kind == highlight
+		})
+		if !found {
+			col, found = firstCol(view.Overlays(m.index), func(o line.Overlay) bool { return !o.Blend })
 		}
 
 		if found {
-			view.Annotate(i, line.Annotation{Kind: kind.TextError, Placement: line.Below, Col: col})
+			view.Annotate(m.index, line.Annotation{Kind: own, Placement: line.Below, Col: col})
 		}
 	}
+}
+
+// firstCol returns the first column that the overlays keep accepts start
+// at, and whether keep accepts any.
+func firstCol(overlays line.Overlays, keep func(line.Overlay) bool) (int, bool) {
+	col, found := 0, false
+
+	for _, o := range overlays {
+		if keep(o) && (!found || o.Cols.Start < col) {
+			col, found = o.Cols.Start, true
+		}
+	}
+
+	return col, found
 }
 
 // lineIndex returns a lookup from a line index of lines to the index of

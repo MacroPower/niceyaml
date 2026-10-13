@@ -15,6 +15,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 // excerptOf returns the part of a rendered error after its tree, which
@@ -407,5 +409,46 @@ func TestPrinter_PrintReport(t *testing.T) {
 			"   2  b: 2",
 			"         ^ bad b",
 		), p.PrintReport(rep))
+	})
+}
+
+func TestPrinter_PrintError_Warnings(t *testing.T) {
+	t.Parallel()
+
+	item := niceyaml.NewSourceFromString("name: semla\nspec: {price: 0, legacyPricing: true}\n",
+		niceyaml.WithName("item.yaml"))
+
+	err := yamltest.Bind(t, item, errors.Join(
+		niceyaml.NewError("0 is less than 1", niceyaml.AtPath(paths.Doc().Child("spec", "price"))),
+		niceyaml.NewWarning(`deprecated field "legacyPricing"`,
+			niceyaml.AtPath(paths.Doc().Child("spec", "legacyPricing").Key())),
+	))
+
+	t.Run("each severity gets its own row", func(t *testing.T) {
+		t.Parallel()
+
+		p := testPrinterWithGutter(printer.DefaultGutter)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"├── item.yaml:2:15: $.spec.price: 0 is less than 1",
+			`└── item.yaml:2:18: warning: $.spec.legacyPricing~: deprecated field "legacyPricing"`,
+			"",
+			"   1  name: semla",
+			"   2  spec: {price: 0, legacyPricing: true}",
+			"                    ^ 0 is less than 1",
+			`                       ^^^^^^^^^^^^^ warning: deprecated field "legacyPricing"`,
+		), p.PrintError(err))
+	})
+
+	t.Run("the label renders in the warning text style", func(t *testing.T) {
+		t.Parallel()
+
+		p := testPrinterWithStyles(style.Set(kind.TextWarn, bracketStyle("<", ">")))
+
+		tree, _, _ := strings.Cut(p.PrintError(err), "\n\n")
+		assert.Equal(t, stringtest.JoinLF(
+			"├── item.yaml:2:15: $.spec.price: 0 is less than 1",
+			`└── item.yaml:2:18: <warning:> $.spec.legacyPricing~: deprecated field "legacyPricing"`,
+		), tree)
 	})
 }

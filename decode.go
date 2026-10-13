@@ -472,7 +472,9 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // ErrDecode. The Decoding section describes the messages, the sentinels
 // of each problem, and where each error binds.
 func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
-	return n.decodeInto(ctx, v, newDecodeConfig(n.source, opts), nil)
+	c := &warningCollector{}
+
+	return c.finish(ctx, n.decodeInto(c.context(ctx), v, newDecodeConfig(n.source, opts), nil), n.Bind)
 }
 
 // decodeInto is [Node.DecodeInto] with its settings resolved. It also
@@ -497,7 +499,9 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 		return n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
 	}
 
-	err = n.bindOwn(n.decodeUnbound(ctx, n.AST(), v, cfg, comments))
+	// The decoder step reports each problem as an error, whatever it wraps,
+	// since the decoder stops at the first and reads no value past it.
+	err = n.bindOwn(AsErrors(n.decodeUnbound(ctx, n.AST(), v, cfg, comments)))
 	if err != nil {
 		return err
 	}

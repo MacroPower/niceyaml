@@ -170,10 +170,11 @@ func (p palette) build(dimSurface, surface color.Color) style.Styles {
 	s := style.New(base, derived...)
 
 	// The printer paints whole inserted and deleted lines and their + and -
-	// markers in these kinds, and it marks errors with a GenericError
-	// overlay that replaces the style underneath. A palette that leaves
-	// them out takes its OK and Error colors, and the error mark draws as a
-	// badge so it shows over a token drawn in the Error color. Each default
+	// markers in these kinds. It marks errors with a GenericError overlay
+	// and warnings with a GenericWarn overlay, and each replaces the style
+	// underneath. A palette that leaves them out takes its OK, Warn, and
+	// Error colors, and each mark draws as a badge so it shows over a token
+	// drawn in the color of the mark. Each default
 	// fills in for a missing Tokens spec and layers over Generic the same
 	// way, so a theme spec for one of these kinds replaces the default
 	// outright rather than layering over it.
@@ -186,6 +187,7 @@ func (p palette) build(dimSurface, surface color.Color) style.Styles {
 		kind.GenericInserted: style.Encode(lipgloss.NewStyle().Foreground(ok)),
 		kind.GenericDeleted:  style.Encode(lipgloss.NewStyle().Foreground(errColor)),
 		kind.GenericError:    style.Encode(lipgloss.NewStyle().Foreground(textOn(errColor)).Background(errColor)),
+		kind.GenericWarn:     style.Encode(lipgloss.NewStyle().Foreground(textOn(warn)).Background(warn)),
 	}
 	// Null and the booleans share one keyword-constant token in the source
 	// themes, so a palette that leaves null out draws it with the boolean
@@ -330,7 +332,7 @@ func highlightSurfaces(s style.Styles, fg, bg, accent color.Color, mode Mode) (c
 
 	// The printer paints whole diff lines and error marks in these kinds,
 	// and a theme may draw each on a fill of its own.
-	for _, k := range []kind.Kind{kind.GenericInserted, kind.GenericDeleted, kind.GenericError} {
+	for _, k := range []kind.Kind{kind.GenericInserted, kind.GenericDeleted, kind.GenericError, kind.GenericWarn} {
 		st := s.Style(k)
 
 		paint := st.GetBackground()

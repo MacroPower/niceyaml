@@ -803,6 +803,14 @@ func (s *Source) AllDocuments() []*Node {
 // documents with content that passes it still fails [Source.Decode] with
 // [ErrMultipleDocuments].
 func (s *Source) ValidateDocuments(ctx context.Context, v Validator) error {
+	c := &warningCollector{}
+
+	return c.finish(ctx, s.validateDocuments(c.context(ctx), v), s.Bind)
+}
+
+// validateDocuments is [Source.ValidateDocuments] with the warnings of the
+// documents that pass handed to the warning handler of ctx.
+func (s *Source) validateDocuments(ctx context.Context, v Validator) error {
 	var (
 		errs []error
 		// The syntax error of the document before, which the next document

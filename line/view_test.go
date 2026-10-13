@@ -1397,6 +1397,72 @@ func TestView_String(t *testing.T) {
 	})
 }
 
+func TestView_String_Severities(t *testing.T) {
+	t.Parallel()
+
+	content := "spec: {price: 0, legacyPricing: true}\n"
+	errorOverlay := line.Overlay{Kind: kind.GenericError, Cols: position.NewSpan(14, 15)}
+	warnOverlay := line.Overlay{Kind: kind.GenericWarn, Cols: position.NewSpan(17, 30)}
+	errorAnn := line.Annotation{Content: "0 is less than 1", Kind: kind.TextError, Placement: line.Below, Col: 14}
+	warnAnn := line.Annotation{
+		Content:   `warning: deprecated field "legacyPricing"`,
+		Kind:      kind.TextWarn,
+		Placement: line.Below,
+		Col:       17,
+	}
+
+	tcs := map[string]struct {
+		overlays    []line.Overlay
+		annotations []line.Annotation
+		want        string
+	}{
+		"each severity gets its own row, errors first": {
+			overlays:    []line.Overlay{warnOverlay, errorOverlay},
+			annotations: []line.Annotation{warnAnn, errorAnn},
+			want: stringtest.JoinLF(
+				"   1 | spec: {price: 0, legacyPricing: true}",
+				"     |               ^ 0 is less than 1",
+				`     |                  ^^^^^^^^^^^^^ warning: deprecated field "legacyPricing"`,
+			),
+		},
+		"a warning alone marks every overlay": {
+			overlays:    []line.Overlay{warnOverlay, errorOverlay},
+			annotations: []line.Annotation{warnAnn},
+			want: stringtest.JoinLF(
+				"   1 | spec: {price: 0, legacyPricing: true}",
+				`     |               ^  ^^^^^^^^^^^^^ warning: deprecated field "legacyPricing"`,
+			),
+		},
+		"empty annotations draw the carets of their own severity": {
+			overlays: []line.Overlay{warnOverlay, errorOverlay},
+			annotations: []line.Annotation{
+				{Kind: kind.TextError, Placement: line.Below, Col: 14},
+				{Kind: kind.TextWarn, Placement: line.Below, Col: 17},
+			},
+			want: stringtest.JoinLF(
+				"   1 | spec: {price: 0, legacyPricing: true}",
+				"     |               ^",
+				"     |                  ^^^^^^^^^^^^^",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := newTestView(t, content, 1)
+			for _, o := range tc.overlays {
+				view.AddLineOverlay(0, o)
+			}
+
+			view.Annotate(0, tc.annotations...)
+
+			assert.Equal(t, tc.want, view.String())
+		})
+	}
+}
+
 func TestView_OutOfRange(t *testing.T) {
 	t.Parallel()
 

@@ -30,6 +30,7 @@
 //     PunctuationBlock, PunctuationCollectEntry, PunctuationHeading.
 //   - Diff and error markers: Generic -> GenericDeleted, GenericInserted,
 //     GenericError.
+//   - Warning markers: TextWarn -> GenericWarn.
 //   - Search and selection highlights: Generic -> GenericHighlight ->
 //     GenericHighlightDim.
 //   - Headings: Generic -> GenericHeading -> GenericHeadingAccent,
@@ -108,6 +109,10 @@ const (
 	GenericErrorUnknown Kind = "genericErrorUnknown"
 	// GenericInserted styles lines inserted in diff (+).
 	GenericInserted Kind = "genericInserted"
+	// GenericWarn styles the location of a warning, as GenericError styles
+	// the location of an error. It inherits from [TextWarn], so a theme
+	// that leaves it unset draws the location in its warning text style.
+	GenericWarn Kind = "genericWarn"
 	// GenericHighlight styles highlights.
 	GenericHighlight Kind = "genericHighlight"
 	// GenericHighlightDim styles dimmed highlights.
@@ -233,6 +238,7 @@ var parent = map[Kind]Kind{
 	GenericHighlight:         Generic,
 	GenericHighlightDim:      GenericHighlight,
 	GenericInserted:          Generic,
+	GenericWarn:              TextWarn,
 	Literal:                  Text,
 	LiteralBoolean:           Literal,
 	LiteralNull:              Literal,

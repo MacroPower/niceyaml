@@ -16,6 +16,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
+	"go.jacobcolvin.com/niceyaml/internal/severity"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -1410,7 +1411,8 @@ const minAnnotationWidth = 20
 // each wrapped row of the line shows, and the result holds a block of
 // rows for each wrapped row:
 // the rows of each [AnnotationRow] whose column that wrapped row holds.
-// Within a block, the kinds come in [line.Annotations.ByKind] order, and
+// Within a block, the kinds come in [line.Annotations.ByKind] order, with
+// a [kind.TextWarn] group after a [kind.TextError] group, and
 // within each kind the rows the [AnnotationFunc] returns come in order,
 // each wrapped to the printer width and styled in the style of its kind.
 // It returns nil when the line has no annotations at the placement.
@@ -1432,12 +1434,33 @@ func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Pl
 	// the length of the line.
 	rowCells := make([]*cells.Row, len(out))
 
-	for _, group := range anns.ByKind() {
+	groups := anns.ByKind()
+
+	kinds := make([]kind.Kind, 0, len(groups))
+	for _, group := range groups {
+		kinds = append(kinds, group[0].RenderKind())
+	}
+
+	// A line that holds both an error and a warning gives each severity a
+	// row of its own, errors first, and each row marks the overlays of its
+	// own severity alone.
+	split := severity.Split(kinds)
+
+	for _, gi := range severity.Order(kinds) {
+		group := groups[gi]
+
+		overlays := vl.overlays()
+		if split {
+			overlays = slices.DeleteFunc(slices.Clone(overlays), func(o line.Overlay) bool {
+				return !severity.Draws(kinds[gi], o.Kind)
+			})
+		}
+
 		rows := p.annotationFunc(AnnotationContext{
 			Annotations: group,
 			Placement:   placement,
 			Content:     text,
-			Overlays:    vl.overlays(),
+			Overlays:    overlays,
 			RowStarts:   slices.Clone(starts),
 			RowEnds:     slices.Clone(w.ends),
 		})

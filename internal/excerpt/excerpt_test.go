@@ -25,6 +25,13 @@ func below(col int, content string) line.Annotation {
 	return line.Annotation{Content: content, Kind: kind.TextError, Placement: line.Below, Col: col}
 }
 
+// warning returns m as the mark of a warning.
+func warning(m excerpt.Mark) excerpt.Mark {
+	m.Warning = true
+
+	return m
+}
+
 func overlay(cols position.Span) line.Overlay {
 	return line.Overlay{Cols: cols, Kind: kind.GenericError}
 }
@@ -57,6 +64,31 @@ func TestAnnotate(t *testing.T) {
 			overlays:    line.Overlays{overlay(position.NewSpan(4, 6))},
 			annotations: line.Annotations{below(4, "")},
 			want:        true,
+		},
+		"a warning marks in the warning kinds": {
+			marks: []excerpt.Mark{warning(mark(lines, position.New(1, 4), "warning: big"))},
+			overlays: line.Overlays{
+				{Cols: position.NewSpan(4, 6), Kind: kind.GenericWarn},
+			},
+			annotations: line.Annotations{
+				{Content: "warning: big", Kind: kind.TextWarn, Placement: line.Below, Col: 4},
+			},
+			want: true,
+		},
+		"a line of both severities without messages gets a caret run for each": {
+			marks: []excerpt.Mark{
+				mark(lines, position.New(1, 0), ""),
+				warning(mark(lines, position.New(1, 4), "")),
+			},
+			overlays: line.Overlays{
+				overlay(position.NewSpan(0, 2)),
+				{Cols: position.NewSpan(4, 6), Kind: kind.GenericWarn},
+			},
+			annotations: line.Annotations{
+				below(0, ""),
+				{Kind: kind.TextWarn, Placement: line.Below, Col: 4},
+			},
+			want: true,
 		},
 		"repeats read once": {
 			marks: []excerpt.Mark{

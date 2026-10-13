@@ -6534,8 +6534,14 @@ func TestValidatorFunc_Check(t *testing.T) {
 			node := cmp.Or(tc.node, doc)
 			validator := rejectingValidator(tc.returns)
 
-			// A direct call returns the error as the function wrote it.
-			assert.Equal(t, tc.returns, validator.Check(t.Context(), node))
+			// A direct call returns a failure as the function wrote it, and
+			// nil for a pass.
+			got := validator.Check(t.Context(), node)
+			if tc.want == "" {
+				require.NoError(t, got)
+			} else {
+				assert.Equal(t, tc.returns, got)
+			}
 
 			err := node.Validate(t.Context(), validator)
 			if tc.want == "" {

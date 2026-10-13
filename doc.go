@@ -328,6 +328,69 @@
 // [Node.PathAt] goes from a position to the path of the node there, for a
 // viewer that names the value under its cursor.
 //
+// # Warnings
+//
+// A problem is either an error or a warning, and a warning does not make a
+// check fail. [NewWarning] takes the options of [NewError], so a warning
+// carries a location and details and binds to a [Source] as an error
+// does. The nearest severity mark on the cause chain of a problem decides
+// its severity. NewWarning and [Node.Warn] mark a warning, [AsErrors] marks
+// an error above each warning, and a problem with no mark is an error.
+// [Invalid], [Place], [Rebase], [Node.Bind], and [fmt.Errorf] add no mark,
+// so a warning stays a warning inside them. A wrapper that [fmt.Errorf]
+// builds with several %w verbs is one problem, and it is a warning when
+// one of its branches is. A warning among the details of an error leaves
+// that error an error.
+//
+// Every reader keeps the two apart. [HasErrors] reports whether an error
+// holds an error, [IsInvalid] decides from the errors and passes over the
+// warnings, and each node of an [ErrorTree] reports its severity in
+// Warning. [errors.Is] and [errors.As] match a warning as they match an
+// error. Each renderer writes "warning:" after the position of a warning,
+// where compilers put it, and a heading that niceyaml writes counts each
+// severity, as in "cafe.yaml: 2 errors, 1 warning":
+//
+//	cafe.yaml: 2 errors, 1 warning
+//	|-- 2:1: $.curency~: unknown field "curency"
+//	|-- 3:1: warning: $.legacyPricing~: deprecated field "legacyPricing"
+//	`-- 4:1: $.wifi~: unknown field "wifi"
+//
+// A [Validator] reports each warning with Node.Warn and returns its
+// failures alone, and a Validate method of a [SelfValidator] returns its
+// warnings beside its errors. [Node.Validate], [Source.ValidateDocuments],
+// the Decode methods of Node and Source, both SelfValidate methods, and
+// [SelfValidateValue] collect the warnings of the checks they run. A call
+// that passes returns nil and hands its warnings to the handler that
+// [WithWarningHandler] puts on its context, and drops them without a
+// handler. A call that fails returns
+// its warnings in its error, under one heading over its problems and its
+// warnings in source order. Without a warning, the error of a failing call
+// reads as it does on its own.
+//
+// Wherever niceyaml reads a result to decide whether a check passed, a
+// result whose every problem is a warning counts as a pass. The
+// self-validation walk thus runs the Validate method of a value when the
+// values below it gave only warnings, and [ChainValidator] goes on to the
+// next validator. The decoder step reports each problem as an error,
+// whatever it wraps, so a value that decodes itself warns from its
+// Validate method rather than from its unmarshaler.
+//
+// A program in strict mode turns each warning into an error with
+// AsErrors, applied to the warnings that its handler receives or to the
+// error of a call that fails:
+//
+//	var warned error
+//	ctx = niceyaml.WithWarningHandler(ctx, func(w error) { warned = w })
+//
+//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
+//	if strict {
+//		if err == nil {
+//			err = warned
+//		}
+//
+//		err = niceyaml.AsErrors(err)
+//	}
+//
 // # Decoding
 //
 // [Source.Decode] decodes a file that holds one document, [Source.Document]
@@ -513,11 +576,13 @@
 // A decode calls Validate on every value in the result that implements
 // SelfValidator, and then the functions from WithValueCheck for the type of
 // the value, in the order given. The values below a value validate first,
-// and the value validates only when every one of them passed. The functions
-// for a value run only once its Validate passes, and the first that fails
-// stops the rest. A Validate that an embedded field promotes runs once, on
-// that field. A Validate that an UnmarshalYAML already called runs again in
-// the decode, so it must be idempotent.
+// and the value validates only when no value below it failed. A Validate
+// method or a function whose result holds warnings alone passes, as the
+// Warnings section describes. The functions for a value run only once its
+// Validate passes, and the first that fails stops the rest. A Validate that
+// an embedded field promotes runs once, on that field. A Validate that an
+// UnmarshalYAML already called runs again in the decode, so it must be
+// idempotent.
 //
 // Validate and each function write `@` paths, which read from the value,
 // and the decode puts them under the path of the value in the document. An

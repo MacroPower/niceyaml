@@ -39,6 +39,7 @@ func buildDefault() Styles {
 		Set(kind.GenericDeleted, base.Foreground(charmtone.Cherry).Background(charmtone.Toast)),
 		Set(kind.GenericInserted, base.Foreground(charmtone.Julep).Background(charmtone.Spinach)),
 		Set(kind.GenericError, base.Foreground(charmtone.Butter).Background(charmtone.Sriracha)),
+		Set(kind.GenericWarn, base.Foreground(charmtone.Pepper).Background(charmtone.Cumin)),
 		Set(kind.LiteralBoolean, base.Foreground(charmtone.Malibu)),
 		Set(kind.LiteralNull, base.Foreground(charmtone.Malibu)),
 		Set(kind.LiteralNumber, base.Foreground(charmtone.Julep)),

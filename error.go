@@ -267,6 +267,12 @@ type Error struct {
 	errors []error
 	errorConfig
 	fault declaration
+	// The severity mark of the Error, which decides the severity of the
+	// problem below it, as [severityOf] reads it.
+	severity severity
+	// The Error is a heading that counts the errors and the warnings it
+	// heads, so [AsErrors] counts them again.
+	tally bool
 }
 
 // declaration is what an [Error] declares about the fault of the document.
@@ -2403,12 +2409,19 @@ func (e *SourceError) buildTexts() boundTexts {
 	}
 
 	path, hasPath := e.ownPath()
+	warns := e.warns()
 	pathed := func(msg string) string {
-		if !hasPath {
-			return msg
+		if hasPath {
+			msg = withPath(path, msg)
 		}
 
-		return withPath(path, msg)
+		// The label of a warning sits between the position and the path,
+		// where compilers put it, so editors and problem matchers read it.
+		if warns {
+			msg = prefix("warning:", msg)
+		}
+
+		return msg
 	}
 
 	// No error below e reaches the list, so the text stands as it is.
@@ -2446,6 +2459,24 @@ func (e *SourceError) buildTexts() boundTexts {
 	t.msg = strings.Join(lines, "\n")
 
 	return t
+}
+
+// warns reports whether e binds one problem that is a warning, so its line
+// carries the "warning:" label. A heading takes no label, and neither does
+// a binding that adopted a warning, whose text holds the label already.
+func (e *SourceError) warns() bool {
+	if e.heads() || !isWarning(e.err) {
+		return false
+	}
+
+	if e.adopted {
+		inner, ok := anchorOf(e.err).err.(*SourceError) //nolint:errorlint // The anchor itself, found by the walk.
+		if ok && inner.warns() {
+			return false
+		}
+	}
+
+	return true
 }
 
 // bare reports whether e has neither a message nor a position, so it
@@ -3084,7 +3115,7 @@ func (e *SourceError) Annotate(view *line.View) bool {
 // reports true when it marked a line, counting one that held the marks
 // already, and false for a nil err.
 func Annotate(err error, view *line.View) bool {
-	sources, positions := treePositions(slices.Collect(Bindings(err)), true, nil)
+	sources, positions := treePositions(slices.Collect(Bindings(err)), true, nil, nil)
 
 	marked := false
 
@@ -3120,7 +3151,7 @@ func (e *SourceError) Excerpt(opts ...ExcerptOption) (*line.View, bool) {
 	// The location of a lone binding carries no message, so the excerpt
 	// gives it a caret run alone, since the tree above the excerpt names
 	// it.
-	_, positions := treePositions([]*SourceError{e}, false, nil)
+	_, positions := treePositions([]*SourceError{e}, false, nil, nil)
 
 	return e.source.excerpt(positions[e.source], newExcerptConfig(opts))
 }
@@ -3172,45 +3203,77 @@ func joinParts(parts ...string) string {
 
 // treePositions returns the sources the trees of bindings touch, in walk
 // order, with the resolved locations bound to each. A root carries its
-// message only when labeled is set, and a node in skipped adds nothing.
+// message only when labeled is set, and a node in skipped adds nothing. A
+// node in quiet adds its source and no mark. The mark of a warning carries
+// the "warning:" label beside its message, and a detail takes the severity
+// of the problem it explains and never the label.
 func treePositions(
 	bindings []*SourceError,
 	labeled bool,
-	skipped map[*SourceError]bool,
+	skipped, quiet map[*SourceError]bool,
 ) ([]*Source, map[*Source][]excerpt.Mark) {
-	var sources []*Source
+	var (
+		sources []*Source
+		walk    func(n, root *SourceError, warning, detail bool)
+	)
 
 	touched := make(map[*Source]bool)
 	positions := make(map[*Source][]excerpt.Mark)
 	seen := make(map[*SourceError]bool)
 
+	walk = func(n, root *SourceError, warning, detail bool) {
+		if n == nil || seen[n] {
+			return
+		}
+
+		seen[n] = true
+
+		if !detail {
+			warning = n.isWarning()
+		}
+
+		if !skipped[n] && !touched[n.source] {
+			touched[n.source] = true
+			sources = append(sources, n.source)
+		}
+
+		if !skipped[n] && !quiet[n] && n.locErr == nil {
+			positions[n.source] = append(positions[n.source], n.mark(labeled || n != root, warning, detail))
+		}
+
+		for _, c := range n.below {
+			walk(c.bound, root, warning, detail || c.detail)
+		}
+	}
+
 	for _, root := range bindings {
-		root.all(seen, func(n *SourceError) bool {
-			if skipped[n] {
-				return true
-			}
-
-			if !touched[n.source] {
-				touched[n.source] = true
-				sources = append(sources, n.source)
-			}
-
-			if n.locErr != nil {
-				return true
-			}
-
-			at := excerpt.Mark{Pos: n.loc.pos, Ranges: n.ranges}
-			if labeled || n != root {
-				at.Message = n.text()
-			}
-
-			positions[n.source] = append(positions[n.source], at)
-
-			return true
-		})
+		walk(root, root, false, false)
 	}
 
 	return sources, positions
+}
+
+// mark returns the excerpt mark of e, a binding whose location resolved,
+// with its message when labeled. The mark of a warning carries the
+// "warning:" label beside its message unless it is a detail.
+func (e *SourceError) mark(labeled, warning, detail bool) excerpt.Mark {
+	at := excerpt.Mark{Pos: e.loc.pos, Ranges: e.ranges, Warning: warning}
+	if !labeled {
+		return at
+	}
+
+	at.Message = e.text()
+	if warning && !detail {
+		at.Message = prefix("warning:", at.Message)
+	}
+
+	return at
+}
+
+// isWarning reports whether e binds one problem that is a warning, as
+// opposed to an error or a heading.
+func (e *SourceError) isWarning() bool {
+	return !e.heads() && isWarning(e.err)
 }
 
 // checkInRange reports [ErrOutOfRange] when loc starts on a line lines
