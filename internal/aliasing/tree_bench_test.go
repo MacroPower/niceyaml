@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
@@ -44,7 +45,7 @@ func BenchmarkCheckDecode_TaggedAliasChain(b *testing.B) {
 				// input anew, outside the timer.
 				b.StopTimer()
 
-				doc := yamltest.FirstDocument(b, input)
+				doc := yamltest.FirstDocument(b, input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 
 				b.StartTimer()
 
@@ -90,7 +91,7 @@ func BenchmarkCheckDecode_NestedAnchors(b *testing.B) {
 				// input anew, outside the timer.
 				b.StopTimer()
 
-				doc := yamltest.FirstDocument(b, input)
+				doc := yamltest.FirstDocument(b, input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 
 				b.StartTimer()
 

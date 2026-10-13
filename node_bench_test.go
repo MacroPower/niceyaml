@@ -47,7 +47,7 @@ func BenchmarkNode_PathAt(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
 
-				doc := yamltest.FirstDocument(b, yaml)
+				doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 
 				b.StartTimer()
 
@@ -57,7 +57,7 @@ func BenchmarkNode_PathAt(b *testing.B) {
 		})
 
 		b.Run(sz.name+"/later", func(b *testing.B) {
-			doc := yamltest.FirstDocument(b, yaml)
+			doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 
 			_, ok := doc.PathAt(last)
 			require.True(b, ok)
@@ -112,7 +112,12 @@ func BenchmarkNode_Nodes(b *testing.B) {
 	path := paths.Current().Child("items").IndexAll()
 
 	for _, sz := range sizes {
-		doc := yamltest.FirstDocument(b, "items:\n"+yamltest.GenerateLines(sz.items, sourceBenchItem))
+		doc := yamltest.FirstDocument(
+			b,
+			"items:\n"+yamltest.GenerateLines(sz.items, sourceBenchItem),
+			niceyaml.WithByteLimit(0),
+			niceyaml.WithDepthLimit(0),
+		)
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -149,7 +154,14 @@ func BenchmarkNode_BindManyPaths(b *testing.B) {
 				niceyaml.AtPath(paths.Current().Child(fmt.Sprintf("k%d", i)))))
 		}
 
-		doc := yamltest.Document(b, niceyaml.NewSourceFromString(yamltest.GenerateLines(sz.keys, "k%[1]d: v%[1]d")))
+		doc := yamltest.Document(
+			b,
+			niceyaml.NewSourceFromString(
+				yamltest.GenerateLines(sz.keys, "k%[1]d: v%[1]d"),
+				niceyaml.WithByteLimit(0),
+				niceyaml.WithDepthLimit(0),
+			),
+		)
 
 		joined := errors.Join(errs...)
 

@@ -63,7 +63,7 @@ func BenchmarkNewSourceFromString(b *testing.B) {
 			b.SetBytes(int64(len(yaml)))
 
 			for b.Loop() {
-				_ = niceyaml.NewSourceFromString(yaml)
+				_ = niceyaml.NewSourceFromString(yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 			}
 		})
 	}
@@ -87,7 +87,7 @@ func BenchmarkNewSourceFromString_Nested(b *testing.B) {
 			b.SetBytes(int64(len(yaml)))
 
 			for b.Loop() {
-				_ = niceyaml.NewSourceFromString(yaml)
+				_ = niceyaml.NewSourceFromString(yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 			}
 		})
 	}
@@ -105,7 +105,7 @@ func BenchmarkSourceRunes(b *testing.B) {
 
 	for _, sz := range sizes {
 		yaml := yamltest.GenerateYAML(sz.lines)
-		lines := niceyaml.NewSourceFromString(yaml).Lines()
+		lines := niceyaml.NewSourceFromString(yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).Lines()
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -135,7 +135,7 @@ func BenchmarkSourceLines(b *testing.B) {
 
 	for _, sz := range sizes {
 		yaml := yamltest.GenerateYAML(sz.lines)
-		lines := niceyaml.NewSourceFromString(yaml).Lines()
+		lines := niceyaml.NewSourceFromString(yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).Lines()
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -155,7 +155,7 @@ func BenchmarkSourceLines(b *testing.B) {
 
 func BenchmarkSourceLen(b *testing.B) {
 	yaml := yamltest.GenerateYAML(5000)
-	lines := niceyaml.NewSourceFromString(yaml).Lines()
+	lines := niceyaml.NewSourceFromString(yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).Lines()
 
 	b.ReportAllocs()
 
@@ -176,7 +176,7 @@ func BenchmarkSourceContent(b *testing.B) {
 
 	for _, sz := range sizes {
 		yaml := yamltest.GenerateYAML(sz.lines)
-		source := niceyaml.NewSourceFromString(yaml)
+		source := niceyaml.NewSourceFromString(yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -201,7 +201,11 @@ func BenchmarkSourceBind_ManyDocuments(b *testing.B) {
 	for _, sz := range sizes {
 		// Each document spans three lines, and the error joins one
 		// finding per line, as a line-oriented lint reports them.
-		source := niceyaml.NewSourceFromString(strings.Repeat(stringtest.LinesLF("---", "a: 1", "b: 2"), sz.docs))
+		source := niceyaml.NewSourceFromString(
+			strings.Repeat(stringtest.LinesLF("---", "a: 1", "b: 2"), sz.docs),
+			niceyaml.WithByteLimit(0),
+			niceyaml.WithDepthLimit(0),
+		)
 
 		source.Documents()
 
@@ -246,7 +250,7 @@ func BenchmarkSource_File_ManyDocuments(b *testing.B) {
 				// new one outside the timer.
 				b.StopTimer()
 
-				source := niceyaml.NewSourceFromString(input)
+				source := niceyaml.NewSourceFromString(input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 				source.Tokens()
 
 				b.StartTimer()

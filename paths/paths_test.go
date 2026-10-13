@@ -3554,7 +3554,7 @@ func TestPath_Matches_AliasFanOut(t *testing.T) {
 func assertMatchCount(t *testing.T, input, expr string, want int, wantErr error) {
 	t.Helper()
 
-	doc := yamltest.FirstDocument(t, input).DocumentAST()
+	doc := yamltest.FirstDocument(t, input, niceyaml.WithDepthLimit(0), niceyaml.WithByteLimit(0)).DocumentAST()
 	path := paths.MustParse(expr)
 
 	matches, err := paths.NewResolver(doc).Matches(path)
@@ -4407,7 +4407,7 @@ func TestPath_Matches_RecursiveReachedTwice(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
+			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithDepthLimit(0)).DocumentAST()
 
 			matches := requireMatches(t, doc, tc.path)
 

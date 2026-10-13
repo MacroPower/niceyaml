@@ -97,7 +97,7 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 
 			yaml := sb.String()
 
-			doc := yamltest.FirstDocument(b, yaml)
+			doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 
 			for _, mode := range selfValidationModes {
 				decode := shape.decode(mode.opts...)
@@ -158,7 +158,7 @@ func BenchmarkNode_Decode_SelfValidation_Nested(b *testing.B) {
 		for _, depth := range []int{500, 1000, 2000} {
 			yaml := strings.Repeat(shape.open, depth) + "{}" + strings.Repeat(shape.close, depth)
 
-			doc := yamltest.FirstDocument(b, yaml)
+			doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 
 			for _, mode := range selfValidationModes {
 				decode := shape.decode(mode.opts...)
@@ -191,7 +191,7 @@ func BenchmarkNode_Decode_SelfValidation_DeepMap(b *testing.B) {
 	for _, depth := range []int{250, 1000, 2000} {
 		yaml := strings.Repeat("{kids: {a: ", depth) + "{leaf: 80}" + strings.Repeat("}}", depth)
 
-		doc := yamltest.FirstDocument(b, yaml)
+		doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 
 		for _, mode := range selfValidationModes {
 			decode := decodeAs[mapTree](mode.opts...)
@@ -222,7 +222,7 @@ func BenchmarkNode_Decode_SelfValidation_Promoted(b *testing.B) {
 	for _, rows := range []int{4000, 16000} {
 		yaml := yamltest.GenerateLines(rows, "- {name: n%[1]d, port: 80}")
 
-		doc := yamltest.FirstDocument(b, yaml)
+		doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 
 		for _, mode := range selfValidationModes {
 			decode := decodeAs[[]promotedRow](mode.opts...)

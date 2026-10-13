@@ -290,7 +290,10 @@ func isJSONObject(data []byte) bool {
 // read checks no context either, so a context that ends stops the
 // compile at the same step for JSON and for YAML.
 func decodeYAML(ctx context.Context, data []byte) (any, error) {
-	doc, err := niceyaml.NewSourceFromBytes(data).Decode[any](context.WithoutCancel(ctx))
+	// The JSON reader takes a schema of any size, and so does this one.
+	source := niceyaml.NewSourceFromBytes(data, niceyaml.WithByteLimit(0))
+
+	doc, err := source.Decode[any](context.WithoutCancel(ctx))
 	if err != nil {
 		return nil, errors.New("YAML decode: " + err.Error())
 	}

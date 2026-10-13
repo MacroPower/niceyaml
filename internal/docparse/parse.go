@@ -67,6 +67,14 @@ type standIn struct {
 // costs the file only its own documents. [Result.File] holds stand-ins in
 // their place, and [Result.Failures] holds the run.
 func Parse(tks token.Tokens, opts ...parser.Option) *Result {
+	return ParseDepth(tks, 0, opts...)
+}
+
+// ParseDepth is [Parse] with a limit on the levels a document may nest. A
+// run that holds a document past the limit fails with a [*DepthError] in
+// place of a parse, so the parser, whose memory grows with the square of
+// the depth, never reads it. A depth of zero or less sets no limit.
+func ParseDepth(tks token.Tokens, depth int, opts ...parser.Option) *Result {
 	copies := tokens.ForParser(tks)
 
 	index := make(map[*token.Token]int, len(copies))
@@ -91,6 +99,12 @@ func Parse(tks token.Tokens, opts ...parser.Option) *Result {
 	r := &Result{File: &ast.File{Docs: []*ast.DocumentNode{}}, Index: index, Tokens: copies}
 
 	for _, run := range splitDocumentRuns(copies) {
+		if at, deep := tooDeep(run, depth); deep {
+			r.fail(Failure{Err: &DepthError{Token: at, Limit: depth}, Run: run})
+
+			continue
+		}
+
 		f, failure := parseRun(dropStrandedComments(run), opts)
 		if failure == nil {
 			nullEmptyAnchors(f)
@@ -121,6 +135,16 @@ func Parse(tks token.Tokens, opts ...parser.Option) *Result {
 
 		r.File.Docs = append(r.File.Docs, doc)
 	}
+
+	return r
+}
+
+// Failed returns the [Result] of a text that fails whole with err before
+// any parse, such as one past a byte limit. Its file holds one stand-in
+// document that carries err.
+func Failed(err error) *Result {
+	r := &Result{File: &ast.File{}, Index: map[*token.Token]int{}}
+	r.fail(Failure{Err: err})
 
 	return r
 }

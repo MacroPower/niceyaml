@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"strconv"
 	"sync"
 
+	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -442,11 +442,11 @@ func countText(errs, warns int) string {
 	var parts []string
 
 	if errs > 0 || warns == 0 {
-		parts = append(parts, plural(errs, "error"))
+		parts = append(parts, quantity.Plural(errs, "error"))
 	}
 
 	if warns > 0 {
-		parts = append(parts, plural(warns, "warning"))
+		parts = append(parts, quantity.Plural(warns, "warning"))
 	}
 
 	if len(parts) == 1 {
@@ -454,15 +454,6 @@ func countText(errs, warns int) string {
 	}
 
 	return parts[0] + ", " + parts[1]
-}
-
-// plural returns n and noun, with an "s" after noun unless n is one.
-func plural(n int, noun string) string {
-	if n == 1 {
-		return "1 " + noun
-	}
-
-	return strconv.Itoa(n) + " " + noun + "s"
 }
 
 // warningKey is the key of the warning handler on a context.

@@ -18,7 +18,10 @@ import (
 )
 
 func validateCmd() *cobra.Command {
-	var schemaRef string
+	var (
+		schemaRef string
+		limits    *limitFlags
+	)
 
 	cmd := &cobra.Command{
 		Use:   "validate file.yaml [file.yaml...]",
@@ -85,7 +88,7 @@ func validateCmd() *cobra.Command {
 
 				ctx := niceyaml.WithWarningHandler(cmd.Context(), func(w error) { warned = w })
 
-				err := validateFile(ctx, yamlPath, reg)
+				err := validateFile(ctx, yamlPath, reg, limits.options()...)
 
 				// A run canceled during the file stops there. The error of
 				// the file reports the cancellation once it has read the
@@ -133,6 +136,8 @@ func validateCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&schemaRef, "schema", "s", "", "File path or URL of a JSON schema, written in JSON or YAML")
 
+	limits = addLimitFlags(cmd)
+
 	return cmd
 }
 
@@ -163,7 +168,7 @@ func validateCmd() *cobra.Command {
 // is. Schema directives resolve against the directory of the file the read
 // opens. When the read fails, the error from [readSource] already names
 // the file, so validateFile adds no name of its own.
-func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) error {
+func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, extra ...niceyaml.SourceOption) error {
 	absPath := physicalAbs(yamlPath)
 
 	// Resolvers route on the absolute path, and WithName keeps messages
@@ -175,10 +180,10 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 	// The library draws a tab in a name as four spaces, and the result
 	// line and a read error draw it as "␉". With the name escaped here,
 	// every line of a run spells the file one way.
-	opts := []niceyaml.SourceOption{
+	opts := append([]niceyaml.SourceOption{
 		niceyaml.WithName(escape.Control(yamlPath)),
 		niceyaml.WithFilePath(absPath),
-	}
+	}, extra...)
 
 	source, err := readSource(yamlPath, opts...)
 	if err != nil {
@@ -193,22 +198,35 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 // source stays path as given and a read error names path with its control
 // characters escaped. A glob match takes its name from the file system.
 // The error handler in main keeps each line break in a message as a row
-// break, so a raw newline in the name would start a row of its own.
+// break, so a raw newline in the name would start a row of its own. A
+// file past the byte limit of opts fails without a full read, with an
+// error bound to the name of the source.
 func readSource(path string, opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // User-provided file paths are intentional.
-	if err != nil {
-		// The read made this error, so no other caller holds it.
-		if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
-			pathErr.Path = escape.Control(pathErr.Path)
-		}
-
-		return nil, fmt.Errorf("read file: %w", err)
-	}
-
 	// The file path goes first, so opts can override it.
 	opts = append([]niceyaml.SourceOption{niceyaml.WithFilePath(path)}, opts...)
 
-	return niceyaml.NewSourceFromBytes(data, opts...), nil
+	source, err := niceyaml.NewSourceFromFile(path, opts...)
+	if errors.Is(err, niceyaml.ErrLimit) {
+		// The error names no file, so it binds to an empty Source that
+		// takes the name of the file.
+		named := niceyaml.NewSourceFromString("", opts...)
+
+		return nil, named.Bind(err) //nolint:wrapcheck // The binding names the file.
+	}
+
+	// The read made this error, so no other caller holds it. The wrapper
+	// holds its text from before the escape, so a new one replaces it.
+	if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
+		pathErr.Path = escape.Control(pathErr.Path)
+
+		return nil, fmt.Errorf("read file: %w", pathErr)
+	}
+
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The error says that the read failed.
+	}
+
+	return source, nil
 }
 
 // physicalAbs returns an absolute form of path that names the file the

@@ -7,6 +7,7 @@ import (
 
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -34,7 +35,7 @@ func BenchmarkResolver_Nodes_Recursive(b *testing.B) {
 	path := paths.Doc().Recursive("zzz")
 
 	for _, in := range inputs {
-		doc := yamltest.FirstDocument(b, in.yaml).DocumentAST()
+		doc := yamltest.FirstDocument(b, in.yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).DocumentAST()
 
 		r := paths.NewResolver(doc)
 
@@ -59,7 +60,8 @@ func BenchmarkResolver_Nodes_RecursiveChained(b *testing.B) {
 	path := paths.Doc().Recursive("a").Recursive("a")
 
 	for _, depth := range depths {
-		doc := yamltest.FirstDocument(b, nestedChain(depth)).DocumentAST()
+		doc := yamltest.FirstDocument(b, nestedChain(depth), niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).
+			DocumentAST()
 
 		r := paths.NewResolver(doc)
 
@@ -85,7 +87,8 @@ func BenchmarkResolver_Nodes_RecursiveChained(b *testing.B) {
 // grows.
 func BenchmarkResolver_Node_WideMapping(b *testing.B) {
 	for _, keys := range []int{1000, 4000, 16000} {
-		doc := yamltest.FirstDocument(b, yamltest.GenerateYAML(keys)).DocumentAST()
+		doc := yamltest.FirstDocument(b, yamltest.GenerateYAML(keys), niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).
+			DocumentAST()
 
 		ps := make([]paths.Path, keys)
 		for i := range keys {
@@ -116,7 +119,8 @@ func BenchmarkResolver_Node_WideMapping(b *testing.B) {
 // stay flat as the chain grows.
 func BenchmarkResolver_Node_DeepPath(b *testing.B) {
 	for _, depth := range []int{1000, 2000, 4000} {
-		doc := yamltest.FirstDocument(b, nestedChain(depth)).DocumentAST()
+		doc := yamltest.FirstDocument(b, nestedChain(depth), niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).
+			DocumentAST()
 
 		r := paths.NewResolver(doc)
 		path := paths.Doc().Child(slices.Repeat([]string{"a"}, depth)...)
@@ -142,7 +146,8 @@ func BenchmarkResolver_Node_DeepPath(b *testing.B) {
 // grows.
 func BenchmarkNewResolver_NestedOpenMerges(b *testing.B) {
 	for _, links := range []int{1000, 2000, 4000, 8000} {
-		doc := yamltest.FirstDocument(b, openMerges(links)).DocumentAST()
+		doc := yamltest.FirstDocument(b, openMerges(links), niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).
+			DocumentAST()
 
 		b.Run(fmt.Sprintf("links_%d", links), func(b *testing.B) {
 			b.ReportAllocs()
@@ -165,7 +170,8 @@ func BenchmarkResolver_Matches_MissingMergeFirst(b *testing.B) {
 	path := paths.Doc().Recursive("nope")
 
 	for _, keys := range []int{8000, 16000, 32000, 64000} {
-		doc := yamltest.FirstDocument(b, missingFirst(keys)).DocumentAST()
+		doc := yamltest.FirstDocument(b, missingFirst(keys), niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).
+			DocumentAST()
 
 		r := paths.NewResolver(doc)
 
@@ -193,7 +199,8 @@ func BenchmarkResolver_Matches_MergedRecords(b *testing.B) {
 	path := paths.Doc().Recursive("name")
 
 	for _, records := range []int{500, 1000, 2000, 4000} {
-		doc := yamltest.FirstDocument(b, mergedRecords(records, 10, 19)).DocumentAST()
+		doc := yamltest.FirstDocument(b, mergedRecords(records, 10, 19), niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).
+			DocumentAST()
 
 		resolver := paths.NewResolver(doc)
 

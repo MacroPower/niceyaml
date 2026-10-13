@@ -2,6 +2,7 @@ package niceyaml
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -25,6 +26,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
+	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -60,28 +62,31 @@ import (
 // [NewSourceFromReader], [NewSourceFromBytes], [NewSourceFromString],
 // [NewSourceFromTokens], or [NewSourceFromLayers].
 type Source struct {
-	lines line.Lines
+	// The error of a text past the byte limit, which fails the one
+	// document of the Source, or nil.
+	limitErr error
+	// Holds the layers [NewSourceFromLayers] merged into the Source, or nil.
+	// An error bound in the merged document binds in a layer instead.
+	layers *layering
 	// Holds the text the Source read, which [Source.Text] returns. A
 	// Source built from tokens read none, and hasInput is false for it.
 	input string
-	// The index that maps a position to an offset in input, built on the
-	// first call of [Source.Offset].
-	offsets lazy[bom.Index]
-	// The stream that [Source.Tokens] rebuilds from lines.
-	stream lazy[token.Tokens]
+	lines line.Lines
 	// The parse of the tokens, made on the first call that needs it.
 	parsed lazy[*parsedFile]
 	// The second parse of the tokens, for the decoder, as reparse
 	// describes.
 	decodeParse lazy[*docparse.Result]
-	// Holds the layers [NewSourceFromLayers] merged into the Source, or nil.
-	// An error bound in the merged document binds in a layer instead.
-	layers *layering
-	sourceConfig
+	// The index that maps a position to an offset in input, built on the
+	// first call of [Source.Offset].
+	offsets lazy[bom.Index]
+	// The stream that [Source.Tokens] rebuilds from lines.
+	stream lazy[token.Tokens]
 	// The texts of the reference documents a new anchor name must not
 	// spell, as spellReferences reads them.
 	referenceTexts lazy[[]string]
-	hasInput       bool
+	sourceConfig
+	hasInput bool
 }
 
 // lazy holds a value that get computes on the first call. Its zero value
@@ -109,6 +114,8 @@ func (l *lazy[T]) get(f func() T) T {
 //   - [WithReferences]
 //   - [WithUnmarshalers]
 //   - [WithExcerpts]
+//   - [WithByteLimit]
+//   - [WithDepthLimit]
 //
 // [WithAllowDuplicateKeys], [WithReferences], and [WithAliasLimit]
 // describe the documents themselves, so the Source applies them to every
@@ -127,21 +134,24 @@ type SourceOption func(*sourceConfig)
 // takes it in place of the [Source] that embeds it, so only a constructor
 // can apply one.
 type sourceConfig struct {
-	name     string
-	filePath string
 	// The file system filePath names a file in, or nil when no option
 	// set one, where a path names a file on disk.
 	fsys fs.FS
+	// The limit error of a reference document from WithReferences, which
+	// fails every decode of the Source.
+	referenceErr error
+	name         string
+	filePath     string
 	// Holds the text of each reference document from WithReferences, in
 	// the order every decode reads them.
 	references [][]byte
 	// Holds the options of WithUnmarshalers, in the order given, which
 	// every decode of the documents applies ahead of its own options.
 	unmarshalers []DecodeOption
-	// Accepts a mapping with the same key twice when parsing and decoding.
-	allowDuplicateKeys bool
-	// Turns off the alias limit for every reader of the documents.
-	skipAliasLimit bool
+	// The limits from WithByteLimit and WithDepthLimit, each when its
+	// option set it, where zero turns the check off.
+	depthLimit int
+	byteLimit  int
 	// Says no error may show the text, so no excerpt holds a line of the
 	// Source.
 	noExcerpts bool
@@ -149,6 +159,158 @@ type sourceConfig struct {
 	// of the Source do not hold and the document [NewSourceFromLayers]
 	// builds does.
 	noReferenceExcerpts bool
+	// Turns off the alias limit for every reader of the documents.
+	skipAliasLimit bool
+	// Whether WithByteLimit and WithDepthLimit set their limits.
+	byteLimitSet  bool
+	depthLimitSet bool
+	// Says the Source holds text niceyaml wrote itself, such as the merged
+	// text of layers, which skips both limits.
+	noLimits bool
+	// Accepts a mapping with the same key twice when parsing and decoding.
+	allowDuplicateKeys bool
+}
+
+// The limits a [Source] applies when no option sets them.
+const (
+	// DefaultByteLimit is the most bytes of text a [Source] holds unless
+	// [WithByteLimit] sets another limit.
+	DefaultByteLimit = 256 << 10
+	// DefaultDepthLimit is the most levels a document of a [Source] nests
+	// unless [WithDepthLimit] sets another limit.
+	DefaultDepthLimit = 100
+)
+
+// bytes returns the byte limit of c, or zero for none.
+func (c *sourceConfig) bytes() int {
+	switch {
+	case c.noLimits:
+		return 0
+	case c.byteLimitSet:
+		return c.byteLimit
+	default:
+		return DefaultByteLimit
+	}
+}
+
+// depth returns the depth limit of c, or zero for none.
+func (c *sourceConfig) depth() int {
+	switch {
+	case c.noLimits:
+		return 0
+	case c.depthLimitSet:
+		return c.depthLimit
+	default:
+		return DefaultDepthLimit
+	}
+}
+
+// WithByteLimit is a [SourceOption] that sets the most bytes of text the
+// [Source] holds, [DefaultByteLimit] unless it sets another. A limit of 0
+// turns the check off, and a negative limit counts as 0.
+//
+// The go-yaml parser takes time and memory that grow faster than the text
+// of one document, so the limit bounds the slowest file a program reads.
+// [NewSourceFromFile], [NewSourceFromFS], and [NewSourceFromReader] read at
+// most one byte past the limit, and return an error that matches
+// [ErrLimit] when the text holds more, as in "file is larger than 256
+// KiB". [NewSourceFromString] and [NewSourceFromBytes] keep their text and
+// skip the lexer, so such a Source holds no lines, and its one document
+// fails with that error, as a document that does not parse does. A
+// reference document past a limit fails every decode of the Source that
+// reads it through [WithReferences].
+//
+// A program that reads large files, such as Kubernetes CRDs, raises the
+// limit and pays for it in the time the slowest file takes:
+//
+//	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithByteLimit(1<<20))
+//
+// The text that niceyaml writes itself, such as the merged text of
+// [NewSourceFromLayers], skips the limit.
+func WithByteLimit(n int) SourceOption {
+	return func(c *sourceConfig) {
+		c.byteLimit, c.byteLimitSet = max(0, n), true
+	}
+}
+
+// WithDepthLimit is a [SourceOption] that sets the most levels a document
+// of the [Source] may nest, [DefaultDepthLimit] unless it sets another. A
+// limit of 0 turns the check off, and a negative limit counts as 0.
+//
+// The depth counts each mapping and each sequence on the way from the root
+// of the document to its deepest value. A flow collection opens a level
+// at its "[" or "{", and a block collection opens one at its first key or
+// "-". An alias opens no level, because the alias limit bounds what it
+// repeats. A document past the limit fails as a document that does not
+// parse, with an error that matches [ErrLimit], at the token that opens
+// its first level past the limit, as in "document nests more than 100
+// levels". The other documents of the Source still parse, and a reference
+// document past the limit fails every decode of the Source that reads it
+// through [WithReferences]. The memory that
+// the go-yaml parser keeps grows with the square of the depth, so the
+// check reads the tokens of each document before the parser runs.
+//
+// The text that niceyaml writes itself, such as the merged text of
+// [NewSourceFromLayers], skips the limit.
+func WithDepthLimit(n int) SourceOption {
+	return func(c *sourceConfig) {
+		c.depthLimit, c.depthLimitSet = max(0, n), true
+	}
+}
+
+// newSourceConfig returns the settings of opts applied in order.
+func newSourceConfig(opts []SourceOption) sourceConfig {
+	var c sourceConfig
+
+	for _, opt := range opts {
+		opt(&c)
+	}
+
+	return c
+}
+
+// limitError returns the error of a text past the byte limit n, which
+// matches [ErrLimit] and declares the document at fault.
+func limitError(n int) error {
+	return Invalid(&markedError{err: errors.New("file is larger than " + quantity.Bytes(n)), marks: []error{ErrLimit}})
+}
+
+// limitFailure returns the error of s when its text passes the byte limit,
+// or else the error of its first document past the depth limit, or nil.
+// The go-yaml decoder parses the text of a reference Source with no limit
+// of its own, so [WithReferences] keeps that error for every decode.
+func (s *Source) limitFailure() error {
+	if s.limitErr != nil {
+		return s.limitErr
+	}
+
+	for _, doc := range s.parsed.get(s.parse).docs {
+		if errors.Is(doc.doc.err, ErrLimit) {
+			return doc.doc.err
+		}
+	}
+
+	return nil
+}
+
+// readLimited reads r to its end, or to one byte past limit when limit is
+// above zero, and returns the error of [limitError] for a text past the
+// limit.
+func readLimited(r io.Reader, limit int) ([]byte, error) {
+	if limit <= 0 {
+		return io.ReadAll(r) //nolint:wrapcheck // The caller wraps the error.
+	}
+
+	data, err := io.ReadAll(io.LimitReader(r, int64(limit)+1))
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The caller wraps the error.
+	}
+
+	if len(data) > limit {
+		return nil, limitError(limit)
+	}
+
+	return data, nil
 }
 
 // WithName is a [SourceOption] that sets the name for the [Source], which
@@ -301,6 +463,10 @@ func WithReferences(refs ...*Source) SourceOption {
 			c.references = append(c.references, ref.references...)
 			c.references = append(c.references, ref.tokenText())
 
+			if c.referenceErr == nil {
+				c.referenceErr = cmp.Or(ref.referenceErr, ref.limitFailure())
+			}
+
 			if ref.noExcerpts || ref.noReferenceExcerpts {
 				c.noReferenceExcerpts = true
 			}
@@ -434,9 +600,11 @@ func referenceReaders(docs [][]byte) yaml.DecodeOption {
 //
 // Returns a nil Source and an error when it cannot read the file.
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // User-provided file paths are intentional.
+	cfg := newSourceConfig(opts)
+
+	data, err := readFile(path, cfg.bytes())
 	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
+		return nil, err
 	}
 
 	// Abs fails only when the working directory has no name, and the path
@@ -469,7 +637,20 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 //
 // Returns a nil Source and an error when it cannot read the file.
 func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, error) {
-	data, err := fs.ReadFile(fsys, path)
+	cfg := newSourceConfig(opts)
+
+	f, err := fsys.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	defer f.Close() //nolint:errcheck // A read-only file has nothing to flush.
+
+	data, err := readLimited(f, cfg.bytes())
+	if errors.Is(err, ErrLimit) {
+		return nil, err
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
@@ -486,7 +667,13 @@ func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, er
 //
 // Returns an error when it cannot read r.
 func NewSourceFromReader(r io.Reader, opts ...SourceOption) (*Source, error) {
-	data, err := io.ReadAll(r)
+	cfg := newSourceConfig(opts)
+
+	data, err := readLimited(r, cfg.bytes())
+	if errors.Is(err, ErrLimit) {
+		return nil, err
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("read: %w", err)
 	}
@@ -504,11 +691,43 @@ func NewSourceFromBytes(data []byte, opts ...SourceOption) *Source {
 // the tokens and lines of the Source hold none and no key reads a mark
 // as part of its text. The Source keeps src as it is, and [Source.Text]
 // returns it with every mark.
+//
+// A text past the byte limit, as [WithByteLimit] sets it, skips the lexer,
+// so the Source holds no lines and its one document fails with an error
+// that matches [ErrLimit].
 func NewSourceFromString(src string, opts ...SourceOption) *Source {
+	cfg := newSourceConfig(opts)
+
+	if limit := cfg.bytes(); limit > 0 && len(src) > limit {
+		return &Source{sourceConfig: cfg, input: src, hasInput: true, limitErr: limitError(limit)}
+	}
+
 	s := NewSourceFromTokens(tokens.Tokenize(src), opts...)
 	s.input, s.hasInput = src, true
 
 	return s
+}
+
+// readFile reads the file at path from disk, to one byte past limit when
+// limit is above zero, as [readLimited] reads it.
+func readFile(path string, limit int) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // User-provided file paths are intentional.
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	defer f.Close() //nolint:errcheck // A read-only file has nothing to flush.
+
+	data, err := readLimited(f, limit)
+	if errors.Is(err, ErrLimit) {
+		return nil, err
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	return data, nil
 }
 
 // NewSourceFromTokens creates a new [*Source] from [token.Tokens].
@@ -1062,7 +1281,14 @@ type parsedFile struct {
 // to the error, which must happen before any caller holds it.
 func (s *Source) parse() *parsedFile {
 	tks := s.Tokens()
-	r := docparse.Parse(tks, s.parserOptions()...)
+
+	var r *docparse.Result
+
+	if s.limitErr != nil {
+		r = docparse.Failed(s.limitErr)
+	} else {
+		r = docparse.ParseDepth(tks, s.depth(), s.parserOptions()...)
+	}
 
 	errs := make([]error, len(r.Failures))
 	for i, f := range r.Failures {
@@ -1085,7 +1311,16 @@ func (s *Source) parseError(f docparse.Failure) error {
 	// each control character by its picture.
 	yamlErr, ok := errors.AsType[yaml.Error](f.Err)
 
+	depthErr, deep := errors.AsType[*docparse.DepthError](f.Err)
+
 	switch {
+	case deep:
+		limit := &markedError{err: errors.New(depthErr.Error()), marks: []error{ErrLimit}}
+		err = Invalid(limit, atToken(depthErr.Token))
+
+	case errors.Is(f.Err, ErrLimit):
+		err = f.Err
+
 	case f.Panic != nil:
 		var at *token.Token
 
@@ -1121,7 +1356,7 @@ func markSyntax(err error) *markedError {
 // give each token and document the same index. It writes the null of every
 // enclosed alias at once, since the go-yaml formatter reads every document.
 func (s *Source) reparse() *docparse.Result {
-	r := docparse.Parse(s.Tokens(), s.parserOptions()...)
+	r := docparse.ParseDepth(s.Tokens(), s.depth(), s.parserOptions()...)
 
 	first := s.parsed.get(s.parse).result.Index
 

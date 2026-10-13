@@ -473,9 +473,14 @@ func newMergedSource(from *Source, text string, excerpts bool) *Source {
 		// The merged value holds no alias, so it reads no reference
 		// document.
 		c.references = nil
+		c.referenceErr = nil
 		c.noReferenceExcerpts = false
 
 		c.noExcerpts = !excerpts
+
+		// The merged text is text niceyaml wrote, and each layer passed
+		// its own limits.
+		c.noLimits = true
 	})
 
 	src.parsed.get(src.parse)

@@ -2707,6 +2707,27 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 		_, err = doc.Decode[map[string]plainLevel](t.Context(), levels, decodes())
 		require.EqualError(t, err, "1:8: $.level: expected integer, got string")
 	})
+
+	t.Run("the function reads a value past the default limits of a Source", func(t *testing.T) {
+		t.Parallel()
+
+		type nested struct {
+			value any
+		}
+
+		// The decoder writes the text of the value from a node that passed
+		// the limits of the document, which turn the depth check off here.
+		values := niceyaml.WithCustomUnmarshaler(func(_ context.Context, n *nested, decode func(any) error) error {
+			return decode(&n.value)
+		})
+
+		deep := strings.Repeat("[", 150) + strings.Repeat("]", 150)
+		doc := yamltest.FirstDocument(t, "deep: "+deep+"\n", niceyaml.WithDepthLimit(0))
+
+		got, err := doc.Decode[map[string]nested](t.Context(), values)
+		require.NoError(t, err)
+		assert.IsType(t, []any{}, got["deep"].value)
+	})
 }
 
 // jsonSize has an UnmarshalJSON method that reads a size such as "4k",
@@ -6856,10 +6877,11 @@ func TestErrDecode(t *testing.T) {
 				msg:  "cannot find anchor by alias name x",
 			},
 			"depth limit": {
-				input: "a: " + strings.Repeat("[", 10005) + strings.Repeat("]", 10005) + "\n",
-				path:  paths.Current(),
-				line:  0,
-				msg:   "exceeded max depth",
+				input:  "a: " + strings.Repeat("[", 10005) + strings.Repeat("]", 10005) + "\n",
+				source: []niceyaml.SourceOption{niceyaml.WithDepthLimit(0)},
+				path:   paths.Current(),
+				line:   0,
+				msg:    "exceeded max depth",
 			},
 		}
 
@@ -11407,7 +11429,9 @@ func TestDocument_Decode_Problems_Deep(t *testing.T) {
 	// takes no longer for it.
 	const depth = 4000
 
-	_, err := yamltest.FirstDocument(t, deepDocument(depth)).Decode[problemDeep](t.Context())
+	_, err := yamltest.FirstDocument(t, deepDocument(depth), niceyaml.WithDepthLimit(0)).Decode[problemDeep](
+		t.Context(),
+	)
 	require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 	srcErr := yamltest.RequireSourceError(t, err)

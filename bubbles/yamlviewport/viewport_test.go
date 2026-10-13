@@ -629,7 +629,7 @@ func setRevision(m *yamlviewport.Model, doc string) {
 func addRevisions(m *yamlviewport.Model, docs ...string) {
 	for _, doc := range docs {
 		name := fmt.Sprintf("v%d", m.RevisionCount()+1)
-		m.AddRevision(niceyaml.NewSourceFromString(doc, niceyaml.WithName(name)))
+		m.AddRevision(niceyaml.NewSourceFromString(doc, niceyaml.WithName(name), niceyaml.WithByteLimit(0)))
 	}
 }
 

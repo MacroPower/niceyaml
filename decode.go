@@ -485,6 +485,12 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 		return n.bindOwn(err)
 	}
 
+	// A reference document past a limit fails every decode, as one that
+	// does not parse does.
+	if n.source.referenceErr != nil {
+		return n.Bind(n.source.referenceErr)
+	}
+
 	err = n.validate(ctx, cfg.validators)
 	if err != nil {
 		return err
@@ -599,6 +605,10 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 
 	source := NewSourceFromBytes(text, func(c *sourceConfig) {
 		c.allowDuplicateKeys = n.source.allowDuplicateKeys
+
+		// The decoder wrote the text from a node that passed the limits of
+		// its own Source.
+		c.noLimits = true
 	})
 
 	doc, err := source.Document()

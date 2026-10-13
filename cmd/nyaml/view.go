@@ -14,6 +14,7 @@ func viewCmd() *cobra.Command {
 	var (
 		lineNumbers bool
 		search      string
+		limits      *limitFlags
 	)
 
 	cmd := &cobra.Command{
@@ -26,7 +27,7 @@ func viewCmd() *cobra.Command {
 				return err
 			}
 
-			sources, err := loadSources(paths)
+			sources, err := loadSources(paths, limits.options()...)
 			if err != nil {
 				return err
 			}
@@ -65,6 +66,8 @@ func viewCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&lineNumbers, "line-numbers", true, "show line numbers")
 	cmd.Flags().StringVarP(&search, "search", "s", "", "initial search term")
 
+	limits = addLimitFlags(cmd)
+
 	return cmd
 }
 
@@ -72,12 +75,12 @@ func viewCmd() *cobra.Command {
 // names each Source with the status bar label that [revisionLabels] gives
 // its path. A read error from [readSource] already names the path, so
 // loadSources adds no name of its own.
-func loadSources(paths []string) ([]*niceyaml.Source, error) {
+func loadSources(paths []string, opts ...niceyaml.SourceOption) ([]*niceyaml.Source, error) {
 	labels := revisionLabels(paths)
 	sources := make([]*niceyaml.Source, 0, len(paths))
 
 	for i, path := range paths {
-		source, err := readSource(path, niceyaml.WithName(labels[i]))
+		source, err := readSource(path, append([]niceyaml.SourceOption{niceyaml.WithName(labels[i])}, opts...)...)
 		if err != nil {
 			return nil, err
 		}

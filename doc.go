@@ -945,6 +945,20 @@
 // [NewSourceFromLayers] writes each alias of a layer out in full, so a
 // layer must pass the limit as a decode into a type that reads text does.
 //
+// # Limits
+//
+// The go-yaml parser takes time and memory that grow faster than the text
+// of one document, so every [Source] bounds what it parses. A Source holds
+// at most 256 KiB of text, and each of its documents nests at most 100
+// levels, unless [WithByteLimit] or [WithDepthLimit] sets another limit,
+// where 0 turns the check off. A file past the byte limit fails as a file
+// that does not read, and a document past the depth limit fails as a
+// document that does not parse, at the token that opens its first level
+// past the limit. The other documents of the Source still parse. Each
+// such error matches [ErrLimit], and [IsInvalid] reports it. The merged
+// text of [NewSourceFromLayers] skips both limits, because each layer
+// passed its own.
+//
 // # Diffs
 //
 // [go.jacobcolvin.com/niceyaml/diff.Differ] computes line differences using an

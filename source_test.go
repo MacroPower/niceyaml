@@ -6813,3 +6813,196 @@ func TestSource_Document(t *testing.T) {
 		assert.Equal(t, fileErr, err)
 	})
 }
+
+func TestWithByteLimit(t *testing.T) {
+	t.Parallel()
+
+	text := "name: " + strings.Repeat("x", 2000) + "\n"
+
+	t.Run("a string past the limit holds no lines and fails its document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(text, niceyaml.WithName("big.yaml"), niceyaml.WithByteLimit(1024))
+
+		assert.Equal(t, 0, source.Lines().Len())
+		assert.Equal(t, text, source.Text())
+
+		_, err := source.Document()
+		require.ErrorIs(t, err, niceyaml.ErrLimit)
+		assert.Equal(t, "big.yaml: file is larger than 1 KiB", err.Error())
+		assert.True(t, niceyaml.IsInvalid(err))
+
+		docs := source.Documents()
+		require.Len(t, docs, 1)
+		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrLimit)
+
+		_, err = source.Decode[map[string]any](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrLimit)
+	})
+
+	t.Run("a limit of zero turns the check off", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(0))
+
+		_, err := source.Document()
+		require.NoError(t, err)
+	})
+
+	t.Run("readers stop one byte past the limit", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		path := filepath.Join(dir, "big.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(text), 0o600))
+
+		fsys := fstest.MapFS{"big.yaml": &fstest.MapFile{Data: []byte(text)}}
+
+		tcs := map[string]struct {
+			read func() (*niceyaml.Source, error)
+		}{
+			"file": {read: func() (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromFile(path, niceyaml.WithByteLimit(1000))
+			}},
+			"file system": {read: func() (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromFS(fsys, "big.yaml", niceyaml.WithByteLimit(1000))
+			}},
+			"reader": {read: func() (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromReader(strings.NewReader(text), niceyaml.WithByteLimit(1000))
+			}},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source, err := tc.read()
+				require.ErrorIs(t, err, niceyaml.ErrLimit)
+				assert.Nil(t, source)
+				assert.Equal(t, "file is larger than 1000 bytes", err.Error())
+			})
+		}
+	})
+
+	t.Run("the merged text of layers skips the limit", func(t *testing.T) {
+		t.Parallel()
+
+		half := "a: " + strings.Repeat("x", 700) + "\n"
+		other := "b: " + strings.Repeat("y", 700) + "\n"
+
+		merged := yamltest.Layers(t,
+			niceyaml.NewSourceFromString(half, niceyaml.WithByteLimit(1024)),
+			niceyaml.NewSourceFromString(other, niceyaml.WithByteLimit(1024)),
+		)
+
+		_, err := merged.Document()
+		require.NoError(t, err)
+	})
+
+	t.Run("a reference past the limit fails every decode", func(t *testing.T) {
+		t.Parallel()
+
+		ref := niceyaml.NewSourceFromString("base: &base {port: 1}\n"+strings.Repeat("#\n", 600),
+			niceyaml.WithByteLimit(1024))
+		source := niceyaml.NewSourceFromString("server: *base\n", niceyaml.WithReferences(ref))
+
+		_, err := source.Decode[map[string]any](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrLimit)
+	})
+}
+
+func TestWithDepthLimit(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		limit int
+		// The message of the error of the first document, or none.
+		want string
+	}{
+		"flow brackets past the default": {
+			input: "a: " + strings.Repeat("[", 101) + strings.Repeat("]", 101) + "\n",
+			limit: -1,
+			want:  "deep.yaml:1:103: document nests more than 100 levels",
+		},
+		"block mappings past a limit": {
+			input: stringtest.Input(`
+				a:
+				  b:
+				    c:
+				      d: 1
+			`),
+			limit: 3,
+			want:  "deep.yaml:4:7: document nests more than 3 levels",
+		},
+		"a sequence in the column of its key opens a level": {
+			input: stringtest.Input(`
+				a:
+				- b:
+				  - 1
+			`),
+			limit: 3,
+			want:  "deep.yaml:3:3: document nests more than 3 levels",
+		},
+		"block mappings within a limit": {
+			input: "a:\n  b:\n    c: 1\n",
+			limit: 3,
+		},
+		"an alias opens no level": {
+			input: "a: &a [[1]]\nb: [*a, *a]\n",
+			limit: 3,
+		},
+		"a limit of zero turns the check off": {
+			input: "a: " + strings.Repeat("[", 200) + strings.Repeat("]", 200) + "\n",
+			limit: 0,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := []niceyaml.SourceOption{niceyaml.WithName("deep.yaml")}
+			if tc.limit >= 0 {
+				opts = append(opts, niceyaml.WithDepthLimit(tc.limit))
+			}
+
+			source := niceyaml.NewSourceFromString(tc.input, opts...)
+
+			_, err := source.Document()
+			if tc.want == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, niceyaml.ErrLimit)
+			require.NotErrorIs(t, err, niceyaml.ErrSyntax)
+			assert.Equal(t, tc.want, err.Error())
+			assert.True(t, niceyaml.IsInvalid(err))
+		})
+	}
+
+	t.Run("the other documents still parse", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: [[[1]]]\n---\nb: 1\n", niceyaml.WithDepthLimit(2))
+
+		docs := source.Documents()
+		require.Len(t, docs, 2)
+		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrLimit)
+		require.NoError(t, docs[1].Err())
+	})
+
+	t.Run("a reference past the limit fails every decode", func(t *testing.T) {
+		t.Parallel()
+
+		ref := niceyaml.NewSourceFromString("base: &base {port: 1}\ndeep: [[[1]]]\n",
+			niceyaml.WithName("ref.yaml"), niceyaml.WithDepthLimit(2))
+		source := niceyaml.NewSourceFromString("server: *base\n", niceyaml.WithReferences(ref))
+
+		_, err := source.Decode[map[string]any](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrLimit)
+		assert.Equal(t, "ref.yaml:2:8: document nests more than 2 levels", err.Error())
+	})
+}

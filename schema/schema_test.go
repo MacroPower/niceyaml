@@ -468,6 +468,11 @@ func TestCompile_Document(t *testing.T) {
 			valid:   "name: a\n",
 			invalid: "value: 1\n",
 		},
+		"YAML larger than the default byte limit of a Source": {
+			schema:  strings.Repeat("# The text of a long schema.\n", 10000) + "required: [name]\n",
+			valid:   "name: a\n",
+			invalid: "value: 1\n",
+		},
 		"YAML after a document start": {
 			schema:  "---\nrequired: [name]\n",
 			valid:   "name: a\n",

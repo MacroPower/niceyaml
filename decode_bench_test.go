@@ -42,7 +42,7 @@ func BenchmarkNode_Decode_FirstDecode(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
 
-				doc := yamltest.FirstDocument(b, yaml)
+				doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 
 				b.StartTimer()
 
@@ -61,7 +61,7 @@ func BenchmarkNode_Decode_FirstDecode(b *testing.B) {
 // flat as the document deepens.
 func BenchmarkNode_Decode_ProblemsNested(b *testing.B) {
 	for _, depth := range []int{500, 1000, 2000, 4000} {
-		doc := yamltest.FirstDocument(b, deepDocument(depth))
+		doc := yamltest.FirstDocument(b, deepDocument(depth), niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
 
 		benchRejected[problemDeep](b, fmt.Sprintf("depth_%d", depth), doc, depth, "level")
 	}
@@ -119,7 +119,12 @@ func BenchmarkNode_Decode_ProblemsWide(b *testing.B) {
 			server = last
 		}
 
-		doc := yamltest.FirstDocument(b, benchProblemServers(layout.servers, server, last))
+		doc := yamltest.FirstDocument(
+			b,
+			benchProblemServers(layout.servers, server, last),
+			niceyaml.WithByteLimit(0),
+			niceyaml.WithDepthLimit(0),
+		)
 
 		benchRejected[problemConfig](b, layout.name, doc, layout.servers, "server")
 	}
@@ -148,7 +153,12 @@ func BenchmarkNode_Decode_ProblemsMap(b *testing.B) {
 			server = last
 		}
 
-		doc := yamltest.FirstDocument(b, benchProblemServers(layout.servers, server, last))
+		doc := yamltest.FirstDocument(
+			b,
+			benchProblemServers(layout.servers, server, last),
+			niceyaml.WithByteLimit(0),
+			niceyaml.WithDepthLimit(0),
+		)
 
 		benchRejected[struct {
 			Servers map[string]problemServer `yaml:"servers"`
@@ -183,7 +193,12 @@ func BenchmarkNode_Decode_ProblemsText(b *testing.B) {
 			last = server
 		}
 
-		doc := yamltest.FirstDocument(b, benchProblemServers(layout.servers, server, last))
+		doc := yamltest.FirstDocument(
+			b,
+			benchProblemServers(layout.servers, server, last),
+			niceyaml.WithByteLimit(0),
+			niceyaml.WithDepthLimit(0),
+		)
 
 		benchRejected[struct {
 			Servers []problemTiered `yaml:"servers"`
@@ -233,7 +248,12 @@ func BenchmarkNode_DecodeScoped(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		doc := yamltest.FirstDocument(b, sz.head+"items:\n"+yamltest.GenerateLines(sz.items, sz.entry))
+		doc := yamltest.FirstDocument(
+			b,
+			sz.head+"items:\n"+yamltest.GenerateLines(sz.items, sz.entry),
+			niceyaml.WithByteLimit(0),
+			niceyaml.WithDepthLimit(0),
+		)
 
 		items, err := doc.Nodes(paths.Current().Child("items").IndexAll())
 		require.NoError(b, err)
@@ -264,7 +284,7 @@ func BenchmarkNode_DecodeRejectedStream(b *testing.B) {
 
 	for _, sz := range sizes {
 		input := yamltest.GenerateLines(sz.docs, stringtest.JoinLF("---", "a: x%d", "b: y", "c: z"))
-		docs := niceyaml.NewSourceFromString(input).Documents()
+		docs := niceyaml.NewSourceFromString(input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).Documents()
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -307,7 +327,8 @@ func BenchmarkNode_DecodeReusedAnchorStream(b *testing.B) {
 			for b.Loop() {
 				// Each document builds its decode tree once, so each
 				// iteration parses the stream anew.
-				docs := niceyaml.NewSourceFromString(input).Documents()
+				docs := niceyaml.NewSourceFromString(input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).
+					Documents()
 
 				for _, doc := range docs {
 					_, err := doc.Decode[map[string]int](b.Context())
@@ -341,7 +362,13 @@ func BenchmarkNode_DecodeReferenceAliases(b *testing.B) {
 		{"anchors_8000", 8000},
 	}
 
-	ref := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {x: notint}\n"))
+	ref := niceyaml.WithReferences(
+		niceyaml.NewSourceFromString(
+			"base: &base {x: notint}\n",
+			niceyaml.WithByteLimit(0),
+			niceyaml.WithDepthLimit(0),
+		),
+	)
 
 	for _, sz := range sizes {
 		var sb strings.Builder
@@ -359,7 +386,10 @@ func BenchmarkNode_DecodeReferenceAliases(b *testing.B) {
 
 		sb.WriteString("]\nitem: *base\n")
 
-		doc := yamltest.Document(b, niceyaml.NewSourceFromString(sb.String(), ref))
+		doc := yamltest.Document(
+			b,
+			niceyaml.NewSourceFromString(sb.String(), ref, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)),
+		)
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -398,7 +428,8 @@ func BenchmarkNode_DecodeSelfAliases(b *testing.B) {
 			for b.Loop() {
 				// A document builds its decode tree once, so each iteration
 				// parses the input anew.
-				doc, err := niceyaml.NewSourceFromString(input).Document()
+				doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).
+					Document()
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -456,7 +487,8 @@ func BenchmarkNode_DecodeBracketedAnchorNames(b *testing.B) {
 			for b.Loop() {
 				// A document builds its decode tree once, so each iteration
 				// parses the input anew.
-				doc, err := niceyaml.NewSourceFromString(input).Document()
+				doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).
+					Document()
 				if err != nil {
 					b.Fatal(err)
 				}

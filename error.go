@@ -218,6 +218,14 @@ var (
 	// the Validation section of the package documentation describes.
 	ErrAmbiguousPath = errors.New("path names the entries of several keys")
 
+	// ErrLimit indicates a text past a limit of its [Source]: a file that
+	// holds more bytes than [WithByteLimit] allows, or a document that
+	// nests more levels than [WithDepthLimit] allows. The document is at
+	// fault for it, as [IsInvalid] describes. A file past the byte limit
+	// fails as a file that does not read, and a document past the depth
+	// limit fails as a document that does not parse.
+	ErrLimit = errors.New("text past a limit")
+
 	// The reason of a [SourceError] whose error carries no location at
 	// all, which is not a failure to resolve one, so
 	// [SourceError.Unresolved] reports nil for it.
