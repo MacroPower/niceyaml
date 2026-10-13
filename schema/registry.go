@@ -123,6 +123,7 @@ type Registry struct {
 //   - [WithHTTPClient]
 //   - [WithRetryAfter]
 //   - [WithFSAt]
+//   - [WithURLPrefixes]
 type RegistryOption func(*registryConfig)
 
 // registryConfig holds the settings a [RegistryOption] configures. An
@@ -132,6 +133,7 @@ type registryConfig struct {
 	client      *http.Client // fetches the schemas URL refs name
 	fsys        fs.FS        // reads the schemas File refs name under WithFSAt; nil reads the disk
 	fsAt        *fsDir       // the directory on disk the root of fsys stands for; nil when it stands for none
+	urls        *urlPolicy   // the URLs the registry fetches, or nil for every URL
 	resolvers   []Resolver
 	compileOpts []CompileOption
 	retryAfter  time.Duration // how long the registry remembers a failure
@@ -239,6 +241,10 @@ func WithFSAt(dir string, fsys fs.FS) RegistryOption {
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] fetches
 // its catalog with a client of its own, since the catalog is not a schema
 // the registry loads.
+//
+// [WithURLPrefixes] limits the URLs the registry fetches with the client.
+// The registry then fetches with a copy of the client and leaves the
+// client itself unchanged.
 func WithHTTPClient(client *http.Client) RegistryOption {
 	return func(c *registryConfig) {
 		if client != nil {
@@ -382,6 +388,10 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 	for _, opt := range opts {
 		opt(&r.registryConfig)
 	}
+
+	// Each hop of a redirect passes the URL policy, so a schema host
+	// cannot send the fetch elsewhere.
+	r.client = r.urls.guard(r.client)
 
 	return r
 }
@@ -860,7 +870,8 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 // Load reads the file from disk, or through the file system [WithFSAt]
 // gave the registry. For a Ref from [FileFS], it reads the file from the
 // file system of the Ref. For a Ref from [URL], it fetches the URL
-// with the client [WithHTTPClient] gave the registry. For a Ref from
+// with the client [WithHTTPClient] gave the registry, and refuses a URL
+// outside the prefixes of [WithURLPrefixes]. For a Ref from
 // [Loadable], it returns the bytes the Ref's load returns. Load reads the
 // bytes on every call. It caches nothing, and it reads again after a
 // failure without waiting for the interval of [WithRetryAfter].
@@ -893,6 +904,12 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 	case ref.url:
 		if !httpfetch.IsHTTPURL(ref.key) {
 			return nil, errNotHTTPURL
+		}
+
+		// The caller names the URL beside the error, so the refusal
+		// does not repeat it.
+		if !r.urls.allows(ref.key) {
+			return nil, ErrURLNotAllowed
 		}
 
 		//nolint:wrapcheck // The fetch error names the URL already.
@@ -1118,7 +1135,8 @@ func (r *Registry) keepRefDoc(key string, doc refDoc) refDoc {
 // because the resolver refuses a document fetched over HTTP or HTTPS that
 // names a file URL. The refusal holds whatever order the compiler reaches
 // documents in, and it covers a document the registry kept for a schema
-// from [URL].
+// from [URL]. The resolver refuses a URL outside the prefixes of
+// [WithURLPrefixes] before it looks for a kept document.
 //
 // User holds the userinfo of a key from [URL], such as a password. It
 // stays out of every URI the compiler and the validator resolve, so no
@@ -1171,6 +1189,13 @@ func (r *Registry) refOptions(
 
 		switch {
 		case httpfetch.IsHTTPURL(uri):
+			// The policy judges the URL as the schema names it, before
+			// the registry adds the userinfo of the key.
+			err := r.urls.check(uri)
+			if err != nil {
+				return nil, err
+			}
+
 			uri = user.apply(uri)
 			key = uri
 			load = func() ([]byte, error) {
