@@ -79,6 +79,9 @@ type Doc struct {
 	origin []int
 	// The line of the user's text where orig starts.
 	base int
+	// The bytes [start, end) of the text of the user's Source that orig
+	// holds, with its byte order mark.
+	start, end int
 	// An edit changed the text.
 	edited bool
 }
@@ -144,7 +147,7 @@ func New(user *niceyaml.Node, opts Options) (*Doc, error) {
 
 	orig := text[start:end]
 
-	d := &Doc{user: user, base: span.Start, opts: opts}
+	d := &Doc{user: user, base: span.Start, opts: opts, start: start, end: end}
 
 	// The parse counts positions without the marks that the tokenizer
 	// drops, such as one after the "---" of a later document. The text
@@ -181,6 +184,13 @@ func (d *Doc) Text() string {
 // errors bind in the user's text.
 func (d *Doc) Node() *niceyaml.Node {
 	return d.node
+}
+
+// Bounds returns the bytes [start, end) of the text of the user's Source
+// that the document holds, which [Doc.Text] takes the place of in a
+// rewrite of the file.
+func (d *Doc) Bounds() (int, int) {
+	return d.start, d.end
 }
 
 // Edited reports whether an edit changed the text.

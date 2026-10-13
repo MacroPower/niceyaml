@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -12,46 +13,66 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
+	"go.jacobcolvin.com/niceyaml/manifest/internal/edit"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 // docState is one document of a load, as its checks leave it.
 type docState struct {
-	l *loader
-	f *file
+	// The decoded value, once the decode passed.
+	value any
+	// The warning of the deprecated version that the document declares, or
+	// nil.
+	versionWarning error
+	l              *loader
+	f              *file
 	// The document as the user wrote it.
 	doc *niceyaml.Node
 	// The working copy of the document, in the layout of the current
 	// version once the steps ran, which the schema checks and the decode
 	// read, or nil.
 	work *niceyaml.Node
-	// The decoded value, once the decode passed.
-	value any
+	// The copy of the document that the steps edit, or nil.
+	edit *edit.Doc
 	// The name, when the document reached the layout of the current version
 	// with a name that is a non-empty string.
-	name     string
-	nameRead fieldRead
+	name string
+	// The text of the document at the written version, for a document that
+	// declares an older version and passed the steps up to it.
+	after    string
 	route    route
-	// The problems of the checks, bound, in check order.
-	problems []error
-	// The warnings that the checks handed to the warning handler.
-	warned []error
+	nameRead fieldRead
+	// The values that the steps up to the written version removed, which a
+	// rewrite deletes, and the warnings of the values.
+	removedValues []edit.Removal
+	removed       []error
 	// The warnings that strict mode leaves warnings.
 	lenient []error
-	mu      sync.Mutex
-	// The index of the file, and of the document within it.
-	file  int
+	// The warnings that the checks handed to the warning handler.
+	warned []error
+	// The problems of the checks, bound, in check order.
+	problems []error
+	// The index of the document within its file, and of the file.
 	index int
+	file  int
+	// The number of warnings in warned that the steps up to the written
+	// version handed over, which a rewrite clears.
+	earlyWarned int
+	mu          sync.Mutex
 	// A document of the file writes a type field.
 	typedFile bool
 	// The load skips the document, which holds no content or which
 	// [WithIgnore] accepts.
 	skipped bool
+	// The document routed to a kind and a version.
+	routed bool
 	// The document reached the layout of the current version with a name
 	// that is a non-empty string.
 	hasName bool
 	// The document passed every check.
 	passed bool
+	// A plan rewrites the document to the written version of its kind.
+	rewritten bool
 }
 
 // check runs the checks of the document in order, and stops at the first
@@ -95,6 +116,8 @@ func (d *docState) check(ctx context.Context) {
 		return
 	}
 
+	d.routed = true
+
 	d.deprecations()
 
 	if !d.prepareWork(d.doc, nil) || !d.checkSchema(ctx, d.route.version, nil) ||
@@ -128,10 +151,26 @@ func (d *docState) warn(w error) {
 // report adds the problems of the document to the report of the load. The
 // first error of a document that the load reads as a kind it does not
 // name carries the details of that choice.
-func (d *docState) report() {
+//
+// A document that a plan rewrites leaves out the warnings that the
+// rewrite clears: the deprecation of its version, the warnings of the
+// steps up to the written version, and its removals, which the plan lists
+// with the file. Its migrated text stays a migrated text, so the warnings
+// of the steps after the written version stay.
+func (d *docState) report(migrated bool) {
 	adoption := d.route.adoption
+	problems := slices.Concat(d.problems, d.removed, d.warned)
 
-	for _, err := range append(d.problems, d.warned...) {
+	if migrated {
+		problems = slices.Concat(
+			slices.DeleteFunc(slices.Clone(d.problems), func(e error) bool {
+				return e == d.versionWarning //nolint:errorlint // The binding itself, not a chain search.
+			}),
+			d.warned[d.earlyWarned:],
+		)
+	}
+
+	for _, err := range problems {
 		for problem := range niceyaml.Problems(err) {
 			e := problem.Err
 
@@ -284,7 +323,7 @@ func (d *docState) routeVersion(entry *kindEntry, wrote string) bool {
 		first := entry.versions[0]
 
 		switch {
-		case first.cfg.unversioned && first.removal != nil:
+		case first.cfg.unversioned && first.removal != nil && !d.l.cfg.plan:
 			d.fail(reg.removedProblem(d.doc, first.removal, d.rewritable()))
 
 			return false
@@ -334,7 +373,7 @@ func (d *docState) routeVersion(entry *kindEntry, wrote string) bool {
 
 	rt.version = v
 
-	if v.removal != nil {
+	if v.removal != nil && !d.l.cfg.plan {
 		d.fail(reg.removedProblem(d.doc, v.removal, d.rewritable()))
 
 		return false
@@ -514,6 +553,8 @@ func (d *docState) deprecations() {
 			d.fail(newWarning(ErrDeprecated, fmt.Sprintf("deprecated version %q", v.cfg.name),
 				niceyaml.AtPath(reg.cfg.versionField), niceyaml.WithDetails(details...)))
 		}
+
+		d.versionWarning = d.problems[len(d.problems)-1]
 	}
 
 	if current.cfg.deprecated {

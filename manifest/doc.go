@@ -61,6 +61,47 @@
 // [Written] marks the version that a rewrite writes, and [Object.UpToDate]
 // reports whether a document declares that version or a newer one.
 //
+// # Rewriting Files
+//
+// A rewrite moves each document to the written version of its kind, so a
+// user who upgrades gets files that the new release reads without steps.
+// [Registry.PlanMigration] runs the checks of a load and works out the new
+// text of each file, and writes nothing. [Plan.Apply] writes the files
+// that change:
+//
+//	plan, err := config.Registry.PlanMigration(ctx, manifest.Path(dir))
+//	if err != nil {
+//		return err
+//	}
+//
+//	for _, f := range plan.Files() {
+//		fmt.Println(f.Header())
+//		lipgloss.Println(printer.New().Print(f.Diff(3)))
+//	}
+//
+//	res, err := plan.Apply(ctx)
+//	if err != nil {
+//		return err
+//	}
+//
+//	fmt.Println(res.Summary())
+//
+//	return res.Err()
+//
+// A rewrite keeps every byte that a step leaves alone: the comments, the
+// blank lines, the key order, the quoting, and the line endings. A
+// document that fails a check blocks its file, so a rewrite never writes a
+// document that a load then rejects. A value that a step removes appears
+// in [PlanFile.Header] and [PlanFile.Removals], so a rewrite never deletes
+// a value without a row that says so.
+//
+// Apply writes each file atomically and keeps its mode, its owner, and its
+// group. It writes only a file that a [Path] input read from disk, and a
+// file whose text changed after the plan read it fails with an error that
+// matches [ErrChanged]. Every other file fails with an error that matches
+// [ErrReadOnly], and its plan still holds its new text, so a dry run shows
+// the diff.
+//
 // # Loading
 //
 // [Registry.Load] reads an [Input] and returns a [Set]. [Path] reads a

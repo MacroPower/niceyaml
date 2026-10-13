@@ -29,14 +29,25 @@ var defaultInclude = []string{"*.yaml", "*.yml"}
 
 // file is one file that a load reads.
 type file struct {
-	// The Source of the file, or nil when it did not read.
-	src *niceyaml.Source
 	// The problem of the file as a whole, bound, or nil.
 	err error
+	// The Source of the file, or nil when it did not read.
+	src *niceyaml.Source
+	// The change of the file that a plan writes, or nil.
+	plan *PlanFile
 	// The name of the directory input whose walk found the file, or "".
 	dir string
+	// The name of the file, as messages show it.
+	name string
+	// The documents of the file that the load checked, in order.
+	docs []*docState
 	// Where Apply writes the file.
 	target target
+	// The documents of the file that a plan does not migrate, because they
+	// fail to route.
+	notMigrated int
+	// A problem blocks the rewrite of the file.
+	blocked bool
 }
 
 // targetKind tells apart where a file came from, which decides whether
@@ -53,6 +64,12 @@ const (
 
 // target is where a file came from, and where Apply writes it.
 type target struct {
+	// The directory input whose walk found the file, or "" for a file that
+	// an input names directly.
+	root string
+	// The slash path of the file below root, or the path of a file that an
+	// input names directly.
+	path string
 	kind targetKind
 	// A walk reached the file through a link that leads outside the input
 	// directory.
@@ -266,7 +283,7 @@ func readInputs(ctx context.Context, in Input) (*reader, error) {
 			r.walkDisk(p)
 		case p.def.kind == inputPath:
 			name := filepath.Clean(p.def.path)
-			r.readDisk(name, p.def.path, p.def.cfg.sourceOptions, target{kind: targetDisk})
+			r.readDisk(name, p.def.path, p.def.cfg.sourceOptions, target{kind: targetDisk, path: p.def.path})
 
 		case p.info.IsDir():
 			r.walkFS(p)
@@ -286,12 +303,14 @@ func readInputs(ctx context.Context, in Input) (*reader, error) {
 
 // fail adds the file name, which did not read, with its problem err.
 func (r *reader) fail(name string, err error, t target) {
-	r.files = append(r.files, &file{err: namedSource(name).Bind(err), target: t})
+	r.files = append(r.files, &file{err: namedSource(name).Bind(err), target: t, name: name})
 }
 
 // add adds src, a file the load read, with the problem of its encoding
 // when check is set.
 func (r *reader) add(f *file, check bool) {
+	f.name = f.src.Name()
+
 	if check {
 		f.err = checkEncoding(f.src)
 	}
@@ -509,7 +528,7 @@ func (r *reader) walkDisk(p *prepared) {
 		}
 
 		name := filepath.Join(root, filepath.FromSlash(e.rel))
-		t := target{kind: targetDisk, outside: e.outside}
+		t := target{kind: targetDisk, outside: e.outside, root: root, path: e.rel}
 
 		if e.err != nil {
 			r.fail(name, e.err, t)

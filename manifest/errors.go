@@ -137,8 +137,9 @@ type Warning struct { //nolint:errname // A Warning is no error, though it wraps
 	Version string
 	// Path is the path that the message shows, such as
 	// `$.spec.legacyPricing~`, or `$` for a warning with no path. A `~` at
-	// its end marks a warning about a key. In a plan, it is the path that a
-	// load after Apply shows.
+	// its end marks a warning about a key. In a plan, it names the value as
+	// the text that the plan read spells it. A step that renames a key thus
+	// changes the path that a load after Apply shows.
 	Path paths.Path
 }
 

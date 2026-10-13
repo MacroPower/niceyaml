@@ -27,6 +27,10 @@ type loadConfig struct {
 	filter      func(*Warning) bool
 	strict      bool
 	noSetChecks bool
+	// The checks run for a plan, which migrates a document at a version
+	// that a removal names, and reports each file once it knows whether the
+	// plan rewrites it.
+	plan bool
 }
 
 // newLoadConfig returns the settings of opts.
@@ -113,13 +117,12 @@ func (r *Registry) Load(ctx context.Context, in Input, opts ...LoadOption) (*Set
 		}
 	}
 
-	rows := l.finish()
-
-	if slices.ContainsFunc(rows, niceyaml.HasErrors) {
-		return nil, newLoadError(l.named, rows)
+	failed, warnings := l.outcome(l.finishRows(l.rows))
+	if failed != nil {
+		return nil, failed
 	}
 
-	set.warnings = newLoadError(l.named, rows)
+	set.warnings = warnings
 
 	return set, nil
 }
@@ -130,6 +133,8 @@ type loader struct {
 	// The empty Source that a problem of the whole set binds to, named as
 	// the heading of the load.
 	named *niceyaml.Source
+	// The number of calls of each step that ran.
+	calls map[StepID]int
 	cfg   loadConfig
 	// The details of each directory input that selected no file.
 	empty []string
@@ -203,6 +208,8 @@ func (l *loader) checkFile(ctx context.Context, i int, f *file) {
 	if f.err != nil {
 		l.add(&row{err: f.err, file: i, index: -1, unplaced: true})
 
+		f.blocked = true
+
 		return
 	}
 
@@ -221,7 +228,16 @@ func (l *loader) checkFile(ctx context.Context, i int, f *file) {
 		}
 
 		l.addDoc(d)
-		d.report()
+
+		f.docs = append(f.docs, d)
+
+		if !l.cfg.plan {
+			d.report(false)
+		}
+	}
+
+	if l.cfg.plan {
+		l.planFile(i, f)
 	}
 }
 
@@ -287,23 +303,18 @@ func (l *loader) failed() bool {
 	return slices.ContainsFunc(l.rows, func(r *row) bool { return niceyaml.HasErrors(r.err) })
 }
 
-// finish returns the rows of the load in load order, with the filter of
+// finishRows returns rows in load order, with the filter of
 // [WithWarningFilter] and the strict mode of [WithWarningsAsErrors]
 // applied to the warnings, and each warning wrapped in a [*Warning].
-func (l *loader) finish() []error {
-	slices.SortStableFunc(l.rows, compareRows)
+func (l *loader) finishRows(rows []*row) []*row {
+	slices.SortStableFunc(rows, compareRows)
 
-	out := make([]error, 0, len(l.rows))
+	out := make([]*row, 0, len(rows))
 
-	for _, r := range l.rows {
+	for _, r := range rows {
 		if !niceyaml.HasErrors(r.err) {
 			w := l.warningOf(r)
-
-			wrapped := hook.Rewrap(r.err, func(inner error) error {
-				w.Err = inner
-
-				return w
-			})
+			wrapped := wrapIn(r.err, w)
 
 			if l.cfg.filter != nil && !l.cfg.filter(w) {
 				continue
@@ -316,10 +327,41 @@ func (l *loader) finish() []error {
 			}
 		}
 
-		out = append(out, r.err)
+		out = append(out, r)
 	}
 
 	return out
+}
+
+// wrapWarning returns the warning of r wrapped in a [*Warning], with no
+// filter and no strict mode.
+func (l *loader) wrapWarning(r *row) error {
+	return wrapIn(r.err, l.warningOf(r))
+}
+
+// wrapIn returns err, a bound warning, with w around the error it binds.
+func wrapIn(err error, w *Warning) error {
+	//nolint:wrapcheck // The wrapper is the warning of the row.
+	return hook.Rewrap(err, func(inner error) error {
+		w.Err = inner
+
+		return w
+	})
+}
+
+// outcome returns the error of finished rows that hold an error, or else
+// the warnings of the rows, each a [*LoadError] or nil.
+func (l *loader) outcome(rows []*row) (error, error) {
+	errs := make([]error, 0, len(rows))
+	for _, r := range rows {
+		errs = append(errs, r.err)
+	}
+
+	if slices.ContainsFunc(errs, niceyaml.HasErrors) {
+		return newLoadError(l.named, errs), nil
+	}
+
+	return nil, newLoadError(l.named, errs)
 }
 
 // compareRows orders two rows in load order: by file, then by document,
@@ -366,7 +408,13 @@ func (l *loader) warningOf(r *row) *Warning {
 
 	if d != nil && d.route.kind != nil {
 		w.Kind = d.route.kind.kind.name
-		if v := d.route.version; v != nil && !v.cfg.unversioned {
+
+		v := d.route.version
+		if d.rewritten {
+			v = d.route.kind.written
+		}
+
+		if v != nil && !v.cfg.unversioned {
 			w.Version = v.cfg.name
 		}
 	}

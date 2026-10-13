@@ -51,13 +51,26 @@ func (d *docState) migrate(ctx context.Context) bool {
 		return false
 	}
 
+	d.edit = ed
+
 	for _, v := range entry.versions[from.index+1:] {
 		seen := len(ed.Removals())
 		ok := d.runSteps(ctx, ed, v) && d.setTypeFields(ctx, ed, v)
 
 		d.removals(ed.Removals()[seen:], v)
 
-		if !ok || !d.prepareWork(ed.Node(), ed.Locate) {
+		if !ok {
+			return false
+		}
+
+		// The schema of the written version reads the text that a rewrite
+		// writes, as the next load of the file does.
+		if v == entry.written {
+			d.after = ed.Text()
+			d.earlyWarned = len(d.warned)
+		}
+
+		if !d.prepareWork(ed.Node(), ed.Locate) {
 			return false
 		}
 
@@ -98,6 +111,8 @@ func (d *docState) runSteps(ctx context.Context, ed *edit.Doc, v *versionEntry) 
 
 			n, _ := edit.NewNode(h).(*migrate.Node) //nolint:errcheck // The hook returns a *migrate.Node.
 
+			d.l.countCall(id)
+
 			err := ed.EndCall(h, callStep(ctx, id, s.fn, n))
 			if err != nil {
 				d.fail(err)
@@ -115,6 +130,15 @@ func (d *docState) runSteps(ctx context.Context, ed *edit.Doc, v *versionEntry) 
 	}
 
 	return true
+}
+
+// countCall counts one call of the step id.
+func (l *loader) countCall(id StepID) {
+	if l.calls == nil {
+		l.calls = make(map[StepID]int)
+	}
+
+	l.calls[id]++
 }
 
 // callStep calls fn with n, and returns its error, or the
@@ -182,7 +206,8 @@ func (d *docState) removals(removed []edit.Removal, v *versionEntry) {
 			niceyaml.WithDetails(details...)))
 
 		if written {
-			d.problems = append(d.problems, w)
+			d.removed = append(d.removed, w)
+			d.removedValues = append(d.removedValues, rm)
 		} else {
 			d.lenient = append(d.lenient, w)
 		}
