@@ -46,7 +46,9 @@ import (
 // that decodes the Node it gets passes options of its own. A setting
 // that describes the documents, such as [WithReferences] or
 // [WithAliasLimit], belongs to the [Source], as the Decoding section of
-// the package documentation describes.
+// the package documentation describes. A Source also gives every decode
+// of its documents the unmarshalers of [WithUnmarshalers], and the
+// options of the call apply over them.
 type DecodeOption func(*decodeConfig)
 
 // decodeConfig holds the settings a [DecodeOption] configures. Its zero
@@ -71,11 +73,18 @@ type valueCheck struct {
 	run func(ctx context.Context, v reflect.Value) error
 }
 
-// newDecodeConfig returns the settings of a decode: the defaults, with
-// opts applied over them in order. The result shares nothing with any
-// other decode.
-func newDecodeConfig(opts []DecodeOption) decodeConfig {
+// newDecodeConfig returns the settings of a decode of a document of s:
+// the defaults, with the options of [WithUnmarshalers] on s applied over
+// them, and then opts, each in order. A nil s stands for no document and
+// adds no option. The result shares nothing with any other decode.
+func newDecodeConfig(s *Source, opts []DecodeOption) decodeConfig {
 	var cfg decodeConfig
+
+	if s != nil {
+		for _, opt := range s.unmarshalers {
+			opt(&cfg)
+		}
+	}
 
 	for _, opt := range opts {
 		opt(&cfg)
@@ -267,9 +276,10 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 //	})
 //
 // The function gets the context of the decode and a decode function,
-// which decodes the value with the options of the decode, reads an alias
-// as the content of its anchor, and runs no [Validator]. It returns an
-// error for a pointer to T, which would call fn again, so a function that
+// which decodes the value with the unmarshalers of the [Source] and the
+// options of the decode, reads an alias as the content of its anchor, and
+// runs no [Validator]. A decode into a pointer to T calls fn again, so
+// the decode function returns an error for one, and a function that
 // decodes T by its fields decodes into a second type with those fields,
 // such as `type fields T`. A function that needs the YAML text of the
 // value decodes into a [yaml.RawMessage].
@@ -280,14 +290,27 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 // function already names its place in the document, so fn returns it as
 // it is. A fn that looks the value up elsewhere, such as in a secret
 // store, returns the error of a lookup that fails inside [Place], so
-// [IsInvalid] does not report it. A later option for the same T replaces
-// an earlier one, and a nil fn or a pointer type T adds nothing. Give the
-// function here rather than to [yaml.RegisterCustomUnmarshaler], whose
-// types a decode cannot see.
+// [IsInvalid] does not report it.
+//
+// A program gives the function to the [Source] with [WithUnmarshalers],
+// so every decode of the documents applies it, the decode inside a
+// [Validator] included. A later option for the same T replaces an earlier
+// one and the function the Source gives the type. A nil fn removes the
+// function that an earlier option or the Source gave the type, so a
+// library that gets a Source from its caller can read T by the methods of
+// the type alone. A pointer type T changes nothing. Give the function to
+// one of these options rather than to [yaml.RegisterCustomUnmarshaler],
+// whose types a decode cannot see.
 func WithCustomUnmarshaler[T any](fn func(ctx context.Context, v *T, decode func(any) error) error) DecodeOption {
 	return func(c *decodeConfig) {
 		t := reflect.TypeFor[T]()
-		if fn == nil || t.Kind() == reflect.Pointer {
+		if t.Kind() == reflect.Pointer {
+			return
+		}
+
+		if fn == nil {
+			c.unmarshalers = c.unmarshalers.Without(t)
+
 			return
 		}
 
@@ -354,6 +377,12 @@ func (e shieldedError) As(target any) bool {
 // documentation describe. A struct that gets the method from an embedded
 // field decodes the document into that field, so the field validates at
 // the path of the struct.
+//
+// A program whose types read their documents through UnmarshalJSON gives
+// the option to the [Source] with [WithUnmarshalers], so every decode of
+// the documents applies it, the decode inside a [Validator] included. A
+// call that gets WithJSONUnmarshalers(false) turns the methods off for
+// that call alone.
 func WithJSONUnmarshalers(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.unmarshalers.JSON = enabled
@@ -394,11 +423,17 @@ func WithYAMLOrderedMaps(enabled bool) DecodeOption {
 // [Node.Nodes], that node is one value inside the document, so those
 // calls take the settings without the schema of the whole document.
 //
+// The unmarshalers that say how the types of the program read YAML go to
+// the [Source] with [WithUnmarshalers] instead of into such a bundle. A
+// decode that no bundle reaches, such as one inside a [Validator], then
+// applies them too.
+//
 // [WithValidator], [WithValueCheck], and [WithAllowedFieldPrefixes] add to
-// what the options before them gave, and [WithCustomUnmarshaler] adds a
-// type. Every other option replaces what an earlier one of its kind set. A
-// call that gets the same DecodeOptions twice thus runs each of its
-// validators and each of its value checks twice.
+// what the options before them gave, and [WithCustomUnmarshaler] adds or
+// removes the function of a type. Every other option replaces what an
+// earlier one of its kind set. A call that gets the same DecodeOptions
+// twice thus runs each of its validators and each of its value checks
+// twice.
 //
 // DecodeOptions copies opts, so the result keeps its options when the
 // caller changes the slice it passed. A nil DecodeOption among opts
@@ -437,7 +472,7 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // ErrDecode. The Decoding section describes the messages, the sentinels
 // of each problem, and where each error binds.
 func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
-	return n.decodeInto(ctx, v, newDecodeConfig(opts), nil)
+	return n.decodeInto(ctx, v, newDecodeConfig(n.source, opts), nil)
 }
 
 // decodeInto is [Node.DecodeInto] with its settings resolved. It also
@@ -846,7 +881,10 @@ func (n *Node) YAMLComments(ctx context.Context) (yaml.CommentMap, error) {
 
 	comments := yaml.CommentMap{}
 
-	err := n.decodeInto(ctx, &value, decodeConfig{skipSelfValidation: true}, comments)
+	cfg := newDecodeConfig(n.source, nil)
+	cfg.skipSelfValidation = true
+
+	err := n.decodeInto(ctx, &value, cfg, comments)
 	if err != nil {
 		return nil, err
 	}

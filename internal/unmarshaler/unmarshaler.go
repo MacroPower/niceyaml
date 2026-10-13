@@ -165,8 +165,16 @@ type custom struct {
 // With returns o with the function that opt registers for the type t,
 // in place of the one an earlier call gave t.
 func (o Options) With(t reflect.Type, opt func(ValueDecoder) yaml.DecodeOption) Options {
-	o.custom = slices.DeleteFunc(slices.Clone(o.custom), func(c custom) bool { return c.typ == t })
+	o = o.Without(t)
 	o.custom = append(o.custom, custom{typ: t, opt: opt})
+
+	return o
+}
+
+// Without returns o with no function for the type t, so the decoder reads
+// t as it reads a type that no option names.
+func (o Options) Without(t reflect.Type) Options {
+	o.custom = slices.DeleteFunc(slices.Clone(o.custom), func(c custom) bool { return c.typ == t })
 
 	return o
 }

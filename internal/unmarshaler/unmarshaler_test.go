@@ -196,6 +196,22 @@ func TestOptions(t *testing.T) {
 		assert.Len(t, unmarshaler.Options{JSON: true}.YAMLOptions(nil), 1)
 	})
 
+	t.Run("without removes the function of a type", func(t *testing.T) {
+		t.Parallel()
+
+		json := reflect.TypeFor[jsonValue]()
+		both := custom.With(json, noOption)
+
+		got := both.Without(plain)
+
+		assert.False(t, got.Custom(plain))
+		assert.True(t, got.Custom(json))
+		assert.True(t, both.Custom(plain), "the first options keep their function")
+		assert.True(t, custom.Without(json).Custom(plain), "a type with no function changes nothing")
+		assert.True(t, unmarshaler.Options{}.Without(plain).Empty())
+		assert.True(t, unmarshaler.Options{JSON: true}.Without(plain).JSON)
+	})
+
 	t.Run("custom", func(t *testing.T) {
 		t.Parallel()
 

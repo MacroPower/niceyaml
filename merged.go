@@ -91,10 +91,12 @@ type mergeConfig struct {
 // builds stand for layer, such as the file of the user above defaults
 // that the program embeds. The Source takes the name, the file path, the
 // file system, and the preamble of that layer, and what
-// [WithAllowDuplicateKeys] and [WithAliasLimit] set on its Source, in
-// place of those of the lowest layer. An error with no location binds in
-// that layer. The layers merge in the order given whichever layer the
-// Source stands for, so a higher layer still sets the values it holds.
+// [WithAllowDuplicateKeys], [WithAliasLimit], and [WithUnmarshalers] set
+// on its Source, in place of those of the lowest layer. A program thus
+// gives its unmarshalers to the Source of the layer it names here. An
+// error with no location binds in that layer. The layers merge in the
+// order given whichever layer the Source stands for, so a higher layer
+// still sets the values it holds.
 //
 // The preamble holds the schema directive of the layer, so the directive
 // of that layer picks the schema of the merged document, and a relative
@@ -349,7 +351,10 @@ func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, erro
 
 	var discard any
 
-	err := n.decodeInto(ctx, &discard, decodeConfig{skipSelfValidation: true}, nil)
+	cfg := newDecodeConfig(n.source, nil)
+	cfg.skipSelfValidation = true
+
+	err := n.decodeInto(ctx, &discard, cfg, nil)
 	if err != nil {
 		return nil, err
 	}

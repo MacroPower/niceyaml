@@ -44,11 +44,13 @@ import (
 // On a value that nothing changed, SelfValidate returns what the decode
 // with the walk on returns, given the same functions of WithValueCheck.
 // To spell each map key as the document does, the walk decodes the keys
-// with the settings of the [Source] and with the options in opts that say
+// with the settings of the [Source], the unmarshalers of
+// [WithUnmarshalers] among them, and with the options in opts that say
 // how a value decodes: [WithCustomUnmarshaler], [WithJSONUnmarshalers],
 // [WithDisallowUnknownFields], [WithAllowedFieldPrefixes], and
-// [WithYAMLOrderedMaps]. It reads no other option, so a caller passes the
-// options of the decode.
+// [WithYAMLOrderedMaps]. It reads no other option. A program that gives
+// its unmarshalers to the Source thus passes none of them here, and a
+// caller passes the other options of the decode again.
 //
 // In a document that did not parse, every error binds with no position,
 // and SelfValidate returns those errors rather than the syntax error
@@ -58,7 +60,7 @@ import (
 // ends, as the Cancellation section of the package documentation
 // describes.
 func (n *Node) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
-	return n.selfValidate(ctx, v, newDecodeConfig(opts))
+	return n.selfValidate(ctx, v, newDecodeConfig(n.source, opts))
 }
 
 // selfValidate is [Node.SelfValidate] with its settings resolved.
@@ -95,7 +97,9 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // body of a request with the functions it gives a decode. It knows a type
 // that decodes itself by its own unmarshaler method, and by
 // [WithCustomUnmarshaler] and [WithJSONUnmarshalers] in opts. It reads no
-// other option.
+// other option. The value has no [Source], so the unmarshalers of
+// [WithUnmarshalers] do not reach the walk, and a caller passes them in
+// opts.
 //
 // A Validate whose value holds fields a decode does not reach, such as
 // one tagged `yaml:"-"`, validates them with SelfValidateValue and
@@ -111,7 +115,7 @@ func SelfValidateValue(ctx context.Context, v any, opts ...DecodeOption) error {
 		return BindValue(err)
 	}
 
-	return BindValue(walkSelfValidators(ctx, v, nil, newDecodeConfig(opts)))
+	return BindValue(walkSelfValidators(ctx, v, nil, newDecodeConfig(nil, opts)))
 }
 
 // walkSelfValidators runs Validate on every [SelfValidator] in v, a non-nil

@@ -2639,6 +2639,73 @@ func TestMergeAs(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("the merged Source takes the unmarshalers of the layer it stands for", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Name  string     `yaml:"name"`
+			Level plainLevel `yaml:"level"`
+		}
+
+		levels := niceyaml.WithUnmarshalers(niceyaml.WithCustomUnmarshaler(decodeLevel))
+
+		// The level lies in the lowest layer, and decodes from its name
+		// only through the function.
+		plainBase := niceyaml.NewSourceFromString("level: low\n", niceyaml.WithName("base.yaml"))
+		levelsBase := niceyaml.NewSourceFromString("level: low\n", niceyaml.WithName("base.yaml"), levels)
+		plainUser := niceyaml.NewSourceFromString("name: api\n", niceyaml.WithName("user.yaml"))
+		levelsUser := niceyaml.NewSourceFromString("name: api\n", niceyaml.WithName("user.yaml"), levels)
+
+		const rejected = "base.yaml:1:8: $.level: expected integer, got string"
+
+		tcs := map[string]struct {
+			err    string
+			layers []*niceyaml.Source
+			opts   []niceyaml.MergeOption
+		}{
+			"the layer MergeAs names": {
+				layers: []*niceyaml.Source{plainBase, levelsUser},
+				opts:   []niceyaml.MergeOption{niceyaml.MergeAs(levelsUser)},
+			},
+			"the lowest layer with no MergeAs": {
+				layers: []*niceyaml.Source{levelsBase, plainUser},
+			},
+			"no other layer with no MergeAs": {
+				layers: []*niceyaml.Source{plainBase, levelsUser},
+				err:    rejected,
+			},
+			"no layer but the one MergeAs names": {
+				layers: []*niceyaml.Source{levelsBase, plainUser},
+				opts:   []niceyaml.MergeOption{niceyaml.MergeAs(plainUser)},
+				err:    rejected,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				merged, err := niceyaml.NewSourceFromLayers(t.Context(), tc.layers, tc.opts...)
+				require.NoError(t, err)
+
+				got, err := merged.Decode[config](t.Context())
+
+				_, atErr := yamltest.Document(t, merged).DecodeAt[plainLevel](t.Context(), paths.Doc().Child("level"))
+
+				if tc.err != "" {
+					require.EqualError(t, err, tc.err)
+					require.EqualError(t, atErr, tc.err)
+
+					return
+				}
+
+				require.NoError(t, err)
+				require.NoError(t, atErr)
+				assert.Equal(t, config{Name: "api", Level: levelLow}, got)
+			})
+		}
+	})
 }
 
 // identityLayer returns a Source of input, named name.yaml in dir of a file

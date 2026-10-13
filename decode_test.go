@@ -2625,14 +2625,39 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 	})
 
-	t.Run("a nil function names no type", func(t *testing.T) {
+	t.Run("a nil function removes the function of the type", func(t *testing.T) {
 		t.Parallel()
 
-		got, err := yamltest.FirstDocument(t, "level: 2\n").Decode[map[string]plainLevel](
-			t.Context(), niceyaml.WithCustomUnmarshaler[plainLevel](nil),
-		)
-		require.NoError(t, err)
-		assert.Equal(t, map[string]plainLevel{"level": levelHigh}, got)
+		removed := niceyaml.WithCustomUnmarshaler[plainLevel](nil)
+
+		tcs := map[string]struct {
+			opts []niceyaml.DecodeOption
+		}{
+			"alone": {
+				opts: []niceyaml.DecodeOption{removed},
+			},
+			"after a function": {
+				opts: []niceyaml.DecodeOption{levels, removed},
+			},
+			"in a bundle after a function": {
+				opts: []niceyaml.DecodeOption{niceyaml.DecodeOptions(levels, removed)},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				// The function reads a name, so the decode reads the number
+				// only once the function is gone.
+				got, err := yamltest.FirstDocument(t, "level: 2\n").Decode[map[string]plainLevel](
+					t.Context(),
+					tc.opts...,
+				)
+				require.NoError(t, err)
+				assert.Equal(t, map[string]plainLevel{"level": levelHigh}, got)
+			})
+		}
 	})
 
 	t.Run("a pointer type names no type", func(t *testing.T) {

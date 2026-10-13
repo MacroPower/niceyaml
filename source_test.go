@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -5760,6 +5761,588 @@ func (s minPort) Validate() error {
 	}
 
 	return nil
+}
+
+func ExampleWithUnmarshalers() {
+	ctx := context.Background()
+
+	type policy struct {
+		Allow []net.IPNet `yaml:"allow"`
+		Port  int         `yaml:"port"`
+	}
+
+	cidr := niceyaml.WithCustomUnmarshaler(func(_ context.Context, n *net.IPNet, decode func(any) error) error {
+		var s string
+
+		err := decode(&s)
+		if err != nil {
+			return err
+		}
+
+		_, parsed, err := net.ParseCIDR(s)
+		if err != nil {
+			return err //nolint:wrapcheck // The decode binds the error at the value.
+		}
+
+		*n = *parsed
+
+		return nil
+	})
+
+	allowPath := paths.Current().Child("allow")
+
+	// The validator passes no option to its decode, and the Source gives
+	// that decode the function for a net.IPNet.
+	private := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+		nets, err := n.DecodeAt[[]net.IPNet](ctx, allowPath)
+		if err != nil {
+			return err
+		}
+
+		for i, allowed := range nets {
+			if !allowed.IP.IsPrivate() {
+				return niceyaml.NewError(allowed.String()+" is not private", niceyaml.AtPath(allowPath.Index(i)))
+			}
+		}
+
+		return nil
+	})
+
+	inputs := []string{
+		stringtest.LinesLF("port: 8080", "allow:", "  - 10.0.0.0/8"),
+		stringtest.LinesLF("port: 8080", "allow:", "  - 10.0.0.0/8", "  - 8.8.8.0/24"),
+	}
+
+	for _, input := range inputs {
+		source := niceyaml.NewSourceFromString(input,
+			niceyaml.WithName("policy.yaml"), niceyaml.WithUnmarshalers(cidr))
+
+		p, err := source.Decode[policy](ctx, niceyaml.WithValidator(private))
+		if err != nil {
+			fmt.Println(err)
+
+			continue
+		}
+
+		fmt.Println(p.Port, p.Allow[0].String())
+	}
+
+	// Output:
+	// 8080 10.0.0.0/8
+	// policy.yaml:4:5: $.allow[1]: 8.8.8.0/24 is not private
+}
+
+func TestWithUnmarshalers(t *testing.T) {
+	t.Parallel()
+
+	levels := niceyaml.WithCustomUnmarshaler(decodeLevel)
+
+	t.Run("every decode of the documents applies them", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Level plainLevel `yaml:"level"`
+		}
+
+		input := stringtest.LinesLF(
+			"level: high",
+			"spans:",
+			"  - {from: 1, to: 2, level: low}",
+		)
+
+		levelPath := paths.Current().Child("level")
+		spansPath := paths.Current().Child("spans")
+
+		// Each decode reads a level, which decodes from its name only
+		// through the function of the Source.
+		tcs := map[string]struct {
+			decode func(ctx context.Context, source *niceyaml.Source, doc *niceyaml.Node) (any, error)
+			want   any
+		}{
+			"Source.Decode": {
+				decode: func(ctx context.Context, source *niceyaml.Source, _ *niceyaml.Node) (any, error) {
+					return source.Decode[config](ctx)
+				},
+				want: config{Level: levelHigh},
+			},
+			"Source.DecodeInto": {
+				decode: func(ctx context.Context, source *niceyaml.Source, _ *niceyaml.Node) (any, error) {
+					var got config
+
+					err := source.DecodeInto(ctx, &got)
+
+					return got, err
+				},
+				want: config{Level: levelHigh},
+			},
+			"Node.Decode": {
+				decode: func(ctx context.Context, _ *niceyaml.Source, doc *niceyaml.Node) (any, error) {
+					return doc.Decode[config](ctx)
+				},
+				want: config{Level: levelHigh},
+			},
+			"Node.DecodeInto": {
+				decode: func(ctx context.Context, _ *niceyaml.Source, doc *niceyaml.Node) (any, error) {
+					var got config
+
+					err := doc.DecodeInto(ctx, &got)
+
+					return got, err //nolint:wrapcheck // The test reads the error as the decode returns it.
+				},
+				want: config{Level: levelHigh},
+			},
+			"Node.DecodeAt": {
+				decode: func(ctx context.Context, _ *niceyaml.Source, doc *niceyaml.Node) (any, error) {
+					return doc.DecodeAt[plainLevel](ctx, levelPath)
+				},
+				want: levelHigh,
+			},
+			"Node.DecodeIfPresent": {
+				decode: func(ctx context.Context, _ *niceyaml.Source, doc *niceyaml.Node) (any, error) {
+					var got plainLevel
+
+					_, err := doc.DecodeIfPresent(ctx, levelPath, &got)
+
+					return got, err //nolint:wrapcheck // The test reads the error as the decode returns it.
+				},
+				want: levelHigh,
+			},
+			"the decode of a validator": {
+				decode: func(ctx context.Context, _ *niceyaml.Source, doc *niceyaml.Node) (any, error) {
+					var got plainLevel
+
+					read := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+						var err error
+
+						got, err = n.DecodeAt[plainLevel](ctx, levelPath)
+
+						return err
+					})
+
+					_, err := doc.Decode[map[string]any](ctx, niceyaml.WithValidator(read))
+
+					return got, err
+				},
+				want: levelHigh,
+			},
+			"the decode function of a custom unmarshaler": {
+				decode: func(ctx context.Context, _ *niceyaml.Source, doc *niceyaml.Node) (any, error) {
+					return doc.DecodeAt[[]plainSpan](ctx, spansPath, niceyaml.WithCustomUnmarshaler(decodeSpan))
+				},
+				want: []plainSpan{{From: 1, To: 2, Level: levelLow}},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(input, niceyaml.WithUnmarshalers(levels))
+
+				got, err := tc.decode(t.Context(), source, yamltest.Document(t, source))
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+
+				// A Source without the option reads a level as an integer.
+				plain := niceyaml.NewSourceFromString(input)
+
+				_, err = tc.decode(t.Context(), plain, yamltest.Document(t, plain))
+				require.ErrorIs(t, err, niceyaml.ErrWrongKind)
+			})
+		}
+	})
+
+	t.Run("self-validation spells each map key as the document does", func(t *testing.T) {
+		t.Parallel()
+
+		input := stringtest.Input(`
+			by_grade:
+			  high: {url: http://h}
+		`)
+
+		// A grade decodes from its name only through gradeNames, so the
+		// key of the document matches the key of the map only when the
+		// walk has it.
+		tcs := map[string]struct {
+			sourceOpts []niceyaml.SourceOption
+			decodeOpts []niceyaml.DecodeOption
+			err        string
+		}{
+			"the Source gives the function of the key": {
+				sourceOpts: []niceyaml.SourceOption{niceyaml.WithUnmarshalers(gradeNames)},
+				err:        `app.yaml:2:15: $.by_grade.high.url: url "ftp://h" is not http`,
+			},
+			"without it, the error binds at the key of the map": {
+				decodeOpts: []niceyaml.DecodeOption{gradeNames},
+				err:        `app.yaml:1:1: $.by_grade.3.url: url "ftp://h" is not http`,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(input,
+					append([]niceyaml.SourceOption{niceyaml.WithName("app.yaml")}, tc.sourceOpts...)...)
+
+				var cfg gradedConfig
+
+				err := source.DecodeInto(t.Context(), &cfg,
+					append([]niceyaml.DecodeOption{niceyaml.WithSelfValidation(false)}, tc.decodeOpts...)...)
+				require.NoError(t, err)
+
+				cfg.ByGrade[gradeHigh] = upstream{URL: "ftp://h"}
+
+				require.EqualError(t, source.SelfValidate(t.Context(), &cfg), tc.err)
+				require.EqualError(t, yamltest.Document(t, source).SelfValidate(t.Context(), &cfg), tc.err)
+			})
+		}
+	})
+
+	t.Run("SelfValidateValue reads no Source", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("by_grade:\n  high: {url: http://h}\n",
+			niceyaml.WithUnmarshalers(gradeNames))
+
+		var cfg gradedConfig
+
+		err := source.DecodeInto(t.Context(), &cfg, niceyaml.WithSelfValidation(false))
+		require.NoError(t, err)
+
+		cfg.ByGrade[gradeHigh] = upstream{URL: "ftp://h"}
+
+		require.EqualError(t, source.SelfValidate(t.Context(), &cfg),
+			`2:15: $.by_grade.high.url: url "ftp://h" is not http`)
+		require.EqualError(t, niceyaml.SelfValidateValue(t.Context(), &cfg),
+			`$.by_grade.3.url: url "ftp://h" is not http`)
+	})
+
+	t.Run("each constructor takes the option", func(t *testing.T) {
+		t.Parallel()
+
+		const input = "level: high\n"
+
+		path := filepath.Join(t.TempDir(), "app.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(input), 0o600))
+
+		fsys := fstest.MapFS{"app.yaml": &fstest.MapFile{Data: []byte(input)}}
+
+		tcs := map[string]func(opts ...niceyaml.SourceOption) (*niceyaml.Source, error){
+			"NewSourceFromFile": func(opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromFile(path, opts...)
+			},
+			"NewSourceFromFS": func(opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromFS(fsys, "app.yaml", opts...)
+			},
+			"NewSourceFromReader": func(opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromReader(strings.NewReader(input), opts...)
+			},
+			"NewSourceFromBytes": func(opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromBytes([]byte(input), opts...), nil
+			},
+			"NewSourceFromString": func(opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromString(input, opts...), nil
+			},
+			"NewSourceFromTokens": func(opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromTokens(tokens.Tokenize(input), opts...), nil
+			},
+		}
+
+		for name, build := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source, err := build(niceyaml.WithUnmarshalers(levels))
+				require.NoError(t, err)
+
+				got, err := source.Decode[map[string]plainLevel](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, map[string]plainLevel{"level": levelHigh}, got)
+			})
+		}
+	})
+
+	t.Run("a call replaces or removes the function of a type", func(t *testing.T) {
+		t.Parallel()
+
+		seven := niceyaml.WithCustomUnmarshaler(func(_ context.Context, l *plainLevel, _ func(any) error) error {
+			*l = 7
+
+			return nil
+		})
+
+		removed := niceyaml.WithCustomUnmarshaler[plainLevel](nil)
+
+		tcs := map[string]struct {
+			input string
+			err   string
+			opts  []niceyaml.DecodeOption
+			want  plainLevel
+		}{
+			"the function of the Source": {
+				input: "level: high\n",
+				want:  levelHigh,
+			},
+			"a function of the call replaces it": {
+				input: "level: high\n",
+				opts:  []niceyaml.DecodeOption{seven},
+				want:  7,
+			},
+			"a nil function removes it": {
+				input: "level: 2\n",
+				opts:  []niceyaml.DecodeOption{removed},
+				want:  levelHigh,
+			},
+			"a type with no function reads by its kind": {
+				input: "level: high\n",
+				opts:  []niceyaml.DecodeOption{removed},
+				err:   "1:8: $.level: expected integer, got string",
+			},
+			"a function after a nil one gives the type a function again": {
+				input: "level: high\n",
+				opts:  []niceyaml.DecodeOption{removed, seven},
+				want:  7,
+			},
+			"a nil function for another type keeps it": {
+				input: "level: high\n",
+				opts:  []niceyaml.DecodeOption{niceyaml.WithCustomUnmarshaler[net.IPNet](nil)},
+				want:  levelHigh,
+			},
+			"a nil function for a pointer type keeps it": {
+				input: "level: high\n",
+				opts:  []niceyaml.DecodeOption{niceyaml.WithCustomUnmarshaler[*plainLevel](nil)},
+				want:  levelHigh,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithUnmarshalers(levels))
+
+				got, err := doc.Decode[map[string]plainLevel](t.Context(), tc.opts...)
+				if tc.err != "" {
+					require.EqualError(t, err, tc.err)
+
+					return
+				}
+
+				require.NoError(t, err)
+				assert.Equal(t, map[string]plainLevel{"level": tc.want}, got)
+			})
+		}
+	})
+
+	t.Run("a call turns the JSON methods of the Source off", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Size jsonSize `yaml:"size"`
+		}
+
+		doc := yamltest.FirstDocument(t, "size: 4k\n",
+			niceyaml.WithUnmarshalers(niceyaml.WithJSONUnmarshalers(true)))
+
+		got, err := doc.Decode[config](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, 4096, got.Size.Bytes)
+
+		_, err = doc.Decode[config](t.Context(), niceyaml.WithJSONUnmarshalers(false))
+		require.EqualError(t, err, "1:7: $.size: expected mapping, got string")
+	})
+
+	t.Run("several options add to each other in order", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Size  jsonSize   `yaml:"size"`
+			Level plainLevel `yaml:"level"`
+		}
+
+		seven := niceyaml.WithCustomUnmarshaler(func(_ context.Context, l *plainLevel, _ func(any) error) error {
+			*l = 7
+
+			return nil
+		})
+
+		jsonOn := niceyaml.WithJSONUnmarshalers(true)
+
+		tcs := map[string]struct {
+			input string
+			err   string
+			opts  []niceyaml.SourceOption
+			want  config
+		}{
+			"each gives what it sets": {
+				input: "level: high\nsize: 4k\n",
+				opts: []niceyaml.SourceOption{
+					niceyaml.WithUnmarshalers(levels),
+					niceyaml.WithUnmarshalers(jsonOn),
+				},
+				want: config{Level: levelHigh, Size: jsonSize{Bytes: 4096}},
+			},
+			"a bundle gives what it holds": {
+				input: "level: high\nsize: 4k\n",
+				opts:  []niceyaml.SourceOption{niceyaml.WithUnmarshalers(niceyaml.DecodeOptions(levels, jsonOn))},
+				want:  config{Level: levelHigh, Size: jsonSize{Bytes: 4096}},
+			},
+			"a later function for a type replaces an earlier one": {
+				input: "level: high\n",
+				opts: []niceyaml.SourceOption{
+					niceyaml.WithUnmarshalers(levels),
+					niceyaml.WithUnmarshalers(seven),
+				},
+				want: config{Level: 7},
+			},
+			"a later nil function removes an earlier one": {
+				input: "level: 2\n",
+				opts: []niceyaml.SourceOption{
+					niceyaml.WithUnmarshalers(levels),
+					niceyaml.WithUnmarshalers(niceyaml.WithCustomUnmarshaler[plainLevel](nil)),
+				},
+				want: config{Level: levelHigh},
+			},
+			"the last JSON setting applies": {
+				input: "size: 4k\n",
+				opts: []niceyaml.SourceOption{
+					niceyaml.WithUnmarshalers(jsonOn),
+					niceyaml.WithUnmarshalers(niceyaml.WithJSONUnmarshalers(false)),
+				},
+				err: "1:7: $.size: expected mapping, got string",
+			},
+			"a later option without a JSON setting keeps the earlier one": {
+				input: "size: 4k\n",
+				opts: []niceyaml.SourceOption{
+					niceyaml.WithUnmarshalers(jsonOn),
+					niceyaml.WithUnmarshalers(levels),
+				},
+				want: config{Size: jsonSize{Bytes: 4096}},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got, err := yamltest.FirstDocument(t, tc.input, tc.opts...).Decode[config](t.Context())
+				if tc.err != "" {
+					require.EqualError(t, err, tc.err)
+
+					return
+				}
+
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
+	t.Run("panics for any setting but an unmarshaler", func(t *testing.T) {
+		t.Parallel()
+
+		const msg = "niceyaml.WithUnmarshalers: an option sets more than an unmarshaler, " +
+			"and a Source takes WithCustomUnmarshaler and WithJSONUnmarshalers alone"
+
+		pass := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error { return nil })
+
+		tcs := map[string]struct {
+			opt niceyaml.DecodeOption
+		}{
+			"WithValidator": {
+				opt: niceyaml.WithValidator(pass),
+			},
+			"WithValidator of nil": {
+				opt: niceyaml.WithValidator(nil),
+			},
+			"WithValueCheck": {
+				opt: niceyaml.WithValueCheck(func(context.Context, *plainLevel) error { return nil }),
+			},
+			"WithSelfValidation(false)": {
+				opt: niceyaml.WithSelfValidation(false),
+			},
+			"WithDisallowUnknownFields(true)": {
+				opt: niceyaml.WithDisallowUnknownFields(true),
+			},
+			"WithAllowedFieldPrefixes": {
+				opt: niceyaml.WithAllowedFieldPrefixes("x-"),
+			},
+			"WithYAMLOrderedMaps(true)": {
+				opt: niceyaml.WithYAMLOrderedMaps(true),
+			},
+			"a bundle that holds a validator": {
+				opt: niceyaml.DecodeOptions(levels, niceyaml.WithValidator(pass)),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.PanicsWithValue(t, msg, func() {
+					_ = niceyaml.WithUnmarshalers(levels, tc.opt)
+				})
+			})
+		}
+	})
+
+	t.Run("panics for a nil option", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			opt niceyaml.DecodeOption
+		}{
+			"an option":           {},
+			"an option in bundle": {opt: niceyaml.DecodeOptions(levels, nil)},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.Panics(t, func() {
+					_ = niceyaml.WithUnmarshalers(levels, tc.opt)
+				})
+			})
+		}
+	})
+
+	t.Run("an option that leaves its setting at the default passes", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			opt niceyaml.DecodeOption
+		}{
+			"WithSelfValidation(true)": {
+				opt: niceyaml.WithSelfValidation(true),
+			},
+			"WithDisallowUnknownFields(false)": {
+				opt: niceyaml.WithDisallowUnknownFields(false),
+			},
+			"WithAllowedFieldPrefixes with no prefix": {
+				opt: niceyaml.WithAllowedFieldPrefixes(),
+			},
+			"WithYAMLOrderedMaps(false)": {
+				opt: niceyaml.WithYAMLOrderedMaps(false),
+			},
+			"WithValueCheck of nil": {
+				opt: niceyaml.WithValueCheck[plainLevel](nil),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString("level: high\n", niceyaml.WithUnmarshalers(levels, tc.opt))
+
+				got, err := source.Decode[map[string]plainLevel](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, map[string]plainLevel{"level": levelHigh}, got)
+			})
+		}
+	})
 }
 
 func TestWithExcerpts(t *testing.T) {

@@ -380,6 +380,16 @@
 // outside it, and an alias with no such anchor reads one of a reference
 // document.
 //
+// The options of [WithCustomUnmarshaler] and [WithJSONUnmarshalers] state
+// how the types of the program read YAML, so a program gives them to the
+// Source with [WithUnmarshalers]. Every decode of the documents then
+// applies them, wherever it runs. That covers a decode inside a
+// [Validator], the decode function a WithCustomUnmarshaler function gets,
+// the map keys [Node.SelfValidate] spells, and a decode in code that did
+// not build the Source, such as a library the program hands it to. The
+// options of a call apply over them, so a call can replace or remove the
+// function of a type and turn the JSON methods off.
+//
 // A value the decoder rejects returns an error that matches [ErrDecode] and
 // carries the `$` path of the value, and the message describes the document
 // rather than the Go target:
@@ -481,12 +491,13 @@
 //
 // A validator that reads decoded data decodes the node itself with
 // [Node.Decode], and a decode passes none of its options to the validators
-// it runs. A check that runs after Decode returns, such as one that runs
-// its I/O in parallel, locates each finding with [Node.DataLocator]. The
-// decoder respells some keys, so the key 0x10 sets the member 16. A
-// DataLocator reads the names of decoded data as the decoder does, so a
-// check of the data reports a finding where a schema reports a violation
-// of the same value.
+// it runs. The decode of the validator still applies the unmarshalers of
+// [WithUnmarshalers], which belong to the Source. A check that runs after
+// Decode returns, such as one that runs its I/O in parallel, locates each
+// finding with [Node.DataLocator]. The decoder respells some keys, so the
+// key 0x10 sets the member 16. A DataLocator reads the names of decoded
+// data as the decoder does, so a check of the data reports a finding where
+// a schema reports a violation of the same value.
 //
 // A validator declares which of its errors are the fault of the document
 // by the constructor it calls, as the Errors section describes. [NewError]
@@ -758,10 +769,11 @@
 // comment. Each scalar keeps the spelling of its layer, such as 0x10 or
 // 1.50, except that a block scalar or a string of several lines becomes
 // one double-quoted line. The Source takes its name, its file path, its
-// file system, and what [WithAllowDuplicateKeys] and [WithAliasLimit] set
-// from the Source of that layer. Its text holds the values of every
-// layer, so it shows no excerpt when the Source of a layer, or of a
-// reference document a layer reads, has [WithExcerpts] set to false.
+// file system, and what [WithAllowDuplicateKeys], [WithAliasLimit], and
+// [WithUnmarshalers] set from the Source of that layer. Its text holds
+// the values of every layer, so it shows no excerpt when the Source of a
+// layer, or of a reference document a layer reads, has [WithExcerpts] set
+// to false.
 //
 // That text is no file of the program. [Node.View], [Node.Span],
 // [Node.Ranges], and [Node.PathAt] read the merged lines, so a position
@@ -774,8 +786,9 @@
 // MergeAs with the Source of that file. The directive of the file then
 // picks the schema, a
 // [go.jacobcolvin.com/niceyaml/schema/matcher.FilePath] matcher routes on
-// the path of the file, and the heading of an error names the file and
-// not the defaults.
+// the path of the file, every decode applies the unmarshalers of its
+// Source, and the heading of an error names the file and not the
+// defaults.
 //
 // Each error of the merged Source binds in the file of a layer and never
 // in the merged text, so it names the line a user edits:
