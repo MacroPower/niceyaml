@@ -197,9 +197,12 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 // returns binds at the value, as the Decoding and Validation sections of
 // the package documentation describe. A rejection from the decode
 // function already names its place in the document, so fn returns it as
-// it is. A later option for the same T replaces an earlier one, and a nil
-// fn or a pointer type T adds nothing. Give the function here rather than
-// to [yaml.RegisterCustomUnmarshaler], whose types a decode cannot see.
+// it is. A fn that looks the value up elsewhere, such as in a secret
+// store, returns the error of a lookup that fails inside [Place], so
+// [IsInvalid] does not report it. A later option for the same T replaces
+// an earlier one, and a nil fn or a pointer type T adds nothing. Give the
+// function here rather than to [yaml.RegisterCustomUnmarshaler], whose
+// types a decode cannot see.
 func WithCustomUnmarshaler[T any](fn func(ctx context.Context, v *T, decode func(any) error) error) DecodeOption {
 	return func(c *decodeConfig) {
 		t := reflect.TypeFor[T]()
@@ -667,10 +670,11 @@ func yamlMessage(err yaml.Error, msg string) *markedError {
 }
 
 // asDecodeError returns err, from the go-yaml decoder, as an error that
-// matches [ErrDecode]. An ended context, a panic, and an err that matches
-// already come back as they are.
+// matches [ErrDecode]. An ended context, a panic, an err that holds an
+// Error from [Place] on its cause chain, and an err that matches already
+// come back as they are.
 func asDecodeError(err error) error {
-	if err == nil || errors.Is(err, ErrDecode) || contextEnded(err) || holdsPanic(err) {
+	if err == nil || errors.Is(err, ErrDecode) || contextEnded(err) || holdsPanic(err) || holdsUnchecked(err) {
 		return err
 	}
 
@@ -1438,7 +1442,7 @@ func valueProblem(problem error) error {
 			return problem
 		}
 
-		return Place(problem, AtPath(at.path))
+		return wrapUndeclared(problem, AtPath(at.path))
 	}
 
 	located := *x

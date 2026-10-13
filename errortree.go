@@ -466,8 +466,9 @@ func joinBranches(err error) ([]error, childBase, bool) {
 }
 
 // peel strips the [*Error]s on top of err that add nothing and returns
-// what remains, with the base the errors below them take. The base is
-// invalid when a stripped Error matches [errInvalid].
+// what remains, with the base the errors below them take. The base takes
+// the fault the stripped Errors declare, as [declaration.under] passes it
+// down.
 func peel(err error) (childBase, error) {
 	var base childBase
 
@@ -477,7 +478,7 @@ func peel(err error) (childBase, error) {
 			return base, err
 		}
 
-		base.invalid = base.invalid || x.invalid
+		base.fault = base.fault.under(x)
 		err = x.err
 	}
 }
@@ -717,35 +718,38 @@ func isLeaf(err error) bool {
 type childBase struct {
 	// The move of every Error from Rebase above the children, joined, or
 	// nil when the walk met none.
-	move    *move
-	invalid bool
+	move *move
+	// The fault the Errors above the children declare, as
+	// [declaration.under] passes it down.
+	fault declaration
 }
 
 // cross returns the base below x: c with the move of x after its own, as
-// [move.then] joins them, and marked invalid when x matches
-// [errInvalid].
+// [move.then] joins them, and with the fault x passes down, as
+// [declaration.under] gives it.
 func (c childBase) cross(x *Error) childBase {
-	return childBase{move: c.move.then(x.move), invalid: c.invalid || x.invalid}
+	return childBase{move: c.move.then(x.move), fault: c.fault.under(x)}
 }
 
 // rebase returns n under the base. A detail explains the error above it,
 // so the base moves its paths alone and never marks it invalid. A problem
-// below an Error that matches [errInvalid] is the document's fault too.
+// below an Error that matches [errInvalid] is the document's fault too,
+// unless the fault is one a hook presumes and n holds an Error from
+// [Place].
 func (c childBase) rebase(n error, detail bool) error {
-	invalid := c.invalid && !detail
+	d := c.fault
+	if detail {
+		d = undeclared
+	}
 
 	if c.move == nil {
-		if invalid {
-			return markInvalid(n)
-		}
-
-		return n
+		return markFault(n, d)
 	}
 
 	m := *c.move
 	m.movesOnly = m.movesOnly || detail
 
-	return rebase(n, m, invalid)
+	return rebase(n, m, d)
 }
 
 // trees returns the nodes of kids in position order within the source

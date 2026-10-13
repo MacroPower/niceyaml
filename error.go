@@ -63,17 +63,18 @@ var (
 	//     number that overflows its type, an alias with no anchor, or a
 	//     field the target lacks under [WithDisallowUnknownFields].
 	//   - The error a value's own UnmarshalYAML or UnmarshalText returns,
-	//     which stays in the chain.
+	//     which stays in the chain, unless it holds an Error from [Place].
 	//   - The error for a target type whose definition the decoder
 	//     refuses, such as a struct with two fields of one name.
 	//   - The error of a reference document from [WithReferences] that
 	//     does not parse.
 	//
 	// The error of a context that ended does not match, even when an
-	// unmarshaler wraps it. Neither does a [PanicError], [ErrDecodeTarget],
-	// [ErrExcessiveAliasing], or an error that a [Validator] or a
-	// [SelfValidator] reports about the value it checks. Text the parser
-	// rejects matches [ErrSyntax] instead. [ErrUnknownField],
+	// unmarshaler wraps it. Neither does a [PanicError], an error from
+	// Place that an unmarshaler or a [WithCustomUnmarshaler] function
+	// returns, [ErrDecodeTarget], [ErrExcessiveAliasing], or an error that
+	// a [Validator] or a [SelfValidator] reports about the value it checks.
+	// Text the parser rejects matches [ErrSyntax] instead. [ErrUnknownField],
 	// [ErrWrongKind], and [ErrOverflow] label some of the rejections, and a
 	// problem with a label matches ErrDecode too. The document is at fault
 	// for each problem that matches, as [IsInvalid] describes, and the
@@ -265,7 +266,55 @@ type Error struct {
 	move   *move
 	errors []error
 	errorConfig
-	invalid bool
+	fault declaration
+}
+
+// declaration is what an [Error] declares about the fault of the document.
+// The values rise in strength, so where two apply to one error, the
+// larger one holds.
+type declaration uint8
+
+const (
+	// The Error declares nothing, as one from [Rebase] does.
+	undeclared declaration = iota
+	// The Error comes from [Place], so its check could not run. A fault
+	// that a hook presumes does not reach the error the Error wraps.
+	unchecked
+	// A hook presumes the document at fault for an error that the code it
+	// calls returns, as a decode does for each error of a [SelfValidator].
+	presumed
+	// [NewError] or [Invalid] declared the fault.
+	declared
+)
+
+// invalid reports whether the document is at fault under d.
+func (d declaration) invalid() bool {
+	return d >= presumed
+}
+
+// on returns the declaration d puts on err. A presumed fault does not
+// reach an err that holds an Error from [Place] on its cause chain, and
+// any other d reaches it unchanged.
+func (d declaration) on(err error) declaration {
+	if d == presumed && holdsUnchecked(err) {
+		return undeclared
+	}
+
+	return d
+}
+
+// under returns the declaration that the errors below x take when d comes
+// from above x. A fault that x declares passes down when it is stronger
+// than d, and an x from [Place] stops a presumed fault.
+func (d declaration) under(x *Error) declaration {
+	switch {
+	case x.fault == unchecked && d == presumed:
+		return undeclared
+	case x.fault.invalid() && x.fault > d:
+		return x.fault
+	default:
+		return d
+	}
 }
 
 // move is how an [Error] from [Rebase] moves the paths below it.
@@ -304,7 +353,7 @@ type move struct {
 // the location with a caret run and no text beside it.
 func NewError(msg string, opts ...ErrorOption) *Error {
 	e := wrapUndeclared(errors.New(msg), opts...)
-	e.invalid = true
+	e.fault = declared
 
 	return e
 }
@@ -316,8 +365,8 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 // [context.DeadlineExceeded], or a join with such a branch, gets the
 // options and no declaration, since that error is about the call. A
 // detail of err decides nothing. Use [NewError] instead to create an
-// error from a message, and [Place] to locate an error without declaring
-// a fault.
+// error from a message, and [Place] to locate the error of a check that
+// could not run.
 //
 // Invalid returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, whatever the options. It returns an error
@@ -336,27 +385,35 @@ func Invalid(err error, opts ...ErrorOption) error {
 	}
 
 	e := wrapUndeclared(err, opts...)
-	e.invalid = !contextEnded(err)
+	if !contextEnded(err) {
+		e.fault = declared
+	}
 
 	return e
 }
 
 // Place creates a new [*Error] that wraps err and gives it the location
-// and the details of the options. Place declares nothing about err, so
-// [IsInvalid] reports the result only when it reports err. An err the
-// document is at fault for through its own chain, such as an Error from
-// [NewError] or a decode rejection, stays a fault inside Place. A check
-// that could not run, such as one whose I/O fails, shows its error at the
-// value it read this way:
+// and the details of the options. The Error declares that the check could
+// not run, so a check whose I/O fails shows its error at the value it
+// read this way:
 //
 //	return niceyaml.Place(fmt.Errorf("stat license: %w", err),
 //		niceyaml.AtRange(licenseRange), niceyaml.WithDetails(why))
 //
 // The result binds and prints as one from [Invalid] with the same options
-// does. A decode declares the document at fault for every error a
-// [SelfValidator] returns, so a Validate method that returns an Error from
-// Place still reports a fault, and a check whose I/O can fail belongs in a
-// [Validator].
+// does. Place declares no fault, so [IsInvalid] reports the result only
+// when it reports err. An err the document is at fault for through its
+// own chain, such as an Error from [NewError] or a decode rejection, stays
+// a fault inside Place, and a Place inside Invalid is a fault too.
+//
+// A hook that runs code of the caller presumes the document at fault for
+// an error that code returns, as the Errors section of the package
+// documentation describes. An Error from Place on the cause chain of the
+// error turns that presumption off. An I/O error that a Validate method
+// or an unmarshaler places is thus no fault, and one from an unmarshaler
+// does not match [ErrDecode]. A Place around a join turns the presumption
+// off for each branch it heads, and a branch that declares a fault itself
+// stays one.
 //
 // Place returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, whatever the options. It returns an error rather
@@ -368,12 +425,50 @@ func Place(err error, opts ...ErrorOption) error {
 		return nil
 	}
 
-	return wrapUndeclared(err, opts...)
+	e := wrapUndeclared(err, opts...)
+	e.fault = unchecked
+
+	return e
+}
+
+// holdsUnchecked reports whether an [Error] from [Place] sits on the cause
+// chain of err. The walk skips details and the problems a summary heads,
+// and it stops at a join, whose branches each answer for themselves. A
+// wrapper with several %w verbs is one error, so a Place in any of its
+// branches counts.
+func holdsUnchecked(err error) bool {
+	for cur := err; !isNothing(cur); {
+		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *Error:
+			if x.fault == unchecked {
+				return true
+			}
+
+			cur = x.err
+
+		case interface{ Unwrap() error }:
+			cur = x.Unwrap()
+
+		case interface{ Unwrap() []error }:
+			branches := x.Unwrap()
+			if multierr.IsJoin(cur) || multierr.JoinMessage(cur.Error(), branches) {
+				return false
+			}
+
+			return slices.ContainsFunc(branches, holdsUnchecked)
+
+		default:
+			return false
+		}
+	}
+
+	return false
 }
 
 // wrapUndeclared returns an [*Error] around err with opts applied. The
 // Error does not match [errInvalid] itself, so it declares nothing about
-// err. [NewError], [Invalid], and [Place] build on it.
+// err. [NewError], [Invalid], and [Place] build on it, and a decode uses
+// it to put a location on an error it rewrites.
 func wrapUndeclared(err error, opts ...ErrorOption) *Error {
 	e := &Error{err: err}
 	for _, opt := range opts {
@@ -431,25 +526,31 @@ func NewSummary(msg string, errs ...error) error {
 // mark internal, so the method matches no target a caller can name, and
 // a caller asks [IsInvalid] or [ErrorTree.IsInvalid] instead of
 // [errors.Is]. An Error from [NewError] or [Invalid] declares the
-// fault, with a location or without, and so does the Error a decode puts
-// around what a [SelfValidator] returns. An Error from [Place] or
+// fault, with a location or without. So does the Error a decode puts
+// around an error a [SelfValidator] returns, unless an Error from [Place]
+// sits on the cause chain of that error. An Error from Place or
 // [Rebase], a summary from [NewSummary], and the Error a scoped
 // [Node.Bind] puts around an error declare nothing, and neither does an
 // Error from Invalid around the error of a context that ended. Any
 // other target matches through the errors the Error wraps, as
 // [Error.Unwrap] returns them.
 func (e *Error) Is(target error) bool {
-	return target == errInvalid && e != nil && e.invalid
+	return target == errInvalid && e != nil && e.fault.invalid()
 }
 
 // IsInvalid reports whether the document is at fault for every problem
-// of err, the question a caller asks to pick a status code, an exit code,
-// or whether to retry. The problems are the nodes [ErrorTree.Problems]
-// yields for err, so IsInvalid(err) and NewErrorTree(err).IsInvalid()
-// agree. One problem that is no fault makes IsInvalid report false for
-// the whole error, and a heading or a detail decides nothing. IsInvalid
-// reports false for a nil err too, and for an error with no problem,
-// such as one with an empty message.
+// of err, the question a caller asks to pick a status code or an exit
+// code. The problems are the nodes [ErrorTree.Problems] yields for err,
+// so IsInvalid(err) and NewErrorTree(err).IsInvalid() agree. One problem
+// that is no fault makes IsInvalid report false for the whole error, and
+// a heading or a detail decides nothing. IsInvalid reports false for a
+// nil err too, and for an error with no problem, such as one with an
+// empty message.
+//
+// A retry does not clear a fault of the document, so an error with a
+// problem of each kind fails again although IsInvalid reports false for
+// it. A caller that decides whether to retry asks [ErrorTree.IsInvalid]
+// of each problem instead.
 //
 // The code that builds an error declares the fault, as the Errors section
 // of the package documentation describes. Beside the errors that section
@@ -524,13 +625,14 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // is, except the result of [BindValue], which rebases as the error it was
 // made from.
 func Rebase(err error, base paths.Path) error {
-	return rebase(err, move{base: base}, false)
+	return rebase(err, move{base: base}, undeclared)
 }
 
-// rebase is [Rebase] with the paths of err moved as m moves them. With
-// invalid, each Error it builds matches [errInvalid]. A binding takes no
-// base, and one that stands in no document rebases as [placeable] returns.
-func rebase(err error, m move, invalid bool) error {
+// rebase is [Rebase] with the paths of err moved as m moves them. Each
+// Error it builds declares d, as [declaration.on] puts d on the error it
+// wraps. A binding takes no base, and one that stands in no document
+// rebases as [placeable] returns.
+func rebase(err error, m move, d declaration) error {
 	if isNothing(err) {
 		return nil
 	}
@@ -541,12 +643,10 @@ func rebase(err error, m move, invalid bool) error {
 	}
 
 	if isBound(err) {
-		if invalid {
-			return markInvalid(err)
-		}
-
-		return err
+		return markFault(err, d)
 	}
+
+	d = d.on(err)
 
 	// An Error that adds nothing to the join it wraps rebases as the join,
 	// with its mark on each branch, and the copy keeps what the Error
@@ -554,34 +654,43 @@ func rebase(err error, m move, invalid bool) error {
 	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
 	if ok && x.addsNothing() {
 		if _, _, joined := joinBranches(x.err); joined {
-			return &Error{err: rebase(x.err, m, invalid || x.invalid), invalid: x.invalid || invalid}
+			below := d.under(x)
+
+			return &Error{err: rebase(x.err, m, below), fault: max(x.fault, below)}
 		}
 	}
 
 	joined := mapJoin(err, func(branch error) error {
-		return rebase(branch, m, invalid)
+		return rebase(branch, m, d)
 	})
 	if joined != nil {
 		return joined
 	}
 
-	return &Error{err: err, move: &m, invalid: invalid}
+	return &Error{err: err, move: &m, fault: d}
 }
 
-// markInvalid returns err marked as a fault of the document. An err not
-// marked already comes back inside an Error that adds only the mark, so it
-// keeps its text, location, and children, and [isBound] still reports it.
-func markInvalid(err error) error {
+// markFault returns err with d on it, as [declaration.on] puts d on err.
+// An err whose own Error declares as much comes back as it is, and so
+// does one that d declares no fault for. Any other err comes back inside
+// an Error that adds only the mark, so it keeps its text, location, and
+// children, and [isBound] still reports it.
+func markFault(err error, d declaration) error {
 	if isNothing(err) {
 		return err
 	}
 
-	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
-	if ok && x.invalid {
+	d = d.on(err)
+	if !d.invalid() {
 		return err
 	}
 
-	return &Error{err: err, invalid: true}
+	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
+	if ok && x.fault >= d {
+		return err
+	}
+
+	return &Error{err: err, fault: d}
 }
 
 // ErrorOption configures an [Error]. [NewError], [Invalid], [Place],
@@ -1432,7 +1541,7 @@ func underScope(err error, scope paths.Path) (scopedError, bool) {
 			}
 
 			// The copy keeps what the Error declared.
-			return anchored(&Error{err: inner.err, invalid: x.invalid}), true
+			return anchored(&Error{err: inner.err, fault: x.fault}), true
 		}
 	}
 

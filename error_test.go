@@ -7733,6 +7733,10 @@ var (
 
 	// ErrRegistry is the error the code of a caller panics with.
 	errRegistry = errors.New("registry not initialized")
+
+	// ErrLicense is the I/O error that [placedText] and [placedUnmarshaler]
+	// place, as a check that cannot read the file a value names does.
+	errLicense = fmt.Errorf("stat license: %w", fs.ErrPermission)
 )
 
 // classifiedJoinError is a join of its own type, as [sparseJoinError] is,
@@ -11003,18 +11007,159 @@ func TestPlace(t *testing.T) {
 		}
 	})
 
-	t.Run("a SelfValidator marks a placed error invalid", func(t *testing.T) {
+	t.Run("a hook presumes no fault for a placed error", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := checkedConfig{Hours: selfChecked{check: func() error {
-			return niceyaml.Place(errStat, niceyaml.AtPath(paths.Current().Child("close")))
-		}}}
+		// Each decode runs a hook that places errLicense, so the error
+		// keeps its location and matches no decode error.
+		tcs := map[string]struct {
+			decode func(ctx context.Context) error
+			want   string
+		}{
+			"Validate method": {
+				decode: func(ctx context.Context) error {
+					return doc.DecodeInto(ctx, &checkedConfig{Hours: selfChecked{check: func() error {
+						return niceyaml.Place(errLicense, niceyaml.AtPath(paths.Current().Child("close")))
+					}}})
+				},
+				want: "cfg.yaml:3:10: $.hours.close: stat license: permission denied",
+			},
+			"UnmarshalText method": {
+				decode: func(ctx context.Context) error {
+					return errOf(doc.Decode[struct {
+						License placedText `yaml:"license"`
+					}](ctx))
+				},
+				want: "cfg.yaml:4:10: $.license: stat license: permission denied",
+			},
+			"UnmarshalYAML method": {
+				decode: func(ctx context.Context) error {
+					return errOf(doc.Decode[struct {
+						License placedUnmarshaler `yaml:"license"`
+					}](ctx))
+				},
+				want: "cfg.yaml:4:10: $.license: stat license: permission denied",
+			},
+			"WithCustomUnmarshaler function": {
+				decode: func(ctx context.Context) error {
+					return errOf(doc.Decode[struct {
+						License licenseRef `yaml:"license"`
+					}](ctx, withLicenseCheck(func(func(any) error) error {
+						return niceyaml.Place(errLicense)
+					})))
+				},
+				want: "cfg.yaml:4:10: $.license: stat license: permission denied",
+			},
+		}
 
-		err := doc.DecodeInto(t.Context(), &cfg)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		require.EqualError(t, err, "cfg.yaml:3:10: $.hours.close: stat license: permission denied")
-		require.ErrorIs(t, err, fs.ErrPermission)
-		assert.True(t, niceyaml.IsInvalid(err))
+				err := tc.decode(t.Context())
+
+				require.EqualError(t, err, tc.want)
+				require.ErrorIs(t, err, fs.ErrPermission)
+				require.NotErrorIs(t, err, niceyaml.ErrDecode)
+				assert.False(t, niceyaml.IsInvalid(err))
+			})
+		}
+	})
+
+	t.Run("each problem from a hook answers for itself", func(t *testing.T) {
+		t.Parallel()
+
+		closePath := paths.Current().Child("close")
+
+		// Each row of problems is the text of a problem and what IsInvalid
+		// reports for it, in the order of the lines they bind at.
+		tcs := map[string]struct {
+			check    func() error
+			problems []string
+		}{
+			"Invalid around Place": {
+				check: func() error {
+					return niceyaml.Invalid(niceyaml.Place(errStat, niceyaml.AtPath(closePath)))
+				},
+				problems: []string{"cfg.yaml:3:10: $.hours.close: stat license: permission denied true"},
+			},
+			"Place around NewError": {
+				check: func() error {
+					return niceyaml.Place(niceyaml.NewError("closes before it opens"), niceyaml.AtPath(closePath))
+				},
+				problems: []string{"cfg.yaml:3:10: $.hours.close: closes before it opens true"},
+			},
+			"Place around a join that holds NewError": {
+				// The Place heads each branch, and the branch from NewError
+				// declares its own fault.
+				check: func() error {
+					return niceyaml.Place(errors.Join(
+						niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath)),
+						errStat,
+					))
+				},
+				problems: []string{
+					"cfg.yaml:1:1: $.hours: stat license: permission denied false",
+					"cfg.yaml:3:10: $.hours.close: closes before it opens true",
+				},
+			},
+			"join of Place and a plain error": {
+				// The Place heads one branch, and the decode presumes the
+				// other branch a fault.
+				check: func() error {
+					return errors.Join(
+						niceyaml.Place(errStat, niceyaml.AtPath(closePath)),
+						errors.New("opens too late"),
+					)
+				},
+				problems: []string{
+					"cfg.yaml:1:1: $.hours: opens too late true",
+					"cfg.yaml:3:10: $.hours.close: stat license: permission denied false",
+				},
+			},
+			"summary of Place and a plain error": {
+				// The heading names the file, so the rows below it do not.
+				check: func() error {
+					return niceyaml.NewSummary("2 problems",
+						niceyaml.Place(errStat, niceyaml.AtPath(closePath)),
+						errors.New("opens too late"),
+					)
+				},
+				problems: []string{
+					"1:1: $.hours: opens too late true",
+					"3:10: $.hours.close: stat license: permission denied false",
+				},
+			},
+			"Invalid around a join that holds Place": {
+				check: func() error {
+					return niceyaml.Invalid(errors.Join(
+						niceyaml.Place(errStat, niceyaml.AtPath(closePath)),
+						errors.New("opens too late"),
+					))
+				},
+				problems: []string{
+					"cfg.yaml:1:1: $.hours: opens too late true",
+					"cfg.yaml:3:10: $.hours.close: stat license: permission denied true",
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := doc.DecodeInto(t.Context(), &checkedConfig{Hours: selfChecked{check: tc.check}})
+				require.Error(t, err)
+
+				var problems []string
+
+				for problem := range niceyaml.NewErrorTree(err).Problems() {
+					problems = append(problems, fmt.Sprintf("%s %t", problem.Label, problem.IsInvalid()))
+				}
+
+				assert.Equal(t, tc.problems, problems)
+			})
+		}
 	})
 
 	t.Run("options on a join locate the heading and no branch", func(t *testing.T) {
@@ -11150,10 +11295,40 @@ func (*fetchingUnmarshaler) UnmarshalYAML([]byte) error {
 type hintedUnmarshaler struct{}
 
 func (*hintedUnmarshaler) UnmarshalYAML([]byte) error {
-	return niceyaml.Place(
+	return niceyaml.Invalid(
 		errors.New("unknown name"),
 		niceyaml.WithDetails(fmt.Errorf("look up a suggestion: %w", context.DeadlineExceeded)),
 	)
+}
+
+// placedText decodes itself from text with a check that cannot run, so
+// it returns errLicense inside [niceyaml.Place].
+type placedText string
+
+func (*placedText) UnmarshalText([]byte) error {
+	return niceyaml.Place(errLicense)
+}
+
+// placedUnmarshaler decodes itself with a check that cannot run, so it
+// returns errLicense inside [niceyaml.Place].
+type placedUnmarshaler struct{}
+
+func (*placedUnmarshaler) UnmarshalYAML([]byte) error {
+	return niceyaml.Place(errLicense)
+}
+
+// licenseRef is a value that a [niceyaml.WithCustomUnmarshaler] function
+// decodes, so each test picks the error its decode returns.
+type licenseRef string
+
+// withLicenseCheck returns an option that decodes every [licenseRef] with
+// a function that returns what check returns. Check gets the decode
+// function of the value, so its error can wrap a rejection of that
+// function.
+func withLicenseCheck(check func(decode func(any) error) error) niceyaml.DecodeOption {
+	return niceyaml.WithCustomUnmarshaler(func(_ context.Context, _ *licenseRef, decode func(any) error) error {
+		return check(decode)
+	})
 }
 
 // invalidConfig is a target the decodes of [TestIsInvalid] reject.
@@ -11390,9 +11565,77 @@ func TestIsInvalid(t *testing.T) {
 			want: true,
 		},
 		"SelfValidator Place of an I/O error": {
-			// A decode marks every error a SelfValidator returns.
-			err:  selfValidated(niceyaml.Place(ioErr, niceyaml.AtPath(closePath))),
+			// The Place turns off the fault the decode presumes.
+			err: selfValidated(niceyaml.Place(ioErr, niceyaml.AtPath(closePath))),
+			is:  fs.ErrNotExist,
+		},
+		"SelfValidator Invalid of Place of an I/O error": {
+			err:  selfValidated(niceyaml.Invalid(niceyaml.Place(ioErr, niceyaml.AtPath(closePath)))),
 			is:   fs.ErrNotExist,
+			want: true,
+		},
+		"SelfValidator Place of NewError": {
+			err: selfValidated(
+				niceyaml.Place(niceyaml.NewError("closes before it opens"), niceyaml.AtPath(closePath)),
+			),
+			want: true,
+		},
+		"UnmarshalText Place of an I/O error": {
+			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
+				V placedText `yaml:"v"`
+			}](t.Context())),
+			is: fs.ErrPermission,
+		},
+		"UnmarshalYAML Place of an I/O error": {
+			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
+				V placedUnmarshaler `yaml:"v"`
+			}](t.Context())),
+			is: fs.ErrPermission,
+		},
+		"WithCustomUnmarshaler Place of an I/O error": {
+			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
+				V licenseRef `yaml:"v"`
+			}](t.Context(), withLicenseCheck(func(func(any) error) error {
+				return niceyaml.Place(ioErr)
+			}))),
+			is: fs.ErrNotExist,
+		},
+		"WithCustomUnmarshaler Invalid of Place of an I/O error": {
+			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
+				V licenseRef `yaml:"v"`
+			}](t.Context(), withLicenseCheck(func(func(any) error) error {
+				return niceyaml.Invalid(niceyaml.Place(ioErr))
+			}))),
+			is:   fs.ErrNotExist,
+			want: true,
+		},
+		"WithCustomUnmarshaler Place of NewError": {
+			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
+				V licenseRef `yaml:"v"`
+			}](t.Context(), withLicenseCheck(func(func(any) error) error {
+				return niceyaml.Place(niceyaml.NewError("unknown license"))
+			}))),
+			want: true,
+		},
+		"WithCustomUnmarshaler Place of a rejection of its decode function": {
+			// The rejection is a fault of its own, so the Place keeps it.
+			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
+				V licenseRef `yaml:"v"`
+			}](t.Context(), withLicenseCheck(func(decode func(any) error) error {
+				var n int
+
+				return niceyaml.Place(decode(&n))
+			}))),
+			is:   niceyaml.ErrDecode,
+			want: true,
+		},
+		"Validator Place of a rejection from DecodeAt": {
+			err: validated(niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+				_, err := n.DecodeAt[int](ctx, namePath)
+
+				return niceyaml.Place(err)
+			})),
+			is:   niceyaml.ErrDecode,
 			want: true,
 		},
 		"Validator error with no location and a located detail": {
@@ -11657,6 +11900,24 @@ func TestIsInvalid(t *testing.T) {
 		"bound Invalid of a join of a bound error and a plain one": {
 			err: doc.Bind(
 				niceyaml.Invalid(errors.Join(boundRead, errors.New("opens too late"))),
+			),
+			is:   fs.ErrNotExist,
+			want: true,
+		},
+		"unbound Invalid of a summary that heads Place": {
+			// The Place declares no fault, so the Invalid above it holds.
+			err: niceyaml.Invalid(
+				niceyaml.NewSummary("2 problems", errors.New("opens too late"), niceyaml.Place(ioErr)),
+			),
+			is:   fs.ErrNotExist,
+			want: true,
+		},
+		"unbound Rebase of Invalid of a summary that heads Place": {
+			err: niceyaml.Rebase(
+				niceyaml.Invalid(
+					niceyaml.NewSummary("2 problems", errors.New("opens too late"), niceyaml.Place(ioErr)),
+				),
+				hoursPath,
 			),
 			is:   fs.ErrNotExist,
 			want: true,

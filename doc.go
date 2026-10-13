@@ -189,16 +189,27 @@
 // The code that builds an error declares whether the document is at fault
 // for it or the check could not run, and a location never decides it.
 // [NewError] and [Invalid] declare a fault. [Place] takes the same
-// options and declares nothing, so it shows an I/O error at the value a
-// check read. The document is at fault for each problem the parse reports
-// with [ErrSyntax] and a decode reports with [ErrDecode], and for every
-// error a [SelfValidator] returns. Any other error declares nothing, and
-// a wrapper is a fault only when the error it wraps is one. The error of
-// a context that ended and a [PanicError] are never faults:
+// options and declares that the check could not run, so it shows an I/O
+// error at the value a check read. The document is at fault for each
+// problem the parse reports with [ErrSyntax] and a decode reports with
+// [ErrDecode]. Any other error declares nothing, and a wrapper is a fault
+// only when the error it wraps is one. The error of a context that ended
+// and a [PanicError] are never faults:
 //
 //	niceyaml.NewError("license file does not exist", niceyaml.AtPath(p)) // fault
 //	niceyaml.Invalid(checkErr, niceyaml.AtPath(p))                       // fault
 //	niceyaml.Place(statErr, niceyaml.AtPath(p))                          // check could not run
+//
+// A hook runs code of the caller in a decode, as a [SelfValidator], an
+// UnmarshalYAML or UnmarshalText method, or a [WithCustomUnmarshaler]
+// function does. The decode presumes the document at fault for an error
+// a hook returns that declares nothing, and such an error from an
+// unmarshaler matches ErrDecode too. An Error from Place on the cause
+// chain of the error turns the presumption off, so an I/O error that a
+// hook places is no fault and does not match ErrDecode. A Place around a
+// join turns the presumption off for each branch it heads. A declared
+// fault still holds anywhere on the chain, so NewError inside Place and
+// Place inside Invalid are faults.
 //
 // [IsInvalid] reports whether the document is at fault for every problem
 // of an error, which picks a status code or an exit code, and
@@ -207,12 +218,9 @@
 // a heading or a detail decides nothing. A wrapper that [fmt.Errorf]
 // builds with several %w verbs is one problem, so an I/O error wrapped
 // beside violations goes uncounted where a join of the two counts it. A
-// decode cannot tell the I/O of an UnmarshalYAML or UnmarshalText method
-// from its check of the value, so an error such a method returns is a
-// fault. A caller that must tell them apart checks for its own errors
-// first. A [PanicError] is a bug in code. A document can still trip one
-// in go-yaml, so a public endpoint that answers such a document with a
-// 4xx status tests for the PanicError before it asks IsInvalid.
+// [PanicError] is a bug in code. A document can still trip one in
+// go-yaml, so a public endpoint that answers such a document with a 4xx
+// status tests for the PanicError before it asks IsInvalid.
 //
 // A check run on a value inside a document reports `@` paths that read
 // from that value. [Rebase] puts the path of the value in front of each
@@ -414,8 +422,9 @@
 //
 //	config.yaml:7:14: $.servers[1].timeout: time: invalid duration "soon"
 //
-// An `@` path in an [*Error] from an unmarshaler reads from its own value,
-// and the error stays in the chain beside ErrDecode. An unmarshaler that
+// An `@` path in an [*Error] from an unmarshaler reads from its own value.
+// The error stays in the chain beside ErrDecode, unless it holds an Error
+// from [Place], as the Errors section describes. An unmarshaler that
 // answers otherwise the second time can move the error to another value, and
 // an error that no value reproduces comes back with no location.
 //
