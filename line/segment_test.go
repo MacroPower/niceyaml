@@ -16,80 +16,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-func TestLine_Kind(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-		line  int
-		want  []kind.Kind
-	}{
-		"mapping entry": {
-			input: "key: value\n",
-			want:  []kind.Kind{kind.NameTag, kind.PunctuationMappingValue, kind.LiteralString},
-		},
-		"anchor and alias take the kind of their marker": {
-			input: "a: &x 1\nb: *x\n",
-			line:  1,
-			want:  []kind.Kind{kind.NameTag, kind.PunctuationMappingValue, kind.NameAlias, kind.NameAlias},
-		},
-		"key whose colon sits on the next line": {
-			input: "? key\n: value\n",
-			want:  []kind.Kind{kind.NameTag, kind.NameTag},
-		},
-		"merge key keeps its kind": {
-			input: "<<: *base\n",
-			want:  []kind.Kind{kind.NameAliasMerge, kind.PunctuationMappingValue, kind.NameAlias, kind.NameAlias},
-		},
-		"comment between explicit key and colon": {
-			input: "? a # c\n: b\n",
-			want:  []kind.Kind{kind.NameTag, kind.NameTag, kind.Comment},
-		},
-		"flow sequence key keeps its closing bracket": {
-			input: "[a]: v\n",
-			want: []kind.Kind{
-				kind.PunctuationSequenceStart,
-				kind.LiteralString,
-				kind.PunctuationSequenceEnd,
-				kind.PunctuationMappingValue,
-				kind.LiteralString,
-			},
-		},
-		"tag before an empty key stays a decorator": {
-			input: "!!null : v\n",
-			want:  []kind.Kind{kind.NameDecorator, kind.PunctuationMappingValue, kind.LiteralString},
-		},
-		"sequence entry before an empty key stays punctuation": {
-			input: "- : v\n",
-			want:  []kind.Kind{kind.PunctuationSequenceEntry, kind.PunctuationMappingValue, kind.LiteralString},
-		},
-		"block scalar continuation is a string": {
-			input: stringtest.LinesLF(
-				"text: |",
-				"  hello",
-			),
-			line: 1,
-			want: []kind.Kind{kind.LiteralString},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := newLines(tc.input)
-			ln := lines.Line(tc.line)
-
-			got := make([]kind.Kind, 0, len(ln.Tokens()))
-			for i := range ln.Tokens() {
-				got = append(got, ln.Kind(i))
-			}
-
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
 // segmentText joins the segments of line i of view as "text" in kind,
 // with the kinds of the overlays covering each in brackets, so a test
 // reads the split at a glance.
@@ -205,8 +131,17 @@ func TestView_Segments(t *testing.T) {
 				want: "text(    )",
 			},
 			"the line ending is not part of any segment": {
-				input: "a: 1\r\nb: 2\r\n",
+				input: stringtest.LinesCRLF("a: 1", "b: 2"),
 				want:  "nameTag(a) punctuationMappingValue(:) text( ) literalNumberInteger(1)",
+			},
+			"an empty line has no segments": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"",
+					"b: 2",
+				),
+				line: 1,
+				want: "",
 			},
 		}
 
@@ -214,7 +149,7 @@ func TestView_Segments(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				view := newTestView(t, tc.input, strings.Count(tc.input, "\n"))
+				view := newView(tc.input)
 				view.AddLineOverlay(tc.line, tc.overlays...)
 
 				assert.Equal(t, tc.want, segmentText(view, tc.line))
@@ -230,7 +165,7 @@ func TestView_Segments(t *testing.T) {
 			"  - &a [1, 2]",
 			"  - *a",
 		)
-		view := newTestView(t, input, 3)
+		view := newView(input)
 
 		for i, ln := range view.All() {
 			var (
@@ -255,7 +190,7 @@ func TestView_Segments(t *testing.T) {
 	t.Run("overlays come in the order they were added", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, "abcdef\n", 1)
+		view := newView("abcdef\n")
 		view.AddOverlay("outer", yamltest.LineRange(0, 0, 6))
 		view.BlendOverlay("inner", yamltest.LineRange(0, 2, 4))
 
@@ -274,7 +209,7 @@ func TestView_Segments(t *testing.T) {
 	t.Run("a segment's overlays are its own", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, "key: value\n", 1)
+		view := newView("key: value\n")
 		view.AddOverlay("w", yamltest.LineRange(0, 0, 10))
 
 		want := slices.Clone(view.Overlays(0))
@@ -322,7 +257,7 @@ func TestView_Segments(t *testing.T) {
 	t.Run("an overlay on a line the view does not hold is not asked for", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, "a: 1\nb: 2\n", 2)
+		view := newView(stringtest.LinesLF(letterRows(2)...))
 		view.AddOverlay("hl", yamltest.LineRange(1, 0, 1))
 
 		assert.Equal(t, "nameTag(a) punctuationMappingValue(:) text( ) literalNumberInteger(1)", segmentText(view, 0))
@@ -332,22 +267,10 @@ func TestView_Segments(t *testing.T) {
 		)
 	})
 
-	t.Run("an empty line has no segments", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, stringtest.LinesLF(
-			"a: 1",
-			"",
-			"b: 2",
-		), 3)
-
-		assert.Empty(t, slices.Collect(view.Segments(1)))
-	})
-
 	t.Run("stops when the caller does", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, "key: value\n", 1)
+		view := newView("key: value\n")
 
 		n := 0
 		for range view.Segments(0) {
@@ -362,7 +285,7 @@ func TestView_Segments(t *testing.T) {
 	t.Run("panics outside the content", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, "a: 1\n", 1)
+		view := newView("a: 1\n")
 
 		assert.Panics(t, func() { view.Segments(1) })
 	})

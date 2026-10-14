@@ -5,6 +5,7 @@ import (
 
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -115,6 +116,8 @@ func TestTokenKind(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
+			// Add links each token to its neighbors, which TokenKind reads
+			// through tc.tk.
 			var chain token.Tokens
 
 			chain.Add(tc.prev...)
@@ -122,6 +125,80 @@ func TestTokenKind(t *testing.T) {
 			chain.Add(tc.next...)
 
 			assert.Equal(t, tc.want, line.TokenKind(tc.tk))
+		})
+	}
+}
+
+func TestLine_Kind(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		line  int
+		want  []kind.Kind
+	}{
+		"mapping entry": {
+			input: "key: value\n",
+			want:  []kind.Kind{kind.NameTag, kind.PunctuationMappingValue, kind.LiteralString},
+		},
+		"anchor and alias take the kind of their marker": {
+			input: stringtest.LinesLF("a: &x 1", "b: *x"),
+			line:  1,
+			want:  []kind.Kind{kind.NameTag, kind.PunctuationMappingValue, kind.NameAlias, kind.NameAlias},
+		},
+		"key whose colon sits on the next line": {
+			input: stringtest.LinesLF("? key", ": value"),
+			want:  []kind.Kind{kind.NameTag, kind.NameTag},
+		},
+		"merge key keeps its kind": {
+			input: "<<: *base\n",
+			want:  []kind.Kind{kind.NameAliasMerge, kind.PunctuationMappingValue, kind.NameAlias, kind.NameAlias},
+		},
+		"comment between explicit key and colon": {
+			input: stringtest.LinesLF("? a # c", ": b"),
+			want:  []kind.Kind{kind.NameTag, kind.NameTag, kind.Comment},
+		},
+		"flow sequence key keeps its closing bracket": {
+			input: "[a]: v\n",
+			want: []kind.Kind{
+				kind.PunctuationSequenceStart,
+				kind.LiteralString,
+				kind.PunctuationSequenceEnd,
+				kind.PunctuationMappingValue,
+				kind.LiteralString,
+			},
+		},
+		"tag before an empty key stays a decorator": {
+			input: "!!null : v\n",
+			want:  []kind.Kind{kind.NameDecorator, kind.PunctuationMappingValue, kind.LiteralString},
+		},
+		"sequence entry before an empty key stays punctuation": {
+			input: "- : v\n",
+			want:  []kind.Kind{kind.PunctuationSequenceEntry, kind.PunctuationMappingValue, kind.LiteralString},
+		},
+		"block scalar continuation is a string": {
+			input: stringtest.LinesLF(
+				"text: |",
+				"  hello",
+			),
+			line: 1,
+			want: []kind.Kind{kind.LiteralString},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := newLines(tc.input)
+			ln := lines.Line(tc.line)
+
+			got := make([]kind.Kind, 0, len(ln.Tokens()))
+			for i := range ln.Tokens() {
+				got = append(got, ln.Kind(i))
+			}
+
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }

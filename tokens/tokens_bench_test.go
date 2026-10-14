@@ -1,7 +1,7 @@
 package tokens_test
 
 import (
-	"strconv"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,43 +10,48 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
-// BenchmarkTokenize_TabRepeats tokenizes double-quoted scalars that each
-// have a second line a tab indents. The lexer cuts every scalar at its tab
-// and reads the tab again as a token of its own, and Tokenize drops each
-// of those repeats.
-func BenchmarkTokenize_TabRepeats(b *testing.B) {
-	for _, scalars := range []int{100, 1000, 10000} {
-		src := strings.Repeat(stringtest.LinesLF(
-			`k: "x`,
-			"\ty\"",
-		), scalars)
-
-		b.Run(strconv.Itoa(scalars), func(b *testing.B) {
-			b.ReportAllocs()
-			b.SetBytes(int64(len(src)))
-
-			for b.Loop() {
-				_ = tokens.Tokenize(src)
-			}
-		})
+func BenchmarkTokenize(b *testing.B) {
+	// Each source repeats unit 100, 1000, or 10000 times.
+	benchmarks := []struct {
+		name string
+		unit string
+	}{
+		// Each unit is a double-quoted scalar with a second line a tab
+		// indents. The lexer cuts every scalar at its tab and reads the tab
+		// again as a token of its own, and Tokenize drops each of those
+		// repeats.
+		{
+			name: "TabRepeats",
+			unit: stringtest.LinesLF(
+				`k: "x`,
+				"\ty\"",
+			),
+		},
+		// Each unit is a document that leaves a flow sequence open. The
+		// lexer reads each document after the first as the inside of that
+		// sequence, and Tokenize lexes the source again from the marker of
+		// each one.
+		{
+			name: "OpenFlows",
+			unit: stringtest.LinesLF(
+				"k: [v,",
+				"---",
+			),
+		},
 	}
-}
 
-// BenchmarkTokenize_OpenFlows tokenizes documents that each leave a flow
-// sequence open. The lexer reads each document after the first as the
-// inside of that sequence, and Tokenize lexes the source again from the
-// marker of each one.
-func BenchmarkTokenize_OpenFlows(b *testing.B) {
-	for _, docs := range []int{100, 1000, 10000} {
-		src := strings.Repeat("k: [v,\n---\n", docs)
+	for _, bm := range benchmarks {
+		for _, count := range []int{100, 1000, 10000} {
+			src := strings.Repeat(bm.unit, count)
 
-		b.Run(strconv.Itoa(docs), func(b *testing.B) {
-			b.ReportAllocs()
-			b.SetBytes(int64(len(src)))
+			b.Run(fmt.Sprintf("%s/%d", bm.name, count), func(b *testing.B) {
+				b.ReportAllocs()
+				b.SetBytes(int64(len(src)))
 
-			for b.Loop() {
-				_ = tokens.Tokenize(src)
-			}
-		})
+				for b.Loop() {
+					_ = tokens.Tokenize(src)
+				}
+			})
+		}
 	}
 }

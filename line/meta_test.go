@@ -7,48 +7,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
-
-func TestAnnotation_String(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		ann  line.Annotation
-		want string
-	}{
-		"empty content": {
-			ann:  line.Annotation{Content: "", Col: 0},
-			want: "",
-		},
-		"content at col 0": {
-			ann:  line.Annotation{Content: "error here", Col: 0},
-			want: "error here",
-		},
-		"content with padding": {
-			ann:  line.Annotation{Content: "note", Col: 5},
-			want: "     note",
-		},
-		"max column pads to the bound": {
-			ann:  line.Annotation{Content: "x", Col: math.MaxInt},
-			want: strings.Repeat(" ", 1024) + "x",
-		},
-		"column past the bound pads to the bound": {
-			ann:  line.Annotation{Content: "x", Col: 1 << 32},
-			want: strings.Repeat(" ", 1024) + "x",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, tc.ann.String())
-		})
-	}
-}
 
 func TestAnnotation_RenderKind(t *testing.T) {
 	t.Parallel()
@@ -247,18 +211,18 @@ func TestAnnotations_ByKind(t *testing.T) {
 	}
 }
 
-func TestAnnotations_FilterPosition(t *testing.T) {
+func TestAnnotations_Filter(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		anns     line.Annotations
-		position line.Placement
-		want     line.Annotations
+		anns      line.Annotations
+		placement line.Placement
+		want      line.Annotations
 	}{
 		"empty annotations": {
-			anns:     nil,
-			position: line.Above,
-			want:     nil,
+			anns:      nil,
+			placement: line.Above,
+			want:      nil,
 		},
 		"filter above from mixed": {
 			anns: line.Annotations{
@@ -266,7 +230,7 @@ func TestAnnotations_FilterPosition(t *testing.T) {
 				{Content: "below1", Placement: line.Below},
 				{Content: "above2", Placement: line.Above},
 			},
-			position: line.Above,
+			placement: line.Above,
 			want: line.Annotations{
 				{Content: "above1", Placement: line.Above},
 				{Content: "above2", Placement: line.Above},
@@ -278,21 +242,21 @@ func TestAnnotations_FilterPosition(t *testing.T) {
 				{Content: "below1", Placement: line.Below},
 				{Content: "below2", Placement: line.Below},
 			},
-			position: line.Below,
+			placement: line.Below,
 			want: line.Annotations{
 				{Content: "below1", Placement: line.Below},
 				{Content: "below2", Placement: line.Below},
 			},
 		},
 		"no matches": {
-			anns:     line.Annotations{{Content: "below", Placement: line.Below}},
-			position: line.Above,
-			want:     nil,
+			anns:      line.Annotations{{Content: "below", Placement: line.Below}},
+			placement: line.Above,
+			want:      nil,
 		},
 		"all match": {
-			anns:     line.Annotations{{Content: "a", Placement: line.Above}, {Content: "b", Placement: line.Above}},
-			position: line.Above,
-			want:     line.Annotations{{Content: "a", Placement: line.Above}, {Content: "b", Placement: line.Above}},
+			anns:      line.Annotations{{Content: "a", Placement: line.Above}, {Content: "b", Placement: line.Above}},
+			placement: line.Above,
+			want:      line.Annotations{{Content: "a", Placement: line.Above}, {Content: "b", Placement: line.Above}},
 		},
 	}
 
@@ -300,11 +264,13 @@ func TestAnnotations_FilterPosition(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, tc.anns.Filter(tc.position))
+			assert.Equal(t, tc.want, tc.anns.Filter(tc.placement))
 		})
 	}
 }
 
+// TestAnnotations_String also checks Annotation.String, which renders an
+// annotation the same as a collection that holds only that annotation.
 func TestAnnotations_String(t *testing.T) {
 	t.Parallel()
 
@@ -319,6 +285,14 @@ func TestAnnotations_String(t *testing.T) {
 		"single annotation": {
 			anns: line.Annotations{{Content: "message", Col: 3}},
 			want: "   message",
+		},
+		"single annotation at column zero": {
+			anns: line.Annotations{{Content: "error here", Col: 0}},
+			want: "error here",
+		},
+		"single annotation without content": {
+			anns: line.Annotations{{Content: "", Col: 0}},
+			want: "",
 		},
 		"multiple annotations joined": {
 			anns: line.Annotations{{Content: "first", Col: 5}, {Content: "second", Col: 10}},
@@ -367,6 +341,93 @@ func TestAnnotations_String(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, tc.anns.String())
+
+			if len(tc.anns) == 1 {
+				assert.Equal(t, tc.want, tc.anns[0].String())
+			}
+		})
+	}
+}
+
+func TestOverlays_MarkerRow(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		content  string
+		want     string
+		overlays line.Overlays
+	}{
+		"no overlays": {
+			content: "key: v",
+			want:    "",
+		},
+		"negative start clamps to the first column": {
+			content:  "key: v",
+			overlays: line.Overlays{{Cols: position.NewSpan(-2, 3)}},
+			want:     "^^^",
+		},
+		"span past the end stops at the content": {
+			content:  "key: v",
+			overlays: line.Overlays{{Cols: position.NewSpan(3, 10)}},
+			want:     "   ^^^",
+		},
+		"span past the content marks nothing": {
+			content:  "key: v",
+			overlays: line.Overlays{{Cols: position.NewSpan(8, 12)}},
+			want:     "",
+		},
+		"empty span marks nothing": {
+			content:  "key: v",
+			overlays: line.Overlays{{Cols: position.NewSpan(2, 2)}},
+			want:     "",
+		},
+		"overlapping overlays": {
+			content: "key: v",
+			overlays: line.Overlays{
+				{Cols: position.NewSpan(1, 3)},
+				{Cols: position.NewSpan(2, 5)},
+			},
+			want: " ^^^^",
+		},
+		"wide rune gets two carets": {
+			content:  "名前: v",
+			overlays: line.Overlays{{Cols: position.NewSpan(1, 2)}},
+			want:     "  ^^",
+		},
+		"zero-width space marks the next column": {
+			content:  "k: a\u200bb",
+			overlays: line.Overlays{{Cols: position.NewSpan(4, 5)}},
+			want:     "    ^",
+		},
+		"zero-width space at the end marks the column past it": {
+			content:  "k: a\u200b",
+			overlays: line.Overlays{{Cols: position.NewSpan(4, 5)}},
+			want:     "    ^",
+		},
+		"lone combining mark marks the next column": {
+			content:  "\u0301x",
+			overlays: line.Overlays{{Cols: position.NewSpan(0, 1)}},
+			want:     "^",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.overlays.MarkerRow(tc.content))
+
+			// View.String draws the same row under the line, or none
+			// when the row is empty.
+			view := newView(tc.content + "\n")
+			view.AddLineOverlay(0, tc.overlays...)
+
+			rows := []string{"   1 | " + tc.content}
+			if tc.want != "" {
+				rows = append(rows, "     | "+tc.want)
+			}
+
+			assert.Equal(t, stringtest.JoinLF(rows...), view.String())
 		})
 	}
 }

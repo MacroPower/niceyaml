@@ -13,59 +13,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
-func TestSplit(t *testing.T) {
+func TestLine(t *testing.T) {
 	t.Parallel()
-
-	tcs := map[string]struct {
-		input       string
-		wantContent []string
-		wantNumbers []int
-	}{
-		"single line": {
-			input:       "key: value",
-			wantContent: []string{"key: value"},
-			wantNumbers: []int{1},
-		},
-		"block scalar splits per line": {
-			input: stringtest.LinesLF(
-				"foo: |-",
-				"  hello",
-				"  world",
-			),
-			wantContent: []string{"foo: |-", "  hello", "  world"},
-			wantNumbers: []int{1, 2, 3},
-		},
-		// The lexer drops the line ending ahead of some tokens, such as a
-		// "?" after a document header or a value indicator after a
-		// directive. Tokenize restores it, so the token opens a new line
-		// rather than joining the one before it.
-		"explicit key after header": {
-			input: stringtest.LinesLF(
-				"x: 1",
-				"---",
-				"? a",
-				": b",
-			),
-			wantContent: []string{"x: 1", "---", "? a", ": b"},
-			wantNumbers: []int{1, 2, 3, 4},
-		},
-		"value indicator after directive": {
-			input:       "%YAML 1.2\n: value\n",
-			wantContent: []string{"%YAML 1.2", ": value"},
-			wantNumbers: []int{1, 2},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := newLines(tc.input)
-
-			assert.Equal(t, tc.wantContent, contentsOf(lines.All()))
-			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
-		})
-	}
 
 	t.Run("zero value", func(t *testing.T) {
 		t.Parallel()
@@ -79,6 +28,16 @@ func TestSplit(t *testing.T) {
 		assert.Nil(t, l.Tokens())
 		assert.Nil(t, l.SourceTokens())
 		assert.Nil(t, l.TokenAt(0))
+
+		for range l.Runes() {
+			t.Fatal("zero value must not yield")
+		}
+	})
+
+	t.Run("a line with tokens is not empty", func(t *testing.T) {
+		t.Parallel()
+
+		assert.False(t, newLines("key: value\n").Line(0).IsEmpty())
 	})
 }
 
@@ -89,10 +48,16 @@ func TestLine_Runes(t *testing.T) {
 		input string
 		want  []string
 	}{
-		"lf ending":                        {input: "a: b\nc: d\n", want: []string{"a: b\n", "c: d\n"}},
-		"crlf ending collapses to newline": {input: "a: b\r\nc: d\r\n", want: []string{"a: b\n", "c: d\n"}},
-		"no ending at end of input":        {input: "ab", want: []string{"ab"}},
-		"multibyte runes":                  {input: "k: héllo\nz: 1", want: []string{"k: héllo\n", "z: 1"}},
+		"lf ending": {input: stringtest.LinesLF("a: b", "c: d"), want: []string{"a: b\n", "c: d\n"}},
+		"crlf ending collapses to newline": {
+			input: stringtest.LinesCRLF("a: b", "c: d"),
+			want:  []string{"a: b\n", "c: d\n"},
+		},
+		"no ending at end of input": {input: "ab", want: []string{"ab"}},
+		"multibyte runes": {
+			input: stringtest.JoinLF("k: héllo", "z: 1"),
+			want:  []string{"k: héllo\n", "z: 1"},
+		},
 		// The lexer repeats the newline after a tag at the start of the next
 		// token. The line still yields it once.
 		"newline repeated after tag": {
@@ -109,8 +74,11 @@ func TestLine_Runes(t *testing.T) {
 			),
 			want: []string{"a: !t\n", "  b: 1\n"},
 		},
-		"crlf cut after comment": {input: "a: b # c\r\nd: e\r\n", want: []string{"a: b # c\n", "d: e\n"}},
-		"bare cr ending":         {input: "a: 1\rb: 2\r", want: []string{"a: 1\n", "b: 2\n"}},
+		"crlf cut after comment": {
+			input: stringtest.LinesCRLF("a: b # c", "d: e"),
+			want:  []string{"a: b # c\n", "d: e\n"},
+		},
+		"bare cr ending": {input: "a: 1\rb: 2\r", want: []string{"a: 1\n", "b: 2\n"}},
 		"blank line after tag": {
 			input: stringtest.LinesLF(
 				"a: !t",
@@ -176,16 +144,6 @@ func TestLine_Runes(t *testing.T) {
 		}
 
 		assert.Equal(t, 2, count)
-	})
-
-	t.Run("zero value yields nothing", func(t *testing.T) {
-		t.Parallel()
-
-		var l line.Line
-
-		for range l.Runes() {
-			t.Fatal("zero value must not yield")
-		}
 	})
 }
 
@@ -326,11 +284,11 @@ func TestLine_String(t *testing.T) {
 		want string
 	}{
 		"numbered": {
-			line: newTestView(t, "key: value\n", 1).Line(0),
+			line: newLines("key: value\n").Line(0),
 			want: "   1 | key: value",
 		},
 		"control characters": {
-			line: newTestView(t, "a: \"x\ty\"\n", 1).Line(0),
+			line: newLines("a: \"x\ty\"\n").Line(0),
 			want: "   1 | a: \"x\u2409y\"",
 		},
 		// A zero Line, which a diff puts opposite an inserted or deleted

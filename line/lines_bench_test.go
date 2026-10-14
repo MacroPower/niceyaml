@@ -4,24 +4,27 @@ import (
 	"testing"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
-	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
-func BenchmarkLinesContentRanges(b *testing.B) {
-	sizes := []struct {
-		name  string
-		lines int
-	}{
-		{"small_50", 50},
-		{"medium_500", 500},
-		{"large_5000", 5000},
-	}
+// benchSize names a run of a benchmark over content of a number of lines.
+type benchSize struct {
+	name  string
+	lines int
+}
 
-	for _, sz := range sizes {
-		tks := tokens.Tokenize(yamltest.GenerateYAML(sz.lines))
-		lines := line.NewLines(tks)
+// benchSizes are the lengths of content that most benchmarks of the
+// package run at.
+var benchSizes = []benchSize{
+	{"small_50", 50},
+	{"medium_500", 500},
+	{"large_5000", 5000},
+}
+
+func BenchmarkLinesContentRanges(b *testing.B) {
+	for _, sz := range benchSizes {
+		lines := newLines(yamltest.GenerateYAML(sz.lines))
+		tks := lines.Tokens()
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -36,16 +39,7 @@ func BenchmarkLinesContentRanges(b *testing.B) {
 }
 
 func BenchmarkLinesRunes(b *testing.B) {
-	sizes := []struct {
-		name  string
-		lines int
-	}{
-		{"small_50", 50},
-		{"medium_500", 500},
-		{"large_5000", 5000},
-	}
-
-	for _, sz := range sizes {
+	for _, sz := range benchSizes {
 		lines := newLines(yamltest.GenerateYAML(sz.lines))
 
 		// One short range per line, as a search yields a match on each.

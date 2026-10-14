@@ -10,16 +10,7 @@ import (
 )
 
 func BenchmarkViewIndex(b *testing.B) {
-	sizes := []struct {
-		name  string
-		lines int
-	}{
-		{"small_50", 50},
-		{"medium_500", 500},
-		{"large_5000", 5000},
-	}
-
-	for _, sz := range sizes {
+	for _, sz := range benchSizes {
 		lines := newLines(yamltest.GenerateYAML(sz.lines))
 
 		b.Run(sz.name, func(b *testing.B) {
@@ -36,15 +27,7 @@ func BenchmarkViewIndex(b *testing.B) {
 }
 
 func BenchmarkViewHunks(b *testing.B) {
-	sizes := []struct {
-		name  string
-		lines int
-	}{
-		{"medium_2000", 2000},
-		{"large_20000", 20000},
-	}
-
-	for _, sz := range sizes {
+	for _, sz := range []benchSize{{"medium_2000", 2000}, {"large_20000", 20000}} {
 		lines := newLines(yamltest.GenerateYAML(sz.lines))
 
 		// An overlay on every third line gives Hunks(0) one span per
@@ -65,15 +48,7 @@ func BenchmarkViewHunks(b *testing.B) {
 }
 
 func BenchmarkViewSlice(b *testing.B) {
-	sizes := []struct {
-		name  string
-		lines int
-	}{
-		{"medium_1000", 1000},
-		{"large_100000", 100000},
-	}
-
-	for _, sz := range sizes {
+	for _, sz := range []benchSize{{"medium_1000", 1000}, {"large_100000", 100000}} {
 		lines := newLines(yamltest.GenerateYAML(sz.lines))
 
 		// A viewport slices the same 50-line window of a decorated view on

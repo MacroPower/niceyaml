@@ -89,101 +89,101 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 	}{
 		"leading question mark": {
 			input: map[string]string{"k": "? x"},
-			want:  "k: \"? x\"\n",
+			want:  stringtest.LinesLF(`k: "? x"`),
 		},
 		"leading question mark key": {
 			input: map[string]int{"? x": 1},
-			want:  "\"? x\": 1\n",
+			want:  stringtest.LinesLF(`"? x": 1`),
 		},
 		"leading dash before NUL": {
 			input: "-\x00x",
-			want:  "\"-\\x00x\"\n",
+			want:  stringtest.LinesLF(`"-\x00x"`),
 		},
 		"leading tab": {
 			input: map[string]string{"k": "\tx"},
-			want:  "k: \"\\tx\"\n",
+			want:  stringtest.LinesLF(`k: "\tx"`),
 		},
 		"trailing tab": {
 			input: map[string]string{"k": "x\t"},
-			want:  "k: \"x\\t\"\n",
+			want:  stringtest.LinesLF(`k: "x\t"`),
 		},
 		"inner tab": {
 			input: "x\tx",
-			want:  "\"x\\tx\"\n",
+			want:  stringtest.LinesLF(`"x\tx"`),
 		},
 		"colon before tab": {
 			input: map[string]string{"k": "a:\tb"},
-			want:  "k: \"a:\\tb\"\n",
+			want:  stringtest.LinesLF(`k: "a:\tb"`),
 		},
 		"infinity": {
 			input: map[string]string{"k": ".inf"},
-			want:  "k: \".inf\"\n",
+			want:  stringtest.LinesLF(`k: ".inf"`),
 		},
 		"negative infinity": {
 			input: "-.inf",
-			want:  "\"-.inf\"\n",
+			want:  stringtest.LinesLF(`"-.inf"`),
 		},
 		"not a number": {
 			input: map[string]string{"k": ".nan"},
-			want:  "k: \".nan\"\n",
+			want:  stringtest.LinesLF(`k: ".nan"`),
 		},
 		"not a number key": {
 			input: map[string]int{".NaN": 1},
-			want:  "\".NaN\": 1\n",
+			want:  stringtest.LinesLF(`".NaN": 1`),
 		},
 		"document start marker": {
 			input: "---",
-			want:  "\"---\"\n",
+			want:  stringtest.LinesLF(`"---"`),
 		},
 		"document end marker": {
 			input: "...",
-			want:  "\"...\"\n",
+			want:  stringtest.LinesLF(`"..."`),
 		},
 		"document end marker with text": {
 			input: "...x",
-			want:  "\"...x\"\n",
+			want:  stringtest.LinesLF(`"...x"`),
 		},
 		"merge key": {
 			input: map[string]int{"<<": 1},
-			want:  "\"<<\": 1\n",
+			want:  stringtest.LinesLF(`"<<": 1`),
 		},
 		"key ending in merge key": {
 			input: map[string]int{"x<<": 1},
-			want:  "\"x<<\": 1\n",
+			want:  stringtest.LinesLF(`"x<<": 1`),
 		},
 		"CRLF line break": {
 			input: map[string]string{"k": "x\r\ny"},
-			want:  "k: \"x\\r\\ny\"\n",
+			want:  stringtest.LinesLF(`k: "x\r\ny"`),
 		},
 		"CR line break": {
 			input: "x\ry",
-			want:  "\"x\\ry\"\n",
+			want:  stringtest.LinesLF(`"x\ry"`),
 		},
 		"line break key": {
 			input: map[string]int{"x\ny": 1},
-			want:  "\"x\\ny\": 1\n",
+			want:  stringtest.LinesLF(`"x\ny": 1`),
 		},
 		"line break alone": {
 			input: "\n",
-			want:  "\"\\n\"\n",
+			want:  stringtest.LinesLF(`"\n"`),
 		},
 		"indented line after line break": {
 			input: map[string]string{"k": "\n  y"},
-			want:  "k: \"\\n  y\"\n",
+			want:  stringtest.LinesLF(`k: "\n  y"`),
 		},
 		"space at end of last line": {
 			input: map[string]string{"k": "x\ny "},
 			opts:  []encoder.Option{literalStyle},
-			want:  "k: \"x\\ny \"\n",
+			want:  stringtest.LinesLF(`k: "x\ny "`),
 		},
 		"space before final line break at indent 1": {
 			input: map[string]string{"k": "x \n"},
 			opts:  []encoder.Option{encoder.WithIndent(1)},
-			want:  "k: \"x \\n\"\n",
+			want:  stringtest.LinesLF(`k: "x \n"`),
 		},
 		"blank last line": {
 			input: map[string]string{"k": "x\n \n"},
-			want:  "k: \"x\\n \\n\"\n",
+			want:  stringtest.LinesLF(`k: "x\n \n"`),
 		},
 		"line breaks alone before sequence entry": {
 			input: []string{"\n\n", "z"},
@@ -192,25 +192,25 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 		"line break in flow mapping": {
 			input: map[string]string{"k": "x\ny"},
 			opts:  []encoder.Option{flow},
-			want:  "{k: \"x\\ny\"}\n",
+			want:  stringtest.LinesLF(`{k: "x\ny"}`),
 		},
 		"flow indicator in flow mapping": {
 			input: map[string]string{"k": "a[b"},
 			opts:  []encoder.Option{flow},
-			want:  "{k: \"a[b\"}\n",
+			want:  stringtest.LinesLF(`{k: "a[b"}`),
 		},
 		"byte order mark": {
 			input: "\ufeffx",
-			want:  "\"\\ufeffx\"\n",
+			want:  stringtest.LinesLF(`"\ufeffx"`),
 		},
 		"byte order mark key": {
 			input: map[string]int{"\ufeffx": 1},
-			want:  "\"\\ufeffx\": 1\n",
+			want:  stringtest.LinesLF(`"\ufeffx": 1`),
 		},
 		"indented line in sequence at indent 1": {
 			input: []string{"x\n y"},
 			opts:  []encoder.Option{encoder.WithIndent(1)},
-			want:  "- \"x\\n y\"\n",
+			want:  stringtest.LinesLF(`- "x\n y"`),
 		},
 		"indented line in indented sequence at indent 1": {
 			input: map[string][]string{"k": {"x\n  y"}},
@@ -220,50 +220,50 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 		"marshaled literal block in flow mapping": {
 			input: map[string]literalBlock{"k": "x\ny"},
 			opts:  []encoder.Option{flow},
-			want:  "{k: \"x\\ny\"}\n",
+			want:  stringtest.LinesLF(`{k: "x\ny"}`),
 		},
 		"marshaled literal block in flow sequence": {
 			input: []literalBlock{"x\ny"},
 			opts:  []encoder.Option{flow},
-			want:  "[\"x\\ny\"]\n",
+			want:  stringtest.LinesLF(`["x\ny"]`),
 		},
 		"marshaled literal block with anchor in flow mapping": {
 			input: struct {
 				A literalBlock `yaml:"a,anchor"`
 			}{A: "x\ny"},
 			opts: []encoder.Option{flow},
-			want: "{a: &a \"x\\ny\"}\n",
+			want: stringtest.LinesLF(`{a: &a "x\ny"}`),
 		},
 		"marshaled literal block with tag in flow sequence": {
 			input: []taggedLiteralBlock{"x\ny"},
 			opts:  []encoder.Option{flow},
-			want:  "[!!str \"x\\ny\"]\n",
+			want:  stringtest.LinesLF(`[!!str "x\ny"]`),
 		},
 		"marshaled literal block key": {
 			input: map[literalBlock]int{"x\ny": 1},
-			want:  "\"x\\ny\": 1\n",
+			want:  stringtest.LinesLF(`"x\ny": 1`),
 		},
 		"marshaled literal block key with tag": {
 			input: map[taggedLiteralBlock]int{"x\ny": 1},
-			want:  "!!str \"x\\ny\": 1\n",
+			want:  stringtest.LinesLF(`!!str "x\ny": 1`),
 		},
 		"marshaled literal block key with anchor": {
 			input: map[anchoredLiteralBlock]int{"x\ny": 1},
-			want:  "&k \"x\\ny\": 1\n",
+			want:  stringtest.LinesLF(`&k "x\ny": 1`),
 		},
 		"marshaled merge key with tag": {
 			input: map[taggedString]int{"<<": 1},
-			want:  "!!str \"<<\": 1\n",
+			want:  stringtest.LinesLF(`!!str "<<": 1`),
 		},
 		"marshaled plain scalar over a blank line": {
 			input:   map[string]rawYAML{"k": "a\n\n  b"},
 			decoded: map[string]rawYAML{"k": "a\nb"},
-			want:    "k: \"a\\nb\"\n",
+			want:    stringtest.LinesLF(`k: "a\nb"`),
 		},
 		"marshaled plain scalar over a blank line at top level": {
 			input:   rawYAML("a\n\n  b"),
 			decoded: rawYAML("a\nb"),
-			want:    "\"a\\nb\"\n",
+			want:    stringtest.LinesLF(`"a\nb"`),
 		},
 		"marshaled plain scalar over a blank line in nested mapping": {
 			input:   map[string]map[string]rawYAML{"a": {"k": "a\n\n  b"}},
@@ -273,12 +273,12 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 		"marshaled single-quoted line break": {
 			input:   map[string]rawYAML{"k": "'a\n\n  b'"},
 			decoded: map[string]rawYAML{"k": "a\nb"},
-			want:    "k: \"a\\nb\"\n",
+			want:    stringtest.LinesLF(`k: "a\nb"`),
 		},
 		"marshaled single-quoted line break key": {
 			input:   map[rawYAML]string{"'a\n\n  b'": "v"},
 			decoded: map[rawYAML]string{"a\nb": "v"},
-			want:    "\"a\\nb\": v\n",
+			want:    stringtest.LinesLF(`"a\nb": v`),
 		},
 		"marshaled keyword under a custom tag": {
 			input:   map[string]rawYAML{"k": "!foo .inf"},
@@ -362,6 +362,11 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 	}
 }
 
+// itemList is a document that lists its items under a key.
+type itemList struct {
+	Items []string `yaml:"items"`
+}
+
 // shared is a value that [anchoredDoc] and [unencodableDoc] anchor.
 type shared struct {
 	Name string `yaml:"name"`
@@ -392,6 +397,7 @@ func TestEncoder_Encode_documents(t *testing.T) {
 	tcs := map[string]struct {
 		steps []step
 		want  string
+		opts  []encoder.Option
 	}{
 		"separator between documents": {
 			steps: []step{{value: "a"}, {value: "b"}},
@@ -427,6 +433,35 @@ func TestEncoder_Encode_documents(t *testing.T) {
 			},
 			want: stringtest.LinesLF("a: &a", "  name: x"),
 		},
+		"pretty root sequence in each document": {
+			steps: []step{
+				{value: []string{"a"}},
+				{value: itemList{Items: []string{"b"}}},
+				{value: []string{"c"}},
+			},
+			opts: []encoder.Option{encoder.Pretty()},
+			want: stringtest.LinesLF(
+				"- a",
+				"---",
+				"items:",
+				"  - b",
+				"---",
+				"- c",
+			),
+		},
+		"comments in every document": {
+			// The comments of a later WithYAMLComments replace those of an
+			// earlier one.
+			steps: []step{
+				{value: map[string]int{"a": 1}},
+				{value: map[string]int{"a": 2}},
+			},
+			opts: []encoder.Option{
+				encoder.WithYAMLComments(yaml.CommentMap{"$.a": {yaml.LineComment(" replaced")}}),
+				encoder.WithYAMLComments(yaml.CommentMap{"$.a": {yaml.LineComment(" count")}}),
+			},
+			want: stringtest.LinesLF("a: 1 # count", "---", "a: 2 # count"),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -435,7 +470,7 @@ func TestEncoder_Encode_documents(t *testing.T) {
 
 			var buf bytes.Buffer
 
-			enc := encoder.New(&buf)
+			enc := encoder.New(&buf, tc.opts...)
 
 			for i, st := range tc.steps {
 				err := enc.Encode(t.Context(), st.value)
@@ -457,33 +492,6 @@ func TestEncoder_Encode_documents(t *testing.T) {
 			}
 		})
 	}
-}
-
-// policyKey is the context key that [policyMarshaler] reads.
-type policyKey struct{}
-
-// policyMarshaler encodes as the policy its context holds, or as "none".
-type policyMarshaler struct{}
-
-func (policyMarshaler) MarshalYAML(ctx context.Context) (any, error) {
-	policy, ok := ctx.Value(policyKey{}).(string)
-	if !ok {
-		policy = "none"
-	}
-
-	return policy, nil
-}
-
-func TestEncoder_Encode_context(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-
-	enc := encoder.New(&buf)
-	ctx := context.WithValue(t.Context(), policyKey{}, "redact")
-
-	require.NoError(t, enc.Encode(ctx, map[string]policyMarshaler{"policy": {}}))
-	assert.Equal(t, "policy: redact\n", buf.String())
 }
 
 // emptyMarshaler marshals to no YAML.
@@ -619,6 +627,21 @@ func TestEncoder_Encode_writeError(t *testing.T) {
 	assert.Zero(t, calls, "Encode runs no marshaler after a refused write")
 }
 
+// policyKey is the context key that [policyMarshaler] reads.
+type policyKey struct{}
+
+// policyMarshaler encodes as the policy its context holds, or as "none".
+type policyMarshaler struct{}
+
+func (policyMarshaler) MarshalYAML(ctx context.Context) (any, error) {
+	policy, ok := ctx.Value(policyKey{}).(string)
+	if !ok {
+		policy = "none"
+	}
+
+	return policy, nil
+}
+
 func TestMarshal(t *testing.T) {
 	t.Parallel()
 
@@ -646,7 +669,7 @@ func TestMarshal(t *testing.T) {
 		},
 		"empty string": {
 			input: "",
-			want:  "\"\"\n",
+			want:  stringtest.LinesLF(`""`),
 		},
 		"mapping": {
 			input: map[string]string{"key": "value"},
@@ -705,17 +728,27 @@ func TestMarshal(t *testing.T) {
 			opts:  []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
 			want:  "{items: [one, two]}\n",
 		},
+		"marshaler that reads the context": {
+			input: map[string]policyMarshaler{"policy": {}},
+			want:  "policy: redact\n",
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := encoder.Marshal(t.Context(), tc.input, tc.opts...)
+			// The context holds a policy, which only policyMarshaler reads.
+			ctx := context.WithValue(t.Context(), policyKey{}, "redact")
+
+			got, err := encoder.Marshal(ctx, tc.input, tc.opts...)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, string(got))
 
-			assert.Equal(t, mustEncode(t, tc.input, tc.opts...), string(got), "Marshal returns what Encode writes")
+			var buf bytes.Buffer
+
+			require.NoError(t, encoder.New(&buf, tc.opts...).Encode(ctx, tc.input))
+			assert.Equal(t, buf.String(), string(got), "Marshal returns what Encode writes")
 		})
 	}
 }
@@ -818,16 +851,6 @@ func TestEncoder_Encode_errors(t *testing.T) {
 	}
 }
 
-func TestMarshal_context(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.WithValue(t.Context(), policyKey{}, "redact")
-
-	got, err := encoder.Marshal(ctx, map[string]policyMarshaler{"policy": {}})
-	require.NoError(t, err)
-	assert.Equal(t, "policy: redact\n", string(got))
-}
-
 func TestWithIndent_panicsBelowOne(t *testing.T) {
 	t.Parallel()
 
@@ -839,31 +862,27 @@ func TestWithIndent_panicsBelowOne(t *testing.T) {
 func TestPretty(t *testing.T) {
 	t.Parallel()
 
-	type config struct {
-		Items []string `yaml:"items"`
-	}
-
 	type server struct {
 		Name  string `yaml:"name"`
 		Ports []int  `yaml:"ports"`
 	}
 
-	// Each input encodes as a document of its own. Every want is the text
-	// prettier writes for it, except where a marshaler returned YAML.
+	// Every want is the text prettier writes for the input, except where a
+	// marshaler returned YAML.
 	tcs := map[string]struct {
-		inputs []any
-		want   string
+		input any
+		want  string
 	}{
 		"sequence under a key": {
-			inputs: []any{config{Items: []string{"one", "two"}}},
-			want:   stringtest.LinesLF("items:", "  - one", "  - two"),
+			input: itemList{Items: []string{"one", "two"}},
+			want:  stringtest.LinesLF("items:", "  - one", "  - two"),
 		},
 		"root sequence": {
-			inputs: []any{[]string{"one", "two"}},
-			want:   stringtest.LinesLF("- one", "- two"),
+			input: []string{"one", "two"},
+			want:  stringtest.LinesLF("- one", "- two"),
 		},
 		"root sequence of mappings": {
-			inputs: []any{[]server{{Name: "a", Ports: []int{1, 2}}, {Name: "b"}}},
+			input: []server{{Name: "a", Ports: []int{1, 2}}, {Name: "b"}},
 			want: stringtest.LinesLF(
 				"- name: a",
 				"  ports:",
@@ -874,35 +893,24 @@ func TestPretty(t *testing.T) {
 			),
 		},
 		"root sequence of sequences": {
-			inputs: []any{[][]string{{"a", "b"}, {"c"}}},
-			want:   stringtest.LinesLF("- - a", "  - b", "- - c"),
+			input: [][]string{{"a", "b"}, {"c"}},
+			want:  stringtest.LinesLF("- - a", "  - b", "- - c"),
 		},
 		"literal block in a root sequence": {
-			inputs: []any{[]string{"one\ntwo\n"}},
-			want:   stringtest.LinesLF("- |", "  one", "  two"),
+			input: []string{"one\ntwo\n"},
+			want:  stringtest.LinesLF("- |", "  one", "  two"),
 		},
 		"literal block in a mapping in a root sequence": {
-			inputs: []any{[]map[string]string{{"k": "one\ntwo\n"}}},
-			want:   stringtest.LinesLF("- k: |", "    one", "    two"),
-		},
-		"root sequence in each document": {
-			inputs: []any{[]string{"a"}, config{Items: []string{"b"}}, []string{"c"}},
-			want: stringtest.LinesLF(
-				"- a",
-				"---",
-				"items:",
-				"  - b",
-				"---",
-				"- c",
-			),
+			input: []map[string]string{{"k": "one\ntwo\n"}},
+			want:  stringtest.LinesLF("- k: |", "    one", "    two"),
 		},
 		"root sequence that a marshaler returned": {
-			inputs: []any{rawYAML("- a\n- b\n")},
-			want:   stringtest.LinesLF("- a", "- b"),
+			input: rawYAML("- a\n- b\n"),
+			want:  stringtest.LinesLF("- a", "- b"),
 		},
 		"root sequence that holds YAML a marshaler returned": {
-			inputs: []any{[]rawYAML{"- a\n- b\n"}},
-			want:   stringtest.LinesLF("  - - a", "    - b"),
+			input: []rawYAML{"- a\n- b\n"},
+			want:  stringtest.LinesLF("  - - a", "    - b"),
 		},
 	}
 
@@ -910,15 +918,7 @@ func TestPretty(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var buf bytes.Buffer
-
-			enc := encoder.New(&buf, encoder.Pretty())
-
-			for _, input := range tc.inputs {
-				require.NoError(t, enc.Encode(t.Context(), input))
-			}
-
-			assert.Equal(t, tc.want, buf.String())
+			assert.Equal(t, tc.want, mustEncode(t, tc.input, encoder.Pretty()))
 		})
 	}
 }
@@ -1191,12 +1191,12 @@ func TestWithYAMLComments(t *testing.T) {
 		"line comment on a quoted keyword": {
 			input:    map[string]string{"k": ".inf"},
 			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" not a float")}},
-			want:     "k: \".inf\" # not a float\n",
+			want:     stringtest.LinesLF(`k: ".inf" # not a float`),
 		},
 		"line comment on a quoted CRLF string": {
 			input:    map[string]string{"k": "x\r\ny"},
 			comments: yaml.CommentMap{"$.k": {yaml.LineComment(" two lines")}},
-			want:     "k: \"x\\r\\ny\" # two lines\n",
+			want:     stringtest.LinesLF(`k: "x\r\ny" # two lines`),
 		},
 		"line comment on a mapping": {
 			input:    map[string]any{"b": map[string]any{"c": "x"}},
@@ -1253,20 +1253,4 @@ func TestWithYAMLComments(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
-}
-
-func TestWithYAMLComments_documents(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-
-	enc := encoder.New(
-		&buf,
-		encoder.WithYAMLComments(yaml.CommentMap{"$.a": {yaml.LineComment(" replaced")}}),
-		encoder.WithYAMLComments(yaml.CommentMap{"$.a": {yaml.LineComment(" count")}}),
-	)
-
-	require.NoError(t, enc.Encode(t.Context(), map[string]int{"a": 1}))
-	require.NoError(t, enc.Encode(t.Context(), map[string]int{"a": 2}))
-	assert.Equal(t, stringtest.LinesLF("a: 1 # count", "---", "a: 2 # count"), buf.String())
 }

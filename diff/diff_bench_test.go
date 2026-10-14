@@ -38,23 +38,32 @@ func partlyChangedYAML(lines int) string {
 	return sb.String()
 }
 
-// benchUnified measures a diff of the lines of two sources and the unified
-// view of its result.
-func benchUnified(b *testing.B, sourceA, sourceB *niceyaml.Source) {
+// benchDiff measures a diff of the lines of the sources "a" and "b" made
+// from yamlA and yamlB, and the call of render on its result. The sources
+// have no size limits, so every line of a large input takes part.
+func benchDiff(b *testing.B, yamlA, yamlB string, render func(*diff.Result)) {
 	b.Helper()
 	b.ReportAllocs()
 
-	linesA, linesB := sourceA.Lines(), sourceB.Lines()
+	linesA := niceyaml.NewSourceFromString(yamlA, yamltest.NoSizeLimits(niceyaml.WithName("a"))...).Lines()
+	linesB := niceyaml.NewSourceFromString(yamlB, yamltest.NoSizeLimits(niceyaml.WithName("b"))...).Lines()
 
 	for b.Loop() {
-		_ = diff.Diff(linesA, linesB).Unified()
+		render(diff.Diff(linesA, linesB))
 	}
+}
+
+// benchUnified measures a diff through [benchDiff] and the unified view of
+// its result.
+func benchUnified(b *testing.B, yamlA, yamlB string) {
+	b.Helper()
+
+	benchDiff(b, yamlA, yamlB, func(r *diff.Result) { _ = r.Unified() })
 }
 
 func BenchmarkFullDiffSource(b *testing.B) {
 	for _, sz := range benchSizes {
 		yamlA := yamltest.GenerateYAML(sz.lines)
-		sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
 
 		changes := []struct{ name, yamlB string }{
 			{"identical", yamlA},
@@ -64,10 +73,8 @@ func BenchmarkFullDiffSource(b *testing.B) {
 		}
 
 		for _, change := range changes {
-			sourceB := niceyaml.NewSourceFromString(change.yamlB, niceyaml.WithName("b"))
-
 			b.Run(sz.name+"/"+change.name, func(b *testing.B) {
-				benchUnified(b, sourceA, sourceB)
+				benchUnified(b, yamlA, change.yamlB)
 			})
 		}
 	}
@@ -77,20 +84,11 @@ func BenchmarkHunksDiffSource(b *testing.B) {
 	contexts := []int{0, 3, 10}
 
 	for _, sz := range benchSizes {
-		yamlA := yamltest.GenerateYAML(sz.lines)
-		sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
-
-		sourceB := niceyaml.NewSourceFromString(partlyChangedYAML(sz.lines), niceyaml.WithName("b"))
+		yamlA, yamlB := yamltest.GenerateYAML(sz.lines), partlyChangedYAML(sz.lines)
 
 		for _, ctx := range contexts {
 			b.Run(fmt.Sprintf("%s/context_%d", sz.name, ctx), func(b *testing.B) {
-				b.ReportAllocs()
-
-				linesA, linesB := sourceA.Lines(), sourceB.Lines()
-
-				for b.Loop() {
-					_ = diff.Diff(linesA, linesB).Hunks(ctx)
-				}
+				benchDiff(b, yamlA, yamlB, func(r *diff.Result) { _ = r.Hunks(ctx) })
 			})
 		}
 	}
@@ -98,21 +96,13 @@ func BenchmarkHunksDiffSource(b *testing.B) {
 
 func BenchmarkSideBySideDiffSource(b *testing.B) {
 	for _, sz := range benchSizes {
-		yamlA := yamltest.GenerateYAML(sz.lines)
-		sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
-
-		sourceB := niceyaml.NewSourceFromString(partlyChangedYAML(sz.lines), niceyaml.WithName("b"))
+		yamlA, yamlB := yamltest.GenerateYAML(sz.lines), partlyChangedYAML(sz.lines)
 
 		b.Run(sz.name, func(b *testing.B) {
-			b.ReportAllocs()
-
-			linesA, linesB := sourceA.Lines(), sourceB.Lines()
-
-			for b.Loop() {
-				result := diff.Diff(linesA, linesB)
-				_ = result.Before()
-				_ = result.After()
-			}
+			benchDiff(b, yamlA, yamlB, func(r *diff.Result) {
+				_ = r.Before()
+				_ = r.After()
+			})
 		})
 	}
 }
@@ -125,7 +115,6 @@ func BenchmarkFullDiffSource_WorstCase(b *testing.B) {
 
 	for _, size := range sizes {
 		yamlA := yamltest.GenerateYAML(size)
-		sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
 
 		reversed := slices.Collect(strings.Lines(yamlA))
 		slices.Reverse(reversed)
@@ -145,11 +134,8 @@ func BenchmarkFullDiffSource_WorstCase(b *testing.B) {
 		}
 
 		for _, order := range orders {
-			yamlB := strings.Join(order.lines, "")
-			sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
-
 			b.Run(fmt.Sprintf("%s_%d", order.name, size), func(b *testing.B) {
-				benchUnified(b, sourceA, sourceB)
+				benchUnified(b, yamlA, strings.Join(order.lines, ""))
 			})
 		}
 	}
@@ -165,7 +151,6 @@ func BenchmarkFullDiffSource_NearIdentical(b *testing.B) {
 	const size = 20000
 
 	yamlA := yamltest.GenerateYAML(size)
-	sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
 
 	swapped := slices.Collect(strings.Lines(yamlA))
 	swapped[1], swapped[size-2] = swapped[size-2], swapped[1]
@@ -181,10 +166,8 @@ func BenchmarkFullDiffSource_NearIdentical(b *testing.B) {
 	}
 
 	for name, yamlB := range changes {
-		sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
-
 		b.Run(fmt.Sprintf("%s_%d", name, size), func(b *testing.B) {
-			benchUnified(b, sourceA, sourceB)
+			benchUnified(b, yamlA, yamlB)
 		})
 	}
 }
@@ -194,15 +177,11 @@ func BenchmarkFullDiffSource_InsertAtEnd(b *testing.B) {
 	sizes := []int{100, 500, 1000}
 
 	for _, size := range sizes {
-		yamlA := yamltest.GenerateYAML(size)
-		sourceA := niceyaml.NewSourceFromString(yamlA, niceyaml.WithName("a"))
-
 		// Same content + 10% more at the end.
-		yamlB := yamltest.GenerateYAML(size + size/10)
-		sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
+		yamlA, yamlB := yamltest.GenerateYAML(size), yamltest.GenerateYAML(size+size/10)
 
 		b.Run(fmt.Sprintf("append_%d", size), func(b *testing.B) {
-			benchUnified(b, sourceA, sourceB)
+			benchUnified(b, yamlA, yamlB)
 		})
 	}
 }

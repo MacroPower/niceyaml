@@ -35,9 +35,7 @@ func TestDiffer_Views(t *testing.T) {
 
 	got := result.Unified()
 	require.Equal(t, 3, got.Count())
-	assert.Equal(t, line.FlagDefault, got.Flag(0))
-	assert.Equal(t, line.FlagDeleted, got.Flag(1))
-	assert.Equal(t, line.FlagInserted, got.Flag(2))
+	assert.Equal(t, map[int]line.Flag{1: line.FlagDeleted, 2: line.FlagInserted}, changedFlags(got))
 
 	// A diff reads the lines of its inputs alone, so the result carries the
 	// flags of the diff and no overlays or annotations.
@@ -53,11 +51,6 @@ func TestDiffer_Views(t *testing.T) {
 	assert.Len(t, decorated.Annotations(1), 1)
 	assert.Equal(t, line.FlagInserted, decorated.Flag(0))
 
-	// Each result view owns its decoration.
-	got.AddOverlay(kind.GenericHighlight, yamltest.LineRange(2, 0, 1))
-	assert.Len(t, got.Overlays(2), 1)
-	assert.Empty(t, result.Unified().Overlays(2))
-
 	// The diff of a diff is a diff of the lines the view holds, and it
 	// ignores the flags of the first diff.
 	again := diff.Diff(got, got)
@@ -72,27 +65,14 @@ func TestDiffer_Views_LineNumbers(t *testing.T) {
 	// An unchanged line keeps the number it has in each revision, so an
 	// insertion at the top of the after revision leaves the before view's
 	// numbers alone.
-	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n").Lines()
-	after := niceyaml.NewSourceFromString(stringtest.LinesLF(
+	result := yamltest.Diff("a: 1\nb: 2\n", stringtest.LinesLF(
 		"x: 0",
 		"a: 1",
 		"b: 2",
-	)).Lines()
+	))
 
-	result := diff.New().Diff(before, after)
-
-	var beforeNumbers, afterNumbers []int
-
-	for _, l := range result.Before().All() {
-		beforeNumbers = append(beforeNumbers, l.Number())
-	}
-
-	for _, l := range result.After().All() {
-		afterNumbers = append(afterNumbers, l.Number())
-	}
-
-	assert.Equal(t, []int{0, 1, 2}, beforeNumbers)
-	assert.Equal(t, []int{1, 2, 3}, afterNumbers)
+	assert.Equal(t, []int{0, 1, 2}, yamltest.LineNumbers(result.Before()))
+	assert.Equal(t, []int{1, 2, 3}, yamltest.LineNumbers(result.After()))
 }
 
 // sequenceFunc adapts an iterator to [line.Sequence], as an implementation
@@ -548,7 +528,7 @@ func TestDiffer_Full(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			result := diffStrings(tc.before, tc.after)
+			result := yamltest.Diff(tc.before, tc.after)
 
 			got := result.Unified()
 			assert.Equal(t, tc.want, got.String())
@@ -589,6 +569,22 @@ func TestDiffer_Hunks(t *testing.T) {
 		l10: 10
 	`)
 
+	fiveLines := stringtest.Input(`
+		line1: 1
+		line2: 2
+		line3: old
+		line4: 4
+		line5: 5
+	`)
+	// Changes line3.
+	oneChange := stringtest.Input(`
+		line1: 1
+		line2: 2
+		line3: new
+		line4: 4
+		line5: 5
+	`)
+
 	tcs := map[string]struct {
 		before      string
 		after       string
@@ -597,58 +593,41 @@ func TestDiffer_Hunks(t *testing.T) {
 		flags       map[int]line.Flag
 		annotations map[int]string
 	}{
-		"context limits output": {
-			before: stringtest.Input(`
-				line1: 1
-				line2: 2
-				line3: 3
-				line4: 4
-				line5: old
-				line6: 6
-				line7: 7
-				line8: 8
-				line9: 9
-			`),
-			after: stringtest.Input(`
-				line1: 1
-				line2: 2
-				line3: 3
-				line4: 4
-				line5: new
-				line6: 6
-				line7: 7
-				line8: 8
-				line9: 9
-			`),
-			context: 1,
-			wantLen: 4,
-			flags: map[int]line.Flag{
-				3: line.FlagDefault,
-				4: line.FlagDeleted,
-				5: line.FlagInserted,
-				6: line.FlagDefault,
-			},
-			annotations: map[int]string{3: "@@ -4,3 +4,3 @@"},
-		},
 		"context 0 shows only changes": {
-			before: stringtest.Input(`
-				line1: 1
-				line2: 2
-				line3: old
-				line4: 4
-				line5: 5
-			`),
-			after: stringtest.Input(`
-				line1: 1
-				line2: 2
-				line3: new
-				line4: 4
-				line5: 5
-			`),
+			before:      fiveLines,
+			after:       oneChange,
 			context:     0,
 			wantLen:     2,
 			flags:       map[int]line.Flag{2: line.FlagDeleted, 3: line.FlagInserted},
 			annotations: map[int]string{2: "@@ -3 +3 @@"},
+		},
+		"context 1 adds a line on each side": {
+			before:  fiveLines,
+			after:   oneChange,
+			context: 1,
+			wantLen: 4,
+			flags: map[int]line.Flag{
+				1: line.FlagDefault,
+				2: line.FlagDeleted,
+				3: line.FlagInserted,
+				4: line.FlagDefault,
+			},
+			annotations: map[int]string{1: "@@ -2,3 +2,3 @@"},
+		},
+		"context 2 adds two lines on each side": {
+			before:  fiveLines,
+			after:   oneChange,
+			context: 2,
+			wantLen: 6,
+			flags: map[int]line.Flag{
+				0: line.FlagDefault,
+				1: line.FlagDefault,
+				2: line.FlagDeleted,
+				3: line.FlagInserted,
+				4: line.FlagDefault,
+				5: line.FlagDefault,
+			},
+			annotations: map[int]string{0: "@@ -1,5 +1,5 @@"},
 		},
 		"no changes returns empty": {
 			before:  "key: value\n",
@@ -839,7 +818,7 @@ func TestDiffer_Hunks(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			result := diffStrings(tc.before, tc.after)
+			result := yamltest.Diff(tc.before, tc.after)
 			got := result.Hunks(tc.context)
 
 			// The hunks keep the indices of the unified view.
@@ -858,6 +837,8 @@ func TestDiffer_Hunks(t *testing.T) {
 				require.NotEmpty(t, anns, "expected annotation at line %d", lineIdx)
 				assert.Equal(t, wantAnnotation, anns[0].Content)
 			}
+
+			assert.Len(t, hunkHeaders(got), len(tc.annotations), "one header for each hunk")
 
 			if tc.wantLen == 0 {
 				// The empty view takes decoration as any other.
@@ -905,7 +886,7 @@ func TestDiffResult_HunksKeepUnifiedIndices(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			result := diffStrings(before, tc.after)
+			result := yamltest.Diff(before, tc.after)
 
 			unified := result.Unified()
 			got := result.Hunks(1)
@@ -988,8 +969,11 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 			want: []string{"@@ -7,0 +8 @@"},
 		},
 		"delete the last line": {
-			after: "a: 1\nb: 2\n",
-			want:  []string{"@@ -7 +6,0 @@"},
+			after: stringtest.LinesLF(
+				"a: 1",
+				"b: 2",
+			),
+			want: []string{"@@ -7 +6,0 @@"},
 		},
 		"two separate hunks": {
 			before: stringtest.LinesLF(
@@ -1014,7 +998,7 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 			want:    []string{"@@ -5,3 +5,3 @@"},
 		},
 		"earlier document grew": {
-			afterHead: head + "v: 4\nu: 5\n",
+			afterHead: head + stringtest.LinesLF("v: 4", "u: 5"),
 			after:     changed,
 			want:      []string{"@@ -6 +8 @@"},
 		},
@@ -1027,11 +1011,8 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 			before := niceyaml.NewSourceFromString(head + "---\n" + cmp.Or(tc.before, body))
 			after := niceyaml.NewSourceFromString(cmp.Or(tc.afterHead, head) + "---\n" + tc.after)
 
-			beforeDocs := before.Documents()
-			require.Len(t, beforeDocs, 2)
-
-			afterDocs := after.Documents()
-			require.Len(t, afterDocs, 2)
+			beforeDocs := yamltest.Documents(t, before, 2)
+			afterDocs := yamltest.Documents(t, after, 2)
 
 			got := diff.Diff(beforeDocs[1].View(), afterDocs[1].View()).Hunks(tc.context)
 			assert.Equal(t, tc.want, hunkHeaders(got))
@@ -1049,23 +1030,42 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 func TestDiffer_HunksOfHeldLines(t *testing.T) {
 	t.Parallel()
 
-	// The before side holds lines 4-6 of a six-line file.
-	before := niceyaml.NewSourceFromString(stringtest.LinesLF(
+	// One before side holds lines 4-6 of a six-line file.
+	sixLines := stringtest.LinesLF(
 		"x: 1",
 		"y: 2",
 		"z: 3",
 		"a: 1",
 		"b: 2",
 		"c: 3",
-	))
-	beforeView := before.View().Slice(position.NewSpan(3, 6))
+	)
+	lastThree := []position.Span{position.NewSpan(3, 6)}
+	// The other holds lines 1-2 and 6-7 of a seven-line file.
+	sevenLines := stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+		"d: 4",
+		"e: 5",
+		"f: 6",
+		"g: 7",
+	)
+	gapped := []position.Span{position.NewSpan(0, 2), position.NewSpan(5, 7)}
 
 	tcs := map[string]struct {
-		after     string
-		afterSpan position.Span
-		want      []string
+		before      string
+		beforeSpans []position.Span
+		after       string
+		afterSpans  []position.Span
+		context     int
+		want        []string
+		// Each change falls within the spans, so a diff of the whole file
+		// names the same lines.
+		whole bool
 	}{
 		"insert before the first held line": {
+			before:      sixLines,
+			beforeSpans: lastThree,
 			after: stringtest.LinesLF(
 				"x: 1",
 				"y: 2",
@@ -1075,10 +1075,13 @@ func TestDiffer_HunksOfHeldLines(t *testing.T) {
 				"b: 2",
 				"c: 3",
 			),
-			afterSpan: position.NewSpan(3, 7),
-			want:      []string{"@@ -3,0 +4 @@"},
+			afterSpans: []position.Span{position.NewSpan(3, 7)},
+			want:       []string{"@@ -3,0 +4 @@"},
+			whole:      true,
 		},
 		"delete the first held line": {
+			before:      sixLines,
+			beforeSpans: lastThree,
 			after: stringtest.LinesLF(
 				"x: 1",
 				"y: 2",
@@ -1086,55 +1089,13 @@ func TestDiffer_HunksOfHeldLines(t *testing.T) {
 				"b: 2",
 				"c: 3",
 			),
-			afterSpan: position.NewSpan(3, 5),
-			want:      []string{"@@ -4 +3,0 @@"},
+			afterSpans: []position.Span{position.NewSpan(3, 5)},
+			want:       []string{"@@ -4 +3,0 @@"},
+			whole:      true,
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			after := niceyaml.NewSourceFromString(tc.after)
-			afterView := after.View().Slice(tc.afterSpan)
-
-			got := diff.Diff(beforeView, afterView).Hunks(0)
-			assert.Equal(t, tc.want, hunkHeaders(got))
-
-			// The lines a view holds diff as the view does.
-			held := diff.Diff(beforeView.Held(), afterView.Held()).Hunks(0)
-			assert.Equal(t, tc.want, hunkHeaders(held))
-
-			// Each change falls within the spans, so a diff of the whole
-			// file names the same lines.
-			whole := diff.Diff(before.Lines(), after.Lines()).Hunks(0)
-			assert.Equal(t, tc.want, hunkHeaders(whole))
-		})
-	}
-}
-
-func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
-	t.Parallel()
-
-	// The before side holds lines 1-2 and 6-7 of a seven-line file.
-	before := stringtest.LinesLF(
-		"a: 1",
-		"b: 2",
-		"c: 3",
-		"d: 4",
-		"e: 5",
-		"f: 6",
-		"g: 7",
-	)
-	beforeSpans := []position.Span{position.NewSpan(0, 2), position.NewSpan(5, 7)}
-
-	tcs := map[string]struct {
-		after      string
-		afterSpans []position.Span
-		context    int
-		want       []string
-	}{
 		"context stops at the gap": {
+			before:      sevenLines,
+			beforeSpans: gapped,
 			after: stringtest.LinesLF(
 				"a: 1",
 				"b: 9",
@@ -1144,11 +1105,13 @@ func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
 				"f: 6",
 				"g: 8",
 			),
-			afterSpans: beforeSpans,
+			afterSpans: gapped,
 			context:    1,
 			want:       []string{"@@ -1,2 +1,2 @@", "@@ -6,2 +6,2 @@"},
 		},
 		"no context past the gap": {
+			before:      sevenLines,
+			beforeSpans: gapped,
 			after: stringtest.LinesLF(
 				"a: 1",
 				"b: 9",
@@ -1158,13 +1121,15 @@ func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
 				"f: 6",
 				"g: 7",
 			),
-			afterSpans: beforeSpans,
+			afterSpans: gapped,
 			context:    1,
 			want:       []string{"@@ -1,2 +1,2 @@"},
 		},
 		"changes on both sides of the gap": {
 			// The run of changes deletes lines 2 and 6 before it
 			// inserts them, so it splits wherever a side skips lines.
+			before:      sevenLines,
+			beforeSpans: gapped,
 			after: stringtest.LinesLF(
 				"a: 1",
 				"b: 9",
@@ -1174,13 +1139,14 @@ func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
 				"f: 9",
 				"g: 7",
 			),
-			afterSpans: beforeSpans,
-			context:    0,
+			afterSpans: gapped,
 			want:       []string{"@@ -2 +1,0 @@", "@@ -6 +2 @@", "@@ -6,0 +6 @@"},
 		},
 		"insert after the gap": {
 			// Line 6 of the after side starts its part, so the insert
 			// comes before line 6 of the before side, not after line 2.
+			before:      sevenLines,
+			beforeSpans: gapped,
 			after: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
@@ -1192,12 +1158,14 @@ func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
 				"g: 7",
 			),
 			afterSpans: []position.Span{position.NewSpan(0, 2), position.NewSpan(5, 8)},
-			context:    0,
 			want:       []string{"@@ -5,0 +6 @@"},
+			whole:      true,
 		},
 		"delete after the gap": {
 			// Line 6 of the before side starts its part, so the delete
 			// comes before line 6 of the after side, not after line 2.
+			before:      sevenLines,
+			beforeSpans: gapped,
 			after: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
@@ -1207,8 +1175,8 @@ func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
 				"g: 7",
 			),
 			afterSpans: []position.Span{position.NewSpan(0, 2), position.NewSpan(5, 6)},
-			context:    0,
 			want:       []string{"@@ -6 +5,0 @@"},
+			whole:      true,
 		},
 	}
 
@@ -1216,11 +1184,22 @@ func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			beforeView := niceyaml.NewSourceFromString(before).View().Slice(beforeSpans...)
-			afterView := niceyaml.NewSourceFromString(tc.after).View().Slice(tc.afterSpans...)
+			before := niceyaml.NewSourceFromString(tc.before)
+			after := niceyaml.NewSourceFromString(tc.after)
+			beforeView := before.View().Slice(tc.beforeSpans...)
+			afterView := after.View().Slice(tc.afterSpans...)
 
 			got := diff.Diff(beforeView, afterView).Hunks(tc.context)
 			assert.Equal(t, tc.want, hunkHeaders(got))
+
+			// The lines a view holds diff as the view does.
+			held := diff.Diff(beforeView.Held(), afterView.Held()).Hunks(tc.context)
+			assert.Equal(t, tc.want, hunkHeaders(held))
+
+			if tc.whole {
+				whole := diff.Diff(before.Lines(), after.Lines()).Hunks(tc.context)
+				assert.Equal(t, tc.want, hunkHeaders(whole))
+			}
 		})
 	}
 }
@@ -1233,8 +1212,9 @@ func TestDiffer_HunksFallBackToPositions(t *testing.T) {
 	tcs := map[string]struct {
 		before line.Lines
 		after  line.Lines
-		ops    []lcs.Op
-		want   []string
+		// Holds the algorithm of the diff, when it is not the default.
+		algo lcs.Algorithm
+		want []string
 	}{
 		"line with no number": {
 			before: line.Collect(&line.Line{}),
@@ -1244,7 +1224,7 @@ func TestDiffer_HunksFallBackToPositions(t *testing.T) {
 		"algorithm that repeats a line": {
 			before: src,
 			after:  src,
-			ops: []lcs.Op{
+			algo: opsAlgorithm{
 				{Kind: lcs.OpEqual, Before: 0, After: 0},
 				{Kind: lcs.OpEqual, Before: 0, After: 0},
 				{Kind: lcs.OpDelete, Before: 0, After: -1},
@@ -1257,12 +1237,7 @@ func TestDiffer_HunksFallBackToPositions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			d := diff.New()
-			if tc.ops != nil {
-				d = diff.New(diff.WithAlgorithm(opsAlgorithm(tc.ops)))
-			}
-
-			got := d.Diff(tc.before, tc.after).Hunks(0)
+			got := diff.New(diff.WithAlgorithm(tc.algo)).Diff(tc.before, tc.after).Hunks(0)
 			assert.Equal(t, tc.want, hunkHeaders(got))
 		})
 	}
@@ -1278,65 +1253,35 @@ func (a opsAlgorithm) Diff(_, _ []string) []lcs.Op {
 func TestDiffer_WithAlgorithm(t *testing.T) {
 	t.Parallel()
 
-	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n").Lines()
-	after := niceyaml.NewSourceFromString("a: 1\nc: 3\n").Lines()
+	before, after := "a: 1\nb: 2\n", "a: 1\nc: 3\n"
+
+	// The fixed ops and the default algorithm pair the lines alike.
+	want := stringtest.JoinLF(
+		"   1 | a: 1",
+		"   2 | b: 2",
+		"   2 | c: 3",
+	)
+	wantFlags := map[int]line.Flag{1: line.FlagDeleted, 2: line.FlagInserted}
 
 	tcs := map[string]struct {
-		ops       []lcs.Op
-		wantFlags []line.Flag
+		algo      lcs.Algorithm
 		wantPanic string
 	}{
 		"known kinds render in order": {
-			ops: []lcs.Op{
+			algo: opsAlgorithm{
 				{Kind: lcs.OpEqual, Before: 0, After: 0},
 				{Kind: lcs.OpDelete, Before: 1, After: -1},
 				{Kind: lcs.OpInsert, Before: -1, After: 1},
 			},
-			wantFlags: []line.Flag{line.FlagDefault, line.FlagDeleted, line.FlagInserted},
 		},
 		"unknown kind panics instead of dropping the line": {
-			ops: []lcs.Op{
+			algo: opsAlgorithm{
 				{Kind: lcs.OpEqual, Before: 0, After: 0},
 				{Kind: lcs.OpKind(3), Before: -1, After: 1},
 			},
 			wantPanic: "diff: op 1 has unknown lcs.OpKind 3",
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			d := diff.New(diff.WithAlgorithm(opsAlgorithm(tc.ops)))
-
-			if tc.wantPanic != "" {
-				assert.PanicsWithValue(t, tc.wantPanic, func() {
-					d.Diff(before, after)
-				})
-
-				return
-			}
-
-			got := d.Diff(before, after).Unified()
-			require.Equal(t, len(tc.wantFlags), got.Count())
-
-			for i, want := range tc.wantFlags {
-				assert.Equal(t, want, got.Flag(i), "flag mismatch at line %d", i)
-			}
-		})
-	}
-}
-
-func TestDiffer_WithNilAlgorithm(t *testing.T) {
-	t.Parallel()
-
-	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n").Lines()
-	after := niceyaml.NewSourceFromString("a: 1\nc: 3\n").Lines()
-	want := diff.New().Diff(before, after).Unified()
-
-	tcs := map[string]struct {
-		algo lcs.Algorithm
-	}{
+		// A nil algorithm falls back to the default.
 		"untyped nil":         {algo: nil},
 		"nil *lcs.Hirschberg": {algo: (*lcs.Hirschberg)(nil)},
 	}
@@ -1345,17 +1290,19 @@ func TestDiffer_WithNilAlgorithm(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			d := diff.New(diff.WithAlgorithm(tc.algo))
+			opt := diff.WithAlgorithm(tc.algo)
 
-			var got *line.View
+			if tc.wantPanic != "" {
+				assert.PanicsWithValue(t, tc.wantPanic, func() {
+					yamltest.Diff(before, after, opt)
+				})
 
-			require.NotPanics(t, func() {
-				got = d.Diff(before, after).Unified()
-			})
+				return
+			}
 
-			assert.Equal(t, want.String(), got.String())
-			assert.Equal(t, want.Count(), got.Count())
-			assert.Equal(t, changedFlags(want), changedFlags(got))
+			got := yamltest.Diff(before, after, opt).Unified()
+			assert.Equal(t, want, got.String())
+			assert.Equal(t, wantFlags, changedFlags(got))
 		})
 	}
 }
@@ -1418,9 +1365,8 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 	tcs := map[string]struct {
 		before string
 		after  string
-		// Holds the ops of the diff, in place of those the default
-		// algorithm finds.
-		ops        []lcs.Op
+		// Holds the algorithm of the diff, when it is not the default.
+		algo       lcs.Algorithm
 		wantBefore []wantLine
 		wantAfter  []wantLine
 	}{
@@ -1611,7 +1557,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 		"delete then insert": {
 			before: oneChange.before,
 			after:  oneChange.after,
-			ops: []lcs.Op{
+			algo: opsAlgorithm{
 				{Kind: lcs.OpEqual, Before: 0, After: 0},
 				{Kind: lcs.OpDelete, Before: 1, After: -1},
 				{Kind: lcs.OpInsert, Before: -1, After: 1},
@@ -1628,7 +1574,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 		"insert then delete": {
 			before: oneChange.before,
 			after:  oneChange.after,
-			ops: []lcs.Op{
+			algo: opsAlgorithm{
 				{Kind: lcs.OpEqual, Before: 0, After: 0},
 				{Kind: lcs.OpInsert, Before: -1, After: 1},
 				{Kind: lcs.OpDelete, Before: 1, After: -1},
@@ -1645,7 +1591,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 		"interleaved deletes and inserts": {
 			before: twoChanges.before,
 			after:  twoChanges.after,
-			ops: []lcs.Op{
+			algo: opsAlgorithm{
 				{Kind: lcs.OpEqual, Before: 0, After: 0},
 				{Kind: lcs.OpDelete, Before: 1, After: -1},
 				{Kind: lcs.OpInsert, Before: -1, After: 1},
@@ -1666,7 +1612,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 		"inserts ahead of deletes": {
 			before: twoChanges.before,
 			after:  twoChanges.after,
-			ops: []lcs.Op{
+			algo: opsAlgorithm{
 				{Kind: lcs.OpEqual, Before: 0, After: 0},
 				{Kind: lcs.OpInsert, Before: -1, After: 1},
 				{Kind: lcs.OpInsert, Before: -1, After: 2},
@@ -1687,7 +1633,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 		"more inserts than deletes": {
 			before: oneChange.before,
 			after:  twoChanges.after,
-			ops: []lcs.Op{
+			algo: opsAlgorithm{
 				{Kind: lcs.OpEqual, Before: 0, After: 0},
 				{Kind: lcs.OpInsert, Before: -1, After: 1},
 				{Kind: lcs.OpDelete, Before: 1, After: -1},
@@ -1710,15 +1656,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			d := diff.New()
-			if tc.ops != nil {
-				d = diff.New(diff.WithAlgorithm(opsAlgorithm(tc.ops)))
-			}
-
-			result := d.Diff(
-				niceyaml.NewSourceFromString(tc.before).Lines(),
-				niceyaml.NewSourceFromString(tc.after).Lines(),
-			)
+			result := yamltest.Diff(tc.before, tc.after, diff.WithAlgorithm(tc.algo))
 
 			beforeView := result.Before()
 			afterView := result.After()
@@ -1818,47 +1756,6 @@ func TestDiffResult_PlaceholdersAreDistinct(t *testing.T) {
 	}
 }
 
-func TestDiffer_MultipleRenders(t *testing.T) {
-	t.Parallel()
-
-	before := stringtest.Input(`
-		line1: 1
-		line2: 2
-		line3: old
-		line4: 4
-		line5: 5
-	`)
-	after := stringtest.Input(`
-		line1: 1
-		line2: 2
-		line3: new
-		line4: 4
-		line5: 5
-	`)
-
-	result := diffStrings(before, after)
-
-	// Call Unified multiple times.
-	full1 := result.Unified()
-	full2 := result.Unified()
-
-	assert.Equal(t, full1.String(), full2.String())
-
-	// Call Hunks with different contexts.
-	summary0 := result.Hunks(0)
-	summary1 := result.Hunks(1)
-	summary2 := result.Hunks(2)
-
-	// All should have 1 hunk.
-	assert.Len(t, hunkHeaders(summary0), 1)
-	assert.Len(t, hunkHeaders(summary1), 1)
-	assert.Len(t, hunkHeaders(summary2), 1)
-
-	// Different contexts should produce different hunk sizes.
-	assert.Less(t, summary0.Count(), summary1.Count())
-	assert.Less(t, summary1.Count(), summary2.Count())
-}
-
 func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 	t.Parallel()
 
@@ -1872,10 +1769,13 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 		t.Parallel()
 
 		first := result.Unified()
+		text := first.String()
 		first.AddOverlay(kind.GenericHighlight, highlight)
+		assert.Len(t, first.Overlays(0), 1)
 
 		second := result.Unified()
 		assert.Empty(t, second.Overlays(0))
+		assert.Equal(t, text, second.String())
 	})
 
 	t.Run("Before and After", func(t *testing.T) {
@@ -1911,14 +1811,6 @@ func changedFlags(view *line.View) map[int]line.Flag {
 	}
 
 	return flags
-}
-
-// diffStrings diffs the lines of two YAML inputs.
-func diffStrings(before, after string) *diff.Result {
-	return diff.Diff(
-		niceyaml.NewSourceFromString(before).Lines(),
-		niceyaml.NewSourceFromString(after).Lines(),
-	)
 }
 
 // hunkHeaders returns the hunk headers of a view from [diff.Result.Hunks]

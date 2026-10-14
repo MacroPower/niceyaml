@@ -1,9 +1,7 @@
 package line_test
 
 import (
-	"iter"
 	"math"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -22,15 +20,13 @@ import (
 
 // TestNewLines_Roundtrip verifies that NewLines leaves the tokens it cuts
 // into parts as the lexer produced them, that Lines.Tokens returns those same
-// tokens, and that the lines hold the content of the input.
+// tokens, and that the lines hold the content of the input. It also checks
+// how NewLines links and places the parts of each line.
 func TestNewLines_Roundtrip(t *testing.T) {
 	t.Parallel()
 
-	full, err := os.ReadFile(filepath.Join("..", "testdata", "full.yaml"))
-	require.NoError(t, err)
-
 	tcs := map[string]string{
-		"testdata/full.yaml": string(full),
+		"testdata/full.yaml": yamltest.ReadFile(t, filepath.Join("..", "testdata", "full.yaml")),
 
 		// Simple cases.
 		"simple key-value": "key: value\n",
@@ -50,8 +46,8 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		),
 		"inline map":     "config: {key: value}\n",
 		"inline list":    "items: [a, b, c]\n",
-		"boolean values": "enabled: true\ndisabled: false\n",
-		"numeric values": "integer: 42\nfloat: 3.14\n",
+		"boolean values": stringtest.LinesLF("enabled: true", "disabled: false"),
+		"numeric values": stringtest.LinesLF("integer: 42", "float: 3.14"),
 		"double quoted":  "message: \"hello world\"\n",
 		"single quoted":  "message: 'hello world'\n",
 		"comment only":   "# This is a comment\n",
@@ -112,8 +108,8 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		),
 
 		// Document markers.
-		"document start": "---\nkey: value\n",
-		"document end":   "key: value\n...\n",
+		"document start": stringtest.LinesLF("---", "key: value"),
+		"document end":   stringtest.LinesLF("key: value", "..."),
 		"multi-document": stringtest.LinesLF(
 			"---",
 			"doc: 1",
@@ -198,11 +194,11 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		),
 
 		// Quoted strings with escapes.
-		"double quote escapes": "text: \"line1\\nline2\\ttab\"\n",
-		"single quote literal": "text: 'no \\n escape'\n",
+		"double quote escapes": stringtest.LinesLF(`text: "line1\nline2\ttab"`),
+		"single quote literal": stringtest.LinesLF(`text: 'no \n escape'`),
 		"quote in single":      "text: 'it''s quoted'\n",
-		"quote in double":      "text: \"say \\\"hello\\\"\"\n",
-		"unicode escape":       "text: \"\\u65E5\\u672C\"\n",
+		"quote in double":      stringtest.LinesLF(`text: "say \"hello\""`),
+		"unicode escape":       stringtest.LinesLF(`text: "\u65E5\u672C"`),
 
 		// Unicode content.
 		"unicode value":   "name: 日本語\n",
@@ -247,7 +243,7 @@ func TestNewLines_Roundtrip(t *testing.T) {
 			`"東京":`,
 			"  flagship: true",
 		),
-		"explicit key indicator": "? complex key\n: value\n",
+		"explicit key indicator": stringtest.LinesLF("? complex key", ": value"),
 
 		// Advanced numeric formats.
 		"underscore separator": "value: 1_000_000\n",
@@ -331,8 +327,8 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		"pipe in value":      "options: \"A | B\"\n",
 		"greater in value":   "compare: \"A > B\"\n",
 		"question in value":  "ask: \"Why? Because!\"\n",
-		"empty document":     "---\n...\n",
-		"CRLF line endings":  "key: value\r\nother: data\r\n",
+		"empty document":     stringtest.LinesLF("---", "..."),
+		"CRLF line endings":  stringtest.LinesCRLF("key: value", "other: data"),
 		"block scalar with CRLF": stringtest.LinesCRLF(
 			"key: |",
 			"  line1",
@@ -347,7 +343,7 @@ func TestNewLines_Roundtrip(t *testing.T) {
 			"b: 2",
 			"c: 3",
 		),
-		"inline comment CRLF": "key: value # comment\r\nnext: data\r\n",
+		"inline comment CRLF": stringtest.LinesCRLF("key: value # comment", "next: data"),
 		"folded block CRLF": stringtest.LinesCRLF(
 			"key: >",
 			"  line1",
@@ -359,7 +355,7 @@ func TestNewLines_Roundtrip(t *testing.T) {
 			"",
 		),
 		"mixed LF and CRLF":  "key: value\nother: data\r\n",
-		"quoted string CRLF": "key: \"line1\r\nline2\"\r\n",
+		"quoted string CRLF": stringtest.LinesCRLF(`key: "line1`, `line2"`),
 		"plain multiline CRLF": stringtest.LinesCRLF(
 			"key: text",
 			"  continued",
@@ -369,10 +365,10 @@ func TestNewLines_Roundtrip(t *testing.T) {
 			"  - one",
 			"  - two",
 		),
-		"flow map CRLF":        "config: {a: 1, b: 2}\r\nnext: value\r\n",
-		"document marker CRLF": "---\r\nkey: value\r\n",
-		"comment only CRLF":    "# comment\r\nkey: value\r\n",
-		"anchor alias CRLF":    "base: &ref value\r\nuse: *ref\r\n",
+		"flow map CRLF":        stringtest.LinesCRLF("config: {a: 1, b: 2}", "next: value"),
+		"document marker CRLF": stringtest.LinesCRLF("---", "key: value"),
+		"comment only CRLF":    stringtest.LinesCRLF("# comment", "key: value"),
+		"anchor alias CRLF":    stringtest.LinesCRLF("base: &ref value", "use: *ref"),
 		"literal indent CRLF": stringtest.LinesCRLF(
 			"code: |2",
 			"    indented",
@@ -401,39 +397,90 @@ func TestNewLines_Roundtrip(t *testing.T) {
 			"  a multiline",
 			"  plain string",
 		),
-		"double quoted multiline": "key: \"line1\nline2\"\n",
-		"single quoted multiline": "key: 'line1\nline2'\n",
-		"multiple keys CR":        "a: 1\rb: 2\r",
-		"block scalar with CR":    "key: |\r  line1\r  line2\r",
-		"blank line between CR":   "a: 1\r\rb: 2\r",
-		"mixed CR and CRLF":       "a: 1\rb: 2\r\nc: 3\n",
+		"double quoted multiline": stringtest.LinesLF(`key: "line1`, `line2"`),
+		"single quoted multiline": stringtest.LinesLF("key: 'line1", "line2'"),
+		"indented double quoted multiline": stringtest.LinesLF(
+			`key: "line1`,
+			`  line2"`,
+		),
+		"leading indent then continuation": stringtest.JoinLF(
+			"  b",
+			"s:",
+		),
+		"comments between and after keys": stringtest.Input(`
+			# Header comment
+			key1: value1  # inline comment
+			# Middle comment
+			key2: value2
+			# Footer comment
+		`),
+		"multiple keys CR":      "a: 1\rb: 2\r",
+		"block scalar with CR":  "key: |\r  line1\r  line2\r",
+		"blank line between CR": "a: 1\r\rb: 2\r",
+		"mixed CR and CRLF":     "a: 1\rb: 2\r\nc: 3\n",
+
+		// The chain of the parts never crosses a line, including after a
+		// gap the builder flushes.
+		"gap after multi-part token": stringtest.JoinLF(
+			"''",
+			"",
+			":",
+		),
+		"quoted scalar before a key": stringtest.LinesLF(
+			"s: 'q",
+			"r'",
+			"\r",
+			": v",
+			"   ",
+			"j: 1",
+		),
+		"sequence end before a key": stringtest.JoinLF(
+			"]",
+			"",
+			":",
+		),
 	}
 
 	for name, input := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			// The lines hold the tokens passed to NewLines, so the lexer's
-			// tokens come from a second tokenization.
-			want := tokens.Tokenize(input)
-			tks := tokens.Tokenize(input)
-			lines := line.NewLines(tks)
-
-			// NewLines leaves the tokens it cuts into parts as the lexer
-			// produced them, and Lines.Tokens returns those same tokens.
-			yamltest.RequireTokensEqual(t, want, tks)
-
-			got := lines.Tokens()
-			require.Len(t, got, len(tks))
-
-			for i := range tks {
-				assert.Same(t, tks[i], got[i], "token %d", i)
-			}
+			lines := requireRoundtrip(t, input)
 
 			contentDiff := yamltest.CompareContent(input, lines.Content())
 			require.True(t, contentDiff.Equal(), contentDiff.String())
+
+			var prevOffset int
+
+			for _, ln := range lines.All() {
+				// The parts on each line link to their neighbors in column
+				// order, and the chain stops at both ends of the line.
+				parts := ln.Tokens()
+				require.NotEmpty(t, parts, "line %d", ln.Number())
+				require.NoError(t, yamltest.ValidateTokenLinks(parts), "line %d", ln.Number())
+
+				// The offsets of the parts strictly increase across the
+				// lines.
+				for _, part := range parts {
+					assert.Greater(t, part.Position.Offset, prevOffset,
+						"Offset not increasing at line %d", ln.Number())
+
+					prevOffset = part.Position.Offset
+				}
+			}
 		})
 	}
+}
+
+// lineCount returns the number of lines of input: one for each line break,
+// and one more when text follows the last.
+func lineCount(input string) int {
+	n := strings.Count(input, "\n")
+	if !strings.HasSuffix(input, "\n") {
+		n++
+	}
+
+	return n
 }
 
 // newLines creates [line.Lines] from the tokens of input.
@@ -441,18 +488,26 @@ func newLines(input string) line.Lines {
 	return line.NewLines(tokens.Tokenize(input))
 }
 
-// requireRoundtrip creates [line.Lines] from the tokens of input and
-// requires [line.Lines.Tokens] to return tokens equal to those of a second
-// tokenization of input. The lines hold the tokens passed to
-// [line.NewLines], so comparing with those would compare each token with
-// itself.
+// requireRoundtrip creates [line.Lines] from the tokens of input. It
+// requires [line.NewLines] to leave the tokens it cuts into parts as the
+// lexer produced them, and [line.Lines.Tokens] to return those same tokens.
+// The lines hold the tokens passed to NewLines, so the lexer's tokens come
+// from a second tokenization.
 func requireRoundtrip(t *testing.T, input string) line.Lines {
 	t.Helper()
 
 	want := tokens.Tokenize(input)
-	lines := newLines(input)
+	tks := tokens.Tokenize(input)
+	lines := line.NewLines(tks)
 
-	yamltest.RequireTokensEqual(t, want, lines.Tokens())
+	yamltest.RequireTokensEqual(t, want, tks)
+
+	got := lines.Tokens()
+	require.Len(t, got, len(tks))
+
+	for i := range tks {
+		assert.Same(t, tks[i], got[i], "token %d", i)
+	}
 
 	return lines
 }
@@ -526,6 +581,40 @@ func TestNewLines_PerLine(t *testing.T) {
 				`   1 | special: "line1\nline2"`,
 			},
 		},
+		"single key-value without a final newline": {
+			input: "key: value",
+			want: []string{
+				"   1 | key: value",
+			},
+		},
+		// The lexer drops the line ending ahead of some tokens, such as a
+		// "?" after a document header or a value indicator after a
+		// directive. Tokenize restores it, so the token opens a new line
+		// rather than joining the one before it.
+		"explicit key after header": {
+			input: stringtest.LinesLF(
+				"x: 1",
+				"---",
+				"? a",
+				": b",
+			),
+			want: []string{
+				"   1 | x: 1",
+				"   2 | ---",
+				"   3 | ? a",
+				"   4 | : b",
+			},
+		},
+		"value indicator after directive": {
+			input: stringtest.LinesLF(
+				"%YAML 1.2",
+				": value",
+			),
+			want: []string{
+				"   1 | %YAML 1.2",
+				"   2 | : value",
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -548,22 +637,24 @@ func TestNewLines_PerLine(t *testing.T) {
 
 // TestNewLines_LineNumbers verifies that each line takes its number from the
 // Position.Line of the tokens on it, wherever the stream starts and whichever
-// lines it skips.
+// lines it skips. An input yields one line for each of its own lines, the
+// blank ones too, numbered from 1.
 func TestNewLines_LineNumbers(t *testing.T) {
 	t.Parallel()
 
 	strTkb := yamltest.NewTokenBuilder().Type(token.StringType).PositionColumn(1)
 
 	tcs := map[string]struct {
-		tks  token.Tokens
-		want []int
+		input string       // Tokenized when tks is nil.
+		tks   token.Tokens // Tokens with numbers of their own.
+		want  []int        // Nil for 1 through the line count of input.
 	}{
 		"tokens starting at line 1": {
-			tks: tokens.Tokenize(stringtest.Input(`
+			input: stringtest.Input(`
 				key1: value1
 				key2: value2
 				key3: value3
-			`)),
+			`),
 			want: []int{1, 2, 3},
 		},
 		"tokens starting at line 10": {
@@ -618,8 +709,8 @@ func TestNewLines_LineNumbers(t *testing.T) {
 		},
 		"gap between two sections": {
 			tks: joinTokens(
-				tokenizeAt("key1: value1\nkey2: value2\n", 10),
-				tokenizeAt("key3: value3\nkey4: value4\n", 40),
+				tokenizeAt(stringtest.LinesLF("key1: value1", "key2: value2"), 10),
+				tokenizeAt(stringtest.LinesLF("key3: value3", "key4: value4"), 40),
 			),
 			want: []int{10, 11, 40, 41},
 		},
@@ -657,23 +748,205 @@ func TestNewLines_LineNumbers(t *testing.T) {
 			tks:  token.Tokens{{Type: token.StringType, Origin: "test\n", Value: "test"}},
 			want: []int{1},
 		},
+
+		"blank line between keys": {
+			input: stringtest.LinesLF(
+				"key: value",
+				"",
+				"next: data",
+			),
+		},
+
+		// The lexer folds the lines before a merge key into its token and
+		// positions the token on the line of the key, so the lines start
+		// that many lines earlier. Other first tokens open on an earlier
+		// line the same way.
+		"plain lines before a merge key": {
+			input: stringtest.LinesLF(
+				"x",
+				"x",
+				"<<: *an",
+			),
+		},
+		"indented text before a merge key": {input: stringtest.LinesLF("  text", "<<: *an")},
+		"alias and blank line before a merge key": {
+			input: stringtest.LinesLF(
+				"x",
+				"*a",
+				"",
+				"<<: *an",
+			),
+		},
+		"blank lines before the first key": {
+			input: stringtest.LinesLF(
+				"",
+				"",
+				"foo: 1",
+			),
+		},
+		"quoted scalar of two lines": {input: stringtest.LinesLF(`"a`, ` b"`)},
+		"bare literal block": {
+			input: stringtest.LinesLF(
+				"|",
+				"  a",
+				"  b",
+			),
+		},
+		"comment before the first key": {input: stringtest.LinesLF("# c", "k: v")},
+
+		// The lexer emits the blank line after a bare block scalar header
+		// as a token that is a line ending alone, positioned on its own
+		// line. It ends the header's line rather than syncing past it, so
+		// the blank line keeps its row.
+		"blank line after a bare folded header": {
+			input: stringtest.LinesLF(
+				">",
+				"",
+				"a: 1",
+			),
+		},
+		"blank line after a bare literal header": {
+			input: stringtest.LinesLF(
+				"|",
+				"",
+				"r",
+			),
+		},
+		"blank lines after bare folded headers": {
+			input: stringtest.LinesLF(
+				"",
+				">",
+				"",
+				">",
+				"# c",
+			),
+		},
+
+		// The lexer reports a block scalar content token at the line of
+		// its last content line, so the builder must not treat that line
+		// as a gap to sync forward to.
+		"blank content then key": {
+			input: stringtest.LinesLF(
+				"b: |",
+				"  ",
+				"last: 1",
+				"# c",
+			),
+		},
+		"blank content then marker": {
+			input: stringtest.LinesLF(
+				"b: |",
+				"  ",
+				"---",
+			),
+		},
+		"content then marker": {
+			input: stringtest.LinesLF(
+				"b: |",
+				"   y",
+				"---",
+				"---",
+				"last: 1",
+			),
+		},
+		"blank content then tagged": {
+			input: stringtest.LinesLF(
+				"b: |",
+				"",
+				"!!str s: 1",
+			),
+		},
+
+		// A file that ends in blank lines yields one line for each text
+		// line, the blank ones too.
+		"no trailing newline":     {input: "a: 1"},
+		"trailing newline":        {input: "a: 1\n"},
+		"one trailing blank line": {input: "a: 1\n\n"},
+		"two trailing blank lines": {
+			input: stringtest.LinesLF(
+				"a: 1",
+				"",
+				"",
+			),
+		},
+		"crlf trailing blank line": {input: stringtest.LinesCRLF("a: 1", "")},
+		"comment then blank line": {
+			input: stringtest.LinesLF(
+				"a: 1",
+				"# c",
+				"",
+			),
+		},
+
+		// The lexer starts the token after a comment with the line
+		// ending, which NewLines must handle without putting the columns
+		// of a line out of order.
+		"inline comment followed by next line": {
+			input: stringtest.Input(`
+				items:
+				  - key: value # inline comment
+				    next: data
+			`),
+		},
+		"sequence entry with merge key and comment": {
+			input: stringtest.Input(`
+				items:
+				  - <<: *anchor # comment
+				    key: value
+			`),
+		},
+		"nested map with trailing comment": {
+			input: stringtest.Input(`
+				parent:
+				  child: value # note
+				  sibling: other
+			`),
+		},
+		"multiple inline comments": {
+			input: stringtest.Input(`
+				a: 1 # first
+				b: 2 # second
+				c: 3 # third
+			`),
+		},
+		"comment block after content": {
+			input: stringtest.Input(`
+				key: value
+
+				# Comment block
+				# More comments
+				next: data
+			`),
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := line.NewLines(tc.tks)
+			tks := tc.tks
+			if tks == nil {
+				tks = tokens.Tokenize(tc.input)
+			}
+
+			want := tc.want
+			if want == nil {
+				for i := range lineCount(tc.input) {
+					want = append(want, i+1)
+				}
+			}
+
+			lines := line.NewLines(tks)
 
 			// Every part carries the number of its line.
 			require.NoError(t, yamltest.ValidateLines(lines))
 
-			assert.Equal(t, tc.want, lineNumbers(lines))
+			assert.Equal(t, want, yamltest.LineNumbers(lines))
 
 			// The tokens come back whole, and Prev and Next still link
 			// them across the gaps.
 			gotTokens := lines.Tokens()
-			assert.Equal(t, yamltest.DumpTokenOrigins(tc.tks), yamltest.DumpTokenOrigins(gotTokens))
+			assert.Equal(t, yamltest.DumpTokenOrigins(tks), yamltest.DumpTokenOrigins(gotTokens))
 			require.NoError(t, yamltest.ValidateTokenLinks(gotTokens))
 		})
 	}
@@ -699,175 +972,6 @@ func joinTokens(streams ...token.Tokens) token.Tokens {
 	}
 
 	return joined
-}
-
-func TestNewLines_Value_PrevNextLinking(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-	}{
-		"single key-value": {
-			input: "foo: bar\n",
-		},
-		"multi line": {
-			input: "foo: bar\nbaz: qux\n",
-		},
-		"nested map": {
-			input: stringtest.Input(`
-				parent:
-				  child: value
-				  sibling: another
-			`),
-		},
-		"literal block": {
-			input: stringtest.Input(`
-				key: |
-				  line1
-				  line2
-			`),
-		},
-		"list": {
-			input: stringtest.Input(`
-				items:
-				  - one
-				  - two
-			`),
-		},
-		"deeply nested": {
-			input: stringtest.Input(`
-				level1:
-				  level2:
-				    level3:
-				      level4:
-				        value: deep
-			`),
-		},
-		"anchor and alias": {
-			input: stringtest.Input(`
-				defaults: &defaults
-				  timeout: 30
-				  retries: 3
-				production:
-				  <<: *defaults
-				  timeout: 60
-			`),
-		},
-		"inline flow style": {
-			input: stringtest.Input(`
-				map: {a: 1, b: 2, c: 3}
-				list: [x, y, z]
-			`),
-		},
-		"mixed comments": {
-			input: stringtest.Input(`
-				# Header comment
-				key1: value1  # inline comment
-				# Middle comment
-				key2: value2
-				# Footer comment
-			`),
-		},
-		"folded block": {
-			input: stringtest.Input(`
-				description: >
-				  This is a long
-				  description that
-				  spans multiple lines.
-			`),
-		},
-		"list of maps": {
-			input: stringtest.Input(`
-				items:
-				  - name: first
-				    value: 1
-				    enabled: true
-				  - name: second
-				    value: 2
-				    enabled: false
-			`),
-		},
-		"complex kubernetes manifest": {
-			input: stringtest.Input(`
-				apiVersion: apps/v1
-				kind: Deployment
-				metadata:
-				  name: example
-				  labels:
-				    app: test
-				spec:
-				  replicas: 3
-				  selector:
-				    matchLabels:
-				      app: test
-				  template:
-				    spec:
-				      containers:
-				        - name: app
-				          image: nginx:latest
-				          ports:
-				            - containerPort: 80
-			`),
-		},
-		"quoted strings": {
-			input: stringtest.Input(`
-				double: "hello world"
-				single: 'foo bar'
-				special: "line1\nline2\ttab"
-			`),
-		},
-		"multi-document": {
-			input: stringtest.Input(`
-				---
-				doc1: value1
-				---
-				doc2: value2
-			`),
-		},
-		// The chain never crosses a line, including after a gap the
-		// builder flushes.
-		"gap after multi-part token": {
-			input: stringtest.JoinLF(
-				"''",
-				"",
-				":",
-			),
-		},
-		"quoted scalar before a key": {
-			input: stringtest.LinesLF(
-				"s: 'q",
-				"r'",
-				"\r",
-				": v",
-				"   ",
-				"j: 1",
-			),
-		},
-		"sequence end before a key": {
-			input: stringtest.JoinLF(
-				"]",
-				"",
-				":",
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := newLines(tc.input)
-
-			// The parts on each line link to their neighbors in column
-			// order, and the chain stops at both ends of the line.
-			for _, ln := range lines.All() {
-				parts := ln.Tokens()
-				require.NotEmpty(t, parts, "line %d", ln.Number())
-
-				require.NoError(t, yamltest.ValidateTokenLinks(parts), "line %d", ln.Number())
-			}
-		})
-	}
 }
 
 func TestNewLines_PartPositionsMatchLexer(t *testing.T) {
@@ -897,7 +1001,7 @@ func TestNewLines_PartPositionsMatchLexer(t *testing.T) {
 		"inline map":       "config: {key: value}\n",
 		"inline list":      "items: [a, b, c]\n",
 		"comment":          "key: value  # comment\n",
-		"anchor and alias": "anchor: &name value\nref: *name\n",
+		"anchor and alias": stringtest.LinesLF("anchor: &name value", "ref: *name"),
 		"unindent after nest": stringtest.LinesLF(
 			"parent:",
 			"  child: value",
@@ -955,121 +1059,68 @@ func TestNewLines_PartPositionsMatchLexer(t *testing.T) {
 	}
 }
 
-func TestNewLines_SplitTokenOffsets(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]string{
-		"literal block": stringtest.LinesLF(
-			"script: |",
-			"  line1",
-			"  line2",
-		),
-		"folded block": stringtest.LinesLF(
-			"text: >",
-			"  first",
-			"  second",
-		),
-		"leading indent then continuation": stringtest.JoinLF(
-			"  b",
-			"s:",
-		),
-		"multiline string": stringtest.LinesLF(
-			`key: "line1`,
-			`  line2"`,
-		),
-	}
-
-	for name, input := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := newLines(input)
-
-			var prevOffset int
-
-			for i := range lines.All() {
-				ln := lines.Line(i)
-				for _, tk := range ln.Tokens() {
-					if tk.Position != nil {
-						// Offset must be strictly increasing.
-						assert.Greater(t, tk.Position.Offset, prevOffset,
-							"Offset not increasing at line %d", ln.Number())
-
-						prevOffset = tk.Position.Offset
-					}
-				}
-			}
-		})
-	}
-}
-
 func TestNewLines_OffsetRuneCount(t *testing.T) {
 	t.Parallel()
 
-	// Test that part Offsets count runes, not bytes, as the go-yaml lexer
-	// does. UTF-8 chars like 日 are 3 bytes each, but 1 rune each.
-	//
-	// For input "日: value\n":
-	//   - "日" part at offset 1 (first position)
-	//   - ":" part at offset 2 (after 1 rune for 日)
-	//   - "value" part at offset 4 (after 3 runes for "日: ")
-	//
-	// If byte-based, ":" would be at offset 4 (after 3 bytes for 日).
-	input := "日: value\n"
-	lines := requireRoundtrip(t, input)
-
-	// The ":" (MappingValue) part sits at offset 2, not 4, which proves
-	// rune-based counting.
-	require.Equal(t, 1, lines.Len())
-
-	parts := lines.Line(0).Tokens()
-	require.Len(t, parts, 3, "expected 3 parts: key, :, value")
-
-	// Part 0: "日" at offset 1.
-	assert.Equal(t, 1, parts[0].Position.Offset, "first part offset should be 1")
-
-	// Part 1: ":" at offset 2 (rune-based) not 4 (byte-based).
-	assert.Equal(t, 2, parts[1].Position.Offset,
-		"MappingValue ':' should be at offset 2 (rune-based), not 4 (byte-based)")
-
-	// Part 2: "value" at offset 4 (after "日: " which is 3 runes).
-	assert.Equal(t, 4, parts[2].Position.Offset, "value part offset should be 4")
-
-	// The total bytes match, so the Origin content survives the split.
-	var origTotalBytes, resultTotalBytes int
-
-	for _, tk := range tokens.Tokenize(input) {
-		origTotalBytes += len(tk.Origin)
-	}
-
-	for _, part := range parts {
-		resultTotalBytes += len(part.Origin)
-	}
-
-	assert.Equal(t, origTotalBytes, resultTotalBytes, "total bytes should match lexer output")
-}
-
-func TestNewLines_OffsetRuneCount_Continuation(t *testing.T) {
-	t.Parallel()
+	// Part Offsets count runes, not bytes, as the go-yaml lexer does. The
+	// rune 日 takes 3 bytes, so a count of bytes would put the ":" after it
+	// at offset 4 rather than 2.
+	wide := "日: value\n"
 
 	// Continuation parts of a multi-line token take their offset from the
 	// builder's running count, which must advance by runes like the lexer.
 	// "key: héllo\n" is 11 runes, so the continuation starts at offset 12.
-	input := stringtest.LinesLF(
+	accented := stringtest.LinesLF(
 		"key: h\u00e9llo",
 		"  w\u00f6rld",
 		"next: v",
 	)
-	lines := newLines(input)
-	require.Equal(t, 3, lines.Len())
 
-	continuation := lines.Line(1).Token(0)
-	assert.Equal(t, "  w\u00f6rld\n", continuation.Origin)
-	assert.Equal(t, 12, continuation.Position.Offset)
+	tcs := map[string]struct {
+		input  string
+		origin string // Origin of the part.
+		line   int    // Index of the line that holds the part.
+		part   int    // Index of the part on its line.
+		want   int    // Offset of the part.
+	}{
+		"wide rune key":           {input: wide, part: 0, origin: "日", want: 1},
+		"colon after a wide rune": {input: wide, part: 1, origin: ":", want: 2},
+		"value after a wide rune": {input: wide, part: 2, origin: " value\n", want: 4},
+		"continuation after an accented line": {
+			input:  accented,
+			line:   1,
+			origin: "  w\u00f6rld\n",
+			want:   12,
+		},
+		"key after an accented continuation": {
+			input:  accented,
+			line:   2,
+			origin: "next",
+			want:   20,
+		},
+	}
 
-	next := lines.Line(2).Token(0)
-	assert.Equal(t, "next", next.Value)
-	assert.Equal(t, 20, next.Position.Offset)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := requireRoundtrip(t, tc.input)
+
+			part := lines.Line(tc.line).Token(tc.part)
+			assert.Equal(t, tc.origin, part.Origin)
+			assert.Equal(t, tc.want, part.Position.Offset)
+
+			// The parts hold the Origins of the lexer's tokens, byte for
+			// byte.
+			var origins strings.Builder
+
+			for _, ln := range lines.All() {
+				origins.WriteString(yamltest.DumpTokenOrigins(ln.Tokens()))
+			}
+
+			assert.Equal(t, yamltest.DumpTokenOrigins(lines.Tokens()), origins.String())
+		})
+	}
 }
 
 func TestNewLines_IndentLevelProgression(t *testing.T) {
@@ -1098,15 +1149,9 @@ func TestNewLines_IndentLevelProgression(t *testing.T) {
 
 	require.Equal(t, len(wantLevels), lines.Len())
 
-	for i := range lines.All() {
-		ln := lines.Line(i)
-		if len(ln.Tokens()) > 0 {
-			firstTk := ln.Token(0)
-			if firstTk.Position != nil {
-				assert.Equal(t, wantLevels[i], firstTk.Position.IndentLevel,
-					"IndentLevel mismatch at line %d", i+1)
-			}
-		}
+	for i, ln := range lines.All() {
+		require.NotEmpty(t, ln.Tokens(), "line %d", i+1)
+		assert.Equal(t, wantLevels[i], ln.Token(0).Position.IndentLevel, "IndentLevel mismatch at line %d", i+1)
 	}
 }
 
@@ -1118,16 +1163,40 @@ func TestNewLines_BlockScalars(t *testing.T) {
 	t.Run("position semantics", func(t *testing.T) {
 		t.Parallel()
 
-		// Block scalar content has one part on each line it spans, from the
-		// first line that holds its text. The first part keeps the content's
-		// Column and Offset, and the last part that holds content carries
-		// the Value, whether content follows the scalar or not.
+		// Block scalar content has one part on each line it spans. The part
+		// on the first line that holds text keeps the content's Column,
+		// which names the text past the indentation, and its Offset. Every
+		// later part starts at column 1 with the indentation inside it, as
+		// a blank line before the text does. The last part that holds
+		// content carries the Value, whether content follows the scalar or
+		// not.
+		type part struct {
+			value string
+			col   int
+		}
 
 		tcs := map[string]struct {
 			input string
-			line  int      // Line of the content's first part.
-			want  []string // Value of the content's part on each line from line on.
+			want  []part // The content's part on each line from line on.
+			line  int    // Line of the content's first part.
 		}{
+			"literal one line followed by a key": {
+				input: stringtest.LinesLF(
+					"key: |",
+					"  content",
+					"next: value",
+				),
+				line: 2,
+				want: []part{{col: 3, value: "content\n"}},
+			},
+			"literal one line with a final newline": {
+				input: stringtest.LinesLF(
+					"key: |",
+					"  content",
+				),
+				line: 2,
+				want: []part{{col: 3, value: "content\n"}},
+			},
 			"literal two lines": {
 				input: stringtest.Input(`
 					key: |
@@ -1135,7 +1204,16 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					  line2
 				`),
 				line: 2,
-				want: []string{"", "line1\nline2"},
+				want: []part{{col: 3}, {col: 1, value: "line1\nline2"}},
+			},
+			"literal two lines with a final newline": {
+				input: stringtest.LinesLF(
+					"key: |",
+					"  line1",
+					"  line2",
+				),
+				line: 2,
+				want: []part{{col: 3}, {col: 1, value: "line1\nline2\n"}},
 			},
 			"literal three lines": {
 				input: stringtest.Input(`
@@ -1145,7 +1223,28 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					  c
 				`),
 				line: 2,
-				want: []string{"", "", "a\nb\nc"},
+				want: []part{{col: 3}, {col: 1}, {col: 1, value: "a\nb\nc"}},
+			},
+			"literal three lines with a final newline": {
+				input: stringtest.LinesLF(
+					"key: |",
+					"  a",
+					"  b",
+					"  c",
+				),
+				line: 2,
+				want: []part{{col: 3}, {col: 1}, {col: 1, value: "a\nb\nc\n"}},
+			},
+			"literal three lines followed by a key": {
+				input: stringtest.LinesLF(
+					"key: |",
+					"  a",
+					"  b",
+					"  c",
+					"next: data",
+				),
+				line: 2,
+				want: []part{{col: 3}, {col: 1}, {col: 1, value: "a\nb\nc\n"}},
 			},
 			"folded two lines": {
 				input: stringtest.Input(`
@@ -1154,7 +1253,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					  second
 				`),
 				line: 2,
-				want: []string{"", "first second"},
+				want: []part{{col: 3}, {col: 1, value: "first second"}},
 			},
 			"literal with strip": {
 				input: stringtest.Input(`
@@ -1163,7 +1262,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					  line2
 				`),
 				line: 2,
-				want: []string{"", "line1\nline2"},
+				want: []part{{col: 3}, {col: 1, value: "line1\nline2"}},
 			},
 			"literal with keep and trailing blank": {
 				input: stringtest.LinesLF(
@@ -1173,7 +1272,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					"",
 				),
 				line: 2,
-				want: []string{"", "line1\nline2\n\n", ""},
+				want: []part{{col: 3}, {col: 1, value: "line1\nline2\n\n"}, {col: 1}},
 			},
 			"literal followed by a key": {
 				input: stringtest.LinesLF(
@@ -1183,7 +1282,28 @@ func TestNewLines_BlockScalars(t *testing.T) {
 					"next: 1",
 				),
 				line: 2,
-				want: []string{"", "line1\nline2\n"},
+				want: []part{{col: 3}, {col: 1, value: "line1\nline2\n"}},
+			},
+			"deeper indentation": {
+				input: stringtest.LinesLF(
+					"a:",
+					"  key: |",
+					"    line1",
+					"    line2",
+					"  next: 1",
+				),
+				line: 3,
+				want: []part{{col: 5}, {col: 1, value: "line1\nline2\n"}},
+			},
+			"leading blank line": {
+				input: stringtest.LinesLF(
+					"key: |",
+					"",
+					"  line2",
+					"next: 1",
+				),
+				line: 2,
+				want: []part{{col: 1}, {col: 3, value: "\nline2\n"}},
 			},
 		}
 
@@ -1192,21 +1312,32 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				t.Parallel()
 
 				lines := requireRoundtrip(t, tc.input)
-				contentToken := multilineString(t, tc.input)
+
+				require.NoError(t, yamltest.ValidateLines(lines))
+				require.Equal(t, lineCount(tc.input), lines.Len())
+
+				content := blockScalarContent(t, tc.input)
+				text := false
 
 				for i, want := range tc.want {
 					parts := lines.Line(tc.line - 1 + i).Tokens()
 					require.Len(t, parts, 1, "line %d", tc.line+i)
 
-					part := parts[0]
-					assert.Equal(t, tc.line+i, part.Position.Line, "part %q", part.Origin)
-					assert.Equal(t, want, part.Value, "part %q", part.Origin)
+					got := parts[0]
+					assert.Equal(t, token.StringType, got.Type, "part %q", got.Origin)
+					assert.Equal(t, tc.line+i, got.Position.Line, "part %q", got.Origin)
+					assert.Equal(t, want.col, got.Position.Column, "part %q", got.Origin)
+					assert.Equal(t, want.value, got.Value, "part %q", got.Origin)
 
-					if i == 0 {
-						assert.Equal(t, contentToken.Position.Column, part.Position.Column, "part %q", part.Origin)
-						assert.Equal(t, contentToken.Position.Offset, part.Position.Offset, "part %q", part.Origin)
+					if !text && strings.TrimSpace(got.Origin) != "" {
+						text = true
+
+						assert.Equal(t, content.Position.Column, got.Position.Column, "part %q", got.Origin)
+						assert.Equal(t, content.Position.Offset, got.Position.Offset, "part %q", got.Origin)
 					}
 				}
+
+				assert.True(t, text, "a part holds the text of the content")
 			})
 		}
 	})
@@ -1249,12 +1380,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				// The lexer places the empty content of a scalar that
 				// keeps its trailing lines past the end of the source,
 				// which adds no line the file does not have.
-				want := strings.Count(input, "\n")
-				if !strings.HasSuffix(input, "\n") {
-					want++
-				}
-
-				assert.Equal(t, want, lines.Len())
+				assert.Equal(t, lineCount(input), lines.Len())
 			})
 		}
 	})
@@ -1369,7 +1495,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 
 				lines := requireRoundtrip(t, tc.input)
 
-				assert.Equal(t, strings.Count(tc.input, "\n"), lines.Len())
+				assert.Equal(t, lineCount(tc.input), lines.Len())
 				assert.Equal(t, tc.want, blockScalarValue(t, lines))
 			})
 		}
@@ -1398,26 +1524,44 @@ func blockScalarValue(t *testing.T, lines line.Lines) string {
 	return values[0]
 }
 
-func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
+// blockScalarContent returns the lexer's token for the content of the first
+// block scalar of input, which follows its header.
+func blockScalarContent(t *testing.T, input string) *token.Token {
+	t.Helper()
+
+	tks := tokens.Tokenize(input)
+
+	i := slices.IndexFunc(tks, func(tk *token.Token) bool {
+		return tk.Type == token.LiteralType || tk.Type == token.FoldedType
+	})
+	require.GreaterOrEqual(t, i, 0, "expected a block scalar header")
+	require.Less(t, i+1, len(tks), "expected content after the block scalar header")
+
+	return tks[i+1]
+}
+
+func TestNewLines_MultilineFlowScalars(t *testing.T) {
 	t.Parallel()
 
-	// A plain multiline string has one part on each line it spans, and that
-	// part is the last on its line. The first part keeps the string's Column
-	// and Offset and carries its Value, which block scalars put on their
-	// last content part instead. Every later part is alone on its line and
-	// starts with the indentation, at column 1.
-
+	// A plain or quoted scalar that spans lines has one part on each of
+	// them, and that part is the last on its line. The first part keeps
+	// the scalar's Column and Offset and carries its Value, which block
+	// scalars put on their last content part instead. Every later part is
+	// alone on its line, starts at column 1 with the indentation inside
+	// it, and has an empty Value.
 	tcs := map[string]struct {
 		input string
-		line  int      // Line of the string's first part.
-		col   int      // Column of the string's first part.
-		want  []string // Value of the string's part on each line from line on.
+		want  []string // Value of the scalar's part on each line from line on.
+		typ   token.Type
+		line  int // Line of the scalar's first part.
+		col   int // Column of the scalar's first part.
 	}{
 		"plain multiline two lines": {
 			input: stringtest.Input(`
 				key: this is
 				  continued
 			`),
+			typ:  token.StringType,
 			line: 1,
 			col:  6,
 			want: []string{"this is continued", ""},
@@ -1428,6 +1572,7 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 				  second
 				  third
 			`),
+			typ:  token.StringType,
 			line: 1,
 			col:  6,
 			want: []string{"first second third", "", ""},
@@ -1438,9 +1583,42 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 				  child: line one
 				    continued line
 			`),
+			typ:  token.StringType,
 			line: 2, // First line of the value.
 			col:  10,
 			want: []string{"line one continued line", ""},
+		},
+		// The quoted scalars hold actual line breaks, not escaped ones.
+		"double quoted with actual newline": {
+			input: stringtest.LinesLF(
+				`key: "line1`,
+				`line2"`,
+			),
+			typ:  token.DoubleQuoteType,
+			line: 1,
+			col:  6,
+			want: []string{"line1 line2", ""},
+		},
+		"double quoted with multiple newlines": {
+			input: stringtest.LinesLF(
+				`key: "a`,
+				"b",
+				`c"`,
+			),
+			typ:  token.DoubleQuoteType,
+			line: 1,
+			col:  6,
+			want: []string{"a b c", "", ""},
+		},
+		"single quoted with actual newline": {
+			input: stringtest.LinesLF(
+				"key: 'line1",
+				"line2'",
+			),
+			typ:  token.SingleQuoteType,
+			line: 1,
+			col:  6,
+			want: []string{"line1 line2", ""},
 		},
 	}
 
@@ -1451,20 +1629,22 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 			lines := requireRoundtrip(t, tc.input)
 			require.Equal(t, tc.line-1+len(tc.want), lines.Len())
 
-			contentToken := multilineString(t, tc.input)
+			scalar := multilineToken(t, tc.input, tc.typ)
 
 			for i, want := range tc.want {
 				parts := lines.Line(tc.line - 1 + i).Tokens()
 				require.NotEmpty(t, parts, "line %d", tc.line+i)
 
 				part := parts[len(parts)-1]
+				assert.Equal(t, tc.typ, part.Type, "part %q", part.Origin)
 				assert.Equal(t, tc.line+i, part.Position.Line, "part %q", part.Origin)
 				assert.Equal(t, want, part.Value, "part %q", part.Origin)
 
 				if i == 0 {
 					assert.Equal(t, tc.col, part.Position.Column, "part %q", part.Origin)
-					assert.Equal(t, contentToken.Position.Column, part.Position.Column, "part %q", part.Origin)
-					assert.Equal(t, contentToken.Position.Offset, part.Position.Offset, "part %q", part.Origin)
+					assert.Equal(t, scalar.Position.Column, part.Position.Column, "part %q", part.Origin)
+					assert.Equal(t, scalar.Position.Offset, part.Position.Offset, "part %q", part.Origin)
+					assert.Equal(t, scalar.Value, part.Value, "part %q", part.Origin)
 
 					continue
 				}
@@ -1476,119 +1656,30 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 	}
 }
 
-// multilineString returns the lexer's token for the first string of input
-// whose text crosses a line break.
-func multilineString(t *testing.T, input string) *token.Token {
+// multilineToken returns the lexer's token for the first scalar of type typ
+// in input whose text crosses a line break.
+func multilineToken(t *testing.T, input string, typ token.Type) *token.Token {
 	t.Helper()
 
 	tks := tokens.Tokenize(input)
 
 	i := slices.IndexFunc(tks, func(tk *token.Token) bool {
-		return tk.Type == token.StringType && strings.Contains(strings.TrimSpace(tk.Origin), "\n")
+		return tk.Type == typ && strings.Contains(strings.TrimSpace(tk.Origin), "\n")
 	})
-	require.GreaterOrEqual(t, i, 0, "expected a string whose text crosses a line break")
+	require.GreaterOrEqual(t, i, 0, "expected a %s scalar whose text crosses a line break", typ)
 
 	return tks[i]
 }
 
-func TestNewLines_QuotedMultilineActualNewlines(t *testing.T) {
+func TestLines_Empty(t *testing.T) {
 	t.Parallel()
 
-	// Test quoted strings with actual newlines in the content (not escaped \n).
-	// The part on the opening quote line keeps the string's Column and
-	// Offset and carries its Value. Every later part starts at column 1 with
-	// an empty Value.
-
-	tcs := map[string]struct {
-		input         string
-		want          int // Number of lines the string spans.
-		wantTokenType token.Type
-	}{
-		"double quoted with actual newline": {
-			input:         "key: \"line1\nline2\"\n",
-			want:          2,
-			wantTokenType: token.DoubleQuoteType,
-		},
-		"double quoted with multiple newlines": {
-			input: stringtest.LinesLF(
-				`key: "a`,
-				"b",
-				`c"`,
-			),
-			want:          3,
-			wantTokenType: token.DoubleQuoteType,
-		},
-		"single quoted with actual newline": {
-			input:         "key: 'line1\nline2'\n",
-			want:          2,
-			wantTokenType: token.SingleQuoteType,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := requireRoundtrip(t, tc.input)
-
-			// Find the quoted token.
-			var quotedToken *token.Token
-
-			for _, tk := range tokens.Tokenize(tc.input) {
-				if tk.Type == tc.wantTokenType {
-					quotedToken = tk
-					break
-				}
-			}
-
-			require.NotNil(t, quotedToken, "expected to find quoted string token")
-			require.Equal(t, tc.want, lines.Len())
-
-			// The string's first part is the last part on the first line.
-			parts := lines.Line(0).Tokens()
-			require.NotEmpty(t, parts)
-
-			first := parts[len(parts)-1]
-			assert.Equal(t, tc.wantTokenType, first.Type)
-			assert.Equal(t, 1, first.Position.Line)
-			assert.Equal(t, quotedToken.Position.Column, first.Position.Column,
-				"first part should keep the opening quote's Column")
-			assert.Equal(t, quotedToken.Position.Offset, first.Position.Offset,
-				"first part should keep the opening quote's Offset")
-			assert.Equal(t, quotedToken.Value, first.Value, "first part should carry the Value")
-
-			// Each later line holds one continuation part.
-			for i, ln := range lines.All(position.NewSpan(1, lines.Len())) {
-				require.Len(t, ln.Tokens(), 1, "line %d", i+1)
-
-				part := ln.Token(0)
-				assert.Equal(t, tc.wantTokenType, part.Type, "part %q", part.Origin)
-				assert.Equal(t, i+1, part.Position.Line, "part %q", part.Origin)
-				assert.Equal(t, 1, part.Position.Column, "part %q", part.Origin)
-				assert.Empty(t, part.Value, "part %q", part.Origin)
-			}
-		})
-	}
-}
-
-func TestEmptyAndZeroValues(t *testing.T) {
-	t.Parallel()
-
-	t.Run("Line/with tokens not empty", func(t *testing.T) {
-		t.Parallel()
-
-		lines := newLines("key: value\n")
-
-		require.Equal(t, 1, lines.Len())
-		assert.False(t, lines.Line(0).IsEmpty())
-	})
-
-	// Each of these holds no lines.
+	// Each of these holds no lines, and neither does a view over it.
 	tcs := map[string]line.Lines{
-		"Lines/zero value":                 {},
-		"Lines/NewLines with nil tokens":   line.NewLines(nil),
-		"Lines/NewLines with empty tokens": newLines(""),
-		"Lines/Collect with no lines":      line.Collect(),
+		"zero value":                 {},
+		"NewLines with nil tokens":   line.NewLines(nil),
+		"NewLines with empty tokens": newLines(""),
+		"Collect with no lines":      line.Collect(),
 	}
 
 	for name, lines := range tcs {
@@ -1612,116 +1703,15 @@ func TestEmptyAndZeroValues(t *testing.T) {
 			}
 
 			require.NoError(t, yamltest.ValidateLines(lines))
-		})
-	}
-}
 
-func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
-	t.Parallel()
+			view := line.NewView(lines)
 
-	// Every part of a block scalar sits on its own line. The first part
-	// carries the token's Column, which names the text past the
-	// indentation, and every later part starts at column 1 with the
-	// indentation inside it, whether content follows the scalar or not.
-	tcs := map[string]struct {
-		input string
-		want  map[int]int // Column of the first part on each 1-indexed line.
-	}{
-		"single-line with following content": {
-			input: stringtest.LinesLF(
-				"key: |",
-				"  content",
-				"next: value",
-			),
-			want: map[int]int{2: 3},
-		},
-		"single-line standalone": {
-			input: stringtest.LinesLF(
-				"key: |",
-				"  content",
-			),
-			want: map[int]int{2: 3},
-		},
-		"multi-line with following content": {
-			input: stringtest.LinesLF(
-				"key: |",
-				"  line1",
-				"  line2",
-				"next: data",
-			),
-			want: map[int]int{2: 3, 3: 1},
-		},
-		"multi-line standalone": {
-			input: stringtest.LinesLF(
-				"key: |",
-				"  line1",
-				"  line2",
-			),
-			want: map[int]int{2: 3, 3: 1},
-		},
-		"three-line with following content": {
-			input: stringtest.LinesLF(
-				"key: |",
-				"  a",
-				"  b",
-				"  c",
-				"next: data",
-			),
-			want: map[int]int{2: 3, 3: 1, 4: 1},
-		},
-		"three-line standalone": {
-			input: stringtest.LinesLF(
-				"key: |",
-				"  a",
-				"  b",
-				"  c",
-			),
-			want: map[int]int{2: 3, 3: 1, 4: 1},
-		},
-		"deeper indentation": {
-			input: stringtest.LinesLF(
-				"a:",
-				"  key: |",
-				"    line1",
-				"    line2",
-				"  next: 1",
-			),
-			want: map[int]int{3: 5, 4: 1},
-		},
-		"leading blank line": {
-			input: stringtest.LinesLF(
-				"key: |",
-				"",
-				"  line2",
-				"next: 1",
-			),
-			want: map[int]int{2: 1, 3: 3},
-		},
-	}
+			assert.Equal(t, 0, view.Count())
+			assert.Panics(t, func() { view.Line(0) })
+			assert.Empty(t, view.String())
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := requireRoundtrip(t, tc.input)
-
-			require.NoError(t, yamltest.ValidateLines(lines))
-			require.Equal(t, strings.Count(tc.input, "\n"), lines.Len())
-
-			for i := range lines.All() {
-				ln := lines.Line(i)
-
-				want, ok := tc.want[ln.Number()]
-				if !ok {
-					continue
-				}
-
-				require.NotEmpty(t, ln.Tokens(), "line %d", ln.Number())
-
-				part := ln.Token(0)
-				assert.Equal(t, token.StringType, part.Type, "line %d part %q", ln.Number(), part.Origin)
-				assert.Equal(t, ln.Number(), part.Position.Line, "line %d part %q", ln.Number(), part.Origin)
-				assert.Equal(t, want, part.Position.Column, "line %d part %q", ln.Number(), part.Origin)
+			for range view.All() {
+				t.Fatal("expected no lines in the view")
 			}
 		})
 	}
@@ -1729,248 +1719,46 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 
 // TestNewLines_BlankLineAbsorption documents how the go-yaml lexer handles
 // blank lines. The lexer absorbs a blank line into the previous token's
-// Origin rather than emitting a separate token.
-// NewLines still yields one Line per source line and round-trips the tokens.
+// Origin rather than emitting a separate token. NewLines still round-trips
+// the tokens, and TestNewLines_LineNumbers checks that it yields one Line
+// per source line.
 func TestNewLines_BlankLineAbsorption(t *testing.T) {
 	t.Parallel()
 
-	t.Run("blank lines join the Origin of the token before them", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]struct {
-			input string
-			want  string // Origin of the token for "value".
-		}{
-			"single blank line": {
-				input: stringtest.LinesLF(
-					"key: value",
-					"",
-					"next: data",
-				),
-				want: " value\n\n",
-			},
-			"multiple blank lines": {
-				input: stringtest.LinesLF(
-					"key: value",
-					"",
-					"",
-					"next: data",
-				),
-				want: " value\n\n\n",
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				tks := requireRoundtrip(t, tc.input).Tokens()
-
-				i := slices.IndexFunc(tks, func(tk *token.Token) bool { return tk.Value == "value" })
-				require.GreaterOrEqual(t, i, 0, "expected to find value token")
-				assert.Equal(t, tc.want, tks[i].Origin)
-			})
-		}
-	})
-
-	t.Run("every source line keeps its number", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]string{
-			"blank line between keys": stringtest.LinesLF(
+	tcs := map[string]struct {
+		input string
+		want  string // Origin of the token for "value".
+	}{
+		"single blank line": {
+			input: stringtest.LinesLF(
 				"key: value",
 				"",
 				"next: data",
 			),
-
-			// The lexer folds the lines before a merge key into its token and
-			// positions the token on the line of the key, so the lines start
-			// that many lines earlier. Other first tokens open on an earlier
-			// line the same way.
-			"plain lines before a merge key": stringtest.LinesLF(
-				"x",
-				"x",
-				"<<: *an",
-			),
-			"indented text before a merge key": stringtest.LinesLF(
-				"  text",
-				"<<: *an",
-			),
-			"alias and blank line before a merge key": stringtest.LinesLF(
-				"x",
-				"*a",
-				"",
-				"<<: *an",
-			),
-			"blank lines before the first key": stringtest.LinesLF(
+			want: " value\n\n",
+		},
+		"multiple blank lines": {
+			input: stringtest.LinesLF(
+				"key: value",
 				"",
 				"",
-				"foo: 1",
+				"next: data",
 			),
-			"quoted scalar of two lines": stringtest.LinesLF(
-				`"a`,
-				` b"`,
-			),
-			"bare literal block": stringtest.LinesLF(
-				"|",
-				"  a",
-				"  b",
-			),
-			"comment before the first key": "# c\nk: v\n",
-
-			// The lexer emits the blank line after a bare block scalar header
-			// as a token that is a line ending alone, positioned on its own
-			// line. It ends the header's line rather than syncing past it, so
-			// the blank line keeps its row.
-			"blank line after a bare folded header": stringtest.LinesLF(
-				">",
-				"",
-				"a: 1",
-			),
-			"blank line after a bare literal header": stringtest.LinesLF(
-				"|",
-				"",
-				"r",
-			),
-			"blank lines after bare folded headers": stringtest.LinesLF(
-				"",
-				">",
-				"",
-				">",
-				"# c",
-			),
-
-			// The lexer reports a block scalar content token at the line of
-			// its last content line, so the builder must not treat that line
-			// as a gap to sync forward to.
-			"blank content then key": stringtest.LinesLF(
-				"b: |",
-				"  ",
-				"last: 1",
-				"# c",
-			),
-			"blank content then marker": stringtest.LinesLF(
-				"b: |",
-				"  ",
-				"---",
-			),
-			"content then marker": stringtest.LinesLF(
-				"b: |",
-				"   y",
-				"---",
-				"---",
-				"last: 1",
-			),
-			"blank content then tagged": stringtest.LinesLF(
-				"b: |",
-				"",
-				"!!str s: 1",
-			),
-
-			// A file that ends in blank lines yields one line for each text
-			// line, the blank ones too.
-			"no trailing newline":     "a: 1",
-			"trailing newline":        "a: 1\n",
-			"one trailing blank line": "a: 1\n\n",
-			"two trailing blank lines": stringtest.LinesLF(
-				"a: 1",
-				"",
-				"",
-			),
-			"crlf trailing blank line": "a: 1\r\n\r\n",
-			"comment then blank line": stringtest.LinesLF(
-				"a: 1",
-				"# c",
-				"",
-			),
-
-			// The lexer starts the token after a comment with the line
-			// ending, which NewLines must handle without putting the columns
-			// of a line out of order.
-			"inline comment followed by next line": stringtest.Input(`
-				items:
-				  - key: value # inline comment
-				    next: data
-			`),
-			"sequence entry with merge key and comment": stringtest.Input(`
-				items:
-				  - <<: *anchor # comment
-				    key: value
-			`),
-			"nested map with trailing comment": stringtest.Input(`
-				parent:
-				  child: value # note
-				  sibling: other
-			`),
-			"multiple inline comments": stringtest.Input(`
-				a: 1 # first
-				b: 2 # second
-				c: 3 # third
-			`),
-			"comment block after content": stringtest.Input(`
-				key: value
-
-				# Comment block
-				# More comments
-				next: data
-			`),
-		}
-
-		for name, input := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				// An input holds one line for each line break, and one
-				// more when text follows the last.
-				n := strings.Count(input, "\n")
-				if !strings.HasSuffix(input, "\n") {
-					n++
-				}
-
-				want := make([]int, n)
-				for i := range want {
-					want[i] = i + 1
-				}
-
-				lines := newLines(input)
-
-				require.NoError(t, yamltest.ValidateLines(lines))
-				assert.Equal(t, want, lineNumbers(lines))
-			})
-		}
-	})
-}
-
-// indicesOf returns the index of each line seq yields.
-func indicesOf(seq iter.Seq2[int, *line.Line]) []int {
-	var got []int
-
-	for i := range seq {
-		got = append(got, i)
+			want: " value\n\n\n",
+		},
 	}
 
-	return got
-}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-// contentsOf returns the content of each line seq yields.
-func contentsOf(seq iter.Seq2[int, *line.Line]) []string {
-	var got []string
+			tks := requireRoundtrip(t, tc.input).Tokens()
 
-	for _, ln := range seq {
-		got = append(got, ln.Content())
+			i := slices.IndexFunc(tks, func(tk *token.Token) bool { return tk.Value == "value" })
+			require.GreaterOrEqual(t, i, 0, "expected to find value token")
+			assert.Equal(t, tc.want, tks[i].Origin)
+		})
 	}
-
-	return got
-}
-
-// lineNumbers returns the number of each line of lines.
-func lineNumbers(lines line.Lines) []int {
-	got := make([]int, 0, lines.Len())
-	for _, ln := range lines.All() {
-		got = append(got, ln.Number())
-	}
-
-	return got
 }
 
 func TestLines_TokenAt(t *testing.T) {
@@ -2171,7 +1959,7 @@ func TestLines_TokenRanges(t *testing.T) {
 	// Two sections whose line numbers jump from 11 to 40, so the line
 	// numbers of the tokens differ from the indices of their lines.
 	gapped := line.NewLines(joinTokens(
-		tokenizeAt("key1: value1\nkey2: value2\n", 10),
+		tokenizeAt(stringtest.LinesLF("key1: value1", "key2: value2"), 10),
 		tokenizeAt(stringtest.LinesLF(
 			"key3: |",
 			"  a",
@@ -2183,9 +1971,32 @@ func TestLines_TokenRanges(t *testing.T) {
 
 	// Two revisions interleaved as a diff shows them, where the deleted
 	// and inserted lines each hold a "b" key at the same position.
-	before := newLines("a: 1\nb: 2\n")
-	after := newLines("a: 1\nb: 3\n")
+	before := newLines(stringtest.LinesLF("a: 1", "b: 2"))
+	after := newLines(stringtest.LinesLF("a: 1", "b: 3"))
 	revisions := line.Collect(after.Line(0), before.Line(1), after.Line(1))
+
+	// Values with spaces or tabs around their text, which the content
+	// ranges leave out, and a position in the spaces that resolves to the
+	// value.
+	spacedTks := tokens.Tokenize("key:   value  \n")
+	spaced := line.NewLines(spacedTks)
+	require.Len(t, spacedTks, 3)
+	require.Same(t, spacedTks[2], spaced.TokenAt(position.New(0, 6)))
+
+	tabbed := newLines("a:\tb\t# c\n")
+	tabbedValue := tabbed.TokenAt(position.New(0, 3))
+	require.NotNil(t, tabbedValue)
+	require.Equal(t, "\tb\t", tabbedValue.Origin)
+
+	// A quoted scalar whose middle line holds only spaces.
+	quotedTks := tokens.Tokenize(stringtest.LinesLF(
+		"a: 'x",
+		"   ",
+		"  y'",
+	))
+	quoted := line.NewLines(quotedTks)
+	require.Len(t, quotedTks, 3)
+	require.Same(t, quotedTks[2], quoted.TokenAt(position.New(1, 0)))
 
 	// The ranges name indices in the collection, whatever the line numbers
 	// of the tokens.
@@ -2298,6 +2109,28 @@ func TestLines_TokenRanges(t *testing.T) {
 			wantToken:   position.Ranges{yamltest.LineRange(1, 0, 1), yamltest.LineRange(2, 0, 1)},
 			wantContent: position.Ranges{yamltest.LineRange(1, 0, 1), yamltest.LineRange(2, 0, 1)},
 		},
+		"content excludes leading and trailing spaces": {
+			lines:       spaced,
+			tk:          spacedTks[2],
+			wantToken:   position.Ranges{yamltest.LineRange(0, 4, 14)},
+			wantContent: position.Ranges{yamltest.LineRange(0, 7, 12)},
+		},
+		"content excludes leading and trailing tabs": {
+			lines:       tabbed,
+			tk:          tabbedValue,
+			wantToken:   position.Ranges{yamltest.LineRange(0, 2, 5)},
+			wantContent: position.Ranges{yamltest.LineRange(0, 3, 4)},
+		},
+		"space-only part contributes no content range": {
+			lines: quoted,
+			tk:    quotedTks[2],
+			wantToken: position.Ranges{
+				yamltest.LineRange(0, 2, 5),
+				yamltest.LineRange(1, 0, 3),
+				yamltest.LineRange(2, 0, 4),
+			},
+			wantContent: position.Ranges{yamltest.LineRange(0, 3, 5), yamltest.LineRange(2, 2, 4)},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2313,19 +2146,33 @@ func TestLines_TokenRanges(t *testing.T) {
 	t.Run("a token the lines do not hold has no ranges", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Nil(t, single.TokenRanges(nil))
-		assert.Nil(t, single.TokenRanges(single.TokenAt(position.New(0, 100))))
-		assert.Nil(t, single.TokenRanges(tokens.Tokenize("other: data\n")[0]))
-
-		// This token from another stream sits at the same position as the
-		// block scalar content but differs in its text, so it matches
+		// The last token of other sits at the same position as the block
+		// scalar content of src but differs in its text, so it matches
 		// nothing.
 		other := tokens.Tokenize(stringtest.LinesLF(
 			"key: |",
 			"  other",
 			"  lines",
 		))
-		assert.Nil(t, src.TokenRanges(other[len(other)-1]))
+
+		tcs := map[string]struct {
+			lines line.Lines
+			tk    *token.Token
+		}{
+			"nil token":                       {lines: single},
+			"token of another stream":         {lines: single, tk: tokens.Tokenize("other: data\n")[0]},
+			"same position in another stream": {lines: src, tk: other[len(other)-1]},
+			"empty collection":                {lines: line.Lines{}, tk: singleTks[0]},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.Nil(t, tc.lines.TokenRanges(tc.tk))
+				assert.Nil(t, tc.lines.ContentRanges(tc.tk))
+			})
+		}
 	})
 }
 
@@ -2414,76 +2261,7 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 	})
 }
 
-func TestLines_ContentRanges(t *testing.T) {
-	t.Parallel()
-
-	// The table of TestLines_TokenRanges also holds the content ranges of
-	// each token it looks up.
-
-	t.Run("excludes leading and trailing spaces", func(t *testing.T) {
-		t.Parallel()
-
-		tks := tokens.Tokenize("key:   value  \n")
-		lines := line.NewLines(tks)
-		require.Len(t, tks, 3)
-
-		tk := lines.TokenAt(position.New(0, 6))
-		require.Same(t, tks[2], tk)
-
-		assert.Equal(t, position.Ranges{yamltest.LineRange(0, 7, 12)}, lines.ContentRanges(tk))
-	})
-
-	t.Run("excludes leading and trailing tabs", func(t *testing.T) {
-		t.Parallel()
-
-		lines := newLines("a:\tb\t# c\n")
-
-		tk := lines.TokenAt(position.New(0, 3))
-		require.NotNil(t, tk)
-		require.Equal(t, "\tb\t", tk.Origin)
-
-		assert.Equal(t, position.Ranges{yamltest.LineRange(0, 2, 5)}, lines.TokenRanges(tk))
-		assert.Equal(t, position.Ranges{yamltest.LineRange(0, 3, 4)}, lines.ContentRanges(tk))
-	})
-
-	t.Run("space-only part contributes no range", func(t *testing.T) {
-		t.Parallel()
-
-		tks := tokens.Tokenize(stringtest.LinesLF(
-			"a: 'x",
-			"   ",
-			"  y'",
-		))
-		lines := line.NewLines(tks)
-		require.Len(t, tks, 3)
-
-		tk := lines.TokenAt(position.New(1, 0))
-		require.Same(t, tks[2], tk)
-
-		assert.Contains(t, lines.TokenRanges(tk), yamltest.LineRange(1, 0, 3))
-		assert.Equal(
-			t,
-			position.Ranges{yamltest.LineRange(0, 3, 5), yamltest.LineRange(2, 2, 4)},
-			lines.ContentRanges(tk),
-		)
-	})
-
-	t.Run("nil and missing tokens return nil", func(t *testing.T) {
-		t.Parallel()
-
-		lines := newLines("key: value\n")
-
-		assert.Nil(t, lines.ContentRanges(nil))
-		assert.Nil(t, lines.ContentRanges(lines.TokenAt(position.New(0, 100))))
-		assert.Nil(t, lines.ContentRanges(lines.TokenAt(position.New(999, 0))))
-
-		var empty line.Lines
-
-		assert.Nil(t, empty.ContentRanges(lines.TokenAt(position.New(0, 0))))
-	})
-}
-
-func TestLines_View(t *testing.T) {
+func TestLines(t *testing.T) {
 	t.Parallel()
 
 	input := stringtest.Input(`
@@ -2505,61 +2283,6 @@ func TestLines_View(t *testing.T) {
 		t.Parallel()
 
 		assert.Equal(t, len("key: value"), lines.Width())
-	})
-
-	t.Run("All yields every index and line", func(t *testing.T) {
-		t.Parallel()
-
-		assert.Equal(t, []int{0, 1, 2}, indicesOf(lines.All()))
-		assert.Equal(t, []string{"key: value", "list:", "  - one"}, contentsOf(lines.All()))
-	})
-
-	t.Run("All yields each line once in content order", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]struct {
-			spans []position.Span
-			want  []int
-		}{
-			"clamped": {
-				spans: []position.Span{position.NewSpan(1, 99)},
-				want:  []int{1, 2},
-			},
-			"overlapping": {
-				spans: []position.Span{position.NewSpan(0, 2), position.NewSpan(1, 3)},
-				want:  []int{0, 1, 2},
-			},
-			"out of order": {
-				spans: []position.Span{position.NewSpan(2, 3), position.NewSpan(0, 1)},
-				want:  []int{0, 2},
-			},
-			"repeated": {
-				spans: []position.Span{position.NewSpan(1, 2), position.NewSpan(1, 2)},
-				want:  []int{1},
-			},
-			"only empty spans": {
-				spans: []position.Span{position.NewSpan(1, 1), position.NewSpan(2, 2)},
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				got := indicesOf(lines.All(tc.spans...))
-
-				assert.Equal(t, tc.want, got)
-				assert.Equal(t, indicesOf(line.NewView(lines).All(tc.spans...)), got)
-			})
-		}
-	})
-
-	t.Run("All yields the lines of the collection", func(t *testing.T) {
-		t.Parallel()
-
-		for i, ln := range lines.All() {
-			assert.Same(t, lines.Line(i), ln)
-		}
 	})
 
 	t.Run("Runes round-trips the input", func(t *testing.T) {
@@ -2707,7 +2430,7 @@ func TestLines_View(t *testing.T) {
 	t.Run("CRLF endings do not count toward width or runes", func(t *testing.T) {
 		t.Parallel()
 
-		lines := newLines("key: value\r\nother: data\r\n")
+		lines := newLines(stringtest.LinesCRLF("key: value", "other: data"))
 
 		assert.Equal(t, len("other: data"), lines.Width())
 
@@ -2721,15 +2444,15 @@ func TestLines_View(t *testing.T) {
 			sb.WriteRune(r)
 		}
 
-		assert.Equal(t, "key: value\nother: data\n", sb.String())
+		assert.Equal(t, stringtest.LinesLF("key: value", "other: data"), sb.String())
 	})
 }
 
 func TestCollect(t *testing.T) {
 	t.Parallel()
 
-	before := newLines("a: 1\nb: 2\n")
-	after := newLines("a: 1\nc: 3\n")
+	before := newLines(stringtest.LinesLF("a: 1", "b: 2"))
+	after := newLines(stringtest.LinesLF("a: 1", "c: 3"))
 
 	t.Run("holds the lines in the order given", func(t *testing.T) {
 		t.Parallel()
@@ -2776,7 +2499,7 @@ func TestCollect(t *testing.T) {
 func TestLines_Line(t *testing.T) {
 	t.Parallel()
 
-	lines := newLines("a: 1\nb: 2\n")
+	lines := newLines(stringtest.LinesLF("a: 1", "b: 2"))
 
 	assert.Equal(t, "a: 1", lines.Line(0).Content())
 	assert.Equal(t, "b: 2", lines.Line(1).Content())

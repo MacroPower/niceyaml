@@ -22,7 +22,7 @@ func TestHirschberg_Diff(t *testing.T) {
 	// kind of one op: "=" keeps a line, "-" deletes one, and "+" inserts
 	// one. The kinds fix the indices of the ops, and requireValidOps checks
 	// those.
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		before string
 		after  string
 		want   string
@@ -55,7 +55,7 @@ func TestHirschberg_Diff(t *testing.T) {
 		"replace_before_repeated_line":            {before: "xx", after: "yx", want: "-+="},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -124,7 +124,7 @@ func TestHirschberg_DiffIsMinimal(t *testing.T) {
 	// A case with edits builds after from before by that many random
 	// deletions and insertions, so the two inputs share most lines. The
 	// others draw both inputs at random.
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		alphabet []string
 		maxLen   int
 		edits    int
@@ -153,7 +153,7 @@ func TestHirschberg_DiffIsMinimal(t *testing.T) {
 		},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -207,90 +207,67 @@ func TestHirschberg_DiffIsMinimal(t *testing.T) {
 	}
 }
 
-func TestHirschberg_DiffFarEdits(t *testing.T) {
+func TestHirschberg_DiffScales(t *testing.T) {
 	t.Parallel()
 
-	// Changing the first and last lines leaves no shared start or end to
-	// pair up. A search that takes time in proportion to the product of
-	// the input lengths needs seconds here, while one that scales with the
-	// number of changed lines needs milliseconds.
-	const n = 40000
-
-	before := make([]string, n)
-	for i := range before {
-		before[i] = fmt.Sprintf("key%d: value%d", i, i)
-	}
-
-	after := slices.Clone(before)
-	after[0] = "changed first"
-	after[n-1] = "changed last"
-
-	want := make([]lcs.Op, 0, n+2)
-	want = append(want,
-		lcs.Op{Kind: lcs.OpDelete, Before: 0, After: -1},
-		lcs.Op{Kind: lcs.OpInsert, Before: -1, After: 0},
-	)
-
-	for i := 1; i < n-1; i++ {
-		want = append(want, lcs.Op{Kind: lcs.OpEqual, Before: i, After: i})
-	}
-
-	want = append(want,
-		lcs.Op{Kind: lcs.OpDelete, Before: n - 1, After: -1},
-		lcs.Op{Kind: lcs.OpInsert, Before: -1, After: n - 1},
-	)
-
-	start := time.Now()
-	got := lcs.NewHirschberg().Diff(before, after)
-	elapsed := time.Since(start)
-
-	assert.Equal(t, want, got)
-	assert.Less(t, elapsed, time.Second)
-}
-
-func TestHirschberg_DiffUniqueLines(t *testing.T) {
-	t.Parallel()
-
-	// A line that only one input holds is always a change. When most
-	// lines are such changes, a search that walks through each of them
-	// needs seconds here, while one that leaves them out needs
-	// milliseconds.
-	const n = 60000
-
-	before := make([]string, n)
-	for i := range before {
-		before[i] = fmt.Sprintf("key%d: value%d", i, i)
-	}
-
-	tests := map[string]struct {
-		after     func(i int) string
+	// Each case holds inputs long enough that a slow search needs seconds
+	// and a fast one needs milliseconds. The after func gives line i of the
+	// after input from the lines of before.
+	tcs := map[string]struct {
+		lines     int
+		after     func(before []string, i int) string
 		wantEqual int
 	}{
+		// Changing the first and last lines leaves no shared start or end
+		// to pair up. A search whose time grows with the product of the
+		// input lengths is slow here, and one that scales with the number
+		// of changed lines is fast.
+		"far_edits": {
+			lines: 40000,
+			after: func(before []string, i int) string {
+				switch i {
+				case 0:
+					return "changed first"
+				case len(before) - 1:
+					return "changed last"
+				}
+
+				return before[i]
+			},
+			wantEqual: 40000 - 2,
+		},
+		// A line that only one input holds is always a change. When most
+		// lines are such changes, a search that walks through each of them
+		// is slow, and one that leaves them out is fast.
 		"no_shared_lines": {
-			after: func(i int) string {
+			lines: 60000,
+			after: func(_ []string, i int) string {
 				return fmt.Sprintf("other%d", i)
 			},
 			wantEqual: 0,
 		},
 		"every_other_line_shared": {
-			after: func(i int) string {
+			lines: 60000,
+			after: func(before []string, i int) string {
 				if i%2 == 0 {
 					return before[i]
 				}
 
 				return fmt.Sprintf("other%d", i)
 			},
-			wantEqual: n / 2,
+			wantEqual: 60000 / 2,
 		},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			after := make([]string, n)
+			before := numberedLines(tc.lines)
+
+			after := make([]string, tc.lines)
 			for i := range after {
-				after[i] = tc.after(i)
+				after[i] = tc.after(before, i)
 			}
 
 			start := time.Now()
@@ -302,6 +279,17 @@ func TestHirschberg_DiffUniqueLines(t *testing.T) {
 			assert.Less(t, elapsed, time.Second)
 		})
 	}
+}
+
+// numberedLines returns n lines that are all distinct, "key0: value0"
+// through "key<n-1>: value<n-1>".
+func numberedLines(n int) []string {
+	lines := make([]string, n)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("key%d: value%d", i, i)
+	}
+
+	return lines
 }
 
 // requireValidOps checks that ops transform before into after. Each index
@@ -412,137 +400,4 @@ func naiveLCSLen(before, after []string) int {
 	}
 
 	return table[len(before)][len(after)]
-}
-
-func BenchmarkHirschberg_Diff(b *testing.B) {
-	type benchCase struct {
-		name  string
-		after []string
-	}
-
-	for _, n := range []int{1000, 10000, 40000} {
-		before := make([]string, n)
-		for i := range before {
-			before[i] = fmt.Sprintf("key%d: value%d", i, i)
-		}
-
-		// Swapping the first and last lines leaves no shared start or end
-		// to pair up, and both lines stay in both inputs, so the search
-		// covers both whole inputs with only a few edits.
-		farSwap := slices.Clone(before)
-		farSwap[0], farSwap[n-1] = farSwap[n-1], farSwap[0]
-
-		// Every tenth line changes, so the edits spread over the inputs.
-		// Each changed line appears in only one input, so the search
-		// leaves it out.
-		spread := slices.Clone(before)
-		for i := 0; i < n; i += 10 {
-			spread[i] = fmt.Sprintf("changed%d", i)
-		}
-
-		// No line of before appears in unrelated.
-		unrelated := make([]string, n)
-		for i := range unrelated {
-			unrelated[i] = fmt.Sprintf("other%d", i)
-		}
-
-		cases := []benchCase{
-			{"far_swap", farSwap},
-			{"spread", spread},
-			{"unrelated", unrelated},
-		}
-
-		// The same lines in a different order keep every line in the
-		// search and take time close to the square of n, so these cases
-		// skip the largest n.
-		if n <= 10000 {
-			reversed := slices.Clone(before)
-			slices.Reverse(reversed)
-
-			shuffled := slices.Clone(before)
-			rng := rand.New(rand.NewPCG(1, 2))
-			rng.Shuffle(n, func(i, j int) {
-				shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
-			})
-
-			cases = append(cases,
-				benchCase{"reversed", reversed},
-				benchCase{"shuffled", shuffled},
-			)
-		}
-
-		for _, tc := range cases {
-			b.Run(fmt.Sprintf("%s_%d", tc.name, n), func(b *testing.B) {
-				h := lcs.NewHirschberg()
-
-				b.ReportAllocs()
-
-				for b.Loop() {
-					h.Diff(before, tc.after)
-				}
-			})
-		}
-	}
-}
-
-func BenchmarkHirschberg_DiffAfterLarge(b *testing.B) {
-	// Each call returns n lines and a copy with every tenth line changed.
-	spreadInputs := func(n int) ([]string, []string) {
-		before := make([]string, n)
-		for i := range before {
-			before[i] = fmt.Sprintf("key%d: value%d", i, i)
-		}
-
-		after := slices.Clone(before)
-		for i := 0; i < n; i += 10 {
-			after[i] = fmt.Sprintf("changed%d", i)
-		}
-
-		return before, after
-	}
-
-	// Each call returns n lines that alternate between two values, with a
-	// first and last line that differ between the inputs. The line map
-	// that intern makes for them has room for n lines but holds only six.
-	repeatedInputs := func(n int) ([]string, []string) {
-		before := make([]string, n)
-		for i := range before {
-			before[i] = []string{"a", "b"}[i%2]
-		}
-
-		after := slices.Clone(before)
-		before[0], before[n-1] = "first before", "last before"
-		after[0], after[n-1] = "first after", "last after"
-
-		return before, after
-	}
-
-	before, after := spreadInputs(200)
-
-	cases := []struct {
-		name  string
-		large func(int) ([]string, []string)
-	}{
-		{"fresh", nil},
-		{"after_100000", spreadInputs},
-		{"after_100000_repeated", repeatedInputs},
-	}
-
-	for _, tc := range cases {
-		b.Run(tc.name, func(b *testing.B) {
-			h := lcs.NewHirschberg()
-
-			// A large diff leaves its buffers in the pool, and the small
-			// diffs after it should run as fast as on a fresh instance.
-			if tc.large != nil {
-				h.Diff(tc.large(100000))
-			}
-
-			b.ReportAllocs()
-
-			for b.Loop() {
-				h.Diff(before, after)
-			}
-		})
-	}
 }

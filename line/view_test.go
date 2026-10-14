@@ -1,6 +1,8 @@
 package line_test
 
 import (
+	"fmt"
+	"iter"
 	"math"
 	"runtime"
 	"strings"
@@ -16,14 +18,42 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// newTestView creates a view over the lines of input.
-func newTestView(t *testing.T, input string, wantLen int) *line.View {
-	t.Helper()
+// newView creates a view over the lines of input.
+func newView(input string) *line.View {
+	return line.NewView(newLines(input))
+}
 
-	lines := newLines(input)
-	require.Equal(t, wantLen, lines.Len())
+// indicesOf returns the index of each line seq yields.
+func indicesOf(seq iter.Seq2[int, *line.Line]) []int {
+	var got []int
 
-	return line.NewView(lines)
+	for i := range seq {
+		got = append(got, i)
+	}
+
+	return got
+}
+
+// contentsOf returns the content of each line seq yields.
+func contentsOf(seq iter.Seq2[int, *line.Line]) []string {
+	var got []string
+
+	for _, ln := range seq {
+		got = append(got, ln.Content())
+	}
+
+	return got
+}
+
+// letterRows returns n rows of YAML that map the letters of the alphabet
+// to their places in it, from "a: 1" on.
+func letterRows(n int) []string {
+	rows := make([]string, n)
+	for i := range rows {
+		rows[i] = fmt.Sprintf("%c: %d", 'a'+i, i+1)
+	}
+
+	return rows
 }
 
 func TestNewView(t *testing.T) {
@@ -32,43 +62,13 @@ func TestNewView(t *testing.T) {
 	t.Run("over lines", func(t *testing.T) {
 		t.Parallel()
 
-		lines := newLines("key: value\nother: data\n")
+		lines := newLines(stringtest.LinesLF("key: value", "other: data"))
 		view := line.NewView(lines)
 
 		assert.Equal(t, 2, view.Count())
 		assert.Same(t, lines.Line(0), view.Line(0))
 		assert.Same(t, lines.Line(1), view.Line(1))
 		assert.Panics(t, func() { view.Line(2) }, "the content ends where lines ends")
-	})
-
-	t.Run("over empty lines", func(t *testing.T) {
-		t.Parallel()
-
-		// Each constructor returns the zero Lines for empty input, which
-		// assert.Empty checks through the view.
-		tcs := map[string]struct {
-			lines line.Lines
-		}{
-			"zero Lines":            {lines: line.Lines{}},
-			"NewLines of no tokens": {lines: newLines("")},
-			"Collect of no lines":   {lines: line.Collect()},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				view := line.NewView(tc.lines)
-
-				assert.Equal(t, 0, view.Count())
-				assert.Panics(t, func() { view.Line(0) })
-				assert.Empty(t, view.String())
-
-				for range view.All() {
-					t.Fatal("expected no lines")
-				}
-			})
-		}
 	})
 
 	t.Run("zero value", func(t *testing.T) {
@@ -85,72 +85,35 @@ func TestNewView(t *testing.T) {
 
 		assert.Equal(t, 0, view.Slice(position.NewSpan(0, 5)).Count())
 	})
-
-	t.Run("nil view", func(t *testing.T) {
-		t.Parallel()
-
-		var view *line.View
-
-		assert.Equal(t, 0, view.Count())
-		assert.Panics(t, func() { view.Line(0) })
-		assert.Nil(t, view.Clone())
-
-		for range view.All() {
-			t.Fatal("expected no lines")
-		}
-	})
 }
 
-func TestNewView_Spans(t *testing.T) {
+func TestView_Nil(t *testing.T) {
 	t.Parallel()
 
-	lines := newLines(stringtest.LinesLF(
-		"a: 1",
-		"b: 2",
-		"c: 3",
-		"d: 4",
-		"e: 5",
-	))
+	var view *line.View
 
-	tcs := map[string]struct {
-		spans []position.Span
-		want  []int
-	}{
-		"no spans": {
-			want: []int{0, 1, 2, 3, 4},
-		},
-		"one span": {
-			spans: []position.Span{position.NewSpan(1, 3)},
-			want:  []int{1, 2},
-		},
-		"spans out of order and overlapping": {
-			spans: []position.Span{position.NewSpan(3, 5), position.NewSpan(0, 1), position.NewSpan(3, 4)},
-			want:  []int{0, 3, 4},
-		},
-		"span past the end": {
-			spans: []position.Span{position.NewSpan(4, 9)},
-			want:  []int{4},
-		},
-		"empty span": {
-			spans: []position.Span{position.NewSpan(2, 2)},
-		},
+	assert.Equal(t, 0, view.Count())
+	assert.Panics(t, func() { view.Line(0) })
+	assert.Nil(t, view.Clone())
+	assert.Equal(t, 0, view.Held().Len())
+
+	for range view.All() {
+		t.Fatal("expected no lines")
 	}
 
-	for name, tc := range tcs {
+	// Hunks and Clip return an empty view rather than nil.
+	tcs := map[string]*line.View{
+		"Hunks": view.Hunks(2),
+		"Clip":  view.Clip(10),
+	}
+
+	for name, got := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := line.NewView(lines, tc.spans...)
-
-			got := indicesOf(view.All())
-			assert.Equal(t, tc.want, got)
-
-			for i := range lines.Len() {
-				assert.Same(t, lines.Line(i), view.Line(i), "content line %d", i)
-			}
-
-			// The view holds what a slice of a view over every line holds.
-			assert.Equal(t, indicesOf(line.NewView(lines).Slice(tc.spans...).All()), got)
+			require.NotNil(t, got)
+			assert.Equal(t, 0, got.Count())
+			assert.Empty(t, got.String())
 		})
 	}
 }
@@ -158,11 +121,7 @@ func TestNewView_Spans(t *testing.T) {
 func TestView_Contains(t *testing.T) {
 	t.Parallel()
 
-	view := newTestView(t, stringtest.LinesLF(
-		"a: 1",
-		"b: 2",
-		"c: 3",
-	), 3)
+	view := newView(stringtest.LinesLF(letterRows(3)...))
 	sliced := view.Slice(position.NewSpan(1, 3))
 
 	var nilView *line.View
@@ -194,133 +153,48 @@ func TestView_Contains(t *testing.T) {
 func TestView_All(t *testing.T) {
 	t.Parallel()
 
-	input := stringtest.Input(`
-		key: value
-		list:
-		  - one
-	`)
+	// TestSequence checks how All selects lines from a view of every line.
+	// This view holds lines 0, 2, and 5 alone, so All yields those of them
+	// that the spans select.
+	view := newView(stringtest.JoinLF(letterRows(6)...)).Slice(
+		position.NewSpan(0, 1),
+		position.NewSpan(2, 3),
+		position.NewSpan(5, 6),
+	)
 
-	t.Run("yields every index and line", func(t *testing.T) {
-		t.Parallel()
+	tcs := map[string]struct {
+		spans []position.Span
+		want  []int
+	}{
+		"no spans yields the lines the view holds": {
+			want: []int{0, 2, 5},
+		},
+		"span over lines the view skips": {
+			spans: []position.Span{position.NewSpan(1, 5)},
+			want:  []int{2},
+		},
+		"overlapping spans": {
+			spans: []position.Span{position.NewSpan(4, 6), position.NewSpan(2, 5), position.NewSpan(0, 3)},
+			want:  []int{0, 2, 5},
+		},
+		"spans over lines the view does not hold": {
+			spans: []position.Span{position.NewSpan(3, 5), position.NewSpan(1, 2)},
+		},
+	}
 
-		view := newTestView(t, input, 3)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		var (
-			indices  []int
-			contents []string
-		)
-
-		for i, ln := range view.All() {
-			indices = append(indices, i)
-			contents = append(contents, ln.Content())
-
-			assert.Same(t, view.Line(i), ln)
-		}
-
-		assert.Equal(t, []int{0, 1, 2}, indices)
-		assert.Equal(t, []string{"key: value", "list:", "  - one"}, contents)
-	})
-
-	t.Run("spans select held lines in content order", func(t *testing.T) {
-		t.Parallel()
-
-		six := stringtest.Input(`
-			a: 1
-			b: 2
-			c: 3
-			d: 4
-			e: 5
-			f: 6
-		`)
-
-		// Sparse slices the view to lines 0, 2, and 5 before selecting.
-		sparse := []position.Span{position.NewSpan(0, 1), position.NewSpan(2, 3), position.NewSpan(5, 6)}
-
-		tcs := map[string]struct {
-			held  []position.Span
-			spans []position.Span
-			want  []int
-		}{
-			"out of order": {
-				spans: []position.Span{position.NewSpan(4, 6), position.NewSpan(0, 2)},
-				want:  []int{0, 1, 4, 5},
-			},
-			"nested": {
-				spans: []position.Span{position.NewSpan(0, 5), position.NewSpan(1, 2)},
-				want:  []int{0, 1, 2, 3, 4},
-			},
-			"overlapping": {
-				spans: []position.Span{position.NewSpan(2, 5), position.NewSpan(0, 3)},
-				want:  []int{0, 1, 2, 3, 4},
-			},
-			"touching": {
-				spans: []position.Span{position.NewSpan(2, 4), position.NewSpan(0, 2)},
-				want:  []int{0, 1, 2, 3},
-			},
-			"empty span among real ones": {
-				spans: []position.Span{position.NewSpan(4, 5), position.NewSpan(3, 3), position.NewSpan(1, 2)},
-				want:  []int{1, 4},
-			},
-			"negative start": {
-				spans: []position.Span{position.NewSpan(-3, 2)},
-				want:  []int{0, 1},
-			},
-			"end past the content": {
-				spans: []position.Span{position.NewSpan(4, 99)},
-				want:  []int{4, 5},
-			},
-			"sparse view": {
-				held:  sparse,
-				spans: []position.Span{position.NewSpan(1, 5)},
-				want:  []int{2},
-			},
-			"sparse view with overlapping spans": {
-				held:  sparse,
-				spans: []position.Span{position.NewSpan(4, 6), position.NewSpan(2, 5), position.NewSpan(0, 3)},
-				want:  []int{0, 2, 5},
-			},
-			"spans over lines the view does not hold": {
-				held:  sparse,
-				spans: []position.Span{position.NewSpan(3, 5), position.NewSpan(1, 2)},
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				// A slice with no spans holds every line.
-				view := newTestView(t, six, 6).Slice(tc.held...)
-
-				assert.Equal(t, tc.want, indicesOf(view.All(tc.spans...)))
-			})
-		}
-	})
-
-	t.Run("index reaches decoration", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, input, 3)
-		view.SetFlag(1, line.FlagInserted)
-
-		var flags []line.Flag
-
-		for i := range view.All() {
-			flags = append(flags, view.Flag(i))
-		}
-
-		assert.Equal(t, []line.Flag{line.FlagDefault, line.FlagInserted, line.FlagDefault}, flags)
-	})
+			assert.Equal(t, tc.want, indicesOf(view.All(tc.spans...)))
+		})
+	}
 }
 
 func TestView_Flag(t *testing.T) {
 	t.Parallel()
 
-	view := newTestView(t, stringtest.LinesLF(
-		"a: 1",
-		"b: 2",
-		"c: 3",
-	), 3)
+	view := newView(stringtest.LinesLF(letterRows(3)...))
 	assert.Equal(t, []line.Flag{line.FlagDefault, line.FlagDefault, line.FlagDefault}, flagsOf(view))
 
 	view.SetFlag(1, line.FlagInserted)
@@ -353,7 +227,7 @@ func flagsOf(view *line.View) []line.Flag {
 func TestView_Annotate(t *testing.T) {
 	t.Parallel()
 
-	view := newTestView(t, "a: 1\nb: 2\n", 2)
+	view := newView(stringtest.LinesLF(letterRows(2)...))
 	assert.Nil(t, view.Annotations(1))
 
 	first := line.Annotation{Content: "first", Placement: line.Above}
@@ -371,7 +245,7 @@ func TestView_Annotate(t *testing.T) {
 func TestView_AddLineOverlay(t *testing.T) {
 	t.Parallel()
 
-	view := newTestView(t, "a: 1\nb: 2\n", 2)
+	view := newView(stringtest.LinesLF(letterRows(2)...))
 	assert.Nil(t, view.Overlays(1))
 
 	first := line.Overlay{Cols: position.NewSpan(0, 3), Kind: "test1"}
@@ -438,7 +312,7 @@ func TestView_AddOverlay(t *testing.T) {
 		// applies only to the lines that exist, and a range entirely
 		// outside the view adds nothing.
 		"out of range lines are skipped": {
-			input: "a: 1\nb: 2\n",
+			input: stringtest.LinesLF(letterRows(2)...),
 			ranges: []position.Range{
 				position.NewRange(position.New(-1, 0), position.New(5, 3)),
 				yamltest.LineRange(7, 0, 3),
@@ -448,11 +322,7 @@ func TestView_AddOverlay(t *testing.T) {
 		// Both ranges end on the line before they start, one at column 0
 		// and one past it.
 		"inverted ranges add nothing": {
-			input: stringtest.LinesLF(
-				"a: 1",
-				"b: 2",
-				"c: 3",
-			),
+			input: stringtest.LinesLF(letterRows(3)...),
 			ranges: []position.Range{
 				position.NewRange(position.New(2, 0), position.New(1, 0)),
 				position.NewRange(position.New(2, 0), position.New(1, 3)),
@@ -465,10 +335,11 @@ func TestView_AddOverlay(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := newTestView(t, tc.input, len(tc.want))
+			view := newView(tc.input)
+			require.Equal(t, len(tc.want), view.Count())
 			view.AddOverlay("test1", tc.ranges...)
 
-			blended := newTestView(t, tc.input, len(tc.want))
+			blended := newView(tc.input)
 			blended.BlendOverlay("test1", tc.ranges...)
 
 			for i, cols := range tc.want {
@@ -487,17 +358,6 @@ func TestView_AddOverlay(t *testing.T) {
 			}
 		})
 	}
-
-	t.Run("empty view no-op", func(t *testing.T) {
-		t.Parallel()
-
-		view := line.NewView(line.Lines{})
-
-		// AddOverlay on an empty view does not panic.
-		view.AddOverlay("test1", yamltest.LineRange(0, 0, 5))
-
-		assert.Equal(t, 0, view.Count())
-	})
 }
 
 func TestView_BlendOverlay(t *testing.T) {
@@ -505,7 +365,7 @@ func TestView_BlendOverlay(t *testing.T) {
 
 	// TestView_AddOverlay runs its ranges through BlendOverlay too. The two
 	// kinds of overlay mix on one line in the order of the calls.
-	view := newTestView(t, "key: value\n", 1)
+	view := newView("key: value\n")
 	view.AddOverlay("test1", yamltest.LineRange(0, 0, 3))
 	view.BlendOverlay("test2", yamltest.LineRange(0, 0, 3))
 
@@ -515,6 +375,10 @@ func TestView_BlendOverlay(t *testing.T) {
 	}, view.Overlays(0))
 }
 
+// TestView_Clone checks Clone together with Slice and Clip, which also
+// return a copy of the view. With no span, a slice holds every line of the
+// view, and a clip leaves its lines whole. Each copy shares the lines of
+// the view and owns its decoration.
 func TestView_Clone(t *testing.T) {
 	t.Parallel()
 
@@ -524,92 +388,103 @@ func TestView_Clone(t *testing.T) {
 		  - one
 	`)
 
-	t.Run("shares lines", func(t *testing.T) {
-		t.Parallel()
+	tcs := map[string]func(*line.View) *line.View{
+		"Clone": (*line.View).Clone,
+		"Slice": func(v *line.View) *line.View { return v.Slice() },
+		"Clip":  func(v *line.View) *line.View { return v.Clip(10) },
+	}
 
-		view := newTestView(t, input, 3)
-		clone := view.Clone()
+	for name, copyOf := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		require.NotSame(t, view, clone)
-		require.Equal(t, 3, clone.Count())
-		assert.Equal(t, view.Held().Content(), clone.Held().Content())
+			t.Run("shares lines", func(t *testing.T) {
+				t.Parallel()
 
-		for i, ln := range view.All() {
-			j, ok := clone.Index(ln)
-			require.True(t, ok, "line %d", i)
-			assert.Equal(t, i, j)
-		}
-	})
+				view := newView(input)
+				got := copyOf(view)
 
-	t.Run("carries decoration of its own", func(t *testing.T) {
-		t.Parallel()
+				require.NotSame(t, view, got)
+				require.Equal(t, 3, got.Count())
+				assert.Equal(t, view.Held().Content(), got.Held().Content())
 
-		overlay := line.Overlay{Cols: position.NewSpan(0, 5), Kind: "test1"}
-		note := line.Annotation{Content: "original note", Placement: line.Below}
+				for i, ln := range view.All() {
+					j, ok := got.Index(ln)
+					require.True(t, ok, "line %d", i)
+					assert.Equal(t, i, j)
+				}
+			})
 
-		view := newTestView(t, input, 3)
-		view.SetFlag(1, line.FlagDeleted)
-		view.AddLineOverlay(1, overlay)
-		view.Annotate(1, note)
+			t.Run("carries decoration of its own", func(t *testing.T) {
+				t.Parallel()
 
-		clone := view.Clone()
+				overlay := line.Overlay{Cols: position.NewSpan(0, 5), Kind: "test1"}
+				note := line.Annotation{Content: "original note", Placement: line.Below}
 
-		assert.Equal(t, flagsOf(view), flagsOf(clone))
-		assert.Equal(t, line.Overlays{overlay}, clone.Overlays(1))
-		assert.Equal(t, line.Annotations{note}, clone.Annotations(1))
+				view := newView(input)
+				view.SetFlag(1, line.FlagDeleted)
+				view.AddLineOverlay(1, overlay)
+				view.Annotate(1, note)
 
-		// Decoration added to the clone, on a line that has some and on a
-		// line that has none, leaves the original as it was.
-		clone.SetFlag(1, line.FlagInserted)
-		clone.SetFlag(2, line.FlagInserted)
-		clone.AddLineOverlay(1, line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"})
-		clone.Annotate(1, line.Annotation{Content: "modified", Placement: line.Above})
+				got := copyOf(view)
 
-		assert.Equal(t, []line.Flag{line.FlagDefault, line.FlagDeleted, line.FlagDefault}, flagsOf(view))
-		assert.Equal(t, line.Overlays{overlay}, view.Overlays(1))
-		assert.Equal(t, line.Annotations{note}, view.Annotations(1))
-		assert.Len(t, clone.Overlays(1), 2)
-		assert.Len(t, clone.Annotations(1), 2)
-	})
+				assert.Equal(t, flagsOf(view), flagsOf(got))
+				assert.Equal(t, line.Overlays{overlay}, got.Overlays(1))
+				assert.Equal(t, line.Annotations{note}, got.Annotations(1))
 
-	t.Run("decoration is independent in both directions", func(t *testing.T) {
-		t.Parallel()
+				// Decoration added to the copy, on a line that has some and
+				// on a line that has none, leaves the original as it was.
+				got.SetFlag(1, line.FlagInserted)
+				got.SetFlag(2, line.FlagInserted)
+				got.AddLineOverlay(1, line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"})
+				got.Annotate(1, line.Annotation{Content: "modified", Placement: line.Above})
 
-		view := newTestView(t, input, 3)
-		clone := view.Clone()
+				assert.Equal(t, []line.Flag{line.FlagDefault, line.FlagDeleted, line.FlagDefault}, flagsOf(view))
+				assert.Equal(t, line.Overlays{overlay}, view.Overlays(1))
+				assert.Equal(t, line.Annotations{note}, view.Annotations(1))
+				assert.Len(t, got.Overlays(1), 2)
+				assert.Len(t, got.Annotations(1), 2)
+			})
 
-		clone.AddOverlay(kind.GenericHighlight, yamltest.LineRange(0, 0, 3))
-		clone.Annotate(1, line.Annotation{Content: "note", Placement: line.Below})
-		clone.SetFlag(2, line.FlagInserted)
+			t.Run("decoration is independent in both directions", func(t *testing.T) {
+				t.Parallel()
 
-		assert.Empty(t, view.Overlays(0))
-		assert.Empty(t, view.Annotations(1))
-		assert.Equal(t, line.FlagDefault, view.Flag(2))
+				view := newView(input)
+				got := copyOf(view)
 
-		view.AddOverlay(kind.GenericError, yamltest.LineRange(1, 0, 3))
-		view.Annotate(0, line.Annotation{Content: "other", Placement: line.Above})
-		view.SetFlag(0, line.FlagDeleted)
+				got.AddOverlay(kind.GenericHighlight, yamltest.LineRange(0, 0, 3))
+				got.Annotate(1, line.Annotation{Content: "note", Placement: line.Below})
+				got.SetFlag(2, line.FlagInserted)
 
-		assert.Empty(t, clone.Overlays(1))
-		assert.Empty(t, clone.Annotations(0))
-		assert.Equal(t, line.FlagDefault, clone.Flag(0))
+				assert.Empty(t, view.Overlays(0))
+				assert.Empty(t, view.Annotations(1))
+				assert.Equal(t, line.FlagDefault, view.Flag(2))
 
-		// Decorating one leaves the other intact.
-		require.Len(t, clone.Overlays(0), 1)
-	})
+				view.AddOverlay(kind.GenericError, yamltest.LineRange(1, 0, 3))
+				view.Annotate(0, line.Annotation{Content: "other", Placement: line.Above})
+				view.SetFlag(0, line.FlagDeleted)
 
-	t.Run("undecorated", func(t *testing.T) {
-		t.Parallel()
+				assert.Empty(t, got.Overlays(1))
+				assert.Empty(t, got.Annotations(0))
+				assert.Equal(t, line.FlagDefault, got.Flag(0))
 
-		view := newTestView(t, input, 3)
-		clone := view.Clone()
+				// Decorating one leaves the other intact.
+				require.Len(t, got.Overlays(0), 1)
+			})
 
-		for i := range clone.All() {
-			assert.Equal(t, line.FlagDefault, clone.Flag(i))
-			assert.Nil(t, clone.Overlays(i))
-			assert.Nil(t, clone.Annotations(i))
-		}
-	})
+			t.Run("undecorated", func(t *testing.T) {
+				t.Parallel()
+
+				got := copyOf(newView(input))
+
+				for i := range got.All() {
+					assert.Equal(t, line.FlagDefault, got.Flag(i))
+					assert.Nil(t, got.Overlays(i))
+					assert.Nil(t, got.Annotations(i))
+				}
+			})
+		})
+	}
 
 	t.Run("empty", func(t *testing.T) {
 		t.Parallel()
@@ -624,15 +499,10 @@ func TestView_Clone(t *testing.T) {
 func TestView_Index(t *testing.T) {
 	t.Parallel()
 
-	input := stringtest.Input(`
-		a: 1
-		b: 2
-		c: 3
-		d: 4
-	`)
+	input := stringtest.JoinLF(letterRows(4)...)
 
-	view := newTestView(t, input, 4)
-	other := newTestView(t, input, 4)
+	view := newView(input)
+	other := newView(input)
 
 	a, b := view.Line(0), view.Line(1)
 	repeated := line.NewView(line.Collect(a, b, a, b, a))
@@ -712,76 +582,17 @@ func TestView_Index(t *testing.T) {
 	}
 }
 
-func TestView_Held(t *testing.T) {
-	t.Parallel()
-
-	input := stringtest.Input(`
-		a: 1
-		b: 2
-		c: 3
-		d: 4
-	`)
-
-	view := newTestView(t, input, 4)
-
-	tcs := map[string]struct {
-		view *line.View
-		want []int // Indices in the content of the lines held.
-	}{
-		"every line of the content": {
-			view: view,
-			want: []int{0, 1, 2, 3},
-		},
-		"the lines a slice holds": {
-			view: view.Slice(position.NewSpan(1, 3)),
-			want: []int{1, 2},
-		},
-		"content order through overlapping spans": {
-			view: view.Slice(position.NewSpan(2, 4), position.NewSpan(0, 1)),
-			want: []int{0, 2, 3},
-		},
-		"a slice that holds nothing": {
-			view: view.Slice(position.NewSpan(2, 2)),
-			want: nil,
-		},
-		"nil view": {
-			view: nil,
-			want: nil,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := tc.view.Held()
-			require.Equal(t, len(tc.want), got.Len())
-			assert.Equal(t, tc.view.Count(), got.Len())
-
-			for i, ci := range tc.want {
-				assert.Same(t, view.Line(ci), got.Line(i), "held line %d shares content line %d", i, ci)
-				assert.Equal(t, ci+1, got.Line(i).Number(), "held line %d keeps the file's number", i)
-			}
-		})
-	}
-}
-
 func TestView_Slice(t *testing.T) {
 	t.Parallel()
 
-	input := stringtest.Input(`
-		a: 1
-		b: 2
-		c: 3
-		d: 4
-	`)
+	// TestSequence checks which lines a slice holds, and TestView_Clone
+	// checks that a slice is a copy that owns its decoration.
+	input := stringtest.JoinLF(letterRows(4)...)
 
 	// Decorated returns a view with a distinct flag, overlay, and annotation
 	// on every line so a test can check a slice against its source.
-	decorated := func(t *testing.T) *line.View {
-		t.Helper()
-
-		view := newTestView(t, input, 4)
+	decorated := func() *line.View {
+		view := newView(input)
 
 		for i, ln := range view.All() {
 			view.SetFlag(i, line.Flag(i))
@@ -792,85 +603,10 @@ func TestView_Slice(t *testing.T) {
 		return view
 	}
 
-	t.Run("holds the lines the spans select", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]struct {
-			spans []position.Span
-			want  []string
-		}{
-			"no spans yields every line": {
-				want: []string{"a: 1", "b: 2", "c: 3", "d: 4"},
-			},
-			"single span": {
-				spans: []position.Span{position.NewSpan(1, 3)},
-				want:  []string{"b: 2", "c: 3"},
-			},
-			"spans in any order yield content order": {
-				spans: []position.Span{position.NewSpan(3, 4), position.NewSpan(0, 2)},
-				want:  []string{"a: 1", "b: 2", "d: 4"},
-			},
-			"overlapping spans hold each line once": {
-				spans: []position.Span{position.NewSpan(0, 2), position.NewSpan(1, 3)},
-				want:  []string{"a: 1", "b: 2", "c: 3"},
-			},
-			"spans are clamped": {
-				spans: []position.Span{position.NewSpan(-5, 1), position.NewSpan(3, 99)},
-				want:  []string{"a: 1", "d: 4"},
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				view := decorated(t)
-				got := view.Slice(tc.spans...)
-
-				require.NotSame(t, view, got)
-				assert.Equal(t, tc.want, contentsOf(got.All()))
-				assert.Equal(t, len(tc.want), got.Count())
-			})
-		}
-	})
-
-	t.Run("empty and out of range spans yield nothing", func(t *testing.T) {
-		t.Parallel()
-
-		view := decorated(t)
-
-		for name, span := range map[string]position.Span{
-			"empty":        position.NewSpan(2, 2),
-			"inverted":     position.NewSpan(3, 1),
-			"past the end": position.NewSpan(10, 20),
-			"before start": position.NewSpan(-9, -1),
-		} {
-			got := view.Slice(span)
-
-			assert.Equal(t, 0, got.Count(), name)
-			assert.Same(t, view.Line(0), got.Line(0), name)
-			assert.Empty(t, got.String(), name)
-		}
-	})
-
-	t.Run("shares lines", func(t *testing.T) {
-		t.Parallel()
-
-		view := decorated(t)
-		got := view.Slice(position.NewSpan(2, 4))
-
-		require.Equal(t, 2, got.Count())
-		assert.Same(t, view.Line(0), got.Line(0), "the slice reaches a line of the content it does not hold")
-
-		for i, ln := range got.All() {
-			assert.Same(t, view.Line(i), ln)
-		}
-	})
-
 	t.Run("carries decoration", func(t *testing.T) {
 		t.Parallel()
 
-		view := decorated(t)
+		view := decorated()
 		got := view.Slice(position.NewSpan(3, 4), position.NewSpan(1, 2))
 
 		require.Equal(t, 2, got.Count())
@@ -894,22 +630,6 @@ func TestView_Slice(t *testing.T) {
 		assert.Empty(t, got.Annotations(2))
 	})
 
-	t.Run("decoration is independent", func(t *testing.T) {
-		t.Parallel()
-
-		view := decorated(t)
-		got := view.Slice(position.NewSpan(1, 2))
-
-		got.SetFlag(1, line.FlagDefault)
-		got.AddLineOverlay(1, line.Overlay{Cols: position.NewSpan(2, 3), Kind: "extra"})
-		got.Annotate(1, line.Annotation{Content: "extra"})
-
-		assert.Equal(t, line.Flag(1), view.Flag(1))
-		assert.Len(t, view.Overlays(1), 1)
-		assert.Len(t, view.Annotations(1), 1)
-		assert.Len(t, got.Overlays(1), 2)
-	})
-
 	t.Run("keeps the coordinates of the content", func(t *testing.T) {
 		t.Parallel()
 
@@ -918,13 +638,13 @@ func TestView_Slice(t *testing.T) {
 		rng := yamltest.LineRange(2, 3, 4)
 		ann := line.Annotation{Content: "here", Placement: line.Below, Col: 3}
 
-		before := newTestView(t, input, 4)
+		before := newView(input)
 		before.AddOverlay("test", rng)
 		before.Annotate(2, ann)
 
 		before = before.Slice(position.NewSpan(2, 4))
 
-		after := newTestView(t, input, 4).Slice(position.NewSpan(2, 4))
+		after := newView(input).Slice(position.NewSpan(2, 4))
 		after.AddOverlay("test", rng)
 		after.Annotate(2, ann)
 
@@ -940,7 +660,7 @@ func TestView_Slice(t *testing.T) {
 	t.Run("a slice of a slice narrows it", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, input, 4)
+		view := newView(input)
 		got := view.Slice(position.NewSpan(1, 4)).Slice(position.NewSpan(0, 3))
 
 		assert.Equal(t, []string{"b: 2", "c: 3"}, contentsOf(got.All()))
@@ -952,7 +672,7 @@ func TestView_Slice(t *testing.T) {
 	t.Run("decoration on a line the slice does not hold never renders", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, input, 4).Slice(position.NewSpan(0, 2))
+		view := newView(input).Slice(position.NewSpan(0, 2))
 		view.AddOverlay("test", yamltest.LineRange(3, 0, 4))
 		view.Annotate(3, line.Annotation{Content: "hidden", Placement: line.Below})
 
@@ -960,25 +680,10 @@ func TestView_Slice(t *testing.T) {
 		assert.Equal(t, stringtest.JoinLF("   1 | a: 1", "   2 | b: 2"), view.String())
 	})
 
-	t.Run("undecorated source", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, input, 4)
-		got := view.Slice(position.NewSpan(1, 3))
-
-		require.Equal(t, 2, got.Count())
-
-		for i := range got.All() {
-			assert.Equal(t, line.FlagDefault, got.Flag(i))
-			assert.Nil(t, got.Overlays(i))
-			assert.Nil(t, got.Annotations(i))
-		}
-	})
-
 	t.Run("String renders the sliced lines", func(t *testing.T) {
 		t.Parallel()
 
-		view := decorated(t)
+		view := decorated()
 		got := view.Slice(position.NewSpan(2, 3))
 
 		assert.Equal(t, stringtest.JoinLF("   3 | c: 3", "     | ^^^ c: 3"), got.String())
@@ -1046,7 +751,7 @@ func TestView_String(t *testing.T) {
 			key1: value1
 			key2: value2
 		`)
-		view := newTestView(t, input, 2)
+		view := newView(input)
 
 		assert.Equal(t, view.Held().String(), view.String())
 		assert.Equal(t, stringtest.JoinLF("   1 | key1: value1", "   2 | key2: value2"), view.String())
@@ -1055,11 +760,7 @@ func TestView_String(t *testing.T) {
 	t.Run("annotations on several lines", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, stringtest.LinesLF(
-			"a: 1",
-			"b: 2",
-			"c: 3",
-		), 3)
+		view := newView(stringtest.LinesLF(letterRows(3)...))
 		view.Annotate(0, line.Annotation{Content: "top", Placement: line.Above})
 		view.Annotate(2, line.Annotation{Content: "bottom", Placement: line.Below, Col: 3})
 
@@ -1077,7 +778,7 @@ func TestView_String(t *testing.T) {
 	t.Run("overlays mark their columns and flags do not render", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, "key: value\n", 1)
+		view := newView("key: value\n")
 		view.SetFlag(0, line.FlagDeleted)
 		view.AddOverlay("test1", yamltest.LineRange(0, 0, 3))
 		view.BlendOverlay("test2", yamltest.LineRange(0, 5, 7))
@@ -1085,62 +786,85 @@ func TestView_String(t *testing.T) {
 		assert.Equal(t, stringtest.JoinLF("   1 | key: value", "     | ^^^  ^^"), view.String())
 	})
 
-	t.Run("annotation without content marks an overlay of no width", func(t *testing.T) {
-		t.Parallel()
-
-		// An overlay that covers no column, such as the one a bound error
-		// puts at the end of a line with no token under its location,
-		// renders no caret itself, so the annotation below the line marks
-		// the spot. An overlay that covers a column marks the row alone.
-		tcs := map[string]struct {
-			overlay line.Overlay
-			want    string
-		}{
-			"empty span at the end of the line": {
-				overlay: line.Overlay{Kind: "test1", Cols: position.NewSpan(10, 10)},
-				want:    stringtest.JoinLF("   1 | key: value", "     |           ^"),
-			},
-			"span past the content": {
-				overlay: line.Overlay{Kind: "test1", Cols: position.NewSpan(12, 14)},
-				want:    stringtest.JoinLF("   1 | key: value", "     |           ^"),
-			},
-			"span that covers a column": {
-				overlay: line.Overlay{Kind: "test1", Cols: position.NewSpan(5, 7)},
-				want:    stringtest.JoinLF("   1 | key: value", "     |      ^^"),
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				view := newTestView(t, "key: value\n", 1)
-				view.AddLineOverlay(0, tc.overlay)
-				view.Annotate(0, line.Annotation{Placement: line.Below, Col: 10})
-
-				assert.Equal(t, tc.want, view.String())
-			})
-		}
-	})
-
-	t.Run("overlay past the width stops at the content", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.AddLineOverlay(0, line.Overlay{Kind: "test1", Cols: position.NewSpan(8, 20)})
-
-		assert.Equal(t, stringtest.JoinLF("   1 | key: value", "     |         ^^"), view.String())
-	})
-
 	t.Run("annotations and marks on one line", func(t *testing.T) {
 		t.Parallel()
+
+		// The marks of a line that holds a price below its bound and a
+		// deprecated field.
+		const spec = "spec: {price: 0, legacyPricing: true}"
+
+		errorOverlay := line.Overlay{Kind: kind.GenericError, Cols: position.NewSpan(14, 15)}
+		warnOverlay := line.Overlay{Kind: kind.GenericWarn, Cols: position.NewSpan(17, 30)}
+		errorAnn := line.Annotation{Content: "0 is less than 1", Kind: kind.TextError, Placement: line.Below, Col: 14}
+		warnAnn := line.Annotation{
+			Content:   `warning: deprecated field "legacyPricing"`,
+			Kind:      kind.TextWarn,
+			Placement: line.Below,
+			Col:       17,
+		}
 
 		tcs := map[string]struct {
 			input       string
 			want        string
-			ranges      []position.Range
+			ranges      []position.Range // Ranges that AddOverlay marks with the kind test1.
+			overlays    line.Overlays    // Overlays that AddLineOverlay adds as they are.
 			annotations []line.Annotation
 		}{
+			// An overlay that covers no column, such as the one a bound
+			// error puts at the end of a line with no token under its
+			// location, renders no caret itself, so the annotation below
+			// the line marks the spot. An overlay that covers a column
+			// marks the row alone.
+			"annotation without content marks an empty span at the end of the line": {
+				input:       "key: value",
+				overlays:    line.Overlays{{Kind: "test1", Cols: position.NewSpan(10, 10)}},
+				annotations: []line.Annotation{{Placement: line.Below, Col: 10}},
+				want:        stringtest.JoinLF("   1 | key: value", "     |           ^"),
+			},
+			"annotation without content marks a span past the content": {
+				input:       "key: value",
+				overlays:    line.Overlays{{Kind: "test1", Cols: position.NewSpan(12, 14)}},
+				annotations: []line.Annotation{{Placement: line.Below, Col: 10}},
+				want:        stringtest.JoinLF("   1 | key: value", "     |           ^"),
+			},
+			"a span that covers a column marks the row alone": {
+				input:       "key: value",
+				overlays:    line.Overlays{{Kind: "test1", Cols: position.NewSpan(5, 7)}},
+				annotations: []line.Annotation{{Placement: line.Below, Col: 10}},
+				want:        stringtest.JoinLF("   1 | key: value", "     |      ^^"),
+			},
+			"each severity gets its own row, errors first": {
+				input:       spec,
+				overlays:    line.Overlays{warnOverlay, errorOverlay},
+				annotations: []line.Annotation{warnAnn, errorAnn},
+				want: stringtest.JoinLF(
+					"   1 | spec: {price: 0, legacyPricing: true}",
+					"     |               ^ 0 is less than 1",
+					`     |                  ^^^^^^^^^^^^^ warning: deprecated field "legacyPricing"`,
+				),
+			},
+			"a warning alone marks every overlay": {
+				input:       spec,
+				overlays:    line.Overlays{warnOverlay, errorOverlay},
+				annotations: []line.Annotation{warnAnn},
+				want: stringtest.JoinLF(
+					"   1 | spec: {price: 0, legacyPricing: true}",
+					`     |               ^  ^^^^^^^^^^^^^ warning: deprecated field "legacyPricing"`,
+				),
+			},
+			"empty annotations draw the carets of their own severity": {
+				input:    spec,
+				overlays: line.Overlays{warnOverlay, errorOverlay},
+				annotations: []line.Annotation{
+					{Kind: kind.TextError, Placement: line.Below, Col: 14},
+					{Kind: kind.TextWarn, Placement: line.Below, Col: 17},
+				},
+				want: stringtest.JoinLF(
+					"   1 | spec: {price: 0, legacyPricing: true}",
+					"     |               ^",
+					"     |                  ^^^^^^^^^^^^^",
+				),
+			},
 			"overlay and annotation share the marker row": {
 				input:       "key: value",
 				ranges:      []position.Range{yamltest.LineRange(0, 5, 10)},
@@ -1387,80 +1111,15 @@ func TestView_String(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				view := newTestView(t, tc.input+"\n", 1)
+				view := newView(tc.input + "\n")
 				view.AddOverlay("test1", tc.ranges...)
+				view.AddLineOverlay(0, tc.overlays...)
 				view.Annotate(0, tc.annotations...)
 
 				assert.Equal(t, tc.want, view.String())
 			})
 		}
 	})
-}
-
-func TestView_String_Severities(t *testing.T) {
-	t.Parallel()
-
-	content := "spec: {price: 0, legacyPricing: true}\n"
-	errorOverlay := line.Overlay{Kind: kind.GenericError, Cols: position.NewSpan(14, 15)}
-	warnOverlay := line.Overlay{Kind: kind.GenericWarn, Cols: position.NewSpan(17, 30)}
-	errorAnn := line.Annotation{Content: "0 is less than 1", Kind: kind.TextError, Placement: line.Below, Col: 14}
-	warnAnn := line.Annotation{
-		Content:   `warning: deprecated field "legacyPricing"`,
-		Kind:      kind.TextWarn,
-		Placement: line.Below,
-		Col:       17,
-	}
-
-	tcs := map[string]struct {
-		overlays    []line.Overlay
-		annotations []line.Annotation
-		want        string
-	}{
-		"each severity gets its own row, errors first": {
-			overlays:    []line.Overlay{warnOverlay, errorOverlay},
-			annotations: []line.Annotation{warnAnn, errorAnn},
-			want: stringtest.JoinLF(
-				"   1 | spec: {price: 0, legacyPricing: true}",
-				"     |               ^ 0 is less than 1",
-				`     |                  ^^^^^^^^^^^^^ warning: deprecated field "legacyPricing"`,
-			),
-		},
-		"a warning alone marks every overlay": {
-			overlays:    []line.Overlay{warnOverlay, errorOverlay},
-			annotations: []line.Annotation{warnAnn},
-			want: stringtest.JoinLF(
-				"   1 | spec: {price: 0, legacyPricing: true}",
-				`     |               ^  ^^^^^^^^^^^^^ warning: deprecated field "legacyPricing"`,
-			),
-		},
-		"empty annotations draw the carets of their own severity": {
-			overlays: []line.Overlay{warnOverlay, errorOverlay},
-			annotations: []line.Annotation{
-				{Kind: kind.TextError, Placement: line.Below, Col: 14},
-				{Kind: kind.TextWarn, Placement: line.Below, Col: 17},
-			},
-			want: stringtest.JoinLF(
-				"   1 | spec: {price: 0, legacyPricing: true}",
-				"     |               ^",
-				"     |                  ^^^^^^^^^^^^^",
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := newTestView(t, content, 1)
-			for _, o := range tc.overlays {
-				view.AddLineOverlay(0, o)
-			}
-
-			view.Annotate(0, tc.annotations...)
-
-			assert.Equal(t, tc.want, view.String())
-		})
-	}
 }
 
 func TestView_OutOfRange(t *testing.T) {
@@ -1482,7 +1141,7 @@ func TestView_OutOfRange(t *testing.T) {
 
 			for _, i := range []int{-1, 2, 99} {
 				// Undecorated, so the check happens before any slice exists.
-				view := newTestView(t, "a: 1\nb: 2\n", 2)
+				view := newView(stringtest.LinesLF(letterRows(2)...))
 
 				assert.Panics(t, func() { call(view, i) }, "index %d on undecorated view", i)
 
@@ -1499,102 +1158,10 @@ func TestView_OutOfRange(t *testing.T) {
 	}
 }
 
-func TestOverlays_MarkerRow(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		content  string
-		want     string
-		overlays line.Overlays
-	}{
-		"no overlays": {
-			content: "key: v",
-			want:    "",
-		},
-		"negative start clamps to the first column": {
-			content:  "key: v",
-			overlays: line.Overlays{{Cols: position.NewSpan(-2, 3)}},
-			want:     "^^^",
-		},
-		"span past the end stops at the content": {
-			content:  "key: v",
-			overlays: line.Overlays{{Cols: position.NewSpan(3, 10)}},
-			want:     "   ^^^",
-		},
-		"span past the content marks nothing": {
-			content:  "key: v",
-			overlays: line.Overlays{{Cols: position.NewSpan(8, 12)}},
-			want:     "",
-		},
-		"empty span marks nothing": {
-			content:  "key: v",
-			overlays: line.Overlays{{Cols: position.NewSpan(2, 2)}},
-			want:     "",
-		},
-		"overlapping overlays": {
-			content: "key: v",
-			overlays: line.Overlays{
-				{Cols: position.NewSpan(1, 3)},
-				{Cols: position.NewSpan(2, 5)},
-			},
-			want: " ^^^^",
-		},
-		"wide rune gets two carets": {
-			content:  "名前: v",
-			overlays: line.Overlays{{Cols: position.NewSpan(1, 2)}},
-			want:     "  ^^",
-		},
-		"zero-width space marks the next column": {
-			content:  "k: a\u200bb",
-			overlays: line.Overlays{{Cols: position.NewSpan(4, 5)}},
-			want:     "    ^",
-		},
-		"zero-width space at the end marks the column past it": {
-			content:  "k: a\u200b",
-			overlays: line.Overlays{{Cols: position.NewSpan(4, 5)}},
-			want:     "    ^",
-		},
-		"lone combining mark marks the next column": {
-			content:  "\u0301x",
-			overlays: line.Overlays{{Cols: position.NewSpan(0, 1)}},
-			want:     "^",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, tc.overlays.MarkerRow(tc.content))
-
-			// View.String draws the same row under the line, or none
-			// when the row is empty.
-			view := newTestView(t, tc.content+"\n", 1)
-			view.AddLineOverlay(0, tc.overlays...)
-
-			want := "   1 | " + tc.content
-			if tc.want != "" {
-				want += "\n     | " + tc.want
-			}
-
-			assert.Equal(t, want, view.String())
-		})
-	}
-}
-
 func TestView_Hunks(t *testing.T) {
 	t.Parallel()
 
-	input := stringtest.Input(`
-		a: 1
-		b: 2
-		c: 3
-		d: 4
-		e: 5
-		f: 6
-		g: 7
-		h: 8
-	`)
+	input := stringtest.JoinLF(letterRows(8)...)
 
 	separators := func(v *line.View) []int {
 		var out []int
@@ -1613,7 +1180,7 @@ func TestView_Hunks(t *testing.T) {
 	t.Run("keeps context around every kind of decoration", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, input, 8)
+		view := newView(input)
 		view.SetFlag(0, line.FlagInserted)
 		view.AddOverlay("test", yamltest.LineRange(7, 0, 1))
 		view.Annotate(4, line.Annotation{Content: "here", Placement: line.Below})
@@ -1689,7 +1256,7 @@ func TestView_Hunks(t *testing.T) {
 				t.Parallel()
 
 				// A slice with no spans holds every line.
-				view := newTestView(t, input, 8).Slice(tc.held...)
+				view := newView(input).Slice(tc.held...)
 				for _, i := range tc.annotated {
 					view.Annotate(i, line.Annotation{Content: "note", Placement: line.Below})
 				}
@@ -1705,7 +1272,7 @@ func TestView_Hunks(t *testing.T) {
 	t.Run("no decoration yields no line", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, input, 8)
+		view := newView(input)
 
 		got := view.Hunks(2)
 
@@ -1714,60 +1281,12 @@ func TestView_Hunks(t *testing.T) {
 		assert.Panics(t, func() { got.Line(8) })
 	})
 
-	t.Run("nil view yields no line", func(t *testing.T) {
-		t.Parallel()
-
-		var view *line.View
-
-		got := view.Hunks(2)
-
-		require.NotNil(t, got)
-		assert.Equal(t, 0, got.Count())
-		assert.Empty(t, got.String())
-	})
-
-	t.Run("a gap the view skips inside a hunk gets a separator", func(t *testing.T) {
-		t.Parallel()
-
-		// The windows of lines c and e overlap across line d, which the
-		// view skips, so they share a hunk that jumps from c to e.
-		view := newTestView(t, input, 8).Slice(position.NewSpan(0, 3), position.NewSpan(4, 8))
-		view.Annotate(2, line.Annotation{Content: "one", Placement: line.Below})
-		view.Annotate(4, line.Annotation{Content: "two", Placement: line.Below})
-
-		got := view.Hunks(1)
-
-		assert.Equal(t, []string{"b: 2", "c: 3", "e: 5", "f: 6"}, contentsOf(got.All()))
-		assert.Equal(t, []int{4}, separators(got))
-		assert.Equal(t, stringtest.JoinLF(
-			"   2 | b: 2",
-			"   3 | c: 3",
-			"     | ^ one",
-			"     | ...",
-			"   5 | e: 5",
-			"     | ^ two",
-			"   6 | f: 6",
-		), got.String())
-	})
-
 	t.Run("hunks of hunks match hunks of the view", func(t *testing.T) {
 		t.Parallel()
 
 		// The hunks at context 2 hold a separator above line g, a context
 		// line, which must not count as decoration when narrowed.
-		ten := stringtest.Input(`
-			a: 1
-			b: 2
-			c: 3
-			d: 4
-			e: 5
-			f: 6
-			g: 7
-			h: 8
-			i: 9
-			j: 10
-		`)
-		view := newTestView(t, ten, 10)
+		view := newView(stringtest.JoinLF(letterRows(10)...))
 		view.Annotate(1, line.Annotation{Content: "x", Placement: line.Below})
 		view.Annotate(8, line.Annotation{Content: "y", Placement: line.Below})
 
@@ -1788,56 +1307,81 @@ func TestView_Hunks(t *testing.T) {
 	t.Run("renders as an excerpt", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, input, 8)
-		view.Annotate(1, line.Annotation{Content: "one", Placement: line.Below})
-		view.Annotate(6, line.Annotation{Content: "two", Placement: line.Below})
+		one := line.Annotation{Content: "one", Placement: line.Below}
+		two := line.Annotation{Content: "two", Placement: line.Below}
 
-		want := stringtest.JoinLF(
-			"   1 | a: 1",
-			"   2 | b: 2",
-			"     | ^ one",
-			"   3 | c: 3",
-			"     | ...",
-			"   6 | f: 6",
-			"   7 | g: 7",
-			"     | ^ two",
-			"   8 | h: 8",
-		)
-		assert.Equal(t, want, view.Hunks(1).String())
-	})
+		tcs := map[string]struct {
+			held        []position.Span         // Spans the view holds, or none for every line.
+			annotations map[int]line.Annotation // The annotation of each annotated line.
+			want        []string                // Rows of the rendered hunks.
+			context     int
+		}{
+			"hunks with their context": {
+				annotations: map[int]line.Annotation{1: one, 6: two},
+				context:     1,
+				want: []string{
+					"   1 | a: 1",
+					"   2 | b: 2",
+					"     | ^ one",
+					"   3 | c: 3",
+					"     | ...",
+					"   6 | f: 6",
+					"   7 | g: 7",
+					"     | ^ two",
+					"   8 | h: 8",
+				},
+			},
+			// The windows of lines c and e overlap across line d, which the
+			// view skips, so they share a hunk that jumps from c to e.
+			"a gap the view skips inside a hunk gets a separator": {
+				held:        []position.Span{position.NewSpan(0, 3), position.NewSpan(4, 8)},
+				annotations: map[int]line.Annotation{2: one, 4: two},
+				context:     1,
+				want: []string{
+					"   2 | b: 2",
+					"   3 | c: 3",
+					"     | ^ one",
+					"     | ...",
+					"   5 | e: 5",
+					"     | ^ two",
+					"   6 | f: 6",
+				},
+			},
+			"separator sits above an annotated first line": {
+				annotations: map[int]line.Annotation{1: one, 6: {Content: "two", Placement: line.Above}},
+				want: []string{
+					"   2 | b: 2",
+					"     | ^ one",
+					"     | ...",
+					"     | two",
+					"   7 | g: 7",
+				},
+			},
+			"separator keeps the column of an annotation above": {
+				annotations: map[int]line.Annotation{1: one, 6: {Content: "hint", Placement: line.Above, Col: 3}},
+				want: []string{
+					"   2 | b: 2",
+					"     | ^ one",
+					"     | ...",
+					"     |    hint",
+					"   7 | g: 7",
+				},
+			},
+		}
 
-	t.Run("separator sits above an annotated first line", func(t *testing.T) {
-		t.Parallel()
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		view := newTestView(t, input, 8)
-		view.Annotate(1, line.Annotation{Content: "one", Placement: line.Below})
-		view.Annotate(6, line.Annotation{Content: "two", Placement: line.Above})
+				// A slice with no spans holds every line.
+				view := newView(input).Slice(tc.held...)
+				for i, ann := range tc.annotations {
+					view.Annotate(i, ann)
+				}
 
-		want := stringtest.JoinLF(
-			"   2 | b: 2",
-			"     | ^ one",
-			"     | ...",
-			"     | two",
-			"   7 | g: 7",
-		)
-		assert.Equal(t, want, view.Hunks(0).String())
-	})
-
-	t.Run("separator keeps the column of an annotation above", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, input, 8)
-		view.Annotate(1, line.Annotation{Content: "one", Placement: line.Below})
-		view.Annotate(6, line.Annotation{Content: "hint", Placement: line.Above, Col: 3})
-
-		want := stringtest.JoinLF(
-			"   2 | b: 2",
-			"     | ^ one",
-			"     | ...",
-			"     |    hint",
-			"   7 | g: 7",
-		)
-		assert.Equal(t, want, view.Hunks(0).String())
+				assert.Equal(t, stringtest.JoinLF(tc.want...), view.Hunks(tc.context).String())
+			})
+		}
 	})
 }
 
@@ -2119,7 +1663,7 @@ func TestView_Clip(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			view := newTestView(t, tc.input+"\n", 1)
+			view := newView(tc.input + "\n")
 
 			for _, cols := range tc.overlays {
 				view.AddLineOverlay(0, line.Overlay{Kind: kind.GenericError, Cols: cols})
@@ -2141,13 +1685,13 @@ func TestView_Clip(t *testing.T) {
 func TestView_Clip_KeepsView(t *testing.T) {
 	t.Parallel()
 
+	// TestView_Clone checks that a clip is a copy that owns its
+	// decoration.
 	long := "key: " + strings.Repeat("x", 40)
-	input := stringtest.JoinLF("a: 1", long, "c: 3", "d: 4", "")
+	input := stringtest.LinesLF("a: 1", long, "c: 3", "d: 4")
 
-	newMarked := func(t *testing.T) *line.View {
-		t.Helper()
-
-		view := newTestView(t, input, 4)
+	newMarked := func() *line.View {
+		view := newView(input)
 		view.SetFlag(1, line.FlagInserted)
 		view.AddOverlay(kind.GenericError, yamltest.LineRange(1, 30, 32))
 		view.Annotate(1, line.Annotation{Content: "bad", Placement: line.Below, Col: 30})
@@ -2157,41 +1701,10 @@ func TestView_Clip_KeepsView(t *testing.T) {
 
 	window := position.Spans{position.NewSpan(25, 35)}
 
-	t.Run("copy holds the lines and their decoration", func(t *testing.T) {
-		t.Parallel()
-
-		view := newMarked(t)
-		clipped := view.Clip(10)
-
-		require.NotSame(t, view, clipped)
-		assert.Equal(t, view.Count(), clipped.Count())
-		assert.Equal(t, line.FlagInserted, clipped.Flag(1))
-		assert.Equal(t, view.Overlays(1), clipped.Overlays(1))
-		assert.Equal(t, view.Annotations(1), clipped.Annotations(1))
-
-		for i, ln := range view.All() {
-			j, ok := clipped.Index(ln)
-			require.True(t, ok, "line %d", i)
-			assert.Equal(t, i, j)
-		}
-	})
-
-	t.Run("decorating the copy leaves the view as it was", func(t *testing.T) {
-		t.Parallel()
-
-		view := newMarked(t)
-		clipped := view.Clip(10)
-
-		clipped.Annotate(1, line.Annotation{Content: "more", Placement: line.Below, Col: 8})
-
-		assert.Len(t, view.Annotations(1), 1)
-		assert.Len(t, clipped.Annotations(1), 2)
-	})
-
 	t.Run("mark added after the clip gets a window", func(t *testing.T) {
 		t.Parallel()
 
-		clipped := newMarked(t).Clip(10)
+		clipped := newMarked().Clip(10)
 		require.Equal(t, window, clipped.Windows(1))
 
 		clipped.Annotate(1, line.Annotation{Content: "more", Placement: line.Below, Col: 12})
@@ -2209,7 +1722,7 @@ func TestView_Clip_KeepsView(t *testing.T) {
 	t.Run("clone, slice, and hunks keep the clip", func(t *testing.T) {
 		t.Parallel()
 
-		clipped := newMarked(t).Clip(10)
+		clipped := newMarked().Clip(10)
 
 		assert.Equal(t, window, clipped.Clone().Windows(1))
 		assert.Equal(t, window, clipped.Slice(position.NewSpan(1, 2)).Windows(1))
@@ -2222,7 +1735,7 @@ func TestView_Clip_KeepsView(t *testing.T) {
 	t.Run("clip of the hunks matches the hunks of the clip", func(t *testing.T) {
 		t.Parallel()
 
-		view := newMarked(t)
+		view := newMarked()
 
 		assert.Equal(t, view.Clip(10).Hunks(1).String(), view.Hunks(1).Clip(10).String())
 	})
@@ -2230,22 +1743,10 @@ func TestView_Clip_KeepsView(t *testing.T) {
 	t.Run("second clip replaces the first", func(t *testing.T) {
 		t.Parallel()
 
-		clipped := newMarked(t).Clip(10)
+		clipped := newMarked().Clip(10)
 
 		assert.Equal(t, position.Spans{position.NewSpan(20, 40)}, clipped.Clip(20).Windows(1))
 		assert.Nil(t, clipped.Clip(0).Windows(1))
 		assert.Equal(t, window, clipped.Windows(1))
-	})
-
-	t.Run("nil view clips to an empty view", func(t *testing.T) {
-		t.Parallel()
-
-		var view *line.View
-
-		clipped := view.Clip(10)
-
-		require.NotNil(t, clipped)
-		assert.Equal(t, 0, clipped.Count())
-		assert.Empty(t, clipped.String())
 	})
 }
