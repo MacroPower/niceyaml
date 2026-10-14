@@ -67,3 +67,17 @@ func BenchmarkViewSlice(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkViewAddOverlay(b *testing.B) {
+	yaml := yamltest.GenerateYAML(100)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		view := line.NewView(newLines(yaml))
+
+		for i := range 100 {
+			view.AddOverlay(kind.GenericHighlight, yamltest.LineRange(i, 0, 10))
+		}
+	}
+}

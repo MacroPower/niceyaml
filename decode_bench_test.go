@@ -1,6 +1,7 @@
 package niceyaml_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -42,7 +43,7 @@ func BenchmarkNode_Decode_FirstDecode(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
 
-				doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
+				doc := yamltest.FirstDocument(b, yaml, yamltest.NoSizeLimits()...)
 
 				b.StartTimer()
 
@@ -61,31 +62,38 @@ func BenchmarkNode_Decode_FirstDecode(b *testing.B) {
 // flat as the document deepens.
 func BenchmarkNode_Decode_ProblemsNested(b *testing.B) {
 	for _, depth := range []int{500, 1000, 2000, 4000} {
-		doc := yamltest.FirstDocument(b, deepDocument(depth), niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
+		doc := yamltest.FirstDocument(b, deepDocument(depth), yamltest.NoSizeLimits()...)
 
-		benchRejected[problemDeep](b, fmt.Sprintf("depth_%d", depth), doc, depth, "level")
+		benchRejected(b, fmt.Sprintf("depth_%d", depth), depth, "level", decodeIntoAs[problemDeep](), doc)
 	}
 }
 
-// benchRejected runs a benchmark under name that decodes doc into a new
-// T in each iteration and stops unless the decoder rejects it. It reports
-// the time per unit, of which doc holds count.
-func benchRejected[T any](b *testing.B, name string, doc *niceyaml.Node, count int, unit string) {
+// benchRejected runs a benchmark under name that runs decode on each of
+// docs in each iteration and stops unless the decoder rejects each one.
+// It reports the time per unit, of which docs hold count.
+func benchRejected(
+	b *testing.B,
+	name string,
+	count int,
+	unit string,
+	decode func(context.Context, *niceyaml.Node) error,
+	docs ...*niceyaml.Node,
+) {
 	b.Helper()
 
 	b.Run(name, func(b *testing.B) {
 		b.ReportAllocs()
 
 		for b.Loop() {
-			var v T
-
-			err := doc.DecodeInto(b.Context(), &v)
-			if !errors.Is(err, niceyaml.ErrDecode) {
-				b.Fatalf("got %v, want a rejection", err)
+			for _, doc := range docs {
+				err := decode(b.Context(), doc)
+				if !errors.Is(err, niceyaml.ErrDecode) {
+					b.Fatalf("got %v, want a rejection", err)
+				}
 			}
 		}
 
-		b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*count), "ns/"+unit)
+		yamltest.ReportTimePer(b, count, unit)
 	})
 }
 
@@ -96,38 +104,42 @@ func benchProblemServers(count int, server, last string) string {
 	return "servers:\n" + yamltest.GenerateLines(count-1, server) + fmt.Sprintf(last+"\n", count-1)
 }
 
+// benchProblemLayouts runs [benchRejected] for a decode into T on two
+// layouts of a list of servers, at each count in counts. The layout
+// last_of_N writes N-1 servers with the format server and the last with
+// the format last, so the decoder rejects the last server alone. The
+// layout each_of_N writes all N with the format each, so the decoder
+// rejects each server.
+func benchProblemLayouts[T any](b *testing.B, counts []int, server, last, each string) {
+	b.Helper()
+
+	layouts := []struct{ name, server, last string }{
+		{"last_of", server, last},
+		{"each_of", each, each},
+	}
+
+	for _, layout := range layouts {
+		for _, count := range counts {
+			doc := yamltest.FirstDocument(
+				b,
+				benchProblemServers(count, layout.server, layout.last),
+				yamltest.NoSizeLimits()...,
+			)
+
+			benchRejected(b, fmt.Sprintf("%s_%d", layout.name, count), count, "server", decodeIntoAs[T](), doc)
+		}
+	}
+}
+
 // BenchmarkNode_Decode_ProblemsWide decodes a list of servers. In the
 // first layout the decoder rejects the last server alone, so the search
 // reads every server and finds nothing more. In the second it rejects
 // each server, so the search reports as many problems as the list holds.
 // The time per server stays flat as the list grows.
 func BenchmarkNode_Decode_ProblemsWide(b *testing.B) {
-	layouts := []struct {
-		name    string
-		servers int
-		every   bool
-	}{
-		{"last_of_1000", 1000, false},
-		{"last_of_20000", 20000, false},
-		{"each_of_1000", 1000, true},
-		{"each_of_20000", 20000, true},
-	}
+	bad := "  - {name: n%d, port: http}"
 
-	for _, layout := range layouts {
-		server, last := "  - {name: n%d, port: 80}", "  - {name: n%d, port: http}"
-		if layout.every {
-			server = last
-		}
-
-		doc := yamltest.FirstDocument(
-			b,
-			benchProblemServers(layout.servers, server, last),
-			niceyaml.WithByteLimit(0),
-			niceyaml.WithDepthLimit(0),
-		)
-
-		benchRejected[problemConfig](b, layout.name, doc, layout.servers, "server")
-	}
+	benchProblemLayouts[problemConfig](b, []int{1000, 20000}, "  - {name: n%d, port: 80}", bad, bad)
 }
 
 // BenchmarkNode_Decode_ProblemsMap decodes a map of servers. In the first
@@ -136,34 +148,11 @@ func BenchmarkNode_Decode_ProblemsWide(b *testing.B) {
 // server, so the search reports as many problems as the map holds. The
 // time per server stays flat as the map grows.
 func BenchmarkNode_Decode_ProblemsMap(b *testing.B) {
-	layouts := []struct {
-		name    string
-		servers int
-		every   bool
-	}{
-		{"last_of_2000", 2000, false},
-		{"last_of_20000", 20000, false},
-		{"each_of_2000", 2000, true},
-		{"each_of_20000", 20000, true},
-	}
+	bad := "  s%[1]d: {name: n%[1]d, port: http}"
 
-	for _, layout := range layouts {
-		server, last := "  s%[1]d: {name: n%[1]d, port: 80}", "  s%[1]d: {name: n%[1]d, port: http}"
-		if layout.every {
-			server = last
-		}
-
-		doc := yamltest.FirstDocument(
-			b,
-			benchProblemServers(layout.servers, server, last),
-			niceyaml.WithByteLimit(0),
-			niceyaml.WithDepthLimit(0),
-		)
-
-		benchRejected[struct {
-			Servers map[string]problemServer `yaml:"servers"`
-		}](b, layout.name, doc, layout.servers, "server")
-	}
+	benchProblemLayouts[struct {
+		Servers map[string]problemServer `yaml:"servers"`
+	}](b, []int{2000, 20000}, "  s%[1]d: {name: n%[1]d, port: 80}", bad, bad)
 }
 
 // BenchmarkNode_Decode_ProblemsText decodes a list of servers whose tier
@@ -175,37 +164,21 @@ func BenchmarkNode_Decode_ProblemsMap(b *testing.B) {
 // text, so the time per server grows with the list, in the decode and in
 // the search alike.
 func BenchmarkNode_Decode_ProblemsText(b *testing.B) {
-	layouts := []struct {
-		name    string
-		servers int
-		every   bool
-	}{
-		{"last_of_250", 250, false},
-		{"last_of_1000", 1000, false},
-		{"each_of_250", 250, true},
-		{"each_of_1000", 1000, true},
-	}
-
-	for _, layout := range layouts {
-		server, last := "  - {name: n%d, tier: low, port: 80}", "  - {name: n%d, tier: low, port: http}"
-		if layout.every {
-			server = "  - {name: n%d, tier: mid, port: 80}"
-			last = server
-		}
-
-		doc := yamltest.FirstDocument(
-			b,
-			benchProblemServers(layout.servers, server, last),
-			niceyaml.WithByteLimit(0),
-			niceyaml.WithDepthLimit(0),
-		)
-
-		benchRejected[struct {
-			Servers []problemTiered `yaml:"servers"`
-		}](b, layout.name, doc, layout.servers, "server")
-	}
+	benchProblemLayouts[struct {
+		Servers []problemTiered `yaml:"servers"`
+	}](
+		b,
+		[]int{250, 1000},
+		"  - {name: n%d, tier: low, port: 80}",
+		"  - {name: n%d, tier: low, port: http}",
+		"  - {name: n%d, tier: mid, port: 80}",
+	)
 }
 
+// BenchmarkNode_DecodeScoped decodes each item of a list through the
+// node of the item. The items of a merge layout take their value from
+// defaults through a merge key, and the items of the anchored layout
+// also define an anchor each.
 func BenchmarkNode_DecodeScoped(b *testing.B) {
 	type item struct {
 		Name  string `yaml:"name"`
@@ -251,8 +224,7 @@ func BenchmarkNode_DecodeScoped(b *testing.B) {
 		doc := yamltest.FirstDocument(
 			b,
 			sz.head+"items:\n"+yamltest.GenerateLines(sz.items, sz.entry),
-			niceyaml.WithByteLimit(0),
-			niceyaml.WithDepthLimit(0),
+			yamltest.NoSizeLimits()...,
 		)
 
 		items, err := doc.Nodes(paths.Current().Child("items").IndexAll())
@@ -273,36 +245,40 @@ func BenchmarkNode_DecodeScoped(b *testing.B) {
 	}
 }
 
+// BenchmarkNode_DecodeRejectedStream decodes every document of a stream
+// whose value at a is no int, so the decoder rejects each document. It
+// reports the time per document.
 func BenchmarkNode_DecodeRejectedStream(b *testing.B) {
-	sizes := []struct {
-		name string
-		docs int
-	}{
-		{"docs_1000", 1000},
-		{"docs_10000", 10000},
+	for _, count := range []int{1000, 10000} {
+		input := yamltest.GenerateLines(count, stringtest.JoinLF("---", "a: x%d", "b: y", "c: z"))
+		docs := yamltest.Documents(b, niceyaml.NewSourceFromString(input, yamltest.NoSizeLimits()...), count)
+
+		benchRejected(b, fmt.Sprintf("docs_%d", count), count, "doc", decodeIntoAs[struct{ A int }](), docs...)
 	}
+}
 
-	for _, sz := range sizes {
-		input := yamltest.GenerateLines(sz.docs, stringtest.JoinLF("---", "a: x%d", "b: y", "c: z"))
-		docs := niceyaml.NewSourceFromString(input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).Documents()
+// benchFreshDecode runs a benchmark under name that parses input anew in
+// each iteration and decodes each of its documents into a T. A document
+// builds its decode tree once, so only a new parse measures that work in
+// every iteration. It reports the time per unit, of which input holds
+// count.
+func benchFreshDecode[T any](b *testing.B, name, input string, count int, unit string) {
+	b.Helper()
 
-		b.Run(sz.name, func(b *testing.B) {
-			b.ReportAllocs()
+	b.Run(name, func(b *testing.B) {
+		b.ReportAllocs()
 
-			for b.Loop() {
-				for _, doc := range docs {
-					var v struct{ A int }
-
-					err := doc.DecodeInto(b.Context(), &v)
-					if !errors.Is(err, niceyaml.ErrDecode) {
-						b.Fatalf("got %v, want a rejection", err)
-					}
+		for b.Loop() {
+			for _, doc := range niceyaml.NewSourceFromString(input, yamltest.NoSizeLimits()...).Documents() {
+				_, err := doc.Decode[T](b.Context())
+				if err != nil {
+					b.Fatal(err)
 				}
 			}
+		}
 
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*sz.docs), "ns/doc")
-		})
-	}
+		yamltest.ReportTimePer(b, count, unit)
+	})
 }
 
 // BenchmarkNode_DecodeReusedAnchorStream decodes every document of a
@@ -310,36 +286,10 @@ func BenchmarkNode_DecodeRejectedStream(b *testing.B) {
 // decodes from a tree with renamed anchors. The time per document stays
 // flat as the stream grows.
 func BenchmarkNode_DecodeReusedAnchorStream(b *testing.B) {
-	sizes := []struct {
-		name string
-		docs int
-	}{
-		{"docs_500", 500},
-		{"docs_2000", 2000},
-	}
+	for _, count := range []int{500, 2000} {
+		input := strings.Repeat(stringtest.LinesLF("---", "a: &x 1", "b: &x 2", "c: *x"), count)
 
-	for _, sz := range sizes {
-		input := strings.Repeat(stringtest.LinesLF("---", "a: &x 1", "b: &x 2", "c: *x"), sz.docs)
-
-		b.Run(sz.name, func(b *testing.B) {
-			b.ReportAllocs()
-
-			for b.Loop() {
-				// Each document builds its decode tree once, so each
-				// iteration parses the stream anew.
-				docs := niceyaml.NewSourceFromString(input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).
-					Documents()
-
-				for _, doc := range docs {
-					_, err := doc.Decode[map[string]int](b.Context())
-					if err != nil {
-						b.Fatal(err)
-					}
-				}
-			}
-
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*sz.docs), "ns/doc")
-		})
+		benchFreshDecode[map[string]int](b, fmt.Sprintf("docs_%d", count), input, count, "doc")
 	}
 }
 
@@ -354,55 +304,21 @@ func BenchmarkNode_DecodeReferenceAliases(b *testing.B) {
 		Refs []any           `yaml:"refs"`
 	}
 
-	sizes := []struct {
-		name    string
-		anchors int
-	}{
-		{"anchors_2000", 2000},
-		{"anchors_8000", 8000},
-	}
+	ref := yamltest.References("base: &base {x: notint}\n")
 
-	ref := niceyaml.WithReferences(
-		niceyaml.NewSourceFromString(
-			"base: &base {x: notint}\n",
-			niceyaml.WithByteLimit(0),
-			niceyaml.WithDepthLimit(0),
-		),
-	)
-
-	for _, sz := range sizes {
-		var sb strings.Builder
-
-		sb.WriteString(yamltest.GenerateLines(sz.anchors, "a%[1]d: &a%[1]d {v: %[1]d}"))
-		sb.WriteString("refs: [")
-
-		for i := range sz.anchors {
-			if i > 0 {
-				sb.WriteString(", ")
-			}
-
-			fmt.Fprintf(&sb, "*a%d", i)
+	for _, count := range []int{2000, 8000} {
+		aliases := make([]string, count)
+		for i := range aliases {
+			aliases[i] = fmt.Sprintf("*a%d", i)
 		}
 
-		sb.WriteString("]\nitem: *base\n")
+		input := yamltest.GenerateLines(count, "a%[1]d: &a%[1]d {v: %[1]d}") +
+			"refs: [" + strings.Join(aliases, ", ") + "]\n" +
+			"item: *base\n"
 
-		doc := yamltest.Document(
-			b,
-			niceyaml.NewSourceFromString(sb.String(), ref, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)),
-		)
+		doc := yamltest.Document(b, niceyaml.NewSourceFromString(input, yamltest.NoSizeLimits(ref)...))
 
-		b.Run(sz.name, func(b *testing.B) {
-			b.ReportAllocs()
-
-			for b.Loop() {
-				_, err := doc.Decode[config](b.Context())
-				if !errors.Is(err, niceyaml.ErrDecode) {
-					b.Fatalf("got %v, want a rejection", err)
-				}
-			}
-
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*sz.anchors), "ns/alias")
-		})
+		benchRejected(b, fmt.Sprintf("anchors_%d", count), count, "alias", decodeAs[config](), doc)
 	}
 }
 
@@ -411,37 +327,10 @@ func BenchmarkNode_DecodeReferenceAliases(b *testing.B) {
 // decode walks the anchor once rather than once per alias, so the time
 // per alias stays flat as the aliases grow.
 func BenchmarkNode_DecodeSelfAliases(b *testing.B) {
-	sizes := []struct {
-		name    string
-		aliases int
-	}{
-		{"aliases_2000", 2000},
-		{"aliases_8000", 8000},
-	}
+	for _, count := range []int{2000, 8000} {
+		input := "a: &a\n" + strings.Repeat("  - *a\n", count)
 
-	for _, sz := range sizes {
-		input := "a: &a\n" + strings.Repeat("  - *a\n", sz.aliases)
-
-		b.Run(sz.name, func(b *testing.B) {
-			b.ReportAllocs()
-
-			for b.Loop() {
-				// A document builds its decode tree once, so each iteration
-				// parses the input anew.
-				doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).
-					Document()
-				if err != nil {
-					b.Fatal(err)
-				}
-
-				_, err = doc.Decode[map[string]any](b.Context())
-				if err != nil {
-					b.Fatal(err)
-				}
-			}
-
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*sz.aliases), "ns/alias")
-		})
+		benchFreshDecode[map[string]any](b, fmt.Sprintf("aliases_%d", count), input, count, "alias")
 	}
 }
 
@@ -453,53 +342,21 @@ func BenchmarkNode_DecodeSelfAliases(b *testing.B) {
 // spells each name in one lookup rather than checking every name against
 // every count, so the time per name grows little with N.
 func BenchmarkNode_DecodeBracketedAnchorNames(b *testing.B) {
-	sizes := []struct {
-		name  string
-		kind  string
-		names int
-	}{
-		{"tries_2000", "tries", 2000},
-		{"tries_8000", "tries", 8000},
-		{"wide_2000", "wide", 2000},
-		{"wide_8000", "wide", 8000},
+	for _, count := range []int{2000, 8000} {
+		var tries strings.Builder
+
+		for i := range count {
+			fmt.Fprintf(&tries, `- &"x [%d]" %d`+"\n", i+1, i)
+		}
+
+		tries.WriteString(stringtest.LinesLF("- &x 1", "- &x 2"))
+
+		benchFreshDecode[[]any](b, fmt.Sprintf("tries_%d", count), tries.String(), count, "name")
 	}
 
-	for _, sz := range sizes {
-		var sb strings.Builder
+	for _, count := range []int{2000, 8000} {
+		wide := yamltest.GenerateLines(count, stringtest.JoinLF(`- &"n%[1]d [1]" 1`, `- &"n%[1]d [1]" 2`))
 
-		for i := range sz.names {
-			if sz.kind == "tries" {
-				fmt.Fprintf(&sb, "- &\"x [%d]\" %d\n", i+1, i)
-			} else {
-				fmt.Fprintf(&sb, "- &\"n%d [1]\" 1\n- &\"n%d [1]\" 2\n", i, i)
-			}
-		}
-
-		if sz.kind == "tries" {
-			sb.WriteString("- &x 1\n- &x 2\n")
-		}
-
-		input := sb.String()
-
-		b.Run(sz.name, func(b *testing.B) {
-			b.ReportAllocs()
-
-			for b.Loop() {
-				// A document builds its decode tree once, so each iteration
-				// parses the input anew.
-				doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).
-					Document()
-				if err != nil {
-					b.Fatal(err)
-				}
-
-				_, err = doc.Decode[[]any](b.Context())
-				if err != nil {
-					b.Fatal(err)
-				}
-			}
-
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*sz.names), "ns/name")
-		})
+		benchFreshDecode[[]any](b, fmt.Sprintf("wide_%d", count), wide, count, "name")
 	}
 }

@@ -47,18 +47,30 @@ var defaultsDecoding = niceyaml.DecodeOptions(
 	}),
 )
 
-func TestDefaults(t *testing.T) {
-	t.Parallel()
-
-	got := niceyaml.Defaults[defaultsCafe](defaultsDecoding)
-
-	assert.Equal(t, defaultsCafe{
+// defaultedCafe returns the café that [defaultsDecoding] builds from its
+// defaults alone, after each of edits changes it.
+func defaultedCafe(edits ...func(*defaultsCafe)) defaultsCafe {
+	c := defaultsCafe{
 		Seats:    20,
 		Currency: "SEK",
 		Receipts: defaultsPrinter{Port: 9100},
 		Kitchen:  defaultsPrinter{Port: 9101},
 		Spare:    &defaultsPrinter{Host: "spare", Port: 9200},
-	}, got)
+	}
+
+	for _, edit := range edits {
+		edit(&c)
+	}
+
+	return c
+}
+
+func TestDefaults(t *testing.T) {
+	t.Parallel()
+
+	got := niceyaml.Defaults[defaultsCafe](defaultsDecoding)
+
+	assert.Equal(t, defaultedCafe(), got)
 
 	assert.Equal(t, defaultsPrinter{Port: 9100}, niceyaml.Defaults[defaultsPrinter](defaultsDecoding))
 	assert.Equal(t, defaultsCafe{}, niceyaml.Defaults[defaultsCafe]())
@@ -97,34 +109,20 @@ func TestNode_Decode_Defaults(t *testing.T) {
 				"stations:",
 				"  - host: bar.yamull",
 			),
-			want: defaultsCafe{
-				Seats:    40,
-				Currency: "SEK",
-				Receipts: defaultsPrinter{Host: "printer.yamull", Port: 9100},
-				Kitchen:  defaultsPrinter{Host: "printer.yamull", Port: 9101},
-				Stations: []defaultsPrinter{{Host: "bar.yamull", Port: 9100}},
-				Spare:    &defaultsPrinter{Host: "spare", Port: 9200},
-			},
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Seats = 40
+				c.Receipts = defaultsPrinter{Host: "printer.yamull", Port: 9100}
+				c.Kitchen = defaultsPrinter{Host: "printer.yamull", Port: 9101}
+				c.Stations = []defaultsPrinter{{Host: "bar.yamull", Port: 9100}}
+			}),
 		},
 		"empty document": {
 			input: "",
-			want: defaultsCafe{
-				Seats:    20,
-				Currency: "SEK",
-				Receipts: defaultsPrinter{Port: 9100},
-				Kitchen:  defaultsPrinter{Port: 9101},
-				Spare:    &defaultsPrinter{Host: "spare", Port: 9200},
-			},
+			want:  defaultedCafe(),
 		},
 		"null at the root": {
 			input: "~\n",
-			want: defaultsCafe{
-				Seats:    20,
-				Currency: "SEK",
-				Receipts: defaultsPrinter{Port: 9100},
-				Kitchen:  defaultsPrinter{Port: 9101},
-				Spare:    &defaultsPrinter{Host: "spare", Port: 9200},
-			},
+			want:  defaultedCafe(),
 		},
 		"nulls": {
 			input: stringtest.LinesLF(
@@ -135,15 +133,12 @@ func TestNode_Decode_Defaults(t *testing.T) {
 				"backups: [~]",
 				"printers: {bar: ~}",
 			),
-			want: defaultsCafe{
-				Seats:    20,
-				Currency: "SEK",
-				Receipts: defaultsPrinter{Port: 9100},
-				Kitchen:  defaultsPrinter{Port: 9101},
-				Stations: []defaultsPrinter{{Port: 9100}, {Host: "b", Port: 9100}},
-				Backups:  []*defaultsPrinter{nil},
-				Printers: map[string]defaultsPrinter{"bar": {Port: 9100}},
-			},
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Spare = nil
+				c.Stations = []defaultsPrinter{{Port: 9100}, {Host: "b", Port: 9100}}
+				c.Backups = []*defaultsPrinter{nil}
+				c.Printers = map[string]defaultsPrinter{"bar": {Port: 9100}}
+			}),
 		},
 		"pointers": {
 			input: stringtest.LinesLF(
@@ -151,15 +146,11 @@ func TestNode_Decode_Defaults(t *testing.T) {
 				"spare: {port: 1}",
 				"backups: [{host: b}]",
 			),
-			want: defaultsCafe{
-				Seats:    20,
-				Currency: "SEK",
-				Receipts: defaultsPrinter{Port: 9100},
-				Kitchen:  defaultsPrinter{Port: 9101},
-				Owner:    &defaultsPrinter{Host: "o", Port: 9100},
-				Spare:    &defaultsPrinter{Host: "spare", Port: 1},
-				Backups:  []*defaultsPrinter{{Host: "b", Port: 9100}},
-			},
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Owner = &defaultsPrinter{Host: "o", Port: 9100}
+				c.Spare = &defaultsPrinter{Host: "spare", Port: 1}
+				c.Backups = []*defaultsPrinter{{Host: "b", Port: 9100}}
+			}),
 		},
 		"map values": {
 			input: stringtest.LinesLF(
@@ -167,17 +158,12 @@ func TestNode_Decode_Defaults(t *testing.T) {
 				"  bar: {host: b}",
 				"  back: {host: k, port: 1}",
 			),
-			want: defaultsCafe{
-				Seats:    20,
-				Currency: "SEK",
-				Receipts: defaultsPrinter{Port: 9100},
-				Kitchen:  defaultsPrinter{Port: 9101},
-				Spare:    &defaultsPrinter{Host: "spare", Port: 9200},
-				Printers: map[string]defaultsPrinter{
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Printers = map[string]defaultsPrinter{
 					"bar":  {Host: "b", Port: 9100},
 					"back": {Host: "k", Port: 1},
-				},
-			},
+				}
+			}),
 		},
 		"merge key": {
 			input: stringtest.LinesLF(
@@ -185,25 +171,15 @@ func TestNode_Decode_Defaults(t *testing.T) {
 				"  - &bar {host: bar}",
 				"  - {<<: *bar, port: 1}",
 			),
-			want: defaultsCafe{
-				Seats:    20,
-				Currency: "SEK",
-				Receipts: defaultsPrinter{Port: 9100},
-				Kitchen:  defaultsPrinter{Port: 9101},
-				Spare:    &defaultsPrinter{Host: "spare", Port: 9200},
-				Stations: []defaultsPrinter{{Host: "bar", Port: 9100}, {Host: "bar", Port: 1}},
-			},
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Stations = []defaultsPrinter{{Host: "bar", Port: 9100}, {Host: "bar", Port: 1}}
+			}),
 		},
 		"a slice replaces the default whole": {
 			input: "stations: []\n",
-			want: defaultsCafe{
-				Seats:    20,
-				Currency: "SEK",
-				Receipts: defaultsPrinter{Port: 9100},
-				Kitchen:  defaultsPrinter{Port: 9101},
-				Spare:    &defaultsPrinter{Host: "spare", Port: 9200},
-				Stations: []defaultsPrinter{},
-			},
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Stations = []defaultsPrinter{}
+			}),
 		},
 	}
 
@@ -391,11 +367,7 @@ func TestNode_Decode_DefaultsPanic(t *testing.T) {
 		doc := yamltest.FirstDocument(t, "stations: [{host: a}]\n")
 
 		_, err := doc.Decode[defaultsCafe](t.Context(), niceyaml.WithDefaults(func(*defaultsCafe) {}), boom)
-		require.Error(t, err)
-
-		var p *niceyaml.PanicError
-
-		require.ErrorAs(t, err, &p)
+		require.ErrorAs(t, err, new(*niceyaml.PanicError))
 		require.NotErrorIs(t, err, niceyaml.ErrDecode)
 	})
 
@@ -405,10 +377,6 @@ func TestNode_Decode_DefaultsPanic(t *testing.T) {
 		doc := yamltest.FirstDocument(t, "host: a\n")
 
 		_, err := doc.Decode[defaultsPrinter](t.Context(), boom)
-		require.Error(t, err)
-
-		var p *niceyaml.PanicError
-
-		require.ErrorAs(t, err, &p)
+		require.ErrorAs(t, err, new(*niceyaml.PanicError))
 	})
 }

@@ -8,7 +8,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -47,7 +46,7 @@ func BenchmarkNode_PathAt(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
 
-				doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
+				doc := yamltest.FirstDocument(b, yaml, yamltest.NoSizeLimits()...)
 
 				b.StartTimer()
 
@@ -57,7 +56,7 @@ func BenchmarkNode_PathAt(b *testing.B) {
 		})
 
 		b.Run(sz.name+"/later", func(b *testing.B) {
-			doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
+			doc := yamltest.FirstDocument(b, yaml, yamltest.NoSizeLimits()...)
 
 			_, ok := doc.PathAt(last)
 			require.True(b, ok)
@@ -115,8 +114,7 @@ func BenchmarkNode_Nodes(b *testing.B) {
 		doc := yamltest.FirstDocument(
 			b,
 			"items:\n"+yamltest.GenerateLines(sz.items, sourceBenchItem),
-			niceyaml.WithByteLimit(0),
-			niceyaml.WithDepthLimit(0),
+			yamltest.NoSizeLimits()...,
 		)
 
 		b.Run(sz.name, func(b *testing.B) {
@@ -150,18 +148,10 @@ func BenchmarkNode_BindManyPaths(b *testing.B) {
 		errs := make([]error, 0, sz.keys)
 
 		for i := range sz.keys {
-			errs = append(errs, niceyaml.NewError("bad value",
-				niceyaml.AtPath(paths.Current().Child(fmt.Sprintf("k%d", i)))))
+			errs = append(errs, yamltest.ErrorAt("bad value", fmt.Sprintf("k%d", i)))
 		}
 
-		doc := yamltest.Document(
-			b,
-			niceyaml.NewSourceFromString(
-				yamltest.GenerateLines(sz.keys, "k%[1]d: v%[1]d"),
-				niceyaml.WithByteLimit(0),
-				niceyaml.WithDepthLimit(0),
-			),
-		)
+		doc := yamltest.FirstDocument(b, yamltest.GenerateLines(sz.keys, "k%[1]d: v%[1]d"), yamltest.NoSizeLimits()...)
 
 		joined := errors.Join(errs...)
 

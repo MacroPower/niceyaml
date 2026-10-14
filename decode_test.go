@@ -20,7 +20,6 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -55,6 +54,10 @@ var (
 
 	// OpenOnlyDoc is a document whose hours hold an open and no close.
 	openOnlyDoc = stringtest.LinesLF("spec:", "  hours:", "    open: 9")
+
+	// DecodeNameValueDoc is a document that sets both fields of a
+	// [plainConfig] and of a [validatorConfig].
+	decodeNameValueDoc = stringtest.LinesLF("name: test", "value: 42")
 
 	// The errors the unmarshalers of this file report.
 	errBadServer    = errors.New("bad server")
@@ -228,21 +231,17 @@ func TestDocument_Decode(t *testing.T) {
 			name: second
 			value: 2
 		`)
-		source := niceyaml.NewSourceFromString(input)
-		d := source.Documents()
 
 		var results []testStruct
 
-		for _, dd := range d {
+		for _, dd := range yamltest.Documents(t, niceyaml.NewSourceFromString(input), 2) {
 			result, err := dd.Decode[testStruct](t.Context())
 			require.NoError(t, err)
 
 			results = append(results, result)
 		}
 
-		require.Len(t, results, 2)
-		assert.Equal(t, testStruct{Name: "first", Value: 1}, results[0])
-		assert.Equal(t, testStruct{Name: "second", Value: 2}, results[1])
+		assert.Equal(t, []testStruct{{Name: "first", Value: 1}, {Name: "second", Value: 2}}, results)
 	})
 
 	t.Run("alias with a trailing comment", func(t *testing.T) {
@@ -258,13 +257,11 @@ func TestDocument_Decode(t *testing.T) {
 		}{
 			"mapping value": {
 				input:   "base: &x 1\nref: *x # same as base\n",
-				path:    paths.Current(),
 				want:    map[string]any{"base": uint64(1), "ref": uint64(1)},
 				comment: "# same as base",
 			},
 			"sequence item": {
 				input:   "- &x 1\n- *x # c\n",
-				path:    paths.Current(),
 				want:    []any{uint64(1), uint64(1)},
 				comment: "# c",
 			},
@@ -300,7 +297,6 @@ func TestDocument_Decode(t *testing.T) {
 					  - *SS # Subsequent occurrence
 					  - Ken Griffey
 				`),
-				path: paths.Current(),
 				want: map[string]any{
 					"hr":  []any{"Mark McGwire", "Sammy Sosa"},
 					"rbi": []any{"Sammy Sosa", "Ken Griffey"},
@@ -315,7 +311,7 @@ func TestDocument_Decode(t *testing.T) {
 
 				dd := yamltest.FirstDocument(t, tc.input)
 
-				got, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context())
+				got, err := yamltest.AtOrSelf(t, dd, tc.path).Decode[any](t.Context())
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, got)
 
@@ -821,32 +817,47 @@ func TestDocument_Decode(t *testing.T) {
 		// The parser takes the comment as the value of the anchor. Each
 		// typed decode reads the anchored node as null, as it reads "&x ~".
 		type config struct {
-			A int `yaml:"a"`
+			List []int `yaml:"list"`
+			A    int   `yaml:"a"`
 		}
+
+		listPath := paths.Current().Child("list")
 
 		tcs := map[string]struct {
 			input string
 			path  paths.Path
+			// Whether the anchor is the value of the list field, so that a
+			// decode of the document leaves the list empty.
+			field bool
 		}{
 			"anchored null": {
 				input: "&x ~\n",
-				path:  paths.Current(),
 			},
 			"root": {
 				input: "&x\n# c\n",
-				path:  paths.Current(),
 			},
 			"root above a header": {
 				input: stringtest.LinesLF("--- &x", "# c", "---", "b: 1"),
-				path:  paths.Current(),
+			},
+			"anchored null mapping value": {
+				input: "list: &d ~\n",
+				path:  listPath,
+				field: true,
 			},
 			"mapping value": {
 				input: "list: &d\n# end\n",
-				path:  paths.Current().Child("list"),
+				path:  listPath,
+				field: true,
 			},
 			"mapping value after a reused anchor name": {
 				input: stringtest.LinesLF("x: &d 1", "y: *d", "list: &d", "# end"),
-				path:  paths.Current().Child("list"),
+				path:  listPath,
+				field: true,
+			},
+			"mapping value above a header": {
+				input: stringtest.LinesLF("list: &d", "# end", "---", "b: 1"),
+				path:  listPath,
+				field: true,
 			},
 			"sequence item": {
 				input: "- &d\n# end\n",
@@ -858,7 +869,8 @@ func TestDocument_Decode(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				node := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.path)
+				doc := yamltest.FirstDocument(t, tc.input)
+				node := yamltest.AtOrSelf(t, doc, tc.path)
 
 				cfg := &config{A: 7}
 				require.NoError(t, node.DecodeInto(t.Context(), &cfg))
@@ -871,33 +883,12 @@ func TestDocument_Decode(t *testing.T) {
 				str := new("keep")
 				require.NoError(t, node.DecodeInto(t.Context(), &str))
 				assert.Nil(t, str)
-			})
-		}
-	})
 
-	t.Run("anchored field with no value above a comment", func(t *testing.T) {
-		t.Parallel()
-
-		type config struct {
-			List []int `yaml:"list"`
-		}
-
-		tcs := map[string]struct {
-			input string
-		}{
-			"anchored null":                    {input: "list: &d ~\n"},
-			"field":                            {input: "list: &d\n# end\n"},
-			"field after a reused anchor name": {input: stringtest.LinesLF("x: &d 1", "y: *d", "list: &d", "# end")},
-			"field above a header":             {input: stringtest.LinesLF("list: &d", "# end", "---", "b: 1")},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				got, err := yamltest.FirstDocument(t, tc.input).Decode[config](t.Context())
-				require.NoError(t, err)
-				assert.Equal(t, config{}, got)
+				if tc.field {
+					got, err := doc.Decode[config](t.Context())
+					require.NoError(t, err)
+					assert.Equal(t, config{}, got)
+				}
 			})
 		}
 	})
@@ -1420,7 +1411,7 @@ func (c accumulatingConfig) Validate() error {
 	var err *niceyaml.Error
 
 	if c.Value == 0 {
-		err = niceyaml.NewError("value is required", niceyaml.AtPath(paths.Current().Child("value")))
+		err = yamltest.ErrorAt("value is required", "value")
 	}
 
 	return err
@@ -1503,7 +1494,7 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 	t.Run("a typed nil from Validate decodes without error", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
+		doc := yamltest.FirstDocument(t, decodeNameValueDoc)
 
 		result, err := doc.Decode[accumulatingConfig](t.Context())
 		require.NoError(t, err)
@@ -1521,24 +1512,27 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 		assert.Equal(t, "2:8: $.value: value is required", bound.Error())
 	})
 
-	t.Run("runs schema and Validate in order", func(t *testing.T) {
+	// A decode into a value the caller holds keeps each field the document
+	// leaves out.
+	t.Run("runs a schema beside Validate", func(t *testing.T) {
 		t.Parallel()
 
-		input := stringtest.Input(`
-			name: test
-			value: 42
-		`)
-		dd := yamltest.FirstDocument(t, input)
+		var decodeRan, intoRan bool
 
-		var called bool
+		doc := yamltest.FirstDocument(t, stringtest.JoinLF("name: test", "value: 42"))
 
-		result, err := dd.Decode[validatorConfig](
-			t.Context(),
-			niceyaml.WithValidator(nameSchema(&called)),
-		)
+		got, err := doc.Decode[validatorConfig](t.Context(), niceyaml.WithValidator(nameSchema(&decodeRan)))
 		require.NoError(t, err)
-		assert.True(t, called, "the validator should have been called")
-		assert.Equal(t, validatorConfig{Name: "test", Value: 42, validated: true}, result)
+		assert.True(t, decodeRan, "the schema did not run in Decode")
+		assert.Equal(t, validatorConfig{Name: "test", Value: 42, validated: true}, got)
+
+		into := validatorConfig{Value: 7}
+
+		err = yamltest.FirstDocument(t, "name: test").
+			DecodeInto(t.Context(), &into, niceyaml.WithValidator(nameSchema(&intoRan)))
+		require.NoError(t, err)
+		assert.True(t, intoRan, "the schema did not run in DecodeInto")
+		assert.Equal(t, validatorConfig{Name: "test", Value: 7, validated: true}, into)
 	})
 }
 
@@ -1599,7 +1593,7 @@ type failingValidator struct {
 }
 
 func (failingValidator) Validate() error {
-	return niceyaml.NewError("rejected", niceyaml.AtPath(paths.Current().Child("name")))
+	return yamltest.ErrorAt("rejected", "name")
 }
 
 // fieldValidator is a [niceyaml.Validator] that returns the error its
@@ -1610,161 +1604,6 @@ type fieldValidator struct {
 
 func (v *fieldValidator) Check(context.Context, *niceyaml.Node) error {
 	return v.err
-}
-
-// negativePrice rejects a price below zero. It is a validator of a type
-// of its own, with a body a [niceyaml.ValidatorFunc] can hold as it is.
-type negativePrice struct{}
-
-func (negativePrice) Check(ctx context.Context, n *niceyaml.Node) error {
-	pricePath := paths.Current().Child("price")
-
-	node, err := n.At(pricePath)
-	if err != nil {
-		return err //nolint:wrapcheck // The test inspects the error as it is.
-	}
-
-	price, err := node.Decode[int](ctx)
-	if err != nil {
-		return err
-	}
-
-	if price < 0 {
-		return niceyaml.NewError("negative price", niceyaml.AtPath(pricePath))
-	}
-
-	return nil
-}
-
-func TestDocument_ErrorsResolveInDocument(t *testing.T) {
-	t.Parallel()
-
-	input := stringtest.Input(`
-		name: first
-		---
-		name: second
-	`)
-
-	badName := niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name")))
-	validator := rejectingValidator(badName)
-	// A validator that binds its own error, through the Node it gets.
-	binding := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Node) error {
-		return doc.Bind(badName)
-	})
-
-	tcs := map[string]struct {
-		// Returns the error of one document.
-		call func(ctx context.Context, doc *niceyaml.Node) error
-		// The first line of the error of each document.
-		want []string
-	}{
-		"validator errors": {
-			call: func(ctx context.Context, doc *niceyaml.Node) error {
-				return doc.Validate(ctx, validator)
-			},
-			want: []string{"1:7: $.name: bad name", "3:7: $.name: bad name"},
-		},
-		"validator errors of a decode": {
-			call: decodeAs[map[string]string](niceyaml.WithValidator(validator)),
-			want: []string{"1:7: $.name: bad name", "3:7: $.name: bad name"},
-		},
-		"errors a validator binds itself": {
-			call: decodeAs[map[string]string](niceyaml.WithValidator(binding)),
-			want: []string{"1:7: $.name: bad name", "3:7: $.name: bad name"},
-		},
-		"self validation errors": {
-			call: decodeAs[failingValidator](),
-			want: []string{"1:7: $.name: rejected", "3:7: $.name: rejected"},
-		},
-		"decode errors": {
-			call: decodeAs[struct {
-				Name int `yaml:"name"`
-			}](),
-			want: []string{"1:7: $.name: expected integer, got string", "3:7: $.name: expected integer, got string"},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			var got []string
-
-			for _, doc := range niceyaml.NewSourceFromString(input).Documents() {
-				err := tc.call(t.Context(), doc)
-				require.Error(t, err)
-
-				got = append(got, strings.SplitN(err.Error(), "\n", 2)[0])
-			}
-
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestWithDisallowUnknownFields_ControlCharacters(t *testing.T) {
-	t.Parallel()
-
-	type config struct {
-		Name string `yaml:"name"`
-	}
-
-	// The decoder writes the name of an unknown field into its message as
-	// the document spells it. A key with a line feed or an escape sequence
-	// thus reaches the message, where it must not start a line that reads
-	// as another error or write to a terminal.
-	tcs := map[string]struct {
-		input string
-		want  string
-	}{
-		"a key that forges a line": {
-			input: "name: x\n\"a\\nother.yaml:9:9: $.secret: forged\": 1\n",
-			want: `f.yaml:2:1: $.'a\nother.yaml:9:9: $.secret: forged'~: ` +
-				"unknown field \"a\u240aother.yaml:9:9: $.secret: forged\"",
-		},
-		"a key with an escape sequence": {
-			input: "name: x\n\"a\\e[31mb\": 1\n",
-			want:  `f.yaml:2:1: $.'a\u001b[31mb'~: ` + "unknown field \"a\u241b[31mb\"",
-		},
-		"two keys": {
-			input: stringtest.LinesLF(
-				"name: x",
-				`"a\nb": 1`,
-				`"c\td": 2`,
-			),
-			want: stringtest.JoinLF(
-				"f.yaml: 2 unknown fields",
-				`f.yaml:2:1: $.'a\nb'~: `+"unknown field \"a\u240ab\"",
-				`f.yaml:3:1: $.'c\td'~: `+"unknown field \"c\u2409d\"",
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("f.yaml"))
-
-			_, err := source.Decode[config](t.Context(), niceyaml.WithDisallowUnknownFields(true))
-			require.EqualError(t, err, tc.want)
-			assert.NotContains(t, err.Error(), "\x1b")
-
-			// The path reads back as the key the document holds.
-			require.ErrorAs(t, err, new(*niceyaml.SourceError))
-
-			for _, b := range yamltest.BoundIn(err) {
-				path, ok := b.Path()
-				if !ok {
-					continue
-				}
-
-				parsed, err := paths.Parse(path.String())
-				require.NoError(t, err)
-				assert.Equal(t, path, parsed)
-			}
-		})
-	}
 }
 
 func TestWithDisallowUnknownFields(t *testing.T) {
@@ -1783,7 +1622,6 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 		}{
 			"root": {
 				input: "name: test\nextra: field",
-				path:  paths.Current(),
 			},
 			"scoped node": {
 				input: stringtest.JoinLF("inner:", "  name: test", "  extra: field"),
@@ -1795,7 +1633,7 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				node := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.path)
+				node := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.path)
 
 				// The same node decodes strictly on one call and loosely on
 				// the next, so the option belongs to the call rather than
@@ -1822,6 +1660,70 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "test", result.Name)
 	})
+
+	t.Run("a key with control characters", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder writes the name of an unknown field into its message
+		// as the document spells it. A key with a line feed or an escape
+		// sequence thus reaches the message, where it must not start a line
+		// that reads as another error or write to a terminal.
+		tcs := map[string]struct {
+			input string
+			want  string
+		}{
+			"a key that forges a line": {
+				input: stringtest.LinesLF(
+					"name: x",
+					`"a\nother.yaml:9:9: $.secret: forged": 1`,
+				),
+				want: `f.yaml:2:1: $.'a\nother.yaml:9:9: $.secret: forged'~: ` +
+					"unknown field \"a\u240aother.yaml:9:9: $.secret: forged\"",
+			},
+			"a key with an escape sequence": {
+				input: stringtest.LinesLF("name: x", `"a\e[31mb": 1`),
+				want:  `f.yaml:2:1: $.'a\u001b[31mb'~: ` + "unknown field \"a\u241b[31mb\"",
+			},
+			"two keys": {
+				input: stringtest.LinesLF(
+					"name: x",
+					`"a\nb": 1`,
+					`"c\td": 2`,
+				),
+				want: stringtest.JoinLF(
+					"f.yaml: 2 unknown fields",
+					`f.yaml:2:1: $.'a\nb'~: `+"unknown field \"a\u240ab\"",
+					`f.yaml:3:1: $.'c\td'~: `+"unknown field \"c\u2409d\"",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("f.yaml"))
+
+				_, err := source.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+				require.EqualError(t, err, tc.want)
+				assert.NotContains(t, err.Error(), "\x1b")
+
+				// The path reads back as the key the document holds.
+				require.ErrorAs(t, err, new(*niceyaml.SourceError))
+
+				for _, b := range yamltest.BoundIn(err) {
+					path, ok := b.Path()
+					if !ok {
+						continue
+					}
+
+					parsed, err := paths.Parse(path.String())
+					require.NoError(t, err)
+					assert.Equal(t, path, parsed)
+				}
+			})
+		}
+	})
 }
 
 func TestWithAllowedFieldPrefixes(t *testing.T) {
@@ -1841,15 +1743,6 @@ func TestWithAllowedFieldPrefixes(t *testing.T) {
 		"allows a key under a prefix": {
 			input: "name: a\nx-note: b\n",
 			opts:  []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFieldPrefixes("x-")},
-		},
-		"rejects a key under no prefix": {
-			input: stringtest.LinesLF(
-				"name: a",
-				"x-note: b",
-				"note: c",
-			),
-			opts: []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFieldPrefixes("x-")},
-			err:  `3:1: $.note~: unknown field "note"`,
 		},
 		"each option adds to the prefixes before it": {
 			input: stringtest.LinesLF(
@@ -1962,7 +1855,7 @@ func decodeSpan(_ context.Context, s *plainSpan, decode func(any) error) error {
 	}
 
 	if s.To < s.From {
-		return niceyaml.NewError("to is below from", niceyaml.AtPath(paths.Current().Child("to")))
+		return yamltest.ErrorAt("to is below from", "to")
 	}
 
 	return nil
@@ -2076,7 +1969,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			input string
 		}{
 			"plain":          {input: "office: 10.0.0.0/8\n"},
-			"double quoted":  {input: "office: \"10.0.0.0/8\"\n"},
+			"double quoted":  {input: stringtest.LinesLF(`office: "10.0.0.0/8"`)},
 			"single quoted":  {input: "office: '10.0.0.0/8'\n"},
 			"with a comment": {input: "office: 10.0.0.0/8 # the office\n"},
 			"block":          {input: stringtest.LinesLF("office: |-", "  10.0.0.0/8")},
@@ -2133,7 +2026,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			Levels []plainLevel `yaml:"levels"`
 		}](t.Context(), record)
 		require.NoError(t, err)
-		assert.Equal(t, []string{"low\n", "\"high\" # top\n", "{a: 1}\n"}, got)
+		assert.Equal(t, []string{"low\n", `"high" # top` + "\n", "{a: 1}\n"}, got)
 	})
 
 	// The decode callback returns the rejection of a decode, and the
@@ -2148,6 +2041,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			Nets    []net.IPNet           `yaml:"nets"`
 			Spans   []plainSpan           `yaml:"spans"`
 			Count   int                   `yaml:"count"`
+			Level   plainLevel            `yaml:"level"`
 		}
 
 		decoders := niceyaml.DecodeOptions(
@@ -2157,10 +2051,20 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 		)
 
 		tcs := map[string]struct {
+			// An error the result matches beside niceyaml.ErrDecode, for a
+			// case that names one.
+			is    error
 			input string
 			want  string
 			opts  []niceyaml.DecodeOption
 		}{
+			// The first line names no field of config. It puts the level on
+			// line 2.
+			"field the function rejects": {
+				input: stringtest.LinesLF("name: api", "level: mid"),
+				is:    errUnknownLevel,
+				want:  `2:8: $.level: unknown level "mid"`,
+			},
 			"sequence where the function decodes a string": {
 				input: stringtest.LinesLF(
 					"nets:",
@@ -2199,6 +2103,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 					"  low: a",
 					"  mid: b",
 				),
+				is:   errUnknownLevel,
 				want: `3:3: $.by_level.mid~: unknown level "mid"`,
 			},
 			"field of the value": {
@@ -2275,6 +2180,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			// called the function, so another function decodes the level.
 			"value another function decodes below the value": {
 				input: stringtest.LinesLF("spans:", "  - {from: 1, to: 2, level: mid}"),
+				is:    errUnknownLevel,
 				want:  `2:29: $.spans[0].level: unknown level "mid"`,
 			},
 			"unknown field of the value": {
@@ -2321,9 +2227,11 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 				_, err := yamltest.FirstDocument(t, tc.input).Decode[config](
 					t.Context(), append([]niceyaml.DecodeOption{decoders}, tc.opts...)...,
 				)
-				require.EqualError(t, err, tc.want)
-				require.ErrorIs(t, err, niceyaml.ErrDecode)
-				requireInvalid(t, err, max(strings.Count(tc.want, "\n"), 1))
+				requireRejected(t, err, tc.want)
+
+				if tc.is != nil {
+					require.ErrorIs(t, err, tc.is)
+				}
 			})
 		}
 	})
@@ -2363,7 +2271,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			"path of a detail": {
 				input: reversed,
 				report: niceyaml.NewError("span is odd", niceyaml.WithDetails(
-					niceyaml.NewError("to set here", niceyaml.AtPath(paths.Current().Child("to"))),
+					yamltest.ErrorAt("to set here", "to"),
 				)),
 				want:   "2:5: $.boxes[0].item: span is odd",
 				detail: "2:25: $.boxes[0].item.to: to set here",
@@ -2402,9 +2310,9 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 					return
 				}
 
-				srcErr := yamltest.RequireSourceError(t, err)
-				require.Len(t, yamltest.DetailsOf(srcErr), 1)
-				assert.EqualError(t, yamltest.DetailsOf(srcErr)[0].Bound, tc.detail)
+				details := yamltest.DetailsOf(yamltest.RequireSourceError(t, err))
+				require.Len(t, details, 1)
+				assert.EqualError(t, details[0].Bound, tc.detail)
 			})
 		}
 
@@ -2611,18 +2519,6 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 
 		_, err = doc.Decode[map[string]methodLevel](t.Context())
 		require.EqualError(t, err, "1:8: $.level: the decoder called the method")
-	})
-
-	t.Run("the error of the function binds at the value", func(t *testing.T) {
-		t.Parallel()
-
-		_, err := yamltest.FirstDocument(t, "name: api\nlevel: mid\n").Decode[struct {
-			Name  string     `yaml:"name"`
-			Level plainLevel `yaml:"level"`
-		}](t.Context(), levels)
-		require.EqualError(t, err, `2:8: $.level: unknown level "mid"`)
-		require.ErrorIs(t, err, errUnknownLevel)
-		require.ErrorIs(t, err, niceyaml.ErrDecode)
 	})
 
 	t.Run("a nil function removes the function of the type", func(t *testing.T) {
@@ -3687,10 +3583,9 @@ func TestNode_YAMLComments_Errors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			docs := niceyaml.NewSourceFromString(tc.input).AllDocuments()
-			require.Len(t, docs, 1)
+			doc := yamltest.AllDocuments(t, niceyaml.NewSourceFromString(tc.input), 1)[0]
 
-			got, err := docs[0].YAMLComments(t.Context())
+			got, err := doc.YAMLComments(t.Context())
 			require.ErrorIs(t, err, tc.err)
 			assert.Nil(t, got)
 		})
@@ -3756,7 +3651,6 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 					"c: x [1]",
 					"d: *x",
 				),
-				path: paths.Current(),
 				want: map[string]any{"a": uint64(1), "b": uint64(2), "c": "x [1]", "d": uint64(2)},
 			},
 			"failure in an anchor a later one hides": {
@@ -3836,7 +3730,6 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			},
 			"whole document with an alias to a sibling in an anchor": {
 				input: sibling,
-				path:  paths.Current(),
 				want: map[string]any{
 					"outer": map[string]any{
 						"one": uint64(1),
@@ -3875,13 +3768,13 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 
 				dd := yamltest.FirstDocument(t, tc.input)
 
-				got, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context())
+				got, err := yamltest.AtOrSelf(t, dd, tc.path).Decode[any](t.Context())
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, got)
 
 				var scoped any
 
-				err = yamltest.At(t, dd, tc.path).DecodeInto(t.Context(), &scoped)
+				err = yamltest.AtOrSelf(t, dd, tc.path).DecodeInto(t.Context(), &scoped)
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, scoped)
 			})
@@ -4178,8 +4071,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			"  - *x",
 		)
 
-		docs := niceyaml.NewSourceFromString(input).Documents()
-		require.Len(t, docs, 2)
+		docs := yamltest.Documents(t, niceyaml.NewSourceFromString(input), 2)
 
 		got, err := yamltest.At(t, docs[1], paths.Current().Child("b")).Decode[[]int](t.Context())
 		require.NoError(t, err)
@@ -4210,6 +4102,8 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		assert.Contains(t, got.T.text, "&x 2")
 	})
 
+	// The new name of a renamed anchor skips each count the document or a
+	// reference document spells.
 	t.Run("node spells an alias to a renamed anchor with its new name", func(t *testing.T) {
 		t.Parallel()
 
@@ -4218,31 +4112,16 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			D ast.Node `yaml:"d"`
 		}
 
-		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
-			"a: &x 1",
-			"b: &x 2",
-			"c: [*x, 3]",
-			"d: {p: &x 4, q: *x}",
-		))
-
-		got, err := dd.Decode[wrapper](t.Context())
-		require.NoError(t, err)
-		require.NotNil(t, got.C)
-		require.NotNil(t, got.D)
-		assert.Equal(t, "[*x [2], 3]", got.C.String())
-		assert.Equal(t, "{p: &x 4, q: *x [3]}", got.D.String())
-	})
-
-	t.Run("new names skip the counts the document spells", func(t *testing.T) {
-		t.Parallel()
-
-		type wrapper struct {
-			C ast.Node `yaml:"c"`
-		}
+		// The one anchor named x gets a new name when the source has a
+		// reference document.
+		one := "a: &x 1\nc: [*x]\n"
 
 		tcs := map[string]struct {
-			input string
+			input      string
+			references []string
+			// The text of c, and of d for a case that holds one.
 			want  string
+			wantD string
 		}{
 			"nothing spelled": {
 				input: stringtest.LinesLF(
@@ -4251,6 +4130,16 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 					"c: [*x]",
 				),
 				want: "[*x [2]]",
+			},
+			"anchor the node defines again": {
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x 2",
+					"c: [*x, 3]",
+					"d: {p: &x 4, q: *x}",
+				),
+				want:  "[*x [2], 3]",
+				wantD: "{p: &x 4, q: *x [3]}",
 			},
 			"several counts spelled": {
 				input: stringtest.LinesLF(
@@ -4272,59 +4161,38 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 				),
 				want: "[*x [2]]",
 			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				got, err := yamltest.FirstDocument(t, tc.input).Decode[wrapper](t.Context())
-				require.NoError(t, err)
-				require.NotNil(t, got.C)
-				assert.Equal(t, tc.want, got.C.String())
-			})
-		}
-	})
-
-	t.Run("new names skip the counts a reference document spells", func(t *testing.T) {
-		t.Parallel()
-
-		type wrapper struct {
-			C ast.Node `yaml:"c"`
-		}
-
-		// The one anchor named x gets a new name, since the source has a
-		// reference document.
-		tcs := map[string]struct {
-			reference string
-			want      string
-		}{
-			"nothing spelled": {
-				reference: "r: 1\n",
-				want:      "[*x [1]]",
+			"nothing spelled in a reference document": {
+				input:      one,
+				references: []string{"r: 1\n"},
+				want:       "[*x [1]]",
 			},
-			"count of another name": {
-				reference: "r: y [1]\n",
-				want:      "[*x [1]]",
+			"count of another name in a reference document": {
+				input:      one,
+				references: []string{"r: y [1]\n"},
+				want:       "[*x [1]]",
 			},
-			"key": {
-				reference: "\"x [1]\": 1\n",
-				want:      "[*x [2]]",
+			"key of a reference document": {
+				input:      one,
+				references: []string{stringtest.LinesLF(`"x [1]": 1`)},
+				want:       "[*x [2]]",
 			},
-			"escaped value": {
-				reference: "r: \"x\\x20[1]\"\n",
-				want:      "[*x [2]]",
+			"escaped value of a reference document": {
+				input:      one,
+				references: []string{stringtest.LinesLF(`r: "x\x20[1]"`)},
+				want:       "[*x [2]]",
 			},
-			"tag before a flow sequence": {
-				reference: "r: !x [1]\n",
-				want:      "[*x [2]]",
+			"tag before a flow sequence of a reference document": {
+				input:      one,
+				references: []string{"r: !x [1]\n"},
+				want:       "[*x [2]]",
 			},
-			"second reference": {
-				reference: stringtest.LinesLF(
+			"second document of a reference": {
+				input: one,
+				references: []string{stringtest.LinesLF(
 					"r: x [1]",
 					"---",
 					"r: x [2] # x [3]",
-				),
+				)},
 				want: "[*x [4]]",
 			},
 		}
@@ -4333,13 +4201,17 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, "a: &x 1\nc: [*x]\n",
-					niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.reference)))
+				dd := yamltest.FirstDocument(t, tc.input, yamltest.References(tc.references...))
 
 				got, err := dd.Decode[wrapper](t.Context())
 				require.NoError(t, err)
 				require.NotNil(t, got.C)
 				assert.Equal(t, tc.want, got.C.String())
+
+				if tc.wantD != "" {
+					require.NotNil(t, got.D)
+					assert.Equal(t, tc.wantD, got.D.String())
+				}
 			})
 		}
 	})
@@ -4356,8 +4228,8 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 
 		// The anchor named x gets a new name, and the message quotes the
 		// key as the reference document spells it.
-		dd := yamltest.FirstDocument(t, "x: &x 9\nv: *r\n",
-			niceyaml.WithReferences(niceyaml.NewSourceFromString("r: &r {\"x [1]\": 2}\n")))
+		ref := yamltest.References(stringtest.LinesLF(`r: &r {"x [1]": 2}`))
+		dd := yamltest.FirstDocument(t, "x: &x 9\nv: *r\n", ref)
 
 		_, err := dd.Decode[config](t.Context(), niceyaml.WithDisallowUnknownFields(true))
 		require.EqualError(t, err, `2:4: unknown field "x [1]"`)
@@ -4375,21 +4247,15 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		// The alias inside its own anchor makes each document write a null
 		// into the tokens of the second parse, which the go-yaml formatter
 		// reads for rawText in every other document.
-		var sb strings.Builder
-
-		for i := range 8 {
-			fmt.Fprintf(&sb, stringtest.LinesLF(
-				"---",
-				"a: &x %d",
-				"t:",
-				"  p: &x 2",
-				"  q: *x",
-				"r: *x",
-				"s: &s {s: *s}",
-			), i)
-		}
-
-		docs := niceyaml.NewSourceFromString(sb.String()).Documents()
+		docs := yamltest.Documents(t, niceyaml.NewSourceFromString(yamltest.GenerateLines(8, stringtest.JoinLF(
+			"---",
+			"a: &x %d",
+			"t:",
+			"  p: &x 2",
+			"  q: *x",
+			"r: *x",
+			"s: &s {s: *s}",
+		))), 8)
 
 		var wg sync.WaitGroup
 
@@ -4440,11 +4306,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		require.EqualError(t, err, `3:15: $.c.k: cannot convert "nope" to boolean`)
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-		bound := yamltest.RequireSourceError(t, err)
-
-		rng, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, 2, rng.Start.Line)
+		assert.Equal(t, 2, yamltest.RangeOf(t, yamltest.RequireSourceError(t, err)).Start.Line)
 	})
 }
 
@@ -4454,7 +4316,7 @@ func TestDocument_Decode_ForwardAlias(t *testing.T) {
 	// An alias before every anchor of its name in the document reads the
 	// anchor of a reference document, however many anchors of the name
 	// follow the alias.
-	refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("defaults: &defaults {port: 80}\nx: &x 1\n"))
+	refs := yamltest.References(stringtest.LinesLF("defaults: &defaults {port: 80}", "x: &x 1"))
 
 	tcs := map[string]struct {
 		input  string
@@ -4822,9 +4684,12 @@ func TestDocument_DecodeInto(t *testing.T) {
 		}
 
 		tcs := map[string]struct {
-			input string
-			path  paths.Path
-			want  position.Position
+			decode func(context.Context, *niceyaml.Node) error
+			input  string
+			path   paths.Path
+			// The message of the error.
+			err  string
+			want position.Position
 		}{
 			"whole document": {
 				input: stringtest.LinesLF(
@@ -4833,8 +4698,9 @@ func TestDocument_DecodeInto(t *testing.T) {
 					"name: x",
 					"items: [a]",
 				),
-				path: paths.Current(),
-				want: position.New(2, 0),
+				decode: decodeAs[listConfig](),
+				err:    "3:1: decoder panicked: unmarshaler rejected the value",
+				want:   position.New(2, 0),
 			},
 			"scoped node": {
 				input: stringtest.LinesLF(
@@ -4843,8 +4709,16 @@ func TestDocument_DecodeInto(t *testing.T) {
 					"  # the list",
 					"  items: [a]",
 				),
-				path: paths.Current().Child("wrap"),
-				want: position.New(3, 2),
+				path:   paths.Current().Child("wrap"),
+				decode: decodeAs[listConfig](),
+				err:    "4:3: decoder panicked: unmarshaler rejected the value",
+				want:   position.New(3, 2),
+			},
+			"value the decode reads": {
+				input:  stringtest.LinesLF("# note", "value: 1"),
+				decode: decodeAs[panickingUnmarshaler](),
+				err:    "2:1: decoder panicked: unmarshaler rejected the value",
+				want:   position.New(1, 0),
 			},
 		}
 
@@ -4857,24 +4731,23 @@ func TestDocument_DecodeInto(t *testing.T) {
 				var err error
 
 				require.NotPanics(t, func() {
-					_, err = yamltest.At(t, dd, tc.path).Decode[listConfig](t.Context())
+					err = tc.decode(t.Context(), yamltest.AtOrSelf(t, dd, tc.path))
 				})
 				require.NotErrorIs(t, err, niceyaml.ErrDecode)
-				require.ErrorContains(t, err, "decoder panicked: "+errUnmarshal.Error())
+				require.EqualError(t, err, tc.err)
 				requirePanic(t, err)
 
 				_, ok := errors.AsType[yaml.Error](err)
 				assert.False(t, ok, "a go-yaml error is in the chain")
 
-				srcErr := yamltest.RequireSourceError(t, err)
-
-				rng, ok := srcErr.Range()
-				require.True(t, ok, "the rejection has no location")
-				assert.Equal(t, tc.want, rng.Start)
+				assert.Equal(t, tc.want, yamltest.RangeOf(t, yamltest.RequireSourceError(t, err)).Start)
 			})
 		}
 	})
 
+	// The target fails the call before a validator runs, and before
+	// DecodeIfPresent resolves its path, so the mistake shows whether or
+	// not the document holds the value.
 	t.Run("rejects a target that is not a non-nil pointer", func(t *testing.T) {
 		t.Parallel()
 
@@ -4886,46 +4759,62 @@ func TestDocument_DecodeInto(t *testing.T) {
 		}{
 			"nil": {
 				target: nil,
-				want:   "decode target is not a non-nil pointer: got nil",
+				want:   "cfg.yaml: decode target is not a non-nil pointer: got nil",
 			},
 			"value": {
 				target: 5,
-				want:   "decode target is not a non-nil pointer: got int",
+				want:   "cfg.yaml: decode target is not a non-nil pointer: got int",
 			},
 			"nil pointer": {
 				target: nilConfig,
-				want:   "decode target is not a non-nil pointer: got *niceyaml_test.plainConfig",
+				want:   "cfg.yaml: decode target is not a non-nil pointer: got *niceyaml_test.plainConfig",
 			},
+		}
+
+		// Returns a call of DecodeIfPresent for the value at path. The
+		// target fails the call, so it finds nothing.
+		ifPresent := func(path paths.Path) func(*testing.T, *niceyaml.Node, any, niceyaml.DecodeOption) error {
+			return func(t *testing.T, doc *niceyaml.Node, target any, opt niceyaml.DecodeOption) error {
+				t.Helper()
+
+				found, err := doc.DecodeIfPresent(t.Context(), path, target, opt)
+				assert.False(t, found)
+
+				return err //nolint:wrapcheck // The test inspects the error of the call.
+			}
+		}
+
+		calls := map[string]func(t *testing.T, doc *niceyaml.Node, target any, opt niceyaml.DecodeOption) error{
+			"DecodeInto": func(t *testing.T, doc *niceyaml.Node, target any, opt niceyaml.DecodeOption) error {
+				t.Helper()
+
+				return doc.DecodeInto(t.Context(), target, opt)
+			},
+			"DecodeIfPresent of a value the document holds":      ifPresent(paths.Current().Child("version")),
+			"DecodeIfPresent of a value the document leaves out": ifPresent(paths.Current().Child("name")),
 		}
 
 		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				var called bool
+				for callName, call := range calls {
+					t.Run(callName, func(t *testing.T) {
+						t.Parallel()
 
-				dd := yamltest.FirstDocument(t, "name: test")
+						var called bool
 
-				err := dd.DecodeInto(t.Context(), tc.target, niceyaml.WithValidator(nameSchema(&called)))
-				require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+						doc := yamltest.FirstDocumentWithPath(t, "version: 3\n", "cfg.yaml")
 
-				require.ErrorAs(t, err, new(*niceyaml.SourceError))
-				assert.Equal(t, tc.want, err.Error())
-				assert.False(t, called, "the validator should not run for a bad target")
+						err := call(t, doc, tc.target, niceyaml.WithValidator(nameSchema(&called)))
+						require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+						require.ErrorAs(t, err, new(*niceyaml.SourceError))
+						assert.Equal(t, tc.want, err.Error())
+						assert.False(t, called, "the validator should not run for a bad target")
+					})
+				}
 			})
 		}
-	})
-
-	t.Run("binds a rejected target to the source", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocumentWithPath(t, "name: test", "f.yaml")
-
-		err := dd.DecodeInto(t.Context(), nil)
-		require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
-
-		require.ErrorAs(t, err, new(*niceyaml.SourceError))
-		assert.Equal(t, "f.yaml: decode target is not a non-nil pointer: got nil", err.Error())
 	})
 
 	t.Run("decodes through a pointer target", func(t *testing.T) {
@@ -4965,7 +4854,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 			want       any
 			err        error
 			input      string
-			references string
+			references []string
 		}{
 			"Decode validates the value": {
 				input:  "name: a\nvalue: 1\n",
@@ -5018,31 +4907,31 @@ func TestDocument_DecodeInto(t *testing.T) {
 			},
 			"alias to a null of a reference document": {
 				input:      "*x\n",
-				references: "a: &x ~\n",
+				references: []string{"a: &x ~\n"},
 				decode:     decodedAs[*validatorConfig],
 				want:       (*validatorConfig)(nil),
 			},
 			"DecodeInto sets a non-nil pointer to nil for an alias to a null": {
 				input:      "*x\n",
-				references: "a: &x ~\n",
+				references: []string{"a: &x ~\n"},
 				decode:     intoConfig,
 				want:       (*plainConfig)(nil),
 			},
 			"anchored alias to a null of a reference document": {
 				input:      "&y\n*x\n",
-				references: "a: &x ~\n",
+				references: []string{"a: &x ~\n"},
 				decode:     decodedAs[*validatorConfig],
 				want:       (*validatorConfig)(nil),
 			},
 			"alias to a tagged null of a reference document": {
 				input:      "*x\n",
-				references: "a: &x !!null\n",
+				references: []string{"a: &x !!null\n"},
 				decode:     decodedAs[*string],
 				want:       (*string)(nil),
 			},
 			"alias to a scalar of a reference document": {
 				input:      "*x\n",
-				references: "a: &x 7\n",
+				references: []string{"a: &x 7\n"},
 				decode:     decodedAs[*int],
 				want:       new(7),
 			},
@@ -5077,13 +4966,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				var opts []niceyaml.SourceOption
-
-				if tc.references != "" {
-					opts = append(opts, niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.references)))
-				}
-
-				dd := yamltest.FirstDocument(t, tc.input, opts...)
+				dd := yamltest.FirstDocument(t, tc.input, yamltest.References(tc.references...))
 
 				got, err := tc.decode(t, dd)
 				if tc.err != nil {
@@ -5095,23 +4978,6 @@ func TestDocument_DecodeInto(t *testing.T) {
 				assert.Equal(t, tc.want, got)
 			})
 		}
-	})
-
-	t.Run("runs schema and Validate around the decode", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "name: test")
-
-		result := validatorConfig{Value: 7}
-
-		var called bool
-
-		err := dd.DecodeInto(t.Context(), &result, niceyaml.WithValidator(nameSchema(&called)))
-		require.NoError(t, err)
-		assert.Equal(t, "test", result.Name)
-		assert.Equal(t, 7, result.Value)
-		assert.True(t, called, "the validator should have been called")
-		assert.True(t, result.validated, "Validate() should have been called")
 	})
 }
 
@@ -5293,43 +5159,6 @@ func TestNode_DecodeInto_Merge(t *testing.T) {
 	}
 }
 
-func TestDocument_Decode_ValueReceivers(t *testing.T) {
-	t.Parallel()
-
-	t.Run("calls value receiver hooks", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "name: test")
-
-		result, err := dd.Decode[valueValidatorConfig](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, "test", result.Name)
-	})
-
-	t.Run("returns value receiver Validate error", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, `name: ""`)
-
-		result, err := dd.Decode[valueValidatorConfig](t.Context())
-		require.ErrorIs(t, err, errNameRequired)
-		assert.Zero(t, result)
-	})
-}
-
-// valueValidatorConfig implements niceyaml.SelfValidator with a value receiver.
-type valueValidatorConfig struct {
-	Name string `yaml:"name"`
-}
-
-func (c valueValidatorConfig) Validate() error {
-	if c.Name == "" {
-		return errNameRequired
-	}
-
-	return nil
-}
-
 func TestWithAllowDuplicateKeys(t *testing.T) {
 	t.Parallel()
 
@@ -5372,15 +5201,9 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 		result, err := doc.Decode[config](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, "second", result.Name)
-	})
 
-	t.Run("At resolves the value the decode keeps", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, input, niceyaml.WithAllowDuplicateKeys(true))
-		name := yamltest.At(t, doc, paths.Current().Child("name"))
-
-		got, err := name.Decode[string](t.Context())
+		// At resolves the value the decode keeps.
+		got, err := yamltest.At(t, doc, paths.Current().Child("name")).Decode[string](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, "second", got)
 	})
@@ -5459,8 +5282,11 @@ func TestDocument_Decode_MergeOverride(t *testing.T) {
 			want: server{Host: "h", Port: 2},
 		},
 		"a key overrides a merge in a flow mapping": {
-			input: "defaults: &defaults {host: h, port: 1}\nserver: {<<: *defaults, port: 2}\n",
-			want:  server{Host: "h", Port: 2},
+			input: stringtest.LinesLF(
+				"defaults: &defaults {host: h, port: 1}",
+				"server: {<<: *defaults, port: 2}",
+			),
+			want: server{Host: "h", Port: 2},
 		},
 	}
 
@@ -5504,6 +5330,12 @@ func (plainValidated) Validate() error {
 func TestDocument_ErrorsBindToSource(t *testing.T) {
 	t.Parallel()
 
+	input := stringtest.Input(`
+		name: first
+		---
+		name: second
+	`)
+
 	namePath := paths.Current().Child("name")
 
 	// The helper asserts err is a [*niceyaml.SourceError] bound to the
@@ -5520,57 +5352,87 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 		Name string `yaml:"name"`
 	}
 
-	failing := rejectingValidator(niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
+	badName := yamltest.ErrorAt("bad name", "name")
+	failing := rejectingValidator(badName)
+	// A validator that binds its own error, through the Node it gets.
+	binding := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Node) error {
+		return doc.Bind(badName)
+	})
 
+	// Each error resolves in the document of the call, so its position
+	// reads from the line of that document.
 	tcs := map[string]struct {
+		// Returns the error of one document.
 		call func(ctx context.Context, doc *niceyaml.Node) error
 		// An error the result matches, for a case that names one.
-		is    error
+		is error
+		// The input, for a case that does not read the two documents of
+		// the shared input.
 		input string
+		// The first line of the error of each document.
+		want []string
 	}{
 		"Decode binds a decoding error": {
+			call: decodeAs[struct {
+				Name int `yaml:"name"`
+			}](),
+			is:   niceyaml.ErrDecode,
+			want: []string{"1:7: $.name: expected integer, got string", "3:7: $.name: expected integer, got string"},
+		},
+		// The rejection of a sequence where a string belongs binds at the
+		// key of the sequence rather than at its value.
+		"Decode binds a decoding error of a sequence": {
 			input: "name: [1, 2]\n",
 			call:  decodeAs[config](),
 			is:    niceyaml.ErrDecode,
+			want:  []string{"1:1: $.name: expected string, got sequence"},
 		},
-		"Decode binds a schema error": {
-			input: "name: a\n",
-			call:  decodeAs[config](niceyaml.WithValidator(failing)),
+		"DecodeAt binds a decoding error of a sequence": {
+			input: "name: [1, 2]\n",
+			call:  decodeAtAs[string](namePath),
+			is:    niceyaml.ErrDecode,
+			want:  []string{"1:1: $.name: expected string, got sequence"},
 		},
-		"DecodeInto binds a schema error": {
-			input: "name: a\n",
-			call: func(ctx context.Context, doc *niceyaml.Node) error {
-				return doc.DecodeInto(ctx, new(config), niceyaml.WithValidator(failing))
-			},
+		"Decode binds a validator error": {
+			call: decodeAs[config](niceyaml.WithValidator(failing)),
+			want: []string{"1:7: $.name: bad name", "3:7: $.name: bad name"},
+		},
+		"Decode binds an error a validator binds itself": {
+			call: decodeAs[config](niceyaml.WithValidator(binding)),
+			want: []string{"1:7: $.name: bad name", "3:7: $.name: bad name"},
+		},
+		"DecodeInto binds a validator error": {
+			call: decodeIntoAs[config](niceyaml.WithValidator(failing)),
+			want: []string{"1:7: $.name: bad name", "3:7: $.name: bad name"},
 		},
 		"DecodeAt binds a decoding error": {
-			input: "name: [1, 2]\n",
-			call: func(ctx context.Context, doc *niceyaml.Node) error {
-				_, err := doc.DecodeAt[string](ctx, namePath)
-
-				return err
-			},
-			is: niceyaml.ErrDecode,
+			call: decodeAtAs[int](namePath),
+			is:   niceyaml.ErrDecode,
+			want: []string{"1:7: $.name: expected integer, got string", "3:7: $.name: expected integer, got string"},
 		},
 		"Validate binds a validator error": {
-			input: "name: a\n",
 			call: func(ctx context.Context, doc *niceyaml.Node) error {
 				return doc.Validate(ctx, failing)
 			},
+			want: []string{"1:7: $.name: bad name", "3:7: $.name: bad name"},
+		},
+		"Decode binds a self validation error": {
+			call: decodeAs[failingValidator](),
+			want: []string{"1:7: $.name: rejected", "3:7: $.name: rejected"},
 		},
 		"Decode binds a plain self validation error": {
-			input: "name: a\n",
-			call:  decodeAs[plainValidated](),
-			is:    errPlainValidation,
+			call: decodeAs[plainValidated](),
+			is:   errPlainValidation,
+			want: []string{"1:1: $: plain validation failure", "3:1: $: plain validation failure"},
 		},
 		"At binds a path resolution error": {
-			input: "name: a\n",
 			call: func(_ context.Context, doc *niceyaml.Node) error {
 				_, err := doc.At(paths.Current().Child("missing"))
 
 				return err //nolint:wrapcheck // The test inspects the error of the call.
 			},
-			is: paths.ErrNotFound,
+			is:   paths.ErrNotFound,
+			want: []string{"1:1: $.missing: not found", "3:1: $.missing: not found"},
 		},
 	}
 
@@ -5578,14 +5440,25 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
-
-			err := tc.call(t.Context(), doc)
-			requireBound(t, doc, err)
-
-			if tc.is != nil {
-				require.ErrorIs(t, err, tc.is)
+			source := niceyaml.NewSourceFromString(input)
+			if tc.input != "" {
+				source = niceyaml.NewSourceFromString(tc.input)
 			}
+
+			var got []string
+
+			for _, doc := range yamltest.Documents(t, source, len(tc.want)) {
+				err := tc.call(t.Context(), doc)
+				requireBound(t, doc, err)
+
+				if tc.is != nil {
+					require.ErrorIs(t, err, tc.is)
+				}
+
+				got = append(got, strings.SplitN(err.Error(), "\n", 2)[0])
+			}
+
+			assert.Equal(t, tc.want, got)
 		})
 	}
 
@@ -5597,7 +5470,7 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 		var pre error
 
 		validator := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Node) error {
-			pre = yamltest.Bind(t, doc.Source(), niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
+			pre = yamltest.Bind(t, doc.Source(), yamltest.ErrorAt("bad name", "name"))
 
 			return pre
 		})
@@ -5614,7 +5487,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 	t.Run("receives the document and decodes on success", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
+		dd := yamltest.FirstDocument(t, decodeNameValueDoc)
 
 		var got *niceyaml.Node
 
@@ -5638,8 +5511,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		// The alias names an anchor of the reference document the source
 		// holds. The ordered map option reaches the decode that gets it and
 		// no decode the validator runs.
-		refs := niceyaml.NewSourceFromString("base: &x 1\n")
-		dd := yamltest.FirstDocument(t, stringtest.LinesLF("b:", "  c: *x"), niceyaml.WithReferences(refs))
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF("b:", "  c: *x"), yamltest.References("base: &x 1\n"))
 		ordered := niceyaml.WithYAMLOrderedMaps(true)
 
 		var (
@@ -5696,30 +5568,6 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		}
 	})
 
-	t.Run("runs in order and stops at the first failure", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "name: test\n")
-
-		var order []string
-
-		record := func(name string, err error) niceyaml.Validator {
-			return niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
-				order = append(order, name)
-
-				return err
-			})
-		}
-
-		_, err := dd.Decode[plainConfig](t.Context(),
-			niceyaml.WithValidator(record("first", nil)),
-			niceyaml.WithValidator(record("second", errDocumentRejected)),
-			niceyaml.WithValidator(record("third", nil)),
-		)
-		require.ErrorIs(t, err, errDocumentRejected)
-		assert.Equal(t, []string{"first", "second"}, order)
-	})
-
 	t.Run("a typed nil pointer is no failure and the next validator runs", func(t *testing.T) {
 		t.Parallel()
 
@@ -5748,13 +5596,11 @@ func TestDocument_Decode_Validator(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
+				dd := yamltest.FirstDocument(t, decodeNameValueDoc)
 
 				result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(tc.validator))
 				require.NoError(t, err)
 				assert.Equal(t, plainConfig{Name: "test", Value: 42}, result)
-
-				require.NoError(t, dd.Validate(t.Context(), tc.validator))
 			})
 		}
 	})
@@ -5762,7 +5608,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 	t.Run("a scoped decode passes the scope", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
+		dd := yamltest.FirstDocument(t, decodeNameValueDoc)
 		valuePath := paths.Doc().Child("value")
 		scoped := yamltest.At(t, dd, valuePath)
 
@@ -5779,6 +5625,58 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		assert.Same(t, scoped, got)
 		assert.Equal(t, valuePath, got.Path())
 		assert.Equal(t, 42, value)
+	})
+
+	t.Run("a validator that decodes the document runs once", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, decodeNameValueDoc)
+
+		var runs int
+
+		// A validator shaped like schema.Schema.Check decodes the
+		// document to inspect it. Its own decode must carry no hooks, or
+		// the validator would run itself again on every decode it performs.
+		inspect := niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Node) error {
+			runs++
+
+			_, err := doc.Decode[any](ctx)
+
+			return err
+		})
+
+		result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(inspect))
+		require.NoError(t, err)
+		assert.Equal(t, 1, runs)
+		assert.Equal(t, "test", result.Name)
+		assert.Equal(t, 42, result.Value)
+	})
+
+	t.Run("a scoped decode inside a validator runs no validators", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, decodeNameValueDoc)
+
+		// The decode of the name field carries no hooks, so readName does
+		// not run again on its own decode, where the path of the field
+		// selects nothing.
+		readName := niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Node) error {
+			scoped := yamltest.At(t, doc, paths.Current().Child("name"))
+
+			name, err := scoped.Decode[string](ctx)
+			if err != nil {
+				return err
+			}
+
+			if name != "test" {
+				return errNameRequired
+			}
+
+			return nil
+		})
+
+		_, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(readName))
+		require.NoError(t, err)
 	})
 }
 
@@ -5818,106 +5716,17 @@ func typedNilValidator() niceyaml.Validator {
 	})
 }
 
-// hoursConfig is a value decoded from one node of a document, and its
-// Validate names a path from that node.
-type hoursConfig struct {
-	Open  string `yaml:"open"`
-	Close string `yaml:"close"`
-}
-
-func (h hoursConfig) Validate() error {
-	if h.Open == "" {
-		return niceyaml.NewError("open is required", niceyaml.AtPath(paths.Current().Child("open").Key()))
-	}
-
-	if h.Open >= h.Close {
-		return niceyaml.NewError("open must be before close", niceyaml.AtPath(paths.Current().Child("open")))
-	}
-
-	return nil
-}
-
-// valuesOfTokens returns the value of each token of tks, or nil for no
-// tokens.
-func valuesOfTokens(tks token.Tokens) []string {
-	var values []string
-
-	for _, tk := range tks {
-		values = append(values, tk.Value)
-	}
-
-	return values
-}
-
-// requireNodeExtent checks the span and the token values of the Node that
-// path selects in doc.
-func requireNodeExtent(t *testing.T, doc *niceyaml.Node, path paths.Path, span position.Span, values []string) {
-	t.Helper()
-
-	scoped := yamltest.At(t, doc, path)
-
-	assert.Equal(t, span, scoped.Span())
-	assert.Equal(t, values, valuesOfTokens(scoped.Tokens()))
-}
-
-func TestDocument_Decode_ValidatorDecodesWithoutHooks(t *testing.T) {
-	t.Parallel()
-
-	t.Run("a validator that decodes the document runs once", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
-
-		var runs int
-
-		// A validator shaped like schema.Schema.Check decodes the
-		// document to inspect it. Its own decode must carry no hooks, or
-		// the validator would run itself again on every decode it performs.
-		inspect := niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Node) error {
-			runs++
-
-			_, err := doc.Decode[any](ctx)
-
-			return err
-		})
-
-		result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(inspect))
-		require.NoError(t, err)
-		assert.Equal(t, 1, runs)
-		assert.Equal(t, "test", result.Name)
-		assert.Equal(t, 42, result.Value)
-	})
-
-	t.Run("a validator that reads one field resolves the path once", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
-
-		readName := niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Node) error {
-			scoped := yamltest.At(t, doc, paths.Current().Child("name"))
-
-			name, err := scoped.Decode[string](ctx)
-			if err != nil {
-				return err
-			}
-
-			if name != "test" {
-				return errNameRequired
-			}
-
-			return nil
-		})
-
-		_, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(readName))
-		require.NoError(t, err)
-	})
-}
-
 // decodeSettings holds the source options and the decode options of one
 // case of [validatorSettings].
 type decodeSettings struct {
 	source []niceyaml.SourceOption
 	opts   []niceyaml.DecodeOption
+}
+
+// validating returns the decode options of s followed by the option
+// that runs v.
+func (s decodeSettings) validating(v niceyaml.Validator) []niceyaml.DecodeOption {
+	return append(slices.Clone(s.opts), niceyaml.WithValidator(v))
 }
 
 // validatorSettings returns the settings under which a test repeats a
@@ -5927,9 +5736,7 @@ func validatorSettings() map[string]decodeSettings {
 	return map[string]decodeSettings{
 		"no options": {},
 		"references": {
-			source: []niceyaml.SourceOption{
-				niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
-			},
+			source: []niceyaml.SourceOption{yamltest.References("base: &x 1\n")},
 		},
 		"ordered maps": {opts: []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)}},
 	}
@@ -5965,8 +5772,7 @@ func TestDocument_Decode_ValidatorErrorBoundToReceiver(t *testing.T) {
 				t.Parallel()
 
 				dd := yamltest.FirstDocument(t, "a: 1\n", tc.source...)
-
-				opts := append(slices.Clone(tc.opts), niceyaml.WithValidator(validator))
+				opts := tc.validating(validator)
 
 				_, decodeErr := dd.Decode[any](t.Context(), opts...)
 				validateErr := dd.Validate(t.Context(), validator)
@@ -6020,7 +5826,7 @@ func TestDocument_Decode_ScopedValidatorErrorDocument(t *testing.T) {
 						return fmt.Errorf("scope: %w", err)
 					}
 
-					return scoped.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("x"))))
+					return scoped.Bind(yamltest.ErrorAt("bad", "x"))
 				})
 
 				dd := yamltest.FirstDocument(t, stringtest.LinesLF(
@@ -6030,9 +5836,7 @@ func TestDocument_Decode_ScopedValidatorErrorDocument(t *testing.T) {
 					"  - x: 2",
 				), tc.source...)
 
-				opts := append(slices.Clone(tc.opts), niceyaml.WithValidator(scoping))
-
-				_, err := dd.Decode[any](t.Context(), opts...)
+				_, err := dd.Decode[any](t.Context(), tc.validating(scoping)...)
 				require.EqualError(t, err, "4:8: $.items[1].x: bad")
 
 				bound := yamltest.RequireSourceError(t, err)
@@ -6057,9 +5861,7 @@ func TestDocument_Decode_ValidatorAmbiguousErrorBoundToReceiver(t *testing.T) {
 
 			dd := yamltest.FirstDocument(t, "NaN: {n: -1}\n.nan: {n: -2}\n", tc.source...)
 
-			opts := append(slices.Clone(tc.opts), niceyaml.WithValidator(decoding))
-
-			_, err := dd.Decode[any](t.Context(), opts...)
+			_, err := dd.Decode[any](t.Context(), tc.validating(decoding)...)
 			require.Error(t, err)
 
 			ambiguous := 0
@@ -6164,10 +5966,7 @@ func TestDecodeOptions(t *testing.T) {
 
 		opts := niceyaml.DecodeOptions(record(&order, "schema"), strict)
 
-		docs := niceyaml.NewSourceFromString(input).Documents()
-		require.Len(t, docs, 2)
-
-		for _, dd := range docs {
+		for _, dd := range yamltest.Documents(t, niceyaml.NewSourceFromString(input), 2) {
 			_, err := dd.Decode[strictConfig](t.Context(), opts)
 			require.ErrorContains(t, err, `unknown field "extra"`)
 
@@ -6564,18 +6363,6 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 	}
 }
 
-// nodePaths returns the path of each Node of nodes as a string, or nil for
-// no nodes.
-func nodePaths(nodes []*niceyaml.Node) []string {
-	var got []string
-
-	for _, n := range nodes {
-		got = append(got, n.Path().String())
-	}
-
-	return got
-}
-
 // rejectingUnmarshaler decodes itself and reports errUnmarshal, so the
 // error the decoder returns is the caller's own rather than go-yaml's.
 type rejectingUnmarshaler struct{}
@@ -6716,22 +6503,14 @@ func TestErrDecode(t *testing.T) {
 			decode: decodeAs[struct{ Value string }](),
 		},
 		"DecodeInto": {
-			input: "value: abc",
-			decode: func(ctx context.Context, dd *niceyaml.Node) error {
-				var v struct{ Value int }
-
-				return dd.DecodeInto(ctx, &v)
-			},
+			input:  "value: abc",
+			decode: decodeIntoAs[struct{ Value int }](),
 		},
 		// The parser makes a null token for each value the document leaves
 		// out, which the lexer never saw.
 		"mapping value with only a tag": {
-			input: "a: null\nc: !!int\n",
-			decode: func(ctx context.Context, dd *niceyaml.Node) error {
-				_, err := dd.DecodeAt[struct{ X int }](ctx, paths.Current().Child("c"))
-
-				return err
-			},
+			input:  "a: null\nc: !!int\n",
+			decode: decodeAtAs[struct{ X int }](paths.Current().Child("c")),
 		},
 		"sequence item with only a tag": {
 			input: stringtest.LinesLF("items:", "  - !!int"),
@@ -6750,15 +6529,23 @@ func TestErrDecode(t *testing.T) {
 			input:  "a: !!bool\n",
 			decode: decodeAs[map[string]any](),
 		},
+		"decode inside a validator": {
+			input: "value: abc\n",
+			decode: func(ctx context.Context, dd *niceyaml.Node) error {
+				return dd.Validate(ctx, niceyaml.ValidatorFunc(decodeAs[struct{ Value int }]()))
+			},
+		},
+		"decode inside a validator of a decode": {
+			input:  "value: abc\n",
+			decode: decodeAs[any](niceyaml.WithValidator(niceyaml.ValidatorFunc(decodeAs[struct{ Value int }]()))),
+		},
 	}
 
 	for name, tc := range rejected {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			dd := yamltest.FirstDocument(t, tc.input)
-
-			err := tc.decode(t.Context(), dd)
+			err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input))
 			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 			require.ErrorAs(t, err, new(*niceyaml.Error))
@@ -6775,7 +6562,7 @@ func TestErrDecode(t *testing.T) {
 
 		// The decoder reports these with no token of the source, so the
 		// decode binds them where the document causes them.
-		refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {x: 1}\n"))
+		refs := yamltest.References("base: &base {x: 1}\n")
 
 		noAnchor := stringtest.LinesLF(
 			"a:",
@@ -6792,7 +6579,6 @@ func TestErrDecode(t *testing.T) {
 		}{
 			"merge alias the references leave unbound": {
 				input:  noAnchor,
-				path:   paths.Current(),
 				source: []niceyaml.SourceOption{refs},
 				line:   1,
 				msg:    "cannot find anchor by alias name nope",
@@ -6804,7 +6590,6 @@ func TestErrDecode(t *testing.T) {
 					"  b:",
 					"    <<: *nope",
 				),
-				path:   paths.Current(),
 				source: []niceyaml.SourceOption{refs},
 				line:   3,
 				msg:    "cannot find anchor by alias name nope",
@@ -6815,13 +6600,11 @@ func TestErrDecode(t *testing.T) {
 					"  <<: *x",
 					"  b: 1",
 				),
-				path: paths.Current(),
 				line: 1,
 				msg:  "cannot find anchor by alias name x",
 			},
 			"merge alias with no anchor": {
 				input: noAnchor,
-				path:  paths.Current(),
 				line:  1,
 				msg:   "cannot find anchor by alias name nope",
 			},
@@ -6833,13 +6616,11 @@ func TestErrDecode(t *testing.T) {
 					"c: &y",
 					"  d: 1",
 				),
-				path: paths.Current(),
 				line: 1,
 				msg:  "cannot find anchor by alias name y",
 			},
 			"merge alias in a list of sources": {
 				input: "a: {<<: [{b: 1}, *nope]}\n",
-				path:  paths.Current(),
 				line:  0,
 				msg:   "cannot find anchor by alias name nope",
 			},
@@ -6879,7 +6660,6 @@ func TestErrDecode(t *testing.T) {
 			"depth limit": {
 				input:  "a: " + strings.Repeat("[", 10005) + strings.Repeat("]", 10005) + "\n",
 				source: []niceyaml.SourceOption{niceyaml.WithDepthLimit(0)},
-				path:   paths.Current(),
 				line:   0,
 				msg:    "exceeded max depth",
 			},
@@ -6891,16 +6671,13 @@ func TestErrDecode(t *testing.T) {
 
 				dd := yamltest.FirstDocument(t, tc.input, tc.source...)
 
-				_, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context())
+				_, err := yamltest.AtOrSelf(t, dd, tc.path).Decode[any](t.Context())
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 				assert.Contains(t, err.Error(), tc.msg)
 				assert.NotContains(t, err.Error(), "\n", "the go-yaml excerpt leaked into the message")
 
 				srcErr := yamltest.RequireSourceError(t, err)
-
-				rng, ok := srcErr.Range()
-				require.True(t, ok, "the rejection carries no location")
-				assert.Equal(t, tc.line, rng.Start.Line)
+				assert.Equal(t, tc.line, yamltest.RangeOf(t, srcErr).Start.Line)
 				assert.Empty(t, yamltest.ProblemsOf(srcErr), "the rejection binds its own causes as children")
 			})
 		}
@@ -6915,14 +6692,10 @@ func TestErrDecode(t *testing.T) {
 			Item struct{ X int } `yaml:"item"`
 		}
 
-		ref := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {x: notint}\nother: &other 1\n"))
+		ref := yamltest.References(stringtest.LinesLF("base: &base {x: notint}", "other: &other 1"))
 
 		// Decodes the node under the key outer.
-		scoped := func(ctx context.Context, dd *niceyaml.Node) error {
-			_, err := dd.DecodeAt[cfg](ctx, paths.Current().Child("outer"))
-
-			return err
-		}
+		scoped := decodeAtAs[cfg](paths.Current().Child("outer"))
 
 		// A line of -1 means the rejection carries no location.
 		tcs := map[string]struct {
@@ -6977,13 +6750,9 @@ func TestErrDecode(t *testing.T) {
 			// document, so it binds the rejection at the alias too.
 			"key of an inline map beside an alias to a reference": {
 				input: "a: *other\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					var v struct {
-						M map[int]int `yaml:",inline"`
-					}
-
-					return dd.DecodeInto(ctx, &v)
-				},
+				decode: decodeIntoAs[struct {
+					M map[int]int `yaml:",inline"`
+				}](),
 				line: 0,
 			},
 		}
@@ -6992,9 +6761,7 @@ func TestErrDecode(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input, ref)
-
-				err := tc.decode(t.Context(), dd)
+				err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input, ref))
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 				assert.Contains(t, err.Error(), "expected integer, got string")
 				assert.NotContains(t, err.Error(), "[1:", "go-yaml's position leaked into the message")
@@ -7046,9 +6813,7 @@ func TestErrDecode(t *testing.T) {
 					"  <<: *base",
 					"  when: x",
 				),
-				source: []niceyaml.SourceOption{
-					niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {x: 1}\n")),
-				},
+				source: []niceyaml.SourceOption{yamltest.References("base: &base {x: 1}\n")},
 				decode: decodeAs[map[string]item](),
 			},
 			"error that wraps the go-yaml error of a top-level value": {
@@ -7072,9 +6837,7 @@ func TestErrDecode(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input, tc.source...)
-
-				err := tc.decode(t.Context(), dd)
+				err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input, tc.source...))
 				require.ErrorIs(t, err, errUnmarshal)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
@@ -7131,14 +6894,10 @@ func TestErrDecode(t *testing.T) {
 			// that gives one a token gives its case a location.
 			"duplicated struct field name": {
 				input: "a: 1\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					var v struct {
-						A int `yaml:"a"`
-						B int `yaml:"a"`
-					}
-
-					return dd.DecodeInto(ctx, &v)
-				},
+				decode: decodeIntoAs[struct {
+					A int `yaml:"a"`
+					B int `yaml:"a"`
+				}](),
 				msg: "duplicated struct field name a",
 			},
 			"unexported inline embedded struct": {
@@ -7154,24 +6913,16 @@ func TestErrDecode(t *testing.T) {
 			// so the mapping and its keys carry no token.
 			"key of an inline map": {
 				input: "a: 1\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					var v struct {
-						M map[int]int `yaml:",inline"`
-					}
-
-					return dd.DecodeInto(ctx, &v)
-				},
+				decode: decodeIntoAs[struct {
+					M map[int]int `yaml:",inline"`
+				}](),
 				msg: "cannot unmarshal string into Go struct field .M of type int",
 			},
 			"inline field that cannot hold a mapping": {
 				input: "a: 1\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					var v struct {
-						N int `yaml:",inline"`
-					}
-
-					return dd.DecodeInto(ctx, &v)
-				},
+				decode: decodeIntoAs[struct {
+					N int `yaml:",inline"`
+				}](),
 				msg: "cannot unmarshal map[string]interface {} into Go struct field .N of type int",
 			},
 		}
@@ -7180,9 +6931,7 @@ func TestErrDecode(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
-
-				err := tc.decode(t.Context(), dd)
+				err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input))
 				require.ErrorContains(t, err, tc.msg)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
@@ -7209,48 +6958,39 @@ func TestErrDecode(t *testing.T) {
 		err := dd.DecodeInto(t.Context(), &v)
 		require.EqualError(t, err, "2:4: $.b: expected integer, got string")
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
-
-		srcErr := yamltest.RequireSourceError(t, err)
-
-		rng, ok := srcErr.Range()
-		require.True(t, ok, "the rejection carries no location")
-		assert.Equal(t, position.New(1, 3), rng.Start)
-	})
-
-	t.Run("panic does not match", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "# note\nvalue: 1\n")
-
-		_, err := dd.Decode[panickingUnmarshaler](t.Context())
-		require.NotErrorIs(t, err, niceyaml.ErrDecode)
-		require.EqualError(t, err, "2:1: decoder panicked: unmarshaler rejected the value")
-		requirePanic(t, err)
-	})
-
-	t.Run("decode inside a validator matches", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "value: abc\n")
-
-		decodes := niceyaml.ValidatorFunc(decodeAs[struct{ Value int }]())
-
-		err := dd.Validate(t.Context(), decodes)
-		require.ErrorIs(t, err, niceyaml.ErrDecode)
-
-		_, err = dd.Decode[any](t.Context(), niceyaml.WithValidator(decodes))
-		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		assert.Equal(t, position.New(1, 3), yamltest.RangeOf(t, yamltest.RequireSourceError(t, err)).Start)
 	})
 
 	t.Run("error of another kind does not match", func(t *testing.T) {
 		t.Parallel()
 
-		tooLow := niceyaml.NewError("too low", niceyaml.AtPath(paths.Current().Child("value")))
+		tooLow := yamltest.ErrorAt("too low", "value")
+
+		// Returns decode with a context that has ended.
+		canceled := func(decode func(context.Context, *niceyaml.Node) error) func(context.Context, *niceyaml.Node) error {
+			return func(ctx context.Context, dd *niceyaml.Node) error {
+				ctx, cancel := context.WithCancel(ctx)
+				cancel()
+
+				return decode(ctx, dd)
+			}
+		}
+
+		// The alias under b needs the anchor under a, which the decode
+		// would otherwise skip and report as missing.
+		anchored := stringtest.LinesLF(
+			"a: &x 1",
+			"b:",
+			"  c: *x",
+		)
 
 		tcs := map[string]struct {
 			decode func(ctx context.Context, dd *niceyaml.Node) error
 			is     error
 			input  string
+			// The path of the node that decodes, for a case that decodes
+			// below the root.
+			path paths.Path
 			// The message of the error, for a case that checks it.
 			want string
 		}{
@@ -7278,14 +7018,20 @@ func TestErrDecode(t *testing.T) {
 				is: niceyaml.ErrDecodeTarget,
 			},
 			"canceled context": {
-				input: "value: 1",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					ctx, cancel := context.WithCancel(ctx)
-					cancel()
-
-					return decodeAs[cancelAwareUnmarshaler]()(ctx, dd)
-				},
-				is: context.Canceled,
+				input:  "value: 1",
+				decode: canceled(decodeAs[cancelAwareUnmarshaler]()),
+				is:     context.Canceled,
+			},
+			"canceled context of a decode that reads an anchor": {
+				input:  anchored,
+				decode: canceled(decodeAs[map[string]any]()),
+				is:     context.Canceled,
+			},
+			"canceled context of a scoped decode that reads an anchor": {
+				input:  anchored,
+				path:   paths.Current().Child("b"),
+				decode: canceled(decodeAs[map[string]any]()),
+				is:     context.Canceled,
 			},
 			// The context of the decode has not ended, and the value reports
 			// the error of a deadline of its own.
@@ -7307,7 +7053,7 @@ func TestErrDecode(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input))
+				err := tc.decode(t.Context(), yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.path))
 				require.ErrorIs(t, err, tc.is)
 				require.NotErrorIs(t, err, niceyaml.ErrDecode)
 
@@ -7321,50 +7067,15 @@ func TestErrDecode(t *testing.T) {
 	t.Run("parse error does not match", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("a: [\n")
+		doc := yamltest.UnparsedDocument(t, "a: [\n")
 
-		_, err := source.File()
+		_, err := doc.Source().File()
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
 		require.NotErrorIs(t, err, niceyaml.ErrDecode)
 
-		docs := source.AllDocuments()
-		require.Len(t, docs, 1)
-
-		_, err = docs[0].Decode[any](t.Context())
+		_, err = doc.Decode[any](t.Context())
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
 		require.NotErrorIs(t, err, niceyaml.ErrDecode)
-	})
-
-	t.Run("canceled context stops a decode that reads an anchor", func(t *testing.T) {
-		t.Parallel()
-
-		// The alias under b needs the anchor under a, which the decode
-		// would otherwise skip and report as missing.
-		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
-			"a: &x 1",
-			"b:",
-			"  c: *x",
-		))
-
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-
-		tcs := map[string]struct {
-			node *niceyaml.Node
-		}{
-			"scoped": {node: yamltest.At(t, dd, paths.Current().Child("b"))},
-			"root":   {node: dd},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				_, err := tc.node.Decode[map[string]any](ctx)
-				require.ErrorIs(t, err, context.Canceled)
-				require.NotErrorIs(t, err, niceyaml.ErrDecode)
-			})
-		}
 	})
 }
 
@@ -7793,6 +7504,28 @@ type strictAliased struct {
 func decodeAs[T any](opts ...niceyaml.DecodeOption) func(context.Context, *niceyaml.Node) error {
 	return func(ctx context.Context, n *niceyaml.Node) error {
 		_, err := n.Decode[T](ctx, opts...)
+
+		return err
+	}
+}
+
+// decodeIntoAs returns a decode of a node into a new T with opts,
+// through [niceyaml.Node.DecodeInto]. The decode returns the error
+// alone, as one of [decodeAs] does.
+func decodeIntoAs[T any](opts ...niceyaml.DecodeOption) func(context.Context, *niceyaml.Node) error {
+	return func(ctx context.Context, n *niceyaml.Node) error {
+		var v T
+
+		return n.DecodeInto(ctx, &v, opts...)
+	}
+}
+
+// decodeAtAs returns a decode of the node that path selects as a T with
+// opts, through [niceyaml.Node.DecodeAt]. The decode returns the error
+// alone, as one of [decodeAs] does.
+func decodeAtAs[T any](path paths.Path, opts ...niceyaml.DecodeOption) func(context.Context, *niceyaml.Node) error {
+	return func(ctx context.Context, n *niceyaml.Node) error {
+		_, err := n.DecodeAt[T](ctx, path, opts...)
 
 		return err
 	}
@@ -8334,11 +8067,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				require.Len(t, fields, rows)
 
 				for _, field := range fields {
-					require.ErrorIs(t, field.Err, niceyaml.ErrDecode)
-					require.NoError(t, field.Bound.Unresolved())
-
-					path, ok := field.Path()
-					require.True(t, ok)
+					path, _ := requireDecodeProblem(t, field)
 					assert.True(t, strings.HasSuffix(path.String(), "~"), "path %s", path)
 
 					// Each field holds a rejection the decoder returned.
@@ -8349,53 +8078,85 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			}
 		})
 	}
-}
 
-func TestDocument_Decode_UnknownFields_BesideValues(t *testing.T) {
-	t.Parallel()
+	t.Run("beside a value of the wrong kind", func(t *testing.T) {
+		t.Parallel()
 
-	// The decoder reports the value of the wrong kind and no unknown
-	// field. The decode lists the unknown fields beside that rejection,
-	// and counts problems, since not each of them is an unknown field.
-	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
-		"t: abc",
-		"qqq: 1",
-		"ppp: 2",
-	))
+		// The decoder reports the value of the wrong kind and no unknown
+		// field. The decode lists the unknown fields beside that rejection,
+		// and counts problems, since not each of them is an unknown field.
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"t: abc",
+			"qqq: 1",
+			"ppp: 2",
+		))
 
-	_, err := doc.Decode[struct {
-		T int `yaml:"t"`
-	}](t.Context(), niceyaml.WithDisallowUnknownFields(true))
-	require.EqualError(t, err, stringtest.JoinLF(
-		"3 problems",
-		"1:4: $.t: expected integer, got string",
-		`2:1: $.qqq~: unknown field "qqq"`,
-		`3:1: $.ppp~: unknown field "ppp"`,
-	))
-	require.ErrorIs(t, err, niceyaml.ErrDecode)
-	requireInvalid(t, err, 3)
+		_, err := doc.Decode[struct {
+			T int `yaml:"t"`
+		}](t.Context(), strict)
+		requireRejected(t, err, stringtest.JoinLF(
+			"3 problems",
+			"1:4: $.t: expected integer, got string",
+			`2:1: $.qqq~: unknown field "qqq"`,
+			`3:1: $.ppp~: unknown field "ppp"`,
+		))
 
-	srcErr := yamltest.RequireSourceError(t, err)
+		srcErr := yamltest.RequireSourceError(t, err)
 
-	problems := yamltest.ProblemsOf(srcErr)
-	require.Len(t, problems, 3)
+		problems := yamltest.ProblemsOf(srcErr)
+		require.Len(t, problems, 3)
 
-	var mismatch *yaml.TypeError
+		var mismatch *yaml.TypeError
 
-	require.ErrorAs(t, problems[0].Err, &mismatch)
+		require.ErrorAs(t, problems[0].Err, &mismatch)
 
-	for _, field := range problems[1:] {
-		var unknown *yaml.UnknownFieldError
+		for _, field := range problems[1:] {
+			var unknown *yaml.UnknownFieldError
 
-		require.ErrorAs(t, field.Err, &unknown)
-	}
+			require.ErrorAs(t, field.Err, &unknown)
+		}
 
-	// Without the option the decoder skips both keys, and the decode
-	// reports the value alone.
-	_, err = doc.Decode[struct {
-		T int `yaml:"t"`
-	}](t.Context())
-	require.EqualError(t, err, "1:4: $.t: expected integer, got string")
+		// Without the option the decoder skips both keys, and the decode
+		// reports the value alone.
+		_, err = doc.Decode[struct {
+			T int `yaml:"t"`
+		}](t.Context())
+		require.EqualError(t, err, "1:4: $.t: expected integer, got string")
+	})
+
+	t.Run("each document of a source", func(t *testing.T) {
+		t.Parallel()
+
+		// One value carries the option to the decode of every document.
+		opts := niceyaml.DecodeOptions(strict)
+
+		docs := yamltest.Documents(t, niceyaml.NewSourceFromString(stringtest.LinesLF(
+			"foo: 1",
+			"bar: 2",
+			"---",
+			"name: x",
+			"---",
+			"baz: 3",
+		)), 3)
+
+		want := []string{
+			stringtest.JoinLF(
+				`1:1: $.foo~: unknown field "foo"`,
+				`2:1: $.bar~: unknown field "bar"`,
+			),
+			"",
+			`6:1: $.baz~: unknown field "baz"`,
+		}
+
+		for i, doc := range docs {
+			var v struct {
+				Name string `yaml:"name"`
+			}
+
+			err := doc.DecodeInto(t.Context(), &v, opts)
+			assert.Equal(t, want[i], rejectionRows(err), "document %d", i)
+		}
+	})
 }
 
 func TestDocument_Decode_UnknownFields_KeyKinds(t *testing.T) {
@@ -8449,11 +8210,13 @@ func TestDocument_Decode_UnknownFields_KeyKinds(t *testing.T) {
 		"alias to an integer":   {key: "*i : x"},
 	}
 
+	// The anchors s and i, which the alias keys name.
+	anchors := stringtest.LinesLF("s: &s str", "i: &i 5")
+
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			anchors := "s: &s str\ni: &i 5\n"
 			b := stringtest.LinesLF("b:", "  www: 2", "  "+tc.key)
 
 			// The decoder alone says whether it rejects www beside the
@@ -8470,7 +8233,9 @@ func TestDocument_Decode_UnknownFields_KeyKinds(t *testing.T) {
 			// The report agrees with it.
 			var w keyKinds
 
-			err = yamltest.FirstDocument(t, anchors+"a:\n  zzz: 1\n"+b).DecodeInto(t.Context(), &w, strict)
+			a := stringtest.LinesLF("a:", "  zzz: 1")
+
+			err = yamltest.FirstDocument(t, anchors+a+b).DecodeInto(t.Context(), &w, strict)
 			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 			rows := rejectionRows(err)
@@ -8561,75 +8326,6 @@ func TestDocument_Decode_UnknownFields_IgnoredMerges(t *testing.T) {
 			assert.Contains(t, rows, `unknown field "qqq"`)
 			assert.Contains(t, rows, `unknown field "www"`)
 		})
-	}
-}
-
-func TestDocument_Decode_UnknownFields_Source(t *testing.T) {
-	t.Parallel()
-
-	// A named source puts its name in front of the summary and of each
-	// field in the message, and each field keeps its own position.
-	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
-		"foo: 1",
-		"name: x",
-		"bar: 2",
-	), niceyaml.WithName("cfg.yaml"))
-
-	_, err := source.Decode[struct {
-		Name string `yaml:"name"`
-	}](t.Context(), niceyaml.WithDisallowUnknownFields(true))
-	require.EqualError(t, err, stringtest.JoinLF(
-		"cfg.yaml: 2 unknown fields",
-		`cfg.yaml:1:1: $.foo~: unknown field "foo"`,
-		`cfg.yaml:3:1: $.bar~: unknown field "bar"`,
-	))
-	require.ErrorIs(t, err, niceyaml.ErrDecode)
-
-	assert.Equal(t, stringtest.JoinLF(
-		"cfg.yaml: 2 unknown fields",
-		`|-- 1:1: $.foo~: unknown field "foo"`,
-		"`-- "+`3:1: $.bar~: unknown field "bar"`,
-		"",
-		"   1 | foo: 1",
-		`     | ^^^ unknown field "foo"`,
-		"     | ...",
-		"   3 | bar: 2",
-		`     | ^^^ unknown field "bar"`,
-	), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
-}
-
-func TestDocument_DecodeInto_UnknownFields_EachDocument(t *testing.T) {
-	t.Parallel()
-
-	// One value carries the option to the decode of every document.
-	strict := niceyaml.DecodeOptions(niceyaml.WithDisallowUnknownFields(true))
-
-	docs := niceyaml.NewSourceFromString(stringtest.LinesLF(
-		"foo: 1",
-		"bar: 2",
-		"---",
-		"name: x",
-		"---",
-		"baz: 3",
-	)).Documents()
-	require.Len(t, docs, 3)
-
-	want := []string{
-		stringtest.JoinLF(
-			`1:1: $.foo~: unknown field "foo"`,
-			`2:1: $.bar~: unknown field "bar"`,
-		),
-		"",
-		`6:1: $.baz~: unknown field "baz"`,
-	}
-
-	for i, doc := range docs {
-		var v struct {
-			Name string `yaml:"name"`
-		}
-
-		err := doc.DecodeInto(t.Context(), &v, strict)
-		assert.Equal(t, want[i], rejectionRows(err), "document %d", i)
 	}
 }
 
@@ -8842,7 +8538,7 @@ func TestNode_DecodeAt(t *testing.T) {
 		late := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
 			seen = n.Path().String()
 
-			return niceyaml.NewError("opens too late", niceyaml.AtPath(paths.Current().Child("open")))
+			return yamltest.ErrorAt("opens too late", "open")
 		})
 
 		got, err := document(t).DecodeAt[openHours](t.Context(), hoursPath, niceyaml.WithValidator(late))
@@ -8859,13 +8555,11 @@ func TestNode_DecodeAt(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocumentWithPath(t, openOnlyDoc, "cfg.yaml")
-
-		_, err := doc.At(hoursPath)
-		require.NoError(t, err)
+		yamltest.At(t, doc, hoursPath)
 
 		// The error matches paths.ErrNotFound, and the node at the path
 		// is present, so the sentinel does not show an absent value.
-		_, err = doc.DecodeAt[openHours](t.Context(), hoursPath, niceyaml.WithValidator(requiresClose()))
+		_, err := doc.DecodeAt[openHours](t.Context(), hoursPath, niceyaml.WithValidator(requiresClose()))
 		require.ErrorIs(t, err, paths.ErrNotFound)
 		require.EqualError(t, err, "cfg.yaml:2:3: $.spec.hours.close: not found")
 	})
@@ -8879,7 +8573,7 @@ func TestNode_DecodeAt(t *testing.T) {
 		// value.
 		check := func(h openHours) error {
 			if h.Open < 12 {
-				return niceyaml.NewError("opens before noon", niceyaml.AtPath(paths.Current().Child("open")))
+				return yamltest.ErrorAt("opens before noon", "open")
 			}
 
 			return nil
@@ -9291,47 +8985,6 @@ func TestNode_DecodeIfPresent(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, found)
 		assert.Nil(t, target)
-	})
-
-	t.Run("a target that is no pointer returns ErrDecodeTarget", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]struct {
-			target  any
-			wantErr string
-		}{
-			"a value": {
-				target:  1,
-				wantErr: "cfg.yaml: decode target is not a non-nil pointer: got int",
-			},
-			"a nil pointer": {
-				target:  (*int)(nil),
-				wantErr: "cfg.yaml: decode target is not a non-nil pointer: got *int",
-			},
-			"nil": {
-				wantErr: "cfg.yaml: decode target is not a non-nil pointer: got nil",
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				doc := yamltest.FirstDocumentWithPath(t, "version: 3\n", "cfg.yaml")
-
-				// The target fails the call whether or not the document
-				// holds the value.
-				for holds, path := range map[string]paths.Path{
-					"present": versionPath,
-					"absent":  paths.Current().Child("name"),
-				} {
-					found, err := doc.DecodeIfPresent(t.Context(), path, tc.target)
-					require.ErrorIs(t, err, niceyaml.ErrDecodeTarget, holds)
-					require.EqualError(t, err, tc.wantErr, holds)
-					assert.False(t, found, holds)
-				}
-			})
-		}
 	})
 
 	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
@@ -9846,6 +9499,29 @@ func requireInvalid(t *testing.T, err error, count int) {
 	require.Equal(t, count, found)
 }
 
+// requireRejected checks that err, the error of a decode, reads want and
+// matches [niceyaml.ErrDecode], and that the document is at fault for
+// each problem want lists.
+func requireRejected(t *testing.T, err error, want string) {
+	t.Helper()
+
+	require.EqualError(t, err, want)
+	require.ErrorIs(t, err, niceyaml.ErrDecode)
+	requireInvalid(t, err, max(strings.Count(want, "\n"), 1))
+}
+
+// requireDecodeProblem checks that problem, a problem of the error of a
+// decode, matches [niceyaml.ErrDecode] and resolves its path. It returns
+// the path and the position the problem reports.
+func requireDecodeProblem(t *testing.T, problem niceyaml.ErrorTree) (paths.Path, position.Position) {
+	t.Helper()
+
+	require.ErrorIs(t, problem.Err, niceyaml.ErrDecode)
+	require.NoError(t, problem.Bound.Unresolved())
+
+	return yamltest.PathOf(t, problem), yamltest.PositionOf(t, problem)
+}
+
 func TestSource_Decode_Problems(t *testing.T) {
 	t.Parallel()
 
@@ -9863,14 +9539,12 @@ func TestSource_Decode_Problems(t *testing.T) {
 	)
 
 	_, err := source.Decode[problemConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
-	require.EqualError(t, err, stringtest.JoinLF(
+	requireRejected(t, err, stringtest.JoinLF(
 		"app.yaml: 3 problems",
 		`app.yaml:1:1: $.replcas~: unknown field "replcas"`,
 		"app.yaml:2:10: $.timeout: expected integer, got string",
 		"app.yaml:4:11: $.servers[0].port: expected integer, got string",
 	))
-	require.ErrorIs(t, err, niceyaml.ErrDecode)
-	requireInvalid(t, err, 3)
 
 	assert.Equal(t, stringtest.JoinLF(
 		"app.yaml: 3 problems",
@@ -9909,15 +9583,8 @@ func TestSource_Decode_Problems(t *testing.T) {
 	}
 
 	for i, problem := range problems {
-		require.ErrorIs(t, problem.Err, niceyaml.ErrDecode)
-		require.NoError(t, problem.Bound.Unresolved())
-
-		path, ok := problem.Path()
-		require.True(t, ok)
+		path, pos := requireDecodeProblem(t, problem)
 		assert.Equal(t, want[i].path, path.String())
-
-		pos, ok := problem.Position()
-		require.True(t, ok)
 		assert.Equal(t, want[i].pos, pos)
 	}
 
@@ -10355,27 +10022,22 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				var srcOpts []niceyaml.SourceOption
 
 				if i%2 == 1 {
-					srcOpts = append(srcOpts, niceyaml.WithReferences(
-						niceyaml.NewSourceFromString(stringtest.LinesLF(
-							"a: &a 2",
-							"b: &b {port: 1}",
-							"x: &x 1",
-						)),
-					))
+					srcOpts = append(srcOpts, yamltest.References(stringtest.LinesLF(
+						"a: &a 2",
+						"b: &b {port: 1}",
+						"x: &x 1",
+					)))
 				}
 
 				node := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input, srcOpts...), tc.scope)
 
 				err := tc.decode(t.Context(), node)
-				require.EqualError(t, err, tc.want)
-				require.ErrorIs(t, err, niceyaml.ErrDecode)
+				requireRejected(t, err, tc.want)
 
 				srcErr := yamltest.RequireSourceError(t, err)
 				assert.Same(t, node, yamltest.BoundNode(t, srcErr))
 
 				rows := strings.Count(tc.want, "\n")
-
-				requireInvalid(t, err, max(rows, 1))
 
 				// One problem points at its value, and a summary at none.
 				_, ok := srcErr.Position()
@@ -10388,43 +10050,90 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				require.Len(t, problems, rows)
 
 				for _, problem := range problems {
-					require.ErrorIs(t, problem.Err, niceyaml.ErrDecode)
-					require.NoError(t, problem.Bound.Unresolved())
-
-					_, ok := problem.Position()
-					assert.True(t, ok)
-
-					_, ok = problem.Path()
-					assert.True(t, ok)
+					requireDecodeProblem(t, problem)
 				}
 			}
 		})
 	}
-}
 
-func TestDocument_Decode_Problems_SecondDocument(t *testing.T) {
-	t.Parallel()
+	t.Run("problem of a later document", func(t *testing.T) {
+		t.Parallel()
 
-	// A problem of a later document keeps its line in the file.
-	docs := niceyaml.NewSourceFromString(
-		stringtest.LinesLF(
-			"replicas: 1",
-			"---",
-			"replicas: x",
-			"timeout: soon",
-		),
-		niceyaml.WithName("app.yaml"),
-	).Documents()
-	require.Len(t, docs, 2)
+		// A problem of a later document keeps its line in the file.
+		docs := yamltest.Documents(t, niceyaml.NewSourceFromString(
+			stringtest.LinesLF(
+				"replicas: 1",
+				"---",
+				"replicas: x",
+				"timeout: soon",
+			),
+			niceyaml.WithName("app.yaml"),
+		), 2)
 
-	var cfg problemConfig
+		var cfg problemConfig
 
-	err := docs[1].DecodeInto(t.Context(), &cfg)
-	require.EqualError(t, err, stringtest.JoinLF(
-		"app.yaml: document 2: 2 problems",
-		"app.yaml:3:11: $.replicas: expected integer, got string",
-		"app.yaml:4:10: $.timeout: expected integer, got string",
-	))
+		err := docs[1].DecodeInto(t.Context(), &cfg)
+		require.EqualError(t, err, stringtest.JoinLF(
+			"app.yaml: document 2: 2 problems",
+			"app.yaml:3:11: $.replicas: expected integer, got string",
+			"app.yaml:4:10: $.timeout: expected integer, got string",
+		))
+	})
+
+	t.Run("value the caller filled", func(t *testing.T) {
+		t.Parallel()
+
+		// The decode fills the server over the port the caller set, so the
+		// check for a port passes. No second decode of the server into a new
+		// value runs that check without the port.
+		cfg := struct {
+			Server  problemPorted `yaml:"server"`
+			Timeout int           `yaml:"timeout"`
+		}{Server: problemPorted{Port: 8080}}
+
+		err := yamltest.FirstDocument(t, "timeout: soon\nserver: {name: a}\n").DecodeInto(t.Context(), &cfg)
+		require.EqualError(t, err, "1:10: $.timeout: expected integer, got string")
+		require.NotErrorIs(t, err, errPortRequired)
+	})
+
+	t.Run("document nested deep", func(t *testing.T) {
+		t.Parallel()
+
+		// The search reads each level once, so a document nested this deep
+		// takes no longer for it.
+		const depth = 4000
+
+		_, err := yamltest.FirstDocument(t, deepDocument(depth), niceyaml.WithDepthLimit(0)).Decode[problemDeep](
+			t.Context(),
+		)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+		srcErr := yamltest.RequireSourceError(t, err)
+		assert.Empty(t, yamltest.ProblemsOf(srcErr))
+		assert.Equal(t, "expected integer, got string", srcErr.Message())
+		assert.Equal(t, "$"+strings.Repeat(".c", depth)+".v", yamltest.PathOf(t, srcErr).String())
+	})
+
+	t.Run("many problems", func(t *testing.T) {
+		t.Parallel()
+
+		// The report holds every problem, and the message lists the first of
+		// them and counts the rest.
+		const servers = 500
+
+		_, err := yamltest.FirstDocument(t, "servers:\n"+strings.Repeat("  - port: http\n", servers)).
+			Decode[problemConfig](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+		srcErr := yamltest.RequireSourceError(t, err)
+		require.Len(t, yamltest.ProblemsOf(srcErr), servers)
+
+		lines := strings.Split(err.Error(), "\n")
+		require.Len(t, lines, niceyaml.ErrorListLimit+2)
+		assert.Equal(t, "500 problems", lines[0])
+		assert.Equal(t, "2:11: $.servers[0].port: expected integer, got string", lines[1])
+		assert.Equal(t, "and 490 more", lines[len(lines)-1])
+	})
 }
 
 func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
@@ -10761,9 +10470,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			t.Parallel()
 
 			err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input))
-			require.EqualError(t, err, tc.want)
-			require.ErrorIs(t, err, niceyaml.ErrDecode)
-			requireInvalid(t, err, max(strings.Count(tc.want, "\n"), 1))
+			requireRejected(t, err, tc.want)
 
 			if tc.is != nil {
 				require.ErrorIs(t, err, tc.is)
@@ -10907,33 +10614,14 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 			t.Parallel()
 
 			for range 10 {
-				doc := yamltest.FirstDocument(t, tc.input,
-					niceyaml.WithReferences(niceyaml.NewSourceFromString(references)))
+				doc := yamltest.FirstDocument(t, tc.input, yamltest.References(references))
 				node := yamltest.AtOrSelf(t, doc, tc.scope)
 
 				err := tc.decode(t.Context(), node)
-				require.EqualError(t, err, tc.want)
-				require.ErrorIs(t, err, niceyaml.ErrDecode)
-				requireInvalid(t, err, max(strings.Count(tc.want, "\n"), 1))
+				requireRejected(t, err, tc.want)
 			}
 		})
 	}
-}
-
-func TestDocument_DecodeInto_Problems_Defaults(t *testing.T) {
-	t.Parallel()
-
-	// The decode fills the server over the port the caller set, so the
-	// check for a port passes. No second decode of the server into a new
-	// value runs that check without the port.
-	cfg := struct {
-		Server  problemPorted `yaml:"server"`
-		Timeout int           `yaml:"timeout"`
-	}{Server: problemPorted{Port: 8080}}
-
-	err := yamltest.FirstDocument(t, "timeout: soon\nserver: {name: a}\n").DecodeInto(t.Context(), &cfg)
-	require.EqualError(t, err, "1:10: $.timeout: expected integer, got string")
-	require.NotErrorIs(t, err, errPortRequired)
 }
 
 func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
@@ -11013,14 +10701,13 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 				Port  int          `yaml:"port"`
 			} `yaml:"services"`
 		}](t.Context())
-		require.EqualError(t, err, stringtest.JoinLF(
+		requireRejected(t, err, stringtest.JoinLF(
 			"4 problems",
 			`3:22: $.services[1].level: unknown level "loud"`,
 			"3:34: $.services[1].port: expected integer, got string",
 			`4:22: $.services[2].level: unknown level "quiet"`,
 			"4:35: $.services[2].port: expected integer, got string",
 		))
-		requireInvalid(t, err, 4)
 		assert.Equal(t, map[string]int{"info": 3, "loud": 4, "quiet": 3}, levelCalls.take())
 	})
 
@@ -11033,8 +10720,7 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 			Port int         `yaml:"port"`
 			Mode problemOnce `yaml:"mode"`
 		}](t.Context())
-		require.EqualError(t, err, "1:7: $.port: expected integer, got string")
-		requireInvalid(t, err, 1)
+		requireRejected(t, err, "1:7: $.port: expected integer, got string")
 		assert.Equal(t, map[string]int{"fast": 2}, onceCalls.take())
 
 		var p *niceyaml.PanicError
@@ -11422,48 +11108,6 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 	}
 }
 
-func TestDocument_Decode_Problems_Deep(t *testing.T) {
-	t.Parallel()
-
-	// The search reads each level once, so a document nested this deep
-	// takes no longer for it.
-	const depth = 4000
-
-	_, err := yamltest.FirstDocument(t, deepDocument(depth), niceyaml.WithDepthLimit(0)).Decode[problemDeep](
-		t.Context(),
-	)
-	require.ErrorIs(t, err, niceyaml.ErrDecode)
-
-	srcErr := yamltest.RequireSourceError(t, err)
-	assert.Empty(t, yamltest.ProblemsOf(srcErr))
-	assert.Equal(t, "expected integer, got string", srcErr.Message())
-
-	path, ok := srcErr.Path()
-	require.True(t, ok)
-	assert.Equal(t, "$"+strings.Repeat(".c", depth)+".v", path.String())
-}
-
-func TestDocument_Decode_Problems_Many(t *testing.T) {
-	t.Parallel()
-
-	// The report holds every problem, and the message lists the first of
-	// them and counts the rest.
-	const servers = 500
-
-	_, err := yamltest.FirstDocument(t, "servers:\n"+strings.Repeat("  - port: http\n", servers)).
-		Decode[problemConfig](t.Context())
-	require.ErrorIs(t, err, niceyaml.ErrDecode)
-
-	srcErr := yamltest.RequireSourceError(t, err)
-	require.Len(t, yamltest.ProblemsOf(srcErr), servers)
-
-	lines := strings.Split(err.Error(), "\n")
-	require.Len(t, lines, niceyaml.ErrorListLimit+2)
-	assert.Equal(t, "500 problems", lines[0])
-	assert.Equal(t, "2:11: $.servers[0].port: expected integer, got string", lines[1])
-	assert.Equal(t, "and 490 more", lines[len(lines)-1])
-}
-
 // tier decodes itself from text and reports errUnknownTier for any text
 // but "low" and "high".
 type tier int
@@ -11789,8 +11433,7 @@ type rejectionConfig struct {
 func requireNamedPath(t *testing.T, srcErr *niceyaml.SourceError, want string) paths.Path {
 	t.Helper()
 
-	path, ok := srcErr.Path()
-	require.True(t, ok, "the error carries no path")
+	path := yamltest.PathOf(t, srcErr)
 	assert.Contains(t, want, ": "+path.String()+": ")
 
 	return path
@@ -12039,18 +11682,11 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 
 			_, near := atPath.Nearest()
 			require.False(t, near, "the path selects nothing")
-
-			want, ok := atPath.Range()
-			require.True(t, ok)
-
-			got, ok := srcErr.Range()
-			require.True(t, ok)
-			assert.Equal(t, want, got)
+			assert.Equal(t, yamltest.RangeOf(t, atPath), yamltest.RangeOf(t, srcErr))
 
 			// The position of the error lies at the path: on the key for
 			// the path of a key, and at or inside the value for any other.
-			pos, ok := srcErr.Position()
-			require.True(t, ok)
+			pos := yamltest.PositionOf(t, srcErr)
 
 			under, ok := dd.PathAt(pos)
 			require.True(t, ok)
@@ -12190,9 +11826,7 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			dd := yamltest.FirstDocument(t, tc.input)
-
-			err := tc.decode(t.Context(), dd)
+			err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input))
 			require.EqualError(t, err, tc.want)
 			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
@@ -12340,7 +11974,7 @@ func TestDocument_Decode_Rejection_Label(t *testing.T) {
 		},
 	)
 
-	refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {small: 300}\n"))
+	refs := yamltest.References("base: &base {small: 300}\n")
 
 	tcs := map[string]struct {
 		input string
@@ -12447,10 +12081,9 @@ func TestDocument_Decode_Rejection_Label(t *testing.T) {
 			_, err := niceyaml.NewSourceFromString(tc.input, tc.source...).Decode[target](t.Context(), tc.opts...)
 			require.Error(t, err)
 
-			problems := slices.Collect(niceyaml.Problems(err))
-			require.Len(t, problems, 1)
-			assert.Equal(t, tc.want, problems[0].Message())
-			requireSentinels(t, problems[0].Err, tc.err...)
+			problem := yamltest.OnlyProblem(t, err)
+			assert.Equal(t, tc.want, problem.Message())
+			requireSentinels(t, problem.Err, tc.err...)
 		})
 	}
 
@@ -12463,10 +12096,9 @@ func TestDocument_Decode_Rejection_Label(t *testing.T) {
 		_, err := niceyaml.NewSourceFromString("bare: {name: abc}\n").Decode[target](t.Context())
 		require.Error(t, err)
 
-		problems := slices.Collect(niceyaml.Problems(err))
-		require.Len(t, problems, 1)
-		requireSentinels(t, problems[0].Err, niceyaml.ErrDecode)
-		require.ErrorAs(t, problems[0].Err, new(*yaml.UnexpectedNodeTypeError))
+		problem := yamltest.OnlyProblem(t, err)
+		requireSentinels(t, problem.Err, niceyaml.ErrDecode)
+		require.ErrorAs(t, problem.Err, new(*yaml.UnexpectedNodeTypeError))
 	})
 
 	// A summary matches each label that one of its problems matches, and
@@ -12556,10 +12188,7 @@ func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
 			ranges, err := yamltest.BoundDocument(t, srcErr).Ranges(path)
 			require.NoError(t, err)
 			require.Len(t, ranges, 1)
-
-			pos, ok := srcErr.Position()
-			require.True(t, ok)
-			assert.Equal(t, ranges[0].Start, pos)
+			assert.Equal(t, ranges[0].Start, yamltest.PositionOf(t, srcErr))
 		})
 	}
 }
@@ -12588,12 +12217,10 @@ func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
 		srcErr := yamltest.RequireSourceError(t, err)
 		require.NoError(t, srcErr.Unresolved())
 
-		path, ok := srcErr.Path()
-		require.True(t, ok)
+		path := yamltest.PathOf(t, srcErr)
 		assert.Equal(t, "$.name", path.String())
 
-		pos, ok := srcErr.Position()
-		require.True(t, ok)
+		pos := yamltest.PositionOf(t, srcErr)
 		assert.Equal(t, position.New(1, 6), pos)
 
 		ranges, err := doc.Ranges(path)
@@ -12601,7 +12228,7 @@ func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
 		require.Len(t, ranges, 1)
 		assert.Equal(t, position.New(2, 6), ranges[0].Start)
 
-		_, ok = doc.PathAt(pos)
+		_, ok := doc.PathAt(pos)
 		assert.False(t, ok, "a path selects the second entry")
 	})
 
@@ -12620,10 +12247,7 @@ func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
 
 		_, ok := srcErr.Path()
 		assert.False(t, ok)
-
-		pos, ok := srcErr.Position()
-		require.True(t, ok)
-		assert.Equal(t, position.New(1, 1), pos)
+		assert.Equal(t, position.New(1, 1), yamltest.PositionOf(t, srcErr))
 	})
 }
 
@@ -12907,13 +12531,9 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want:   `3:11: $.servers[0].tier: unknown tier "mid"`,
 			},
 			"DecodeInto": {
-				input: midTier,
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					var v tierServer
-
-					return dd.DecodeInto(ctx, &v)
-				},
-				want: `2:7: $.tier: unknown tier "mid"`,
+				input:  midTier,
+				decode: decodeIntoAs[tierServer](),
+				want:   `2:7: $.tier: unknown tier "mid"`,
 			},
 		}
 
@@ -12930,8 +12550,8 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 				requireNamedPath(t, srcErr, tc.want)
 
-				_, ok := srcErr.Range()
-				assert.True(t, ok, "the error carries no location")
+				// The error carries a location.
+				yamltest.RangeOf(t, srcErr)
 			})
 		}
 	})
@@ -13014,13 +12634,9 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want:   "1:1: $: expected string, got mapping",
 			},
 			"mapping a scoped decode reads": {
-				input: "name: api\ntier: {a: b}\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.DecodeAt[tier](ctx, paths.Current().Child("tier"))
-
-					return err
-				},
-				want: "2:1: $.tier: expected string, got mapping",
+				input:  "name: api\ntier: {a: b}\n",
+				decode: decodeAtAs[tier](paths.Current().Child("tier")),
+				want:   "2:1: $.tier: expected string, got mapping",
 			},
 		}
 
@@ -13028,9 +12644,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
-
-				err := tc.decode(t.Context(), dd)
+				err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input))
 				require.EqualError(t, err, tc.want)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 				assert.True(t, niceyaml.IsInvalid(err))
@@ -13106,20 +12720,16 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			},
 			// No path resolves through an alias to a reference document.
 			"value an alias reads from a reference document": {
-				input: "timeout: *limit\n",
-				source: []niceyaml.SourceOption{
-					niceyaml.WithReferences(niceyaml.NewSourceFromString("limit: &limit soon\n")),
-				},
+				input:  "timeout: *limit\n",
+				source: []niceyaml.SourceOption{yamltest.References("limit: &limit soon\n")},
 				decode: decodeAs[tierServer](),
 				want:   `time: invalid duration "soon"`,
 			},
 			// Every decode of the node fails the same way, whatever the
 			// target, so no value of the target reported the error.
 			"error of the decoder itself": {
-				input: "timeout: soon\n",
-				source: []niceyaml.SourceOption{
-					niceyaml.WithReferences(niceyaml.NewSourceFromString("limit: [\n")),
-				},
+				input:  "timeout: soon\n",
+				source: []niceyaml.SourceOption{yamltest.References("limit: [\n")},
 				decode: decodeAs[tierServer](),
 				want: stringtest.LinesLF(
 					"[1:8] sequence end token ']' not found",
@@ -13146,9 +12756,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input, tc.source...)
-
-				err := tc.decode(t.Context(), dd)
+				err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input, tc.source...))
 				require.EqualError(t, err, tc.want)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
@@ -13168,9 +12776,20 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 		tcs := map[string]struct {
 			decode func(ctx context.Context, dd *niceyaml.Node) error
-			input  string
-			want   string
+			// An error the result matches beside the sentinel, for a case
+			// that names one.
+			is    error
+			input string
+			want  string
 		}{
+			// The error of an unmarshaler is the value's own, so it keeps
+			// what it matched beside the sentinel.
+			"error of an unmarshaler": {
+				input:  midTier,
+				decode: decodeAs[tierServer](),
+				is:     errUnknownTier,
+				want:   `2:7: $.tier: unknown tier "mid"`,
+			},
 			"field": {
 				input:  "name: api\ntimeout: 5 minutes\n",
 				decode: decodeAs[tierServer](),
@@ -13192,22 +12811,15 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
-
-				err := tc.decode(t.Context(), dd)
+				err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input))
 				require.EqualError(t, err, tc.want)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+				if tc.is != nil {
+					require.ErrorIs(t, err, tc.is)
+				}
 			})
 		}
-
-		// The error of an unmarshaler is the value's own, so it keeps what
-		// it matched beside the sentinel.
-		dd := yamltest.FirstDocument(t, midTier)
-
-		_, err := dd.Decode[tierServer](t.Context())
-		require.EqualError(t, err, `2:7: $.tier: unknown tier "mid"`)
-		require.ErrorIs(t, err, errUnknownTier)
-		require.ErrorIs(t, err, niceyaml.ErrDecode)
 	})
 
 	// An unmarshaler holds no Node, so the path it writes reads from its
@@ -13324,14 +12936,10 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: "1:18: $.spans[0].to: to is below from",
 			},
 			"value below a scoped node": {
-				input: twoSpans,
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.DecodeAt[[]span](ctx, paths.Current().Child("spans"))
-
-					return err
-				},
-				is:   errSpan,
-				want: "4:9: $.spans[1].to: to is below from",
+				input:  twoSpans,
+				decode: decodeAtAs[[]span](paths.Current().Child("spans")),
+				is:     errSpan,
+				want:   "4:9: $.spans[1].to: to is below from",
 			},
 			// No value below the node reports the error, so the path reads
 			// from the node, which is the value.
@@ -13342,14 +12950,10 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want:   "2:5: $.to: to is below from",
 			},
 			"mapping a scoped decode reads": {
-				input: twoSpans,
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.DecodeAt[span](ctx, paths.Current().Child("spans").Index(1))
-
-					return err
-				},
-				is:   errSpan,
-				want: "4:9: $.spans[1].to: to is below from",
+				input:  twoSpans,
+				decode: decodeAtAs[span](paths.Current().Child("spans").Index(1)),
+				is:     errSpan,
+				want:   "4:9: $.spans[1].to: to is below from",
 			},
 			// The span wrote the path, so the path goes under the span and
 			// not under the value that handed its error on.
@@ -13421,8 +13025,8 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				input: items,
 				decode: reported(niceyaml.NewSummary(
 					"2 problems in the span",
-					niceyaml.NewError("from is odd", niceyaml.AtPath(paths.Current().Child("from"))),
-					niceyaml.NewError("to is odd", niceyaml.AtPath(paths.Current().Child("to"))),
+					yamltest.ErrorAt("from is odd", "from"),
+					yamltest.ErrorAt("to is odd", "to"),
 				)),
 				want: stringtest.JoinLF(
 					"2 problems in the span",
@@ -13436,9 +13040,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
-
-				err := tc.decode(t.Context(), dd)
+				err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input))
 				require.EqualError(t, err, tc.want)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
@@ -13474,8 +13076,8 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			"summary": {
 				report: niceyaml.NewSummary(
 					"2 problems in the span",
-					niceyaml.NewError("from is odd", niceyaml.AtPath(paths.Current().Child("from"))),
-					niceyaml.NewError("to is odd", niceyaml.AtPath(paths.Current().Child("to"))),
+					yamltest.ErrorAt("from is odd", "from"),
+					yamltest.ErrorAt("to is odd", "to"),
 				),
 				want: stringtest.JoinLF(
 					"2 problems in the span",
@@ -13519,7 +13121,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, oneSpan)
 		report := niceyaml.NewError("span is odd", niceyaml.WithDetails(
-			niceyaml.NewError("to set here", niceyaml.AtPath(paths.Current().Child("to"))),
+			yamltest.ErrorAt("to set here", "to"),
 		))
 
 		_, err := dd.Decode[struct {
@@ -13527,9 +13129,9 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 		}](context.WithValue(t.Context(), reportKey{}, error(report)))
 		require.EqualError(t, err, "2:3: $.spans[0]: span is odd")
 
-		srcErr := yamltest.RequireSourceError(t, err)
-		require.Len(t, yamltest.DetailsOf(srcErr), 1)
-		assert.EqualError(t, yamltest.DetailsOf(srcErr)[0].Bound, "3:9: $.spans[0].to: to set here")
+		details := yamltest.DetailsOf(yamltest.RequireSourceError(t, err))
+		require.Len(t, details, 1)
+		assert.EqualError(t, details[0].Bound, "3:9: $.spans[0].to: to set here")
 	})
 
 	t.Run("keeps the location the error carries", func(t *testing.T) {

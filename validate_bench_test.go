@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
@@ -95,25 +97,7 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 				sb.WriteString(shape.item(i))
 			}
 
-			yaml := sb.String()
-
-			doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
-
-			for _, mode := range selfValidationModes {
-				decode := shape.decode(mode.opts...)
-
-				b.Run(fmt.Sprintf("%s_%d/%s", shape.name, items, mode.name), func(b *testing.B) {
-					b.ReportAllocs()
-					b.SetBytes(int64(len(yaml)))
-
-					for b.Loop() {
-						err := decode(b.Context(), doc)
-						if err != nil {
-							b.Fatal(err)
-						}
-					}
-				})
-			}
+			benchSelfValidation(b, fmt.Sprintf("%s_%d", shape.name, items), sb.String(), shape.decode, 0, "")
 		}
 	}
 }
@@ -158,25 +142,7 @@ func BenchmarkNode_Decode_SelfValidation_Nested(b *testing.B) {
 		for _, depth := range []int{500, 1000, 2000} {
 			yaml := strings.Repeat(shape.open, depth) + "{}" + strings.Repeat(shape.close, depth)
 
-			doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
-
-			for _, mode := range selfValidationModes {
-				decode := shape.decode(mode.opts...)
-
-				b.Run(fmt.Sprintf("%s_%d/%s", shape.name, depth, mode.name), func(b *testing.B) {
-					b.ReportAllocs()
-					b.SetBytes(int64(len(yaml)))
-
-					for b.Loop() {
-						err := decode(b.Context(), doc)
-						if err != nil {
-							b.Fatal(err)
-						}
-					}
-
-					b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*depth), "ns/level")
-				})
-			}
+			benchSelfValidation(b, fmt.Sprintf("%s_%d", shape.name, depth), yaml, shape.decode, depth, "level")
 		}
 	}
 }
@@ -191,25 +157,7 @@ func BenchmarkNode_Decode_SelfValidation_DeepMap(b *testing.B) {
 	for _, depth := range []int{250, 1000, 2000} {
 		yaml := strings.Repeat("{kids: {a: ", depth) + "{leaf: 80}" + strings.Repeat("}}", depth)
 
-		doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
-
-		for _, mode := range selfValidationModes {
-			decode := decodeAs[mapTree](mode.opts...)
-
-			b.Run(fmt.Sprintf("depth_%d/%s", depth, mode.name), func(b *testing.B) {
-				b.ReportAllocs()
-				b.SetBytes(int64(len(yaml)))
-
-				for b.Loop() {
-					err := decode(b.Context(), doc)
-					if err != nil {
-						b.Fatal(err)
-					}
-				}
-
-				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*depth), "ns/level")
-			})
-		}
+		benchSelfValidation(b, fmt.Sprintf("depth_%d", depth), yaml, decodeAs[mapTree], depth, "level")
 	}
 }
 
@@ -222,25 +170,42 @@ func BenchmarkNode_Decode_SelfValidation_Promoted(b *testing.B) {
 	for _, rows := range []int{4000, 16000} {
 		yaml := yamltest.GenerateLines(rows, "- {name: n%[1]d, port: 80}")
 
-		doc := yamltest.FirstDocument(b, yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
+		benchSelfValidation(b, fmt.Sprintf("rows_%d", rows), yaml, decodeAs[[]promotedRow], rows, "row")
+	}
+}
 
-		for _, mode := range selfValidationModes {
-			decode := decodeAs[[]promotedRow](mode.opts...)
+// benchSelfValidation runs a benchmark under name for each of
+// [selfValidationModes]. Each benchmark decodes the first document of
+// yaml through decode with the options of its mode. When units is
+// positive, each also reports the time of one unit of work as
+// ns/<unit>. A unit is one part of the document, such as a level or a
+// row.
+func benchSelfValidation(
+	b *testing.B,
+	name, yaml string,
+	decode func(opts ...niceyaml.DecodeOption) func(context.Context, *niceyaml.Node) error,
+	units int,
+	unit string,
+) {
+	b.Helper()
 
-			b.Run(fmt.Sprintf("rows_%d/%s", rows, mode.name), func(b *testing.B) {
-				b.ReportAllocs()
-				b.SetBytes(int64(len(yaml)))
+	doc := yamltest.FirstDocument(b, yaml, yamltest.NoSizeLimits()...)
 
-				for b.Loop() {
-					err := decode(b.Context(), doc)
-					if err != nil {
-						b.Fatal(err)
-					}
-				}
+	for _, mode := range selfValidationModes {
+		run := decode(mode.opts...)
 
-				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*rows), "ns/row")
-			})
-		}
+		b.Run(name+"/"+mode.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(yaml)))
+
+			for b.Loop() {
+				require.NoError(b, run(b.Context(), doc))
+			}
+
+			if units > 0 {
+				yamltest.ReportTimePer(b, units, unit)
+			}
+		})
 	}
 }
 

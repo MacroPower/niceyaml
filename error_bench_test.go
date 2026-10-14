@@ -52,13 +52,13 @@ func BenchmarkSourceError_ExcerptOneLine(b *testing.B) {
 }
 
 func BenchmarkSourceBind_SentinelChain(b *testing.B) {
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 	sentinel := errors.New("invalid")
 
 	for _, depth := range []int{400, 1600} {
 		// Each level classifies the one below it with the sentinel, as a
 		// caller does with fmt.Errorf("%w: %w", ErrSentinel, err).
-		var err error = niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a")))
+		var err error = yamltest.ErrorAt("bad", "a")
 
 		for range depth - 1 {
 			err = fmt.Errorf("%w: %w", sentinel, err)

@@ -5,7 +5,6 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,6 +12,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
+
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
 // dependencyPolicy is the rule for one third-party library the exported API
@@ -133,15 +135,15 @@ func TestExportedAPI_DependencyPolicy(t *testing.T) {
 func TestCheckFile_Coverage(t *testing.T) {
 	t.Parallel()
 
-	const header = `package p
+	header := stringtest.Input(`
+		package p
 
-import (
-	"github.com/goccy/go-yaml"
-	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/parser"
-)
-
-`
+		import (
+			"github.com/goccy/go-yaml"
+			"github.com/goccy/go-yaml/ast"
+			"github.com/goccy/go-yaml/parser"
+		)
+	`)
 
 	tcs := map[string]struct {
 		src  string
@@ -167,9 +169,11 @@ import (
 			want: []string{"Default"},
 		},
 		"function literal body": {
-			src: `var Parse = func(src []byte) (*ast.File, error) {
-	return parser.ParseBytes(src, parser.ParseComments)
-}`,
+			src: stringtest.Input(`
+				var Parse = func(src []byte) (*ast.File, error) {
+					return parser.ParseBytes(src, parser.ParseComments)
+				}
+			`),
 		},
 		"pass-through type without the prefix": {
 			src:  `func WithOptions(opts ...yaml.EncodeOption) {}`,
@@ -179,15 +183,19 @@ import (
 			src: `func WithYAMLOptions(opts ...yaml.EncodeOption) {}`,
 		},
 		"method on receiver with type parameters": {
-			src: `type Map[K comparable, V any] struct{}
+			src: stringtest.Input(`
+				type Map[K comparable, V any] struct{}
 
-func (m *Map[K, V]) Node() *ast.MappingNode { return nil }`,
+				func (m *Map[K, V]) Node() *ast.MappingNode { return nil }
+			`),
 			want: []string{"Node"},
 		},
 		"method on unexported receiver with type parameters": {
-			src: `type pair[K comparable, V any] struct{}
+			src: stringtest.Input(`
+				type pair[K comparable, V any] struct{}
 
-func (p *pair[K, V]) Node() *ast.MappingNode { return nil }`,
+				func (p *pair[K, V]) Node() *ast.MappingNode { return nil }
+			`),
 		},
 	}
 
@@ -195,8 +203,7 @@ func (p *pair[K, V]) Node() *ast.MappingNode { return nil }`,
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path := filepath.Join(t.TempDir(), "src.go")
-			require.NoError(t, os.WriteFile(path, []byte(header+tc.src), 0o600))
+			path := yamltest.WriteFile(t, t.TempDir(), "src.go", stringtest.JoinLF(header, "", tc.src))
 
 			var got []string
 
@@ -217,12 +224,9 @@ func (p *pair[K, V]) Node() *ast.MappingNode { return nil }`,
 func checkFile(t *testing.T, path string) []string {
 	t.Helper()
 
-	src, err := os.ReadFile(path)
-	require.NoError(t, err)
-
 	fset := token.NewFileSet()
 
-	file, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution)
+	file, err := parser.ParseFile(fset, path, yamltest.ReadFile(t, path), parser.SkipObjectResolution)
 	require.NoError(t, err)
 
 	// Map local import names to the policy that covers them.

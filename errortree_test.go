@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"iter"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -70,7 +71,7 @@ func errorTreeSource() *niceyaml.Source {
 // builds an error of its own.
 func badKeyError(key string) func() *niceyaml.Error {
 	return func() *niceyaml.Error {
-		return niceyaml.NewError("bad "+key, niceyaml.AtPath(paths.Current().Child(key)))
+		return yamltest.ErrorAt("bad "+key, key)
 	}
 }
 
@@ -133,22 +134,6 @@ func (e listError) Error() string {
 // Unwrap returns the branches.
 func (e listError) Unwrap() []error {
 	return e
-}
-
-// upperError models a wrapper that rewrites the message of the error it
-// wraps. Its message is that message in upper case.
-type upperError struct {
-	err error
-}
-
-// Error returns the message of the wrapped error in upper case.
-func (e upperError) Error() string {
-	return strings.ToUpper(e.err.Error())
-}
-
-// Unwrap returns the wrapped error.
-func (e upperError) Unwrap() error {
-	return e.err
 }
 
 // countingError is an error that counts the calls to its Error method.
@@ -261,7 +246,7 @@ func TestErrorTree_New_DeepMultiWrap(t *testing.T) {
 			build: func(calls *atomic.Int64) error {
 				sentinel := countingError{calls: calls, msg: "invalid"}
 
-				var err error = niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a")))
+				var err error = yamltest.ErrorAt("bad", "a")
 
 				for i := 1; i < n; i++ {
 					err = fmt.Errorf("%w: %w", sentinel, err)
@@ -352,7 +337,7 @@ func TestErrorTree_New_DeepRebind(t *testing.T) {
 				err := source.Bind(countingError{calls: calls, msg: "e0"})
 
 				for i := 1; i < n; i++ {
-					located := niceyaml.NewError(fmt.Sprintf("e%d", i), niceyaml.AtPath(paths.Current().Child("a")))
+					located := yamltest.ErrorAt(fmt.Sprintf("e%d", i), "a")
 					err = source.Bind(fmt.Errorf("%w; %w", err, located))
 				}
 
@@ -387,7 +372,7 @@ func TestErrorTree_New_DeepRebind(t *testing.T) {
 		"message": func(err error) { _ = err.Error() },
 		"tree":    func(err error) { niceyaml.NewErrorTree(err) },
 		"rebind": func(err error) {
-			located := niceyaml.NewError("last", niceyaml.AtPath(paths.Current().Child("b")))
+			located := yamltest.ErrorAt("last", "b")
 			_ = source.Bind(fmt.Errorf("%w; %w", err, located)).Error()
 		},
 	}
@@ -458,7 +443,7 @@ func TestErrorTree_New_MultiErrorCalls(t *testing.T) {
 			var calls atomic.Int64
 
 			tc.run(countingViolationsError{calls: &calls, errs: []error{
-				niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a"))),
+				yamltest.ErrorAt("bad a", "a"),
 				errors.New("plain"),
 			}})
 
@@ -878,7 +863,7 @@ func TestErrorTree_New(t *testing.T) {
 			),
 		},
 		"wrapper that rewrites the message of a binding keeps its text whole": {
-			err: upperError{err: yamltest.Bind(t, source,
+			err: yamltest.UpperError{Err: yamltest.Bind(t, source,
 				niceyaml.NewSummary("2 problems", badA(), badB()))},
 			want: textNode(stringtest.JoinLF("F.YAML: 2 PROBLEMS", "F.YAML:1:4: $.A: BAD A", "F.YAML:2:4: $.B: BAD B"),
 				textNode("1:4: $.a: bad a"),
@@ -1322,7 +1307,10 @@ func TestErrorTree_All_PrintedOrder(t *testing.T) {
 	source := errorTreeSource()
 
 	err := errors.Join(
-		yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", badKeyError("b")(), badKeyError("a")())),
+		yamltest.Bind(t, source, niceyaml.NewSummary("2 problems",
+			yamltest.ErrorAt("bad b", "b"),
+			yamltest.ErrorAt("bad a", "a"),
+		)),
 		errors.New("read g.yaml: no such file"),
 	)
 
@@ -1343,24 +1331,58 @@ func TestErrorTree_All_PrintedOrder(t *testing.T) {
 	}
 }
 
-func TestErrorTree_All_Stops(t *testing.T) {
+func TestErrorTree_Stops(t *testing.T) {
 	t.Parallel()
 
-	tree := textNode("root",
-		textNode("a", textNode("a1")),
-		textNode("b"),
-	)
-
-	var got []string
-
-	for node := range tree.All() {
-		got = append(got, node.Label)
-		if node.Label == "a1" {
-			break
-		}
+	// The loop of each case ends at the node whose text matches stop.
+	tcs := map[string]struct {
+		seq  iter.Seq[niceyaml.ErrorTree]
+		stop string
+		want []string
+	}{
+		"All": {
+			seq: textNode("root",
+				textNode("a", textNode("a1")),
+				textNode("b"),
+			).All(),
+			stop: "a1",
+			want: []string{"root", "a", "a1"},
+		},
+		"Problems": {
+			seq: niceyaml.NewErrorTree(errors.Join(
+				errors.New("first"),
+				errors.New("second"),
+				errors.New("third"),
+			)).Problems(),
+			stop: "second",
+			want: []string{"first", "second"},
+		},
+		"Problems of an error": {
+			seq: niceyaml.Problems(errors.Join(
+				niceyaml.NewError("bad a", niceyaml.AtPath(paths.Doc().Child("a"))),
+				niceyaml.NewError("bad b", niceyaml.AtPath(paths.Doc().Child("b"))),
+			)),
+			stop: "$.a: bad a",
+			want: []string{"$.a: bad a"},
+		},
 	}
 
-	assert.Equal(t, []string{"root", "a", "a1"}, got)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var got []string
+
+			for node := range tc.seq {
+				got = append(got, node.Label)
+				if node.Label == tc.stop {
+					break
+				}
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 // problemRows returns one row per node [niceyaml.ErrorTree.Problems]
@@ -1485,7 +1507,7 @@ func TestErrorTree_Problems(t *testing.T) {
 				"port conflicts",
 				niceyaml.AtPath(paths.Current().Child("b")),
 				niceyaml.WithDetails(
-					niceyaml.NewError("first declared here", niceyaml.AtPath(paths.Current().Child("a"))),
+					yamltest.ErrorAt("first declared here", "a"),
 				),
 			)),
 			want: []string{"port conflicts"},
@@ -1561,7 +1583,7 @@ func TestErrorTree_Problems(t *testing.T) {
 		},
 		"path the document does not hold": {
 			err: yamltest.Bind(t, source, niceyaml.NewSummary("2 problems",
-				niceyaml.NewError("missing", niceyaml.AtPath(paths.Current().Child("c"))),
+				yamltest.ErrorAt("missing", "c"),
 				badA(),
 			)),
 			want:     []string{"bad a", "missing"},
@@ -1790,7 +1812,7 @@ func TestErrorTree_New_Detail(t *testing.T) {
 				niceyaml.AtPath(paths.Current().Child("a")),
 				niceyaml.WithDetails(
 					errors.New("reason"),
-					niceyaml.NewError("see b", niceyaml.AtPath(paths.Current().Child("b"))),
+					yamltest.ErrorAt("see b", "b"),
 				),
 			),
 			errors.New("too old"),
@@ -1872,13 +1894,12 @@ func TestErrorTree_Problems_JoinDetail(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := slices.Collect(niceyaml.NewErrorTree(tc.err).Problems())
-			require.Len(t, got, 1)
-			assert.Equal(t, "conflict", got[0].Message())
+			problem := yamltest.OnlyProblem(t, tc.err)
+			assert.Equal(t, "conflict", problem.Message())
 
 			var details []string
 
-			for _, child := range got[0].Children {
+			for _, child := range problem.Children {
 				assert.True(t, child.Detail, child.Label)
 
 				details = append(details, child.Message())
@@ -1899,15 +1920,14 @@ func TestErrorTree_Problems_Reasons(t *testing.T) {
 		niceyaml.WithDetails(errors.New("no schema directive"), errors.New("no catalog entry matches")),
 	))
 
-	got := slices.Collect(niceyaml.NewErrorTree(err).Problems())
-	require.Len(t, got, 1)
+	problem := yamltest.OnlyProblem(t, err)
 
 	// The reasons stay below the node that yields.
 	assert.Equal(t, textNode("f.yaml: no matching schema",
 		textNode("no schema directive"),
 		textNode("no catalog entry matches"),
-	), textTree(got[0]))
-	require.ErrorIs(t, got[0].Err, err)
+	), textTree(problem))
+	require.ErrorIs(t, problem.Err, err)
 }
 
 func TestErrorTree_Problems_Err(t *testing.T) {
@@ -1961,10 +1981,7 @@ func TestErrorTree_Problems_Err(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			problems := slices.Collect(niceyaml.NewErrorTree(tc.err).Problems())
-			require.Len(t, problems, 1)
-
-			problem := problems[0]
+			problem := yamltest.OnlyProblem(t, tc.err)
 
 			got := ""
 			if rule, ok := errors.AsType[*ruleError](problem.Err); ok {
@@ -2069,23 +2086,20 @@ func TestErrorTree_Problems_SelfValidator(t *testing.T) {
 	// The decode rebases the error and its reasons under $.hours, which
 	// locates the error at the value, a mapping that points at its key.
 	// The reasons explain it and take no location.
-	got := slices.Collect(niceyaml.NewErrorTree(doc.DecodeInto(t.Context(), &cfg)).Problems())
-	require.Len(t, got, 1)
-	require.NotNil(t, got[0].Bound)
+	problem := yamltest.OnlyProblem(t, doc.DecodeInto(t.Context(), &cfg))
+	require.NotNil(t, problem.Bound)
 
-	assert.Equal(t, "hours invalid", got[0].Bound.Message())
-	require.Len(t, got[0].Children, 2)
+	assert.Equal(t, "hours invalid", problem.Bound.Message())
+	require.Len(t, problem.Children, 2)
 
-	for _, reason := range got[0].Children {
+	for _, reason := range problem.Children {
 		assert.True(t, reason.Detail)
 
 		_, ok := reason.Bound.Position()
 		assert.False(t, ok)
 	}
 
-	pos, ok := got[0].Bound.Position()
-	require.True(t, ok)
-	assert.Equal(t, position.New(0, 0), pos)
+	assert.Equal(t, position.New(0, 0), yamltest.PositionOf(t, problem.Bound))
 }
 
 func TestErrorTree_Problems_Scope(t *testing.T) {
@@ -2098,8 +2112,8 @@ func TestErrorTree_Problems_Scope(t *testing.T) {
 	// The binding joins the scope in front of each path, and the summary
 	// is a heading, so it yields no row.
 	bound := hours.Bind(niceyaml.NewSummary("2 problems",
-		niceyaml.NewError("bad open", niceyaml.AtPath(paths.Current().Child("open"))),
-		niceyaml.NewError("no close", niceyaml.AtPath(paths.Current().Child("close"))),
+		yamltest.ErrorAt("bad open", "open"),
+		yamltest.ErrorAt("no close", "close"),
 	))
 
 	// Each row reads as the position, the path, and the message.
@@ -2108,12 +2122,8 @@ func TestErrorTree_Problems_Scope(t *testing.T) {
 	for problem := range niceyaml.NewErrorTree(bound).Problems() {
 		require.NotNil(t, problem.Bound)
 
-		path, ok := problem.Bound.Path()
-		require.True(t, ok)
-
-		pos, ok := problem.Bound.Position()
-		require.True(t, ok)
-
+		pos := yamltest.PositionOf(t, problem.Bound)
+		path := yamltest.PathOf(t, problem.Bound)
 		got = append(got, fmt.Sprintf("%d:%d %s %s", pos.Line, pos.Col, path, problem.Bound.Message()))
 	}
 
@@ -2180,27 +2190,6 @@ func TestErrorTree_Problems_HandBuilt(t *testing.T) {
 	}
 }
 
-func TestErrorTree_Problems_Stops(t *testing.T) {
-	t.Parallel()
-
-	tree := niceyaml.NewErrorTree(errors.Join(
-		errors.New("first"),
-		errors.New("second"),
-		errors.New("third"),
-	))
-
-	var got []string
-
-	for problem := range tree.Problems() {
-		got = append(got, problem.Label)
-		if problem.Label == "second" {
-			break
-		}
-	}
-
-	assert.Equal(t, []string{"first", "second"}, got)
-}
-
 func TestErrorTree_IsInvalid(t *testing.T) {
 	t.Parallel()
 
@@ -2210,9 +2199,13 @@ func TestErrorTree_IsInvalid(t *testing.T) {
 
 	errRead := fmt.Errorf("read g.yaml: %w", fs.ErrPermission)
 
+	// Want is what IsInvalid reports for the tree. Each row of wantNodes,
+	// for a case that lists them, is the message of a node and what
+	// IsInvalid reports for it.
 	tcs := map[string]struct {
-		err  error
-		want bool
+		err       error
+		wantNodes []string
+		want      bool
 	}{
 		"empty tree": {
 			err: nil,
@@ -2243,6 +2236,20 @@ func TestErrorTree_IsInvalid(t *testing.T) {
 		},
 		"mixed summary": {
 			err: niceyaml.NewSummary("2 problems", badA(), errRead),
+			wantNodes: []string{
+				"2 problems false",
+				"bad a true",
+				"read g.yaml: permission denied false",
+			},
+		},
+		"summary below a mixed join": {
+			err: errors.Join(niceyaml.NewSummary("2 violations", badA(), badB()), errRead),
+			wantNodes: []string{
+				"2 violations true",
+				"bad a true",
+				"bad b true",
+				"read g.yaml: permission denied false",
+			},
 		},
 		"fmt wrapper over an invalid problem": {
 			err:  fmt.Errorf("load: %w", badA()),
@@ -2254,6 +2261,11 @@ func TestErrorTree_IsInvalid(t *testing.T) {
 		},
 		"fmt wrapper over a mixed join": {
 			err: fmt.Errorf("load: %w", errors.Join(badA(), errRead)),
+			wantNodes: []string{
+				"load: false",
+				"bad a true",
+				"read g.yaml: permission denied false",
+			},
 		},
 		"joins of joins of invalid problems": {
 			err: errors.Join(
@@ -2277,95 +2289,34 @@ func TestErrorTree_IsInvalid(t *testing.T) {
 			err: fmt.Errorf("%w: %w", errors.New("config rejected"), errRead),
 		},
 		"read error with an invalid detail": {
-			// A detail explains the problem and decides nothing.
+			// A detail explains the problem and decides nothing, and it
+			// answers for itself.
 			err: niceyaml.Place(errRead, niceyaml.AtPath(paths.Current().Child("a")), niceyaml.WithDetails(badB())),
-		},
-		"invalid problem with a detail that is a read error": {
-			err:  niceyaml.NewError("ports conflict", niceyaml.WithDetails(errRead)),
-			want: true,
-		},
-		"invalid problem with a detail that heads a read error": {
-			err: niceyaml.NewError("ports conflict", niceyaml.WithDetails(
-				niceyaml.NewSummary("2 reasons", badA(), errRead),
-			)),
-			want: true,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, niceyaml.NewErrorTree(tc.err).IsInvalid(), "unbound")
-			assert.Equal(t, tc.want, niceyaml.NewErrorTree(yamltest.Bind(t, source, tc.err)).IsInvalid(), "bound")
-		})
-	}
-}
-
-func TestErrorTree_IsInvalid_Nodes(t *testing.T) {
-	t.Parallel()
-
-	source := errorTreeSource()
-
-	badA, badB := badKeyError("a"), badKeyError("b")
-
-	errRead := fmt.Errorf("read g.yaml: %w", fs.ErrPermission)
-
-	// Each row of want is the message of a node and what Invalid reports
-	// for it.
-	tcs := map[string]struct {
-		err  error
-		want []string
-	}{
-		"detail of a read error answers for itself": {
-			err: niceyaml.Place(errRead, niceyaml.AtPath(paths.Current().Child("a")), niceyaml.WithDetails(badB())),
-			want: []string{
+			wantNodes: []string{
 				"read g.yaml: permission denied false",
 				"bad b true",
 			},
 		},
-		"detail of an invalid problem answers for itself": {
+		"invalid problem with a detail that is a read error": {
 			err: niceyaml.NewError("ports conflict", niceyaml.WithDetails(errRead)),
-			want: []string{
+			wantNodes: []string{
 				"ports conflict true",
 				"read g.yaml: permission denied false",
 			},
+			want: true,
 		},
-		"detail that heads problems answers for them": {
+		"invalid problem with a detail that heads a read error": {
+			// The detail answers for the problems it heads.
 			err: niceyaml.NewError("ports conflict", niceyaml.WithDetails(
 				niceyaml.NewSummary("2 reasons", badA(), errRead),
 			)),
-			want: []string{
+			wantNodes: []string{
 				"ports conflict true",
 				"2 reasons false",
 				"bad a true",
 				"read g.yaml: permission denied false",
 			},
-		},
-		"summary below a mixed join": {
-			err: errors.Join(niceyaml.NewSummary("2 violations", badA(), badB()), errRead),
-			want: []string{
-				"2 violations true",
-				"bad a true",
-				"bad b true",
-				"read g.yaml: permission denied false",
-			},
-		},
-		"mixed summary": {
-			err: niceyaml.NewSummary("2 problems", badA(), errRead),
-			want: []string{
-				"2 problems false",
-				"bad a true",
-				"read g.yaml: permission denied false",
-			},
-		},
-		"fmt wrapper over a mixed join": {
-			err: fmt.Errorf("load: %w", errors.Join(badA(), errRead)),
-			want: []string{
-				"load: false",
-				"bad a true",
-				"read g.yaml: permission denied false",
-			},
+			want: true,
 		},
 		"Invalid over a summary of bound errors": {
 			// A problem that is bound already takes the mark as any other
@@ -2374,18 +2325,19 @@ func TestErrorTree_IsInvalid_Nodes(t *testing.T) {
 				yamltest.Bind(t, source, niceyaml.Rebase(errRead, paths.Current().Child("a"))),
 				yamltest.Bind(t, source, errors.New("too many keys")),
 			)),
-			want: []string{
+			wantNodes: []string{
 				"2 problems true",
 				"read g.yaml: permission denied true",
 				"too many keys true",
 			},
+			want: true,
 		},
 		"summary of bound errors": {
 			err: niceyaml.NewSummary("2 problems",
 				yamltest.Bind(t, source, niceyaml.Rebase(errRead, paths.Current().Child("a"))),
 				yamltest.Bind(t, source, errors.New("too many keys")),
 			),
-			want: []string{
+			wantNodes: []string{
 				"2 problems false",
 				"read g.yaml: permission denied false",
 				"too many keys false",
@@ -2407,12 +2359,19 @@ func TestErrorTree_IsInvalid_Nodes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, answers(niceyaml.NewErrorTree(tc.err)), "unbound")
-
-			// A binding orders its children by position, so the rows
-			// hold in any order.
+			unbound := niceyaml.NewErrorTree(tc.err)
 			bound := niceyaml.NewErrorTree(yamltest.Bind(t, source, tc.err))
-			assert.ElementsMatch(t, tc.want, answers(bound), "bound")
+
+			assert.Equal(t, tc.want, unbound.IsInvalid(), "unbound")
+			assert.Equal(t, tc.want, bound.IsInvalid(), "bound")
+
+			if tc.wantNodes != nil {
+				assert.Equal(t, tc.wantNodes, answers(unbound), "unbound")
+
+				// A binding orders its children by position, so the rows
+				// hold in any order.
+				assert.ElementsMatch(t, tc.wantNodes, answers(bound), "bound")
+			}
 		})
 	}
 }
@@ -2483,7 +2442,7 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 
 	badA, badB := badKeyError("a"), badKeyError("b")
 	withDetail := func() *niceyaml.Error {
-		return badA().With(niceyaml.WithDetails(niceyaml.NewError("see b", niceyaml.AtPath(pathB))))
+		return badA().With(niceyaml.WithDetails(yamltest.ErrorAt("see b", "b")))
 	}
 
 	problems := func(err error) []niceyaml.ErrorTree {
@@ -2620,8 +2579,7 @@ func TestErrorTree_Accessors(t *testing.T) {
 		"---",
 		"b: 2",
 	), niceyaml.WithName("f.yaml"))
-	docs := source.Documents()
-	require.Len(t, docs, 2)
+	docs := yamltest.Documents(t, source, 2)
 
 	badB := niceyaml.NewError("bad b", niceyaml.AtPath(paths.Doc().Child("b")))
 	gone := niceyaml.NewError("gone", niceyaml.AtPath(paths.Doc().Child("x").Index(0)))
@@ -2634,20 +2592,15 @@ func TestErrorTree_Accessors(t *testing.T) {
 
 		assert.Same(t, source, node.Source())
 
-		pos, ok := node.Position()
-		require.True(t, ok)
+		pos := yamltest.PositionOf(t, node)
 		assert.Equal(t, position.New(2, 3), pos)
-
-		rng, ok := node.Range()
-		require.True(t, ok)
-		assert.Equal(t, yamltest.LineRange(2, 3, 4), rng)
+		assert.Equal(t, yamltest.LineRange(2, 3, 4), yamltest.RangeOf(t, node))
 
 		index, ok := node.DocumentIndex()
 		require.True(t, ok)
 		assert.Equal(t, 1, index)
 
-		boundPos, _ := node.Bound.Position()
-		assert.Equal(t, boundPos, pos)
+		assert.Equal(t, yamltest.PositionOf(t, node.Bound), pos)
 	})
 
 	t.Run("an unresolved location keeps the source", func(t *testing.T) {
@@ -2672,25 +2625,33 @@ func TestErrorTree_Accessors(t *testing.T) {
 	t.Run("a node bound to no source returns zero values", func(t *testing.T) {
 		t.Parallel()
 
-		for name, node := range map[string]niceyaml.ErrorTree{
-			"unbound Error": niceyaml.NewErrorTree(badB),
-			"plain error":   niceyaml.NewErrorTree(errors.New("plain")),
+		tcs := map[string]struct {
+			node niceyaml.ErrorTree
+		}{
+			"unbound Error": {node: niceyaml.NewErrorTree(badB)},
+			"plain error":   {node: niceyaml.NewErrorTree(errors.New("plain"))},
 			"zero":          {},
-		} {
-			require.Nil(t, node.Bound, name)
-			assert.Nil(t, node.Source(), name)
+		}
 
-			pos, ok := node.Position()
-			assert.False(t, ok, name)
-			assert.Zero(t, pos, name)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-			rng, ok := node.Range()
-			assert.False(t, ok, name)
-			assert.Zero(t, rng, name)
+				require.Nil(t, tc.node.Bound)
+				assert.Nil(t, tc.node.Source())
 
-			index, ok := node.DocumentIndex()
-			assert.False(t, ok, name)
-			assert.Zero(t, index, name)
+				pos, ok := tc.node.Position()
+				assert.False(t, ok)
+				assert.Zero(t, pos)
+
+				rng, ok := tc.node.Range()
+				assert.False(t, ok)
+				assert.Zero(t, rng)
+
+				index, ok := tc.node.DocumentIndex()
+				assert.False(t, ok)
+				assert.Zero(t, index)
+			})
 		}
 	})
 }
@@ -2773,20 +2734,6 @@ func TestProblems(t *testing.T) {
 			)
 		})
 	}
-
-	t.Run("stops when the caller does", func(t *testing.T) {
-		t.Parallel()
-
-		count := 0
-
-		for range niceyaml.Problems(errors.Join(badA, badB)) {
-			count++
-
-			break
-		}
-
-		assert.Equal(t, 1, count)
-	})
 }
 
 // reportExcerpts returns each excerpt of rep: its view as plain text,
@@ -2827,16 +2774,13 @@ func TestNewErrorReport(t *testing.T) {
 	secret := niceyaml.NewSourceFromString("e: 5\n", niceyaml.WithName("secret.yaml"), niceyaml.WithExcerpts(false))
 	empty := niceyaml.NewSourceFromString("", niceyaml.WithName("empty.yaml"))
 
-	at := func(key string) niceyaml.ErrorOption {
-		return niceyaml.AtPath(paths.Current().Child(key))
-	}
 	outside := niceyaml.AtPosition(position.New(99, 0))
 
-	badA := yamltest.Bind(t, first, niceyaml.NewError("bad a", at("a")))
-	badB := yamltest.Bind(t, first, niceyaml.NewError("bad b", at("b")))
-	badC := yamltest.Bind(t, second, niceyaml.NewError("bad c", at("c")))
-	badD := yamltest.Bind(t, unnamed, niceyaml.NewError("bad d", at("d")))
-	badE := yamltest.Bind(t, secret, niceyaml.NewError("bad e", at("e")))
+	badA := yamltest.Bind(t, first, yamltest.ErrorAt("bad a", "a"))
+	badB := yamltest.Bind(t, first, yamltest.ErrorAt("bad b", "b"))
+	badC := yamltest.Bind(t, second, yamltest.ErrorAt("bad c", "c"))
+	badD := yamltest.Bind(t, unnamed, yamltest.ErrorAt("bad d", "d"))
+	badE := yamltest.Bind(t, secret, yamltest.ErrorAt("bad e", "e"))
 	farA := yamltest.Bind(t, first, niceyaml.NewError("far a", outside))
 	farC := yamltest.Bind(t, second, niceyaml.NewError("far c", outside))
 	gone := yamltest.Bind(t, second, niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").Index(0))))
@@ -2940,12 +2884,22 @@ func TestNewErrorReport(t *testing.T) {
 		"a binding with no location has nothing to explain": {
 			err: yamltest.Bind(t, first, errors.New("plain")),
 		},
+		"a tree in one source has one excerpt with no name": {
+			err: yamltest.Bind(t, first, niceyaml.NewError("bad", niceyaml.WithDetails(
+				yamltest.ErrorAt("bad a", "a"),
+			))),
+			want: []string{aloneA},
+		},
+		"a path that selects nothing is unresolved": {
+			err:            gone,
+			wantUnresolved: []string{"second.yaml: $.x[0]: gone"},
+		},
 		"a path into a document with no content has nothing to explain": {
-			err: yamltest.Bind(t, empty, niceyaml.NewError("bad a", at("a"))),
+			err: yamltest.Bind(t, empty, yamltest.ErrorAt("bad a", "a")),
 		},
 		"an unresolved binding whose detail resolves has an excerpt alone": {
 			err: yamltest.Bind(t, first, niceyaml.NewError("far", outside,
-				niceyaml.WithDetails(niceyaml.NewError("see a", at("a"))),
+				niceyaml.WithDetails(yamltest.ErrorAt("see a", "a")),
 			)),
 			want: []string{stringtest.JoinLF(
 				"(first.yaml)",
@@ -2957,6 +2911,9 @@ func TestNewErrorReport(t *testing.T) {
 			err: errors.New("plain"),
 		},
 		"nil has nothing": {},
+		"a nil binding has nothing": {
+			err: (*niceyaml.SourceError)(nil),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -3108,8 +3065,8 @@ func TestNewErrorReport_SeveralSources(t *testing.T) {
 	manifest := niceyaml.NewSourceFromString("kind: App\nvalues: values.yaml\n", niceyaml.WithFilePath("manifest.yaml"))
 	values := niceyaml.NewSourceFromString("port: many\nhost: 7\n", niceyaml.WithFilePath("values.yaml"))
 
-	port := yamltest.Bind(t, values, niceyaml.NewError("not a number", niceyaml.AtPath(paths.Current().Child("port"))))
-	host := yamltest.Bind(t, values, niceyaml.NewError("not a name", niceyaml.AtPath(paths.Current().Child("host"))))
+	port := yamltest.Bind(t, values, yamltest.ErrorAt("not a number", "port"))
+	host := yamltest.Bind(t, values, yamltest.ErrorAt("not a name", "host"))
 	err := yamltest.Bind(t, manifest, niceyaml.NewError(
 		"bad values",
 		niceyaml.AtPath(paths.Current().Child("values")),
@@ -3166,7 +3123,7 @@ func TestNewErrorReport_SeveralSources(t *testing.T) {
 		// binding and none of the details.
 		own := bound.Source().View()
 		require.True(t, bound.Annotate(own))
-		assert.Equal(t, []int{2}, lineNumbers(own.Hunks(0)))
+		assert.Equal(t, []int{2}, yamltest.LineNumbers(own.Hunks(0)))
 	})
 
 	t.Run("FormatError renders every excerpt", func(t *testing.T) {
@@ -3193,10 +3150,9 @@ func TestNewErrorReport_SeveralSources(t *testing.T) {
 	t.Run("children that alternate between sources mark their own", func(t *testing.T) {
 		t.Parallel()
 
-		srcs := []*niceyaml.Source{
-			niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("s0.yaml")),
-			niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("s1.yaml")),
-			niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("s2.yaml")),
+		srcs := make([]*niceyaml.Source, 3)
+		for i := range srcs {
+			srcs[i] = niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName(fmt.Sprintf("s%d.yaml", i)))
 		}
 
 		// Each source gets two children on line 1 and one on line 2, in
@@ -3207,10 +3163,8 @@ func TestNewErrorReport_SeveralSources(t *testing.T) {
 			{"a", "first"}, {"a", "second"}, {"b", "third"},
 		} {
 			for i, src := range srcs {
-				children = append(children, yamltest.Bind(t, src, niceyaml.NewError(
-					fmt.Sprintf("%s %d", spec.msg, i),
-					niceyaml.AtPath(paths.Current().Child(spec.key)),
-				)))
+				msg := fmt.Sprintf("%s %d", spec.msg, i)
+				children = append(children, yamltest.Bind(t, src, yamltest.ErrorAt(msg, spec.key)))
 			}
 		}
 
@@ -3244,29 +3198,6 @@ func TestNewErrorReport_SeveralSources(t *testing.T) {
 				"     |    ^ third 2",
 			),
 		}, reportExcerpts(niceyaml.NewErrorReport(mixed, niceyaml.WithContextLines(0))))
-	})
-
-	t.Run("a tree in one source yields one excerpt", func(t *testing.T) {
-		t.Parallel()
-
-		one := yamltest.RequireSourceError(t, yamltest.Bind(t, values, niceyaml.NewError("bad", niceyaml.WithDetails(
-			niceyaml.NewError("not a number", niceyaml.AtPath(paths.Current().Child("port"))),
-		))))
-
-		assert.Len(t, niceyaml.NewErrorReport(one, niceyaml.WithContextLines(0)).Excerpts, 1)
-	})
-
-	t.Run("nothing resolved yields nothing", func(t *testing.T) {
-		t.Parallel()
-
-		none := yamltest.RequireSourceError(t, yamltest.Bind(t, values,
-			niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("missing").Index(0)))))
-
-		assert.Empty(t, niceyaml.NewErrorReport(none, niceyaml.WithContextLines(0)).Excerpts)
-
-		var nilErr *niceyaml.SourceError
-
-		assert.Empty(t, niceyaml.NewErrorReport(nilErr, niceyaml.WithContextLines(0)).Excerpts)
 	})
 }
 
@@ -3351,9 +3282,7 @@ func TestNewErrorReport_ExcerptsOff(t *testing.T) {
 
 		// The binding still names where it is, and it has no reason to
 		// print in place of the excerpt.
-		pos, ok := bound.Position()
-		require.True(t, ok)
-		assert.Equal(t, position.New(1, 6), pos)
+		assert.Equal(t, position.New(1, 6), yamltest.PositionOf(t, bound))
 		require.NoError(t, bound.Unresolved())
 	})
 

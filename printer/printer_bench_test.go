@@ -242,20 +242,6 @@ func BenchmarkPrinterWithWrapping(b *testing.B) {
 	}
 }
 
-func BenchmarkLinesAddOverlay(b *testing.B) {
-	yaml := yamltest.GenerateYAML(100)
-
-	b.ReportAllocs()
-
-	for b.Loop() {
-		source := niceyaml.NewSourceFromString(yaml).View()
-
-		for i := range 100 {
-			source.AddOverlay(benchmarkOverlayKind, yamltest.LineRange(i, 0, 10))
-		}
-	}
-}
-
 func BenchmarkPrinterLayout_LongTransformedValue(b *testing.B) {
 	// A transform that adds runes around a long value makes the shown text
 	// of its run longer than the content, and the value wraps into many

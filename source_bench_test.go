@@ -3,6 +3,7 @@ package niceyaml_test
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,11 +14,27 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
-// sourceBenchItem is the format of one entry of a sequence of items, which
-// [yamltest.GenerateLines] numbers.
-var sourceBenchItem = stringtest.JoinLF(
-	"  - name: item_%[1]d",
-	"    value: %[1]d",
+// sourceBenchSize names a document of [yamltest.GenerateYAML] by its
+// number of lines.
+type sourceBenchSize struct {
+	name  string
+	lines int
+}
+
+var (
+	// The format of one entry of a sequence of items, which
+	// [yamltest.GenerateLines] numbers.
+	sourceBenchItem = stringtest.JoinLF(
+		"  - name: item_%[1]d",
+		"    value: %[1]d",
+	)
+
+	// The document sizes the Source benchmarks share.
+	sourceBenchSizes = []sourceBenchSize{
+		{"small_50", 50},
+		{"medium_500", 500},
+		{"large_5000", 5000},
+	}
 )
 
 // generateNestedYAML creates YAML nested to the given depth, where each
@@ -46,15 +63,7 @@ func generateNestedYAML(depth, itemsPerLevel int) string {
 }
 
 func BenchmarkNewSourceFromString(b *testing.B) {
-	sizes := []struct {
-		name  string
-		lines int
-	}{
-		{"small_50", 50},
-		{"medium_500", 500},
-		{"large_5000", 5000},
-		{"xlarge_50000", 50000},
-	}
+	sizes := slices.Concat(sourceBenchSizes, []sourceBenchSize{{"xlarge_50000", 50000}})
 
 	for _, sz := range sizes {
 		yaml := yamltest.GenerateYAML(sz.lines)
@@ -63,7 +72,7 @@ func BenchmarkNewSourceFromString(b *testing.B) {
 			b.SetBytes(int64(len(yaml)))
 
 			for b.Loop() {
-				_ = niceyaml.NewSourceFromString(yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
+				_ = niceyaml.NewSourceFromString(yaml, yamltest.NoSizeLimits()...)
 			}
 		})
 	}
@@ -87,25 +96,16 @@ func BenchmarkNewSourceFromString_Nested(b *testing.B) {
 			b.SetBytes(int64(len(yaml)))
 
 			for b.Loop() {
-				_ = niceyaml.NewSourceFromString(yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
+				_ = niceyaml.NewSourceFromString(yaml, yamltest.NoSizeLimits()...)
 			}
 		})
 	}
 }
 
 func BenchmarkSourceRunes(b *testing.B) {
-	sizes := []struct {
-		name  string
-		lines int
-	}{
-		{"small_50", 50},
-		{"medium_500", 500},
-		{"large_5000", 5000},
-	}
-
-	for _, sz := range sizes {
+	for _, sz := range sourceBenchSizes {
 		yaml := yamltest.GenerateYAML(sz.lines)
-		lines := niceyaml.NewSourceFromString(yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).Lines()
+		lines := niceyaml.NewSourceFromString(yaml, yamltest.NoSizeLimits()...).Lines()
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -124,18 +124,9 @@ func BenchmarkSourceRunes(b *testing.B) {
 }
 
 func BenchmarkSourceLines(b *testing.B) {
-	sizes := []struct {
-		name  string
-		lines int
-	}{
-		{"small_50", 50},
-		{"medium_500", 500},
-		{"large_5000", 5000},
-	}
-
-	for _, sz := range sizes {
+	for _, sz := range sourceBenchSizes {
 		yaml := yamltest.GenerateYAML(sz.lines)
-		lines := niceyaml.NewSourceFromString(yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).Lines()
+		lines := niceyaml.NewSourceFromString(yaml, yamltest.NoSizeLimits()...).Lines()
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -155,7 +146,7 @@ func BenchmarkSourceLines(b *testing.B) {
 
 func BenchmarkSourceLen(b *testing.B) {
 	yaml := yamltest.GenerateYAML(5000)
-	lines := niceyaml.NewSourceFromString(yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)).Lines()
+	lines := niceyaml.NewSourceFromString(yaml, yamltest.NoSizeLimits()...).Lines()
 
 	b.ReportAllocs()
 
@@ -165,18 +156,9 @@ func BenchmarkSourceLen(b *testing.B) {
 }
 
 func BenchmarkSourceContent(b *testing.B) {
-	sizes := []struct {
-		name  string
-		lines int
-	}{
-		{"small_50", 50},
-		{"medium_500", 500},
-		{"large_5000", 5000},
-	}
-
-	for _, sz := range sizes {
+	for _, sz := range sourceBenchSizes {
 		yaml := yamltest.GenerateYAML(sz.lines)
-		source := niceyaml.NewSourceFromString(yaml, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
+		source := niceyaml.NewSourceFromString(yaml, yamltest.NoSizeLimits()...)
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -203,8 +185,7 @@ func BenchmarkSourceBind_ManyDocuments(b *testing.B) {
 		// finding per line, as a line-oriented lint reports them.
 		source := niceyaml.NewSourceFromString(
 			strings.Repeat(stringtest.LinesLF("---", "a: 1", "b: 2"), sz.docs),
-			niceyaml.WithByteLimit(0),
-			niceyaml.WithDepthLimit(0),
+			yamltest.NoSizeLimits()...,
 		)
 
 		source.Documents()
@@ -250,7 +231,7 @@ func BenchmarkSource_File_ManyDocuments(b *testing.B) {
 				// new one outside the timer.
 				b.StopTimer()
 
-				source := niceyaml.NewSourceFromString(input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
+				source := niceyaml.NewSourceFromString(input, yamltest.NoSizeLimits()...)
 				source.Tokens()
 
 				b.StartTimer()

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"slices"
 	"sync"
 	"testing"
 
@@ -19,15 +18,22 @@ import (
 )
 
 // warningCafe is the document the warning tests check.
-const warningCafe = "seats: 40\ncurency: SEK\nlegacyPricing: true\nwifi: open\n"
+var warningCafe = stringtest.LinesLF(
+	"seats: 40",
+	"curency: SEK",
+	"legacyPricing: true",
+	"wifi: open",
+)
 
-// warnLegacy is a validator that warns about legacyPricing and passes.
-var warnLegacy = niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-	n.Warn(ctx, niceyaml.NewWarning(`deprecated field "legacyPricing"`,
-		niceyaml.AtPath(paths.Current().Child("legacyPricing").Key())))
+// warnAtKey returns a validator that warns msg at the key name of the
+// node it checks, and passes.
+func warnAtKey(name, msg string) niceyaml.Validator {
+	return niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+		n.Warn(ctx, niceyaml.NewWarning(msg, niceyaml.AtPath(paths.Current().Child(name).Key())))
 
-	return nil
-})
+		return nil
+	})
+}
 
 // warningSpec is a type whose Validate method warns about a low seat count
 // and fails on a negative one.
@@ -38,7 +44,7 @@ type warningSpec struct {
 func (s warningSpec) Validate() error {
 	switch {
 	case s.Seats < 0:
-		return niceyaml.NewError("seats must not be negative", niceyaml.AtPath(paths.Current().Child("seats")))
+		return yamltest.ErrorAt("seats must not be negative", "seats")
 	case s.Seats < 10:
 		return niceyaml.NewWarning("fewer than 10 seats", niceyaml.AtPath(paths.Current().Child("seats")))
 	}
@@ -47,7 +53,7 @@ func (s warningSpec) Validate() error {
 }
 
 // warningCafeDoc is the parent of a [warningSpec], whose Validate runs
-// once the spec passes.
+// after the spec passes.
 type warningCafeDoc struct {
 	Spec  warningSpec `yaml:"spec"`
 	Ran   *bool       `yaml:"-"`
@@ -82,6 +88,17 @@ func collect(ctx context.Context) (context.Context, func() []error) {
 
 		return calls
 	}
+}
+
+// onlyWarning returns the one warning that calls has recorded. The test
+// fails unless calls holds exactly one.
+func onlyWarning(tb testing.TB, calls func() []error) error {
+	tb.Helper()
+
+	got := calls()
+	require.Len(tb, got, 1)
+
+	return got[0]
 }
 
 func TestNewWarning(t *testing.T) {
@@ -125,6 +142,12 @@ func TestNewWarning(t *testing.T) {
 			want:    "load: cafe.yaml: warning: old layout",
 			message: "old layout",
 		},
+		"unbound at an @ path": {
+			err:       niceyaml.NewWarning("closes before it opens", niceyaml.AtPath(paths.Current().Child("close"))),
+			want:      "closes before it opens",
+			message:   "closes before it opens",
+			formatted: "warning: @.close: closes before it opens",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -135,26 +158,15 @@ func TestNewWarning(t *testing.T) {
 			assert.True(t, niceyaml.IsInvalid(tc.err))
 			assert.False(t, niceyaml.HasErrors(tc.err))
 
-			problems := slices.Collect(niceyaml.Problems(tc.err))
-			require.Len(t, problems, 1)
-			assert.True(t, problems[0].Warning)
-			assert.Equal(t, tc.message, problems[0].Message())
+			problem := yamltest.OnlyProblem(t, tc.err)
+			assert.True(t, problem.Warning)
+			assert.Equal(t, tc.message, problem.Message())
 
 			if tc.formatted != "" {
 				assert.Equal(t, tc.formatted, niceyaml.FormatError(tc.err))
 			}
 		})
 	}
-}
-
-func TestNewWarning_Unbound(t *testing.T) {
-	t.Parallel()
-
-	w := niceyaml.NewWarning("closes before it opens", niceyaml.AtPath(paths.Current().Child("close")))
-
-	assert.Equal(t, "closes before it opens", w.Error())
-	assert.Equal(t, "warning: @.close: closes before it opens", niceyaml.FormatError(w))
-	assert.True(t, niceyaml.NewErrorTree(w).Warning)
 }
 
 func TestHasErrors(t *testing.T) {
@@ -245,14 +257,12 @@ func TestAsErrors(t *testing.T) {
 		niceyaml.AtPath(paths.Doc().Child("legacyPricing").Key()))
 	unknown := niceyaml.NewError(`unknown field "wifi"`, niceyaml.AtPath(paths.Doc().Child("wifi").Key()))
 
+	require.NoError(t, niceyaml.AsErrors(nil))
+
 	tcs := map[string]struct {
 		err  error
 		want string
 	}{
-		"nil": {
-			err:  nil,
-			want: "",
-		},
 		"an error stays as it is": {
 			err:  doc.Bind(unknown),
 			want: `cafe.yaml:4:1: $.wifi~: unknown field "wifi"`,
@@ -283,12 +293,6 @@ func TestAsErrors(t *testing.T) {
 			t.Parallel()
 
 			got := niceyaml.AsErrors(tc.err)
-			if tc.err == nil {
-				require.NoError(t, got)
-
-				return
-			}
-
 			assert.Equal(t, tc.want, got.Error())
 			assert.True(t, niceyaml.HasErrors(got))
 
@@ -305,7 +309,8 @@ func TestAsErrors_Tally(t *testing.T) {
 	doc := yamltest.FirstDocument(t, warningCafe, niceyaml.WithName("cafe.yaml"))
 
 	_, err := doc.Decode[warningSpec](t.Context(),
-		niceyaml.WithValidator(warnLegacy), niceyaml.WithDisallowUnknownFields(true))
+		niceyaml.WithValidator(warnAtKey("legacyPricing", `deprecated field "legacyPricing"`)),
+		niceyaml.WithDisallowUnknownFields(true))
 	require.Error(t, err)
 
 	assert.Equal(t, stringtest.JoinLF(
@@ -328,7 +333,18 @@ func TestAsErrors_Tally(t *testing.T) {
 func TestWithWarningHandler(t *testing.T) {
 	t.Parallel()
 
-	doc := yamltest.FirstDocument(t, "spec:\n  seats: 4\nextra: x\n", niceyaml.WithName("cafe.yaml"))
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"spec:",
+		"  seats: 4",
+		"extra: x",
+	), niceyaml.WithName("cafe.yaml"))
+
+	warnExtra := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+		n.Warn(ctx, niceyaml.NewWarning("extra is unused", niceyaml.AtPath(paths.Current().Child("extra"))))
+
+		return nil
+	})
+	oldSpec := warnAtKey("spec", "old spec")
 
 	t.Run("a passing decode hands its warnings over once", func(t *testing.T) {
 		t.Parallel()
@@ -337,22 +353,15 @@ func TestWithWarningHandler(t *testing.T) {
 
 		ran := false
 
-		got, err := doc.Decode[warningCafeDoc](ctx, niceyaml.WithValidator(niceyaml.ValidatorFunc(
-			func(ctx context.Context, n *niceyaml.Node) error {
-				n.Warn(ctx, niceyaml.NewWarning("extra is unused", niceyaml.AtPath(paths.Current().Child("extra"))))
-
-				return nil
-			},
-		)))
+		got, err := doc.Decode[warningCafeDoc](ctx, niceyaml.WithValidator(warnExtra))
 		require.NoError(t, err)
 		assert.Equal(t, 4, got.Spec.Seats)
 
-		require.Len(t, calls(), 1)
 		assert.Equal(t, stringtest.JoinLF(
 			"cafe.yaml: 2 warnings",
 			"cafe.yaml:2:10: warning: $.spec.seats: fewer than 10 seats",
 			"cafe.yaml:3:8: warning: $.extra: extra is unused",
-		), calls()[0].Error())
+		), onlyWarning(t, calls).Error())
 
 		// A Validate whose values below it warned still runs.
 		var parent warningCafeDoc
@@ -365,16 +374,14 @@ func TestWithWarningHandler(t *testing.T) {
 	t.Run("a failing decode returns its warnings in its error", func(t *testing.T) {
 		t.Parallel()
 
-		failing := yamltest.FirstDocument(t, "spec:\n  seats: -1\nextra: x\n", niceyaml.WithName("cafe.yaml"))
+		failing := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"spec:",
+			"  seats: -1",
+			"extra: x",
+		), niceyaml.WithName("cafe.yaml"))
 		ctx, calls := collect(t.Context())
 
-		_, err := failing.Decode[warningCafeDoc](ctx, niceyaml.WithValidator(niceyaml.ValidatorFunc(
-			func(ctx context.Context, n *niceyaml.Node) error {
-				n.Warn(ctx, niceyaml.NewWarning("extra is unused", niceyaml.AtPath(paths.Current().Child("extra"))))
-
-				return nil
-			},
-		)))
+		_, err := failing.Decode[warningCafeDoc](ctx, niceyaml.WithValidator(warnExtra))
 		require.Error(t, err)
 		assert.Empty(t, calls())
 
@@ -409,8 +416,7 @@ func TestWithWarningHandler(t *testing.T) {
 
 		require.NoError(t, doc.Validate(ctx, niceyaml.ChainValidator(returns, after)))
 		assert.True(t, ranAfter)
-		require.Len(t, calls(), 1)
-		assert.Equal(t, "cafe.yaml: warning: old layout", calls()[0].Error())
+		assert.Equal(t, "cafe.yaml: warning: old layout", onlyWarning(t, calls).Error())
 	})
 
 	t.Run("each validator of a MultiValidator keeps its warnings", func(t *testing.T) {
@@ -418,10 +424,10 @@ func TestWithWarningHandler(t *testing.T) {
 
 		ctx, calls := collect(t.Context())
 		failing := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-			return niceyaml.NewError("bad extra", niceyaml.AtPath(paths.Current().Child("extra")))
+			return yamltest.ErrorAt("bad extra", "extra")
 		})
 
-		err := doc.Validate(ctx, niceyaml.MultiValidator(warnLegacyAt("spec"), failing))
+		err := doc.Validate(ctx, niceyaml.MultiValidator(oldSpec, failing))
 		require.Error(t, err)
 		assert.Empty(t, calls())
 		assert.Equal(t, stringtest.JoinLF(
@@ -436,18 +442,8 @@ func TestWithWarningHandler(t *testing.T) {
 
 		ctx, calls := collect(t.Context())
 
-		require.NoError(t, doc.Validate(ctx, niceyaml.MultiValidator(warnLegacyAt("spec"), warnLegacyAt("spec"))))
-		require.Len(t, calls(), 1)
-		assert.Equal(t, "cafe.yaml:1:1: warning: $.spec~: old spec", calls()[0].Error())
-	})
-}
-
-// warnLegacyAt returns a validator that warns about the key name.
-func warnLegacyAt(name string) niceyaml.Validator {
-	return niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-		n.Warn(ctx, niceyaml.NewWarning("old "+name, niceyaml.AtPath(paths.Current().Child(name).Key())))
-
-		return nil
+		require.NoError(t, doc.Validate(ctx, niceyaml.MultiValidator(oldSpec, oldSpec)))
+		assert.Equal(t, "cafe.yaml:1:1: warning: $.spec~: old spec", onlyWarning(t, calls).Error())
 	})
 }
 
@@ -470,7 +466,7 @@ func TestNode_Warn(t *testing.T) {
 			want: "menu.yaml:3:12: warning: $.items[1].price: odd price",
 		},
 		"an error becomes a warning": {
-			warn: niceyaml.NewError("odd price", niceyaml.AtPath(paths.Current().Child("price"))),
+			warn: yamltest.ErrorAt("odd price", "price"),
 			want: "menu.yaml:3:12: warning: $.items[1].price: odd price",
 		},
 		"a bound error becomes a warning": {
@@ -490,9 +486,10 @@ func TestNode_Warn(t *testing.T) {
 			ctx, calls := collect(t.Context())
 
 			item.Warn(ctx, tc.warn)
-			require.Len(t, calls(), 1)
-			assert.Equal(t, tc.want, calls()[0].Error())
-			assert.False(t, niceyaml.HasErrors(calls()[0]))
+
+			got := onlyWarning(t, calls)
+			assert.Equal(t, tc.want, got.Error())
+			assert.False(t, niceyaml.HasErrors(got))
 		})
 	}
 
@@ -512,8 +509,7 @@ func TestSelfValidateValue_Warnings(t *testing.T) {
 	ctx, calls := collect(t.Context())
 
 	require.NoError(t, niceyaml.SelfValidateValue(ctx, warningCafeDoc{Spec: warningSpec{Seats: 3}}))
-	require.Len(t, calls(), 1)
-	assert.Equal(t, "warning: $.spec.seats: fewer than 10 seats", calls()[0].Error())
+	assert.Equal(t, "warning: $.spec.seats: fewer than 10 seats", onlyWarning(t, calls).Error())
 
 	err := niceyaml.SelfValidateValue(ctx, warningSpec{Seats: -1})
 	require.Error(t, err)
@@ -523,12 +519,17 @@ func TestSelfValidateValue_Warnings(t *testing.T) {
 func TestSource_ValidateDocuments_Warnings(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("spec: 1\n---\nspec: 2\nextra: 3\n", niceyaml.WithName("all.yaml"))
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"spec: 1",
+		"---",
+		"spec: 2",
+		"extra: 3",
+	), niceyaml.WithName("all.yaml"))
 	failing := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 		n.Warn(ctx, niceyaml.NewWarning("old spec", niceyaml.AtPath(paths.Current().Child("spec").Key())))
 
 		if n.DocumentIndex() == 1 {
-			return niceyaml.NewError("bad extra", niceyaml.AtPath(paths.Current().Child("extra")))
+			return yamltest.ErrorAt("bad extra", "extra")
 		}
 
 		return nil

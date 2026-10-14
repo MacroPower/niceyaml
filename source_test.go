@@ -58,7 +58,7 @@ var (
 	sourceMarkedHeader = stringtest.LinesLF("a: 1", "\ufeff---", "b: 2")
 )
 
-func TestTokens_String_Annotation(t *testing.T) {
+func TestSource_View_Annotate(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -165,29 +165,92 @@ func runePositions(lines line.Lines, ranges ...position.Range) []runePosition {
 func TestSource_ZeroValue(t *testing.T) {
 	t.Parallel()
 
-	var s niceyaml.Source
+	// A report reads the Source of each bound error, and a nil SourceError
+	// returns a nil Source. Each read of a nil Source answers as an empty
+	// Source does, and so does each read of the zero value.
+	var bound *niceyaml.SourceError
 
-	assert.Empty(t, s.Tokens())
-	assert.Empty(t, s.Text())
+	require.Nil(t, bound.Source())
 
-	_, ok := s.Offset(position.New(0, 0))
-	assert.False(t, ok)
+	sources := map[string]*niceyaml.Source{
+		"nil":        bound.Source(),
+		"zero value": new(niceyaml.Source),
+	}
 
-	file, err := s.File()
-	require.NoError(t, err)
-	assert.NotNil(t, file)
+	tcs := map[string]struct {
+		read func(s *niceyaml.Source) any
+		want any
+	}{
+		"name": {
+			read: func(s *niceyaml.Source) any { return s.Name() },
+			want: "",
+		},
+		"file path": {
+			read: func(s *niceyaml.Source) any { return s.FilePath() },
+			want: "",
+		},
+		"tokens": {
+			read: func(s *niceyaml.Source) any { return s.Tokens() },
+			want: token.Tokens(nil),
+		},
+		"lines": {
+			read: func(s *niceyaml.Source) any { return s.Lines().Len() },
+			want: 0,
+		},
+		"view": {
+			read: func(s *niceyaml.Source) any { return s.View().Count() },
+			want: 0,
+		},
+		"excerpts": {
+			read: func(s *niceyaml.Source) any { return s.ShowsExcerpts() },
+			want: true,
+		},
+		"text": {
+			read: func(s *niceyaml.Source) any { return s.Text() },
+			want: "",
+		},
+		"offset": {
+			read: func(s *niceyaml.Source) any {
+				_, ok := s.Offset(position.New(0, 0))
 
-	docs := s.Documents()
-	require.Len(t, docs, 1)
-	assert.True(t, docs[0].IsEmpty())
+				return ok
+			},
+			want: false,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			for via, source := range sources {
+				assert.Equal(t, tc.want, tc.read(source), via)
+			}
+		})
+	}
+
+	t.Run("zero value holds one empty document", func(t *testing.T) {
+		t.Parallel()
+
+		var s niceyaml.Source
+
+		file, err := s.File()
+		require.NoError(t, err)
+		assert.NotNil(t, file)
+
+		assert.True(t, yamltest.Documents(t, &s, 1)[0].IsEmpty())
+	})
 }
 
 func TestSource_Runes(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input string
-		want  []runePosition
+		input  string
+		ranges []position.Range
+		// The rune after which the loop stops, or 0 to read every rune.
+		stop rune
+		want []runePosition
 	}{
 		"simple key-value": {
 			// The lexer strips the trailing newline from the final simple value.
@@ -201,7 +264,7 @@ func TestSource_Runes(t *testing.T) {
 		},
 		"multi-line": {
 			// The lexer strips the trailing newline from the final value on each line.
-			input: "a: 1\nb: 2\n",
+			input: stringtest.LinesLF("a: 1", "b: 2"),
 			want: []runePosition{
 				{R: 'a', Pos: position.New(0, 0)},
 				{R: ':', Pos: position.New(0, 1)},
@@ -278,6 +341,66 @@ func TestSource_Runes(t *testing.T) {
 			input: "",
 			want:  nil,
 		},
+		"empty with a range": {
+			input:  "",
+			ranges: []position.Range{yamltest.LineRange(0, 0, 5)},
+		},
+		// The range covers "b: 2" on line 1, and leaves its end out.
+		"single range filters runes correctly": {
+			input:  sourceFiveLines,
+			ranges: []position.Range{yamltest.LineRange(1, 0, 4)},
+			want: []runePosition{
+				{R: 'b', Pos: position.New(1, 0)},
+				{R: ':', Pos: position.New(1, 1)},
+				{R: ' ', Pos: position.New(1, 2)},
+				{R: '2', Pos: position.New(1, 3)},
+			},
+		},
+		// Line 1 from column 2 through its newline at column 4, then
+		// columns 0 and 1 of line 2.
+		"range spanning multiple lines": {
+			input:  sourceFiveLines,
+			ranges: []position.Range{position.NewRange(position.New(1, 2), position.New(2, 2))},
+			want: []runePosition{
+				{R: ' ', Pos: position.New(1, 2)},
+				{R: '2', Pos: position.New(1, 3)},
+				{R: '\n', Pos: position.New(1, 4)},
+				{R: 'c', Pos: position.New(2, 0)},
+				{R: ':', Pos: position.New(2, 1)},
+			},
+		},
+		"out-of-range yields nothing": {
+			input:  sourceFiveLines,
+			ranges: []position.Range{yamltest.LineRange(100, 0, 10)},
+		},
+		"multiple ranges": {
+			input: sourceFiveLines,
+			ranges: []position.Range{
+				yamltest.LineRange(0, 0, 1),
+				yamltest.LineRange(2, 0, 1),
+			},
+			want: []runePosition{
+				{R: 'a', Pos: position.New(0, 0)},
+				{R: 'c', Pos: position.New(2, 0)},
+			},
+		},
+		"early break": {
+			input: "abc\n",
+			stop:  'b',
+			want: []runePosition{
+				{R: 'a', Pos: position.New(0, 0)},
+				{R: 'b', Pos: position.New(0, 1)},
+			},
+		},
+		"early break with a range": {
+			input:  sourceFiveLines,
+			ranges: []position.Range{position.NewRange(position.New(0, 0), position.New(2, 10))},
+			stop:   ':',
+			want: []runePosition{
+				{R: 'a', Pos: position.New(0, 0)},
+				{R: ':', Pos: position.New(0, 1)},
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -286,9 +409,32 @@ func TestSource_Runes(t *testing.T) {
 
 			source := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input))
 
-			assert.Equal(t, tc.want, runePositions(source.Lines()))
+			var got []runePosition
+
+			for pos, r := range source.Lines().Runes(tc.ranges...) {
+				got = append(got, runePosition{R: r, Pos: pos})
+				if r == tc.stop {
+					break
+				}
+			}
+
+			assert.Equal(t, tc.want, got)
 		})
 	}
+
+	t.Run("no range and a range past both ends return all runes", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(sourceFiveLines)
+		require.Equal(t, 5, source.Lines().Len())
+
+		all := runePositions(source.Lines())
+		require.NotEmpty(t, all)
+		assert.Equal(t, runePosition{R: 'a', Pos: position.New(0, 0)}, all[0])
+
+		rng := position.NewRange(position.New(-5, 0), position.New(100, 100))
+		assert.Equal(t, all, runePositions(source.Lines(), rng))
+	})
 }
 
 func TestSource_Runes_DiffBuiltLines(t *testing.T) {
@@ -317,28 +463,7 @@ func TestSource_Runes_DiffBuiltLines(t *testing.T) {
 	assert.Equal(t, []position.Position{position.New(0, 0), position.New(1, 0)}, got)
 }
 
-func TestSource_All_EarlyBreak(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromTokens(lexer.Tokenize(stringtest.LinesLF(
-		"a: 1",
-		"b: 2",
-		"c: 3",
-	)))
-
-	var collected []int
-
-	for idx := range source.Lines().All() {
-		collected = append(collected, idx)
-		if idx >= 1 {
-			break
-		}
-	}
-
-	assert.Equal(t, []int{0, 1}, collected)
-}
-
-func TestSource_All_WithSpans(t *testing.T) {
+func TestSource_Lines_All(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString(sourceFiveLines)
@@ -347,6 +472,9 @@ func TestSource_All_WithSpans(t *testing.T) {
 
 	tcs := map[string]struct {
 		spans []position.Span
+		// The number of lines the loop reads before it stops, or 0 to
+		// read every line.
+		limit int
 		want  []int
 	}{
 		"no spans returns all lines": {
@@ -370,6 +498,10 @@ func TestSource_All_WithSpans(t *testing.T) {
 		"span beyond length yields nothing": {
 			spans: []position.Span{position.NewSpan(10, 20)},
 		},
+		"early break": {
+			limit: 2,
+			want:  []int{0, 1},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -380,6 +512,9 @@ func TestSource_All_WithSpans(t *testing.T) {
 
 			for idx := range source.Lines().All(tc.spans...) {
 				got = append(got, idx)
+				if len(got) == tc.limit {
+					break
+				}
 			}
 
 			assert.Equal(t, tc.want, got)
@@ -467,7 +602,7 @@ func TestSource_Tokens(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 	}{
-		"mapping": {input: "key: value\nfoo: bar\n"},
+		"mapping": {input: stringtest.LinesLF("key: value", "foo: bar")},
 		"block scalar": {
 			input: stringtest.LinesLF(
 				"key: |",
@@ -530,127 +665,11 @@ func TestSource_Lines_Whitespace(t *testing.T) {
 			t.Parallel()
 
 			src := niceyaml.NewSourceFromString(tc.input)
-			lines := src.Lines()
 
-			require.Equal(t, len(tc.numbers), lines.Len())
-
-			for i, want := range tc.numbers {
-				assert.Equal(t, want, lines.Line(i).Number(), "line %d", i)
-			}
-
+			assert.Equal(t, tc.numbers, yamltest.LineNumbers(src.Lines()))
 			assert.Equal(t, tc.want, yamltest.Document(t, src).Span())
 		})
 	}
-}
-
-func TestSource_Runes_EarlyBreak(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromTokens(lexer.Tokenize("abc\n"))
-
-	var collected []rune
-
-	for _, r := range source.Lines().Runes() {
-		collected = append(collected, r)
-		if r == 'b' {
-			break
-		}
-	}
-
-	assert.Equal(t, []rune{'a', 'b'}, collected)
-}
-
-func TestSource_Runes_WithRanges(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString(sourceFiveLines)
-
-	require.Equal(t, 5, source.Lines().Len())
-
-	tcs := map[string]struct {
-		ranges []position.Range
-		want   []runePosition
-	}{
-		// The range covers "b: 2" on line 1, and leaves its end out.
-		"single range filters runes correctly": {
-			ranges: []position.Range{yamltest.LineRange(1, 0, 4)},
-			want: []runePosition{
-				{R: 'b', Pos: position.New(1, 0)},
-				{R: ':', Pos: position.New(1, 1)},
-				{R: ' ', Pos: position.New(1, 2)},
-				{R: '2', Pos: position.New(1, 3)},
-			},
-		},
-		// Line 1 from column 2 through its newline at column 4, then
-		// columns 0 and 1 of line 2.
-		"range spanning multiple lines": {
-			ranges: []position.Range{position.NewRange(position.New(1, 2), position.New(2, 2))},
-			want: []runePosition{
-				{R: ' ', Pos: position.New(1, 2)},
-				{R: '2', Pos: position.New(1, 3)},
-				{R: '\n', Pos: position.New(1, 4)},
-				{R: 'c', Pos: position.New(2, 0)},
-				{R: ':', Pos: position.New(2, 1)},
-			},
-		},
-		"out-of-range yields nothing": {
-			ranges: []position.Range{yamltest.LineRange(100, 0, 10)},
-		},
-		"multiple ranges": {
-			ranges: []position.Range{
-				yamltest.LineRange(0, 0, 1),
-				yamltest.LineRange(2, 0, 1),
-			},
-			want: []runePosition{
-				{R: 'a', Pos: position.New(0, 0)},
-				{R: 'c', Pos: position.New(2, 0)},
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, runePositions(source.Lines(), tc.ranges...))
-		})
-	}
-
-	t.Run("no range and a range past both ends return all runes", func(t *testing.T) {
-		t.Parallel()
-
-		all := runePositions(source.Lines())
-		require.NotEmpty(t, all)
-		assert.Equal(t, runePosition{R: 'a', Pos: position.New(0, 0)}, all[0])
-
-		rng := position.NewRange(position.New(-5, 0), position.New(100, 100))
-		assert.Equal(t, all, runePositions(source.Lines(), rng))
-	})
-
-	t.Run("empty source returns nothing", func(t *testing.T) {
-		t.Parallel()
-
-		rng := yamltest.LineRange(0, 0, 5)
-		assert.Nil(t, runePositions(niceyaml.NewSourceFromString("").Lines(), rng))
-	})
-
-	t.Run("early break works with ranges", func(t *testing.T) {
-		t.Parallel()
-
-		rng := position.NewRange(position.New(0, 0), position.New(2, 10))
-
-		var collected []rune
-
-		for _, r := range source.Lines().Runes(rng) {
-			collected = append(collected, r)
-			if r == ':' {
-				break
-			}
-		}
-
-		// Should stop at first colon.
-		assert.Equal(t, []rune{'a', ':'}, collected)
-	})
 }
 
 func TestSource_Lines_TokenLookup(t *testing.T) {
@@ -695,10 +714,10 @@ func TestSource_Lines_DroppedText(t *testing.T) {
 	}{
 		"code of an escape in a double-quoted scalar": {input: `m: {a: "\u00e9", b: xx, c: yy}` + "\n"},
 		"code of an escape after a tag":               {input: stringtest.LinesLF(`name: !!str "Caf\u00e9"`, "age: 3")},
-		"blank line with a tab before the first key":  {input: " \t\na: 1\n"},
-		"blank line of a tab before the first key":    {input: "\t\na: 1\n"},
+		"blank line with a tab before the first key":  {input: stringtest.LinesLF(" \t", "a: 1")},
+		"blank line of a tab before the first key":    {input: stringtest.LinesLF("\t", "a: 1")},
 		"space before a colon after a quoted key":     {input: `{"a" : 1, "b" : "x"}` + "\n"},
-		"trailing spaces":                             {input: "a: 1   \nb: 2\n"},
+		"trailing spaces":                             {input: stringtest.LinesLF("a: 1   ", "b: 2")},
 		"blank line of spaces":                        {input: stringtest.LinesLF("a: 1", "   ", "b: 2")},
 	}
 
@@ -1286,10 +1305,7 @@ func TestSource_File_TokensFindLines(t *testing.T) {
 	t.Run("every token of the file finds its ranges", func(t *testing.T) {
 		t.Parallel()
 
-		data, err := os.ReadFile(filepath.Join("testdata", "full.yaml"))
-		require.NoError(t, err)
-
-		source := niceyaml.NewSourceFromString(string(data))
+		source := niceyaml.NewSourceFromString(yamltest.ReadFile(t, filepath.Join("testdata", "full.yaml")))
 
 		file, err := source.File()
 		require.NoError(t, err)
@@ -1327,8 +1343,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 		"d: 4",
 	))
 
-	docs := full.Documents()
-	require.Len(t, docs, 2)
+	docs := yamltest.Documents(t, full, 2)
 
 	source := niceyaml.NewSourceFromTokens(docs[1].Tokens())
 	view := source.Lines()
@@ -1355,14 +1370,11 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 	t.Run("path error reports the renumbered line", func(t *testing.T) {
 		t.Parallel()
 
-		err := yamltest.Bind(t, source, niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b"))))
+		err := yamltest.Bind(t, source, yamltest.ErrorAt("bad b", "b"))
 		assert.Equal(t, "2:4: $.b: bad b", err.Error())
 
 		bound := yamltest.RequireSourceError(t, err)
-
-		rng, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, yamltest.LineRange(1, 3, 4), rng)
+		assert.Equal(t, yamltest.LineRange(1, 3, 4), yamltest.RangeOf(t, bound))
 
 		got := stringtest.TrimLineEnds(render(bound))
 		assert.Contains(t, got, "<genericError>2</genericError>")
@@ -1428,14 +1440,7 @@ func TestNewSourceFromTokens_WhitespaceDocument(t *testing.T) {
 
 			require.NotEmpty(t, doc)
 
-			lines := niceyaml.NewSourceFromTokens(doc).Lines()
-
-			got := make([]int, 0, lines.Len())
-			for _, l := range lines.All() {
-				got = append(got, l.Number())
-			}
-
-			assert.Equal(t, []int{1, 2}, got)
+			assert.Equal(t, []int{1, 2}, yamltest.LineNumbers(niceyaml.NewSourceFromTokens(doc).Lines()))
 		})
 	}
 }
@@ -1459,9 +1464,9 @@ func TestNewSourceFromString_ByteOrderMark(t *testing.T) {
 			lines: "a: 1",
 		},
 		"before a document marker": {
-			input: "\ufeff---\na: 1\n",
+			input: stringtest.LinesLF("\ufeff---", "a: 1"),
 			want:  map[string]any{"a": uint64(1)},
-			lines: "---\na: 1",
+			lines: stringtest.JoinLF("---", "a: 1"),
 		},
 	}
 
@@ -1506,8 +1511,7 @@ func TestNewSourceFromString_ByteOrderMarkLaterDocument(t *testing.T) {
 			source := niceyaml.NewSourceFromString(tc.input)
 			assert.Equal(t, tc.lines, source.Lines().Content())
 
-			docs := source.Documents()
-			require.Len(t, docs, 2)
+			docs := yamltest.Documents(t, source, 2)
 
 			got, err := docs[1].Decode[map[string]any](t.Context())
 			require.NoError(t, err)
@@ -1515,7 +1519,7 @@ func TestNewSourceFromString_ByteOrderMarkLaterDocument(t *testing.T) {
 
 			// The positions count in the text without the marks, so an
 			// error at the value of b points at it.
-			err = docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
+			err = docs[1].Bind(yamltest.ErrorAt("bad", "b"))
 			assert.EqualError(t, err, tc.err)
 		})
 	}
@@ -1528,15 +1532,15 @@ func TestSource_Text(t *testing.T) {
 	// and Text returns every one as the Source read it.
 	tcs := map[string]string{
 		"empty":                     "",
-		"LF":                        "a: 1\nb: 2\n",
+		"LF":                        stringtest.LinesLF("a: 1", "b: 2"),
 		"no final line ending":      "a: 1\nb: 2",
-		"CRLF":                      "a: 1\r\nb: 2\r\n",
+		"CRLF":                      stringtest.LinesCRLF("a: 1", "b: 2"),
 		"bare CR":                   "a: 1\rb: 2\r",
 		"trailing blank lines":      stringtest.LinesLF("a: 1", "", ""),
 		"byte order mark":           "\ufeffa: 1\n",
 		"mark at a document marker": sourceMarkedHeader,
 		"invalid UTF-8":             "a: \"x\xffy\"\n",
-		"tag that ends its line":    "a: !t\nb: 1\n",
+		"tag that ends its line":    stringtest.LinesLF("a: !t", "b: 1"),
 		"tag that ends the file":    "a: 1\nb: !t",
 	}
 
@@ -1551,16 +1555,11 @@ func TestSource_Text(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, text, fromReader.Text())
 
-			fsys := fstest.MapFS{"a.yaml": &fstest.MapFile{Data: []byte(text)}}
-
-			fromFS, err := niceyaml.NewSourceFromFS(fsys, "a.yaml")
+			fromFS, err := niceyaml.NewSourceFromFS(yamltest.MapFS(map[string]string{"a.yaml": text}), "a.yaml")
 			require.NoError(t, err)
 			assert.Equal(t, text, fromFS.Text())
 
-			path := filepath.Join(t.TempDir(), "a.yaml")
-			require.NoError(t, os.WriteFile(path, []byte(text), 0o600))
-
-			fromFile, err := niceyaml.NewSourceFromFile(path)
+			fromFile, err := niceyaml.NewSourceFromFile(yamltest.WriteFile(t, t.TempDir(), "a.yaml", text))
 			require.NoError(t, err)
 			assert.Equal(t, text, fromFile.Text())
 		})
@@ -1570,6 +1569,10 @@ func TestSource_Text(t *testing.T) {
 func TestSource_Offset(t *testing.T) {
 	t.Parallel()
 
+	// Two lines, each of which ends in a line break.
+	lf := stringtest.LinesLF("a: 1", "b: 2")
+	crlf := stringtest.LinesCRLF("a: 1", "b: 2")
+
 	tcs := map[string]struct {
 		input string
 		line  int
@@ -1578,12 +1581,12 @@ func TestSource_Offset(t *testing.T) {
 		ok    bool
 	}{
 		"start of the text": {
-			input: "a: 1\nb: 2\n",
+			input: lf,
 			want:  0,
 			ok:    true,
 		},
 		"column of a later line": {
-			input: "a: 1\nb: 2\n",
+			input: lf,
 			line:  1,
 			col:   3,
 			want:  8,
@@ -1597,35 +1600,35 @@ func TestSource_Offset(t *testing.T) {
 			ok:    true,
 		},
 		"LF takes the column after the content": {
-			input: "a: 1\nb: 2\n",
+			input: lf,
 			line:  0,
 			col:   4,
 			want:  4,
 			ok:    true,
 		},
 		"column past a LF is the next line": {
-			input: "a: 1\nb: 2\n",
+			input: lf,
 			line:  0,
 			col:   5,
 			want:  5,
 			ok:    true,
 		},
 		"CRLF takes one column": {
-			input: "a: 1\r\nb: 2\r\n",
+			input: crlf,
 			line:  0,
 			col:   4,
 			want:  4,
 			ok:    true,
 		},
 		"column past a CRLF is the next line": {
-			input: "a: 1\r\nb: 2\r\n",
+			input: crlf,
 			line:  0,
 			col:   5,
 			want:  6,
 			ok:    true,
 		},
 		"line after a CRLF": {
-			input: "a: 1\r\nb: 2\r\n",
+			input: crlf,
 			line:  1,
 			col:   0,
 			want:  6,
@@ -1673,7 +1676,7 @@ func TestSource_Offset(t *testing.T) {
 			col:   0,
 		},
 		"column past a line ending": {
-			input: "a: 1\nb: 2\n",
+			input: lf,
 			line:  0,
 			col:   6,
 		},
@@ -1750,7 +1753,7 @@ func TestSource_Offset(t *testing.T) {
 			ok:    true,
 		},
 		"line after a tag that ends its line": {
-			input: "a: !t\nb: 1\n",
+			input: stringtest.LinesLF("a: !t", "b: 1"),
 			line:  1,
 			col:   3,
 			want:  9,
@@ -1781,9 +1784,6 @@ func TestSource_Offset(t *testing.T) {
 func TestSource_Offset_Runes(t *testing.T) {
 	t.Parallel()
 
-	full, err := os.ReadFile(filepath.Join("testdata", "full.yaml"))
-	require.NoError(t, err)
-
 	tcs := map[string]string{
 		"LF": stringtest.LinesLF(
 			"a: 1",
@@ -1799,10 +1799,10 @@ func TestSource_Offset_Runes(t *testing.T) {
 		),
 		"bare CR":                   "a: 1\rb: 2\r",
 		"no final line ending":      "a: 1\nb: 2",
-		"byte order mark":           "\ufeff# c\na: 1\n",
+		"byte order mark":           stringtest.LinesLF("\ufeff# c", "a: 1"),
 		"mark at a document marker": sourceMarkedHeader,
-		"wide runes":                "é: \"日本語\" # 😀\nb: 2\n",
-		"invalid UTF-8":             "a: \"x\xffy\"\nb: 2\n",
+		"wide runes":                stringtest.LinesLF(`é: "日本語" # 😀`, "b: 2"),
+		"invalid UTF-8":             stringtest.LinesLF("a: \"x\xffy\"", "b: 2"),
 		"block scalar": stringtest.LinesCRLF(
 			"a: |",
 			"  x",
@@ -1815,7 +1815,7 @@ func TestSource_Offset_Runes(t *testing.T) {
 			"  - x",
 			"b: 1",
 		),
-		"full.yaml": string(full),
+		"full.yaml": yamltest.ReadFile(t, filepath.Join("testdata", "full.yaml")),
 	}
 
 	for name, input := range tcs {
@@ -1933,11 +1933,14 @@ func TestSource_Parse(t *testing.T) {
 
 		tcs := map[string]struct {
 			input string
-			want  int
+			// The number of documents in the file, and the number
+			// AllDocuments returns.
+			want, all int
 		}{
 			"simple key-value": {
 				input: "key: value\n",
 				want:  1,
+				all:   1,
 			},
 			"nested map": {
 				input: stringtest.Input(`
@@ -1945,6 +1948,7 @@ func TestSource_Parse(t *testing.T) {
 					  child: value
 				`),
 				want: 1,
+				all:  1,
 			},
 			"multiple documents": {
 				input: stringtest.Input(`
@@ -1954,6 +1958,7 @@ func TestSource_Parse(t *testing.T) {
 					doc2: value2
 				`),
 				want: 2,
+				all:  2,
 			},
 			"consecutive headers": {
 				input: stringtest.Input(`
@@ -1961,6 +1966,7 @@ func TestSource_Parse(t *testing.T) {
 					---
 				`),
 				want: 2,
+				all:  2,
 			},
 			"consecutive headers before more documents": {
 				input: stringtest.Input(`
@@ -1971,6 +1977,7 @@ func TestSource_Parse(t *testing.T) {
 					kind: B
 				`),
 				want: 3,
+				all:  3,
 			},
 			"consecutive headers after an end marker": {
 				input: stringtest.Input(`
@@ -1981,6 +1988,7 @@ func TestSource_Parse(t *testing.T) {
 					b: 2
 				`),
 				want: 3,
+				all:  3,
 			},
 			"consecutive headers after a directive": {
 				// The parser puts the directive in a node of its own.
@@ -1991,6 +1999,7 @@ func TestSource_Parse(t *testing.T) {
 					a: 1
 				`),
 				want: 3,
+				all:  2,
 			},
 			"comment between headers": {
 				input: stringtest.Input(`
@@ -2001,6 +2010,7 @@ func TestSource_Parse(t *testing.T) {
 					b: 2
 				`),
 				want: 3,
+				all:  3,
 			},
 			"anchor with no value before a header": {
 				input: stringtest.Input(`
@@ -2009,6 +2019,7 @@ func TestSource_Parse(t *testing.T) {
 					b: 1
 				`),
 				want: 2,
+				all:  2,
 			},
 			"anchored entry with no value before a header": {
 				input: stringtest.Input(`
@@ -2016,6 +2027,7 @@ func TestSource_Parse(t *testing.T) {
 					---
 				`),
 				want: 2,
+				all:  2,
 			},
 			"tag directive for the secondary handle": {
 				// The directive holds for the first document alone. Carried
@@ -2030,6 +2042,7 @@ func TestSource_Parse(t *testing.T) {
 					"- !!str",
 				),
 				want: 3,
+				all:  2,
 			},
 			"list": {
 				input: stringtest.Input(`
@@ -2038,35 +2051,17 @@ func TestSource_Parse(t *testing.T) {
 					  - two
 				`),
 				want: 1,
+				all:  1,
 			},
 			// The go-yaml parser returns one empty document for an empty
 			// input.
 			"empty source": {
 				input: "",
 				want:  1,
+				all:   1,
 			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				file, err := niceyaml.NewSourceFromString(tc.input).File()
-				require.NoError(t, err)
-				assert.Len(t, file.Docs, tc.want)
-			})
-		}
-	})
-
-	t.Run("an end marker between headers ends a document", func(t *testing.T) {
-		t.Parallel()
-
-		// The parser merges a header that an end marker closes into the
-		// next document, which then holds two headers.
-		tcs := map[string]struct {
-			input string
-			want  int
-		}{
+			// The parser merges a header that an end marker closes into the
+			// next document, which then holds two headers.
 			"end marker between headers": {
 				input: stringtest.Input(`
 					---
@@ -2075,6 +2070,7 @@ func TestSource_Parse(t *testing.T) {
 					a: 1
 				`),
 				want: 2,
+				all:  2,
 			},
 			"end marker between headers with a comment": {
 				input: stringtest.Input(`
@@ -2083,6 +2079,7 @@ func TestSource_Parse(t *testing.T) {
 					---
 				`),
 				want: 2,
+				all:  2,
 			},
 			"end marker between headers after a document": {
 				input: stringtest.Input(`
@@ -2093,6 +2090,7 @@ func TestSource_Parse(t *testing.T) {
 					a: 1
 				`),
 				want: 3,
+				all:  3,
 			},
 			"consecutive headers before an end marker": {
 				input: stringtest.Input(`
@@ -2102,6 +2100,7 @@ func TestSource_Parse(t *testing.T) {
 					---
 				`),
 				want: 3,
+				all:  3,
 			},
 		}
 
@@ -2113,7 +2112,7 @@ func TestSource_Parse(t *testing.T) {
 				file, err := source.File()
 				require.NoError(t, err)
 				assert.Len(t, file.Docs, tc.want)
-				assert.Len(t, source.AllDocuments(), tc.want)
+				assert.Len(t, source.AllDocuments(), tc.all)
 			})
 		}
 	})
@@ -2154,16 +2153,14 @@ func TestSource_Parse(t *testing.T) {
 		assert.Contains(t, detail, "<genericError>b</genericError>", "the offending token is highlighted")
 
 		// The document returns the same bound error.
-		docs := source.Documents()
-		require.Len(t, docs, 1)
-		assert.Same(t, bound, docs[0].Err())
+		assert.Same(t, bound, yamltest.Documents(t, source, 1)[0].Err())
 	})
 
 	t.Run("parser panic comes back as an error on every call", func(t *testing.T) {
 		t.Parallel()
 
 		// The go-yaml parser dereferences the position of this token.
-		tks := lexer.Tokenize("a: 1\nb: 2\n")
+		tks := lexer.Tokenize(stringtest.LinesLF("a: 1", "b: 2"))
 		tks[2].Position = nil
 
 		source := niceyaml.NewSourceFromTokens(tks)
@@ -2182,20 +2179,14 @@ func TestSource_Parse(t *testing.T) {
 		_, ok := value.(runtime.Error)
 		assert.True(t, ok, "got %T", value)
 
-		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, source, bound.Source())
+		assert.Same(t, source, yamltest.RequireSourceError(t, err).Source())
 
 		file, again := source.File()
 		assert.Nil(t, file)
 		assert.Same(t, err, again)
 
-		docs := source.Documents()
-		require.Len(t, docs, 1)
-		assert.Same(t, err, docs[0].Err())
-
-		docs = source.AllDocuments()
-		require.Len(t, docs, 1)
-		assert.Same(t, err, docs[0].Err())
+		assert.Same(t, err, yamltest.Documents(t, source, 1)[0].Err())
+		assert.Same(t, err, yamltest.AllDocuments(t, source, 1)[0].Err())
 
 		_, again = source.Document()
 		assert.Same(t, err, again)
@@ -2298,11 +2289,11 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			want:  []bool{true},
 		},
 		"duplicate key": {
-			input: "a: 1\na: 2\n",
+			input: stringtest.LinesLF("a: 1", "a: 2"),
 			want:  []bool{true},
 		},
 		"duplicate key the source allows": {
-			input: "a: 1\na: 2\n",
+			input: stringtest.LinesLF("a: 1", "a: 2"),
 			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 			want:  []bool{false},
 		},
@@ -2351,8 +2342,7 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 
 			source := niceyaml.NewSourceFromString(tc.input, tc.opts...)
 
-			all := source.AllDocuments()
-			require.Len(t, all, len(tc.want))
+			all := yamltest.AllDocuments(t, source, len(tc.want))
 
 			for i, doc := range all {
 				if !tc.want[i] {
@@ -2407,27 +2397,6 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 func TestSource_AllDocuments(t *testing.T) {
 	t.Parallel()
 
-	t.Run("file that parses holds the Nodes Documents returns", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "---", "b: 2"))
-
-		docs := source.Documents()
-		require.Len(t, docs, 2)
-
-		all := source.AllDocuments()
-		require.Len(t, all, 2)
-
-		for i, doc := range docs {
-			assert.Same(t, doc, all[i])
-		}
-
-		// Every call returns a slice of its own.
-		all[1] = nil
-
-		assert.Same(t, docs[1], source.AllDocuments()[1])
-	})
-
 	t.Run("file with a syntax error holds every document", func(t *testing.T) {
 		t.Parallel()
 
@@ -2449,12 +2418,9 @@ func TestSource_AllDocuments(t *testing.T) {
 
 		// Documents returns the document that did not parse beside the
 		// others, with its error on the Node.
-		docs := source.Documents()
-		require.Len(t, docs, 4)
-		assert.Same(t, fileErr, docs[2].Err())
+		assert.Same(t, fileErr, yamltest.Documents(t, source, 4)[2].Err())
 
-		all := source.AllDocuments()
-		require.Len(t, all, 4)
+		all := yamltest.AllDocuments(t, source, 4)
 
 		require.NoError(t, all[0].Err())
 		require.NoError(t, all[1].Err())
@@ -2472,8 +2438,7 @@ func TestSource_AllDocuments(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString(stringtest.LinesLF("a: &x", "---", "b: ["))
 
-		all := source.AllDocuments()
-		require.Len(t, all, 2)
+		all := yamltest.AllDocuments(t, source, 2)
 
 		require.ErrorIs(t, all[0].Err(), niceyaml.ErrSyntax)
 		assert.Same(t, all[0].Err(), all[1].Err())
@@ -2582,10 +2547,7 @@ func TestSource_AllDocuments(t *testing.T) {
 					assert.Same(t, yamltest.BoundNode(t, bound), doc)
 					assert.Same(t, docs[doc.DocumentIndex()], doc)
 					assert.Same(t, error(bound), doc.Err(), "the document returns the error bound to it")
-
-					rng, ok := bound.Range()
-					require.True(t, ok)
-					assert.True(t, doc.Span().Contains(rng.Start.Line))
+					assert.True(t, doc.Span().Contains(yamltest.RangeOf(t, bound).Start.Line))
 
 					got = append(got, doc.DocumentIndex())
 				}
@@ -2608,8 +2570,7 @@ func TestSource_AllDocuments(t *testing.T) {
 
 		source := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("f.yaml"))
 
-		all := source.AllDocuments()
-		require.Len(t, all, 2)
+		all := yamltest.AllDocuments(t, source, 2)
 		requirePanic(t, all[0].Err())
 		assert.Same(t, all[0].Err(), all[1].Err())
 
@@ -2918,8 +2879,7 @@ func TestSource_AllDocuments_SyntaxError(t *testing.T) {
 
 			source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("f.yaml"))
 
-			docs := source.AllDocuments()
-			require.Len(t, docs, len(tc.want))
+			docs := yamltest.AllDocuments(t, source, len(tc.want))
 
 			// The syntax errors in file order. The two documents of one
 			// run share its error.
@@ -3088,8 +3048,7 @@ func TestSource_AllDocuments_UnclosedFlow(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			docs := niceyaml.NewSourceFromString(tc.input).AllDocuments()
-			require.Len(t, docs, len(tc.want))
+			docs := yamltest.AllDocuments(t, niceyaml.NewSourceFromString(tc.input), len(tc.want))
 
 			for i, doc := range docs {
 				if tc.want[i] == nil {
@@ -3175,21 +3134,11 @@ func TestSource_AllDocuments_SyntaxErrorTokens(t *testing.T) {
 			_, err := source.File()
 			require.Error(t, err)
 
-			docs := source.AllDocuments()
-			require.Len(t, docs, len(tc.want))
-
 			var all token.Tokens
 
-			for i, doc := range docs {
+			for i, doc := range yamltest.AllDocuments(t, source, len(tc.want)) {
 				assert.Equal(t, stringtest.JoinLF(tc.want[i]...), doc.View().Held().Content())
-
-				var preamble []string
-
-				for _, tk := range doc.Preamble() {
-					preamble = append(preamble, tk.Value)
-				}
-
-				assert.Equal(t, tc.preambles[i], preamble)
+				assert.Equal(t, tc.preambles[i], yamltest.TokenValues(doc.Preamble()))
 
 				all = append(all, doc.Tokens()...)
 			}
@@ -3208,7 +3157,7 @@ func requireName(calls *atomic.Int32) niceyaml.Validator {
 
 		_, err := n.At(paths.Current().Child("name"))
 		if err != nil {
-			return niceyaml.NewError("name is required", niceyaml.AtPath(paths.Current()))
+			return yamltest.ErrorAt("name is required")
 		}
 
 		return nil
@@ -3231,7 +3180,7 @@ func TestSource_Documents_LeavesOutEmpty(t *testing.T) {
 			all:   2,
 		},
 		"trailing header": {
-			input: "a: 1\n---\n",
+			input: stringtest.LinesLF("a: 1", "---"),
 			want:  []int{0},
 			all:   2,
 		},
@@ -3268,7 +3217,7 @@ func TestSource_Documents_LeavesOutEmpty(t *testing.T) {
 		},
 		// A document that holds a value is not empty, whatever the value.
 		"explicit null": {
-			input: "a: 1\n--- ~\n",
+			input: stringtest.LinesLF("a: 1", "--- ~"),
 			want:  []int{0, 1},
 			all:   2,
 		},
@@ -3299,7 +3248,7 @@ func TestSource_Documents_LeavesOutEmpty(t *testing.T) {
 			all:   1,
 		},
 		"headers alone": {
-			input: "---\n---\n",
+			input: stringtest.LinesLF("---", "---"),
 			want:  []int{0},
 			all:   2,
 		},
@@ -3316,8 +3265,7 @@ func TestSource_Documents_LeavesOutEmpty(t *testing.T) {
 
 			source := niceyaml.NewSourceFromString(tc.input)
 
-			all := source.AllDocuments()
-			require.Len(t, all, tc.all)
+			all := yamltest.AllDocuments(t, source, tc.all)
 
 			docs := source.Documents()
 
@@ -3409,9 +3357,9 @@ func TestSource_ValidateDocuments(t *testing.T) {
 			),
 			want: []string{"f.yaml:3:7: " + unclosedSequence, "f.yaml:5:1: $: name is required"},
 		},
-		"empty document beside one with content": {input: "name: x\n---\n"},
+		"empty document beside one with content": {input: stringtest.LinesLF("name: x", "---")},
 		"empty documents alone": {
-			input: "---\n---\n",
+			input: stringtest.LinesLF("---", "---"),
 			want:  []string{"f.yaml:1:1: $: name is required"},
 		},
 		"empty file": {
@@ -3440,10 +3388,7 @@ func TestSource_ValidateDocuments(t *testing.T) {
 			}
 
 			assert.Equal(t, tc.want, bindingMessages(err))
-
-			for b := range niceyaml.Bindings(err) {
-				assert.Same(t, source, b.Source())
-			}
+			yamltest.AssertBoundTo(t, source, err)
 
 			// Every document that parsed runs the validator, but an empty
 			// one in a file that holds a document with content, and every
@@ -3470,18 +3415,18 @@ func TestSource_ValidateDocuments(t *testing.T) {
 	t.Run("a nil validator returns the error File returns", func(t *testing.T) {
 		t.Parallel()
 
-		for _, input := range []string{
-			stringtest.LinesLF("name: a", "---", "name: b"),
-			"a: [\n",
-			stringtest.LinesLF(
+		tcs := map[string]string{
+			"every document valid": stringtest.LinesLF("name: a", "---", "name: b"),
+			"one syntax error":     "a: [\n",
+			"two syntax errors": stringtest.LinesLF(
 				"a: [",
 				"---",
 				"b: 1",
 				"---",
 				"c: [",
 			),
-			stringtest.LinesLF("a: &x", "---", "b: ["),
-			stringtest.LinesLF(
+			"syntax error two documents share": stringtest.LinesLF("a: &x", "---", "b: ["),
+			"shared syntax error beside another": stringtest.LinesLF(
 				"a: &x",
 				"---",
 				"b: [",
@@ -3490,36 +3435,45 @@ func TestSource_ValidateDocuments(t *testing.T) {
 				"---",
 				"d: @x",
 			),
-			"...\n",
-		} {
-			source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
+			"stream of markers alone": "...\n",
+		}
 
-			_, fileErr := source.File()
+		// A nil pointer to a fieldValidator panics if it runs.
+		validators := map[string]niceyaml.Validator{
+			"nil":               nil,
+			"nil pointer":       (*fieldValidator)(nil),
+			"nil ValidatorFunc": niceyaml.ValidatorFunc(nil),
+		}
 
-			// A nil pointer to a fieldValidator panics if it runs.
-			for _, v := range []niceyaml.Validator{nil, (*fieldValidator)(nil), niceyaml.ValidatorFunc(nil)} {
-				err := source.ValidateDocuments(t.Context(), v)
-				assert.Equal(t, fileErr, err, input)
-			}
+		for name, input := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
+
+				_, fileErr := source.File()
+
+				for via, v := range validators {
+					assert.Equal(t, fileErr, source.ValidateDocuments(t.Context(), v), via)
+				}
+			})
 		}
 	})
 
 	t.Run("the validator decides how many violations a document reports", func(t *testing.T) {
 		t.Parallel()
 
-		namePath := paths.Current().Child("name")
-
 		// Rejects returns a validator that reports msg at the name of a
 		// document whose name is one of bad.
 		rejects := func(msg string, bad ...string) niceyaml.Validator {
 			return niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-				name, err := n.DecodeAt[string](ctx, namePath)
+				name, err := n.DecodeAt[string](ctx, paths.Current().Child("name"))
 				if err != nil {
 					return err
 				}
 
 				if slices.Contains(bad, name) {
-					return niceyaml.NewError(msg, niceyaml.AtPath(namePath))
+					return yamltest.ErrorAt(msg, "name")
 				}
 
 				return nil
@@ -3657,11 +3611,11 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		// An empty document beside one with content passes with v alone.
 		"schema, trailing header": {
 			v:     manifest,
-			input: "kind: Pod\n---\n",
+			input: stringtest.LinesLF("kind: Pod", "---"),
 		},
 		"registry, trailing header": {
 			v:     registry,
-			input: "kind: Pod\n---\n",
+			input: stringtest.LinesLF("kind: Pod", "---"),
 		},
 		"schema, empty file": {
 			v:      manifest,
@@ -3693,12 +3647,12 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		// them with v alone.
 		"schema, headers alone": {
 			v:      manifest,
-			input:  "---\n---\n",
+			input:  stringtest.LinesLF("---", "---"),
 			strict: []string{"f.yaml:1:1: " + notNull},
 		},
 		"registry, headers alone": {
 			v:      registry,
-			input:  "---\n---\n",
+			input:  stringtest.LinesLF("---", "---"),
 			strict: []string{"f.yaml: document 1: " + noMatch},
 		},
 		"schema, template that renders a comment alone": {
@@ -3714,25 +3668,25 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		// A document that holds a value answers to the validator.
 		"schema, explicit null": {
 			v:      manifest,
-			input:  "kind: Pod\n--- null\n",
+			input:  stringtest.LinesLF("kind: Pod", "--- null"),
 			strict: []string{"f.yaml:2:5: " + notNull},
 			want:   []string{"f.yaml:2:5: " + notNull},
 		},
 		"registry, explicit null": {
 			v:      registry,
-			input:  "kind: Pod\n--- null\n",
+			input:  stringtest.LinesLF("kind: Pod", "--- null"),
 			strict: []string{"f.yaml: document 2: " + noMatch},
 			want:   []string{"f.yaml: document 2: " + noMatch},
 		},
 		"schema, alias with no anchor": {
 			v:      manifest,
-			input:  "kind: Pod\n--- *nope\n",
+			input:  stringtest.LinesLF("kind: Pod", "--- *nope"),
 			strict: []string{`f.yaml:2:5: $: could not find alias "nope"`},
 			want:   []string{`f.yaml:2:5: $: could not find alias "nope"`},
 		},
 		"registry, alias with no anchor": {
 			v:     registry,
-			input: "kind: Pod\n--- *nope\n",
+			input: stringtest.LinesLF("kind: Pod", "--- *nope"),
 			strict: []string{
 				"f.yaml: document 2: resolve $.kind: alias does not resolve: *nope has no anchor before it",
 			},
@@ -3765,7 +3719,7 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		// beside it passes.
 		"schema, empty document beside one that did not parse": {
 			v:      manifest,
-			input:  "kind: [\n---\n",
+			input:  stringtest.LinesLF("kind: [", "---"),
 			strict: []string{"f.yaml:1:7: " + unclosedSequence},
 			want:   []string{"f.yaml:1:7: " + unclosedSequence},
 		},
@@ -3820,11 +3774,11 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 			// The kind each document Documents returns decodes to.
 			want []string
 		}{
-			"trailing header":             {input: "kind: Pod\n---\n", want: []string{"Pod"}},
+			"trailing header":             {input: stringtest.LinesLF("kind: Pod", "---"), want: []string{"Pod"}},
 			"comment after a manifest":    {input: sourced, want: []string{"A"}},
 			"chart output":                {input: helm, want: []string{"ConfigMap", "Service"}},
 			"document below an empty one": {input: spaced, want: []string{"A", "B"}},
-			"headers alone":               {input: "---\n---\n", want: []string{""}},
+			"headers alone":               {input: stringtest.LinesLF("---", "---"), want: []string{""}},
 			"template that renders no content": {
 				input: stringtest.LinesLF("---", "# Source: demo/templates/ingress.yaml"),
 				want:  []string{""},
@@ -3883,8 +3837,7 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 
 				source := niceyaml.NewSourceFromString(sourced, niceyaml.WithName("f.yaml"))
 
-				docs := source.AllDocuments()
-				require.Len(t, docs, 2)
+				docs := yamltest.AllDocuments(t, source, 2)
 				require.True(t, docs[1].IsEmpty())
 
 				// ValidateDocuments leaves the empty document out, and
@@ -3937,8 +3890,7 @@ func TestSource_ValidateDocuments_Context(t *testing.T) {
 		assert.Equal(t, int32(0), calls.Load())
 		assert.Equal(t, []string{"f.yaml: context canceled"}, bindingMessages(err))
 
-		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, source, bound.Source())
+		assert.Same(t, source, yamltest.RequireSourceError(t, err).Source())
 
 		// With a nil validator, the ended ctx still fails the call.
 		err = source.ValidateDocuments(ctx, nil)
@@ -3981,7 +3933,7 @@ func TestSource_ValidateDocuments_Context(t *testing.T) {
 						return tc.result(ctx)
 					}
 
-					return niceyaml.NewError("bad", niceyaml.AtPath(paths.Current()))
+					return yamltest.ErrorAt("bad")
 				})
 
 				source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
@@ -4059,67 +4011,6 @@ func TestSource_Name(t *testing.T) {
 			)
 
 			assert.Equal(t, tc.want, source.Name())
-		})
-	}
-}
-
-func TestSource_NilReceiver(t *testing.T) {
-	t.Parallel()
-
-	// A report reads the Source of each bound error, and a nil SourceError
-	// returns a nil Source. Each read answers as an empty Source does.
-	tcs := map[string]struct {
-		read func(s *niceyaml.Source) any
-		want any
-	}{
-		"name": {
-			read: func(s *niceyaml.Source) any { return s.Name() },
-			want: "",
-		},
-		"file path": {
-			read: func(s *niceyaml.Source) any { return s.FilePath() },
-			want: "",
-		},
-		"tokens": {
-			read: func(s *niceyaml.Source) any { return s.Tokens() },
-			want: token.Tokens(nil),
-		},
-		"lines": {
-			read: func(s *niceyaml.Source) any { return s.Lines().Len() },
-			want: 0,
-		},
-		"view": {
-			read: func(s *niceyaml.Source) any { return s.View().Count() },
-			want: 0,
-		},
-		"excerpts": {
-			read: func(s *niceyaml.Source) any { return s.ShowsExcerpts() },
-			want: true,
-		},
-		"text": {
-			read: func(s *niceyaml.Source) any { return s.Text() },
-			want: "",
-		},
-		"offset": {
-			read: func(s *niceyaml.Source) any {
-				_, ok := s.Offset(position.New(0, 0))
-
-				return ok
-			},
-			want: false,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			var bound *niceyaml.SourceError
-
-			source := bound.Source()
-			require.Nil(t, source)
-
-			assert.Equal(t, tc.want, tc.read(source))
 		})
 	}
 }
@@ -4213,10 +4104,7 @@ func TestSource_Bind(t *testing.T) {
 		assert.Same(t, source, bound.Source())
 		assert.Same(t, docs[1], yamltest.BoundDocument(t, bound))
 		assert.Equal(t, "two.yaml:3:4: too wide", err.Error())
-
-		got, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, rng, got)
+		assert.Equal(t, rng, yamltest.RangeOf(t, bound))
 
 		assert.Equal(t, stringtest.JoinLF(
 			"two.yaml:3:4: too wide",
@@ -4304,8 +4192,7 @@ func TestSource_Bind(t *testing.T) {
 			"c: 3",
 		), niceyaml.WithName("broken.yaml"))
 
-		docs := broken.AllDocuments()
-		require.Len(t, docs, 3)
+		docs := yamltest.AllDocuments(t, broken, 3)
 		require.NoError(t, docs[0].Err())
 		require.ErrorIs(t, docs[1].Err(), niceyaml.ErrSyntax)
 		require.NoError(t, docs[2].Err())
@@ -4375,15 +4262,12 @@ func TestSource_Bind(t *testing.T) {
 		), niceyaml.WithName("one.yaml"))
 		doc := yamltest.Document(t, one)
 
-		err := one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
+		err := one.Bind(yamltest.ErrorAt("bad", "b"))
 
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, "one.yaml:3:4: $.b: bad", err.Error())
 		assert.Same(t, doc, yamltest.BoundDocument(t, bound))
-
-		got, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, yamltest.LineRange(2, 3, 5), got)
+		assert.Equal(t, yamltest.LineRange(2, 3, 5), yamltest.RangeOf(t, bound))
 
 		assert.Equal(t, stringtest.JoinLF(
 			"one.yaml:3:4: $.b: bad",
@@ -4398,7 +4282,7 @@ func TestSource_Bind(t *testing.T) {
 	t.Run("missing path binds to the one document", func(t *testing.T) {
 		t.Parallel()
 
-		one := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("one.yaml"))
+		one := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2"), niceyaml.WithName("one.yaml"))
 		doc := yamltest.Document(t, one)
 
 		err := one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("zz").Index(0))))
@@ -4431,14 +4315,11 @@ func TestSource_Bind(t *testing.T) {
 			niceyaml.WithName("f.yaml"),
 		)
 
-		err := keyed.Bind(niceyaml.NewError("bad port", niceyaml.AtPath(paths.Current().Child("port"))))
+		err := keyed.Bind(yamltest.ErrorAt("bad port", "port"))
 
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, "f.yaml:5:7: $.port: bad port", err.Error())
-
-		got, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, yamltest.LineRange(4, 6, 10), got)
+		assert.Equal(t, yamltest.LineRange(4, 6, 10), yamltest.RangeOf(t, bound))
 
 		assert.Equal(t, stringtest.JoinLF(
 			"f.yaml:5:7: $.port: bad port",
@@ -4456,7 +4337,7 @@ func TestSource_Bind(t *testing.T) {
 		// The source holds two documents and Bind picks neither, so the
 		// error keeps its message and name and no position, and names the
 		// reason in place of the excerpt.
-		err := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
+		err := source.Bind(yamltest.ErrorAt("bad", "b"))
 
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, "two.yaml: $.b: bad", err.Error())
@@ -4475,45 +4356,53 @@ func TestSource_Bind(t *testing.T) {
 		), fmt.Sprintf("%+v", err))
 	})
 
-	t.Run("path error resolves in the one document beside an empty one", func(t *testing.T) {
+	t.Run("path error binds to the document Document returns", func(t *testing.T) {
 		t.Parallel()
 
 		// The empty documents do not count, so the path resolves in the
-		// document with content, wherever it sits in the file.
-		for input, want := range map[string]string{
-			"b: 2\n---\n":                            "one.yaml:1:4: $.b: bad",
-			stringtest.LinesLF("---", "---", "b: 2"): "one.yaml:3:4: $.b: bad",
-		} {
-			src := niceyaml.NewSourceFromString(input, niceyaml.WithName("one.yaml"))
-			err := src.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
-
-			doc := yamltest.Document(t, src)
-
-			bound := yamltest.RequireSourceError(t, err)
-			assert.Equal(t, want, err.Error())
-			assert.Same(t, doc, yamltest.BoundDocument(t, bound), input)
-			require.NoError(t, bound.Unresolved(), input)
+		// document with content, wherever it sits in the file. A stream of
+		// "..." markers alone holds one empty document, as an empty file
+		// does, so a path resolves in that document and finds nothing
+		// there.
+		tcs := map[string]struct {
+			input string
+			want  string
+			// The reason the path resolves to no range, when it does not.
+			unresolved error
+		}{
+			"empty document below": {
+				input: stringtest.LinesLF("b: 2", "---"),
+				want:  "one.yaml:1:4: $.b: bad",
+			},
+			"empty documents above": {
+				input: stringtest.LinesLF("---", "---", "b: 2"),
+				want:  "one.yaml:3:4: $.b: bad",
+			},
+			"stream of markers alone": {
+				input:      "...\n",
+				want:       "one.yaml: $.b: bad",
+				unresolved: paths.ErrNoDocument,
+			},
+			"empty file": {
+				input:      "",
+				want:       "one.yaml: $.b: bad",
+				unresolved: paths.ErrNoDocument,
+			},
 		}
-	})
 
-	t.Run("path error in a stream of markers alone binds as in an empty file", func(t *testing.T) {
-		t.Parallel()
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		// A stream of "..." markers alone holds one empty document, as an
-		// empty file does, so a path resolves in that document and finds
-		// nothing there.
-		for _, input := range []string{"...\n", ""} {
-			src := niceyaml.NewSourceFromString(input, niceyaml.WithName("none.yaml"))
-			err := src.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
+				src := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("one.yaml"))
+				err := src.Bind(yamltest.ErrorAt("bad", "b"))
+				require.EqualError(t, err, tc.want)
 
-			doc := yamltest.Document(t, src)
-
-			bound := yamltest.RequireSourceError(t, err)
-			assert.Same(t, doc, yamltest.BoundDocument(t, bound), input)
-
-			rangeErr := bound.Unresolved()
-			require.ErrorIs(t, rangeErr, paths.ErrNoDocument, input)
-			require.NotErrorIs(t, rangeErr, niceyaml.ErrPathNeedsDocument, input)
+				bound := yamltest.RequireSourceError(t, err)
+				assert.Same(t, yamltest.Document(t, src), yamltest.BoundDocument(t, bound))
+				require.ErrorIs(t, bound.Unresolved(), tc.unresolved)
+				require.NotErrorIs(t, bound.Unresolved(), niceyaml.ErrPathNeedsDocument)
+			})
 		}
 	})
 
@@ -4524,7 +4413,7 @@ func TestSource_Bind(t *testing.T) {
 		_, parseErr := broken.File()
 		require.Error(t, parseErr)
 
-		err := broken.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a"))))
+		err := broken.Bind(yamltest.ErrorAt("bad", "a"))
 
 		bound := yamltest.RequireSourceError(t, err)
 
@@ -4561,8 +4450,8 @@ func TestSource_Bind(t *testing.T) {
 		t.Parallel()
 
 		err := source.Bind(niceyaml.NewSummary("2 problems",
-			niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a"))),
-			niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b"))),
+			yamltest.ErrorAt("bad a", "a"),
+			yamltest.ErrorAt("bad b", "b"),
 		))
 
 		bound := yamltest.RequireSourceError(t, err)
@@ -4597,7 +4486,7 @@ func TestSource_Bind(t *testing.T) {
 
 		docs := source.Documents()
 
-		bound := docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
+		bound := docs[1].Bind(yamltest.ErrorAt("bad", "b"))
 		assert.Same(t, bound, source.Bind(bound))
 	})
 }
@@ -4700,10 +4589,7 @@ func TestNewSourceFromReader(t *testing.T) {
 //nolint:paralleltest // See above.
 func TestNewSourceFromFile(t *testing.T) {
 	dir := t.TempDir()
-	file := filepath.Join(dir, "configs", "app.yaml")
-
-	require.NoError(t, os.Mkdir(filepath.Dir(file), 0o700))
-	require.NoError(t, os.WriteFile(file, []byte("key: value\n"), 0o600))
+	file := yamltest.WriteFile(t, dir, "configs/app.yaml", "key: value\n")
 
 	t.Chdir(dir)
 
@@ -4777,7 +4663,8 @@ func TestSource_FS(t *testing.T) {
 
 	// A pointer compares by identity, so the test tells this file system
 	// from any other.
-	bundle := &fstest.MapFS{"configs/app.yaml": &fstest.MapFile{Data: []byte(text)}}
+	fsys := yamltest.MapFS(map[string]string{"configs/app.yaml": text})
+	bundle := &fsys
 
 	fromFS, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
 	require.NoError(t, err)
@@ -4842,9 +4729,7 @@ func TestSource_FS(t *testing.T) {
 func TestNewSourceFromFS(t *testing.T) {
 	t.Parallel()
 
-	fsys := fstest.MapFS{
-		"configs/app.yaml": &fstest.MapFile{Data: []byte("key: value\n")},
-	}
+	fsys := yamltest.MapFS(map[string]string{"configs/app.yaml": "key: value\n"})
 
 	t.Run("reads the file and sets its path", func(t *testing.T) {
 		t.Parallel()
@@ -4911,10 +4796,7 @@ func TestSource_Decode(t *testing.T) {
 		got, err := source.Decode[defaultsCafe](t.Context(), defaultsDecoding)
 		require.NoError(t, err)
 
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		want, err := doc.Decode[defaultsCafe](t.Context(), defaultsDecoding)
+		want, err := yamltest.Document(t, source).Decode[defaultsCafe](t.Context(), defaultsDecoding)
 		require.NoError(t, err)
 		assert.Equal(t, want, got)
 		assert.Equal(t, 40, got.Seats)
@@ -4935,19 +4817,25 @@ func TestSource_Decode(t *testing.T) {
 	t.Run("decodes the one document beside an empty one", func(t *testing.T) {
 		t.Parallel()
 
-		for _, input := range []string{
-			"name: a\n---\n",
-			stringtest.LinesLF("---", "# head", "---", "name: a"),
-		} {
-			source := niceyaml.NewSourceFromString(input)
+		tcs := map[string]string{
+			"empty document below":  stringtest.LinesLF("name: a", "---"),
+			"empty documents above": stringtest.LinesLF("---", "# head", "---", "name: a"),
+		}
 
-			got, err := source.Decode[config](t.Context())
-			require.NoError(t, err, input)
-			assert.Equal(t, config{Name: "a"}, got, input)
+		for name, input := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-			cfg := config{Name: "default"}
-			require.NoError(t, source.DecodeInto(t.Context(), &cfg), input)
-			assert.Equal(t, config{Name: "a"}, cfg, input)
+				source := niceyaml.NewSourceFromString(input)
+
+				got, err := source.Decode[config](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, config{Name: "a"}, got)
+
+				cfg := config{Name: "default"}
+				require.NoError(t, source.DecodeInto(t.Context(), &cfg))
+				assert.Equal(t, config{Name: "a"}, cfg)
+			})
 		}
 	})
 
@@ -4972,10 +4860,7 @@ func TestSource_Decode(t *testing.T) {
 		source := niceyaml.NewSourceFromString("name: [1]\n", niceyaml.WithName("x.yaml"))
 
 		_, err := source.Decode[config](t.Context())
-		require.Error(t, err)
-
-		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, source, bound.Source())
+		assert.Same(t, source, yamltest.RequireSourceError(t, err).Source())
 	})
 }
 
@@ -5222,7 +5107,7 @@ func TestWithReferences(t *testing.T) {
 				refs: []*niceyaml.Source{defaults},
 			},
 			"violation beside an alias to the reference": {
-				input: "name: 1\nserver: *base\n",
+				input: stringtest.LinesLF("name: 1", "server: *base"),
 				refs:  []*niceyaml.Source{defaults},
 				want:  []string{`app.yaml:1:7: $.name: expected "string", got "integer"`},
 			},
@@ -5287,8 +5172,7 @@ func TestWithReferences(t *testing.T) {
 		err := src.ValidateDocuments(t.Context(), serverSchema)
 		assert.Equal(t, want, bindingMessages(err))
 
-		docs := src.Documents()
-		require.Len(t, docs, 2)
+		docs := yamltest.Documents(t, src, 2)
 
 		_, err = docs[0].Decode[config](t.Context(), niceyaml.WithValidator(serverSchema))
 		require.NoError(t, err)
@@ -5300,7 +5184,7 @@ func TestWithReferences(t *testing.T) {
 	t.Run("anchors of the references", func(t *testing.T) {
 		t.Parallel()
 
-		first := niceyaml.NewSourceFromString("old: &old 1\nx: &x 1\n")
+		first := niceyaml.NewSourceFromString(stringtest.LinesLF("old: &old 1", "x: &x 1"))
 		second := niceyaml.NewSourceFromString("x: &x 2\n")
 		nested := niceyaml.NewSourceFromString("list: &list [*x, 3]\n", niceyaml.WithReferences(second))
 
@@ -5310,12 +5194,12 @@ func TestWithReferences(t *testing.T) {
 			want  map[string]any
 		}{
 			"later reference overrides an earlier one": {
-				input: "a: *old\nb: *x\n",
+				input: stringtest.LinesLF("a: *old", "b: *x"),
 				refs:  []*niceyaml.Source{first, second},
 				want:  map[string]any{"a": uint64(1), "b": uint64(2)},
 			},
 			"reference brings its own references": {
-				input: "a: *list\nb: *x\n",
+				input: stringtest.LinesLF("a: *list", "b: *x"),
 				refs:  []*niceyaml.Source{nested},
 				want:  map[string]any{"a": []any{uint64(2), uint64(3)}, "b": uint64(2)},
 			},
@@ -5325,7 +5209,7 @@ func TestWithReferences(t *testing.T) {
 				want:  map[string]any{"a": uint64(2)},
 			},
 			"anchor of the document before the alias wins": {
-				input: "x: &x 5\na: *x\n",
+				input: stringtest.LinesLF("x: &x 5", "a: *x"),
 				refs:  []*niceyaml.Source{second},
 				want:  map[string]any{"x": uint64(5), "a": uint64(5)},
 			},
@@ -5365,7 +5249,7 @@ func TestWithReferences(t *testing.T) {
 			X      int    `yaml:"x"`
 		}
 
-		list := niceyaml.NewSourceFromString("x: &x 1\nlist: &list [*x]\n")
+		list := niceyaml.NewSourceFromString(stringtest.LinesLF("x: &x 1", "list: &list [*x]"))
 
 		tcs := map[string]struct {
 			ref   *niceyaml.Source
@@ -5374,12 +5258,12 @@ func TestWithReferences(t *testing.T) {
 		}{
 			"anchor of the document before the alias": {
 				ref:   list,
-				input: "x: &x 9\nv: *list\n",
+				input: stringtest.LinesLF("x: &x 9", "v: *list"),
 				want:  target{X: 9, V: []int{1}},
 			},
 			"anchor of the document after the alias": {
 				ref:   list,
-				input: "v: *list\nx: &x 9\n",
+				input: stringtest.LinesLF("v: *list", "x: &x 9"),
 				want:  target{X: 9, V: []int{1}},
 			},
 			"alias of the document to its own anchor": {
@@ -5389,7 +5273,7 @@ func TestWithReferences(t *testing.T) {
 			},
 			"two anchors of the document": {
 				ref:   list,
-				input: "w: [&x 8, *x, &x 9, *x]\nv: *list\n",
+				input: stringtest.LinesLF("w: [&x 8, *x, &x 9, *x]", "v: *list"),
 				want:  target{V: []int{1}, W: []int{8, 8, 9, 9}},
 			},
 			"merge inside the reference": {
@@ -5481,8 +5365,8 @@ func TestWithReferences(t *testing.T) {
 
 		// The go-yaml decoder lets a `<<` merge key set a key the mapping
 		// holds above it.
-		doc := yamltest.FirstDocument(t, "kind: Deployment\n<<: *base\n",
-			niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {kind: Bogus}\n")))
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("kind: Deployment", "<<: *base"),
+			yamltest.References("base: &base {kind: Bogus}\n"))
 
 		got, err := doc.Decode[map[string]any](t.Context())
 		require.NoError(t, err)
@@ -5496,21 +5380,22 @@ func TestWithReferences(t *testing.T) {
 		// alias inside the list by name again for a typed target, after it
 		// has read every reference document, so it finds the second anchor.
 		tcs := map[string]struct {
-			refs []*niceyaml.Source
+			// The text of each reference.
+			refs []string
 		}{
 			"in one reference": {
-				refs: []*niceyaml.Source{
-					niceyaml.NewSourceFromString(stringtest.LinesLF(
+				refs: []string{
+					stringtest.LinesLF(
 						"x: &x 1",
 						"list: &list [*x]",
 						"y: &x 2",
-					)),
+					),
 				},
 			},
 			"in two references": {
-				refs: []*niceyaml.Source{
-					niceyaml.NewSourceFromString("x: &x 1\nlist: &list [*x]\n"),
-					niceyaml.NewSourceFromString("x: &x 2\n"),
+				refs: []string{
+					stringtest.LinesLF("x: &x 1", "list: &list [*x]"),
+					"x: &x 2\n",
 				},
 			},
 		}
@@ -5519,7 +5404,7 @@ func TestWithReferences(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, "v: *list\n", niceyaml.WithReferences(tc.refs...))
+				doc := yamltest.FirstDocument(t, "v: *list\n", yamltest.References(tc.refs...))
 
 				untyped, err := doc.Decode[map[string]any](t.Context())
 				require.NoError(t, err)
@@ -5535,11 +5420,10 @@ func TestWithReferences(t *testing.T) {
 	t.Run("references serve every decode from any goroutine", func(t *testing.T) {
 		t.Parallel()
 
-		docs := niceyaml.NewSourceFromString(
+		docs := yamltest.Documents(t, niceyaml.NewSourceFromString(
 			stringtest.LinesLF("b: *x", "---", "c: *x"),
-			niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
-		).Documents()
-		require.Len(t, docs, 2)
+			yamltest.References("base: &x 1\n"),
+		), 2)
 
 		var wg sync.WaitGroup
 
@@ -5560,7 +5444,7 @@ func TestWithReferences(t *testing.T) {
 	t.Run("a path resolves in the document alone", func(t *testing.T) {
 		t.Parallel()
 
-		src := niceyaml.NewSourceFromString("name: app\nserver: *base\n",
+		src := niceyaml.NewSourceFromString(stringtest.LinesLF("name: app", "server: *base"),
 			niceyaml.WithName("app.yaml"),
 			niceyaml.WithReferences(defaults),
 		)
@@ -5652,9 +5536,9 @@ func TestWithReferences(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, "name: app\nserver: *base\n",
+				doc := yamltest.FirstDocument(t, stringtest.LinesLF("name: app", "server: *base"),
 					niceyaml.WithName("app.yaml"),
-					niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.reference)),
+					yamltest.References(tc.reference),
 				)
 
 				_, err := doc.Decode[target](t.Context(), niceyaml.WithValidator(tc.validator))
@@ -5675,10 +5559,7 @@ func TestWithReferences(t *testing.T) {
 				require.True(t, ok)
 				assert.Equal(t, paths.Doc().Child("server"), near)
 				require.ErrorIs(t, bound.Unresolved(), paths.ErrAlias)
-
-				path, ok := bound.Path()
-				require.True(t, ok)
-				assert.Equal(t, paths.Doc().Child("server", "port"), path)
+				assert.Equal(t, paths.Doc().Child("server", "port"), yamltest.PathOf(t, bound))
 			})
 		}
 	})
@@ -5689,12 +5570,12 @@ func TestWithReferences(t *testing.T) {
 		// The merge sets no kind, so the decode keeps the misspelled one.
 		// The document cannot tell, so a caret under the alias would point
 		// one line below the typo.
-		doc := yamltest.FirstDocument(t, "kind: Deploymnet\n<<: *base\n",
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("kind: Deploymnet", "<<: *base"),
 			niceyaml.WithName("app.yaml"),
-			niceyaml.WithReferences(niceyaml.NewSourceFromString(stringtest.LinesLF(
+			yamltest.References(stringtest.LinesLF(
 				"base: &base",
 				"  replicas: 1",
-			))),
+			)),
 		)
 
 		kinds := schema.MustCompile([]byte(`{"properties": {"kind": {"enum": ["Deployment", "Service"]}}}`))
@@ -5720,22 +5601,18 @@ func TestWithReferences(t *testing.T) {
 		// A program reads each file of a directory into a Source, in the
 		// order it picks, and an anchor of a later file wins a name two
 		// files define.
-		fsys := fstest.MapFS{
-			"refs/a.yaml": &fstest.MapFile{
-				Data: []byte(stringtest.LinesLF(
-					"base: &base",
-					"  port: 80",
-				)),
-			},
-			"refs/b.yaml": &fstest.MapFile{
-				Data: []byte(stringtest.LinesLF(
-					"base: &base",
-					"  port: 443",
-					"name: &name api",
-				)),
-			},
-			"refs/note.md": &fstest.MapFile{Data: []byte("no reference")},
-		}
+		fsys := yamltest.MapFS(map[string]string{
+			"refs/a.yaml": stringtest.LinesLF(
+				"base: &base",
+				"  port: 80",
+			),
+			"refs/b.yaml": stringtest.LinesLF(
+				"base: &base",
+				"  port: 443",
+				"name: &name api",
+			),
+			"refs/note.md": "no reference",
+		})
 
 		names, err := fs.Glob(fsys, "refs/*.yaml")
 		require.NoError(t, err)
@@ -5749,7 +5626,11 @@ func TestWithReferences(t *testing.T) {
 			refs = append(refs, ref)
 		}
 
-		doc := yamltest.FirstDocument(t, "name: *name\nserver: *base\n", niceyaml.WithReferences(refs...))
+		doc := yamltest.FirstDocument(
+			t,
+			stringtest.LinesLF("name: *name", "server: *base"),
+			niceyaml.WithReferences(refs...),
+		)
 
 		got, err := doc.Decode[config](t.Context(), niceyaml.WithValidator(serverSchema))
 		require.NoError(t, err)
@@ -5759,8 +5640,7 @@ func TestWithReferences(t *testing.T) {
 	t.Run("reference that does not parse fails every decode", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "a: 1\n",
-			niceyaml.WithReferences(niceyaml.NewSourceFromString("x: [\n")))
+		doc := yamltest.FirstDocument(t, "a: 1\n", yamltest.References("x: [\n"))
 
 		_, err := doc.Decode[map[string]int](t.Context())
 		require.ErrorContains(t, err, unclosedSequence)
@@ -5776,7 +5656,7 @@ type minPort struct {
 // Validate implements [niceyaml.SelfValidator].
 func (s minPort) Validate() error {
 	if s.Port < 1 {
-		return niceyaml.NewError("port must be at least 1", niceyaml.AtPath(paths.Current().Child("port")))
+		return yamltest.ErrorAt("port must be at least 1", "port")
 	}
 
 	return nil
@@ -6559,10 +6439,9 @@ func TestWithAliasLimit(t *testing.T) {
 	t.Run("every document of the source", func(t *testing.T) {
 		t.Parallel()
 
-		docs := niceyaml.NewSourceFromString(bomb+"---\n"+bomb, niceyaml.WithAliasLimit(false)).Documents()
-		require.Len(t, docs, 2)
+		source := niceyaml.NewSourceFromString(bomb+"---\n"+bomb, niceyaml.WithAliasLimit(false))
 
-		for _, doc := range docs {
+		for _, doc := range yamltest.Documents(t, source, 2) {
 			require.NoError(t, decode(niceyaml.WithValidator(shape))(t.Context(), doc))
 		}
 	})
@@ -6603,24 +6482,38 @@ func TestSource_Documents(t *testing.T) {
 		b: 2
 	`), niceyaml.WithFilePath("two.yaml"))
 
-	docs := source.Documents()
-	require.Len(t, docs, 2)
+	// The file holds no empty document, so both methods return its two
+	// documents.
+	tcs := map[string]struct {
+		docs func() []*niceyaml.Node
+	}{
+		"Documents":    {docs: source.Documents},
+		"AllDocuments": {docs: source.AllDocuments},
+	}
 
-	second := docs[1]
-	assert.Equal(t, 1, second.DocumentIndex())
-	assert.Equal(t, "two.yaml", second.FilePath())
-	assert.Same(t, source, second.Source())
-	assert.NotNil(t, second.Tokens())
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	// Every call hands out the same root Node for an index, in a slice of
-	// its own.
-	again := source.Documents()
-	assert.Same(t, second, again[1])
+			docs := tc.docs()
+			require.Len(t, docs, 2)
 
-	again[1] = nil
+			second := docs[1]
+			assert.Equal(t, 1, second.DocumentIndex())
+			assert.Equal(t, "two.yaml", second.FilePath())
+			assert.Same(t, source, second.Source())
+			assert.NotNil(t, second.Tokens())
 
-	third := source.Documents()
-	assert.Same(t, second, third[1])
+			// Every call hands out the same root Node for an index, in a
+			// slice of its own.
+			again := tc.docs()
+			assert.Same(t, second, again[1])
+
+			again[1] = nil
+
+			assert.Same(t, second, tc.docs()[1])
+		})
+	}
 }
 
 func TestSource_Document(t *testing.T) {
@@ -6697,7 +6590,7 @@ func TestSource_Document(t *testing.T) {
 				want:  map[string]int{"a": 1},
 			},
 			"trailing header": {
-				input: "b: 2\n---\n",
+				input: stringtest.LinesLF("b: 2", "---"),
 				want:  map[string]int{"b": 2},
 			},
 			"comment below a trailing header": {
@@ -6746,10 +6639,7 @@ func TestSource_Document(t *testing.T) {
 				assert.Equal(t, tc.index, doc.DocumentIndex())
 				assert.Same(t, source.AllDocuments()[tc.index], doc)
 				assert.Equal(t, tc.want == nil, doc.IsEmpty())
-
-				docs := source.Documents()
-				require.Len(t, docs, 1)
-				assert.Same(t, docs[0], doc)
+				assert.Same(t, yamltest.Documents(t, source, 1)[0], doc)
 
 				got, err := source.Decode[map[string]int](t.Context())
 				require.NoError(t, err)
@@ -6797,11 +6687,8 @@ func TestSource_Document(t *testing.T) {
 
 				source := niceyaml.NewSourceFromString(tc.input)
 
-				docs := source.Documents()
-				require.Len(t, docs, 1)
-
 				doc := yamltest.Document(t, source)
-				assert.Same(t, docs[0], doc)
+				assert.Same(t, yamltest.Documents(t, source, 1)[0], doc)
 
 				file, err := source.File()
 				require.NoError(t, err)
@@ -6818,18 +6705,6 @@ func TestSource_Document(t *testing.T) {
 				assert.Nil(t, got)
 			})
 		}
-	})
-
-	t.Run("returns the parse error", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("a: [")
-
-		_, err := source.Document()
-		require.Error(t, err)
-
-		_, fileErr := source.File()
-		assert.Equal(t, fileErr, err)
 	})
 }
 
@@ -6851,9 +6726,7 @@ func TestWithByteLimit(t *testing.T) {
 		assert.Equal(t, "big.yaml: file is larger than 1 KiB", err.Error())
 		assert.True(t, niceyaml.IsInvalid(err))
 
-		docs := source.Documents()
-		require.Len(t, docs, 1)
-		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrLimit)
+		require.ErrorIs(t, yamltest.Documents(t, source, 1)[0].Err(), niceyaml.ErrLimit)
 
 		_, err = source.Decode[map[string]any](t.Context())
 		require.ErrorIs(t, err, niceyaml.ErrLimit)
@@ -6862,20 +6735,14 @@ func TestWithByteLimit(t *testing.T) {
 	t.Run("a limit of zero turns the check off", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(0))
-
-		_, err := source.Document()
-		require.NoError(t, err)
+		yamltest.Document(t, niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(0)))
 	})
 
 	t.Run("readers stop one byte past the limit", func(t *testing.T) {
 		t.Parallel()
 
-		dir := t.TempDir()
-		path := filepath.Join(dir, "big.yaml")
-		require.NoError(t, os.WriteFile(path, []byte(text), 0o600))
-
-		fsys := fstest.MapFS{"big.yaml": &fstest.MapFile{Data: []byte(text)}}
+		path := yamltest.WriteFile(t, t.TempDir(), "big.yaml", text)
+		fsys := yamltest.MapFS(map[string]string{"big.yaml": text})
 
 		tcs := map[string]struct {
 			read func() (*niceyaml.Source, error)
@@ -6914,8 +6781,7 @@ func TestWithByteLimit(t *testing.T) {
 			niceyaml.NewSourceFromString(other, niceyaml.WithByteLimit(1024)),
 		)
 
-		_, err := merged.Document()
-		require.NoError(t, err)
+		yamltest.Document(t, merged)
 	})
 
 	t.Run("a reference past the limit fails every decode", func(t *testing.T) {
@@ -6964,11 +6830,15 @@ func TestWithDepthLimit(t *testing.T) {
 			want:  "deep.yaml:3:3: document nests more than 3 levels",
 		},
 		"block mappings within a limit": {
-			input: "a:\n  b:\n    c: 1\n",
+			input: stringtest.LinesLF(
+				"a:",
+				"  b:",
+				"    c: 1",
+			),
 			limit: 3,
 		},
 		"an alias opens no level": {
-			input: "a: &a [[1]]\nb: [*a, *a]\n",
+			input: stringtest.LinesLF("a: &a [[1]]", "b: [*a, *a]"),
 			limit: 3,
 		},
 		"a limit of zero turns the check off": {
@@ -7005,10 +6875,12 @@ func TestWithDepthLimit(t *testing.T) {
 	t.Run("the other documents still parse", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("a: [[[1]]]\n---\nb: 1\n", niceyaml.WithDepthLimit(2))
+		source := niceyaml.NewSourceFromString(
+			stringtest.LinesLF("a: [[[1]]]", "---", "b: 1"),
+			niceyaml.WithDepthLimit(2),
+		)
 
-		docs := source.Documents()
-		require.Len(t, docs, 2)
+		docs := yamltest.Documents(t, source, 2)
 		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrLimit)
 		require.NoError(t, docs[1].Err())
 	})
@@ -7016,7 +6888,7 @@ func TestWithDepthLimit(t *testing.T) {
 	t.Run("a reference past the limit fails every decode", func(t *testing.T) {
 		t.Parallel()
 
-		ref := niceyaml.NewSourceFromString("base: &base {port: 1}\ndeep: [[[1]]]\n",
+		ref := niceyaml.NewSourceFromString(stringtest.LinesLF("base: &base {port: 1}", "deep: [[[1]]]"),
 			niceyaml.WithName("ref.yaml"), niceyaml.WithDepthLimit(2))
 		source := niceyaml.NewSourceFromString("server: *base\n", niceyaml.WithReferences(ref))
 

@@ -25,8 +25,7 @@ func BenchmarkNewErrorReport(b *testing.B) {
 		// touches every source.
 		children := make([]error, 0, n)
 		for i := range n {
-			child := niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child(fmt.Sprintf("key_%d", i))))
-			children = append(children, sources[i%k].Bind(child))
+			children = append(children, sources[i%k].Bind(yamltest.ErrorAt("bad", fmt.Sprintf("key_%d", i))))
 		}
 
 		bound := yamltest.RequireSourceError(b, sources[0].Bind(niceyaml.NewError("root",
@@ -46,15 +45,14 @@ func BenchmarkNewErrorReport(b *testing.B) {
 func BenchmarkErrorTree_LeftDeepJoin(b *testing.B) {
 	const n = 10000
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 
 	// A loop that joins each new error onto the ones before nests each
 	// join in the next.
 	var joined error
 
 	for i := range n {
-		joined = errors.Join(joined, niceyaml.NewError(fmt.Sprintf("error %d", i),
-			niceyaml.AtPath(paths.Current().Child("a"))))
+		joined = errors.Join(joined, yamltest.ErrorAt(fmt.Sprintf("error %d", i), "a"))
 	}
 
 	tcs := map[string]error{
