@@ -11,7 +11,7 @@ require (
 	github.com/goccy/go-yaml v1.19.3-0.20260407131736-edee2f91616c
 	github.com/lucasb-eyer/go-colorful v1.4.1
 	github.com/stretchr/testify v1.12.1
-	go.jacobcolvin.com/x/jsonschema v0.3.0
+	go.jacobcolvin.com/x/jsonschema v0.4.0
 	go.jacobcolvin.com/x/stringtest v0.2.0
 	golang.org/x/sync v0.24.0
 	golang.org/x/text v0.43.0
