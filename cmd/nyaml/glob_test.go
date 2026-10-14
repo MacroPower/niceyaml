@@ -13,21 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
-// writeFile writes content to the file name in dir and returns the path
-// of the file.
-func writeFile(t *testing.T, dir, name, content string) string {
-	t.Helper()
-
-	path := filepath.Join(dir, name)
-	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
-
-	return path
-}
-
-// makeDir creates the directory that elem names under dir, with any parent
-// it lacks, and returns the path of the directory.
+// makeDir creates the empty directory that elem names under dir, with any
+// parent it lacks, and returns the path of the directory.
 func makeDir(t *testing.T, dir string, elem ...string) string {
 	t.Helper()
 
@@ -37,6 +27,10 @@ func makeDir(t *testing.T, dir string, elem ...string) string {
 	return path
 }
 
+// fixedMTime is the modification time that tests give files whose
+// modification times must match.
+var fixedMTime = time.Date(2024, 1, 2, 3, 4, 5, 6, time.UTC)
+
 func TestContainsGlobChars(t *testing.T) {
 	t.Parallel()
 
@@ -44,38 +38,14 @@ func TestContainsGlobChars(t *testing.T) {
 		input string
 		want  bool
 	}{
-		"asterisk": {
-			input: "*.yaml",
-			want:  true,
-		},
-		"question mark": {
-			input: "file?.yaml",
-			want:  true,
-		},
-		"bracket": {
-			input: "file[0-9].yaml",
-			want:  true,
-		},
-		"multiple globs": {
-			input: "**/[a-z]*.yaml",
-			want:  true,
-		},
-		"brace alternation": {
-			input: "{a,b}.yaml",
-			want:  true,
-		},
-		"no glob chars": {
-			input: "file.yaml",
-			want:  false,
-		},
-		"empty string": {
-			input: "",
-			want:  false,
-		},
-		"path without globs": {
-			input: "/path/to/file.yaml",
-			want:  false,
-		},
+		"asterisk":           {input: "*.yaml", want: true},
+		"question mark":      {input: "file?.yaml", want: true},
+		"bracket":            {input: "file[0-9].yaml", want: true},
+		"multiple globs":     {input: "**/[a-z]*.yaml", want: true},
+		"brace alternation":  {input: "{a,b}.yaml", want: true},
+		"no glob chars":      {input: "file.yaml", want: false},
+		"empty string":       {input: "", want: false},
+		"path without globs": {input: "/path/to/file.yaml", want: false},
 	}
 
 	for name, tc := range tcs {
@@ -97,32 +67,30 @@ func TestExpand(t *testing.T) {
 	// Create test files with predictable names for sorting.
 	// The files share one size and modification time, so telling them
 	// apart takes more than those two.
-	mtime := time.Date(2024, 1, 2, 3, 4, 5, 6, time.UTC)
-
 	files := []string{"002.yaml", "000.yaml", "001.yaml"}
 	for _, name := range files {
-		path := writeFile(t, tmpDir, name, "test")
-		require.NoError(t, os.Chtimes(path, mtime, mtime))
+		path := yamltest.WriteFile(t, tmpDir, name, "test")
+		require.NoError(t, os.Chtimes(path, fixedMTime, fixedMTime))
 	}
 
 	// Create a subdirectory with a file for recursive glob testing, and
 	// one whose path sorts between the files above it, which a directory
 	// walk reports after them.
-	subdir := makeDir(t, tmpDir, "subdir")
-	writeFile(t, subdir, "003.yaml", "test")
-	writeFile(t, makeDir(t, tmpDir, "000dir"), "x.yaml", "test")
+	subdir := filepath.Join(tmpDir, "subdir")
+	yamltest.WriteFile(t, tmpDir, "subdir/003.yaml", "test")
+	yamltest.WriteFile(t, tmpDir, "000dir/x.yaml", "test")
 
 	// Create a file whose name contains a glob metacharacter, and one its
 	// name matches when read as a pattern.
-	bracketFile := writeFile(t, tmpDir, "cfg[1].txt", "test")
-	writeFile(t, tmpDir, "cfg1.txt", "test")
+	bracketFile := yamltest.WriteFile(t, tmpDir, "cfg[1].txt", "test")
+	yamltest.WriteFile(t, tmpDir, "cfg1.txt", "test")
 
 	// Create a directory whose name contains a glob metacharacter.
 	bracketDir := makeDir(t, tmpDir, "data[1]")
 
 	// Create a file whose name is no valid pattern, out of the way of the
 	// wildcard cases.
-	strayFile := writeFile(t, makeDir(t, tmpDir, "stray"), "report[2024.txt", "test")
+	strayFile := yamltest.WriteFile(t, tmpDir, "stray/report[2024.txt", "test")
 
 	tcs := map[string]struct {
 		args      []string
@@ -232,11 +200,13 @@ func TestExpand(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-			require.Len(t, paths, len(tc.wantNames))
 
-			for i, path := range paths {
-				assert.Equal(t, tc.wantNames[i], filepath.Base(path))
+			names := make([]string, 0, len(paths))
+			for _, path := range paths {
+				names = append(names, filepath.Base(path))
 			}
+
+			assert.Equal(t, tc.wantNames, names)
 		})
 	}
 }
@@ -275,18 +245,15 @@ func TestExpandPathsSymlinks(t *testing.T) {
 
 	makeDir(t, subdir, "deep")
 
-	target := writeFile(t, subdir, "x.yaml", "x")
-	top := writeFile(t, tmpDir, "x.yaml", "top")
+	target := yamltest.WriteFile(t, subdir, "x.yaml", "x")
+	top := yamltest.WriteFile(t, tmpDir, "x.yaml", "top")
 
-	err := os.Symlink(filepath.Join("sub", "x.yaml"), link)
-	if err != nil {
-		t.Skipf("symlinks unsupported: %v", err)
-	}
+	yamltest.SymlinkOrSkip(t, filepath.Join("sub", "x.yaml"), link)
 
 	require.NoError(t, os.Symlink("missing.yaml", dangling))
 	require.NoError(t, os.Symlink("sub", filepath.Join(tmpDir, "ldir")))
 	require.NoError(t, os.Symlink(filepath.Join("sub", "deep"), filepath.Join(tmpDir, "deeplink")))
-	writeFile(t, tmpDir, "cfg1.txt", "cfg")
+	yamltest.WriteFile(t, tmpDir, "cfg1.txt", "cfg")
 	require.NoError(t, os.Symlink("missing.txt", danglingMeta))
 	require.NoError(t, os.Symlink("missing.txt", danglingMetaAlone))
 
@@ -354,8 +321,6 @@ func TestExpandPathsSymlinks(t *testing.T) {
 func TestFileSet(t *testing.T) {
 	t.Parallel()
 
-	mtime := time.Date(2024, 1, 2, 3, 4, 5, 6, time.UTC)
-
 	tcs := map[string]struct {
 		// The second func changes the file at first, or creates another
 		// file, and returns the name to add next.
@@ -379,7 +344,7 @@ func TestFileSet(t *testing.T) {
 				require.NoError(t, err)
 				require.NoError(t, f.Close())
 
-				later := mtime.Add(time.Hour)
+				later := fixedMTime.Add(time.Hour)
 				require.NoError(t, os.Chtimes(first, later, later))
 
 				return first
@@ -390,8 +355,8 @@ func TestFileSet(t *testing.T) {
 			second: func(t *testing.T, first string) string {
 				t.Helper()
 
-				other := writeFile(t, filepath.Dir(first), "b.yaml", "a: 1\n")
-				require.NoError(t, os.Chtimes(other, mtime, mtime))
+				other := yamltest.WriteFile(t, filepath.Dir(first), "b.yaml", "a: 1\n")
+				require.NoError(t, os.Chtimes(other, fixedMTime, fixedMTime))
 
 				return other
 			},
@@ -403,8 +368,8 @@ func TestFileSet(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			first := writeFile(t, t.TempDir(), "a.yaml", "a: 1\n")
-			require.NoError(t, os.Chtimes(first, mtime, mtime))
+			first := yamltest.WriteFile(t, t.TempDir(), "a.yaml", "a: 1\n")
+			require.NoError(t, os.Chtimes(first, fixedMTime, fixedMTime))
 
 			var set fileSet
 
@@ -436,14 +401,16 @@ func TestGlob(t *testing.T) {
 	//   k8s/
 	//     deploy.yaml
 	subdir := filepath.Join(tmpDir, "subdir")
-	subdirDeep := makeDir(t, subdir, "deep")
-	k8sDir := makeDir(t, tmpDir, "k8s")
+	subdirDeep := filepath.Join(subdir, "deep")
+	k8sDir := filepath.Join(tmpDir, "k8s")
 
-	writeFile(t, tmpDir, "a.yaml", "a")
-	writeFile(t, tmpDir, "b.yml", "b")
-	writeFile(t, subdir, "c.yaml", "c")
-	writeFile(t, subdirDeep, "d.yaml", "d")
-	writeFile(t, k8sDir, "deploy.yaml", "k8s")
+	yamltest.WriteFiles(t, tmpDir, map[string]string{
+		"a.yaml":             "a",
+		"b.yml":              "b",
+		"subdir/c.yaml":      "c",
+		"subdir/deep/d.yaml": "d",
+		"k8s/deploy.yaml":    "k8s",
+	})
 
 	tcs := map[string]struct {
 		pattern   string
@@ -614,13 +581,15 @@ func TestGlobEscapes(t *testing.T) {
 	//   b\s/
 	//     y.yaml
 	tmpDir := t.TempDir()
-	commaDir := makeDir(t, tmpDir, "d,e")
-	backslashDir := makeDir(t, tmpDir, `b\s`)
+	commaDir := filepath.Join(tmpDir, "d,e")
+	backslashDir := tmpDir + `/b\s`
 
-	writeFile(t, tmpDir, "a,b.yaml", "a")
-	writeFile(t, tmpDir, "c.yaml", "c")
-	writeFile(t, commaDir, "x.yaml", "x")
-	writeFile(t, backslashDir, "y.yaml", "y")
+	yamltest.WriteFiles(t, tmpDir, map[string]string{
+		"a,b.yaml":   "a",
+		"c.yaml":     "c",
+		"d,e/x.yaml": "x",
+		`b\s/y.yaml`: "y",
+	})
 
 	tcs := map[string]struct {
 		pattern   string
@@ -691,12 +660,9 @@ func TestGlobSymlinks(t *testing.T) {
 	subdir := filepath.Join(tmpDir, "sub")
 
 	makeDir(t, subdir, "deep")
-	writeFile(t, subdir, "x.yaml", "x")
+	yamltest.WriteFile(t, subdir, "x.yaml", "x")
 
-	err := os.Symlink("..", filepath.Join(subdir, "up"))
-	if err != nil {
-		t.Skipf("symlinks unsupported: %v", err)
-	}
+	yamltest.SymlinkOrSkip(t, "..", filepath.Join(subdir, "up"))
 
 	require.NoError(t, os.Symlink("..", filepath.Join(subdir, "up2")))
 	require.NoError(t, os.Symlink("sub", filepath.Join(tmpDir, "dir.yaml")))

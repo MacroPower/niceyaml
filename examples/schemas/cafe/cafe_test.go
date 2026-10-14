@@ -41,6 +41,16 @@ func violationPaths(err error) []string {
 	return got
 }
 
+// edited returns in with its first from replaced by to. The test fails
+// when in holds no from, as it would after the default config changes.
+func edited(t *testing.T, in, from, to string) string {
+	t.Helper()
+
+	require.Contains(t, in, from)
+
+	return strings.Replace(in, from, to, 1)
+}
+
 func TestCafeDefaultConfig(t *testing.T) {
 	t.Parallel()
 
@@ -106,8 +116,7 @@ func TestCafeSLA(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			in := strings.Replace(cafe.DefaultYAML, "sla: 15m", "sla: "+tc.sla, 1)
-			require.Contains(t, in, "sla: "+tc.sla)
+			in := edited(t, cafe.DefaultYAML, "sla: 15m", "sla: "+tc.sla)
 
 			_, err := cafeConfig(t.Context(), in)
 			if !tc.err {
@@ -149,13 +158,8 @@ func TestCafeHours(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			open := `open: "` + tc.open + `"`
-			closing := `close: "` + tc.close + `"`
-
-			in := strings.Replace(cafe.DefaultYAML, `open: "07:00"`, open, 1)
-			in = strings.Replace(in, `close: "19:00"`, closing, 1)
-			require.Contains(t, in, open)
-			require.Contains(t, in, closing)
+			in := edited(t, cafe.DefaultYAML, `open: "07:00"`, `open: "`+tc.open+`"`)
+			in = edited(t, in, `close: "19:00"`, `close: "`+tc.close+`"`)
 
 			_, err := cafeConfig(t.Context(), in)
 			if !tc.err {

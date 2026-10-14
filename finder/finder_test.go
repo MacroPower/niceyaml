@@ -15,7 +15,6 @@ import (
 	"golang.org/x/text/transform"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -115,42 +114,42 @@ func TestFinder_Find(t *testing.T) {
 			want:       position.Ranges{yamltest.LineRange(0, 6, 11)},
 		},
 		"with normalizer - kana voicing mark distinguishes": {
-			input:      "name: ガ",
-			search:     "カ",
+			input:      "name: \u30ac",
+			search:     "\u30ab",
 			normalizer: normalizer.New(),
 		},
 		"with normalizer - kana voicing mark distinguishes decomposed source": {
-			input:      "name: ガ",
-			search:     "カ",
+			input:      "name: \u30ab\u3099",
+			search:     "\u30ab",
 			normalizer: normalizer.New(),
 		},
 		"with normalizer - katakana precomposed source, decomposed search": {
-			input:      "name: ガ",
-			search:     "ガ",
+			input:      "name: \u30ac",
+			search:     "\u30ab\u3099",
 			normalizer: normalizer.New(),
 			want:       position.Ranges{yamltest.LineRange(0, 6, 7)},
 		},
 		"with normalizer - katakana decomposed source, precomposed search": {
-			input:      "name: ガ",
-			search:     "ガ",
+			input:      "name: \u30ab\u3099",
+			search:     "\u30ac",
 			normalizer: normalizer.New(),
 			want:       position.Ranges{yamltest.LineRange(0, 6, 8)},
 		},
 		"with normalizer - hiragana decomposed source, precomposed search": {
-			input:      "name: が",
-			search:     "が",
+			input:      "name: \u304b\u3099",
+			search:     "\u304c",
 			normalizer: normalizer.New(),
 			want:       position.Ranges{yamltest.LineRange(0, 6, 8)},
 		},
 		"with normalizer - hangul precomposed source, decomposed search": {
-			input:      "name: 한국",
-			search:     "한국",
+			input:      "name: \ud55c\uad6d",
+			search:     "\u1112\u1161\u11ab\u1100\u116e\u11a8",
 			normalizer: normalizer.New(),
 			want:       position.Ranges{yamltest.LineRange(0, 6, 8)},
 		},
 		"with normalizer - hangul decomposed source, precomposed search": {
-			input:      "name: 한국",
-			search:     "한국",
+			input:      "name: \u1112\u1161\u11ab\u1100\u116e\u11a8",
+			search:     "\ud55c\uad6d",
 			normalizer: normalizer.New(),
 			want:       position.Ranges{yamltest.LineRange(0, 6, 12)},
 		},
@@ -184,7 +183,7 @@ func TestFinder_Find(t *testing.T) {
 			exact:  true,
 		},
 		"exact matching - match covers a trailing combining mark": {
-			input:  "name: café",
+			input:  "name: cafe\u0301",
 			search: "cafe",
 			exact:  true,
 			want:   position.Ranges{yamltest.LineRange(0, 6, 11)},
@@ -308,7 +307,7 @@ func TestFinder_Find(t *testing.T) {
 			},
 		},
 		"special yaml chars in search": {
-			input:  "text: \"[not] {a} list\"",
+			input:  `text: "[not] {a} list"`,
 			search: "[not]",
 			want:   position.Ranges{yamltest.LineRange(0, 7, 12)},
 		},
@@ -324,12 +323,12 @@ func TestFinder_Find(t *testing.T) {
 		// The loaded text reads every line ending as "\n", so a search string
 		// copied out of a CRLF file, line ending included, still matches.
 		"CRLF source - CRLF search": {
-			input:  "a: 1\r\nb: 2\r\n",
+			input:  stringtest.LinesCRLF("a: 1", "b: 2"),
 			search: "1\r\nb",
 			want:   position.Ranges{position.NewRange(position.New(0, 3), position.New(1, 1))},
 		},
 		"CRLF source - LF search": {
-			input:  "a: 1\r\nb: 2\r\n",
+			input:  stringtest.LinesCRLF("a: 1", "b: 2"),
 			search: "1\nb",
 			want:   position.Ranges{position.NewRange(position.New(0, 3), position.New(1, 1))},
 		},
@@ -337,7 +336,7 @@ func TestFinder_Find(t *testing.T) {
 		// must yield no matches rather than match at every offset.
 		"search that normalizes to empty": {
 			input:      "key: value\n",
-			search:     "́",
+			search:     "\u0301",
 			normalizer: normalizer.New(),
 		},
 		// The accent is a combining mark that belongs to the "e" before it, and
@@ -345,13 +344,13 @@ func TestFinder_Find(t *testing.T) {
 		// as a match ending inside an expansion covers the whole character, so
 		// the highlight ends where the next character begins.
 		"match ending at a dropped combining mark": {
-			input:      "k: caféx\n",
-			search:     "café",
+			input:      "k: cafe\u0301x\n",
+			search:     "caf\u00e9",
 			normalizer: normalizer.New(),
 			want:       position.Ranges{yamltest.LineRange(0, 3, 8)},
 		},
 		"match starting at a character with a dropped combining mark": {
-			input:      "k: caféx\n",
+			input:      "k: cafe\u0301x\n",
 			search:     "ex",
 			normalizer: normalizer.New(),
 			want:       position.Ranges{yamltest.LineRange(0, 6, 9)},
@@ -475,31 +474,7 @@ func TestFinder_Find(t *testing.T) {
 	}
 }
 
-func TestFinder_Find_NilLines(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		lines line.Sequence
-	}{
-		"zero lines":              {lines: line.Lines{}},
-		"nil sequence":            {lines: nil},
-		"nil view":                {lines: (*line.View)(nil)},
-		"nil pointer to lines":    {lines: (*line.Lines)(nil)},
-		"view that holds no line": {lines: niceyaml.NewSourceFromString("test: 1\n").View().Slice(position.Span{})},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			idx := finder.New().Load(tc.lines)
-
-			assert.Nil(t, idx.Find("test"))
-		})
-	}
-}
-
-func TestFinder_Find_View(t *testing.T) {
+func TestFinder_Load(t *testing.T) {
 	t.Parallel()
 
 	// The first document holds lines 0 and 1 of the file, and the second
@@ -511,9 +486,7 @@ func TestFinder_Find_View(t *testing.T) {
 		"name: x",
 		"port: 80",
 	))
-
-	docs := source.Documents()
-	require.Len(t, docs, 2)
+	docs := yamltest.Documents(t, source, 2)
 
 	// The view skips lines 1 and 2.
 	gapped := source.View().Slice(position.NewSpan(0, 1), position.NewSpan(3, 5))
@@ -529,8 +502,8 @@ func TestFinder_Find_View(t *testing.T) {
 
 	// The unified diff holds nine rows, and its hunks hold rows 0 and 1,
 	// where k1 changed, and rows 7 and 8, where k7 changed.
-	hunks := diff.Diff(
-		niceyaml.NewSourceFromString(stringtest.LinesLF(
+	hunks := yamltest.Diff(
+		stringtest.LinesLF(
 			"k1: a",
 			"k2: b",
 			"k3: c",
@@ -538,8 +511,8 @@ func TestFinder_Find_View(t *testing.T) {
 			"k5: e",
 			"k6: f",
 			"k7: g",
-		)).Lines(),
-		niceyaml.NewSourceFromString(stringtest.LinesLF(
+		),
+		stringtest.LinesLF(
 			"k1: A",
 			"k2: b",
 			"k3: c",
@@ -547,180 +520,139 @@ func TestFinder_Find_View(t *testing.T) {
 			"k5: e",
 			"k6: f",
 			"k7: G",
-		)).Lines(),
+		),
 	).Hunks(0)
 	require.Equal(t, 4, hunks.Count())
 
 	// The host shares line 2 of the file with the port beside it.
-	flow := niceyaml.NewSourceFromString(stringtest.LinesLF(
+	flow := yamltest.Documents(t, niceyaml.NewSourceFromString(stringtest.LinesLF(
 		"top: 1",
 		"---",
 		"server: {host: h, port: 80}",
 		"port: 1",
-	)).Documents()
-	require.Len(t, flow, 2)
+	)), 2)
 
 	host := yamltest.At(t, flow[1], paths.Doc().Child("server", "host"))
 
 	// The unified diff holds "key: old" on row 0 and "key: new" on row 1.
 	// Both lines are line 1 of their revision, and a match names the row.
-	unified := diff.Diff(
-		niceyaml.NewSourceFromString("key: old\n").Lines(),
-		niceyaml.NewSourceFromString("key: new\n").Lines(),
-	).Unified()
-
-	tcs := map[string]struct {
-		view       *line.View
-		normalizer finder.Normalizer
-		search     string
-		want       position.Ranges
-	}{
-		"view of every line matches as its lines do": {
-			view:   source.View(),
-			search: "2\n---",
-			want:   position.Ranges{position.NewRange(position.New(1, 3), position.New(2, 3))},
-		},
-		"document reports the lines of the file": {
-			view:   docs[1].View(),
-			search: "port",
-			want:   position.Ranges{yamltest.LineRange(4, 0, 4)},
-		},
-		"line the view does not hold": {
-			view:   docs[1].View(),
-			search: "a: 1",
-		},
-		"match ends with the last held line": {
-			view:   docs[0].View(),
-			search: "2\n",
-			want:   position.Ranges{yamltest.LineRange(1, 3, 5)},
-		},
-		"match does not run past the last held line": {
-			view:   docs[0].View(),
-			search: "2\n---",
-		},
-		"match does not start above the first held line": {
-			view:   docs[1].View(),
-			search: "2\n---",
-		},
-		"match spans held lines in a row": {
-			view:   gapped,
-			search: "x\nport",
-			want:   position.Ranges{position.NewRange(position.New(3, 6), position.New(4, 4))},
-		},
-		"match does not cross a gap": {
-			view:   gapped,
-			search: "1\nname",
-		},
-		"normalizer dropping whitespace joins held lines in a row": {
-			view:       gapped,
-			normalizer: noSpace(),
-			search:     "xport",
-			want:       position.Ranges{position.NewRange(position.New(3, 6), position.New(4, 4))},
-		},
-		"normalizer dropping whitespace does not join text across a gap": {
-			view:       gapped,
-			normalizer: noSpace(),
-			search:     "1name",
-		},
-		"match that overlaps one crossing a gap": {
-			view:   repeated,
-			search: "a\na",
-			want:   position.Ranges{position.NewRange(position.New(2, 0), position.New(3, 1))},
-		},
-		"hunks report the rows of the unified diff": {
-			view:   hunks,
-			search: "k7",
-			want:   position.Ranges{yamltest.LineRange(7, 0, 2), yamltest.LineRange(8, 0, 2)},
-		},
-		"unified diff reports the row of a deleted line": {
-			view:   unified,
-			search: "old",
-			want:   position.Ranges{yamltest.LineRange(0, 5, 8)},
-		},
-		"unified diff reports the row of an inserted line": {
-			view:   unified,
-			search: "new",
-			want:   position.Ranges{yamltest.LineRange(1, 5, 8)},
-		},
-		"unified diff reports both rows of a change": {
-			view:   unified,
-			search: "key",
-			want:   position.Ranges{yamltest.LineRange(0, 0, 3), yamltest.LineRange(1, 0, 3)},
-		},
-		"match spans the rows of one hunk": {
-			view:   hunks,
-			search: "a\nk1",
-			want:   position.Ranges{position.NewRange(position.New(0, 4), position.New(1, 2))},
-		},
-		"match does not run from one hunk into the next": {
-			view:   hunks,
-			search: "A\nk7",
-		},
-		"node holds the whole of its line": {
-			view:   host.View(),
-			search: "port",
-			want:   position.Ranges{yamltest.LineRange(2, 18, 22)},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			var opts []finder.Option
-
-			if tc.normalizer != nil {
-				opts = append(opts, finder.WithNormalizer(tc.normalizer))
-			}
-
-			got := finder.New(opts...).Load(tc.view).Find(tc.search)
-
-			assert.Equal(t, tc.want, got)
-		})
-	}
-
-	t.Run("matches mark the view they came from", func(t *testing.T) {
-		t.Parallel()
-
-		// The matches of a view are in the coordinates of its content.
-		view := docs[1].View()
-		view.AddOverlay(kind.GenericHighlight, finder.New().Load(view).Find("port")...)
-
-		assert.Equal(t, stringtest.JoinLF(
-			"   3 | ---",
-			"   4 | name: x",
-			"   5 | port: 80",
-			"     | ^^^^",
-		), view.String())
-	})
-}
-
-func TestFinder_Find_LineWithoutEnding(t *testing.T) {
-	t.Parallel()
+	unified := yamltest.Diff("key: old\n", "key: new\n").Unified()
 
 	// A diff view can hold a line with no line ending before another line,
 	// such as the last line of a revision or a placeholder row. The loaded
 	// text still ends every line but the last with "\n", so no match joins
 	// the text of two lines.
-	noEnding := diff.Diff(
-		niceyaml.NewSourceFromString("x: 1").Lines(),
-		niceyaml.NewSourceFromString("x: 2\n").Lines(),
-	)
-	placeholders := diff.Diff(
-		niceyaml.NewSourceFromString("a: 1\nb: 2\n").Lines(),
-		niceyaml.NewSourceFromString(stringtest.LinesLF(
+	noEnding := yamltest.Diff("x: 1", "x: 2\n")
+	placeholders := yamltest.Diff(
+		stringtest.LinesLF("a: 1", "b: 2"),
+		stringtest.LinesLF(
 			"a: 1",
 			"n: 1",
 			"m: 1",
 			"b: 2",
-		)).Lines(),
+		),
 	)
 
 	tcs := map[string]struct {
-		lines  line.Sequence
-		search string
-		want   position.Ranges
+		lines      line.Sequence
+		normalizer finder.Normalizer
+		search     string
+		want       position.Ranges
 	}{
+		"zero lines":           {lines: line.Lines{}, search: "test"},
+		"nil sequence":         {lines: nil, search: "test"},
+		"nil view":             {lines: (*line.View)(nil), search: "test"},
+		"nil pointer to lines": {lines: (*line.Lines)(nil), search: "test"},
+		"view that holds no line": {
+			lines:  niceyaml.NewSourceFromString("test: 1\n").View().Slice(position.Span{}),
+			search: "test",
+		},
+		"view of every line matches as its lines do": {
+			lines:  source.View(),
+			search: "2\n---",
+			want:   position.Ranges{position.NewRange(position.New(1, 3), position.New(2, 3))},
+		},
+		"document reports the lines of the file": {
+			lines:  docs[1].View(),
+			search: "port",
+			want:   position.Ranges{yamltest.LineRange(4, 0, 4)},
+		},
+		"line the view does not hold": {
+			lines:  docs[1].View(),
+			search: "a: 1",
+		},
+		"match ends with the last held line": {
+			lines:  docs[0].View(),
+			search: "2\n",
+			want:   position.Ranges{yamltest.LineRange(1, 3, 5)},
+		},
+		"match does not run past the last held line": {
+			lines:  docs[0].View(),
+			search: "2\n---",
+		},
+		"match does not start above the first held line": {
+			lines:  docs[1].View(),
+			search: "2\n---",
+		},
+		"match spans held lines in a row": {
+			lines:  gapped,
+			search: "x\nport",
+			want:   position.Ranges{position.NewRange(position.New(3, 6), position.New(4, 4))},
+		},
+		"match does not cross a gap": {
+			lines:  gapped,
+			search: "1\nname",
+		},
+		"normalizer dropping whitespace joins held lines in a row": {
+			lines:      gapped,
+			normalizer: noSpace(),
+			search:     "xport",
+			want:       position.Ranges{position.NewRange(position.New(3, 6), position.New(4, 4))},
+		},
+		"normalizer dropping whitespace does not join text across a gap": {
+			lines:      gapped,
+			normalizer: noSpace(),
+			search:     "1name",
+		},
+		"match that overlaps one crossing a gap": {
+			lines:  repeated,
+			search: "a\na",
+			want:   position.Ranges{position.NewRange(position.New(2, 0), position.New(3, 1))},
+		},
+		"hunks report the rows of the unified diff": {
+			lines:  hunks,
+			search: "k7",
+			want:   position.Ranges{yamltest.LineRange(7, 0, 2), yamltest.LineRange(8, 0, 2)},
+		},
+		"unified diff reports the row of a deleted line": {
+			lines:  unified,
+			search: "old",
+			want:   position.Ranges{yamltest.LineRange(0, 5, 8)},
+		},
+		"unified diff reports the row of an inserted line": {
+			lines:  unified,
+			search: "new",
+			want:   position.Ranges{yamltest.LineRange(1, 5, 8)},
+		},
+		"unified diff reports both rows of a change": {
+			lines:  unified,
+			search: "key",
+			want:   position.Ranges{yamltest.LineRange(0, 0, 3), yamltest.LineRange(1, 0, 3)},
+		},
+		"match spans the rows of one hunk": {
+			lines:  hunks,
+			search: "a\nk1",
+			want:   position.Ranges{position.NewRange(position.New(0, 4), position.New(1, 2))},
+		},
+		"match does not run from one hunk into the next": {
+			lines:  hunks,
+			search: "A\nk7",
+		},
+		"node holds the whole of its line": {
+			lines:  host.View(),
+			search: "port",
+			want:   position.Ranges{yamltest.LineRange(2, 18, 22)},
+		},
 		"unified view keeps the deleted line apart from the next": {
 			lines:  noEnding.Unified(),
 			search: "1x",
@@ -762,11 +694,32 @@ func TestFinder_Find_LineWithoutEnding(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := finder.New().Load(tc.lines).Find(tc.search)
+			var opts []finder.Option
+
+			if tc.normalizer != nil {
+				opts = append(opts, finder.WithNormalizer(tc.normalizer))
+			}
+
+			got := finder.New(opts...).Load(tc.lines).Find(tc.search)
 
 			assert.Equal(t, tc.want, got)
 		})
 	}
+
+	t.Run("matches mark the view they came from", func(t *testing.T) {
+		t.Parallel()
+
+		// The matches of a view are in the coordinates of its content.
+		view := docs[1].View()
+		view.AddOverlay(kind.GenericHighlight, finder.New().Load(view).Find("port")...)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"   3 | ---",
+			"   4 | name: x",
+			"   5 | port: 80",
+			"     | ^^^^",
+		), view.String())
+	})
 }
 
 func TestFinder_Reload(t *testing.T) {

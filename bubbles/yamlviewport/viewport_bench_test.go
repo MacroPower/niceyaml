@@ -4,23 +4,17 @@ import (
 	"fmt"
 	"testing"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/printer"
-	"go.jacobcolvin.com/niceyaml/style/theme"
 )
-
-// benchmarkSource returns a source of n lines that each hold one match of
-// the term "name".
-func benchmarkSource(n int) *niceyaml.Source {
-	return niceyaml.NewSourceFromString(numbered(n, "key%[1]d: value %[1]d name foo"))
-}
 
 func BenchmarkViewport_SearchNext(b *testing.B) {
 	for _, n := range []int{1_000, 20_000} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
-			m := testModel(printer.New(printer.WithStyles(theme.Charm.Styles())), 120, 40)
-			m.SetRevision(benchmarkSource(n))
+			// Each line holds one match of the term.
+			m := testModel(printer.New(), 120, 40)
+			setRevision(&m, yamltest.GenerateLines(n, "key%[1]d: value %[1]d name foo"))
 			m.SetSearchTerm("name")
 
 			_ = m.View()
@@ -43,9 +37,9 @@ func BenchmarkViewport_SetSearchTerm(b *testing.B) {
 
 	for _, n := range []int{1_000, 20_000} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
-			src := numbered(n, "key%[1]d: value %[1]d") + "zebra: here\n"
+			src := yamltest.GenerateLines(n, "key%[1]d: value %[1]d") + "zebra: here\n"
 
-			m := testModel(printer.New(printer.WithStyles(theme.Charm.Styles())), 120, 40)
+			m := testModel(printer.New(), 120, 40)
 			setRevision(&m, src)
 
 			_ = m.View()
@@ -69,7 +63,7 @@ func BenchmarkViewport_SideBySideView(b *testing.B) {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
 			m := testModel(printer.New(), 120, 40)
 			m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			addRevisions(&m, numbered(n, "k%[1]d: v%[1]d"), numbered(n, "k%[1]d: w%[1]d"))
+			addRevisions(&m, yamltest.GenerateLines(n, "k%[1]d: v%[1]d"), yamltest.GenerateLines(n, "k%[1]d: w%[1]d"))
 			m.SetSearchTerm("v1")
 
 			_ = m.View()

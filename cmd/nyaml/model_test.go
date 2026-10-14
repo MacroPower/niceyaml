@@ -51,101 +51,42 @@ func update(t *testing.T, m tea.Model, msgs ...tea.Msg) model {
 	return got
 }
 
-func TestUpdateSearchInputBackspace(t *testing.T) {
+func TestUpdateSearchInput(t *testing.T) {
 	t.Parallel()
 
+	backspace := tea.KeyPressMsg{Code: tea.KeyBackspace}
+
 	tcs := map[string]struct {
+		msg tea.Msg
+		// The search input before msg.
 		input string
 		want  string
-	}{
-		"ascii": {
-			input: "abc",
-			want:  "ab",
-		},
-		"multibyte rune": {
-			input: "café",
-			want:  "caf",
-		},
-		"only multibyte rune": {
-			input: "é",
-			want:  "",
-		},
-		"emoji with skin tone modifier": {
-			input: "a\U0001F44D\U0001F3FD",
-			want:  "a",
-		},
-		"flag": {
-			input: "\U0001F1FA\U0001F1F8",
-			want:  "",
-		},
-		"combining sequence": {
-			input: "café",
-			want:  "caf",
-		},
-		"empty": {
-			input: "",
-			want:  "",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			m := newModel(&modelOptions{})
-			m.searching = true
-			m.searchInput = tc.input
-
-			m.updateSearchInput(tea.KeyPressMsg{Code: tea.KeyBackspace})
-
-			assert.Equal(t, tc.want, m.searchInput)
-			assert.True(t, m.searching)
-		})
-	}
-}
-
-func TestUpdatePaste(t *testing.T) {
-	t.Parallel()
-
-	// The search input holds "a" before each paste.
-	tcs := map[string]struct {
-		content string
-		want    string
-		// Pastes while the search prompt is closed.
+		// Sends msg while the search prompt is closed.
 		closed bool
 	}{
-		"text is appended": {
-			content: "bc",
-			want:    "abc",
+		"backspace over ascii":                          {input: "abc", msg: backspace, want: "ab"},
+		"backspace over a multibyte rune":               {input: "caf\u00e9", msg: backspace, want: "caf"},
+		"backspace over the only multibyte rune":        {input: "\u00e9", msg: backspace, want: ""},
+		"backspace over an emoji with a skin tone":      {input: "a\U0001F44D\U0001F3FD", msg: backspace, want: "a"},
+		"backspace over a flag":                         {input: "\U0001F1FA\U0001F1F8", msg: backspace, want: ""},
+		"backspace over a combining sequence":           {input: "cafe\u0301", msg: backspace, want: "caf"},
+		"backspace on an empty input":                   {input: "", msg: backspace, want: ""},
+		"pasted text is appended":                       {input: "a", msg: tea.PasteMsg{Content: "bc"}, want: "abc"},
+		"pasted newline keeps the first line":           {input: "a", msg: tea.PasteMsg{Content: "b\nc"}, want: "ab"},
+		"pasted carriage return keeps the first line":   {input: "a", msg: tea.PasteMsg{Content: "b\rc"}, want: "ab"},
+		"pasted tab is dropped":                         {input: "a", msg: tea.PasteMsg{Content: "b\tc"}, want: "abc"},
+		"pasted leading newline pastes nothing":         {input: "a", msg: tea.PasteMsg{Content: "\nb"}, want: "a"},
+		"pasted leading carriage return pastes nothing": {input: "a", msg: tea.PasteMsg{Content: "\rb"}, want: "a"},
+		"pasted carriage return and newline keep the first line": {
+			input: "a",
+			msg:   tea.PasteMsg{Content: "b\r\nc"},
+			want:  "ab",
 		},
 		"paste outside the prompt changes nothing": {
-			content: "xyz",
-			want:    "a",
-			closed:  true,
-		},
-		"newline keeps the first line": {
-			content: "b\nc",
-			want:    "ab",
-		},
-		"carriage return and newline keep the first line": {
-			content: "b\r\nc",
-			want:    "ab",
-		},
-		"carriage return keeps the first line": {
-			content: "b\rc",
-			want:    "ab",
-		},
-		"tab is dropped": {
-			content: "b\tc",
-			want:    "abc",
-		},
-		"leading newline pastes nothing": {
-			content: "\nb",
-			want:    "a",
-		},
-		"leading carriage return pastes nothing": {
-			content: "\rb",
-			want:    "a",
+			input:  "a",
+			msg:    tea.PasteMsg{Content: "xyz"},
+			want:   "a",
+			closed: true,
 		},
 	}
 
@@ -155,9 +96,9 @@ func TestUpdatePaste(t *testing.T) {
 
 			m := newModel(&modelOptions{})
 			m.searching = !tc.closed
-			m.searchInput = "a"
+			m.searchInput = tc.input
 
-			got := update(t, m, tea.PasteMsg{Content: tc.content})
+			got := update(t, m, tc.msg)
 			assert.Equal(t, tc.want, got.searchInput)
 			assert.Equal(t, !tc.closed, got.searching)
 		})
@@ -277,7 +218,7 @@ func TestNewModelDefaultTheme(t *testing.T) {
 			t.Parallel()
 
 			m := newModel(&modelOptions{
-				sources:     sourcesOf("a: 1\nb: [2, 3]\n"),
+				sources:     sourcesOf(stringtest.LinesLF("a: 1", "b: [2, 3]")),
 				lineNumbers: tc.lineNumbers,
 			})
 
@@ -320,22 +261,10 @@ func TestUpdateWindowSizeViewportHeight(t *testing.T) {
 		height int
 		want   int
 	}{
-		"tall terminal": {
-			height: 40,
-			want:   38,
-		},
-		"status bar only": {
-			height: 2,
-			want:   0,
-		},
-		"single row": {
-			height: 1,
-			want:   0,
-		},
-		"zero rows": {
-			height: 0,
-			want:   0,
-		},
+		"tall terminal":   {height: 40, want: 38},
+		"status bar only": {height: 2, want: 0},
+		"single row":      {height: 1, want: 0},
+		"zero rows":       {height: 0, want: 0},
 	}
 
 	for name, tc := range tcs {
@@ -434,18 +363,9 @@ func TestBaseViewFillsTerminal(t *testing.T) {
 		width  int
 		height int
 	}{
-		"narrow": {
-			width:  20,
-			height: 24,
-		},
-		"standard": {
-			width:  80,
-			height: 24,
-		},
-		"large": {
-			width:  200,
-			height: 60,
-		},
+		"narrow":   {width: 20, height: 24},
+		"standard": {width: 80, height: 24},
+		"large":    {width: 200, height: 60},
 	}
 
 	for name, tc := range tcs {
@@ -475,22 +395,10 @@ func TestBaseViewNoColumns(t *testing.T) {
 		mode  yamlviewport.ViewMode
 		width int
 	}{
-		"full width 0": {
-			mode:  yamlviewport.ViewModeFull,
-			width: 0,
-		},
-		"side-by-side width 0": {
-			mode:  yamlviewport.ViewModeSideBySide,
-			width: 0,
-		},
-		"side-by-side width 3": {
-			mode:  yamlviewport.ViewModeSideBySide,
-			width: 3,
-		},
-		"side-by-side width 4": {
-			mode:  yamlviewport.ViewModeSideBySide,
-			width: 4,
-		},
+		"full width 0":         {mode: yamlviewport.ViewModeFull, width: 0},
+		"side-by-side width 0": {mode: yamlviewport.ViewModeSideBySide, width: 0},
+		"side-by-side width 3": {mode: yamlviewport.ViewModeSideBySide, width: 3},
+		"side-by-side width 4": {mode: yamlviewport.ViewModeSideBySide, width: 4},
 	}
 
 	for name, tc := range tcs {
@@ -525,26 +433,10 @@ func TestOverlayOffset(t *testing.T) {
 		inner int
 		want  int
 	}{
-		"centered": {
-			outer: 80,
-			inner: 30,
-			want:  25,
-		},
-		"exact fit": {
-			outer: 30,
-			inner: 30,
-			want:  0,
-		},
-		"overlay wider than the terminal": {
-			outer: 10,
-			inner: 28,
-			want:  0,
-		},
-		"no terminal": {
-			outer: 0,
-			inner: 10,
-			want:  0,
-		},
+		"centered":                        {outer: 80, inner: 30, want: 25},
+		"exact fit":                       {outer: 30, inner: 30, want: 0},
+		"overlay wider than the terminal": {outer: 10, inner: 28, want: 0},
+		"no terminal":                     {outer: 0, inner: 10, want: 0},
 	}
 
 	for name, tc := range tcs {
@@ -659,14 +551,8 @@ func TestTextLineEscapesRevisionName(t *testing.T) {
 		name string
 		want string
 	}{
-		"sgr conceal": {
-			name: "\x1b[8mhidden.yaml",
-			want: "␛[8mhidden.yaml",
-		},
-		"bel": {
-			name: "x\ay.yaml",
-			want: "x␇y.yaml",
-		},
+		"sgr conceal": {name: "\x1b[8mhidden.yaml", want: "␛[8mhidden.yaml"},
+		"bel":         {name: "x\ay.yaml", want: "x␇y.yaml"},
 	}
 
 	for name, tc := range tcs {
@@ -714,62 +600,38 @@ func TestUpdateCtrlCQuits(t *testing.T) {
 	}
 }
 
-func TestThemePickerMouseWheel(t *testing.T) {
+func TestThemePicker(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		button tea.MouseButton
-		want   int
+		// Messages sent after the key that opens the picker.
+		msgs []tea.Msg
+		// How far the selection ends from the theme the picker opened with.
+		want int
+		// Leaves the picker open.
+		picking bool
 	}{
 		"wheel down": {
-			button: tea.MouseWheelDown,
-			want:   1,
+			msgs:    []tea.Msg{tea.MouseWheelMsg{Button: tea.MouseWheelDown}},
+			want:    1,
+			picking: true,
 		},
 		"wheel up": {
-			button: tea.MouseWheelUp,
-			want:   -1,
+			msgs:    []tea.Msg{tea.MouseWheelMsg{Button: tea.MouseWheelUp}},
+			want:    -1,
+			picking: true,
 		},
 		"wheel right": {
-			button: tea.MouseWheelRight,
-			want:   0,
+			msgs:    []tea.Msg{tea.MouseWheelMsg{Button: tea.MouseWheelRight}},
+			want:    0,
+			picking: true,
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			m := newModel(&modelOptions{sources: sourcesOf(yamltest.GenerateYAML(100))})
-
-			before := update(t, m, tea.WindowSizeMsg{Width: 80, Height: 24}, press('t'))
-			require.True(t, before.themePicking)
-			require.Positive(t, before.themeIndex)
-			require.Less(t, before.themeIndex, len(before.themeList)-1)
-
-			got := update(t, before, tea.MouseWheelMsg{Button: tc.button})
-
-			assert.True(t, got.themePicking)
-			assert.Zero(t, got.viewport.YOffset())
-			assert.Zero(t, got.viewport.XOffset())
-			assert.Equal(t, before.themeIndex+tc.want, got.themeIndex)
-			assert.Equal(t, got.themeList[got.themeIndex].Styles(), got.styles)
-		})
-	}
-}
-
-func TestThemePickerClose(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		key  tea.KeyPressMsg
-		want int
-	}{
 		"esc restores the theme the picker opened with": {
-			key:  tea.KeyPressMsg{Code: tea.KeyEscape},
+			msgs: []tea.Msg{press('j'), press('j'), tea.KeyPressMsg{Code: tea.KeyEscape}},
 			want: 0,
 		},
 		"enter keeps the selected theme": {
-			key:  tea.KeyPressMsg{Code: tea.KeyEnter},
+			msgs: []tea.Msg{press('j'), press('j'), tea.KeyPressMsg{Code: tea.KeyEnter}},
 			want: 2,
 		},
 	}
@@ -778,14 +640,19 @@ func TestThemePickerClose(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := newModel(&modelOptions{sources: sourcesOf("a: 1\n")})
+			// The document is long enough to scroll, so a wheel that
+			// reached the viewport would move it.
+			m := newModel(&modelOptions{sources: sourcesOf(yamltest.GenerateYAML(100))})
 
 			before := update(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+			require.Positive(t, before.themeIndex)
 			require.Less(t, before.themeIndex, len(before.themeList)-2)
 
-			got := update(t, before, press('t'), press('j'), press('j'), tc.key)
+			got := update(t, before, append([]tea.Msg{press('t')}, tc.msgs...)...)
 
-			assert.False(t, got.themePicking)
+			assert.Equal(t, tc.picking, got.themePicking)
+			assert.Zero(t, got.viewport.YOffset())
+			assert.Zero(t, got.viewport.XOffset())
 			assert.Equal(t, before.themeIndex+tc.want, got.themeIndex)
 			assert.Equal(t, got.themeList[got.themeIndex].Styles(), got.styles)
 		})

@@ -16,6 +16,8 @@ import (
 	"github.com/creack/pty"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
 // notifyHelperEnv tells the test binary to run [runNotifyHelper] in place
@@ -143,7 +145,7 @@ func TestViewSignal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path := writeFile(t, t.TempDir(), "a.yaml", "a: 1\n")
+			path := yamltest.WriteFile(t, t.TempDir(), "a.yaml", "a: 1\n")
 
 			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestViewSignal$")
 

@@ -40,9 +40,7 @@ func TestCharm(t *testing.T) {
 	assert.Equal(t, theme.Dark, theme.Charm.Mode)
 	assert.Equal(t, style.Default(), theme.Charm.Styles())
 
-	got, ok := theme.Builtin().Get("charm")
-	require.True(t, ok)
-	assert.Equal(t, theme.Charm.Name, got.Name)
+	assert.Equal(t, theme.Charm.Name, builtin(t, "charm").Name)
 }
 
 func TestCatalog_With(t *testing.T) {
@@ -315,7 +313,7 @@ func TestPalette_DiffAndErrorKindsStandOut(t *testing.T) {
 func TestPalette_KindStyles(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		theme string
 		kind  kind.Kind
 		want  string
@@ -431,7 +429,7 @@ func TestPalette_KindStyles(t *testing.T) {
 		},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -493,7 +491,7 @@ func TestPalette_ErrorAndDiffBadgesReadable(t *testing.T) {
 	// The error mark replaces the style of the token it covers, and the
 	// printer paints whole deleted lines, so the text on each colored
 	// surface must stay readable.
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		theme string
 		kind  kind.Kind
 	}{
@@ -512,7 +510,7 @@ func TestPalette_ErrorAndDiffBadgesReadable(t *testing.T) {
 		"xcode-dark error mark": {theme: "xcode-dark", kind: kind.GenericError},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -656,12 +654,7 @@ func TestPalette_HeadingsReadable(t *testing.T) {
 		kind.GenericHeadingError,
 	}
 
-	for _, th := range theme.Builtin().All() {
-		if th.Name == theme.Charm.Name {
-			// Charm sets its headings by hand rather than from a palette.
-			continue
-		}
-
+	for _, th := range paletteThemes() {
 		t.Run(th.Name, func(t *testing.T) {
 			t.Parallel()
 
@@ -706,23 +699,15 @@ func TestPalette_HighlightsReadable(t *testing.T) {
 		"blend":    {apply: colors.BlendStyles, apart: 0.08},
 	}
 
-	for _, th := range theme.Builtin().All() {
-		if th.Name == theme.Charm.Name {
-			// Charm sets its highlights by hand rather than from a palette,
-			// and TestDefault_HighlightsReadable covers them.
-			continue
-		}
-
+	// TestDefault_HighlightsReadable covers the highlights of Charm.
+	for _, th := range paletteThemes() {
 		t.Run(th.Name, func(t *testing.T) {
 			t.Parallel()
 
 			styles := th.Styles()
 			text := styles.Style(kind.Text)
 
-			bg := text.GetBackground()
-			if unset(bg) {
-				t.Skip("theme leaves the background to the terminal")
-			}
+			bg := textBackground(t, styles)
 
 			// Body text keeps the WCAG AA 4.5:1 on every highlight, or its
 			// own contrast divided by maxContrastLoss where that is lower.
@@ -814,22 +799,14 @@ func TestPalette_SurfaceHeadingsReadable(t *testing.T) {
 
 	// The accent and subtle headings paint the highlight surfaces, so their
 	// text keeps the contrast that body text keeps on a highlight.
-	for _, th := range theme.Builtin().All() {
-		if th.Name == theme.Charm.Name {
-			// Charm sets its headings by hand rather than from a palette.
-			continue
-		}
-
+	for _, th := range paletteThemes() {
 		t.Run(th.Name, func(t *testing.T) {
 			t.Parallel()
 
 			styles := th.Styles()
 			text := styles.Style(kind.Text)
 
-			bg := text.GetBackground()
-			if unset(bg) {
-				t.Skip("theme leaves the background to the terminal")
-			}
+			bg := textBackground(t, styles)
 
 			floor := min(4.5, yamltest.Contrast(text.GetForeground(), bg)/maxContrastLoss)
 
@@ -857,10 +834,7 @@ func TestPalette_ChromeReadable(t *testing.T) {
 
 			styles := th.Styles()
 
-			bg := styles.Style(kind.Text).GetBackground()
-			if unset(bg) {
-				t.Skip("theme leaves the background to the terminal")
-			}
+			bg := textBackground(t, styles)
 
 			fg := styles.Style(kind.UI).GetForeground()
 			assert.GreaterOrEqual(t, yamltest.Contrast(fg, bg), floor,
@@ -909,6 +883,27 @@ func standsOut(token, marked lipgloss.Style) bool {
 	}
 
 	return distance(a, b) >= minMarkDistance
+}
+
+// paletteThemes returns every built-in theme but Charm, which sets its
+// headings and highlights by hand rather than from a palette.
+func paletteThemes() []theme.Theme {
+	return slices.DeleteFunc(theme.Builtin().All(), func(th theme.Theme) bool {
+		return th.Name == theme.Charm.Name
+	})
+}
+
+// textBackground returns the background of the body text in styles. It
+// skips the test for a theme that leaves the background to the terminal.
+func textBackground(t *testing.T, styles style.Styles) color.Color {
+	t.Helper()
+
+	bg := styles.Style(kind.Text).GetBackground()
+	if unset(bg) {
+		t.Skip("theme leaves the background to the terminal")
+	}
+
+	return bg
 }
 
 // builtin returns the built-in theme of the given name. The test fails

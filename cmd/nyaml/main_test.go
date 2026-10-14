@@ -55,10 +55,10 @@ func TestRootCmdProfileFlags(t *testing.T) {
 
 			dir := t.TempDir()
 
-			yamlPath := writeFile(t, dir, "doc.yaml", "name: a\n")
+			yamlPath := yamltest.WriteFile(t, dir, "doc.yaml", "name: a\n")
 
 			// An explicit schema keeps validate from fetching the SchemaStore catalog.
-			schemaPath := writeFile(t, dir, "schema.json", `{"type": "object"}`)
+			schemaPath := yamltest.WriteFile(t, dir, "schema.json", `{"type": "object"}`)
 
 			profilePath := filepath.Join(dir, "out.prof")
 
@@ -206,8 +206,8 @@ func TestExitCode(t *testing.T) {
 		},
 		"invalid document beside a directive that does not load": {
 			files: map[string]string{
-				"a.yaml": directive("./schema.json") + "value: 1\n",
-				"b.yaml": directive("./missing.json") + "name: b\n",
+				"a.yaml": yamltest.SchemaDirective("./schema.json", "value: 1\n"),
+				"b.yaml": yamltest.SchemaDirective("./missing.json", "name: b\n"),
 			},
 			args: []string{"a.yaml", "b.yaml"},
 			want: exitFailure,
@@ -230,7 +230,7 @@ func TestExitCode(t *testing.T) {
 		"valid document under a directive that names a YAML schema": {
 			files: map[string]string{
 				"schema.yaml": "required: [name]\n",
-				"a.yaml":      directive("./schema.yaml") + "name: a\n",
+				"a.yaml":      yamltest.SchemaDirective("./schema.yaml", "name: a\n"),
 			},
 			args: []string{"a.yaml"},
 			want: 0,
@@ -238,7 +238,7 @@ func TestExitCode(t *testing.T) {
 		"violation of a YAML schema that a directive names": {
 			files: map[string]string{
 				"schema.yaml": "required: [name]\n",
-				"a.yaml":      directive("./schema.yaml") + "value: 1\n",
+				"a.yaml":      yamltest.SchemaDirective("./schema.yaml", "value: 1\n"),
 			},
 			args: []string{"a.yaml"},
 			want: exitInvalid,
@@ -246,8 +246,8 @@ func TestExitCode(t *testing.T) {
 		"invalid document beside a directive whose YAML schema does not parse": {
 			files: map[string]string{
 				"schema.yaml": "required: [name\n",
-				"a.yaml":      directive("./schema.json") + "value: 1\n",
-				"b.yaml":      directive("./schema.yaml") + "name: b\n",
+				"a.yaml":      yamltest.SchemaDirective("./schema.json", "value: 1\n"),
+				"b.yaml":      yamltest.SchemaDirective("./schema.yaml", "name: b\n"),
 			},
 			args: []string{"a.yaml", "b.yaml"},
 			want: exitFailure,
@@ -269,11 +269,9 @@ func TestExitCode(t *testing.T) {
 			t.Parallel()
 
 			dir := t.TempDir()
-			writeFile(t, dir, "schema.json", string(nameSchema))
+			yamltest.WriteFile(t, dir, "schema.json", string(nameSchema))
 
-			for file, content := range tc.files {
-				writeFile(t, dir, file, content)
-			}
+			yamltest.WriteFiles(t, dir, tc.files)
 
 			args := make([]string, 0, len(tc.args))
 			for _, arg := range tc.args {
@@ -320,14 +318,8 @@ func TestHelpColorScheme(t *testing.T) {
 		isDark bool
 		want   fang.ColorScheme
 	}{
-		"light terminal": {
-			isDark: false,
-			want:   fangs.ColorScheme(light),
-		},
-		"dark terminal": {
-			isDark: true,
-			want:   fangs.ColorScheme(theme.Charm),
-		},
+		"light terminal": {isDark: false, want: fangs.ColorScheme(light)},
+		"dark terminal":  {isDark: true, want: fangs.ColorScheme(theme.Charm)},
 	}
 
 	for name, tc := range tcs {
@@ -337,23 +329,4 @@ func TestHelpColorScheme(t *testing.T) {
 			assert.Equal(t, tc.want, csFunc(lipgloss.LightDark(tc.isDark)))
 		})
 	}
-}
-
-func TestViewCmdLineNumbersFlag(t *testing.T) {
-	t.Parallel()
-
-	// A boolean shorthand takes no value, so a shorthand on a flag that
-	// defaults to true could only repeat the default. The long flag carries
-	// the value that turns the line numbers off.
-	flag := viewCmd().Flags().Lookup("line-numbers")
-	require.NotNil(t, flag)
-	assert.Empty(t, flag.Shorthand)
-	assert.Equal(t, "true", flag.DefValue)
-
-	cmd := viewCmd()
-	require.NoError(t, cmd.Flags().Parse([]string{"--line-numbers=false"}))
-
-	lineNumbers, err := cmd.Flags().GetBool("line-numbers")
-	require.NoError(t, err)
-	assert.False(t, lineNumbers)
 }

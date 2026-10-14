@@ -21,6 +21,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/escape"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -63,12 +64,6 @@ func writeOrSkip(t *testing.T, dir, name, content string) {
 	}
 }
 
-// directive returns the comment line that names ref as the schema of the
-// document below it.
-func directive(ref string) string {
-	return "# yaml-language-server: $schema=" + ref + "\n"
-}
-
 // quietValidateCmd returns nyaml validate set to run with args, to write
 // its output to out, and to print no error itself.
 func quietValidateCmd(out io.Writer, args ...string) *cobra.Command {
@@ -96,10 +91,7 @@ func linkedDir(t *testing.T, link string) string {
 	dir := t.TempDir()
 	makeDir(t, dir, "sub", "deep")
 
-	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, link))
-	if err != nil {
-		t.Skipf("symlinks unsupported: %v", err)
-	}
+	yamltest.SymlinkOrSkip(t, filepath.Join("sub", "deep"), filepath.Join(dir, link))
 
 	return dir
 }
@@ -128,7 +120,7 @@ func TestValidateFile(t *testing.T) {
 			want:    []string{"3:1:"},
 		},
 		"comment above the first header": {
-			content: directive("./s.json") + stringtest.LinesLF("---", "name: a"),
+			content: yamltest.SchemaDirective("./s.json", stringtest.LinesLF("---", "name: a")),
 		},
 		"comment above an invalid document": {
 			content: stringtest.LinesLF("# a preamble", "---", "value: 1"),
@@ -172,7 +164,7 @@ func TestValidateFile(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path := writeFile(t, t.TempDir(), "config.yaml", tc.content)
+			path := yamltest.WriteFile(t, t.TempDir(), "config.yaml", tc.content)
 
 			err := validateFile(t.Context(), path, nameRegistry())
 			if len(tc.want) == 0 {
@@ -230,7 +222,7 @@ func TestValidateFileEmpty(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path := writeFile(t, t.TempDir(), "config.yaml", tc.content)
+			path := yamltest.WriteFile(t, t.TempDir(), "config.yaml", tc.content)
 
 			err := validateFile(t.Context(), path, tc.reg)
 			if tc.want == "" {
@@ -251,7 +243,7 @@ func TestValidateFileRoutesOnAbsolutePath(t *testing.T) {
 	// SchemaStore routes on patterns that name parent directories, so the
 	// resolver must see the absolute path even when the user types a
 	// relative one. Messages still name the file as the user typed it.
-	path := writeFile(t, t.TempDir(), "config.yaml", "value: 1\n")
+	path := yamltest.WriteFile(t, t.TempDir(), "config.yaml", "value: 1\n")
 
 	rel := relToWorkDir(t, path)
 	require.False(t, filepath.IsAbs(rel))
@@ -280,8 +272,8 @@ func TestValidateFileDotDotAfterSymlink(t *testing.T) {
 	dir := linkedDir(t, "ldir")
 	sub := filepath.Join(dir, "sub")
 
-	writeFile(t, sub, "s.json", string(nameSchema))
-	writeFile(t, sub, "x.yaml", directive("./s.json")+"name: a\n")
+	yamltest.WriteFile(t, sub, "s.json", string(nameSchema))
+	yamltest.WriteFile(t, sub, "x.yaml", yamltest.SchemaDirective("./s.json", "name: a\n"))
 
 	// Joining the name with filepath.Join would clean it to x.yaml.
 	path := dir + "/ldir/../x.yaml"
@@ -299,14 +291,11 @@ func TestBuildRegistryRefs(t *testing.T) {
 	dir := t.TempDir()
 	schemaPath := filepath.Join(dir, "s.json")
 
-	files := map[string]string{
+	yamltest.WriteFiles(t, dir, map[string]string{
 		"s.json":       `{"properties": {"name": {"type": "string"}, "extra": {"$ref": "missing.json"}}}`,
-		"skips.yaml":   directive("./s.json") + "name: a\n",
-		"reaches.yaml": directive("./s.json") + "extra: 1\n",
-	}
-	for name, content := range files {
-		writeFile(t, dir, name, content)
-	}
+		"skips.yaml":   yamltest.SchemaDirective("./s.json", "name: a\n"),
+		"reaches.yaml": yamltest.SchemaDirective("./s.json", "extra: 1\n"),
+	})
 
 	t.Run("--schema fails before any file", func(t *testing.T) {
 		t.Parallel()
@@ -340,10 +329,10 @@ func TestBuildRegistrySchemaDotDotAfterSymlink(t *testing.T) {
 	// ldir, which cleaning the path as text would name, rejects one.
 	dir := linkedDir(t, "ldir")
 
-	writeFile(t, filepath.Join(dir, "sub"), "schema.json", `{"type": "string"}`)
-	writeFile(t, dir, "schema.json", `{"type": "integer"}`)
+	yamltest.WriteFile(t, dir, "sub/schema.json", `{"type": "string"}`)
+	yamltest.WriteFile(t, dir, "schema.json", `{"type": "integer"}`)
 
-	yamlPath := writeFile(t, dir, "x.yaml", "hello\n")
+	yamlPath := yamltest.WriteFile(t, dir, "x.yaml", "hello\n")
 	rel := relToWorkDir(t, dir)
 
 	// The test builds each ref as text, since filepath.Join would clean it.
@@ -379,10 +368,10 @@ func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
 
 	makeDir(t, dir, "cfg:v2")
 	makeDir(t, dir, "file:")
-	writeFile(t, filepath.Join(dir, "sub"), "schema.json", `{"type": "string"}`)
-	writeFile(t, dir, "schema.json", `{"type": "integer"}`)
+	yamltest.WriteFile(t, dir, "sub/schema.json", `{"type": "string"}`)
+	yamltest.WriteFile(t, dir, "schema.json", `{"type": "integer"}`)
 
-	yamlPath := writeFile(t, dir, "x.yaml", "hello\n")
+	yamlPath := yamltest.WriteFile(t, dir, "x.yaml", "hello\n")
 
 	require.NoError(t, os.Symlink(filepath.Join("..", "sub", "deep"), filepath.Join(dir, "cfg:v2", "ldir")))
 	require.NoError(t, os.Symlink(filepath.Join("..", "sub", "deep"), filepath.Join(dir, "file:", "ldir")))
@@ -396,9 +385,7 @@ func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
 		"colon in a directory before the symlink": {ref: "cfg:v2/ldir/../schema.json"},
 		// FileOrURL reads a file URL whose host is not localhost as a
 		// relative path, here file:/ldir/../schema.json.
-		"file URL with a host": {
-			ref: "file://ldir/../schema.json",
-		},
+		"file URL with a host": {ref: "file://ldir/../schema.json"},
 	}
 
 	for name, tc := range tcs {
@@ -527,24 +514,15 @@ func TestValidateCmdSchemaError(t *testing.T) {
 		url bool
 	}{
 		"missing file": {err: schema.ErrLoad},
-		"invalid JSON": {
-			content: `{"type": 12`,
-			err:     schema.ErrCompile,
-		},
-		"invalid YAML": {
-			content: "type: [object\n",
-			err:     schema.ErrCompile,
-		},
+		"invalid JSON": {content: `{"type": 12`, err: schema.ErrCompile},
+		"invalid YAML": {content: "type: [object\n", err: schema.ErrCompile},
 		// One of the three documents sets no "a", so its validation would
 		// never reach the $ref.
 		"$ref names a missing file": {
 			content: `{"properties": {"a": {"$ref": "defs.json"}}}`,
 			err:     schema.ErrLoad,
 		},
-		"URL fails": {
-			url: true,
-			err: schema.ErrLoad,
-		},
+		"URL fails": {url: true, err: schema.ErrLoad},
 	}
 
 	for name, tc := range tcs {
@@ -574,14 +552,14 @@ func TestValidateCmdSchemaError(t *testing.T) {
 				ref = srv.URL + "/schema.json"
 
 			case tc.content != "":
-				writeFile(t, dir, "schema.json", tc.content)
+				yamltest.WriteFile(t, dir, "schema.json", tc.content)
 			}
 
 			// Three documents across two files, so a schema loaded per
 			// document would report three times.
 			yamlPaths := []string{
-				writeFile(t, dir, "one.yaml", "a: 1\n"),
-				writeFile(t, dir, "two.yaml", stringtest.LinesLF("a: 1", "---", "b: 2")),
+				yamltest.WriteFile(t, dir, "one.yaml", "a: 1\n"),
+				yamltest.WriteFile(t, dir, "two.yaml", stringtest.LinesLF("a: 1", "---", "b: 2")),
 			}
 
 			out := &bytes.Buffer{}
@@ -647,7 +625,7 @@ func TestValidateCmdCanceled(t *testing.T) {
 				}))
 				t.Cleanup(srv.Close)
 
-				doc = directive(srv.URL+"/s.json") + doc
+				doc = yamltest.SchemaDirective(srv.URL+"/s.json", doc)
 			} else {
 				cancel()
 			}
@@ -658,7 +636,7 @@ func TestValidateCmdCanceled(t *testing.T) {
 			var args []string
 
 			for _, name := range []string{"a.yaml", "b.yaml", "c.yaml"} {
-				args = append(args, writeFile(t, dir, name, body))
+				args = append(args, yamltest.WriteFile(t, dir, name, body))
 			}
 
 			out := &bytes.Buffer{}
@@ -704,7 +682,7 @@ func TestValidateCmdOutput(t *testing.T) {
 
 			dir := t.TempDir()
 
-			schemaPath := writeFile(t, dir, "schema.json", `{"type": "object"}`)
+			schemaPath := yamltest.WriteFile(t, dir, "schema.json", `{"type": "object"}`)
 
 			for _, file := range tc.files {
 				writeOrSkip(t, dir, file, "name: a\n")
@@ -751,13 +729,9 @@ func TestValidateCmdErrorNames(t *testing.T) {
 		// Makes every write of a result line fail.
 		failWrite bool
 	}{
-		"invalid document": {content: "value: 1\n"},
-		"unreadable file":  {err: fs.ErrNotExist},
-		"result line not written": {
-			content:   "name: a\n",
-			failWrite: true,
-			err:       io.ErrClosedPipe,
-		},
+		"invalid document":        {content: "value: 1\n"},
+		"unreadable file":         {err: fs.ErrNotExist},
+		"result line not written": {content: "name: a\n", failWrite: true, err: io.ErrClosedPipe},
 	}
 
 	for name, tc := range tcs {
@@ -766,15 +740,12 @@ func TestValidateCmdErrorNames(t *testing.T) {
 
 			dir := t.TempDir()
 
-			schemaPath := writeFile(t, dir, "schema.json", string(nameSchema))
+			schemaPath := yamltest.WriteFile(t, dir, "schema.json", string(nameSchema))
 
 			path := filepath.Join(dir, file)
 
 			if tc.content == "" {
-				err := os.Symlink(filepath.Join(dir, "missing.yaml"), path)
-				if err != nil {
-					t.Skipf("symlink %q: %v", file, err)
-				}
+				yamltest.SymlinkOrSkip(t, filepath.Join(dir, "missing.yaml"), path)
 			} else {
 				writeOrSkip(t, dir, file, tc.content)
 			}
@@ -808,10 +779,10 @@ func TestValidateCmdDeprecations(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	writeFile(t, dir, "compose.schema.json",
+	yamltest.WriteFile(t, dir, "compose.schema.json",
 		`{"properties": {"version": {"deprecated": true, "deprecationMessage": "Compose ignores version."}}}`)
 
-	path := writeFile(t, dir, "compose.yaml", stringtest.LinesLF(`version: "3.8"`, "services: {}"))
+	path := yamltest.WriteFile(t, dir, "compose.yaml", stringtest.LinesLF(`version: "3.8"`, "services: {}"))
 
 	out := &bytes.Buffer{}
 

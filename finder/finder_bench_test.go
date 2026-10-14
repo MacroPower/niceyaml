@@ -105,25 +105,26 @@ func BenchmarkFinderCreate(b *testing.B) {
 	yaml := yamltest.GenerateYAML(500)
 	source := niceyaml.NewSourceFromString(yaml)
 
-	b.Run("without_normalizer", func(b *testing.B) {
-		b.ReportAllocs()
+	// Each iteration builds its own normalizer, so the benchmark counts the
+	// cost of building one.
+	modes := []struct {
+		name       string
+		normalizer func() finder.Normalizer
+	}{
+		{"without_normalizer", func() finder.Normalizer { return nil }},
+		{"with_normalizer", func() finder.Normalizer { return normalizer.New() }},
+	}
 
-		for b.Loop() {
-			f := finder.New(finder.WithNormalizer(nil))
-			_ = f.Load(source.Lines())
-		}
-	})
+	for _, mode := range modes {
+		b.Run(mode.name, func(b *testing.B) {
+			b.ReportAllocs()
 
-	b.Run("with_normalizer", func(b *testing.B) {
-		b.ReportAllocs()
-
-		for b.Loop() {
-			f := finder.New(
-				finder.WithNormalizer(normalizer.New()),
-			)
-			_ = f.Load(source.Lines())
-		}
-	})
+			for b.Loop() {
+				f := finder.New(finder.WithNormalizer(mode.normalizer()))
+				_ = f.Load(source.Lines())
+			}
+		})
+	}
 }
 
 func BenchmarkFinderFind_MatchDensity(b *testing.B) {

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/escape"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
 func TestLoadSources(t *testing.T) {
@@ -50,20 +51,19 @@ func TestLoadSources(t *testing.T) {
 			paths := make([]string, len(tc.files))
 			for i, file := range tc.files {
 				paths[i] = filepath.Join(dir, file)
-				require.NoError(t, os.MkdirAll(filepath.Dir(paths[i]), 0o750))
 
 				if file == tc.missing {
+					// Only the file is missing, not its directory.
+					require.NoError(t, os.MkdirAll(filepath.Dir(paths[i]), 0o750))
+
 					if tc.dangling {
-						err := os.Symlink(filepath.Join(dir, "nowhere.yaml"), paths[i])
-						if err != nil {
-							t.Skipf("symlink %q: %v", file, err)
-						}
+						yamltest.SymlinkOrSkip(t, filepath.Join(dir, "nowhere.yaml"), paths[i])
 					}
 
 					continue
 				}
 
-				writeFile(t, dir, file, "a: 1\n")
+				yamltest.WriteFile(t, dir, file, "a: 1\n")
 			}
 
 			sources, err := loadSources(paths)
@@ -91,4 +91,23 @@ func TestLoadSources(t *testing.T) {
 			assert.Equal(t, labels, m.viewport.RevisionNames())
 		})
 	}
+}
+
+func TestViewCmdLineNumbersFlag(t *testing.T) {
+	t.Parallel()
+
+	// A boolean shorthand takes no value, so a shorthand on a flag that
+	// defaults to true could only repeat the default. The long flag carries
+	// the value that turns the line numbers off.
+	flag := viewCmd().Flags().Lookup("line-numbers")
+	require.NotNil(t, flag)
+	assert.Empty(t, flag.Shorthand)
+	assert.Equal(t, "true", flag.DefValue)
+
+	cmd := viewCmd()
+	require.NoError(t, cmd.Flags().Parse([]string{"--line-numbers=false"}))
+
+	lineNumbers, err := cmd.Flags().GetBool("line-numbers")
+	require.NoError(t, err)
+	assert.False(t, lineNumbers)
 }

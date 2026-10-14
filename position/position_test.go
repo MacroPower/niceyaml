@@ -1,6 +1,7 @@
 package position_test
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -60,78 +61,50 @@ func TestNewFromToken(t *testing.T) {
 	}
 }
 
-func TestPosition_String(t *testing.T) {
+func TestString(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		pos  position.Position
-		want string
+		value fmt.Stringer
+		want  string
 	}{
-		"zero position":             {pos: position.New(0, 0), want: "0:0"},
-		"line 5 col 15 (0-indexed)": {pos: position.New(4, 14), want: "4:14"},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, tc.pos.String())
-		})
-	}
-}
-
-func TestRange_String(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		r    position.Range
-		want string
-	}{
-		"single point":      {r: position.NewRange(position.New(0, 0), position.New(0, 0)), want: "0:0-0:0"},
-		"single line range": {r: position.NewRange(position.New(0, 5), position.New(0, 10)), want: "0:5-0:10"},
-		"multi-line range":  {r: position.NewRange(position.New(2, 3), position.New(5, 8)), want: "2:3-5:8"},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, tc.r.String())
-		})
-	}
-}
-
-func TestRanges_String(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		ranges position.Ranges
-		want   string
-	}{
-		"empty ranges": {
-			ranges: nil,
-			want:   "",
+		"Position zero":                      {value: position.New(0, 0), want: "0:0"},
+		"Position line 5 col 15 (0-indexed)": {value: position.New(4, 14), want: "4:14"},
+		"Range single point": {
+			value: position.NewRange(position.New(0, 0), position.New(0, 0)),
+			want:  "0:0-0:0",
 		},
-		"single range": {
-			ranges: position.Ranges{
+		"Range single line": {
+			value: position.NewRange(position.New(0, 5), position.New(0, 10)),
+			want:  "0:5-0:10",
+		},
+		"Range multi-line": {
+			value: position.NewRange(position.New(2, 3), position.New(5, 8)),
+			want:  "2:3-5:8",
+		},
+		"Ranges empty": {value: position.Ranges(nil), want: ""},
+		"Ranges single range": {
+			value: position.Ranges{
 				position.NewRange(position.New(0, 0), position.New(0, 5)),
 			},
 			want: "0:0-0:5",
 		},
-		"multiple ranges": {
-			ranges: position.Ranges{
+		"Ranges multiple ranges": {
+			value: position.Ranges{
 				position.NewRange(position.New(0, 0), position.New(0, 5)),
 				position.NewRange(position.New(2, 3), position.New(4, 8)),
 			},
 			want: "0:0-0:5, 2:3-4:8",
 		},
+		"Span zero values":     {value: position.NewSpan(0, 0), want: "0-0"},
+		"Span positive values": {value: position.NewSpan(5, 10), want: "5-10"},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, tc.ranges.String())
+			assert.Equal(t, tc.want, tc.value.String())
 		})
 	}
 }
@@ -417,26 +390,6 @@ func TestSpan_Overlaps(t *testing.T) {
 	}
 }
 
-func TestSpan_String(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input position.Span
-		want  string
-	}{
-		"zero values":     {input: position.NewSpan(0, 0), want: "0-0"},
-		"positive values": {input: position.NewSpan(5, 10), want: "5-10"},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, tc.input.String())
-		})
-	}
-}
-
 func TestGroupIndices(t *testing.T) {
 	t.Parallel()
 
@@ -612,79 +565,93 @@ func TestSpans_Clamp(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input    position.Spans
-		min, max int
-		want     position.Spans
+		input  position.Spans
+		lo, hi int
+		want   position.Spans
 	}{
 		"nil spans": {
 			input: nil,
-			min:   0, max: 100,
-			want: nil,
+			lo:    0,
+			hi:    100,
+			want:  nil,
 		},
 		"empty spans": {
 			input: position.Spans{},
-			min:   0, max: 100,
-			want: nil,
+			lo:    0,
+			hi:    100,
+			want:  nil,
 		},
 		"no clamping needed": {
 			input: position.Spans{position.NewSpan(5, 10)},
-			min:   0, max: 100,
-			want: position.Spans{position.NewSpan(5, 10)},
+			lo:    0,
+			hi:    100,
+			want:  position.Spans{position.NewSpan(5, 10)},
 		},
 		"clamp start below min": {
 			input: position.Spans{position.NewSpan(-5, 10)},
-			min:   0, max: 100,
-			want: position.Spans{position.NewSpan(0, 10)},
+			lo:    0,
+			hi:    100,
+			want:  position.Spans{position.NewSpan(0, 10)},
 		},
 		"clamp end above max": {
 			input: position.Spans{position.NewSpan(5, 150)},
-			min:   0, max: 100,
-			want: position.Spans{position.NewSpan(5, 100)},
+			lo:    0,
+			hi:    100,
+			want:  position.Spans{position.NewSpan(5, 100)},
 		},
 		"clamp both": {
 			input: position.Spans{position.NewSpan(-10, 200)},
-			min:   0, max: 100,
-			want: position.Spans{position.NewSpan(0, 100)},
+			lo:    0,
+			hi:    100,
+			want:  position.Spans{position.NewSpan(0, 100)},
 		},
 		"multiple spans clamp": {
 			input: position.Spans{position.NewSpan(-5, 10), position.NewSpan(90, 150)},
-			min:   0, max: 100,
-			want: position.Spans{position.NewSpan(0, 10), position.NewSpan(90, 100)},
+			lo:    0,
+			hi:    100,
+			want:  position.Spans{position.NewSpan(0, 10), position.NewSpan(90, 100)},
 		},
 		"span past the upper bound is dropped": {
 			input: position.Spans{position.NewSpan(9, 11)},
-			min:   0, max: 5,
-			want: nil,
+			lo:    0,
+			hi:    5,
+			want:  nil,
 		},
 		"span below the lower bound is dropped": {
 			input: position.Spans{position.NewSpan(-4, -1)},
-			min:   0, max: 5,
-			want: nil,
+			lo:    0,
+			hi:    5,
+			want:  nil,
 		},
 		"inverted span is dropped": {
 			input: position.Spans{position.NewSpan(3, 1)},
-			min:   0, max: 5,
-			want: nil,
+			lo:    0,
+			hi:    5,
+			want:  nil,
 		},
 		"empty span is dropped": {
 			input: position.Spans{position.NewSpan(2, 2)},
-			min:   0, max: 5,
-			want: nil,
+			lo:    0,
+			hi:    5,
+			want:  nil,
 		},
 		"dropped spans leave the rest in order": {
 			input: position.Spans{position.NewSpan(0, 2), position.NewSpan(7, 9), position.NewSpan(3, 5)},
-			min:   0, max: 5,
-			want: position.Spans{position.NewSpan(0, 2), position.NewSpan(3, 5)},
+			lo:    0,
+			hi:    5,
+			want:  position.Spans{position.NewSpan(0, 2), position.NewSpan(3, 5)},
 		},
 		"full int range is kept": {
 			input: position.Spans{position.NewSpan(math.MinInt, math.MaxInt)},
-			min:   math.MinInt, max: math.MaxInt,
-			want: position.Spans{position.NewSpan(math.MinInt, math.MaxInt)},
+			lo:    math.MinInt,
+			hi:    math.MaxInt,
+			want:  position.Spans{position.NewSpan(math.MinInt, math.MaxInt)},
 		},
 		"span wider than MaxInt is kept": {
 			input: position.Spans{position.NewSpan(-1, math.MaxInt)},
-			min:   -1, max: math.MaxInt,
-			want: position.Spans{position.NewSpan(-1, math.MaxInt)},
+			lo:    -1,
+			hi:    math.MaxInt,
+			want:  position.Spans{position.NewSpan(-1, math.MaxInt)},
 		},
 	}
 
@@ -692,7 +659,7 @@ func TestSpans_Clamp(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, tc.input.Clamp(tc.min, tc.max))
+			assert.Equal(t, tc.want, tc.input.Clamp(tc.lo, tc.hi))
 		})
 	}
 }

@@ -1,6 +1,7 @@
 package kind_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,10 +17,7 @@ func TestParent_ReachesText(t *testing.T) {
 	// reach Text, so a cycle in the hierarchy would hang them. A walk from
 	// any predefined kind must end at Text in fewer steps than there are
 	// kinds.
-	n := 0
-	for range kind.All() {
-		n++
-	}
+	n := len(slices.Collect(kind.All()))
 
 	for k := range kind.All() {
 		cur := k
@@ -38,7 +36,7 @@ func TestParent_ReachesText(t *testing.T) {
 func TestParent(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		kind kind.Kind
 		want kind.Kind
 	}{
@@ -49,7 +47,7 @@ func TestParent(t *testing.T) {
 		"leaf":                  {kind: kind.LiteralNumberFloat, want: kind.LiteralNumber},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 

@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"fmt"
 	"math"
-	"os"
 	"runtime"
 	"slices"
 	"strings"
@@ -41,7 +40,7 @@ func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
 	// width, so the row counts must follow the decoration of the current
 	// term and selection rather than the one before it.
 	widen := bracketStyle("<<", ">>")
-	p := barePrinter(highlightStyles(widen, widen))
+	p := yamltest.NewPlainPrinter(printer.WithStyles(highlightStyles(widen, widen)))
 
 	m := testModel(p, 24, 2)
 	m.SetWordWrap(true)
@@ -66,7 +65,7 @@ func TestViewport_SearchNextRefreshesRowCounts(t *testing.T) {
 	// Only the selected match widens, so each move of the selection changes
 	// the rows and the width of the line it leaves and of the line it
 	// reaches. The row counts and the horizontal scroll bound follow both.
-	p := barePrinter(highlightStyles(bracketStyle("<<", ">>"), lipgloss.NewStyle()))
+	p := yamltest.NewPlainPrinter(printer.WithStyles(highlightStyles(bracketStyle("<<", ">>"), lipgloss.NewStyle())))
 
 	// Line i is 9+i columns wide, or 13+i with the selected match, so the
 	// widest row and the lines that wrap change with the selection.
@@ -228,7 +227,8 @@ func TestViewport_SearchTermRefreshesRowCounts(t *testing.T) {
 	// they reach. The row counts, the horizontal scroll bound, and the
 	// render follow every change of term.
 	widen := bracketStyle("<<", ">>")
-	p := barePrinter(highlightStyles(widen, widen)).With(
+	p := yamltest.NewPlainPrinter(
+		printer.WithStyles(highlightStyles(widen, widen)),
 		printer.WithContainerStyle(normalBorder().Padding(0, 1)),
 	)
 
@@ -307,7 +307,7 @@ func TestViewport_SearchHighlightsMatchAcrossLines(t *testing.T) {
 	// line, including when the window starts on the second of them. The
 	// last line differs between the revisions, so every other line sits at
 	// the same index in each view mode.
-	before := numbered(30, "k%[1]d: v%[1]d")
+	before := yamltest.GenerateLines(30, "k%[1]d: v%[1]d")
 	after := replaceLine(before, 29, "k29: changed")
 
 	tcs := map[string]struct {
@@ -362,11 +362,7 @@ func TestViewport_SearchHighlightsMatchAcrossLines(t *testing.T) {
 // container frame, for predictable golden output. Its gutter marks the
 // lines of a diff.
 func testPrinter() *printer.Printer {
-	return printer.New(
-		printer.WithStyles(style.Styles{}),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.DiffGutter),
-	)
+	return yamltest.NewPlainPrinter(printer.WithGutter(printer.DiffGutter))
 }
 
 // testPrinterWithLineNumbers returns [testPrinter] with the default gutter,
@@ -387,11 +383,6 @@ func testPrinterWithSearch() *printer.Printer {
 	return testPrinter().With(printer.WithStyles(yamltest.NewXMLStyles(
 		yamltest.XMLStyleInclude(kind.GenericHighlightDim, kind.GenericHighlight),
 	)))
-}
-
-// barePrinter returns [testPrinter] with the given styles and no gutter.
-func barePrinter(styles style.Styler) *printer.Printer {
-	return testPrinter().With(printer.WithStyles(styles), printer.WithGutter(printer.NoGutter))
 }
 
 // framedPrinter returns [testPrinter] with the given container style.
@@ -535,20 +526,6 @@ func framedRows(t *testing.T, m *yamlviewport.Model, n int) []string {
 	return rows
 }
 
-// numbered returns a document of n lines. Each line is format with the
-// index of the line in place of its verb. GenerateLines in yamltest writes
-// the same document, but the niceyaml version this module requires
-// predates it, and the tests must build against that version.
-func numbered(n int, format string) string {
-	var sb strings.Builder
-
-	for i := range n {
-		fmt.Fprintf(&sb, format+"\n", i)
-	}
-
-	return sb.String()
-}
-
 // replaceLine returns doc with the line at index i replaced by text.
 func replaceLine(doc string, i int, text string) string {
 	lines := strings.SplitAfter(doc, "\n")
@@ -573,7 +550,7 @@ func termRevisions() (string, string) {
 // lines 20 and 30, and a second revision that changes line 5 and keeps both
 // matches.
 func needleRevisions() (string, string) {
-	before := numbered(40, "key%d: value")
+	before := yamltest.GenerateLines(40, "key%d: value")
 	before = replaceLine(before, 20, "key20: needle")
 	before = replaceLine(before, 30, "key30: needle")
 
@@ -678,6 +655,10 @@ var (
 		line10: j
 	`)
 
+	// One line that holds "alpha", and a second revision that adds another.
+	alphaYAML      = "key: alpha\n"
+	alphaTwiceYAML = stringtest.LinesLF("key: alpha", "other: alpha")
+
 	// Three short lines, and a second revision that changes the middle one.
 	threeYAML        = stringtest.LinesLF("a: 1", "b: 2", "c: 3")
 	threeChangedYAML = stringtest.LinesLF("a: 1", "b: 9", "c: 3")
@@ -742,12 +723,13 @@ func TestViewport_Golden(t *testing.T) {
 		printer *printer.Printer
 		style   lipgloss.Style
 		yaml    string
-		width   int
-		height  int
+		// The viewport is 80 columns wide and 24 rows tall unless the case
+		// sets width or height.
+		width  int
+		height int
 	}
 
-	fullYAML, err := os.ReadFile("testdata/full.yaml")
-	require.NoError(t, err)
+	fullYAML := yamltest.ReadFile(t, "testdata/full.yaml")
 
 	simpleYAML := stringtest.Input(`
 		key: value
@@ -795,32 +777,22 @@ func TestViewport_Golden(t *testing.T) {
 			},
 		},
 		"BasicView": {
-			yaml:   simpleYAML,
-			width:  80,
-			height: 24,
+			yaml: simpleYAML,
 		},
 		"WithLineNumbers": {
 			printer: testPrinterWithLineNumbers(),
 			yaml:    simpleYAML,
-			width:   80,
-			height:  24,
 		},
 		"DefaultColors": {
 			printer: testPrinterWithColors(),
 			yaml:    simpleYAML,
-			width:   80,
-			height:  24,
 		},
 		"FullYAML": {
-			yaml:   string(fullYAML),
-			width:  80,
-			height: 24,
+			yaml: fullYAML,
 		},
 		"SearchHighlight": {
 			printer: testPrinterWithSearch(),
 			yaml:    simpleYAML,
-			width:   80,
-			height:  24,
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("item")
 			},
@@ -832,12 +804,9 @@ func TestViewport_Golden(t *testing.T) {
 				addRevisions(m, diffBeforeYAML, diffAfterYAML)
 				m.GotoRevision(1) // Show diff between revision 0 and 1.
 			},
-			width:  80,
-			height: 24,
 		},
 		"ScrolledContent": {
-			yaml:   string(fullYAML),
-			width:  80,
+			yaml:   fullYAML,
 			height: 10,
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetYOffset(15) // Scroll down to middle of content.
@@ -864,15 +833,11 @@ func TestViewport_Golden(t *testing.T) {
 			},
 		},
 		"EmptyContent": {
-			yaml:   "",
-			width:  80,
-			height: 24,
+			yaml: "",
 		},
 		"StyledContainer": {
-			style:  normalBorder().Padding(1),
-			yaml:   simpleYAML,
-			width:  80,
-			height: 24,
+			style: normalBorder().Padding(1),
+			yaml:  simpleYAML,
 		},
 		"SmallViewport": {
 			yaml:   simpleYAML,
@@ -884,8 +849,6 @@ func TestViewport_Golden(t *testing.T) {
 			// each navigation case selects a different match.
 			printer: testPrinterWithSearch(),
 			yaml:    simpleYAML,
-			width:   80,
-			height:  24,
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("i")
 				m.SearchNext() // Move to the second match, in item1.
@@ -894,8 +857,6 @@ func TestViewport_Golden(t *testing.T) {
 		"SearchNoMatches": {
 			printer: testPrinterWithSearch(),
 			yaml:    simpleYAML,
-			width:   80,
-			height:  24,
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("nonexistent")
 			},
@@ -903,8 +864,6 @@ func TestViewport_Golden(t *testing.T) {
 		"SearchNavigatePrevious": {
 			printer: testPrinterWithSearch(),
 			yaml:    simpleYAML,
-			width:   80,
-			height:  24,
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("i")
 				m.SearchPrevious() // Wrap from the first match to the last, in child.
@@ -913,8 +872,6 @@ func TestViewport_Golden(t *testing.T) {
 		"SearchWrapAroundNext": {
 			printer: testPrinterWithSearch(),
 			yaml:    simpleYAML,
-			width:   80,
-			height:  24,
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("i")
 				m.SearchNext() // Second match, in item1.
@@ -926,8 +883,6 @@ func TestViewport_Golden(t *testing.T) {
 		"SearchWrapAroundPrevious": {
 			printer: testPrinterWithSearch(),
 			yaml:    simpleYAML,
-			width:   80,
-			height:  24,
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("i")
 				m.SearchPrevious() // Wrap to the last match, in child.
@@ -943,8 +898,7 @@ func TestViewport_Golden(t *testing.T) {
 				item: item_value
 				another: data
 			`),
-			width:  120,
-			height: 24,
+			width: 120,
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("item") // Matches twice on the same line.
 			},
@@ -952,8 +906,6 @@ func TestViewport_Golden(t *testing.T) {
 		"SearchClear": {
 			printer: testPrinterWithSearch(),
 			yaml:    simpleYAML,
-			width:   80,
-			height:  24,
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("item")
 				m.ClearSearch() // Clearing the search removes the highlights.
@@ -963,8 +915,7 @@ func TestViewport_Golden(t *testing.T) {
 			// With a small viewport, setting a search term scrolls to the first match.
 			// "timeout" first appears on line 36 in full.yaml.
 			printer: testPrinterWithSearch(),
-			yaml:    string(fullYAML),
-			width:   80,
+			yaml:    fullYAML,
 			height:  10,
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("timeout") // First match is on line 36.
@@ -974,8 +925,7 @@ func TestViewport_Golden(t *testing.T) {
 			// Navigating to the next match scrolls the viewport.
 			// "timeout" appears on lines 36 and 41 in full.yaml.
 			printer: testPrinterWithSearch(),
-			yaml:    string(fullYAML),
-			width:   80,
+			yaml:    fullYAML,
 			height:  10,
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("timeout")
@@ -986,8 +936,7 @@ func TestViewport_Golden(t *testing.T) {
 			// Navigating backwards scrolls to the previous match.
 			// Start at the second "timeout" match, go back to the first.
 			printer: testPrinterWithSearch(),
-			yaml:    string(fullYAML),
-			width:   80,
+			yaml:    fullYAML,
 			height:  10,
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("timeout")
@@ -1001,7 +950,12 @@ func TestViewport_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := testModel(tc.printer, tc.width, tc.height, yamlviewport.WithContainerStyle(tc.style))
+			m := testModel(
+				tc.printer,
+				cmp.Or(tc.width, 80),
+				cmp.Or(tc.height, 24),
+				yamlviewport.WithContainerStyle(tc.style),
+			)
 			setRevision(&m, tc.yaml)
 
 			if tc.setupFunc != nil {
@@ -1016,23 +970,17 @@ func TestViewport_Golden(t *testing.T) {
 func TestViewport_Scrolling(t *testing.T) {
 	t.Parallel()
 
-	horizontalYAML := stringtest.Input(`
-		short: x
-		very_long_line: "This is a very long value that extends beyond the viewport width"
-		another: y
-	`)
-
 	tcs := map[string]struct {
-		setup  func(m *yamlviewport.Model)
-		test   func(t *testing.T, m *yamlviewport.Model)
-		yaml   string
+		setup func(m *yamlviewport.Model)
+		test  func(t *testing.T, m *yamlviewport.Model)
+		yaml  string
+		// The viewport is 80 columns wide and 5 rows tall unless the case
+		// sets width or height.
 		width  int
 		height int
 	}{
 		"Vertical/ScrollDown": {
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
+			yaml: verticalYAML,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Equal(t, 0, m.YOffset())
@@ -1045,9 +993,7 @@ func TestViewport_Scrolling(t *testing.T) {
 			},
 		},
 		"Vertical/ScrollUp": {
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
+			yaml: verticalYAML,
 			setup: func(m *yamlviewport.Model) {
 				m.SetYOffset(5)
 			},
@@ -1058,9 +1004,7 @@ func TestViewport_Scrolling(t *testing.T) {
 			},
 		},
 		"Vertical/PageDown": {
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
+			yaml: verticalYAML,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				m.PageDown()
@@ -1068,9 +1012,7 @@ func TestViewport_Scrolling(t *testing.T) {
 			},
 		},
 		"Vertical/PageUp": {
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
+			yaml: verticalYAML,
 			setup: func(m *yamlviewport.Model) {
 				m.GotoBottom()
 			},
@@ -1081,9 +1023,7 @@ func TestViewport_Scrolling(t *testing.T) {
 			},
 		},
 		"Vertical/ScrollDownNegativeAtBottom": {
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
+			yaml: verticalYAML,
 			setup: func(m *yamlviewport.Model) {
 				m.GotoBottom()
 			},
@@ -1094,47 +1034,15 @@ func TestViewport_Scrolling(t *testing.T) {
 			},
 		},
 		"Vertical/ScrollUpNegativeAtTop": {
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
+			yaml: verticalYAML,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				m.ScrollUp(-3)
 				assert.Equal(t, 3, m.YOffset())
 			},
 		},
-		"Vertical/InvertedWheelAtTop": {
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
-			setup: func(m *yamlviewport.Model) {
-				m.MouseWheelDelta = -3
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-
-				*m, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
-				assert.Equal(t, 3, m.YOffset())
-			},
-		},
-		"Vertical/InvertedWheelAtBottom": {
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
-			setup: func(m *yamlviewport.Model) {
-				m.MouseWheelDelta = -3
-				m.GotoBottom()
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-
-				*m, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
-				assert.Equal(t, 2, m.YOffset())
-			},
-		},
 		"Vertical/HalfPageDown": {
 			yaml:   verticalYAML,
-			width:  80,
 			height: 6,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -1144,7 +1052,6 @@ func TestViewport_Scrolling(t *testing.T) {
 		},
 		"Vertical/HalfPageUp": {
 			yaml:   verticalYAML,
-			width:  80,
 			height: 6,
 			setup: func(m *yamlviewport.Model) {
 				m.GotoBottom()
@@ -1157,9 +1064,7 @@ func TestViewport_Scrolling(t *testing.T) {
 			},
 		},
 		"Vertical/GotoTopBottom": {
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
+			yaml: verticalYAML,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				m.GotoBottom()
@@ -1171,9 +1076,7 @@ func TestViewport_Scrolling(t *testing.T) {
 			},
 		},
 		"Vertical/ScrollPercent": {
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
+			yaml: verticalYAML,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.InDelta(t, 0.0, m.ScrollPercent(), 0.01)
@@ -1184,7 +1087,6 @@ func TestViewport_Scrolling(t *testing.T) {
 		},
 		"Vertical/ScrollDownByZero": {
 			yaml:   verticalYAML,
-			width:  80,
 			height: 2,
 			setup: func(m *yamlviewport.Model) {
 				m.SetYOffset(1)
@@ -1198,7 +1100,6 @@ func TestViewport_Scrolling(t *testing.T) {
 		},
 		"Vertical/ScrollUpByZero": {
 			yaml:   verticalYAML,
-			width:  80,
 			height: 2,
 			setup: func(m *yamlviewport.Model) {
 				m.SetYOffset(2)
@@ -1210,7 +1111,6 @@ func TestViewport_Scrolling(t *testing.T) {
 			},
 		},
 		"Vertical/ScrollDownWithoutLines": {
-			width:  80,
 			height: 10,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -1219,7 +1119,6 @@ func TestViewport_Scrolling(t *testing.T) {
 			},
 		},
 		"Vertical/ScrollUpWithoutLines": {
-			width:  80,
 			height: 10,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -1230,7 +1129,6 @@ func TestViewport_Scrolling(t *testing.T) {
 		"Vertical/HalfPageOfOneRow": {
 			// Half a page of one row of content still scrolls one row.
 			yaml:   verticalYAML,
-			width:  80,
 			height: 1,
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -1239,65 +1137,6 @@ func TestViewport_Scrolling(t *testing.T) {
 
 				m.HalfPageUp()
 				assert.Equal(t, 0, m.YOffset())
-			},
-		},
-		"Horizontal/ScrollRight": {
-			yaml:   horizontalYAML,
-			width:  40,
-			height: 10,
-			setup: func(m *yamlviewport.Model) {
-				m.ToggleWordWrap() // Disable wrap.
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, 0, m.XOffset())
-
-				m.ScrollRight(10)
-				assert.Equal(t, 10, m.XOffset())
-			},
-		},
-		"Horizontal/ScrollLeft": {
-			yaml:   horizontalYAML,
-			width:  40,
-			height: 10,
-			setup: func(m *yamlviewport.Model) {
-				m.ToggleWordWrap() // Disable wrap.
-				m.SetXOffset(20)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				m.ScrollLeft(5)
-				assert.Equal(t, 15, m.XOffset())
-			},
-		},
-		"Horizontal/SetHorizontalStep": {
-			yaml:   horizontalYAML,
-			width:  40,
-			height: 10,
-			setup: func(m *yamlviewport.Model) {
-				m.ToggleWordWrap() // Disable wrap.
-				m.SetHorizontalStep(10)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-
-				*m, _ = m.Update(tea.KeyPressMsg{Code: 'l'})
-				assert.Equal(t, 10, m.XOffset())
-
-				*m, _ = m.Update(tea.KeyPressMsg{Code: 'h'})
-				assert.Equal(t, 0, m.XOffset())
-			},
-		},
-		"Horizontal/ScrollPercent": {
-			yaml:   horizontalYAML,
-			width:  40,
-			height: 10,
-			setup: func(m *yamlviewport.Model) {
-				m.ToggleWordWrap() // Disable wrap.
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.InDelta(t, 0.0, m.HorizontalScrollPercent(), 0.01)
 			},
 		},
 		"Horizontal/ToggleWordWrapResetsXOffset": {
@@ -1352,7 +1191,7 @@ func TestViewport_Scrolling(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := testModel(testPrinter(), tc.width, tc.height)
+			m := testModel(testPrinter(), cmp.Or(tc.width, 80), cmp.Or(tc.height, 5))
 
 			// A case without YAML scrolls a model that holds no revision.
 			if tc.yaml != "" {
@@ -1362,6 +1201,65 @@ func TestViewport_Scrolling(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(&m)
 			}
+
+			tc.test(t, &m)
+		})
+	}
+}
+
+func TestViewport_ScrollingWithoutWrap(t *testing.T) {
+	t.Parallel()
+
+	// Each case scrolls wideYAML in a 40 by 10 viewport with word wrap
+	// off, so its long line runs past the right edge.
+	tcs := map[string]struct {
+		test func(t *testing.T, m *yamlviewport.Model)
+	}{
+		"ScrollRight": {
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 0, m.XOffset())
+
+				m.ScrollRight(10)
+				assert.Equal(t, 10, m.XOffset())
+			},
+		},
+		"ScrollLeft": {
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				m.SetXOffset(20)
+
+				m.ScrollLeft(5)
+				assert.Equal(t, 15, m.XOffset())
+			},
+		},
+		"SetHorizontalStep": {
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				m.SetHorizontalStep(10)
+
+				*m, _ = m.Update(tea.KeyPressMsg{Code: 'l'})
+				assert.Equal(t, 10, m.XOffset())
+
+				*m, _ = m.Update(tea.KeyPressMsg{Code: 'h'})
+				assert.Equal(t, 0, m.XOffset())
+			},
+		},
+		"HorizontalScrollPercent": {
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.InDelta(t, 0.0, m.HorizontalScrollPercent(), 0.01)
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 40, 10)
+			setRevision(&m, wideYAML)
+			m.SetWordWrap(false)
 
 			tc.test(t, &m)
 		})
@@ -1678,7 +1576,7 @@ func TestViewport_ContainerStyleKeepsTopLine(t *testing.T) {
 	// at the top.
 	m := testModel(testPrinter(), 40, 13)
 	m.SetContainerStyle(lipgloss.NewStyle().PaddingTop(3))
-	setRevision(&m, numbered(30, "k%02d: word word word word"))
+	setRevision(&m, yamltest.GenerateLines(30, "k%02d: word word word word"))
 	m.GotoBottom()
 	require.Equal(t, 20, m.YOffset())
 
@@ -1827,7 +1725,7 @@ func TestViewport_SearchBeforeSize(t *testing.T) {
 
 	// A program sets the search term before its first window size message.
 	// The match stays on screen once the lines wrap to that size.
-	src := numbered(60, "k%d: "+strings.TrimSpace(strings.Repeat("word ", 8))) + "needle: here\n"
+	src := yamltest.GenerateLines(60, "k%d: "+strings.TrimSpace(strings.Repeat("word ", 8))) + "needle: here\n"
 
 	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 	setRevision(&m, src)
@@ -1842,7 +1740,7 @@ func TestViewport_SearchBeforeSize(t *testing.T) {
 func TestViewport_ContainerFrame(t *testing.T) {
 	t.Parallel()
 
-	src := numbered(10, "line%d: v")
+	src := yamltest.GenerateLines(10, "line%d: v")
 
 	// The frame of the printer's container style adds rows above the first
 	// line and below the last. Each offset shows the frame and line rows it
@@ -2401,7 +2299,7 @@ func TestViewport_FixedSizeContainerStyle(t *testing.T) {
 			t.Parallel()
 
 			m := testModel(testPrinter(), 60, 40, yamlviewport.WithContainerStyle(tc.style))
-			setRevision(&m, "a: 1\nb: 2\n")
+			setRevision(&m, stringtest.LinesLF("a: 1", "b: 2"))
 
 			view := m.View()
 			assert.Equal(t, tc.wantWidth, lipgloss.Width(view))
@@ -2449,7 +2347,7 @@ func TestViewport_MaxSizeContainerStyle(t *testing.T) {
 			t.Parallel()
 
 			m := testModel(testPrinter(), 20, 12, yamlviewport.WithContainerStyle(tc.style))
-			setRevision(&m, numbered(50, "k%d: v"))
+			setRevision(&m, yamltest.GenerateLines(50, "k%d: v"))
 
 			view := m.View()
 			assert.Equal(t, tc.wantWidth, lipgloss.Width(view))
@@ -2523,7 +2421,7 @@ func TestViewport_PrinterContainerSizeIgnored(t *testing.T) {
 
 			m := testModel(framedPrinter(tc.container), tc.width, tc.height)
 			m.SetWordWrap(true)
-			setRevision(&m, numbered(tc.lines, tc.line))
+			setRevision(&m, yamltest.GenerateLines(tc.lines, tc.line))
 
 			assert.Equal(t, tc.wantTotal, m.TotalRowCount())
 
@@ -2604,7 +2502,11 @@ func TestViewport_ViewFitsWidth(t *testing.T) {
 			for width := 1; width <= 12; width++ {
 				m := testModel(tc.printer, width, height)
 				m.SetViewMode(tc.mode)
-				addRevisions(&m, "name: original\ncount: 10\n", "name: modified\ncount: 20\n")
+				addRevisions(
+					&m,
+					stringtest.LinesLF("name: original", "count: 10"),
+					stringtest.LinesLF("name: modified", "count: 20"),
+				)
 
 				view := m.View()
 				if view == "" {
@@ -2766,18 +2668,6 @@ func TestViewport_Revisions(t *testing.T) {
 		// The documents the model holds a revision of before setup runs.
 		docs []string
 	}{
-		"ClearRevisions/Empty": {
-			setup: func(m *yamlviewport.Model) {
-				m.ClearRevisions()
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, 0, m.RevisionCount())
-				assert.Equal(t, 0, m.RevisionIndex())
-				assert.False(t, m.ShowingDiff())
-				assert.Empty(t, m.RevisionName())
-			},
-		},
 		"Empty": {
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -2785,6 +2675,13 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.True(t, m.AtFirstRevision())
 				assert.True(t, m.AtLatestRevision())
 				assert.Empty(t, m.RevisionNames())
+
+				// Clearing an empty history leaves it empty.
+				m.ClearRevisions()
+				assert.Equal(t, 0, m.RevisionCount())
+				assert.Equal(t, 0, m.RevisionIndex())
+				assert.False(t, m.ShowingDiff())
+				assert.Empty(t, m.RevisionName())
 			},
 		},
 		"AtFirstRevision/Multiple": {
@@ -3176,7 +3073,7 @@ func TestViewport_SameDiffBaseKeepsPosition(t *testing.T) {
 	// At revision index 1, adjacent and origin both compare against the
 	// first revision, so a change between them shows the same diff and
 	// leaves the scroll offset and the selected match where they are.
-	v1 := numbered(50, "k%d: v")
+	v1 := yamltest.GenerateLines(50, "k%d: v")
 
 	m := testModel(testPrinter(), 40, 10)
 	addRevisions(&m, v1, replaceLine(v1, 20, "k20: w"))
@@ -3222,40 +3119,33 @@ func TestViewport_ViewModeWithoutDiffKeepsPosition(t *testing.T) {
 		to     yamlviewport.ViewMode
 		diff   bool
 		toggle bool
-		keep   bool
 	}{
 		"set full to hunks": {
 			from: yamlviewport.ViewModeFull,
 			to:   yamlviewport.ViewModeHunks,
-			keep: true,
 		},
 		"set full to side-by-side": {
 			from: yamlviewport.ViewModeFull,
 			to:   yamlviewport.ViewModeSideBySide,
-			keep: true,
 		},
 		"set side-by-side to full": {
 			from: yamlviewport.ViewModeSideBySide,
 			to:   yamlviewport.ViewModeFull,
-			keep: true,
 		},
 		"toggle full to hunks": {
 			from:   yamlviewport.ViewModeFull,
 			to:     yamlviewport.ViewModeHunks,
 			toggle: true,
-			keep:   true,
 		},
 		"toggle hunks to side-by-side": {
 			from:   yamlviewport.ViewModeHunks,
 			to:     yamlviewport.ViewModeSideBySide,
 			toggle: true,
-			keep:   true,
 		},
 		"toggle side-by-side to full": {
 			from:   yamlviewport.ViewModeSideBySide,
 			to:     yamlviewport.ViewModeFull,
 			toggle: true,
-			keep:   true,
 		},
 		"set full to hunks with diff": {
 			from: yamlviewport.ViewModeFull,
@@ -3270,7 +3160,7 @@ func TestViewport_ViewModeWithoutDiffKeepsPosition(t *testing.T) {
 		},
 	}
 
-	v1 := numbered(50, "k%d: v")
+	v1 := yamltest.GenerateLines(50, "k%d: v")
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
@@ -3301,12 +3191,12 @@ func TestViewport_ViewModeWithoutDiffKeepsPosition(t *testing.T) {
 
 			require.Equal(t, tc.to, m.ViewMode())
 
-			if tc.keep {
-				assert.Equal(t, 20, m.SearchIndex())
-				assert.Equal(t, topLine, m.TopLine())
-			} else {
+			if tc.diff {
 				assert.Equal(t, 0, m.SearchIndex())
 				assert.Equal(t, 0, m.TopLine())
+			} else {
+				assert.Equal(t, 20, m.SearchIndex())
+				assert.Equal(t, topLine, m.TopLine())
 			}
 		})
 	}
@@ -3342,16 +3232,6 @@ func TestViewport_State(t *testing.T) {
 				t.Helper()
 				m.SetHeight(50)
 				assert.Equal(t, 50, m.Height())
-			},
-		},
-		"Dimensions/ZeroDimensions": {
-			yaml:   "key: value",
-			width:  0,
-			height: 0,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				// View should return empty string for zero dimensions.
-				assert.Empty(t, m.View())
 			},
 		},
 		"LineCounts/VisibleLineCount": {
@@ -3449,140 +3329,91 @@ func TestViewport_Update(t *testing.T) {
 
 	// The change closure returns a second revision of verticalYAML.
 	change := func() *niceyaml.Source {
-		return niceyaml.NewSourceFromString("line1: modified\nline2: changed", niceyaml.WithName("change"))
+		return niceyaml.NewSourceFromString(
+			stringtest.JoinLF("line1: modified", "line2: changed"),
+			niceyaml.WithName("change"),
+		)
 	}
 
 	tcs := map[string]struct {
-		msg    tea.Msg
-		setup  func(m *yamlviewport.Model)
-		test   func(t *testing.T, m *yamlviewport.Model)
-		yaml   string
+		msg   tea.Msg
+		setup func(m *yamlviewport.Model)
+		// The checks of the updated model. A case without test compares
+		// the updated view with its golden file.
+		test func(t *testing.T, m *yamlviewport.Model)
+		yaml string
+		// The viewport is 40 columns wide and 5 rows tall unless the case
+		// sets width or height.
 		width  int
 		height int
-		golden bool
 	}{
 		// Golden file tests (verify rendered output).
 		"KeyDown": {
-			msg:    tea.KeyPressMsg{Code: 'j'},
-			yaml:   verticalYAML,
-			width:  40,
-			height: 5,
-			golden: true,
+			msg:  tea.KeyPressMsg{Code: 'j'},
+			yaml: verticalYAML,
 		},
 		"KeyUp": {
-			msg:    tea.KeyPressMsg{Code: 'k'},
-			yaml:   verticalYAML,
-			width:  40,
-			height: 5,
+			msg:  tea.KeyPressMsg{Code: 'k'},
+			yaml: verticalYAML,
 			setup: func(m *yamlviewport.Model) {
 				m.SetYOffset(3)
 			},
-			golden: true,
 		},
 		"KeyPageDown": {
-			msg:    tea.KeyPressMsg{Code: 'f'},
-			yaml:   verticalYAML,
-			width:  40,
-			height: 5,
-			golden: true,
+			msg:  tea.KeyPressMsg{Code: 'f'},
+			yaml: verticalYAML,
 		},
 		"KeyPageUp": {
-			msg:    tea.KeyPressMsg{Code: 'b'},
-			yaml:   verticalYAML,
-			width:  40,
-			height: 5,
+			msg:  tea.KeyPressMsg{Code: 'b'},
+			yaml: verticalYAML,
 			setup: func(m *yamlviewport.Model) {
 				m.GotoBottom()
 			},
-			golden: true,
 		},
 		"KeyHalfPageDown": {
 			msg:    tea.KeyPressMsg{Code: 'd'},
 			yaml:   verticalYAML,
-			width:  40,
 			height: 6,
-			golden: true,
 		},
 		"KeyHalfPageUp": {
 			msg:    tea.KeyPressMsg{Code: 'u'},
 			yaml:   verticalYAML,
-			width:  40,
 			height: 6,
 			setup: func(m *yamlviewport.Model) {
 				m.GotoBottom()
 			},
-			golden: true,
 		},
 		"KeyRight": {
-			msg:    tea.KeyPressMsg{Code: 'l'},
-			yaml:   wideYAML,
-			width:  40,
-			height: 5,
+			msg:  tea.KeyPressMsg{Code: 'l'},
+			yaml: wideYAML,
 			setup: func(m *yamlviewport.Model) {
 				m.ToggleWordWrap() // Disable wrap.
 			},
-			golden: true,
 		},
 		"KeyLeft": {
-			msg:    tea.KeyPressMsg{Code: 'h'},
-			yaml:   wideYAML,
-			width:  40,
-			height: 5,
+			msg:  tea.KeyPressMsg{Code: 'h'},
+			yaml: wideYAML,
 			setup: func(m *yamlviewport.Model) {
 				m.ToggleWordWrap() // Disable wrap.
 				m.SetXOffset(20)
 			},
-			golden: true,
 		},
 		"MouseWheelDown": {
-			msg:    tea.MouseWheelMsg{Button: tea.MouseWheelDown},
-			yaml:   verticalYAML,
-			width:  40,
-			height: 5,
-			golden: true,
+			msg:  tea.MouseWheelMsg{Button: tea.MouseWheelDown},
+			yaml: verticalYAML,
 		},
 		"MouseWheelUp": {
-			msg:    tea.MouseWheelMsg{Button: tea.MouseWheelUp},
-			yaml:   verticalYAML,
-			width:  40,
-			height: 5,
+			msg:  tea.MouseWheelMsg{Button: tea.MouseWheelUp},
+			yaml: verticalYAML,
 			setup: func(m *yamlviewport.Model) {
 				m.SetYOffset(5)
 			},
-			golden: true,
 		},
 		// Behavior tests (verify state changes).
-		"Behavior/MouseWheelDisabled": {
-			msg:    tea.MouseWheelMsg{Button: tea.MouseWheelDown},
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
-			setup: func(m *yamlviewport.Model) {
-				m.MouseWheelEnabled = false
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, 0, m.YOffset()) // Should not scroll.
-			},
-		},
-		"Behavior/MouseWheelCustomDelta": {
-			msg:    tea.MouseWheelMsg{Button: tea.MouseWheelDown},
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
-			setup: func(m *yamlviewport.Model) {
-				m.MouseWheelDelta = 5
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, 5, m.YOffset())
-			},
-		},
 		"Behavior/TabNextRevision": {
-			msg:    tea.KeyPressMsg{Code: tea.KeyTab},
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
+			msg:   tea.KeyPressMsg{Code: tea.KeyTab},
+			yaml:  verticalYAML,
+			width: 80,
 			setup: func(m *yamlviewport.Model) {
 				// Add a second revision and go to revision 0.
 				m.AddRevision(change())
@@ -3596,10 +3427,9 @@ func TestViewport_Update(t *testing.T) {
 			},
 		},
 		"Behavior/ShiftTabPrevRevision": {
-			msg:    tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift},
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
+			msg:   tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift},
+			yaml:  verticalYAML,
+			width: 80,
 			setup: func(m *yamlviewport.Model) {
 				// Add a second revision (starts at latest index 1).
 				m.AddRevision(change())
@@ -3615,10 +3445,9 @@ func TestViewport_Update(t *testing.T) {
 			},
 		},
 		"Behavior/MToggleDiffMode": {
-			msg:    tea.KeyPressMsg{Code: 'm'},
-			yaml:   verticalYAML,
-			width:  80,
-			height: 5,
+			msg:   tea.KeyPressMsg{Code: 'm'},
+			yaml:  verticalYAML,
+			width: 80,
 			setup: func(m *yamlviewport.Model) {
 				m.AddRevision(change())
 			},
@@ -3633,7 +3462,7 @@ func TestViewport_Update(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := testModel(testPrinter(), tc.width, tc.height)
+			m := testModel(testPrinter(), cmp.Or(tc.width, 40), cmp.Or(tc.height, 5))
 			setRevision(&m, tc.yaml)
 
 			if tc.setup != nil {
@@ -3642,13 +3471,63 @@ func TestViewport_Update(t *testing.T) {
 
 			updated, _ := m.Update(tc.msg)
 
-			if tc.golden {
+			if tc.test == nil {
 				golden.RequireEqual(t, updated.View())
+
+				return
 			}
 
-			if tc.test != nil {
-				tc.test(t, &updated)
-			}
+			tc.test(t, &updated)
+		})
+	}
+}
+
+func TestViewport_UpdateVerticalWheel(t *testing.T) {
+	t.Parallel()
+
+	// A vertical wheel scrolls by MouseWheelDelta rows. A negative delta
+	// turns the wheel around, and a disabled wheel does not scroll.
+	tcs := map[string]struct {
+		setup  func(m *yamlviewport.Model)
+		button tea.MouseButton
+		want   int
+	}{
+		"disabled": {
+			setup:  func(m *yamlviewport.Model) { m.MouseWheelEnabled = false },
+			button: tea.MouseWheelDown,
+			want:   0,
+		},
+		"custom delta": {
+			setup:  func(m *yamlviewport.Model) { m.MouseWheelDelta = 5 },
+			button: tea.MouseWheelDown,
+			want:   5,
+		},
+		"inverted at top": {
+			setup:  func(m *yamlviewport.Model) { m.MouseWheelDelta = -3 },
+			button: tea.MouseWheelUp,
+			want:   3,
+		},
+		"inverted at bottom": {
+			setup: func(m *yamlviewport.Model) {
+				m.MouseWheelDelta = -3
+				m.GotoBottom()
+			},
+			button: tea.MouseWheelDown,
+			want:   2,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 80, 5)
+			setRevision(&m, verticalYAML)
+			tc.setup(&m)
+
+			m, _ = m.Update(tea.MouseWheelMsg{Button: tc.button})
+
+			assert.Equal(t, tc.want, m.YOffset())
 		})
 	}
 }
@@ -3694,55 +3573,29 @@ func TestViewport_KeyMap(t *testing.T) {
 
 	lines := niceyaml.NewSourceFromString(stringtest.JoinLF("key: value", "key2: value2", "key3: value3"))
 
+	rebind := func(km *yamlviewport.KeyMap) { km.Down = key.NewBinding(key.WithKeys("x")) }
+
+	// Each case changes the Down binding, which 'j' triggers by default,
+	// and presses one key.
 	tcs := map[string]struct {
-		setup func(m *yamlviewport.Model)
-		test  func(t *testing.T, m *yamlviewport.Model)
+		change func(km *yamlviewport.KeyMap)
+		key    rune
+		want   int
 	}{
-		"DefaultKeyMapEnabled": {
-			test: func(t *testing.T, _ *yamlviewport.Model) {
-				t.Helper()
-
-				km := yamlviewport.DefaultKeyMap()
-				assert.True(t, km.PageDown.Enabled())
-				assert.True(t, km.PageUp.Enabled())
-				assert.True(t, km.HalfPageDown.Enabled())
-				assert.True(t, km.HalfPageUp.Enabled())
-				assert.True(t, km.Down.Enabled())
-				assert.True(t, km.Up.Enabled())
-				assert.True(t, km.Left.Enabled())
-				assert.True(t, km.Right.Enabled())
-				assert.True(t, km.NextRevision.Enabled())
-				assert.True(t, km.PreviousRevision.Enabled())
-				assert.True(t, km.ToggleDiffMode.Enabled())
-			},
+		"custom binding drops the default key": {
+			change: rebind,
+			key:    'j',
+			want:   0,
 		},
-		"CustomKeyMap": {
-			setup: func(m *yamlviewport.Model) {
-				m.KeyMap.Down = key.NewBinding(key.WithKeys("x"))
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-
-				// Default 'j' should not work anymore (since we changed the binding).
-				updated, _ := m.Update(tea.KeyPressMsg{Code: 'j'})
-				assert.Equal(t, 0, updated.YOffset())
-
-				// Custom 'x' should work.
-				updated, _ = m.Update(tea.KeyPressMsg{Code: 'x'})
-				assert.Equal(t, 1, updated.YOffset())
-			},
+		"custom binding scrolls on its key": {
+			change: rebind,
+			key:    'x',
+			want:   1,
 		},
-		"DisabledKeyBinding": {
-			setup: func(m *yamlviewport.Model) {
-				m.KeyMap.Down.SetEnabled(false)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-
-				// 'j' should not work.
-				updated, _ := m.Update(tea.KeyPressMsg{Code: 'j'})
-				assert.Equal(t, 0, updated.YOffset())
-			},
+		"disabled binding": {
+			change: func(km *yamlviewport.KeyMap) { km.Down.SetEnabled(false) },
+			key:    'j',
+			want:   0,
 		},
 	}
 
@@ -3752,12 +3605,11 @@ func TestViewport_KeyMap(t *testing.T) {
 
 			m := testModel(testPrinter(), 80, 2)
 			m.SetRevision(lines)
+			tc.change(&m.KeyMap)
 
-			if tc.setup != nil {
-				tc.setup(&m)
-			}
+			m, _ = m.Update(tea.KeyPressMsg{Code: tc.key})
 
-			tc.test(t, &m)
+			assert.Equal(t, tc.want, m.YOffset())
 		})
 	}
 }
@@ -3765,98 +3617,73 @@ func TestViewport_KeyMap(t *testing.T) {
 func TestViewModeHunks_Golden(t *testing.T) {
 	t.Parallel()
 
-	// The hunks closure shows the diff of the first two revisions as hunks.
-	hunks := func(m *yamlviewport.Model) {
-		addRevisions(m, modeRev1YAML, modeRev2YAML)
-		m.GotoRevision(1)
-		m.SetViewMode(yamlviewport.ViewModeHunks)
+	// The hunks closure returns a setup func that adds a revision of each
+	// doc and shows the diff at the revision index in diffMode as hunks.
+	hunks := func(index int, diffMode yamlviewport.DiffMode, docs ...string) func(m *yamlviewport.Model) {
+		return func(m *yamlviewport.Model) {
+			addRevisions(m, docs...)
+			m.GotoRevision(index)
+			m.SetDiffMode(diffMode)
+			m.SetViewMode(yamlviewport.ViewModeHunks)
+		}
 	}
+
+	// The diff of the first two revisions.
+	basic := hunks(1, yamlviewport.DiffModeAdjacent, modeRev1YAML, modeRev2YAML)
 
 	type goldenTest struct {
 		setupFunc func(m *yamlviewport.Model)
-		width     int
-		height    int
+		// The viewport is 80 columns wide and 30 rows tall unless the case
+		// sets width or height.
+		width  int
+		height int
 	}
 
 	tcs := map[string]goldenTest{
 		"BasicHunks": {
-			setupFunc: hunks,
-			width:     80,
-			height:    30,
+			setupFunc: basic,
 		},
 		"AtFirstRevision": {
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, modeRev1YAML, modeRev2YAML)
-				m.GotoRevision(0)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
-			},
-			width:  80,
-			height: 30,
+			setupFunc: hunks(0, yamlviewport.DiffModeAdjacent, modeRev1YAML, modeRev2YAML),
 		},
 		"DiffModeOrigin": {
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, modeRev1YAML, modeRev2YAML, modeRev3YAML)
-				m.GotoRevision(2)
-				m.SetDiffMode(yamlviewport.DiffModeOrigin)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
-			},
-			width:  80,
-			height: 30,
+			setupFunc: hunks(2, yamlviewport.DiffModeOrigin, modeRev1YAML, modeRev2YAML, modeRev3YAML),
 		},
 		"DiffModeNone": {
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, modeRev1YAML, modeRev2YAML)
-				m.GotoRevision(1)
-				m.SetDiffMode(yamlviewport.DiffModeNone)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
-			},
-			width:  80,
-			height: 30,
+			setupFunc: hunks(1, yamlviewport.DiffModeNone, modeRev1YAML, modeRev2YAML),
 		},
 		"MultipleRevisions": {
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, modeRev1YAML, modeRev2YAML, modeRev3YAML)
-				m.GotoRevision(2)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
-			},
-			width:  80,
-			height: 30,
+			setupFunc: hunks(2, yamlviewport.DiffModeAdjacent, modeRev1YAML, modeRev2YAML, modeRev3YAML),
 		},
 		"HunksScrolled": {
 			// The offset counts rows, and the hunk header is a row.
 			setupFunc: func(m *yamlviewport.Model) {
-				hunks(m)
+				basic(m)
 				m.SetYOffset(2)
 			},
-			width:  80,
 			height: 5,
 		},
 		"HunksScrolledToBottom": {
 			setupFunc: func(m *yamlviewport.Model) {
-				hunks(m)
+				basic(m)
 				m.GotoBottom()
 			},
-			width:  80,
 			height: 5,
 		},
 		"HunksSearch": {
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
-				hunks(m)
+				basic(m)
 				m.SetSearchTerm("name")
 			},
-			width:  80,
-			height: 30,
 		},
 		"HunksSearchNavigate": {
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
-				hunks(m)
+				basic(m)
 				m.SetSearchTerm("name")
 				m.SearchNext() // Navigate to second match.
 			},
-			width:  80,
-			height: 30,
 		},
 	}
 
@@ -3864,7 +3691,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := testModel(testPrinter(), tc.width, tc.height)
+			m := testModel(testPrinter(), cmp.Or(tc.width, 80), cmp.Or(tc.height, 30))
 			tc.setupFunc(&m)
 
 			golden.RequireEqual(t, m.View())
@@ -3880,13 +3707,20 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 	rev1YAML := stringtest.JoinLF(modeRev1YAML, "extra:", "  key1: value1", "  key2: value2")
 	rev2YAML := stringtest.JoinLF(modeRev2YAML, "extra:", "  key1: changed1", "  key2: changed2")
 
-	// The sideBySide closure shows the diff of the first two revisions in two
+	// The sideBySide closure returns a setup func that adds a revision of
+	// each doc and shows the diff at the revision index in diffMode in two
 	// panes.
-	sideBySide := func(m *yamlviewport.Model) {
-		addRevisions(m, rev1YAML, rev2YAML)
-		m.GotoRevision(1)
-		m.SetViewMode(yamlviewport.ViewModeSideBySide)
+	sideBySide := func(index int, diffMode yamlviewport.DiffMode, docs ...string) func(m *yamlviewport.Model) {
+		return func(m *yamlviewport.Model) {
+			addRevisions(m, docs...)
+			m.GotoRevision(index)
+			m.SetDiffMode(diffMode)
+			m.SetViewMode(yamlviewport.ViewModeSideBySide)
+		}
 	}
+
+	// The diff of the first two revisions.
+	basic := sideBySide(1, yamlviewport.DiffModeAdjacent, rev1YAML, rev2YAML)
 
 	// The search closure returns a setup func that shows the same diff with
 	// tagged search highlights, searches for term, and moves the selection
@@ -3896,7 +3730,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 	search := func(term string, next int) func(m *yamlviewport.Model) {
 		return func(m *yamlviewport.Model) {
 			m.SetPrinter(testPrinterWithSearch())
-			sideBySide(m)
+			basic(m)
 			m.SetSearchTerm(term)
 			searchNext(m, next)
 		}
@@ -3904,134 +3738,88 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 
 	type goldenTest struct {
 		setupFunc func(m *yamlviewport.Model)
-		width     int
-		height    int
+		// The viewport is 80 columns wide and 24 rows tall unless the case
+		// sets width or height.
+		width  int
+		height int
 	}
 
 	tcs := map[string]goldenTest{
 		"SideBySide": {
-			setupFunc: sideBySide,
-			width:     80,
-			height:    24,
+			setupFunc: basic,
 		},
 		"SideBySideNoChanges": {
 			// Same content on both sides renders identical panes.
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev1YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			},
-			width:  80,
-			height: 24,
+			setupFunc: sideBySide(1, yamlviewport.DiffModeAdjacent, rev1YAML, rev1YAML),
 		},
 		"SideBySideAtOrigin": {
 			// At revision 0, both panes show the same content.
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(0)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			},
-			width:  80,
-			height: 24,
+			setupFunc: sideBySide(0, yamlviewport.DiffModeAdjacent, rev1YAML, rev2YAML),
 		},
 		"SideBySideScrolled": {
 			// Side-by-side with vertical scrolling.
 			setupFunc: func(m *yamlviewport.Model) {
-				sideBySide(m)
+				basic(m)
 				m.SetYOffset(3)
 			},
-			width:  80,
 			height: 10,
 		},
 		"SideBySideDiffModeOrigin": {
 			// Side-by-side with origin diff mode (compares to first revision).
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML, modeRev3YAML)
-				m.GotoRevision(2)
-				m.SetDiffMode(yamlviewport.DiffModeOrigin)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			},
-			width:  80,
-			height: 24,
+			setupFunc: sideBySide(2, yamlviewport.DiffModeOrigin, rev1YAML, rev2YAML, modeRev3YAML),
 		},
 		"SideBySideDiffModeNone": {
 			// Side-by-side with no diff mode shows the same content on both panes.
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetDiffMode(yamlviewport.DiffModeNone)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			},
-			width:  80,
-			height: 24,
+			setupFunc: sideBySide(1, yamlviewport.DiffModeNone, rev1YAML, rev2YAML),
 		},
 		"SideBySideNarrow": {
 			// Narrower viewport to test pane width calculation.
-			setupFunc: sideBySide,
+			setupFunc: basic,
 			width:     60,
 			height:    16,
 		},
-		"SideBySideTooNarrow": {
-			// Width <=4: paneWidth = (4-3)/2 = 0, so it renders empty
-			// without panic.
-			setupFunc: sideBySide,
-			width:     4,
-			height:    10,
-		},
 		"SideBySideMinimal": {
 			// Width 5: paneWidth = (5-3)/2 = 1, minimum to render content.
-			setupFunc: sideBySide,
+			setupFunc: basic,
 			width:     5,
 			height:    10,
 		},
 		"SideBySideMoreDeletions": {
 			// With more deletions than insertions, the right pane gets placeholders.
-			setupFunc: func(m *yamlviewport.Model) {
-				moreDeletionsBefore := stringtest.Input(`
+			setupFunc: sideBySide(1, yamlviewport.DiffModeAdjacent,
+				stringtest.Input(`
 					keep: start
 					del1: a
 					del2: b
 					del3: c
 					del4: d
 					keep: end
-				`)
-				moreDeletionsAfter := stringtest.Input(`
+				`),
+				stringtest.Input(`
 					keep: start
 					ins1: x
 					keep: end
-				`)
-
-				m.ClearRevisions()
-				addRevisions(m, moreDeletionsBefore, moreDeletionsAfter)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			},
-			width:  80,
+				`),
+			),
 			height: 16,
 		},
 		"SideBySideMoreInsertions": {
 			// With more insertions than deletions, the left pane gets placeholders.
-			setupFunc: func(m *yamlviewport.Model) {
-				moreInsertionsBefore := stringtest.Input(`
+			setupFunc: sideBySide(1, yamlviewport.DiffModeAdjacent,
+				stringtest.Input(`
 					keep: start
 					del1: a
 					keep: end
-				`)
-				moreInsertionsAfter := stringtest.Input(`
+				`),
+				stringtest.Input(`
 					keep: start
 					ins1: w
 					ins2: x
 					ins3: y
 					ins4: z
 					keep: end
-				`)
-
-				m.ClearRevisions()
-				addRevisions(m, moreInsertionsBefore, moreInsertionsAfter)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			},
-			width:  80,
+				`),
+			),
 			height: 16,
 		},
 		"SideBySideSearchNavigate": {
@@ -4042,44 +3830,39 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			// pane.
 			setupFunc: search("key", 2),
 			width:     190,
-			height:    24,
 		},
 		"SideBySideSearchDeletedLine": {
 			// Verifies SearchSelected appears on deleted line (before pane only).
 			setupFunc: search("original", 0),
 			width:     190,
-			height:    24,
 		},
 		"SideBySideSearchInsertedLine": {
 			// Verifies SearchSelected appears on inserted line (after pane only).
 			setupFunc: search("modified", 0),
 			width:     190,
-			height:    24,
 		},
 		"SideBySideSearchBothSidesFirstSelected": {
 			// The search term appears on both deleted and inserted lines.
 			// The selection sits on the first match, in the before pane.
 			setupFunc: search("name", 0),
 			width:     190,
-			height:    24,
 		},
 		"SideBySideWrapAligned": {
 			// The before pane wraps a long line that the after pane replaced
 			// with a short one. The after pane gets blank rows so the lines
 			// below stay level.
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, stringtest.Input(`
+			setupFunc: sideBySide(1, yamlviewport.DiffModeAdjacent,
+				stringtest.Input(`
 					name: original
 					description: "a long description that wraps inside a narrow pane"
 					enabled: true
-				`), stringtest.Input(`
+				`),
+				stringtest.Input(`
 					name: original
 					description: short
 					enabled: true
-				`))
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			},
+				`),
+			),
 			width:  50,
 			height: 8,
 		},
@@ -4088,7 +3871,6 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			// The selection sits on the second match, in the after pane.
 			setupFunc: search("name", 1),
 			width:     190,
-			height:    24,
 		},
 	}
 
@@ -4096,7 +3878,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := testModel(testPrinter(), tc.width, tc.height)
+			m := testModel(testPrinter(), cmp.Or(tc.width, 80), cmp.Or(tc.height, 24))
 			tc.setupFunc(&m)
 
 			golden.RequireEqual(t, m.View())
@@ -4104,7 +3886,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 	}
 }
 
-func TestViewMode_Behavior(t *testing.T) {
+func TestViewport_ViewMode(t *testing.T) {
 	t.Parallel()
 
 	rev1YAML := stringtest.Input(`
@@ -4369,7 +4151,11 @@ func TestViewport_CopiesRenderConcurrently(t *testing.T) {
 
 			newModel := func() yamlviewport.Model {
 				m := testModel(printer.New(), 20, 3)
-				addRevisions(&m, "a: 1\nb: 2\n", stringtest.LinesLF("a: aaaa bbbb cccc dddd eeee", "b: 3", "c: 4"))
+				addRevisions(
+					&m,
+					stringtest.LinesLF("a: 1", "b: 2"),
+					stringtest.LinesLF("a: aaaa bbbb cccc dddd eeee", "b: 3", "c: 4"),
+				)
 
 				if tc.setup != nil {
 					tc.setup(&m)
@@ -4582,7 +4368,7 @@ func TestViewport_LayoutChangesKeepSearchIndex(t *testing.T) {
 
 	searcher := &countingSearcher{finder: finder.New()}
 	m := testModel(testPrinter(), 80, 10, yamlviewport.WithSearcher(searcher))
-	addRevisions(&m, "key: alpha\n", "key: alpha\nother: alpha\n")
+	addRevisions(&m, alphaYAML, alphaTwiceYAML)
 
 	m.SetSearchTerm("alpha")
 	require.Equal(t, 2, m.SearchCount())
@@ -4667,7 +4453,7 @@ func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
 			// The base style counts every piece of text the printer styles,
 			// which a layout of the view does for each line.
 			renders := 0
-			p := barePrinter(style.New(countingStyle(&renders)))
+			p := yamltest.NewPlainPrinter(printer.WithStyles(style.New(countingStyle(&renders))))
 
 			m := testModel(p, 40, 10, yamlviewport.WithContainerStyle(frame))
 			setRevision(&m, yamltest.GenerateYAML(50))
@@ -4700,7 +4486,7 @@ func TestViewport_SideBySideLoadsSearcherOncePerContent(t *testing.T) {
 	// loads them once per change of content rather than on every keystroke.
 	searcher := &countingSearcher{finder: finder.New()}
 	m := testModel(testPrinter(), 80, 10, yamlviewport.WithSearcher(searcher))
-	addRevisions(&m, "key: alpha\n", "key: alpha\nother: alpha\n")
+	addRevisions(&m, alphaYAML, alphaTwiceYAML)
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
 
 	for _, term := range []string{"a", "al", "alp", "alpha"} {
@@ -4850,7 +4636,7 @@ func TestViewport_AddRevisionsDiffsOnce(t *testing.T) {
 	batch := make([]yamlviewport.Revision, len(docs))
 
 	for i := range docs {
-		docs[i] = fmt.Sprintf("a: %d\nb: 2\n", i)
+		docs[i] = stringtest.LinesLF(fmt.Sprintf("a: %d", i), "b: 2")
 		revs[i] = &countingRevision{
 			Revision: niceyaml.NewSourceFromString(docs[i], niceyaml.WithName(fmt.Sprintf("v%d", i+1))),
 		}
@@ -4963,7 +4749,7 @@ func TestViewport_SearchOrdersIndexMatches(t *testing.T) {
 
 	// The first and last lines hold a match, and the second revision
 	// changes a line between them.
-	before := numbered(40, "k%d: x")
+	before := yamltest.GenerateLines(40, "k%d: x")
 	before = replaceLine(before, 0, "k0: needle")
 	before = replaceLine(before, 39, "k39: needle")
 	after := replaceLine(before, 20, "k20: y")
@@ -5047,10 +4833,10 @@ func TestViewport_SearchLaysOutOnlyHighlightedLines(t *testing.T) {
 	run := func(matches position.Ranges) ([]int, []string) {
 		renders := 0
 		base := countingStyle(&renders)
-		p := barePrinter(style.New(base,
+		p := yamltest.NewPlainPrinter(printer.WithStyles(style.New(base,
 			style.Set(kind.GenericHighlight, base.Underline(true)),
 			style.Set(kind.GenericHighlightDim, base.Italic(true)),
-		))
+		)))
 
 		m := testModel(p, 40, 10, yamlviewport.WithSearcher(&indexSearcher{index: &ptrIndex{matches: matches}}))
 		setRevision(&m, stringtest.LinesLF("a: 1", "b: 2", "c: 3", "d: 4"))
@@ -5145,54 +4931,55 @@ func TestViewport_NilIndexFindsNothing(t *testing.T) {
 	}
 }
 
-func TestViewport_SideBySideSelectedMatchOnInsertedLine(t *testing.T) {
+func TestViewport_SideBySideSelectedMatch(t *testing.T) {
 	t.Parallel()
 
-	// The diff pads the left pane opposite an inserted line with an empty
-	// line that carries the default flag, the same flag an equal line
-	// carries. A match selected on the inserted line belongs to the right
-	// pane alone, so only the right pane draws the selected highlight.
-	const highlight = "<genericHighlight>"
-
-	m := testModel(testPrinterWithSearch(), 100, 8)
-	addRevisions(&m, "a: 1\nb: 2\n", stringtest.LinesLF("a: 1", "find: me", "b: 2"))
-	m.SetViewMode(yamlviewport.ViewModeSideBySide)
-
-	m.SetSearchTerm("find")
-	require.Equal(t, 1, m.SearchCount())
-
-	view := m.View()
-	require.Equal(t, 1, strings.Count(view, highlight))
-	assert.NotContains(t, view, "<genericHighlightDim>")
-
-	// The panes sit either side of a vertical bar, and the highlight is in
-	// the right one.
-	left, right := selectedPanes(t, view)
-	assert.NotContains(t, left, highlight)
-	assert.Contains(t, right, highlight)
-}
-
-func TestViewport_SideBySideMatchStartingOnPadding(t *testing.T) {
-	t.Parallel()
-
-	// A term with a leading newline starts its match on the line before the
-	// text, so on a blank inserted or deleted line the match in the other
-	// pane starts on the padding opposite it. Both matches count, and each
-	// pane draws the selected highlight once as the search steps through
-	// them.
 	const (
-		without   = "a: 1\nb: 2\n"
-		highlight = "<genericHighlight>"
+		selected = "<genericHighlight>"
+		dim      = "<genericHighlightDim>"
 	)
 
+	twoLines := stringtest.LinesLF("a: 1", "b: 2")
 	withBlank := stringtest.LinesLF("a: 1", "", "b: 2")
 
+	// The panes sit either side of a vertical bar. As the search steps
+	// through every match, each view draws the selected highlight once, and
+	// each pane draws it as many times as it holds a match.
 	tcs := map[string]struct {
-		before string
-		after  string
+		before    string
+		after     string
+		term      string
+		wantLeft  int
+		wantRight int
 	}{
-		"inserted line": {before: without, after: withBlank},
-		"deleted line":  {before: withBlank, after: without},
+		"match on an inserted line": {
+			// The diff pads the left pane opposite an inserted line with an
+			// empty line that carries the default flag, the same flag an
+			// equal line carries. A match selected on the inserted line
+			// belongs to the right pane alone, so only the right pane draws
+			// the selected highlight.
+			before:    twoLines,
+			after:     stringtest.LinesLF("a: 1", "find: me", "b: 2"),
+			term:      "find",
+			wantRight: 1,
+		},
+		// A term with a leading newline starts its match on the line before
+		// the text, so on a blank inserted or deleted line the match in the
+		// other pane starts on the padding opposite it. Both matches count.
+		"match starting on padding opposite an inserted line": {
+			before:    twoLines,
+			after:     withBlank,
+			term:      "\nb",
+			wantLeft:  1,
+			wantRight: 1,
+		},
+		"match starting on padding opposite a deleted line": {
+			before:    withBlank,
+			after:     twoLines,
+			term:      "\nb",
+			wantLeft:  1,
+			wantRight: 1,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -5203,24 +4990,27 @@ func TestViewport_SideBySideMatchStartingOnPadding(t *testing.T) {
 			addRevisions(&m, tc.before, tc.after)
 			m.SetViewMode(yamlviewport.ViewModeSideBySide)
 
-			m.SetSearchTerm("\nb")
-			require.Equal(t, 2, m.SearchCount())
+			m.SetSearchTerm(tc.term)
+			require.Equal(t, tc.wantLeft+tc.wantRight, m.SearchCount())
 
 			var leftCount, rightCount int
 
 			for range m.SearchCount() {
 				view := m.View()
-				require.Equal(t, 1, strings.Count(view, highlight))
+				require.Equal(t, 1, strings.Count(view, selected))
+
+				// Every other match draws the dim highlight.
+				assert.Equal(t, m.SearchCount()-1, strings.Count(view, dim))
 
 				left, right := selectedPanes(t, view)
-				leftCount += strings.Count(left, highlight)
-				rightCount += strings.Count(right, highlight)
+				leftCount += strings.Count(left, selected)
+				rightCount += strings.Count(right, selected)
 
 				m.SearchNext()
 			}
 
-			assert.Equal(t, 1, leftCount)
-			assert.Equal(t, 1, rightCount)
+			assert.Equal(t, tc.wantLeft, leftCount)
+			assert.Equal(t, tc.wantRight, rightCount)
 		})
 	}
 }
@@ -5558,7 +5348,7 @@ func TestViewport_SideBySidePanesShareGutterWidth(t *testing.T) {
 	//
 	// A first line long enough to scroll past the widest gutter.
 	first := "k0: " + strings.Repeat("0123456789", 4)
-	before := replaceLine(numbered(10005, "k%d: v"), 0, first)
+	before := replaceLine(yamltest.GenerateLines(10005, "k%d: v"), 0, first)
 
 	m := testModel(testPrinterWithLineNumbers(), 60, 5)
 	m.SetWordWrap(false)
@@ -5618,50 +5408,19 @@ func TestViewport_SideBySideWithoutDiffPrintsOnce(t *testing.T) {
 	}
 }
 
-func TestSideBySideSearch_MatchCounting(t *testing.T) {
+func TestViewport_SideBySideSearchCountsEqualLineOnce(t *testing.T) {
 	t.Parallel()
 
-	// Before: "foo: a", "bar: b"
-	// After:  "foo: c", "bar: b"
-	// "foo" appears on deleted + inserted lines = 2 matches.
-	// "bar" appears on equal line = 1 match.
-	beforeYAML := stringtest.Input(`
-		foo: a
-		bar: b
-	`)
-	afterYAML := stringtest.Input(`
-		foo: c
-		bar: b
-	`)
+	// Both panes show the equal line "bar: b", but its match counts once.
+	// TestViewport_ClearSearchSideBySide counts a match on each side of a
+	// changed line.
+	m := testModel(testPrinter(), 80, 24)
+	addRevisions(&m, stringtest.JoinLF("foo: a", "bar: b"), stringtest.JoinLF("foo: c", "bar: b"))
+	m.GotoRevision(1)
+	m.SetViewMode(yamlviewport.ViewModeSideBySide)
+	m.SetSearchTerm("bar")
 
-	tcs := map[string]struct {
-		searchTerm string
-		wantCount  int
-	}{
-		"EqualLine": {
-			searchTerm: "bar",
-			wantCount:  1, // Equal lines count as single match.
-		},
-		"DeletedAndInserted": {
-			searchTerm: "foo",
-			wantCount:  2, // Deleted and inserted lines are separate matches.
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			m := testModel(testPrinter(), 80, 24)
-
-			addRevisions(&m, beforeYAML, afterYAML)
-			m.GotoRevision(1)
-			m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			m.SetSearchTerm(tc.searchTerm)
-
-			assert.Equal(t, tc.wantCount, m.SearchCount())
-		})
-	}
+	assert.Equal(t, 1, m.SearchCount())
 }
 
 func TestViewport_DoesNotMutateSource(t *testing.T) {
@@ -5744,14 +5503,19 @@ func TestViewport_RevisionOverPartOfTheSource(t *testing.T) {
 func TestViewport_RevisionKeepsDecoration(t *testing.T) {
 	t.Parallel()
 
-	p := barePrinter(yamltest.NewXMLStyles(yamltest.XMLStyleInclude(kind.GenericHighlight, kind.GenericError)))
+	p := yamltest.NewPlainPrinter(
+		printer.WithStyles(yamltest.NewXMLStyles(yamltest.XMLStyleInclude(kind.GenericHighlight, kind.GenericError))),
+	)
 
 	m := testModel(p, 80, 10)
 
-	source := niceyaml.NewSourceFromString("key: value\nother: thing\n", niceyaml.WithName("marked"))
+	source := niceyaml.NewSourceFromString(
+		stringtest.LinesLF("key: value", "other: thing"),
+		niceyaml.WithName("marked"),
+	)
 	view := source.View()
 	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below})
-	view.AddOverlay(kind.GenericError, position.NewRange(position.New(1, 0), position.New(1, 5)))
+	view.AddOverlay(kind.GenericError, yamltest.LineRange(1, 0, 5))
 
 	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
 	assert.Equal(t, "marked", m.RevisionName())
@@ -5817,11 +5581,16 @@ func TestViewport_RevisionIgnoresLaterMarks(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := barePrinter(yamltest.NewXMLStyles(yamltest.XMLStyleInclude(kind.GenericHighlight)))
+			p := yamltest.NewPlainPrinter(
+				printer.WithStyles(yamltest.NewXMLStyles(yamltest.XMLStyleInclude(kind.GenericHighlight))),
+			)
 
 			m := testModel(p, 80, 10)
 
-			source := niceyaml.NewSourceFromString("key: value\nother: value\n", niceyaml.WithName(name))
+			source := niceyaml.NewSourceFromString(
+				stringtest.LinesLF("key: value", "other: value"),
+				niceyaml.WithName(name),
+			)
 			view := source.View()
 
 			m.SetRevision(yamlviewport.NewRevision(name, view))
@@ -5855,7 +5624,7 @@ func markedRevision(name, doc string, marks ...int) yamlviewport.Revision {
 	for _, i := range marks {
 		field, _, _ := strings.Cut(view.Line(i).Content(), ":")
 
-		view.AddOverlay(kind.GenericError, position.NewRange(position.New(i, 0), position.New(i, len(field))))
+		view.AddOverlay(kind.GenericError, yamltest.LineRange(i, 0, len(field)))
 		view.Annotate(i, line.Annotation{Content: name + " " + field, Placement: line.Below})
 	}
 
@@ -5875,16 +5644,7 @@ func markPrinter() *printer.Printer {
 // plainRows returns the rows of the view of m down to the last one that
 // shows text, without their styling or the padding at the end of each.
 func plainRows(m *yamlviewport.Model) string {
-	rows := strings.Split(ansi.Strip(m.View()), "\n")
-	for i, row := range rows {
-		rows[i] = strings.TrimRight(row, " ")
-	}
-
-	for len(rows) > 0 && rows[len(rows)-1] == "" {
-		rows = rows[:len(rows)-1]
-	}
-
-	return stringtest.JoinLF(rows...)
+	return strings.TrimRight(stringtest.TrimLineEnds(ansi.Strip(m.View())), "\n")
 }
 
 func TestViewport_DiffKeepsMarks(t *testing.T) {
@@ -6335,7 +6095,7 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 func TestViewport_ContentChangesScrollToTop(t *testing.T) {
 	t.Parallel()
 
-	before := numbered(100, "key%d: value")
+	before := yamltest.GenerateLines(100, "key%d: value")
 	after := replaceLine(before, 60, "key60: changed")
 
 	tcs := map[string]struct {
@@ -6405,13 +6165,13 @@ func TestViewport_SearchAcrossRevisions(t *testing.T) {
 
 	m := testModel(testPrinter(), 80, 10)
 
-	addRevisions(&m, "key: alpha\n")
+	addRevisions(&m, alphaYAML)
 	m.SetSearchTerm("alpha")
 	assert.Equal(t, 1, m.SearchCount())
 
 	// A new revision changes the displayed content, so the viewport
 	// recomputes the matches against the diff rather than the stale index.
-	addRevisions(&m, "key: alpha\nother: alpha\n")
+	addRevisions(&m, alphaTwiceYAML)
 	assert.Equal(t, 2, m.SearchCount())
 
 	m.SetSearchTerm("other")
@@ -6422,7 +6182,7 @@ func TestViewport_NewSearchTermStartsAtFirstMatch(t *testing.T) {
 	t.Parallel()
 
 	m := testModel(testPrinter(), 80, 5)
-	setRevision(&m, numbered(40, "k%d: needle"))
+	setRevision(&m, yamltest.GenerateLines(40, "k%d: needle"))
 
 	m.SetSearchTerm("needle")
 	searchNext(&m, 7)
@@ -6458,7 +6218,7 @@ func TestViewport_SideBySideSearchOrder(t *testing.T) {
 	// Every line changes, so each line holds a deleted match in the left pane
 	// and an inserted match at the same position in the right pane.
 	m := testModel(testPrinterWithSearch(), 160, 3)
-	addRevisions(&m, numbered(20, "k%02d: needle a"), numbered(20, "k%02d: needle b"))
+	addRevisions(&m, yamltest.GenerateLines(20, "k%02d: needle a"), yamltest.GenerateLines(20, "k%02d: needle b"))
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
 
 	m.SetSearchTerm("needle")
@@ -6488,7 +6248,7 @@ func TestViewport_ClearSearchSideBySide(t *testing.T) {
 	// wide enough that highlighted lines still fit on one row.
 	newModel := func() yamlviewport.Model {
 		m := testModel(testPrinterWithSearch(), 120, 5)
-		addRevisions(&m, "foo: a\nbar: b\n", "foo: c\nbar: b\n")
+		addRevisions(&m, stringtest.LinesLF("foo: a", "bar: b"), stringtest.LinesLF("foo: c", "bar: b"))
 		m.SetViewMode(yamlviewport.ViewModeSideBySide)
 
 		return m
@@ -6497,6 +6257,8 @@ func TestViewport_ClearSearchSideBySide(t *testing.T) {
 	plain := newModel()
 	m := newModel()
 
+	// The deleted and the inserted side of the changed line each hold a
+	// match.
 	m.SetSearchTerm("foo")
 	require.Equal(t, 2, m.SearchCount())
 	require.NotEqual(t, plain.View(), m.View())
@@ -6611,7 +6373,7 @@ func TestViewport_SearchScrollsToTransformedMatch(t *testing.T) {
 	// before the selected one pushes it two cells further right than its
 	// column in the content. The X offset counts those cells, so the
 	// selected match stays on screen with wrap off.
-	p := barePrinter(highlightStyles(bracketStyle("{", "}"), bracketStyle("[", "]")))
+	p := yamltest.NewPlainPrinter(printer.WithStyles(highlightStyles(bracketStyle("{", "}"), bracketStyle("[", "]"))))
 
 	tcs := map[string]struct {
 		next int
@@ -6700,7 +6462,7 @@ func TestViewport_UnchangedModeKeepsPosition(t *testing.T) {
 	// and the selected match where they are, as the Model doc promises
 	// for anything but a change of content.
 	m := testModel(testPrinter(), 40, 10)
-	m.AddRevision(niceyaml.NewSourceFromString(numbered(50, "k%d: v")))
+	m.AddRevision(niceyaml.NewSourceFromString(yamltest.GenerateLines(50, "k%d: v")))
 	m.SetSearchTerm("v")
 	searchNext(&m, 3)
 	m.SetYOffset(30)
@@ -6732,6 +6494,12 @@ func TestViewport_UnchangedModeKeepsPosition(t *testing.T) {
 		assert.Equal(t, 3, m.SearchIndex(), step.name)
 		assert.Equal(t, 30, m.YOffset(), step.name)
 	}
+}
+
+// screenMessage returns the view of m without its styling, as the message
+// of an assertion about what the view shows.
+func screenMessage(m *yamlviewport.Model) string {
+	return "screen:\n" + ansi.Strip(m.View())
 }
 
 // hitMap returns one row for each row of the viewport, with one character
@@ -6991,11 +6759,10 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 				tc.setup(&m)
 			}
 
-			screen := m.View()
-			require.Equal(t, tc.want, hitMap(&m), "screen:\n%s", ansi.Strip(screen))
+			require.Equal(t, tc.want, hitMap(&m), screenMessage(&m))
 
 			// Every hit names the rune its cell shows.
-			cells := screenCells(screen)
+			cells := screenCells(m.View())
 
 			for y := -1; y <= m.Height(); y++ {
 				for x := -1; x <= m.Width(); x++ {
@@ -7058,7 +6825,8 @@ func TestViewport_HitAt(t *testing.T) {
 	framed := testPrinterWithLineNumbers().With(printer.WithContainerStyle(normalBorder().Padding(0, 1)))
 
 	// The default test printer draws a gutter one cell wide, so the
-	// content of a row starts at cell 1.
+	// content of a row starts at cell 1. A case with a nil want expects
+	// HitAt to find nothing at the cell.
 	tcs := map[string]struct {
 		setup     func(m *yamlviewport.Model)
 		printer   *printer.Printer
@@ -7068,8 +6836,7 @@ func TestViewport_HitAt(t *testing.T) {
 		height    int
 		x         int
 		y         int
-		want      yamlviewport.Hit
-		ok        bool
+		want      *yamlviewport.Hit
 	}{
 		"first column of a line": {
 			revisions: []yamlviewport.Revision{source(hitV1)},
@@ -7077,8 +6844,7 @@ func TestViewport_HitAt(t *testing.T) {
 			height:    4,
 			x:         1,
 			y:         1,
-			want:      yamlviewport.Hit{Position: position.New(1, 0)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(1, 0)},
 		},
 		"second cell of a wide character": {
 			revisions: []yamlviewport.Revision{source(hitV1)},
@@ -7086,8 +6852,7 @@ func TestViewport_HitAt(t *testing.T) {
 			height:    4,
 			x:         5,
 			y:         1,
-			want:      yamlviewport.Hit{Position: position.New(1, 3)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(1, 3)},
 		},
 		"gutter": {
 			revisions: []yamlviewport.Revision{source(hitV1)},
@@ -7145,8 +6910,7 @@ func TestViewport_HitAt(t *testing.T) {
 			height:    5,
 			x:         1,
 			y:         3,
-			want:      yamlviewport.Hit{Position: position.New(2, 10)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(2, 10)},
 		},
 		"scrolled down": {
 			revisions: []yamlviewport.Revision{source(hitV2)},
@@ -7155,8 +6919,7 @@ func TestViewport_HitAt(t *testing.T) {
 			x:         3,
 			y:         1,
 			setup:     func(m *yamlviewport.Model) { m.SetYOffset(2) },
-			want:      yamlviewport.Hit{Position: position.New(3, 2)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(3, 2)},
 		},
 		"scrolled sideways": {
 			revisions: []yamlviewport.Revision{source(hitV1)},
@@ -7168,8 +6931,7 @@ func TestViewport_HitAt(t *testing.T) {
 				m.SetWordWrap(false)
 				m.SetXOffset(4)
 			},
-			want: yamlviewport.Hit{Position: position.New(1, 3)},
-			ok:   true,
+			want: &yamlviewport.Hit{Position: position.New(1, 3)},
 		},
 		"frames of both container styles": {
 			revisions: []yamlviewport.Revision{source(hitV2)},
@@ -7179,8 +6941,7 @@ func TestViewport_HitAt(t *testing.T) {
 			height:    10,
 			x:         11,
 			y:         4,
-			want:      yamlviewport.Hit{Position: position.New(1, 0)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(1, 0)},
 		},
 		"frame of the printer": {
 			revisions: []yamlviewport.Revision{source(hitV2)},
@@ -7197,8 +6958,7 @@ func TestViewport_HitAt(t *testing.T) {
 			height:    6,
 			x:         10,
 			y:         1,
-			want:      yamlviewport.Hit{Revision: 0, Position: position.New(1, 6)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Revision: 0, Position: position.New(1, 6)},
 		},
 		"inserted line of a diff": {
 			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
@@ -7206,8 +6966,7 @@ func TestViewport_HitAt(t *testing.T) {
 			height:    6,
 			x:         1,
 			y:         3,
-			want:      yamlviewport.Hit{Revision: 1, Position: position.New(2, 0)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Revision: 1, Position: position.New(2, 0)},
 		},
 		"line below the changes keeps the index of its revision": {
 			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
@@ -7215,8 +6974,7 @@ func TestViewport_HitAt(t *testing.T) {
 			height:    6,
 			x:         1,
 			y:         4,
-			want:      yamlviewport.Hit{Revision: 1, Position: position.New(3, 0)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Revision: 1, Position: position.New(3, 0)},
 		},
 		"deleted line of a diff with the first revision": {
 			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2), source(hitV3)},
@@ -7225,8 +6983,7 @@ func TestViewport_HitAt(t *testing.T) {
 			x:         1,
 			y:         1,
 			setup:     func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeOrigin) },
-			want:      yamlviewport.Hit{Revision: 0, Position: position.New(1, 0)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Revision: 0, Position: position.New(1, 0)},
 		},
 		"deleted line of a diff with the revision before": {
 			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2), source(hitV3)},
@@ -7234,8 +6991,7 @@ func TestViewport_HitAt(t *testing.T) {
 			height:    6,
 			x:         1,
 			y:         1,
-			want:      yamlviewport.Hit{Revision: 1, Position: position.New(1, 0)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Revision: 1, Position: position.New(1, 0)},
 		},
 		"later revision without a diff": {
 			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
@@ -7244,8 +7000,7 @@ func TestViewport_HitAt(t *testing.T) {
 			x:         1,
 			y:         2,
 			setup:     func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeNone) },
-			want:      yamlviewport.Hit{Revision: 1, Position: position.New(2, 0)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Revision: 1, Position: position.New(2, 0)},
 		},
 		"hunk header": {
 			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
@@ -7262,8 +7017,7 @@ func TestViewport_HitAt(t *testing.T) {
 			x:         1,
 			y:         3,
 			setup:     hunks,
-			want:      yamlviewport.Hit{Revision: 1, Position: position.New(2, 0)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Revision: 1, Position: position.New(2, 0)},
 		},
 		"left pane holds the revision the diff compares with": {
 			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
@@ -7272,8 +7026,7 @@ func TestViewport_HitAt(t *testing.T) {
 			x:         1,
 			y:         4,
 			setup:     sideBySide,
-			want:      yamlviewport.Hit{Revision: 0, Position: position.New(2, 0)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Revision: 0, Position: position.New(2, 0)},
 		},
 		"right pane holds the current revision": {
 			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
@@ -7282,8 +7035,7 @@ func TestViewport_HitAt(t *testing.T) {
 			x:         18,
 			y:         4,
 			setup:     sideBySide,
-			want:      yamlviewport.Hit{Revision: 1, Position: position.New(3, 0)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Revision: 1, Position: position.New(3, 0)},
 		},
 		"row a line wraps onto in the right pane": {
 			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
@@ -7292,8 +7044,7 @@ func TestViewport_HitAt(t *testing.T) {
 			x:         18,
 			y:         3,
 			setup:     sideBySide,
-			want:      yamlviewport.Hit{Revision: 1, Position: position.New(2, 10)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Revision: 1, Position: position.New(2, 10)},
 		},
 		"filler beside a taller pane": {
 			revisions: []yamlviewport.Revision{source(hitV1), source(hitV2)},
@@ -7326,8 +7077,7 @@ func TestViewport_HitAt(t *testing.T) {
 			x:         22,
 			y:         1,
 			setup:     sideBySide,
-			want:      yamlviewport.Hit{Position: position.New(1, 3)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(1, 3)},
 		},
 		"line of a slice keeps its index in the content": {
 			revisions: []yamlviewport.Revision{
@@ -7340,8 +7090,7 @@ func TestViewport_HitAt(t *testing.T) {
 			height: 4,
 			x:      1,
 			y:      0,
-			want:   yamlviewport.Hit{Position: position.New(2, 0)},
-			ok:     true,
+			want:   &yamlviewport.Hit{Position: position.New(2, 0)},
 		},
 		"annotation row": {
 			revisions: []yamlviewport.Revision{yamlviewport.NewRevision("annotated", annotated)},
@@ -7356,8 +7105,7 @@ func TestViewport_HitAt(t *testing.T) {
 			height:    5,
 			x:         1,
 			y:         2,
-			want:      yamlviewport.Hit{Position: position.New(1, 0)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(1, 0)},
 		},
 		"first column a clipped line shows": {
 			revisions: []yamlviewport.Revision{clipped},
@@ -7365,8 +7113,7 @@ func TestViewport_HitAt(t *testing.T) {
 			height:    5,
 			x:         4,
 			y:         1,
-			want:      yamlviewport.Hit{Position: position.New(1, 15)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(1, 15)},
 		},
 		"last column a clipped line shows": {
 			revisions: []yamlviewport.Revision{clipped},
@@ -7374,8 +7121,7 @@ func TestViewport_HitAt(t *testing.T) {
 			height:    5,
 			x:         13,
 			y:         1,
-			want:      yamlviewport.Hit{Position: position.New(1, 24)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(1, 24)},
 		},
 		"ellipsis at the start of a clipped line": {
 			revisions: []yamlviewport.Revision{clipped},
@@ -7401,8 +7147,7 @@ func TestViewport_HitAt(t *testing.T) {
 				m.SetWordWrap(false)
 				m.SetXOffset(6)
 			},
-			want: yamlviewport.Hit{Position: position.New(1, 17)},
-			ok:   true,
+			want: &yamlviewport.Hit{Position: position.New(1, 17)},
 		},
 		"clipped line with a search match in another window": {
 			revisions: []yamlviewport.Revision{clipped},
@@ -7411,8 +7156,7 @@ func TestViewport_HitAt(t *testing.T) {
 			x:         17,
 			y:         1,
 			setup:     func(m *yamlviewport.Model) { m.SetSearchTerm("yz") },
-			want:      yamlviewport.Hit{Position: position.New(1, 28)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(1, 28)},
 		},
 		"line below a clipped line": {
 			revisions: []yamlviewport.Revision{clipped},
@@ -7420,8 +7164,7 @@ func TestViewport_HitAt(t *testing.T) {
 			height:    5,
 			x:         4,
 			y:         3,
-			want:      yamlviewport.Hit{Position: position.New(2, 3)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(2, 3)},
 		},
 		"bracket a highlight adds before a match": {
 			revisions: []yamlviewport.Revision{source("k: ab cd\n")},
@@ -7431,8 +7174,7 @@ func TestViewport_HitAt(t *testing.T) {
 			x:         4,
 			y:         0,
 			setup:     func(m *yamlviewport.Model) { m.SetSearchTerm("ab") },
-			want:      yamlviewport.Hit{Position: position.New(0, 3)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(0, 3)},
 		},
 		"bracket a highlight adds after a match": {
 			revisions: []yamlviewport.Revision{source("k: ab cd\n")},
@@ -7442,8 +7184,7 @@ func TestViewport_HitAt(t *testing.T) {
 			x:         7,
 			y:         0,
 			setup:     func(m *yamlviewport.Model) { m.SetSearchTerm("ab") },
-			want:      yamlviewport.Hit{Position: position.New(0, 4)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(0, 4)},
 		},
 		"column after a highlight that adds brackets": {
 			revisions: []yamlviewport.Revision{source("k: ab cd\n")},
@@ -7453,8 +7194,7 @@ func TestViewport_HitAt(t *testing.T) {
 			x:         9,
 			y:         0,
 			setup:     func(m *yamlviewport.Model) { m.SetSearchTerm("ab") },
-			want:      yamlviewport.Hit{Position: position.New(0, 6)},
-			ok:        true,
+			want:      &yamlviewport.Hit{Position: position.New(0, 6)},
 		},
 		"no revision": {
 			width:  16,
@@ -7483,8 +7223,15 @@ func TestViewport_HitAt(t *testing.T) {
 			}
 
 			got, ok := m.HitAt(tc.x, tc.y)
-			assert.Equal(t, tc.ok, ok, "screen:\n%s", ansi.Strip(m.View()))
-			assert.Equal(t, tc.want, got)
+			if tc.want == nil {
+				assert.False(t, ok, screenMessage(&m))
+				assert.Zero(t, got)
+
+				return
+			}
+
+			assert.True(t, ok, screenMessage(&m))
+			assert.Equal(t, *tc.want, got)
 		})
 	}
 }
@@ -7548,10 +7295,9 @@ func TestViewport_HitAt_PathAt(t *testing.T) {
 			m := m
 
 			hit, ok := m.HitAt(tc.x, tc.y)
-			require.True(t, ok, "screen:\n%s", ansi.Strip(m.View()))
+			require.True(t, ok, screenMessage(&m))
 
-			doc, err := sources[hit.Revision].Document()
-			require.NoError(t, err)
+			doc := yamltest.Document(t, sources[hit.Revision])
 
 			path, ok := doc.PathAt(hit.Position)
 			require.True(t, ok)
@@ -7581,7 +7327,7 @@ func TestViewport_Reveal(t *testing.T) {
 	// The viewport shows revision 2. Revision 1 holds three lines in place
 	// of line 20 and another line 40, so its lines past the first change
 	// sit two below the lines they match in revision 2.
-	origin := numbered(60, "key%d: value")
+	origin := yamltest.GenerateLines(60, "key%d: value")
 	before := replaceLine(replaceLine(origin, 40, "old: x"), 20, stringtest.JoinLF("gone: 1", "gone: 2", "gone: 3"))
 	after := replaceLine(origin, 40, "new: y")
 
@@ -7593,7 +7339,8 @@ func TestViewport_Reveal(t *testing.T) {
 	noDiff := func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeNone) }
 
 	// Each case that wants true names in shows a Hit that the center row
-	// holds once Reveal returns.
+	// holds once Reveal returns. A case without shows wants the center row
+	// to hold its hit.
 	tcs := map[string]struct {
 		setup func(m *yamlviewport.Model)
 		hit   yamlviewport.Hit
@@ -7601,19 +7348,16 @@ func TestViewport_Reveal(t *testing.T) {
 		want  bool
 	}{
 		"unchanged line": {
-			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
-			shows: yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
-			want:  true,
+			hit:  yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
+			want: true,
 		},
 		"inserted line": {
-			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(40, 0)},
-			shows: yamlviewport.Hit{Revision: 2, Position: position.New(40, 0)},
-			want:  true,
+			hit:  yamlviewport.Hit{Revision: 2, Position: position.New(40, 0)},
+			want: true,
 		},
 		"deleted line": {
-			hit:   yamlviewport.Hit{Revision: 1, Position: position.New(21, 0)},
-			shows: yamlviewport.Hit{Revision: 1, Position: position.New(21, 0)},
-			want:  true,
+			hit:  yamlviewport.Hit{Revision: 1, Position: position.New(21, 0)},
+			want: true,
 		},
 		"unchanged line of the compared revision": {
 			// The unified diff shows the line as line 50 of revision 2.
@@ -7656,13 +7400,11 @@ func TestViewport_Reveal(t *testing.T) {
 		"hunks inserted line": {
 			setup: hunks,
 			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(40, 0)},
-			shows: yamlviewport.Hit{Revision: 2, Position: position.New(40, 0)},
 			want:  true,
 		},
 		"hunks deleted line": {
 			setup: hunks,
 			hit:   yamlviewport.Hit{Revision: 1, Position: position.New(21, 0)},
-			shows: yamlviewport.Hit{Revision: 1, Position: position.New(21, 0)},
 			want:  true,
 		},
 		"hunks unchanged line of the compared revision": {
@@ -7682,19 +7424,16 @@ func TestViewport_Reveal(t *testing.T) {
 		"side by side left pane": {
 			setup: sideBySide,
 			hit:   yamlviewport.Hit{Revision: 1, Position: position.New(52, 0)},
-			shows: yamlviewport.Hit{Revision: 1, Position: position.New(52, 0)},
 			want:  true,
 		},
 		"side by side right pane": {
 			setup: sideBySide,
 			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
-			shows: yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
 			want:  true,
 		},
 		"origin deleted line": {
 			setup: withOrigin,
 			hit:   yamlviewport.Hit{Revision: 0, Position: position.New(40, 0)},
-			shows: yamlviewport.Hit{Revision: 0, Position: position.New(40, 0)},
 			want:  true,
 		},
 		"origin revision the diff leaves out": {
@@ -7704,7 +7443,6 @@ func TestViewport_Reveal(t *testing.T) {
 		"no diff": {
 			setup: noDiff,
 			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
-			shows: yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
 			want:  true,
 		},
 		"no diff side by side": {
@@ -7712,9 +7450,8 @@ func TestViewport_Reveal(t *testing.T) {
 				noDiff(m)
 				sideBySide(m)
 			},
-			hit:   yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
-			shows: yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
-			want:  true,
+			hit:  yamlviewport.Hit{Revision: 2, Position: position.New(50, 0)},
+			want: true,
 		},
 		"no diff compared revision": {
 			setup: noDiff,
@@ -7738,7 +7475,7 @@ func TestViewport_Reveal(t *testing.T) {
 			y, x := m.YOffset(), m.XOffset()
 			revision, viewMode, diffMode := m.RevisionIndex(), m.ViewMode(), m.DiffMode()
 
-			require.Equal(t, tc.want, m.Reveal(tc.hit), "screen:\n%s", ansi.Strip(m.View()))
+			require.Equal(t, tc.want, m.Reveal(tc.hit), screenMessage(&m))
 
 			assert.Equal(t, revision, m.RevisionIndex())
 			assert.Equal(t, viewMode, m.ViewMode())
@@ -7751,9 +7488,9 @@ func TestViewport_Reveal(t *testing.T) {
 				return
 			}
 
-			row, ok := hitRow(&m, tc.shows)
-			require.True(t, ok, "screen:\n%s", ansi.Strip(m.View()))
-			assert.Equal(t, (height-1)/2, row, "screen:\n%s", ansi.Strip(m.View()))
+			row, ok := hitRow(&m, cmp.Or(tc.shows, tc.hit))
+			require.True(t, ok, screenMessage(&m))
+			assert.Equal(t, (height-1)/2, row, screenMessage(&m))
 		})
 	}
 }
@@ -7845,7 +7582,7 @@ func TestViewport_Reveal_Sideways(t *testing.T) {
 			}
 
 			_, ok := hitRow(&m, tc.hit)
-			assert.True(t, ok, "screen:\n%s", ansi.Strip(m.View()))
+			assert.True(t, ok, screenMessage(&m))
 		})
 	}
 }

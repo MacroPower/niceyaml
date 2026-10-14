@@ -45,7 +45,7 @@ func attrsOf(s lipgloss.Style) styleAttrs {
 func TestParse(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		err   error
 		input string
 		want  styleAttrs
@@ -56,11 +56,8 @@ func TestParse(t *testing.T) {
 		"short foreground color": {input: "#f00", want: styleAttrs{Fg: "#ff0000"}},
 		"background color":       {input: "bg:#00ff00", want: styleAttrs{Bg: "#00ff00"}},
 		"bold":                   {input: "bold", want: styleAttrs{Bold: true}},
-		"nobold":                 {input: "nobold", want: styleAttrs{}},
 		"italic":                 {input: "italic", want: styleAttrs{Italic: true}},
-		"noitalic":               {input: "noitalic", want: styleAttrs{}},
 		"underline":              {input: "underline", want: styleAttrs{Underline: true}},
-		"nounderline":            {input: "nounderline", want: styleAttrs{}},
 		"noinherit ignored":      {input: "noinherit #ff0000", want: styleAttrs{Fg: "#ff0000"}},
 		"border ignored":         {input: "border:#0000ff #ff0000", want: styleAttrs{Fg: "#ff0000"}},
 		"combined style": {
@@ -79,21 +76,44 @@ func TestParse(t *testing.T) {
 		"invalid border color":         {input: "border:garbage", err: style.ErrInvalidColor},
 		"empty border color":           {input: "border:", err: style.ErrInvalidColor},
 		"unknown keyword":              {input: "unknown", err: style.ErrUnknownKeyword},
+		"uppercase hex color":          {input: "Bold #FF0000", want: styleAttrs{Bold: true, Fg: "#ff0000"}},
+		"modifiers only": {
+			input: "bold italic underline",
+			want:  styleAttrs{Bold: true, Italic: true, Underline: true},
+		},
+		"colors only": {input: "#aabbcc bg:#112233", want: styleAttrs{Fg: "#aabbcc", Bg: "#112233"}},
+		"all features": {
+			input: "bold italic underline #ffffff bg:#000000",
+			want:  styleAttrs{Bold: true, Italic: true, Underline: true, Fg: "#ffffff", Bg: "#000000"},
+		},
+		"cleared modifier": {input: "bold nobold #ff0000", want: styleAttrs{Fg: "#ff0000"}},
 	}
 
-	for name, tt := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := style.Parse(tt.input)
-			if tt.err != nil {
-				require.ErrorIs(t, err, tt.err)
+			got, err := style.Parse(tc.input)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				assert.Panics(t, func() { style.MustParse(tc.input) })
 
 				return
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, tt.want, attrsOf(got))
+			assert.Equal(t, tc.want, attrsOf(got))
+			assert.Equal(t, tc.want, attrsOf(style.MustParse(tc.input)))
+
+			// The encoded style parses back to the same attributes and
+			// encodes to the same string again.
+			encoded := style.Encode(got)
+
+			reparsed, err := style.Parse(encoded)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.want, attrsOf(reparsed))
+			assert.Equal(t, encoded, style.Encode(reparsed), "round-trip should be stable")
 		})
 	}
 }
@@ -101,7 +121,7 @@ func TestParse(t *testing.T) {
 func TestParse_NoKeywordsLeaveAttributeUnset(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		input  string
 		parent lipgloss.Style
 		get    func(lipgloss.Style) bool
@@ -138,61 +158,31 @@ func TestParse_NoKeywordsLeaveAttributeUnset(t *testing.T) {
 		},
 	}
 
-	for name, tt := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			s, err := style.Parse(tt.input)
+			s, err := style.Parse(tc.input)
 			require.NoError(t, err)
+			assert.Equal(t, styleAttrs{}, attrsOf(s))
 
 			// An unset attribute lets Inherit take the parent's value.
-			assert.True(t, tt.get(s.Inherit(tt.parent)))
+			assert.True(t, tc.get(s.Inherit(tc.parent)))
 		})
 	}
-}
-
-func TestMustParse(t *testing.T) {
-	t.Parallel()
-
-	t.Run("valid input", func(t *testing.T) {
-		t.Parallel()
-
-		s := style.MustParse("bold #ff0000")
-		assert.Equal(t, styleAttrs{Bold: true, Fg: "#ff0000"}, attrsOf(s))
-	})
-
-	t.Run("invalid input panics", func(t *testing.T) {
-		t.Parallel()
-
-		assert.Panics(t, func() {
-			style.MustParse("invalid")
-		})
-	})
 }
 
 func TestEncode(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		style lipgloss.Style
 		want  string
 	}{
-		"empty style": {
-			style: lipgloss.NewStyle(),
-			want:  "",
-		},
-		"bold only": {
-			style: lipgloss.NewStyle().Bold(true),
-			want:  "bold",
-		},
-		"italic only": {
-			style: lipgloss.NewStyle().Italic(true),
-			want:  "italic",
-		},
-		"underline only": {
-			style: lipgloss.NewStyle().Underline(true),
-			want:  "underline",
-		},
+		"empty style":    {style: lipgloss.NewStyle(), want: ""},
+		"bold only":      {style: lipgloss.NewStyle().Bold(true), want: "bold"},
+		"italic only":    {style: lipgloss.NewStyle().Italic(true), want: "italic"},
+		"underline only": {style: lipgloss.NewStyle().Underline(true), want: "underline"},
 		"foreground color": {
 			style: lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000")),
 			want:  "#ff0000",
@@ -234,51 +224,11 @@ func TestEncode(t *testing.T) {
 		},
 	}
 
-	for name, tt := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tt.want, style.Encode(tt.style))
-		})
-	}
-}
-
-func TestRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		input string
-	}{
-		"simple color":     {input: "#ff0000"},
-		"bold":             {input: "bold"},
-		"italic":           {input: "italic"},
-		"underline":        {input: "underline"},
-		"bg color":         {input: "bg:#00ff00"},
-		"combined":         {input: "bold italic #c678dd bg:#282c34"},
-		"all features":     {input: "bold italic underline #ffffff bg:#000000"},
-		"modifiers only":   {input: "bold italic underline"},
-		"colors only":      {input: "#aabbcc bg:#112233"},
-		"case insensitive": {input: "Bold #FF0000"},
-		"cleared modifier": {input: "bold nobold #ff0000"},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			style1, err := style.Parse(tt.input)
-			require.NoError(t, err)
-
-			encoded := style.Encode(style1)
-
-			style2, err := style.Parse(encoded)
-			require.NoError(t, err)
-
-			assert.Equal(t, encoded, style.Encode(style2), "round-trip should be stable")
-
-			// The style parsed from the encoded string holds the same
-			// attributes.
-			assert.Equal(t, attrsOf(style1), attrsOf(style2))
+			assert.Equal(t, tc.want, style.Encode(tc.style))
 		})
 	}
 }

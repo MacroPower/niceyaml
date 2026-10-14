@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
 func TestLimitFlags(t *testing.T) {
@@ -40,7 +41,7 @@ func TestLimitFlags(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path := writeFile(t, t.TempDir(), "deep.yaml", deep)
+			path := yamltest.WriteFile(t, t.TempDir(), "deep.yaml", deep)
 			out := &bytes.Buffer{}
 
 			err := quietValidateCmd(out, append(tc.args, path)...).Execute()

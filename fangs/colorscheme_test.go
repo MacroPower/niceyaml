@@ -113,17 +113,6 @@ func TestColorScheme(t *testing.T) {
 	}
 }
 
-func TestColorSchemeFunc(t *testing.T) {
-	t.Parallel()
-
-	styles := theme.Charm.Styles()
-
-	csFunc := fangs.ColorSchemeFunc(styles)
-
-	// The returned function ignores the LightDarkFunc parameter.
-	assert.Equal(t, fangs.ColorScheme(styles), csFunc(nil))
-}
-
 // stylerFunc adapts a func to [style.Styler].
 type stylerFunc func(kind.Kind) lipgloss.Style
 
@@ -181,7 +170,7 @@ func TestColorScheme_NilStyler(t *testing.T) {
 	}
 }
 
-func TestLightDarkColorSchemeFunc(t *testing.T) {
+func TestColorSchemeFunc(t *testing.T) {
 	t.Parallel()
 
 	light, ok := theme.Builtin().Get("github")
@@ -192,18 +181,25 @@ func TestLightDarkColorSchemeFunc(t *testing.T) {
 	// Equal schemes would let a function that ignores the background pass.
 	require.NotEqual(t, fangs.ColorScheme(light), fangs.ColorScheme(dark))
 
-	csFunc := fangs.LightDarkColorSchemeFunc(light, dark)
+	styles := dark.Styles()
+	lightDark := fangs.LightDarkColorSchemeFunc(light, dark)
 
 	tcs := map[string]struct {
-		isDark bool
+		scheme func() fang.ColorScheme
 		want   fang.ColorScheme
 	}{
-		"light terminal": {
-			isDark: false,
+		// The function that ColorSchemeFunc returns ignores its
+		// LightDarkFunc parameter, so the case passes nil.
+		"ColorSchemeFunc": {
+			scheme: func() fang.ColorScheme { return fangs.ColorSchemeFunc(styles)(nil) },
+			want:   fangs.ColorScheme(styles),
+		},
+		"LightDarkColorSchemeFunc on a light terminal": {
+			scheme: func() fang.ColorScheme { return lightDark(lipgloss.LightDark(false)) },
 			want:   fangs.ColorScheme(light),
 		},
-		"dark terminal": {
-			isDark: true,
+		"LightDarkColorSchemeFunc on a dark terminal": {
+			scheme: func() fang.ColorScheme { return lightDark(lipgloss.LightDark(true)) },
 			want:   fangs.ColorScheme(dark),
 		},
 	}
@@ -212,7 +208,7 @@ func TestLightDarkColorSchemeFunc(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, csFunc(lipgloss.LightDark(tc.isDark)))
+			assert.Equal(t, tc.want, tc.scheme())
 		})
 	}
 }

@@ -19,9 +19,8 @@ func TestDefault_SharedValueStaysUnchanged(t *testing.T) {
 	first := style.Default()
 	assert.Equal(t, first, style.Default())
 
-	red := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000"))
-	extended := style.Default().With(style.Set(kind.Comment, red))
-	assert.Equal(t, red, extended.Style(kind.Comment))
+	extended := style.Default().With(style.Set(kind.Comment, redStyle))
+	assert.Equal(t, redStyle, extended.Style(kind.Comment))
 
 	// With copies the shared value, so a later call still sees the default.
 	assert.Equal(t, charmtone.Oyster, style.Default().Style(kind.Comment).GetForeground())
