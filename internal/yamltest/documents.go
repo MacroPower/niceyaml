@@ -50,6 +50,33 @@ func AtOrSelf(tb testing.TB, n *niceyaml.Node, path paths.Path) *niceyaml.Node {
 	return At(tb, n, path)
 }
 
+// Documents returns the root [*niceyaml.Node] of each document of source
+// that [niceyaml.Source.Documents] returns, which leaves out an empty
+// document beside one with content. The test fails unless there are n of
+// them. A document that did not parse keeps its place, and a test reads
+// its error through [niceyaml.Node.Err].
+func Documents(tb testing.TB, source *niceyaml.Source, n int) []*niceyaml.Node {
+	tb.Helper()
+
+	docs := source.Documents()
+	require.Len(tb, docs, n)
+
+	return docs
+}
+
+// AllDocuments returns the root [*niceyaml.Node] of every document of
+// source that [niceyaml.Source.AllDocuments] returns, which counts each
+// empty document and each document that did not parse. The test fails
+// unless there are n of them.
+func AllDocuments(tb testing.TB, source *niceyaml.Source, n int) []*niceyaml.Node {
+	tb.Helper()
+
+	docs := source.AllDocuments()
+	require.Len(tb, docs, n)
+
+	return docs
+}
+
 // Document returns the root [*niceyaml.Node] of the single document of
 // source, through [niceyaml.Source.Document]. The test fails when the
 // source does not hold exactly one document, or when that document did
@@ -107,4 +134,32 @@ func UnparsedDocument(tb testing.TB, input string, opts ...niceyaml.SourceOption
 	require.Error(tb, docs[0].Err())
 
 	return docs[0]
+}
+
+// References returns the [niceyaml.WithReferences] option for a
+// [*niceyaml.Source] created from each input, in the order of inputs. An
+// alias in the source under test then names an anchor that an input
+// defines:
+//
+//	doc := yamltest.FirstDocument(t, "server: *base\n", yamltest.References("base: &base {port: 80}\n"))
+func References(inputs ...string) niceyaml.SourceOption {
+	refs := make([]*niceyaml.Source, 0, len(inputs))
+	for _, input := range inputs {
+		refs = append(refs, niceyaml.NewSourceFromString(input))
+	}
+
+	return niceyaml.WithReferences(refs...)
+}
+
+// NoSizeLimits returns [niceyaml.WithByteLimit] and
+// [niceyaml.WithDepthLimit] with a limit of 0, followed by opts. Those
+// options turn off the byte limit and the depth limit of a
+// [*niceyaml.Source], so a test or a benchmark that reads a large or
+// deeply nested document passes them:
+//
+//	doc := yamltest.FirstDocument(b, input, yamltest.NoSizeLimits()...)
+//
+// The alias limit stays on.
+func NoSizeLimits(opts ...niceyaml.SourceOption) []niceyaml.SourceOption {
+	return append([]niceyaml.SourceOption{niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0)}, opts...)
 }

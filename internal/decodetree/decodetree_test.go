@@ -16,6 +16,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
 // newTree returns the tree of the one document of input, with the
@@ -25,10 +26,7 @@ func newTree(tb testing.TB, input string) (*decodetree.Tree, *niceyaml.Node) {
 	tb.Helper()
 
 	src := niceyaml.NewSourceFromString(input)
-
-	doc, err := src.Document()
-	require.NoError(tb, err)
-
+	doc := yamltest.Document(tb, src)
 	facts := aliasing.NewFacts(doc.AST(), doc.Resolver())
 
 	reparse := func() (ast.Node, map[*token.Token]int) {
@@ -135,7 +133,7 @@ func TestNew(t *testing.T) {
 func TestTree_Holds(t *testing.T) {
 	t.Parallel()
 
-	tree, doc := newTree(t, "a: 1\nb:\n")
+	tree, doc := newTree(t, stringtest.LinesLF("a: 1", "b:"))
 
 	// The parser makes a null for the value of b, which no lexer token
 	// stands for.
@@ -218,16 +216,10 @@ func TestWriteNull(t *testing.T) {
 
 	tks := niceyaml.NewSourceFromString("a: *x\n").Tokens()
 
-	var alias *token.Token
+	i := slices.IndexFunc(tks, func(tk *token.Token) bool { return tk.Type == token.AliasType })
+	require.GreaterOrEqual(t, i, 0, "no alias token")
 
-	for _, tk := range tks {
-		if tk.Type == token.AliasType {
-			alias = tk
-		}
-	}
-
-	require.NotNil(t, alias)
-
+	alias := tks[i]
 	prev, next := alias.Prev, alias.Next
 
 	decodetree.WriteNull(alias)

@@ -70,17 +70,9 @@ func TestJoin(t *testing.T) {
 		same bool
 		join bool
 	}{
-		"no errors": {},
-		"one error": {
-			errs: []error{errA},
-			want: "a",
-			same: true,
-		},
-		"several errors": {
-			errs: []error{errA, errB},
-			want: "a\nb",
-			join: true,
-		},
+		"no errors":      {},
+		"one error":      {errs: []error{errA}, want: "a", same: true},
+		"several errors": {errs: []error{errA, errB}, want: "a\nb", join: true},
 	}
 
 	for name, tc := range tcs {
@@ -112,23 +104,11 @@ func TestIsJoin(t *testing.T) {
 		join      bool
 		wrapError bool
 	}{
-		"join": {
-			err:  errors.Join(errA, errB),
-			join: true,
-		},
-		"several verbs": {
-			err:       fmt.Errorf("%w: %w", errA, errB),
-			wrapError: true,
-		},
-		"one verb": {
-			err: fmt.Errorf("x: %w", errA),
-		},
-		"other type": {
-			err: &listError{msg: "a\nb", errs: []error{errA, errB}},
-		},
-		"nil": {
-			err: nil,
-		},
+		"join":          {err: errors.Join(errA, errB), join: true},
+		"several verbs": {err: fmt.Errorf("%w: %w", errA, errB), wrapError: true},
+		"one verb":      {err: fmt.Errorf("x: %w", errA)},
+		"other type":    {err: &listError{msg: "a\nb", errs: []error{errA, errB}}},
+		"nil":           {err: nil},
 	}
 
 	for name, tc := range tcs {
@@ -149,32 +129,12 @@ func TestJoinMessage(t *testing.T) {
 		branches []error
 		want     bool
 	}{
-		"one per line": {
-			msg:      "a\nb",
-			branches: []error{errA, errB},
-			want:     true,
-		},
-		"nil branch takes no line": {
-			msg:      "a\nb",
-			branches: []error{errA, nil, errB},
-			want:     true,
-		},
-		"no branches": {
-			msg:  "",
-			want: true,
-		},
-		"other separator": {
-			msg:      "a; b",
-			branches: []error{errA, errB},
-		},
-		"text after the branches": {
-			msg:      "a\nb\n",
-			branches: []error{errA, errB},
-		},
-		"other order": {
-			msg:      "b\na",
-			branches: []error{errA, errB},
-		},
+		"one per line":             {msg: "a\nb", branches: []error{errA, errB}, want: true},
+		"nil branch takes no line": {msg: "a\nb", branches: []error{errA, nil, errB}, want: true},
+		"no branches":              {msg: "", want: true},
+		"other separator":          {msg: "a; b", branches: []error{errA, errB}},
+		"text after the branches":  {msg: "a\nb\n", branches: []error{errA, errB}},
+		"other order":              {msg: "b\na", branches: []error{errA, errB}},
 	}
 
 	for name, tc := range tcs {
@@ -193,14 +153,9 @@ func TestFirst(t *testing.T) {
 		want     error
 		branches []error
 	}{
-		"past nil branches": {
-			branches: []error{nil, errB, errC},
-			want:     errB,
-		},
-		"nil branches alone": {
-			branches: []error{nil},
-		},
-		"no branches": {},
+		"past nil branches":  {branches: []error{nil, errB, errC}, want: errB},
+		"nil branches alone": {branches: []error{nil}},
+		"no branches":        {},
 	}
 
 	for name, tc := range tcs {
@@ -227,18 +182,9 @@ func TestHoldsFirst(t *testing.T) {
 		branches []error
 		want     bool
 	}{
-		"holds the first": {
-			msg:      "x: a, b",
-			branches: []error{nil, errA, errB},
-			want:     true,
-		},
-		"holds a later one alone": {
-			msg:      "x: b",
-			branches: []error{errA, errB},
-		},
-		"no branches": {
-			msg: "x",
-		},
+		"holds the first":         {msg: "x: a, b", branches: []error{nil, errA, errB}, want: true},
+		"holds a later one alone": {msg: "x: b", branches: []error{errA, errB}},
+		"no branches":             {msg: "x"},
 	}
 
 	for name, tc := range tcs {

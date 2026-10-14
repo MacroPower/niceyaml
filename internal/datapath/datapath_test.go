@@ -57,6 +57,25 @@ var (
 	// The key 3.10 of python sets the member 3.1.
 	pythonInput = stringtest.LinesLF("python:", "  3.10: a")
 
+	// The merge key of user sets the member 16 through the key 0x10, and
+	// the quoted key "0x10" after it takes that spelling for the member
+	// 0x10.
+	takenSpellingInput = stringtest.LinesLF(
+		"user:",
+		"  <<: {0x10: x}",
+		`  "0x10": 1`,
+	)
+
+	// The alias key of m has no name the index can tell, so the index
+	// leaves out the members before it.
+	aliasKeyInput = stringtest.LinesLF(
+		"k: &k {x: y}",
+		"m:",
+		"  a: 1",
+		"  *k : 2",
+		"  b: 3",
+	)
+
 	// The key 3.10 of python sets the member 3.1. The tagged alias key has no
 	// name the index can tell, so it may set a member of any name, and the
 	// index leaves out the members before it.
@@ -103,13 +122,13 @@ func TestIndex_Member(t *testing.T) {
 			wantStart: "a@2:9",
 		},
 		"bool and null keys": {
-			input:     "True: a\n~: b\n",
+			input:     stringtest.LinesLF("True: a", "~: b"),
 			steps:     []any{"null"},
 			want:      "@.'~'",
 			wantStart: "b@2:4",
 		},
 		"quoted key": {
-			input:     "\"a b\": x\n",
+			input:     stringtest.LinesLF(`"a b": x`),
 			steps:     []any{"a b"},
 			want:      "@.'a b'",
 			wantStart: "x@1:8",
@@ -154,11 +173,7 @@ func TestIndex_Member(t *testing.T) {
 			wantStart: "v@3:8",
 		},
 		"spelling a later key repeats": {
-			input: stringtest.LinesLF(
-				"user:",
-				"  <<: {0x10: x}",
-				`  "0x10": 1`,
-			),
+			input:     takenSpellingInput,
 			steps:     []any{"user", "16"},
 			want:      "@.user.16",
 			wantStart: "x@2:14",
@@ -184,25 +199,13 @@ func TestIndex_Member(t *testing.T) {
 			unspelled: true,
 		},
 		"member before a key with no name": {
-			input: stringtest.LinesLF(
-				"k: &k {x: y}",
-				"m:",
-				"  a: 1",
-				"  *k : 2",
-				"  b: 3",
-			),
+			input:     aliasKeyInput,
 			steps:     []any{"m", "a"},
 			want:      "@.m.a",
 			unspelled: true,
 		},
 		"member after a key with no name": {
-			input: stringtest.LinesLF(
-				"k: &k {x: y}",
-				"m:",
-				"  a: 1",
-				"  *k : 2",
-				"  b: 3",
-			),
+			input:     aliasKeyInput,
 			steps:     []any{"m", "b"},
 			want:      "@.m.b",
 			wantStart: "3@5:6",
@@ -299,7 +302,7 @@ func TestIndex_Element(t *testing.T) {
 	}
 }
 
-func TestTarget_Start(t *testing.T) {
+func TestTarget(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -309,6 +312,9 @@ func TestTarget_Start(t *testing.T) {
 		// key.
 		want    string
 		wantKey string
+		// Whether the case reads the tokens through Token in place of
+		// Start.
+		token bool
 	}{
 		"entry of a mapping": {
 			input:   portsInput,
@@ -317,7 +323,7 @@ func TestTarget_Start(t *testing.T) {
 			wantKey: "0x10@2:3",
 		},
 		"explicit key": {
-			input:   "? 0x10\n: x\n",
+			input:   stringtest.LinesLF("? 0x10", ": x"),
 			steps:   []any{"16"},
 			want:    "x@2:3",
 			wantKey: "0x10@1:3",
@@ -366,6 +372,23 @@ func TestTarget_Start(t *testing.T) {
 			input: "a: x\n",
 			steps: []any{"b"},
 		},
+		"token when the path selects the member": {
+			input: portsInput,
+			steps: []any{"ports", "16"},
+			token: true,
+		},
+		"token when the path selects another entry": {
+			input:   takenSpellingInput,
+			steps:   []any{"user", "16"},
+			want:    "x@2:14",
+			wantKey: "0x10@2:8",
+			token:   true,
+		},
+		"token when the walk reached no node": {
+			input: takenSpellingInput,
+			steps: []any{"user", "16", "name"},
+			token: true,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -374,55 +397,24 @@ func TestTarget_Start(t *testing.T) {
 
 			_, got := find(t, tc.input, tc.steps...)
 
-			assert.Equal(t, tc.want, yamltest.TokenPlace(got.Start(false)))
-			assert.Equal(t, tc.wantKey, yamltest.TokenPlace(got.Start(true)))
+			read := got.Start
+			if tc.token {
+				read = got.Token
+			}
+
+			assert.Equal(t, tc.want, yamltest.TokenPlace(read(false)))
+			assert.Equal(t, tc.wantKey, yamltest.TokenPlace(read(true)))
 		})
 	}
 }
 
-func TestTarget_Token(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input   string
-		steps   []any
-		want    string
-		wantKey string
-	}{
-		"path selects the member": {
-			input: portsInput,
-			steps: []any{"ports", "16"},
-		},
-		"path selects another entry": {
-			input: stringtest.LinesLF(
-				"user:",
-				"  <<: {0x10: x}",
-				`  "0x10": 1`,
-			),
-			steps:   []any{"user", "16"},
-			want:    "x@2:14",
-			wantKey: "0x10@2:8",
-		},
-		"walk reached no node": {
-			input: stringtest.LinesLF(
-				"user:",
-				"  <<: {0x10: x}",
-				`  "0x10": 1`,
-			),
-			steps: []any{"user", "16", "name"},
-		},
+// text returns the text of node, or "<nil>" for no node.
+func text(node ast.Node) string {
+	if node == nil {
+		return "<nil>"
 	}
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			_, got := find(t, tc.input, tc.steps...)
-
-			assert.Equal(t, tc.want, yamltest.TokenPlace(got.Token(false)))
-			assert.Equal(t, tc.wantKey, yamltest.TokenPlace(got.Token(true)))
-		})
-	}
+	return node.String()
 }
 
 func TestIndex_Deref(t *testing.T) {
@@ -433,26 +425,15 @@ func TestIndex_Deref(t *testing.T) {
 		steps []any
 		want  string
 	}{
-		"plain value": {
-			input: "a: x\n",
-			steps: []any{"a"},
-			want:  "x",
-		},
-		"anchor and tag": {
-			input: "a: &a !!str x\n",
-			steps: []any{"a"},
-			want:  "x",
-		},
-		"alias": {
-			input: "a: &a x\nb: *a\n",
-			steps: []any{"b"},
-			want:  "x",
-		},
+		"plain value":    {input: "a: x\n", steps: []any{"a"}, want: "x"},
+		"anchor and tag": {input: "a: &a !!str x\n", steps: []any{"a"}, want: "x"},
+		"alias":          {input: stringtest.LinesLF("a: &a x", "b: *a"), steps: []any{"b"}, want: "x"},
 		"alias to a tagged value": {
-			input: "a: &a !!str x\nb: *a\n",
+			input: stringtest.LinesLF("a: &a !!str x", "b: *a"),
 			steps: []any{"b"},
 			want:  "x",
 		},
+		"alias with no anchor": {input: "a: *missing\n", steps: []any{"a"}, want: "<nil>"},
 	}
 
 	for name, tc := range tcs {
@@ -460,10 +441,8 @@ func TestIndex_Deref(t *testing.T) {
 			t.Parallel()
 
 			idx, target := find(t, tc.input, tc.steps...)
-			got := idx.Deref(target.Node)
 
-			require.NotNil(t, got)
-			assert.Equal(t, tc.want, got.String())
+			assert.Equal(t, tc.want, text(idx.Deref(target.Node)))
 		})
 	}
 
@@ -471,14 +450,6 @@ func TestIndex_Deref(t *testing.T) {
 		t.Parallel()
 
 		assert.Nil(t, datapath.NewIndex(paths.NewResolver(nil)).Deref(nil))
-	})
-
-	t.Run("alias with no anchor", func(t *testing.T) {
-		t.Parallel()
-
-		idx, target := find(t, "a: *missing\n", "a")
-
-		assert.Nil(t, idx.Deref(target.Node))
 	})
 }
 
@@ -490,29 +461,11 @@ func TestIndex_MemberNode(t *testing.T) {
 		name  string
 		want  string
 	}{
-		"member by its decoded name": {
-			input: "0x10: x\n",
-			name:  "16",
-			want:  "x",
-		},
-		"last of two keys with one name": {
-			input: "16: a\n0x10: b\n",
-			name:  "16",
-			want:  "b",
-		},
-		"member of a merge source": {
-			input: "<<: {0x10: x}\n",
-			name:  "16",
-			want:  "x",
-		},
-		"source spelling": {
-			input: "0x10: x\n",
-			name:  "0x10",
-		},
-		"sequence": {
-			input: "- x\n",
-			name:  "0",
-		},
+		"member by its decoded name":     {input: "0x10: x\n", name: "16", want: "x"},
+		"last of two keys with one name": {input: stringtest.LinesLF("16: a", "0x10: b"), name: "16", want: "b"},
+		"member of a merge source":       {input: "<<: {0x10: x}\n", name: "16", want: "x"},
+		"source spelling":                {input: "0x10: x\n", name: "0x10", want: "<nil>"},
+		"sequence":                       {input: "- x\n", name: "0", want: "<nil>"},
 	}
 
 	for name, tc := range tcs {
@@ -521,15 +474,7 @@ func TestIndex_MemberNode(t *testing.T) {
 
 			idx, root := find(t, tc.input)
 
-			got := idx.MemberNode(root.Node, tc.name)
-			if tc.want == "" {
-				assert.Nil(t, got)
-
-				return
-			}
-
-			require.NotNil(t, got)
-			assert.Equal(t, tc.want, got.String())
+			assert.Equal(t, tc.want, text(idx.MemberNode(root.Node, tc.name)))
 		})
 	}
 }
@@ -542,48 +487,19 @@ func TestElementNode(t *testing.T) {
 		want  string
 		index int
 	}{
-		"first element": {
-			input: "[a, b]\n",
-			index: 0,
-			want:  "a",
-		},
-		"last element": {
-			input: "[a, b]\n",
-			index: 1,
-			want:  "b",
-		},
-		"anchored sequence": {
-			input: "&s [a, b]\n",
-			index: 1,
-			want:  "b",
-		},
-		"index past the end": {
-			input: "[a, b]\n",
-			index: 2,
-		},
-		"negative index": {
-			input: "[a, b]\n",
-			index: -1,
-		},
-		"mapping": {
-			input: "a: b\n",
-			index: 0,
-		},
+		"first element":      {input: "[a, b]\n", index: 0, want: "a"},
+		"last element":       {input: "[a, b]\n", index: 1, want: "b"},
+		"anchored sequence":  {input: "&s [a, b]\n", index: 1, want: "b"},
+		"index past the end": {input: "[a, b]\n", index: 2, want: "<nil>"},
+		"negative index":     {input: "[a, b]\n", index: -1, want: "<nil>"},
+		"mapping":            {input: "a: b\n", index: 0, want: "<nil>"},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := datapath.ElementNode(yamltest.FirstDocument(t, tc.input).AST(), tc.index)
-			if tc.want == "" {
-				assert.Nil(t, got)
-
-				return
-			}
-
-			require.NotNil(t, got)
-			assert.Equal(t, tc.want, got.String())
+			assert.Equal(t, tc.want, text(datapath.ElementNode(yamltest.FirstDocument(t, tc.input).AST(), tc.index)))
 		})
 	}
 
@@ -594,226 +510,196 @@ func TestElementNode(t *testing.T) {
 	})
 }
 
-func TestIndex_SelectsEntry(t *testing.T) {
+func TestIndex(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
+		query func(idx *datapath.Index, node ast.Node, name string) bool
 		input string
 		steps []any
 		name  string
 		want  bool
 	}{
-		"source spelling of a key": {
+		"SelectsEntry source spelling of a key": {
+			query: (*datapath.Index).SelectsEntry,
 			input: pythonInput,
 			steps: []any{"python"},
 			name:  "3.10",
 			want:  true,
 		},
-		"decoded name of a respelled key": {
+		"SelectsEntry decoded name of a respelled key": {
+			query: (*datapath.Index).SelectsEntry,
 			input: pythonInput,
 			steps: []any{"python"},
 			name:  "3.1",
 		},
-		"key of a merge source": {
+		"SelectsEntry key of a merge source": {
+			query: (*datapath.Index).SelectsEntry,
 			input: stringtest.LinesLF("m:", "  <<: {0x10: x}"),
 			steps: []any{"m"},
 			name:  "0x10",
 			want:  true,
 		},
-		"mapping behind an alias": {
+		"SelectsEntry mapping behind an alias": {
+			query: (*datapath.Index).SelectsEntry,
 			input: stringtest.LinesLF("base: &base {a: b}", "al: *base"),
 			steps: []any{"al"},
 			name:  "a",
 			want:  true,
 		},
-		"sequence": {
+		"SelectsEntry sequence": {
+			query: (*datapath.Index).SelectsEntry,
 			input: "items: [a]\n",
 			steps: []any{"items"},
 			name:  "0",
 		},
-		"scalar": {
+		"SelectsEntry scalar": {
+			query: (*datapath.Index).SelectsEntry,
 			input: "a: b\n",
 			steps: []any{"a"},
 			name:  "b",
 		},
-		"no node": {
-			input: "a: b\n",
-			steps: []any{"missing"},
-			name:  "a",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			idx, target := find(t, tc.input, tc.steps...)
-
-			assert.Equal(t, tc.want, idx.SelectsEntry(target.Node, tc.name))
-		})
-	}
-}
-
-func TestIndex_Lacks(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-		steps []any
-		name  string
-		want  bool
-	}{
-		"member the mapping holds": {
+		"Lacks member the mapping holds": {
+			query: (*datapath.Index).Lacks,
 			input: portsInput,
 			steps: []any{"ports"},
 			name:  "16",
 		},
-		"source spelling of a respelled key": {
+		"Lacks source spelling of a respelled key": {
+			query: (*datapath.Index).Lacks,
 			input: portsInput,
 			steps: []any{"ports"},
 			name:  "0x10",
 			want:  true,
 		},
-		"member of no key": {
+		"Lacks member of no key": {
+			query: (*datapath.Index).Lacks,
 			input: portsInput,
 			steps: []any{"ports"},
 			name:  "name",
 			want:  true,
 		},
-		"member a merge source holds": {
+		"Lacks member a merge source holds": {
+			query: (*datapath.Index).Lacks,
 			input: stringtest.LinesLF("m:", "  <<: {0x10: x}"),
 			steps: []any{"m"},
 			name:  "16",
 		},
-		"mapping behind an alias": {
+		"Lacks mapping behind an alias": {
+			query: (*datapath.Index).Lacks,
 			input: stringtest.LinesLF("base: &base {a: b}", "al: *base"),
 			steps: []any{"al"},
 			name:  "c",
 			want:  true,
 		},
-		"sequence": {
+		"Lacks sequence": {
+			query: (*datapath.Index).Lacks,
 			input: "items: [a]\n",
 			steps: []any{"items"},
 			name:  "0",
 			want:  true,
 		},
-		"scalar": {
+		"Lacks scalar": {
+			query: (*datapath.Index).Lacks,
 			input: "a: b\n",
 			steps: []any{"a"},
 			name:  "b",
 			want:  true,
 		},
-		"null": {
+		"Lacks null": {
+			query: (*datapath.Index).Lacks,
 			input: "a: ~\n",
 			steps: []any{"a"},
 			name:  "b",
 			want:  true,
 		},
-		"member before a key with no name": {
+		"Lacks member before a key with no name": {
+			query: (*datapath.Index).Lacks,
 			input: unnamedKeyInput,
 			steps: []any{"python"},
 			name:  "a",
 		},
-		"member after a key with no name": {
+		"Lacks member after a key with no name": {
+			query: (*datapath.Index).Lacks,
 			input: unnamedKeyInput,
 			steps: []any{"python"},
 			name:  "b",
 		},
-		"member of no key beside a key with no name": {
+		"Lacks member of no key beside a key with no name": {
+			query: (*datapath.Index).Lacks,
 			input: unnamedKeyInput,
 			steps: []any{"python"},
 			name:  "zz",
 		},
-		"member beside a merge key that does not resolve": {
+		"Lacks member beside a merge key that does not resolve": {
+			query: (*datapath.Index).Lacks,
 			input: stringtest.LinesLF("m:", "  a: 1", "  <<: *missing"),
 			steps: []any{"m"},
 			name:  "zz",
 		},
-		"alias that does not resolve": {
+		"Lacks alias that does not resolve": {
+			query: (*datapath.Index).Lacks,
 			input: "a: *missing\n",
 			steps: []any{"a"},
 			name:  "b",
 		},
-		"no node": {
-			input: "a: b\n",
-			steps: []any{"missing"},
-			name:  "a",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			idx, target := find(t, tc.input, tc.steps...)
-
-			assert.Equal(t, tc.want, idx.Lacks(target.Node, tc.name))
-		})
-	}
-}
-
-func TestIndex_SelectsOther(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-		steps []any
-		name  string
-		want  bool
-	}{
-		"spelling of a key with another name": {
+		"SelectsOther spelling of a key with another name": {
+			query: (*datapath.Index).SelectsOther,
 			input: pythonInput,
 			steps: []any{"python"},
 			name:  "3.10",
 			want:  true,
 		},
-		"name of a member": {
+		"SelectsOther name of a member": {
+			query: (*datapath.Index).SelectsOther,
 			input: pythonInput,
 			steps: []any{"python"},
 			name:  "3.1",
 		},
-		"name no key spells": {
+		"SelectsOther name no key spells": {
+			query: (*datapath.Index).SelectsOther,
 			input: pythonInput,
 			steps: []any{"python"},
 			name:  "zz",
 		},
-		"spelling a merge source gives a key with another name": {
+		"SelectsOther spelling a merge source gives a key with another name": {
+			query: (*datapath.Index).SelectsOther,
 			input: stringtest.LinesLF("m:", "  <<: {0x10: x}"),
 			steps: []any{"m"},
 			name:  "0x10",
 			want:  true,
 		},
-		"spelling of a key with another name before a key with no name": {
+		"SelectsOther spelling of a key with another name before a key with no name": {
+			query: (*datapath.Index).SelectsOther,
 			input: unnamedKeyInput,
 			steps: []any{"python"},
 			name:  "3.10",
 			want:  true,
 		},
-		"key spelled as its name before a key with no name": {
+		"SelectsOther key spelled as its name before a key with no name": {
+			query: (*datapath.Index).SelectsOther,
 			input: unnamedKeyInput,
 			steps: []any{"python"},
 			name:  "a",
 		},
-		"spelling of a key with no name": {
+		"SelectsOther spelling of a key with no name": {
+			query: (*datapath.Index).SelectsOther,
 			input: unnamedKeyInput,
 			steps: []any{"python"},
 			name:  "0x10",
 			want:  true,
 		},
-		"merge key that does not resolve": {
+		"SelectsOther merge key that does not resolve": {
+			query: (*datapath.Index).SelectsOther,
 			input: stringtest.LinesLF("m:", "  3.10: a", "  <<: *missing"),
 			steps: []any{"m"},
 			name:  "3.10",
 		},
-		"sequence": {
+		"SelectsOther sequence": {
+			query: (*datapath.Index).SelectsOther,
 			input: "items: [a]\n",
 			steps: []any{"items"},
 			name:  "0",
-		},
-		"no node": {
-			input: "a: b\n",
-			steps: []any{"missing"},
-			name:  "a",
 		},
 	}
 
@@ -823,9 +709,19 @@ func TestIndex_SelectsOther(t *testing.T) {
 
 			idx, target := find(t, tc.input, tc.steps...)
 
-			assert.Equal(t, tc.want, idx.SelectsOther(target.Node, tc.name))
+			assert.Equal(t, tc.want, tc.query(idx, target.Node, tc.name))
 		})
 	}
+
+	t.Run("no node", func(t *testing.T) {
+		t.Parallel()
+
+		idx, target := find(t, "a: b\n", "missing")
+
+		assert.False(t, idx.SelectsEntry(target.Node, "a"))
+		assert.False(t, idx.Lacks(target.Node, "a"))
+		assert.False(t, idx.SelectsOther(target.Node, "a"))
+	})
 }
 
 func TestMemberName(t *testing.T) {
@@ -885,15 +781,13 @@ func keys(seq iter.Seq[*ast.MappingValueNode]) []string {
 func TestDeref(t *testing.T) {
 	t.Parallel()
 
-	doc := yamltest.FirstDocument(t, "a: &a !!str x\nb: *a\nc: *missing\n")
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF("a: &a !!str x", "b: *a", "c: *missing"))
 	r := doc.Resolver()
 
 	b, err := r.Node(paths.Doc().Child("b"))
 	require.NoError(t, err)
 
-	got := datapath.Deref(r, b)
-	require.NotNil(t, got)
-	assert.Equal(t, "x", got.String())
+	assert.Equal(t, "x", text(datapath.Deref(r, b)))
 
 	c, ok := doc.AST().(*ast.MappingNode)
 	require.True(t, ok)
@@ -1123,27 +1017,11 @@ func TestIndex_Locate(t *testing.T) {
 		want  string
 		token string
 	}{
-		"member": {
-			names: []string{"ports", "16", "name"},
-			want:  "@.ports.0x10.name",
-		},
-		"key of a member": {
-			names: []string{"ports", "16"},
-			key:   true,
-			want:  "@.ports.0x10~",
-		},
-		"element": {
-			names: []string{"list", "1"},
-			want:  "@.list[1]",
-		},
-		"element past the end": {
-			names: []string{"list", "5", "x"},
-			want:  "@.list[5].x",
-		},
-		"missing member": {
-			names: []string{"ports", "16", "port"},
-			want:  "@.ports.0x10.port",
-		},
+		"member":               {names: []string{"ports", "16", "name"}, want: "@.ports.0x10.name"},
+		"key of a member":      {names: []string{"ports", "16"}, key: true, want: "@.ports.0x10~"},
+		"element":              {names: []string{"list", "1"}, want: "@.list[1]"},
+		"element past the end": {names: []string{"list", "5", "x"}, want: "@.list[5].x"},
+		"missing member":       {names: []string{"ports", "16", "port"}, want: "@.ports.0x10.port"},
 		"key that sets another member": {
 			names: []string{"python", "3.10", "image"},
 			want:  "@.python.'3.10'.image",
@@ -1155,18 +1033,12 @@ func TestIndex_Locate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, input)
-			idx := datapath.NewIndex(doc.Resolver())
+			idx, root := find(t, input)
 
-			path, tk := idx.Locate(datapath.Target{Path: paths.Current(), Node: doc.AST()}, tc.names, tc.key)
+			path, tk := idx.Locate(root, tc.names, tc.key)
 
 			assert.Equal(t, tc.want, path.String())
-
-			if tc.token == "" {
-				assert.Nil(t, tk)
-			} else {
-				assert.Equal(t, tc.token, yamltest.TokenPlace(tk))
-			}
+			assert.Equal(t, tc.token, yamltest.TokenPlace(tk))
 		})
 	}
 }
@@ -1252,7 +1124,6 @@ func TestMapGroups(t *testing.T) {
 		},
 		"keys of one value share a group": {
 			value: map[float64]int{math.NaN(): 1, math.NaN(): 2},
-			names: map[any]string{},
 			want:  []string{"NaN:2:true"},
 		},
 		"pointer keys name their type": {

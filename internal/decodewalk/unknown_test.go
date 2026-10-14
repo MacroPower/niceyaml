@@ -1,7 +1,6 @@
 package decodewalk_test
 
 import (
-	"fmt"
 	"reflect"
 	"testing"
 
@@ -24,8 +23,7 @@ func unknownKeys(tb testing.TB, doc *niceyaml.Node, t reflect.Type) []string {
 	var keys []string
 
 	for _, field := range decodewalk.UnknownFields(tb.Context(), r, t, doc.AST()) {
-		pos := field.Token.Position
-		keys = append(keys, fmt.Sprintf("%s@%d:%d", field.Token.Value, pos.Line, pos.Column))
+		keys = append(keys, yamltest.TokenPlace(field.Token))
 	}
 
 	return keys
@@ -82,12 +80,12 @@ func TestUnknownFields(t *testing.T) {
 		want  []string
 	}{
 		"each unknown key, in the order of the source": {
-			input: "z: 1\na: 2\ny: 3\n",
+			input: stringtest.LinesLF("z: 1", "a: 2", "y: 3"),
 			typ:   reflect.TypeFor[pair](),
 			want:  []string{"z@1:1", "y@3:1"},
 		},
 		"no field of an inline struct": {
-			input: "c: 1\na: 2\n",
+			input: stringtest.LinesLF("c: 1", "a: 2"),
 			typ:   reflect.TypeFor[withInline](),
 		},
 		"a key below a list": {
@@ -104,16 +102,13 @@ func TestUnknownFields(t *testing.T) {
 			want: []string{"q@1:14"},
 		},
 		"no key under an inline map": {
-			input: "x: {q: 1}\na: 1\n",
+			input: stringtest.LinesLF("x: {q: 1}", "a: 1"),
 			typ:   reflect.TypeFor[inlineMapHolder](),
 		},
 		"a key a struct that decodes itself rejects": {
 			input: "self: {in: {q: 1}, r: 2}\n",
 			typ:   reflect.TypeFor[selfHolder](),
-			want: []string{
-				"q@1:13",
-				"r@1:20",
-			},
+			want:  []string{"q@1:13", "r@1:20"},
 		},
 		"no key a struct that decodes itself accepts": {
 			input: "self: {in: {q: 1}, r: 2}\n",

@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 // Sentinel errors for line validation.
@@ -129,4 +131,35 @@ func ValidateLines(ls line.Lines) error {
 	}
 
 	return nil
+}
+
+// LineNumbers returns the [line.Line.Number] of each line of seq, such as
+// a [line.Lines] or a [*line.View], in order, or nil when seq holds no
+// line.
+func LineNumbers(seq line.Sequence) []int {
+	var numbers []int
+
+	for _, l := range seq.All() {
+		numbers = append(numbers, l.Number())
+	}
+
+	return numbers
+}
+
+// ErrorAnnotation returns the [line.Annotation] that the binding of an
+// error leaves below a line it marks. A printer draws a caret at col with
+// msg beside it, or the caret alone when msg is empty.
+func ErrorAnnotation(col int, msg string) line.Annotation {
+	return line.Annotation{Content: msg, Kind: kind.TextError, Placement: line.Below, Col: col}
+}
+
+// ErrorOverlays returns the [line.Overlays] that the binding of an error
+// leaves on a line it marks, one at each of spans, in order.
+func ErrorOverlays(spans ...position.Span) line.Overlays {
+	overlays := make(line.Overlays, 0, len(spans))
+	for _, span := range spans {
+		overlays = append(overlays, line.Overlay{Kind: kind.GenericError, Cols: span})
+	}
+
+	return overlays
 }

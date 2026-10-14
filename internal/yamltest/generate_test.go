@@ -93,7 +93,7 @@ func TestGenerateLines(t *testing.T) {
 			format: "k%d: v",
 			want:   stringtest.LinesLF("k0: v", "k1: v", "k2: v"),
 		},
-		"index twice in lines": {lines: 2, format: "k%[1]d: v%[1]d", want: "k0: v0\nk1: v1\n"},
+		"index twice in lines": {lines: 2, format: "k%[1]d: v%[1]d", want: stringtest.LinesLF("k0: v0", "k1: v1")},
 	}
 
 	for name, tc := range tcs {
@@ -195,5 +195,36 @@ func TestAliasedMapping(t *testing.T) {
 	)
 
 	assert.Equal(t, want, yamltest.AliasedMapping(2, 3))
-	assert.Equal(t, "defaults: &d\nservices:\n", yamltest.AliasedMapping(0, 0))
+	assert.Equal(t, stringtest.LinesLF("defaults: &d", "services:"), yamltest.AliasedMapping(0, 0))
+}
+
+func TestAliasKey(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, stringtest.LinesLF("kind:", "  ? *l7", "  : v"), yamltest.AliasKey("kind", 7))
+}
+
+func TestSchemaDirective(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		body string
+		want string
+	}{
+		"body": {
+			body: "name: a\n",
+			want: stringtest.LinesLF("# yaml-language-server: $schema=./s.json", "name: a"),
+		},
+		"no body": {
+			want: "# yaml-language-server: $schema=./s.json\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, yamltest.SchemaDirective("./s.json", tc.body))
+		})
+	}
 }

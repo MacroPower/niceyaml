@@ -67,9 +67,13 @@ func TestCheckDecode(t *testing.T) {
 		err   error
 		input string
 		path  paths.Path
+		opts  []niceyaml.SourceOption
+		// Whether the case checks the node through CheckDecodeText in
+		// place of CheckDecode.
+		text bool
 	}{
 		"no alias":                  {input: "a: [x, y]\n"},
-		"alias to a small sequence": {input: "s: &s [a, b]\nt: *s\n"},
+		"alias to a small sequence": {input: stringtest.LinesLF("s: &s [a, b]", "t: *s")},
 		"aliases to a small mapping in a long sequence": {
 			// Each alias is a node of the document as well as a read of
 			// its anchor, so the 150 aliases add 150 nodes to the 13 the
@@ -88,11 +92,11 @@ func TestCheckDecode(t *testing.T) {
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias bomb as mapping key": {
-			input: yamltest.AliasLevels(7) + stringtest.LinesLF("kind:", "  ? *l7", "  : v"),
+			input: yamltest.AliasLevels(7) + yamltest.AliasKey("kind", 7),
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"anchored alias bomb as mapping key": {
-			input: anchoredAliasLevels() + stringtest.LinesLF("kind:", "  ? *l7", "  : v"),
+			input: anchoredAliasLevels() + yamltest.AliasKey("kind", 7),
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"merge key bomb": {
@@ -102,12 +106,12 @@ func TestCheckDecode(t *testing.T) {
 		"node holding an alias with a bomb outside it": {
 			// The limit applies to the whole document, even where a
 			// decode of the node would read only the anchor it needs.
-			input: "k: &k a\n" + yamltest.AliasLevels(7) + stringtest.LinesLF("b:", "  ? *l7", "  : v", "c: [*k]"),
+			input: "k: &k a\n" + yamltest.AliasLevels(7) + yamltest.AliasKey("b", 7) + "c: [*k]\n",
 			path:  paths.Current().Child("c"),
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"node without an alias beside a bomb": {
-			input: yamltest.AliasLevels(7) + stringtest.LinesLF("b:", "  ? *l7", "  : v", "c: [x]"),
+			input: yamltest.AliasLevels(7) + yamltest.AliasKey("b", 7) + "c: [x]\n",
 			path:  paths.Current().Child("c"),
 		},
 		"aliases inside their own anchor": {
@@ -384,22 +388,51 @@ func TestCheckDecode(t *testing.T) {
 			),
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
+		"source with the limit off": {
+			input: yamltest.MergeLevels(7),
+			opts:  []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
+		},
+		"node of a source with the limit off": {
+			input: yamltest.MergeLevels(7),
+			path:  paths.Current().Child("m7"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
+		},
+		"text with no alias": {
+			input: stringtest.LinesLF(longScalar, "kind: x"),
+			path:  paths.Current().Child("kind"),
+			text:  true,
+		},
+		"text of many aliases to a long scalar": {
+			input: stringtest.LinesLF(longScalar, "kind: "+yamltest.FlowSequence("*a", 500)),
+			path:  paths.Current().Child("kind"),
+			text:  true,
+			err:   aliaslimit.ErrExcessiveAliasing,
+		},
+		"text of a few aliases to a long scalar": {
+			input: stringtest.LinesLF(longScalar, "kind: "+yamltest.FlowSequence("*a", 2)),
+			path:  paths.Current().Child("kind"),
+			text:  true,
+		},
+		"text of a source with the limit off": {
+			input: stringtest.LinesLF(longScalar, "kind: "+yamltest.FlowSequence("*a", 500)),
+			path:  paths.Current().Child("kind"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
+			text:  true,
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.path)
+			doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input, tc.opts...), tc.path)
 
-			err := aliasing.CheckDecode(doc)
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-
-				return
+			check := aliasing.CheckDecode
+			if tc.text {
+				check = aliasing.CheckDecodeText
 			}
 
-			require.NoError(t, err)
+			require.ErrorIs(t, check(doc), tc.err)
 		})
 	}
 
@@ -407,15 +440,7 @@ func TestCheckDecode(t *testing.T) {
 		t.Parallel()
 
 		require.NoError(t, aliasing.CheckDecode((*niceyaml.Node)(nil)))
-	})
-
-	t.Run("source with the limit off", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, yamltest.MergeLevels(7), niceyaml.WithAliasLimit(false))
-
-		require.NoError(t, aliasing.CheckDecode(doc))
-		require.NoError(t, aliasing.CheckDecode(yamltest.At(t, doc, paths.Current().Child("m7"))))
+		require.NoError(t, aliasing.CheckDecodeText((*niceyaml.Node)(nil)))
 	})
 }
 
@@ -426,11 +451,8 @@ func TestLimited(t *testing.T) {
 		opts []niceyaml.SourceOption
 		want bool
 	}{
-		"default": {want: true},
-		"limit on": {
-			opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(true)},
-			want: true,
-		},
+		"default":   {want: true},
+		"limit on":  {opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(true)}, want: true},
 		"limit off": {opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)}},
 	}
 
@@ -440,8 +462,8 @@ func TestLimited(t *testing.T) {
 
 			// The source holds the setting, so every document of it and
 			// every node of a document answer alike.
-			docs := niceyaml.NewSourceFromString(stringtest.LinesLF("a: [x]", "---", "b: 1"), tc.opts...).Documents()
-			require.Len(t, docs, 2)
+			source := niceyaml.NewSourceFromString(stringtest.LinesLF("a: [x]", "---", "b: 1"), tc.opts...)
+			docs := yamltest.Documents(t, source, 2)
 
 			assert.Equal(t, tc.want, aliasing.Limited(docs[0]))
 			assert.Equal(t, tc.want, aliasing.Limited(docs[1]))
@@ -464,35 +486,17 @@ func TestHoldsReferenceAlias(t *testing.T) {
 		path  paths.Path
 		want  bool
 	}{
-		"no alias":                     {input: "a: [x, y]\n"},
-		"alias to an anchor before it": {input: "s: &s [a, b]\nt: *s\n"},
-		"alias inside its own anchor":  {input: "x: &x [a, *x]\n"},
-		"alias with no anchor": {
-			input: "t: *s\n",
-			want:  true,
-		},
-		"alias before the anchor of its name": {
-			input: "t: *s\ns: &s [a, b]\n",
-			want:  true,
-		},
-		"tagged alias with no anchor": {
-			input: "t: !foo *s\n",
-			want:  true,
-		},
-		"alias key with no anchor": {
-			input: "t: {? *s : 1}\n",
-			want:  true,
-		},
-		"merge key alias with no anchor": {
-			input: stringtest.LinesLF("t:", "  <<: *s"),
-			want:  true,
-		},
-		"alias with no anchor inside an anchor": {
-			input: "a: &a [*s]\nt: *a\n",
-			want:  true,
-		},
+		"no alias":                              {input: "a: [x, y]\n"},
+		"alias to an anchor before it":          {input: stringtest.LinesLF("s: &s [a, b]", "t: *s")},
+		"alias inside its own anchor":           {input: "x: &x [a, *x]\n"},
+		"alias with no anchor":                  {input: "t: *s\n", want: true},
+		"alias before the anchor of its name":   {input: stringtest.LinesLF("t: *s", "s: &s [a, b]"), want: true},
+		"tagged alias with no anchor":           {input: "t: !foo *s\n", want: true},
+		"alias key with no anchor":              {input: "t: {? *s : 1}\n", want: true},
+		"merge key alias with no anchor":        {input: stringtest.LinesLF("t:", "  <<: *s"), want: true},
+		"alias with no anchor inside an anchor": {input: stringtest.LinesLF("a: &a [*s]", "t: *a"), want: true},
 		"node without an alias beside an alias with no anchor": {
-			input: "a: [x]\nt: *s\n",
+			input: stringtest.LinesLF("a: [x]", "t: *s"),
 			path:  paths.Current().Child("a"),
 			want:  true,
 		},
@@ -515,64 +519,5 @@ func TestHoldsReferenceAlias(t *testing.T) {
 		t.Parallel()
 
 		assert.False(t, aliasing.HoldsReferenceAlias((*niceyaml.Node)(nil)))
-	})
-}
-
-func TestCheckDecodeText(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		err   error
-		input string
-	}{
-		"no alias": {input: stringtest.LinesLF(longScalar, "kind: x")},
-		"many aliases to a long scalar": {
-			input: stringtest.LinesLF(
-				longScalar,
-				"kind: "+yamltest.FlowSequence("*a", 500),
-			),
-			err: aliaslimit.ErrExcessiveAliasing,
-		},
-		"a few aliases to a long scalar": {
-			input: stringtest.LinesLF(
-				longScalar,
-				"kind: "+yamltest.FlowSequence("*a", 2),
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			doc := yamltest.At(t, yamltest.FirstDocument(t, tc.input), paths.Current().Child("kind"))
-
-			err := aliasing.CheckDecodeText(doc)
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-
-				return
-			}
-
-			require.NoError(t, err)
-		})
-	}
-
-	t.Run("nil node", func(t *testing.T) {
-		t.Parallel()
-
-		require.NoError(t, aliasing.CheckDecodeText((*niceyaml.Node)(nil)))
-	})
-
-	t.Run("source with the limit off", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.LinesLF(
-			longScalar,
-			"kind: "+yamltest.FlowSequence("*a", 500),
-		)
-		doc := yamltest.FirstDocument(t, input, niceyaml.WithAliasLimit(false))
-
-		require.NoError(t, aliasing.CheckDecodeText(yamltest.At(t, doc, paths.Current().Child("kind"))))
 	})
 }

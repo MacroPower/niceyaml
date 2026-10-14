@@ -163,7 +163,7 @@ func TestWalk(t *testing.T) {
 		want  []string
 	}{
 		"fields in the order the struct declares them": {
-			input: "b: 1\na: 2\n",
+			input: stringtest.LinesLF("b: 1", "a: 2"),
 			typ:   reflect.TypeFor[pair](),
 			want: []string{
 				"root @ decodewalk_test.pair fields",
@@ -206,7 +206,7 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"an inline struct where it stands": {
-			input: "c: 1\na: 2\n",
+			input: stringtest.LinesLF("c: 1", "a: 2"),
 			typ:   reflect.TypeFor[withInline](),
 			want: []string{
 				"root @ decodewalk_test.withInline fields",
@@ -216,7 +216,7 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"each entry an inline map reads": {
-			input: "x: 1\na: 2\nx: 3\n",
+			input: stringtest.LinesLF("x: 1", "a: 2", "x: 3"),
 			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 			typ:   reflect.TypeFor[withInlineMap](),
 			want: []string{
@@ -229,7 +229,7 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"nothing below an interface or a map slice": {
-			input: "any: {a: 1}\nitem: {a: 1}\npair: [1]\n",
+			input: stringtest.LinesLF("any: {a: 1}", "item: {a: 1}", "pair: [1]"),
 			typ:   reflect.TypeFor[withAny](),
 			want: []string{
 				"root @ decodewalk_test.withAny fields",
@@ -239,17 +239,17 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"no field of a mapping with a key of another kind": {
-			input: "a: 1\n2: 3\n",
+			input: stringtest.LinesLF("a: 1", "2: 3"),
 			typ:   reflect.TypeFor[pair](),
 			want:  []string{"root @ decodewalk_test.pair fields"},
 		},
 		"no field of a mapping with a key under an !!int tag": {
-			input: "!!int a: 1\nb: 2\n",
+			input: stringtest.LinesLF("!!int a: 1", "b: 2"),
 			typ:   reflect.TypeFor[pair](),
 			want:  []string{"root @ decodewalk_test.pair fields"},
 		},
 		"the fields of a mapping with a key under a !!str tag": {
-			input: "!!str a: 1\nb: 2\n",
+			input: stringtest.LinesLF("!!str a: 1", "b: 2"),
 			typ:   reflect.TypeFor[pair](),
 			want: []string{
 				"root @ decodewalk_test.pair fields",
@@ -258,7 +258,7 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"the fields of a mapping with a key under another tag": {
-			input: "!t x: 1\na: 2\n",
+			input: stringtest.LinesLF("!t x: 1", "a: 2"),
 			typ:   reflect.TypeFor[pair](),
 			want: []string{
 				"root @ decodewalk_test.pair fields",
@@ -266,7 +266,7 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"the fields of a mapping with a key under a !!int tag a directive renames": {
-			input: "%TAG !! tag:example.com,2000:\n---\n!!int a: 1\nb: 2\n",
+			input: stringtest.LinesLF("%TAG !! tag:example.com,2000:", "---", "!!int a: 1", "b: 2"),
 			typ:   reflect.TypeFor[pair](),
 			want: []string{
 				"root @ decodewalk_test.pair fields",
@@ -275,12 +275,12 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"no field of a mapping with a key of a tag alone": {
-			input: "? !t\n: 1\na: 2\n",
+			input: stringtest.LinesLF("? !t", ": 1", "a: 2"),
 			typ:   reflect.TypeFor[pair](),
 			want:  []string{"root @ decodewalk_test.pair fields"},
 		},
 		"the fields of a mapping with explicit, anchored, and literal keys": {
-			input: "? |\n  x\n: 1\n&k a: 2\n? b\n: 3\n",
+			input: stringtest.LinesLF("? |", "  x", ": 1", "&k a: 2", "? b", ": 3"),
 			typ:   reflect.TypeFor[pair](),
 			want: []string{
 				"root @ decodewalk_test.pair fields",
@@ -289,7 +289,7 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"the fields of a mapping with an alias to a string key": {
-			input: "x: &k a\nv: {*k : 1, b: 2}\n",
+			input: stringtest.LinesLF("x: &k a", "v: {*k : 1, b: 2}"),
 			typ:   reflect.TypeFor[pairHolder](),
 			want: []string{
 				"root @ decodewalk_test.pairHolder fields",
@@ -299,7 +299,7 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"no field of a mapping with an alias to an integer key": {
-			input: "n: &n 1\nv: {*n : 2, a: 3}\n",
+			input: stringtest.LinesLF("n: &n 1", "v: {*n : 2, a: 3}"),
 			typ:   reflect.TypeFor[pairHolder](),
 			want: []string{
 				"root @ decodewalk_test.pairHolder fields",
@@ -317,7 +317,7 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"no merged entry from a source with a key of another kind": {
-			input: "base: &base {1: x, b: 2}\nv: {<<: *base, a: 1}\n",
+			input: stringtest.LinesLF("base: &base {1: x, b: 2}", "v: {<<: *base, a: 1}"),
 			typ:   reflect.TypeFor[pairHolder](),
 			want: []string{
 				"root @ decodewalk_test.pairHolder fields",
@@ -326,7 +326,7 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"no field of a mapping with a refused merge": {
-			input: "s: &s 1\nv: {a: 1, <<: *s}\n",
+			input: stringtest.LinesLF("s: &s 1", "v: {a: 1, <<: *s}"),
 			typ:   reflect.TypeFor[pairHolder](),
 			want: []string{
 				"root @ decodewalk_test.pairHolder fields",
@@ -334,7 +334,7 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"a merged entry for a struct": {
-			input: "base: &base {b: 1}\nv: {<<: *base}\n",
+			input: stringtest.LinesLF("base: &base {b: 1}", "v: {<<: *base}"),
 			typ:   reflect.TypeFor[pairHolder](),
 			want: []string{
 				"root @ decodewalk_test.pairHolder fields",
@@ -343,7 +343,7 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"no merged entry for a struct that ignores merges": {
-			input: "base: &base {b: 1}\nv: {<<: *base}\n",
+			input: stringtest.LinesLF("base: &base {b: 1}", "v: {<<: *base}"),
 			typ:   reflect.TypeFor[ownHolder](),
 			want: []string{
 				"root @ decodewalk_test.ownHolder fields",
@@ -372,7 +372,7 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"nothing below a skipped value": {
-			input: "list: [{a: 1}]\nname: x\n",
+			input: stringtest.LinesLF("list: [{a: 1}]", "name: x"),
 			typ:   reflect.TypeFor[withList](),
 			visit: func(v *decodewalk.Value) decodewalk.Action {
 				if v.Kind == decodewalk.Field {
@@ -388,7 +388,7 @@ func TestWalk(t *testing.T) {
 			},
 		},
 		"nothing after a stop": {
-			input: "list: [{a: 1}, {a: 2}]\nname: x\n",
+			input: stringtest.LinesLF("list: [{a: 1}, {a: 2}]", "name: x"),
 			typ:   reflect.TypeFor[withList](),
 			visit: func(v *decodewalk.Value) decodewalk.Action {
 				if v.Kind == decodewalk.Element {
@@ -423,7 +423,7 @@ func TestWalk(t *testing.T) {
 func TestWalk_Value(t *testing.T) {
 	t.Parallel()
 
-	doc := yamltest.FirstDocument(t, "pairs: {x: {a: 1}, x: 2, ? *k : 3}\nk: &k [1]\n",
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF("pairs: {x: {a: 1}, x: 2, ? *k : 3}", "k: &k [1]"),
 		niceyaml.WithAllowDuplicateKeys(true))
 
 	type holder struct {

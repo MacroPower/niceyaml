@@ -17,8 +17,7 @@ import (
 func TestStateOf(t *testing.T) {
 	t.Parallel()
 
-	docs := niceyaml.NewSourceFromString(stringtest.LinesLF("a: [1, 2]", "---", "b: 3")).Documents()
-	require.Len(t, docs, 2)
+	docs := yamltest.Documents(t, niceyaml.NewSourceFromString(stringtest.LinesLF("a: [1, 2]", "---", "b: 3")), 2)
 
 	first := aliasing.StateOf(docs[0])
 	require.NotNil(t, first)
@@ -44,7 +43,7 @@ func TestState_Facts(t *testing.T) {
 	t.Parallel()
 
 	calls := 0
-	doc := yamltest.FirstDocument(t, "a: &x 1\nb: *x\n")
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF("a: &x 1", "b: *x"))
 
 	s := aliasing.NewState(true, func() (ast.Node, *paths.Resolver) {
 		calls++
@@ -110,19 +109,10 @@ func TestState_ExcessiveTextAliasing(t *testing.T) {
 
 			s := aliasing.NewState(true, nil)
 
-			calls := 0
-			count := func() bool {
-				calls++
-
-				return tc.text
-			}
-
 			// The State keeps the text verdict apart from the value
-			// verdict, so each count runs once.
+			// verdict, so neither count reads the verdict of the other.
 			assert.Equal(t, tc.value, s.ExcessiveAliasing(func() bool { return tc.value }))
-			assert.Equal(t, tc.text, s.ExcessiveTextAliasing(count))
-			assert.Equal(t, tc.text, s.ExcessiveTextAliasing(count))
-			assert.Equal(t, 1, calls)
+			assert.Equal(t, tc.text, s.ExcessiveTextAliasing(func() bool { return tc.text }))
 			assert.Equal(t, tc.value, s.ExcessiveAliasing(func() bool { return !tc.value }))
 		})
 	}

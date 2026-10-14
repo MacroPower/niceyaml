@@ -219,7 +219,7 @@ func TestSplit_Lines(t *testing.T) {
 			want:  []string{"a: |-", "  x", "  y"},
 		},
 		"empty literal scalar": {
-			input: "a: |\n\n",
+			input: stringtest.LinesLF("a: |", ""),
 			want:  []string{"a: |", ""},
 		},
 		"empty strip literal scalar": {
@@ -227,7 +227,7 @@ func TestSplit_Lines(t *testing.T) {
 			want:  []string{"a: |-", "", ""},
 		},
 		"empty folded scalar": {
-			input: "a: >\n\n",
+			input: stringtest.LinesLF("a: >", ""),
 			want:  []string{"a: >", ""},
 		},
 		"empty literal scalar with indentation indicator": {
@@ -235,7 +235,7 @@ func TestSplit_Lines(t *testing.T) {
 			want:  []string{"a: |2", "", ""},
 		},
 		"empty strip literal scalar with indentation indicator": {
-			input: "- |1-\n\n",
+			input: stringtest.LinesLF("- |1-", ""),
 			want:  []string{"- |1-", ""},
 		},
 		"empty literal scalar with indentation indicator and crlf": {
@@ -265,7 +265,7 @@ func TestSplit_Lines(t *testing.T) {
 			want:  []string{"# c", "k: v"},
 		},
 		"crlf split after comment": {
-			input: "a: b # c\r\nd: e\r\n",
+			input: stringtest.LinesCRLF("a: b # c", "d: e"),
 			want:  []string{"a: b # c", "d: e"},
 		},
 		"crlf between two comments": {
@@ -289,7 +289,7 @@ func TestSplit_Lines(t *testing.T) {
 			want:  []string{"key: value", "", "next: data"},
 		},
 		"crlf after a comment line": {
-			input: "# c\r\nk: v\r\n",
+			input: stringtest.LinesCRLF("# c", "k: v"),
 			want:  []string{"# c", "k: v"},
 		},
 		"quoted scalar continued after a tag": {
@@ -496,7 +496,7 @@ func TestSplit_PartPosition(t *testing.T) {
 		// and the offset by one, while the "\r" a tag repeats before
 		// "\r\n" does not.
 		"newline of a crlf cut after a comment": {
-			input:      "# c\r\nk: v\r\n",
+			input:      stringtest.LinesCRLF("# c", "k: v"),
 			origin:     "\n",
 			line:       0,
 			idx:        1,
@@ -631,12 +631,16 @@ func TestSplit_BlockScalarOffsets(t *testing.T) {
 	}
 }
 
-func TestSplit_OffsetsIncrease(t *testing.T) {
+func TestSplit_Invariants(t *testing.T) {
 	t.Parallel()
 
-	// Offsets grow from part to part through the whole stream, across the
-	// tokens the lexer positions short, such as those after a comment or a
-	// tag, and across a CRLF it cuts between two tokens.
+	// Every part on a line reports the number of that line. Offsets grow
+	// from part to part through the whole stream, across the tokens the
+	// lexer positions short, such as those after a comment or a tag, and
+	// across a CRLF it cuts between two tokens. The first part of a token
+	// that holds text carries the token's own Line, Column, and Offset,
+	// whatever whitespace and line endings the Origin opens with and
+	// whatever the lexer dropped before it.
 	tcs := map[string]string{
 		"comments": stringtest.LinesLF(
 			"# head",
@@ -652,8 +656,9 @@ func TestSplit_OffsetsIncrease(t *testing.T) {
 			"",
 			"  - x",
 		),
-		"crlf":     stringtest.LinesCRLF("key: value", "# c", "next: 1"),
-		"crlf tag": stringtest.LinesCRLF("a: !t", "  b: 1", "c: 'x", "  y'"),
+		"tagged mapping at the end": stringtest.LinesLF("t: !!str s", "u: !t", "  v: 1"),
+		"crlf":                      stringtest.LinesCRLF("key: value", "# c", "next: 1"),
+		"crlf tag":                  stringtest.LinesCRLF("a: !t", "  b: 1", "c: 'x", "  y'"),
 		"block scalars": stringtest.LinesLF(
 			"k: |",
 			"  a",
@@ -663,8 +668,13 @@ func TestSplit_OffsetsIncrease(t *testing.T) {
 			"  c",
 			"  d",
 		),
-		"trailing spaces":   "a: 1   \nb: 2  \n",
-		"folded blank line": stringtest.LinesLF("a:", "   ", "  b: 1"),
+		"block scalar indented four spaces": stringtest.LinesLF("k: |", "    hello", "    world", "z: 1"),
+		"leading blank line":                stringtest.LinesLF("k: |", "", "  b", "z: 1"),
+		"trailing spaces on every line":     stringtest.LinesLF("a: 1   ", "b: 2  "),
+		"trailing spaces before a line":     stringtest.LinesLF("a: 1   ", "b: 2"),
+		"folded blank line":                 stringtest.LinesLF("a:", "   ", "  b: 1"),
+		"comment then header":               stringtest.LinesLF("# comment", "---", "b: two"),
+		"quoted multi-line":                 stringtest.LinesLF("a: 'x", "", "  y'", "b: 1"),
 	}
 
 	for name, input := range tcs {
@@ -674,33 +684,9 @@ func TestSplit_OffsetsIncrease(t *testing.T) {
 			lines := segment.Split(tokens.Tokenize(input))
 			require.NotEmpty(t, lines)
 
+			assertPartLines(t, lines)
 			assertOffsetsIncrease(t, lines)
-		})
-	}
-}
-
-func TestSplit_FirstTextPartKeepsPosition(t *testing.T) {
-	t.Parallel()
-
-	// The first part of a token that holds text carries the token's own
-	// Line, Column, and Offset, whatever whitespace and line endings the
-	// Origin opens with and whatever the lexer dropped before it.
-	tcs := map[string]string{
-		"trailing spaces":      "a: 1   \nb: 2\n",
-		"comment then header":  stringtest.LinesLF("# comment", "---", "b: two"),
-		"tag":                  stringtest.LinesLF("t: !!str s", "u: !t", "  v: 1"),
-		"block scalar":         stringtest.LinesLF("k: |", "    hello", "    world", "z: 1"),
-		"leading blank line":   stringtest.LinesLF("k: |", "", "  b", "z: 1"),
-		"collapsed blank line": stringtest.LinesLF("a:", "   ", "  b: 1"),
-		"crlf":                 stringtest.LinesCRLF("key: value", "# c", "next: 1"),
-		"quoted multi-line":    stringtest.LinesLF("a: 'x", "", "  y'", "b: 1"),
-	}
-
-	for name, input := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assertFirstTextParts(t, segment.Split(tokens.Tokenize(input)))
+			assertFirstTextParts(t, lines)
 		})
 	}
 }
@@ -768,9 +754,9 @@ func TestSplit_PartsKeepTokenFields(t *testing.T) {
 	// last. The lexer gives an Error to the invalid token it makes of a tab
 	// that opens a line.
 	tcs := map[string]string{
-		"tab after a comment cut from its crlf": "a: 1 # c\r\n\tb: 1\r\n",
+		"tab after a comment cut from its crlf": stringtest.LinesCRLF("a: 1 # c", "\tb: 1"),
 		"tab line after a tag":                  stringtest.LinesLF("a: !!map", "\t", "  b: 1"),
-		"tab that opens a line":                 "a: 1\n\tb: 2\n",
+		"tab that opens a line":                 stringtest.LinesLF("a: 1", "\tb: 2"),
 	}
 
 	for name, input := range tcs {
@@ -925,7 +911,7 @@ func TestSplit_HandBuiltStream(t *testing.T) {
 
 	// A caller can compose a stream itself rather than take one from the
 	// lexer, so Split tolerates what the lexer never emits.
-	pair := tokens.Tokenize("a: 1\nb: 2\n")
+	pair := tokens.Tokenize(stringtest.LinesLF("a: 1", "b: 2"))
 	require.NotEmpty(t, pair)
 
 	tcs := map[string]struct {
@@ -967,11 +953,6 @@ func TestSplit_HandBuiltStream(t *testing.T) {
 			}},
 			wantContent: []string{"a"},
 			wantNumbers: []int{-5},
-		},
-		"unlinked empty block scalar with indentation indicator": {
-			input:       unlinked(tokens.Tokenize(stringtest.LinesLF("a: |2", "", ""))),
-			wantContent: []string{"a: |2", "", ""},
-			wantNumbers: []int{1, 2, 3},
 		},
 		"line number at the int limit": {
 			input: token.Tokens{

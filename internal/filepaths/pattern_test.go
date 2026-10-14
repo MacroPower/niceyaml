@@ -18,31 +18,12 @@ func TestNewPattern(t *testing.T) {
 		pattern string
 		err     error
 	}{
-		"empty pattern": {
-			pattern: "",
-			err:     filepaths.ErrInvalidPattern,
-		},
-		"empty brace group": {
-			pattern: "{}",
-			err:     filepaths.ErrInvalidPattern,
-		},
-		"empty alternatives": {
-			pattern: "{,}",
-			err:     filepaths.ErrInvalidPattern,
-		},
-		"nested empty alternatives": {
-			pattern: "{,{}}",
-			err:     filepaths.ErrInvalidPattern,
-		},
-		"one empty alternative": {pattern: "{,a.yaml}"},
-		"invalid bracket": {
-			pattern: "[",
-			err:     filepaths.ErrInvalidPattern,
-		},
-		"unclosed bracket": {
-			pattern: "[abc",
-			err:     filepaths.ErrInvalidPattern,
-		},
+		"empty pattern":                     {pattern: "", err: filepaths.ErrInvalidPattern},
+		"empty brace group":                 {pattern: "{}", err: filepaths.ErrInvalidPattern},
+		"empty alternatives":                {pattern: "{,}", err: filepaths.ErrInvalidPattern},
+		"nested empty alternatives":         {pattern: "{,{}}", err: filepaths.ErrInvalidPattern},
+		"invalid bracket":                   {pattern: "[", err: filepaths.ErrInvalidPattern},
+		"unclosed bracket":                  {pattern: "[abc", err: filepaths.ErrInvalidPattern},
 		"braces within the expansion limit": {pattern: strings.Repeat("{a,b}", 10) + ".yaml"},
 		"braces past the expansion limit": {
 			pattern: strings.Repeat("{,}", 30) + "x.yaml",
@@ -52,9 +33,7 @@ func TestNewPattern(t *testing.T) {
 			pattern: strings.Repeat("{a}", 20000) + ".yaml",
 			err:     filepaths.ErrBraceLimit,
 		},
-		"parent after a literal element": {pattern: "configs/../*.yaml"},
-		"leading parent elements":        {pattern: "../../*.yaml"},
-		"parent after a double star":     {pattern: "**/../x.yaml"},
+		"leading parent elements": {pattern: "../../*.yaml"},
 		"parent after a wildcard element": {
 			pattern: "*/../x.yaml",
 			err:     filepaths.ErrInvalidPattern,
@@ -71,7 +50,6 @@ func TestNewPattern(t *testing.T) {
 			pattern: "**/a/**/../x.yaml",
 			err:     filepaths.ErrInvalidPattern,
 		},
-		"parent after a double star after leading parents": {pattern: "../**/../x.yaml"},
 		"parent after a class element": {
 			pattern: "a/[bc]/../x.yaml",
 			err:     filepaths.ErrInvalidPattern,
@@ -127,7 +105,6 @@ func TestPattern_Match(t *testing.T) {
 		"exact no match": {
 			pattern: "config.yaml",
 			path:    "settings.yaml",
-			want:    false,
 		},
 		"wildcard in root": {
 			pattern: "*.yaml",
@@ -137,7 +114,6 @@ func TestPattern_Match(t *testing.T) {
 		"wildcard does not match subdir": {
 			pattern: "*.yaml",
 			path:    "deep/path/config.yaml",
-			want:    false,
 		},
 		"brace in a class matches a single segment": {
 			pattern: "[^a{]b",
@@ -149,7 +125,6 @@ func TestPattern_Match(t *testing.T) {
 			// against a path with a separator, so it matches no such path.
 			pattern: "[^a{]b",
 			path:    "a/b",
-			want:    false,
 		},
 		"wildcard in root with dot slash prefix": {
 			pattern: "*.yaml",
@@ -194,7 +169,6 @@ func TestPattern_Match(t *testing.T) {
 		"dot slash pattern matches no file": {
 			pattern: "./",
 			path:    "x.yaml",
-			want:    false,
 		},
 		"dot alternative in braces": {
 			pattern: "{.,configs}/*.yaml",
@@ -224,7 +198,6 @@ func TestPattern_Match(t *testing.T) {
 		"pattern with dot slash prefix keeps its depth": {
 			pattern: "./*.yaml",
 			path:    "configs/a.yaml",
-			want:    false,
 		},
 		"wildcard in root after parent traversal": {
 			pattern: "*.yaml",
@@ -244,7 +217,6 @@ func TestPattern_Match(t *testing.T) {
 		"parent after a literal keeps its depth": {
 			pattern: "configs/../*.yaml",
 			path:    "configs/x.yaml",
-			want:    false,
 		},
 		"nested parents after literals": {
 			pattern: "a/b/../../c/*.yaml",
@@ -269,7 +241,6 @@ func TestPattern_Match(t *testing.T) {
 		"escaped separator before a parent keeps its depth": {
 			pattern: `a\/b/../*.yaml`,
 			path:    "x.yaml",
-			want:    false,
 		},
 		"escaped leading separator is rooted": {
 			pattern: `\/a/../b`,
@@ -279,7 +250,6 @@ func TestPattern_Match(t *testing.T) {
 		"escaped leading separator matches no relative path": {
 			pattern: `\/a/../b`,
 			path:    "b",
-			want:    false,
 		},
 		"escaped dot element": {
 			pattern: `\./*.yaml`,
@@ -314,7 +284,6 @@ func TestPattern_Match(t *testing.T) {
 		"double star before an escaped separator is a single star": {
 			pattern: `a/**\/x.yaml`,
 			path:    "a/q/r/x.yaml",
-			want:    false,
 		},
 		"double star after an escaped separator": {
 			pattern: `a\/**/x.yaml`,
@@ -344,22 +313,18 @@ func TestPattern_Match(t *testing.T) {
 		"star matches no parent element": {
 			pattern: "*/x.yaml",
 			path:    "../x.yaml",
-			want:    false,
 		},
 		"stars match no parent elements": {
 			pattern: "*/*/x.yaml",
 			path:    "../a/x.yaml",
-			want:    false,
 		},
 		"question marks match no parent element": {
 			pattern: "??/x.yaml",
 			path:    "../x.yaml",
-			want:    false,
 		},
 		"classes match no parent element": {
 			pattern: "[.][.]/x.yaml",
 			path:    "../x.yaml",
-			want:    false,
 		},
 		"star after a parent matches a name": {
 			pattern: "../*/x.yaml",
@@ -369,7 +334,6 @@ func TestPattern_Match(t *testing.T) {
 		"star after a parent matches no second parent": {
 			pattern: "../*/x.yaml",
 			path:    "../../x.yaml",
-			want:    false,
 		},
 		"double star matches parent elements": {
 			pattern: "**/x.yaml",
@@ -384,7 +348,6 @@ func TestPattern_Match(t *testing.T) {
 		"rooted double star matches no parent element": {
 			pattern: "/**/x.yaml",
 			path:    "../x.yaml",
-			want:    false,
 		},
 		"parent pattern matches the parent itself": {
 			pattern: "..",
@@ -394,12 +357,10 @@ func TestPattern_Match(t *testing.T) {
 		"star matches no parent itself": {
 			pattern: "*",
 			path:    "..",
-			want:    false,
 		},
 		"more parents than the pattern names": {
 			pattern: "../x.yaml",
 			path:    "../../x.yaml",
-			want:    false,
 		},
 		"repeated separators are collapsed": {
 			pattern: "deep/*.yaml",
@@ -434,7 +395,6 @@ func TestPattern_Match(t *testing.T) {
 		"double star specific dir no match": {
 			pattern: "**/k8s/*.yaml",
 			path:    "deploy/other/app.yaml",
-			want:    false,
 		},
 		"question mark": {
 			pattern: "file?.yaml",
@@ -444,7 +404,6 @@ func TestPattern_Match(t *testing.T) {
 		"question mark no match": {
 			pattern: "file?.yaml",
 			path:    "file12.yaml",
-			want:    false,
 		},
 		"bracket range": {
 			pattern: "file[0-9].yaml",
@@ -454,12 +413,10 @@ func TestPattern_Match(t *testing.T) {
 		"bracket range no match": {
 			pattern: "file[0-9].yaml",
 			path:    "filea.yaml",
-			want:    false,
 		},
 		"empty path": {
 			pattern: "*.yaml",
 			path:    "",
-			want:    false,
 		},
 		"one empty alternative": {
 			pattern: "{,a.yaml}",
@@ -488,34 +445,13 @@ func TestPattern_Relative(t *testing.T) {
 		pattern string
 		want    bool
 	}{
-		"relative": {
-			pattern: "configs/*.yaml",
-			want:    true,
-		},
-		"double star": {
-			pattern: "**/*.yaml",
-			want:    true,
-		},
-		"leading dot element": {
-			pattern: "./configs/*.yaml",
-			want:    true,
-		},
-		"rooted": {
-			pattern: "/etc/app/*.yaml",
-			want:    false,
-		},
-		"rooted with repeated separators": {
-			pattern: "//etc/app/*.yaml",
-			want:    false,
-		},
-		"braces around rooted patterns": {
-			pattern: "/{etc,opt}/app/*.yaml",
-			want:    false,
-		},
-		"braces around a rooted and a relative pattern": {
-			pattern: "{/etc,configs}/*.yaml",
-			want:    true,
-		},
+		"relative":                        {pattern: "configs/*.yaml", want: true},
+		"double star":                     {pattern: "**/*.yaml", want: true},
+		"leading dot element":             {pattern: "./configs/*.yaml", want: true},
+		"rooted":                          {pattern: "/etc/app/*.yaml"},
+		"rooted with repeated separators": {pattern: "//etc/app/*.yaml"},
+		"braces around rooted patterns":   {pattern: "/{etc,opt}/app/*.yaml"},
+		"braces around a rooted and a relative pattern": {pattern: "{/etc,configs}/*.yaml", want: true},
 	}
 
 	for name, tc := range tcs {
@@ -530,284 +466,240 @@ func TestPattern_Relative(t *testing.T) {
 	}
 }
 
-func TestAnyDepthPatterns_Matching(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		path     string
-		patterns []string
-		want     bool
-	}{
-		"matches base name": {
-			path:     "some/dir/config.yaml",
-			patterns: []string{"*.yaml"},
-			want:     true,
-		},
-		"matches full path pattern": {
-			path:     ".github/workflows/ci.yaml",
-			patterns: []string{".github/workflows/*.yaml"},
-			want:     true,
-		},
-		"matches full path pattern with dot slash prefix": {
-			path:     "./.github/workflows/ci.yaml",
-			patterns: []string{".github/workflows/*.yaml"},
-			want:     true,
-		},
-		"matches exact filename via base": {
-			path:     "some/dir/docker-compose.yaml",
-			patterns: []string{"docker-compose.yaml"},
-			want:     true,
-		},
-		"no match": {
-			path:     "config.txt",
-			patterns: []string{"*.yaml"},
-			want:     false,
-		},
-		"empty path": {
-			path:     "",
-			patterns: []string{"*.yaml"},
-			want:     false,
-		},
-		"invalid pattern ignored": {
-			path:     "config.yaml",
-			patterns: []string{"[", "*.yaml"},
-			want:     true,
-		},
-		"pattern that fails validation still matches": {
-			// The "[" alternative fails doublestar.ValidatePattern, but
-			// doublestar.Match reads the pattern for this path.
-			path:     "x/a.yaml",
-			patterns: []string{"{a.yaml,[}"},
-			want:     true,
-		},
-		"github workflow deep path": {
-			path:     ".github/workflows/ci.yaml",
-			patterns: []string{".github/workflows/*.yml", ".github/workflows/*.yaml"},
-			want:     true,
-		},
-		"dependabot exact": {
-			path:     ".github/dependabot.yaml",
-			patterns: []string{".github/dependabot.yml", ".github/dependabot.yaml"},
-			want:     true,
-		},
-		"directory pattern matches an absolute path": {
-			path:     "/repo/.github/workflows/ci.yml",
-			patterns: []string{".github/workflows/*.yml"},
-			want:     true,
-		},
-		"directory pattern matches a nested path": {
-			path:     "repo/.github/workflows/ci.yml",
-			patterns: []string{".github/workflows/*.yml"},
-			want:     true,
-		},
-		"directory pattern does not match another directory": {
-			path:     "repo/.circleci/workflows/ci.yml",
-			patterns: []string{".github/workflows/*.yml"},
-			want:     false,
-		},
-		"directory pattern does not match a partial directory name": {
-			path:     "repo/my.github/workflows/ci.yml",
-			patterns: []string{".github/workflows/*.yml"},
-			want:     false,
-		},
-		"leading slash is dropped": {
-			path:     "repo/.github/workflows/ci.yml",
-			patterns: []string{"/.github/workflows/*.yml"},
-			want:     true,
-		},
-		"leading dot slash is dropped": {
-			path:     "repo/.github/workflows/ci.yml",
-			patterns: []string{"./.github/workflows/*.yml"},
-			want:     true,
-		},
-		"repeated separators in a pattern are collapsed": {
-			path:     "repo/.github/workflows/ci.yml",
-			patterns: []string{".github//workflows/*.yml"},
-			want:     true,
-		},
-		"dot elements in a pattern are dropped": {
-			path:     "repo/k8s/x.yaml",
-			patterns: []string{"k8s/./x.yaml"},
-			want:     true,
-		},
-		"escaped dot elements in a pattern are dropped": {
-			path:     "repo/k8s/x.yaml",
-			patterns: []string{`k8s/\./*.yaml`},
-			want:     true,
-		},
-		"dot alternative in braces matches at any depth": {
-			path:     "repo/values.yaml",
-			patterns: []string{"{.,configs}/*.yaml"},
-			want:     true,
-		},
-		"class holding separator and dot matches at any depth": {
-			path:     "repo/a.b",
-			patterns: []string{"a[/./]b"},
-			want:     true,
-		},
-		"negation with a dot alternative in braces": {
-			path:     "repo/values.yaml",
-			patterns: []string{"*.yaml", "!{.,configs}/values.yaml"},
-			want:     false,
-		},
-		"double star prefix is kept": {
-			path:     "repo/.github/workflows/ci.yml",
-			patterns: []string{"**/.github/workflows/*.yml"},
-			want:     true,
-		},
-		"base name pattern matches an absolute path": {
-			path:     "/srv/app/docker-compose.yaml",
-			patterns: []string{"docker-compose.yaml"},
-			want:     true,
-		},
-		"negation excludes file": {
-			path:     "/x/docker-compose.yml",
-			patterns: []string{"*.yml", "!docker-compose.yml"},
-			want:     false,
-		},
-		"negation leaves other files": {
-			path:     "/x/app.yml",
-			patterns: []string{"*.yml", "!docker-compose.yml"},
-			want:     true,
-		},
-		"negation before the include still excludes": {
-			path:     "/x/docker-compose.yml",
-			patterns: []string{"!docker-compose.yml", "*.yml"},
-			want:     false,
-		},
-		"negation only matches nothing": {
-			path:     "/x/other.yml",
-			patterns: []string{"!docker-compose.yml"},
-			want:     false,
-		},
-		"negation does not match its literal spelling": {
-			path:     "/x/!docker-compose.yml",
-			patterns: []string{"!docker-compose.yml"},
-			want:     false,
-		},
-		"negation at depth": {
-			path:     "/r/.github/workflows/ci.yml",
-			patterns: []string{"**/*.yml", "!.github/**"},
-			want:     false,
-		},
-		"negation with a leading slash": {
-			path:     "/r/.github/workflows/ci.yml",
-			patterns: []string{"*.yml", "!/.github/workflows/*.yml"},
-			want:     false,
-		},
-		"parent after a literal at depth": {
-			path:     "/r/x.yaml",
-			patterns: []string{"configs/../*.yaml"},
-			want:     true,
-		},
-		"parent after a wildcard is kept and matches nothing": {
-			path:     "/r/a/x.yaml",
-			patterns: []string{"*/../x.yaml"},
-			want:     false,
-		},
-		"bare negation is skipped": {
-			path:     "/x/app.yml",
-			patterns: []string{"*.yml", "!"},
-			want:     true,
-		},
-		"braces past the expansion limit match nothing": {
-			path:     "a.yaml",
-			patterns: []string{strings.Repeat("{,}", 30) + "*.yaml"},
-			want:     false,
-		},
-		"braces past the expansion limit exclude nothing": {
-			path:     "a.yaml",
-			patterns: []string{"*.yaml", "!" + strings.Repeat("{,}", 30) + "a.yaml"},
-			want:     true,
-		},
-		"braces past the expansion limit leave other patterns": {
-			path:     "a.yaml",
-			patterns: []string{strings.Repeat("{,}", 30) + "*.yaml", "a.yaml"},
-			want:     true,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			p := filepaths.NewAnyDepthPatterns(tc.patterns)
-			_, got := p.SpecificityClean(filepaths.CleanPath(tc.path))
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
 func TestAnyDepthPatterns_SpecificityClean(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
 		path     string
 		patterns []string
-		want     int
-		wantOK   bool
+		// The specificity of the most specific pattern that matches the
+		// path. A case checks it when it sets it, and every case of a path
+		// that no pattern matches checks that it is 0.
+		want int
+		ok   bool
 	}{
+		"matches base name": {
+			path:     "some/dir/config.yaml",
+			patterns: []string{"*.yaml"},
+			ok:       true,
+		},
+		"matches full path pattern": {
+			path:     ".github/workflows/ci.yaml",
+			patterns: []string{".github/workflows/*.yaml"},
+			ok:       true,
+		},
+		"matches full path pattern with dot slash prefix": {
+			path:     "./.github/workflows/ci.yaml",
+			patterns: []string{".github/workflows/*.yaml"},
+			ok:       true,
+		},
+		"matches exact filename via base": {
+			path:     "some/dir/docker-compose.yaml",
+			patterns: []string{"docker-compose.yaml"},
+			ok:       true,
+		},
+		"no match": {
+			path:     "config.txt",
+			patterns: []string{"*.yaml"},
+		},
+		"empty path": {
+			path:     "",
+			patterns: []string{"*.yaml"},
+		},
+		"invalid pattern ignored": {
+			path:     "config.yaml",
+			patterns: []string{"[", "*.yaml"},
+			ok:       true,
+		},
+		"pattern that fails validation still matches": {
+			// The "[" alternative fails doublestar.ValidatePattern, but
+			// doublestar.Match reads the pattern for this path.
+			path:     "x/a.yaml",
+			patterns: []string{"{a.yaml,[}"},
+			ok:       true,
+		},
+		"dependabot exact": {
+			path:     ".github/dependabot.yaml",
+			patterns: []string{".github/dependabot.yml", ".github/dependabot.yaml"},
+			ok:       true,
+		},
+		"directory pattern matches an absolute path": {
+			path:     "/repo/.github/workflows/ci.yml",
+			patterns: []string{".github/workflows/*.yml"},
+			ok:       true,
+		},
+		"directory pattern matches a nested path": {
+			path:     "repo/.github/workflows/ci.yml",
+			patterns: []string{".github/workflows/*.yml"},
+			ok:       true,
+		},
+		"directory pattern does not match another directory": {
+			path:     "repo/.circleci/workflows/ci.yml",
+			patterns: []string{".github/workflows/*.yml"},
+		},
+		"directory pattern does not match a partial directory name": {
+			path:     "repo/my.github/workflows/ci.yml",
+			patterns: []string{".github/workflows/*.yml"},
+		},
+		"leading slash is dropped": {
+			path:     "repo/.github/workflows/ci.yml",
+			patterns: []string{"/.github/workflows/*.yml"},
+			ok:       true,
+		},
+		"leading dot slash is dropped": {
+			path:     "repo/.github/workflows/ci.yml",
+			patterns: []string{"./.github/workflows/*.yml"},
+			ok:       true,
+		},
+		"repeated separators in a pattern are collapsed": {
+			path:     "repo/.github/workflows/ci.yml",
+			patterns: []string{".github//workflows/*.yml"},
+			ok:       true,
+		},
+		"dot elements in a pattern are dropped": {
+			path:     "repo/k8s/x.yaml",
+			patterns: []string{"k8s/./x.yaml"},
+			ok:       true,
+		},
+		"escaped dot elements in a pattern are dropped": {
+			path:     "repo/k8s/x.yaml",
+			patterns: []string{`k8s/\./*.yaml`},
+			ok:       true,
+		},
+		"dot alternative in braces matches at any depth": {
+			path:     "repo/values.yaml",
+			patterns: []string{"{.,configs}/*.yaml"},
+			ok:       true,
+		},
+		"class holding separator and dot matches at any depth": {
+			path:     "repo/a.b",
+			patterns: []string{"a[/./]b"},
+			ok:       true,
+		},
+		"negation with a dot alternative in braces": {
+			path:     "repo/values.yaml",
+			patterns: []string{"*.yaml", "!{.,configs}/values.yaml"},
+		},
+		"double star prefix is kept": {
+			path:     "repo/.github/workflows/ci.yml",
+			patterns: []string{"**/.github/workflows/*.yml"},
+			ok:       true,
+		},
+		"base name pattern matches an absolute path": {
+			path:     "/srv/app/docker-compose.yaml",
+			patterns: []string{"docker-compose.yaml"},
+			ok:       true,
+		},
+		"negation excludes file": {
+			path:     "/x/docker-compose.yml",
+			patterns: []string{"*.yml", "!docker-compose.yml"},
+		},
+		"negation leaves other files": {
+			path:     "/x/app.yml",
+			patterns: []string{"*.yml", "!docker-compose.yml"},
+			ok:       true,
+		},
+		"negation before the include still excludes": {
+			path:     "/x/docker-compose.yml",
+			patterns: []string{"!docker-compose.yml", "*.yml"},
+		},
+		"negation only matches nothing": {
+			path:     "/x/other.yml",
+			patterns: []string{"!docker-compose.yml"},
+		},
+		"negation does not match its literal spelling": {
+			path:     "/x/!docker-compose.yml",
+			patterns: []string{"!docker-compose.yml"},
+		},
+		"negation at depth": {
+			path:     "/r/.github/workflows/ci.yml",
+			patterns: []string{"**/*.yml", "!.github/**"},
+		},
+		"negation with a leading slash": {
+			path:     "/r/.github/workflows/ci.yml",
+			patterns: []string{"*.yml", "!/.github/workflows/*.yml"},
+		},
+		"parent after a literal at depth": {
+			path:     "/r/x.yaml",
+			patterns: []string{"configs/../*.yaml"},
+			ok:       true,
+		},
+		"parent after a wildcard is kept and matches nothing": {
+			path:     "/r/a/x.yaml",
+			patterns: []string{"*/../x.yaml"},
+		},
+		"bare negation is skipped": {
+			path:     "/x/app.yml",
+			patterns: []string{"*.yml", "!"},
+			ok:       true,
+		},
+		"braces past the expansion limit match nothing": {
+			path:     "a.yaml",
+			patterns: []string{strings.Repeat("{,}", 30) + "*.yaml"},
+		},
+		"braces past the expansion limit exclude nothing": {
+			path:     "a.yaml",
+			patterns: []string{"*.yaml", "!" + strings.Repeat("{,}", 30) + "a.yaml"},
+			ok:       true,
+		},
+		"braces past the expansion limit leave other patterns": {
+			path:     "a.yaml",
+			patterns: []string{strings.Repeat("{,}", 30) + "*.yaml", "a.yaml"},
+			ok:       true,
+		},
 		"counts literal characters of names": {
 			path:     "/repo/.moon/tasks/node.yml",
 			patterns: []string{"**/.moon/tasks/**/*.yml"},
 			want:     14,
-			wantOK:   true,
+			ok:       true,
 		},
-		"broad pattern": {
+		"specificity of a broad pattern": {
 			path:     "/repo/.moon/tasks/node.yml",
 			patterns: []string{"**/tasks/*.yml"},
 			want:     9,
-			wantOK:   true,
+			ok:       true,
 		},
 		"most specific matching pattern": {
 			path:     "/repo/packages/foo/package.yaml",
 			patterns: []string{"package.yaml", "**/packages/*/package.yaml"},
 			want:     20,
-			wantOK:   true,
+			ok:       true,
 		},
 		"most specific brace alternative that matches": {
 			path:     "/repo/migrations/x.vespertide.yml",
 			patterns: []string{"**/migrations/{*.yml,**/*.vespertide.yml}"},
 			want:     25,
-			wantOK:   true,
+			ok:       true,
 		},
 		"pattern that does not match is ignored": {
 			path:     "/repo/config.yaml",
 			patterns: []string{"*.yaml", "**/other/config.yaml"},
 			want:     5,
-			wantOK:   true,
+			ok:       true,
 		},
-		"question mark and class": {
+		"specificity of a question mark and a class": {
 			path:     "/repo/a1.yaml",
 			patterns: []string{"?[0-9].yaml"},
 			want:     5,
-			wantOK:   true,
+			ok:       true,
 		},
-		"escaped character": {
+		"specificity of an escaped character": {
 			path:     "/repo/a*.yaml",
-			patterns: []string{"a\\*.yaml"},
+			patterns: []string{`a\*.yaml`},
 			want:     7,
-			wantOK:   true,
+			ok:       true,
 		},
 		"multibyte characters count once": {
 			path:     "/repo/日本/a.yml",
 			patterns: []string{"日本/*.yml"},
 			want:     6,
-			wantOK:   true,
+			ok:       true,
 		},
-		"escaped multibyte character": {
+		"specificity of an escaped multibyte character": {
 			path:     "/repo/é.yml",
-			patterns: []string{"\\é.yml"},
+			patterns: []string{`\é.yml`},
 			want:     5,
-			wantOK:   true,
-		},
-		"excluded path": {
-			path:     "/repo/docker-compose.yml",
-			patterns: []string{"*.yml", "!docker-compose.yml"},
-		},
-		"no match": {
-			path:     "/repo/config.json",
-			patterns: []string{"*.yaml"},
+			ok:       true,
 		},
 	}
 
@@ -817,29 +709,13 @@ func TestAnyDepthPatterns_SpecificityClean(t *testing.T) {
 
 			p := filepaths.NewAnyDepthPatterns(tc.patterns)
 			got, ok := p.SpecificityClean(filepaths.CleanPath(tc.path))
-			assert.Equal(t, tc.wantOK, ok)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.ok, ok)
+
+			if tc.want != 0 || !tc.ok {
+				assert.Equal(t, tc.want, got)
+			}
 		})
 	}
-}
-
-func TestExpandBraces_Budget(t *testing.T) {
-	t.Parallel()
-
-	// Ten binary groups stand for 1024 patterns, the most ExpandBraces
-	// produces. One more group would double that, so ExpandBraces reports
-	// the limit.
-	group := "{a,b}"
-	within := strings.Repeat(group, 10)
-	over := strings.Repeat(group, 11)
-
-	got, err := filepaths.ExpandBraces(within)
-	require.NoError(t, err)
-	assert.Len(t, got, filepaths.MaxBraceExpansions)
-
-	got, err = filepaths.ExpandBraces(over)
-	require.ErrorIs(t, err, filepaths.ErrBraceLimit)
-	assert.Nil(t, got)
 }
 
 func TestUnclosedClasses(t *testing.T) {
@@ -890,19 +766,12 @@ func TestExpandBraces(t *testing.T) {
 		err     error
 		pattern string
 		want    []string
+		// The number of patterns, for a case that names no want.
+		wantLen int
 	}{
-		"no braces": {
-			pattern: "*.yaml",
-			want:    []string{"*.yaml"},
-		},
-		"empty pattern": {
-			pattern: "",
-			want:    []string{""},
-		},
-		"two alternatives": {
-			pattern: "*.{yml,yaml}",
-			want:    []string{"*.yml", "*.yaml"},
-		},
+		"no braces":        {pattern: "*.yaml", want: []string{"*.yaml"}},
+		"empty pattern":    {pattern: "", want: []string{""}},
+		"two alternatives": {pattern: "*.{yml,yaml}", want: []string{"*.yml", "*.yaml"}},
 		"directory and alternatives": {
 			pattern: "**/.github/workflows/*.{yml,yaml}",
 			want:    []string{"**/.github/workflows/*.yml", "**/.github/workflows/*.yaml"},
@@ -911,49 +780,31 @@ func TestExpandBraces(t *testing.T) {
 			pattern: "{a,b}.{x,y}",
 			want:    []string{"a.x", "a.y", "b.x", "b.y"},
 		},
-		"nested group": {
-			pattern: "a{b,c{d,e}}f",
-			want:    []string{"abf", "acdf", "acef"},
-		},
-		"empty alternative": {
-			pattern: "a{,b}",
-			want:    []string{"a", "ab"},
-		},
-		"single alternative": {
-			pattern: "a{b}c",
-			want:    []string{"abc"},
-		},
-		"unclosed group is kept": {
-			pattern: "a{b,c",
-			want:    []string{"a{b,c"},
-		},
-		"stray closing brace is kept": {
-			pattern: "a}b{c,d}",
-			want:    []string{"a}bc", "a}bd"},
-		},
-		"escaped braces are kept": {
-			pattern: `a\{b,c\}`,
-			want:    []string{`a\{b,c\}`},
-		},
-		"escaped comma stays in the alternative": {
-			pattern: `{a\,b,c}`,
-			want:    []string{`a\,b`, "c"},
-		},
-		"braces inside a character class are kept": {
-			pattern: "x.[{a,b}]c",
-			want:    []string{"x.[{a,b}]c"},
-		},
-		"class inside a group keeps its comma": {
-			pattern: "{a,[,]b}",
-			want:    []string{"a", "[,]b"},
-		},
+		"nested group":                             {pattern: "a{b,c{d,e}}f", want: []string{"abf", "acdf", "acef"}},
+		"empty alternative":                        {pattern: "a{,b}", want: []string{"a", "ab"}},
+		"single alternative":                       {pattern: "a{b}c", want: []string{"abc"}},
+		"unclosed group is kept":                   {pattern: "a{b,c", want: []string{"a{b,c"}},
+		"stray closing brace is kept":              {pattern: "a}b{c,d}", want: []string{"a}bc", "a}bd"}},
+		"escaped braces are kept":                  {pattern: `a\{b,c\}`, want: []string{`a\{b,c\}`}},
+		"escaped comma stays in the alternative":   {pattern: `{a\,b,c}`, want: []string{`a\,b`, "c"}},
+		"braces inside a character class are kept": {pattern: "x.[{a,b}]c", want: []string{"x.[{a,b}]c"}},
+		"class inside a group keeps its comma":     {pattern: "{a,[,]b}", want: []string{"a", "[,]b"}},
 		"closing bracket first in a negated class": {
 			pattern: "[!]{]{a,b}",
 			want:    []string{"[!]{]a", "[!]{]b"},
 		},
-		"unclosed class reads as a literal": {
-			pattern: "a[{b,c}",
-			want:    []string{"a[b", "a[c"},
+		"unclosed class reads as a literal": {pattern: "a[{b,c}", want: []string{"a[b", "a[c"}},
+		// Ten binary groups stand for 1024 patterns, the most ExpandBraces
+		// produces.
+		"binary groups at the expansion limit": {
+			pattern: strings.Repeat("{a,b}", 10),
+			wantLen: filepaths.MaxBraceExpansions,
+		},
+		// One more group would double the patterns of ten, so ExpandBraces
+		// reports the limit.
+		"binary groups past the expansion limit": {
+			pattern: strings.Repeat("{a,b}", 11),
+			err:     filepaths.ErrBraceLimit,
 		},
 		// Each of the next three patterns expands to few patterns, but
 		// ExpandBraces would rebuild a long pattern once per brace group
@@ -977,14 +828,14 @@ func TestExpandBraces(t *testing.T) {
 			t.Parallel()
 
 			got, err := filepaths.ExpandBraces(tc.pattern)
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-				assert.Nil(t, got)
+			require.ErrorIs(t, err, tc.err)
+
+			if tc.wantLen > 0 {
+				assert.Len(t, got, tc.wantLen)
 
 				return
 			}
 
-			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})
 	}

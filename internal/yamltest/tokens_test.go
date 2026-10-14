@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml/token"
@@ -21,10 +22,7 @@ func TestDumpTokenOrigins(t *testing.T) {
 		want  string
 		input token.Tokens
 	}{
-		"empty slice": {
-			input: token.Tokens{},
-			want:  "",
-		},
+		"empty slice": {input: token.Tokens{}, want: ""},
 		"single token": {
 			input: token.Tokens{
 				{Origin: "hello"},
@@ -47,10 +45,7 @@ func TestDumpTokenOrigins(t *testing.T) {
 			},
 			want: "key: value\n",
 		},
-		"only nil tokens": {
-			input: token.Tokens{nil, nil},
-			want:  "",
-		},
+		"only nil tokens": {input: token.Tokens{nil, nil}, want: ""},
 	}
 
 	for name, tc := range tcs {
@@ -134,11 +129,8 @@ func TestFormatTokens(t *testing.T) {
 		want  string
 		input token.Tokens
 	}{
-		"nil slice": {want: "<empty>"},
-		"empty slice": {
-			input: token.Tokens{},
-			want:  "<empty>",
-		},
+		"nil slice":   {want: "<empty>"},
+		"empty slice": {input: token.Tokens{}, want: "<empty>"},
 		"single token": {
 			input: token.Tokens{first},
 			want:  stringtest.JoinLF("[0]", yamltest.FormatToken(first)),
@@ -171,22 +163,13 @@ func TestCompareContent(t *testing.T) {
 		got  string
 		msgs []string // Empty when the content is equal.
 	}{
-		"equal content": {
-			want: "hello",
-			got:  "hello",
-		},
-		"normalizes line endings": {
-			want: "line1\nline2",
-			got:  "line1\r\nline2",
-		},
+		"equal content":           {want: "hello", got: "hello"},
+		"normalizes line endings": {want: "line1\nline2", got: "line1\r\nline2"},
 		"normalizes bare CR line endings": {
 			want: stringtest.JoinLF("line1", "line2", "", "line3"),
 			got:  "line1\rline2\r\rline3\r",
 		},
-		"trims surrounding newlines": {
-			want: "\nhello\n",
-			got:  "hello",
-		},
+		"trims surrounding newlines": {want: "\nhello\n", got: "hello"},
 		"different content": {
 			want: "hello",
 			got:  "world",
@@ -302,6 +285,21 @@ func TestTokenBuilder(t *testing.T) {
 	})
 }
 
+// requireValidation requires err to be nil when want is nil, and to wrap
+// want and hold msg in its text otherwise.
+func requireValidation(tb testing.TB, err, want error, msg string) {
+	tb.Helper()
+
+	if want == nil {
+		require.NoError(tb, err)
+
+		return
+	}
+
+	require.ErrorIs(tb, err, want)
+	assert.Contains(tb, err.Error(), msg)
+}
+
 func TestValidateTokens(t *testing.T) {
 	t.Parallel()
 
@@ -313,14 +311,8 @@ func TestValidateTokens(t *testing.T) {
 		want token.Tokens
 		got  token.Tokens
 	}{
-		"equal length with valid tokens": {
-			want: token.Tokens{tk, tk},
-			got:  token.Tokens{tk, tk},
-		},
-		"empty slices": {
-			want: token.Tokens{},
-			got:  token.Tokens{},
-		},
+		"equal length with valid tokens": {want: token.Tokens{tk, tk}, got: token.Tokens{tk, tk}},
+		"empty slices":                   {want: token.Tokens{}, got: token.Tokens{}},
 		"count mismatch": {
 			want: token.Tokens{tk},
 			got:  token.Tokens{tk, tk},
@@ -358,20 +350,13 @@ func TestValidateTokens(t *testing.T) {
 			t.Parallel()
 
 			err := yamltest.ValidateTokens(tc.want, tc.got)
-			if tc.err == nil {
-				require.NoError(t, err)
-
-				return
-			}
-
-			require.ErrorIs(t, err, tc.err)
-			assert.Contains(t, err.Error(), tc.msg)
+			requireValidation(t, err, tc.err, tc.msg)
 
 			// A count mismatch names no token, so it alone is no
 			// TokenValidationError.
 			var tve *yamltest.TokenValidationError
 
-			assert.Equal(t, !errors.Is(tc.err, yamltest.ErrTokenCountMismatch), errors.As(err, &tve))
+			assert.Equal(t, tc.err != nil && !errors.Is(tc.err, yamltest.ErrTokenCountMismatch), errors.As(err, &tve))
 		})
 	}
 }
@@ -398,9 +383,7 @@ func TestValidateTokenLinks(t *testing.T) {
 		err  error // Nil when every link fits.
 		msg  string
 	}{
-		"linked chain": {
-			edit: func(token.Tokens) {},
-		},
+		"linked chain": {edit: func(token.Tokens) {}},
 		"first token with a Prev": {
 			edit: func(tks token.Tokens) { tks[0].Prev = other },
 			err:  yamltest.ErrTokenLink,
@@ -435,15 +418,7 @@ func TestValidateTokenLinks(t *testing.T) {
 			tks := chain()
 			tc.edit(tks)
 
-			err := yamltest.ValidateTokenLinks(tks)
-			if tc.err == nil {
-				require.NoError(t, err)
-
-				return
-			}
-
-			require.ErrorIs(t, err, tc.err)
-			assert.Contains(t, err.Error(), tc.msg)
+			requireValidation(t, yamltest.ValidateTokenLinks(tks), tc.err, tc.msg)
 		})
 	}
 
@@ -457,79 +432,68 @@ func TestValidateTokenLinks(t *testing.T) {
 func TestCompareTokens(t *testing.T) {
 	t.Parallel()
 
-	t.Run("equal tokens", func(t *testing.T) {
-		t.Parallel()
+	tkb := yamltest.NewTokenBuilder()
+	tk := tkb.Clone().Type(token.StringType).Value("test").Origin("test\n").PositionLine(1).PositionColumn(1).Build()
 
-		tk := yamltest.NewTokenBuilder().
-			Type(token.StringType).
-			Value("test").
-			Origin("test\n").
-			PositionLine(1).
-			PositionColumn(1).
-			Build()
+	tcs := map[string]struct {
+		want   *token.Token
+		got    *token.Token
+		fields []string // The fields that differ, empty when the tokens are equal.
+	}{
+		"equal tokens": {want: tk, got: tk},
+		"Type differs": {
+			want:   tkb.Clone().Type(token.StringType).Build(),
+			got:    tkb.Clone().Type(token.IntegerType).Build(),
+			fields: []string{"Type"},
+		},
+		"Value differs": {
+			want:   tkb.Clone().Value("a").Build(),
+			got:    tkb.Clone().Value("b").Build(),
+			fields: []string{"Value"},
+		},
+		"Origin differs": {
+			want:   tkb.Clone().Origin("a\n").Build(),
+			got:    tkb.Clone().Origin("b\n").Build(),
+			fields: []string{"Origin"},
+		},
+		"Error differs": {
+			want:   tkb.Clone().Error("bad").Build(),
+			got:    tkb.Build(),
+			fields: []string{"Error"},
+		},
+		"Position.Line differs": {
+			want:   tkb.Clone().PositionLine(1).Build(),
+			got:    tkb.Clone().PositionLine(2).Build(),
+			fields: []string{"Position.Line"},
+		},
+	}
 
-		diff := yamltest.CompareTokens(tk, tk)
-		assert.True(t, diff.Equal())
-		assert.Equal(t, "tokens equal", diff.String())
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("one field differs", func(t *testing.T) {
-		t.Parallel()
+			diff := yamltest.CompareTokens(tc.want, tc.got)
+			assert.Equal(t, tc.fields, diff.Fields)
+			assert.Equal(t, tc.fields, yamltest.DiffTokenFields(tc.want, tc.got))
 
-		tkb := yamltest.NewTokenBuilder()
+			if len(tc.fields) == 0 {
+				assert.True(t, diff.Equal())
+				assert.Equal(t, "tokens equal", diff.String())
 
-		// Each case differs in the field that names it.
-		tcs := map[string]struct {
-			want *token.Token
-			got  *token.Token
-		}{
-			"Type": {
-				want: tkb.Clone().Type(token.StringType).Build(),
-				got:  tkb.Clone().Type(token.IntegerType).Build(),
-			},
-			"Value": {
-				want: tkb.Clone().Value("a").Build(),
-				got:  tkb.Clone().Value("b").Build(),
-			},
-			"Origin": {
-				want: tkb.Clone().Origin("a\n").Build(),
-				got:  tkb.Clone().Origin("b\n").Build(),
-			},
-			"Error": {
-				want: tkb.Clone().Error("bad").Build(),
-				got:  tkb.Build(),
-			},
-			"Position.Line": {
-				want: tkb.Clone().PositionLine(1).Build(),
-				got:  tkb.Clone().PositionLine(2).Build(),
-			},
-		}
+				return
+			}
 
-		for field, tc := range tcs {
-			t.Run(field, func(t *testing.T) {
-				t.Parallel()
+			assert.False(t, diff.Equal())
 
-				diff := yamltest.CompareTokens(tc.want, tc.got)
-				assert.False(t, diff.Equal())
-				assert.Equal(t, []string{field}, diff.Fields)
-				assert.Equal(t, []string{field}, yamltest.DiffTokenFields(tc.want, tc.got))
-			})
-		}
-	})
+			// The text shows both tokens and names the fields that differ.
+			str := diff.String()
+			for _, msg := range []string{"token mismatch", "want", "got"} {
+				assert.Contains(t, str, msg)
+			}
 
-	t.Run("String() includes details", func(t *testing.T) {
-		t.Parallel()
-
-		want := yamltest.NewTokenBuilder().Value("a").Build()
-		got := yamltest.NewTokenBuilder().Value("b").Build()
-
-		diff := yamltest.CompareTokens(want, got)
-		str := diff.String()
-		assert.Contains(t, str, "token mismatch")
-		assert.Contains(t, str, "want")
-		assert.Contains(t, str, "got")
-		assert.Contains(t, str, "Value")
-	})
+			assert.Contains(t, str, "differences: "+strings.Join(tc.fields, ", "))
+		})
+	}
 }
 
 func TestCompareTokenSlices(t *testing.T) {
@@ -616,6 +580,24 @@ func (r *recordingTB) FailNow() {
 	runtime.Goexit()
 }
 
+// record returns a new [recordingTB] after a call of fn with it. The call
+// runs on a goroutine of its own, because FailNow ends the goroutine it
+// runs on, as it does for a real test.
+func record(fn func(tb *recordingTB)) *recordingTB {
+	rec := &recordingTB{}
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		fn(rec)
+	}()
+
+	<-done
+
+	return rec
+}
+
 func TestRequireTokensEqual(t *testing.T) {
 	t.Parallel()
 
@@ -628,10 +610,7 @@ func TestRequireTokensEqual(t *testing.T) {
 		got  token.Tokens
 		msgs []string // Empty when the helper passes.
 	}{
-		"equal slices pass": {
-			want: token.Tokens{a, b},
-			got:  token.Tokens{a.Clone(), b.Clone()},
-		},
+		"equal slices pass": {want: token.Tokens{a, b}, got: token.Tokens{a.Clone(), b.Clone()}},
 		"value mismatch fails": {
 			want: token.Tokens{a},
 			got:  token.Tokens{b},
@@ -653,17 +632,9 @@ func TestRequireTokensEqual(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			rec := &recordingTB{}
-			done := make(chan struct{})
-
-			// FailNow ends the goroutine, as it does for a real test.
-			go func() {
-				defer close(done)
-
-				yamltest.RequireTokensEqual(rec, tc.want, tc.got)
-			}()
-
-			<-done
+			rec := record(func(tb *recordingTB) {
+				yamltest.RequireTokensEqual(tb, tc.want, tc.got)
+			})
 
 			if len(tc.msgs) == 0 {
 				assert.False(t, rec.failed, rec.msg)
@@ -746,6 +717,29 @@ func TestTokenPlace(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, yamltest.TokenPlace(tc.input))
+		})
+	}
+}
+
+func TestTokenValues(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input token.Tokens
+		want  []string
+	}{
+		"no tokens": {},
+		"tokens": {
+			input: token.Tokens{{Value: "a"}, {Value: ""}, {Value: "b"}},
+			want:  []string{"a", "", "b"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, yamltest.TokenValues(tc.input))
 		})
 	}
 }

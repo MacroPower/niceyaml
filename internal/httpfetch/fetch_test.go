@@ -1,6 +1,7 @@
 package httpfetch_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -20,7 +21,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
-func TestGet_RedactsPassword(t *testing.T) {
+func TestGet_ParseError(t *testing.T) {
 	t.Parallel()
 
 	// Get sends no request for a URL that does not parse, and its error
@@ -29,29 +30,70 @@ func TestGet_RedactsPassword(t *testing.T) {
 	// or fragment, so Get refuses it too. A third slash after the scheme
 	// empties the host and turns the userinfo into a path, so Get refuses
 	// that URL as well.
-	tcs := map[string]string{
-		"invalid port":                           "https://user:secret@example.com:port/x",
-		"invalid percent escape":                 "https://user:secret@example.com/%zz",
-		"control character":                      "https://user:secret@example.com/\x7f",
-		"password with a slash":                  "https://user:secret/x@example.com/x",
-		"password with a question mark":          "https://user:secret?x@example.com/x",
-		"password with a hash":                   "https://user:secret#x@example.com/x",
-		"password starting with a slash":         "https://user:/secret@example.com/x",
-		"password starting with a question mark": "https://user:?secret@example.com/x",
-		"password starting with a hash":          "https://user:#secret@example.com/x",
-		"username with an at sign":               "https://jane@corp.com:/secret@example.com/x",
-		"empty authority":                        "https:///user:secret@example.com/x",
-		"upper-case scheme and empty authority":  "HTTPS:////user:secret@example.com/x",
-		"password and an empty host":             "http://user:secret@/x",
+	tcs := map[string]struct {
+		url string
+		// An empty want stands for the start of an error that names url
+		// as Redacted spells it.
+		want string
+	}{
+		"invalid port":                           {url: "https://user:secret@example.com:port/x"},
+		"invalid percent escape":                 {url: "https://user:secret@example.com/%zz"},
+		"control character":                      {url: "https://user:secret@example.com/\x7f"},
+		"password with a slash":                  {url: "https://user:secret/x@example.com/x"},
+		"password with a question mark":          {url: "https://user:secret?x@example.com/x"},
+		"password with a hash":                   {url: "https://user:secret#x@example.com/x"},
+		"password starting with a slash":         {url: "https://user:/secret@example.com/x"},
+		"password starting with a question mark": {url: "https://user:?secret@example.com/x"},
+		"password starting with a hash":          {url: "https://user:#secret@example.com/x"},
+		"username with an at sign":               {url: "https://jane@corp.com:/secret@example.com/x"},
+		"empty authority":                        {url: "https:///user:secret@example.com/x"},
+		"upper-case scheme and empty authority":  {url: "HTTPS:////user:secret@example.com/x"},
+		"password and an empty host":             {url: "http://user:secret@/x"},
+		"url with no password keeps the reason": {
+			url:  "https://example.com:port/x",
+			want: `parse URL "https://example.com:port/x": invalid port ":port" after host`,
+		},
+		"control character is quoted": {
+			url:  "https://example.com/\x7f",
+			want: `parse URL "https://example.com/\x7f": `,
+		},
+		// Get names only an http or https URL in a parse error. Redacted
+		// finds a password after a leading "//" too, so Get withholds the
+		// reason, as it does for an https URL with a password.
+		"scheme-relative url is not named": {
+			url:  "//user:secret@example.com/%zz",
+			want: "parse URL: reason withheld",
+		},
+		// The parser reads an authority after a leading "//", so Get
+		// refuses a password in a scheme-relative URL wherever it refuses
+		// one after "://".
+		"scheme-relative password starting with a slash": {
+			url:  "//user:/secret@example.com/x",
+			want: `parse URL: empty port and a later "@" suggest`,
+		},
+		"scheme-relative password starting with a question mark": {
+			url:  "//user:?secret@example.com/x",
+			want: `parse URL: empty port and a later "@" suggest`,
+		},
+		"scheme-relative password with a slash": {
+			url:  "//user:s3/cret@example.com/x",
+			want: "parse URL: reason withheld",
+		},
 	}
 
-	for name, rawURL := range tcs {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := httpfetch.Get(t.Context(), refusingClient(t), rawURL)
-			require.ErrorContains(t, err, "parse URL "+strconv.Quote(httpfetch.Redacted(rawURL))+": ")
-			assert.NotContains(t, err.Error(), "secret")
+			want := cmp.Or(tc.want, "parse URL "+strconv.Quote(httpfetch.Redacted(tc.url))+": ")
+
+			_, err := httpfetch.Get(t.Context(), refusingClient(t), tc.url)
+			require.ErrorContains(t, err, want)
+
+			// Each password holds "cret", and "s3/cret" also holds "s3", so
+			// no half of a password reaches the error.
+			assert.NotContains(t, err.Error(), "s3")
+			assert.NotContains(t, err.Error(), "cret")
 		})
 	}
 }
@@ -112,60 +154,6 @@ func TestGet_PasswordWithAtSignKeepsContextError(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	assert.NotContains(t, err.Error(), "host.invalid")
 	assert.NotContains(t, err.Error(), "tail")
-}
-
-func TestGet_ParseReason(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		url  string
-		want string
-	}{
-		"url with no password keeps the reason": {
-			url:  "https://example.com:port/x",
-			want: `parse URL "https://example.com:port/x": invalid port ":port" after host`,
-		},
-		"control character is quoted": {
-			url:  "https://example.com/\x7f",
-			want: `parse URL "https://example.com/\x7f": `,
-		},
-		// Get names only an http or https URL in a parse error. Redacted
-		// finds a password after a leading "//" too, so Get withholds the
-		// reason, as it does for an https URL with a password.
-		"scheme-relative url is not named": {
-			url:  "//user:secret@example.com/%zz",
-			want: "parse URL: reason withheld",
-		},
-		// The parser reads an authority after a leading "//", so Get
-		// refuses a password in a scheme-relative URL wherever it refuses
-		// one after "://".
-		"scheme-relative password starting with a slash": {
-			url:  "//user:/secret@example.com/x",
-			want: `parse URL: empty port and a later "@" suggest`,
-		},
-		"scheme-relative password starting with a question mark": {
-			url:  "//user:?secret@example.com/x",
-			want: `parse URL: empty port and a later "@" suggest`,
-		},
-		"scheme-relative password with a slash": {
-			url:  "//user:s3/cret@example.com/x",
-			want: "parse URL: reason withheld",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			_, err := httpfetch.Get(t.Context(), refusingClient(t), tc.url)
-			require.ErrorContains(t, err, tc.want)
-
-			// The password is "secret" or "s3/cret", and no half of it
-			// reaches the error.
-			assert.NotContains(t, err.Error(), "s3")
-			assert.NotContains(t, err.Error(), "cret")
-		})
-	}
 }
 
 func TestGet_RedactsPasswordOnTransport(t *testing.T) {
@@ -386,11 +374,11 @@ func TestIsHTTPURL(t *testing.T) {
 		"upper-case scheme":    {url: "HTTPS://example.com/s.json", want: true},
 		"mixed-case scheme":    {url: "hTtP://example.com/s.json", want: true},
 		"scheme alone":         {url: "https://", want: true},
-		"file url":             {url: "file:///srv/s.json", want: false},
-		"scheme without slash": {url: "https:example.com", want: false},
-		"shorter than scheme":  {url: "http:/", want: false},
-		"relative path":        {url: "schemas/s.json", want: false},
-		"empty":                {url: "", want: false},
+		"file url":             {url: "file:///srv/s.json"},
+		"scheme without slash": {url: "https:example.com"},
+		"shorter than scheme":  {url: "http:/"},
+		"relative path":        {url: "schemas/s.json"},
+		"empty":                {url: ""},
 	}
 
 	for name, tc := range tcs {

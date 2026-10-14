@@ -229,30 +229,16 @@ func TestOptions_Whole(t *testing.T) {
 		field int
 		whole bool
 	}{
-		"plain": {
-			typ:   reflect.TypeFor[plainValue](),
-			field: -1,
-		},
-		"declared method": {
-			typ:   reflect.TypeFor[nodeValue](),
-			field: -1,
-			whole: true,
-		},
-		"embedded method": {
-			typ:   reflect.TypeFor[embedsNode](),
-			field: 1,
-			whole: true,
-		},
+		"plain":           {typ: reflect.TypeFor[plainValue](), field: -1},
+		"declared method": {typ: reflect.TypeFor[nodeValue](), field: -1, whole: true},
+		"embedded method": {typ: reflect.TypeFor[embedsNode](), field: 1, whole: true},
 		"custom function": {
 			typ:   reflect.TypeFor[embedsNode](),
 			opts:  unmarshaler.Options{}.With(reflect.TypeFor[embedsNode](), noOption),
 			field: -1,
 			whole: true,
 		},
-		"json without its option": {
-			typ:   reflect.TypeFor[embedsJSON](),
-			field: -1,
-		},
+		"json without its option": {typ: reflect.TypeFor[embedsJSON](), field: -1},
 		"embedded json under its option": {
 			typ:   reflect.TypeFor[embedsJSON](),
 			opts:  unmarshaler.Options{JSON: true},
@@ -328,21 +314,10 @@ func TestOptions_RefusesForText(t *testing.T) {
 			content: mapping,
 			want:    true,
 		},
-		"text type from a scalar": {
-			typ:     reflect.TypeFor[textValue](),
-			content: &ast.StringNode{},
-		},
-		"text type from nothing": {
-			typ: reflect.TypeFor[textValue](),
-		},
-		"time from a mapping": {
-			typ:     reflect.TypeFor[time.Time](),
-			content: mapping,
-		},
-		"node type from a mapping": {
-			typ:     reflect.TypeFor[nodeValue](),
-			content: mapping,
-		},
+		"text type from a scalar":  {typ: reflect.TypeFor[textValue](), content: &ast.StringNode{}},
+		"text type from nothing":   {typ: reflect.TypeFor[textValue]()},
+		"time from a mapping":      {typ: reflect.TypeFor[time.Time](), content: mapping},
+		"node type from a mapping": {typ: reflect.TypeFor[nodeValue](), content: mapping},
 	}
 
 	for name, tc := range tcs {

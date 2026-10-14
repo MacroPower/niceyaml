@@ -16,32 +16,12 @@ func TestExcessive(t *testing.T) {
 		aliased  int
 		want     bool
 	}{
-		"few aliased nodes": {
-			distinct: 10,
-			aliased:  100,
-		},
-		"small document": {
-			distinct: 1,
-			aliased:  998,
-		},
-		"aliases under the larger share": {
-			distinct: 20,
-			aliased:  1000,
-		},
-		"aliases past the larger share": {
-			distinct: 5,
-			aliased:  1000,
-			want:     true,
-		},
-		"aliases past the smaller share": {
-			distinct: 1_000_000,
-			aliased:  4_000_000,
-			want:     true,
-		},
-		"aliases under the smaller share": {
-			distinct: 4_000_000,
-			aliased:  400_000,
-		},
+		"few aliased nodes":               {distinct: 10, aliased: 100},
+		"small document":                  {distinct: 1, aliased: 998},
+		"aliases under the larger share":  {distinct: 20, aliased: 1000},
+		"aliases past the larger share":   {distinct: 5, aliased: 1000, want: true},
+		"aliases past the smaller share":  {distinct: 1_000_000, aliased: 4_000_000, want: true},
+		"aliases under the smaller share": {distinct: 4_000_000, aliased: 400_000},
 	}
 
 	for name, tc := range tcs {

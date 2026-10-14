@@ -127,11 +127,11 @@ func TestValue_Find(t *testing.T) {
 		found bool
 	}{
 		"the root":               {path: paths.Current(), layer: 1, found: true},
-		"a value of the top":     {path: paths.Current().Child("a").Child("b"), layer: 1, found: true},
-		"a value of the base":    {path: paths.Current().Child("a").Child("c").Index(0), found: true},
+		"a value of the top":     {path: paths.Current().Child("a", "b"), layer: 1, found: true},
+		"a value of the base":    {path: paths.Current().Child("a", "c").Index(0), found: true},
 		"a removed key":          {path: paths.Current().Child("d"), layer: 1, found: true},
-		"a key no layer holds":   {path: paths.Current().Child("a").Child("z"), layer: 1},
-		"an index past the list": {path: paths.Current().Child("a").Child("c").Index(4)},
+		"a key no layer holds":   {path: paths.Current().Child("a", "z"), layer: 1},
+		"an index past the list": {path: paths.Current().Child("a", "c").Index(4)},
 	}
 
 	for name, tc := range tcs {

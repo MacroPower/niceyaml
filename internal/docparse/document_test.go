@@ -6,8 +6,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
@@ -41,36 +43,54 @@ func TestResult_Documents(t *testing.T) {
 			},
 		},
 		"a header after a header": {
-			input: "---\n---\na: 1\n",
+			input: stringtest.LinesLF("---", "---", "a: 1"),
 			want: []doc{
 				{text: "---", span: position.NewSpan(0, 1), preamble: 1, failure: -1},
-				{text: "\n---\na: 1\n", span: position.NewSpan(1, 4), fileIndex: 1, preamble: 1, failure: -1},
+				{
+					text:      stringtest.LinesLF("", "---", "a: 1"),
+					span:      position.NewSpan(1, 4),
+					fileIndex: 1,
+					preamble:  1,
+					failure:   -1,
+				},
 			},
 		},
 		"a document that did not parse names its failure": {
-			input: "a: 1\n---\nb: [\n",
+			input: stringtest.LinesLF("a: 1", "---", "b: ["),
 			want: []doc{
 				{text: "a: 1\n", span: position.NewSpan(0, 1), failure: -1},
-				{text: "---\nb: [\n", span: position.NewSpan(1, 4), fileIndex: 1, preamble: 1},
+				{text: stringtest.LinesLF("---", "b: ["), span: position.NewSpan(1, 4), fileIndex: 1, preamble: 1},
 			},
 		},
 		"comments above the first header fold into the document below": {
-			input: "# c\n---\na: 1\n",
+			input: stringtest.LinesLF("# c", "---", "a: 1"),
 			want: []doc{
-				{text: "# c\n---\na: 1\n", span: position.NewSpan(0, 4), fileIndex: 1, preamble: 2, failure: -1},
+				{
+					text:      stringtest.LinesLF("# c", "---", "a: 1"),
+					span:      position.NewSpan(0, 4),
+					fileIndex: 1,
+					preamble:  2,
+					failure:   -1,
+				},
 			},
 		},
 		"a comment above a header moves to the document below": {
-			input: "a: 1\n# about b\n---\nb: 2\n",
+			input: stringtest.LinesLF("a: 1", "# about b", "---", "b: 2"),
 			want: []doc{
 				{text: "a: 1\n", span: position.NewSpan(0, 1), failure: -1},
-				{text: "# about b\n---\nb: 2\n", span: position.NewSpan(1, 5), fileIndex: 1, preamble: 2, failure: -1},
+				{
+					text:      stringtest.LinesLF("# about b", "---", "b: 2"),
+					span:      position.NewSpan(1, 5),
+					fileIndex: 1,
+					preamble:  2,
+					failure:   -1,
+				},
 			},
 		},
 		"a comment on the line of a marker stays with the document above": {
-			input: "a: 1\n... # end\nb: 2\n",
+			input: stringtest.LinesLF("a: 1", "... # end", "b: 2"),
 			want: []doc{
-				{text: "a: 1\n... # end\n", span: position.NewSpan(0, 2), failure: -1},
+				{text: stringtest.LinesLF("a: 1", "... # end"), span: position.NewSpan(0, 2), failure: -1},
 				{text: "b: 2\n", span: position.NewSpan(2, 4), fileIndex: 1, failure: -1},
 			},
 		},
@@ -89,13 +109,7 @@ func TestResult_Documents(t *testing.T) {
 			for i, d := range docs {
 				want := tc.want[i]
 
-				var sb strings.Builder
-
-				for _, tk := range d.Tokens {
-					sb.WriteString(tk.Origin)
-				}
-
-				assert.Equal(t, want.text, sb.String(), "text of document %d", i)
+				assert.Equal(t, want.text, yamltest.DumpTokenOrigins(d.Tokens), "text of document %d", i)
 				assert.Equal(t, want.span, d.Span, "span of document %d", i)
 				assert.Equal(t, want.fileIndex, d.FileIndex, "file index of document %d", i)
 				assert.Equal(t, want.preamble, d.Preamble, "preamble of document %d", i)

@@ -20,15 +20,9 @@ func TestRun(t *testing.T) {
 		fn  func() error
 		err error
 	}{
-		"returns nil": {fn: func() error { return nil }},
-		"returns an error": {
-			fn:  func() error { return errSentinel },
-			err: errSentinel,
-		},
-		"panics": {
-			fn:  func() error { panic("bug") },
-			err: &capture.PanicError{Value: "bug"},
-		},
+		"returns nil":      {fn: func() error { return nil }},
+		"returns an error": {fn: func() error { return errSentinel }, err: errSentinel},
+		"panics":           {fn: func() error { panic("bug") }, err: &capture.PanicError{Value: "bug"}},
 		"calls runtime.Goexit": {
 			fn: func() error {
 				runtime.Goexit()
@@ -57,19 +51,11 @@ func TestReraise(t *testing.T) {
 		err  error
 		want error
 	}{
-		"nil":            {},
-		"ordinary error": {err: errSentinel},
-		"panic": {
-			err:  &capture.PanicError{Value: "bug"},
-			want: &capture.PanicError{Value: "bug"},
-		},
-		"runtime.Goexit": {
-			err:  capture.ErrGoexit,
-			want: capture.ErrGoexit,
-		},
-		"wrapped panic": {
-			err: fmt.Errorf("%w: %w", errSentinel, &capture.PanicError{Value: "bug"}),
-		},
+		"nil":                    {},
+		"ordinary error":         {err: errSentinel},
+		"panic":                  {err: &capture.PanicError{Value: "bug"}, want: &capture.PanicError{Value: "bug"}},
+		"runtime.Goexit":         {err: capture.ErrGoexit, want: capture.ErrGoexit},
+		"wrapped panic":          {err: fmt.Errorf("%w: %w", errSentinel, &capture.PanicError{Value: "bug"})},
 		"wrapped runtime.Goexit": {err: fmt.Errorf("%w: %w", errSentinel, capture.ErrGoexit)},
 	}
 

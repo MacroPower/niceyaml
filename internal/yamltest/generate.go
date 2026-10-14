@@ -112,3 +112,21 @@ func AliasedMapping(keys, aliases int) string {
 
 	return sb.String()
 }
+
+// AliasKey creates YAML content whose key holds a mapping with the alias
+// *l<level> as its one key and v as its value. A decode writes out an
+// alias in a mapping key in full. After the content of [AliasLevels] for
+// level or more levels, the key therefore holds an alias bomb that a
+// decode expands:
+//
+//	input := yamltest.AliasLevels(7) + yamltest.AliasKey("kind", 7)
+func AliasKey(key string, level int) string {
+	return fmt.Sprintf("%s:\n  ? *l%d\n  : v\n", key, level)
+}
+
+// SchemaDirective returns body under the comment line
+// "# yaml-language-server: $schema=<ref>", which names ref as the schema
+// of the document. An empty body leaves the comment line alone.
+func SchemaDirective(ref, body string) string {
+	return "# yaml-language-server: $schema=" + ref + "\n" + body
+}

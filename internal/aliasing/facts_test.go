@@ -65,6 +65,40 @@ func TestNewFacts(t *testing.T) {
 			anchors:  []string{"x", "x"},
 			enclosed: []string{"x"},
 		},
+		"extent of a scalar": {
+			input:   "a: &x 1\n",
+			anchors: []string{"x"},
+		},
+		"extent of a block mapping": {
+			input:   stringtest.LinesLF("a: &x", "  b: 1", "  c: [2, 3]", "d: 4"),
+			anchors: []string{"x"},
+		},
+		"extent of nested anchors": {
+			input:    stringtest.LinesLF("a: &x", "  b: &y", "    - 1", "    - *x", "  c: 2"),
+			aliases:  []string{"*x -> &x inside"},
+			anchors:  []string{"x", "y"},
+			enclosed: []string{"x"},
+		},
+		"extent with a comment inside": {
+			input:   stringtest.LinesLF("a: &x", "  b: 1", "  # note", "  c: 2"),
+			anchors: []string{"x"},
+		},
+		"extent of a flow sequence": {
+			input:    "a: &x [1, &y {b: *x}, 3]\n",
+			aliases:  []string{"*x -> &x inside"},
+			anchors:  []string{"x", "y"},
+			enclosed: []string{"x"},
+		},
+		"extent with an empty entry": {
+			input:   stringtest.LinesLF("a: &x", "  -", "  - 1"),
+			anchors: []string{"x"},
+		},
+		"extent with a comment on an alias": {
+			input:    stringtest.LinesLF("a: &x", "  - 1", "  - *x # note"),
+			aliases:  []string{"*x -> &x inside"},
+			anchors:  []string{"x"},
+			enclosed: []string{"x"},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -101,6 +135,7 @@ func TestNewFacts(t *testing.T) {
 
 			for _, a := range facts.Anchors {
 				assert.Equal(t, a.Name, a.Node.Name.GetToken().Value)
+				assert.Equal(t, astnode.ExtentOf(a.Node, true), a.Extent, "anchor %s", a.Name)
 
 				anchors = append(anchors, a.Name)
 			}
@@ -109,34 +144,6 @@ func TestNewFacts(t *testing.T) {
 			assert.Equal(t, tc.anchors, anchors)
 			assert.Equal(t, tc.enclosed, enclosed)
 			assert.Len(t, facts.Enclosed, len(tc.enclosed))
-		})
-	}
-}
-
-func TestNewFacts_Extent(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]string{
-		"a scalar":              "a: &x 1\n",
-		"a block mapping":       stringtest.LinesLF("a: &x", "  b: 1", "  c: [2, 3]", "d: 4"),
-		"nested anchors":        stringtest.LinesLF("a: &x", "  b: &y", "    - 1", "    - *x", "  c: 2"),
-		"a comment inside":      stringtest.LinesLF("a: &x", "  b: 1", "  # note", "  c: 2"),
-		"a flow sequence":       "a: &x [1, &y {b: *x}, 3]\n",
-		"an empty entry":        stringtest.LinesLF("a: &x", "  -", "  - 1"),
-		"a comment on an alias": stringtest.LinesLF("a: &x", "  - 1", "  - *x # note"),
-	}
-
-	for name, input := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			doc := yamltest.FirstDocument(t, input)
-			facts := aliasing.NewFacts(doc.AST(), doc.Resolver())
-			assert.NotEmpty(t, facts.Anchors)
-
-			for _, a := range facts.Anchors {
-				assert.Equal(t, astnode.ExtentOf(a.Node, true), a.Extent, "anchor %s", a.Name)
-			}
 		})
 	}
 }

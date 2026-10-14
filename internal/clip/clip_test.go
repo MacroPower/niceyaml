@@ -4,6 +4,7 @@ import (
 	"math"
 	"slices"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 
@@ -24,65 +25,54 @@ func TestMap_Content(t *testing.T) {
 		content string
 		want    string
 		windows []position.Span
-		width   int
 	}{
 		"whole line": {
 			content: alphabet,
-			width:   26,
 			windows: []position.Span{position.NewSpan(0, 26)},
 			want:    alphabet,
 		},
 		"cut at the end": {
 			content: alphabet,
-			width:   26,
 			windows: []position.Span{position.NewSpan(0, 4)},
 			want:    "abcd...",
 		},
 		"cut at the start": {
 			content: alphabet,
-			width:   26,
 			windows: []position.Span{position.NewSpan(20, 26)},
 			want:    "...uvwxyz",
 		},
 		"cut at both ends": {
 			content: alphabet,
-			width:   26,
 			windows: []position.Span{position.NewSpan(10, 14)},
 			want:    "...klmn...",
 		},
 		"cut between two windows": {
 			content: alphabet,
-			width:   26,
 			windows: []position.Span{position.NewSpan(0, 4), position.NewSpan(20, 26)},
 			want:    "abcd...uvwxyz",
 		},
 		"touching windows join without an ellipsis": {
 			content: alphabet,
-			width:   26,
 			windows: []position.Span{position.NewSpan(0, 4), position.NewSpan(4, 8)},
 			want:    "abcdefgh...",
 		},
 		"window past the line stops at its end": {
 			content: alphabet,
-			width:   26,
 			windows: []position.Span{position.NewSpan(22, 40)},
 			want:    "...wxyz",
 		},
 		"window that overlaps the one before keeps the rest": {
 			content: alphabet,
-			width:   26,
 			windows: []position.Span{position.NewSpan(0, 6), position.NewSpan(4, 8)},
 			want:    "abcdefgh...",
 		},
 		"no window leaves an ellipsis": {
 			content: alphabet,
-			width:   26,
 			want:    "...",
 		},
 		"empty line": {want: ""},
 		"windows count runes": {
 			content: "日本語のテキスト",
-			width:   8,
 			windows: []position.Span{position.NewSpan(0, 2), position.NewSpan(6, 8)},
 			want:    "日本...スト",
 		},
@@ -92,7 +82,7 @@ func TestMap_Content(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := clip.New(tc.width, tc.windows)
+			m := clip.New(utf8.RuneCountInString(tc.content), tc.windows)
 
 			assert.Equal(t, tc.want, m.Content(tc.content))
 			assert.Equal(t, len([]rune(tc.want)), m.Width())
@@ -104,22 +94,27 @@ func TestMap_Col(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		col  int
-		want int
+		// Empty maps the column on an empty line with no window in place
+		// of the line of 26 columns that twoWindows cut.
+		empty bool
+		col   int
+		want  int
 	}{
 		"before the first window takes the first ellipsis": {col: 2, want: 0},
-		"start of the line":                               {col: 0, want: 0},
-		"negative counts as the start":                    {col: -5, want: 0},
-		"start of a window":                               {col: 4, want: 3},
-		"inside a window":                                 {col: 6, want: 5},
-		"just past a window takes the next ellipsis":      {col: 8, want: 7},
-		"between windows takes the ellipsis between them": {col: 15, want: 7},
-		"start of the second window":                      {col: 20, want: 10},
-		"end of the second window":                        {col: 23, want: 13},
-		"after the last window takes the last ellipsis":   {col: 25, want: 14},
-		"end of the line is the end of the row":           {col: 26, want: 17},
-		"past the end keeps its distance":                 {col: 30, want: 21},
-		"max column saturates":                            {col: math.MaxInt, want: math.MaxInt - 9},
+		"start of the line":                                {col: 0, want: 0},
+		"negative counts as the start":                     {col: -5, want: 0},
+		"start of a window":                                {col: 4, want: 3},
+		"inside a window":                                  {col: 6, want: 5},
+		"just past a window takes the next ellipsis":       {col: 8, want: 7},
+		"between windows takes the ellipsis between them":  {col: 15, want: 7},
+		"start of the second window":                       {col: 20, want: 10},
+		"end of the second window":                         {col: 23, want: 13},
+		"after the last window takes the last ellipsis":    {col: 25, want: 14},
+		"end of the line is the end of the row":            {col: 26, want: 17},
+		"past the end keeps its distance":                  {col: 30, want: 21},
+		"max column saturates":                             {col: math.MaxInt, want: math.MaxInt - 9},
+		"start of an empty line":                           {empty: true, col: 0, want: 0},
+		"past the end of an empty line keeps its distance": {empty: true, col: 3, want: 3},
 	}
 
 	for name, tc := range tcs {
@@ -127,20 +122,13 @@ func TestMap_Col(t *testing.T) {
 			t.Parallel()
 
 			m := clip.New(26, twoWindows)
+			if tc.empty {
+				m = clip.New(0, nil)
+			}
 
 			assert.Equal(t, tc.want, m.Col(tc.col))
 		})
 	}
-}
-
-func TestMap_Col_EmptyLine(t *testing.T) {
-	t.Parallel()
-
-	m := clip.New(0, nil)
-
-	assert.Equal(t, 0, m.Col(0))
-	assert.Equal(t, 3, m.Col(3))
-	assert.Equal(t, 0, m.Width())
 }
 
 func TestMap_LineCol(t *testing.T) {
@@ -188,24 +176,12 @@ func TestMap_LineCol_InvertsCol(t *testing.T) {
 		windows []position.Span
 		width   int
 	}{
-		"cut at both ends and between": {
-			width:   26,
-			windows: []position.Span{position.NewSpan(4, 8), position.NewSpan(20, 24)},
-		},
-		"window at the start": {
-			width:   26,
-			windows: []position.Span{position.NewSpan(0, 4)},
-		},
-		"window at the end": {
-			width:   26,
-			windows: []position.Span{position.NewSpan(20, 26)},
-		},
-		"whole line": {
-			width:   26,
-			windows: []position.Span{position.NewSpan(0, 26)},
-		},
-		"no window":  {width: 26},
-		"empty line": {},
+		"cut at both ends and between": {width: 26, windows: twoWindows},
+		"window at the start":          {width: 26, windows: []position.Span{position.NewSpan(0, 4)}},
+		"window at the end":            {width: 26, windows: []position.Span{position.NewSpan(20, 26)}},
+		"whole line":                   {width: 26, windows: []position.Span{position.NewSpan(0, 26)}},
+		"no window":                    {width: 26},
+		"empty line":                   {},
 	}
 
 	for name, tc := range tcs {

@@ -33,38 +33,20 @@ func TestContent(t *testing.T) {
 		node ast.Node
 		want ast.Node
 	}{
-		"nil":       {node: nil},
-		"typed nil": {node: (*ast.MappingNode)(nil)},
-		"scalar": {
-			node: scalar,
-			want: scalar,
-		},
-		"document": {
-			node: &ast.DocumentNode{Body: mapping},
-			want: mapping,
-		},
-		"anchor": {
-			node: &ast.AnchorNode{Value: mapping},
-			want: mapping,
-		},
-		"tag": {
-			node: &ast.TagNode{Value: mapping},
-			want: mapping,
-		},
-		"explicit key": {
-			node: &ast.MappingKeyNode{Value: mapping},
-			want: mapping,
-		},
+		"nil":                      {node: nil},
+		"typed nil":                {node: (*ast.MappingNode)(nil)},
+		"scalar":                   {node: scalar, want: scalar},
+		"document":                 {node: &ast.DocumentNode{Body: mapping}, want: mapping},
+		"anchor":                   {node: &ast.AnchorNode{Value: mapping}, want: mapping},
+		"tag":                      {node: &ast.TagNode{Value: mapping}, want: mapping},
+		"explicit key":             {node: &ast.MappingKeyNode{Value: mapping}, want: mapping},
 		"typed nil wrapper":        {node: (*ast.AnchorNode)(nil)},
 		"wrapper around typed nil": {node: &ast.TagNode{Value: (*ast.MappingNode)(nil)}},
 		"nested wrappers": {
 			node: &ast.DocumentNode{Body: &ast.AnchorNode{Value: &ast.TagNode{Value: mapping}}},
 			want: mapping,
 		},
-		"alias": {
-			node: alias,
-			want: alias,
-		},
+		"alias": {node: alias, want: alias},
 	}
 
 	for name, tc := range tcs {
@@ -93,26 +75,11 @@ func TestIsNil(t *testing.T) {
 		node ast.Node
 		want bool
 	}{
-		"nil": {
-			node: nil,
-			want: true,
-		},
-		"typed nil": {
-			node: (*ast.StringNode)(nil),
-			want: true,
-		},
-		"node": {
-			node: &ast.StringNode{},
-			want: false,
-		},
-		"struct embedding a node": {
-			node: embeddedNode{&ast.StringNode{}},
-			want: false,
-		},
-		"decorator": {
-			node: decoratedNode{&ast.StringNode{}},
-			want: false,
-		},
+		"nil":                     {node: nil, want: true},
+		"typed nil":               {node: (*ast.StringNode)(nil), want: true},
+		"node":                    {node: &ast.StringNode{}},
+		"struct embedding a node": {node: embeddedNode{&ast.StringNode{}}},
+		"decorator":               {node: decoratedNode{&ast.StringNode{}}},
 	}
 
 	for name, tc := range tcs {
@@ -131,38 +98,14 @@ func TestHasContent(t *testing.T) {
 		node ast.Node
 		want bool
 	}{
-		"nil": {
-			node: nil,
-			want: false,
-		},
-		"typed nil mapping": {
-			node: (*ast.MappingNode)(nil),
-			want: false,
-		},
-		"typed nil scalar": {
-			node: (*ast.StringNode)(nil),
-			want: false,
-		},
-		"comment group": {
-			node: &ast.CommentGroupNode{},
-			want: false,
-		},
-		"directive": {
-			node: &ast.DirectiveNode{},
-			want: false,
-		},
-		"placeholder scalar": {
-			node: &ast.StringNode{Token: tokens.Tokenize("  \n")[0]},
-			want: false,
-		},
-		"scalar": {
-			node: &ast.StringNode{Token: tokens.Tokenize("a")[0], Value: "a"},
-			want: true,
-		},
-		"mapping": {
-			node: &ast.MappingNode{},
-			want: true,
-		},
+		"nil":                {node: nil},
+		"typed nil mapping":  {node: (*ast.MappingNode)(nil)},
+		"typed nil scalar":   {node: (*ast.StringNode)(nil)},
+		"comment group":      {node: &ast.CommentGroupNode{}},
+		"directive":          {node: &ast.DirectiveNode{}},
+		"placeholder scalar": {node: &ast.StringNode{Token: tokens.Tokenize("  \n")[0]}},
+		"scalar":             {node: &ast.StringNode{Token: tokens.Tokenize("a")[0], Value: "a"}, want: true},
+		"mapping":            {node: &ast.MappingNode{}, want: true},
 	}
 
 	for name, tc := range tcs {
@@ -247,7 +190,7 @@ func TestPathToken(t *testing.T) {
 			want:  "k@1:1",
 		},
 		"block mapping at the root with an explicit first key": {
-			input: "? k\n: v\n",
+			input: stringtest.LinesLF("? k", ": v"),
 			want:  "k@1:3",
 		},
 		"block mapping at the root with an anchor on the first key": {
@@ -255,7 +198,7 @@ func TestPathToken(t *testing.T) {
 			want:  "k@1:4",
 		},
 		"block sequence at the root starts at its first element": {
-			input: "- x\n- y\n",
+			input: stringtest.LinesLF("- x", "- y"),
 			want:  "x@1:3",
 		},
 		"block sequence of mappings at the root": {
@@ -313,7 +256,7 @@ func TestPathToken(t *testing.T) {
 			want:  "a@1:1",
 		},
 		"mapping under an explicit key": {
-			input: "? a\n: {k: v}\n",
+			input: stringtest.LinesLF("? a", ": {k: v}"),
 			steps: []any{"a"},
 			want:  "a@1:3",
 		},
@@ -323,7 +266,7 @@ func TestPathToken(t *testing.T) {
 			want:  "b@2:3",
 		},
 		"block mapping element": {
-			input: "- k: v\n- l: w\n",
+			input: stringtest.LinesLF("- k: v", "- l: w"),
 			steps: []any{1},
 			want:  "-@2:1",
 		},
@@ -436,22 +379,10 @@ func TestKeyToken(t *testing.T) {
 		input string
 		want  string
 	}{
-		"plain key": {
-			input: "k: v\n",
-			want:  "k@1:1",
-		},
-		"explicit key leaves out its indicator": {
-			input: "? k\n: v\n",
-			want:  "k@1:3",
-		},
-		"anchor on the key": {
-			input: "&a k: v\n",
-			want:  "k@1:4",
-		},
-		"tag on the key": {
-			input: "!!str k: v\n",
-			want:  "k@1:7",
-		},
+		"plain key":                             {input: "k: v\n", want: "k@1:1"},
+		"explicit key leaves out its indicator": {input: stringtest.LinesLF("? k", ": v"), want: "k@1:3"},
+		"anchor on the key":                     {input: "&a k: v\n", want: "k@1:4"},
+		"tag on the key":                        {input: "!!str k: v\n", want: "k@1:7"},
 	}
 
 	for name, tc := range tcs {
@@ -506,18 +437,11 @@ func TestInspect(t *testing.T) {
 		prune map[ast.NodeType]bool
 		want  []string
 	}{
-		"nil": {
-			node: nil,
-		},
-		"typed nil": {
-			node: (*ast.MappingNode)(nil),
-		},
-		"typed nil below a node": {
-			node: &ast.TagNode{Value: (*ast.StringNode)(nil)},
-			want: []string{"Tag"},
-		},
+		"nil":                    {node: nil},
+		"typed nil":              {node: (*ast.MappingNode)(nil)},
+		"typed nil below a node": {node: &ast.TagNode{Value: (*ast.StringNode)(nil)}, want: []string{"Tag"}},
 		"walk order": {
-			node: parse(t, "a: &x [1, 2] # c\nb: *x\n"),
+			node: parse(t, stringtest.LinesLF("a: &x [1, 2] # c", "b: *x")),
 			want: []string{
 				"Mapping::", "MappingValue::", "String:a", "Anchor:&", "String:x",
 				"Sequence:[", "Comment: c", "Integer:1", "Integer:2",
@@ -525,7 +449,7 @@ func TestInspect(t *testing.T) {
 			},
 		},
 		"pruned": {
-			node:  parse(t, "a: [1, 2]\nb: 3\n"),
+			node:  parse(t, stringtest.LinesLF("a: [1, 2]", "b: 3")),
 			prune: map[ast.NodeType]bool{ast.SequenceType: true},
 			want: []string{
 				"Mapping::", "MappingValue::", "String:a", "Sequence:[",
@@ -556,7 +480,7 @@ func TestNodes(t *testing.T) {
 
 	var got []string
 
-	for _, n := range astnode.Nodes(parse(t, "# head\na: 1 # line\n")) {
+	for _, n := range astnode.Nodes(parse(t, stringtest.LinesLF("# head", "a: 1 # line"))) {
 		got = append(got, describe(n))
 	}
 
@@ -582,20 +506,10 @@ func TestName(t *testing.T) {
 		want string
 		ok   bool
 	}{
-		"scalar": {
-			node: &ast.StringNode{Token: token.New("x", "x", nil)},
-			want: "x",
-			ok:   true,
-		},
-		"no token": {
-			node: &ast.StringNode{},
-		},
-		"nil": {
-			node: nil,
-		},
-		"typed nil": {
-			node: (*ast.StringNode)(nil),
-		},
+		"scalar":    {node: &ast.StringNode{Token: token.New("x", "x", nil)}, want: "x", ok: true},
+		"no token":  {node: &ast.StringNode{}},
+		"nil":       {node: nil},
+		"typed nil": {node: (*ast.StringNode)(nil)},
 	}
 
 	for name, tc := range tcs {
@@ -620,14 +534,8 @@ func TestExtent(t *testing.T) {
 		extent astnode.Extent
 		want   astnode.Extent
 	}{
-		"empty": {
-			extent: astnode.Extent{},
-			want:   astnode.Extent{},
-		},
-		"one token": {
-			extent: astnode.Extent{}.With(at(4)),
-			want:   astnode.Extent{Lo: 4, Hi: 4, OK: true},
-		},
+		"empty":     {extent: astnode.Extent{}, want: astnode.Extent{}},
+		"one token": {extent: astnode.Extent{}.With(at(4)), want: astnode.Extent{Lo: 4, Hi: 4, OK: true}},
 		"tokens widen it": {
 			extent: astnode.Extent{}.With(at(4)).With(at(9)).With(at(2)),
 			want:   astnode.Extent{Lo: 2, Hi: 9, OK: true},
@@ -687,7 +595,7 @@ func TestExtentOf(t *testing.T) {
 			content:  astnode.Extent{Lo: 1, Hi: 6, OK: true},
 		},
 		"block sequence starts at its dash": {
-			input:    "- a\n- b\n",
+			input:    stringtest.LinesLF("- a", "- b"),
 			comments: astnode.Extent{Lo: 1, Hi: 7, OK: true},
 			content:  astnode.Extent{Lo: 1, Hi: 7, OK: true},
 		},
@@ -713,11 +621,11 @@ func TestExtentOf(t *testing.T) {
 		t.Parallel()
 
 		inputs := []string{
-			"# head\na: 1 # line\nb: [x, y] # tail\n",
-			"- &a {k: v}\n- *a\n-\n",
-			"<<: [*a, *b]\n? k\n: v\n",
-			"a: |\n  text\n# foot\n",
-			"%YAML 1.2\n---\n!!map {a: 1}\n",
+			stringtest.LinesLF("# head", "a: 1 # line", "b: [x, y] # tail"),
+			stringtest.LinesLF("- &a {k: v}", "- *a", "-"),
+			stringtest.LinesLF("<<: [*a, *b]", "? k", ": v"),
+			stringtest.LinesLF("a: |", "  text", "# foot"),
+			stringtest.LinesLF("%YAML 1.2", "---", "!!map {a: 1}"),
 		}
 
 		for _, input := range inputs {
@@ -758,7 +666,7 @@ func TestBounds(t *testing.T) {
 		first, last []string
 	}{
 		"block mapping": {
-			input: "a: 1\nb: 2\n",
+			input: stringtest.LinesLF("a: 1", "b: 2"),
 			first: []string{"a@1:1"},
 			last:  []string{"2@2:4"},
 		},
@@ -773,7 +681,7 @@ func TestBounds(t *testing.T) {
 			last:  []string{"]@1:6"},
 		},
 		"implicit null shares the offset of its dash": {
-			input: "- a\n-\n",
+			input: stringtest.LinesLF("- a", "-"),
 			first: []string{"-@1:1", "-@1:1"},
 			last:  []string{"-@2:1", "null@2:3"},
 		},
@@ -818,31 +726,16 @@ func TestStartToken(t *testing.T) {
 		node ast.Node
 		want string
 	}{
-		"comment before a value": {
-			node: parse(t, "# c\na: 1\n"),
-			want: "a@2:1",
-		},
-		"anchor": {
-			node: parse(t, "&x [1]\n"),
-			want: "&@1:1",
-		},
-		"nil": {
-			node: nil,
-		},
+		"comment before a value": {node: parse(t, stringtest.LinesLF("# c", "a: 1")), want: "a@2:1"},
+		"anchor":                 {node: parse(t, "&x [1]\n"), want: "&@1:1"},
+		"nil":                    {node: nil},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := astnode.StartToken(tc.node)
-			if tc.want == "" {
-				assert.Nil(t, got)
-
-				return
-			}
-
-			assert.Equal(t, tc.want, yamltest.TokenPlace(got))
+			assert.Equal(t, tc.want, yamltest.TokenPlace(astnode.StartToken(tc.node)))
 		})
 	}
 }
@@ -865,34 +758,13 @@ func TestIsMergeKey(t *testing.T) {
 		key  ast.Node
 		want bool
 	}{
-		"merge key": {
-			key:  firstEntry(t, "<<: {a: 1}\n").Key,
-			want: true,
-		},
-		"explicit merge key": {
-			key:  &ast.MappingKeyNode{Value: &ast.MergeKeyNode{}},
-			want: true,
-		},
-		"anchored merge key": {
-			key:  firstEntry(t, "&k <<: {a: 1}\n").Key,
-			want: true,
-		},
-		"quoted key": {
-			key:  firstEntry(t, "'<<': {a: 1}\n").Key,
-			want: false,
-		},
-		"plain key": {
-			key:  firstEntry(t, "a: 1\n").Key,
-			want: false,
-		},
-		"nil": {
-			key:  nil,
-			want: false,
-		},
-		"typed nil": {
-			key:  (*ast.MappingKeyNode)(nil),
-			want: false,
-		},
+		"merge key":          {key: firstEntry(t, "<<: {a: 1}\n").Key, want: true},
+		"explicit merge key": {key: &ast.MappingKeyNode{Value: &ast.MergeKeyNode{}}, want: true},
+		"anchored merge key": {key: firstEntry(t, "&k <<: {a: 1}\n").Key, want: true},
+		"quoted key":         {key: firstEntry(t, "'<<': {a: 1}\n").Key},
+		"plain key":          {key: firstEntry(t, "a: 1\n").Key},
+		"nil":                {key: nil},
+		"typed nil":          {key: (*ast.MappingKeyNode)(nil)},
 	}
 
 	for name, tc := range tcs {
@@ -911,17 +783,9 @@ func TestMergeValues(t *testing.T) {
 		input string
 		want  []string
 	}{
-		"one alias": {
-			input: "<<: *a\n",
-			want:  []string{"Alias:*"},
-		},
-		"sequence of aliases": {
-			input: "<<: [*a, &b !t {k: v}]\n",
-			want:  []string{"Alias:*", "Mapping:{"},
-		},
-		"no merge key": {
-			input: "a: *a\n",
-		},
+		"one alias":           {input: "<<: *a\n", want: []string{"Alias:*"}},
+		"sequence of aliases": {input: "<<: [*a, &b !t {k: v}]\n", want: []string{"Alias:*", "Mapping:{"}},
+		"no merge key":        {input: "a: *a\n"},
 	}
 
 	for name, tc := range tcs {
@@ -953,27 +817,11 @@ func TestEntries(t *testing.T) {
 		want int
 		ok   bool
 	}{
-		"mapping": {
-			node: parse(t, "a: 1\nb: 2\n"),
-			want: 2,
-			ok:   true,
-		},
-		"mapping of one entry": {
-			node: firstEntry(t, "a: 1\n"),
-			want: 1,
-			ok:   true,
-		},
-		"anchored mapping": {
-			node: parse(t, "&x {a: 1, b: 2, c: 3}\n"),
-			want: 3,
-			ok:   true,
-		},
-		"sequence": {
-			node: parse(t, "[a]\n"),
-		},
-		"typed nil": {
-			node: (*ast.MappingNode)(nil),
-		},
+		"mapping":              {node: parse(t, stringtest.LinesLF("a: 1", "b: 2")), want: 2, ok: true},
+		"mapping of one entry": {node: firstEntry(t, "a: 1\n"), want: 1, ok: true},
+		"anchored mapping":     {node: parse(t, "&x {a: 1, b: 2, c: 3}\n"), want: 3, ok: true},
+		"sequence":             {node: parse(t, "[a]\n")},
+		"typed nil":            {node: (*ast.MappingNode)(nil)},
 	}
 
 	for name, tc := range tcs {
@@ -994,34 +842,13 @@ func TestIsTaggedNull(t *testing.T) {
 		input string
 		want  bool
 	}{
-		"null tag over a value": {
-			input: "a: !!null x\n",
-			want:  true,
-		},
-		"map tag over no value": {
-			input: "a: !!map\n",
-			want:  true,
-		},
-		"local tag over no value": {
-			input: "a: !local\n",
-			want:  true,
-		},
-		"anchor on a tagged null": {
-			input: "a: &x !!seq\n",
-			want:  true,
-		},
-		"string tag over no value": {
-			input: "a: !!str\n",
-			want:  false,
-		},
-		"local tag over a value": {
-			input: "a: !local x\n",
-			want:  false,
-		},
-		"no tag": {
-			input: "a: x\n",
-			want:  false,
-		},
+		"null tag over a value":    {input: "a: !!null x\n", want: true},
+		"map tag over no value":    {input: "a: !!map\n", want: true},
+		"local tag over no value":  {input: "a: !local\n", want: true},
+		"anchor on a tagged null":  {input: "a: &x !!seq\n", want: true},
+		"string tag over no value": {input: "a: !!str\n"},
+		"local tag over a value":   {input: "a: !local x\n"},
+		"no tag":                   {input: "a: x\n"},
 	}
 
 	for name, tc := range tcs {
@@ -1040,9 +867,9 @@ func TestIsScalar(t *testing.T) {
 		node ast.Node
 		want bool
 	}{
-		"nil":      {node: nil, want: false},
-		"mapping":  {node: &ast.MappingNode{}, want: false},
-		"sequence": {node: &ast.SequenceNode{}, want: false},
+		"nil":      {node: nil},
+		"mapping":  {node: &ast.MappingNode{}},
+		"sequence": {node: &ast.SequenceNode{}},
 		"scalar":   {node: &ast.StringNode{}, want: true},
 		"alias":    {node: &ast.AliasNode{}, want: true},
 	}

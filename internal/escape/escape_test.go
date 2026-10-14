@@ -18,46 +18,16 @@ func TestControl(t *testing.T) {
 		input string
 		want  string
 	}{
-		"empty string": {
-			input: "",
-			want:  "",
-		},
-		"normal text unchanged": {
-			input: "Hello, World!",
-			want:  "Hello, World!",
-		},
-		"NUL replaced": {
-			input: "before\x00after",
-			want:  "before␀after",
-		},
-		"ESC replaced": {
-			input: "before\x1bafter",
-			want:  "before␛after",
-		},
-		"TAB replaced": {
-			input: "col1\tcol2",
-			want:  "col1␉col2",
-		},
-		"newline replaced": {
-			input: "line1\nline2",
-			want:  "line1␊line2",
-		},
-		"carriage return replaced": {
-			input: "line1\rline2",
-			want:  "line1␍line2",
-		},
-		"ANSI red sequence": {
-			input: "\x1b[31mRed\x1b[0m",
-			want:  "␛[31mRed␛[0m",
-		},
-		"ANSI bold sequence": {
-			input: "\x1b[1mBold\x1b[22m",
-			want:  "␛[1mBold␛[22m",
-		},
-		"multiple control chars": {
-			input: "\x00\x01\x02\x1f\x7f",
-			want:  "␀␁␂␟␡",
-		},
+		"empty string":             {input: "", want: ""},
+		"normal text unchanged":    {input: "Hello, World!", want: "Hello, World!"},
+		"NUL replaced":             {input: "before\x00after", want: "before␀after"},
+		"ESC replaced":             {input: "before\x1bafter", want: "before␛after"},
+		"TAB replaced":             {input: "col1\tcol2", want: "col1␉col2"},
+		"newline replaced":         {input: "line1\nline2", want: "line1␊line2"},
+		"carriage return replaced": {input: "line1\rline2", want: "line1␍line2"},
+		"ANSI red sequence":        {input: "\x1b[31mRed\x1b[0m", want: "␛[31mRed␛[0m"},
+		"ANSI bold sequence":       {input: "\x1b[1mBold\x1b[22m", want: "␛[1mBold␛[22m"},
+		"multiple control chars":   {input: "\x00\x01\x02\x1f\x7f", want: "␀␁␂␟␡"},
 		"all C0 controls": {
 			input: "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f" +
 				"\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f",
@@ -68,59 +38,20 @@ func TestControl(t *testing.T) {
 				"\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009A\u009B\u009C\u009D\u009E\u009F",
 			want: strings.Repeat("\uFFFD", 32),
 		},
-		"mixed content": {
-			input: "normal\x1b[31mred\x00null",
-			want:  "normal␛[31mred␀null",
-		},
-		"unicode preserved": {
-			input: "日本語\x1bテスト",
-			want:  "日本語␛テスト",
-		},
-		"high ASCII preserved": {
-			input: "café\x1btest",
-			want:  "café␛test",
-		},
-		"C1 CSI replaced": {
-			input: "before\u009Bafter",
-			want:  "before\uFFFDafter",
-		},
-		"multiple C1 controls": {
-			input: "\u0080\u0085\u009B\u009F",
-			want:  "\uFFFD\uFFFD\uFFFD\uFFFD",
-		},
-		"mixed C0 and C1 controls": {
-			input: "\x00\u0080\x1b\u009B\x7f\u009F",
-			want:  "␀\uFFFD␛\uFFFD␡\uFFFD",
-		},
+		"mixed content":            {input: "normal\x1b[31mred\x00null", want: "normal␛[31mred␀null"},
+		"unicode preserved":        {input: "日本語\x1bテスト", want: "日本語␛テスト"},
+		"high ASCII preserved":     {input: "café\x1btest", want: "café␛test"},
+		"C1 CSI replaced":          {input: "before\u009Bafter", want: "before\uFFFDafter"},
+		"multiple C1 controls":     {input: "\u0080\u0085\u009B\u009F", want: "\uFFFD\uFFFD\uFFFD\uFFFD"},
+		"mixed C0 and C1 controls": {input: "\x00\u0080\x1b\u009B\x7f\u009F", want: "␀\uFFFD␛\uFFFD␡\uFFFD"},
 		// Boundary tests.
-		"boundary US (0x1F) last C0 control": {
-			input: "a\x1fb",
-			want:  "a␟b",
-		},
-		"boundary space (0x20) first printable unchanged": {
-			input: "a b",
-			want:  "a b",
-		},
-		"boundary tilde (0x7E) last regular printable unchanged": {
-			input: "a~b",
-			want:  "a~b",
-		},
-		"boundary DEL (0x7F) replaced": {
-			input: "a\x7fb",
-			want:  "a␡b",
-		},
-		"boundary PAD (0x80) first C1 control replaced": {
-			input: "a\u0080b",
-			want:  "a\uFFFDb",
-		},
-		"boundary APC (0x9F) last C1 control replaced": {
-			input: "a\u009Fb",
-			want:  "a\uFFFDb",
-		},
-		"boundary NBSP (0xA0) after C1 unchanged": {
-			input: "a\u00A0b",
-			want:  "a\u00A0b",
-		},
+		"boundary US (0x1F) last C0 control":                     {input: "a\x1fb", want: "a␟b"},
+		"boundary space (0x20) first printable unchanged":        {input: "a b", want: "a b"},
+		"boundary tilde (0x7E) last regular printable unchanged": {input: "a~b", want: "a~b"},
+		"boundary DEL (0x7F) replaced":                           {input: "a\x7fb", want: "a␡b"},
+		"boundary PAD (0x80) first C1 control replaced":          {input: "a\u0080b", want: "a\uFFFDb"},
+		"boundary APC (0x9F) last C1 control replaced":           {input: "a\u009Fb", want: "a\uFFFDb"},
+		"boundary NBSP (0xA0) after C1 unchanged":                {input: "a\u00A0b", want: "a\u00A0b"},
 	}
 
 	for name, tc := range tcs {
@@ -144,34 +75,13 @@ func TestRows(t *testing.T) {
 		input string
 		want  string
 	}{
-		"empty string": {
-			input: "",
-			want:  "",
-		},
-		"single row": {
-			input: "a\x1bb",
-			want:  "a␛b",
-		},
-		"line feed kept": {
-			input: "a\nb",
-			want:  "a\nb",
-		},
-		"controls replaced in each row": {
-			input: "\x1b[31m\nx\ty",
-			want:  "␛[31m\nx␉y",
-		},
-		"carriage return before line feed replaced": {
-			input: "a\r\nb",
-			want:  "a␍\nb",
-		},
-		"leading and trailing line feeds kept": {
-			input: "\na\n",
-			want:  "\na\n",
-		},
-		"only line feeds kept": {
-			input: "\n\n",
-			want:  "\n\n",
-		},
+		"empty string":                  {input: "", want: ""},
+		"single row":                    {input: "a\x1bb", want: "a␛b"},
+		"line feed kept":                {input: "a\nb", want: "a\nb"},
+		"controls replaced in each row": {input: "\x1b[31m\nx\ty", want: "␛[31m\nx␉y"},
+		"carriage return before line feed replaced": {input: "a\r\nb", want: "a␍\nb"},
+		"leading and trailing line feeds kept":      {input: "\na\n", want: "\na\n"},
+		"only line feeds kept":                      {input: "\n\n", want: "\n\n"},
 	}
 
 	for name, tc := range tcs {
@@ -191,26 +101,11 @@ func TestTabs(t *testing.T) {
 		input string
 		want  string
 	}{
-		"empty string": {
-			input: "",
-			want:  "",
-		},
-		"text without tabs unchanged": {
-			input: "a b\nc",
-			want:  "a b\nc",
-		},
-		"leading tab expands to four spaces": {
-			input: "\tvalidate",
-			want:  "    validate",
-		},
-		"tab after three cells expands to four spaces": {
-			input: "abc\td",
-			want:  "abc    d",
-		},
-		"consecutive tabs expand to four spaces each": {
-			input: "a\t\tb",
-			want:  "a        b",
-		},
+		"empty string":                                 {input: "", want: ""},
+		"text without tabs unchanged":                  {input: "a b\nc", want: "a b\nc"},
+		"leading tab expands to four spaces":           {input: "\tvalidate", want: "    validate"},
+		"tab after three cells expands to four spaces": {input: "abc\td", want: "abc    d"},
+		"consecutive tabs expand to four spaces each":  {input: "a\t\tb", want: "a        b"},
 		"other controls kept": {
 			input: "\x1b[31m\t\x07\r\n\tx",
 			want:  "\x1b[31m    \x07\r\n    x",
@@ -234,46 +129,16 @@ func TestMessage(t *testing.T) {
 		input string
 		want  string
 	}{
-		"empty string": {
-			input: "",
-			want:  "",
-		},
-		"normal text unchanged": {
-			input: "a\nb",
-			want:  "a\nb",
-		},
-		"leading tab expands to four spaces": {
-			input: "\tvalidate",
-			want:  "    validate",
-		},
-		"tab mid-row expands to four spaces": {
-			input: "ab\tc",
-			want:  "ab    c",
-		},
-		"tab after four cells expands to four spaces": {
-			input: "abcd\te",
-			want:  "abcd    e",
-		},
-		"consecutive tabs expand to four spaces each": {
-			input: "a\t\tb",
-			want:  "a        b",
-		},
-		"tabs expand in each row": {
-			input: "abc\n\tx",
-			want:  "abc\n    x",
-		},
-		"tab after a wide rune expands to four spaces": {
-			input: "名\tx",
-			want:  "名    x",
-		},
-		"tab after a picture expands to four spaces": {
-			input: "\x1b\tx",
-			want:  "␛    x",
-		},
-		"other controls replaced": {
-			input: "\x1b[31m\x07\r",
-			want:  "␛[31m␇␍",
-		},
+		"empty string":                                 {input: "", want: ""},
+		"normal text unchanged":                        {input: "a\nb", want: "a\nb"},
+		"leading tab expands to four spaces":           {input: "\tvalidate", want: "    validate"},
+		"tab mid-row expands to four spaces":           {input: "ab\tc", want: "ab    c"},
+		"tab after four cells expands to four spaces":  {input: "abcd\te", want: "abcd    e"},
+		"consecutive tabs expand to four spaces each":  {input: "a\t\tb", want: "a        b"},
+		"tabs expand in each row":                      {input: "abc\n\tx", want: "abc\n    x"},
+		"tab after a wide rune expands to four spaces": {input: "名\tx", want: "名    x"},
+		"tab after a picture expands to four spaces":   {input: "\x1b\tx", want: "␛    x"},
+		"other controls replaced":                      {input: "\x1b[31m\x07\r", want: "␛[31m␇␍"},
 		"line feeds kept": {
 			input: stringtest.LinesLF("", "Did you mean this?", "\tvalidate"),
 			want:  stringtest.LinesLF("", "Did you mean this?", "    validate"),
@@ -297,26 +162,11 @@ func TestLine(t *testing.T) {
 		input string
 		want  string
 	}{
-		"empty string": {
-			input: "",
-			want:  "",
-		},
-		"normal text unchanged": {
-			input: "app.yaml",
-			want:  "app.yaml",
-		},
-		"tab expands to four spaces": {
-			input: "a\tb",
-			want:  "a    b",
-		},
-		"line feed becomes its picture": {
-			input: "a\nb",
-			want:  "a␊b",
-		},
-		"escape becomes its picture": {
-			input: "\x1b[31m",
-			want:  "␛[31m",
-		},
+		"empty string":                  {input: "", want: ""},
+		"normal text unchanged":         {input: "app.yaml", want: "app.yaml"},
+		"tab expands to four spaces":    {input: "a\tb", want: "a    b"},
+		"line feed becomes its picture": {input: "a\nb", want: "a␊b"},
+		"escape becomes its picture":    {input: "\x1b[31m", want: "␛[31m"},
 	}
 
 	for name, tc := range tcs {

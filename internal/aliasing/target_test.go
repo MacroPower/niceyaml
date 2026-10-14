@@ -88,37 +88,47 @@ type prefixHolder struct {
 	Addr netip.Prefix
 }
 
+// jsonValue has an UnmarshalJSON method, which go-yaml calls only when a
+// decode turns it on.
+type jsonValue struct{}
+
+func (*jsonValue) UnmarshalJSON([]byte) error { return nil }
+
+// nodeJSONValue decodes itself from its node. Go-yaml calls its
+// UnmarshalYAML ahead of its UnmarshalJSON.
+type nodeJSONValue struct{}
+
+func (*nodeJSONValue) UnmarshalYAML(ast.Node) error { return nil }
+
+func (*nodeJSONValue) UnmarshalJSON([]byte) error { return nil }
+
+// plainValue has no method, so only a function of a decode reads its
+// text.
+type plainValue struct{}
+
 func TestDecodesText(t *testing.T) {
 	t.Parallel()
 
+	custom := func(typ reflect.Type) unmarshaler.Options {
+		return unmarshaler.Options{}.With(typ, func(unmarshaler.ValueDecoder) yaml.DecodeOption { return nil })
+	}
+
 	tcs := map[string]struct {
-		typ  reflect.Type
+		typ reflect.Type
+		// The unmarshalers of a decode, for DecodesTextWith. A case
+		// without them checks DecodesText too.
+		u    unmarshaler.Options
 		want bool
 	}{
-		"text unmarshaler": {
-			typ:  reflect.TypeFor[textValue](),
-			want: true,
-		},
-		"bytes unmarshaler": {
-			typ:  reflect.TypeFor[bytesValue](),
-			want: true,
-		},
-		"bytes unmarshaler with a context": {
-			typ:  reflect.TypeFor[bytesContextValue](),
-			want: true,
-		},
-		"unmarshaler with a decode function": {
-			typ:  reflect.TypeFor[funcValue](),
-			want: true,
-		},
+		"text unmarshaler":                   {typ: reflect.TypeFor[textValue](), want: true},
+		"bytes unmarshaler":                  {typ: reflect.TypeFor[bytesValue](), want: true},
+		"bytes unmarshaler with a context":   {typ: reflect.TypeFor[bytesContextValue](), want: true},
+		"unmarshaler with a decode function": {typ: reflect.TypeFor[funcValue](), want: true},
 		"unmarshaler with a decode function and a context": {
 			typ:  reflect.TypeFor[funcContextValue](),
 			want: true,
 		},
-		"pointer": {
-			typ:  reflect.TypeFor[*textValue](),
-			want: true,
-		},
+		"pointer": {typ: reflect.TypeFor[*textValue](), want: true},
 		"struct field": {
 			typ: reflect.TypeFor[struct {
 				Name string
@@ -144,27 +154,12 @@ func TestDecodesText(t *testing.T) {
 			}](),
 			want: true,
 		},
-		"array element": {
-			typ:  reflect.TypeFor[[2]bytesValue](),
-			want: true,
-		},
-		"map key": {
-			typ:  reflect.TypeFor[map[textValue]int](),
-			want: true,
-		},
-		"map value": {
-			typ:  reflect.TypeFor[map[string][]textValue](),
-			want: true,
-		},
-		"recursive type with a text field": {
-			typ:  reflect.TypeFor[textChain](),
-			want: true,
-		},
-		"embedded time": {
-			typ:  reflect.TypeFor[embeddedTime](),
-			want: true,
-		},
-		"time": {typ: reflect.TypeFor[time.Time]()},
+		"array element":                    {typ: reflect.TypeFor[[2]bytesValue](), want: true},
+		"map key":                          {typ: reflect.TypeFor[map[textValue]int](), want: true},
+		"map value":                        {typ: reflect.TypeFor[map[string][]textValue](), want: true},
+		"recursive type with a text field": {typ: reflect.TypeFor[textChain](), want: true},
+		"embedded time":                    {typ: reflect.TypeFor[embeddedTime](), want: true},
+		"time":                             {typ: reflect.TypeFor[time.Time]()},
 		"struct with time fields": {
 			typ: reflect.TypeFor[struct {
 				At      time.Time
@@ -202,53 +197,7 @@ func TestDecodesText(t *testing.T) {
 		},
 		"plain types": {typ: reflect.TypeFor[map[string][]string]()},
 		"interface":   {typ: reflect.TypeFor[any]()},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, aliasing.DecodesText(tc.typ))
-			assert.Equal(t, tc.want, aliasing.DecodesText(tc.typ), "a second call gives the same answer")
-		})
-	}
-}
-
-// jsonValue has an UnmarshalJSON method, which go-yaml calls only when a
-// decode turns it on.
-type jsonValue struct{}
-
-func (*jsonValue) UnmarshalJSON([]byte) error { return nil }
-
-// nodeJSONValue decodes itself from its node. Go-yaml calls its
-// UnmarshalYAML ahead of its UnmarshalJSON.
-type nodeJSONValue struct{}
-
-func (*nodeJSONValue) UnmarshalYAML(ast.Node) error { return nil }
-
-func (*nodeJSONValue) UnmarshalJSON([]byte) error { return nil }
-
-// plainValue has no method, so only a function of a decode reads its
-// text.
-type plainValue struct{}
-
-func TestDecodesTextWith(t *testing.T) {
-	t.Parallel()
-
-	custom := func(typ reflect.Type) unmarshaler.Options {
-		return unmarshaler.Options{}.With(typ, func(unmarshaler.ValueDecoder) yaml.DecodeOption { return nil })
-	}
-
-	tcs := map[string]struct {
-		typ  reflect.Type
-		u    unmarshaler.Options
-		want bool
-	}{
 		"no unmarshalers reads a plain type by its fields": {typ: reflect.TypeFor[plainValue]()},
-		"no unmarshalers still reads a text unmarshaler": {
-			typ:  reflect.TypeFor[textValue](),
-			want: true,
-		},
 		"custom type": {
 			typ:  reflect.TypeFor[plainValue](),
 			u:    custom(reflect.TypeFor[plainValue]()),
@@ -308,6 +257,11 @@ func TestDecodesTextWith(t *testing.T) {
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+
+			if tc.u.Empty() {
+				assert.Equal(t, tc.want, aliasing.DecodesText(tc.typ))
+				assert.Equal(t, tc.want, aliasing.DecodesText(tc.typ), "a second call gives the same answer")
+			}
 
 			assert.Equal(t, tc.want, aliasing.DecodesTextWith(tc.typ, tc.u))
 			assert.Equal(t, tc.want, aliasing.DecodesTextWith(tc.typ, tc.u), "a second call gives the same answer")

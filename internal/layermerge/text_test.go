@@ -28,7 +28,7 @@ func TestText(t *testing.T) {
 		"a colon and a space":      {value: `"a: b"`, want: `"a: b"`},
 		"a comment marker":         {value: `"a #b"`, want: `"a #b"`},
 		"a document marker":        {value: `"---"`, want: `"---"`},
-		"a block scalar":           {value: "|\n    two\n    lines", want: `"two\nlines\n"`},
+		"a block scalar":           {value: stringtest.JoinLF("|", "    two", "    lines"), want: `"two\nlines\n"`},
 		"a tag":                    {value: "!!str 1", want: "!!str 1"},
 		"an empty mapping":         {value: "{}", want: "{}"},
 		"an empty sequence":        {value: "[]", want: "[]"},

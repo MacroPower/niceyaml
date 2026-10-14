@@ -19,8 +19,8 @@ func TestDrop(t *testing.T) {
 	}{
 		"empty": {input: "", want: ""},
 		"no mark": {
-			input: "a: 1\nb: 2\n",
-			want:  "a: 1\nb: 2\n",
+			input: stringtest.LinesLF("a: 1", "b: 2"),
+			want:  stringtest.LinesLF("a: 1", "b: 2"),
 		},
 		"mark opens the text": {
 			input: "\ufeffa: 1\n",
@@ -43,13 +43,13 @@ func TestDrop(t *testing.T) {
 			marks: []int{6},
 		},
 		"mark on each line before the content": {
-			input: "\ufeff# c\n\ufeffa: 1\n",
-			want:  "# c\na: 1\n",
+			input: stringtest.LinesLF("\ufeff# c", "\ufeffa: 1"),
+			want:  stringtest.LinesLF("# c", "a: 1"),
 			marks: []int{0, 4},
 		},
 		"mark inside the content stays": {
-			input: "a: 1\n\ufeffb: 2\n",
-			want:  "a: 1\n\ufeffb: 2\n",
+			input: stringtest.LinesLF("a: 1", "\ufeffb: 2"),
+			want:  stringtest.LinesLF("a: 1", "\ufeffb: 2"),
 		},
 		"mark inside a line stays": {
 			input: "a: \"\ufeffx\"\n",
@@ -71,12 +71,12 @@ func TestDrop(t *testing.T) {
 			marks: []int{13},
 		},
 		"mark after a marker line with content": {
-			input: "--- a\n\ufeffb\n",
-			want:  "--- a\n\ufeffb\n",
+			input: stringtest.LinesLF("--- a", "\ufeffb"),
+			want:  stringtest.LinesLF("--- a", "\ufeffb"),
 		},
 		"mark in front of text that opens like a marker": {
-			input: "a: 1\n\ufeff---b\n",
-			want:  "a: 1\n\ufeff---b\n",
+			input: stringtest.LinesLF("a: 1", "\ufeff---b"),
+			want:  stringtest.LinesLF("a: 1", "\ufeff---b"),
 		},
 		"mark between a bare CR and a LF": {
 			input: "\r\ufeff\na: 1\n",
@@ -100,18 +100,20 @@ func TestDrop(t *testing.T) {
 func TestIndex_Offset(t *testing.T) {
 	t.Parallel()
 
+	twoLines := stringtest.LinesLF("a: 1", "b: 2")
+
 	tcs := map[string]struct {
 		src       string
 		line, col int
 		want      int
 		ok        bool
 	}{
-		"the start":                     {src: "a: 1\nb: 2\n", want: 0, ok: true},
-		"a later line":                  {src: "a: 1\nb: 2\n", line: 1, want: 5, ok: true},
-		"the end of a line":             {src: "a: 1\nb: 2\n", line: 1, col: 4, want: 9, ok: true},
-		"past the line ending":          {src: "a: 1\nb: 2\n", line: 1, col: 5, want: 10, ok: true},
-		"the empty last line":           {src: "a: 1\nb: 2\n", line: 2, want: 10, ok: true},
-		"a line past the last":          {src: "a: 1\nb: 2\n", line: 3},
+		"the start":                     {src: twoLines, want: 0, ok: true},
+		"a later line":                  {src: twoLines, line: 1, want: 5, ok: true},
+		"the end of a line":             {src: twoLines, line: 1, col: 4, want: 9, ok: true},
+		"past the line ending":          {src: twoLines, line: 1, col: 5, want: 10, ok: true},
+		"the empty last line":           {src: twoLines, line: 2, want: 10, ok: true},
+		"a line past the last":          {src: twoLines, line: 3},
 		"a column past the line ending": {src: "a: 1\n", col: 6},
 		"a mark before the text":        {src: bom.Mark + "a: 1\n", col: 1, want: 4, ok: true},
 		"a carriage return and a feed":  {src: "a\r\nb", col: 2, want: 3, ok: true},

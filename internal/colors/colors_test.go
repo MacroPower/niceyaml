@@ -33,21 +33,7 @@ func TestOverride(t *testing.T) {
 		overlay color.Color
 		want    color.Color
 	}{
-		"overlay valid returns overlay": {
-			base:    red,
-			overlay: blue,
-			want:    blue,
-		},
-		"both nil returns nil": {
-			base:    nil,
-			overlay: nil,
-			want:    nil,
-		},
-		"base nil overlay valid returns overlay": {
-			base:    nil,
-			overlay: blue,
-			want:    blue,
-		},
+		"overlay valid returns overlay": {base: red, overlay: blue, want: blue},
 		"overlay outside the gamut is clamped": {
 			base:    red,
 			overlay: colorful.Color{R: -0.2, G: 1.4, B: 0.5},
@@ -65,47 +51,38 @@ func TestOverride(t *testing.T) {
 	}
 }
 
-func TestAbsentOverlay(t *testing.T) {
+func TestAbsentColor(t *testing.T) {
 	t.Parallel()
 
 	// Override and Blend share one rule for an absent color, so both hand
-	// back the base color, clamped into the gamut, for each of these
-	// overlays, and nil when the base is absent too.
+	// back the other color, clamped into the gamut, and nil when both
+	// colors are absent.
 	tcs := map[string]struct {
 		base    color.Color
 		overlay color.Color
 		want    color.Color
 	}{
-		"nil": {
-			base:    red,
-			overlay: nil,
-			want:    red,
-		},
-		"NoColor": {
-			base:    red,
-			overlay: lipgloss.NoColor{},
-			want:    red,
-		},
-		"invisible": {
-			base:    red,
-			overlay: color.RGBA{A: 0},
-			want:    red,
-		},
-		"nil with base outside the gamut": {
+		"overlay nil":       {base: red, overlay: nil, want: red},
+		"overlay NoColor":   {base: red, overlay: lipgloss.NoColor{}, want: red},
+		"overlay invisible": {base: red, overlay: color.RGBA{A: 0}, want: red},
+		"overlay nil with base outside the gamut": {
 			base:    colorful.Color{R: -0.2, G: 1.4, B: 0.5},
 			overlay: nil,
 			want:    colorful.Color{R: 0, G: 1, B: 0.5},
 		},
-		"nil with base NoColor": {
-			base:    lipgloss.NoColor{},
-			overlay: nil,
+		"base nil":       {base: nil, overlay: blue, want: blue},
+		"base NoColor":   {base: lipgloss.NoColor{}, overlay: blue, want: blue},
+		"base invisible": {base: color.RGBA{R: 255, G: 0, B: 0, A: 0}, overlay: blue, want: blue},
+		"both nil":       {base: nil, overlay: nil, want: nil},
+		"both NoColor":   {base: lipgloss.NoColor{}, overlay: lipgloss.NoColor{}, want: nil},
+		"both invisible": {
+			base:    color.RGBA{R: 255, G: 0, B: 0, A: 0},
+			overlay: color.RGBA{R: 0, G: 0, B: 255, A: 0},
 			want:    nil,
 		},
-		"NoColor with base invisible": {
-			base:    color.RGBA{A: 0},
-			overlay: lipgloss.NoColor{},
-			want:    nil,
-		},
+		"overlay nil with base NoColor":       {base: lipgloss.NoColor{}, overlay: nil, want: nil},
+		"overlay NoColor with base invisible": {base: color.RGBA{A: 0}, overlay: lipgloss.NoColor{}, want: nil},
+		"overlay invisible with base NoColor": {base: lipgloss.NoColor{}, overlay: color.RGBA{A: 0}, want: nil},
 	}
 
 	for name, tc := range tcs {
@@ -137,61 +114,7 @@ func labMidpoint(t *testing.T, c1, c2 color.Color) color.Color {
 func TestBlend(t *testing.T) {
 	t.Parallel()
 
-	tcs := map[string]struct {
-		c1   color.Color
-		c2   color.Color
-		want color.Color
-	}{
-		"both valid returns blend": {
-			c1:   red,
-			c2:   blue,
-			want: labMidpoint(t, red, blue),
-		},
-		"both nil returns nil": {
-			c1:   nil,
-			c2:   nil,
-			want: nil,
-		},
-		"both NoColor returns nil": {
-			c1:   lipgloss.NoColor{},
-			c2:   lipgloss.NoColor{},
-			want: nil,
-		},
-		"c1 nil returns c2": {
-			c1:   nil,
-			c2:   blue,
-			want: blue,
-		},
-		"c1 NoColor returns c2": {
-			c1:   lipgloss.NoColor{},
-			c2:   blue,
-			want: blue,
-		},
-		"c1 invisible returns c2": {
-			c1:   color.RGBA{R: 255, G: 0, B: 0, A: 0},
-			c2:   blue,
-			want: blue,
-		},
-		"NoColor against invisible returns nil": {
-			c1:   lipgloss.NoColor{},
-			c2:   color.RGBA{R: 0, G: 0, B: 0, A: 0},
-			want: nil,
-		},
-		"both invisible returns nil": {
-			c1:   color.RGBA{R: 255, G: 0, B: 0, A: 0},
-			c2:   color.RGBA{R: 0, G: 0, B: 255, A: 0},
-			want: nil,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := colors.Blend(tc.c1, tc.c2)
-			assert.Equal(t, tc.want, got)
-		})
-	}
+	assert.Equal(t, labMidpoint(t, red, blue), colors.Blend(red, blue))
 }
 
 func TestBlend_Symmetric(t *testing.T) {
@@ -204,18 +127,9 @@ func TestBlend_Symmetric(t *testing.T) {
 		c1 color.Color
 		c2 color.Color
 	}{
-		"red and blue": {
-			c1: red,
-			c2: blue,
-		},
-		"green and yellow": {
-			c1: green,
-			c2: yellow,
-		},
-		"gray and orange": {
-			c1: lipgloss.Color("#808080"),
-			c2: lipgloss.Color("#FFA500"),
-		},
+		"red and blue":     {c1: red, c2: blue},
+		"green and yellow": {c1: green, c2: yellow},
+		"gray and orange":  {c1: lipgloss.Color("#808080"), c2: lipgloss.Color("#FFA500")},
 	}
 
 	for name, tc := range tcs {
@@ -260,10 +174,7 @@ func TestBlend_InGamut(t *testing.T) {
 			c1: colorful.Color{R: 1.8, G: -0.4, B: 0.5},
 			c2: lipgloss.NoColor{},
 		},
-		"out of gamut against nil": {
-			c1: nil,
-			c2: colorful.Color{R: 1.8, G: -0.4, B: 0.5},
-		},
+		"out of gamut against nil": {c1: nil, c2: colorful.Color{R: 1.8, G: -0.4, B: 0.5}},
 	}
 
 	for name, tc := range tcs {

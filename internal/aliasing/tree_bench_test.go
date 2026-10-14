@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
@@ -45,7 +44,7 @@ func BenchmarkCheckDecode_TaggedAliasChain(b *testing.B) {
 				// input anew, outside the timer.
 				b.StopTimer()
 
-				doc := yamltest.FirstDocument(b, input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
+				doc := yamltest.FirstDocument(b, input, yamltest.NoSizeLimits()...)
 
 				b.StartTimer()
 
@@ -55,7 +54,7 @@ func BenchmarkCheckDecode_TaggedAliasChain(b *testing.B) {
 				}
 			}
 
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*2*sz.anchors), "ns/alias")
+			yamltest.ReportTimePer(b, 2*sz.anchors, "alias")
 		})
 	}
 }
@@ -91,7 +90,7 @@ func BenchmarkCheckDecode_NestedAnchors(b *testing.B) {
 				// input anew, outside the timer.
 				b.StopTimer()
 
-				doc := yamltest.FirstDocument(b, input, niceyaml.WithByteLimit(0), niceyaml.WithDepthLimit(0))
+				doc := yamltest.FirstDocument(b, input, yamltest.NoSizeLimits()...)
 
 				b.StartTimer()
 
@@ -101,7 +100,7 @@ func BenchmarkCheckDecode_NestedAnchors(b *testing.B) {
 				}
 			}
 
-			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*depth), "ns/alias")
+			yamltest.ReportTimePer(b, depth, "alias")
 		})
 	}
 }

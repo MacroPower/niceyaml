@@ -11,18 +11,13 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
-// find returns the token among tks with the value text, the first of
-// them after skip others.
-func find(tb testing.TB, tks token.Tokens, text string, skip int) *token.Token {
+// find returns the first token among tks with the value text.
+func find(tb testing.TB, tks token.Tokens, text string) *token.Token {
 	tb.Helper()
 
 	for _, tk := range tks {
 		if tk.Value == text && tk.Position != nil {
-			if skip == 0 {
-				return tk
-			}
-
-			skip--
+			return tk
 		}
 	}
 
@@ -45,7 +40,6 @@ func TestIndex_PathAt(t *testing.T) {
 
 	tcs := map[string]struct {
 		text string
-		skip int
 		want string
 	}{
 		"a key":                     {text: "a", want: "$.a~"},
@@ -66,7 +60,7 @@ func TestIndex_PathAt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			path, ok := idx.PathAt(doc.Resolver(), find(t, tks, tc.text, tc.skip).Position.Offset)
+			path, ok := idx.PathAt(doc.Resolver(), find(t, tks, tc.text).Position.Offset)
 			assert.True(t, ok)
 			assert.Equal(t, tc.want, path.String())
 		})
@@ -87,7 +81,7 @@ func TestIndex_PathAt_Unselected(t *testing.T) {
 	doc := yamltest.FirstDocument(t, stringtest.LinesLF("base: &b {k: 1}", "m: {k: 2, <<: *b}"))
 	idx := pathindex.New(doc.AST())
 
-	_, ok := idx.PathAt(doc.Resolver(), find(t, doc.Tokens(), "2", 0).Position.Offset)
+	_, ok := idx.PathAt(doc.Resolver(), find(t, doc.Tokens(), "2").Position.Offset)
 	assert.False(t, ok)
 }
 
@@ -105,18 +99,16 @@ func TestIndex_OwnerPath(t *testing.T) {
 		ok      bool
 	}{
 		"the colon of the first entry names the mapping": {
-			tk: find(t, tks, ":", 0), want: "$", selects: true, ok: true,
+			tk: find(t, tks, ":"), want: "$", selects: true, ok: true,
 		},
 		"the dash of the first element names the sequence": {
-			tk: find(t, tks, "-", 0), want: "$.b", selects: true, ok: true,
+			tk: find(t, tks, "-"), want: "$.b", selects: true, ok: true,
 		},
 		"a scalar names its entry": {
-			tk: find(t, tks, "c", 0), want: "$.b[0]", selects: true, ok: true,
+			tk: find(t, tks, "c"), want: "$.b[0]", selects: true, ok: true,
 		},
-		"a token of no node": {
-			tk: token.New("z", "z", &token.Position{Offset: 1000}),
-		},
-		"a nil token": {},
+		"a token of no node": {tk: token.New("z", "z", &token.Position{Offset: 1000})},
+		"a nil token":        {},
 	}
 
 	for name, tc := range tcs {

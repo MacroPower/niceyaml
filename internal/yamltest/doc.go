@@ -43,9 +43,11 @@
 //	}
 //
 // Tests of code that builds a [line.Lines] collection check its integrity
-// with [ValidateLines]. Tests of code that links tokens check the Prev and
-// Next of a stream with [ValidateTokenLinks]. A table that expects one
-// token names it as "value@line:column", which [TokenPlace] writes.
+// with [ValidateLines] and read the number of each line through
+// [LineNumbers]. Tests of code that links tokens check the Prev and Next
+// of a stream with [ValidateTokenLinks]. A table that expects one token
+// names it as "value@line:column", which [TokenPlace] writes, and a table
+// that expects several compares their values through [TokenValues].
 //
 // Most ranges a test names sit on one line, and [LineRange] writes one
 // from the line and its two columns:
@@ -89,14 +91,26 @@
 // and returns its node for a path with no selector, so a table case names
 // a path only when it checks a scoped node. [UnparsedDocument] returns the
 // node of an input that does not parse, for a test of what such a
-// document reports.
+// document reports. [Documents] and [AllDocuments] return the documents
+// of a source and fail the test unless the source holds as many as the
+// test names:
+//
+//	docs := yamltest.Documents(t, source, 2)
+//
+// [References] creates the option that gives a source reference
+// documents from YAML inputs:
+//
+//	doc := yamltest.FirstDocument(t, "server: *base\n", yamltest.References("base: &base {port: 80}\n"))
+//
+// [NoSizeLimits] returns the options that turn off the byte limit and the
+// depth limit, for a test or a benchmark that reads a large document.
 //
 // Tests that check how a bound error reads use [Bind]. It binds an error to
 // the single document of a [*niceyaml.Source] and fails the test unless the
-// source holds exactly one document:
+// source holds exactly one document. [ErrorAt] creates an error at the
+// value under a list of keys:
 //
-//	path := paths.Doc().Child("spec", "replicas")
-//	err := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(path)))
+//	err := yamltest.Bind(t, source, yamltest.ErrorAt("bad", "spec", "replicas"))
 //
 // Tests of a [niceyaml.Validator] run it through [niceyaml.Node.Validate]
 // on a scoped node, which binds the error as a decode does:
@@ -109,9 +123,9 @@
 // few levels make a small document that holds millions of nodes once its
 // aliases expand. A decode expands merge keys every time. It expands an
 // alias to a list only where it writes the list out, as in a mapping
-// key, so a test appends such a key:
+// key. A test appends such a key with [AliasKey]:
 //
-//	input := yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n"
+//	input := yamltest.AliasLevels(7) + yamltest.AliasKey("kind", 7)
 //
 // [WideMerge] builds a mapping whose merge key lists one alias for each
 // of its keys, so a lookup of every key reads the whole list.
@@ -122,6 +136,13 @@
 // [GenerateLines], from the format of one line:
 //
 //	input := yamltest.GenerateLines(200, "k%d: v")
+//
+// A benchmark that does several units of work in each iteration reports
+// the time of one unit through [ReportTimePer].
+//
+// [SchemaDirective] puts a document under the comment that names its
+// schema, for tests of schema directives. [Diff] diffs the lines of two
+// YAML inputs, for tests of code that renders or searches a diff.
 //
 // # Error Trees
 //
@@ -141,6 +162,42 @@
 //
 // [BoundNode] and [BoundDocument] return the node and the document a
 // binding is bound to, and fail the test for a binding bound to none.
+// [AssertBoundTo] asserts that each binding in the tree of an error is
+// bound to the source that the test names.
+//
+// [OnlyProblem] returns the one problem that [niceyaml.Problems] yields
+// for an error, even below a summary or a join. [RequireError] returns
+// the [*niceyaml.Error] in the chain of an error. [PathOf], [RangeOf],
+// and [PositionOf] return the location that an error or a node of the
+// tree reports. Each fails the test for an error that reports none:
+//
+//	problem := yamltest.OnlyProblem(t, err)
+//	assert.Equal(t, yamltest.LineRange(1, 6, 9), yamltest.RangeOf(t, problem))
+//
+// [ErrorAnnotation] and [ErrorOverlays] return the annotation and the
+// overlays that a binding leaves on a line it marks. A test of the
+// excerpt of the binding compares the line with them.
+//
+// [CheckError], [UpperError], [IndentError], and [RewriteError] model
+// wrappers that a caller puts around an error. Each wraps the error and
+// changes its text in its own way, for tests of code that keeps the text
+// of a wrapper.
+//
+// # Files
+//
+// Tests of code that reads files build a file system in memory with
+// [MapFS], or write files under a directory with [WriteFile] and
+// [WriteFiles]. Each path is slash-separated, and WriteFile creates each
+// parent directory that the file lacks:
+//
+//	yamltest.WriteFiles(t, dir, map[string]string{"configs/app.yaml": "name: a\n"})
+//
+// [ReadFile] reads a file back. [SymlinkOrSkip] creates a symbolic link
+// and skips the test on a platform that refuses one.
+// [RemoveWorkingDirectory] removes the working directory of the process,
+// for a test of code that resolves a relative path. It changes the
+// directory through [testing.TB.Chdir], so such a test does not run in
+// parallel.
 //
 // # Mocks
 //

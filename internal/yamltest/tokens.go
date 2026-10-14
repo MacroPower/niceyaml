@@ -561,3 +561,15 @@ func normalizeContent(s string) string {
 
 	return strings.Trim(s, "\n")
 }
+
+// TokenValues returns the Value of each token of tks, in order, or nil
+// for no tokens.
+func TokenValues(tks token.Tokens) []string {
+	var values []string
+
+	for _, tk := range tks {
+		values = append(values, tk.Value)
+	}
+
+	return values
+}

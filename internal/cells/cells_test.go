@@ -18,7 +18,9 @@ func TestRow(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		content   string
+		content string
+		// Zero measures the zero Row in place of NewRow(content).
+		zero      bool
 		col       int
 		wantStart int
 		wantCells int
@@ -41,6 +43,9 @@ func TestRow(t *testing.T) {
 			wantCells: 1,
 			wantWidth: math.MaxInt,
 		},
+		"zero Row start":        {zero: true, col: 0, wantStart: 0, wantCells: 1, wantWidth: 0},
+		"zero Row negative":     {zero: true, col: -1, wantStart: 0, wantCells: 1, wantWidth: 0},
+		"zero Row past the end": {zero: true, col: 3, wantStart: 3, wantCells: 1, wantWidth: 3},
 	}
 
 	for name, tc := range tcs {
@@ -48,6 +53,9 @@ func TestRow(t *testing.T) {
 			t.Parallel()
 
 			row := cells.NewRow(tc.content)
+			if tc.zero {
+				row = cells.Row{}
+			}
 
 			assert.Equal(t, tc.wantStart, row.Start(tc.col), "start")
 			assert.Equal(t, tc.wantCells, row.Cells(tc.col), "cells")
@@ -61,9 +69,11 @@ func TestRowCol(t *testing.T) {
 
 	tcs := map[string]struct {
 		content string
-		lo      int
-		cell    int
-		want    int
+		// Zero maps the cell on the zero Row in place of NewRow(content).
+		zero bool
+		lo   int
+		cell int
+		want int
 	}{
 		"ascii":                           {content: "a: b", lo: 0, cell: 2, want: 2},
 		"wide rune start":                 {content: "k: 日本", lo: 0, cell: 3, want: 3},
@@ -83,13 +93,20 @@ func TestRowCol(t *testing.T) {
 		"lo past the end":                 {content: "ab", lo: 5, cell: 1, want: 5},
 		"lo past a cell past the end":     {content: "ab", lo: 5, cell: 3, want: 5},
 		"max cell after zero-width runes": {content: "cafe\u0301", lo: 0, cell: math.MaxInt, want: math.MaxInt},
+		"zero Row start":                  {zero: true, lo: 0, cell: 0, want: 0},
+		"zero Row past the end":           {zero: true, lo: 0, cell: 3, want: 3},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, cells.NewRow(tc.content).Col(tc.lo, tc.cell))
+			row := cells.NewRow(tc.content)
+			if tc.zero {
+				row = cells.Row{}
+			}
+
+			assert.Equal(t, tc.want, row.Col(tc.lo, tc.cell))
 		})
 	}
 }
@@ -119,41 +136,6 @@ func TestRowNext(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, cells.NewRow(tc.content).Next(tc.col))
-		})
-	}
-}
-
-func TestRowZeroValue(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		col       int
-		wantStart int
-		wantCells int
-		wantWidth int
-		wantCol   int
-	}{
-		"start":    {col: 0, wantStart: 0, wantCells: 1, wantWidth: 0, wantCol: 0},
-		"negative": {col: -1, wantStart: 0, wantCells: 1, wantWidth: 0, wantCol: 0},
-		"past the end": {
-			col:       3,
-			wantStart: 3,
-			wantCells: 1,
-			wantWidth: 3,
-			wantCol:   3,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			var row cells.Row
-
-			assert.Equal(t, tc.wantStart, row.Start(tc.col), "start")
-			assert.Equal(t, tc.wantCells, row.Cells(tc.col), "cells")
-			assert.Equal(t, tc.wantWidth, row.Width(tc.col), "width")
-			assert.Equal(t, tc.wantCol, row.Col(0, tc.wantWidth), "col")
 		})
 	}
 }

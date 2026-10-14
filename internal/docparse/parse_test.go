@@ -6,8 +6,10 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -25,16 +27,16 @@ func TestParse(t *testing.T) {
 			want:  []string{"a: 1"},
 		},
 		"a header after a header starts a document": {
-			input: "---\n---\na: 1\n",
-			want:  []string{"---", "---\na: 1"},
+			input: stringtest.LinesLF("---", "---", "a: 1"),
+			want:  []string{"---", stringtest.JoinLF("---", "a: 1")},
 		},
 		"a run the parser rejects keeps its place": {
-			input:    "a: [\n---\nb: 1\n",
-			want:     []string{"", "---\nb: 1"},
+			input:    stringtest.LinesLF("a: [", "---", "b: 1"),
+			want:     []string{"", stringtest.JoinLF("---", "b: 1")},
 			failures: 1,
 		},
 		"a stream of markers holds one document": {
-			input: "...\n...\n",
+			input: stringtest.LinesLF("...", "..."),
 			want:  []string{"..."},
 		},
 		"an empty file holds one document": {
@@ -42,111 +44,111 @@ func TestParse(t *testing.T) {
 			want:  []string{""},
 		},
 		"a comment below a scalar root drops": {
-			input: "a\n# c\n",
+			input: stringtest.LinesLF("a", "# c"),
 			want:  []string{"a"},
 		},
 		"a comment between a directive and its header drops": {
-			input: "%YAML 1.2\n# c\n---\na: 1\n",
-			want:  []string{"%YAML 1.2", "---\na: 1"},
+			input: stringtest.LinesLF("%YAML 1.2", "# c", "---", "a: 1"),
+			want:  []string{"%YAML 1.2", stringtest.JoinLF("---", "a: 1")},
 		},
 		"a comment before a ',' of a flow sequence drops": {
-			input: "a: [1\n# c\n, 2]\n",
+			input: stringtest.LinesLF("a: [1", "# c", ", 2]"),
 			want:  []string{"a: [1, 2]"},
 		},
 		"a comment before the '}' of a flow mapping drops": {
-			input: "{a: 1\n# c\n}\n",
+			input: stringtest.LinesLF("{a: 1", "# c", "}"),
 			want:  []string{"{a: 1}"},
 		},
 		"a comment where a flow mapping expects a key drops": {
-			input: "a: {b: 1,\n# c\n  d: 2}\n",
+			input: stringtest.LinesLF("a: {b: 1,", "# c", "  d: 2}"),
 			want:  []string{"a: {b: 1, d: 2}"},
 		},
 		"a comment between the entries of a flow sequence stays": {
-			input: "a: [1,\n# c\n  2]\n",
+			input: stringtest.LinesLF("a: [1,", "# c", "  2]"),
 			want:  []string{"a: [1, 2 # c]"},
 		},
 		"a comment after a '?' drops": {
-			input: "? \n# c\n  a\n: 1\n",
+			input: stringtest.LinesLF("? ", "# c", "  a", ": 1"),
 			want:  []string{"? a: 1"},
 		},
 		"a comment before a ':' drops": {
-			input: "? a\n# c\n: 1\n",
+			input: stringtest.LinesLF("? a", "# c", ": 1"),
 			want:  []string{"? a: 1"},
 		},
 		"a comment left of the key of an anchor above its value drops": {
-			input: "m:\n  a: &x\n# c\n    1\n",
-			want:  []string{"m:\n  a: &x 1"},
+			input: stringtest.LinesLF("m:", "  a: &x", "# c", "    1"),
+			want:  []string{stringtest.JoinLF("m:", "  a: &x 1")},
 		},
 		"a comment left of the key of an anchor above its sequence drops": {
-			input: "m:\n  a: &x\n# c\n  - 1\n",
-			want:  []string{"m:\n  a: &x\n  - 1"},
+			input: stringtest.LinesLF("m:", "  a: &x", "# c", "  - 1"),
+			want:  []string{stringtest.JoinLF("m:", "  a: &x", "  - 1")},
 		},
 		"a comment at the key of an anchor above its value stays": {
-			input: "a: &x\n# c\n  1\n",
+			input: stringtest.LinesLF("a: &x", "# c", "  1"),
 			want:  []string{"a: &x 1 # c"},
 		},
 		"a comment left of the key of an anchor above the next key stays": {
-			input: "m:\n  a: &x\n# c\n  b: 1\n",
-			want:  []string{"m:\n  a: &x\n  # c\n  b: 1"},
+			input: stringtest.LinesLF("m:", "  a: &x", "# c", "  b: 1"),
+			want:  []string{stringtest.JoinLF("m:", "  a: &x", "  # c", "  b: 1")},
 		},
 		"a comment above a key left of the key of an anchor drops": {
-			input: "m:\n  a: &x\n  # c\nb: 1\n",
-			want:  []string{"m:\n  a: &x\nb: 1"},
+			input: stringtest.LinesLF("m:", "  a: &x", "  # c", "b: 1"),
+			want:  []string{stringtest.JoinLF("m:", "  a: &x", "b: 1")},
 		},
 		"a comment between an anchor and the next key drops": {
-			input: "a: &x\n# c\nb: 1\n",
-			want:  []string{"a: &x\nb: 1"},
+			input: stringtest.LinesLF("a: &x", "# c", "b: 1"),
+			want:  []string{stringtest.JoinLF("a: &x", "b: 1")},
 		},
 		"a comment on the line of an anchor stays as the one below drops": {
-			input: "a: &x # c\n# d\nb: 1\n",
-			want:  []string{"a: &x # c\nb: 1"},
+			input: stringtest.LinesLF("a: &x # c", "# d", "b: 1"),
+			want:  []string{stringtest.JoinLF("a: &x # c", "b: 1")},
 		},
 		"a comment between an anchor in an entry and the next key drops": {
-			input: "- a: &x\n  # c\n  b: 1\n",
-			want:  []string{"- a: &x\n  b: 1"},
+			input: stringtest.LinesLF("- a: &x", "  # c", "  b: 1"),
+			want:  []string{stringtest.JoinLF("- a: &x", "  b: 1")},
 		},
 		"a comment between an anchor and the next '?' key drops": {
-			input: "a: &x\n# c\n? b\n: 1\n",
-			want:  []string{"a: &x\n? b: 1"},
+			input: stringtest.LinesLF("a: &x", "# c", "? b", ": 1"),
+			want:  []string{stringtest.JoinLF("a: &x", "? b: 1")},
 		},
 		"a comment above a flow value at the key of an anchor stays": {
-			input: "a: &x\n# c\n[1]\n",
+			input: stringtest.LinesLF("a: &x", "# c", "[1]"),
 			want:  []string{"a: &x [1] # c"},
 		},
 		"a comment above a scalar at the key of an anchor stays": {
-			input: "a: &x\n# c\nb\n",
+			input: stringtest.LinesLF("a: &x", "# c", "b"),
 			want:  []string{"a: &x b # c"},
 		},
 		"a comment between an anchor and the next '-' drops": {
-			input: "- &x\n# c\n- 1\n",
-			want:  []string{"- &x\n- 1"},
+			input: stringtest.LinesLF("- &x", "# c", "- 1"),
+			want:  []string{stringtest.JoinLF("- &x", "- 1")},
 		},
 		"a comment above a scalar at the '-' of an anchor stays": {
-			input: "- &x\n# c\na\n",
+			input: stringtest.LinesLF("- &x", "# c", "a"),
 			want:  []string{"- &x a # c"},
 		},
 		"a comment below a '&' with no name stays, and the run fails": {
-			input:    "a: &\n# c\nb: 1\n",
+			input:    stringtest.LinesLF("a: &", "# c", "b: 1"),
 			want:     []string{""},
 			failures: 1,
 		},
 		"a comment below an anchor at the root stays": {
-			input: "&x\n# c\na: 1\n",
-			want:  []string{"&x\n# c\na: 1"},
+			input: stringtest.LinesLF("&x", "# c", "a: 1"),
+			want:  []string{stringtest.JoinLF("&x", "# c", "a: 1")},
 		},
 		"a comment below an anchor after a tag stays": {
-			input: "a: !t &x\n# c\n  b\n",
+			input: stringtest.LinesLF("a: !t &x", "# c", "  b"),
 			want:  []string{"a: !t &x b # c"},
 		},
 		"a comment left of the root that closes the document of an anchor drops": {
-			input: "  a: &x\n# c\n---\nb: 1\n",
-			want:  []string{"  a: &x", "---\nb: 1"},
+			input: stringtest.LinesLF("  a: &x", "# c", "---", "b: 1"),
+			want:  []string{"  a: &x", stringtest.JoinLF("---", "b: 1")},
 		},
 		// The parser rejects the anchor without the comment, which it takes
 		// as the value of the anchor.
 		"a comment left of the root below an anchor on a line of its own stays": {
-			input: "  a:\n    &x\n# c\n---\nb: 1\n",
-			want:  []string{"  a: &x", "---\nb: 1"},
+			input: stringtest.LinesLF("  a:", "    &x", "# c", "---", "b: 1"),
+			want:  []string{"  a: &x", stringtest.JoinLF("---", "b: 1")},
 		},
 	}
 
@@ -177,7 +179,7 @@ func TestParse_EmptyAnchor(t *testing.T) {
 	t.Parallel()
 
 	// The parser takes the comment below the anchor as its value.
-	r := docparse.Parse(tokens.Tokenize("a: &x\n# c\n"))
+	r := docparse.Parse(tokens.Tokenize(stringtest.LinesLF("a: &x", "# c")))
 	require.Empty(t, r.Failures)
 
 	mapping, ok := r.File.Docs[0].Body.(*ast.MappingNode)
@@ -192,18 +194,15 @@ func TestParse_EmptyAnchor(t *testing.T) {
 func TestParse_Index(t *testing.T) {
 	t.Parallel()
 
-	tks := tokens.Tokenize("a: 1\n# c\nb: [x, y]\n")
+	tks := tokens.Tokenize(stringtest.LinesLF("a: 1", "# c", "b: [x, y]"))
 
 	r := docparse.Parse(tks)
-	require.Len(t, r.Tokens, len(tks))
+	yamltest.RequireTokensEqual(t, tks, r.Tokens)
 	require.Len(t, r.Index, len(tks))
 
 	for i, tk := range r.Tokens {
 		assert.NotSame(t, tks[i], tk)
 		assert.Equal(t, i, r.Index[tk])
-		assert.Equal(t, tks[i].Type, tk.Type)
-		assert.Equal(t, tks[i].Origin, tk.Origin)
-		assert.Equal(t, *tks[i].Position, *tk.Position)
 
 		_, ok := r.Index[tks[i]]
 		assert.False(t, ok, "token %d of the input", i)
@@ -214,7 +213,7 @@ func TestParse_Panic(t *testing.T) {
 	t.Parallel()
 
 	// The go-yaml parser dereferences the position of this token.
-	tks := tokens.Tokenize("a: 1\nb: 2\n")
+	tks := tokens.Tokenize(stringtest.LinesLF("a: 1", "b: 2"))
 	tks[2].Position = nil
 
 	r := docparse.Parse(tks)

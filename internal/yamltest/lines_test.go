@@ -1,7 +1,6 @@
 package yamltest_test
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,8 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -116,24 +117,9 @@ func TestLines_Validate(t *testing.T) {
 				t.Parallel()
 
 				lines := line.NewLines(tc.tks)
+				assert.Equal(t, tc.want, yamltest.LineNumbers(lines))
 
-				var got []int
-
-				for _, l := range lines.All() {
-					got = append(got, l.Number())
-				}
-
-				assert.Equal(t, tc.want, got)
-
-				err := yamltest.ValidateLines(lines)
-				if tc.err == nil {
-					require.NoError(t, err)
-
-					return
-				}
-
-				require.ErrorIs(t, err, tc.err)
-				assert.Contains(t, err.Error(), tc.msg)
+				requireValidation(t, yamltest.ValidateLines(lines), tc.err, tc.msg)
 			})
 		}
 	})
@@ -149,7 +135,7 @@ func TestLines_Validate(t *testing.T) {
 	t.Run("token line differs from line number", func(t *testing.T) {
 		t.Parallel()
 
-		lines := line.NewLines(tokens.Tokenize("a: 1\nb: 2\n"))
+		lines := line.NewLines(tokens.Tokenize(stringtest.LinesLF("a: 1", "b: 2")))
 		require.Equal(t, 2, lines.Len())
 
 		// The line shares its tokens, so renumbering them moves every token
@@ -159,8 +145,7 @@ func TestLines_Validate(t *testing.T) {
 		}
 
 		err := yamltest.ValidateLines(lines)
-		require.ErrorIs(t, err, yamltest.ErrLineNumberMismatch)
-		assert.Contains(t, err.Error(), "token line 7 differs from line number 2")
+		requireValidation(t, err, yamltest.ErrLineNumberMismatch, "token line 7 differs from line number 2")
 	})
 
 	t.Run("token line number opens a new line", func(t *testing.T) {
@@ -201,14 +186,103 @@ func TestLines_Validate_Testdata(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			src, err := os.ReadFile(filepath.Join("..", "..", "testdata", name))
-			require.NoError(t, err)
+			src := yamltest.ReadFile(t, filepath.Join("..", "..", "testdata", name))
 
-			lines := line.NewLines(tokens.Tokenize(string(src)))
+			lines := line.NewLines(tokens.Tokenize(src))
 			require.NotEmpty(t, lines)
 
-			assert.Equal(t, strings.Count(string(src), "\n"), lines.Len(), "one line per source line")
+			assert.Equal(t, strings.Count(src, "\n"), lines.Len(), "one line per source line")
 			assert.NoError(t, yamltest.ValidateLines(lines))
 		})
 	}
+}
+
+func TestLineNumbers(t *testing.T) {
+	t.Parallel()
+
+	// The unified view holds line 2 of both revisions, so two of its lines
+	// have the number 2.
+	unified := yamltest.Diff(stringtest.LinesLF("a: 1", "b: 2"), stringtest.LinesLF("a: 1", "b: 3")).Unified()
+
+	tcs := map[string]struct {
+		seq  line.Sequence
+		want []int
+	}{
+		"no lines": {seq: line.Lines{}},
+		"lines": {
+			seq:  niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2")).Lines(),
+			want: []int{1, 2},
+		},
+		"view": {seq: unified, want: []int{1, 2, 2}},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, yamltest.LineNumbers(tc.seq))
+		})
+	}
+}
+
+// excerptOf returns the excerpt of the binding of err to the one line of
+// "key: value", with no line of context.
+func excerptOf(t *testing.T, err error) *line.View {
+	t.Helper()
+
+	bound := yamltest.RequireSourceError(t, yamltest.Bind(t, niceyaml.NewSourceFromString("key: value\n"), err))
+
+	excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
+	require.True(t, ok)
+
+	return excerpt
+}
+
+func TestErrorAnnotation(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err  error
+		want line.Annotations
+	}{
+		// The headline holds the message of a single error, so its line
+		// carries the caret alone.
+		"single error": {
+			err:  yamltest.ErrorAt("bad value", "key"),
+			want: line.Annotations{yamltest.ErrorAnnotation(5, "")},
+		},
+		"summary of two problems": {
+			err: niceyaml.NewSummary("2 problems",
+				yamltest.ErrorAt("bad value", "key"),
+				niceyaml.NewError("bad key", niceyaml.AtPosition(position.New(0, 0))),
+			),
+			want: line.Annotations{
+				yamltest.ErrorAnnotation(5, "bad value"),
+				yamltest.ErrorAnnotation(0, "bad key"),
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, excerptOf(t, tc.err).Annotations(0))
+		})
+	}
+}
+
+func TestErrorOverlays(t *testing.T) {
+	t.Parallel()
+
+	excerpt := excerptOf(t, niceyaml.NewSummary("2 problems",
+		yamltest.ErrorAt("bad value", "key"),
+		niceyaml.NewError("bad key", niceyaml.AtPosition(position.New(0, 0))),
+	))
+
+	assert.Equal(t,
+		yamltest.ErrorOverlays(position.NewSpan(5, 10), position.NewSpan(0, 3)),
+		excerpt.Overlays(0),
+	)
+	assert.Empty(t, yamltest.ErrorOverlays())
 }

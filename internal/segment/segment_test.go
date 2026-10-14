@@ -150,31 +150,17 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 	key := &token.Token{Origin: "key"}
 	colon := &token.Token{Origin: ":"}
 	value := &token.Token{Origin: " value\n"}
-
-	segs := segment.Segments{
+	entry := segment.Segments{
 		segment.New(key, key),
 		segment.New(colon, colon),
 		segment.New(value, value),
 	}
 
-	assert.Same(t, key, segs.SourceTokenAt(0))
-	assert.Same(t, key, segs.SourceTokenAt(2))
-	assert.Same(t, colon, segs.SourceTokenAt(3))
-	assert.Same(t, value, segs.SourceTokenAt(4))
-	assert.Same(t, value, segs.SourceTokenAt(9))
-	assert.Nil(t, segs.SourceTokenAt(10))
-	assert.Nil(t, segs.SourceTokenAt(-1))
-	assert.Nil(t, segment.Segments(nil).SourceTokenAt(0))
-}
-
-func TestSegments_SourceTokenAt_Indentation(t *testing.T) {
-	t.Parallel()
-
 	// The lexer bundles the indentation of the next line into the end of a
 	// plain scalar, so " x\n  " spans two lines and leaves "  " on the second.
 	prev := &token.Token{Origin: " x\n  "}
 	indent := &token.Token{Origin: "  "}
-	key := &token.Token{Origin: "other"}
+	other := &token.Token{Origin: "other"}
 	blank := &token.Token{Origin: "  \n"}
 	tabbed := &token.Token{Origin: " \t"}
 	// A token that starts with a line ending leaves only that line ending
@@ -188,20 +174,28 @@ func TestSegments_SourceTokenAt_Indentation(t *testing.T) {
 		want *token.Token
 		col  int
 	}{
+		"first column of the first token":  {segs: entry, col: 0, want: key},
+		"last column of the first token":   {segs: entry, col: 2, want: key},
+		"first column of a later token":    {segs: entry, col: 3, want: colon},
+		"first column of the last token":   {segs: entry, col: 4, want: value},
+		"last column before a line ending": {segs: entry, col: 9, want: value},
+		"column past the last token":       {segs: entry, col: 10},
+		"negative column":                  {segs: entry, col: -1},
+		"no segments":                      {segs: nil, col: 0},
 		"indentation resolves to the next token": {
-			segs: segment.Segments{segment.New(prev, indent), segment.New(key, key)},
+			segs: segment.Segments{segment.New(prev, indent), segment.New(other, other)},
 			col:  0,
-			want: key,
+			want: other,
 		},
 		"last indentation column resolves to the next token": {
-			segs: segment.Segments{segment.New(prev, indent), segment.New(key, key)},
+			segs: segment.Segments{segment.New(prev, indent), segment.New(other, other)},
 			col:  1,
-			want: key,
+			want: other,
 		},
 		"indentation with a tab resolves to the next token": {
-			segs: segment.Segments{segment.New(prev, tabbed), segment.New(key, key)},
+			segs: segment.Segments{segment.New(prev, tabbed), segment.New(other, other)},
 			col:  1,
-			want: key,
+			want: other,
 		},
 		"indentation with nothing after it": {
 			segs: segment.Segments{segment.New(prev, indent)},
@@ -217,10 +211,10 @@ func TestSegments_SourceTokenAt_Indentation(t *testing.T) {
 			segs: segment.Segments{
 				segment.New(prev, indent),
 				segment.New(empty, empty),
-				segment.New(key, key),
+				segment.New(other, other),
 			},
 			col:  0,
-			want: key,
+			want: other,
 		},
 		"whitespace with a line ending keeps its own token": {
 			segs: segment.Segments{segment.New(blank, blank)},

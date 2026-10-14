@@ -29,11 +29,7 @@ func TestXMLStyles_Style(t *testing.T) {
 		want    string
 		opts    []yamltest.XMLStylesOption
 	}{
-		"text": {
-			input:   kind.Text,
-			content: "test",
-			want:    "<text>test</text>",
-		},
+		"text": {input: kind.Text, content: "test", want: "<text>test</text>"},
 		"kind of several words": {
 			input:   kind.PunctuationSequenceEntry,
 			content: "test",
@@ -44,10 +40,7 @@ func TestXMLStyles_Style(t *testing.T) {
 			content: "test",
 			want:    "<unknownStyle>test</unknownStyle>",
 		},
-		"empty content": {
-			input: kind.NameTag,
-			want:  "<nameTag></nameTag>",
-		},
+		"empty content": {input: kind.NameTag, want: "<nameTag></nameTag>"},
 		"first included kind": {
 			opts:    include,
 			input:   kind.GenericHighlightDim,
@@ -78,22 +71,31 @@ func TestXMLStyles_Style(t *testing.T) {
 	}
 }
 
-func TestNewXMLPrinter(t *testing.T) {
+func TestNewPrinters(t *testing.T) {
 	t.Parallel()
 
 	view := niceyaml.NewSourceFromString("a: 1\n").View()
 
 	tcs := map[string]struct {
-		want string
-		opts []printer.Option
+		newPrinter func(...printer.Option) *printer.Printer
+		want       string
+		opts       []printer.Option
 	}{
-		"defaults": {
+		"XML defaults": {
+			newPrinter: yamltest.NewXMLPrinter,
 			want: "<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue>" +
 				"<text> </text><literalNumberInteger>1</literalNumberInteger>",
 		},
-		"option after the defaults": {
-			opts: []printer.Option{printer.WithStyles(style.Styles{})},
-			want: "a: 1",
+		"XML option after the defaults": {
+			newPrinter: yamltest.NewXMLPrinter,
+			opts:       []printer.Option{printer.WithStyles(style.Styles{})},
+			want:       "a: 1",
+		},
+		"plain defaults": {newPrinter: yamltest.NewPlainPrinter, want: "a: 1"},
+		"plain option after the defaults": {
+			newPrinter: yamltest.NewPlainPrinter,
+			opts:       []printer.Option{printer.WithGutter(printer.LineNumberGutter)},
+			want:       "   1 a: 1",
 		},
 	}
 
@@ -101,34 +103,7 @@ func TestNewXMLPrinter(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, yamltest.NewXMLPrinter(tc.opts...).Print(view))
-		})
-	}
-}
-
-func TestNewPlainPrinter(t *testing.T) {
-	t.Parallel()
-
-	view := niceyaml.NewSourceFromString("a: 1\n").View()
-
-	tcs := map[string]struct {
-		want string
-		opts []printer.Option
-	}{
-		"defaults": {
-			want: "a: 1",
-		},
-		"option after the defaults": {
-			opts: []printer.Option{printer.WithGutter(printer.LineNumberGutter)},
-			want: "   1 a: 1",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, yamltest.NewPlainPrinter(tc.opts...).Print(view))
+			assert.Equal(t, tc.want, tc.newPrinter(tc.opts...).Print(view))
 		})
 	}
 }
