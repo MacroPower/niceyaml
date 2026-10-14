@@ -1,17 +1,24 @@
 package niceyaml
 
 import (
+	"context"
+
 	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 )
 
-// The calls that niceyaml hands to its manifest package, as the package
-// [hook] describes.
+// The calls that niceyaml hands to its manifest and schema packages, as
+// the package [hook] describes.
 //
 //nolint:gochecknoinits // The hooks reach no API, so only init can set them.
 func init() {
 	hook.Tally = newTally
 	hook.MarkWarning = func(err error) error { return remark(err, severityWarning) }
+	hook.Warn = func(ctx context.Context, err error) {
+		if !isNothing(err) {
+			reportWarning(ctx, remark(err, severityWarning))
+		}
+	}
 	hook.Rewrap = rewrap
 	hook.WorkingSource = func(text string, home any, locate func(hook.Located) hook.Place) any {
 		n, _ := home.(*Node) //nolint:errcheck // The hook takes a *Node.

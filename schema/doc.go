@@ -131,6 +131,47 @@
 // compiles, and validation fails with an error wrapping [ErrValidate]
 // for each document that reaches the $ref.
 //
+// # Deprecations
+//
+// A schema marks a field or a value deprecated with the deprecated
+// keyword. [Schema.Check] and [Schema.ValidateValue] report each value
+// that such a schema applies to as a warning that matches
+// [ErrDeprecated], and the check still passes. The keyword on the
+// subschema that properties, patternProperties, additionalProperties, or
+// unevaluatedProperties gives a member marks the key of that member. So
+// does the keyword under propertyNames. The warning binds at the key, and
+// its path ends in `~`:
+//
+//	config.yaml:17:3: warning: $.legacyPricing~: deprecated field "legacyPricing"
+//	`-- legacyPricing has no effect. Remove it.
+//
+// The keyword anywhere else marks the value, the schema that a $ref
+// reaches included, and the warning binds at the value. The headline
+// quotes the text of a scalar, as in `deprecated value "wep"`, and reads
+// `deprecated value` alone for a mapping or a sequence. The detail comes
+// from the deprecationMessage keyword of the schema, which the JSON
+// language service of VS Code also reads. The generator of
+// [go.jacobcolvin.com/x/jsonschema] writes that keyword from the
+// Deprecated: paragraph of a doc comment. A schema without it warns with
+// the headline alone.
+//
+// A choice in the schema decides whether a deprecation applies. A
+// deprecation under a branch of anyOf or oneOf warns only when the value
+// passes that branch. One under if warns only when the value passes if,
+// one under contains only for the items that match, and one under not
+// never. [go.jacobcolvin.com/x/jsonschema.Validator.ValidateDeprecations]
+// lists the rules. Draft-07 ignores each sibling of a $ref, so under that
+// draft a deprecated keyword beside a $ref warns nothing.
+//
+// One check gives one warning for each node of the text. The
+// deprecations that reach a node through an alias, a merge key, or two
+// schemas share its warning. The warning lists each distinct message
+// once, in the order that the check evaluated them, and names the path
+// that comes first in the document. A check that passes hands its
+// warnings to the call that runs it. A check that fails returns them in
+// its error, as the Warnings section of [go.jacobcolvin.com/niceyaml]
+// describes.
+//
 // # YAML Schemas
 //
 // A schema document holds JSON or YAML. [Compile] and a [Registry] read

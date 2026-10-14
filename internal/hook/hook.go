@@ -1,5 +1,5 @@
 // Package hook holds the calls that the niceyaml package hands to its
-// manifest package without adding them to its API.
+// manifest and schema packages without adding them to its API.
 //
 // The niceyaml package sets each variable when it loads, so a package that
 // imports both finds every variable set. A parameter or a result that names
@@ -8,6 +8,8 @@
 package hook
 
 import (
+	"context"
+
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -51,6 +53,10 @@ var (
 	// MarkWarning returns err with a warning mark above it, as
 	// niceyaml.Node.Warn marks the error that it reports.
 	MarkWarning func(err error) error
+
+	// Warn reports err as a warning to the call that runs ctx, as
+	// niceyaml.Node.Warn does, and binds it to no document.
+	Warn func(ctx context.Context, err error)
 
 	// Rewrap returns err with wrap applied to the error that it binds, when
 	// err is a *niceyaml.SourceError, and wrap(err) otherwise. The result

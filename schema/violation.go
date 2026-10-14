@@ -12,6 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/fault"
+	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -145,27 +146,6 @@ func newViolation(e *jsonschema.ValidationError) *Violation {
 	}
 }
 
-// newValidationError converts a [*jsonschema.ValidationError] into a
-// [*niceyaml.Error].
-//
-// The conversion reduces the error tree to its violations, as
-// [converter.violations] finds them. A single violation becomes the main
-// error and carries its own path, so the printer highlights that location
-// and [niceyaml.Error.Path] reports it. Several violations become a count
-// summary from [niceyaml.NewSummary] with no path of its own, and each
-// violation it heads carries the path to one failing location. The index
-// idx finds the members of the mappings in the document of n.
-func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node, idx *datapath.Index) error {
-	c := converter{root: rootOf(n), idx: idx}
-
-	found := c.violations(ve)
-	if len(found) == 0 {
-		return niceyaml.Invalid(newViolation(ve))
-	}
-
-	return niceyaml.NewSummary(fmt.Sprintf("%d schema violations", len(found)), found...)
-}
-
 // converter turns the failures of one validation into violations. The
 // tree root is the one the validated value came from, or nil for a value
 // with no node, and idx finds the members of the mappings in its
@@ -173,6 +153,31 @@ func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node, idx *d
 type converter struct {
 	root ast.Node
 	idx  *datapath.Index
+}
+
+// validationError converts a [*jsonschema.ValidationError] into a
+// [*niceyaml.Error].
+//
+// The conversion reduces the error tree to its violations, as
+// [converter.violations] finds them. A single violation becomes the main
+// error and carries its own path, so the printer highlights that location
+// and [niceyaml.Error.Path] reports it. Several violations become a count
+// summary from [niceyaml.NewSummary] with no path of its own, and each
+// violation it heads carries the path to one failing location. With
+// warnings, one heading that counts the errors and the warnings stands
+// over the violations and the warnings in place of that summary.
+func (c converter) validationError(ve *jsonschema.ValidationError, warnings []error) error {
+	found := c.violations(ve)
+	if len(found) == 0 {
+		found = []error{niceyaml.Invalid(newViolation(ve))}
+	}
+
+	if len(warnings) > 0 {
+		//nolint:wrapcheck // The heading adds no context of its own.
+		return hook.Tally(append(found, warnings...))
+	}
+
+	return niceyaml.NewSummary(fmt.Sprintf("%d schema violations", len(found)), found...)
 }
 
 // violations returns the violations in the error tree of e, each a
@@ -374,8 +379,12 @@ func (c converter) at(e *jsonschema.ValidationError) []niceyaml.ErrorOption {
 		return c.atMissing(target, name)
 	}
 
-	key := constrainsKey(e)
+	return c.atTarget(target, constrainsKey(e))
+}
 
+// atTarget returns the options that give an error the location target,
+// at the key of its member when key is set, as [converter.at] describes.
+func (c converter) atTarget(target datapath.Target, key bool) []niceyaml.ErrorOption {
 	path := target.Path
 	if key {
 		path = path.Key()

@@ -15,6 +15,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -22,7 +23,9 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
+	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
+	"go.jacobcolvin.com/niceyaml/internal/schemahook"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -60,6 +63,12 @@ var (
 	// another document and no ref resolver to serve that document does
 	// not compile, as [WithRequireRefs] describes.
 	ErrCompile = errors.New("compile schema")
+
+	// ErrDeprecated indicates the warning about a value that a schema with
+	// "deprecated": true applies to. [Schema.Check] and
+	// [Schema.ValidateValue] report each such value as a warning that
+	// matches it.
+	ErrDeprecated = errors.New("deprecated")
 )
 
 // CompileOption configures [Compile] and [MustCompile], and
@@ -401,6 +410,8 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // location, bound to the source for
 // [go.jacobcolvin.com/niceyaml/printer.Printer] to display.
 // Each one wraps a [*Violation] that names the keyword the value fails.
+// Each value that a deprecated schema applies to comes back as a warning
+// that matches [ErrDeprecated].
 // [Schema.Check] checks a node, which is the whole document for the
 // root [niceyaml.Node] of a document and one value inside it for a Node
 // from [niceyaml.Node.At]. [Schema.ValidateValue] checks decoded data
@@ -467,6 +478,15 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // alias limit returns an error matching [ErrExcessiveAliasing].
 // [Schema.ValidateValue] checks data for a caller that reports the errors
 // somewhere else.
+//
+// # Deprecations
+//
+// Check reports each value that a schema with the deprecated keyword
+// applies to as a warning, as the Deprecations section of the package
+// documentation describes. When n passes, Check reports its warnings
+// with [niceyaml.Node.Warn]. When n fails, Check returns them in its
+// error, bound through n, under one heading that counts the violations
+// and the warnings.
 //
 // # Unparsed Documents
 //
@@ -608,7 +628,16 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 		}
 	}
 
-	return s.validate(ctx, data, n)
+	warnings, err := s.validate(ctx, data, n)
+	if err != nil {
+		return err
+	}
+
+	for _, w := range warnings {
+		n.Warn(ctx, w)
+	}
+
+	return nil
 }
 
 // ValidateValue checks data, the decoded form of a YAML value, against the
@@ -648,6 +677,20 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // of each branch the value could have been meant for, as [Violation]
 // describes. Any other failure wraps [ErrValidate], including a $ref the
 // validator cannot resolve, since the value is not at fault for that.
+//
+// # Deprecations
+//
+// ValidateValue reports each value that a schema with the deprecated
+// keyword applies to as a warning, as the Deprecations section of the
+// package documentation describes. A value that passes hands its
+// warnings to the warning handler of ctx, from
+// [niceyaml.WithWarningHandler], bound as BindValue binds an error. A
+// value that fails returns them in its error, under one heading that
+// counts the violations and the warnings:
+//
+//	1 error, 1 warning
+//	$.port: 0 is less than 1
+//	warning: $.legacyPricing~: deprecated field "legacyPricing"
 //
 // # Error Text
 //
@@ -730,29 +773,34 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // The context reaches the underlying [jsonschema.Validator], where remote
 // reference resolution honors its cancellation and deadlines.
 func (s *Schema) ValidateValue(ctx context.Context, data any) error {
-	err := s.checkValue(ctx, data)
-	if err == nil {
-		return nil
+	warnings, err := s.checkValue(ctx, data)
+	if err != nil {
+		//nolint:wrapcheck // Binding puts each path in the text; the error keeps its own context.
+		return niceyaml.BindValue(err)
 	}
 
-	//nolint:wrapcheck // Binding puts each path in the text; the error keeps its own context.
-	return niceyaml.BindValue(err)
+	if len(warnings) > 0 {
+		hook.Warn(ctx, niceyaml.BindValue(hook.Tally(warnings)))
+	}
+
+	return nil
 }
 
-// checkValue checks data against the schema and returns the errors
-// unbound, each with a path that starts at `@`, the value data stands
-// for. It holds no source, so each path names a key as the decoder does,
-// such as 16 for a key the document spells 0x10.
-func (s *Schema) checkValue(ctx context.Context, data any) error {
+// checkValue checks data against the schema. It returns the warnings of a
+// value that passes, or the error of one that fails. Each comes back
+// unbound, with a path that starts at `@`, the value data stands for. It
+// holds no source, so each path names a key as the decoder does, such as
+// 16 for a key the document spells 0x10.
+func (s *Schema) checkValue(ctx context.Context, data any) ([]error, error) {
 	if s.acceptAll {
-		return nil
+		return nil, nil
 	}
 
 	// Both normalizeJSON and the validator read a shared value again at
 	// every use, so the check runs before either of them.
 	err := checkExpansion(data)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	return s.validate(ctx, data, nil)
@@ -765,7 +813,11 @@ func (s *Schema) checkValue(ctx context.Context, data any) error {
 // hexadecimal 0x10, needs the node to spell the key in its path as the
 // source does, and a !!timestamp needs it to show whether the source
 // wrote only a date.
-func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error {
+//
+// The error of a value that fails holds its warnings. With a node, each
+// warning there is bound through n. A call that collects warnings then
+// tells apart two of them with one message.
+func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) ([]error, error) {
 	// The resolver binds aliases across the whole document, so an alias
 	// inside a scoped node reaches an anchor outside it. The document
 	// keeps one for every Node of it, so a check of each item of a list
@@ -778,10 +830,22 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 	// The timestamp lookups and every violation share one index, so each
 	// key decodes once however many of them lie under its mapping.
 	idx := datapath.NewIndex(resolver)
+	c := converter{root: rootOf(n), idx: idx}
+	instance := normalizeJSON(data, c.root, idx)
 
-	err := s.compiled.Validate(ctx, normalizeJSON(data, rootOf(n), idx))
+	var (
+		records []jsonschema.Deprecation
+		err     error
+	)
+
+	if schemahook.ReportsDeprecations(ctx) {
+		records, err = s.compiled.ValidateDeprecations(ctx, instance)
+	} else {
+		err = s.compiled.Validate(ctx, instance)
+	}
+
 	if err == nil {
-		return nil
+		return c.deprecations(records, instance), nil
 	}
 
 	// A structured validation failure carries per-location paths, so it
@@ -789,17 +853,24 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 	// failure.
 	ve, ok := errors.AsType[*jsonschema.ValidationError](err)
 	if !ok {
-		return fmt.Errorf("%w: %w", ErrValidate, err)
+		return nil, fmt.Errorf("%w: %w", ErrValidate, err)
 	}
 
 	// A $ref the validator cannot resolve arrives as a validation failure
 	// at the referencing location, but the data there broke no constraint,
 	// so report the schema problem rather than point at the document.
 	if refErrs := unresolvedRefs(ve); len(refErrs) > 0 {
-		return fmt.Errorf("%w: %w", ErrValidate, errors.Join(refErrs...))
+		return nil, fmt.Errorf("%w: %w", ErrValidate, errors.Join(refErrs...))
 	}
 
-	return newValidationError(ve, n, idx)
+	warnings := c.deprecations(records, instance)
+	if n != nil {
+		for i, w := range warnings {
+			warnings[i] = n.Bind(w)
+		}
+	}
+
+	return nil, c.validationError(ve, warnings)
 }
 
 // unresolvedRefs returns the failures in the tree of ve that report a $ref
@@ -890,17 +961,36 @@ func rootOf(n *niceyaml.Node) ast.Node {
 // The walks that share idx share its limit on the merge sources they
 // read, which is the limit of one [paths.EntryFinder].
 func sourcePath(root ast.Node, idx *datapath.Index, segments []jsonschema.Segment) datapath.Target {
-	t := datapath.Target{Path: paths.Current(), Node: root}
+	t, _ := sourceRoute(root, idx, segments, false)
 
-	for _, seg := range segments {
+	return t
+}
+
+// sourceRoute returns the [datapath.Target] that [sourcePath] returns for
+// segments, and the token at each step of its path, which orders the
+// paths that reach one node. The token of a step is the one
+// [datapath.Target.Start] gives, and the last step takes the key of its
+// entry when key is set.
+func sourceRoute(
+	root ast.Node,
+	idx *datapath.Index,
+	segments []jsonschema.Segment,
+	key bool,
+) (datapath.Target, []*token.Token) {
+	t := datapath.Target{Path: paths.Current(), Node: root}
+	route := make([]*token.Token, 0, len(segments))
+
+	for i, seg := range segments {
 		if seg.IsIndex {
 			t = idx.Element(t, seg.Index)
 		} else {
 			t = idx.Member(t, seg.Key)
 		}
+
+		route = append(route, t.Start(key && i == len(segments)-1))
 	}
 
-	return t
+	return t, route
 }
 
 // normalizeJSON converts the YAML-native values a decode produces that the

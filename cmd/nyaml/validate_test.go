@@ -803,3 +803,30 @@ type closedWriter struct{}
 func (closedWriter) Write([]byte) (int, error) {
 	return 0, io.ErrClosedPipe
 }
+
+func TestValidateCmdDeprecations(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeFile(t, dir, "compose.schema.json",
+		`{"properties": {"version": {"deprecated": true, "deprecationMessage": "Compose ignores version."}}}`)
+
+	path := writeFile(t, dir, "compose.yaml", stringtest.LinesLF(`version: "3.8"`, "services: {}"))
+
+	out := &bytes.Buffer{}
+
+	// A file that passes prints its warnings before its result line, and
+	// the run passes.
+	err := quietValidateCmd(out, "--schema", filepath.Join(dir, "compose.schema.json"), path).Execute()
+	require.NoError(t, err)
+	assert.Equal(t, stringtest.LinesLF(
+		`compose.yaml:1:1: warning: $.version~: deprecated field "version"`,
+		"`-- Compose ignores version.",
+		"",
+		`   1 | version: "3.8"`,
+		"     | ^^^^^^^",
+		"   2 | services: {}",
+		"",
+		"compose.yaml: valid",
+	), strings.ReplaceAll(out.String(), path, "compose.yaml"))
+}
