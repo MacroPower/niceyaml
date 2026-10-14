@@ -17,61 +17,14 @@ import (
 func TestSelector_String(t *testing.T) {
 	t.Parallel()
 
+	// TestPath_Selectors checks the text of the selectors of each kind.
 	tcs := map[string]struct {
 		want string
 		sel  paths.Selector
 	}{
-		"child": {
-			sel:  paths.Selector{Kind: paths.SelectorChild, Name: "name"},
-			want: ".name",
-		},
-		"child with the empty name": {
-			sel:  paths.Selector{Kind: paths.SelectorChild},
-			want: ".''",
-		},
-		"child with a reserved character": {
-			sel:  paths.Selector{Kind: paths.SelectorChild, Name: "a.b"},
-			want: ".'a.b'",
-		},
 		"child with a space": {
 			sel:  paths.Selector{Kind: paths.SelectorChild, Name: "my job"},
 			want: ".'my job'",
-		},
-		"child named star": {
-			sel:  paths.Selector{Kind: paths.SelectorChild, Name: "*"},
-			want: ".'*'",
-		},
-		"index": {
-			sel:  paths.Selector{Kind: paths.SelectorIndex, Index: 3},
-			want: "[3]",
-		},
-		"index zero": {
-			sel:  paths.Selector{Kind: paths.SelectorIndex},
-			want: "[0]",
-		},
-		"mapping wildcard": {
-			sel:  paths.Selector{Kind: paths.SelectorChildAll},
-			want: ".*",
-		},
-		"sequence wildcard": {
-			sel:  paths.Selector{Kind: paths.SelectorIndexAll},
-			want: "[*]",
-		},
-		"recursive": {
-			sel:  paths.Selector{Kind: paths.SelectorRecursive, Name: "name"},
-			want: "..name",
-		},
-		"recursive with a reserved character": {
-			sel:  paths.Selector{Kind: paths.SelectorRecursive, Name: "a.b"},
-			want: "..'a.b'",
-		},
-		"recursive wildcard": {
-			sel:  paths.Selector{Kind: paths.SelectorRecursiveAll},
-			want: "..*",
-		},
-		"key": {
-			sel:  paths.Selector{Kind: paths.SelectorKey},
-			want: "~",
 		},
 		"zero selector": {want: ""},
 		"unknown kind": {
@@ -159,6 +112,10 @@ func TestPath_Selectors(t *testing.T) {
 			expr: "$..'x y'",
 			want: []paths.Selector{{Kind: paths.SelectorRecursive, Name: "x y"}},
 		},
+		"empty recursive name": {
+			expr: "$..''",
+			want: []paths.Selector{{Kind: paths.SelectorRecursive}},
+		},
 		"recursive wildcard": {
 			expr: "$.spec..*.name",
 			want: []paths.Selector{
@@ -216,19 +173,19 @@ func TestPath_Selectors(t *testing.T) {
 			assert.Equal(t, len(tc.want), p.Len())
 
 			// The selectors print the path expression after its root.
-			var sb strings.Builder
-
-			sb.WriteString("$")
-
+			texts := []string{"$"}
 			for _, sel := range got {
-				sb.WriteString(sel.String())
+				texts = append(texts, sel.String())
 			}
 
-			assert.Equal(t, p.String(), sb.String())
+			assert.Equal(t, tc.expr, strings.Join(texts, ""))
+			assert.Equal(t, p.String(), strings.Join(texts, ""))
 
-			// The builders turn the selectors back into an equal path.
+			// The builders turn the selectors back into an equal path,
+			// which holds the same selectors.
 			rebuilt := buildPath(t, p.Selectors())
 			assert.True(t, rebuilt.Equal(p), "rebuilt %s from %s", rebuilt, p)
+			assert.Equal(t, got, slices.Collect(rebuilt.Selectors()))
 		})
 	}
 
@@ -248,25 +205,6 @@ func TestPath_Selectors(t *testing.T) {
 			{Kind: paths.SelectorChild, Name: "a"},
 			{Kind: paths.SelectorChild, Name: "b"},
 		}, got)
-	})
-
-	t.Run("builders", func(t *testing.T) {
-		t.Parallel()
-
-		p := paths.Doc().Child("spec", "a.b").Index(0, 2).ChildAll().IndexAll().Recursive("").RecursiveAll().Key()
-
-		assert.Equal(t, []paths.Selector{
-			{Kind: paths.SelectorChild, Name: "spec"},
-			{Kind: paths.SelectorChild, Name: "a.b"},
-			{Kind: paths.SelectorIndex},
-			{Kind: paths.SelectorIndex, Index: 2},
-			{Kind: paths.SelectorChildAll},
-			{Kind: paths.SelectorIndexAll},
-			{Kind: paths.SelectorRecursive},
-			{Kind: paths.SelectorRecursiveAll},
-			{Kind: paths.SelectorKey},
-		}, slices.Collect(p.Selectors()))
-		assert.True(t, buildPath(t, p.Selectors()).Equal(p))
 	})
 }
 
@@ -316,6 +254,8 @@ func TestPath_Last(t *testing.T) {
 			ok:   true,
 		},
 		"empty name": {
+			// The selector differs from the zero selector, which has no
+			// kind.
 			p:    paths.Doc().Child(""),
 			want: paths.Selector{Kind: paths.SelectorChild},
 			ok:   true,
@@ -361,27 +301,6 @@ func TestPath_Last(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
-
-	t.Run("empty name differs from the zero selector", func(t *testing.T) {
-		t.Parallel()
-
-		got, ok := paths.MustParse("$.''").Last()
-		require.True(t, ok)
-		assert.NotEqual(t, paths.Selector{}, got)
-		assert.Equal(t, paths.SelectorChild, got.Kind)
-		assert.Empty(t, got.Name)
-	})
-
-	t.Run("name of a key through the parent", func(t *testing.T) {
-		t.Parallel()
-
-		parent, ok := paths.MustParse("$.jobs.build~").Parent()
-		require.True(t, ok)
-
-		got, ok := parent.Last()
-		require.True(t, ok)
-		assert.Equal(t, paths.Selector{Kind: paths.SelectorChild, Name: "build"}, got)
-	})
 }
 
 func TestPath_Last_Matches(t *testing.T) {
