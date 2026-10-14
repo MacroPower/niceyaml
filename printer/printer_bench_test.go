@@ -48,6 +48,19 @@ func addBenchmarkOverlays(view *line.View, n int) {
 	}
 }
 
+// benchmarkPrint measures p printing a view of source, which holds yaml,
+// and reports the throughput in bytes of yaml.
+func benchmarkPrint(b *testing.B, p *printer.Printer, source *niceyaml.Source, yaml string) {
+	b.Helper()
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(yaml)))
+
+	for b.Loop() {
+		_ = p.Print(source.View())
+	}
+}
+
 func BenchmarkPrinterPrint(b *testing.B) {
 	sizes := []struct {
 		name  string
@@ -63,14 +76,7 @@ func BenchmarkPrinterPrint(b *testing.B) {
 		source := niceyaml.NewSourceFromString(yaml)
 
 		b.Run(sz.name, func(b *testing.B) {
-			p := printer.New()
-
-			b.ReportAllocs()
-			b.SetBytes(int64(len(yaml)))
-
-			for b.Loop() {
-				_ = p.Print(source.View())
-			}
+			benchmarkPrint(b, printer.New(), source, yaml)
 		})
 	}
 }
@@ -210,14 +216,7 @@ func BenchmarkPrinterWithGutter(b *testing.B) {
 
 	for _, g := range gutters {
 		b.Run(g.name, func(b *testing.B) {
-			p := printer.New(printer.WithGutter(g.gutter))
-
-			b.ReportAllocs()
-			b.SetBytes(int64(len(yaml)))
-
-			for b.Loop() {
-				_ = p.Print(source.View())
-			}
+			benchmarkPrint(b, printer.New(printer.WithGutter(g.gutter)), source, yaml)
 		})
 	}
 }
@@ -238,14 +237,7 @@ func BenchmarkPrinterWithWrapping(b *testing.B) {
 
 	for _, w := range widths {
 		b.Run(w.name, func(b *testing.B) {
-			p := printer.New(printer.WithWrapWidth(w.width))
-
-			b.ReportAllocs()
-			b.SetBytes(int64(len(yaml)))
-
-			for b.Loop() {
-				_ = p.Print(source.View())
-			}
+			benchmarkPrint(b, printer.New(printer.WithWrapWidth(w.width)), source, yaml)
 		})
 	}
 }
@@ -290,7 +282,7 @@ func BenchmarkPrinterPrintError_LongWrappedValue(b *testing.B) {
 	// rows, and the caret run under it takes a row below each one.
 	for _, n := range []int{8000, 32000} {
 		source := niceyaml.NewSourceFromString("data: " + strings.Repeat("QUJD", n/4) + "\n")
-		err := source.Bind(errAt("bad", "data"))
+		err := source.Bind(yamltest.ErrorAt("bad", "data"))
 
 		b.Run(fmt.Sprintf("chars_%d", n), func(b *testing.B) {
 			p := printer.New(printer.WithWrapWidth(80))
