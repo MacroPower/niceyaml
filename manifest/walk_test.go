@@ -4,14 +4,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
@@ -23,7 +24,8 @@ type tree struct {
 	dirs  []string
 }
 
-// write creates t below dir.
+// write creates tr below dir. It skips the test when tr holds a link
+// that the platform refuses to create.
 func (tr tree) write(tb testing.TB, dir string) {
 	tb.Helper()
 
@@ -31,16 +33,12 @@ func (tr tree) write(tb testing.TB, dir string) {
 		require.NoError(tb, os.MkdirAll(filepath.Join(dir, d), 0o750))
 	}
 
-	for name, text := range tr.files {
-		p := filepath.Join(dir, name)
-		require.NoError(tb, os.MkdirAll(filepath.Dir(p), 0o750))
-		require.NoError(tb, os.WriteFile(p, []byte(text), 0o600))
-	}
+	yamltest.WriteFiles(tb, dir, tr.files)
 
 	for name, target := range tr.links {
-		p := filepath.Join(dir, name)
+		p := filepath.Join(dir, filepath.FromSlash(name))
 		require.NoError(tb, os.MkdirAll(filepath.Dir(p), 0o750))
-		require.NoError(tb, os.Symlink(target, p))
+		yamltest.SymlinkOrSkip(tb, target, p)
 	}
 }
 
@@ -55,12 +53,22 @@ func loadedNames(set *manifest.Set) []string {
 	return names
 }
 
+// notExistReason returns the reason that the system gives for a path
+// that does not exist, such as "no such file or directory".
+func notExistReason(t *testing.T) string {
+	t.Helper()
+
+	_, err := os.Stat(filepath.Join(t.TempDir(), "missing"))
+
+	var pe *fs.PathError
+
+	require.ErrorAs(t, err, &pe)
+
+	return pe.Err.Error()
+}
+
 func TestPath(t *testing.T) {
 	t.Parallel()
-
-	if runtime.GOOS == "windows" {
-		t.Skip("symbolic links need privileges on Windows")
-	}
 
 	tcs := map[string]struct {
 		tree  tree
@@ -142,9 +150,10 @@ func TestPath(t *testing.T) {
 				files: map[string]string{"config/cafe.yaml": cafeDoc, "shared/hours.yaml": ""},
 				links: map[string]string{"config/hours.yaml": "../shared/hours.yaml"},
 			},
-			err: "" +
-				"{dir}/config/hours.yaml: links to ../shared/hours.yaml, which leads outside {dir}/config\n" +
+			err: stringtest.JoinLF(
+				"{dir}/config/hours.yaml: links to ../shared/hours.yaml, which leads outside {dir}/config",
 				"`-- copy the file into {dir}/config, or make {dir}/config itself the link",
+			),
 			is: []error{manifest.ErrOutsideLink},
 		},
 		"link outside the directory allowed": {
@@ -173,7 +182,7 @@ func TestPath(t *testing.T) {
 		},
 		"input that does not exist": {
 			input: "confg",
-			err:   "confg: no such file or directory",
+			err:   "confg: " + notExistReason(t),
 			is:    []error{fs.ErrNotExist},
 		},
 		"bad pattern": {
@@ -240,33 +249,15 @@ func TestPath(t *testing.T) {
 }
 
 // hoursV1Doc holds an Hours manifest that declares the written version.
-const hoursV1Doc = "apiVersion: cafe.jacobcolvin.com/v1\nkind: Hours\nmetadata:\n  name: weekday\n"
-
-func TestPath_Relative(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	tree{files: map[string]string{"config/cafe.yaml": cafeDoc}}.write(t, dir)
-
-	reg := newCafeRegistry(t)
-
-	_, err := reg.Load(t.Context(), manifest.Path(filepath.Join(dir, "config", "missing")))
-	require.ErrorIs(t, err, fs.ErrNotExist)
-
-	set, err := reg.Load(t.Context(), manifest.Inputs(
-		manifest.Path(filepath.Join(dir, "config")),
-		manifest.Path(filepath.Join(dir, "config", "cafe.yaml")),
-	))
-	require.NoError(t, err)
-	assert.Len(t, set.Sources(), 1)
-}
+var hoursV1Doc = stringtest.LinesLF(
+	"apiVersion: cafe.jacobcolvin.com/v1",
+	"kind: Hours",
+	"metadata:",
+	"  name: weekday",
+)
 
 func TestFS(t *testing.T) {
 	t.Parallel()
-
-	if runtime.GOOS == "windows" {
-		t.Skip("symbolic links need privileges on Windows")
-	}
 
 	tcs := map[string]struct {
 		tree tree
@@ -313,7 +304,7 @@ func TestFS(t *testing.T) {
 			is:  []error{fs.ErrNotExist},
 		},
 		"missing input": {
-			err: "config: no such file or directory",
+			err: "config: " + notExistReason(t),
 			is:  []error{fs.ErrNotExist},
 		},
 	}
@@ -419,7 +410,7 @@ func TestWithSourceOptions(t *testing.T) {
 
 	reg := newCafeRegistry(t)
 
-	_, err := reg.Load(t.Context(), manifest.FS(mapFS(map[string]string{"cafe.yaml": cafeDoc}), "config",
+	_, err := reg.Load(t.Context(), configFS(map[string]string{"cafe.yaml": cafeDoc},
 		manifest.WithSourceOptions(niceyaml.WithByteLimit(10), niceyaml.WithName("ignored"))))
 	require.ErrorIs(t, err, niceyaml.ErrLimit)
 	assert.True(t, niceyaml.IsInvalid(err))

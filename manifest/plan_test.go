@@ -2,12 +2,12 @@ package manifest_test
 
 import (
 	"context"
-	"fmt"
-	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -17,6 +17,27 @@ import (
 	"go.jacobcolvin.com/niceyaml/printer"
 )
 
+// menuV1Doc holds the documents of menuDoc at cafe.jacobcolvin.com/v1.
+var menuV1Doc = stringtest.LinesLF(
+	"# Fika menu, updated each season.",
+	"apiVersion: cafe.jacobcolvin.com/v1",
+	"kind: MenuItem",
+	"metadata:",
+	"  name: kanelbulle",
+	"spec:",
+	"  price: 45 # kr",
+	"  tags: [vegan]",
+	"---",
+	"apiVersion: cafe.jacobcolvin.com/v1",
+	"kind: MenuItem",
+	"metadata:",
+	"  name: semla",
+	"spec:",
+	"  price: 65",
+	"  tags: [seasonal]",
+	"  legacyPricing: true",
+)
+
 // planOf plans the migration of files in the directory config of a file
 // system, with the registry of opts.
 func planOf(t *testing.T, opts []manifest.RegistryOption, files map[string]string,
@@ -24,10 +45,9 @@ func planOf(t *testing.T, opts []manifest.RegistryOption, files map[string]strin
 ) *manifest.Plan {
 	t.Helper()
 
-	reg, err := manifest.NewRegistry(opts...)
-	require.NoError(t, err)
+	reg := manifest.MustNewRegistry(opts...)
 
-	plan, err := reg.PlanMigration(t.Context(), manifest.FS(mapFS(files), "config"), load...)
+	plan, err := reg.PlanMigration(t.Context(), configFS(files), load...)
 	require.NoError(t, err)
 
 	return plan
@@ -58,22 +78,8 @@ func afters(plan *manifest.Plan) []string {
 func TestRegistry_PlanMigration(t *testing.T) {
 	t.Parallel()
 
-	adopt := []manifest.RegistryOption{
-		manifest.WithAppName("cafe"),
-		manifest.WithNameField(meta.Child("name")),
-		manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
-			manifest.Unversioned(),
-			manifest.Version("cafe.jacobcolvin.com/v1",
-				manifest.Written(),
-				manifest.Migrate(paths.Doc().Child("name"), func(_ context.Context, n *migrate.Node) error {
-					return n.Move(meta.Child("name"))
-				}),
-				manifest.Migrate(paths.Doc().Child("seats"), func(_ context.Context, n *migrate.Node) error {
-					return n.Move(spec.Child("seats"))
-				}),
-			),
-		)),
-	}
+	// A document whose kind is misspelled, after the documents of a file.
+	misspelled := stringtest.LinesLF("---", "apiVersion: cafe.jacobcolvin.com/v1", "kind: Menuitem")
 
 	tcs := map[string]struct {
 		files   map[string]string
@@ -88,18 +94,22 @@ func TestRegistry_PlanMigration(t *testing.T) {
 	}{
 		"example directory": {
 			opts:  cafeOptions(),
-			files: map[string]string{"cafe.yaml": cafeDoc, "hours.yaml": hoursDoc, "menu.yaml": menuDoc},
+			files: exampleFiles,
 			headers: []string{
-				"config/hours.yaml: Hours \"weekday\" from cafe.jacobcolvin.com/v1alpha1 to cafe.jacobcolvin.com/v1",
-				"config/menu.yaml: MenuItem \"kanelbulle\" from cafe.jacobcolvin.com/v1beta1 to cafe.jacobcolvin.com/v1",
+				`config/hours.yaml: Hours "weekday" from cafe.jacobcolvin.com/v1alpha1 to cafe.jacobcolvin.com/v1`,
+				`config/menu.yaml: MenuItem "kanelbulle" from cafe.jacobcolvin.com/v1beta1 to cafe.jacobcolvin.com/v1`,
 			},
 			afters: []string{
-				"apiVersion: cafe.jacobcolvin.com/v1\nkind: Hours\nmetadata:\n  name: weekday\n" +
-					"spec:\n  open: \"07:00\" # summer hours\n  close: \"19:00\"\n",
-				"# Fika menu, updated each season.\napiVersion: cafe.jacobcolvin.com/v1\nkind: MenuItem\n" +
-					"metadata:\n  name: kanelbulle\nspec:\n  price: 45 # kr\n  tags: [vegan]\n---\n" +
-					"apiVersion: cafe.jacobcolvin.com/v1\nkind: MenuItem\nmetadata:\n  name: semla\nspec:\n" +
-					"  price: 65\n  tags: [seasonal]\n  legacyPricing: true\n",
+				stringtest.LinesLF(
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Hours",
+					"metadata:",
+					"  name: weekday",
+					"spec:",
+					`  open: "07:00" # summer hours`,
+					`  close: "19:00"`,
+				),
+				menuV1Doc,
 			},
 			summary: "2 files to migrate, 1 up to date, nothing written",
 		},
@@ -109,48 +119,94 @@ func TestRegistry_PlanMigration(t *testing.T) {
 			headers: []string{
 				`config/hours.yaml: Hours "weekday" from cafe.jacobcolvin.com/v1alpha1 to cafe.jacobcolvin.com/v1`,
 			},
-			afters: []string{cafeDoc + "---\napiVersion: cafe.jacobcolvin.com/v1\nkind: Hours\nmetadata:\n" +
-				"  name: weekday\nspec:\n  open: \"07:00\" # summer hours\n  close: \"19:00\"\n"},
+			afters: []string{cafeDoc + stringtest.LinesLF(
+				"---",
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Hours",
+				"metadata:",
+				"  name: weekday",
+				"spec:",
+				`  open: "07:00" # summer hours`,
+				`  close: "19:00"`,
+			)},
 			summary: "1 file to migrate, nothing written",
 		},
 		"removal": {
 			opts: drinkOptions(true),
 			files: map[string]string{
-				"drink.yaml": drinkDoc + "  # Matches the brand palette.\n  color: red # or hex\n  size: S\n",
+				"drink.yaml": drinkDoc + stringtest.LinesLF(
+					"  # Matches the brand palette.",
+					"  color: red # or hex",
+					"  size: S",
+				),
 			},
 			headers: []string{
-				"config/drink.yaml: Drink from cafe.jacobcolvin.com/v1beta1 to cafe.jacobcolvin.com/v1\n" +
+				stringtest.JoinLF(
+					"config/drink.yaml: Drink from cafe.jacobcolvin.com/v1beta1 to cafe.jacobcolvin.com/v1",
 					"  removes $.spec.color: menu colors moved to the theme of the Cafe",
+				),
 			},
-			afters: []string{"apiVersion: cafe.jacobcolvin.com/v1\nkind: Drink\nmetadata:\n  name: kaffe\n" +
-				"spec:\n  size: small\n"},
+			afters: []string{stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Drink",
+				"metadata:",
+				"  name: kaffe",
+				"spec:",
+				"  size: small",
+			)},
 			summary: "1 file to migrate, nothing written",
+		},
+		"deprecations that no step fixes": {
+			opts:  deprecationOptions(),
+			files: map[string]string{"menu.yaml": deprecatedMenu},
+			headers: []string{
+				`config/menu.yaml: MenuItem "kanelbulle" from cafe.jacobcolvin.com/v1beta1 to cafe.jacobcolvin.com/v1`,
+			},
+			afters: []string{
+				stringtest.LinesLF(
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: MenuItem",
+					"metadata:",
+					"  name: kanelbulle",
+					"spec:",
+					"  price: 45",
+					"  legacyPricing: true",
+					"---",
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: MenuItem",
+					"metadata:",
+					"  name: semla",
+					"spec:",
+					"  price: 65",
+					"  legacyPricing: true",
+				),
+			},
+			summary: "1 file to migrate, nothing written",
+			warns:   "config: 2 warnings",
 		},
 		"step error blocks the file": {
 			opts:    drinkOptions(true),
 			files:   map[string]string{"drink.yaml": drinkDoc + "  size: XL\n"},
 			blocked: []string{"config/drink.yaml"},
 			summary: "1 file not migrated, nothing written",
-			err:     "config/drink.yaml:6:9: $.spec.size: no cafe.jacobcolvin.com/v1 size for \"XL\"",
+			err:     `config/drink.yaml:6:9: $.spec.size: no cafe.jacobcolvin.com/v1 size for "XL"`,
 		},
 		"routing failure keeps its document": {
 			opts: cafeOptions(),
 			files: map[string]string{
-				"menu.yaml": menuDoc + "---\napiVersion: cafe.jacobcolvin.com/v1\nkind: Menuitem\n",
+				"menu.yaml": menuDoc + misspelled,
 			},
 			headers: []string{
-				"config/menu.yaml: MenuItem \"kanelbulle\" from cafe.jacobcolvin.com/v1beta1 to cafe.jacobcolvin.com/v1\n" +
+				stringtest.JoinLF(
+					`config/menu.yaml: MenuItem "kanelbulle" from cafe.jacobcolvin.com/v1beta1 to cafe.jacobcolvin.com/v1`,
 					"config/menu.yaml: 1 document not migrated",
+				),
 			},
 			afters: []string{
-				"# Fika menu, updated each season.\napiVersion: cafe.jacobcolvin.com/v1\nkind: MenuItem\n" +
-					"metadata:\n  name: kanelbulle\nspec:\n  price: 45 # kr\n  tags: [vegan]\n---\n" +
-					"apiVersion: cafe.jacobcolvin.com/v1\nkind: MenuItem\nmetadata:\n  name: semla\nspec:\n" +
-					"  price: 65\n  tags: [seasonal]\n  legacyPricing: true\n" +
-					"---\napiVersion: cafe.jacobcolvin.com/v1\nkind: Menuitem\n",
+				menuV1Doc + misspelled,
 			},
 			summary: "1 file to migrate, 1 document not migrated, nothing written",
-			err:     "config/menu.yaml:20:7: $.kind: unknown kind \"Menuitem\"",
+			err:     `config/menu.yaml:20:7: $.kind: unknown kind "Menuitem"`,
 		},
 		"up to date": {
 			opts:    cafeOptions(),
@@ -159,34 +215,57 @@ func TestRegistry_PlanMigration(t *testing.T) {
 		},
 		"removed version that the kind still lists": {
 			opts:    configOptions(manifest.WithRemoved("1", "Config", "app 2.0 removed version 1")),
-			files:   map[string]string{"config.yaml": "version: 1\nport: 80\n"},
+			files:   map[string]string{"config.yaml": stringtest.LinesLF("version: 1", "port: 80")},
 			headers: []string{"config/config.yaml: Config from version 1 to version 2"},
-			afters:  []string{"version: 2\nlisten: 80\n"},
+			afters:  []string{stringtest.LinesLF("version: 2", "listen: 80")},
 			summary: "1 file to migrate, nothing written",
 		},
 		"type fields of an unversioned document": {
-			opts:  adopt,
-			files: map[string]string{"cafe.yaml": "# Café Yamüll, the main room.\nname: yamull\nseats: 40\n"},
+			opts: adoptOptions(true),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"# Café Yamüll, the main room.",
+				"name: yamull",
+				"seats: 40",
+			)},
 			headers: []string{
-				"config/cafe.yaml: Cafe \"yamull\" from the unversioned layout of Cafe to cafe.jacobcolvin.com/v1",
+				`config/cafe.yaml: Cafe "yamull" from the unversioned layout of Cafe to cafe.jacobcolvin.com/v1`,
 			},
-			afters: []string{"# Café Yamüll, the main room.\napiVersion: cafe.jacobcolvin.com/v1\nkind: Cafe\n" +
-				"metadata:\n  name: yamull\nspec:\n  seats: 40\n"},
+			afters: []string{stringtest.LinesLF(
+				"# Café Yamüll, the main room.",
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Cafe",
+				"metadata:",
+				"  name: yamull",
+				"spec:",
+				"  seats: 40",
+			)},
 			summary: "1 file to migrate, nothing written",
 		},
 		"documents without names": {
-			opts:    configOptions(),
-			files:   map[string]string{"config.yaml": "version: 2\nlisten: 80\n---\nversion: 1\nport: 80\n"},
+			opts: configOptions(),
+			files: map[string]string{"config.yaml": stringtest.LinesLF(
+				"version: 2",
+				"listen: 80",
+				"---",
+				"version: 1",
+				"port: 80",
+			)},
 			headers: []string{"config/config.yaml: document 2: Config from version 1 to version 2"},
-			afters:  []string{"version: 2\nlisten: 80\n---\nversion: 2\nlisten: 80\n"},
+			afters: []string{stringtest.LinesLF(
+				"version: 2",
+				"listen: 80",
+				"---",
+				"version: 2",
+				"listen: 80",
+			)},
 			summary: "1 file to migrate, nothing written",
 		},
 		"removal by a version newer than the written one in strict mode": {
 			opts:    drinkOptions(false),
-			files:   map[string]string{"drink.yaml": drinkDoc + "  color: red\n"},
+			files:   map[string]string{"drink.yaml": colorDrinkDoc},
 			load:    []manifest.LoadOption{manifest.WithWarningsAsErrors(true)},
 			summary: "1 file up to date, nothing written",
-			warns:   "config/drink.yaml:6:3: warning: $.spec.color~: cafe.jacobcolvin.com/v1 ignores field \"color\"",
+			warns:   `config/drink.yaml:6:3: warning: $.spec.color~: cafe.jacobcolvin.com/v1 ignores field "color"`,
 		},
 	}
 
@@ -219,54 +298,80 @@ func TestRegistry_PlanMigration(t *testing.T) {
 	}
 }
 
+func TestRegistry_PlanMigration_WarningFilter(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu       sync.Mutex
+		versions []string
+	)
+
+	// The filter gets the version that each document declares once
+	// Apply writes it.
+	keep := manifest.WithWarningFilter(func(w *manifest.Warning) bool {
+		mu.Lock()
+		defer mu.Unlock()
+
+		versions = append(versions, w.Kind+" "+w.Version)
+
+		return true
+	})
+
+	plan := planOf(t, deprecationOptions(), map[string]string{"menu.yaml": deprecatedMenu}, keep)
+	require.Error(t, plan.Warnings())
+
+	want := "MenuItem cafe.jacobcolvin.com/v1"
+	assert.Equal(t, []string{want, want}, versions)
+}
+
 func TestRegistry_PlanMigration_Limits(t *testing.T) {
 	t.Parallel()
 
-	reg, err := manifest.NewRegistry(configOptions()...)
-	require.NoError(t, err)
+	tcs := map[string]struct {
+		opts  []manifest.RegistryOption
+		limit niceyaml.SourceOption
+		want  string
+	}{
+		// The rename makes the 20 bytes of the text two bytes longer.
+		"new text past the byte limit": {
+			opts:  configOptions(),
+			limit: niceyaml.WithByteLimit(21),
+			want:  "config/config.yaml: cannot rewrite a file whose new text holds more than 21 bytes",
+		},
+		"new text past the depth limit": {
+			opts: []manifest.RegistryOption{
+				manifest.WithVersionOnly(paths.Doc().Child("version")),
+				manifest.WithKinds(manifest.NewKind[map[string]any]("Config",
+					manifest.Version("1"),
+					manifest.Version("2",
+						manifest.Written(),
+						manifest.Migrate(paths.Doc().Child("port"), func(ctx context.Context, n *migrate.Node) error {
+							return n.Set(ctx, map[string]any{"listen": map[string]any{"port": 80}})
+						}),
+					),
+				)),
+			},
+			limit: niceyaml.WithDepthLimit(2),
+			want:  "config/config.yaml: cannot rewrite a document whose new text nests more than 2 levels",
+		},
+	}
 
-	// The rename makes the text two bytes longer.
-	text := "version: 1\nport: 80\n"
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	in := manifest.FS(mapFS(map[string]string{"config.yaml": text}), "config",
-		manifest.WithSourceOptions(niceyaml.WithByteLimit(len(text)+1)))
+			in := configFS(map[string]string{"config.yaml": stringtest.LinesLF("version: 1", "port: 80")},
+				manifest.WithSourceOptions(tc.limit))
 
-	plan, err := reg.PlanMigration(t.Context(), in)
-	require.NoError(t, err)
-	assert.Empty(t, plan.Files())
-	assert.Equal(t, []string{"config/config.yaml"}, plan.Blocked())
-	require.ErrorIs(t, plan.Err(), niceyaml.ErrLimit)
-	assert.False(t, niceyaml.IsInvalid(plan.Err()))
-	assert.Equal(t, fmt.Sprintf("config/config.yaml: cannot rewrite a file whose new text holds more than %d bytes",
-		len(text)+1), plan.Err().Error())
-}
-
-func TestRegistry_PlanMigration_DepthLimit(t *testing.T) {
-	t.Parallel()
-
-	reg, err := manifest.NewRegistry(
-		manifest.WithVersionOnly(paths.Doc().Child("version")),
-		manifest.WithKinds(manifest.NewKind[map[string]any]("Config",
-			manifest.Version("1"),
-			manifest.Version("2",
-				manifest.Written(),
-				manifest.Migrate(paths.Doc().Child("port"), func(ctx context.Context, n *migrate.Node) error {
-					return n.Set(ctx, map[string]any{"listen": map[string]any{"port": 80}})
-				}),
-			),
-		)),
-	)
-	require.NoError(t, err)
-
-	in := manifest.FS(mapFS(map[string]string{"config.yaml": "version: 1\nport: 80\n"}), "config",
-		manifest.WithSourceOptions(niceyaml.WithDepthLimit(2)))
-
-	plan, err := reg.PlanMigration(t.Context(), in)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"config/config.yaml"}, plan.Blocked())
-	require.ErrorIs(t, plan.Err(), niceyaml.ErrLimit)
-	assert.Equal(t, "config/config.yaml: cannot rewrite a document whose new text nests more than 2 levels",
-		plan.Err().Error())
+			plan, err := manifest.MustNewRegistry(tc.opts...).PlanMigration(t.Context(), in)
+			require.NoError(t, err)
+			assert.Empty(t, plan.Files())
+			assert.Equal(t, []string{"config/config.yaml"}, plan.Blocked())
+			require.ErrorIs(t, plan.Err(), niceyaml.ErrLimit)
+			assert.False(t, niceyaml.IsInvalid(plan.Err()))
+			assert.Equal(t, tc.want, plan.Err().Error())
+		})
+	}
 }
 
 func TestPlan_StepCalls(t *testing.T) {
@@ -299,52 +404,51 @@ func TestPlan_Sources(t *testing.T) {
 func TestPlanFile_Diff(t *testing.T) {
 	t.Parallel()
 
-	reg := newCafeRegistry(t)
 	p := yamltest.NewPlainPrinter(printer.WithGutter(printer.DefaultGutter))
+	files := map[string]string{"hours.yaml": hoursDoc}
 
-	plan, err := reg.PlanMigration(t.Context(), manifest.FS(mapFS(map[string]string{"hours.yaml": hoursDoc}), "config"))
-	require.NoError(t, err)
+	plan := planOf(t, cafeOptions(), files)
 	require.Len(t, plan.Files(), 1)
 
-	assert.Equal(t, ""+
-		"      @@ -1,7 +1,7 @@\n"+
-		"   1 -apiVersion: cafe.jacobcolvin.com/v1alpha1\n"+
-		"   1 +apiVersion: cafe.jacobcolvin.com/v1\n"+
-		"   2  kind: Hours\n"+
-		"   3  metadata:\n"+
-		"   4    name: weekday\n"+
-		"   5  spec:\n"+
-		"   6 -  opens: \"07:00\" # summer hours\n"+
-		"   7 -  closes: \"19:00\"\n"+
-		"   6 +  open: \"07:00\" # summer hours\n"+
-		"   7 +  close: \"19:00\"", trimLines(p.Print(plan.Files()[0].Diff(3))))
+	assert.Equal(t, stringtest.JoinLF(
+		"      @@ -1,7 +1,7 @@",
+		"   1 -apiVersion: cafe.jacobcolvin.com/v1alpha1",
+		"   1 +apiVersion: cafe.jacobcolvin.com/v1",
+		"   2  kind: Hours",
+		"   3  metadata:",
+		"   4    name: weekday",
+		"   5  spec:",
+		`   6 -  opens: "07:00" # summer hours`,
+		`   7 -  closes: "19:00"`,
+		`   6 +  open: "07:00" # summer hours`,
+		`   7 +  close: "19:00"`,
+	), stringtest.TrimLineEnds(p.Print(plan.Files()[0].Diff(3))))
 
-	fsys := mapFS(map[string]string{"hours.yaml": hoursDoc})
-
-	hidden, err := reg.PlanMigration(t.Context(),
-		manifest.FS(fsys, "config", manifest.WithSourceOptions(niceyaml.WithExcerpts(false))))
+	hidden, err := newCafeRegistry(t).PlanMigration(t.Context(),
+		configFS(files, manifest.WithSourceOptions(niceyaml.WithExcerpts(false))))
 	require.NoError(t, err)
 	require.Len(t, hidden.Files(), 1)
-	assert.Equal(t, "   1  3 lines removed, 3 added", trimLines(p.Print(hidden.Files()[0].Diff(3))))
+	assert.Equal(t, "   1  3 lines removed, 3 added", stringtest.TrimLineEnds(p.Print(hidden.Files()[0].Diff(3))))
 }
 
 func TestPlanFile_Removals(t *testing.T) {
 	t.Parallel()
 
-	plan := planOf(t, drinkOptions(true), map[string]string{"drink.yaml": drinkDoc + "  color: red\n"},
+	plan := planOf(t, drinkOptions(true), map[string]string{"drink.yaml": colorDrinkDoc},
 		manifest.WithWarningsAsErrors(true), manifest.WithWarningFilter(func(*manifest.Warning) bool { return false }))
 	require.Len(t, plan.Files(), 1)
 
 	removals := plan.Files()[0].Removals()
 	require.ErrorIs(t, removals, manifest.ErrRemoved)
-	assert.Equal(t, ""+
-		"config/drink.yaml:6:3: warning: $.spec.color~: cafe.jacobcolvin.com/v1 ignores field \"color\"\n"+
-		"`-- menu colors moved to the theme of the Cafe\n"+
-		"\n"+
-		"   4 |   name: kaffe\n"+
-		"   5 | spec:\n"+
-		"   6 |   color: red\n"+
-		"     |   ^^^^^", niceyaml.FormatError(removals))
+	assert.Equal(t, stringtest.JoinLF(
+		`config/drink.yaml:6:3: warning: $.spec.color~: cafe.jacobcolvin.com/v1 ignores field "color"`,
+		"`-- menu colors moved to the theme of the Cafe",
+		"",
+		"   4 |   name: kaffe",
+		"   5 | spec:",
+		"   6 |   color: red",
+		"     |   ^^^^^",
+	), niceyaml.FormatError(removals))
 
 	var w *manifest.Warning
 
@@ -365,14 +469,4 @@ func configOptions(extra ...manifest.RegistryOption) []manifest.RegistryOption {
 			manifest.Version("2", manifest.Written(), manifest.Migrate(paths.Doc().Child("port"), rename("listen"))),
 		)),
 	}, extra...)
-}
-
-// trimLines returns s without the spaces at the end of each line.
-func trimLines(s string) string {
-	lines := strings.Split(s, "\n")
-	for i, l := range lines {
-		lines[i] = strings.TrimRight(l, " ")
-	}
-
-	return strings.Join(lines, "\n")
 }

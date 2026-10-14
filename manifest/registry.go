@@ -137,7 +137,8 @@ func WithMigrateHint(hint string) RegistryOption {
 
 // WithDecodeOptions is a [RegistryOption] that adds options to each decode
 // of a manifest. They apply after the rejection of unknown fields and
-// before the options of [DecodeOptions].
+// before the options of [DecodeOptions], so a [niceyaml.WithDefaults] of a
+// kind replaces one of the registry for the same type.
 func WithDecodeOptions(opts ...niceyaml.DecodeOption) RegistryOption {
 	return func(c *registryConfig) {
 		c.decodeOptions = append(c.decodeOptions, opts...)
@@ -622,38 +623,6 @@ func removedLabel(version string) string {
 	}
 
 	return version
-}
-
-// Verify loads and compiles the schema of each version, and returns an
-// error that names each version whose schema fails, with the error of the
-// schema. A load fails each document that reaches such a version, so a
-// test calls Verify to find the mistake before a user does:
-//
-//	func TestRegistry(t *testing.T) {
-//		t.Parallel()
-//
-//		require.NoError(t, config.Registry.Verify(t.Context()))
-//	}
-//
-// Verify shares the schemas with the loads of the registry, so a schema
-// that compiles here serves each load without a second compile.
-func (r *Registry) Verify(ctx context.Context) error {
-	var errs []error
-
-	for _, entry := range r.kinds {
-		for _, v := range entry.versions {
-			if !v.cfg.hasSchema {
-				continue
-			}
-
-			_, err := r.schemas.Schema(ctx, v.cfg.schema)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("%s %s: %w", entry.kind.name, v.label(), err))
-			}
-		}
-	}
-
-	return errors.Join(errs...)
 }
 
 // joinAnd returns items as a list in prose, as in "A, B, and C".

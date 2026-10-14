@@ -26,7 +26,8 @@
 // [NewRegistry] returns an error for a registry that contradicts itself,
 // such as a kind that lists a version twice, and [MustNewRegistry] panics on
 // one. [Registry.Verify] loads and compiles the schema of each version, so
-// a test catches a broken schema before a user meets it.
+// a test catches a broken schema before a user meets it. It also catches a
+// deprecated field that the user cannot remove.
 //
 // # Versions
 //
@@ -60,6 +61,13 @@
 // Versions compare by their place in the list and never by their text.
 // [Written] marks the version that a rewrite writes, and [Object.UpToDate]
 // reports whether a document declares that version or a newer one.
+//
+// A load decodes each manifest from the defaults that
+// [niceyaml.WithDefaults] gives its Go type, in the options of
+// [WithDecodeOptions] and [DecodeOptions]. The defaults belong to the
+// current version. A changed default changes the meaning of every file
+// that leaves the field out. The author thus ships the change as a new
+// version, whose step writes the old default where the field is missing.
 //
 // # Rewriting Files
 //
@@ -223,6 +231,23 @@
 //
 //	set, err := config.Registry.Load(ctx, manifest.Path(dir),
 //		manifest.WithWarningsAsErrors(strict))
+//
+// The schema of the current version marks a field or a value deprecated
+// with the deprecated keyword, as the Deprecations section of
+// [go.jacobcolvin.com/niceyaml/schema] describes. A load warns about each
+// value that such a schema applies to. The gen tool of
+// [go.jacobcolvin.com/x/jsonschema] sets the keyword on each field whose
+// doc comment holds a Deprecated: paragraph:
+//
+//	// LegacyPricing rounds each price to whole kronor.
+//	//
+//	// Deprecated: legacyPricing has no effect. Remove it.
+//	LegacyPricing bool `json:"legacyPricing,omitzero"`
+//
+// The omitzero option keeps the field out of required, so the user can
+// follow the warning. Only the schema of the current version warns. The
+// schema of an older version still checks a document, but a later release
+// might drop one of its marks and keep the field.
 //
 // A warning handler on the context of a load receives none of the warnings
 // that the load reports.

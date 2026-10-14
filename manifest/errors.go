@@ -8,6 +8,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/schema"
 )
 
 // Each problem that a load, a plan, or Apply reports matches one of these
@@ -76,8 +77,9 @@ var (
 	ErrChanged = errors.New("file changed")
 
 	// ErrDeprecated indicates the warning about a deprecated version, kind,
-	// field, or value.
-	ErrDeprecated = errors.New("deprecated")
+	// field, or value. It is [schema.ErrDeprecated], which the warning of
+	// a schema check about a deprecated field or value matches.
+	ErrDeprecated = schema.ErrDeprecated
 
 	// ErrRemoved indicates the warning about a value that a step removed.
 	ErrRemoved = errors.New("removed by a migration")

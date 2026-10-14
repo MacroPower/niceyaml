@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/manifest"
@@ -20,7 +21,7 @@ var spec = paths.Doc().Child("spec")
 func load(t *testing.T, text string, p paths.Path, fn migrate.Func) (map[string]any, error) {
 	t.Helper()
 
-	reg, err := manifest.NewRegistry(
+	reg := manifest.MustNewRegistry(
 		manifest.WithAppName("cafe"),
 		manifest.WithKinds(manifest.NewKind[map[string]any]("Cafe",
 			manifest.Singleton(),
@@ -28,9 +29,9 @@ func load(t *testing.T, text string, p paths.Path, fn migrate.Func) (map[string]
 			manifest.Version("v2", manifest.Migrate(p, fn)),
 		)),
 	)
-	require.NoError(t, err)
 
-	src := niceyaml.NewSourceFromString("apiVersion: v1\nkind: Cafe\n"+text, niceyaml.WithName("cafe.yaml"))
+	src := niceyaml.NewSourceFromString(stringtest.LinesLF("apiVersion: v1", "kind: Cafe")+text,
+		niceyaml.WithName("cafe.yaml"))
 
 	set, err := reg.Load(t.Context(), manifest.Sources(src))
 	if err != nil {
@@ -92,7 +93,12 @@ func TestNode_Read(t *testing.T) {
 
 	var got []read
 
-	_, err := load(t, "spec:\n  seats: 40 # inside\n  tags: [a]\n  hours: {open: \"07:00\"}\n",
+	_, err := load(t, stringtest.LinesLF(
+		"spec:",
+		"  seats: 40 # inside",
+		"  tags: [a]",
+		`  hours: {open: "07:00"}`,
+	),
 		paths.MustParse("$.spec.*"),
 		func(_ context.Context, n *migrate.Node) error {
 			missing := n.At(paths.Current().Child("missing"))
@@ -129,7 +135,7 @@ func TestNode_Edit(t *testing.T) {
 		err  string
 	}{
 		"decode and set": {
-			text: "spec:\n  position: 3\n",
+			text: stringtest.LinesLF("spec:", "  position: 3"),
 			path: spec.Child("position"),
 			fn: func(ctx context.Context, n *migrate.Node) error {
 				position, err := n.Decode[int](ctx)
@@ -147,7 +153,7 @@ func TestNode_Edit(t *testing.T) {
 			want: map[string]any{"spec": map[string]any{"index": uint64(2)}},
 		},
 		"move": {
-			text: "name: yamull\nspec: {}\n",
+			text: stringtest.LinesLF("name: yamull", "spec: {}"),
 			path: paths.Doc().Child("name"),
 			fn: func(_ context.Context, n *migrate.Node) error {
 				return n.Move(paths.Doc().Child("metadata", "name"))
@@ -155,7 +161,11 @@ func TestNode_Edit(t *testing.T) {
 			want: map[string]any{"metadata": map[string]any{"name": "yamull"}, "spec": map[string]any{}},
 		},
 		"remove": {
-			text: "spec:\n  color: red\n  seats: 4\n",
+			text: stringtest.LinesLF(
+				"spec:",
+				"  color: red",
+				"  seats: 4",
+			),
 			path: spec.Child("color"),
 			fn: func(_ context.Context, n *migrate.Node) error {
 				return n.Remove("menu colors moved to the theme")
@@ -163,7 +173,7 @@ func TestNode_Edit(t *testing.T) {
 			want: map[string]any{"spec": map[string]any{"seats": uint64(4)}},
 		},
 		"fill where the file leaves the value out": {
-			text: "metadata:\n  name: yamull\n",
+			text: stringtest.LinesLF("metadata:", "  name: yamull"),
 			path: paths.Doc(),
 			fn:   fill(spec.Child("currency"), "SEK"),
 			want: map[string]any{
@@ -178,13 +188,13 @@ func TestNode_Edit(t *testing.T) {
 			want: map[string]any{"spec": map[string]any{"currency": "SEK"}},
 		},
 		"fill where the file writes the value": {
-			text: "spec:\n  currency: EUR\n",
+			text: stringtest.LinesLF("spec:", "  currency: EUR"),
 			path: paths.Doc(),
 			fn:   fill(spec.Child("currency"), "SEK"),
 			want: map[string]any{"spec": map[string]any{"currency": "EUR"}},
 		},
 		"error of a method that the step ignores": {
-			text: "spec:\n  - a\n",
+			text: stringtest.LinesLF("spec:", "  - a"),
 			path: spec.Index(0),
 			fn: func(_ context.Context, n *migrate.Node) error {
 				_ = n.SetKey("b") //nolint:errcheck // The document fails with the error anyway.

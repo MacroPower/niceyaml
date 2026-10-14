@@ -86,6 +86,9 @@ type goodEmbed struct {
 	Price int `json:"price"`
 }
 
+// migrateHint is the migrate hint of the test registries.
+const migrateHint = `run "cafe config migrate" to update this file`
+
 // itemSchema requires a positive price.
 const itemSchema = `{
   "type": "object",
@@ -126,7 +129,7 @@ func cafeOptions(extra ...manifest.RegistryOption) []manifest.RegistryOption {
 	return append([]manifest.RegistryOption{
 		manifest.WithNameField(meta.Child("name")),
 		manifest.WithAppName("cafe"),
-		manifest.WithMigrateHint(`run "cafe config migrate" to update this file`),
+		manifest.WithMigrateHint(migrateHint),
 		manifest.WithRemoved("cafe.jacobcolvin.com/v1alpha1", "Dish",
 			"cafe 3.0 removed Dish v1alpha1, see https://jacobcolvin.com/cafe/upgrade/3"),
 		manifest.WithKinds(
@@ -158,6 +161,12 @@ func cafeOptions(extra ...manifest.RegistryOption) []manifest.RegistryOption {
 	}, extra...)
 }
 
+// withKinds returns the options of a registry that holds kinds and
+// nothing else.
+func withKinds(kinds ...*manifest.Kind) []manifest.RegistryOption {
+	return []manifest.RegistryOption{manifest.WithKinds(kinds...)}
+}
+
 // newCafeRegistry returns the registry of [cafeOptions].
 func newCafeRegistry(t *testing.T, extra ...manifest.RegistryOption) *manifest.Registry {
 	t.Helper()
@@ -182,122 +191,122 @@ func TestNewRegistry(t *testing.T) {
 		},
 		"empty registry": {},
 		"kind without versions": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Cafe]("Cafe"))},
+			opts: withKinds(manifest.NewKind[Cafe]("Cafe")),
 			err:  "kind Cafe has no version",
 		},
 		"two kinds of one name": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(
+			opts: withKinds(
 				manifest.NewKind[Cafe]("Cafe", v1),
 				manifest.NewKind[Hours]("Cafe", v1),
-			)},
+			),
 			err: `kinds Cafe and Cafe both answer to the name "Cafe"`,
 		},
 		"two kinds of one type": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(
+			opts: withKinds(
 				manifest.NewKind[Cafe]("Cafe", v1),
 				manifest.NewKind[Cafe]("Bistro", v1),
-			)},
+			),
 			err: "kinds Cafe and Bistro share the Go type manifest_test.Cafe",
 		},
 		"version listed twice": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
-				manifest.Version("v1"), manifest.Version("v1", manifest.Written())))},
+			opts: withKinds(manifest.NewKind[Cafe]("Cafe",
+				manifest.Version("v1"), manifest.Version("v1", manifest.Written()))),
 			err: "kind Cafe lists v1 twice",
 		},
 		"two written versions": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
 				manifest.Version("cafe.jacobcolvin.com/v1", manifest.Written()),
 				manifest.Version("cafe.jacobcolvin.com/v2", manifest.Written()),
-			))},
+			)),
 			err: "Hours carries manifest.Written on cafe.jacobcolvin.com/v1 and on cafe.jacobcolvin.com/v2",
 		},
 		"written and loosened": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
 				manifest.Version("v1"),
 				manifest.Version("v2", manifest.Written(), manifest.Loosened()),
-			))},
+			)),
 			err: "kind Hours: v2 carries manifest.Loosened",
 		},
 		"step on the oldest version": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
 				manifest.Version("v1", manifest.Migrate(spec.Child("opens"), rename("open"))),
-			))},
+			)),
 			err: "kind Hours: v1 is the oldest version, so it takes no manifest.Migrate",
 		},
 		"step on the unversioned layout": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
 				manifest.Unversioned(manifest.Migrate(spec.Child("opens"), rename("open"))),
-			))},
+			)),
 			err: "kind Hours: the unversioned layout takes no manifest.Migrate, because no version comes before it",
 		},
 		"step with a relative path": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
 				manifest.Version("v1"),
 				manifest.Version("v2", manifest.Migrate(paths.Current().Child("opens"), rename("open"))),
-			))},
+			)),
 			err: "kind Hours: step 1 of v2 takes a $ path, not @.opens",
 		},
 		"step with a key path": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
 				manifest.Version("v1"),
 				manifest.Version("v2", manifest.Migrate(spec.Child("opens").Key(), rename("open"))),
-			))},
+			)),
 			err: "kind Hours: step 1 of v2 takes a path without ~, not $.spec.opens~",
 		},
 		"step without a function": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
 				manifest.Version("v1"),
 				manifest.Version("v2", manifest.Migrate(spec.Child("opens"), nil)),
-			))},
+			)),
 			err: "kind Hours: step 1 of v2 has a nil function",
 		},
 		"kind name on current version": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[MenuItem]("MenuItem",
+			opts: withKinds(manifest.NewKind[MenuItem]("MenuItem",
 				manifest.Version("v1", manifest.KindName("Dish")),
-			))},
+			)),
 			err: "kind MenuItem: the current version v1 takes no manifest.KindName",
 		},
 		"kind name that another kind uses": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(
+			opts: withKinds(
 				manifest.NewKind[Cafe]("Cafe", v1),
 				manifest.NewKind[MenuItem]("MenuItem", manifest.Version("v0", manifest.KindName("Cafe")), v1),
-			)},
+			),
 			err: `kind MenuItem: v0 gives the name "Cafe", which kind Cafe uses`,
 		},
 		"unversioned after a version": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
+			opts: withKinds(manifest.NewKind[Cafe]("Cafe",
 				v1, manifest.Unversioned(),
-			))},
+			)),
 			err: "kind Cafe: manifest.Unversioned comes first among the versions",
 		},
 		"version without a name": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", manifest.Version("")))},
+			opts: withKinds(manifest.NewKind[Cafe]("Cafe", manifest.Version(""))),
 			err:  "kind Cafe: manifest.Version needs a name",
 		},
 		"kind name on the unversioned layout": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
+			opts: withKinds(manifest.NewKind[Cafe]("Cafe",
 				manifest.Unversioned(manifest.KindName("Bistro")), v1,
-			))},
+			)),
 			err: "kind Cafe: the unversioned layout takes no manifest.KindName",
 		},
 		"zero schema ref": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
+			opts: withKinds(manifest.NewKind[Cafe]("Cafe",
 				manifest.Version("v1", manifest.Schema(schema.Ref{})),
-			))},
+			)),
 			err: "kind Cafe: v1 has a schema.Ref that names no schema",
 		},
 		"deprecated written version": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
 				manifest.Version("v1", manifest.Deprecated()),
 				manifest.Version("v2"),
-			))},
+			)),
 			err: "kind Hours: v1 carries manifest.Deprecated, but a rewrite does not move a document off",
 		},
 		"deprecated current version of a required kind": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
+			opts: withKinds(manifest.NewKind[Cafe]("Cafe",
 				manifest.Required(),
 				manifest.Version("v1", manifest.Deprecated()),
-			))},
+			)),
 			err: "kind Cafe: manifest.Deprecated on the current version of a Required kind",
 		},
 		"deprecated removed version": {
@@ -373,10 +382,10 @@ func TestNewRegistry(t *testing.T) {
 			err: "manifest.WithNameField takes a $ path of names and indexes, not $.metadata.*",
 		},
 		"two unversioned kinds without a claim": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(
+			opts: withKinds(
 				manifest.NewKind[Cafe]("Cafe", manifest.Unversioned(), v1),
 				manifest.NewKind[Hours]("Hours", manifest.Unversioned(), v1),
-			)},
+			),
 			err: "kinds Cafe and Hours read documents without type fields",
 		},
 		"unversioned removal beside an unversioned kind": {
@@ -390,17 +399,17 @@ func TestNewRegistry(t *testing.T) {
 			err: "kinds Cafe and Hours read documents without type fields",
 		},
 		"embedded struct without an inline option": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[badEmbed]("Item", v1))},
+			opts: withKinds(manifest.NewKind[badEmbed]("Item", v1)),
 			err: `kind Item: badEmbed.Common: embedded struct needs yaml:",inline", ` +
 				"because gen reads it inline and the decode nests it",
 		},
 		"named field with an inline option": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[badInline]("Item", v1))},
+			opts: withKinds(manifest.NewKind[badInline]("Item", v1)),
 			err: "kind Item: badInline.Extra: named field has an inline option, " +
 				"which the decode reads inline and gen nests",
 		},
 		"embedded struct with an inline option": {
-			opts: []manifest.RegistryOption{manifest.WithKinds(manifest.NewKind[goodEmbed]("Item", v1))},
+			opts: withKinds(manifest.NewKind[goodEmbed]("Item", v1)),
 		},
 	}
 
@@ -430,42 +439,4 @@ func TestMustNewRegistry(t *testing.T) {
 	assert.PanicsWithError(t, "manifest: kind Cafe has no version", func() {
 		manifest.MustNewRegistry(manifest.WithKinds(manifest.NewKind[Cafe]("Cafe")))
 	})
-}
-
-func TestRegistry_Verify(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		schema []byte
-		err    string
-	}{
-		"schema compiles": {
-			schema: []byte(itemSchema),
-		},
-		"schema does not compile": {
-			schema: []byte(`{"type": 5}`),
-			err:    "MenuItem v1: ",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			reg, err := manifest.NewRegistry(manifest.WithKinds(manifest.NewKind[MenuItem]("MenuItem",
-				manifest.Version("v1", manifest.Schema(schema.Embedded(tc.schema))),
-			)))
-			require.NoError(t, err)
-
-			err = reg.Verify(t.Context())
-			if tc.err == "" {
-				require.NoError(t, err)
-
-				return
-			}
-
-			require.ErrorIs(t, err, schema.ErrCompile)
-			assert.Contains(t, err.Error(), tc.err)
-		})
-	}
 }

@@ -13,6 +13,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
+	"go.jacobcolvin.com/niceyaml/internal/schemahook"
 	"go.jacobcolvin.com/niceyaml/manifest/internal/edit"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -584,10 +585,15 @@ func detailsOf(texts []string) []error {
 
 // checkSchema checks the working copy against the schema of v, and reports
 // whether it passed. A version without a schema passes. Each problem of
-// the check takes detail as its last detail, when detail is not nil.
+// the check takes detail as its last detail, when detail is not nil. Only
+// the schema of the current version reports deprecations.
 func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail error) bool {
 	if !v.cfg.hasSchema {
 		return true
+	}
+
+	if v != v.kind.versions[len(v.kind.versions)-1] {
+		ctx = schemahook.DeprecationsOff(ctx)
 	}
 
 	reg := d.l.reg

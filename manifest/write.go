@@ -310,11 +310,20 @@ func resolveIn(root *os.Root, abs, name string) (string, error) {
 			continue
 
 		case "..":
-			if len(done) == 0 {
+			if len(done) > 0 {
+				done = done[:len(done)-1]
+
+				continue
+			}
+
+			// A link can climb out of root and come back in, as
+			// "../config/x.yaml" does in a directory named config.
+			rel, ok := absBelow(abs, filepath.Join(append([]string{filepath.Dir(abs)}, parts...)...))
+			if !ok {
 				return "", errOutside
 			}
 
-			done = done[:len(done)-1]
+			parts = strings.Split(filepath.ToSlash(rel), "/")
 
 			continue
 		}
@@ -343,8 +352,8 @@ func resolveIn(root *os.Root, abs, name string) (string, error) {
 		}
 
 		if filepath.IsAbs(link) {
-			rel, err := filepath.Rel(abs, link)
-			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			rel, ok := absBelow(abs, link)
+			if !ok {
 				return "", errOutside
 			}
 
@@ -355,6 +364,34 @@ func resolveIn(root *os.Root, abs, name string) (string, error) {
 	}
 
 	return filepath.Join(done...), nil
+}
+
+// absBelow returns the path of link, an absolute link target, below abs,
+// a directory with every link resolved, and whether link lies below abs.
+// A target whose directory runs through links, such as /tmp on macOS,
+// lies below abs when it does after those links resolve.
+func absBelow(abs, link string) (string, bool) {
+	if rel, ok := relBelow(abs, link); ok {
+		return rel, true
+	}
+
+	dir, err := filepath.EvalSymlinks(filepath.Dir(link))
+	if err != nil {
+		return "", false
+	}
+
+	return relBelow(abs, filepath.Join(dir, filepath.Base(link)))
+}
+
+// relBelow returns the path of target below dir, and whether target lies
+// below dir as text.
+func relBelow(dir, target string) (string, bool) {
+	rel, err := filepath.Rel(dir, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+
+	return rel, true
 }
 
 // systemProblem returns the problem of a file that the system refuses to

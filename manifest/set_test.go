@@ -6,21 +6,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/manifest"
 )
 
-// loadExample loads the example directory with reg.
-func loadExample(t *testing.T, reg *manifest.Registry) *manifest.Set {
+// loadExample loads the example directory with the registry of
+// [cafeOptions].
+func loadExample(t *testing.T) *manifest.Set {
 	t.Helper()
 
-	set, err := reg.Load(t.Context(), manifest.FS(mapFS(map[string]string{
-		"cafe.yaml":  cafeDoc,
-		"hours.yaml": hoursDoc,
-		"menu.yaml":  menuDoc,
-	}), "config"))
+	set, err := newCafeRegistry(t).Load(t.Context(), configFS(exampleFiles))
 	require.NoError(t, err)
 
 	return set
@@ -29,7 +27,7 @@ func loadExample(t *testing.T, reg *manifest.Registry) *manifest.Set {
 func TestSet_One(t *testing.T) {
 	t.Parallel()
 
-	set := loadExample(t, newCafeRegistry(t))
+	set := loadExample(t)
 
 	cafe, ok := set.One[Cafe]()
 	require.True(t, ok)
@@ -56,7 +54,7 @@ func TestSet_One(t *testing.T) {
 func TestSet_All(t *testing.T) {
 	t.Parallel()
 
-	set := loadExample(t, newCafeRegistry(t))
+	set := loadExample(t)
 
 	var names []string
 
@@ -76,7 +74,7 @@ func TestSet_All(t *testing.T) {
 func TestSet_Get(t *testing.T) {
 	t.Parallel()
 
-	set := loadExample(t, newCafeRegistry(t))
+	set := loadExample(t)
 
 	hours, ok := set.Get[Hours]("weekday")
 	require.True(t, ok)
@@ -86,9 +84,8 @@ func TestSet_Get(t *testing.T) {
 	_, ok = set.Get[Hours]("weekend")
 	assert.False(t, ok)
 
-	reg, err := manifest.NewRegistry(manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
+	reg := manifest.MustNewRegistry(manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
 		manifest.Version("cafe.jacobcolvin.com/v1"))))
-	require.NoError(t, err)
 
 	unnamed, err := reg.Load(t.Context(), manifest.Sources())
 	require.NoError(t, err)
@@ -101,7 +98,7 @@ func TestSet_Get(t *testing.T) {
 func TestSet_Objects(t *testing.T) {
 	t.Parallel()
 
-	set := loadExample(t, newCafeRegistry(t))
+	set := loadExample(t)
 
 	var kinds []string
 
@@ -132,48 +129,65 @@ func TestObject_Bind(t *testing.T) {
 	built := manifest.Object[Cafe]{Node: doc}
 	assert.Equal(t, "a.yaml: bad", built.Bind(errBad).Error())
 
-	set := loadExample(t, newCafeRegistry(t))
+	set := loadExample(t)
 
 	item, ok := set.Get[MenuItem]("kanelbulle")
 	require.True(t, ok)
 
 	err := item.Bind(niceyaml.NewError(`unknown tag "vegan"`, niceyaml.AtPath(spec.Child("tags").Index(0))))
-	assert.Equal(t, ""+
-		"config/menu.yaml:8:9: $.spec.tags: unknown tag \"vegan\"\n"+
-		"`-- cafe.jacobcolvin.com/v1 sets $.spec.tags[0] from this value\n"+
-		"\n"+
-		"   6 | spec:\n"+
-		"   7 |   cost: 45 # kr\n"+
-		"   8 |   tags: vegan\n"+
-		"     |         ^^^^^\n"+
-		"   9 | ---\n"+
-		"  10 | apiVersion: cafe.jacobcolvin.com/v1", niceyaml.FormatError(err))
+	assert.Equal(t, stringtest.JoinLF(
+		`config/menu.yaml:8:9: $.spec.tags: unknown tag "vegan"`,
+		"`-- cafe.jacobcolvin.com/v1 sets $.spec.tags[0] from this value",
+		"",
+		"   6 | spec:",
+		"   7 |   cost: 45 # kr",
+		"   8 |   tags: vegan",
+		"     |         ^^^^^",
+		"   9 | ---",
+		"  10 | apiVersion: cafe.jacobcolvin.com/v1",
+	), niceyaml.FormatError(err))
 
 	err = item.Bind(niceyaml.NewError("too cheap", niceyaml.AtPath(spec.Child("price"))))
 	assert.Equal(t, "config/menu.yaml:7:9: $.spec.cost: too cheap", err.Error())
 
-	left, err := newCafeRegistry(t).Load(t.Context(), manifest.FS(mapFS(map[string]string{
-		"cafe.yaml":  "apiVersion: cafe.jacobcolvin.com/v1\nkind: Cafe\nmetadata:\n  name: yamull\nspec:\n  currency: SEK\n",
-		"hours.yaml": "apiVersion: cafe.jacobcolvin.com/v1alpha1\nkind: Hours\nmetadata:\n  name: weekday\nspec:\n  opens: \"18:00\"\n",
-	}), "config"))
+	left, err := newCafeRegistry(t).Load(t.Context(), configFS(map[string]string{
+		"cafe.yaml": stringtest.LinesLF(
+			"apiVersion: cafe.jacobcolvin.com/v1",
+			"kind: Cafe",
+			"metadata:",
+			"  name: yamull",
+			"spec:",
+			"  currency: SEK",
+		),
+		"hours.yaml": stringtest.LinesLF(
+			"apiVersion: cafe.jacobcolvin.com/v1alpha1",
+			"kind: Hours",
+			"metadata:",
+			"  name: weekday",
+			"spec:",
+			`  opens: "18:00"`,
+		),
+	}))
 	require.NoError(t, err)
 
 	cafe, ok := left.One[Cafe]()
 	require.True(t, ok)
 
 	err = cafe.Bind(niceyaml.NewError("20 seats exceed capacity 10", niceyaml.AtPath(spec.Child("seats"))))
-	assert.Equal(t, ""+
-		"config/cafe.yaml:5:1: $.spec.seats: 20 seats exceed capacity 10\n"+
-		"`-- the file leaves out seats, so it holds its default", firstTwoLines(niceyaml.FormatError(err)))
+	assert.Equal(t, stringtest.JoinLF(
+		"config/cafe.yaml:5:1: $.spec.seats: 20 seats exceed capacity 10",
+		"`-- the file leaves out seats, so it holds its default",
+	), firstTwoLines(niceyaml.FormatError(err)))
 
 	hours, ok := left.Get[Hours]("weekday")
 	require.True(t, ok)
 
 	err = hours.Bind(niceyaml.NewError("closes at 17:00, before it opens at 18:00",
 		niceyaml.AtPath(spec.Child("close"))))
-	assert.Equal(t, ""+
-		"config/hours.yaml:5:1: $.spec.close: closes at 17:00, before it opens at 18:00\n"+
+	assert.Equal(t, stringtest.JoinLF(
+		"config/hours.yaml:5:1: $.spec.close: closes at 17:00, before it opens at 18:00",
 		"`-- the file leaves out the field that cafe.jacobcolvin.com/v1 names close, so it holds its default",
+	),
 		firstTwoLines(niceyaml.FormatError(err)))
 
 	err = hours.Bind(niceyaml.NewError("too early", niceyaml.AtPath(spec.Child("open"))))
