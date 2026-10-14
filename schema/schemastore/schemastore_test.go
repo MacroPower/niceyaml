@@ -23,6 +23,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/capture"
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
@@ -38,10 +39,13 @@ const (
 	workflowSchemaURL = "https://example.com/github-workflow.json"
 )
 
-// The catalogs and the transport that tests share.
+// The catalogs, the transport, and the error that tests share.
 var (
 	// A transport function that answers every URL with status 500.
 	serverError = yamltest.Respond(http.StatusInternalServerError, "")
+
+	// The error raisedByLookup reports for a lookup that returns.
+	errLookupReturned = errors.New("lookup returned")
 
 	// A one-entry catalog whose pattern matches every YAML file.
 	testCatalog = schemastore.Catalog{
@@ -98,7 +102,7 @@ var (
 	}
 )
 
-func TestSchemaStore_FindMatch(t *testing.T) {
+func TestStore_FindMatch(t *testing.T) {
 	t.Parallel()
 
 	catalog := schemastore.Catalog{
@@ -251,7 +255,7 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 	}
 }
 
-func TestSchemaStore_FindMatchPrefersSpecificPattern(t *testing.T) {
+func TestStore_FindMatchPrefersSpecificPattern(t *testing.T) {
 	t.Parallel()
 
 	// Each case lists a broad entry before a specific one that matches the
@@ -338,7 +342,7 @@ func TestSchemaStore_FindMatchPrefersSpecificPattern(t *testing.T) {
 	}
 }
 
-func TestSchemaStore_FindMatchDoesNotAliasCatalog(t *testing.T) {
+func TestStore_FindMatchDoesNotAliasCatalog(t *testing.T) {
 	t.Parallel()
 
 	// The returned entry must not share its pattern slice with the cached
@@ -359,7 +363,7 @@ func TestSchemaStore_FindMatchDoesNotAliasCatalog(t *testing.T) {
 	assert.Equal(t, []string{"*.yaml"}, entry.FileMatch)
 }
 
-func TestSchemaStore_FindMatchRepeatedPath(t *testing.T) {
+func TestStore_FindMatchRepeatedPath(t *testing.T) {
 	t.Parallel()
 
 	// A registry looks up a file's path once per document, so each lookup
@@ -414,7 +418,7 @@ func TestSchemaStore_FindMatchRepeatedPath(t *testing.T) {
 	}
 }
 
-func TestSchemaStore_FindMatchAfterRefresh(t *testing.T) {
+func TestStore_FindMatchAfterRefresh(t *testing.T) {
 	t.Parallel()
 
 	// A TTL of 0 turns caching off, so each lookup fetches a new catalog,
@@ -432,58 +436,7 @@ func TestSchemaStore_FindMatchAfterRefresh(t *testing.T) {
 	assert.Equal(t, int32(3), requests.Load())
 }
 
-func BenchmarkStore_FindMatch(b *testing.B) {
-	// A path no entry matches makes a scan try every pattern, as a document
-	// outside the catalog does.
-	catalog := schemastore.Catalog{}
-	for i := range 1000 {
-		catalog.Schemas = append(catalog.Schemas, schemastore.CatalogEntry{
-			Name: fmt.Sprintf("Schema %d", i),
-			URL:  fmt.Sprintf("https://example.com/schema-%d.json", i),
-			FileMatch: []string{
-				fmt.Sprintf("schema-%d.yaml", i),
-				fmt.Sprintf("/.config/schema-%d/*.{yml,yaml}", i),
-			},
-		})
-	}
-
-	store := newCatalogStore(b, catalog)
-
-	_, err := store.FindMatch(b.Context(), "/repo/unmatched.yaml")
-	require.ErrorIs(b, err, schemastore.ErrNoCatalogMatch)
-
-	bms := map[string]struct {
-		paths []string
-	}{
-		// Each lookup names a different path from the one before, so each
-		// one scans the catalog.
-		"new path": {
-			paths: []string{"/repo/unmatched.yaml", "/repo/other.yaml"},
-		},
-		// Every lookup names the same path, as the documents of one file
-		// do, so each one reuses the last scan.
-		"repeated path": {
-			paths: []string{"/repo/unmatched.yaml"},
-		},
-	}
-
-	for name, bm := range bms {
-		b.Run(name, func(b *testing.B) {
-			b.ReportAllocs()
-
-			var i int
-
-			for b.Loop() {
-				_, err = store.FindMatch(b.Context(), bm.paths[i%len(bm.paths)])
-				i++
-			}
-
-			require.ErrorIs(b, err, schemastore.ErrNoCatalogMatch)
-		})
-	}
-}
-
-func TestSchemaStore_LazyLoading(t *testing.T) {
+func TestStore_LazyLoading(t *testing.T) {
 	t.Parallel()
 
 	// A fetch the store starts on a goroutine of its own can reach the
@@ -513,28 +466,31 @@ func TestSchemaStore_LazyLoading(t *testing.T) {
 	})
 }
 
-func TestSchemaStore_CacheTTL(t *testing.T) {
+func TestStore_CacheTTL(t *testing.T) {
 	t.Parallel()
 
-	// Use a very short TTL for testing.
-	store, fetchCount := newCountingStore(
-		respondCatalog(t, testCatalog),
-		schemastore.WithCacheTTL(10*time.Millisecond),
-	)
+	// Inside the bubble, the sleep below moves the fake clock past the
+	// cache TTL without waiting in real time.
+	synctest.Test(t, func(t *testing.T) {
+		store, fetchCount := newCountingStore(
+			respondCatalog(t, testCatalog),
+			schemastore.WithCacheTTL(10*time.Millisecond),
+		)
 
-	// First lookup fetches.
-	requireEntry(t, store, "Test")
-	assert.Equal(t, int32(1), fetchCount.Load())
+		// First lookup fetches.
+		requireEntry(t, store, "Test")
+		assert.Equal(t, int32(1), fetchCount.Load())
 
-	// Wait for cache to expire.
-	time.Sleep(20 * time.Millisecond)
+		// Wait for cache to expire.
+		time.Sleep(20 * time.Millisecond)
 
-	// Lookup triggers refetch due to expired cache.
-	requireEntry(t, store, "Test")
-	assert.Equal(t, int32(2), fetchCount.Load())
+		// Lookup triggers refetch due to expired cache.
+		requireEntry(t, store, "Test")
+		assert.Equal(t, int32(2), fetchCount.Load())
+	})
 }
 
-func TestSchemaStore_ConcurrentFirstFetch(t *testing.T) {
+func TestStore_ConcurrentFirstFetch(t *testing.T) {
 	t.Parallel()
 
 	synctest.Test(t, func(t *testing.T) {
@@ -570,7 +526,7 @@ func TestSchemaStore_ConcurrentFirstFetch(t *testing.T) {
 	})
 }
 
-func TestSchemaStore_SlowFetch(t *testing.T) {
+func TestStore_SlowFetch(t *testing.T) {
 	t.Parallel()
 
 	// Each subtest runs in a synctest bubble, whose clock stands still until
@@ -687,7 +643,7 @@ func TestSchemaStore_SlowFetch(t *testing.T) {
 	})
 }
 
-func TestSchemaStore_ConcurrentAccess(t *testing.T) {
+func TestStore_ConcurrentAccess(t *testing.T) {
 	t.Parallel()
 
 	// Use short TTL to trigger concurrent cache refreshes.
@@ -708,24 +664,20 @@ func TestSchemaStore_ConcurrentAccess(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(numGoroutines)
-
 	for range numGoroutines {
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for range numIterations {
 				for _, path := range filePaths {
 					_, _ = store.FindMatch(t.Context(), path) //nolint:errcheck // Only the race matters here.
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
 }
 
-func TestSchemaStore_Filter(t *testing.T) {
+func TestStore_Filter(t *testing.T) {
 	t.Parallel()
 
 	// Filter to only GitHub schemas.
@@ -743,68 +695,36 @@ func TestSchemaStore_Filter(t *testing.T) {
 	require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
 }
 
-func TestSchemaStore_FetchPanicReachesCaller(t *testing.T) {
+func TestStore_FetchPanicReachesCaller(t *testing.T) {
 	t.Parallel()
 
 	// The fetch runs on a goroutine the store starts, so a panic during it
 	// must reach the lookup that waits for the fetch rather than end the
-	// process.
+	// process. A fetch that calls runtime.Goexit, as t.FailNow does, must
+	// end the goroutine of that lookup the same way, rather than leave every
+	// lookup waiting on a fetch that never finishes.
 	tcs := map[string]struct {
 		transport yamltest.RoundTripFunc
 		filter    func(schemastore.CatalogEntry) bool
-		want      any
+		want      error
 	}{
-		"filter": {
+		"filter panics": {
 			transport: respondCatalog(t, testCatalog),
 			filter:    panicFilter,
-			want:      "filter bug",
+			want:      &capture.PanicError{Value: "filter bug"},
 		},
-		"transport": {
+		"transport panics": {
 			transport: panicTransport,
-			want:      "transport bug",
+			want:      &capture.PanicError{Value: "transport bug"},
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			store, fetchCount := newCountingStore(tc.transport, schemastore.WithFilter(tc.filter))
-
-			assert.PanicsWithValue(t, tc.want, func() {
-				_, err := store.FindMatch(t.Context(), "config.yaml")
-				require.NoError(t, err)
-			})
-
-			// The panicked fetch counts as a failed one, so the next lookup
-			// reports it within the retry interval and does not fetch again.
-			res := receive(t, findMatchAsync(t.Context(), store))
-			require.ErrorIs(t, res.err, schemastore.ErrFetchCatalog)
-			assert.Equal(t, int32(1), fetchCount.Load())
-		})
-	}
-}
-
-func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
-	t.Parallel()
-
-	// A fetch that calls runtime.Goexit, as t.FailNow does, must end the
-	// goroutine of the lookup that waits for it the same way, rather than
-	// leave every lookup waiting on a fetch that never finishes.
-	tcs := map[string]struct {
-		transport yamltest.RoundTripFunc
-		filter    func(schemastore.CatalogEntry) bool
-	}{
-		"filter": {
+		"filter calls runtime.Goexit": {
 			transport: respondCatalog(t, testCatalog),
-			filter: func(schemastore.CatalogEntry) bool {
-				runtime.Goexit()
-
-				return true
-			},
+			filter:    goexitFilter,
+			want:      capture.ErrGoexit,
 		},
-		"transport": {
+		"transport calls runtime.Goexit": {
 			transport: goexitTransport,
+			want:      capture.ErrGoexit,
 		},
 	}
 
@@ -814,25 +734,11 @@ func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
 
 			store, fetchCount := newCountingStore(tc.transport, schemastore.WithFilter(tc.filter))
 
-			var returned bool
+			assert.Equal(t, tc.want, raisedByLookup(t, store))
 
-			done := make(chan struct{})
-
-			go func() {
-				defer close(done)
-
-				//nolint:errcheck // The call exits through runtime.Goexit.
-				_, _ = store.FindMatch(t.Context(), "config.yaml")
-				returned = true
-			}()
-
-			// A lookup that hangs on the fetch never closes done.
-			receive(t, done)
-			assert.False(t, returned)
-
-			// The fetch that called runtime.Goexit counts as a failed one, so
-			// the next lookup reports it within the retry interval and does
-			// not fetch again.
+			// The fetch that panicked or called runtime.Goexit counts as a
+			// failed one, so the next lookup reports it within the retry
+			// interval and does not fetch again.
 			res := receive(t, findMatchAsync(t.Context(), store))
 			require.ErrorIs(t, res.err, schemastore.ErrFetchCatalog)
 			require.NotErrorIs(t, res.err, schema.ErrNoMatch)
@@ -841,7 +747,7 @@ func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
 	}
 }
 
-func TestSchemaStore_RecordedFetchPanicLoadsAsError(t *testing.T) {
+func TestStore_RecordedFetchPanicLoadsAsError(t *testing.T) {
 	t.Parallel()
 
 	// After a fetch panics or calls runtime.Goexit, lookups within the
@@ -850,9 +756,10 @@ func TestSchemaStore_RecordedFetchPanicLoadsAsError(t *testing.T) {
 	// Goexit again in a caller that never waited on the fetch.
 	tcs := map[string]struct {
 		transport yamltest.RoundTripFunc
+		raised    error
 	}{
-		"panic":  {transport: panicTransport},
-		"goexit": {transport: goexitTransport},
+		"panic":  {transport: panicTransport, raised: &capture.PanicError{Value: "transport bug"}},
+		"goexit": {transport: goexitTransport, raised: capture.ErrGoexit},
 	}
 
 	for name, tc := range tcs {
@@ -862,19 +769,8 @@ func TestSchemaStore_RecordedFetchPanicLoadsAsError(t *testing.T) {
 			store := newStore(tc.transport.Client())
 
 			// The first lookup waits on the fetch and raises its panic or
-			// Goexit, so it runs on a goroutine of its own.
-			first := make(chan struct{})
-
-			go func() {
-				defer close(first)
-				//nolint:errcheck // The panic only signals the end of the fetch.
-				defer func() { _ = recover() }()
-
-				//nolint:errcheck // The call panics or exits through runtime.Goexit.
-				_, _ = store.FindMatch(t.Context(), "config.yaml")
-			}()
-
-			receive(t, first)
+			// Goexit.
+			require.Equal(t, tc.raised, raisedByLookup(t, store))
 
 			reg := schema.NewRegistry()
 			ref := schema.Loadable("catalog.json", func(ctx context.Context) ([]byte, error) {
@@ -883,38 +779,21 @@ func TestSchemaStore_RecordedFetchPanicLoadsAsError(t *testing.T) {
 				return nil, fmt.Errorf("find catalog match: %w", err)
 			})
 
-			// A Schema that raises the failure again must not take the test
-			// goroutine with it, so it runs on a goroutine of its own too.
-			type outcome struct {
-				err       error
-				recovered any
-				returned  bool
-			}
+			// A Schema that raised the failure again would make capturedRun
+			// report the panic or the Goexit, neither of which matches the
+			// errors of a failed load.
+			err := capturedRun(t, func() error {
+				_, err := reg.Schema(t.Context(), ref)
 
-			results := make(chan outcome, 1)
-
-			go func() {
-				var out outcome
-
-				defer func() {
-					out.recovered = recover()
-					results <- out
-				}()
-
-				_, out.err = reg.Schema(t.Context(), ref)
-				out.returned = true
-			}()
-
-			out := receive(t, results)
-			require.Nil(t, out.recovered)
-			require.True(t, out.returned, "Schema exited through runtime.Goexit")
-			require.ErrorIs(t, out.err, schema.ErrLoad)
-			require.ErrorIs(t, out.err, schemastore.ErrFetchCatalog)
+				return err //nolint:wrapcheck // The test inspects the error of the load.
+			})
+			require.ErrorIs(t, err, schema.ErrLoad)
+			require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
 		})
 	}
 }
 
-func TestSchemaStore_ContextEndsAfterFetch(t *testing.T) {
+func TestStore_ContextEndsAfterFetch(t *testing.T) {
 	t.Parallel()
 
 	// The lookup's context ends only after the fetch has finished, so both
@@ -1015,7 +894,7 @@ func (c *endsAfterFetchContext) Err() error {
 	return nil
 }
 
-func TestSchemaStore_HTTPClient(t *testing.T) {
+func TestStore_HTTPClient(t *testing.T) {
 	t.Parallel()
 
 	// The catalog URL names a host that never resolves, so only the
@@ -1031,7 +910,7 @@ func TestSchemaStore_HTTPClient(t *testing.T) {
 	assert.Equal(t, int32(1), fetchCount.Load())
 }
 
-func TestSchemaStore_ZeroRefreshTimeout(t *testing.T) {
+func TestStore_ZeroRefreshTimeout(t *testing.T) {
 	t.Parallel()
 
 	// A zero timeout keeps the default rather than expiring every fetch
@@ -1041,7 +920,7 @@ func TestSchemaStore_ZeroRefreshTimeout(t *testing.T) {
 	requireEntry(t, store, "Test")
 }
 
-func TestSchemaStore_NilHTTPClient(t *testing.T) {
+func TestStore_NilHTTPClient(t *testing.T) {
 	t.Parallel()
 
 	// A nil client keeps the default rather than panicking on the first
@@ -1064,7 +943,7 @@ func TestSchemaStore_NilHTTPClient(t *testing.T) {
 	requireEntry(t, store, "Test")
 }
 
-func TestSchemaStore_FetchError(t *testing.T) {
+func TestStore_FetchError(t *testing.T) {
 	t.Parallel()
 
 	// With no catalog ever loaded, a failed fetch surfaces from the lookup.
@@ -1104,7 +983,7 @@ func TestSchemaStore_FetchError(t *testing.T) {
 	}
 }
 
-func TestSchemaStore_RetryAfter(t *testing.T) {
+func TestStore_RetryAfter(t *testing.T) {
 	t.Parallel()
 
 	// The bubble's clock stands still while goroutines run, so the second
@@ -1130,7 +1009,7 @@ func TestSchemaStore_RetryAfter(t *testing.T) {
 	})
 }
 
-func TestSchemaStore_NonPositiveRetryAfter(t *testing.T) {
+func TestStore_NonPositiveRetryAfter(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]time.Duration{
@@ -1156,7 +1035,7 @@ func TestSchemaStore_NonPositiveRetryAfter(t *testing.T) {
 	}
 }
 
-func TestSchemaStore_EmptyCatalog(t *testing.T) {
+func TestStore_EmptyCatalog(t *testing.T) {
 	t.Parallel()
 
 	catalog := schemastore.Catalog{
@@ -1170,7 +1049,7 @@ func TestSchemaStore_EmptyCatalog(t *testing.T) {
 	require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
 }
 
-func TestSchemaStore_CanceledContext(t *testing.T) {
+func TestStore_CanceledContext(t *testing.T) {
 	t.Parallel()
 
 	// Each subtest runs in a synctest bubble. A lookup with a canceled
@@ -1234,7 +1113,7 @@ func TestSchemaStore_CanceledContext(t *testing.T) {
 	})
 }
 
-func TestSchemaStore_RefetchFails(t *testing.T) {
+func TestStore_RefetchFails(t *testing.T) {
 	t.Parallel()
 
 	// A refresh that fails leaves the previous catalog in use.
@@ -1301,7 +1180,7 @@ func TestSchemaStore_RefetchFails(t *testing.T) {
 	}
 }
 
-func TestSchemaStore_Resolve(t *testing.T) {
+func TestStore_Resolve(t *testing.T) {
 	t.Parallel()
 
 	schemaData := `{"type": "object"}`
@@ -1554,6 +1433,46 @@ func goexitTransport(*http.Request) (*http.Response, error) {
 	panic("unreachable")
 }
 
+// goexitFilter is a catalog filter that calls runtime.Goexit, as t.FailNow
+// does.
+func goexitFilter(schemastore.CatalogEntry) bool {
+	runtime.Goexit()
+
+	return true
+}
+
+// raisedByLookup looks config.yaml up in store and returns what the lookup
+// raises, as [capture.Run] reports it: a [*capture.PanicError] for a panic
+// and [capture.ErrGoexit] for a call to runtime.Goexit. It returns
+// errLookupReturned for a lookup that returns.
+func raisedByLookup(t *testing.T, store *schemastore.Store) error {
+	t.Helper()
+
+	return capturedRun(t, func() error {
+		//nolint:errcheck // Only a panic or a call to runtime.Goexit counts here.
+		_, _ = store.FindMatch(t.Context(), "config.yaml")
+
+		return errLookupReturned
+	})
+}
+
+// capturedRun returns what [capture.Run] returns for fn: the error of fn, a
+// [*capture.PanicError], or [capture.ErrGoexit]. It calls capture.Run on a
+// goroutine of its own and waits for the result with receive, so the test
+// fails rather than hangs when fn does not end within the time receive
+// waits.
+func capturedRun(t *testing.T, fn func() error) error {
+	t.Helper()
+
+	results := make(chan error, 1)
+
+	go func() {
+		results <- capture.Run(fn)
+	}()
+
+	return receive(t, results)
+}
+
 // newRoutingClient returns a client whose transport answers each URL in
 // routes with its body and every other URL with status 404.
 func newRoutingClient(routes map[string]string) *http.Client {
@@ -1741,7 +1660,7 @@ func TestStore_ParseErrorRedactsCredentials(t *testing.T) {
 	assert.NotContains(t, err.Error(), "hunter2")
 }
 
-func TestStore_FindMatch_SupportedPatterns(t *testing.T) {
+func TestStore_FindMatchSupportedPatterns(t *testing.T) {
 	t.Parallel()
 
 	// A pattern whose braces expand past the limit matches no file.

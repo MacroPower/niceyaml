@@ -329,9 +329,12 @@ func TestWithURLPrefixes(t *testing.T) {
 			schema.WithResolvers(schema.Directive()),
 		)
 
-		requireAccepts(t, reg, withDirective("https://schemas.test/app.json", "a: 1\n"))
+		requireAccepts(t, reg, yamltest.SchemaDirective("https://schemas.test/app.json", "a: 1\n"))
 
-		err := reg.Check(t.Context(), yamltest.FirstDocument(t, withDirective("https://evil.test/app.json", "a: 1\n")))
+		err := reg.Check(
+			t.Context(),
+			yamltest.FirstDocument(t, yamltest.SchemaDirective("https://evil.test/app.json", "a: 1\n")),
+		)
 		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorIs(t, err, schema.ErrURLNotAllowed)
 		assert.False(t, niceyaml.IsInvalid(err))
@@ -341,7 +344,7 @@ func TestWithURLPrefixes(t *testing.T) {
 	t.Run("file reads stay outside the limit", func(t *testing.T) {
 		t.Parallel()
 
-		bundle := mapFS(map[string]string{"s.json": objectSchema})
+		bundle := yamltest.MapFS(map[string]string{"s.json": objectSchema})
 		reg := schema.NewRegistry(schema.WithURLPrefixes())
 
 		_, err := reg.Schema(t.Context(), schema.FileFS(bundle, "s.json"))

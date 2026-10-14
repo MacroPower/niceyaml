@@ -27,6 +27,8 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/capture"
+	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
@@ -50,23 +52,21 @@ func lookup(t *testing.T, client *http.Client, r schema.Resolver) error {
 	return err //nolint:wrapcheck // Tests inspect the registry's own error.
 }
 
-// writeFiles writes files, a map from slash-separated path to content,
-// under dir.
-func writeFiles(t *testing.T, dir string, files map[string]string) {
+// checkInput returns what [schema.Registry.Check] of reg reports for the
+// first document of input.
+func checkInput(t *testing.T, reg *schema.Registry, input string) error {
 	t.Helper()
 
-	for name, data := range files {
-		path := filepath.Join(dir, filepath.FromSlash(name))
-		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
-		require.NoError(t, os.WriteFile(path, []byte(data), 0o600))
-	}
+	doc := yamltest.FirstDocument(t, input)
+
+	return reg.Check(t.Context(), doc) //nolint:wrapcheck // Tests inspect the registry's own error.
 }
 
 // requireAccepts fails the test unless reg accepts the document input.
 func requireAccepts(t *testing.T, reg *schema.Registry, input string) {
 	t.Helper()
 
-	require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, input)))
+	require.NoError(t, checkInput(t, reg, input))
 }
 
 // requireRejects fails the test unless reg rejects the document input
@@ -75,9 +75,18 @@ func requireAccepts(t *testing.T, reg *schema.Registry, input string) {
 func requireRejects(t *testing.T, reg *schema.Registry, input, want string) {
 	t.Helper()
 
-	err := reg.Check(t.Context(), yamltest.FirstDocument(t, input))
+	err := checkInput(t, reg, input)
 	require.ErrorContains(t, err, want)
 	require.NotErrorIs(t, err, schema.ErrValidate)
+}
+
+// requireLoadError fails the test unless err is a failed load, which
+// wraps [schema.ErrLoad], and wraps cause too.
+func requireLoadError(t *testing.T, err, cause error) {
+	t.Helper()
+
+	require.ErrorIs(t, err, schema.ErrLoad)
+	require.ErrorIs(t, err, cause)
 }
 
 // requireRefs returns the option that sets whether a registry compiles a
@@ -122,6 +131,26 @@ var (
 		"refs not required": {require: false, err: schema.ErrValidate},
 	}
 )
+
+// requireRefModes checks input under a registry of each of refModes,
+// built with opts after the mode, in a parallel subtest per mode. Each
+// check must fail with the sentinel of its mode and a message that holds
+// want.
+func requireRefModes(t *testing.T, input, want string, opts ...schema.RegistryOption) {
+	t.Helper()
+
+	for name, mode := range refModes {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := schema.NewRegistry(append([]schema.RegistryOption{requireRefs(mode.require)}, opts...)...)
+
+			err := checkInput(t, reg, input)
+			require.ErrorIs(t, err, mode.err)
+			assert.Contains(t, err.Error(), want)
+		})
+	}
+}
 
 // loading returns a ref that names key and whose Load returns data and
 // err.
@@ -674,7 +703,7 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 			schema.WithRequireSchema(false),
 		)
 
-		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Service"))
+		err := checkInput(t, reg, "kind: Service")
 		require.ErrorIs(t, err, schema.ErrResolve)
 		require.ErrorIs(t, err, cannotDecide)
 	})
@@ -689,7 +718,7 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 			schema.WithRequireSchema(false),
 		)
 
-		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Service"))
+		err := checkInput(t, reg, "kind: Service")
 		require.ErrorIs(t, err, schema.ErrLoad)
 	})
 
@@ -737,7 +766,7 @@ func TestRegistry_Check_SyntaxError(t *testing.T) {
 		},
 		"directive that turns validation off": {
 			reg:   schema.NewRegistry(schema.WithResolvers(schema.Directive())),
-			input: withDirective("none", "kind: [\n"),
+			input: yamltest.SchemaDirective("none", "kind: [\n"),
 		},
 	}
 
@@ -745,10 +774,7 @@ func TestRegistry_Check_SyntaxError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			docs := niceyaml.NewSourceFromString(tc.input).AllDocuments()
-			require.Len(t, docs, 1)
-
-			doc := docs[0]
+			doc := yamltest.UnparsedDocument(t, tc.input)
 			require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
 
 			// The document did not parse, so every route to the registry
@@ -785,22 +811,6 @@ func TestRegistry_Caching(t *testing.T) {
 		assert.Same(t, v1, v2)
 	})
 
-	t.Run("loader runs once per URL", func(t *testing.T) {
-		t.Parallel()
-
-		r, loads := countingLoader("test.json", []byte(`{"type": "object"}`))
-
-		reg := schema.NewRegistry(schema.WithResolvers(r))
-
-		doc := yamltest.FirstDocument(t, "kind: Deployment")
-
-		for range 5 {
-			require.NoError(t, reg.Check(t.Context(), doc))
-		}
-
-		assert.Equal(t, int32(1), loads.Load(), "the cache should be checked before loading")
-	})
-
 	t.Run("scheme case does not split the cache", func(t *testing.T) {
 		t.Parallel()
 
@@ -828,10 +838,7 @@ func TestRegistry_Caching(t *testing.T) {
 			b: 2
 		`))
 
-		docs := source.Documents()
-		require.Len(t, docs, 2)
-
-		for _, doc := range docs {
+		for _, doc := range yamltest.Documents(t, source, 2) {
 			require.NoError(t, reg.Check(t.Context(), doc))
 		}
 
@@ -936,13 +943,15 @@ func TestRegistry_Caching(t *testing.T) {
 	t.Run("concurrent access is safe", func(t *testing.T) {
 		t.Parallel()
 
-		schemaData := []byte(`{"type": "object"}`)
+		// No lookup waits for another, so lookups that find the schema in
+		// the cache run beside the one that fills it, and the race detector
+		// checks the cache reads against that write.
 		reg := schema.NewRegistry(schema.WithResolvers(schema.When(
 			matcher.Content(kindPath, "Deployment"),
-			schema.Embedded(schemaData),
+			schema.Embedded([]byte(`{"type": "object"}`)),
 		)))
 
-		// Pre-create documents outside goroutines, since only the test
+		// Pre-create documents outside goroutines, because only the test
 		// goroutine may run the helper's require calls.
 		docs := make([]*niceyaml.Node, 100)
 		for i := range docs {
@@ -951,15 +960,11 @@ func TestRegistry_Caching(t *testing.T) {
 
 		var wg sync.WaitGroup
 
-		wg.Add(len(docs))
-
 		for _, doc := range docs {
-			go func() {
-				defer wg.Done()
-
+			wg.Go(func() {
 				_, err := reg.Lookup(t.Context(), doc)
 				assert.NoError(t, err)
-			}()
+			})
 		}
 
 		wg.Wait()
@@ -1048,7 +1053,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 				})),
 			)
 
-			doc := yamltest.FirstDocument(t, `key: value`)
+			doc := document(t)
 			errs := make([]error, goroutines)
 
 			var wg sync.WaitGroup
@@ -1067,8 +1072,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			assert.Equal(t, int32(1), loads.Load(), "callers should share the failed load")
 
 			for _, err := range errs {
-				require.ErrorIs(t, err, schema.ErrLoad)
-				require.ErrorIs(t, err, context.DeadlineExceeded)
+				requireLoadError(t, err, context.DeadlineExceeded)
 			}
 		})
 	})
@@ -1087,7 +1091,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 				})),
 			)
 
-			doc := yamltest.FirstDocument(t, `key: value`)
+			doc := document(t)
 
 			var (
 				wg        sync.WaitGroup
@@ -1127,8 +1131,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			<-joinerDone
 
 			require.NoError(t, leaderErr)
-			require.ErrorIs(t, joinerErr, schema.ErrLoad)
-			require.ErrorIs(t, joinerErr, context.DeadlineExceeded)
+			requireLoadError(t, joinerErr, context.DeadlineExceeded)
 		})
 	})
 
@@ -1152,7 +1155,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 				})),
 			)
 
-			doc := yamltest.FirstDocument(t, `key: value`)
+			doc := document(t)
 
 			leaderCtx, cancelLeader := context.WithCancel(t.Context())
 			defer cancelLeader()
@@ -1178,8 +1181,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			cancelLeader()
 			wg.Wait()
 
-			require.ErrorIs(t, leaderErr, schema.ErrLoad)
-			require.ErrorIs(t, leaderErr, context.Canceled)
+			requireLoadError(t, leaderErr, context.Canceled)
 			require.NoError(t, joinerErr)
 			assert.Equal(t, int32(2), loads.Load())
 		})
@@ -1260,11 +1262,9 @@ func TestRegistry_SharedLoad(t *testing.T) {
 				close(gate)
 				<-lateDone
 
-				require.ErrorIs(t, starterErr, schema.ErrLoad)
-				require.ErrorIs(t, starterErr, context.Canceled)
+				requireLoadError(t, starterErr, context.Canceled)
 				require.NoError(t, joinerErr)
-				require.ErrorIs(t, lateErr, schema.ErrLoad)
-				require.ErrorIs(t, lateErr, context.DeadlineExceeded)
+				requireLoadError(t, lateErr, context.DeadlineExceeded)
 				require.NotErrorIs(t, lateErr, context.Canceled)
 				require.Nil(t, late)
 				require.Equal(t, int32(2), loads.Load())
@@ -1357,8 +1357,7 @@ func TestRegistry_SharedLoad(t *testing.T) {
 							require.NotNil(t, late)
 						} else {
 							require.ErrorIs(t, starterErr, tc.err)
-							require.ErrorIs(t, lateErr, schema.ErrLoad)
-							require.ErrorIs(t, lateErr, tc.err)
+							requireLoadError(t, lateErr, tc.err)
 							require.NotErrorIs(t, lateErr, context.DeadlineExceeded)
 						}
 					}
@@ -1371,142 +1370,124 @@ func TestRegistry_SharedLoad(t *testing.T) {
 func TestRegistry_DynamicResolver(t *testing.T) {
 	t.Parallel()
 
-	t.Run("ResolverFunc for dynamic schema", func(t *testing.T) {
-		t.Parallel()
-
-		// Create schema files for different kinds.
-		tmpDir := t.TempDir()
-		writeFiles(t, tmpDir, map[string]string{
-			"Deployment.json": `{"type": "object", "properties": {"kind": {"const": "Deployment"}}}`,
-			"Service.json":    `{"type": "object", "properties": {"kind": {"const": "Service"}}}`,
-		})
-
-		reg := schema.NewRegistry(
-			schema.WithResolvers(
-				schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
-					node, err := doc.At(kindPath)
-					if err != nil {
-						return schema.Ref{}, schema.ErrNoMatch
-					}
-
-					kind, err := node.Decode[string](ctx)
-					if err != nil || (kind != "Deployment" && kind != "Service") {
-						return schema.Ref{}, schema.ErrNoMatch
-					}
-
-					return schema.File(filepath.Join(tmpDir, kind+".json")), nil
-				}),
-			),
-		)
-
-		requireAccepts(t, reg, "kind: Deployment")
-		requireAccepts(t, reg, "kind: Service")
-
-		// ConfigMap has no schema.
-		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: ConfigMap"))
-		require.ErrorIs(t, err, schema.ErrNoMatch)
+	// Create schema files for different kinds.
+	tmpDir := t.TempDir()
+	yamltest.WriteFiles(t, tmpDir, map[string]string{
+		"Deployment.json": `{"type": "object", "properties": {"kind": {"const": "Deployment"}}}`,
+		"Service.json":    `{"type": "object", "properties": {"kind": {"const": "Service"}}}`,
 	})
 
-	t.Run("Directive integration", func(t *testing.T) {
-		t.Parallel()
+	reg := schema.NewRegistry(
+		schema.WithResolvers(
+			schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
+				node, err := doc.At(kindPath)
+				if err != nil {
+					return schema.Ref{}, schema.ErrNoMatch
+				}
 
-		tmpDir := t.TempDir()
-		writeFiles(t, tmpDir, map[string]string{
-			"test.json":   `{"type": "object", "properties": {"kind": {"type": "string"}}}`,
-			"config.yaml": withDirective("test.json", "kind: Deployment\n"),
-		})
+				kind, err := node.Decode[string](ctx)
+				if err != nil || (kind != "Deployment" && kind != "Service") {
+					return schema.Ref{}, schema.ErrNoMatch
+				}
 
-		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+				return schema.File(filepath.Join(tmpDir, kind+".json")), nil
+			}),
+		),
+	)
 
-		source, err := niceyaml.NewSourceFromFile(filepath.Join(tmpDir, "config.yaml"))
-		require.NoError(t, err)
-		require.NoError(t, source.ValidateDocuments(t.Context(), reg))
-	})
+	requireAccepts(t, reg, "kind: Deployment")
+	requireAccepts(t, reg, "kind: Service")
+
+	// ConfigMap has no schema.
+	err := checkInput(t, reg, "kind: ConfigMap")
+	require.ErrorIs(t, err, schema.ErrNoMatch)
 }
 
-func TestRegistry_CompileOptionsNotAliased(t *testing.T) {
+func TestRegistry_OptionSlices(t *testing.T) {
 	t.Parallel()
 
-	// The registry compiles each schema on its first lookup, so aliasing
-	// the caller's slice would let a later write change how the next
-	// schema compiles. The option copies the slice when the caller builds
-	// it, so a write between WithCompileOptions and NewRegistry changes
-	// nothing either. Asserting formats makes the difference observable
-	// here.
+	// The registry compiles each schema on its first lookup and runs a
+	// CompileOption only then, so an option that aliased the caller's
+	// slice would let a later write change how the next schema compiles.
+	// Each option copies its slice when the caller builds it. Asserting
+	// formats makes the difference observable, so a registry takes an
+	// ipv4 schema and must reject a value that is not an address, unless
+	// its case names another input.
+	ipv4 := schema.WithResolvers(schema.Embedded([]byte(`{"type": "string", "format": "ipv4"}`)))
+
+	formats := func(on bool) schema.CompileOption {
+		return schema.WithJSONSchemaOptions(jsonschema.WithFormats(on))
+	}
+
 	tcs := map[string]struct {
-		writeFirst bool
+		newRegistry func() *schema.Registry
+		input       string
+		want        string
 	}{
-		"write after NewRegistry":  {},
-		"write before NewRegistry": {writeFirst: true},
+		"compile options written after NewRegistry": {
+			newRegistry: func() *schema.Registry {
+				opts := []schema.CompileOption{formats(true)}
+				reg := schema.NewRegistry(schema.WithCompileOptions(opts...), ipv4)
+				opts[0] = formats(false)
+
+				return reg
+			},
+		},
+		// A write between WithCompileOptions and NewRegistry changes
+		// nothing either.
+		"compile options written before NewRegistry": {
+			newRegistry: func() *schema.Registry {
+				opts := []schema.CompileOption{formats(true)}
+				opt := schema.WithCompileOptions(opts...)
+				opts[0] = formats(false)
+
+				return schema.NewRegistry(opt, ipv4)
+			},
+		},
+		"JSON Schema options written after NewRegistry": {
+			newRegistry: func() *schema.Registry {
+				jopts := []jsonschema.ValidateOption{jsonschema.WithFormats(true)}
+				reg := schema.NewRegistry(schema.WithCompileOptions(schema.WithJSONSchemaOptions(jopts...)), ipv4)
+				jopts[0] = jsonschema.WithFormats(false)
+
+				return reg
+			},
+		},
+		// Each call appends, so the format assertions the first call asks
+		// for still reach the compiler after the second call adds to them.
+		"compile options of two calls": {
+			newRegistry: func() *schema.Registry {
+				return schema.NewRegistry(
+					schema.WithCompileOptions(formats(true)),
+					schema.WithCompileOptions(schema.WithJSONSchemaOptions()),
+					ipv4,
+				)
+			},
+		},
+		// A nil written to the caller's slice afterwards neither slips past
+		// the nil check nor reaches Lookup.
+		"resolvers written after WithResolvers": {
+			newRegistry: func() *schema.Registry {
+				res := []schema.Resolver{schema.Embedded([]byte(`{"type": "string"}`))}
+				opt := schema.WithResolvers(res...)
+				res[0] = nil
+
+				return schema.NewRegistry(opt)
+			},
+			input: "key: value",
+			want:  `expected "string", got "object"`,
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			opts := []schema.CompileOption{schema.WithJSONSchemaOptions(jsonschema.WithFormats(true))}
-			opt := schema.WithCompileOptions(opts...)
-
-			if tc.writeFirst {
-				opts[0] = schema.WithJSONSchemaOptions(jsonschema.WithFormats(false))
-			}
-
-			reg := schema.NewRegistry(
-				opt,
-				schema.WithResolvers(schema.Embedded([]byte(`{"type": "string", "format": "ipv4"}`))),
-			)
-
-			opts[0] = schema.WithJSONSchemaOptions(jsonschema.WithFormats(false))
-
-			requireRejects(t, reg, "not-an-ip", `string does not match format "ipv4"`)
+			requireRejects(t, tc.newRegistry(),
+				cmp.Or(tc.input, "not-an-ip"),
+				cmp.Or(tc.want, `string does not match format "ipv4"`))
 		})
 	}
-}
-
-func TestRegistry_ResolversNotAliased(t *testing.T) {
-	t.Parallel()
-
-	// The option copies the resolvers when the caller builds it, so a nil
-	// written to the caller's slice afterwards neither slips past the nil
-	// check nor reaches Lookup.
-	res := []schema.Resolver{schema.Embedded([]byte(`{"type": "string"}`))}
-	opt := schema.WithResolvers(res...)
-	res[0] = nil
-
-	requireRejects(t, schema.NewRegistry(opt), "key: value", `expected "string", got "object"`)
-}
-
-func TestRegistry_JSONSchemaOptionsNotAliased(t *testing.T) {
-	t.Parallel()
-
-	// The registry runs a CompileOption only when it first compiles a
-	// schema, so WithJSONSchemaOptions must copy its slice when the caller
-	// builds the option. Otherwise a write after NewRegistry would turn
-	// format assertions off.
-	jopts := []jsonschema.ValidateOption{jsonschema.WithFormats(true)}
-
-	reg := schema.NewRegistry(
-		schema.WithCompileOptions(schema.WithJSONSchemaOptions(jopts...)),
-		schema.WithResolvers(schema.Embedded([]byte(`{"type": "string", "format": "ipv4"}`))),
-	)
-
-	jopts[0] = jsonschema.WithFormats(false)
-
-	requireRejects(t, reg, "not-an-ip", `string does not match format "ipv4"`)
-}
-
-func TestRegistry_CompileOptionsAppend(t *testing.T) {
-	t.Parallel()
-
-	// Each call appends, so the format assertions the first call asks for
-	// still reach the compiler after the second call adds to them.
-	reg := schema.NewRegistry(
-		schema.WithCompileOptions(schema.WithJSONSchemaOptions(jsonschema.WithFormats(true))),
-		schema.WithCompileOptions(schema.WithJSONSchemaOptions()),
-		schema.WithResolvers(schema.Embedded([]byte(`{"type": "string", "format": "ipv4"}`))),
-	)
-
-	requireRejects(t, reg, "not-an-ip", `string does not match format "ipv4"`)
 }
 
 func TestRegistry_ErrorCases(t *testing.T) {
@@ -1579,14 +1560,13 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 		schema.When(matcher.Content(kindPath, "Service"), schema.Embedded(serviceSchema)),
 	))
 
-	docs := niceyaml.NewSourceFromString(stringtest.Input(`
+	docs := yamltest.Documents(t, niceyaml.NewSourceFromString(stringtest.Input(`
 		kind: Deployment
 		---
 		kind: Service
 		---
 		kind: ConfigMap
-	`)).Documents()
-	require.Len(t, docs, 3)
+	`)), 3)
 
 	// Each schema takes one kind alone, so a document passes only the
 	// schema of its own resolver. No resolver applies to the ConfigMap.
@@ -1605,7 +1585,7 @@ func TestRegistry_Validator_ErrorBoundToReceiver(t *testing.T) {
 
 	// The registry gets the document the decode runs on, whatever options
 	// the source and the decode hold, and binds its errors through it.
-	refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n"))
+	refs := yamltest.References("base: &x 1\n")
 	ordered := niceyaml.WithYAMLOrderedMaps(true)
 
 	tcs := map[string]struct {
@@ -1836,7 +1816,7 @@ func TestRegistry_WithRetryAfter(t *testing.T) {
 		t.Helper()
 
 		for range 5 {
-			err := reg.Check(t.Context(), yamltest.FirstDocument(t, withDirective(schemaURL, "a: 1\n")))
+			err := checkInput(t, reg, yamltest.SchemaDirective(schemaURL, "a: 1\n"))
 			require.ErrorIs(t, err, want)
 		}
 	}
@@ -2067,8 +2047,7 @@ func TestRegistry_WithRetryAfter(t *testing.T) {
 					close(release)
 					synctest.Wait()
 
-					require.ErrorIs(t, err, schema.ErrLoad)
-					require.ErrorIs(t, err, context.Canceled)
+					requireLoadError(t, err, context.Canceled)
 
 					// No interval has passed, so a remembered failure would
 					// fail this document too.
@@ -2085,20 +2064,18 @@ func TestRegistry_WithRetryAfter(t *testing.T) {
 		// Two spellings of one path in one file system share a cache key,
 		// so the second request gets the failure of the first, and its
 		// message names the path the second Ref spells.
-		fsys := &openCountingFS{files: mapFS(nil)}
+		fsys := &openCountingFS{files: yamltest.MapFS(nil)}
 		reg := schema.NewRegistry()
 
 		_, err := reg.Schema(t.Context(), schema.FileFS(fsys, "schemas/gone.json"))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrNotExist)
+		requireLoadError(t, err, fs.ErrNotExist)
 		assert.True(t, strings.HasPrefix(err.Error(), `load schema: "schemas/gone.json": `), err.Error())
 
 		opens := fsys.opens.Load()
 		require.Positive(t, opens)
 
 		_, err = reg.Schema(t.Context(), schema.FileFS(fsys, "./schemas/gone.json"))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrNotExist)
+		requireLoadError(t, err, fs.ErrNotExist)
 		assert.True(t, strings.HasPrefix(err.Error(), `load schema: "./schemas/gone.json": `), err.Error())
 		assert.Equal(t, opens, fsys.opens.Load())
 	})
@@ -2109,8 +2086,8 @@ func TestRegistry_FileFS(t *testing.T) {
 
 	schemaData := []byte(`{"type": "object", "required": ["kind"]}`)
 
-	bundle := mapFS(map[string]string{
-		"configs/app.yaml":        withDirective("./app.schema.json", "kind: App\n"),
+	bundle := yamltest.MapFS(map[string]string{
+		"configs/app.yaml":        yamltest.SchemaDirective("./app.schema.json", "kind: App\n"),
 		"configs/app.schema.json": string(schemaData),
 		"schemas/pod.json":        string(schemaData),
 	})
@@ -2160,14 +2137,13 @@ func TestRegistry_FileFS(t *testing.T) {
 		onDisk := yamltest.FirstDocumentWithPath(t, text, filepath.Join(t.TempDir(), "configs", "app.yaml"))
 
 		err = reg.Check(t.Context(), onDisk)
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, os.ErrNotExist)
+		requireLoadError(t, err, os.ErrNotExist)
 	})
 
 	t.Run("a directive with a fragment selects a subschema", func(t *testing.T) {
 		t.Parallel()
 
-		fsys := mapFS(map[string]string{
+		fsys := yamltest.MapFS(map[string]string{
 			"configs/defs.json": `{"$defs": {"Foo": {"$ref": "#/$defs/Name"}, "Name": {"required": ["name"]}}}`,
 		})
 
@@ -2175,7 +2151,7 @@ func TestRegistry_FileFS(t *testing.T) {
 
 		// Each document names a subschema of defs.json by its pointer.
 		app := func(pointer, body string) *niceyaml.Node {
-			return yamltest.FirstDocument(t, withDirective("./defs.json#"+pointer, body),
+			return yamltest.FirstDocument(t, yamltest.SchemaDirective("./defs.json#"+pointer, body),
 				niceyaml.WithFilePath("configs/app.yaml"), niceyaml.WithFS(fsys))
 		}
 
@@ -2197,7 +2173,7 @@ func TestRegistry_FileFS(t *testing.T) {
 	t.Run("a $ref through the parent stays in the file system", func(t *testing.T) {
 		t.Parallel()
 
-		fsys := mapFS(map[string]string{
+		fsys := yamltest.MapFS(map[string]string{
 			"schemas/app/main.json": `{"properties": {"a": {"$ref": "../defs/a.json"}}}`,
 			"schemas/defs/a.json":   `{"type": "string"}`,
 		})
@@ -2215,8 +2191,7 @@ func TestRegistry_FileFS(t *testing.T) {
 		reg := schema.NewRegistry()
 
 		_, err := reg.Load(t.Context(), schema.FileFS(bundle, "./schemas/missing.json"))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrNotExist)
+		requireLoadError(t, err, fs.ErrNotExist)
 		assert.Equal(t,
 			`load schema: "./schemas/missing.json": read schemas/missing.json: `+
 				`open schemas/missing.json: file does not exist`,
@@ -2226,7 +2201,7 @@ func TestRegistry_FileFS(t *testing.T) {
 	t.Run("a missing $ref reports the path in the file system", func(t *testing.T) {
 		t.Parallel()
 
-		fsys := mapFS(map[string]string{
+		fsys := yamltest.MapFS(map[string]string{
 			"schemas/root.json": `{"properties": {"a": {"$ref": "defs.json"}}}`,
 		})
 
@@ -2239,7 +2214,7 @@ func TestRegistry_FileFS(t *testing.T) {
 					schema.WithResolvers(schema.FileFS(fsys, "schemas/root.json")),
 				)
 
-				err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
+				err := checkInput(t, reg, "a: 1\n")
 				require.ErrorIs(t, err, mode.err)
 				assert.Contains(t, err.Error(), "read schemas/defs.json: open schemas/defs.json: file does not exist")
 				assert.NotContains(t, err.Error(), wd)
@@ -2268,12 +2243,10 @@ func TestRegistry_FileFS(t *testing.T) {
 				reg := schema.NewRegistry()
 
 				_, err := reg.Load(t.Context(), schema.FileFS(bundle, tc.path))
-				require.ErrorIs(t, err, schema.ErrLoad)
-				require.ErrorIs(t, err, fs.ErrInvalid)
+				requireLoadError(t, err, fs.ErrInvalid)
 
 				_, err = reg.Schema(t.Context(), schema.FileFS(bundle, tc.path))
-				require.ErrorIs(t, err, schema.ErrLoad)
-				require.ErrorIs(t, err, fs.ErrInvalid)
+				requireLoadError(t, err, fs.ErrInvalid)
 			})
 		}
 	})
@@ -2282,20 +2255,19 @@ func TestRegistry_FileFS(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t,
-			withDirective("./app.schema.json", "kind: App\n"),
+			yamltest.SchemaDirective("./app.schema.json", "kind: App\n"),
 			niceyaml.WithFilePath(filepath.Join(wd, "configs", "app.yaml")), niceyaml.WithFS(bundle))
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
 		err := reg.Check(t.Context(), doc)
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrInvalid)
+		requireLoadError(t, err, fs.ErrInvalid)
 	})
 
 	t.Run("a file and a loadable with one name stay apart", func(t *testing.T) {
 		t.Parallel()
 
-		fsys := mapFS(map[string]string{"s.json": `{"type": "string"}`})
+		fsys := yamltest.MapFS(map[string]string{"s.json": `{"type": "string"}`})
 
 		file := schema.FileFS(fsys, "s.json")
 		loadable := loading("s.json", []byte(`{"type": "integer"}`), nil)
@@ -2335,17 +2307,14 @@ func TestRegistry_FileFS(t *testing.T) {
 		reg := schema.NewRegistry()
 
 		_, err := reg.Load(t.Context(), schema.FileFS(fsys, "schemas/pipe.json"))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrInvalid)
+		requireLoadError(t, err, fs.ErrInvalid)
 	})
 
 	t.Run("an oversize file exceeds the limit", func(t *testing.T) {
 		t.Parallel()
 
-		const maxSchemaSize = 10 * 1024 * 1024 // Must match httpfetch.MaxSize.
-
 		fsys := fstest.MapFS{
-			"schemas/big.json": &fstest.MapFile{Data: make([]byte, maxSchemaSize+1)},
+			"schemas/big.json": &fstest.MapFile{Data: make([]byte, httpfetch.MaxSize+1)},
 		}
 
 		reg := schema.NewRegistry()
@@ -2360,14 +2329,12 @@ func TestRegistry_FileFS(t *testing.T) {
 
 		root := t.TempDir()
 
-		err := os.Symlink(writeSchema(t, "s.json", schemaData), filepath.Join(root, "s.json"))
-		if err != nil {
-			t.Skipf("create symlink: %v", err)
-		}
+		target := yamltest.WriteFile(t, t.TempDir(), "s.json", string(schemaData))
+		yamltest.SymlinkOrSkip(t, target, filepath.Join(root, "s.json"))
 
 		reg := schema.NewRegistry()
 
-		_, err = reg.Load(t.Context(), schema.FileFS(rootFS(t, root), "s.json"))
+		_, err := reg.Load(t.Context(), schema.FileFS(rootFS(t, root), "s.json"))
 		require.ErrorIs(t, err, schema.ErrLoad)
 
 		// The file system of os.DirFS follows the link and reads the file
@@ -2409,8 +2376,7 @@ func TestRegistry_FileFS(t *testing.T) {
 		assert.Equal(t, schemaData, data)
 
 		_, err = reg.Load(t.Context(), schema.File(abs))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrNotExist)
+		requireLoadError(t, err, fs.ErrNotExist)
 
 		// With bundle as that file system, the path on disk reads from it.
 		reg = schema.NewRegistry(schema.WithFSAt(".", bundle))
@@ -2431,20 +2397,20 @@ func TestRegistry_FileSystems(t *testing.T) {
 
 	// Both file systems and the directory on disk hold the same paths and
 	// the same schema. The documents its $ref names differ.
-	stringFS := mapFS(map[string]string{
-		"configs/app.yaml":    withDirective("./schema.json", "v: x\n"),
+	stringFS := yamltest.MapFS(map[string]string{
+		"configs/app.yaml":    yamltest.SchemaDirective("./schema.json", "v: x\n"),
 		"configs/schema.json": refsDefs,
 		"configs/defs.json":   `{"type": "string"}`,
 	})
-	integerFS := mapFS(map[string]string{
-		"configs/app.yaml":    withDirective("./schema.json", "v: 5\n"),
+	integerFS := yamltest.MapFS(map[string]string{
+		"configs/app.yaml":    yamltest.SchemaDirective("./schema.json", "v: 5\n"),
 		"configs/schema.json": refsDefs,
 		"configs/defs.json":   `{"type": "integer"}`,
 	})
 
 	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{
-		"configs/app.yaml":    withDirective("./schema.json", "v: true\n"),
+	yamltest.WriteFiles(t, dir, map[string]string{
+		"configs/app.yaml":    yamltest.SchemaDirective("./schema.json", "v: true\n"),
 		"configs/schema.json": refsDefs,
 		"configs/defs.json":   `{"type": "boolean"}`,
 	})
@@ -2480,7 +2446,7 @@ func TestRegistry_FileSystems(t *testing.T) {
 	t.Run("a document fails the schema of its own file system", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, withDirective("./schema.json", "v: 5\n"),
+		doc := yamltest.FirstDocument(t, yamltest.SchemaDirective("./schema.json", "v: 5\n"),
 			niceyaml.WithFilePath("configs/other.yaml"), niceyaml.WithFS(stringFS))
 
 		err := reg.Check(t.Context(), doc)
@@ -2514,7 +2480,7 @@ func TestRegistry_FileSystems(t *testing.T) {
 func TestRegistry_FileSystemIdentity(t *testing.T) {
 	t.Parallel()
 
-	files := mapFS(map[string]string{"s.json": `{"type": "string"}`})
+	files := yamltest.MapFS(map[string]string{"s.json": `{"type": "string"}`})
 
 	t.Run("a value Go cannot compare names no file system", func(t *testing.T) {
 		t.Parallel()
@@ -2522,8 +2488,7 @@ func TestRegistry_FileSystemIdentity(t *testing.T) {
 		reg := schema.NewRegistry()
 
 		_, err := reg.Schema(t.Context(), schema.FileFS(sliceFS{files: files}, "s.json"))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrInvalid)
+		requireLoadError(t, err, fs.ErrInvalid)
 		require.ErrorContains(t, err, "pass a pointer to it")
 	})
 
@@ -2582,9 +2547,9 @@ func TestRegistry_WithFSAt(t *testing.T) {
 		t.Parallel()
 
 		tenant := t.TempDir()
-		writeFiles(t, tenant, map[string]string{
-			"app.yaml":    withDirective("./schema.json", "name: 5\n"),
-			"ok.yaml":     withDirective("./schema.json", "name: cafe\n"),
+		yamltest.WriteFiles(t, tenant, map[string]string{
+			"app.yaml":    yamltest.SchemaDirective("./schema.json", "name: 5\n"),
+			"ok.yaml":     yamltest.SchemaDirective("./schema.json", "name: cafe\n"),
 			"schema.json": nameSchema,
 		})
 
@@ -2622,26 +2587,42 @@ func TestRegistry_WithFSAt(t *testing.T) {
 
 		base := t.TempDir()
 		tenant := filepath.Join(base, "tenant")
-		writeFiles(t, base, map[string]string{
+		yamltest.WriteFiles(t, base, map[string]string{
 			"tenant/schema.json": nameSchema,
 			"shared/schema.json": nameSchema,
 		})
 
+		missing := filepath.Join(tenant, "schemas", "missing.json")
+
 		tcs := map[string]struct {
 			path string
+			err  error
 			want string
 		}{
 			"path in another directory": {
 				path: filepath.Join(base, "shared", "schema.json"),
+				err:  fs.ErrInvalid,
 				want: "not under " + tenant,
 			},
 			"path through the parent": {
 				path: filepath.Join(tenant, "..", "shared", "schema.json"),
+				err:  fs.ErrInvalid,
 				want: "not under " + tenant,
 			},
 			"the directory itself": {
 				path: tenant,
+				err:  fs.ErrInvalid,
 				want: "not a regular file",
+			},
+			"drive-letter path": {
+				path: "Q:/schemas/config.json",
+				err:  fs.ErrInvalid,
+			},
+			// The error reports the path on disk.
+			"missing file": {
+				path: missing,
+				err:  fs.ErrNotExist,
+				want: "read " + missing,
 			},
 		}
 
@@ -2652,36 +2633,10 @@ func TestRegistry_WithFSAt(t *testing.T) {
 				reg := schema.NewRegistry(schema.WithFSAt(tenant, os.DirFS(tenant)))
 
 				_, err := reg.Load(t.Context(), schema.File(tc.path))
-				require.ErrorIs(t, err, schema.ErrLoad)
-				require.ErrorIs(t, err, fs.ErrInvalid)
+				requireLoadError(t, err, tc.err)
 				require.ErrorContains(t, err, tc.want)
 			})
 		}
-	})
-
-	t.Run("a drive-letter path names no file", func(t *testing.T) {
-		t.Parallel()
-
-		tenant := t.TempDir()
-		reg := schema.NewRegistry(schema.WithFSAt(tenant, os.DirFS(tenant)))
-
-		_, err := reg.Load(t.Context(), schema.File("Q:/schemas/config.json"))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrInvalid)
-	})
-
-	t.Run("a missing file reports the path on disk", func(t *testing.T) {
-		t.Parallel()
-
-		tenant := t.TempDir()
-		missing := filepath.Join(tenant, "schemas", "missing.json")
-
-		reg := schema.NewRegistry(schema.WithFSAt(tenant, os.DirFS(tenant)))
-
-		_, err := reg.Load(t.Context(), schema.File(missing))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrNotExist)
-		require.ErrorContains(t, err, "read "+missing)
 	})
 
 	t.Run("a $ref reads under the directory and no further", func(t *testing.T) {
@@ -2689,7 +2644,7 @@ func TestRegistry_WithFSAt(t *testing.T) {
 
 		base := t.TempDir()
 		tenant := filepath.Join(base, "tenant")
-		writeFiles(t, base, map[string]string{
+		yamltest.WriteFiles(t, base, map[string]string{
 			"tenant/in.json":   `{"properties": {"in": {"$ref": "defs.json"}}}`,
 			"tenant/out.json":  `{"properties": {"out": {"$ref": "../shared/defs.json"}}}`,
 			"tenant/defs.json": `{"type": "string"}`,
@@ -2703,21 +2658,10 @@ func TestRegistry_WithFSAt(t *testing.T) {
 
 		requireRejects(t, reg, "in: 5\n", `$.in: expected "string", got "integer"`)
 
-		for name, mode := range refModes {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				reg := schema.NewRegistry(
-					requireRefs(mode.require),
-					schema.WithFSAt(tenant, os.DirFS(tenant)),
-					schema.WithResolvers(schema.File(filepath.Join(tenant, "out.json"))),
-				)
-
-				err := reg.Check(t.Context(), yamltest.FirstDocument(t, "out: 5\n"))
-				require.ErrorIs(t, err, mode.err)
-				assert.Contains(t, err.Error(), "not under "+tenant)
-			})
-		}
+		requireRefModes(t, "out: 5\n", "not under "+tenant,
+			schema.WithFSAt(tenant, os.DirFS(tenant)),
+			schema.WithResolvers(schema.File(filepath.Join(tenant, "out.json"))),
+		)
 
 		// Without the file system, the same schema reads the file outside.
 		disk := schema.NewRegistry(schema.WithResolvers(schema.File(filepath.Join(tenant, "out.json"))))
@@ -2728,11 +2672,11 @@ func TestRegistry_WithFSAt(t *testing.T) {
 		t.Parallel()
 
 		tenant := t.TempDir()
-		writeFiles(t, tenant, map[string]string{
+		yamltest.WriteFiles(t, tenant, map[string]string{
 			"defs.json": `{"$defs": {"Foo": {"$ref": "#/$defs/Name"}, "Name": {"required": ["name"]}}}`,
 		})
 
-		ref := fileOrURL(t, "", "file://"+filepath.ToSlash(filepath.Join(tenant, "defs.json"))+"#/$defs/Foo")
+		ref := fileOrURL(t, "", plainFileURL(filepath.Join(tenant, "defs.json"))+"#/$defs/Foo")
 		reg := schema.NewRegistry(schema.WithFSAt(tenant, os.DirFS(tenant)), schema.WithResolvers(ref))
 
 		requireAccepts(t, reg, "name: x\n")
@@ -2744,7 +2688,7 @@ func TestRegistry_WithFSAt(t *testing.T) {
 		t.Parallel()
 
 		schemaData := []byte(`{"type": "object", "required": ["kind"]}`)
-		bundle := mapFS(map[string]string{
+		bundle := yamltest.MapFS(map[string]string{
 			"configs/app.schema.json": string(schemaData),
 			"schemas/pod.json":        string(schemaData),
 		})
@@ -2766,13 +2710,12 @@ func TestRegistry_WithFSAt(t *testing.T) {
 		}
 
 		doc := yamltest.FirstDocumentWithPath(t,
-			withDirective("./app.schema.json", "kind: App\n"),
+			yamltest.SchemaDirective("./app.schema.json", "kind: App\n"),
 			filepath.Join(wd, "configs", "app.yaml"))
 		require.NoError(t, reg.Check(t.Context(), doc))
 
 		_, err = reg.Load(t.Context(), schema.File(filepath.Join(t.TempDir(), "pod.json")))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrInvalid)
+		requireLoadError(t, err, fs.ErrInvalid)
 	})
 
 	t.Run("a link to the directory names the directory", func(t *testing.T) {
@@ -2782,12 +2725,9 @@ func TestRegistry_WithFSAt(t *testing.T) {
 		dir := filepath.Join(base, "dir")
 		link := filepath.Join(base, "link")
 
-		writeFiles(t, dir, map[string]string{"schemas/s.json": nameSchema})
+		yamltest.WriteFile(t, dir, "schemas/s.json", nameSchema)
 
-		err := os.Symlink(dir, link)
-		if err != nil {
-			t.Skipf("create symlink: %v", err)
-		}
+		yamltest.SymlinkOrSkip(t, dir, link)
 
 		tcs := map[string]struct {
 			at   string
@@ -2827,8 +2767,7 @@ func TestRegistry_WithFSAt(t *testing.T) {
 
 				data, err := reg.Load(t.Context(), schema.File(tc.path))
 				if tc.err != nil {
-					require.ErrorIs(t, err, schema.ErrLoad)
-					require.ErrorIs(t, err, tc.err)
+					requireLoadError(t, err, tc.err)
 
 					return
 				}
@@ -2842,15 +2781,10 @@ func TestRegistry_WithFSAt(t *testing.T) {
 	t.Run("a link inside the directory is the file system's to follow", func(t *testing.T) {
 		t.Parallel()
 
-		outside := t.TempDir()
-		writeFiles(t, outside, map[string]string{"s.json": nameSchema})
+		outside := yamltest.WriteFile(t, t.TempDir(), "s.json", nameSchema)
 
 		root := t.TempDir()
-
-		err := os.Symlink(filepath.Join(outside, "s.json"), filepath.Join(root, "s.json"))
-		if err != nil {
-			t.Skipf("create symlink: %v", err)
-		}
+		yamltest.SymlinkOrSkip(t, outside, filepath.Join(root, "s.json"))
 
 		ref := schema.File(filepath.Join(root, "s.json"))
 
@@ -2865,13 +2799,12 @@ func TestRegistry_WithFSAt(t *testing.T) {
 	t.Run("a nil file system keeps the disk", func(t *testing.T) {
 		t.Parallel()
 
-		dir := t.TempDir()
-		writeFiles(t, dir, map[string]string{"s.json": nameSchema})
+		path := yamltest.WriteFile(t, t.TempDir(), "s.json", nameSchema)
 
 		// The directory holds no schema, and the registry reads past it.
 		reg := schema.NewRegistry(schema.WithFSAt(t.TempDir(), nil))
 
-		data, err := reg.Load(t.Context(), schema.File(filepath.Join(dir, "s.json")))
+		data, err := reg.Load(t.Context(), schema.File(path))
 		require.NoError(t, err)
 		assert.JSONEq(t, nameSchema, string(data))
 	})
@@ -2895,8 +2828,8 @@ func TestRegistry_DocumentOutsideFileSystem(t *testing.T) {
 	base := t.TempDir()
 	tenant := filepath.Join(base, "tenant")
 
-	writeFiles(t, base, map[string]string{
-		"shared/app.yaml":           withDirective("./schema.json", "name: 5\n"),
+	yamltest.WriteFiles(t, base, map[string]string{
+		"shared/app.yaml":           yamltest.SchemaDirective("./schema.json", "name: 5\n"),
 		"shared/schema.json":        `{"properties": {"name": {"type": "string"}}}`,
 		"tenant/shared/schema.json": `{}`,
 	})
@@ -2934,8 +2867,7 @@ func TestRegistry_DocumentOutsideFileSystem(t *testing.T) {
 			require.ErrorContains(t, err, tc.want)
 
 			if tc.err != nil {
-				require.ErrorIs(t, err, schema.ErrLoad)
-				require.ErrorIs(t, err, tc.err)
+				requireLoadError(t, err, tc.err)
 			}
 		})
 	}
@@ -2947,7 +2879,7 @@ func TestRegistry_DocumentOutsideFileSystem(t *testing.T) {
 //
 //nolint:paralleltest // See above.
 func TestRegistry_FileSystemAfterChdir(t *testing.T) {
-	bundle := mapFS(map[string]string{
+	bundle := yamltest.MapFS(map[string]string{
 		"schemas/config.json": `{"properties": {"a": {"$ref": "defs.json"}}}`,
 		"schemas/defs.json":   `{"type": "string"}`,
 	})
@@ -3005,7 +2937,7 @@ func TestRegistry_FileSystemAfterChdir(t *testing.T) {
 //
 //nolint:paralleltest // See above.
 func TestRegistry_FileFS_AnyWorkingDirectory(t *testing.T) {
-	bundle := mapFS(map[string]string{
+	bundle := yamltest.MapFS(map[string]string{
 		"x/s.json":    `{"type": "string"}`,
 		"s.json":      `{"type": "integer"}`,
 		"x/main.json": `{"$ref": "defs.json"}`,
@@ -3102,10 +3034,10 @@ func TestRegistry_WithFSAt_RelativeDocument(t *testing.T) {
 
 	// The schema beside the document takes only a string, and the one at
 	// the root of the repository takes anything.
-	writeFiles(t, repo, map[string]string{
+	yamltest.WriteFiles(t, repo, map[string]string{
 		"schema.json":     `{}`,
 		"sub/schema.json": `{"properties": {"name": {"type": "string"}}}`,
-		"sub/app.yaml":    withDirective("./schema.json", "name: 5\n"),
+		"sub/app.yaml":    yamltest.SchemaDirective("./schema.json", "name: 5\n"),
 	})
 
 	t.Chdir(filepath.Join(repo, "sub"))
@@ -3129,7 +3061,7 @@ func TestRegistry_WithFSAt_RelativeDocument(t *testing.T) {
 //
 //nolint:paralleltest // See above.
 func TestRegistry_WithFSAt_RelativeDirectory(t *testing.T) {
-	bundle := mapFS(map[string]string{"s.json": `{"type": "object"}`})
+	bundle := yamltest.MapFS(map[string]string{"s.json": `{"type": "object"}`})
 
 	before, at, after := t.TempDir(), t.TempDir(), t.TempDir()
 
@@ -3164,19 +3096,16 @@ func TestRegistry_WithFSAt_WorkingDirectoryThroughLink(t *testing.T) {
 	base := t.TempDir()
 	link := filepath.Join(base, "link")
 
-	writeFiles(t, base, map[string]string{
+	yamltest.WriteFiles(t, base, map[string]string{
 		"repo/sub/schema.json": `{"properties": {"name": {"type": "string"}}}`,
-		"repo/sub/app.yaml":    withDirective("./schema.json", "name: 5\n"),
+		"repo/sub/app.yaml":    yamltest.SchemaDirective("./schema.json", "name: 5\n"),
 	})
 
 	// The temporary directory may lie behind a link of its own.
 	repo, err := filepath.EvalSymlinks(filepath.Join(base, "repo"))
 	require.NoError(t, err)
 
-	err = os.Symlink(repo, link)
-	if err != nil {
-		t.Skipf("create symlink: %v", err)
-	}
+	yamltest.SymlinkOrSkip(t, repo, link)
 
 	t.Chdir(filepath.Join(link, "sub"))
 
@@ -3202,14 +3131,6 @@ func TestRegistry_WithFSAt_WorkingDirectoryThroughLink(t *testing.T) {
 func TestRegistry_Load(t *testing.T) {
 	t.Parallel()
 
-	t.Run("a loadable ref returns its bytes", func(t *testing.T) {
-		t.Parallel()
-
-		data, err := schema.NewRegistry().Load(t.Context(), loading("k", []byte(`{}`), nil))
-		require.NoError(t, err)
-		assert.Equal(t, []byte(`{}`), data)
-	})
-
 	t.Run("a URL ref fetches with the client", func(t *testing.T) {
 		t.Parallel()
 
@@ -3229,7 +3150,7 @@ func TestRegistry_Load(t *testing.T) {
 
 		const schemaData = "# Every document names itself.\nrequired: [name]\n"
 
-		path := writeSchema(t, "schema.yaml", []byte(schemaData))
+		path := yamltest.WriteFile(t, t.TempDir(), "schema.yaml", schemaData)
 
 		data, err := schema.NewRegistry().Load(t.Context(), schema.File(path))
 		require.NoError(t, err)
@@ -3421,9 +3342,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		assert.Equal(t, []string{"no schema directive", "no kind"}, reasons)
 
-		problems := slices.Collect(niceyaml.NewErrorTree(err).Problems())
-		require.Len(t, problems, 1)
-		assert.Len(t, problems[0].Children, 2)
+		assert.Len(t, yamltest.OnlyProblem(t, err).Children, 2)
 	})
 
 	t.Run("names the document in a file that holds several", func(t *testing.T) {
@@ -3439,8 +3358,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 			kind: Wat
 		`), niceyaml.WithName("m.yaml"))
 
-		docs := source.Documents()
-		require.Len(t, docs, 3)
+		docs := yamltest.Documents(t, source, 3)
 
 		err := docs[2].Validate(t.Context(), reg)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
@@ -3501,11 +3419,10 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		// The one row of a report matches the reasons the same way, and
 		// each reason stays a detail below it.
-		problems := slices.Collect(niceyaml.NewErrorTree(err).Problems())
-		require.Len(t, problems, 1)
-		require.ErrorIs(t, problems[0].Err, schema.ErrNoDirective)
-		require.Len(t, problems[0].Children, 3)
-		assert.Equal(t, "no schema for kind Service", problems[0].Children[1].Message())
+		problem := yamltest.OnlyProblem(t, err)
+		require.ErrorIs(t, problem.Err, schema.ErrNoDirective)
+		require.Len(t, problem.Children, 3)
+		assert.Equal(t, "no schema for kind Service", problem.Children[1].Message())
 	})
 
 	t.Run("matches a reason only through a target that wraps ErrNoMatch", func(t *testing.T) {
@@ -3561,9 +3478,9 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 	)
 
 	tmpDir := t.TempDir()
-	writeFiles(t, tmpDir, map[string]string{"root.json": rootSchema})
+	yamltest.WriteFile(t, tmpDir, "root.json", rootSchema)
 
-	bundle := mapFS(map[string]string{
+	bundle := yamltest.MapFS(map[string]string{
 		"schemas/root.json": rootSchema,
 		"schemas/two.json":  twoSchema,
 	})
@@ -3571,7 +3488,7 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 	base := serve(t, map[string]string{"/s/root.json": rootSchema})
 
 	// A file URL takes a fragment, which a plain path does not.
-	rootURL := "file://" + filepath.ToSlash(filepath.Join(tmpDir, "root.json"))
+	rootURL := plainFileURL(filepath.Join(tmpDir, "root.json"))
 
 	fragment, err := schema.FileOrURL(tmpDir, rootURL+"#/properties/a")
 	require.NoError(t, err)
@@ -3670,7 +3587,7 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 			// same way, bound to the document.
 			byDocument := schema.NewRegistry(append(tc.opts, schema.WithResolvers(tc.ref))...)
 
-			err = byDocument.Check(t.Context(), yamltest.FirstDocument(t, "b: 5\n"))
+			err = checkInput(t, byDocument, "b: 5\n")
 			require.ErrorIs(t, err, tc.err)
 			assert.False(t, niceyaml.IsInvalid(err))
 		})
@@ -3684,13 +3601,13 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 		entered := make(chan struct{}, 1)
 		release := make(chan struct{})
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.URL.Path {
-			case "/root.json":
-				//nolint:errcheck // Test helper.
-				w.Write([]byte(`{"properties": {"a": {"$ref": "slow.json"}}}`))
+		files := schemaHandler(map[string]string{
+			"/root.json": `{"properties": {"a": {"$ref": "slow.json"}}}`,
+			"/slow.json": `{"type": "string"}`,
+		})
 
-			case "/slow.json":
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/slow.json" {
 				select {
 				case entered <- struct{}{}:
 				default:
@@ -3698,15 +3615,12 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 
 				select {
 				case <-release:
-					//nolint:errcheck // Test helper.
-					w.Write([]byte(`{"type": "string"}`))
-
 				case <-r.Context().Done():
+					return
 				}
-
-			default:
-				http.NotFound(w, r)
 			}
+
+			files.ServeHTTP(w, r)
 		}))
 		t.Cleanup(server.Close)
 
@@ -3722,8 +3636,7 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 		}()
 
 		_, err := reg.Schema(ctx, ref)
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, context.Canceled)
+		requireLoadError(t, err, context.Canceled)
 
 		close(release)
 
@@ -3735,66 +3648,64 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 	})
 }
 
-func TestRegistry_Schema_PanicReachesCaller(t *testing.T) {
+func TestRegistry_Schema_LoadExitReachesCaller(t *testing.T) {
 	t.Parallel()
 
-	// The group runs the load on a goroutine of its own, so a panic in the
-	// load must come back to the caller's goroutine, where the caller can
-	// recover it.
-	reg := schema.NewRegistry()
-	ref := schema.Loadable("boom.json", func(_ context.Context) ([]byte, error) {
-		panic("boom")
-	})
+	// The group runs the load on a goroutine of its own, so a load that
+	// exits without a result must end the caller's goroutine the same way.
+	// The caller can recover a panic there, and a call to runtime.Goexit,
+	// as t.FailNow makes, must not leave the caller waiting on a load that
+	// never answers. The call runs inside capture.Run and drops what Schema
+	// returns, so only a panic or a call to runtime.Goexit yields an error.
+	tcs := map[string]struct {
+		ref schema.Ref
+		err error
+	}{
+		"panic": {
+			ref: schema.Loadable("boom.json", func(context.Context) ([]byte, error) {
+				panic("boom")
+			}),
+			err: &capture.PanicError{Value: "boom"},
+		},
+		"runtime.Goexit": {
+			ref: schema.Loadable("goexit.json", func(context.Context) ([]byte, error) {
+				runtime.Goexit()
 
-	load := func() {
-		_, err := reg.Schema(t.Context(), ref)
-		require.NoError(t, err)
+				return nil, nil
+			}),
+			err: capture.ErrGoexit,
+		},
 	}
 
-	assert.PanicsWithValue(t, "boom", load)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	// The next call loads again rather than hanging on the failed load.
-	assert.PanicsWithValue(t, "boom", load)
-}
+			reg := schema.NewRegistry()
 
-func TestRegistry_Schema_GoexitReachesCaller(t *testing.T) {
-	t.Parallel()
+			// The second call loads again rather than hanging on the failed
+			// load.
+			for range 2 {
+				ended := make(chan error, 1)
 
-	// A load that calls runtime.Goexit, as t.FailNow does, must end the
-	// caller's goroutine the same way instead of leaving the caller waiting
-	// on a load that never answers.
-	reg := schema.NewRegistry()
-	ref := schema.Loadable("goexit.json", func(context.Context) ([]byte, error) {
-		runtime.Goexit()
+				go func() {
+					ended <- capture.Run(func() error {
+						//nolint:errcheck // The call must end through a panic or runtime.Goexit.
+						_, _ = reg.Schema(t.Context(), tc.ref)
 
-		return nil, nil
-	})
+						return nil
+					})
+				}()
 
-	load := func() bool {
-		var returned bool
-
-		done := make(chan struct{})
-
-		go func() {
-			defer close(done)
-
-			_, _ = reg.Schema(t.Context(), ref) //nolint:errcheck // The call exits through runtime.Goexit.
-			returned = true
-		}()
-
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			require.FailNow(t, "Schema hung after the load called runtime.Goexit")
-		}
-
-		return returned
+				select {
+				case err := <-ended:
+					assert.Equal(t, tc.err, err)
+				case <-time.After(5 * time.Second):
+					require.FailNow(t, "Schema hung after the load of "+tc.ref.Key()+" exited")
+				}
+			}
+		})
 	}
-
-	assert.False(t, load())
-
-	// The next call loads again rather than hanging on the failed load.
-	assert.False(t, load())
 }
 
 func TestRegistry_FragmentRefs(t *testing.T) {
@@ -3905,8 +3816,8 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 
 				// Each case writes defs.json to a directory of its own,
 				// and the registry sends no request for it.
-				defsFile := writeSchema(t, "defs.json", []byte(defsSchema))
-				ref := fileOrURL(t, "", "file://"+filepath.ToSlash(defsFile)+"#/$defs/Foo")
+				defsFile := yamltest.WriteFile(t, t.TempDir(), "defs.json", defsSchema)
+				ref := fileOrURL(t, "", plainFileURL(defsFile)+"#/$defs/Foo")
 
 				client, requests := newClient()
 				opts := append([]schema.RegistryOption{
@@ -4043,16 +3954,16 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 	)
 
 	tmpDir := t.TempDir()
-	writeFiles(t, tmpDir, map[string]string{"main.json": mainSchema, "defs.json": defsSchema})
+	yamltest.WriteFiles(t, tmpDir, map[string]string{"main.json": mainSchema, "defs.json": defsSchema})
 
-	bundle := mapFS(map[string]string{
+	bundle := yamltest.MapFS(map[string]string{
 		"schemas/main.json": mainSchema,
 		"schemas/defs.json": defsSchema,
 	})
 
 	// The defs file on disk, and the directory that holds it as a base.
-	defsURL := "file://" + filepath.ToSlash(filepath.Join(tmpDir, "defs.json"))
-	dirURL := "file://" + filepath.ToSlash(tmpDir) + "/"
+	defsURL := plainFileURL(filepath.Join(tmpDir, "defs.json"))
+	dirURL := plainFileURL(tmpDir) + "/"
 
 	base := serve(t, map[string]string{
 		"/s/main.json": mainSchema,
@@ -4097,20 +4008,7 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 	t.Run("a url schema reads no local file", func(t *testing.T) {
 		t.Parallel()
 
-		for name, mode := range refModes {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				reg := schema.NewRegistry(
-					requireRefs(mode.require),
-					schema.WithResolvers(schema.URL(base+"/s/local.json")),
-				)
-
-				err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
-				require.ErrorIs(t, err, mode.err)
-				assert.Contains(t, err.Error(), "cannot resolve $ref")
-			})
-		}
+		requireRefModes(t, "a: 5\n", "cannot resolve $ref", schema.WithResolvers(schema.URL(base+"/s/local.json")))
 	})
 
 	t.Run("a url reached from a file schema reads no local file", func(t *testing.T) {
@@ -4130,7 +4028,7 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				root := writeSchema(t, "root.json", fmt.Appendf(nil, `{"$ref": %q}`, base+tc.remote))
+				root := yamltest.WriteFile(t, t.TempDir(), "root.json", fmt.Sprintf(`{"$ref": %q}`, base+tc.remote))
 
 				for name, mode := range refModes {
 					t.Run(name, func(t *testing.T) {
@@ -4138,14 +4036,14 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 
 						reg := schema.NewRegistry(requireRefs(mode.require), schema.WithResolvers(schema.File(root)))
 
-						err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+						err := checkInput(t, reg, "a: 5\n")
 						require.ErrorIs(t, err, mode.err)
 						assert.NotContains(t, err.Error(), `expected "string", got "integer"`)
 						assert.Contains(t, err.Error(), "names local file")
 
 						// A string fails too, since the registry refuses the
 						// remote schema rather than skip the reference.
-						err = reg.Check(t.Context(), yamltest.FirstDocument(t, "a: x\n"))
+						err = checkInput(t, reg, "a: x\n")
 						require.ErrorContains(t, err, "names local file")
 					})
 				}
@@ -4157,22 +4055,22 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 func TestRegistry_RefDocuments(t *testing.T) {
 	t.Parallel()
 
-	defsFile := writeSchema(t, "defs.json", []byte(`{"type": "string"}`))
+	defsFile := yamltest.WriteFile(t, t.TempDir(), "defs.json", `{"type": "string"}`)
 
-	defsURL := "file://" + filepath.ToSlash(defsFile)
-	namesFile := fmt.Appendf(nil, `{"properties": {"a": {"$ref": %q}}}`, defsURL)
+	defsURL := plainFileURL(defsFile)
+	namesFile := fmt.Sprintf(`{"properties": {"a": {"$ref": %q}}}`, defsURL)
 
-	served := map[string][]byte{
-		"/a.json":          []byte(`{"properties": {"x": {"$ref": "defs.json"}}}`),
-		"/b.json":          []byte(`{"properties": {"x": {"$ref": "defs.json"}}}`),
-		"/defs.json":       []byte(`{"type": "string"}`),
-		"/f.json":          []byte(`{"properties": {"b": {"$ref": "flaky.json"}}}`),
-		"/flaky.json":      []byte(`{"type": "integer"}`),
-		"/g.json":          []byte(`{"properties": {"b": {"$ref": "missing.json"}}}`),
-		"/kept/f.json":     []byte(`{"properties": {"b": {"$ref": "flaky.json"}}}`),
-		"/kept/flaky.json": []byte(`{"type": "integer"}`),
+	served := map[string]string{
+		"/a.json":          `{"properties": {"x": {"$ref": "defs.json"}}}`,
+		"/b.json":          `{"properties": {"x": {"$ref": "defs.json"}}}`,
+		"/defs.json":       `{"type": "string"}`,
+		"/f.json":          `{"properties": {"b": {"$ref": "flaky.json"}}}`,
+		"/flaky.json":      `{"type": "integer"}`,
+		"/g.json":          `{"properties": {"b": {"$ref": "missing.json"}}}`,
+		"/kept/f.json":     `{"properties": {"b": {"$ref": "flaky.json"}}}`,
+		"/kept/flaky.json": `{"type": "integer"}`,
 		"/names-file.json": namesFile,
-		"/via-remote.json": []byte(`{"$ref": "remote-names-file.json"}`),
+		"/via-remote.json": `{"$ref": "remote-names-file.json"}`,
 		// The remote document the two roots of one subtest share.
 		"/remote-names-file.json": namesFile,
 	}
@@ -4185,28 +4083,19 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		hits[path] = &atomic.Int32{}
 	}
 
+	files := schemaHandler(served)
+
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		counter, ok := hits[r.URL.Path]
-		if !ok {
-			http.NotFound(w, r)
+		if counter, ok := hits[r.URL.Path]; ok {
+			n := counter.Add(1)
+			if n == 1 && strings.HasSuffix(r.URL.Path, "/flaky.json") {
+				http.Error(w, "unavailable", http.StatusInternalServerError)
 
-			return
+				return
+			}
 		}
 
-		n := counter.Add(1)
-		data, ok := served[r.URL.Path]
-
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/flaky.json") && n == 1:
-			http.Error(w, "unavailable", http.StatusInternalServerError)
-
-		case !ok:
-			http.NotFound(w, r)
-
-		default:
-			//nolint:errcheck // Test helper.
-			w.Write(data)
-		}
+		files.ServeHTTP(w, r)
 	})
 
 	server := httptest.NewServer(handler)
@@ -4251,7 +4140,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 			// miss, so a validation inside the interval fetches nothing,
 			// although the document has recovered.
 			for range 5 {
-				err := reg.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n"))
+				err := checkInput(t, reg, "b: 2\n")
 				require.ErrorIs(t, err, schema.ErrValidate)
 			}
 
@@ -4279,7 +4168,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 			reg := schema.NewRegistry(memory, schema.WithResolvers(ref))
 
 			for range 3 {
-				err := reg.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n"))
+				err := checkInput(t, reg, "b: 2\n")
 				require.ErrorIs(t, err, schema.ErrLoad)
 				assert.Contains(t, err.Error(), "/kept/flaky.json")
 			}
@@ -4318,7 +4207,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 			// them.
 			for interval := int32(1); interval <= 3; interval++ {
 				for range 3 {
-					err := reg.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n"))
+					err := checkInput(t, reg, "b: 2\n")
 					require.ErrorIs(t, err, schema.ErrValidate)
 				}
 
@@ -4332,7 +4221,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 	t.Run("a url schema still reads no local file after a file schema loaded it", func(t *testing.T) {
 		t.Parallel()
 
-		root := writeSchema(t, "root.json", namesFile)
+		root := yamltest.WriteFile(t, t.TempDir(), "root.json", namesFile)
 
 		for name, mode := range refModes {
 			t.Run(name, func(t *testing.T) {
@@ -4349,7 +4238,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 				err = yamltest.FirstDocument(t, "a: 5\n").Validate(t.Context(), s)
 				require.ErrorContains(t, err, `expected "string"`)
 
-				err = reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+				err = checkInput(t, reg, "a: 5\n")
 				require.ErrorIs(t, err, mode.err)
 				assert.Contains(t, err.Error(), "cannot resolve $ref")
 			})
@@ -4359,7 +4248,8 @@ func TestRegistry_RefDocuments(t *testing.T) {
 	t.Run("a cached remote document still cannot name a local file", func(t *testing.T) {
 		t.Parallel()
 
-		root := writeSchema(t, "root.json", fmt.Appendf(nil, `{"$ref": %q}`, server.URL+"/remote-names-file.json"))
+		root := yamltest.WriteFile(t, t.TempDir(), "root.json",
+			fmt.Sprintf(`{"$ref": %q}`, server.URL+"/remote-names-file.json"))
 
 		// The url root compiles only in a registry that does not require
 		// refs, since it cannot reach the file its document names.
@@ -4371,7 +4261,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, int32(1), hits["/remote-names-file.json"].Load())
 
-		err = reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+		err = checkInput(t, reg, "a: 5\n")
 		require.ErrorIs(t, err, schema.ErrValidate)
 		assert.NotContains(t, err.Error(), `expected "string", got "integer"`)
 		assert.Contains(t, err.Error(), "names local file")
@@ -4427,7 +4317,7 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 			t.Helper()
 
 			dir := t.TempDir()
-			writeFiles(t, dir, files)
+			yamltest.WriteFiles(t, dir, files)
 
 			file, fragment, ok := strings.Cut(name, "#")
 			path := filepath.Join(dir, file)
@@ -4436,35 +4326,31 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 				return schema.File(path), nil
 			}
 
-			return fileOrURL(t, "", "file://"+filepath.ToSlash(path)+"#"+fragment), nil
+			return fileOrURL(t, "", plainFileURL(path)+"#"+fragment), nil
 		}
 	}
 
+	// For each file, under puts dir in front of its name.
+	under := func(dir string, files map[string]string) map[string]string {
+		out := make(map[string]string, len(files))
+		for file, data := range files {
+			out[dir+file] = data
+		}
+
+		return out
+	}
+
 	inFS := func(files map[string]string, name string) refFunc {
-		return func(t *testing.T) (schema.Ref, []schema.RegistryOption) {
-			t.Helper()
-
-			fsys := fstest.MapFS{}
-			for file, data := range files {
-				fsys["schemas/"+file] = &fstest.MapFile{Data: []byte(data)}
-			}
-
-			return schema.FileFS(fsys, "schemas/"+name), nil
+		return func(*testing.T) (schema.Ref, []schema.RegistryOption) {
+			return schema.FileFS(yamltest.MapFS(under("schemas/", files)), "schemas/"+name), nil
 		}
 	}
 
 	// Names under .test never resolve, so a fetch that bypasses the
 	// client fails.
 	served := func(files map[string]string, name string) refFunc {
-		return func(t *testing.T) (schema.Ref, []schema.RegistryOption) {
-			t.Helper()
-
-			remote := make(map[string]string, len(files))
-			for file, data := range files {
-				remote["/"+file] = data
-			}
-
-			client, _ := memoryClient(remote)
+		return func(*testing.T) (schema.Ref, []schema.RegistryOption) {
+			client, _ := memoryClient(under("/", files))
 
 			return schema.URL("http://schemas.test/" + name), []schema.RegistryOption{schema.WithHTTPClient(client)}
 		}
@@ -4601,8 +4487,7 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 
 			ref, _ := onDisk(tc.files, tc.name)(t)
 
-			err := schema.NewRegistry(schema.WithResolvers(ref)).
-				Check(t.Context(), yamltest.FirstDocument(t, "name: a\n"))
+			err := checkInput(t, schema.NewRegistry(schema.WithResolvers(ref)), "name: a\n")
 			require.ErrorIs(t, err, tc.err)
 			assert.Contains(t, err.Error(), tc.at)
 			assert.Contains(t, err.Error(), "YAML decode: ")
@@ -4615,10 +4500,9 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 	t.Run("a remote YAML document cannot name a local file", func(t *testing.T) {
 		t.Parallel()
 
-		dir := t.TempDir()
-		writeFiles(t, dir, map[string]string{"defs.json": `{"type": "string"}`})
+		defsFile := yamltest.WriteFile(t, t.TempDir(), "defs.json", `{"type": "string"}`)
 
-		defsURL := "file://" + filepath.ToSlash(filepath.Join(dir, "defs.json"))
+		defsURL := plainFileURL(defsFile)
 
 		refersTo := func(ref string) string {
 			return stringtest.LinesLF("properties:", "  a:", "    $ref: "+ref)
@@ -4634,19 +4518,13 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 		base := serve(t, remote)
 
 		for path := range remote {
-			for name, mode := range refModes {
-				t.Run(path+" "+name, func(t *testing.T) {
-					t.Parallel()
+			t.Run(path, func(t *testing.T) {
+				t.Parallel()
 
-					root := writeSchema(t, "root.yaml", []byte("$ref: "+base+path+"\n"))
+				root := yamltest.WriteFile(t, t.TempDir(), "root.yaml", "$ref: "+base+path+"\n")
 
-					reg := schema.NewRegistry(requireRefs(mode.require), schema.WithResolvers(schema.File(root)))
-
-					err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
-					require.ErrorIs(t, err, mode.err)
-					assert.Contains(t, err.Error(), "names local file")
-				})
-			}
+				requireRefModes(t, "a: 5\n", "names local file", schema.WithResolvers(schema.File(root)))
+			})
 		}
 	})
 }
@@ -4733,25 +4611,19 @@ func TestRegistry_Check_RedactsPassword(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var lateHits atomic.Int32
 
+		files := schemaHandler(map[string]string{
+			"/d/root.json": `{"properties": {"a": {"$ref": "../late.json"}}}`,
+			"/late.json":   `{"$defs": {"a": {"$anchor": "1bad"}}}`,
+		})
+
 		client := handlerTransport(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch r.URL.Path {
-			case "/d/root.json":
-				//nolint:errcheck // Test helper.
-				w.Write([]byte(`{"properties": {"a": {"$ref": "../late.json"}}}`))
+			if r.URL.Path == "/late.json" && lateHits.Add(1) == 1 {
+				http.Error(w, "unavailable", http.StatusInternalServerError)
 
-			case "/late.json":
-				if lateHits.Add(1) == 1 {
-					http.Error(w, "unavailable", http.StatusInternalServerError)
-
-					return
-				}
-
-				//nolint:errcheck // Test helper.
-				w.Write([]byte(`{"$defs": {"a": {"$anchor": "1bad"}}}`))
-
-			default:
-				http.NotFound(w, r)
+				return
 			}
+
+			files.ServeHTTP(w, r)
 		})).Client()
 
 		ref := schema.URL(addPassword("http://schemas.test") + "/d/root.json")
@@ -4762,7 +4634,7 @@ func TestRegistry_Check_RedactsPassword(t *testing.T) {
 
 		time.Sleep(time.Minute)
 
-		err = reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+		err = checkInput(t, reg, "a: 5\n")
 		require.ErrorIs(t, err, schema.ErrValidate)
 		assert.Contains(t, err.Error(), "1bad")
 		assert.NotContains(t, err.Error(), "secret")
@@ -4774,6 +4646,11 @@ func TestRegistry_RefCredentials(t *testing.T) {
 
 	// The server answers only a request that carries the password, so a
 	// referenced document loads only when the registry sends it.
+	files := schemaHandler(map[string]string{
+		"/d/root.json": `{"properties": {"a": {"$ref": "../defs.json#/$defs/Str"}}}`,
+		"/defs.json":   `{"$defs": {"Str": {"type": "string"}}}`,
+	})
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if user, pass, ok := r.BasicAuth(); !ok || user != "user" || pass != "secret" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -4781,18 +4658,7 @@ func TestRegistry_RefCredentials(t *testing.T) {
 			return
 		}
 
-		switch r.URL.Path {
-		case "/d/root.json":
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{"properties": {"a": {"$ref": "../defs.json#/$defs/Str"}}}`))
-
-		case "/defs.json":
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{"$defs": {"Str": {"type": "string"}}}`))
-
-		default:
-			http.NotFound(w, r)
-		}
+		files.ServeHTTP(w, r)
 	}))
 	t.Cleanup(server.Close)
 
@@ -4827,13 +4693,14 @@ func TestRegistry_RefCredentials(t *testing.T) {
 
 		var sawAuth atomic.Bool
 
+		defs := schemaHandler(map[string]string{"/defs.json": `{"type": "string"}`})
+
 		other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if _, _, ok := r.BasicAuth(); ok {
 				sawAuth.Store(true)
 			}
 
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{"type": "string"}`))
+			defs.ServeHTTP(w, r)
 		}))
 		t.Cleanup(other.Close)
 

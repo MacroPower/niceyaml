@@ -7,13 +7,13 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -25,28 +25,6 @@ func fileURL(t *testing.T, path string) string {
 	return schema.File(path).Key()
 }
 
-// writeSchema writes data to a file called name in a new temporary
-// directory and returns the path of the file.
-func writeSchema(t *testing.T, name string, data []byte) string {
-	t.Helper()
-
-	path := filepath.Join(t.TempDir(), name)
-	require.NoError(t, os.WriteFile(path, data, 0o600))
-
-	return path
-}
-
-// mapFS returns a file system that holds files, a map from
-// slash-separated path to content.
-func mapFS(files map[string]string) fstest.MapFS {
-	fsys := fstest.MapFS{}
-	for name, data := range files {
-		fsys[name] = &fstest.MapFile{Data: []byte(data)}
-	}
-
-	return fsys
-}
-
 func TestFile(t *testing.T) {
 	t.Parallel()
 
@@ -54,7 +32,7 @@ func TestFile(t *testing.T) {
 		t.Parallel()
 
 		schemaData := []byte(`{"type": "object"}`)
-		schemaPath := writeSchema(t, "schema.json", schemaData)
+		schemaPath := yamltest.WriteFile(t, t.TempDir(), "schema.json", string(schemaData))
 
 		_, data, err := load(t, schema.File(schemaPath))
 		require.NoError(t, err)
@@ -97,8 +75,7 @@ func TestFile(t *testing.T) {
 		// The null device reads as empty, but a device such as /dev/zero
 		// never ends, so the loader refuses every file that is not regular.
 		_, data, err := load(t, schema.File(os.DevNull))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrInvalid)
+		requireLoadError(t, err, fs.ErrInvalid)
 		assert.Nil(t, data)
 	})
 
@@ -119,7 +96,7 @@ func TestFile_ErrorDrawsControlCharacters(t *testing.T) {
 	// path holds whatever the author of the document wrote.
 	const name = "a\x1b[2J\nb.json"
 
-	fsys := mapFS(map[string]string{"dir\x1b[2J/x.json": "{}"})
+	fsys := yamltest.MapFS(map[string]string{"dir\x1b[2J/x.json": "{}"})
 
 	tcs := map[string]struct {
 		ref  schema.Ref
@@ -173,7 +150,7 @@ func TestFile_ErrorKeepsCause(t *testing.T) {
 
 	const name = "a\x1b[2Jb.json"
 
-	_, err := schema.NewRegistry().Schema(t.Context(), schema.FileFS(mapFS(nil), name))
+	_, err := schema.NewRegistry().Schema(t.Context(), schema.FileFS(yamltest.MapFS(nil), name))
 
 	var pathErr *fs.PathError
 
@@ -196,21 +173,8 @@ func TestFile_DriveLetter(t *testing.T) {
 	assert.Equal(t, "file:///C:/schemas/config.json", key)
 	assert.Nil(t, data)
 	require.ErrorContains(t, err, "read C:/schemas/config.json")
-	require.ErrorIs(t, err, schema.ErrLoad)
-	require.ErrorIs(t, err, fs.ErrInvalid)
+	requireLoadError(t, err, fs.ErrInvalid)
 	require.NotErrorIs(t, err, os.ErrNotExist)
-}
-
-func TestFile_DirectoryNamedLikeADrive(t *testing.T) {
-	t.Parallel()
-
-	if runtime.GOOS == "windows" {
-		t.Skip("a rooted path has no drive on Windows")
-	}
-
-	// Here /C: is an ordinary directory at the root, and a different file
-	// from the drive path C:/x, so the two must not share a cache entry.
-	assert.NotEqual(t, schema.File("C:/x").Key(), schema.File("/C:/x").Key())
 }
 
 func TestFile_URL(t *testing.T) {
@@ -228,6 +192,10 @@ func TestFile_URL(t *testing.T) {
 			path: "/schemas/../schemas/./config.json",
 			want: "file:///schemas/config.json",
 		},
+		"drive-letter path": {
+			path: "C:/schemas/config.json",
+			want: "file:///C:/schemas/config.json",
+		},
 		"unclean drive-letter path": {
 			path: "C:/schemas/../schemas/./config.json",
 			want: "file:///C:/schemas/config.json",
@@ -240,6 +208,9 @@ func TestFile_URL(t *testing.T) {
 			path: `C:\schemas\config.json`,
 			want: "file:///C:/schemas/config.json",
 		},
+		// Off Windows, /C: is an ordinary directory at the root, and a
+		// different file from the drive path C:/schemas/config.json, so the
+		// two must not share a cache entry.
 		"rooted directory named like a drive": {
 			path: "/C:/schemas/config.json",
 			want: "file:///C%3A/schemas/config.json",
@@ -281,7 +252,7 @@ func TestFile_HashInName(t *testing.T) {
 
 	const data = `{"type": "string"}`
 
-	path := writeSchema(t, "a#b.json", []byte(data))
+	path := yamltest.WriteFile(t, t.TempDir(), "a#b.json", data)
 	dir := filepath.Dir(path)
 
 	tcs := map[string]struct {
@@ -292,7 +263,7 @@ func TestFile_HashInName(t *testing.T) {
 			ref: schema.File(path),
 		},
 		"in a file system": {
-			ref: schema.FileFS(mapFS(map[string]string{"a#b.json": data}), "a#b.json"),
+			ref: schema.FileFS(yamltest.MapFS(map[string]string{"a#b.json": data}), "a#b.json"),
 		},
 		"under WithFSAt": {
 			ref:  schema.File(path),
@@ -324,29 +295,17 @@ func TestFile_HashInName(t *testing.T) {
 //
 //nolint:paralleltest // See above.
 func TestFile_NoWorkingDirectory(t *testing.T) {
-	schemaPath := writeSchema(t, "s.json", []byte(`{"type": "object"}`))
+	schemaPath := yamltest.WriteFile(t, t.TempDir(), "s.json", `{"type": "object"}`)
 
 	elsewhere := t.TempDir()
 
-	bundle := mapFS(map[string]string{
-		"configs/app.yaml":  withDirective("../schemas/root.json", "name: 5\n"),
+	bundle := yamltest.MapFS(map[string]string{
+		"configs/app.yaml":  yamltest.SchemaDirective("../schemas/root.json", "name: 5\n"),
 		"schemas/root.json": `{"properties": {"name": {"$ref": "defs.json"}}}`,
 		"schemas/defs.json": `{"type": "string"}`,
 	})
 
-	gone := filepath.Join(t.TempDir(), "gone")
-	require.NoError(t, os.Mkdir(gone, 0o700))
-	t.Chdir(gone)
-
-	err := os.Remove(gone)
-	if err != nil {
-		t.Skipf("remove the working directory: %v", err)
-	}
-
-	_, err = os.Getwd()
-	if err == nil {
-		t.Skip("the platform still names the removed working directory")
-	}
+	yamltest.RemoveWorkingDirectory(t)
 
 	//nolint:paralleltest // See above.
 	t.Run("a relative path builds a Ref", func(t *testing.T) {
@@ -406,7 +365,7 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 	//nolint:paralleltest // See above.
 	t.Run("a relative path never takes the schema of the path under the root", func(t *testing.T) {
 		// The two Refs share a key, and only the absolute one names a file.
-		rooted := loading(schema.File("/schemas/root.json").Key(), []byte(`{"type": "object"}`), nil)
+		rooted := loading(fileURL(t, "/schemas/root.json"), []byte(`{"type": "object"}`), nil)
 
 		reg := schema.NewRegistry()
 
@@ -441,7 +400,9 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 //
 //nolint:paralleltest // See above.
 func TestFile_ReadsAfterChdir(t *testing.T) {
-	t.Chdir(filepath.Dir(writeSchema(t, "s.json", []byte(`{"type": "object"}`))))
+	dir := t.TempDir()
+	yamltest.WriteFile(t, dir, "s.json", `{"type": "object"}`)
+	t.Chdir(dir)
 
 	ref := schema.File("s.json")
 

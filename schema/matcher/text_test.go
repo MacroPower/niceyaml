@@ -5,13 +5,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
-	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
@@ -86,61 +83,11 @@ func TestText(t *testing.T) {
 		})
 	})
 
-	t.Run("context that ended is an error", func(t *testing.T) {
-		t.Parallel()
-
-		requireCanceled(t, matcher.Text(kindPath, acceptAll))
+	testCannotDecide(t, func(path paths.Path) matcher.Matcher {
+		return matcher.Text(path, acceptAll)
 	})
 
-	t.Run("alias that does not resolve is an error", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, `kind: *missing`)
-
-		ok, err := matcher.Text(kindPath, acceptAll).Match(t.Context(), doc)
-		require.ErrorIs(t, err, paths.ErrAlias)
-		assert.False(t, ok)
-	})
-
-	t.Run("wildcard path is an error", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.Text(paths.Current().Child("items").IndexAll(), acceptAll)
-		doc := yamltest.FirstDocument(t, `items: [x]`)
-
-		_, err := m.Match(t.Context(), doc)
-		require.ErrorIs(t, err, paths.ErrWildcard)
-	})
-
-	t.Run("alias bomb is an error", func(t *testing.T) {
-		t.Parallel()
-
-		// Match refuses the document before it decodes anything, as
-		// Content does.
-		doc := yamltest.FirstDocument(t, aliasBomb)
-
-		ok, err := matcher.Text(kindPath, acceptAll).Match(t.Context(), doc)
-		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
-		assert.False(t, ok)
-
-		// The aliases of the document are the cause, so the document is
-		// at fault for the refusal.
-		assert.True(t, niceyaml.IsInvalid(err))
-	})
-
-	t.Run("alias bomb in a source with the limit off is read", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.Text(kindPath, func(text string) bool { return text == "Deployment" })
-
-		ok, err := m.Match(t.Context(), yamltest.FirstDocument(t, taggedAliasBomb))
-		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
-		assert.False(t, ok)
-
-		ok, err = m.Match(t.Context(), yamltest.FirstDocument(t, taggedAliasBomb, niceyaml.WithAliasLimit(false)))
-		require.NoError(t, err)
-		assert.True(t, ok)
-	})
+	testAliasBomb(t, matcher.Text(kindPath, func(text string) bool { return text == "Deployment" }))
 }
 
 func TestText_Reads(t *testing.T) {

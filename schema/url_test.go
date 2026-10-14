@@ -220,24 +220,21 @@ func TestURL(t *testing.T) {
 		require.NoError(t, err)
 
 		_, err = schema.NewRegistry().Load(ctx, ref)
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, context.Canceled)
+		requireLoadError(t, err, context.Canceled)
 		assert.Equal(t, int32(0), requests.Load(), "a canceled Load should not fetch")
 	})
 
-	t.Run("invalid url", func(t *testing.T) {
-		t.Parallel()
-
-		_, _, err := load(t, schema.URL("http://\x00")) // Control char makes URL invalid.
-		require.ErrorContains(t, err, "parse URL")
-	})
-
-	t.Run("url that is not http or https", func(t *testing.T) {
+	t.Run("url that names nothing to fetch", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
 			ref string
+			// The reason in the error, or empty for a URL that is not an
+			// HTTP or HTTPS URL.
+			want string
 		}{
+			// The control character makes the URL invalid.
+			"invalid url":           {ref: "http://\x00", want: "parse URL"},
 			"control character":     {ref: "\x00"},
 			"no scheme":             {ref: "example.com/schema.json"},
 			"s3 scheme":             {ref: "s3://bucket/schema.json"},
@@ -252,14 +249,16 @@ func TestURL(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
+				want := cmp.Or(tc.want, "not an HTTP or HTTPS URL")
+
 				_, _, err := load(t, schema.URL(tc.ref))
 				require.ErrorIs(t, err, schema.ErrLoad)
-				require.ErrorContains(t, err, "not an HTTP or HTTPS URL")
+				require.ErrorContains(t, err, want)
 				assert.NotContains(t, err.Error(), "secret")
 
 				_, err = schema.NewRegistry().Schema(t.Context(), schema.URL(tc.ref))
 				require.ErrorIs(t, err, schema.ErrLoad)
-				require.ErrorContains(t, err, "not an HTTP or HTTPS URL")
+				require.ErrorContains(t, err, want)
 				assert.NotContains(t, err.Error(), "secret")
 			})
 		}
@@ -273,7 +272,7 @@ func TestURL(t *testing.T) {
 		// a warm registry reports what a cold one does.
 		reg := schema.NewRegistry()
 
-		file := schema.File(writeSchema(t, "s.json", []byte(`{"type": "object"}`)))
+		file := schema.File(yamltest.WriteFile(t, t.TempDir(), "s.json", `{"type": "object"}`))
 		_, err := reg.Schema(t.Context(), file)
 		require.NoError(t, err)
 

@@ -3,14 +3,17 @@ package matcher_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
@@ -65,51 +68,243 @@ func match(t *testing.T, m matcher.Matcher, doc *niceyaml.Node) bool {
 	return got
 }
 
-// requireCanceled runs m with a context that ended. Such a matcher cannot
-// decide, so it must return the error of the context rather than a match,
-// and the registry stops at the document.
-func requireCanceled(t *testing.T, m matcher.Matcher) {
+// testCombinator runs the checks that [matcher.All] and [matcher.Any]
+// share on combine, whose panics name it as funcName.
+func testCombinator(t *testing.T, funcName string, combine func(...matcher.Matcher) matcher.Matcher) {
 	t.Helper()
 
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
+	t.Run("error ends the evaluation", func(t *testing.T) {
+		t.Parallel()
 
-	ok, err := m.Match(ctx, yamltest.FirstDocument(t, `kind: Deployment`))
-	require.ErrorIs(t, err, context.Canceled)
-	assert.False(t, ok)
+		called := false
+		m := combine(undecided, recording(&called))
+		doc := yamltest.FirstDocument(t, `kind: Deployment`)
+
+		_, err := m.Match(t.Context(), doc)
+		require.ErrorIs(t, err, errUndecided)
+		assert.False(t, called)
+	})
+
+	t.Run("nil matcher panics", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			matchers []matcher.Matcher
+			index    int
+		}{
+			"nil func first": {matchers: []matcher.Matcher{matcher.Func(nil)}, index: 0},
+			"nil func after a matcher": {
+				matchers: []matcher.Matcher{matcher.Exists(kindPath), matcher.Func(nil)},
+				index:    1,
+			},
+			"nil interface first": {
+				matchers: []matcher.Matcher{nil, matcher.Content(kindPath, "Test")},
+				index:    0,
+			},
+			"nil interface after a matcher": {
+				matchers: []matcher.Matcher{matcher.Content(kindPath, "Test"), nil},
+				index:    1,
+			},
+			"nil pointer first": {
+				matchers: []matcher.Matcher{(*pointerMatcher)(nil), matcher.Exists(kindPath)},
+				index:    0,
+			},
+			"nil pointer after a matcher": {
+				matchers: []matcher.Matcher{matcher.Exists(kindPath), (*pointerMatcher)(nil)},
+				index:    1,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				want := fmt.Sprintf("%s: matcher at index %d is nil", funcName, tc.index)
+				assert.PanicsWithValue(t, want, func() {
+					combine(tc.matchers...)
+				})
+			})
+		}
+	})
+
+	t.Run("writing to the caller's slice changes nothing", func(t *testing.T) {
+		t.Parallel()
+
+		ms := []matcher.Matcher{matcher.Content(kindPath, "Deployment")}
+		m := combine(ms...)
+		ms[0] = matcher.Content(kindPath, "Service")
+		doc := yamltest.FirstDocument(t, `kind: Service`)
+
+		assert.False(t, match(t, m, doc))
+	})
+}
+
+// testCannotDecide checks that the matcher newMatcher creates for a path
+// returns an error where it cannot decide, rather than a match or a plain
+// no, so a registry stops at the document. Such a matcher cannot decide
+// with a context that ended, or for a path that cannot resolve. A tag on
+// an alias changes nothing.
+func testCannotDecide(t *testing.T, newMatcher func(path paths.Path) matcher.Matcher) {
+	t.Helper()
+
+	t.Run("context that ended is an error", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		ok, err := newMatcher(kindPath).Match(ctx, yamltest.FirstDocument(t, `kind: Deployment`))
+		require.ErrorIs(t, err, context.Canceled)
+		assert.False(t, ok)
+	})
+
+	jobs := stringtest.Input(`
+		jobs:
+		  build:
+		    steps:
+		      - uses: checkout
+	`)
+
+	tcs := map[string]struct {
+		err   error
+		path  paths.Path
+		input string
+	}{
+		"alias without an anchor":           {path: kindPath, input: `kind: *missing`, err: paths.ErrAlias},
+		"tagged alias without an anchor":    {path: kindPath, input: `kind: !!str *missing`, err: paths.ErrAlias},
+		"tagged alias to itself":            {path: kindPath, input: `kind: &a !!str *a`, err: paths.ErrAlias},
+		"alias without an anchor on a path": {path: metadataName, input: `metadata: *missing`, err: paths.ErrAlias},
+		"wildcard index": {
+			path:  paths.Current().Child("items").IndexAll(),
+			input: `items: [x]`,
+			err:   paths.ErrWildcard,
+		},
+		"wildcard child": {path: paths.MustParse("$.jobs.*"), input: jobs, err: paths.ErrWildcard},
+		"wildcard child before a key": {
+			path:  paths.MustParse("$.jobs.*.steps"),
+			input: jobs,
+			err:   paths.ErrWildcard,
+		},
+		"wildcard index of a nested list": {
+			path:  paths.MustParse("$.jobs.build.steps[*]"),
+			input: jobs,
+			err:   paths.ErrWildcard,
+		},
+		"recursive descent to a key":    {path: paths.MustParse("$..uses"), input: jobs, err: paths.ErrWildcard},
+		"recursive descent to any node": {path: paths.MustParse("$..*"), input: jobs, err: paths.ErrWildcard},
+	}
+
+	t.Run("path that cannot resolve is an error", func(t *testing.T) {
+		t.Parallel()
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				ok, err := newMatcher(tc.path).Match(t.Context(), doc)
+				require.ErrorIs(t, err, tc.err)
+				assert.False(t, ok)
+			})
+		}
+	})
+}
+
+// testAliasBomb checks that m, a matcher of kind: Deployment, refuses a
+// document whose aliases put a read of kind past the alias limit, unless
+// [niceyaml.WithAliasLimit] turned the limit off for its source. Match
+// refuses such a document before it decodes anything, as the schema
+// validator does.
+func testAliasBomb(t *testing.T, m matcher.Matcher) {
+	t.Helper()
+
+	// The tag keeps the alias in the node at kind, so Match counts the
+	// document before it reads the node, and the levels put it past the
+	// limit. With the limit off, kind reads as Deployment.
+	taggedAliasBomb := stringtest.LinesLF("name: &name Deployment") +
+		yamltest.AliasLevels(4) +
+		stringtest.LinesLF("kind: !!str *name")
+
+	tcs := map[string]struct {
+		err   error
+		input string
+		opts  []niceyaml.SourceOption
+		want  bool
+	}{
+		"alias key is an error": {
+			// Each level lists the level below ten times, so a decode of
+			// the alias key at kind reads 10^7 scalars.
+			input: yamltest.AliasLevels(7) + yamltest.AliasKey("kind", 7),
+			err:   schema.ErrExcessiveAliasing,
+		},
+		"tagged alias is an error": {input: taggedAliasBomb, err: schema.ErrExcessiveAliasing},
+		"tagged alias in a source with the limit off is read": {
+			input: taggedAliasBomb,
+			opts:  []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
+			want:  true,
+		},
+	}
+
+	t.Run("alias bomb", func(t *testing.T) {
+		t.Parallel()
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
+
+				ok, err := m.Match(t.Context(), doc)
+				assert.Equal(t, tc.want, ok)
+
+				if tc.err == nil {
+					require.NoError(t, err)
+
+					return
+				}
+
+				require.ErrorIs(t, err, tc.err)
+
+				// The aliases of the document are the cause, so the
+				// document is at fault for the refusal.
+				assert.True(t, niceyaml.IsInvalid(err))
+			})
+		}
+	})
 }
 
 func TestFunc(t *testing.T) {
 	t.Parallel()
 
-	t.Run("reports the result of the function", func(t *testing.T) {
-		t.Parallel()
+	tcs := map[string]struct {
+		fn   matcher.Func
+		err  error
+		want bool
+	}{
+		"reports the result of the function": {
+			fn:   func(context.Context, *niceyaml.Node) (bool, error) { return true, nil },
+			want: true,
+		},
+		"passes the error of the function through": {fn: undecided, err: errUndecided},
+	}
 
-		called := false
-		m := matcher.Func(func(_ context.Context, _ *niceyaml.Node) (bool, error) {
-			called = true
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-			return true, nil
+			doc := yamltest.FirstDocument(t, "kind: Test")
+
+			got, err := tc.fn.Match(t.Context(), doc)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+			} else {
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tc.want, got)
 		})
-
-		doc := yamltest.FirstDocument(t, "kind: Test")
-		got := match(t, m, doc)
-
-		assert.True(t, called)
-		assert.True(t, got)
-	})
-
-	t.Run("passes the error of the function through", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.Func(func(_ context.Context, _ *niceyaml.Node) (bool, error) {
-			return false, errUndecided
-		})
-
-		doc := yamltest.FirstDocument(t, "kind: Test")
-		_, err := m.Match(t.Context(), doc)
-		require.ErrorIs(t, err, errUndecided)
-	})
+	}
 }
 
 func TestFunc_Null(t *testing.T) {

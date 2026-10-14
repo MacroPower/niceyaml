@@ -1,7 +1,6 @@
 package matcher_test
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -293,10 +292,7 @@ func TestFilePath_WorkingDirectory(t *testing.T) {
 func TestFilePath_FileOnDisk(t *testing.T) {
 	root := t.TempDir()
 	proj := filepath.Join(root, "proj")
-	file := filepath.Join(proj, "configs", "app.yaml")
-
-	require.NoError(t, os.MkdirAll(filepath.Dir(file), 0o700))
-	require.NoError(t, os.WriteFile(file, []byte("kind: Test\n"), 0o600))
+	file := yamltest.WriteFile(t, proj, "configs/app.yaml", "kind: Test\n")
 
 	tcs := map[string]struct {
 		// The working directory of the read.
@@ -345,19 +341,7 @@ func TestFilePath_NoWorkingDirectory(t *testing.T) {
 	base := t.TempDir()
 	file := filepath.Join(base, "configs", "app.yaml")
 
-	gone := filepath.Join(t.TempDir(), "gone")
-	require.NoError(t, os.Mkdir(gone, 0o700))
-	t.Chdir(gone)
-
-	err := os.Remove(gone)
-	if err != nil {
-		t.Skipf("remove the working directory: %v", err)
-	}
-
-	_, err = os.Getwd()
-	if err == nil {
-		t.Skip("the platform still names the removed working directory")
-	}
+	yamltest.RemoveWorkingDirectory(t)
 
 	tcs := map[string]struct {
 		err      error

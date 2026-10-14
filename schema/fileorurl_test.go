@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"io/fs"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -29,6 +28,12 @@ func fileOrURL(t *testing.T, baseDir, ref string) schema.Ref {
 	require.NoError(t, err)
 
 	return r
+}
+
+// plainFileURL returns the file URL that spells path with no escapes, as
+// a document or a schema writes one by hand.
+func plainFileURL(path string) string {
+	return "file://" + filepath.ToSlash(path)
 }
 
 func TestFileOrURL(t *testing.T) {
@@ -104,7 +109,7 @@ func TestFileOrURL(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				schemaPath := writeSchema(t, cmp.Or(tc.file, "schema.json"), schemaData)
+				schemaPath := yamltest.WriteFile(t, t.TempDir(), cmp.Or(tc.file, "schema.json"), string(schemaData))
 				fill := strings.NewReplacer(
 					"{dir}", filepath.Dir(schemaPath),
 					"{path}", schemaPath,
@@ -179,70 +184,56 @@ func TestFileOrURL(t *testing.T) {
 		}
 	})
 
-	t.Run("URL with custom client", func(t *testing.T) {
+	t.Run("rooted reference on any platform", func(t *testing.T) {
 		t.Parallel()
 
-		base := serve(t, map[string]string{"/schema.json": `{"type": "object"}`})
+		// A rooted reference never joins baseDir and needs none to resolve,
+		// and none picks up the working directory.
+		tcs := map[string]struct {
+			ref  string
+			want string
+		}{
+			// A file URL names its path on every platform, even where the
+			// platform reads a rooted path carrying no volume as relative.
+			"rooted file URL": {
+				ref:  "file:///schemas/config.json",
+				want: "file:///schemas/config.json",
+			},
+			// Windows reads a rooted path that carries no volume as relative,
+			// so there the path would otherwise land under baseDir, and an
+			// empty baseDir would report ErrNoBaseDir. The key names the path
+			// as File does, on the current drive on Windows.
+			"rooted path": {
+				ref:  "/schemas/config.json",
+				want: fileURL(t, "/schemas/config.json"),
+			},
+			// A drive-letter path is absolute on Windows and names nothing a
+			// POSIX base directory can resolve, so FileOrURL must keep the
+			// reference intact rather than rewrite it against baseDir.
+			"windows file URL": {
+				ref:  "file:///C:/schemas/config.json",
+				want: "file:///C:/schemas/config.json",
+			},
+			// A file URL keys the cleaned path, as File keys a drive-letter
+			// path, so both spellings share one registry entry.
+			"windows file URL with dot segments": {
+				ref:  "file:///C:/schemas/../schemas/config.json",
+				want: "file:///C:/schemas/config.json",
+			},
+		}
 
-		client, requests := yamltest.CountingClient(http.DefaultTransport)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		// The registry fetches the URL with its own client.
-		err := lookup(t, client, fileOrURL(t, "/dir", base+"/schema.json"))
-		require.NoError(t, err)
-		assert.Equal(t, int32(1), requests.Load())
-	})
+				url, _, err := load(t, fileOrURL(t, "/configs", tc.ref))
+				require.Error(t, err)
+				assert.Equal(t, tc.want, url)
 
-	t.Run("rooted file URL on any platform", func(t *testing.T) {
-		t.Parallel()
-
-		// A file URL names its path on every platform, so it never joins
-		// baseDir, even where the platform reads a rooted path carrying no
-		// volume as relative.
-		url, _, err := load(t, fileOrURL(t, "/configs", "file:///schemas/config.json"))
-		require.Error(t, err)
-		assert.Equal(t, "file:///schemas/config.json", url)
-
-		// The same reference needs no base directory to resolve.
-		_, err = schema.FileOrURL("", "file:///schemas/config.json")
-		require.NoError(t, err)
-	})
-
-	t.Run("rooted path on any platform", func(t *testing.T) {
-		t.Parallel()
-
-		// A rooted path never joins baseDir, as the rooted file URL above
-		// does not. Windows reads a rooted path that carries no volume as
-		// relative, so there the path would otherwise land under baseDir,
-		// and an empty baseDir would report ErrNoBaseDir. The key names
-		// the path as File does, on the current drive on Windows.
-		url, _, err := load(t, fileOrURL(t, "/configs", "/schemas/config.json"))
-		require.Error(t, err)
-		assert.Equal(t, schema.File("/schemas/config.json").Key(), url)
-
-		_, err = schema.FileOrURL("", "/schemas/config.json")
-		require.NoError(t, err)
-	})
-
-	t.Run("windows file URL on any platform", func(t *testing.T) {
-		t.Parallel()
-
-		// A drive-letter path is absolute on Windows and names nothing a
-		// POSIX base directory can resolve, so FileOrURL must keep the
-		// reference intact rather than rewrite it against baseDir.
-		url, _, err := load(t, fileOrURL(t, "/configs", "file:///C:/schemas/config.json"))
-		require.Error(t, err)
-		assert.Equal(t, "file:///C:/schemas/config.json", url)
-
-		// The bare drive-letter path names the same schema, and neither
-		// form picks up the working directory.
-		url, _, err = load(t, fileOrURL(t, "/configs", "C:/schemas/config.json"))
-		require.Error(t, err)
-		assert.Equal(t, "file:///C:/schemas/config.json", url)
-
-		// A file URL keys the cleaned path, as File keys a drive-letter
-		// path, so both spellings share one registry entry.
-		ref := fileOrURL(t, "/configs", "file:///C:/schemas/../schemas/config.json")
-		assert.Equal(t, "file:///C:/schemas/config.json", ref.Key())
+				_, err = schema.FileOrURL("", tc.ref)
+				require.NoError(t, err)
+			})
+		}
 	})
 
 	t.Run("escaped colon in a file URL", func(t *testing.T) {
@@ -270,39 +261,49 @@ func TestFileOrURL(t *testing.T) {
 	})
 }
 
-func TestFileOrURL_DriveLetter(t *testing.T) {
+func TestFileOrURL_BaseDir(t *testing.T) {
 	t.Parallel()
 
 	// A path that starts with a drive letter is absolute wherever a
-	// program reads it, so it never joins baseDir and names the schema
-	// File names for it. A colon anywhere else is part of a file name,
-	// and the path joins baseDir like any other relative one.
+	// program reads it, so it never joins baseDir, needs none, and names
+	// the schema File names for it. A colon anywhere else is part of a file
+	// name, and the path joins baseDir like any other relative one. A file
+	// URL with a remote host, or with no path, names no local path, so the
+	// whole reference is a relative file path too.
 	baseDir := t.TempDir()
 
 	tcs := map[string]struct {
-		path  string
+		ref   string
 		drive bool
 	}{
-		"upper-case drive":        {path: "C:/schemas/config.json", drive: true},
-		"lower-case drive":        {path: "c:/schemas/config.json", drive: true},
-		"drive alone":             {path: "C:", drive: true},
-		"backslash separator":     {path: `C:\schemas\config.json`, drive: true},
-		"colon without separator": {path: "a:b.json"},
-		"digit before the colon":  {path: "1:/schemas/config.json"},
-		"longer first segment":    {path: "ab:/schemas/config.json"},
-		"single letter":           {path: "C"},
+		"upper-case drive":            {ref: "C:/schemas/config.json", drive: true},
+		"lower-case drive":            {ref: "c:/schemas/config.json", drive: true},
+		"drive alone":                 {ref: "C:", drive: true},
+		"backslash separator":         {ref: `C:\schemas\config.json`, drive: true},
+		"digit before the colon":      {ref: "1:/schemas/config.json"},
+		"longer first segment":        {ref: "ab:/schemas/config.json"},
+		"single letter":               {ref: "C"},
+		"file URL with a remote host": {ref: "file://host/C:/schemas/config.json"},
+		"file URL with an empty path": {ref: "file://"},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			want := fileURL(t, filepath.Join(baseDir, tc.path))
+			want := fileURL(t, filepath.Join(baseDir, tc.ref))
 			if tc.drive {
-				want = fileURL(t, tc.path)
+				want = fileURL(t, tc.ref)
 			}
 
-			assert.Equal(t, want, fileOrURL(t, baseDir, tc.path).Key())
+			assert.Equal(t, want, fileOrURL(t, baseDir, tc.ref).Key())
+
+			_, err := schema.FileOrURL("", tc.ref)
+			if tc.drive {
+				require.NoError(t, err)
+			} else {
+				require.ErrorIs(t, err, schema.ErrNoBaseDir)
+			}
 		})
 	}
 }
@@ -388,43 +389,17 @@ func TestFileOrURL_FileURL(t *testing.T) {
 	}
 }
 
-func TestFileOrURL_FileURLWithoutLocalPath(t *testing.T) {
-	t.Parallel()
-
-	// A file URL with a remote host, or with no path, names no local
-	// path, so the whole reference is a relative file path.
-	baseDir := t.TempDir()
-
-	tcs := map[string]struct {
-		ref string
-	}{
-		"remote host": {ref: "file://host/C:/schemas/config.json"},
-		"empty path":  {ref: "file://"},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			_, err := schema.FileOrURL("", tc.ref)
-			require.ErrorIs(t, err, schema.ErrNoBaseDir)
-
-			got := fileOrURL(t, baseDir, tc.ref)
-			assert.Equal(t, fileURL(t, filepath.Join(baseDir, tc.ref)), got.Key())
-		})
-	}
-}
-
 func TestRefBeside(t *testing.T) {
 	t.Parallel()
 
 	const schemaData = `{"type": "object", "required": ["kind"]}`
 
-	bundle := mapFS(map[string]string{
+	bundle := yamltest.MapFS(map[string]string{
 		"configs/schema.json": schemaData,
 	})
 
-	dir := filepath.Dir(writeSchema(t, "schema.json", []byte(schemaData)))
+	dir := t.TempDir()
+	yamltest.WriteFile(t, dir, "schema.json", schemaData)
 
 	inBundle := yamltest.FirstDocument(t, "kind: App\n",
 		niceyaml.WithFilePath("configs/app.yaml"), niceyaml.WithFS(bundle))
@@ -450,7 +425,7 @@ func TestRefBeside(t *testing.T) {
 
 		ref, err := schema.RefBeside(onDisk, "schema.json")
 		require.NoError(t, err)
-		assert.Equal(t, schema.File(filepath.Join(dir, "schema.json")).Key(), ref.Key())
+		assert.Equal(t, fileURL(t, filepath.Join(dir, "schema.json")), ref.Key())
 
 		data, err := reg.Load(t.Context(), ref)
 		require.NoError(t, err)
@@ -468,8 +443,7 @@ func TestRefBeside(t *testing.T) {
 		require.NoError(t, err)
 
 		_, err = reg.Load(t.Context(), out)
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrInvalid)
+		requireLoadError(t, err, fs.ErrInvalid)
 	})
 
 	t.Run("a URL names a URL wherever the document lives", func(t *testing.T) {
@@ -487,13 +461,12 @@ func TestRefBeside(t *testing.T) {
 
 		abs := filepath.Join(dir, "schema.json")
 
-		for _, written := range []string{abs, "file://" + filepath.ToSlash(abs)} {
+		for _, written := range []string{abs, plainFileURL(abs)} {
 			ref, err := schema.RefBeside(inBundle, written)
 			require.NoError(t, err)
 
 			_, err = reg.Load(t.Context(), ref)
-			require.ErrorIs(t, err, schema.ErrLoad)
-			require.ErrorIs(t, err, fs.ErrInvalid)
+			requireLoadError(t, err, fs.ErrInvalid)
 
 			// The same reference beside a document on disk reads the file.
 			ref, err = schema.RefBeside(onDisk, written)
@@ -507,7 +480,7 @@ func TestRefBeside(t *testing.T) {
 	t.Run("the origin of a layered value names a file beside its layer", func(t *testing.T) {
 		t.Parallel()
 
-		layered := mapFS(map[string]string{
+		layered := yamltest.MapFS(map[string]string{
 			"configs/prod/schema.json": schemaData,
 		})
 
@@ -636,9 +609,9 @@ func TestRefBeside_WorkingDirectory(t *testing.T) {
 	wd := t.TempDir()
 	path := filepath.Join("configs", "app.yaml")
 
-	writeFiles(t, wd, map[string]string{
+	yamltest.WriteFiles(t, wd, map[string]string{
 		"configs/schema.json": `{"properties": {"name": {"type": "string"}}}`,
-		"configs/app.yaml":    withDirective("./schema.json", "name: 5\n"),
+		"configs/app.yaml":    yamltest.SchemaDirective("./schema.json", "name: 5\n"),
 	})
 
 	t.Chdir(wd)

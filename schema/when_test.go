@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -27,54 +26,82 @@ func TestWhen(t *testing.T) {
 	t.Parallel()
 
 	schemaData := []byte(`{"type": "object"}`)
+	byKind := matcher.Content(kindPath, "Deployment")
+	inner := errors.New("inner")
+	undecided := errors.New("undecided")
 
-	t.Run("matcher accepts", func(t *testing.T) {
-		t.Parallel()
-
-		r := schema.When(
-			matcher.Content(kindPath, "Deployment"),
-			schema.Embedded(schemaData),
-		)
-
-		key, data, err := loadFor(t, r, yamltest.FirstDocument(t, "kind: Deployment"))
-		require.NoError(t, err)
-		assert.NotEmpty(t, key)
-		assert.Equal(t, schemaData, data)
-	})
-
-	t.Run("guarded resolver errors pass through", func(t *testing.T) {
-		t.Parallel()
-
-		inner := errors.New("inner")
-		r := schema.When(matcher.Content(kindPath, "Deployment"), failing(inner))
-
-		doc := yamltest.FirstDocument(t, "kind: Deployment")
-		_, err := r.Resolve(t.Context(), doc)
-		require.ErrorIs(t, err, inner)
-	})
-
-	t.Run("matcher errors pass through", func(t *testing.T) {
-		t.Parallel()
-
-		undecided := errors.New("undecided")
-		called := false
-		r := schema.When(
-			matcher.Func(func(_ context.Context, _ *niceyaml.Node) (bool, error) {
+	// Each case guards resolver with matcher. The err is what Resolve
+	// reports, or nil for a resolve that names the schema of resolver.
+	tcs := map[string]struct {
+		matcher  matcher.Matcher
+		resolver schema.Resolver
+		err      error
+		input    string
+		// The guarded resolver runs.
+		wantCalled bool
+	}{
+		"matcher accepts": {
+			matcher:    byKind,
+			resolver:   schema.Embedded(schemaData),
+			input:      "kind: Deployment",
+			wantCalled: true,
+		},
+		"guarded resolver errors pass through": {
+			matcher:    byKind,
+			resolver:   failing(inner),
+			input:      "kind: Deployment",
+			err:        inner,
+			wantCalled: true,
+		},
+		"matcher errors pass through": {
+			matcher: matcher.Func(func(context.Context, *niceyaml.Node) (bool, error) {
 				return false, undecided
 			}),
-			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
-				called = true
+			resolver: schema.Embedded(schemaData),
+			input:    "kind: Deployment",
+			err:      undecided,
+		},
+		"matcher rejects without consulting the guarded resolver": {
+			matcher:  byKind,
+			resolver: schema.Embedded(schemaData),
+			input:    "kind: Service",
+			err:      schema.ErrNoMatch,
+		},
+	}
 
-				return schema.Ref{}, nil
-			}),
-		)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "kind: Deployment")
-		_, err := r.Resolve(t.Context(), doc)
-		require.ErrorIs(t, err, undecided)
-		require.NotErrorIs(t, err, schema.ErrNoMatch)
-		assert.False(t, called)
-	})
+			called := false
+			r := schema.When(
+				tc.matcher,
+				schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
+					called = true
+
+					return tc.resolver.Resolve(ctx, doc)
+				}),
+			)
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			if tc.err != nil {
+				_, err := r.Resolve(t.Context(), doc)
+				require.ErrorIs(t, err, tc.err)
+				// Only a matcher that rejects the document reports ErrNoMatch.
+				assert.Equal(t, errors.Is(tc.err, schema.ErrNoMatch), errors.Is(err, schema.ErrNoMatch))
+				assert.Equal(t, tc.wantCalled, called)
+
+				return
+			}
+
+			key, data, err := loadFor(t, r, doc)
+			require.NoError(t, err)
+			assert.NotEmpty(t, key)
+			assert.Equal(t, schemaData, data)
+			assert.Equal(t, tc.wantCalled, called)
+		})
+	}
 
 	t.Run("alias bomb stops the registry", func(t *testing.T) {
 		t.Parallel()
@@ -82,11 +109,7 @@ func TestWhen(t *testing.T) {
 		// The matcher runs before any schema, so it refuses a document
 		// whose aliases would make its decode read 10^7 scalars, and the
 		// registry stops at the document.
-		input := yamltest.AliasLevels(7) + stringtest.LinesLF(
-			"kind:",
-			"  ? *l7",
-			"  : v",
-		)
+		input := yamltest.AliasLevels(7) + yamltest.AliasKey("kind", 7)
 
 		tcs := map[string]struct {
 			matcher matcher.Matcher
@@ -122,25 +145,6 @@ func TestWhen(t *testing.T) {
 		}
 	})
 
-	t.Run("matcher rejects without consulting the guarded resolver", func(t *testing.T) {
-		t.Parallel()
-
-		called := false
-		r := schema.When(
-			matcher.Content(kindPath, "Deployment"),
-			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
-				called = true
-
-				return schema.Ref{}, nil
-			}),
-		)
-
-		doc := yamltest.FirstDocument(t, "kind: Service")
-		_, err := r.Resolve(t.Context(), doc)
-		require.ErrorIs(t, err, schema.ErrNoMatch)
-		assert.False(t, called)
-	})
-
 	t.Run("nil argument panics", func(t *testing.T) {
 		t.Parallel()
 
@@ -149,7 +153,6 @@ func TestWhen(t *testing.T) {
 			noResolver = "schema.When: resolver is nil"
 		)
 
-		byKind := matcher.Content(kindPath, "x")
 		embedded := schema.Embedded(schemaData)
 
 		tcs := map[string]struct {

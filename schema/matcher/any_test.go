@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
@@ -39,40 +38,5 @@ func TestAny(t *testing.T) {
 		})
 	}
 
-	t.Run("error ends the evaluation", func(t *testing.T) {
-		t.Parallel()
-
-		called := false
-		m := matcher.Any(undecided, recording(&called))
-		doc := yamltest.FirstDocument(t, `kind: Deployment`)
-
-		_, err := m.Match(t.Context(), doc)
-		require.ErrorIs(t, err, errUndecided)
-		assert.False(t, called)
-	})
-
-	t.Run("nil matcher panics", func(t *testing.T) {
-		t.Parallel()
-
-		assert.PanicsWithValue(t, "matcher.Any: matcher at index 1 is nil", func() {
-			matcher.Any(matcher.Exists(kindPath), matcher.Func(nil))
-		})
-		assert.PanicsWithValue(t, "matcher.Any: matcher at index 0 is nil", func() {
-			matcher.Any(nil, matcher.Content(kindPath, "Test"))
-		})
-		assert.PanicsWithValue(t, "matcher.Any: matcher at index 0 is nil", func() {
-			matcher.Any((*pointerMatcher)(nil), matcher.Exists(kindPath))
-		})
-	})
-
-	t.Run("writing to the caller's slice changes nothing", func(t *testing.T) {
-		t.Parallel()
-
-		ms := []matcher.Matcher{matcher.Content(kindPath, "Deployment")}
-		m := matcher.Any(ms...)
-		ms[0] = matcher.Content(kindPath, "Service")
-		doc := yamltest.FirstDocument(t, `kind: Service`)
-
-		assert.False(t, match(t, m, doc))
-	})
+	testCombinator(t, "matcher.Any", matcher.Any)
 }

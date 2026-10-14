@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -26,7 +27,7 @@ func TestFile_FSRootedPath(t *testing.T) {
 
 	rooted := filepath.ToSlash(strings.TrimPrefix(cwd, filepath.VolumeName(cwd)))
 
-	fsys := mapFS(map[string]string{
+	fsys := yamltest.MapFS(map[string]string{
 		"schemas/main.json": `{"$ref": "` + rooted + `/schemas/defs.json"}`,
 		"schemas/defs.json": `{"type": "string"}`,
 	})

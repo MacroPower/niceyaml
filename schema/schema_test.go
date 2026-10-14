@@ -2,6 +2,7 @@ package schema_test
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -34,24 +35,13 @@ func compileSchema(tb testing.TB, schemaData string, opts ...schema.CompileOptio
 	return v
 }
 
-// assertBoundTo fails the test unless every binding in the tree of err
-// names source.
-func assertBoundTo(t *testing.T, source *niceyaml.Source, err error) {
-	t.Helper()
-
-	for _, b := range yamltest.BoundIn(err) {
-		assert.Same(t, source, b.Source())
-	}
-}
-
 // requireUnresolved returns the path of bound, which selects nothing in
 // doc. The test fails when bound carries no path or when the path
 // resolves.
 func requireUnresolved(t *testing.T, doc *niceyaml.Node, bound *niceyaml.SourceError) paths.Path {
 	t.Helper()
 
-	path, ok := bound.Path()
-	require.True(t, ok, "bound error carries no path")
+	path := yamltest.PathOf(t, bound)
 
 	_, err := doc.At(path)
 	require.Error(t, err, "path from the error resolves")
@@ -99,10 +89,12 @@ const (
 	}`
 )
 
-func TestSchema_Check(t *testing.T) {
+func TestSchema_ValidateValue_Conformance(t *testing.T) {
 	t.Parallel()
 
-	v := compileSchema(t, `{
+	// A record requires a name, and takes members of several types under
+	// it, each closed to members its schema does not name.
+	const record = `{
 		"type": "object",
 		"properties": {
 			"name": {"type": "string"},
@@ -154,56 +146,69 @@ func TestSchema_Check(t *testing.T) {
 		},
 		"required": ["name"],
 		"additionalProperties": false
-	}`)
+	}`
+
+	// A schema that takes a number for the member x.
+	const numberX = `{
+		"type": "object",
+		"properties": {"x": {"type": "number"}}
+	}`
 
 	tcs := map[string]struct {
-		input   any
-		wantErr bool
+		// The schema, or record when empty.
+		schema string
+		value  any
+		// The text of the error, or empty for a value the schema accepts.
+		err string
 	}{
 		"valid data": {
-			input: map[string]any{
+			value: map[string]any{
 				"name": "Kallistō",
 				"age":  30,
 			},
 		},
 		"missing required field": {
-			input: map[string]any{
+			value: map[string]any{
 				"age": 30,
 			},
-			wantErr: true,
+			err: `$.name: missing required property "name"`,
 		},
 		"wrong type for name": {
-			input: map[string]any{
+			value: map[string]any{
 				"name": 123,
 				"age":  30,
 			},
-			wantErr: true,
+			err: `$.name: expected "string", got "integer"`,
 		},
 		"wrong type for age": {
-			input: map[string]any{
+			value: map[string]any{
 				"name": "Kallistō",
 				"age":  "thirty",
 			},
-			wantErr: true,
+			err: `$.age: expected "number", got "string"`,
 		},
 		"invalid array item": {
-			input: map[string]any{
+			value: map[string]any{
 				"name":  "John",
 				"items": []any{"valid", 123, "also valid"},
 			},
-			wantErr: true,
+			err: `$.items[1]: expected "string", got "integer"`,
 		},
 		"nested object validation error": {
-			input: map[string]any{
+			value: map[string]any{
 				"name": "Kallistō",
 				"nested": map[string]any{
 					"notValue": "something",
 				},
 			},
-			wantErr: true,
+			err: stringtest.JoinLF(
+				"2 schema violations",
+				"$.nested.notValue~: value is not allowed",
+				`$.nested.value: missing required property "value"`,
+			),
 		},
 		"valid array of objects": {
-			input: map[string]any{
+			value: map[string]any{
 				"name": "Kallistō",
 				"users": []any{
 					map[string]any{
@@ -227,7 +232,7 @@ func TestSchema_Check(t *testing.T) {
 			},
 		},
 		"invalid object in array": {
-			input: map[string]any{
+			value: map[string]any{
 				"name": "Kallistō",
 				"users": []any{
 					map[string]any{
@@ -240,10 +245,10 @@ func TestSchema_Check(t *testing.T) {
 					},
 				},
 			},
-			wantErr: true,
+			err: `$.users[0].id: expected "number", got "string"`,
 		},
 		"missing required field in nested object within array": {
-			input: map[string]any{
+			value: map[string]any{
 				"name": "Kallistō",
 				"users": []any{
 					map[string]any{
@@ -256,10 +261,10 @@ func TestSchema_Check(t *testing.T) {
 					},
 				},
 			},
-			wantErr: true,
+			err: `$.users[0].profile.lastName: missing required property "lastName"`,
 		},
 		"valid matrix (2D array)": {
-			input: map[string]any{
+			value: map[string]any{
 				"name": "Kallistō",
 				"matrix": []any{
 					[]any{1, 2, 3},
@@ -268,31 +273,66 @@ func TestSchema_Check(t *testing.T) {
 			},
 		},
 		"invalid element in 2D array": {
-			input: map[string]any{
+			value: map[string]any{
 				"name": "Kallistō",
 				"matrix": []any{
 					[]any{1, 2, 3},
 					[]any{4, "invalid", 6}, // Should be number.
 				},
 			},
-			wantErr: true,
+			err: `$.matrix[1][1]: expected "number", got "string"`,
 		},
 		"additional property at root": {
-			input: map[string]any{
+			value: map[string]any{
 				"name":      "John",
 				"extraProp": "not allowed",
 			},
-			wantErr: true,
+			err: "$.extraProp~: value is not allowed",
 		},
 		"additional property in nested object": {
-			input: map[string]any{
+			value: map[string]any{
 				"name": "Kallistō",
 				"nested": map[string]any{
 					"value":       "valid",
 					"extraNested": "not allowed",
 				},
 			},
-			wantErr: true,
+			err: "$.nested.extraNested~: value is not allowed",
+		},
+		// YAML decodes .nan and .inf into non-finite float64 values. These
+		// are not JSON-encodable, but the validator treats them as numbers
+		// rather than surfacing an opaque marshaling error.
+		"NaN is a number": {
+			schema: numberX,
+			value:  map[string]any{"x": math.NaN()},
+		},
+		"positive infinity is a number": {
+			schema: numberX,
+			value:  map[string]any{"x": math.Inf(1)},
+		},
+		"negative infinity is a number": {
+			schema: numberX,
+			value:  map[string]any{"x": math.Inf(-1)},
+		},
+		// Boolean schemas are valid in JSON Schema. A true schema accepts
+		// everything, and a false schema rejects everything.
+		"true schema accepts a string":  {schema: "true", value: "anything"},
+		"true schema accepts a number":  {schema: "true", value: 42},
+		"true schema accepts a mapping": {schema: "true", value: map[string]any{"key": "value"}},
+		"false schema rejects a string": {
+			schema: "false",
+			value:  "anything",
+			err:    "$: value is not allowed",
+		},
+		"false schema rejects a number": {
+			schema: "false",
+			value:  42,
+			err:    "$: value is not allowed",
+		},
+		"false schema rejects a mapping": {
+			schema: "false",
+			value:  map[string]any{"key": "value"},
+			err:    "$: value is not allowed",
 		},
 	}
 
@@ -300,15 +340,15 @@ func TestSchema_Check(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := v.ValidateValue(t.Context(), tc.input)
-
-			if tc.wantErr {
-				var validationErr *niceyaml.Error
-
-				require.ErrorAs(t, err, &validationErr)
-			} else {
+			err := compileSchema(t, cmp.Or(tc.schema, record)).ValidateValue(t.Context(), tc.value)
+			if tc.err == "" {
 				require.NoError(t, err)
+
+				return
 			}
+
+			require.EqualError(t, err, tc.err)
+			require.ErrorAs(t, err, new(*niceyaml.Error))
 		})
 	}
 }
@@ -433,8 +473,19 @@ func TestCompile_RequireRefs(t *testing.T) {
 func TestCompile_Document(t *testing.T) {
 	t.Parallel()
 
-	// Each schema that compiles requires a "name" key, unless the case
-	// says what it accepts.
+	// A document with a name, which a schema that requires a "name" key
+	// accepts, and one without, which it rejects.
+	var (
+		named   = []string{"name: a\n"}
+		unnamed = []string{"value: 1\n"}
+	)
+
+	// The schema of each case that reads a number holds one keyword for
+	// the member v.
+	forV := func(keyword string) string {
+		return stringtest.LinesLF("properties:", "  v:", "    "+keyword)
+	}
+
 	tcs := map[string]struct {
 		// Wrapped by the compile error, if any.
 		err error
@@ -443,40 +494,39 @@ func TestCompile_Document(t *testing.T) {
 		// Text the compile error holds, or empty for a schema that
 		// compiles.
 		want string
-		// A document the schema accepts and one it rejects, or empty for
-		// a schema with no such document.
-		valid   string
-		invalid string
+		// Documents the schema accepts and documents it rejects.
+		valid   []string
+		invalid []string
 	}{
 		"JSON object": {
 			schema:  `{"required": ["name"]}`,
-			valid:   "name: a\n",
-			invalid: "value: 1\n",
+			valid:   named,
+			invalid: unnamed,
 		},
 		"JSON object after white space": {
-			schema:  "\r\n\t {\"required\": [\"name\"]}",
-			valid:   "name: a\n",
-			invalid: "value: 1\n",
+			schema:  "\r\n\t " + `{"required": ["name"]}`,
+			valid:   named,
+			invalid: unnamed,
 		},
 		"YAML mapping": {
-			schema:  "type: object\nrequired: [name]\n",
-			valid:   "name: a\n",
-			invalid: "value: 1\n",
+			schema:  stringtest.LinesLF("type: object", "required: [name]"),
+			valid:   named,
+			invalid: unnamed,
 		},
 		"YAML after a comment": {
-			schema:  "# Every document names itself.\nrequired: [name]\n",
-			valid:   "name: a\n",
-			invalid: "value: 1\n",
+			schema:  stringtest.LinesLF("# Every document names itself.", "required: [name]"),
+			valid:   named,
+			invalid: unnamed,
 		},
 		"YAML larger than the default byte limit of a Source": {
 			schema:  strings.Repeat("# The text of a long schema.\n", 10000) + "required: [name]\n",
-			valid:   "name: a\n",
-			invalid: "value: 1\n",
+			valid:   named,
+			invalid: unnamed,
 		},
 		"YAML after a document start": {
-			schema:  "---\nrequired: [name]\n",
-			valid:   "name: a\n",
-			invalid: "value: 1\n",
+			schema:  stringtest.LinesLF("---", "required: [name]"),
+			valid:   named,
+			invalid: unnamed,
 		},
 		"YAML with a merge key": {
 			schema: stringtest.Input(`
@@ -486,8 +536,8 @@ func TestCompile_Document(t *testing.T) {
 				allOf:
 				  - <<: *named
 			`),
-			valid:   "name: a\n",
-			invalid: "value: 1\n",
+			valid:   named,
+			invalid: unnamed,
 		},
 		"YAML with a $ref inside the schema": {
 			schema: stringtest.Input(`
@@ -496,16 +546,16 @@ func TestCompile_Document(t *testing.T) {
 				  named:
 				    required: [name]
 			`),
-			valid:   "name: a\n",
-			invalid: "value: 1\n",
+			valid:   named,
+			invalid: unnamed,
 		},
 		"true": {
 			schema: "true",
-			valid:  "value: 1\n",
+			valid:  unnamed,
 		},
 		"false": {
 			schema:  "false\n",
-			invalid: "value: 1\n",
+			invalid: unnamed,
 		},
 		// The first byte picks the JSON reader, and nothing reads the
 		// data as YAML after the JSON reader refuses it.
@@ -540,7 +590,7 @@ func TestCompile_Document(t *testing.T) {
 			want: "compile schema: YAML decode: 3:1: ",
 		},
 		"YAML duplicate key": {
-			schema: "type: object\ntype: string\n",
+			schema: stringtest.LinesLF("type: object", "type: string"),
 			want:   `compile schema: YAML decode: 2:1: mapping key "type" already defined`,
 		},
 		"two YAML documents": {
@@ -584,67 +634,8 @@ func TestCompile_Document(t *testing.T) {
 			want:   "compile schema: schema document must be a JSON object or boolean",
 			err:    jsonschema.ErrInvalidSchemaDocument,
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			s, err := schema.Compile(t.Context(), []byte(tc.schema))
-			if tc.want != "" {
-				require.ErrorIs(t, err, schema.ErrCompile)
-				require.ErrorContains(t, err, tc.want)
-				assert.Nil(t, s)
-
-				if tc.err != nil {
-					require.ErrorIs(t, err, tc.err)
-				}
-
-				// The text of the schema is at fault, and no document is.
-				require.NotErrorIs(t, err, niceyaml.ErrSyntax)
-				require.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
-				assert.False(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
-
-				assert.Panics(t, func() { schema.MustCompile([]byte(tc.schema)) })
-
-				return
-			}
-
-			require.NoError(t, err)
-
-			if tc.valid != "" {
-				require.NoError(t, yamltest.FirstDocument(t, tc.valid).Validate(t.Context(), s))
-			}
-
-			if tc.invalid != "" {
-				err := yamltest.FirstDocument(t, tc.invalid).Validate(t.Context(), s)
-				require.Error(t, err)
-				assert.True(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
-			}
-		})
-	}
-}
-
-func TestCompile_YAMLNumbers(t *testing.T) {
-	t.Parallel()
-
-	// The schema of each YAML case holds one keyword for the member v.
-	forV := func(keyword string) string {
-		return stringtest.LinesLF("properties:", "  v:", "    "+keyword)
-	}
-
-	// A schema in YAML reads each number as a decode into any reads it,
-	// and a document reads its numbers the same way.
-	tcs := map[string]struct {
-		// The schema document, in JSON or YAML.
-		schema string
-		// Text the compile error holds, or empty for a schema that
-		// compiles.
-		want string
-		// Documents the schema accepts and documents it rejects.
-		valid   []string
-		invalid []string
-	}{
+		// A schema in YAML reads each number as a decode into any reads
+		// it, and a document reads its numbers the same way.
 		"exponent without a point is text": {
 			schema:  forV("const: 1e3"),
 			valid:   []string{"v: 1e3\n", "v: '1e3'\n"},
@@ -694,6 +685,18 @@ func TestCompile_YAMLNumbers(t *testing.T) {
 			if tc.want != "" {
 				require.ErrorIs(t, err, schema.ErrCompile)
 				require.ErrorContains(t, err, tc.want)
+				assert.Nil(t, s)
+
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err)
+				}
+
+				// The text of the schema is at fault, and no document is.
+				require.NotErrorIs(t, err, niceyaml.ErrSyntax)
+				require.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
+				assert.False(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
+
+				assert.Panics(t, func() { schema.MustCompile([]byte(tc.schema)) })
 
 				return
 			}
@@ -705,7 +708,9 @@ func TestCompile_YAMLNumbers(t *testing.T) {
 			}
 
 			for _, doc := range tc.invalid {
-				require.Error(t, yamltest.FirstDocument(t, doc).Validate(t.Context(), s), doc)
+				err := yamltest.FirstDocument(t, doc).Validate(t.Context(), s)
+				require.Error(t, err, doc)
+				assert.True(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
 			}
 		})
 	}
@@ -1013,30 +1018,6 @@ func TestSchema_PathTarget(t *testing.T) {
 
 			assert.Contains(t, yamltest.NewXMLPrinter().PrintError(bound),
 				"<genericError>"+tc.want+"</genericError>")
-		})
-	}
-}
-
-func TestSchema_NonFiniteFloats(t *testing.T) {
-	t.Parallel()
-
-	// YAML decodes .nan/.inf into non-finite float64 values. These are not
-	// JSON-encodable, but the validator treats them as numbers rather than
-	// surfacing an opaque marshaling error.
-	v := compileSchema(t, `{
-		"type": "object",
-		"properties": {"x": {"type": "number"}}
-	}`)
-
-	for name, value := range map[string]float64{
-		"NaN":          math.NaN(),
-		"positive inf": math.Inf(1),
-		"negative inf": math.Inf(-1),
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			require.NoError(t, v.ValidateValue(t.Context(), map[string]any{"x": value}))
 		})
 	}
 }
@@ -1376,10 +1357,7 @@ func TestSchema_ValidateValue(t *testing.T) {
 				_, ok := problem.Bound.Position()
 				assert.False(t, ok)
 
-				path, ok := problem.Path()
-				require.True(t, ok)
-
-				gotPaths = append(gotPaths, path.String())
+				gotPaths = append(gotPaths, yamltest.PathOf(t, problem).String())
 			}
 
 			assert.Equal(t, tc.wantPaths, gotPaths)
@@ -1499,7 +1477,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			var violation *schema.Violation
 
 			require.ErrorAs(t, placed, &violation)
-			assertBoundTo(t, doc.Source(), placed)
+			yamltest.AssertBoundTo(t, doc.Source(), placed)
 
 			require.EqualError(t,
 				doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", err), base)),
@@ -1533,14 +1511,14 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 	t.Run("a wrapper keeps what it matches", func(t *testing.T) {
 		t.Parallel()
 
-		wrapped := &placeCheckError{err: one}
+		wrapped := &yamltest.CheckError{Err: one}
 		require.EqualError(t, wrapped, "check: $.port: 0 is less than 1")
 
 		placed := doc.Bind(niceyaml.Rebase(wrapped, base))
 		require.EqualError(t, placed, "app.yaml:2:9: $.request.port: check: 0 is less than 1")
 		require.ErrorIs(t, placed, wrapped)
 
-		var got *placeCheckError
+		var got *yamltest.CheckError
 
 		require.ErrorAs(t, placed, &got)
 		assert.Same(t, wrapped, got)
@@ -1549,14 +1527,14 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 	t.Run("a wrapper keeps the errors beside the result", func(t *testing.T) {
 		t.Parallel()
 
-		typed := &placeCheckError{err: errPlaceCheck}
+		typed := &yamltest.CheckError{Err: errPlaceCheck}
 
 		placed := doc.Bind(niceyaml.Rebase(fmt.Errorf("%w: %w", typed, one), base))
 		require.EqualError(t, placed, "app.yaml:2:9: $.request.port: check: check: 0 is less than 1")
 		require.ErrorIs(t, placed, errPlaceCheck)
 		assert.True(t, niceyaml.IsInvalid(placed))
 
-		var got *placeCheckError
+		var got *yamltest.CheckError
 
 		require.ErrorAs(t, placed, &got)
 		assert.Same(t, typed, got)
@@ -1577,27 +1555,27 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			want string
 		}{
 			"message of its own": {
-				err:  placeFixedError{err: one},
-				want: "app.yaml:2:9: $.request.port: invalid body",
+				err:  yamltest.RewriteError{Err: one},
+				want: "app.yaml:2:9: $.request.port: rewritten",
 			},
 			"message of its own above two violations": {
-				err: placeFixedError{err: two},
+				err: yamltest.RewriteError{Err: two},
 				want: stringtest.JoinLF(
-					"app.yaml: invalid body",
+					"app.yaml: rewritten",
 					`app.yaml:1:1: $.request.name: missing required property "name"`,
 					"app.yaml:2:9: $.request.port: 0 is less than 1",
 				),
 			},
 			"message of its own beside a sentinel": {
-				err:  fmt.Errorf("%w: %w", errPlaceCheck, placeFixedError{err: one}),
-				want: "app.yaml:2:9: $.request.port: check: invalid body",
+				err:  fmt.Errorf("%w: %w", errPlaceCheck, yamltest.RewriteError{Err: one}),
+				want: "app.yaml:2:9: $.request.port: check: rewritten",
 			},
 			"upper case": {
-				err:  placeShoutError{err: one},
+				err:  yamltest.UpperError{Err: one},
 				want: "app.yaml:2:9: $.request.port: $.PORT: 0 IS LESS THAN 1",
 			},
 			"indented lines": {
-				err: placeIndentError{err: two},
+				err: yamltest.IndentError{Err: two},
 				want: stringtest.JoinLF(
 					"app.yaml: validation:",
 					"  2 schema violations",
@@ -1625,7 +1603,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 				var violation *schema.Violation
 
 				require.ErrorAs(t, placed, &violation)
-				assertBoundTo(t, doc.Source(), placed)
+				yamltest.AssertBoundTo(t, doc.Source(), placed)
 			})
 		}
 	})
@@ -1642,8 +1620,8 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 				want:    "app.yaml:2:9: $.request.port: 0 is less than 1",
 			},
 			"under a message of its own": {
-				request: placeRequest{schema: v, fixed: true},
-				want:    "app.yaml:2:9: $.request.port: invalid body",
+				request: placeRequest{schema: v, rewrite: true},
+				want:    "app.yaml:2:9: $.request.port: rewritten",
 			},
 			"inside Invalid": {
 				request: placeRequest{schema: v, invalid: true},
@@ -1685,7 +1663,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			"app.yaml:2:9: $.request.port: check: 0 is less than 1",
 		)
 
-		assertBoundTo(t, doc.Source(), request.Bind(niceyaml.Invalid(one)))
+		yamltest.AssertBoundTo(t, doc.Source(), request.Bind(niceyaml.Invalid(one)))
 	})
 
 	t.Run("an Error with a location or details places the result", func(t *testing.T) {
@@ -1817,7 +1795,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			placed := doc.Bind(niceyaml.Rebase(violation.Err, base))
 			require.EqualError(t, placed, want[i])
 			assert.True(t, niceyaml.IsInvalid(placed))
-			assertBoundTo(t, doc.Source(), placed)
+			yamltest.AssertBoundTo(t, doc.Source(), placed)
 
 			// The violation itself stays where the result put it.
 			assert.NotSame(t, doc.Source(), violation.Source())
@@ -1842,8 +1820,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 		located := yamltest.RequireSourceError(t, err)
 
-		path, ok := located.Path()
-		require.True(t, ok)
+		path := yamltest.PathOf(t, located)
 		assert.Equal(t, "$.ports.16", path.String())
 
 		// No key of the document has that spelling, so the path binds at
@@ -1863,60 +1840,6 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 	})
 }
 
-// placeCheckError wraps the error of a check with a prefix, as a caller's
-// own error type does.
-type placeCheckError struct {
-	err error
-}
-
-func (e *placeCheckError) Error() string {
-	return "check: " + e.err.Error()
-}
-
-func (e *placeCheckError) Unwrap() error {
-	return e.err
-}
-
-// placeShoutError wraps an error and rewrites its text.
-type placeShoutError struct {
-	err error
-}
-
-func (e placeShoutError) Error() string {
-	return strings.ToUpper(e.err.Error())
-}
-
-func (e placeShoutError) Unwrap() error {
-	return e.err
-}
-
-// placeFixedError wraps an error under a message of its own, as an error
-// type that maps a failure to a status does.
-type placeFixedError struct {
-	err error
-}
-
-func (e placeFixedError) Error() string {
-	return "invalid body"
-}
-
-func (e placeFixedError) Unwrap() error {
-	return e.err
-}
-
-// placeIndentError wraps an error and indents each line of its text.
-type placeIndentError struct {
-	err error
-}
-
-func (e placeIndentError) Error() string {
-	return "validation:\n  " + strings.ReplaceAll(e.err.Error(), "\n", "\n  ")
-}
-
-func (e placeIndentError) Unwrap() error {
-	return e.err
-}
-
 // placeConfig holds a [placeRequest] under the key request.
 type placeConfig struct {
 	Request placeRequest `yaml:"request"`
@@ -1925,14 +1848,14 @@ type placeConfig struct {
 // placeRequest checks itself against a schema the test sets before the
 // decode, and returns what ValidateValue returns. With invalid, it
 // returns that result inside [niceyaml.Invalid] with no option. With
-// fixed, it returns that result inside a [placeFixedError].
+// rewrite, it returns that result inside a [yamltest.RewriteError].
 type placeRequest struct {
 	schema *schema.Schema
 
 	Port int `yaml:"port"`
 
 	invalid bool
-	fixed   bool
+	rewrite bool
 }
 
 func (r placeRequest) Validate() error {
@@ -1942,8 +1865,8 @@ func (r placeRequest) Validate() error {
 	case r.invalid:
 		return niceyaml.Invalid(err)
 
-	case r.fixed:
-		return placeFixedError{err: err}
+	case r.rewrite:
+		return yamltest.RewriteError{Err: err}
 	}
 
 	//nolint:wrapcheck // The test checks where a decode places the result as it is.
@@ -2256,11 +2179,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		lists := "k: &k a\n" + yamltest.AliasLevels(7) + "*k : small\n"
 
 		// The mapping under b spells the last level out as a key.
-		keyed := lists + stringtest.LinesLF(
-			"b:",
-			"  ? *l7",
-			"  : v",
-		)
+		keyed := lists + yamltest.AliasKey("b", 7)
 
 		// The sequence k lists 500 aliases to a scalar of 2000 bytes.
 		scalarAliases := stringtest.LinesLF(
@@ -2298,7 +2217,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				input:     keyed + "c: [*k]\n",
 				excessive: true,
 			},
-			"alias to a small sequence as mapping key": {input: "s: &s [a, b]\n*s : v\n"},
+			"alias to a small sequence as mapping key": {input: stringtest.LinesLF("s: &s [a, b]", "*s : v")},
 			// The key holds a copy of the long scalar for each alias.
 			"scalar aliases written out in a key": {
 				input:     scalarAliases + "m: {? *k : v}\n",
@@ -2481,14 +2400,8 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				path:  paths.Current().Child("a").Index(4),
 				input: yamltest.AliasLevels(4),
 			},
-			"merge key bomb": {input: yamltest.MergeLevels(4)},
-			"alias bomb as mapping key": {
-				input: yamltest.AliasLevels(4) + stringtest.LinesLF(
-					"b:",
-					"  ? *l4",
-					"  : v",
-				),
-			},
+			"merge key bomb":            {input: yamltest.MergeLevels(4)},
+			"alias bomb as mapping key": {input: yamltest.AliasLevels(4) + yamltest.AliasKey("b", 4)},
 		}
 
 		for name, tc := range tcs {
@@ -2520,9 +2433,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		t.Parallel()
 
 		// The anchored mapping of the reference document holds 1000 entries.
-		refs := niceyaml.WithReferences(niceyaml.NewSourceFromString(
-			"defaults: &defaults\n" + yamltest.GenerateLines(1000, "  k%d: v"),
-		))
+		refs := yamltest.References("defaults: &defaults\n" + yamltest.GenerateLines(1000, "  k%d: v"))
 		v := compileSchema(t, `{"maxProperties": 5}`)
 
 		// The refusal carries no location, so each case names where the
@@ -2672,42 +2583,6 @@ func TestSchema_AliasExpansion(t *testing.T) {
 	})
 }
 
-func TestSchema_BooleanSchema(t *testing.T) {
-	t.Parallel()
-
-	// Boolean schemas are valid in JSON Schema. A true schema accepts
-	// everything, and a false schema rejects everything.
-	tcs := map[string]struct {
-		input          string
-		wantAcceptsAll bool
-	}{
-		"true schema accepts all data": {
-			input:          `true`,
-			wantAcceptsAll: true,
-		},
-		"false schema rejects all data": {input: `false`},
-	}
-
-	testData := []any{"anything", 42, map[string]any{"key": "value"}}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			v := compileSchema(t, tc.input)
-
-			for _, data := range testData {
-				err := v.ValidateValue(t.Context(), data)
-				if tc.wantAcceptsAll {
-					assert.NoError(t, err)
-				} else {
-					assert.Error(t, err)
-				}
-			}
-		})
-	}
-}
-
 func TestSchema_SubErrorAnnotations(t *testing.T) {
 	t.Parallel()
 
@@ -2776,17 +2651,13 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 				assert.Contains(t, errOutput, annotation)
 			}
 
-			var validationErr *niceyaml.Error
-
-			require.ErrorAs(t, err, &validationErr)
-
 			// Unwrap includes the main error plus its nested errors.
-			assert.Len(t, validationErr.Unwrap(), tc.wantNestedErrors+1)
+			assert.Len(t, yamltest.RequireError(t, err).Unwrap(), tc.wantNestedErrors+1)
 		})
 	}
 }
 
-func TestSchema_PathAnchors(t *testing.T) {
+func TestSchema_ErrorPaths(t *testing.T) {
 	t.Parallel()
 
 	whole := compileSchema(t, `{"properties": {"server": {"properties": {"port": {"minimum": 1}}}}}`)
@@ -2795,13 +2666,22 @@ func TestSchema_PathAnchors(t *testing.T) {
 	doc := yamltest.FirstDocument(t, stringtest.LinesLF("server:", "  port: 0"))
 	serverNode := yamltest.At(t, doc, paths.Doc().Child("server"))
 
-	// A binding reports the `$` path from the root of the document.
-	// ValidateValue binds to a source that holds no document, so its `$`
-	// is the value. Each case holds the result of one validation.
+	// The result of a check of value against the schema schemaData.
+	validateValue := func(schemaData string, value any) error {
+		return compileSchema(t, schemaData).ValidateValue(t.Context(), value)
+	}
+
+	// A single violation puts its path on the main error. Several
+	// violations leave the main error without a path and expose one path
+	// per problem below it. A binding reports the `$` path from the root of
+	// the document. ValidateValue binds to a source that holds no document,
+	// so its `$` is the value. Each case holds the result of one
+	// validation, and want is the first line that FormatError prints.
 	tcs := map[string]struct {
-		result   error
-		want     string
-		wantPath string
+		result          error
+		want            string
+		wantPath        string   // Expected path on the main error.
+		wantNestedPaths []string // Expected paths from nested errors.
 	}{
 		"value of a document": {
 			result:   whole.ValidateValue(t.Context(), map[string]any{"server": map[string]any{"port": 0}}),
@@ -2823,6 +2703,38 @@ func TestSchema_PathAnchors(t *testing.T) {
 			want:     "2:9: $.server.port: 0 is less than 1",
 			wantPath: "$.server.port",
 		},
+		"type error has path on main error": {
+			result: validateValue(
+				`{"type": "object", "properties": {"name": {"type": "string"}}}`,
+				map[string]any{"name": 123},
+			),
+			want:     `$.name: expected "string", got "integer"`,
+			wantPath: "$.name",
+		},
+		"additional property has key path on main error": {
+			result: validateValue(
+				`{"type": "object", "properties": {"name": {"type": "string"}}, "additionalProperties": false}`,
+				map[string]any{"name": "valid", "extra": "invalid"},
+			),
+			want:     "$.extra~: value is not allowed",
+			wantPath: "$.extra~",
+		},
+		"nested validation error has path on main error": {
+			result: validateValue(
+				`{"type": "object", "properties": {"user": {"type": "object", "properties": {"age": {"type": "integer"}}}}}`,
+				map[string]any{"user": map[string]any{"age": "notanumber"}},
+			),
+			want:     `$.user.age: expected "integer", got "string"`,
+			wantPath: "$.user.age",
+		},
+		"several violations have paths on nested errors": {
+			result: validateValue(
+				`{"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "number"}}}`,
+				map[string]any{"name": 123, "age": "thirty"},
+			),
+			want:            "2 schema violations",
+			wantNestedPaths: []string{"$.name", "$.age"},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2837,56 +2749,6 @@ func TestSchema_PathAnchors(t *testing.T) {
 				tc.want,
 				strings.SplitN(niceyaml.FormatError(err, niceyaml.WithContextLines(0)), "\n", 2)[0],
 			)
-
-			path, ok := niceyaml.NewErrorTree(err).Path()
-			require.True(t, ok)
-			assert.Equal(t, tc.wantPath, path.String())
-		})
-	}
-}
-
-func TestSchema_ErrorPaths(t *testing.T) {
-	t.Parallel()
-
-	// A single violation puts its path on the main error. Several violations
-	// leave the main error without a path and expose one path per problem
-	// below it. ValidateValue writes each path from `$`, the value.
-	tcs := map[string]struct {
-		schema          string
-		input           any
-		wantPath        string   // Expected path on the main error.
-		wantNestedPaths []string // Expected paths from nested errors.
-	}{
-		"type error has path on main error": {
-			schema:   `{"type": "object", "properties": {"name": {"type": "string"}}}`,
-			input:    map[string]any{"name": 123},
-			wantPath: "$.name",
-		},
-		"additional property has key path on main error": {
-			schema:   `{"type": "object", "properties": {"name": {"type": "string"}}, "additionalProperties": false}`,
-			input:    map[string]any{"name": "valid", "extra": "invalid"},
-			wantPath: "$.extra~",
-		},
-		"nested validation error has path on main error": {
-			schema:   `{"type": "object", "properties": {"user": {"type": "object", "properties": {"age": {"type": "integer"}}}}}`,
-			input:    map[string]any{"user": map[string]any{"age": "notanumber"}},
-			wantPath: "$.user.age",
-		},
-		"several violations have paths on nested errors": {
-			schema:          `{"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "number"}}}`,
-			input:           map[string]any{"name": 123, "age": "thirty"},
-			wantNestedPaths: []string{"$.name", "$.age"},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			v := compileSchema(t, tc.schema)
-
-			err := v.ValidateValue(t.Context(), tc.input)
-			require.Error(t, err)
 
 			tree := niceyaml.NewErrorTree(err)
 
@@ -3001,9 +2863,7 @@ func TestSchema_Check_Scope(t *testing.T) {
 
 			bound := yamltest.RequireSourceError(t, err)
 
-			rng, ok := bound.Range()
-			require.True(t, ok)
-			assert.Equal(t, tc.wantStart, rng.Start)
+			assert.Equal(t, tc.wantStart, yamltest.RangeOf(t, bound).Start)
 			assert.Equal(t, tc.want, bound.Error())
 		})
 	}
@@ -3046,12 +2906,11 @@ func TestSchema_Check_SyntaxError(t *testing.T) {
 
 			v := compileSchema(t, tc.schema)
 
-			docs := niceyaml.NewSourceFromString(stringtest.Input(`
+			docs := yamltest.AllDocuments(t, niceyaml.NewSourceFromString(stringtest.Input(`
 				a: 1
 				---
 				b: [
-			`)).AllDocuments()
-			require.Len(t, docs, 2)
+			`)), 2)
 			require.ErrorIs(t, docs[1].Err(), niceyaml.ErrSyntax)
 
 			// The second document did not parse, so the schema has no data
@@ -3108,7 +2967,7 @@ func TestSchema_Check_Bound(t *testing.T) {
 			want:  "menu.yaml:4:12: $.items[1].price: -2 is less than 0",
 		},
 		"several violations": {
-			input: "name: 1\nprice: -1\n",
+			input: stringtest.LinesLF("name: 1", "price: -1"),
 			want: stringtest.JoinLF(
 				"menu.yaml: 2 schema violations",
 				`menu.yaml:1:7: $.name: expected "string", got "integer"`,
@@ -3189,13 +3048,7 @@ func TestSchema_Check_Bound(t *testing.T) {
 
 		// The path reads from the node the schema got, and the node
 		// resolves it when it binds the error.
-		var violation *niceyaml.Error
-
-		require.ErrorAs(t, err, &violation)
-
-		path, ok := violation.Path()
-		require.True(t, ok)
-		assert.Equal(t, "@.price", path.String())
+		assert.Equal(t, "@.price", yamltest.PathOf(t, yamltest.RequireError(t, err)).String())
 
 		require.EqualError(t, item.Validate(t.Context(), v), "menu.yaml:4:12: $.items[1].price: -2 is less than 0")
 	})
@@ -3230,7 +3083,7 @@ func TestSchema_Check_Bound(t *testing.T) {
 	t.Run("a validator that checks another document names that document", func(t *testing.T) {
 		t.Parallel()
 
-		other := yamltest.FirstDocumentWithPath(t, "# other\nprice: -1\n", "other.yaml")
+		other := yamltest.FirstDocumentWithPath(t, stringtest.LinesLF("# other", "price: -1"), "other.yaml")
 		include := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
 			return other.Validate(ctx, v)
 		})
@@ -3292,7 +3145,7 @@ func TestSchema_SourcePath(t *testing.T) {
 		},
 		"merge key ahead of a null key": {
 			schema: stringOrObjectMembers,
-			input:  "<<: {a: x}\n~: 5\n",
+			input:  stringtest.LinesLF("<<: {a: x}", "~: 5"),
 			want:   `2:4: $.'~': expected ["string", "object"], got "integer"`,
 		},
 		"merge key ahead of an empty key": {
@@ -3337,7 +3190,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			// The decoder sets 0x10: x after the merge, so the member 16
 			// holds x rather than the 5 the merge brings in.
 			schema: integersInM,
-			input:  "b: &b {16: 5}\nm: {<<: *b, 0x10: x}\n",
+			input:  stringtest.LinesLF("b: &b {16: 5}", "m: {<<: *b, 0x10: x}"),
 			want:   `2:19: $.m.0x10: expected "integer", got "string"`,
 		},
 		"merged member hidden by a same-spelled key": {
@@ -3346,7 +3199,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			// and a path selector matches that key, so the path keeps the
 			// name 16 and the error binds at the x.
 			schema:     integersInM,
-			input:      "m: {<<: {0x10: x}, \"0x10\": 5}\n",
+			input:      stringtest.LinesLF(`m: {<<: {0x10: x}, "0x10": 5}`),
 			want:       `1:16: $.m.16: expected "integer", got "string"`,
 			unresolved: true,
 		},
@@ -3354,7 +3207,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			// The tag may change the name the alias key decodes to, so the
 			// key 0x10 before it cannot name the member 16.
 			schema: integersInM,
-			input:  "a: &k 16\nm: {0x10: 5, ? !!str *k : x}\n",
+			input:  stringtest.LinesLF("a: &k 16", "m: {0x10: 5, ? !!str *k : x}"),
 			want:   `2:27: $.m.16: expected "integer", got "string"`,
 		},
 		"merge source with a tagged alias key": {
@@ -3373,7 +3226,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			// name, so the key 0x10 before it cannot name the member 16.
 			// The walk finds no member there, so the error binds at m.
 			schema:     integersInM,
-			input:      "s: &s [a]\nm: {0x10: x, ? *s : 1}\n",
+			input:      stringtest.LinesLF("s: &s [a]", "m: {0x10: x, ? *s : 1}"),
 			want:       `2:1: $.m.16: expected "integer", got "string"`,
 			unresolved: true,
 		},
@@ -3401,17 +3254,17 @@ func TestSchema_SourcePath(t *testing.T) {
 			// The key decodes to null, and the path spells it as the
 			// empty key the source writes.
 			schema: stringMembers,
-			input:  "!!null \"\": 5\n",
+			input:  stringtest.LinesLF(`!!null "": 5`),
 			want:   `1:12: $.'': expected "string", got "integer"`,
 		},
 		"int-tagged quoted key": {
 			schema: stringMembers,
-			input:  "!!int \"0x10\": 5\n",
+			input:  stringtest.LinesLF(`!!int "0x10": 5`),
 			want:   `1:15: $.0x10: expected "string", got "integer"`,
 		},
 		"timestamp-tagged key": {
 			schema: stringMembers,
-			input:  "? !!timestamp 2001-01-01\n: 5\n",
+			input:  stringtest.LinesLF("? !!timestamp 2001-01-01", ": 5"),
 			want:   `2:3: $.2001-01-01: expected "string", got "integer"`,
 		},
 		"float key": {
@@ -3423,7 +3276,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			// Both keys decode to 1, and the decoder keeps the later
 			// member, so the path names the later key.
 			schema: stringMembers,
-			input:  "1.0: x\n1: 2\n",
+			input:  stringtest.LinesLF("1.0: x", "1: 2"),
 			want:   `2:4: $.1: expected "string", got "integer"`,
 		},
 		"key with a dot": {
@@ -3474,7 +3327,7 @@ func TestSchema_SourcePath(t *testing.T) {
 		},
 		"alias key": {
 			schema: stringMembers,
-			input:  "a: &k name\n*k : 5\n",
+			input:  stringtest.LinesLF("a: &k name", "*k : 5"),
 			want:   `2:6: $.name: expected "string", got "integer"`,
 		},
 		"key named like an alias": {
@@ -3527,7 +3380,7 @@ func TestSchema_SourcePath(t *testing.T) {
 		},
 		"respelled key behind an alias": {
 			schema: stringsInB,
-			input:  "a: &a {0x10: 1}\nb: *a\n",
+			input:  stringtest.LinesLF("a: &a {0x10: 1}", "b: *a"),
 			want:   `1:14: $.b.0x10: expected "string", got "integer"`,
 		},
 		"respelled key behind an alias to a block mapping": {
@@ -3590,8 +3443,7 @@ func TestSchema_SourcePath(t *testing.T) {
 
 			bound := yamltest.RequireSourceError(t, err)
 
-			gotPath, ok := bound.Path()
-			require.True(t, ok, "bound error carries no path")
+			gotPath := yamltest.PathOf(t, bound)
 			assert.Equal(t, tc.want, bound.Error())
 			assert.Contains(t, tc.want, ": "+gotPath.String()+": ", "the message spells another path")
 
@@ -3615,7 +3467,10 @@ func TestSchema_SourcePath_ReferenceAlias(t *testing.T) {
 	// the decoded name of a member below the alias. A merge key that names
 	// such an alias may set a member of any name, so the key 0x10 before
 	// it cannot name the member 16 either.
-	refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {0x10: x}\nother: &other {k: 1}\n"))
+	refs := yamltest.References(stringtest.LinesLF(
+		"base: &base {0x10: x}",
+		"other: &other {k: 1}",
+	))
 
 	tcs := map[string]struct {
 		schema string
@@ -3637,7 +3492,7 @@ func TestSchema_SourcePath_ReferenceAlias(t *testing.T) {
 				"type": "object",
 				"additionalProperties": {"type": "integer"}
 			}`,
-			input: "0x10: x\n<<: *other\n",
+			input: stringtest.LinesLF("0x10: x", "<<: *other"),
 			want:  "$.16",
 		},
 	}
@@ -3660,78 +3515,135 @@ func TestSchema_SourcePath_ReferenceAlias(t *testing.T) {
 func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 	t.Parallel()
 
-	// In each case the key 0x10 sets the member 16 to x. A later entry
-	// spells its key 0x10 too, and a path through 0x10 selects that entry.
-	// The path of the member keeps its decoded name and selects nothing,
-	// and the error binds at the x rather than at the valid 1. The quoted
-	// "0x10" decodes to the member 0x10, as does an alias key whose anchor
-	// holds it.
-	v := compileSchema(t, integersInUser)
+	// In each case a later entry hides the key of the member that holds x.
+	// The path keeps the decoded name of that member and selects nothing,
+	// and the error binds at the x. The quoted "0x10" decodes to the
+	// member 0x10, as does an alias key whose anchor holds it.
+	//
+	// The integersBelowUser schema takes integers for the members of each
+	// mapping under user.
+	const integersBelowUser = `{
+		"type": "object",
+		"properties": {
+			"user": {
+				"additionalProperties": {
+					"additionalProperties": {"type": "integer"}
+				}
+			}
+		}
+	}`
 
 	tcs := map[string]struct {
-		input string
-		// The position of the x, as the message prints it.
-		want string
-		opts []niceyaml.SourceOption
+		schema string
+		input  string
+		want   string
+		opts   []niceyaml.SourceOption
 	}{
+		// In the cases of integersInUser, the key 0x10 sets the member 16
+		// to x. A later entry spells its key 0x10 too, and a path through
+		// 0x10 selects that entry, so the error binds at the x rather than
+		// at the valid 1.
 		"own key after the merge key": {
+			schema: integersInUser,
 			input: stringtest.Input(`
 				user:
 				  <<: {0x10: x}
 				  "0x10": 1
 			`),
-			want: "2:14",
+			want: `2:14: $.user.16: expected "integer", got "string"`,
 		},
 		"merge key after the own key": {
+			schema: integersInUser,
 			input: stringtest.Input(`
 				user:
 				  0x10: x
 				  <<: {"0x10": 1}
 			`),
-			want: "2:9",
+			want: `2:9: $.user.16: expected "integer", got "string"`,
 		},
 		"later source of one merge key": {
+			schema: integersInUser,
 			input: stringtest.Input(`
 				user:
 				  <<: [{0x10: x}, {"0x10": 1}]
 			`),
-			want: "2:15",
+			want: `2:15: $.user.16: expected "integer", got "string"`,
 		},
 		"later aliased source of one merge key": {
+			schema: integersInUser,
 			input: stringtest.Input(`
 				a: &a {0x10: x}
 				b: &b {"0x10": 1}
 				user:
 				  <<: [*a, *b]
 			`),
-			want: "1:14",
+			want: `1:14: $.user.16: expected "integer", got "string"`,
 		},
 		"later merge key": {
+			schema: integersInUser,
 			input: stringtest.Input(`
 				user:
 				  <<: {0x10: x}
 				  <<: {"0x10": 1}
 			`),
-			want: "2:14",
+			want: `2:14: $.user.16: expected "integer", got "string"`,
 			opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 		},
 		"later own key": {
+			schema: integersInUser,
 			input: stringtest.Input(`
 				user:
 				  0x10: x
 				  "0x10": 1
 			`),
-			want: "2:9",
+			want: `2:9: $.user.16: expected "integer", got "string"`,
 			opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 		},
 		"later alias key": {
+			schema: integersInUser,
 			input: stringtest.Input(`
 				k: &k "0x10"
 				user:
 				  0x10: x
 				  *k : 1
 			`),
-			want: "3:9",
+			want: `3:9: $.user.16: expected "integer", got "string"`,
+		},
+		// In the cases of integersBelowUser, the x lies below the member of
+		// the hidden key. The decoded name of that member selects another
+		// entry, which holds a valid value under the spelling 0x11, so the
+		// keys below keep their decoded names too.
+		"below an own key after the merge key": {
+			schema: integersBelowUser,
+			input:  stringtest.LinesLF(`user: {16: {0x11: 2}, <<: {0x10: {0x11: x}}, "0x10": 1}`),
+			want:   `1:41: $.user.16.17: expected "integer", got "string"`,
+		},
+		"below a block own key after the merge key": {
+			schema: integersBelowUser,
+			input: stringtest.Input(`
+				user:
+				  16: {0x11: 2}
+				  <<: {0x10: {0x11: x}}
+				  "0x10": 1
+			`),
+			want: `3:21: $.user.16.17: expected "integer", got "string"`,
+		},
+		"below a later source of one merge key": {
+			schema: integersBelowUser,
+			input:  stringtest.LinesLF(`user: {16: {0x11: 2}, <<: [{0x10: {0x11: x}}, {"0x10": 1}]}`),
+			want:   `1:42: $.user.16.17: expected "integer", got "string"`,
+		},
+		"below a merge key after the own key": {
+			schema: integersBelowUser,
+			input:  stringtest.LinesLF(`user: {16: {0x11: 2}, 0x10: {0x11: x}, <<: {"0x10": 1}}`),
+			want:   `1:36: $.user.16.17: expected "integer", got "string"`,
+		},
+		"below an own key spelled as its name before a merge key": {
+			// The own key decodes to 0x10, and the merged 0x10 sets the
+			// member 16, but a path through 0x10 selects the merged key.
+			schema: integersBelowUser,
+			input:  stringtest.LinesLF(`user: {"0x10": {0x11: x}, <<: {0x10: {0x11: 1}, 16: 2}}`),
+			want:   `1:23: $.user.0x10.17: expected "integer", got "string"`,
 		},
 	}
 
@@ -3741,78 +3653,11 @@ func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
 
-			err := doc.Validate(t.Context(), v)
-
-			bound := yamltest.RequireSourceError(t, err)
-			assert.Equal(t, tc.want+`: $.user.16: expected "integer", got "string"`, bound.Error())
-			requireUnresolved(t, doc, bound)
-		})
-	}
-}
-
-func TestSchema_SourcePath_BelowHiddenKey(t *testing.T) {
-	t.Parallel()
-
-	// In each case a later entry hides the key of the member that holds x,
-	// so the path writes the decoded name of that member. That name
-	// selects another entry, which holds a valid value under the spelling
-	// 0x11, so the keys below keep their decoded names too. The path
-	// selects nothing, and the error binds at the x.
-	v := compileSchema(t, `{
-		"type": "object",
-		"properties": {
-			"user": {
-				"additionalProperties": {
-					"additionalProperties": {"type": "integer"}
-				}
-			}
-		}
-	}`)
-
-	tcs := map[string]struct {
-		input string
-		want  string
-	}{
-		"own key after the merge key": {
-			input: "user: {16: {0x11: 2}, <<: {0x10: {0x11: x}}, \"0x10\": 1}\n",
-			want:  `1:41: $.user.16.17: expected "integer", got "string"`,
-		},
-		"block own key after the merge key": {
-			input: stringtest.Input(`
-				user:
-				  16: {0x11: 2}
-				  <<: {0x10: {0x11: x}}
-				  "0x10": 1
-			`),
-			want: `3:21: $.user.16.17: expected "integer", got "string"`,
-		},
-		"later source of one merge key": {
-			input: "user: {16: {0x11: 2}, <<: [{0x10: {0x11: x}}, {\"0x10\": 1}]}\n",
-			want:  `1:42: $.user.16.17: expected "integer", got "string"`,
-		},
-		"merge key after the own key": {
-			input: "user: {16: {0x11: 2}, 0x10: {0x11: x}, <<: {\"0x10\": 1}}\n",
-			want:  `1:36: $.user.16.17: expected "integer", got "string"`,
-		},
-		"own key spelled as its name before a merge key": {
-			// The own key decodes to 0x10, and the merged 0x10 sets the
-			// member 16, but a path through 0x10 selects the merged key.
-			input: "user: {\"0x10\": {0x11: x}, <<: {0x10: {0x11: 1}, 16: 2}}\n",
-			want:  `1:23: $.user.0x10.17: expected "integer", got "string"`,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			dd := yamltest.FirstDocument(t, tc.input)
-
-			err := dd.Validate(t.Context(), v)
+			err := doc.Validate(t.Context(), compileSchema(t, tc.schema))
 
 			bound := yamltest.RequireSourceError(t, err)
 			assert.Equal(t, tc.want, bound.Error())
-			requireUnresolved(t, dd, bound)
+			requireUnresolved(t, doc, bound)
 		})
 	}
 }
@@ -3877,8 +3722,7 @@ func TestSchema_SourcePath_SeveralViolations(t *testing.T) {
 	var got []string
 
 	for _, child := range yamltest.ProblemsOf(bound) {
-		path, ok := child.Path()
-		require.True(t, ok, "violation carries no path")
+		path := yamltest.PathOf(t, child)
 
 		_, err := dd.At(path)
 		require.NoError(t, err, "path %s does not resolve", path)
@@ -3917,22 +3761,13 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 
 			err := v.Check(t.Context(), dd)
 
-			var ve *niceyaml.Error
-
-			require.ErrorAs(t, err, &ve)
-
-			violations := yamltest.ProblemsOf(ve)
+			violations := yamltest.ProblemsOf(yamltest.RequireError(t, err))
 			require.Len(t, violations, tc.members)
 
 			spelled := 0
 
 			for _, violation := range violations {
-				var child *niceyaml.Error
-
-				require.ErrorAs(t, violation.Err, &child)
-
-				path, ok := child.Path()
-				require.True(t, ok, "violation carries no path")
+				path := yamltest.PathOf(t, yamltest.RequireError(t, violation.Err))
 
 				if strings.HasPrefix(path.String(), "@.m.0x") {
 					_, err := dd.At(path)
@@ -3976,14 +3811,8 @@ func TestSchema_RefToRejectingSchema(t *testing.T) {
 			err := v.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
 			require.NotErrorIs(t, err, schema.ErrValidate)
 
-			var nerr *niceyaml.Error
-
-			require.ErrorAs(t, err, &nerr)
-
 			// Check writes the path from the node it got.
-			path, ok := nerr.Path()
-			require.True(t, ok)
-			assert.Equal(t, "@.a", path.String())
+			assert.Equal(t, "@.a", yamltest.PathOf(t, yamltest.RequireError(t, err)).String())
 		})
 	}
 }

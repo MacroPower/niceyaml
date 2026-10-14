@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -63,8 +64,7 @@ func TestFile_FIFO(t *testing.T) {
 
 			select {
 			case err := <-errc:
-				require.ErrorIs(t, err, schema.ErrLoad)
-				require.ErrorIs(t, err, fs.ErrInvalid)
+				requireLoadError(t, err, fs.ErrInvalid)
 				require.ErrorContains(t, err, "not a regular file")
 
 			case <-time.After(5 * time.Second):
@@ -81,11 +81,9 @@ func TestFile_FIFOSwappedAfterStat(t *testing.T) {
 	// must not block the open either. One goroutine swaps a regular file
 	// and a FIFO at the path while the loop loads it.
 	dir := t.TempDir()
-	path := filepath.Join(dir, "schema.json")
+	path := yamltest.WriteFile(t, dir, "schema.json", `{"type":"object"}`)
 	regular := filepath.Join(dir, "regular.json")
 	fifo := filepath.Join(dir, "fifo")
-
-	require.NoError(t, os.WriteFile(path, []byte(`{"type":"object"}`), 0o600))
 
 	var (
 		stop atomic.Bool

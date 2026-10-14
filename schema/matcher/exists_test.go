@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -68,34 +67,5 @@ func TestExists(t *testing.T) {
 		})
 	}
 
-	t.Run("alias without an anchor is an error", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, `metadata: *missing`)
-
-		_, err := matcher.Exists(metadataName).Match(t.Context(), doc)
-		require.ErrorIs(t, err, paths.ErrAlias)
-	})
-
-	t.Run("wildcard path is an error", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			jobs:
-			  build:
-			    steps:
-			      - uses: checkout
-		`))
-
-		for _, expr := range []string{"$.jobs.*", "$.jobs.*.steps", "$.jobs.build.steps[*]", "$..uses", "$..*"} {
-			_, err := matcher.Exists(paths.MustParse(expr)).Match(t.Context(), doc)
-			require.ErrorIs(t, err, paths.ErrWildcard, expr)
-		}
-	})
-}
-
-func TestExists_ContextEnded(t *testing.T) {
-	t.Parallel()
-
-	requireCanceled(t, matcher.Exists(kindPath))
+	testCannotDecide(t, matcher.Exists)
 }

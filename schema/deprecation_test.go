@@ -3,7 +3,6 @@ package schema_test
 import (
 	"cmp"
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -64,7 +63,7 @@ func warningRows(err error) string {
 		}
 	}
 
-	return strings.Join(rows, "\n")
+	return stringtest.JoinLF(rows...)
 }
 
 // collectWarnings returns ctx with a warning handler, and a func that
@@ -95,14 +94,14 @@ func TestSchema_Check_Deprecations(t *testing.T) {
 			want:  `cafe.yaml:1:1: warning: $.notes~: deprecated field "notes"`,
 		},
 		"scalar value": {
-			input: "wifi:\n  security: wpa3\n",
+			input: stringtest.LinesLF("wifi:", "  security: wpa3"),
 			want: stringtest.JoinLF(
 				`cafe.yaml:2:13: warning: $.wifi.security: deprecated value "wpa3"`,
 				"  cafe 5.0 replaces security with wifi.mode.",
 			),
 		},
 		"two schemas at one value": {
-			input: "wifi:\n  security: wep\n",
+			input: stringtest.LinesLF("wifi:", "  security: wep"),
 			want: stringtest.JoinLF(
 				`cafe.yaml:2:13: warning: $.wifi.security: deprecated value "wep"`,
 				"  cafe 5.0 replaces security with wifi.mode.",
@@ -110,7 +109,11 @@ func TestSchema_Check_Deprecations(t *testing.T) {
 			),
 		},
 		"field of a definition": {
-			input: "dishes:\n  semla:\n    cost: 45\n",
+			input: stringtest.LinesLF(
+				"dishes:",
+				"  semla:",
+				"    cost: 45",
+			),
 			want: stringtest.JoinLF(
 				`cafe.yaml:3:5: warning: $.dishes.semla.cost~: deprecated field "cost"`,
 				"  write price",
@@ -124,7 +127,11 @@ func TestSchema_Check_Deprecations(t *testing.T) {
 			),
 		},
 		"key under propertyNames": {
-			input: "milks:\n  Oat: 1\n  soy: 2\n",
+			input: stringtest.LinesLF(
+				"milks:",
+				"  Oat: 1",
+				"  soy: 2",
+			),
 			want: stringtest.JoinLF(
 				`cafe.yaml:2:3: warning: $.milks.Oat~: deprecated field "Oat"`,
 				"  write the milk in lowercase",
@@ -138,23 +145,52 @@ func TestSchema_Check_Deprecations(t *testing.T) {
 			want:  `cafe.yaml:1:8: warning: $.sizes: deprecated value "large"`,
 		},
 		"mapping": {
-			input: "printer:\n  host: kitchen\n",
+			input: stringtest.LinesLF("printer:", "  host: kitchen"),
 			want: stringtest.JoinLF(
 				`cafe.yaml:1:1: warning: $.printer: deprecated value`,
 				"  cafe 5.0 drops printers.",
 			),
 		},
 		"alias": {
-			input: "dishes:\n  semla: &dish\n    cost: 45\n  bulle: *dish\n",
+			input: stringtest.LinesLF(
+				"dishes:",
+				"  semla: &dish",
+				"    cost: 45",
+				"  bulle: *dish",
+			),
 			want: stringtest.JoinLF(
 				`cafe.yaml:3:5: warning: $.dishes.semla.cost~: deprecated field "cost"`,
 				"  write price",
 			),
 		},
 		"merge key": {
-			input: "dishes:\n  semla: &dish\n    cost: 45\n  bulle:\n    <<: *dish\n    price: 40\n",
+			input: stringtest.LinesLF(
+				"dishes:",
+				"  semla: &dish",
+				"    cost: 45",
+				"  bulle:",
+				"    <<: *dish",
+				"    price: 40",
+			),
 			want: stringtest.JoinLF(
 				`cafe.yaml:3:5: warning: $.dishes.semla.cost~: deprecated field "cost"`,
+				"  write price",
+			),
+		},
+		// Two warnings with one message stay apart, because each binds at
+		// its own key.
+		"one message at two keys": {
+			input: stringtest.LinesLF(
+				"dishes:",
+				"  semla:",
+				"    cost: 45",
+				"  bulle:",
+				"    cost: 40",
+			),
+			want: stringtest.JoinLF(
+				`cafe.yaml:3:5: warning: $.dishes.semla.cost~: deprecated field "cost"`,
+				"  write price",
+				`cafe.yaml:5:5: warning: $.dishes.bulle.cost~: deprecated field "cost"`,
 				"  write price",
 			),
 		},
@@ -204,7 +240,11 @@ func TestSchema_Check_DeprecationsOfAFailure(t *testing.T) {
 	t.Parallel()
 
 	s := compileSchema(t, cafeSchema)
-	doc := yamltest.FirstDocument(t, "legacyPricing: true\nseats: 0\n", niceyaml.WithName("cafe.yaml"))
+	doc := yamltest.FirstDocument(
+		t,
+		stringtest.LinesLF("legacyPricing: true", "seats: 0"),
+		niceyaml.WithName("cafe.yaml"),
+	)
 	ctx, warned := collectWarnings(t.Context())
 
 	err := doc.Validate(ctx, s)
@@ -232,25 +272,6 @@ func TestSchema_Check_DeprecationsOfAFailure(t *testing.T) {
 	ctx, warned = collectWarnings(t.Context())
 	require.NoError(t, doc.Validate(ctx, fallback))
 	require.NoError(t, warned())
-}
-
-func TestSchema_Check_DeprecationsAcrossNodes(t *testing.T) {
-	t.Parallel()
-
-	s := compileSchema(t, cafeSchema)
-	doc := yamltest.FirstDocument(t, "dishes:\n  semla:\n    cost: 45\n  bulle:\n    cost: 40\n",
-		niceyaml.WithName("cafe.yaml"))
-	ctx, warned := collectWarnings(t.Context())
-
-	// Two warnings with one message stay apart, because each binds at its
-	// own key.
-	require.NoError(t, doc.Validate(ctx, s))
-	assert.Equal(t, stringtest.JoinLF(
-		`cafe.yaml:3:5: warning: $.dishes.semla.cost~: deprecated field "cost"`,
-		"  write price",
-		`cafe.yaml:5:5: warning: $.dishes.bulle.cost~: deprecated field "cost"`,
-		"  write price",
-	), warningRows(warned()))
 }
 
 func TestSchema_ValidateValue_Deprecations(t *testing.T) {

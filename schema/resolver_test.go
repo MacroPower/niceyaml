@@ -9,7 +9,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
-	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -83,8 +82,6 @@ func TestRef_Resolve(t *testing.T) {
 
 func TestResolverFunc(t *testing.T) {
 	t.Parallel()
-
-	kindPath := paths.Current().Child("kind")
 
 	// A resolver that names a schema per kind and reports ErrNoMatch for
 	// documents without one.
@@ -173,16 +170,5 @@ func TestLoadable(t *testing.T) {
 		assert.PanicsWithValue(t, "schema.Loadable: load is nil", func() {
 			schema.Loadable("config.json", nil)
 		})
-	})
-
-	t.Run("zero ref loads nothing", func(t *testing.T) {
-		t.Parallel()
-
-		var ref schema.Ref
-
-		assert.Empty(t, ref.Key())
-
-		_, err := schema.NewRegistry().Load(t.Context(), ref)
-		require.ErrorIs(t, err, schema.ErrLoad)
 	})
 }

@@ -41,24 +41,24 @@ func requireViolation(t *testing.T, err error) *schema.Violation {
 	return v
 }
 
-// treeText returns the tree of err as text, one node per line, each two
-// spaces deeper than the node above it.
-func treeText(err error) string {
-	var sb strings.Builder
+// treeRows returns the label of each node of the tree of err, one row per
+// node, each two spaces deeper than the node above it.
+func treeRows(err error) []string {
+	var rows []string
 
-	var write func(t niceyaml.ErrorTree, depth int)
+	var walk func(t niceyaml.ErrorTree, depth int)
 
-	write = func(t niceyaml.ErrorTree, depth int) {
-		sb.WriteString(strings.Repeat("  ", depth) + t.Label + "\n")
+	walk = func(t niceyaml.ErrorTree, depth int) {
+		rows = append(rows, strings.Repeat("  ", depth)+t.Label)
 
 		for _, child := range t.Children {
-			write(child, depth+1)
+			walk(child, depth+1)
 		}
 	}
 
-	write(niceyaml.NewErrorTree(err), 0)
+	walk(niceyaml.NewErrorTree(err), 0)
 
-	return sb.String()
+	return rows
 }
 
 func TestViolation(t *testing.T) {
@@ -212,7 +212,7 @@ func TestViolation_Binding(t *testing.T) {
 	t.Run("several violations", func(t *testing.T) {
 		t.Parallel()
 
-		err := yamltest.FirstDocument(t, "name: 123\nage: old\n").Validate(t.Context(), v)
+		err := yamltest.FirstDocument(t, stringtest.LinesLF("name: 123", "age: old")).Validate(t.Context(), v)
 
 		bound := yamltest.RequireSourceError(t, err)
 		require.Len(t, yamltest.ProblemsOf(bound), 2)
@@ -458,7 +458,7 @@ func TestViolation_MissingMember(t *testing.T) {
 		// in the message.
 		"names that hold a quote": {
 			schema: `{"dependentRequired": {"a \" requires property \"b": ["c \" d"]}}`,
-			input:  "'a \" requires property \"b': 1\n",
+			input:  stringtest.LinesLF(`'a " requires property "b': 1`),
 			want: []string{
 				`1:1: $.'c " d': property "a \" requires property \"b" requires property "c \" d"`,
 			},
@@ -538,10 +538,7 @@ func TestViolation_MissingMember(t *testing.T) {
 				near = append(near, at.String())
 
 				// The path names a member the document leaves out.
-				path, ok := bound.Path()
-				require.True(t, ok)
-
-				_, err := doc.At(path)
+				_, err := doc.At(yamltest.PathOf(t, bound))
 				require.ErrorIs(t, err, paths.ErrNotFound)
 			}
 
@@ -581,12 +578,9 @@ func TestViolation_MissingMember(t *testing.T) {
 		// and no position.
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, `$.server.name: missing required property "name"`, bound.Error())
+		assert.Equal(t, "$.server.name", yamltest.PathOf(t, bound).String())
 
-		path, ok := bound.Path()
-		require.True(t, ok)
-		assert.Equal(t, "$.server.name", path.String())
-
-		_, ok = bound.Nearest()
+		_, ok := bound.Nearest()
 		assert.False(t, ok)
 	})
 }
@@ -601,11 +595,7 @@ func TestViolation_Value(t *testing.T) {
 
 		err := v.ValidateValue(t.Context(), map[string]any{"name": 123})
 
-		var located *niceyaml.Error
-
-		require.ErrorAs(t, err, &located)
-
-		assert.Equal(t, nameType, *requireViolation(t, located))
+		assert.Equal(t, nameType, *requireViolation(t, yamltest.RequireError(t, err)))
 	})
 
 	t.Run("several violations", func(t *testing.T) {
@@ -613,19 +603,11 @@ func TestViolation_Value(t *testing.T) {
 
 		err := v.ValidateValue(t.Context(), map[string]any{"name": 123, "age": "old"})
 
-		var summary *niceyaml.Error
-
-		require.ErrorAs(t, err, &summary)
-
-		nested := yamltest.ProblemsOf(summary)
+		nested := yamltest.ProblemsOf(yamltest.RequireError(t, err))
 		require.Len(t, nested, 2)
 
 		for _, n := range nested {
-			var located *niceyaml.Error
-
-			require.ErrorAs(t, n.Err, &located)
-
-			assert.Equal(t, "type", requireViolation(t, located).Keyword)
+			assert.Equal(t, "type", requireViolation(t, yamltest.RequireError(t, n.Err)).Keyword)
 		}
 	})
 }
@@ -893,7 +875,7 @@ func TestViolation_Alternatives(t *testing.T) {
 			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
 			require.Error(t, err)
 
-			assert.Equal(t, stringtest.LinesLF(tc.want...), treeText(err))
+			assert.Equal(t, tc.want, treeRows(err))
 		})
 	}
 }
@@ -915,11 +897,9 @@ func TestViolation_Forms(t *testing.T) {
 
 		// The value has one violation, which carries the path to the
 		// value and names the keyword.
-		path, ok := bound.Path()
-		require.True(t, ok)
-		assert.Equal(t, "$.v", path.String())
+		assert.Equal(t, "$.v", yamltest.PathOf(t, bound).String())
 
-		_, ok = bound.Range()
+		_, ok := bound.Range()
 		assert.True(t, ok)
 
 		assert.Equal(t, schema.Violation{
@@ -965,11 +945,7 @@ func TestViolation_Forms(t *testing.T) {
 
 			nested := yamltest.DetailsOf(form.Bound)
 			require.Len(t, nested, 1)
-
-			path, ok := nested[0].Path()
-			require.True(t, ok)
-			assert.Equal(t, "$.v", path.String())
-
+			assert.Equal(t, "$.v", yamltest.PathOf(t, nested[0]).String())
 			assert.Equal(t, want[i], *requireViolation(t, nested[0].Err))
 		}
 	})
@@ -980,12 +956,9 @@ func TestViolation_Forms(t *testing.T) {
 		err := v.ValidateValue(t.Context(), map[string]any{"v": "ab"})
 
 		bound := yamltest.RequireSourceError(t, err)
+		assert.Equal(t, "$.v", yamltest.PathOf(t, bound).String())
 
-		path, ok := bound.Path()
-		require.True(t, ok)
-		assert.Equal(t, "$.v", path.String())
-
-		_, ok = bound.Range()
+		_, ok := bound.Range()
 		assert.False(t, ok)
 
 		assert.Equal(t, "anyOf", requireViolation(t, bound).Keyword)
@@ -1004,13 +977,11 @@ func TestViolation_Forms(t *testing.T) {
 		}
 
 		// A document places the violation, and its forms come with it.
-		placed := yamltest.FirstDocument(t, "v: ab\n").Bind(err)
+		placed := yamltest.RequireSourceError(t, yamltest.FirstDocument(t, "v: ab\n").Bind(err))
 
-		require.ErrorAs(t, placed, &bound)
-
-		_, ok = bound.Range()
+		_, ok = placed.Range()
 		assert.True(t, ok)
-		assert.Len(t, yamltest.DetailsOf(bound), 2)
+		assert.Len(t, yamltest.DetailsOf(placed), 2)
 	})
 }
 
@@ -1141,7 +1112,7 @@ func TestViolation_Is(t *testing.T) {
 
 		s := compileSchema(t, `{"properties": {"a": {"type": "string"}, "b": {"maximum": 1}}}`)
 
-		err := s.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\nb: 2\n"))
+		err := s.Check(t.Context(), yamltest.FirstDocument(t, stringtest.LinesLF("a: 1", "b: 2")))
 		require.Error(t, err)
 		assert.True(t, niceyaml.IsInvalid(err))
 
