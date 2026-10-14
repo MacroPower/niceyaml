@@ -28,7 +28,7 @@ const (
 	// Hub pull rate limits. The renovateVersion constant pins the Renovate
 	// release that provides renovate-config-validator.
 	renovateImage   = "public.ecr.aws/docker/library/node:24-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/node
-	renovateVersion = "44.151.5"                                   // renovate: datasource=npm depName=renovate
+	renovateVersion = "44.158.1"                                   // renovate: datasource=npm depName=renovate
 
 	// zizmorConfig is the zizmor configuration file that [Ci.LintActions] uses,
 	// relative to the source root.
