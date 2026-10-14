@@ -1200,16 +1200,14 @@ func (s *Source) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) 
 // A Source that holds more than one document returns the error
 // Source.Document returns. On error, the returned T is the zero value.
 func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
-	var v T
-
-	err := s.DecodeInto(ctx, &v, opts...)
+	doc, err := s.Document()
 	if err != nil {
 		var zero T
 
 		return zero, err
 	}
 
-	return v, nil
+	return doc.Decode[T](ctx, opts...)
 }
 
 // single returns the one document [Source.Documents] returns. For a

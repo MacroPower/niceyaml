@@ -9,6 +9,7 @@ package hook
 
 import (
 	"context"
+	"reflect"
 
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -82,6 +83,11 @@ var (
 	// Limits returns the byte limit and the depth limit of src, a
 	// *niceyaml.Source, where zero turns a check off.
 	Limits func(src any) (bytes, depth int)
+
+	// Defaults returns the defaults of t under opts, a
+	// []niceyaml.DecodeOption, as niceyaml.Defaults returns them. A panic
+	// in a function of niceyaml.WithDefaults reaches the caller.
+	Defaults func(t reflect.Type, opts any) reflect.Value
 
 	// Layers returns the layers that niceyaml.NewSourceFromLayers merged
 	// into src, a *niceyaml.Source, as the *niceyaml.Node of the document

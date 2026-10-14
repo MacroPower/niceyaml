@@ -4903,6 +4903,25 @@ func TestSource_Decode(t *testing.T) {
 		assert.True(t, called, "the validator of the call runs on the root")
 	})
 
+	t.Run("starts from the defaults that Node.Decode starts from", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("seats: 40\n")
+
+		got, err := source.Decode[defaultsCafe](t.Context(), defaultsDecoding)
+		require.NoError(t, err)
+
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		want, err := doc.Decode[defaultsCafe](t.Context(), defaultsDecoding)
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+		assert.Equal(t, 40, got.Seats)
+		assert.Equal(t, "SEK", got.Currency)
+		assert.Equal(t, 9101, got.Kitchen.Port)
+	})
+
 	t.Run("DecodeInto keeps the fields the document leaves out", func(t *testing.T) {
 		t.Parallel()
 

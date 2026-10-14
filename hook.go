@@ -2,6 +2,7 @@ package niceyaml
 
 import (
 	"context"
+	"reflect"
 
 	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
@@ -34,6 +35,11 @@ func init() {
 		s, _ := src.(*Source) //nolint:errcheck // The hook takes a *Source.
 
 		return s.bytes(), s.depth()
+	}
+	hook.Defaults = func(t reflect.Type, opts any) reflect.Value {
+		o, _ := opts.([]DecodeOption) //nolint:errcheck // The hook takes the options of a decode.
+
+		return newDecodeConfig(nil, o).defaults.value(t)
 	}
 	hook.Layers = func(src any) []any {
 		s, _ := src.(*Source) //nolint:errcheck // The hook takes a *Source.

@@ -427,13 +427,13 @@
 //     itself, and each function from [WithValueCheck] checks the values of
 //     its type, unless [WithSelfValidation] turns that off.
 //
-// A field the document leaves out keeps its value, so a caller fills the
-// target with defaults first. A mapping merges into a struct field by field
-// at every depth, and the document replaces a slice, an array, a map, or an
-// interface value whole. A null leaves the target as it is, unless the
-// target is a pointer or an interface, which a null with no tag sets to nil.
-// A null under a key leaves a struct field as it is too, unless the field is
-// a pointer.
+// A field the document leaves out keeps its value. A mapping merges into a
+// struct field by field at every depth, and the document replaces a slice,
+// an array, a map, or an interface value whole. A null leaves the target as
+// it is, unless the target is a pointer or an interface, which a null with
+// no tag sets to nil. A null under a key leaves a struct field as it is
+// too, unless the field is a pointer. The Defaults section describes the
+// value that each value a decode creates starts from.
 //
 // A [DecodeOption] sets how one decode runs, and it reaches the call that
 // gets it and no other. A setting that describes the documents, such as
@@ -513,6 +513,50 @@
 //
 // A Source from [NewSourceFromLayers] runs these steps once on the merged
 // document, as the Layers section describes.
+//
+// # Defaults
+//
+// [Node.Decode] starts from the value that [Defaults] returns, and
+// [Node.DecodeInto] starts from the value the caller passes. A decode also
+// creates values: each element of a slice or an array, each value of a
+// map, and the target of each pointer that the document fills. Each starts
+// from the defaults of its type, which [WithDefaults] sets:
+//
+//	var decoding = niceyaml.DecodeOptions(
+//		niceyaml.WithDefaults(func(s *CafeSpec) {
+//			s.Seats = 20
+//			s.Kitchen.Port = 9101
+//		}),
+//		niceyaml.WithDefaults(func(p *Printer) {
+//			p.Port = 9100
+//		}),
+//	)
+//
+// The defaults of a type start from its zero value, with each struct field
+// built from the defaults of its own type, and then the function of the
+// type runs. A parent thus wins where its function writes. With the
+// options above, each Printer defaults to port 9100, and the kitchen
+// printer of a CafeSpec to port 9101.
+//
+// A value the decode creates fills as the Decoding section describes, from
+// its defaults. A null element or map value holds the defaults of its type,
+// and a null sets a pointer to nil. The target of a pointer that already
+// points to a value, such as one that a function of WithDefaults sets,
+// starts from that value. The value it pointed to stays as it was. A value
+// that decodes itself, through an unmarshaler method or a
+// [WithCustomUnmarshaler] function, starts from its defaults too. Its
+// method decides what to keep.
+//
+// The value at an alias starts from the defaults of its own place. The
+// places that aliases of one anchor fill share one value when they start
+// from equal values, as the go-yaml decoder shares it. Two pointer fields
+// with equal defaults thus share one target. A place that starts from
+// another value builds a value of its own. An interface value at an alias
+// holds the value of its anchor.
+//
+// Each key of a map keeps the value the decoder gives it, and so does a
+// value behind an alias to a reference document. A panic in a function of
+// WithDefaults makes the decode return an error that holds a [PanicError].
 //
 // # Validation
 //

@@ -40,6 +40,7 @@ import (
 //   - [WithCustomUnmarshaler]
 //   - [WithJSONUnmarshalers]
 //   - [WithYAMLOrderedMaps]
+//   - [WithDefaults]
 //   - [DecodeOptions]
 //
 // An option reaches the call that gets it and no other, so a [Validator]
@@ -54,6 +55,8 @@ type DecodeOption func(*decodeConfig)
 // decodeConfig holds the settings a [DecodeOption] configures. Its zero
 // value holds the defaults.
 type decodeConfig struct {
+	// The function that [WithDefaults] gives each type.
+	defaults             defaultFuncs
 	validators           []Validator
 	allowedFieldPrefixes []string
 	// The functions from [WithValueCheck], in the order given.
@@ -461,8 +464,9 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // content in full, and returns an error matching [ErrExcessiveAliasing]
 // when aliases make up too much of it. A step that fails before the
 // go-yaml decoder runs leaves v as it is. A field the document leaves out
-// keeps its value, so a caller may fill v with defaults first, and the
-// same section describes how a mapping, a null, and an alias fill v.
+// keeps its value. The same section describes how a mapping, a null, and
+// an alias fill v, and the Defaults section describes the value that each
+// value the decode creates starts from.
 //
 // Every error comes back bound to the source as a [SourceError]. An
 // error of the decoder matches [ErrDecode] and carries the `$` path of
@@ -684,13 +688,25 @@ func (n *Node) decodeUnbound(
 
 	// For a null, the decoder sets *v to nil.
 	target := v
+
+	var start reflect.Value
+
 	if !null {
-		target = allocate(v)
+		target, start, err = startTarget(v, cfg, node)
+		if err != nil {
+			return err
+		}
 	}
 
 	// The recover turns a panic in the go-yaml decoder, or in a value's
 	// own UnmarshalYAML, into an error that holds a PanicError.
 	err = decodeWithRecover(ctx, dec, view, target)
+
+	// The decoder starts each value it creates from zero, so the Node
+	// builds those values again from their defaults.
+	if err == nil && start.IsValid() {
+		err = n.fillDefaults(ctx, dec, cfg, node, target, start)
+	}
 
 	// The decoder returns the error of a value that decodes itself with
 	// no token, so the Node finds the value that reported it.
@@ -854,12 +870,18 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 // An [ast.Node] in the result is part of a tree the document shares, so
 // a caller must not modify it.
 func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
-	var v T
+	var zero T
 
-	err := n.DecodeInto(ctx, &v, opts...)
+	start, err := newDecodeConfig(n.source, opts).defaults.start(reflect.TypeFor[T](), n.AST())
 	if err != nil {
-		var zero T
+		return zero, n.bindOwn(err)
+	}
 
+	// A nil interface asserts to the zero value, which it is.
+	v, _ := reflect.TypeAssert[T](start)
+
+	err = n.DecodeInto(ctx, &v, opts...)
+	if err != nil {
 		return zero, err
 	}
 

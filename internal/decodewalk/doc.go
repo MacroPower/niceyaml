@@ -14,4 +14,9 @@
 // walk goes below it. [UnknownFields] walks a type that way to find the
 // keys a decoder that rejects unknown fields rejects, which the decoder
 // reports one at a time.
+//
+// The decoder starts each value it creates from the zero value of its
+// type. [Fill] reads the type, the node, and the value the decoder gave
+// by the same rules, and builds each of those values again from a start
+// of its own.
 package decodewalk
