@@ -1336,7 +1336,7 @@ func (s *Source) parseError(f docparse.Failure) error {
 			at = f.Run[i]
 		}
 
-		err = Place(panicked("parser", &PanicError{Value: f.Panic, Stack: f.Stack}), atToken(at))
+		err = Unchecked(panicked("parser", &PanicError{Value: f.Panic, Stack: f.Stack}), atToken(at))
 
 	case ok:
 		msg := escape.Control(yamlErr.GetMessage())

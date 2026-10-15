@@ -4952,12 +4952,21 @@ func TestNode_Bind_Scope(t *testing.T) {
 				want:    "cfg.yaml:3:5: $.shops[0].hours: stat license: permission denied",
 				invalid: true,
 			},
-			"Place declares no fault": {
-				got:  hours.Bind(niceyaml.Place(errStat, niceyaml.AtPath(closePath))),
+			"Unchecked declares no fault": {
+				got:  hours.Bind(niceyaml.Unchecked(errStat, niceyaml.AtPath(closePath))),
 				want: "cfg.yaml:5:14: $.shops[0].hours.close: stat license: permission denied",
 			},
-			"Place keeps the fault of the error it places": {
-				got:     hours.Bind(niceyaml.Place(niceyaml.NewError("bad"), niceyaml.AtPath(closePath))),
+			"Unchecked keeps the fault of the error it wraps": {
+				got:     hours.Bind(niceyaml.Unchecked(niceyaml.NewError("bad"), niceyaml.AtPath(closePath))),
+				want:    "cfg.yaml:5:14: $.shops[0].hours.close: bad",
+				invalid: true,
+			},
+			"Locate declares nothing": {
+				got:  hours.Bind(niceyaml.Locate(errStat, niceyaml.AtPath(closePath))),
+				want: "cfg.yaml:5:14: $.shops[0].hours.close: stat license: permission denied",
+			},
+			"Locate keeps the fault of the error it wraps": {
+				got:     hours.Bind(niceyaml.Locate(niceyaml.NewError("bad"), niceyaml.AtPath(closePath))),
 				want:    "cfg.yaml:5:14: $.shops[0].hours.close: bad",
 				invalid: true,
 			},
@@ -4979,9 +4988,11 @@ func TestNode_Bind_Scope(t *testing.T) {
 		var typed *niceyaml.Error
 
 		require.NoError(t, hours.Bind(niceyaml.Invalid(nil, niceyaml.AtPath(closePath))))
-		require.NoError(t, hours.Bind(niceyaml.Place(nil, niceyaml.AtPath(closePath))))
+		require.NoError(t, hours.Bind(niceyaml.Unchecked(nil, niceyaml.AtPath(closePath))))
+		require.NoError(t, hours.Bind(niceyaml.Locate(nil, niceyaml.AtPath(closePath))))
 		require.NoError(t, hours.Bind(niceyaml.Invalid(typed)))
-		require.NoError(t, hours.Bind(niceyaml.Place(typed)))
+		require.NoError(t, hours.Bind(niceyaml.Unchecked(typed)))
+		require.NoError(t, hours.Bind(niceyaml.Locate(typed)))
 	})
 
 	t.Run("a validator's error with no location binds at the scope", func(t *testing.T) {

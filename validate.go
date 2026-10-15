@@ -1003,11 +1003,10 @@ func implementsSelfValidator(t reflect.Type) bool {
 // validate runs Validate on v, through a copy when v has no address, and
 // then each function of the walk from [WithValueCheck] for the type of v,
 // in order. It reports whether v passed, and stops at the first that
-// fails. Rebasing the error of Validate under at presumes every problem
-// invalid, so each matches [errInvalid] whether it has a location or not,
-// unless an Error from [Place] sits on its cause chain. The error of a
-// function declares what it declares itself, as that of a [Validator]
-// does.
+// fails. Rebasing the error of Validate or of a function under at presumes
+// every problem invalid, unless an Error from [Unchecked] sits on its
+// cause chain. Each such problem matches [errInvalid] whether it has a
+// location or not.
 func (w *selfWalker) validate(v reflect.Value, at place) bool {
 	if !w.checked.validates(v.Type()) {
 		return true
@@ -1031,7 +1030,7 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 			continue
 		}
 
-		if w.stopped() || !w.report(check.run(w.ctx, v.Addr()), at, undeclared) {
+		if w.stopped() || !w.report(check.run(w.ctx, v.Addr()), at, presumed) {
 			return false
 		}
 	}
@@ -1408,10 +1407,10 @@ func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token
 // A decode presumes the document at fault for an error a Validate returns
 // that declares nothing, a plain I/O error included. A check that can
 // fail for reasons outside the document returns such an error inside
-// [Place], which turns the presumption off, as the Errors section of the
-// package documentation describes. The Validation section describes the
-// order the values validate in, the path of each value, and where each
-// error binds.
+// [Unchecked], which turns the presumption off, as the Errors section of
+// the package documentation describes. The Validation section describes
+// the order the values validate in, the path of each value, and where
+// each error binds.
 type SelfValidator interface {
 	Validate() error
 }

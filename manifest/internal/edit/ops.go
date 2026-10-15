@@ -405,7 +405,7 @@ func (d *Doc) bug(h *Handle, err error) error {
 		app = "this program"
 	}
 
-	bound := h.Bind(niceyaml.Place(&engineError{
+	bound := h.Bind(niceyaml.Unchecked(&engineError{
 		msg: app + " cannot migrate this value without changing it",
 		err: err,
 	}, niceyaml.WithDetails(fmt.Errorf("report this to the authors of %s", app))))

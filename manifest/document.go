@@ -176,7 +176,7 @@ func (d *docState) report(migrated bool) {
 			e := problem.Err
 
 			if len(adoption) > 0 && niceyaml.HasErrors(e) {
-				e = d.doc.Bind(niceyaml.Place(e, niceyaml.WithDetails(adoption...)))
+				e = d.doc.Bind(niceyaml.Locate(e, niceyaml.WithDetails(adoption...)))
 				adoption = nil
 			}
 
@@ -601,7 +601,7 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 	sch, err := reg.schemas.Schema(ctx, v.cfg.schema)
 	if err != nil {
 		what := fmt.Sprintf("%s cannot load its schema of %s %s", reg.app(), v.kind.kind.name, v.label())
-		d.fail(niceyaml.Place(&problemError{msg: what, marks: []error{err}}, niceyaml.WithDetails(err)))
+		d.fail(niceyaml.Unchecked(&problemError{msg: what, marks: []error{err}}, niceyaml.WithDetails(err)))
 
 		return false
 	}
@@ -620,7 +620,7 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 	for problem := range niceyaml.Problems(err) {
 		e := problem.Err
 		if niceyaml.HasErrors(e) {
-			e = d.doc.Bind(niceyaml.Place(e, niceyaml.WithDetails(detail)))
+			e = d.doc.Bind(niceyaml.Locate(e, niceyaml.WithDetails(detail)))
 		}
 
 		d.problems = append(d.problems, e)
@@ -724,7 +724,7 @@ func (d *docState) leftOut(err error) error {
 
 		detail := d.leftOutDetail(problem)
 		if detail != nil {
-			e = d.doc.Bind(niceyaml.Place(e, niceyaml.WithDetails(detail)))
+			e = d.doc.Bind(niceyaml.Locate(e, niceyaml.WithDetails(detail)))
 			changed = true
 		}
 

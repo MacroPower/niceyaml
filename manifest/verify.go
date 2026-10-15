@@ -184,7 +184,7 @@ func authorError(msg string, details ...string) error {
 	}
 
 	//nolint:wrapcheck // The error is the problem itself.
-	return niceyaml.Place(errors.New(msg), niceyaml.WithDetails(errs...))
+	return niceyaml.Unchecked(errors.New(msg), niceyaml.WithDetails(errs...))
 }
 
 // schemaDoc is one compiled schema document, which resolves the $ref and

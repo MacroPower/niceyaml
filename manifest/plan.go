@@ -416,7 +416,7 @@ func checkLimits(src *niceyaml.Source, after string) error {
 			details = append(details, errors.New("split its documents across several files"))
 		}
 
-		return niceyaml.Place(&problemError{
+		return niceyaml.Unchecked(&problemError{
 			msg:   "cannot rewrite a file whose new text holds more than " + quantity.Bytes(bytes),
 			marks: []error{niceyaml.ErrLimit},
 		}, niceyaml.WithDetails(details...))

@@ -63,17 +63,20 @@ var (
 	//     number that overflows its type, an alias with no anchor, or a
 	//     field the target lacks under [WithDisallowUnknownFields].
 	//   - The error a value's own UnmarshalYAML or UnmarshalText returns,
-	//     which stays in the chain, unless it holds an Error from [Place].
+	//     which stays in the chain, unless it holds an Error from
+	//     [Unchecked].
 	//   - The error for a target type whose definition the decoder
 	//     refuses, such as a struct with two fields of one name.
 	//   - The error of a reference document from [WithReferences] that
 	//     does not parse.
 	//
 	// The error of a context that ended does not match, even when an
-	// unmarshaler wraps it. Neither does a [PanicError], an error from
-	// Place that an unmarshaler or a [WithCustomUnmarshaler] function
-	// returns, [ErrDecodeTarget], [ErrExcessiveAliasing], or an error that
-	// a [Validator] or a [SelfValidator] reports about the value it checks.
+	// unmarshaler wraps it. Neither does a [PanicError], [ErrDecodeTarget],
+	// or [ErrExcessiveAliasing]. An error from [Unchecked] that an
+	// unmarshaler or a [WithCustomUnmarshaler] function returns does not
+	// match either. Neither does an error that a [Validator], a
+	// [SelfValidator], or a function from [WithValueCheck] reports about
+	// the value it checks.
 	// Text the parser rejects matches [ErrSyntax] instead. [ErrUnknownField],
 	// [ErrWrongKind], and [ErrOverflow] label some of the rejections, and a
 	// problem with a label matches ErrDecode too. The document is at fault
@@ -267,8 +270,8 @@ var (
 // the details. An Error is immutable once created, and [Error.With]
 // returns a copy with more options applied.
 //
-// Create instances with [NewError], [Invalid], [Place], or
-// [NewSummary].
+// Create instances with [NewError], [Invalid], [Unchecked], [Locate],
+// or [NewSummary].
 type Error struct {
 	err    error
 	move   *move
@@ -289,13 +292,14 @@ type Error struct {
 type declaration uint8
 
 const (
-	// The Error declares nothing, as one from [Rebase] does.
+	// The Error declares nothing, as one from [Rebase] or [Locate] does.
 	undeclared declaration = iota
-	// The Error comes from [Place], so its check could not run. A fault
-	// that a hook presumes does not reach the error the Error wraps.
+	// The Error comes from [Unchecked], so its check could not run. A
+	// fault that a hook presumes does not reach the error the Error wraps.
 	unchecked
 	// A hook presumes the document at fault for an error that the code it
-	// calls returns, as a decode does for each error of a [SelfValidator].
+	// calls returns, as a decode does for each error of a [SelfValidator]
+	// or a function from [WithValueCheck].
 	presumed
 	// [NewError] or [Invalid] declared the fault.
 	declared
@@ -307,8 +311,8 @@ func (d declaration) invalid() bool {
 }
 
 // on returns the declaration d puts on err. A presumed fault does not
-// reach an err that holds an Error from [Place] on its cause chain, and
-// any other d reaches it unchanged.
+// reach an err that holds an Error from [Unchecked] on its cause chain,
+// and any other d reaches it unchanged.
 func (d declaration) on(err error) declaration {
 	if d == presumed && holdsUnchecked(err) {
 		return undeclared
@@ -319,7 +323,7 @@ func (d declaration) on(err error) declaration {
 
 // under returns the declaration that the errors below x take when d comes
 // from above x. A fault that x declares passes down when it is stronger
-// than d, and an x from [Place] stops a presumed fault.
+// than d, and an x from [Unchecked] stops a presumed fault.
 func (d declaration) under(x *Error) declaration {
 	switch {
 	case x.fault == unchecked && d == presumed:
@@ -379,8 +383,8 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 // [context.DeadlineExceeded], or a join with such a branch, gets the
 // options and no declaration, since that error is about the call. A
 // detail of err decides nothing. Use [NewError] instead to create an
-// error from a message, and [Place] to locate the error of a check that
-// could not run.
+// error from a message, [Unchecked] to declare that a check could not
+// run, and [Locate] to add a location and declare nothing.
 //
 // Invalid returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, whatever the options. It returns an error
@@ -406,37 +410,39 @@ func Invalid(err error, opts ...ErrorOption) error {
 	return e
 }
 
-// Place creates a new [*Error] that wraps err and gives it the location
-// and the details of the options. The Error declares that the check could
-// not run, so a check whose I/O fails shows its error at the value it
-// read this way:
+// Unchecked creates a new [*Error] that wraps err, gives it the location
+// and the details of the options, and declares that the check could not
+// run. A check whose I/O fails returns its error this way, at the value
+// it read:
 //
-//	return niceyaml.Place(fmt.Errorf("stat license: %w", err),
+//	return niceyaml.Unchecked(fmt.Errorf("stat license: %w", err),
 //		niceyaml.AtRange(licenseRange), niceyaml.WithDetails(why))
 //
 // The result binds and prints as one from [Invalid] with the same options
-// does. Place declares no fault, so [IsInvalid] reports the result only
-// when it reports err. An err the document is at fault for through its
-// own chain, such as an Error from [NewError] or a decode rejection, stays
-// a fault inside Place, and a Place inside Invalid is a fault too.
+// does. Unchecked declares no fault, so [IsInvalid] reports the result
+// only when it reports err. An err the document is at fault for through
+// its own chain, such as an Error from [NewError] or a decode rejection,
+// stays a fault inside Unchecked. An Unchecked inside Invalid is a fault
+// too.
 //
-// A hook that runs code of the caller presumes the document at fault for
-// an error that code returns, as the Errors section of the package
-// documentation describes. An Error from Place on the cause chain of the
-// error turns that presumption off. An I/O error that a Validate method
-// or an unmarshaler places is thus no fault, and one from an unmarshaler
-// does not match [ErrDecode]. A Place around a join turns the presumption
-// off for each branch it heads, and a branch that declares a fault itself
-// stays one. A Place in one branch of a join, or of a wrapper that
-// [fmt.Errorf] builds with several %w verbs and that heads several
-// problems, turns the presumption off for that branch alone.
+// A hook presumes the document at fault for an error it returns that
+// declares nothing, as the Errors section of the package documentation
+// describes. An Error from Unchecked on the cause chain of the error
+// turns that presumption off. An I/O error that a Validate method, a
+// function from [WithValueCheck], or an unmarshaler wraps in Unchecked is
+// thus no fault, and one from an unmarshaler does not match [ErrDecode].
+// An Unchecked around a join turns the presumption off for each branch it
+// heads, and a branch that declares a fault itself stays one. An
+// Unchecked in one branch of a join, or of a wrapper that [fmt.Errorf]
+// builds with several %w verbs and that heads several problems, turns the
+// presumption off for that branch alone.
 //
-// Place returns nil for a nil err, and for a nil [*Error] or
+// Unchecked returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, whatever the options. It returns an error rather
 // than an [*Error] for the reason Invalid gives. An err that is a join
 // stays a list of problems, and the options locate the heading above them
 // and no branch, as Invalid describes.
-func Place(err error, opts ...ErrorOption) error {
+func Unchecked(err error, opts ...ErrorOption) error {
 	if isNothing(err) {
 		return nil
 	}
@@ -447,14 +453,52 @@ func Place(err error, opts ...ErrorOption) error {
 	return e
 }
 
-// holdsUnchecked reports whether an [Error] from [Place] sits on the cause
-// chain of err. The walk skips details and the problems a summary heads,
+// Locate creates a new [*Error] that wraps err and gives it the location
+// and the details of the options. It declares nothing, so the fault stays
+// with err. A check that calls a helper adds the location of the value to
+// the error of the helper this way. The error keeps what the helper
+// declared:
+//
+//	if err := checkName(cfg.Name); err != nil {
+//		return niceyaml.Locate(err, niceyaml.AtPath(paths.Current().Child("name")))
+//	}
+//
+// With a location or details, the result binds and prints as one from
+// [Invalid] or [Unchecked] with the same options does. A result with
+// neither reads as err does in a wrapper with several %w verbs. One around
+// a plain error thus reads as a sentinel there.
+//
+// [IsInvalid] reports the result only when it reports err. A hook presumes
+// a fault for the result exactly when it presumes one for err, as the
+// Errors section of the package documentation describes. A plain I/O
+// error that a Validate method or a function from [WithValueCheck]
+// returns inside Locate is thus a fault. Such a check wraps the error in
+// Unchecked instead. A [Validator] declares its own faults, so a plain
+// error that it returns inside Locate is not a fault.
+//
+// Locate returns nil for a nil err, and for a nil [*Error] or
+// [*SourceError] pointer, whatever the options. It returns an error rather
+// than an [*Error] for the reason Invalid gives. An err that is a join
+// stays a list of problems, and the options locate the heading above them
+// and no branch, as Invalid describes. To move the `@` paths of an error
+// under the path of a value, use [Rebase].
+func Locate(err error, opts ...ErrorOption) error {
+	if isNothing(err) {
+		return nil
+	}
+
+	return wrapUndeclared(err, opts...)
+}
+
+// holdsUnchecked reports whether an [Error] from [Unchecked] sits on the
+// cause chain of err. The walk skips details and the problems a summary heads,
 // and it stops at a join, whose branches each answer for themselves. A
 // wrapper with several %w verbs that heads several problems stops the
 // walk as a join does, and one with a single problem among its branches
-// goes on through that problem. An Error from Place is always a problem,
-// so the walk never drops one as a sentinel. Any other error with several
-// branches is one problem, so a Place in any of its branches counts.
+// goes on through that problem. An Error from Unchecked is always a
+// problem, so the walk never drops one as a sentinel. Any other error with
+// several branches is one problem, so an Unchecked in any of its branches
+// counts.
 func holdsUnchecked(err error) bool {
 	for cur := err; !isNothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -493,8 +537,8 @@ func holdsUnchecked(err error) bool {
 
 // wrapUndeclared returns an [*Error] around err with opts applied. The
 // Error does not match [errInvalid] itself, so it declares nothing about
-// err. [NewError], [Invalid], and [Place] build on it, and a decode uses
-// it to put a location on an error it rewrites.
+// err. [NewError], [Invalid], [Unchecked], and [Locate] build on it, and
+// a decode uses it to put a location on an error it rewrites.
 func wrapUndeclared(err error, opts ...ErrorOption) *Error {
 	e := &Error{err: err}
 	for _, opt := range opts {
@@ -553,13 +597,14 @@ func NewSummary(msg string, errs ...error) error {
 // a caller asks [IsInvalid] or [ErrorTree.IsInvalid] instead of
 // [errors.Is]. An Error from [NewError] or [Invalid] declares the
 // fault, with a location or without. So does the Error a decode puts
-// around an error a [SelfValidator] returns, unless an Error from [Place]
-// sits on the cause chain of that error. An Error from Place or
+// around an error that a [SelfValidator] or a function from
+// [WithValueCheck] returns, unless an Error from [Unchecked] sits on the
+// cause chain of that error. An Error from Unchecked, [Locate], or
 // [Rebase], a summary from [NewSummary], and the Error a scoped
-// [Node.Bind] puts around an error declare nothing, and neither does an
-// Error from Invalid around the error of a context that ended. Any
-// other target matches through the errors the Error wraps, as
-// [Error.Unwrap] returns them.
+// [Node.Bind] puts around an error declare no fault. Neither does an Error
+// from Invalid around the error of a context that ended. Any other target
+// matches through the errors the Error wraps, as [Error.Unwrap] returns
+// them.
 func (e *Error) Is(target error) bool {
 	return target == errInvalid && e != nil && e.fault.invalid()
 }
@@ -595,7 +640,7 @@ func (e *Error) Is(target error) bool {
 //	case errors.Is(err, niceyaml.ErrSyntax):
 //		status = 400
 //	default:
-//		status = 422 // decode rejection, violation, Validate method
+//		status = 422 // decode rejection, violation, Validate method, value check
 //	}
 func IsInvalid(err error) bool {
 	return NewErrorTree(err).IsInvalid()
@@ -719,10 +764,10 @@ func markFault(err error, d declaration) error {
 	return &Error{err: err, fault: d}
 }
 
-// ErrorOption configures an [Error]. [NewError], [Invalid], [Place],
-// and [Error.With] take the same options. [AtPath] sets the path of the
-// Error. [AtPosition] or [AtRange] sets its position or range, and the
-// last of those two given wins. [WithDetails] adds the errors that
+// ErrorOption configures an [Error]. [NewError], [Invalid], [Unchecked],
+// [Locate], and [Error.With] take the same options. [AtPath] sets the path
+// of the Error. [AtPosition] or [AtRange] sets its position or range, and
+// the last of those two given wins. [WithDetails] adds the errors that
 // explain it. A [DataLocator] returns the options that locate an error by
 // the names of decoded data.
 //

@@ -1972,7 +1972,7 @@ func TestErrorTree_Problems_Err(t *testing.T) {
 			err: fmt.Errorf("check: %w", niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed)),
 		},
 		"rule of a problem bound to no source": {
-			err:  niceyaml.Place(fmt.Errorf("%w: read rules: %w", own, fs.ErrNotExist), detailed),
+			err:  niceyaml.Unchecked(fmt.Errorf("%w: read rules: %w", own, fs.ErrNotExist), detailed),
 			want: "own",
 		},
 	}
@@ -2300,7 +2300,7 @@ func TestErrorTree_IsInvalid(t *testing.T) {
 		"read error with an invalid detail": {
 			// A detail explains the problem and decides nothing, and it
 			// answers for itself.
-			err: niceyaml.Place(errRead, niceyaml.AtPath(paths.Current().Child("a")), niceyaml.WithDetails(badB())),
+			err: niceyaml.Unchecked(errRead, niceyaml.AtPath(paths.Current().Child("a")), niceyaml.WithDetails(badB())),
 			wantNodes: []string{
 				"read g.yaml: permission denied false",
 				"bad b true",
@@ -2832,8 +2832,8 @@ func TestProblems_WrapperBranches(t *testing.T) {
 			},
 			invalid: true,
 		},
-		"a placed I/O error and an error": {
-			first:  niceyaml.Place(fs.ErrPermission),
+		"an unchecked I/O error and an error": {
+			first:  niceyaml.Unchecked(fs.ErrPermission),
 			second: niceyaml.NewError("port is required"),
 			want: []string{
 				"permission denied [error, no fault]",
@@ -2841,8 +2841,8 @@ func TestProblems_WrapperBranches(t *testing.T) {
 			},
 			hasErrors: true,
 		},
-		"a located placed I/O error and an error": {
-			first:  niceyaml.Place(fs.ErrPermission, atA),
+		"a located unchecked I/O error and an error": {
+			first:  niceyaml.Unchecked(fs.ErrPermission, atA),
 			second: niceyaml.NewError("port is required"),
 			want: []string{
 				"permission denied [error, no fault]",
@@ -2850,8 +2850,8 @@ func TestProblems_WrapperBranches(t *testing.T) {
 			},
 			hasErrors: true,
 		},
-		"a placed I/O error and a warning": {
-			first:  niceyaml.Place(fs.ErrPermission),
+		"an unchecked I/O error and a warning": {
+			first:  niceyaml.Unchecked(fs.ErrPermission),
 			second: niceyaml.NewWarning("legacy layout"),
 			want: []string{
 				"permission denied [error, no fault]",

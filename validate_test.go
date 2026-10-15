@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"maps"
 	"math"
@@ -3869,6 +3870,64 @@ func TestSelfValidateValue_Options(t *testing.T) {
 
 				require.EqualError(t, err, tc.err)
 				assert.True(t, niceyaml.IsInvalid(err))
+			})
+		}
+	})
+
+	t.Run("presumes a fault for an error from a check", func(t *testing.T) {
+		t.Parallel()
+
+		errLookup := fmt.Errorf("look up mirrors: %w", fs.ErrNotExist)
+		urlPath := paths.Current().Child("url")
+
+		// The walk presumes the value at fault for an error from the check
+		// that declares nothing, as it does for a Validate method.
+		tcs := map[string]struct {
+			err  error
+			want string
+			// Whether IsInvalid reports the error.
+			invalid bool
+		}{
+			"errors.New": {
+				err:     errors.New("mirror is retired"),
+				want:    "$.mirror: mirror is retired",
+				invalid: true,
+			},
+			"I/O error": {
+				err:     errLookup,
+				want:    "$.mirror: look up mirrors: file does not exist",
+				invalid: true,
+			},
+			"Unchecked of an I/O error": {
+				err:  niceyaml.Unchecked(errLookup, niceyaml.AtPath(urlPath)),
+				want: "$.mirror.url: look up mirrors: file does not exist",
+			},
+			"Locate of an I/O error": {
+				err:     niceyaml.Locate(errLookup, niceyaml.AtPath(urlPath)),
+				want:    "$.mirror.url: look up mirrors: file does not exist",
+				invalid: true,
+			},
+			"Locate of Unchecked of an I/O error": {
+				err:  niceyaml.Locate(niceyaml.Unchecked(errLookup), niceyaml.AtPath(urlPath)),
+				want: "$.mirror.url: look up mirrors: file does not exist",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				value := &struct {
+					Mirror checkedMirror `yaml:"mirror"`
+				}{Mirror: checkedMirror{URL: "http://m"}}
+
+				err := niceyaml.SelfValidateValue(t.Context(), value,
+					niceyaml.WithValueCheck(func(context.Context, *checkedMirror) error {
+						return tc.err
+					}))
+
+				require.EqualError(t, err, tc.want)
+				assert.Equal(t, tc.invalid, niceyaml.IsInvalid(err))
 			})
 		}
 	})

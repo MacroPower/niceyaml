@@ -746,11 +746,11 @@ func followBranches(err error, branches []error) ([]error, error) {
 // carries no location and no children on its cause chain, as [anchorOf]
 // and [walkChildren] find them. It holds no [*Error] whose fault or
 // severity is set either, because callers build such Errors with
-// [NewError], [NewWarning], [Invalid], and [Place] to report problems. A
-// rare sentinel built with one of them reads as a problem. An error from
-// [errors.New] reads as a sentinel too. The function walks the chain
-// once, because running anchorOf and walkChildren both doubles the work
-// at each nesting level.
+// [NewError], [NewWarning], [Invalid], and [Unchecked] to report
+// problems. A rare sentinel built with one of them reads as a problem. An
+// error from [errors.New] reads as a sentinel too. The function walks the
+// chain once, because running anchorOf and walkChildren both doubles the
+// work at each nesting level.
 func isLeaf(err error) bool {
 	for cur := err; !isNothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -809,7 +809,7 @@ func (c childBase) cross(x *Error) childBase {
 // so the base moves its paths alone and never marks it invalid. A problem
 // below an Error that matches [errInvalid] is the document's fault too,
 // unless the fault is one a hook presumes and n holds an Error from
-// [Place].
+// [Unchecked].
 func (c childBase) rebase(n error, detail bool) error {
 	d := c.fault
 	if detail {

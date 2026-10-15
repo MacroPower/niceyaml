@@ -34,10 +34,13 @@ var (
 	// validating against a schema, such as a reference resolution problem.
 	// Schema constraint violations come back as [*niceyaml.Error] values
 	// with path information instead of wrapping this sentinel.
-	// [niceyaml.IsInvalid] reports a violation. It does not report an
-	// error that wraps ErrValidate, since the validation could not run,
-	// even when a scoped [niceyaml.Node.Bind] places it at the value it
-	// checked.
+	// [niceyaml.IsInvalid] reports a violation. The validation could not
+	// run for an error that wraps ErrValidate, so IsInvalid does not report
+	// one, even when a scoped [niceyaml.Node.Bind] places it at the value
+	// it checked. A decode presumes the document at fault for an error
+	// that declares nothing from a Validate method or a
+	// [niceyaml.WithValueCheck] function. Either one thus returns an error
+	// that wraps ErrValidate inside [niceyaml.Unchecked].
 	ErrValidate = errors.New("validate schema")
 
 	// ErrExcessiveAliasing indicates a value that shares maps, slices, or
@@ -649,7 +652,10 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // [*niceyaml.SourceError] bound to no document, whose text names the path
 // of each violation, as in "$.port: 0 is less than 1". A check that could
 // not run, such as a $ref the validator cannot resolve, returns an error
-// wrapping [ErrValidate].
+// wrapping [ErrValidate]. A decode presumes the document at fault for an
+// error that declares nothing from a Validate method or a
+// [niceyaml.WithValueCheck] function. Either one that calls ValidateValue
+// thus returns such an error inside [niceyaml.Unchecked].
 //
 // # Conversions
 //
@@ -732,8 +738,9 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // text through both calls, behind the position and the path, as in
 // "app.yaml:2:9: $.request.port: check: 0 is less than 1". BindValue
 // describes a wrapper that rewrites the text of the result, and a result
-// inside [niceyaml.Invalid] or [niceyaml.Place]. Both place the
-// violations too. The result itself never changes.
+// inside [niceyaml.Invalid], [niceyaml.Unchecked], or [niceyaml.Locate].
+// A Bind places the violations inside each of them too. The result itself
+// never changes.
 //
 // Each violation the result heads places the same way on its own, so a
 // caller that drops some of them places the rest. The violations are

@@ -188,34 +188,40 @@
 //
 // The code that builds an error declares whether the document is at fault
 // for it or the check could not run, and a location never decides it.
-// [NewError] and [Invalid] declare a fault. [Place] takes the same
-// options and declares that the check could not run, so it shows an I/O
-// error at the value a check read. The document is at fault for each
-// problem the parse reports with [ErrSyntax] and a decode reports with
-// [ErrDecode]. Any other error declares nothing, and a wrapper is a fault
-// only when the error it wraps is one. The error of a context that ended
-// and a [PanicError] are never faults:
+// [NewError] and [Invalid] declare a fault. [Unchecked] takes the same
+// options, shows an I/O error at the value a check read, and declares that
+// the check could not run. [Locate] takes the same options, adds the
+// location to an error, and declares nothing, so the fault stays with that
+// error. The document is at fault for each problem the parse
+// reports with [ErrSyntax] and a decode reports with [ErrDecode]. Any
+// other error declares nothing, and a wrapper is a fault only when the
+// error it wraps is one. The error of a context that ended and a
+// [PanicError] are never faults:
 //
 //	niceyaml.NewError("license file does not exist", niceyaml.AtPath(p)) // fault
 //	niceyaml.Invalid(checkErr, niceyaml.AtPath(p))                       // fault
-//	niceyaml.Place(statErr, niceyaml.AtPath(p))                          // check could not run
+//	niceyaml.Unchecked(statErr, niceyaml.AtPath(p))                      // check could not run
+//	niceyaml.Locate(nameErr, niceyaml.AtPath(p))                         // what nameErr declares
 //
-// A hook runs code of the caller in a decode, as a [SelfValidator], an
-// UnmarshalYAML or UnmarshalText method, or a [WithCustomUnmarshaler]
-// function does. The decode presumes the document at fault for an error
-// a hook returns that declares nothing, and such an error from an
-// unmarshaler matches ErrDecode too. A function from [WithValueCheck] is
-// no such hook. It declares its faults as a [Validator] does, so a plain
-// error it returns is no fault.
+// A hook is code of the caller that a decode runs on one value. Each
+// [SelfValidator], UnmarshalYAML or UnmarshalText method,
+// [WithCustomUnmarshaler] function, and [WithValueCheck] function is a
+// hook. The decode presumes the document at fault for an error a hook
+// returns that declares nothing, a plain I/O error included. Such an error
+// from an unmarshaler matches ErrDecode too. A check thus keeps its
+// faults when it moves from one hook to another. A [Validator] checks a
+// node before the decode and is not a hook. It declares its own faults, so
+// a plain error it returns is not a fault.
 //
-// An Error from Place on the cause chain of the error that a hook returns
-// turns the presumption off. An I/O error that a hook places is thus no
-// fault and does not match ErrDecode. A Place around a join turns the
-// presumption off for each branch it heads. A Place in one branch of a
-// join, or of a wrapper with several %w verbs that heads several
+// An Error from Unchecked on the cause chain of the error that a hook
+// returns turns the presumption off. An I/O error that a hook wraps in
+// Unchecked is thus no fault and does not match ErrDecode. An Error from
+// Locate leaves the presumption on. An Unchecked around a join turns the
+// presumption off for each branch it heads. An Unchecked in one branch of
+// a join, or of a wrapper with several %w verbs that heads several
 // problems, turns it off for that branch alone. A declared fault still
-// holds anywhere on the chain, so NewError inside Place and Place inside
-// Invalid are faults.
+// holds anywhere on the chain, so NewError inside Unchecked and Unchecked
+// inside Invalid are faults.
 //
 // A wrapper that [fmt.Errorf] builds with several %w verbs heads the
 // branches that are problems, as a join does. It reads each other branch
@@ -223,7 +229,7 @@
 // its own. A branch is a problem when it carries a location or errors
 // below it. So is a branch that holds an Error that declares a fault,
 // declares that its check could not run, or marks a severity. Such Errors
-// come from calls such as NewError, [NewWarning], Invalid, Place, and
+// come from calls such as NewError, [NewWarning], Invalid, Unchecked, and
 // [AsErrors]. A wrapper with one such branch is that problem, so a
 // sentinel in front of a warning leaves one warning:
 //
@@ -232,9 +238,11 @@
 // No reader can tell a plain error, such as one from [errors.New], from a
 // sentinel, so a plain error beside a problem reads as a sentinel too.
 // Return separate problems with [errors.Join], or build each with
-// NewError, Invalid, or Place. Invalid declares nothing for the error of a
-// context that ended, so an Error from Invalid with no location around
-// such an error reads as a sentinel as well.
+// NewError, Invalid, or Unchecked. Invalid declares nothing for the error
+// of a context that ended, so an Error from Invalid with no location
+// around such an error reads as a sentinel as well. An Error from Locate
+// with no location and no details reads as the error it wraps does, so
+// one around a plain error reads as a sentinel too.
 //
 // [IsInvalid] reports whether the document is at fault for every problem
 // of an error, the question a caller asks to pick a status code or an
@@ -247,10 +255,10 @@
 //
 // A plain I/O error beside violations in one wrapper with several %w
 // verbs reads as a sentinel, so IsInvalid does not count it. IsInvalid
-// counts it in a join of the two, and in the wrapper when Place wraps the
-// I/O error. A wrapper that is one problem declares no fault when a branch
-// holds the error of a context that ended. Invalid declares no fault for
-// that error either.
+// counts it in a join of the two, and in the wrapper when Unchecked wraps
+// the I/O error. A wrapper that is one problem declares no fault when a
+// branch holds the error of a context that ended. Invalid declares no
+// fault for that error either.
 //
 // A check run on a value inside a document reports `@` paths that read
 // from that value. [Rebase] puts the path of the value in front of each
@@ -364,9 +372,9 @@
 // does. The nearest severity mark on the cause chain of a problem decides
 // its severity. NewWarning and [Node.Warn] mark a warning, [AsErrors] marks
 // an error above each warning, and a problem with no mark is an error.
-// [Invalid], [Place], [Rebase], [Node.Bind], and [fmt.Errorf] add no mark,
-// so a warning stays a warning inside them. A warning among the details
-// of an error leaves that error an error.
+// [Invalid], [Unchecked], [Locate], [Rebase], [Node.Bind], and
+// [fmt.Errorf] add no mark, so a warning stays a warning inside them. A
+// warning among the details of an error leaves that error an error.
 //
 // Every reader keeps the two apart. [HasErrors] reports whether an error
 // holds an error, [IsInvalid] decides from the errors and passes over the
@@ -534,7 +542,7 @@
 //
 // An `@` path in an [*Error] from an unmarshaler reads from its own value.
 // The error stays in the chain beside ErrDecode, unless it holds an Error
-// from [Place], as the Errors section describes. An unmarshaler that
+// from [Unchecked], as the Errors section describes. An unmarshaler that
 // answers otherwise the second time can move the error to another value, and
 // an error that no value reproduces comes back with no location.
 //
@@ -620,7 +628,12 @@
 // type in the result, in the step where the values validate themselves:
 //
 //	allowed := niceyaml.WithValueCheck(func(ctx context.Context, p *netip.Prefix) error {
-//		if !tenant.Allows(ctx, *p) {
+//		ok, err := tenant.Allows(ctx, *p)
+//		if err != nil {
+//			return niceyaml.Unchecked(err)
+//		}
+//
+//		if !ok {
 //			return niceyaml.NewError("prefix not allowed")
 //		}
 //
@@ -641,14 +654,14 @@
 //
 // A validator declares which of its errors are the fault of the document
 // by the constructor it calls, as the Errors section describes. [NewError]
-// and [Invalid] declare a fault, and [Place] shows an error at the value the
-// check read without declaring one. A schema reports a violation as a fault
+// and [Invalid] declare a fault. A plain error declares none, and neither
+// does an error from [Unchecked]. A schema reports a violation as a fault
 // and a schema that does not load as none, so [IsInvalid] tells the two
-// apart. A function from WithValueCheck declares its faults the same way,
-// where a decode presumes the document at fault for an error that a
-// Validate method returns and that declares nothing. A check moved from a
-// Validate method into such a function thus keeps its fault only when it
-// wraps its error in Invalid.
+// apart. A decode presumes the document at fault for an error from a
+// Validate method or a function from WithValueCheck that declares nothing.
+// A check thus keeps its faults when it moves from one to the other. Such
+// a check wraps an I/O error in Unchecked, so IsInvalid does not report
+// it.
 //
 // A decode calls Validate on every value in the result that implements
 // SelfValidator, and then the functions from WithValueCheck for the type of

@@ -405,5 +405,5 @@ func systemProblem(err error) error {
 		err = le.Err
 	}
 
-	return niceyaml.Place(fmt.Errorf("cannot replace the file: %w", err))
+	return niceyaml.Unchecked(fmt.Errorf("cannot replace the file: %w", err))
 }

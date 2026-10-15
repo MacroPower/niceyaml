@@ -142,7 +142,7 @@ func (d defaultFuncs) start(t reflect.Type, node ast.Node) (reflect.Value, error
 			}
 
 			stack := &PanicError{Value: p, Stack: debug.Stack()}
-			err = Place(panicked(fmt.Sprintf("the defaults of %s", t), stack, errPlaced),
+			err = Unchecked(panicked(fmt.Sprintf("the defaults of %s", t), stack, errPlaced),
 				atToken(astnode.StartToken(node)))
 		}()
 

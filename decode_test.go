@@ -1565,8 +1565,8 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 				},
 				invalid: true,
 			},
-			"a placed I/O error leaves the problems beside it presumed invalid": {
-				first: niceyaml.Place(fs.ErrPermission),
+			"an unchecked I/O error leaves the problems beside it presumed invalid": {
+				first: niceyaml.Unchecked(fs.ErrPermission),
 				second: niceyaml.NewSummary("2 problems",
 					errors.New("port is required"), errors.New("host is required")),
 				want: []string{
@@ -3118,7 +3118,7 @@ func TestWithValueCheck(t *testing.T) {
 		}
 	})
 
-	t.Run("the error declares the fault as the error of a validator does", func(t *testing.T) {
+	t.Run("the decode presumes a fault as it does for a Validate method", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
@@ -3133,11 +3133,19 @@ func TestWithValueCheck(t *testing.T) {
 				err:     niceyaml.Invalid(errPlainValidation),
 				invalid: true,
 			},
-			"Place": {
-				err: niceyaml.Place(errPlainValidation),
+			"Unchecked": {
+				err: niceyaml.Unchecked(errPlainValidation),
+			},
+			"Locate": {
+				err:     niceyaml.Locate(errPlainValidation, niceyaml.AtPath(paths.Current())),
+				invalid: true,
+			},
+			"Locate of Unchecked": {
+				err: niceyaml.Locate(niceyaml.Unchecked(errPlainValidation), niceyaml.AtPath(paths.Current())),
 			},
 			"a plain error": {
-				err: errPlainValidation,
+				err:     errPlainValidation,
+				invalid: true,
 			},
 		}
 
@@ -3152,6 +3160,13 @@ func TestWithValueCheck(t *testing.T) {
 				_, err := yamltest.FirstDocument(t, "addr: 10.0.0.1\n").Decode[checkedService](t.Context(), check)
 				require.EqualError(t, err, "1:7: $.addr: plain validation failure")
 				assert.Equal(t, tc.invalid, niceyaml.IsInvalid(err))
+
+				// A Validate method that returns the same error gets the
+				// same answer, so a check keeps its fault when it moves.
+				validated := yamltest.FirstDocument(t, "hours: {}\n").DecodeInto(t.Context(),
+					&checkedConfig{Hours: selfChecked{check: func() error { return tc.err }}})
+				require.EqualError(t, validated, "1:1: $.hours: plain validation failure")
+				assert.Equal(t, tc.invalid, niceyaml.IsInvalid(validated))
 			})
 		}
 	})

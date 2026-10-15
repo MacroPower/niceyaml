@@ -201,8 +201,8 @@ func TestHasErrors(t *testing.T) {
 			err:  fmt.Errorf("%w; %w", niceyaml.NewError("bad"), warning),
 			want: true,
 		},
-		"a wrapper with a placed error and a warning": {
-			err:  fmt.Errorf("%w; %w", niceyaml.Place(fs.ErrPermission), warning),
+		"a wrapper with an unchecked error and a warning": {
+			err:  fmt.Errorf("%w; %w", niceyaml.Unchecked(fs.ErrPermission), warning),
 			want: true,
 		},
 		"a wrapper with an Invalid error and a warning": {
@@ -236,11 +236,11 @@ func TestIsInvalid_Warnings(t *testing.T) {
 			want: false,
 		},
 		"warnings beside a fault pass over the warnings": {
-			err:  errors.Join(niceyaml.Place(niceyaml.NewWarning("x")), niceyaml.NewError("bad")),
+			err:  errors.Join(niceyaml.Unchecked(niceyaml.NewWarning("x")), niceyaml.NewError("bad")),
 			want: true,
 		},
 		"a warning that declares nothing answers for itself": {
-			err:  niceyaml.Place(niceyaml.AsErrors(fs.ErrPermission)),
+			err:  niceyaml.Unchecked(niceyaml.AsErrors(fs.ErrPermission)),
 			want: false,
 		},
 	}

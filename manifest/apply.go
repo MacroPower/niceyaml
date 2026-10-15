@@ -269,7 +269,7 @@ func (f *PlanFile) layersProblem() error {
 
 		if d.route.versionTxt.found {
 			//nolint:wrapcheck // The binding is the problem of the file.
-			return d.doc.Bind(niceyaml.Place(problem, niceyaml.AtPath(f.reg.cfg.versionField)))
+			return d.doc.Bind(niceyaml.Locate(problem, niceyaml.AtPath(f.reg.cfg.versionField)))
 		}
 
 		return d.doc.Bind(problem) //nolint:wrapcheck // The binding is the problem of the file.
@@ -281,12 +281,12 @@ func (f *PlanFile) layersProblem() error {
 // readOnlyProblem returns the problem of a file that Apply cannot write,
 // which matches [ErrReadOnly], with details.
 func readOnlyProblem(msg string, details ...error) error {
-	return niceyaml.Place(&problemError{msg: msg, marks: []error{ErrReadOnly}}, niceyaml.WithDetails(details...))
+	return niceyaml.Unchecked(&problemError{msg: msg, marks: []error{ErrReadOnly}}, niceyaml.WithDetails(details...))
 }
 
 // changedProblem returns the problem of a file whose text differs from
 // the text that the plan read, which matches [ErrChanged].
 func changedProblem(msg string) error {
-	return niceyaml.Place(&problemError{msg: msg, marks: []error{ErrChanged}},
+	return niceyaml.Unchecked(&problemError{msg: msg, marks: []error{ErrChanged}},
 		niceyaml.WithDetails(errors.New("run the command again")))
 }

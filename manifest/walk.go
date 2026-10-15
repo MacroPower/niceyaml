@@ -478,7 +478,7 @@ func readError(err error) error {
 		err = pe.Err
 	}
 
-	return niceyaml.Place(err)
+	return niceyaml.Unchecked(err)
 }
 
 // namedSource returns an empty Source that messages name name, where a

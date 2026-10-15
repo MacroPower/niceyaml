@@ -800,6 +800,47 @@ func TestSchema_UnresolvableRef(t *testing.T) {
 			require.NotErrorAs(t, err, &nerr)
 		})
 	}
+
+	t.Run("a value check returns the failure inside Unchecked", func(t *testing.T) {
+		t.Parallel()
+
+		v := compileSchema(t,
+			`{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`,
+			schema.WithRequireRefs(false),
+		)
+		doc := yamltest.FirstDocument(t, "a: 1\n")
+
+		// A decode presumes the document at fault for the failure until
+		// the check wraps it in Unchecked.
+		tcs := map[string]struct {
+			wrap func(err error) error
+			want bool
+		}{
+			"as it is": {
+				wrap: func(err error) error { return err },
+				want: true,
+			},
+			"inside Unchecked": {
+				wrap: func(err error) error { return niceyaml.Unchecked(err) },
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var data map[string]any
+
+				err := doc.DecodeInto(t.Context(), &data,
+					niceyaml.WithValueCheck(func(ctx context.Context, m *map[string]any) error {
+						return tc.wrap(v.ValidateValue(ctx, *m))
+					}))
+
+				require.ErrorIs(t, err, schema.ErrValidate)
+				assert.Equal(t, tc.want, niceyaml.IsInvalid(err))
+			})
+		}
+	})
 }
 
 func TestSchema_PathTarget(t *testing.T) {
@@ -1649,17 +1690,17 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 		const want = "app.yaml:2:9: $.request.port: 0 is less than 1"
 
-		// Invalid and Place with no option add nothing to the result, so
+		// Invalid and Locate with no option add nothing to the result, so
 		// it places as it does alone.
 		require.EqualError(t, request.Bind(niceyaml.Invalid(one)), want)
-		require.EqualError(t, request.Bind(niceyaml.Place(one)), want)
+		require.EqualError(t, request.Bind(niceyaml.Locate(one)), want)
 		require.EqualError(t, doc.Bind(niceyaml.Rebase(niceyaml.Invalid(one), base)), want)
 		require.EqualError(t,
 			doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", niceyaml.Invalid(one)), base)),
 			"app.yaml:2:9: $.request.port: check: 0 is less than 1",
 		)
 		require.EqualError(t,
-			doc.Bind(niceyaml.Rebase(fmt.Errorf("%w: %w", errPlaceCheck, niceyaml.Place(one)), base)),
+			doc.Bind(niceyaml.Rebase(fmt.Errorf("%w: %w", errPlaceCheck, niceyaml.Locate(one)), base)),
 			"app.yaml:2:9: $.request.port: check: 0 is less than 1",
 		)
 
@@ -1693,7 +1734,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 				),
 			},
 			"wrapper around a location": {
-				err: fmt.Errorf("check: %w", niceyaml.Place(two, at)),
+				err: fmt.Errorf("check: %w", niceyaml.Locate(two, at)),
 				want: stringtest.JoinLF(
 					"app.yaml:1:1: $.request: check: 2 schema violations",
 					`app.yaml:1:1: $.request.name: missing required property "name"`,
@@ -1701,7 +1742,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 				),
 			},
 			"details beside one violation": {
-				err:         niceyaml.Place(one, why),
+				err:         niceyaml.Locate(one, why),
 				want:        "app.yaml:2:9: $.request.port: 0 is less than 1",
 				wantDetails: []string{"the body of the request"},
 			},

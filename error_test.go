@@ -6171,7 +6171,7 @@ func TestBindings(t *testing.T) {
 			want: []error{outer},
 		},
 		"binding in a detail of an Error bound to no source": {
-			err:  niceyaml.Place(errors.New("defaults do not load"), niceyaml.WithDetails(first)),
+			err:  niceyaml.Unchecked(errors.New("defaults do not load"), niceyaml.WithDetails(first)),
 			want: []error{first},
 		},
 		"bindings an Error bound to no source wraps, heads, and holds as a detail": {
@@ -7461,8 +7461,9 @@ var (
 	// ErrRegistry is the error the code of a caller panics with.
 	errRegistry = errors.New("registry not initialized")
 
-	// ErrLicense is the I/O error that [placedText] and [placedUnmarshaler]
-	// place, as a check that cannot read the file a value names does.
+	// ErrLicense is the I/O error that [uncheckedText] and
+	// [uncheckedUnmarshaler] wrap in [niceyaml.Unchecked], as a check that
+	// cannot read the file a value names does.
 	errLicense = fmt.Errorf("stat license: %w", fs.ErrPermission)
 )
 
@@ -8316,7 +8317,7 @@ func TestBindValue(t *testing.T) {
 		inner := niceyaml.BindValue(valueErrors(2))
 		at := niceyaml.AtPath(paths.Current().Child("request"))
 
-		require.EqualError(t, niceyaml.BindValue(niceyaml.Place(inner, at)), stringtest.JoinLF(
+		require.EqualError(t, niceyaml.BindValue(niceyaml.Unchecked(inner, at)), stringtest.JoinLF(
 			"$.request: 2 violations",
 			"$.port: 0 is less than 1",
 			"$.name: name is required",
@@ -8563,8 +8564,8 @@ func TestBindValue_Place(t *testing.T) {
 				problems: 1,
 				want:     "app.yaml:2:9: $.request.port: 0 is less than 1",
 			},
-			"Place with no option under a wrapper": {
-				wrap:     func(err error) error { return fmt.Errorf("check: %w", niceyaml.Place(err)) },
+			"Unchecked with no option under a wrapper": {
+				wrap:     func(err error) error { return fmt.Errorf("check: %w", niceyaml.Unchecked(err)) },
 				problems: 1,
 				want:     "app.yaml:2:9: $.request.port: check: 0 is less than 1",
 			},
@@ -8583,7 +8584,7 @@ func TestBindValue_Place(t *testing.T) {
 				),
 			},
 			"wrapper around a location": {
-				wrap:     func(err error) error { return fmt.Errorf("check: %w", niceyaml.Place(err, at)) },
+				wrap:     func(err error) error { return fmt.Errorf("check: %w", niceyaml.Unchecked(err, at)) },
 				problems: 2,
 				want: stringtest.JoinLF(
 					"app.yaml:1:1: $.request: check: 2 violations",
@@ -8592,7 +8593,7 @@ func TestBindValue_Place(t *testing.T) {
 				),
 			},
 			"details beside one problem": {
-				wrap:        func(err error) error { return niceyaml.Place(err, why) },
+				wrap:        func(err error) error { return niceyaml.Unchecked(err, why) },
 				problems:    1,
 				want:        "app.yaml:2:9: $.request.port: 0 is less than 1",
 				wantDetails: []string{"the body of the request"},
@@ -10234,12 +10235,13 @@ func TestInvalid(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				// NoError compares the interface with nil, which a nil
-				// *Error inside it would fail. Place returns nil for the
-				// same inputs that Invalid does.
+				// NoError compares the interface with nil, and a nil *Error
+				// inside it fails that comparison. Unchecked and Locate
+				// return nil for the same inputs that Invalid does.
 				for constructor, wrap := range map[string]func(error, ...niceyaml.ErrorOption) error{
-					"Invalid": niceyaml.Invalid,
-					"Place":   niceyaml.Place,
+					"Invalid":   niceyaml.Invalid,
+					"Unchecked": niceyaml.Unchecked,
+					"Locate":    niceyaml.Locate,
 				} {
 					require.NoError(t, wrap(tc.err), constructor)
 					require.NoError(t, wrap(tc.err,
@@ -10382,7 +10384,7 @@ func TestInvalid(t *testing.T) {
 	})
 }
 
-func TestPlace(t *testing.T) {
+func TestUnchecked(t *testing.T) {
 	t.Parallel()
 
 	input := stringtest.Input(`
@@ -10414,8 +10416,8 @@ func TestPlace(t *testing.T) {
 				err:  niceyaml.Invalid(errStat, niceyaml.AtPath(licensePath)),
 				want: true,
 			},
-			"Place": {
-				err: niceyaml.Place(errStat, niceyaml.AtPath(licensePath)),
+			"Unchecked": {
+				err: niceyaml.Unchecked(errStat, niceyaml.AtPath(licensePath)),
 			},
 			"Rebase": {
 				err: niceyaml.Rebase(errStat, licensePath),
@@ -10474,27 +10476,27 @@ func TestPlace(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				placed := niceyaml.Place(errStat, tc.opts...)
+				unchecked := niceyaml.Unchecked(errStat, tc.opts...)
 				want := wrapError(t, errStat, tc.opts...)
 
 				// The Error carries what the same options give Invalid.
-				got := yamltest.RequireError(t, placed)
+				got := yamltest.RequireError(t, unchecked)
 
 				assert.Same(t, errStat, got.Unwrap()[0])
 				assert.Equal(t, yamltest.ErrsOf(yamltest.DetailsOf(want)), yamltest.ErrsOf(yamltest.DetailsOf(got)))
 
 				assert.Equal(t, locationOf(t, want), locationOf(t, got))
 
-				err := doc.Bind(placed)
+				err := doc.Bind(unchecked)
 
 				require.EqualError(t, err, tc.want)
-				assert.False(t, niceyaml.IsInvalid(placed), "unbound")
+				assert.False(t, niceyaml.IsInvalid(unchecked), "unbound")
 				assert.False(t, niceyaml.IsInvalid(err), "bound")
 			})
 		}
 	})
 
-	t.Run("declares nothing and clears nothing", func(t *testing.T) {
+	t.Run("declares no fault and clears none", func(t *testing.T) {
 		t.Parallel()
 
 		badOpen := niceyaml.NewError("opens too late", niceyaml.AtPath(openPath))
@@ -10505,35 +10507,35 @@ func TestPlace(t *testing.T) {
 		}{
 			"I/O error with a located detail from NewError": {
 				// The detail explains the I/O error and decides nothing.
-				err: niceyaml.Place(errStat,
+				err: niceyaml.Unchecked(errStat,
 					niceyaml.AtRange(licenseRange),
 					niceyaml.WithDetails(niceyaml.NewError("named here", niceyaml.AtPath(openPath))),
 				),
 			},
 			"NewError": {
-				err:  niceyaml.Place(badOpen, niceyaml.AtRange(licenseRange)),
+				err:  niceyaml.Unchecked(badOpen, niceyaml.AtRange(licenseRange)),
 				want: true,
 			},
 			"fmt wrapper around NewError": {
-				err:  niceyaml.Place(fmt.Errorf("check hours: %w", badOpen), niceyaml.AtRange(licenseRange)),
+				err:  niceyaml.Unchecked(fmt.Errorf("check hours: %w", badOpen), niceyaml.AtRange(licenseRange)),
 				want: true,
 			},
 			"Invalid of an I/O error": {
-				err:  niceyaml.Place(niceyaml.Invalid(errStat), niceyaml.AtRange(licenseRange)),
+				err:  niceyaml.Unchecked(niceyaml.Invalid(errStat), niceyaml.AtRange(licenseRange)),
 				want: true,
 			},
-			"Invalid around Place": {
-				err:  niceyaml.Invalid(niceyaml.Place(errStat, niceyaml.AtRange(licenseRange))),
+			"Invalid around Unchecked": {
+				err:  niceyaml.Invalid(niceyaml.Unchecked(errStat, niceyaml.AtRange(licenseRange))),
 				want: true,
 			},
-			"Rebase around Place": {
+			"Rebase around Unchecked": {
 				err: niceyaml.Rebase(
-					niceyaml.Place(errStat, niceyaml.AtPath(paths.Current().Child("open"))),
+					niceyaml.Unchecked(errStat, niceyaml.AtPath(paths.Current().Child("open"))),
 					hoursPath,
 				),
 			},
 			"canceled context": {
-				err: niceyaml.Place(context.Canceled, niceyaml.AtRange(licenseRange)),
+				err: niceyaml.Unchecked(context.Canceled, niceyaml.AtRange(licenseRange)),
 			},
 		}
 
@@ -10547,7 +10549,7 @@ func TestPlace(t *testing.T) {
 		}
 	})
 
-	t.Run("a scoped Node binds a placed error at its value", func(t *testing.T) {
+	t.Run("a scoped Node binds an unchecked error at its value", func(t *testing.T) {
 		t.Parallel()
 
 		hours := yamltest.At(t, doc, hoursPath)
@@ -10557,11 +10559,11 @@ func TestPlace(t *testing.T) {
 			want string
 		}{
 			"no location": {
-				err:  niceyaml.Place(errStat),
+				err:  niceyaml.Unchecked(errStat),
 				want: "cfg.yaml:1:1: $.hours: stat license: permission denied",
 			},
 			"path from the value": {
-				err:  niceyaml.Place(errStat, niceyaml.AtPath(paths.Current().Child("close"))),
+				err:  niceyaml.Unchecked(errStat, niceyaml.AtPath(paths.Current().Child("close"))),
 				want: "cfg.yaml:3:10: $.hours.close: stat license: permission denied",
 			},
 		}
@@ -10578,11 +10580,11 @@ func TestPlace(t *testing.T) {
 		}
 	})
 
-	t.Run("a hook presumes no fault for a placed error", func(t *testing.T) {
+	t.Run("a hook presumes no fault for an unchecked error", func(t *testing.T) {
 		t.Parallel()
 
-		// Each decode runs a hook that places errLicense, so the error
-		// keeps its location and matches no decode error.
+		// Each decode runs a hook that wraps errLicense in Unchecked, so
+		// the error keeps its location and matches no decode error.
 		tcs := map[string]struct {
 			decode func(ctx context.Context) error
 			want   string
@@ -10590,15 +10592,25 @@ func TestPlace(t *testing.T) {
 			"Validate method": {
 				decode: func(ctx context.Context) error {
 					return doc.DecodeInto(ctx, &checkedConfig{Hours: selfChecked{check: func() error {
-						return niceyaml.Place(errLicense, niceyaml.AtPath(paths.Current().Child("close")))
+						return niceyaml.Unchecked(errLicense, niceyaml.AtPath(paths.Current().Child("close")))
 					}}})
 				},
 				want: "cfg.yaml:3:10: $.hours.close: stat license: permission denied",
 			},
+			"WithValueCheck function": {
+				decode: func(ctx context.Context) error {
+					return errOf(doc.Decode[struct {
+						License string `yaml:"license"`
+					}](ctx, niceyaml.WithValueCheck(func(context.Context, *string) error {
+						return niceyaml.Unchecked(errLicense)
+					})))
+				},
+				want: "cfg.yaml:4:10: $.license: stat license: permission denied",
+			},
 			"UnmarshalText method": {
 				decode: func(ctx context.Context) error {
 					return errOf(doc.Decode[struct {
-						License placedText `yaml:"license"`
+						License uncheckedText `yaml:"license"`
 					}](ctx))
 				},
 				want: "cfg.yaml:4:10: $.license: stat license: permission denied",
@@ -10606,7 +10618,7 @@ func TestPlace(t *testing.T) {
 			"UnmarshalYAML method": {
 				decode: func(ctx context.Context) error {
 					return errOf(doc.Decode[struct {
-						License placedUnmarshaler `yaml:"license"`
+						License uncheckedUnmarshaler `yaml:"license"`
 					}](ctx))
 				},
 				want: "cfg.yaml:4:10: $.license: stat license: permission denied",
@@ -10616,7 +10628,7 @@ func TestPlace(t *testing.T) {
 					return errOf(doc.Decode[struct {
 						License licenseRef `yaml:"license"`
 					}](ctx, withLicenseCheck(func(func(any) error) error {
-						return niceyaml.Place(errLicense)
+						return niceyaml.Unchecked(errLicense)
 					})))
 				},
 				want: "cfg.yaml:4:10: $.license: stat license: permission denied",
@@ -10648,23 +10660,23 @@ func TestPlace(t *testing.T) {
 			check    func() error
 			problems []string
 		}{
-			"Invalid around Place": {
+			"Invalid around Unchecked": {
 				check: func() error {
-					return niceyaml.Invalid(niceyaml.Place(errStat, niceyaml.AtPath(closePath)))
+					return niceyaml.Invalid(niceyaml.Unchecked(errStat, niceyaml.AtPath(closePath)))
 				},
 				problems: []string{"cfg.yaml:3:10: $.hours.close: stat license: permission denied true"},
 			},
-			"Place around NewError": {
+			"Unchecked around NewError": {
 				check: func() error {
-					return niceyaml.Place(niceyaml.NewError("closes before it opens"), niceyaml.AtPath(closePath))
+					return niceyaml.Unchecked(niceyaml.NewError("closes before it opens"), niceyaml.AtPath(closePath))
 				},
 				problems: []string{"cfg.yaml:3:10: $.hours.close: closes before it opens true"},
 			},
-			"Place around a join that holds NewError": {
-				// The Place heads each branch, and the branch from NewError
+			"Unchecked around a join that holds NewError": {
+				// The Unchecked heads each branch, and the branch from NewError
 				// declares its own fault.
 				check: func() error {
-					return niceyaml.Place(errors.Join(
+					return niceyaml.Unchecked(errors.Join(
 						niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath)),
 						errStat,
 					))
@@ -10674,12 +10686,12 @@ func TestPlace(t *testing.T) {
 					"cfg.yaml:3:10: $.hours.close: closes before it opens true",
 				},
 			},
-			"join of Place and a plain error": {
-				// The Place heads one branch, and the decode presumes the
+			"join of Unchecked and a plain error": {
+				// The Unchecked heads one branch, and the decode presumes the
 				// other branch a fault.
 				check: func() error {
 					return errors.Join(
-						niceyaml.Place(errStat, niceyaml.AtPath(closePath)),
+						niceyaml.Unchecked(errStat, niceyaml.AtPath(closePath)),
 						errors.New("opens too late"),
 					)
 				},
@@ -10688,11 +10700,11 @@ func TestPlace(t *testing.T) {
 					"cfg.yaml:3:10: $.hours.close: stat license: permission denied false",
 				},
 			},
-			"summary of Place and a plain error": {
+			"summary of Unchecked and a plain error": {
 				// The heading names the file, so the rows below it do not.
 				check: func() error {
 					return niceyaml.NewSummary("2 problems",
-						niceyaml.Place(errStat, niceyaml.AtPath(closePath)),
+						niceyaml.Unchecked(errStat, niceyaml.AtPath(closePath)),
 						errors.New("opens too late"),
 					)
 				},
@@ -10701,10 +10713,10 @@ func TestPlace(t *testing.T) {
 					"3:10: $.hours.close: stat license: permission denied false",
 				},
 			},
-			"Invalid around a join that holds Place": {
+			"Invalid around a join that holds Unchecked": {
 				check: func() error {
 					return niceyaml.Invalid(errors.Join(
-						niceyaml.Place(errStat, niceyaml.AtPath(closePath)),
+						niceyaml.Unchecked(errStat, niceyaml.AtPath(closePath)),
 						errors.New("opens too late"),
 					))
 				},
@@ -10751,7 +10763,7 @@ func TestPlace(t *testing.T) {
 			problems []string
 		}{
 			"no option": {
-				err: niceyaml.Place(joined),
+				err: niceyaml.Unchecked(joined),
 				want: stringtest.JoinLF(
 					"cfg.yaml:2:9: $.hours.open: opens too late",
 					"cfg.yaml: stat license: permission denied",
@@ -10762,7 +10774,7 @@ func TestPlace(t *testing.T) {
 				},
 			},
 			"path": {
-				err: niceyaml.Place(joined, niceyaml.AtPath(licensePath)),
+				err: niceyaml.Unchecked(joined, niceyaml.AtPath(licensePath)),
 				want: stringtest.JoinLF(
 					"cfg.yaml:4:10: $.license:",
 					"cfg.yaml:2:9: $.hours.open: opens too late",
@@ -10774,7 +10786,7 @@ func TestPlace(t *testing.T) {
 				},
 			},
 			"range": {
-				err: niceyaml.Place(joined, niceyaml.AtRange(licenseRange)),
+				err: niceyaml.Unchecked(joined, niceyaml.AtRange(licenseRange)),
 				want: stringtest.JoinLF(
 					"cfg.yaml:2:9: $.hours.open: opens too late",
 					"cfg.yaml: stat license: permission denied",
@@ -10813,6 +10825,254 @@ func TestPlace(t *testing.T) {
 				}
 
 				assert.Equal(t, tc.problems, problems)
+			})
+		}
+	})
+}
+
+func TestLocate(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		hours:
+		  open: 9
+		  close: 5
+		license: /root/x
+	`)
+
+	closePath := paths.Current().Child("close")
+	licensePath := paths.Current().Child("license")
+	licenseRange := yamltest.LineRange(3, 9, 16)
+
+	errStat := fmt.Errorf("stat license: %w", fs.ErrPermission)
+
+	doc := yamltest.FirstDocument(t, input, niceyaml.WithName("cfg.yaml"))
+
+	t.Run("places as Invalid does and leaves the fault to the error", func(t *testing.T) {
+		t.Parallel()
+
+		// One I/O error at one path prints the same line from each
+		// wrapper, and Locate adds no fault of its own.
+		tcs := map[string]struct {
+			err  error
+			want bool
+		}{
+			"I/O error": {
+				err: niceyaml.Locate(errStat, niceyaml.AtPath(licensePath)),
+			},
+			"Unchecked": {
+				err: niceyaml.Locate(niceyaml.Unchecked(errStat), niceyaml.AtPath(licensePath)),
+			},
+			"Invalid": {
+				err:  niceyaml.Locate(niceyaml.Invalid(errStat), niceyaml.AtPath(licensePath)),
+				want: true,
+			},
+			"Invalid around Locate": {
+				err:  niceyaml.Invalid(niceyaml.Locate(errStat, niceyaml.AtPath(licensePath))),
+				want: true,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := doc.Bind(tc.err)
+
+				require.EqualError(t, err, "cfg.yaml:4:10: $.license: stat license: permission denied")
+				require.ErrorIs(t, err, fs.ErrPermission)
+				assert.Equal(t, tc.want, niceyaml.IsInvalid(tc.err), "unbound")
+				assert.Equal(t, tc.want, niceyaml.IsInvalid(err), "bound")
+			})
+		}
+	})
+
+	t.Run("takes every option", func(t *testing.T) {
+		t.Parallel()
+
+		why := errors.New("the license check reads this file")
+
+		tcs := map[string]struct {
+			opts []niceyaml.ErrorOption
+			want string
+		}{
+			"no option": {
+				want: "cfg.yaml: stat license: permission denied",
+			},
+			"path": {
+				opts: []niceyaml.ErrorOption{niceyaml.AtPath(licensePath)},
+				want: "cfg.yaml:4:10: $.license: stat license: permission denied",
+			},
+			"position": {
+				opts: []niceyaml.ErrorOption{niceyaml.AtPosition(licenseRange.Start)},
+				want: "cfg.yaml:4:10: stat license: permission denied",
+			},
+			"range": {
+				opts: []niceyaml.ErrorOption{niceyaml.AtRange(licenseRange)},
+				want: "cfg.yaml:4:10: stat license: permission denied",
+			},
+			"range and details": {
+				opts: []niceyaml.ErrorOption{niceyaml.AtRange(licenseRange), niceyaml.WithDetails(why)},
+				want: "cfg.yaml:4:10: stat license: permission denied",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				located := niceyaml.Locate(errStat, tc.opts...)
+				want := wrapError(t, errStat, tc.opts...)
+
+				// The Error carries what the same options give Invalid.
+				got := yamltest.RequireError(t, located)
+
+				assert.Same(t, errStat, got.Unwrap()[0])
+				assert.Equal(t, yamltest.ErrsOf(yamltest.DetailsOf(want)), yamltest.ErrsOf(yamltest.DetailsOf(got)))
+
+				assert.Equal(t, locationOf(t, want), locationOf(t, got))
+
+				err := doc.Bind(located)
+
+				require.EqualError(t, err, tc.want)
+				assert.False(t, niceyaml.IsInvalid(located), "unbound")
+				assert.False(t, niceyaml.IsInvalid(err), "bound")
+			})
+		}
+	})
+
+	t.Run("a hook presumes a fault for a located error", func(t *testing.T) {
+		t.Parallel()
+
+		// Each decode runs a hook that returns errLicense inside Locate,
+		// which leaves the presumption of the hook on.
+		tcs := map[string]struct {
+			decode func(ctx context.Context) error
+			want   string
+			// The hook decodes its value, so the error matches ErrDecode.
+			decoding bool
+		}{
+			"Validate method": {
+				decode: func(ctx context.Context) error {
+					return doc.DecodeInto(ctx, &checkedConfig{Hours: selfChecked{check: func() error {
+						return niceyaml.Locate(errLicense, niceyaml.AtPath(closePath))
+					}}})
+				},
+				want: "cfg.yaml:3:10: $.hours.close: stat license: permission denied",
+			},
+			"WithValueCheck function": {
+				decode: func(ctx context.Context) error {
+					return errOf(doc.Decode[struct {
+						License string `yaml:"license"`
+					}](ctx, niceyaml.WithValueCheck(func(context.Context, *string) error {
+						return niceyaml.Locate(errLicense, niceyaml.AtPath(paths.Current()))
+					})))
+				},
+				want: "cfg.yaml:4:10: $.license: stat license: permission denied",
+			},
+			"WithCustomUnmarshaler function": {
+				decode: func(ctx context.Context) error {
+					return errOf(doc.Decode[struct {
+						License licenseRef `yaml:"license"`
+					}](ctx, withLicenseCheck(func(func(any) error) error {
+						return niceyaml.Locate(errLicense)
+					})))
+				},
+				want:     "cfg.yaml:4:10: $.license: stat license: permission denied",
+				decoding: true,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := tc.decode(t.Context())
+
+				require.EqualError(t, err, tc.want)
+				require.ErrorIs(t, err, fs.ErrPermission)
+				assert.True(t, niceyaml.IsInvalid(err))
+
+				if tc.decoding {
+					require.ErrorIs(t, err, niceyaml.ErrDecode)
+				} else {
+					require.NotErrorIs(t, err, niceyaml.ErrDecode)
+				}
+			})
+		}
+	})
+
+	t.Run("each problem from a hook answers for itself", func(t *testing.T) {
+		t.Parallel()
+
+		openPath := paths.Current().Child("open")
+
+		// Each hook decodes the document and returns the error of check
+		// from the value under hours.
+		hooks := map[string]func(ctx context.Context, check func() error) error{
+			"Validate method": func(ctx context.Context, check func() error) error {
+				return doc.DecodeInto(ctx, &checkedConfig{Hours: selfChecked{check: check}})
+			},
+			"WithValueCheck function": func(ctx context.Context, check func() error) error {
+				passes := selfChecked{check: func() error { return nil }}
+
+				return doc.DecodeInto(ctx, &checkedConfig{Hours: passes},
+					niceyaml.WithValueCheck(func(context.Context, *selfChecked) error {
+						return check()
+					}))
+			},
+		}
+
+		// Each row of problems is the text of a problem and what IsInvalid
+		// reports for it, in the order of the lines they bind at.
+		tcs := map[string]struct {
+			check    func() error
+			problems []string
+		}{
+			"Locate around a join of a plain error and Unchecked": {
+				// The options locate the heading, and the hook presumes a
+				// fault for the plain branch alone.
+				check: func() error {
+					return niceyaml.Locate(errors.Join(
+						errors.New("opens too late"),
+						niceyaml.Unchecked(errStat, niceyaml.AtPath(closePath)),
+					), niceyaml.AtPath(openPath))
+				},
+				problems: []string{
+					"1:1: $.hours: opens too late true",
+					"3:10: $.hours.close: stat license: permission denied false",
+				},
+			},
+			"join of Locate and Unchecked": {
+				check: func() error {
+					return errors.Join(
+						niceyaml.Locate(errors.New("opens too late"), niceyaml.AtPath(openPath)),
+						niceyaml.Unchecked(errStat, niceyaml.AtPath(closePath)),
+					)
+				},
+				problems: []string{
+					"cfg.yaml:2:9: $.hours.open: opens too late true",
+					"cfg.yaml:3:10: $.hours.close: stat license: permission denied false",
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				for hook, decode := range hooks {
+					err := decode(t.Context(), tc.check)
+					require.Error(t, err, hook)
+
+					var problems []string
+
+					for problem := range niceyaml.NewErrorTree(err).Problems() {
+						problems = append(problems, fmt.Sprintf("%s %t", problem.Label, problem.IsInvalid()))
+					}
+
+					assert.Equal(t, tc.problems, problems, hook)
+				}
 			})
 		}
 	})
@@ -10872,20 +11132,20 @@ func (*hintedUnmarshaler) UnmarshalYAML([]byte) error {
 	)
 }
 
-// placedText decodes itself from text with a check that cannot run, so
-// it returns errLicense inside [niceyaml.Place].
-type placedText string
+// uncheckedText decodes itself from text with a check that cannot run, so
+// it returns errLicense inside [niceyaml.Unchecked].
+type uncheckedText string
 
-func (*placedText) UnmarshalText([]byte) error {
-	return niceyaml.Place(errLicense)
+func (*uncheckedText) UnmarshalText([]byte) error {
+	return niceyaml.Unchecked(errLicense)
 }
 
-// placedUnmarshaler decodes itself with a check that cannot run, so it
-// returns errLicense inside [niceyaml.Place].
-type placedUnmarshaler struct{}
+// uncheckedUnmarshaler decodes itself with a check that cannot run, so it
+// returns errLicense inside [niceyaml.Unchecked].
+type uncheckedUnmarshaler struct{}
 
-func (*placedUnmarshaler) UnmarshalYAML([]byte) error {
-	return niceyaml.Place(errLicense)
+func (*uncheckedUnmarshaler) UnmarshalYAML([]byte) error {
+	return niceyaml.Unchecked(errLicense)
 }
 
 // licenseRef is a value that a [niceyaml.WithCustomUnmarshaler] function
@@ -10949,11 +11209,11 @@ func TestIsInvalid(t *testing.T) {
 		return n.DecodeInto(ctx, &target)
 	})
 
-	placed := fails(niceyaml.Place(fmt.Errorf("stat license: %w", fs.ErrPermission), niceyaml.AtPath(namePath)))
+	unchecked := fails(niceyaml.Unchecked(fmt.Errorf("stat license: %w", fs.ErrPermission), niceyaml.AtPath(namePath)))
 
 	// The explained error is an I/O error placed at the name, with a
 	// located detail the document is at fault for.
-	explained := niceyaml.Place(
+	explained := niceyaml.Unchecked(
 		fmt.Errorf("stat license: %w", fs.ErrPermission),
 		niceyaml.AtRange(yamltest.LineRange(0, 6, 10)),
 		niceyaml.WithDetails(yamltest.ErrorAt("license named here", "name")),
@@ -10989,6 +11249,12 @@ func TestIsInvalid(t *testing.T) {
 		cfg := checkedConfig{Hours: selfChecked{check: func() error { return err }}}
 
 		return doc.DecodeInto(t.Context(), &cfg)
+	}
+
+	valueChecked := func(err error) error {
+		check := niceyaml.WithValueCheck(func(context.Context, *invalidConfig) error { return err })
+
+		return errOf(doc.Decode[invalidConfig](t.Context(), check))
 	}
 
 	decoded := func(text string, opts ...niceyaml.DecodeOption) error {
@@ -11122,89 +11388,135 @@ func TestIsInvalid(t *testing.T) {
 			err: validated(rebased),
 			is:  fs.ErrPermission,
 		},
-		"Validator Place of an I/O error at the root": {
-			err: validated(placed),
+		"Validator Unchecked of an I/O error at the root": {
+			err: validated(unchecked),
 			is:  fs.ErrPermission,
 		},
-		"Validator Place of an I/O error on a scoped Node": {
-			err: scopedValidated(fails(niceyaml.Place(ioErr))),
+		"Validator Unchecked of an I/O error on a scoped Node": {
+			err: scopedValidated(fails(niceyaml.Unchecked(ioErr))),
 			is:  fs.ErrNotExist,
 		},
-		"Validator Place of NewError": {
-			// Place declares nothing and clears nothing.
-			err:  validated(fails(niceyaml.Place(niceyaml.NewError("unknown name"), niceyaml.AtPath(namePath)))),
+		"Validator Unchecked of NewError": {
+			// Unchecked declares no fault and clears none.
+			err:  validated(fails(niceyaml.Unchecked(niceyaml.NewError("unknown name"), niceyaml.AtPath(namePath)))),
 			want: true,
 		},
-		"SelfValidator Place of an I/O error": {
-			// The Place turns off the fault the decode presumes.
-			err: selfValidated(niceyaml.Place(ioErr, niceyaml.AtPath(closePath))),
+		"SelfValidator Unchecked of an I/O error": {
+			// The Unchecked turns off the fault the decode presumes.
+			err: selfValidated(niceyaml.Unchecked(ioErr, niceyaml.AtPath(closePath))),
 			is:  fs.ErrNotExist,
 		},
-		"SelfValidator Invalid of Place of an I/O error": {
-			err:  selfValidated(niceyaml.Invalid(niceyaml.Place(ioErr, niceyaml.AtPath(closePath)))),
+		"SelfValidator Invalid of Unchecked of an I/O error": {
+			err:  selfValidated(niceyaml.Invalid(niceyaml.Unchecked(ioErr, niceyaml.AtPath(closePath)))),
 			is:   fs.ErrNotExist,
 			want: true,
 		},
-		"SelfValidator Place of NewError": {
+		"SelfValidator Unchecked of NewError": {
 			err: selfValidated(
-				niceyaml.Place(niceyaml.NewError("closes before it opens"), niceyaml.AtPath(closePath)),
+				niceyaml.Unchecked(niceyaml.NewError("closes before it opens"), niceyaml.AtPath(closePath)),
 			),
 			want: true,
 		},
-		"UnmarshalText Place of an I/O error": {
+		"SelfValidator Locate of an I/O error": {
+			// Locate declares nothing, so the decode presumes a fault.
+			err:  selfValidated(niceyaml.Locate(ioErr, niceyaml.AtPath(closePath))),
+			is:   fs.ErrNotExist,
+			want: true,
+		},
+		"SelfValidator Locate of Unchecked of an I/O error": {
+			err: selfValidated(niceyaml.Locate(niceyaml.Unchecked(ioErr), niceyaml.AtPath(closePath))),
+			is:  fs.ErrNotExist,
+		},
+		"WithValueCheck errors.New": {
+			err:  valueChecked(errors.New("name is reserved")),
+			want: true,
+		},
+		"WithValueCheck I/O error": {
+			err:  valueChecked(fmt.Errorf("look up names: %w", ioErr)),
+			is:   fs.ErrNotExist,
+			want: true,
+		},
+		"WithValueCheck join of errors with no location": {
+			err:  valueChecked(errors.Join(errors.New("name is reserved"), errors.New("port is taken"))),
+			want: true,
+		},
+		"WithValueCheck Unchecked of an I/O error": {
+			err: valueChecked(niceyaml.Unchecked(ioErr, niceyaml.AtPath(namePath))),
+			is:  fs.ErrNotExist,
+		},
+		"WithValueCheck Unchecked of NewError": {
+			err:  valueChecked(niceyaml.Unchecked(niceyaml.NewError("name is reserved"), niceyaml.AtPath(namePath))),
+			want: true,
+		},
+		"WithValueCheck Locate of an I/O error": {
+			err:  valueChecked(niceyaml.Locate(ioErr, niceyaml.AtPath(namePath))),
+			is:   fs.ErrNotExist,
+			want: true,
+		},
+		"Validator Locate of an I/O error": {
+			// A Validator presumes nothing, so the I/O error inside Locate
+			// is not a fault.
+			err: validated(fails(niceyaml.Locate(ioErr, niceyaml.AtPath(namePath)))),
+			is:  fs.ErrNotExist,
+		},
+		"Validator Locate of NewError": {
+			err:  validated(fails(niceyaml.Locate(niceyaml.NewError("unknown name"), niceyaml.AtPath(namePath)))),
+			want: true,
+		},
+		"UnmarshalText Unchecked of an I/O error": {
 			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
-				V placedText `yaml:"v"`
+				V uncheckedText `yaml:"v"`
 			}](t.Context())),
 			is: fs.ErrPermission,
 		},
-		"UnmarshalYAML Place of an I/O error": {
+		"UnmarshalYAML Unchecked of an I/O error": {
 			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
-				V placedUnmarshaler `yaml:"v"`
+				V uncheckedUnmarshaler `yaml:"v"`
 			}](t.Context())),
 			is: fs.ErrPermission,
 		},
-		"WithCustomUnmarshaler Place of an I/O error": {
+		"WithCustomUnmarshaler Unchecked of an I/O error": {
 			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
 				V licenseRef `yaml:"v"`
 			}](t.Context(), withLicenseCheck(func(func(any) error) error {
-				return niceyaml.Place(ioErr)
+				return niceyaml.Unchecked(ioErr)
 			}))),
 			is: fs.ErrNotExist,
 		},
-		"WithCustomUnmarshaler Invalid of Place of an I/O error": {
+		"WithCustomUnmarshaler Invalid of Unchecked of an I/O error": {
 			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
 				V licenseRef `yaml:"v"`
 			}](t.Context(), withLicenseCheck(func(func(any) error) error {
-				return niceyaml.Invalid(niceyaml.Place(ioErr))
+				return niceyaml.Invalid(niceyaml.Unchecked(ioErr))
 			}))),
 			is:   fs.ErrNotExist,
 			want: true,
 		},
-		"WithCustomUnmarshaler Place of NewError": {
+		"WithCustomUnmarshaler Unchecked of NewError": {
 			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
 				V licenseRef `yaml:"v"`
 			}](t.Context(), withLicenseCheck(func(func(any) error) error {
-				return niceyaml.Place(niceyaml.NewError("unknown license"))
+				return niceyaml.Unchecked(niceyaml.NewError("unknown license"))
 			}))),
 			want: true,
 		},
-		"WithCustomUnmarshaler Place of a rejection of its decode function": {
-			// The rejection is a fault of its own, so the Place keeps it.
+		"WithCustomUnmarshaler Unchecked of a rejection of its decode function": {
+			// The rejection is a fault of its own, so the Unchecked keeps it.
 			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
 				V licenseRef `yaml:"v"`
 			}](t.Context(), withLicenseCheck(func(decode func(any) error) error {
 				var n int
 
-				return niceyaml.Place(decode(&n))
+				return niceyaml.Unchecked(decode(&n))
 			}))),
 			is:   niceyaml.ErrDecode,
 			want: true,
 		},
-		"Validator Place of a rejection from DecodeAt": {
+		"Validator Unchecked of a rejection from DecodeAt": {
 			err: validated(niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 				_, err := n.DecodeAt[int](ctx, namePath)
 
-				return niceyaml.Place(err)
+				return niceyaml.Unchecked(err)
 			})),
 			is:   niceyaml.ErrDecode,
 			want: true,
@@ -11475,18 +11787,18 @@ func TestIsInvalid(t *testing.T) {
 			is:   fs.ErrNotExist,
 			want: true,
 		},
-		"unbound Invalid of a summary that heads Place": {
-			// The Place declares no fault, so the Invalid above it holds.
+		"unbound Invalid of a summary that heads Unchecked": {
+			// The Unchecked declares no fault, so the Invalid above it holds.
 			err: niceyaml.Invalid(
-				niceyaml.NewSummary("2 problems", errors.New("opens too late"), niceyaml.Place(ioErr)),
+				niceyaml.NewSummary("2 problems", errors.New("opens too late"), niceyaml.Unchecked(ioErr)),
 			),
 			is:   fs.ErrNotExist,
 			want: true,
 		},
-		"unbound Rebase of Invalid of a summary that heads Place": {
+		"unbound Rebase of Invalid of a summary that heads Unchecked": {
 			err: niceyaml.Rebase(
 				niceyaml.Invalid(
-					niceyaml.NewSummary("2 problems", errors.New("opens too late"), niceyaml.Place(ioErr)),
+					niceyaml.NewSummary("2 problems", errors.New("opens too late"), niceyaml.Unchecked(ioErr)),
 				),
 				hoursPath,
 			),
@@ -11554,29 +11866,29 @@ func TestIsInvalid(t *testing.T) {
 			err: niceyaml.Rebase(ioErr, namePath),
 			is:  fs.ErrNotExist,
 		},
-		"unbound Place of an I/O error": {
-			err: niceyaml.Place(ioErr, niceyaml.AtPath(namePath)),
+		"unbound Unchecked of an I/O error": {
+			err: niceyaml.Unchecked(ioErr, niceyaml.AtPath(namePath)),
 			is:  fs.ErrNotExist,
 		},
-		"unbound Place of a fmt wrapper around NewError": {
-			err: niceyaml.Place(
+		"unbound Unchecked of a fmt wrapper around NewError": {
+			err: niceyaml.Unchecked(
 				fmt.Errorf("check names: %w", niceyaml.NewError("unknown name")),
 				niceyaml.AtPath(namePath),
 			),
 			want: true,
 		},
-		"unbound Invalid of Place of an I/O error": {
-			err:  niceyaml.Invalid(niceyaml.Place(ioErr, niceyaml.AtPath(namePath))),
+		"unbound Invalid of Unchecked of an I/O error": {
+			err:  niceyaml.Invalid(niceyaml.Unchecked(ioErr, niceyaml.AtPath(namePath))),
 			is:   fs.ErrNotExist,
 			want: true,
 		},
-		"unbound Place of a mixed join": {
-			// Each branch answers for itself, as it does with no Place.
-			err: niceyaml.Place(errors.Join(niceyaml.NewError("unknown name"), ioErr)),
+		"unbound Unchecked of a mixed join": {
+			// Each branch answers for itself, as it does with no Unchecked.
+			err: niceyaml.Unchecked(errors.Join(niceyaml.NewError("unknown name"), ioErr)),
 			is:  fs.ErrNotExist,
 		},
-		"unbound Place of a join of NewErrors": {
-			err: niceyaml.Place(errors.Join(
+		"unbound Unchecked of a join of NewErrors": {
+			err: niceyaml.Unchecked(errors.Join(
 				niceyaml.NewError("unknown name"),
 				niceyaml.NewError("closes before it opens"),
 			)),
@@ -11680,8 +11992,8 @@ func TestIsInvalid(t *testing.T) {
 			path   string
 			want   bool
 		}{
-			"Invalid around Place with a hint": {
-				err:    niceyaml.Invalid(niceyaml.Place(errors.New("unknown name"), hinted)),
+			"Invalid around Unchecked with a hint": {
+				err:    niceyaml.Invalid(niceyaml.Unchecked(errors.New("unknown name"), hinted)),
 				detail: context.DeadlineExceeded,
 				want:   true,
 			},
@@ -11690,8 +12002,8 @@ func TestIsInvalid(t *testing.T) {
 				detail: context.DeadlineExceeded,
 				want:   true,
 			},
-			"Place with a hint": {
-				err:    niceyaml.Place(fmt.Errorf("read names.db: %w", fs.ErrPermission), hinted),
+			"Unchecked with a hint": {
+				err:    niceyaml.Unchecked(fmt.Errorf("read names.db: %w", fs.ErrPermission), hinted),
 				is:     fs.ErrPermission,
 				detail: context.DeadlineExceeded,
 			},
@@ -11716,8 +12028,8 @@ func TestIsInvalid(t *testing.T) {
 				path:   "$.name",
 				want:   true,
 			},
-			"Place with a syntax error as a detail": {
-				err:    niceyaml.Place(errors.New("defaults do not load"), niceyaml.WithDetails(syntaxErr)),
+			"Unchecked with a syntax error as a detail": {
+				err:    niceyaml.Unchecked(errors.New("defaults do not load"), niceyaml.WithDetails(syntaxErr)),
 				detail: niceyaml.ErrSyntax,
 			},
 			"Invalid with a syntax error as a detail": {
@@ -11771,8 +12083,8 @@ func TestIsInvalid(t *testing.T) {
 		tcs := map[string]struct {
 			validator niceyaml.Validator
 		}{
-			"Place with a path":   {validator: placed},
-			"Rebase under a path": {validator: rebased},
+			"Unchecked with a path": {validator: unchecked},
+			"Rebase under a path":   {validator: rebased},
 		}
 
 		for name, tc := range tcs {

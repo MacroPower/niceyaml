@@ -141,7 +141,7 @@ func WithSelfValidation(enabled bool) DecodeOption {
 //	allowed := niceyaml.WithValueCheck(func(ctx context.Context, p *netip.Prefix) error {
 //		ok, err := tenant.Allows(ctx, *p)
 //		if err != nil {
-//			return niceyaml.Place(err)
+//			return niceyaml.Unchecked(err)
 //		}
 //
 //		if !ok {
@@ -162,12 +162,13 @@ func WithSelfValidation(enabled bool) DecodeOption {
 // skips fn.
 //
 // The `@` paths of an error from fn read from the value, and the walk puts
-// them under the path of the value, as it does for a Validate method. Fn
-// declares its faults as a [Validator] does. [NewError] and [Invalid]
-// declare a fault, and [Place] and a plain error declare none, where the
-// walk presumes the document at fault for a plain error from Validate. A
-// check moved from a Validate method thus keeps its fault only when it
-// wraps its error in Invalid.
+// them under the path of the value, as it does for a Validate method. The
+// walk also presumes the document at fault for an error from fn that
+// declares nothing, a plain I/O error included, as it does for a Validate
+// method. A check thus keeps its faults when it moves from a Validate
+// method to fn. A check that can fail for reasons outside the document
+// returns the error of such a failure inside [Unchecked], as the lookup in
+// the example does.
 //
 // A struct field the document leaves out reaches fn as its zero value. A
 // map key, a map value, and a value inside an interface reach fn as a
@@ -292,7 +293,7 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 // the package documentation describe. A rejection from the decode
 // function already names its place in the document, so fn returns it as
 // it is. A fn that looks the value up elsewhere, such as in a secret
-// store, returns the error of a lookup that fails inside [Place], so
+// store, returns the error of a lookup that fails inside [Unchecked], so
 // [IsInvalid] does not report it.
 //
 // A program gives the function to the [Source] with [WithUnmarshalers],
@@ -818,8 +819,8 @@ func yamlMessage(err yaml.Error, msg string) *markedError {
 
 // asDecodeError returns err, from the go-yaml decoder, as an error that
 // matches [ErrDecode]. An ended context, a panic, an err that holds an
-// Error from [Place] on its cause chain, and an err that matches already
-// come back as they are.
+// Error from [Unchecked] on its cause chain, and an err that matches
+// already come back as they are.
 func asDecodeError(err error) error {
 	if err == nil || errors.Is(err, ErrDecode) || contextEnded(err) || holdsPanic(err) || holdsUnchecked(err) {
 		return err
@@ -838,7 +839,7 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 			return
 		}
 
-		err = Place(panicked("decoder", &PanicError{Value: p, Stack: debug.Stack()}, errPlaced),
+		err = Unchecked(panicked("decoder", &PanicError{Value: p, Stack: debug.Stack()}, errPlaced),
 			atToken(astnode.StartToken(node)))
 	}()
 
