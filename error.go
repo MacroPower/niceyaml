@@ -427,7 +427,9 @@ func Invalid(err error, opts ...ErrorOption) error {
 // or an unmarshaler places is thus no fault, and one from an unmarshaler
 // does not match [ErrDecode]. A Place around a join turns the presumption
 // off for each branch it heads, and a branch that declares a fault itself
-// stays one.
+// stays one. A Place in one branch of a join, or of a wrapper that
+// [fmt.Errorf] builds with several %w verbs and that heads several
+// problems, turns the presumption off for that branch alone.
 //
 // Place returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, whatever the options. It returns an error rather
@@ -448,8 +450,11 @@ func Place(err error, opts ...ErrorOption) error {
 // holdsUnchecked reports whether an [Error] from [Place] sits on the cause
 // chain of err. The walk skips details and the problems a summary heads,
 // and it stops at a join, whose branches each answer for themselves. A
-// wrapper with several %w verbs is one error, so a Place in any of its
-// branches counts.
+// wrapper with several %w verbs that heads several problems stops the
+// walk as a join does, and one with a single problem among its branches
+// goes on through that problem. An Error from Place is always a problem,
+// so the walk never drops one as a sentinel. Any other error with several
+// branches is one problem, so a Place in any of its branches counts.
 func holdsUnchecked(err error) bool {
 	for cur := err; !isNothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -465,6 +470,13 @@ func holdsUnchecked(err error) bool {
 
 		case interface{ Unwrap() []error }:
 			branches := x.Unwrap()
+
+			if multierr.IsWrapErrors(cur) {
+				_, cur = followBranches(cur, branches)
+
+				continue
+			}
+
 			if multierr.IsJoin(cur) || multierr.JoinMessage(cur.Error(), branches) {
 				return false
 			}
@@ -1699,7 +1711,7 @@ func bindTree(err error, b binder) error {
 
 // placeable returns err with a [BindValue] binding replaced by the error
 // it was made from, so a document can place it. Each wrapper above it
-// becomes a stand-in, as [replaceBelow] builds one.
+// becomes a stand-in, as [replaceBelow] and [mapWrapper] build them.
 func placeable(err error) error {
 	placed, _ := replaceUnplaced(err)
 
@@ -1748,6 +1760,11 @@ func replaceUnplaced(err error) (error, bool) {
 		branches := x.Unwrap()
 
 		_, below := followBranches(err, branches)
+		if below == nil {
+			// The wrapper heads several problems, so each of them gets its
+			// binding replaced.
+			return mapWrapper(err, branches, replaceUnplaced)
+		}
 
 		return replaceBelow(err, below, branches)
 
@@ -1796,13 +1813,9 @@ func replaceBelow(wrapper, below error, branches []error) (error, bool) {
 		return wrapper, false
 	}
 
-	// A message that holds the text below it once shows where that text
-	// stands, so the text of the placed error, which names no path, takes
-	// its place.
-	msg, old := wrapper.Error(), below.Error()
-	if old != "" && strings.Count(msg, old) == 1 {
-		msg = strings.Replace(msg, old, placed.Error(), 1)
-	}
+	// The placed error names no path, so its text takes the place of the
+	// text of the binding.
+	msg := replaceText(wrapper.Error(), below.Error(), placed.Error())
 
 	var beside []error
 
@@ -1815,6 +1828,50 @@ func replaceBelow(wrapper, below error, branches []error) (error, bool) {
 	// The stand-in unwraps to the placed error and matches the wrapper,
 	// since the wrapper still unwraps to the binding.
 	return multierr.Replace(wrapper, placed, msg, beside), true
+}
+
+// mapWrapper applies f to each problem among branches, the errors that
+// wrapper unwraps to. Wrapper is a wrapper that [fmt.Errorf] builds with
+// several %w verbs, and [isLeaf] picks out its sentinels, which f never
+// sees. When f reports a change, mapWrapper returns true and a stand-in
+// for wrapper over the results and the sentinels. The message of the
+// stand-in has the text of each changed branch replaced. Otherwise
+// mapWrapper returns wrapper and false.
+func mapWrapper(wrapper error, branches []error, f func(error) (error, bool)) (error, bool) {
+	msg := wrapper.Error()
+	mapped := slices.Clone(branches)
+	changed := false
+
+	for i, branch := range branches {
+		if isNothing(branch) || isLeaf(branch) {
+			continue
+		}
+
+		m, ok := f(branch)
+		if !ok {
+			continue
+		}
+
+		msg = replaceText(msg, branch.Error(), m.Error())
+		mapped[i], changed = m, true
+	}
+
+	if !changed {
+		return wrapper, false
+	}
+
+	return multierr.Rewrap(wrapper, mapped, msg), true
+}
+
+// replaceText returns msg with old, the text of an error that msg holds,
+// replaced by with. A message that holds old exactly once shows where
+// that text stands, so any other message comes back as it is.
+func replaceText(msg, old, with string) string {
+	if old == "" || strings.Count(msg, old) != 1 {
+		return msg
+	}
+
+	return strings.Replace(msg, old, with, 1)
 }
 
 // isBound reports whether err is a [*SourceError], or wraps one with no

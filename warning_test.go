@@ -183,17 +183,32 @@ func TestHasErrors(t *testing.T) {
 		err  error
 		want bool
 	}{
-		"nil":                         {err: nil, want: false},
-		"nil Error pointer":           {err: nilError, want: false},
-		"nil SourceError pointer":     {err: nilSourceError, want: false},
-		"a warning":                   {err: warning, want: false},
-		"a join of warnings":          {err: errors.Join(warning, niceyaml.NewWarning("older")), want: false},
-		"an error":                    {err: niceyaml.NewError("bad"), want: true},
-		"a plain error":               {err: errors.New("bad"), want: true},
-		"a join of both":              {err: errors.Join(warning, errors.New("bad")), want: true},
-		"an error with no problem":    {err: niceyaml.NewError(""), want: true},
-		"a warning made an error":     {err: niceyaml.AsErrors(warning), want: true},
-		"a wrapper with a warning":    {err: fmt.Errorf("%w; %w", fs.ErrNotExist, warning), want: false},
+		"nil":                      {err: nil, want: false},
+		"nil Error pointer":        {err: nilError, want: false},
+		"nil SourceError pointer":  {err: nilSourceError, want: false},
+		"a warning":                {err: warning, want: false},
+		"a join of warnings":       {err: errors.Join(warning, niceyaml.NewWarning("older")), want: false},
+		"an error":                 {err: niceyaml.NewError("bad"), want: true},
+		"a plain error":            {err: errors.New("bad"), want: true},
+		"a join of both":           {err: errors.Join(warning, errors.New("bad")), want: true},
+		"an error with no problem": {err: niceyaml.NewError(""), want: true},
+		"a warning made an error":  {err: niceyaml.AsErrors(warning), want: true},
+		"a wrapper with a sentinel and a warning": {
+			err:  fmt.Errorf("%w; %w", fs.ErrNotExist, warning),
+			want: false,
+		},
+		"a wrapper with an error and a warning": {
+			err:  fmt.Errorf("%w; %w", niceyaml.NewError("bad"), warning),
+			want: true,
+		},
+		"a wrapper with a placed error and a warning": {
+			err:  fmt.Errorf("%w; %w", niceyaml.Place(fs.ErrPermission), warning),
+			want: true,
+		},
+		"a wrapper with an Invalid error and a warning": {
+			err:  fmt.Errorf("%w; %w", niceyaml.Invalid(errors.New("bad")), warning),
+			want: true,
+		},
 		"a warning among the details": {err: niceyaml.NewError("bad", niceyaml.WithDetails(warning)), want: true},
 	}
 
@@ -298,6 +313,75 @@ func TestAsErrors(t *testing.T) {
 
 			for problem := range niceyaml.Problems(got) {
 				assert.False(t, problem.Warning)
+			}
+		})
+	}
+}
+
+func TestAsErrors_WrapperBranches(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, warningCafe, niceyaml.WithName("cafe.yaml"))
+	legacy := niceyaml.NewWarning("legacy layout")
+	port := niceyaml.NewWarning("legacy port")
+	seats := niceyaml.NewWarning("few seats", niceyaml.AtPath(paths.Current().Child("seats")))
+	errLegacy := errors.New("legacy")
+
+	// AsErrors marks each problem that a wrapper with several %w verbs
+	// heads, as it marks each branch of a join.
+	tcs := map[string]struct {
+		wrapped error
+		joined  error
+	}{
+		"two warnings": {
+			wrapped: fmt.Errorf("%w; %w", legacy, port),
+			joined:  errors.Join(legacy, port),
+		},
+		"an error and a warning": {
+			wrapped: fmt.Errorf("%w; %w", niceyaml.NewError("port is required"), legacy),
+			joined:  errors.Join(niceyaml.NewError("port is required"), legacy),
+		},
+		"a located warning and a warning": {
+			wrapped: fmt.Errorf("%w; %w", seats, legacy),
+			joined:  errors.Join(seats, legacy),
+		},
+		"a summary and a warning": {
+			wrapped: fmt.Errorf("%w; %w", niceyaml.NewSummary("2 problems", port, seats), legacy),
+			joined:  errors.Join(niceyaml.NewSummary("2 problems", port, seats), legacy),
+		},
+		"a sentinel in front of a join": {
+			wrapped: fmt.Errorf("%w: %w", errLegacy, errors.Join(legacy, port)),
+			joined:  errors.Join(legacy, port),
+		},
+		"a rebase around two warnings": {
+			wrapped: niceyaml.Rebase(fmt.Errorf("%w; %w", legacy, port), paths.Doc().Child("seats")),
+			joined:  niceyaml.Rebase(errors.Join(legacy, port), paths.Doc().Child("seats")),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := niceyaml.AsErrors(tc.wrapped)
+			assert.Equal(t, tc.wrapped.Error(), got.Error())
+			require.ErrorIs(t, got, legacy)
+
+			binds := map[string]func(error) error{
+				"unbound": func(err error) error { return err },
+				"bound":   doc.Bind,
+			}
+
+			for kind, bind := range binds {
+				got := niceyaml.AsErrors(bind(tc.wrapped))
+				want := niceyaml.AsErrors(bind(tc.joined))
+
+				assert.True(t, niceyaml.HasErrors(got), kind)
+				assert.ElementsMatch(t, severityRows(want), severityRows(got), kind)
+
+				for problem := range niceyaml.Problems(got) {
+					assert.False(t, problem.Warning, "%s: %s", kind, problem.Message())
+				}
 			}
 		})
 	}
@@ -492,6 +576,34 @@ func TestNode_Warn(t *testing.T) {
 			assert.False(t, niceyaml.HasErrors(got))
 		})
 	}
+
+	t.Run("a wrapper with several verbs warns each problem it heads", func(t *testing.T) {
+		t.Parallel()
+
+		price := yamltest.ErrorAt("odd price", "price")
+		odd := niceyaml.NewError("odd item")
+
+		// The wrapper heads two problems, so each becomes a warning, as
+		// each branch of a join does.
+		var got []error
+
+		for _, err := range []error{fmt.Errorf("%w; %w", price, odd), errors.Join(price, odd)} {
+			ctx, calls := collect(t.Context())
+
+			item.Warn(ctx, err)
+
+			warned := onlyWarning(t, calls)
+			assert.False(t, niceyaml.HasErrors(warned), warned.Error())
+
+			got = append(got, warned)
+		}
+
+		assert.ElementsMatch(t, []string{
+			"odd price [warning, invalid]",
+			"odd item [warning, invalid]",
+		}, severityRows(got[0]))
+		assert.ElementsMatch(t, severityRows(got[1]), severityRows(got[0]))
+	})
 
 	t.Run("nil warns nothing", func(t *testing.T) {
 		t.Parallel()

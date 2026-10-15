@@ -106,9 +106,13 @@ func TestIsJoin(t *testing.T) {
 	}{
 		"join":          {err: errors.Join(errA, errB), join: true},
 		"several verbs": {err: fmt.Errorf("%w: %w", errA, errB), wrapError: true},
-		"one verb":      {err: fmt.Errorf("x: %w", errA)},
-		"other type":    {err: &listError{msg: "a\nb", errs: []error{errA, errB}}},
-		"nil":           {err: nil},
+		"stand-in for several verbs": {
+			err:       multierr.Rewrap(fmt.Errorf("%w: %w", errA, errB), []error{errA, errC}, "a: c"),
+			wrapError: true,
+		},
+		"one verb":   {err: fmt.Errorf("x: %w", errA)},
+		"other type": {err: &listError{msg: "a\nb", errs: []error{errA, errB}}},
+		"nil":        {err: nil},
 	}
 
 	for name, tc := range tcs {
@@ -248,6 +252,68 @@ func TestRejoin(t *testing.T) {
 
 			assert.Equal(t, tc.join, multierr.IsJoin(got))
 			require.EqualError(t, got, tc.want)
+
+			for _, err := range tc.is {
+				require.ErrorIs(t, got, err)
+			}
+
+			for _, err := range tc.isNot {
+				require.NotErrorIs(t, got, err)
+			}
+
+			if tc.as != nil {
+				requireAs(t, got, tc.as)
+			}
+		})
+	}
+}
+
+func TestRewrap(t *testing.T) {
+	t.Parallel()
+
+	wrapper := fmt.Errorf("%w: %w", errA, errB)
+
+	tcs := map[string]struct {
+		wrapper error
+		// The error errors.As finds in the result for a target of its
+		// type, or nil.
+		as       error
+		msg      string
+		branches []error
+		// The errors the result matches for errors.Is, and those it does
+		// not.
+		is, isNot []error
+	}{
+		"wrapper": {
+			wrapper:  wrapper,
+			msg:      "a: c",
+			branches: []error{errA, errC},
+			// The stand-in matches the wrapper itself and its own
+			// branches, not a branch it replaced.
+			is:    []error{wrapper, errA, errC},
+			isNot: []error{errB},
+		},
+		"wrapper with an Is method": {
+			wrapper:  matchError{},
+			msg:      "match: c",
+			branches: []error{errC},
+			is:       []error{errA, errC},
+			as:       matchError{},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := multierr.Rewrap(tc.wrapper, tc.branches, tc.msg)
+
+			require.EqualError(t, got, tc.msg)
+			assert.True(t, multierr.IsWrapErrors(got))
+
+			unwrapped, ok := got.(interface{ Unwrap() []error })
+			require.True(t, ok)
+			assert.Equal(t, tc.branches, unwrapped.Unwrap())
 
 			for _, err := range tc.is {
 				require.ErrorIs(t, got, err)

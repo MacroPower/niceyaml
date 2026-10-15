@@ -4,9 +4,9 @@
 // messages of their branches one per line.
 //
 // A caller that rebuilds such an error around new branches keeps what
-// the old error matched. [Rejoin] and [Replace] return stand-ins that
-// match the old error for [errors.Is] and [errors.As] while they unwrap
-// to the new errors.
+// the old error matched. [Rejoin], [Rewrap], and [Replace] return
+// stand-ins that match the old error for [errors.Is] and [errors.As]
+// while they unwrap to the new errors.
 package multierr
 
 import (
@@ -44,8 +44,12 @@ func IsJoin(err error) bool {
 }
 
 // IsWrapErrors reports whether err is a wrapper that [fmt.Errorf] builds
-// with several %w verbs.
+// with several %w verbs, or a stand-in for one that [Rewrap] returns.
 func IsWrapErrors(err error) bool {
+	if _, ok := err.(*wrapError); ok { //nolint:errorlint // The error itself, not a chain search.
+		return true
+	}
+
 	return reflect.TypeOf(err) == wrapErrorsType
 }
 
@@ -117,6 +121,16 @@ func Rejoin(joined error, branches []error) error {
 	return &joinError{like: joined, branches: branches}
 }
 
+// Rewrap returns a stand-in for wrapper, a wrapper that [fmt.Errorf]
+// builds with several %w verbs. The stand-in unwraps to branches in place
+// of what wrapper unwraps to, and its message is msg. [IsWrapErrors]
+// reports it as such a wrapper, so a caller reads it as it reads wrapper.
+// It matches wrapper for [errors.Is] and [errors.As], as wrapper matches
+// itself, and it matches what each of branches matches.
+func Rewrap(wrapper error, branches []error, msg string) error {
+	return &wrapError{like: wrapper, branches: branches, msg: msg}
+}
+
 // Replace returns a stand-in for wrapper, an error that wraps others,
 // which unwraps to err in place of what wrapper wraps. Its message is
 // msg. It matches wrapper for [errors.Is] and [errors.As], as wrapper
@@ -146,6 +160,26 @@ func (j *joinError) Error() string {
 // Unwrap returns the branches.
 func (j *joinError) Unwrap() []error {
 	return j.branches
+}
+
+// wrapError is the stand-in [Rewrap] returns.
+type wrapError struct {
+	mimic
+
+	msg string
+	// The errors that take the place of the branches of the wrapper.
+	branches []error
+}
+
+// Error returns the message [Rewrap] received.
+func (w *wrapError) Error() string {
+	return w.msg
+}
+
+// Unwrap returns the errors that take the place of the branches of the
+// wrapper.
+func (w *wrapError) Unwrap() []error {
+	return w.branches
 }
 
 // placedError is the stand-in [Replace] returns.

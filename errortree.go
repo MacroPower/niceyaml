@@ -90,9 +90,12 @@ type ErrorTree struct {
 // An error that unwraps to several and whose message is theirs one per
 // line, such as one from [errors.Join], is a node with no text, and its
 // children take its place in the tree above it. Any other error that
-// unwraps to several keeps its text and has a child per branch, except
-// that a wrapper [fmt.Errorf] builds with several %w verbs keeps only the
-// branches that carry a location or errors below them.
+// unwraps to several keeps its text and has a child per branch. A wrapper
+// that [fmt.Errorf] builds with several %w verbs is the exception. It has
+// a child for each branch that is a problem and none for a sentinel, as
+// the Errors section of the package documentation defines them. With one
+// such branch, the wrapper reads as a wrapper with one %w verb around
+// that branch.
 //
 // Each node holds its error in Err and its binding in Bound. The node of
 // a wrapper around a binding holds the wrapper in Err and the binding in
@@ -131,7 +134,9 @@ func (t ErrorTree) All() iter.Seq[ErrorTree] {
 // CI annotations, or editor diagnostics. A heading, which is a summary
 // from [NewSummary], a join, any other error that unwraps to several, or
 // a wrapper around one, yields no node of its own, and the walk goes on to
-// the problems below it. Every other node with text is one problem, and
+// the problems below it. A wrapper that [fmt.Errorf] builds with several
+// %w verbs is a heading only when it heads several problems, as
+// [NewErrorTree] describes. Every other node with text is one problem, and
 // Problems yields it with exactly its details as its Children, each with
 // Detail set. A node yields whether or not it carries a location, so an
 // error bound to no source, such as a file that did not read, yields a row
@@ -240,7 +245,10 @@ func (t ErrorTree) IsInvalid() bool {
 
 // declaresInvalid reports whether an error on the cause chain of err
 // matches [errInvalid] through an Is method of its own. The walk skips
-// details, which decide nothing, and stops at a [*PanicError].
+// details, which decide nothing, and stops at a [*PanicError]. An error
+// with several branches declares nothing when a branch holds the error of
+// a context that ended. Such a branch reports that the call stopped, not
+// a fault of the document, and [Invalid] declares nothing for it either.
 func declaresInvalid(err error) bool {
 	for cur := err; !isNothing(cur); {
 		if x, ok := cur.(interface{ Is(target error) bool }); ok && x.Is(errInvalid) {
@@ -258,7 +266,12 @@ func declaresInvalid(err error) bool {
 			cur = x.Unwrap()
 
 		case interface{ Unwrap() []error }:
-			return slices.ContainsFunc(x.Unwrap(), declaresInvalid)
+			branches := x.Unwrap()
+			if slices.ContainsFunc(branches, contextEnded) {
+				return false
+			}
+
+			return slices.ContainsFunc(branches, declaresInvalid)
 
 		default:
 			return false
@@ -702,9 +715,10 @@ func walkChildren(
 	return chainEnd{}
 }
 
-// followBranches returns the branches of err that stand below it. A
-// [fmt.Errorf] wrapper with several %w verbs drops leaves, such as a
-// sentinel its text shows, and returns a lone kept branch as the next link.
+// followBranches returns the branches of err that stand below it. For a
+// [fmt.Errorf] wrapper with several %w verbs, it drops each branch that
+// [isLeaf] reports as a sentinel, whose text the wrapper shows. It
+// returns a lone kept branch as the next link.
 func followBranches(err error, branches []error) ([]error, error) {
 	// The type check runs first, so an error of any other type never
 	// formats its message here, where the result would go unused.
@@ -727,9 +741,16 @@ func followBranches(err error, branches []error) ([]error, error) {
 	return kept, nil
 }
 
-// isLeaf reports whether err carries no location and no children on its
-// cause chain, as [anchorOf] and [walkChildren] would find. It walks the
-// chain once, since running both doubles the work at each nesting level.
+// isLeaf reports whether err reads as a sentinel rather than a problem
+// when it is a branch of a wrapper with several %w verbs. A sentinel
+// carries no location and no children on its cause chain, as [anchorOf]
+// and [walkChildren] find them. It holds no [*Error] whose fault or
+// severity is set either, because callers build such Errors with
+// [NewError], [NewWarning], [Invalid], and [Place] to report problems. A
+// rare sentinel built with one of them reads as a problem. An error from
+// [errors.New] reads as a sentinel too. The function walks the chain
+// once, because running anchorOf and walkChildren both doubles the work
+// at each nesting level.
 func isLeaf(err error) bool {
 	for cur := err; !isNothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -739,7 +760,8 @@ func isLeaf(err error) bool {
 		case *Error:
 			// An Error from Rebase that points at its base anchors the
 			// chain there when nothing below it carries a location.
-			if x.hasLocation() || (x.move != nil && !x.move.movesOnly) || x.nests() {
+			if x.hasLocation() || (x.move != nil && !x.move.movesOnly) || x.nests() ||
+				x.fault != undeclared || x.severity != severityNone {
 				return false
 			}
 

@@ -2288,6 +2288,15 @@ func TestErrorTree_IsInvalid(t *testing.T) {
 		"wrapper with several verbs over a sentinel and a read error": {
 			err: fmt.Errorf("%w: %w", errors.New("config rejected"), errRead),
 		},
+		"wrapper with several verbs over an ended context and an invalid problem": {
+			// The context error reports that the call stopped, not a fault
+			// of the document, so the wrapper declares nothing. Invalid
+			// declares nothing for it either.
+			err: fmt.Errorf("%w: %w", context.Canceled, badA()),
+		},
+		"wrapper with several verbs over an invalid problem and a wrapped deadline": {
+			err: fmt.Errorf("%w; %w", niceyaml.NewError("too old"), fmt.Errorf("fetch: %w", context.DeadlineExceeded)),
+		},
 		"read error with an invalid detail": {
 			// A detail explains the problem and decides nothing, and it
 			// answers for itself.
@@ -2732,6 +2741,182 @@ func TestProblems(t *testing.T) {
 				slices.Collect(niceyaml.NewErrorTree(tc.err).Problems()),
 				slices.Collect(niceyaml.Problems(tc.err)),
 			)
+		})
+	}
+}
+
+// severityRows returns one row per problem of err: its message, then its
+// severity and what [niceyaml.ErrorTree.IsInvalid] reports for it.
+func severityRows(err error) []string {
+	var rows []string
+
+	for problem := range niceyaml.Problems(err) {
+		severity, fault := "error", "no fault"
+		if problem.Warning {
+			severity = "warning"
+		}
+
+		if problem.IsInvalid() {
+			fault = "invalid"
+		}
+
+		rows = append(rows, fmt.Sprintf("%s [%s, %s]", problem.Message(), severity, fault))
+	}
+
+	return rows
+}
+
+func TestProblems_WrapperBranches(t *testing.T) {
+	t.Parallel()
+
+	source := errorTreeSource()
+	atA := niceyaml.AtPath(paths.Current().Child("a"))
+	atB := niceyaml.AtPath(paths.Current().Child("b"))
+
+	// Each branch that niceyaml builds is a problem of its own. A wrapper
+	// with several %w verbs thus answers as a join of its branches does,
+	// whether a branch carries a location or not.
+	tcs := map[string]struct {
+		first     error
+		second    error
+		want      []string
+		hasErrors bool
+		invalid   bool
+	}{
+		"an error and a warning": {
+			first:  niceyaml.NewError("port is required"),
+			second: niceyaml.NewWarning("legacy layout"),
+			want: []string{
+				"port is required [error, invalid]",
+				"warning: legacy layout [warning, invalid]",
+			},
+			hasErrors: true,
+			invalid:   true,
+		},
+		"a located error and a warning": {
+			first:  niceyaml.NewError("port is required", atA),
+			second: niceyaml.NewWarning("legacy layout"),
+			want: []string{
+				"port is required [error, invalid]",
+				"warning: legacy layout [warning, invalid]",
+			},
+			hasErrors: true,
+			invalid:   true,
+		},
+		"an error and a located warning": {
+			first:  niceyaml.NewError("port is required"),
+			second: niceyaml.NewWarning("legacy layout", atB),
+			want: []string{
+				"port is required [error, invalid]",
+				"legacy layout [warning, invalid]",
+			},
+			hasErrors: true,
+			invalid:   true,
+		},
+		"two errors": {
+			first:  niceyaml.NewError("port is required"),
+			second: niceyaml.NewError("host is required"),
+			want: []string{
+				"port is required [error, invalid]",
+				"host is required [error, invalid]",
+			},
+			hasErrors: true,
+			invalid:   true,
+		},
+		"two warnings": {
+			first:  niceyaml.NewWarning("legacy layout"),
+			second: niceyaml.NewWarning("legacy port"),
+			want: []string{
+				"warning: legacy layout [warning, invalid]",
+				"warning: legacy port [warning, invalid]",
+			},
+			invalid: true,
+		},
+		"a placed I/O error and an error": {
+			first:  niceyaml.Place(fs.ErrPermission),
+			second: niceyaml.NewError("port is required"),
+			want: []string{
+				"permission denied [error, no fault]",
+				"port is required [error, invalid]",
+			},
+			hasErrors: true,
+		},
+		"a located placed I/O error and an error": {
+			first:  niceyaml.Place(fs.ErrPermission, atA),
+			second: niceyaml.NewError("port is required"),
+			want: []string{
+				"permission denied [error, no fault]",
+				"port is required [error, invalid]",
+			},
+			hasErrors: true,
+		},
+		"a placed I/O error and a warning": {
+			first:  niceyaml.Place(fs.ErrPermission),
+			second: niceyaml.NewWarning("legacy layout"),
+			want: []string{
+				"permission denied [error, no fault]",
+				"warning: legacy layout [warning, invalid]",
+			},
+			hasErrors: true,
+		},
+		"an invalid I/O error and a warning": {
+			first:  niceyaml.Invalid(fs.ErrPermission),
+			second: niceyaml.NewWarning("legacy layout"),
+			want: []string{
+				"permission denied [error, invalid]",
+				"warning: legacy layout [warning, invalid]",
+			},
+			hasErrors: true,
+			invalid:   true,
+		},
+		"a warning made an error and a warning": {
+			first:  niceyaml.AsErrors(niceyaml.NewWarning("legacy port")),
+			second: niceyaml.NewWarning("legacy layout"),
+			want: []string{
+				"legacy port [error, invalid]",
+				"warning: legacy layout [warning, invalid]",
+			},
+			hasErrors: true,
+			invalid:   true,
+		},
+		"a summary and a warning": {
+			first: niceyaml.NewSummary("2 problems",
+				niceyaml.NewError("port is required"), niceyaml.NewError("host is required")),
+			second: niceyaml.NewWarning("legacy layout"),
+			want: []string{
+				"port is required [error, invalid]",
+				"host is required [error, invalid]",
+				"warning: legacy layout [warning, invalid]",
+			},
+			hasErrors: true,
+			invalid:   true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			wrapped := fmt.Errorf("%w; %w", tc.first, tc.second)
+			joined := errors.Join(tc.first, tc.second)
+
+			for _, err := range []error{wrapped, joined} {
+				assert.Equal(t, tc.want, severityRows(err), err.Error())
+				assert.Equal(t, tc.hasErrors, niceyaml.HasErrors(err), err.Error())
+				assert.Equal(t, tc.invalid, niceyaml.IsInvalid(err), err.Error())
+			}
+
+			// A binding orders its problems by position, so the rows of
+			// the two bindings hold in any order.
+			boundWrapped := yamltest.Bind(t, source, wrapped)
+			boundJoined := yamltest.Bind(t, source, joined)
+			assert.ElementsMatch(t, severityRows(boundJoined), severityRows(boundWrapped))
+			assert.Len(t, severityRows(boundWrapped), len(tc.want))
+
+			for _, err := range []error{boundWrapped, boundJoined} {
+				assert.Equal(t, tc.hasErrors, niceyaml.HasErrors(err), err.Error())
+				assert.Equal(t, tc.invalid, niceyaml.IsInvalid(err), err.Error())
+			}
 		})
 	}
 }

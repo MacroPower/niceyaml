@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/netip"
 	"reflect"
@@ -1534,6 +1535,71 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 		assert.True(t, intoRan, "the schema did not run in DecodeInto")
 		assert.Equal(t, validatorConfig{Name: "test", Value: 7, validated: true}, into)
 	})
+
+	t.Run("a wrapper with several %w verbs answers as a join of its branches", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "port: 0\n", niceyaml.WithName("cfg.yaml"))
+
+		tcs := map[string]struct {
+			first   error
+			second  error
+			want    []string
+			invalid bool
+		}{
+			"an error beside a warning fails": {
+				first:  niceyaml.NewError("port is required"),
+				second: niceyaml.NewWarning("legacy layout"),
+				want: []string{
+					"port is required [error, invalid]",
+					"legacy layout [warning, invalid]",
+				},
+				invalid: true,
+			},
+			"a located error beside a warning fails": {
+				first:  niceyaml.NewError("port is required", niceyaml.AtPath(paths.Current().Child("port"))),
+				second: niceyaml.NewWarning("legacy layout"),
+				want: []string{
+					"port is required [error, invalid]",
+					"legacy layout [warning, invalid]",
+				},
+				invalid: true,
+			},
+			"a placed I/O error leaves the problems beside it presumed invalid": {
+				first: niceyaml.Place(fs.ErrPermission),
+				second: niceyaml.NewSummary("2 problems",
+					errors.New("port is required"), errors.New("host is required")),
+				want: []string{
+					"permission denied [error, no fault]",
+					"port is required [error, invalid]",
+					"host is required [error, invalid]",
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				returned := map[string]error{
+					"wrapper": fmt.Errorf("%w; %w", tc.first, tc.second),
+					"join":    errors.Join(tc.first, tc.second),
+				}
+
+				for kind, ret := range returned {
+					cfg := branchesConfig{err: ret}
+
+					err := doc.DecodeInto(t.Context(), &cfg)
+					require.Error(t, err, kind)
+
+					// The decode binds each problem, and a binding orders
+					// its problems by position.
+					assert.ElementsMatch(t, tc.want, severityRows(err), kind)
+					assert.Equal(t, tc.invalid, niceyaml.IsInvalid(err), kind)
+				}
+			})
+		}
+	})
 }
 
 // validatorConfig implements niceyaml.SelfValidator.
@@ -1554,6 +1620,17 @@ func (c *validatorConfig) Validate() error {
 	}
 
 	return nil
+}
+
+// branchesConfig implements niceyaml.SelfValidator with a Validate that
+// returns the error its err field holds.
+type branchesConfig struct {
+	err  error
+	Port int `yaml:"port"`
+}
+
+func (c branchesConfig) Validate() error {
+	return c.err
 }
 
 // plainConfig does not implement niceyaml.SelfValidator.

@@ -204,25 +204,53 @@
 // UnmarshalYAML or UnmarshalText method, or a [WithCustomUnmarshaler]
 // function does. The decode presumes the document at fault for an error
 // a hook returns that declares nothing, and such an error from an
-// unmarshaler matches ErrDecode too. An Error from Place on the cause
-// chain of the error turns the presumption off, so an I/O error that a
-// hook places is no fault and does not match ErrDecode. A Place around a
-// join turns the presumption off for each branch it heads. A declared
-// fault still holds anywhere on the chain, so NewError inside Place and
-// Place inside Invalid are faults. A function from [WithValueCheck] is
+// unmarshaler matches ErrDecode too. A function from [WithValueCheck] is
 // no such hook. It declares its faults as a [Validator] does, so a plain
 // error it returns is no fault.
 //
+// An Error from Place on the cause chain of the error that a hook returns
+// turns the presumption off. An I/O error that a hook places is thus no
+// fault and does not match ErrDecode. A Place around a join turns the
+// presumption off for each branch it heads. A Place in one branch of a
+// join, or of a wrapper with several %w verbs that heads several
+// problems, turns it off for that branch alone. A declared fault still
+// holds anywhere on the chain, so NewError inside Place and Place inside
+// Invalid are faults.
+//
+// A wrapper that [fmt.Errorf] builds with several %w verbs heads the
+// branches that are problems, as a join does. It reads each other branch
+// as a sentinel, whose text the wrapper shows and which is no problem of
+// its own. A branch is a problem when it carries a location or errors
+// below it. So is a branch that holds an Error that declares a fault,
+// declares that its check could not run, or marks a severity. Such Errors
+// come from calls such as NewError, [NewWarning], Invalid, Place, and
+// [AsErrors]. A wrapper with one such branch is that problem, so a
+// sentinel in front of a warning leaves one warning:
+//
+//	return fmt.Errorf("%w: %w", ErrLegacy, niceyaml.NewWarning("legacy layout"))
+//
+// No reader can tell a plain error, such as one from [errors.New], from a
+// sentinel, so a plain error beside a problem reads as a sentinel too.
+// Return separate problems with [errors.Join], or build each with
+// NewError, Invalid, or Place. Invalid declares nothing for the error of a
+// context that ended, so an Error from Invalid with no location around
+// such an error reads as a sentinel as well.
+//
 // [IsInvalid] reports whether the document is at fault for every problem
-// of an error, which picks a status code or an exit code, and
-// [ErrorTree.IsInvalid] asks the same of one row of a report. One problem
-// that is no fault makes IsInvalid report false for the whole error, and
-// a heading or a detail decides nothing. A wrapper that [fmt.Errorf]
-// builds with several %w verbs is one problem, so an I/O error wrapped
-// beside violations goes uncounted where a join of the two counts it. A
-// [PanicError] is a bug in code. A document can still trip one in
-// go-yaml, so a public endpoint that answers such a document with a 4xx
-// status tests for the PanicError before it asks IsInvalid.
+// of an error, the question a caller asks to pick a status code or an
+// exit code. [ErrorTree.IsInvalid] asks the same of one row of a report.
+// One problem that is no fault makes IsInvalid report false for the whole
+// error, and a heading or a detail decides nothing. A [PanicError] is a
+// bug in code. A document can still trip one in go-yaml, so a public
+// endpoint that answers such a document with a 4xx status tests for the
+// PanicError before it asks IsInvalid.
+//
+// A plain I/O error beside violations in one wrapper with several %w
+// verbs reads as a sentinel, so IsInvalid does not count it. IsInvalid
+// counts it in a join of the two, and in the wrapper when Place wraps the
+// I/O error. A wrapper that is one problem declares no fault when a branch
+// holds the error of a context that ended. Invalid declares no fault for
+// that error either.
 //
 // A check run on a value inside a document reports `@` paths that read
 // from that value. [Rebase] puts the path of the value in front of each
@@ -337,10 +365,8 @@
 // its severity. NewWarning and [Node.Warn] mark a warning, [AsErrors] marks
 // an error above each warning, and a problem with no mark is an error.
 // [Invalid], [Place], [Rebase], [Node.Bind], and [fmt.Errorf] add no mark,
-// so a warning stays a warning inside them. A wrapper that [fmt.Errorf]
-// builds with several %w verbs is one problem, and it is a warning when
-// one of its branches is. A warning among the details of an error leaves
-// that error an error.
+// so a warning stays a warning inside them. A warning among the details
+// of an error leaves that error an error.
 //
 // Every reader keeps the two apart. [HasErrors] reports whether an error
 // holds an error, [IsInvalid] decides from the errors and passes over the
@@ -374,6 +400,13 @@
 // next validator. The decoder step reports each problem as an error,
 // whatever it wraps, so a value that decodes itself warns from its
 // Validate method rather than from its unmarshaler.
+//
+// A wrapper that [fmt.Errorf] builds with several %w verbs heads a
+// warning and an Error from [NewError] beside it as two problems, as the
+// Errors section describes. A plain error beside a warning in such a
+// wrapper reads as a sentinel, so the wrapper is one warning, and a check
+// that returns it passes. Join the plain error and the warning with
+// [errors.Join], or build the error with NewError, to keep it an error.
 //
 // A program in strict mode turns each warning into an error with
 // AsErrors, applied to the warnings that its handler receives or to the

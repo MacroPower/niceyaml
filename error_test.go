@@ -8672,6 +8672,29 @@ func TestBindValue_Place(t *testing.T) {
 		require.EqualError(t, err, "app.yaml:2:9: $.request.port: 0 is less than 1")
 	})
 
+	t.Run("a wrapper with several verbs places the result beside another problem", func(t *testing.T) {
+		t.Parallel()
+
+		// The wrapper heads the result and the Error beside it as two
+		// problems, and its text drops the path of the result as a
+		// wrapper around the result alone does.
+		free := valueErrors(1)
+		other := niceyaml.NewError("name is required")
+		err := fmt.Errorf("%w; %w", niceyaml.BindValue(free), other)
+
+		want := stringtest.JoinLF(
+			"app.yaml: 0 is less than 1; name is required",
+			"app.yaml:1:1: $.request: name is required",
+			"app.yaml:2:9: $.request.port: 0 is less than 1",
+		)
+
+		placed := doc.Bind(niceyaml.Rebase(err, base))
+		require.EqualError(t, placed, want)
+		require.EqualError(t, doc.Bind(niceyaml.Rebase(fmt.Errorf("%w; %w", free, other), base)), want)
+		require.ErrorIs(t, placed, err)
+		require.ErrorIs(t, placed, other)
+	})
+
 	t.Run("a summary and a detail place the results they hold", func(t *testing.T) {
 		t.Parallel()
 

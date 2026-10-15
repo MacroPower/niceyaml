@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sync"
 
+	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -52,10 +53,11 @@ func NewWarning(msg string, opts ...ErrorOption) *Error {
 	return e
 }
 
-// severityOf returns the nearest severity mark on the cause chain of err.
-// A wrapper with several branches, such as one that [fmt.Errorf] builds
-// with several %w verbs, is one problem, and it is a warning when one of
-// its branches is. The walk stops at a sealed error and at a
+// severityOf returns the nearest severity mark on the cause chain of err,
+// which callers read for one problem. A wrapper with several branches is
+// a warning when one of its branches is. The branches of a wrapper that
+// is one problem are that problem and sentinels, which carry no mark, so
+// the problem decides. The walk stops at a sealed error and at a
 // [*PanicError], which mark nothing.
 func severityOf(err error) severity {
 	for cur := err; !isNothing(cur); {
@@ -214,11 +216,14 @@ func holdsWarning(err error) bool {
 //
 // AsErrors rebuilds the errors that niceyaml builds, such as an [*Error],
 // a [*SourceError], and a join, and calls the AsErrors method of an error
-// that has one, so the result of such an error keeps its type. It marks
-// any other error above the warning it wraps, so a program applies it to
-// an error as a call returned it, before it wraps the error with
-// [fmt.Errorf]. An err that holds no warning comes back as it is, and a
-// nil err returns nil.
+// that has one, so the result of such an error keeps its type. A wrapper
+// that [fmt.Errorf] builds with several %w verbs and that heads several
+// problems gets a mark above each problem, as a join does. The result
+// keeps the message of the wrapper and matches it for [errors.Is] and
+// [errors.As]. AsErrors marks any other error above the warning it wraps,
+// so a program applies it to an error as a call returned it, before it
+// wraps the error with [fmt.Errorf]. An err that holds no warning comes
+// back as it is, and a nil err returns nil.
 func AsErrors(err error) error {
 	if isNothing(err) {
 		return nil
@@ -280,6 +285,15 @@ func remark(err error, sev severity) error {
 		return joined
 	}
 
+	x, ok := err.(interface{ Unwrap() []error }) //nolint:errorlint // The node itself, not a chain search.
+	if ok && multierr.IsWrapErrors(err) && heads(err) {
+		rewrapped, _ := mapWrapper(err, x.Unwrap(), func(branch error) (error, bool) {
+			return remark(branch, sev), true
+		})
+
+		return rewrapped
+	}
+
 	return mark(err, sev)
 }
 
@@ -293,8 +307,10 @@ func remarkAll(errs []error, sev severity) []error {
 	return out
 }
 
-// heads reports whether err stands over separate problems: a join, a
-// summary, or a binding of either, through the Errors on top of it.
+// heads reports whether err stands over separate problems through the
+// Errors on top of it. Such an err is a join, a summary, a binding of
+// either, or a wrapper with several %w verbs that heads several problems.
+// A wrapper with one problem among its branches reads as that problem.
 func heads(err error) bool {
 	for cur := err; !isNothing(cur); {
 		if _, _, ok := joinBranches(cur); ok {
@@ -311,6 +327,18 @@ func heads(err error) bool {
 
 		case *SourceError:
 			return x.heads()
+
+		case interface{ Unwrap() []error }:
+			if !multierr.IsWrapErrors(cur) {
+				return false
+			}
+
+			kept, next := followBranches(cur, x.Unwrap())
+			if next == nil {
+				return len(kept) > 0
+			}
+
+			cur = next
 
 		default:
 			return false
