@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"sync"
@@ -281,6 +282,29 @@ func TestWithCacheLimit(t *testing.T) {
 				runtime.KeepAlive(reg)
 			})
 		}
+	})
+
+	t.Run("Invalidate after the limit drops a schema", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		yamltest.WriteFiles(t, dir, map[string]string{
+			"s.json":     refA,
+			"other.json": stringA,
+			"defs.json":  stringDefs,
+		})
+
+		ref := schema.File(filepath.Join(dir, "s.json"))
+		reg := schema.NewRegistry(schema.WithCacheLimit(1))
+
+		// The limit of one lets other.json take the place of s.json,
+		// which then loads again and takes the place of other.json.
+		loadAll(t, reg, ref, schema.File(filepath.Join(dir, "other.json")), ref)
+
+		yamltest.WriteFile(t, dir, "defs.json", integerDefs)
+		reg.Invalidate(schema.File(filepath.Join(dir, "defs.json")))
+
+		requireCheck(t, reg, ref, notInteger)
 	})
 
 	t.Run("concurrent requests", func(t *testing.T) {

@@ -102,6 +102,15 @@ type CatalogEntry struct {
 // catalog URL again, so an unreachable catalog costs one timeout per
 // interval rather than one per lookup.
 //
+// The TTL covers the catalog alone. The registry keeps each schema it
+// fetched for an entry after a refresh of the catalog. A program passes
+// the URL of an entry to
+// [go.jacobcolvin.com/niceyaml/schema.Registry.Invalidate] to fetch its
+// schema again. The documents the $refs of that schema name stay in the
+// cache. A program calls
+// [go.jacobcolvin.com/niceyaml/schema.Registry.Purge] to fetch those
+// documents again too.
+//
 // Concurrent lookups share a single fetch. A lookup that arrives while a
 // refresh is running uses the previous catalog without waiting. The lookup
 // that starts a fetch, and any lookup with no catalog to fall back on, waits

@@ -219,8 +219,8 @@ func file(path string) (Ref, error) {
 // schema, a remembered failure, or a $ref document. [WithCacheLimit]
 // bounds the entries, and with them the file systems the registry holds.
 // A registry without a limit holds each file system until
-// [Registry.Forget] drops the entries from it. A program passes each
-// file system it is done with to Forget.
+// [Registry.Forget] or [Registry.Purge] drops the entries from it. A
+// program passes each file system it is done with to Forget.
 //
 // The registry reads only a regular file within the limit of
 // [WithLoadLimit], as [File] describes, and the note there on

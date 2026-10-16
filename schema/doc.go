@@ -311,8 +311,16 @@
 // The documents that name a broken schema inside the interval cost one
 // attempt between them, and the first document after the interval loads
 // the schema again. [WithCacheLimit] bounds the number of schemas the
-// cache keeps. A
-// caller that holds a Ref of its own takes the compiled schema from the
+// cache keeps.
+//
+// The registry serves a schema from its cache after the file or URL it
+// came from changes. A program that watches its schema files, such as an
+// editor, passes each file that changes to [Registry.Invalidate]. The
+// registry then drops the schema of that file and each schema whose
+// $refs reached the file. The next document that names one loads it
+// again. [Registry.Purge] drops every schema the registry keeps.
+//
+// A caller that holds a Ref of its own takes the compiled schema from the
 // same cache. A resolver that picks the schema from the document returns
 // the same Refs:
 //
@@ -466,8 +474,8 @@
 //
 // [WithCacheLimit] bounds the number of schemas the registry keeps.
 // Without it, documents that name endless distinct schemas, such as one
-// URL with a new query string each time, grow the cache for the lifetime
-// of the registry.
+// URL with a new query string each time, grow the cache until the
+// program calls [Registry.Purge].
 //
 // The registry holds the file system of a document from
 // [go.jacobcolvin.com/niceyaml.WithFS] for as long as it keeps an entry

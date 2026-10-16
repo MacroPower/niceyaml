@@ -2835,6 +2835,708 @@ func loadFS(path string) func(context.Context, *schema.Registry, fs.FS) error {
 	}
 }
 
+// The schemas and the documents the tests of the release methods load.
+const (
+	// A schema whose member a takes a string.
+	stringA = `{"properties": {"a": {"type": "string"}}}`
+	// A schema whose member a takes an integer.
+	integerA = `{"properties": {"a": {"type": "integer"}}}`
+	// A schema whose member a takes what defs.json beside it takes.
+	refA = `{"properties": {"a": {"$ref": "defs.json"}}}`
+	// A document that takes a string.
+	stringDefs = `{"type": "string"}`
+	// A document that takes an integer.
+	integerDefs = `{"type": "integer"}`
+	// The violation of the document "a: x" against a schema whose
+	// member a takes an integer.
+	notInteger = `expected "integer", got "string"`
+)
+
+// requireCheck asks reg for the schema ref names and validates the
+// document "a: x" with it. The request must pass. For a non-empty want,
+// the error of the validation must contain want. For an empty want, the
+// validation must pass.
+func requireCheck(t *testing.T, reg *schema.Registry, ref schema.Ref, want string) {
+	t.Helper()
+
+	s, err := reg.Schema(t.Context(), ref)
+	require.NoError(t, err)
+
+	err = yamltest.FirstDocument(t, "a: x\n").Validate(t.Context(), s)
+	if want == "" {
+		require.NoError(t, err)
+
+		return
+	}
+
+	require.ErrorContains(t, err, want)
+}
+
+// fileRef returns a Ref for the file name in dir. A '#' in name opens
+// the fragment of the Ref.
+func fileRef(t *testing.T, dir, name string) schema.Ref {
+	t.Helper()
+
+	base, fragment, ok := strings.Cut(name, "#")
+	if !ok {
+		return schema.File(filepath.Join(dir, name))
+	}
+
+	return fileOrURL(t, dir, plainFileURL(filepath.Join(dir, base))+"#"+fragment)
+}
+
+// A gatedFS is a file system that holds the first open of one file until
+// its gate closes, and counts the opens of that file. It has no method
+// but Open, so every read goes through the count.
+type gatedFS struct {
+	files   fstest.MapFS
+	started chan struct{} // gets a value when the first open of name starts to wait
+	gate    <-chan struct{}
+	name    string
+	opens   atomic.Int32
+}
+
+func (f *gatedFS) Open(name string) (fs.File, error) {
+	if name == f.name && f.opens.Add(1) == 1 {
+		f.started <- struct{}{}
+
+		<-f.gate
+	}
+
+	return f.files.Open(name) //nolint:wrapcheck // The test file system returns the error of the one it wraps.
+}
+
+func TestRegistry_Invalidate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("loads the changed document again", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			// The error the request for the schema returns before
+			// Invalidate, or nil for a check that passes.
+			stale error
+			// The files in the directory before the change. In each
+			// file, "{dir}" stands for the URL path of the directory.
+			before map[string]string
+			// The files the change writes.
+			after map[string]string
+			// The schemas a request loads before the change.
+			warm []string
+			// The schema a request loads after the change.
+			ref string
+			// The file the program passes to Invalidate.
+			changed string
+			// Text the error of the check holds after Invalidate, or ""
+			// for a check that passes.
+			want string
+		}{
+			"schema file": {
+				before:  map[string]string{"s.json": stringA},
+				after:   map[string]string{"s.json": integerA},
+				warm:    []string{"s.json"},
+				ref:     "s.json",
+				changed: "s.json",
+				want:    notInteger,
+			},
+			"fragment of the schema file": {
+				before:  map[string]string{"s.json": `{"$defs": {"obj": ` + stringA + `}}`},
+				after:   map[string]string{"s.json": `{"$defs": {"obj": ` + integerA + `}}`},
+				warm:    []string{"s.json#/$defs/obj"},
+				ref:     "s.json#/$defs/obj",
+				changed: "s.json",
+				want:    notInteger,
+			},
+			"document a $ref names": {
+				before:  map[string]string{"s.json": refA, "defs.json": stringDefs},
+				after:   map[string]string{"defs.json": integerDefs},
+				warm:    []string{"s.json"},
+				ref:     "s.json",
+				changed: "defs.json",
+				want:    notInteger,
+			},
+			"document a $ref names with a query": {
+				before: map[string]string{
+					"s.json":    `{"properties": {"a": {"$ref": "defs.json?v=1"}}}`,
+					"defs.json": stringDefs,
+				},
+				after:   map[string]string{"defs.json": integerDefs},
+				warm:    []string{"s.json"},
+				ref:     "s.json",
+				changed: "defs.json",
+				want:    notInteger,
+			},
+			"document a $ref names by a localhost URL": {
+				before: map[string]string{
+					"s.json":    `{"properties": {"a": {"$ref": "file://localhost{dir}/defs.json"}}}`,
+					"defs.json": stringDefs,
+				},
+				after:   map[string]string{"defs.json": integerDefs},
+				warm:    []string{"s.json"},
+				ref:     "s.json",
+				changed: "defs.json",
+				want:    notInteger,
+			},
+			"document a $ref names through another document": {
+				before: map[string]string{
+					"s.json":    `{"properties": {"a": {"$ref": "mid.json"}}}`,
+					"mid.json":  `{"$ref": "defs.json"}`,
+					"defs.json": stringDefs,
+				},
+				after:   map[string]string{"defs.json": integerDefs},
+				warm:    []string{"s.json"},
+				ref:     "s.json",
+				changed: "defs.json",
+				want:    notInteger,
+			},
+			// The registry keeps defs.json for every schema that names it.
+			// Without Invalidate, a schema it compiles after the change
+			// reads the document another schema loaded before the change.
+			"document another schema loaded": {
+				before:  map[string]string{"s.json": refA, "t.json": refA, "defs.json": stringDefs},
+				after:   map[string]string{"defs.json": integerDefs},
+				warm:    []string{"s.json"},
+				ref:     "t.json",
+				changed: "defs.json",
+				want:    notInteger,
+			},
+			"schema file that did not exist": {
+				after:   map[string]string{"s.json": stringA},
+				warm:    []string{"s.json"},
+				ref:     "s.json",
+				changed: "s.json",
+				stale:   fs.ErrNotExist,
+			},
+			"document a $ref names that did not exist": {
+				before:  map[string]string{"s.json": refA},
+				after:   map[string]string{"defs.json": stringDefs},
+				warm:    []string{"s.json"},
+				ref:     "s.json",
+				changed: "defs.json",
+				stale:   fs.ErrNotExist,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dir := t.TempDir()
+				dirPath := "/" + strings.TrimPrefix(filepath.ToSlash(dir), "/")
+
+				before := make(map[string]string, len(tc.before))
+				for name, data := range tc.before {
+					before[name] = strings.ReplaceAll(data, "{dir}", dirPath)
+				}
+
+				yamltest.WriteFiles(t, dir, before)
+
+				reg := schema.NewRegistry()
+
+				check := func(ref schema.Ref) {
+					t.Helper()
+
+					if tc.stale == nil {
+						requireCheck(t, reg, ref, "")
+
+						return
+					}
+
+					_, err := reg.Schema(t.Context(), ref)
+					requireLoadError(t, err, tc.stale)
+				}
+
+				for _, warm := range tc.warm {
+					check(fileRef(t, dir, warm))
+				}
+
+				yamltest.WriteFiles(t, dir, tc.after)
+
+				ref := fileRef(t, dir, tc.ref)
+				check(ref)
+
+				reg.Invalidate(fileRef(t, dir, tc.changed))
+				requireCheck(t, reg, ref, tc.want)
+			})
+		}
+	})
+
+	t.Run("keeps every other entry", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		yamltest.WriteFiles(t, dir, map[string]string{
+			"s.json":     refA,
+			"defs.json":  stringDefs,
+			"other.json": stringA,
+		})
+
+		files := map[string]string{"s.json": refA, "defs.json": stringDefs}
+
+		tcs := map[string]struct {
+			// The Refs the program passes to Invalidate.
+			refs []schema.Ref
+		}{
+			"no Ref": {},
+			"another file": {
+				refs: []schema.Ref{schema.File(filepath.Join(dir, "other.json"))},
+			},
+			"same path in another file system": {
+				refs: []schema.Ref{schema.FileFS(yamltest.MapFS(files), "defs.json")},
+			},
+			"zero Ref": {
+				refs: []schema.Ref{{}},
+			},
+			"compiled schema": {
+				refs: []schema.Ref{schema.MustCompile([]byte(stringA)).Ref()},
+			},
+			"Ref that names no file": {
+				refs: []schema.Ref{schema.FileFS(yamltest.MapFS(files), "../defs.json")},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				fsys := &openCountingFS{files: yamltest.MapFS(files)}
+				loadable, loads := countingLoader("loadable", []byte(stringA))
+
+				refs := []schema.Ref{
+					schema.File(filepath.Join(dir, "s.json")),
+					schema.FileFS(fsys, "s.json"),
+					loadable,
+				}
+
+				reg := schema.NewRegistry()
+
+				first := make([]*schema.Schema, len(refs))
+
+				for i, ref := range refs {
+					s, err := reg.Schema(t.Context(), ref)
+					require.NoError(t, err)
+
+					first[i] = s
+				}
+
+				opens := fsys.opens.Load()
+
+				reg.Invalidate(tc.refs...)
+
+				for i, ref := range refs {
+					again, err := reg.Schema(t.Context(), ref)
+					require.NoError(t, err)
+					assert.Same(t, first[i], again)
+				}
+
+				assert.Equal(t, opens, fsys.opens.Load())
+				assert.Equal(t, int32(1), loads.Load())
+			})
+		}
+	})
+
+	t.Run("URL", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			// The URL of the schema a request loads.
+			schemaURL string
+			// The URL the program passes to Invalidate.
+			changed string
+			// The number of requests the server gets for each path by
+			// the end of the test.
+			want map[string]int
+		}{
+			"document a $ref names": {
+				schemaURL: "http://schemas.test/s.json",
+				changed:   "http://schemas.test/defs.json",
+				want:      map[string]int{"/s.json": 2, "/defs.json": 2},
+			},
+			"host in upper case": {
+				schemaURL: "http://schemas.test/s.json",
+				changed:   "http://SCHEMAS.TEST/defs.json",
+				want:      map[string]int{"/s.json": 2, "/defs.json": 2},
+			},
+			"path with dot segments": {
+				schemaURL: "http://schemas.test/s.json",
+				changed:   "http://schemas.test/x/../defs.json",
+				want:      map[string]int{"/s.json": 2, "/defs.json": 2},
+			},
+			"fragment": {
+				schemaURL: "http://schemas.test/s.json",
+				changed:   "http://schemas.test/defs.json#/$defs/x",
+				want:      map[string]int{"/s.json": 2, "/defs.json": 2},
+			},
+			"userinfo the schema carries": {
+				schemaURL: "http://user:pw@schemas.test/s.json",
+				changed:   "http://schemas.test/defs.json",
+				want:      map[string]int{"/s.json": 2, "/defs.json": 2},
+			},
+			"userinfo the program passes": {
+				schemaURL: "http://schemas.test/s.json",
+				changed:   "http://user:pw@schemas.test/defs.json",
+				want:      map[string]int{"/s.json": 2, "/defs.json": 2},
+			},
+			"schema URL": {
+				schemaURL: "http://schemas.test/s.json",
+				changed:   "http://schemas.test/s.json",
+				want:      map[string]int{"/s.json": 2, "/defs.json": 1},
+			},
+			"another URL": {
+				schemaURL: "http://schemas.test/s.json",
+				changed:   "http://schemas.test/other.json",
+				want:      map[string]int{"/s.json": 1, "/defs.json": 1},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				handler, requests := countingHandler(schemaHandler(map[string]string{
+					"/s.json":    refA,
+					"/defs.json": stringDefs,
+				}))
+
+				reg := schema.NewRegistry(schema.WithHTTPClient(handlerTransport(handler).Client()))
+
+				requireCheck(t, reg, schema.URL(tc.schemaURL), "")
+
+				reg.Invalidate(schema.URL(tc.changed))
+
+				requireCheck(t, reg, schema.URL(tc.schemaURL), "")
+				assert.Equal(t, tc.want, requests())
+			})
+		}
+	})
+
+	t.Run("file system", func(t *testing.T) {
+		t.Parallel()
+
+		files := map[string]string{"schemas/s.json": refA, "schemas/defs.json": stringDefs}
+		changed, kept := yamltest.MapFS(files), yamltest.MapFS(files)
+
+		reg := schema.NewRegistry()
+
+		fromChanged, err := reg.Schema(t.Context(), schema.FileFS(changed, "schemas/s.json"))
+		require.NoError(t, err)
+
+		fromKept, err := reg.Schema(t.Context(), schema.FileFS(kept, "schemas/s.json"))
+		require.NoError(t, err)
+
+		changed["schemas/defs.json"] = &fstest.MapFile{Data: []byte(integerDefs)}
+		kept["schemas/defs.json"] = &fstest.MapFile{Data: []byte(integerDefs)}
+
+		reg.Invalidate(schema.FileFS(changed, "schemas/defs.json"))
+
+		again, err := reg.Schema(t.Context(), schema.FileFS(changed, "schemas/s.json"))
+		require.NoError(t, err)
+		assert.NotSame(t, fromChanged, again)
+		requireCheck(t, reg, schema.FileFS(changed, "schemas/s.json"), notInteger)
+
+		again, err = reg.Schema(t.Context(), schema.FileFS(kept, "schemas/s.json"))
+		require.NoError(t, err)
+		assert.Same(t, fromKept, again)
+	})
+
+	t.Run("document a validation reached", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		yamltest.WriteFiles(t, dir, map[string]string{
+			"s.json":    `{"properties": {"a": {"$ref": "mid.json"}}}`,
+			"defs.json": stringDefs,
+		})
+
+		ref := schema.File(filepath.Join(dir, "s.json"))
+		defs := schema.File(filepath.Join(dir, "defs.json"))
+
+		// The schema compiles without mid.json. The registry drops the
+		// failure of mid.json after a nanosecond, so a validation loads it
+		// again.
+		reg := schema.NewRegistry(requireRefs(false), schema.WithRetryAfter(time.Nanosecond))
+
+		first, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+
+		// The compile did not reach defs.json, so the registry keeps the
+		// schema.
+		reg.Invalidate(defs)
+
+		again, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+		require.Same(t, first, again)
+
+		// The validation loads mid.json, and reaches defs.json through it.
+		yamltest.WriteFile(t, dir, "mid.json", `{"$ref": "defs.json"}`)
+		require.NoError(t, yamltest.FirstDocument(t, "a: x\n").Validate(t.Context(), first))
+
+		reg.Invalidate(defs)
+
+		again, err = reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+		assert.NotSame(t, first, again)
+	})
+
+	t.Run("concurrent use", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		yamltest.WriteFiles(t, dir, map[string]string{
+			"s.json":    refA,
+			"t.json":    `{"properties": {"a": {"$ref": "missing.json"}}}`,
+			"defs.json": stringDefs,
+		})
+
+		refs := []schema.Ref{
+			schema.File(filepath.Join(dir, "s.json")),
+			schema.File(filepath.Join(dir, "t.json")),
+		}
+		defs := schema.File(filepath.Join(dir, "defs.json"))
+
+		reg := schema.NewRegistry(schema.WithCacheLimit(1), requireRefs(false))
+
+		var (
+			wg   sync.WaitGroup
+			errs [4]error
+		)
+
+		for g := range errs {
+			wg.Go(func() {
+				for i := range 100 {
+					switch i % 10 {
+					case 3:
+						reg.Invalidate(defs)
+					case 7:
+						reg.Purge()
+					}
+
+					s, err := reg.Schema(t.Context(), refs[(g+i)%len(refs)])
+					if err != nil {
+						errs[g] = err
+
+						return
+					}
+
+					// A validation of t.json reaches the $ref that did not
+					// load, and fails.
+					err = s.ValidateValue(t.Context(), map[string]any{"a": "x"})
+					if err != nil && !errors.Is(err, schema.ErrValidate) {
+						errs[g] = err
+
+						return
+					}
+				}
+			})
+		}
+
+		wg.Wait()
+
+		require.NoError(t, errors.Join(errs[:]...))
+	})
+}
+
+func TestRegistry_Purge(t *testing.T) {
+	t.Parallel()
+
+	t.Run("loads every schema again", func(t *testing.T) {
+		t.Parallel()
+
+		files := map[string]string{"s.json": refA, "defs.json": stringDefs}
+
+		dir := t.TempDir()
+		yamltest.WriteFiles(t, dir, files)
+
+		fsys := &openCountingFS{files: yamltest.MapFS(files)}
+		loadable, loads := countingLoader("loadable", []byte(stringA))
+
+		refs := []schema.Ref{
+			schema.File(filepath.Join(dir, "s.json")),
+			schema.FileFS(fsys, "s.json"),
+			loadable,
+		}
+
+		reg := schema.NewRegistry()
+
+		first := make([]*schema.Schema, len(refs))
+
+		for i, ref := range refs {
+			s, err := reg.Schema(t.Context(), ref)
+			require.NoError(t, err)
+
+			first[i] = s
+		}
+
+		opens := fsys.opens.Load()
+
+		// The registry remembers the failure of a file that did not exist.
+		missing := schema.File(filepath.Join(dir, "missing.json"))
+
+		_, err := reg.Schema(t.Context(), missing)
+		requireLoadError(t, err, fs.ErrNotExist)
+
+		yamltest.WriteFile(t, dir, "missing.json", stringA)
+
+		reg.Purge()
+
+		for i, ref := range refs {
+			again, err := reg.Schema(t.Context(), ref)
+			require.NoError(t, err)
+			assert.NotSame(t, first[i], again)
+		}
+
+		// The schema and the document its $ref names load again.
+		assert.Equal(t, 2*opens, fsys.opens.Load())
+		assert.Equal(t, int32(2), loads.Load())
+
+		_, err = reg.Schema(t.Context(), missing)
+		require.NoError(t, err)
+	})
+
+	t.Run("stops holding every file system", func(t *testing.T) {
+		t.Parallel()
+
+		files := map[string]string{"s.json": refA, "defs.json": stringDefs}
+		systems := []*heldFS{newHeldFS(files, nil), newHeldFS(files, asPointer)}
+
+		reg := schema.NewRegistry()
+
+		for _, h := range systems {
+			_, err := reg.Schema(t.Context(), schema.FileFS(h.fsys, "s.json"))
+			require.NoError(t, err)
+		}
+
+		reg.Purge()
+
+		for _, h := range systems {
+			assert.False(t, h.held())
+		}
+
+		runtime.KeepAlive(reg)
+	})
+}
+
+func TestRegistry_ReleaseDuringLoad(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		// Releases the document ref names from reg.
+		release func(reg *schema.Registry, ref schema.Ref)
+	}{
+		"Invalidate": {
+			release: func(reg *schema.Registry, ref schema.Ref) { reg.Invalidate(ref) },
+		},
+		"Purge": {
+			release: func(reg *schema.Registry, _ schema.Ref) { reg.Purge() },
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			t.Run("schema", func(t *testing.T) {
+				t.Parallel()
+
+				type result struct {
+					err error
+					s   *schema.Schema
+				}
+
+				var loads atomic.Int32
+
+				gate := make(chan struct{})
+				started := make(chan struct{}, 2)
+
+				ref := schema.Loadable("gated", func(context.Context) ([]byte, error) {
+					loads.Add(1)
+
+					started <- struct{}{}
+
+					<-gate
+
+					return []byte(stringA), nil
+				})
+
+				reg := schema.NewRegistry()
+
+				request := func() <-chan result {
+					out := make(chan result, 1)
+
+					go func() {
+						s, err := reg.Schema(t.Context(), ref)
+						out <- result{s: s, err: err}
+					}()
+
+					return out
+				}
+
+				before := request()
+
+				<-started
+
+				tc.release(reg, ref)
+
+				// A request after the release starts a load of its own.
+				after := request()
+
+				<-started
+
+				close(gate)
+
+				fromBefore, fromAfter := <-before, <-after
+				require.NoError(t, fromBefore.err)
+				require.NoError(t, fromAfter.err)
+				assert.NotSame(t, fromBefore.s, fromAfter.s)
+
+				// The load that started before the release kept nothing.
+				again, err := reg.Schema(t.Context(), ref)
+				require.NoError(t, err)
+				assert.Same(t, fromAfter.s, again)
+				assert.Equal(t, int32(2), loads.Load())
+			})
+
+			t.Run("document a $ref names", func(t *testing.T) {
+				t.Parallel()
+
+				gate := make(chan struct{})
+				fsys := &gatedFS{
+					files:   yamltest.MapFS(map[string]string{"s.json": refA, "defs.json": stringDefs}),
+					name:    "defs.json",
+					started: make(chan struct{}, 1),
+					gate:    gate,
+				}
+
+				ref := schema.FileFS(fsys, "s.json")
+				reg := schema.NewRegistry()
+
+				done := make(chan error, 1)
+
+				go func() {
+					_, err := reg.Schema(t.Context(), ref)
+					done <- err
+				}()
+
+				<-fsys.started
+
+				tc.release(reg, schema.FileFS(fsys, "defs.json"))
+
+				close(gate)
+				require.NoError(t, <-done)
+
+				opens := fsys.opens.Load()
+
+				// The registry kept neither the schema nor the document the
+				// load read across the release, so the compile reads the
+				// document again.
+				_, err := reg.Schema(t.Context(), ref)
+				require.NoError(t, err)
+				assert.Equal(t, 2*opens, fsys.opens.Load())
+			})
+		})
+	}
+}
+
 func TestRegistry_WithFSAt(t *testing.T) {
 	t.Parallel()
 
