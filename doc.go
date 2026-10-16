@@ -649,10 +649,16 @@
 // A validator writes its errors from the Node it gets, so an `@` path reads
 // from that Node. The decode or Node.Validate that runs it binds the result
 // as [Node.Bind] binds an error, and leaves an error the validator bound
-// itself as it is. A validator that runs another on a Node of its choosing,
-// such as each element of a list, calls Validate on that Node, so the error
-// binds there. A direct call of [Validator.Check] returns the error
-// unbound.
+// itself as it is. A direct call of [Validator.Check] returns the error as
+// the validator wrote it. A validator that calls Check on an element and
+// returns the result thus reports it at the wrong value. A validator that
+// runs another on a Node of its choosing calls Validate on that Node, so
+// the error binds there. [Each] runs a validator on every Node a path
+// selects, such as each element of a list, and binds each failure at the
+// Node that its validator checked:
+//
+//	items := paths.Current().Child("items").IndexAll()
+//	err := source.ValidateDocuments(ctx, niceyaml.MultiValidator(schema, niceyaml.Each(items, reserved)))
 //
 // A check of the decoded values of one type goes to the decode with
 // [WithValueCheck]. It suits a check that needs the context of the call,
@@ -828,8 +834,11 @@
 //     the collector of the context. A Validate method or a function from
 //     WithValueCheck that returns the error of a context that ended stops
 //     the walk the same way.
-//   - [MultiValidator] runs no further validator, and returns the error of
-//     the context, or the error of the validator that saw it end.
+//   - [MultiValidator] does not run another validator, and returns the
+//     error of the context, or the error of the validator that saw it end.
+//   - [Each] does not run its validator on another Node, and returns the
+//     error of the context, or the error its validator returned on the
+//     Node where the context ended.
 //   - [NewSourceFromLayers] returns the error of the context.
 //
 // The error of a context that ended matches [context.Canceled] or

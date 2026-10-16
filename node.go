@@ -327,6 +327,9 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 //		}
 //	}
 //
+// [Each] turns that loop into a [Validator], so a decode or a
+// [MultiValidator] can run it beside other validators.
+//
 // The last selector of that path, which [paths.Path.Last] gives, names an
 // entry by the text [paths.Resolver.KeyName] gives its key.
 //

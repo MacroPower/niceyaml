@@ -114,7 +114,7 @@ An [`Error`][niceyaml.Error] names a path and holds no source. The example binds
 
 - [examples/validators](examples/validators)
 
-A validator checks a document before the decoder reads it. The example rejects an unknown field at decode time, then runs two rules of its own with `MultiValidator`, which reports every failure, and with `ChainValidator`, which stops at the first.
+A validator checks a document before the decoder reads it. The example rejects an unknown field at decode time. It then runs rules of its own with `MultiValidator`, which reports every failure, and with `ChainValidator`, which stops at the first. One rule checks a single breakfast, and `Each` runs it on every breakfast, so its error names the breakfast that failed.
 
 ### Schemas
 

@@ -1429,25 +1429,33 @@ type SelfValidator interface {
 
 // Validator validates a [*Node] before it decodes, as a JSON schema does.
 // Pass one to a decode with [WithValidator], or run one on its own with
-// [Node.Validate]. The context carries cancellation and deadlines to a
-// validator that does work it can stop, such as resolving a remote schema
-// reference.
+// [Node.Validate]. A validator that runs another validator on a
+// different Node, such as each element of a list, passes it to [Each] or
+// to the Validate method of that Node. A call to Check returns errors
+// whose `@` paths read from the Node that Check got. A validator of the
+// root that returns the Check result of `$.items[1]` as its own thus
+// reports `@.name` at `$.name` rather than at `$.items[1].name`.
 //
 // See [ValidatorFunc], [MultiValidator], [ChainValidator], [SkipEmpty],
-// [go.jacobcolvin.com/niceyaml/schema.Schema], and
+// [Each], [go.jacobcolvin.com/niceyaml/schema.Schema], and
 // [go.jacobcolvin.com/niceyaml/schema.Registry] for implementations.
 //
-// Check gets the Node that runs it, which is the root of a document or a
-// Node from [Node.At], and returns its errors as it wrote them from that
-// Node, with `@` paths that read from the Node. An error about a key the
-// document lacks carries the path of the key. Node.Validate and a decode
-// bind what Check returns as [Node.Bind] binds an error, and bind each
-// warning that Check hands to its context the same way. The validators
-// of this module return their errors unbound, apart from schema.Registry,
-// which binds every error it returns. A validator that needs the whole
-// document reaches it through [Node.Document]. The Validation section of
-// the package documentation describes how a validator declares a fault
-// and how one checks decoded data.
+// Check gets the Node that runs it, the root of a document or a Node from
+// [Node.At] or [Node.Nodes]. It returns its errors as it wrote them from
+// that Node. An error about a key the document lacks carries the path of
+// the key. Node.Validate and a decode bind what Check returns as
+// [Node.Bind] binds an error, and bind each warning that Check hands to
+// its context the same way. The validators of this module return their
+// errors unbound, apart from schema.Registry and Each. A schema.Registry
+// binds every error it returns, and Each binds each failure at the Node
+// that its validator checked.
+//
+// A validator that needs the whole document reaches it through
+// [Node.Document]. The context carries cancellation and deadlines to a
+// validator that does work it can stop, such as resolving a remote schema
+// reference. The Validation section of the package documentation
+// describes how a validator declares a fault and how one checks decoded
+// data.
 //
 // A decode and Node.Validate return the syntax error of a document that
 // did not parse before any validator runs. A caller that calls Check
@@ -1613,6 +1621,63 @@ func SkipEmpty(v Validator) Validator {
 	})
 }
 
+// Each returns a [Validator] that runs v on every Node that path selects
+// from the Node it gets, as [Node.Nodes] selects them. It runs v through
+// the Validate method of each such Node, so each failure binds at the
+// Node that v checked. A rule written for one element of a list thus
+// checks every element, and its errors name the element they came from:
+//
+//	items := paths.Current().Child("items").IndexAll()
+//	err := doc.Validate(ctx, niceyaml.MultiValidator(schema, niceyaml.Each(items, reserved)))
+//
+// When the second element of the list is named admin, err reads:
+//
+//	svc.yaml:3:11: $.items[1].name: reserved name
+//
+// Each reports every failure in document order, as [MultiValidator]
+// reports the failures of its validators. It hands the warnings of v to
+// the [Warnings] collector of its context, bound at the Node that v
+// checked. A path that selects nothing passes, and so does a nil v, or
+// one that holds a nil pointer or func, without resolving the path. An
+// error from Node.Nodes comes back as Node.Nodes returns it, and a
+// document that did not parse returns its syntax error. A context that
+// ends stops the run, as the Cancellation section of the package
+// documentation describes.
+func Each(path paths.Path, v Validator) Validator {
+	return ValidatorFunc(func(ctx context.Context, n *Node) error {
+		if nilness.IsNil(v) {
+			return nil
+		}
+
+		nodes, err := n.Nodes(path)
+		if err != nil {
+			return err
+		}
+
+		var errs []error
+
+		for _, node := range nodes {
+			err = ctx.Err()
+			if err != nil {
+				return err //nolint:wrapcheck // The context names the reason, and the Node that runs the validator binds it.
+			}
+
+			err = node.Validate(ctx, v)
+			if err == nil {
+				continue
+			}
+
+			if ctx.Err() != nil {
+				return err
+			}
+
+			errs = append(errs, err)
+		}
+
+		return multierr.Join(errs)
+	})
+}
+
 // Validate runs v on the node. It is the validation step of [Node.Decode]
 // on its own, for a caller that checks a document without decoding it:
 //
@@ -1630,9 +1695,10 @@ func SkipEmpty(v Validator) Validator {
 // Validate hands the warnings of v to the [Warnings] collector of ctx, as
 // the Warnings section of the package documentation describes. A Node
 // from [Node.At] or [Node.Nodes] points an error with no location at its
-// own value. A validator that runs another on a Node of its choosing,
-// such as each element of a list, calls Validate on that Node, where a
-// call to Check returns the error unbound.
+// own value. A validator that runs another on a Node of its choosing
+// calls Validate on that Node, because a call to Check returns the error
+// as the validator wrote it. [Each] runs a validator that way on every
+// Node a path selects, such as each element of a list.
 //
 // A document that did not parse returns the syntax error [Node.Err]
 // returns before v runs, even when v is nil. Otherwise a nil v, or one

@@ -38,8 +38,13 @@ func main() {
 	_, err := source.Decode[menu](ctx, strict)
 	lipgloss.Println(p.PrintError(err))
 
-	// ValidatorFunc adapts a function to the Validator interface.
-	rules := []niceyaml.Validator{niceyaml.ValidatorFunc(capped), niceyaml.ValidatorFunc(distinct)}
+	// ValidatorFunc adapts a function to the Validator interface, and Each
+	// runs a rule on every breakfast.
+	rules := []niceyaml.Validator{
+		niceyaml.ValidatorFunc(capped),
+		niceyaml.ValidatorFunc(distinct),
+		niceyaml.Each(paths.Current().Child("breakfast").IndexAll(), niceyaml.ValidatorFunc(affordable)),
+	}
 
 	fmt.Println("\nReport every failure with MultiValidator:")
 
@@ -94,6 +99,23 @@ func distinct(ctx context.Context, n *niceyaml.Node) error {
 		}
 
 		seen[name] = true
+	}
+
+	return nil
+}
+
+// affordable rejects a breakfast that costs more than 190 kr.
+func affordable(ctx context.Context, n *niceyaml.Node) error {
+	// The path starts at the breakfast that Each runs the rule on.
+	pricePath := paths.Current().Child("price")
+
+	price, err := n.DecodeAt[int](ctx, pricePath)
+	if err != nil {
+		return fmt.Errorf("decode price: %w", err)
+	}
+
+	if price > 190 {
+		return niceyaml.NewError("costs more than 190 kr", niceyaml.AtPath(pricePath))
 	}
 
 	return nil

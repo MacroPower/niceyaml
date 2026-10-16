@@ -6275,11 +6275,12 @@ func TestDataLocator_MergeReads(t *testing.T) {
 }
 
 // TestValidator_DirectCall calls the Check method of every validator the
-// library ships. Each returns the error as the validator it wraps wrote
-// it, and [niceyaml.Node.Validate] binds it. A Registry binds the error
-// of its lookup through the root of the document itself and runs the
-// schema it finds through Node.Validate, so a direct call to it returns
-// what Node.Validate returns.
+// library ships. Most of them return the error as the validator they wrap
+// wrote it, and [niceyaml.Node.Validate] binds it. A Registry binds the
+// error of its lookup through the root of the document itself and runs
+// the schema it finds through Node.Validate. [niceyaml.Each] runs its
+// validator through Node.Validate on each Node it selects. A direct call
+// to either of the two returns what Node.Validate returns.
 func TestValidator_DirectCall(t *testing.T) {
 	t.Parallel()
 
@@ -6350,6 +6351,18 @@ func TestValidator_DirectCall(t *testing.T) {
 			path: itemPath,
 			raw:  "reserved name",
 			want: "c.yaml:4:11: $.items[1].name: reserved name",
+		},
+		"Each": {
+			v:    niceyaml.Each(paths.Current().Child("items").IndexAll(), rule),
+			path: paths.Doc(),
+			raw: stringtest.JoinLF(
+				"c.yaml:3:11: $.items[0].name: reserved name",
+				"c.yaml:4:11: $.items[1].name: reserved name",
+			),
+			want: stringtest.JoinLF(
+				"c.yaml:3:11: $.items[0].name: reserved name",
+				"c.yaml:4:11: $.items[1].name: reserved name",
+			),
 		},
 	}
 
@@ -7352,6 +7365,298 @@ func TestSkipEmpty(t *testing.T) {
 		require.ErrorIs(t, empty.Validate(t.Context(), one), errBad)
 		assert.Zero(t, first)
 		assert.Equal(t, 1, second)
+	})
+}
+
+func TestEach(t *testing.T) {
+	t.Parallel()
+
+	errBad := errors.New("bad")
+
+	namePath := paths.Current().Child("name")
+	items := paths.Current().Child("items").IndexAll()
+
+	// Reserved rejects a Node named admin, with an `@` path that reads from
+	// the Node it gets.
+	reserved := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+		name, err := n.DecodeAt[string](ctx, namePath)
+		if err != nil {
+			return err
+		}
+
+		if name == "admin" {
+			return niceyaml.NewError("reserved name", niceyaml.AtPath(namePath))
+		}
+
+		return nil
+	})
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		name: admin
+		items:
+		  - name: web
+		  - name: admin
+		  - name: admin
+	`), niceyaml.WithName("svc.yaml"))
+
+	both := stringtest.JoinLF(
+		"svc.yaml:4:11: $.items[1].name: reserved name",
+		"svc.yaml:5:11: $.items[2].name: reserved name",
+	)
+
+	t.Run("binds each failure at the Node that v checked", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			// The Node that runs Each, or none for the document.
+			at paths.Path
+			// The path Each selects its Nodes with.
+			path paths.Path
+			// The message of the error, or none for a pass.
+			want string
+		}{
+			"every element": {
+				path: items,
+				want: both,
+			},
+			"one element": {
+				path: paths.Current().Child("items").Index(1),
+				want: "svc.yaml:4:11: $.items[1].name: reserved name",
+			},
+			"an element that passes": {
+				path: paths.Current().Child("items").Index(0),
+			},
+			"a path that selects nothing": {
+				path: paths.Current().Child("missing").IndexAll(),
+			},
+			"an @ path reads from a scoped Node": {
+				at:   paths.Current().Child("items"),
+				path: paths.Current().IndexAll(),
+				want: both,
+			},
+			"a $ path reads from the root": {
+				at:   paths.Current().Child("items").Index(0),
+				path: paths.Doc().Child("items").IndexAll(),
+				want: both,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				node := yamltest.AtOrSelf(t, doc, tc.at)
+				each := niceyaml.Each(tc.path, reserved)
+
+				validated := node.Validate(t.Context(), each)
+				checked := each.Check(t.Context(), node)
+				_, decoded := node.Decode[any](t.Context(), niceyaml.WithValidator(each))
+
+				if tc.want == "" {
+					require.NoError(t, validated)
+					require.NoError(t, checked)
+					require.NoError(t, decoded)
+
+					return
+				}
+
+				require.EqualError(t, validated, tc.want)
+				require.EqualError(t, decoded, tc.want)
+
+				// A direct call returns the failures bound at their Nodes.
+				require.EqualError(t, checked, tc.want)
+			})
+		}
+	})
+
+	t.Run("a lone failure comes back as the Node bound it", func(t *testing.T) {
+		t.Parallel()
+
+		err := doc.Validate(t.Context(), niceyaml.Each(paths.Current().Child("items").Index(1), reserved))
+		require.Error(t, err)
+
+		bound := yamltest.RequireSourceError(t, err)
+		assert.Equal(t, yamltest.LineRange(3, 10, 15), yamltest.RangeOf(t, bound))
+		assert.Equal(t, "$.items[1]", yamltest.BoundNode(t, bound).Path().String())
+	})
+
+	t.Run("binds a failure with no location at each element", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			err error
+		}{
+			"an Error": {
+				err: niceyaml.NewError("bad"),
+			},
+			"an unchecked error": {
+				err: niceyaml.Unchecked(errBad),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := doc.Validate(t.Context(), niceyaml.Each(items, rejectingValidator(tc.err)))
+				require.Error(t, err)
+
+				// One problem comes back for each element, bound at the
+				// value of the element.
+				problems := yamltest.ProblemsOf(err)
+				assert.Equal(t, []string{
+					"svc.yaml:3:3: $.items[0]: bad",
+					"svc.yaml:4:3: $.items[1]: bad",
+					"svc.yaml:5:3: $.items[2]: bad",
+				}, errorTexts(problems))
+
+				for i, problem := range problems {
+					bound := yamltest.RequireSourceError(t, problem.Err)
+					assert.Equal(t, fmt.Sprintf("$.items[%d]", i), yamltest.BoundNode(t, bound).Path().String())
+				}
+			})
+		}
+	})
+
+	t.Run("binds where a returned Check result does not", func(t *testing.T) {
+		t.Parallel()
+
+		second := paths.Current().Child("items").Index(1)
+
+		// A validator that returns the result of Check on an element
+		// reports it from the Node that runs the validator.
+		byHand := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			return reserved.Check(ctx, yamltest.At(t, n, second))
+		})
+
+		require.EqualError(t, doc.Validate(t.Context(), byHand), "svc.yaml:1:7: $.name: reserved name")
+		require.EqualError(
+			t,
+			doc.Validate(t.Context(), niceyaml.Each(second, reserved)),
+			"svc.yaml:4:11: $.items[1].name: reserved name",
+		)
+	})
+
+	t.Run("runs beside a validator of the root", func(t *testing.T) {
+		t.Parallel()
+
+		multi := niceyaml.MultiValidator(reserved, niceyaml.Each(items, reserved))
+
+		require.EqualError(t, doc.Validate(t.Context(), multi), stringtest.JoinLF(
+			"svc.yaml:1:7: $.name: reserved name",
+			both,
+		))
+	})
+
+	t.Run("hands the warnings of the validator to the collector", func(t *testing.T) {
+		t.Parallel()
+
+		old := niceyaml.NewWarning("old name", niceyaml.AtPath(namePath))
+
+		tcs := map[string]struct {
+			v niceyaml.Validator
+		}{
+			"a returned warning": {
+				v: rejectingValidator(old),
+			},
+			"a warning handed to the context": {
+				v: niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+					n.Warn(ctx, old)
+
+					return nil
+				}),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				warnings := niceyaml.NewWarnings()
+				each := niceyaml.Each(items, tc.v)
+
+				require.NoError(t, doc.Validate(warnings.Context(t.Context()), each))
+				require.EqualError(t, warnings.Err(), stringtest.JoinLF(
+					"svc.yaml: 3 warnings",
+					"svc.yaml:3:11: warning: $.items[0].name: old name",
+					"svc.yaml:4:11: warning: $.items[1].name: old name",
+					"svc.yaml:5:11: warning: $.items[2].name: old name",
+				))
+			})
+		}
+	})
+
+	t.Run("a nil validator passes every Node", func(t *testing.T) {
+		t.Parallel()
+
+		for _, v := range []niceyaml.Validator{nil, (*fieldValidator)(nil), niceyaml.ValidatorFunc(nil)} {
+			require.NoError(t, doc.Validate(t.Context(), niceyaml.Each(items, v)))
+		}
+
+		// A typed nil pointer reports no failure, as it does from a
+		// validator given alone.
+		require.NoError(t, doc.Validate(t.Context(), niceyaml.Each(items, typedNilValidator())))
+	})
+
+	t.Run("returns the error of Nodes", func(t *testing.T) {
+		t.Parallel()
+
+		dangling := yamltest.FirstDocument(t, "items: *nope\n", niceyaml.WithName("svc.yaml"))
+
+		_, want := dangling.Nodes(items)
+		require.ErrorIs(t, want, paths.ErrAlias)
+
+		calls := 0
+		counting := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+			calls++
+
+			return nil
+		})
+
+		err := dangling.Validate(t.Context(), niceyaml.Each(items, counting))
+		require.ErrorIs(t, err, paths.ErrAlias)
+		assert.Equal(t, want.Error(), err.Error())
+		assert.Zero(t, calls)
+	})
+
+	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
+		t.Parallel()
+
+		broken := yamltest.UnparsedDocument(t, "items: [\n")
+		require.ErrorIs(t, broken.Err(), niceyaml.ErrSyntax)
+
+		each := niceyaml.Each(items, rejectingValidator(niceyaml.Invalid(errBad)))
+
+		assert.Same(t, broken.Err(), broken.Validate(t.Context(), each))
+		assert.Same(t, broken.Err(), each.Check(t.Context(), broken))
+	})
+
+	t.Run("a context that ends stops the run", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+
+		// The validator fails the first Node and ends the context on the
+		// second.
+		calls := 0
+		canceling := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+			calls++
+			if calls == 1 {
+				return niceyaml.Invalid(errBad)
+			}
+
+			cancel()
+
+			return ctx.Err()
+		})
+
+		err := doc.Validate(ctx, niceyaml.Each(items, canceling))
+		require.ErrorIs(t, err, context.Canceled)
+		require.NotErrorIs(t, err, errBad)
+		assert.Equal(t, 2, calls)
+
+		require.ErrorIs(t, doc.Validate(ctx, niceyaml.Each(items, canceling)), context.Canceled)
+		assert.Equal(t, 2, calls, "an ended context runs no validator")
 	})
 }
 
