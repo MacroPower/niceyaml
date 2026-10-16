@@ -1,6 +1,7 @@
 package style
 
 import (
+	"image/color"
 	"maps"
 
 	"charm.land/lipgloss/v2"
@@ -33,6 +34,12 @@ type Styler interface {
 // style of a predefined kind under any theme, and one with no parent
 // resolves to the base style, as [kind.Parent] places it under [kind.Text].
 //
+// A Styles value can also hold a surface, the background color that
+// [WithSurface] sets. Every kind whose own style sets no background
+// resolves with the surface behind it. A theme thus paints one surface
+// behind all of its text, and kinds with a fill of their own, such as
+// [kind.GenericHighlight], keep that fill.
+//
 // The zero value resolves every kind to an empty style. Create instances
 // with [New].
 type Styles struct {
@@ -46,6 +53,7 @@ type Styles struct {
 // Available options:
 //   - [Set]
 //   - [Inherit]
+//   - [WithSurface]
 type Option func(*config)
 
 // config holds the settings an [Option] configures. An option takes it in
@@ -54,6 +62,9 @@ type Option func(*config)
 type config struct {
 	overrides map[kind.Kind]*lipgloss.Style
 	parents   map[kind.Kind]kind.Kind
+	// The background behind every kind that sets none. Nil leaves the
+	// terminal's own background there.
+	surface color.Color
 }
 
 // Set returns an [Option] that sets the [lipgloss.Style] for a [kind.Kind].
@@ -88,12 +99,38 @@ func Inherit(child, parent kind.Kind) Option {
 	}
 }
 
+// WithSurface returns an [Option] that sets the surface of a [Styles]
+// value, the background behind every kind whose own style sets none.
+// [Styles.Style] returns such a kind with bg as its background. Kinds
+// with a background of their own, such as highlights and headings, keep
+// it. A nil bg, or a [lipgloss.NoColor], sets no surface, so every kind
+// without a background of its own shows the terminal's own background. A
+// later WithSurface replaces the surface.
+//
+// To remove the surface of a theme, pass nil:
+//
+//	plain := theme.Charm.Styles().With(style.WithSurface(nil))
+//
+// The colors of a built-in theme keep their contrast on the surface the
+// theme sets. A theme without its surface draws them on the terminal's
+// own background instead, where some text might be hard to read.
+func WithSurface(bg color.Color) Option {
+	if !isColorSet(bg) {
+		bg = nil
+	}
+
+	return func(c *config) {
+		c.surface = bg
+	}
+}
+
 // New creates a new [Styles] value with inheritance resolved.
 //
 // [kind.Text] uses the base style, and every other kind inherits it.
 // Use [Set] options to override specific kinds; child kinds inherit from
 // their closest set ancestor. Use [Inherit] to place a custom kind under
-// a predefined one.
+// a predefined one, and [WithSurface] to paint one background behind every
+// kind that sets none.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func New(base lipgloss.Style, opts ...Option) Styles {
@@ -118,8 +155,12 @@ func New(base lipgloss.Style, opts ...Option) Styles {
 // [kind.Text]. Only those parents can form a cycle, since the predefined
 // hierarchy ends at [kind.Text], so a walk records the kinds it visits
 // only when some are set. The overrides must hold [kind.Text].
+//
+// A style that sets no background resolves with the surface behind it,
+// when the value holds one. The overrides keep the styles as the options
+// set them, so a later [WithSurface] replaces the surface of every kind.
 func (s Styles) resolve() map[kind.Kind]*lipgloss.Style {
-	lookup := func(st kind.Kind) *lipgloss.Style {
+	closest := func(st kind.Kind) *lipgloss.Style {
 		var visited map[kind.Kind]bool
 
 		for current := st; ; current = s.parent(current) {
@@ -139,6 +180,25 @@ func (s Styles) resolve() map[kind.Kind]*lipgloss.Style {
 				visited[current] = true
 			}
 		}
+	}
+
+	// Kinds that inherit one style share one copy of it with the surface.
+	surfaced := map[*lipgloss.Style]*lipgloss.Style{}
+
+	lookup := func(st kind.Kind) *lipgloss.Style {
+		ls := closest(st)
+		if s.surface == nil || isColorSet(ls.GetBackground()) {
+			return ls
+		}
+
+		if filled, ok := surfaced[ls]; ok {
+			return filled
+		}
+
+		filled := ls.Background(s.surface)
+		surfaced[ls] = &filled
+
+		return &filled
 	}
 
 	resolved := make(map[kind.Kind]*lipgloss.Style, len(s.overrides)+len(s.parents))
@@ -182,6 +242,12 @@ func (s Styles) parent(st kind.Kind) kind.Kind {
 // cannot turn one off. Use [Inherit] to give such a kind the style of a
 // predefined kind, or [Set] to give it a style of its own. The zero
 // Styles value returns an empty style for every kind.
+//
+// For a kind whose style sets no background, Style returns that style
+// with the surface of [WithSurface] as its background. A [Set] that takes
+// its style from Style keeps that surface as a background of its own, so
+// a later [WithSurface] leaves it in place. Build such a style from one
+// that sets no background to keep the kind on the surface.
 func (s Styles) Style(st kind.Kind) lipgloss.Style {
 	if ls, ok := s.resolved[st]; ok && ls != nil {
 		return *ls
@@ -194,13 +260,22 @@ func (s Styles) Style(st kind.Kind) lipgloss.Style {
 	return emptyStyle
 }
 
+// Surface returns the background that [WithSurface] set, or nil when the
+// value has none. Without a surface, every kind that sets no background
+// shows the terminal's own background.
+func (s Styles) Surface() color.Color {
+	return s.surface
+}
+
 // With returns a copy of the [Styles] with the given options applied and
 // inheritance resolved again, so overriding a parent kind also changes
-// the children that inherit from it. The receiver is unchanged.
+// the children that inherit from it. The copy keeps the surface of the
+// receiver unless an option sets another. The receiver is unchanged.
 func (s Styles) With(opts ...Option) Styles {
 	c := Styles{
 		overrides: make(map[kind.Kind]*lipgloss.Style, len(s.overrides)+len(opts)),
 		parents:   make(map[kind.Kind]kind.Kind, len(s.parents)+len(opts)),
+		surface:   s.surface,
 	}
 	maps.Copy(c.overrides, s.overrides)
 	maps.Copy(c.parents, s.parents)

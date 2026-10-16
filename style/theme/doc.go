@@ -16,19 +16,25 @@
 // its styles on the first call and returns the same value afterwards:
 //
 //	if t, ok := theme.Builtin().Get("dracula"); ok {
-//		p := printer.New(printer.WithStyles(t))
+//		p := printer.New(printer.WithStyles(t), printer.WithBox())
 //	}
 //
-// [Charm] is the theme [style.Default] renders with, held as a Theme so a
-// program can name it without a lookup:
+// Themes with a background paint it behind each token, so without
+// [go.jacobcolvin.com/niceyaml/printer.WithBox] that color ends where the
+// content of each row ends. The box fills the rest of the rectangle around
+// the rows with it. The Surfaces section covers how to draw a theme on the
+// terminal's own background instead.
 //
-//	p := printer.New(printer.WithStyles(theme.Charm))
+// [Charm] paints the CharmTone palette of [style.Default] on a Pepper
+// surface. It is a Theme so a program can name it without a lookup:
+//
+//	p := printer.New(printer.WithStyles(theme.Charm), printer.WithBox())
 //
 // [Theme.Styles] returns the [style.Styles] behind a theme, for a program
 // that overrides some of its kinds with [style.Styles.With]:
 //
 //	styles := theme.Charm.Styles().With(style.Set(kind.Comment, dim))
-//	p := printer.New(printer.WithStyles(styles))
+//	p := printer.New(printer.WithStyles(styles), printer.WithBox())
 //
 // A program that names a kind of its own, such as one for an overlay, gives
 // it a parent with [style.Inherit], and it then takes the parent's style
@@ -74,6 +80,24 @@
 // kinds it colors. The package derives the remaining kinds, such as headings,
 // highlights, dimmed text, diff lines, and error marks, from those colors, so
 // every theme presents the same set of kinds.
+//
+// # Surfaces
+//
+// The background of a palette becomes the surface of its theme, as
+// [style.WithSurface] sets it. Every kind without a fill of its own draws
+// on that color, and [go.jacobcolvin.com/niceyaml/printer.WithBox] fills
+// the rest of the rectangle around the rows with it. A few themes, such
+// as pygments, have no background and draw on the terminal's own.
+//
+// To draw any theme on the terminal's background, remove its surface:
+//
+//	styles := t.Styles().With(style.WithSurface(nil))
+//
+// Kinds with a fill of their own, such as the highlights, the headings,
+// and the error marks, keep it. The package picks the derived colors of
+// each theme to keep their contrast on its surface. Without the surface,
+// those colors meet the terminal's background instead, and some of them
+// might be hard to read there.
 //
 // Most themes in this package derive from the Chroma syntax highlighter:
 // https://github.com/alecthomas/chroma

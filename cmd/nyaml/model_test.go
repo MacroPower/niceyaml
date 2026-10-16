@@ -16,6 +16,8 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
@@ -234,6 +236,19 @@ func TestNewModelDefaultTheme(t *testing.T) {
 
 			assert.Equal(t, want.baseView(), got.baseView())
 		})
+	}
+}
+
+func TestBuildPrinterOpts(t *testing.T) {
+	t.Parallel()
+
+	styles := theme.Charm.Styles()
+
+	for _, lineNumbers := range []bool{false, true} {
+		p := printer.New(buildPrinterOpts(lineNumbers, styles)...)
+
+		// The viewer draws its content in a box of the theme's surface.
+		assert.Equal(t, styles.Style(kind.Text).PaddingRight(1), p.ContainerStyle())
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style/kind"
+	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 const defaultHorizontalStep = 6
@@ -204,8 +205,10 @@ type config struct {
 }
 
 // WithPrinter is an [Option] that sets the [*printer.Printer] used for
-// rendering. Without it, the viewport creates a default [printer.Printer].
-// A nil p selects that same default.
+// rendering. Without it, the viewport creates a printer that renders with
+// [theme.Charm] inside the box of [printer.WithBox]. A nil p selects that
+// same default. Pass [printer.WithBox] to a printer of your own to draw the
+// same box, with one cell of padding at the right of each row.
 //
 // The viewport never modifies the printer. Each render derives a copy with
 // [printer.Printer.With] and the viewport's wrap width, so other renderers
@@ -395,7 +398,7 @@ func (m *Model) setInitialValues() {
 	m.searchIndex = -1
 
 	if m.printer == nil {
-		m.printer = printer.New()
+		m.printer = defaultPrinter()
 	}
 
 	if isNil(m.searcher) {
@@ -403,6 +406,12 @@ func (m *Model) setInitialValues() {
 	}
 
 	m.relayout()
+}
+
+// defaultPrinter returns the printer that a [Model] renders with when none
+// is set. It renders with [theme.Charm] inside the box of [printer.WithBox].
+func defaultPrinter() *printer.Printer {
+	return printer.New(printer.WithStyles(theme.Charm), printer.WithBox())
 }
 
 // Init returns the command that starts the viewport, which is nil because
@@ -617,7 +626,7 @@ func (m *Model) renderPrinter(width int) *printer.Printer {
 // themes costs one render and no diff or search index rebuild.
 func (m *Model) SetPrinter(p *printer.Printer) {
 	if p == nil {
-		p = printer.New()
+		p = defaultPrinter()
 	}
 
 	// A printer never changes once built, so the printer already set keeps

@@ -5,11 +5,28 @@
 // from a [style.Styler]. Create one with [New] and render with
 // [Printer.Print]:
 //
-//	p := printer.New(printer.WithStyles(theme.Charm))
+//	p := printer.New()
 //	lipgloss.Println(p.Print(source.View()))
 //
 // Every setting is an [Option]. A Printer never changes after construction,
 // so [Printer.With] derives a copy with more options applied.
+//
+// # Backgrounds
+//
+// By default the printer adds nothing around the rows it renders, so each
+// row ends where its content ends. [style.Default] sets no surface, so the
+// text shows the terminal's own background. A theme that sets a surface,
+// such as [go.jacobcolvin.com/niceyaml/style/theme.Charm], paints it
+// behind each token. For a full-screen viewer, [WithBox] fills the rest of
+// the rectangle around the rows with it:
+//
+//	p := printer.New(printer.WithStyles(theme.Charm), printer.WithBox())
+//
+// To draw such a theme on the terminal's own background instead, remove
+// its surface with [style.WithSurface]:
+//
+//	styles := theme.Charm.Styles().With(style.WithSurface(nil))
+//	p := printer.New(printer.WithStyles(styles))
 //
 // # Color Profiles
 //
@@ -45,15 +62,18 @@
 // which inside tmux starts a process, so a program that prints many views
 // builds one writer and prints them all through it.
 //
-// Output without its sequences is not the plain text of a view. The
-// default container pads each row with spaces, and [WithWrapWidth] wraps
-// a long line onto several rows. [line.View.String] renders a view as
-// plain text, with no padding and no wrap. Below each line, it draws the
-// same caret rows that [DefaultAnnotation] draws. Neither draws a caret
-// for an overlay that no annotation labels, such as a search match, so
-// such an overlay shows through color alone. Output for a log or a file
-// should go through [line.View.String], or through [niceyaml.FormatError],
-// which renders an error the same way.
+// Output without its sequences is not the plain text of a view.
+// [WithWrapWidth] wraps a long line onto several rows. [WithBox],
+// [WithContainerWidth], and a container style that sets any property pad
+// rows with spaces.
+//
+// [line.View.String] renders a view as plain text, with no padding and no
+// wrap. Below each line, it draws the same caret rows that
+// [DefaultAnnotation] draws. Neither draws a caret for an overlay that no
+// annotation labels, such as a search match, so such an overlay shows
+// through color alone. Output for a log or a file should go through
+// [line.View.String], or through [niceyaml.FormatError], which renders an
+// error the same way.
 //
 // # Gutters
 //

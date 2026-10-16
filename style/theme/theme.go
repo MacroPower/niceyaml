@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/exp/charmtone"
 
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -74,9 +75,12 @@ func (t Theme) Style(st kind.Kind) lipgloss.Style {
 }
 
 var (
-	// Charm is the theme of CharmTone colors that [style.Default] returns,
-	// listed here so a picker can offer it by name.
-	Charm = New("charm", Dark, style.Default)
+	// Charm is the theme of CharmTone colors. It paints the palette of
+	// [style.Default] on a Pepper surface, which [style.Default] leaves
+	// out. The catalog lists it so a picker can offer it by name.
+	Charm = New("charm", Dark, func() style.Styles {
+		return style.Default().With(style.WithSurface(charmtone.Pepper))
+	})
 
 	// The catalog of every palette plus charm, built once.
 	builtin = func() Catalog {

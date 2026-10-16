@@ -65,7 +65,7 @@ func main() {
 	lipgloss.Println(p.Print(view))
 
 	// With derives a printer, so the same view prints another way. The
-	// width counts the gutter and the container as well as the content.
+	// width counts the gutter as well as the content.
 	narrow := p.With(printer.WithWrapWidth(48))
 
 	fmt.Println("\nWrap to 48 columns:")

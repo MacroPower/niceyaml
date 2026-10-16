@@ -45,18 +45,26 @@ func TestDefault_HighlightsReadable(t *testing.T) {
 		kind.GenericDeleted,
 	}
 
+	// The default styles draw on the terminal's own background, and
+	// theme.Charm draws the same palette on a Pepper surface, which a
+	// blended highlight mixes into.
+	pepper := style.Default().With(style.WithSurface(charmtone.Pepper))
+
 	tcs := map[string]struct {
-		apply func(base, overlay lipgloss.Style) lipgloss.Style
+		apply  func(base, overlay lipgloss.Style) lipgloss.Style
+		styles style.Styles
 	}{
-		"override": {apply: colors.OverrideStyles},
-		"blend":    {apply: colors.BlendStyles},
+		"override":           {apply: colors.OverrideStyles, styles: style.Default()},
+		"blend":              {apply: colors.BlendStyles, styles: style.Default()},
+		"override on pepper": {apply: colors.OverrideStyles, styles: pepper},
+		"blend on pepper":    {apply: colors.BlendStyles, styles: pepper},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			styles := style.Default()
+			styles := tc.styles
 
 			for _, hl := range []kind.Kind{kind.GenericHighlight, kind.GenericHighlightDim} {
 				for _, k := range content {

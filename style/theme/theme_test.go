@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/lucasb-eyer/go-colorful"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,7 +39,13 @@ func TestCharm(t *testing.T) {
 
 	assert.Equal(t, "charm", theme.Charm.Name)
 	assert.Equal(t, theme.Dark, theme.Charm.Mode)
-	assert.Equal(t, style.Default(), theme.Charm.Styles())
+
+	// Charm paints the palette of the default styles on a surface, which
+	// the default styles leave out.
+	assert.Equal(t, style.Default().With(style.WithSurface(charmtone.Pepper)), theme.Charm.Styles())
+	assert.Equal(t, charmtone.Pepper, theme.Charm.Styles().Surface())
+	assert.Nil(t, style.Default().Surface())
+	assert.Equal(t, lipgloss.NoColor{}, style.Default().Style(kind.Text).GetBackground())
 
 	assert.Equal(t, theme.Charm.Name, builtin(t, "charm").Name)
 }
@@ -207,6 +214,60 @@ func TestBuiltin(t *testing.T) {
 	all[0] = theme.Theme{}
 
 	assert.Equal(t, "abap", theme.Builtin().All()[0].Name)
+}
+
+func TestBuiltin_Surface(t *testing.T) {
+	t.Parallel()
+
+	for _, th := range theme.Builtin().All() {
+		t.Run(th.Name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := th.Styles()
+
+			// A theme with a background holds it as its surface, and the
+			// text takes it.
+			surface := styles.Surface()
+			if surface == nil {
+				surface = lipgloss.NoColor{}
+			}
+
+			assert.Equal(t, surface, styles.Style(kind.Text).GetBackground())
+
+			// Without the surface, every kind keeps its foreground and
+			// any fill of its own. The kinds that took the surface show
+			// the terminal's own background. No fill repeats the surface,
+			// so none of them paints it.
+			plain := styles.With(style.WithSurface(nil))
+
+			assert.Nil(t, plain.Surface())
+			assert.NotEqual(t, lipgloss.NoColor{}, plain.Style(kind.GenericHighlight).GetBackground())
+
+			for k := range kind.All() {
+				painted, got := styles.Style(k), plain.Style(k)
+				assert.Equal(t, painted.GetForeground(), got.GetForeground(), "foreground of %s", k)
+
+				if unset(got.GetBackground()) {
+					assert.Equal(t, surface, painted.GetBackground(), "background of %s", k)
+
+					continue
+				}
+
+				assert.Equal(t, painted.GetBackground(), got.GetBackground(), "fill of %s", k)
+
+				if !unset(surface) {
+					assert.NotEqual(t, yamltest.ColorHex(surface), yamltest.ColorHex(got.GetBackground()),
+						"%s fills with the surface", k)
+				}
+			}
+		})
+	}
+
+	// Most built-in themes paint a surface, and some leave the terminal's
+	// own background in place.
+	dracula := builtin(t, "dracula").Styles()
+	assert.Equal(t, yamltest.ColorHex(lipgloss.Color("#282a36")), yamltest.ColorHex(dracula.Surface()))
+	assert.Nil(t, builtin(t, "pygments").Styles().Surface())
 }
 
 func TestThemeStyles(t *testing.T) {
@@ -699,7 +760,8 @@ func TestPalette_HighlightsReadable(t *testing.T) {
 		"blend":    {apply: colors.BlendStyles, apart: 0.08},
 	}
 
-	// TestDefault_HighlightsReadable covers the highlights of Charm.
+	// TestDefault_HighlightsReadable in the style package covers the
+	// highlights of Charm, with and without its surface.
 	for _, th := range paletteThemes() {
 		t.Run(th.Name, func(t *testing.T) {
 			t.Parallel()

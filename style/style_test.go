@@ -1,6 +1,7 @@
 package style_test
 
 import (
+	"image/color"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -254,6 +255,138 @@ func TestStyles_With(t *testing.T) {
 		// The zero value holds an empty style for every kind.
 		assert.Equal(t, lipgloss.NewStyle(), style.Styles{}.Style("never-set"))
 	})
+}
+
+func TestWithSurface(t *testing.T) {
+	t.Parallel()
+
+	const custom kind.Kind = "customSurface"
+
+	surface := lipgloss.Color("#202020")
+	other := lipgloss.Color("#303030")
+	fill := lipgloss.NewStyle().Background(lipgloss.Color("#ff00ff"))
+
+	// Each case builds its styles over baseStyle.
+	tcs := map[string]struct {
+		surface color.Color
+		want    map[kind.Kind]lipgloss.Style
+		opts    []style.Option
+	}{
+		"kinds without a background take the surface": {
+			opts: []style.Option{
+				style.WithSurface(surface),
+				style.Set(kind.Comment, greenStyle),
+			},
+			surface: surface,
+			want: map[kind.Kind]lipgloss.Style{
+				kind.Text:               baseStyle.Background(surface),
+				kind.Comment:            greenStyle.Background(surface),
+				kind.UILineNumber:       greenStyle.Background(surface),
+				kind.LiteralNumberFloat: baseStyle.Background(surface),
+				custom:                  baseStyle.Background(surface),
+			},
+		},
+		"kinds with a background keep it": {
+			opts: []style.Option{
+				style.Set(kind.GenericHighlight, fill),
+				style.Inherit(custom, kind.GenericHighlight),
+				style.WithSurface(surface),
+			},
+			surface: surface,
+			want: map[kind.Kind]lipgloss.Style{
+				kind.GenericHighlight: fill,
+				custom:                fill,
+				kind.Text:             baseStyle.Background(surface),
+			},
+		},
+		"later surface replaces the earlier one": {
+			opts: []style.Option{
+				style.WithSurface(surface),
+				style.WithSurface(other),
+			},
+			surface: other,
+			want:    map[kind.Kind]lipgloss.Style{kind.Text: baseStyle.Background(other)},
+		},
+		"nil sets no surface": {
+			opts: []style.Option{
+				style.WithSurface(surface),
+				style.WithSurface(nil),
+			},
+			want: map[kind.Kind]lipgloss.Style{kind.Text: baseStyle, kind.Comment: baseStyle},
+		},
+		"NoColor sets no surface": {
+			opts: []style.Option{style.WithSurface(lipgloss.NoColor{})},
+			want: map[kind.Kind]lipgloss.Style{kind.Text: baseStyle, kind.Comment: baseStyle},
+		},
+		"no option sets no surface": {
+			want: map[kind.Kind]lipgloss.Style{kind.Text: baseStyle},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := style.New(baseStyle, tc.opts...)
+
+			assert.Equal(t, tc.surface, styles.Surface())
+			assertStyles(t, tc.want, styles)
+		})
+	}
+}
+
+func TestStyles_Surface(t *testing.T) {
+	t.Parallel()
+
+	surface := lipgloss.Color("#202020")
+	painted := style.New(baseStyle, style.WithSurface(surface), style.Set(kind.Comment, greenStyle))
+
+	tcs := map[string]struct {
+		styles  style.Styles
+		surface color.Color
+		want    map[kind.Kind]lipgloss.Style
+	}{
+		"With keeps the surface": {
+			styles:  painted.With(style.Set(kind.LiteralNumber, redStyle)),
+			surface: surface,
+			want: map[kind.Kind]lipgloss.Style{
+				kind.Text:          baseStyle.Background(surface),
+				kind.LiteralNumber: redStyle.Background(surface),
+			},
+		},
+		"With removes the surface": {
+			styles: painted.With(style.WithSurface(nil)),
+			want: map[kind.Kind]lipgloss.Style{
+				kind.Text:    baseStyle,
+				kind.Comment: greenStyle,
+			},
+		},
+		"With adds a surface to the zero value": {
+			styles:  style.Styles{}.With(style.WithSurface(surface)),
+			surface: surface,
+			want: map[kind.Kind]lipgloss.Style{
+				kind.Text:    lipgloss.NewStyle().Background(surface),
+				kind.Comment: lipgloss.NewStyle().Background(surface),
+			},
+		},
+		"zero value": {
+			styles: style.Styles{},
+			want:   map[kind.Kind]lipgloss.Style{kind.Text: lipgloss.NewStyle()},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.surface, tc.styles.Surface())
+			assertStyles(t, tc.want, tc.styles)
+		})
+	}
+
+	// The receiver keeps its surface.
+	assert.Equal(t, surface, painted.Surface())
+	assert.Equal(t, greenStyle.Background(surface), painted.Style(kind.Comment))
 }
 
 func TestInherit(t *testing.T) {

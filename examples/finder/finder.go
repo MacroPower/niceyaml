@@ -26,10 +26,12 @@ func main() {
 
 	// Create a printer whose styles place the highlight kind under the
 	// theme's own highlight kind, so it takes that color under any theme.
+	// The box fills the rectangle behind the rows with the theme's surface.
 	p := printer.New(
 		printer.WithStyles(theme.Charm.Styles().With(
 			style.Inherit(highlightKind, kind.GenericHighlight),
 		)),
+		printer.WithBox(),
 	)
 
 	// A finder ignores case and diacritics by default.

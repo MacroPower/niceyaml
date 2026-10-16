@@ -67,10 +67,11 @@ type palette struct {
 	// not pick up the italics or bold of the comments. A UI spec layers
 	// over that color, and the UI children inherit from UI as usual.
 	Tokens map[kind.Kind]string
-	// Fg and Bg are the base text colors as hex strings. An empty value
-	// leaves the terminal default in place; the derived kinds then
-	// assume black on white for a [Light] theme and white on black for a
-	// [Dark] one.
+	// Fg and Bg are the base text colors as hex strings. Bg becomes the
+	// surface of the theme, as [style.WithSurface] sets it. An empty value
+	// leaves the terminal default in place. The derived kinds then assume
+	// black on white for a [Light] theme and white on black for a [Dark]
+	// one.
 	Fg, Bg string
 	// Accent colors headings and accented text, and highlights take its
 	// hue, or the nearest hue that lets them stand apart. OK, Warn, and
@@ -105,15 +106,13 @@ func (p palette) styles() style.Styles {
 
 // build builds the [style.Styles] for the palette, with dimSurface and
 // surface as the backgrounds of the highlights and of the subtle and
-// accent headings.
+// accent headings. Bg becomes the surface of the result, as
+// [style.WithSurface] sets it, so the kinds hold no background of their
+// own unless they paint a fill.
 func (p palette) build(dimSurface, surface color.Color) style.Styles {
 	base := lipgloss.NewStyle()
 	if p.Fg != "" {
 		base = base.Foreground(lipgloss.Color(p.Fg))
-	}
-
-	if p.Bg != "" {
-		base = base.Background(lipgloss.Color(p.Bg))
 	}
 
 	fg, bg := p.surface()
@@ -230,6 +229,13 @@ func (p palette) build(dimSurface, surface color.Color) style.Styles {
 		}
 
 		s = s.With(style.Set(st, cur))
+	}
+
+	// The token pass layers each spec over a style it reads from s. A
+	// style read with the surface in place carries the surface as a fill
+	// of its own, so the surface comes last.
+	if p.Bg != "" {
+		s = s.With(style.WithSurface(lipgloss.Color(p.Bg)))
 	}
 
 	return s

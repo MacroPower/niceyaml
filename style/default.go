@@ -13,9 +13,14 @@ import (
 // call and returns the same value to every later call.
 var defaultStyles = sync.OnceValue(buildDefault)
 
-// Default returns the [Styles] niceyaml renders with unless a caller picks a
-// theme. It uses the CharmTone palette, and the theme catalog exposes the
-// same palette as [go.jacobcolvin.com/niceyaml/style/theme.Charm].
+// Default returns the [Styles] a printer renders with unless a caller picks
+// a theme. It uses the CharmTone palette and sets no surface, so the text
+// shows the terminal's own background.
+// [go.jacobcolvin.com/niceyaml/style/theme.Charm] paints the same palette
+// on a Pepper surface.
+//
+// The palette targets a dark background, so its text reads best on a dark
+// terminal.
 //
 // Every call returns the same shared value. Extend it with [Styles.With],
 // which returns a copy.
@@ -25,9 +30,7 @@ func Default() Styles {
 
 // buildDefault builds the [Styles] that [Default] returns.
 func buildDefault() Styles {
-	base := lipgloss.NewStyle().
-		Foreground(charmtone.Smoke).
-		Background(charmtone.Pepper)
+	base := lipgloss.NewStyle().Foreground(charmtone.Smoke)
 
 	return New(
 		base,

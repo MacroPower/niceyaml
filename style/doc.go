@@ -44,6 +44,24 @@
 //
 // A [Set] on the custom kind still wins over the inherited style.
 //
+// # Surface
+//
+// A theme usually draws all of its text on one background, its surface.
+// [WithSurface] holds that color separately from the style of each kind,
+// and every kind whose own style sets no background takes it. Kinds that
+// paint a fill of their own, such as highlights, headings, and error
+// marks, keep their fill. [Styles.Surface] returns the color.
+//
+// Because no kind's style holds the surface, a theme without it draws on
+// the terminal's own background and keeps each fill:
+//
+//	plain := theme.Charm.Styles().With(style.WithSurface(nil))
+//
+// [Default] sets no surface, and its pale text reads best on a dark
+// terminal. Each theme picks its colors for its own surface. On a
+// terminal background of another color, some of its text might be hard to
+// read.
+//
 // # Themes
 //
 // The [go.jacobcolvin.com/niceyaml/style/theme] subpackage provides

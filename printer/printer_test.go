@@ -276,12 +276,104 @@ func TestPrinter_CRLF(t *testing.T) {
 func TestNewPrinter(t *testing.T) {
 	t.Parallel()
 
-	// The default gutter adds line numbers, and the default style adds
-	// trailing padding.
+	// The default gutter adds line numbers, and the default container
+	// adds nothing around the rows.
 	p := printer.New(printer.WithStyles(style.Styles{}))
 	view := niceyaml.NewSourceFromTokens(lexer.Tokenize("key: value")).View()
 
-	assert.Equal(t, "   1  key: value ", p.Print(view))
+	assert.Equal(t, "   1  key: value", p.Print(view))
+	assert.Equal(t, lipgloss.NewStyle(), p.ContainerStyle())
+
+	// The default styles set no surface, so the output paints no
+	// background and each row ends where its content ends.
+	src := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: a longer value", "c: [3]"))
+	got := printer.New().Print(src.View())
+
+	assert.NotContains(t, got, "48;")
+	assert.Equal(t, stringtest.JoinLF("   1  a: 1", "   2  b: a longer value", "   3  c: [3]"), ansi.Strip(got))
+}
+
+func TestWithBox(t *testing.T) {
+	t.Parallel()
+
+	src := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: longer", "c: 3"))
+	border := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+
+	tcs := map[string]struct {
+		opts []printer.Option
+		want []string
+	}{
+		"plain container leaves each row as wide as its content": {
+			want: []string{"a: 1", "b: longer", "c: 3"},
+		},
+		"box pads every row to the widest and one cell more": {
+			opts: []printer.Option{printer.WithBox()},
+			want: []string{"a: 1      ", "b: longer ", "c: 3      "},
+		},
+		"box pads every row to the container width": {
+			opts: []printer.Option{printer.WithBox(), printer.WithContainerWidth(12)},
+			want: []string{"a: 1        ", "b: longer   ", "c: 3        "},
+		},
+		"later container style replaces the box": {
+			opts: []printer.Option{printer.WithBox(), printer.WithContainerStyle(lipgloss.NewStyle())},
+			want: []string{"a: 1", "b: longer", "c: 3"},
+		},
+		"later box replaces the container style": {
+			opts: []printer.Option{printer.WithContainerStyle(border), printer.WithBox()},
+			want: []string{"a: 1      ", "b: longer ", "c: 3      "},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinter().With(tc.opts...)
+
+			assert.Equal(t, stringtest.JoinLF(tc.want...), p.Print(src.View()))
+		})
+	}
+
+	t.Run("box takes the text style of the final styles", func(t *testing.T) {
+		t.Parallel()
+
+		first := style.New(lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000")))
+		second := style.New(lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff00")))
+
+		for _, p := range []*printer.Printer{
+			printer.New(printer.WithStyles(first), printer.WithBox()),
+			printer.New(printer.WithBox(), printer.WithStyles(first)),
+		} {
+			assert.Equal(t, first.Style(kind.Text).PaddingRight(1), p.ContainerStyle())
+
+			// A copy with other styles takes their text style.
+			assert.Equal(t, second.Style(kind.Text).PaddingRight(1),
+				p.With(printer.WithStyles(second)).ContainerStyle())
+		}
+	})
+
+	t.Run("box fills with the surface of the styles", func(t *testing.T) {
+		t.Parallel()
+
+		surface := style.New(
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#ffffff")),
+			style.WithSurface(lipgloss.Color("#202020")),
+			style.Set(kind.GenericHighlight, lipgloss.NewStyle().Background(lipgloss.Color("#ff00ff"))),
+		)
+		view := src.View()
+		view.AddOverlay(kind.GenericHighlight, yamltest.LineRange(1, 3, 9))
+
+		painted := printer.New(printer.WithStyles(surface), printer.WithBox()).Print(view)
+		plain := printer.New(printer.WithStyles(surface.With(style.WithSurface(nil))), printer.WithBox()).Print(view)
+
+		// Both draw the same box, and only the painted one fills it.
+		assert.Equal(t, ansi.Strip(painted), ansi.Strip(plain))
+		assert.Contains(t, painted, "48;2;32;32;32")
+		assert.NotContains(t, plain, "48;2;32;32;32")
+
+		// The highlight keeps its fill without the surface.
+		assert.Contains(t, plain, "48;2;255;0;255")
+	})
 }
 
 func TestPrinter_PrintSlice(t *testing.T) {
@@ -1289,8 +1381,7 @@ func TestPrinter_WordWrap_RowOfRunes(t *testing.T) {
 				view := niceyaml.NewSourceFromString(tc.input).View()
 				p := printer.New(printer.WithGutter(printer.NoGutter), printer.WithWrapWidth(1))
 
-				// The container style pads each row on the right.
-				rows := strings.Split(stringtest.TrimLineEnds(ansi.Strip(p.Print(view))), "\n")
+				rows := strings.Split(ansi.Strip(p.Print(view)), "\n")
 
 				assert.Equal(t, tc.want, rows)
 
@@ -1496,11 +1587,11 @@ func TestPrinter_WordWrap_BreakpointPastWidth_KeepsStyle(t *testing.T) {
 
 	// The row the hard wrap cuts off must open its style again, so the
 	// text it carries renders like the rows around it. The width leaves
-	// seven columns after the gutter and the padding of the container.
+	// seven columns after the gutter.
 	input := "name: some-very-long-name-that-will-wrap-around-the-viewport-width-for-sure\n"
 	view := niceyaml.NewSourceFromString(input).View()
 
-	p := printer.New(printer.WithWrapWidth(14))
+	p := printer.New(printer.WithWrapWidth(13))
 
 	rows := strings.Split(p.Print(view), "\n")
 
@@ -2465,8 +2556,8 @@ func TestPrinter_With(t *testing.T) {
 	// A negative width disables wrapping, and WrapWidth reports that as 0.
 	assert.Equal(t, 0, base.With(printer.WithWrapWidth(-5)).WrapWidth())
 
-	// A negative container width is no width at all, so the box keeps
-	// shrinking to the widest row.
+	// A negative container width pins no width, so ContainerWidth reports
+	// 0 for it.
 	assert.Equal(t, 0, base.ContainerWidth())
 	assert.Equal(t, 40, base.With(printer.WithContainerWidth(40)).ContainerWidth())
 	assert.Equal(t, 0, base.With(printer.WithContainerWidth(-1)).ContainerWidth())
@@ -4478,8 +4569,8 @@ func TestPrinter_WrapWidth_FitsFrame(t *testing.T) {
 
 	// The width counts the frame of the container, so every row of Print
 	// and of PrintError fits it whatever the container draws around the
-	// content. The default container pads each row on the right, and a
-	// border adds a column on each side.
+	// content. The box pads each row on the right, and a border adds a
+	// column on each side.
 	named := niceyaml.NewSourceFromString(
 		"name: a-very-long-name-that-will-wrap-around-the-width-for-sure\n",
 		niceyaml.WithName("long.yaml"),
@@ -4502,9 +4593,13 @@ func TestPrinter_WrapWidth_FitsFrame(t *testing.T) {
 	}{
 		"default container":        {width: 40},
 		"narrow default container": {width: 30},
-		"no container": {
-			opts:  []printer.Option{printer.WithContainerStyle(lipgloss.NewStyle())},
+		"box": {
+			opts:  []printer.Option{printer.WithBox()},
 			width: 40,
+		},
+		"narrow box": {
+			opts:  []printer.Option{printer.WithBox()},
+			width: 30,
 		},
 		"bordered container": {
 			opts: []printer.Option{

@@ -622,7 +622,7 @@ func (m *model) textLine() string {
 }
 
 func buildPrinterOpts(lineNumbers bool, styles style.Styles) []printer.Option {
-	opts := []printer.Option{printer.WithStyles(styles)}
+	opts := []printer.Option{printer.WithStyles(styles), printer.WithBox()}
 
 	if !lineNumbers {
 		opts = append(opts, printer.WithGutter(printer.DiffGutter))
