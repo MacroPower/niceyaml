@@ -2,6 +2,7 @@ package aliasing_test
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
+	"go.jacobcolvin.com/niceyaml/internal/fault"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -413,6 +415,13 @@ func TestCheckDecode(t *testing.T) {
 			path:  paths.Current().Child("kind"),
 			text:  true,
 		},
+		"text past the byte limit read into a value": {
+			// A read into a value shares the scalar between the aliases,
+			// so the byte limit does not refuse it.
+			input: yamltest.AliasedScalar(100, 20),
+			path:  paths.Current().Child("l"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+		},
 		"text of a source with the limit off": {
 			input: stringtest.LinesLF(longScalar, "kind: "+yamltest.FlowSequence("*a", 500)),
 			path:  paths.Current().Child("kind"),
@@ -442,6 +451,208 @@ func TestCheckDecode(t *testing.T) {
 		require.NoError(t, aliasing.CheckDecode((*niceyaml.Node)(nil)))
 		require.NoError(t, aliasing.CheckDecodeText((*niceyaml.Node)(nil)))
 	})
+}
+
+func TestCheckDecodeText(t *testing.T) {
+	t.Parallel()
+
+	// Ten levels of flow sequences around ten scalars. Block style writes
+	// each scalar on a line of its own, ten levels deeper than the alias.
+	deep := strings.Repeat("[", 9) + yamltest.FlowSequence("x", 10) + strings.Repeat("]", 9)
+
+	tcs := map[string]struct {
+		// The expansion error, or nil for a node that passes. Its Alias
+		// holds the line and the column of the alias, in the form "2:5".
+		err   *aliasing.ExpansionError
+		alias string
+		input string
+		opts  []niceyaml.SourceOption
+	}{
+		"aliases past the byte limit": {
+			// Each alias writes the 100 bytes of a on a line of its own,
+			// which "  - " and a newline make 105 bytes long, so the tenth
+			// alias brings the text to 1050 bytes.
+			input: yamltest.AliasedScalar(100, 20),
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			err:   &aliasing.ExpansionError{Limit: 1024},
+			alias: "12:5",
+		},
+		"aliases within the byte limit": {
+			input: yamltest.AliasedScalar(100, 9),
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+		},
+		"aliases with the byte limit off": {
+			input: yamltest.AliasedScalar(100, 20),
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(0)},
+		},
+		"aliases that repeat aliases past the byte limit": {
+			// Each *b repeats both copies of a, so the second *b brings
+			// the text past 512 bytes.
+			input: stringtest.LinesLF(
+				"a: &a "+strings.Repeat("x", 100),
+				"b: &b [*a, *a]",
+				"l: [*b, *b, *b, *b]",
+			),
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(512)},
+			err:   &aliasing.ExpansionError{Limit: 512},
+			alias: "3:9",
+		},
+		"aliases of deep content past the byte limit": {
+			// Each alias repeats 20 nodes. Block style indents the line of
+			// each x by 22 spaces, so the fourth alias brings the text past
+			// 1 KiB.
+			input: stringtest.LinesLF("a: &a "+deep, "l:") + strings.Repeat("  - *a\n", 20),
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			err:   &aliasing.ExpansionError{Limit: 1024},
+			alias: "6:5",
+		},
+		"aliases of spaced content past the byte limit": {
+			// A copy of the text of a repeats the 300 spaces between its
+			// scalars at each alias, so the fourth alias brings the text
+			// past 1 KiB.
+			input: stringtest.LinesLF("a: &a [x,"+strings.Repeat(" ", 300)+"x]", "l: [*a, *a, *a, *a]"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			err:   &aliasing.ExpansionError{Limit: 1024},
+			alias: "2:17",
+		},
+		"aliases of commented content past the byte limit": {
+			// A copy of the text of a repeats its comment at each alias, so
+			// the fourth alias brings the text past 1 KiB.
+			input: stringtest.LinesLF(
+				"a: &a",
+				"  - x # "+strings.Repeat("c", 300),
+				"  - x",
+				"l: [*a, *a, *a, *a]",
+			),
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			err:   &aliasing.ExpansionError{Limit: 1024},
+			alias: "4:17",
+		},
+		"aliases on indented lines past the byte limit": {
+			// A copy of the text of a indents each line of a to the line of
+			// the alias, 60 spaces deep, so the second alias brings the text
+			// past 1 KiB.
+			input: "a: &a\n" + strings.Repeat("  - x\n", 10) + "l:\n" +
+				strings.Repeat(strings.Repeat(" ", 60)+"- *a\n", 4),
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			err:   &aliasing.ExpansionError{Limit: 1024},
+			alias: "14:63",
+		},
+		"alias chain past the depth limit": {
+			// The alias *c8 writes out nine levels inside the mapping and
+			// the sequence around it, so c9 nests eleven levels.
+			input: yamltest.AliasChain(20),
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(10)},
+			err:   &aliasing.ExpansionError{Limit: 10, Depth: true},
+			alias: "10:10",
+		},
+		"alias chain at the depth limit": {
+			input: yamltest.AliasChain(8),
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(10)},
+		},
+		"alias chain with the depth limit off": {
+			input: yamltest.AliasChain(20),
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(0)},
+		},
+		"alias chain past the default depth limit": {
+			input: yamltest.AliasChain(150),
+			err:   &aliasing.ExpansionError{Limit: niceyaml.DefaultDepthLimit, Depth: true},
+			alias: "100:12",
+		},
+		"alias chain with the alias limit off": {
+			input: yamltest.AliasChain(20),
+			opts: []niceyaml.SourceOption{
+				niceyaml.WithDepthLimit(10),
+				niceyaml.WithAliasLimit(false),
+			},
+		},
+		"alias deep in the document": {
+			// The alias lies three levels deep and adds the level of x.
+			input: stringtest.LinesLF("x: &x [1]", "d: {e: {f: *x}}"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(3)},
+			err:   &aliasing.ExpansionError{Limit: 3, Depth: true},
+			alias: "2:12",
+		},
+		"alias deep in the document within the depth limit": {
+			input: stringtest.LinesLF("x: &x [1]", "d: {e: {f: *x}}"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(4)},
+		},
+		"alias to a tag over an alias": {
+			// The alias *s nests k through the alias under the tag.
+			input: stringtest.LinesLF("k: &k [[x]]", "s: &s !foo *k", "l: [*s]"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(3)},
+			err:   &aliasing.ExpansionError{Limit: 3, Depth: true},
+			alias: "3:5",
+		},
+		"alias inside its own anchor": {
+			// The decoder reads *x as null, so it nests no level.
+			input: "x: &x [a, *x]\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(2)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
+
+			// The document keeps the result, so a second check returns the
+			// same error.
+			err := aliasing.CheckDecodeText(doc)
+			assert.Equal(t, err, aliasing.CheckDecodeText(doc))
+
+			if tc.err == nil {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, aliaslimit.ErrExcessiveAliasing)
+			require.ErrorIs(t, err, fault.ErrLimit)
+
+			got, ok := errors.AsType[*aliasing.ExpansionError](err)
+			require.True(t, ok)
+
+			pos := got.Alias.GetToken().Position
+			assert.Equal(t, tc.alias, fmt.Sprintf("%d:%d", pos.Line, pos.Column))
+			assert.Equal(t, tc.err.Limit, got.Limit)
+			assert.Equal(t, tc.err.Depth, got.Depth)
+
+			// A read into a value shares each anchor between its aliases,
+			// so no bound applies to it.
+			require.NoError(t, aliasing.CheckDecode(doc))
+		})
+	}
+}
+
+func TestExpansionError(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err  *aliasing.ExpansionError
+		want string
+	}{
+		"byte limit": {
+			err:  &aliasing.ExpansionError{Limit: 256 << 10},
+			want: "aliases repeat more than 256 KiB of text",
+		},
+		"depth limit": {
+			err:  &aliasing.ExpansionError{Limit: 100, Depth: true},
+			want: "aliases nest the document more than 100 levels",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			require.EqualError(t, tc.err, tc.want)
+			require.ErrorIs(t, tc.err, aliaslimit.ErrExcessiveAliasing)
+			require.ErrorIs(t, tc.err, fault.ErrLimit)
+			require.NotErrorIs(t, tc.err, fault.ErrInvalid)
+		})
+	}
 }
 
 func TestLimited(t *testing.T) {

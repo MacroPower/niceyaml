@@ -61,10 +61,12 @@ type relocation struct {
 
 // newWorkingSource returns a [Source] of text that stands for home, with
 // the unmarshalers us ahead of those of home, as [hook.WorkingSource]
-// describes.
+// describes. The text holds the aliases of home, so a decode of it keeps
+// the bounds that the limits of home put on them.
 func newWorkingSource(text string, home *Node, us []Unmarshaler, locate func(hook.Located) hook.Place) *Source {
 	cfg := home.source.sourceConfig
 	cfg.noLimits = true
+	cfg.aliasBudget = home.doc.state.Budget()
 	cfg.unmarshalers = slices.Concat(us, cfg.unmarshalers)
 
 	src := newStringSource(text, cfg)

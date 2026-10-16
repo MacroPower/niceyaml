@@ -154,10 +154,18 @@ var (
 	// limit gopkg.in/yaml.v3 applies. A [Validator] that decodes the node
 	// it checks returns the same error, as a
 	// [go.jacobcolvin.com/niceyaml/schema.Schema] does. [WithAliasLimit]
-	// on the [Source] turns the limit off for every one of them. The
-	// error comes back bound as a [SourceError] at the first token of the
-	// node that is not a comment. The document is at fault for it, as
+	// on the [Source] turns the limit off for every one of them. The error
+	// comes back bound as a [SourceError] at the first token of the node
+	// that is not a comment. The document is at fault for it, as
 	// [IsInvalid] describes, and it does not match [ErrDecode].
+	//
+	// A decode into a type that reads text and [NewSourceFromLayers] also
+	// fail when the aliases of a document repeat more text than the byte
+	// limit of the Source allows. They fail as well when the aliases nest
+	// the document past its depth limit. That error matches [ErrLimit] too,
+	// and it binds at the alias that takes the text past the bound, as
+	// ErrLimit describes. WithAliasLimit turns off those bounds with the
+	// limit.
 	//
 	// [Node.Nodes] returns ErrExcessiveAliasing too, bound to its receiver
 	// with no location, when aliases lead a selector of the path to far
@@ -221,13 +229,23 @@ var (
 	// the Validation section of the package documentation describes.
 	ErrAmbiguousPath = errors.New("path names the entries of several keys")
 
-	// ErrLimit indicates a text past a limit of its [Source]: a file that
-	// holds more bytes than [WithByteLimit] allows, or a document that
-	// nests more levels than [WithDepthLimit] allows. The document is at
-	// fault for it, as [IsInvalid] describes. A file past the byte limit
-	// fails as a file that does not read, and a document past the depth
-	// limit fails as a document that does not parse.
-	ErrLimit = errors.New("text past a limit")
+	// ErrLimit indicates a text past a limit of its [Source]. A file that
+	// holds more bytes than [WithByteLimit] allows fails as a file that
+	// does not read. A document that nests more levels than
+	// [WithDepthLimit] allows fails as a document that does not parse.
+	// The document is at fault for each, as [IsInvalid] describes.
+	//
+	// The same limits set bounds on the text that the aliases of a
+	// document write out, for a decode into a type that reads text and for
+	// [NewSourceFromLayers]. A node that holds an alias fails such a
+	// decode or merge when the aliases of its document repeat more text
+	// than the byte limit allows. It also fails when they nest the
+	// document more levels than the depth limit allows. Either error also
+	// matches [ErrExcessiveAliasing] and binds at the first alias that
+	// takes the text past the bound, as in "aliases repeat more than 256
+	// KiB of text". The Limits section of the package documentation
+	// describes the bounds.
+	ErrLimit = fault.ErrLimit
 
 	// The reason of a [SourceError] whose error carries no location at
 	// all, which is not a failure to resolve one, so

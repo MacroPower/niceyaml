@@ -1,11 +1,16 @@
 package aliasing
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/fault"
+	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -34,25 +39,26 @@ func CheckDecode(n Node) error {
 		return nil
 	}
 
-	excessive := state.ExcessiveAliasing(func() bool {
-		return excessiveRead(state.Facts(), readValue)
+	return state.ExcessiveAliasing(func() error {
+		return checkRead(state.Facts(), readValue, Budget{})
 	})
-	if excessive {
-		return aliaslimit.ErrExcessiveAliasing
-	}
-
-	return nil
 }
 
-// CheckDecodeText returns [aliaslimit.ErrExcessiveAliasing] when n holds
-// an alias and aliases make up too much of the text the decoder writes
-// out for the node. To decode a type with an UnmarshalText method, or one
-// that reads YAML bytes, the decoder writes the node out as text with
-// each alias in full. The count covers the whole document as
-// [CheckDecode] does. It reads every node as text, so each scalar counts
-// one node per byte of its text. A node without an alias passes, as does
-// a nil Node and every node of a document the limit does not apply to.
-// The document keeps the count, as it keeps the count of CheckDecode.
+// CheckDecodeText returns an error when n holds an alias and aliases make
+// up too much of the text the decoder writes out for the node. To decode
+// a type with an UnmarshalText method, or one that reads YAML bytes, the
+// decoder writes the node out as text with each alias in full. The count
+// covers the whole document as [CheckDecode] does. It reads every node as
+// text, so each scalar counts one node per byte of its text.
+//
+// The text must fit the [Budget] of the document as well as the limit.
+// An [*ExpansionError] reports the first alias of the document that takes
+// the text past a bound of the Budget. For a document past the limit and
+// within the Budget, CheckDecodeText returns
+// [aliaslimit.ErrExcessiveAliasing]. A node without an alias passes, as
+// does a nil Node and every node of a document the limit does not apply
+// to. The document keeps the result of the count, as it keeps the result
+// of CheckDecode.
 //
 // A caller that decodes n into a type that [DecodesText] reports runs
 // CheckDecodeText as well as CheckDecode.
@@ -62,14 +68,60 @@ func CheckDecodeText(n Node) error {
 		return nil
 	}
 
-	excessive := state.ExcessiveTextAliasing(func() bool {
-		return excessiveRead(state.Facts(), readText)
+	return state.ExcessiveTextAliasing(func() error {
+		return checkRead(state.Facts(), readText, state.Budget())
 	})
-	if excessive {
-		return aliaslimit.ErrExcessiveAliasing
+}
+
+// Budget bounds the text that the aliases of a document write out where
+// the decoder writes a node out as text. It applies in addition to the
+// alias limit. The niceyaml package takes each bound from the byte limit
+// and the depth limit of the source of the document. A bound of zero is
+// off.
+type Budget struct {
+	// Bytes is the most text that the aliases of the document repeat, as
+	// a writer in block style writes it. Such a writer puts each mapping
+	// entry and each sequence element on a line of its own.
+	// [CheckDecodeText] weighs each node that an alias repeats by its
+	// text: the length in bytes of a scalar, or one byte for a mapping or
+	// a sequence. It adds one byte to each node, and two bytes of
+	// indentation for each level around the node in the document.
+	Bytes int
+	// Depth is the most levels that the document nests with each alias
+	// written out in full. An alias nests the levels around it and the
+	// levels its content nests, through the aliases there.
+	Depth int
+}
+
+// ExpansionError is the failure of a document whose aliases, written out
+// in full, take its text past a bound of its [Budget]. It matches
+// [aliaslimit.ErrExcessiveAliasing] and [fault.ErrLimit].
+type ExpansionError struct {
+	// Alias is the first alias, in the order of the document, that takes
+	// the text past the bound.
+	Alias *ast.AliasNode
+	// Limit is the bound the text passes, in bytes for the byte bound and
+	// in levels for the depth bound.
+	Limit int
+	// Depth reports that the text passes the depth bound of the Budget
+	// and not its byte bound.
+	Depth bool
+}
+
+// Error returns the message of e, as "aliases repeat more than 256 KiB
+// of text" or "aliases nest the document more than 100 levels".
+func (e *ExpansionError) Error() string {
+	if e.Depth {
+		return "aliases nest the document more than " + strconv.Itoa(e.Limit) + " levels"
 	}
 
-	return nil
+	return "aliases repeat more than " + quantity.Bytes(e.Limit) + " of text"
+}
+
+// Is reports whether target is [aliaslimit.ErrExcessiveAliasing] or
+// [fault.ErrLimit].
+func (e *ExpansionError) Is(target error) bool {
+	return target == aliaslimit.ErrExcessiveAliasing || target == fault.ErrLimit
 }
 
 // Limited reports whether the alias limit applies to the document of n.
@@ -116,14 +168,20 @@ func stateOf(n Node) *State {
 	return StateOf(n)
 }
 
-// excessiveRead reports whether aliases make up too much of what a
-// decode of the document of f reads, with the document read as mode.
-func excessiveRead(f *Facts, mode readMode) bool {
+// checkRead returns the error of what a decode of the document of f reads
+// as mode. It returns an [*ExpansionError] when the aliases of the
+// document take it past a bound of budget. It returns
+// [aliaslimit.ErrExcessiveAliasing] when they make up too much of the
+// read.
+func checkRead(f *Facts, mode readMode, budget Budget) error {
 	c := treeCounter{
 		resolver:    f.resolver,
 		nulls:       f.nulls,
+		budget:      budget,
 		sizes:       [readModes]map[ast.Node]int{{}, {}},
 		open:        map[ast.Node]bool{},
+		extents:     map[ast.Node]extent{},
+		measuring:   map[ast.Node]bool{},
 		collections: map[*ast.AliasNode]bool{},
 		textKeys:    map[*ast.AliasNode]bool{},
 		binaries:    map[*ast.AliasNode]bool{},
@@ -132,7 +190,15 @@ func excessiveRead(f *Facts, mode readMode) bool {
 
 	c.count(f.body, true, mode)
 
-	return aliaslimit.Excessive(c.distinct, c.aliased)
+	if c.overrun != nil {
+		return c.overrun
+	}
+
+	if aliaslimit.Excessive(c.distinct, c.aliased) {
+		return aliaslimit.ErrExcessiveAliasing
+	}
+
+	return nil
 }
 
 // holdsAlias reports whether node or any node below it is an alias.
@@ -237,15 +303,32 @@ const (
 // alias refers to a !!binary scalar. A chain of tagged aliases then costs
 // one walk, however many aliases lead into it. The repeated map holds
 // what [treeCounter.repeats] has found for the content of each alias.
+//
+// The budget bounds the text the aliases repeat and the levels they add
+// to the tree, as [Budget] describes. A bound of zero is off. The level
+// field holds the levels around the node that the counter reads in the
+// tree, outside the content of every alias. The written field holds the
+// text that the aliases of the tree repeat so far, as the byte bound
+// weighs it. The extents map holds the [extent] of the content of each
+// alias, after [treeCounter.measure] has read it. The measuring map holds
+// the content of each alias that measure is reading. The overrun field
+// holds the error of the first alias that takes the tree past a bound of
+// the budget.
 type treeCounter struct {
 	resolver    *paths.Resolver
 	nulls       map[*ast.AliasNode]bool
 	sizes       [readModes]map[ast.Node]int
 	open        map[ast.Node]bool
+	extents     map[ast.Node]extent
+	measuring   map[ast.Node]bool
 	collections map[*ast.AliasNode]bool
 	textKeys    map[*ast.AliasNode]bool
 	binaries    map[*ast.AliasNode]bool
 	repeated    map[ast.Node]bool
+	overrun     *ExpansionError
+	budget      Budget
+	level       int
+	written     int
 	distinct    int
 	aliased     int
 }
@@ -284,6 +367,13 @@ func (c *treeCounter) count(node ast.Node, top bool, mode readMode) int {
 		c.distinct = aliaslimit.AddCapped(c.distinct, size)
 	}
 
+	// A mapping or a sequence of the tree opens a level around the nodes
+	// in it.
+	opens := top && isCollection(node)
+	if opens {
+		c.level++
+	}
+
 	switch n := node.(type) {
 	case *ast.MappingNode:
 		for _, entry := range n.Values {
@@ -297,6 +387,10 @@ func (c *treeCounter) count(node ast.Node, top bool, mode readMode) int {
 		for _, elem := range n.Values {
 			size = aliaslimit.AddCapped(size, c.count(elem, top, mode))
 		}
+	}
+
+	if opens {
+		c.level--
 	}
 
 	return size
@@ -392,7 +486,8 @@ func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool, mode readMode) in
 // as in `&s !foo *k`, refers to what that alias refers to. With top set,
 // the alias lies outside the content of every other alias. It is then a
 // node of the tree itself, so alias adds one to distinct, and it adds
-// the size of what the alias repeats to aliased.
+// the size of what the alias repeats to aliased. It then checks the alias
+// against the budget with [treeCounter.spend].
 func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 	target, err := c.resolver.Deref(alias)
 	if err != nil || c.nulls[alias] || c.open[target] || (mode == readValue && !c.repeats(target)) {
@@ -416,9 +511,230 @@ func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 		// The alias is a node of its own, as gopkg.in/yaml.v3 counts it.
 		c.distinct = aliaslimit.AddCapped(c.distinct, 1)
 		c.aliased = aliaslimit.AddCapped(c.aliased, size)
+
+		c.spend(alias)
 	}
 
 	return size
+}
+
+// spend records an [*ExpansionError] at alias, an alias of the tree, when
+// alias takes the tree past a bound of the budget and no alias before it
+// did. It adds the text that alias repeats to written, as
+// [extent.text] weighs the content of alias at the level of alias. The
+// written field must not pass the byte bound. The levels around alias
+// and the levels its content nests must not pass the depth bound.
+func (c *treeCounter) spend(alias *ast.AliasNode) {
+	if c.overrun != nil || c.budget == (Budget{}) {
+		return
+	}
+
+	content := c.aliasExtent(alias)
+
+	c.written = aliaslimit.AddCapped(c.written, content.text(c.level))
+	if c.budget.Bytes > 0 && c.written > c.budget.Bytes {
+		c.overrun = &ExpansionError{Alias: alias, Limit: c.budget.Bytes}
+
+		return
+	}
+
+	if c.budget.Depth > 0 && c.level+content.depth > c.budget.Depth {
+		c.overrun = &ExpansionError{Alias: alias, Limit: c.budget.Depth, Depth: true}
+	}
+}
+
+// extent is what a node holds with each alias in it written out in full,
+// which the budget weighs. A writer can give the node the text of block
+// style, with each mapping entry and each sequence element on a line of
+// its own. It can also copy the node as the document spells it, with the
+// text of each alias in place of the alias.
+type extent struct {
+	// The levels the node nests, one for each mapping or sequence on the
+	// way from the node to its deepest value.
+	depth int
+	// The text of the node in block style without the indentation and the
+	// punctuation of its lines. That is the length in bytes of each
+	// scalar and tag, and two bytes for each mapping or sequence.
+	units int
+	// The lines of the node in block style. Each key and each other leaf
+	// that is not the value of a mapping entry starts a line. A leaf is a
+	// scalar, an empty mapping, or an empty sequence.
+	lines int
+	// The levels between the node and the leaf that starts each of its
+	// lines, summed.
+	levels int
+	// The length in bytes of the text of the node as the document spells
+	// it. That text holds the comments and the spaces between its tokens,
+	// and the text of each alias in it.
+	spelled int
+	// The lines of that text.
+	spelledLines int
+	// Whether the node is a leaf.
+	leaf bool
+}
+
+// text returns the bytes that a writer of the node of e gives it when
+// level mappings and sequences lie around it, as [Budget] weighs them.
+// That is the larger of the text in block style and the text as the
+// document spells it. In block style, each line weighs one byte of
+// punctuation and two bytes of indentation for each level around the
+// leaf that starts it.
+func (e *extent) text(level int) int {
+	perLine := mulCapped(e.lines, aliaslimit.AddCapped(1, mulCapped(2, level)))
+	block := aliaslimit.AddCapped(aliaslimit.AddCapped(e.units, perLine), mulCapped(2, e.levels))
+
+	return max(block, e.spelled)
+}
+
+// nest adds child, a key, a value, or an element one level inside the
+// mapping or the sequence of e.
+func (e *extent) nest(child extent) {
+	e.depth = max(e.depth, child.depth+1)
+	e.units = aliaslimit.AddCapped(e.units, child.units)
+	e.lines = aliaslimit.AddCapped(e.lines, child.lines)
+	e.levels = aliaslimit.AddCapped(e.levels, aliaslimit.AddCapped(child.levels, child.lines))
+	e.spelled = aliaslimit.AddCapped(e.spelled, child.spelled)
+	e.spelledLines = aliaslimit.AddCapped(e.spelledLines, child.spelledLines)
+}
+
+// measure returns the [extent] of node. A mapping or a sequence nests one
+// level more than the deepest key, value, or element in it. A scalar
+// starts one line and nests no level. An anchor, a tag, or the `?` of an
+// explicit key holds what it wraps, and a tag adds its own text. An
+// alias holds the extent of its content, as [treeCounter.aliasExtent]
+// finds it. The spelled text of node counts only the aliases in it, and
+// aliasExtent adds the text of the content that holds them.
+func (c *treeCounter) measure(node ast.Node) extent {
+	if astnode.IsNil(node) {
+		return extent{}
+	}
+
+	switch n := node.(type) {
+	case *ast.AliasNode:
+		return c.aliasExtent(n)
+	case *ast.AnchorNode:
+		return c.measure(n.Value)
+	case *ast.MappingKeyNode:
+		return c.measure(n.Value)
+	case *ast.CommentGroupNode:
+		return extent{}
+	case *ast.TagNode:
+		e := c.measure(n.Value)
+		if n.Start != nil {
+			e.units = aliaslimit.AddCapped(e.units, len(n.Start.Value)+1)
+		}
+
+		return e
+	}
+
+	if !isCollection(node) {
+		return extent{units: textSize(node), lines: 1, leaf: true}
+	}
+
+	e := extent{depth: 1, units: 2}
+
+	switch n := node.(type) {
+	case *ast.MappingNode:
+		for _, entry := range n.Values {
+			c.measureEntry(&e, entry)
+		}
+
+	case *ast.MappingValueNode:
+		c.measureEntry(&e, n)
+
+	case *ast.SequenceNode:
+		for _, elem := range n.Values {
+			e.nest(c.measure(elem))
+		}
+	}
+
+	if e.lines == 0 {
+		e.lines, e.leaf = 1, true
+	}
+
+	return e
+}
+
+// measureEntry nests the key and the value of entry, an entry of the
+// mapping of e, in e. A leaf value goes on the line of its key, so it
+// starts no line of its own.
+func (c *treeCounter) measureEntry(e *extent, entry *ast.MappingValueNode) {
+	if entry == nil {
+		return
+	}
+
+	e.nest(c.measure(entry.Key))
+
+	value := c.measure(entry.Value)
+	if value.leaf {
+		value.lines, value.levels = 0, 0
+	}
+
+	e.nest(value)
+}
+
+// aliasExtent returns the [extent] of the content of alias. An alias that
+// does not resolve, one that the decoder reads as null, and one that
+// leads back into content that [treeCounter.measure] is reading each hold
+// a leaf of one byte. A writer that copies the content of an alias as the
+// document spells it indents each line of that text to the line of the
+// alias. The spelled text of alias grows by that indentation. The
+// extents map holds the extent of the content of each alias, so a chain
+// of nested aliases costs one walk per anchor.
+func (c *treeCounter) aliasExtent(alias *ast.AliasNode) extent {
+	target, err := c.resolver.Deref(alias)
+	if err != nil || c.nulls[alias] || c.measuring[target] {
+		return extent{units: 1, lines: 1, leaf: true}
+	}
+
+	e, ok := c.extents[target]
+	if !ok {
+		c.measuring[target] = true
+		e = c.measure(target)
+		delete(c.measuring, target)
+
+		e.spelled, e.spelledLines = spell(target, e.spelled, e.spelledLines)
+
+		c.extents[target] = e
+	}
+
+	if tk := alias.GetToken(); tk != nil && tk.Position != nil {
+		e.spelled = aliaslimit.AddCapped(e.spelled, mulCapped(e.spelledLines, tk.Position.IndentNum))
+	}
+
+	return e
+}
+
+// spell returns the length in bytes and the lines of the text of node as
+// the document spells it, comments and spaces included. The origins of
+// the tokens of node hold that text, from the first token to the last.
+// It adds them to bytes and lines, the text and the lines of the aliases
+// in node.
+func spell(node ast.Node, bytes, lines int) (int, int) {
+	first, last := astnode.Bounds(node)
+	if len(first) == 0 || len(last) == 0 {
+		return bytes, lines
+	}
+
+	end := last[0].Position.Offset
+	lines = aliaslimit.AddCapped(lines, 1)
+
+	for tk := first[0]; tk != nil && tk.Position != nil && tk.Position.Offset <= end; tk = tk.Next {
+		bytes = aliaslimit.AddCapped(bytes, len(tk.Origin))
+		lines = aliaslimit.AddCapped(lines, strings.Count(tk.Origin, "\n"))
+	}
+
+	return bytes, lines
+}
+
+// mulCapped returns a*b, or [aliaslimit.CountCap] when the product would
+// pass it. Both a and b fall between zero and CountCap.
+func mulCapped(a, b int) int {
+	if b != 0 && a > aliaslimit.CountCap/b {
+		return aliaslimit.CountCap
+	}
+
+	return a * b
 }
 
 // repeats reports whether each alias to target, the content of an

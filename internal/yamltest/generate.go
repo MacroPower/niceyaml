@@ -49,6 +49,23 @@ func AliasLevels(levels int) string {
 	return sb.String()
 }
 
+// AliasChain creates YAML content with the keys c0 through c<links>, each
+// under an anchor of the same name. Key c0 is [x], and each later key
+// lists one alias of the key before it. No line of the content nests more
+// than two levels, but *c<links> written out in full nests links+1 levels
+// of sequences.
+func AliasChain(links int) string {
+	var sb strings.Builder
+
+	sb.WriteString("c0: &c0 [x]\n")
+
+	for link := 1; link <= links; link++ {
+		fmt.Fprintf(&sb, "c%d: &c%d [*c%d]\n", link, link, link-1)
+	}
+
+	return sb.String()
+}
+
 // MergeLevels creates YAML content with the keys m0 through m<levels>,
 // each under an anchor of the same name. Key m0 is {a: x}, and each later
 // key merges ten aliases of the key before it, so a decode reads m0
@@ -111,6 +128,14 @@ func AliasedMapping(keys, aliases int) string {
 	}
 
 	return sb.String()
+}
+
+// AliasedScalar creates YAML content whose key a holds a scalar of size
+// bytes under the anchor a. Its key l lists aliases elements, each an
+// alias to a, in a block sequence that starts on the third line. A writer
+// that writes each alias out in full repeats the scalar at every element.
+func AliasedScalar(size, aliases int) string {
+	return "a: &a " + strings.Repeat("x", size) + "\nl:\n" + strings.Repeat("  - *a\n", aliases)
 }
 
 // AliasKey creates YAML content whose key holds a mapping with the alias

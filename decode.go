@@ -328,6 +328,13 @@ func (u Unmarshaler) applyTo(o *unmarshaler.Options) {
 // such as `type fields T`. A function that needs the YAML text of the
 // value decodes into a [yaml.RawMessage].
 //
+// The decoder writes the value out as text for the decode function. A
+// decode of a node that holds an alias then fails when the aliases of
+// the document repeat more text than the byte limit of the Source allows.
+// It also fails when they nest the document past its depth limit. Each
+// error matches [ErrLimit], as the Limits section of the package
+// documentation describes.
+//
 // The decode reads T as a type that decodes itself, so an error fn
 // returns binds at the value, as the Decoding and Validation sections of
 // the package documentation describe. A rejection from the decode
@@ -530,11 +537,13 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // anything runs. When the node holds an alias, the decode counts what a
 // decode of the whole document reads, with each alias reading its
 // content in full, and returns an error matching [ErrExcessiveAliasing]
-// when aliases make up too much of it. A step that fails before the
-// go-yaml decoder runs leaves v as it is. A field the document leaves out
-// keeps its value. The same section describes how a mapping, a null, and
-// an alias fill v, and the Defaults section describes the value that each
-// value the decode creates starts from.
+// when aliases make up too much of it. For a v that reads text, an error
+// past the bounds that the byte limit and the depth limit of the [Source]
+// set on the aliases matches [ErrLimit] too. A step that fails before
+// the go-yaml decoder runs leaves v as it is. A field the document leaves
+// out keeps its value. The same section describes how a mapping, a null,
+// and an alias fill v, and the Defaults section describes the value that
+// each value the decode creates starts from.
 //
 // Every error comes back bound to the source as a [SourceError]. An
 // error of the decoder matches [ErrDecode] and carries the `$` path of
@@ -572,7 +581,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 	}
 
 	if err != nil {
-		return n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
+		return n.aliasingError(err)
 	}
 
 	// The decoder step reports each problem as an error, whatever it wraps,
@@ -587,6 +596,22 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 	}
 
 	return n.selfValidate(ctx, v, cfg)
+}
+
+// aliasingError returns err, the error of an alias check of n, bound to n
+// with the document at fault. An [*aliasing.ExpansionError] binds at the
+// alias that takes the text past a bound of the Source. The bound error
+// keeps no node of the document, so [Detach] can release the parse. Any
+// other error binds at the first token of n that is not a comment.
+func (n *Node) aliasingError(err error) error {
+	expansion, ok := errors.AsType[*aliasing.ExpansionError](err)
+	if !ok {
+		return n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
+	}
+
+	limit := &markedError{err: errors.New(expansion.Error()), marks: []error{ErrLimit, ErrExcessiveAliasing}}
+
+	return n.Bind(Invalid(limit, atToken(expansion.Alias.GetToken())))
 }
 
 // checkTarget returns sentinel when v is nil or a nil pointer, or, with
@@ -677,7 +702,8 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 		c.allowDuplicateKeys = n.source.allowDuplicateKeys
 
 		// The decoder wrote the text from a node that passed the limits of
-		// its own Source.
+		// its own Source. The decode checked the aliases of that node
+		// against the bounds of those limits before the decoder wrote it.
 		c.noLimits = true
 	})
 

@@ -35,8 +35,9 @@ type blockLevel struct {
 // A flow collection opens a level at its "[" or "{". A block collection
 // opens one at its first key or "-", in a column deeper than the block
 // collection that holds it, or in the column of its key for a sequence
-// that is the value of a mapping entry. An alias opens no level, because the
-// alias limit bounds what it repeats. Each document counts from zero.
+// that is the value of a mapping entry. An alias opens no level, because
+// the aliasing package bounds the levels that aliases add where a reader
+// writes them out. Each document counts from zero.
 func tooDeep(run token.Tokens, limit int) (*token.Token, bool) {
 	if limit <= 0 {
 		return nil, false

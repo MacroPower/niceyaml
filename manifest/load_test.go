@@ -1277,6 +1277,70 @@ func TestRegistry_Load_Unmarshalers(t *testing.T) {
 	}
 }
 
+func TestRegistry_Load_AliasExpansion(t *testing.T) {
+	t.Parallel()
+
+	// The level reads text through a function from
+	// niceyaml.CustomUnmarshaler. The decode of the working copy thus
+	// writes each alias in the labels out in full, the 100 bytes of the
+	// anchor a at each of 20 aliases.
+	doc := stringtest.LinesLF(
+		"apiVersion: alarm.jacobcolvin.com/v1",
+		"kind: Alarm",
+		"metadata:",
+		"  name: smoke",
+		"  labels:",
+		"    a: &a "+strings.Repeat("x", 100),
+	) + yamltest.GenerateLines(20, "    l%d: *a") + stringtest.LinesLF("spec:", "  level: high")
+
+	reg := manifest.MustNewRegistry(
+		manifest.WithNameField(meta.Child("name")),
+		manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeAlarmLevel)),
+		manifest.WithKinds(manifest.NewKind[Alarm]("Alarm", manifest.Version("alarm.jacobcolvin.com/v1"))),
+	)
+
+	tcs := map[string]struct {
+		err  string
+		opts []niceyaml.SourceOption
+	}{
+		"aliases past the byte limit": {
+			// The ninth alias brings the text past 1 KiB.
+			opts: []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			err:  "config/alarm.yaml:15:9: aliases repeat more than 1 KiB of text",
+		},
+		"aliases within a raised byte limit": {
+			opts: []niceyaml.SourceOption{niceyaml.WithByteLimit(4096)},
+		},
+		"aliases with the alias limit off": {
+			opts: []niceyaml.SourceOption{niceyaml.WithByteLimit(1024), niceyaml.WithAliasLimit(false)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			in := configFS(map[string]string{"alarm.yaml": doc}, manifest.WithSourceOptions(tc.opts...))
+
+			set, err := reg.Load(t.Context(), in)
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				alarm, ok := set.Get[Alarm]("smoke")
+				require.True(t, ok)
+				assert.Len(t, alarm.Value.Metadata.Labels, 21)
+
+				return
+			}
+
+			require.Error(t, err)
+			assert.Contains(t, niceyaml.FormatError(err), tc.err)
+			require.ErrorIs(t, err, niceyaml.ErrLimit)
+			require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+		})
+	}
+}
+
 func TestLoadError(t *testing.T) {
 	t.Parallel()
 

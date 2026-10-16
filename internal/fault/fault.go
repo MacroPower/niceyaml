@@ -1,15 +1,27 @@
-// Package fault holds the mark of an error the document is at fault for.
+// Package fault holds the errors that mark a problem of a document, so
+// that several packages of the module can set and match them.
 //
-// An error type of the module declares that fault by matching
+// An error type of the module declares the document at fault by matching
 // [ErrInvalid] from an Is method. The niceyaml package reads the mark to
 // tell a problem of the document from a check that could not run. The
-// mark sits in an internal package so the schema package can match it
-// while no caller outside the module can name it.
+// mark sits in an internal package so the schema package can match it,
+// and no caller outside the module can name it.
+//
+// [ErrLimit] marks a text past a limit of its source, and the niceyaml
+// package exports it. The expansion error of the aliasing package matches
+// it too, for aliases that write out more text, or nest it deeper, than
+// the bounds of those limits allow.
 package fault
 
 import "errors"
 
-// ErrInvalid is the target an error matches from an Is method to declare
-// the document at fault. No error wraps it, so its message reaches no
-// caller.
-var ErrInvalid = errors.New("invalid document")
+var (
+	// ErrInvalid is the target an error matches from an Is method to
+	// declare the document at fault. No error wraps it, so its message
+	// reaches no caller.
+	ErrInvalid = errors.New("invalid document")
+
+	// ErrLimit indicates a text past a limit of its source. The niceyaml
+	// package exports the same error value.
+	ErrLimit = errors.New("text past a limit")
+)

@@ -62,13 +62,16 @@ var (
 // The merge fails on the lowest layer that holds no value it can read. A
 // Source of several documents holds none, and neither does a document
 // that did not parse, that a decode of it alone into an any value
-// rejects, or that goes past the alias limit of [WithAliasLimit]. A key
-// that is a sequence or a mapping fails its layer with [ErrUnnamedKey].
-// The merge returns the error of that layer, bound in its file, and no
-// Source. It returns the error of ctx once ctx ends, so a deadline stops
-// a merge that writes many aliases out. A layer of MergeAs that the
-// layers do not hold fails the call with [ErrUnknownLayer] before any
-// layer merges.
+// rejects, or that goes past the alias limit of [WithAliasLimit].
+//
+// The merge writes each alias out in full. A layer fails with an error
+// that matches [ErrLimit] when its aliases repeat more text than the byte
+// limit of its Source allows, or nest the layer past its depth limit. A
+// key that is a sequence or a mapping fails its layer with
+// [ErrUnnamedKey]. The merge returns the error of that layer, bound in
+// its file, and no Source. It returns the error of ctx when ctx ends. A
+// layer of MergeAs that the layers do not hold fails the call with
+// [ErrUnknownLayer] before any layer merges.
 func NewSourceFromLayers[L Layer](ctx context.Context, layers []L, opts ...MergeOption) (*Source, error) {
 	var cfg mergeConfig
 
@@ -390,8 +393,9 @@ func resolveLayers[L Layer](given []L, as Layer) ([]resolvedLayer, int, error) {
 }
 
 // read returns the value of layer i, or nil when it holds none. It decodes
-// the layer first, so a layer fails here as it fails alone, and checks the
-// alias limit, because the reader writes each alias out in full.
+// the layer first, so a layer fails here as it fails alone. The reader
+// writes each alias out in full, so read then checks the alias limit, and
+// the bounds that the limits of the Source of the layer set on that text.
 func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, error) {
 	n := l.node
 	if n == nil {
@@ -414,7 +418,7 @@ func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, erro
 
 	err = aliasing.CheckDecodeText(n)
 	if err != nil {
-		return nil, n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
+		return nil, n.aliasingError(err)
 	}
 
 	if !astnode.HasContent(n.AST()) {
@@ -444,10 +448,10 @@ func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, erro
 	return v, nil
 }
 
-// mergeLayers implements [NewSourceFromLayers]. It checks ctx again before
-// it parses the merged text, which aliases can make far longer than the
-// layers, and writes that text below the preamble of the layer the merged
-// Source stands for.
+// mergeLayers implements [NewSourceFromLayers]. It writes the merged text
+// below the preamble of the layer the merged Source stands for. It checks
+// ctx again before it parses that text, which aliases can make longer
+// than the layers.
 func mergeLayers[L Layer](ctx context.Context, given []L, cfg mergeConfig) (*Source, error) {
 	layers, identity, err := resolveLayers(given, cfg.as)
 	if err != nil {
@@ -536,8 +540,9 @@ func newMergedSource(from *Source, text string, excerpts bool, merge mergeConfig
 
 		c.noExcerpts = !excerpts
 
-		// The merged text is text niceyaml wrote, and each layer passed
-		// its own limits.
+		// The merged text is text niceyaml wrote. It holds the content of
+		// the layers and no more than the bounds of their limits let their
+		// aliases add.
 		c.noLimits = true
 	})
 

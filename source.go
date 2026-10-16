@@ -138,14 +138,14 @@ type SourceOption func(*sourceConfig)
 // takes it in place of the [Source] that embeds it, so only a constructor
 // can apply one.
 type sourceConfig struct {
-	// The file system filePath names a file in, or nil when no option
-	// set one, where a path names a file on disk.
-	fsys fs.FS
 	// The limit error of a reference document from WithReferences, which
 	// fails every decode of the Source.
 	referenceErr error
-	name         string
-	filePath     string
+	// The file system filePath names a file in, or nil when no option
+	// set one, where a path names a file on disk.
+	fsys     fs.FS
+	name     string
+	filePath string
 	// Holds the text of each reference document from WithReferences, in
 	// the order every decode reads them.
 	references [][]byte
@@ -153,6 +153,10 @@ type sourceConfig struct {
 	// which every decode of the documents applies ahead of its own
 	// options.
 	unmarshalers []Unmarshaler
+	// The bounds on the text that aliases write out for a Source with
+	// noLimits whose text holds the aliases of another document, such as
+	// the working copy of a manifest.
+	aliasBudget aliasing.Budget
 	// The limits from WithByteLimit and WithDepthLimit, each when its
 	// option set it, where zero turns the check off.
 	depthLimit int
@@ -160,18 +164,19 @@ type sourceConfig struct {
 	// Says no error may show the text, so no excerpt holds a line of the
 	// Source.
 	noExcerpts bool
-	// Says the same of the text of a reference document, which the lines
-	// of the Source do not hold and the document [NewSourceFromLayers]
-	// builds does.
-	noReferenceExcerpts bool
 	// Turns off the alias limit for every reader of the documents.
 	skipAliasLimit bool
 	// Whether WithByteLimit and WithDepthLimit set their limits.
 	byteLimitSet  bool
 	depthLimitSet bool
 	// Says the Source holds text niceyaml wrote itself, such as the merged
-	// text of layers, which skips both limits.
+	// text of layers. Such a Source skips the byte limit and the depth
+	// limit, and the bounds they put on aliases.
 	noLimits bool
+	// Says no excerpt holds a line of the text of a reference document,
+	// which the lines of the Source do not hold and the document
+	// [NewSourceFromLayers] builds does.
+	noReferenceExcerpts bool
 	// Accepts a mapping with the same key twice when parsing and decoding.
 	allowDuplicateKeys bool
 }
@@ -210,6 +215,16 @@ func (c *sourceConfig) depth() int {
 	}
 }
 
+// budget returns the bounds that the limits of c put on the text that
+// the aliases of a document write out, as [aliasing.Budget] describes.
+func (c *sourceConfig) budget() aliasing.Budget {
+	if c.noLimits {
+		return c.aliasBudget
+	}
+
+	return aliasing.Budget{Bytes: c.bytes(), Depth: c.depth()}
+}
+
 // WithByteLimit is a [SourceOption] that sets the most bytes of text the
 // [Source] holds, [DefaultByteLimit] unless it sets another. A limit of 0
 // turns the check off, and a negative limit counts as 0.
@@ -230,8 +245,12 @@ func (c *sourceConfig) depth() int {
 //
 //	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithByteLimit(1<<20))
 //
-// The text that niceyaml writes itself, such as the merged text of
-// [NewSourceFromLayers], skips the limit.
+// A decode into a type that reads text and [NewSourceFromLayers] each
+// write the aliases of a document out in full. The limit also bounds the
+// text that those aliases repeat, as the Limits section of the package
+// documentation describes. The merged text of NewSourceFromLayers skips
+// the limit, because it holds no more than its layers and the text the
+// limit lets their aliases repeat.
 func WithByteLimit(n int) SourceOption {
 	return func(c *sourceConfig) {
 		c.byteLimit, c.byteLimitSet = max(0, n), true
@@ -245,18 +264,20 @@ func WithByteLimit(n int) SourceOption {
 // The depth counts each mapping and each sequence on the way from the root
 // of the document to its deepest value. A flow collection opens a level
 // at its "[" or "{", and a block collection opens one at its first key or
-// "-". An alias opens no level, because the alias limit bounds what it
-// repeats. A document past the limit fails as a document that does not
-// parse, with an error that matches [ErrLimit], at the token that opens
-// its first level past the limit, as in "document nests more than 100
-// levels". The other documents of the Source still parse, and a reference
-// document past the limit fails every decode of the Source that reads it
-// through [WithReferences]. The memory that
-// the go-yaml parser keeps grows with the square of the depth, so the
-// check reads the tokens of each document before the parser runs.
+// "-". An alias opens no level of the document. A document past the limit
+// fails as a document that does not parse, with an error that matches
+// [ErrLimit], at the token that opens its first level past the limit, as
+// in "document nests more than 100 levels". The other documents of the
+// Source still parse, and a reference document past the limit fails every
+// decode of the Source that reads it through [WithReferences]. The memory
+// that the go-yaml parser keeps grows with the square of the depth, so
+// the check reads the tokens of each document before the parser runs.
 //
-// The text that niceyaml writes itself, such as the merged text of
-// [NewSourceFromLayers], skips the limit.
+// A decode into a type that reads text and [NewSourceFromLayers] each
+// write the aliases of a document out in full. The limit also bounds the
+// levels that those aliases add, as the Limits section of the package
+// documentation describes. The merged text of NewSourceFromLayers skips
+// the limit, because each layer passed it with its aliases written out.
 func WithDepthLimit(n int) SourceOption {
 	return func(c *sourceConfig) {
 		c.depthLimit, c.depthLimitSet = max(0, n), true
@@ -425,11 +446,13 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 //
 // Turn the limit off only for input the program trusts, such as a file
 // it ships. With it off, a few hundred bytes of nested aliases can hold
-// a decode for minutes, since the go-yaml decoder never checks the
+// a decode for minutes, because the go-yaml decoder never checks the
 // context, and a schema validation for seconds and hundreds of MiB:
 //
 //	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithAliasLimit(false))
 //
+// The option also turns off the bounds that [WithByteLimit] and
+// [WithDepthLimit] put on the text the aliases of a document write out.
 // The option covers the documents of the Source alone. The limit counts
 // no reference document of [WithReferences], and the option on a
 // reference Source changes nothing.
@@ -1439,7 +1462,7 @@ func newDocuments(src *Source, docs []docparse.Document, errs []error) []*Node {
 		doc.tree = sync.OnceValue(doc.newDecodeTree)
 		doc.pathIndex = sync.OnceValue(func() *pathindex.Index { return pathindex.New(doc.root.Body) })
 		doc.resolver = sync.OnceValue(doc.newResolver)
-		doc.state = aliasing.NewState(!src.skipAliasLimit, func() (ast.Node, *paths.Resolver) {
+		doc.state = aliasing.NewState(!src.skipAliasLimit, src.budget(), func() (ast.Node, *paths.Resolver) {
 			return doc.root.Body, doc.pathResolver()
 		})
 		nodes[i] = doc.node

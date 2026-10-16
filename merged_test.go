@@ -1208,10 +1208,22 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 		_, err := limited.Decode[any](t.Context())
 		require.NoError(t, err)
 
+		// The 27th alias takes the text the aliases repeat past the byte
+		// limit, so the error binds there.
 		_, err = niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{limited})
 		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
-		require.EqualError(t, err, "prod.yaml:1:1: excessive aliasing")
+		require.ErrorIs(t, err, niceyaml.ErrLimit)
+		require.EqualError(t, err, "prod.yaml:29:5: aliases repeat more than 256 KiB of text")
 		assert.True(t, niceyaml.IsInvalid(err))
+
+		// With the byte limit off, the aliases still make up too much of
+		// the text.
+		unbounded := yamltest.FirstDocument(t, input, niceyaml.WithName("prod.yaml"), niceyaml.WithByteLimit(0))
+
+		_, err = niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{unbounded})
+		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+		require.NotErrorIs(t, err, niceyaml.ErrLimit)
+		require.EqualError(t, err, "prod.yaml:1:1: excessive aliasing")
 
 		trusted := yamltest.FirstDocument(t, input, niceyaml.WithAliasLimit(false))
 
@@ -4960,6 +4972,134 @@ func TestNewSourceFromLayers_Alias(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewSourceFromLayers_AliasExpansion(t *testing.T) {
+	t.Parallel()
+
+	// The merge writes l out with the 100 bytes of the anchor a at each of
+	// its 20 aliases.
+	repeated := yamltest.AliasedScalar(100, 20)
+
+	// The merge writes ten levels of sequences out at each alias, in block
+	// style, which indents each level more deeply.
+	deep := stringtest.LinesLF(
+		"a: &a "+strings.Repeat("[", 9)+yamltest.FlowSequence("x", 10)+strings.Repeat("]", 9),
+		"l:",
+	) + strings.Repeat("  - *a\n", 20)
+
+	tcs := map[string]struct {
+		input string
+		err   string
+		opts  []niceyaml.SourceOption
+	}{
+		"aliases past the byte limit": {
+			// The tenth alias brings the text the aliases repeat to 1050
+			// bytes.
+			input: repeated,
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			err:   "prod.yaml:12:5: aliases repeat more than 1 KiB of text",
+		},
+		"aliases of deep content past the byte limit": {
+			// The fourth alias brings the indentation of block style past
+			// 1 KiB.
+			input: deep,
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			err:   "prod.yaml:6:5: aliases repeat more than 1 KiB of text",
+		},
+		"aliases of deep content within a raised byte limit": {
+			input: deep,
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(8192)},
+		},
+		"aliases within a raised byte limit": {
+			input: repeated,
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(4096)},
+		},
+		"aliases with the byte limit off": {
+			input: repeated,
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(0)},
+		},
+		"aliases with the alias limit off": {
+			input: repeated,
+			opts: []niceyaml.SourceOption{
+				niceyaml.WithByteLimit(1024),
+				niceyaml.WithAliasLimit(false),
+			},
+		},
+		"alias chain past the depth limit": {
+			// The alias *c98 nests c99 more than 100 levels deep.
+			input: yamltest.AliasChain(150),
+			err:   "prod.yaml:100:12: aliases nest the document more than 100 levels",
+		},
+		"alias chain past a lower depth limit": {
+			input: yamltest.AliasChain(20),
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(10)},
+			err:   "prod.yaml:10:10: aliases nest the document more than 10 levels",
+		},
+		"alias chain within the depth limit": {
+			input: yamltest.AliasChain(98),
+		},
+		"alias chain with the depth limit off": {
+			input: yamltest.AliasChain(150),
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(0)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			base := yamltest.FirstDocument(t, "base: 1\n", niceyaml.WithName("base.yaml"))
+			prod := yamltest.FirstDocument(t, tc.input,
+				append([]niceyaml.SourceOption{niceyaml.WithName("prod.yaml")}, tc.opts...)...)
+
+			// A decode into an any value shares each anchor between its
+			// aliases, so the layer decodes alone.
+			_, err := prod.Decode[any](t.Context())
+			require.NoError(t, err)
+
+			merged, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{base, prod})
+			if tc.err == "" {
+				require.NoError(t, err)
+				assert.NotNil(t, merged)
+
+				return
+			}
+
+			require.EqualError(t, err, tc.err)
+			require.ErrorIs(t, err, niceyaml.ErrLimit)
+			require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+			assert.True(t, niceyaml.IsInvalid(err))
+			assert.Nil(t, merged)
+
+			bound := yamltest.RequireSourceError(t, err)
+			assert.Same(t, prod, yamltest.BoundNode(t, bound))
+		})
+	}
+
+	t.Run("layers without aliases merge past the byte limit", func(t *testing.T) {
+		t.Parallel()
+
+		// Each layer holds its own keys and passes its own limit, so the
+		// merged text holds the keys of both.
+		var layers []*niceyaml.Source
+
+		for _, prefix := range []string{"base", "prod"} {
+			input := yamltest.GenerateLines(40, prefix+"%d: "+strings.Repeat("v", 10))
+			require.Less(t, len(input), 1024)
+
+			layers = append(layers, niceyaml.NewSourceFromString(input,
+				niceyaml.WithName(prefix+".yaml"), niceyaml.WithByteLimit(1024)))
+		}
+
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), layers)
+		require.NoError(t, err)
+		assert.Greater(t, len(merged.Text()), 1024)
+
+		got, err := merged.Decode[map[string]string](t.Context())
+		require.NoError(t, err)
+		assert.Len(t, got, 80)
+	})
 }
 
 func TestNewSourceFromLayers_Concurrent(t *testing.T) {

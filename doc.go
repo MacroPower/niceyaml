@@ -513,7 +513,11 @@
 //     given.
 //  4. A node that holds an alias fails with an error matching
 //     [ErrExcessiveAliasing] when nested aliases would make a decode of
-//     the document read far more than the document holds.
+//     the document read far more than the document holds. A decode into a
+//     type that reads text also fails when the aliases of the document
+//     repeat more text than the byte limit of the [Source] allows. It
+//     fails as well when they nest the document past its depth limit, as
+//     the Limits section describes.
 //  5. The go-yaml decoder fills the target.
 //  6. Every value in the result that implements [SelfValidator] validates
 //     itself, and each function from [WithValueCheck] checks the values of
@@ -1102,12 +1106,14 @@
 // [go.jacobcolvin.com/niceyaml/schema/matcher.Text] matcher therefore
 // refuse a node that holds an alias when the aliases of its document go
 // past the limit. The error matches [ErrExcessiveAliasing], and
-// [IsInvalid] reports it, since the aliases of the document are the cause
-// wherever the count runs.
+// [IsInvalid] reports it, because the aliases of the document are the
+// cause wherever the count runs.
 //
 // [WithAliasLimit] set to false turns the limit off for the documents of
-// one Source, for input the program trusts, such as a file it ships. Two
-// checks stay on whatever the option says.
+// one Source, for input the program trusts, such as a file it ships. It
+// also turns off the bounds that the Limits section describes for the
+// text that aliases write out. Two checks stay on whatever the option
+// says.
 // [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] takes a Go
 // value and no Source, and refuses a value that shares its maps and
 // slices past the limit, even one that a Source with the limit off
@@ -1121,6 +1127,8 @@
 // on or off. A program passes trusted files alone as reference documents.
 // [NewSourceFromLayers] writes each alias of a layer out in full, so a
 // layer must pass the limit as a decode into a type that reads text does.
+// The byte limit and the depth limit of the Source of each layer bound
+// that text too, as the Limits section describes.
 //
 // # Limits
 //
@@ -1132,9 +1140,47 @@
 // that does not read, and a document past the depth limit fails as a
 // document that does not parse, at the token that opens its first level
 // past the limit. The other documents of the Source still parse. Each
-// such error matches [ErrLimit], and [IsInvalid] reports it. The merged
-// text of [NewSourceFromLayers] skips both limits, because each layer
-// passed its own.
+// such error matches [ErrLimit], and [IsInvalid] reports it.
+//
+// A decode into a type that reads text writes the node out as text with
+// each alias in full. Types that read text include those with an
+// UnmarshalText method or an UnmarshalYAML method that takes bytes, and
+// those that a function of [CustomUnmarshaler] decodes.
+// [NewSourceFromLayers] writes each layer out the same way. The aliases of
+// a small document can make that text far longer and deeper than the
+// document, so the limits of the Source bound what the aliases add:
+//
+//   - The aliases of the document repeat no more text than the byte limit
+//     allows. The count weighs the text of each alias in two ways and
+//     takes the longer. One writes the content of the alias in block
+//     style, with each entry and each element on a line indented to its
+//     level in the document. The other copies the content as the document
+//     spells it, comments and spaces included, and indents each line to
+//     the line of the alias.
+//   - No alias nests the document more levels than the depth limit
+//     allows. An alias nests the levels around it and the levels its
+//     content nests, through the aliases there.
+//
+// Such a decode or merge of a node that holds an alias checks the whole
+// document before it writes any text. It fails on a document past either
+// bound with an error that matches both [ErrLimit] and
+// [ErrExcessiveAliasing], as in "app.yaml:30:5: aliases repeat more than
+// 256 KiB of text". The error binds at the first alias that takes the text
+// past the bound. A decode into a value that reads no text shares each
+// anchor between its aliases, so neither bound applies to it.
+//
+// A [go.jacobcolvin.com/niceyaml/schema/matcher.Content] matcher that
+// decodes into a type that reads text applies the same bounds.
+// [WithAliasLimit] set to false turns both bounds off with the alias
+// limit. [WithByteLimit] or [WithDepthLimit] set to 0 turns off the bound
+// that its limit sets.
+//
+// The merged text of NewSourceFromLayers skips the byte limit and the
+// depth limit. It holds the content of its layers, written in block
+// style, and no more than the bounds let their aliases add. The text that
+// a function of CustomUnmarshaler decodes skips the limits too, because
+// it holds no more than its node and what the bounds let the aliases
+// there add.
 //
 // # Diffs
 //

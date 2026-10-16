@@ -1,5 +1,6 @@
-// Package aliasing holds the check that applies the alias limit of the
-// aliaslimit package to a document before the go-yaml decoder reads it.
+// Package aliasing holds the checks that apply the alias limit of the
+// aliaslimit package, and the [Budget] of a source, to a document before
+// the go-yaml decoder reads it.
 //
 // The decoder writes out the whole content of an alias it spells as text,
 // such as an alias used as a key. It also reads a mapping a merge key
@@ -19,15 +20,27 @@
 // into a type that [DecodesTextWith] reports for the unmarshalers its
 // options name.
 //
+// The text that the decoder writes out must also fit the [Budget] of the
+// document. The niceyaml package takes the Budget from the byte limit and
+// the depth limit of the source, which bound the text that the parser
+// reads. The aliases of a document within those limits can still write
+// out far more text, or nest it far deeper. [CheckDecodeText] refuses
+// such a document with an [*ExpansionError] at the alias that takes the
+// text past a bound. It weighs the text of each alias as a writer in
+// block style gives it, or as a copy of the text of the document gives
+// it, whichever is longer. A niceyaml merge of layers runs
+// CheckDecodeText on each layer before it writes the merged text, so the
+// Budget bounds that text too.
+//
 // Neither count can see a reference document of a decode, so an alias to
 // one of its anchors counts as one node. [HoldsReferenceAlias] reports a
 // document that holds such an alias, and a caller that reads the decoded
 // value again at every alias then limits that value itself.
 //
-// The source of a document turns the limit off for all of these readers
-// with niceyaml.WithAliasLimit. Both checks then pass every node of the
-// document, and a caller that limits a decoded value asks [Limited]
-// whether the limit applies.
+// The source of a document turns the limit and the Budget off for all of
+// these readers with niceyaml.WithAliasLimit. Both checks then pass every
+// node of the document, and a caller that limits a decoded value asks
+// [Limited] whether the limit applies.
 //
 // Every Node of a document shares one [State], which [StateOf] returns,
 // so a check of each item of a list counts the document once. The State

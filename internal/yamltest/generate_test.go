@@ -31,6 +31,20 @@ func TestAliasBombs(t *testing.T) {
 				"  - &l1 [*l0, *l0, *l0, *l0, *l0, *l0, *l0, *l0, *l0, *l0]",
 			),
 		},
+		"alias chain without aliases": {
+			generate: yamltest.AliasChain,
+			levels:   0,
+			want:     "c0: &c0 [x]\n",
+		},
+		"alias chain of two links": {
+			generate: yamltest.AliasChain,
+			levels:   2,
+			want: stringtest.LinesLF(
+				"c0: &c0 [x]",
+				"c1: &c1 [*c0]",
+				"c2: &c2 [*c1]",
+			),
+		},
 		"merge levels without merges": {
 			generate: yamltest.MergeLevels,
 			levels:   0,
@@ -196,6 +210,20 @@ func TestAliasedMapping(t *testing.T) {
 
 	assert.Equal(t, want, yamltest.AliasedMapping(2, 3))
 	assert.Equal(t, stringtest.LinesLF("defaults: &d", "services:"), yamltest.AliasedMapping(0, 0))
+}
+
+func TestAliasedScalar(t *testing.T) {
+	t.Parallel()
+
+	want := stringtest.LinesLF(
+		"a: &a xxx",
+		"l:",
+		"  - *a",
+		"  - *a",
+	)
+
+	assert.Equal(t, want, yamltest.AliasedScalar(3, 2))
+	assert.Equal(t, stringtest.LinesLF("a: &a ", "l:"), yamltest.AliasedScalar(0, 0))
 }
 
 func TestAliasKey(t *testing.T) {

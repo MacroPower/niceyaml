@@ -7607,6 +7607,166 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 	}
 }
 
+// aliasList reads text only through a function from
+// niceyaml.CustomUnmarshaler, which the decoder hands the whole list.
+type aliasList []string
+
+// aliasValue reads text only through a function from
+// niceyaml.CustomUnmarshaler, which decodes its node into an any value.
+type aliasValue struct {
+	value any
+}
+
+func TestDocument_Decode_AliasExpansion(t *testing.T) {
+	t.Parallel()
+
+	// To decode a type that reads text, the decoder writes l out with the
+	// 100 bytes of the anchor a at each of its 20 aliases.
+	repeated := yamltest.AliasedScalar(100, 20)
+
+	// The aliases repeat 300 spaces each as the document spells them,
+	// which the decoder copies into the text of l.
+	spaced := stringtest.LinesLF("a: &a [x,"+strings.Repeat(" ", 300)+"x]", "l: [*a, *a, *a, *a]")
+
+	// The aliases repeat ten levels of sequences, which block style
+	// indents more deeply at each level.
+	deep := stringtest.LinesLF(
+		"a: &a "+strings.Repeat("[", 9)+yamltest.FlowSequence("x", 10)+strings.Repeat("]", 9),
+		"l:",
+	) + strings.Repeat("  - *a\n", 20)
+
+	customList := niceyaml.WithUnmarshaler(
+		niceyaml.CustomUnmarshaler(func(_ context.Context, l *aliasList, decode func(any) error) error {
+			return decode((*[]string)(l))
+		}),
+	)
+	customValue := niceyaml.WithUnmarshaler(
+		niceyaml.CustomUnmarshaler(func(_ context.Context, v *aliasValue, decode func(any) error) error {
+			return decode(&v.value)
+		}),
+	)
+
+	type listed struct {
+		L aliasList `yaml:"l"`
+	}
+
+	tcs := map[string]struct {
+		target func() any
+		input  string
+		err    string
+		path   paths.Path
+		opts   []niceyaml.SourceOption
+		decode []niceyaml.DecodeOption
+	}{
+		"custom unmarshaler of the aliased list": {
+			// The tenth alias brings the text the aliases repeat to 1050
+			// bytes.
+			input:  repeated,
+			target: func() any { return new(listed) },
+			opts:   []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			decode: []niceyaml.DecodeOption{customList},
+			err:    "doc.yaml:12:5: aliases repeat more than 1 KiB of text",
+		},
+		"custom unmarshaler of a list of spaced aliases": {
+			// The fourth alias brings the spaces past 1 KiB.
+			input:  spaced,
+			target: func() any { return new(map[string]aliasValue) },
+			opts:   []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			decode: []niceyaml.DecodeOption{customValue},
+			err:    "doc.yaml:2:17: aliases repeat more than 1 KiB of text",
+		},
+		"custom unmarshaler of a list of deep aliases": {
+			// The fourth alias brings the indentation of block style past
+			// 1 KiB.
+			input:  deep,
+			target: func() any { return new(map[string]aliasValue) },
+			opts:   []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			decode: []niceyaml.DecodeOption{customValue},
+			err:    "doc.yaml:6:5: aliases repeat more than 1 KiB of text",
+		},
+		"custom unmarshaler of the aliased list within a raised byte limit": {
+			input:  repeated,
+			target: func() any { return new(listed) },
+			opts:   []niceyaml.SourceOption{niceyaml.WithByteLimit(4096)},
+			decode: []niceyaml.DecodeOption{customList},
+		},
+		"custom unmarshaler of the aliased list with the alias limit off": {
+			input:  repeated,
+			target: func() any { return new(listed) },
+			opts: []niceyaml.SourceOption{
+				niceyaml.WithByteLimit(1024),
+				niceyaml.WithAliasLimit(false),
+			},
+			decode: []niceyaml.DecodeOption{customList},
+		},
+		"aliased list without its custom unmarshaler": {
+			// A decode into a value shares the anchor a between the
+			// aliases.
+			input:  repeated,
+			target: func() any { return new(listed) },
+			opts:   []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+		},
+		"text unmarshaler elements": {
+			input: repeated,
+			target: func() any {
+				return new(struct {
+					L []aliasText `yaml:"l"`
+				})
+			},
+			opts: []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			err:  "doc.yaml:12:5: aliases repeat more than 1 KiB of text",
+		},
+		"node with an alias beside the aliases past the byte limit": {
+			// The count covers the whole document, so the error binds at
+			// the alias in l that takes the text past the byte limit.
+			input:  repeated + "m: [*a]\n",
+			path:   paths.Current().Child("m"),
+			target: func() any { return new([]aliasText) },
+			opts:   []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			err:    "doc.yaml:12:5: aliases repeat more than 1 KiB of text",
+		},
+		"custom unmarshaler of an alias chain": {
+			// The alias *c98 nests c99 more than 100 levels deep.
+			input:  yamltest.AliasChain(150),
+			target: func() any { return new(map[string]aliasValue) },
+			decode: []niceyaml.DecodeOption{customValue},
+			err:    "doc.yaml:100:12: aliases nest the document more than 100 levels",
+		},
+		"custom unmarshaler of an alias chain with the depth limit off": {
+			input:  yamltest.AliasChain(150),
+			target: func() any { return new(map[string]aliasValue) },
+			opts:   []niceyaml.SourceOption{niceyaml.WithDepthLimit(0)},
+			decode: []niceyaml.DecodeOption{customValue},
+		},
+		"alias chain without a custom unmarshaler": {
+			input:  yamltest.AliasChain(150),
+			target: func() any { return new(map[string]any) },
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := append([]niceyaml.SourceOption{niceyaml.WithName("doc.yaml")}, tc.opts...)
+			doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input, opts...), tc.path)
+
+			err := doc.DecodeInto(t.Context(), tc.target(), tc.decode...)
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.EqualError(t, err, tc.err)
+			require.ErrorIs(t, err, niceyaml.ErrLimit)
+			require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+			require.NotErrorIs(t, err, niceyaml.ErrDecode)
+			assert.True(t, niceyaml.IsInvalid(err))
+		})
+	}
+}
+
 // strictInner is a struct with two fields, for the decodes that reject
 // unknown fields.
 type strictInner struct {
