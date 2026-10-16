@@ -5373,29 +5373,44 @@ func TestWithReferences(t *testing.T) {
 		assert.Equal(t, map[string]any{"kind": "Bogus"}, got)
 	})
 
-	t.Run("anchor name the references define twice", func(t *testing.T) {
+	t.Run("last anchor of a name in the references wins", func(t *testing.T) {
 		t.Parallel()
 
-		// WithReferences documents this limit. The go-yaml decoder reads the
-		// alias inside the list by name again for a typed target, after it
-		// has read every reference document, so it finds the second anchor.
+		// The References section of the package documentation states the
+		// rule. An alias inside a reference reads the last anchor of its
+		// name, in a decode into any as in a typed decode.
 		tcs := map[string]struct {
-			// The text of each reference.
-			refs []string
+			refs []*niceyaml.Source
 		}{
 			"in one reference": {
-				refs: []string{
-					stringtest.LinesLF(
+				refs: []*niceyaml.Source{
+					niceyaml.NewSourceFromString(stringtest.LinesLF(
 						"x: &x 1",
 						"list: &list [*x]",
 						"y: &x 2",
-					),
+					)),
 				},
 			},
 			"in two references": {
-				refs: []string{
-					stringtest.LinesLF("x: &x 1", "list: &list [*x]"),
-					"x: &x 2\n",
+				refs: []*niceyaml.Source{
+					niceyaml.NewSourceFromString(stringtest.LinesLF("x: &x 1", "list: &list [*x]")),
+					niceyaml.NewSourceFromString("x: &x 2\n"),
+				},
+			},
+			"anchor after the alias in its reference": {
+				refs: []*niceyaml.Source{
+					niceyaml.NewSourceFromString(stringtest.LinesLF("list: &list [*x]", "x: &x 2")),
+				},
+			},
+			"in a reference of the reference": {
+				refs: []*niceyaml.Source{
+					niceyaml.NewSourceFromString("list: &list [*x]\n",
+						yamltest.References(stringtest.LinesLF("x: &x 1", "y: &x 2"))),
+				},
+			},
+			"anchor inside an anchor of its name": {
+				refs: []*niceyaml.Source{
+					niceyaml.NewSourceFromString(stringtest.LinesLF("outer: &x [&x 2]", "list: &list [*x]")),
 				},
 			},
 		}
@@ -5404,11 +5419,11 @@ func TestWithReferences(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, "v: *list\n", yamltest.References(tc.refs...))
+				doc := yamltest.FirstDocument(t, "v: *list\n", niceyaml.WithReferences(tc.refs...))
 
 				untyped, err := doc.Decode[map[string]any](t.Context())
 				require.NoError(t, err)
-				assert.Equal(t, map[string]any{"v": []any{uint64(1)}}, untyped)
+				assert.Equal(t, map[string]any{"v": []any{uint64(2)}}, untyped)
 
 				typed, err := doc.Decode[map[string][]int](t.Context())
 				require.NoError(t, err)
@@ -5417,22 +5432,104 @@ func TestWithReferences(t *testing.T) {
 		}
 	})
 
+	t.Run("anchor inside an anchor a decode reads registers its name again", func(t *testing.T) {
+		t.Parallel()
+
+		// The References section of the package documentation describes
+		// this exception to the rule that the last anchor of a name wins.
+		// A merge of layers follows the rule.
+		tcs := map[string]struct {
+			ref     string
+			input   string
+			untyped map[string]any
+			typed   map[string][]int
+			layered map[string]any
+		}{
+			"alias read after the outer anchor": {
+				ref:     stringtest.LinesLF("base: &base [&x 1, *x]", "z: &x 9"),
+				input:   stringtest.LinesLF("a: *base", "b: [*x]"),
+				untyped: map[string]any{"a": []any{uint64(1), uint64(1)}, "b": []any{uint64(1)}},
+				typed:   map[string][]int{"a": {1, 1}, "b": {1}},
+				layered: map[string]any{"a": []any{uint64(1), uint64(9)}, "b": []any{uint64(9)}},
+			},
+			"typed decode of an anchor read before the outer anchor": {
+				ref:     stringtest.LinesLF("outer: &outer [&x 1]", "y: &x 2", "list: &list [*x]"),
+				input:   stringtest.LinesLF("l: *list", "o: *outer"),
+				untyped: map[string]any{"l": []any{uint64(2)}, "o": []any{uint64(1)}},
+				typed:   map[string][]int{"l": {1}, "o": {1}},
+				layered: map[string]any{"l": []any{uint64(2)}, "o": []any{uint64(1)}},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				src := niceyaml.NewSourceFromString(tc.input, yamltest.References(tc.ref))
+				doc := yamltest.Document(t, src)
+
+				untyped, err := doc.Decode[map[string]any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.untyped, untyped)
+
+				typed, err := doc.Decode[map[string][]int](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.typed, typed)
+
+				merged, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Source{src})
+				require.NoError(t, err)
+
+				layered, err := yamltest.Document(t, merged).Decode[map[string]any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.layered, layered)
+			})
+		}
+	})
+
+	t.Run("scoped node reads the anchors of the references first", func(t *testing.T) {
+		t.Parallel()
+
+		// The anchor of the document outside the scoped node reads an
+		// anchor of the reference, so the decode reads that one first.
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("d: &d {p: *base}", "svc: {x: *d}"),
+			yamltest.References("base: &base {port: 80}\n"))
+
+		got, err := yamltest.AtOrSelf(t, doc, paths.Doc().Child("svc")).Decode[map[string]any](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"x": map[string]any{"p": map[string]any{"port": uint64(80)}}}, got)
+	})
+
 	t.Run("references serve every decode from any goroutine", func(t *testing.T) {
 		t.Parallel()
 
-		docs := yamltest.Documents(t, niceyaml.NewSourceFromString(
-			stringtest.LinesLF("b: *x", "---", "c: *x"),
-			yamltest.References("base: &x 1\n"),
-		), 2)
+		// Two sources share the parse of one reference.
+		ref := niceyaml.NewSourceFromString("base: &x 1\n")
+
+		docs := slices.Concat(
+			yamltest.Documents(t, niceyaml.NewSourceFromString(
+				stringtest.LinesLF("b: *x", "---", "c: *x"),
+				niceyaml.WithReferences(ref),
+			), 2),
+			yamltest.Documents(t, niceyaml.NewSourceFromString("d: *x\n", niceyaml.WithReferences(ref)), 1),
+		)
 
 		var wg sync.WaitGroup
 
 		for range 4 {
 			for i, doc := range docs {
+				key := []string{"b", "c", "d"}[i]
+
 				wg.Go(func() {
 					got, err := doc.Decode[map[string]int](t.Context())
 					if assert.NoError(t, err) {
-						assert.Equal(t, map[string]int{[]string{"b", "c"}[i]: 1}, got)
+						assert.Equal(t, map[string]int{key: 1}, got)
+					}
+				})
+
+				wg.Go(func() {
+					untyped, err := doc.Decode[any](t.Context())
+					if assert.NoError(t, err) {
+						assert.Equal(t, map[string]any{key: uint64(1)}, untyped)
 					}
 				})
 			}
@@ -5640,10 +5737,59 @@ func TestWithReferences(t *testing.T) {
 	t.Run("reference that does not parse fails every decode", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "a: 1\n", yamltest.References("x: [\n"))
+		ref := niceyaml.NewSourceFromString("x: [\n", niceyaml.WithName("ref.yaml"))
+		doc := yamltest.FirstDocument(t, "a: 1\n", niceyaml.WithReferences(ref))
+
+		// Every decode returns the error of the parse of the reference.
+		_, want := ref.File()
 
 		_, err := doc.Decode[map[string]int](t.Context())
-		require.ErrorContains(t, err, unclosedSequence)
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		assert.Equal(t, want, err)
+		assert.Equal(t, "ref.yaml:1:4: "+unclosedSequence, err.Error())
+	})
+
+	t.Run("alias with no anchor in a reference fails the decodes that reach it", func(t *testing.T) {
+		t.Parallel()
+
+		ref := yamltest.References(stringtest.LinesLF(
+			"good: &good {port: 80}",
+			"bad: &bad {port: *missing}",
+		))
+
+		tcs := map[string]struct {
+			input string
+			want  map[string]any
+			err   string
+		}{
+			"alias to the anchor that reads no alias": {
+				input: "server: *good\n",
+				want:  map[string]any{"server": map[string]any{"port": uint64(80)}},
+			},
+			"alias to the anchor that holds the alias": {
+				input: "server: *bad\n",
+				err:   `app.yaml:1:9: could not find alias "missing"`,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("app.yaml"), ref)
+
+				got, err := doc.Decode[map[string]any](t.Context())
+				if tc.err != "" {
+					require.EqualError(t, err, tc.err)
+					require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+					return
+				}
+
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
 	})
 }
 

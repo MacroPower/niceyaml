@@ -429,7 +429,7 @@ func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, erro
 		Ctx:        ctx,
 		Resolver:   n.doc.pathResolver(),
 		Enclosed:   n.doc.state.Facts().Enclosed,
-		References: n.source.references,
+		References: n.source.referenceAnchors(),
 		UnnamedKey: ErrUnnamedKey,
 		Layer:      i,
 	}

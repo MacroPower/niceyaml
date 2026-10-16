@@ -322,6 +322,62 @@ func BenchmarkNode_DecodeReferenceAliases(b *testing.B) {
 	}
 }
 
+// BenchmarkNode_DecodeOverReferences decodes many small files that each
+// read one anchor of a shared file of defaults, each file from a Source
+// of its own. A validator decodes each file too, so each file runs two
+// decodes. Every Source shares the parse of the defaults, and each decode
+// reads the anchors its aliases reach. The time per file thus stays flat
+// as the defaults grow.
+func BenchmarkNode_DecodeOverReferences(b *testing.B) {
+	type config struct {
+		Server struct {
+			Host string `yaml:"host"`
+			Port int    `yaml:"port"`
+		} `yaml:"server"`
+		Local struct {
+			Port int `yaml:"port"`
+		} `yaml:"local"`
+		Name string `yaml:"name"`
+	}
+
+	const files = 200
+
+	untyped := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+		_, err := n.Decode[any](ctx)
+
+		return err
+	})
+
+	for _, anchors := range []int{100, 1000} {
+		defaults := niceyaml.NewSourceFromString(
+			yamltest.GenerateLines(anchors, "a%[1]d: &a%[1]d {host: host%[1]d.example.internal, port: %[1]d}"),
+			yamltest.NoSizeLimits()...,
+		)
+
+		inputs := make([]string, files)
+		for i := range inputs {
+			inputs[i] = fmt.Sprintf("name: n%d\nlocal: &local {port: 1}\nserver: *a%d\nother: *local\n", i, i%anchors)
+		}
+
+		b.Run(fmt.Sprintf("defaults_%dKiB", len(defaults.Text())>>10), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				for _, input := range inputs {
+					doc := yamltest.Document(b, niceyaml.NewSourceFromString(input, niceyaml.WithReferences(defaults)))
+
+					_, err := doc.Decode[config](b.Context(), niceyaml.WithValidator(untyped))
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+
+			yamltest.ReportTimePer(b, files, "file")
+		})
+	}
+}
+
 // BenchmarkNode_DecodeSelfAliases decodes a document whose one anchor
 // holds many aliases to itself, which the decoder reads as null. The
 // decode walks the anchor once rather than once per alias, so the time

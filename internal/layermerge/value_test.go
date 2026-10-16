@@ -4,12 +4,14 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/layermerge"
+	"go.jacobcolvin.com/niceyaml/internal/reftable"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -18,7 +20,8 @@ import (
 var errUnnamed = errors.New("unnamed key")
 
 // read returns the value a [layermerge.Reader] reads from the document
-// of input, as the layer at index layer.
+// of input, as the layer at index layer. The first document of each of
+// refs is a reference document of the layer.
 func read(tb testing.TB, input string, layer int, refs ...string) (*layermerge.Value, error) {
 	tb.Helper()
 
@@ -32,8 +35,14 @@ func read(tb testing.TB, input string, layer int, refs ...string) (*layermerge.V
 		Layer:      layer,
 	}
 
+	var bodies []ast.Node
+
 	for _, ref := range refs {
-		r.References = append(r.References, []byte(ref))
+		bodies = append(bodies, yamltest.FirstDocument(tb, ref).AST())
+	}
+
+	if len(bodies) > 0 {
+		r.References = reftable.New(bodies)
 	}
 
 	return r.Read(doc.AST())

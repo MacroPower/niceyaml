@@ -1,7 +1,6 @@
 package niceyaml
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -25,6 +24,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
+	"go.jacobcolvin.com/niceyaml/internal/reftable"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -86,9 +86,18 @@ type Source struct {
 	offsets lazy[bom.Index]
 	// The stream that [Source.Tokens] rebuilds from lines.
 	stream lazy[token.Tokens]
-	// The texts of the reference documents a new anchor name must not
-	// spell, as spellReferences reads them.
-	referenceTexts lazy[[]string]
+	// The anchors an alias of the documents finds in the reference
+	// documents, as referenceAnchors builds them.
+	refAnchors lazy[*reftable.Table]
+	// The anchors a Source that reads this one through WithReferences
+	// finds in it, as exportedAnchors builds them.
+	exported lazy[*reftable.Table]
+	// The counts in brackets the text of the Source spells, which a new
+	// anchor name in a Source that reads this one must not spell.
+	spellings lazy[*decodetree.Spellings]
+	// The spellings of the reference documents, as referenceSpellings
+	// collects them.
+	refSpellings lazy[[]*decodetree.Spellings]
 	sourceConfig
 	hasInput bool
 }
@@ -138,17 +147,17 @@ type SourceOption func(*sourceConfig)
 // takes it in place of the [Source] that embeds it, so only a constructor
 // can apply one.
 type sourceConfig struct {
-	// The limit error of a reference document from WithReferences, which
-	// fails every decode of the Source.
+	// The error of the parse of a reference document from WithReferences,
+	// which fails every decode of the Source.
 	referenceErr error
 	// The file system filePath names a file in, or nil when no option
 	// set one, where a path names a file on disk.
 	fsys     fs.FS
 	name     string
 	filePath string
-	// Holds the text of each reference document from WithReferences, in
-	// the order every decode reads them.
-	references [][]byte
+	// Holds each Source that WithReferences gave, in the order given.
+	// Each of them holds its own references.
+	references []*Source
 	// Holds the unmarshalers of WithUnmarshalers, in the order given,
 	// which every decode of the documents applies ahead of its own
 	// options.
@@ -301,24 +310,6 @@ func limitError(n int) error {
 	return Invalid(&markedError{err: errors.New("file is larger than " + quantity.Bytes(n)), marks: []error{ErrLimit}})
 }
 
-// limitFailure returns the error of s when its text passes the byte limit,
-// or else the error of its first document past the depth limit, or nil.
-// The go-yaml decoder parses the text of a reference Source with no limit
-// of its own, so [WithReferences] keeps that error for every decode.
-func (s *Source) limitFailure() error {
-	if s.limitErr != nil {
-		return s.limitErr
-	}
-
-	for _, doc := range s.parsed.get(s.parse).docs {
-		if errors.Is(doc.doc.err, ErrLimit) {
-			return doc.doc.err
-		}
-	}
-
-	return nil
-}
-
 // readLimited reads r to its end, or to one byte past limit when limit is
 // above zero, and returns the error of [limitError] for a text past the
 // limit.
@@ -425,9 +416,9 @@ func WithFS(fsys fs.FS) SourceOption {
 // `*k` is such a pair, and so is 1 beside 0x1 in a map with string keys.
 // The decode keeps the later entry of each.
 //
-// The decoder parses each reference document of [WithReferences] itself
-// and accepts a duplicate key there. A program that needs the check reads
-// the documents of that [Source] first.
+// A reference document of [WithReferences] parses with the option of its
+// own [Source]. A duplicate key there that its Source does not allow
+// fails every decode of a Source that reads it.
 func WithAllowDuplicateKeys(allow bool) SourceOption {
 	return func(c *sourceConfig) {
 		c.allowDuplicateKeys = allow
@@ -476,11 +467,22 @@ func WithAliasLimit(enabled bool) SourceOption {
 //	source, err := niceyaml.NewSourceFromFile("app.yaml", niceyaml.WithReferences(defaults))
 //
 // The order of refs decides the anchor that wins a name two of them
-// define. WithReferences skips a nil Source, and a reference document
-// that does not parse fails every decode of the Source. The References
-// section of the package documentation describes how an alias finds its
-// anchor, what a reference Source brings, and how a path and an error
-// treat an alias to a reference document.
+// define. WithReferences skips a nil Source. It parses each Source of
+// refs, and a reference document that does not parse fails every decode
+// of the Source with the error of that parse.
+//
+// Every Source that reads a reference Source shares its parse. A decode
+// reads the anchors of refs that its aliases reach, so its cost follows
+// those anchors rather than the size of refs. One call to [Node.Decode]
+// or [Node.Validate] can run several decodes. Those include one for each
+// validator that decodes and one for each
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Content] matcher of a
+// schema registry. Each of them reads the anchors it reaches.
+//
+// The References section of the package documentation describes how an
+// alias finds its anchor and what a reference Source brings. It also
+// describes how a path and an error treat an alias to a reference
+// document.
 func WithReferences(refs ...*Source) SourceOption {
 	return func(c *sourceConfig) {
 		for _, ref := range refs {
@@ -488,15 +490,14 @@ func WithReferences(refs ...*Source) SourceOption {
 				continue
 			}
 
-			c.references = append(c.references, ref.references...)
-			c.references = append(c.references, ref.tokenText())
+			c.references = append(c.references, ref)
 
 			if c.referenceErr == nil {
 				c.referenceErr = ref.referenceErr
 			}
 
 			if c.referenceErr == nil {
-				c.referenceErr = ref.limitFailure()
+				_, c.referenceErr = ref.File()
 			}
 
 			if ref.noExcerpts || ref.noReferenceExcerpts {
@@ -580,20 +581,6 @@ func WithUnmarshalers(us ...Unmarshaler) SourceOption {
 func WithExcerpts(enabled bool) SourceOption {
 	return func(c *sourceConfig) {
 		c.noExcerpts = !enabled
-	}
-}
-
-// referenceReaders returns a go-yaml option that hands the decoder a new
-// reader over each of docs, so every decode reads the documents from the
-// start.
-func referenceReaders(docs [][]byte) yaml.DecodeOption {
-	return func(d *yaml.Decoder) error {
-		readers := make([]io.Reader, len(docs))
-		for i, doc := range docs {
-			readers[i] = bytes.NewReader(doc)
-		}
-
-		return yaml.ReferenceReaders(readers...)(d)
 	}
 }
 
@@ -787,26 +774,75 @@ func (s *Source) decodeOptions() []yaml.DecodeOption {
 	// The decoder counts a key that a `<<` merge brings in beside the
 	// keys of the mapping, so its check rejects a mapping that overrides
 	// a merged key. The parser rejects a key a mapping holds twice.
-	opts := []yaml.DecodeOption{yaml.AllowDuplicateMapKey()}
-
-	if len(s.references) > 0 {
-		opts = append(opts, referenceReaders(s.references))
-	}
-
-	return opts
+	return []yaml.DecodeOption{yaml.AllowDuplicateMapKey()}
 }
 
-// tokenText returns the text the Origins of the tokens of the Source spell,
-// which a Source built from tokens has too. It can differ from
-// [Source.Text], since the lexer drops and repeats some text in Origins.
-func (s *Source) tokenText() []byte {
-	var b bytes.Buffer
-
-	for _, tk := range s.Tokens() {
-		b.WriteString(tk.Origin)
+// referenceAnchors returns the anchors of the reference documents of the
+// Source, or nil for a Source with no reference document. An alias of its
+// documents reads them when it names no anchor before it. The first call
+// builds the table over the tables of the reference Sources, which each
+// of them builds once.
+func (s *Source) referenceAnchors() *reftable.Table {
+	if len(s.references) == 0 {
+		return nil
 	}
 
-	return b.Bytes()
+	return s.refAnchors.get(func() *reftable.Table {
+		tables := make([]*reftable.Table, len(s.references))
+		for i, ref := range s.references {
+			tables[i] = ref.exportedAnchors()
+		}
+
+		return reftable.New(nil, tables...)
+	})
+}
+
+// exportedAnchors returns the anchors a Source finds in s when it reads s
+// through [WithReferences]: those of the documents of s over those of
+// the reference documents of s.
+func (s *Source) exportedAnchors() *reftable.Table {
+	return s.exported.get(func() *reftable.Table {
+		var bodies []ast.Node
+
+		for _, doc := range s.documents() {
+			if doc.doc.err == nil && doc.doc.root != nil {
+				bodies = append(bodies, doc.doc.root.Body)
+			}
+		}
+
+		return reftable.New(bodies, s.referenceAnchors())
+	})
+}
+
+// referenceSpellings returns the [decodetree.Spellings] of the reference
+// documents, those of each reference Source included, each once.
+func (s *Source) referenceSpellings() []*decodetree.Spellings {
+	return s.refSpellings.get(func() []*decodetree.Spellings {
+		var all []*decodetree.Spellings
+
+		// Two reference Sources can read the same Source, and the list
+		// holds its Spellings once.
+		seen := map[*decodetree.Spellings]bool{}
+
+		for _, ref := range s.references {
+			for _, sp := range slices.Concat(ref.referenceSpellings(), []*decodetree.Spellings{ref.ownSpellings()}) {
+				if !seen[sp] {
+					seen[sp] = true
+					all = append(all, sp)
+				}
+			}
+		}
+
+		return all
+	})
+}
+
+// ownSpellings returns the [decodetree.Spellings] of the text of the
+// Source, which the first call builds.
+func (s *Source) ownSpellings() *decodetree.Spellings {
+	return s.spellings.get(func() *decodetree.Spellings {
+		return decodetree.NewSpellings(spellingTexts(s.Tokens()))
+	})
 }
 
 // Name returns the name of the [Source]: the one [WithName] set, the
@@ -1369,18 +1405,6 @@ func (s *Source) reparse() *docparse.Result {
 	}
 
 	return r
-}
-
-// spellReferences returns the [spellingTexts] of the reference documents,
-// which include those of each reference Source.
-func (s *Source) spellReferences() []string {
-	var tks token.Tokens
-
-	for _, ref := range s.references {
-		tks = append(tks, tokens.Tokenize(string(ref))...)
-	}
-
-	return spellingTexts(tks)
 }
 
 // Bind binds err to the [Source] and to the document each location in

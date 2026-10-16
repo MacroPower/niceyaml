@@ -907,17 +907,31 @@
 // does not take.
 //
 // An alias reads an anchor of the reference documents only when no
-// anchor of its name comes before it in its own document. Each decode
-// reads the reference documents in the order given, so an anchor of a
+// anchor of its name comes before it in its own document. Where the
+// reference documents define one anchor name more than once, the last
+// of them in the text wins, even an anchor inside another anchor of that
+// name. The reference documents go in the order given, so an anchor of a
 // later one overrides an anchor of the same name in an earlier one. A
 // Source among them puts its own reference documents ahead of its own
-// text, so its aliases resolve as they do in its own decodes. An alias
-// inside a reference document reads the anchors of the reference
-// documents alone, whatever anchors the document that reads it defines.
-// Where the reference documents define one anchor name twice, a value
-// between the two anchors reads the first in a decode into an any value,
-// the decode a schema runs. A decode into a typed value reads the second.
-// Each anchor of the reference documents thus needs a name of its own.
+// text, so its own anchors override theirs.
+//
+// An alias inside a reference document reads the anchors of the
+// reference documents alone, whatever anchors the document that reads it
+// defines. It reads the last anchor of its name by the same rule, even
+// one after it or in a later reference document.
+//
+// An anchor inside another anchor breaks the rule when a later anchor
+// shares its name. A decode that reads the outer anchor registers the
+// inner one again. An alias that the decode reads after the outer anchor
+// might then read the inner anchor, but [NewSourceFromLayers] reads the
+// last. A typed decode and a decode into an any value, the decode a
+// schema runs, might also read different anchors. Each anchor of the
+// reference documents thus needs a name of its own.
+//
+// A decode reads the anchors of the reference documents that its aliases
+// reach, and every anchor that an alias inside those anchors reaches.
+// Its cost thus follows those anchors rather than the size of the
+// reference documents, however many documents read them.
 //
 // A path resolves in the document itself and stops at an alias that
 // reads a reference document. [Node.At] and [Node.Nodes] return an error
@@ -941,9 +955,13 @@
 // key of a mapping that merges a reference document under a `<<` key
 // binds with no position.
 //
-// A reference document brings its text and its own reference documents,
-// and none of the other settings of its Source. A reference document that
-// does not parse fails every decode of the Source that reads it.
+// A reference document brings its anchors and its own reference
+// documents. Its Source parses it once, with its [WithAllowDuplicateKeys],
+// [WithByteLimit], and [WithDepthLimit] options, and every Source that
+// reads it shares the parse. A reference document that does not parse
+// fails every decode of the Source that reads it, with the error of the
+// parse. The unmarshalers and the [WithAliasLimit] option of its Source
+// reach no decode of a Source that reads it.
 //
 // # Layers
 //
@@ -1122,9 +1140,10 @@
 //
 // The count reads the documents of a Source and no reference document of
 // [WithReferences], and the option on a reference Source changes nothing.
-// Every decode reads each reference document in full, so nested `<<`
-// merge keys there cost every decode what they expand to, with the limit
-// on or off. A program passes trusted files alone as reference documents.
+// A decode reads in full each anchor of the reference documents that its
+// aliases reach. Nested `<<` merge keys there thus cost the decode what
+// they expand to, with the limit on or off. A program passes trusted
+// files alone as reference documents.
 // [NewSourceFromLayers] writes each alias of a layer out in full, so a
 // layer must pass the limit as a decode into a type that reads text does.
 // The byte limit and the depth limit of the Source of each layer bound

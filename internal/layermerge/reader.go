@@ -9,10 +9,10 @@ import (
 	"unicode"
 
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/reftable"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -25,10 +25,10 @@ var errNoScalarText = errors.New("node has no text to merge")
 //
 // An alias reads the anchor the [paths.Resolver] of the document binds it
 // to, which is the anchor a decode of the layer reads. An alias the
-// resolver binds to no anchor reads an anchor of the reference documents
-// of the layer by name, and so does every alias inside a reference
-// document. An alias inside the anchor it refers to reads as null, as the
-// decoder reads it.
+// resolver binds to no anchor reads the anchor that the
+// [*reftable.Table] of the reference documents of the layer holds for its
+// name, and so does every alias inside a reference document. An alias
+// inside the anchor it refers to reads as null, as the decoder reads it.
 type Reader struct {
 	// Ctx cancels the read, which can run long, since the read copies the
 	// anchor of each alias in full.
@@ -41,13 +41,11 @@ type Reader struct {
 	// UnnamedKey is the error of a key with no name, which the read wraps
 	// in a [NodeError].
 	UnnamedKey error
-	// The anchors of the reference documents of the layer by name, which
-	// references fills on its first call.
-	refs map[string]*ast.AnchorNode
 	// The anchors whose content the reader is inside.
 	open map[*ast.AnchorNode]bool
-	// References holds the text of each reference document of the layer.
-	References [][]byte
+	// References holds the anchors of the reference documents of the
+	// layer, or nil when the layer has none.
+	References *reftable.Table
 	// Layer is the index of the layer among the layers the merge reads.
 	// Each value the read returns holds it as [Value.Layer].
 	Layer int
@@ -178,8 +176,8 @@ func tagsNoValue(tag *ast.TagNode) bool {
 // anchor returns the anchor alias reads, and whether that anchor lies in
 // a reference document. An alias of the document reads the anchor the
 // resolver binds it to. An alias the resolver binds to no anchor, and
-// every alias of a reference document, reads the last anchor of its name
-// in the reference documents.
+// every alias of a reference document, reads the anchor that References
+// holds for its name.
 func (r *Reader) anchor(alias *ast.AliasNode, ref bool) (*ast.AnchorNode, bool, error) {
 	if !ref {
 		found, err := r.Resolver.Anchor(alias)
@@ -190,7 +188,7 @@ func (r *Reader) anchor(alias *ast.AliasNode, ref bool) (*ast.AnchorNode, bool, 
 
 	name, _ := astnode.Name(alias.Value)
 
-	anchor, ok := r.references()[name]
+	anchor, ok := r.References.Anchor(name)
 	if !ok {
 		err := fmt.Errorf("%w: *%s has no anchor to read", paths.ErrAlias, name)
 
@@ -198,41 +196,6 @@ func (r *Reader) anchor(alias *ast.AliasNode, ref bool) (*ast.AnchorNode, bool, 
 	}
 
 	return anchor, true, nil
-}
-
-// references returns the anchors of the reference documents of the layer
-// by name, and reads the documents on the first call. The decoder reads
-// the reference documents in order and keeps the anchors by name, so the
-// last anchor of a name wins.
-func (r *Reader) references() map[string]*ast.AnchorNode {
-	if r.refs != nil {
-		return r.refs
-	}
-
-	r.refs = map[string]*ast.AnchorNode{}
-
-	for _, text := range r.References {
-		// The caller rejects a layer with a reference document that does
-		// not parse before the read.
-		file, err := parser.ParseBytes(text, 0)
-		if err != nil {
-			continue
-		}
-
-		for _, doc := range file.Docs {
-			astnode.Inspect(doc, func(node ast.Node) bool {
-				if anchor, ok := node.(*ast.AnchorNode); ok {
-					if name, ok := astnode.Name(anchor.Name); ok {
-						r.refs[name] = anchor
-					}
-				}
-
-				return true
-			})
-		}
-	}
-
-	return r.refs
 }
 
 // content returns the value of content, a node [Reader.follow] found.

@@ -33,15 +33,18 @@ import (
 // keeps its name, so it reads an anchor of a reference document or none.
 //
 // The decoder keeps the anchors of the reference documents in the same
-// maps, and it reads those documents first. It reads the value of each
-// anchor there into an interface, and it reads the nodes of the anchor
-// again for each target of another type. An alias among those nodes finds
-// its anchor by name at every read. The second read thus finds an anchor
-// of the document that shares the name, where the first found the anchor
-// of the reference document. When the Source has reference documents from
-// niceyaml.WithReferences, the tree therefore gives every anchor of the
-// document a name of its own, so an alias of a reference document reads
-// the anchors of the reference documents alone.
+// maps. Before a decode, niceyaml has the decoder read the anchors of the
+// reference documents that the decode needs. The decoder reads the value
+// of each such anchor into an interface. It reads the nodes of the anchor
+// again for each target of another type.
+//
+// An alias among those nodes finds its anchor by name at every read. The
+// second read thus finds an anchor of the document that shares the name,
+// where the first found the anchor of the reference document. When the
+// Source has reference documents from niceyaml.WithReferences, the tree
+// therefore gives every anchor of the document a name of its own. An
+// alias of a reference document then reads the anchors of the reference
+// documents alone.
 //
 // The decoder reads an alias inside the anchor it refers to as null,
 // since it has not finished reading the anchor. For a type with an
@@ -110,6 +113,9 @@ type Tree struct {
 	// Returns the aliases of source in the order of their offsets, and
 	// lists them on the first call.
 	aliases func() []aliasRead
+	// Returns the aliases to a reference document that a decode of body
+	// reads, and lists them on the first call.
+	bodyReads func() []aliasRead
 }
 
 // Options says how [New] builds a tree that changes the document.
@@ -121,9 +127,14 @@ type Options struct {
 	// the token of each alias the facts hold as enclosed, as [WriteNull]
 	// writes it.
 	Reparse func() (ast.Node, map[*token.Token]int)
-	// Texts returns the texts a new name such as "x [2]" must not spell:
-	// those of the document and of its reference documents.
+	// Texts returns the texts of the document that a new name such as
+	// "x [2]" must not spell.
 	Texts func() []string
+	// ReferenceSpellings returns the [Spellings] of the reference
+	// documents that niceyaml.WithReferences gives the Source. A new name
+	// must not spell what they index either. A nil field, or one that
+	// returns nil, stands for no reference document.
+	ReferenceSpellings func() []*Spellings
 	// References reports whether the Source has reference documents, from
 	// niceyaml.WithReferences.
 	References bool
@@ -153,6 +164,7 @@ func New(body ast.Node, facts *aliasing.Facts, opts Options) *Tree {
 	t.anchors = sync.OnceValue(t.newAnchorIndex)
 	t.merges = sync.OnceValue(t.unresolvedMerges)
 	t.aliases = sync.OnceValue(t.offsetAliases)
+	t.bodyReads = sync.OnceValue(func() []aliasRead { return t.walkReferenceReads(t.body) })
 
 	return t
 }
@@ -180,7 +192,13 @@ func (t *Tree) parse(names map[string]bool, opts Options) bool {
 	spelled := map[string]bool{}
 
 	if len(names) > 0 {
-		newSpellings(opts.Texts()).find(names, spelled)
+		NewSpellings(opts.Texts()).find(names, spelled)
+
+		if opts.ReferenceSpellings != nil {
+			for _, s := range opts.ReferenceSpellings() {
+				s.find(names, spelled)
+			}
+		}
 	}
 
 	anchors := make(map[*ast.AliasNode]*ast.AnchorNode, len(t.facts.Aliases))
@@ -410,9 +428,9 @@ func (t *Tree) Holds(tk *token.Token) bool {
 // it as the document's resolver binds it, or for one inside the anchor it
 // names, which the decoder has not finished reading when it merges.
 //
-// The document's resolver knows nothing of the reference documents a
-// decode may carry, from niceyaml.WithReferences, and the decoder merges an
-// alias that one of them defines. So err reports an alias only when it
+// The document's resolver knows nothing of the anchors of the reference
+// documents, from niceyaml.WithReferences, that a decode reads first. The
+// decoder merges an alias that one of them defines. So err reports an alias only when it
 // is the decoder's own failure for that alias. That is the message the
 // decoder gives an alias it finds no anchor for, and, for an alias
 // inside the anchor it names, any [yaml.Error] whose token is not one
@@ -472,9 +490,51 @@ func (t *Tree) unresolvedMerges() []mergeAlias {
 // inside the anchor it refers to reads null, so the walk does not follow
 // it.
 func (t *Tree) ReferenceAliases(scope ast.Node) []*token.Token {
+	reads := t.referenceReads(scope)
+
+	refs := make([]*token.Token, len(reads))
+	for i, a := range reads {
+		refs[i] = a.token
+	}
+
+	return refs
+}
+
+// ReferenceNames returns the names of the aliases [Tree.ReferenceAliases]
+// returns for scope, each once, in document order. A decode of scope
+// reads the anchors of those names in the reference documents.
+func (t *Tree) ReferenceNames(scope ast.Node) []string {
+	var names []string
+
+	seen := map[string]bool{}
+
+	for _, a := range t.referenceReads(scope) {
+		if a.name != "" && !seen[a.name] {
+			seen[a.name] = true
+			names = append(names, a.name)
+		}
+	}
+
+	return names
+}
+
+// referenceReads returns the aliases [Tree.ReferenceAliases] describes
+// for scope, in document order. The tree lists those of its body once,
+// because each decode of the body reads them.
+func (t *Tree) referenceReads(scope ast.Node) []aliasRead {
+	if scope == t.body {
+		return t.bodyReads()
+	}
+
+	return t.walkReferenceReads(scope)
+}
+
+// walkReferenceReads lists the aliases [Tree.referenceReads] returns for
+// scope.
+func (t *Tree) walkReferenceReads(scope ast.Node) []aliasRead {
 	aliases := t.aliases()
 
-	var refs []*token.Token
+	var refs []aliasRead
 
 	seen := map[*token.Token]bool{}
 	visited := map[ast.Node]bool{}
@@ -503,7 +563,7 @@ func (t *Tree) ReferenceAliases(scope ast.Node) []*token.Token {
 			case a.anchor == nil:
 				if !seen[a.token] {
 					seen[a.token] = true
-					refs = append(refs, a.token)
+					refs = append(refs, a)
 				}
 
 			case !visited[a.anchor] && !a.enclosed:
@@ -514,14 +574,14 @@ func (t *Tree) ReferenceAliases(scope ast.Node) []*token.Token {
 	}
 
 	sort.SliceStable(refs, func(i, j int) bool {
-		return refs[i].Position.Offset < refs[j].Position.Offset
+		return refs[i].token.Position.Offset < refs[j].token.Position.Offset
 	})
 
 	return refs
 }
 
 // offsetAliases returns the aliases of the tree in the order of their
-// offsets, for [Tree.ReferenceAliases].
+// offsets.
 func (t *Tree) offsetAliases() []aliasRead {
 	var aliases []aliasRead
 
@@ -530,7 +590,7 @@ func (t *Tree) offsetAliases() []aliasRead {
 			continue
 		}
 
-		read := aliasRead{token: a.Node.Start, enclosed: a.Inside}
+		read := aliasRead{token: a.Node.Start, name: a.Name, enclosed: a.Inside}
 		if a.Anchor != nil {
 			read.anchor = a.Anchor
 		}
@@ -547,11 +607,14 @@ func (t *Tree) offsetAliases() []aliasRead {
 
 // aliasRead is an alias of the document and the anchor it reads.
 type aliasRead struct {
-	// The token of the alias.
-	token *token.Token
 	// The anchor the document's resolver binds the alias to, or nil when
 	// it binds the alias to no anchor.
 	anchor ast.Node
+	// The token of the alias.
+	token *token.Token
+	// The name of the alias as the document spells it, or empty when it
+	// has none.
+	name string
 	// Whether the alias lies inside anchor.
 	enclosed bool
 }
@@ -615,12 +678,13 @@ func renamedAnchorNames(facts *aliasing.Facts, references bool) map[string]bool 
 	return names
 }
 
-// spellings indexes the counts in brackets that tokens spell, such as the
-// " [2]" of "x [2]", so [spellings.find] reports the new names
-// [Tree.newName] cannot give an anchor.
+// Spellings indexes the counts in brackets that texts spell, such as the
+// " [2]" of "x [2]", so a [Tree] finds the new names it cannot give an
+// anchor. A Source builds the Spellings of the text of each reference
+// document once. Every tree that reads that document shares them.
 //
-// Create instances with [newSpellings].
-type spellings struct {
+// Create instances with [NewSpellings].
+type Spellings struct {
 	// Finds each place a name precedes " [" in data.
 	index *suffixarray.Index
 	// Each count in brackets of data, by the offset of its " [".
@@ -629,16 +693,16 @@ type spellings struct {
 	data []byte
 }
 
-// bracket is a count in brackets in the data of a [spellings]. The string
+// bracket is a count in brackets in the data of a [Spellings]. The string
 // that holds it starts at start, and the bracket ends before end.
 type bracket struct{ start, end int }
 
-// newSpellings creates a new [*spellings] for texts.
-func newSpellings(texts []string) *spellings {
+// NewSpellings creates new [*Spellings] for texts.
+func NewSpellings(texts []string) *Spellings {
 	// The data joins the strings, so that one index finds each name in all
 	// of them. A string that spells no count spells no new name, so the
 	// data leaves it out.
-	s := &spellings{brackets: map[int]bracket{}}
+	s := &Spellings{brackets: map[int]bracket{}}
 
 	for _, str := range texts {
 		start := len(s.data)
@@ -681,7 +745,7 @@ func newSpellings(texts []string) *spellings {
 // find adds to spelled the new names that the texts of s spell, even in
 // part, among those [Tree.newName] can give an anchor with a name in
 // names.
-func (s *spellings) find(names, spelled map[string]bool) {
+func (s *Spellings) find(names, spelled map[string]bool) {
 	for name := range names {
 		for _, at := range s.index.Lookup([]byte(name+" ["), -1) {
 			// A place where the name starts in an earlier string spells

@@ -564,8 +564,8 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 		return n.bindOwn(err)
 	}
 
-	// A reference document past a limit fails every decode, as one that
-	// does not parse does.
+	// A reference document that does not parse, or one past a limit,
+	// fails every decode with the error of its parse.
 	if n.source.referenceErr != nil {
 		return n.Bind(n.source.referenceErr)
 	}
@@ -921,9 +921,16 @@ func asDecodeError(err error) error {
 }
 
 // decodeWithRecover decodes node into v with dec. It turns a panic into an
-// [*Error] at node that holds a [*PanicError] and matches [errPlaced] but
-// not [ErrDecode], since a panic is no fault of the document.
-func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v any) (err error) {
+// [*Error] at node that holds a [*PanicError]. The error matches
+// [errPlaced] but not [ErrDecode], because the document is not at fault
+// for a panic.
+func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v any) error {
+	return decodeAtWithRecover(ctx, dec, node, v, node)
+}
+
+// decodeAtWithRecover is [decodeWithRecover] with the error of a panic at
+// the first token of at, a node of the document, rather than of node.
+func decodeAtWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v any, at ast.Node) (err error) {
 	defer func() {
 		p := recover()
 		if p == nil {
@@ -931,7 +938,7 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 		}
 
 		err = Unchecked(panicked("decoder", &PanicError{Value: p, Stack: debug.Stack()}, errPlaced),
-			atToken(astnode.StartToken(node)))
+			atToken(astnode.StartToken(at)))
 	}()
 
 	err = dec.DecodeFromNodeContext(ctx, node, v)
@@ -1021,15 +1028,44 @@ func (n *Node) YAMLComments(ctx context.Context) (yaml.CommentMap, error) {
 }
 
 // prime returns the view of node in the [decodetree.Tree] and has dec read
-// the anchors outside node that its aliases need, since the decoder knows
-// only anchors it has decoded. It stops at the first anchor that fails.
+// the anchors outside node that its aliases need. The decoder knows only
+// the anchors it has decoded. Those it needs are the anchors of the
+// reference documents that the aliases reach and, for a node below the
+// body, the anchors of the document before node. It stops at the first
+// anchor that fails.
 func (n *Node) prime(ctx context.Context, dec *yaml.Decoder, node ast.Node) (ast.Node, error) {
-	view := n.doc.tree().View(node)
-	if node == n.doc.root.Body {
-		return view, nil
+	tree := n.doc.tree()
+	view := tree.View(node)
+
+	var anchors []*ast.AnchorNode
+
+	if node != n.doc.root.Body {
+		anchors = tree.Prime(view)
 	}
 
-	for _, anchor := range n.doc.tree().Prime(view) {
+	// An anchor of the document can read a reference document, but no
+	// anchor of a reference document reads the document. The anchors of
+	// the reference documents thus go first.
+	if refs := n.source.referenceAnchors(); refs != nil {
+		for _, anchor := range refs.Prime(tree.ReferenceNames(view)) {
+			err := ctx.Err()
+			if err != nil {
+				return view, err //nolint:wrapcheck // The context names the reason, and the Node binds it.
+			}
+
+			// No token of a reference document lies in the document, so the
+			// error binds at view, where an error of the decode of view
+			// binds.
+			var sink any
+
+			err = decodeAtWithRecover(ctx, dec, anchor, &sink, view)
+			if err != nil {
+				return view, n.rejection(err, view)
+			}
+		}
+	}
+
+	for _, anchor := range anchors {
 		// Without an anchor it needs, the decode of the node would fail
 		// in its stead.
 		err := ctx.Err()

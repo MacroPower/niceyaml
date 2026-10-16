@@ -817,9 +817,10 @@ func (d *document) newDecodeTree() *decodetree.Tree {
 			return r.File.Docs[d.fileIndex].Body, r.Index
 		},
 		Texts: func() []string {
-			return append(spellingTexts(d.tokens), src.referenceTexts.get(src.spellReferences)...)
+			return spellingTexts(d.tokens)
 		},
-		References: len(src.references) > 0,
+		ReferenceSpellings: src.referenceSpellings,
+		References:         len(src.references) > 0,
 	})
 }
 

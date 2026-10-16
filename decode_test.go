@@ -3646,13 +3646,23 @@ func TestNode_YAMLComments(t *testing.T) {
 	`)
 
 	tcs := map[string]struct {
-		want  yaml.CommentMap
-		input string
-		path  paths.Path
+		want   yaml.CommentMap
+		input  string
+		path   paths.Path
+		source []niceyaml.SourceOption
 	}{
 		"document": {
 			input: input,
 			want:  want,
+		},
+		"alias to a reference document leaves out its comments": {
+			input: stringtest.LinesLF("server: *base", "name: api # short"),
+			source: []niceyaml.SourceOption{yamltest.References(stringtest.LinesLF(
+				"# The defaults.",
+				"base: &base",
+				"  port: 80 # http",
+			))},
+			want: yaml.CommentMap{"$.name": {yaml.LineComment(" short")}},
 		},
 		"node below the root keeps the paths of the document": {
 			input: input,
@@ -3686,7 +3696,7 @@ func TestNode_YAMLComments(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			n := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.path)
+			n := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input, tc.source...), tc.path)
 
 			got, err := n.YAMLComments(t.Context())
 			require.NoError(t, err)
@@ -5422,19 +5432,49 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 		assert.Equal(t, map[string]string{"1": "second"}, got)
 	})
 
-	t.Run("without option a decode accepts a duplicate key of a reference document", func(t *testing.T) {
+	t.Run("a reference document parses with the option of its own source", func(t *testing.T) {
 		t.Parallel()
 
-		ref := niceyaml.NewSourceFromString("defaults: &defaults {name: first, name: second}\n")
+		ref := "defaults: &defaults {name: first, name: second}\n"
 
-		_, err := ref.File()
-		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		tcs := map[string]struct {
+			opts []niceyaml.SourceOption
+			want map[string]config
+			// A part of the message of the error every decode returns.
+			err string
+		}{
+			"without option the duplicate key fails every decode": {
+				err: `mapping key "name" already defined`,
+			},
+			"with option the last value wins": {
+				opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+				want: map[string]config{"server": {Name: "second"}},
+			},
+		}
 
-		doc := yamltest.FirstDocument(t, "server: *defaults\n", niceyaml.WithReferences(ref))
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		got, err := doc.Decode[map[string]config](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]config{"server": {Name: "second"}}, got)
+				// The option on the source that reads the reference reaches
+				// the parse of that source alone.
+				doc := yamltest.FirstDocument(t, "server: *defaults\n",
+					niceyaml.WithAllowDuplicateKeys(true),
+					niceyaml.WithReferences(niceyaml.NewSourceFromString(ref, tc.opts...)),
+				)
+
+				got, err := doc.Decode[map[string]config](t.Context())
+				if tc.err != "" {
+					require.ErrorIs(t, err, niceyaml.ErrSyntax)
+					assert.ErrorContains(t, err, tc.err)
+
+					return
+				}
+
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
 	})
 }
 
@@ -13076,16 +13116,14 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want:   `time: invalid duration "soon"`,
 			},
 			// Every decode of the node fails the same way, whatever the
-			// target, so no value of the target reported the error.
+			// target, so no value of the target reported the error. The
+			// anchor the decoder rejects lies in a reference document that
+			// two aliases read, so neither alias holds the error.
 			"error of the decoder itself": {
-				input:  "timeout: soon\n",
-				source: []niceyaml.SourceOption{yamltest.References("limit: [\n")},
+				input:  stringtest.LinesLF("timeout: soon", "a: *limit", "b: *limit"),
+				source: []niceyaml.SourceOption{yamltest.References("limit: &limit [*missing]\n")},
 				decode: decodeAs[tierServer](),
-				want: stringtest.LinesLF(
-					"[1:8] sequence end token ']' not found",
-					">  1 | limit: [",
-					"              ^",
-				),
+				want:   `could not find alias "missing"`,
 			},
 			// The walk decodes nothing once the context has ended.
 			"context an unmarshaler ends": {

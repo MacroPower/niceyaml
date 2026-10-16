@@ -67,8 +67,6 @@ var (
 	//     [Unchecked].
 	//   - The error for a target type whose definition the decoder
 	//     refuses, such as a struct with two fields of one name.
-	//   - The error of a reference document from [WithReferences] that
-	//     does not parse.
 	//
 	// The error of a context that ended does not match, even when an
 	// unmarshaler wraps it. Neither does a [PanicError], [ErrDecodeTarget],
@@ -179,13 +177,16 @@ var (
 	// a mapping holds twice without [WithAllowDuplicateKeys]. Every error
 	// the parser returns matches it. [Source.File] and [Source.Document]
 	// return it, and [Node.Err] returns it for a document that did not
-	// parse, among the documents [Source.Documents] returns. Each error
-	// comes back bound as a [SourceError] at the offending token. The error
-	// of a file with several such documents is a join, which matches
-	// through each of them. [errors.As] still finds the go-yaml error,
-	// which no error of the chain unwraps to. The document is at fault for
-	// each problem the parse reports with ErrSyntax, as [IsInvalid]
-	// describes.
+	// parse, among the documents [Source.Documents] returns. When a
+	// reference document from [WithReferences] does not parse, every
+	// decode of a Source that reads it returns the error of that document.
+	//
+	// Each error comes back bound as a [SourceError] at the offending
+	// token. The error of a file with several such documents is a join,
+	// which matches through each of them. [errors.As] still finds the
+	// go-yaml error, which no error of the chain unwraps to. The document
+	// is at fault for each problem the parse reports with ErrSyntax, as
+	// [IsInvalid] describes.
 	//
 	// A panic in the parser does not match, such as one on a token with
 	// no position that [NewSourceFromTokens] received. It comes back from
