@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -28,7 +29,10 @@ type Registry struct {
 	// names and the old names from KindName.
 	names map[string]*kindEntry
 	// The kind of each Go type.
-	types   map[reflect.Type]*kindEntry
+	types map[reflect.Type]*kindEntry
+	// The type fields that each schema does not declare, keyed by the
+	// validator of the schema, as [Registry.hiddenFields] returns them.
+	hidden  sync.Map
 	kinds   []*kindEntry
 	removed []*removal
 	cfg     registryConfig

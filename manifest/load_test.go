@@ -1,11 +1,14 @@
 package manifest_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 
@@ -547,9 +550,60 @@ func TestRegistry_Load(t *testing.T) {
 			),
 			matches: []error{niceyaml.ErrUnknownField},
 		},
+		"unknown field and a rejected value beside the type fields": {
+			files: map[string]string{
+				"cafe.yaml": stringtest.LinesLF(
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Cafe",
+					"metadata:",
+					"  name: yamull",
+					"spec:",
+					"  seats: many",
+					"wifi: open",
+				),
+			},
+			err: stringtest.JoinLF(
+				"config: 2 errors",
+				"|-- config/cafe.yaml:6:10: $.spec.seats: expected integer, got string",
+				"`-- config/cafe.yaml:7:1: $.wifi~: unknown field \"wifi\"",
+				"",
+				"config/cafe.yaml",
+				"   4 |   name: yamull",
+				"   5 | spec:",
+				"   6 |   seats: many",
+				"     |          ^^^^ expected integer, got string",
+				"   7 | wifi: open",
+				"     | ^^^^ unknown field \"wifi\"",
+			),
+			matches: []error{niceyaml.ErrUnknownField},
+		},
 		"flow mapping with type fields": {
 			files: map[string]string{
 				"cafe.yaml": "{apiVersion: cafe.jacobcolvin.com/v1, kind: Cafe, metadata: {name: yamull}}\n",
+			},
+			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
+		},
+		"anchored mapping with type fields": {
+			files: map[string]string{
+				"cafe.yaml": stringtest.LinesLF(
+					"&cafe",
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Cafe",
+					"metadata:",
+					"  name: yamull",
+				),
+			},
+			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
+		},
+		"tagged mapping with type fields": {
+			files: map[string]string{
+				"cafe.yaml": stringtest.LinesLF(
+					"!!map",
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Cafe",
+					"metadata:",
+					"  name: yamull",
+				),
 			},
 			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
 		},
@@ -1719,4 +1773,368 @@ func TestRegistry_Load_LeftOut(t *testing.T) {
 		"`-- the file leaves out the field that cafe.jacobcolvin.com/v1 names close, so it holds its default",
 	),
 		firstTwoLines(niceyaml.FormatError(err)))
+}
+
+// TypeMeta holds the type fields, as the TypeMeta of Kubernetes does.
+type TypeMeta struct {
+	APIVersion string `json:"apiVersion,omitzero"`
+	Kind       string `json:"kind,omitzero"`
+}
+
+// Brew is the Go type of a kind, and declares the type fields through
+// its TypeMeta.
+type Brew struct {
+	TypeMeta `json:",inline"`
+
+	Metadata Metadata `json:"metadata"`
+}
+
+// brewSchema returns a closed schema that requires and declares the type
+// fields, and admits only version and kind as their values.
+func brewSchema(version, kind string) string {
+	return fmt.Sprintf(`{
+  "type": "object",
+  "required": ["apiVersion", "kind"],
+  "properties": {
+    "apiVersion": {"const": %q},
+    "kind": {"const": %q},
+    "metadata": {"type": "object"}
+  },
+  "additionalProperties": false
+}`, version, kind)
+}
+
+func TestRegistry_Load_TypeFields(t *testing.T) {
+	t.Parallel()
+
+	coffee := stringtest.LinesLF("apiVersion: v1", "kind: Coffee", "metadata:", "  name: bryggkaffe")
+	brew := stringtest.LinesLF("apiVersion: v2", "kind: Brew", "metadata:", "  name: bryggkaffe")
+
+	// A closed schema that leaves the type fields out.
+	closed := `{"type": "object", "properties": {"metadata": {"type": "object"}}, "additionalProperties": false}`
+
+	tcs := map[string]struct {
+		// The schemas of v1 and v2, where "" gives the version none.
+		v1, v2 string
+		doc    string
+		decode []niceyaml.DecodeOption
+		err    string
+	}{
+		"current version": {
+			doc: brew,
+		},
+		"older version": {
+			doc: coffee,
+		},
+		"schemas that declare the type fields": {
+			v1:  brewSchema("v1", "Coffee"),
+			v2:  brewSchema("v2", "Brew"),
+			doc: coffee,
+		},
+		"closed schema that leaves the type fields out": {
+			v1:  closed,
+			v2:  closed,
+			doc: coffee,
+		},
+		"closed schema and a flow mapping": {
+			v2:  closed,
+			doc: "{apiVersion: v2, kind: Brew, metadata: {name: bryggkaffe}}\n",
+		},
+		"closed schema and a flow mapping that ends in the type fields": {
+			v2:  closed,
+			doc: "{metadata: {name: bryggkaffe}, apiVersion: v2, kind: Brew}\n",
+		},
+		"closed schema and a document of type fields alone": {
+			v2:  closed,
+			doc: stringtest.LinesLF("apiVersion: v2", "kind: Brew"),
+			// The schema check passes, so the check of the name fails.
+			err: stringtest.JoinLF(
+				"brew.yaml:1:1: $.metadata.name: name must be a non-empty string",
+				"",
+				"   1 | apiVersion: v2",
+				"     | ^^^^^^^^^^",
+				"   2 | kind: Brew",
+			),
+		},
+		"schema that rejects a type field": {
+			v2:  brewSchema("v2", "Tea"),
+			doc: brew,
+			err: stringtest.JoinLF(
+				"brew.yaml:2:7: $.kind: value does not match const",
+				"",
+				"   1 | apiVersion: v2",
+				"   2 | kind: Brew",
+				"     |       ^^^^",
+				"   3 | metadata:",
+				"   4 |   name: bryggkaffe",
+			),
+		},
+		"validator that reads a type field": {
+			doc: coffee,
+			decode: []niceyaml.DecodeOption{niceyaml.WithValidator(niceyaml.ValidatorFunc(
+				func(ctx context.Context, n *niceyaml.Node) error {
+					kind, err := n.DecodeAt[string](ctx, paths.Doc().Child("kind"))
+					if err != nil {
+						return err
+					}
+
+					if kind != "Brew" {
+						return niceyaml.NewError("kind is " + kind)
+					}
+
+					return nil
+				},
+			))},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var v1, v2 []manifest.VersionOption
+
+			if tc.v1 != "" {
+				v1 = append(v1, manifest.Schema(schema.Embedded([]byte(tc.v1))))
+			}
+
+			if tc.v2 != "" {
+				v2 = append(v2, manifest.Schema(schema.Embedded([]byte(tc.v2))))
+			}
+
+			reg := manifest.MustNewRegistry(
+				manifest.WithNameField(meta.Child("name")),
+				manifest.WithDecodeOptions(tc.decode...),
+				manifest.WithKinds(manifest.NewKind[Brew]("Brew",
+					manifest.Version("v1", append(v1, manifest.KindName("Coffee"))...),
+					manifest.Version("v2", v2...),
+				)),
+			)
+
+			set, err := reg.Load(t.Context(),
+				manifest.Sources(niceyaml.NewSourceFromString(tc.doc, niceyaml.WithName("brew.yaml"))))
+			if tc.err != "" {
+				require.Error(t, err)
+				assert.Equal(t, tc.err, niceyaml.FormatError(err))
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			got, ok := set.Get[Brew]("bryggkaffe")
+			require.True(t, ok)
+			assert.Equal(t, TypeMeta{APIVersion: "v2", Kind: "Brew"}, got.Value.TypeMeta)
+		})
+	}
+}
+
+// cafeFields holds the fields of a Cafe, for an unmarshaler of Cafe that
+// decodes it field by field.
+type cafeFields Cafe
+
+// brewFields holds the fields of a Brew, for an unmarshaler of Brew that
+// decodes it field by field.
+type brewFields Brew
+
+// metadataFields holds the fields of a Metadata, for an unmarshaler of
+// Metadata that decodes it field by field.
+type metadataFields Metadata
+
+// jsonCafe is the Go type of a kind that reads its JSON through a method
+// of its own, which rejects unknown fields.
+type jsonCafe Cafe
+
+// UnmarshalJSON decodes c from data field by field, and rejects each key
+// that no field reads.
+func (c *jsonCafe) UnmarshalJSON(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+
+	var f cafeFields
+
+	err := dec.Decode(&f)
+	if err != nil {
+		return fmt.Errorf("decode cafe: %w", err)
+	}
+
+	*c = jsonCafe(f)
+
+	return nil
+}
+
+func TestRegistry_Load_SelfDecodingTypes(t *testing.T) {
+	t.Parallel()
+
+	yamull := Metadata{Name: "yamull"}
+
+	tcs := map[string]struct {
+		// The options of the registry, whose unmarshaler counts each of
+		// its calls in calls. The registry holds one kind, of version v1.
+		opts func(calls *atomic.Int32) []manifest.RegistryOption
+		// The value of the manifest.
+		want any
+		// The name of the kind.
+		kind string
+		// The calls that the load makes to the unmarshaler of opts.
+		calls int32
+	}{
+		"custom unmarshaler of the kind": {
+			kind: "Cafe",
+			opts: func(calls *atomic.Int32) []manifest.RegistryOption {
+				return []manifest.RegistryOption{
+					manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(
+						func(_ context.Context, c *Cafe, decode func(any) error) error {
+							calls.Add(1)
+
+							var f cafeFields
+
+							err := decode(&f)
+							*c = Cafe(f)
+
+							return err
+						},
+					)),
+					manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", manifest.Version("v1"))),
+				}
+			},
+			want:  Cafe{Metadata: yamull},
+			calls: 1,
+		},
+		"custom unmarshaler of a kind that declares the type fields": {
+			kind: "Brew",
+			opts: func(calls *atomic.Int32) []manifest.RegistryOption {
+				return []manifest.RegistryOption{
+					manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(
+						func(_ context.Context, b *Brew, decode func(any) error) error {
+							calls.Add(1)
+
+							var f brewFields
+
+							err := decode(&f)
+							*b = Brew(f)
+
+							return err
+						},
+					)),
+					manifest.WithKinds(manifest.NewKind[Brew]("Brew", manifest.Version("v1"))),
+				}
+			},
+			// The unmarshaler does not see the type fields.
+			want:  Brew{Metadata: yamull},
+			calls: 1,
+		},
+		"custom unmarshaler below the kind": {
+			kind: "Brew",
+			opts: func(calls *atomic.Int32) []manifest.RegistryOption {
+				return []manifest.RegistryOption{
+					manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(
+						func(_ context.Context, m *Metadata, decode func(any) error) error {
+							calls.Add(1)
+
+							var f metadataFields
+
+							err := decode(&f)
+							*m = Metadata(f)
+
+							return err
+						},
+					)),
+					manifest.WithKinds(manifest.NewKind[Brew]("Brew", manifest.Version("v1"))),
+				}
+			},
+			want:  Brew{TypeMeta: TypeMeta{APIVersion: "v1", Kind: "Brew"}, Metadata: yamull},
+			calls: 1,
+		},
+		"JSON unmarshaler of the kind": {
+			kind: "Cafe",
+			opts: func(*atomic.Int32) []manifest.RegistryOption {
+				return []manifest.RegistryOption{
+					manifest.WithUnmarshalers(niceyaml.JSONUnmarshalers(true)),
+					manifest.WithKinds(manifest.NewKind[jsonCafe]("Cafe", manifest.Version("v1"))),
+				}
+			},
+			want: jsonCafe{Metadata: yamull},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var calls atomic.Int32
+
+			reg := manifest.MustNewRegistry(append(tc.opts(&calls), manifest.WithNameField(meta.Child("name")))...)
+
+			doc := stringtest.LinesLF("apiVersion: v1", "kind: "+tc.kind, "metadata:", "  name: yamull")
+
+			set, err := reg.Load(t.Context(),
+				manifest.Sources(niceyaml.NewSourceFromString(doc, niceyaml.WithName("cafe.yaml"))))
+			require.NoError(t, err)
+
+			var got []any
+
+			for o := range set.Objects() {
+				got = append(got, o.Value)
+			}
+
+			assert.Equal(t, []any{tc.want}, got)
+			assert.Equal(t, tc.calls, calls.Load())
+		})
+	}
+}
+
+func TestRegistry_Load_NestedTypeField(t *testing.T) {
+	t.Parallel()
+
+	doc := stringtest.LinesLF("apiVersion: v1", "metadata:", "  kind: Cafe", "  name: yamull")
+
+	tcs := map[string]struct {
+		schema string
+		err    string
+	}{
+		"schema that declares the type field": {
+			schema: `{"properties": {"metadata": {
+  "required": ["kind"],
+  "properties": {"kind": {"const": "Cafe"}, "name": {"type": "string"}},
+  "additionalProperties": false}}}`,
+		},
+		"closed schema that leaves the type field out": {
+			schema: `{"properties": {"metadata": {
+  "properties": {"name": {"type": "string"}},
+  "additionalProperties": false}}}`,
+		},
+		"schema that rejects the type field": {
+			schema: `{"properties": {"metadata": {"properties": {"kind": {"const": "Bar"}}}}}`,
+			err:    "cafe.yaml:3:9: $.metadata.kind: value does not match const",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := manifest.MustNewRegistry(
+				manifest.WithKindField(meta.Child("kind")),
+				manifest.WithNameField(meta.Child("name")),
+				manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
+					manifest.Version("v1", manifest.Schema(schema.Embedded([]byte(tc.schema)))),
+				)),
+			)
+
+			set, err := reg.Load(t.Context(),
+				manifest.Sources(niceyaml.NewSourceFromString(doc, niceyaml.WithName("cafe.yaml"))))
+			if tc.err != "" {
+				require.Error(t, err)
+				assert.Equal(t, tc.err, firstLine(niceyaml.FormatError(err)))
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			_, ok := set.Get[Cafe]("yamull")
+			assert.True(t, ok)
+		})
+	}
 }

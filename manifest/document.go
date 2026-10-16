@@ -29,9 +29,15 @@ type docState struct {
 	// The document as the user wrote it.
 	doc *niceyaml.Node
 	// The working copy of the document, in the layout of the current
-	// version once the steps ran, which the schema checks and the decode
-	// read, or nil.
+	// version after the steps ran, or nil. The checks of the document read
+	// it, and a schema check that hides a type field reads a blanked copy
+	// instead.
 	work *niceyaml.Node
+	// The document or migrated copy that work copies.
+	workFrom *niceyaml.Node
+	// Moves a location of work into the document, or nil for the document
+	// itself.
+	workLocate func(hook.Located) hook.Place
 	// The copy of the document that the steps edit, or nil.
 	edit *edit.Doc
 	// The name, when the document reached the layout of the current version
@@ -584,9 +590,11 @@ func detailsOf(texts []string) []error {
 }
 
 // checkSchema checks the working copy against the schema of v, and reports
-// whether it passed. A version without a schema passes. Each problem of
-// the check takes detail as its last detail, when detail is not nil. Only
-// the schema of the current version reports deprecations.
+// whether it passed. A version without a schema passes. The check sees
+// each type field that the schema declares, with the names of v, and sees
+// every other type field blank. Each problem of the check takes detail as
+// its last detail, when detail is not nil. Only the schema of the current
+// version reports deprecations.
 func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail error) bool {
 	if !v.cfg.hasSchema {
 		return true
@@ -606,9 +614,20 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 		return false
 	}
 
+	work := d.work
+
+	if hide := reg.hiddenFields(sch); len(hide) > 0 {
+		var ok bool
+
+		work, ok = d.workingCopy(d.workFrom, d.workLocate, hide)
+		if !ok {
+			return false
+		}
+	}
+
 	warnings := niceyaml.NewWarnings()
 
-	err = d.work.Validate(warnings.Context(ctx), sch)
+	err = work.Validate(warnings.Context(ctx), sch)
 
 	d.warn(warnings.Err())
 
@@ -630,12 +649,17 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 }
 
 // decode decodes the working copy into a value of the Go type of the kind,
-// and reports whether the decode passed.
+// and reports whether the decode passed. The decode admits the type
+// fields, and fills each field of the Go type that reads one, unless a
+// value on the way decodes itself. It rejects every other key that the Go
+// type does not declare.
 func (d *docState) decode(ctx context.Context) bool {
 	reg := d.l.reg
 	entry := d.route.kind
 
-	opts := append([]niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)}, reg.cfg.decodeOptions...)
+	known, _ := hook.KnownKeys(reg.typeFields()).(niceyaml.DecodeOption) //nolint:errcheck // The hook returns a DecodeOption.
+
+	opts := append([]niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true), known}, reg.cfg.decodeOptions...)
 	opts = append(opts, entry.kind.cfg.decodeOptions...)
 
 	warnings := niceyaml.NewWarnings()

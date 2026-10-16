@@ -178,10 +178,23 @@
 //     that implements [niceyaml.SelfValidator] validates itself.
 //  6. The document must hold a name, when [WithNameField] reads names.
 //
-// The schema check and the decode admit the type fields, whatever the
-// schema and the Go type declare. The decode rejects every other key that
-// the Go type does not declare. Every error and every warning binds in the
-// file of the user.
+// The check of each schema sees the type fields that the schema declares
+// under properties, with the names of its version, and sees no other type
+// field. A closed schema that leaves the type fields out thus passes. Only
+// a declaration in the schema document itself, outside every branch such
+// as a schema under oneOf, counts. [Registry.Verify] reports each schema
+// that requires a type field and does not declare it, because such a
+// schema fails every document. It also reports each type field that a
+// branch or another document might declare.
+//
+// The decode admits the type fields, and rejects every other key that the
+// Go type does not declare. A Go type that reads the type fields, such as
+// one that embeds the TypeMeta of Kubernetes or a map[string]any, gets the
+// names of the current version. Each validator of [WithDecodeOptions] and
+// [DecodeOptions] sees them too. A value that decodes itself, through a
+// method such as UnmarshalYAML or through an unmarshaler of
+// [WithUnmarshalers], sees no type field below it. Every error and every
+// warning binds in the file of the user.
 //
 // Once each document has run its checks, the load compares the names of
 // the manifests of each kind, and counts the manifests of each kind that

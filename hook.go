@@ -7,6 +7,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
+	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 // The calls that niceyaml hands to its manifest and schema packages, as
@@ -47,6 +48,13 @@ func init() {
 		s, _ := src.(*Source) //nolint:errcheck // The hook takes a *Source.
 
 		return s.layerNodes()
+	}
+	hook.KnownKeys = func(keys []paths.Path) any {
+		keys = slices.Clone(keys)
+
+		return DecodeOption(func(c *decodeConfig) {
+			c.knownKeys = append(c.knownKeys, keys...)
+		})
 	}
 }
 

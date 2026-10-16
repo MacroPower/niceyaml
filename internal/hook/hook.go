@@ -96,4 +96,13 @@ var (
 	// that each layer reads, lowest first. It returns nil for a Source that
 	// merges no layers.
 	Layers func(src any) []any
+
+	// KnownKeys returns a niceyaml.DecodeOption that admits the key at
+	// each of keys, a path from `$` in the document that the decode reads.
+	// A decode under niceyaml.WithDisallowUnknownFields then rejects every
+	// unknown field except those keys. A key with a field in the target
+	// decodes into that field. The decode skips a key that no field reads,
+	// and every key below a value that decodes itself. The validators of
+	// the decode still see each key.
+	KnownKeys func(keys []paths.Path) any
 )

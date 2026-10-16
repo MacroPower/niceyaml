@@ -17,7 +17,8 @@ import (
 var spec = paths.Doc().Child("spec")
 
 // load loads text, a document at v1 of the kind Cafe, whose v2 runs the
-// step fn on the places that p selects, and returns the value of v2.
+// step fn on the places that p selects. It checks that the value of v2
+// holds the type fields of v2, and returns the value without them.
 func load(t *testing.T, text string, p paths.Path, fn migrate.Func) (map[string]any, error) {
 	t.Helper()
 
@@ -40,6 +41,12 @@ func load(t *testing.T, text string, p paths.Path, fn migrate.Func) (map[string]
 
 	cafe, ok := set.One[map[string]any]()
 	require.True(t, ok)
+
+	assert.Equal(t, "v2", cafe.Value["apiVersion"])
+	assert.Equal(t, "Cafe", cafe.Value["kind"])
+
+	delete(cafe.Value, "apiVersion")
+	delete(cafe.Value, "kind")
 
 	return cafe.Value, nil
 }

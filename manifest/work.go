@@ -9,19 +9,39 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
+	"go.jacobcolvin.com/niceyaml/internal/schemahook"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-// prepareWork builds the working copy of doc, the document or a migrated
-// copy of it. The copy holds the lines of doc with each type field
-// blanked. The schema checks and the decode thus admit the type fields,
-// whatever the schema and the Go type declare. Every line and column of
-// the copy matches doc, so locate moves a location of the copy, as doc
-// places it, into the document. A nil locate leaves the location as it
-// is, for doc itself. The copy takes the unmarshalers of the registry
-// ahead of those of the Source of doc.
+// prepareWork sets the working copy to a copy of doc, the document or a
+// migrated copy of it, with no field blanked. It keeps doc and locate, so
+// that a schema check can build a copy that blanks the type fields its
+// schema does not declare.
 func (d *docState) prepareWork(doc *niceyaml.Node, locate func(hook.Located) hook.Place) bool {
+	work, ok := d.workingCopy(doc, locate, nil)
+	if !ok {
+		return false
+	}
+
+	d.work, d.workFrom, d.workLocate = work, doc, locate
+
+	return true
+}
+
+// workingCopy returns a copy of doc that holds the lines of doc, with the
+// type field at each of hide blanked. Every line and column of the copy
+// matches doc, so locate moves a location of the copy, as doc places it,
+// into the document. A nil locate leaves the location as it is, for doc
+// itself. The copy takes the unmarshalers of the registry ahead of those
+// of the Source of doc. It adds the problem of a copy that does not parse,
+// or that holds nothing after the blanking, and reports false.
+func (d *docState) workingCopy(
+	doc *niceyaml.Node,
+	locate func(hook.Located) hook.Place,
+	hide []paths.Path,
+) (*niceyaml.Node, bool) {
 	src := doc.Source()
 	text := src.Text()
 	span := doc.Span()
@@ -41,7 +61,7 @@ func (d *docState) prepareWork(doc *niceyaml.Node, locate func(hook.Located) hoo
 	work := []rune(text[start:end])
 	blank := &blanker{doc: doc, src: src, base: start, text: text, work: work, first: -1}
 
-	for _, p := range d.l.reg.typeFields() {
+	for _, p := range hide {
 		blank.field(p)
 	}
 
@@ -60,29 +80,57 @@ func (d *docState) prepareWork(doc *niceyaml.Node, locate func(hook.Located) hoo
 		return hook.Place{Path: at.Path, HasPath: at.HasPath, Range: at.Range, HasRange: at.HasRange}
 	}).(*niceyaml.Source)
 	if !ok {
-		return false
+		return nil, false
 	}
 
 	for _, n := range working.AllDocuments() {
 		if n.Err() != nil {
 			d.fail(n.Err())
 
-			return false
+			return nil, false
 		}
 
 		if !n.IsEmpty() {
-			d.work = n
-
-			return true
+			return n, true
 		}
 	}
 
 	d.fail(niceyaml.NewError("document holds nothing but its type fields"))
 
-	return false
+	return nil, false
 }
 
-// blanker blanks the type fields of a document in a working copy of its
+// hiddenFields returns the type fields that sch, the schema of a version,
+// does not declare, which the check of the schema sees blank. A schema
+// that checks nothing hides none.
+func (r *Registry) hiddenFields(sch *schema.Schema) []paths.Path {
+	v := schemahook.Validator(sch)
+	if v == nil {
+		return nil
+	}
+
+	if hidden, ok := r.hidden.Load(v); ok {
+		fields, _ := hidden.([]paths.Path) //nolint:errcheck // The map holds the type fields of each validator.
+
+		return fields
+	}
+
+	doc := newSchemaDoc(v)
+
+	var fields []paths.Path
+
+	for _, p := range r.typeFields() {
+		if !doc.field(p).declared {
+			fields = append(fields, p)
+		}
+	}
+
+	r.hidden.Store(v, fields)
+
+	return fields
+}
+
+// blanker blanks type fields of a document in a working copy of its
 // lines, rune by rune, so every other rune keeps its line and its column.
 type blanker struct {
 	doc  *niceyaml.Node

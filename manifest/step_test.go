@@ -515,7 +515,11 @@ func TestRegistry_Load_StepValues(t *testing.T) {
 	require.NoError(t, err)
 
 	for shift := range shifts.All[map[string]any]() {
-		assert.Equal(t, map[string]any{"spec": map[string]any{"start": "10:00"}}, shift.Value)
+		assert.Equal(t, map[string]any{
+			"apiVersion": "cafe.jacobcolvin.com/v3",
+			"kind":       "Shift",
+			"spec":       map[string]any{"start": "10:00"},
+		}, shift.Value)
 		assert.Equal(t, "cafe.jacobcolvin.com/v1alpha1", shift.Version)
 	}
 
@@ -524,7 +528,12 @@ func TestRegistry_Load_StepValues(t *testing.T) {
 	drinks, err := drinkReg.Load(t.Context(), manifest.Sources(niceyaml.NewSourceFromString(drinkDoc+"  size: M\n")))
 	require.NoError(t, err)
 
-	want := map[string]any{"metadata": map[string]any{"name": "kaffe"}, "spec": map[string]any{"size": "medium"}}
+	want := map[string]any{
+		"apiVersion": "cafe.jacobcolvin.com/v1",
+		"kind":       "Drink",
+		"metadata":   map[string]any{"name": "kaffe"},
+		"spec":       map[string]any{"size": "medium"},
+	}
 
 	for drink := range drinks.All[map[string]any]() {
 		assert.Equal(t, want, drink.Value)

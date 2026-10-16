@@ -60,6 +60,8 @@ type decodeConfig struct {
 	allowedFieldPrefixes []string
 	// The functions from [WithValueCheck], in the order given.
 	checks []valueCheck
+	// The paths of the keys that [hook.KnownKeys] admits.
+	knownKeys []paths.Path
 	// The types the options hand to an unmarshaler that no method of the
 	// type declares.
 	unmarshalers          unmarshaler.Options
@@ -721,6 +723,10 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 		return fmt.Errorf("parse the text of the value: %v", err)
 	}
 
+	// The paths of the known keys name places in the document of the
+	// outer decode, not in the text of the value.
+	cfg.knownKeys = nil
+
 	return valueError(doc.decodeUnbound(ctx, doc.AST(), dst, cfg, nil))
 }
 
@@ -765,6 +771,8 @@ func (n *Node) decodeUnbound(
 	if err != nil {
 		return n.decodeRejection(err)
 	}
+
+	view = n.admitKnownKeys(cfg, reflect.TypeOf(v).Elem(), view)
 
 	// The pass decoded anchors outside node with dec, which wrote their
 	// comments to the map.
@@ -1385,8 +1393,8 @@ func (n *Node) walkRules(ctx context.Context, dec *yaml.Decoder, u unmarshaler.O
 }
 
 // collect finds the problems of a decode of node into a value of type
-// t: the leaves the decoder rejects, and the unknown fields, when the
-// decoder rejects those.
+// t: the leaves the decoder rejects, and the unknown fields other than
+// the known keys of the decode, when the decoder rejects unknown fields.
 func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 	c.register(node)
 
@@ -1397,7 +1405,15 @@ func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 		return
 	}
 
+	known := c.node.knownKeys(c.cfg)
+
 	for _, field := range decodewalk.UnknownFields(c.ctx, c.rules, t, node) {
+		// The search reads node, which holds the known keys that the view
+		// of the decode leaves out.
+		if _, ok := known[position.NewFromToken(field.Token)]; ok {
+			continue
+		}
+
 		c.add(decodeProblem{
 			err:          c.node.tokenRejection(field),
 			at:           position.NewFromToken(field.Token),

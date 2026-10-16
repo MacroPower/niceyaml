@@ -2,6 +2,7 @@ package manifest_test
 
 import (
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -9,6 +10,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/manifest"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -45,6 +47,140 @@ func TestRegistry_Verify(t *testing.T) {
 
 			require.ErrorIs(t, err, schema.ErrCompile)
 			assert.Contains(t, err.Error(), tc.err)
+		})
+	}
+}
+
+func TestRegistry_Verify_TypeFields(t *testing.T) {
+	t.Parallel()
+
+	required := func(p string) string {
+		return stringtest.JoinLF(
+			"MenuItem v1: "+p+": required, but no properties keyword declares it",
+			"`-- declare "+p+" under properties, or remove it from required",
+		)
+	}
+
+	unsure := func(p string) string {
+		return stringtest.JoinLF(
+			"MenuItem v1: "+p+": a branch or a $ref to another document might read it",
+			"`-- declare "+p+" under properties outside every branch and every such $ref",
+		)
+	}
+
+	tags := paths.Doc().Child("tags").Index(1).Child("kind")
+
+	tcs := map[string]struct {
+		opts   []manifest.RegistryOption
+		schema string
+		// The other files beside the schema, which a $ref of the schema
+		// can name.
+		files map[string]string
+		// The schema belongs to the unversioned layout, and v1 has none.
+		unversioned bool
+		want        string
+	}{
+		"declared and required": {
+			schema: brewSchema("v1", "MenuItem"),
+		},
+		"declared behind a $ref": {
+			schema: `{"$ref": "#/$defs/item", "$defs": {"item": {
+  "required": ["kind"],
+  "properties": {"kind": {"type": "string"}}}}}`,
+		},
+		"required and not declared": {
+			schema: `{"required": ["kind"], "properties": {"metadata": {"type": "object"}}}`,
+			want:   required("$.kind"),
+		},
+		"required behind allOf and not declared": {
+			schema: `{"allOf": [{"required": ["apiVersion"]}]}`,
+			want:   required("$.apiVersion"),
+		},
+		"one of the type fields declared": {
+			schema: `{"required": ["apiVersion", "kind"], "properties": {"apiVersion": {"type": "string"}}}`,
+			want:   required("$.kind"),
+		},
+		"type field below the root": {
+			opts:   []manifest.RegistryOption{manifest.WithKindField(meta.Child("kind"))},
+			schema: `{"properties": {"metadata": {"required": ["kind"]}}}`,
+			want:   required("$.metadata.kind"),
+		},
+		"type field below an index": {
+			opts:   []manifest.RegistryOption{manifest.WithKindField(tags)},
+			schema: `{"properties": {"tags": {"items": {"required": ["kind"]}}}}`,
+			want:   required("$.tags[1].kind"),
+		},
+		"type field declared by prefixItems": {
+			opts: []manifest.RegistryOption{manifest.WithKindField(tags)},
+			schema: `{"properties": {"tags": {"prefixItems": [{}, {
+  "required": ["kind"],
+  "properties": {"kind": {"type": "string"}}}]}}}`,
+		},
+		"type field required by additionalItems": {
+			opts: []manifest.RegistryOption{manifest.WithKindField(tags)},
+			schema: `{"$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {"tags": {"items": [{}], "additionalItems": {"required": ["kind"]}}}}`,
+			want: required("$.tags[1].kind"),
+		},
+		"required in a branch": {
+			schema: `{"oneOf": [{"required": ["kind"]}, {"required": ["metadata"]}]}`,
+			want:   unsure("$.kind"),
+		},
+		"declared in a branch": {
+			schema: `{"if": {"properties": {"kind": {"const": "MenuItem"}}}, "then": {"required": ["metadata"]}}`,
+			want:   unsure("$.kind"),
+		},
+		"declared outside the branch that reads it": {
+			schema: `{"properties": {"kind": {"type": "string"}},
+  "if": {"properties": {"kind": {"const": "MenuItem"}}}, "then": {"required": ["metadata"]}}`,
+		},
+		"closed branches that leave the type fields out": {
+			schema: `{"oneOf": [
+  {"required": ["metadata"], "properties": {"metadata": {}}, "additionalProperties": false},
+  {"required": ["spec"], "properties": {"spec": {}}, "additionalProperties": false}]}`,
+		},
+		"$ref to another document": {
+			schema: `{"$ref": "defs.json#/$defs/item", "properties": {"apiVersion": {"type": "string"}}}`,
+			files: map[string]string{"defs.json": `{"$defs": {"item": {
+  "required": ["kind"],
+  "properties": {"kind": {"type": "string"}}}}}`},
+			want: unsure("$.kind"),
+		},
+		"unversioned layout": {
+			schema:      `{"required": ["kind"]}`,
+			unversioned: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			fsys := fstest.MapFS{"schema.json": {Data: []byte(tc.schema)}}
+			for path, text := range tc.files {
+				fsys[path] = &fstest.MapFile{Data: []byte(text)}
+			}
+
+			sch := manifest.Schema(schema.FileFS(fsys, "schema.json"))
+
+			versions := []manifest.KindOption{manifest.Version("v1", sch)}
+			if tc.unversioned {
+				versions = []manifest.KindOption{manifest.Unversioned(sch), manifest.Version("v1")}
+			}
+
+			reg := manifest.MustNewRegistry(append(tc.opts,
+				manifest.WithKinds(manifest.NewKind[MenuItem]("MenuItem", versions...)))...)
+
+			err := reg.Verify(t.Context())
+			if tc.want == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.Error(t, err)
+			assert.Equal(t, tc.want, niceyaml.FormatError(err))
+			assert.False(t, niceyaml.IsInvalid(err))
 		})
 	}
 }
