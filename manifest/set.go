@@ -31,6 +31,12 @@ type setObject struct {
 
 // Object is one manifest of a [Set], where T is the Go type of its kind.
 //
+// Node and Bind keep the [niceyaml.Source] of the file in memory. Bind
+// also keeps a copy of the document in the layout of the current version.
+// For a migrated document, Bind keeps the edits of the migration too. It
+// reads them to bind each error at the line that the user wrote. Copy
+// Value to keep the value alone.
+//
 // Receive instances from [Set.One], [Set.All], [Set.Get], or
 // [Set.Objects].
 type Object[T any] struct {
@@ -91,7 +97,7 @@ func (l *loader) newSet() *Set {
 		obj := Object[any]{
 			Value:    d.value,
 			Node:     d.doc,
-			bind:     d.bindObject,
+			bind:     d.binder().bind,
 			Name:     d.name,
 			Kind:     entry.kind.name,
 			UpToDate: v.index >= entry.written.index,

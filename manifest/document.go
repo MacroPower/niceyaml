@@ -668,10 +668,11 @@ func (d *docState) decode(ctx context.Context) bool {
 
 	// A Validate method reports a field that the document leaves out at
 	// the mapping that lacks it, with a detail that names the field.
-	d.warn(d.leftOut(warnings.Err()))
+	b := d.binder()
+	d.warn(b.leftOut(warnings.Err()))
 
 	if err != nil {
-		d.problems = append(d.problems, d.leftOut(err))
+		d.problems = append(d.problems, b.leftOut(err))
 
 		return false
 	}
@@ -725,19 +726,46 @@ func (d *docState) checkName() bool {
 	return true
 }
 
-// bindObject binds err in the working copy of the document, as
-// [Object.Bind] does.
-func (d *docState) bindObject(err error) error {
-	return d.leftOut(d.work.Bind(err))
+// objectBinder binds errors in one document of a load, as [Object.Bind]
+// does. It holds only what a binding reads, so an [Object] that a caller
+// keeps does not keep the rest of its load in memory.
+type objectBinder struct {
+	// The document as the user wrote it.
+	doc *niceyaml.Node
+	// The working copy of the document, in the layout of the current
+	// version.
+	work *niceyaml.Node
+	// The label of the current version of the kind, as messages name it.
+	currentLabel string
+	// The document declares the current version of its kind.
+	atCurrent bool
+}
+
+// binder returns a new [objectBinder] for d.
+func (d *docState) binder() *objectBinder {
+	current := d.route.kind.versions[len(d.route.kind.versions)-1]
+
+	return &objectBinder{
+		doc:          d.doc,
+		work:         d.work,
+		currentLabel: d.l.reg.label(current),
+		atCurrent:    d.route.version == current,
+	}
+}
+
+// bind binds err in the working copy of the document, as [Object.Bind]
+// does.
+func (b *objectBinder) bind(err error) error {
+	return b.leftOut(b.work.Bind(err))
 }
 
 // leftOut returns err, an error bound in the document, with a detail on
-// each problem at a field that the document leaves out. The detail names
-// the first key of the path of the problem that the document lacks, and
-// says that the field holds its default, because a check of the decoded
-// value reported it. It returns err as it is when no problem needs the
-// detail.
-func (d *docState) leftOut(err error) error {
+// each problem at a field that the document leaves out. It returns err as
+// it is when no problem needs the detail. The detail walks the path of the
+// problem and names the first key that the document lacks. The check that
+// reported the problem read the decoded value, so the detail also says
+// that the field holds its default.
+func (b *objectBinder) leftOut(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -749,9 +777,9 @@ func (d *docState) leftOut(err error) error {
 	for problem := range niceyaml.Problems(err) {
 		e := problem.Err
 
-		detail := d.leftOutDetail(problem)
+		detail := b.leftOutDetail(problem)
 		if detail != nil {
-			e = d.doc.Bind(niceyaml.Locate(e, niceyaml.WithDetails(detail)))
+			e = b.doc.Bind(niceyaml.Locate(e, niceyaml.WithDetails(detail)))
 			changed = true
 		}
 
@@ -762,7 +790,7 @@ func (d *docState) leftOut(err error) error {
 		return err
 	}
 
-	return d.doc.Bind(hook.Tally(problems)) //nolint:wrapcheck // The binding is the error of the caller.
+	return b.doc.Bind(hook.Tally(problems)) //nolint:wrapcheck // The binding is the error of the caller.
 }
 
 // leftOutDetail returns the detail of problem when its path names a field
@@ -770,17 +798,17 @@ func (d *docState) leftOut(err error) error {
 // field by field, or nil. The path names the field as the current version
 // does, so the detail names that version for a document that declares an
 // older one.
-func (d *docState) leftOutDetail(problem niceyaml.ErrorTree) error {
+func (b *objectBinder) leftOutDetail(problem niceyaml.ErrorTree) error {
 	p, ok := problem.Path()
-	if !ok || d.work == nil {
+	if !ok {
 		return nil
 	}
 
-	if exists(d.doc, p) || exists(d.work, p) {
+	if exists(b.doc, p) || exists(b.work, p) {
 		return nil
 	}
 
-	res := d.work.Resolver()
+	res := b.work.Resolver()
 	prefix := paths.Doc()
 
 	for sel := range p.Selectors() {
@@ -789,7 +817,7 @@ func (d *docState) leftOutDetail(problem niceyaml.ErrorTree) error {
 		}
 
 		next := prefix.Child(sel.Name)
-		if exists(d.work, next) {
+		if exists(b.work, next) {
 			prefix = next
 
 			continue
@@ -800,13 +828,12 @@ func (d *docState) leftOutDetail(problem niceyaml.ErrorTree) error {
 			return nil
 		}
 
-		current := d.route.kind.versions[len(d.route.kind.versions)-1]
-		if d.route.version == current {
+		if b.atCurrent {
 			return fmt.Errorf("the file leaves out %s, so it holds its default", sel.Name)
 		}
 
 		return fmt.Errorf("the file leaves out the field that %s names %s, so it holds its default",
-			d.l.reg.label(current), sel.Name)
+			b.currentLabel, sel.Name)
 	}
 
 	return nil

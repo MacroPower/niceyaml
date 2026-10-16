@@ -2,7 +2,10 @@ package manifest_test
 
 import (
 	"errors"
+	"runtime"
 	"testing"
+	"time"
+	"weak"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -192,4 +195,93 @@ func TestObject_Bind(t *testing.T) {
 
 	err = hours.Bind(niceyaml.NewError("too early", niceyaml.AtPath(spec.Child("open"))))
 	assert.Equal(t, "config/hours.yaml:6:10: $.spec.opens: too early", firstLine(niceyaml.FormatError(err)))
+}
+
+// keepOne loads cafe.yaml and hours.yaml, and returns the manifest whose
+// kind is kind. It also returns weak pointers to the Sources of the files
+// that do not hold that manifest.
+func keepOne(t *testing.T, kind string) (manifest.Object[any], []weak.Pointer[niceyaml.Source]) {
+	t.Helper()
+
+	set, err := newCafeRegistry(t).Load(t.Context(), manifest.Sources(
+		niceyaml.NewSourceFromString(cafeDoc, niceyaml.WithName("cafe.yaml")),
+		niceyaml.NewSourceFromString(hoursDoc, niceyaml.WithName("hours.yaml")),
+	))
+	require.NoError(t, err)
+
+	var (
+		kept  manifest.Object[any]
+		found bool
+	)
+
+	for o := range set.Objects() {
+		if o.Kind == kind {
+			kept, found = o, true
+		}
+	}
+
+	require.True(t, found)
+
+	var others []weak.Pointer[niceyaml.Source]
+
+	for _, src := range set.Sources() {
+		if src != kept.Node.Source() {
+			others = append(others, weak.Make(src))
+		}
+	}
+
+	require.NotEmpty(t, others)
+
+	return kept, others
+}
+
+func TestObject_Retention(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		problem error
+		kind    string
+		want    string
+	}{
+		"current version": {
+			kind:    "Cafe",
+			problem: niceyaml.NewError("no currency", niceyaml.AtPath(spec.Child("currency"))),
+			want: stringtest.JoinLF(
+				"cafe.yaml:5:1: $.spec.currency: no currency",
+				"`-- the file leaves out currency, so it holds its default",
+			),
+		},
+		"migrated": {
+			kind:    "Hours",
+			problem: niceyaml.NewError("no break", niceyaml.AtPath(spec.Child("break"))),
+			want: stringtest.JoinLF(
+				"hours.yaml:5:1: $.spec.break: no break",
+				"`-- the file leaves out the field that cafe.jacobcolvin.com/v1 names break, so it holds its default",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			kept, others := keepOne(t, tc.kind)
+
+			// The kept Object does not keep the other files of its load in
+			// memory.
+			for _, other := range others {
+				assert.Eventually(t, func() bool {
+					runtime.GC()
+
+					return other.Value() == nil
+				}, 5*time.Second, 10*time.Millisecond)
+			}
+
+			assert.Equal(t, tc.want, firstTwoLines(niceyaml.FormatError(kept.Bind(tc.problem))))
+
+			// The kept Object must outlive the check, or the collector
+			// frees the whole load with it.
+			runtime.KeepAlive(kept)
+		})
+	}
 }
