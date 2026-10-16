@@ -11,19 +11,29 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// errSaveUTF8 is the detail of each encoding problem.
-var errSaveUTF8 = errors.New("save the file as UTF-8")
+// The details of an encoding problem: one for a Source with a file path,
+// and one for a Source without one.
+var (
+	errSaveUTF8   = errors.New("save the file as UTF-8")
+	errEncodeUTF8 = errors.New("encode the text as UTF-8")
+)
 
-// checkEncoding returns the problem of src, a file that a load read
-// itself, when its text is not UTF-8, or nil. A UTF-8 byte order mark can
-// start the text. A text whose byte order mark or leading zero bytes show
-// UTF-16 or UTF-32 fails whole, and any other text fails at its first byte
-// that UTF-8 does not allow.
+// checkEncoding returns the problem of src, a file of a load, when its
+// text is not UTF-8, or nil. A UTF-8 byte order mark can start the text. A
+// text whose byte order mark or leading zero bytes show UTF-16 or UTF-32
+// fails whole, and any other text fails at its first byte that UTF-8 does
+// not allow. The message calls a Source with a file path a file, and any
+// other Source a text.
 func checkEncoding(src *niceyaml.Source) error {
 	text := src.Text()
 
+	noun, fix := "file", errSaveUTF8
+	if src.FilePath() == "" {
+		noun, fix = "text", errEncodeUTF8
+	}
+
 	if enc := wideEncoding(text); enc != "" {
-		return src.Bind(newProblem(ErrEncoding, "file is "+enc+", not UTF-8", niceyaml.WithDetails(errSaveUTF8)))
+		return src.Bind(newProblem(ErrEncoding, noun+" is "+enc+", not UTF-8", niceyaml.WithDetails(fix)))
 	}
 
 	body := strings.TrimPrefix(text, bom.Mark)
@@ -37,7 +47,7 @@ func checkEncoding(src *niceyaml.Source) error {
 
 	return src.Bind(newProblem(ErrEncoding, fmt.Sprintf("byte 0x%02x is not UTF-8", body[off]),
 		niceyaml.AtRange(position.NewRange(at, position.New(at.Line, at.Col+1))),
-		niceyaml.WithDetails(errSaveUTF8)))
+		niceyaml.WithDetails(fix)))
 }
 
 // wideEncoding returns "UTF-16" or "UTF-32" when the byte order mark or the

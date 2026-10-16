@@ -62,8 +62,9 @@ func FS(fsys fs.FS, p string, opts ...InputOption) Input {
 
 // Sources creates a new [Input] that reads srcs, which the app built
 // itself. A load reads each Source as it is, with its own name and its own
-// limits, and checks no encoding. The decodes of a load apply the
-// unmarshalers of [WithUnmarshalers] ahead of those of each Source.
+// limits. It fails a Source whose text is not UTF-8, as it fails a file of
+// [Path]. The decodes of a load apply the unmarshalers of
+// [WithUnmarshalers] ahead of those of each Source.
 func Sources(srcs ...*niceyaml.Source) Input {
 	return Input{in: &inputDef{kind: inputSources, srcs: srcs}}
 }

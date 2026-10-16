@@ -16,7 +16,7 @@ import (
 // reading the message. [niceyaml.IsInvalid] reports each problem of a load,
 // because the files that the user wrote cause them.
 var (
-	// ErrEncoding indicates a file that is not UTF-8, such as one with a
+	// ErrEncoding indicates a text that is not UTF-8, such as a file with a
 	// byte that UTF-8 does not allow or one in UTF-16.
 	ErrEncoding = errors.New("text is not UTF-8")
 

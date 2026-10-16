@@ -15,6 +15,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
+	"go.jacobcolvin.com/niceyaml/internal/hook"
 )
 
 // The path that names standard input, and the name messages give it.
@@ -310,12 +311,13 @@ func (r *reader) fail(name string, err error, t target) {
 	r.files = append(r.files, &file{err: namedSource(name).Bind(err), target: t, name: name})
 }
 
-// add adds src, a file the load read, with the problem of its encoding
-// when check is set.
-func (r *reader) add(f *file, check bool) {
+// add adds f, a file the load read, with the problem of its encoding. A
+// Source whose text is past its byte limit holds no lines, so the load
+// reports that limit instead.
+func (r *reader) add(f *file) {
 	f.name = f.src.Name()
 
-	if check {
+	if bytes, _ := hook.Limits(f.src); bytes == 0 || len(f.src.Text()) <= bytes {
 		f.err = checkEncoding(f.src)
 	}
 
@@ -330,7 +332,7 @@ func (r *reader) readSources(srcs []*niceyaml.Source) {
 		}
 
 		r.sources = append(r.sources, src)
-		r.add(&file{src: src, target: target{kind: targetSource}}, false)
+		r.add(&file{src: src, target: target{kind: targetSource}})
 	}
 }
 
@@ -351,7 +353,7 @@ func (r *reader) readStdin(opts []niceyaml.SourceOption) {
 		return
 	}
 
-	r.add(&file{src: src, target: t}, true)
+	r.add(&file{src: src, target: t})
 }
 
 // readDisk adds the file at full, which messages name name, unless the
@@ -388,7 +390,7 @@ func (r *reader) readDisk(name, full string, opts []niceyaml.SourceOption, t tar
 		return
 	}
 
-	r.add(&file{src: src, target: t}, true)
+	r.add(&file{src: src, target: t})
 }
 
 // readFS adds the file at p in fsys, which messages name name, unless the
@@ -420,7 +422,7 @@ func (r *reader) readFS(fsys fs.FS, name, p string, opts []niceyaml.SourceOption
 		return
 	}
 
-	r.add(&file{src: src, target: t}, true)
+	r.add(&file{src: src, target: t})
 }
 
 // same reports whether k and o name one file: one path in file systems

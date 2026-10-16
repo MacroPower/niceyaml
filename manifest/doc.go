@@ -133,10 +133,11 @@
 //
 // A load reads the inputs in order, the files of a directory sorted by
 // path, and the documents of each file in order. Every report and every
-// iteration of a set follows that load order. A load fails a file that is
-// not UTF-8 with an error that matches [ErrEncoding], and applies the
-// limits of each Source, as [niceyaml.WithByteLimit] and
-// [niceyaml.WithDepthLimit] describe.
+// iteration of a set follows that load order. A load fails each file that
+// is not UTF-8 with an error that matches [ErrEncoding]. The text of a
+// [Sources] input counts as a file. A load applies the limits of each
+// Source, as [niceyaml.WithByteLimit] and [niceyaml.WithDepthLimit]
+// describe.
 //
 // [WithUnmarshalers] sets how the Go types of the kinds read YAML, such
 // as a type of another package that a document writes as text. A load
