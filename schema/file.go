@@ -39,10 +39,10 @@ const driveLen = 2
 //
 // A schema shipped in an [embed.FS], or in any other file system, takes
 // [FileFS] instead, which reads the path from that file system and never
-// from disk. Given [WithFSAt], the registry reads the path it would read
-// from disk through a file system that stands for one directory, so a
-// path outside that directory names no file. See that option for
-// details.
+// from disk. The [Access] of the registry decides which files on disk it
+// reads. Under [AllowRoot], the registry reads the path through an
+// [os.Root], so a path outside the directory of the root names no file.
+// See that option for details.
 //
 // # Cache Key
 //
@@ -125,8 +125,9 @@ const driveLen = 2
 //
 // File uses the path as written, so a path built from a document can
 // name any file the registry can read. Check such a path before passing
-// it to File, as the example does, or confine the registry with
-// [WithFSAt], so a path outside its file system names no file.
+// it to File, as the example does, or give the registry an [Access] from
+// [AllowRoot], so a path outside the directory of the root names no
+// file.
 func File(path string) Ref {
 	ref, err := file(path)
 	if err != nil {
@@ -264,26 +265,41 @@ func inFS(ref Ref, fsys fs.FS) Ref {
 	return ref
 }
 
-// An fsDir is the directory on disk that the root of a registry's file
-// system stands for, as [WithFSAt] names it.
+// An fsDir is the directory on disk that the root of [AllowRoot] holds.
 type fsDir struct {
-	// Why the directory has no absolute path, which every read reports.
-	err error
 	// The directory as an absolute path.
 	dir string
 	// The directory with its symbolic links resolved.
 	physical string
 }
 
-// newFSDir returns the [fsDir] for dir. It makes a relative dir absolute
-// against the working directory at the time of the call.
-func newFSDir(dir string) *fsDir {
-	abs, err := filepath.Abs(dir)
+// newFSDir returns the [fsDir] for root. It makes the name of root
+// absolute against the working directory at the time of the call. It
+// returns an error when that path does not name the directory that root
+// holds.
+func newFSDir(root *os.Root) (*fsDir, error) {
+	name := root.Name()
+
+	abs, err := filepath.Abs(name)
 	if err != nil {
-		return &fsDir{err: fmt.Errorf("no absolute path for directory %s: %w", dir, err)}
+		return nil, fmt.Errorf("no absolute path for directory %s: %w", name, err)
 	}
 
-	return &fsDir{dir: abs, physical: resolveLinks(abs)}
+	held, err := root.Stat(".")
+	if err != nil {
+		return nil, fmt.Errorf("root %s: %w", name, err)
+	}
+
+	named, err := os.Stat(abs)
+	if err != nil {
+		return nil, fmt.Errorf("root %s: %w", name, err)
+	}
+
+	if !os.SameFile(held, named) {
+		return nil, fmt.Errorf("root %s: %s names a directory other than the one the root holds", name, abs)
+	}
+
+	return &fsDir{dir: abs, physical: resolveLinks(abs)}, nil
 }
 
 // rel returns the path in the file system that names path, an absolute
@@ -294,10 +310,6 @@ func newFSDir(dir string) *fsDir {
 // directory that a link led to. Any other path, and a drive-letter path
 // off Windows, is [fs.ErrInvalid].
 func (d *fsDir) rel(path string) (string, error) {
-	if d.err != nil {
-		return "", d.err
-	}
-
 	// Off Windows, a drive letter is an ordinary directory name, so the
 	// path is relative there, while its key names the drive.
 	if hasDriveLetter(path) && !onWindows {
@@ -322,10 +334,7 @@ func (d *fsDir) rel(path string) (string, error) {
 	}
 
 	if !ok {
-		return "", fmt.Errorf(
-			"%w: not under %s, the directory the registry's file system stands for",
-			fs.ErrInvalid, d.dir,
-		)
+		return "", fmt.Errorf("%w: not under %s, the directory of the registry's root", fs.ErrInvalid, d.dir)
 	}
 
 	return filepath.ToSlash(rel), nil
@@ -418,45 +427,33 @@ func filePath(ref Ref) (string, error) {
 // With a file system, readFile reads path without its leading slash from
 // it, and its errors name that path. A drive-letter path is
 // [fs.ErrInvalid] there on every platform. With none, readFile reads
-// path from disk, or under [WithFSAt] relative to the directory the file
-// system of the registry stands for, where a path outside that directory
-// is [fs.ErrInvalid]. Its errors name path either way, and off Windows a
-// drive-letter path is invalid the same way.
+// path from disk as the [Access] of the registry allows, and its errors
+// name path. Off Windows, a drive-letter path is invalid the same way.
 //
 // Each error is a [*FetchError]. A document names the path through a
 // $schema directive, and a schema names it through a $ref, so the message
 // of each error draws its control characters as pictures, as FetchError
 // describes.
 func (r *Registry) readFile(fsys fs.FS, path string) ([]byte, error) {
-	switch {
-	case fsys != nil:
-		rooted := slashpath.Clean(filepath.ToSlash(path))
-		if !strings.HasPrefix(rooted, "/") {
-			return nil, readError(path, fmt.Errorf(
-				"%w: a drive letter names no file in the file system of the document or the Ref",
-				fs.ErrInvalid,
-			))
-		}
-
-		// The root itself is "." to an fs.FS.
-		name := strings.TrimPrefix(rooted, "/")
-		if name == "" {
-			name = "."
-		}
-
-		return readFS(fsys, name, name, r.loadLimit)
-
-	case r.fsys == nil:
-		return readDisk(path, r.loadLimit)
-
-	default:
-		name, err := r.fsAt.rel(path)
-		if err != nil {
-			return nil, readError(path, err)
-		}
-
-		return readFS(r.fsys, name, path, r.loadLimit)
+	if fsys == nil {
+		return r.access.readFile(path, r.loadLimit)
 	}
+
+	rooted := slashpath.Clean(filepath.ToSlash(path))
+	if !strings.HasPrefix(rooted, "/") {
+		return nil, readError(path, fmt.Errorf(
+			"%w: a drive letter names no file in the file system of the document or the Ref",
+			fs.ErrInvalid,
+		))
+	}
+
+	// The root itself is "." to an fs.FS.
+	name := strings.TrimPrefix(rooted, "/")
+	if name == "" {
+		name = "."
+	}
+
+	return readFS(fsys, name, name, r.loadLimit)
 }
 
 // readDisk returns the bytes of the file at abs, an absolute path on

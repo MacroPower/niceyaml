@@ -12,23 +12,21 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
 
-// ErrURLNotAllowed indicates the registry refused to fetch a URL that no
-// prefix of [WithURLPrefixes] covers, and sent no request for it. The
-// program set the prefixes, so the document that names the URL is not at
-// fault, and [niceyaml.IsInvalid] reports false for the error.
+// ErrURLNotAllowed indicates the registry refused to fetch a URL that its
+// [Access] does not allow, and sent no request for it. The program set
+// the Access, so the document that names the URL is not at fault, and
+// [niceyaml.IsInvalid] reports false for the error.
 var ErrURLNotAllowed = errors.New("URL not under an allowed prefix")
 
-// WithURLPrefixes is a [RegistryOption] that limits the URLs the registry
-// fetches to those under one of prefixes. Without the option, the
-// registry fetches any HTTP or HTTPS URL. With it and no prefixes, the
-// registry fetches none:
+// AllowURLPrefixes is an [AccessOption] that allows the URLs under each
+// of prefixes:
 //
-//	reg := schema.NewRegistry(
-//	    schema.WithURLPrefixes("https://schemas.example.com/"),
-//	    schema.WithResolvers(schema.Directive()),
+//	access, err := schema.NewAccess(
+//	    schema.AllowURLPrefixes("https://schemas.example.com/"),
 //	)
 //
-// The limit covers every fetch of the registry:
+// An [Access] with neither this option nor [AllowAnyURL] allows no URL.
+// The prefixes cover every fetch of a registry that holds the Access:
 //
 //   - The schema a [Ref] from [URL] names, whether a resolver of the
 //     program holds the Ref or [Directive] builds it from a document.
@@ -41,16 +39,16 @@ var ErrURLNotAllowed = errors.New("URL not under an allowed prefix")
 // its CheckRedirect refuses a hop outside the prefixes before it calls
 // the CheckRedirect of the client.
 //
-// The limit applies to every resolver, as [WithFSAt] does. A registry
-// that holds a [go.jacobcolvin.com/niceyaml/schema/schemastore.Store]
-// must list the hosts of the schemas its catalog names, such as
-// https://json.schemastore.org/, https://www.schemastore.org/, and
-// https://raw.githubusercontent.com/, or those schemas fail to load. The
-// Store fetches the catalog with a client of its own, so the limit does
-// not reach the catalog.
-//
-// The limit covers HTTP and HTTPS URLs alone. [WithFSAt] confines the
-// files the registry reads.
+// The prefixes apply to every resolver of the registry. A program that
+// gives such an Access to a registry holding a
+// [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] must pass the
+// hosts of the catalog's schemas to AllowURLPrefixes, or those schemas
+// fail to load. Those hosts include https://json.schemastore.org/,
+// https://www.schemastore.org/, and https://raw.githubusercontent.com/. A
+// program that confines only the schemas its documents name gives the
+// Store a registry of its own, as [Registry.Resolve] describes. The Store
+// fetches the catalog with a client of its own, so the prefixes do not
+// reach the catalog.
 //
 // # Matching
 //
@@ -80,58 +78,57 @@ var ErrURLNotAllowed = errors.New("URL not under an allowed prefix")
 // rebinding. A program that must keep the fetches off its own network
 // checks each address in the Dialer of the client it gives
 // [WithHTTPClient]. The Untrusted Documents section of the package
-// documentation pairs the option with the others that confine a
+// documentation pairs the Access with the other options that confine a
 // registry.
 //
 // Given more than once, each call adds its prefixes to those of the
 // calls before it.
 //
-// Panics if a prefix does not parse, is not an http or https URL with a
-// host, or holds userinfo, a query, or a fragment.
-func WithURLPrefixes(prefixes ...string) RegistryOption {
-	parsed := make([]urlPrefix, 0, len(prefixes))
-
-	for _, prefix := range prefixes {
-		p, err := parseURLPrefix(prefix)
-		if err != nil {
-			panic(fmt.Sprintf("schema.WithURLPrefixes: %q: %v", httpfetch.Redacted(prefix), err))
+// [NewAccess] returns an error for a prefix that does not parse, is not
+// an http or https URL with a host, or holds userinfo, a query, or a
+// fragment. The error hides the password of the prefix. NewAccess also
+// returns an error for a prefix beside [AllowAnyURL], because the
+// prefixes confine nothing when the Access allows every URL.
+func AllowURLPrefixes(prefixes ...string) AccessOption {
+	return func(c *accessConfig) error {
+		if c.anyURL && len(prefixes) > 0 {
+			return errors.New("schema.AllowURLPrefixes: the access allows every URL already")
 		}
 
-		parsed = append(parsed, p)
-	}
+		var errs []error
 
-	return func(c *registryConfig) {
-		if c.urls == nil {
-			c.urls = &urlPolicy{}
+		for _, prefix := range prefixes {
+			p, err := parseURLPrefix(prefix)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("schema.AllowURLPrefixes: %q: %w", httpfetch.Redacted(prefix), err))
+
+				continue
+			}
+
+			c.prefixes = append(c.prefixes, p)
 		}
 
-		c.urls.prefixes = append(c.urls.prefixes, parsed...)
+		return errors.Join(errs...)
 	}
 }
 
-// A urlPolicy holds the prefixes [WithURLPrefixes] gave a registry. A nil
-// urlPolicy allows every URL.
-type urlPolicy struct {
-	prefixes []urlPrefix
-}
-
-// allows reports whether p lets the registry fetch rawURL.
-func (p *urlPolicy) allows(rawURL string) bool {
-	if p == nil {
+// allowsURL reports whether c lets the registry fetch rawURL.
+func (c *accessConfig) allowsURL(rawURL string) bool {
+	if c.anyURL {
 		return true
 	}
 
 	u, ok := parseHTTPURL(rawURL)
 
-	return ok && slices.ContainsFunc(p.prefixes, func(prefix urlPrefix) bool {
+	return ok && slices.ContainsFunc(c.prefixes, func(prefix urlPrefix) bool {
 		return prefix.covers(u)
 	})
 }
 
-// check returns nil when p lets the registry fetch rawURL, and an error
-// wrapping [ErrURLNotAllowed] that names rawURL otherwise.
-func (p *urlPolicy) check(rawURL string) error {
-	if p.allows(rawURL) {
+// checkURL returns nil when c lets the registry fetch rawURL, and an
+// error wrapping [ErrURLNotAllowed] that names rawURL otherwise.
+func (c *accessConfig) checkURL(rawURL string) error {
+	if c.allowsURL(rawURL) {
 		return nil
 	}
 
@@ -139,11 +136,12 @@ func (p *urlPolicy) check(rawURL string) error {
 }
 
 // guard returns a copy of client whose CheckRedirect refuses a redirect
-// to a URL p does not allow. It then asks the CheckRedirect of client,
+// to a URL c does not allow. It then asks the CheckRedirect of client,
 // or, when client has none, stops after ten redirects as the default
-// policy of [http.Client] does. A nil p returns client itself.
-func (p *urlPolicy) guard(client *http.Client) *http.Client {
-	if p == nil {
+// policy of [http.Client] does. For an Access that allows every URL,
+// guard returns client itself.
+func (c *accessConfig) guard(client *http.Client) *http.Client {
+	if c.anyURL {
 		return client
 	}
 
@@ -151,7 +149,7 @@ func (p *urlPolicy) guard(client *http.Client) *http.Client {
 	next := client.CheckRedirect
 
 	guarded.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		err := p.check(req.URL.String())
+		err := c.checkURL(req.URL.String())
 		if err != nil {
 			return fmt.Errorf("redirect: %w", err)
 		}
@@ -175,7 +173,7 @@ func (p *urlPolicy) guard(client *http.Client) *http.Client {
 // [http.Client] does.
 const maxRedirects = 10
 
-// A urlPrefix is a prefix of [WithURLPrefixes], or a URL to compare with
+// A urlPrefix is a prefix of [AllowURLPrefixes], or a URL to compare with
 // one, split into the parts the registry compares.
 type urlPrefix struct {
 	// The scheme, "http" or "https".
@@ -193,7 +191,7 @@ type urlPrefix struct {
 }
 
 // parseURLPrefix returns the parts of prefix, or an error when prefix is
-// not a prefix [WithURLPrefixes] takes.
+// not a prefix [AllowURLPrefixes] takes.
 func parseURLPrefix(prefix string) (urlPrefix, error) {
 	if strings.ContainsAny(prefix, "?#") {
 		return urlPrefix{}, errors.New("prefix holds a query or a fragment")

@@ -414,7 +414,7 @@ func TestFetchError_RefusedURL(t *testing.T) {
 
 	// The registry refuses a URL outside its prefixes before any fetch, so
 	// the error holds no FetchError.
-	reg := schema.NewRegistry(schema.WithURLPrefixes("https://schemas.example.com/"))
+	reg := schema.NewRegistry(withAccess(t, schema.AllowURLPrefixes("https://schemas.example.com/")))
 
 	_, err := reg.Load(t.Context(), schema.URL("https://example.com/s.json"))
 	requireLoadError(t, err, schema.ErrURLNotAllowed)

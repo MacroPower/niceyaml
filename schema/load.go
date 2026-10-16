@@ -103,10 +103,11 @@ func (e *LoadError) Unwrap() error {
 // [errors.As] finds one inside a join of several too.
 //
 // The registry refuses some URLs before any fetch, such as a URL that
-// does not parse or one that [WithURLPrefixes] does not cover. The error
-// of such a URL holds no FetchError. A path the registry refuses before
-// any read is a FetchError still, such as an absolute path in a file
-// system or a path outside [WithFSAt]. Its Err matches [fs.ErrInvalid].
+// does not parse or one that its [Access] does not allow. The error of
+// such a URL holds no FetchError. A path the registry refuses before any
+// read is a FetchError still, such as an absolute path in a file system
+// or a path that the Access does not allow. Its Err matches
+// [fs.ErrInvalid].
 //
 // The message reads as "fetch https://example.com/s.json: status 404"
 // for a URL and as "read /srv/schemas/s.json: ..." for a file. A

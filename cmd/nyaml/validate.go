@@ -385,6 +385,9 @@ func buildRegistry(ctx context.Context, schemaRef string) (*schema.Registry, err
 	}
 
 	return schema.NewRegistry(
+		// The user picks the files to validate, so a directive can name any
+		// file or URL, as it does in yaml-language-server.
+		schema.WithAccess(schema.Unrestricted),
 		schema.WithResolvers(
 			schema.Directive(), // Resolves schemas relative to each YAML file.
 			schemastore.New(),  // Automatic discovery by absolute file path.

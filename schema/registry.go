@@ -33,6 +33,11 @@ var (
 	// document for its aliases returns [ErrExcessiveAliasing], and the
 	// document is at fault for that one, so [niceyaml.IsInvalid] reports
 	// the ErrResolve around it.
+	//
+	// The lookup returns a resolver error that already matches ErrResolve,
+	// [ErrLoad], or [ErrCompile] as it is, without wrapping it in a second
+	// ErrResolve. Every error that a [Registry] returns as a resolver of
+	// another registry, other than a decline, is such an error.
 	ErrResolve = errors.New("resolve schema")
 
 	// ErrLoad indicates the registry could not load the schema, or a
@@ -66,12 +71,12 @@ const defaultRetryAfter = 1 * time.Minute
 
 // Registry maps YAML documents to schemas using pluggable resolvers.
 //
-// Lookup tries the resolvers [WithResolvers] gave it in order, and the
-// first [Resolver] that does not report [ErrNoMatch] wins. The registry
-// caches the schemas it compiles by [Ref.Key], and a Ref from [FileFS]
-// by its file system too. It consults that cache before loading, so
-// after a schema compiles, the registry serves it to every later
-// document that names it without loading it again. The registry
+// Lookup tries the resolvers [WithResolvers] gave it in order. The first
+// [Resolver] that does not decline wins, as Resolver describes.
+// The registry caches the schemas it compiles by [Ref.Key], and a Ref
+// from [FileFS] by its file system too. It consults that cache before
+// loading, so after a schema compiles, the registry serves it to every
+// later document that names it without loading it again. The registry
 // remembers a failed load or compile for the interval [WithRetryAfter]
 // sets, one minute by default. Every document that names the Key inside
 // the interval gets the error of that attempt, and the first one after
@@ -112,6 +117,10 @@ const defaultRetryAfter = 1 * time.Minute
 //	    ),
 //	))
 //
+// A Registry is a [Resolver] too. A registry confined by an [Access] can
+// thus load the schemas that documents pick and serve them to a registry
+// that holds the program's own schemas, as [Registry.Resolve] describes.
+//
 // A Registry never changes after construction except for its cache, so it
 // is safe for concurrent use. Create instances with [NewRegistry].
 type Registry struct {
@@ -128,8 +137,7 @@ type Registry struct {
 //   - [WithRequireSchema]
 //   - [WithHTTPClient]
 //   - [WithRetryAfter]
-//   - [WithFSAt]
-//   - [WithURLPrefixes]
+//   - [WithAccess]
 //   - [WithCacheLimit]
 //   - [WithLoadLimit]
 type RegistryOption func(*registryConfig)
@@ -139,82 +147,14 @@ type RegistryOption func(*registryConfig)
 // [NewRegistry] can apply one.
 type registryConfig struct {
 	client      *http.Client // fetches the schemas URL refs name
-	fsys        fs.FS        // reads the schemas File refs name under WithFSAt; nil reads the disk
-	fsAt        *fsDir       // the directory on disk the root of fsys stands for; nil when it stands for none
-	urls        *urlPolicy   // the URLs the registry fetches, or nil for every URL
 	resolvers   []Resolver
 	compileOpts []CompileOption
+	access      accessConfig  // the files on disk the registry reads and the URLs it fetches
 	retryAfter  time.Duration // how long the registry remembers a failure
 	cacheLimit  int           // the most entries each cache keeps, or 0 for no limit
 	loadLimit   int           // the most bytes of each schema document the registry reads
 	// Makes Check report ErrNoMatch when no resolver applies.
 	requireSchema bool
-}
-
-// WithFSAt is a [RegistryOption] that confines the schema files the
-// registry reads from disk to dir, a directory there, and reads them
-// through fsys. It serves every [Ref] that names a file on disk: one from
-// [File], and one [Directive], [RefBeside], or [FileOrURL] builds for a
-// document on disk. A Ref from [FileFS], and one built for a document in
-// a file system, reads from its own file system and never from disk, so
-// the option has no part in it. The root of fsys stands for dir, as it
-// does in the file system
-// [os.DirFS] returns for dir and in the one of an [os.Root] opened on
-// dir. The registry resolves each path as it does without a file system,
-// so a relative path resolves against the working directory at the time
-// [File] runs. It then reads the path relative to dir from fsys. A path
-// outside dir names no file and fails to load with [fs.ErrInvalid].
-//
-// A nil fsys leaves the registry as it is. Given more than once, the
-// last option wins. The registry reads only a regular file within the
-// limit of [WithLoadLimit], as [File] describes.
-//
-// Panics if dir is empty.
-//
-// # Symbolic Links
-//
-// The registry checks only the path, and [os.DirFS] follows symbolic
-// links, so a link inside dir still reads a file anywhere on disk. The
-// file system [os.Root.FS] returns refuses a link that leads out of the
-// tree. A program that validates documents from another trust domain
-// therefore passes the file system of an [os.Root] and keeps the Root
-// open while the registry is in use. The Untrusted Documents section of
-// the package documentation gives the whole recipe.
-//
-// # Directory Paths
-//
-// A relative dir resolves against the working directory when
-// [NewRegistry] runs, so WithFSAt(".", fsys) confines the registry to
-// that directory. In a process without a working directory, a relative
-// dir names no directory, and every file fails to load.
-//
-// The registry compares each path with dir as written.
-// When the path is not under dir that way, it resolves the symbolic
-// links in the directories of both and compares them again. A program
-// that entered its working directory through a link therefore still
-// reads the files under a dir it names by its physical path.
-//
-// # Keys and URLs
-//
-// [Ref.Key], the cache, and the URL a $ref resolves against stay as they
-// are without a file system, and an error names the path on disk.
-//
-// # No Disk Access
-//
-// A registry that must read nothing from disk takes a file system that
-// holds no file, since every path on disk then names none:
-//
-//	schema.WithFSAt(".", fstest.MapFS{})
-func WithFSAt(dir string, fsys fs.FS) RegistryOption {
-	if dir == "" {
-		panic("schema.WithFSAt: dir is empty")
-	}
-
-	return func(c *registryConfig) {
-		if fsys != nil {
-			c.fsys, c.fsAt = fsys, newFSDir(dir)
-		}
-	}
 }
 
 // WithHTTPClient is a [RegistryOption] that sets the client the registry
@@ -235,9 +175,9 @@ func WithFSAt(dir string, fsys fs.FS) RegistryOption {
 // its catalog with a client of its own, since the catalog is not a schema
 // the registry loads.
 //
-// [WithURLPrefixes] limits the URLs the registry fetches with the client.
-// The registry then fetches with a copy of the client and leaves the
-// client itself unchanged.
+// An [Access] from [WithAccess] can limit the URLs the registry fetches
+// with the client. The registry then fetches with a copy of the client
+// and leaves the client itself unchanged.
 func WithHTTPClient(client *http.Client) RegistryOption {
 	return func(c *registryConfig) {
 		if client != nil {
@@ -385,6 +325,7 @@ func WithCompileOptions(opts ...CompileOption) RegistryOption {
 func NewRegistry(opts ...RegistryOption) *Registry {
 	r := &Registry{
 		client:        defaultHTTPClient,
+		access:        accessConfig{anyFile: true, anyURL: true},
 		retryAfter:    defaultRetryAfter,
 		loadLimit:     DefaultLoadLimit,
 		requireSchema: true,
@@ -393,9 +334,9 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 		opt(&r.registryConfig)
 	}
 
-	// Each hop of a redirect passes the URL policy, so a schema host
-	// cannot send the fetch elsewhere.
-	r.client = r.urls.guard(r.client)
+	// The access checks each hop of a redirect, so a schema host cannot
+	// send the fetch elsewhere.
+	r.client = r.access.guard(r.client)
 
 	r.cache = newCache(r.cacheLimit, r.retryAfter)
 
@@ -418,7 +359,9 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 //	└── no catalog entry matches
 //
 // In a file that holds several documents, the message names the document
-// the lookup ran for, as "app.yaml: document 3: no matching schema".
+// the lookup ran for, as "app.yaml: document 3: no matching schema". A
+// registry among the resolvers gives the reason of each of its own
+// resolvers, as [Registry.Resolve] describes.
 //
 // Returns [ErrResolve] if a resolver applied but could not name the
 // schema, and an error that holds a [*LoadError] matching [ErrLoad] or
@@ -429,7 +372,10 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // after that, before the named schema finishes loading, Lookup returns
 // [ErrLoad] wrapping the context's error without waiting for the load.
 // Either way [errors.Is] finds the context's error, such as
-// [context.Canceled] or [context.DeadlineExceeded].
+// [context.Canceled] or [context.DeadlineExceeded]. A resolver that is a
+// [Registry] returns the errors of its own lookup, and Lookup returns
+// them as they are, as [Registry.Resolve] describes. When ctx ends during
+// the load of that registry, Lookup thus returns its ErrLoad.
 //
 // An empty document, such as one that holds only comments, is the null
 // document, and a resolver sees it as it sees any other. A document that
@@ -471,6 +417,64 @@ func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (*Schema, error
 	return v, nil
 }
 
+// Resolve implements [Resolver], so one registry is a resolver of
+// another. Resolve names the schema [Registry.Lookup] finds for doc, as a
+// [Ref] from [Schema.Ref]. This registry loads and compiles that schema
+// under its own [Access], cache, and limits. The registry that asked
+// validates with the schema as it is and loads nothing for it. A $ref
+// that the validation reaches loads through this registry too.
+//
+// A program thus confines the schemas its documents pick and trusts its
+// own schemas and those of a catalog, each in a registry of its own:
+//
+//	untrusted := schema.NewRegistry(
+//	    schema.WithAccess(access),
+//	    schema.WithCacheLimit(1024),
+//	    schema.WithResolvers(schema.Directive()),
+//	)
+//
+//	reg := schema.NewRegistry(schema.WithResolvers(
+//	    untrusted,
+//	    schemastore.New(),
+//	    schema.File("/etc/app/schema.json"),
+//	))
+//
+// A schema that both registries name compiles once in each of them.
+//
+// # Errors
+//
+// When no resolver of this registry applies to doc, Resolve returns the
+// error Lookup returns, unbound, which matches [ErrNoMatch]. The registry
+// that asked then moves on to its next resolver. It lists the reason each
+// resolver of this registry gave among the reasons of its own resolvers,
+// as Lookup describes. A resolver that wraps that error in context of its
+// own, such as a [ResolverFunc] that calls Resolve, gives one reason
+// with that context.
+//
+// Any other error ends the lookup of the registry that asked, and that
+// registry returns it without adding an ErrResolve of its own. An error
+// that matches [ErrResolve], [ErrLoad], or [ErrCompile] does so even when
+// it wraps ErrNoMatch. A directive that names a schema that does not load
+// thus fails the lookup with that load error.
+//
+// Lookup binds its error to the document, but Resolve returns the error
+// unbound, because the registry that asked binds it. A document that did
+// not parse returns the syntax error [niceyaml.Node.Err] returns.
+func (r *Registry) Resolve(ctx context.Context, doc *niceyaml.Node) (Ref, error) {
+	err := doc.Err()
+	if err != nil {
+		//nolint:wrapcheck // The source bound the syntax error already.
+		return Ref{}, err
+	}
+
+	s, _, err := r.lookup(ctx, doc)
+	if err != nil {
+		return Ref{}, err
+	}
+
+	return s.Ref(), nil
+}
+
 // lookup is [Registry.Lookup] before binding the error to the document.
 // It reports true when every resolver declined the document. The error
 // alone cannot tell, since a load error may wrap [ErrNoMatch] too.
@@ -502,19 +506,19 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 			// that error. The context's error replaces anything else,
 			// even a decline that wraps it, since a canceled lookup never
 			// matches ErrNoMatch.
-			if err == nil || errors.Is(err, ErrNoMatch) || !errors.Is(err, ctxErr) {
+			if err == nil || isDecline(err) || !errors.Is(err, ctxErr) {
 				err = ctxErr
 			}
 
-			return nil, false, fmt.Errorf("%w: %w", ErrResolve, err)
+			return nil, false, resolveError(err)
 		}
 
-		if err != nil && !errors.Is(err, ErrNoMatch) {
-			return nil, false, fmt.Errorf("%w: %w", ErrResolve, err)
+		if err != nil && !isDecline(err) {
+			return nil, false, resolveError(err)
 		}
 
 		if err != nil {
-			reasons = append(reasons, err)
+			reasons = append(reasons, declineReasons(err)...)
 
 			continue
 		}
@@ -525,6 +529,48 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 	}
 
 	return nil, true, noMatch(reasons)
+}
+
+// isDecline reports whether err, the error of a resolver, declines the
+// document. A decline matches [ErrNoMatch] and none of [ErrResolve],
+// [ErrLoad], and [ErrCompile]. The error of a [Registry] that is a
+// resolver can match ErrNoMatch beside one of those, as a load error
+// does. Such an error is no decline.
+func isDecline(err error) bool {
+	return errors.Is(err, ErrNoMatch) && !isLookupError(err)
+}
+
+// resolveError wraps err, the error of a resolver that named no schema,
+// in [ErrResolve]. It returns err as it is when err already matches
+// ErrResolve, [ErrLoad], or [ErrCompile], as the error of a [Registry]
+// that is a resolver does.
+func resolveError(err error) error {
+	if isLookupError(err) {
+		return err
+	}
+
+	return fmt.Errorf("%w: %w", ErrResolve, err)
+}
+
+// isLookupError reports whether err matches [ErrResolve], [ErrLoad], or
+// [ErrCompile], the sentinels of the errors a lookup returns.
+func isLookupError(err error) bool {
+	return errors.Is(err, ErrResolve) || errors.Is(err, ErrLoad) || errors.Is(err, ErrCompile)
+}
+
+// declineReasons returns the reasons a lookup lists for err, the decline
+// of a resolver. A [Registry] that is a resolver declines with the
+// reasons of its own resolvers. The lookup lists each of them in place
+// of that decline. A decline that adds context of its own around
+// the decline of a Registry is one reason, so the lookup keeps that
+// context. Any other decline is a reason of its own too.
+func declineReasons(err error) []error {
+	declined, ok := errors.AsType[noMatchError](err)
+	if !ok || err.Error() != ErrNoMatch.Error() {
+		return []error{err}
+	}
+
+	return declined.reasons
 }
 
 // noMatch returns the error a lookup reports when every resolver declined:
@@ -883,11 +929,11 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 }
 
 // Load returns the bytes of the schema ref names. For a Ref from [File],
-// Load reads the file from disk, or through the file system [WithFSAt]
-// gave the registry. For a Ref from [FileFS], it reads the file from the
-// file system of the Ref. For a Ref from [URL], it fetches the URL
-// with the client [WithHTTPClient] gave the registry, and refuses a URL
-// outside the prefixes of [WithURLPrefixes]. For a Ref from
+// Load reads the file from disk, where the [Access] of the registry
+// decides which files it reads. For a Ref from [FileFS], it reads the
+// file from the file system of the Ref. For a Ref from [URL], it fetches
+// the URL with the client [WithHTTPClient] gave the registry. It refuses
+// a URL that the Access does not allow. For a Ref from
 // [Loadable], it returns the bytes the Ref's load returns. Load reads the
 // bytes on every call. It caches nothing, and it reads again after a
 // failure without waiting for the interval of [WithRetryAfter].
@@ -1010,8 +1056,8 @@ func (r *Registry) Invalidate(refs ...Ref) {
 // The next request for a schema in fsys loads it again. Forget acts on
 // the file system of a Ref from [FileFS], or of a document in a file
 // system, as [RefBeside] describes. The registry knows every file it
-// reads through the file system of [WithFSAt] as a file on disk, so
-// Forget leaves those schemas in place. A nil fsys, and a file system
+// reads through the root of [AllowRoot] as a file on disk, so Forget
+// leaves those schemas in place. A nil fsys, and a file system
 // the registry keeps nothing from, leave the registry as it is.
 //
 // Forget acts on the cache alone, as [Registry.Invalidate] does, so a
@@ -1061,7 +1107,7 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 
 		// The caller names the URL beside the error, so the refusal
 		// does not repeat it.
-		if !r.urls.allows(ref.key) {
+		if !r.access.allowsURL(ref.key) {
 			return nil, ErrURLNotAllowed
 		}
 
@@ -1281,8 +1327,8 @@ func loadRefDoc(ctx context.Context, uri string, load func() ([]byte, error), li
 // because the resolver refuses a document fetched over HTTP or HTTPS
 // that names a file URL. The refusal holds whatever order the compiler
 // reaches documents in, and it covers a document the registry kept for a
-// schema from [URL]. The resolver refuses a URL outside the prefixes of
-// [WithURLPrefixes] before it looks for a kept document.
+// schema from [URL]. The resolver refuses a URL that the [Access] of the
+// registry does not allow before it looks for a kept document.
 //
 // User holds the userinfo of a key from [URL], such as a password. It
 // stays out of every URI the compiler and the validator resolve, so no
@@ -1335,9 +1381,9 @@ func (r *Registry) refOptions(
 
 		switch {
 		case httpfetch.IsHTTPURL(uri):
-			// The policy judges the URL as the schema names it, before
+			// The access judges the URL as the schema names it, before
 			// the registry adds the userinfo of the key.
-			err := r.urls.check(uri)
+			err := r.access.checkURL(uri)
 			if err != nil {
 				return nil, err
 			}

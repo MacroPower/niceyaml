@@ -301,8 +301,8 @@
 // The loaders return a [Ref] whose key identifies the schema and whose
 // bytes the registry loads through [Registry.Load]. [Embedded] holds a
 // copy of the bytes. The registry reads a file from the file system its
-// Ref names, or from disk, where [WithFSAt] confines the read, and it
-// fetches a URL with the client [WithHTTPClient] gave it.
+// Ref names, or from disk, where its [Access] decides which files it
+// reads. It fetches a URL with the client [WithHTTPClient] gave it.
 // [Registry.Schema] checks its cache by
 // key before it loads and compiles those bytes, so once a schema
 // compiles, the registry serves it to every later document that names it
@@ -367,11 +367,11 @@
 // one that [go.jacobcolvin.com/niceyaml.NewSourceFromFile] opened. One
 // registry thus serves bundled documents and documents on disk.
 //
-// [WithFSAt] confines the files a registry reads from disk. It reads
-// them through a file system that stands for one directory, and a path
-// outside that directory fails to load. Untrusted Documents pairs it
-// with the other options that confine a registry for documents from
-// another trust domain.
+// An [Access] from [WithAccess] decides which files a registry reads
+// from disk and which URLs it fetches. [AllowRoot] confines the reads to
+// the directory of an [os.Root], and a path outside that directory fails
+// to load. Untrusted Documents pairs the Access with the other options
+// that confine a registry for documents from another trust domain.
 //
 // [FileOrURL] routes a reference as written in a directive or on a command
 // line, which may be a file path or a URL, and returns an error for one
@@ -405,7 +405,10 @@
 // the document.
 //
 // A resolver error that does not wrap [ErrNoMatch] ends the lookup, and the
-// resolvers after it do not run. While no catalog has loaded, a
+// resolvers after it do not run. An error that matches [ErrResolve],
+// [ErrLoad], or [ErrCompile] ends it too, even when it wraps ErrNoMatch.
+// The error of a [Registry] that is a resolver is one example. While no
+// catalog has loaded, a
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] that cannot
 // reach SchemaStore.org ends the lookup this way, so place it after any
 // resolver that should still apply without the catalog.
@@ -422,12 +425,17 @@
 //
 // [Directive] lets the author of a document pick the files the registry
 // reads and the URLs it fetches, and the schema a directive names can
-// name more through its $refs. A program that validates documents from
-// another trust domain, such as uploads or pull requests, confines its
-// registry with [WithFSAt], [WithURLPrefixes], [WithCacheLimit], and
-// [WithLoadLimit]. Each acts on every load the registry performs: the
-// schema a [Ref] names, each $ref, and each redirect. One registry with
-// these options serves the program for its whole lifetime:
+// name more through its $refs. A registry reads any file and fetches any
+// URL by default, as [Unrestricted] allows. A program that validates
+// documents from another trust domain, such as uploads or pull requests,
+// gives Directive a registry of its own. It confines that registry with
+// [WithAccess], [WithCacheLimit], and [WithLoadLimit]. The [Access] acts
+// on every load that registry performs: the schema a [Ref] names, each
+// $ref, and each redirect.
+//
+// A second registry, without those limits, holds the program's schemas,
+// the catalog, and the confined registry as its first resolver. The two
+// registries serve the program for its whole lifetime:
 //
 //	root, err := os.OpenRoot(tenantDir)
 //	if err != nil {
@@ -435,64 +443,89 @@
 //	}
 //	defer root.Close()
 //
-//	reg := schema.NewRegistry(
-//	    schema.WithFSAt(tenantDir, root.FS()),
-//	    schema.WithURLPrefixes("https://schemas.example.com/"),
+//	access, err := schema.NewAccess(
+//	    schema.AllowRoot(root),
+//	    schema.AllowURLPrefixes("https://schemas.example.com/"),
+//	)
+//	if err != nil {
+//	    return err
+//	}
+//
+//	untrusted := schema.NewRegistry(
+//	    schema.WithAccess(access),
 //	    schema.WithCacheLimit(1024),
 //	    schema.WithLoadLimit(1<<20),
 //	    schema.WithResolvers(schema.Directive()),
 //	)
 //
+//	reg := schema.NewRegistry(schema.WithResolvers(
+//	    untrusted,
+//	    schemastore.New(),
+//	    schema.File("/etc/app/schema.json"),
+//	))
+//
 //	source, err := niceyaml.NewSourceFromFile(filepath.Join(tenantDir, "app.yaml"))
 //
-// [WithFSAt] confines the reads from disk to tenantDir. A directive that
+// The registry reg asks untrusted first. A document with a directive
+// validates against the schema that untrusted loaded under the Access. A
+// document without one falls through to the catalog and then to the
+// schema of the program. A directive that names a schema the Access does
+// not allow ends the lookup of reg with a load error. The registry reg
+// then tries none of its later resolvers. [Registry.Resolve] describes
+// how the two registries pass errors.
+//
+// [AllowRoot] confines the reads from disk to tenantDir. A directive that
 // names ./schema.json reads schema.json in tenantDir. One that names
 // ../other/schema.json, or an absolute path outside tenantDir, fails to
-// load, and so does a $ref that leads there. The file system of an
-// [os.Root] refuses a symbolic link that leads out of the tree, but the
-// one [os.DirFS] returns follows it. The Root must stay open while the
-// registry is in use.
+// load, and so does a $ref that leads there. The confined registry reads
+// through the [os.Root], which refuses a symbolic link that leads out of
+// the tree. The program must keep the Root open while it uses the
+// registry. An Access with neither AllowRoot nor [AllowAnyFile] allows no
+// file on disk.
 //
-// WithFSAt confines every document on disk.
+// The Access confines every document on disk.
 // [go.jacobcolvin.com/niceyaml.NewSourceFromFile] gives each document
 // an absolute path. A program that builds a document from bytes passes
 // an absolute path to [go.jacobcolvin.com/niceyaml.WithFilePath]. A
 // relative reference beside a document whose path is relative and that
 // has no file system fails with [ErrNoBaseDir]. A document in the file
 // system [go.jacobcolvin.com/niceyaml.WithFS] gives it reads only that
-// file system.
+// file system, whatever the Access allows.
 //
-// [WithURLPrefixes] confines the fetches to the URLs under its prefixes,
-// and with no prefixes the registry fetches nothing. The prefixes cover
-// the schemas of every resolver, so a registry that also holds a
-// [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] must list the
-// hosts of the schemas its catalog names. A prefix names a host, not an
-// address. A host whose DNS answer points at an internal address still
-// receives the request, as in DNS rebinding. A program that must keep the
-// fetches off its own network checks each address in the Dialer of the
-// client it gives [WithHTTPClient].
+// [AllowURLPrefixes] confines the fetches to the URLs under its prefixes.
+// An Access with neither AllowURLPrefixes nor [AllowAnyURL] allows no
+// URL. The catalog sits in reg, which reads and fetches what Unrestricted
+// allows. The prefixes therefore do not have to list the hosts of the
+// schemas the catalog names. A prefix names a host, not an address.
+// A host whose DNS answer points at an internal address still receives
+// the request, as in DNS rebinding. A program that must keep the fetches
+// off its own network checks each address in the Dialer of the client it
+// gives [WithHTTPClient]. With that check, the program can pass
+// [AllowAnyURL] in place of the prefixes. A directive then names any URL,
+// as it does in yaml-language-server.
 //
-// [WithCacheLimit] bounds the number of schemas the registry keeps.
+// [WithCacheLimit] bounds the number of schemas the confined registry
+// keeps.
 // Without it, documents that name endless distinct schemas, such as one
 // URL with a new query string each time, grow the cache until the
 // program calls [Registry.Purge].
 //
-// The registry holds the file system of a document from
+// The confined registry holds the file system of a document from
 // [go.jacobcolvin.com/niceyaml.WithFS] for as long as it keeps an entry
 // from it, as [FileFS] describes. The limit thus bounds those file
 // systems too. When a program opens each upload in a file system of its
-// own, such as an [*archive/zip.Reader], the registry therefore holds a
-// bounded number of uploads. Without a limit, the registry holds every
+// own, such as an [*archive/zip.Reader], the confined registry therefore
+// holds a bounded number of uploads. Without a limit, it holds every
 // upload whose directive named a schema beside it, until the program
 // passes the upload to [Registry.Forget]:
 //
-//	defer reg.Forget(upload)
+//	defer untrusted.Forget(upload)
 //
-// [WithLoadLimit] bounds the bytes of each schema document the registry
-// reads, [DefaultLoadLimit] by default. A directive that names a YAML
-// schema of 10 MiB can cost gigabytes to compile, as the YAML Schemas
-// section describes. The example in this section lowers the limit to
-// 1 MiB. The registry keeps each schema it compiles, so the load limit
+// [WithLoadLimit] bounds the bytes of each schema document the confined
+// registry reads, [DefaultLoadLimit] by default. A directive that names a
+// YAML schema of 10 MiB can cost gigabytes to compile, as the YAML
+// Schemas section describes. The example in this section lowers the limit
+// to 1 MiB. The registry keeps each schema it compiles, so the load limit
 // and the cache limit together bound the memory of the cache.
 //
 // The options do not keep the author from turning validation off. A

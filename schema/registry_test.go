@@ -310,6 +310,317 @@ func TestRegistry_Lookup(t *testing.T) {
 		assert.Equal(t, int32(1), firstLoads.Load())
 		assert.Equal(t, int32(0), secondLoads.Load())
 	})
+
+	t.Run("a resolver load error that wraps ErrNoMatch ends the lookup", func(t *testing.T) {
+		t.Parallel()
+
+		errGone := fmt.Errorf("%w: schema is gone", schema.ErrNoMatch)
+
+		// The resolver loads its schema through a registry of its own and
+		// returns the load error of that registry.
+		other := schema.NewRegistry()
+		loader := schema.ResolverFunc(func(ctx context.Context, _ *niceyaml.Node) (schema.Ref, error) {
+			s, err := other.Schema(ctx, loading("gone.json", nil, errGone))
+			if err != nil {
+				return schema.Ref{}, err //nolint:wrapcheck // The test returns the load error as it is.
+			}
+
+			return s.Ref(), nil
+		})
+
+		fallback, fallbackLoads := countingLoader("fallback.json", schemaData)
+		reg := schema.NewRegistry(schema.WithResolvers(loader, fallback))
+
+		_, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Service"))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, errGone)
+		require.NotErrorIs(t, err, schema.ErrResolve)
+		assert.Equal(t, `load schema: "gone.json": no matching schema: schema is gone`, err.Error())
+		assert.False(t, niceyaml.IsInvalid(err))
+		assert.Zero(t, fallbackLoads.Load())
+	})
+}
+
+func TestRegistry_Resolve(t *testing.T) {
+	t.Parallel()
+
+	const nameSchema = `{"properties": {"name": {"type": "string"}}}`
+
+	t.Run("a confined registry serves the directives of another", func(t *testing.T) {
+		t.Parallel()
+
+		base := t.TempDir()
+		tenant := filepath.Join(base, "tenant")
+
+		yamltest.WriteFiles(t, base, map[string]string{
+			"tenant/schema.json": nameSchema,
+			"prog/schema.json":   `{"required": ["kind"]}`,
+		})
+
+		client, requests := recordingClient(anySchema)
+
+		untrusted := schema.NewRegistry(
+			schema.WithHTTPClient(client),
+			withAccess(t, allowRoot(t, tenant)),
+			schema.WithResolvers(schema.Directive()),
+		)
+
+		// The program's own schema lies outside the root of the confined
+		// registry.
+		reg := schema.NewRegistry(schema.WithResolvers(
+			untrusted,
+			schema.File(filepath.Join(base, "prog", "schema.json")),
+		))
+
+		// The subtests run after this function returns, so the check waits
+		// for them.
+		t.Cleanup(func() { assert.Empty(t, requests()) })
+
+		tcs := map[string]struct {
+			input string
+			err   error
+			want  string
+			// Whether the document is at fault.
+			invalid bool
+		}{
+			"directive inside the root": {
+				input:   yamltest.SchemaDirective("./schema.json", "name: 5\n"),
+				want:    `expected "string", got "integer"`,
+				invalid: true,
+			},
+			"directive outside the root": {
+				input: yamltest.SchemaDirective("../prog/schema.json", "kind: App\n"),
+				err:   fs.ErrInvalid,
+				want:  "not under " + tenant,
+			},
+			"directive that names a URL": {
+				input: yamltest.SchemaDirective("https://evil.test/s.json", "kind: App\n"),
+				err:   schema.ErrURLNotAllowed,
+			},
+			"no directive and no kind": {
+				input:   "name: x\n",
+				want:    `missing required property "kind"`,
+				invalid: true,
+			},
+			"no directive": {
+				input: "kind: App\n",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocumentWithPath(t, tc.input, filepath.Join(tenant, "app.yaml"))
+
+				err := reg.Check(t.Context(), doc)
+				if tc.err == nil && tc.want == "" {
+					require.NoError(t, err)
+
+					return
+				}
+
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err)
+				}
+
+				require.ErrorContains(t, err, tc.want)
+				require.NotErrorIs(t, err, schema.ErrResolve)
+				assert.NotContains(t, err.Error(), "resolve schema")
+				assert.Equal(t, tc.invalid, niceyaml.IsInvalid(err))
+			})
+		}
+	})
+
+	t.Run("names the schema its lookup finds", func(t *testing.T) {
+		t.Parallel()
+
+		inner := schema.NewRegistry(schema.WithResolvers(schema.Embedded([]byte(nameSchema))))
+		doc := yamltest.FirstDocument(t, "name: x\n")
+
+		found, err := inner.Lookup(t.Context(), doc)
+		require.NoError(t, err)
+
+		ref, err := inner.Resolve(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Same(t, found, ref.Schema())
+	})
+
+	t.Run("lists the reasons of its resolvers when it declines", func(t *testing.T) {
+		t.Parallel()
+
+		errNoKind := fmt.Errorf("%w: no kind", schema.ErrNoMatch)
+		errNoLabel := fmt.Errorf("%w: no label", schema.ErrNoMatch)
+
+		inner := schema.NewRegistry(schema.WithResolvers(schema.Directive(), failing(errNoKind)))
+		reg := schema.NewRegistry(schema.WithResolvers(inner, failing(errNoLabel)))
+
+		doc := yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml")
+
+		_, err := inner.Resolve(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrNoMatch)
+		require.ErrorIs(t, err, schema.ErrNoDirective)
+
+		_, err = reg.Lookup(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrNoMatch)
+		require.ErrorIs(t, err, schema.ErrNoDirective)
+		require.ErrorIs(t, err, errNoKind)
+		require.ErrorIs(t, err, errNoLabel)
+		require.NotErrorIs(t, err, schema.ErrResolve)
+		assert.Equal(t, "app.yaml: no matching schema", err.Error())
+
+		wantTree := stringtest.JoinLF(
+			"app.yaml: no matching schema",
+			"|-- no schema directive",
+			"|-- no kind",
+			"`-- no label",
+		)
+		assert.Equal(t, wantTree, niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
+	})
+
+	t.Run("a resolver around a registry decides how its decline reads", func(t *testing.T) {
+		t.Parallel()
+
+		errNoLabel := fmt.Errorf("%w: no label", schema.ErrNoMatch)
+
+		inner := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+
+		tcs := map[string]struct {
+			resolver schema.Resolver
+			// The lines of the rendered error between the message and the
+			// reason of the second resolver.
+			want []string
+		}{
+			"guard that passes the decline through": {
+				resolver: schema.When(matcher.Content(kindPath, "Service"), inner),
+				want:     []string{"|-- no schema directive"},
+			},
+			"resolver that adds context": {
+				resolver: schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
+					ref, err := inner.Resolve(ctx, doc)
+					if err != nil {
+						return schema.Ref{}, fmt.Errorf("tenant acme: %w", err)
+					}
+
+					return ref, nil
+				}),
+				want: []string{"|-- tenant acme: no matching schema", "|   `-- no schema directive"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				reg := schema.NewRegistry(schema.WithResolvers(tc.resolver, failing(errNoLabel)))
+
+				_, err := reg.Lookup(t.Context(), yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml"))
+				require.ErrorIs(t, err, schema.ErrNoMatch)
+				require.ErrorIs(t, err, schema.ErrNoDirective)
+				require.ErrorIs(t, err, errNoLabel)
+
+				lines := slices.Concat([]string{"app.yaml: no matching schema"}, tc.want, []string{"`-- no label"})
+				wantTree := stringtest.JoinLF(lines...)
+				assert.Equal(t, wantTree, niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
+			})
+		}
+	})
+
+	t.Run("a registry that requires no schema passes what the other declines", func(t *testing.T) {
+		t.Parallel()
+
+		client, requests := recordingClient(anySchema)
+
+		untrusted := schema.NewRegistry(
+			schema.WithHTTPClient(client),
+			withAccess(t),
+			schema.WithResolvers(schema.Directive()),
+		)
+
+		reg := schema.NewRegistry(schema.WithRequireSchema(false), schema.WithResolvers(untrusted))
+
+		requireAccepts(t, reg, "name: 5\n")
+
+		// A directive the access refuses still fails the document.
+		err := checkInput(t, reg, yamltest.SchemaDirective("https://evil.test/s.json", "name: 5\n"))
+		requireLoadError(t, err, schema.ErrURLNotAllowed)
+		assert.Empty(t, requests())
+	})
+
+	t.Run("a failure ends the lookup of the registry that asked", func(t *testing.T) {
+		t.Parallel()
+
+		errBroken := errors.New("broken resolver")
+		errGone := fmt.Errorf("%w: schema is gone", schema.ErrNoMatch)
+
+		tcs := map[string]struct {
+			inner schema.Resolver
+			// The sentinels the error of the outer lookup matches.
+			errs []error
+			// The start of the message, which names the failed step only
+			// one time.
+			want     string
+			resolves int
+		}{
+			"resolver error": {
+				inner:    failing(errBroken),
+				errs:     []error{schema.ErrResolve, errBroken},
+				want:     "resolve schema: broken resolver",
+				resolves: 1,
+			},
+			"load error that wraps ErrNoMatch": {
+				inner: loading("gone.json", nil, errGone),
+				errs:  []error{schema.ErrLoad, schema.ErrNoMatch, errGone},
+				want:  `load schema: "gone.json": no matching schema: schema is gone`,
+			},
+			"compile error": {
+				inner: schema.Embedded([]byte(`{"type": 5}`)),
+				errs:  []error{schema.ErrCompile},
+				want:  "compile schema: ",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				fallback, fallbackLoads := countingLoader("fallback.json", []byte(`{}`))
+
+				inner := schema.NewRegistry(schema.WithResolvers(tc.inner))
+				reg := schema.NewRegistry(schema.WithResolvers(inner, fallback))
+
+				err := reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Service\n"))
+
+				for _, want := range tc.errs {
+					require.ErrorIs(t, err, want)
+				}
+
+				assert.True(t, strings.HasPrefix(err.Error(), tc.want), err.Error())
+				assert.Equal(t, tc.resolves, strings.Count(err.Error(), "resolve schema"), err.Error())
+				assert.Zero(t, fallbackLoads.Load())
+			})
+		}
+	})
+
+	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
+		t.Parallel()
+
+		inner := schema.NewRegistry(schema.WithResolvers(schema.Embedded([]byte(nameSchema))))
+		doc := yamltest.UnparsedDocument(t, "kind: [\n")
+
+		_, err := inner.Resolve(t.Context(), doc)
+		assert.Same(t, doc.Err(), err)
+	})
+
+	t.Run("a scoped node fails", func(t *testing.T) {
+		t.Parallel()
+
+		inner := schema.NewRegistry(schema.WithResolvers(schema.Embedded([]byte(nameSchema))))
+		doc := yamltest.FirstDocument(t, "spec:\n  name: x\n")
+
+		_, err := inner.Resolve(t.Context(), yamltest.At(t, doc, paths.Current().Child("spec")))
+		require.ErrorIs(t, err, schema.ErrScopedDocument)
+	})
 }
 
 func TestRegistry_Check_ScopedNode(t *testing.T) {
@@ -2362,28 +2673,17 @@ func TestRegistry_FileFS(t *testing.T) {
 		assert.NotContains(t, schema.FileFS(bundle, "schemas/pod.json").Key(), filepath.ToSlash(wd))
 	})
 
-	t.Run("a file system ref reads past WithFSAt, which confines the disk", func(t *testing.T) {
+	t.Run("a file system ref reads past an access that reads no file", func(t *testing.T) {
 		t.Parallel()
 
-		abs := filepath.Join(wd, "schemas", "pod.json")
-
-		// The file system of the registry stands for the working directory
-		// and holds no file, so a path on disk names none.
-		reg := schema.NewRegistry(schema.WithFSAt(".", fstest.MapFS{}))
+		reg := schema.NewRegistry(withAccess(t))
 
 		data, err := reg.Load(t.Context(), schema.FileFS(bundle, "schemas/pod.json"))
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
 
-		_, err = reg.Load(t.Context(), schema.File(abs))
-		requireLoadError(t, err, fs.ErrNotExist)
-
-		// With bundle as that file system, the path on disk reads from it.
-		reg = schema.NewRegistry(schema.WithFSAt(".", bundle))
-
-		data, err = reg.Load(t.Context(), schema.File(abs))
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
+		_, err = reg.Load(t.Context(), schema.File(filepath.Join(wd, "schemas", "pod.json")))
+		requireLoadError(t, err, fs.ErrInvalid)
 	})
 }
 
@@ -2802,26 +3102,25 @@ func TestRegistry_Forget(t *testing.T) {
 		}
 	})
 
-	t.Run("keeps the files it read through WithFSAt", func(t *testing.T) {
+	t.Run("keeps the files it read through AllowRoot", func(t *testing.T) {
 		t.Parallel()
 
 		dir := t.TempDir()
-		fsys := &openCountingFS{files: yamltest.MapFS(files)}
+		yamltest.WriteFiles(t, dir, files)
+
+		root := openRoot(t, dir)
 		ref := schema.File(filepath.Join(dir, "schemas", "s.json"))
 
-		reg := schema.NewRegistry(schema.WithFSAt(dir, fsys))
+		reg := schema.NewRegistry(withAccess(t, schema.AllowRoot(root)))
 
 		first, err := reg.Schema(t.Context(), ref)
 		require.NoError(t, err)
 
-		opens := fsys.opens.Load()
-
-		reg.Forget(fsys)
+		reg.Forget(root.FS())
 
 		again, err := reg.Schema(t.Context(), ref)
 		require.NoError(t, err)
 		assert.Same(t, first, again)
-		assert.Equal(t, opens, fsys.opens.Load())
 	})
 }
 
@@ -3537,286 +3836,6 @@ func TestRegistry_ReleaseDuringLoad(t *testing.T) {
 	}
 }
 
-func TestRegistry_WithFSAt(t *testing.T) {
-	t.Parallel()
-
-	const nameSchema = `{"properties": {"name": {"type": "string"}}}`
-
-	t.Run("a document opened by absolute path resolves its directive", func(t *testing.T) {
-		t.Parallel()
-
-		tenant := t.TempDir()
-		yamltest.WriteFiles(t, tenant, map[string]string{
-			"app.yaml":    yamltest.SchemaDirective("./schema.json", "name: 5\n"),
-			"ok.yaml":     yamltest.SchemaDirective("./schema.json", "name: cafe\n"),
-			"schema.json": nameSchema,
-		})
-
-		tcs := map[string]struct {
-			fsys fs.FS
-		}{
-			"os.DirFS":   {fsys: os.DirFS(tenant)},
-			"os.Root.FS": {fsys: rootFS(t, tenant)},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				reg := schema.NewRegistry(
-					schema.WithFSAt(tenant, tc.fsys),
-					schema.WithResolvers(schema.Directive()),
-				)
-
-				source, err := niceyaml.NewSourceFromFile(filepath.Join(tenant, "app.yaml"))
-				require.NoError(t, err)
-
-				err = source.ValidateDocuments(t.Context(), reg)
-				require.ErrorContains(t, err, `expected "string", got "integer"`)
-
-				source, err = niceyaml.NewSourceFromFile(filepath.Join(tenant, "ok.yaml"))
-				require.NoError(t, err)
-				require.NoError(t, source.ValidateDocuments(t.Context(), reg))
-			})
-		}
-	})
-
-	t.Run("a path the directory does not hold names no file", func(t *testing.T) {
-		t.Parallel()
-
-		base := t.TempDir()
-		tenant := filepath.Join(base, "tenant")
-		yamltest.WriteFiles(t, base, map[string]string{
-			"tenant/schema.json": nameSchema,
-			"shared/schema.json": nameSchema,
-		})
-
-		missing := filepath.Join(tenant, "schemas", "missing.json")
-
-		tcs := map[string]struct {
-			path string
-			err  error
-			want string
-		}{
-			"path in another directory": {
-				path: filepath.Join(base, "shared", "schema.json"),
-				err:  fs.ErrInvalid,
-				want: "not under " + tenant,
-			},
-			"path through the parent": {
-				path: filepath.Join(tenant, "..", "shared", "schema.json"),
-				err:  fs.ErrInvalid,
-				want: "not under " + tenant,
-			},
-			"the directory itself": {
-				path: tenant,
-				err:  fs.ErrInvalid,
-				want: "not a regular file",
-			},
-			"drive-letter path": {
-				path: "Q:/schemas/config.json",
-				err:  fs.ErrInvalid,
-			},
-			// The error reports the path on disk.
-			"missing file": {
-				path: missing,
-				err:  fs.ErrNotExist,
-				want: "read " + missing,
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				reg := schema.NewRegistry(schema.WithFSAt(tenant, os.DirFS(tenant)))
-
-				_, err := reg.Load(t.Context(), schema.File(tc.path))
-				requireLoadError(t, err, tc.err)
-				require.ErrorContains(t, err, tc.want)
-			})
-		}
-	})
-
-	t.Run("a $ref reads under the directory and no further", func(t *testing.T) {
-		t.Parallel()
-
-		base := t.TempDir()
-		tenant := filepath.Join(base, "tenant")
-		yamltest.WriteFiles(t, base, map[string]string{
-			"tenant/in.json":   `{"properties": {"in": {"$ref": "defs.json"}}}`,
-			"tenant/out.json":  `{"properties": {"out": {"$ref": "../shared/defs.json"}}}`,
-			"tenant/defs.json": `{"type": "string"}`,
-			"shared/defs.json": `{"type": "string"}`,
-		})
-
-		reg := schema.NewRegistry(
-			schema.WithFSAt(tenant, os.DirFS(tenant)),
-			schema.WithResolvers(schema.File(filepath.Join(tenant, "in.json"))),
-		)
-
-		requireRejects(t, reg, "in: 5\n", `$.in: expected "string", got "integer"`)
-
-		requireRefModes(t, "out: 5\n", "not under "+tenant,
-			schema.WithFSAt(tenant, os.DirFS(tenant)),
-			schema.WithResolvers(schema.File(filepath.Join(tenant, "out.json"))),
-		)
-
-		// Without the file system, the same schema reads the file outside.
-		disk := schema.NewRegistry(schema.WithResolvers(schema.File(filepath.Join(tenant, "out.json"))))
-		requireRejects(t, disk, "out: 5\n", `$.out: expected "string", got "integer"`)
-	})
-
-	t.Run("a fragment selects a subschema", func(t *testing.T) {
-		t.Parallel()
-
-		tenant := t.TempDir()
-		yamltest.WriteFiles(t, tenant, map[string]string{
-			"defs.json": `{"$defs": {"Foo": {"$ref": "#/$defs/Name"}, "Name": {"required": ["name"]}}}`,
-		})
-
-		ref := fileOrURL(t, "", plainFileURL(filepath.Join(tenant, "defs.json"))+"#/$defs/Foo")
-		reg := schema.NewRegistry(schema.WithFSAt(tenant, os.DirFS(tenant)), schema.WithResolvers(ref))
-
-		requireAccepts(t, reg, "name: x\n")
-
-		requireRejects(t, reg, "other: 1\n", `missing required property "name"`)
-	})
-
-	t.Run("a file system stands for the working directory", func(t *testing.T) {
-		t.Parallel()
-
-		schemaData := []byte(`{"type": "object", "required": ["kind"]}`)
-		bundle := yamltest.MapFS(map[string]string{
-			"configs/app.schema.json": string(schemaData),
-			"schemas/pod.json":        string(schemaData),
-		})
-
-		wd, err := os.Getwd()
-		require.NoError(t, err)
-
-		reg := schema.NewRegistry(
-			schema.WithFSAt(".", bundle),
-			schema.WithResolvers(schema.Directive()),
-		)
-
-		// A relative path and the absolute path it resolves to name one
-		// file.
-		for _, path := range []string{"schemas/pod.json", filepath.Join(wd, "schemas", "pod.json")} {
-			data, err := reg.Load(t.Context(), schema.File(path))
-			require.NoError(t, err, path)
-			assert.Equal(t, schemaData, data, path)
-		}
-
-		doc := yamltest.FirstDocumentWithPath(t,
-			yamltest.SchemaDirective("./app.schema.json", "kind: App\n"),
-			filepath.Join(wd, "configs", "app.yaml"))
-		require.NoError(t, reg.Check(t.Context(), doc))
-
-		_, err = reg.Load(t.Context(), schema.File(filepath.Join(t.TempDir(), "pod.json")))
-		requireLoadError(t, err, fs.ErrInvalid)
-	})
-
-	t.Run("a link to the directory names the directory", func(t *testing.T) {
-		t.Parallel()
-
-		base := t.TempDir()
-		dir := filepath.Join(base, "dir")
-		link := filepath.Join(base, "link")
-
-		yamltest.WriteFile(t, dir, "schemas/s.json", nameSchema)
-
-		yamltest.SymlinkOrSkip(t, dir, link)
-
-		tcs := map[string]struct {
-			at   string
-			path string
-			err  error
-		}{
-			"path through the link": {
-				at:   dir,
-				path: filepath.Join(link, "schemas", "s.json"),
-			},
-			"directory through the link": {
-				at:   link,
-				path: filepath.Join(dir, "schemas", "s.json"),
-			},
-			"missing file through the link": {
-				at:   dir,
-				path: filepath.Join(link, "schemas", "missing.json"),
-				err:  fs.ErrNotExist,
-			},
-			"missing directory through the link": {
-				at:   dir,
-				path: filepath.Join(link, "missing", "s.json"),
-				err:  fs.ErrNotExist,
-			},
-			"path beside the link": {
-				at:   dir,
-				path: filepath.Join(base, "schemas", "s.json"),
-				err:  fs.ErrInvalid,
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				reg := schema.NewRegistry(schema.WithFSAt(tc.at, os.DirFS(tc.at)))
-
-				data, err := reg.Load(t.Context(), schema.File(tc.path))
-				if tc.err != nil {
-					requireLoadError(t, err, tc.err)
-
-					return
-				}
-
-				require.NoError(t, err)
-				assert.JSONEq(t, nameSchema, string(data))
-			})
-		}
-	})
-
-	t.Run("a link inside the directory is the file system's to follow", func(t *testing.T) {
-		t.Parallel()
-
-		outside := yamltest.WriteFile(t, t.TempDir(), "s.json", nameSchema)
-
-		root := t.TempDir()
-		yamltest.SymlinkOrSkip(t, outside, filepath.Join(root, "s.json"))
-
-		ref := schema.File(filepath.Join(root, "s.json"))
-
-		data, err := schema.NewRegistry(schema.WithFSAt(root, os.DirFS(root))).Load(t.Context(), ref)
-		require.NoError(t, err)
-		assert.JSONEq(t, nameSchema, string(data))
-
-		_, err = schema.NewRegistry(schema.WithFSAt(root, rootFS(t, root))).Load(t.Context(), ref)
-		require.ErrorIs(t, err, schema.ErrLoad)
-	})
-
-	t.Run("a nil file system keeps the disk", func(t *testing.T) {
-		t.Parallel()
-
-		path := yamltest.WriteFile(t, t.TempDir(), "s.json", nameSchema)
-
-		// The directory holds no schema, and the registry reads past it.
-		reg := schema.NewRegistry(schema.WithFSAt(t.TempDir(), nil))
-
-		data, err := reg.Load(t.Context(), schema.File(path))
-		require.NoError(t, err)
-		assert.JSONEq(t, nameSchema, string(data))
-	})
-
-	t.Run("an empty directory panics", func(t *testing.T) {
-		t.Parallel()
-
-		assert.PanicsWithValue(t, "schema.WithFSAt: dir is empty", func() {
-			schema.WithFSAt("", fstest.MapFS{})
-		})
-	})
-}
-
 // A registry confined to one directory never validates a document outside
 // it against the schema at the same relative path inside. The schema
 // beside the document takes only a string, and the one under the tenant
@@ -3845,8 +3864,8 @@ func TestRegistry_DocumentOutsideFileSystem(t *testing.T) {
 			err:    fs.ErrInvalid,
 			want:   "an absolute path names no file",
 		},
-		"WithFSAt": {
-			opts: []schema.RegistryOption{schema.WithFSAt(tenant, os.DirFS(tenant))},
+		"AllowRoot": {
+			opts: []schema.RegistryOption{withAccess(t, allowRoot(t, tenant))},
 			err:  fs.ErrInvalid,
 			want: "not under " + tenant,
 		},
@@ -3873,38 +3892,46 @@ func TestRegistry_DocumentOutsideFileSystem(t *testing.T) {
 }
 
 // A program can build a Ref with File, change directory, and only then
-// validate through a registry with a file system. The test changes the
-// process's working directory, so it does not run in parallel.
+// validate through a registry with a file system or a root. The test
+// changes the process's working directory, so it does not run in
+// parallel.
 //
 //nolint:paralleltest // See above.
 func TestRegistry_FileSystemAfterChdir(t *testing.T) {
-	bundle := yamltest.MapFS(map[string]string{
+	files := map[string]string{
 		"schemas/config.json": `{"properties": {"a": {"$ref": "defs.json"}}}`,
 		"schemas/defs.json":   `{"type": "string"}`,
-	})
+	}
+
+	bundle := yamltest.MapFS(files)
 
 	const rel = "schemas/config.json"
 
-	at := func(wd string) []schema.RegistryOption {
-		return []schema.RegistryOption{schema.WithFSAt(wd, bundle)}
+	// At writes the files to wd and gives the registry a root there.
+	at := func(t *testing.T, wd string) []schema.RegistryOption {
+		t.Helper()
+
+		yamltest.WriteFiles(t, wd, files)
+
+		return []schema.RegistryOption{withAccess(t, allowRoot(t, wd))}
 	}
 
 	// FileFS reads the path as written, which no directory changes.
-	// WithFSAt reads the path File made absolute, and the $ref resolves
+	// AllowRoot reads the path File made absolute, and the $ref resolves
 	// to an absolute path beside it.
 	tcs := map[string]struct {
 		ref  func(wd string) schema.Ref
-		opts func(wd string) []schema.RegistryOption
+		opts func(t *testing.T, wd string) []schema.RegistryOption
 	}{
 		"relative path in a file system": {
 			ref:  func(string) schema.Ref { return schema.FileFS(bundle, rel) },
-			opts: func(string) []schema.RegistryOption { return nil },
+			opts: func(*testing.T, string) []schema.RegistryOption { return nil },
 		},
-		"relative path under WithFSAt": {
+		"relative path under AllowRoot": {
 			ref:  func(string) schema.Ref { return schema.File(rel) },
 			opts: at,
 		},
-		"absolute path under WithFSAt": {
+		"absolute path under AllowRoot": {
 			ref:  func(wd string) schema.Ref { return schema.File(filepath.Join(wd, "schemas", "config.json")) },
 			opts: at,
 		},
@@ -3920,7 +3947,7 @@ func TestRegistry_FileSystemAfterChdir(t *testing.T) {
 
 			t.Chdir(t.TempDir())
 
-			reg := schema.NewRegistry(append(tc.opts(wd), schema.WithResolvers(ref))...)
+			reg := schema.NewRegistry(append(tc.opts(t, wd), schema.WithResolvers(ref))...)
 
 			requireAccepts(t, reg, "a: x\n")
 
@@ -4020,111 +4047,6 @@ func TestRegistry_FileFS_AnyWorkingDirectory(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Under WithFSAt, a relative document resolves against the working
-// directory, as it does without a file system, and not against the
-// directory the file system stands for. The test changes the process's
-// working directory, so it does not run in parallel.
-//
-//nolint:paralleltest // See above.
-func TestRegistry_WithFSAt_RelativeDocument(t *testing.T) {
-	repo := t.TempDir()
-
-	// The schema beside the document takes only a string, and the one at
-	// the root of the repository takes anything.
-	yamltest.WriteFiles(t, repo, map[string]string{
-		"schema.json":     `{}`,
-		"sub/schema.json": `{"properties": {"name": {"type": "string"}}}`,
-		"sub/app.yaml":    yamltest.SchemaDirective("./schema.json", "name: 5\n"),
-	})
-
-	t.Chdir(filepath.Join(repo, "sub"))
-
-	reg := schema.NewRegistry(
-		schema.WithFSAt(repo, os.DirFS(repo)),
-		schema.WithResolvers(schema.Directive()),
-	)
-
-	source, err := niceyaml.NewSourceFromFile("app.yaml")
-	require.NoError(t, err)
-
-	err = source.ValidateDocuments(t.Context(), reg)
-	require.ErrorContains(t, err, `expected "string", got "integer"`)
-}
-
-// A relative directory resolves against the working directory when
-// NewRegistry runs, not when WithFSAt runs or when the registry reads.
-// The test changes the process's working directory, so it does not run
-// in parallel.
-//
-//nolint:paralleltest // See above.
-func TestRegistry_WithFSAt_RelativeDirectory(t *testing.T) {
-	bundle := yamltest.MapFS(map[string]string{"s.json": `{"type": "object"}`})
-
-	before, at, after := t.TempDir(), t.TempDir(), t.TempDir()
-
-	t.Chdir(before)
-
-	opt := schema.WithFSAt(".", bundle)
-
-	t.Chdir(at)
-
-	reg := schema.NewRegistry(opt)
-
-	t.Chdir(after)
-
-	data, err := reg.Load(t.Context(), schema.File(filepath.Join(at, "s.json")))
-	require.NoError(t, err)
-	assert.JSONEq(t, `{"type": "object"}`, string(data))
-
-	for _, dir := range []string{before, after} {
-		_, err := reg.Load(t.Context(), schema.File(filepath.Join(dir, "s.json")))
-		require.ErrorIs(t, err, fs.ErrInvalid, dir)
-	}
-}
-
-// A shell that enters a project through a symbolic link leaves the link
-// in the working directory, while a program that finds the project root
-// itself names the directory the link leads to. A relative document
-// still lies under that root. The test changes the process's working
-// directory, so it does not run in parallel.
-//
-//nolint:paralleltest // See above.
-func TestRegistry_WithFSAt_WorkingDirectoryThroughLink(t *testing.T) {
-	base := t.TempDir()
-	link := filepath.Join(base, "link")
-
-	yamltest.WriteFiles(t, base, map[string]string{
-		"repo/sub/schema.json": `{"properties": {"name": {"type": "string"}}}`,
-		"repo/sub/app.yaml":    yamltest.SchemaDirective("./schema.json", "name: 5\n"),
-	})
-
-	// The temporary directory may lie behind a link of its own.
-	repo, err := filepath.EvalSymlinks(filepath.Join(base, "repo"))
-	require.NoError(t, err)
-
-	yamltest.SymlinkOrSkip(t, repo, link)
-
-	t.Chdir(filepath.Join(link, "sub"))
-
-	wd, err := os.Getwd()
-	require.NoError(t, err)
-
-	if wd != filepath.Join(link, "sub") {
-		t.Skipf("the platform resolves the link in the working directory: %s", wd)
-	}
-
-	reg := schema.NewRegistry(
-		schema.WithFSAt(repo, rootFS(t, repo)),
-		schema.WithResolvers(schema.Directive()),
-	)
-
-	source, err := niceyaml.NewSourceFromFile("app.yaml")
-	require.NoError(t, err)
-
-	err = source.ValidateDocuments(t.Context(), reg)
-	require.ErrorContains(t, err, `expected "string", got "integer"`)
 }
 
 func TestRegistry_Load(t *testing.T) {

@@ -87,7 +87,7 @@ func nonceDir(t *testing.T, routes map[string]http.Handler) (string, *atomic.Int
 	return server.URL + dir, &requests
 }
 
-func TestWithURLPrefixes(t *testing.T) {
+func TestAllowURLPrefixes(t *testing.T) {
 	t.Parallel()
 
 	t.Run("matching", func(t *testing.T) {
@@ -235,7 +235,10 @@ func TestWithURLPrefixes(t *testing.T) {
 				t.Parallel()
 
 				client, requests := recordingClient(anySchema)
-				reg := schema.NewRegistry(schema.WithHTTPClient(client), schema.WithURLPrefixes(tc.prefixes...))
+				reg := schema.NewRegistry(
+					schema.WithHTTPClient(client),
+					withAccess(t, schema.AllowURLPrefixes(tc.prefixes...)),
+				)
 
 				_, err := reg.Schema(t.Context(), schema.URL(tc.url))
 
@@ -254,26 +257,17 @@ func TestWithURLPrefixes(t *testing.T) {
 		}
 	})
 
-	t.Run("without the option the registry fetches any URL", func(t *testing.T) {
-		t.Parallel()
-
-		client, requests := recordingClient(anySchema)
-		reg := schema.NewRegistry(schema.WithHTTPClient(client))
-
-		_, err := reg.Schema(t.Context(), schema.URL("https://evil.test/app.json"))
-		require.NoError(t, err)
-		assert.Equal(t, []string{"https://evil.test/app.json"}, requests())
-	})
-
 	t.Run("each call adds its prefixes", func(t *testing.T) {
 		t.Parallel()
 
 		client, requests := recordingClient(anySchema)
 		reg := schema.NewRegistry(
 			schema.WithHTTPClient(client),
-			schema.WithURLPrefixes(),
-			schema.WithURLPrefixes("https://a.test/"),
-			schema.WithURLPrefixes("https://b.test/"),
+			withAccess(t,
+				schema.AllowURLPrefixes(),
+				schema.AllowURLPrefixes("https://a.test/"),
+				schema.AllowURLPrefixes("https://b.test/"),
+			),
 		)
 
 		for _, u := range []string{"https://a.test/s.json", "https://b.test/s.json"} {
@@ -293,7 +287,7 @@ func TestWithURLPrefixes(t *testing.T) {
 		allowed, allowedRequests := nonceDir(t, routes)
 		other, otherRequests := nonceDir(t, routes)
 
-		reg := schema.NewRegistry(schema.WithURLPrefixes(allowed + "/"))
+		reg := schema.NewRegistry(withAccess(t, schema.AllowURLPrefixes(allowed+"/")))
 
 		_, err := reg.Schema(t.Context(), schema.URL(allowed+"/s.json"))
 		require.NoError(t, err)
@@ -309,7 +303,10 @@ func TestWithURLPrefixes(t *testing.T) {
 		t.Parallel()
 
 		client, requests := recordingClient(anySchema)
-		reg := schema.NewRegistry(schema.WithHTTPClient(client), schema.WithURLPrefixes("https://schemas.test/"))
+		reg := schema.NewRegistry(
+			schema.WithHTTPClient(client),
+			withAccess(t, schema.AllowURLPrefixes("https://schemas.test/")),
+		)
 
 		_, err := reg.Load(t.Context(), schema.URL("https://user:secret@evil.test/app.json"))
 		require.ErrorIs(t, err, schema.ErrLoad)
@@ -325,7 +322,7 @@ func TestWithURLPrefixes(t *testing.T) {
 		client, requests := recordingClient(anySchema)
 		reg := schema.NewRegistry(
 			schema.WithHTTPClient(client),
-			schema.WithURLPrefixes("https://schemas.test/"),
+			withAccess(t, schema.AllowURLPrefixes("https://schemas.test/")),
 			schema.WithResolvers(schema.Directive()),
 		)
 
@@ -341,11 +338,11 @@ func TestWithURLPrefixes(t *testing.T) {
 		assert.Equal(t, []string{"https://schemas.test/app.json"}, requests())
 	})
 
-	t.Run("file reads stay outside the limit", func(t *testing.T) {
+	t.Run("a file system stays outside the prefixes", func(t *testing.T) {
 		t.Parallel()
 
 		bundle := yamltest.MapFS(map[string]string{"s.json": objectSchema})
-		reg := schema.NewRegistry(schema.WithURLPrefixes())
+		reg := schema.NewRegistry(withAccess(t, schema.AllowURLPrefixes()))
 
 		_, err := reg.Schema(t.Context(), schema.FileFS(bundle, "s.json"))
 		require.NoError(t, err)
@@ -383,7 +380,7 @@ func TestWithURLPrefixes(t *testing.T) {
 
 				reg := schema.NewRegistry(
 					schema.WithHTTPClient(client),
-					schema.WithURLPrefixes("https://schemas.test/v1/"),
+					withAccess(t, schema.AllowURLPrefixes("https://schemas.test/v1/")),
 				)
 
 				_, err := reg.Schema(t.Context(), schema.URL("https://schemas.test/v1/s.json"))
@@ -412,7 +409,7 @@ func TestWithURLPrefixes(t *testing.T) {
 
 		reg := schema.NewRegistry(
 			schema.WithHTTPClient(client),
-			schema.WithURLPrefixes("https://schemas.test/"),
+			withAccess(t, schema.AllowURLPrefixes("https://schemas.test/")),
 			requireRefs(false),
 			schema.WithResolvers(schema.URL("https://schemas.test/s.json")),
 		)
@@ -458,7 +455,7 @@ func TestWithURLPrefixes(t *testing.T) {
 
 				reg := schema.NewRegistry(
 					schema.WithHTTPClient(client),
-					schema.WithURLPrefixes("https://schemas.test/v1/"),
+					withAccess(t, schema.AllowURLPrefixes("https://schemas.test/v1/")),
 				)
 
 				_, err := reg.Schema(t.Context(), schema.URL("https://schemas.test/v1/s.json"))
@@ -489,7 +486,7 @@ func TestWithURLPrefixes(t *testing.T) {
 			"/s.json": http.RedirectHandler(elsewhere+"/s.json", http.StatusFound),
 		})
 
-		reg := schema.NewRegistry(schema.WithURLPrefixes(allowed + "/"))
+		reg := schema.NewRegistry(withAccess(t, schema.AllowURLPrefixes(allowed+"/")))
 
 		_, err := reg.Schema(t.Context(), schema.URL(allowed+"/s.json"))
 		require.ErrorIs(t, err, schema.ErrURLNotAllowed)
@@ -526,7 +523,10 @@ func TestWithURLPrefixes(t *testing.T) {
 				return errStop
 			}
 
-			reg := schema.NewRegistry(schema.WithHTTPClient(client), schema.WithURLPrefixes("https://schemas.test/"))
+			reg := schema.NewRegistry(
+				schema.WithHTTPClient(client),
+				withAccess(t, schema.AllowURLPrefixes("https://schemas.test/")),
+			)
 
 			_, err := reg.Schema(t.Context(), schema.URL("https://schemas.test/in"))
 			require.ErrorIs(t, err, errStop)
@@ -542,7 +542,10 @@ func TestWithURLPrefixes(t *testing.T) {
 			t.Parallel()
 
 			client, requests := recordingClient(redirecting)
-			reg := schema.NewRegistry(schema.WithHTTPClient(client), schema.WithURLPrefixes("https://schemas.test/"))
+			reg := schema.NewRegistry(
+				schema.WithHTTPClient(client),
+				withAccess(t, schema.AllowURLPrefixes("https://schemas.test/")),
+			)
 
 			_, err := reg.Schema(t.Context(), schema.URL("https://schemas.test/loop"))
 			require.ErrorIs(t, err, schema.ErrLoad)
@@ -570,7 +573,10 @@ func TestWithURLPrefixes(t *testing.T) {
 				}),
 			}
 
-			reg := schema.NewRegistry(schema.WithHTTPClient(client), schema.WithURLPrefixes("https://schemas.test/"))
+			reg := schema.NewRegistry(
+				schema.WithHTTPClient(client),
+				withAccess(t, schema.AllowURLPrefixes("https://schemas.test/")),
+			)
 
 			start := time.Now()
 
@@ -583,7 +589,7 @@ func TestWithURLPrefixes(t *testing.T) {
 		})
 	})
 
-	t.Run("panics on an invalid prefix", func(t *testing.T) {
+	t.Run("an invalid prefix is an error", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
@@ -607,13 +613,15 @@ func TestWithURLPrefixes(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				assert.Panics(t, func() { schema.WithURLPrefixes("https://schemas.test/", tc.prefix) })
+				access, err := schema.NewAccess(schema.AllowURLPrefixes("https://schemas.test/", tc.prefix))
+				require.Error(t, err)
+				assert.Nil(t, access)
 			})
 		}
 
 		// The message hides a password.
-		assert.PanicsWithValue(t,
-			`schema.WithURLPrefixes: "https://user:xxxxx@schemas.test/": prefix holds userinfo`,
-			func() { schema.WithURLPrefixes("https://user:secret@schemas.test/") })
+		_, err := schema.NewAccess(schema.AllowURLPrefixes("https://user:secret@schemas.test/"))
+		require.EqualError(t, err,
+			`schema.AllowURLPrefixes: "https://user:xxxxx@schemas.test/": prefix holds userinfo`)
 	})
 }

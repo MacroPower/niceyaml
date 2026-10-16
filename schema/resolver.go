@@ -61,10 +61,11 @@ var ErrNoMatch = errors.New("no matching schema")
 // file system and its path together, so one path in two file systems is
 // two schemas. The registry compiles every schema with the options
 // [WithCompileOptions] gave it. [Registry.Load] reads a file from the
-// file system its Ref names, or from disk, where [WithFSAt] confines the
-// read. It fetches a URL with the client [WithHTTPClient] gave the
-// registry. A Ref that carries a compiled schema has nothing to load,
-// and the registry validates with the schema as it is.
+// file system its Ref names, or from disk, where the [Access] of the
+// registry decides which files it reads. It fetches a URL with the client
+// [WithHTTPClient] gave the registry. A Ref that carries a compiled schema
+// has nothing to load, and the registry validates with the schema as it
+// is.
 //
 // Create instances with [Loadable], [Embedded], [File], [FileFS], [URL],
 // [FileOrURL], [RefBeside], or [Schema.Ref]. The zero Ref names no
@@ -87,8 +88,8 @@ type Ref struct {
 	absErr error
 	// The file made absolute against the working directory as File made
 	// it to build the key, and empty for a Ref with a file system. Every
-	// read from disk or under WithFSAt uses it, so the bytes under the
-	// key stay the same wherever the read happens.
+	// read from disk, through a root of AllowRoot or not, uses it, so the
+	// bytes under the key stay the same wherever the read happens.
 	abs string
 	// The key is an HTTP URL the registry fetches with its client.
 	url bool
@@ -160,7 +161,9 @@ func (r Ref) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // apply to the document. A registry tries its resolvers in the order given
 // and moves past each one that reports ErrNoMatch, so a resolver decides
 // whether it applies and names the schema in the same call. Any other
-// error stops the lookup.
+// error stops the lookup. An error that wraps ErrNoMatch but also matches
+// [ErrResolve], [ErrLoad], or [ErrCompile] stops the lookup too, and the
+// registry returns it without a second ErrResolve.
 //
 // A resolver may inspect the document's content, file path, or tokens, or
 // ignore the document and always name the same schema. The document is
@@ -168,7 +171,7 @@ func (r Ref) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // [*Schema] are resolvers of the second kind, and [When] guards any
 // resolver with a [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher].
 //
-// See [ResolverFunc], [Ref], [Schema], [Directive], and
+// See [ResolverFunc], [Ref], [Schema], [Directive], [*Registry], and
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] for
 // implementations.
 type Resolver interface {

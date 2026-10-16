@@ -174,10 +174,21 @@ type directiveResolver struct{}
 // The author of the document picks the file or URL the directive names,
 // so a directive can name any file the registry can read, a path outside
 // the document's directory included, and any host the client can reach.
-// A program that validates documents from another trust domain confines
-// the registry with [WithFSAt], [WithURLPrefixes], and [WithCacheLimit],
-// as the Untrusted Documents section of the package documentation
-// describes. WithFSAt alone confines a document on disk, whether
+// A program that validates documents from another trust domain gives
+// Directive a registry of its own, confined with [WithAccess] and
+// [WithCacheLimit]. That registry is a resolver of the registry that
+// holds the program's own schemas, as [Registry.Resolve] describes:
+//
+//	untrusted := schema.NewRegistry(
+//	    schema.WithAccess(access),
+//	    schema.WithCacheLimit(1024),
+//	    schema.WithResolvers(schema.Directive()),
+//	)
+//
+//	reg := schema.NewRegistry(schema.WithResolvers(untrusted, schemastore.New()))
+//
+// The Untrusted Documents section of the package documentation gives the
+// whole recipe. [AllowRoot] confines a document on disk, whether
 // [niceyaml.NewSourceFromFile] read it or the program built it from
 // bytes with an absolute file path. A program that trusts no directive
 // at all leaves Directive out of the resolvers.

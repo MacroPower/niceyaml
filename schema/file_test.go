@@ -264,9 +264,9 @@ func TestFile_HashInName(t *testing.T) {
 		"in a file system": {
 			ref: schema.FileFS(yamltest.MapFS(map[string]string{"a#b.json": data}), "a#b.json"),
 		},
-		"under WithFSAt": {
+		"under AllowRoot": {
 			ref:  schema.File(path),
-			opts: []schema.RegistryOption{schema.WithFSAt(dir, os.DirFS(dir))},
+			opts: []schema.RegistryOption{withAccess(t, allowRoot(t, dir))},
 		},
 	}
 
@@ -340,8 +340,8 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 			opts []schema.RegistryOption
 		}{
 			"on disk": {},
-			"under WithFSAt": {
-				opts: []schema.RegistryOption{schema.WithFSAt(elsewhere, bundle)},
+			"under AllowRoot": {
+				opts: []schema.RegistryOption{withAccess(t, allowRoot(t, elsewhere))},
 			},
 		}
 
@@ -383,12 +383,17 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 	})
 
 	//nolint:paralleltest // See above.
-	t.Run("a relative directory under WithFSAt names none", func(t *testing.T) {
-		reg := schema.NewRegistry(schema.WithFSAt(".", bundle))
+	t.Run("a root on a relative name has no directory", func(t *testing.T) {
+		root, err := os.OpenRoot(".")
+		if err != nil {
+			t.Skipf("open the removed working directory: %v", err)
+		}
 
-		_, err := reg.Load(t.Context(), schema.File(schemaPath))
-		require.ErrorIs(t, err, schema.ErrLoad)
+		defer root.Close() //nolint:errcheck // Best-effort close.
+
+		access, err := schema.NewAccess(schema.AllowRoot(root))
 		require.ErrorContains(t, err, "no absolute path for directory .")
+		assert.Nil(t, access)
 	})
 }
 

@@ -3,7 +3,6 @@
 package schema_test
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,20 +13,21 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
+// Windows reads a rooted path without a drive, such as \proj\x.json, as
+// relative, but File makes it absolute on the current drive. A registry
+// under AllowRoot reads such a path relative to the directory of its
+// root, as it reads a path with a drive, and so does a $ref that names
+// one. The test changes the process's working directory to put the
+// directory on the current drive, so it does not run in parallel.
+//
+//nolint:paralleltest // See above.
 func TestFile_FSRootedPath(t *testing.T) {
-	t.Parallel()
+	dir := t.TempDir()
+	t.Chdir(dir)
 
-	// Windows reads a rooted path without a drive, such as \proj\x.json,
-	// as relative, while File makes it absolute on the current drive. A
-	// registry under WithFSAt reads such a path relative to its
-	// directory, as it reads a path with a drive, and so does a $ref
-	// that names one.
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
+	rooted := filepath.ToSlash(strings.TrimPrefix(dir, filepath.VolumeName(dir)))
 
-	rooted := filepath.ToSlash(strings.TrimPrefix(cwd, filepath.VolumeName(cwd)))
-
-	fsys := yamltest.MapFS(map[string]string{
+	yamltest.WriteFiles(t, dir, map[string]string{
 		"schemas/main.json": `{"$ref": "` + rooted + `/schemas/defs.json"}`,
 		"schemas/defs.json": `{"type": "string"}`,
 	})
@@ -40,10 +40,9 @@ func TestFile_FSRootedPath(t *testing.T) {
 	}
 
 	for name, tc := range tcs {
+		//nolint:paralleltest // See above.
 		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			reg := schema.NewRegistry(schema.WithFSAt(".", fsys))
+			reg := schema.NewRegistry(withAccess(t, allowRoot(t, dir)))
 
 			s, err := reg.Schema(t.Context(), schema.File(tc.path))
 			require.NoError(t, err)
