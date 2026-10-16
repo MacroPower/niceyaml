@@ -12,9 +12,9 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/manifest"
-	"go.jacobcolvin.com/niceyaml/manifest/migrate"
 )
 
 // planDir writes files below a new directory config and plans their
@@ -71,9 +71,9 @@ func TestPlan_Apply(t *testing.T) {
 func TestPlan_Apply_Warnings(t *testing.T) {
 	t.Parallel()
 
-	remove := func(reason string) migrate.Func {
-		return func(_ context.Context, n *migrate.Node) error {
-			return n.Remove(reason)
+	remove := func(reason string) edit.Func {
+		return func(_ context.Context, n *edit.Node) error {
+			return n.Remove(edit.WithReason(reason))
 		}
 	}
 

@@ -34,7 +34,7 @@ type mergeView struct {
 	via string
 }
 
-// editRecord is an edit of the step running, as a message names it.
+// editRecord is an edit of the Apply running, as a message names it.
 type editRecord struct {
 	// What the edit does, as "renames "closes" to "close"".
 	desc string
@@ -107,8 +107,8 @@ func (d *Doc) addView(views, keep map[position.Position]*mergeView, res *paths.R
 		candidates[name] = append(candidates[name], e)
 	}
 
-	// No path of a step reaches a merge key. The first merge key thus names
-	// its mapping after a step removes the entries around it.
+	// No path of an Apply reaches a merge key. The first merge key thus
+	// names its mapping after an edit removes the entries around it.
 	id := d.entryID(entries[0])
 	if merge != nil {
 		id = d.entryID(merge)
@@ -190,7 +190,7 @@ func mergedEntries(res *paths.Resolver, m ast.Node, candidates map[string][]*ast
 }
 
 // entryID returns the place in the user's text of the key of e, which a
-// rename keeps. A key that a step created takes a place of its own.
+// rename keeps. A key that an edit created takes a place of its own.
 func (d *Doc) entryID(e *ast.MappingValueNode) position.Position {
 	s, ok := d.nodeSpan(e.Key)
 	if !ok || s.start >= len(d.origin) {
@@ -212,10 +212,10 @@ func (d *Doc) entryID(e *ast.MappingValueNode) position.Position {
 	return position.New(-2, o)
 }
 
-// recordEdit records an edit of the step running, which a message about
+// recordEdit records an edit of the Apply running, which a message about
 // what a mapping reads names. The edit is at the place p of h, and at the
 // key of its entry when it renames, removes, or moves the entry.
-func (d *Doc) recordEdit(h *Handle, p *place, desc string) {
+func (d *Doc) recordEdit(h *Node, p *place, desc string) {
 	start, ok := d.startOf(p)
 	if !ok {
 		start = d.valueStart(p)
@@ -241,9 +241,9 @@ func (d *Doc) recordEdit(h *Handle, p *place, desc string) {
 	d.lastEdit = &editRecord{desc: desc, path: d.userPath(path, at.Start), at: at}
 }
 
-// checkMerges returns the problem of a step after which a mapping that
+// checkMerges returns the problem of an Apply after which a mapping that
 // merges or repeats a key reads another entry: one that it hid before the
-// step, or another one in place of an entry that it now hides.
+// Apply, or another one in place of an entry that it now hides.
 func (d *Doc) checkMerges() error {
 	before := d.merges
 	d.merges = nil
@@ -276,16 +276,16 @@ func (d *Doc) checkMerges() error {
 	return nil
 }
 
-// mergeProblem returns the problem of the last edit of the step, after
+// mergeProblem returns the problem of the last edit of the Apply, after
 // which the mapping of view reads another entry under name.
 func (d *Doc) mergeProblem(view *mergeView, name string) error {
 	e := d.lastEdit
 
-	msg := fmt.Sprintf("%s %s, but the mapping also writes %q", d.label, e.desc, name)
+	msg := fmt.Sprintf("%s %s, but the mapping also writes %q", d.subject(), e.desc, name)
 	detail := errors.New("remove one of the two")
 
 	if view.merge != "" {
-		msg = fmt.Sprintf("%s %s, but %s also brings in %q", d.label, e.desc, view.merge, name)
+		msg = fmt.Sprintf("%s %s, but %s also brings in %q", d.subject(), e.desc, view.merge, name)
 		detail = fmt.Errorf("write the value out in place of %s", view.via)
 	}
 
@@ -293,7 +293,7 @@ func (d *Doc) mergeProblem(view *mergeView, name string) error {
 		niceyaml.WithDetails(detail)))
 	d.record(err)
 
-	return err
+	return err //nolint:wrapcheck // The binding is the problem of the Apply.
 }
 
 // comparePositions orders two positions by line, then by column.

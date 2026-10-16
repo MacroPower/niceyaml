@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/manifest"
-	"go.jacobcolvin.com/niceyaml/manifest/migrate"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
@@ -107,14 +107,14 @@ var (
 )
 
 // rename returns a step that renames the key of each value it gets.
-func rename(key string) migrate.Func {
-	return func(_ context.Context, n *migrate.Node) error {
+func rename(key string) edit.Func {
+	return func(_ context.Context, n *edit.Node) error {
 		return n.SetKey(key)
 	}
 }
 
 // tagList is a step that turns a single tag into a list of one.
-func tagList(ctx context.Context, n *migrate.Node) error {
+func tagList(ctx context.Context, n *edit.Node) error {
 	tag, err := n.Decode[string](ctx)
 	if err != nil {
 		return err

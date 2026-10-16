@@ -164,7 +164,7 @@ func WithDecodeOptions(opts ...niceyaml.DecodeOption) RegistryOption {
 // runs on a document applies them ahead of the unmarshalers of its
 // Source, a Source that [Sources] reads included. The decode of a
 // manifest, the decode inside a validator, and
-// [go.jacobcolvin.com/niceyaml/manifest/migrate.Node.Decode] thus apply
+// [go.jacobcolvin.com/niceyaml/edit.Node.Decode] in a step thus apply
 // them. The Node of an [Object] from a Source that Sources reads keeps
 // the unmarshalers of that Source alone.
 //

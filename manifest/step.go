@@ -7,8 +7,8 @@ import (
 	"runtime/debug"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/manifest/internal/edit"
-	"go.jacobcolvin.com/niceyaml/manifest/migrate"
+	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/internal/edithook"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -44,18 +44,16 @@ func (d *docState) migrate(ctx context.Context) bool {
 
 	reg := d.l.reg
 
-	ed, err := edit.New(d.doc, edit.Options{
-		App:          reg.app(),
-		TypeFields:   reg.typeFields(),
-		Unmarshalers: reg.cfg.unmarshalers,
-	})
+	ed, err := edit.New(d.doc,
+		edit.WithApp(reg.app()),
+		edit.WithProtected(reg.typeFields()...),
+		edit.WithUnmarshalers(reg.cfg.unmarshalers...),
+	)
 	if err != nil {
 		d.fail(err)
 
 		return false
 	}
-
-	d.edit = ed
 
 	for _, v := range entry.versions[from.index+1:] {
 		seen := len(ed.Removals())
@@ -74,7 +72,7 @@ func (d *docState) migrate(ctx context.Context) bool {
 			d.earlyWarned = len(d.warned)
 		}
 
-		if !d.prepareWork(ed.Node(), ed.Locate) {
+		if !d.prepareWork(ed.Node(), edithook.Locator(ed)) {
 			return false
 		}
 
@@ -92,45 +90,25 @@ func (d *docState) migrate(ctx context.Context) bool {
 	return true
 }
 
-// runSteps runs the steps of v on ed, and reports whether each passed.
+// runSteps runs the steps of v on ed, each as one [edit.Doc.Apply], and
+// reports whether each passed.
 func (d *docState) runSteps(ctx context.Context, ed *edit.Doc, v *versionEntry) bool {
-	label := d.l.reg.label(v)
+	label := edit.WithLabel(d.l.reg.label(v))
 
 	for i, s := range v.cfg.steps {
-		ed.BeginStep(label)
-
-		handles, err := ed.Matches(s.path)
-		if err != nil {
-			d.fail(err)
-
-			return false
-		}
-
 		id := StepID{Kind: v.kind.kind.name, Version: v.cfg.name, Step: i + 1}
 
-		for _, h := range handles {
-			if h.Gone() {
-				continue
-			}
-
-			n, _ := edit.NewNode(h).(*migrate.Node) //nolint:errcheck // The hook returns a *migrate.Node.
-
+		err := ed.Apply(ctx, s.path, func(ctx context.Context, n *edit.Node) error {
 			d.l.countCall(id)
 
 			warnings := niceyaml.NewWarnings()
 
-			err := ed.EndCall(h, callStep(warnings.Context(ctx), id, s.fn, n))
+			err := callStep(warnings.Context(ctx), id, s.fn, n)
 
 			d.warn(warnings.Err())
 
-			if err != nil {
-				d.fail(err)
-
-				return false
-			}
-		}
-
-		err = ed.Check(ctx)
+			return err
+		}, label)
 		if err != nil {
 			d.fail(err)
 
@@ -152,7 +130,7 @@ func (l *loader) countCall(id StepID) {
 
 // callStep calls fn with n, and returns its error, or the
 // [niceyaml.PanicError] of a panic in it.
-func callStep(ctx context.Context, id StepID, fn migrate.Func, n *migrate.Node) (err error) {
+func callStep(ctx context.Context, id StepID, fn edit.Func, n *edit.Node) (err error) {
 	defer func() {
 		if v := recover(); v != nil {
 			err = &panicError{in: id.String(), p: &niceyaml.PanicError{Value: v, Stack: debug.Stack()}}
@@ -166,11 +144,10 @@ func callStep(ctx context.Context, id StepID, fn migrate.Func, n *migrate.Node) 
 // first, so a version field that the document lacks goes above it.
 func (d *docState) setTypeFields(ctx context.Context, ed *edit.Doc, v *versionEntry) bool {
 	cfg := &d.l.reg.cfg
-
-	ed.BeginStep(d.l.reg.label(v))
+	label := d.l.reg.label(v)
 
 	if !cfg.versionOnly {
-		err := ed.SetTypeField(ctx, cfg.kindField, v.kindName)
+		err := edithook.SetField(ctx, ed, label, cfg.kindField, v.kindName)
 		if err != nil {
 			d.fail(err)
 
@@ -178,7 +155,7 @@ func (d *docState) setTypeFields(ctx context.Context, ed *edit.Doc, v *versionEn
 		}
 	}
 
-	err := ed.SetTypeField(ctx, cfg.versionField, v.cfg.name)
+	err := edithook.SetField(ctx, ed, label, cfg.versionField, v.cfg.name)
 	if err != nil {
 		d.fail(err)
 

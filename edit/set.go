@@ -54,42 +54,45 @@ type payload struct {
 	mapping bool
 }
 
-// Set replaces the value of h with v, or creates it and the mappings
-// above it. It keeps the comments of the entry, and drops the tag of the
-// old value and the comments inside it. It writes v as
-// [go.jacobcolvin.com/niceyaml/encoder.Marshal] does, and a Go string keeps
-// the quotes of the scalar it replaces.
-func (h *Handle) Set(ctx context.Context, v any) error {
-	return h.set(ctx, v, false)
+// Set replaces the value with v, or creates it and the mappings above it.
+// It writes v as [go.jacobcolvin.com/niceyaml/encoder.Marshal] does, keeps
+// the comments of the entry, and drops the tag of the old value and the
+// comments inside it. A Go string keeps the quotes of the scalar that it
+// replaces. Set at the index past the last item of a sequence appends an
+// item.
+func (n *Node) Set(ctx context.Context, v any) error {
+	return n.set(ctx, v, false)
 }
 
-// set is [Handle.Set], which sets a type field when typeField is set.
-func (h *Handle) set(ctx context.Context, v any, typeField bool) error {
-	d := h.d
+// set is [Node.Set], which sets a protected value when protected is set.
+func (n *Node) set(ctx context.Context, v any, protected bool) error {
+	d := n.d
 
-	p, err := h.place()
+	p, err := n.place()
 	if err != nil {
 		return err
 	}
 
+	why := d.protection(n.path)
+
 	switch {
 	case p.root:
-		return d.fail(h, "%s replaces the root of the document", d.label)
-	case !typeField && d.holdsTypeField(h.path):
-		return d.fail(h, "%s sets %s, which holds a type field", d.label, h.path)
+		return d.fail(n, "%s replaces the root of the document", d.subject())
+	case !protected && why != "":
+		return d.fail(n, "%s sets %s, which %s", d.subject(), n.path, why)
 	}
 
 	if p.exists {
-		err = d.editOnce(h, p)
+		err = d.editOnce(n, p)
 		if err != nil {
 			return err
 		}
 
-		d.recordEdit(h, p, "sets "+h.path.String())
+		d.recordEdit(n, p, "sets "+n.path.String())
 
-		err = d.replaceValue(ctx, h, p, v)
+		err = d.replaceValue(ctx, n, p, v)
 	} else {
-		err = d.createValue(ctx, h, p, v)
+		err = d.createValue(ctx, n, p, v)
 	}
 
 	if err != nil {
@@ -97,28 +100,28 @@ func (h *Handle) set(ctx context.Context, v any, typeField bool) error {
 	}
 
 	if !p.exists {
-		created, err := d.resolve(h.path)
+		created, err := d.resolve(n.path)
 		if err == nil && created.exists {
-			d.recordEdit(h, created, "sets "+h.path.String())
+			d.recordEdit(n, created, "sets "+n.path.String())
 		}
 	}
 
-	d.invalidate(h.path)
+	d.invalidate(n.path)
 
-	d.written = append(d.written, writtenValue{path: h.path, value: v})
-	d.took(h.path, false)
+	d.written = append(d.written, writtenValue{path: n.path, value: v})
+	d.took(n.path, false)
 
 	return nil
 }
 
 // renderPayload returns v as a payload for a place whose block collections
 // indent by step.
-func (d *Doc) renderPayload(ctx context.Context, h *Handle, v any, step, origin int) (payload, error) {
+func (d *Doc) renderPayload(ctx context.Context, h *Node, v any, step, origin int) (payload, error) {
 	seqIndent := d.sequenceIndent()
 
 	r, err := render(ctx, v, step, seqIndent)
 	if err != nil {
-		return payload{}, d.fail(h, "%s cannot write the value of %s: %v", d.label, h.path, err)
+		return payload{}, d.fail(h, "%s cannot write the value of %s: %v", d.subject(), h.path, err)
 	}
 
 	pl := payload{flow: newRun(r.flow, origin), mapping: r.mapping}
@@ -159,7 +162,7 @@ func renderedLine(text string, shift, origin int) line {
 }
 
 // replaceValue replaces the value of p with v.
-func (d *Doc) replaceValue(ctx context.Context, h *Handle, p *place, v any) error {
+func (d *Doc) replaceValue(ctx context.Context, h *Node, p *place, v any) error {
 	vs, ve := d.valueStart(p), d.valueEnd(p)
 	origin := d.addNote(d.setNote(vs, ve, true))
 	keyStart, _ := d.startOf(p)
@@ -261,7 +264,7 @@ func (d *Doc) replaceValue(ctx context.Context, h *Handle, p *place, v any) erro
 // [start, end) of the current text.
 func (d *Doc) setNote(start, end int, replaced bool) note {
 	n := d.keptNote(start, max(start+1, end))
-	n.detail = d.label
+	n.detail = d.subject()
 	n.replaced = replaced
 
 	return n
@@ -335,7 +338,7 @@ func prefixRun(text string, r run, origin int) run {
 
 // createValue creates the value of p, and the mappings above it that the
 // document lacks.
-func (d *Doc) createValue(ctx context.Context, h *Handle, p *place, v any) error {
+func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any) error {
 	var sels []paths.Selector
 
 	for sel := range h.path.Selectors() {
@@ -346,14 +349,14 @@ func (d *Doc) createValue(ctx context.Context, h *Handle, p *place, v any) error
 
 	holder, err := d.resolve(holderPath)
 	if err != nil || !holder.exists {
-		return d.fail(h, "%s cannot find %s", d.label, holderPath)
+		return d.fail(h, "%s cannot find %s", d.subject(), holderPath)
 	}
 
 	content := astnode.Content(holder.value)
 	if _, ok := content.(*ast.AliasNode); ok {
 		target, err := d.node.Resolver().Deref(content)
 		if err != nil {
-			return d.fail(h, "%s sets %s, which goes through an alias that does not resolve", d.label, h.path)
+			return d.fail(h, "%s sets %s, which goes through an alias that does not resolve", d.subject(), h.path)
 		}
 
 		content = astnode.Content(target)
@@ -366,7 +369,7 @@ func (d *Doc) createValue(ctx context.Context, h *Handle, p *place, v any) error
 
 	for i := len(sels) - 1; i > p.found; i-- {
 		if sels[i].Kind != paths.SelectorChild {
-			return d.fail(h, "%s sets %s, but %s holds no item %d", d.label, h.path, holderName, sels[i].Index)
+			return d.fail(h, "%s sets %s, but %s holds no item %d", d.subject(), h.path, holderName, sels[i].Index)
 		}
 
 		value = map[string]any{sels[i].Name: value}
@@ -378,7 +381,7 @@ func (d *Doc) createValue(ctx context.Context, h *Handle, p *place, v any) error
 	case paths.SelectorChild:
 		entries, ok := astnode.Entries(content)
 		if !ok {
-			return d.fail(h, "%s sets %s, but %s holds %s", d.label, h.path, holderName, kindOf(content))
+			return d.fail(h, "%s sets %s, but %s holds %s", d.subject(), h.path, holderName, kindOf(content))
 		}
 
 		return d.insertEntry(ctx, h, holderPath, holder, content, entries, next.Name, value, origin)
@@ -386,11 +389,11 @@ func (d *Doc) createValue(ctx context.Context, h *Handle, p *place, v any) error
 	default:
 		seq, ok := content.(*ast.SequenceNode)
 		if !ok {
-			return d.fail(h, "%s sets %s, but %s holds %s", d.label, h.path, holderName, kindOf(content))
+			return d.fail(h, "%s sets %s, but %s holds %s", d.subject(), h.path, holderName, kindOf(content))
 		}
 
 		if next.Index != len(seq.Values) || p.found != len(sels)-1 {
-			return d.fail(h, "%s sets %s, but %s holds %d items", d.label, h.path, holderName, len(seq.Values))
+			return d.fail(h, "%s sets %s, but %s holds %d items", d.subject(), h.path, holderName, len(seq.Values))
 		}
 
 		return d.appendItem(ctx, h, holderPath, holder, seq, value, origin)
@@ -434,7 +437,7 @@ func (d *Doc) createdNote(holder *place) note {
 	for p := holder; p != nil; {
 		if start, ok := d.startOf(p); ok && start < len(d.origin) && d.origin[start] >= 0 {
 			n := d.keptNote(start, d.valueEnd(p))
-			n.detail = d.label
+			n.detail = d.subject()
 
 			return n
 		}
@@ -452,14 +455,14 @@ func (d *Doc) createdNote(holder *place) note {
 		p = next
 	}
 
-	return note{detail: d.label}
+	return note{detail: d.subject()}
 }
 
 // insertEntry inserts the entry key with value into the mapping content at
 // holderPath, after its last entry.
 func (d *Doc) insertEntry(
 	ctx context.Context,
-	h *Handle,
+	h *Node,
 	holderPath paths.Path,
 	holder *place,
 	content ast.Node,
@@ -472,7 +475,7 @@ func (d *Doc) insertEntry(
 
 	keyText, err := renderKey(ctx, key, nil, flow)
 	if err != nil {
-		return d.fail(h, "%s cannot write the key %q: %v", d.label, key, err)
+		return d.fail(h, "%s cannot write the key %q: %v", d.subject(), key, err)
 	}
 
 	step := d.stepOf(holderPath)
@@ -488,7 +491,7 @@ func (d *Doc) insertEntry(
 // insertPayload inserts the entry key with the payload pl into the mapping
 // content at holderPath, after its last entry.
 func (d *Doc) insertPayload(
-	h *Handle,
+	h *Node,
 	holderPath paths.Path,
 	holder *place,
 	content ast.Node,
@@ -556,7 +559,7 @@ func keyOf(d *Doc, entry *ast.MappingValueNode) string {
 
 // applyEdit applies e, and returns the problem of text the engine cannot
 // parse.
-func (d *Doc) applyEdit(h *Handle, e edit) error {
+func (d *Doc) applyEdit(h *Node, e edit) error {
 	err := d.apply(e)
 	if err != nil {
 		return d.bug(h, err)
@@ -600,8 +603,8 @@ func (d *Doc) entryLines(key run, pl payload, col int, brk string) run {
 	return out
 }
 
-// opening is an empty flow collection that the migration wrote in block
-// context, which takes block style once an edit adds to it.
+// opening is an empty flow collection that an edit wrote in block
+// context, which takes block style when a later edit adds to it.
 type opening struct {
 	// The bytes that the block lines replace: the collection and the space
 	// before it.
@@ -612,7 +615,7 @@ type opening struct {
 }
 
 // blockOpening returns the empty flow collection content, the value of
-// holder, when the migration wrote it in block context.
+// holder, when an edit wrote it in block context.
 func (d *Doc) blockOpening(holder *place, content ast.Node) (opening, bool) {
 	if holder.flow || holder.root {
 		return opening{}, false
@@ -671,7 +674,7 @@ func (d *Doc) flowInsert(content ast.Node, n int, text run, origin int) edit {
 // value of holder.
 func (d *Doc) appendItem(
 	ctx context.Context,
-	h *Handle,
+	h *Node,
 	holderPath paths.Path,
 	holder *place,
 	seq *ast.SequenceNode,
@@ -691,7 +694,7 @@ func (d *Doc) appendItem(
 // appendPayload appends the payload pl as the last item of the sequence
 // seq, the value of holder.
 func (d *Doc) appendPayload(
-	h *Handle,
+	h *Node,
 	holderPath paths.Path,
 	holder *place,
 	seq *ast.SequenceNode,

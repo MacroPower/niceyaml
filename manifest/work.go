@@ -45,18 +45,7 @@ func (d *docState) workingCopy(
 	src := doc.Source()
 	text := src.Text()
 	span := doc.Span()
-
-	start, ok := src.Offset(position.New(span.Start, 0))
-	if !ok {
-		start = 0
-	}
-
-	end := len(text)
-	if span.End < src.Lines().Len() {
-		if off, ok := src.Offset(position.New(span.End, 0)); ok {
-			end = off
-		}
-	}
+	start, end := textBounds(doc)
 
 	work := []rune(text[start:end])
 	blank := &blanker{doc: doc, src: src, base: start, text: text, work: work, first: -1}
@@ -98,6 +87,27 @@ func (d *docState) workingCopy(
 	d.fail(niceyaml.NewError("document holds nothing but its type fields"))
 
 	return nil, false
+}
+
+// textBounds returns the bytes [start, end) of the text of the Source of
+// doc that the lines of doc hold.
+func textBounds(doc *niceyaml.Node) (int, int) {
+	src := doc.Source()
+	span := doc.Span()
+
+	start, ok := src.Offset(position.New(span.Start, 0))
+	if !ok {
+		start = 0
+	}
+
+	end := len(src.Text())
+	if span.End < src.Lines().Len() {
+		if off, ok := src.Offset(position.New(span.End, 0)); ok {
+			end = off
+		}
+	}
+
+	return start, end
 }
 
 // hiddenFields returns the type fields that sch, the schema of a version,

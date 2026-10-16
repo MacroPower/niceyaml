@@ -14,32 +14,37 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// SetKey renames the key of the entry of h to key. The value and its
-// comments stay in place, and the key keeps its quotes. A key that the
-// entry already has, as the decode reads it, changes nothing.
-func (h *Handle) SetKey(key string) error {
-	d := h.d
+// SetKey renames the key of the entry. The value and its comments stay in
+// place, and the key keeps its quotes. A key that the entry already has,
+// as the decode reads it, changes nothing. SetKey fails on a sequence
+// item, which has no key, and on a key that the mapping holds already.
+//
+//nolint:contextcheck // A rename writes text and reads no state that a context carries.
+func (n *Node) SetKey(key string) error {
+	d := n.d
 
-	p, err := h.place()
+	p, err := n.place()
 	if err != nil || !p.exists {
 		return err
 	}
 
+	why := d.protection(n.path)
+
 	switch {
 	case p.root || p.entry == nil:
-		return d.fail(h, "%s renames this item, but an item of a sequence has no key", d.label)
-	case d.holdsTypeField(h.path):
-		return d.fail(h, "%s renames %q, which holds a type field", d.label, h.Key())
+		return d.fail(n, "%s renames this item, but an item of a sequence has no key", d.subject())
+	case why != "":
+		return d.fail(n, "%s renames %q, which %s", d.subject(), n.Key(), why)
 	}
 
 	ks, tk, ok := d.keySpan(p)
 	if !ok {
-		return d.fail(h, "%s cannot find the key of %s", d.label, h.path)
+		return d.fail(n, "%s cannot find the key of %s", d.subject(), n.path)
 	}
 
 	text, err := renderKey(context.Background(), key, tk, p.flow)
 	if err != nil {
-		return d.fail(h, "%s cannot write the key %q: %v", d.label, key, err)
+		return d.fail(n, "%s cannot write the key %q: %v", d.subject(), key, err)
 	}
 
 	name := keyName(text)
@@ -47,23 +52,23 @@ func (h *Handle) SetKey(key string) error {
 		return nil
 	}
 
-	err = d.editOnce(h, p)
+	err = d.editOnce(n, p)
 	if err != nil {
 		return err
 	}
 
-	d.recordEdit(h, p, fmt.Sprintf("renames %q to %q", h.Key(), key))
+	d.recordEdit(n, p, fmt.Sprintf("renames %q to %q", n.Key(), key))
 
-	parent, _ := h.path.Parent()
+	parent, _ := n.path.Parent()
 
 	if other := d.sibling(p, name); other != nil {
 		otherKey, _ := d.node.Resolver().KeyName(other.Key)
 		detail := d.node.Bind(niceyaml.NewError(fmt.Sprintf("%q is defined here", otherKey),
 			niceyaml.AtPath(parent.Child(otherKey).Key())))
 
-		err := h.Bind(niceyaml.NewError(
-			fmt.Sprintf("%s renames %q to %q, which already exists", d.label, h.Key(), key),
-			niceyaml.AtPath(h.path.Key()),
+		err := n.bind(niceyaml.NewError(
+			fmt.Sprintf("%s renames %q to %q, which already exists", d.subject(), n.Key(), key),
+			niceyaml.AtPath(n.path.Key()),
 			niceyaml.WithDetails(detail, errors.New("remove one of the two")),
 		))
 		d.record(err)
@@ -71,21 +76,21 @@ func (h *Handle) SetKey(key string) error {
 		return err
 	}
 
-	d.invalidate(h.path)
+	d.invalidate(n.path)
 
 	// PathAt gives a path that ends in `~` for a key, and so does the note
 	// of a key that an earlier call renamed.
-	n := d.keptNote(ks.start, ks.end)
-	if last, ok := n.path.Last(); n.hasPath && (!ok || last.Kind != paths.SelectorKey) {
-		n.path = n.path.Key()
+	kept := d.keptNote(ks.start, ks.end)
+	if last, ok := kept.path.Last(); kept.hasPath && (!ok || last.Kind != paths.SelectorKey) {
+		kept.path = kept.path.Key()
 	}
 
-	err = d.splice(ks.start, ks.end, text, written(text, d.addNote(n)))
+	err = d.splice(ks.start, ks.end, text, written(text, d.addNote(kept)))
 	if err != nil {
-		return d.bug(h, err)
+		return d.bug(n, err)
 	}
 
-	d.moved(h.path, parent.Child(key))
+	d.moved(n.path, parent.Child(key))
 
 	return nil
 }
@@ -114,8 +119,8 @@ func (d *Doc) sibling(p *place, name string) *ast.MappingValueNode {
 }
 
 // keptNote returns the note of text that an edit writes over the bytes
-// [start, end): the place in the user's text of the first byte, or the
-// note of that byte when an earlier edit wrote it.
+// [start, end). The note holds the place in the user's text of the first
+// byte, or the note of that byte when an earlier edit wrote it.
 func (d *Doc) keptNote(start, end int) note {
 	if start < len(d.origin) && d.origin[start] < 0 {
 		return d.notes[-1-d.origin[start]]
@@ -131,64 +136,93 @@ func (d *Doc) keptNote(start, end int) note {
 	return n
 }
 
-// Remove removes the entry or the item of h, with its comments, and
-// records the removal with reason. When blank lines surround the lines it
-// deletes, one of them goes too, and a block collection that it empties
-// becomes "{}" or "[]".
-func (h *Handle) Remove(reason string) error {
-	d := h.d
+// RemoveOption configures one call of [Node.Remove].
+//
+// Options:
+//   - [WithReason]
+type RemoveOption func(*removeConfig)
 
-	p, err := h.place()
+// removeConfig holds the settings that each [RemoveOption] gives a
+// removal.
+type removeConfig struct {
+	reason string
+}
+
+// WithReason is a [RemoveOption] that gives the reason for the removal,
+// which [Removal.Reason] holds.
+func WithReason(reason string) RemoveOption {
+	return func(c *removeConfig) {
+		c.reason = reason
+	}
+}
+
+// Remove removes the entry or the item, with its comments. [Doc.Removals]
+// lists the removal of a value of the user's text. When blank lines
+// surround the lines that Remove deletes, one of them goes too. A block
+// collection that it empties becomes "{}" or "[]". A place that holds no
+// value stays as it is.
+func (n *Node) Remove(opts ...RemoveOption) error {
+	d := n.d
+
+	var cfg removeConfig
+
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	p, err := n.place()
 	if err != nil || !p.exists {
 		return err
 	}
 
+	why := d.protection(n.path)
+
 	switch {
 	case p.root:
-		return d.fail(h, "%s removes the root of the document", d.label)
-	case d.holdsTypeField(h.path):
-		return d.fail(h, "%s removes %s, which holds a type field", d.label, h.path)
+		return d.fail(n, "%s removes the root of the document", d.subject())
+	case why != "":
+		return d.fail(n, "%s removes %s, which %s", d.subject(), n.path, why)
 	}
 
-	err = d.editOnce(h, p)
+	err = d.editOnce(n, p)
 	if err != nil {
 		return err
 	}
 
 	if p.entry != nil {
-		d.recordEdit(h, p, fmt.Sprintf("removes %q", h.Key()))
+		d.recordEdit(n, p, fmt.Sprintf("removes %q", n.Key()))
 	} else {
-		d.recordEdit(h, p, "removes this item")
+		d.recordEdit(n, p, "removes this item")
 	}
 
-	d.recordRemoval(h, p, reason)
-	d.invalidate(h.path)
+	d.recordRemoval(n, p, cfg.reason)
+	d.invalidate(n.path)
 
 	anchors := d.anchorsIn(p.value)
 
 	if p.flow {
 		err = d.removeFlow(p)
 	} else {
-		err = d.removeBlock(h, p)
+		err = d.removeBlock(n, p)
 	}
 
 	if err != nil {
-		return d.bug(h, err)
+		return d.bug(n, err)
 	}
 
-	d.took(h.path, true)
+	d.took(n.path, true)
 
 	if p.seq != nil {
-		parent, _ := h.path.Parent()
+		parent, _ := n.path.Parent()
 		d.shifted(parent, p.index)
 	}
 
-	return d.keepAnchors(h, anchors)
+	return d.keepAnchors(n, anchors)
 }
 
-// recordRemoval records the removal of the value of p, unless it holds no
-// text of the user's file.
-func (d *Doc) recordRemoval(h *Handle, p *place, reason string) {
+// recordRemoval records the removal of the value of p through h, unless
+// it holds no text of the user's file.
+func (d *Doc) recordRemoval(h *Node, p *place, reason string) {
 	start, ok := d.startOf(p)
 	if !ok {
 		return
@@ -235,7 +269,7 @@ func (d *Doc) recordRemoval(h *Handle, p *place, reason string) {
 }
 
 // removeBlock removes p, an entry or an item of a block collection.
-func (d *Doc) removeBlock(h *Handle, p *place) error {
+func (d *Doc) removeBlock(h *Node, p *place) error {
 	r := d.blockRegion(p)
 	start, end := r.start, r.end
 
@@ -399,14 +433,14 @@ func (d *Doc) removeFlow(p *place) error {
 
 // bug returns the problem of an edit whose text the engine cannot
 // parse, which shows a bug in the engine.
-func (d *Doc) bug(h *Handle, err error) error {
-	app := d.opts.App
+func (d *Doc) bug(h *Node, err error) error {
+	app := d.cfg.app
 	if app == "" {
 		app = "this program"
 	}
 
-	bound := h.Bind(niceyaml.Unchecked(&engineError{
-		msg: app + " cannot migrate this value without changing it",
+	bound := h.bind(niceyaml.Unchecked(&engineError{
+		msg: app + " cannot edit this value without changing it",
 		err: err,
 	}, niceyaml.WithDetails(fmt.Errorf("report this to the authors of %s", app))))
 	d.record(bound)

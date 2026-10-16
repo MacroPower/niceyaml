@@ -1,11 +1,3 @@
-// Package edit applies the edits of migration steps to the text of one
-// YAML document. It keeps every byte that an edit leaves alone, and it
-// records where each byte of the new text came from, so an error found in
-// the new text binds at the line that the user wrote.
-//
-// A [Doc] holds the text of a document as the edits leave it. A [Handle]
-// names one place of the document, and its methods read and edit the value
-// there. A load and a plan of the manifest package share the engine.
 package edit
 
 import (
@@ -16,196 +8,26 @@ import (
 	"unicode/utf8"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/bom"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// ErrEngine indicates new text that the engine cannot parse, or that does
-// not decode to the values the edits wrote. It shows a bug in the engine,
-// not in the document.
-var ErrEngine = errors.New("migration changed a value it kept")
-
-// Options configures a [Doc].
-type Options struct {
-	// App names the app in the messages of the engine, as "cafe" or
-	// "this program".
-	App string
-	// TypeFields holds the paths of the type fields, which no step edits.
-	TypeFields []paths.Path
-	// Unmarshalers holds the unmarshalers that the Source of each parse
-	// applies ahead of those of the user's Source, so every decode of the
-	// document applies them.
-	Unmarshalers []niceyaml.Unmarshaler
-}
-
-// Doc is the text of one document as the edits of the steps leave it.
-//
-// Create instances with [New].
-type Doc struct {
-	// The first problem of the call that runs, which fails the document
-	// unless the step returns its own.
-	callErr error
-	// The document as the user wrote it.
-	user *niceyaml.Node
-	// The parse of the current text, and its document.
-	src  *niceyaml.Source
-	node *niceyaml.Node
-	// The places that the calls of the step running edited, by the origin
-	// of the first byte of each.
-	stepEdits map[int]stepEdit
-	// What each mapping that merges or repeats a key read before the step
-	// running, and the last edit of the step.
-	merges   map[position.Position]*mergeView
-	lastEdit *editRecord
-	// The text of the lines of the user's document.
-	orig string
-	// The byte order mark the text starts with, which the parse leaves out.
-	bom string
-	// The current text, without the byte order mark.
-	cur string
-	// The label of the version whose step runs, as messages name it.
-	label string
-	opts  Options
-	notes []note
-	// The line starts of orig and of cur.
-	origLines []int
-	curLines  []int
-	// The live handles, whose paths each edit keeps up to date.
-	handles  []*Handle
-	removals []Removal
-	// The values that the calls of the step running wrote, which the check
-	// after the step compares with what the document reads.
-	written []writtenValue
-	// The place in orig that each byte of cur came from, or for a byte an
-	// edit wrote, -1 minus the index of its note.
-	origin []int
-	// The line of the user's text where orig starts.
-	base int
-	// The bytes [start, end) of the text of the user's Source that orig
-	// holds, with its byte order mark.
-	start, end int
-	// An edit changed the text.
-	edited bool
-}
-
 // note is where the text that an edit wrote binds its errors in the user's
 // text, and what it says about the edit.
 type note struct {
-	// The label of the version whose step wrote the text, or "" for text
-	// that holds no value.
+	// The subject of the Apply that wrote a value, as messages name it. It
+	// is "" for text that holds no value, and for text that stands for text
+	// of the user, such as a renamed key.
 	detail string
 	path   paths.Path
 	at     position.Range
 	// The note names a value the file holds, so an error binds there.
 	located bool
 	hasPath bool
-	// The text replaced a value, so the detail says the version set the
-	// value from the one the file holds.
+	// The text replaced a value, so the detail says the Apply set the value
+	// from the one the file holds.
 	replaced bool
-}
-
-// Removal is one value that a step removed.
-type Removal struct {
-	// Reason is the reason the step gave.
-	Reason string
-	// Label is the version whose step removed the value.
-	Label string
-	// Key is the key of the entry, for a removal of an entry.
-	Key string
-	// Path is the path of the value as the user's text spells it, which
-	// ends in `~` for an entry.
-	Path paths.Path
-	// Range is the range of the key or the item in the user's text.
-	Range position.Range
-	// Item is set for the removal of a sequence item.
-	Item bool
-}
-
-// writtenValue is a value a call wrote, which the check after the step
-// compares with what the text reads at path.
-type writtenValue struct {
-	value any
-	path  paths.Path
-}
-
-// New creates a new [Doc] that holds the text of user, a document that
-// parsed and holds content.
-func New(user *niceyaml.Node, opts Options) (*Doc, error) {
-	src := user.Source()
-	text := src.Text()
-	span := user.Span()
-
-	start, ok := src.Offset(position.New(span.Start, 0))
-	if !ok {
-		start = 0
-	}
-
-	end := len(text)
-	if span.End < src.Lines().Len() {
-		if off, ok := src.Offset(position.New(span.End, 0)); ok {
-			end = off
-		}
-	}
-
-	orig := text[start:end]
-
-	d := &Doc{user: user, base: span.Start, opts: opts, start: start, end: end}
-
-	// The parse counts positions without the marks that the tokenizer
-	// drops, such as one after the "---" of a later document. The text
-	// leaves them out too. A rewrite keeps the mark that opens the text
-	// and drops any other, which the parse reads as nothing.
-	orig, marks := bom.Drop(orig)
-	if len(marks) > 0 && marks[0] == 0 {
-		d.bom = bom.Mark
-	}
-
-	d.orig, d.cur = orig, orig
-	d.origLines = lineStarts(orig)
-
-	d.origin = make([]int, len(orig))
-	for i := range d.origin {
-		d.origin[i] = i
-	}
-
-	err := d.parse()
-	if err != nil {
-		return nil, err
-	}
-
-	return d, nil
-}
-
-// Text returns the current text of the document, with the byte order mark
-// it started with.
-func (d *Doc) Text() string {
-	return d.bom + d.cur
-}
-
-// Node returns the current text of the document as a document, whose
-// errors bind in the user's text.
-func (d *Doc) Node() *niceyaml.Node {
-	return d.node
-}
-
-// Bounds returns the bytes [start, end) of the text of the user's Source
-// that the document holds, which [Doc.Text] takes the place of in a
-// rewrite of the file.
-func (d *Doc) Bounds() (int, int) {
-	return d.start, d.end
-}
-
-// Edited reports whether an edit changed the text.
-func (d *Doc) Edited() bool {
-	return d.edited
-}
-
-// Removals returns the values that the steps removed, in the order of the
-// calls.
-func (d *Doc) Removals() []Removal {
-	return d.removals
 }
 
 // lineStarts returns the offset of each line of text.
@@ -223,7 +45,7 @@ func lineStarts(text string) []int {
 
 // parse parses the current text and records its lines.
 func (d *Doc) parse() error {
-	src, ok := hook.WorkingSource(d.cur, d.user, d.opts.Unmarshalers, d.Locate).(*niceyaml.Source)
+	src, ok := hook.WorkingSource(d.cur, d.user, d.cfg.unmarshalers, d.locate).(*niceyaml.Source)
 	if !ok {
 		return errors.New("edit: no working source")
 	}
@@ -288,10 +110,10 @@ func positionIn(text string, starts []int, off int) position.Position {
 	return position.New(line, utf8.RuneCountInString(text[starts[line]:off]))
 }
 
-// Locate gives the place in the user's text of a location that an error
+// locate gives the place in the user's text of a location that an error
 // resolved in the current text, or in a copy of it that keeps every line
 // and column.
-func (d *Doc) Locate(at hook.Located) hook.Place {
+func (d *Doc) locate(at hook.Located) hook.Place {
 	place := hook.Place{Path: at.Path, HasPath: at.HasPath}
 
 	if !at.HasRange {
@@ -381,7 +203,7 @@ func (d *Doc) userPos(off int) position.Position {
 // userPath returns the path of the value that the user's text holds at
 // pos, for an error at path in the current text. A path that the current
 // text does not hold, such as a field the document leaves out, stays as it
-// is, in the terms of the current version.
+// is, in the terms of the current text.
 func (d *Doc) userPath(path paths.Path, pos position.Position) paths.Path {
 	// The resolver binds no error. A bound error locates itself through d,
 	// which then calls userPath again.

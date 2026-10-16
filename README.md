@@ -21,6 +21,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 - String [`finder`][niceyaml/finder] for load-once, search-many scenarios
 - [`Node`][niceyaml.Node] decoding with validation hooks, and a matching [`encoder`][niceyaml/encoder]
 - JSON schema [validation][niceyaml/schema.Schema] with YAML path errors
+- Document [`edit`][niceyaml/edit]s that keep comments and formatting, with errors bound at the lines the user wrote
 - [`manifest`][niceyaml/manifest] loading and migration of configuration that declares its `apiVersion` and `kind`, as Kubernetes manifests do
 - Bubble [`yamlviewport`][niceyaml/bubbles/yamlviewport] for Bubble Tea, in a module of its own
 - [`fangs`][niceyaml/fangs] adapters for CLIs built with fang, in a module of their own
@@ -68,7 +69,7 @@ Module `niceyaml` adds a few abstractions on top of [go-yaml][goccy/go-yaml]:
 - [`line.View`][niceyaml/line] - One rendering of a `Lines` value, which carries the overlays, annotations, and flags the printer draws
 - [`niceyaml.Source`][niceyaml.Source] - A YAML file, which parses into one `Node` per document, decodes, wraps errors, exposes its `Lines`, and returns fresh `View`s over them
 
-Most use cases will only need to interact with `Source`. Its `Lines` method returns the `line.Lines` that the [`finder`][niceyaml/finder] and [`diff`][niceyaml/diff] packages read, and its `View` method returns a fresh `line.View` over them for the [`printer`][niceyaml/printer]. Both packages read a view too, so a search or a diff of one document takes the `View` of its `Node` and reports the lines of the file. Diffs return plain views, since interleaved lines from two revisions are not a YAML document. A program that edits a file in place reads the bytes of the file from `Text` and converts a position to a byte offset in them with `Offset`.
+Most use cases will only need to interact with `Source`. Its `Lines` method returns the `line.Lines` that the [`finder`][niceyaml/finder] and [`diff`][niceyaml/diff] packages read, and its `View` method returns a fresh `line.View` over them for the [`printer`][niceyaml/printer]. Both packages read a view too, so a search or a diff of one document takes the `View` of its `Node` and reports the lines of the file. Diffs return plain views, since interleaved lines from two revisions are not a YAML document. A program that replaces a scalar on one line can splice the bytes of `Text` at the offsets that `Offset` gives. The [`edit`][niceyaml/edit] package renames keys and sets, moves, and removes values, and it keeps every byte that an edit leaves alone.
 
 These abstractions let you iterate over arbitrary lines of tokens from one or more YAML documents, and they keep the original token details from the lexer. Multi-line and overlapping tokens cause common problems in diffs, partial rendering, and search, and these abstractions solve them.
 
@@ -154,6 +155,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml.Node]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Node
 [niceyaml.Source]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Source
 [niceyaml/diff]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/diff
+[niceyaml/edit]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/edit
 [niceyaml/encoder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/encoder
 [niceyaml/finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/finder
 [niceyaml/line]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line

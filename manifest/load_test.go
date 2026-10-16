@@ -18,9 +18,9 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/manifest"
-	"go.jacobcolvin.com/niceyaml/manifest/migrate"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
@@ -1490,7 +1490,7 @@ func TestRegistry_Load_Unmarshalers(t *testing.T) {
 			manifest.WithKinds(manifest.NewKind[Alarm]("Alarm",
 				manifest.Version("alarm.jacobcolvin.com/v1alpha1"),
 				manifest.Version("alarm.jacobcolvin.com/v1",
-					manifest.Migrate(spec.Child("severity"), func(ctx context.Context, n *migrate.Node) error {
+					manifest.Migrate(spec.Child("severity"), func(ctx context.Context, n *edit.Node) error {
 						_, err := n.Decode[AlarmLevel](ctx)
 						if err != nil {
 							return err
@@ -1974,7 +1974,7 @@ func TestRegistry_Load_Warnings(t *testing.T) {
 			opts: shiftOptions(
 				manifest.Version("cafe.jacobcolvin.com/v1alpha1"),
 				manifest.Version("cafe.jacobcolvin.com/v1",
-					manifest.Migrate(spec.Child("open"), func(ctx context.Context, n *migrate.Node) error {
+					manifest.Migrate(spec.Child("open"), func(ctx context.Context, n *edit.Node) error {
 						_, err := n.Decode[string](ctx, niceyaml.WithValidator(openWarning))
 
 						return err //nolint:wrapcheck // The load binds the error of a step.

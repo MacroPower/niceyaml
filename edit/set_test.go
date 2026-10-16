@@ -1,15 +1,16 @@
 package edit_test
 
 import (
+	"context"
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-func TestHandle_Set(t *testing.T) {
+func TestNode_Set(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -173,7 +174,7 @@ func TestHandle_Set(t *testing.T) {
 			value:  "SEK",
 			want:   "spec: {price: 65, currency: SEK}\n",
 		},
-		"new key below an empty mapping that the step wrote": {
+		"new key below an empty mapping that the edit wrote": {
 			before: stringtest.LinesLF(
 				"spec:",
 				"  extras:",
@@ -279,12 +280,6 @@ func TestHandle_Set(t *testing.T) {
 				"  currency: SEK",
 			),
 		},
-		"type field": {
-			before: "kind: Cafe\n",
-			path:   paths.Doc().Child("kind"),
-			value:  "Bistro",
-			err:    "cafe.jacobcolvin.com/v1 sets $.kind, which holds a type field",
-		},
 	}
 
 	for name, tc := range tcs {
@@ -292,14 +287,15 @@ func TestHandle_Set(t *testing.T) {
 			t.Parallel()
 
 			d := newDoc(t, tc.before)
-			h := d.Handle(tc.path)
 
-			err := h.Set(t.Context(), tc.value)
-			if tc.thenKey != "" {
-				require.NoError(t, err)
+			err := applyAt(t, d, tc.path, func(ctx context.Context, n *edit.Node) error {
+				err := n.Set(ctx, tc.value)
+				if err != nil || tc.thenKey == "" {
+					return err
+				}
 
-				err = h.At(paths.Current().Child(tc.thenKey)).Set(t.Context(), tc.thenValue)
-			}
+				return n.At(paths.Current().Child(tc.thenKey)).Set(ctx, tc.thenValue)
+			})
 
 			requireEdit(t, d, err, tc.err, tc.want)
 		})

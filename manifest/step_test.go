@@ -11,8 +11,8 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/manifest"
-	"go.jacobcolvin.com/niceyaml/manifest/migrate"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
@@ -50,7 +50,7 @@ func drinkOptions(written bool) []manifest.RegistryOption {
 		manifest.WithKinds(manifest.NewKind[map[string]any]("Drink",
 			manifest.Version("cafe.jacobcolvin.com/v1beta1"),
 			manifest.Version("cafe.jacobcolvin.com/v1", append(mark,
-				manifest.Migrate(spec.Child("size"), func(ctx context.Context, n *migrate.Node) error {
+				manifest.Migrate(spec.Child("size"), func(ctx context.Context, n *edit.Node) error {
 					size, ok := sizes[n.Text()]
 					if !ok {
 						return niceyaml.NewError(fmt.Sprintf("no cafe.jacobcolvin.com/v1 size for %q", n.Text()),
@@ -59,10 +59,10 @@ func drinkOptions(written bool) []manifest.RegistryOption {
 
 					return n.Set(ctx, size)
 				}),
-				manifest.Migrate(spec.Child("color"), func(_ context.Context, n *migrate.Node) error {
-					return n.Remove("menu colors moved to the theme of the Cafe")
+				manifest.Migrate(spec.Child("color"), func(_ context.Context, n *edit.Node) error {
+					return n.Remove(edit.WithReason("menu colors moved to the theme of the Cafe"))
 				}),
-				manifest.Migrate(spec.Child("boom"), func(context.Context, *migrate.Node) error {
+				manifest.Migrate(spec.Child("boom"), func(context.Context, *edit.Node) error {
 					panic("boom")
 				}),
 			)...),
@@ -86,10 +86,10 @@ func adoptOptions(written bool) []manifest.RegistryOption {
 		manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
 			manifest.Unversioned(),
 			manifest.Version("cafe.jacobcolvin.com/v1", append(mark,
-				manifest.Migrate(paths.Doc().Child("name"), func(_ context.Context, n *migrate.Node) error {
+				manifest.Migrate(paths.Doc().Child("name"), func(_ context.Context, n *edit.Node) error {
 					return n.Move(meta.Child("name"))
 				}),
-				manifest.Migrate(paths.Doc().Child("seats"), func(_ context.Context, n *migrate.Node) error {
+				manifest.Migrate(paths.Doc().Child("seats"), func(_ context.Context, n *edit.Node) error {
 					return n.Move(spec.Child("seats"))
 				}),
 			)...),
@@ -137,7 +137,7 @@ func TestRegistry_Load_Steps(t *testing.T) {
 		manifest.WithKinds(manifest.NewKind[map[string]any]("MenuItem",
 			manifest.Version("cafe.jacobcolvin.com/v1beta1"),
 			manifest.Version("cafe.jacobcolvin.com/v1",
-				manifest.Migrate(paths.MustParse("$.spec.extras.*"), func(ctx context.Context, n *migrate.Node) error {
+				manifest.Migrate(paths.MustParse("$.spec.extras.*"), func(ctx context.Context, n *edit.Node) error {
 					price := n.At(paths.Current().Child("price"))
 					if !price.Exists() {
 						return nil
@@ -181,8 +181,9 @@ func TestRegistry_Load_Steps(t *testing.T) {
 		manifest.WithAppName("cafe"),
 		manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
 			manifest.Version("v1"),
-			manifest.Version("v2", manifest.Migrate(spec.Child("closes"),
-				func(_ context.Context, n *migrate.Node) error { return n.Remove("closing is up to the staff") })),
+			manifest.Version("v2", manifest.Migrate(spec.Child("closes"), func(_ context.Context, n *edit.Node) error {
+				return n.Remove(edit.WithReason("closing is up to the staff"))
+			})),
 		)),
 	}
 
@@ -427,19 +428,15 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				`  closes: "19:00"`,
 				"  <<: *summer",
 			)},
+			// The failed step removes nothing, so no removal warns.
 			err: stringtest.JoinLF(
-				"config: 1 error, 1 warning",
-				`|-- config/hours.yaml:6:3: $.spec.closes~: v2 removes "closes", but <<: *summer also brings in "closes"`,
-				"|   `-- write the value out in place of *summer",
-				"`-- config/hours.yaml:6:3: warning: $.spec.closes~: v2 ignores field \"closes\"",
-				"    `-- closing is up to the staff",
+				`config/hours.yaml:6:3: $.spec.closes~: v2 removes "closes", but <<: *summer also brings in "closes"`,
+				"`-- write the value out in place of *summer",
 				"",
-				"config/hours.yaml",
 				`   4 |   closes: "21:00"`,
 				"   5 | spec:",
 				`   6 |   closes: "19:00"`,
-				`     |   ^^^^^^ v2 removes "closes", but <<: *summer also brings in "closes"`,
-				`     |   ^^^^^^ warning: v2 ignores field "closes"`,
+				"     |   ^^^^^^",
 				"   7 |   <<: *summer",
 			),
 		},

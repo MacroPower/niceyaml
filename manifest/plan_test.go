@@ -10,9 +10,9 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/manifest"
-	"go.jacobcolvin.com/niceyaml/manifest/migrate"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/printer"
 )
@@ -151,6 +151,27 @@ func TestRegistry_PlanMigration(t *testing.T) {
 				"kind: Drink",
 				"metadata:",
 				"  name: kaffe",
+				"spec:",
+				"  size: small",
+			)},
+			summary: "1 file to migrate, nothing written",
+		},
+		"quoted type fields": {
+			opts: drinkOptions(true),
+			files: map[string]string{
+				"drink.yaml": stringtest.LinesLF(
+					`apiVersion: "cafe.jacobcolvin.com/v1beta1" # since 2024`,
+					"kind: 'Drink'",
+					"spec:",
+					"  size: S",
+				),
+			},
+			headers: []string{
+				"config/drink.yaml: Drink from cafe.jacobcolvin.com/v1beta1 to cafe.jacobcolvin.com/v1",
+			},
+			afters: []string{stringtest.LinesLF(
+				`apiVersion: "cafe.jacobcolvin.com/v1" # since 2024`,
+				"kind: 'Drink'",
 				"spec:",
 				"  size: small",
 			)},
@@ -345,7 +366,7 @@ func TestRegistry_PlanMigration_Limits(t *testing.T) {
 					manifest.Version("1"),
 					manifest.Version("2",
 						manifest.Written(),
-						manifest.Migrate(paths.Doc().Child("port"), func(ctx context.Context, n *migrate.Node) error {
+						manifest.Migrate(paths.Doc().Child("port"), func(ctx context.Context, n *edit.Node) error {
 							return n.Set(ctx, map[string]any{"listen": map[string]any{"port": 80}})
 						}),
 					),

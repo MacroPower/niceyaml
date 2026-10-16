@@ -1,16 +1,18 @@
 package edit_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-func TestHandle_Move(t *testing.T) {
+func TestNode_Move(t *testing.T) {
 	t.Parallel()
 
 	meta := paths.Doc().Child("metadata")
@@ -149,41 +151,51 @@ func TestHandle_Move(t *testing.T) {
 
 			d := newDoc(t, tc.before)
 
-			var err error
-
-			for _, m := range tc.moves {
-				err = d.Handle(m[0]).Move(m[1])
-				if err != nil {
-					break
+			err := d.Apply(t.Context(), paths.Doc(), func(_ context.Context, root *edit.Node) error {
+				for _, m := range tc.moves {
+					err := root.At(m[0]).Move(m[1])
+					if err != nil {
+						return err
+					}
 				}
-			}
+
+				return nil
+			}, label)
 
 			requireEdit(t, d, err, tc.err, tc.want)
 		})
 	}
 }
 
-func TestHandle_Move_Items(t *testing.T) {
+func TestNode_Move_Items(t *testing.T) {
 	t.Parallel()
 
 	d := newDoc(t, stringtest.LinesLF("items:", "  - kaffe", "  - te", "  - saft"))
 
-	handles, err := d.Matches(paths.Doc().Child("items").IndexAll())
-	require.NoError(t, err)
-	require.Len(t, handles, 3)
+	var nodes []*edit.Node
 
 	// Each item moves after the item before it left the sequence.
-	require.NoError(t, handles[0].Move(paths.Doc().Child("first")))
-	require.NoError(t, handles[1].Move(paths.Doc().Child("second")))
+	targets := []paths.Path{paths.Doc().Child("first"), paths.Doc().Child("second")}
 
-	assert.Equal(t, paths.Doc().Child("first"), handles[0].Path())
-	assert.Equal(t, paths.Doc().Child("second"), handles[1].Path())
-	assert.Equal(t, paths.Doc().Child("items").Index(0), handles[2].Path())
+	err := d.Apply(t.Context(), paths.Doc().Child("items").IndexAll(), func(_ context.Context, n *edit.Node) error {
+		nodes = append(nodes, n)
 
-	requireEdit(t, d, nil, "", stringtest.LinesLF(
+		if len(nodes) > len(targets) {
+			return nil
+		}
+
+		return n.Move(targets[len(nodes)-1])
+	})
+
+	requireEdit(t, d, err, "", stringtest.LinesLF(
 		"items:",
 		"  - saft",
 		"first: kaffe",
 		"second: te",
 	))
+
+	require.Len(t, nodes, 3)
+	assert.Equal(t, paths.Doc().Child("first"), nodes[0].Path())
+	assert.Equal(t, paths.Doc().Child("second"), nodes[1].Path())
+	assert.Equal(t, paths.Doc().Child("items").Index(0), nodes[2].Path())
 }

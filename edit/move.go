@@ -10,71 +10,77 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// Move moves the value of h, with its comments, to target, a `$` path,
-// which it creates as [Handle.Set] does. The value keeps its text,
-// indented for its new place.
-func (h *Handle) Move(target paths.Path) error {
-	d := h.d
+// Move moves the value and its comments to target, a `$` path, which it
+// creates as [Node.Set] does. The index past the last item of a sequence
+// thus appends an item. The value keeps its text, indented for its new
+// place. Move fails on a target that holds a value or that lies inside the
+// value.
+//
+//nolint:contextcheck // A move writes text and reads no state that a context carries.
+func (n *Node) Move(target paths.Path) error {
+	d := n.d
 
-	p, err := h.place()
+	p, err := n.place()
 	if err != nil || !p.exists {
 		return err
 	}
 
-	name := h.Key()
+	name := n.Key()
 	if name == "" {
-		name = h.path.String()
+		name = n.path.String()
 	}
+
+	why, whyTarget := d.protection(n.path), d.protection(target)
 
 	switch {
 	case !target.IsAbsolute() || !plain(target) || target.IsRoot():
-		return d.fail(h, "%s moves %q to %s, which is no $ path of names and indexes", d.label, name, target)
+		return d.fail(n, "%s moves %q to %s, which is no $ path of names and indexes", d.subject(), name, target)
 	case p.root:
-		return d.fail(h, "%s moves the root of the document", d.label)
-	case d.holdsTypeField(h.path):
-		return d.fail(h, "%s moves %q, which holds a type field", d.label, name)
-	case d.holdsTypeField(target):
-		return d.fail(h, "%s moves %q to %s, a type field", d.label, name, target)
+		return d.fail(n, "%s moves the root of the document", d.subject())
+	case why != "":
+		return d.fail(n, "%s moves %q, which %s", d.subject(), name, why)
+	case whyTarget != "":
+		return d.fail(n, "%s moves %q to %s, which %s", d.subject(), name, target, whyTarget)
 	case p.shared:
-		return d.fail(h, "%s moves %q to %s, but an alias or a merge key also reads it", d.label, name, target)
+		return d.fail(n, "%s moves %q to %s, but an alias or a merge key also reads it", d.subject(), name, target)
 	}
 
-	if _, inside := target.CutPrefix(h.path); inside {
-		return d.fail(h, "%s moves %q to %s, which lies inside it", d.label, name, target)
+	if _, inside := target.CutPrefix(n.path); inside {
+		return d.fail(n, "%s moves %q to %s, which lies inside it", d.subject(), name, target)
 	}
 
 	tp, err := d.resolve(target)
 	if err != nil {
-		return d.fail(h, "%s moves %q to %s, which %s", d.label, name, target, err.Error())
+		return d.fail(n, "%s moves %q to %s, which %s", d.subject(), name, target, err.Error())
 	}
 
 	if tp.exists {
-		return d.fail(h, "%s moves %q to %s, which already exists", d.label, name, target)
+		return d.fail(n, "%s moves %q to %s, which already exists", d.subject(), name, target)
 	}
 
-	pl := d.extract(h, p)
+	pl := d.extract(n, p)
 	anchors := d.anchorsIn(p.value)
 
-	d.recordEdit(h, p, fmt.Sprintf("moves %q to %s", name, target))
+	d.recordEdit(n, p, fmt.Sprintf("moves %q to %s", name, target))
 
-	d.invalidate(h.path)
+	d.invalidate(n.path)
 	d.invalidate(target)
 
 	if p.flow {
 		err = d.removeFlow(p)
 	} else {
-		err = d.removeBlock(h, p)
+		err = d.removeBlock(n, p)
 	}
 
 	if err != nil {
-		return d.bug(h, err)
+		return d.bug(n, err)
 	}
 
-	from := h.path
+	from := n.path
 
-	// The handles to move come first, because the shift below moves the
-	// handle of the next item to the place the value left.
-	moving := d.handlesAt(from)
+	// The nodes to move come first, because the shift below moves the node
+	// of the next item to the place the value left.
+	moving := d.nodesAt(from)
 
 	if p.seq != nil {
 		parent, _ := from.Parent()
@@ -84,14 +90,14 @@ func (h *Handle) Move(target paths.Path) error {
 		target = shiftedPath(target, parent, p.index)
 	}
 
-	err = d.insertAt(h, target, pl)
+	err = d.insertAt(n, target, pl)
 	if err != nil {
 		return err
 	}
 
 	repoint(moving, from, target)
 
-	return d.keepAnchors(h, anchors)
+	return d.keepAnchors(n, anchors)
 }
 
 // plain reports whether path holds names and indexes alone.
@@ -107,7 +113,7 @@ func plain(path paths.Path) bool {
 
 // extract returns the value of p with its comments as a payload, with the
 // origins of its bytes.
-func (d *Doc) extract(h *Handle, p *place) payload {
+func (d *Doc) extract(h *Node, p *place) payload {
 	start, _ := d.startOf(p)
 	keyLine := d.lineOf(start)
 	keyCol := d.column(start)
@@ -210,7 +216,7 @@ func isMapping(node ast.Node) bool {
 
 // flowOf returns the value of p in flow style, for a flow collection that
 // a move puts it in.
-func (d *Doc) flowOf(h *Handle, p *place) run {
+func (d *Doc) flowOf(h *Node, p *place) run {
 	vs, ve := d.valueStart(p), d.valueEnd(p)
 	origin := d.addNote(d.keptNote(vs, ve))
 
@@ -234,10 +240,10 @@ func (d *Doc) flowOf(h *Handle, p *place) run {
 
 // insertAt inserts pl at target, a place that holds no value, and creates
 // the mappings above it that the document lacks.
-func (d *Doc) insertAt(h *Handle, target paths.Path, pl payload) error {
+func (d *Doc) insertAt(h *Node, target paths.Path, pl payload) error {
 	tp, err := d.resolve(target)
 	if err != nil {
-		return d.fail(h, "%s moves %q to %s, which %s", d.label, h.Key(), target, err.Error())
+		return d.fail(h, "%s moves %q to %s, which %s", d.subject(), h.Key(), target, err.Error())
 	}
 
 	var sels []paths.Selector
@@ -250,7 +256,7 @@ func (d *Doc) insertAt(h *Handle, target paths.Path, pl payload) error {
 
 	holder, err := d.resolve(holderPath)
 	if err != nil || !holder.exists {
-		return d.fail(h, "%s cannot find %s", d.label, holderPath)
+		return d.fail(h, "%s cannot find %s", d.subject(), holderPath)
 	}
 
 	content := astnode.Content(holder.value)
@@ -262,7 +268,7 @@ func (d *Doc) insertAt(h *Handle, target paths.Path, pl payload) error {
 	if next := sels[tp.found]; next.Kind == paths.SelectorIndex {
 		seq, ok := content.(*ast.SequenceNode)
 		if !ok || next.Index != len(seq.Values) || tp.found != len(sels)-1 {
-			return d.fail(h, "%s moves %q to %s, but %s holds no such item", d.label, h.Key(), target, holderName)
+			return d.fail(h, "%s moves %q to %s, but %s holds no such item", d.subject(), h.Key(), target, holderName)
 		}
 
 		return d.appendPayload(h, holderPath, holder, seq, pl, origin)
@@ -272,12 +278,12 @@ func (d *Doc) insertAt(h *Handle, target paths.Path, pl payload) error {
 
 	for _, sel := range sels[tp.found:] {
 		if sel.Kind != paths.SelectorChild {
-			return d.fail(h, "%s moves %q to %s, but %s holds no such item", d.label, h.Key(), target, holderName)
+			return d.fail(h, "%s moves %q to %s, but %s holds no such item", d.subject(), h.Key(), target, holderName)
 		}
 
 		key, err := renderKey(context.Background(), sel.Name, nil, holder.flow || isFlow(content))
 		if err != nil {
-			return d.fail(h, "%s cannot write the key %q: %v", d.label, sel.Name, err)
+			return d.fail(h, "%s cannot write the key %q: %v", d.subject(), sel.Name, err)
 		}
 
 		keys = append(keys, newRun(key, origin))
@@ -285,7 +291,7 @@ func (d *Doc) insertAt(h *Handle, target paths.Path, pl payload) error {
 
 	entries, ok := astnode.Entries(content)
 	if !ok {
-		return d.fail(h, "%s moves %q to %s, but %s holds %s", d.label, h.Key(), target, holderName,
+		return d.fail(h, "%s moves %q to %s, but %s holds %s", d.subject(), h.Key(), target, holderName,
 			kindOf(content))
 	}
 

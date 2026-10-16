@@ -189,7 +189,7 @@ func keyName(text string) string {
 }
 
 // plainText reports whether text reads back as a plain scalar with the
-// same text, so a type field keeps the plain style of the text it
+// same text. A type field thus keeps the plain style of the text that it
 // replaces.
 func plainText(text string) bool {
 	if text == "" || strings.TrimSpace(text) != text {
@@ -215,9 +215,9 @@ func plainText(text string) bool {
 	}
 }
 
-// typeFieldText returns the text of a type field value that replaces old,
-// or a new one for a nil old.
-func typeFieldText(ctx context.Context, text string, old *token.Token) (string, error) {
+// fieldText returns the text of the value of a type field that replaces
+// old, or of a new one for a nil old.
+func fieldText(ctx context.Context, text string, old *token.Token) (string, error) {
 	if s, ok := scalarStyle(text, old); ok {
 		return s, nil
 	}

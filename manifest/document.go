@@ -10,10 +10,10 @@ import (
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/schemahook"
-	"go.jacobcolvin.com/niceyaml/manifest/internal/edit"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -38,8 +38,6 @@ type docState struct {
 	// Moves a location of work into the document, or nil for the document
 	// itself.
 	workLocate func(hook.Located) hook.Place
-	// The copy of the document that the steps edit, or nil.
-	edit *edit.Doc
 	// The name, when the document reached the layout of the current version
 	// with a name that is a non-empty string.
 	name string

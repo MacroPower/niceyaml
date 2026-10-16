@@ -1,14 +1,16 @@
 package edit_test
 
 import (
+	"context"
 	"testing"
 
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-func TestHandle_SetKey(t *testing.T) {
+func TestNode_SetKey(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -90,12 +92,6 @@ func TestHandle_SetKey(t *testing.T) {
 			key:    "b",
 			err:    "cafe.jacobcolvin.com/v1 renames this item, but an item of a sequence has no key",
 		},
-		"type field": {
-			before: "kind: Cafe\n",
-			path:   paths.Doc().Child("kind"),
-			key:    "type",
-			err:    `cafe.jacobcolvin.com/v1 renames "kind", which holds a type field`,
-		},
 	}
 
 	for name, tc := range tcs {
@@ -104,12 +100,16 @@ func TestHandle_SetKey(t *testing.T) {
 
 			d := newDoc(t, tc.before)
 
-			requireEdit(t, d, d.Handle(tc.path).SetKey(tc.key), tc.err, tc.want)
+			err := applyAt(t, d, tc.path, func(_ context.Context, n *edit.Node) error {
+				return n.SetKey(tc.key)
+			})
+
+			requireEdit(t, d, err, tc.err, tc.want)
 		})
 	}
 }
 
-func TestHandle_Remove(t *testing.T) {
+func TestNode_Remove(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -218,7 +218,11 @@ func TestHandle_Remove(t *testing.T) {
 
 			d := newDoc(t, tc.before)
 
-			requireEdit(t, d, d.Handle(tc.path).Remove("gone"), "", tc.want)
+			err := applyAt(t, d, tc.path, func(_ context.Context, n *edit.Node) error {
+				return n.Remove(edit.WithReason("gone"))
+			})
+
+			requireEdit(t, d, err, "", tc.want)
 		})
 	}
 }

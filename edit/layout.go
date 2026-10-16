@@ -198,7 +198,7 @@ func (d *Doc) docStep() int {
 	return step
 }
 
-// sequenceIndent reports whether a block sequence that the rewrite
+// sequenceIndent reports whether a block sequence that an edit
 // creates under a key indents its "-" one step deeper than the key, as
 // the first block sequence under a key in the document does. Without one,
 // it does.

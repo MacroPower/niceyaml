@@ -11,10 +11,10 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
+	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/line"
-	"go.jacobcolvin.com/niceyaml/manifest/internal/edit"
 )
 
 // PlanMigration reads the documents of in, runs the checks of a load on
@@ -389,7 +389,7 @@ func newText(text string, docs []*docState) string {
 	last := 0
 
 	for _, d := range docs {
-		start, end := d.edit.Bounds()
+		start, end := textBounds(d.doc)
 		b.WriteString(text[last:start])
 		b.WriteString(d.after)
 

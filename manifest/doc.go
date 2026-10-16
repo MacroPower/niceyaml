@@ -39,24 +39,36 @@
 //
 //	manifest.Version("cafe.jacobcolvin.com/v1",
 //		manifest.Written(),
-//		manifest.Migrate(spec.Child("cost"), func(_ context.Context, n *migrate.Node) error {
+//		manifest.Migrate(spec.Child("cost"), func(_ context.Context, n *edit.Node) error {
 //			return n.SetKey("price")
 //		}),
 //	),
 //
-// A step is a [go.jacobcolvin.com/niceyaml/manifest/migrate.Func]. It runs
-// once for each place that its path selects, in document order, and gets a
-// handle that reads the value there and edits the document. Each call sees
-// the edits of the calls before it. A document that moves into the next
-// version gets both type fields of that version, so a step never writes
-// them. An error from a step fails the document, and a panic in a step
-// fails it with a [niceyaml.PanicError].
+// A step is a [go.jacobcolvin.com/niceyaml/edit.Func]. Each step of a
+// version runs as one [go.jacobcolvin.com/niceyaml/edit.Doc.Apply], which
+// calls the step once for each place that its path selects, in document
+// order. Each call gets a node that reads the value there and edits the
+// document. Each call sees the edits of the calls before it. A document
+// that moves into the next version gets both type fields of that version,
+// so a step never writes them. An error from a step fails the document,
+// and a panic in a step fails it with a [niceyaml.PanicError].
+//
+// A step must make the same edits for the same document. A load runs it
+// at each load of an older document, and a plan runs it again. A step
+// that reads the clock, the environment, or a random source thus gives
+// each run a different document.
+//
+// A step should build the values that it sets from types that it declares
+// itself and from the standard library. A Go type of the app might change
+// in a later version, and the step must still write what it wrote before.
 //
 // Every error and every warning about a migrated document binds at the
 // line that the user wrote, under the path that the file spells. An error
 // at a value that a step set carries a detail that names the version of
-// the step. A value that a step removes warns with the reason that the
-// step gave, and the warning matches [ErrRemoved].
+// the step. A value that a step removes warns, and the warning matches
+// [ErrRemoved]. A reason that the step gives with
+// [go.jacobcolvin.com/niceyaml/edit.WithReason] appears as a detail of the
+// warning.
 //
 // Versions compare by their place in the list and never by their text.
 // [Written] marks the version that a rewrite writes, and [Object.UpToDate]

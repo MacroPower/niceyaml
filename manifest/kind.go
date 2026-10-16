@@ -5,7 +5,7 @@ import (
 	"reflect"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/manifest/migrate"
+	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
@@ -177,7 +177,7 @@ func Schema(ref schema.Ref) VersionOption {
 
 // step is one step of a version, which [Migrate] adds.
 type step struct {
-	fn   migrate.Func
+	fn   edit.Func
 	path paths.Path
 }
 
@@ -186,8 +186,14 @@ type step struct {
 // before it, so the oldest version takes none. The step calls fn once for
 // each place that p selects, in document order, and a path that selects
 // nothing calls it zero times. The path starts at `$` and holds no `~`.
-// "Steps" in the package documentation describes the calls.
-func Migrate(p paths.Path, fn migrate.Func) VersionOption {
+// "Versions" in the package documentation describes the calls.
+//
+// The step runs as one [edit.Doc.Apply], whose messages name the version.
+// [edit.Node.Decode] in fn applies the unmarshalers of [WithUnmarshalers].
+// It leaves out the decode options of the registry and the kind, which
+// describe the current version. Fn should pass the ctx it got to Decode,
+// so the warnings of the decode join the warnings of the load.
+func Migrate(p paths.Path, fn edit.Func) VersionOption {
 	return func(c *versionConfig) {
 		c.steps = append(c.steps, step{path: p, fn: fn})
 	}

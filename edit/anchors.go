@@ -133,7 +133,7 @@ func (d *Doc) capture(name string, value ast.Node) (keptAnchor, bool) {
 // the first alias that reads it. It skips each anchor that the document
 // still defines before that alias. The aliases thus go on reading the
 // value after an edit removes the anchor or moves it past them.
-func (d *Doc) keepAnchors(h *Handle, kept []keptAnchor) error {
+func (d *Doc) keepAnchors(h *Node, kept []keptAnchor) error {
 	for _, k := range kept {
 		alias := d.firstAlias(k.name)
 		if alias == nil {
