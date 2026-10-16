@@ -80,6 +80,44 @@ func TestRef_Resolve(t *testing.T) {
 	})
 }
 
+func TestRef_Name(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		ref  schema.Ref
+		want string
+	}{
+		"URL with a password": {
+			ref:  schema.URL("https://user:secret@example.com/s.json#/$defs/a"),
+			want: "https://user:xxxxx@example.com/s.json#/$defs/a",
+		},
+		"URL with no password": {
+			ref:  schema.URL("https://example.com/s.json"),
+			want: "https://example.com/s.json",
+		},
+		"file in a file system": {
+			ref:  schema.FileFS(yamltest.MapFS(nil), "schemas/s.json"),
+			want: "schemas/s.json",
+		},
+		"loadable": {
+			ref:  loading("config.json", nil, nil),
+			want: "config.json",
+		},
+		"zero Ref": {
+			ref:  schema.Ref{},
+			want: "",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.ref.Name())
+		})
+	}
+}
+
 func TestResolverFunc(t *testing.T) {
 	t.Parallel()
 

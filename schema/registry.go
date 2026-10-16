@@ -37,7 +37,7 @@ var (
 
 	// ErrLoad indicates the registry could not load the schema, or a
 	// document that a $ref of the schema names, as [Registry.Schema]
-	// describes.
+	// describes. The registry returns it as the Phase of a [*LoadError].
 	ErrLoad = errors.New("load schema")
 
 	// ErrScopedDocument indicates a caller passed a [*niceyaml.Node] from
@@ -125,6 +125,7 @@ type Registry struct {
 //   - [WithFSAt]
 //   - [WithURLPrefixes]
 //   - [WithCacheLimit]
+//   - [WithLoadLimit]
 type RegistryOption func(*registryConfig)
 
 // registryConfig holds the settings a [RegistryOption] configures. An
@@ -139,6 +140,7 @@ type registryConfig struct {
 	compileOpts []CompileOption
 	retryAfter  time.Duration // how long the registry remembers a failure
 	cacheLimit  int           // the most entries each cache keeps, or 0 for no limit
+	loadLimit   int           // the most bytes of each schema document the registry reads
 	// Makes Check report ErrNoMatch when no resolver applies.
 	requireSchema bool
 }
@@ -158,8 +160,8 @@ type registryConfig struct {
 // outside dir names no file and fails to load with [fs.ErrInvalid].
 //
 // A nil fsys leaves the registry as it is. Given more than once, the
-// last option wins. The registry reads only a regular file of at most
-// 10 MB, as [File] describes.
+// last option wins. The registry reads only a regular file within the
+// limit of [WithLoadLimit], as [File] describes.
 //
 // Panics if dir is empty.
 //
@@ -376,6 +378,7 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 	r := &Registry{
 		client:        defaultHTTPClient,
 		retryAfter:    defaultRetryAfter,
+		loadLimit:     DefaultLoadLimit,
 		requireSchema: true,
 	}
 	for _, opt := range opts {
@@ -410,15 +413,16 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // In a file that holds several documents, the message names the document
 // the lookup ran for, as "app.yaml: document 3: no matching schema".
 //
-// Returns [ErrResolve] if a resolver applied but could not name the schema, and
-// [ErrLoad] or [ErrCompile] if loading or compiling the schema fails. When
-// ctx ends before a resolver names a schema, or before Lookup finds that no
+// Returns [ErrResolve] if a resolver applied but could not name the
+// schema, and an error that holds a [*LoadError] matching [ErrLoad] or
+// [ErrCompile] if loading or compiling the schema fails. When ctx ends
+// before a resolver names a schema, or before Lookup finds that no
 // resolver applies, Lookup returns [ErrResolve] wrapping the context's
-// error, even when the resolvers ignore their context. When ctx ends after
-// that, before the named schema finishes loading, Lookup returns [ErrLoad]
-// wrapping the context's error without waiting for the load. Either way [errors.Is]
-// finds the context's error, such as [context.Canceled] or
-// [context.DeadlineExceeded].
+// error, even when the resolvers ignore their context. When ctx ends
+// after that, before the named schema finishes loading, Lookup returns
+// [ErrLoad] wrapping the context's error without waiting for the load.
+// Either way [errors.Is] finds the context's error, such as
+// [context.Canceled] or [context.DeadlineExceeded].
 //
 // An empty document, such as one that holds only comments, is the null
 // document, and a resolver sees it as it sees any other. A document that
@@ -728,15 +732,20 @@ func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 //
 // The zero Ref names no schema, so it is [ErrResolve]. A load that fails
 // is [ErrLoad], and a compile that fails is [ErrCompile]. The registry
-// remembers either under the cache key for the interval [WithRetryAfter]
-// sets. Every request for the key inside the interval returns the error
-// of that attempt and loads nothing, so a schema that many documents name
-// costs one attempt per interval. The first request after the interval
-// loads again. When ctx ends before the schema loads, Schema returns
-// [ErrLoad] wrapping the context's error without waiting for the load to
-// finish. A load that fails under a context that ended says nothing about
-// the schema, so the registry does not remember it, and the next request
-// loads again.
+// remembers either failure under the cache key for the interval
+// [WithRetryAfter] sets. Every request for the key inside the interval
+// returns the error of that attempt and loads nothing. A schema that
+// many documents name thus costs one attempt per interval. The first
+// request after the interval loads again. When ctx ends before the
+// schema loads, Schema returns [ErrLoad] wrapping the context's error
+// without waiting for the load to finish. A load that fails under a
+// context that ended says nothing about the schema, so the registry does
+// not remember it, and the next request loads again.
+//
+// The error of a failed load or compile is a [*LoadError] that names
+// ref. It holds a [*FetchError] for each file or URL that did not read,
+// such as one past the limit of [WithLoadLimit] or a response with a
+// status other than 200 OK.
 //
 // # References
 //
@@ -792,7 +801,7 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 	// URL Ref would return what a File Ref cached and fail on a registry
 	// that holds nothing for its key.
 	if ref.url && !httpfetch.IsHTTPURL(ref.key) {
-		return nil, fmt.Errorf("%w: %q: %w", ErrLoad, r.name(ref), errNotHTTPURL)
+		return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: errNotHTTPURL}
 	}
 
 	// A Ref from File that names no file in this registry has no cache
@@ -801,7 +810,7 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 	// would otherwise return the schema of that other file.
 	key, err := keyOf(ref)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %q: %w", ErrLoad, r.name(ref), err)
+		return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: err}
 	}
 
 	if e, ok := r.cache.get(key); ok {
@@ -828,7 +837,7 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 			select {
 			case <-call.done:
 			default:
-				return nil, fmt.Errorf("%w: %q: %w", ErrLoad, r.name(ref), ctx.Err())
+				return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: ctx.Err()}
 			}
 
 		case <-call.done:
@@ -851,10 +860,10 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 				continue
 			}
 
-			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, r.name(ref), ctx.Err())
+			return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: ctx.Err()}
 		}
 
-		//nolint:wrapcheck // compile already wraps its errors with the sentinel and Key.
+		//nolint:wrapcheck // compile returns a LoadError already.
 		return nil, call.err
 	}
 }
@@ -872,7 +881,10 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 // same bytes once and compiles them, so Load is for a caller that wants
 // the bytes themselves, such as one that prints a schema. For a file or
 // URL whose fragment selects a subschema, Load returns the bytes of the
-// whole document. An error wraps [ErrLoad].
+// whole document. A file or URL of more than the limit of
+// [WithLoadLimit] does not load. An error is a [*LoadError] that matches
+// [ErrLoad], with a [*FetchError] inside it for a file or URL that did
+// not read.
 //
 // The bytes are the text the file, the URL, or the load holds, in JSON
 // or YAML. Load turns neither into the other, so a caller that parses
@@ -884,7 +896,7 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 	data, err := r.load(ctx, ref)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %q: %w", ErrLoad, r.name(ref), err)
+		return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: err}
 	}
 
 	return data, nil
@@ -932,8 +944,7 @@ func (r *Registry) Forget(fsys fs.FS) {
 	r.refDocs.drop(inFS)
 }
 
-// load is [Registry.Load] before wrapping the error with the sentinel and
-// the key.
+// load is [Registry.Load] before wrapping the error in a [*LoadError].
 func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 	switch {
 	case ref.url:
@@ -947,8 +958,7 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 			return nil, ErrURLNotAllowed
 		}
 
-		//nolint:wrapcheck // The fetch error names the URL already.
-		return httpfetch.Get(ctx, r.client, ref.key)
+		return r.fetch(ctx, ref.key)
 
 	case ref.file != "":
 		path, err := filePath(ref)
@@ -969,6 +979,20 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 	}
 }
 
+// fetch returns the body of rawURL, an HTTP or HTTPS URL, which the
+// registry fetches with its client within its load limit. A fetch that
+// fails after the URL passes the checks of [httpfetch.Get] returns a
+// [*FetchError].
+func (r *Registry) fetch(ctx context.Context, rawURL string) ([]byte, error) {
+	data, err := httpfetch.Get(ctx, r.client, rawURL, r.loadLimit)
+	if fetchErr, ok := errors.AsType[*httpfetch.Error](err); ok {
+		return nil, &FetchError{URL: fetchErr.URL, StatusCode: fetchErr.StatusCode, Err: fetchErr.Err}
+	}
+
+	//nolint:wrapcheck // The error of a URL that fails the checks of Get names the URL already.
+	return data, err
+}
+
 // localFileURL returns the first file URL that the schema document data
 // names in a $id, $ref, or $dynamicRef member, or "" when it names none.
 // A member name matches in any case, because the schema decoder reads
@@ -976,12 +1000,12 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 // only its subschemas, because a JSON pointer $ref can reach an object
 // under an unknown keyword and resolve the references there.
 //
-// It reads data as JSON or as YAML by the rule [parseDocument] follows.
-// For YAML, it searches the decoded value, where each alias, merge key,
-// and escape holds what it stands for.
-func localFileURL(ctx context.Context, data []byte) (string, error) {
+// It reads data as JSON or as YAML by the rule [parseDocument] follows,
+// with YAML text within limit. For YAML, it searches the decoded value,
+// where each alias, merge key, and escape holds what it stands for.
+func localFileURL(ctx context.Context, data []byte, limit int) (string, error) {
 	if !isJSONObject(data) {
-		doc, err := decodeYAML(ctx, data)
+		doc, err := decodeYAML(ctx, data, limit)
 		if err != nil {
 			return "", fmt.Errorf("decode schema: %w", err)
 		}
@@ -1079,7 +1103,7 @@ func (r *Registry) refDocument(
 		return doc, doc.err
 	}
 
-	doc, err := loadRefDoc(ctx, uri, load)
+	doc, err := loadRefDoc(ctx, uri, load, r.loadLimit)
 
 	var failedAt time.Time
 
@@ -1097,22 +1121,23 @@ func (r *Registry) refDocument(
 }
 
 // loadRefDoc calls load for the bytes of the document a $ref names by
-// uri and parses them. For an HTTP or HTTPS uri, it also searches the
-// document for a file URL, as [localFileURL] describes.
-func loadRefDoc(ctx context.Context, uri string, load func() ([]byte, error)) (refDoc, error) {
+// uri and parses them, with YAML text within limit. For an HTTP or HTTPS
+// uri, it also searches the document for a file URL, as [localFileURL]
+// describes.
+func loadRefDoc(ctx context.Context, uri string, load func() ([]byte, error), limit int) (refDoc, error) {
 	data, err := load()
 	if err != nil {
 		return refDoc{}, err
 	}
 
-	s, err := parseDocument(ctx, data)
+	s, err := parseDocument(ctx, data, limit)
 	if err != nil {
 		return refDoc{}, fmt.Errorf("parse %s: %w", httpfetch.Redacted(uri), err)
 	}
 
 	doc := refDoc{schema: s}
 	if httpfetch.IsHTTPURL(uri) {
-		doc.fileURL, doc.fileURLErr = localFileURL(ctx, data)
+		doc.fileURL, doc.fileURLErr = localFileURL(ctx, data, limit)
 	}
 
 	return doc, nil
@@ -1206,8 +1231,7 @@ func (r *Registry) refOptions(
 			uri = user.apply(uri)
 			key = cacheKey{uri: uri}
 			load = func() ([]byte, error) {
-				//nolint:wrapcheck // The fetch error names the URL already.
-				return httpfetch.Get(ctx, r.client, uri)
+				return r.fetch(ctx, uri)
 			}
 
 		case allowFile && isFileURL(uri):
@@ -1324,7 +1348,7 @@ func keyOf(ref Ref) (cacheKey, error) {
 
 	inFS, err := identify(ref.fsys)
 	if err != nil {
-		return cacheKey{}, fmt.Errorf("read %s: %w", ref.file, err)
+		return cacheKey{}, readError(ref.file, err)
 	}
 
 	return cacheKey{fs: inFS, uri: base}, nil
@@ -1397,18 +1421,6 @@ func fileFragment(ref Ref) string {
 	return ref.key[i:]
 }
 
-// name returns the name of ref for a message. That is the key, as
-// [Ref.name] returns it, except for a [Ref] that names its file in a
-// file system. The registry names such a Ref by the path as given, with
-// the fragment of its key, since that is the path the file system reads.
-func (r *Registry) name(ref Ref) string {
-	if ref.file == "" || ref.fsys == nil {
-		return ref.name()
-	}
-
-	return ref.file + fileFragment(ref)
-}
-
 // A cacheEntry is what the registry keeps for a cache key. That is the
 // compiled schema, or the failure of the last attempt to load and compile
 // one. The registry keeps a schema until [WithCacheLimit] or
@@ -1432,11 +1444,11 @@ type failure struct {
 }
 
 // answer returns what a request for ref gets from e, the entry for its
-// cache key. That is the schema of the entry, or an error that names ref
-// and wraps the sentinel and the cause of the entry's failure.
+// cache key. That is the schema of the entry, or a [*LoadError] that
+// names ref and holds the sentinel and the cause of the entry's failure.
 func (r *Registry) answer(ref Ref, e cacheEntry) (*Schema, error) {
 	if e.failed != nil {
-		return nil, fmt.Errorf("%w: %q: %w", e.failed.kind, r.name(ref), e.failed.cause)
+		return nil, &LoadError{Ref: ref, Phase: e.failed.kind, Err: e.failed.cause}
 	}
 
 	return e.schema, nil
@@ -1523,7 +1535,7 @@ func (r *Registry) attempt(ctx context.Context, ref Ref) (*Schema, *failure) {
 
 	_, fragment, _ := strings.Cut(base, "#")
 	if (ref.url || ref.file != "") && fragment != "" {
-		doc, err = parseDocument(ctx, data)
+		doc, err = parseDocument(ctx, data, r.loadLimit)
 		if err != nil {
 			return nil, &failure{kind: ErrCompile, cause: err}
 		}
@@ -1548,7 +1560,7 @@ func (r *Registry) attempt(ctx context.Context, ref Ref) (*Schema, *failure) {
 		rec = &refRecorder{}
 	}
 
-	compiled, err := compileDocument(ctx, data, r.refOptions(ref, base, user, doc, rec))
+	compiled, err := compileDocument(ctx, data, r.loadLimit, r.refOptions(ref, base, user, doc, rec))
 	if err != nil {
 		return nil, &failure{kind: ErrCompile, cause: err}
 	}

@@ -198,6 +198,15 @@
 // root package. [go.jacobcolvin.com/niceyaml.IsInvalid] does not report
 // it for the document the schema would validate.
 //
+// The go-yaml decoder takes several hundred times the size of the text
+// in memory. A registry therefore refuses a schema file, URL, or YAML
+// text of more than the limit [WithLoadLimit] sets. [Compile] refuses
+// YAML of more than [DefaultLoadLimit]. The error of a schema past the
+// limit matches [go.jacobcolvin.com/niceyaml.ErrLimit], and IsInvalid
+// does not report that error either. Compile takes JSON text of any
+// size, and so does a registry for the bytes of [Embedded] or
+// [Loadable].
+//
 // A YAML schema holds the values a decode into any yields, and
 // [Schema.Check] reads the numbers of a document the same way. The
 // go-yaml decoder reads three spellings of a number in its own way:
@@ -407,10 +416,10 @@
 // reads and the URLs it fetches, and the schema a directive names can
 // name more through its $refs. A program that validates documents from
 // another trust domain, such as uploads or pull requests, confines its
-// registry with three options. Each acts on every load the registry
-// performs: the schema a [Ref] names, each $ref, and each redirect. One
-// registry with these options serves the program for its whole
-// lifetime:
+// registry with [WithFSAt], [WithURLPrefixes], [WithCacheLimit], and
+// [WithLoadLimit]. Each acts on every load the registry performs: the
+// schema a [Ref] names, each $ref, and each redirect. One registry with
+// these options serves the program for its whole lifetime:
 //
 //	root, err := os.OpenRoot(tenantDir)
 //	if err != nil {
@@ -422,6 +431,7 @@
 //	    schema.WithFSAt(tenantDir, root.FS()),
 //	    schema.WithURLPrefixes("https://schemas.example.com/"),
 //	    schema.WithCacheLimit(1024),
+//	    schema.WithLoadLimit(1<<20),
 //	    schema.WithResolvers(schema.Directive()),
 //	)
 //
@@ -470,6 +480,13 @@
 //
 //	defer reg.Forget(upload)
 //
+// [WithLoadLimit] bounds the bytes of each schema document the registry
+// reads, [DefaultLoadLimit] by default. A directive that names a YAML
+// schema of 10 MiB can cost gigabytes to compile, as the YAML Schemas
+// section describes. The example in this section lowers the limit to
+// 1 MiB. The registry keeps each schema it compiles, so the load limit
+// and the cache limit together bound the memory of the cache.
+//
 // The options do not keep the author from turning validation off. A
 // directive of "$schema=none" passes its document, and so does a
 // directive that names a schema that accepts the document. A program
@@ -482,4 +499,12 @@
 // [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for a load
 // error, so such a server can tell it apart from a fault of the document
 // and return a message of its own.
+//
+// The error holds a [*LoadError], which [errors.As] finds, with the
+// [Ref] of the schema. [Ref.Name] names that Ref without the password of
+// a URL. Each file or URL that did not read is a [*FetchError] inside
+// the LoadError, with the status of the response for a URL. The server
+// builds its message from those fields, such as one that names the URL
+// but not the path, or one that tells a missing schema from a host that
+// failed.
 package schema

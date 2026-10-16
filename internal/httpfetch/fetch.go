@@ -5,16 +5,85 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/quantity"
 )
 
-// MaxSize is the largest response body [Get] accepts, in bytes.
-const MaxSize = 10 * 1024 * 1024 // 10 MB.
+// Error is the error of a [Get] that tried to fetch its URL. It names the
+// URL as [Redacted] spells it, with the status of the response, and
+// wraps the cause.
+type Error struct {
+	// Err is why the fetch gave no body.
+	Err error
+	// URL is the URL as [Redacted] spells it.
+	URL string
+	// StatusCode is the status of the response, or 0 when no response
+	// came.
+	StatusCode int
+}
+
+// Error returns "fetch", the URL, and the message of the cause.
+func (e *Error) Error() string {
+	return "fetch " + e.URL + ": " + e.Err.Error()
+}
+
+// Unwrap returns the cause.
+func (e *Error) Unwrap() error {
+	return e.Err
+}
+
+// TooLarge returns the error of a text of more than limit bytes. For the
+// noun "response", its message reads as "response is larger than 10 MiB".
+// It matches [niceyaml.ErrLimit], as the error of a Source past its byte
+// limit does. It declares no document at fault, so [niceyaml.IsInvalid]
+// does not report it.
+func TooLarge(noun string, limit int) error {
+	return sizeError{noun: noun, limit: limit}
+}
+
+// ReadAll reads r to its end or to one byte past limit, whichever comes
+// first. A caller tells a text of more than limit bytes by a length past
+// limit. A limit of [math.MaxInt] reads r to its end.
+func ReadAll(r io.Reader, limit int) ([]byte, error) {
+	n := int64(limit)
+	if n < math.MaxInt64 {
+		n++
+	}
+
+	//nolint:wrapcheck // The caller wraps the error.
+	return io.ReadAll(io.LimitReader(r, n))
+}
+
+// sizeError is the error [TooLarge] returns.
+type sizeError struct {
+	noun  string
+	limit int
+}
+
+func (e sizeError) Error() string {
+	return e.noun + " is larger than " + quantity.Bytes(e.limit)
+}
+
+// Is reports whether target is [niceyaml.ErrLimit].
+func (e sizeError) Is(target error) bool {
+	return target == niceyaml.ErrLimit
+}
 
 // Get performs an HTTP GET for rawURL with client and returns the body. It
-// rejects any status other than 200 OK and any body over [MaxSize] bytes.
+// rejects any status other than 200 OK and any body of more than limit
+// bytes. The error of a body past the limit wraps the error of
+// [TooLarge].
+//
+// Get refuses a URL that does not parse, an http or https URL with an
+// empty host, and a URL whose host ends in a colon before an "@". It
+// refuses each one before it sends a request, with an error of its own.
+// Every other error is an [*Error]. It holds the status of the response,
+// or 0 when no response came.
 //
 // Errors name the URL as [Redacted] spells it, which replaces any password
 // in its userinfo, so a password in a schema URL does not reach logs.
@@ -46,7 +115,7 @@ const MaxSize = 10 * 1024 * 1024 // 10 MB.
 // the error omits the reason, since the reason can name the host, as a
 // failed DNS lookup does. When ctx has ended, the error wraps the
 // context's error in place of the reason.
-func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
+func Get(ctx context.Context, client *http.Client, rawURL string, limit int) ([]byte, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		if _, ok := redactSpan(rawURL); ok {
@@ -71,7 +140,7 @@ func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), http.NoBody)
 	if err != nil {
-		return nil, fmt.Errorf("create request for %s: %w", name, reason(err))
+		return nil, &Error{URL: name, Err: fmt.Errorf("create request: %w", reason(err))}
 	}
 
 	resp, err := client.Do(req)
@@ -79,29 +148,27 @@ func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error
 		if splitsPassword(u, rawURL) {
 			ctxErr := ctx.Err()
 			if ctxErr != nil {
-				return nil, fmt.Errorf("fetch %s: %w", name, ctxErr)
+				return nil, &Error{URL: name, Err: ctxErr}
 			}
 
-			return nil, fmt.Errorf("fetch %s: reason withheld because it can quote the password", name)
+			return nil, &Error{URL: name, Err: errors.New("reason withheld because it can quote the password")}
 		}
 
-		return nil, fmt.Errorf("fetch %s: %w", name, reason(err))
+		return nil, &Error{URL: name, Err: reason(err)}
 	}
 	defer resp.Body.Close() //nolint:errcheck // Best-effort close.
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fetch %s: status %d", name, resp.StatusCode)
+		return nil, &Error{URL: name, StatusCode: resp.StatusCode, Err: fmt.Errorf("status %d", resp.StatusCode)}
 	}
 
-	// Read one byte past the limit so an over-size response reads as
-	// MaxSize+1 bytes. Anything at or under the limit is the whole body.
-	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxSize+1))
+	data, err := ReadAll(resp.Body, limit)
 	if err != nil {
-		return nil, fmt.Errorf("read response from %s: %w", name, err)
+		return nil, &Error{URL: name, StatusCode: resp.StatusCode, Err: fmt.Errorf("read response: %w", err)}
 	}
 
-	if int64(len(data)) > MaxSize {
-		return nil, fmt.Errorf("fetch %s: response exceeds %d bytes", name, MaxSize)
+	if len(data) > limit {
+		return nil, &Error{URL: name, StatusCode: resp.StatusCode, Err: TooLarge("response", limit)}
 	}
 
 	return data, nil

@@ -29,7 +29,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/capture"
-	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
@@ -2315,14 +2314,14 @@ func TestRegistry_FileFS(t *testing.T) {
 		t.Parallel()
 
 		fsys := fstest.MapFS{
-			"schemas/big.json": &fstest.MapFile{Data: make([]byte, httpfetch.MaxSize+1)},
+			"schemas/big.json": &fstest.MapFile{Data: make([]byte, schema.DefaultLoadLimit+1)},
 		}
 
 		reg := schema.NewRegistry()
 
 		_, err := reg.Load(t.Context(), schema.FileFS(fsys, "schemas/big.json"))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorContains(t, err, "exceeds")
+		requireLoadError(t, err, niceyaml.ErrLimit)
+		require.ErrorContains(t, err, "read schemas/big.json: file is larger than 10 MiB")
 	})
 
 	t.Run("an os.Root refuses a symlink out of its tree", func(t *testing.T) {

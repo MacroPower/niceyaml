@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
@@ -56,12 +55,12 @@ func TestFile(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "schema.json")
 		f, err := os.Create(path)
 		require.NoError(t, err)
-		require.NoError(t, f.Truncate(httpfetch.MaxSize+1))
+		require.NoError(t, f.Truncate(schema.DefaultLoadLimit+1))
 		require.NoError(t, f.Close())
 
 		_, data, err := load(t, schema.File(path))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorContains(t, err, "exceeds")
+		requireLoadError(t, err, niceyaml.ErrLimit)
+		require.ErrorContains(t, err, "read "+path+": file is larger than 10 MiB")
 		assert.Nil(t, data)
 	})
 

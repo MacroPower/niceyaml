@@ -126,10 +126,16 @@ func (r Ref) Key() string {
 	return r.key
 }
 
-// name returns the key of r for a message, with any password in a URL
-// key redacted, so an error does not print a password that the fetch
-// itself redacts.
-func (r Ref) name() string {
+// Name returns the name the errors of a [Registry] give r. That is the
+// [Ref.Key] with any password in the userinfo of a URL replaced by
+// "xxxxx", so the errors do not print the password. A Ref that names its
+// file in a file system, such as one from [FileFS], goes by the path as
+// given, with the fragment of its key. The file system reads that path.
+func (r Ref) Name() string {
+	if r.file != "" && r.fsys != nil {
+		return r.file + fileFragment(r)
+	}
+
 	return httpfetch.Redacted(r.key)
 }
 

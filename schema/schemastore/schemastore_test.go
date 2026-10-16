@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -979,6 +980,82 @@ func TestStore_FetchError(t *testing.T) {
 			_, err := store.Resolve(t.Context(), doc)
 			require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
 			require.NotErrorIs(t, err, schema.ErrNoMatch)
+		})
+	}
+}
+
+func TestStore_FetchErrorFields(t *testing.T) {
+	t.Parallel()
+
+	// A fetch that gets a response holds its status, and a body past the
+	// limit matches niceyaml.ErrLimit as well.
+	body := marshalCatalog(t, testCatalog)
+
+	tcs := map[string]struct {
+		transport yamltest.RoundTripFunc
+		err       error
+		opts      []schemastore.Option
+		status    int
+	}{
+		"server error": {
+			transport: yamltest.Respond(http.StatusServiceUnavailable, ""),
+			status:    http.StatusServiceUnavailable,
+		},
+		"not found": {
+			transport: yamltest.Respond(http.StatusNotFound, ""),
+			status:    http.StatusNotFound,
+		},
+		"catalog past the limit": {
+			transport: yamltest.Respond(http.StatusOK, body),
+			opts:      []schemastore.Option{schemastore.WithLoadLimit(len(body) - 1)},
+			status:    http.StatusOK,
+			err:       niceyaml.ErrLimit,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := newStore(tc.transport.Client(), tc.opts...)
+
+			_, err := store.FindMatch(t.Context(), "config.yaml")
+			require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+			}
+
+			fetchErr, ok := errors.AsType[*schema.FetchError](err)
+			require.True(t, ok, "want a FetchError, got %v", err)
+			assert.Equal(t, catalogURL, fetchErr.URL)
+			assert.Equal(t, tc.status, fetchErr.StatusCode)
+		})
+	}
+}
+
+func TestWithLoadLimit(t *testing.T) {
+	t.Parallel()
+
+	body := marshalCatalog(t, testCatalog)
+
+	// A limit of zero or less keeps the default, which reads the catalog,
+	// and so does the largest int.
+	tcs := map[string]struct {
+		limit int
+	}{
+		"catalog at the limit": {limit: len(body)},
+		"zero":                 {limit: 0},
+		"negative":             {limit: -1},
+		"largest int":          {limit: math.MaxInt},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := newStore(yamltest.Respond(http.StatusOK, body).Client(), schemastore.WithLoadLimit(tc.limit))
+			requireEntry(t, store, "Test")
 		})
 	}
 }

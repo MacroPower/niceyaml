@@ -39,10 +39,13 @@ import (
 // password, with each fetch of a URL that a reference names at the same
 // scheme and host, and keeps the password out of its errors.
 //
-// A registry rejects a response body over 10 MB. The client's Timeout and
-// the context of the lookup bound each fetch. [Registry.Load] fetches the
-// URL and returns the bytes of the whole document, whatever its fragment,
-// for a caller that wants them rather than the compiled schema.
+// A registry rejects a response body of more than the limit of
+// [WithLoadLimit], [DefaultLoadLimit] by default, and a response with any
+// status but 200 OK. Either one fails to load with a [*LoadError] that
+// holds a [*FetchError]. The client's Timeout and the context of the
+// lookup bound each fetch. [Registry.Load] fetches the URL and returns
+// the bytes of the whole document, whatever its fragment, for a caller
+// that wants them rather than the compiled schema.
 func URL(schemaURL string) Ref {
 	if schemaURL == "" {
 		panic("schema.URL: schema URL is empty")

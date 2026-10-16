@@ -91,7 +91,8 @@ type CatalogEntry struct {
 // The store names a matched schema by the entry's URL, and the registry
 // fetches it with the client
 // [go.jacobcolvin.com/niceyaml/schema.WithHTTPClient] gave the registry.
-// The store's own client and refresh timeout apply to the catalog alone.
+// The store's own client, refresh timeout, and load limit apply to the
+// catalog alone.
 //
 // The store fetches the catalog on the first lookup and caches it for the
 // configured TTL. Once the cache expires, the next lookup refreshes it. A
@@ -147,6 +148,7 @@ type fetchCall struct {
 //   - [WithRefreshTimeout]
 //   - [WithRetryAfter]
 //   - [WithFilter]
+//   - [WithLoadLimit]
 type Option func(*config)
 
 // config holds the settings an [Option] configures. An option takes it in
@@ -158,6 +160,7 @@ type config struct {
 	cacheTTL       time.Duration
 	refreshTimeout time.Duration
 	retryAfter     time.Duration
+	loadLimit      int
 }
 
 // WithCatalogURL is an [Option] that sets a custom catalog URL.
@@ -229,6 +232,24 @@ func WithRetryAfter(interval time.Duration) Option {
 	}
 }
 
+// WithLoadLimit is an [Option] that sets the most bytes of the catalog
+// the store reads. A catalog that holds more fails to fetch with a
+// [*schema.FetchError] whose cause matches [niceyaml.ErrLimit]. The store
+// treats that failure as any other failed fetch and keeps the previous
+// catalog, or reports [ErrFetchCatalog] when none has loaded. The limit
+// covers the catalog alone. The registry reads each schema the catalog
+// names within the limit of [schema.WithLoadLimit].
+//
+// Defaults to [schema.DefaultLoadLimit]. A limit of zero or less keeps
+// the default, and a program that wants no limit passes [math.MaxInt].
+func WithLoadLimit(n int) Option {
+	return func(c *config) {
+		if n > 0 {
+			c.loadLimit = n
+		}
+	}
+}
+
 // WithFilter is an [Option] that sets a filter function for catalog entries.
 //
 // The store matches only the entries for which the filter returns true.
@@ -268,6 +289,7 @@ func New(opts ...Option) *Store {
 		cacheTTL:       defaultCacheTTL,
 		refreshTimeout: defaultRefreshTimeout,
 		retryAfter:     defaultRetryAfter,
+		loadLimit:      schema.DefaultLoadLimit,
 	}
 	for _, opt := range opts {
 		opt(&store.config)
@@ -545,10 +567,16 @@ func (s *Store) staleLocked(cause error) ([]CatalogEntry, error) {
 // filtered entries. It holds no lock, so a slow catalog server blocks only
 // the lookups waiting on this fetch.
 //
-// The HTTP GET and its size limit are the ones [schema.URL] uses. Only the
-// catalog JSON parsing is specific to SchemaStore.
+// The HTTP GET is the one [schema.URL] uses, with the limit of
+// [WithLoadLimit]. A fetch that fails after the URL passes the checks of
+// [httpfetch.Get] returns a [*schema.FetchError]. Only the catalog JSON
+// parsing is specific to SchemaStore.
 func (s *Store) fetch(ctx context.Context) ([]CatalogEntry, error) {
-	data, err := httpfetch.Get(ctx, s.client, s.catalogURL)
+	data, err := httpfetch.Get(ctx, s.client, s.catalogURL, s.loadLimit)
+	if fetchErr, ok := errors.AsType[*httpfetch.Error](err); ok {
+		return nil, &schema.FetchError{URL: fetchErr.URL, StatusCode: fetchErr.StatusCode, Err: fetchErr.Err}
+	}
+
 	if err != nil {
 		//nolint:wrapcheck // The error already names the catalog URL.
 		return nil, err

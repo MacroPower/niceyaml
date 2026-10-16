@@ -62,9 +62,10 @@ var (
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// ErrCompile indicates a schema document that does not compile.
-	// [Compile] and [Registry.Lookup] return it. A schema with a $ref to
-	// another document and no ref resolver to serve that document does
-	// not compile, as [WithRequireRefs] describes.
+	// [Compile] returns it, and a [Registry] returns it as the Phase of a
+	// [*LoadError]. A schema with a $ref to another document and no ref
+	// resolver to serve that document does not compile, as
+	// [WithRequireRefs] describes.
 	ErrCompile = errors.New("compile schema")
 
 	// ErrDeprecated indicates the warning about a value that a schema with
@@ -187,6 +188,13 @@ func WithRequireRefs(require bool) CompileOption {
 // holds the values a decode into any yields, and the package
 // documentation says how that reads numbers such as 1e3 and 010.
 //
+// The go-yaml decoder takes several hundred times the size of the text
+// in memory, so Compile refuses YAML of more than [DefaultLoadLimit]
+// bytes. Its error matches [niceyaml.ErrLimit], and IsInvalid does not
+// report it either. Compile reads JSON of any size. A [Registry] refuses
+// YAML from [Embedded] of more than the limit [WithLoadLimit] sets, and
+// it reads JSON from Embedded of any size.
+//
 // A schema known valid at build time compiles with [MustCompile] at package
 // scope. A registry compiles the schemas its resolvers name as bytes the
 // same way, with the options [WithCompileOptions] gives it, and takes a
@@ -212,7 +220,7 @@ func WithRequireRefs(require bool) CompileOption {
 //
 //	v, err := schema.NewRegistry().Schema(ctx, schema.File("schemas/root.json"))
 func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Schema, error) {
-	compiled, err := compileDocument(ctx, data, opts)
+	compiled, err := compileDocument(ctx, data, DefaultLoadLimit, opts)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrCompile, err)
 	}
@@ -220,9 +228,10 @@ func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Schema, 
 	return compiled, nil
 }
 
-// compileDocument is [Compile] before wrapping the error with [ErrCompile].
-func compileDocument(ctx context.Context, data []byte, opts []CompileOption) (*Schema, error) {
-	doc, err := parseDocument(ctx, data)
+// compileDocument is [Compile] before wrapping the error with [ErrCompile],
+// with YAML text within limit.
+func compileDocument(ctx context.Context, data []byte, limit int, opts []CompileOption) (*Schema, error) {
+	doc, err := parseDocument(ctx, data, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -259,17 +268,18 @@ func compileDocument(ctx context.Context, data []byte, opts []CompileOption) (*S
 
 // parseDocument reads data as one schema document without compiling it.
 // Data that [isJSONObject] reports reads as JSON, and any other data reads
-// as YAML through [decodeYAML]. One byte picks the reader, so data never
-// goes to the second reader after the first refuses it. Malformed JSON
-// would otherwise compile as the YAML it also is, where a member with no
-// value is null and the schema library reads a null keyword as absent.
-func parseDocument(ctx context.Context, data []byte) (*jsonschema.Schema, error) {
+// as YAML through [decodeYAML] within limit. One byte picks the reader, so
+// data never goes to the second reader after the first refuses it.
+// Malformed JSON would otherwise compile as the YAML it also is, where a
+// member with no value is null and the schema library reads a null
+// keyword as absent.
+func parseDocument(ctx context.Context, data []byte, limit int) (*jsonschema.Schema, error) {
 	if isJSONObject(data) {
 		//nolint:wrapcheck // Callers wrap the error with ErrCompile.
 		return jsonschema.ParseSchema(data)
 	}
 
-	doc, err := decodeYAML(ctx, data)
+	doc, err := decodeYAML(ctx, data, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -289,21 +299,28 @@ func isJSONObject(data []byte) bool {
 }
 
 // decodeYAML decodes data, the text of a schema document in YAML, into
-// the value a decode into any yields. The text is one document, and the
-// decode refuses a duplicate key and aliases past the limit
-// [niceyaml.WithAliasLimit] describes.
+// the value a decode into any yields. The text is one document of at most
+// limit bytes, and the decode refuses a duplicate key and aliases past
+// the limit [niceyaml.WithAliasLimit] describes.
 //
-// The error holds the text of the decode error and wraps nothing. The
-// schema is at fault for the decode error, and [niceyaml.IsInvalid]
-// would report it for the document the schema validates.
+// The error of a text past limit wraps the error of [httpfetch.TooLarge],
+// which matches [niceyaml.ErrLimit] and declares no fault. Any other
+// error holds the text of the decode error and wraps nothing. The schema
+// is at fault for the decode error, and [niceyaml.IsInvalid] would report
+// it for the document the schema validates.
 //
 // The decode takes the context without its cancellation, because the
 // error of a context that has ended would become text here too. A JSON
 // read checks no context either, so a context that ends stops the
 // compile at the same step for JSON and for YAML.
-func decodeYAML(ctx context.Context, data []byte) (any, error) {
-	// The JSON reader takes a schema of any size, and so does this one.
-	source := niceyaml.NewSourceFromBytes(data, niceyaml.WithByteLimit(0))
+func decodeYAML(ctx context.Context, data []byte, limit int) (any, error) {
+	// The go-yaml decoder takes several hundred times the size of the text
+	// in memory, so the decode refuses text past limit.
+	if len(data) > limit {
+		return nil, fmt.Errorf("YAML decode: %w", httpfetch.TooLarge("text", limit))
+	}
+
+	source := niceyaml.NewSourceFromBytes(data, niceyaml.WithByteLimit(limit))
 
 	doc, err := source.Decode[any](context.WithoutCancel(ctx))
 	if err != nil {

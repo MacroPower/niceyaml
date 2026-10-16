@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,13 +15,134 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
+
+// The body limit of every Get in the tests.
+const limit = 16
+
+func TestGet(t *testing.T) {
+	t.Parallel()
+
+	const rawURL = "https://user:secret@example.com/s.json"
+
+	tcs := map[string]struct {
+		transport yamltest.RoundTripFunc
+		err       error
+		want      string
+		status    int
+	}{
+		"body at the limit": {
+			transport: yamltest.Respond(http.StatusOK, strings.Repeat("x", limit)),
+		},
+		"body past the limit": {
+			transport: yamltest.Respond(http.StatusOK, strings.Repeat("x", limit+1)),
+			status:    http.StatusOK,
+			err:       niceyaml.ErrLimit,
+			want:      "fetch https://user:xxxxx@example.com/s.json: response is larger than 16 bytes",
+		},
+		"status other than OK": {
+			transport: yamltest.Respond(http.StatusServiceUnavailable, ""),
+			status:    http.StatusServiceUnavailable,
+			want:      "fetch https://user:xxxxx@example.com/s.json: status 503",
+		},
+		"body that does not read": {
+			transport: yamltest.RespondBody(iotest.ErrReader(io.ErrUnexpectedEOF)),
+			status:    http.StatusOK,
+			err:       io.ErrUnexpectedEOF,
+			want:      "fetch https://user:xxxxx@example.com/s.json: read response: unexpected EOF",
+		},
+		"no response": {
+			transport: func(*http.Request) (*http.Response, error) {
+				return nil, syscall.ECONNREFUSED
+			},
+			err:  syscall.ECONNREFUSED,
+			want: "fetch https://user:xxxxx@example.com/s.json: connection refused",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			data, err := httpfetch.Get(t.Context(), tc.transport.Client(), rawURL, limit)
+			if tc.want == "" {
+				require.NoError(t, err)
+				assert.Len(t, data, limit)
+
+				return
+			}
+
+			require.EqualError(t, err, tc.want)
+
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+			}
+
+			fetchErr, ok := errors.AsType[*httpfetch.Error](err)
+			require.True(t, ok)
+			assert.Equal(t, "https://user:xxxxx@example.com/s.json", fetchErr.URL)
+			assert.Equal(t, tc.status, fetchErr.StatusCode)
+			assert.False(t, niceyaml.IsInvalid(err))
+		})
+	}
+}
+
+func TestTooLarge(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		noun  string
+		want  string
+		limit int
+	}{
+		"mebibytes": {noun: "response", limit: 10 << 20, want: "response is larger than 10 MiB"},
+		"bytes":     {noun: "file", limit: 1000, want: "file is larger than 1000 bytes"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := httpfetch.TooLarge(tc.noun, tc.limit)
+			require.EqualError(t, err, tc.want)
+			require.ErrorIs(t, err, niceyaml.ErrLimit)
+			assert.False(t, niceyaml.IsInvalid(err))
+		})
+	}
+}
+
+func TestReadAll(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		text  string
+		limit int
+		want  int
+	}{
+		"text within the limit": {text: "abc", limit: 4, want: 3},
+		"text at the limit":     {text: "abcd", limit: 4, want: 4},
+		"text past the limit":   {text: "abcdefg", limit: 4, want: 5},
+		"largest int":           {text: "abcdefg", limit: math.MaxInt, want: 7},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			data, err := httpfetch.ReadAll(strings.NewReader(tc.text), tc.limit)
+			require.NoError(t, err)
+			assert.Equal(t, tc.text[:tc.want], string(data))
+		})
+	}
+}
 
 func TestGet_ParseError(t *testing.T) {
 	t.Parallel()
@@ -87,7 +210,7 @@ func TestGet_ParseError(t *testing.T) {
 
 			want := cmp.Or(tc.want, "parse URL "+strconv.Quote(httpfetch.Redacted(tc.url))+": ")
 
-			_, err := httpfetch.Get(t.Context(), refusingClient(t), tc.url)
+			_, err := httpfetch.Get(t.Context(), refusingClient(t), tc.url, limit)
 			require.ErrorContains(t, err, want)
 
 			// Each password holds "cret", and "s3/cret" also holds "s3", so
@@ -132,7 +255,7 @@ func TestGet_RedactsPasswordWithAtSign(t *testing.T) {
 				return nil, errors.New("lookup " + r.URL.Host + ": no such host")
 			}).Client()
 
-			_, err := httpfetch.Get(t.Context(), client, rawURL)
+			_, err := httpfetch.Get(t.Context(), client, rawURL, limit)
 			require.ErrorContains(t, err, "fetch "+httpfetch.Redacted(rawURL)+": reason withheld")
 			assert.NotContains(t, err.Error(), "host.invalid")
 			assert.NotContains(t, err.Error(), "tail")
@@ -150,7 +273,7 @@ func TestGet_PasswordWithAtSignKeepsContextError(t *testing.T) {
 		return nil, fmt.Errorf("lookup %s: %w", r.URL.Host, r.Context().Err())
 	}).Client()
 
-	_, err := httpfetch.Get(ctx, client, "https://user:p@host.invalid/tail@example.com/s.json")
+	_, err := httpfetch.Get(ctx, client, "https://user:p@host.invalid/tail@example.com/s.json", limit)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.NotContains(t, err.Error(), "host.invalid")
 	assert.NotContains(t, err.Error(), "tail")
@@ -171,7 +294,7 @@ func TestGet_RedactsPasswordOnTransport(t *testing.T) {
 		},
 	}
 
-	_, err := httpfetch.Get(t.Context(), client, "http://user:secret@127.0.0.1:8080/s.json")
+	_, err := httpfetch.Get(t.Context(), client, "http://user:secret@127.0.0.1:8080/s.json", limit)
 	require.ErrorIs(t, err, syscall.ECONNREFUSED)
 	assert.NotContains(t, err.Error(), "secret")
 	assert.NotContains(t, err.Error(), `Get "`)
@@ -201,7 +324,7 @@ func TestGet_NamesURLAsRedacted(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := httpfetch.Get(t.Context(), server.Client(), rawURL)
+			_, err := httpfetch.Get(t.Context(), server.Client(), rawURL, limit)
 			require.ErrorContains(t, err, "fetch "+httpfetch.Redacted(rawURL)+": status 404")
 			assert.NotContains(t, err.Error(), "secret")
 		})

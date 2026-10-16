@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
@@ -310,11 +309,11 @@ func TestURL(t *testing.T) {
 			},
 			"body read error": {
 				transport: yamltest.RespondBody(iotest.ErrReader(errors.New("read error"))),
-				want:      "read response from http://example.com/schema.json",
+				want:      "fetch http://example.com/schema.json: read response: read error",
 			},
 			"schema exceeds size limit": {
-				transport: yamltest.RespondBody(bytes.NewReader(make([]byte, httpfetch.MaxSize+1))),
-				want:      "response exceeds",
+				transport: yamltest.RespondBody(bytes.NewReader(make([]byte, schema.DefaultLoadLimit+1))),
+				want:      "fetch http://example.com/schema.json: response is larger than 10 MiB",
 			},
 		}
 

@@ -593,6 +593,18 @@ func TestCompile_Document(t *testing.T) {
 			schema: stringtest.LinesLF("type: object", "type: string"),
 			want:   `compile schema: YAML decode: 2:1: mapping key "type" already defined`,
 		},
+		// The go-yaml decoder takes far more memory than the text, so the
+		// decode refuses text past the load limit. JSON has no such limit.
+		"YAML past the load limit": {
+			schema: "required: [name]\n" + strings.Repeat("#", schema.DefaultLoadLimit),
+			want:   "compile schema: YAML decode: text is larger than 10 MiB",
+			err:    niceyaml.ErrLimit,
+		},
+		"JSON past the load limit": {
+			schema:  `{"required": ["name"]}` + strings.Repeat(" ", schema.DefaultLoadLimit),
+			valid:   named,
+			invalid: unnamed,
+		},
 		"two YAML documents": {
 			schema: stringtest.Input(`
 				type: object

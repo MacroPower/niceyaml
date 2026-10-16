@@ -3,7 +3,6 @@ package schema
 import (
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -13,7 +12,6 @@ import (
 
 	slashpath "path"
 
-	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
 
@@ -34,8 +32,8 @@ const driveLen = 2
 // against the working directory at the time File runs. A change of
 // working directory after File therefore leaves the Ref on the same file.
 // The registry reads the file when the Ref loads, once however many
-// documents name it, and it reads only a regular file of at most 10 MB.
-// File panics on an empty path.
+// documents name it, and it reads only a regular file within the limit
+// of [WithLoadLimit]. File panics on an empty path.
 //
 // # File Systems
 //
@@ -72,12 +70,13 @@ const driveLen = 2
 //
 // # File Limits
 //
-// The registry reads only a regular file of at most 10 MB, the limit it
-// sets on a response from a [URL], so a path that names a directory, a
-// device, or a named pipe fails to load. Given a file system, the
-// registry checks the path with [fs.Stat] before it opens the file, and
-// an [fs.FS] opens a file with no flags, so a named pipe can still block
-// the read until a writer opens it. A file system that implements
+// The registry reads only a regular file, so a path that names a
+// directory, a device, or a named pipe fails to load. A file of more
+// than the limit of [WithLoadLimit], [DefaultLoadLimit] by default,
+// fails to load too, as a response from a [URL] does. Given a file
+// system, the registry checks the path with [fs.Stat] before it opens the
+// file, and an [fs.FS] opens a file with no flags, so a named pipe can
+// still block the read until a writer opens it. A file system that implements
 // [fs.StatFS], such as [os.DirFS] or the one [os.Root.FS] returns,
 // answers the check without an open, so only a named pipe that replaces
 // the file while the registry reads it blocks. On any other file system,
@@ -223,8 +222,9 @@ func file(path string) (Ref, error) {
 // [Registry.Forget] drops the entries from it. A program passes each
 // file system it is done with to Forget.
 //
-// The registry reads only a regular file of at most 10 MB, as [File]
-// describes, and the note there on [fs.StatFS] holds for fsys.
+// The registry reads only a regular file within the limit of
+// [WithLoadLimit], as [File] describes, and the note there on
+// [fs.StatFS] holds for fsys.
 //
 // Panics if fsys is nil or path is empty.
 func FileFS(fsys fs.FS, path string) Ref {
@@ -380,28 +380,28 @@ func isRelative(path string) bool {
 // cleaned, in slash form, and behind a slash, so schemas/config.json
 // becomes /schemas/config.json. The working directory plays no part
 // there. An absolute path, or one that leads out of the root, is
-// [fs.ErrInvalid].
+// [fs.ErrInvalid]. Each error is a [*FetchError] that names the path as
+// given.
 func filePath(ref Ref) (string, error) {
 	if ref.fsys == nil {
 		if ref.abs == "" {
-			return "", drawn(fmt.Errorf("read %s: no absolute path: %w", ref.file, ref.absErr))
+			return "", readError(ref.file, fmt.Errorf("no absolute path: %w", ref.absErr))
 		}
 
 		return ref.abs, nil
 	}
 
 	if !isRelative(ref.file) {
-		return "", drawn(fmt.Errorf(
-			"read %s: %w: an absolute path names no file in the file system of the document or the Ref",
-			ref.file, fs.ErrInvalid,
+		return "", readError(ref.file, fmt.Errorf(
+			"%w: an absolute path names no file in the file system of the document or the Ref",
+			fs.ErrInvalid,
 		))
 	}
 
 	name := slashpath.Clean(filepath.ToSlash(ref.file))
 	if !fs.ValidPath(name) {
-		return "", drawn(fmt.Errorf(
-			"read %s: %w: not a path in the file system of the document or the Ref",
-			ref.file,
+		return "", readError(ref.file, fmt.Errorf(
+			"%w: not a path in the file system of the document or the Ref",
 			fs.ErrInvalid,
 		))
 	}
@@ -412,7 +412,8 @@ func filePath(ref Ref) (string, error) {
 // readFile returns the bytes of the file at path, an absolute path as
 // [filePath] returns it for a [Ref] and as a file URL in a $ref names
 // it. The file system is the one the Ref names its file in, or nil for a
-// Ref that names a file on disk.
+// Ref that names a file on disk. A file of more than the load limit of
+// the registry does not read.
 //
 // With a file system, readFile reads path without its leading slash from
 // it, and its errors name that path. A drive-letter path is
@@ -422,29 +423,19 @@ func filePath(ref Ref) (string, error) {
 // is [fs.ErrInvalid]. Its errors name path either way, and off Windows a
 // drive-letter path is invalid the same way.
 //
-// A document names the path through a $schema directive, and a schema
-// names it through a $ref, so the message of each error draws its control
-// characters as pictures, as [drawnError] describes.
+// Each error is a [*FetchError]. A document names the path through a
+// $schema directive, and a schema names it through a $ref, so the message
+// of each error draws its control characters as pictures, as FetchError
+// describes.
 func (r *Registry) readFile(fsys fs.FS, path string) ([]byte, error) {
-	data, err := r.readPath(fsys, path)
-	if err != nil {
-		return nil, drawn(err)
-	}
-
-	return data, nil
-}
-
-// readPath reads the file at path as [Registry.readFile] describes, and
-// returns each error as the read wrote it.
-func (r *Registry) readPath(fsys fs.FS, path string) ([]byte, error) {
 	switch {
 	case fsys != nil:
 		rooted := slashpath.Clean(filepath.ToSlash(path))
 		if !strings.HasPrefix(rooted, "/") {
-			return nil, fmt.Errorf(
-				"read %s: %w: a drive letter names no file in the file system of the document or the Ref",
-				path, fs.ErrInvalid,
-			)
+			return nil, readError(path, fmt.Errorf(
+				"%w: a drive letter names no file in the file system of the document or the Ref",
+				fs.ErrInvalid,
+			))
 		}
 
 		// The root itself is "." to an fs.FS.
@@ -453,31 +444,31 @@ func (r *Registry) readPath(fsys fs.FS, path string) ([]byte, error) {
 			name = "."
 		}
 
-		return readFS(fsys, name, name)
+		return readFS(fsys, name, name, r.loadLimit)
 
 	case r.fsys == nil:
-		return readDisk(path)
+		return readDisk(path, r.loadLimit)
 
 	default:
 		name, err := r.fsAt.rel(path)
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", path, err)
+			return nil, readError(path, err)
 		}
 
-		return readFS(r.fsys, name, path)
+		return readFS(r.fsys, name, path, r.loadLimit)
 	}
 }
 
 // readDisk returns the bytes of the file at abs, an absolute path on
-// disk. Off Windows, readDisk refuses a drive-letter path with
-// [fs.ErrInvalid].
-func readDisk(abs string) ([]byte, error) {
+// disk, as [readBounded] reads them within limit. Off Windows, readDisk
+// refuses a drive-letter path with [fs.ErrInvalid].
+func readDisk(abs string, limit int) ([]byte, error) {
 	// Off Windows, a drive letter is an ordinary directory name, so
 	// the read would resolve the path against the working directory
 	// while the key stays the cwd-independent drive URL. One key would
 	// then name different bytes per directory, so refuse the read.
 	if hasDriveLetter(abs) && !onWindows {
-		return nil, fmt.Errorf("read %s: %w", abs, noDriveLetter())
+		return nil, readError(abs, noDriveLetter())
 	}
 
 	// Stat before the open, since opening a FIFO blocks until a writer
@@ -486,25 +477,25 @@ func readDisk(abs string) ([]byte, error) {
 	// it, and readBounded checks the opened file again.
 	info, err := os.Stat(abs)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", abs, err)
+		return nil, readError(abs, err)
 	}
 
 	if !info.Mode().IsRegular() {
-		return nil, notRegular(abs)
+		return nil, readError(abs, notRegular())
 	}
 
 	f, err := openFile(abs)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", abs, err)
+		return nil, readError(abs, err)
 	}
 	defer f.Close() //nolint:errcheck // Best-effort close.
 
-	return readBounded(f, abs)
+	return readBounded(f, abs, limit)
 }
 
-// readFS returns the bytes of the file at fsPath in fsys. Its errors
-// name the file by name.
-func readFS(fsys fs.FS, fsPath, name string) ([]byte, error) {
+// readFS returns the bytes of the file at fsPath in fsys, as
+// [readBounded] reads them within limit. Its errors name the file by name.
+func readFS(fsys fs.FS, fsPath, name string, limit int) ([]byte, error) {
 	// Stat before the open, as readDisk does. The Stat of [os.DirFS]
 	// follows a symbolic link, so a link to a device is not regular.
 	// Unlike readDisk, the open takes no flags, since [fs.FS] has none
@@ -515,86 +506,54 @@ func readFS(fsys fs.FS, fsPath, name string) ([]byte, error) {
 	// the path blocks the Stat itself.
 	info, err := fs.Stat(fsys, fsPath)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", name, err)
+		return nil, readError(name, err)
 	}
 
 	if !info.Mode().IsRegular() {
-		return nil, notRegular(name)
+		return nil, readError(name, notRegular())
 	}
 
 	f, err := fsys.Open(fsPath)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", name, err)
+		return nil, readError(name, err)
 	}
 	defer f.Close() //nolint:errcheck // Best-effort close.
 
-	return readBounded(f, name)
+	return readBounded(f, name, limit)
 }
 
 // readBounded returns the bytes of f, the file at name. It checks again
 // that f is a regular file, since the file at the path can change after
-// the caller's check, and refuses a file over [httpfetch.MaxSize] bytes,
-// the limit a schema fetched from a URL has.
-func readBounded(f fs.File, name string) ([]byte, error) {
+// the caller's check, and refuses a file of more than limit bytes, the
+// limit a schema fetched from a URL has too. Each error is a
+// [*FetchError] that names the file by name.
+func readBounded(f fs.File, name string, limit int) ([]byte, error) {
 	info, err := f.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", name, err)
+		return nil, readError(name, err)
 	}
 
 	if !info.Mode().IsRegular() {
-		return nil, notRegular(name)
+		return nil, readError(name, notRegular())
 	}
 
-	// Read one byte past the limit, as [httpfetch.Get] does, so an
-	// over-size file reads as MaxSize+1 bytes.
-	data, err := io.ReadAll(io.LimitReader(f, httpfetch.MaxSize+1))
+	data, err := httpfetch.ReadAll(f, limit)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", name, err)
+		return nil, readError(name, err)
 	}
 
-	if int64(len(data)) > httpfetch.MaxSize {
-		return nil, fmt.Errorf("read %s: file exceeds %d bytes", name, httpfetch.MaxSize)
+	if len(data) > limit {
+		return nil, readError(name, httpfetch.TooLarge("file", limit))
 	}
 
 	return data, nil
 }
 
-// drawnError is an error of a file read whose message draws its control
-// characters as pictures, and a tab as four spaces. The message names the
-// path of the file, and the text of the cause names it again. A document
-// or a schema can supply that path, so a message that held it as written
-// would let either one start a line of its own or write to a terminal.
-// The error unwraps to the error it draws, so [errors.Is] and [errors.As]
-// find the cause, whose own text stays as the file system wrote it.
-type drawnError struct {
-	err error
-}
-
-// drawn returns err as a [drawnError], or nil for a nil err.
-func drawn(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	return drawnError{err: err}
-}
-
-// Error returns the message of the error e draws, with its control
-// characters as pictures and each tab as four spaces.
-func (e drawnError) Error() string {
-	return escape.Line(e.err.Error())
-}
-
-// Unwrap returns the error e draws.
-func (e drawnError) Unwrap() error {
-	return e.err
-}
-
-// notRegular returns the [fs.ErrInvalid] error for name, a path that
-// names something other than a regular file, such as a directory, a
-// device, or a named pipe.
-func notRegular(name string) error {
-	return fmt.Errorf("read %s: %w: not a regular file", name, fs.ErrInvalid)
+// notRegular returns the [fs.ErrInvalid] error for a path that names
+// something other than a regular file, such as a directory, a device, or
+// a named pipe.
+func notRegular() error {
+	return fmt.Errorf("%w: not a regular file", fs.ErrInvalid)
 }
 
 // noDriveLetter returns the [fs.ErrInvalid] error for a drive-letter

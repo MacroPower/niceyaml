@@ -246,6 +246,12 @@ var (
 	// takes the text past the bound, as in "aliases repeat more than 256
 	// KiB of text". The Limits section of the package documentation
 	// describes the bounds.
+	//
+	// The error of a schema past its load limit, as
+	// [go.jacobcolvin.com/niceyaml/schema.WithLoadLimit] describes,
+	// matches ErrLimit too. So does the error of a schema catalog past its
+	// limit. The schema or the catalog is at fault for that error, not the
+	// document, so IsInvalid reports false for it.
 	ErrLimit = fault.ErrLimit
 
 	// The reason of a [SourceError] whose error carries no location at
