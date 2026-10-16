@@ -296,10 +296,9 @@ func TestUpdateWindowSizeViewportHeight(t *testing.T) {
 func TestInitialSearchScrollsLikeALaterOne(t *testing.T) {
 	t.Parallel()
 
-	// The viewport centers a match in the rows it has, and it has none
-	// before the first window size message, so a term applied at
-	// construction would land near the top of the view instead of its
-	// center.
+	// The model sets the term of --search before the first window size
+	// message gives the viewport any rows. The match lands on the same
+	// row as a search after that message.
 	sources := sourcesOf(yamltest.GenerateYAML(40))
 	size := tea.WindowSizeMsg{Width: 40, Height: 14}
 
