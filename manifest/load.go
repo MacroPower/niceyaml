@@ -83,10 +83,10 @@ func WithSetChecks(enabled bool) LoadOption {
 // and no set. A load that passes returns its warnings from
 // [Set.Warnings].
 //
-// The heading of the error starts with the name of the input: the path of a
-// lone [Path] or [FS] input, "<stdin>" for standard input, or the name of
-// the Source when a lone [Sources] holds one. Any other load leaves the name
-// out.
+// The heading of the error starts with the name of the input. The name is
+// the path of a lone [Path] or [FS] input, or the name of a lone [Stdin]
+// or [Reader] input. A lone [Sources] input that holds one Source gives
+// the name of that Source. Any other load leaves the name out.
 //
 // Load fails before it reads a file for a pattern that does not parse,
 // with an error that matches

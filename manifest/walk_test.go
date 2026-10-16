@@ -1,6 +1,8 @@
 package manifest_test
 
 import (
+	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -403,6 +405,140 @@ func TestFS_UncomparableFS(t *testing.T) {
 	set, err := newCafeRegistry(t).Load(t.Context(), manifest.Inputs(in, in), manifest.WithSetChecks(false))
 	require.NoError(t, err)
 	assert.Equal(t, []string{"config/cafe.yaml", "config/cafe.yaml"}, loadedNames(set))
+}
+
+// failingReader is an [io.Reader] whose first read fails with err, and
+// whose later reads find the end of the text.
+type failingReader struct {
+	err  error
+	done bool
+}
+
+// Read returns the error of r on the first call, and [io.EOF] after.
+func (r *failingReader) Read([]byte) (int, error) {
+	if r.done {
+		return 0, io.EOF
+	}
+
+	r.done = true
+
+	return 0, r.err
+}
+
+func TestReader(t *testing.T) {
+	t.Parallel()
+
+	errBroken := errors.New("broken pipe")
+
+	tcs := map[string]struct {
+		in   manifest.Input
+		want []string
+		err  string
+		is   []error
+	}{
+		"text": {
+			in:   manifest.Reader("cafe.yaml", strings.NewReader(cafeDoc)),
+			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
+		},
+		"name option": {
+			in: manifest.Reader("cafe.yaml", strings.NewReader(cafeDoc),
+				manifest.WithSourceOptions(niceyaml.WithName("ignored"))),
+			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
+		},
+		"one reader twice": {
+			in: func() manifest.Input {
+				in := manifest.Reader("cafe.yaml", strings.NewReader(cafeDoc))
+
+				return manifest.Inputs(in, in)
+			}(),
+			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
+		},
+		"read that fails": {
+			in:  manifest.Reader("cafe.yaml", &failingReader{err: errBroken}),
+			err: "cafe.yaml: read: broken pipe",
+			is:  []error{errBroken},
+		},
+		"byte limit": {
+			in: manifest.Reader("cafe.yaml", strings.NewReader(cafeDoc),
+				manifest.WithSourceOptions(niceyaml.WithByteLimit(10), niceyaml.WithName("ignored"))),
+			err: "cafe.yaml: file is larger than 10 bytes",
+			is:  []error{niceyaml.ErrLimit},
+		},
+		"bad pattern": {
+			in:  manifest.Reader("cafe.yaml", strings.NewReader(cafeDoc), manifest.WithExclude("[")),
+			err: `pattern "["`,
+			is:  []error{matcher.ErrInvalidPattern},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := newCafeRegistry(t)
+
+			// Every load of the Input gives the result of the first read.
+			for range 2 {
+				set, err := reg.Load(t.Context(), tc.in, manifest.WithSetChecks(false))
+				if tc.err != "" {
+					require.Error(t, err)
+
+					for _, target := range tc.is {
+						require.ErrorIs(t, err, target)
+					}
+
+					assert.Contains(t, niceyaml.FormatError(err), tc.err)
+
+					continue
+				}
+
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, listObjects(set))
+				assert.Equal(t, []string{"cafe.yaml"}, loadedNames(set))
+			}
+		})
+	}
+}
+
+func TestReader_PlanThenLoad(t *testing.T) {
+	t.Parallel()
+
+	reg := newCafeRegistry(t)
+	in := manifest.Reader("menu.yaml", strings.NewReader(menuDoc))
+
+	plan, err := reg.PlanMigration(t.Context(), in)
+	require.NoError(t, err)
+	require.Len(t, plan.Files(), 1)
+	assert.Equal(t, menuV1Doc, string(plan.Files()[0].After()))
+
+	set, err := reg.Load(t.Context(), in, manifest.WithSetChecks(false))
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		`MenuItem "kanelbulle" cafe.jacobcolvin.com/v1beta1 up-to-date=false`,
+		`MenuItem "semla" cafe.jacobcolvin.com/v1 up-to-date=true`,
+	}, listObjects(set))
+}
+
+// panicReader is an [io.Reader] whose reads panic.
+type panicReader struct{}
+
+// Read panics.
+func (panicReader) Read([]byte) (int, error) {
+	panic("reader broke")
+}
+
+func TestReader_Panic(t *testing.T) {
+	t.Parallel()
+
+	reg := newCafeRegistry(t)
+	in := manifest.Reader("cafe.yaml", panicReader{})
+
+	// Every load of the Input repeats the panic of the first read.
+	for range 2 {
+		assert.PanicsWithValue(t, "reader broke", func() {
+			_, _ = reg.Load(t.Context(), in, manifest.WithSetChecks(false)) //nolint:errcheck // The load panics.
+		})
+	}
 }
 
 func TestWithSourceOptions(t *testing.T) {

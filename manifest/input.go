@@ -1,31 +1,40 @@
 package manifest
 
 import (
+	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
+	"sync"
 
 	"go.jacobcolvin.com/niceyaml"
 )
 
-// Input names where the documents of a load come from: a file or a
-// directory on disk, one in an [fs.FS], [niceyaml.Source] values that the
-// app built, or several inputs in order.
+// stdinName is the name that messages give standard input.
+const stdinName = "<stdin>"
+
+// Input names where the documents of a load come from. It names a file or
+// a directory on disk, one in an [fs.FS], the text of an [io.Reader] such
+// as standard input, or [niceyaml.Source] values that the app built. It
+// can also name several inputs in order.
 //
 // The zero Input names no file, so a load of it finds no manifest.
 //
-// Create instances with [Path], [FS], [Sources], or [Inputs].
+// Create instances with [Path], [FS], [Stdin], [Reader], [Sources], or
+// [Inputs].
 type Input struct {
 	in *inputDef
 }
 
 // inputDef is what an [Input] names.
 type inputDef struct {
-	fsys fs.FS
-	path string
-	srcs []*niceyaml.Source
-	ins  []Input
-	cfg  inputConfig
-	kind inputKind
+	fsys   fs.FS
+	stream *stream
+	path   string
+	srcs   []*niceyaml.Source
+	ins    []Input
+	cfg    inputConfig
+	kind   inputKind
 }
 
 // inputKind tells the kinds of [Input] apart.
@@ -35,15 +44,17 @@ type inputKind int
 const (
 	inputPath inputKind = iota + 1
 	inputFS
+	inputStream
 	inputSources
 	inputList
 )
 
-// Path creates a new [Input] that reads the file at p, the files of the
-// directory at p, or standard input for "-". A file that p names loads
-// whatever its name or its type, so p can name a pipe. A directory loads
-// the files that match "*.yaml" or "*.yml", as "File Selection" in the
-// package documentation describes, and opts change the selection.
+// Path creates a new [Input] that reads the file at p or the files of the
+// directory at p. A file that p names loads whatever its name or its
+// type, so p can name a pipe. A directory loads the files that match
+// "*.yaml" or "*.yml", as "File Selection" in the package documentation
+// describes, and opts change the selection. A p of "-" names the file "-".
+// [Stdin] reads standard input.
 //
 // [Plan.Apply] rewrites only the files of a Path input, so an app reads
 // the files of its user with Path.
@@ -58,6 +69,70 @@ func Path(p string, opts ...InputOption) Input {
 // in any other file system.
 func FS(fsys fs.FS, p string, opts ...InputOption) Input {
 	return Input{in: &inputDef{kind: inputFS, fsys: fsys, path: p, cfg: newInputConfig(opts)}}
+}
+
+// Stdin creates a new [Input] that reads standard input, which messages
+// name "<stdin>". It reads as [Reader] does, so one Stdin value serves
+// [Registry.PlanMigration] and the [Registry.Load] after it. Each Stdin
+// value reads standard input for itself, and a second one finds the text
+// that the first left.
+//
+// A CLI whose --config flag takes "-" for standard input picks the input
+// itself:
+//
+//	in := manifest.Path(config)
+//	if config == "-" {
+//		in = manifest.Stdin()
+//	}
+func Stdin(opts ...InputOption) Input {
+	return newStreamInput(stdinName, os.Stdin, targetStdin, opts)
+}
+
+// Reader creates a new [Input] that reads r, such as the body of a
+// request. Messages refer to the text as name. The first load or plan
+// that reads the Input reads r to its end, and every later one reuses that
+// text. One Input thus serves [Registry.PlanMigration] and the
+// [Registry.Load] after it.
+//
+// A load reports a read that fails, and a text past the byte limit of
+// [niceyaml.WithByteLimit], as it reports a file of [Path] that does not
+// read. Every later load of the Input reports the same problem.
+func Reader(name string, r io.Reader, opts ...InputOption) Input {
+	return newStreamInput(name, r, targetReader, opts)
+}
+
+// newStreamInput returns the [Input] that reads r under name with opts.
+// The kind tells why Apply cannot rewrite the text.
+func newStreamInput(name string, r io.Reader, kind targetKind, opts []InputOption) Input {
+	cfg := newInputConfig(opts)
+
+	s := &stream{
+		name: name,
+		kind: kind,
+		read: sync.OnceValues(func() (string, error) {
+			src, err := niceyaml.NewSourceFromReader(r, cfg.sourceOptions...)
+			if err != nil {
+				return "", err
+			}
+
+			return src.Text(), nil
+		}),
+	}
+
+	return Input{in: &inputDef{kind: inputStream, stream: s, cfg: cfg}}
+}
+
+// stream is the text of a [Stdin] or [Reader] input. The first load of
+// the input reads the text, and every load after it reuses the text.
+type stream struct {
+	// The read of the text. The first call reads the reader and returns
+	// the text or the problem of the read. Each later call returns what the
+	// first one found.
+	read func() (string, error)
+	name string
+	// The place the text came from, which tells why Apply cannot rewrite
+	// it.
+	kind targetKind
 }
 
 // Sources creates a new [Input] that reads srcs, which the app built
@@ -77,7 +152,10 @@ func Inputs(ins ...Input) Input {
 }
 
 // InputOption configures the selection of the files of a directory, and
-// the [niceyaml.Source] of each file, for [Path] and [FS].
+// the [niceyaml.Source] of each file, for [Path], [FS], [Stdin], and
+// [Reader]. A Stdin or Reader input reads one text, so only
+// [WithSourceOptions] changes what it reads. A pattern of [WithInclude] or
+// [WithExclude] that does not parse still fails the load.
 //
 // Available options:
 //   - [WithRecursive]
@@ -151,10 +229,12 @@ func WithExclude(globs ...string) InputOption {
 }
 
 // WithSourceOptions is an [InputOption] that hands opts to each
-// [niceyaml.Source] that [Path] or [FS] builds, such as
-// [niceyaml.WithReferences] or [niceyaml.WithByteLimit]. The input names
-// each file itself, so [niceyaml.WithName], [niceyaml.WithFilePath], and
-// [niceyaml.WithFS] change nothing. The unmarshalers of a
+// [niceyaml.Source] that the input builds, such as
+// [niceyaml.WithReferences] or [niceyaml.WithByteLimit]. [Path] and [FS]
+// name each file themselves, so [niceyaml.WithName],
+// [niceyaml.WithFilePath], and [niceyaml.WithFS] change nothing for them.
+// [Stdin] and [Reader] name their text themselves, so [niceyaml.WithName]
+// changes nothing for them. The unmarshalers of a
 // [niceyaml.WithUnmarshalers] among opts apply over those of
 // [WithUnmarshalers].
 func WithSourceOptions(opts ...niceyaml.SourceOption) InputOption {
@@ -164,8 +244,9 @@ func WithSourceOptions(opts ...niceyaml.SourceOption) InputOption {
 }
 
 // heading returns the name that the heading of a load of in starts with,
-// or "" when the load has none: the path of a lone [Path] or [FS] input,
-// or the name of a lone Source.
+// or "" when the load has none. The name is the path of a lone [Path] or
+// [FS] input, the name of a lone [Stdin] or [Reader] input, or the name of
+// a lone Source.
 func (in Input) heading() string {
 	d := in.in
 
@@ -176,12 +257,12 @@ func (in Input) heading() string {
 	switch {
 	case d == nil:
 		return ""
-	case d.kind == inputPath && d.path == stdinPath:
-		return stdinName
 	case d.kind == inputPath:
 		return filepath.Clean(d.path)
 	case d.kind == inputFS:
 		return cleanFSPath(d.path)
+	case d.kind == inputStream:
+		return d.stream.name
 	case d.kind == inputSources && len(d.srcs) == 1 && d.srcs[0] != nil:
 		return d.srcs[0].Name()
 	default:

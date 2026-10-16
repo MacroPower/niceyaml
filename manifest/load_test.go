@@ -781,6 +781,14 @@ func TestRegistry_Load_Inputs(t *testing.T) {
 			in:  manifest.Sources(niceyaml.NewSourceFromString("", niceyaml.WithName("stdin.yaml"))),
 			err: "stdin.yaml: missing Cafe",
 		},
+		"named heading of a lone reader": {
+			in:  manifest.Reader("body.yaml", strings.NewReader("")),
+			err: "body.yaml: missing Cafe",
+		},
+		"path of a dash": {
+			in:  manifest.Path("-"),
+			err: "-: " + notExistReason(t),
+		},
 		"unnamed heading of several inputs": {
 			in:  manifest.Inputs(manifest.Sources(hours), manifest.Sources(nope)),
 			err: "2 errors, 1 warning\n",

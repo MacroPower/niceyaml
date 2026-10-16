@@ -2,6 +2,7 @@ package manifest_test
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -119,6 +120,21 @@ func TestRegistry_Load_EncodingOfEachInput(t *testing.T) {
 			},
 			is:   manifest.ErrEncoding,
 			want: stringtest.JoinLF("config/cafe.yaml:4:11: byte 0xf6 is not UTF-8", "`-- save the file as UTF-8"),
+		},
+		"reader": {
+			in: func(*testing.T) manifest.Input {
+				return manifest.Reader("cafe.yaml", strings.NewReader(latin1))
+			},
+			is:   manifest.ErrEncoding,
+			want: stringtest.JoinLF("cafe.yaml:4:11: byte 0xf6 is not UTF-8", "`-- encode the text as UTF-8"),
+		},
+		"reader with a file path": {
+			in: func(*testing.T) manifest.Input {
+				return manifest.Reader("cafe.yaml", strings.NewReader(latin1),
+					manifest.WithSourceOptions(niceyaml.WithFilePath("cafe.yaml")))
+			},
+			is:   manifest.ErrEncoding,
+			want: stringtest.JoinLF("cafe.yaml:4:11: byte 0xf6 is not UTF-8", "`-- save the file as UTF-8"),
 		},
 		"source": {
 			in: func(*testing.T) manifest.Input {

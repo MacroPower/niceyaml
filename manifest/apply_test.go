@@ -143,6 +143,10 @@ func TestPlan_Apply_ReadOnly(t *testing.T) {
 				"1 file not written",
 			),
 		},
+		"reader": {
+			in:  manifest.Reader("hours.yaml", strings.NewReader(hoursDoc)),
+			err: "hours.yaml: cannot rewrite a file that cafe read from a stream",
+		},
 		"source": {
 			in:  manifest.Sources(niceyaml.NewSourceFromString(hoursDoc, niceyaml.WithName("hours.yaml"))),
 			err: "hours.yaml: cannot rewrite a file that cafe built in memory",

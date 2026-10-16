@@ -18,12 +18,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 )
 
-// The path that names standard input, and the name messages give it.
-const (
-	stdinPath = "-"
-	stdinName = "<stdin>"
-)
-
 // defaultInclude holds the patterns that select the files of a directory
 // without [WithInclude].
 var defaultInclude = []string{"*.yaml", "*.yml"}
@@ -59,6 +53,7 @@ type targetKind int
 const (
 	targetDisk targetKind = iota + 1
 	targetStdin
+	targetReader
 	targetFS
 	targetSource
 )
@@ -142,8 +137,8 @@ func matchAny(patterns []pattern, rel string, dir bool) bool {
 	})
 }
 
-// prepared is one [Path] or [FS] input, or one Sources input, checked
-// before the load reads a file.
+// prepared is one input that is not a list, checked before the load reads
+// a file.
 type prepared struct {
 	def     *inputDef
 	info    fs.FileInfo
@@ -177,7 +172,7 @@ func prepare(ctx context.Context, in Input, out []*prepared) ([]*prepared, error
 	case inputSources:
 		return append(out, &prepared{def: d}), nil
 
-	case inputPath, inputFS:
+	case inputPath, inputFS, inputStream:
 	}
 
 	err := ctx.Err()
@@ -200,12 +195,12 @@ func prepare(ctx context.Context, in Input, out []*prepared) ([]*prepared, error
 		return nil, err
 	}
 
-	switch {
-	case d.kind == inputPath && d.path == stdinPath:
-	case d.kind == inputPath:
+	switch d.kind {
+	case inputPath:
 		p.info, err = os.Stat(d.path)
-	default:
+	case inputFS:
 		p.info, err = fs.Stat(d.fsys, cleanFSPath(d.path))
+	case inputStream, inputSources, inputList:
 	}
 
 	if err != nil {
@@ -250,11 +245,12 @@ type reader struct {
 	// The unmarshalers of the registry, which every Source the reader
 	// builds takes ahead of the options of its input.
 	unmarshalers []niceyaml.Unmarshaler
-	// The files read from disk, which a later path to one of them skips.
+	// The files, Sources, and streams that the load has read, which a later
+	// input that names one of them skips.
 	disk    []os.FileInfo
 	fsFiles []fsKey
 	sources []*niceyaml.Source
-	stdin   bool
+	streams []*stream
 }
 
 // fsKey names one file of an [fs.FS].
@@ -282,8 +278,8 @@ func readInputs(ctx context.Context, in Input, us []niceyaml.Unmarshaler) (*read
 		switch {
 		case p.def.kind == inputSources:
 			r.readSources(p.def.srcs)
-		case p.def.kind == inputPath && p.def.path == stdinPath:
-			r.readStdin(p.def.cfg.sourceOptions)
+		case p.def.kind == inputStream:
+			r.readStream(p.def.stream, p.def.cfg.sourceOptions)
 		case p.def.kind == inputPath && p.info.IsDir():
 			r.walkDisk(p)
 		case p.def.kind == inputPath:
@@ -336,23 +332,25 @@ func (r *reader) readSources(srcs []*niceyaml.Source) {
 	}
 }
 
-// readStdin adds standard input, unless the load has read it.
-func (r *reader) readStdin(opts []niceyaml.SourceOption) {
-	if r.stdin {
+// readStream adds the Source of the text of s, built with opts, unless the
+// load has read s.
+func (r *reader) readStream(s *stream, opts []niceyaml.SourceOption) {
+	if slices.Contains(r.streams, s) {
 		return
 	}
 
-	r.stdin = true
+	r.streams = append(r.streams, s)
 
-	t := target{kind: targetStdin}
+	t := target{kind: s.kind}
 
-	src, err := niceyaml.NewSourceFromReader(os.Stdin, r.sourceOptions(opts, niceyaml.WithName(stdinName))...)
+	text, err := s.read()
 	if err != nil {
-		r.fail(stdinName, readError(err), t)
+		r.fail(s.name, readError(err), t)
 
 		return
 	}
 
+	src := niceyaml.NewSourceFromString(text, r.sourceOptions(opts, niceyaml.WithName(s.name))...)
 	r.add(&file{src: src, target: t})
 }
 

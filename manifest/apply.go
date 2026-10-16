@@ -235,6 +235,9 @@ func (f *PlanFile) readOnly() error {
 	case targetStdin:
 		return readOnlyProblem("cannot rewrite standard input")
 
+	case targetReader:
+		return readOnlyProblem("cannot rewrite a file that " + app + " read from a stream")
+
 	case targetFS:
 		return readOnlyProblem("cannot rewrite a file that "+app+" provides",
 			fmt.Errorf("only a newer release of %s updates this file", app))

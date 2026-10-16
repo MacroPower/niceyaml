@@ -113,15 +113,27 @@
 // # Loading
 //
 // [Registry.Load] reads an [Input] and returns a [Set]. [Path] reads a
-// file, a directory, or standard input, so a --config flag takes a
-// directory or a single file. [FS] reads a file or a directory of an
-// [io/fs.FS], [Sources] reads Sources that the app built, and [Inputs]
-// reads several inputs in order:
+// file or a directory, so a --config flag takes either. [FS] reads a file
+// or a directory of an [io/fs.FS], [Stdin] reads standard input, [Reader]
+// reads an [io.Reader], [Sources] reads Sources that the app built, and
+// [Inputs] reads several inputs in order:
 //
 //	set, err := config.Registry.Load(ctx, manifest.Path(dir))
 //	if err != nil {
 //		return err
 //	}
+//
+// Path reads only the file system, so a CLI whose --config flag takes "-"
+// for standard input picks Stdin itself:
+//
+//	in := manifest.Path(config)
+//	if config == "-" {
+//		in = manifest.Stdin()
+//	}
+//
+// The first load or plan that reads a Stdin or Reader input reads its
+// text, and every later one reuses that text. One Input thus serves
+// [Registry.PlanMigration] and the Load after it.
 //
 // A directory input reads the files that match "*.yaml" or "*.yml", and
 // skips each entry whose name starts with ".". [WithRecursive],
@@ -135,9 +147,9 @@
 // path, and the documents of each file in order. Every report and every
 // iteration of a set follows that load order. A load fails each file that
 // is not UTF-8 with an error that matches [ErrEncoding]. The text of a
-// [Sources] input counts as a file. A load applies the limits of each
-// Source, as [niceyaml.WithByteLimit] and [niceyaml.WithDepthLimit]
-// describe.
+// [Stdin], [Reader], or [Sources] input counts as a file. A load applies
+// the limits of each Source, as [niceyaml.WithByteLimit] and
+// [niceyaml.WithDepthLimit] describe.
 //
 // [WithUnmarshalers] sets how the Go types of the kinds read YAML, such
 // as a type of another package that a document writes as text. A load
