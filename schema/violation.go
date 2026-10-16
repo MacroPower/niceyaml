@@ -12,7 +12,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/fault"
-	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -163,18 +162,11 @@ type converter struct {
 // error and carries its own path, so the printer highlights that location
 // and [niceyaml.Error.Path] reports it. Several violations become a count
 // summary from [niceyaml.NewSummary] with no path of its own, and each
-// violation it heads carries the path to one failing location. With
-// warnings, one heading that counts the errors and the warnings stands
-// over the violations and the warnings in place of that summary.
-func (c converter) validationError(ve *jsonschema.ValidationError, warnings []error) error {
+// violation it heads carries the path to one failing location.
+func (c converter) validationError(ve *jsonschema.ValidationError) error {
 	found := c.violations(ve)
 	if len(found) == 0 {
 		found = []error{niceyaml.Invalid(newViolation(ve))}
-	}
-
-	if len(warnings) > 0 {
-		//nolint:wrapcheck // The heading adds no context of its own.
-		return hook.Tally(append(found, warnings...))
 	}
 
 	return niceyaml.NewSummary(fmt.Sprintf("%d schema violations", len(found)), found...)

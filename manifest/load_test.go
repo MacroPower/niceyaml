@@ -16,6 +16,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/manifest"
+	"go.jacobcolvin.com/niceyaml/manifest/migrate"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
@@ -1041,6 +1042,24 @@ func TestRegistry_Load_Deprecations(t *testing.T) {
 		"config/menu.yaml MenuItem cafe.jacobcolvin.com/v1beta1 $.spec.legacyPricing~",
 		"config/menu.yaml MenuItem cafe.jacobcolvin.com/v1 $.spec.legacyPricing~",
 	}, rows)
+
+	// A document that fails the schema reports its deprecations beside its
+	// violations.
+	_, err = reg.Load(t.Context(), configFS(map[string]string{"menu.yaml": stringtest.LinesLF(
+		"apiVersion: cafe.jacobcolvin.com/v1",
+		"kind: MenuItem",
+		"metadata:",
+		"  name: semla",
+		"spec:",
+		"  price: 0",
+		"  legacyPricing: true",
+	)}))
+	require.Error(t, err)
+	assert.Equal(t, stringtest.JoinLF(
+		"config: 1 error, 1 warning",
+		"config/menu.yaml:6:10: $.spec.price: 0 is less than 1",
+		`config/menu.yaml:7:3: warning: $.spec.legacyPricing~: deprecated field "legacyPricing"`,
+	), err.Error())
 }
 
 func TestRegistry_Load_Defaults(t *testing.T) {
@@ -1283,19 +1302,138 @@ type ShiftSpec struct {
 }
 
 // Validate reports a shift that closes before it opens, where a shift
-// without a close closes at 17:00.
+// without a close closes at 17:00, and warns about a shift that opens
+// before six.
 func (s ShiftSpec) Validate() error {
+	var errs []error
+
+	if s.Open != "" && s.Open < "06:00" {
+		errs = append(errs, niceyaml.NewWarning("opens before six", niceyaml.AtPath(paths.Current().Child("open"))))
+	}
+
 	closes := s.Close
 	if closes == "" {
 		closes = "17:00"
 	}
 
 	if closes < s.Open {
-		return niceyaml.NewError(fmt.Sprintf("closes at %s, before it opens at %s", closes, s.Open),
-			niceyaml.AtPath(paths.Current().Child("close")))
+		errs = append(errs, niceyaml.NewError(fmt.Sprintf("closes at %s, before it opens at %s", closes, s.Open),
+			niceyaml.AtPath(paths.Current().Child("close"))))
 	}
 
-	return nil
+	return errors.Join(errs...)
+}
+
+func TestRegistry_Load_Warnings(t *testing.T) {
+	t.Parallel()
+
+	// The validator warns about the open field of the spec of a Shift.
+	openWarning := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+		n.Warn(ctx, niceyaml.NewWarning("open moves to hours", niceyaml.AtPath(spec.Child("open"))))
+
+		return nil
+	})
+
+	// Each registry holds the kind Shift, with extra on the kind and its
+	// versions after it.
+	shiftOptions := func(extra ...manifest.KindOption) []manifest.RegistryOption {
+		return []manifest.RegistryOption{
+			manifest.WithAppName("cafe"),
+			manifest.WithKinds(manifest.NewKind[Shift]("Shift", extra...)),
+		}
+	}
+	v1 := manifest.Version("cafe.jacobcolvin.com/v1")
+
+	shift := func(version, open, closes string) string {
+		return stringtest.LinesLF(
+			"apiVersion: "+version,
+			"kind: Shift",
+			"spec:",
+			fmt.Sprintf("  open: %q", open),
+			fmt.Sprintf("  close: %q", closes),
+		)
+	}
+
+	// Each case loads shift.yaml, and the load reports the warnings of
+	// each check that the case runs.
+	tcs := map[string]struct {
+		opts  []manifest.RegistryOption
+		file  string
+		err   string
+		warns string
+	}{
+		"a Validate method warns in a document that passes": {
+			opts:  shiftOptions(v1),
+			file:  shift("cafe.jacobcolvin.com/v1", "05:00", "12:00"),
+			warns: "config/shift.yaml:4:9: warning: $.spec.open: opens before six",
+		},
+		"a Validate method warns in a document that fails": {
+			opts: shiftOptions(v1),
+			file: shift("cafe.jacobcolvin.com/v1", "05:00", "04:00"),
+			err: stringtest.JoinLF(
+				"config: 1 error, 1 warning",
+				"config/shift.yaml:4:9: warning: $.spec.open: opens before six",
+				"config/shift.yaml:5:10: $.spec.close: closes at 04:00, before it opens at 05:00",
+			),
+		},
+		"a claim whose match warns": {
+			opts: shiftOptions(
+				manifest.Claim(matcher.Func(func(ctx context.Context, doc *niceyaml.Node) (bool, error) {
+					return true, doc.Validate(ctx, openWarning)
+				})),
+				manifest.Unversioned(),
+				v1,
+			),
+			file:  stringtest.LinesLF("spec:", `  open: "07:00"`),
+			warns: "config/shift.yaml:2:9: warning: $.spec.open: open moves to hours",
+		},
+		"a step whose decode warns": {
+			opts: shiftOptions(
+				manifest.Version("cafe.jacobcolvin.com/v1alpha1"),
+				manifest.Version("cafe.jacobcolvin.com/v1",
+					manifest.Migrate(spec.Child("open"), func(ctx context.Context, n *migrate.Node) error {
+						_, err := n.Decode[string](ctx, niceyaml.WithValidator(openWarning))
+
+						return err //nolint:wrapcheck // The load binds the error of a step.
+					}),
+				),
+			),
+			file:  shift("cafe.jacobcolvin.com/v1alpha1", "07:00", "12:00"),
+			warns: "config/shift.yaml:4:9: warning: $.spec.open: open moves to hours",
+		},
+		"a check that runs a validator with its context": {
+			opts: append(shiftOptions(v1), manifest.WithCheck(func(ctx context.Context, set *manifest.Set) error {
+				var errs []error
+
+				for o := range set.All[Shift]() {
+					errs = append(errs, o.Node.Validate(ctx, openWarning))
+				}
+
+				return errors.Join(errs...)
+			})),
+			file:  shift("cafe.jacobcolvin.com/v1", "07:00", "12:00"),
+			warns: "config/shift.yaml:4:9: warning: $.spec.open: open moves to hours",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := manifest.MustNewRegistry(tc.opts...)
+
+			set, err := reg.Load(t.Context(), configFS(map[string]string{"shift.yaml": tc.file}))
+			if tc.err != "" {
+				require.EqualError(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			require.Error(t, set.Warnings())
+			assert.Equal(t, tc.warns, set.Warnings().Error())
+		})
+	}
 }
 
 func TestRegistry_Load_LeftOut(t *testing.T) {

@@ -6460,6 +6460,38 @@ func TestValidatorFunc_Check(t *testing.T) {
 		})
 	}
 
+	t.Run("hands its warnings to the collector and returns its errors", func(t *testing.T) {
+		t.Parallel()
+
+		old := niceyaml.NewWarning("old price", niceyaml.AtPath(paths.Current().Child("price")))
+
+		tcs := map[string]struct {
+			returns error
+			// The error that Check returns, or none for a pass.
+			want error
+		}{
+			"warnings alone pass": {
+				returns: old,
+			},
+			"a warning beside an error": {
+				returns: errors.Join(negative, old),
+				want:    negative,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				warnings := niceyaml.NewWarnings()
+
+				got := rejectingValidator(tc.returns).Check(warnings.Context(t.Context()), item)
+				assert.Equal(t, tc.want, got)
+				assert.Equal(t, "menu.yaml:4:12: warning: $.items[1].price: old price", warnings.Err().Error())
+			})
+		}
+	})
+
 	t.Run("returns what the same body returns as the method of a type", func(t *testing.T) {
 		t.Parallel()
 

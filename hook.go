@@ -17,7 +17,7 @@ func init() {
 	hook.MarkWarning = func(err error) error { return remark(err, severityWarning) }
 	hook.Warn = func(ctx context.Context, err error) {
 		if !isNothing(err) {
-			reportWarning(ctx, remark(err, severityWarning))
+			deliver(ctx, remark(err, severityWarning))
 		}
 	}
 	hook.Rewrap = rewrap

@@ -55,7 +55,7 @@ var (
 	// niceyaml.Node.Warn marks the error that it reports.
 	MarkWarning func(err error) error
 
-	// Warn reports err as a warning to the call that runs ctx, as
+	// Warn reports err as a warning to the collector of ctx, as
 	// niceyaml.Node.Warn does, and binds it to no document.
 	Warn func(ctx context.Context, err error)
 

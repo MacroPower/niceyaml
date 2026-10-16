@@ -113,7 +113,12 @@ func (d *docState) runSteps(ctx context.Context, ed *edit.Doc, v *versionEntry) 
 
 			d.l.countCall(id)
 
-			err := ed.EndCall(h, callStep(ctx, id, s.fn, n))
+			warnings := niceyaml.NewWarnings()
+
+			err := ed.EndCall(h, callStep(warnings.Context(ctx), id, s.fn, n))
+
+			d.warn(warnings.Err())
+
 			if err != nil {
 				d.fail(err)
 

@@ -778,26 +778,60 @@ func (closedWriter) Write([]byte) (int, error) {
 func TestValidateCmdDeprecations(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-	yamltest.WriteFile(t, dir, "compose.schema.json",
-		`{"properties": {"version": {"deprecated": true, "deprecationMessage": "Compose ignores version."}}}`)
+	tcs := map[string]struct {
+		input string
+		// The output of the run, and the error it fails with, or none for a
+		// run that passes.
+		want string
+		err  string
+	}{
+		"a file that passes prints its warnings before its result line": {
+			input: stringtest.LinesLF(`version: "3.8"`, "services: {}"),
+			want: stringtest.LinesLF(
+				`compose.yaml:1:1: warning: $.version~: deprecated field "version"`,
+				"`-- Compose ignores version.",
+				"",
+				`   1 | version: "3.8"`,
+				"     | ^^^^^^^",
+				"   2 | services: {}",
+				"",
+				"compose.yaml: valid",
+			),
+		},
+		"a file that fails reports its warnings among its errors": {
+			input: stringtest.LinesLF(`version: "3.8"`, "services: 1"),
+			err: stringtest.JoinLF(
+				"compose.yaml: 1 error, 1 warning",
+				`compose.yaml:1:1: warning: $.version~: deprecated field "version"`,
+				`compose.yaml:2:11: $.services: expected "object", got "integer"`,
+			),
+		},
+	}
 
-	path := yamltest.WriteFile(t, dir, "compose.yaml", stringtest.LinesLF(`version: "3.8"`, "services: {}"))
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	out := &bytes.Buffer{}
+			dir := t.TempDir()
+			yamltest.WriteFile(t, dir, "compose.schema.json", `{"properties": {`+
+				`"version": {"deprecated": true, "deprecationMessage": "Compose ignores version."}, `+
+				`"services": {"type": "object"}}}`)
 
-	// A file that passes prints its warnings before its result line, and
-	// the run passes.
-	err := quietValidateCmd(out, "--schema", filepath.Join(dir, "compose.schema.json"), path).Execute()
-	require.NoError(t, err)
-	assert.Equal(t, stringtest.LinesLF(
-		`compose.yaml:1:1: warning: $.version~: deprecated field "version"`,
-		"`-- Compose ignores version.",
-		"",
-		`   1 | version: "3.8"`,
-		"     | ^^^^^^^",
-		"   2 | services: {}",
-		"",
-		"compose.yaml: valid",
-	), strings.ReplaceAll(out.String(), path, "compose.yaml"))
+			path := yamltest.WriteFile(t, dir, "compose.yaml", tc.input)
+
+			out := &bytes.Buffer{}
+
+			err := quietValidateCmd(out, "--schema", filepath.Join(dir, "compose.schema.json"), path).Execute()
+			if tc.err != "" {
+				require.Error(t, err)
+				assert.Equal(t, tc.err, strings.ReplaceAll(err.Error(), path, "compose.yaml"))
+				assert.Empty(t, out.String())
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, strings.ReplaceAll(out.String(), path, "compose.yaml"))
+		})
+	}
 }

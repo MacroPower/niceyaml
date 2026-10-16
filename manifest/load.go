@@ -6,7 +6,6 @@ import (
 	"errors"
 	"runtime/debug"
 	"slices"
-	"sync"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
@@ -441,17 +440,8 @@ func (l *loader) addDoc(d *docState) {
 // problems to the report. A panic in a check fails the load with a
 // [niceyaml.PanicError].
 func (l *loader) runChecks(ctx context.Context, set *Set) error {
-	var (
-		mu     sync.Mutex
-		warned []error
-	)
-
-	cctx := niceyaml.WithWarningHandler(ctx, func(w error) {
-		mu.Lock()
-		defer mu.Unlock()
-
-		warned = append(warned, w)
-	})
+	warnings := niceyaml.NewWarnings()
+	cctx := warnings.Context(ctx)
 
 	for _, check := range l.reg.cfg.checks {
 		err := runCheck(cctx, check, set)
@@ -462,9 +452,7 @@ func (l *loader) runChecks(ctx context.Context, set *Set) error {
 		l.addChecked(err)
 	}
 
-	for _, w := range warned {
-		l.addChecked(w)
-	}
+	l.addChecked(warnings.Err())
 
 	return nil
 }

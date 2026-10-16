@@ -1542,28 +1542,25 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 		doc := yamltest.FirstDocument(t, "port: 0\n", niceyaml.WithName("cfg.yaml"))
 
 		tcs := map[string]struct {
-			first   error
-			second  error
-			want    []string
-			invalid bool
+			first    error
+			second   error
+			want     []string
+			warnings []string
+			invalid  bool
 		}{
 			"an error beside a warning fails": {
-				first:  niceyaml.NewError("port is required"),
-				second: niceyaml.NewWarning("legacy layout"),
-				want: []string{
-					"port is required [error, invalid]",
-					"legacy layout [warning, invalid]",
-				},
-				invalid: true,
+				first:    niceyaml.NewError("port is required"),
+				second:   niceyaml.NewWarning("legacy layout"),
+				want:     []string{"port is required [error, invalid]"},
+				warnings: []string{"legacy layout [warning, invalid]"},
+				invalid:  true,
 			},
 			"a located error beside a warning fails": {
-				first:  niceyaml.NewError("port is required", niceyaml.AtPath(paths.Current().Child("port"))),
-				second: niceyaml.NewWarning("legacy layout"),
-				want: []string{
-					"port is required [error, invalid]",
-					"legacy layout [warning, invalid]",
-				},
-				invalid: true,
+				first:    niceyaml.NewError("port is required", niceyaml.AtPath(paths.Current().Child("port"))),
+				second:   niceyaml.NewWarning("legacy layout"),
+				want:     []string{"port is required [error, invalid]"},
+				warnings: []string{"legacy layout [warning, invalid]"},
+				invalid:  true,
 			},
 			"an unchecked I/O error leaves the problems beside it presumed invalid": {
 				first: niceyaml.Unchecked(fs.ErrPermission),
@@ -1588,13 +1585,16 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 
 				for kind, ret := range returned {
 					cfg := branchesConfig{err: ret}
+					warnings := niceyaml.NewWarnings()
 
-					err := doc.DecodeInto(t.Context(), &cfg)
+					err := doc.DecodeInto(warnings.Context(t.Context()), &cfg)
 					require.Error(t, err, kind)
 
 					// The decode binds each problem, and a binding orders
-					// its problems by position.
+					// its problems by position. The warnings go to the
+					// collector.
 					assert.ElementsMatch(t, tc.want, severityRows(err), kind)
+					assert.ElementsMatch(t, tc.warnings, severityRows(warnings.Err()), kind)
 					assert.Equal(t, tc.invalid, niceyaml.IsInvalid(err), kind)
 				}
 			})

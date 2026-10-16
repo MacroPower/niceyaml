@@ -249,6 +249,9 @@
 // schema of an older version still checks a document, but a later release
 // might drop one of its marks and keep the field.
 //
-// A warning handler on the context of a load receives none of the warnings
-// that the load reports.
+// A load collects the warnings of its checks itself, so a
+// [niceyaml.Warnings] on the context of the load receives none of the
+// warnings that the load reports. Inside a call of niceyaml, such as in a
+// [niceyaml.Validator], the warnings also reach the collectors of that
+// call, as [niceyaml.Warnings.Context] describes.
 package manifest

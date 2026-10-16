@@ -413,15 +413,17 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // location, bound to the source for
 // [go.jacobcolvin.com/niceyaml/printer.Printer] to display.
 // Each one wraps a [*Violation] that names the keyword the value fails.
-// Each value that a deprecated schema applies to comes back as a warning
-// that matches [ErrDeprecated].
+// Each value that a deprecated schema applies to goes to the
+// [niceyaml.Warnings] collector of the context as a warning that matches
+// [ErrDeprecated].
 // [Schema.Check] checks a node, which is the whole document for the
 // root [niceyaml.Node] of a document and one value inside it for a Node
 // from [niceyaml.Node.At]. [Schema.ValidateValue] checks decoded data
 // that came from no document, such as the body of a request, and the
 // text of its error names the path of each violation. A caller that
 // knows where the data stands in a document places that error there with
-// [niceyaml.Rebase] and [niceyaml.Node.Bind].
+// [niceyaml.Rebase] and [niceyaml.Node.Bind]. It places the warnings the
+// same way, as the Placement section of ValidateValue describes.
 //
 // A Schema is the validator for a program that holds one schema and
 // compiles it itself. It is also a [Resolver] that names itself for every
@@ -486,10 +488,9 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 //
 // Check reports each value that a schema with the deprecated keyword
 // applies to as a warning, as the Deprecations section of the package
-// documentation describes. When n passes, Check reports its warnings
-// with [niceyaml.Node.Warn]. When n fails, Check returns them in its
-// error, bound through n, under one heading that counts the violations
-// and the warnings.
+// documentation describes. Check reports its warnings with
+// [niceyaml.Node.Warn] whether n passes or fails, and returns its errors
+// alone.
 //
 // # Unparsed Documents
 //
@@ -632,15 +633,12 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 	}
 
 	warnings, err := s.validate(ctx, data, n)
-	if err != nil {
-		return err
-	}
 
 	for _, w := range warnings {
 		n.Warn(ctx, w)
 	}
 
-	return nil
+	return err
 }
 
 // ValidateValue checks data, the decoded form of a YAML value, against the
@@ -688,11 +686,11 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 //
 // ValidateValue reports each value that a schema with the deprecated
 // keyword applies to as a warning, as the Deprecations section of the
-// package documentation describes. A value that passes hands its
-// warnings to the warning handler of ctx, from
-// [niceyaml.WithWarningHandler], bound as BindValue binds an error. A
-// value that fails returns them in its error, under one heading that
-// counts the violations and the warnings:
+// package documentation describes. It hands each warning to the
+// collector that [niceyaml.Warnings.Context] put on ctx, whether data
+// passes or fails. Each warning binds as [niceyaml.BindValue] binds an
+// error. ValidateValue returns its errors alone, and
+// [niceyaml.Warnings.Report] puts the warnings beside them:
 //
 //	1 error, 1 warning
 //	$.port: 0 is less than 1
@@ -750,6 +748,15 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 //		errs = append(errs, doc.Bind(niceyaml.Rebase(violation.Err, base)))
 //	}
 //
+// The warnings place the same way. A caller outside a call of niceyaml
+// collects them with a [niceyaml.Warnings] of its own and places what
+// [niceyaml.Warnings.Err] returns. A function of
+// [niceyaml.WithValueCheck] passes its context to ValidateValue, and the
+// decode places each warning that ValidateValue hands over at the value
+// that the function checked. A [niceyaml.Validator] passes its context
+// the same way, and the Node that runs the validator places each warning
+// at that Node.
+//
 // # Key Names
 //
 // ValidateValue holds no source, so each path names a key as the decoder
@@ -781,20 +788,17 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // reference resolution honors its cancellation and deadlines.
 func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 	warnings, err := s.checkValue(ctx, data)
-	if err != nil {
-		//nolint:wrapcheck // Binding puts each path in the text; the error keeps its own context.
-		return niceyaml.BindValue(err)
+
+	for _, w := range warnings {
+		hook.Warn(ctx, niceyaml.BindValue(w))
 	}
 
-	if len(warnings) > 0 {
-		hook.Warn(ctx, niceyaml.BindValue(hook.Tally(warnings)))
-	}
-
-	return nil
+	//nolint:wrapcheck // Binding puts each path in the text, and the error keeps its own context.
+	return niceyaml.BindValue(err)
 }
 
-// checkValue checks data against the schema. It returns the warnings of a
-// value that passes, or the error of one that fails. Each comes back
+// checkValue checks data against the schema. It returns the warnings of
+// the value, and the error of a value that fails. Each comes back
 // unbound, with a path that starts at `@`, the value data stands for. It
 // holds no source, so each path names a key as the decoder does, such as
 // 16 for a key the document spells 0x10.
@@ -821,9 +825,8 @@ func (s *Schema) checkValue(ctx context.Context, data any) ([]error, error) {
 // source does, and a !!timestamp needs it to show whether the source
 // wrote only a date.
 //
-// The error of a value that fails holds its warnings. With a node, each
-// warning there is bound through n. A call that collects warnings then
-// tells apart two of them with one message.
+// It returns the warnings of data beside the error of a value that fails,
+// each unbound.
 func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) ([]error, error) {
 	// The resolver binds aliases across the whole document, so an alias
 	// inside a scoped node reaches an anchor outside it. The document
@@ -870,14 +873,7 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) ([]er
 		return nil, fmt.Errorf("%w: %w", ErrValidate, errors.Join(refErrs...))
 	}
 
-	warnings := c.deprecations(records, instance)
-	if n != nil {
-		for i, w := range warnings {
-			warnings[i] = n.Bind(w)
-		}
-	}
-
-	return nil, c.validationError(ve, warnings)
+	return c.deprecations(records, instance), c.validationError(ve)
 }
 
 // unresolvedRefs returns the failures in the tree of ve that report a $ref

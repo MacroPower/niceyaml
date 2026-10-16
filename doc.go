@@ -413,13 +413,31 @@
 // failures alone, and a Validate method of a [SelfValidator] returns its
 // warnings beside its errors. [Node.Validate], [Source.ValidateDocuments],
 // the Decode methods of Node and Source, both SelfValidate methods, and
-// [SelfValidateValue] collect the warnings of the checks they run. A call
-// that passes returns nil and hands its warnings to the handler that
-// [WithWarningHandler] puts on its context, and drops them without a
-// handler. A call that fails returns
-// its warnings in its error, under one heading over its problems and its
-// warnings in source order. Without a warning, the error of a failing call
-// reads as it does on its own.
+// [SelfValidateValue] collect the warnings of the checks they run. Each
+// such call hands every warning to the [Warnings] collector on its
+// context, whether the call passes or fails. Without a collector on the
+// context, the call drops its warnings. The call returns its errors
+// alone, so a call that returns nil passed, and [errors.Is] on its error
+// matches no warning.
+//
+// A failure that holds no warning comes back as the check wrote it. In a
+// result that holds both, the call removes the warnings from the joins
+// and from the wrappers of one %w verb that [fmt.Errorf] builds, and keeps
+// those joins and wrappers. Any other error in the result that holds
+// both, such as a summary from [NewSummary], becomes the join of its
+// errors. That join drops the heading and the type of the error, so
+// [errors.As] does not find that type.
+//
+// A program that prints only the error of a call shows none of its
+// warnings. A renderer that lists the warnings between the errors, as a
+// compiler does, asks [Warnings.Report] for one error that holds both:
+//
+//	warnings := niceyaml.NewWarnings()
+//
+//	config, err := doc.Decode[Config](warnings.Context(ctx), niceyaml.WithValidator(reg))
+//	if err != nil {
+//		return warnings.Report(err)
+//	}
 //
 // Wherever niceyaml reads a result to decide whether a check passed, a
 // result whose every problem is a warning counts as a pass. The
@@ -437,19 +455,13 @@
 // [errors.Join], or build the error with NewError, to keep it an error.
 //
 // A program in strict mode turns each warning into an error with
-// AsErrors, applied to the warnings that its handler receives or to the
-// error of a call that fails:
+// AsErrors, applied to the report of the call:
 //
-//	var warned error
-//	ctx = niceyaml.WithWarningHandler(ctx, func(w error) { warned = w })
+//	warnings := niceyaml.NewWarnings()
 //
-//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
+//	config, err := doc.Decode[Config](warnings.Context(ctx), niceyaml.WithValidator(reg))
 //	if strict {
-//		if err == nil {
-//			err = warned
-//		}
-//
-//		err = niceyaml.AsErrors(err)
+//		err = niceyaml.AsErrors(warnings.Report(err))
 //	}
 //
 // # Decoding
@@ -810,8 +822,9 @@
 //
 //   - The search for the other problems of a rejected decode stops, and
 //     the decode returns the rejection alone.
-//   - The self-validation walk stops, and returns the error of the context
-//     in place of the errors it found. A Validate method or a function from
+//   - The self-validation walk stops. It returns the error of the context
+//     in place of the errors it found, and hands the warnings it found to
+//     the collector of the context. A Validate method or a function from
 //     WithValueCheck that returns the error of a context that ended stops
 //     the walk the same way.
 //   - [MultiValidator] runs no further validator, and returns the error of

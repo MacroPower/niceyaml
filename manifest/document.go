@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/goccy/go-yaml/ast"
 
@@ -49,7 +48,7 @@ type docState struct {
 	removed       []error
 	// The warnings that strict mode leaves warnings.
 	lenient []error
-	// The warnings that the checks handed to the warning handler.
+	// The warnings of the checks, in check order.
 	warned []error
 	// The problems of the checks, bound, in check order.
 	problems []error
@@ -59,7 +58,6 @@ type docState struct {
 	// The number of warnings in warned that the steps up to the written
 	// version handed over, which a rewrite clears.
 	earlyWarned int
-	mu          sync.Mutex
 	// A document of the file writes a type field.
 	typedFile bool
 	// The load skips the document, which holds no content or which
@@ -111,8 +109,6 @@ func (d *docState) check(ctx context.Context) {
 		}
 	}
 
-	ctx = niceyaml.WithWarningHandler(ctx, d.warn)
-
 	if !d.routeDoc(ctx) {
 		return
 	}
@@ -140,13 +136,12 @@ func (d *docState) fail(err error) {
 	d.problems = append(d.problems, d.doc.Bind(err))
 }
 
-// warn adds w, the warnings of a check that passed, as the warning handler
-// of the checks of the document.
+// warn adds w, the warnings that a check collected, to those of the
+// document. A nil w adds nothing.
 func (d *docState) warn(w error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	d.warned = append(d.warned, w)
+	if w != nil {
+		d.warned = append(d.warned, w)
+	}
 }
 
 // report adds the problems of the document to the report of the load. The
@@ -403,7 +398,12 @@ func (d *docState) adopt(ctx context.Context) bool {
 			continue
 		}
 
-		ok, err := e.kind.cfg.claim.Match(ctx, doc)
+		warnings := niceyaml.NewWarnings()
+
+		ok, err := e.kind.cfg.claim.Match(warnings.Context(ctx), doc)
+
+		d.warn(warnings.Err())
+
 		if err != nil {
 			d.fail(err)
 
@@ -606,8 +606,13 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 		return false
 	}
 
-	err = d.work.Validate(ctx, sch)
-	if !niceyaml.HasErrors(err) {
+	warnings := niceyaml.NewWarnings()
+
+	err = d.work.Validate(warnings.Context(ctx), sch)
+
+	d.warn(warnings.Err())
+
+	if err == nil {
 		return true
 	}
 
@@ -618,12 +623,7 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 	}
 
 	for problem := range niceyaml.Problems(err) {
-		e := problem.Err
-		if niceyaml.HasErrors(e) {
-			e = d.doc.Bind(niceyaml.Locate(e, niceyaml.WithDetails(detail)))
-		}
-
-		d.problems = append(d.problems, e)
+		d.problems = append(d.problems, d.doc.Bind(niceyaml.Locate(problem.Err, niceyaml.WithDetails(detail))))
 	}
 
 	return false
@@ -638,11 +638,14 @@ func (d *docState) decode(ctx context.Context) bool {
 	opts := append([]niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)}, reg.cfg.decodeOptions...)
 	opts = append(opts, entry.kind.cfg.decodeOptions...)
 
+	warnings := niceyaml.NewWarnings()
+
+	v, err := entry.kind.decode(warnings.Context(ctx), d.work, opts)
+
 	// A Validate method reports a field that the document leaves out at
 	// the mapping that lacks it, with a detail that names the field.
-	ctx = niceyaml.WithWarningHandler(ctx, func(w error) { d.warn(d.leftOut(w)) })
+	d.warn(d.leftOut(warnings.Err()))
 
-	v, err := entry.kind.decode(ctx, d.work, opts)
 	if err != nil {
 		d.problems = append(d.problems, d.leftOut(err))
 

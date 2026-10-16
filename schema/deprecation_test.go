@@ -66,14 +66,6 @@ func warningRows(err error) string {
 	return stringtest.JoinLF(rows...)
 }
 
-// collectWarnings returns ctx with a warning handler, and a func that
-// returns what the handler received last.
-func collectWarnings(ctx context.Context) (context.Context, func() error) {
-	var warned error
-
-	return niceyaml.WithWarningHandler(ctx, func(w error) { warned = w }), func() error { return warned }
-}
-
 func TestSchema_Check_Deprecations(t *testing.T) {
 	t.Parallel()
 
@@ -213,22 +205,23 @@ func TestSchema_Check_Deprecations(t *testing.T) {
 
 			s := compileSchema(t, cmp.Or(tc.schema, cafeSchema))
 			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("cafe.yaml"))
-			ctx, warned := collectWarnings(t.Context())
+			warnings := niceyaml.NewWarnings()
 
-			require.NoError(t, doc.Validate(ctx, s))
+			require.NoError(t, doc.Validate(warnings.Context(t.Context()), s))
 
+			warned := warnings.Err()
 			if tc.want == "" {
-				assert.NoError(t, warned())
+				assert.NoError(t, warned)
 
 				return
 			}
 
-			require.Error(t, warned())
-			assert.Equal(t, tc.want, warningRows(warned()))
-			assert.False(t, niceyaml.HasErrors(warned()))
-			assert.True(t, niceyaml.IsInvalid(warned()))
+			require.Error(t, warned)
+			assert.Equal(t, tc.want, warningRows(warned))
+			assert.False(t, niceyaml.HasErrors(warned))
+			assert.True(t, niceyaml.IsInvalid(warned))
 
-			for problem := range niceyaml.Problems(warned()) {
+			for problem := range niceyaml.Problems(warned) {
 				require.ErrorIs(t, problem.Err, schema.ErrDeprecated)
 				assert.True(t, problem.Warning)
 			}
@@ -245,20 +238,22 @@ func TestSchema_Check_DeprecationsOfAFailure(t *testing.T) {
 		stringtest.LinesLF("legacyPricing: true", "seats: 0"),
 		niceyaml.WithName("cafe.yaml"),
 	)
-	ctx, warned := collectWarnings(t.Context())
+	warnings := niceyaml.NewWarnings()
 
-	err := doc.Validate(ctx, s)
-	require.Error(t, err)
-	require.NoError(t, warned())
+	// The check returns its violations alone and hands its warnings over.
+	err := doc.Validate(warnings.Context(t.Context()), s)
+	require.EqualError(t, err, "cafe.yaml:2:8: $.seats: 0 is less than 1")
+	require.NotErrorIs(t, err, schema.ErrDeprecated)
+	require.ErrorIs(t, warnings.Err(), schema.ErrDeprecated)
 
 	assert.Equal(t, stringtest.JoinLF(
 		"cafe.yaml: 1 error, 1 warning",
 		`cafe.yaml:1:1: warning: $.legacyPricing~: deprecated field "legacyPricing"`,
 		"cafe.yaml:2:8: $.seats: 0 is less than 1",
-	), err.Error())
+	), warnings.Report(err).Error())
 
-	// A validator that tries a second schema after the first fails keeps
-	// the warnings of the second alone.
+	// A validator that tries a second schema after the first fails still
+	// hands over the warnings of the first.
 	plain := compileSchema(t, `{"type": "object"}`)
 	fallback := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 		err := s.Check(ctx, n)
@@ -269,9 +264,10 @@ func TestSchema_Check_DeprecationsOfAFailure(t *testing.T) {
 		return nil
 	})
 
-	ctx, warned = collectWarnings(t.Context())
-	require.NoError(t, doc.Validate(ctx, fallback))
-	require.NoError(t, warned())
+	warnings = niceyaml.NewWarnings()
+	require.NoError(t, doc.Validate(warnings.Context(t.Context()), fallback))
+	assert.Equal(t, `cafe.yaml:1:1: warning: $.legacyPricing~: deprecated field "legacyPricing"`,
+		warnings.Err().Error())
 }
 
 func TestSchema_ValidateValue_Deprecations(t *testing.T) {
@@ -282,9 +278,9 @@ func TestSchema_ValidateValue_Deprecations(t *testing.T) {
 	t.Run("a value that passes hands its warnings over", func(t *testing.T) {
 		t.Parallel()
 
-		ctx, warned := collectWarnings(t.Context())
+		warnings := niceyaml.NewWarnings()
 
-		require.NoError(t, s.ValidateValue(ctx, map[string]any{
+		require.NoError(t, s.ValidateValue(warnings.Context(t.Context()), map[string]any{
 			"legacyPricing": true,
 			"tags":          []any{"old"},
 			"wifi":          map[string]any{"security": "wep"},
@@ -294,35 +290,37 @@ func TestSchema_ValidateValue_Deprecations(t *testing.T) {
 			`warning: $.legacyPricing~: deprecated field "legacyPricing"`,
 			`warning: $.tags[0]: deprecated value "old"`,
 			`warning: $.wifi.security: deprecated value "wep"`,
-		), warned().Error())
-		require.ErrorIs(t, warned(), schema.ErrDeprecated)
+		), warnings.Err().Error())
+		require.ErrorIs(t, warnings.Err(), schema.ErrDeprecated)
 	})
 
-	t.Run("a value that fails returns its warnings in its error", func(t *testing.T) {
+	t.Run("a value that fails hands its warnings over and returns its violations", func(t *testing.T) {
 		t.Parallel()
 
-		ctx, warned := collectWarnings(t.Context())
+		warnings := niceyaml.NewWarnings()
 
-		err := s.ValidateValue(ctx, map[string]any{"legacyPricing": true, "seats": 0})
-		require.Error(t, err)
-		require.NoError(t, warned())
+		err := s.ValidateValue(warnings.Context(t.Context()), map[string]any{"legacyPricing": true, "seats": 0})
+		require.EqualError(t, err, "$.seats: 0 is less than 1")
+		require.NotErrorIs(t, err, schema.ErrDeprecated)
+		assert.Equal(t, `warning: $.legacyPricing~: deprecated field "legacyPricing"`, warnings.Err().Error())
 		assert.Equal(t, stringtest.JoinLF(
 			"1 error, 1 warning",
 			"$.seats: 0 is less than 1",
 			`warning: $.legacyPricing~: deprecated field "legacyPricing"`,
-		), err.Error())
+		), warnings.Report(err).Error())
 	})
 
 	t.Run("a value from no document quotes its JSON text", func(t *testing.T) {
 		t.Parallel()
 
-		ctx, warned := collectWarnings(t.Context())
+		warnings := niceyaml.NewWarnings()
 
-		require.NoError(t, s.ValidateValue(ctx, map[string]any{"sizes": "large", "printer": map[string]any{}}))
+		require.NoError(t, s.ValidateValue(warnings.Context(t.Context()),
+			map[string]any{"sizes": "large", "printer": map[string]any{}}))
 		assert.Equal(t, stringtest.JoinLF(
 			"2 warnings",
 			`warning: $.printer: deprecated value`,
 			`warning: $.sizes: deprecated value "large"`,
-		), warned().Error())
+		), warnings.Err().Error())
 	})
 }

@@ -83,12 +83,14 @@ func validateCmd() *cobra.Command {
 				}
 
 				// The warnings of a file that passes print before its result
-				// line, and the run still passes.
-				var warned error
+				// line, and the run still passes. A file that fails reports
+				// its warnings among its errors.
+				warnings := niceyaml.NewWarnings()
 
-				ctx := niceyaml.WithWarningHandler(cmd.Context(), func(w error) { warned = w })
-
-				err := validateFile(ctx, yamlPath, reg, limits.options()...)
+				err := validateFile(warnings.Context(cmd.Context()), yamlPath, reg, limits.options()...)
+				if err != nil {
+					err = warnings.Report(err)
+				}
 
 				// A run canceled during the file stops there. The error of
 				// the file reports the cancellation once it has read the
@@ -117,6 +119,7 @@ func validateCmd() *cobra.Command {
 				// escape it here and in the error, as validateFile does.
 				name := escape.Control(yamlPath)
 
+				warned := warnings.Err()
 				if warned != nil {
 					_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s\n\n", niceyaml.FormatError(warned))
 					if err != nil {
@@ -158,9 +161,9 @@ func validateCmd() *cobra.Command {
 // comment-only file, has no position, so its messages open with "path:"
 // alone.
 //
-// A file that passes hands its warnings, such as the deprecations its
-// schema marks, to the warning handler of ctx. A file that fails returns
-// its warnings in its error.
+// Each call hands the warnings of the file, such as the deprecations its
+// schema marks, to the collector of ctx, whether the file passes or
+// fails, and returns its errors alone.
 //
 // The file path of the source is the [physicalAbs] form of yamlPath.
 // SchemaStore patterns that name parent directories, such as

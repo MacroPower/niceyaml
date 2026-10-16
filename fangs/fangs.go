@@ -118,14 +118,14 @@ func WithExcerptOptions(opts ...niceyaml.ExcerptOption) Option {
 // its wrappers added in front and a connector before each error below
 // another. The excerpt of each [*go.jacobcolvin.com/niceyaml.SourceError]
 // in the error's tree follows, so a joined error annotates each failure
-// it holds. The warnings in the error render as the errors do, each with
-// the "warning:" label after its position and its location marked in the
-// warning styles of the printer. The handler indents each line by
-// [Indent] columns and ends
-// the output with a blank line. An error with no SourceError in its tree
-// renders as that tree alone, and the handler drops the line breaks that
-// end it, such as the one after the suggestions Cobra lists for an
-// unknown command.
+// it holds. The warnings in the error, such as the ones that
+// [niceyaml.Warnings.Report] puts beside the errors of a call, render as
+// the errors do. Each has the "warning:" label after its position and its
+// location marked in the warning styles of the printer. The handler
+// indents each line by [Indent] columns and ends the output with a blank
+// line. An error with no SourceError in its tree renders as that tree
+// alone, without the line breaks that end it, such as the one after the
+// suggestions Cobra lists for an unknown command.
 //
 // Fang hands the handler a [*colorprofile.Writer] that holds the color
 // profile of the error stream. When that profile has no color, as in a

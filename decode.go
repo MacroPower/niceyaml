@@ -162,7 +162,10 @@ func WithSelfValidation(enabled bool) DecodeOption {
 // skips fn.
 //
 // The `@` paths of an error from fn read from the value, and the walk puts
-// them under the path of the value, as it does for a Validate method. The
+// them under the path of the value, as it does for a Validate method. It
+// places each warning that fn hands to its context the same way, such as
+// one from [SelfValidateValue] or
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue]. The
 // walk also presumes the document at fault for an error from fn that
 // declares nothing, a plain I/O error included, as it does for a Validate
 // method. A check thus keeps its faults when it moves from a Validate
@@ -477,9 +480,7 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // ErrDecode. The Decoding section describes the messages, the sentinels
 // of each problem, and where each error binds.
 func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
-	c := &warningCollector{}
-
-	return c.finish(ctx, n.decodeInto(c.context(ctx), v, newDecodeConfig(n.source, opts), nil), n.Bind)
+	return n.decodeInto(enterCall(ctx), v, newDecodeConfig(n.source, opts), nil)
 }
 
 // decodeInto is [Node.DecodeInto] with its settings resolved. It also

@@ -167,10 +167,10 @@
 // deprecations that reach a node through an alias, a merge key, or two
 // schemas share its warning. The warning lists each distinct message
 // once, in the order that the check evaluated them, and names the path
-// that comes first in the document. A check that passes hands its
-// warnings to the call that runs it. A check that fails returns them in
-// its error, as the Warnings section of [go.jacobcolvin.com/niceyaml]
-// describes.
+// that comes first in the document. A check hands its warnings to the
+// [go.jacobcolvin.com/niceyaml.Warnings] collector on its context,
+// whether the check passes or fails, as the Warnings section of
+// [go.jacobcolvin.com/niceyaml] describes.
 //
 // # YAML Schemas
 //

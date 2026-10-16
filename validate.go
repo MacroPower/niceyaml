@@ -60,13 +60,10 @@ import (
 // ends, as the Cancellation section of the package documentation
 // describes.
 func (n *Node) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
-	c := &warningCollector{}
-
-	return c.finish(ctx, n.selfValidate(c.context(ctx), v, newDecodeConfig(n.source, opts)), n.Bind)
+	return n.selfValidate(ctx, v, newDecodeConfig(n.source, opts))
 }
 
-// selfValidate is [Node.SelfValidate] with its settings resolved, and with
-// the warnings of the walk handed to the warning handler of ctx.
+// selfValidate is [Node.SelfValidate] with its settings resolved.
 // [Node.DecodeInto] runs it once the decode has filled v, so a decode and
 // a later call of SelfValidate on the same value return the same error.
 func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error {
@@ -77,7 +74,7 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 
 	failure, warnings := walkSelfValidators(ctx, v, n, cfg)
 
-	reportWarning(ctx, n.Bind(warnings))
+	deliver(ctx, n.Bind(warnings))
 
 	return n.Bind(failure)
 }
@@ -110,8 +107,17 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 //
 // A Validate whose value holds fields a decode does not reach, such as
 // one tagged `yaml:"-"`, validates them with SelfValidateValue and
-// moves the result under their path with [Rebase]. It must not pass its
-// own receiver, which would call that Validate again without end.
+// moves the result under their path with [Rebase]. A Validate gets no
+// context, so it collects the warnings of the call with a [Warnings] of
+// its own and returns them beside its errors, and the walk places both:
+//
+//	warnings := niceyaml.NewWarnings()
+//	err := niceyaml.SelfValidateValue(warnings.Context(context.Background()), p.Upstreams)
+//
+//	return niceyaml.Rebase(errors.Join(err, warnings.Err()), paths.Current().Child("upstreams"))
+//
+// A Validate must not pass its own receiver, which would call that
+// Validate again without end.
 //
 // Any v but nil and a nil pointer works, and those return an error
 // wrapping [ErrSelfValidateTarget]. The walk stops once ctx ends, as the
@@ -122,21 +128,21 @@ func SelfValidateValue(ctx context.Context, v any, opts ...DecodeOption) error {
 		return BindValue(err)
 	}
 
-	c := &warningCollector{}
+	failure, warnings := walkSelfValidators(ctx, v, nil, newDecodeConfig(nil, opts))
 
-	failure, warnings := walkSelfValidators(c.context(ctx), v, nil, newDecodeConfig(nil, opts))
+	deliver(ctx, BindValue(warnings))
 
-	c.add(BindValue(warnings))
-
-	return c.finish(ctx, BindValue(failure), BindValue)
+	return BindValue(failure)
 }
 
 // walkSelfValidators runs Validate on every [SelfValidator] in v, a non-nil
 // pointer or a value that is no pointer, and the functions of cfg from
 // [WithValueCheck] on the values of their types. It joins the errors under
 // the path of each value in the document of n, where a nil n stands for no
-// document, and returns the failures and then the warnings. A check whose
-// result holds warnings alone passes.
+// document, and returns the failures and then the warnings. The warnings
+// are those that each check returns and those that each function hands to
+// its context, whether the check passes or fails. A check whose result
+// holds warnings alone passes.
 func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (error, error) {
 	w := selfWalker{
 		ctx:      ctx,
@@ -151,7 +157,7 @@ func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (
 	w.walk(reflect.ValueOf(v), place{}, nil)
 
 	if w.ended != nil {
-		return w.ended, nil
+		return w.ended, multierr.Join(w.warns)
 	}
 
 	return multierr.Join(w.errs), multierr.Join(w.warns)
@@ -185,8 +191,8 @@ type selfWalker struct {
 	// map or slice covers only the values below it.
 	scanned map[visit]bool
 	errs    []error
-	// The warnings of the Validate methods that passed, which hold
-	// warnings alone.
+	// The warnings of the checks, which [selfWalker.report] takes out of
+	// their results.
 	warns []error
 	// The error of a context that ended, once it stops the walk, as
 	// [selfWalker.stopped] describes.
@@ -1020,8 +1026,11 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 
 	if implementsSelfValidator(v.Type()) {
 		validator, ok := reflect.TypeAssert[SelfValidator](v.Addr())
-		if ok && !w.report(validator.Validate(), at, presumed) {
-			return false
+		if ok {
+			failure, warnings := splitWarnings(validator.Validate())
+			if !w.report(failure, warnings, at, presumed) {
+				return false
+			}
 		}
 	}
 
@@ -1030,7 +1039,14 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 			continue
 		}
 
-		if w.stopped() || !w.report(check.run(w.ctx, v.Addr()), at, presumed) {
+		if w.stopped() {
+			return false
+		}
+
+		failure, warnings := runHook(w.ctx, func(ctx context.Context) error {
+			return check.run(ctx, v.Addr())
+		})
+		if !w.report(failure, warnings, at, presumed) {
 			return false
 		}
 	}
@@ -1038,33 +1054,29 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 	return true
 }
 
-// report records err, the result of a check of one value, rebased with d
-// under the place of that value, and reports whether the value passed.
-// The error of a context that ended stops the walk, as
-// [selfWalker.stopped] describes.
-func (w *selfWalker) report(err error, at place, d declaration) bool {
-	if isNothing(err) {
+// report records the errors and the warnings of a check of one value,
+// each rebased with d under the place of that value, and reports whether
+// the value passed. A check with warnings alone passes, so the values
+// above it still validate. The error of a context that ended stops the
+// walk, as [selfWalker.stopped] describes.
+func (w *selfWalker) report(failure, warnings error, at place, d declaration) bool {
+	m := move{base: at.path(), ambiguous: w.ambiguous, fallback: w.fallback()}
+
+	if warnings != nil {
+		w.warns = append(w.warns, rebase(warnings, m, d))
+	}
+
+	if failure == nil {
 		return true
 	}
 
-	if contextEnded(err) {
-		w.ended = err
+	if contextEnded(failure) {
+		w.ended = failure
 
 		return false
 	}
 
-	m := move{base: at.path(), ambiguous: w.ambiguous, fallback: w.fallback()}
-	rebased := rebase(err, m, d)
-
-	// A check returns its warnings beside its errors, and a result of
-	// warnings alone passes, so the values above it still validate.
-	if !HasErrors(err) {
-		w.warns = append(w.warns, rebased)
-
-		return true
-	}
-
-	w.errs = append(w.errs, rebased)
+	w.errs = append(w.errs, rebase(failure, m, d))
 
 	return false
 }
@@ -1429,7 +1441,8 @@ type SelfValidator interface {
 // Node from [Node.At], and returns its errors as it wrote them from that
 // Node, with `@` paths that read from the Node. An error about a key the
 // document lacks carries the path of the key. Node.Validate and a decode
-// bind what Check returns as [Node.Bind] binds an error. The validators
+// bind what Check returns as [Node.Bind] binds an error, and bind each
+// warning that Check hands to its context the same way. The validators
 // of this module return their errors unbound, apart from schema.Registry,
 // which binds every error it returns. A validator that needs the whole
 // document reaches it through [Node.Document]. The Validation section of
@@ -1471,32 +1484,20 @@ type Validator interface {
 //	return niceyaml.Invalid(check(v))
 type ValidatorFunc func(ctx context.Context, n *Node) error
 
-// Check implements [Validator]. It runs f with a context of its own and
-// holds the warnings that f reports with [Node.Warn] until it knows the
-// outcome. When f returns an error, Check returns that failure with the
-// warnings it holds added to it, under a heading that counts both, as
-// "2 errors, 1 warning". Without a warning, the failure comes back as f
-// wrote it. A result that holds warnings alone counts as a pass, so Check
-// takes those warnings in, hands every warning it holds to the warning
-// handler of ctx, and returns nil. For a document that did not parse, it
+// Check implements [Validator]. It returns the errors of what f returns,
+// and nil when f returns warnings alone or a nil [*Error] or [*SourceError]
+// pointer. The warnings that f returns, and those that f hands to its
+// context, go to the [Warnings] collector of ctx, bound as [Node.Bind]
+// binds an error. A failure that holds no warning comes back as f wrote
+// it, and the Warnings section of the package documentation describes a
+// failure that holds both. For a document that did not parse, Check
 // returns the syntax error [Node.Err] returns without calling f.
 func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 	if n.doc.err != nil {
 		return n.doc.err
 	}
 
-	c := &warningCollector{}
-
-	err := f(c.context(ctx), n)
-	if HasErrors(err) {
-		return c.merge(err, unbound)
-	}
-
-	if !isNothing(err) {
-		c.add(n.Bind(err))
-	}
-
-	return c.finish(ctx, nil, n.Bind)
+	return n.checkWith(ctx, f)
 }
 
 // MultiValidator returns a [Validator] that runs every validator in
@@ -1509,10 +1510,11 @@ func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 // Each validator sees the node whatever the ones before it reported. The
 // run skips a nil validator, and one that holds a nil pointer or func.
 // No failure is no error, and a lone failure comes back as that validator
-// wrote it. Two or more come back joined in the order given, so
-// [errors.Is] matches any one of them, and the Node that runs the
-// MultiValidator binds each at its own location, as [Node.Bind]
-// describes:
+// wrote it, unless it also holds a warning, as the Warnings section of
+// the package documentation describes. Two or more come back joined in
+// the order given, so [errors.Is] matches any one of them, and the Node
+// that runs the MultiValidator binds each at its own location, as
+// [Node.Bind] describes:
 //
 //	svc.yaml:1:7: $.name: reserved name
 //	svc.yaml:2:7: $.port: 0 is less than 1
@@ -1539,17 +1541,13 @@ func MultiValidator(validators ...Validator) Validator {
 
 			// A typed nil pointer is no failure, as [Node.Bind] reads it, and
 			// neither is a result of warnings alone.
-			err = dv.Check(ctx, n)
-			if !HasErrors(err) {
-				if !isNothing(err) {
-					reportWarning(ctx, n.Bind(err))
-				}
-
+			err = n.checkWith(ctx, dv.Check)
+			if err == nil {
 				continue
 			}
 
 			if ctx.Err() != nil {
-				return err //nolint:wrapcheck // The validator's own error, which the Node that runs the validator binds.
+				return err
 			}
 
 			errs = append(errs, err)
@@ -1574,10 +1572,12 @@ func MultiValidator(validators ...Validator) Validator {
 // Node. A decode runs the validators of repeated [WithValidator] options
 // the same way.
 //
-// The failure comes back as the validator wrote it, so the Node that
-// runs the ChainValidator binds it as it binds the failure of that
-// validator alone. ChainValidator copies the validators it gets, so a
-// caller that edits the slice it passed changes nothing in the Validator.
+// The failure comes back as the validator wrote it, unless it also holds
+// a warning. The Node that runs the ChainValidator thus binds it as it
+// binds the failure of that validator alone. The Warnings section of the
+// package documentation describes a failure that holds a warning.
+// ChainValidator copies the validators it gets, so a caller that edits
+// the slice it passed changes nothing in the Validator.
 func ChainValidator(validators ...Validator) Validator {
 	validators = slices.Clone(validators)
 
@@ -1598,9 +1598,10 @@ func ChainValidator(validators ...Validator) Validator {
 // that [Node.At] or [Node.Nodes] scopes below the root is no document, so
 // v runs on it. A document that did not parse returns its syntax error.
 //
-// SkipEmpty returns the error of v as v wrote it, and a nil v passes
-// every Node. It takes one validator, so it wraps the one that
-// [MultiValidator] or [ChainValidator] makes of several.
+// SkipEmpty returns the errors of v as [ValidatorFunc.Check] returns the
+// errors of its function, and a nil v passes every Node. It takes one
+// validator, so it wraps the one that [MultiValidator] or
+// [ChainValidator] makes of several.
 func SkipEmpty(v Validator) Validator {
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
 		if n.IsEmpty() || nilness.IsNil(v) {
@@ -1624,27 +1625,27 @@ func SkipEmpty(v Validator) Validator {
 // document with no content pass.
 //
 // Validate binds what v returns through [Node.Bind], so an [*Error]
-// renders its location with its `@` paths read from the node, and an
-// error v bound itself comes back as it is. A Node from [Node.At] or
-// [Node.Nodes] points an error with no location at its own value. A
-// validator that runs another on a Node of its choosing, such as each
-// element of a list, calls Validate on that Node, where a call to Check
-// returns the error unbound.
+// renders its location with its `@` paths read from the node. An error v
+// bound itself comes back as it is, unless it also holds a warning.
+// Validate hands the warnings of v to the [Warnings] collector of ctx, as
+// the Warnings section of the package documentation describes. A Node
+// from [Node.At] or [Node.Nodes] points an error with no location at its
+// own value. A validator that runs another on a Node of its choosing,
+// such as each element of a list, calls Validate on that Node, where a
+// call to Check returns the error unbound.
 //
 // A document that did not parse returns the syntax error [Node.Err]
 // returns before v runs, even when v is nil. Otherwise a nil v, or one
 // that holds a nil pointer or func, runs nothing and passes, and so does
 // a validator that returns a nil [*Error] or [*SourceError] pointer.
 func (n *Node) Validate(ctx context.Context, v Validator) error {
-	c := &warningCollector{}
-
-	return c.finish(ctx, n.validate(c.context(ctx), []Validator{v}), n.Bind)
+	return n.validate(ctx, []Validator{v})
 }
 
 // validate runs validators in order on n, and binds the first error with
 // n when the validator left it unbound. A document that did not parse
 // returns its syntax error, and no validator runs. The warnings of the
-// validators that pass go to the warning handler of ctx.
+// validators go to the collectors of ctx.
 func (n *Node) validate(ctx context.Context, validators []Validator) error {
 	if n.doc.err != nil {
 		return n.doc.err
@@ -1653,9 +1654,10 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 	return n.Bind(n.firstFailure(ctx, validators))
 }
 
-// firstFailure runs validators in order on n and returns the first
-// failure as the validator wrote it, or nil when each of them passes. It
-// skips a nil validator, and one that holds a nil pointer or func.
+// firstFailure runs validators in order on n and returns the errors of
+// the first failure, as [Node.checkWith] returns them, or nil when each
+// of them passes. It skips a nil validator, and one that holds a nil
+// pointer or func.
 func (n *Node) firstFailure(ctx context.Context, validators []Validator) error {
 	for _, dv := range validators {
 		if nilness.IsNil(dv) {
@@ -1664,17 +1666,26 @@ func (n *Node) firstFailure(ctx context.Context, validators []Validator) error {
 
 		// A typed nil pointer is no failure, as [Node.Bind] reads it, and
 		// neither is a result of warnings alone.
-		err := dv.Check(ctx, n)
-		if !HasErrors(err) {
-			if !isNothing(err) {
-				reportWarning(ctx, n.Bind(err))
-			}
-
-			continue
+		err := n.checkWith(ctx, dv.Check)
+		if err != nil {
+			return err
 		}
-
-		return err //nolint:wrapcheck // The validator's own error, which the Node that runs the validator binds.
 	}
 
 	return nil
+}
+
+// checkWith runs check on n, as [runHook] runs a hook, and returns the
+// errors of its result as [splitWarnings] splits them, or nil when the
+// result holds none. The warnings of the result, and those that check
+// hands to its context, go to the collectors of ctx, bound as [Node.Bind]
+// binds them.
+func (n *Node) checkWith(ctx context.Context, check func(context.Context, *Node) error) error {
+	failure, warnings := runHook(ctx, func(ctx context.Context) error {
+		return check(ctx, n)
+	})
+
+	deliver(ctx, n.Bind(warnings))
+
+	return failure
 }

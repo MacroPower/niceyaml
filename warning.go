@@ -3,6 +3,7 @@ package niceyaml
 import (
 	"context"
 	"errors"
+	"iter"
 	"slices"
 	"sync"
 
@@ -199,19 +200,14 @@ func holdsWarning(err error) bool {
 // problem as it was, without the "warning:" label, and each heading that
 // niceyaml wrote to count the errors and the warnings below it counts
 // them again, so "2 errors, 1 warning" reads "3 errors". A program in
-// strict mode applies it to the warnings that its handler receives, or to
-// the error of a call that fails:
+// strict mode applies it to the report of a call. [Warnings.Report]
+// builds that report from the error of the call and its warnings:
 //
-//	var warned error
-//	ctx = niceyaml.WithWarningHandler(ctx, func(w error) { warned = w })
+//	warnings := niceyaml.NewWarnings()
 //
-//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
+//	config, err := doc.Decode[Config](warnings.Context(ctx), niceyaml.WithValidator(reg))
 //	if strict {
-//		if err == nil {
-//			err = warned
-//		}
-//
-//		err = niceyaml.AsErrors(err)
+//		err = niceyaml.AsErrors(warnings.Report(err))
 //	}
 //
 // AsErrors rebuilds the errors that niceyaml builds, such as an [*Error],
@@ -220,10 +216,11 @@ func holdsWarning(err error) bool {
 // that [fmt.Errorf] builds with several %w verbs and that heads several
 // problems gets a mark above each problem, as a join does. The result
 // keeps the message of the wrapper and matches it for [errors.Is] and
-// [errors.As]. AsErrors marks any other error above the warning it wraps,
-// so a program applies it to an error as a call returned it, before it
-// wraps the error with [fmt.Errorf]. An err that holds no warning comes
-// back as it is, and a nil err returns nil.
+// [errors.As]. AsErrors marks any other error above the warning it wraps.
+// A program thus applies it to the error that [Warnings.Report] or
+// [Warnings.Err] returns, before it wraps the error with [fmt.Errorf]. An
+// err that holds no warning comes back as it is, and a nil err returns
+// nil.
 func AsErrors(err error) error {
 	if isNothing(err) {
 		return nil
@@ -484,64 +481,374 @@ func countText(errs, warns int) string {
 	return parts[0] + ", " + parts[1]
 }
 
-// warningKey is the key of the warning handler on a context.
-type warningKey struct{}
-
-// warningHandler receives the warnings of a call.
-type warningHandler func(error)
-
-// WithWarningHandler returns a copy of ctx that carries fn, so each call
-// of this package that runs with the context hands its warnings to fn. A
-// call that passes calls fn once, with one error that holds every
-// warning of the call, sorted by position: the warning alone, or a
-// heading such as "cafe.yaml: 2 warnings" over several. A call that fails
-// returns its warnings in its error and calls fn with none. Without a
-// handler, a call that passes drops its warnings.
+// Warnings collects the warnings of the calls of niceyaml and its schema
+// package that run with a context from [Warnings.Context]. The calls that
+// collect warnings are [Node.Validate], [Source.ValidateDocuments], the
+// Decode methods of [Node] and [Source], both SelfValidate methods,
+// [SelfValidateValue], and
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue]. Each call
+// hands every warning of the checks it runs to the collector, whether the
+// call passes or fails, and returns its errors alone:
 //
-// The calls that collect warnings are [Node.Validate],
-// [Source.ValidateDocuments], the Decode methods of [Node] and [Source],
-// both SelfValidate methods, and [SelfValidateValue]. Each runs
-// its checks with a context of its own, so the warnings of a [Validator],
-// of a nested call, and of [Node.Warn] reach the call that runs them
-// first. Calls in several goroutines that share a context each call fn,
-// so fn guards its own state:
+//	warnings := niceyaml.NewWarnings()
 //
-//	var (
-//		mu     sync.Mutex
-//		warned []error
-//	)
+//	config, err := doc.Decode[Config](warnings.Context(ctx), niceyaml.WithValidator(reg))
+//	if err != nil {
+//		return warnings.Report(err)
+//	}
 //
-//	ctx = niceyaml.WithWarningHandler(ctx, func(w error) {
-//		mu.Lock()
-//		defer mu.Unlock()
+//	if w := warnings.Err(); w != nil {
+//		log.Print(niceyaml.FormatError(w))
+//	}
 //
-//		warned = append(warned, w)
-//	})
+// A call that runs with no collector drops its warnings, whether it
+// passes or fails. The collector keeps one of the warnings that share a
+// source, a position, a path, and a message, so a deprecation that two
+// checks report shows once. It is safe for concurrent use, so calls in
+// several goroutines can share one. A nil *Warnings collects nothing and
+// holds no warning.
 //
-// A later WithWarningHandler on a context derived from ctx replaces fn
-// for the calls that run with the derived context.
-func WithWarningHandler(ctx context.Context, fn func(error)) context.Context {
-	return context.WithValue(ctx, warningKey{}, warningHandler(fn))
+// Create instances with [NewWarnings].
+type Warnings struct {
+	rows []warningRow
+	mu   sync.Mutex
 }
 
-// reportWarning hands err to the warning handler of ctx, if it has one. A
-// nil err hands nothing.
-func reportWarning(ctx context.Context, err error) {
+// NewWarnings creates a new [*Warnings] that holds no warning.
+func NewWarnings() *Warnings {
+	return &Warnings{}
+}
+
+// Context returns a copy of ctx that carries w, so each call of niceyaml
+// that runs with the context hands its warnings to w. A [Validator]
+// reports to w through [Node.Warn] with the context it gets.
+//
+// Outside a call of niceyaml, a later Context replaces w for the calls
+// that run with the derived context. A hook, such as a Validator or a
+// function of [WithValueCheck], gets its context from a call. On that
+// context, a later Context hands each warning to the collectors of the
+// call as well. So does each Context derived from the context it
+// returns. A validator that reads the warnings of a check it runs
+// collects them with a Warnings of its own, and the caller of the
+// enclosing call still gets them. For a nil w, Context returns ctx as it
+// is.
+func (w *Warnings) Context(ctx context.Context) context.Context {
+	if w == nil {
+		return ctx
+	}
+
+	scope := &warningScope{w: w}
+
+	if outer := scopeOf(ctx); outer != nil {
+		switch {
+		case outer.call:
+			scope.outer = outer
+		case outer.outer != nil:
+			// The scope of ctx was derived inside a call, so the call takes
+			// the warnings of w as well.
+			scope.outer = outer.outer
+		}
+	}
+
+	return context.WithValue(ctx, warningKey{}, scope)
+}
+
+// All returns an iterator over the warnings that w holds, one
+// [ErrorTree] per warning. The warnings sort by position, within the
+// order their sources first reached w, and the warnings with no position
+// come last. Each tree holds the warning bound as the call bound it, with
+// its details as its Children. A program reads the fields of each tree as
+// it reads those of a node that [Problems] yields:
+//
+//	for warning := range warnings.All() {
+//		pos, _ := warning.Position()
+//		emit(warning.Source().Name(), pos, warning.Message())
+//	}
+func (w *Warnings) All() iter.Seq[ErrorTree] {
+	return func(yield func(ErrorTree) bool) {
+		for _, r := range w.sorted() {
+			if !yield(NewErrorTree(r.err)) {
+				return
+			}
+		}
+	}
+}
+
+// Err returns the warnings that w holds as one error, in the order
+// [Warnings.All] yields them, or nil when w holds none. One warning comes
+// back alone. Several come back under a heading that counts them, as in
+// "cafe.yaml: 2 warnings". The heading binds to the source of the
+// warnings when they share one, and to no document otherwise, as
+// [BindValue] binds an error. [Warnings.Report] puts the warnings beside
+// the errors of a call that fails, and a program in strict mode turns
+// either result into errors with [AsErrors].
+func (w *Warnings) Err() error {
+	return tallyRows(w.sorted())
+}
+
+// Report returns one error that lists the problems of err and the
+// warnings of w together, sorted by position. A heading that counts both
+// severities stands over them and binds as the heading of [Warnings.Err]
+// binds. A renderer calls Report to show a failure as a compiler does,
+// with each warning between the errors around it:
+//
+//	cafe.yaml: 2 errors, 1 warning
+//	|-- 2:1: $.curency~: unknown field "curency"
+//	|-- 3:1: warning: $.legacyPricing~: deprecated field "legacyPricing"
+//	`-- 4:1: $.wifi~: unknown field "wifi"
+//
+// A warning of err that w holds as well shows once. Report builds a new
+// error and leaves err as it is. The result keeps each problem of err for
+// [errors.Is] and [errors.As], but not the headings and the wrappers above
+// them. A program thus classifies the failure with err itself. With no
+// warning in w, err comes back as it is. For a nil err, Report returns
+// what [Warnings.Err] returns.
+func (w *Warnings) Report(err error) error {
+	held := w.sorted()
+	if len(held) == 0 {
+		return err
+	}
+
 	if isNothing(err) {
+		return tallyRows(held)
+	}
+
+	rows := rowsOf(err)
+
+	for _, r := range held {
+		if !slices.ContainsFunc(rows, r.same) {
+			rows = append(rows, r)
+		}
+	}
+
+	return tallyRows(sortRows(rows))
+}
+
+// keep adds each of rows unless w holds a row that shares its source, its
+// position, its path, and its message.
+func (w *Warnings) keep(rows []warningRow) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for _, row := range rows {
+		if !slices.ContainsFunc(w.rows, row.same) {
+			w.rows = append(w.rows, row)
+		}
+	}
+}
+
+// sorted returns a copy of the rows of w, sorted as [sortRows] sorts them.
+// A nil w holds no row.
+func (w *Warnings) sorted() []warningRow {
+	if w == nil {
+		return nil
+	}
+
+	w.mu.Lock()
+
+	rows := slices.Clone(w.rows)
+
+	w.mu.Unlock()
+
+	return sortRows(rows)
+}
+
+// warningKey is the key of the [warningScope] on a context.
+type warningKey struct{}
+
+// warningScope is what a context carries for the calls that collect
+// warnings: the collector that each of them hands its warnings to.
+type warningScope struct {
+	// The collector that takes every warning delivered on the context.
+	w *Warnings
+	// The scope of the enclosing call, which takes each warning as well.
+	// It is set for a scope that [Warnings.Context] derived inside a call
+	// and for the scopes that enterCall marks from one, and nil otherwise.
+	outer *warningScope
+	// A call of this package runs with the context, so a scope that
+	// Warnings.Context derives from this one hands its warnings here too.
+	call bool
+}
+
+// scopeOf returns the scope that ctx carries, or nil.
+func scopeOf(ctx context.Context) *warningScope {
+	s, _ := ctx.Value(warningKey{}).(*warningScope) //nolint:errcheck // A context with no scope reads as nil.
+
+	return s
+}
+
+// enterCall returns ctx marked as the context of a call of this package
+// that collects warnings, for a call that passes ctx to code of the
+// program outside [runHook], as a decode passes it to each unmarshaler
+// that takes a context. A collector that such code puts on the context
+// then hands its warnings to the collectors of the call as well. A ctx
+// with no collector comes back as it is.
+func enterCall(ctx context.Context) context.Context {
+	s := scopeOf(ctx)
+	if s == nil || s.call {
+		return ctx
+	}
+
+	return context.WithValue(ctx, warningKey{}, &warningScope{w: s.w, outer: s.outer, call: true})
+}
+
+// runHook runs a hook of a call, such as a [Validator] or a function of
+// [WithValueCheck], and returns the errors and then the warnings of the
+// result. The warnings include those that the hook hands to its context,
+// a copy of ctx whose collector holds them and none of the collectors of
+// ctx. The call thus binds every warning of the hook as it binds the
+// result.
+func runHook(ctx context.Context, run func(ctx context.Context) error) (error, error) {
+	held := NewWarnings()
+
+	failure, warnings := splitWarnings(run(context.WithValue(ctx, warningKey{}, &warningScope{w: held, call: true})))
+
+	handed := held.Err()
+	if handed == nil {
+		return failure, warnings
+	}
+
+	if warnings == nil {
+		return failure, handed
+	}
+
+	return failure, errors.Join(warnings, handed)
+}
+
+// deliver hands each problem of err, a warning bound as the call binds
+// it, to every collector that ctx carries. A nil err hands nothing, and a
+// ctx with no collector drops err.
+func deliver(ctx context.Context, err error) {
+	s := scopeOf(ctx)
+	if s == nil || isNothing(err) {
 		return
 	}
 
-	h, ok := ctx.Value(warningKey{}).(warningHandler)
-	if ok && h != nil {
-		h(err)
+	rows := rowsOf(err)
+
+	for ; s != nil; s = s.outer {
+		s.w.keep(rows)
 	}
 }
 
-// Warn reports err as a warning to the call that runs ctx, as
-// [WithWarningHandler] describes. It marks err a warning, as [NewWarning]
-// marks one, and binds it at n as [Node.Bind] binds an error, so an `@`
-// path reads from n. A [Validator] reports each warning this way and
-// returns its failures alone:
+// splitWarnings returns the errors and then the warnings among the
+// problems of err. An err with no warning among its problems comes back
+// whole as the errors, and one with no error whole as the warnings. For
+// an err that holds both, [splitBelow] keeps the join or the wrapper on
+// top of the errors where it can. Otherwise each severity comes back as
+// the join of its problems, in the order [Problems] yields them.
+func splitWarnings(err error) (error, error) {
+	var failure, warnings error
+
+	switch {
+	case isNothing(err):
+	case !holdsWarning(err):
+		failure = err
+	case !HasErrors(err):
+		warnings = err
+	default:
+		failure, warnings = splitBelow(err)
+		if failure == nil {
+			failure, warnings = splitProblems(err)
+		}
+	}
+
+	return failure, warnings
+}
+
+// splitProblems returns the join of the errors and then the join of the
+// warnings among the problems of err, in the order [Problems] yields
+// them.
+func splitProblems(err error) (error, error) {
+	var errs, warns []error
+
+	for problem := range Problems(err) {
+		if isWarning(problem.Err) {
+			warns = append(warns, problem.Err)
+		} else {
+			errs = append(errs, problem.Err)
+		}
+	}
+
+	return multierr.Join(errs), multierr.Join(warns)
+}
+
+// splitBelow splits err, which holds both errors and warnings, below its
+// top. It splits a join branch by branch, as [splitJoin] does, and a
+// wrapper of one error below the wrapper, as [splitWrapper] does. An
+// [*Error] and a [*SourceError] do not split. For an err that does not
+// split, splitBelow returns a nil failure.
+func splitBelow(err error) (error, error) {
+	var failure, warnings error
+
+	switch x := err.(type) { //nolint:errorlint // The node itself, not a chain search.
+	case *Error, *SourceError, *markedError, *PanicError:
+	case interface{ Unwrap() []error }:
+		failure, warnings = splitJoin(err)
+	case interface{ Unwrap() error }:
+		failure, warnings = splitWrapper(err, x.Unwrap())
+	}
+
+	return failure, warnings
+}
+
+// splitJoin splits err branch by branch, as [splitWarnings] splits each
+// branch, when err is a join. The errors keep the join over the branches
+// that hold errors, and an [errors.Join] of one such branch reads as
+// that branch. For an err that is no join, splitJoin returns a nil
+// failure.
+func splitJoin(err error) (error, error) {
+	branches, _, ok := joinBranches(err)
+	if !ok {
+		return nil, nil //nolint:nilnil // A nil failure means that err does not split.
+	}
+
+	var errs, warns []error
+
+	for _, branch := range branches {
+		f, w := splitWarnings(branch)
+		if f != nil {
+			errs = append(errs, f)
+		}
+
+		if w != nil {
+			warns = append(warns, w)
+		}
+	}
+
+	if len(errs) == 0 || multierr.IsJoin(err) {
+		return multierr.Join(errs), multierr.Join(warns)
+	}
+
+	return multierr.Rejoin(err, errs), multierr.Join(warns)
+}
+
+// splitWrapper splits wrapper, which wraps below alone, below it. The
+// errors keep the wrapper as a stand-in that matches it, and whose text
+// holds the errors of below in place of the text of below. For a wrapper
+// whose text does not show below once, splitWrapper returns a nil
+// failure.
+func splitWrapper(wrapper, below error) (error, error) {
+	failure, warnings := splitWarnings(below)
+	if failure == nil || warnings == nil {
+		return nil, nil //nolint:nilnil // A nil failure means that the wrapper does not split.
+	}
+
+	msg := wrapper.Error()
+
+	text := replaceText(msg, below.Error(), failure.Error())
+	if text == msg {
+		return nil, nil //nolint:nilnil // A nil failure means that the wrapper does not split.
+	}
+
+	return multierr.Replace(wrapper, failure, text, nil), warnings
+}
+
+// Warn reports err as a warning to the collector of ctx, as [Warnings]
+// describes. It marks err a warning, as [NewWarning] marks one, and binds
+// it at n as [Node.Bind] binds an error, so an `@` path reads from n. A
+// [Validator] reports each warning this way and returns its failures
+// alone:
 //
 //	if port < 1024 {
 //		n.Warn(ctx, niceyaml.NewWarning("a port below 1024 needs root",
@@ -550,79 +857,59 @@ func reportWarning(ctx context.Context, err error) {
 //
 // The validator passes the context it got to each check and decode that it
 // runs, or the warnings of that work go nowhere. A nil err warns nothing,
-// and a context without a call or a handler drops the warning.
+// and a context with no collector drops the warning.
 func (n *Node) Warn(ctx context.Context, err error) {
 	if isNothing(err) {
 		return
 	}
 
-	reportWarning(ctx, n.Bind(remark(err, severityWarning)))
+	deliver(ctx, n.Bind(remark(err, severityWarning)))
 }
 
-// warningRow is one warning a [warningCollector] holds, with the source,
-// the position, and the message that tell it apart.
+// warningRow is one problem that a [Warnings] holds or that
+// [Warnings.Report] lists, with the source, the position, the path, and
+// the message that tell it apart.
 type warningRow struct {
 	err     error
 	src     *Source
 	msg     string
+	path    string
 	pos     position.Position
 	located bool
 }
 
-// same reports whether r and o share a source, a position, and a message.
-func (r warningRow) same(o warningRow) bool {
-	return r.src == o.src && r.located == o.located && r.pos == o.pos && r.msg == o.msg
-}
-
-// warningCollector holds the warnings of one call until the call knows its
-// outcome. It is safe for concurrent use, so a validator may report from
-// several goroutines.
-type warningCollector struct {
-	rows []warningRow
-	mu   sync.Mutex
-}
-
-// context returns ctx with the collector as its warning handler.
-func (c *warningCollector) context(ctx context.Context) context.Context {
-	return context.WithValue(ctx, warningKey{}, warningHandler(c.add))
-}
-
-// add takes in each problem of err as a row, and keeps one of the rows
-// that share a source, a position, and a message.
-func (c *warningCollector) add(err error) {
-	if isNothing(err) {
-		return
-	}
+// rowsOf returns a row for each problem of err, or one row for err itself
+// when it holds no problem.
+func rowsOf(err error) []warningRow {
+	var rows []warningRow
 
 	for problem := range Problems(err) {
 		row := warningRow{err: problem.Err, src: problem.Source(), msg: problem.Message()}
 		row.pos, row.located = problem.Position()
 
-		c.keep(row)
+		if p, ok := problem.Path(); ok {
+			row.path = p.String()
+		}
+
+		rows = append(rows, row)
 	}
+
+	if len(rows) == 0 {
+		rows = append(rows, warningRow{err: err, msg: err.Error()})
+	}
+
+	return rows
 }
 
-// keep adds row unless the collector holds a row that shares its source,
-// its position, and its message.
-func (c *warningCollector) keep(row warningRow) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if !slices.ContainsFunc(c.rows, row.same) {
-		c.rows = append(c.rows, row)
-	}
+// same reports whether r and o share a source, a position, a path, and a
+// message.
+func (r warningRow) same(o warningRow) bool {
+	return r.src == o.src && r.located == o.located && r.pos == o.pos && r.path == o.path && r.msg == o.msg
 }
 
-// warnings returns the warnings the collector holds, sorted by position
-// within the order their sources first appear, with those that have no
-// position last.
-func (c *warningCollector) warnings() []error {
-	c.mu.Lock()
-
-	rows := slices.Clone(c.rows)
-
-	c.mu.Unlock()
-
+// sortRows sorts rows by position within the order their sources first
+// appear, with the rows that have no position last, and returns them.
+func sortRows(rows []warningRow) []warningRow {
 	var sources []*Source
 
 	group := func(src *Source) int {
@@ -660,72 +947,38 @@ func (c *warningCollector) warnings() []error {
 		return a.pos.Col - b.pos.Col
 	})
 
-	out := make([]error, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, r.err)
-	}
-
-	return out
+	return rows
 }
 
-// finish ends a call that ran its checks under c, with err the result of
-// the call, bound as the call binds it. A result that holds no error
-// passes. Its warnings join those of c, which go to the handler of ctx as
-// one error that bind binds, and finish returns nil. A failure returns
-// with the warnings of c in it, as [warningCollector.merge] puts them.
-func (c *warningCollector) finish(ctx context.Context, err error, bind func(error) error) error {
-	if HasErrors(err) {
-		return c.merge(err, bind)
-	}
-
-	c.add(err)
-
-	ws := c.warnings()
-
-	switch len(ws) {
+// tallyRows returns the errors of rows as one error. It returns nil for
+// no row, the error of a lone row, and otherwise a heading that counts
+// the errors and the warnings among them. The heading binds to the source
+// of the rows when every row has that source, and to no document
+// otherwise, as [BindValue] binds an error.
+func tallyRows(rows []warningRow) error {
+	switch len(rows) {
 	case 0:
+		return nil
 	case 1:
-		reportWarning(ctx, ws[0])
-	default:
-		reportWarning(ctx, bind(newTally(ws)))
+		return rows[0].err
 	}
 
-	return nil
-}
+	src := rows[0].src
+	errs := make([]error, 0, len(rows))
 
-// merge returns failure with the warnings of c in it. With no warning,
-// failure comes back as it is. Otherwise one heading that counts the
-// errors and the warnings stands over the problems of failure and the
-// warnings, which bind puts in source order, in place of any heading that
-// failure had.
-func (c *warningCollector) merge(failure error, bind func(error) error) error {
-	c.mu.Lock()
+	for _, r := range rows {
+		errs = append(errs, r.err)
 
-	held := len(c.rows) > 0
-
-	c.mu.Unlock()
-
-	if !held {
-		return failure
-	}
-
-	var rows []error
-
-	for problem := range Problems(failure) {
-		if isWarning(problem.Err) {
-			c.add(problem.Err)
-
-			continue
+		if r.src != src {
+			src = nil
 		}
-
-		rows = append(rows, problem.Err)
 	}
 
-	return bind(newTally(append(rows, c.warnings()...)))
-}
+	tally := newTally(errs)
 
-// unbound is the bind of a call that returns its result unbound, as
-// [ValidatorFunc.Check] does.
-func unbound(err error) error {
-	return err
+	if src != nil && src != valueSource() {
+		return src.Bind(tally)
+	}
+
+	return BindValue(tally)
 }
