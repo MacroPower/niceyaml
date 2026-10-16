@@ -74,8 +74,11 @@ type docState struct {
 	// The document reached the layout of the current version with a name
 	// that is a non-empty string.
 	hasName bool
-	// The document passed every check.
+	// The document passed every check of its own.
 	passed bool
+	// An error of the finished report binds in the document, so the set of
+	// [Registry.Check] leaves it out.
+	rejected bool
 	// A plan rewrites the document to the written version of its kind.
 	rewritten bool
 }

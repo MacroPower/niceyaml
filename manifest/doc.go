@@ -251,6 +251,30 @@
 // and [niceyaml.IsInvalid] reports each problem that the files of the user
 // cause.
 //
+// [Registry.Check] runs the checks of a load and returns the manifests that
+// pass beside the problems, for an editor or a terminal UI that shows both.
+// [Checked.Set] leaves out the manifest of each document that an error
+// binds in, such as the second manifest of a [Singleton] kind.
+// [Checked.Err] returns the error that Load returns, which holds the
+// warnings too. A load that passes returns its warnings from
+// [Checked.Warnings]:
+//
+//	checked, err := config.Registry.Check(ctx, manifest.Path(dir))
+//	if err != nil {
+//		return err
+//	}
+//
+//	for item := range checked.Set().All[config.MenuItem]() {
+//		menu.Add(item.Value)
+//	}
+//
+//	problems := checked.Err()
+//	if problems == nil {
+//		problems = checked.Warnings()
+//	}
+//
+//	diagnostics.Show(problems)
+//
 // # Warnings
 //
 // [Deprecated] marks a version deprecated, and a load warns about each

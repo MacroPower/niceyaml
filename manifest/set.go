@@ -15,7 +15,7 @@ import (
 //
 // The methods of a Set are safe for concurrent use.
 //
-// Receive instances from [Registry.Load].
+// Receive instances from [Registry.Load] or [Checked.Set].
 type Set struct {
 	reg      *Registry
 	warnings error
@@ -76,7 +76,8 @@ func (o Object[T]) Bind(err error) error {
 	}
 }
 
-// newSet returns the set of the documents that passed every check.
+// newSet returns the set of the documents that passed their own checks
+// and that reject did not mark.
 func (l *loader) newSet() *Set {
 	s := &Set{reg: l.reg}
 
@@ -87,7 +88,7 @@ func (l *loader) newSet() *Set {
 	}
 
 	for _, d := range l.docs {
-		if !d.passed {
+		if !d.passed || d.rejected {
 			continue
 		}
 
@@ -185,7 +186,9 @@ func (s *Set) Objects() iter.Seq[Object[any]] {
 }
 
 // Warnings returns the warnings of the load as a [*LoadError], or nil when
-// the load found none.
+// the load found none. Warnings returns nil for the set of a [Checked]
+// whose [Checked.Err] returns an error, because that error holds the
+// warnings.
 func (s *Set) Warnings() error {
 	return s.warnings
 }

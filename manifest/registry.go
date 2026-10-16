@@ -17,6 +17,8 @@ import (
 // Registry holds the kinds of an app: their versions, schemas, and steps,
 // and the fields that name them. [Registry.Load] reads manifests into a
 // [Set], and [Registry.Verify] checks the schemas in a test.
+// [Registry.Check] returns the manifests that pass beside the problems of
+// a load.
 //
 // The methods of a Registry are safe for concurrent use.
 //
@@ -225,9 +227,12 @@ func WithRemoved(version, kind string, details ...string) RegistryOption {
 
 // WithCheck is a [RegistryOption] that adds a check across the manifests
 // of a set, such as a reference from one manifest to another. A load calls
-// check with the set it returns once the documents and the checks across
-// the set found no error. Each error and warning that check returns joins
-// the report of the load. Several checks run in the order given.
+// check with the set of its manifests when the documents and the other
+// checks across the set find no error. [Registry.Load] returns that set
+// when no error follows. Each error and warning that check returns joins
+// the report of the load. An error that check binds in a document, such
+// as through [Object.Bind], leaves that manifest out of [Checked.Set].
+// Several checks run in the order given.
 func WithCheck(check func(ctx context.Context, set *Set) error) RegistryOption {
 	return func(c *registryConfig) {
 		c.checks = append(c.checks, check)

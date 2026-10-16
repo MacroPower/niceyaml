@@ -81,7 +81,8 @@ func WithSetChecks(enabled bool) LoadOption {
 // and a problem in one does not stop the others. A load that fails returns
 // a [*LoadError] that holds every error and every warning in load order,
 // and no set. A load that passes returns its warnings from
-// [Set.Warnings].
+// [Set.Warnings]. [Registry.Check] runs the same checks and returns the
+// manifests that pass beside the problems.
 //
 // The heading of the error starts with the name of the input. The name is
 // the path of a lone [Path] or [FS] input, or the name of a lone [Stdin]
@@ -95,6 +96,28 @@ func WithSetChecks(enabled bool) LoadOption {
 // [fs.ErrNotExist]. A load whose ctx ends fails with an error that matches
 // ctx.Err().
 func (r *Registry) Load(ctx context.Context, in Input, opts ...LoadOption) (*Set, error) {
+	c, err := r.Check(ctx, in, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	if c.err != nil {
+		return nil, c.err
+	}
+
+	return c.set, nil
+}
+
+// Check reads the documents of in and runs the checks of [Registry.Load].
+// It returns the manifests that pass beside the problems of the load, so
+// an editor can show the problems of each file and still use the
+// manifests that pass. [Checked.Err] returns the error that Load returns
+// for the same input.
+//
+// Check returns a nil result and an error for a pattern that does not
+// parse, for an input path that does not exist, and for a ctx that ends.
+// Load fails with the same errors.
+func (r *Registry) Check(ctx context.Context, in Input, opts ...LoadOption) (*Checked, error) {
 	cfg := newLoadConfig(opts)
 
 	l, err := r.check(ctx, in, cfg)
@@ -116,14 +139,74 @@ func (r *Registry) Load(ctx context.Context, in Input, opts ...LoadOption) (*Set
 		}
 	}
 
-	failed, warnings := l.outcome(l.finishRows(l.rows))
-	if failed != nil {
-		return nil, failed
+	rows := l.finishRows(l.rows)
+
+	c := &Checked{}
+	c.err, c.warnings = l.outcome(rows)
+
+	// Build a new set rather than filter the one that the functions of
+	// WithCheck saw, because a function might keep that set. It holds each
+	// document that passed its own checks, even one that a later error
+	// binds in.
+	if c.err != nil {
+		l.reject(rows)
+
+		set = l.newSet()
 	}
 
-	set.warnings = warnings
+	set.warnings = c.warnings
+	c.set = set
 
-	return set, nil
+	return c, nil
+}
+
+// Checked is the outcome of [Registry.Check]: the manifests that pass,
+// beside the problems of the load.
+//
+// The methods of a Checked are safe for concurrent use.
+//
+// Receive instances from [Registry.Check].
+type Checked struct {
+	set      *Set
+	err      error
+	warnings error
+}
+
+// Set returns the manifests of the documents that hold no error, in load
+// order. A document holds an error when one of its own checks fails, or
+// when a later error binds in it.
+//
+// The checks across the set bind an error in each manifest of a
+// [Singleton] kind after the first. They also bind one in each manifest
+// that repeats the name of an earlier manifest of its kind. An error that
+// a function of [WithCheck] binds with [Object.Bind] binds in the document
+// of the Object. [WithWarningsAsErrors] binds each error that it makes
+// from a warning in the document of the warning. An error of a whole file
+// or of the whole set, such as a [Required] kind that the set lacks, binds
+// in no document and removes no manifest.
+//
+// When [Checked.Err] returns nil, the set is the one that [Registry.Load]
+// returns. When Err returns an error, the set might lack a Required kind.
+// It might also hold a manifest with a problem that only a function of
+// WithCheck finds, such as a reference that dangles. Those functions run
+// only when the documents and the other checks across the set find no
+// error. They run before WithWarningsAsErrors turns warnings into errors.
+func (c *Checked) Set() *Set {
+	return c.set
+}
+
+// Err returns the problems of the load as a [*LoadError] that holds the
+// warnings too, or nil when the load found no error. It is the error that
+// [Registry.Load] returns.
+func (c *Checked) Err() error {
+	return c.err
+}
+
+// Warnings returns the warnings of the load as a [*LoadError], or nil when
+// the load found none or [Checked.Err] returns an error. The Warnings
+// method of the set from [Checked.Set] returns the same.
+func (c *Checked) Warnings() error {
+	return c.warnings
 }
 
 // loader holds the state of one load.
@@ -302,6 +385,27 @@ func (l *loader) failed() bool {
 	return slices.ContainsFunc(l.rows, func(r *row) bool { return niceyaml.HasErrors(r.err) })
 }
 
+// reject marks each document that an error of rows binds in, so newSet
+// leaves it out. The rows must be finished, so that strict mode has turned
+// its warnings into errors.
+func (l *loader) reject(rows []*row) {
+	for _, r := range rows {
+		if d := l.docOf(r); d != nil && niceyaml.HasErrors(r.err) {
+			d.rejected = true
+		}
+	}
+}
+
+// docOf returns the document of the row r, or nil for a row of a whole
+// file or of the whole set.
+func (l *loader) docOf(r *row) *docState {
+	if r.doc == nil && r.file < len(l.files) && r.index >= 0 {
+		return l.docAt(r.file, r.index)
+	}
+
+	return r.doc
+}
+
 // finishRows returns rows in load order, with the filter of
 // [WithWarningFilter] and the strict mode of [WithWarningsAsErrors]
 // applied to the warnings, and each warning wrapped in a [*Warning].
@@ -400,11 +504,7 @@ func (l *loader) warningOf(r *row) *Warning {
 		w.File = src.Name()
 	}
 
-	d := r.doc
-	if d == nil && r.file < len(l.files) && r.index >= 0 {
-		d = l.docAt(r.file, r.index)
-	}
-
+	d := l.docOf(r)
 	if d != nil && d.route.kind != nil {
 		w.Kind = d.route.kind.kind.name
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -821,6 +822,271 @@ func TestRegistry_Load_Context(t *testing.T) {
 
 	_, err := newCafeRegistry(t).Load(ctx, configFS(map[string]string{"cafe.yaml": cafeDoc}))
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestRegistry_Check(t *testing.T) {
+	t.Parallel()
+
+	errPricey := errors.New("pricey")
+
+	// A check that binds an error in the MenuItem kanelbulle through its
+	// Object. Kanelbulle migrates, so the error tests the bind of a
+	// migrated document.
+	failKanelbulle := manifest.WithCheck(func(_ context.Context, set *manifest.Set) error {
+		item, ok := set.Get[MenuItem]("kanelbulle")
+		if !ok {
+			return errors.New("no kanelbulle")
+		}
+
+		return item.Bind(niceyaml.NewError("too cheap", niceyaml.AtPath(spec.Child("price"))))
+	})
+
+	menuExtra := stringtest.LinesLF(
+		"apiVersion: cafe.jacobcolvin.com/v1beta1",
+		"kind: Dish",
+		"metadata:",
+		"  name: semla",
+	)
+
+	// The opts of each case come after those of [cafeOptions]. The err and
+	// warns fields hold the first line of each error.
+	tcs := map[string]struct {
+		files   map[string]string
+		opts    []manifest.RegistryOption
+		load    []manifest.LoadOption
+		want    []string
+		warns   string
+		err     string
+		matches []error
+	}{
+		"passing load": {
+			files: exampleFiles,
+			want: []string{
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`Hours "weekday" cafe.jacobcolvin.com/v1alpha1 up-to-date=false`,
+				`MenuItem "kanelbulle" cafe.jacobcolvin.com/v1beta1 up-to-date=false`,
+				`MenuItem "semla" cafe.jacobcolvin.com/v1 up-to-date=true`,
+			},
+			warns:   `config/hours.yaml:1:13: warning: $.apiVersion: deprecated version "cafe.jacobcolvin.com/v1alpha1"`,
+			matches: []error{manifest.ErrDeprecated},
+		},
+		"failing document beside a warning": {
+			files: map[string]string{"cafe.yaml": cafeDoc, "hours.yaml": hoursDoc, "specials.yaml": specialsDoc},
+			want: []string{
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`Hours "weekday" cafe.jacobcolvin.com/v1alpha1 up-to-date=false`,
+			},
+			err:     "config: 1 error, 1 warning",
+			matches: []error{manifest.ErrUnknownKind, manifest.ErrDeprecated},
+		},
+		"schema violation in a second document": {
+			files: map[string]string{
+				"cafe.yaml": cafeDoc,
+				"menu.yaml": strings.Replace(menuDoc, "price: 65", "price: 0", 1),
+			},
+			want: []string{
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`MenuItem "kanelbulle" cafe.jacobcolvin.com/v1beta1 up-to-date=false`,
+			},
+			err: "config/menu.yaml:15:10: $.spec.price: 0 is less than 1",
+		},
+		"duplicate name": {
+			files: map[string]string{"cafe.yaml": cafeDoc, "menu-extra.yaml": menuExtra, "menu.yaml": menuDoc},
+			want: []string{
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`MenuItem "semla" cafe.jacobcolvin.com/v1beta1 up-to-date=false`,
+				`MenuItem "kanelbulle" cafe.jacobcolvin.com/v1beta1 up-to-date=false`,
+			},
+			err:     `config/menu.yaml:13:9: $.metadata.name: duplicate MenuItem "semla"`,
+			matches: []error{manifest.ErrDuplicateName},
+		},
+		"second singleton": {
+			files: map[string]string{
+				"cafe-copy.yaml": strings.Replace(cafeDoc, "yamull", "copy", 1),
+				"cafe.yaml":      cafeDoc,
+			},
+			want:    []string{`Cafe "copy" cafe.jacobcolvin.com/v1 up-to-date=true`},
+			err:     "config/cafe.yaml:2:7: $.kind: more than one Cafe",
+			matches: []error{manifest.ErrExtraManifest},
+		},
+		"missing required kind": {
+			files: map[string]string{"menu.yaml": menuDoc},
+			want: []string{
+				`MenuItem "kanelbulle" cafe.jacobcolvin.com/v1beta1 up-to-date=false`,
+				`MenuItem "semla" cafe.jacobcolvin.com/v1 up-to-date=true`,
+			},
+			err:     "config: missing Cafe",
+			matches: []error{manifest.ErrMissingManifest},
+		},
+		"strict mode": {
+			files:   map[string]string{"cafe.yaml": cafeDoc, "hours.yaml": hoursDoc},
+			load:    []manifest.LoadOption{manifest.WithWarningsAsErrors(true)},
+			want:    []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
+			err:     `config/hours.yaml:1:13: $.apiVersion: deprecated version "cafe.jacobcolvin.com/v1alpha1"`,
+			matches: []error{manifest.ErrDeprecated},
+		},
+		"strict mode with every warning dropped": {
+			files: map[string]string{"cafe.yaml": cafeDoc, "hours.yaml": hoursDoc},
+			load: []manifest.LoadOption{
+				manifest.WithWarningsAsErrors(true),
+				manifest.WithWarningFilter(func(*manifest.Warning) bool { return false }),
+			},
+			want: []string{
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`Hours "weekday" cafe.jacobcolvin.com/v1alpha1 up-to-date=false`,
+			},
+		},
+		"set checks off": {
+			files: map[string]string{
+				"cafe-copy.yaml": cafeDoc,
+				"cafe.yaml":      cafeDoc,
+				"menu.yaml":      strings.Replace(menuDoc, "price: 65", "price: 0", 1),
+			},
+			load: []manifest.LoadOption{manifest.WithSetChecks(false)},
+			want: []string{
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`MenuItem "kanelbulle" cafe.jacobcolvin.com/v1beta1 up-to-date=false`,
+			},
+			err: "config/menu.yaml:15:10: $.spec.price: 0 is less than 1",
+		},
+		"check error bound through an object": {
+			files: map[string]string{"cafe.yaml": cafeDoc, "menu.yaml": menuDoc},
+			opts:  []manifest.RegistryOption{failKanelbulle},
+			want: []string{
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`MenuItem "semla" cafe.jacobcolvin.com/v1 up-to-date=true`,
+			},
+			err: "config/menu.yaml:7:9: $.spec.cost: too cheap",
+		},
+		"check error bound in no document": {
+			files: map[string]string{"cafe.yaml": cafeDoc, "menu.yaml": menuDoc},
+			opts: []manifest.RegistryOption{manifest.WithCheck(func(context.Context, *manifest.Set) error {
+				return errPricey
+			})},
+			want: []string{
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`MenuItem "kanelbulle" cafe.jacobcolvin.com/v1beta1 up-to-date=false`,
+				`MenuItem "semla" cafe.jacobcolvin.com/v1 up-to-date=true`,
+			},
+			err:     "config: pricey",
+			matches: []error{errPricey},
+		},
+		"check error bound in a whole file": {
+			files: map[string]string{"cafe.yaml": cafeDoc, "menu.yaml": menuDoc},
+			opts: []manifest.RegistryOption{manifest.WithCheck(func(_ context.Context, set *manifest.Set) error {
+				semla, ok := set.Get[MenuItem]("semla")
+				if !ok {
+					return errors.New("no semla")
+				}
+
+				return semla.Node.Source().Bind(errors.New("whole file"))
+			})},
+			want: []string{
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`MenuItem "kanelbulle" cafe.jacobcolvin.com/v1beta1 up-to-date=false`,
+				`MenuItem "semla" cafe.jacobcolvin.com/v1 up-to-date=true`,
+			},
+			err: "config/menu.yaml: whole file",
+		},
+		"failing document skips the checks of the set": {
+			files: map[string]string{"cafe.yaml": cafeDoc, "menu.yaml": menuDoc, "specials.yaml": specialsDoc},
+			opts:  []manifest.RegistryOption{failKanelbulle},
+			want: []string{
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`MenuItem "kanelbulle" cafe.jacobcolvin.com/v1beta1 up-to-date=false`,
+				`MenuItem "semla" cafe.jacobcolvin.com/v1 up-to-date=true`,
+			},
+			err:     `config/specials.yaml:2:7: $.kind: unknown kind "Menuitem"`,
+			matches: []error{manifest.ErrUnknownKind},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := newCafeRegistry(t, tc.opts...)
+			in := configFS(tc.files)
+
+			checked, err := reg.Check(t.Context(), in, tc.load...)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, listObjects(checked.Set()))
+			assert.Equal(t, checked.Warnings(), checked.Set().Warnings())
+
+			set, loadErr := reg.Load(t.Context(), in, tc.load...)
+
+			if tc.err != "" {
+				require.ErrorAs(t, checked.Err(), new(*manifest.LoadError))
+				assert.Equal(t, tc.err, firstLine(niceyaml.FormatError(checked.Err())))
+				require.NoError(t, checked.Warnings())
+
+				for _, m := range tc.matches {
+					require.ErrorIs(t, checked.Err(), m)
+				}
+
+				// Load returns the same error, and no set.
+				require.Error(t, loadErr)
+				assert.Nil(t, set)
+				assert.Equal(t, niceyaml.FormatError(checked.Err()), niceyaml.FormatError(loadErr))
+
+				return
+			}
+
+			require.NoError(t, checked.Err())
+			assert.Equal(t, tc.warns, firstLine(niceyaml.FormatError(checked.Warnings())))
+
+			for _, m := range tc.matches {
+				require.ErrorIs(t, checked.Warnings(), m)
+			}
+
+			require.NoError(t, loadErr)
+			assert.Equal(t, tc.want, listObjects(set))
+		})
+	}
+}
+
+func TestRegistry_Check_Fails(t *testing.T) {
+	t.Parallel()
+
+	files := map[string]string{"cafe.yaml": cafeDoc}
+
+	tcs := map[string]struct {
+		in     manifest.Input
+		err    error
+		cancel bool
+	}{
+		"ended context": {
+			in:     configFS(files),
+			cancel: true,
+			err:    context.Canceled,
+		},
+		"bad pattern": {
+			in:  configFS(files, manifest.WithExclude("[")),
+			err: matcher.ErrInvalidPattern,
+		},
+		"input path that does not exist": {
+			in:  manifest.Path(filepath.Join(t.TempDir(), "confg")),
+			err: fs.ErrNotExist,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithCancel(t.Context())
+			if tc.cancel {
+				cancel()
+			}
+
+			defer cancel()
+
+			checked, err := newCafeRegistry(t).Check(ctx, tc.in)
+			require.ErrorIs(t, err, tc.err)
+			assert.Nil(t, checked)
+		})
+	}
 }
 
 func TestRegistry_Load_Unversioned(t *testing.T) {
