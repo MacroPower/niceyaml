@@ -322,11 +322,11 @@ func isFloatScalar(node *niceyaml.Node, raw any) bool {
 // isPlain reports whether the decoder reads t as it reads the basic type
 // of its kind, which holds when t is no [time.Duration] and its pointer
 // implements no unmarshaler the decoder honors. The decoder reads an
-// UnmarshalJSON method only under [niceyaml.WithJSONUnmarshalers], which
-// a match never sets. Methods that play no part in decoding, such as a
-// String method, leave a type plain. A [time.Duration] decodes by a rule
-// of its own, as a type with an unmarshaler does, and a type defined on
-// one gets no such rule.
+// UnmarshalJSON method only when a [niceyaml.JSONUnmarshalers](true)
+// reaches the decode, and a match never passes one in its own options.
+// Methods that play no part in decoding, such as a String method, leave a
+// type plain. A [time.Duration] decodes by a rule of its own, as a type
+// with an unmarshaler does, and a type defined on one gets no such rule.
 func isPlain(t reflect.Type) bool {
 	return t != unmarshaler.DurationType &&
 		!slices.ContainsFunc(unmarshaler.Interfaces, reflect.PointerTo(t).Implements)

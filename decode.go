@@ -37,8 +37,7 @@ import (
 //   - [WithValueCheck]
 //   - [WithDisallowUnknownFields]
 //   - [WithAllowedFieldPrefixes]
-//   - [WithCustomUnmarshaler]
-//   - [WithJSONUnmarshalers]
+//   - [WithUnmarshaler]
 //   - [WithYAMLOrderedMaps]
 //   - [WithDefaults]
 //   - [DecodeOptions]
@@ -48,8 +47,8 @@ import (
 // that describes the documents, such as [WithReferences] or
 // [WithAliasLimit], belongs to the [Source], as the Decoding section of
 // the package documentation describes. A Source also gives every decode
-// of its documents the unmarshalers of [WithUnmarshalers], and the
-// options of the call apply over them.
+// of its documents the unmarshalers of [WithUnmarshalers], and those of
+// [WithUnmarshaler] in the call apply over them.
 type DecodeOption func(*decodeConfig)
 
 // decodeConfig holds the settings a [DecodeOption] configures. Its zero
@@ -77,15 +76,16 @@ type valueCheck struct {
 }
 
 // newDecodeConfig returns the settings of a decode of a document of s:
-// the defaults, with the options of [WithUnmarshalers] on s applied over
-// them, and then opts, each in order. A nil s stands for no document and
-// adds no option. The result shares nothing with any other decode.
+// the defaults, with the unmarshalers of [WithUnmarshalers] on s applied
+// over them, and then opts, each in order. A nil s stands for no document
+// and adds no unmarshaler. The result shares nothing with any other
+// decode.
 func newDecodeConfig(s *Source, opts []DecodeOption) decodeConfig {
 	var cfg decodeConfig
 
 	if s != nil {
-		for _, opt := range s.unmarshalers {
-			opt(&cfg)
+		for _, u := range s.unmarshalers {
+			u.applyTo(&cfg.unmarshalers)
 		}
 	}
 
@@ -231,8 +231,8 @@ func WithValueCheck[T any](fn func(ctx context.Context, v *T) error) DecodeOptio
 // The report misses an unknown field below a struct that decodes itself
 // into fields that do not mirror the document, unless the decoder names
 // it. It can also report a key that a function from
-// [yaml.RegisterCustomUnmarshaler] accepts. A function given to
-// [WithCustomUnmarshaler] has no such limit.
+// [yaml.RegisterCustomUnmarshaler] accepts. A function from
+// [CustomUnmarshaler] has no such limit.
 func WithDisallowUnknownFields(disallow bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.disallowUnknownFields = disallow
@@ -258,15 +258,48 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 	}
 }
 
-// WithCustomUnmarshaler is a [DecodeOption] that decodes every value of
-// type T with fn, for a type the program cannot give an UnmarshalYAML
+// Unmarshaler sets how the types of the program read YAML.
+// [CustomUnmarshaler] gives one type a function, and [JSONUnmarshalers]
+// turns the UnmarshalJSON methods of the types on or off. A program gives
+// its unmarshalers to the [Source] with [WithUnmarshalers], so every
+// decode of the documents applies them. A call applies its own over them
+// with [WithUnmarshaler]. Each place takes the same value. Below, a
+// Source takes cidr with WithUnmarshalers, and one call on a document of
+// another Source takes it with WithUnmarshaler:
+//
+//	cidr := niceyaml.CustomUnmarshaler(decodeCIDR)
+//
+//	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithUnmarshalers(cidr))
+//	nets, err := doc.Decode[[]net.IPNet](ctx, niceyaml.WithUnmarshaler(cidr))
+//
+// A decode applies its unmarshalers in order, those of the Source first.
+// A function for a type replaces the function that an earlier
+// Unmarshaler gave that type, and a nil function removes it. The last
+// JSONUnmarshalers applies. The zero Unmarshaler changes nothing.
+//
+// Create instances with [CustomUnmarshaler] or [JSONUnmarshalers].
+type Unmarshaler struct {
+	// Sets the unmarshaler in the settings of a decode, or nil for the
+	// zero Unmarshaler.
+	apply func(*unmarshaler.Options)
+}
+
+// applyTo sets the unmarshaler of u in o.
+func (u Unmarshaler) applyTo(o *unmarshaler.Options) {
+	if u.apply != nil {
+		u.apply(o)
+	}
+}
+
+// CustomUnmarshaler creates a new [Unmarshaler] that decodes every value
+// of type T with fn, for a type the program cannot give an UnmarshalYAML
 // method, such as one of another package. The decoder calls fn in place
 // of decoding the fields, elements, or entries of T, and ahead of any
 // unmarshaler method T has. A field of type *T decodes through fn too,
-// and a null leaves it nil without a call. The option below decodes a
-// [net.IPNet] from its CIDR text:
+// and a null leaves it nil without a call. The Unmarshaler below decodes
+// a [net.IPNet] from its CIDR text:
 //
-//	cidr := niceyaml.WithCustomUnmarshaler(func(ctx context.Context, n *net.IPNet, decode func(any) error) error {
+//	cidr := niceyaml.CustomUnmarshaler(func(ctx context.Context, n *net.IPNet, decode func(any) error) error {
 //		var s string
 //		if err := decode(&s); err != nil {
 //			return err
@@ -299,52 +332,57 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 // store, returns the error of a lookup that fails inside [Unchecked], so
 // [IsInvalid] does not report it.
 //
-// A program gives the function to the [Source] with [WithUnmarshalers],
+// A program gives the Unmarshaler to the Source with [WithUnmarshalers],
 // so every decode of the documents applies it, the decode inside a
-// [Validator] included. A later option for the same T replaces an earlier
-// one and the function the Source gives the type. A nil fn removes the
-// function that an earlier option or the Source gave the type, so a
-// library that gets a Source from its caller can read T by the methods of
-// the type alone. A pointer type T changes nothing. Give the function to
-// one of these options rather than to [yaml.RegisterCustomUnmarshaler],
-// whose types a decode cannot see.
-func WithCustomUnmarshaler[T any](fn func(ctx context.Context, v *T, decode func(any) error) error) DecodeOption {
-	return func(c *decodeConfig) {
-		t := reflect.TypeFor[T]()
-		if t.Kind() == reflect.Pointer {
-			return
-		}
+// [Validator] included. A nil fn removes the function that an earlier
+// Unmarshaler or the Source gave the type. A library that gets a Source
+// from its caller can thus read T by the methods of the type alone, when
+// it passes CustomUnmarshaler[T](nil) to [WithUnmarshaler]. Give the
+// function to CustomUnmarshaler rather than to
+// [yaml.RegisterCustomUnmarshaler], whose types a decode cannot see.
+//
+// CustomUnmarshaler panics for a pointer type T. The decoder reads a *T
+// through T, so the function for T already decodes a pointer to T.
+func CustomUnmarshaler[T any](fn func(ctx context.Context, v *T, decode func(any) error) error) Unmarshaler {
+	t := reflect.TypeFor[T]()
+	if t.Kind() == reflect.Pointer {
+		panic(fmt.Sprintf("niceyaml.CustomUnmarshaler: %v is a pointer type, "+
+			"which the decoder reads through the type it points to", t))
+	}
 
-		if fn == nil {
-			c.unmarshalers = c.unmarshalers.Without(t)
+	if fn == nil {
+		return Unmarshaler{apply: func(o *unmarshaler.Options) {
+			*o = o.Without(t)
+		}}
+	}
 
-			return
-		}
-
-		c.unmarshalers = c.unmarshalers.With(t, func(decode unmarshaler.ValueDecoder) yaml.DecodeOption {
-			return yaml.CustomUnmarshalerContext(func(ctx context.Context, v *T, text []byte) error {
-				err := fn(ctx, v, func(dst any) error {
-					// A decode into T would call fn for the same value again,
-					// and so on without end.
-					if dt := reflect.TypeOf(dst); dt != nil && unmarshaler.Base(dt) == t {
-						return fmt.Errorf("decode target is the type the function decodes: got %T", dst)
-					}
-
-					return decode(ctx, text, dst)
-				})
-				if err != nil {
-					return shieldedError{err: err}
+	opt := func(decode unmarshaler.ValueDecoder) yaml.DecodeOption {
+		return yaml.CustomUnmarshalerContext(func(ctx context.Context, v *T, text []byte) error {
+			err := fn(ctx, v, func(dst any) error {
+				// A decode into T calls fn again for the same value, so the
+				// recursion never ends.
+				if dt := reflect.TypeOf(dst); dt != nil && unmarshaler.Base(dt) == t {
+					return fmt.Errorf("decode target is the type the function decodes: got %T", dst)
 				}
 
-				return nil
+				return decode(ctx, text, dst)
 			})
+			if err != nil {
+				return shieldedError{err: err}
+			}
+
+			return nil
 		})
 	}
+
+	return Unmarshaler{apply: func(o *unmarshaler.Options) {
+		*o = o.With(t, opt)
+	}}
 }
 
-// shieldedError carries the error of a [WithCustomUnmarshaler] function
-// past the go-yaml decoder, which swaps an error that wraps a
-// [yaml.TypeError] for that TypeError. [decodeWithRecover] unwraps it.
+// shieldedError carries the error of a [CustomUnmarshaler] function past
+// the go-yaml decoder, which swaps an error that wraps a [yaml.TypeError]
+// for that TypeError. [decodeWithRecover] unwraps it.
 type shieldedError struct {
 	err error
 }
@@ -368,10 +406,10 @@ func (e shieldedError) As(target any) bool {
 	return errors.As(e.err, target)
 }
 
-// WithJSONUnmarshalers is a [DecodeOption] that sets whether a type with
-// an UnmarshalJSON method decodes through that method. The default is
-// false, and the decode then reads such a type by its fields, elements,
-// or entries, as it reads a type with no method.
+// JSONUnmarshalers creates a new [Unmarshaler] that sets whether a type
+// with an UnmarshalJSON method decodes through that method. A decode that
+// no JSONUnmarshalers(true) reaches reads such a type by its fields,
+// elements, or entries, as it reads a type with no method.
 //
 // When enabled, the decoder converts the node to JSON, with each alias
 // in the node written out in full, and hands the JSON to the method. It
@@ -386,13 +424,35 @@ func (e shieldedError) As(target any) bool {
 // the path of the struct.
 //
 // A program whose types read their documents through UnmarshalJSON gives
-// the option to the [Source] with [WithUnmarshalers], so every decode of
-// the documents applies it, the decode inside a [Validator] included. A
-// call that gets WithJSONUnmarshalers(false) turns the methods off for
-// that call alone.
-func WithJSONUnmarshalers(enabled bool) DecodeOption {
+// JSONUnmarshalers(true) to the [Source] with [WithUnmarshalers], so
+// every decode of the documents applies it, the decode inside a
+// [Validator] included. A call that gets JSONUnmarshalers(false) through
+// [WithUnmarshaler] turns the methods off for that call alone.
+func JSONUnmarshalers(enabled bool) Unmarshaler {
+	return Unmarshaler{apply: func(o *unmarshaler.Options) {
+		o.JSON = enabled
+	}}
+}
+
+// WithUnmarshaler is a [DecodeOption] that applies the unmarshalers us
+// to the decode, in order, over the unmarshalers that [WithUnmarshalers]
+// gives the [Source]. A call can thus replace or remove the function the
+// Source gives a type, or turn the JSON methods off for itself alone:
+//
+//	cfg, err := doc.Decode[Config](ctx, niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(false)))
+//
+// A program that reads every document of a Source with the same
+// unmarshalers gives them to the Source instead. A decode that this
+// option does not reach, such as one inside a [Validator], then applies
+// them too. WithUnmarshaler copies the slice us, so the option keeps its
+// unmarshalers when the caller changes the slice it passed.
+func WithUnmarshaler(us ...Unmarshaler) DecodeOption {
+	us = slices.Clone(us)
+
 	return func(c *decodeConfig) {
-		c.unmarshalers.JSON = enabled
+		for _, u := range us {
+			u.applyTo(&c.unmarshalers)
+		}
 	}
 }
 
@@ -436,11 +496,11 @@ func WithYAMLOrderedMaps(enabled bool) DecodeOption {
 // applies them too.
 //
 // [WithValidator], [WithValueCheck], and [WithAllowedFieldPrefixes] add to
-// what the options before them gave, and [WithCustomUnmarshaler] adds or
-// removes the function of a type. Every other option replaces what an
-// earlier one of its kind set. A call that gets the same DecodeOptions
-// twice thus runs each of its validators and each of its value checks
-// twice.
+// what the options before them gave, and [WithUnmarshaler] applies its
+// unmarshalers over the earlier ones, as [Unmarshaler] describes. Every
+// other option replaces what an earlier one of its kind set. A call that
+// gets the same DecodeOptions twice thus runs each of its validators and
+// each of its value checks twice.
 //
 // DecodeOptions copies opts, so the result keeps its options when the
 // caller changes the slice it passed. A nil DecodeOption among opts
@@ -600,7 +660,7 @@ func (n *Node) newDecoder(cfg decodeConfig, extra ...yaml.DecodeOption) *yaml.De
 	return yaml.NewDecoder(bytes.NewReader(nil), append(opts, extra...)...)
 }
 
-// decodeValue decodes text, the value a [WithCustomUnmarshaler] function
+// decodeValue decodes text, the value a [CustomUnmarshaler] function
 // got, into dst with cfg, as a [Source] of its own with no [Validator].
 // [valueError] rewrites the error for the outer decode to place.
 func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decodeConfig) error {

@@ -224,9 +224,9 @@
 //
 // A hook is code of the caller that a decode runs on one value. Each
 // [SelfValidator], UnmarshalYAML or UnmarshalText method,
-// [WithCustomUnmarshaler] function, and [WithValueCheck] function is a
-// hook. The decode presumes the document at fault for an error a hook
-// returns that declares nothing, a plain I/O error included. Such an error
+// [CustomUnmarshaler] function, and [WithValueCheck] function is a hook.
+// The decode presumes the document at fault for an error a hook returns
+// that declares nothing, a plain I/O error included. Such an error
 // from an unmarshaler matches ErrDecode too. A check thus keeps its
 // faults when it moves from one hook to another. A [Validator] checks a
 // node before the decode and is not a hook. It declares its own faults, so
@@ -516,15 +516,16 @@
 // outside it, and an alias with no such anchor reads one of a reference
 // document.
 //
-// The options of [WithCustomUnmarshaler] and [WithJSONUnmarshalers] state
-// how the types of the program read YAML, so a program gives them to the
-// Source with [WithUnmarshalers]. Every decode of the documents then
+// The [Unmarshaler] values from [CustomUnmarshaler] and [JSONUnmarshalers]
+// set how the types of the program read YAML, so a program gives them to
+// the Source with [WithUnmarshalers]. Every decode of the documents then
 // applies them, wherever it runs. That covers a decode inside a
-// [Validator], the decode function a WithCustomUnmarshaler function gets,
-// the map keys [Node.SelfValidate] spells, and a decode in code that did
-// not build the Source, such as a library the program hands it to. The
-// options of a call apply over them, so a call can replace or remove the
-// function of a type and turn the JSON methods off.
+// [Validator], the decode function a CustomUnmarshaler function gets, and
+// the map keys [Node.SelfValidate] spells. It also covers a decode in
+// code that did not build the Source, such as a library the program hands
+// it to. The unmarshalers of [WithUnmarshaler] in a call apply over them,
+// so a call can replace or remove the function of a type and turn the
+// JSON methods off.
 //
 // A value the decoder rejects returns an error that matches [ErrDecode] and
 // carries the `$` path of the value, and the message describes the document
@@ -565,7 +566,7 @@
 //
 // The decoder returns the error of a value that decodes itself with no token
 // of the source. Such a value has an unmarshaler method the decoder calls, a
-// function from [WithCustomUnmarshaler], or the type [time.Duration]. The
+// function from [CustomUnmarshaler], or the type [time.Duration]. The
 // decode decodes each such value again, in the order the decoder reads them,
 // and binds the error at the first that fails the same way, or at the
 // deepest value inside it that also fails that way:
@@ -617,7 +618,7 @@
 // points to a value, such as one that a function of WithDefaults sets,
 // starts from that value. The value it pointed to stays as it was. A value
 // that decodes itself, through an unmarshaler method or a
-// [WithCustomUnmarshaler] function, starts from its defaults too. Its
+// [CustomUnmarshaler] function, starts from its defaults too. Its
 // method decides what to keep.
 //
 // The value at an alias starts from the defaults of its own place. The
@@ -807,7 +808,7 @@
 // # Cancellation
 //
 // The context of a call reaches every [Validator] the call runs and every
-// function from [WithCustomUnmarshaler] and [WithValueCheck]. A check that
+// function from [CustomUnmarshaler] and [WithValueCheck]. A check that
 // does remote work, such as resolving a schema reference, thus stops when
 // the caller cancels the context.
 //
@@ -1156,7 +1157,7 @@
 // calls, comes back as a [PanicError] that matches none of them.
 //
 // The go-yaml settings niceyaml supports have named options, such as
-// [WithAllowDuplicateKeys], [WithCustomUnmarshaler], or
+// [WithAllowDuplicateKeys], [WithUnmarshaler], or
 // [go.jacobcolvin.com/niceyaml/encoder.WithIndent]. A parse and a decode
 // take named options alone, so niceyaml knows what each one changes and
 // applies it to every decoder a call runs. An option or a method that

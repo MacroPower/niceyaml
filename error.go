@@ -73,8 +73,8 @@ var (
 	// The error of a context that ended does not match, even when an
 	// unmarshaler wraps it. Neither does a [PanicError], [ErrDecodeTarget],
 	// or [ErrExcessiveAliasing]. An error from [Unchecked] that an
-	// unmarshaler or a [WithCustomUnmarshaler] function returns does not
-	// match either. Neither does an error that a [Validator], a
+	// unmarshaler or a [CustomUnmarshaler] function returns does not match
+	// either. Neither does an error that a [Validator], a
 	// [SelfValidator], or a function from [WithValueCheck] reports about
 	// the value it checks.
 	// Text the parser rejects matches [ErrSyntax] instead. [ErrUnknownField],
@@ -102,8 +102,8 @@ var (
 	// not the go-yaml error behind it. A problem that keeps the text of
 	// go-yaml or of an unmarshaler matches no label, such as an alias with
 	// no anchor or text that does not parse as a [time.Duration]. A
-	// [WithCustomUnmarshaler] function that returns or wraps the rejection
-	// of its decode function keeps the label of that rejection.
+	// [CustomUnmarshaler] function that returns or wraps the rejection of
+	// its decode function keeps the label of that rejection.
 	//
 	// [errors.Is] reports whether any problem of an error matches a
 	// label, so a caller that sorts the problems of a decode tests the Err
@@ -3472,7 +3472,7 @@ func checkInRange(loc location, lines line.Lines) error {
 // it. The message leaves the stack out.
 //
 // The go-yaml parser and decoder run under a recover, and so do the
-// UnmarshalYAML and UnmarshalText methods and the [WithCustomUnmarshaler]
+// UnmarshalYAML and UnmarshalText methods and the [CustomUnmarshaler]
 // functions the decoder calls. A panic in any of them comes back as a
 // [SourceError] that holds a PanicError, with a message such as "decoder
 // panicked: registry not initialized":

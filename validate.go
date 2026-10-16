@@ -46,11 +46,11 @@ import (
 // To spell each map key as the document does, the walk decodes the keys
 // with the settings of the [Source], the unmarshalers of
 // [WithUnmarshalers] among them, and with the options in opts that say
-// how a value decodes: [WithCustomUnmarshaler], [WithJSONUnmarshalers],
-// [WithDisallowUnknownFields], [WithAllowedFieldPrefixes], and
-// [WithYAMLOrderedMaps]. It reads no other option. A program that gives
-// its unmarshalers to the Source thus passes none of them here, and a
-// caller passes the other options of the decode again.
+// how a value decodes: [WithUnmarshaler], [WithDisallowUnknownFields],
+// [WithAllowedFieldPrefixes], and [WithYAMLOrderedMaps]. It reads no
+// other option. A program that gives its unmarshalers to the Source thus
+// passes none of them here, and a caller passes the other options of the
+// decode again.
 //
 // In a document that did not parse, every error binds with no position,
 // and SelfValidate returns those errors rather than the syntax error
@@ -99,11 +99,11 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // SelfValidateValue runs each function of [WithValueCheck] in opts on the
 // values of its type, as Node.SelfValidate does, so a server checks the
 // body of a request with the functions it gives a decode. It knows a type
-// that decodes itself by its own unmarshaler method, and by
-// [WithCustomUnmarshaler] and [WithJSONUnmarshalers] in opts. It reads no
-// other option. The value has no [Source], so the unmarshalers of
-// [WithUnmarshalers] do not reach the walk, and a caller passes them in
-// opts.
+// that decodes itself by its own unmarshaler method, and by the
+// unmarshalers of [WithUnmarshaler] in opts. It reads no other option.
+// The value has no [Source], so the unmarshalers of [WithUnmarshalers] do
+// not reach the walk, and a caller passes them in opts with
+// WithUnmarshaler.
 //
 // A Validate whose value holds fields a decode does not reach, such as
 // one tagged `yaml:"-"`, validates them with SelfValidateValue and

@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"sync"
 
@@ -26,7 +25,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
-	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -148,9 +146,10 @@ type sourceConfig struct {
 	// Holds the text of each reference document from WithReferences, in
 	// the order every decode reads them.
 	references [][]byte
-	// Holds the options of WithUnmarshalers, in the order given, which
-	// every decode of the documents applies ahead of its own options.
-	unmarshalers []DecodeOption
+	// Holds the unmarshalers of WithUnmarshalers, in the order given,
+	// which every decode of the documents applies ahead of its own
+	// options.
+	unmarshalers []Unmarshaler
 	// The limits from WithByteLimit and WithDepthLimit, each when its
 	// option set it, where zero turns the check off.
 	depthLimit int
@@ -482,11 +481,10 @@ func WithReferences(refs ...*Source) SourceOption {
 }
 
 // WithUnmarshalers is a [SourceOption] that gives every decode of the
-// documents of the [Source] the unmarshalers opts set, which state how
-// the types of the program read YAML. Each decode applies opts first and
-// its own options over them, as though the call got opts ahead of its
-// own. With the cidr option that [WithCustomUnmarshaler] shows, every
-// decode of the file reads a [net.IPNet] from its CIDR text:
+// documents of the [Source] the unmarshalers us, which set how the types
+// of the program read YAML. With the cidr [Unmarshaler] that
+// [CustomUnmarshaler] shows, every decode of the file reads a
+// [net.IPNet] from its CIDR text:
 //
 //	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithUnmarshalers(cidr))
 //
@@ -494,49 +492,31 @@ func WithReferences(refs ...*Source) SourceOption {
 // covers [Node.Decode], [Node.DecodeInto], [Node.DecodeAt],
 // [Node.DecodeIfPresent], [Source.Decode], [Source.DecodeInto], the
 // decode a [Validator] runs on the Node it gets, and the decode function
-// that a WithCustomUnmarshaler function gets. [Node.SelfValidate] and
+// that a CustomUnmarshaler function gets. [Node.SelfValidate] and
 // [Source.SelfValidate] spell each map key with them. They also reach a
 // decode in code that did not build the Source, such as a library the
 // program hands the Source to. [SelfValidateValue] reads no Source, so
 // none of them reach it.
 //
-// A call can override or remove them. A WithCustomUnmarshaler that the
-// call gets for a type replaces the function the Source gives that type,
-// and one with a nil function removes it. A call that gets
-// WithJSONUnmarshalers(false) turns the methods off for that call alone.
+// Each decode applies the unmarshalers us first, and the unmarshalers of
+// [WithUnmarshaler] in the call apply over them. A call can thus replace
+// the function the Source gives a type, or remove it with a nil
+// function. It can also turn the UnmarshalJSON methods off with
+// JSONUnmarshalers(false). Each such change holds for that call alone.
 //
-// The opts must be WithCustomUnmarshaler and [WithJSONUnmarshalers]
-// options, or [DecodeOptions] values that hold those alone.
-// WithUnmarshalers applies opts when it is called, and panics there when
-// they change any other setting from its default. Each other setting,
-// such as the validator of [WithValidator] or the strictness of
-// [WithDisallowUnknownFields], depends on the target of one decode. A nil
-// DecodeOption among opts panics too. Each WithUnmarshalers adds to the
-// ones before it, as the options of one call do, so a later function for
-// a type replaces an earlier one and the last WithJSONUnmarshalers
-// applies.
+// Each WithUnmarshalers adds to the ones before it, as the options of one
+// call do, so a later function for a type replaces an earlier one and the
+// last [JSONUnmarshalers] applies. WithUnmarshalers copies the slice us,
+// so the option keeps its unmarshalers when the caller changes the slice
+// it passed.
 //
 // A Source from [NewSourceFromLayers] takes the unmarshalers of the layer
 // [MergeAs] names, or else of the lowest layer.
-func WithUnmarshalers(opts ...DecodeOption) SourceOption {
-	opts = slices.Clone(opts)
-
-	var cfg decodeConfig
-
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-
-	// The check reads every field of decodeConfig but the unmarshalers, so
-	// it covers each field that decodeConfig gains.
-	cfg.unmarshalers = unmarshaler.Options{}
-	if !reflect.ValueOf(cfg).IsZero() {
-		panic("niceyaml.WithUnmarshalers: an option sets more than an unmarshaler, " +
-			"and a Source takes WithCustomUnmarshaler and WithJSONUnmarshalers alone")
-	}
+func WithUnmarshalers(us ...Unmarshaler) SourceOption {
+	us = slices.Clone(us)
 
 	return func(c *sourceConfig) {
-		c.unmarshalers = slices.Concat(c.unmarshalers, opts)
+		c.unmarshalers = slices.Concat(c.unmarshalers, us)
 	}
 }
 

@@ -860,7 +860,7 @@ func TestNewSourceFromLayers_Decode_Options(t *testing.T) {
 		Backup plainLevel `yaml:"backup"`
 	}
 
-	levels := niceyaml.WithCustomUnmarshaler(decodeLevel)
+	levels := niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(decodeLevel))
 
 	// The options reach the one decode of the merged document, so the
 	// function decodes a level whichever layer holds it, and its error
@@ -2639,7 +2639,7 @@ func TestMergeAs(t *testing.T) {
 			Level plainLevel `yaml:"level"`
 		}
 
-		levels := niceyaml.WithUnmarshalers(niceyaml.WithCustomUnmarshaler(decodeLevel))
+		levels := niceyaml.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeLevel))
 
 		// The level lies in the lowest layer, and decodes from its name
 		// only through the function.

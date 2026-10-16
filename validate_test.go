@@ -149,7 +149,7 @@ var (
 	errLoop = errors.New("loop")
 
 	// Decodes a grade from its name, the only form a document gives it.
-	gradeNames = niceyaml.WithCustomUnmarshaler(func(_ context.Context, g *grade, decode func(any) error) error {
+	gradeNames = niceyaml.CustomUnmarshaler(func(_ context.Context, g *grade, decode func(any) error) error {
 		var name string
 
 		err := decode(&name)
@@ -269,15 +269,17 @@ var (
 // a decode into a typed value, the keys of its maps among them, and
 // counts its calls in n.
 func countStrings(n *int) niceyaml.DecodeOption {
-	return niceyaml.WithCustomUnmarshaler(func(_ context.Context, s *string, decode func(any) error) error {
-		// The function decodes a string, so its decode reads a second
-		// type that the function does not decode.
-		type text string
+	return niceyaml.WithUnmarshaler(
+		niceyaml.CustomUnmarshaler(func(_ context.Context, s *string, decode func(any) error) error {
+			// The function decodes a string, so its decode reads a second
+			// type that the function does not decode.
+			type text string
 
-		*n++
+			*n++
 
-		return decode((*text)(s))
-	})
+			return decode((*text)(s))
+		}),
+	)
 }
 
 // Hours is hours under an exported name, for embedding without a tag.
@@ -2535,12 +2537,14 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		// path of that close, so each error binds at the value the option
 		// gives an unmarshaler.
 		opts := niceyaml.DecodeOptions(
-			niceyaml.WithCustomUnmarshaler(func(_ context.Context, o *optionDecodedHours, _ func(any) error) error {
-				o.Inner = hours{Open: "17:00", Close: "09:00"}
+			niceyaml.WithUnmarshaler(
+				niceyaml.CustomUnmarshaler(func(_ context.Context, o *optionDecodedHours, _ func(any) error) error {
+					o.Inner = hours{Open: "17:00", Close: "09:00"}
 
-				return nil
-			}),
-			niceyaml.WithJSONUnmarshalers(true),
+					return nil
+				}),
+			),
+			niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true)),
 		)
 
 		want := stringtest.JoinLF(
@@ -2587,7 +2591,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "shop: anything\n")
 
-		_, err := dd.Decode[map[string]*embedsJSON](t.Context(), niceyaml.WithJSONUnmarshalers(true))
+		_, err := dd.Decode[map[string]*embedsJSON](
+			t.Context(),
+			niceyaml.WithUnmarshaler(niceyaml.JSONUnmarshalers(true)),
+		)
 		require.EqualError(t, err, "1:7: $.shop.inner.close: closes before it opens")
 	})
 
@@ -3166,7 +3173,7 @@ func TestNode_SelfValidate_KeyOptions(t *testing.T) {
 		err  string
 	}{
 		"the options of the decode match the key of the document": {
-			opts: []niceyaml.DecodeOption{gradeNames},
+			opts: []niceyaml.DecodeOption{niceyaml.WithUnmarshaler(gradeNames)},
 			err:  `app.yaml:2:15: $.by_grade.high.url: url "ftp://h" is not http`,
 		},
 		"without them, the error binds at the key of the map": {
@@ -3182,7 +3189,12 @@ func TestNode_SelfValidate_KeyOptions(t *testing.T) {
 
 			var cfg gradedConfig
 
-			err := doc.DecodeInto(t.Context(), &cfg, gradeNames, niceyaml.WithSelfValidation(false))
+			err := doc.DecodeInto(
+				t.Context(),
+				&cfg,
+				niceyaml.WithUnmarshaler(gradeNames),
+				niceyaml.WithSelfValidation(false),
+			)
 			require.NoError(t, err)
 
 			cfg.ByGrade[gradeHigh] = upstream{URL: "ftp://h"}
@@ -3266,7 +3278,7 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 				by_grade:
 				  high: {url: ftp://h}
 			`),
-			opts: []niceyaml.DecodeOption{gradeNames},
+			opts: []niceyaml.DecodeOption{niceyaml.WithUnmarshaler(gradeNames)},
 			err:  `2:15: $.by_grade.high.url: url "ftp://h" is not http`,
 		},
 		// SelfValidate decodes the keys with the references of the source,
@@ -3932,7 +3944,7 @@ func TestSelfValidateValue_Options(t *testing.T) {
 		}
 	})
 
-	// A function from WithCustomUnmarshaler sorts the numbers, so their
+	// A function from CustomUnmarshaler sorts the numbers, so their
 	// indices need not match the document, and an error below them binds
 	// at the list.
 	t.Run("reads the unmarshalers it gets", func(t *testing.T) {
@@ -3944,20 +3956,22 @@ func TestSelfValidateValue_Options(t *testing.T) {
 			Nums sortedNums `yaml:"nums"`
 		}
 
-		sorted := niceyaml.WithCustomUnmarshaler(func(_ context.Context, s *sortedNums, decode func(any) error) error {
-			var nums []int
+		sorted := niceyaml.WithUnmarshaler(
+			niceyaml.CustomUnmarshaler(func(_ context.Context, s *sortedNums, decode func(any) error) error {
+				var nums []int
 
-			err := decode(&nums)
-			if err != nil {
-				return err
-			}
+				err := decode(&nums)
+				if err != nil {
+					return err
+				}
 
-			slices.Sort(nums)
+				slices.Sort(nums)
 
-			*s = nums
+				*s = nums
 
-			return nil
-		})
+				return nil
+			}),
+		)
 
 		small := niceyaml.WithValueCheck(func(_ context.Context, n *int) error {
 			if *n > 2 {
@@ -4370,14 +4384,14 @@ func (s *selfDecodingText) Validate() error {
 }
 
 // optionDecodedHours has no unmarshaler method. A function from
-// niceyaml.WithCustomUnmarshaler decodes it, so its fields need not
+// niceyaml.CustomUnmarshaler decodes it, so its fields need not
 // mirror the document.
 type optionDecodedHours struct {
 	Inner hours `yaml:"inner"`
 }
 
 // jsonDecodedHours decodes itself from JSON under
-// niceyaml.WithJSONUnmarshalers, so its fields need not mirror the
+// niceyaml.JSONUnmarshalers, so its fields need not mirror the
 // document. It fills Inner with hours that close before they open, at a
 // path the document does not hold.
 type jsonDecodedHours struct {

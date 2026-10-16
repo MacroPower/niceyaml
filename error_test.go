@@ -10839,7 +10839,7 @@ func TestUnchecked(t *testing.T) {
 				},
 				want: "cfg.yaml:4:10: $.license: stat license: permission denied",
 			},
-			"WithCustomUnmarshaler function": {
+			"CustomUnmarshaler function": {
 				decode: func(ctx context.Context) error {
 					return errOf(doc.Decode[struct {
 						License licenseRef `yaml:"license"`
@@ -11185,7 +11185,7 @@ func TestLocate(t *testing.T) {
 				},
 				want: "cfg.yaml:4:10: $.license: stat license: permission denied",
 			},
-			"WithCustomUnmarshaler function": {
+			"CustomUnmarshaler function": {
 				decode: func(ctx context.Context) error {
 					return errOf(doc.Decode[struct {
 						License licenseRef `yaml:"license"`
@@ -11363,7 +11363,7 @@ func (*uncheckedUnmarshaler) UnmarshalYAML([]byte) error {
 	return niceyaml.Unchecked(errLicense)
 }
 
-// licenseRef is a value that a [niceyaml.WithCustomUnmarshaler] function
+// licenseRef is a value that a [niceyaml.CustomUnmarshaler] function
 // decodes, so each test picks the error its decode returns.
 type licenseRef string
 
@@ -11372,9 +11372,11 @@ type licenseRef string
 // function of the value, so its error can wrap a rejection of that
 // function.
 func withLicenseCheck(check func(decode func(any) error) error) niceyaml.DecodeOption {
-	return niceyaml.WithCustomUnmarshaler(func(_ context.Context, _ *licenseRef, decode func(any) error) error {
-		return check(decode)
-	})
+	return niceyaml.WithUnmarshaler(
+		niceyaml.CustomUnmarshaler(func(_ context.Context, _ *licenseRef, decode func(any) error) error {
+			return check(decode)
+		}),
+	)
 }
 
 // invalidConfig is a target the decodes of [TestIsInvalid] reject.
@@ -11690,7 +11692,7 @@ func TestIsInvalid(t *testing.T) {
 			}](t.Context())),
 			is: fs.ErrPermission,
 		},
-		"WithCustomUnmarshaler Unchecked of an I/O error": {
+		"CustomUnmarshaler Unchecked of an I/O error": {
 			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
 				V licenseRef `yaml:"v"`
 			}](t.Context(), withLicenseCheck(func(func(any) error) error {
@@ -11698,7 +11700,7 @@ func TestIsInvalid(t *testing.T) {
 			}))),
 			is: fs.ErrNotExist,
 		},
-		"WithCustomUnmarshaler Invalid of Unchecked of an I/O error": {
+		"CustomUnmarshaler Invalid of Unchecked of an I/O error": {
 			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
 				V licenseRef `yaml:"v"`
 			}](t.Context(), withLicenseCheck(func(func(any) error) error {
@@ -11707,7 +11709,7 @@ func TestIsInvalid(t *testing.T) {
 			is:   fs.ErrNotExist,
 			want: true,
 		},
-		"WithCustomUnmarshaler Unchecked of NewError": {
+		"CustomUnmarshaler Unchecked of NewError": {
 			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
 				V licenseRef `yaml:"v"`
 			}](t.Context(), withLicenseCheck(func(func(any) error) error {
@@ -11715,7 +11717,7 @@ func TestIsInvalid(t *testing.T) {
 			}))),
 			want: true,
 		},
-		"WithCustomUnmarshaler Unchecked of a rejection of its decode function": {
+		"CustomUnmarshaler Unchecked of a rejection of its decode function": {
 			// The rejection is a fault of its own, so the Unchecked keeps it.
 			err: errOf(yamltest.FirstDocument(t, "v: x\n").Decode[struct {
 				V licenseRef `yaml:"v"`
@@ -12448,12 +12450,12 @@ func TestPanicError_Recovered(t *testing.T) {
 		// matches through errors.As.
 		runtimeErr bool
 	}{
-		"function from WithCustomUnmarshaler": {
+		"function from CustomUnmarshaler": {
 			input:  "name: x\n",
 			source: []niceyaml.SourceOption{niceyaml.WithName("c.yaml")},
-			decode: decodeAs[config](niceyaml.WithCustomUnmarshaler(
+			decode: decodeAs[config](niceyaml.WithUnmarshaler(niceyaml.CustomUnmarshaler(
 				func(context.Context, *config, func(any) error) error { panic(errRegistry) },
-			)),
+			))),
 			is:   errRegistry,
 			want: "c.yaml:1:1: decoder panicked: registry not initialized",
 		},
