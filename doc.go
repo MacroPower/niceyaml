@@ -42,10 +42,15 @@
 // [Node] of each YAML document in the file from [Source.Documents], and
 // binds the errors it and its Nodes produce to itself. [Node.Bind] binds
 // errors built elsewhere to that document, and [Source.Bind] binds one to
-// the document its location falls in. The Source keeps the text it read.
-// [Source.Text] returns that text byte for byte, and [Source.Offset]
-// converts a position in its lines to a byte offset in the text, for a
-// program that edits the file in place.
+// the document its location falls in.
+//
+// The Source keeps the text it read. [Source.Text] returns that text byte
+// for byte, and [Source.Offset] converts a position in its lines to a
+// byte offset in the text. A program that replaces a scalar on one line
+// can splice the text at those offsets. The
+// [go.jacobcolvin.com/niceyaml/edit] package renames keys and sets,
+// moves, and removes values, and it keeps every byte that an edit leaves
+// alone.
 //
 // [line.Lines] is the content, the tokens organized into lines, and it never changes.
 // [line.View] is one rendering of that content. It shares the lines and carries the
