@@ -112,6 +112,9 @@ func newDecodeConfig(s *Source, opts []DecodeOption) decodeConfig {
 //
 // An empty document validates as any other. [SkipEmpty] wraps a
 // validator that should pass one, so the decode returns the zero value.
+//
+// [Node.SelfValidate], [Source.SelfValidate], and [SelfValidateValue]
+// run no validator, so a WithValidator they get changes nothing.
 func WithValidator(dv Validator) DecodeOption {
 	return func(c *decodeConfig) {
 		c.validators = append(c.validators, dv)
