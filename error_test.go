@@ -1931,8 +1931,8 @@ func TestError_MultiError(t *testing.T) {
 					yamltest.ErrorAt("error2", "key"),
 				),
 			),
-			// Errors on the same line combine with "; ".
-			want: []string{"error1; error2"},
+			// Each error on the same line gets a row under its own range.
+			want: []string{"^^^ error1<", "     ^^^^^ error2<"},
 		},
 		"nested errors on same line out of column order": {
 			source: "key: [alpha, beta]",
@@ -1942,8 +1942,8 @@ func TestError_MultiError(t *testing.T) {
 				niceyaml.NewError("bad beta", niceyaml.AtPath(keyPath.Index(1))),
 				niceyaml.NewError("bad alpha", niceyaml.AtPath(keyPath.Index(0))),
 			),
-			// The joined messages follow the column order of the carets.
-			want: []string{"^ bad alpha; bad beta"},
+			// The rows follow the column order of the carets.
+			want: []string{"^^^^^ bad alpha<", "<textError>             ^^^^ bad beta<"},
 		},
 		"nested errors that repeat a message": {
 			source: "key: [alpha, beta]",
@@ -1954,9 +1954,9 @@ func TestError_MultiError(t *testing.T) {
 				niceyaml.NewError("too long", niceyaml.AtPath(keyPath.Index(0))),
 				niceyaml.NewError("no digit", niceyaml.AtPath(keyPath.Index(0))),
 			),
-			// The message reads once at the column it repeats at, and again
-			// at the other column.
-			want: []string{"^ too long; no digit; too long<"},
+			// The message reads once on the range it repeats on, joined
+			// with the other message there, and again on the other range.
+			want: []string{"^^^^^ too long; no digit<", "<textError>             ^^^^ too long<"},
 		},
 		"nested error with direct token": {
 			source: pair,
@@ -2861,7 +2861,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			wantContains: []string{"line2", "line3", "line4"},
 			wantNot:      []string{"line1", "line5"},
 		},
-		"nested errors on one line share an annotation": {
+		"nested errors on one line get a row each": {
 			source: numbered(3),
 			err: niceyaml.NewSummary(
 				"validation error",
@@ -2870,7 +2870,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			),
 			lines: 0,
 			// The excerpt shows line2 with both errors.
-			wantContains: []string{"line2", "error 1; error 2"},
+			wantContains: []string{"line2", "^^^^^ error 1", "       ^ error 2"},
 		},
 		"distant errors show separate hunks with separator": {
 			source: numbered(10),
@@ -3179,7 +3179,8 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 				"    wrap when the width is limited",
 				"",
 				"key: value",
-				"^^^  ^^^^^ this is a very long error",
+				"^^^",
+				"     ^^^^^ this is a very long error",
 				"           message that should",
 				"           definitely wrap when the",
 				"           width is limited",
@@ -3195,7 +3196,8 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 				"└── 1:6: $.key: this is a very long error message that should not wrap",
 				"",
 				"key: value",
-				"^^^  ^^^^^ this is a very long error message that should not wrap",
+				"^^^",
+				"     ^^^^^ this is a very long error message that should not wrap",
 				"other: data",
 			),
 		},
@@ -3208,7 +3210,8 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 				"└── 1:6: $.key: short error",
 				"",
 				"key: value",
-				"^^^  ^^^^^ short error",
+				"^^^",
+				"     ^^^^^ short error",
 				"other: data",
 			),
 		},
@@ -3244,8 +3247,8 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 				"      testing wrap behavior",
 			),
 		},
-		// Multiple errors on the same line combine with "; ".
-		"annotations combined on one line wrap": {
+		// Each error on the same line gets a row of its own.
+		"annotations on one line each wrap": {
 			source: "key: value",
 			width:  40,
 			err: niceyaml.NewError("validation failed", niceyaml.AtPath(keyPath.Key()), niceyaml.WithDetails(
@@ -3260,8 +3263,8 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 				"    here",
 				"",
 				"key: value",
-				"^^^  ^^^^^ first error message here;",
-				"           second error message here",
+				"^^^ first error message here",
+				"     ^^^^^ second error message here",
 			),
 		},
 	}
@@ -3772,7 +3775,8 @@ func TestError_NestedErrorChains(t *testing.T) {
 		))
 
 		_, detail := renderParts(err)
-		assert.Contains(t, detail, "^ inner; also")
+		assert.Contains(t, detail, "^ inner")
+		assert.Contains(t, detail, "^ also")
 		assert.NotContains(t, detail, "2:1:")
 		assert.NotContains(t, detail, "$.b")
 	})
@@ -4764,18 +4768,20 @@ func TestSourceError_Excerpt(t *testing.T) {
 		excerpt := requireExcerpt(t, bound, niceyaml.WithContextLines(0))
 
 		assert.Equal(t, line.Annotations{
-			yamltest.ErrorAnnotation(5, "about value"),
-			yamltest.ErrorAnnotation(0, "about key"),
+			yamltest.ErrorAnnotation(position.NewSpan(5, 10), "about value"),
+			yamltest.ErrorAnnotation(position.NewSpan(0, 3), "about key"),
 		}, excerpt.Annotations(0))
 		assert.Equal(t,
 			yamltest.ErrorOverlays(position.NewSpan(5, 10), position.NewSpan(0, 3)),
 			excerpt.Overlays(0),
 		)
 
-		// A renderer joins the messages in the order of their columns.
+		// A renderer gives each message a row beside the carets of its own
+		// range, in the order of their columns.
 		assert.Equal(t, stringtest.JoinLF(
 			"   1 | key: value",
-			"     | ^^^  ^^^^^ about key; about value",
+			"     | ^^^ about key",
+			"     |      ^^^^^ about value",
 		), excerpt.String())
 	})
 
@@ -4864,7 +4870,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 				err: niceyaml.NewError("top", niceyaml.WithDetails(
 					niceyaml.NewError("far", niceyaml.AtPosition(far)),
 				)),
-				want:    line.Annotations{yamltest.ErrorAnnotation(4, "far")},
+				want:    line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(4, 4), "far")},
 				row:     "     |     ^ far",
 				printed: "<textError>    ^ far</textError>",
 			},
@@ -4872,13 +4878,13 @@ func TestSourceError_Excerpt(t *testing.T) {
 				err: niceyaml.NewError("top", niceyaml.WithDetails(
 					niceyaml.NewError("far", niceyaml.AtRange(position.NewRange(far, position.New(0, far.Col+2)))),
 				)),
-				want:    line.Annotations{yamltest.ErrorAnnotation(4, "far")},
+				want:    line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(4, 4), "far")},
 				row:     "     |     ^ far",
 				printed: "<textError>    ^ far</textError>",
 			},
 			"root position": {
 				err:     niceyaml.NewError("far", niceyaml.AtPosition(far)),
-				want:    line.Annotations{yamltest.ErrorAnnotation(4, "")},
+				want:    line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(4, 4), "")},
 				row:     "     |     ^",
 				printed: "<textError>    ^</textError>",
 			},
@@ -4908,12 +4914,12 @@ func TestSourceError_Excerpt(t *testing.T) {
 
 		assert.Equal(
 			t,
-			line.Annotations{yamltest.ErrorAnnotation(3, "bad h")},
+			line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(3, 4), "bad h")},
 			excerpt.Annotations(7).Filter(line.Below),
 		)
 		assert.Equal(
 			t,
-			line.Annotations{yamltest.ErrorAnnotation(3, "")},
+			line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(3, 4), "")},
 			excerpt.Annotations(1),
 			"the main error has no message of its own, so its line carries a marker alone",
 		)
@@ -4994,8 +5000,16 @@ func TestSourceError_Annotate(t *testing.T) {
 		want := yamltest.ErrorOverlays(position.NewSpan(3, 4))
 		assert.Equal(t, want, view.Overlays(1))
 		assert.Equal(t, want, view.Overlays(7))
-		assert.Equal(t, line.Annotations{yamltest.ErrorAnnotation(3, "bad b")}, view.Annotations(1))
-		assert.Equal(t, line.Annotations{yamltest.ErrorAnnotation(3, "bad h")}, view.Annotations(7))
+		assert.Equal(
+			t,
+			line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(3, 4), "bad b")},
+			view.Annotations(1),
+		)
+		assert.Equal(
+			t,
+			line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(3, 4), "bad h")},
+			view.Annotations(7),
+		)
 
 		assertUnmarked(t, view, 1, 7)
 
@@ -5005,7 +5019,11 @@ func TestSourceError_Annotate(t *testing.T) {
 		excerpt := requireExcerpt(t, bound, niceyaml.WithContextLines(0))
 		assert.Equal(t, view.Overlays(1), excerpt.Overlays(1))
 		assert.Equal(t, view.Overlays(7), excerpt.Overlays(7))
-		assert.Equal(t, line.Annotations{yamltest.ErrorAnnotation(3, "")}, excerpt.Annotations(1).Filter(line.Below))
+		assert.Equal(
+			t,
+			line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(3, 4), "")},
+			excerpt.Annotations(1).Filter(line.Below),
+		)
 		assert.Equal(t, view.Annotations(7), excerpt.Annotations(7).Filter(line.Below))
 	})
 
@@ -5023,11 +5041,15 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		// The annotation keeps the other control characters, which a
 		// renderer draws as their pictures.
-		assert.Equal(t, line.Annotations{yamltest.ErrorAnnotation(3, "did you mean:\n    b\x1b")}, view.Annotations(0))
+		assert.Equal(
+			t,
+			line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(3, 4), "did you mean:\n    b\x1b")},
+			view.Annotations(0),
+		)
 		assert.Contains(t, view.String(), "^ did you mean:\u240a    b\u241b")
 	})
 
-	t.Run("messages on one line join in column order", func(t *testing.T) {
+	t.Run("messages on one line get a row each in column order", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("key: value\n")
@@ -5041,8 +5063,12 @@ func TestSourceError_Annotate(t *testing.T) {
 		view := source.View()
 		require.True(t, niceyaml.Annotate(err, view))
 
-		assert.Contains(t, view.String(), "^^^  ^^^^^ about key; about value")
-		assert.Contains(t, niceyaml.FormatError(err, niceyaml.WithContextLines(0)), "^^^  ^^^^^ about key; about value")
+		rows := stringtest.JoinLF(
+			"     | ^^^ about key",
+			"     |      ^^^^^ about value",
+		)
+		assert.Contains(t, view.String(), rows)
+		assert.Contains(t, niceyaml.FormatError(err, niceyaml.WithContextLines(0)), rows)
 	})
 
 	t.Run("a binding the tree reaches twice marks its line once", func(t *testing.T) {
@@ -5093,7 +5119,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		excerpt := requireExcerpt(t, bound, niceyaml.WithContextLines(0))
 		assert.Equal(
 			t,
-			line.Annotations{yamltest.ErrorAnnotation(3, "bad a")},
+			line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(3, 4), "bad a")},
 			excerpt.Annotations(0).Filter(line.Below),
 		)
 	})
@@ -5116,8 +5142,16 @@ func TestSourceError_Annotate(t *testing.T) {
 		want := yamltest.ErrorOverlays(position.NewSpan(3, 4))
 		assert.Equal(t, want, view.Overlays(1))
 		assert.Equal(t, want, view.Overlays(3))
-		assert.Equal(t, line.Annotations{yamltest.ErrorAnnotation(3, "bad b")}, view.Annotations(1))
-		assert.Equal(t, line.Annotations{yamltest.ErrorAnnotation(3, "too big")}, view.Annotations(3))
+		assert.Equal(
+			t,
+			line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(3, 4), "bad b")},
+			view.Annotations(1),
+		)
+		assert.Equal(
+			t,
+			line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(3, 4), "too big")},
+			view.Annotations(3),
+		)
 	})
 
 	t.Run("each error at one value marks its line", func(t *testing.T) {
@@ -5132,19 +5166,22 @@ func TestSourceError_Annotate(t *testing.T) {
 		}{
 			"two errors on one line each add an annotation": {
 				msgs: []string{"bad b", "too big"},
-				want: line.Annotations{yamltest.ErrorAnnotation(3, "bad b"), yamltest.ErrorAnnotation(3, "too big")},
-				row:  "     |    ^ bad b; too big",
+				want: line.Annotations{
+					yamltest.ErrorAnnotation(position.NewSpan(3, 4), "bad b"),
+					yamltest.ErrorAnnotation(position.NewSpan(3, 4), "too big"),
+				},
+				row: "     |    ^ bad b; too big",
 			},
 			// Two bindings say the same of one value, as two branches of an
 			// anyOf do.
 			"a message that repeats at one column reads once": {
 				msgs: []string{"bad b", "bad b"},
-				want: line.Annotations{yamltest.ErrorAnnotation(3, "bad b")},
+				want: line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(3, 4), "bad b")},
 				row:  "     |    ^ bad b",
 			},
 			"an error with no message marks a caret run alone": {
 				msgs: []string{""},
-				want: line.Annotations{yamltest.ErrorAnnotation(3, "")},
+				want: line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(3, 4), "")},
 				row:  "     |    ^",
 			},
 		}
@@ -5258,8 +5295,10 @@ func TestSourceError_Annotate(t *testing.T) {
 		))
 		require.True(t, bound.Annotate(view))
 
-		assert.Equal(t, yamltest.ErrorOverlays(position.NewSpan(4, 4)), view.Overlays(0))
-		assert.Equal(t, line.Annotations{yamltest.ErrorAnnotation(4, "far")}, view.Annotations(0))
+		// The location covers no column, so it gets no overlay, and the
+		// annotation of no width marks it.
+		assert.Empty(t, view.Overlays(0))
+		assert.Equal(t, line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(4, 4), "far")}, view.Annotations(0))
 		assert.Equal(t, stringtest.JoinLF(
 			"   1 | a: 1",
 			"     |     ^ far",
@@ -5278,7 +5317,11 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		assert.Equal(t, []int{7, 8, 9, 10}, yamltest.LineNumbers(view))
 		assert.Equal(t, yamltest.ErrorOverlays(position.NewSpan(3, 4)), view.Overlays(7))
-		assert.Equal(t, line.Annotations{yamltest.ErrorAnnotation(3, "bad h")}, view.Annotations(7))
+		assert.Equal(
+			t,
+			line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(3, 4), "bad h")},
+			view.Annotations(7),
+		)
 
 		assertUnmarked(t, view, 7)
 
@@ -6491,7 +6534,8 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 				"`-- 1:68: $.port: port must be at least 1",
 				"",
 				"   1 | {name: shop, tags: [...h, ii, jj], port: 0}",
-				"     |        ^^^^                              ^ name is taken; port must be at least 1",
+				"     |        ^^^^ name is taken",
+				"     |                                          ^ port must be at least 1",
 			},
 		},
 		"context lines keep their first columns": {

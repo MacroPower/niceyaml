@@ -117,7 +117,7 @@ func TestSource_View_Annotate(t *testing.T) {
 				d: 4
 			`),
 			annotations: map[int]line.Annotation{
-				1: {Content: "middle", Placement: line.Below, Col: 2},
+				1: {Content: "middle", Placement: line.Below, Cols: position.NewSpan(2, 2)},
 			},
 			want: stringtest.JoinLF(
 				"   1 | a: 1",

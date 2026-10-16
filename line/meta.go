@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -36,7 +35,7 @@ const (
 
 // MaxColPastEnd is the furthest past the end of the content of a line, in
 // columns, that a renderer starts an [Annotation]. [View.String] and the
-// printer start an annotation whose [Annotation.Col] lies further out at
+// printer start an annotation whose [Annotation.Cols] start further out at
 // this bound, so a stray column such as [math.MaxInt] pads a bounded row.
 // [Annotation.String] and [Annotations.String] have no line content, so
 // they pad by at most this many spaces.
@@ -58,24 +57,34 @@ func annotationCol(col, width int) int {
 // above one in [kind.UIHunkHeader]. The zero Kind renders as
 // [kind.UIAnnotation].
 //
+// Cols names the columns of the line the annotation labels. Below the
+// line, a renderer draws a caret under each of those columns and the
+// content after the carets. The content thus sits beside the run it
+// labels. A span that covers no column of the content, such as an empty
+// one, gets a single caret at its start. An annotation without content
+// draws its carets alone. Above the line, the content starts at the
+// column Cols starts at.
+//
 // Add annotations to a [View] with [View.Annotate].
 type Annotation struct {
 	Content   string
 	Kind      kind.Kind
 	Placement Placement
-	Col       int // Optional, 0-indexed column position for the annotation.
+	// Cols counts columns from 0 and is half-open. The zero span labels
+	// column 0.
+	Cols position.Span
 }
 
-// String returns the annotation content padded to [Annotation.Col]. It has
-// no line content to measure, so the padding stops at [MaxColPastEnd]
-// spaces. An annotation without content renders nothing, so the result is
-// the empty string.
+// String returns the annotation content padded to the start of
+// [Annotation.Cols]. It has no line content to measure, so the padding
+// stops at [MaxColPastEnd] spaces. An annotation without content renders
+// nothing, so the result is the empty string.
 func (a Annotation) String() string {
 	if a.Content == "" {
 		return ""
 	}
 
-	padding := strings.Repeat(" ", annotationCol(a.Col, 0))
+	padding := strings.Repeat(" ", annotationCol(a.Cols.Start, 0))
 
 	return padding + a.Content
 }
@@ -136,26 +145,28 @@ func (a Annotations) ByKind() []Annotations {
 	return groups
 }
 
-// Col returns the minimum column position among all annotations.
-func (a Annotations) Col() int {
+// Start returns the first column any of the annotations starts at, the
+// smallest start of their [Annotation.Cols], or 0 when there are none.
+func (a Annotations) Start() int {
 	if len(a) == 0 {
 		return 0
 	}
 
-	col := a[0].Col
+	col := a[0].Cols.Start
 	for _, v := range a[1:] {
-		col = min(col, v.Col)
+		col = min(col, v.Cols.Start)
 	}
 
 	return col
 }
 
 // WithContent returns a new [Annotations] holding the annotations that have
-// content, sorted by column. Annotations at the same column keep their
-// original order. An annotation without content renders nothing, so its
-// column must not pull [Annotations.Col] left. Callers that pad to a
-// column or join contents filter with WithContent first, so the joined
-// messages read in the order of the columns they mark.
+// content, sorted by the column each starts at. Annotations that start at
+// the same column keep their original order. An annotation without
+// content renders nothing, so its column must not pull [Annotations.Start]
+// left. Callers that pad to a column or join contents filter with
+// WithContent first, so the joined messages read in the order of the
+// columns they mark.
 func (a Annotations) WithContent() Annotations {
 	var result Annotations
 
@@ -166,7 +177,7 @@ func (a Annotations) WithContent() Annotations {
 	}
 
 	slices.SortStableFunc(result, func(x, y Annotation) int {
-		return cmp.Compare(x.Col, y.Col)
+		return cmp.Compare(x.Cols.Start, y.Cols.Start)
 	})
 
 	return result
@@ -185,8 +196,8 @@ func (a Annotations) Contents() []string {
 
 // String returns the combined annotation content for debugging.
 // It joins the annotations with "; " in column order, as
-// [Annotations.WithContent] sorts them, at the minimum column
-// position among the annotations that have content, padded by at most
+// [Annotations.WithContent] sorts them, at the first column the
+// annotations that have content start at, padded by at most
 // [MaxColPastEnd] spaces, as [Annotation.String] pads. Annotations without
 // content add nothing, so a set with no content at all is the empty string,
 // as a single such annotation is.
@@ -196,7 +207,7 @@ func (a Annotations) String() string {
 		return ""
 	}
 
-	padding := strings.Repeat(" ", annotationCol(kept.Col(), 0))
+	padding := strings.Repeat(" ", annotationCol(kept.Start(), 0))
 
 	return padding + strings.Join(kept.Contents(), "; ")
 }
@@ -205,7 +216,10 @@ func (a Annotations) String() string {
 //
 // Overlays apply visual styles (highlighting, coloring) to specific portions of
 // a line. Kind names the style the printer renders the columns with, as its
-// [go.jacobcolvin.com/niceyaml/style.Styles] resolves it.
+// [go.jacobcolvin.com/niceyaml/style.Styles] resolves it. An overlay draws
+// no caret, so a range shows in plain output only when an [Annotation]
+// labels the same columns. For a range that spans several lines, add one
+// annotation for each range that [Lines.SliceLines] splits it into.
 //
 // Add overlays to a [View] with [View.AddOverlay], [View.BlendOverlay], or
 // [View.AddLineOverlay].
@@ -219,16 +233,3 @@ type Overlay struct {
 
 // Overlays is a slice of [Overlay] values for a single [Line].
 type Overlays []Overlay
-
-// MarkerRow returns the row that marks the overlays below content, the
-// text of the line without its line ending. The row holds a caret under
-// every column an overlay covers within the content and a space under
-// every other column before the last caret, as [View.String] draws under
-// a line. A column is as many carets wide as the rune on it renders, so
-// the carets stay under the runes they mark on a line holding wide or
-// control characters. A rune that renders no cells, such as a zero-width
-// space, gets its caret under the next column that takes a cell. Returns
-// "" when the overlays cover no column of the content.
-func (o Overlays) MarkerRow(content string) string {
-	return strings.TrimRight(renderMarks(content, overlayMarks(o, utf8.RuneCountInString(content))), " ")
-}

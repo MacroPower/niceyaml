@@ -45,16 +45,15 @@
 // which inside tmux starts a process, so a program that prints many views
 // builds one writer and prints them all through it.
 //
-// Output without its sequences is not the plain text of a view. Below a
-// line with an annotation below it, such as each line an error marks in
-// [Printer.PrintError], [DefaultAnnotation] draws a caret under every
-// column the line's overlays cover, so those ranges keep their extent.
-// An overlay on any other line, and a blend overlay such as a search
-// match, marks its span with color alone and loses its mark along with
-// the colors. The default container also pads each row with spaces.
-// [line.View.String] renders a view as plain text with a caret under
-// every column an overlay covers, and [niceyaml.FormatError] renders an
-// error the same way, so output for a log or a file goes through them.
+// Output without its sequences is not the plain text of a view. The
+// default container pads each row with spaces, and [WithWrapWidth] wraps
+// a long line onto several rows. [line.View.String] renders a view as
+// plain text, with no padding and no wrap. Below each line, it draws the
+// same caret rows that [DefaultAnnotation] draws. Neither draws a caret
+// for an overlay that no annotation labels, such as a search match, so
+// such an overlay shows through color alone. Output for a log or a file
+// should go through [line.View.String], or through [niceyaml.FormatError],
+// which renders an error the same way.
 //
 // # Gutters
 //
@@ -82,10 +81,14 @@
 // [line.Annotation.Kind], or [kind.UIAnnotation] for those with none. An
 // [AnnotationFunc] renders the annotations of each such kind as
 // [AnnotationRow]s, each the text and the column it starts under, and the
-// printer pads, escapes, wraps, and styles each row. When the line wraps,
-// each row sits above or below the wrapped row that holds its column.
-// [New] starts with [DefaultAnnotation], and [WithAnnotation] sets
-// another.
+// printer pads, escapes, wraps, and styles each row. [New] starts with
+// [DefaultAnnotation], which gives each run of columns that the
+// annotations below a line label a row of its own. [WithAnnotation] sets
+// another func.
+//
+// Below a line, the rows of errors come first, then those of warnings,
+// then the other kinds. When the line wraps, each row sits above or below
+// the wrapped row that holds its column.
 //
 // # Word Wrapping
 //

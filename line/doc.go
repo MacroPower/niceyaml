@@ -103,20 +103,26 @@
 // [Annotations] add extra content above or below a line, which is useful for
 // error messages, hints, or context. An [Annotation] takes a [Placement] of
 // [Above] or [Below], and its Kind names the style it renders in, as the Kind
-// of an [Overlay] does. Without a Kind it renders in [kind.UIAnnotation]:
+// of an [Overlay] does. Without a Kind it renders in [kind.UIAnnotation].
+// Its Cols name the columns of the line it labels. Below the line, a
+// renderer draws a caret under each of those columns and the content
+// beside the carets:
 //
 //	view.Annotate(i, line.Annotation{
 //	    Content:   "missing required field",
 //	    Kind:      kind.TextError,
 //	    Placement: line.Below,
-//	    Col:       4, // Align with the error location.
+//	    Cols:      position.NewSpan(4, 9), // The columns of the error location.
 //	})
 //
 // [Overlays] define column ranges with associated styles, primarily for
 // highlighting. An [Overlay] either replaces the style underneath it or, with
 // Blend set, mixes with it so a search highlight keeps the token color it
-// covers. [View.AddOverlay] and [View.BlendOverlay] add overlays across a
-// range of lines, the second with Blend set:
+// covers. An overlay draws no caret, so a range shows in plain output
+// only when an annotation labels the same columns. For a range that spans
+// several lines, add one annotation for each range that [Lines.SliceLines]
+// splits it into. [View.AddOverlay] and [View.BlendOverlay] add overlays
+// across a range of lines, the second with Blend set:
 //
 //	view.AddOverlay(kind.GenericError, errorRange)
 //	view.BlendOverlay(kind.GenericHighlight, matches...)
@@ -155,11 +161,13 @@
 // its content. A search of a slice therefore returns ranges that apply to
 // the slice, and a diff of two slices compares the lines they hold.
 //
-// [View.String] renders a view as plain text: each line behind its number,
-// the annotations above it on rows of their own, carets under the columns
-// its overlays cover, and the annotations below it beside the carets, with
-// no escape sequences. A line the view clips renders its windows with
-// "..." in place of the columns between them. It is the rendering
+// [View.String] renders a view as plain text, with no escape sequences.
+// Each line sits behind its number, with the annotations above it on rows
+// of their own. Below the line, each run of columns its annotations label
+// gets a row with carets under the run and the contents of the
+// annotations of the run beside them. A line the view clips renders its
+// windows with "..." in place of the columns between them. That plain
+// text is the rendering
 // [go.jacobcolvin.com/niceyaml.FormatError] prints for the excerpt of a
 // bound error, and it suits a log or a golden file. A printer renders the same
 // view with styles.

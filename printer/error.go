@@ -60,17 +60,23 @@ const errorConnectorWidth = 4
 //
 // # Carets
 //
-// Each location gets a caret run under its range on the row below its
-// line, as [niceyaml.FormatError] draws one, so the range shows its
+// Each location gets a row below its line with a caret run under its
+// range, as [niceyaml.FormatError] draws one, so the range shows its
 // extent without color. A location that covers no column, such as a path
-// to an empty value, gets a single caret at its column instead. Among
-// several bindings, the message of each sits after the carets of its
-// line, and when they touch more than one source, the name of its source
-// leads each excerpt on a row of its own. A location with no message
-// beside it in the excerpt, such as the root of a lone bound error, gets
-// its carets alone. [niceyaml.SourceError.Excerpt] marks such a line with
-// an annotation without content, and [DefaultAnnotation] draws the carets
-// for it. Blank lines separate the parts.
+// to an empty value, gets a single caret at its column instead. A range
+// that runs onto later lines gets a caret run below each of them too.
+// Among several bindings, the message of each sits after the carets of
+// its own range. Locations that share a range share its row, with their
+// messages joined by "; ", and the rows of errors come before those of
+// warnings.
+//
+// A location with no message beside it in the excerpt, such as the root
+// of a lone bound error, gets its carets alone.
+// [niceyaml.SourceError.Excerpt] marks such a line with an annotation
+// without content, and [DefaultAnnotation] draws the carets for it.
+//
+// When the bindings touch more than one source, the name of its source
+// leads each excerpt on a row of its own. Blank lines separate the parts.
 //
 // # Missing Excerpts
 //

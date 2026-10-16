@@ -572,7 +572,7 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 			),
 		},
 		// The message sits beside the carets of the wrapped row that holds
-		// its column, here the second.
+		// the start of its range, here the second.
 		"message beside the carets of a later row": {
 			err: yamltest.Bind(t, source, errors.Join(
 				yamltest.ErrorAt("not a number", "ports", "https"),
@@ -591,9 +591,9 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 				"      ^ bad name",
 			),
 		},
-		// The messages of the first row join beside the carets of both
-		// values, which leave them too little room, so they move to the
-		// rows below the carets.
+		// Each value gets a row of its own. The carets of the second leave
+		// its message too little room, so the message moves to the row
+		// below them.
 		"bindings on one row": {
 			err: yamltest.Bind(t, source, errors.Join(
 				yamltest.ErrorAt("not a number", "ports", "http"),
@@ -608,9 +608,9 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 				"└── 2:7: $.name: bad name",
 				"",
 				"ports: {http: eighty, https: ninety}",
-				"              ^^^^^^         ^^^^^^",
-				"                    not a number; also",
-				"                    not a number",
+				"              ^^^^^^ not a number",
+				"                             ^^^^^^",
+				"                    also not a number",
 				"name: x",
 				"      ^ bad name",
 			),
@@ -1098,7 +1098,8 @@ func TestPrinter_PrintError_Excerpt(t *testing.T) {
 				"└── 1:30: $.ports.https: also not a number",
 				"",
 				"ports: {http: eighty, https: ninety}",
-				"              ^^^^^^         ^^^^^^ not a number; also not a number",
+				"              ^^^^^^ not a number",
+				"                             ^^^^^^ also not a number",
 				"name: Web-App",
 				"port: 8",
 			},

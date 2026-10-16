@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -36,7 +35,7 @@ func TestAnnotation_RenderKind(t *testing.T) {
 	}
 }
 
-func TestAnnotations_Col(t *testing.T) {
+func TestAnnotations_Start(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -48,24 +47,38 @@ func TestAnnotations_Col(t *testing.T) {
 			want: 0,
 		},
 		"single annotation": {
-			anns: line.Annotations{{Content: "x", Col: 5}},
+			anns: line.Annotations{{Content: "x", Cols: position.NewSpan(5, 5)}},
 			want: 5,
 		},
 		"multiple annotations returns minimum": {
 			anns: line.Annotations{
-				{Content: "first", Col: 10},
-				{Content: "second", Col: 3},
-				{Content: "third", Col: 7},
+				{Content: "first", Cols: position.NewSpan(10, 10)},
+				{Content: "second", Cols: position.NewSpan(3, 3)},
+				{Content: "third", Cols: position.NewSpan(7, 7)},
 			},
 			want: 3,
 		},
 		"all same column": {
-			anns: line.Annotations{{Content: "a", Col: 4}, {Content: "b", Col: 4}},
+			anns: line.Annotations{
+				{Content: "a", Cols: position.NewSpan(4, 4)},
+				{Content: "b", Cols: position.NewSpan(4, 4)},
+			},
 			want: 4,
 		},
 		"zero is minimum": {
-			anns: line.Annotations{{Content: "a", Col: 5}, {Content: "b", Col: 0}, {Content: "c", Col: 3}},
+			anns: line.Annotations{
+				{Content: "a", Cols: position.NewSpan(5, 5)},
+				{Content: "b", Cols: position.NewSpan(0, 0)},
+				{Content: "c", Cols: position.NewSpan(3, 3)},
+			},
 			want: 0,
+		},
+		"ends do not count": {
+			anns: line.Annotations{
+				{Content: "a", Cols: position.NewSpan(4, 9)},
+				{Content: "b", Cols: position.NewSpan(2, 3)},
+			},
+			want: 2,
 		},
 	}
 
@@ -73,7 +86,7 @@ func TestAnnotations_Col(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, tc.anns.Col())
+			assert.Equal(t, tc.want, tc.anns.Start())
 		})
 	}
 }
@@ -124,19 +137,39 @@ func TestAnnotations_WithContent(t *testing.T) {
 			want: nil,
 		},
 		"all have content": {
-			anns: line.Annotations{{Content: "a", Col: 1}, {Content: "b", Col: 2}},
-			want: line.Annotations{{Content: "a", Col: 1}, {Content: "b", Col: 2}},
+			anns: line.Annotations{
+				{Content: "a", Cols: position.NewSpan(1, 1)},
+				{Content: "b", Cols: position.NewSpan(2, 2)},
+			},
+			want: line.Annotations{
+				{Content: "a", Cols: position.NewSpan(1, 1)},
+				{Content: "b", Cols: position.NewSpan(2, 2)},
+			},
 		},
 		"sorts by column and keeps the order at one column": {
-			anns: line.Annotations{{Content: "c", Col: 4}, {Content: "a", Col: 1}, {Content: "d", Col: 4}},
-			want: line.Annotations{{Content: "a", Col: 1}, {Content: "c", Col: 4}, {Content: "d", Col: 4}},
+			anns: line.Annotations{
+				{Content: "c", Cols: position.NewSpan(4, 4)},
+				{Content: "a", Cols: position.NewSpan(1, 1)},
+				{Content: "d", Cols: position.NewSpan(4, 4)},
+			},
+			want: line.Annotations{
+				{Content: "a", Cols: position.NewSpan(1, 1)},
+				{Content: "c", Cols: position.NewSpan(4, 4)},
+				{Content: "d", Cols: position.NewSpan(4, 4)},
+			},
 		},
 		"drops the empty content": {
-			anns: line.Annotations{{Content: "", Col: 0}, {Content: "b", Col: 2}},
-			want: line.Annotations{{Content: "b", Col: 2}},
+			anns: line.Annotations{
+				{Content: "", Cols: position.NewSpan(0, 0)},
+				{Content: "b", Cols: position.NewSpan(2, 2)},
+			},
+			want: line.Annotations{{Content: "b", Cols: position.NewSpan(2, 2)}},
 		},
 		"no content at all": {
-			anns: line.Annotations{{Content: "", Col: 0}, {Content: "", Col: 2}},
+			anns: line.Annotations{
+				{Content: "", Cols: position.NewSpan(0, 0)},
+				{Content: "", Cols: position.NewSpan(2, 2)},
+			},
 			want: nil,
 		},
 	}
@@ -283,55 +316,74 @@ func TestAnnotations_String(t *testing.T) {
 			want: "",
 		},
 		"single annotation": {
-			anns: line.Annotations{{Content: "message", Col: 3}},
+			anns: line.Annotations{{Content: "message", Cols: position.NewSpan(3, 3)}},
 			want: "   message",
 		},
 		"single annotation at column zero": {
-			anns: line.Annotations{{Content: "error here", Col: 0}},
+			anns: line.Annotations{{Content: "error here", Cols: position.NewSpan(0, 0)}},
 			want: "error here",
 		},
 		"single annotation without content": {
-			anns: line.Annotations{{Content: "", Col: 0}},
+			anns: line.Annotations{{Content: "", Cols: position.NewSpan(0, 0)}},
 			want: "",
 		},
 		"multiple annotations joined": {
-			anns: line.Annotations{{Content: "first", Col: 5}, {Content: "second", Col: 10}},
+			anns: line.Annotations{
+				{Content: "first", Cols: position.NewSpan(5, 5)},
+				{Content: "second", Cols: position.NewSpan(10, 10)},
+			},
 			want: "     first; second",
 		},
 		"joined in column order": {
 			anns: line.Annotations{
-				{Content: "second", Col: 10},
-				{Content: "first", Col: 5},
-				{Content: "third", Col: 10},
+				{Content: "second", Cols: position.NewSpan(10, 10)},
+				{Content: "first", Cols: position.NewSpan(5, 5)},
+				{Content: "third", Cols: position.NewSpan(10, 10)},
 			},
 			want: "     first; second; third",
 		},
 		"annotations without content add nothing": {
-			anns: line.Annotations{{Content: "", Col: 5}, {Content: "second", Col: 10}},
+			anns: line.Annotations{
+				{Content: "", Cols: position.NewSpan(5, 5)},
+				{Content: "second", Cols: position.NewSpan(10, 10)},
+			},
 			want: "          second",
 		},
 		"empty content at column zero does not pull the column left": {
-			anns: line.Annotations{{Content: "", Col: 0}, {Content: "boom", Col: 5}},
+			anns: line.Annotations{
+				{Content: "", Cols: position.NewSpan(0, 0)},
+				{Content: "boom", Cols: position.NewSpan(5, 5)},
+			},
 			want: "     boom",
 		},
 		"no content at all is empty": {
-			anns: line.Annotations{{Content: "", Col: 5}, {Content: "", Col: 10}},
+			anns: line.Annotations{
+				{Content: "", Cols: position.NewSpan(5, 5)},
+				{Content: "", Cols: position.NewSpan(10, 10)},
+			},
 			want: "",
 		},
 		"uses minimum column": {
-			anns: line.Annotations{{Content: "a", Col: 8}, {Content: "b", Col: 2}, {Content: "c", Col: 5}},
+			anns: line.Annotations{
+				{Content: "a", Cols: position.NewSpan(8, 8)},
+				{Content: "b", Cols: position.NewSpan(2, 2)},
+				{Content: "c", Cols: position.NewSpan(5, 5)},
+			},
 			want: "  b; c; a",
 		},
 		"zero column no padding": {
-			anns: line.Annotations{{Content: "x", Col: 0}, {Content: "y", Col: 5}},
+			anns: line.Annotations{
+				{Content: "x", Cols: position.NewSpan(0, 0)},
+				{Content: "y", Cols: position.NewSpan(5, 5)},
+			},
 			want: "x; y",
 		},
 		"max column pads to the bound": {
-			anns: line.Annotations{{Content: "x", Col: math.MaxInt}},
+			anns: line.Annotations{{Content: "x", Cols: position.NewSpan(math.MaxInt, math.MaxInt)}},
 			want: strings.Repeat(" ", 1024) + "x",
 		},
 		"column past the bound pads to the bound": {
-			anns: line.Annotations{{Content: "x", Col: 1 << 32}},
+			anns: line.Annotations{{Content: "x", Cols: position.NewSpan(1<<32, 1<<32)}},
 			want: strings.Repeat(" ", 1024) + "x",
 		},
 	}
@@ -345,89 +397,6 @@ func TestAnnotations_String(t *testing.T) {
 			if len(tc.anns) == 1 {
 				assert.Equal(t, tc.want, tc.anns[0].String())
 			}
-		})
-	}
-}
-
-func TestOverlays_MarkerRow(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		content  string
-		want     string
-		overlays line.Overlays
-	}{
-		"no overlays": {
-			content: "key: v",
-			want:    "",
-		},
-		"negative start clamps to the first column": {
-			content:  "key: v",
-			overlays: line.Overlays{{Cols: position.NewSpan(-2, 3)}},
-			want:     "^^^",
-		},
-		"span past the end stops at the content": {
-			content:  "key: v",
-			overlays: line.Overlays{{Cols: position.NewSpan(3, 10)}},
-			want:     "   ^^^",
-		},
-		"span past the content marks nothing": {
-			content:  "key: v",
-			overlays: line.Overlays{{Cols: position.NewSpan(8, 12)}},
-			want:     "",
-		},
-		"empty span marks nothing": {
-			content:  "key: v",
-			overlays: line.Overlays{{Cols: position.NewSpan(2, 2)}},
-			want:     "",
-		},
-		"overlapping overlays": {
-			content: "key: v",
-			overlays: line.Overlays{
-				{Cols: position.NewSpan(1, 3)},
-				{Cols: position.NewSpan(2, 5)},
-			},
-			want: " ^^^^",
-		},
-		"wide rune gets two carets": {
-			content:  "名前: v",
-			overlays: line.Overlays{{Cols: position.NewSpan(1, 2)}},
-			want:     "  ^^",
-		},
-		"zero-width space marks the next column": {
-			content:  "k: a\u200bb",
-			overlays: line.Overlays{{Cols: position.NewSpan(4, 5)}},
-			want:     "    ^",
-		},
-		"zero-width space at the end marks the column past it": {
-			content:  "k: a\u200b",
-			overlays: line.Overlays{{Cols: position.NewSpan(4, 5)}},
-			want:     "    ^",
-		},
-		"lone combining mark marks the next column": {
-			content:  "\u0301x",
-			overlays: line.Overlays{{Cols: position.NewSpan(0, 1)}},
-			want:     "^",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, tc.overlays.MarkerRow(tc.content))
-
-			// View.String draws the same row under the line, or none
-			// when the row is empty.
-			view := newView(tc.content + "\n")
-			view.AddLineOverlay(0, tc.overlays...)
-
-			rows := []string{"   1 | " + tc.content}
-			if tc.want != "" {
-				rows = append(rows, "     | "+tc.want)
-			}
-
-			assert.Equal(t, stringtest.JoinLF(rows...), view.String())
 		})
 	}
 }

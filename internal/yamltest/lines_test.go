@@ -246,10 +246,10 @@ func TestErrorAnnotation(t *testing.T) {
 		want line.Annotations
 	}{
 		// The headline holds the message of a single error, so its line
-		// carries the caret alone.
+		// carries the carets alone.
 		"single error": {
 			err:  yamltest.ErrorAt("bad value", "key"),
-			want: line.Annotations{yamltest.ErrorAnnotation(5, "")},
+			want: line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(5, 10), "")},
 		},
 		"summary of two problems": {
 			err: niceyaml.NewSummary("2 problems",
@@ -257,8 +257,8 @@ func TestErrorAnnotation(t *testing.T) {
 				niceyaml.NewError("bad key", niceyaml.AtPosition(position.New(0, 0))),
 			),
 			want: line.Annotations{
-				yamltest.ErrorAnnotation(5, "bad value"),
-				yamltest.ErrorAnnotation(0, "bad key"),
+				yamltest.ErrorAnnotation(position.NewSpan(5, 10), "bad value"),
+				yamltest.ErrorAnnotation(position.NewSpan(0, 3), "bad key"),
 			},
 		},
 	}

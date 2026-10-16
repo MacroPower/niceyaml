@@ -613,7 +613,11 @@ func TestView_Slice(t *testing.T) {
 		for i, ln := range view.All() {
 			view.SetFlag(i, line.Flag(i))
 			view.AddLineOverlay(i, line.Overlay{Cols: position.NewSpan(0, i+1), Kind: "test"})
-			view.Annotate(i, line.Annotation{Content: ln.Content(), Placement: line.Below})
+			view.Annotate(i, line.Annotation{
+				Content:   ln.Content(),
+				Placement: line.Below,
+				Cols:      position.NewSpan(0, i+1),
+			})
 		}
 
 		return view
@@ -652,7 +656,7 @@ func TestView_Slice(t *testing.T) {
 		// Decorating before or after slicing renders the same, since a
 		// slice takes ranges and indices in the coordinates of its content.
 		rng := yamltest.LineRange(2, 3, 4)
-		ann := line.Annotation{Content: "here", Placement: line.Below, Col: 3}
+		ann := line.Annotation{Content: "here", Placement: line.Below, Cols: position.NewSpan(3, 4)}
 
 		before := newView(input)
 		before.AddOverlay("test", rng)
@@ -778,7 +782,7 @@ func TestView_String(t *testing.T) {
 
 		view := newView(stringtest.LinesLF(letterRows(3)...))
 		view.Annotate(0, line.Annotation{Content: "top", Placement: line.Above})
-		view.Annotate(2, line.Annotation{Content: "bottom", Placement: line.Below, Col: 3})
+		view.Annotate(2, line.Annotation{Content: "bottom", Placement: line.Below, Cols: position.NewSpan(3, 4)})
 
 		want := stringtest.JoinLF(
 			"     | top",
@@ -791,7 +795,7 @@ func TestView_String(t *testing.T) {
 		assert.Equal(t, want, view.String())
 	})
 
-	t.Run("overlays mark their columns and flags do not render", func(t *testing.T) {
+	t.Run("overlays and flags do not render", func(t *testing.T) {
 		t.Parallel()
 
 		view := newView("key: value\n")
@@ -799,7 +803,7 @@ func TestView_String(t *testing.T) {
 		view.AddOverlay("test1", yamltest.LineRange(0, 0, 3))
 		view.BlendOverlay("test2", yamltest.LineRange(0, 5, 7))
 
-		assert.Equal(t, stringtest.JoinLF("   1 | key: value", "     | ^^^  ^^"), view.String())
+		assert.Equal(t, "   1 | key: value", view.String())
 	})
 
 	t.Run("annotations and marks on one line", func(t *testing.T) {
@@ -811,12 +815,23 @@ func TestView_String(t *testing.T) {
 
 		errorOverlay := line.Overlay{Kind: kind.GenericError, Cols: position.NewSpan(14, 15)}
 		warnOverlay := line.Overlay{Kind: kind.GenericWarn, Cols: position.NewSpan(17, 30)}
-		errorAnn := line.Annotation{Content: "0 is less than 1", Kind: kind.TextError, Placement: line.Below, Col: 14}
+		errorAnn := line.Annotation{
+			Content:   "0 is less than 1",
+			Kind:      kind.TextError,
+			Placement: line.Below,
+			Cols:      errorOverlay.Cols,
+		}
 		warnAnn := line.Annotation{
 			Content:   `warning: deprecated field "legacyPricing"`,
 			Kind:      kind.TextWarn,
 			Placement: line.Below,
-			Col:       17,
+			Cols:      warnOverlay.Cols,
+		}
+
+		// Below returns an annotation below the line that labels the
+		// columns from start up to end with msg.
+		below := func(start, end int, msg string) line.Annotation {
+			return line.Annotation{Content: msg, Placement: line.Below, Cols: position.NewSpan(start, end)}
 		}
 
 		tcs := map[string]struct {
@@ -826,28 +841,33 @@ func TestView_String(t *testing.T) {
 			overlays    line.Overlays    // Overlays that AddLineOverlay adds as they are.
 			annotations []line.Annotation
 		}{
-			// An overlay that covers no column, such as the one a bound
-			// error puts at the end of a line with no token under its
-			// location, renders no caret itself, so the annotation below
-			// the line marks the spot. An overlay that covers a column
-			// marks the row alone.
-			"annotation without content marks an empty span at the end of the line": {
+			"an empty span marks the column at the end of the line": {
 				input:       "key: value",
-				overlays:    line.Overlays{{Kind: "test1", Cols: position.NewSpan(10, 10)}},
-				annotations: []line.Annotation{{Placement: line.Below, Col: 10}},
+				annotations: []line.Annotation{below(10, 10, "")},
 				want:        stringtest.JoinLF("   1 | key: value", "     |           ^"),
 			},
-			"annotation without content marks a span past the content": {
+			"a span past the content marks its start": {
 				input:       "key: value",
-				overlays:    line.Overlays{{Kind: "test1", Cols: position.NewSpan(12, 14)}},
-				annotations: []line.Annotation{{Placement: line.Below, Col: 10}},
-				want:        stringtest.JoinLF("   1 | key: value", "     |           ^"),
+				annotations: []line.Annotation{below(12, 14, "")},
+				want:        stringtest.JoinLF("   1 | key: value", "     |             ^"),
 			},
-			"a span that covers a column marks the row alone": {
+			"a span that runs past the content stops at its end": {
 				input:       "key: value",
-				overlays:    line.Overlays{{Kind: "test1", Cols: position.NewSpan(5, 7)}},
-				annotations: []line.Annotation{{Placement: line.Below, Col: 10}},
-				want:        stringtest.JoinLF("   1 | key: value", "     |      ^^"),
+				annotations: []line.Annotation{below(5, 14, "")},
+				want:        stringtest.JoinLF("   1 | key: value", "     |      ^^^^^"),
+			},
+			"a span that starts before the first column starts at it": {
+				input:       "key: value",
+				annotations: []line.Annotation{below(-2, 3, "")},
+				want:        stringtest.JoinLF("   1 | key: value", "     | ^^^"),
+			},
+			// Overlays style the columns and draw no caret, so a blend and
+			// a replacing overlay alike leave the line without a row below.
+			"overlays render no row": {
+				input:    "key: value",
+				ranges:   []position.Range{yamltest.LineRange(0, 0, 3)},
+				overlays: line.Overlays{{Kind: "test2", Cols: position.NewSpan(5, 7), Blend: true}},
+				want:     "   1 | key: value",
 			},
 			"each severity gets its own row, errors first": {
 				input:       spec,
@@ -859,21 +879,21 @@ func TestView_String(t *testing.T) {
 					`     |                  ^^^^^^^^^^^^^ warning: deprecated field "legacyPricing"`,
 				),
 			},
-			"a warning alone marks every overlay": {
+			"a warning alone marks its own columns": {
 				input:       spec,
 				overlays:    line.Overlays{warnOverlay, errorOverlay},
 				annotations: []line.Annotation{warnAnn},
 				want: stringtest.JoinLF(
 					"   1 | spec: {price: 0, legacyPricing: true}",
-					`     |               ^  ^^^^^^^^^^^^^ warning: deprecated field "legacyPricing"`,
+					`     |                  ^^^^^^^^^^^^^ warning: deprecated field "legacyPricing"`,
 				),
 			},
-			"empty annotations draw the carets of their own severity": {
+			"empty annotations draw the carets of their own columns": {
 				input:    spec,
 				overlays: line.Overlays{warnOverlay, errorOverlay},
 				annotations: []line.Annotation{
-					{Kind: kind.TextError, Placement: line.Below, Col: 14},
-					{Kind: kind.TextWarn, Placement: line.Below, Col: 17},
+					{Kind: kind.TextWarn, Placement: line.Below, Cols: warnOverlay.Cols},
+					{Kind: kind.TextError, Placement: line.Below, Cols: errorOverlay.Cols},
 				},
 				want: stringtest.JoinLF(
 					"   1 | spec: {price: 0, legacyPricing: true}",
@@ -881,34 +901,77 @@ func TestView_String(t *testing.T) {
 					"     |                  ^^^^^^^^^^^^^",
 				),
 			},
-			"overlay and annotation share the marker row": {
+			// A document minified onto one line holds several problems, and
+			// each message sits beside the carets of its own run.
+			"each run gets a row of its own in column order": {
+				input: `{"a": "x", "b": true, "c": -1}`,
+				annotations: []line.Annotation{
+					below(27, 29, "must be positive"),
+					below(6, 9, "must be a number"),
+					below(16, 20, "must be a string"),
+				},
+				want: stringtest.JoinLF(
+					`   1 | {"a": "x", "b": true, "c": -1}`,
+					"     |       ^^^ must be a number",
+					"     |                 ^^^^ must be a string",
+					"     |                            ^^ must be positive",
+				),
+			},
+			"messages on one run share its row": {
 				input:       "key: value",
-				ranges:      []position.Range{yamltest.LineRange(0, 5, 10)},
-				annotations: []line.Annotation{{Content: "bad value", Placement: line.Below, Col: 5}},
+				annotations: []line.Annotation{below(5, 10, "bad value"), below(5, 10, ""), below(5, 10, "too long")},
+				want:        stringtest.JoinLF("   1 | key: value", "     |      ^^^^^ bad value; too long"),
+			},
+			"a run without a message draws its carets alone": {
+				input:       "key: value",
+				annotations: []line.Annotation{below(5, 10, "bad value"), below(0, 3, "")},
 				want: stringtest.JoinLF(
 					"   1 | key: value",
+					"     | ^^^",
 					"     |      ^^^^^ bad value",
+				),
+			},
+			"runs that start at one column come shorter first": {
+				input:       "key: value",
+				annotations: []line.Annotation{below(5, 10, "long"), below(5, 7, "short")},
+				want: stringtest.JoinLF(
+					"   1 | key: value",
+					"     |      ^^ short",
+					"     |      ^^^^^ long",
+				),
+			},
+			"overlapping runs get a row each": {
+				input:       "key: v",
+				annotations: []line.Annotation{below(1, 3, ""), below(2, 5, "")},
+				want: stringtest.JoinLF(
+					"   1 | key: v",
+					"     |  ^^",
+					"     |   ^^^",
 				),
 			},
 			// Each CJK rune renders two cells wide, so the columns before
 			// the marked ones are worth two carets each.
 			"carets sit under wide runes": {
 				input:       "名前: value",
-				ranges:      []position.Range{yamltest.LineRange(0, 4, 9)},
-				annotations: []line.Annotation{{Content: "bad", Placement: line.Below, Col: 4}},
+				annotations: []line.Annotation{below(4, 9, "bad")},
 				want: stringtest.JoinLF(
 					"   1 | 名前: value",
 					"     |       ^^^^^ bad",
 				),
 			},
+			"a wide rune gets two carets": {
+				input:       "名前: v",
+				annotations: []line.Annotation{below(1, 2, "")},
+				want:        stringtest.JoinLF("   1 | 名前: v", "     |   ^^"),
+			},
 			// The row above starts at the column of the annotation as the
 			// content row renders it, so on wide characters it takes their
-			// cells, as the marker row below does.
+			// cells, as the caret row below does.
 			"annotation above sits over wide runes": {
 				input: "名前: v",
 				annotations: []line.Annotation{
-					{Content: "above", Placement: line.Above, Col: 2},
-					{Content: "below", Placement: line.Below, Col: 2},
+					{Content: "above", Placement: line.Above, Cols: position.NewSpan(2, 2)},
+					below(2, 2, "below"),
 				},
 				want: stringtest.JoinLF(
 					"     |     above",
@@ -917,27 +980,39 @@ func TestView_String(t *testing.T) {
 				),
 			},
 			// The acute accent renders on the e before it, so a mark on the
-			// accent's column lands under the e, and an annotation at that
-			// column starts there too.
+			// accent's column lands under the e, and the message follows.
 			"carets on a combining mark sit under its base": {
 				input:       "k: e\u0301x",
-				ranges:      []position.Range{yamltest.LineRange(0, 4, 5)},
-				annotations: []line.Annotation{{Content: "here", Placement: line.Below, Col: 4}},
+				annotations: []line.Annotation{below(4, 5, "here")},
 				want: stringtest.JoinLF(
 					"   1 | k: e\u0301x",
 					"     |    ^ here",
 				),
+			},
+			"a lone combining mark marks the next column": {
+				input:       "\u0301x",
+				annotations: []line.Annotation{below(0, 1, "")},
+				want:        stringtest.JoinLF("   1 | \u0301x", "     | ^"),
+			},
+			"a zero-width space marks the next column": {
+				input:       "k: a\u200bb",
+				annotations: []line.Annotation{below(4, 5, "")},
+				want:        stringtest.JoinLF("   1 | k: a\u200bb", "     |     ^"),
+			},
+			"a zero-width space at the end marks the column past it": {
+				input:       "k: a\u200b",
+				annotations: []line.Annotation{below(4, 5, "")},
+				want:        stringtest.JoinLF("   1 | k: a\u200b", "     |     ^"),
 			},
 			// The content row renders a ZWJ sequence or a keycap as one
 			// cluster of two cells, so the columns before x are worth that
 			// much and no more, and the caret lands under x as the row
 			// above starts there.
 			"carets sit under a zwj sequence": {
-				input:  "a: \"\U0001F468\u200d\U0001F469\" x",
-				ranges: []position.Range{yamltest.LineRange(0, 9, 10)},
+				input: "a: \"\U0001F468\u200d\U0001F469\" x",
 				annotations: []line.Annotation{
-					{Content: "above", Placement: line.Above, Col: 9},
-					{Content: "below", Placement: line.Below, Col: 9},
+					{Content: "above", Placement: line.Above, Cols: position.NewSpan(9, 10)},
+					below(9, 10, "below"),
 				},
 				want: stringtest.JoinLF(
 					"     |         above",
@@ -946,11 +1021,10 @@ func TestView_String(t *testing.T) {
 				),
 			},
 			"carets sit under a keycap": {
-				input:  "a: 1\ufe0f\u20e3 x",
-				ranges: []position.Range{yamltest.LineRange(0, 7, 8)},
+				input: "a: 1\ufe0f\u20e3 x",
 				annotations: []line.Annotation{
-					{Content: "above", Placement: line.Above, Col: 7},
-					{Content: "below", Placement: line.Below, Col: 7},
+					{Content: "above", Placement: line.Above, Cols: position.NewSpan(7, 8)},
+					below(7, 8, "below"),
 				},
 				want: stringtest.JoinLF(
 					"     |       above",
@@ -961,21 +1035,23 @@ func TestView_String(t *testing.T) {
 			// The joiner and the second emoji render as part of the cluster
 			// the first emoji starts, so a mark on either lands under it.
 			"a mark inside a grapheme cluster sits under its first rune": {
-				input:  "a: \U0001F468\u200d\U0001F469 x",
-				ranges: []position.Range{yamltest.LineRange(0, 5, 6)},
+				input:       "a: \U0001F468\u200d\U0001F469 x",
+				annotations: []line.Annotation{below(5, 6, "")},
 				want: stringtest.JoinLF(
 					"   1 | a: \U0001F468\u200d\U0001F469 x",
 					"     |    ^^",
 				),
 			},
 			"control characters render as pictures": {
-				input:       "a: \"x\ty\x1b\"",
-				ranges:      []position.Range{yamltest.LineRange(0, 3, 9)},
-				annotations: []line.Annotation{{Content: "tab\x1bhere", Placement: line.Above}},
+				input: "a: \"x\ty\x1b\"",
+				annotations: []line.Annotation{
+					{Content: "tab\x1bhere", Placement: line.Above},
+					below(3, 9, "a\x1bb"),
+				},
 				want: stringtest.JoinLF(
 					"     | tab\u241bhere",
 					"   1 | a: \"x\u2409y\u241b\"",
-					"     |    ^^^^^^",
+					"     |    ^^^^^^ a\u241bb",
 				),
 			},
 			"no annotation": {
@@ -990,7 +1066,7 @@ func TestView_String(t *testing.T) {
 			},
 			"annotation below with padding": {
 				input:       "key: value",
-				annotations: []line.Annotation{{Content: "note", Placement: line.Below, Col: 4}},
+				annotations: []line.Annotation{below(4, 4, "note")},
 				want:        stringtest.JoinLF("   1 | key: value", "     |     ^ note"),
 			},
 			"annotation above": {
@@ -1000,24 +1076,21 @@ func TestView_String(t *testing.T) {
 			},
 			"annotation above without content adds no row": {
 				input:       "key: value",
-				annotations: []line.Annotation{{Content: "", Placement: line.Above, Col: 2}},
+				annotations: []line.Annotation{{Content: "", Placement: line.Above, Cols: position.NewSpan(2, 2)}},
 				want:        "   1 | key: value",
 			},
-			"annotations below without content get one caret": {
-				input: "key: value",
-				annotations: []line.Annotation{
-					{Content: "", Placement: line.Below, Col: 4},
-					{Content: "", Placement: line.Below, Col: 2},
-				},
-				want: stringtest.JoinLF("   1 | key: value", "     |   ^"),
+			"annotations below without content get a caret each": {
+				input:       "key: value",
+				annotations: []line.Annotation{below(4, 4, ""), below(2, 2, "")},
+				want:        stringtest.JoinLF("   1 | key: value", "     |   ^", "     |     ^"),
 			},
 			"annotations above of each kind get a row of their own": {
 				input: "key: value",
 				annotations: []line.Annotation{
 					{Content: "@@ hunk header @@", Kind: kind.UIHunkHeader, Placement: line.Above},
-					{Content: "first", Placement: line.Above, Col: 5},
+					{Content: "first", Placement: line.Above, Cols: position.NewSpan(5, 9)},
 					{Content: "", Kind: kind.UISeparator, Placement: line.Above},
-					{Content: "second", Kind: kind.UIAnnotation, Placement: line.Above, Col: 2},
+					{Content: "second", Kind: kind.UIAnnotation, Placement: line.Above, Cols: position.NewSpan(2, 3)},
 				},
 				want: stringtest.JoinLF(
 					"     | @@ hunk header @@",
@@ -1029,7 +1102,7 @@ func TestView_String(t *testing.T) {
 				input: "key: value",
 				annotations: []line.Annotation{
 					{Content: "@@ hunk header @@", Placement: line.Above},
-					{Content: "note", Placement: line.Below, Col: 2},
+					below(2, 2, "note"),
 				},
 				want: stringtest.JoinLF(
 					"     | @@ hunk header @@",
@@ -1037,49 +1110,33 @@ func TestView_String(t *testing.T) {
 					"     |   ^ note",
 				),
 			},
-			"multiple annotations below join in column order at the minimum column": {
+			"annotations below of each kind get rows of their own, errors first": {
 				input: "key: value",
 				annotations: []line.Annotation{
-					{Content: "first", Placement: line.Below, Col: 5},
-					{Content: "second", Placement: line.Below, Col: 2},
-				},
-				want: stringtest.JoinLF("   1 | key: value", "     |   ^ second; first"),
-			},
-			"an annotation without content does not set the column": {
-				input: "key: value",
-				annotations: []line.Annotation{
-					{Content: "", Placement: line.Below, Col: 0},
-					{Content: "boom", Placement: line.Below, Col: 5},
-				},
-				want: stringtest.JoinLF("   1 | key: value", "     |      ^ boom"),
-			},
-			"annotations below of each kind get a row of their own": {
-				input: "key: value",
-				annotations: []line.Annotation{
-					{Content: "hint", Placement: line.Below, Col: 0},
-					{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Col: 5},
+					below(0, 0, "hint"),
+					{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Cols: position.NewSpan(5, 5)},
 				},
 				want: stringtest.JoinLF(
 					"   1 | key: value",
-					"     | ^ hint",
 					"     |      ^ bad value",
+					"     | ^ hint",
 				),
 			},
-			"a kind below without content keeps its caret beside another kind": {
+			"one run of two kinds gets a row for each": {
 				input: "key: value",
 				annotations: []line.Annotation{
-					{Content: "", Placement: line.Below, Col: 2},
-					{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Col: 5},
+					below(5, 10, "hint"),
+					{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Cols: position.NewSpan(5, 10)},
 				},
 				want: stringtest.JoinLF(
 					"   1 | key: value",
-					"     |   ^",
-					"     |      ^ bad value",
+					"     |      ^^^^^ bad value",
+					"     |      ^^^^^ hint",
 				),
 			},
 			"negative column is not padded": {
 				input:       "key: value",
-				annotations: []line.Annotation{{Content: "note", Placement: line.Below, Col: -3}},
+				annotations: []line.Annotation{below(-3, -3, "note")},
 				want:        stringtest.JoinLF("   1 | key: value", "     | ^ note"),
 			},
 
@@ -1088,38 +1145,44 @@ func TestView_String(t *testing.T) {
 			// as the printer starts it.
 			"below at the max column": {
 				input:       "a: 1",
-				annotations: []line.Annotation{{Content: "msg", Placement: line.Below, Col: math.MaxInt}},
+				annotations: []line.Annotation{below(math.MaxInt, math.MaxInt, "msg")},
 				want:        stringtest.JoinLF("   1 | a: 1", "     | "+strings.Repeat(" ", 4+1024)+"^ msg"),
 			},
 			"above at the max column": {
-				input:       "a: 1",
-				annotations: []line.Annotation{{Content: "msg", Placement: line.Above, Col: math.MaxInt}},
-				want:        stringtest.JoinLF("     | "+strings.Repeat(" ", 4+1024)+"msg", "   1 | a: 1"),
+				input: "a: 1",
+				annotations: []line.Annotation{
+					{Content: "msg", Placement: line.Above, Cols: position.NewSpan(math.MaxInt, math.MaxInt)},
+				},
+				want: stringtest.JoinLF("     | "+strings.Repeat(" ", 4+1024)+"msg", "   1 | a: 1"),
 			},
 			"below past the bound": {
 				input:       "a: 1",
-				annotations: []line.Annotation{{Content: "msg", Placement: line.Below, Col: 1 << 32}},
+				annotations: []line.Annotation{below(1<<32, 1<<32, "msg")},
 				want:        stringtest.JoinLF("   1 | a: 1", "     | "+strings.Repeat(" ", 4+1024)+"^ msg"),
 			},
 			"above past the bound": {
-				input:       "a: 1",
-				annotations: []line.Annotation{{Content: "msg", Placement: line.Above, Col: 1 << 32}},
-				want:        stringtest.JoinLF("     | "+strings.Repeat(" ", 4+1024)+"msg", "   1 | a: 1"),
+				input: "a: 1",
+				annotations: []line.Annotation{
+					{Content: "msg", Placement: line.Above, Cols: position.NewSpan(1<<32, 1<<32)},
+				},
+				want: stringtest.JoinLF("     | "+strings.Repeat(" ", 4+1024)+"msg", "   1 | a: 1"),
 			},
 			"below at the bound": {
 				input:       "a: 1",
-				annotations: []line.Annotation{{Content: "msg", Placement: line.Below, Col: 4 + 1024}},
+				annotations: []line.Annotation{below(4+1024, 4+1024, "msg")},
 				want:        stringtest.JoinLF("   1 | a: 1", "     | "+strings.Repeat(" ", 4+1024)+"^ msg"),
 			},
 			"below at the max column after wide runes": {
 				input:       "k: 日本語",
-				annotations: []line.Annotation{{Content: "msg", Placement: line.Below, Col: math.MaxInt}},
+				annotations: []line.Annotation{below(math.MaxInt, math.MaxInt, "msg")},
 				want:        stringtest.JoinLF("   1 | k: 日本語", "     | "+strings.Repeat(" ", 9+1024)+"^ msg"),
 			},
 			"above at the max column after wide runes": {
-				input:       "k: 日本語",
-				annotations: []line.Annotation{{Content: "msg", Placement: line.Above, Col: math.MaxInt}},
-				want:        stringtest.JoinLF("     | "+strings.Repeat(" ", 9+1024)+"msg", "   1 | k: 日本語"),
+				input: "k: 日本語",
+				annotations: []line.Annotation{
+					{Content: "msg", Placement: line.Above, Cols: position.NewSpan(math.MaxInt, math.MaxInt)},
+				},
+				want: stringtest.JoinLF("     | "+strings.Repeat(" ", 9+1024)+"msg", "   1 | k: 日本語"),
 			},
 		}
 
@@ -1378,7 +1441,10 @@ func TestView_Hunks(t *testing.T) {
 				},
 			},
 			"separator keeps the column of an annotation above": {
-				annotations: map[int]line.Annotation{1: one, 6: {Content: "hint", Placement: line.Above, Col: 3}},
+				annotations: map[int]line.Annotation{
+					1: one,
+					6: {Content: "hint", Placement: line.Above, Cols: position.NewSpan(3, 4)},
+				},
 				want: []string{
 					"   2 | b: 2",
 					"     | ^ one",
@@ -1421,10 +1487,12 @@ func TestView_Clip(t *testing.T) {
 	b := func(n int) string { return strings.Repeat("b", n) }
 
 	tcs := map[string]struct {
-		input       string
-		want        []string
-		windows     position.Spans
-		overlays    []position.Span
+		input   string
+		want    []string
+		windows position.Spans
+		// Spans that each get an overlay and an annotation without content
+		// below the line, as an excerpt marks a location.
+		marks       []position.Span
 		annotations []line.Annotation
 		cols        int
 	}{
@@ -1440,112 +1508,117 @@ func TestView_Clip(t *testing.T) {
 			want:    []string{"   1 | key: abcde..."},
 		},
 		"window centers on its mark": {
-			input:    letters,
-			cols:     10,
-			overlays: []position.Span{position.NewSpan(30, 32)},
-			windows:  position.Spans{position.NewSpan(25, 35)},
+			input:   letters,
+			cols:    10,
+			marks:   []position.Span{position.NewSpan(30, 32)},
+			windows: position.Spans{position.NewSpan(25, 35)},
 			want: []string{
 				"   1 | ...uvwxyzABCD...",
 				"     |         ^^",
 			},
 		},
 		"window near the start stays inside the line": {
-			input:    letters,
-			cols:     10,
-			overlays: []position.Span{position.NewSpan(2, 3)},
-			windows:  position.Spans{position.NewSpan(0, 10)},
+			input:   letters,
+			cols:    10,
+			marks:   []position.Span{position.NewSpan(2, 3)},
+			windows: position.Spans{position.NewSpan(0, 10)},
 			want: []string{
 				"   1 | key: abcde...",
 				"     |   ^",
 			},
 		},
 		"window near the end stays inside the line": {
-			input:    letters,
-			cols:     10,
-			overlays: []position.Span{position.NewSpan(55, 57)},
-			windows:  position.Spans{position.NewSpan(47, 57)},
+			input:   letters,
+			cols:    10,
+			marks:   []position.Span{position.NewSpan(55, 57)},
+			windows: position.Spans{position.NewSpan(47, 57)},
 			want: []string{
 				"   1 | ...QRSTUVWXYZ",
 				"     |            ^^",
 			},
 		},
 		"two marks far apart get a window each": {
-			input:    letters,
-			cols:     10,
-			overlays: []position.Span{position.NewSpan(15, 16), position.NewSpan(45, 46)},
+			input: letters,
+			cols:  10,
+			marks: []position.Span{position.NewSpan(15, 16), position.NewSpan(45, 46)},
 			annotations: []line.Annotation{
-				{Content: "first", Placement: line.Below, Col: 15},
-				{Content: "second", Placement: line.Below, Col: 45},
+				{Content: "first", Kind: kind.TextError, Placement: line.Below, Cols: position.NewSpan(15, 16)},
+				{Content: "second", Kind: kind.TextError, Placement: line.Below, Cols: position.NewSpan(45, 46)},
 			},
 			windows: position.Spans{position.NewSpan(10, 20), position.NewSpan(40, 50)},
 			want: []string{
 				"   1 | ...fghijklmno...JKLMNOPQRS...",
-				"     |         ^            ^ first; second",
+				"     |         ^ first",
+				"     |                      ^ second",
 			},
 		},
 		"windows three columns apart join": {
-			input:    letters,
-			cols:     10,
-			overlays: []position.Span{position.NewSpan(20, 21), position.NewSpan(33, 34)},
-			windows:  position.Spans{position.NewSpan(15, 38)},
+			input:   letters,
+			cols:    10,
+			marks:   []position.Span{position.NewSpan(20, 21), position.NewSpan(33, 34)},
+			windows: position.Spans{position.NewSpan(15, 38)},
 			want: []string{
 				"   1 | ...klmnopqrstuvwxyzABCDEFG...",
-				"     |         ^            ^",
+				"     |         ^",
+				"     |                      ^",
 			},
 		},
 		"windows four columns apart stay apart": {
-			input:    letters,
-			cols:     10,
-			overlays: []position.Span{position.NewSpan(20, 21), position.NewSpan(34, 35)},
-			windows:  position.Spans{position.NewSpan(15, 25), position.NewSpan(29, 39)},
+			input:   letters,
+			cols:    10,
+			marks:   []position.Span{position.NewSpan(20, 21), position.NewSpan(34, 35)},
+			windows: position.Spans{position.NewSpan(15, 25), position.NewSpan(29, 39)},
 			want: []string{
 				"   1 | ...klmnopqrst...yzABCDEFGH...",
-				"     |         ^            ^",
+				"     |         ^",
+				"     |                      ^",
 			},
 		},
 		"window three columns from an end reaches it": {
-			input:    letters,
-			cols:     10,
-			overlays: []position.Span{position.NewSpan(8, 9), position.NewSpan(49, 50)},
-			windows:  position.Spans{position.NewSpan(0, 13), position.NewSpan(44, 57)},
+			input:   letters,
+			cols:    10,
+			marks:   []position.Span{position.NewSpan(8, 9), position.NewSpan(49, 50)},
+			windows: position.Spans{position.NewSpan(0, 13), position.NewSpan(44, 57)},
 			want: []string{
 				"   1 | key: abcdefgh...NOPQRSTUVWXYZ",
-				"     |         ^            ^",
+				"     |         ^",
+				"     |                      ^",
 			},
 		},
 		"line three columns longer than the clip stays whole": {
-			input:    "key: abcdefgh",
-			cols:     10,
-			overlays: []position.Span{position.NewSpan(5, 6)},
+			input: "key: abcdefgh",
+			cols:  10,
+			marks: []position.Span{position.NewSpan(5, 6)},
 			want: []string{
 				"   1 | key: abcdefgh",
 				"     |      ^",
 			},
 		},
-		"long overlay shows the columns from its start": {
-			input:    letters,
-			cols:     10,
-			overlays: []position.Span{position.NewSpan(20, 57)},
-			windows:  position.Spans{position.NewSpan(15, 25)},
+		"long mark shows the columns from its start": {
+			input:   letters,
+			cols:    10,
+			marks:   []position.Span{position.NewSpan(20, 57)},
+			windows: position.Spans{position.NewSpan(15, 25)},
 			want: []string{
 				"   1 | ...klmnopqrst...",
 				"     |         ^^^^^",
 			},
 		},
-		"overlay that spans two windows marks its part of each": {
-			input:    letters,
-			cols:     10,
-			overlays: []position.Span{position.NewSpan(15, 47), position.NewSpan(45, 46)},
-			windows:  position.Spans{position.NewSpan(10, 20), position.NewSpan(40, 50)},
+		"mark that spans two windows runs through the ellipsis between them": {
+			input:   letters,
+			cols:    10,
+			marks:   []position.Span{position.NewSpan(15, 47), position.NewSpan(45, 46)},
+			windows: position.Spans{position.NewSpan(10, 20), position.NewSpan(40, 50)},
 			want: []string{
 				"   1 | ...fghijklmno...JKLMNOPQRS...",
-				"     |         ^^^^^   ^^^^^^^",
+				"     |         ^^^^^^^^^^^^^^^",
+				"     |                      ^",
 			},
 		},
 		"annotation alone marks its column": {
 			input:       letters,
 			cols:        10,
-			annotations: []line.Annotation{{Content: "here", Placement: line.Below, Col: 40}},
+			annotations: []line.Annotation{{Content: "here", Placement: line.Below, Cols: position.NewSpan(40, 41)}},
 			windows:     position.Spans{position.NewSpan(35, 45)},
 			want: []string{
 				"   1 | ...EFGHIJKLMN...",
@@ -1555,7 +1628,7 @@ func TestView_Clip(t *testing.T) {
 		"annotation above sits over its column": {
 			input:       letters,
 			cols:        10,
-			annotations: []line.Annotation{{Content: "above", Placement: line.Above, Col: 40}},
+			annotations: []line.Annotation{{Content: "above", Placement: line.Above, Cols: position.NewSpan(40, 41)}},
 			windows:     position.Spans{position.NewSpan(35, 45)},
 			want: []string{
 				"     |         above",
@@ -1565,30 +1638,29 @@ func TestView_Clip(t *testing.T) {
 		"annotation past the end marks the end": {
 			input:       letters,
 			cols:        10,
-			annotations: []line.Annotation{{Content: "end", Placement: line.Below, Col: 58}},
+			annotations: []line.Annotation{{Content: "end", Placement: line.Below, Cols: position.NewSpan(58, 58)}},
 			windows:     position.Spans{position.NewSpan(47, 57)},
 			want: []string{
 				"   1 | ...QRSTUVWXYZ",
 				"     |               ^ end",
 			},
 		},
-		"overlay of no width at the end marks the end": {
-			input:       letters,
-			cols:        10,
-			overlays:    []position.Span{position.NewSpan(57, 57)},
-			annotations: []line.Annotation{{Placement: line.Below, Col: 57}},
-			windows:     position.Spans{position.NewSpan(47, 57)},
+		"mark of no width at the end marks the end": {
+			input:   letters,
+			cols:    10,
+			marks:   []position.Span{position.NewSpan(57, 57)},
+			windows: position.Spans{position.NewSpan(47, 57)},
 			want: []string{
 				"   1 | ...QRSTUVWXYZ",
 				"     |              ^",
 			},
 		},
 		"separator is no mark and starts at the ellipsis": {
-			input:    letters,
-			cols:     10,
-			overlays: []position.Span{position.NewSpan(40, 41)},
+			input: letters,
+			cols:  10,
+			marks: []position.Span{position.NewSpan(40, 41)},
 			annotations: []line.Annotation{
-				{Content: "---", Kind: kind.UISeparator, Placement: line.Above, Col: 20},
+				{Content: "---", Kind: kind.UISeparator, Placement: line.Above, Cols: position.NewSpan(20, 20)},
 			},
 			windows: position.Spans{position.NewSpan(35, 45)},
 			want: []string{
@@ -1598,79 +1670,79 @@ func TestView_Clip(t *testing.T) {
 			},
 		},
 		"wide runes count one column and take two cells": {
-			input:    "k: " + strings.Repeat("日本語", 8),
-			cols:     8,
-			overlays: []position.Span{position.NewSpan(15, 16)},
-			windows:  position.Spans{position.NewSpan(11, 19)},
+			input:   "k: " + strings.Repeat("日本語", 8),
+			cols:    8,
+			marks:   []position.Span{position.NewSpan(15, 16)},
+			windows: position.Spans{position.NewSpan(11, 19)},
 			want: []string{
 				"   1 | ...語日本語日本語日...",
 				"     |            ^^",
 			},
 		},
 		"tab counts one column and shows as its picture": {
-			input:    "k: a\tb\tc\td\te\tf\tg\th\ti\tj\tk\tl\tm",
-			cols:     8,
-			overlays: []position.Span{position.NewSpan(15, 16)},
-			windows:  position.Spans{position.NewSpan(11, 19)},
+			input:   "k: a\tb\tc\td\te\tf\tg\th\ti\tj\tk\tl\tm",
+			cols:    8,
+			marks:   []position.Span{position.NewSpan(15, 16)},
+			windows: position.Spans{position.NewSpan(11, 19)},
 			want: []string{
 				"   1 | ...e␉f␉g␉h␉...",
 				"     |        ^",
 			},
 		},
 		"mark inside a grapheme cluster shows the cluster": {
-			input:    "k: " + couple + a(12) + couple + b(24),
-			cols:     8,
-			overlays: []position.Span{position.NewSpan(20, 21)},
-			windows:  position.Spans{position.NewSpan(16, 24)},
+			input:   "k: " + couple + a(12) + couple + b(24),
+			cols:    8,
+			marks:   []position.Span{position.NewSpan(20, 21)},
+			windows: position.Spans{position.NewSpan(16, 24)},
 			want: []string{
 				"   1 | ...aa" + couple + "bbb...",
 				"     |      ^^",
 			},
 		},
 		"window grows to hold a grapheme cluster at its end": {
-			input:    "k: " + a(25) + couple + b(24),
-			cols:     8,
-			overlays: []position.Span{position.NewSpan(25, 26)},
-			windows:  position.Spans{position.NewSpan(21, 31)},
+			input:   "k: " + a(25) + couple + b(24),
+			cols:    8,
+			marks:   []position.Span{position.NewSpan(25, 26)},
+			windows: position.Spans{position.NewSpan(21, 31)},
 			want: []string{
 				"   1 | ...aaaaaaa" + couple + "...",
 				"     |        ^",
 			},
 		},
 		"window grows to hold a grapheme cluster at its start": {
-			input:    "k: " + a(25) + couple + b(24),
-			cols:     8,
-			overlays: []position.Span{position.NewSpan(33, 34)},
-			windows:  position.Spans{position.NewSpan(28, 37)},
+			input:   "k: " + a(25) + couple + b(24),
+			cols:    8,
+			marks:   []position.Span{position.NewSpan(33, 34)},
+			windows: position.Spans{position.NewSpan(28, 37)},
 			want: []string{
 				"   1 | ..." + couple + "bbbbbb...",
 				"     |        ^",
 			},
 		},
 		"combining marks stay with their letters": {
-			input:    "k: " + a(25) + strings.Repeat("e\u0301", 5) + b(24),
-			cols:     6,
-			overlays: []position.Span{position.NewSpan(31, 32)},
-			windows:  position.Spans{position.NewSpan(28, 34)},
+			input:   "k: " + a(25) + strings.Repeat("e\u0301", 5) + b(24),
+			cols:    6,
+			marks:   []position.Span{position.NewSpan(31, 32)},
+			windows: position.Spans{position.NewSpan(28, 34)},
 			want: []string{
 				"   1 | ..." + strings.Repeat("e\u0301", 3) + "...",
 				"     |     ^",
 			},
 		},
 		"clip of one column keeps the mark": {
-			input:    letters,
-			cols:     1,
-			overlays: []position.Span{position.NewSpan(30, 31)},
-			windows:  position.Spans{position.NewSpan(30, 31)},
+			input:   letters,
+			cols:    1,
+			marks:   []position.Span{position.NewSpan(30, 31)},
+			windows: position.Spans{position.NewSpan(30, 31)},
 			want: []string{
 				"   1 | ...z...",
 				"     |    ^",
 			},
 		},
 		"clip of zero shows the whole line": {
-			input:    letters,
-			cols:     0,
-			overlays: []position.Span{position.NewSpan(30, 31)},
+			input: letters,
+			cols:  0,
+			marks: []position.Span{position.NewSpan(30, 31)},
 			want: []string{
 				"   1 | " + letters,
 				"     | " + strings.Repeat(" ", 30) + "^",
@@ -1689,8 +1761,9 @@ func TestView_Clip(t *testing.T) {
 
 			view := newView(tc.input + "\n")
 
-			for _, cols := range tc.overlays {
+			for _, cols := range tc.marks {
 				view.AddLineOverlay(0, line.Overlay{Kind: kind.GenericError, Cols: cols})
+				view.Annotate(0, line.Annotation{Kind: kind.TextError, Placement: line.Below, Cols: cols})
 			}
 
 			view.Annotate(0, tc.annotations...)
@@ -1718,7 +1791,7 @@ func TestView_Clip_KeepsView(t *testing.T) {
 		view := newView(input)
 		view.SetFlag(1, line.FlagInserted)
 		view.AddOverlay(kind.GenericError, yamltest.LineRange(1, 30, 32))
-		view.Annotate(1, line.Annotation{Content: "bad", Placement: line.Below, Col: 30})
+		view.Annotate(1, line.Annotation{Content: "bad", Placement: line.Below, Cols: position.NewSpan(30, 32)})
 
 		return view
 	}
@@ -1731,13 +1804,14 @@ func TestView_Clip_KeepsView(t *testing.T) {
 		clipped := newMarked().Clip(10)
 		require.Equal(t, window, clipped.Windows(1))
 
-		clipped.Annotate(1, line.Annotation{Content: "more", Placement: line.Below, Col: 12})
+		clipped.Annotate(1, line.Annotation{Content: "more", Placement: line.Below, Cols: position.NewSpan(12, 12)})
 
 		assert.Equal(t, position.Spans{position.NewSpan(7, 17), position.NewSpan(25, 35)}, clipped.Windows(1))
 		assert.Equal(t, stringtest.JoinLF(
 			"   1 | a: 1",
 			"   2 | ...xxxxxxxxxx...xxxxxxxxxx...",
-			"     |         ^            ^^ more; bad",
+			"     |         ^ more",
+			"     |                      ^^ bad",
 			"   3 | c: 3",
 			"   4 | d: 4",
 		), clipped.String())

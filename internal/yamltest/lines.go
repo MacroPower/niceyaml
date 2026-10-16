@@ -147,10 +147,11 @@ func LineNumbers(seq line.Sequence) []int {
 }
 
 // ErrorAnnotation returns the [line.Annotation] that the binding of an
-// error leaves below a line it marks. A printer draws a caret at col with
-// msg beside it, or the caret alone when msg is empty.
-func ErrorAnnotation(col int, msg string) line.Annotation {
-	return line.Annotation{Content: msg, Kind: kind.TextError, Placement: line.Below, Col: col}
+// error leaves below a line it marks. A printer draws a caret under each
+// column of cols with msg beside the carets, or the carets alone when msg
+// is empty.
+func ErrorAnnotation(cols position.Span, msg string) line.Annotation {
+	return line.Annotation{Content: msg, Kind: kind.TextError, Placement: line.Below, Cols: cols}
 }
 
 // ErrorOverlays returns the [line.Overlays] that the binding of an error

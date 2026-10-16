@@ -81,8 +81,8 @@ func TestPrinter_Layout(t *testing.T) {
 			"c: 3",
 		)).View()
 		view.Annotate(0, line.Annotation{Content: "a note above that wraps too", Placement: line.Above})
-		view.Annotate(0, line.Annotation{Content: "below", Placement: line.Below, Col: 5})
-		view.Annotate(2, line.Annotation{Content: "last", Placement: line.Below, Col: 3})
+		view.Annotate(0, line.Annotation{Content: "below", Placement: line.Below, Cols: position.NewSpan(5, 5)})
+		view.Annotate(2, line.Annotation{Content: "last", Placement: line.Below, Cols: position.NewSpan(3, 3)})
 
 		return view
 	}
@@ -345,7 +345,7 @@ func TestPrinter_Layout(t *testing.T) {
 					lipgloss.NewStyle(),
 					style.Set(kind.NameTag, lipgloss.NewStyle().Transform(strings.ToUpper)),
 				),
-				below:   []line.Annotation{{Content: "x", Placement: line.Below, Col: 20}},
+				below:   []line.Annotation{{Content: "x", Placement: line.Below, Cols: position.NewSpan(20, 20)}},
 				content: words,
 				wrap:    10,
 				want:    stringtest.JoinLF("KEY: aaaa", "bbbb cccc", "dddd", "^ x"),
@@ -503,7 +503,7 @@ func TestPrinter_Layout_Width(t *testing.T) {
 	annotated.Annotate(0, line.Annotation{Content: "a note wider than the lines", Placement: line.Above})
 
 	noted := niceyaml.NewSourceFromString("key: value\n").View()
-	noted.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Col: 5})
+	noted.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Cols: position.NewSpan(5, 5)})
 
 	tcs := map[string]struct {
 		view   *line.View
@@ -699,7 +699,14 @@ func TestPrinter_Layout_StyledAnnotationRows(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString("a: 1\n").View()
-			view.Annotate(0, line.Annotation{Content: "hello world foo", Placement: line.Below, Col: tc.col})
+			view.Annotate(
+				0,
+				line.Annotation{
+					Content:   "hello world foo",
+					Placement: line.Below,
+					Cols:      position.NewSpan(tc.col, tc.col),
+				},
+			)
 
 			p := testPrinterWithStyles(style.Set(kind.UIAnnotation, tc.style)).With(
 				printer.WithGutter(tc.gutter),
@@ -896,8 +903,8 @@ func TestPrinter_Layout_Clip(t *testing.T) {
 	newView := func() *line.View {
 		return newClippedView(clipLetters, 10,
 			[]position.Span{position.NewSpan(15, 16), position.NewSpan(45, 46)},
-			line.Annotation{Content: "first", Placement: line.Below, Col: 15},
-			line.Annotation{Content: "second", Placement: line.Below, Col: 45},
+			line.Annotation{Content: "first", Placement: line.Below, Cols: position.NewSpan(15, 16)},
+			line.Annotation{Content: "second and widest", Placement: line.Below, Cols: position.NewSpan(45, 46)},
 		)
 	}
 
@@ -918,8 +925,8 @@ func TestPrinter_Layout_Clip(t *testing.T) {
 		"negative column counts as the start":                     {col: -1, wantCell: 0},
 		"wrapped first mark":                                      {col: 15, wrap: 16, wantRow: 0, wantCell: 8},
 		"wrapped column between the windows":                      {col: 25, wrap: 16, wantRow: 0, wantCell: 13},
-		"wrapped second mark":                                     {col: 45, wrap: 16, wantRow: 3, wantCell: 5},
-		"wrapped column after the last window":                    {col: 52, wrap: 16, wantRow: 3, wantCell: 10},
+		"wrapped second mark":                                     {col: 45, wrap: 16, wantRow: 2, wantCell: 5},
+		"wrapped column after the last window":                    {col: 52, wrap: 16, wantRow: 2, wantCell: 10},
 	}
 
 	for name, tc := range tcs {
@@ -940,10 +947,10 @@ func TestPrinter_Layout_Clip(t *testing.T) {
 		view := newView()
 		l := testPrinter().Layout(view)
 
-		// The annotation row is the widest: "        ^            ^
-		// first; second".
-		assert.Equal(t, 36, l.Width())
-		assert.Equal(t, 36, l.LineWidth(0))
+		// The row of the second annotation is the widest: 21 cells of
+		// padding, then "^ second and widest".
+		assert.Equal(t, 40, l.Width())
+		assert.Equal(t, 40, l.LineWidth(0))
 		assert.Equal(t, 29, testPrinter().With(printer.WithAnnotation(printer.NoAnnotation)).Layout(view).Width())
 	})
 
@@ -979,7 +986,7 @@ func TestPrinter_Layout_PositionAt(t *testing.T) {
 
 	// An annotation at column 20 moves the window of a clipped line, so
 	// the letters show as "...mnopqrstuv...".
-	at20 := &line.Annotation{Content: "x", Placement: line.Below, Col: 20}
+	at20 := &line.Annotation{Content: "x", Placement: line.Below, Cols: position.NewSpan(20, 20)}
 
 	tcs := map[string]struct {
 		annotation *line.Annotation
@@ -1217,7 +1224,7 @@ func TestPrinter_Layout_PositionAt(t *testing.T) {
 		// The line shows as "...日本語日本語日本語".
 		"second cell of a wide rune on a clipped line": {
 			content:    "k: 日本語日本語日本語日本語",
-			annotation: &line.Annotation{Content: "x", Placement: line.Below, Col: 9},
+			annotation: &line.Annotation{Content: "x", Placement: line.Below, Cols: position.NewSpan(9, 9)},
 			clip:       6,
 			cell:       6,
 			want:       new(position.New(0, 7)),
@@ -1335,7 +1342,10 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			input:   stringtest.LinesLF("key: aaaa bbbb cccc", "b: 2"),
 			decorate: func(view *line.View) {
 				view.Annotate(0, line.Annotation{Content: "above", Placement: line.Above})
-				view.Annotate(0, line.Annotation{Content: "below", Placement: line.Below, Col: 12})
+				view.Annotate(
+					0,
+					line.Annotation{Content: "below", Placement: line.Below, Cols: position.NewSpan(12, 12)},
+				)
 				view.Annotate(1, line.Annotation{Content: "last", Placement: line.Below})
 			},
 		},
@@ -1348,8 +1358,11 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			input:   stringtest.LinesLF("k: abcdefghijklmnopqrstuvwxyz", "b: 2"),
 			clip:    8,
 			decorate: func(view *line.View) {
-				view.Annotate(0, line.Annotation{Content: "first", Placement: line.Below, Col: 5})
-				view.Annotate(0, line.Annotation{Content: "second", Placement: line.Below, Col: 24})
+				view.Annotate(0, line.Annotation{Content: "first", Placement: line.Below, Cols: position.NewSpan(5, 5)})
+				view.Annotate(
+					0,
+					line.Annotation{Content: "second", Placement: line.Below, Cols: position.NewSpan(24, 24)},
+				)
 			},
 		},
 		"clipped with wide runes and brackets": {
@@ -1365,7 +1378,7 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			input:   "k: aaaa bbbb cccc dddd eeee ffff gggg\n",
 			clip:    16,
 			decorate: func(view *line.View) {
-				view.Annotate(0, line.Annotation{Content: "x", Placement: line.Below, Col: 20})
+				view.Annotate(0, line.Annotation{Content: "x", Placement: line.Below, Cols: position.NewSpan(20, 20)})
 			},
 		},
 		"full.yaml clipped with a gutter": {

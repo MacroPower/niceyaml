@@ -3396,17 +3396,21 @@ func (e *SourceError) Annotate(view *line.View) bool {
 //	niceyaml.Annotate(err, view)
 //	lipgloss.Println(p.Print(view))
 //
-// Each binding highlights its location with [kind.GenericError] and adds
-// its [SourceError.Message] as an annotation below its line in
-// [kind.TextError], with each tab as four spaces. An error with no message
-// adds an empty annotation, which a renderer draws as a caret run under
-// the highlight. A location whose highlight leaves out its own line, such
-// as a position past the end of a line, gets an overlay of no width, so
-// [line.View.Hunks] keeps the line. A column past the end of its line
-// moves to the column after its last rune. A binding whose location did
-// not resolve adds no mark. Neither does a binding with no line of its
-// own, such as one of a join with a location, because each problem of the
-// join that carries no location marks that location.
+// Each binding highlights its location with [kind.GenericError] and
+// labels the same columns with an annotation in [kind.TextError] below
+// each line the highlight covers. A renderer draws a caret run under the
+// columns of each annotation. The first annotation on the line of the
+// location carries its [SourceError.Message], with each tab as four
+// spaces, and the others carry no message. An error with no message thus
+// gets caret runs alone.
+//
+// A location whose highlight leaves out its own line, such as a position
+// past the end of a line, gets an annotation of no width at its column.
+// The annotation makes [line.View.Hunks] keep the line. A column past the
+// end of its line moves to the column after its last rune. A binding
+// whose location did not resolve adds no mark. Neither does a binding
+// with no line of its own, such as one of a join with a location, because
+// each problem of the join that carries no location marks that location.
 //
 // Annotate finds each line by identity, so the view may be the whole
 // source, a slice of it, or a diff against another revision, and a

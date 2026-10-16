@@ -5198,7 +5198,7 @@ func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
 				"a: 1", "k: v", "c: 3", "d: 4", "e: 5", "f: 6", "g: 7", "h: 8", "i: 9", "j: 10",
 			))
 			view := source.View()
-			view.Annotate(1, line.Annotation{Content: "BAD", Placement: line.Below, Col: 50})
+			view.Annotate(1, line.Annotation{Content: "BAD", Placement: line.Below, Cols: position.NewSpan(50, 50)})
 
 			p := testPrinterWithLineNumbers().With(
 				printer.WithContainerStyle(normalBorder()),
@@ -5625,7 +5625,11 @@ func markedRevision(name, doc string, marks ...int) yamlviewport.Revision {
 		field, _, _ := strings.Cut(view.Line(i).Content(), ":")
 
 		view.AddOverlay(kind.GenericError, yamltest.LineRange(i, 0, len(field)))
-		view.Annotate(i, line.Annotation{Content: name + " " + field, Placement: line.Below})
+		view.Annotate(i, line.Annotation{
+			Content:   name + " " + field,
+			Placement: line.Below,
+			Cols:      position.NewSpan(0, len(field)),
+		})
 	}
 
 	return yamlviewport.NewRevision(name, view)
@@ -6814,7 +6818,7 @@ func TestViewport_HitAt(t *testing.T) {
 	// The mark at column 20 centers the window of the long line, which
 	// shows as "...mnopqrstuv..." behind the gutter.
 	marked := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "k: abcdefghijklmnopqrstuvwxyz", "c: 3")).View()
-	marked.Annotate(1, line.Annotation{Content: "x", Placement: line.Below, Col: 20})
+	marked.Annotate(1, line.Annotation{Content: "x", Placement: line.Below, Cols: position.NewSpan(20, 20)})
 
 	clipped := yamlviewport.NewRevision("clipped", marked.Clip(10))
 

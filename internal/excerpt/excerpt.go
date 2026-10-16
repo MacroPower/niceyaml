@@ -3,9 +3,10 @@
 //
 // A location highlights the content of the token at it, or the range an
 // error carried, as [Ranges] finds it. [Annotate] marks each [Mark] on a
-// view: an overlay on the text it covers, and its message as an
-// annotation below its line. A renderer draws a line with no message as
-// a caret run under its overlays.
+// view: an overlay on each line of the text it covers, and an annotation
+// below each of those lines that labels the same columns. A renderer
+// draws each annotation as a caret run under its columns, with the
+// message of the mark beside the run on the line of the mark.
 package excerpt
 
 import (
@@ -54,59 +55,51 @@ func (m Mark) textKind() kind.Kind {
 
 // Annotate puts each mark in marks on view, where marks hold the resolved
 // locations of the errors in lines, and reports whether it marked any
-// line. It adds an annotation without content below each line it marked
-// that has no annotation below it, so a renderer draws a caret run there.
-// It marks nothing when marks is empty or the view holds none of their
-// lines.
+// line. It marks nothing when marks is empty or the view holds none of
+// their lines.
 //
-// The view may hold the lines at any indices, as a diff does, so every
-// mark goes to the index that holds its line. A mark whose highlight
-// leaves out its own line gets an overlay of no width at its column on
-// that line. That holds for a mark with no token under it and a range
-// that covers no column of its lines. It also holds for a mark on a line
-// of only spaces inside a block scalar, and a range that starts at the
-// end of its first line. The overlay renders nothing and still marks the
-// line as decorated, so the line joins the hunks [line.View.Hunks] keeps.
+// The view can hold the lines at any indices, as a diff does, so every
+// mark goes to the index that holds its line. A mark highlights each line
+// its ranges cover with an overlay. It also labels the same columns with
+// an annotation below that line, so a renderer draws a caret run under
+// them without color.
+//
+// The first annotation on the line of the mark, in the order of its
+// ranges, carries its message, and every other annotation of the mark
+// carries none. A mark with no message thus gets caret runs alone. The
+// highlight on the line of a mark can start past the column of the mark,
+// as for a mark on the spaces before a token. The message then sits under
+// the token.
+//
+// A mark whose highlight leaves out its own line labels the column of the
+// mark with an annotation of no width, which carries its message. That
+// holds for a mark with no token under it and a range that covers no
+// column of its lines. It also holds for a mark on a line of only spaces
+// inside a block scalar, and a range that starts at the end of its first
+// line. The annotation marks the line as decorated, so the line joins the
+// hunks [line.View.Hunks] keeps. A column past the end of its line moves
+// to the column after its last rune. A far column then costs a renderer
+// no more cells than a column at the end.
 //
 // A mark of a warning highlights in [kind.GenericWarn] and annotates in
 // [kind.TextWarn], and a mark of an error in [kind.GenericError] and
-// [kind.TextError]. A line that holds marks of both gets an annotation of
-// each kind, so a renderer gives each severity a row of its own.
+// [kind.TextError]. The printer and [line.View.String] draw the rows of
+// errors first.
 //
-// Each mark with a message adds one annotation below its line, so a line
-// several marks mark carries one annotation per message, and a renderer
-// joins them in column order. Each tab in a message becomes four spaces,
-// as [escape.Tabs] returns it. A renderer draws the other control
-// characters of an annotation as their pictures. The annotation starts
-// at the first column the highlight of its mark covers on that line,
-// where the caret run starts, so a mark on the spaces around a token puts
-// its message under the token. A mark with no highlight on its line
-// keeps its column. A column past the end of its line moves to the
-// column after its last rune, in the overlay and in the annotation below
-// the line. A far column then costs a renderer no more cells than a
-// column at the end.
+// Each tab in a message becomes four spaces, as [escape.Tabs] returns it.
+// A renderer draws the other control characters of an annotation as
+// their pictures.
 //
 // A line keeps each mark once. Marks that repeat, in one call or across
 // several, leave the view as the first of them does, so a message that
-// repeats at one column reads once.
+// repeats on one run reads once.
 func Annotate(view *line.View, lines line.Lines, marks []Mark) bool {
-	marked := annotateLines(view, lines, marks)
-
-	markUnannotated(view, marked)
-
-	return len(marked) > 0
-}
-
-// annotateLines marks marks on view as [Annotate] describes, and returns
-// the indices of the lines it marked, with repeats.
-func annotateLines(view *line.View, lines line.Lines, marks []Mark) []markedLine {
 	if len(marks) == 0 {
-		return nil
+		return false
 	}
 
 	index := lineIndex(view, lines)
-
-	var marked []markedLine
+	marked := false
 
 	for _, m := range marks {
 		var segments []position.Range
@@ -115,41 +108,44 @@ func annotateLines(view *line.View, lines line.Lines, marks []Mark) []markedLine
 			segments = append(segments, lines.SliceLines(r)...)
 		}
 
-		if i, ok := index(m.Pos.Line); ok {
-			marked = append(marked, markedLine{index: i, warning: m.Warning})
+		// The message goes on the first segment of the line of the mark,
+		// or on the column of the mark when no segment lies on that line.
+		labeled := slices.IndexFunc(segments, func(lr position.Range) bool {
+			return lr.Start.Line == m.Pos.Line
+		})
 
-			width := lines.Line(m.Pos.Line).Width()
-			start, onLine := highlightStart(m.Pos, segments)
+		if i, ok := index(m.Pos.Line); ok && labeled < 0 {
+			col := min(m.Pos.Col, lines.Line(m.Pos.Line).Width())
+			addAnnotation(view, i, line.Annotation{
+				Content:   escape.Tabs(m.Message),
+				Kind:      m.textKind(),
+				Placement: line.Below,
+				Cols:      position.NewSpan(col, col),
+			})
 
-			if !onLine {
-				col := min(m.Pos.Col, width)
-				addOverlay(view, i, line.Overlay{
-					Cols: position.NewSpan(col, col),
-					Kind: m.overlayKind(),
-				})
-			}
-
-			if m.Message != "" {
-				addAnnotation(view, i, line.Annotation{
-					Content:   escape.Tabs(m.Message),
-					Kind:      m.textKind(),
-					Placement: line.Below,
-					Col:       min(start, width),
-				})
-			}
+			marked = true
 		}
 
 		// [line.Lines.SliceLines] already clamped each segment to its
 		// line, which the view holds at index i.
-		for _, lr := range segments {
-			if i, ok := index(lr.Start.Line); ok {
-				addOverlay(view, i, line.Overlay{
-					Cols: position.NewSpan(lr.Start.Col, lr.End.Col),
-					Kind: m.overlayKind(),
-				})
-
-				marked = append(marked, markedLine{index: i, warning: m.Warning})
+		for j, lr := range segments {
+			i, ok := index(lr.Start.Line)
+			if !ok {
+				continue
 			}
+
+			cols := position.NewSpan(lr.Start.Col, lr.End.Col)
+
+			addOverlay(view, i, line.Overlay{Cols: cols, Kind: m.overlayKind()})
+
+			ann := line.Annotation{Kind: m.textKind(), Placement: line.Below, Cols: cols}
+			if j == labeled {
+				ann.Content = escape.Tabs(m.Message)
+			}
+
+			addAnnotation(view, i, ann)
+
+			marked = true
 		}
 	}
 
@@ -170,84 +166,6 @@ func addAnnotation(view *line.View, i int, a line.Annotation) {
 	if !slices.Contains(view.Annotations(i), a) {
 		view.Annotate(i, a)
 	}
-}
-
-// highlightStart returns the first column that segments cover on the
-// line of at, or the column of at when no segment lies on that line. It
-// also reports whether any segment lies on that line.
-func highlightStart(at position.Position, segments []position.Range) (int, bool) {
-	col, found := at.Col, false
-
-	for _, lr := range segments {
-		if lr.Start.Line == at.Line && (!found || lr.Start.Col < col) {
-			col, found = lr.Start.Col, true
-		}
-	}
-
-	return col, found
-}
-
-// markedLine is the index of a line of a view that [Annotate] marked, and
-// whether the mark there belongs to a warning.
-type markedLine struct {
-	index   int
-	warning bool
-}
-
-// markUnannotated adds an empty annotation below each line of view in
-// marked that has none of the kind of its mark below it yet: a
-// [kind.TextError] one for the mark of an error and a [kind.TextWarn] one
-// for the mark of a warning. An annotation of another kind counts too,
-// apart from one of the other severity, so a line that holds both
-// severities gets a row for each. The annotation goes at the first column
-// that the overlays of its kind cover, or else any overlay without Blend
-// set, so a search highlight moves no caret. The printer draws it as a
-// caret run, so a location with no message, such as the root of a bound
-// error, still shows its extent.
-func markUnannotated(view *line.View, marked []markedLine) {
-	for _, m := range marked {
-		own, other := kind.TextError, kind.TextWarn
-		highlight := kind.GenericError
-
-		if m.warning {
-			own, other = other, own
-			highlight = kind.GenericWarn
-		}
-
-		// A line repeats in marked once per location on it, so the check
-		// for an annotation below it comes before the scan of its overlays.
-		// Each repeat after the first then skips the scan.
-		if slices.ContainsFunc(view.Annotations(m.index), func(a line.Annotation) bool {
-			return a.Placement == line.Below && a.Kind != other
-		}) {
-			continue
-		}
-
-		col, found := firstCol(view.Overlays(m.index), func(o line.Overlay) bool {
-			return !o.Blend && o.Kind == highlight
-		})
-		if !found {
-			col, found = firstCol(view.Overlays(m.index), func(o line.Overlay) bool { return !o.Blend })
-		}
-
-		if found {
-			view.Annotate(m.index, line.Annotation{Kind: own, Placement: line.Below, Col: col})
-		}
-	}
-}
-
-// firstCol returns the first column that the overlays keep accepts start
-// at, and whether keep accepts any.
-func firstCol(overlays line.Overlays, keep func(line.Overlay) bool) (int, bool) {
-	col, found := 0, false
-
-	for _, o := range overlays {
-		if keep(o) && (!found || o.Cols.Start < col) {
-			col, found = o.Cols.Start, true
-		}
-	}
-
-	return col, found
 }
 
 // lineIndex returns a lookup from a line index of lines to the index of

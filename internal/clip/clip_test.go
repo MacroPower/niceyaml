@@ -250,6 +250,58 @@ func TestMap_Spans(t *testing.T) {
 	}
 }
 
+func TestMap_Span(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		cols position.Span
+		want position.Span
+	}{
+		"inside one window": {
+			cols: position.NewSpan(5, 7),
+			want: position.NewSpan(4, 6),
+		},
+		"cut at the end of a window": {
+			cols: position.NewSpan(6, 12),
+			want: position.NewSpan(5, 7),
+		},
+		"across both windows holds the ellipsis between them": {
+			cols: position.NewSpan(5, 22),
+			want: position.NewSpan(4, 12),
+		},
+		"start in a gap starts at its ellipsis": {
+			cols: position.NewSpan(1, 6),
+			want: position.NewSpan(0, 5),
+		},
+		"inside a gap": {
+			cols: position.NewSpan(10, 14),
+			want: position.NewSpan(7, 7),
+		},
+		"past the end": {
+			cols: position.NewSpan(26, 30),
+			want: position.NewSpan(17, 17),
+		},
+		"no columns": {
+			cols: position.NewSpan(5, 5),
+			want: position.NewSpan(4, 4),
+		},
+		"start past the end": {
+			cols: position.NewSpan(7, 5),
+			want: position.NewSpan(6, 6),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := clip.New(26, twoWindows)
+
+			assert.Equal(t, tc.want, m.Span(tc.cols))
+		})
+	}
+}
+
 func TestMap_Pieces(t *testing.T) {
 	t.Parallel()
 

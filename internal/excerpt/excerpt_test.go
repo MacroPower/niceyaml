@@ -44,19 +44,19 @@ func TestAnnotate(t *testing.T) {
 		"message under its token": {
 			marks:       []excerpt.Mark{mark(position.New(1, 4), "too big")},
 			overlays:    yamltest.ErrorOverlays(position.NewSpan(4, 6)),
-			annotations: line.Annotations{yamltest.ErrorAnnotation(4, "too big")},
+			annotations: line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(4, 6), "too big")},
 			want:        true,
 		},
 		"message on the spaces before a token": {
 			marks:       []excerpt.Mark{mark(position.New(1, 3), "too big")},
 			overlays:    yamltest.ErrorOverlays(position.NewSpan(4, 6)),
-			annotations: line.Annotations{yamltest.ErrorAnnotation(4, "too big")},
+			annotations: line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(4, 6), "too big")},
 			want:        true,
 		},
 		"no message gets a caret run": {
 			marks:       []excerpt.Mark{mark(position.New(1, 4), "")},
 			overlays:    yamltest.ErrorOverlays(position.NewSpan(4, 6)),
-			annotations: line.Annotations{yamltest.ErrorAnnotation(4, "")},
+			annotations: line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(4, 6), "")},
 			want:        true,
 		},
 		"a warning marks in the warning kinds": {
@@ -65,7 +65,7 @@ func TestAnnotate(t *testing.T) {
 				{Cols: position.NewSpan(4, 6), Kind: kind.GenericWarn},
 			},
 			annotations: line.Annotations{
-				{Content: "warning: big", Kind: kind.TextWarn, Placement: line.Below, Col: 4},
+				{Content: "warning: big", Kind: kind.TextWarn, Placement: line.Below, Cols: position.NewSpan(4, 6)},
 			},
 			want: true,
 		},
@@ -79,8 +79,8 @@ func TestAnnotate(t *testing.T) {
 				{Cols: position.NewSpan(4, 6), Kind: kind.GenericWarn},
 			},
 			annotations: line.Annotations{
-				yamltest.ErrorAnnotation(0, ""),
-				{Kind: kind.TextWarn, Placement: line.Below, Col: 4},
+				yamltest.ErrorAnnotation(position.NewSpan(0, 2), ""),
+				{Kind: kind.TextWarn, Placement: line.Below, Cols: position.NewSpan(4, 6)},
 			},
 			want: true,
 		},
@@ -90,19 +90,37 @@ func TestAnnotate(t *testing.T) {
 				mark(position.New(1, 4), "too big"),
 			},
 			overlays:    yamltest.ErrorOverlays(position.NewSpan(4, 6)),
-			annotations: line.Annotations{yamltest.ErrorAnnotation(4, "too big")},
+			annotations: line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(4, 6), "too big")},
 			want:        true,
 		},
 		"tabs become spaces": {
 			marks:       []excerpt.Mark{mark(position.New(1, 4), "a\tb")},
 			overlays:    yamltest.ErrorOverlays(position.NewSpan(4, 6)),
-			annotations: line.Annotations{yamltest.ErrorAnnotation(4, "a    b")},
+			annotations: line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(4, 6), "a    b")},
 			want:        true,
 		},
+		"messages on one line get an annotation each": {
+			marks: []excerpt.Mark{
+				mark(position.New(1, 4), "too big"),
+				mark(position.New(1, 0), "bad key"),
+			},
+			overlays: yamltest.ErrorOverlays(position.NewSpan(4, 6), position.NewSpan(0, 2)),
+			annotations: line.Annotations{
+				yamltest.ErrorAnnotation(position.NewSpan(4, 6), "too big"),
+				yamltest.ErrorAnnotation(position.NewSpan(0, 2), "bad key"),
+			},
+			want: true,
+		},
+		// A location with no highlight on its line gets no overlay, and the
+		// annotation of no width at its column marks the line.
 		"column past the end of its line": {
 			marks:       []excerpt.Mark{{Message: "far", Pos: position.New(1, 99)}},
-			overlays:    yamltest.ErrorOverlays(position.NewSpan(6, 6)),
-			annotations: line.Annotations{yamltest.ErrorAnnotation(6, "far")},
+			annotations: line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(6, 6), "far")},
+			want:        true,
+		},
+		"column past the end of its line without a message": {
+			marks:       []excerpt.Mark{{Pos: position.New(1, 99)}},
+			annotations: line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(6, 6), "")},
 			want:        true,
 		},
 		"line outside the source": {
@@ -122,6 +140,30 @@ func TestAnnotate(t *testing.T) {
 			assert.Equal(t, tc.annotations, view.Annotations(1))
 		})
 	}
+
+	t.Run("range across lines labels each line it covers", func(t *testing.T) {
+		t.Parallel()
+
+		view := line.NewView(docLines)
+		rng := position.NewRange(position.New(0, 3), position.New(1, 2))
+
+		assert.True(t, excerpt.Annotate(view, docLines, []excerpt.Mark{{
+			Message: "spans lines",
+			Ranges:  position.Ranges{rng},
+			Pos:     rng.Start,
+		}}))
+
+		// The message goes on the line of the mark, and the line the range
+		// runs on to gets a caret run alone.
+		assert.Equal(t, yamltest.ErrorOverlays(position.NewSpan(3, 4)), view.Overlays(0))
+		assert.Equal(
+			t,
+			line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(3, 4), "spans lines")},
+			view.Annotations(0),
+		)
+		assert.Equal(t, yamltest.ErrorOverlays(position.NewSpan(0, 2)), view.Overlays(1))
+		assert.Equal(t, line.Annotations{yamltest.ErrorAnnotation(position.NewSpan(0, 2), "")}, view.Annotations(1))
+	})
 
 	t.Run("view without the line", func(t *testing.T) {
 		t.Parallel()

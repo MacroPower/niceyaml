@@ -184,6 +184,23 @@ func (m *Map) Spans(cols position.Span) position.Spans {
 	return out
 }
 
+// Span returns a single run of columns of the row that covers what the
+// row shows of cols, a run of columns of the line. The run starts at the
+// column [Map.Col] maps the start of cols to and ends after the last
+// column of the row that shows one of cols. It holds each ellipsis
+// between them. A run of the line that the row shows none of, such as an
+// empty one, maps to the empty span at its start.
+func (m *Map) Span(cols position.Span) position.Span {
+	start := m.Col(cols.Start)
+
+	spans := m.Spans(cols)
+	if len(spans) == 0 {
+		return position.NewSpan(start, start)
+	}
+
+	return position.NewSpan(start, max(start, spans[len(spans)-1].End))
+}
+
 // Content returns the text of the row for content, the text of the line
 // without its line ending: the runes of each window, with [Ellipsis] in
 // place of each run of columns the row leaves out.

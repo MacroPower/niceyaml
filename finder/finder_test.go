@@ -713,12 +713,7 @@ func TestFinder_Load(t *testing.T) {
 		view := docs[1].View()
 		view.AddOverlay(kind.GenericHighlight, finder.New().Load(view).Find("port")...)
 
-		assert.Equal(t, stringtest.JoinLF(
-			"   3 | ---",
-			"   4 | name: x",
-			"   5 | port: 80",
-			"     | ^^^^",
-		), view.String())
+		assert.Equal(t, line.Overlays{{Kind: kind.GenericHighlight, Cols: position.NewSpan(0, 4)}}, view.Overlays(4))
 	})
 }
 

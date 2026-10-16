@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"go.jacobcolvin.com/niceyaml/internal/caret"
 	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/internal/clip"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
@@ -526,8 +527,8 @@ func isSeparator(a Annotation) bool {
 // line, or a long encoded value on the line an error marks, thus renders
 // as a row of bounded length.
 //
-// A mark is the first column of an [Overlay] or the column of an
-// [Annotation] of a kind other than [kind.UISeparator], and a line with
+// A mark is the first column of an [Overlay] or of the [Annotation.Cols]
+// of an annotation of a kind other than [kind.UISeparator], and a line with
 // no mark keeps its first cols columns. A window centers on its mark and
 // moves to stay inside the line. An overlay longer than its window
 // therefore shows the columns from its start that the window holds.
@@ -586,7 +587,7 @@ func (v *View) Windows(i int) position.Spans {
 
 	for _, a := range v.annotations[i] {
 		if !isSeparator(a) {
-			marks = append(marks, a.Col)
+			marks = append(marks, a.Cols.Start)
 		}
 	}
 
@@ -636,13 +637,12 @@ func (v *View) Windows(i int) position.Spans {
 }
 
 // shownRow is one line as [View.String] renders it: the text of its row
-// and the decoration of the line in the columns of that text. They are
-// the content and the decoration of the line itself unless the View clips
-// the line.
+// and the annotations of the line in the columns of that text. They are
+// the content and the annotations of the line itself unless the View
+// clips the line.
 type shownRow struct {
 	content     string
 	annotations Annotations
-	overlays    Overlays
 	// The number of columns of content.
 	width int
 }
@@ -650,16 +650,13 @@ type shownRow struct {
 // shown returns line i of the View, which is ln, as [View.String] renders
 // it. For a line the View clips, the content holds the windows
 // [View.Windows] returns with "..." in place of the columns between them.
-// Each annotation moves to the column of that text that shows its own, and
-// each overlay covers the columns of that text that show the ones it
-// covers, one overlay per window.
+// Each annotation labels the run of that text that shows its columns.
 func (v *View) shown(i int, ln *Line) shownRow {
 	windows := v.Windows(i)
 	if windows == nil {
 		return shownRow{
 			content:     ln.Content(),
 			annotations: v.Annotations(i),
-			overlays:    v.Overlays(i),
 			width:       ln.Width(),
 		}
 	}
@@ -668,58 +665,56 @@ func (v *View) shown(i int, ln *Line) shownRow {
 	row := shownRow{content: m.Content(ln.Content()), width: m.Width()}
 
 	for _, a := range v.Annotations(i) {
-		a.Col = m.Col(a.Col)
+		a.Cols = m.Span(a.Cols)
 		row.annotations = append(row.annotations, a)
-	}
-
-	for _, o := range v.Overlays(i) {
-		for _, cols := range m.Spans(o.Cols) {
-			row.overlays = append(row.overlays, Overlay{Kind: o.Kind, Cols: cols, Blend: o.Blend})
-		}
 	}
 
 	return row
 }
 
 // String renders the [View] as plain text: each line behind its number,
-// and the annotations above and below it on rows of their own, one row per
-// kind as [Annotations.ByKind] groups them. Each row below the line holds
-// a caret at the column of its annotations and their contents after the
-// caret, joined with "; " in column order. The first row below the line
-// also holds a caret under every column an overlay covers, and a line with
-// overlays but no annotation below it gets that row alone. Annotations of
-// a kind without content still get their caret when their row holds no
-// overlay caret, so an overlay of no width, such as one at the end of the
-// line, shows where it sits. String does not render flags.
-// The number column is at least four wide and grows to fit the largest
-// number in the view, so every row lines up. Annotations whose column lies
-// more than [MaxColPastEnd] columns past the end of the content start at
-// that bound, as the printer starts them.
+// and the annotations above and below it on rows of their own. String
+// does not render flags. The number column is at least four wide and
+// grows to fit the largest number in the view, so every row lines up.
+// An empty view renders as "".
 //
-// A line that holds the [kind.TextError] annotations of an error and the
-// [kind.TextWarn] annotations of a warning gives each severity its own
-// row, the row of the error first. Each of the two rows marks the overlays
-// of its own severity, so the warning row marks the [kind.GenericWarn]
-// overlays and the error row marks the rest. No caret thus sits beside
-// the message of the other severity.
+// Above a line, each kind of annotation with content gets one row, in
+// the order the kinds first appear, as [Annotations.ByKind] groups them.
+// The row holds their contents joined with "; " in column order, from the
+// first column they start at.
 //
-// Control characters render as their pictures, and a rune that takes two
+// Below a line, each run of columns that annotations label, their
+// [Annotation.Cols], gets a row of its own. The row holds a caret under
+// each column of the run and the contents of its annotations after the
+// carets. Annotations of one kind that label the same columns share a
+// row, with their contents joined with "; ". An annotation without
+// content draws its carets alone. A run that covers no column of the
+// content, such as an empty one, gets a single caret at its start.
+//
+// Below a line, the rows of [kind.TextError] annotations come first, then
+// those of [kind.TextWarn], then those of the other kinds in the order
+// the kinds first appear. The rows of one kind come in the order their
+// runs start, and runs that start at one column come shorter first.
+// Overlays render no row, so a line with overlays and no annotation below
+// it renders no caret.
+//
+// Annotations that start more than [MaxColPastEnd] columns past the end
+// of the content start at that bound, as the printer starts them.
+// Control characters render as their pictures. A rune that takes two
 // cells in a terminal gets two carets, so the carets stay under the runes
 // they mark in a fixed-width font. The output holds no escape sequences,
 // so it goes into a log or a golden file as it is, and
 // [go.jacobcolvin.com/niceyaml.FormatError] prints the excerpt of a
-// bound error this way. A printer renders the same view with styles, and
-// color marks the overlays there, so its rows below a line can differ
-// from these. [go.jacobcolvin.com/niceyaml/printer.DefaultAnnotation]
-// draws the overlay carets on the row of each kind below a line rather
-// than the first alone, and draws none for a blend overlay or for a line
-// with no annotation below it. An empty view renders as "".
+// bound error this way. A printer renders the same view with styles.
+// [go.jacobcolvin.com/niceyaml/printer.DefaultAnnotation] lays out the
+// rows below a line as String does, and the printer wraps the line and
+// those rows to its width.
 //
 // A line the View clips, as [View.Clip] sets a View to, renders the
 // windows [View.Windows] returns, with "..." in place of each run of
 // columns it leaves out. The carets and the annotations of the line sit
-// under the columns of that row. An annotation at a column the row
-// leaves out starts at the "..." that stands for the column.
+// under the columns of that row. An annotation that starts at a column
+// the row leaves out starts at the "..." that stands for the column.
 func (v *View) String() string {
 	width := 4
 	for _, ln := range v.All() {
@@ -734,6 +729,14 @@ func (v *View) String() string {
 		row := v.shown(i, ln)
 		anns := row.annotations
 
+		// A line without annotations pads no row, so it skips measuring
+		// the cells of its content.
+		var cellRow cells.Row
+
+		if len(anns) > 0 {
+			cellRow = cells.NewRow(row.content)
+		}
+
 		// Each kind of annotation above the line gets a row of its own,
 		// in the order the kinds first appear, as the printer renders
 		// them. An annotation without content adds nothing to its row,
@@ -746,72 +749,47 @@ func (v *View) String() string {
 				continue
 			}
 
-			col := annotationCol(kept.Col(), row.width)
-			padding := strings.Repeat(" ", cells.NewRow(row.content).Width(col))
+			col := annotationCol(kept.Start(), row.width)
+			padding := strings.Repeat(" ", cellRow.Width(col))
 			rows = append(rows, blank+padding+escape.Control(strings.Join(kept.Contents(), "; ")))
 		}
 
 		rows = append(rows, contentRow(ln.Number(), row.content, width))
 
-		// Each kind of annotation below the line gets a row of its own as
-		// well, in the order the kinds first appear. The overlays mark the
-		// first row, so a line with overlays but no annotation below it
-		// still gets that row. A line that holds both an error and a
-		// warning gives each severity a row, errors first, and each row
-		// marks the overlays of its own severity.
-		groups, split := severityRows(anns.Filter(Below).ByKind())
-		if len(groups) == 0 {
-			groups = []Annotations{nil}
+		// Each run of columns the annotations below the line label gets a
+		// row of its own, as the printer lays them out.
+		below := anns.Filter(Below).ByKind()
+
+		kinds := make([]kind.Kind, 0, len(below))
+		for _, group := range below {
+			kinds = append(kinds, group[0].RenderKind())
 		}
 
-		overlays := row.overlays
-		for _, group := range groups {
-			drawn := overlays
-			if split {
-				drawn = severityOverlays(row.overlays, group)
+		for _, gi := range severity.Order(kinds) {
+			for _, r := range caret.Rows(row.content, caretLabels(below[gi], row.width), nil) {
+				padding := strings.Repeat(" ", cellRow.Width(r.Col))
+				rows = append(rows, blank+padding+r.Marker+r.Text)
 			}
-
-			if marker := markerRow(row.content, row.width, drawn, group); marker != "" {
-				rows = append(rows, blank+marker)
-			}
-
-			overlays = nil
 		}
 	}
 
 	return strings.Join(rows, "\n")
 }
 
-// severityRows returns groups, the annotations below a line grouped by
-// kind, in the order a renderer draws them, and whether the line holds
-// both an error and a warning, as [severity.Split] reports.
-func severityRows(groups []Annotations) ([]Annotations, bool) {
-	kinds := make([]kind.Kind, 0, len(groups))
-	for _, group := range groups {
-		kinds = append(kinds, group[0].RenderKind())
+// caretLabels returns the labels that mark anns below a line whose content
+// is width columns wide. Each label starts no further than [MaxColPastEnd]
+// columns past the end of the content.
+func caretLabels(anns Annotations, width int) []caret.Label {
+	labels := make([]caret.Label, 0, len(anns))
+
+	for _, a := range anns {
+		cols := a.Cols
+		cols.Start = annotationCol(cols.Start, width)
+
+		labels = append(labels, caret.Label{Text: a.Content, Cols: cols})
 	}
 
-	ordered := make([]Annotations, 0, len(groups))
-	for _, i := range severity.Order(kinds) {
-		ordered = append(ordered, groups[i])
-	}
-
-	return ordered, severity.Split(kinds)
-}
-
-// severityOverlays returns the overlays that the row of group marks on a
-// line that holds both an error and a warning, as [severity.Draws] picks
-// them.
-func severityOverlays(overlays Overlays, group Annotations) Overlays {
-	var drawn Overlays
-
-	for _, o := range overlays {
-		if severity.Draws(group[0].RenderKind(), o.Kind) {
-			drawn = append(drawn, o)
-		}
-	}
-
-	return drawn
+	return labels
 }
 
 // contentRow returns the row that renders content, the text of a line,
@@ -826,138 +804,4 @@ func contentRow(number int, content string, width int) string {
 	}
 
 	return fmt.Sprintf("%*s | %s", width, gutter, escape.Control(content))
-}
-
-// markerRow returns the row below a line that marks its overlays and
-// carries its annotations. Content is the text of the line, which is
-// width columns wide. The row holds a caret under every column an overlay
-// covers within the content, a caret at the column of the annotations,
-// and their contents after the last caret. Annotations without content
-// set no column while one with content remains. When none has content
-// and the overlays cover no column, such as an overlay of no width at the
-// end of the line, the annotations still get one caret at their column,
-// so the row marks the spot. The carets take the cells the content row
-// gives each grapheme cluster, so they stay under the runes they mark on
-// a line holding wide, combining, or control characters. The caret of the
-// annotations sits no further than [MaxColPastEnd] columns past the end
-// of the content. Returns "" when the line has neither.
-func markerRow(content string, width int, overlays Overlays, below Annotations) string {
-	marks := overlayMarks(overlays, width)
-
-	mark := func(col int) {
-		col = annotationCol(col, width)
-		if col >= len(marks) {
-			marks = append(marks, make([]bool, col+1-len(marks))...)
-		}
-
-		marks[col] = true
-	}
-
-	kept := below.WithContent()
-
-	switch {
-	case len(kept) > 0:
-		mark(kept.Col())
-	case len(below) > 0 && len(marks) == 0:
-		mark(below.Col())
-	}
-
-	if len(marks) == 0 {
-		return ""
-	}
-
-	// Every mark lands on a column that takes a cell, so the trim is a
-	// safety net that keeps a row without a caret from rendering.
-	carets := strings.TrimRight(renderMarks(content, marks), " ")
-	if carets == "" && len(kept) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-
-	sb.WriteString(carets)
-
-	if len(kept) > 0 {
-		sb.WriteByte(' ')
-		sb.WriteString(escape.Control(strings.Join(kept.Contents(), "; ")))
-	}
-
-	return sb.String()
-}
-
-// overlayMarks marks every column that overlays cover within the first
-// width columns of a line. The slice ends at the last marked column, so
-// a row rendered from it puts nothing after the last caret. Returns nil
-// when the overlays cover no column.
-func overlayMarks(overlays Overlays, width int) []bool {
-	var marks []bool
-
-	for _, o := range overlays {
-		start, end := max(0, o.Cols.Start), min(o.Cols.End, width)
-		if start >= end {
-			continue
-		}
-
-		if end > len(marks) {
-			marks = append(marks, make([]bool, end-len(marks))...)
-		}
-
-		for col := start; col < end; col++ {
-			marks[col] = true
-		}
-	}
-
-	return marks
-}
-
-// renderMarks renders marks as a row under content: a caret under every
-// marked column and a space under every other. The content row renders
-// each grapheme cluster at its display width. The first column of a
-// cluster is therefore as many cells wide as the cluster renders, every
-// other column of it takes none, and a column past the end of the content
-// takes one cell. A mark on any column of a cluster lands under the whole
-// cluster. A cluster that renders no cells, such as a zero-width space,
-// has nothing to put a caret under, so its mark moves to the next column
-// that takes a cell, where the content row shows what follows it.
-func renderMarks(content string, marks []bool) string {
-	var sb strings.Builder
-
-	row := cells.NewRow(content)
-
-	marks = slices.Clone(marks)
-	for col, marked := range marks {
-		if marked {
-			marks[row.Start(col)] = true
-		}
-	}
-
-	// The loop reads the length of marks on every pass, so it still
-	// renders a mark it moves past the end.
-	for col := 0; col < len(marks); col++ {
-		if !marks[col] || row.Start(col) != col || row.Cells(col) > 0 {
-			continue
-		}
-
-		next := col + 1
-		for row.Cells(next) == 0 {
-			next++
-		}
-
-		if next >= len(marks) {
-			marks = append(marks, make([]bool, next+1-len(marks))...)
-		}
-
-		marks[next] = true
-	}
-
-	for col, marked := range marks {
-		cell := " "
-		if marked {
-			cell = "^"
-		}
-
-		sb.WriteString(strings.Repeat(cell, row.Cells(col)))
-	}
-
-	return sb.String()
 }
