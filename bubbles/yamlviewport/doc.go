@@ -66,7 +66,9 @@
 // match. With wrapping off, it scrolls sideways only when the match would
 // end past the right edge of the first screen, and then centers the start
 // of the match. A match that fits the first screen leaves the view at the
-// first column.
+// first column. The parent can set a term before the content area has room
+// for a row, such as before the first [tea.WindowSizeMsg]. The viewport then
+// scrolls to the current match when the area has room.
 //
 // Search highlighting uses [kind.GenericHighlightDim] for regular matches and
 // [kind.GenericHighlight] for the current match.
@@ -90,7 +92,9 @@
 //
 // [Model.Reveal] scrolls the viewport to a Hit, whether HitAt returned it
 // or the parent built it from a position in a revision, such as the place
-// of an error.
+// of an error. Like a search, a Reveal before the content area has room for
+// a row scrolls when the area has room. A parent can therefore reveal the
+// first error before the first [tea.WindowSizeMsg] arrives.
 //
 // # Customization
 //

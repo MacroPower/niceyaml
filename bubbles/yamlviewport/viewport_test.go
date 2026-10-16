@@ -1720,21 +1720,384 @@ func TestViewport_ResizeClampsOffsetAtOnce(t *testing.T) {
 	}
 }
 
-func TestViewport_SearchBeforeSize(t *testing.T) {
+func TestViewport_ScrollBeforeSize(t *testing.T) {
 	t.Parallel()
 
-	// A program sets the search term before its first window size message.
-	// The match stays on screen once the lines wrap to that size.
-	src := yamltest.GenerateLines(60, "k%d: "+strings.TrimSpace(strings.Repeat("word ", 8))) + "needle: here\n"
+	// A program sets the search term or reveals a position before its
+	// first window size message. The scroll waits for the size, so the
+	// view matches one that got its size first. The target sits on the
+	// center row, and with wrap off the view scrolls sideways to it.
+	const width, height = 30, 10
 
-	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-	setRevision(&m, src)
-	m.SetSearchTerm("needle")
+	plain := yamltest.GenerateLines(60, "key%d: value")
+	wordy := yamltest.GenerateLines(60, "k%d: "+strings.TrimSpace(strings.Repeat("word ", 8)))
+	deepLine := "k30: " + strings.Repeat("word ", 30) + "needle " + strings.Repeat("word ", 30)
 
-	m.SetWidth(30)
-	m.SetHeight(10)
+	needle := replaceLine(plain, 40, "key40: needle")
+	wrapped := replaceLine(wordy, 40, "needle: here")
+	deep := replaceLine(wordy, 30, deepLine)
 
-	assert.Contains(t, m.View(), "needle: here")
+	search := func(_ *testing.T, m *yamlviewport.Model) { m.SetSearchTerm("needle") }
+	clearSearch := func(m *yamlviewport.Model) { m.ClearSearch() }
+	reveal := func(line, col int, want bool) func(t *testing.T, m *yamlviewport.Model) {
+		return func(t *testing.T, m *yamlviewport.Model) {
+			t.Helper()
+
+			hit := yamlviewport.Hit{Revision: m.RevisionIndex(), Position: position.New(line, col)}
+			require.Equal(t, want, m.Reveal(hit))
+		}
+	}
+
+	tcs := map[string]struct {
+		// Sets the content and the modes.
+		setup  func(m *yamlviewport.Model)
+		scroll func(t *testing.T, m *yamlviewport.Model)
+		// Changes the layout. The Model that gets its size last changes it
+		// after scroll, and the one that gets its size first before it.
+		layout func(m *yamlviewport.Model)
+		// Gives the content area room. The default sets the width and then
+		// the height.
+		size func(m *yamlviewport.Model)
+		// Runs on both Models after the size. A search scroll that still
+		// waits finds no match after ClearSearch and leaves the view at the
+		// top, so ClearSearch here shows whether the size ran the scroll.
+		after func(m *yamlviewport.Model)
+		// Reports that the center row shows "needle".
+		centered bool
+	}{
+		"search": {
+			setup:    func(m *yamlviewport.Model) { setRevision(m, needle) },
+			scroll:   search,
+			centered: true,
+		},
+		"search in wrapped lines": {
+			setup:    func(m *yamlviewport.Model) { setRevision(m, wrapped) },
+			scroll:   search,
+			centered: true,
+		},
+		"search deep in a wrapped line": {
+			setup:    func(m *yamlviewport.Model) { setRevision(m, deep) },
+			scroll:   search,
+			centered: true,
+		},
+		"search past the right edge": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetWordWrap(false)
+				setRevision(m, replaceLine(plain, 40, "key40: "+strings.Repeat("-", 60)+"needle"))
+			},
+			scroll:   search,
+			centered: true,
+		},
+		"search in the right pane": {
+			setup: func(m *yamlviewport.Model) {
+				addRevisions(m, plain, needle)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			scroll: search,
+			size: func(m *yamlviewport.Model) {
+				m.SetWidth(2*width + 1)
+				m.SetHeight(height)
+			},
+			centered: true,
+		},
+		"next match": {
+			setup:    func(m *yamlviewport.Model) { setRevision(m, replaceLine(needle, 20, "key20: needle")) },
+			scroll:   func(_ *testing.T, m *yamlviewport.Model) { m.SetSearchTerm("needle"); m.SearchNext() },
+			centered: true,
+		},
+		"reveal": {
+			setup:    func(m *yamlviewport.Model) { setRevision(m, needle) },
+			scroll:   reveal(40, 0, true),
+			centered: true,
+		},
+		"reveal deep in a wrapped line": {
+			setup:    func(m *yamlviewport.Model) { setRevision(m, deep) },
+			scroll:   reveal(30, strings.Index(deepLine, "needle"), true),
+			centered: true,
+		},
+		"reveal past the last line": {
+			setup:  func(m *yamlviewport.Model) { setRevision(m, needle) },
+			scroll: reveal(60, 0, false),
+		},
+		"wrap turned off before the size": {
+			setup:    func(m *yamlviewport.Model) { setRevision(m, deep) },
+			scroll:   search,
+			layout:   func(m *yamlviewport.Model) { m.SetWordWrap(false) },
+			centered: true,
+		},
+		"line numbers before the size": {
+			setup:    func(m *yamlviewport.Model) { setRevision(m, wrapped) },
+			scroll:   search,
+			layout:   func(m *yamlviewport.Model) { m.SetPrinter(testPrinterWithLineNumbers()) },
+			centered: true,
+		},
+		"height before width": {
+			setup:  func(m *yamlviewport.Model) { setRevision(m, wrapped) },
+			scroll: search,
+			size: func(m *yamlviewport.Model) {
+				m.SetHeight(height)
+				m.SetWidth(width)
+			},
+			after:    clearSearch,
+			centered: true,
+		},
+		"view mode that gives the pane room": {
+			// Side by side, a width of 4 gives each pane 0 columns beside
+			// the separator. The full view then gives its one pane room.
+			setup: func(m *yamlviewport.Model) {
+				setRevision(m, needle)
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			scroll: search,
+			size: func(m *yamlviewport.Model) {
+				m.SetWidth(4)
+				m.SetHeight(height)
+				m.SetViewMode(yamlviewport.ViewModeFull)
+			},
+			after: clearSearch,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			layout := func(m *yamlviewport.Model) {
+				if tc.layout != nil {
+					tc.layout(m)
+				}
+			}
+
+			size := func(m *yamlviewport.Model) {
+				m.SetWidth(width)
+				m.SetHeight(height)
+			}
+			if tc.size != nil {
+				size = tc.size
+			}
+
+			after := func(m *yamlviewport.Model) {
+				if tc.after != nil {
+					tc.after(m)
+				}
+			}
+
+			want := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			tc.setup(&want)
+			layout(&want)
+			size(&want)
+			tc.scroll(t, &want)
+			after(&want)
+
+			got := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			tc.setup(&got)
+			tc.scroll(t, &got)
+			layout(&got)
+			size(&got)
+			after(&got)
+
+			assert.Equal(t, want.YOffset(), got.YOffset())
+			assert.Equal(t, want.XOffset(), got.XOffset())
+
+			view := got.View()
+			assert.Equal(t, want.View(), view)
+
+			if tc.centered {
+				assert.Equal(t, (height-1)/2, rowIndex(view, "needle"), screenMessage(&got))
+			}
+		})
+	}
+}
+
+func TestViewport_ScrollBeforeSizeWaits(t *testing.T) {
+	t.Parallel()
+
+	// A scroll that waits for the size waits until the size comes. A
+	// later scroll takes its place, and an explicit offset or a change of
+	// content drops it. A search scrolls to the match that is current
+	// when the size comes, so a search left without a match stays at the
+	// top. The size runs the scroll in either order of width and height,
+	// so a step after the size starts from the match. Every line takes one
+	// row, so the offset that centers line n is n-4.
+	plain := yamltest.GenerateLines(60, "key%d: value")
+	needle := replaceLine(plain, 40, "key40: needle")
+
+	search := func(m *yamlviewport.Model) { m.SetSearchTerm("needle") }
+
+	// Each case checks the offset, which shows whether Reveal found the
+	// line.
+	reveal := func(m *yamlviewport.Model) { m.Reveal(yamlviewport.Hit{Position: position.New(50, 0)}) }
+
+	tcs := map[string]struct {
+		// Run before the size.
+		steps []func(m *yamlviewport.Model)
+		// Run after the size.
+		after []func(m *yamlviewport.Model)
+		want  int
+	}{
+		"search": {
+			steps: []func(m *yamlviewport.Model){search},
+			want:  36,
+		},
+		"search cleared after the size": {
+			steps: []func(m *yamlviewport.Model){search},
+			after: []func(m *yamlviewport.Model){func(m *yamlviewport.Model) { m.ClearSearch() }},
+			want:  36,
+		},
+		"term without a match after the size": {
+			steps: []func(m *yamlviewport.Model){search},
+			after: []func(m *yamlviewport.Model){func(m *yamlviewport.Model) { m.SetSearchTerm("absent") }},
+			want:  36,
+		},
+		"horizontal offset set after the size": {
+			steps: []func(m *yamlviewport.Model){search},
+			after: []func(m *yamlviewport.Model){func(m *yamlviewport.Model) { m.SetXOffset(0) }},
+			want:  36,
+		},
+		"offset set": {
+			steps: []func(m *yamlviewport.Model){search, func(m *yamlviewport.Model) { m.SetYOffset(5) }},
+			want:  5,
+		},
+		"horizontal offset set": {
+			steps: []func(m *yamlviewport.Model){search, func(m *yamlviewport.Model) { m.SetXOffset(0) }},
+			want:  0,
+		},
+		"scroll down": {
+			steps: []func(m *yamlviewport.Model){search, func(m *yamlviewport.Model) { m.ScrollDown(3) }},
+			want:  3,
+		},
+		"go to top": {
+			steps: []func(m *yamlviewport.Model){search, func(m *yamlviewport.Model) { m.GotoTop() }},
+			want:  0,
+		},
+		"search cleared": {
+			steps: []func(m *yamlviewport.Model){search, func(m *yamlviewport.Model) { m.ClearSearch() }},
+			want:  0,
+		},
+		"term without a match": {
+			steps: []func(m *yamlviewport.Model){search, func(m *yamlviewport.Model) { m.SetSearchTerm("absent") }},
+			want:  0,
+		},
+		"content without a match": {
+			steps: []func(m *yamlviewport.Model){search, func(m *yamlviewport.Model) { setRevision(m, plain) }},
+			want:  0,
+		},
+		"content with a match on another line": {
+			steps: []func(m *yamlviewport.Model){search, func(m *yamlviewport.Model) {
+				setRevision(m, replaceLine(plain, 20, "key20: needle"))
+			}},
+			want: 16,
+		},
+		"reveal": {
+			steps: []func(m *yamlviewport.Model){reveal},
+			want:  46,
+		},
+		"reveal then content": {
+			steps: []func(m *yamlviewport.Model){reveal, func(m *yamlviewport.Model) { setRevision(m, plain) }},
+			want:  0,
+		},
+		"reveal then term without a match": {
+			steps: []func(m *yamlviewport.Model){reveal, func(m *yamlviewport.Model) { m.SetSearchTerm("absent") }},
+			want:  46,
+		},
+		"search then reveal then search cleared": {
+			steps: []func(m *yamlviewport.Model){search, reveal, func(m *yamlviewport.Model) { m.ClearSearch() }},
+			want:  46,
+		},
+		"reveal then search": {
+			steps: []func(m *yamlviewport.Model){reveal, search},
+			want:  36,
+		},
+	}
+
+	sizes := map[string]func(m *yamlviewport.Model){
+		"width first": func(m *yamlviewport.Model) {
+			m.SetWidth(30)
+			m.SetHeight(10)
+		},
+		"height first": func(m *yamlviewport.Model) {
+			m.SetHeight(10)
+			m.SetWidth(30)
+		},
+	}
+
+	for name, tc := range tcs {
+		for order, size := range sizes {
+			t.Run(name+", "+order, func(t *testing.T) {
+				t.Parallel()
+
+				m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+				setRevision(&m, needle)
+
+				for _, step := range tc.steps {
+					step(&m)
+				}
+
+				size(&m)
+
+				for _, step := range tc.after {
+					step(&m)
+				}
+
+				assert.Equal(t, tc.want, m.YOffset(), screenMessage(&m))
+			})
+		}
+	}
+}
+
+func TestViewport_ScrollBeforeSizeThenLayout(t *testing.T) {
+	t.Parallel()
+
+	// A height and then a width give the content area room, and the Model
+	// scrolls to the match then. View has a value receiver, so it renders a
+	// copy of the Model. A layout change after that keeps the top line, as
+	// it does for a Model that got its size before the search.
+	doc := replaceLine(
+		yamltest.GenerateLines(60, "k%d: "+strings.TrimSpace(strings.Repeat("word ", 8))),
+		40,
+		"needle: here",
+	)
+
+	tcs := map[string]struct {
+		change func(m *yamlviewport.Model)
+	}{
+		"no change":    {},
+		"wrap off":     {change: func(m *yamlviewport.Model) { m.SetWordWrap(false) }},
+		"line numbers": {change: func(m *yamlviewport.Model) { m.SetPrinter(testPrinterWithLineNumbers()) }},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			size := func(m *yamlviewport.Model) {
+				m.SetHeight(10)
+				m.SetWidth(30)
+			}
+
+			want := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			setRevision(&want, doc)
+			size(&want)
+			want.SetSearchTerm("needle")
+
+			got := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			setRevision(&got, doc)
+			got.SetSearchTerm("needle")
+			size(&got)
+
+			copied := got.View()
+			require.Equal(t, 4, rowIndex(copied, "needle"), "screen:\n%s", copied)
+			require.Equal(t, want.View(), copied)
+
+			if tc.change != nil {
+				tc.change(&want)
+				tc.change(&got)
+			}
+
+			assert.Equal(t, want.YOffset(), got.YOffset())
+			assert.Equal(t, want.View(), got.View())
+		})
+	}
 }
 
 func TestViewport_ContainerFrame(t *testing.T) {

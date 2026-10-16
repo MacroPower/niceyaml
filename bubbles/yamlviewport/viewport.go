@@ -300,8 +300,19 @@ func New(opts ...Option) Model {
 // is a layout change too, since every mode shows the same lines.
 //
 // A change of content scrolls to the top, or to the first search match when
-// the term has one. A new revision changes the content, as does a diff mode
-// that changes the diff on display or a view mode while a diff shows.
+// the term has one. A new revision changes the content. So do a diff mode
+// that changes the diff on display, a view mode while a diff shows, and a
+// hunk context while hunks of a diff show.
+//
+// A search or [Model.Reveal] waits to scroll while the content area has no
+// room for a row, such as before the parent sizes the viewport from the
+// first [tea.WindowSizeMsg]. When the area has room, the viewport centers
+// the current match or the revealed position in the layout it has then. A
+// search without a current match at that point leaves the view in place. A
+// layout change before that point does not keep the top line, because the
+// scroll sets the offsets. Reveal reports its result at the call, before
+// the scroll runs. [Model.SetYOffset], [Model.SetXOffset], and the scroll
+// methods drop a scroll that waits, and so does a change of content.
 type Model struct {
 	config
 
@@ -344,6 +355,11 @@ type Model struct {
 	// value-receiver View fills in stay filled for the Model it copied. The
 	// cache locks its fill, so copies can render on separate goroutines.
 	rows *rowCache
+	// The scroll that scrollTo deferred because the content area had no
+	// room for a row, or nil. The first call to ensureRows with room runs
+	// it. Every change that gives the area room calls ensureRows, so a
+	// scroll waits only while the area has no room.
+	pending *scrollTarget
 	// Current search query.
 	searchTerm string
 	// KeyMap contains the keybindings for viewport navigation.
@@ -387,6 +403,19 @@ type Model struct {
 	// Reports that anchorLine and anchorRow wait for ensureRows to restore
 	// them.
 	anchored bool
+}
+
+// scrollTarget is a range for scrollTo to center: a search match or a
+// revealed position.
+type scrollTarget struct {
+	// The range, in the content of the left pane, or of the right one when
+	// right is true.
+	rng   position.Range
+	right bool
+	// Reports that the range is the current search match. A deferred
+	// scroll with match set scrolls to the match that is current when
+	// ensureRows runs the scroll, not to this range.
+	match bool
 }
 
 func (m *Model) setInitialValues() {
@@ -456,8 +485,16 @@ func (m *Model) SetWidth(w int) {
 	m.width = w
 
 	// Row counts depend on the width only through the pane width.
-	if m.paneWidth() != old {
-		m.relayout()
+	if m.paneWidth() == old {
+		return
+	}
+
+	m.relayout()
+
+	// A width that gives the content area room runs a scroll that waits
+	// for it, as SetHeight does.
+	if m.pending != nil {
+		m.ensureRows()
 	}
 }
 
@@ -466,9 +503,10 @@ func (m *Model) SetWidth(w int) {
 // row count cache and leaves any copy that shares the old cache untouched.
 // The next read of the scroll bounds fills the new cache.
 //
-// Row offsets from the old cache point at other lines once the rows reflow,
+// Row offsets from the old cache point at other lines after the rows reflow,
 // so relayout calls anchorTop to record the top line as the old layout shows
-// it, and ensureRows scrolls back to that line.
+// it. The next call to ensureRows scrolls back to that line. A scroll that
+// waits for room replaces the anchor, so anchorTop records nothing then.
 func (m *Model) relayout() {
 	m.anchorTop()
 
@@ -551,8 +589,13 @@ func (m *Model) remeasure(ranges ...position.Range) {
 // the frame instead. The first row of the view anchors to the top frame even
 // when the layout has none, so a view at the top stays there when a frame
 // appears.
+//
+// A deferred scroll replaces the anchor, so anchorTop records nothing while
+// one waits. The caller might have set the new size already. The rows have
+// not reflowed yet, so a read of the top line here runs that scroll on the
+// old row counts.
 func (m *Model) anchorTop() {
-	if m.anchored || m.rows == nil || !m.rows.filled() || len(m.rows.left) == 0 {
+	if m.anchored || m.pending != nil || m.rows == nil || !m.rows.filled() || len(m.rows.left) == 0 {
 		return
 	}
 
@@ -871,6 +914,12 @@ func (m *Model) SetViewMode(mode ViewMode) {
 
 		m.viewMode = mode
 
+		// As in SetWidth, a pane width that gives the content area room
+		// runs a scroll that waits for it.
+		if m.pending != nil {
+			m.ensureRows()
+		}
+
 		return
 	}
 
@@ -1032,6 +1081,11 @@ func (m *Model) rebuildViews() {
 	m.yOffset = 0
 	m.xOffset = 0
 	m.rows = &rowCache{}
+
+	// A deferred scroll targets a range of the old content, so rebuildViews
+	// drops it with the offsets. Then scrollToCurrentMatch scrolls to a
+	// match in the new content, or defers that scroll.
+	m.pending = nil
 
 	m.scrollToCurrentMatch()
 }
@@ -1540,8 +1594,10 @@ func (c *rowCache) differs(layout printer.Layout, view *line.View, rows, widths 
 
 // ensureRows fills the row count cache when it is empty, scrolls back to the
 // row that relayout recorded, and clamps both scroll offsets to the cache's
-// bounds. It checks on every call, because a copy of the Model can fill a
-// shared cache without restoring or clamping this Model's offsets.
+// bounds. When the content area has room for a row, it then runs the scroll
+// that scrollTo deferred, which replaces the restored row. It checks on
+// every call, because a copy of the Model can fill a shared cache without
+// restoring or clamping this Model's offsets.
 func (m *Model) ensureRows() {
 	m.fillRows()
 
@@ -1565,6 +1621,19 @@ func (m *Model) ensureRows() {
 
 	m.yOffset = clamp(m.yOffset, 0, m.rowOffsetLimit())
 	m.xOffset = clamp(m.xOffset, 0, m.maxXOffset())
+
+	// The anchor keeps the top line of an earlier layout. A deferred scroll
+	// waited for the first layout with room, so it wins. Clearing it first
+	// keeps the ensureRows calls inside scrollTo from running it again.
+	if p := m.pending; p != nil && m.canRender() {
+		m.pending = nil
+
+		if p.match {
+			m.scrollToCurrentMatch()
+		} else {
+			m.scrollTo(*p)
+		}
+	}
 }
 
 // fillRows computes the row counts of the view into the cache when it is
@@ -1976,8 +2045,10 @@ func cutWindow(body string, inner, offset, visible int) (string, int, int) {
 }
 
 // SetYOffset sets the vertical offset, in rows, clamped to the scrollable
-// range.
+// range. It drops a search or [Model.Reveal] scroll that waits for the
+// content area to have room for a row, as the [Model] doc describes.
 func (m *Model) SetYOffset(n int) {
+	m.pending = nil
 	m.yOffset = clamp(n, 0, m.maxYOffset())
 }
 
@@ -1989,8 +2060,10 @@ func (m *Model) YOffset() int {
 	return m.yOffset
 }
 
-// SetXOffset sets the X offset.
+// SetXOffset sets the X offset. Like [Model.SetYOffset], it drops a scroll
+// that waits for the content area to have room for a row.
 func (m *Model) SetXOffset(n int) {
+	m.pending = nil
 	m.xOffset = clamp(n, 0, m.maxXOffset())
 }
 
@@ -2319,7 +2392,9 @@ func (m *Model) revisionHit(right bool, pos position.Position) (Hit, bool) {
 // Reveal scrolls as a search does for its current match. It centers the
 // row that shows the position. With wrapping off it scrolls sideways only
 // when the position lies past the right edge of the first screen, and then
-// centers the position.
+// centers the position. Before the content area has room for a row, Reveal
+// reports its result at the call and scrolls when the area has room, as the
+// [Model] doc describes.
 //
 // Reveal changes neither the revision on display nor the [ViewMode] nor
 // the [DiffMode]. It reports false and leaves the viewport as it is when
@@ -2342,7 +2417,10 @@ func (m *Model) Reveal(hit Hit) bool {
 
 	// The range covers the column of the position, so a sideways scroll
 	// brings the whole of its cell on screen.
-	return m.scrollTo(right, position.NewRange(pos, position.New(pos.Line, pos.Col+1)))
+	return m.scrollTo(scrollTarget{
+		rng:   position.NewRange(pos, position.New(pos.Line, pos.Col+1)),
+		right: right,
+	})
 }
 
 // locate finds hit in the views on display. It returns whether the right
@@ -2405,7 +2483,9 @@ func holds(view *line.View, pos position.Position) bool {
 // The term stays set across content changes. A change of content, as the
 // [Model] doc defines it, starts the search over at the first match in the
 // new content and scrolls to it. A new term likewise starts at its first
-// match, while setting the same term again keeps the current match.
+// match, but setting the same term again keeps the current match. Before the
+// content area has room for a row, the scroll to the match waits until the
+// area has room, as the [Model] doc describes.
 func (m *Model) SetSearchTerm(term string) {
 	if term == "" {
 		m.ClearSearch()
@@ -2508,17 +2588,28 @@ func (m *Model) scrollToCurrentMatch() {
 
 	match := m.searchMatches[m.searchIndex]
 
-	m.scrollTo(m.baseRight != nil && !match.inLeft, match.rng)
+	m.scrollTo(scrollTarget{
+		rng:   match.rng,
+		right: m.baseRight != nil && !match.inLeft,
+		match: true,
+	})
 }
 
-// scrollTo scrolls to center the row that holds the start of rng, a range
-// in the content of the left pane, or of the right one when right is true.
-// It returns to the first screen sideways, unless wrap is off and rng ends
-// past that screen, and then it centers the start of rng. It reports
-// whether the pane renders the line rng starts on, and leaves both offsets
-// as they are when it does not.
-func (m *Model) scrollTo(right bool, rng position.Range) bool {
+// scrollTo scrolls to center the row that holds the start of the range of
+// target. It returns to the first screen sideways, unless wrap is off and
+// the range ends past that screen, and then it centers the start of the
+// range. It reports whether the pane renders the line the range starts on,
+// and leaves both offsets as they are when it does not.
+//
+// A content area without room for a row has no center row and no first
+// screen, so scrollTo defers both offsets. The first call to ensureRows
+// with room runs the scroll, and a search target scrolls to the match that
+// is current then. The row counts fill at any size, so scrollTo reports its
+// result at the call.
+func (m *Model) scrollTo(target scrollTarget) bool {
 	m.ensureRows()
+
+	rng, right := target.rng, target.right
 
 	view := m.baseLeft
 	if right {
@@ -2540,6 +2631,12 @@ func (m *Model) scrollTo(right bool, rng position.Range) bool {
 	lineRow := layout.RowOf(rng.Start)
 	if lineRow < 0 {
 		return false
+	}
+
+	if !m.canRender() {
+		m.pending = &target
+
+		return true
 	}
 
 	row := m.rows.sums[k] + lineRow
