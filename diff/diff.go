@@ -2,6 +2,7 @@ package diff
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -73,9 +74,10 @@ func New(opts ...Option) *Differ {
 //	result := diff.Diff(before[1].View(), after[1].View())
 //
 // Diff reads the lines of a view and ignores its decoration, so the flags,
-// overlays, and annotations of an input never reach the result. A nil
-// sequence holds no lines, and so does one that holds a nil pointer, such
-// as a nil [*line.View].
+// overlays, and annotations of an input never reach the result.
+// [Result.Carry] copies the overlays and annotations of the inputs onto a
+// view of the result. A nil sequence holds no lines, and so does one that
+// holds a nil pointer, such as a nil [*line.View].
 //
 // Lines compare by [line.Line.Content], which strips the line ending, so
 // two revisions that differ only in LF versus CRLF endings or in a missing
@@ -84,54 +86,80 @@ func New(opts ...Option) *Differ {
 // The result shares the lines with its inputs, which never change, and
 // carries the flags of the diff itself. Each rendering method,
 // [Result.Unified], [Result.Hunks], [Result.Before], and [Result.After],
-// returns a fresh [line.View] over those lines.
+// returns a fresh [line.View] that shares those lines.
 //
 // The revisions should hold distinct lines, as two parsed Source values
 // do. When both hold one [*line.Line], such as two [line.Collect] values
 // that reorder the lines of one revision, a moved line appears in
-// [Result.Unified] once as deleted and once as inserted, and
-// [line.View.Index] finds only the first of the two.
+// [Result.Unified] once as deleted and once as inserted.
+// [line.View.Index] finds only the first of the two, but
+// [Result.UnifiedOrigin] and the other methods that map rows give the
+// deleted row and the inserted row different origins.
 //
 // Diff panics when the [lcs.Algorithm] returns an [lcs.Op] with an
 // [lcs.OpKind] other than [lcs.OpEqual], [lcs.OpDelete], or [lcs.OpInsert],
 // or with an index outside the input it refers to.
 func (d *Differ) Diff(a, b line.Sequence) *Result {
-	before, after := collect(a), collect(b)
+	r := &Result{inputs: [2]input{collect(a), collect(b)}}
+	r.ops = d.computeOps(r.inputs[Before].lines, r.inputs[After].lines)
 
-	return &Result{
-		before: before,
-		after:  after,
-		ops:    d.computeOps(before, after),
+	// Each row of the unified view shows the line of its op, and each line
+	// of an input maps to the first row that shows it.
+	lines := make([]*line.Line, len(r.ops))
+
+	for s := range r.inputs {
+		r.inputs[s].unifiedRows = unmappedRows(r.inputs[s].lines.Len())
 	}
+
+	for row, op := range r.ops {
+		shown := op.shows()
+		lines[row] = r.inputs[shown].lines.Line(op.pos[shown])
+
+		for s, p := range op.pos {
+			if p >= 0 && r.inputs[s].unifiedRows[p] < 0 {
+				r.inputs[s].unifiedRows[p] = row
+			}
+		}
+	}
+
+	r.unified = line.Collect(lines...)
+
+	return r
 }
 
-// collect returns the lines of seq as [line.Lines], which a diff reads by
+// collect returns the lines of seq as an [input], which a diff reads by
 // position. A [line.Lines] value never changes, so it comes back as it is
 // and the diff of two whole files copies neither.
-func collect(seq line.Sequence) line.Lines {
-	switch seq := seq.(type) {
-	case line.Lines:
-		return seq
-	case *line.View:
-		return seq.Held()
+func collect(seq line.Sequence) input {
+	if lines, ok := seq.(line.Lines); ok {
+		in := input{lines: lines, indices: make([]int, lines.Len())}
+		for i := range in.indices {
+			in.indices[i] = i
+		}
+
+		return in
 	}
 
 	if nilness.IsNil(seq) {
-		return line.Lines{}
+		return input{}
 	}
 
-	var ls []*line.Line
+	var (
+		ls      []*line.Line
+		indices []int
+	)
 
-	for _, l := range seq.All() {
+	for i, l := range seq.All() {
 		ls = append(ls, l)
+		indices = append(indices, i)
 	}
 
-	return line.Collect(ls...)
+	return input{lines: line.Collect(ls...), indices: indices}
 }
 
-// computeOps computes line operations using the configured algorithm. The
-// ops hold the caller's lines, which never change and which nothing can
-// reorder inside a [line.Lines] value.
+// computeOps computes line operations using the configured algorithm. Each
+// op holds the position of its line on each side. A [line.Lines] value
+// never changes, so a position keeps naming the same line.
 func (d *Differ) computeOps(before, after line.Lines) []lineOp {
 	// Precompute content strings once to avoid repeated string building.
 	beforeContent := make([]string, before.Len())
@@ -147,17 +175,24 @@ func (d *Differ) computeOps(before, after line.Lines) []lineOp {
 	// Compute diff using the configured algorithm.
 	diffOps := d.algo.Diff(beforeContent, afterContent)
 
-	// Convert to lineOp values.
+	// Convert to lineOp values. Reading the line at each position checks
+	// that the position lies inside its side.
 	ops := make([]lineOp, 0, len(diffOps))
 
 	for i, op := range diffOps {
 		switch op.Kind {
 		case lcs.OpEqual:
-			ops = append(ops, lineOp{kind: lcs.OpEqual, line: after.Line(op.After), before: before.Line(op.Before)})
+			_, _ = before.Line(op.Before), after.Line(op.After)
+			ops = append(ops, lineOp{kind: lcs.OpEqual, pos: [2]int{op.Before, op.After}})
+
 		case lcs.OpDelete:
-			ops = append(ops, lineOp{kind: lcs.OpDelete, line: before.Line(op.Before)})
+			_ = before.Line(op.Before)
+			ops = append(ops, lineOp{kind: lcs.OpDelete, pos: [2]int{op.Before, -1}})
+
 		case lcs.OpInsert:
-			ops = append(ops, lineOp{kind: lcs.OpInsert, line: after.Line(op.After)})
+			_ = after.Line(op.After)
+			ops = append(ops, lineOp{kind: lcs.OpInsert, pos: [2]int{-1, op.After}})
+
 		default:
 			// Dropping the op would lose a line from every rendering
 			// without a trace, so treat it as a broken Algorithm the same
@@ -169,6 +204,36 @@ func (d *Differ) computeOps(before, after line.Lines) []lineOp {
 	return ops
 }
 
+// Side names one of the two revisions a [Result] compares.
+type Side uint8
+
+// [Side] constants.
+const (
+	// Before is the first revision [Differ.Diff] takes, the one the diff
+	// changes from.
+	Before Side = iota
+	// After is the second revision [Differ.Diff] takes, the one the diff
+	// changes to.
+	After
+)
+
+// Origin names the line of an input that a row of a diff shows, by the
+// [Side] that holds the line and its index there. A row is an index of a
+// view the [Result] renders.
+//
+// The index is in the coordinates of the content of the input, the index
+// its [line.Sequence] yields with the line. For a [*line.View] it is the
+// index [line.View.Line] takes, which a slice of the view keeps. The
+// decoration of the input view and a range from a search of it apply at
+// that index. It is not the index of the line in [line.View.Held], which
+// numbers only the held lines, starting at zero.
+type Origin struct {
+	// Side is the revision that holds the line.
+	Side Side
+	// Index is the index of the line in the content of its input.
+	Index int
+}
+
 // Result holds computed diff operations for rendering.
 //
 // Rendering methods each return a fresh [line.View] that a printer accepts
@@ -178,25 +243,85 @@ func (d *Differ) computeOps(before, after line.Lines) []lineOp {
 //   - [Result.Before] and [Result.After] return aligned views
 //     for side-by-side rendering.
 //
+// Every row of a rendering shows a line of an input or, in a side-by-side
+// pane, an empty placeholder. [Result.UnifiedOrigin] and
+// [Result.PaneOrigin] name the line of the input that a row shows, and
+// [Result.UnifiedRow] and [Result.PaneRow] find the row that shows a line
+// of an input. [Result.Carry] copies the overlays and annotations of the
+// input views onto a rendering.
+//
 // A diff is not a YAML document, so the views carry no parsing or decoding
 // behavior.
 //
 // Create instances with [Differ.Diff] or [Diff].
 type Result struct {
-	before      line.Lines // The before revision, which names hunk header lines.
-	after       line.Lines // The after revision, which names hunk header lines.
-	ops         []lineOp
-	alignedRows []alignedRow // Side-by-side rows, which getAlignedRows builds on first use.
-	alignedOnce sync.Once    // Guards the first build of alignedRows.
+	unified   line.Lines // The line of each op, the content of every unified view.
+	ops       []lineOp
+	inputs    [2]input // The two revisions, by [Side].
+	panes     panes    // The side-by-side panes, which getPanes builds on first use.
+	panesOnce sync.Once
 }
 
-// alignedRow holds a pair of lines for side-by-side diff rendering, each
-// with its flag. Either line may be the empty placeholder.
+// input is one revision of a diff.
+type input struct {
+	// The lines the input sequence yields, in order. A position names a
+	// line here.
+	lines line.Lines
+	// The index each line has in the content of the input sequence, by
+	// position. The indices ascend, as a [line.Sequence] yields them.
+	indices []int
+	// The first row of the unified view that shows each line, by
+	// position, or -1. An unchanged line maps to the row of the after
+	// line the view shows in its place.
+	unifiedRows []int
+}
+
+// position returns the position of the line at index in the content of the
+// input, and true. It reports false when the input holds no line at index.
+func (in input) position(index int) (int, bool) {
+	return slices.BinarySearch(in.indices, index)
+}
+
+// panes holds the two panes of a side-by-side diff.
+type panes struct {
+	// The content of each pane, by [Side]. Each placeholder is a line of
+	// its own, so a line pointer names one row of one pane.
+	content [2]line.Lines
+	rows    []alignedRow
+	// The first row of each pane that shows each line of its side, by
+	// [Side] and by position, or -1.
+	rowOf [2][]int
+}
+
+// alignedRow is one row of a side-by-side diff.
 type alignedRow struct {
-	before     *line.Line
-	after      *line.Line
-	beforeFlag line.Flag
-	afterFlag  line.Flag
+	// The position of the line the row shows on each side, by [Side], or
+	// -1 for an empty placeholder.
+	pos [2]int
+	// Whether the row belongs to a run of changes.
+	changed bool
+}
+
+// flag returns the [line.Flag] of the row in the pane of side s.
+func (row alignedRow) flag(s Side) line.Flag {
+	switch {
+	case !row.changed || row.pos[s] < 0:
+		return line.FlagDefault
+	case s == Before:
+		return line.FlagDeleted
+	default:
+		return line.FlagInserted
+	}
+}
+
+// unmappedRows returns n rows, each -1.
+func unmappedRows(n int) []int {
+	rows := make([]int, n)
+	for i := range rows {
+		rows[i] = -1
+	}
+
+	return rows
 }
 
 // Unified returns a [line.View] of the complete diff.
@@ -209,17 +334,22 @@ type alignedRow struct {
 // inserted, or unchanged.
 //
 // A decorator that finds lines by identity, such as [line.View.Index] or
-// [go.jacobcolvin.com/niceyaml.SourceError.Annotate], finds every line
-// of the after revision in the view but only the deleted lines of the
-// before revision. [Result.Before] holds every line of the before
-// revision.
+// [go.jacobcolvin.com/niceyaml.Annotate], finds every line of the after
+// revision in the view but only the deleted lines of the before revision.
+// [Result.UnifiedRow] finds the row of a line of either revision, and
+// [Result.Carry] copies the marks of the input views onto the rows.
 //
 // Each call returns a new view with its own decoration, so overlays added
-// to one do not affect another.
+// to one do not affect another. Every view the calls return is over the
+// same content, so a row names the same line in each.
 func (r *Result) Unified() *line.View {
-	return flaggedView(r.ops, func(op lineOp) (*line.Line, line.Flag) {
-		return op.line, opKindFlag(op.kind)
-	})
+	view := line.NewView(r.unified)
+
+	for row, op := range r.ops {
+		view.SetFlag(row, opKindFlag(op.kind))
+	}
+
+	return view
 }
 
 // Hunks returns a [line.View] of the summarized diff. The view holds the
@@ -336,8 +466,8 @@ func (r *Result) consecutiveParts() []consecutivePart {
 
 	for _, op := range r.ops {
 		b, a := opKindDeltas(op.kind)
-		nextBefore := sideNumber(r.before, part.before.End, b)
-		nextAfter := sideNumber(r.after, part.after.End, a)
+		nextBefore := sideNumber(r.inputs[Before].lines, part.before.End, b)
+		nextAfter := sideNumber(r.inputs[After].lines, part.after.End, a)
 
 		if skipsLines(lastBefore, nextBefore) || skipsLines(lastAfter, nextAfter) {
 			parts = append(parts, part)
@@ -419,15 +549,15 @@ func (r *Result) Stats() Stats {
 	return s
 }
 
-// getAlignedRows returns the lazily computed aligned rows for side-by-side
-// rendering. It aligns lines so both sides have equal counts:
+// getPanes returns the lazily computed panes for side-by-side rendering.
+// It aligns lines so both sides have equal counts:
 //   - Equal lines appear on both sides at the same position.
 //   - Within each run of changes, the n-th deletion and the n-th insertion
 //     share a row, whatever order the algorithm listed them in.
 //   - Unmatched deletions have empty placeholders on the right.
 //   - Unmatched insertions have empty placeholders on the left.
-func (r *Result) getAlignedRows() []alignedRow {
-	r.alignedOnce.Do(func() {
+func (r *Result) getPanes() *panes {
+	r.panesOnce.Do(func() {
 		rows := make([]alignedRow, 0, len(r.ops))
 
 		i := 0
@@ -438,10 +568,7 @@ func (r *Result) getAlignedRows() []alignedRow {
 			case lcs.OpEqual:
 				// Equal lines appear on both sides, each with the number it
 				// has in its own revision.
-				rows = append(rows, alignedRow{
-					before: op.before,
-					after:  op.line,
-				})
+				rows = append(rows, alignedRow{pos: op.pos})
 				i++
 
 			case lcs.OpDelete, lcs.OpInsert:
@@ -451,28 +578,21 @@ func (r *Result) getAlignedRows() []alignedRow {
 				}
 
 				// Pair the deletes of the run with its inserts, each side in
-				// its own order. Each filler row gets a line of its own, so
-				// a line pointer names one row of one view.
+				// its own order.
 				del := nextOfKind(r.ops, lcs.OpDelete, i, end)
 				ins := nextOfKind(r.ops, lcs.OpInsert, i, end)
 
 				for del < end || ins < end {
-					var row alignedRow
+					row := alignedRow{pos: [2]int{-1, -1}, changed: true}
 
 					if del < end {
-						row.before = r.ops[del].line
-						row.beforeFlag = line.FlagDeleted
+						row.pos[Before] = r.ops[del].pos[Before]
 						del = nextOfKind(r.ops, lcs.OpDelete, del+1, end)
-					} else {
-						row.before = &line.Line{}
 					}
 
 					if ins < end {
-						row.after = r.ops[ins].line
-						row.afterFlag = line.FlagInserted
+						row.pos[After] = r.ops[ins].pos[After]
 						ins = nextOfKind(r.ops, lcs.OpInsert, ins+1, end)
-					} else {
-						row.after = &line.Line{}
 					}
 
 					rows = append(rows, row)
@@ -488,10 +608,34 @@ func (r *Result) getAlignedRows() []alignedRow {
 			}
 		}
 
-		r.alignedRows = rows
+		r.panes.rows = rows
+
+		for s := range r.inputs {
+			in := r.inputs[s]
+			lines := make([]*line.Line, len(rows))
+			rowOf := unmappedRows(in.lines.Len())
+
+			for row, ar := range rows {
+				p := ar.pos[s]
+				if p < 0 {
+					lines[row] = &line.Line{}
+
+					continue
+				}
+
+				lines[row] = in.lines.Line(p)
+
+				if rowOf[p] < 0 {
+					rowOf[p] = row
+				}
+			}
+
+			r.panes.content[s] = line.Collect(lines...)
+			r.panes.rowOf[s] = rowOf
+		}
 	})
 
-	return r.alignedRows
+	return &r.panes
 }
 
 // Before returns a [line.View] for the left (before) pane of a side-by-side
@@ -507,11 +651,10 @@ func (r *Result) getAlignedRows() []alignedRow {
 // placeholders carry [line.FlagDefault].
 //
 // Each call returns a new view with its own decoration, so overlays added
-// to one do not affect another or the paired [Result.After] view.
+// to one do not affect another or the paired [Result.After] view. Every
+// view the calls return is over the same content.
 func (r *Result) Before() *line.View {
-	return flaggedView(r.getAlignedRows(), func(row alignedRow) (*line.Line, line.Flag) {
-		return row.before, row.beforeFlag
-	})
+	return r.pane(Before)
 }
 
 // After returns a [line.View] for the right (after) pane of a side-by-side
@@ -527,30 +670,213 @@ func (r *Result) Before() *line.View {
 // placeholders carry [line.FlagDefault].
 //
 // Each call returns a new view with its own decoration, so overlays added
-// to one do not affect another or the paired [Result.Before] view.
+// to one do not affect another or the paired [Result.Before] view. Every
+// view the calls return is over the same content.
 func (r *Result) After() *line.View {
-	return flaggedView(r.getAlignedRows(), func(row alignedRow) (*line.Line, line.Flag) {
-		return row.after, row.afterFlag
-	})
+	return r.pane(After)
 }
 
-// flaggedView returns a [line.View] of the line pick returns for each item,
-// with the flag pick returns for that item set on its line.
-func flaggedView[T any](items []T, pick func(T) (*line.Line, line.Flag)) *line.View {
-	lines := make([]*line.Line, len(items))
-	flags := make([]line.Flag, len(items))
+// pane returns a new view of the pane of side s with the flags of its rows.
+func (r *Result) pane(s Side) *line.View {
+	p := r.getPanes()
+	view := line.NewView(p.content[s])
 
-	for i, item := range items {
-		lines[i], flags[i] = pick(item)
-	}
-
-	view := line.NewView(line.Collect(lines...))
-
-	for i, flag := range flags {
-		view.SetFlag(i, flag)
+	for row, ar := range p.rows {
+		view.SetFlag(row, ar.flag(s))
 	}
 
 	return view
+}
+
+// UnifiedOrigin returns the [Origin] of the line that row shows in
+// [Result.Unified], and true. [Result.Hunks] keeps the rows of the unified
+// view, so a row of the hunks has the same Origin. A deleted row shows a
+// line of [Before], and an inserted or unchanged row shows a line of
+// [After]. UnifiedOrigin reports false for a row outside the unified view.
+func (r *Result) UnifiedOrigin(row int) (Origin, bool) {
+	return r.origin(r.unifiedShows(row))
+}
+
+// unifiedShows returns the [Side] and the position there of the line that
+// row shows in the unified view, and true. It reports false for a row
+// outside the view.
+func (r *Result) unifiedShows(row int) (Side, int, bool) {
+	if row < 0 || row >= len(r.ops) {
+		return 0, 0, false
+	}
+
+	op := r.ops[row]
+	s := op.shows()
+
+	return s, op.pos[s], true
+}
+
+// paneShows returns s and the position there of the line that row shows in
+// the pane of s, and true. It reports false for a row outside the pane, for
+// a Side that names neither revision, and for a placeholder.
+func (r *Result) paneShows(s Side, row int) (Side, int, bool) {
+	if s > After {
+		return 0, 0, false
+	}
+
+	p := r.getPanes()
+	if row < 0 || row >= len(p.rows) || p.rows[row].pos[s] < 0 {
+		return 0, 0, false
+	}
+
+	return s, p.rows[row].pos[s], true
+}
+
+// origin returns the [Origin] of the line at position p of side s, and ok.
+// It returns the zero Origin when ok is false.
+func (r *Result) origin(s Side, p int, ok bool) (Origin, bool) {
+	if !ok {
+		return Origin{}, false
+	}
+
+	return Origin{Side: s, Index: r.inputs[s].indices[p]}, true
+}
+
+// PaneOrigin returns the [Origin] of the line that row shows in the pane
+// of side s, and true. The pane of [Before] is [Result.Before], and the
+// pane of [After] is [Result.After]. The Origin names a line of side s.
+// PaneOrigin reports false for a row outside the pane, for a Side that
+// names neither revision, and for an empty placeholder. A placeholder
+// shows no line of an input.
+func (r *Result) PaneOrigin(s Side, row int) (Origin, bool) {
+	return r.origin(r.paneShows(s, row))
+}
+
+// UnifiedRow returns the row of [Result.Unified] that shows the line o
+// names, and true. The unified view shows each unchanged line once, as the
+// line of [After]. A line of [Before] that the diff left unchanged maps to
+// the row of that after line. UnifiedRow reports false when o names no
+// line of an input. A line that the [lcs.Algorithm] lists more than once
+// maps to the first row that shows it.
+//
+// [Result.Hunks] keeps the rows of the unified view and holds a row when a
+// hunk covers it, as [line.View.Contains] reports.
+func (r *Result) UnifiedRow(o Origin) (int, bool) {
+	if o.Side > After {
+		return 0, false
+	}
+
+	in := r.inputs[o.Side]
+
+	p, ok := in.position(o.Index)
+	if !ok || in.unifiedRows[p] < 0 {
+		return 0, false
+	}
+
+	return in.unifiedRows[p], true
+}
+
+// PaneRow returns the row of the pane of o.Side that shows the line o
+// names, and true. [Result.Before] shows every line of [Before], and
+// [Result.After] shows every line of [After]. The panes align, so the same
+// row of the other pane shows the paired line or an empty placeholder.
+// PaneRow reports false when o names no line of an input. A line that the
+// [lcs.Algorithm] lists more than once maps to the first row that shows it.
+func (r *Result) PaneRow(o Origin) (int, bool) {
+	if o.Side > After {
+		return 0, false
+	}
+
+	in := r.inputs[o.Side]
+
+	p, ok := in.position(o.Index)
+	if !ok {
+		return 0, false
+	}
+
+	row := r.getPanes().rowOf[o.Side][p]
+	if row < 0 {
+		return 0, false
+	}
+
+	return row, true
+}
+
+// Carry copies the overlays and annotations of the input views onto dst,
+// a view that [Result.Unified], [Result.Hunks], [Result.Before], or
+// [Result.After] returned, or a slice, clone, or clip of one. Each row
+// that dst holds takes the marks of the line its [Origin] names. A line of
+// [Before] takes them from before, and a line of [After] from after. The
+// marks follow the annotations each row carries already, so a hunk header
+// stays above them.
+//
+//	result := diff.Diff(before, after)
+//	view := result.Unified()
+//	result.Carry(view, before, after)
+//
+// The index of an Origin is in the coordinates of the content of its
+// input. Each input view must be over the content of its input, which is
+// the [line.Lines] passed to Diff or the content of the view passed to it,
+// as [line.View.Over] reports. A row takes the marks of an input view only
+// when the view holds the line of the row at the index of its Origin. A
+// nil view holds no line. Carry reads the input views when it runs, so it
+// takes the marks they carry at that moment.
+//
+// The unified view shows each unchanged line once, as the line of [After],
+// so an unchanged row takes the marks of after alone. A caller that wants
+// the marks of before on the unchanged rows maps each line of [Before] to
+// its row with [Result.UnifiedRow]. The row is unchanged when
+// [Result.UnifiedOrigin] names a line of [After] for it.
+//
+// A row keeps each mark once, so carrying the marks again adds none. Carry
+// copies no flag, because dst carries the flags of the diff. A nil dst
+// takes no marks. Carry panics when dst is over content this Result did
+// not render, as [line.View.Over] reports.
+func (r *Result) Carry(dst, before, after *line.View) {
+	if dst == nil {
+		return
+	}
+
+	shows := r.unifiedShows
+
+	// GetPanes builds the panes on first use, so testing the unified
+	// content first keeps a unified dst from building them.
+	if !dst.Over(r.unified) {
+		p := r.getPanes()
+
+		switch {
+		case dst.Over(p.content[Before]):
+			shows = func(row int) (Side, int, bool) { return r.paneShows(Before, row) }
+		case dst.Over(p.content[After]):
+			shows = func(row int) (Side, int, bool) { return r.paneShows(After, row) }
+		default:
+			panic("diff: Carry: dst is not a view of this Result")
+		}
+	}
+
+	src := [2]*line.View{before, after}
+
+	for row := range dst.All() {
+		s, p, ok := shows(row)
+		if !ok {
+			continue
+		}
+
+		// A view of other content can hold a line at the same index, so
+		// the view gives its marks only when it holds the line the diff
+		// read there.
+		view, i := src[s], r.inputs[s].indices[p]
+		if !view.Contains(i) || view.Line(i) != r.inputs[s].lines.Line(p) {
+			continue
+		}
+
+		for _, o := range view.Overlays(i) {
+			if !slices.Contains(dst.Overlays(row), o) {
+				dst.AddLineOverlay(row, o)
+			}
+		}
+
+		for _, a := range view.Annotations(i) {
+			if !slices.Contains(dst.Annotations(row), a) {
+				dst.Annotate(row, a)
+			}
+		}
+	}
 }
 
 // IsEmpty reports whether the diff contains no lines.
@@ -571,16 +897,24 @@ func Diff(a, b line.Sequence) *Result {
 	return defaultDiffer.Diff(a, b)
 }
 
-// lineOp represents a line in the unified diff output.
+// lineOp is one row of the unified view.
 type lineOp struct {
-	line *line.Line // The [line.Line] from the revision it came from.
-
-	// The [line.Line] of the before revision for an [lcs.OpEqual] op, whose
-	// line field holds the after revision's line, so each side of an
-	// aligned view numbers the line as its own revision does.
-	before *line.Line
-
+	// The position of the line the op holds on each side, by [Side], or
+	// -1 for a side the op holds no line of. An [lcs.OpEqual] op holds a
+	// line of each side, so each side of an aligned view numbers the line
+	// as its own revision does.
+	pos  [2]int
 	kind lcs.OpKind // One of [lcs.OpEqual], [lcs.OpDelete], [lcs.OpInsert].
+}
+
+// shows returns the [Side] of the line the unified view shows for the op.
+// It shows the after line of an unchanged pair.
+func (op lineOp) shows() Side {
+	if op.kind == lcs.OpDelete {
+		return Before
+	}
+
+	return After
 }
 
 // nextOfKind returns the index of the first op of kind k in ops[from:end],
@@ -632,11 +966,11 @@ func (r *Result) formatHunkHeader(part consecutivePart, beforeIdx, beforeCount, 
 
 	fmt.Fprint(&b, "@@ ")
 
-	writeHunkRange(&b, '-', hunkStart(r.before, part.before, beforeIdx, beforeCount), beforeCount)
+	writeHunkRange(&b, '-', hunkStart(r.inputs[Before].lines, part.before, beforeIdx, beforeCount), beforeCount)
 
 	fmt.Fprint(&b, " ")
 
-	writeHunkRange(&b, '+', hunkStart(r.after, part.after, afterIdx, afterCount), afterCount)
+	writeHunkRange(&b, '+', hunkStart(r.inputs[After].lines, part.after, afterIdx, afterCount), afterCount)
 
 	fmt.Fprint(&b, " @@")
 

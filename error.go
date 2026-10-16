@@ -3421,6 +3421,11 @@ func (e *SourceError) Annotate(view *line.View) bool {
 // binding that [Detach] detached keeps no line of any view, so it marks
 // nothing. Annotate reports true when it marked a line, counting one that
 // held the marks already, and false for a nil err.
+//
+// A unified diff shows each unchanged line as the line of the after
+// revision, so a binding of the before revision marks only the lines the
+// diff deletes from it. [go.jacobcolvin.com/niceyaml/diff.Result.UnifiedRow]
+// maps each line of the before revision to its row.
 func Annotate(err error, view *line.View) bool {
 	sources, positions := treePositions(slices.Collect(Bindings(err)), true, nil, nil)
 

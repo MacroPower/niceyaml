@@ -29,7 +29,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 
 We use a **parse-once**, **style-once** approach. This means your users get a snappy UI, and you get a simple API. There's no need to employ multiple lexers, or perform any ANSI manipulation!
 
-Every part of `niceyaml` shares one consistent **positioning system**. It addresses each cell on its own, and the display mode, such as a diff or a slice, adds no complexity.
+Every part of `niceyaml` shares one **positioning system**. Each position names a line of some content and a column on that line, counted in runes from zero. Slices of a view keep the positions of the whole, so a range from a search or an error applies to a slice as it is. Diffs render new content with rows of their own. The `diff.Result` of each diff maps each row to the line of the revision it shows, and each line of a revision to its row.
 
 ## Features
 

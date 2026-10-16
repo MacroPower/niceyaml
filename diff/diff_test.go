@@ -1791,6 +1791,562 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 	})
 }
 
+// originViews returns the two revisions the origin tests compare. Each
+// view skips the lines above the change, two in the before revision and
+// one in the after revision. The index of a line in the content of its
+// input thus differs from its position among the lines the view holds.
+//
+// The unified diff and the panes show these lines:
+//
+//	row  unified    before     after
+//	0    a: 1 (A1)  a: 1 (B2)  a: 1 (A1)
+//	1    b: 2 (B3)  b: 2 (B3)  b: 9 (A2)
+//	2    b: 9 (A2)  c: 3 (B4)  c: 3 (A3)
+//	3    c: 3 (A3)  d: 4 (B5)  e: 5 (A4)
+//	4    d: 4 (B5)  (filler)   f: 6 (A5)
+//	5    e: 5 (A4)
+//	6    f: 6 (A5)
+func originViews() (*line.View, *line.View) {
+	before := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"x: 0",
+		"y: 0",
+		"a: 1",
+		"b: 2",
+		"c: 3",
+		"d: 4",
+	)).View().Slice(position.NewSpan(2, 6))
+	after := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"x: 0",
+		"a: 1",
+		"b: 9",
+		"c: 3",
+		"e: 5",
+		"f: 6",
+	)).View().Slice(position.NewSpan(1, 6))
+
+	return before, after
+}
+
+func TestDiffResult_UnifiedOrigin(t *testing.T) {
+	t.Parallel()
+
+	before, after := originViews()
+	result := diff.Diff(before, after)
+	unified := result.Unified()
+	hunks := result.Hunks(0)
+
+	tcs := map[string]struct {
+		want   diff.Origin
+		row    int
+		wantOK bool
+	}{
+		"unchanged line shows the after line": {row: 0, want: diff.Origin{Side: diff.After, Index: 1}, wantOK: true},
+		"deleted line":                        {row: 1, want: diff.Origin{Side: diff.Before, Index: 3}, wantOK: true},
+		"inserted line":                       {row: 2, want: diff.Origin{Side: diff.After, Index: 2}, wantOK: true},
+		"line after a change":                 {row: 3, want: diff.Origin{Side: diff.After, Index: 3}, wantOK: true},
+		"deleted line of a second change":     {row: 4, want: diff.Origin{Side: diff.Before, Index: 5}, wantOK: true},
+		"last row":                            {row: 6, want: diff.Origin{Side: diff.After, Index: 5}, wantOK: true},
+		"row before the view":                 {row: -1},
+		"row past the view":                   {row: 7},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := result.UnifiedOrigin(tc.row)
+			require.Equal(t, tc.wantOK, ok)
+			assert.Equal(t, tc.want, got)
+
+			if !ok {
+				return
+			}
+
+			// The index reaches the line the row shows through the input
+			// view, and the row of the hunks shows the same line.
+			input := before
+			if got.Side == diff.After {
+				input = after
+			}
+
+			assert.Same(t, input.Line(got.Index), unified.Line(tc.row))
+
+			if hunks.Contains(tc.row) {
+				assert.Same(t, unified.Line(tc.row), hunks.Line(tc.row))
+			}
+
+			// The row maps back to itself.
+			row, ok := result.UnifiedRow(got)
+			require.True(t, ok)
+			assert.Equal(t, tc.row, row)
+		})
+	}
+}
+
+func TestDiffResult_PaneOrigin(t *testing.T) {
+	t.Parallel()
+
+	before, after := originViews()
+	result := diff.Diff(before, after)
+
+	tcs := map[string]struct {
+		want   diff.Origin
+		side   diff.Side
+		row    int
+		wantOK bool
+	}{
+		"unchanged line on the left": {
+			side:   diff.Before,
+			row:    0,
+			want:   diff.Origin{Side: diff.Before, Index: 2},
+			wantOK: true,
+		},
+		"unchanged line on the right": {
+			side:   diff.After,
+			row:    0,
+			want:   diff.Origin{Side: diff.After, Index: 1},
+			wantOK: true,
+		},
+		"deleted line": {
+			side:   diff.Before,
+			row:    1,
+			want:   diff.Origin{Side: diff.Before, Index: 3},
+			wantOK: true,
+		},
+		"inserted line": {
+			side:   diff.After,
+			row:    1,
+			want:   diff.Origin{Side: diff.After, Index: 2},
+			wantOK: true,
+		},
+		"line beside a placeholder": {
+			side:   diff.After,
+			row:    4,
+			want:   diff.Origin{Side: diff.After, Index: 5},
+			wantOK: true,
+		},
+		"placeholder":              {side: diff.Before, row: 4},
+		"row past the pane":        {side: diff.After, row: 5},
+		"row before the pane":      {side: diff.Before, row: -1},
+		"side of neither revision": {side: diff.After + 1, row: 0},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := result.PaneOrigin(tc.side, tc.row)
+			require.Equal(t, tc.wantOK, ok)
+			assert.Equal(t, tc.want, got)
+
+			if !ok {
+				return
+			}
+
+			input, pane := before, result.Before()
+			if tc.side == diff.After {
+				input, pane = after, result.After()
+			}
+
+			assert.Same(t, input.Line(got.Index), pane.Line(tc.row))
+
+			row, ok := result.PaneRow(got)
+			require.True(t, ok)
+			assert.Equal(t, tc.row, row)
+		})
+	}
+}
+
+func TestDiffResult_UnifiedRow(t *testing.T) {
+	t.Parallel()
+
+	before, after := originViews()
+	result := diff.Diff(before, after)
+
+	tcs := map[string]struct {
+		origin diff.Origin
+		want   int
+		wantOK bool
+	}{
+		// The unified view shows an unchanged line as the after line, so
+		// the before line maps to the row of the after line.
+		"unchanged before line":        {origin: diff.Origin{Side: diff.Before, Index: 2}, want: 0, wantOK: true},
+		"unchanged after line":         {origin: diff.Origin{Side: diff.After, Index: 1}, want: 0, wantOK: true},
+		"unchanged line after changes": {origin: diff.Origin{Side: diff.Before, Index: 4}, want: 3, wantOK: true},
+		"deleted line":                 {origin: diff.Origin{Side: diff.Before, Index: 5}, want: 4, wantOK: true},
+		"inserted line":                {origin: diff.Origin{Side: diff.After, Index: 4}, want: 5, wantOK: true},
+		"line the input skips":         {origin: diff.Origin{Side: diff.Before, Index: 0}},
+		"index past the content":       {origin: diff.Origin{Side: diff.After, Index: 6}},
+		"side of neither revision":     {origin: diff.Origin{Side: diff.After + 1, Index: 1}},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := result.UnifiedRow(tc.origin)
+			require.Equal(t, tc.wantOK, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestDiffResult_PaneRow(t *testing.T) {
+	t.Parallel()
+
+	before, after := originViews()
+	result := diff.Diff(before, after)
+
+	tcs := map[string]struct {
+		origin diff.Origin
+		want   int
+		wantOK bool
+	}{
+		"unchanged before line":    {origin: diff.Origin{Side: diff.Before, Index: 2}, want: 0, wantOK: true},
+		"deleted line":             {origin: diff.Origin{Side: diff.Before, Index: 5}, want: 3, wantOK: true},
+		"unchanged after line":     {origin: diff.Origin{Side: diff.After, Index: 3}, want: 2, wantOK: true},
+		"inserted line":            {origin: diff.Origin{Side: diff.After, Index: 5}, want: 4, wantOK: true},
+		"line the input skips":     {origin: diff.Origin{Side: diff.After, Index: 0}},
+		"index before the content": {origin: diff.Origin{Side: diff.Before, Index: -1}},
+		"side of neither revision": {origin: diff.Origin{Side: diff.After + 1, Index: 1}},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := result.PaneRow(tc.origin)
+			require.Equal(t, tc.wantOK, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestDiffResult_Origins_SharedLines(t *testing.T) {
+	t.Parallel()
+
+	// Both revisions hold the same lines, and the after revision moves the
+	// first line to the end, so the unified diff shows that line twice.
+	src := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+	)).Lines()
+	before := line.Collect(src.Line(0), src.Line(1), src.Line(2))
+	after := line.Collect(src.Line(1), src.Line(2), src.Line(0))
+
+	result := diff.Diff(before, after)
+	unified := result.Unified()
+	require.Equal(t, 4, unified.Count())
+
+	// Each row names a line of one revision and maps back to itself, though
+	// two rows show one line pointer.
+	seen := map[diff.Origin]bool{}
+
+	for row := range unified.All() {
+		origin, ok := result.UnifiedOrigin(row)
+		require.True(t, ok)
+		assert.False(t, seen[origin], "row %d repeats %v", row, origin)
+
+		seen[origin] = true
+
+		got, ok := result.UnifiedRow(origin)
+		require.True(t, ok)
+		assert.Equal(t, row, got)
+	}
+
+	deleted, ok := result.UnifiedRow(diff.Origin{Side: diff.Before, Index: 0})
+	require.True(t, ok)
+
+	inserted, ok := result.UnifiedRow(diff.Origin{Side: diff.After, Index: 2})
+	require.True(t, ok)
+
+	assert.Same(t, unified.Line(deleted), unified.Line(inserted))
+	assert.NotEqual(t, deleted, inserted)
+	assert.Equal(t, line.FlagDeleted, unified.Flag(deleted))
+	assert.Equal(t, line.FlagInserted, unified.Flag(inserted))
+
+	// The marks of each revision land on the row of its own copy.
+	beforeView, afterView := line.NewView(before), line.NewView(after)
+	beforeView.Annotate(0, line.Annotation{Content: "before"})
+	afterView.Annotate(2, line.Annotation{Content: "after"})
+
+	result.Carry(unified, beforeView, afterView)
+	assert.Equal(t, []string{"before"}, unified.Annotations(deleted).Contents())
+	assert.Equal(t, []string{"after"}, unified.Annotations(inserted).Contents())
+}
+
+func TestDiffResult_Origins_RepeatedLine(t *testing.T) {
+	t.Parallel()
+
+	// An algorithm that lists one line more than once maps the line to the
+	// first row that shows it.
+	src := niceyaml.NewSourceFromString("a: 1\n").Lines()
+	result := diff.New(diff.WithAlgorithm(opsAlgorithm{
+		{Kind: lcs.OpEqual, Before: 0, After: 0},
+		{Kind: lcs.OpEqual, Before: 0, After: 0},
+		{Kind: lcs.OpDelete, Before: 0, After: -1},
+	})).Diff(src, src)
+
+	origin, ok := result.UnifiedOrigin(2)
+	require.True(t, ok)
+	assert.Equal(t, diff.Origin{Side: diff.Before, Index: 0}, origin)
+
+	row, ok := result.UnifiedRow(origin)
+	require.True(t, ok)
+	assert.Equal(t, 0, row)
+
+	row, ok = result.PaneRow(origin)
+	require.True(t, ok)
+	assert.Equal(t, 0, row)
+}
+
+func TestDiffResult_Carry(t *testing.T) {
+	t.Parallel()
+
+	note := func(content string) line.Annotation {
+		return line.Annotation{Content: content, Kind: kind.TextError, Placement: line.Below}
+	}
+
+	// Marked returns the views of originViews with marks on lines of each
+	// revision: the unchanged line, a deleted or an inserted line, and a
+	// line the input view does not hold.
+	marked := func() (*line.View, *line.View) {
+		before, after := originViews()
+
+		before.Annotate(2, note("a before"))
+		before.Annotate(3, note("b deleted"))
+		before.AddOverlay(kind.GenericHighlight, yamltest.LineRange(3, 0, 1))
+		before.Annotate(0, note("x skipped"))
+
+		after.Annotate(1, note("a after"))
+		after.Annotate(4, note("e inserted"))
+		after.AddOverlay(kind.GenericHighlight, yamltest.LineRange(4, 0, 1))
+
+		return before, after
+	}
+
+	before, after := marked()
+	result := diff.Diff(before, after)
+
+	tcs := map[string]struct {
+		dst          *line.View
+		wantNotes    map[int][]string
+		wantOverlays map[int]int
+	}{
+		// The unified view shows the unchanged line as the after line, so
+		// it carries the marks of the after revision alone.
+		"unified": {
+			dst:          result.Unified(),
+			wantNotes:    map[int][]string{0: {"a after"}, 1: {"b deleted"}, 5: {"e inserted"}},
+			wantOverlays: map[int]int{1: 1, 5: 1},
+		},
+		// The marks follow the hunk header on the first line of a hunk.
+		"hunks": {
+			dst: result.Hunks(0),
+			wantNotes: map[int][]string{
+				1: {"@@ -4 +3 @@", "b deleted"},
+				4: {"@@ -6 +5,2 @@"},
+				5: {"e inserted"},
+			},
+			wantOverlays: map[int]int{1: 1, 5: 1},
+		},
+		"before pane": {
+			dst:          result.Before(),
+			wantNotes:    map[int][]string{0: {"a before"}, 1: {"b deleted"}},
+			wantOverlays: map[int]int{1: 1},
+		},
+		"after pane": {
+			dst:          result.After(),
+			wantNotes:    map[int][]string{0: {"a after"}, 3: {"e inserted"}},
+			wantOverlays: map[int]int{3: 1},
+		},
+		"slice of a pane": {
+			dst:          result.After().Slice(position.NewSpan(2, 5)),
+			wantNotes:    map[int][]string{3: {"e inserted"}},
+			wantOverlays: map[int]int{3: 1},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			flags := changedFlags(tc.dst)
+
+			result.Carry(tc.dst, before, after)
+
+			assert.Equal(t, tc.wantNotes, notesOf(tc.dst))
+			assert.Equal(t, tc.wantOverlays, overlayCounts(tc.dst))
+			assert.Equal(t, flags, changedFlags(tc.dst), "Carry keeps the flags of the diff")
+		})
+	}
+
+	t.Run("marks added after the diff", func(t *testing.T) {
+		t.Parallel()
+
+		// Carry reads the input views when it runs, so it carries a mark
+		// added after the diff. Another view over the content of an input
+		// gives its marks as the input view does.
+		plain, other := originViews()
+		result := diff.Diff(plain, other)
+
+		plain.Annotate(3, note("b deleted"))
+
+		clone := other.Clone()
+		clone.Annotate(4, note("e inserted"))
+
+		dst := result.Unified()
+		result.Carry(dst, plain, clone)
+
+		assert.Equal(t, map[int][]string{1: {"b deleted"}, 5: {"e inserted"}}, notesOf(dst))
+	})
+
+	t.Run("carrying again", func(t *testing.T) {
+		t.Parallel()
+
+		// A row keeps each mark once, so a second Carry adds none.
+		dst := result.Hunks(0)
+		result.Carry(dst, before, after)
+		result.Carry(dst, before, after)
+
+		assert.Equal(t, map[int][]string{
+			1: {"@@ -4 +3 @@", "b deleted"},
+			4: {"@@ -6 +5,2 @@"},
+			5: {"e inserted"},
+		}, notesOf(dst))
+		assert.Equal(t, map[int]int{1: 1, 5: 1}, overlayCounts(dst))
+	})
+
+	t.Run("source that leaves out a line", func(t *testing.T) {
+		t.Parallel()
+
+		// The slice leaves out the deleted line at index 3 of before, so
+		// the row of that line takes no marks from it, though the slice
+		// carries one there.
+		part := before.Slice(position.NewSpan(4, 6))
+		part.Annotate(3, note("b left out"))
+
+		dst := result.Unified()
+		result.Carry(dst, part, after)
+
+		assert.Equal(t, map[int][]string{0: {"a after"}, 5: {"e inserted"}}, notesOf(dst))
+		assert.Equal(t, map[int]int{5: 1}, overlayCounts(dst))
+	})
+
+	t.Run("views of the other revision", func(t *testing.T) {
+		t.Parallel()
+
+		// The two revisions hold distinct lines, so each view holds a line
+		// of its own revision at the index of a line of the other, and
+		// gives no marks for it.
+		dst := result.Unified()
+		result.Carry(dst, after, before)
+
+		assert.Nil(t, notesOf(dst))
+		assert.Nil(t, overlayCounts(dst))
+	})
+
+	t.Run("inputs that share lines", func(t *testing.T) {
+		t.Parallel()
+
+		// Both inputs are views of one source, so the unified view and the
+		// before pane show the same line pointers. Each still takes the
+		// marks of its own revision.
+		src := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2"))
+		left, right := src.View(), src.View()
+		left.Annotate(0, note("before"))
+		right.Annotate(0, note("after"))
+
+		result := diff.Diff(left, right)
+		unified, beforePane, afterPane := result.Unified(), result.Before(), result.After()
+
+		for _, dst := range []*line.View{unified, beforePane, afterPane} {
+			result.Carry(dst, left, right)
+		}
+
+		assert.Equal(t, map[int][]string{0: {"after"}}, notesOf(unified))
+		assert.Equal(t, map[int][]string{0: {"before"}}, notesOf(beforePane))
+		assert.Equal(t, map[int][]string{0: {"after"}}, notesOf(afterPane))
+	})
+
+	t.Run("nil views", func(t *testing.T) {
+		t.Parallel()
+
+		dst := result.Unified()
+		result.Carry(dst, nil, nil)
+		assert.Nil(t, notesOf(dst))
+
+		assert.NotPanics(t, func() { result.Carry(nil, before, after) })
+	})
+
+	t.Run("empty diff", func(t *testing.T) {
+		t.Parallel()
+
+		empty := diff.Diff(line.Lines{}, line.Lines{})
+		dst := empty.Unified()
+
+		assert.NotPanics(t, func() { empty.Carry(dst, before, after) })
+		assert.Equal(t, 0, dst.Count())
+	})
+
+	t.Run("view of other content", func(t *testing.T) {
+		t.Parallel()
+
+		other := diff.Diff(before, after)
+
+		for _, dst := range []*line.View{before, other.Unified(), other.Before()} {
+			assert.PanicsWithValue(t, "diff: Carry: dst is not a view of this Result", func() {
+				result.Carry(dst, before, after)
+			})
+		}
+	})
+}
+
+// notesOf returns the contents of the annotations of each line of view
+// that carries some, by the index of the line. It returns nil when no line
+// carries an annotation.
+func notesOf(view *line.View) map[int][]string {
+	var notes map[int][]string
+
+	for i := range view.All() {
+		anns := view.Annotations(i)
+		if len(anns) == 0 {
+			continue
+		}
+
+		if notes == nil {
+			notes = map[int][]string{}
+		}
+
+		notes[i] = anns.Contents()
+	}
+
+	return notes
+}
+
+// overlayCounts returns the number of overlays on each line of view that
+// carries some, by the index of the line. It returns nil when no line
+// carries an overlay.
+func overlayCounts(view *line.View) map[int]int {
+	var counts map[int]int
+
+	for i := range view.All() {
+		n := len(view.Overlays(i))
+		if n == 0 {
+			continue
+		}
+
+		if counts == nil {
+			counts = map[int]int{}
+		}
+
+		counts[i] = n
+	}
+
+	return counts
+}
+
 // changedFlags returns the flag of each line of view that is not
 // [line.FlagDefault], by the index of the line. It returns nil when every
 // line has the default flag.

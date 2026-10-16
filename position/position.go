@@ -12,9 +12,12 @@ import (
 // Position represents a 0-indexed line and column location. Col counts
 // runes, which are Unicode code points, and not bytes or terminal cells.
 //
-// Note that it is not an offset of [token.Position] values. Rather, it
-// represents the absolute line and column in a document, including in cases
-// where multiple instances of the same token exist (e.g. in diffs).
+// It is not an offset of [token.Position] values. It names a line and a
+// column of some content, such as the lines of a file or the rows of a
+// diff. A diff can hold two instances of one token, and each gets a
+// position of its own. A position applies to the content that produced
+// it. [go.jacobcolvin.com/niceyaml/diff.Result] maps between the rows of a
+// diff and the lines of each revision.
 //
 // Create instances with [New].
 type Position struct {

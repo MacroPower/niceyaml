@@ -403,6 +403,11 @@
 // [Node.PathAt] goes from a position to the path of the node there, for a
 // viewer that names the value under its cursor.
 //
+// A unified diff shows each unchanged line as the line of the after
+// revision, so an error of the before revision marks only the lines the
+// diff deletes from it. [go.jacobcolvin.com/niceyaml/diff.Result.UnifiedRow]
+// maps each line of the before revision to its row.
+//
 // # Warnings
 //
 // A problem is either an error or a warning, and a warning does not make a

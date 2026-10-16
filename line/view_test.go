@@ -150,6 +150,43 @@ func TestView_Contains(t *testing.T) {
 	}
 }
 
+func TestView_Over(t *testing.T) {
+	t.Parallel()
+
+	lines := newLines(stringtest.LinesLF(letterRows(3)...))
+	view := line.NewView(lines)
+
+	var nilView *line.View
+
+	tcs := map[string]struct {
+		view  *line.View
+		lines line.Lines
+		want  bool
+	}{
+		"view of the lines":      {view: view, lines: lines, want: true},
+		"view within spans":      {view: line.NewViewWithin(lines, position.NewSpan(1, 2)), lines: lines, want: true},
+		"slice":                  {view: view.Slice(position.NewSpan(0, 1)), lines: lines, want: true},
+		"clone":                  {view: view.Clone(), lines: lines, want: true},
+		"hunks":                  {view: view.Hunks(1), lines: lines, want: true},
+		"clip":                   {view: view.Clip(4), lines: lines, want: true},
+		"collect of the lines":   {view: view, lines: line.Collect(lines.Line(0), lines.Line(1), lines.Line(2))},
+		"held lines":             {view: view, lines: view.Held()},
+		"other content":          {view: view, lines: newLines("a: 1\n")},
+		"zero view and no lines": {view: &line.View{}, lines: line.Lines{}, want: true},
+		"nil view and no lines":  {view: nilView, lines: line.Lines{}, want: true},
+		"nil view and lines":     {view: nilView, lines: lines},
+		"view and no lines":      {view: view, lines: line.Lines{}},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.view.Over(tc.lines))
+		})
+	}
+}
+
 func TestView_All(t *testing.T) {
 	t.Parallel()
 

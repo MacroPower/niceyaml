@@ -7502,6 +7502,61 @@ func TestViewport_Reveal(t *testing.T) {
 	}
 }
 
+func TestViewport_Reveal_SharedLines(t *testing.T) {
+	t.Parallel()
+
+	// Both revisions hold the lines of one source, and the current one
+	// moves the first line to the middle. The unified diff shows that line
+	// twice, deleted at the top and inserted in the middle, and a Hit of
+	// the current revision reveals the inserted row.
+	lines := niceyaml.NewSourceFromString(yamltest.GenerateLines(30, "key%d: value")).Lines()
+
+	moved := make([]*line.Line, 0, lines.Len())
+	for i := 1; i < lines.Len(); i++ {
+		moved = append(moved, lines.Line(i))
+		if i == 15 {
+			moved = append(moved, lines.Line(0))
+		}
+	}
+
+	hit := yamlviewport.Hit{Revision: 1, Position: position.New(15, 0)}
+
+	const height = 5
+
+	// Each case wants the row of the screen that shows hit.
+	tcs := map[string]struct {
+		viewMode yamlviewport.ViewMode
+		want     int
+	}{
+		"full": {viewMode: yamlviewport.ViewModeFull, want: (height - 1) / 2},
+		// The number of the moved line does not follow the numbers of the
+		// lines around it, so its hunk holds it alone. It ends the view and
+		// shows on the last row.
+		"hunks":        {viewMode: yamlviewport.ViewModeHunks, want: height - 1},
+		"side by side": {viewMode: yamlviewport.ViewModeSideBySide, want: (height - 1) / 2},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 44, height)
+			m.SetViewMode(tc.viewMode)
+			m.AddRevisions(
+				yamlviewport.NewRevision("before", line.NewView(lines)),
+				yamlviewport.NewRevision("after", line.NewView(line.Collect(moved...))),
+			)
+			require.True(t, m.ShowingDiff())
+
+			require.True(t, m.Reveal(hit), screenMessage(&m))
+
+			row, ok := hitRow(&m, hit)
+			require.True(t, ok, screenMessage(&m))
+			assert.Equal(t, tc.want, row, screenMessage(&m))
+		})
+	}
+}
+
 func TestViewport_Reveal_Sideways(t *testing.T) {
 	t.Parallel()
 

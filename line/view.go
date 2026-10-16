@@ -104,6 +104,25 @@ func (v *View) Line(i int) *Line {
 	return v.lines.lines[i]
 }
 
+// Over reports whether lines is the content of the [View], so an index or
+// a [position.Range] in the coordinates of lines applies to the View. A
+// View is over the [Lines] that [NewView] or [NewViewWithin] took, and so
+// is every View that [View.Slice], [View.Clone], [View.Hunks], or
+// [View.Clip] returns from it. A Lines value and its copies are one
+// content. Two values that [Collect] created are two contents, even when
+// they hold the same lines. Every Lines value that holds no line is the
+// zero Lines, so two empty values are one content. A nil View and the zero
+// View are over it.
+func (v *View) Over(lines Lines) bool {
+	var content Lines
+
+	if v != nil {
+		content = v.lines
+	}
+
+	return content.idx == lines.idx
+}
+
 // Held returns the lines the [View] holds as new [Lines], in the order
 // [View.All] yields them. The result shares the lines by pointer with the
 // content, as [Collect] does. It has the methods a View lacks, such as
@@ -161,7 +180,11 @@ func (v *View) Contains(i int) bool {
 // decorator that knows a line of a [Lines] value finds it in a slice of
 // that content, or in a diff that interleaves it with another revision,
 // without knowing what built the view. A line the view does not hold,
-// such as one from other content, reports false.
+// such as one from other content, reports false. A unified diff shows an
+// unchanged line of the before revision as the line of the after
+// revision, so Index does not find the before line there.
+// [go.jacobcolvin.com/niceyaml/diff.Result.UnifiedRow] maps every line of
+// either revision to its row.
 func (v *View) Index(l *Line) (int, bool) {
 	if v == nil || l == nil {
 		return 0, false

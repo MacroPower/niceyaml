@@ -25,6 +25,26 @@
 // affect another. The hunks are a slice of the unified view and keep its
 // line indices, so one index marks the same line in both.
 //
+// Each rendering is new content, and its indices are its rows. A position
+// in an input does not apply to a rendering, so the Result maps between
+// the lines of each input and the rows. An [Origin] names a line of an
+// input by its [Side] and its index in the content of that input.
+//
+// [Result.UnifiedOrigin] and [Result.PaneOrigin] name the line a row
+// shows. Viewers use them to go from a click on a row to a place in a
+// revision. [Result.UnifiedRow] and [Result.PaneRow] find the row that
+// shows a line. Viewers use them to scroll to an error in either revision:
+//
+//	row, ok := result.UnifiedRow(diff.Origin{Side: diff.Before, Index: i})
+//
+// A diff ignores the decoration of its inputs. [Result.Carry] copies the
+// overlays and annotations of the input views onto a rendering, so the
+// marks of a revision, such as its errors, show in the diff. An unchanged
+// row of the unified view takes the marks of the after revision:
+//
+//	view := result.Unified()
+//	result.Carry(view, beforeView, afterView)
+//
 // Lines compare by their content with line endings stripped, so a change
 // from LF to CRLF endings or a missing final newline is not a difference.
 //
