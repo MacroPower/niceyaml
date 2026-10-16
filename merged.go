@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
@@ -54,6 +55,9 @@ var (
 // The Source stands for the lowest layer, or for the layer [MergeAs]
 // names. It takes the name, the file path, the file system, and the
 // preamble of that layer, and an error with no location binds in it.
+// Every decode of the Source applies the unmarshalers of
+// [MergeUnmarshalers], or else the unmarshalers that [WithUnmarshalers]
+// gives the Source of that layer.
 //
 // The merge fails on the lowest layer that holds no value it can read. A
 // Source of several documents holds none, and neither does a document
@@ -79,24 +83,30 @@ func NewSourceFromLayers[L Layer](ctx context.Context, layers []L, opts ...Merge
 //
 // Available options:
 //   - [MergeAs]
+//   - [MergeUnmarshalers]
 type MergeOption func(*mergeConfig)
 
 // mergeConfig holds the settings a [MergeOption] configures.
 type mergeConfig struct {
 	// The layer the merged Source stands for, or nil for the lowest.
 	as Layer
+	// Holds the unmarshalers of MergeUnmarshalers, in the order given.
+	unmarshalers []Unmarshaler
+	// Says the caller passed a MergeUnmarshalers option, even one with no
+	// unmarshalers, so unmarshalers replaces those of the layer the merged
+	// Source stands for.
+	ownUnmarshalers bool
 }
 
 // MergeAs is a [MergeOption] that makes the Source [NewSourceFromLayers]
 // builds stand for layer, such as the file of the user above defaults
 // that the program embeds. The Source takes the name, the file path, the
-// file system, and the preamble of that layer, and what
-// [WithAllowDuplicateKeys], [WithAliasLimit], and [WithUnmarshalers] set
-// on its Source, in place of those of the lowest layer. A program thus
-// gives its unmarshalers to the Source of the layer it names here. An
-// error with no location binds in that layer. The layers merge in the
-// order given whichever layer the Source stands for, so a higher layer
-// still sets the values it holds.
+// file system, and the preamble of that layer in place of those of the
+// lowest layer. It also takes the unmarshalers that [WithUnmarshalers]
+// gives the Source of that layer, unless [MergeUnmarshalers] gives the
+// merge its own. An error with no location binds in that layer. The
+// layers merge in the order given whichever layer the Source stands for,
+// so a higher layer still sets the values it holds.
 //
 // The preamble holds the schema directive of the layer, so the directive
 // of that layer picks the schema of the merged document, and a relative
@@ -107,15 +117,54 @@ type mergeConfig struct {
 // registry.
 //
 // A nil layer keeps the lowest layer, and so does a nil Source or a nil
-// Node, so an optional file goes to MergeAs as it is. For any other layer
-// that the layers do not hold, NewSourceFromLayers returns an error that
-// wraps [ErrUnknownLayer]. It compares pointers, so layer must be the
-// [*Source] or the [*Node] the layers hold, and a Node that another call
-// of [Node.At] returns does not match. The last of several MergeAs options
-// applies.
+// Node, so an optional file goes to MergeAs as it is. The Source stands
+// for the lowest layer when that file is missing, so unmarshalers given
+// to that file alone apply only when it exists. A program gives its
+// unmarshalers to MergeUnmarshalers instead. Every decode then reads the
+// types of the program the same way whichever files exist.
+//
+// For any other layer that the layers do not hold, NewSourceFromLayers
+// returns an error that wraps [ErrUnknownLayer]. It compares pointers, so
+// layer must be the [*Source] or the [*Node] the layers hold, and a Node
+// that another call of [Node.At] returns does not match. The last of
+// several MergeAs options applies.
 func MergeAs(layer Layer) MergeOption {
 	return func(c *mergeConfig) {
 		c.as = layer
+	}
+}
+
+// MergeUnmarshalers is a [MergeOption] that gives every decode of the
+// Source [NewSourceFromLayers] builds the unmarshalers us, in place of
+// the unmarshalers of the layer the Source stands for. A program that
+// merges an optional file of the user over the defaults it embeds gives
+// its unmarshalers here, such as the cidr [Unmarshaler] that
+// [CustomUnmarshaler] shows. Every decode then applies them whichever
+// files exist:
+//
+//	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{defaults, user},
+//		niceyaml.MergeAs(user),
+//		niceyaml.MergeUnmarshalers(cidr),
+//	)
+//
+// Like the unmarshalers of [WithUnmarshalers], the unmarshalers us reach
+// the decode inside a [Validator] and every decode of the empty Source
+// that a merge of no layer returns. A Node that [Node.Origin] returns
+// belongs to the document of a layer, so a decode of it applies the
+// unmarshalers of that layer instead.
+//
+// A merge with MergeUnmarshalers takes no unmarshaler from any layer,
+// even when us is empty. Each MergeUnmarshalers adds to the ones before
+// it, so a later function for a type replaces an earlier one and the
+// last [JSONUnmarshalers] applies. MergeUnmarshalers copies the slice us,
+// so the option keeps its unmarshalers when the caller changes the slice
+// it passed.
+func MergeUnmarshalers(us ...Unmarshaler) MergeOption {
+	us = slices.Clone(us)
+
+	return func(c *mergeConfig) {
+		c.unmarshalers = slices.Concat(c.unmarshalers, us)
+		c.ownUnmarshalers = true
 	}
 }
 
@@ -156,6 +205,10 @@ type Layer interface {
 // them, and that Node holds the keys its own layer sets and none of the
 // keys the layers below add. The origin of the root is the highest layer
 // that holds a value, or the highest of all when none does.
+//
+// The origin decodes with the unmarshalers of the Source of its layer,
+// and not with those of [MergeUnmarshalers]. So a program that decodes
+// origins gives the same [WithUnmarshalers] to the Source of every layer.
 //
 // A value that a layer reads through an alias or a `<<` merge key has its
 // origin at the content of the anchor. For an anchor in a reference
@@ -402,7 +455,7 @@ func mergeLayers[L Layer](ctx context.Context, given []L, cfg mergeConfig) (*Sou
 	}
 
 	if len(layers) == 0 {
-		return NewSourceFromString(""), nil
+		return NewSourceFromString("", WithUnmarshalers(cfg.unmarshalers...)), nil
 	}
 
 	var root *layermerge.Value
@@ -427,7 +480,7 @@ func mergeLayers[L Layer](ctx context.Context, given []L, cfg mergeConfig) (*Sou
 		return nil, named.node.bindOwn(err)
 	}
 
-	src := newMergedSource(named.source, text, showsLayers(layers))
+	src := newMergedSource(named.source, text, showsLayers(layers), cfg)
 	src.layers = &layering{root: root, layers: layers, identity: identity}
 
 	return src, nil
@@ -465,10 +518,15 @@ func showsLayers(layers []resolvedLayer) bool {
 
 // newMergedSource returns a new [*Source] that holds text, with the name,
 // file, and settings of from but no references, and excerpts as given. It
-// parses now, so it binds each syntax error before the caller sets layers.
-func newMergedSource(from *Source, text string, excerpts bool) *Source {
+// takes the unmarshalers of merge when merge sets its own. It parses now,
+// so it binds each syntax error before the caller sets layers.
+func newMergedSource(from *Source, text string, excerpts bool, merge mergeConfig) *Source {
 	src := NewSourceFromString(text, func(c *sourceConfig) {
 		*c = from.sourceConfig
+
+		if merge.ownUnmarshalers {
+			c.unmarshalers = merge.unmarshalers
+		}
 
 		// The merged value holds no alias, so it reads no reference
 		// document.

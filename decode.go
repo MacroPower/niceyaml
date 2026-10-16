@@ -266,7 +266,8 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 // turns the UnmarshalJSON methods of the types on or off. A program gives
 // its unmarshalers to the [Source] with [WithUnmarshalers], so every
 // decode of the documents applies them. A call applies its own over them
-// with [WithUnmarshaler]. Each place takes the same value. Below, a
+// with [WithUnmarshaler]. A Source from [NewSourceFromLayers] takes them
+// with [MergeUnmarshalers]. Each place takes the same value. Below, a
 // Source takes cidr with WithUnmarshalers, and one call on a document of
 // another Source takes it with WithUnmarshaler:
 //

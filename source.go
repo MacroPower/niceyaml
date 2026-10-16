@@ -510,8 +510,9 @@ func WithReferences(refs ...*Source) SourceOption {
 // so the option keeps its unmarshalers when the caller changes the slice
 // it passed.
 //
-// A Source from [NewSourceFromLayers] takes the unmarshalers of the layer
-// [MergeAs] names, or else of the lowest layer.
+// A Source from [NewSourceFromLayers] applies the unmarshalers of
+// [MergeUnmarshalers]. A merge with no such option takes the unmarshalers
+// of the layer [MergeAs] names, or else of the lowest layer.
 func WithUnmarshalers(us ...Unmarshaler) SourceOption {
 	us = slices.Clone(us)
 

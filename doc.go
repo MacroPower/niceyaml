@@ -525,7 +525,9 @@
 // code that did not build the Source, such as a library the program hands
 // it to. The unmarshalers of [WithUnmarshaler] in a call apply over them,
 // so a call can replace or remove the function of a type and turn the
-// JSON methods off.
+// JSON methods off. A program gives the unmarshalers of a Source from
+// [NewSourceFromLayers] to [MergeUnmarshalers], as the Layers section
+// describes.
 //
 // A value the decoder rejects returns an error that matches [ErrDecode] and
 // carries the `$` path of the value, and the message describes the document
@@ -968,12 +970,12 @@
 // file names the schema of the merged document. It keeps no other
 // comment. Each scalar keeps the spelling of its layer, such as 0x10 or
 // 1.50, except that a block scalar or a string of several lines becomes
-// one double-quoted line. The Source takes its name, its file path, its
-// file system, and what [WithAllowDuplicateKeys], [WithAliasLimit], and
-// [WithUnmarshalers] set from the Source of that layer. Its text holds
-// the values of every layer, so it shows no excerpt when the Source of a
-// layer, or of a reference document a layer reads, has [WithExcerpts] set
-// to false.
+// one double-quoted line. The Source takes its name, its file path, and
+// its file system from the Source of that layer. It also takes the
+// unmarshalers of that Source when no [MergeUnmarshalers] sets them. Its
+// text holds the values of every layer, so it shows no excerpt when the
+// Source of a layer, or of a reference document a layer reads, has
+// [WithExcerpts] set to false.
 //
 // That text is no file of the program. [Node.View], [Node.Span],
 // [Node.Ranges], and [Node.PathAt] read the merged lines, so a position
@@ -983,12 +985,33 @@
 // that holds a value in the file of its layer.
 //
 // A program that embeds its defaults below the file of the user passes
-// MergeAs with the Source of that file. The directive of the file then
-// picks the schema, a
+// MergeAs with the Source of that file. It gives its unmarshalers, such
+// as the cidr [Unmarshaler] that [CustomUnmarshaler] shows, to
+// [MergeUnmarshalers]:
+//
+//	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{defaults, user},
+//		niceyaml.MergeAs(user),
+//		niceyaml.MergeUnmarshalers(cidr),
+//	)
+//
+// The directive of the file then picks the schema, and a
 // [go.jacobcolvin.com/niceyaml/schema/matcher.FilePath] matcher routes on
-// the path of the file, every decode applies the unmarshalers of its
-// Source, and the heading of an error names the file and not the
-// defaults.
+// the path of the file. The heading of an error names the file and not
+// the defaults. Every decode of the merged Source applies cidr, the
+// decode inside a [Validator] included.
+//
+// A merge with no MergeUnmarshalers takes the unmarshalers that
+// [WithUnmarshalers] gives the Source of the layer the merged Source
+// stands for. When the file MergeAs names is missing, the merged Source
+// stands for the lowest layer instead. So unmarshalers given to that file
+// alone apply only when it exists. A program gives its unmarshalers to
+// MergeUnmarshalers, or the same unmarshalers to the Source of every
+// layer. Every decode of the merged Source then reads the types of the
+// program the same way whichever files exist.
+//
+// A Node that [Node.Origin] returns decodes with the unmarshalers of its
+// layer. So a program that decodes origins gives the same unmarshalers to
+// the Source of every layer.
 //
 // Each error of the merged Source binds in the file of a layer and never
 // in the merged text, so it names the line a user edits:
