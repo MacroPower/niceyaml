@@ -138,6 +138,14 @@
 // limits of each Source, as [niceyaml.WithByteLimit] and
 // [niceyaml.WithDepthLimit] describe.
 //
+// [WithUnmarshalers] sets how the Go types of the kinds read YAML, such
+// as a type of another package that a document writes as text. A load
+// gives the unmarshalers to each Source that it builds. Every decode that
+// the load runs on a document applies them too, so the decode of a
+// manifest, the decode inside a validator, and the decode of a migration
+// step read the types alike. The Node of an [Object] from a Source that
+// [Sources] reads keeps the unmarshalers of that Source alone.
+//
 // # Routing
 //
 // A load reads the type fields of each document and picks the kind and the

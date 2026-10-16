@@ -246,6 +246,9 @@ type reader struct {
 	// The details of each directory input that selected no file.
 	empty []string
 	files []*file
+	// The unmarshalers of the registry, which every Source the reader
+	// builds takes ahead of the options of its input.
+	unmarshalers []niceyaml.Unmarshaler
 	// The files read from disk, which a later path to one of them skips.
 	disk    []os.FileInfo
 	fsFiles []fsKey
@@ -259,14 +262,15 @@ type fsKey struct {
 	path string
 }
 
-// readInputs reads the files of in, in load order.
-func readInputs(ctx context.Context, in Input) (*reader, error) {
+// readInputs reads the files of in, in load order. Each Source it builds
+// takes the unmarshalers us.
+func readInputs(ctx context.Context, in Input, us []niceyaml.Unmarshaler) (*reader, error) {
 	inputs, err := prepare(ctx, in, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	r := &reader{ctx: ctx}
+	r := &reader{ctx: ctx, unmarshalers: us}
 
 	for _, p := range inputs {
 		err := ctx.Err()
@@ -340,7 +344,7 @@ func (r *reader) readStdin(opts []niceyaml.SourceOption) {
 
 	t := target{kind: targetStdin}
 
-	src, err := niceyaml.NewSourceFromReader(os.Stdin, sourceOptions(opts, niceyaml.WithName(stdinName))...)
+	src, err := niceyaml.NewSourceFromReader(os.Stdin, r.sourceOptions(opts, niceyaml.WithName(stdinName))...)
 	if err != nil {
 		r.fail(stdinName, readError(err), t)
 
@@ -377,7 +381,7 @@ func (r *reader) readDisk(name, full string, opts []niceyaml.SourceOption, t tar
 	}
 
 	src, err := niceyaml.NewSourceFromReader(f,
-		sourceOptions(opts, niceyaml.WithName(name), niceyaml.WithFilePath(abs))...)
+		r.sourceOptions(opts, niceyaml.WithName(name), niceyaml.WithFilePath(abs))...)
 	if err != nil {
 		r.fail(name, readError(err), t)
 
@@ -409,7 +413,7 @@ func (r *reader) readFS(fsys fs.FS, name, p string, opts []niceyaml.SourceOption
 	defer f.Close() //nolint:errcheck // A read-only file has nothing to flush.
 
 	src, err := niceyaml.NewSourceFromReader(f,
-		sourceOptions(opts, niceyaml.WithName(name), niceyaml.WithFilePath(p), niceyaml.WithFS(fsys))...)
+		r.sourceOptions(opts, niceyaml.WithName(name), niceyaml.WithFilePath(p), niceyaml.WithFS(fsys))...)
 	if err != nil {
 		r.fail(name, readError(err), t)
 
@@ -461,9 +465,11 @@ func equalFS(a, b reflect.Value) bool {
 	return equal
 }
 
-// sourceOptions returns the options of the user, then own, so own wins.
-func sourceOptions(user []niceyaml.SourceOption, own ...niceyaml.SourceOption) []niceyaml.SourceOption {
-	return slices.Concat(user, own)
+// sourceOptions returns the options of a Source the reader builds: the
+// unmarshalers of the registry, then the options of the user, then own.
+// Each later option wins.
+func (r *reader) sourceOptions(user []niceyaml.SourceOption, own ...niceyaml.SourceOption) []niceyaml.SourceOption {
+	return slices.Concat([]niceyaml.SourceOption{niceyaml.WithUnmarshalers(r.unmarshalers...)}, user, own)
 }
 
 // readError returns the problem of a file that did not read: the reason

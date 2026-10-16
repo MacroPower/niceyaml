@@ -3,6 +3,7 @@ package niceyaml
 import (
 	"context"
 	"reflect"
+	"slices"
 
 	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
@@ -21,10 +22,11 @@ func init() {
 		}
 	}
 	hook.Rewrap = rewrap
-	hook.WorkingSource = func(text string, home any, locate func(hook.Located) hook.Place) any {
-		n, _ := home.(*Node) //nolint:errcheck // The hook takes a *Node.
+	hook.WorkingSource = func(text string, home, us any, locate func(hook.Located) hook.Place) any {
+		n, _ := home.(*Node)       //nolint:errcheck // The hook takes a *Node.
+		u, _ := us.([]Unmarshaler) //nolint:errcheck // The hook takes a []Unmarshaler.
 
-		return newWorkingSource(text, n, locate)
+		return newWorkingSource(text, n, u, locate)
 	}
 	hook.Reread = func(src any, text string) any {
 		s, _ := src.(*Source) //nolint:errcheck // The hook takes a *Source.
@@ -57,11 +59,13 @@ type relocation struct {
 	locate func(hook.Located) hook.Place
 }
 
-// newWorkingSource returns a [Source] of text that stands for home, as
-// [hook.WorkingSource] describes.
-func newWorkingSource(text string, home *Node, locate func(hook.Located) hook.Place) *Source {
+// newWorkingSource returns a [Source] of text that stands for home, with
+// the unmarshalers us ahead of those of home, as [hook.WorkingSource]
+// describes.
+func newWorkingSource(text string, home *Node, us []Unmarshaler, locate func(hook.Located) hook.Place) *Source {
 	cfg := home.source.sourceConfig
 	cfg.noLimits = true
+	cfg.unmarshalers = slices.Concat(us, cfg.unmarshalers)
 
 	src := newStringSource(text, cfg)
 	src.relocation = &relocation{home: home, locate: locate}

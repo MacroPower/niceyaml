@@ -172,7 +172,7 @@ type row struct {
 
 // check reads the files of in and runs the checks of each document.
 func (r *Registry) check(ctx context.Context, in Input, cfg loadConfig) (*loader, error) {
-	rd, err := readInputs(ctx, in)
+	rd, err := readInputs(ctx, in, r.cfg.unmarshalers)
 	if err != nil {
 		return nil, err
 	}

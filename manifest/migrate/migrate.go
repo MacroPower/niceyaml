@@ -77,10 +77,13 @@ func (n *Node) Text() string {
 }
 
 // Decode decodes the value as [niceyaml.Node.Decode] does, with opts and the
-// settings of the Source of the file, such as its reference documents. It
-// leaves out the decode options of the registry and the kind, which
-// describe the current version. A step passes the ctx it got, so the
-// warnings of the decode join the warnings of the load.
+// settings of the Source of the file, such as its reference documents. The
+// unmarshalers of
+// [go.jacobcolvin.com/niceyaml/manifest.WithUnmarshalers] apply too, ahead
+// of those of the Source. Decode leaves out the decode options of the
+// registry and the kind, which describe the current version. A step passes
+// the ctx it got, so the warnings of the decode join the warnings of the
+// load.
 func (n *Node) Decode[T any](ctx context.Context, opts ...niceyaml.DecodeOption) (T, error) {
 	var zero T
 

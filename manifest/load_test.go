@@ -101,6 +101,9 @@ var (
 		"  price: 65",
 		"  legacyPricing: true",
 	)
+
+	// The error of an alarm level that a document misspells.
+	errUnknownAlarmLevel = errors.New("unknown level")
 )
 
 // mapFS returns a file system that holds files under the directory config.
@@ -1084,6 +1087,194 @@ func TestRegistry_Load_Defaults(t *testing.T) {
 	cafe, ok := set.Get[Cafe]("yamull")
 	require.True(t, ok)
 	assert.Equal(t, CafeSpec{Seats: 40, Currency: "EUR"}, cafe.Value.Spec)
+}
+
+// Alarm is a kind whose level a document writes by name, which a
+// function from niceyaml.CustomUnmarshaler reads.
+type Alarm struct {
+	Metadata Metadata  `json:"metadata"`
+	Spec     AlarmSpec `json:"spec"`
+}
+
+// AlarmSpec describes an alarm.
+type AlarmSpec struct {
+	Level AlarmLevel `json:"level"`
+}
+
+// AlarmLevel is the level of an alarm. It has no method of its own.
+type AlarmLevel int
+
+// The levels of an alarm.
+const (
+	alarmLow AlarmLevel = iota + 1
+	alarmHigh
+)
+
+// decodeAlarmLevel decodes an [AlarmLevel] from its name.
+func decodeAlarmLevel(_ context.Context, l *AlarmLevel, decode func(any) error) error {
+	var name string
+
+	err := decode(&name)
+	if err != nil {
+		return err
+	}
+
+	switch name {
+	case "low":
+		*l = alarmLow
+	case "high":
+		*l = alarmHigh
+	default:
+		return fmt.Errorf("%w %q", errUnknownAlarmLevel, name)
+	}
+
+	return nil
+}
+
+func TestRegistry_Load_Unmarshalers(t *testing.T) {
+	t.Parallel()
+
+	levelNames := niceyaml.CustomUnmarshaler(decodeAlarmLevel)
+
+	seven := niceyaml.CustomUnmarshaler(func(_ context.Context, l *AlarmLevel, _ func(any) error) error {
+		*l = 7
+
+		return nil
+	})
+
+	levelPath := paths.Current().Child("spec", "level")
+
+	// Neither the validator nor the step passes an option to its decode,
+	// so each reads a level name only through the unmarshalers of the
+	// load.
+	options := func(us []niceyaml.Unmarshaler, decodeOpts []niceyaml.DecodeOption) []manifest.RegistryOption {
+		readLevel := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			_, err := n.DecodeAt[AlarmLevel](ctx, levelPath)
+
+			return err
+		})
+
+		return []manifest.RegistryOption{
+			manifest.WithNameField(meta.Child("name")),
+			manifest.WithUnmarshalers(us...),
+			manifest.WithDecodeOptions(niceyaml.WithValidator(readLevel)),
+			manifest.WithDecodeOptions(decodeOpts...),
+			manifest.WithKinds(manifest.NewKind[Alarm]("Alarm",
+				manifest.Version("alarm.jacobcolvin.com/v1alpha1"),
+				manifest.Version("alarm.jacobcolvin.com/v1",
+					manifest.Migrate(spec.Child("severity"), func(ctx context.Context, n *migrate.Node) error {
+						_, err := n.Decode[AlarmLevel](ctx)
+						if err != nil {
+							return err
+						}
+
+						return n.SetKey("level")
+					}),
+				),
+			)),
+		}
+	}
+
+	current := stringtest.LinesLF(
+		"apiVersion: alarm.jacobcolvin.com/v1",
+		"kind: Alarm",
+		"metadata:",
+		"  name: smoke",
+		"spec:",
+		"  level: high",
+	)
+
+	older := stringtest.LinesLF(
+		"apiVersion: alarm.jacobcolvin.com/v1alpha1",
+		"kind: Alarm",
+		"metadata:",
+		"  name: smoke",
+		"spec:",
+		"  severity: high",
+	)
+
+	tcs := map[string]struct {
+		in         manifest.Input
+		us         []niceyaml.Unmarshaler
+		decodeOpts []niceyaml.DecodeOption
+		err        string
+		want       AlarmLevel
+	}{
+		"a file the load reads": {
+			in:   configFS(map[string]string{"alarm.yaml": current}),
+			us:   []niceyaml.Unmarshaler{levelNames},
+			want: alarmHigh,
+		},
+		"a Source the program built": {
+			in:   manifest.Sources(niceyaml.NewSourceFromString(current, niceyaml.WithName("alarm.yaml"))),
+			us:   []niceyaml.Unmarshaler{levelNames},
+			want: alarmHigh,
+		},
+		"the step of a file the load reads": {
+			in:   configFS(map[string]string{"alarm.yaml": older}),
+			us:   []niceyaml.Unmarshaler{levelNames},
+			want: alarmHigh,
+		},
+		"the step of a Source the program built": {
+			in:   manifest.Sources(niceyaml.NewSourceFromString(older, niceyaml.WithName("alarm.yaml"))),
+			us:   []niceyaml.Unmarshaler{levelNames},
+			want: alarmHigh,
+		},
+		"the source options of an input apply over them": {
+			in: configFS(map[string]string{"alarm.yaml": current},
+				manifest.WithSourceOptions(niceyaml.WithUnmarshalers(seven))),
+			us:   []niceyaml.Unmarshaler{levelNames},
+			want: 7,
+		},
+		"the unmarshalers of a Source the program built apply over them": {
+			in: manifest.Sources(niceyaml.NewSourceFromString(current,
+				niceyaml.WithName("alarm.yaml"), niceyaml.WithUnmarshalers(seven))),
+			us:   []niceyaml.Unmarshaler{levelNames},
+			want: 7,
+		},
+		"a later function for a type replaces an earlier one": {
+			in:   configFS(map[string]string{"alarm.yaml": current}),
+			us:   []niceyaml.Unmarshaler{levelNames, seven},
+			want: 7,
+		},
+		"the decode options of the registry apply over them": {
+			in:         configFS(map[string]string{"alarm.yaml": current}),
+			us:         []niceyaml.Unmarshaler{levelNames},
+			decodeOpts: []niceyaml.DecodeOption{niceyaml.WithUnmarshaler(seven)},
+			want:       7,
+		},
+		"without them, a level reads as an integer": {
+			in:  configFS(map[string]string{"alarm.yaml": current}),
+			err: "config/alarm.yaml:6:10: $.spec.level: expected integer, got string",
+		},
+		"without them, the step reads a level as an integer": {
+			in:  manifest.Sources(niceyaml.NewSourceFromString(older, niceyaml.WithName("alarm.yaml"))),
+			err: "alarm.yaml:6:13: $.spec.severity: expected integer, got string",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg, err := manifest.NewRegistry(options(tc.us, tc.decodeOpts)...)
+			require.NoError(t, err)
+
+			set, err := reg.Load(t.Context(), tc.in)
+			if tc.err != "" {
+				require.Error(t, err)
+				assert.Contains(t, niceyaml.FormatError(err), tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			alarm, ok := set.Get[Alarm]("smoke")
+			require.True(t, ok)
+			assert.Equal(t, tc.want, alarm.Value.Spec.Level)
+		})
+	}
 }
 
 func TestLoadError(t *testing.T) {

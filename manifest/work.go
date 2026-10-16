@@ -19,7 +19,8 @@ import (
 // whatever the schema and the Go type declare. Every line and column of
 // the copy matches doc, so locate moves a location of the copy, as doc
 // places it, into the document. A nil locate leaves the location as it
-// is, for doc itself.
+// is, for doc itself. The copy takes the unmarshalers of the registry
+// ahead of those of the Source of doc.
 func (d *docState) prepareWork(doc *niceyaml.Node, locate func(hook.Located) hook.Place) bool {
 	src := doc.Source()
 	text := src.Text()
@@ -46,7 +47,7 @@ func (d *docState) prepareWork(doc *niceyaml.Node, locate func(hook.Located) hoo
 
 	blank.fillEmptyRoot()
 
-	working, ok := hook.WorkingSource(string(blank.work), d.doc, func(at hook.Located) hook.Place {
+	working, ok := hook.WorkingSource(string(blank.work), d.doc, d.l.reg.cfg.unmarshalers, func(at hook.Located) hook.Place {
 		if at.HasRange {
 			at.Range.Start.Line += span.Start
 			at.Range.End.Line += span.Start

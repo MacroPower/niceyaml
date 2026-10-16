@@ -44,7 +44,11 @@ func (d *docState) migrate(ctx context.Context) bool {
 
 	reg := d.l.reg
 
-	ed, err := edit.New(d.doc, edit.Options{App: reg.app(), TypeFields: reg.typeFields()})
+	ed, err := edit.New(d.doc, edit.Options{
+		App:          reg.app(),
+		TypeFields:   reg.typeFields(),
+		Unmarshalers: reg.cfg.unmarshalers,
+	})
 	if err != nil {
 		d.fail(err)
 

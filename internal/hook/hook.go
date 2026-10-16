@@ -69,10 +69,12 @@ var (
 	// WorkingSource returns a *niceyaml.Source of text, a working copy of
 	// the document home, a *niceyaml.Node. The Source holds the settings of
 	// the Source of home, its name and its reference documents included,
-	// and skips the limits, because niceyaml wrote its text. Every error
-	// bound in it binds in home instead, at the place that locate gives for
-	// the location the error resolved in the working text.
-	WorkingSource func(text string, home any, locate func(Located) Place) any
+	// and skips the limits, because niceyaml wrote its text. It takes the
+	// unmarshalers us, a []niceyaml.Unmarshaler, ahead of those of the
+	// Source of home, as though niceyaml.WithUnmarshalers gave them first.
+	// Every error bound in it binds in home instead, at the place that
+	// locate gives for the location the error resolved in the working text.
+	WorkingSource func(text string, home, us any, locate func(Located) Place) any
 
 	// Reread returns a *niceyaml.Source of text that holds every setting
 	// of src, a *niceyaml.Source: its name, its file path, its reference

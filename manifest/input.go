@@ -62,7 +62,8 @@ func FS(fsys fs.FS, p string, opts ...InputOption) Input {
 
 // Sources creates a new [Input] that reads srcs, which the app built
 // itself. A load reads each Source as it is, with its own name and its own
-// limits, and checks no encoding.
+// limits, and checks no encoding. The decodes of a load apply the
+// unmarshalers of [WithUnmarshalers] ahead of those of each Source.
 func Sources(srcs ...*niceyaml.Source) Input {
 	return Input{in: &inputDef{kind: inputSources, srcs: srcs}}
 }
@@ -152,7 +153,9 @@ func WithExclude(globs ...string) InputOption {
 // [niceyaml.Source] that [Path] or [FS] builds, such as
 // [niceyaml.WithReferences] or [niceyaml.WithByteLimit]. The input names
 // each file itself, so [niceyaml.WithName], [niceyaml.WithFilePath], and
-// [niceyaml.WithFS] change nothing.
+// [niceyaml.WithFS] change nothing. The unmarshalers of a
+// [niceyaml.WithUnmarshalers] among opts apply over those of
+// [WithUnmarshalers].
 func WithSourceOptions(opts ...niceyaml.SourceOption) InputOption {
 	return func(c *inputConfig) {
 		c.sourceOptions = append(c.sourceOptions, opts...)

@@ -72,6 +72,7 @@ type removal struct {
 //   - [WithAppName]
 //   - [WithMigrateHint]
 //   - [WithDecodeOptions]
+//   - [WithUnmarshalers]
 //   - [WithVersionField]
 //   - [WithKindField]
 //   - [WithVersionOnly]
@@ -86,6 +87,7 @@ type registryConfig struct {
 	appName         string
 	migrateHint     string
 	decodeOptions   []niceyaml.DecodeOption
+	unmarshalers    []niceyaml.Unmarshaler
 	kinds           []*Kind
 	checks          []func(ctx context.Context, set *Set) error
 	removed         []*removal
@@ -142,6 +144,33 @@ func WithMigrateHint(hint string) RegistryOption {
 func WithDecodeOptions(opts ...niceyaml.DecodeOption) RegistryOption {
 	return func(c *registryConfig) {
 		c.decodeOptions = append(c.decodeOptions, opts...)
+	}
+}
+
+// WithUnmarshalers is a [RegistryOption] that sets how the Go types of
+// the kinds read YAML, such as a [net.IPNet] that a document writes as
+// CIDR text:
+//
+//	manifest.WithUnmarshalers(niceyaml.CustomUnmarshaler(decodeCIDR))
+//
+// A load gives the unmarshalers us to each [niceyaml.Source] that it
+// builds, with [niceyaml.WithUnmarshalers]. Every decode that the load
+// runs on a document applies them ahead of the unmarshalers of its
+// Source, a Source that [Sources] reads included. The decode of a
+// manifest, the decode inside a validator, and
+// [go.jacobcolvin.com/niceyaml/manifest/migrate.Node.Decode] thus apply
+// them. The Node of an [Object] from a Source that Sources reads keeps
+// the unmarshalers of that Source alone.
+//
+// The unmarshalers of the Source of a document apply over them. Those
+// come from [WithSourceOptions], or from the program that built a Source
+// that [Sources] reads. A [niceyaml.WithUnmarshaler] in
+// [WithDecodeOptions] or [DecodeOptions] applies over both in the decode
+// of a manifest. Each WithUnmarshalers adds to the ones before it, so a
+// later function for a type replaces an earlier one.
+func WithUnmarshalers(us ...niceyaml.Unmarshaler) RegistryOption {
+	return func(c *registryConfig) {
+		c.unmarshalers = append(c.unmarshalers, us...)
 	}
 }
 

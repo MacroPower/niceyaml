@@ -34,6 +34,10 @@ type Options struct {
 	App string
 	// TypeFields holds the paths of the type fields, which no step edits.
 	TypeFields []paths.Path
+	// Unmarshalers holds the unmarshalers that the Source of each parse
+	// applies ahead of those of the user's Source, so every decode of the
+	// document applies them.
+	Unmarshalers []niceyaml.Unmarshaler
 }
 
 // Doc is the text of one document as the edits of the steps leave it.
@@ -219,7 +223,7 @@ func lineStarts(text string) []int {
 
 // parse parses the current text and records its lines.
 func (d *Doc) parse() error {
-	src, ok := hook.WorkingSource(d.cur, d.user, d.Locate).(*niceyaml.Source)
+	src, ok := hook.WorkingSource(d.cur, d.user, d.opts.Unmarshalers, d.Locate).(*niceyaml.Source)
 	if !ok {
 		return errors.New("edit: no working source")
 	}
