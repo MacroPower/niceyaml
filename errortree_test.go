@@ -2650,6 +2650,7 @@ func TestErrorTree_Accessors(t *testing.T) {
 		require.NotNil(t, node.Bound)
 
 		assert.Same(t, source, node.Source())
+		assert.Equal(t, "f.yaml", node.Name())
 
 		pos := yamltest.PositionOf(t, node)
 		assert.Equal(t, position.New(2, 3), pos)
@@ -2669,6 +2670,7 @@ func TestErrorTree_Accessors(t *testing.T) {
 		require.NotNil(t, node.Bound)
 
 		assert.Same(t, source, node.Source())
+		assert.Equal(t, "f.yaml", node.Name())
 
 		_, ok := node.Position()
 		assert.False(t, ok)
@@ -2679,6 +2681,20 @@ func TestErrorTree_Accessors(t *testing.T) {
 		index, ok := node.DocumentIndex()
 		require.True(t, ok)
 		assert.Zero(t, index)
+	})
+
+	t.Run("a detached node keeps the name and no source", func(t *testing.T) {
+		t.Parallel()
+
+		node := niceyaml.NewErrorTree(niceyaml.Detach(docs[1].Bind(badB)))
+		require.NotNil(t, node.Bound)
+
+		assert.Nil(t, node.Source())
+		assert.Equal(t, "f.yaml", node.Name())
+
+		index, ok := node.DocumentIndex()
+		require.True(t, ok)
+		assert.Equal(t, 1, index)
 	})
 
 	t.Run("a node bound to no source returns zero values", func(t *testing.T) {
@@ -2698,6 +2714,7 @@ func TestErrorTree_Accessors(t *testing.T) {
 
 				require.Nil(t, tc.node.Bound)
 				assert.Nil(t, tc.node.Source())
+				assert.Empty(t, tc.node.Name())
 
 				pos, ok := tc.node.Position()
 				assert.False(t, ok)
@@ -2978,7 +2995,7 @@ func reportExcerpts(rep niceyaml.ErrorReport) []string {
 	var got []string
 
 	for _, excerpt := range rep.Excerpts {
-		name := excerpt.Source.Name()
+		name := excerpt.Name
 		if !excerpt.Named {
 			name = "(" + name + ")"
 		}

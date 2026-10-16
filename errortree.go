@@ -28,7 +28,7 @@ import (
 // resolved its location. A report a program reads, such as a JSON line,
 // a CI annotation, or an editor diagnostic, takes its fields from the
 // node rather than from the label. It reads [ErrorTree.Message] and
-// [ErrorTree.Path] from the node, and [ErrorTree.Source] and
+// [ErrorTree.Path] from the node, and [ErrorTree.Name] and
 // [ErrorTree.Position] from its binding. [Problems] yields the nodes
 // such a report lists, one per problem, and [ErrorTree.All] yields every
 // node of the tree. A node with Detail set explains its parent, and a
@@ -172,7 +172,7 @@ func (t ErrorTree) Problems() iter.Seq[ErrorTree] {
 //	for problem := range niceyaml.Problems(err) {
 //		path, _ := problem.Path()
 //		pos, _ := problem.Position()
-//		emit(problem.Source().Name(), pos, problem.Message(), path)
+//		emit(problem.Name(), pos, problem.Message(), path)
 //	}
 //
 // A nil err has no problems.
@@ -348,9 +348,19 @@ func (t ErrorTree) Path() (paths.Path, bool) {
 }
 
 // Source returns the [*Source] the node is bound to, as [SourceError.Source]
-// returns it for Bound, or nil for a node bound to no source.
+// returns it for Bound, or nil for a node bound to no source. A node of an
+// error that [Detach] detached has no Source either, but [ErrorTree.Name]
+// returns the name its source had.
 func (t ErrorTree) Source() *Source {
 	return t.Bound.Source()
+}
+
+// Name returns the name of the source the node is bound to, as
+// [SourceError.Name] returns it for Bound, or "" for a node bound to no
+// source. A node of an error that [Detach] detached keeps the name and no
+// [Source], so a report reads the name of each problem here.
+func (t ErrorTree) Name() string {
+	return t.Bound.Name()
 }
 
 // Position returns the [position.Position] the location of the node
@@ -935,7 +945,7 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 		src := textBinding(child)
 
 		text := src.headline()
-		if !kid.named && src.Source() == parent.Source() {
+		if !kid.named && src.origin() == parent.origin() {
 			if inner := src.texts().own; inner != text {
 				text = inner
 
@@ -943,7 +953,7 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 				case kid.located:
 					text = prefix(editorPosition(kid.pos)+":", text)
 
-				case src.node.Document() != parent.node.Document():
+				case !sameDocument(src, parent):
 					// The parent names another document of the source, or
 					// none, so the child keeps the one it wrote.
 					text = prefix(suffixed(src.documentLabel()), text)
@@ -974,7 +984,7 @@ func flatten(kids []positioned, children []boundChild, parent *SourceError, name
 		joined := joinBinding(c.bound)
 		if joined != nil {
 			from := len(kids)
-			kids = flatten(kids, joined.below, joined, named || joined.Source() != parent.Source())
+			kids = flatten(kids, joined.below, joined, named || joined.origin() != parent.origin())
 
 			for i := from; c.detail && i < len(kids); i++ {
 				kids[i].underDetail = true
@@ -1015,7 +1025,7 @@ func textBinding(e *SourceError) *SourceError {
 // positioned is a child node with the source and the position, when
 // located, that [arrange] sorts it by. [arrange] fills in group.
 type positioned struct {
-	src *Source
+	src excerptSource
 	// The binding of the child, or nil for an error bound to no source.
 	bound *SourceError
 	// The binding whose children hold the child, as [flatten] finds it.
@@ -1036,7 +1046,7 @@ type positioned struct {
 // by. Only a resolved range counts as located, since the excerpt marks
 // nothing else, and the position is the one the message of child carries.
 func placed(child *SourceError) positioned {
-	kid := positioned{src: child.Source(), bound: child}
+	kid := positioned{src: child.origin(), bound: child}
 
 	if _, ok := child.Range(); ok {
 		kid.located = true
@@ -1050,7 +1060,7 @@ func placed(child *SourceError) positioned {
 // appear, and then by position, since a line number means something only
 // within its own source.
 func arrange(kids []positioned) []positioned {
-	seen := make([]*Source, 0, 1)
+	seen := make([]excerptSource, 0, 1)
 
 	for i := range kids {
 		group := slices.Index(seen, kids[i].src)
@@ -1281,6 +1291,12 @@ func (t ErrorTree) eachNode(yield func(ErrorTree) bool) bool {
 // picture too, so a renderer that keeps the rows of a message escapes
 // each row on its own.
 //
+// A report keeps each Source that the bindings of its error touch, with
+// every line, token, and parse of it, alive until the program drops the
+// report. The report of an error from [Detach] keeps the lines that
+// Detach kept instead, so a program that keeps reports past their sources
+// builds them from detached errors.
+//
 // Create instances with [NewErrorReport].
 type ErrorReport struct {
 	// Excerpts holds one excerpt per source the bindings of the error
@@ -1313,25 +1329,33 @@ type ErrorReport struct {
 	Tree ErrorTree
 }
 
-// ErrorExcerpt is the excerpt of one source in an [ErrorReport].
+// ErrorExcerpt is the excerpt of one source in an [ErrorReport]. It keeps
+// Source, with every line, token, and parse of it, alive until the
+// program drops the excerpt. The excerpt of an error that [Detach]
+// detached keeps the lines that Detach kept and no Source.
 type ErrorExcerpt struct {
-	// Source is the source the excerpt shows.
+	// Source is the source the excerpt shows, or nil for the excerpt of a
+	// detached error.
 	Source *Source
-	// View holds the lines of Source around the locations the error marks
-	// in it, cut and clipped as [SourceError.Excerpt] cuts a view.
+	// View holds the lines of the source around the locations the error
+	// marks in it, cut and clipped as [SourceError.Excerpt] cuts a view.
 	View *line.View
-	// Named reports whether the name of Source leads the excerpt on a row
-	// of its own, so a reader tells the excerpts of several sources apart.
-	// It is set when the bindings of the error touch more than one source
-	// and Source has a name. A source counts whether or not it has an
-	// excerpt, so the one excerpt of a report has Named set when the error
-	// also touches a source where no location resolved.
+	// Name is the name of the source, as [Source.Name] returns it. The
+	// excerpt of a detached error has the name its Source had.
+	Name string
+	// Named reports whether Name leads the excerpt on a row of its own, so
+	// a reader tells the excerpts of several sources apart. It is set when
+	// the bindings of the error touch more than one source and the source
+	// has a name. A source counts whether or not it has an excerpt, so the
+	// one excerpt of a report has Named set when the error also touches a
+	// source where no location resolved.
 	Named bool
 }
 
 // NewErrorReport creates a new [ErrorReport] from err. Each excerpt keeps
 // the context lines and the width the options set, as [ExcerptOption]
-// describes. A nil err yields the zero ErrorReport.
+// describes. An excerpt of a detached binding keeps those of the options
+// [Detach] received instead. A nil err yields the zero ErrorReport.
 func NewErrorReport(err error, opts ...ExcerptOption) ErrorReport {
 	return newErrorReport(err, newExcerptConfig(opts), 0)
 }
@@ -1374,8 +1398,9 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 		}
 
 		rep.Excerpts = append(rep.Excerpts, ErrorExcerpt{
-			Source: src,
+			Source: src.live(),
 			View:   view,
+			Name:   src.Name(),
 			Named:  len(sources) > 1 && src.Name() != "",
 		})
 	}

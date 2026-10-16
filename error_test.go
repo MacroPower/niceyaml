@@ -7314,6 +7314,64 @@ func TestSourceError_Node(t *testing.T) {
 	}
 }
 
+func TestSourceError_Name(t *testing.T) {
+	t.Parallel()
+
+	named := niceyaml.NewSourceFromString(
+		"a: 1\n",
+		niceyaml.WithName("cafe.yaml"),
+		niceyaml.WithFilePath("/srv/cafe.yaml"),
+	)
+	pathOnly := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithFilePath("/srv/menu.yaml"))
+	bare := niceyaml.NewSourceFromString("a: 1\n")
+	bad := yamltest.ErrorAt("bad", "a")
+
+	tcs := map[string]struct {
+		err          error
+		wantName     string
+		wantFilePath string
+	}{
+		"source with a name and a file path": {
+			err:          yamltest.Bind(t, named, bad),
+			wantName:     "cafe.yaml",
+			wantFilePath: "/srv/cafe.yaml",
+		},
+		"source with a file path alone": {
+			err:          yamltest.Bind(t, pathOnly, bad),
+			wantName:     "/srv/menu.yaml",
+			wantFilePath: "/srv/menu.yaml",
+		},
+		"source with neither": {
+			err: yamltest.Bind(t, bare, bad),
+		},
+		"value that came from no document": {
+			err: niceyaml.BindValue(bad),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			bound := yamltest.RequireSourceError(t, tc.err)
+
+			assert.Equal(t, tc.wantName, bound.Name())
+			assert.Equal(t, bound.Source().Name(), bound.Name())
+			assert.Equal(t, tc.wantFilePath, bound.FilePath())
+			assert.Equal(t, bound.Source().FilePath(), bound.FilePath())
+		})
+	}
+
+	t.Run("nil SourceError", func(t *testing.T) {
+		t.Parallel()
+
+		var bound *niceyaml.SourceError
+
+		assert.Empty(t, bound.Name())
+		assert.Empty(t, bound.FilePath())
+	})
+}
+
 func TestSourceError_Document(t *testing.T) {
 	t.Parallel()
 

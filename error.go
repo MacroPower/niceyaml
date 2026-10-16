@@ -943,8 +943,10 @@ func (e *Error) Error() string {
 // %+v verb prints what [FormatError] renders for the error, its message
 // behind its path with the errors below it as a tree, with
 // [ErrorListLimit] problems at most and a last row that counts the rest.
-// Every other verb formats [Error.Error] as it formats a string, with the
-// width, precision, and flags given, so %q quotes the message.
+// The excerpt of a binding below the error takes the default options, or,
+// for a detached binding, the options [Detach] received. Every other verb
+// formats [Error.Error] as it formats a string, with the width,
+// precision, and flags given, so %q quotes the message.
 func (e *Error) Format(f fmt.State, verb rune) {
 	formatVerb(f, verb, e)
 }
@@ -1370,6 +1372,11 @@ func locateMerged(b binder, node *Node, at position.Position, l locus) (location
 //		log.Print(niceyaml.FormatError(err))
 //	}
 //
+// A SourceError keeps its Source, with every line, token, and parse of
+// it, alive until the program drops the error. A program that keeps the
+// error past the Source calls [Detach], which returns a copy that keeps
+// what renders the error and no Source.
+//
 // Create instances with [Node.Bind] or [Source.Bind], or receive them
 // from the [Source] and [Node] methods. [BindValue] creates one for a
 // value that came from no document.
@@ -1390,6 +1397,12 @@ type SourceError struct {
 	// leaves the message as it is, or nil when Error puts a position or
 	// name in front, or when no binding wrote the first line.
 	lead *SourceError
+	// What a detached binding keeps of the source and the document it was
+	// bound in, in place of source and node, which are nil. Both are nil
+	// for a binding that holds its source. A detached binding that was
+	// bound to no document has no keptDoc.
+	kept    *keptSource
+	keptDoc *keptDocument
 	// The location, which binding resolved.
 	loc location
 	// The error that ends the cause chain with children below it.
@@ -1426,20 +1439,24 @@ type boundChild struct {
 
 // DefaultContextLines is the number of context lines the %+v verb of an
 // [*Error] or a [*SourceError] shows on either side of each marked line.
+// A binding that [Detach] detached shows the context lines of the options
+// Detach received instead.
 const DefaultContextLines = 2
 
 // DefaultExcerptWidth is the number of columns an error excerpt shows
 // around each location it marks on a line longer than that, unless
-// [WithExcerptWidth] sets another for the excerpt.
+// [WithExcerptWidth] sets another for the excerpt, or for the call of
+// [Detach] that detached its binding.
 const DefaultExcerptWidth = 160
 
 // ExcerptOption configures the excerpts of an error, which [FormatError],
-// [NewErrorReport], and [SourceError.Excerpt] build. An excerpt is a view
-// of the lines of a source around the locations an error marks in it, and
-// the options say how many lines it keeps around each one and how much of
-// a long line it shows. The renderer of an error chooses both, so one
-// program renders the same error with whole lines in a terminal and with
-// bounded rows in a log.
+// [NewErrorReport], and [SourceError.Excerpt] build and [Detach] keeps.
+// An excerpt is a view of the lines of a source around the locations an
+// error marks in it. The options say how many lines it keeps around each
+// one and how much of a long line it shows. The renderer of an error
+// chooses both, so one program renders the same error with whole lines in
+// a terminal and with bounded rows in a log. Detach chooses them in place
+// of the renderer, as [Detach] describes.
 //
 // Available options:
 //   - [WithContextLines]
@@ -2051,7 +2068,7 @@ func (e *SourceError) passedLead() *SourceError {
 		}
 
 		lead := leadingBinding(e.err)
-		if lead != nil && (e.source.Name() == "" || lead.Source() == e.source || !holdsSource(e, e.source)) {
+		if lead != nil && (e.Name() == "" || lead.origin() == e.origin() || !holdsSource(e, e.origin())) {
 			e.lead = lead
 		}
 	})
@@ -2083,7 +2100,7 @@ func (e *SourceError) keepsMessage() bool {
 // writes no position, as "cafe.yaml: document 3:", with either part left
 // out when e has none.
 func (e *SourceError) place() string {
-	name, doc := e.source.label(), e.documentLabel()
+	name, doc := e.label(), e.documentLabel()
 
 	switch {
 	case doc == "":
@@ -2106,23 +2123,35 @@ func suffixed(s string) string {
 
 // documentLabel returns "document 3" for an e with no position bound in the
 // third document of a file of several, since no line names it. The number
-// counts every document of the file, as [Source.AllDocuments] does.
+// counts every document of the file, as [Source.AllDocuments] does. A
+// detached binding reads the label it kept.
 func (e *SourceError) documentLabel() string {
-	if e.locErr == nil || e.node == nil {
+	switch {
+	case e.locErr == nil:
+		return ""
+	case e.keptDoc != nil:
+		return e.keptDoc.label
+	case e.node == nil:
+		return ""
+	default:
+		return documentName(e.node)
+	}
+}
+
+// documentName returns "document 3" for node in the third document of a
+// file of several, or "" for node in a file of one document.
+func documentName(node *Node) string {
+	if len(node.source.documents()) < 2 {
 		return ""
 	}
 
-	if len(e.node.source.documents()) < 2 {
-		return ""
-	}
-
-	return "document " + oneBased(e.node.doc.index)
+	return "document " + oneBased(node.doc.index)
 }
 
 // holdsSource reports whether a child of e is bound to src. It looks
 // through a child that binds a join to its branches, since such a child
 // has no text of its own.
-func holdsSource(e *SourceError, src *Source) bool {
+func holdsSource(e *SourceError, src excerptSource) bool {
 	for _, c := range e.below {
 		joined := joinBinding(c.bound)
 		if joined != nil {
@@ -2133,7 +2162,7 @@ func holdsSource(e *SourceError, src *Source) bool {
 			continue
 		}
 
-		if c.bound.Source() == src {
+		if c.bound.origin() == src {
 			return true
 		}
 	}
@@ -2276,6 +2305,7 @@ func newSourceError(err error, b binder) *SourceError {
 		e.adopted = true
 		e.source = a.source
 		e.node = a.node
+		e.kept, e.keptDoc = a.kept, a.keptDoc
 		e.loc, e.locErr = a.loc, a.locErr
 		e.rng, e.ranges = a.rng, a.ranges
 	}
@@ -2368,14 +2398,80 @@ func (e *SourceError) headsAlone() bool {
 	return e.heads() && e.headline() == ""
 }
 
-// Source returns the [*Source] the error is bound to. A nil SourceError is
-// bound to none.
+// Source returns the [*Source] the error is bound to. A binding that
+// [Detach] detached keeps no Source and returns nil, and so does a nil
+// SourceError. [SourceError.Name] and [SourceError.FilePath] report the
+// name and the file path of the Source for a live binding and a detached
+// one alike.
 func (e *SourceError) Source() *Source {
 	if e == nil {
 		return nil
 	}
 
 	return e.source
+}
+
+// Name returns the name of the [Source] the error was bound to, as
+// [Source.Name] returns it. A binding that [Detach] detached returns the
+// name its Source had. A nil SourceError has no name.
+func (e *SourceError) Name() string {
+	if e == nil {
+		return ""
+	}
+
+	return e.origin().Name()
+}
+
+// FilePath returns the file path of the [Source] the error was bound to,
+// as [Source.FilePath] returns it. A binding that [Detach] detached
+// returns the file path its Source had. A nil SourceError has no file
+// path.
+func (e *SourceError) FilePath() string {
+	switch {
+	case e == nil:
+		return ""
+	case e.kept != nil:
+		return e.kept.filePath
+	default:
+		return e.source.FilePath()
+	}
+}
+
+// label returns the name of the source of e as messages show it. The
+// label draws control characters as pictures and tabs as spaces, so a
+// file name that holds a line feed stays on one line.
+func (e *SourceError) label() string {
+	return escape.Line(e.Name())
+}
+
+// origin returns the text the excerpts of e show: its Source, or what a
+// detached binding kept of one. Bindings with the same origin share an
+// excerpt, and a child with the origin of its parent drops the name the
+// row of the parent shows. A nil e has none.
+func (e *SourceError) origin() excerptSource {
+	switch {
+	case e == nil:
+		return nil
+	case e.kept != nil:
+		return e.kept
+	default:
+		return e.source
+	}
+}
+
+// sameDocument reports whether a and b are bound to one document, or both
+// to none. A detached binding compares by the document it kept, so it
+// never shares a document with a live binding.
+func sameDocument(a, b *SourceError) bool {
+	if (a.kept == nil) != (b.kept == nil) {
+		return false
+	}
+
+	if a.kept != nil {
+		return a.keptDoc == b.keptDoc
+	}
+
+	return a.node.Document() == b.node.Document()
 }
 
 // Node returns the [*Node] the error is bound to and true, or nil and
@@ -2396,8 +2492,9 @@ func (e *SourceError) Source() *Source {
 // that binding. An error bound in a merged [Source] is bound to the Node
 // of the layer its location resolved in. When it carries no location, it
 // is bound to the Node of the layer [MergeAs] names, or else of the lowest
-// layer. The error [BindValue] returns and each binding
-// below it are bound to none, and so is a nil SourceError.
+// layer. The error [BindValue] returns and each binding below it are
+// bound to none. A binding that [Detach] detached and a nil SourceError
+// are bound to none too.
 func (e *SourceError) Node() (*Node, bool) {
 	if e == nil || e.node == nil {
 		return nil, false
@@ -2423,12 +2520,14 @@ func (e *SourceError) Document() (*Node, bool) {
 }
 
 // DocumentIndex returns the 0-indexed position within the file of the
-// document the error is bound to and true, or 0 and false where
-// [SourceError.Document] reports false. It is the [Node.DocumentIndex] of
-// that root. The message of a bound error counts documents from 1, as it
-// counts lines, so "document 3" in [SourceError.Error] is the document at
-// index 2. A report that groups the problems of a file by document reads
-// the index of each:
+// document the error is bound to and true, or 0 and false for a binding
+// in no document. It is the [Node.DocumentIndex] of the root that
+// [SourceError.Document] returns. A binding that [Detach] detached
+// reports the index of the document it was bound to, although
+// SourceError.Document reports false for it. The message of a bound error
+// counts documents from 1, as it counts lines, so "document 3" in
+// [SourceError.Error] is the document at index 2. A report that groups
+// the problems of a file by document reads the index of each:
 //
 //	for problem := range niceyaml.Problems(err) {
 //		if index, ok := problem.DocumentIndex(); ok {
@@ -2436,6 +2535,10 @@ func (e *SourceError) Document() (*Node, bool) {
 //		}
 //	}
 func (e *SourceError) DocumentIndex() (int, bool) {
+	if e != nil && e.keptDoc != nil {
+		return e.keptDoc.index, true
+	}
+
 	doc, ok := e.Document()
 	if !ok {
 		return 0, false
@@ -2657,7 +2760,7 @@ func (e *SourceError) bare() bool {
 func (e *SourceError) more(n int) string {
 	rest := "and " + strconv.Itoa(n) + " more"
 
-	name := e.source.label()
+	name := e.label()
 	if name == "" {
 		return rest
 	}
@@ -2677,7 +2780,7 @@ func withPath(p paths.Path, msg string) string {
 func (e *SourceError) prefixed(msg string) string {
 	switch {
 	case e.locErr == nil && !e.adopted:
-		return prefix(formatPosition(e.source.label(), e.loc.pos), msg)
+		return prefix(formatPosition(e.label(), e.loc.pos), msg)
 
 	case e.keepsMessage():
 		return msg
@@ -2971,13 +3074,15 @@ func allBindings(err error) iter.Seq[*SourceError] {
 // The %v and %s verbs print [SourceError.Error]. The %+v verb prints what
 // [FormatError] renders for the error at [DefaultContextLines] lines of
 // context and [DefaultExcerptWidth] columns, with [ErrorListLimit]
-// problems at most and a last row that counts the rest. Every other verb
-// formats [SourceError.Error] as it formats a string, with the width,
-// precision, and flags given, so %q quotes the message. A wrapper such as
-// [fmt.Errorf] around a SourceError formats as its own message under
-// every verb, so a program that holds any error calls FormatError for the
-// excerpt. A source with excerpts off, as [WithExcerpts] sets it, shows
-// no line under any verb.
+// problems at most and a last row that counts the rest. A binding that
+// [Detach] detached renders at the options Detach received instead.
+// Every other verb formats [SourceError.Error] as it formats a string,
+// with the width, precision, and flags given, so %q quotes the message.
+//
+// A wrapper such as [fmt.Errorf] around a SourceError formats as its own
+// message under every verb, so a program that holds any error calls
+// FormatError for the excerpt. A source with excerpts off, as
+// [WithExcerpts] sets it, shows no line under any verb.
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	formatVerb(f, verb, e)
 }
@@ -3007,10 +3112,13 @@ func (e *SourceError) LogValue() slog.Value {
 // marked lines with context lines on either side, carets under each
 // location, and the message of each error below a binding beside its
 // caret. The context lines and the width of long lines come from opts, as
-// [ExcerptOption] describes. A line starting "no excerpt:" then follows
-// for each binding [Bindings] yields whose tree resolves no location,
-// with the reason [SourceError.Unresolved] returns for it. A binding with
-// no reason, and one whose reason wraps
+// [ExcerptOption] describes. An excerpt of a binding that [Detach]
+// detached keeps those of the options Detach received instead.
+//
+// A line starting "no excerpt:" follows the excerpts for each binding
+// [Bindings] yields whose tree resolves no location, with the reason
+// [SourceError.Unresolved] returns for it. A binding with no reason, and
+// one whose reason wraps
 // [go.jacobcolvin.com/niceyaml/paths.ErrNoDocument], gets no such line. A
 // source with excerpts off, as [WithExcerpts] sets it, adds no excerpt and
 // no line in its place.
@@ -3040,7 +3148,7 @@ func formatError(err error, cfg excerptConfig, limit int) string {
 		// The name is the caller's text, so its control characters render
 		// as pictures like those of the tree.
 		if shown.Named {
-			part = shown.Source.label() + "\n" + part
+			part = escape.Line(shown.Name) + "\n" + part
 		}
 
 		parts = append(parts, part)
@@ -3248,7 +3356,8 @@ func (e *SourceError) Nearest() (paths.Path, bool) {
 // location, such as one of a summary that carries none, adds no mark for
 // itself. Neither does a binding with no line of its own, such as one of
 // a join, even with a location. The bindings below either one still mark
-// their lines. A nil SourceError marks nothing.
+// their lines. A binding that [Detach] detached marks nothing, and
+// neither does a nil SourceError.
 func (e *SourceError) Annotate(view *line.View) bool {
 	return Annotate(e, view)
 }
@@ -3279,16 +3388,18 @@ func (e *SourceError) Annotate(view *line.View) bool {
 // binding marks only the lines of its own source. A line keeps each mark
 // once, so marking a view again, or with a binding inside an error that
 // marked it already, doubles no message. Annotate marks a source with
-// excerpts off too, since the caller decides who sees the view. It
-// reports true when it marked a line, counting one that held the marks
-// already, and false for a nil err.
+// excerpts off too, because the caller decides who sees the view. A
+// binding that [Detach] detached keeps no line of any view, so it marks
+// nothing. Annotate reports true when it marked a line, counting one that
+// held the marks already, and false for a nil err.
 func Annotate(err error, view *line.View) bool {
 	sources, positions := treePositions(slices.Collect(Bindings(err)), true, nil, nil)
 
 	marked := false
 
-	for _, src := range sources {
-		if excerpt.Annotate(view, src.lines, positions[src]) {
+	for _, origin := range sources {
+		src := origin.live()
+		if src != nil && excerpt.Annotate(view, src.lines, positions[origin]) {
 			marked = true
 		}
 	}
@@ -3311,6 +3422,12 @@ func Annotate(err error, view *line.View) bool {
 // location does not resolve. It reports false, with no view, when no
 // location in the tree resolves in the source, when the source has
 // excerpts off, as [WithExcerpts] describes, and for a nil SourceError.
+//
+// A binding that [Detach] detached builds its excerpt from the lines it
+// kept, with the context lines and the width of the options Detach
+// received, whatever opts holds. The view holds those lines alone,
+// so its indices are not those of [Source.Lines]. Each line keeps its
+// number in the file.
 func (e *SourceError) Excerpt(opts ...ExcerptOption) (*line.View, bool) {
 	if e == nil {
 		return nil, false
@@ -3321,12 +3438,34 @@ func (e *SourceError) Excerpt(opts ...ExcerptOption) (*line.View, bool) {
 	// it.
 	_, positions := treePositions([]*SourceError{e}, false, nil, nil)
 
-	return e.source.excerpt(positions[e.source], newExcerptConfig(opts))
+	src := e.origin()
+
+	return src.excerpt(positions[src], newExcerptConfig(opts))
+}
+
+// excerptSource is the text the excerpts of a binding show: the
+// [*Source] the binding is bound to, or the [*keptSource] a detached
+// binding holds in its place.
+type excerptSource interface {
+	// Name returns the name of the text, as [Source.Name] returns it.
+	Name() string
+	// The excerpt method returns a view of the text with marks on it, cut
+	// to hunks and clipped as cfg sets, or as the options the text kept.
+	// It reports false when it marked no line.
+	excerpt(marks []excerpt.Mark, cfg excerptConfig) (*line.View, bool)
+	// The live method returns the Source of the text, or nil for the text
+	// a detached binding kept.
+	live() *Source
+}
+
+// live returns s, the Source of its own text.
+func (s *Source) live() *Source {
+	return s
 }
 
 // excerpt returns a fresh view of s with positions marked, cut to hunks
-// and clipped as cfg sets. Every error excerpt comes from here, so the
-// [WithExcerpts] check stands in one place.
+// and clipped as cfg sets. Every error excerpt of a Source comes from
+// here, so each passes the [WithExcerpts] check.
 func (s *Source) excerpt(positions []excerpt.Mark, cfg excerptConfig) (*line.View, bool) {
 	if !s.ShowsExcerpts() {
 		return nil, false
@@ -3370,24 +3509,25 @@ func joinParts(parts ...string) string {
 	return strings.Join(kept, "\n\n")
 }
 
-// treePositions returns the sources the trees of bindings touch, in walk
-// order, with the resolved locations bound to each. A root carries its
-// message only when labeled is set, and a node in skipped adds nothing. A
-// node in quiet adds its source and no mark. The mark of a warning carries
-// the "warning:" label beside its message, and a detail takes the severity
-// of the problem it explains and never the label.
+// treePositions returns the sources the trees of bindings touch, as
+// [SourceError.origin] gives them, in walk order, with the resolved
+// locations bound to each. A root carries its message only when labeled
+// is set, and a node in skipped adds nothing. A node in quiet adds its
+// source and no mark. The mark of a warning carries the "warning:" label
+// beside its message, and a detail takes the severity of the problem it
+// explains and never the label.
 func treePositions(
 	bindings []*SourceError,
 	labeled bool,
 	skipped, quiet map[*SourceError]bool,
-) ([]*Source, map[*Source][]excerpt.Mark) {
+) ([]excerptSource, map[excerptSource][]excerpt.Mark) {
 	var (
-		sources []*Source
+		sources []excerptSource
 		walk    func(n, root *SourceError, warning, detail bool)
 	)
 
-	touched := make(map[*Source]bool)
-	positions := make(map[*Source][]excerpt.Mark)
+	touched := make(map[excerptSource]bool)
+	positions := make(map[excerptSource][]excerpt.Mark)
 	seen := make(map[*SourceError]bool)
 
 	walk = func(n, root *SourceError, warning, detail bool) {
@@ -3401,13 +3541,15 @@ func treePositions(
 			warning = n.isWarning()
 		}
 
-		if !skipped[n] && !touched[n.source] {
-			touched[n.source] = true
-			sources = append(sources, n.source)
+		src := n.origin()
+
+		if !skipped[n] && !touched[src] {
+			touched[src] = true
+			sources = append(sources, src)
 		}
 
 		if !skipped[n] && !quiet[n] && n.locErr == nil && !n.headsAlone() {
-			positions[n.source] = append(positions[n.source], n.mark(labeled || n != root, warning, detail))
+			positions[src] = append(positions[src], n.mark(labeled || n != root, warning, detail))
 		}
 
 		for _, c := range n.below {

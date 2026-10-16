@@ -132,6 +132,8 @@ func rewrap(err error, wrap func(error) error) error {
 		locErr:  x.locErr,
 		source:  x.source,
 		node:    x.node,
+		kept:    x.kept,
+		keptDoc: x.keptDoc,
 		loc:     x.loc,
 		end:     x.end,
 		ranges:  x.ranges,

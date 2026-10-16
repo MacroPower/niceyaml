@@ -371,6 +371,8 @@ func (e *SourceError) remarked(sev severity) *SourceError {
 		locErr:  e.locErr,
 		source:  e.source,
 		node:    e.node,
+		kept:    e.kept,
+		keptDoc: e.keptDoc,
 		loc:     e.loc,
 		end:     e.end,
 		ranges:  e.ranges,
@@ -562,7 +564,7 @@ func (w *Warnings) Context(ctx context.Context) context.Context {
 //
 //	for warning := range warnings.All() {
 //		pos, _ := warning.Position()
-//		emit(warning.Source().Name(), pos, warning.Message())
+//		emit(warning.Name(), pos, warning.Message())
 //	}
 func (w *Warnings) All() iter.Seq[ErrorTree] {
 	return func(yield func(ErrorTree) bool) {
@@ -579,9 +581,10 @@ func (w *Warnings) All() iter.Seq[ErrorTree] {
 // back alone. Several come back under a heading that counts them, as in
 // "cafe.yaml: 2 warnings". The heading binds to the source of the
 // warnings when they share one, and to no document otherwise, as
-// [BindValue] binds an error. [Warnings.Report] puts the warnings beside
-// the errors of a call that fails, and a program in strict mode turns
-// either result into errors with [AsErrors].
+// [BindValue] binds an error. Warnings that [Detach] detached bind their
+// heading to no document. [Warnings.Report] puts the warnings beside the
+// errors of a call that fails, and a program in strict mode turns either
+// result into errors with [AsErrors].
 func (w *Warnings) Err() error {
 	return tallyRows(w.sorted())
 }
@@ -870,8 +873,10 @@ func (n *Node) Warn(ctx context.Context, err error) {
 // [Warnings.Report] lists, with the source, the position, the path, and
 // the message that tell it apart.
 type warningRow struct {
-	err     error
-	src     *Source
+	err error
+	// The source of the problem, as [SourceError.origin] gives it, or nil
+	// for a problem bound to no source.
+	src     excerptSource
 	msg     string
 	path    string
 	pos     position.Position
@@ -884,7 +889,7 @@ func rowsOf(err error) []warningRow {
 	var rows []warningRow
 
 	for problem := range Problems(err) {
-		row := warningRow{err: problem.Err, src: problem.Source(), msg: problem.Message()}
+		row := warningRow{err: problem.Err, src: problem.Bound.origin(), msg: problem.Message()}
 		row.pos, row.located = problem.Position()
 
 		if p, ok := problem.Path(); ok {
@@ -910,9 +915,9 @@ func (r warningRow) same(o warningRow) bool {
 // sortRows sorts rows by position within the order their sources first
 // appear, with the rows that have no position last, and returns them.
 func sortRows(rows []warningRow) []warningRow {
-	var sources []*Source
+	var sources []excerptSource
 
-	group := func(src *Source) int {
+	group := func(src excerptSource) int {
 		i := slices.Index(sources, src)
 		if i < 0 {
 			i = len(sources)
@@ -954,7 +959,8 @@ func sortRows(rows []warningRow) []warningRow {
 // no row, the error of a lone row, and otherwise a heading that counts
 // the errors and the warnings among them. The heading binds to the source
 // of the rows when every row has that source, and to no document
-// otherwise, as [BindValue] binds an error.
+// otherwise, as [BindValue] binds an error. Rows that [Detach] detached
+// have no Source to bind to, so their heading binds to no document too.
 func tallyRows(rows []warningRow) error {
 	switch len(rows) {
 	case 0:
@@ -976,8 +982,8 @@ func tallyRows(rows []warningRow) error {
 
 	tally := newTally(errs)
 
-	if src != nil && src != valueSource() {
-		return src.Bind(tally)
+	if bound, ok := src.(*Source); ok && bound != valueSource() {
+		return bound.Bind(tally)
 	}
 
 	return BindValue(tally)

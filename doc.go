@@ -353,7 +353,7 @@
 // A report a program reads, such as JSON lines, CI annotations, or editor
 // diagnostics, walks [Problems], which yields one node of the [ErrorTree]
 // per problem with its details below it. A row takes its fields from the
-// node through [ErrorTree.Message], [ErrorTree.Path], [ErrorTree.Source],
+// node through [ErrorTree.Message], [ErrorTree.Path], [ErrorTree.Name],
 // and [ErrorTree.Position], rather than from its label, and [errors.As]
 // on the Err of the node finds the typed error of that problem.
 //
@@ -368,6 +368,25 @@
 // which holds the tree, the excerpt of each source, and the bindings that
 // get a reason in place of an excerpt. A renderer of its own, such as one
 // that writes HTML, draws the same report.
+//
+// A bound error keeps its [Source] alive, with every line, token, and
+// parse of the file, and so does its report. A program that keeps errors
+// past the files they came from passes each error through [Detach], as a
+// check that prints the errors of every file at the end does. The
+// detached error keeps its messages, its locations, and a copy of the
+// lines its excerpts show, and it renders as the error did:
+//
+//	warnings := niceyaml.NewWarnings()
+//	if err := source.ValidateDocuments(warnings.Context(ctx), reg); err != nil {
+//		errs = append(errs, niceyaml.Detach(warnings.Report(err)))
+//	}
+//
+// The program detaches the whole error of a file once, after
+// [Warnings.Report] adds the warnings of the collector. The bindings of
+// one source that separate calls of Detach detached render as bindings of
+// separate sources, each under an excerpt of its own. A collector keeps
+// the Source of each warning it holds alive until the program drops the
+// collector.
 //
 // The marks of an error decorate a [line.View], so this package knows
 // nothing of the printer. [Annotate] marks every binding of an error on a

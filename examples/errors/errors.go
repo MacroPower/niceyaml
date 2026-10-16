@@ -74,7 +74,7 @@ func main() {
 	for problem := range niceyaml.Problems(err) {
 		pos, _ := problem.Position()
 		path, _ := problem.Path()
-		name := escape.Control(problem.Source().Name())
+		name := escape.Control(problem.Name())
 		msg := escape.Control(problem.Message())
 		fmt.Printf("%s:%d:%d\t%s\t%s\n", name, pos.Line+1, pos.Col+1, path, msg)
 	}

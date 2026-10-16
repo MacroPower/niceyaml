@@ -46,14 +46,17 @@ import (
 // [Source.Name], [Source.FilePath], [Source.FS], [Source.Text],
 // [Source.Offset], [Source.Tokens], and [Source.Lines] return zero values
 // for it, [Source.View] returns a view that holds no lines, and
-// [Source.ShowsExcerpts] reports true. [ErrorTree.Source] returns nil for
-// an error bound to no Source, so a report reads the name and the lines
-// of the Source of each problem with no nil check. The methods that need
-// the parse panic on a nil Source. They are [Source.Documents],
+// [Source.ShowsExcerpts] reports true. The methods that need the parse
+// panic on a nil Source. They are [Source.Documents],
 // [Source.AllDocuments], [Source.Document], [Source.File],
 // [Source.DecodeInto], [Source.Decode], [Source.SelfValidate],
 // [Source.ValidateDocuments], and [Source.Bind] of an error that is not
 // nil.
+//
+// [ErrorTree.Source] returns nil for an error bound to no Source and for
+// one that [Detach] detached. A report thus reads the lines of the Source
+// of each problem with no nil check. [ErrorTree.Name] returns the name of
+// the source for a live binding and a detached one alike.
 //
 // Create instances with [NewSourceFromFile], [NewSourceFromFS],
 // [NewSourceFromReader], [NewSourceFromBytes], [NewSourceFromString],
@@ -797,13 +800,6 @@ func (s *Source) Name() string {
 	}
 
 	return s.name
-}
-
-// label returns the name of the [Source] as messages and excerpt headings
-// show it, with control characters drawn as pictures and tabs as spaces,
-// so a file name that holds a line feed stays on one line.
-func (s *Source) label() string {
-	return escape.Line(s.Name())
 }
 
 // FilePath returns the file path of the [Source], which schema routing

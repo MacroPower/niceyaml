@@ -146,7 +146,7 @@ func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 		// as pictures like those of the tree. It sits outside the
 		// container, so it wraps to the whole width.
 		if excerpt.Named {
-			name := p.wrapTo(escape.Line(excerpt.Source.Name()), p.textWidth(0))
+			name := p.wrapTo(escape.Line(excerpt.Name), p.textWidth(0))
 			part = strings.Join(name, "\n") + "\n" + part
 		}
 
