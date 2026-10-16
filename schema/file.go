@@ -13,6 +13,7 @@ import (
 	slashpath "path"
 
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
+	"go.jacobcolvin.com/niceyaml/internal/limitread"
 )
 
 // ErrEmptyPath reports an empty path given to [FileOrURL], which names no
@@ -534,7 +535,7 @@ func readBounded(f fs.File, name string, limit int) ([]byte, error) {
 		return nil, readError(name, notRegular())
 	}
 
-	data, err := httpfetch.ReadAll(f, limit)
+	data, err := limitread.ReadAll(f, limit)
 	if err != nil {
 		return nil, readError(name, err)
 	}

@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/limitread"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 )
 
@@ -44,19 +43,6 @@ func (e *Error) Unwrap() error {
 // does not report it.
 func TooLarge(noun string, limit int) error {
 	return sizeError{noun: noun, limit: limit}
-}
-
-// ReadAll reads r to its end or to one byte past limit, whichever comes
-// first. A caller tells a text of more than limit bytes by a length past
-// limit. A limit of [math.MaxInt] reads r to its end.
-func ReadAll(r io.Reader, limit int) ([]byte, error) {
-	n := int64(limit)
-	if n < math.MaxInt64 {
-		n++
-	}
-
-	//nolint:wrapcheck // The caller wraps the error.
-	return io.ReadAll(io.LimitReader(r, n))
 }
 
 // sizeError is the error [TooLarge] returns.
@@ -162,7 +148,7 @@ func Get(ctx context.Context, client *http.Client, rawURL string, limit int) ([]
 		return nil, &Error{URL: name, StatusCode: resp.StatusCode, Err: fmt.Errorf("status %d", resp.StatusCode)}
 	}
 
-	data, err := ReadAll(resp.Body, limit)
+	data, err := limitread.ReadAll(resp.Body, limit)
 	if err != nil {
 		return nil, &Error{URL: name, StatusCode: resp.StatusCode, Err: fmt.Errorf("read response: %w", err)}
 	}

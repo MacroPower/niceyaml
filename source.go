@@ -21,6 +21,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/internal/limitread"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
@@ -318,7 +319,7 @@ func readLimited(r io.Reader, limit int) ([]byte, error) {
 		return io.ReadAll(r) //nolint:wrapcheck // The caller wraps the error.
 	}
 
-	data, err := io.ReadAll(io.LimitReader(r, int64(limit)+1))
+	data, err := limitread.ReadAll(r, limit)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // The caller wraps the error.
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"iter"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -6864,6 +6865,37 @@ func TestWithByteLimit(t *testing.T) {
 				require.ErrorIs(t, err, niceyaml.ErrLimit)
 				assert.Nil(t, source)
 				assert.Equal(t, "file is larger than 1000 bytes", err.Error())
+			})
+		}
+	})
+
+	t.Run("readers read the whole text with the largest limit", func(t *testing.T) {
+		t.Parallel()
+
+		path := yamltest.WriteFile(t, t.TempDir(), "big.yaml", text)
+		fsys := yamltest.MapFS(map[string]string{"big.yaml": text})
+
+		tcs := map[string]struct {
+			read func() (*niceyaml.Source, error)
+		}{
+			"file": {read: func() (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromFile(path, niceyaml.WithByteLimit(math.MaxInt))
+			}},
+			"file system": {read: func() (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromFS(fsys, "big.yaml", niceyaml.WithByteLimit(math.MaxInt))
+			}},
+			"reader": {read: func() (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromReader(strings.NewReader(text), niceyaml.WithByteLimit(math.MaxInt))
+			}},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source, err := tc.read()
+				require.NoError(t, err)
+				assert.Equal(t, text, source.Text())
 			})
 		}
 	})
