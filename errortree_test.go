@@ -175,20 +175,39 @@ func TestErrorTree_New_LeftDeepJoin(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
 
+	// The tree reads each message reads times at most, whatever n is. An
+	// Error with a location around the join reads the message of the join
+	// once more to cut it from its own.
 	tcs := map[string]struct {
 		build  func(error) error
 		prefix string
+		reads  int64
 	}{
 		"join": {
 			build: func(err error) error { return err },
+			reads: 2,
 		},
 		"rebased join": {
 			build:  func(err error) error { return niceyaml.Rebase(err, paths.Current()) },
 			prefix: "@: ",
+			reads:  2,
 		},
 		"bound join": {
 			build:  func(err error) error { return source.Bind(err) },
 			prefix: "f.yaml: ",
+			reads:  2,
+		},
+		"located join": {
+			build:  func(err error) error { return niceyaml.Locate(err, niceyaml.AtPath(paths.Current())) },
+			prefix: "@: ",
+			reads:  3,
+		},
+		"bound located join": {
+			build: func(err error) error {
+				return source.Bind(niceyaml.Locate(err, niceyaml.AtPath(paths.Current())))
+			},
+			prefix: "f.yaml:1:1: $: ",
+			reads:  3,
 		},
 	}
 
@@ -213,7 +232,7 @@ func TestErrorTree_New_LeftDeepJoin(t *testing.T) {
 			assert.Equal(t, want, got)
 			// Finding each join by rebuilding its message would read every
 			// message once per join above it, n*n/2 times in all.
-			assert.LessOrEqual(t, calls.Load(), int64(2*n))
+			assert.LessOrEqual(t, calls.Load(), tc.reads*n)
 		})
 	}
 }
@@ -723,6 +742,37 @@ func TestErrorTree_New(t *testing.T) {
 			want: textForest(
 				textNode("@.a: bad a"),
 				textNode("@.b: bad b"),
+			),
+		},
+		"error with a location around a join is the join with the location on its branches": {
+			err: niceyaml.Invalid(errors.Join(errA, badB()), niceyaml.AtPath(paths.Current().Child("a"))),
+			want: textForest(
+				textNode("@.a: first"),
+				textNode("@.b: bad b"),
+			),
+		},
+		"bound error with a location around a join is a forest of named bindings": {
+			err: yamltest.Bind(t, source, niceyaml.Invalid(
+				errors.Join(badB(), errA),
+				niceyaml.AtPath(paths.Current().Child("a")),
+			)),
+			want: textForest(
+				textNode("f.yaml:1:4: $.a: first"),
+				textNode("f.yaml:2:4: $.b: bad b"),
+			),
+			multiLine: true,
+		},
+		"nested join with a location gives its place to the branches": {
+			// The branches sort among the other problems of the summary, so
+			// the key of b sits between them.
+			err: yamltest.Bind(t, source, niceyaml.NewSummary("2 problems",
+				niceyaml.Locate(errors.Join(badA(), errA), niceyaml.AtPath(paths.Current().Child("b"))),
+				niceyaml.NewError("key b", niceyaml.AtPath(paths.Current().Child("b").Key())),
+			)),
+			want: textNode("f.yaml: 2 problems",
+				textNode("1:4: $.a: bad a"),
+				textNode("2:1: $.b~: key b"),
+				textNode("2:4: $.b: first"),
 			),
 		},
 		"bound error that only wraps a join is a forest of named bindings": {
@@ -3091,6 +3141,19 @@ func TestNewErrorReport(t *testing.T) {
 				"   1 | a: 1",
 				"     |    ^ see a",
 			)},
+		},
+		"a join located at an alias reports the alias when its problems resolve nowhere": {
+			// The join has no line of its own, so its location marks no
+			// line, and the report explains why the alias did not resolve.
+			err: yamltest.Bind(
+				t,
+				niceyaml.NewSourceFromString("a: *x\n", niceyaml.WithName("alias.yaml")),
+				niceyaml.Invalid(
+					errors.Join(niceyaml.NewError("far a", outside), niceyaml.NewError("far b", outside)),
+					niceyaml.AtPath(paths.Current().Child("a", "b")),
+				),
+			),
+			wantUnresolved: []string{"alias.yaml: far a\nalias.yaml: far b"},
 		},
 		"an error bound to no source has a tree alone": {
 			err: errors.New("plain"),

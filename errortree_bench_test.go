@@ -55,9 +55,13 @@ func BenchmarkErrorTree_LeftDeepJoin(b *testing.B) {
 		joined = errors.Join(joined, yamltest.ErrorAt(fmt.Sprintf("error %d", i), "a"))
 	}
 
+	located := niceyaml.Locate(joined, niceyaml.AtPath(paths.Current()))
+
 	tcs := map[string]error{
-		"unbound": joined,
-		"bound":   source.Bind(joined),
+		"unbound":         joined,
+		"bound":           source.Bind(joined),
+		"located unbound": located,
+		"located bound":   source.Bind(located),
 	}
 
 	for name, err := range tcs {

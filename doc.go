@@ -186,6 +186,25 @@
 // every path a [SourceError] reports starts at `$` and names the same
 // value through any Node of the document.
 //
+// A heading with a location, such as a join that [Invalid] locates or a
+// summary that [Error.With] locates, gives that location to each problem
+// below it that carries none. A problem with a location of its own keeps
+// it, and a detail gains none. A heading below it with no location takes
+// the location and gives it to the problems below it, and the nearest
+// heading with a location wins. A [Rebase] between the heading and a
+// problem points the problem at its base instead, so whichever of the two
+// lies nearer the problem gives it its location.
+//
+// A join has no line of its own, so the location of a join shows only on
+// the lines of the problems that take it:
+//
+//	return niceyaml.Invalid(errors.Join(sizeErr, keysErr), niceyaml.AtPath(licensePath))
+//	// cfg.yaml:4:10: $.license: file is too large
+//	// cfg.yaml:4:10: $.license: too many keys
+//
+// When every problem of the join carries a location of its own, the
+// location of the join shows nowhere.
+//
 // The code that builds an error declares whether the document is at fault
 // for it or the check could not run, and a location never decides it.
 // [NewError] and [Invalid] declare a fault. [Unchecked] takes the same
@@ -263,12 +282,13 @@
 // A check run on a value inside a document reports `@` paths that read
 // from that value. [Rebase] puts the path of the value in front of each
 // `@` path in the tree of an error, details included, and points each
-// problem that carries no location at the value itself. A `$` path, a
-// position, and a range stay as they are, and rebases compose. A decode
-// rebases what every nested [SelfValidator] and every function from
-// WithValueCheck returns. A [Node] from [Node.At] or [Node.Nodes] binds an
-// error as a Rebase under its own path does, so a check bound through the
-// Node of its value does not need a Rebase.
+// problem that carries no location at the value itself. A heading with a
+// location inside the rebased error gives that location to the problems
+// below it instead. A `$` path, a position, and a range stay as they are,
+// and rebases compose. A decode rebases what every nested [SelfValidator]
+// and every function from WithValueCheck returns. A [Node] from [Node.At]
+// or [Node.Nodes] binds an error as a Rebase under its own path does, so a
+// check bound through the Node of its value does not need a Rebase.
 // A path names a map key as the document spells it, so a base built from
 // a decoded key can miss, as the key 0x10 of a map[int]T that decodes to
 // 16 does. A [DataLocator] finds an entry by its decoded key.
@@ -741,11 +761,13 @@
 // [Node.Bind] binds the result of a check the caller runs on the value, with
 // its `@` paths read from the node. A scoped Node binds a problem with no
 // location at its value, as an error with [AtPath] of [paths.Current] binds.
-// A summary or a join only heads its problems, and each binds on its own,
-// while a detail gains no location. The root of a document leaves a
-// problem with no location without one, since such an error can be about
-// the whole document. A location declares nothing, so [IsInvalid] reports
-// a bound error only when it reports the error the Node bound.
+// A summary or a join only heads its problems, and each binds on its own.
+// A problem below a heading with a location binds at that location instead,
+// read from the node, and a detail gains no location. The root of a
+// document leaves a problem with no location without one, because such an
+// error can be about the whole document. A location declares nothing, so
+// [IsInvalid] reports a bound error only when it reports the error the Node
+// bound.
 //
 // [Node.Document] returns the root of the document. A validator that can
 // check only a whole document, as a

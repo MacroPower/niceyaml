@@ -3504,6 +3504,33 @@ func TestNewSummary(t *testing.T) {
 		assert.Equal(t, []string{"bad a", "too old"}, problemRows(niceyaml.NewErrorTree(bound)))
 		assert.Equal(t, []string{"@.a: bad a", "too old"}, problemRows(niceyaml.NewErrorTree(err)))
 	})
+
+	t.Run("a location on the summary locates each problem with none", func(t *testing.T) {
+		t.Parallel()
+
+		summary := yamltest.RequireError(t, niceyaml.NewSummary("2 problems", badA, tooOld))
+		err := summary.With(niceyaml.AtPath(paths.Current().Child("b")))
+
+		// The summary keeps its line, with the location in front.
+		bound := yamltest.Bind(t, source, err)
+		require.EqualError(t, bound, stringtest.JoinLF(
+			"f.yaml:2:4: $.b: 2 problems",
+			"f.yaml:1:4: $.a: bad a",
+			"f.yaml:2:4: $.b: too old",
+		))
+
+		var rows []string
+
+		for problem := range niceyaml.Problems(bound) {
+			pos := yamltest.PositionOf(t, problem)
+			rows = append(rows, fmt.Sprintf("%s %s: %s", pos, yamltest.PathOf(t, problem), problem.Message()))
+		}
+
+		assert.Equal(t, []string{"0:3 $.a: bad a", "1:3 $.b: too old"}, rows)
+
+		// The problems carry the location before binding too.
+		assert.Equal(t, []string{"@.a: bad a", "@.b: too old"}, problemRows(niceyaml.NewErrorTree(err)))
+	})
 }
 
 func TestWithDetails(t *testing.T) {
@@ -5585,6 +5612,27 @@ func TestAnnotate(t *testing.T) {
 					"     |    ^ with b",
 					"   3 | c: 3",
 					"     |    ^ bad c",
+				),
+			},
+			// The join has no line of its own, so its location at c adds
+			// no mark beside those of its problems.
+			"join with a location over located problems": {
+				build: func(t *testing.T) (*niceyaml.Source, error) {
+					t.Helper()
+
+					source := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2", "c: 3"))
+
+					return source, yamltest.Bind(t, source, niceyaml.Invalid(
+						errors.Join(yamltest.ErrorAt("bad a", "a"), yamltest.ErrorAt("bad b", "b")),
+						niceyaml.AtPath(paths.Current().Child("c")),
+					))
+				},
+				want: stringtest.JoinLF(
+					"   1 | a: 1",
+					"     |    ^ bad a",
+					"   2 | b: 2",
+					"     |    ^ bad b",
+					"   3 | c: 3",
 				),
 			},
 		}
@@ -10331,49 +10379,139 @@ func TestInvalid(t *testing.T) {
 		}
 	})
 
-	t.Run("options on a join locate the heading and no branch", func(t *testing.T) {
+	t.Run("options on a join locate each branch with no location", func(t *testing.T) {
 		t.Parallel()
 
+		closePath := hoursPath.Child("close")
 		joined := errors.Join(errStat, errors.New("too many keys"))
 
+		// Each row of wantUnbound is a problem before binding, as
+		// locatedLabel writes it, and want holds the lines of the bound
+		// error.
 		tcs := map[string]struct {
-			err  error
-			want string
+			err         error
+			want        string
+			wantUnbound []string
 		}{
 			"path": {
 				err: niceyaml.Invalid(joined, niceyaml.AtPath(licensePath)),
 				want: stringtest.JoinLF(
-					"cfg.yaml:4:10: $.license:",
-					"cfg.yaml: stat license: permission denied",
-					"cfg.yaml: too many keys",
+					"cfg.yaml:4:10: $.license: stat license: permission denied",
+					"cfg.yaml:4:10: $.license: too many keys",
 				),
+				wantUnbound: []string{
+					"@.license: stat license: permission denied",
+					"@.license: too many keys",
+				},
 			},
 			"position": {
 				err: niceyaml.Invalid(joined, niceyaml.AtPosition(licenseRange.Start)),
 				want: stringtest.JoinLF(
-					"cfg.yaml: stat license: permission denied",
-					"cfg.yaml: too many keys",
+					"cfg.yaml:4:10: stat license: permission denied",
+					"cfg.yaml:4:10: too many keys",
 				),
+				wantUnbound: []string{
+					"3:9 stat license: permission denied",
+					"3:9 too many keys",
+				},
 			},
 			"range": {
 				err: niceyaml.Invalid(joined, niceyaml.AtRange(licenseRange)),
 				want: stringtest.JoinLF(
-					"cfg.yaml: stat license: permission denied",
-					"cfg.yaml: too many keys",
+					"cfg.yaml:4:10: stat license: permission denied",
+					"cfg.yaml:4:10: too many keys",
 				),
+				wantUnbound: []string{
+					"3:9-3:16 stat license: permission denied",
+					"3:9-3:16 too many keys",
+				},
 			},
-			"Rebase moves each branch under the path": {
-				err: niceyaml.Invalid(niceyaml.Rebase(joined, licensePath)),
+			"a branch with a location keeps it": {
+				err: niceyaml.Invalid(
+					errors.Join(errStat, niceyaml.NewError("closes too early", niceyaml.AtPath(closePath))),
+					niceyaml.AtPath(licensePath),
+				),
+				want: stringtest.JoinLF(
+					"cfg.yaml:3:10: $.hours.close: closes too early",
+					"cfg.yaml:4:10: $.license: stat license: permission denied",
+				),
+				wantUnbound: []string{
+					"@.license: stat license: permission denied",
+					"@.hours.close: closes too early",
+				},
+			},
+			"options inside a Rebase win over its base": {
+				err: niceyaml.Rebase(
+					niceyaml.Invalid(joined, niceyaml.AtPath(paths.Current().Child("close"))),
+					hoursPath,
+				),
+				want: stringtest.JoinLF(
+					"cfg.yaml:3:10: $.hours.close: stat license: permission denied",
+					"cfg.yaml:3:10: $.hours.close: too many keys",
+				),
+				wantUnbound: []string{
+					"@.hours.close: stat license: permission denied",
+					"@.hours.close: too many keys",
+				},
+			},
+			"a Rebase inside the located error wins over the options": {
+				err: niceyaml.Invalid(niceyaml.Rebase(joined, licensePath), niceyaml.AtPath(hoursPath)),
 				want: stringtest.JoinLF(
 					"cfg.yaml:4:10: $.license: stat license: permission denied",
 					"cfg.yaml:4:10: $.license: too many keys",
 				),
+				wantUnbound: []string{
+					"@.license: stat license: permission denied",
+					"@.license: too many keys",
+				},
+			},
+			"a Rebase between the options and a problem points it at the base": {
+				// The summary keeps the location of the options, and the
+				// Rebase around it points each of its problems at license.
+				err: niceyaml.Invalid(
+					niceyaml.Rebase(
+						niceyaml.NewSummary("2 problems", errStat, errors.New("too many keys")),
+						licensePath,
+					),
+					niceyaml.AtPath(hoursPath),
+				),
+				want: stringtest.JoinLF(
+					"cfg.yaml:1:1: $.hours: 2 problems",
+					"cfg.yaml:4:10: $.license: stat license: permission denied",
+					"cfg.yaml:4:10: $.license: too many keys",
+				),
+				wantUnbound: []string{
+					"@.license: stat license: permission denied",
+					"@.license: too many keys",
+				},
+			},
+			"a branch from BindValue takes the location as the error it was made from": {
+				err: niceyaml.Invalid(
+					errors.Join(niceyaml.BindValue(errors.New("too many keys")), errStat),
+					niceyaml.AtPath(licensePath),
+				),
+				want: stringtest.JoinLF(
+					"cfg.yaml:4:10: $.license: too many keys",
+					"cfg.yaml:4:10: $.license: stat license: permission denied",
+				),
+				wantUnbound: []string{
+					"@.license: too many keys",
+					"@.license: stat license: permission denied",
+				},
 			},
 		}
 
 		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
+
+				var unbound []string
+
+				for problem := range niceyaml.Problems(tc.err) {
+					unbound = append(unbound, locatedLabel(problem))
+				}
+
+				assert.Equal(t, tc.wantUnbound, unbound)
 
 				err := doc.Bind(tc.err)
 
@@ -10382,6 +10520,84 @@ func TestInvalid(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("the nearest heading with a location wins", func(t *testing.T) {
+		t.Parallel()
+
+		closePath := hoursPath.Child("close")
+
+		// The summary carries no location, so it takes the location of the
+		// join and gives it to its problems. The Locate below the join
+		// carries its own.
+		err := doc.Bind(niceyaml.Invalid(errors.Join(
+			niceyaml.NewSummary("2 hours problems", errors.New("closes too early"), errors.New("opens too late")),
+			niceyaml.Locate(errors.Join(errStat, errors.New("too many keys")), niceyaml.AtPath(licensePath)),
+		), niceyaml.AtPath(closePath)))
+
+		require.EqualError(t, err, stringtest.JoinLF(
+			"cfg.yaml:3:10: $.hours.close: 2 hours problems",
+			"cfg.yaml:3:10: $.hours.close: closes too early",
+			"cfg.yaml:3:10: $.hours.close: opens too late",
+			"cfg.yaml:4:10: $.license: stat license: permission denied",
+			"cfg.yaml:4:10: $.license: too many keys",
+		))
+	})
+
+	t.Run("a detail gains no location from a heading", func(t *testing.T) {
+		t.Parallel()
+
+		err := doc.Bind(niceyaml.Invalid(errors.Join(
+			niceyaml.NewError("closes too early", niceyaml.WithDetails(errors.New("the shop closes at 17:00"))),
+			errors.New("opens too late"),
+		), niceyaml.AtPath(hoursPath.Child("close"))))
+
+		problem := slices.Collect(niceyaml.Problems(err))[0]
+		assert.Equal(t, "closes too early", problem.Message())
+		assert.Equal(t, yamltest.LineRange(2, 9, 10).Start, yamltest.PositionOf(t, problem))
+
+		require.Len(t, problem.Children, 1)
+
+		_, ok := problem.Children[0].Position()
+		assert.False(t, ok)
+
+		_, ok = problem.Children[0].Path()
+		assert.False(t, ok)
+	})
+
+	t.Run("a scoped Bind reads the location of the options from its node", func(t *testing.T) {
+		t.Parallel()
+
+		hours := yamltest.At(t, doc, paths.Doc().Child("hours"))
+
+		err := hours.Bind(niceyaml.Invalid(
+			errors.Join(errStat, errors.New("too many keys")),
+			niceyaml.AtPath(paths.Current().Child("close")),
+		))
+
+		require.EqualError(t, err, stringtest.JoinLF(
+			"cfg.yaml:3:10: $.hours.close: stat license: permission denied",
+			"cfg.yaml:3:10: $.hours.close: too many keys",
+		))
+	})
+}
+
+// locatedLabel returns the label of a problem bound to no source, behind
+// the range or the position that its [niceyaml.Error] carries, if any.
+func locatedLabel(problem niceyaml.ErrorTree) string {
+	x, ok := errors.AsType[*niceyaml.Error](problem.Err)
+	if !ok {
+		return problem.Label
+	}
+
+	if r, ok := x.Range(); ok {
+		return r.String() + " " + problem.Label
+	}
+
+	if pos, ok := x.Position(); ok {
+		return pos.String() + " " + problem.Label
+	}
+
+	return problem.Label
 }
 
 func TestUnchecked(t *testing.T) {
@@ -10745,7 +10961,7 @@ func TestUnchecked(t *testing.T) {
 		}
 	})
 
-	t.Run("options on a join locate the heading and no branch", func(t *testing.T) {
+	t.Run("options on a join locate each branch with no location", func(t *testing.T) {
 		t.Parallel()
 
 		// The path of the located branch starts at `$`, so Rebase leaves
@@ -10776,24 +10992,23 @@ func TestUnchecked(t *testing.T) {
 			"path": {
 				err: niceyaml.Unchecked(joined, niceyaml.AtPath(licensePath)),
 				want: stringtest.JoinLF(
-					"cfg.yaml:4:10: $.license:",
 					"cfg.yaml:2:9: $.hours.open: opens too late",
-					"cfg.yaml: stat license: permission denied",
+					"cfg.yaml:4:10: $.license: stat license: permission denied",
 				),
 				problems: []string{
-					"2:9: $.hours.open: opens too late true",
-					"stat license: permission denied false",
+					"cfg.yaml:2:9: $.hours.open: opens too late true",
+					"cfg.yaml:4:10: $.license: stat license: permission denied false",
 				},
 			},
 			"range": {
 				err: niceyaml.Unchecked(joined, niceyaml.AtRange(licenseRange)),
 				want: stringtest.JoinLF(
 					"cfg.yaml:2:9: $.hours.open: opens too late",
-					"cfg.yaml: stat license: permission denied",
+					"cfg.yaml:4:10: stat license: permission denied",
 				),
 				problems: []string{
 					"cfg.yaml:2:9: $.hours.open: opens too late true",
-					"cfg.yaml: stat license: permission denied false",
+					"cfg.yaml:4:10: stat license: permission denied false",
 				},
 			},
 			"Rebase moves each branch under the path": {
@@ -11030,8 +11245,8 @@ func TestLocate(t *testing.T) {
 			problems []string
 		}{
 			"Locate around a join of a plain error and Unchecked": {
-				// The options locate the heading, and the hook presumes a
-				// fault for the plain branch alone.
+				// The options locate the plain branch, and the hook presumes
+				// a fault for that branch alone.
 				check: func() error {
 					return niceyaml.Locate(errors.Join(
 						errors.New("opens too late"),
@@ -11039,8 +11254,8 @@ func TestLocate(t *testing.T) {
 					), niceyaml.AtPath(openPath))
 				},
 				problems: []string{
-					"1:1: $.hours: opens too late true",
-					"3:10: $.hours.close: stat license: permission denied false",
+					"cfg.yaml:2:9: $.hours.open: opens too late true",
+					"cfg.yaml:3:10: $.hours.close: stat license: permission denied false",
 				},
 			},
 			"join of Locate and Unchecked": {

@@ -89,13 +89,16 @@ type ErrorTree struct {
 //
 // An error that unwraps to several and whose message is theirs one per
 // line, such as one from [errors.Join], is a node with no text, and its
-// children take its place in the tree above it. Any other error that
-// unwraps to several keeps its text and has a child per branch. A wrapper
-// that [fmt.Errorf] builds with several %w verbs is the exception. It has
-// a child for each branch that is a problem and none for a sentinel, as
-// the Errors section of the package documentation defines them. With one
-// such branch, the wrapper reads as a wrapper with one %w verb around
-// that branch.
+// children take its place in the tree above it. An [*Error] from
+// [Invalid], [Unchecked], or [Locate] around such an error adds no text
+// either, even with a location. Each problem below it that carries no
+// location takes that location. Any other error that unwraps to
+// several keeps its text and has a child per branch. A wrapper that
+// [fmt.Errorf] builds with several %w verbs is the exception. It has a
+// child for each branch that is a problem and none for a sentinel, as the
+// Errors section of the package documentation defines them. With one such
+// branch, the wrapper reads as a wrapper with one %w verb around that
+// branch.
 //
 // Each node holds its error in Err and its binding in Bound. The node of
 // a wrapper around a binding holds the wrapper in Err and the binding in
@@ -324,8 +327,11 @@ func (t ErrorTree) Message() string {
 //   - For a node with a binding, it is the [SourceError.Path] of Bound.
 //   - For a node bound to no source, it is the path of the first located
 //     [*Error] along the cause chain of Err, with the base of every
-//     [Rebase] on the way joined in front. The label of the node puts the
-//     same path in front of the message.
+//     [Rebase] on the way joined in front. A problem that carries no
+//     location takes the path of the nearest heading above it that
+//     carries one, unless a [Rebase] lies between them. The Errors section
+//     of the package documentation describes a location on a heading. The
+//     label of the node puts the same path in front of the message.
 //
 // The source and the position come from Bound, which resolved them, and
 // [ErrorTree.Source] and [ErrorTree.Position] read them for any node. A
@@ -415,7 +421,13 @@ func appendTrees(dst []ErrorTree, err error) []ErrorTree {
 		node.Label = x.headline()
 	} else {
 		node.Label, _, _, _ = end.cut(err.Error())
-		node.Label = unboundText(err, node.Label)
+
+		// A heading with no text of its own has no row, like its binding,
+		// because each problem below it that carries no location names the
+		// heading's location.
+		if node.Label != "" || !(ErrorTree{Children: kids}).heads() {
+			node.Label = unboundText(err, node.Label)
+		}
 	}
 
 	t := newTree(node, kids)
@@ -473,8 +485,10 @@ func appendTree(dst []ErrorTree, t ErrorTree) []ErrorTree {
 }
 
 // joinBinding returns the binding of a join that err reads as, or nil.
-// An Error that adds nothing reads as the error it wraps, and so does a
-// binding that adopted one, since neither adds text or children.
+// A binding that heads problems with no line of its own reads as a join
+// too, as one of a join with a location does. An Error that adds nothing
+// reads as the error it wraps, and so does a binding that adopted one,
+// because neither adds text or children.
 func joinBinding(err error) *SourceError {
 	for {
 		switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -490,7 +504,7 @@ func joinBinding(err error) *SourceError {
 				return nil
 			}
 
-			if _, _, joined := joinBranches(x.err); joined {
+			if _, _, joined := joinBranches(x.err); joined || x.headsAlone() {
 				return x
 			}
 
@@ -788,11 +802,18 @@ func isLeaf(err error) bool {
 
 // childBase is the base the children on a cause chain rebase under. Even a
 // Rebase at the root locates a problem with no location, so a chain rebases
-// its children whenever it holds a Rebase.
+// its children whenever it holds a Rebase. The base also carries the
+// location of the nearest located heading, which each problem with no
+// location takes.
 type childBase struct {
 	// The move of every Error from Rebase above the children, joined, or
 	// nil when the walk met none.
 	move *move
+	// The nearest Error above the children that carries a location, or nil
+	// when the walk met none or met a Rebase below it. Each problem below
+	// with no location of its own takes that location, as
+	// [childBase.inherit] gives it.
+	at *Error
 	// The fault the Errors above the children declare, as
 	// [declaration.under] passes it down.
 	fault declaration
@@ -800,20 +821,34 @@ type childBase struct {
 
 // cross returns the base below x: c with the move of x after its own, as
 // [move.then] joins them, and with the fault x passes down, as
-// [declaration.under] gives it.
+// [declaration.under] gives it. A location on x becomes the location the
+// children below inherit. A Rebase with no location points the children
+// below it at its base, so it ends what they inherit from above.
 func (c childBase) cross(x *Error) childBase {
-	return childBase{move: c.move.then(x.move), fault: c.fault.under(x)}
+	at := c.at
+
+	switch {
+	case x.hasLocation():
+		at = x
+	case x.move != nil:
+		at = nil
+	}
+
+	return childBase{move: c.move.then(x.move), at: at, fault: c.fault.under(x)}
 }
 
 // rebase returns n under the base. A detail explains the error above it,
-// so the base moves its paths alone and never marks it invalid. A problem
-// below an Error that matches [errInvalid] is the document's fault too,
-// unless the fault is one a hook presumes and n holds an Error from
-// [Unchecked].
+// so the base moves its paths alone, never marks it invalid, and gives it
+// no location. A problem with no location takes the location of the
+// heading above it, as [childBase.inherit] gives it. A problem below an
+// Error that matches [errInvalid] is the document's fault too, unless the
+// fault is one a hook presumes and n holds an Error from [Unchecked].
 func (c childBase) rebase(n error, detail bool) error {
 	d := c.fault
 	if detail {
 		d = undeclared
+	} else {
+		n = c.inherit(n)
 	}
 
 	if c.move == nil {
@@ -824,6 +859,45 @@ func (c childBase) rebase(n error, detail bool) error {
 	m.movesOnly = m.movesOnly || detail
 
 	return rebase(n, m, d)
+}
+
+// inherit returns n with the location of the heading above it on each
+// problem of n that carries no location, as [anchorOf] finds none. Each
+// such problem goes inside an Error that declares nothing, as one from
+// [Locate] does. A join stays a join, so the tree still reads it as one
+// and each of its branches takes the location on its own. Any other
+// heading n gives the location to each of its own problems with none. A
+// [BindValue] binding takes the location as the error it was made from,
+// as a document places it. The moves of the base apply to the location as
+// they apply to the heading, because no Rebase lies between the two.
+func (c childBase) inherit(n error) error {
+	if c.at == nil || isNothing(n) {
+		return n
+	}
+
+	// An Error that adds nothing to the join it wraps stays around the
+	// join, so the copy keeps what the Error declares.
+	x, ok := n.(*Error) //nolint:errorlint // The node itself, not a chain search.
+	if ok && x.addsNothing() {
+		if _, _, joined := joinBranches(x.err); joined {
+			kept := *x
+			kept.err = c.inherit(x.err)
+
+			return &kept
+		}
+	}
+
+	joined := mapJoin(n, c.inherit)
+	if joined != nil {
+		return joined
+	}
+
+	placed := placeable(n)
+	if anchorOf(placed).err != nil {
+		return n
+	}
+
+	return &Error{err: placed, loc: c.at.loc, path: c.at.path, hasPath: c.at.hasPath}
 }
 
 // trees returns the nodes of kids in position order within the source

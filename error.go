@@ -393,10 +393,19 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 //
 //	return niceyaml.Invalid(spec.Check())
 //
-// An err that is a join stays a list of problems, and the options locate
-// the heading above them and no branch. To point each branch at a value,
-// move the join under the path of the value with [Rebase], or wrap each
-// branch before joining them.
+// An err that is a join stays a list of problems, and the options give
+// their location to each problem of the join that carries none of its
+// own. A problem with a location of its own keeps it, so the first
+// problem here binds at sizePath and the second at namePath:
+//
+//	return niceyaml.Invalid(errors.Join(
+//		errors.New("too big"),
+//		niceyaml.NewError("name is taken", niceyaml.AtPath(namePath)),
+//	), niceyaml.AtPath(sizePath))
+//
+// The join has no line of its own, so the location shows only on the
+// lines of the problems that take it. The Errors section of the package
+// documentation describes a location on a heading.
 func Invalid(err error, opts ...ErrorOption) error {
 	if isNothing(err) {
 		return nil
@@ -440,8 +449,8 @@ func Invalid(err error, opts ...ErrorOption) error {
 // Unchecked returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, whatever the options. It returns an error rather
 // than an [*Error] for the reason Invalid gives. An err that is a join
-// stays a list of problems, and the options locate the heading above them
-// and no branch, as Invalid describes.
+// stays a list of problems, and the options give their location to each
+// problem of the join that carries none of its own, as Invalid describes.
 func Unchecked(err error, opts ...ErrorOption) error {
 	if isNothing(err) {
 		return nil
@@ -479,9 +488,10 @@ func Unchecked(err error, opts ...ErrorOption) error {
 // Locate returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, whatever the options. It returns an error rather
 // than an [*Error] for the reason Invalid gives. An err that is a join
-// stays a list of problems, and the options locate the heading above them
-// and no branch, as Invalid describes. To move the `@` paths of an error
-// under the path of a value, use [Rebase].
+// stays a list of problems, and the options give their location to each
+// problem of the join that carries none of its own, as Invalid describes.
+// To move the `@` paths of an error under the path of a value, use
+// [Rebase].
 func Locate(err error, opts ...ErrorOption) error {
 	if isNothing(err) {
 		return nil
@@ -555,10 +565,13 @@ func wrapUndeclared(err error, opts ...ErrorOption) *Error {
 // summary, [ErrorTree.Problems] yields each of them and never the
 // summary, and [FormatError] draws each as a branch.
 //
-// A summary carries no location. [Rebase] and a scoped [Node.Bind] give
-// none to it, and they locate each of errs on its own, as they locate
-// each branch of a join. A validator's summary above violations with no
-// location thus binds each violation at the value it checked.
+// [Rebase] and a scoped [Node.Bind] give no location to a summary, and
+// they locate each of errs on its own, as they locate each branch of a
+// join. A validator's summary above violations with no location thus binds
+// each violation at the value it checked. A location that [Error.With]
+// puts on a summary stands in front of the line of the summary. Each of
+// errs that carries no location takes that location in place of the base
+// of a Rebase or a scoped Node.Bind.
 //
 // NewSummary skips a nil error in errs. With no error left it returns
 // nil, and with one it returns that error alone, since a heading such as
@@ -651,6 +664,9 @@ func IsInvalid(err error) bool {
 // specialized per use:
 //
 //	located := err.With(niceyaml.AtPath(namePath))
+//
+// A location on a summary from [NewSummary] reaches each problem it heads
+// that carries none, as NewSummary describes.
 func (e *Error) With(opts ...ErrorOption) *Error {
 	if e == nil {
 		return nil
@@ -671,10 +687,12 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // the [*Error] that anchors it, on each problem a summary or a join heads,
 // and on each detail. A `$` path stays as it is, as [paths.Path.Join]
 // leaves it, and so does a position or a range. Each problem that carries
-// no location points at base itself, while a heading and a detail gain no
-// location. Rebases compose, and a `$` base stops the bases above it from
-// moving the paths below it. The Errors section of the package
-// documentation describes rebasing.
+// no location points at base itself, and a heading or a detail gains none.
+// A heading inside err that carries a location gives that location, in
+// place of base, to each problem below it that carries none. Rebases
+// compose, and a `$` base stops the bases above it from moving the paths
+// below it. The Errors section of the package documentation describes
+// rebasing.
 //
 // A check written for a type writes `@` paths from the value it checks.
 // A caller that runs it on a value inside a document rebases the result
@@ -884,7 +902,10 @@ func AtRange(r position.Range) ErrorOption {
 // detail at the location its own error carries, if any, and a detail that
 // is or wraps a [*SourceError] stays as it is, so it can point into
 // another file. [Rebase] and a scoped [Node.Bind] move the paths of a
-// detail and give it no location.
+// detail and give it no location. A location on the Error or on a heading
+// above it does not reach a detail either. A join has no line of its own,
+// so the details that [Invalid], [Unchecked], or [Locate] put on a join
+// sit beside its problems.
 //
 // [errors.Is] and [errors.As] on the Error pass over its details, so a
 // sentinel that a detail wraps never matches for the problem it explains.
@@ -1335,13 +1356,15 @@ func locateMerged(b binder, node *Node, at position.Position, l locus) (location
 // Binding binds the whole tree of the error. Each problem a summary or a
 // join heads and each detail binds as a SourceError of its own, at the
 // location its own error carries, and [NewErrorTree] lays them out as a
-// tree. A path the document leaves out binds at the nearest node above
-// it, as [SourceError.Nearest] describes, and any other location that
-// does not resolve costs the SourceError its position, for the reason
-// [SourceError.Unresolved] returns. The Errors section of the package
-// documentation describes these cases. [FormatError] prints the tree and
-// the excerpts as plain text, however a caller wrapped or joined the
-// error:
+// tree. A problem that carries no location binds at the location of the
+// nearest heading above it that carries one, unless a [Rebase] lies
+// between them. A path the document leaves out binds at the nearest node
+// above it, as [SourceError.Nearest] describes, and any other location
+// that does not resolve costs the SourceError its position, for the
+// reason [SourceError.Unresolved] returns. The Errors section of the
+// package documentation describes these cases. [FormatError] prints the
+// tree and the excerpts as plain text, however a caller wrapped or joined
+// the error:
 //
 //	if _, err := source.File(); err != nil {
 //		log.Print(niceyaml.FormatError(err))
@@ -2337,6 +2360,14 @@ func (e *SourceError) heads() bool {
 	return slices.ContainsFunc(e.below, func(c boundChild) bool { return !c.detail })
 }
 
+// headsAlone reports whether e heads separate problems and has no line of
+// its own, as the binding of a join does. Such a binding marks nothing in
+// an excerpt, even with a location, because each problem below it that
+// carries no location takes that location.
+func (e *SourceError) headsAlone() bool {
+	return e.heads() && e.headline() == ""
+}
+
 // Source returns the [*Source] the error is bound to. A nil SourceError is
 // bound to none.
 func (e *SourceError) Source() *Source {
@@ -2479,10 +2510,12 @@ func (e *SourceError) Unwrap() error {
 //	cafe.yaml:6:8: $.spec.sla: string does not match pattern
 //	cafe.yaml:22:11: $.spec.hours.days: expected "array", got "string"
 //
-// A join has no line of its own. Any other error that unwraps to several
+// A join has no line of its own, even when [Invalid], [Unchecked], or
+// [Locate] gives it a location, because each of its problems that carries
+// no location takes that location. Any other error that unwraps to several
 // keeps its own message, and each branch follows as a line unless that
 // message holds its text already, as "a; b" does. A branch located from
-// an [*Error] follows either way, since its line names a position the
+// an [*Error] follows either way, because its line names a position the
 // message lacks.
 //
 // The name, each path, and the text of a decode rejection reach the
@@ -2571,11 +2604,13 @@ func (e *SourceError) buildTexts() boundTexts {
 		return t
 	}
 
-	t.own = pathed(t.own)
-
 	lines := make([]string, 0, len(t.entries)+2)
 
+	// A heading with no text of its own adds no line, even with a
+	// location. Each problem below it that carries no location takes that
+	// location and names it.
 	if t.own != "" {
+		t.own = pathed(t.own)
 		t.head = e.prefixed(t.own)
 		lines = append(lines, t.head)
 	}
@@ -3210,9 +3245,10 @@ func (e *SourceError) Nearest() (paths.Path, bool) {
 // [Annotate] marks them, and reports whether it marked any line. A caller
 // that holds one binding, such as one [Bindings] yields or [errors.As]
 // finds, thus marks its whole tree with one call. A binding with no
-// location of its own, such as a summary or a join, adds no mark for
-// itself, while the bindings below it still mark their lines. A nil
-// SourceError marks nothing.
+// location, such as one of a summary that carries none, adds no mark for
+// itself. Neither does a binding with no line of its own, such as one of
+// a join, even with a location. The bindings below either one still mark
+// their lines. A nil SourceError marks nothing.
 func (e *SourceError) Annotate(view *line.View) bool {
 	return Annotate(e, view)
 }
@@ -3234,7 +3270,9 @@ func (e *SourceError) Annotate(view *line.View) bool {
 // as a position past the end of a line, gets an overlay of no width, so
 // [line.View.Hunks] keeps the line. A column past the end of its line
 // moves to the column after its last rune. A binding whose location did
-// not resolve adds no mark.
+// not resolve adds no mark. Neither does a binding with no line of its
+// own, such as one of a join with a location, because each problem of the
+// join that carries no location marks that location.
 //
 // Annotate finds each line by identity, so the view may be the whole
 // source, a slice of it, or a diff against another revision, and a
@@ -3304,12 +3342,13 @@ func (s *Source) excerpt(positions []excerpt.Mark, cfg excerptConfig) (*line.Vie
 }
 
 // marks reports whether the location of e, or of a binding below it,
-// resolved, so an excerpt marks a line for the tree of e.
+// resolved, so an excerpt marks a line for the tree of e. A binding that
+// [SourceError.headsAlone] reports marks no line.
 func (e *SourceError) marks() bool {
 	found := false
 
 	e.all(map[*SourceError]bool{}, func(n *SourceError) bool {
-		found = n.locErr == nil
+		found = n.locErr == nil && !n.headsAlone()
 
 		return !found
 	})
@@ -3367,7 +3406,7 @@ func treePositions(
 			sources = append(sources, n.source)
 		}
 
-		if !skipped[n] && !quiet[n] && n.locErr == nil {
+		if !skipped[n] && !quiet[n] && n.locErr == nil && !n.headsAlone() {
 			positions[n.source] = append(positions[n.source], n.mark(labeled || n != root, warning, detail))
 		}
 
