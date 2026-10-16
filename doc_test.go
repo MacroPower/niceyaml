@@ -415,3 +415,344 @@ func typeName(expr ast.Expr) string {
 func receiverExported(recv *ast.FieldList) bool {
 	return len(recv.List) > 0 && token.IsExported(typeName(recv.List[0].Type))
 }
+
+// TestDocFiles_PackageDocumentationOnly checks that each doc.go file in the
+// repository holds only comments and the package clause. The repository
+// reserves the name doc.go for package documentation, so code belongs in
+// another file of the package. The walk starts at the repository root, so it
+// also reads the doc.go files of the nested modules.
+func TestDocFiles_PackageDocumentationOnly(t *testing.T) {
+	t.Parallel()
+
+	// Join the violations so that each one prints on its own line.
+	assert.Empty(t, strings.Join(checkDocFiles(t, "."), "\n"),
+		"doc.go holds only the package documentation, so move each declaration to another file of the package")
+}
+
+// TestCheckDocFiles checks that checkDocFiles reports each declaration in a
+// doc.go file, whatever its build constraints. It also checks that
+// checkDocFiles ignores other files and the directories it skips.
+func TestCheckDocFiles(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		files map[string]string
+		want  []string
+	}{
+		"package documentation only": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+				),
+			},
+		},
+		"build constraint": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"//go:build linux || !linux",
+					"",
+					"// Package p is a fixture.",
+					"package p",
+				),
+			},
+		},
+		"generate directive": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+					"",
+					"//go:generate echo hi",
+				),
+			},
+		},
+		"import with a use": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+					"",
+					`import "fmt"`,
+					"",
+					"var _ = fmt.Sprint",
+				),
+			},
+			want: []string{
+				"p/doc.go:4:1: import declaration in doc.go",
+				"p/doc.go:6:1: var declaration in doc.go",
+			},
+		},
+		"blank import": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+					"",
+					`import _ "embed"`,
+				),
+			},
+			want: []string{"p/doc.go:4:1: import declaration in doc.go"},
+		},
+		"empty groups": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+					"",
+					"import ()",
+					"",
+					"var ()",
+				),
+			},
+			want: []string{
+				"p/doc.go:4:1: import declaration in doc.go",
+				"p/doc.go:6:1: var declaration in doc.go",
+			},
+		},
+		"var": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+					"",
+					"var X = 1",
+				),
+			},
+			want: []string{"p/doc.go:4:1: var declaration in doc.go"},
+		},
+		"blank var": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+					"",
+					"var _ = 1",
+				),
+			},
+			want: []string{"p/doc.go:4:1: var declaration in doc.go"},
+		},
+		"code on a line with a comment": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+					"",
+					"const C = 1 // A comment.",
+				),
+			},
+			want: []string{"p/doc.go:4:1: const declaration in doc.go"},
+		},
+		"type": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+					"",
+					"type T struct{}",
+				),
+			},
+			want: []string{"p/doc.go:4:1: type declaration in doc.go"},
+		},
+		"init func": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+					"",
+					"func init() {}",
+				),
+			},
+			want: []string{"p/doc.go:4:1: func declaration in doc.go"},
+		},
+		"func": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+					"",
+					"func F() {}",
+				),
+			},
+			want: []string{"p/doc.go:4:1: func declaration in doc.go"},
+		},
+		"method on a type of another file": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+					"",
+					"func (T) M() {}",
+				),
+				"p/t.go": stringtest.LinesLF(
+					"package p",
+					"",
+					"type T struct{}",
+				),
+			},
+			want: []string{"p/doc.go:4:1: method declaration in doc.go"},
+		},
+		"main func": {
+			files: map[string]string{
+				"cmd/doc.go": stringtest.LinesLF(
+					"// Command c is a fixture.",
+					"package main",
+					"",
+					"func main() {}",
+				),
+			},
+			want: []string{"cmd/doc.go:4:1: func declaration in doc.go"},
+		},
+		"code in doc_test.go": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+				),
+				"p/doc_test.go": stringtest.LinesLF(
+					"package p_test",
+					"",
+					"var X = 1",
+				),
+			},
+		},
+		"code in other files named for docs": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"// Package p is a fixture.",
+					"package p",
+				),
+				"p/mydoc.go": stringtest.LinesLF(
+					"package p",
+					"",
+					"func A() {}",
+				),
+				"p/doc_x.go": stringtest.LinesLF(
+					"package p",
+					"",
+					"func B() {}",
+				),
+			},
+		},
+		"file excluded from the build": {
+			files: map[string]string{
+				"p/doc.go": stringtest.LinesLF(
+					"//go:build ignore",
+					"",
+					"// Package p is a fixture.",
+					"package p",
+					"",
+					"func F() {}",
+				),
+				"p/p.go": stringtest.LinesLF("package p"),
+			},
+			want: []string{"p/doc.go:6:1: func declaration in doc.go"},
+		},
+		"nested package": {
+			files: map[string]string{
+				"a/b/doc.go": stringtest.LinesLF(
+					"// Package b is a fixture.",
+					"package b",
+					"",
+					"var X = 1",
+				),
+			},
+			want: []string{"a/b/doc.go:4:1: var declaration in doc.go"},
+		},
+		"nested module": {
+			files: map[string]string{
+				"m/go.mod": stringtest.LinesLF("module example.com/m"),
+				"m/doc.go": stringtest.LinesLF(
+					"// Package m is a fixture.",
+					"package m",
+					"",
+					"var X = 1",
+				),
+			},
+			want: []string{"m/doc.go:4:1: var declaration in doc.go"},
+		},
+		"skipped directories": {
+			files: map[string]string{
+				"p/testdata/doc.go":           "var X = 1\n",
+				"vendor/example.com/x/doc.go": "var X = 1\n",
+				".hidden/doc.go":              "var X = 1\n",
+				"_skip/doc.go":                "var X = 1\n",
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			yamltest.WriteFiles(t, dir, tc.files)
+
+			assert.Equal(t, tc.want, checkDocFiles(t, dir))
+		})
+	}
+}
+
+// checkDocFiles returns a violation for each declaration in a doc.go file
+// under root. Each violation reads "file:line:col: kind declaration in
+// doc.go", with the file relative to root. The walk skips the directories
+// named testdata or vendor and each directory whose name starts with "." or
+// "_", as the go command does. Unlike the go command, it enters nested
+// modules. It parses every doc.go file it finds, so a build constraint does
+// not hide one.
+func checkDocFiles(t *testing.T, root string) []string {
+	t.Helper()
+
+	var violations []string
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		name := d.Name()
+
+		if d.IsDir() {
+			if path != root && (slices.Contains([]string{"testdata", "vendor"}, name) ||
+				strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")) {
+				return filepath.SkipDir
+			}
+
+			return nil
+		}
+
+		if name != "doc.go" {
+			return nil
+		}
+
+		rel, err := filepath.Rel(root, path)
+		require.NoError(t, err)
+
+		fset := token.NewFileSet()
+
+		file, err := parser.ParseFile(
+			fset, filepath.ToSlash(rel), yamltest.ReadFile(t, path), parser.SkipObjectResolution,
+		)
+		require.NoError(t, err)
+
+		for _, decl := range file.Decls {
+			kind := "func"
+
+			switch decl := decl.(type) {
+			case *ast.GenDecl:
+				kind = decl.Tok.String()
+			case *ast.FuncDecl:
+				if decl.Recv != nil {
+					kind = "method"
+				}
+			}
+
+			violations = append(violations, fset.Position(decl.Pos()).String()+": "+kind+" declaration in doc.go")
+		}
+
+		return nil
+	})
+	require.NoError(t, err)
+
+	return violations
+}
