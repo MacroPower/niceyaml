@@ -87,9 +87,14 @@ func validateCmd() *cobra.Command {
 				// its warnings among its errors.
 				warnings := niceyaml.NewWarnings()
 
+				// The run holds the error of each file until the run ends.
+				// A binding keeps its whole source alive, so the run
+				// detaches each error, after the report adds the warnings.
+				// The error handler in main renders the error with the
+				// default excerpt options, which Detach keeps.
 				err := validateFile(warnings.Context(cmd.Context()), yamlPath, reg, limits.options()...)
 				if err != nil {
-					err = warnings.Report(err)
+					err = niceyaml.Detach(warnings.Report(err))
 				}
 
 				// A run canceled during the file stops there. The error of

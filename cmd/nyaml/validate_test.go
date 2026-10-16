@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"io/fs"
 	"net/http"
@@ -765,6 +766,49 @@ func TestValidateCmdErrorNames(t *testing.T) {
 			assert.Equal(t, 1, strings.Count(err.Error(), escape.Control(path)), err.Error())
 		})
 	}
+}
+
+func TestValidateCmdDetaches(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	schemaPath := yamltest.WriteFile(t, dir, "schema.json", string(nameSchema))
+	paths := []string{
+		yamltest.WriteFile(t, dir, "first.yaml", stringtest.LinesLF("value: 1", "---", "name: b")),
+		yamltest.WriteFile(t, dir, "second.yaml", "name: [\n"),
+	}
+
+	err := quietValidateCmd(io.Discard, append([]string{"--schema", schemaPath}, paths...)...).Execute()
+	require.Error(t, err)
+
+	reg, regErr := buildRegistry(t.Context(), schemaPath)
+	require.NoError(t, regErr)
+
+	// The errors that validateFile returns hold their sources. The
+	// bindings of the error of the run report no Source, and that error
+	// renders as those errors do.
+	live := make([]error, 0, len(paths))
+
+	for _, path := range paths {
+		warnings := niceyaml.NewWarnings()
+		live = append(live, warnings.Report(validateFile(warnings.Context(t.Context()), path, reg)))
+	}
+
+	want := errors.Join(live...)
+
+	assert.Equal(t, niceyaml.FormatError(want), niceyaml.FormatError(err))
+	assert.Equal(t, exitCode(want), exitCode(err))
+
+	var names []string
+
+	for bound := range niceyaml.Bindings(err) {
+		assert.Nil(t, bound.Source())
+
+		names = append(names, bound.Name())
+	}
+
+	assert.Equal(t, paths, names)
 }
 
 // closedWriter fails every write as a closed pipe does, so tests can
