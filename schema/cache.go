@@ -4,6 +4,8 @@ import (
 	"container/list"
 	"sync"
 	"time"
+
+	"go.jacobcolvin.com/niceyaml/internal/capture"
 )
 
 // WithCacheLimit is a [RegistryOption] that bounds the number of schemas
@@ -25,14 +27,24 @@ import (
 // schemas, and n bounds their number too. A compile or a validation that
 // reaches a document the registry dropped loads it again.
 //
-// Without a limit, the registry keeps every schema it compiles for its
-// whole lifetime. Each distinct [Ref.Key] adds an entry, and a URL that
-// differs from another only in its query string or fragment is a Key of
-// its own. Documents that name endless distinct Keys therefore grow the
-// memory of a long-lived registry without bound. A registry that serves
-// documents from another trust domain for its whole lifetime sets a
-// limit, as the Untrusted Documents section of the package documentation
-// describes.
+// The registry holds each file system for as long as it keeps an entry
+// from that file system, as [FileFS] describes. The limit thus bounds
+// the file systems the registry holds too. A program can open each
+// upload in a file system of its own, such as an [fs.Sub] or an
+// [*archive/zip.Reader]. When the cache is full, the registry drops the
+// entries used least recently and stops holding the uploads they came
+// from. [Registry.Forget] drops the entries of one file system without
+// waiting for the limit.
+//
+// Without a limit, the registry keeps each schema it compiles, and holds
+// the file system the schema comes from, until [Registry.Forget] drops
+// the entries of that file system. Each distinct [Ref.Key] adds an
+// entry. A URL that differs from another only in its query string or
+// fragment is a Key of its own. Documents that name endless distinct
+// Keys therefore grow the memory of a long-lived registry without bound.
+// A registry that serves documents from another trust domain for its
+// whole lifetime sets a limit, as the Untrusted Documents section of the
+// package documentation describes.
 //
 // A limit of zero or less leaves the registry as it is, and by default
 // the registry keeps every entry. Given more than once, the last option
@@ -49,8 +61,8 @@ func WithCacheLimit(n int) RegistryOption {
 // the value used least recently once it holds more than its limit, and
 // it drops a value that records a failure once the retry interval has
 // passed since the failure. It is safe for concurrent use.
-type lru[V any] struct {
-	items      map[string]*lruItem[V]
+type lru[K comparable, V any] struct {
+	items      map[K]*lruItem[K, V]
 	recent     list.List // the item of each key, most recently used first
 	failures   list.List // the items that record a failure, oldest first
 	retryAfter time.Duration
@@ -60,22 +72,22 @@ type lru[V any] struct {
 
 // An lruItem is a value an [lru] keeps, with its key and its place in
 // each list of the lru.
-type lruItem[V any] struct {
+type lruItem[K comparable, V any] struct {
 	// When the failure the value records happened, or the zero time for
 	// a value that records none.
 	failedAt time.Time
+	key      K
 	value    V
 	use      *list.Element // the element of the item in recent
 	failure  *list.Element // the element of the item in failures, or nil
-	key      string
 }
 
 // newLRU creates a new [lru] that keeps at most limit values, or any
 // number for a limit of 0, and drops a failure retryAfter after it
 // happened.
-func newLRU[V any](limit int, retryAfter time.Duration) *lru[V] {
-	return &lru[V]{
-		items:      make(map[string]*lruItem[V]),
+func newLRU[K comparable, V any](limit int, retryAfter time.Duration) *lru[K, V] {
+	return &lru[K, V]{
+		items:      make(map[K]*lruItem[K, V]),
 		limit:      limit,
 		retryAfter: retryAfter,
 	}
@@ -83,7 +95,7 @@ func newLRU[V any](limit int, retryAfter time.Duration) *lru[V] {
 
 // get returns the value c keeps under key and marks it used. A failure
 // whose retry interval has passed counts as no value, and get drops it.
-func (c *lru[V]) get(key string) (V, bool) {
+func (c *lru[K, V]) get(key K) (V, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -115,7 +127,7 @@ func (c *lru[V]) get(key string) (V, bool) {
 // Before it adds v, keep drops each failure whose retry interval has
 // passed. After it, keep drops the values used least recently until c
 // holds no more than its limit.
-func (c *lru[V]) keep(key string, v V, failedAt time.Time) V {
+func (c *lru[K, V]) keep(key K, v V, failedAt time.Time) V {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -131,7 +143,7 @@ func (c *lru[V]) keep(key string, v V, failedAt time.Time) V {
 
 	c.dropExpired()
 
-	item := &lruItem[V]{key: key, value: v, failedAt: failedAt}
+	item := &lruItem[K, V]{key: key, value: v, failedAt: failedAt}
 	item.use = c.recent.PushFront(item)
 
 	if !failedAt.IsZero() {
@@ -141,18 +153,30 @@ func (c *lru[V]) keep(key string, v V, failedAt time.Time) V {
 	c.items[key] = item
 
 	for c.limit > 0 && len(c.items) > c.limit {
-		c.remove(itemOf[V](c.recent.Back()))
+		c.remove(itemOf[K, V](c.recent.Back()))
 	}
 
 	return v
 }
 
+// drop drops the value of each key that match reports true for.
+func (c *lru[K, V]) drop(match func(K) bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for key, item := range c.items {
+		if match(key) {
+			c.remove(item)
+		}
+	}
+}
+
 // dropExpired drops each failure whose retry interval has passed. The
 // failures list holds them oldest first, so dropExpired stops at the
 // first failure whose interval has not passed.
-func (c *lru[V]) dropExpired() {
+func (c *lru[K, V]) dropExpired() {
 	for e := c.failures.Front(); e != nil; e = c.failures.Front() {
-		item := itemOf[V](e)
+		item := itemOf[K, V](e)
 		if !c.expired(item) {
 			return
 		}
@@ -163,12 +187,12 @@ func (c *lru[V]) dropExpired() {
 
 // expired reports whether item records a failure whose retry interval
 // has passed.
-func (c *lru[V]) expired(item *lruItem[V]) bool {
+func (c *lru[K, V]) expired(item *lruItem[K, V]) bool {
 	return item.failure != nil && time.Since(item.failedAt) >= c.retryAfter
 }
 
 // remove drops item from c.
-func (c *lru[V]) remove(item *lruItem[V]) {
+func (c *lru[K, V]) remove(item *lruItem[K, V]) {
 	delete(c.items, item.key)
 	c.recent.Remove(item.use)
 
@@ -179,8 +203,68 @@ func (c *lru[V]) remove(item *lruItem[V]) {
 
 // itemOf returns the item e holds. Every element of the lists of an
 // [lru] holds an [*lruItem].
-func itemOf[V any](e *list.Element) *lruItem[V] {
-	item, _ := e.Value.(*lruItem[V]) //nolint:errcheck // Every element holds an item.
+func itemOf[K comparable, V any](e *list.Element) *lruItem[K, V] {
+	item, _ := e.Value.(*lruItem[K, V]) //nolint:errcheck // Every element holds an item.
 
 	return item
+}
+
+// A flightGroup runs one call at a time for each key, and every caller
+// that asks for the key while the call runs shares its result. Its zero
+// value is ready to use, and it is safe for concurrent use.
+type flightGroup[K comparable, V any] struct {
+	calls map[K]*flightCall[V]
+	mu    sync.Mutex
+}
+
+// A flightCall is one call of a [flightGroup]. Its done channel closes
+// when the call ends, and val and err hold its result from then on.
+type flightCall[V any] struct {
+	err  error
+	done chan struct{}
+	val  V
+}
+
+// do returns the call in flight for key. When none is in flight, do
+// starts fn on a goroutine of its own and returns the new call. The
+// group forgets the call when it ends, so the next do for key starts a
+// new call.
+//
+// The call runs fn through [capture.Run]. Without it, a panic in fn ends
+// the process, and a call to [runtime.Goexit] skips the close of done
+// and leaves every caller blocked. With capture.Run, the call keeps
+// either as an error in err. Each caller must pass err to
+// [capture.Reraise].
+func (g *flightGroup[K, V]) do(key K, fn func() (V, error)) *flightCall[V] {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if c, ok := g.calls[key]; ok {
+		return c
+	}
+
+	if g.calls == nil {
+		g.calls = make(map[K]*flightCall[V])
+	}
+
+	c := &flightCall[V]{done: make(chan struct{})}
+	g.calls[key] = c
+
+	go func() {
+		c.err = capture.Run(func() error {
+			var err error
+
+			c.val, err = fn()
+
+			return err
+		})
+
+		g.mu.Lock()
+		delete(g.calls, key)
+		g.mu.Unlock()
+
+		close(c.done)
+	}()
+
+	return c
 }

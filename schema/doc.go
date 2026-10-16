@@ -459,6 +459,17 @@
 // URL with a new query string each time, grow the cache for the lifetime
 // of the registry.
 //
+// The registry holds the file system of a document from
+// [go.jacobcolvin.com/niceyaml.WithFS] for as long as it keeps an entry
+// from it, as [FileFS] describes. The limit thus bounds those file
+// systems too. When a program opens each upload in a file system of its
+// own, such as an [*archive/zip.Reader], the registry therefore holds a
+// bounded number of uploads. Without a limit, the registry holds every
+// upload whose directive named a schema beside it, until the program
+// passes the upload to [Registry.Forget]:
+//
+//	defer reg.Forget(upload)
+//
 // The options do not keep the author from turning validation off. A
 // directive of "$schema=none" passes its document, and so does a
 // directive that names a schema that accepts the document. A program

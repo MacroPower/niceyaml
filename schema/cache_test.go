@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"runtime"
 	"slices"
@@ -226,6 +227,60 @@ func TestWithCacheLimit(t *testing.T) {
 			"/s1.json": 1, "/s2.json": 1, "/s3.json": 1, "/s4.json": 1,
 			"/d1.json": 2, "/d2.json": 1, "/d3.json": 1,
 		}, requests())
+	})
+
+	t.Run("stops holding the file systems of dropped entries", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			files map[string]string
+			err   error
+		}{
+			"schema": {
+				files: map[string]string{"s.json": `{"type": "object"}`},
+			},
+			"schema that does not load": {
+				err: fs.ErrNotExist,
+			},
+			"document a $ref names": {
+				files: map[string]string{
+					"s.json":    `{"$ref": "defs.json"}`,
+					"defs.json": `{"type": "object"}`,
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				reg := schema.NewRegistry(schema.WithCacheLimit(2))
+
+				systems := make([]*heldFS, 4)
+				for i := range systems {
+					systems[i] = newHeldFS(tc.files, nil)
+
+					_, err := reg.Schema(t.Context(), schema.FileFS(systems[i].fsys, "s.json"))
+					if tc.err != nil {
+						requireLoadError(t, err, tc.err)
+					} else {
+						require.NoError(t, err)
+					}
+				}
+
+				// The registry keeps the entries of the last two file
+				// systems, and stops holding the first two with their
+				// entries.
+				held := make([]bool, len(systems))
+				for i, h := range systems {
+					held[i] = h.held()
+				}
+
+				assert.Equal(t, []bool{false, false, true, true}, held)
+
+				runtime.KeepAlive(reg)
+			})
+		}
 	})
 
 	t.Run("concurrent requests", func(t *testing.T) {

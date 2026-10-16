@@ -388,7 +388,12 @@ func WithFilePath(path string) SourceOption {
 // fsys must be a value Go can compare, such as an [embed.FS] or a
 // pointer, or a map. [go.jacobcolvin.com/niceyaml/schema.FileFS] gives
 // the rule, and a schema beside a document in a file system of any
-// other type does not load.
+// other type does not load. A registry holds fsys for as long as it
+// keeps an entry from it, as FileFS describes. A program that builds a
+// file system per document therefore bounds the registry with
+// [go.jacobcolvin.com/niceyaml/schema.WithCacheLimit], or passes each
+// file system to [go.jacobcolvin.com/niceyaml/schema.Registry.Forget]
+// when it is done with the file system.
 //
 // Without it, and with a nil fsys, the file path names a file on disk.
 func WithFS(fsys fs.FS) SourceOption {
@@ -632,7 +637,8 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 //
 // A directive there that names ./schema.json reads configs/schema.json
 // from bundle. A document that [NewSourceFromFile] opens resolves its
-// directive on disk, so one registry validates both.
+// directive on disk, so one registry validates both. The registry holds
+// fsys for as long as it keeps an entry from it, as [WithFS] describes.
 //
 // Returns a nil Source and an error when it cannot read the file.
 func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, error) {

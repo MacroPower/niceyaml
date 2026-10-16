@@ -213,8 +213,15 @@ func file(path string) (Ref, error) {
 // a struct that holds a slice, fails to load with [fs.ErrInvalid], and a
 // pointer to it loads. Each distinct value is a file system of its own,
 // so a program builds its file system once and passes the same value
-// each time. A new [fs.Sub] or a new [os.Root] per document would add an
-// entry to the registry per document.
+// each time. A new [fs.Sub] or a new [os.Root] for each document adds a
+// separate set of entries to the registry.
+//
+// The registry holds fsys for as long as it keeps an entry from it: a
+// schema, a remembered failure, or a $ref document. [WithCacheLimit]
+// bounds the entries, and with them the file systems the registry holds.
+// A registry without a limit holds each file system until
+// [Registry.Forget] drops the entries from it. A program passes each
+// file system it is done with to Forget.
 //
 // The registry reads only a regular file of at most 10 MB, as [File]
 // describes, and the note there on [fs.StatFS] holds for fsys.

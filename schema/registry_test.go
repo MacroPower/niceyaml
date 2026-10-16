@@ -20,6 +20,7 @@ import (
 	"testing/fstest"
 	"testing/synctest"
 	"time"
+	"weak"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -2526,6 +2527,77 @@ func TestRegistry_FileSystemIdentity(t *testing.T) {
 			assert.NotSame(t, first, other)
 		})
 	}
+
+	t.Run("a map at the address of a collected one loads its own files", func(t *testing.T) {
+		t.Parallel()
+
+		// Each pair of maps holds different files from the pair before it.
+		// The collector runs after each map, so a map can take the address
+		// of a collected map that held other files. Each step passes only
+		// when the registry reads each map's schemas from that map's own
+		// files.
+		tcs := map[string]struct {
+			step func(t *testing.T, reg *schema.Registry, i int, odd bool)
+			opts []schema.RegistryOption
+		}{
+			"remembered failure": {
+				step: func(t *testing.T, reg *schema.Registry, _ int, odd bool) {
+					t.Helper()
+
+					// The map of an odd pair holds no schema, and the
+					// registry remembers that failure.
+					files := map[string]string{"s.json": `{"type": "string"}`}
+					if odd {
+						files = nil
+					}
+
+					_, err := reg.Schema(t.Context(), schema.FileFS(yamltest.MapFS(files), "s.json"))
+					if odd {
+						requireLoadError(t, err, fs.ErrNotExist)
+					} else {
+						require.NoError(t, err)
+					}
+				},
+			},
+			"document a $ref names": {
+				opts: []schema.RegistryOption{schema.WithCacheLimit(1)},
+				step: func(t *testing.T, reg *schema.Registry, i int, odd bool) {
+					t.Helper()
+
+					typ, value := "string", any("x")
+					if odd {
+						typ, value = "integer", 5
+					}
+
+					fsys := yamltest.MapFS(map[string]string{
+						"s.json":    `{"$ref": "defs.json"}`,
+						"defs.json": fmt.Sprintf(`{"type": %q}`, typ),
+					})
+
+					s, err := reg.Schema(t.Context(), schema.FileFS(fsys, "s.json"))
+					require.NoError(t, err)
+					require.NoError(t, s.ValidateValue(t.Context(), value))
+
+					// A schema from no file system takes the place of the
+					// schema, and the document its $ref names stays.
+					loadAll(t, reg, loading(fmt.Sprintf("other-%d", i), []byte(`{}`), nil))
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				reg := schema.NewRegistry(tc.opts...)
+
+				for i := range 40 {
+					tc.step(t, reg, i, i/2%2 == 1)
+					runtime.GC()
+				}
+			})
+		}
+	})
 }
 
 // sliceFS is a file system whose value Go cannot compare, since it holds
@@ -2536,6 +2608,232 @@ type sliceFS struct {
 
 func (f sliceFS) Open(name string) (fs.File, error) {
 	return f.files.Open(name) //nolint:wrapcheck // The test file system returns the error of the one it wraps.
+}
+
+// A heldFS is a file system that a test watches through a weak pointer,
+// to see whether a registry still holds it.
+type heldFS struct {
+	// The file system, until the test drops its own hold on it.
+	fsys fs.FS
+	// A file that only the map holds, so it lives exactly as long as the
+	// map does. The registry never reads it.
+	file weak.Pointer[fstest.MapFile]
+}
+
+// newHeldFS creates a new [heldFS] whose file system is a map that
+// holds files, or the file system wrap returns for that map. A nil wrap
+// keeps the map.
+func newHeldFS(files map[string]string, wrap func(fstest.MapFS) fs.FS) *heldFS {
+	files = maps.Clone(files)
+	if files == nil {
+		files = map[string]string{}
+	}
+
+	files["held.txt"] = "held"
+
+	fsys := yamltest.MapFS(files)
+	h := &heldFS{fsys: fsys, file: weak.Make(fsys["held.txt"])}
+
+	if wrap != nil {
+		h.fsys = wrap(fsys)
+	}
+
+	return h
+}
+
+// held drops the hold of the test on the file system, runs the
+// collector, and reports whether anything else still holds the file
+// system. A goroutine of the registry might hold the file system for a
+// moment after its result reaches the caller, until the goroutine exits.
+// To wait for such a goroutine, held runs the collector up to ten times
+// and yields to other goroutines between runs. It reports a hold only
+// when every run leaves the file system alive.
+func (h *heldFS) held() bool {
+	h.fsys = nil
+
+	for range 10 {
+		runtime.GC()
+
+		if h.file.Value() == nil {
+			return false
+		}
+
+		runtime.Gosched()
+	}
+
+	return true
+}
+
+// asPointer returns a pointer file system that reads from files.
+func asPointer(files fstest.MapFS) fs.FS {
+	return &sliceFS{files: files}
+}
+
+func TestRegistry_Forget(t *testing.T) {
+	t.Parallel()
+
+	files := map[string]string{
+		"configs/app.yaml":    yamltest.SchemaDirective("../schemas/s.json", "a: x\n"),
+		"schemas/s.json":      `{"properties": {"a": {"$ref": "defs.json"}}}`,
+		"schemas/defs.json":   `{"type": "string"}`,
+		"schemas/broken.json": `{"properties": {"a": {"$ref": "missing.json"}}}`,
+	}
+
+	t.Run("stops holding the file system", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			wrap func(fstest.MapFS) fs.FS
+			// Asks the registry for a schema in fsys.
+			load func(ctx context.Context, reg *schema.Registry, fsys fs.FS) error
+			err  error
+		}{
+			"schema and document a $ref names": {
+				load: loadFS("schemas/s.json"),
+			},
+			"file system known by a pointer": {
+				wrap: asPointer,
+				load: loadFS("schemas/s.json"),
+			},
+			"schema that does not load": {
+				load: loadFS("schemas/missing.json"),
+				err:  fs.ErrNotExist,
+			},
+			"document a $ref names that does not load": {
+				load: loadFS("schemas/broken.json"),
+				err:  fs.ErrNotExist,
+			},
+			"directive beside a document": {
+				load: func(ctx context.Context, reg *schema.Registry, fsys fs.FS) error {
+					source, err := niceyaml.NewSourceFromFS(fsys, "configs/app.yaml")
+					if err != nil {
+						return err
+					}
+
+					return source.ValidateDocuments(ctx, reg) //nolint:wrapcheck // The test inspects the error itself.
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+				h := newHeldFS(files, tc.wrap)
+
+				err := tc.load(t.Context(), reg, h.fsys)
+				if tc.err != nil {
+					requireLoadError(t, err, tc.err)
+				} else {
+					require.NoError(t, err)
+				}
+
+				reg.Forget(h.fsys)
+				assert.False(t, h.held())
+
+				runtime.KeepAlive(reg)
+			})
+		}
+	})
+
+	t.Run("loads the schema again", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := &openCountingFS{files: yamltest.MapFS(files)}
+		reg := schema.NewRegistry()
+
+		first, err := reg.Schema(t.Context(), schema.FileFS(fsys, "schemas/s.json"))
+		require.NoError(t, err)
+
+		opens := fsys.opens.Load()
+
+		reg.Forget(fsys)
+
+		again, err := reg.Schema(t.Context(), schema.FileFS(fsys, "schemas/s.json"))
+		require.NoError(t, err)
+		assert.NotSame(t, first, again)
+
+		// The schema and the document its $ref names load again.
+		assert.Equal(t, 2*opens, fsys.opens.Load())
+	})
+
+	t.Run("keeps every other entry", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			// The file system to forget.
+			fsys fs.FS
+		}{
+			"another file system": {
+				fsys: yamltest.MapFS(files),
+			},
+			"nil file system": {},
+			"file system Go cannot compare": {
+				fsys: sliceFS{files: yamltest.MapFS(files)},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				kept := yamltest.MapFS(files)
+				loadable, loads := countingLoader("loadable", []byte(`{}`))
+
+				reg := schema.NewRegistry()
+
+				fromFS, err := reg.Schema(t.Context(), schema.FileFS(kept, "schemas/s.json"))
+				require.NoError(t, err)
+
+				fromLoadable, err := reg.Schema(t.Context(), loadable)
+				require.NoError(t, err)
+
+				reg.Forget(tc.fsys)
+
+				again, err := reg.Schema(t.Context(), schema.FileFS(kept, "schemas/s.json"))
+				require.NoError(t, err)
+				assert.Same(t, fromFS, again)
+
+				again, err = reg.Schema(t.Context(), loadable)
+				require.NoError(t, err)
+				assert.Same(t, fromLoadable, again)
+				assert.Equal(t, int32(1), loads.Load())
+			})
+		}
+	})
+
+	t.Run("keeps the files it read through WithFSAt", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		fsys := &openCountingFS{files: yamltest.MapFS(files)}
+		ref := schema.File(filepath.Join(dir, "schemas", "s.json"))
+
+		reg := schema.NewRegistry(schema.WithFSAt(dir, fsys))
+
+		first, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+
+		opens := fsys.opens.Load()
+
+		reg.Forget(fsys)
+
+		again, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+		assert.Same(t, first, again)
+		assert.Equal(t, opens, fsys.opens.Load())
+	})
+}
+
+// loadFS returns a function that asks a registry for the schema at path
+// in a file system.
+func loadFS(path string) func(context.Context, *schema.Registry, fs.FS) error {
+	return func(ctx context.Context, reg *schema.Registry, fsys fs.FS) error {
+		_, err := reg.Schema(ctx, schema.FileFS(fsys, path))
+
+		return err //nolint:wrapcheck // The test inspects the error itself.
+	}
 }
 
 func TestRegistry_WithFSAt(t *testing.T) {
