@@ -123,6 +123,8 @@ A validator checks a document before the decoder reads it. The example rejects a
 
 Types declare their constraints with `jsonschema` struct tags. The `gen` tool from [go.jacobcolvin.com/x/jsonschema](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema) turns them into [cafe.v1.json](examples/schemas/cafe/cafe.v1.json). Run `go run ./examples/schemas/cafe/demo` to validate a config against that schema and render any failures as source-annotated errors.
 
+`gen` names each property as `encoding/json` names the field. The decoder reads the `yaml` tag, or the `json` tag when a field has no `yaml` tag, and lowercases the Go name when that tag names none. Each field of the example has a `json` tag that names it, so each property matches the key that the decoder reads. The tests of the example call [`schema.CheckFields`][niceyaml/schema.CheckFields], which reports each field where the two disagree.
+
 A [`schema.Registry`][niceyaml/schema.Registry] picks the schema of each document, so one file can hold documents of several kinds. Run `go run ./examples/schemas/registry` to route the documents of a stream by a `$schema` comment or by their `kind` and report the ones that fail.
 
 ### Encoder
@@ -165,5 +167,6 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml/style/kind.Kind]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/style/kind#Kind
 [niceyaml/bubbles/yamlviewport]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/bubbles/yamlviewport
 [niceyaml/fangs]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/fangs
+[niceyaml/schema.CheckFields]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema#CheckFields
 [niceyaml/schema.Registry]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema#Registry
 [niceyaml/schema.Schema]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/schema#Schema

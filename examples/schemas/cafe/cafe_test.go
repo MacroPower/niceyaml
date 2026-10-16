@@ -51,6 +51,14 @@ func edited(t *testing.T, in, from, to string) string {
 	return strings.Replace(in, from, to, 1)
 }
 
+// TestCafeFields checks that gen names each property of the Config
+// schema as the decoder names its key.
+func TestCafeFields(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, schema.CheckFields[cafe.Config]())
+}
+
 func TestCafeDefaultConfig(t *testing.T) {
 	t.Parallel()
 

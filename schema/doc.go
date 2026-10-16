@@ -32,6 +32,35 @@
 //	    return nil
 //	}
 //
+// The generator names each property as encoding/json names the field. It
+// reads the json tag, and takes the Go name of the field when the tag
+// names none. The decoder names the key of each field as go-yaml does.
+// It reads the yaml tag, or the json tag when the field has no yaml tag.
+// It lowercases the Go name when the tag it reads names none. The
+// property and the key agree for every field of a type only when:
+//
+//   - Each field that the decoder reads by name has a json tag that names
+//     it.
+//   - Each yaml tag names the field as its json tag does. A yaml tag that
+//     holds only options, such as yaml:",omitempty", hides the json tag.
+//   - Each field with yaml:"-" that the generator reads carries json:"-"
+//     too.
+//   - Each field that the generator reads inline carries yaml:",inline",
+//     and no other field does. The generator reads inline each embedded
+//     struct without a JSON name, and each struct field with the embed
+//     option of encoding/json/v2.
+//   - Only struct fields carry the embed option.
+//
+// Where the generator and the decoder disagree, the schema rejects
+// documents that decode, and passes documents whose values the decoder
+// leaves zero. [CheckFields] reports each field where they disagree. Call
+// it in a test of the package that generates the schema, so the test
+// catches the field before the schema ships:
+//
+//	func TestConfigFields(t *testing.T) {
+//	    require.NoError(t, schema.CheckFields[Config]())
+//	}
+//
 // # Validation
 //
 // [Compile] turns a JSON schema document, in JSON or YAML, into a
