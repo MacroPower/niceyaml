@@ -12,11 +12,13 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// TestSequence checks how spans select lines. Lines.All and View.All yield
-// the lines within any of the spans, once each and in content order, with
-// the index of each in the content. NewView and View.Slice create a view
-// that holds the lines the spans select, and the view still reaches every
-// line of the content by its index.
+// TestSequence checks how spans select lines. Lines.Within and
+// View.Within yield the lines within any of the spans, once each and in
+// content order, with the index of each in the content. Without a span
+// they yield no line. NewViewWithin and View.Slice create a view that
+// holds the lines the spans select, and its All yields them as a
+// Sequence. The view still reaches every line of the content by its
+// index.
 func TestSequence(t *testing.T) {
 	t.Parallel()
 
@@ -26,8 +28,10 @@ func TestSequence(t *testing.T) {
 		spans []position.Span
 		want  []int // The index in the content of each line selected.
 	}{
-		"no spans": {
-			want: []int{0, 1, 2, 3, 4, 5},
+		"no spans": {},
+		"every line": {
+			spans: []position.Span{position.NewSpan(0, 6)},
+			want:  []int{0, 1, 2, 3, 4, 5},
 		},
 		"one span": {
 			spans: []position.Span{position.NewSpan(1, 3)},
@@ -108,22 +112,18 @@ func TestSequence(t *testing.T) {
 				assert.Equal(t, tc.want, got, via)
 			}
 
-			sequences := map[string]line.Sequence{
-				"Lines": lines,
-				"View":  line.NewView(lines),
-			}
-
-			for via, seq := range sequences {
-				assertSelects(via+".All", seq.All(tc.spans...))
-			}
+			assertSelects("Lines.Within", lines.Within(tc.spans...))
+			assertSelects("View.Within", line.NewView(lines).Within(tc.spans...))
 
 			views := map[string]*line.View{
-				"NewView":    line.NewView(lines, tc.spans...),
-				"View.Slice": line.NewView(lines).Slice(tc.spans...),
+				"NewViewWithin": line.NewViewWithin(lines, tc.spans...),
+				"View.Slice":    line.NewView(lines).Slice(tc.spans...),
 			}
 
 			for via, view := range views {
-				assertSelects(via, view.All())
+				var seq line.Sequence = view
+
+				assertSelects(via, seq.All())
 				assert.Equal(t, len(tc.want), view.Count(), via)
 
 				for i := range lines.Len() {
@@ -143,6 +143,37 @@ func TestSequence(t *testing.T) {
 
 				assert.Equal(t, held.String(), view.String(), via)
 			}
+		})
+	}
+}
+
+// TestSequence_All checks that All of Lines and of a View over every line
+// yields every line, each with its index in the content.
+func TestSequence_All(t *testing.T) {
+	t.Parallel()
+
+	lines := newLines(stringtest.JoinLF(letterRows(3)...))
+
+	tcs := map[string]struct {
+		seq line.Sequence
+	}{
+		"Lines": {seq: lines},
+		"View":  {seq: line.NewView(lines)},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var got []int
+
+			for i, l := range tc.seq.All() {
+				assert.Same(t, lines.Line(i), l, "line %d", i)
+
+				got = append(got, i)
+			}
+
+			assert.Equal(t, []int{0, 1, 2}, got)
 		})
 	}
 }

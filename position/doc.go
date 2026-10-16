@@ -50,7 +50,14 @@
 // [GroupIndices] builds context windows around matched lines and merges
 // adjacent matches when their context would overlap. [ContextSpans] runs
 // that chain in one call. It groups the indices, expands each span by the
-// context, and clamps the result to the document:
+// context, and clamps the result to the document. A
+// [go.jacobcolvin.com/niceyaml/line.View.Slice] by the spans holds the
+// lines of the hunks:
 //
 //	hunks := position.ContextSpans(errorLines, 2, lines.Len())
+//	lipgloss.Println(p.Print(view.Slice(hunks...)))
+//
+// ContextSpans returns nil when no index lies in the document. A slice by
+// no span holds no line, so a view sliced by an empty result renders
+// nothing.
 package position

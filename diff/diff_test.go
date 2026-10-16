@@ -76,10 +76,10 @@ func TestDiffer_Views_LineNumbers(t *testing.T) {
 }
 
 // sequenceFunc adapts an iterator to [line.Sequence], as an implementation
-// from outside the line package. It ignores the spans.
+// from outside the line package.
 type sequenceFunc iter.Seq2[int, *line.Line]
 
-func (f sequenceFunc) All(...position.Span) iter.Seq2[int, *line.Line] {
+func (f sequenceFunc) All() iter.Seq2[int, *line.Line] {
 	return iter.Seq2[int, *line.Line](f)
 }
 

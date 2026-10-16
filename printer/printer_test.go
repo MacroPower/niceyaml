@@ -300,8 +300,12 @@ func TestPrinter_PrintSlice(t *testing.T) {
 		want   string
 		spans  position.Spans
 	}{
-		// Without a span, the view holds every line.
+		// Without a span, the view holds no line.
+		"no span": {
+			want: "",
+		},
 		"full range": {
+			spans: position.Spans{position.NewSpan(0, 5)},
 			want: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -311,6 +315,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			),
 		},
 		"full range with line numbers": {
+			spans:  position.Spans{position.NewSpan(0, 5)},
 			gutter: printer.LineNumberGutter,
 			want: stringtest.JoinLF(
 				"   1 first: 1",

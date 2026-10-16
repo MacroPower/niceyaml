@@ -143,6 +143,13 @@
 // the same way, to a window of columns around each mark on it. An error
 // excerpt shows those hunks, clipped.
 //
+// [Lines.All] yields every line, and [View.All] yields every line the view
+// holds. [Lines.Within] and [View.Within] yield the lines within some
+// spans, and they yield none without a span. A view from [View.Slice] or
+// [NewViewWithin] by no span holds no line. A slice by the
+// [position.ContextSpans] of a search that matches nothing therefore
+// renders nothing.
+//
 // The finder and diff packages read a [Sequence], which Lines and a view
 // both are. A view yields the lines it holds with the indices they have in
 // its content. A search of a slice therefore returns ranges that apply to

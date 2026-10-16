@@ -38,7 +38,7 @@ func BenchmarkLinesContentRanges(b *testing.B) {
 	}
 }
 
-func BenchmarkLinesRunes(b *testing.B) {
+func BenchmarkLinesRunesIn(b *testing.B) {
 	for _, sz := range benchSizes {
 		lines := newLines(yamltest.GenerateYAML(sz.lines))
 
@@ -52,7 +52,7 @@ func BenchmarkLinesRunes(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				for range lines.Runes(ranges...) {
+				for range lines.RunesIn(ranges...) {
 				}
 			}
 		})

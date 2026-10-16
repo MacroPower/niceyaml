@@ -271,25 +271,30 @@ func (ls Lines) Width() int {
 	return maxWidth
 }
 
-// All returns an iterator over the lines within any of the given spans, in
-// content order and each once whatever order the spans come in and however
-// they overlap. Without spans, All yields every line.
+// All returns an iterator over every line, in content order. Each
+// iteration yields the 0-indexed line index and the [*Line] at that index.
+// [Lines.Within] yields the lines of some spans.
+func (ls Lines) All() iter.Seq2[int, *Line] {
+	return func(yield func(int, *Line) bool) {
+		for i := range ls.lines {
+			if !yield(i, ls.lines[i]) {
+				return
+			}
+		}
+	}
+}
+
+// Within returns an iterator over the lines within any of the given spans,
+// in content order and each once whatever order the spans come in and
+// however they overlap. Without spans, Within yields no line, so the empty
+// result of [position.ContextSpans] selects nothing. [Lines.All] yields
+// every line.
 //
 // Each iteration yields the 0-indexed line index and the [*Line] at that
 // index. A span reaching outside the collection selects the lines it does
 // hold.
-func (ls Lines) All(spans ...position.Span) iter.Seq2[int, *Line] {
+func (ls Lines) Within(spans ...position.Span) iter.Seq2[int, *Line] {
 	return func(yield func(int, *Line) bool) {
-		if len(spans) == 0 {
-			for i := range ls.lines {
-				if !yield(i, ls.lines[i]) {
-					return
-				}
-			}
-
-			return
-		}
-
 		for _, s := range mergeSpans(spans, len(ls.lines)) {
 			for i := s.Start; i < s.End; i++ {
 				if !yield(i, ls.lines[i]) {
@@ -300,31 +305,38 @@ func (ls Lines) All(spans ...position.Span) iter.Seq2[int, *Line] {
 	}
 }
 
-// Runes returns an iterator over the runes within any of the given ranges,
-// in content order and each once whatever order the ranges come in and
-// however they overlap. Without ranges, Runes yields every rune.
+// Runes returns an iterator over every rune of the lines, in content
+// order. [Lines.RunesIn] yields the runes of some ranges.
 //
 // Each iteration yields a [position.Position] and the rune at that
 // position. The iteration includes line endings as a single '\n', as
 // [Line.Runes] does, so a newline occupies the column after the last
 // visible rune whether the source used LF or CRLF, and columns match
 // [Line.Width].
-func (ls Lines) Runes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
+func (ls Lines) Runes() iter.Seq2[position.Position, rune] {
 	return func(yield func(position.Position, rune) bool) {
-		if len(ranges) == 0 {
-			every := position.Spans{position.NewSpan(0, math.MaxInt)}
+		every := position.Spans{position.NewSpan(0, math.MaxInt)}
 
-			for i := range ls.lines {
-				if !ls.yieldRunes(i, every, yield) {
-					return
-				}
+		for i := range ls.lines {
+			if !ls.yieldRunes(i, every, yield) {
+				return
 			}
-
-			return
 		}
+	}
+}
 
+// RunesIn returns an iterator over the runes within any of the given
+// ranges, in content order and each once whatever order the ranges come in
+// and however they overlap. Without ranges, RunesIn yields no rune, so the
+// ranges of a search that matches nothing select nothing. [Lines.Runes]
+// yields every rune.
+//
+// Each iteration yields a [position.Position] and the rune at that
+// position, line endings included, as [Lines.Runes] yields them.
+func (ls Lines) RunesIn(ranges ...position.Range) iter.Seq2[position.Position, rune] {
+	return func(yield func(position.Position, rune) bool) {
 		// A range holds runes only on the lines from its start line through
-		// its end line, so [Lines.All] over those line spans visits each
+		// its end line, so [Lines.Within] of those line spans visits each
 		// line that any range touches once, in content order. Capping the
 		// end line first keeps the span end from overflowing.
 		spans := make([]position.Span, len(ranges))
@@ -347,7 +359,7 @@ func (ls Lines) Runes(ranges ...position.Range) iter.Seq2[position.Position, run
 			next   int
 		)
 
-		for i := range ls.All(spans...) {
+		for i := range ls.Within(spans...) {
 			for ; next < len(sorted) && sorted[next].Start.Line <= i; next++ {
 				active = append(active, sorted[next])
 			}

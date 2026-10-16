@@ -483,8 +483,8 @@ func (m *Model) remeasure(ranges ...position.Range) {
 		return
 	}
 
-	// A slice of a view by no span holds every line, so the slices below
-	// would measure the whole view.
+	// Without ranges, the slices below hold no line, so laying them out
+	// changes nothing.
 	if len(ranges) == 0 {
 		return
 	}
@@ -498,7 +498,7 @@ func (m *Model) remeasure(ranges ...position.Range) {
 
 	p := m.renderPrinter(m.paneWidth())
 
-	left := m.highlighted(false, spans...)
+	left := m.highlightedWithin(false, spans...)
 	leftLayout := p.Layout(left)
 	changed := m.rows.differs(leftLayout, left, m.rows.left, m.rows.leftWidths)
 
@@ -508,7 +508,7 @@ func (m *Model) remeasure(ranges ...position.Range) {
 	)
 
 	if m.rows.right != nil && m.baseRight != nil {
-		right = m.highlighted(true, spans...)
+		right = m.highlightedWithin(true, spans...)
 		rightLayout = p.Layout(right)
 		changed = changed || m.rows.differs(rightLayout, right, m.rows.right, m.rows.rightWidths)
 	}
@@ -1103,22 +1103,33 @@ func matchLines(view *line.View, matches position.Ranges) map[int][]int {
 	return lines
 }
 
-// highlighted returns a slice of the base view of the left pane, or of the
-// right one when right is true, with the search highlights of the matches
-// that cover its lines. The slice holds the lines within spans, or every
-// line when spans is empty. The base view keeps no highlight, so a move of
-// the selection costs the lines a caller lays out or renders rather than
-// every match of the document.
+// highlightedWithin returns a slice of the base view of the left pane, or
+// of the right one when right is true. The slice holds the lines within
+// spans with the search highlights of the matches that cover them.
+// Without spans, the slice holds no line. The base view keeps no
+// highlight, so a move of the selection costs the lines a caller lays out
+// or renders rather than every match of the document.
+func (m *Model) highlightedWithin(right bool, spans ...position.Span) *line.View {
+	base := m.baseLeft
+	if right {
+		base = m.baseRight
+	}
+
+	return m.highlight(right, base.Slice(spans...))
+}
+
+// highlight blends into view the search highlights of the matches that
+// cover the lines it holds, and returns view. View must be a clone or a
+// slice of the base view of the left pane, or of the right one when right
+// is true. The base view keeps no highlight.
 //
 // It blends the matches in the order of the match list, so each line gets
 // its overlays in the same order however the caller slices the view.
-func (m *Model) highlighted(right bool, spans ...position.Span) *line.View {
-	base, matches, lines := m.baseLeft, m.leftMatches, m.leftLines
+func (m *Model) highlight(right bool, view *line.View) *line.View {
+	matches, lines := m.leftMatches, m.leftLines
 	if right {
-		base, matches, lines = m.baseRight, m.rightMatches, m.rightLines
+		matches, lines = m.rightMatches, m.rightLines
 	}
-
-	view := base.Slice(spans...)
 
 	// A match that runs across a line break covers several lines of the
 	// slice, so its index repeats.
@@ -1627,11 +1638,11 @@ func (m *Model) fillRows() {
 
 		p := m.renderPrinter(m.paneWidth())
 
-		left := m.highlighted(false)
+		left := m.highlight(false, m.baseLeft.Clone())
 		c.indices, c.left, c.leftWidths = layoutRows(p.Layout(left), left)
 
 		if m.viewMode == ViewModeSideBySide && m.baseRight != nil {
-			right := m.highlighted(true)
+			right := m.highlight(true, m.baseRight.Clone())
 			_, c.right, c.rightWidths = layoutRows(p.Layout(right), right)
 		}
 
@@ -1907,7 +1918,7 @@ func (m *Model) visibleRows() []string {
 	}
 
 	p := m.renderPrinter(m.maxWidth())
-	rows := splitLines(p.Print(m.highlighted(false, m.window(first, last))))
+	rows := splitLines(p.Print(m.highlightedWithin(false, m.window(first, last))))
 	rows = m.trimWindow(m.trimFrame(rows, first, last), first)
 
 	// Rows may run past the content width, with wrap off or when the
@@ -2263,7 +2274,7 @@ func (m *Model) paneHit(right bool, k, row, cell, width int) (position.Position,
 
 	i := m.rows.indices[k]
 	p := m.renderPrinter(width)
-	view := m.highlighted(right, position.NewSpan(i, i+1))
+	view := m.highlightedWithin(right, position.NewSpan(i, i+1))
 	layout := p.Layout(view)
 
 	at := m.xOffset + cell
@@ -2575,7 +2586,7 @@ func (m *Model) scrollTo(right bool, rng position.Range) bool {
 	// The row of the range within its line comes from a layout of the line
 	// alone in the pane it is in, and the line's first row from the sums
 	// that place the taller of the two panes.
-	layout := m.renderPrinter(m.paneWidth()).Layout(m.highlighted(right, position.NewSpan(i, i+1)))
+	layout := m.renderPrinter(m.paneWidth()).Layout(m.highlightedWithin(right, position.NewSpan(i, i+1)))
 
 	lineRow := layout.RowOf(rng.Start)
 	if lineRow < 0 {
@@ -2806,13 +2817,13 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	window := m.window(first, last)
 	p := m.renderPrinter(paneWidth)
 
-	leftRows := m.trimFrame(splitLines(p.Print(m.highlighted(false, window))), first, last)
+	leftRows := m.trimFrame(splitLines(p.Print(m.highlightedWithin(false, window))), first, last)
 
 	// Without a diff, both panes show the left content, so the right pane
 	// reuses the rows the left pane rendered.
 	rightRows := leftRows
 	if m.baseRight != nil {
-		rightRows = m.trimFrame(splitLines(p.Print(m.highlighted(true, window))), first, last)
+		rightRows = m.trimFrame(splitLines(p.Print(m.highlightedWithin(true, window))), first, last)
 	}
 
 	blank := m.blankPaneRow(p)

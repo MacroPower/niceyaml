@@ -509,7 +509,7 @@ func TestPrinter_Layout_Width(t *testing.T) {
 		view   *line.View
 		gutter printer.Gutter // Nil for no gutter.
 		opts   []printer.Option
-		spans  []position.Span
+		spans  []position.Span // Nil for every line.
 		wrap   int
 		want   int
 	}{
@@ -565,7 +565,11 @@ func TestPrinter_Layout_Width(t *testing.T) {
 			t.Parallel()
 
 			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.wrap)).With(tc.opts...)
-			view := tc.view.Slice(tc.spans...)
+			view := tc.view
+			if tc.spans != nil {
+				view = view.Slice(tc.spans...)
+			}
+
 			got := p.Layout(view).Width()
 
 			assert.Equal(t, tc.want, got)
@@ -592,7 +596,10 @@ func TestPrinter_Layout_LineWidth(t *testing.T) {
 		spans []position.Span
 		want  []int
 	}{
-		"every line": {want: []int{10, 16, 35}},
+		"every line": {
+			spans: []position.Span{position.NewSpan(0, 3)},
+			want:  []int{10, 16, 35},
+		},
 		"lines the view does not hold": {
 			spans: []position.Span{position.NewSpan(1, 2)},
 			want:  []int{0, 16, 0},

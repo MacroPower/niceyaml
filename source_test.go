@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"iter"
 	"net"
 	"os"
 	"path/filepath"
@@ -150,12 +151,12 @@ type runePosition struct {
 	Pos position.Position
 }
 
-// runePositions returns each rune that lines yields over ranges, with its
-// position, in order.
-func runePositions(lines line.Lines, ranges ...position.Range) []runePosition {
+// runePositions returns each rune that seq yields, with its position, in
+// order.
+func runePositions(seq iter.Seq2[position.Position, rune]) []runePosition {
 	var got []runePosition
 
-	for pos, r := range lines.Runes(ranges...) {
+	for pos, r := range seq {
 		got = append(got, runePosition{R: r, Pos: pos})
 	}
 
@@ -409,9 +410,15 @@ func TestSource_Runes(t *testing.T) {
 
 			source := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input))
 
+			// A case without ranges reads every rune.
+			seq := source.Lines().Runes()
+			if tc.ranges != nil {
+				seq = source.Lines().RunesIn(tc.ranges...)
+			}
+
 			var got []runePosition
 
-			for pos, r := range source.Lines().Runes(tc.ranges...) {
+			for pos, r := range seq {
 				got = append(got, runePosition{R: r, Pos: pos})
 				if r == tc.stop {
 					break
@@ -428,12 +435,12 @@ func TestSource_Runes(t *testing.T) {
 		source := niceyaml.NewSourceFromString(sourceFiveLines)
 		require.Equal(t, 5, source.Lines().Len())
 
-		all := runePositions(source.Lines())
+		all := runePositions(source.Lines().Runes())
 		require.NotEmpty(t, all)
 		assert.Equal(t, runePosition{R: 'a', Pos: position.New(0, 0)}, all[0])
 
 		rng := position.NewRange(position.New(-5, 0), position.New(100, 100))
-		assert.Equal(t, all, runePositions(source.Lines(), rng))
+		assert.Equal(t, all, runePositions(source.Lines().RunesIn(rng)))
 	})
 }
 
@@ -508,9 +515,15 @@ func TestSource_Lines_All(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
+			// A case without spans reads every line.
+			seq := source.Lines().All()
+			if tc.spans != nil {
+				seq = source.Lines().Within(tc.spans...)
+			}
+
 			var got []int
 
-			for idx := range source.Lines().All(tc.spans...) {
+			for idx := range seq {
 				got = append(got, idx)
 				if len(got) == tc.limit {
 					break

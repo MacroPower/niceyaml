@@ -126,7 +126,7 @@ func TestAnnotate(t *testing.T) {
 	t.Run("view without the line", func(t *testing.T) {
 		t.Parallel()
 
-		view := line.NewView(docLines, position.NewSpan(0, 1))
+		view := line.NewView(docLines).Slice(position.NewSpan(0, 1))
 		require.Equal(t, 1, view.Count())
 
 		assert.False(t, excerpt.Annotate(view, docLines, []excerpt.Mark{mark(position.New(1, 4), "x")}))

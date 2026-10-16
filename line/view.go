@@ -47,7 +47,8 @@ import (
 // concurrent mutation. Decorate from one goroutine at a time, and do not
 // decorate while another goroutine renders.
 //
-// Create instances with [NewView]. The zero value is an empty view.
+// Create instances with [NewView] or [NewViewWithin]. The zero value is an
+// empty view.
 type View struct {
 	// The decoration of the lines that carry some, keyed by index. An
 	// undecorated line has no entry, so a slice or a clone costs the
@@ -64,19 +65,29 @@ type View struct {
 	clip int
 }
 
-// NewView creates a new [*View] over lines with no decoration. Without
-// spans it holds every line in order. With spans it holds the lines
-// within any of them, in content order and each once, as [Lines.All]
-// yields them. It then holds what [View.Slice] of a new View over every
-// line holds, and the index it builds grows with those lines alone.
-func NewView(lines Lines, spans ...position.Span) *View {
-	v := &View{lines: lines}
+// NewView creates a new [*View] over lines with no decoration. The view
+// holds every line, in content order. [NewViewWithin] creates a view that
+// holds the lines of some spans, such as one document of a file that
+// holds several.
+func NewView(lines Lines) *View {
+	v := &View{lines: lines, held: make([]int, 0, lines.Len())}
 
-	if len(spans) == 0 {
-		v.held = make([]int, 0, lines.Len())
+	for i := range lines.All() {
+		v.held = append(v.held, i)
 	}
 
-	for i := range lines.All(spans...) {
+	return v
+}
+
+// NewViewWithin creates a new [*View] over lines with no decoration. The
+// view holds the lines within any of the given spans, in content order and
+// each once, as [Lines.Within] yields them. Without spans, the view holds
+// no line. The view holds the lines that a [View.Slice] of a [NewView] by
+// the same spans holds. The index it builds grows with those lines alone.
+func NewViewWithin(lines Lines, spans ...position.Span) *View {
+	v := &View{lines: lines}
+
+	for i := range lines.Within(spans...) {
 		v.held = append(v.held, i)
 	}
 
@@ -169,26 +180,36 @@ func (v *View) Index(l *Line) (int, bool) {
 	return 0, false
 }
 
-// All returns an iterator over the lines the [View] holds within any of
-// the given spans, in content order and each once whatever order the
-// spans come in and however they overlap. Without spans, All yields every
-// line the View holds. Each iteration yields the index of the line in the
-// content and the [*Line], and the index reaches the line's decoration
-// through [View.Flag], [View.Overlays], and [View.Annotations]. A span
-// reaching outside the content selects the lines it does hold.
-func (v *View) All(spans ...position.Span) iter.Seq2[int, *Line] {
+// All returns an iterator over every line the [View] holds, in content
+// order. Each iteration yields the index of the line in the content and
+// the [*Line], and the index reaches the line's decoration through
+// [View.Flag], [View.Overlays], and [View.Annotations]. [View.Within]
+// yields the lines of some spans.
+func (v *View) All() iter.Seq2[int, *Line] {
 	return func(yield func(int, *Line) bool) {
 		if v == nil {
 			return
 		}
 
-		if len(spans) == 0 {
-			for _, i := range v.held {
-				if !yield(i, v.lines.lines[i]) {
-					return
-				}
+		for _, i := range v.held {
+			if !yield(i, v.lines.lines[i]) {
+				return
 			}
+		}
+	}
+}
 
+// Within returns an iterator over the lines the [View] holds within any of
+// the given spans, in content order and each once whatever order the
+// spans come in and however they overlap. Without spans, Within yields no
+// line, so the empty result of [position.ContextSpans] selects nothing.
+// [View.All] yields every line the View holds. Each iteration
+// yields the index of the line in the content and the [*Line], as
+// View.All does. A span reaching outside the content selects the lines it
+// does hold.
+func (v *View) Within(spans ...position.Span) iter.Seq2[int, *Line] {
+	return func(yield func(int, *Line) bool) {
+		if v == nil {
 			return
 		}
 
@@ -360,16 +381,16 @@ func (v *View) Clone() *View {
 
 // Slice returns a new [*View] over the same content that holds the lines
 // the receiver holds within any of the given spans, in content order and
-// each once, as [View.All] yields them, each with its index and its
+// each once, as [View.Within] yields them, each with its index and its
 // decoration. The result owns its decoration and carries that of the
 // lines it holds, so it is the view a caller renders to show part of a
 // document, such as the hunks around an error. A range or an index that
 // applies to the receiver applies to it. Slicing an already sliced
 // view narrows it further.
 //
-// With no span, Slice holds every line the receiver holds, as [View.All]
-// yields every line when given no span. Pass an empty [position.Span] for
-// a view that holds none.
+// With no span, the result holds no line, so a slice by the empty result
+// of [position.ContextSpans] renders nothing. [View.Clone] holds every
+// line the receiver holds.
 func (v *View) Slice(spans ...position.Span) *View {
 	if v == nil {
 		return &View{}
@@ -377,7 +398,7 @@ func (v *View) Slice(spans ...position.Span) *View {
 
 	out := &View{lines: v.lines, clip: v.clip}
 
-	for i := range v.All(spans...) {
+	for i := range v.Within(spans...) {
 		out.held = append(out.held, i)
 
 		if f := v.Flag(i); f != FlagDefault {
@@ -439,12 +460,7 @@ func (v *View) Hunks(context int) *View {
 		}
 	}
 
-	spans := position.ContextSpans(marked, context, v.lines.Len())
-	if len(spans) == 0 {
-		return v.Slice(position.Span{})
-	}
-
-	hunks := v.Slice(spans...)
+	hunks := v.Slice(position.ContextSpans(marked, context, v.lines.Len())...)
 
 	// A View that is itself hunks carries the separators of its own gaps,
 	// which need not match the gaps of the result, so the result drops

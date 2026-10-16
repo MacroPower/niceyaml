@@ -153,9 +153,23 @@ func TestView_Contains(t *testing.T) {
 func TestView_All(t *testing.T) {
 	t.Parallel()
 
-	// TestSequence checks how All selects lines from a view of every line.
-	// This view holds lines 0, 2, and 5 alone, so All yields those of them
-	// that the spans select.
+	// This view holds lines 0, 2, and 5 alone, so All yields those lines
+	// with the indices they have in the content.
+	view := newView(stringtest.JoinLF(letterRows(6)...)).Slice(
+		position.NewSpan(0, 1),
+		position.NewSpan(2, 3),
+		position.NewSpan(5, 6),
+	)
+
+	assert.Equal(t, []int{0, 2, 5}, indicesOf(view.All()))
+}
+
+func TestView_Within(t *testing.T) {
+	t.Parallel()
+
+	// TestSequence checks how Within selects lines from a view of every
+	// line. This view holds lines 0, 2, and 5 alone, so Within yields those
+	// of them that the spans select.
 	view := newView(stringtest.JoinLF(letterRows(6)...)).Slice(
 		position.NewSpan(0, 1),
 		position.NewSpan(2, 3),
@@ -166,8 +180,10 @@ func TestView_All(t *testing.T) {
 		spans []position.Span
 		want  []int
 	}{
-		"no spans yields the lines the view holds": {
-			want: []int{0, 2, 5},
+		"no spans yields no line": {},
+		"span over the content yields the lines the view holds": {
+			spans: []position.Span{position.NewSpan(0, 6)},
+			want:  []int{0, 2, 5},
 		},
 		"span over lines the view skips": {
 			spans: []position.Span{position.NewSpan(1, 5)},
@@ -186,7 +202,7 @@ func TestView_All(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, indicesOf(view.All(tc.spans...)))
+			assert.Equal(t, tc.want, indicesOf(view.Within(tc.spans...)))
 		})
 	}
 }
@@ -210,7 +226,7 @@ func TestView_Flag(t *testing.T) {
 	view.SetFlag(1, line.FlagDefault)
 	view.SetFlag(2, line.FlagDefault)
 	assert.Equal(t, []line.Flag{line.FlagDefault, line.FlagDefault, line.FlagDefault}, flagsOf(view))
-	assert.Equal(t, line.FlagDefault, view.Slice().Flag(1))
+	assert.Equal(t, line.FlagDefault, view.Clone().Flag(1))
 	assert.Equal(t, 0, view.Hunks(0).Count())
 }
 
@@ -376,9 +392,9 @@ func TestView_BlendOverlay(t *testing.T) {
 }
 
 // TestView_Clone checks Clone together with Slice and Clip, which also
-// return a copy of the view. With no span, a slice holds every line of the
-// view, and a clip leaves its lines whole. Each copy shares the lines of
-// the view and owns its decoration.
+// return a copy of the view. A slice by a span over every line holds every
+// line of the view, and a clip leaves its lines whole. Each copy shares
+// the lines of the view and owns its decoration.
 func TestView_Clone(t *testing.T) {
 	t.Parallel()
 
@@ -390,7 +406,7 @@ func TestView_Clone(t *testing.T) {
 
 	tcs := map[string]func(*line.View) *line.View{
 		"Clone": (*line.View).Clone,
-		"Slice": func(v *line.View) *line.View { return v.Slice() },
+		"Slice": func(v *line.View) *line.View { return v.Slice(position.NewSpan(0, 3)) },
 		"Clip":  func(v *line.View) *line.View { return v.Clip(10) },
 	}
 
@@ -1255,8 +1271,12 @@ func TestView_Hunks(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				// A slice with no spans holds every line.
-				view := newView(input).Slice(tc.held...)
+				// Without held spans, the view holds every line.
+				view := newView(input)
+				if tc.held != nil {
+					view = view.Slice(tc.held...)
+				}
+
 				for _, i := range tc.annotated {
 					view.Annotate(i, line.Annotation{Content: "note", Placement: line.Below})
 				}
@@ -1373,8 +1393,12 @@ func TestView_Hunks(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				// A slice with no spans holds every line.
-				view := newView(input).Slice(tc.held...)
+				// Without held spans, the view holds every line.
+				view := newView(input)
+				if tc.held != nil {
+					view = view.Slice(tc.held...)
+				}
+
 				for i, ann := range tc.annotations {
 					view.Annotate(i, ann)
 				}

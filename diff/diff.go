@@ -275,15 +275,7 @@ func (r *Result) Hunks(context int) *line.View {
 		}
 	}
 
-	unified := r.Unified()
-
-	if len(spans) == 0 {
-		// Slice with no span holds every line, and an empty span holds
-		// none.
-		return unified.Slice(position.Span{})
-	}
-
-	view := unified.Slice(spans...)
+	view := r.Unified().Slice(spans...)
 
 	// The spans come in order, so one pass over the ops counts the lines
 	// each side holds before each hunk and within it.

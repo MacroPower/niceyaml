@@ -1,10 +1,6 @@
 package line
 
-import (
-	"iter"
-
-	"go.jacobcolvin.com/niceyaml/position"
-)
+import "iter"
 
 // Sequence is the lines of some content in order, each with its index in
 // that content. The diff and finder packages read one, so they take
@@ -17,9 +13,8 @@ import (
 //
 // See [Lines] and [*View] for implementations.
 type Sequence interface {
-	// All returns an iterator over the lines within any of the given
-	// spans, in ascending order of index and each once. Without spans it
-	// yields every line of the sequence. Each iteration yields the index
-	// of the line in the content and the [*Line].
-	All(spans ...position.Span) iter.Seq2[int, *Line]
+	// All returns an iterator over every line of the sequence, in
+	// ascending order of index and each once. Each iteration yields the
+	// index of the line in the content and the [*Line].
+	All() iter.Seq2[int, *Line]
 }

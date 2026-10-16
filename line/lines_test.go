@@ -1511,7 +1511,7 @@ func blockScalarValue(t *testing.T, lines line.Lines) string {
 
 	var values []string
 
-	for _, ln := range lines.All(position.NewSpan(1, lines.Len())) {
+	for _, ln := range lines.Within(position.NewSpan(1, lines.Len())) {
 		for _, part := range ln.Tokens() {
 			if part.Value != "" {
 				values = append(values, part.Value)
@@ -2297,13 +2297,14 @@ func TestLines(t *testing.T) {
 		assert.Equal(t, input, sb.String())
 	})
 
-	t.Run("Runes yields each rune once in content order", func(t *testing.T) {
+	t.Run("RunesIn yields each rune once in content order", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
 			ranges []position.Range
 			want   []position.Position
 		}{
+			"no ranges": {},
 			"overlapping": {
 				ranges: []position.Range{yamltest.LineRange(0, 0, 3), yamltest.LineRange(0, 1, 4)},
 				want: []position.Position{
@@ -2369,7 +2370,7 @@ func TestLines(t *testing.T) {
 
 				var got []position.Position
 
-				for pos := range lines.Runes(tc.ranges...) {
+				for pos := range lines.RunesIn(tc.ranges...) {
 					got = append(got, pos)
 				}
 
@@ -2378,7 +2379,7 @@ func TestLines(t *testing.T) {
 		}
 	})
 
-	t.Run("Runes with ranges yields the runes they contain", func(t *testing.T) {
+	t.Run("RunesIn yields the runes the ranges contain", func(t *testing.T) {
 		t.Parallel()
 
 		// Every range of the content, from every start to every end in
@@ -2413,7 +2414,7 @@ func TestLines(t *testing.T) {
 		collect := func(rs ...position.Range) []position.Position {
 			var out []position.Position
 
-			for pos := range lines.Runes(rs...) {
+			for pos := range lines.RunesIn(rs...) {
 				out = append(out, pos)
 			}
 
@@ -2425,6 +2426,7 @@ func TestLines(t *testing.T) {
 		}
 
 		assert.Equal(t, contained(ranges...), collect(ranges...), "all ranges")
+		assert.Empty(t, collect(), "no ranges")
 	})
 
 	t.Run("CRLF endings do not count toward width or runes", func(t *testing.T) {

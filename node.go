@@ -620,7 +620,7 @@ func (n *Node) Span() position.Span {
 // the error lies in the span, and reports false otherwise, as Node.Span
 // describes.
 func (n *Node) View() *line.View {
-	return line.NewView(n.source.lines, n.span)
+	return line.NewViewWithin(n.source.lines, n.span)
 }
 
 // Ranges returns the ranges of the token path points at, the token
