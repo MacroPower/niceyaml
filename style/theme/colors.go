@@ -2,6 +2,7 @@ package theme
 
 import (
 	"cmp"
+	"fmt"
 	"image/color"
 	"maps"
 	"math"
@@ -16,113 +17,230 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// dimShift separates a dimmed variant from its source color.
-const dimShift = 0.15
-
-// subtleDimShift moves [kind.TextSubtleDim] further toward the background
-// than dimShift moves [kind.TextSubtle].
-const subtleDimShift = 0.30
-
-// minTextContrast is the WCAG AA contrast ratio for body text. The body
-// text keeps at least this ratio on a highlight, unless its own ratio on
-// the base background is below maxContrastLoss times this one. The text
-// then keeps at least its own ratio divided by maxContrastLoss.
-const minTextContrast = 4.5
-
-// maxContrastLoss is the most that a highlight may divide the contrast of
-// the comments by. It bounds the body text the same way only where the
-// body's own contrast is below minTextContrast times maxContrastLoss,
-// since body text above that need only keep minTextContrast.
-const maxContrastLoss = 1.25
-
-// blendDistance and paintDistance are the CIEDE2000 distances, on
-// go-colorful's scale of 0 to about 1, that [highlightSurfaces] puts
-// between the base background and the dim highlight, and between the dim
-// highlight and the highlight. The first measures the highlights as the
-// printer blends them into the base background, and the second measures
-// them as it paints them over it. Both sit well above 0.05, about the
-// least distance at which a reader tells two colors apart, so the
-// highlights show at a glance in either overlay mode.
-const (
-	blendDistance = 0.08
-	paintDistance = 0.135
-)
-
-// palette holds the colors [palette.styles] builds the full [style.Styles]
-// of a catalog theme from. Every built-in theme except charm is one palette
-// in [palettes], so a theme lists its colors rather than every kind.
-type palette struct {
-	// Tokens sets token kinds in the style-string form [style.Parse]
-	// reads. Each spec layers over the style its kind inherits, so a spec
-	// naming only attributes keeps the colors of the closest kind above
-	// it. Kinds left out inherit from their parent, with four exceptions.
-	// The headings, the highlights, and the accent, subtle, and status text
-	// take the styles the palette derives for them, even when Tokens sets
-	// a kind above them, and a spec for one of them layers over the
-	// derived style. The inserted, deleted, and error marks take their
-	// colors from OK and Error. [kind.LiteralNull] takes the
-	// [kind.LiteralBoolean] spec, since the source themes color null, true,
-	// and false as one keyword constant. [kind.UI] takes only the
-	// foreground of the finished [kind.Comment] style, so the chrome does
-	// not pick up the italics or bold of the comments. A UI spec layers
-	// over that color, and the UI children inherit from UI as usual.
-	Tokens map[kind.Kind]string
-	// Fg and Bg are the base text colors as hex strings. Bg becomes the
-	// surface of the theme, as [style.WithSurface] sets it. An empty value
-	// leaves the terminal default in place. The derived kinds then assume
-	// black on white for a [Light] theme and white on black for a [Dark]
-	// one.
-	Fg, Bg string
-	// Accent colors headings and accented text, and highlights take its
-	// hue, or the nearest hue that lets them stand apart. OK, Warn, and
-	// Error color the status kinds. OK and Error also color the inserted,
-	// deleted, and error marks when Tokens leaves them out. A heading, and
-	// an error mark Tokens leaves out, draws its text in Fg or Bg,
-	// whichever contrasts more with the color behind it.
-	Accent, OK, Warn, Error string
+// Colors holds the colors that [Derive] builds the [style.Styles] of a
+// theme from. A theme built from a Colors value presents every kind that a
+// built-in theme does.
+//
+// A color field that holds nil or a [lipgloss.NoColor] is unset.
+type Colors struct {
+	// Fg is the color of the body text. An unset Fg leaves the terminal's
+	// own foreground in place. [Derive] then derives the other kinds from
+	// black for a [Light] theme and from white for a [Dark] one.
+	Fg color.Color
+	// Bg is the background of the theme, and it becomes the surface of
+	// the styles, as [style.WithSurface] sets it. An unset Bg sets no
+	// surface, so the text shows the terminal's own background. [Derive]
+	// then derives the other kinds from white for a [Light] theme and from
+	// black for a [Dark] one.
+	Bg color.Color
+	// Accent colors the plain headings and accented text. The highlights
+	// take its hue, or the nearest hue that lets them stand apart. An unset
+	// Accent takes a blue picked for the mode.
+	Accent color.Color
+	// OK colors success text, success headings, and inserted lines. An
+	// unset OK takes a green picked for the mode.
+	OK color.Color
+	// Warn colors warning text, warning headings, and the locations of
+	// warnings. An unset Warn takes an amber picked for the mode.
+	Warn color.Color
+	// Error colors error text, error headings, deleted lines, and the
+	// locations of errors. An unset Error takes a red picked for the mode.
+	Error color.Color
 	// Mode is the background the theme targets. It also picks the
 	// direction of the derived shifts. [kind.TextSubtle] and
-	// [kind.TextSubtleDim] move toward the background, while
-	// [kind.TextAccentDim] moves away from it, so the dimmed accent reads
+	// [kind.TextSubtleDim] move toward the background, but
+	// [kind.TextAccentDim] moves away from it. The dimmed accent thus reads
 	// brighter than the accent on a [Dark] theme and darker on a [Light]
 	// one. An accent that cannot move further from the background, such as
-	// black on a [Light] theme, dims toward it instead. Highlights and the
-	// accent and subtle headings tint the background, and they step its
-	// luminance toward that of the text only where the tint needs room.
+	// black on a [Light] theme, dims toward it instead.
 	Mode Mode
 }
 
-// styles builds the [style.Styles] for the palette.
-func (p palette) styles() style.Styles {
-	fg, bg := p.surface()
+// Token styles one kind of a theme that [Derive] builds. It holds a spec
+// in the form that [style.Parse] reads, such as "bold #268bd2".
+//
+// Derive layers each Token over the style its kind would otherwise take. A
+// Token that names only attributes thus keeps the colors of that style.
+// The "nobold", "noitalic", and "nounderline" keywords turn off an
+// attribute that the style beneath sets, where [style.Parse] only leaves
+// the attribute unset.
+type Token string
+
+// FromColors creates a new [Theme] named name, whose [Theme.Styles]
+// returns the styles that [Derive] builds from c and tokens. The theme
+// takes its [Mode] from c. It keeps a copy of tokens, so a later change
+// to the map does not reach it.
+//
+// FromColors checks each token when it creates the theme, and it panics
+// when [style.Parse] rejects one. The panic value is an error that wraps
+// the error from [style.Parse]. A program that reads its specs at run
+// time should check each one with [style.Parse] first.
+func FromColors(name string, c Colors, tokens map[kind.Kind]Token) Theme {
+	err := checkTokens(tokens)
+	if err != nil {
+		panic(err)
+	}
+
+	return fromColors(name, c, maps.Clone(tokens))
+}
+
+// fromColors creates a new [Theme] that derives its styles from c and
+// tokens as [FromColors] does, but without checking or copying tokens.
+// The first call to [Theme.Styles] panics on a token that [style.Parse]
+// rejects. The built-in catalog creates its themes with fromColors. A
+// program that imports the package thus does not parse every built-in
+// token at startup.
+func fromColors(name string, c Colors, tokens map[kind.Kind]Token) Theme {
+	return New(name, c.Mode, func() style.Styles {
+		return derive(c, tokens)
+	})
+}
+
+// Derive builds the [style.Styles] of a theme from c and tokens.
+//
+// Derive first sets the kinds that the colors of c decide:
+//
+//   - [kind.GenericHeading] draws bold text on Accent,
+//     [kind.GenericHeadingOK] on OK, [kind.GenericHeadingWarn] on Warn,
+//     and [kind.GenericHeadingError] on Error. Each draws its text in Fg
+//     or Bg, whichever contrasts more with the color behind it.
+//   - [kind.GenericHighlightDim] paints a tint of Bg, and
+//     [kind.GenericHighlight] paints a stronger tint.
+//     [kind.GenericHeadingSubtle] draws Fg on the dim tint, and
+//     [kind.GenericHeadingAccent] draws Fg, shifted away from Bg, on the
+//     stronger one.
+//   - [kind.TextAccent] draws in Accent, and [kind.TextAccentDim] draws in
+//     a shade of Accent that Mode picks.
+//   - [kind.TextSubtle] draws Fg shifted toward Bg, and
+//     [kind.TextSubtleDim] shifts it further.
+//   - [kind.TextOK] draws in OK, [kind.TextWarn] in Warn, and
+//     [kind.TextError] in Error.
+//
+// A token for one of these kinds layers over the style that Derive sets
+// for it. A token for a kind above one of them, such as [kind.Generic] or
+// [kind.Text], does not reach it.
+//
+// A renderer paints the lines of a diff and the locations of errors and
+// warnings in four more kinds. Derive gives each one that tokens leaves
+// out a default:
+//
+//   - [kind.GenericInserted] draws in OK.
+//   - [kind.GenericDeleted] draws in Error.
+//   - [kind.GenericError] draws as a badge on Error.
+//   - [kind.GenericWarn] draws as a badge on Warn.
+//
+// Each badge draws its text in Fg or Bg, whichever contrasts more with the
+// badge. The mark thus shows even over a token drawn in the color of the
+// badge. A token for one of these four kinds replaces the default and
+// layers over the style the kind inherits.
+//
+// Derive then layers each token over the style its kind inherits, parents
+// ahead of children. A token for a child thus layers over the finished
+// style of its parent. Two kinds take a style from another kind:
+//
+//   - [kind.LiteralNull] takes the token of [kind.LiteralBoolean] when
+//     tokens sets the booleans and leaves null out. Most editor color
+//     schemes color null, true, and false as one keyword constant.
+//   - [kind.UI] takes the foreground of the finished [kind.Comment] style
+//     and none of its attributes. The gutters and annotations thus do not
+//     take the italics or bold of the comments. A UI token layers over
+//     that color, and the kinds below UI inherit from it.
+//
+// Derive picks the two highlight tints against the finished token styles.
+// Each tint stands apart from the color beneath it, whether a renderer
+// paints the highlight over the text or blends it into the background of
+// the text. On each tint, the body text and the comments stay readable.
+// So does the text of each diff line or badge that paints a fill of its
+// own.
+//
+// Bg becomes the surface of the styles, as [style.WithSurface] sets it,
+// so the kinds hold no background of their own unless they paint one.
+//
+// The rules and the constants behind the derived colors might change in a
+// later release. A test that pins the exact output of Derive might then
+// need updating.
+//
+// Derive panics when [style.Parse] rejects a token. The panic value is an
+// error that wraps the error from [style.Parse].
+func Derive(c Colors, tokens map[kind.Kind]Token) style.Styles {
+	err := checkTokens(tokens)
+	if err != nil {
+		panic(err)
+	}
+
+	return derive(c, tokens)
+}
+
+// derive builds the styles that [Derive] describes, without checking
+// tokens first. It panics on a token that [style.Parse] rejects.
+func derive(c Colors, tokens map[kind.Kind]Token) style.Styles {
+	c = c.filled()
+	fg, bg := c.surface()
 
 	// The search for the highlight surfaces holds the finished token
 	// styles to contrast floors, so a first build with bg in place of the
 	// surfaces supplies those styles.
-	dim, surface := highlightSurfaces(p.build(bg, bg), fg, bg, lipgloss.Color(p.Accent), p.Mode)
+	dim, surface := highlightSurfaces(build(c, tokens, bg, bg), fg, bg, c.Accent, c.Mode)
 
-	return p.build(dim, surface)
+	return build(c, tokens, dim, surface)
 }
 
-// build builds the [style.Styles] for the palette, with dimSurface and
-// surface as the backgrounds of the highlights and of the subtle and
-// accent headings. Bg becomes the surface of the result, as
-// [style.WithSurface] sets it, so the kinds hold no background of their
-// own unless they paint a fill.
-func (p palette) build(dimSurface, surface color.Color) style.Styles {
-	base := lipgloss.NewStyle()
-	if p.Fg != "" {
-		base = base.Foreground(lipgloss.Color(p.Fg))
+// checkTokens returns an error for the first token, in the order of the
+// kinds, that [style.Parse] rejects.
+func checkTokens(tokens map[kind.Kind]Token) error {
+	for _, k := range slices.Sorted(maps.Keys(tokens)) {
+		_, err := style.Parse(string(tokens[k]))
+		if err != nil {
+			return fmt.Errorf("token for %s: %w", k, err)
+		}
 	}
 
-	fg, bg := p.surface()
-	accent := lipgloss.Color(p.Accent)
-	ok := lipgloss.Color(p.OK)
-	warn := lipgloss.Color(p.Warn)
-	errColor := lipgloss.Color(p.Error)
+	return nil
+}
+
+// filled returns c with each unset color other than Fg and Bg replaced by
+// the default for its mode.
+func (c Colors) filled() Colors {
+	accent, ok, warn, errColor := "#0969da", "#1a7f37", "#9a6700", "#cf222e"
+	if c.Mode == Dark {
+		accent, ok, warn, errColor = "#58a6ff", "#3fb950", "#d29922", "#f85149"
+	}
+
+	if !isColorSet(c.Accent) {
+		c.Accent = lipgloss.Color(accent)
+	}
+
+	if !isColorSet(c.OK) {
+		c.OK = lipgloss.Color(ok)
+	}
+
+	if !isColorSet(c.Warn) {
+		c.Warn = lipgloss.Color(warn)
+	}
+
+	if !isColorSet(c.Error) {
+		c.Error = lipgloss.Color(errColor)
+	}
+
+	return c
+}
+
+// build builds the [style.Styles] for c and tokens, with dimSurface and
+// surface as the backgrounds of the highlights and of the subtle and
+// accent headings. Build expects every color of c other than Fg and Bg to
+// be set, as filled leaves them. Bg becomes the surface of the result, as
+// [style.WithSurface] sets it, so the kinds hold no background of their
+// own unless they paint a fill.
+func build(c Colors, tokens map[kind.Kind]Token, dimSurface, surface color.Color) style.Styles {
+	base := lipgloss.NewStyle()
+	if isColorSet(c.Fg) {
+		base = base.Foreground(c.Fg)
+	}
+
+	fg, bg := c.surface()
 
 	towardFg, towardBg := lipgloss.Lighten, lipgloss.Darken
-	if p.Mode == Light {
+	if c.Mode == Light {
 		towardFg, towardBg = lipgloss.Darken, lipgloss.Lighten
 	}
 
@@ -141,105 +259,136 @@ func (p palette) build(dimSurface, surface color.Color) style.Styles {
 		return lipgloss.NewStyle().Foreground(textOn(c)).Background(c).Bold(true)
 	}
 
-	dimAccent := towardFg(accent, dimShift)
-	if sameColor(dimAccent, accent) {
-		dimAccent = towardBg(accent, dimShift)
+	dimAccent := towardFg(c.Accent, dimShift)
+	if sameColor(dimAccent, c.Accent) {
+		dimAccent = towardBg(c.Accent, dimShift)
 	}
 
-	// The derived kinds resolve first, so a Tokens entry naming one of them
+	// The derived kinds resolve first, so a token naming one of them
 	// layers over the derived value rather than the other way around.
 	derived := []style.Option{
-		style.Set(kind.GenericHeading, heading(accent)),
+		style.Set(kind.GenericHeading, heading(c.Accent)),
 		style.Set(kind.GenericHeadingAccent, base.Background(surface).Foreground(towardFg(fg, dimShift))),
 		style.Set(kind.GenericHeadingSubtle, base.Background(dimSurface).Foreground(fg)),
-		style.Set(kind.GenericHeadingOK, heading(ok)),
-		style.Set(kind.GenericHeadingWarn, heading(warn)),
-		style.Set(kind.GenericHeadingError, heading(errColor)),
+		style.Set(kind.GenericHeadingOK, heading(c.OK)),
+		style.Set(kind.GenericHeadingWarn, heading(c.Warn)),
+		style.Set(kind.GenericHeadingError, heading(c.Error)),
 		style.Set(kind.GenericHighlight, lipgloss.NewStyle().Background(surface)),
 		style.Set(kind.GenericHighlightDim, lipgloss.NewStyle().Background(dimSurface)),
-		style.Set(kind.TextAccent, base.Foreground(accent)),
+		style.Set(kind.TextAccent, base.Foreground(c.Accent)),
 		style.Set(kind.TextAccentDim, base.Foreground(dimAccent)),
 		style.Set(kind.TextSubtle, base.Foreground(towardBg(fg, dimShift))),
 		style.Set(kind.TextSubtleDim, base.Foreground(towardBg(fg, subtleDimShift))),
-		style.Set(kind.TextOK, base.Foreground(ok)),
-		style.Set(kind.TextWarn, base.Foreground(warn)),
-		style.Set(kind.TextError, base.Foreground(errColor)),
+		style.Set(kind.TextOK, base.Foreground(c.OK)),
+		style.Set(kind.TextWarn, base.Foreground(c.Warn)),
+		style.Set(kind.TextError, base.Foreground(c.Error)),
 	}
 
 	s := style.New(base, derived...)
 
 	// The printer paints whole inserted and deleted lines and their + and -
 	// markers in these kinds. It marks errors with a GenericError overlay
-	// and warnings with a GenericWarn overlay, and each replaces the style
-	// underneath. A palette that leaves them out takes its OK, Warn, and
-	// Error colors, and each mark draws as a badge so it shows over a token
-	// drawn in the color of the mark. Each default
-	// fills in for a missing Tokens spec and layers over Generic the same
-	// way, so a theme spec for one of these kinds replaces the default
-	// outright rather than layering over it.
-	tokens := maps.Clone(p.Tokens)
-	if tokens == nil {
-		tokens = map[kind.Kind]string{}
+	// and warnings with a GenericWarn overlay, and each overlay replaces the
+	// style underneath. The two overlays draw as badges, so each shows over
+	// a token drawn in the color of its badge. The marks hold the colors of
+	// c as given, so an ANSI color keeps the palette of the terminal. Each
+	// mark stands in for a missing token and layers over the parent of its
+	// kind, as a token does. A token for one of these kinds thus replaces
+	// the mark outright.
+	marks := map[kind.Kind]lipgloss.Style{
+		kind.GenericInserted: lipgloss.NewStyle().Foreground(c.OK),
+		kind.GenericDeleted:  lipgloss.NewStyle().Foreground(c.Error),
+		kind.GenericError:    lipgloss.NewStyle().Foreground(textOn(c.Error)).Background(c.Error),
+		kind.GenericWarn:     lipgloss.NewStyle().Foreground(textOn(c.Warn)).Background(c.Warn),
 	}
 
-	defaults := map[kind.Kind]string{
-		kind.GenericInserted: style.Encode(lipgloss.NewStyle().Foreground(ok)),
-		kind.GenericDeleted:  style.Encode(lipgloss.NewStyle().Foreground(errColor)),
-		kind.GenericError:    style.Encode(lipgloss.NewStyle().Foreground(textOn(errColor)).Background(errColor)),
-		kind.GenericWarn:     style.Encode(lipgloss.NewStyle().Foreground(textOn(warn)).Background(warn)),
-	}
-	// Null and the booleans share one keyword-constant token in the source
-	// themes, so a palette that leaves null out draws it with the boolean
-	// spec. The two kinds are siblings under Literal, so the spec resolves
-	// to the same style for both.
+	// Null and the booleans share one keyword-constant token in most editor
+	// color schemes, so when tokens leaves null out, null takes the boolean
+	// token. The two kinds are siblings under Literal, so the token
+	// resolves to the same style for both.
+	specs := tokens
 	if spec, ok := tokens[kind.LiteralBoolean]; ok {
-		defaults[kind.LiteralNull] = spec
-	}
-
-	for st, spec := range defaults {
-		if _, ok := tokens[st]; !ok {
-			tokens[st] = spec
+		if _, ok := tokens[kind.LiteralNull]; !ok {
+			specs = maps.Clone(tokens)
+			specs[kind.LiteralNull] = spec
 		}
 	}
 
-	// A Tokens spec layers over the style its kind already resolves to, so
-	// a spec of "bold" alone keeps the ancestor's colors. Parents come
+	// A token layers over the style its kind already resolves to. A token
+	// of "bold" alone thus keeps the ancestor's colors. Parents come
 	// first, so a child layers over the parent's finished style. The pass
-	// visits UI even when Tokens leaves it out, since the chrome takes its
-	// color from the finished comments.
-	kinds := slices.Collect(maps.Keys(tokens))
-	if _, ok := tokens[kind.UI]; !ok {
-		kinds = append(kinds, kind.UI)
-	}
+	// visits UI even when tokens leaves it out, because the chrome takes its
+	// color from the finished comments. ByDepth puts the two entries of a
+	// kind that specs and marks both hold side by side, and Compact drops
+	// the second.
+	kinds := slices.Compact(byDepth(slices.Concat(
+		slices.Collect(maps.Keys(specs)),
+		slices.Collect(maps.Keys(marks)),
+		[]kind.Kind{kind.UI},
+	)))
 
-	for _, st := range byDepth(kinds) {
+	for _, st := range kinds {
 		cur := s.Style(st)
 		if st == kind.UI {
-			// The chrome takes the comment color alone. A Tokens spec that
-			// sets comments in italics or bold styles the comments, and a
-			// line number drawn the same way would read as one. UI comes
-			// after Comment and ahead of its own children in the depth
-			// order, so a UI spec layers over this style, and a spec for a
-			// child layers over UI rather than over the comments.
+			// The chrome takes the comment color alone. A token that sets
+			// comments in italics or bold styles the comments, and a line
+			// number drawn the same way reads as one. UI comes after
+			// Comment and ahead of its own children in the depth order. A
+			// UI token thus layers over this style, and a token for a child
+			// layers over UI rather than over the comments.
 			cur = base.Foreground(s.Style(kind.Comment).GetForeground())
 		}
 
-		if spec, ok := tokens[st]; ok {
+		if spec, ok := specs[st]; ok {
 			cur = layer(cur, spec)
+		} else if mark, ok := marks[st]; ok {
+			cur = paint(cur, mark)
 		}
 
 		s = s.With(style.Set(st, cur))
 	}
 
-	// The token pass layers each spec over a style it reads from s. A
+	// The token pass layers each token over a style it reads from s. A
 	// style read with the surface in place carries the surface as a fill
 	// of its own, so the surface comes last.
-	if p.Bg != "" {
-		s = s.With(style.WithSurface(lipgloss.Color(p.Bg)))
+	if isColorSet(c.Bg) {
+		s = s.With(style.WithSurface(c.Bg))
 	}
 
 	return s
 }
+
+// dimShift separates a dimmed variant from its source color.
+const dimShift = 0.15
+
+// subtleDimShift moves [kind.TextSubtleDim] further toward the background
+// than dimShift moves [kind.TextSubtle].
+const subtleDimShift = 0.30
+
+// minTextContrast is the WCAG AA contrast ratio for body text. The body
+// text keeps at least this ratio on a highlight, unless its own ratio on
+// the base background is less than maxContrastLoss times this one. The
+// text then keeps at least its own ratio divided by maxContrastLoss.
+const minTextContrast = 4.5
+
+// maxContrastLoss is the most that a highlight might divide the contrast
+// of the comments by. It bounds the body text the same way only where the
+// body's own contrast is less than minTextContrast times maxContrastLoss.
+// Body text with more contrast than that keeps minTextContrast alone.
+const maxContrastLoss = 1.25
+
+// blendDistance and paintDistance are CIEDE2000 distances, on
+// go-colorful's scale of 0 to about 1. [highlightSurfaces] puts them
+// between the base background and the dim highlight, and between the dim
+// highlight and the highlight. The first measures the highlights as the
+// printer blends them into the base background, and the second measures
+// them as it paints them over it. Both are well more than 0.05, about the
+// least distance at which a reader tells two colors apart. The highlights
+// thus show at a glance in either overlay mode.
+const (
+	blendDistance = 0.08
+	paintDistance = 0.135
+)
 
 // byDepth returns kinds ordered by their distance from [kind.Text],
 // parents ahead of their children. Kinds an equal distance out never
@@ -266,24 +415,24 @@ func depth(st kind.Kind) int {
 	return n
 }
 
-// surface returns the foreground and background that [palette.styles]
-// derives the other kinds from. These are the palette's own colors, or
-// black and white arranged for the mode when the palette leaves one unset.
-func (p palette) surface() (color.Color, color.Color) {
-	fg, bg := "#000000", "#ffffff"
-	if p.Mode == Dark {
+// surface returns the foreground and background that [Derive] derives the
+// other kinds from. These are Fg and Bg, or black and white arranged for
+// the mode where c leaves one unset.
+func (c Colors) surface() (color.Color, color.Color) {
+	fg, bg := lipgloss.Color("#000000"), lipgloss.Color("#ffffff")
+	if c.Mode == Dark {
 		fg, bg = bg, fg
 	}
 
-	if p.Fg != "" {
-		fg = p.Fg
+	if isColorSet(c.Fg) {
+		fg = c.Fg
 	}
 
-	if p.Bg != "" {
-		bg = p.Bg
+	if isColorSet(c.Bg) {
+		bg = c.Bg
 	}
 
-	return lipgloss.Color(fg), lipgloss.Color(bg)
+	return fg, bg
 }
 
 // highlightSurfaces returns the backgrounds of [kind.GenericHighlightDim]
@@ -634,26 +783,18 @@ func luminance(c color.Color) float64 {
 	return toLinear(c).luminance()
 }
 
-// layer returns base with the colors and attributes the spec sets applied
-// on top, leaving base's other properties in place. The spec is in the
-// form [style.Parse] reads, and attribute keywords apply left to right as
-// they do there, so the last keyword for an attribute wins. A "nobold",
-// "noitalic", or "nounderline" keyword turns the attribute off even when
-// base sets it, where [style.Parse] only leaves it unset.
+// layer returns base with the colors and attributes of spec applied on
+// top. The other properties of base stay in place. Attribute keywords
+// apply left to right as they do in [style.Parse], so the last keyword for
+// an attribute wins. A "nobold", "noitalic", or "nounderline" keyword
+// turns the attribute off even when base sets it, where [style.Parse] only
+// leaves it unset.
 //
 //nolint:gocritic // Value semantics match lipgloss.
-func layer(base lipgloss.Style, spec string) lipgloss.Style {
-	over := style.MustParse(spec)
+func layer(base lipgloss.Style, spec Token) lipgloss.Style {
+	base = paint(base, style.MustParse(string(spec)))
 
-	if c := over.GetForeground(); isColorSet(c) {
-		base = base.Foreground(c)
-	}
-
-	if c := over.GetBackground(); isColorSet(c) {
-		base = base.Background(c)
-	}
-
-	for word := range strings.FieldsSeq(strings.ToLower(spec)) {
+	for word := range strings.FieldsSeq(strings.ToLower(string(spec))) {
 		switch word {
 		case "bold":
 			base = base.Bold(true)
@@ -668,6 +809,22 @@ func layer(base lipgloss.Style, spec string) lipgloss.Style {
 		case "nounderline":
 			base = base.Underline(false)
 		}
+	}
+
+	return base
+}
+
+// paint returns base with the foreground and background that over sets.
+// The other properties of base stay in place.
+//
+//nolint:gocritic // Value semantics match lipgloss.
+func paint(base, over lipgloss.Style) lipgloss.Style {
+	if c := over.GetForeground(); isColorSet(c) {
+		base = base.Foreground(c)
+	}
+
+	if c := over.GetBackground(); isColorSet(c) {
+		base = base.Background(c)
 	}
 
 	return base

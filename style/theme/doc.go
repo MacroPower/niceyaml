@@ -1,5 +1,5 @@
 // Package theme provides a catalog of pre-built color themes for YAML syntax
-// highlighting.
+// highlighting, and builds custom themes from a few colors.
 //
 // Themes translate popular editor and terminal color schemes (Monokai, Dracula,
 // Catppuccin, etc.) into [style.Styles] configurations.
@@ -52,18 +52,58 @@
 //
 // # Custom Themes
 //
-// Applications create custom themes with [New] and add them to a catalog
-// with [Catalog.With], which returns a new Catalog and leaves the receiver
-// as it was. A theme with the name of one the catalog holds replaces it,
-// so a program can shadow a built-in theme:
+// [FromColors] creates a theme from a [Colors] value and a [Token] for
+// each kind it colors. Each Token holds a spec in the form that
+// [style.Parse] reads. [Derive] builds the styles of such a theme. It
+// derives the headings, the highlights, the dimmed text, the diff lines,
+// and the marks of errors and warnings from the colors. A theme from
+// FromColors thus presents every kind that a built-in theme does. For
+// example:
+//
+//	corp := theme.FromColors("corp", theme.Colors{
+//		Fg:     lipgloss.Color("#e6e6e6"),
+//		Bg:     lipgloss.Color("#101820"),
+//		Accent: lipgloss.Color("#ff6f00"),
+//		Mode:   theme.Dark,
+//	}, map[kind.Kind]theme.Token{
+//		kind.Comment:       "italic #7a8590",
+//		kind.NameTag:       "bold #ff6f00",
+//		kind.LiteralString: "#9ccc65",
+//	})
+//
+// [Catalog.With] adds themes to a catalog. It returns a new Catalog and
+// leaves the receiver as it was. A program adds its theme to the built-in
+// catalog:
+//
+//	catalog := theme.Builtin().With(corp)
+//
+// A theme with the name of one the catalog holds replaces it, so a program
+// can shadow a built-in theme. A Catalog never changes after construction,
+// so a program builds one at startup and shares it with every picker that
+// needs it.
+//
+// [New] creates a theme from a function that builds its [style.Styles] by
+// hand:
 //
 //	custom := theme.New("my-theme", theme.Dark, func() style.Styles {
 //		return style.New(lipgloss.NewStyle() /* , style.Set(...) */)
 //	})
-//	catalog := theme.Builtin().With(custom)
 //
-// A Catalog never changes after construction, so a program builds one at
-// startup and shares it with every picker that needs it.
+// Such a theme styles only the kinds it sets. Every other kind takes the
+// style of its closest set ancestor, which is often the body text. A theme
+// built with New should set each of the kinds that a renderer paints
+// besides the token kinds, so that its marks stand apart from the text:
+//
+//   - [kind.GenericInserted] and [kind.GenericDeleted] for the lines of a
+//     diff.
+//   - [kind.GenericError] and [kind.GenericWarn] for the locations of
+//     errors and warnings.
+//   - [kind.TextError] and [kind.TextWarn] for the messages of errors and
+//     warnings.
+//   - [kind.GenericHighlight] and [kind.GenericHighlightDim] for search
+//     matches and selections.
+//   - [kind.UI] for gutters, annotations, and hunk headers, which
+//     otherwise take the whole comment style.
 //
 // # Theme Structure
 //
@@ -75,18 +115,19 @@
 // the kinds it customizes, and every other kind falls back to the style of
 // its parent.
 //
-// Most built-in themes come from a small palette: a base foreground and
-// background, an accent color, OK, warning, and error colors, and the token
-// kinds it colors. The package derives the remaining kinds, such as headings,
-// highlights, dimmed text, diff lines, and error marks, from those colors, so
-// every theme presents the same set of kinds.
+// Every built-in theme other than [Charm] comes from [FromColors]. Each of
+// these themes lists a base foreground and background, an accent color,
+// OK, warning, and error colors, and the token kinds it colors. [Derive]
+// derives the remaining kinds from those colors, so every built-in theme
+// presents the same set of kinds.
 //
 // # Surfaces
 //
-// The background of a palette becomes the surface of its theme, as
-// [style.WithSurface] sets it. Every kind without a fill of its own draws
-// on that color, and [go.jacobcolvin.com/niceyaml/printer.WithBox] fills
-// the rest of the rectangle around the rows with it. A few themes, such
+// The Bg of a [Colors] value becomes the surface of the theme that
+// [FromColors] builds from it, as [style.WithSurface] sets it. Every kind
+// without a fill of its own draws on that color, and
+// [go.jacobcolvin.com/niceyaml/printer.WithBox] fills the rest of the
+// rectangle around the rows with it. A few themes, such
 // as pygments, have no background and draw on the terminal's own.
 //
 // To draw any theme on the terminal's background, remove its surface:
@@ -94,7 +135,7 @@
 //	styles := t.Styles().With(style.WithSurface(nil))
 //
 // Kinds with a fill of their own, such as the highlights, the headings,
-// and the error marks, keep it. The package picks the derived colors of
+// and the error marks, keep it. [Derive] picks the derived colors of
 // each theme to keep their contrast on its surface. Without the surface,
 // those colors meet the terminal's background instead, and some of them
 // might be hard to read there.

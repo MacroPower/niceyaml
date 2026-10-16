@@ -65,8 +65,11 @@
 // # Themes
 //
 // The [go.jacobcolvin.com/niceyaml/style/theme] subpackage provides
-// predefined themes (Monokai, Dracula, Catppuccin, etc.). A program looks a
-// theme up by name and gets [Styles] with the colors of that palette.
+// predefined themes, such as Monokai, Dracula, and Catppuccin. A program
+// finds a theme by name and gets [Styles] with the colors of that theme.
+// [go.jacobcolvin.com/niceyaml/style/theme.FromColors] builds a custom
+// theme from a few colors. The custom theme gets diff, error, and
+// highlight kinds derived from those colors.
 //
 // # Style Strings
 //

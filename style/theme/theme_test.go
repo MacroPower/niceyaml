@@ -739,10 +739,10 @@ func TestPalette_HeadingsReadable(t *testing.T) {
 	}
 }
 
-// maxContrastLoss is the most that a palette highlight may divide the
+// maxContrastLoss is the most that a derived highlight might divide the
 // contrast of the comments by. It bounds the body text the same way only
-// where the body's own contrast is below 4.5 times maxContrastLoss, since
-// body text above that need only keep 4.5:1.
+// where the body's own contrast is less than 4.5 times maxContrastLoss.
+// Body text with more contrast than that keeps 4.5:1 alone.
 const maxContrastLoss = 1.25
 
 func TestPalette_HighlightsReadable(t *testing.T) {
@@ -948,7 +948,7 @@ func standsOut(token, marked lipgloss.Style) bool {
 }
 
 // paletteThemes returns every built-in theme but Charm, which sets its
-// headings and highlights by hand rather than from a palette.
+// headings and highlights by hand rather than through FromColors.
 func paletteThemes() []theme.Theme {
 	return slices.DeleteFunc(theme.Builtin().All(), func(th theme.Theme) bool {
 		return th.Name == theme.Charm.Name

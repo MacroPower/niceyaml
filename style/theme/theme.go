@@ -30,8 +30,8 @@ const (
 // [go.jacobcolvin.com/niceyaml/printer.WithStyles].
 //
 // Look one up by name with [Catalog.Get] or enumerate them with
-// [Catalog.All]. Create custom themes with [New] and add them to a catalog
-// with [Catalog.With].
+// [Catalog.All]. Create custom themes with [FromColors] or [New] and add
+// them to a catalog with [Catalog.With].
 type Theme struct {
 	// Memoized builder for the [style.Styles]. The first call builds them
 	// and copies of the Theme share the result. Nil for the zero value.
@@ -46,6 +46,11 @@ type Theme struct {
 // New creates a new [Theme] whose [Theme.Styles] calls build at most once
 // and returns the same value afterwards. A nil build gives a Theme whose
 // Styles returns a zero [style.Styles].
+//
+// The theme styles only the kinds that build sets, and every other kind
+// takes the style of its closest set ancestor. [FromColors] derives the
+// kinds that a renderer paints, such as the diff lines and the highlights,
+// from a few colors instead.
 func New(name string, mode Mode, build func() style.Styles) Theme {
 	t := Theme{Name: name, Mode: mode}
 	if build != nil {
@@ -86,7 +91,7 @@ var (
 	builtin = func() Catalog {
 		themes := make([]Theme, 0, len(palettes)+1)
 		for name, p := range palettes {
-			themes = append(themes, New(name, p.Mode, p.styles))
+			themes = append(themes, fromColors(name, p.colors(), p.Tokens))
 		}
 
 		themes = append(themes, Charm)
@@ -116,7 +121,7 @@ type Catalog struct {
 // Builtin returns the [Catalog] of every theme this package ships, in name
 // order. Add to it with [Catalog.With]:
 //
-//	catalog := theme.Builtin().With(theme.New("corp", theme.Dark, buildCorp))
+//	catalog := theme.Builtin().With(theme.FromColors("corp", corpColors, corpTokens))
 func Builtin() Catalog {
 	return builtin
 }

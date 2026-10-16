@@ -13,7 +13,7 @@ import (
 func TestParent_ReachesText(t *testing.T) {
 	t.Parallel()
 
-	// The style resolver and the theme palettes walk Parent until they
+	// The style resolver and the theme derivation walk Parent until they
 	// reach Text, so a cycle in the hierarchy would hang them. A walk from
 	// any predefined kind must end at Text in fewer steps than there are
 	// kinds.
