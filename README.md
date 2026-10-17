@@ -190,6 +190,8 @@ The resolvers of a registry run in order, and the first one that does not declin
 
 ### Viewport
 
+- [examples/viewport](examples/viewport)
+
 See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pages, searches, diffs, and validates YAML documents.
 
 [`yamlviewport`][niceyaml/bubbles/yamlviewport] builds on the public API of `niceyaml` alone, so your own bubble has every building block it uses. [`printer.Layout`][niceyaml/printer.Layout] maps each position to its row and cell and each cell back to its position, and [`printer.Cut`][niceyaml/printer.Cut] cuts a printed row to a window of those cells.

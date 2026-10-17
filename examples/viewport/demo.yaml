@@ -1,0 +1,19 @@
+---
+restaurant:
+  name: Café Yamüll
+  established: 2026
+
+menu:
+  breakfast:
+    - item: "Småkakor & Kaffe"
+      price: "200 kr"
+      note: Swedish cookies, served with a pot of coffee from the house roaster.
+    - item: "Kanelbulle"
+      price: "45 kr"
+  lunch:
+    - item: "Räksmörgås"
+      price: "180 kr"
+      note: An open sandwich piled high with prawns, egg, dill, mayonnaise, and lemon.
+    - item: "Köttbullar"
+      price: "165 kr"
+      note: Meatballs, new potatoes, cream sauce, 🥒 pickled cucumber, and lingonberries.
