@@ -3387,8 +3387,10 @@ func (e *SourceError) Position() (position.Position, bool) {
 // enters an alias the document cannot follow is the one binding with both a
 // position and a reason. It binds at the alias, and the reason wraps
 // [go.jacobcolvin.com/niceyaml/paths.ErrAlias], so a caller can distinguish
-// that position from one at the value itself. Unresolved returns nil for a
-// nil SourceError.
+// that position from one at the value itself. For an alias that reads a
+// reference document of [WithReferences], the reason wraps
+// [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias] too. Unresolved
+// returns nil for a nil SourceError.
 func (e *SourceError) Unresolved() error {
 	if e == nil || errors.Is(e.locErr, errUnlocated) {
 		return nil

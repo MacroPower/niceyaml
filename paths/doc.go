@@ -134,12 +134,18 @@
 // resolves aliases in the order of the struct's fields. A path does not
 // follow that order.
 //
-// An alias does not resolve when it leads back to itself or when the
-// document does not define an anchor of its name before it. A resolve
-// through such an alias returns an error wrapping [ErrAlias]. An alias
-// inside the content of the anchor it refers to leads back to itself,
-// unless a `<<` merge key names it. The decoder reads such an alias as
-// null, and [Resolver.Token] still finds its token.
+// An alias does not resolve when it leads back to itself or when the document
+// does not define an anchor of its name before it. A resolve through such an
+// alias returns an error wrapping [ErrAlias]. An alias inside the content of
+// the anchor it refers to leads back to itself, unless a `<<` merge key names
+// it. The decoder reads such an alias as null, and [Resolver.Token] still
+// finds its token.
+//
+// A document can read the anchors of reference documents that the Resolver
+// does not hold, such as those of niceyaml.WithReferences.
+// [WithReferenceAnchors] names those anchors. A resolve through an alias
+// that reads one returns an error that wraps [ErrReferenceAlias] as well as
+// ErrAlias.
 //
 // A `.*` selector selects every entry of a mapping, as `[*]` selects every
 // element of a sequence. One path thus reaches each job of a workflow or
@@ -166,7 +172,8 @@
 // with [ErrWildcard]. Use [Resolver.Nodes] to list every match.
 // [ErrNotFound] means that the document does not hold a node at the path.
 // [ErrAlias] means an alias on the path forms a cycle or does not have an
-// anchor of its name before it.
+// anchor of its name before it, and [ErrReferenceAlias] means that such an
+// alias reads a reference document.
 //
 // When the document does not have content to resolve in, Resolver.Token
 // and Resolver.Node return an error that wraps both [ErrNoDocument] and

@@ -2466,6 +2466,118 @@ func TestResolver_UnresolvedAlias(t *testing.T) {
 	}
 }
 
+func TestWithReferenceAnchors(t *testing.T) {
+	t.Parallel()
+
+	// The reference documents define the anchor shared alone.
+	shared := paths.WithReferenceAnchors(func(name string) bool { return name == "shared" })
+	port := paths.Doc().Child("server", "port")
+
+	tcs := map[string]struct {
+		opt   paths.ResolverOption
+		input string
+		path  paths.Path
+		// The text of the error, or empty for a path that resolves.
+		want string
+		// Whether the error wraps paths.ErrReferenceAlias.
+		reference bool
+		// Whether Token finds a token where Node fails.
+		token bool
+	}{
+		"path through an alias that reads a reference": {
+			opt:       shared,
+			input:     "server: *shared\n",
+			path:      port,
+			want:      "alias reads a reference document: *shared",
+			reference: true,
+		},
+		"path to an alias that reads a reference": {
+			// Token does not look through the node of the last selector, so
+			// it finds the token of the alias.
+			opt:       shared,
+			input:     "server: *shared\n",
+			path:      paths.Doc().Child("server"),
+			want:      "alias reads a reference document: *shared",
+			reference: true,
+			token:     true,
+		},
+		"path through a tagged alias that reads a reference": {
+			opt:       shared,
+			input:     "server: !t *shared\n",
+			path:      port,
+			want:      "alias reads a reference document: *shared",
+			reference: true,
+		},
+		"alias before the anchor of its name": {
+			opt:       shared,
+			input:     stringtest.LinesLF("server: *shared", "later: &shared {port: 1}"),
+			path:      port,
+			want:      "alias reads a reference document: *shared",
+			reference: true,
+		},
+		"alias that no reference defines": {
+			opt:   shared,
+			input: "server: *nope\n",
+			path:  port,
+			want:  "alias does not resolve: *nope has no anchor before it",
+		},
+		"anchor of the document before the alias": {
+			opt:   shared,
+			input: stringtest.LinesLF("base: &shared {port: 1}", "server: *shared"),
+			path:  port,
+		},
+		"nil function": {
+			opt:   paths.WithReferenceAnchors(nil),
+			input: "server: *shared\n",
+			path:  port,
+			want:  "alias does not resolve: *shared has no anchor before it",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := paths.NewResolver(documentOf(t, tc.input), tc.opt)
+
+			_, tokenErr := r.Token(tc.path)
+			_, nodeErr := r.Node(tc.path)
+			_, nodesErr := r.Nodes(tc.path)
+
+			errs := []error{nodeErr, nodesErr}
+			if tc.token {
+				require.NoError(t, tokenErr)
+			} else {
+				errs = append(errs, tokenErr)
+			}
+
+			for _, err := range errs {
+				if tc.want == "" {
+					require.NoError(t, err)
+
+					continue
+				}
+
+				require.ErrorIs(t, err, paths.ErrAlias)
+				assert.Equal(t, tc.reference, errors.Is(err, paths.ErrReferenceAlias))
+				assert.Contains(t, err.Error(), tc.want)
+			}
+		})
+	}
+
+	t.Run("anchor of an alias that reads a reference", func(t *testing.T) {
+		t.Parallel()
+
+		doc := documentOf(t, "server: *shared\n")
+		alias := requireAs[*ast.MappingNode](t, doc.Body).Values[0].Value
+
+		_, err := paths.NewResolver(doc, shared).Anchor(alias)
+		require.ErrorIs(t, err, paths.ErrAlias)
+		require.ErrorIs(t, err, paths.ErrReferenceAlias)
+		require.EqualError(t, err, "anchor: alias reads a reference document: *shared")
+	})
+}
+
 func TestResolver_HandBuiltAST(t *testing.T) {
 	t.Parallel()
 

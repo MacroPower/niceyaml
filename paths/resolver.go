@@ -29,15 +29,51 @@ type Resolver struct {
 	resolver *resolver
 }
 
-// NewResolver creates a new [*Resolver] for doc. A nil doc gives a Resolver
-// without a document to resolve in, so each of its resolve methods returns
-// an error wrapping [ErrNoDocument].
-func NewResolver(doc *ast.DocumentNode) *Resolver {
-	if doc == nil {
-		return &Resolver{resolver: &resolver{}}
+// ResolverOption configures a [Resolver] that [NewResolver] creates.
+//
+// Available options:
+//   - [WithReferenceAnchors]
+type ResolverOption func(*resolverConfig)
+
+// resolverConfig holds the settings that a [ResolverOption] configures.
+type resolverConfig struct {
+	// Reports whether a reference document defines an anchor of a name, or
+	// nil.
+	references func(name string) bool
+}
+
+// WithReferenceAnchors is a [ResolverOption] that names the anchors of the
+// reference documents of the document, such as those of
+// niceyaml.WithReferences. The function defines reports whether those
+// documents define an anchor of a name. An alias reads such an anchor only
+// when the document does not define an anchor of its name before the
+// alias. A path through such an alias returns an error that wraps
+// [ErrReferenceAlias], as in "alias reads a reference document: *base". A
+// nil defines does not change anything.
+func WithReferenceAnchors(defines func(name string) bool) ResolverOption {
+	return func(c *resolverConfig) {
+		c.references = defines
+	}
+}
+
+// NewResolver creates a new [*Resolver] for doc with opts. A nil doc gives
+// a Resolver without a document to resolve in, so each of its resolve
+// methods returns an error wrapping [ErrNoDocument].
+func NewResolver(doc *ast.DocumentNode, opts ...ResolverOption) *Resolver {
+	var cfg resolverConfig
+
+	for _, opt := range opts {
+		opt(&cfg)
 	}
 
-	return &Resolver{doc: doc, resolver: newResolver(doc)}
+	if doc == nil {
+		return &Resolver{resolver: &resolver{references: cfg.references}}
+	}
+
+	r := newResolver(doc)
+	r.references = cfg.references
+
+	return &Resolver{doc: doc, resolver: r}
 }
 
 // Node resolves the node at p in the document of the Resolver.
@@ -494,7 +530,8 @@ func (f *EntryFinder) Entry(node ast.Node, name string) (ast.Node, error) {
 //
 // Returns an error wrapping [ErrAlias] when node is not an alias, and for
 // an alias that does not have a name or does not name an anchor before
-// it.
+// it. The error of an alias whose anchor a reference document defines
+// wraps [ErrReferenceAlias] too, as [WithReferenceAnchors] describes.
 func (r *Resolver) Anchor(node ast.Node) (ast.Node, error) {
 	alias, ok := node.(*ast.AliasNode)
 	if !ok || alias == nil {
@@ -508,7 +545,7 @@ func (r *Resolver) Anchor(node ast.Node) (ast.Node, error) {
 
 	anchor, ok := r.resolver.targets[alias]
 	if !ok {
-		return nil, fmt.Errorf("anchor: %w: *%s has no anchor before it", ErrAlias, tk.Value)
+		return nil, fmt.Errorf("anchor: %w", r.resolver.missingAnchor(tk.Value))
 	}
 
 	return anchor, nil

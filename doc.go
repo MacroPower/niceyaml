@@ -998,9 +998,12 @@
 //
 // A path resolves in the document itself and stops at an alias that reads a
 // reference document. [Node.At] and [Node.Nodes] return an error that wraps
-// [go.jacobcolvin.com/niceyaml/paths.ErrAlias] for a path that reaches such
-// an alias, and [Node.Ranges] returns one for a path that passes through it.
-// [IsInvalid] does not report that error. A
+// [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias] for a path that
+// reaches such an alias, and [Node.Ranges] returns one for a path that
+// passes through it. The error also wraps
+// [go.jacobcolvin.com/niceyaml/paths.ErrAlias], as in "app.yaml: resolve
+// $.server.port: alias reads a reference document: *base". [IsInvalid] does
+// not report that error. A
 // [go.jacobcolvin.com/niceyaml/schema/matcher.Content],
 // [go.jacobcolvin.com/niceyaml/schema/matcher.Text], or
 // [go.jacobcolvin.com/niceyaml/schema/matcher.Exists] matcher whose path
@@ -1013,10 +1016,10 @@
 //	app.yaml:2:9: $.server.port: port must be at least 1
 //
 // [SourceError.Nearest] reports the path of that alias, and
-// [SourceError.Unresolved] returns the error that wraps ErrAlias. A caller
-// can thus distinguish this position from one at the value itself. An error
-// at a key of a mapping that merges a reference document under a `<<` key
-// binds without a position.
+// [SourceError.Unresolved] returns the error that wraps ErrReferenceAlias. A
+// caller can thus distinguish this position from one at the value itself.
+// An error at a key of a mapping that merges a reference document under a
+// `<<` key binds without a position.
 //
 // A reference document brings its anchors and its own reference documents.
 // Its Source parses it once, with its [WithAllowDuplicateKeys],

@@ -91,13 +91,27 @@ func (d *document) pathResolver() *paths.Resolver {
 
 // newResolver creates the [paths.Resolver] of the document. A document
 // that did not parse gets one without a document, so a path returns an
-// error rather than an empty match.
+// error rather than an empty match. The resolver knows the anchors of the
+// reference documents of the Source, so a path through an alias that reads
+// one names that cause.
 func (d *document) newResolver() *paths.Resolver {
 	if d.err != nil {
 		return paths.NewResolver(nil)
 	}
 
-	return paths.NewResolver(d.root)
+	src := d.node.source
+	if len(src.references) == 0 {
+		return paths.NewResolver(d.root)
+	}
+
+	// The table of the reference anchors builds on the first alias that
+	// lacks an anchor, so a path that does not meet one does not read the
+	// reference documents.
+	return paths.NewResolver(d.root, paths.WithReferenceAnchors(func(name string) bool {
+		_, ok := src.referenceAnchors().Anchor(name)
+
+		return ok
+	}))
 }
 
 // Node is a scope in a YAML document. It is either the root of the
@@ -214,6 +228,13 @@ func (n *Node) Err() error {
 // [Validator] that runs for each item of a list therefore binds them
 // once, but a resolver from [paths.NewResolver] binds them again for every
 // item.
+//
+// The resolver knows the anchors of the reference documents of
+// [WithReferences], as [paths.WithReferenceAnchors] describes. A path
+// through an alias that reads one of them thus returns an error that wraps
+// [paths.ErrReferenceAlias]. A resolver from paths.NewResolver does not
+// know those anchors, so its error for the same path names an alias
+// without an anchor.
 //
 // A document that did not parse does not have a tree, as [Node.Err]
 // describes. Its resolver is thus the one that [paths.NewResolver] creates

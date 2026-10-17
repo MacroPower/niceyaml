@@ -10,6 +10,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -201,4 +202,46 @@ func TestNode_At(t *testing.T) {
 			requireEdit(t, d, d.Apply(t.Context(), paths.Doc(), tc.fn, label), tc.err, tc.want)
 		})
 	}
+
+	t.Run("path through an alias of a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		ref := niceyaml.NewSourceFromString(stringtest.LinesLF("base: &b", "  price: 4"))
+
+		reads := map[string]struct {
+			fn  edit.Func
+			err string
+		}{
+			"Set below the alias": {
+				fn: func(ctx context.Context, n *edit.Node) error {
+					return n.At(spec.Child("price")).Set(ctx, 5)
+				},
+				err: "cafe.jacobcolvin.com/v1 reads $.spec.price, which path goes through an alias of a reference document",
+			},
+			"Move below the alias": {
+				fn: func(_ context.Context, n *edit.Node) error {
+					return n.At(paths.Doc().Child("other")).Move(spec.Child("other"))
+				},
+				err: `cafe.jacobcolvin.com/v1 moves "other" to $.spec.other, ` +
+					"which path goes through an alias of a reference document",
+			},
+		}
+
+		for name, tc := range reads {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, stringtest.LinesLF("spec: *b", "other: 1"),
+					niceyaml.WithName("test.yaml"), niceyaml.WithReferences(ref))
+
+				d, err := edit.New(doc, edit.WithApp("cafe"))
+				require.NoError(t, err)
+
+				err = d.Apply(t.Context(), paths.Doc(), tc.fn, label)
+				require.Error(t, err)
+				assert.Contains(t, niceyaml.FormatError(err), tc.err)
+				assert.NotContains(t, niceyaml.FormatError(err), "does not resolve")
+			})
+		}
+	})
 }

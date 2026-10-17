@@ -47,13 +47,36 @@ type place struct {
 	flow bool
 }
 
-// errMultiple, errKeyPath, and errUnresolved are the problems of a path
-// that At cannot take.
+// errMultiple, errKeyPath, errUnresolved, and errReferenceAlias are the
+// problems of a path that At cannot take.
 var (
-	errMultiple   = errors.New("path selects more than one value")
-	errKeyPath    = errors.New("path selects a key")
-	errUnresolved = errors.New("path goes through an alias that does not resolve")
+	errMultiple       = errors.New("path selects more than one value")
+	errKeyPath        = errors.New("path selects a key")
+	errUnresolved     = errors.New("path goes through an alias that does not resolve")
+	errReferenceAlias = errors.New("path goes through an alias of a reference document")
 )
+
+// unresolved returns the problem of a path through an alias that the text
+// of the edit does not resolve, around err, the error of that alias. A
+// decode reads an alias of a reference document, but the text of the edit
+// does not hold the anchor, so its problem says so.
+func unresolved(err error) error {
+	if errors.Is(err, paths.ErrReferenceAlias) {
+		return fmt.Errorf("%w: %w", errReferenceAlias, err)
+	}
+
+	return fmt.Errorf("%w: %w", errUnresolved, err)
+}
+
+// aliasKind returns the words that name an alias whose error is err in a
+// message, such as "an alias of a reference document".
+func aliasKind(err error) string {
+	if errors.Is(err, paths.ErrReferenceAlias) {
+		return "an alias of a reference document"
+	}
+
+	return "an alias that does not resolve"
+}
 
 // resolve returns the place at path, a `$` path of names and indexes.
 func (d *Doc) resolve(path paths.Path) (*place, error) {
@@ -73,7 +96,7 @@ func (d *Doc) resolve(path paths.Path) (*place, error) {
 		if _, ok := content.(*ast.AliasNode); ok {
 			target, err := res.Deref(content)
 			if err != nil {
-				return nil, fmt.Errorf("%w: %w", errUnresolved, err)
+				return nil, unresolved(err)
 			}
 
 			p.shared = true
@@ -172,7 +195,7 @@ func findChild(res *paths.Resolver, node ast.Node, name string) (*ast.MappingVal
 
 	sources, err := res.MergeSources(node)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %w", errUnresolved, err)
+		return nil, nil, unresolved(err)
 	}
 
 	for _, src := range slices.Backward(sources) {

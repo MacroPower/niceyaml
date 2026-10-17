@@ -34,8 +34,16 @@ var (
 
 	// ErrAlias indicates an alias on the path that does not name an anchor
 	// or that leads back to itself. Such an alias does not resolve to any
-	// content.
+	// content. The error of an alias whose anchor a reference document
+	// defines wraps [ErrReferenceAlias] too.
 	ErrAlias = errors.New("alias does not resolve")
+
+	// ErrReferenceAlias indicates an alias on the path whose anchor a
+	// reference document defines, as [WithReferenceAnchors] names those
+	// anchors. A path does not enter such an alias, because the Resolver
+	// does not hold the reference documents. Every error that wraps
+	// ErrReferenceAlias also wraps [ErrAlias].
+	ErrReferenceAlias = errors.New("alias reads a reference document")
 
 	// ErrWildcard indicates a request for a single node or token from a path
 	// with a `.*`, `[*]`, or `..` selector. Use [Resolver.Nodes] for such paths.

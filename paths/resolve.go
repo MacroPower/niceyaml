@@ -122,8 +122,11 @@ func (m match) key() match {
 type resolver struct {
 	targets  map[*ast.AliasNode]*ast.AnchorNode
 	enclosed map[*ast.AliasNode]bool
-	keys     sync.Map
-	nodes    int
+	// Reports whether a reference document defines an anchor of a name, as
+	// [WithReferenceAnchors] sets it, or nil.
+	references func(name string) bool
+	keys       sync.Map
+	nodes      int
 }
 
 // mappingKeys indexes the entries of one mapping for [resolver.lookup] and
@@ -904,7 +907,7 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 
 			target, ok := r.targets[n]
 			if !ok {
-				return nil, fmt.Errorf("%w: *%s has no anchor before it", ErrAlias, name)
+				return nil, r.missingAnchor(name)
 			}
 
 			node = target.Value
@@ -913,6 +916,40 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 			return node, nil
 		}
 	}
+}
+
+// missingAnchor returns the error of an alias named name that does not
+// have an anchor of its name before it. The error wraps [ErrAlias]. It
+// wraps [ErrReferenceAlias] too when a reference document defines such an
+// anchor, as [WithReferenceAnchors] reports.
+func (r *resolver) missingAnchor(name string) error {
+	if r.references != nil && r.references(name) {
+		return &referenceAliasError{name: name}
+	}
+
+	return fmt.Errorf("%w: *%s has no anchor before it", ErrAlias, name)
+}
+
+// referenceAliasError is the error of an alias whose anchor a reference
+// document defines. It reads as [ErrReferenceAlias] and the name of the
+// alias. It wraps [ErrAlias] and matches ErrReferenceAlias, so a tree of
+// problems shows it as one problem rather than as one for each sentinel.
+type referenceAliasError struct {
+	name string
+}
+
+func (e *referenceAliasError) Error() string {
+	return ErrReferenceAlias.Error() + ": *" + e.name
+}
+
+// Unwrap returns [ErrAlias].
+func (e *referenceAliasError) Unwrap() error {
+	return ErrAlias
+}
+
+// Is reports whether target is [ErrReferenceAlias].
+func (e *referenceAliasError) Is(target error) bool {
+	return target == ErrReferenceAlias
 }
 
 // resolve applies segs to root and returns every match, in document order

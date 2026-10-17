@@ -4500,17 +4500,17 @@ func TestNode_Origin(t *testing.T) {
 			"the alias": {
 				prod: "server: *shared\n",
 				path: server,
-				err:  "prod.yaml: resolve $.server: alias does not resolve: *shared has no anchor before it",
+				err:  "prod.yaml: resolve $.server: alias reads a reference document: *shared",
 			},
 			"a value below the alias": {
 				prod: "server: *shared\n",
 				path: port,
-				err:  "prod.yaml: resolve $.server.port: alias does not resolve: *shared has no anchor before it",
+				err:  "prod.yaml: resolve $.server.port: alias reads a reference document: *shared",
 			},
 			"a value a merge key reads": {
 				prod: stringtest.LinesLF("server:", "  <<: *shared"),
 				path: port,
-				err:  "prod.yaml: resolve $.server.port: alias does not resolve: *shared has no anchor before it",
+				err:  "prod.yaml: resolve $.server.port: alias reads a reference document: *shared",
 			},
 		}
 

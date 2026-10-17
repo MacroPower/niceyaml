@@ -5587,7 +5587,10 @@ func TestWithReferences(t *testing.T) {
 				t.Parallel()
 
 				require.ErrorIs(t, err, paths.ErrAlias)
+				require.ErrorIs(t, err, paths.ErrReferenceAlias)
+				require.ErrorContains(t, err, "alias reads a reference document: *base")
 				assert.False(t, niceyaml.IsInvalid(err))
+				assert.Len(t, slices.Collect(niceyaml.Problems(err)), 1)
 
 				bound := yamltest.RequireSourceError(t, err)
 
@@ -5696,7 +5699,7 @@ func TestWithReferences(t *testing.T) {
 		assert.Equal(t, stringtest.JoinLF(
 			"app.yaml: $.kind: value does not match any enum member",
 			"",
-			"no excerpt: resolve $.kind: alias does not resolve: *base has no anchor before it",
+			"no excerpt: resolve $.kind: alias reads a reference document: *base",
 		), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 		bound := yamltest.RequireSourceError(t, err)

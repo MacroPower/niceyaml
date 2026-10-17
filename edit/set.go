@@ -357,7 +357,7 @@ func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any) error {
 	if _, ok := content.(*ast.AliasNode); ok {
 		target, err := d.node.Resolver().Deref(content)
 		if err != nil {
-			return d.fail(h, "%s sets %s, which goes through an alias that does not resolve", d.subject(), h.path)
+			return d.fail(h, "%s sets %s, which goes through %s", d.subject(), h.path, aliasKind(err))
 		}
 
 		content = astnode.Content(target)

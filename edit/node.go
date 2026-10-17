@@ -271,8 +271,9 @@ func (n *Node) value() (*niceyaml.Node, error) {
 // such a place.
 //
 // At fails the Apply on a path that selects more than one value, holds a
-// `~`, or goes through an alias that does not resolve. Each method of its
-// node that edits or decodes then returns the same error.
+// `~`, or goes through an alias that does not resolve in the text. An
+// alias of a reference document is such an alias. Each method of its node
+// that edits or decodes then returns the same error.
 func (n *Node) At(path paths.Path) *Node {
 	full := path
 	if !path.IsAbsolute() {
