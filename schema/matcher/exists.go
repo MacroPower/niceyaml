@@ -21,6 +21,10 @@ type existsMatcher struct {
 // path holds a wildcard selector, or an alias that does not name an
 // earlier anchor. To match a particular value, use [Content].
 //
+// The Matcher describes itself as `$.kind exists`, through [Describer].
+// That description is the reason that
+// [go.jacobcolvin.com/niceyaml/schema.When] gives when it declines.
+//
 //	// Matches documents that have a kind field.
 //	matcher.Exists(paths.Doc().Child("kind"))
 //
@@ -33,6 +37,11 @@ type existsMatcher struct {
 //	)
 func Exists(path paths.Path) Matcher {
 	return &existsMatcher{path: path}
+}
+
+// Describe implements [Describer].
+func (m *existsMatcher) Describe() string {
+	return m.path.String() + " exists"
 }
 
 // Match implements [Matcher].

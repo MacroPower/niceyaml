@@ -61,6 +61,50 @@ func TestFilePath(t *testing.T) {
 	}
 }
 
+func TestFilePath_Describe(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+
+	tcs := map[string]struct {
+		matcher matcher.Matcher
+		want    string
+	}{
+		"relative pattern": {
+			matcher: matcher.MustFilePath("configs/*.yaml"),
+			want:    `file path matches "configs/*.yaml"`,
+		},
+		"braces stay as written": {
+			matcher: matcher.MustFilePath("menus/*.{yaml,yml}"),
+			want:    `file path matches "menus/*.{yaml,yml}"`,
+		},
+		// The base directory does not appear.
+		"base directory": {
+			matcher: matcher.MustFilePath("configs/*.yaml", matcher.WithBaseDir(base)),
+			want:    `file path matches "configs/*.yaml"`,
+		},
+		// An absolute pattern names its own directory.
+		"absolute pattern": {
+			matcher: matcher.MustFilePath("/etc/app/*.yaml"),
+			want:    `file path matches "/etc/app/*.yaml"`,
+		},
+		"pattern with a quote": {
+			matcher: matcher.MustFilePath(`a"b/*.yaml`),
+			want:    `file path matches "a\"b/*.yaml"`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := description(t, tc.matcher)
+			assert.Equal(t, tc.want, got)
+			assert.NotContains(t, got, base)
+		})
+	}
+}
+
 func TestFilePath_InvalidPattern(t *testing.T) {
 	t.Parallel()
 

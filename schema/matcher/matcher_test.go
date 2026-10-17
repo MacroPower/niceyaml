@@ -58,6 +58,17 @@ func recording(called *bool) matcher.Matcher {
 	})
 }
 
+// description returns the description of m. The test fails when m does
+// not implement [matcher.Describer].
+func description(t *testing.T, m matcher.Matcher) string {
+	t.Helper()
+
+	d, ok := m.(matcher.Describer)
+	require.True(t, ok, "%T does not implement matcher.Describer", m)
+
+	return d.Describe()
+}
+
 // match runs m on doc and fails the test when the matcher cannot decide.
 func match(t *testing.T, m matcher.Matcher, doc *niceyaml.Node) bool {
 	t.Helper()
@@ -314,6 +325,13 @@ func TestFunc(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+
+	t.Run("does not describe itself", func(t *testing.T) {
+		t.Parallel()
+
+		_, ok := matcher.Matcher(undecided).(matcher.Describer)
+		assert.False(t, ok)
+	})
 }
 
 func TestFunc_Null(t *testing.T) {

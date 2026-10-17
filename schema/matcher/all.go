@@ -30,6 +30,14 @@ type allMatcher struct {
 //	    matcher.MustFilePath("**/k8s/*.yaml"),
 //	    matcher.Content(paths.Doc().Child("kind"), "Deployment"),
 //	)
+//
+// The Matcher describes itself through [Describer] by joining the
+// descriptions of its matchers with "and", so the example reads
+// `file path matches "**/k8s/*.yaml" and $.kind is "Deployment"`. A
+// matcher that joins two or more descriptions of its own, such as an
+// [Any] of two matchers, goes in parentheses. The description is "" when
+// matchers is empty, or when one of them does not have a description,
+// such as a [Func]. [Described] gives such a matcher a description.
 func All(matchers ...Matcher) Matcher {
 	for i, m := range matchers {
 		if nilness.IsNil(m) {
@@ -38,6 +46,11 @@ func All(matchers ...Matcher) Matcher {
 	}
 
 	return &allMatcher{matchers: slices.Clone(matchers)}
+}
+
+// Describe implements [Describer].
+func (m *allMatcher) Describe() string {
+	return describeJoined(m.matchers, " and ")
 }
 
 // Match implements [Matcher].

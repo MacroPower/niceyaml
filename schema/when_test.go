@@ -10,6 +10,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
@@ -102,6 +103,59 @@ func TestWhen(t *testing.T) {
 			assert.Equal(t, tc.wantCalled, called)
 		})
 	}
+
+	t.Run("a decline gives the description of the matcher", func(t *testing.T) {
+		t.Parallel()
+
+		deployment := matcher.Content(paths.Doc().Child("kind"), "Deployment")
+		service := matcher.Content(paths.Doc().Child("kind"), "Service")
+		isPod := matcher.Func(func(context.Context, *niceyaml.Node) (bool, error) { return false, nil })
+
+		tcs := map[string]struct {
+			matcher matcher.Matcher
+			want    string
+		}{
+			"content guard": {
+				matcher: deployment,
+				want:    `no matching schema: applies only when $.kind is "Deployment"`,
+			},
+			"file path guard": {
+				matcher: matcher.MustFilePath("menus/*.{yaml,yml}"),
+				want:    `no matching schema: applies only when file path matches "menus/*.{yaml,yml}"`,
+			},
+			"all guard": {
+				matcher: matcher.All(matcher.MustFilePath("k8s/*.yaml"), deployment),
+				want:    `no matching schema: applies only when file path matches "k8s/*.yaml" and $.kind is "Deployment"`,
+			},
+			"any guard": {
+				matcher: matcher.Any(deployment, service),
+				want:    `no matching schema: applies only when $.kind is "Deployment" or $.kind is "Service"`,
+			},
+			"described guard": {
+				matcher: matcher.Described(isPod, "the file holds a pod"),
+				want:    "no matching schema: applies only when the file holds a pod",
+			},
+			// A Func does not describe itself, so it declines with
+			// ErrNoMatch alone.
+			"func guard": {
+				matcher: isPod,
+				want:    "no matching schema",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				r := schema.When(tc.matcher, schema.Embedded(schemaData))
+				doc := yamltest.FirstDocumentWithPath(t, "kind: ConfigMap", "other/app.yaml")
+
+				_, err := r.Resolve(t.Context(), doc)
+				require.ErrorIs(t, err, schema.ErrNoMatch)
+				require.EqualError(t, err, tc.want)
+			})
+		}
+	})
 
 	t.Run("alias bomb stops the registry", func(t *testing.T) {
 		t.Parallel()

@@ -33,6 +33,15 @@ type anyMatcher struct {
 //	    matcher.Content(kindPath, "StatefulSet"),
 //	    matcher.Content(kindPath, "DaemonSet"),
 //	)
+//
+// The Matcher describes itself through [Describer] by joining the
+// descriptions of its matchers with "or", so the example reads
+// `$.kind is "Deployment" or $.kind is "StatefulSet" or $.kind is
+// "DaemonSet"`. A matcher that joins two or more descriptions of its own,
+// such as an [All] of two matchers, goes in parentheses. The description
+// is "" when matchers is empty, or when one of them does not have a
+// description, such as a [Func]. [Described] gives such a matcher a
+// description.
 func Any(matchers ...Matcher) Matcher {
 	for i, m := range matchers {
 		if nilness.IsNil(m) {
@@ -41,6 +50,11 @@ func Any(matchers ...Matcher) Matcher {
 	}
 
 	return &anyMatcher{matchers: slices.Clone(matchers)}
+}
+
+// Describe implements [Describer].
+func (m *anyMatcher) Describe() string {
+	return describeJoined(m.matchers, " or ")
 }
 
 // Match implements [Matcher].

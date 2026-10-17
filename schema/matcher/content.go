@@ -3,6 +3,7 @@ package matcher
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"regexp"
@@ -90,8 +91,42 @@ type contentMatcher[T Scalar] struct {
 //	    matcher.Content(paths.Doc().Child("kind"), "Deployment"),
 //	    matcher.Content(paths.Doc().Child("apiVersion"), "apps/v1"),
 //	)
+//
+// The Matcher describes itself as `$.kind is "Deployment"`, through
+// [Describer]. That description is the reason that
+// [go.jacobcolvin.com/niceyaml/schema.When] gives when it declines. The
+// description gives want as a value of its basic type, so a String
+// method on the type of want does not change it. A string reads in
+// quotes, and a number or a bool reads as Go formats it, such as 3 or
+// true. When the type of want decodes itself, as a [time.Duration] does,
+// want reads as Go formats it instead, such as 5s. Such a want of a
+// string kind reads in quotes.
 func Content[T Scalar](path paths.Path, want T) Matcher {
 	return &contentMatcher[T]{path: path, want: want}
+}
+
+// Describe implements [Describer].
+func (m *contentMatcher[T]) Describe() string {
+	return m.path.String() + " is " + describeScalar(m.want)
+}
+
+// describeScalar returns want as a description reads it. A string reads
+// in quotes. A type that [isPlain] reports as plain reads as the basic
+// type of its kind, so a defined type with a String method reads as the
+// value that Match compares. Any other type, such as [time.Duration],
+// reads as Go formats it.
+func describeScalar[T Scalar](want T) string {
+	v := reflect.ValueOf(want)
+
+	if isPlain(v.Type()) {
+		v = v.Convert(basicTypes[v.Kind()])
+	}
+
+	if v.Kind() == reflect.String {
+		return fmt.Sprintf("%q", v.Interface())
+	}
+
+	return fmt.Sprint(v.Interface())
 }
 
 // Match implements [Matcher].

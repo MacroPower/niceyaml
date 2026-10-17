@@ -131,7 +131,7 @@ const driveLen = 2
 //	    }
 //
 //	    if !found {
-//	        return schema.Ref{}, schema.ErrNoMatch
+//	        return schema.Ref{}, fmt.Errorf("%w: document has no kind", schema.ErrNoMatch)
 //	    }
 //
 //	    // The document picks kind, so keep it to a file name in schemas/.

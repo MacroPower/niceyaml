@@ -65,10 +65,9 @@ func main() {
 
 	fmt.Println("\nReport the reasons that the resolvers gave:")
 
-	// The error lists the reasons that the resolvers gave, in order. A When
-	// guard declines without a reason, so the list leaves out the path
-	// pattern. To explain its decline, a resolver wraps ErrNoMatch with a
-	// reason of its own, as byKind does.
+	// The error lists the reason that each resolver gave, in order. The
+	// When guard gives the condition of its matcher, and byKind wraps
+	// ErrNoMatch with a reason of its own.
 	validate(ctx, p, reg, "recipe.yaml")
 }
 
@@ -108,9 +107,8 @@ func byKind(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 		return schema.Ref{}, fmt.Errorf("read kind: %w", err)
 	}
 
-	// A decline wraps ErrNoMatch, so the registry tries the next resolver.
-	// The registry trims a leading "no matching schema: " from each reason,
-	// so the sentinel goes first and the reason follows it.
+	// A decline wraps ErrNoMatch first, so the registry tries the next
+	// resolver and lists the reason that follows the sentinel.
 	if !found {
 		return schema.Ref{}, fmt.Errorf("%w: document has no kind", schema.ErrNoMatch)
 	}

@@ -4230,9 +4230,15 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 	t.Run("gives the reason of each resolver that gave one as a detail", func(t *testing.T) {
 		t.Parallel()
 
+		embedded := schema.Embedded([]byte(`{}`))
+		isPod := matcher.Func(func(context.Context, *niceyaml.Node) (bool, error) { return false, nil })
+
 		reg := schema.NewRegistry(schema.WithResolvers(
 			schema.Directive(),
-			schema.When(matcher.Content(kindPath, "Deployment"), schema.Embedded([]byte(`{}`))),
+			schema.When(matcher.MustFilePath("menus/*.{yaml,yml}"), embedded),
+			// A Func does not describe itself, so its guard gives no reason.
+			schema.When(isPod, embedded),
+			schema.When(matcher.Content(kindPath, "Deployment"), embedded),
 			byKind,
 		))
 
@@ -4249,6 +4255,8 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		wantTree := stringtest.JoinLF(
 			"app.yaml: no matching schema",
 			"|-- no schema directive",
+			`|-- applies only when file path matches "menus/*.{yaml,yml}"`,
+			`|-- applies only when @.kind is "Deployment"`,
 			"`-- no kind",
 		)
 		assert.Equal(t, wantTree, niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
@@ -4264,9 +4272,14 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 			reasons = append(reasons, detail.Bound.Unwrap().Error())
 		}
 
-		assert.Equal(t, []string{"no schema directive", "no kind"}, reasons)
+		assert.Equal(t, []string{
+			"no schema directive",
+			`applies only when file path matches "menus/*.{yaml,yml}"`,
+			`applies only when @.kind is "Deployment"`,
+			"no kind",
+		}, reasons)
 
-		assert.Len(t, yamltest.OnlyProblem(t, err).Children, 2)
+		assert.Len(t, yamltest.OnlyProblem(t, err).Children, 4)
 	})
 
 	t.Run("names the document in a file that holds several", func(t *testing.T) {
@@ -4306,8 +4319,10 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 	t.Run("reports ErrNoMatch alone when no resolver says more", func(t *testing.T) {
 		t.Parallel()
 
+		isPod := matcher.Func(func(context.Context, *niceyaml.Node) (bool, error) { return false, nil })
 		reg := schema.NewRegistry(schema.WithResolvers(
-			schema.When(matcher.Content(kindPath, "Deployment"), schema.Embedded([]byte(`{}`))),
+			schema.When(isPod, schema.Embedded([]byte(`{}`))),
+			failing(schema.ErrNoMatch),
 		))
 
 		_, err := reg.Lookup(t.Context(), doc)
@@ -4349,29 +4364,40 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		assert.Equal(t, "no schema for kind Service", problem.Children[1].Message())
 	})
 
-	t.Run("matches a reason only through a target that wraps ErrNoMatch", func(t *testing.T) {
+	t.Run("matches what a reason wraps except the error of a context", func(t *testing.T) {
 		t.Parallel()
 
 		// The resolver gave up under a deadline of its own, and the
 		// context of the lookup goes on.
 		timedOut := failing(fmt.Errorf("%w: read catalog: %w", schema.ErrNoMatch, context.DeadlineExceeded))
+		canceled := failing(fmt.Errorf("%w: %w", schema.ErrNoMatch, context.Canceled))
 		errNoLabel := fmt.Errorf("%w: no label", schema.ErrNoMatch)
-		reg := schema.NewRegistry(schema.WithResolvers(timedOut, failing(errNoLabel)))
+		// A sentinel that does not wrap ErrNoMatch, joined beside it.
+		errNoOwner := errors.New("no owner")
+		reg := schema.NewRegistry(schema.WithResolvers(
+			timedOut,
+			canceled,
+			failing(errNoLabel),
+			failing(fmt.Errorf("%w: %w", schema.ErrNoMatch, errNoOwner)),
+		))
 
 		_, err := reg.Lookup(t.Context(), doc)
 		require.EqualError(t, err, "app.yaml: no matching schema")
 		require.ErrorIs(t, err, schema.ErrNoMatch)
-		// The sentinel of a decline wraps ErrNoMatch, so the no-match
-		// matches it. The error of the resolver's own context does not,
-		// so the no-match keeps it as a detail and matches nothing more.
 		require.ErrorIs(t, err, errNoLabel)
+		require.ErrorIs(t, err, errNoOwner)
+		// The error of the resolver's own context stays a detail. The
+		// no-match does not match it, so the document stays at fault.
 		require.NotErrorIs(t, err, context.DeadlineExceeded)
+		require.NotErrorIs(t, err, context.Canceled)
 		assert.True(t, niceyaml.IsInvalid(err))
 		assert.Equal(t,
 			stringtest.JoinLF(
 				"app.yaml: no matching schema",
 				"|-- read catalog: context deadline exceeded",
-				"`-- no label",
+				"|-- context canceled",
+				"|-- no label",
+				"`-- no owner",
 			),
 			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
 		)

@@ -215,6 +215,13 @@ func TestText_NoText(t *testing.T) {
 	}
 }
 
+func TestText_Describe(t *testing.T) {
+	t.Parallel()
+
+	m := matcher.Text(paths.Doc().Child("apiVersion"), acceptAll)
+	assert.Equal(t, "$.apiVersion passes a text test", description(t, m))
+}
+
 // acceptAll is a function for [matcher.Text] that accepts any text.
 func acceptAll(string) bool {
 	return true

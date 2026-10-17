@@ -76,6 +76,9 @@ type filePathMatcher struct {
 	baseErr error
 	// The baseDir field holds the base directory as an absolute path.
 	baseDir string
+	// The raw field holds the pattern as the caller wrote it, braces and
+	// all, for the description.
+	raw     string
 	pattern filepaths.Pattern
 }
 
@@ -140,6 +143,13 @@ type filePathMatcher struct {
 // But FilePath returns [ErrInvalidPattern] for a rooted pattern such as
 // "/**/../x.yaml", and for one with a name before the "**", such as
 // "a/**/../x.yaml".
+//
+// The Matcher describes itself as `file path matches "configs/*.yaml"`,
+// through [Describer]. That description is the reason that
+// [go.jacobcolvin.com/niceyaml/schema.When] gives when it declines. It
+// holds the pattern as written, with its braces. The base directory does
+// not appear, but an absolute pattern names its own directory.
+// [Described] words a pattern that the reader must not see.
 func FilePath(pattern string, opts ...FilePathOption) (Matcher, error) {
 	p, err := filepaths.NewPattern(pattern)
 	if err != nil {
@@ -151,7 +161,7 @@ func FilePath(pattern string, opts ...FilePathOption) (Matcher, error) {
 		opt(&cfg)
 	}
 
-	m := &filePathMatcher{pattern: p}
+	m := &filePathMatcher{pattern: p, raw: pattern}
 
 	m.baseDir, m.baseErr = filepath.Abs(cfg.baseDir)
 
@@ -175,6 +185,11 @@ func MustFilePath(pattern string, opts ...FilePathOption) Matcher {
 	}
 
 	return m
+}
+
+// Describe implements [Describer].
+func (m *filePathMatcher) Describe() string {
+	return fmt.Sprintf("file path matches %q", m.raw)
 }
 
 // Match implements [Matcher].

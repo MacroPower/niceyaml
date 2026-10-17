@@ -2,6 +2,7 @@ package schema
 
 import (
 	"context"
+	"fmt"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
@@ -13,6 +14,9 @@ import (
 type guarded struct {
 	matcher  matcher.Matcher
 	resolver Resolver
+	// The error that Resolve returns for a document that the matcher
+	// declines.
+	decline error
 }
 
 // When creates a [Resolver] that delegates to r for documents that m
@@ -33,6 +37,23 @@ type guarded struct {
 // as [Directive], implements [Resolver] directly and does not need a
 // guard.
 //
+// # Reasons
+//
+// A matcher that describes the documents that it accepts, through
+// [matcher.Describer], gives that description as the reason of each
+// decline. When every resolver declines a document, the error of the
+// lookup then lists a line such as `applies only when $.kind is
+// "Deployment"`. Each matcher of
+// [go.jacobcolvin.com/niceyaml/schema/matcher] describes itself, except
+// [matcher.Func], and [matcher.Described] gives any matcher a
+// description. When reads the description of m as it builds the guard,
+// not for each document. A matcher without a description declines with
+// a bare [ErrNoMatch], and the error lists no line for it.
+//
+// A registry with many guards lists one line for each. A table of kinds
+// reads better as one [ResolverFunc] that declines with the kind that it
+// found, as [ErrNoMatch] describes.
+//
 // When panics if m or r is nil, including a nil pointer, a nil
 // [matcher.Func], or a nil [ResolverFunc].
 func When(m matcher.Matcher, r Resolver) Resolver {
@@ -44,7 +65,15 @@ func When(m matcher.Matcher, r Resolver) Resolver {
 		panic("schema.When: resolver is nil")
 	}
 
-	return &guarded{matcher: m, resolver: r}
+	decline := ErrNoMatch
+
+	if d, ok := m.(matcher.Describer); ok {
+		if desc := d.Describe(); desc != "" {
+			decline = fmt.Errorf("%w: applies only when %s", ErrNoMatch, desc)
+		}
+	}
+
+	return &guarded{matcher: m, resolver: r, decline: decline}
 }
 
 // Resolve implements [Resolver].
@@ -56,7 +85,7 @@ func (g *guarded) Resolve(ctx context.Context, doc *niceyaml.Node) (Ref, error) 
 	}
 
 	if !ok {
-		return Ref{}, ErrNoMatch
+		return Ref{}, g.decline
 	}
 
 	//nolint:wrapcheck // The guarded resolver's errors pass through unchanged.

@@ -792,6 +792,41 @@ func TestContent_Kinds(t *testing.T) {
 	}
 }
 
+func TestContent_Describe(t *testing.T) {
+	t.Parallel()
+
+	kind := paths.Doc().Child("kind")
+
+	tcs := map[string]struct {
+		matcher matcher.Matcher
+		want    string
+	}{
+		"string":                      {matcher: matcher.Content(kind, "Deployment"), want: `$.kind is "Deployment"`},
+		"string with a quote":         {matcher: matcher.Content(kind, `a"b`), want: `$.kind is "a\"b"`},
+		"string with a line break":    {matcher: matcher.Content(kind, "a\nb"), want: `$.kind is "a\nb"`},
+		"int":                         {matcher: matcher.Content(kind, 3), want: `$.kind is 3`},
+		"float":                       {matcher: matcher.Content(kind, 2.5), want: `$.kind is 2.5`},
+		"bool":                        {matcher: matcher.Content(kind, true), want: `$.kind is true`},
+		"duration":                    {matcher: matcher.Content(kind, 5*time.Second), want: `$.kind is 5s`},
+		"named string":                {matcher: matcher.Content(kind, methodString("2")), want: `$.kind is "2"`},
+		"string with a String method": {matcher: matcher.Content(kind, spelledString("x")), want: `$.kind is "x"`},
+		"int with a String method":    {matcher: matcher.Content(kind, spelledInt(2)), want: `$.kind is 2`},
+		"string that decodes itself":  {matcher: matcher.Content(kind, lowerString("x")), want: `$.kind is "x"`},
+		"path from the current node": {
+			matcher: matcher.Content(kindPath, "Deployment"),
+			want:    `@.kind is "Deployment"`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, description(t, tc.matcher))
+		})
+	}
+}
+
 func TestContent_UnmarshalerError(t *testing.T) {
 	t.Parallel()
 
@@ -970,6 +1005,17 @@ func (m methodString) Major() string {
 
 	return major
 }
+
+// spelledString and spelledInt each have a String method that plays no
+// part in decoding, so each decodes and matches as its basic type does.
+type (
+	spelledString string
+	spelledInt    int
+)
+
+func (spelledString) String() string { return "spelled" }
+
+func (spelledInt) String() string { return "spelled" }
 
 // prefixedString decodes itself from the text the decoder hands it, and
 // puts a "v" in front of that text.

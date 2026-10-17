@@ -372,7 +372,7 @@
 //	    }
 //
 //	    if !found {
-//	        return schema.Ref{}, schema.ErrNoMatch
+//	        return schema.Ref{}, fmt.Errorf("%w: document has no kind", schema.ErrNoMatch)
 //	    }
 //
 //	    // The document picks kind, so keep it to a file name in schemas/.
@@ -584,8 +584,23 @@
 // error, so such a server can distinguish it from a fault of the
 // document and return a message of its own.
 //
-// A server builds that message from the sentinels that the error
-// matches, not from its text:
+// When every resolver declines a document, the error lists the reason
+// of each resolver. A [When] guard gives the description of its matcher,
+// such as its file path pattern. A
+// [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] quotes the file
+// path of the document, whatever name
+// [go.jacobcolvin.com/niceyaml.WithName] gives the document.
+// [go.jacobcolvin.com/niceyaml.IsInvalid] reports that error, so a
+// server that shows the faults of a document to its author shows those
+// reasons too. Such a server keeps absolute patterns out of the guards
+// of that registry, or words them with
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Described]. It ends its
+// resolvers with one that names a schema for every document, as reg
+// does, or builds its own message for an error that matches
+// [ErrNoMatch].
+//
+// A server builds the message of a load error from the sentinels that
+// the error matches, not from its text:
 //
 //   - [ErrURLNotAllowed] and [ErrFileNotAllowed] for a schema that the
 //     Access or the file system refused. The error of a symbolic link

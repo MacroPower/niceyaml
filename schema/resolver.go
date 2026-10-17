@@ -14,9 +14,32 @@ import (
 // ErrNoMatch, and reports the error to the caller when no resolver
 // applies. The document then does not name a schema that the registry
 // knows, so [niceyaml.IsInvalid] reports true for the error that the
-// registry returns. A sentinel that a resolver declines with, such as
-// [ErrNoDirective], must wrap ErrNoMatch for the error that the registry
-// reports to match it.
+// registry returns.
+//
+// A resolver says why it declines by putting ErrNoMatch first and its
+// reason after it:
+//
+//	return schema.Ref{}, fmt.Errorf("%w: no schema for kind %q", schema.ErrNoMatch, kind)
+//
+// When every resolver declines, the error of the registry lists the text
+// after "no matching schema: " as the reason of each resolver. [When]
+// declines with the description of its matcher. A bare ErrNoMatch gives
+// no reason, and the error lists no line for it. A reason that comes
+// before the sentinel keeps the sentinel, so the format "no kind: %w"
+// gives the line "no kind: no matching schema".
+//
+// The error of the registry matches each error that a decline wraps. A
+// sentinel that a resolver declines with, such as [ErrNoDirective], can
+// wrap ErrNoMatch, or sit beside it:
+//
+//	return schema.Ref{}, fmt.Errorf("%w: %w", schema.ErrNoMatch, errNoKind)
+//
+// Either way [errors.Is] finds the sentinel in the error of the
+// registry. The error of a context is the exception. A resolver whose
+// own deadline passed can decline with that error, but the error of the
+// registry matches neither [context.Canceled] nor
+// [context.DeadlineExceeded]. The lookup went on past that resolver, so
+// the document stays at fault.
 var ErrNoMatch = errors.New("no matching schema")
 
 // Ref is the schema that a [Resolver] names for a document. A Ref from
@@ -41,7 +64,7 @@ var ErrNoMatch = errors.New("no matching schema")
 //	    }
 //
 //	    if !found {
-//	        return schema.Ref{}, schema.ErrNoMatch
+//	        return schema.Ref{}, fmt.Errorf("%w: document has no kind", schema.ErrNoMatch)
 //	    }
 //
 //	    // The document picks kind, so keep it to a file name in schemas/.
@@ -163,7 +186,8 @@ func (r Ref) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 //
 // Resolve returns a [Ref] that names the schema for doc, such as one from
 // [Loadable]. When the resolver does not apply to the document, Resolve
-// returns an error wrapping [ErrNoMatch].
+// returns an error wrapping [ErrNoMatch], with its reason after the
+// sentinel as ErrNoMatch describes.
 //
 // A registry tries its resolvers in the order given and moves past each
 // one that reports ErrNoMatch. A resolver thus decides whether it applies
@@ -198,7 +222,7 @@ type Resolver interface {
 //	    }
 //
 //	    if !found {
-//	        return schema.Ref{}, schema.ErrNoMatch
+//	        return schema.Ref{}, fmt.Errorf("%w: document has no kind", schema.ErrNoMatch)
 //	    }
 //
 //	    // The document picks kind, so keep it to a file name in schemas/.

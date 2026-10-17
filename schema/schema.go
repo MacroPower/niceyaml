@@ -490,7 +490,7 @@ type Schema struct {
 //	        return Pod.Ref(), nil
 //	    }
 //
-//	    return schema.Ref{}, schema.ErrNoMatch
+//	    return schema.Ref{}, fmt.Errorf("%w: not a pod file", schema.ErrNoMatch)
 //	})
 //
 // The [Ref.Key] of the Ref is empty, because the registry does not load

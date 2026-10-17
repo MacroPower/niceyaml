@@ -354,18 +354,20 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 
 // Lookup finds the validator for a document.
 //
-// Returns [ErrNoMatch] if every resolver declines the document, with the
-// reason that each resolver gave as a detail, from
-// [niceyaml.WithDetails]. The lookup failed once, so the message of the
-// error is one line. The error matches each reason as well as
-// ErrNoMatch, so [errors.Is] finds a reason such as [ErrNoDirective]. A
-// rendering of the error, such as [niceyaml.FormatError] or
-// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], lists the
-// reasons below the message:
+// Returns [ErrNoMatch] if every resolver declines the document, with a
+// detail from [niceyaml.WithDetails] for each resolver that gave a
+// reason, as ErrNoMatch describes. The lookup failed once, so the
+// message of the error is one line. The error matches each reason as
+// well as ErrNoMatch, so [errors.Is] finds a reason such as
+// [ErrNoDirective], except the error of a context. A rendering of the
+// error lists the reasons below the message.
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draws:
 //
 //	app.yaml: no matching schema
 //	├── no schema directive
-//	└── no catalog entry matches
+//	└── no catalog entry matches: "/srv/app/app.yaml"
+//
+// [niceyaml.FormatError] draws the same tree with ASCII lines.
 //
 // In a file that holds several documents, the message names the document
 // that the lookup ran for, as "app.yaml: document 3: no matching
@@ -624,17 +626,27 @@ func (e noMatchError) Error() string {
 }
 
 // Is reports whether target is [ErrNoMatch], or whether a reason matches
-// a target that wraps ErrNoMatch, as [errors.Is] reports it. So a lookup
-// matches a decline sentinel such as [ErrNoDirective]. A reason can also
-// wrap an error that is not a decline, such as the error of a context
-// that ended inside a resolver with a deadline of its own. The lookup
-// continued past that resolver, and [niceyaml.Invalid] declares the
-// document at fault for every no-match. So the no-match does not match
-// that error.
+// target, as [errors.Is] reports it. So a lookup matches a decline
+// sentinel such as [ErrNoDirective], and a sentinel that a decline wraps
+// beside ErrNoMatch with a second %w verb.
+//
+// The error of a context is the exception, and the no-match matches
+// neither [context.Canceled] nor [context.DeadlineExceeded]. A reason can
+// wrap such an error when a context ended inside a resolver with a
+// deadline of its own. The lookup continued past that resolver, so the
+// call did not stop. [niceyaml.Invalid] declares the document at fault
+// for every no-match, but not for an error that matches the error of a
+// context.
 func (e noMatchError) Is(target error) bool {
-	return target == ErrNoMatch ||
-		(errors.Is(target, ErrNoMatch) &&
-			slices.ContainsFunc(e.reasons, func(reason error) bool { return errors.Is(reason, target) }))
+	if target == ErrNoMatch {
+		return true
+	}
+
+	if errors.Is(target, context.Canceled) || errors.Is(target, context.DeadlineExceeded) {
+		return false
+	}
+
+	return slices.ContainsFunc(e.reasons, func(reason error) bool { return errors.Is(reason, target) })
 }
 
 // As reports whether [errors.As] finds target in a reason, and sets

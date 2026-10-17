@@ -31,6 +31,11 @@ type textMatcher struct {
 // returns an error where [Content] does, and it refuses the documents
 // that [Content] refuses for their aliases.
 //
+// The Matcher describes itself as `$.apiVersion passes a text test`,
+// through [Describer]. That description is the reason that
+// [go.jacobcolvin.com/niceyaml/schema.When] gives when it declines.
+// [Described] words the test itself.
+//
 // Text panics if match is nil.
 //
 //	// Matches apiVersion: apps/v1 and apiVersion: apps/v1beta1.
@@ -48,6 +53,11 @@ func Text(path paths.Path, match func(text string) bool) Matcher {
 	}
 
 	return &textMatcher{path: path, match: match}
+}
+
+// Describe implements [Describer].
+func (m *textMatcher) Describe() string {
+	return m.path.String() + " passes a text test"
 }
 
 // Match implements [Matcher].

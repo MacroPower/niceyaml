@@ -61,6 +61,44 @@
 //	    matcher.Content(kind, "Deployment"),
 //	)
 //
+// # Descriptions
+//
+// A matcher describes the documents that it accepts through [Describer].
+// [go.jacobcolvin.com/niceyaml/schema.When] gives that description as its
+// reason when the matcher declines a document. So the error of a
+// registry that no resolver applies to says what each guard expected:
+//
+//	app.yaml: no matching schema
+//	├── no schema directive
+//	└── applies only when $.kind is "Deployment"
+//
+// Each matcher of this package builds its description from its
+// arguments:
+//
+//   - [Content] reads `$.kind is "Deployment"`, with a string want in
+//     quotes and any other want as Go formats it, such as 3, true, or 5s.
+//   - [Text] reads `$.apiVersion passes a text test`.
+//   - [Exists] reads `$.metadata exists`.
+//   - [FilePath] reads `file path matches "menus/*.{yaml,yml}"`, with the
+//     pattern as written.
+//   - [All] and [Any] join the descriptions of their matchers with "and"
+//     and "or". A child that joins two or more descriptions of its own
+//     goes in parentheses.
+//
+// A [Func] does not have a description. An All or an Any does not have
+// one either when it holds no matcher, or when one of its matchers does
+// not have one. [Described] gives any matcher a description in the words
+// of the caller, and it replaces the description of a matcher of this
+// package. A custom matcher describes itself by implementing Describer.
+//
+// A description holds only the text that the program wrote: the path,
+// the want, and the pattern. The base directory of [FilePath] does not
+// appear, but an absolute pattern names its own directory. The error of
+// a registry that no resolver applies to declares the document at fault,
+// so a server can show it to the author of the document. Such a server
+// keeps absolute patterns out of its guards, or words them with
+// Described.
+//
 // # Custom Matching Logic
 //
 // A [Func] makes tests that the other matchers cannot make. It can test
@@ -80,5 +118,5 @@
 // 2.
 //
 // Implement the [Matcher] interface for a custom matcher that several
-// callers share.
+// callers share, and the [Describer] interface to give it a description.
 package matcher

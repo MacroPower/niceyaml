@@ -69,3 +69,23 @@ func TestExists(t *testing.T) {
 
 	testCannotDecide(t, matcher.Exists)
 }
+
+func TestExists_Describe(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		path paths.Path
+		want string
+	}{
+		"path from the root":         {path: paths.Doc().Child("metadata"), want: "$.metadata exists"},
+		"path from the current node": {path: kindPath, want: "@.kind exists"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, description(t, matcher.Exists(tc.path)))
+		})
+	}
+}
