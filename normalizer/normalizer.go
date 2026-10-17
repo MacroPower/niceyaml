@@ -41,8 +41,8 @@ type Option func(*config)
 // diacriticBlocks holds the combining diacritical mark blocks. The
 // diacritic stage removes only the nonspacing marks in these blocks. Vowel
 // signs, viramas, and kana voicing marks are also nonspacing marks, but they
-// belong to the letter, so removing them would make distinct words equal.
-// Enclosing marks such as the keycap stay too.
+// belong to the letter. Removing them makes distinct words equal, so the
+// stage keeps them. Enclosing marks such as the keycap stay too.
 var diacriticBlocks = &unicode.RangeTable{
 	R16: []unicode.Range16{
 		{Lo: 0x0300, Hi: 0x036f, Stride: 1}, // Combining Diacritical Marks.
@@ -150,8 +150,8 @@ func WithCaseFold(enabled bool) Option {
 // When true (the default), the pipeline decomposes text and removes the
 // combining diacritical marks, such as accents, umlauts, and cedillas. For
 // example, "Ö" becomes "O" (before any case folding). Marks that form part of
-// a letter stay, so "ガ" keeps its voicing mark and Thai and Devanagari vowel
-// signs survive.
+// a letter stay, so "ガ" keeps its voicing mark, and Thai and Devanagari vowel
+// signs stay too.
 func WithDiacriticFold(enabled bool) Option {
 	return func(c *config) {
 		c.diacritics = enabled
@@ -169,9 +169,10 @@ func WithDiacriticFold(enabled bool) Option {
 //		return runes.Remove(runes.In(unicode.Zs))
 //	})
 //
-// Panics if any constructor is nil. [New] calls each constructor once and
-// panics if one returns nil or a nil pointer. [Normalizer.Normalize] can
-// call a constructor again, and it panics the same way.
+// WithTransformer panics if any constructor is nil. [New] calls each
+// constructor once and panics if one returns nil or a nil pointer.
+// [Normalizer.Normalize] might call a constructor again, and it panics the
+// same way.
 func WithTransformer(newTransformer ...func() transform.Transformer) Option {
 	for i, fn := range newTransformer {
 		if fn == nil {
@@ -196,8 +197,8 @@ func WithWidthFold(enabled bool) Option {
 }
 
 // Normalize applies the configured transformations to the input string.
-// A nil Normalizer returns the input string unchanged, and so does a
-// transformation that fails.
+// It returns the input string unchanged when n is nil or when a
+// transformation fails.
 func (n *Normalizer) Normalize(in string) string {
 	if n == nil {
 		return in
