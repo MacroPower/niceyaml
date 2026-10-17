@@ -184,8 +184,9 @@ The resolvers of a registry run in order, and the first one that does not declin
 ### Manifests
 
 - [examples/manifests/load](examples/manifests/load)
+- [examples/manifests/migrate](examples/manifests/migrate)
 
-[`manifest.Registry`][niceyaml/manifest.Registry] declares the kinds of an app once and loads a directory of manifests into typed Go values. The load example reports every problem of a broken directory in one error.
+[`manifest.Registry`][niceyaml/manifest.Registry] declares the kinds of an app once and loads a directory of manifests into typed Go values. The load example reports every problem of a broken directory in one error. The migrate example reads files of version `v1beta1` as the current Go type, then plans, diffs, and applies the rewrite to `v1`.
 
 ### Viewport
 

@@ -1,0 +1,8 @@
+---
+apiVersion: cafe.jacobcolvin.com/v1beta1
+kind: Dish
+metadata:
+  name: kaffe
+spec:
+  price: 35
+  diet: Lactose

@@ -1,0 +1,18 @@
+---
+# Fika menu, updated each season.
+apiVersion: cafe.jacobcolvin.com/v1beta1
+kind: Dish
+metadata:
+  name: kanelbulle
+spec:
+  price: 45 # kr
+  diet: gluten
+  color: brown
+---
+apiVersion: cafe.jacobcolvin.com/v1
+kind: MenuItem
+metadata:
+  name: semla
+spec:
+  price: 65
+  dietary: [gluten, nuts]

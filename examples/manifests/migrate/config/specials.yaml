@@ -1,0 +1,8 @@
+---
+apiVersion: cafe.jacobcolvin.com/v1
+kind: MenuItem
+metadata:
+  name: prinsesstarta
+spec:
+  price: 75
+  dietary: [gluten, lactose]
