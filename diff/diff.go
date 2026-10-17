@@ -259,6 +259,9 @@ type Origin struct {
 //   - [Result.Before] and [Result.After] return aligned views
 //     for side-by-side rendering.
 //
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintSideBySide] prints the
+// panes of Before and After beside each other.
+//
 // Every row of a rendering shows a line of an input or, in a side-by-side
 // pane, an empty placeholder. [Result.UnifiedOrigin] and
 // [Result.PaneOrigin] name the line of the input that a row shows.
@@ -672,6 +675,9 @@ func (r *Result) getPanes() *panes {
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another or the paired [Result.After] view. Every
 // view the calls return is over the same content.
+//
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintSideBySide] prints
+// the two panes beside each other and keeps their lines side by side.
 func (r *Result) Before() *line.View {
 	return r.pane(Before)
 }
@@ -691,6 +697,9 @@ func (r *Result) Before() *line.View {
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another or the paired [Result.Before] view. Every
 // view the calls return is over the same content.
+//
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintSideBySide] prints
+// the two panes beside each other and keeps their lines side by side.
 func (r *Result) After() *line.View {
 	return r.pane(After)
 }

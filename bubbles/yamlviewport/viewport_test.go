@@ -2345,6 +2345,127 @@ func TestViewport_ContainerBoxKeepsItsColumns(t *testing.T) {
 	}
 }
 
+func TestViewport_SideBySideSeparatorStyle(t *testing.T) {
+	t.Parallel()
+
+	// The divider between the panes draws in kind.UISeparator, as the one
+	// of printer.Printer.PrintSideBySide does, so a theme styles the two
+	// alike.
+	divider := lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000"))
+	styles := style.New(lipgloss.NewStyle(), style.Set(kind.UISeparator, divider))
+
+	tcs := map[string]struct {
+		width int
+	}{
+		"even width": {width: 41},
+		"odd width":  {width: 42},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter().With(printer.WithStyles(styles)), tc.width, 3)
+			m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			setRevision(&m, stringtest.LinesLF("a: 1", "b: 2"))
+
+			rows := strings.Split(m.View(), "\n")
+			require.GreaterOrEqual(t, len(rows), 2)
+
+			for _, row := range rows[:2] {
+				assert.Contains(t, row, divider.Render(" │ "))
+				assert.Equal(t, tc.width, ansi.StringWidth(row))
+			}
+		})
+	}
+}
+
+func TestViewport_SideBySideAlignsRowsAbove(t *testing.T) {
+	t.Parallel()
+
+	// The second line of each revision changes. The pane with fewer rows
+	// above the first content row of that line gets blank rows above its
+	// own, so both content rows of the line sit on one screen row.
+	note := func(text string, k kind.Kind) line.Annotation {
+		return line.Annotation{Content: text, Kind: k, Placement: line.Above, Cols: position.NewSpan(3, 3)}
+	}
+
+	tcs := map[string]struct {
+		before, after line.Annotations
+		want          string
+		wantHits      string
+	}{
+		"note above the right pane": {
+			after: line.Annotations{note("a note", "")},
+			want: stringtest.JoinLF(
+				"   1  a: 1      │    1  a: 1",
+				"                │          a note",
+				"   2 -b: 2      │    2 +b: 20",
+				"   3  c: 3      │    3  c: 3",
+			),
+			wantHits: stringtest.JoinLF(
+				"......0000..............1111.....",
+				".................................",
+				"......0000..............11111....",
+				"......0000..............1111.....",
+				".................................",
+			),
+		},
+		"more notes above the left pane": {
+			before: line.Annotations{note("one", ""), note("two", kind.TextWarn)},
+			after:  line.Annotations{note("a note", "")},
+			want: stringtest.JoinLF(
+				"   1  a: 1      │    1  a: 1",
+				"         one    │",
+				"         two    │          a note",
+				"   2 -b: 2      │    2 +b: 20",
+				"   3  c: 3      │    3  c: 3",
+			),
+			wantHits: stringtest.JoinLF(
+				"......0000..............1111.....",
+				".................................",
+				".................................",
+				"......0000..............11111....",
+				"......0000..............1111.....",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			before := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2", "c: 3")).View()
+			after := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 20", "c: 3")).View()
+
+			before.Annotate(1, tc.before...)
+			after.Annotate(1, tc.after...)
+
+			m := testModel(testPrinterWithLineNumbers(), 33, 5)
+			m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			m.AddRevision(yamlviewport.NewRevision("v1", before))
+			m.AddRevision(yamlviewport.NewRevision("v2", after))
+
+			assert.Equal(t, tc.want, plainRows(&m))
+			assert.Equal(t, tc.wantHits, hitMap(&m), screenMessage(&m))
+			assert.Equal(t, strings.Count(tc.want, "\n")+1, m.TotalRowCount())
+
+			// Reveal centers the content row of the line, which both panes
+			// show on one screen row.
+			short := m
+			short.SetHeight(3)
+
+			for revision := range 2 {
+				require.True(t, short.Reveal(yamlviewport.Hit{Revision: revision, Position: position.New(1, 0)}))
+
+				rows := strings.Split(ansi.Strip(short.View()), "\n")
+				assert.Contains(t, rows[1], "2 -b: 2", "revision %d", revision)
+				assert.Contains(t, rows[1], "2 +b: 20", "revision %d", revision)
+			}
+		})
+	}
+}
+
 func TestViewport_SideBySideFillerRowsKeepTheFrame(t *testing.T) {
 	t.Parallel()
 

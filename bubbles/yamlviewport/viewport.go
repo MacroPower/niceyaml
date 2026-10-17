@@ -586,7 +586,7 @@ func (m *Model) remeasure(ranges ...position.Range) {
 
 	left := m.highlightedWithin(false, spans...)
 	leftLayout := p.Layout(left)
-	changed := m.rows.differs(leftLayout, left, m.rows.left, m.rows.leftWidths)
+	changed := m.rows.differs(leftLayout, left, m.rows.left, m.rows.leftWidths, m.rows.leftAbove)
 
 	var (
 		right       *line.View
@@ -596,7 +596,7 @@ func (m *Model) remeasure(ranges ...position.Range) {
 	if m.rows.right != nil && m.baseRight != nil {
 		right = m.highlightedWithin(true, spans...)
 		rightLayout = p.Layout(right)
-		changed = changed || m.rows.differs(rightLayout, right, m.rows.right, m.rows.rightWidths)
+		changed = changed || m.rows.differs(rightLayout, right, m.rows.right, m.rows.rightWidths, m.rows.rightAbove)
 	}
 
 	// The cache already holds the counts of a decoration that keeps every
@@ -606,10 +606,10 @@ func (m *Model) remeasure(ranges ...position.Range) {
 	}
 
 	c := m.rows.clone()
-	c.measure(leftLayout, left, c.left, c.leftWidths)
+	c.measure(leftLayout, left, c.left, c.leftWidths, c.leftAbove)
 
 	if right != nil {
-		c.measure(rightLayout, right, c.right, c.rightWidths)
+		c.measure(rightLayout, right, c.right, c.rightWidths, c.rightAbove)
 	}
 
 	c.sum()
@@ -1541,12 +1541,20 @@ type rowCache struct {
 	// the order of the row counts, for the left and right panes. The right
 	// widths are nil outside side-by-side diffs.
 	leftWidths, rightWidths []int
+	// Rows above the first content row of each line the view renders, in
+	// the order of the row counts, for the left and right panes. The rows
+	// of the annotations above a line are such rows. The right counts are
+	// nil outside side-by-side diffs.
+	leftAbove, rightAbove []int
 	// The index in the content of the k-th rendered line, ascending.
 	indices []int
-	// Prefix sums of the taller pane after the top frame. The entry sums[k]
-	// is the first row of the k-th rendered line, and the last entry is the
-	// first row of the bottom frame. The slice stays nil until fillRows
-	// fills the cache.
+	// Prefix sums of the rows of each line after the top frame. In
+	// side-by-side mode a line takes the larger block of rows above its
+	// first content row and the larger rest of the two panes, as
+	// printer.Printer.PrintSideBySide aligns them. The entry sums[k] is the
+	// first row of the k-th rendered line, and the last entry is the first
+	// row of the bottom frame. The slice stays nil until fillRows fills the
+	// cache.
 	sums []int
 	// Width in cells of the widest row of either pane.
 	width int
@@ -1582,6 +1590,8 @@ func (c *rowCache) clone() *rowCache {
 		right:       slices.Clone(c.right),
 		leftWidths:  slices.Clone(c.leftWidths),
 		rightWidths: slices.Clone(c.rightWidths),
+		leftAbove:   slices.Clone(c.leftAbove),
+		rightAbove:  slices.Clone(c.rightAbove),
 		indices:     c.indices,
 		sums:        c.sums,
 		width:       c.width,
@@ -1602,7 +1612,8 @@ func (c *rowCache) sum() {
 		c.width = max(c.width, c.leftWidths[k])
 
 		if c.right != nil {
-			rows = max(rows, c.right[k])
+			above := max(c.leftAbove[k], c.rightAbove[k])
+			rows = above + max(rows-c.leftAbove[k], c.right[k]-c.rightAbove[k])
 			c.width = max(c.width, c.rightWidths[k])
 		}
 
@@ -1612,30 +1623,61 @@ func (c *rowCache) sum() {
 	c.sums = sums
 }
 
-// measure copies the row count and width of each line of view from layout,
-// the layout of view, into rows and widths. The rows and widths slices hold
-// an entry for each rendered line of the cache.
-func (c *rowCache) measure(layout printer.Layout, view *line.View, rows, widths []int) {
+// padTop returns the blank rows that the left pane, or the right one when
+// right is true, shows above the rows of the k-th rendered line. The pane
+// with fewer rows above the first content row of the line gets the
+// difference, so the first content rows of the two panes sit on one row.
+// Outside side-by-side diffs it returns 0.
+func (c *rowCache) padTop(k int, right bool) int {
+	if c.right == nil {
+		return 0
+	}
+
+	above := max(c.leftAbove[k], c.rightAbove[k])
+	if right {
+		return above - c.rightAbove[k]
+	}
+
+	return above - c.leftAbove[k]
+}
+
+// measure copies the counts of each line of view from layout, the layout
+// of view. The rows of the line go into rows and its width into widths.
+// The rows above its first content row go into above. The slices hold an
+// entry for each rendered line of the cache.
+func (c *rowCache) measure(layout printer.Layout, view *line.View, rows, widths, above []int) {
 	for i := range view.All() {
 		if k, ok := slices.BinarySearch(c.indices, i); ok {
 			rows[k] = layout.LineRows(i)
 			widths[k] = layout.LineWidth(i)
+			above[k] = rowsAbove(layout, i)
 		}
 	}
 }
 
 // differs reports whether layout, the layout of view, gives any line of
-// view a row count or width other than the one in rows and widths. The rows
-// and widths slices hold an entry for each rendered line of the cache.
-func (c *rowCache) differs(layout printer.Layout, view *line.View, rows, widths []int) bool {
+// view a row count, a width, or rows above its first content row other
+// than the ones in rows, widths, and above. The slices hold an entry for
+// each rendered line of the cache.
+func (c *rowCache) differs(layout printer.Layout, view *line.View, rows, widths, above []int) bool {
 	for i := range view.All() {
 		k, ok := slices.BinarySearch(c.indices, i)
-		if ok && (rows[k] != layout.LineRows(i) || widths[k] != layout.LineWidth(i)) {
+		if !ok {
+			continue
+		}
+
+		if rows[k] != layout.LineRows(i) || widths[k] != layout.LineWidth(i) || above[k] != rowsAbove(layout, i) {
 			return true
 		}
 	}
 
 	return false
+}
+
+// rowsAbove returns the rows that line i takes in layout above its first
+// content row, such as the rows of its annotations above it.
+func rowsAbove(layout printer.Layout, i int) int {
+	return layout.RowOf(position.New(i, 0)) - layout.LineStart(i)
 }
 
 // ensureRows fills the row count cache when it is empty, scrolls back to the
@@ -1707,6 +1749,7 @@ func (m *Model) fillRows() {
 
 	c.left, c.right = nil, nil
 	c.leftWidths, c.rightWidths = nil, nil
+	c.leftAbove, c.rightAbove = nil, nil
 	c.top, c.bottom = 0, 0
 	c.maxNumber = 0
 
@@ -1719,11 +1762,11 @@ func (m *Model) fillRows() {
 		p := m.renderPrinter(m.paneWidth())
 
 		left := m.highlight(false, m.baseLeft.Clone())
-		c.indices, c.left, c.leftWidths = layoutRows(p.Layout(left), left)
+		c.indices, c.left, c.leftWidths, c.leftAbove = layoutRows(p.Layout(left), left)
 
 		if m.viewMode == ViewModeSideBySide && m.baseRight != nil {
 			right := m.highlight(true, m.baseRight.Clone())
-			_, c.right, c.rightWidths = layoutRows(p.Layout(right), right)
+			_, c.right, c.rightWidths, c.rightAbove = layoutRows(p.Layout(right), right)
 		}
 
 		// A layout counts the rows before the container style applies. Print
@@ -1738,8 +1781,10 @@ func (m *Model) fillRows() {
 	c.sum()
 }
 
-// lineRows returns the number of rows the k-th rendered line takes, which is
-// the taller of its two panes in side-by-side mode.
+// lineRows returns the number of rows the k-th rendered line takes. In
+// side-by-side mode, the count is the larger block of rows above the
+// first content row in either pane, plus the larger number of rows from
+// that row on.
 func (m *Model) lineRows(k int) int {
 	return m.rows.sums[k+1] - m.rows.sums[k]
 }
@@ -1907,20 +1952,22 @@ func (m *Model) rowWidth() int {
 }
 
 // layoutRows returns the index in the content of each line view holds, the
-// number of rows each takes in layout, and the width of its widest row, in
-// content order.
-func layoutRows(layout printer.Layout, view *line.View) ([]int, []int, []int) {
+// number of rows each takes in layout, the width of its widest row, and
+// the rows above its first content row, in content order.
+func layoutRows(layout printer.Layout, view *line.View) ([]int, []int, []int, []int) {
 	indices := make([]int, 0, view.Count())
 	rows := make([]int, 0, view.Count())
 	widths := make([]int, 0, view.Count())
+	above := make([]int, 0, view.Count())
 
 	for i := range view.All() {
 		indices = append(indices, i)
 		rows = append(rows, layout.LineRows(i))
 		widths = append(widths, layout.LineWidth(i))
+		above = append(above, rowsAbove(layout, i))
 	}
 
-	return indices, rows, widths
+	return indices, rows, widths, above
 }
 
 // scrollWidth returns the number of row columns a pane shows at a time: the
@@ -2291,14 +2338,16 @@ func (m *Model) HitAt(x, y int) (Hit, bool) {
 		}
 	}
 
-	// A line that wraps taller in the other pane leaves blank rows below
-	// its own rows in this one.
+	// A line that takes more rows in the other pane, above its first
+	// content row or below it, leaves blank rows above or below its own
+	// rows in this one.
 	count := m.rows.left[k]
 	if right && m.rows.right != nil {
 		count = m.rows.right[k]
 	}
 
-	if row >= count {
+	row -= m.rows.padTop(k, right)
+	if row < 0 || row >= count {
 		return Hit{}, false
 	}
 
@@ -2624,8 +2673,8 @@ func (m *Model) scrollTo(target scrollTarget) bool {
 	}
 
 	// The row of the range within its line comes from a layout of the line
-	// alone in the pane it is in, and the line's first row from the sums
-	// that place the taller of the two panes.
+	// alone in the pane it is in. The line's first row comes from the sums,
+	// and padTop adds the blank rows the pane shows above its own.
 	layout := m.renderPrinter(m.paneWidth()).Layout(m.highlightedWithin(right, position.NewSpan(i, i+1)))
 
 	lineRow := layout.RowOf(rng.Start)
@@ -2639,7 +2688,9 @@ func (m *Model) scrollTo(target scrollTarget) bool {
 		return true
 	}
 
-	row := m.rows.sums[k] + lineRow
+	// The pane with fewer rows above the first content row of the line
+	// shows blank rows above its own.
+	row := m.rows.sums[k] + m.rows.padTop(k, right) + lineRow
 
 	// (maxHeight-1)/2 puts the range on the visual center row. A height of
 	// 22 gives (22-1)/2 = 10, and a height of 21 gives (21-1)/2 = 10, so
@@ -2840,7 +2891,8 @@ func (m Model) View() string {
 	return m.renderContent(m.visibleRows(), w, h)
 }
 
-// sideBySideSeparator is the column divider between panes.
+// sideBySideSeparator is the divider between the panes, the one that
+// [printer.Printer.PrintSideBySide] draws.
 const sideBySideSeparator = " │ "
 
 // renderSideBySide renders the side-by-side view with two panes.
@@ -2872,22 +2924,22 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 
 	blank := m.blankPaneRow(p)
 
-	// Get text style for padding empty areas.
-	textStyle := m.printer.Style(kind.Text)
-
-	// Build separator with any extra padding from odd width.
+	// The separator draws in kind.UISeparator, as the divider of
+	// printer.Printer.PrintSideBySide does. The cell an odd width leaves
+	// over pads in kind.Text.
 	separatorWidth := ansi.StringWidth(sideBySideSeparator)
 	extraPadding := (contentW - separatorWidth) % 2
-	separator := textStyle.Render(sideBySideSeparator + strings.Repeat(" ", extraPadding))
+	separator := m.printer.Style(kind.UISeparator).Render(sideBySideSeparator) + m.printer.Pad("", extraPadding)
 
 	combined := make([]string, 0, m.rows.sums[last]-m.rows.sums[first])
 
 	var li, ri int
 
-	// Join the next count rows of the panes. Take at most leftCount rows
-	// from the left pane and rightCount from the right, and scroll their
-	// content columns to offset.
-	appendRows := func(count, leftCount, rightCount, offset int) {
+	// Join the next count rows of the panes. Show blank rows for the
+	// first leftTop rows of the left pane, then take at most leftCount
+	// rows from it, and do the same for the right pane. Scroll the content
+	// columns of each row to offset.
+	appendRows := func(count, leftTop, leftCount, rightTop, rightCount, offset int) {
 		for i := range count {
 			// A pane out of rows shows the blank row, which carries the
 			// container's frame. Horizontal scrolling cuts the content
@@ -2895,12 +2947,12 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 			// frame already sits where it belongs.
 			left, right := blank, blank
 
-			if i < leftCount && li < len(leftRows) {
+			if i >= leftTop && i < leftTop+leftCount && li < len(leftRows) {
 				left = m.cutRow(leftRows[li], offset, paneWidth)
 				li++
 			}
 
-			if i < rightCount && ri < len(rightRows) {
+			if i >= rightTop && i < rightTop+rightCount && ri < len(rightRows) {
 				right = m.cutRow(rightRows[ri], offset, paneWidth)
 				ri++
 			}
@@ -2916,11 +2968,14 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	}
 
 	if first == 0 {
-		appendRows(m.rows.top, m.rows.top, m.rows.top, 0)
+		appendRows(m.rows.top, 0, m.rows.top, 0, m.rows.top, 0)
 	}
 
-	// Zip the panes line by line. A line that wraps taller in one pane gets
-	// blank rows in the other, so the panes stay aligned.
+	// Zip the panes line by line, as printer.Printer.PrintSideBySide does.
+	// The pane with fewer rows above the first content row of a line gets
+	// blank rows at the top, so the content rows of the line start side by
+	// side. The pane with fewer rows after that gets blank rows at the
+	// bottom.
 	for k := first; k < last; k++ {
 		leftCount := m.rows.left[k]
 
@@ -2929,11 +2984,11 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 			rightCount = m.rows.right[k]
 		}
 
-		appendRows(m.lineRows(k), leftCount, rightCount, m.xOffset)
+		appendRows(m.lineRows(k), m.rows.padTop(k, false), leftCount, m.rows.padTop(k, true), rightCount, m.xOffset)
 	}
 
 	if last == len(m.rows.left) {
-		appendRows(m.rows.bottom, m.rows.bottom, m.rows.bottom, 0)
+		appendRows(m.rows.bottom, 0, m.rows.bottom, 0, m.rows.bottom, 0)
 	}
 
 	combined = m.trimWindow(combined, first)
@@ -2941,13 +2996,13 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	return m.renderContent(combined, contentW, contentH)
 }
 
-// blankPaneRow renders the row that a side-by-side pane shows below its own
-// rows when the line wraps taller in the other pane. It is one empty content
-// row with the frame of p's container style around it, so the pane keeps
-// its border down the whole window. Print pads the row to p's container
-// width, and the side-by-side view pins that width to the pane width. A
-// container without a horizontal frame therefore gives a row of
-// [kind.Text] spaces as wide as the pane.
+// blankPaneRow renders the row that a side-by-side pane shows above or
+// below its own rows when the other pane takes more rows there. It is one
+// empty content row with the frame of p's container style around it, so
+// the pane keeps its border down the whole window. Print pads the row to
+// p's container width, and the side-by-side view pins that width to the
+// pane width. A container without a horizontal frame therefore gives a row
+// of [kind.Text] spaces as wide as the pane.
 func (m *Model) blankPaneRow(p *printer.Printer) string {
 	// The row holds no content, so an empty view prints it without copying
 	// the decoration of a view as long as the document.

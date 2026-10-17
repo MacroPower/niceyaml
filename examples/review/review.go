@@ -162,17 +162,13 @@ func main() {
 	// Result.Before and Result.After return panes of equal length, with an
 	// empty row where the other revision holds a line that this one lacks.
 	// Each pane shows every line of its revision and takes the marks of
-	// that revision. An annotation row in one pane pushes it out of line
-	// with the other. The panes thus print without annotations and keep
-	// only the error highlights. The highlights are colors, so output
-	// without color does not show the marks.
+	// that revision. PrintSideBySide keeps line i of each pane beside line
+	// i of the other, so an error row below a line in one pane gets a blank
+	// row in the other.
 	left, right := result.Before(), result.After()
 	result.Carry(left, viewBefore, viewAfter)
 	result.Carry(right, viewBefore, viewAfter)
-
-	// The printer renders one view, so lipgloss joins the printed panes.
-	unannotated := p.With(printer.WithAnnotation(printer.NoAnnotation))
-	lipgloss.Println(lipgloss.JoinHorizontal(lipgloss.Top, unannotated.Print(left), "   ", unannotated.Print(right)))
+	lipgloss.Println(p.PrintSideBySide(left, right))
 }
 
 // spacing is an [lcs.Algorithm] that ignores changes in the amount of

@@ -18,6 +18,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -2011,6 +2012,313 @@ func TestPrinter_Style(t *testing.T) {
 
 			assert.Equal(t, tc.wantBold, got.GetBold())
 			assert.Equal(t, tc.wantItalic, got.GetItalic())
+		})
+	}
+}
+
+func TestPrinter_PrintSideBySide(t *testing.T) {
+	t.Parallel()
+
+	// Each case prints the panes that views returns. The plain printer
+	// numbers the lines and marks the changes of a diff.
+	twoLines := stringtest.LinesLF("a: 1", "b: 2")
+	view := func(input string) *line.View { return niceyaml.NewSourceFromString(input).View() }
+	panes := func(left, right string) func() (*line.View, *line.View) {
+		return func() (*line.View, *line.View) { return view(left), view(right) }
+	}
+
+	tcs := map[string]struct {
+		views func() (*line.View, *line.View)
+		want  string
+		opts  []printer.Option
+	}{
+		"equal panes join row by row": {
+			views: panes(twoLines, twoLines),
+			want: stringtest.JoinLF(
+				"   1  a: 1 │    1  a: 1",
+				"   2  b: 2 │    2  b: 2",
+			),
+		},
+		"annotation above a line of the right pane": {
+			views: func() (*line.View, *line.View) {
+				left, right := view(twoLines), view(twoLines)
+				right.Annotate(1, line.Annotation{Content: "a note", Placement: line.Above})
+
+				return left, right
+			},
+			want: stringtest.JoinLF(
+				"   1  a: 1 │    1  a: 1",
+				"           │       a note",
+				"   2  b: 2 │    2  b: 2",
+			),
+		},
+		"annotation below a line of the left pane": {
+			views: func() (*line.View, *line.View) {
+				left, right := view(twoLines), view(twoLines)
+				left.Annotate(0, yamltest.ErrorAnnotation(position.NewSpan(3, 4), "bad"))
+
+				return left, right
+			},
+			want: stringtest.JoinLF(
+				"   1  a: 1     │    1  a: 1",
+				"         ^ bad │       ",
+				"   2  b: 2     │    2  b: 2",
+			),
+		},
+		// Each pane wraps to (33-3)/2 = 15 cells, and the left pane pads
+		// its rows to that width.
+		"line that wraps taller in one pane": {
+			views: panes(stringtest.LinesLF("a: one two three", "b: 2"), twoLines),
+			opts:  []printer.Option{printer.WithWrapWidth(33)},
+			want: stringtest.JoinLF(
+				"   1  a: one    │    1  a: 1",
+				"   -  two three │       ",
+				"   2  b: 2      │    2  b: 2",
+			),
+		},
+		// The left pane has two rows above the content row, and the right
+		// pane has three rows after it. The line thus takes six rows (two
+		// above, the content row, and three after), more than either pane
+		// takes alone.
+		"line with more rows above in one pane and after in the other": {
+			views: func() (*line.View, *line.View) {
+				left, right := view(twoLines), view(stringtest.LinesLF("a: one two three four", "b: 2"))
+				left.Annotate(0,
+					line.Annotation{Content: "one", Kind: kind.TextError, Placement: line.Above},
+					line.Annotation{Content: "two", Kind: kind.TextWarn, Placement: line.Above},
+				)
+
+				return left, right
+			},
+			opts: []printer.Option{printer.WithWrapWidth(31)},
+			want: stringtest.JoinLF(
+				"      one      │       ",
+				"      two      │       ",
+				"   1  a: 1     │    1  a: one",
+				"               │    -  two",
+				"               │    -  three",
+				"               │    -  four",
+				"   2  b: 2     │    2  b: 2",
+			),
+		},
+		"diff placeholders print blank gutters": {
+			views: func() (*line.View, *line.View) {
+				result := yamltest.Diff("a: 1\n", twoLines)
+
+				return result.Before(), result.After()
+			},
+			want: stringtest.JoinLF(
+				"   1  a: 1 │    1  a: 1",
+				"           │    2 +b: 2",
+			),
+		},
+		"large number widens both gutters": {
+			views: func() (*line.View, *line.View) {
+				long := view(tenThousandLines + "z: 9\n")
+
+				return long.Slice(position.NewSpan(0, 1), position.NewSpan(10000, 10001)), view(twoLines)
+			},
+			want: stringtest.JoinLF(
+				"    1  k: v │     1  a: 1",
+				"            │     2  b: 2",
+				"10001  z: 9 │        ",
+			),
+		},
+		"line that only one pane holds": {
+			views: func() (*line.View, *line.View) {
+				return view(twoLines).Slice(position.NewSpan(0, 1)), view(twoLines)
+			},
+			want: stringtest.JoinLF(
+				"   1  a: 1 │    1  a: 1",
+				"           │    2  b: 2",
+			),
+		},
+		"left row past the pane width": {
+			views: func() (*line.View, *line.View) {
+				left, right := view(twoLines), view(twoLines)
+				left.Annotate(0, yamltest.ErrorAnnotation(position.NewSpan(20, 21), "far"))
+
+				return left, right
+			},
+			opts: []printer.Option{printer.WithWrapWidth(33)},
+			want: stringtest.JoinLF(
+				"   1  a: 1                  │    1  a: 1",
+				"                          ^ │       ",
+				"      far                   │       ",
+				"   2  b: 2                  │    2  b: 2",
+			),
+		},
+		"container style wraps the joined rows": {
+			views: panes(twoLines, twoLines),
+			opts:  []printer.Option{printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder()))},
+			want: stringtest.JoinLF(
+				"┌───────────────────────┐",
+				"│   1  a: 1 │    1  a: 1│",
+				"│   2  b: 2 │    2  b: 2│",
+				"└───────────────────────┘",
+			),
+		},
+		"container width pads the joined rows": {
+			views: panes(twoLines, twoLines),
+			opts:  []printer.Option{printer.WithContainerWidth(26)},
+			want: stringtest.JoinLF(
+				"   1  a: 1 │    1  a: 1   ",
+				"   2  b: 2 │    2  b: 2   ",
+			),
+		},
+		"empty views": {
+			views: panes("", ""),
+			want:  "",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinterWithGutter(printer.DefaultGutter).With(tc.opts...)
+			left, right := tc.views()
+			got := p.PrintSideBySide(left, right)
+
+			assert.Equal(t, tc.want, got)
+
+			// The separator keeps one cell on every row.
+			sep := -1
+
+			for row := range strings.SplitSeq(got, "\n") {
+				before, _, ok := strings.Cut(row, "│")
+				if !ok || strings.HasPrefix(row, "│") {
+					continue
+				}
+
+				if sep < 0 {
+					sep = lipgloss.Width(before)
+				}
+
+				assert.Equal(t, sep, lipgloss.Width(before), "row %q", row)
+			}
+
+			// A row fits the wrap width unless a row of the left pane runs
+			// past its half.
+			if w := p.WrapWidth(); w > 0 && name != "left row past the pane width" {
+				for row := range strings.SplitSeq(got, "\n") {
+					assert.LessOrEqual(t, lipgloss.Width(row), w, "row %q", row)
+				}
+			}
+		})
+	}
+}
+
+func TestPrinter_PrintSideBySide_PaneLayout(t *testing.T) {
+	t.Parallel()
+
+	// A viewer zips the panes from a Layout of each pane by the printer
+	// that PrintSideBySide draws the pane with. Each line then starts on
+	// the row the zip gives it, and its first content row sits below the
+	// larger block of rows above it.
+	left := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2", "c: 3")).View()
+	left.Annotate(0,
+		line.Annotation{Content: "one", Kind: kind.TextError, Placement: line.Above},
+		line.Annotation{Content: "two", Kind: kind.TextWarn, Placement: line.Above},
+	)
+
+	right := niceyaml.NewSourceFromString(stringtest.LinesLF("a: one two three four", "b: 2", "c: 3")).View()
+	right.Annotate(2, line.Annotation{Content: "a note", Placement: line.Above})
+
+	p := testPrinterWithGutter(printer.DefaultGutter).With(
+		printer.WithWrapWidth(33),
+		printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
+	)
+
+	// The pane width is half of what the frame and the separator leave.
+	paneWidth := (p.WrapWidth() - p.ContainerStyle().GetHorizontalFrameSize() - 3) / 2
+	pane := p.With(
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithContainerWidth(0),
+		printer.WithMaxNumber(max(p.MaxNumber(left), p.MaxNumber(right))),
+		printer.WithWrapWidth(paneWidth),
+	)
+	layouts := [2]printer.Layout{pane.Layout(left), pane.Layout(right)}
+
+	// The rows inside the top and the bottom border.
+	rows := strings.Split(p.PrintSideBySide(left, right), "\n")
+	rows = rows[1 : len(rows)-1]
+
+	start := 0
+
+	for i := range 3 {
+		var above, after [2]int
+
+		for k, l := range layouts {
+			above[k] = l.RowOf(position.New(i, 0)) - l.LineStart(i)
+			after[k] = l.LineRows(i) - above[k]
+		}
+
+		top := max(above[0], above[1])
+		require.Less(t, start+top, len(rows))
+
+		leftHalf, rightHalf, ok := strings.Cut(rows[start+top], " │ ")
+		require.True(t, ok, "row %q", rows[start+top])
+
+		number := " " + strconv.Itoa(i+1) + "  "
+		assert.Contains(t, leftHalf, number, "line %d", i)
+		assert.Contains(t, rightHalf, number, "line %d", i)
+
+		start += top + max(after[0], after[1])
+	}
+
+	assert.Len(t, rows, start)
+}
+
+func TestPrinter_PrintSideBySide_Golden(t *testing.T) {
+	t.Parallel()
+
+	// The diff changes one price and adds an item, and each revision marks
+	// the prices that are not in kr.
+	before := stringtest.LinesLF(
+		"menu:",
+		"  - item: Kanelbulle",
+		"    price: 45 SEK",
+		"  - item: Semla",
+		"    price: 65 kr",
+	)
+	after := stringtest.LinesLF(
+		"menu:",
+		"  - item: Kanelbulle",
+		"    price: 45 kr",
+		"  - item: Semla",
+		"    price: 65 kr",
+		"  - item: Prinsesstårta",
+		"    price: 8 EUR",
+	)
+
+	tcs := map[string]struct {
+		wrap int
+	}{
+		"diff with marks":         {},
+		"wrapped diff with marks": {wrap: 40},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			viewBefore := niceyaml.NewSourceFromString(before).View()
+			viewBefore.AddOverlay(kind.GenericError, yamltest.LineRange(2, 11, 17))
+			viewBefore.Annotate(2, yamltest.ErrorAnnotation(position.NewSpan(11, 17), "price is not in kr"))
+
+			viewAfter := niceyaml.NewSourceFromString(after).View()
+			viewAfter.AddOverlay(kind.GenericError, yamltest.LineRange(6, 11, 16))
+			viewAfter.Annotate(6, yamltest.ErrorAnnotation(position.NewSpan(11, 16), "price is not in kr"))
+			viewAfter.Annotate(5, line.Annotation{Content: "new item", Kind: kind.TextOK, Placement: line.Above})
+
+			result := diff.Diff(viewBefore, viewAfter)
+			left, right := result.Before(), result.After()
+			result.Carry(left, viewBefore, viewAfter)
+			result.Carry(right, viewBefore, viewAfter)
+
+			p := printer.New(printer.WithStyles(theme.Charm), printer.WithWrapWidth(tc.wrap))
+			golden.RequireEqual(t, p.PrintSideBySide(left, right))
 		})
 	}
 }

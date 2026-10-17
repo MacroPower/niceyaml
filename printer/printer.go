@@ -55,6 +55,9 @@ const wrapOnCharacters = " " + breakpoints
 //	p.Print(view)                       // All lines.
 //	p.Print(view.Slice(span1, span2))   // The lines of two spans.
 //
+// [Printer.PrintSideBySide] renders two views as panes beside each other,
+// such as the two revisions of a side-by-side diff.
+//
 // The output holds 24-bit color escape sequences whatever the destination
 // supports. The package documentation covers the functions that fit them
 // to a terminal, a pipe, or a file.
@@ -832,8 +835,9 @@ func WithWrapWidth(width int) Option {
 // in the view, so a number the view holds never overflows it. A max number
 // of 0, the default, takes the number from the view alone.
 //
-// Use it to give two views the same gutter width, as a side-by-side diff
-// needs when one revision is longer than the other.
+// Use it to give two views the same gutter width, as a viewer that draws a
+// side-by-side diff itself needs when one revision is longer than the
+// other. [Printer.PrintSideBySide] sizes both gutters itself.
 func WithMaxNumber(n int) Option {
 	return func(c *config) {
 		c.maxNumber = max(0, n)
@@ -954,6 +958,158 @@ func (p *Printer) Print(view *line.View) string {
 	return p.style.Render(strings.Join(p.padRows(p.renderRows(view)), "\n"))
 }
 
+// sideBySideSeparator is the divider between the panes that
+// [Printer.PrintSideBySide] renders.
+const sideBySideSeparator = " │ "
+
+// PrintSideBySide renders left and right as two panes beside each other,
+// as a side-by-side diff shows the panes that
+// [go.jacobcolvin.com/niceyaml/diff.Result.Before] and
+// [go.jacobcolvin.com/niceyaml/diff.Result.After] return. The views pair
+// their lines by index, as the panes of a diff do, so line i of left sits
+// beside line i of right. A line that one view holds and the other does
+// not gets blank rows in the other pane.
+//
+// The rows above the first content row of a line, such as the
+// annotations above it, end on one row in both panes. A pane with fewer
+// rows there gets blank rows at the top, and a pane with fewer rows after
+// the first content row gets blank rows at the bottom. Each line thus
+// takes the larger block of rows above its first content row, plus the
+// larger number of rows from that row to the end of the line. A line can
+// take more rows than it takes in either pane alone. The first content
+// row of line i in each pane sits on one output row, and line i+1 starts
+// on one row in both panes.
+//
+// Annotations, wrapped rows, and the marks that
+// [go.jacobcolvin.com/niceyaml/diff.Result.Carry] copies keep the lines
+// of the panes side by side. The rows within a line that wraps need not
+// line up, because an annotation sits beside the wrapped row that holds
+// its column.
+//
+// Both gutters size for the larger [Printer.MaxNumber] of the two views.
+// With [WithWrapWidth], each pane wraps to half the width that the
+// separator and the frame of the container leave. The left pane pads each
+// of its rows in [kind.Text] to the wider of its widest row and that pane
+// width, so the separator keeps its column on every row. The separator
+// " │ " in [kind.UISeparator] joins the panes. The container style wraps
+// the joined rows, and [WithContainerWidth] pins their width, as in
+// [Printer.Print]. The output ends with its last row and no line feed, as
+// [Printer.Print] describes.
+//
+// PrintSideBySide has no [Layout] counterpart. A viewer that scrolls or
+// maps a pointer zips the panes itself by the same rule. For each line, it
+// pads the shorter block of rows above the first content row at the top,
+// and the rest of the shorter pane at the bottom. The block above the
+// first content row of line i takes [Layout.RowOf] of column 0 less
+// [Layout.LineStart] rows.
+//
+// The viewer takes the [Layout] of each pane from the printer that draws
+// that pane. PrintSideBySide draws each pane with a copy of p that has an
+// empty container style, no container width, and the larger MaxNumber of
+// the two views in [WithMaxNumber]. When p wraps, the copy wraps to the
+// pane width. A [Layout] by p itself counts the frame of the container and
+// wraps to the whole width, so its rows differ from the rows of the panes.
+func (p *Printer) PrintSideBySide(left, right *line.View) string {
+	maxNumber := max(p.MaxNumber(left), p.MaxNumber(right))
+
+	// Each pane renders without the container, which wraps the joined
+	// rows, and wraps to its half of the width.
+	pane := p.With(WithContainerStyle(lipgloss.NewStyle()), WithContainerWidth(0))
+
+	paneWidth := 0
+	if p.wrap > 0 {
+		paneWidth = max(1, (p.wrap-p.style.GetHorizontalFrameSize()-lipgloss.Width(sideBySideSeparator))/2)
+		pane = pane.With(WithWrapWidth(paneWidth))
+	}
+
+	gutterWidth := pane.gutterWidth(maxNumber)
+
+	var leftRows, rightRows []string
+
+	for _, i := range pairedLines(left, right) {
+		l, lLead := pane.paneLine(left, i, maxNumber, gutterWidth)
+		r, rLead := pane.paneLine(right, i, maxNumber, gutterWidth)
+
+		// The blocks above the first content rows end on one row, and the
+		// rest of the shorter pane fills to the bottom of the line.
+		lead := max(lLead, rLead)
+		rest := max(len(l)-lLead, len(r)-rLead)
+
+		leftRows = append(leftRows, pane.alignRows(left, i, l, lead-lLead, lead+rest, maxNumber, gutterWidth)...)
+		rightRows = append(rightRows, pane.alignRows(right, i, r, lead-rLead, lead+rest, maxNumber, gutterWidth)...)
+	}
+
+	leftWidth := paneWidth
+	for _, row := range leftRows {
+		leftWidth = max(leftWidth, lipgloss.Width(row))
+	}
+
+	separator := p.Style(kind.UISeparator).Render(sideBySideSeparator)
+	rows := make([]string, len(leftRows))
+
+	for k := range rows {
+		rows[k] = p.Pad(leftRows[k], leftWidth) + separator + rightRows[k]
+	}
+
+	return p.style.Render(strings.Join(p.padRows(rows), "\n"))
+}
+
+// pairedLines returns the indices in the content of the lines that left or
+// right holds, in ascending order and without repeats.
+func pairedLines(left, right *line.View) []int {
+	indices := make([]int, 0, max(left.Count(), right.Count()))
+
+	for i := range left.All() {
+		indices = append(indices, i)
+	}
+
+	for i := range right.All() {
+		indices = append(indices, i)
+	}
+
+	slices.Sort(indices)
+
+	return slices.Compact(indices)
+}
+
+// paneLine renders line i of view as the rows of one pane, and returns
+// them with the number of rows above the first content row. It returns
+// no rows for a line the view does not hold.
+func (p *Printer) paneLine(view *line.View, i, maxNumber, gutterWidth int) ([]string, int) {
+	if !view.Contains(i) {
+		return nil, 0
+	}
+
+	return p.renderLine(view, i, view.Line(i), maxNumber, gutterWidth)
+}
+
+// alignRows returns rows, the rows of line i in the pane of view, with top
+// blank rows above them and as many below as fill total rows. A blank row
+// holds the gutter of an annotation row of the line, so a gutter that
+// draws a border or a background keeps it down the pane.
+func (p *Printer) alignRows(view *line.View, i int, rows []string, top, total, maxNumber, gutterWidth int) []string {
+	ctx := GutterContext{Styles: p.styles, Index: i, MaxNumber: maxNumber, Annotation: true}
+	if view.Contains(i) {
+		ctx.Number = view.Line(i).Number()
+		ctx.Flag = view.Flag(i)
+	}
+
+	blank := p.renderGutter(ctx, gutterWidth)
+	out := make([]string, 0, total)
+
+	for range top {
+		out = append(out, blank)
+	}
+
+	out = append(out, rows...)
+
+	for len(out) < total {
+		out = append(out, blank)
+	}
+
+	return out
+}
+
 // Pad returns row with spaces in [kind.Text] after it, out to width
 // cells, as [WithContainerWidth] pads each row that [Printer.Print]
 // renders. A theme that sets a surface, such as
@@ -1064,7 +1220,8 @@ func (p *Printer) renderRows(view *line.View) []string {
 	rows := make([]string, 0, view.Count())
 
 	for idx, ln := range view.All() {
-		rows = append(rows, p.renderLine(view, idx, ln, maxNumber, gutterWidth)...)
+		lineRows, _ := p.renderLine(view, idx, ln, maxNumber, gutterWidth)
+		rows = append(rows, lineRows...)
 	}
 
 	return rows
@@ -1073,8 +1230,9 @@ func (p *Printer) renderRows(view *line.View) []string {
 // renderLine renders ln, line idx of view, as rows. It wraps the content
 // to the printer width and puts the gutter in front of each row. Each
 // annotation row of the line sits above or below the wrapped row that
-// holds its column.
-func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber, gutterWidth int) []string {
+// holds its column. It also returns the number of rows above the first
+// content row.
+func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber, gutterWidth int) ([]string, int) {
 	vl := newViewLine(view, idx, ln)
 
 	rendered, runs := p.renderRuns(vl)
@@ -1109,7 +1267,7 @@ func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber,
 		rows = append(rows, p.annotationGutters(rowsAt(below, j), gutterCtx, gutterWidth)...)
 	}
 
-	return rows
+	return rows, len(rowsAt(above, 0))
 }
 
 // viewLine is one line of a view as the printer shows it: its content,

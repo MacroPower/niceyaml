@@ -23,7 +23,8 @@
 //   - [Result.Hunks] keeps only the changes, with context lines around each
 //     and a hunk header above it.
 //   - [Result.Before] and [Result.After] return aligned views for
-//     side-by-side rendering.
+//     side-by-side rendering, which
+//     [go.jacobcolvin.com/niceyaml/printer.Printer.PrintSideBySide] prints.
 //
 // Each call returns a fresh [line.View], so overlays that a caller adds to
 // one rendering do not affect another. The hunks are a slice of the
