@@ -2,12 +2,13 @@
 // rejects a value, for a reader of the document rather than of the Go
 // target.
 //
-// The decoder words three of its errors for the Go target, and names the
-// outermost struct field on the way to the value rather than the field
-// that holds it. Those errors carry what they compare in typed fields, so
-// [Classify] writes the message from the fields, with the kinds of YAML
-// values the document holds in place of Go types. It also gives each
-// rejection a [Label], which a caller maps to an error a reader matches.
+// The decoder words a [yaml.TypeError] and a [yaml.OverflowError] for the
+// Go target. It names the outermost struct field on the way to the value
+// rather than the field that holds it. Those errors carry what they
+// compare in typed fields. So [Classify] writes the message from the
+// fields, with the kinds of YAML values that the document holds in place
+// of Go types. It also gives each rejection a [Label], which a caller
+// maps to an error a reader matches.
 package rejection
 
 import (
@@ -22,12 +23,13 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 )
 
-// Label names what a rejection says about its value. The zero Label
-// names nothing.
+// Label names what a rejection says about its value. The zero Label is
+// [None].
 type Label int
 
 const (
-	// None labels a rejection that names no kind, range, or field.
+	// None labels a rejection that does not name a kind, a range, or a
+	// field.
 	None Label = iota
 
 	// WrongKind labels a value of a kind its target does not take, or of
@@ -37,8 +39,8 @@ const (
 	// Overflow labels a number outside the range of its integer type.
 	Overflow
 
-	// UnknownField labels a mapping key that no field of the target
-	// reads.
+	// UnknownField labels a mapping key that does not match any field of
+	// the target.
 	UnknownField
 )
 
@@ -56,13 +58,13 @@ const (
 	// value an interface holds.
 	kindValue = "value"
 
-	// The name a target takes when no YAML value but a null decodes into
-	// it, as for a channel.
+	// The name a target takes when only a null decodes into it, as for a
+	// channel.
 	kindNone = "no value"
 )
 
-// The byte slice a !!binary tag reads as, which [kindOfType] names apart
-// from its kind.
+// bytesType is the byte slice type that a !!binary tag reads as.
+// [kindOfType] names it apart from its kind.
 var bytesType = reflect.TypeFor[[]byte]()
 
 // Classify returns the message of err, a rejection the go-yaml decoder
@@ -74,17 +76,18 @@ var bytesType = reflect.TypeFor[[]byte]()
 //   - A number that overflows an integer type, a [yaml.OverflowError],
 //     reads "expected integer from -128 to 127, got 300", with the range
 //     of the type, labeled [Overflow].
-//   - An unknown field, a [yaml.UnknownFieldError], keeps the message the
-//     decoder gave it, which names the field as the document does, and
-//     is labeled [UnknownField].
+//   - An unknown field, a [yaml.UnknownFieldError], keeps the message
+//     that the decoder gave it, labeled [UnknownField]. That message
+//     names the field as the document does.
 //
-// The decoder also rejects a value by its Go type alone, as when it hands
-// the value of an anchor to an inline field with an alias option, or
-// fills a pointer to a pointer. The two types can then hold one kind of
-// value, as two struct types do, and an anchor the decoder read into an
-// interface has a type that names no kind. Kinds alone would read
-// "expected mapping, got mapping", so the message reads "expected
-// mapping, got mapping of another type" and names neither type.
+// The decoder also rejects a value by its Go type alone. It does so when
+// it hands the value of an anchor to an inline field with an alias
+// option, or when it fills a pointer to a pointer. The two types can then
+// hold the same kind of value, as two struct types do. An anchor that the
+// decoder read into an interface has a type that does not name a kind. A
+// message from kinds alone reads "expected mapping, got mapping", so the
+// message reads "expected mapping, got mapping of another type" and does
+// not name either type.
 //
 // Any other error keeps the message the decoder gave it and gets [None].
 func Classify(err yaml.Error) (string, Label) {
@@ -126,8 +129,8 @@ func ExpectedString(t ast.NodeType) string {
 // kindOfType returns the kind of YAML value that the Go type t holds, for
 // the message of a rejection, and never a Go type name. A nil t is a null,
 // a pointer names what it points to, and an interface is [kindValue]. A
-// channel, a function, a complex number, or an unsafe pointer takes no
-// YAML value but a null, so it is [kindNone].
+// channel, a function, a complex number, or an unsafe pointer takes only
+// a null, so it is [kindNone].
 func kindOfType(t reflect.Type) string {
 	if t == nil {
 		return kindNull
@@ -168,8 +171,8 @@ func kindOfType(t reflect.Type) string {
 }
 
 // kindOfNode returns the kind of YAML value a node of type t holds, for
-// the message of a rejection. A type that holds no value, such as an
-// anchor, has the name go-yaml gives it.
+// the message of a rejection. A type that does not hold a value, such as
+// an anchor, has the name that go-yaml gives it.
 func kindOfNode(t ast.NodeType) string {
 	switch t {
 	case ast.MappingType, ast.MappingValueType:
