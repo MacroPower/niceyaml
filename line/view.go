@@ -62,8 +62,8 @@ type View struct {
 	lines       Lines
 	// The index in lines of each line the View holds, in ascending order.
 	held []int
-	// The number of columns each window of a clipped line holds, as
-	// [View.Clip] sets it, or 0 when the View shows every line whole.
+	// The cols that the last [View.Clip] set, or 0 for a View without a
+	// clip. Each window of a clipped line holds at least clip columns.
 	clip int
 }
 
@@ -578,8 +578,8 @@ func isSeparator(a Annotation) bool {
 // that a caller adds after the clip therefore gets a window too.
 // [View.Windows] returns the windows of a line, and [View.String] and the
 // printer render them. [View.Slice], [View.Hunks], and [View.Clone] keep
-// the clip. A cols of zero or less shows every line whole, so it undoes a
-// clip.
+// the clip, and [View.ClipCols] reports it. A cols of zero or less shows
+// every line whole, so it undoes a clip.
 //
 // An error excerpt clips its hunks this way, and a caller that marks a
 // view of its own does the same:
@@ -594,6 +594,20 @@ func (v *View) Clip(cols int) *View {
 	c.clip = max(0, cols)
 
 	return c
+}
+
+// ClipCols returns the cols that the last [View.Clip] set, or 0 for a View
+// without a clip, such as one that Clip gave a cols of zero or less. A
+// window can hold more columns than ClipCols returns when windows join,
+// reach either end of the line, or grow to hold a grapheme cluster, as
+// View.Clip describes. A caller that builds a view of its own from the
+// content of the View passes the cols to Clip to keep the clip.
+func (v *View) ClipCols() int {
+	if v == nil {
+		return 0
+	}
+
+	return v.clip
 }
 
 // Windows returns the runs of columns of line i that the [View] shows,

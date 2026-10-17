@@ -6,6 +6,7 @@ import (
 	"iter"
 	"math"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -55,9 +56,12 @@ func NewLines(tks token.Tokens) Lines {
 		return Lines{}
 	}
 
+	all := make([]Line, len(split))
 	lines := make([]*Line, len(split))
+
 	for i, l := range split {
-		lines[i] = &Line{segments: l.Segments, number: l.Number}
+		all[i] = Line{segments: l.Segments, number: l.Number}
+		lines[i] = &all[i]
 	}
 
 	return newLines(lines)
@@ -90,13 +94,15 @@ func newLines(ls []*Line) Lines {
 
 // lineIndex finds the indices that hold a [*Line] by identity, and the
 // indices of the lines that hold a token. The first lookup of each kind
-// builds its maps, so creating [Lines] does not build a map.
+// builds its part of the index, so creating [Lines] does not build one.
 type lineIndex struct {
 	// The first index that holds each line.
 	first map[*Line]int
-	// The indices, in ascending order, of the lines with a segment whose
-	// source or part token sits at each position.
-	byPos map[posKey][]int
+	// The offset of the source and of the part token of each segment, with
+	// the index of the line of the segment. Each pair occurs once, and the
+	// pairs sort by offset and then by line. A token without a position
+	// counts at offset 0.
+	byOffset []offsetLine
 	// The next index that holds the same line as each index, or -1 at its
 	// last occurrence. It is nil when every line occurs once.
 	next    []int
@@ -104,24 +110,19 @@ type lineIndex struct {
 	posOnce sync.Once
 }
 
-// posKey holds the fields of a [*token.Position] that
-// [segment.Segment.Contains] compares, so a token can match a segment only
-// when the keys of their positions are equal. A nil position has the zero
-// key.
-//
-//nolint:unused // The fields tell the keys of the position map apart.
-type posKey struct {
-	line, col, off int
-	set            bool
+// offsetLine is an offset in [lineIndex] and the index of a line with a
+// segment whose source or part token sits there.
+type offsetLine struct {
+	off, line int
 }
 
-// keyOf returns the key of p.
-func keyOf(p *token.Position) posKey {
+// offsetOf returns the offset of p, or 0 for a nil p.
+func offsetOf(p *token.Position) int {
 	if p == nil {
-		return posKey{}
+		return 0
 	}
 
-	return posKey{line: p.Line, col: p.Column, off: p.Offset, set: true}
+	return p.Offset
 }
 
 // build indexes ls by identity.
@@ -157,35 +158,63 @@ func (x *lineIndex) build(ls []*Line) {
 	}
 }
 
-// buildPositions indexes ls by the positions of the source and part token
-// of every segment.
+// buildPositions indexes ls by the offsets of the source and the part
+// token of every segment. A segment whose source and part token share an
+// offset, such as the segment of a token on one line, takes one entry for
+// its line.
 func (x *lineIndex) buildPositions(ls []*Line) {
-	x.byPos = make(map[posKey][]int, len(ls))
-
-	for i, l := range ls {
-		for _, seg := range l.segments {
-			x.addPosition(seg.Source(), i)
-			x.addPosition(seg.Part(), i)
-		}
+	// Each segment yields at most two pairs. A slice of twice the segments
+	// thus holds the pairs without a walk of the tokens to count them. The
+	// index keeps a copy that is as long as the pairs.
+	n := 0
+	for _, l := range ls {
+		n += 2 * len(l.segments)
 	}
+
+	pairs := make([]offsetLine, 0, n)
+	for e := range offsetsOf(ls) {
+		pairs = append(pairs, e)
+	}
+
+	// The segments come in the order of their lines, so the pairs come
+	// nearly in order. A stable sort keeps each run that is in order, so it
+	// sorts such a list in about one pass. Equal pairs are the same value,
+	// so the order it gives is the order of any sort.
+	slices.SortStableFunc(pairs, func(a, b offsetLine) int {
+		return cmp.Or(cmp.Compare(a.off, b.off), cmp.Compare(a.line, b.line))
+	})
+
+	x.byOffset = slices.Clone(slices.Compact(pairs))
 }
 
-// addPosition records index i under the position of tk, once per index.
-// The indices of one line arrive together, so comparing with the last
-// index recorded under the key skips repeats.
-func (x *lineIndex) addPosition(tk *token.Token, i int) {
-	if tk == nil {
-		return
+// offsetsOf yields the offset of the source and the part token of each
+// segment of ls with the index of its line, in the order of the segments.
+// It skips a nil token, and an entry equal to the entry before it.
+func offsetsOf(ls []*Line) iter.Seq[offsetLine] {
+	return func(yield func(offsetLine) bool) {
+		last := offsetLine{line: -1}
+
+		for i, l := range ls {
+			for _, seg := range l.segments {
+				for _, tk := range [2]*token.Token{seg.Source(), seg.Part()} {
+					if tk == nil {
+						continue
+					}
+
+					e := offsetLine{off: offsetOf(tk.Position), line: i}
+					if e == last {
+						continue
+					}
+
+					if !yield(e) {
+						return
+					}
+
+					last = e
+				}
+			}
+		}
 	}
-
-	k := keyOf(tk.Position)
-
-	idxs := x.byPos[k]
-	if n := len(idxs); n > 0 && idxs[n-1] == i {
-		return
-	}
-
-	x.byPos[k] = append(idxs, i)
 }
 
 // index returns the identity index of ls, or nil when ls is empty. The
@@ -230,17 +259,28 @@ func (ls Lines) nextIndex(i int) (int, bool) {
 }
 
 // linesAt returns the indices, in ascending order, of the lines with a
-// segment whose source or part token sits at p. The first call builds the
-// position index. Every line where a token at p can match a segment is
-// among them.
-func (ls Lines) linesAt(p *token.Position) []int {
-	if ls.idx == nil {
-		return nil
+// segment whose source or part token sits at the offset of p. The first
+// call builds the position index. Every line where a token at p can match
+// a segment is among them. A line of a token at another position with the
+// same offset can be among them too.
+func (ls Lines) linesAt(p *token.Position) iter.Seq[int] {
+	return func(yield func(int) bool) {
+		if ls.idx == nil {
+			return
+		}
+
+		ls.idx.posOnce.Do(func() { ls.idx.buildPositions(ls.lines) })
+
+		off := offsetOf(p)
+		byOffset := ls.idx.byOffset
+
+		i := sort.Search(len(byOffset), func(i int) bool { return byOffset[i].off >= off })
+		for ; i < len(byOffset) && byOffset[i].off == off; i++ {
+			if !yield(byOffset[i].line) {
+				return
+			}
+		}
 	}
-
-	ls.idx.posOnce.Do(func() { ls.idx.buildPositions(ls.lines) })
-
-	return ls.idx.byPos[keyOf(p)]
 }
 
 // Line returns the [*Line] at index i. Line panics when i is outside the
@@ -557,7 +597,7 @@ func (ls Lines) ContentRanges(tk *token.Token) position.Ranges {
 // ranges collects one range per line that holds tk. The span function
 // picks the columns within each line, and a line where span is empty does
 // not contribute a range. It visits only the lines that hold a token at
-// tk's position, and only the lines that hold tk itself when any line
+// the offset of tk, and only the lines that hold tk itself when any line
 // does.
 func (ls Lines) ranges(
 	tk *token.Token, span func(*Line, *token.Token) (position.Span, bool),
@@ -570,13 +610,19 @@ func (ls Lines) ranges(
 
 	// Another line's token with tk's fields is a different token, such as
 	// the other revision's in a diff, so it matches only a copy of tk.
-	held := slices.ContainsFunc(idxs, func(i int) bool {
-		return ls.lines[i].holds(tk)
-	})
+	held := false
+
+	for i := range idxs {
+		if ls.lines[i].holds(tk) {
+			held = true
+
+			break
+		}
+	}
 
 	var result position.Ranges
 
-	for _, i := range idxs {
+	for i := range idxs {
 		if held && !ls.lines[i].holds(tk) {
 			continue
 		}

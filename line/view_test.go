@@ -1885,3 +1885,43 @@ func TestView_Clip_KeepsView(t *testing.T) {
 		assert.Equal(t, window, clipped.Windows(1))
 	})
 }
+
+func TestView_ClipCols(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.LinesLF("a: 1", "b: 2")
+	marked := func() *line.View {
+		view := newView(input)
+		view.SetFlag(1, line.FlagInserted)
+
+		return view
+	}
+
+	tcs := map[string]struct {
+		view func() *line.View
+		want int
+	}{
+		"view without a clip": {view: marked, want: 0},
+		"clipped view":        {view: func() *line.View { return marked().Clip(10) }, want: 10},
+		"negative clip":       {view: func() *line.View { return marked().Clip(-3) }, want: 0},
+		"clip of zero undoes a clip": {
+			view: func() *line.View { return marked().Clip(10).Clip(0) },
+			want: 0,
+		},
+		"slice keeps the clip": {
+			view: func() *line.View { return marked().Clip(10).Slice(position.NewSpan(1, 2)) },
+			want: 10,
+		},
+		"hunks keep the clip":  {view: func() *line.View { return marked().Clip(10).Hunks(0) }, want: 10},
+		"clone keeps the clip": {view: func() *line.View { return marked().Clip(10).Clone() }, want: 10},
+		"nil view":             {view: func() *line.View { return nil }, want: 0},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.view().ClipCols())
+		})
+	}
+}
