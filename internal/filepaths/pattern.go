@@ -13,12 +13,12 @@ import (
 )
 
 var (
-	// ErrInvalidPattern indicates the pattern syntax is invalid.
+	// ErrInvalidPattern indicates that the pattern syntax is invalid.
 	ErrInvalidPattern = errors.New("invalid glob pattern")
 
-	// ErrBraceLimit indicates the braces of a pattern would expand to
-	// more than [MaxBraceExpansions] patterns, or would take too much
-	// work to expand.
+	// ErrBraceLimit indicates that the braces of a pattern expand to
+	// more than [MaxBraceExpansions] patterns, or that expanding them
+	// takes too much work.
 	ErrBraceLimit = errors.New("braces expand past the limit")
 )
 
@@ -35,12 +35,12 @@ type Pattern struct {
 // returns [ErrInvalidPattern], wrapping [ErrBraceLimit], when
 // [ExpandBraces] reports that the braces expand past its limits. A
 // cleaned path is never empty, so NewPattern returns [ErrInvalidPattern]
-// for an empty pattern, and for a pattern such as "{,}" whose braces
-// expand only to empty patterns.
+// for an empty pattern. It does the same for a pattern such as "{,}"
+// whose braces expand only to empty patterns.
 //
 // NewPattern drops "." elements such as a leading "./", repeated
 // separators, and a trailing separator from the pattern, as
-// [Pattern.Match] does for the path, so those spellings do not change
+// [Pattern.Match] does for the path. So those spellings do not change
 // what the pattern matches. It also resolves a ".." that follows an
 // element without glob syntax, so "configs/../*.yaml" matches "x.yaml"
 // as "*.yaml" does. It normalizes each pattern [ExpandBraces] yields, so
@@ -50,14 +50,14 @@ type Pattern struct {
 // character, so "a\/b/../*.yaml" matches "a/x.yaml" as "a/b/../*.yaml"
 // does, and "a\/**" matches "a" as "a/**" does.
 //
-// A cleaned path holds a ".." only at its start, so NewPattern returns
-// [ErrInvalidPattern] for a pattern that keeps a ".." after a glob
-// element such as "*", which could match no path. A ".." after "**"
-// stays valid when only ".." and "**" elements come before it in a
-// relative pattern, since "**" can match no directory at all, so
-// "**/../x.yaml" matches "../x.yaml". A rooted pattern such as
-// "/**/../x.yaml", or one with a name before the "**" such as
-// "a/**/../x.yaml", returns [ErrInvalidPattern].
+// A cleaned path holds a ".." only at its start. So a pattern that keeps
+// a ".." after a glob element such as "*" does not match any path, and
+// NewPattern returns [ErrInvalidPattern] for it. A ".." after "**" stays
+// valid when only ".." and "**" elements come before it in a relative
+// pattern, because "**" can match zero directories. So "**/../x.yaml"
+// matches "../x.yaml". NewPattern returns [ErrInvalidPattern] for a
+// rooted pattern such as "/**/../x.yaml", and for a pattern with a name
+// before the "**", such as "a/**/../x.yaml".
 func NewPattern(pattern string) (Pattern, error) {
 	if !doublestar.ValidatePattern(pattern) {
 		return Pattern{}, ErrInvalidPattern
@@ -83,10 +83,10 @@ func NewPattern(pattern string) (Pattern, error) {
 }
 
 // parentsMatchable reports whether every ".." element of glob sits in
-// a leading run of ".." and "**" elements of a relative pattern, the
-// only place a ".." of a cleaned path can line up with. A "**" in that
-// run can match no directory, which leaves the ".." at the start of the
-// path.
+// a leading run of ".." and "**" elements of a relative pattern. A ".."
+// of a cleaned path can pair with a pattern element only in that run. A
+// "**" in that run can match zero directories, so a ".." after it can
+// still pair with a ".." at the start of the path.
 func parentsMatchable(glob string) bool {
 	leading := !strings.HasPrefix(glob, "/")
 
@@ -115,9 +115,9 @@ func parentsMatchable(glob string) bool {
 //
 // A cleaned path that leads out of the directory it starts in opens with
 // ".." elements. Each of them matches a ".." element of the pattern, or
-// counts among the directories a "**" matches. A "*", a "?", and a
-// character class match the name of a file or a directory, so "*/x.yaml"
-// matches "a/x.yaml" and not "../x.yaml".
+// counts among the directories a "**" matches. The "*" and "?" wildcards
+// and character classes match only the name of a file or a directory, so
+// "*/x.yaml" matches "a/x.yaml" but not "../x.yaml".
 func (p Pattern) Match(path string) bool {
 	if path == "" {
 		return false
@@ -135,8 +135,8 @@ func (p Pattern) Match(path string) bool {
 	})
 }
 
-// cutParents returns the number of ".." elements that open path, a
-// cleaned path, and the path after them.
+// cutParents returns the number of ".." elements that open path and the
+// rest of path after them. The path must already be clean.
 func cutParents(path string) (int, string) {
 	parents := 0
 
@@ -155,11 +155,11 @@ func cutParents(path string) (int, string) {
 	}
 }
 
-// matchParents reports whether glob matches the cleaned path that opens
-// with parents ".." elements and goes on with rest, as [Pattern.Match]
-// describes. Doublestar matches a ".." of the path with any element that
-// matches its two dots, so matchParents pairs those elements with glob
-// itself and hands doublestar the rest of both.
+// matchParents reports whether glob matches the cleaned path made of
+// parents ".." elements followed by rest, as [Pattern.Match] describes.
+// Doublestar matches a ".." of the path with any element that matches
+// its two dots. So matchParents pairs those elements with glob itself
+// and hands doublestar the rest of both.
 func matchParents(glob string, parents int, rest string) bool {
 	elems := splitElements(glob)
 
@@ -203,7 +203,7 @@ func matchParents(glob string, parents int, rest string) bool {
 }
 
 // skipDoubleStars marks the index after each "**" of elems that at
-// marks, since a "**" can match no directory at all.
+// marks, because a "**" can match zero directories.
 func skipDoubleStars(elems []string, at []bool) {
 	for i, elem := range elems {
 		if at[i] && elem == "**" {
@@ -212,20 +212,21 @@ func skipDoubleStars(elems []string, at []bool) {
 	}
 }
 
-// Relative reports whether any pattern the braces expand to is relative,
-// which is one that does not open with a separator. A relative pattern
-// matches a path that leads from some directory, so a caller that holds
-// an absolute path needs that directory to match the two.
+// Relative reports whether any pattern the braces expand to is relative.
+// A relative pattern does not open with a separator, and it matches a
+// path that leads from some directory. So a caller that holds an
+// absolute path must know that directory to match the two.
 func (p Pattern) Relative() bool {
 	return slices.ContainsFunc(p.globs, func(glob string) bool {
 		return !strings.HasPrefix(glob, "/")
 	})
 }
 
-// CleanPath returns path cleaned, with forward slashes as separators,
-// which is the form the patterns match against. Cleaning drops a leading
-// "./", collapses repeated separators, and resolves ".." elements, so the
-// spelling of a path does not decide whether it matches.
+// CleanPath returns path cleaned and with forward slashes as separators.
+// The patterns match against paths in that form. Cleaning drops a
+// leading "./", collapses repeated separators, and resolves ".."
+// elements, so the spelling of a path does not decide whether it
+// matches.
 func CleanPath(path string) string {
 	return filepath.ToSlash(filepath.Clean(path))
 }
@@ -246,24 +247,25 @@ func expandPattern(pattern string, rewrite func(string) string) ([]string, error
 }
 
 // normalizePattern returns pattern without "." elements, repeated
-// separators, or a trailing separator. A cleaned path carries none of
-// them, so a pattern that kept them would match no path. A pattern left
-// with no other element reads as "." or "/", as [filepath.Clean] reads
-// it.
+// separators, or a trailing separator. A cleaned path does not carry any
+// of them, so a pattern that kept them does not match any path. A
+// pattern left without any other element reads as "." or "/", as
+// [filepath.Clean] reads it.
 //
 // It also resolves ".." elements as [filepath.Clean] does for a path. It
 // drops a ".." and the element before it when that element is a plain
-// name, and it drops a ".." right after the root of a rooted pattern. It
-// keeps a leading ".." and a ".." after a glob element. A glob cannot
-// name the one directory the ".." leaves, and [Pattern.Match] pairs a
-// ".." of the path with a ".." or a "**" of the pattern alone.
+// name, and it drops a ".." immediately after the root of a rooted
+// pattern. It keeps a leading "..". It also keeps a ".." after a glob
+// element, because a glob cannot name the one directory the ".." leaves.
+// [Pattern.Match] pairs a ".." of the path only with a ".." or a "**" of
+// the pattern.
 //
 // It first writes each escaped "/" and "." bare, as
 // [unescapeSeparatorsAndDots] does, so these rules see the separators
 // and elements doublestar matches.
 //
-// It reads a brace group as plain text, so a caller expands the braces
-// first.
+// It reads a brace group as plain text, so the caller must expand the
+// braces first.
 func normalizePattern(pattern string) string {
 	if pattern == "" {
 		return ""
@@ -307,12 +309,13 @@ func normalizePattern(pattern string) string {
 // escape. Doublestar matches an escaped "/" as a separator and an
 // escaped "." as a dot, so the bare spelling matches the same paths
 // except at the end of the pattern. There doublestar lets a bare "/**"
-// or "**/" match nothing, so "a/**" matches "a" where "a\/**" does not.
+// or "**/" match zero directories, so "a/**" matches "a" but "a\/**"
+// does not.
 //
 // Doublestar reads a "**" element as a single "*" when an escaped "/"
-// ends it, so unescapeSeparatorsAndDots writes that element as "*"
-// before the bare "/", which would otherwise make it match any number
-// of directories.
+// ends it. So unescapeSeparatorsAndDots writes that element as "*"
+// before the bare "/", because a "**" before a bare "/" matches any
+// number of directories.
 func unescapeSeparatorsAndDots(pattern string) string {
 	var (
 		out      = make([]byte, 0, len(pattern))
@@ -366,7 +369,7 @@ func unescapeSeparatorsAndDots(pattern string) string {
 
 // isPlainName reports whether elem names one directory, as a path
 // element other than ".." does. An element with an unescaped glob
-// character or brace can stand for many names, so it does not count.
+// character or brace can match many names, so it does not count.
 func isPlainName(elem string) bool {
 	if elem == ".." {
 		return false
@@ -422,11 +425,12 @@ func splitElements(pattern string) []string {
 //
 // A pattern with a leading "!" excludes the paths the rest of it matches,
 // wherever it sits in the list, as yaml-language-server reads it. So
-// "*.yml" and "!docker-compose.yml" together match every YAML file but
-// "docker-compose.yml", and a list that holds only exclusions matches
-// nothing.
+// "*.yml" and "!docker-compose.yml" together match every ".yml" file
+// except "docker-compose.yml". A list that holds only exclusions does
+// not match any path.
 //
-// The zero value holds no patterns and matches no path.
+// The zero value does not hold any patterns, so it does not match any
+// path.
 //
 // Create instances with [NewAnyDepthPatterns].
 type AnyDepthPatterns struct {
@@ -441,21 +445,20 @@ type anyDepthGlob struct {
 }
 
 // NewAnyDepthPatterns creates a new [AnyDepthPatterns] from the given
-// glob patterns. It normalizes each pattern as [NewPattern] does, once,
-// so matching many paths against the patterns repeats none of that
-// work. It drops a "!" that has nothing after it.
+// glob patterns. It normalizes each pattern upfront, as [NewPattern]
+// does, so matching many paths against the patterns does not repeat that
+// work. It drops a pattern that holds only "!".
 //
-// It also drops a pattern for which [ExpandBraces] returns
-// [ErrBraceLimit], so that pattern matches nothing and an exclusion
-// excludes nothing. Matching it could otherwise take time that doubles
-// with each of its brace groups, for every path. For an exclusion, it
-// hands [ExpandBraces] the text after the leading "!".
+// It also drops each pattern for which [ExpandBraces] returns
+// [ErrBraceLimit]. Matching such a pattern against a path takes time
+// that doubles with each of its brace groups. A dropped pattern does not
+// match any path, and a dropped exclusion does not exclude any path. For
+// an exclusion, it hands [ExpandBraces] the text after the leading "!".
 //
-// NewAnyDepthPatterns keeps every other pattern, the invalid ones
-// included, and [AnyDepthPatterns.SpecificityClean] skips a pattern it
-// cannot interpret, so a typo in a SchemaStore catalog entry does not
-// break validation. To validate a pattern upfront, use [NewPattern]
-// instead.
+// NewAnyDepthPatterns keeps every other pattern, including invalid
+// ones. [AnyDepthPatterns.SpecificityClean] skips each pattern it cannot
+// interpret, so a typo in a SchemaStore catalog entry does not break
+// validation. To validate a pattern upfront, use [NewPattern] instead.
 func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
 	var p AnyDepthPatterns
 
@@ -491,15 +494,15 @@ func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
 	return p
 }
 
-// SpecificityClean reports whether path matches any of the patterns and
-// none of the exclusions, and returns the specificity of the most
-// specific pattern that matches it. The path must already be in the form
-// [CleanPath] returns, so a caller matching one path against many
-// pattern sets cleans it once.
+// SpecificityClean reports whether path matches any of the patterns but
+// does not match any exclusion. It also returns the specificity of the
+// most specific pattern that matches the path. The path must already be
+// in the form [CleanPath] returns, so a caller matching one path against
+// many pattern sets cleans it once.
 //
 // The specificity counts the characters a pattern requires literally in
-// the names of a path, which is every character but a separator, a "*",
-// a "?", or a character class. So "**/.moon/tasks/**/*.yml" matches
+// the names of a path. Every character counts except a separator, a
+// "*", a "?", and a character class. So "**/.moon/tasks/**/*.yml" matches
 // ".moon/tasks/node.yml" with a specificity of 14, and "**/tasks/*.yml"
 // matches it with 9. Each brace alternative counts on its own.
 func (p AnyDepthPatterns) SpecificityClean(path string) (int, bool) {
@@ -537,8 +540,8 @@ func matchGlob(glob, path string) bool {
 // specificity returns the number of characters glob requires literally
 // in the names of a path. It counts every character but a separator, a
 // "*", a "?", or a character class, and it counts an escaped character
-// once. A "[" that nothing closes is a literal and counts. As with
-// [normalizePattern], a caller expands the braces first.
+// once. An unclosed "[" is a literal and counts. As with
+// [normalizePattern], the caller must expand the braces first.
 func specificity(glob string) int {
 	var (
 		n        int
@@ -575,8 +578,8 @@ func specificity(glob string) int {
 
 // anyDepth returns pattern with the "**/" prefix that lets it match at any
 // depth of the tree. It normalizes the pattern and drops a leading "/". A
-// pattern that then starts with "**/" gets no second prefix. As with
-// [normalizePattern], a caller expands the braces first.
+// pattern that then starts with "**/" does not get a second prefix. As
+// with [normalizePattern], the caller must expand the braces first.
 func anyDepth(pattern string) string {
 	pattern = strings.TrimPrefix(normalizePattern(pattern), "/")
 
@@ -588,27 +591,29 @@ func anyDepth(pattern string) string {
 }
 
 // MaxBraceExpansions is the most patterns [ExpandBraces] produces for one
-// pattern. Brace groups multiply out, so a pattern from an untrusted source
-// could otherwise stand for millions of patterns.
+// pattern. Brace groups multiply out, so without the limit a pattern from
+// an untrusted source can expand to millions of patterns.
 const MaxBraceExpansions = 1024
 
 // maxBraceWork is the most bytes of intermediate patterns [ExpandBraces]
 // builds for one pattern. Each brace group rebuilds the pattern around
-// it, so a long pattern with many groups could otherwise cost time and
-// memory quadratic in its length while expanding to few patterns.
+// it. So without the limit, a long pattern with many groups can cost time
+// and memory quadratic in its length even when it expands to few
+// patterns.
 const maxBraceWork = 1 << 20
 
-// ExpandBraces returns the patterns the brace alternatives of pattern
-// stand for, so "*.{yml,yaml}" yields "*.yml" and "*.yaml", and nested
-// groups multiply out. A backslash escapes the character after it. A
-// pattern with no brace group, or with an unclosed one, yields itself.
+// ExpandBraces returns the patterns that the brace alternatives of
+// pattern stand for. For example, "*.{yml,yaml}" yields "*.yml" and
+// "*.yaml". Nested groups multiply out. A backslash escapes the
+// character after it. A pattern without a brace group, or with an
+// unclosed one, yields itself.
 //
-// ExpandBraces returns [ErrBraceLimit] for a pattern that would expand to
-// more than [MaxBraceExpansions] patterns, or that would take too much
-// work to expand, such as a very long pattern or one with very many brace
-// groups. A caller should not hand such a pattern to doublestar either,
-// since doublestar expands the braces again on every match, by
-// backtracking, at a cost that can double with each brace group.
+// ExpandBraces returns [ErrBraceLimit] for a pattern that expands to more
+// than [MaxBraceExpansions] patterns. It also returns [ErrBraceLimit] for
+// a pattern that takes too much work to expand, such as a long pattern
+// or one with many brace groups. A caller should not hand such a pattern
+// to doublestar either. Doublestar expands the braces again on every
+// match by backtracking, at a cost that can double with each brace group.
 func ExpandBraces(pattern string) ([]string, error) {
 	work := maxBraceWork
 
@@ -621,9 +626,9 @@ func ExpandBraces(pattern string) ([]string, error) {
 }
 
 // expandBraces is [ExpandBraces] with a budget of patterns left to
-// produce and the bytes of intermediate patterns left to build, which
-// work points to and which all calls of one expansion share. It reports
-// false once the expansion outgrows either.
+// produce. The work argument points to the bytes of intermediate
+// patterns left to build, and all calls of one expansion share it. It
+// reports false when the expansion outgrows either limit.
 func expandBraces(pattern string, budget int, work *int) ([]string, bool) {
 	open, closing := braceGroup(pattern)
 	if open < 0 {
@@ -654,9 +659,9 @@ func expandBraces(pattern string, budget int, work *int) ([]string, bool) {
 }
 
 // braceGroup returns the indexes of the first unescaped "{" in pattern
-// and of the "}" that closes it, or -1 for both when pattern holds no
-// closed brace group. A brace inside a character class is part of the
-// class, as [Pattern.Match] reads it.
+// and of the "}" that closes it, or -1 for both when pattern does not
+// hold a closed brace group. A brace inside a character class is part
+// of the class, as [Pattern.Match] reads it.
 func braceGroup(pattern string) (int, int) {
 	var unclosed bool
 
@@ -730,13 +735,12 @@ func splitAlternatives(body string) []string {
 }
 
 // skipClass returns the index of the "]" that closes the character class
-// opening at pattern[i], or i when nothing closes it, so a scan that
-// reads the "[" as a literal moves on by one byte. It sets unclosed once
-// a class has no "]" and then returns i for every later "[" without
-// looking for one. The scans that call it skip escapes as [classEnd]
-// does, so after one "[" that nothing closes, nothing closes a later "["
-// either, and a long run of them costs time linear in the pattern
-// length.
+// opening at pattern[i]. When the class is unclosed, it returns i, so a
+// scan that reads the "[" as a literal moves on by one byte. It sets
+// unclosed when a class lacks a "]", and then returns i for every later
+// "[" without a search. The scans that call it skip escapes as
+// [classEnd] does. So after one unclosed "[", every later "[" is unclosed
+// too, and a long run of them costs time linear in the pattern length.
 func skipClass(pattern string, i int, unclosed *bool) int {
 	if *unclosed {
 		return i
@@ -753,9 +757,9 @@ func skipClass(pattern string, i int, unclosed *bool) int {
 }
 
 // classEnd returns the index of the "]" that closes the character class
-// opening at pattern[i], or -1 when nothing closes it, so the "[" reads
-// as a literal. A "]" right after the "[", or after a leading "!" or "^",
-// is a member of the class rather than its end.
+// opening at pattern[i]. It returns -1 for an unclosed class, whose "["
+// reads as a literal. A "]" immediately after the "[", or after a
+// leading "!" or "^", is a member of the class rather than its end.
 func classEnd(pattern string, i int) int {
 	j := i + 1
 
