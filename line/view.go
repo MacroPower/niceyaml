@@ -13,7 +13,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/internal/clip"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
-	"go.jacobcolvin.com/niceyaml/internal/severity"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
@@ -514,8 +513,9 @@ func (v *View) Hunks(context int) *View {
 	// line they skip. That is the first line of each hunk after the
 	// first, and the first line after a gap the View itself skips inside
 	// a hunk. It sits ahead of the annotations the line already carries,
-	// since the printer renders them in the order their kinds first
-	// appear and the separator marks the top of what follows the gap.
+	// because the separator marks the top of what follows the gap.
+	// Annotations.Groups puts the groups above a line in the order their
+	// kinds first appear, so the printer draws the separator first.
 	separator := Annotation{
 		Content:   "...",
 		Kind:      kind.UISeparator,
@@ -716,13 +716,13 @@ func (v *View) shown(i int, ln *Line) shownRow {
 // file or a fenced block adds that line feed itself.
 //
 // Above a line, each kind of annotation with content gets one row, in
-// the order the kinds first appear, as [Annotations.ByKind] groups them.
+// the order the kinds first appear, as [Annotations.Groups] groups them.
 // The row holds their contents joined with "; " in column order, from the
 // first column they start at.
 //
 // Below a line, each run of columns that the [Annotation.Cols] of its
 // annotations label gets a row of its own. The row holds a caret under
-// each column of the run and the contents of its annotations after the
+// each cell of the run and the contents of its annotations after the
 // carets. Annotations of one kind that label the same columns share a
 // row, with their contents joined with "; ". An annotation without
 // content draws its carets alone. A run that does not cover any column of
@@ -783,7 +783,7 @@ func (v *View) String() string {
 		// and a kind with no content adds no row. The row starts at the
 		// column of its annotations as the content row renders it, so it
 		// lines up on a line holding wide or control characters.
-		for _, group := range anns.Filter(Above).ByKind() {
+		for _, group := range anns.Groups(Above) {
 			kept := group.WithContent()
 			if len(kept) == 0 {
 				continue
@@ -797,16 +797,9 @@ func (v *View) String() string {
 		rows = append(rows, contentRow(ln.Number(), row.content, width))
 
 		// Each run of columns the annotations below the line label gets a
-		// row of its own, as the printer lays them out.
-		below := anns.Filter(Below).ByKind()
-
-		kinds := make([]kind.Kind, 0, len(below))
-		for _, group := range below {
-			kinds = append(kinds, group[0].RenderKind())
-		}
-
-		for _, gi := range severity.Order(kinds) {
-			for _, r := range caret.Rows(row.content, caretLabels(below[gi], row.width), nil) {
+		// row of its own, as the printer lays them out, errors first.
+		for _, group := range anns.Groups(Below) {
+			for _, r := range caret.Rows(row.content, caretLabels(group, row.width), nil) {
 				padding := strings.Repeat(" ", cellRow.Width(r.Col))
 				rows = append(rows, blank+padding+r.Marker+r.Text)
 			}

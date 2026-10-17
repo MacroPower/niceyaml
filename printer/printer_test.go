@@ -3039,6 +3039,20 @@ func TestDefaultAnnotation(t *testing.T) {
 			above:       true,
 			want:        []printer.AnnotationRow{{Col: 0, Text: "@@ hunk @@"}},
 		},
+		"above clamps a negative start": {
+			content:     "abc",
+			annotations: line.Annotations{{Content: "header", Placement: line.Above, Cols: position.NewSpan(-5, 2)}},
+			above:       true,
+			want:        []printer.AnnotationRow{{Col: 0, Text: "header"}},
+		},
+		"above clamps a start far past the end": {
+			content: "abc",
+			annotations: line.Annotations{
+				{Content: "header", Placement: line.Above, Cols: position.NewSpan(math.MaxInt, math.MaxInt)},
+			},
+			above: true,
+			want:  []printer.AnnotationRow{{Col: 3 + line.MaxColPastEnd, Text: "header"}},
+		},
 		"single above annotation at a column": {
 			annotations: line.Annotations{{Content: "header", Placement: line.Above, Cols: position.NewSpan(3, 9)}},
 			above:       true,
@@ -4750,6 +4764,34 @@ func TestColWidth(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, printer.ColWidth(tc.content, tc.col))
+			assert.Equal(t, tc.want, printer.AnnotationContext{Content: tc.content}.ColWidth(tc.col))
+		})
+	}
+}
+
+func TestAnnotationContext_ColWidth(t *testing.T) {
+	t.Parallel()
+
+	// The context pads a row as the printer does, so a column far past
+	// the end stops at line.MaxColPastEnd columns past it. TestColWidth
+	// covers the columns within that bound.
+	tcs := map[string]struct {
+		content string
+		col     int
+		want    int
+	}{
+		"negative":             {content: "abc", col: -5, want: 0},
+		"in range":             {content: "k: 日本 x", col: 5, want: 7},
+		"at the bound":         {content: "abc", col: 3 + line.MaxColPastEnd, want: 3 + line.MaxColPastEnd},
+		"past the bound":       {content: "abc", col: 2000, want: 3 + line.MaxColPastEnd},
+		"max int":              {content: "abc", col: math.MaxInt, want: 3 + line.MaxColPastEnd},
+		"past a wide rune end": {content: "日", col: math.MaxInt, want: 2 + line.MaxColPastEnd},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
 			assert.Equal(t, tc.want, printer.AnnotationContext{Content: tc.content}.ColWidth(tc.col))
 		})
 	}

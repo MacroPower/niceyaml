@@ -89,20 +89,28 @@ func annotationCol(col, width int) int {
 // as [kind.UIAnnotation].
 //
 // Cols names the columns of the line the annotation labels. Below the
-// line, a renderer draws a caret under each of those columns and the
-// content after the carets. The content thus sits beside the run it
-// labels. A span that does not cover any column of the content, such as
-// an empty one, gets a single caret at its start. An annotation without
-// content draws its carets alone. Above the line, the content starts at
-// the column Cols starts at.
+// line, a renderer draws a caret under each cell of those columns, so a
+// rune that takes two cells gets two carets. The content follows the
+// carets, so it sits beside the run it labels. A span that does not
+// cover any column of the content, such as an empty one, gets a single
+// caret at its start. An annotation without content draws its carets
+// alone. Above the line, the content starts at the column Cols starts
+// at.
 //
 // Add annotations to a [View] with [View.Annotate].
 type Annotation struct {
 	Content   string
 	Kind      kind.Kind
 	Placement Placement
-	// Cols counts columns from 0 and is half-open. The zero span labels
-	// column 0.
+	// Cols counts columns from 0 and is half-open. A column is a rune of
+	// the content, not a terminal cell. The zero span labels column 0. A
+	// renderer that pads an annotation row to a column measures the cells
+	// before it with
+	// [go.jacobcolvin.com/niceyaml/printer.AnnotationContext.ColWidth].
+	// Like the printer, that method stops at [MaxColPastEnd] columns past
+	// the end.
+	// [go.jacobcolvin.com/niceyaml/printer.DefaultAnnotation] draws a caret
+	// for each cell of the columns. View.String and the printer do both.
 	Cols position.Span
 }
 
@@ -146,20 +154,31 @@ func (a Annotations) Filter(p Placement) Annotations {
 	return result
 }
 
-// ByKind groups the annotations by the kind each renders in, as
-// [Annotation.RenderKind] reports it. The groups come in the order each
-// kind first appears, and the annotations of a group keep their original
-// order. Each annotation keeps its Kind as given, so the
-// [kind.UIAnnotation] group can mix annotations of the zero Kind with ones
-// of that kind. The printer renders each group as rows of its own in the
-// style of its kind.
-func (a Annotations) ByKind() []Annotations {
+// Groups returns the annotations at placement p grouped by the kind each
+// renders in, as [Annotation.RenderKind] reports it, in the order a
+// renderer draws the groups. The annotations of a group keep their order.
+// Each annotation keeps its Kind as given, so the [kind.UIAnnotation]
+// group can mix annotations of the zero Kind with ones of that kind.
+//
+// Below a line, the group of [kind.TextError] comes first, then the group
+// of [kind.TextWarn], then the other groups in the order their kinds
+// first appear. At any other placement, such as [Above], the groups come
+// in the order their kinds first appear.
+//
+// [View.String] and the printer draw each group as rows of its own in
+// this order. A renderer of its own that ranges over Groups thus draws
+// the rows of a line in the same order.
+func (a Annotations) Groups(p Placement) []Annotations {
 	var (
 		groups []Annotations
 		index  = make(map[kind.Kind]int)
 	)
 
 	for _, ann := range a {
+		if ann.Placement != p {
+			continue
+		}
+
 		k := ann.RenderKind()
 
 		i, ok := index[k]
@@ -173,7 +192,28 @@ func (a Annotations) ByKind() []Annotations {
 		groups[i] = append(groups[i], ann)
 	}
 
+	// The rows below a line come in order of severity, errors first.
+	if p == Below {
+		slices.SortStableFunc(groups, func(x, y Annotations) int {
+			return cmp.Compare(severity(x[0].RenderKind()), severity(y[0].RenderKind()))
+		})
+	}
+
 	return groups
+}
+
+// severity returns the sort key of the group of annotations below a line
+// that renders in k: 0 for errors, 1 for warnings, and 2 for every other
+// kind.
+func severity(k kind.Kind) int {
+	switch k {
+	case kind.TextError:
+		return 0
+	case kind.TextWarn:
+		return 1
+	default:
+		return 2
+	}
 }
 
 // Start returns the first column any of the annotations starts at, the

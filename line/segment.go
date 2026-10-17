@@ -27,7 +27,8 @@ type Segment struct {
 	// view's overlays, so changing it does not change the view or the
 	// other segments.
 	Overlays Overlays
-	// Cols are the columns of the line the segment covers.
+	// Cols are the columns of the line the segment covers, counted in
+	// runes.
 	Cols position.Span
 }
 

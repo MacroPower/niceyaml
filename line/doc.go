@@ -108,8 +108,9 @@
 // [Above] or [Below], and its Kind names the style it renders in, as the
 // Kind of an [Overlay] does. An annotation with the zero Kind renders in
 // [kind.UIAnnotation]. Its Cols name the columns of the line it labels.
-// Below the line, a renderer draws a caret under each of those columns and
-// the content beside the carets:
+// Below the line, a renderer draws a caret under each cell of those
+// columns, so a rune that takes two cells gets two carets. The content
+// sits beside the carets:
 //
 //	view.Annotate(i, line.Annotation{
 //	    Content:   "missing required field",

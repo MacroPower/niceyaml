@@ -17,7 +17,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
-	"go.jacobcolvin.com/niceyaml/internal/severity"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -311,12 +310,26 @@ type AnnotationContext struct {
 	Placement   line.Placement
 }
 
-// ColWidth returns the display width of the first col runes of ctx.Content,
-// plus one cell for every column past the end of the content. A marker
-// padded by that width lands under the rune at col, whatever the width of
-// the runes before it. See [ColWidth] for the rules it measures by.
+// ColWidth returns the display width of the first col runes of
+// ctx.Content, plus one cell for every column past the end of the content.
+// A marker padded by that width lands under the rune at col, whatever the
+// width of the runes before it. On a line that fits one row, the printer
+// pads an [AnnotationRow] whose Col is col by that width. On a wrapped
+// line, the printer measures the padding from the start of the wrapped
+// row that holds Col instead, as the AnnotationRow doc describes. Like the
+// printer, ColWidth stops at [line.MaxColPastEnd] columns past the end, so
+// a stray column such as [math.MaxInt] pads a bounded row. See [ColWidth]
+// for the rules it measures by.
 func (ctx AnnotationContext) ColWidth(col int) int {
-	return ColWidth(ctx.Content, col)
+	return ColWidth(ctx.Content, annotationCol(ctx.Content, col))
+}
+
+// annotationCol returns the column the printer starts an [AnnotationRow]
+// at when its Col is col and the row sits beside content. The column lies
+// between 0 and [line.MaxColPastEnd] columns past the end of the content,
+// inclusive.
+func annotationCol(content string, col int) int {
+	return min(max(0, col), utf8.RuneCountInString(content)+line.MaxColPastEnd)
 }
 
 // ColWidth returns the display width of the first col runes of content,
@@ -452,12 +465,14 @@ func NoAnnotation(AnnotationContext) []AnnotationRow {
 //
 // Below the line, each run of columns that the annotations label in their
 // [line.Annotation.Cols] gets a row of its own. A marked range thus shows
-// its extent without color. The row holds a caret under each column of
-// the run, then the contents of its annotations after a space.
-// Annotations that label the same columns share a row, with their
-// contents joined with "; ". An annotation without content gets its
-// carets alone. A run that does not cover a column of the content, such
-// as an empty one, gets a single caret at its start.
+// its extent without color. The row holds a caret under each cell that
+// the columns of the run take. A rune two cells wide thus gets two
+// carets, and a combining mark gets none of its own. The contents of its
+// annotations follow the carets after a space. Annotations that label
+// the same columns share a row, with their contents joined with "; ". An
+// annotation without content gets its carets alone. A run that does not
+// cover a column of the content, such as an empty one, gets a single
+// caret at its start.
 //
 // The rows below the line come in the order their runs start, and runs
 // that start at the same column come shorter first. [line.View.String]
@@ -475,6 +490,12 @@ func NoAnnotation(AnnotationContext) []AnnotationRow {
 // Every control character in an annotation renders as
 // [go.jacobcolvin.com/niceyaml/escape.Control] draws it, so a newline does
 // not start a row.
+//
+// Every row DefaultAnnotation returns starts at a column between 0 and
+// [line.MaxColPastEnd] columns past the end of the content, inclusive,
+// where the printer starts any row. A renderer that calls
+// DefaultAnnotation itself pads each row by [AnnotationContext.ColWidth]
+// of its Col and does not need a bound of its own.
 func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 	if ctx.Placement != line.Below {
 		// Filter the annotations rather than their contents, so the column
@@ -485,17 +506,16 @@ func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 		}
 
 		return []AnnotationRow{{
-			Col:  kept.Start(),
+			Col:  annotationCol(ctx.Content, kept.Start()),
 			Text: escape.Control(strings.Join(kept.Contents(), "; ")),
 		}}
 	}
 
-	width := utf8.RuneCountInString(ctx.Content)
 	labels := make([]caret.Label, 0, len(ctx.Annotations))
 
 	for _, a := range ctx.Annotations {
 		cols := a.Cols
-		cols.Start = min(max(0, cols.Start), width+line.MaxColPastEnd)
+		cols.Start = annotationCol(ctx.Content, cols.Start)
 
 		labels = append(labels, caret.Label{Text: a.Content, Cols: cols})
 	}
@@ -1341,15 +1361,16 @@ const minAnnotationWidth = 20
 // [AnnotationRow] whose column that wrapped row holds. It returns nil when
 // the line does not have annotations at the placement.
 //
-// Within a block, the kinds above a line come in [line.Annotations.ByKind]
-// order. Below a line, a [kind.TextError] group comes first, then a
-// [kind.TextWarn] group, then the other kinds in [line.Annotations.ByKind]
-// order. Within each kind, the rows the [AnnotationFunc] returns come in
+// Within a block, the kinds come in the order [line.Annotations.Groups]
+// gives them. Above a line, that is the order the kinds first appear.
+// Below a line, a [kind.TextError] group comes first, then a
+// [kind.TextWarn] group, then the other kinds in the order they first
+// appear. Within each kind, the rows the [AnnotationFunc] returns come in
 // order, each wrapped to the printer width and styled in the style of its
 // kind.
 func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Placement, w wrappedLine) [][]string {
-	anns := vl.annotations().Filter(placement)
-	if len(anns) == 0 {
+	groups := vl.annotations().Groups(placement)
+	if len(groups) == 0 {
 		return nil
 	}
 
@@ -1357,7 +1378,6 @@ func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Pl
 
 	text := vl.content()
 	content := []rune(text)
-	lastCol := len(content) + line.MaxColPastEnd
 	out := make([][]string, max(1, len(starts)))
 
 	// Each wrapped row gets a [cells.Row] of its own text the first time
@@ -1365,26 +1385,7 @@ func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Pl
 	// the length of the line.
 	rowCells := make([]*cells.Row, len(out))
 
-	groups := anns.ByKind()
-
-	// The rows below a line come in order of severity, errors first.
-	order := make([]int, len(groups))
-	for i := range order {
-		order[i] = i
-	}
-
-	if placement == line.Below {
-		kinds := make([]kind.Kind, 0, len(groups))
-		for _, group := range groups {
-			kinds = append(kinds, group[0].RenderKind())
-		}
-
-		order = severity.Order(kinds)
-	}
-
-	for _, gi := range order {
-		group := groups[gi]
-
+	for _, group := range groups {
 		rows := p.annotationFunc(AnnotationContext{
 			Annotations: group,
 			Placement:   placement,
@@ -1403,9 +1404,9 @@ func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Pl
 			// The row sits beside the wrapped row that holds its column,
 			// and its padding runs from the start of that wrapped row, so
 			// the marker lands in the cell the column takes on it. The
-			// column stops at lastCol, so a stray column such as
-			// math.MaxInt pads a bounded row.
-			col := min(max(0, row.Col), lastCol)
+			// column stops at line.MaxColPastEnd columns past the end, so a
+			// stray column such as math.MaxInt pads a bounded row.
+			col := annotationCol(text, row.Col)
 
 			j, from, to := 0, 0, len(content)
 			if len(starts) > 0 {

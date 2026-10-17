@@ -237,12 +237,14 @@ func TestAnnotations_WithContent(t *testing.T) {
 	}
 }
 
-func TestAnnotations_ByKind(t *testing.T) {
+func TestAnnotations_Groups(t *testing.T) {
 	t.Parallel()
 
+	// Annotations of the zero Placement sit above their line.
 	tcs := map[string]struct {
-		anns line.Annotations
-		want []line.Annotations
+		anns      line.Annotations
+		want      []line.Annotations
+		placement line.Placement
 	}{
 		"empty annotations": {
 			anns: nil,
@@ -276,13 +278,54 @@ func TestAnnotations_ByKind(t *testing.T) {
 				{{Content: "b", Kind: kind.TextError}},
 			},
 		},
+		"leaves out the other placement": {
+			anns: line.Annotations{
+				{Content: "a", Placement: line.Below},
+				{Content: "b"},
+			},
+			want: []line.Annotations{{{Content: "b"}}},
+		},
+		"none at the placement": {
+			anns:      line.Annotations{{Content: "a"}},
+			placement: line.Below,
+			want:      nil,
+		},
+		"above keeps a warning ahead of an error": {
+			anns: line.Annotations{
+				{Content: "a", Kind: kind.TextWarn},
+				{Content: "b", Kind: kind.TextError},
+			},
+			want: []line.Annotations{
+				{{Content: "a", Kind: kind.TextWarn}},
+				{{Content: "b", Kind: kind.TextError}},
+			},
+		},
+		"below puts errors first, then warnings, then the others": {
+			anns: line.Annotations{
+				{Content: "a", Kind: kind.Comment, Placement: line.Below},
+				{Content: "b", Kind: kind.TextWarn, Placement: line.Below},
+				{Content: "c", Placement: line.Below},
+				{Content: "d", Kind: kind.TextError, Placement: line.Below},
+				{Content: "e", Kind: kind.TextWarn, Placement: line.Below},
+			},
+			placement: line.Below,
+			want: []line.Annotations{
+				{{Content: "d", Kind: kind.TextError, Placement: line.Below}},
+				{
+					{Content: "b", Kind: kind.TextWarn, Placement: line.Below},
+					{Content: "e", Kind: kind.TextWarn, Placement: line.Below},
+				},
+				{{Content: "a", Kind: kind.Comment, Placement: line.Below}},
+				{{Content: "c", Placement: line.Below}},
+			},
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, tc.anns.ByKind())
+			assert.Equal(t, tc.want, tc.anns.Groups(tc.placement))
 		})
 	}
 }

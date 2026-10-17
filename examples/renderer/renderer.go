@@ -118,8 +118,9 @@ func writeNotes(sb *strings.Builder, gutter int, content string, notes line.Anno
 	// DefaultAnnotation lays out the rows that the printer writes for the
 	// annotations of one kind, and it returns them as text without styles.
 	// A renderer of its own can call it too, so its carets and padding
-	// match those of the printer.
-	for _, group := range notes.Filter(placement).ByKind() {
+	// match those of the printer. Groups returns the groups in the order
+	// the printer draws them, so the errors below a line come first.
+	for _, group := range notes.Groups(placement) {
 		ctx := printer.AnnotationContext{Content: content, Annotations: group, Placement: placement}
 
 		for _, row := range printer.DefaultAnnotation(ctx) {
