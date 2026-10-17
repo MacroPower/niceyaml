@@ -19,8 +19,8 @@ const (
 
 // Value is a value of the document that a merge of layers gives. A
 // [Reader] reads one from each layer, with every alias and `<<` merge key
-// of the layer resolved, and [Value.Merge] puts the value of a higher
-// layer over it.
+// of the layer resolved. [Value.Merge] puts the value of a higher layer
+// over it.
 type Value struct {
 	names   map[string]int
 	tag     string
@@ -44,11 +44,11 @@ type mapEntry struct {
 	// The YAML text of the key, with its tag, as the layer of value
 	// spells it.
 	key string
-	// Reports an entry that a layer removed with a written null. The
-	// merged document leaves the entry out, and value is the null that
-	// removed it, so an error about the key binds at that null. For an
-	// entry that a merged layer removed, value is a null of that layer,
-	// which stands for the null in a layer of its own.
+	// Whether a layer removed the entry with a written null. The merged
+	// document leaves the entry out. The value field holds the null that
+	// removed the entry, so an error about the key binds at that null. For
+	// an entry that a merged layer removed, value is a null of that layer.
+	// That null stands for the null in a layer of its own.
 	removed bool
 }
 
@@ -56,7 +56,7 @@ type mapEntry struct {
 // over e. A removed upper removes e. A removed e stays removed under a
 // null, and takes the null of upper when that null removes, as
 // [Value.removes] reports. Over any other e, a removing null removes a
-// value and replaces a null, and any other null replaces only a null that
+// value and replaces a null. Any other null replaces only a null that
 // does not remove. Any other value replaces a removed e, or merges over
 // the value of e as [Value.Merge] describes.
 func (e *mapEntry) merge(upper *mapEntry) {
@@ -83,10 +83,10 @@ func (e *mapEntry) merge(upper *mapEntry) {
 }
 
 // removes reports whether v is a null that removes the value the layers
-// below hold under its key: a written null with no tag. A tagged null
-// keeps that value, written or not, since go-yaml parses no entry behind
-// a tag with no value and the merged text must write both forms as a
-// written null.
+// below hold under its key: a written null without a tag. A tagged null
+// keeps that value, written or not, because the merged text must write
+// both forms as a written null. It must do so because the go-yaml parser
+// does not parse an entry behind a tag without a value.
 func (v *Value) removes() bool {
 	return v.kind == kindNull && v.written && v.tag == ""
 }
@@ -94,11 +94,12 @@ func (v *Value) removes() bool {
 // Merge returns upper merged over v, where upper comes from a higher
 // layer. Two mappings merge entry by entry, as [mapEntry.merge]
 // describes, and v then holds the result. A null in upper keeps v,
-// unless v is a null too. Any other upper replaces v. Either value may
-// be nil, which stands for a layer that holds no value there.
+// unless v is a null too. Any other upper replaces v. Either value can be
+// nil. A nil value stands for a layer that does not hold a value there.
 //
-// No null removes a value here. [mapEntry.merge] decides that for the
-// value under a key, and the root of a layer has no key.
+// Merge does not let a null remove a value. [mapEntry.merge] decides
+// removal for the value under a key, and the root of a layer does not
+// have a key.
 func (v *Value) Merge(upper *Value) *Value {
 	switch {
 	case v == nil:
@@ -137,17 +138,17 @@ func (v *Value) Merge(upper *Value) *Value {
 	return v
 }
 
-// block reports whether v takes lines of its own in the merged document:
-// a sequence that is not empty, or a mapping with an entry that no layer
-// removed.
+// block reports whether v takes lines of its own in the merged document.
+// A sequence that is not empty does, and so does a mapping that holds an
+// entry that is not removed.
 func (v *Value) block() bool {
 	return len(v.items) > 0 || slices.ContainsFunc(v.entries, func(e *mapEntry) bool { return !e.removed })
 }
 
-// inline returns the text of a value that is no block, with its tag in
-// front. With keyed set, the text goes behind the ":" of a key, where an
-// unwritten null with no tag has no text, as its layer spells it. A
-// written null there would remove a value once the merged document is a
+// inline returns the text of a value that is not a block, with its tag in
+// front. With keyed set, the text goes behind the ":" of a key. There an
+// unwritten null without a tag has empty text, as its layer spells it. A
+// written null there removes a value when the merged document is a
 // layer.
 func (v *Value) inline(keyed bool) string {
 	text := v.text
@@ -171,9 +172,9 @@ func (v *Value) inline(keyed bool) string {
 }
 
 // Find returns the value rel selects in v, where rel is a path relative
-// to v, and true. It follows rel for as long as the values hold it, and
-// returns the last value it reaches and false when one does not. A nil v
-// holds no value.
+// to v, and true. It follows rel while each value holds the next
+// selector. When a value does not hold it, Find returns the last value
+// it reached and false. For a nil v, Find returns nil and false.
 func (v *Value) Find(rel paths.Path) (*Value, bool) {
 	if v == nil {
 		return nil, false
@@ -193,10 +194,10 @@ func (v *Value) Find(rel paths.Path) (*Value, bool) {
 	return at, true
 }
 
-// child returns the value sel selects in v, or nil when v holds none. The
-// `~` selector of a key selects v itself, since the key of an entry
-// belongs to the layer of its value. The name of an entry that a layer
-// removed selects the null that removed it.
+// child returns the value sel selects in v, or nil when v does not hold
+// one. The `~` selector of a key selects v itself, because the key of an
+// entry belongs to the layer of its value. The name of an entry that a
+// layer removed selects the null that removed it.
 func (v *Value) child(sel paths.Selector) *Value {
 	switch sel.Kind {
 	case paths.SelectorKey:
@@ -220,11 +221,12 @@ func (v *Value) child(sel paths.Selector) *Value {
 
 // Carry adds to v each entry that held marks as removed, where v is a
 // value a [Reader] read for the layer at the given index. It serves a
-// layer that is a node of a merged document, where held is the value the
-// layers of that document hold at the node. The reader read v from the
-// merged text, which leaves out each key a layer removed. Each such entry
-// goes in where held has it, as an entry the layer removes, so the layer
-// removes what its own layers do. A nil held holds no entry.
+// layer that is a node of a merged document, and held is the value that
+// the layers of that document hold at the node. The reader read v from
+// the merged text, which leaves out each key that a layer removed. Carry
+// puts each such entry where held has it, as an entry that the layer
+// removes, so the layer removes what its own layers do. Carry does not
+// change v for a nil held.
 func (v *Value) Carry(held *Value, layer int) {
 	if held == nil || v.kind != kindMapping || held.kind != kindMapping {
 		return

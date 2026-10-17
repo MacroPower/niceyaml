@@ -4,7 +4,8 @@ import "strings"
 
 // Text returns the YAML text of a document that holds v below preamble,
 // in block style, with one entry or element on each line. An entry that a
-// layer removed takes no line. A nil v holds no content.
+// layer removed does not take a line. For a nil v, the document holds
+// only the preamble.
 func Text(preamble string, v *Value) string {
 	var w writer
 
@@ -20,7 +21,8 @@ type writer struct {
 	sb strings.Builder
 }
 
-// document writes v as the content of a document. A nil v writes nothing.
+// document writes v as the content of a document. It does not write
+// anything for a nil v.
 func (w *writer) document(v *Value) {
 	switch {
 	case v == nil:
@@ -39,9 +41,9 @@ func (w *writer) document(v *Value) {
 }
 
 // block writes the lines of v, a mapping or a sequence that is not empty,
-// at indent. With first set, the first line goes on behind what the
-// current line holds, as the first entry of a mapping goes behind the "-"
-// of its element. An entry that a layer removed takes no line.
+// at indent. With first set, the first line continues the current line,
+// as the first entry of a mapping follows the "-" of its element. An
+// entry that a layer removed does not take a line.
 func (w *writer) block(v *Value, indent int, first bool) {
 	for _, entry := range v.entries {
 		if entry.removed {
@@ -67,8 +69,8 @@ func (w *writer) block(v *Value, indent int, first bool) {
 	}
 }
 
-// pad writes the indentation of a line, unless the line holds text
-// already.
+// pad writes the indentation of a line. It skips the indentation when
+// started reports that the line already holds text.
 func (w *writer) pad(indent int, started bool) {
 	if !started {
 		w.sb.WriteString(strings.Repeat(" ", indent))
@@ -77,9 +79,9 @@ func (w *writer) pad(indent int, started bool) {
 
 // nested writes v behind the ":" of its key or the "-" of its element,
 // and ends the line. A block goes on the lines below at indent. With
-// compact set, v is an element, and a block with no tag starts on the
-// line itself. Under a key, a null with no text adds nothing to the line,
-// as [Value.inline] describes.
+// compact set, v is an element, and a block without a tag starts on the
+// line itself. Under a key, a null with empty text does not add anything
+// to the line, as [Value.inline] describes.
 func (w *writer) nested(v *Value, indent int, compact bool) {
 	switch {
 	case !v.block():
