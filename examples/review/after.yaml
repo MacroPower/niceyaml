@@ -1,0 +1,16 @@
+---
+restaurant:
+  name: Café Yamüll
+  opens: "06:30"
+---
+menu:
+  - item: "Småkakor & Kaffe"
+    price: "180 kr"
+  - item: "Kanelbulle"
+    price: "45 kr"
+  - item: "Prinsesstårta"
+    price: "8 EUR"
+  - item: "Kardemummabulle"
+    price: "45 kr"
+  - item: "Semla"
+    price: "65 SEK"
