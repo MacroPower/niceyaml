@@ -478,12 +478,23 @@ func TestFromColors(t *testing.T) {
 		_, err := theme.FromColors("test-invalid", brand, tokens)
 		require.ErrorIs(t, err, style.ErrInvalidColor)
 		require.ErrorIs(t, err, style.ErrUnknownKeyword)
-		require.EqualError(t, err, "token for comment: unknown keyword: sparkly\n"+
-			"token for nameTag: invalid color: #zzz")
+		require.EqualError(t, err, `token for "comment": unknown keyword: "sparkly"`+"\n"+
+			`token for "nameTag": invalid color: "#zzz"`)
 
 		// Derive reports the same errors.
 		_, derived := theme.Derive(brand, tokens)
 		assert.Equal(t, err, derived)
+	})
+
+	t.Run("quotes the kind of a token it rejects", func(t *testing.T) {
+		t.Parallel()
+
+		// A program that builds the map from flags or a map of strings can
+		// pass a kind with a control character in its name.
+		tokens := map[kind.Kind]theme.Token{"literalString\n": "sparkly"}
+
+		_, err := theme.FromColors("test-invalid", brand, tokens)
+		require.EqualError(t, err, `token for "literalString\n": unknown keyword: "sparkly"`)
 	})
 
 	t.Run("joins a catalog", func(t *testing.T) {

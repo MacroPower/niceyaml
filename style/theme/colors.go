@@ -23,6 +23,11 @@ import (
 // built-in theme does.
 //
 // A color field that holds nil or a [lipgloss.NoColor] is unset.
+// [lipgloss.Color] returns a NoColor for text it cannot read, such as
+// #2b1d1, so a mistyped color reads as unset and takes the default that
+// its field describes, without an error. A program that reads colors from
+// user input parses them with [style.ParseColor], which returns an error
+// for such text.
 type Colors struct {
 	// Fg is the color of the body text. An unset Fg leaves the terminal's
 	// own foreground in place. [Derive] then derives the other kinds from
@@ -260,7 +265,7 @@ func checkTokens(tokens map[kind.Kind]Token) error {
 	for _, k := range slices.Sorted(maps.Keys(tokens)) {
 		_, err := style.Parse(string(tokens[k]))
 		if err != nil {
-			errs = append(errs, fmt.Errorf("token for %s: %w", k, err))
+			errs = append(errs, fmt.Errorf("token for %q: %w", k, err))
 		}
 	}
 

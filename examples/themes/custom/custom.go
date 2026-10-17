@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"charm.land/lipgloss/v2"
+	"github.com/goccy/go-yaml/token"
 
 	_ "embed"
 
@@ -79,7 +81,8 @@ func main() {
 	// FromColors creates a theme whose styles Derive builds from the colors
 	// and the tokens. Derive sets the headings, the highlights, the diff
 	// lines, and the marks of errors from the colors. It then layers each
-	// token over the style of its kind.
+	// token over the style of its kind. The readableColor rule has checked
+	// each color, so lipgloss.Color reads it as style.ParseColor does.
 	fika, err := theme.FromColors(fikaFile.Name, theme.Colors{
 		Fg:     lipgloss.Color(fikaFile.Colors.Fg),
 		Bg:     lipgloss.Color(fikaFile.Colors.Bg),
@@ -162,22 +165,32 @@ func knownMode(ctx context.Context, n *niceyaml.Node) error {
 	return nil
 }
 
-// readableColor rejects a value that lipgloss does not read as a color.
+// readableColor rejects a color that is null or empty, or that
+// style.ParseColor rejects. ParseColor reads an empty string as unset, but
+// each color that the file names must hold a value. The rule decodes into
+// a new string, and a null leaves it empty. YAML reads an unquoted color,
+// such as bg: #2b1d14, as a comment that leaves the key null. The rule
+// gives the hint about the "#" only when a comment stands in place of the
+// value, and not for a null such as bg: ~.
 func readableColor(ctx context.Context, n *niceyaml.Node) error {
 	text, err := n.Decode[string](ctx)
 	if err != nil {
 		return fmt.Errorf("decode color: %w", err)
 	}
 
-	// For text it cannot read, such as #2b1d1, lipgloss.Color returns
-	// NoColor, and Colors treats NoColor as unset. Without the rule, a typo
-	// in fg or bg leaves the color of the terminal in place. A typo in
-	// accent, ok, warn, or error takes the default for the mode.
-	if _, ok := lipgloss.Color(text).(lipgloss.NoColor); ok {
-		return niceyaml.NewError("not a color")
+	if text == "" {
+		if tks := n.Tokens(); len(tks) > 0 && tks[0].Type == token.CommentType {
+			return niceyaml.NewError("color is empty",
+				niceyaml.WithDetails(errors.New(`YAML reads an unquoted "#" as the start of a comment`)))
+		}
+
+		return niceyaml.NewError("color is empty")
 	}
 
-	return nil
+	// Invalid returns nil for a color that ParseColor accepts.
+	_, err = style.ParseColor(text)
+
+	return niceyaml.Invalid(err)
 }
 
 // knownKind rejects a key that does not name a predefined kind. FromColors

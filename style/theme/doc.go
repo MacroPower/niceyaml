@@ -86,6 +86,16 @@
 // rejects when it decodes, so a niceyaml decode reports each bad token
 // where the file holds it.
 //
+// Such a program reads each color with [style.ParseColor], because
+// [lipgloss.Color] reads a mistyped color as unset. ParseColor reads an
+// empty string as unset too. YAML reads the color in bg: #2b1d14 as a
+// comment, so the key holds null. A null leaves a string field as it was,
+// so a field that starts empty stays empty. After the decode, a check for
+// an empty field thus rejects a null, an empty string, and a color key
+// that the file leaves out. A program that allows a missing key checks
+// each color node that the file holds instead, for example with
+// [go.jacobcolvin.com/niceyaml.Each].
+//
 // [Catalog.With] adds themes to a catalog. It returns a new Catalog and
 // leaves the receiver as it was. A program adds its theme to the built-in
 // catalog:

@@ -101,6 +101,9 @@
 // border:#rrggbb tokens. A malformed border color still returns
 // [ErrInvalidColor].
 //
+// [ParseColor] reads one color in the same form, for a color that a
+// program reads on its own, such as a field of a theme file.
+//
 // Example usage:
 //
 //	// A simple foreground color:

@@ -48,6 +48,7 @@ func TestParse(t *testing.T) {
 	tcs := map[string]struct {
 		err   error
 		input string
+		msg   string
 		want  styleAttrs
 	}{
 		"empty string":           {input: "", want: styleAttrs{}},
@@ -68,15 +69,48 @@ func TestParse(t *testing.T) {
 			input: "BOLD Italic UnDeRlInE",
 			want:  styleAttrs{Bold: true, Italic: true, Underline: true},
 		},
-		"case insensitive prefixes":    {input: "BG:#ff0000", want: styleAttrs{Bg: "#ff0000"}},
-		"invalid color - no hash":      {input: "ff0000", err: style.ErrUnknownKeyword},
-		"invalid color - wrong length": {input: "#ff00", err: style.ErrInvalidColor},
-		"invalid color - invalid hex":  {input: "#gggggg", err: style.ErrInvalidColor},
-		"invalid bg color":             {input: "bg:#invalid", err: style.ErrInvalidColor},
-		"invalid border color":         {input: "border:garbage", err: style.ErrInvalidColor},
-		"empty border color":           {input: "border:", err: style.ErrInvalidColor},
-		"unknown keyword":              {input: "unknown", err: style.ErrUnknownKeyword},
-		"uppercase hex color":          {input: "Bold #FF0000", want: styleAttrs{Bold: true, Fg: "#ff0000"}},
+		"case insensitive prefixes": {input: "BG:#ff0000", want: styleAttrs{Bg: "#ff0000"}},
+		"invalid color - no hash": {
+			input: "ff0000",
+			err:   style.ErrUnknownKeyword,
+			msg:   `unknown keyword: "ff0000"`,
+		},
+		"invalid color - wrong length": {
+			input: "#ff00",
+			err:   style.ErrInvalidColor,
+			msg:   `invalid color: "#ff00"`,
+		},
+		"invalid color - invalid hex": {
+			input: "#gggggg",
+			err:   style.ErrInvalidColor,
+			msg:   `invalid color: "#gggggg"`,
+		},
+		"invalid bg color": {
+			input: "bg:#invalid",
+			err:   style.ErrInvalidColor,
+			msg:   `invalid color: "#invalid"`,
+		},
+		"invalid border color": {
+			input: "border:garbage",
+			err:   style.ErrInvalidColor,
+			msg:   `invalid color: "garbage"`,
+		},
+		"empty border color": {
+			input: "border:",
+			err:   style.ErrInvalidColor,
+			msg:   `invalid color: ""`,
+		},
+		"unknown keyword": {
+			input: "unknown",
+			err:   style.ErrUnknownKeyword,
+			msg:   `unknown keyword: "unknown"`,
+		},
+		"control character": {
+			input: "bold \x1b[2J",
+			err:   style.ErrUnknownKeyword,
+			msg:   `unknown keyword: "\x1b[2J"`,
+		},
+		"uppercase hex color": {input: "Bold #FF0000", want: styleAttrs{Bold: true, Fg: "#ff0000"}},
 		"modifiers only": {
 			input: "bold italic underline",
 			want:  styleAttrs{Bold: true, Italic: true, Underline: true},
@@ -96,6 +130,7 @@ func TestParse(t *testing.T) {
 			got, err := style.Parse(tc.input)
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
+				require.EqualError(t, err, tc.msg)
 				assert.Panics(t, func() { style.MustParse(tc.input) })
 
 				return
@@ -168,6 +203,48 @@ func TestParse_NoKeywordsLeaveAttributeUnset(t *testing.T) {
 
 			// An unset attribute lets Inherit take the parent's value.
 			assert.True(t, tc.get(s.Inherit(tc.parent)))
+		})
+	}
+}
+
+func TestParseColor(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want color.Color
+		err  error
+		text string
+		msg  string
+	}{
+		"short form":     {text: "#f00", want: lipgloss.Color("#f00")},
+		"long form":      {text: "#2b1d14", want: lipgloss.Color("#2b1d14")},
+		"uppercase hex":  {text: "#2B1D14", want: lipgloss.Color("#2b1d14")},
+		"empty is unset": {text: "", want: lipgloss.NoColor{}},
+		"five digits":    {text: "#2b1d1", err: style.ErrInvalidColor, msg: `invalid color: "#2b1d1"`},
+		"color name":     {text: "tan", err: style.ErrInvalidColor, msg: `invalid color: "tan"`},
+		"ansi index":     {text: "4", err: style.ErrInvalidColor, msg: `invalid color: "4"`},
+		"not hex":        {text: "#ggg", err: style.ErrInvalidColor, msg: `invalid color: "#ggg"`},
+		"style string":   {text: "bold #f00", err: style.ErrInvalidColor, msg: `invalid color: "bold #f00"`},
+		"leading space":  {text: " #2b1d14", err: style.ErrInvalidColor, msg: `invalid color: " #2b1d14"`},
+		"trailing space": {text: "#2b1d14 ", err: style.ErrInvalidColor, msg: `invalid color: "#2b1d14 "`},
+		"newline":        {text: "#2b1d14\n", err: style.ErrInvalidColor, msg: `invalid color: "#2b1d14\n"`},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := style.ParseColor(tc.text)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				require.EqualError(t, err, tc.msg)
+				assert.Nil(t, got)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }

@@ -79,6 +79,26 @@ func MustParse(s string) lipgloss.Style {
 	return style
 }
 
+// ParseColor parses a color in the form that [Parse] reads in a style
+// string, #rgb or #rrggbb, and returns what [lipgloss.Color] returns for
+// it. An empty s gives a [lipgloss.NoColor], which [WithSurface] and the
+// colors of a theme read as unset. For any other text, ParseColor returns
+// a nil color and an error that wraps [ErrInvalidColor]. The error quotes
+// the text, so a space or a newline in it shows. For most such text, such
+// as #2b1d1, lipgloss.Color returns a NoColor without an error. It reads
+// some numbers, such as 4, as ANSI colors.
+func ParseColor(s string) (color.Color, error) {
+	if s == "" {
+		return lipgloss.NoColor{}, nil
+	}
+
+	if !isValidColor(s) {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidColor, s)
+	}
+
+	return lipgloss.Color(s), nil
+}
+
 // Encode encodes a [lipgloss.Style] to a Pygments-style string.
 //
 // The output contains space-separated tokens that represent the style's
@@ -126,7 +146,7 @@ func applyToken(style lipgloss.Style, token string) (lipgloss.Style, error) {
 	case strings.HasPrefix(lower, "bg:"):
 		colorStr := token[3:]
 		if !isValidColor(colorStr) {
-			return style, fmt.Errorf("%w: %s", ErrInvalidColor, colorStr)
+			return style, fmt.Errorf("%w: %q", ErrInvalidColor, colorStr)
 		}
 
 		return style.Background(lipgloss.Color(colorStr)), nil
@@ -135,7 +155,7 @@ func applyToken(style lipgloss.Style, token string) (lipgloss.Style, error) {
 		// Pygments compatibility. Check the color, then ignore the border.
 		colorStr := token[7:]
 		if !isValidColor(colorStr) {
-			return style, fmt.Errorf("%w: %s", ErrInvalidColor, colorStr)
+			return style, fmt.Errorf("%w: %q", ErrInvalidColor, colorStr)
 		}
 
 		return style, nil
@@ -164,10 +184,10 @@ func applyToken(style lipgloss.Style, token string) (lipgloss.Style, error) {
 		// A leading # says the token was meant as a color, so report an
 		// invalid color rather than an unknown keyword.
 		if strings.HasPrefix(token, "#") {
-			return style, fmt.Errorf("%w: %s", ErrInvalidColor, token)
+			return style, fmt.Errorf("%w: %q", ErrInvalidColor, token)
 		}
 
-		return style, fmt.Errorf("%w: %s", ErrUnknownKeyword, token)
+		return style, fmt.Errorf("%w: %q", ErrUnknownKeyword, token)
 	}
 
 	return style.Foreground(lipgloss.Color(token)), nil
