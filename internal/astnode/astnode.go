@@ -1,36 +1,37 @@
-// Package astnode holds the nil and wrapper rules for go-yaml AST nodes,
-// the rule for which document bodies hold a value, and the rule for which
-// token a path to a node points at.
+// Package astnode holds the nil and wrapper rules for go-yaml abstract
+// syntax tree (AST) nodes. It also holds the rule for which document
+// bodies hold a value and the rule for which token a path to a node
+// points at.
 //
-// A tree built by hand may hold a typed nil behind a non-nil [ast.Node],
-// where the parser always puts a node. Code that walks a tree calls
-// [IsNil] rather than comparing a node with nil, and calls [Content] to
-// reach the value behind a document, an anchor, a tag, or the `?` of an
-// explicit key. Every walk then agrees on what a node holds.
+// A tree built by hand might hold a typed nil behind a non-nil
+// [ast.Node], where the parser always puts a node. Code that walks a tree
+// calls [IsNil] rather than comparing a node with nil. It calls [Content]
+// to reach the value behind a document, an anchor, a tag, or the `?` of
+// an explicit key. Every walk then agrees on what a node holds.
 //
 //	if m, ok := astnode.Content(node).(*ast.MappingNode); ok {
 //		// node is a mapping, or wraps one.
 //	}
 //
-// The parser gives some documents a body that holds no value: an empty
-// document, one of comments alone, one of a directive alone, and one of
-// whitespace alone. Code that reads a document checks its body with
+// The parser gives some documents a body that does not hold a value. Such
+// a document is empty or holds only comments, only a directive, or only
+// whitespace. Code that reads a document checks its body with
 // [HasContent], so a decode and a path lookup agree on which documents
 // are empty.
 //
-// A path points at one token of the document, which [PathToken] returns
-// for the node the path selects and the [Parent] that holds the node. A
-// scalar is its own token. A mapping or a sequence spans many lines, so
-// it points at the token that introduces it: the key of the entry it is
-// the value of, or the "-" of the block sequence element it is. Code that
-// points at a node it reached without a path calls PathToken too, so both
-// name the same place for one node.
+// A path points at one token of the document. [PathToken] returns that
+// token for the node that the path selects and the [Parent] that holds
+// the node. A scalar is its own token. A mapping or a sequence spans many
+// lines, so it points at the token that introduces it. That token is the
+// key of the entry whose value it is, or the "-" of the block sequence
+// element that it is. Code that points at a node that it reached without
+// a path calls PathToken too, so both name the same place for one node.
 //
-// A walk of a tree goes through [Inspect], which skips the typed nils a
-// hand-built tree may hold. The offsets a node spans come from
-// [ExtentOf], and the tokens at its ends from [Bounds]. Both count the
+// A walk of a tree goes through [Inspect], which skips the typed nils
+// that a hand-built tree might hold. The offsets that a node spans come
+// from [ExtentOf], and the tokens at its ends from [Bounds]. Both count the
 // token that closes a flow collection and the "-" of each block sequence
-// element, which no node of the walk holds.
+// element, even though the walk does not visit a node for either token.
 package astnode
 
 import (
@@ -76,9 +77,9 @@ func IsNil(node ast.Node) bool {
 // for a nil node, including a typed nil, and for a comment group or a
 // directive. Those are the bodies of an empty document, a document of
 // comments alone, and a document of a %YAML directive alone. It also
-// returns false for a scalar holding the placeholder token that
-// [tokens.Tokenize] makes for text the lexer emits nothing for, such as
-// a file of whitespace alone.
+// returns false for a scalar that holds the placeholder token of
+// [tokens.Tokenize]. Tokenize makes that token for text that the lexer
+// does not emit a token for, such as a file of whitespace alone.
 func HasContent(node ast.Node) bool {
 	if IsNil(node) {
 		return false
@@ -97,21 +98,21 @@ func HasContent(node ast.Node) bool {
 	}
 }
 
-// Parent names what holds a node in a tree: the mapping entry the node
-// is the value of, or the sequence the node is an element of. The zero
-// Parent holds the root of a document, the key of an entry, and any
+// Parent names what holds a node in a tree: the mapping entry whose value
+// is the node, or the sequence that holds the node as an element. The
+// zero Parent holds the root of a document, the key of an entry, and any
 // node whose place in the tree the caller does not know.
 type Parent struct {
-	// The entry the node is the value of, or nil.
+	// The entry whose value is the node, or nil.
 	Entry *ast.MappingValueNode
-	// The sequence the node is an element of, or nil.
+	// The sequence that holds the node as an element, or nil.
 	Sequence *ast.SequenceNode
 	// The index of the node in Sequence.
 	Index int
 }
 
-// PathToken returns the token a path to node points at, where in holds
-// node. A scalar is its own token, and so is an alias, whatever its
+// PathToken returns the token that a path to node points at, where in
+// holds node. A scalar is its own token, and so is an alias, whatever its
 // anchor holds. A mapping or a sequence points at the token that
 // introduces it, under the anchors and tags on node. The first of these
 // rules that fits the node gives that token.
@@ -126,8 +127,9 @@ type Parent struct {
 //     starts its content, which is its first key or its first element.
 //     One at the root of a document does.
 //
-// An entry with no key introduces nothing, so its value points where it
-// would with no entry. A nil node, including a typed nil, has no token.
+// An entry without a key does not introduce a token, so PathToken handles
+// its value as it handles a value outside an entry. PathToken returns nil
+// for a nil node, including a typed nil.
 func PathToken(node ast.Node, in Parent) *token.Token {
 	if IsNil(node) {
 		return nil
@@ -159,10 +161,10 @@ func PathToken(node ast.Node, in Parent) *token.Token {
 	return firstToken(node)
 }
 
-// KeyToken returns the token a path to the key of entry points at, as a
-// path that ends in a `~` selector resolves it. It leaves out the `?` of
-// an explicit key, and looks through the anchors and tags on the key. It
-// returns nil for a nil entry and for an entry with no key.
+// KeyToken returns the token that a path to the key of entry points at,
+// as a path that ends in a `~` selector resolves it. It leaves out the
+// `?` of an explicit key, and looks through the anchors and tags on the
+// key. It returns nil for a nil entry and for an entry without a key.
 func KeyToken(entry *ast.MappingValueNode) *token.Token {
 	if entry == nil || Content(entry.Key) == nil {
 		return nil
@@ -177,8 +179,8 @@ func KeyToken(entry *ast.MappingValueNode) *token.Token {
 }
 
 // unwrapped returns the node under the anchors and tags on node. It
-// stops at an alias, which is a token of its own, where [Content] also
-// looks through a document and the `?` of an explicit key.
+// stops at an alias, which is a token of its own. It does not look
+// through a document or the `?` of an explicit key, but [Content] does.
 func unwrapped(node ast.Node) ast.Node {
 	for !IsNil(node) {
 		switch n := node.(type) {
@@ -195,8 +197,8 @@ func unwrapped(node ast.Node) ast.Node {
 }
 
 // flowStart returns start when it is the token of kind that opens a flow
-// collection, and nil for a block collection. A tree built by hand may
-// hold any token there, or none.
+// collection, and nil for a block collection. A tree built by hand might
+// hold any token there, or nil.
 func flowStart(flow bool, start *token.Token, kind token.Type) *token.Token {
 	if !flow || start == nil || start.Type != kind {
 		return nil
@@ -206,9 +208,9 @@ func flowStart(flow bool, start *token.Token, kind token.Type) *token.Token {
 }
 
 // entryToken returns the "-" of element index of seq, or nil when seq
-// writes none for it. The parser gives a flow sequence no token for its
-// first element and the "," for each later one. A tree built by hand may
-// hold no entries at all.
+// does not write one for it. The parser does not give a flow sequence a
+// token for its first element, and it gives the "," for each later one. A
+// tree built by hand might not hold any entries.
 func entryToken(seq *ast.SequenceNode, index int) *token.Token {
 	if seq == nil || index < 0 || index >= len(seq.Entries) {
 		return nil
@@ -226,8 +228,8 @@ func entryToken(seq *ast.SequenceNode, index int) *token.Token {
 // key of a mapping, the first element of a sequence, or the scalar itself.
 // It looks through anchors and tags, and through the `?` indicator,
 // anchors, and tags of the first key of a mapping. An alias is its own
-// token. An entry with no key starts at its own token. A nil node,
-// including a typed nil, has no token.
+// token. An entry without a key starts at its own token. It returns nil
+// for a nil node, including a typed nil.
 func firstToken(node ast.Node) *token.Token {
 	for {
 		if IsNil(node) {
@@ -264,11 +266,11 @@ func firstToken(node ast.Node) *token.Token {
 	}
 }
 
-// Inspect calls f for node and for each node below it, in the order
-// [ast.Walk] visits them, which puts a node before the nodes it holds
-// and the comment group of a node before its children. It goes below a
-// node only while f returns true for it. It skips a nil node, including
-// a typed nil, and everything below one.
+// Inspect calls f for node and for each node below it, in the order that
+// [ast.Walk] visits them. That order puts a node before the nodes that it
+// holds and the comment group of a node before its children. It goes
+// below a node only when f returns true for it. It skips a nil node,
+// including a typed nil, and everything below one.
 func Inspect(node ast.Node, f func(ast.Node) bool) {
 	ast.Walk(inspector(f), node)
 }
@@ -285,8 +287,8 @@ func (f inspector) Visit(node ast.Node) ast.Visitor {
 	return f
 }
 
-// Nodes returns the nodes under node in the order [Inspect] visits them,
-// with node first. It leaves out comments.
+// Nodes returns the nodes under node in the order that [Inspect] visits
+// them, with node first. It leaves out comments.
 func Nodes(node ast.Node) []ast.Node {
 	var nodes []ast.Node
 
@@ -313,9 +315,9 @@ func Token(node ast.Node) *token.Token {
 	return node.GetToken()
 }
 
-// Name returns the value of the token of node, which is the name the
-// decoder gives an anchor or looks an alias up by. It reports false for
-// a node with no token.
+// Name returns the value of the token of node, which is the name that the
+// decoder gives an anchor or resolves an alias by. It reports false for a
+// node without a token.
 func Name(node ast.Node) (string, bool) {
 	tk := Token(node)
 	if tk == nil {
@@ -326,7 +328,7 @@ func Name(node ast.Node) (string, bool) {
 }
 
 // Extent holds the offsets of the first and the last of some tokens. The
-// zero Extent holds no tokens.
+// zero Extent does not hold a token.
 type Extent struct {
 	// The offset of the first token.
 	Lo int
@@ -337,7 +339,7 @@ type Extent struct {
 }
 
 // With returns e widened to hold the offset of tk. A nil token, or one
-// without a position, changes nothing.
+// without a position, does not change e.
 func (e Extent) With(tk *token.Token) Extent {
 	if tk == nil || tk.Position == nil {
 		return e
@@ -374,8 +376,8 @@ func ExtentOf(node ast.Node, comments bool) Extent {
 }
 
 // of returns e widened to hold the tokens under node, as [ExtentOf]
-// describes. It reads the nodes [ast.Walk] reaches, in its own switch
-// rather than through a visitor, so it allocates nothing.
+// describes. It reads the nodes that [ast.Walk] reaches, in its own
+// switch rather than through a visitor, so it does not allocate.
 func (e Extent) of(node ast.Node, comments bool) Extent {
 	if IsNil(node) {
 		return e
@@ -477,9 +479,9 @@ func (e Extent) of(node ast.Node, comments bool) Extent {
 }
 
 // Bounds returns the tokens under node with the lowest and the highest
-// offset, comments included, each in walk order, or nil when no token
-// under node carries a position. Several tokens can share an offset, so
-// each bound can hold more than one.
+// offset, comments included, each in walk order, or nil when none of the
+// tokens under node carries a position. Several tokens can share an
+// offset, so each bound can hold more than one.
 func Bounds(node ast.Node) (token.Tokens, token.Tokens) {
 	var b boundsFinder
 
@@ -489,7 +491,7 @@ func Bounds(node ast.Node) (token.Tokens, token.Tokens) {
 }
 
 // StartToken returns the token with the lowest offset under node that is
-// not a comment, or nil when no such token carries a position.
+// not a comment, or nil when none of those tokens carries a position.
 func StartToken(node ast.Node) *token.Token {
 	b := boundsFinder{skipComments: true}
 
@@ -503,14 +505,15 @@ func StartToken(node ast.Node) *token.Token {
 }
 
 // boundsFinder records the tokens with the lowest and the highest offset
-// among the nodes it visits, all of them when several share the offset.
+// among the nodes that it visits, all of them when several share the
+// offset.
 // With skipComments set, it leaves out the comments.
 type boundsFinder struct {
 	first, last  token.Tokens
 	skipComments bool
 }
 
-// visit is the function [Inspect] calls for each node.
+// visit is the function that [Inspect] calls for each node.
 func (b *boundsFinder) visit(node ast.Node) bool {
 	if b.skipComments && node.Type() == ast.CommentType {
 		return false
@@ -542,7 +545,7 @@ func (b *boundsFinder) visit(node ast.Node) bool {
 
 // consider widens the bounds to tk, or adds tk to the tokens at a bound
 // that it shares the offset of. A nil token, or one without a position,
-// changes nothing.
+// does not change the bounds.
 func (b *boundsFinder) consider(tk *token.Token) {
 	if tk == nil || tk.Position == nil {
 		return
@@ -565,19 +568,19 @@ func (b *boundsFinder) consider(tk *token.Token) {
 	}
 }
 
-// IsMergeKey reports whether key is a `<<` merge key, looking through
-// the `?` indicator, anchors, and tags. A nil key, including a typed
-// nil, is not a merge key.
+// IsMergeKey reports whether key is a `<<` merge key. It looks through
+// the `?` indicator, anchors, and tags. A nil key, including a typed nil,
+// is not a merge key.
 func IsMergeKey(key ast.Node) bool {
 	_, ok := Content(key).(*ast.MergeKeyNode)
 
 	return ok
 }
 
-// MergeValues returns the nodes the `<<` merge key of entry merges, the
-// value of the entry or each element of a sequence there, under their
+// MergeValues returns the nodes that the `<<` merge key of entry merges,
+// the value of the entry or each element of a sequence there, under their
 // anchors and tags. An alias stays an alias. It returns nil when entry
-// holds no merge key.
+// does not hold a merge key.
 func MergeValues(entry *ast.MappingValueNode) []ast.Node {
 	if entry == nil || !IsMergeKey(entry.Key) {
 		return nil
@@ -598,7 +601,7 @@ func MergeValues(entry *ast.MappingValueNode) []ast.Node {
 	return values
 }
 
-// Entries returns the entries of the mapping node holds, under its
+// Entries returns the entries of the mapping that node holds, under its
 // anchors and tags, and reports whether node holds a mapping. A
 // [*ast.MappingValueNode] is a mapping of one entry.
 func Entries(node ast.Node) ([]*ast.MappingValueNode, bool) {
@@ -612,13 +615,14 @@ func Entries(node ast.Node) ([]*ast.MappingValueNode, bool) {
 	}
 }
 
-// IsTaggedNull reports whether node, or the value an anchor on node
-// names, is a tag the go-yaml decoder reads as null: a "!!null" tag over
-// any value, or a tag such as "!!seq", "!!map", or a local one over no
-// value. The go-yaml Unmarshal reads a document whose body is a tagged
-// null as empty. A tag that converts its value, such as "!!str" or "!!int",
-// reads as a value even over no value, as does any tag after a %TAG
-// directive that redefines the "!!" handle.
+// IsTaggedNull reports whether node, or the value that an anchor on node
+// names, is a tag that the go-yaml decoder reads as null. A "!!null" tag
+// over any value is such a tag. So is a tag without a value, such as
+// "!!seq", "!!map", or a local tag. The go-yaml Unmarshal reads a document
+// whose body is a tagged null as empty. A tag that converts its value,
+// such as "!!str" or "!!int", reads as a value even when it does not wrap
+// a value. So does any tag after a %TAG directive that redefines the "!!"
+// handle.
 func IsTaggedNull(node ast.Node) bool {
 	if anchor, ok := node.(*ast.AnchorNode); ok {
 		node = anchor.Value
@@ -643,8 +647,8 @@ func IsTaggedNull(node ast.Node) bool {
 }
 
 // IsScalar reports whether node is any node but a mapping, a sequence, or
-// nil. A node that wraps another, such as an anchor or a tag, counts
-// whatever it holds.
+// nil. A node that wraps another, such as an anchor or a tag, counts as
+// a scalar whatever it holds.
 func IsScalar(node ast.Node) bool {
 	switch node.(type) {
 	case nil, *ast.MappingNode, *ast.SequenceNode:
