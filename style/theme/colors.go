@@ -2,6 +2,7 @@ package theme
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"image/color"
 	"maps"
@@ -71,17 +72,30 @@ type Token string
 // takes its [Mode] from c. It keeps a copy of tokens, so a later change
 // to the map does not change the theme.
 //
-// FromColors checks each token when it creates the theme, and it panics
-// when [style.Parse] rejects one. The panic value is an error that wraps
-// the error from [style.Parse]. A program that reads its specs at run
-// time should check each one with [style.Parse] first.
-func FromColors(name string, c Colors, tokens map[kind.Kind]Token) Theme {
+// FromColors checks each token when it creates the theme. It returns an
+// error for each token that [style.Parse] rejects, sorted by kind and
+// joined with [errors.Join]. Each error names the kind of its token and
+// wraps the error from style.Parse.
+func FromColors(name string, c Colors, tokens map[kind.Kind]Token) (Theme, error) {
 	err := checkTokens(tokens)
+	if err != nil {
+		return Theme{}, err
+	}
+
+	return fromColors(name, c, maps.Clone(tokens)), nil
+}
+
+// MustFromColors is like [FromColors] but panics when FromColors returns
+// an error.
+//
+// Use it for a theme whose tokens the program spells out in its source.
+func MustFromColors(name string, c Colors, tokens map[kind.Kind]Token) Theme {
+	t, err := FromColors(name, c, tokens)
 	if err != nil {
 		panic(err)
 	}
 
-	return fromColors(name, c, maps.Clone(tokens))
+	return t
 }
 
 // fromColors creates a new [Theme] that derives its styles from c and
@@ -160,15 +174,29 @@ func fromColors(name string, c Colors, tokens map[kind.Kind]Token) Theme {
 // later release. A test that pins the exact output of Derive might then
 // fail.
 //
-// Derive panics when [style.Parse] rejects a token. The panic value is an
-// error that wraps the error from [style.Parse].
-func Derive(c Colors, tokens map[kind.Kind]Token) style.Styles {
+// Derive returns an error for each token that [style.Parse] rejects,
+// sorted by kind and joined with [errors.Join]. Each error names the kind
+// of its token and wraps the error from style.Parse.
+func Derive(c Colors, tokens map[kind.Kind]Token) (style.Styles, error) {
 	err := checkTokens(tokens)
+	if err != nil {
+		return style.Styles{}, err
+	}
+
+	return derive(c, tokens), nil
+}
+
+// MustDerive is like [Derive] but panics when Derive returns an error.
+//
+// Use it for tokens that the program spells out in its source, such as in
+// the build function of a theme from [New].
+func MustDerive(c Colors, tokens map[kind.Kind]Token) style.Styles {
+	s, err := Derive(c, tokens)
 	if err != nil {
 		panic(err)
 	}
 
-	return derive(c, tokens)
+	return s
 }
 
 // derive builds the styles that [Derive] describes, without checking
@@ -185,17 +213,20 @@ func derive(c Colors, tokens map[kind.Kind]Token) style.Styles {
 	return build(c, tokens, dim, surface)
 }
 
-// checkTokens returns an error for the first token, in the order of the
-// kinds, that [style.Parse] rejects.
+// checkTokens joins an error for each token that [style.Parse] rejects,
+// in the order of the kinds. It returns nil when style.Parse accepts every
+// token.
 func checkTokens(tokens map[kind.Kind]Token) error {
+	var errs []error
+
 	for _, k := range slices.Sorted(maps.Keys(tokens)) {
 		_, err := style.Parse(string(tokens[k]))
 		if err != nil {
-			return fmt.Errorf("token for %s: %w", k, err)
+			errs = append(errs, fmt.Errorf("token for %s: %w", k, err))
 		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // filled returns c with each unset color other than Fg and Bg replaced by

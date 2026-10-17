@@ -183,7 +183,7 @@ type Catalog struct {
 // Builtin returns the [Catalog] of every theme this package ships, in name
 // order. Add to it with [Catalog.With]:
 //
-//	catalog := theme.Builtin().With(theme.FromColors("corp", corpColors, corpTokens))
+//	catalog := theme.Builtin().With(theme.MustFromColors("corp", corpColors, corpTokens))
 func Builtin() Catalog {
 	return builtin
 }

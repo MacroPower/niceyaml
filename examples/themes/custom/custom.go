@@ -45,11 +45,13 @@ func main() {
 	ctx := context.Background()
 	p := printer.New()
 
-	// FromColors panics on a token that style.Parse rejects, so validToken
-	// checks every token during the decode, before FromColors runs. Key
-	// selects the keys of the tokens rather than their values. Each passes
-	// when its path selects no Node, so it cannot catch a missing mode. The
-	// knownMode rule checks the whole file instead.
+	// FromColors returns an error for a token that style.Parse rejects, but
+	// that error does not name a place in the file. The validToken rule
+	// checks every token during the decode, so the decode reports each bad
+	// token where the file holds it. Key selects the keys of the tokens
+	// rather than their values. Each passes when its path selects no Node,
+	// so it cannot catch a missing mode. The knownMode rule checks the whole
+	// file instead.
 	tokenPath := paths.Current().Child("tokens").ChildAll()
 	rules := niceyaml.WithValidator(niceyaml.MultiValidator(
 		niceyaml.ValidatorFunc(knownMode),
@@ -77,7 +79,7 @@ func main() {
 	// and the tokens. Derive sets the headings, the highlights, the diff
 	// lines, and the marks of errors from the colors. It then layers each
 	// token over the style of its kind.
-	fika := theme.FromColors(fikaFile.Name, theme.Colors{
+	fika, err := theme.FromColors(fikaFile.Name, theme.Colors{
 		Fg:     lipgloss.Color(fikaFile.Colors.Fg),
 		Bg:     lipgloss.Color(fikaFile.Colors.Bg),
 		Accent: lipgloss.Color(fikaFile.Colors.Accent),
@@ -86,6 +88,11 @@ func main() {
 		Error:  lipgloss.Color(fikaFile.Colors.Error),
 		Mode:   fikaFile.Mode,
 	}, fikaFile.Tokens)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
 
 	// Catalog.With adds the theme to a copy of the catalog, so a picker
 	// lists it beside the built-in themes. A theme with the name of a

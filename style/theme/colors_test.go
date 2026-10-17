@@ -159,7 +159,7 @@ func TestDerive(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := theme.Derive(tc.colors, tc.tokens)
+			got := theme.MustDerive(tc.colors, tc.tokens)
 			assert.Equal(t, tc.want, style.Encode(got.Style(tc.kind)))
 		})
 	}
@@ -171,7 +171,7 @@ func TestDerive_KeepsColors(t *testing.T) {
 	// The kinds that take a color whole hold it as given. A theme of ANSI
 	// colors thus keeps the palette of the terminal, and each mark matches
 	// the status text of its color.
-	styles := theme.Derive(theme.Colors{
+	styles := theme.MustDerive(theme.Colors{
 		OK:    lipgloss.Green,
 		Warn:  lipgloss.Yellow,
 		Error: lipgloss.Red,
@@ -219,7 +219,7 @@ func TestDerive_Surface(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := theme.Derive(theme.Colors{Bg: tc.bg, Mode: theme.Dark}, nil)
+			got := theme.MustDerive(theme.Colors{Bg: tc.bg, Mode: theme.Dark}, nil)
 			assert.Equal(t, tc.want, got.Surface())
 
 			// The highlights paint a fill of their own on either surface.
@@ -251,7 +251,7 @@ func TestDerive_MarksStandOut(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			styles := theme.Derive(tc.colors, map[kind.Kind]theme.Token{kind.Comment: "italic #808080"})
+			styles := theme.MustDerive(tc.colors, map[kind.Kind]theme.Token{kind.Comment: "italic #808080"})
 			text := style.Encode(styles.Style(kind.Text))
 
 			for _, k := range []kind.Kind{
@@ -317,8 +317,8 @@ func TestDerive_InvalidToken(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		token theme.Token
 		err   error
+		token theme.Token
 	}{
 		"malformed color": {token: "#zzz", err: style.ErrInvalidColor},
 		"unknown keyword": {token: "sparkly", err: style.ErrUnknownKeyword},
@@ -330,11 +330,16 @@ func TestDerive_InvalidToken(t *testing.T) {
 
 			tokens := map[kind.Kind]theme.Token{kind.Comment: "italic", kind.NameTag: tc.token}
 
-			err := panicError(t, func() {
-				theme.Derive(brand, tokens)
-			})
+			got, err := theme.Derive(brand, tokens)
 			require.ErrorIs(t, err, tc.err)
-			assert.ErrorContains(t, err, string(kind.NameTag))
+			require.ErrorContains(t, err, string(kind.NameTag))
+			assert.Equal(t, style.Styles{}, got)
+
+			// MustDerive panics with the error that Derive returns.
+			panicked := panicError(t, func() {
+				theme.MustDerive(brand, tokens)
+			})
+			assert.Equal(t, err, panicked)
 		})
 	}
 }
@@ -347,11 +352,11 @@ func TestFromColors(t *testing.T) {
 
 		tokens := map[kind.Kind]theme.Token{kind.NameTag: "bold #ff6f00"}
 
-		th := theme.FromColors("test-corp", brand, tokens)
+		th := theme.MustFromColors("test-corp", brand, tokens)
 
 		assert.Equal(t, "test-corp", th.Name)
 		assert.Equal(t, theme.Dark, th.Mode)
-		assert.Equal(t, theme.Derive(brand, tokens), th.Styles())
+		assert.Equal(t, theme.MustDerive(brand, tokens), th.Styles())
 	})
 
 	t.Run("keeps a copy of the tokens", func(t *testing.T) {
@@ -359,7 +364,7 @@ func TestFromColors(t *testing.T) {
 
 		tokens := map[kind.Kind]theme.Token{kind.NameTag: "#ff6f00"}
 
-		th := theme.FromColors("test-copy", brand, tokens)
+		th := theme.MustFromColors("test-copy", brand, tokens)
 		tokens[kind.NameTag] = "#00ff00"
 
 		assert.Equal(t, "#ff6f00 bg:#101820", style.Encode(th.Style(kind.NameTag)))
@@ -368,16 +373,53 @@ func TestFromColors(t *testing.T) {
 	t.Run("checks the tokens when it creates the theme", func(t *testing.T) {
 		t.Parallel()
 
-		err := panicError(t, func() {
-			theme.FromColors("test-invalid", brand, map[kind.Kind]theme.Token{kind.NameTag: "#zzz"})
-		})
+		tokens := map[kind.Kind]theme.Token{kind.NameTag: "#zzz"}
+
+		got, err := theme.FromColors("test-invalid", brand, tokens)
 		require.ErrorIs(t, err, style.ErrInvalidColor)
+		require.ErrorContains(t, err, string(kind.NameTag))
+		assert.Equal(t, theme.Theme{}, got)
+
+		// MustFromColors panics with the error that FromColors returns.
+		panicked := panicError(t, func() {
+			theme.MustFromColors("test-invalid", brand, tokens)
+		})
+		assert.Equal(t, err, panicked)
+	})
+
+	t.Run("returns the theme for valid tokens", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := theme.FromColors("test-valid", brand, map[kind.Kind]theme.Token{kind.NameTag: "bold"})
+		require.NoError(t, err)
+		assert.Equal(t, "test-valid", got.Name)
+		assert.Equal(t, "bold #e6e6e6 bg:#101820", style.Encode(got.Style(kind.NameTag)))
+	})
+
+	t.Run("reports every token it rejects", func(t *testing.T) {
+		t.Parallel()
+
+		tokens := map[kind.Kind]theme.Token{
+			kind.NameTag:       "#zzz",
+			kind.Comment:       "sparkly",
+			kind.LiteralString: "bold",
+		}
+
+		_, err := theme.FromColors("test-invalid", brand, tokens)
+		require.ErrorIs(t, err, style.ErrInvalidColor)
+		require.ErrorIs(t, err, style.ErrUnknownKeyword)
+		require.EqualError(t, err, "token for comment: unknown keyword: sparkly\n"+
+			"token for nameTag: invalid color: #zzz")
+
+		// Derive reports the same errors.
+		_, derived := theme.Derive(brand, tokens)
+		assert.Equal(t, err, derived)
 	})
 
 	t.Run("joins a catalog", func(t *testing.T) {
 		t.Parallel()
 
-		c := theme.Builtin().With(theme.FromColors("test-joined", brand, nil))
+		c := theme.Builtin().With(theme.MustFromColors("test-joined", brand, nil))
 
 		got, ok := c.Get("test-joined")
 		require.True(t, ok)

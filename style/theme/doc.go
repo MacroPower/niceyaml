@@ -64,10 +64,13 @@
 // [style.Parse] reads. [Derive] builds the styles of such a theme. It
 // derives the headings, the highlights, the dimmed text, the diff lines,
 // and the marks of errors and warnings from the colors. A theme from
-// FromColors thus presents every kind that a built-in theme does. For
-// example:
+// FromColors thus presents every kind that a built-in theme does.
 //
-//	corp := theme.FromColors("corp", theme.Colors{
+// FromColors returns an error for a token that style.Parse rejects.
+// [MustFromColors] panics on one instead, for tokens that a program
+// spells out in its source:
+//
+//	corp := theme.MustFromColors("corp", theme.Colors{
 //		Fg:     lipgloss.Color("#e6e6e6"),
 //		Bg:     lipgloss.Color("#101820"),
 //		Accent: lipgloss.Color("#ff6f00"),
