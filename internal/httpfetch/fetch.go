@@ -13,16 +13,16 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 )
 
-// Error is the error of a [Get] that tried to fetch its URL. It names the
-// URL as [Redacted] spells it, with the status of the response, and
+// Error is the error of a [Get] that tried to fetch its URL. It holds the
+// URL as [Redacted] spells it and the status of the response, and it
 // wraps the cause.
 type Error struct {
-	// Err is why the fetch gave no body.
+	// Err is why the fetch did not return a body.
 	Err error
 	// URL is the URL as [Redacted] spells it.
 	URL string
-	// StatusCode is the status of the response, or 0 when no response
-	// came.
+	// StatusCode is the status of the response, or 0 when the fetch did
+	// not get a response.
 	StatusCode int
 }
 
@@ -39,8 +39,8 @@ func (e *Error) Unwrap() error {
 // TooLarge returns the error of a text of more than limit bytes. For the
 // noun "response", its message reads as "response is larger than 10 MiB".
 // It matches [niceyaml.ErrLimit], as the error of a Source past its byte
-// limit does. It declares no document at fault, so [niceyaml.IsInvalid]
-// does not report it.
+// limit does. It does not declare a document at fault, so
+// [niceyaml.IsInvalid] does not report it.
 func TooLarge(noun string, limit int) error {
 	return sizeError{noun: noun, limit: limit}
 }
@@ -68,38 +68,41 @@ func (e sizeError) Is(target error) bool {
 // Get refuses a URL that does not parse, an http or https URL with an
 // empty host, and a URL whose host ends in a colon before an "@". It
 // refuses each one before it sends a request, with an error of its own.
-// Every other error is an [*Error]. It holds the status of the response,
-// or 0 when no response came.
+// Every other error is an [*Error]. The [*Error] holds the status of the
+// response, or 0 when Get did not get a response.
 //
-// Errors name the URL as [Redacted] spells it, which replaces any password
-// in its userinfo, so a password in a schema URL does not reach logs.
-// [Redacted] keeps a username as written, so a token given as the
-// username does reach logs.
-// An error about a URL that does not parse quotes it only when it starts
-// with http:// or https://, since [Redacted] can miss a password in other
-// text that does not parse. When [Redacted] would hide a password in such
-// a URL, errors omit the reason too, since the reason can quote part of
-// the password.
+// Errors name the URL as [Redacted] spells it. [Redacted] replaces any
+// password in the userinfo, so a password in a schema URL does not reach
+// logs. It keeps a username as written, so a token given as the username
+// does reach logs.
 //
-// Get refuses an http or https URL with an empty host, and it sends no
-// request. When a third slash follows the scheme, the parser reads any
-// userinfo as part of the path, so [Redacted] hides a password in such
-// a URL as it does in a URL that does not parse.
+// An error about a URL that does not parse quotes the URL only when it
+// starts with http:// or https://, because [Redacted] can miss a
+// password in other text that does not parse. When such a URL holds a
+// span that [Redacted] hides as a password, the error omits the reason
+// too, because the reason can quote part of the password.
+//
+// Get refuses an http or https URL with an empty host, and it does not
+// send a request for it. When a third slash follows the scheme, the
+// parser reads any userinfo as part of the path. So [Redacted] hides a
+// password in such a URL as it does in a URL that does not parse.
 //
 // A password that starts with "/", "?" or "#" parses, but as a host with
 // an empty port and then a path, query or fragment. Get refuses a URL
-// with no password whose host ends in a colon when an "@" follows the
-// host, and it sends no request, since the request would carry that
-// password to a host named after the user. A password that starts with
+// without a password whose host ends in a colon when an "@" follows the
+// host. A request for such a URL carries that password to a host named
+// after the user, so Get does not send one. A password that starts with
 // digits and then one of those delimiters parses as a host with a valid
-// port, so Get cannot tell it from a URL with an "@" in its path and
-// names the URL as written. A password that holds an "@" and later one
-// of those delimiters parses as a shorter password and a host named after
-// the text between them. Get cannot tell it from a URL with a password
-// and an "@" in its path, so it sends the request to that host, and its
-// errors name the URL as [Redacted] spells it. When that request fails,
-// the error omits the reason, since the reason can name the host, as a
-// failed DNS lookup does. When ctx has ended, the error wraps the
+// port. Get cannot tell such a URL from a URL with an "@" in its path,
+// so it names the URL as written.
+//
+// A password that holds an "@" and later one of those delimiters parses
+// as a shorter password and a host named after the text between them.
+// Get cannot tell such a URL from a URL with a password and an "@" in
+// its path. So it sends the request to that host, and its errors name
+// the URL as [Redacted] spells it. When that request fails, the error
+// omits the reason, because the reason can name the host, as the error
+// of a failed DNS lookup does. When ctx has ended, the error wraps the
 // context's error in place of the reason.
 func Get(ctx context.Context, client *http.Client, rawURL string, limit int) ([]byte, error) {
 	u, err := url.Parse(rawURL)
@@ -162,8 +165,8 @@ func Get(ctx context.Context, client *http.Client, rawURL string, limit int) ([]
 
 // parsePrefix returns the start of an error about a URL that [Get] refuses
 // before it sends a request. It quotes rawURL as [Redacted] spells it when
-// rawURL starts with http:// or https://, since then the first "://" ends
-// the scheme and [Redacted] finds any password after it.
+// rawURL starts with http:// or https://, because then the first "://"
+// ends the scheme and [Redacted] finds any password after it.
 func parsePrefix(rawURL string) string {
 	if !IsHTTPURL(rawURL) {
 		return "parse URL"
@@ -172,9 +175,10 @@ func parsePrefix(rawURL string) string {
 	return fmt.Sprintf("parse URL %q", Redacted(rawURL))
 }
 
-// reason returns the reason err reports without the URL a [*url.Error]
-// quotes around it, which carries the userinfo as the caller wrote it.
-// The reason names the part of the URL it rejected, never the whole.
+// reason returns the reason that err reports, without the URL that a
+// [*url.Error] quotes around it. That URL carries the userinfo as the
+// caller wrote it. The reason names the part of the URL it rejected, and
+// not the whole URL.
 func reason(err error) error {
 	if urlErr, ok := errors.AsType[*url.Error](err); ok {
 		return urlErr.Err
@@ -184,11 +188,11 @@ func reason(err error) error {
 }
 
 // IsHTTPURL reports whether rawURL starts with http:// or https://, in
-// any letter case. The schema loaders fetch only such a URL, and the
-// SchemaStore catalog keeps only entries whose URL passes, so no catalog
-// URL fails the loaders' scheme check. IsHTTPURL does not parse rawURL,
-// so [Get] can still refuse a URL that passes, such as one that does not
-// parse.
+// any letter case. The schema loaders fetch only such a URL. The
+// SchemaStore catalog keeps only entries whose URL passes, so every
+// catalog URL passes the loaders' scheme check. IsHTTPURL does not parse
+// rawURL, so [Get] can still refuse a URL that passes, such as one that
+// does not parse.
 func IsHTTPURL(rawURL string) bool {
 	for _, prefix := range []string{"http://", "https://"} {
 		if len(rawURL) >= len(prefix) && strings.EqualFold(rawURL[:len(prefix)], prefix) {
@@ -201,9 +205,10 @@ func IsHTTPURL(rawURL string) bool {
 
 // Redacted returns rawURL with any password in its userinfo replaced by
 // "xxxxx", for use in messages. It keeps every other byte as written,
-// unlike [url.URL.Redacted], which re-encodes the URL. A string that
-// carries no password comes back unchanged, so a name that is not a URL
-// keeps its spelling.
+// unlike [url.URL.Redacted], which re-encodes the URL. A string without a
+// password comes back unchanged, so a name that is not a URL keeps its
+// spelling.
+//
 // Redacted replaces a wider span in a URL that does not parse and in an
 // http or https URL with an empty host. It does the same in a URL whose
 // host ends in a colon when an "@" follows the host, and in a URL with a
@@ -213,8 +218,8 @@ func IsHTTPURL(rawURL string) bool {
 // after an "@" in the password. It can also cover text that is not a
 // password, such as a port or a host and path before an "@" in the path.
 // A password that starts with digits and then one of those delimiters
-// parses as a host with a valid port, so Redacted cannot tell it from a
-// URL with an "@" in its path and returns it unchanged.
+// parses as a host with a valid port. Redacted cannot tell such a URL
+// from a URL with an "@" in its path, so it returns the URL unchanged.
 func Redacted(rawURL string) string {
 	u, err := url.Parse(rawURL)
 
@@ -238,7 +243,7 @@ func redacted(u *url.URL, err error, rawURL string) string {
 
 // splitsPassword reports whether u, parsed from rawURL, can hold part of
 // a password in its host and path. The parser splits userinfo at the
-// last "@" before the first "/", "?" or "#", so a password with an "@"
+// last "@" before the first "/", "?" or "#". So a password with an "@"
 // and then one of those delimiters parses as a shorter password, and its
 // tail lands in the host and path. A password and a later "@" mark that
 // case.
@@ -250,16 +255,16 @@ func splitsPassword(u *url.URL, rawURL string) bool {
 
 // namesNoHost reports whether u, parsed from rawURL, is an http or https
 // URL with an empty host, as when a third slash follows the scheme. The
-// parser then reads any userinfo as part of the path, and no request can
-// reach the URL. A file URL also has an empty host, so the check skips
-// any URL that [IsHTTPURL] rejects.
+// parser then reads any userinfo as part of the path, and a request
+// cannot reach the URL. A file URL also has an empty host, so the check
+// skips any URL that [IsHTTPURL] rejects.
 func namesNoHost(u *url.URL, rawURL string) bool {
 	return u.Host == "" && IsHTTPURL(rawURL)
 }
 
 // atAfterAuthority reports whether rawURL holds an "@" after its
-// authority, which ends at the first "/", "?" or "#" after "://" or a
-// leading "//".
+// authority. The authority ends at the first "/", "?" or "#" after "://"
+// or a leading "//".
 func atAfterAuthority(rawURL string) bool {
 	start, ok := authorityStart(rawURL)
 	if !ok {
@@ -274,13 +279,13 @@ func atAfterAuthority(rawURL string) bool {
 
 // hidesPassword reports whether u, parsed from rawURL, can hide a password
 // the parser did not read as one. The parser reads "user:/pass@host" as the
-// host "user:" with an empty port and then the path "/pass@host", and it
+// host "user:" with an empty port and then the path "/pass@host". It
 // reads a leading "?" or "#" in the password the same way. A username can
 // hold an unencoded "@", so "jane@corp.com:/pass@host" reads as the user
-// "jane" and the host "corp.com:". So a URL with no password in its
-// userinfo, a host that ends in a colon, and an "@" after "://" or a
-// leading "//" can hold a password. An authority seldom ends in an empty
-// port, so the check seldom flags a URL that holds no password.
+// "jane" and the host "corp.com:". So a URL can hide a password when its
+// userinfo lacks a password, its host ends in a colon, and it holds an
+// "@" after "://" or a leading "//". An authority seldom ends in an empty
+// port, so the check seldom flags a URL without a password.
 func hidesPassword(u *url.URL, rawURL string) bool {
 	if _, ok := u.User.Password(); ok || !strings.HasSuffix(u.Host, ":") {
 		return false
@@ -292,12 +297,12 @@ func hidesPassword(u *url.URL, rawURL string) bool {
 }
 
 // redactSpan returns rawURL with everything from the first colon after
-// "://" or a leading "//" to the last "@" replaced by "xxxxx", and it
+// "://" or a leading "//" to the last "@" replaced by "xxxxx". It also
 // reports whether it found such a span. The span does not stop at the
-// first "/", "?" or "#", because a password can hold one of them. In a
-// URL that parses with a password and holds no "@" after its authority,
-// the span is the password alone, since [url.Parse] also splits the
-// userinfo at the last "@" and the password at the first colon.
+// first "/", "?" or "#", because a password can hold one of them.
+// [url.Parse] also splits the userinfo at the last "@" and the password
+// at the first colon. So in a URL that parses with a password and does
+// not hold an "@" after its authority, the span is the password alone.
 func redactSpan(rawURL string) (string, bool) {
 	start, ok := authorityStart(rawURL)
 	if !ok {
@@ -321,9 +326,9 @@ func redactSpan(rawURL string) (string, bool) {
 
 // authorityStart returns the index at which the authority of rawURL
 // starts, and it reports whether rawURL has one. [url.Parse] reads an
-// authority after a leading "//" in a URL with no scheme, and after a
-// scheme and "://" otherwise. A scheme holds no colon, so the first
-// "://" ends it.
+// authority after a leading "//" in a URL without a scheme, and after a
+// scheme and "://" otherwise. A scheme does not hold a colon, so the
+// first "://" ends it.
 func authorityStart(rawURL string) (int, bool) {
 	if strings.HasPrefix(rawURL, "//") {
 		return len("//"), true
