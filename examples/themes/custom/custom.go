@@ -45,13 +45,14 @@ func main() {
 	ctx := context.Background()
 	p := printer.New()
 
-	// FromColors returns an error for a token that style.Parse rejects, but
-	// that error does not name a place in the file. The validToken rule
-	// checks every token during the decode, so the decode reports each bad
-	// token where the file holds it. Key selects the keys of the tokens
-	// rather than their values. Each passes when its path selects no Node,
-	// so it cannot catch a missing mode. The knownMode rule checks the whole
-	// file instead.
+	// A theme.Token rejects a spec that style.Parse rejects when it decodes.
+	// The validators run before the decoder, and a validator that fails ends
+	// the decode before the decoder reads the tokens. The validToken rule
+	// thus decodes each token. The decode then reports the problems of the
+	// tokens together with those of the colors, the kinds, and the mode.
+	// Key selects the keys of the tokens rather than their values. Each
+	// passes when its path selects no Node, so it cannot catch a missing
+	// mode. The knownMode rule checks the whole file instead.
 	tokenPath := paths.Current().Child("tokens").ChildAll()
 	rules := niceyaml.WithValidator(niceyaml.MultiValidator(
 		niceyaml.ValidatorFunc(knownMode),
@@ -197,15 +198,13 @@ func knownKind(ctx context.Context, n *niceyaml.Node) error {
 	return niceyaml.NewError("unknown kind")
 }
 
-// validToken rejects a token that style.Parse rejects.
+// validToken rejects a token that style.Parse rejects, through the decode
+// into a [theme.Token].
 func validToken(ctx context.Context, n *niceyaml.Node) error {
-	token, err := n.Decode[string](ctx)
+	_, err := n.Decode[theme.Token](ctx)
 	if err != nil {
 		return fmt.Errorf("decode token: %w", err)
 	}
 
-	// Invalid returns nil for a token that style.Parse accepts.
-	_, err = style.Parse(token)
-
-	return niceyaml.Invalid(err)
+	return nil
 }

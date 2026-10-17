@@ -65,7 +65,34 @@ type Colors struct {
 // style. The "nobold", "noitalic", and "nounderline" keywords turn off an
 // attribute that the style beneath sets. In [style.Parse], those keywords
 // leave the attribute unset instead.
+//
+// A Token decodes from text, such as a YAML or JSON string, through
+// [Token.UnmarshalText], which rejects a spec that [style.Parse] rejects.
+// A program that decodes a theme file into a map of Tokens thus gets the
+// error from the decode.
+//
+// A type that holds a Token reads text. A niceyaml decode into such a type
+// thus holds the aliases of the whole document to the bound on the text
+// they repeat, as the Limits section of [go.jacobcolvin.com/niceyaml]
+// describes. When the document holds an alias, the decode counts that
+// text once for the whole document. A config loader whose documents repeat
+// large anchors decodes the tokens as strings and converts them to Tokens,
+// which [FromColors] checks.
 type Token string
+
+// UnmarshalText sets t to text when [style.Parse] accepts it. Otherwise it
+// returns the error from style.Parse, which wraps [style.ErrInvalidColor]
+// or [style.ErrUnknownKeyword], and leaves t as it was.
+func (t *Token) UnmarshalText(text []byte) error {
+	_, err := style.Parse(string(text))
+	if err != nil {
+		return err //nolint:wrapcheck // The doc names the error of style.Parse.
+	}
+
+	*t = Token(text)
+
+	return nil
+}
 
 // FromColors creates a new [Theme] named name, whose [Theme.Styles]
 // returns the styles that [Derive] builds from c and tokens. The theme
@@ -75,7 +102,16 @@ type Token string
 // FromColors checks each token when it creates the theme. It returns an
 // error for each token that [style.Parse] rejects, sorted by kind and
 // joined with [errors.Join]. Each error names the kind of its token and
-// wraps the error from style.Parse.
+// wraps the error from style.Parse. A decoder that calls
+// [Token.UnmarshalText], such as niceyaml, go-yaml, or encoding/json,
+// rejects such a token earlier, when it decodes the theme file. A
+// niceyaml decode also reports where the file holds the token.
+//
+// A Token that a program sets any other way reaches FromColors unchecked,
+// and the error for it does not name a place in a file. Such Tokens
+// include one converted from a string with theme.Token(spec), and one set
+// by a decoder that does not call UnmarshalText, such as mapstructure
+// without its TextUnmarshallerHookFunc.
 func FromColors(name string, c Colors, tokens map[kind.Kind]Token) (Theme, error) {
 	err := checkTokens(tokens)
 	if err != nil {
@@ -176,7 +212,9 @@ func fromColors(name string, c Colors, tokens map[kind.Kind]Token) Theme {
 //
 // Derive returns an error for each token that [style.Parse] rejects,
 // sorted by kind and joined with [errors.Join]. Each error names the kind
-// of its token and wraps the error from style.Parse.
+// of its token and wraps the error from style.Parse. A decoder that calls
+// [Token.UnmarshalText] rejects such a token earlier, as [FromColors]
+// describes.
 func Derive(c Colors, tokens map[kind.Kind]Token) (style.Styles, error) {
 	err := checkTokens(tokens)
 	if err != nil {

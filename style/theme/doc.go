@@ -81,6 +81,11 @@
 //		kind.LiteralString: "#9ccc65",
 //	})
 //
+// A program that reads a theme from a file decodes its tokens into a map
+// of Tokens and calls FromColors. A Token rejects a spec that style.Parse
+// rejects when it decodes, so a niceyaml decode reports each bad token
+// where the file holds it.
+//
 // [Catalog.With] adds themes to a catalog. It returns a new Catalog and
 // leaves the receiver as it was. A program adds its theme to the built-in
 // catalog:

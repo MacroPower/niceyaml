@@ -1,6 +1,7 @@
 package theme_test
 
 import (
+	"encoding/json"
 	"image/color"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -342,6 +344,74 @@ func TestDerive_InvalidToken(t *testing.T) {
 			assert.Equal(t, err, panicked)
 		})
 	}
+}
+
+func TestToken_UnmarshalText(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err  error
+		text string
+		want theme.Token
+	}{
+		"attributes and colors": {text: "bold #ff0000 bg:#000", want: "bold #ff0000 bg:#000"},
+		"empty":                 {text: "", want: ""},
+		"malformed color":       {text: "#zzz", err: style.ErrInvalidColor},
+		"unknown keyword":       {text: "sparkly", err: style.ErrUnknownKeyword},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// Each case starts from a spec of its own, so a failing case
+			// shows that it leaves the Token in place.
+			got := theme.Token("italic")
+
+			err := got.UnmarshalText([]byte(tc.text))
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				assert.Equal(t, theme.Token("italic"), got)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestToken_Decode(t *testing.T) {
+	t.Parallel()
+
+	// A theme file that decodes into a map of Tokens fails the decode on a
+	// spec that style.Parse rejects.
+	t.Run("JSON", func(t *testing.T) {
+		t.Parallel()
+
+		var tokens map[kind.Kind]theme.Token
+
+		err := json.Unmarshal([]byte(`{"nameTag":"bolder"}`), &tokens)
+		require.ErrorIs(t, err, style.ErrUnknownKeyword)
+	})
+
+	t.Run("YAML document", func(t *testing.T) {
+		t.Parallel()
+
+		type file struct {
+			Tokens map[kind.Kind]theme.Token `yaml:"tokens"`
+		}
+
+		source := niceyaml.NewSourceFromString(
+			"tokens:\n  comment: \"italic #7a8590\"\n  nameTag: \"bolder\"\n",
+			niceyaml.WithName("theme.yaml"),
+		)
+
+		_, err := source.Decode[file](t.Context())
+		require.ErrorIs(t, err, style.ErrUnknownKeyword)
+		assert.Equal(t, "$.tokens.nameTag", yamltest.PathOf(t, yamltest.RequireError(t, err)).String())
+	})
 }
 
 func TestFromColors(t *testing.T) {
