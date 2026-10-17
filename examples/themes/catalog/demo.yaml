@@ -1,0 +1,13 @@
+---
+# The board by the door of Café Yamüll.
+restaurant:
+  name: ☕ Café Yamüll
+  seats: 24
+  terrace: true
+
+menu:
+  fika:
+    - item: "Kanelbulle"
+      price: 45
+    - item: "Semla"
+      price: 65

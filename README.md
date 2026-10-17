@@ -94,6 +94,12 @@ A [`line.View`][niceyaml/line.View] carries the notes and marks of one rendering
 
 Views do not depend on the printer. The renderer example writes an HTML renderer from the segments, flags, and annotations of a view. It renders a diff with the same function.
 
+### Themes
+
+- [examples/themes/catalog](examples/themes/catalog)
+
+The catalog example looks up a [theme][niceyaml/style/theme] by name for a `-theme` flag and sets the color profile for a `-color` flag.
+
 ### Diffs
 
 - [examples/diffs](examples/diffs)
