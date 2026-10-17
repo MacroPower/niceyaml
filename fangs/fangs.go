@@ -16,8 +16,8 @@ import (
 )
 
 // ErrorHandler is the [fang.ErrorHandler] that [NewErrorHandler] returns
-// with no options, so [*go.jacobcolvin.com/niceyaml.SourceError] values
-// render with a [printer.Printer] from [printer.New].
+// for an empty option list, so [*go.jacobcolvin.com/niceyaml.SourceError]
+// values render with a [printer.Printer] from [printer.New].
 //
 //nolint:gocritic // hugeParam: required by [fang.ErrorHandler] signature.
 func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
@@ -65,15 +65,15 @@ func newConfig(opts []Option) config {
 }
 
 // WithPrinter is an [Option] that sets the [*printer.Printer] that renders
-// errors through [printer.Printer.PrintReport]. The printer's width, set
-// with [printer.WithWrapWidth], is the width the output of the handler
-// fits, and its styles color the highlighted locations.
+// errors through [printer.Printer.PrintReport]. [printer.WithWrapWidth]
+// sets the width of the printer, and the output of the handler fits that
+// width. The styles of the printer color the highlighted locations.
 // [WithExcerptOptions] sets the context lines around each location and
 // how much of a long line an excerpt shows.
 //
 // The handler indents every line by [Indent] columns and wraps what
-// [printer.Printer.PrintReport] renders to the width less those columns,
-// so the output fits a terminal of that width. To fit a terminal w
+// [printer.Printer.PrintReport] renders to the width less those columns.
+// The output then fits a terminal of that width. To fit a terminal w
 // columns wide, set the width to w, as the [NewErrorHandler] example
 // does.
 func WithPrinter(p *printer.Printer) Option {
@@ -83,15 +83,15 @@ func WithPrinter(p *printer.Printer) Option {
 }
 
 // WithExcerptOptions is an [Option] that sets the [niceyaml.ExcerptOption]
-// values the handler builds the report of each error with:
-// [niceyaml.WithContextLines] sets the context lines around each
-// location, and [niceyaml.WithExcerptWidth] sets how much of a long line
-// an excerpt shows. The styled output and the plain output of the
-// handler draw one report, so both show the same lines. A later call
-// replaces the options of an earlier one.
+// values that the handler builds the report of each error with.
+// [niceyaml.WithContextLines] sets the context lines around each location,
+// and [niceyaml.WithExcerptWidth] sets how much of a long line an excerpt
+// shows. The styled output and the plain output of the handler draw one
+// report, so both show the same lines. A later call replaces the options
+// of an earlier one.
 //
 // WithExcerptOptions copies the options it gets, so a caller that edits
-// the slice it passed changes nothing in the handler.
+// the slice it passed does not change the handler.
 func WithExcerptOptions(opts ...niceyaml.ExcerptOption) Option {
 	opts = slices.Clone(opts)
 
@@ -102,7 +102,8 @@ func WithExcerptOptions(opts ...niceyaml.ExcerptOption) Option {
 
 // NewErrorHandler creates a new [fang.ErrorHandler] that renders
 // [*go.jacobcolvin.com/niceyaml.SourceError] values with their annotated
-// source, using opts for the [printer.Printer]. To fit the output in a
+// source. Each option in opts configures one setting of the handler, such
+// as the [printer.Printer] it renders with. To fit the output in a
 // terminal that is width columns wide, give the printer that width:
 //
 //	p := printer.New(printer.WithWrapWidth(width))
@@ -113,31 +114,34 @@ func WithExcerptOptions(opts ...niceyaml.ExcerptOption) Option {
 //
 // The handler writes the error header, then what
 // [printer.Printer.PrintReport] renders for the [niceyaml.ErrorReport] of
-// err, which the handler builds with the options [WithExcerptOptions]
-// sets. That output starts with the message as a tree, with the context
-// its wrappers added in front and a connector before each error below
-// another. The excerpt of each [*go.jacobcolvin.com/niceyaml.SourceError]
-// in the error's tree follows, so a joined error annotates each failure
-// it holds. The warnings in the error, such as the ones that
-// [niceyaml.Warnings.Report] puts beside the errors of a call, render as
-// the errors do. Each has the "warning:" label after its position and its
-// location marked in the warning styles of the printer. The handler
-// indents each line by [Indent] columns and ends the output with a blank
-// line. An error with no SourceError in its tree renders as that tree
-// alone, without the line breaks that end it, such as the one after the
-// suggestions Cobra lists for an unknown command.
+// err. The handler builds that report with the options that
+// [WithExcerptOptions] sets. The output starts with the message as a tree,
+// with the context its wrappers added in front and a connector before each
+// error below another. The excerpt of each
+// [*go.jacobcolvin.com/niceyaml.SourceError] in the error's tree follows,
+// so a joined error annotates each failure it holds.
+//
+// The warnings in the error render as the errors do. They include the
+// warnings that [niceyaml.Warnings.Report] puts beside the errors of a
+// call. Each has the "warning:" label after its position and its
+// location marked in the warning styles of the printer.
+//
+// The handler indents each line by [Indent] columns and ends the output
+// with a blank line. An error without a SourceError in its tree renders as
+// that tree alone, without the line breaks that end it. One such line
+// break follows the suggestions that Cobra lists for an unknown command.
 //
 // Fang hands the handler a [*colorprofile.Writer] that holds the color
-// profile of the error stream. When that profile has no color, as in a
-// pipe, a file, or a terminal with NO_COLOR set, the handler writes what
-// [niceyaml.FormatError] renders with the same options in place of the
-// PrintReport output. The carets of FormatError then mark each range
-// that color marks in a terminal, and its lines do not wrap.
-// A writer of any other type gets the PrintReport output.
+// profile of the error stream. When that profile does not support color,
+// as in a pipe, a file, or a terminal with NO_COLOR set, the handler
+// replaces the PrintReport output. It writes what [niceyaml.FormatError]
+// renders with the same options. The carets of FormatError then mark each
+// range that color marks in a terminal, and its lines do not wrap. A
+// writer of any other type gets the PrintReport output.
 //
-// Unlike [fang.DefaultErrorHandler], which wraps errors in a lipgloss style
-// that can break multi-line output, this handler styles only the error
-// header and leaves the rendered lines intact.
+// [fang.DefaultErrorHandler] wraps errors in a lipgloss style that breaks
+// multi-line output. This handler styles only the error header and leaves
+// the rendered lines intact.
 func NewErrorHandler(opts ...Option) fang.ErrorHandler {
 	cfg := newConfig(opts)
 
@@ -182,10 +186,11 @@ func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 	}
 }
 
-// render returns err as the handler writes it to w: what
+// render returns err as the handler writes it to w. It returns what
 // [niceyaml.FormatError] renders when w is a [*colorprofile.Writer] whose
-// profile has no color, and what [printer.Printer.PrintReport] renders
-// otherwise. Both draw the report the excerpt options of cfg build.
+// profile does not support color, and what [printer.Printer.PrintReport]
+// renders otherwise. Both draw the report that the excerpt options of cfg
+// build.
 func render(w io.Writer, err error, cfg config) string {
 	if cw, ok := w.(*colorprofile.Writer); ok && cw.Profile <= colorprofile.ASCII {
 		return niceyaml.FormatError(err, cfg.excerpt...)
@@ -205,12 +210,12 @@ func isBound(err error) bool {
 	return false
 }
 
-// ignoreN discards the result of a write to the error writer. A handler that
-// cannot reach the writer has nowhere to report that.
+// ignoreN discards the result of a write to the error writer. The handler
+// reports only to that writer, so it cannot report a write that fails.
 func ignoreN(_ int, _ error) {}
 
 // argCountError matches the messages of Cobra's argument-count validators,
-// such as "accepts at most 2 arg(s), received 3".
+// such as `accepts at most 2 arg(s), received 3`.
 var argCountError = regexp.MustCompile(
 	`^(accepts (at most \d+|between \d+ and \d+|\d+)|requires at least \d+) arg\(s\)`,
 )
@@ -219,10 +224,11 @@ var argCountError = regexp.MustCompile(
 // patterns cover Cobra's flag parser, its command lookup, its argument
 // validators, its required-flag check, and its flag groups. They follow
 // Cobra's exact wording, so an application error that opens with a word
-// such as "accepts" gets no usage hint. Cobra never binds an error to a
-// source, so an error that holds a binding gets no usage hint either, even
-// when its message opens with a source name that matches a pattern.
-// This is a workaround until Cobra exposes a proper usage error type.
+// such as "accepts" does not get a usage hint. Cobra never binds an error
+// to a source. So an error that holds a binding does not get a usage hint
+// either, even when its message opens with a source name that matches a
+// pattern. These patterns are a workaround until Cobra exposes a usage
+// error type.
 // See: https://github.com/spf13/cobra/pull/2266
 func isUsageError(err error) bool {
 	if err == nil {

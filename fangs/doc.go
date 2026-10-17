@@ -3,9 +3,9 @@
 //
 // # Error Handling
 //
-// [fang]'s default error handler wraps the entire error message in a lipgloss
-// style, which breaks multi-line output such as the source excerpt and
-// annotations of a niceyaml error.
+// The default error handler of [fang] wraps the entire error message in a
+// lipgloss style. That style breaks multi-line output, such as the source
+// excerpt and annotations of a niceyaml error.
 //
 // [ErrorHandler] styles only the error header and prints the message as
 // [printer.Printer.PrintError] renders it, indented by [Indent] columns,
@@ -15,9 +15,9 @@
 //	    fang.WithErrorHandler(fangs.ErrorHandler),
 //	)
 //
-// When the error stream has no color, as in a pipe or under NO_COLOR, the
-// handler prints the plain text of [niceyaml.FormatError] instead, whose
-// carets mark each range.
+// When the error stream does not support color, as in a pipe or under
+// NO_COLOR, the handler prints the plain text of [niceyaml.FormatError]
+// instead. Carets in that text mark each range.
 //
 // # Color Schemes
 //
@@ -30,11 +30,11 @@
 //	    fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(theme.Charm)),
 //	)
 //
-// Help output draws most of its text on the terminal's own background, and
-// each theme targets one background, so a dark theme's pale text is hard to
-// read on a light terminal. [LightDarkColorSchemeFunc] takes one theme for
-// each background and picks the one that matches the background fang
-// detects:
+// Help output draws most of its text on the terminal's own background.
+// Each theme targets one background, so the pale text of a dark theme is
+// hard to read on a light terminal. [LightDarkColorSchemeFunc] takes one
+// theme for each background and picks the one that matches the background
+// fang detects:
 //
 //	light, _ := theme.Builtin().Get("github")
 //	err := fang.Execute(ctx, rootCmd,
