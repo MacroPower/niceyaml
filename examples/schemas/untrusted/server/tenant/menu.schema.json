@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MenuItem",
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "price": { "type": "number" },
+    "vegan": { "type": "boolean" }
+  },
+  "required": ["name", "price"]
+}

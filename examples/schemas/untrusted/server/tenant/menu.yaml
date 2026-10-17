@@ -1,0 +1,16 @@
+---
+# yaml-language-server: $schema=./menu.schema.json
+name: Kanelbulle
+price: 42.50
+vegan: false
+---
+name: Semla
+price: -5
+---
+# yaml-language-server: $schema=../private/wholesale.schema.json
+name: Prinsesstårta
+price: 70
+---
+# yaml-language-server: $schema=https://cdn.example.org/menu.json
+name: Kladdkaka
+price: 55
