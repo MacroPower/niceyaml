@@ -13,8 +13,8 @@ import (
 
 var (
 	// ErrInvalidColor reports a color value that is not a valid hex color.
-	// A token carrying a bg: or border: prefix or a leading # names a
-	// color, so [Parse] reports a malformed one with this rather than
+	// Tokens with a bg: or border: prefix or a leading # name a color, so
+	// [Parse] reports a malformed one with ErrInvalidColor rather than
 	// [ErrUnknownKeyword].
 	ErrInvalidColor = errors.New("invalid color")
 	// ErrUnknownKeyword reports a token that is neither a known keyword nor
@@ -27,7 +27,8 @@ var (
 // The input string contains space-separated tokens that specify colors and
 // modifiers. See the package documentation for the full format specification.
 //
-// Returns an error if any token is invalid.
+// Parse returns an error that wraps [ErrInvalidColor] or [ErrUnknownKeyword]
+// when a token is invalid.
 func Parse(s string) (lipgloss.Style, error) {
 	style := lipgloss.NewStyle()
 
@@ -80,7 +81,7 @@ func MustParse(s string) lipgloss.Style {
 
 // Encode encodes a [lipgloss.Style] to a Pygments-style string.
 //
-// The output contains space-separated tokens representing the style's
+// The output contains space-separated tokens that represent the style's
 // properties. Encode writes colors as lowercase hex values.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
@@ -172,7 +173,7 @@ func applyToken(style lipgloss.Style, token string) (lipgloss.Style, error) {
 	return style.Foreground(lipgloss.Color(token)), nil
 }
 
-// isValidColor checks if a string is a valid hex color.
+// isValidColor reports whether s is a hex color in the #rgb or #rrggbb form.
 func isValidColor(s string) bool {
 	if !strings.HasPrefix(s, "#") {
 		return false
@@ -192,12 +193,13 @@ func isValidColor(s string) bool {
 	return true
 }
 
-// isHexDigit checks if a rune is a valid hex digit.
+// isHexDigit reports whether c is a hex digit.
 func isHexDigit(c rune) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
-// isColorSet checks if a color is set (not nil and not NoColor).
+// isColorSet reports whether c is set, that is, neither nil nor a
+// [lipgloss.NoColor].
 func isColorSet(c color.Color) bool {
 	if c == nil {
 		return false
@@ -209,7 +211,7 @@ func isColorSet(c color.Color) bool {
 }
 
 // colorToHex converts a [color.Color] to a hex string. It returns an empty
-// string for a color that is not set or fully transparent.
+// string for a color that is not set or that is fully transparent.
 func colorToHex(c color.Color) string {
 	if !isColorSet(c) {
 		return ""

@@ -14,8 +14,8 @@ import (
 var defaultStyles = sync.OnceValue(buildDefault)
 
 // Default returns the [Styles] a printer renders with unless a caller picks
-// a theme. It uses the CharmTone palette and sets no surface, so the text
-// shows the terminal's own background.
+// a theme. It uses the CharmTone palette and does not set a surface, so the
+// text shows the terminal's own background.
 // [go.jacobcolvin.com/niceyaml/style/theme.Charm] paints the same palette
 // on a Pepper surface.
 //

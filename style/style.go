@@ -15,10 +15,10 @@ var emptyStyle = lipgloss.NewStyle()
 
 // Styler retrieves the style for each [kind.Kind].
 //
-// A renderer asks for each kind as it renders, and one such as
-// [go.jacobcolvin.com/niceyaml/printer.Printer] caches the styles it
-// blends for overlays by the kinds involved, so Style should return the
-// same style for a kind for the life of the value.
+// A renderer asks for each kind while it renders. Some renderers, such as
+// [go.jacobcolvin.com/niceyaml/printer.Printer], cache the styles they
+// blend for overlays by the kinds involved. Style should therefore return
+// the same style for a kind for the life of the value.
 //
 // See [Styles] for an implementation.
 type Styler interface {
@@ -27,15 +27,16 @@ type Styler interface {
 
 // Styles resolves each [kind.Kind] to the [lipgloss.Style] it renders with.
 //
-// A Styles value holds a base style plus explicit overrides, and resolves every
-// predefined kind through the inheritance hierarchy when it is built, so
-// [Styles.Style] is a map lookup. A custom kind, such as one for an
-// overlay, resolves through the parent [Inherit] gives it, so it takes the
-// style of a predefined kind under any theme, and one with no parent
-// resolves to the base style, as [kind.Parent] places it under [kind.Text].
+// A Styles value holds a base style plus explicit overrides. [New] and
+// [Styles.With] resolve every predefined kind through the inheritance
+// hierarchy when they build the value, so [Styles.Style] is a map lookup.
+// A custom kind, such as one for an overlay, resolves through the parent
+// [Inherit] gives it, so it takes the style of a predefined kind under any
+// theme. A custom kind without such a parent resolves to the base style,
+// because [kind.Parent] places it under [kind.Text].
 //
 // A Styles value can also hold a surface, the background color that
-// [WithSurface] sets. Every kind whose own style sets no background
+// [WithSurface] sets. Every kind whose own style does not set a background
 // resolves with the surface behind it. A theme thus paints one surface
 // behind all of its text, and kinds with a fill of their own, such as
 // [kind.GenericHighlight], keep that fill.
@@ -58,18 +59,18 @@ type Option func(*config)
 
 // config holds the settings an [Option] configures. An option takes it in
 // place of the [Styles] that embeds it, so only [New] and [Styles.With]
-// can apply one, and each runs it on maps it just made.
+// can apply one. Each runs it on new maps of its own.
 type config struct {
 	overrides map[kind.Kind]*lipgloss.Style
 	parents   map[kind.Kind]kind.Kind
-	// The background behind every kind that sets none. Nil leaves the
-	// terminal's own background there.
+	// The background behind every kind that does not set one. Nil leaves
+	// the terminal's own background there.
 	surface color.Color
 }
 
 // Set returns an [Option] that sets the [lipgloss.Style] for a [kind.Kind].
-// Kinds below it in the hierarchy inherit it unless a [Set] on the kind
-// itself or on a nearer ancestor overrides it.
+// Kinds below that kind in the hierarchy inherit the style unless a [Set]
+// on the kind itself or on a nearer ancestor overrides it.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func Set(s kind.Kind, ls lipgloss.Style) Option {
@@ -79,11 +80,11 @@ func Set(s kind.Kind, ls lipgloss.Style) Option {
 }
 
 // Inherit returns an [Option] that places child under parent in the
-// hierarchy, in place of the parent [kind.Parent] gives it. A child that no
-// [Set] names then resolves to the style of parent, or of the closest set
-// ancestor above it. A program that names a kind of its own, such as one
-// for an overlay, gives it the look of a predefined kind under any theme
-// this way, with no color of its own:
+// hierarchy, in place of the parent [kind.Parent] gives it. When none of
+// the [Set] options names child, child resolves to the style of parent, or
+// of the closest set ancestor above it. With Inherit, a program gives a
+// kind of its own, such as one for an overlay, the look of a predefined
+// kind under any theme, without a color of its own:
 //
 //	styles := theme.Charm.Styles().With(
 //		style.Inherit(kind.Kind("mine"), kind.GenericHighlight),
@@ -100,12 +101,12 @@ func Inherit(child, parent kind.Kind) Option {
 }
 
 // WithSurface returns an [Option] that sets the surface of a [Styles]
-// value, the background behind every kind whose own style sets none.
-// [Styles.Style] returns such a kind with bg as its background. Kinds
+// value, the background behind every kind whose own style does not set
+// one. [Styles.Style] returns such a kind with bg as its background. Kinds
 // with a background of their own, such as highlights and headings, keep
-// it. A nil bg, or a [lipgloss.NoColor], sets no surface, so every kind
-// without a background of its own shows the terminal's own background. A
-// later WithSurface replaces the surface.
+// it. A nil bg, or a [lipgloss.NoColor], removes the surface, so every
+// kind without a background of its own shows the terminal's own
+// background. A later WithSurface replaces the surface.
 //
 // To remove the surface of a theme, pass nil:
 //
@@ -127,10 +128,10 @@ func WithSurface(bg color.Color) Option {
 // New creates a new [Styles] value with inheritance resolved.
 //
 // [kind.Text] uses the base style, and every other kind inherits it.
-// Use [Set] options to override specific kinds; child kinds inherit from
+// Use [Set] options to override specific kinds. Child kinds inherit from
 // their closest set ancestor. Use [Inherit] to place a custom kind under
 // a predefined one, and [WithSurface] to paint one background behind every
-// kind that sets none.
+// kind that does not set one.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func New(base lipgloss.Style, opts ...Option) Styles {
@@ -150,15 +151,16 @@ func New(base lipgloss.Style, opts ...Option) Styles {
 
 // resolve walks the hierarchy for every predefined kind and every kind an
 // option names and returns the map of kind to the style of its closest set
-// ancestor. The parents set with [Inherit] take precedence over the
+// ancestor. The parents that [Inherit] sets take precedence over the
 // predefined hierarchy, and a walk that revisits a kind ends at
-// [kind.Text]. Only those parents can form a cycle, since the predefined
-// hierarchy ends at [kind.Text], so a walk records the kinds it visits
-// only when some are set. The overrides must hold [kind.Text].
+// [kind.Text]. Only those parents can form a cycle, because the predefined
+// hierarchy ends at [kind.Text]. A walk therefore records the kinds it
+// visits only when some are set. The overrides must hold [kind.Text].
 //
-// A style that sets no background resolves with the surface behind it,
-// when the value holds one. The overrides keep the styles as the options
-// set them, so a later [WithSurface] replaces the surface of every kind.
+// A style that does not set a background resolves with the surface behind
+// it when the value holds a surface. The overrides keep the styles as the
+// options set them, so a later [WithSurface] replaces the surface of every
+// kind.
 func (s Styles) resolve() map[kind.Kind]*lipgloss.Style {
 	closest := func(st kind.Kind) *lipgloss.Style {
 		var visited map[kind.Kind]bool
@@ -231,23 +233,23 @@ func (s Styles) parent(st kind.Kind) kind.Kind {
 // Style returns the [lipgloss.Style] for the given [kind.Kind].
 //
 // A kind that is neither predefined nor set inherits from its parent as a
-// predefined kind does. [Inherit] names that parent, and for a kind it
-// leaves out, [kind.Parent] gives [kind.Text], so the kind returns the
-// base style. An overlay of a custom kind that no option names therefore
-// layers the base style over the text it covers. An overlay that replaces
-// the style underneath gives that text the colors the base style sets,
-// and one that blends tints the text toward those colors. Where the base
-// style leaves a color unset, as the pygments theme does, the text keeps
-// its own. The text also keeps attributes such as bold, since an overlay
-// cannot turn one off. Use [Inherit] to give such a kind the style of a
-// predefined kind, or [Set] to give it a style of its own. The zero
-// Styles value returns an empty style for every kind.
+// predefined kind does. [Inherit] names that parent. For a kind that
+// [Inherit] leaves out, [kind.Parent] gives [kind.Text], so Style returns
+// the base style. When none of the options names a custom kind, an
+// overlay of that kind layers the base style over the text it covers. An
+// overlay that replaces the style underneath gives that text the colors
+// the base style sets, and one that blends tints the text toward those
+// colors. Where the base style leaves a color unset, as the pygments theme
+// does, the text keeps its own. The text also keeps attributes such as
+// bold, because an overlay cannot turn one off. Use [Inherit] to give such
+// a kind the style of a predefined kind, or [Set] to give it a style of
+// its own. The zero Styles value returns an empty style for every kind.
 //
-// For a kind whose style sets no background, Style returns that style
-// with the surface of [WithSurface] as its background. A [Set] that takes
-// its style from Style keeps that surface as a background of its own, so
-// a later [WithSurface] leaves it in place. Build such a style from one
-// that sets no background to keep the kind on the surface.
+// For a kind whose style does not set a background, Style returns that
+// style with the surface of [WithSurface] as its background. A [Set] that
+// takes its style from Style keeps that surface as a background of its
+// own, so a later [WithSurface] leaves it in place. To keep the kind on
+// the surface, build such a style from one that does not set a background.
 func (s Styles) Style(st kind.Kind) lipgloss.Style {
 	if ls, ok := s.resolved[st]; ok && ls != nil {
 		return *ls
@@ -261,8 +263,8 @@ func (s Styles) Style(st kind.Kind) lipgloss.Style {
 }
 
 // Surface returns the background that [WithSurface] set, or nil when the
-// value has none. Without a surface, every kind that sets no background
-// shows the terminal's own background.
+// value does not have one. Without a surface, every kind that does not set
+// a background shows the terminal's own background.
 func (s Styles) Surface() color.Color {
 	return s.surface
 }
@@ -270,7 +272,8 @@ func (s Styles) Surface() color.Color {
 // With returns a copy of the [Styles] with the given options applied and
 // inheritance resolved again, so overriding a parent kind also changes
 // the children that inherit from it. The copy keeps the surface of the
-// receiver unless an option sets another. The receiver is unchanged.
+// receiver unless an option sets another. With leaves the receiver
+// unchanged.
 func (s Styles) With(opts ...Option) Styles {
 	c := Styles{
 		overrides: make(map[kind.Kind]*lipgloss.Style, len(s.overrides)+len(opts)),
