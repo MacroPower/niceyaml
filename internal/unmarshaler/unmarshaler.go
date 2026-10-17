@@ -70,7 +70,7 @@ var (
 
 // TypeCache holds a value computed once for each type it reads. A type
 // never changes, so every decode shares the values. The zero TypeCache
-// holds no value.
+// does not hold any values.
 type TypeCache[V any] struct {
 	values sync.Map
 }
@@ -90,7 +90,7 @@ func (c *TypeCache[V]) Get(t reflect.Type, compute func(reflect.Type) V) V {
 	return v
 }
 
-// Base returns the type t points to through every pointer on it, since
+// Base returns the type t points to through every pointer on it, because
 // the decoder decodes a pointer as the value it points to.
 func Base(t reflect.Type) reflect.Type {
 	for t.Kind() == reflect.Pointer {
@@ -101,8 +101,8 @@ func Base(t reflect.Type) reflect.Type {
 }
 
 // DecodesItself reports whether go-yaml decodes a value of type t whole,
-// so the fields, elements, or entries of the value need not mirror the
-// document. A type decodes itself through an unmarshaler method of its
+// so the fields, elements, or entries of the value do not have to mirror
+// the document. A type decodes itself through an unmarshaler method of its
 // own, or as a node of the go-yaml ast package, as [IsSyntaxNode]
 // reports. The method set of the pointer holds the methods of both
 // receivers, as the decoder checks it.
@@ -112,11 +112,12 @@ func DecodesItself(t reflect.Type) bool {
 	})
 }
 
-// IsSyntaxNode reports whether t is an [ast.Node] type the go-yaml ast
-// package declares, which the decoder sets to the node it decodes rather
-// than decoding field by field. The tokens of such a node link to every
-// other token of the file. A struct that gets the methods of an
-// [ast.Node] from an embedded field decodes field by field.
+// IsSyntaxNode reports whether t is an [ast.Node] type that the go-yaml
+// ast package declares. The decoder sets a value of such a type to the
+// node it decodes rather than decoding it field by field. The tokens of
+// such a node link to every other token of the file. A struct that gets
+// the methods of an [ast.Node] from an embedded field decodes field by
+// field.
 func IsSyntaxNode(t reflect.Type) bool {
 	return t.PkgPath() == astPackage && reflect.PointerTo(t).Implements(reflect.TypeFor[ast.Node]())
 }
@@ -143,7 +144,8 @@ type ValueDecoder func(ctx context.Context, text []byte, dst any) error
 // The decoder decodes a value of such a type whole, through that
 // function or method, in place of its fields, elements, or entries. A
 // walk that reads a type beside a document thus treats it as a type
-// that decodes itself. The zero value gives no type an unmarshaler.
+// that decodes itself. The zero value does not give any type an
+// unmarshaler.
 type Options struct {
 	// The function of each type, with one entry for each type.
 	custom []custom
@@ -171,22 +173,22 @@ func (o Options) With(t reflect.Type, opt func(ValueDecoder) yaml.DecodeOption) 
 	return o
 }
 
-// Without returns o with no function for the type t, so the decoder reads
-// t as it reads a type that no option names.
+// Without returns o without a function for the type t, so the decoder
+// reads t as it reads a type that the options do not name.
 func (o Options) Without(t reflect.Type) Options {
 	o.custom = slices.DeleteFunc(slices.Clone(o.custom), func(c custom) bool { return c.typ == t })
 
 	return o
 }
 
-// Empty reports whether o gives no type an unmarshaler.
+// Empty reports whether o does not give any type an unmarshaler.
 func (o Options) Empty() bool {
 	return len(o.custom) == 0 && !o.JSON
 }
 
 // YAMLOptions returns the go-yaml options that register the
-// unmarshalers with a decoder, whose functions read their values through
-// decode.
+// unmarshalers with a decoder. The functions of those options read their
+// values through decode.
 func (o Options) YAMLOptions(decode ValueDecoder) []yaml.DecodeOption {
 	opts := make([]yaml.DecodeOption, 0, len(o.custom)+1)
 
@@ -208,9 +210,10 @@ func (o Options) Custom(t reflect.Type) bool {
 }
 
 // decodesJSON reports whether the decoder decodes a value of type t
-// through its UnmarshalJSON method. It does under JSON, for a type with
-// that method that has no function of o and no method [DecodesItself]
-// reports, since the decoder looks for both of those first.
+// through its UnmarshalJSON method. It does so under JSON for a type
+// with that method, when o does not hold a function for the type and
+// [DecodesItself] reports false. The decoder looks for such a function
+// and for those methods first.
 func (o Options) decodesJSON(t reflect.Type) bool {
 	return o.JSON && !o.Custom(t) && !DecodesItself(t) && reflect.PointerTo(t).Implements(JSONType)
 }
@@ -218,9 +221,10 @@ func (o Options) decodesJSON(t reflect.Type) bool {
 // Whole reports whether the decoder decodes a value of type t whole,
 // through a method of t, as [DecodesItself] reports, or through an
 // unmarshaler o gives t. The int result is the index of the embedded
-// field of t whose method decodes t, which holds the document in place
-// of t, or -1 when t has no such field. A type that declares its method
-// has none, and neither does one a function of o decodes.
+// field of t whose method decodes t, or -1 when t lacks such a field.
+// That field holds the document in place of t. A type that declares its
+// method lacks such a field, and so does a type that a function of o
+// decodes.
 func (o Options) Whole(t reflect.Type) (int, bool) {
 	switch {
 	case o.Custom(t):
@@ -240,7 +244,7 @@ func (o Options) Whole(t reflect.Type) (int, bool) {
 }
 
 // ReportsOwnError reports whether the decoder can return an error for a
-// value of type t with no token of the source. It can for a
+// value of type t without a token of the source. It can for a
 // [time.Duration], for a type that decodes itself, as [DecodesItself]
 // reads it, and for a type o gives an unmarshaler. A function from
 // [yaml.RegisterCustomUnmarshaler] names a type the decoder never shows,
@@ -250,16 +254,16 @@ func (o Options) ReportsOwnError(t reflect.Type) bool {
 }
 
 // RefusesForText reports whether the decoder refuses content for a value
-// of type t and calls no unmarshaler. The content is the mapping,
+// of type t and does not call an unmarshaler. The content is the mapping,
 // sequence, or scalar the value reads.
 //
 // The decoder hands an UnmarshalText method the string it reads from a
-// scalar. It reads no string from a mapping or a sequence, so it calls
-// no method for one and returns an error of its own, with no token of
-// the source. A type that [Options.FromText] reports thus takes a scalar
-// alone. Two such types take a mapping or a sequence another way. The
-// decoder parses a [time.Time] itself, and under JSON it hands the node
-// to the UnmarshalJSON method of a type that has one.
+// scalar. It does not read a string from a mapping or a sequence. So it
+// does not call the method for one, and it returns an error of its own
+// without a token of the source. A type that [Options.FromText] reports
+// thus takes a scalar alone, unless the decoder reads it another way. The
+// decoder parses a [time.Time] itself, and under JSON it hands the node to
+// the UnmarshalJSON method of a type that has one.
 func (o Options) RefusesForText(t reflect.Type, content ast.Node) bool {
 	if astnode.IsNil(content) || astnode.IsScalar(content) || t == TimeType || !o.FromText(t) {
 		return false
@@ -272,10 +276,10 @@ func (o Options) RefusesForText(t reflect.Type, content ast.Node) bool {
 // type t through the UnmarshalText method of the type. The decoder calls
 // the first unmarshaler it finds on the pointer to the type, in the
 // order of [Interfaces], so a type with an UnmarshalYAML method reports
-// false. So does a type a function of o decodes, since the decoder calls
-// that function ahead of any method. The decoder parses a [time.Time]
-// itself, ahead of its UnmarshalText method, so a caller asks about a
-// time before it asks FromText.
+// false. So does a type that a function of o decodes, because the
+// decoder calls that function ahead of any method. The decoder parses a
+// [time.Time] itself, ahead of its UnmarshalText method, so a caller must
+// check for a time before it asks FromText.
 func (o Options) FromText(t reflect.Type) bool {
 	if o.Custom(t) {
 		return false
@@ -287,9 +291,9 @@ func (o Options) FromText(t reflect.Type) bool {
 }
 
 // InlinesUnmarshaler reports whether t, a struct type, holds an inline
-// field that decodes itself, as [Options.ReportsOwnError] reports, in its
-// own fields or in those of a struct it holds inline. A decode of t calls
-// the unmarshaler of that field whatever the mapping holds.
+// field that decodes itself, as [Options.ReportsOwnError] reports. It
+// checks the fields of t and of each struct that t holds inline. A decode
+// of t calls the unmarshaler of that field whatever the mapping holds.
 func (o Options) InlinesUnmarshaler(t reflect.Type) bool {
 	return o.holdsInlineUnmarshaler(t, map[reflect.Type]bool{})
 }
@@ -320,10 +324,11 @@ func (o Options) holdsInlineUnmarshaler(t reflect.Type, seen map[reflect.Type]bo
 }
 
 // decoderField returns the index of the embedded field of t whose
-// unmarshaler method decodes t, and false when t declares the method
-// go-yaml calls or no embedded field has it. Go-yaml calls the first
-// method of [Interfaces] the pointer to t has, so an UnmarshalYAML that t
-// gets from a field wins over an UnmarshalText that t declares.
+// unmarshaler method decodes t. It returns false when t declares the
+// method that go-yaml calls, or when t lacks an embedded field with that
+// method. Go-yaml calls the first method of [Interfaces] that the pointer
+// to t has, so an UnmarshalYAML that t gets from a field wins over an
+// UnmarshalText that t declares.
 func decoderField(t reflect.Type) (int, bool) {
 	i := findDecoderField(t)
 
@@ -331,7 +336,7 @@ func decoderField(t reflect.Type) (int, bool) {
 }
 
 // findDecoderField returns the index [decoderField] returns, or -1 when
-// t has no such field.
+// t lacks such a field.
 func findDecoderField(t reflect.Type) int {
 	k := slices.IndexFunc(Interfaces, reflect.PointerTo(t).Implements)
 	if k < 0 {
@@ -343,7 +348,7 @@ func findDecoderField(t reflect.Type) int {
 
 // jsonDecoderField returns the index of the embedded field of t whose
 // UnmarshalJSON method decodes t under JSON, or -1 when t declares the
-// method or has none. It finds the field as [decoderField] does, and its
+// method or lacks it. It finds the field as [decoderField] does, and its
 // caller asks only about a type that go-yaml decodes through
 // UnmarshalJSON.
 func jsonDecoderField(t reflect.Type) int {
@@ -398,11 +403,11 @@ func promotingField(t, unmarshaler reflect.Type) int {
 }
 
 // methodDepth returns how many embedded fields deep in t a type declares
-// the method called name: 0 for t itself, or [math.MaxInt] when the
-// pointer to t has no such method. A pointer counts as the type it points
-// to. The search reads one depth at a time and each type once, so it finds
-// the shallowest declaration and ends for a type that embeds a pointer to
-// itself.
+// the method called name. It returns 0 for t itself, and [math.MaxInt]
+// when the pointer to t lacks such a method. A pointer counts as the type
+// it points to. The search reads one depth at a time and each type once,
+// so it finds the shallowest declaration and ends for a type that embeds
+// a pointer to itself.
 func methodDepth(t reflect.Type, name string) int {
 	seen := map[reflect.Type]bool{}
 	level := []reflect.Type{t}
@@ -450,9 +455,9 @@ func methodDepth(t reflect.Type, name string) int {
 // promotesMethod reports whether the method called name of the pointer to
 // t comes from an embedded field of t rather than from t itself. Reflect
 // cannot tell, so it checks for the "<autogenerated>" file the compiler
-// gives a promoted method, which nothing promises and the tests of
-// embedded fields pin. It reads the method set of the value first, since
-// the pointer wraps a method declared on the value too.
+// gives a promoted method. Go does not promise that file name, so the
+// tests of embedded fields pin it. It reads the method set of the value
+// first, because the pointer wraps a method declared on the value too.
 func promotesMethod(t reflect.Type, name string) bool {
 	if t.Kind() != reflect.Struct || !hasEmbedded(t) {
 		return false
