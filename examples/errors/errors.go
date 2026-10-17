@@ -16,7 +16,7 @@ import (
 
 // broken leaves a flow sequence open, so the parser rejects it. It is a
 // constant because prettier checks every YAML file in the repository and
-// cannot read one that does not parse.
+// fails on one that does not parse.
 const broken = `table: 7
 order: [kaffe, kanelbulle
 `
