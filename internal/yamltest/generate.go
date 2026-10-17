@@ -13,10 +13,11 @@ func GenerateYAML(lines int) string {
 	return GenerateLines(lines, "key_%[1]d: value_%[1]d")
 }
 
-// GenerateLines creates content with the given number of lines. Each line
-// is format with the index of the line, counted from 0, as its one
-// argument, so "k%d: v" yields the lines "k0: v", "k1: v", and so on.
-// A count of zero or less yields the empty string.
+// GenerateLines creates content with the given number of lines. It
+// formats each line with format and the index of the line, counted from
+// 0, as the one argument. For example, three lines of "k%d: v" are
+// "k0: v", "k1: v", and "k2: v". A count of zero or less yields the empty
+// string.
 func GenerateLines(lines int, format string) string {
 	var sb strings.Builder
 
@@ -35,8 +36,9 @@ func FlowSequence(item string, count int, tail ...string) string {
 
 // AliasLevels creates YAML content whose key a lists the items l0 through
 // l<levels>, each under an anchor of the same name. Item l0 is [x], and
-// each later item lists ten aliases of the item before it, so a copy of
-// *l<levels> with every alias written out holds 10^levels scalars.
+// each later item lists ten aliases of the item before it. A copy of
+// *l<levels> with every alias written out therefore holds 10^levels
+// scalars.
 func AliasLevels(levels int) string {
 	var sb strings.Builder
 
@@ -51,8 +53,8 @@ func AliasLevels(levels int) string {
 
 // AliasChain creates YAML content with the keys c0 through c<links>, each
 // under an anchor of the same name. Key c0 is [x], and each later key
-// lists one alias of the key before it. No line of the content nests more
-// than two levels, but *c<links> written out in full nests links+1 levels
+// lists one alias of the key before it. Each line of the content nests at
+// most two levels, but *c<links> written out in full nests links+1 levels
 // of sequences.
 func AliasChain(links int) string {
 	var sb strings.Builder
@@ -82,10 +84,11 @@ func MergeLevels(levels int) string {
 	return sb.String()
 }
 
-// WideMerge creates YAML content whose mapping m holds members keys,
-// each spelled in hexadecimal over the value x, and then a merge key that
-// lists as many aliases to the mapping a. To tell which entry the
-// spelling of one of those keys selects, a lookup reads that whole list.
+// WideMerge creates YAML content whose mapping m holds members keys, each
+// spelled in hexadecimal and mapped to the value x. After those keys, m
+// holds a merge key that lists as many aliases to the mapping a. To tell
+// which entry the spelling of one of those keys selects, a lookup reads
+// that whole list.
 func WideMerge(members int) string {
 	return WideMergeOf(members, "*a")
 }
@@ -108,10 +111,10 @@ func WideMergeOf(members int, item string, tail ...string) string {
 }
 
 // AliasedMapping creates YAML content whose key defaults holds a mapping
-// of keys entries under the anchor d, and whose key services holds
-// aliases entries, each an alias to d. A decode reads every entry of the
-// mapping once for each alias, so the two counts set how far the aliases
-// multiply the document.
+// of keys entries under the anchor d. Its key services holds aliases
+// entries, each an alias to d. A decode reads every entry of the mapping
+// once for each alias, so the two counts set how far the aliases multiply
+// the document.
 func AliasedMapping(keys, aliases int) string {
 	var sb strings.Builder
 

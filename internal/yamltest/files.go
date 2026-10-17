@@ -67,7 +67,7 @@ func SymlinkOrSkip(tb testing.TB, target, link string) {
 }
 
 // RemoveWorkingDirectory changes the working directory of the test to a
-// new directory and removes that directory, so the process runs with no
+// new directory and removes that directory, so the process runs without a
 // working directory. It skips the test when the platform refuses to
 // remove the directory or when [os.Getwd] still names it.
 //

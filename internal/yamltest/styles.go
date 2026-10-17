@@ -22,9 +22,8 @@ import (
 // The tags are ordinary text, so lipgloss counts them toward display width.
 // A printer that combines XMLStyles with
 // [go.jacobcolvin.com/niceyaml/printer.WithWrapWidth] or a padded container
-// style
-// wraps and pads by tag length rather than by the visible text, so assert
-// width and alignment through a color theme instead.
+// style wraps and pads by the width of the tagged text, not of the visible
+// text. A test of width or alignment should use a color theme instead.
 //
 // Create instances with [NewXMLStyles].
 type XMLStyles struct {
@@ -81,7 +80,7 @@ func (x *XMLStyles) Style(s kind.Kind) lipgloss.Style {
 }
 
 // NewXMLPrinter creates a new [*printer.Printer] that renders through
-// [XMLStyles], with no gutter and an empty container style, so its
+// [XMLStyles], without a gutter and with an empty container style. Its
 // output holds only the tagged text. Options in opts apply after these
 // defaults.
 func NewXMLPrinter(opts ...printer.Option) *printer.Printer {
@@ -94,9 +93,9 @@ func NewXMLPrinter(opts ...printer.Option) *printer.Printer {
 	return printer.New(append(defaults, opts...)...)
 }
 
-// NewPlainPrinter creates a new [*printer.Printer] with empty styles, no
-// gutter, and an empty container style, so its output holds only the text
-// of the lines. Options in opts apply after these defaults.
+// NewPlainPrinter creates a new [*printer.Printer] with empty styles and an
+// empty container style, and without a gutter. Its output holds only the
+// text of the lines. Options in opts apply after these defaults.
 func NewPlainPrinter(opts ...printer.Option) *printer.Printer {
 	defaults := []printer.Option{
 		printer.WithStyles(style.Styles{}),
@@ -115,8 +114,8 @@ func ColorHex(c color.Color) string {
 	return cf.Hex()
 }
 
-// Contrast returns the WCAG contrast ratio between a and b, from 1 for
-// equal colors to 21 for black on white.
+// Contrast returns the Web Content Accessibility Guidelines (WCAG) contrast
+// ratio between a and b, from 1 for equal colors to 21 for black on white.
 func Contrast(a, b color.Color) float64 {
 	la, lb := luminance(a), luminance(b)
 	if la < lb {

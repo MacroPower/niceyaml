@@ -18,17 +18,17 @@ const (
 
 // Sentinel errors for token validation.
 var (
-	// ErrNilToken indicates a token is nil.
+	// ErrNilToken indicates that a token is nil.
 	ErrNilToken = errors.New("token is nil")
-	// ErrNilPosition indicates a token's position is nil.
+	// ErrNilPosition indicates that the position of a token is nil.
 	ErrNilPosition = errors.New("token position is nil")
-	// ErrTokenCountMismatch indicates two token slices differ in length.
+	// ErrTokenCountMismatch indicates that two token slices differ in length.
 	ErrTokenCountMismatch = errors.New("token count mismatch")
 	// ErrTokenLink indicates a token whose Prev or Next is not its neighbor.
 	ErrTokenLink = errors.New("token link mismatch")
 )
 
-// TokenValidationError indicates a token failed validation.
+// TokenValidationError indicates that a token failed validation.
 type TokenValidationError struct {
 	Reason error  // [ErrNilToken] or [ErrNilPosition].
 	Which  string // "want" or "got".
@@ -59,8 +59,8 @@ func (d TokenDiff) Equal() bool {
 	return len(d.Fields) == 0
 }
 
-// String returns a human-readable representation of the diff using
-// [FormatToken] to display token details.
+// String returns a human-readable representation of the diff. It displays
+// each token through [FormatToken].
 func (d TokenDiff) String() string {
 	if d.Equal() {
 		return "tokens equal"
@@ -125,8 +125,8 @@ func (d TokensDiff) String() string {
 }
 
 // ContentDiff represents the difference between two content strings after
-// normalization, which converts CRLF and bare CR line endings to LF and
-// trims leading/trailing newlines.
+// normalization. Normalization converts CRLF and bare CR line endings to
+// LF and trims leading and trailing newlines.
 //
 // Use [CompareContent] to create a ContentDiff.
 type ContentDiff struct {
@@ -181,11 +181,11 @@ func ValidateTokens(want, got token.Tokens) error {
 }
 
 // ValidateTokenLinks checks that Prev and Next link each token of tks to
-// its neighbors in the slice and that the chain stops at both ends, so the
-// first Prev and the last Next are nil. It returns an error that wraps
-// [ErrTokenLink] and names the first link that points elsewhere, a
-// [*TokenValidationError] for a nil token, or nil when every link fits. A
-// slice of no tokens has no links to check.
+// its neighbors in the slice. It also checks that the chain stops at both
+// ends, so the first Prev and the last Next are nil. It returns an error
+// that wraps [ErrTokenLink] and names the first link that points
+// elsewhere, a [*TokenValidationError] for a nil token, or nil when every
+// link fits. An empty slice passes.
 func ValidateTokenLinks(tks token.Tokens) error {
 	for i, tk := range tks {
 		if tk == nil {
@@ -219,8 +219,8 @@ func ValidateTokenLinks(tks token.Tokens) error {
 }
 
 // CompareTokens compares two tokens with [DiffTokenFields] and returns a
-// [TokenDiff]. It assumes both tokens are non-nil and carry positions.
-// [ValidateTokens] checks this for token slices.
+// [TokenDiff]. It assumes that both tokens are non-nil and carry
+// positions. [ValidateTokens] checks those assumptions for token slices.
 func CompareTokens(want, got *token.Token) TokenDiff {
 	return TokenDiff{
 		Fields: DiffTokenFields(want, got),
@@ -230,8 +230,8 @@ func CompareTokens(want, got *token.Token) TokenDiff {
 }
 
 // CompareTokenSlices compares two token slices index by index with
-// [CompareTokens] and returns a [TokensDiff]. It assumes every token is
-// non-nil and carries a position, so call [ValidateTokens] first.
+// [CompareTokens] and returns a [TokensDiff]. It assumes that every token
+// is non-nil and carries a position, so call [ValidateTokens] first.
 func CompareTokenSlices(want, got token.Tokens) TokensDiff {
 	if len(want) != len(got) {
 		return TokensDiff{
@@ -254,7 +254,7 @@ func CompareTokenSlices(want, got token.Tokens) TokensDiff {
 
 // RequireTokensEqual fails the test unless want and got hold the same tokens.
 // It checks both slices with [ValidateTokens] and then compares them with
-// [CompareTokenSlices], so the failure message names the token count
+// [CompareTokenSlices]. The failure message then names the token count
 // mismatch, the nil token or position, or the fields that differ.
 func RequireTokensEqual(tb testing.TB, want, got token.Tokens) {
 	tb.Helper()
@@ -266,8 +266,8 @@ func RequireTokensEqual(tb testing.TB, want, got token.Tokens) {
 }
 
 // CompareContent compares two strings for equality and returns a [ContentDiff].
-// It converts CRLF and bare CR line endings to LF and trims leading/trailing
-// newlines in both strings before comparing.
+// It converts CRLF and bare CR line endings to LF and trims leading and
+// trailing newlines in both strings before comparing.
 func CompareContent(want, got string) ContentDiff {
 	return ContentDiff{
 		Want: normalizeContent(want),
@@ -277,10 +277,10 @@ func CompareContent(want, got string) ContentDiff {
 
 // DiffTokenFields returns the names of the fields that differ between two
 // tokens. It compares Type, Value, Origin, CharacterType, Indicator, Error,
-// and each Position field. It skips the Next and Prev links, since tokens
-// built apart never point at the same neighbors. It assumes both tokens
-// are non-nil and carry positions. [ValidateTokens] checks this for token
-// slices.
+// and each Position field. It skips the Next and Prev links, because
+// tokens built apart never point at the same neighbors. It assumes that
+// both tokens are non-nil and carry positions. [ValidateTokens] checks
+// those assumptions for token slices.
 func DiffTokenFields(want, got *token.Token) []string {
 	var diffs []string
 
@@ -357,7 +357,7 @@ func NewTokenBuilder() *TokenBuilder {
 }
 
 // Clone returns a new [*TokenBuilder] with a copy of the current token state.
-// Use this to branch from a common base configuration.
+// Use Clone to branch from a common base configuration.
 func (b *TokenBuilder) Clone() *TokenBuilder {
 	return &TokenBuilder{
 		token: b.token.Clone(),
@@ -460,28 +460,37 @@ func (b *TokenBuilder) Build() *token.Token {
 // result matches the source except where Tokenize leaves the lexer's text,
 // as its doc describes. The result lacks the byte order marks that
 // Tokenize drops and keeps any other mark, such as one inside a scalar.
-// When a tag ends a file that holds other text, the result also lacks the
-// tag's text, and it can lack some or all the whitespace in front of the
-// tag, line breaks included, so "a:\n!t" comes back as "a:" but
-// "a: b\n!t" as "a: b\n". Only a space, a line break, or a "," in a flow
-// collection closes a tag, so the lost text can hold flow indicators,
-// such as the "]" of "[!t]". A "{" or "}" in the tag makes the lexer keep
-// its text as an invalid token instead, and a file of a tag alone comes
-// back whole. The result repeats the line ending after a tag that ends
-// its line and after text that follows a block scalar header, and a blank
-// line between the two loses its spaces. The text around a tab used as
-// indentation keeps the lexer's shape, which can drop a ":" indicator. In
-// a flow collection, a repeat of the tab can take the place of that
-// indicator.
-// A raw stream from [github.com/goccy/go-yaml/lexer.Tokenize] keeps every
-// byte order mark, but it also loses the final line ending, trailing
-// spaces, the spaces of whitespace-only lines, and the letter and hex
-// digits of a "\x", "\u", or "\U" escape. It repeats the last rune of
-// text that follows a block scalar header when that text ends the file,
-// and a tab that indents a later line of a quoted scalar.
 //
-// A nil token contributes nothing rather than a placeholder such as "<nil>",
-// so the output holds only source text.
+// When a tag ends a file that holds other text, the result also lacks the
+// text of the tag. It can also lack some or all of the whitespace in front
+// of the tag, line breaks included. For example, the result for "a:\n!t"
+// is "a:", but the result for "a: b\n!t" is "a: b\n".
+//
+// Only a space, a line break, or a "," in a flow collection closes a tag.
+// The lost text can therefore hold flow indicators, such as the "]" of
+// "[!t]". A "{" or "}" in the tag makes the lexer keep its text as an
+// invalid token instead. The result for a file that holds only a tag is
+// the whole file.
+//
+// The result repeats the line ending after a tag that ends its line and
+// after text that follows a block scalar header. The lexer ends one token
+// with that line ending and opens the next with it again. A blank line
+// between those two tokens loses its spaces.
+//
+// Around a tab used as indentation, the result keeps the text that the
+// lexer produced, and that text can lack a ":" indicator. In a flow
+// collection, a repeat of the tab can take the place of that indicator.
+//
+// For a raw stream from [github.com/goccy/go-yaml/lexer.Tokenize], the
+// result keeps every byte order mark but loses more of the source. It
+// loses the final line ending, trailing spaces, and the spaces of
+// whitespace-only lines. It also loses the letter and hex digits of a
+// "\x", "\u", or "\U" escape. It repeats the last rune of text that
+// follows a block scalar header when that text ends the file. It also
+// repeats a tab that indents a later line of a quoted scalar.
+//
+// A nil token does not add text or a placeholder such as "<nil>", so the
+// output holds only source text.
 func DumpTokenOrigins(tks token.Tokens) string {
 	var sb strings.Builder
 
@@ -507,7 +516,7 @@ func FormatTokenPosition(pos *token.Position) string {
 }
 
 // TokenPlace returns the Value of tk and the place where it starts, as
-// "value@line:column", so a test can name the token it expects in one
+// "value@line:column". A test can then name the token it expects in one
 // string. The line and the column count from 1, as those of a
 // [token.Position] do. A nil token and a token without a Position give
 // the empty string.
@@ -563,7 +572,7 @@ func normalizeContent(s string) string {
 }
 
 // TokenValues returns the Value of each token of tks, in order, or nil
-// for no tokens.
+// when tks is empty.
 func TokenValues(tks token.Tokens) []string {
 	var values []string
 

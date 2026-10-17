@@ -13,16 +13,16 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// ProblemsOf returns the children of the node of err in the tree
-// [niceyaml.NewErrorTree] builds that stand for the problems err heads,
-// in the order the tree shows them.
+// ProblemsOf returns the children of the root of the tree that
+// [niceyaml.NewErrorTree] builds for err. It returns only the children
+// that stand for the problems err heads, in the order the tree shows them.
 func ProblemsOf(err error) []niceyaml.ErrorTree {
 	return childrenOf(err, false)
 }
 
-// DetailsOf returns the children of the node of err in the tree
-// [niceyaml.NewErrorTree] builds that explain it, in the order the tree
-// shows them.
+// DetailsOf returns the children of the root of the tree that
+// [niceyaml.NewErrorTree] builds for err. It returns only the children
+// that explain err, in the order the tree shows them.
 func DetailsOf(err error) []niceyaml.ErrorTree {
 	return childrenOf(err, true)
 }
@@ -53,8 +53,8 @@ func ErrsOf(nodes []niceyaml.ErrorTree) []error {
 }
 
 // RequireSourceError returns the first [*niceyaml.SourceError] in the
-// chain of err, as [errors.As] finds it. The test fails when err holds
-// none.
+// chain of err, as [errors.As] finds it. The test fails when err does
+// not hold one.
 func RequireSourceError(tb testing.TB, err error) *niceyaml.SourceError {
 	tb.Helper()
 
@@ -67,7 +67,7 @@ func RequireSourceError(tb testing.TB, err error) *niceyaml.SourceError {
 
 // RequireError returns the first [*niceyaml.Error] in the chain of err,
 // as [errors.As] finds it, so a test reads the accessors of the Error.
-// The test fails when err holds none.
+// The test fails when err does not hold one.
 func RequireError(tb testing.TB, err error) *niceyaml.Error {
 	tb.Helper()
 
@@ -78,9 +78,9 @@ func RequireError(tb testing.TB, err error) *niceyaml.Error {
 	return located
 }
 
-// BoundNode returns the [*niceyaml.Node] bound is bound to, as
-// [niceyaml.SourceError.Node] returns it. The test fails when bound is
-// bound to none.
+// BoundNode returns the [*niceyaml.Node] that bound is bound to, as
+// [niceyaml.SourceError.Node] returns it. The test fails when bound is not
+// bound to a Node.
 func BoundNode(tb testing.TB, bound *niceyaml.SourceError) *niceyaml.Node {
 	tb.Helper()
 
@@ -90,9 +90,9 @@ func BoundNode(tb testing.TB, bound *niceyaml.SourceError) *niceyaml.Node {
 	return node
 }
 
-// BoundDocument returns the root of the document bound is bound to, as
-// [niceyaml.SourceError.Document] returns it. The test fails when bound
-// is bound to none.
+// BoundDocument returns the root of the document that bound is bound to,
+// as [niceyaml.SourceError.Document] returns it. The test fails when bound
+// is not bound to a document.
 func BoundDocument(tb testing.TB, bound *niceyaml.SourceError) *niceyaml.Node {
 	tb.Helper()
 
@@ -104,7 +104,7 @@ func BoundDocument(tb testing.TB, bound *niceyaml.SourceError) *niceyaml.Node {
 
 // PathOf returns the path that the Path method of x reports, such as the
 // path of a [*niceyaml.Error], a [*niceyaml.SourceError], or a
-// [niceyaml.ErrorTree]. The test fails when x reports no path.
+// [niceyaml.ErrorTree]. The test fails when x does not report a path.
 func PathOf(tb testing.TB, x interface{ Path() (paths.Path, bool) }) paths.Path {
 	tb.Helper()
 
@@ -116,7 +116,7 @@ func PathOf(tb testing.TB, x interface{ Path() (paths.Path, bool) }) paths.Path 
 
 // RangeOf returns the range that the Range method of x reports, such as
 // the range of a [*niceyaml.Error], a [*niceyaml.SourceError], or a
-// [niceyaml.ErrorTree]. The test fails when x reports no range.
+// [niceyaml.ErrorTree]. The test fails when x does not report a range.
 func RangeOf(tb testing.TB, x interface{ Range() (position.Range, bool) }) position.Range {
 	tb.Helper()
 
@@ -129,7 +129,7 @@ func RangeOf(tb testing.TB, x interface{ Range() (position.Range, bool) }) posit
 // PositionOf returns the position that the Position method of x
 // reports, such as the position of a [*niceyaml.Error], a
 // [*niceyaml.SourceError], or a [niceyaml.ErrorTree]. The test fails
-// when x reports no position.
+// when x does not report a position.
 func PositionOf(tb testing.TB, x interface {
 	Position() (position.Position, bool)
 },
@@ -176,7 +176,7 @@ func BoundIn(err error) []*niceyaml.SourceError {
 
 // AssertBoundTo asserts that each binding that [BoundIn] returns for err
 // reports source through [niceyaml.SourceError.Source]. An error that
-// holds no binding passes.
+// does not hold a binding passes.
 func AssertBoundTo(tb testing.TB, source *niceyaml.Source, err error) {
 	tb.Helper()
 
@@ -187,8 +187,8 @@ func AssertBoundTo(tb testing.TB, source *niceyaml.Source, err error) {
 
 // ErrorAt creates a [*niceyaml.Error] with the message msg at the value
 // under keys. The keys form a path from the node that binds the error,
-// as [paths.Current] and [paths.Path.Child] build it. With no keys, the
-// error sits at that node.
+// as [paths.Current] and [paths.Path.Child] build it. When keys is empty,
+// the error sits at that node.
 func ErrorAt(msg string, keys ...string) *niceyaml.Error {
 	return niceyaml.NewError(msg, niceyaml.AtPath(paths.Current().Child(keys...)))
 }

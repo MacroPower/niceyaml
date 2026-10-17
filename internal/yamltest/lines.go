@@ -11,15 +11,16 @@ import (
 
 // Sentinel errors for line validation.
 var (
-	// ErrLineNumberNotIncreasing indicates a line number is not greater than
-	// the previous.
+	// ErrLineNumberNotIncreasing indicates that a line number is not greater
+	// than the number of the line before it.
 	ErrLineNumberNotIncreasing = errors.New("line number not greater than previous")
-	// ErrLineNumberMismatch indicates a token's line differs from the number
-	// of the line holding it.
+	// ErrLineNumberMismatch indicates that the line of a token differs from
+	// the number of the line that holds it.
 	ErrLineNumberMismatch = errors.New("token line differs from line number")
-	// ErrColumnNotIncreasing indicates a column is not greater than the previous.
+	// ErrColumnNotIncreasing indicates that a column is not greater than the
+	// column before it.
 	ErrColumnNotIncreasing = errors.New("column not greater than previous")
-	// ErrEmptyLineNumbered indicates a line with no tokens has a number.
+	// ErrEmptyLineNumbered indicates that a line without tokens has a number.
 	ErrEmptyLineNumbered = errors.New("line with no tokens has a number")
 )
 
@@ -31,9 +32,10 @@ var (
 //   - The columns of the tokens on a line strictly increase. The check
 //     skips tokens with an empty Origin.
 //
-// A line with no tokens must be a numberless placeholder, such as the blank
-// row a side-by-side diff inserts. ValidateLines rejects such a line when it
-// has a number and otherwise leaves it out of the numbering check.
+// A line without tokens must be a placeholder without a number, such as the
+// blank row that a side-by-side diff inserts. ValidateLines rejects such a
+// line when it has a number and otherwise leaves it out of the numbering
+// check.
 //
 // It returns an error that wraps [ErrEmptyLineNumbered],
 // [ErrLineNumberNotIncreasing], [ErrLineNumberMismatch], or
@@ -134,8 +136,8 @@ func ValidateLines(ls line.Lines) error {
 }
 
 // LineNumbers returns the [line.Line.Number] of each line of seq, such as
-// a [line.Lines] or a [*line.View], in order, or nil when seq holds no
-// line.
+// a [line.Lines] or a [*line.View], in order, or nil when seq does not
+// hold a line.
 func LineNumbers(seq line.Sequence) []int {
 	var numbers []int
 
@@ -147,7 +149,7 @@ func LineNumbers(seq line.Sequence) []int {
 }
 
 // ErrorAnnotation returns the [line.Annotation] that the binding of an
-// error leaves below a line it marks. A printer draws a caret under each
+// error leaves below a line that it marks. A printer draws a caret under each
 // column of cols with msg beside the carets, or the carets alone when msg
 // is empty.
 func ErrorAnnotation(cols position.Span, msg string) line.Annotation {
@@ -155,7 +157,7 @@ func ErrorAnnotation(cols position.Span, msg string) line.Annotation {
 }
 
 // ErrorOverlays returns the [line.Overlays] that the binding of an error
-// leaves on a line it marks, one at each of spans, in order.
+// leaves on a line that it marks, one at each of spans, in order.
 func ErrorOverlays(spans ...position.Span) line.Overlays {
 	overlays := make(line.Overlays, 0, len(spans))
 	for _, span := range spans {

@@ -8,7 +8,7 @@
 // # Token Fixtures
 //
 // [token.Token] has many fields that tests must populate.
-// [TokenBuilder] provides a fluent API to construct tokens without boilerplate:
+// [TokenBuilder] sets those fields through chained method calls:
 //
 //	tok := yamltest.NewTokenBuilder().
 //		Type(token.StringType).
@@ -32,11 +32,12 @@
 //
 // A test that reports differences its own way runs those steps itself.
 // [CompareTokens] and [CompareTokenSlices] assume non-nil tokens and
-// positions, so the test calls [ValidateTokens] first. Each diff value reports
-// whether its inputs match through Equal and formats itself through String,
-// so a test can hand one to t.Error. [CompareContent] returns the same kind
-// of value for whole text. Before comparing, it converts CRLF and bare CR
-// line endings to LF and trims leading and trailing newlines:
+// positions, so such a test calls [ValidateTokens] first. Each diff value
+// reports whether its inputs match through Equal and formats itself
+// through String, so a test can hand one to t.Error. [CompareContent]
+// returns the same kind of value for whole text. Before comparing, it
+// converts CRLF and bare CR line endings to LF and trims leading and
+// trailing newlines:
 //
 //	if diff := yamltest.CompareContent(want, got); !diff.Equal() {
 //		t.Error(diff)
@@ -49,8 +50,8 @@
 // names it as "value@line:column", which [TokenPlace] writes, and a table
 // that expects several compares their values through [TokenValues].
 //
-// Most ranges a test names sit on one line, and [LineRange] writes one
-// from the line and its two columns:
+// Most ranges that a test names sit on one line, and [LineRange] writes
+// one from the line and its two columns:
 //
 //	want := yamltest.LineRange(0, 5, 10)
 //
@@ -64,9 +65,9 @@
 //	// <nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue>\
 //	// <text> </text><literalString>value</literalString>
 //
-// [NewXMLPrinter] creates a printer that renders through those styles with
-// no gutter and an empty container style, so a test compares the tagged
-// text alone:
+// [NewXMLPrinter] creates a printer that renders through those styles
+// without a gutter and with an empty container style. A test then compares
+// the tagged text alone:
 //
 //	got := yamltest.NewXMLPrinter().Print(source.View())
 //
@@ -81,19 +82,20 @@
 //
 // [FirstDocument] parses a YAML input and returns the root [*niceyaml.Node] of
 // its first document, and [FirstDocumentWithPath] also gives the source a file
-// path. [At] scopes a node to a path and fails the test when nothing matches:
+// path. [At] scopes a node to a path and fails the test when the path does
+// not select a node:
 //
 //	doc := yamltest.FirstDocument(t, input)
 //	replicas := yamltest.At(t, doc, paths.Doc().Child("spec", "replicas"))
 //
 // [Document] returns the root of the single document of a
-// [*niceyaml.Source] the test built itself. [AtOrSelf] scopes like [At]
-// and returns its node for a path with no selector, so a table case names
-// a path only when it checks a scoped node. [UnparsedDocument] returns the
-// node of an input that does not parse, for a test of what such a
-// document reports. [Documents] and [AllDocuments] return the documents
-// of a source and fail the test unless the source holds as many as the
-// test names:
+// [*niceyaml.Source] that the test built itself. [AtOrSelf] scopes like
+// [At] but returns its node for a path without a selector. A table case
+// then names a path only when it checks a scoped node. [UnparsedDocument]
+// returns the node of an input that does not parse, for a test of what
+// such a document reports. [Documents] and [AllDocuments] return the
+// documents of a source and fail the test unless the source holds as many
+// as the test names:
 //
 //	docs := yamltest.Documents(t, source, 2)
 //
@@ -112,16 +114,16 @@
 //
 //	err := yamltest.Bind(t, source, yamltest.ErrorAt("bad", "spec", "replicas"))
 //
-// Tests of a [niceyaml.Validator] run it through [niceyaml.Node.Validate]
-// on a scoped node, which binds the error as a decode does:
+// Tests of a [niceyaml.Validator] run it on a scoped node through
+// [niceyaml.Node.Validate]. Validate binds the error as a decode does:
 //
 //	item := yamltest.At(t, doc, paths.Doc().Child("items").Index(1))
 //	require.EqualError(t, item.Validate(t.Context(), rule), want)
 //
 // Tests of alias limits build their documents with [AliasLevels] and
-// [MergeLevels]. Each level refers to the level before it ten times, so a
-// few levels make a small document that holds millions of nodes once its
-// aliases expand. A decode expands merge keys every time. It expands an
+// [MergeLevels]. Each level refers to the level before it ten times. A few
+// levels therefore make a small document that holds millions of nodes when
+// its aliases expand. A decode expands merge keys every time. It expands an
 // alias to a list only where it writes the list out, as in a mapping
 // key. A test appends such a key with [AliasKey]:
 //
@@ -130,7 +132,7 @@
 // [WideMerge] builds a mapping whose merge key lists one alias for each
 // of its keys, so a lookup of every key reads the whole list.
 // [FlowSequence] writes the flow sequence that repeats one item, for a
-// document that needs its own shape.
+// test that lays out a document of its own.
 //
 // Tests and benchmarks that need a long document write it with
 // [GenerateLines], from the format of one line:
@@ -146,7 +148,7 @@
 //
 // # Error Trees
 //
-// Tests that read the structure of an error read the tree
+// Tests that read the structure of an error read the tree that
 // [niceyaml.NewErrorTree] builds. [ProblemsOf] and [DetailsOf] return the
 // children of its root that are problems and details, and [BoundIn]
 // returns each binding in the tree:
@@ -160,8 +162,9 @@
 //
 //	bound := yamltest.RequireSourceError(t, err)
 //
-// [BoundNode] and [BoundDocument] return the node and the document a
-// binding is bound to, and fail the test for a binding bound to none.
+// [BoundNode] and [BoundDocument] return the node and the document that a
+// binding is bound to. Each fails the test when the binding is not bound
+// to one.
 // [AssertBoundTo] asserts that each binding in the tree of an error is
 // bound to the source that the test names.
 //
@@ -169,13 +172,14 @@
 // for an error, even below a summary or a join. [RequireError] returns
 // the [*niceyaml.Error] in the chain of an error. [PathOf], [RangeOf],
 // and [PositionOf] return the location that an error or a node of the
-// tree reports. Each fails the test for an error that reports none:
+// tree reports. Each fails the test when its argument does not report a
+// location:
 //
 //	problem := yamltest.OnlyProblem(t, err)
 //	assert.Equal(t, yamltest.LineRange(1, 6, 9), yamltest.RangeOf(t, problem))
 //
 // [ErrorAnnotation] and [ErrorOverlays] return the annotation and the
-// overlays that a binding leaves on a line it marks. A test of the
+// overlays that a binding leaves on a line that it marks. A test of the
 // excerpt of the binding compares the line with them.
 //
 // [CheckError], [UpperError], [IndentError], and [RewriteError] model
@@ -201,12 +205,14 @@
 //
 // # Mocks
 //
-// [NormalizerFunc] adapts a function so it can stand in for a normalizer
-// in code paths that depend on normalization:
+// [NormalizerFunc] adapts a function to the
+// [go.jacobcolvin.com/niceyaml/finder.Normalizer] interface, for tests of
+// code paths that depend on normalization:
 //
 //	normalizer := yamltest.NormalizerFunc(strings.ToLower)
 //
-// A [niceyaml.ValidatorFunc] stands in for a validator.
+// A [niceyaml.ValidatorFunc] adapts a function to a [niceyaml.Validator]
+// in the same way.
 //
 // [RoundTripFunc] adapts a function to the transport of an [http.Client],
 // so a test answers each request itself:
@@ -214,7 +220,7 @@
 //	client := yamltest.RoundTripFunc(respond).Client()
 //
 // [Respond] is such a function for one status and body, and
-// [CountingClient] counts the requests a transport receives:
+// [CountingClient] counts the requests that a transport receives:
 //
 //	client, requests := yamltest.CountingClient(yamltest.Respond(http.StatusOK, body))
 //

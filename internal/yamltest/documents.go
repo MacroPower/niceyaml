@@ -11,11 +11,12 @@ import (
 
 // FirstDocument creates the root [*niceyaml.Node] of the first document
 // of a YAML input for testing, from a [*niceyaml.Source] created with
-// opts, such as [niceyaml.WithReferences]. It reads the documents
+// opts, such as [niceyaml.WithReferences]. It reads the documents that
 // [niceyaml.Source.Documents] returns, which leaves out an empty document
 // beside one with content.
 //
-// If the input contains no documents, the test fails.
+// The test fails when the input does not contain a document, or when its
+// first document did not parse.
 func FirstDocument(tb testing.TB, input string, opts ...niceyaml.SourceOption) *niceyaml.Node {
 	tb.Helper()
 
@@ -27,7 +28,7 @@ func FirstDocument(tb testing.TB, input string, opts ...niceyaml.SourceOption) *
 }
 
 // At scopes n to the node that path selects, through [niceyaml.Node.At].
-// The test fails when the path selects nothing.
+// The test fails when the path does not select a node.
 func At(tb testing.TB, n *niceyaml.Node, path paths.Path) *niceyaml.Node {
 	tb.Helper()
 
@@ -37,7 +38,7 @@ func At(tb testing.TB, n *niceyaml.Node, path paths.Path) *niceyaml.Node {
 	return scoped
 }
 
-// AtOrSelf returns n for a path with no selector, and the
+// AtOrSelf returns n for a path without a selector, and the
 // [*niceyaml.Node] that [At] scopes to path for any other. A table case
 // then names a path only when it checks a scoped Node.
 func AtOrSelf(tb testing.TB, n *niceyaml.Node, path paths.Path) *niceyaml.Node {
@@ -101,7 +102,7 @@ func Bind(tb testing.TB, source *niceyaml.Source, err error) error {
 
 // Layers merges layers through [niceyaml.NewSourceFromLayers] with the
 // context of the test, and returns the merged [*niceyaml.Source]. The
-// test fails when a layer holds no value the merge can read.
+// test fails when the merge cannot read a value from a layer.
 func Layers(tb testing.TB, layers ...niceyaml.Layer) *niceyaml.Source {
 	tb.Helper()
 
@@ -114,7 +115,8 @@ func Layers(tb testing.TB, layers ...niceyaml.Layer) *niceyaml.Source {
 // FirstDocumentWithPath creates the root [*niceyaml.Node] of the first
 // document of a YAML input, with file path context, for testing.
 //
-// If the input contains no documents, the test fails.
+// The test fails when the input does not contain a document, or when its
+// first document did not parse.
 func FirstDocumentWithPath(tb testing.TB, input, filePath string) *niceyaml.Node {
 	tb.Helper()
 
@@ -123,7 +125,7 @@ func FirstDocumentWithPath(tb testing.TB, input, filePath string) *niceyaml.Node
 
 // UnparsedDocument creates the [*niceyaml.Node] of the single document of
 // a YAML input that does not parse, from a [*niceyaml.Source] created
-// with opts. It reads the documents [niceyaml.Source.AllDocuments]
+// with opts. It reads the documents that [niceyaml.Source.AllDocuments]
 // returns. The test fails when the input does not hold exactly one
 // document, or when that document parsed.
 func UnparsedDocument(tb testing.TB, input string, opts ...niceyaml.SourceOption) *niceyaml.Node {
@@ -154,8 +156,8 @@ func References(inputs ...string) niceyaml.SourceOption {
 // NoSizeLimits returns [niceyaml.WithByteLimit] and
 // [niceyaml.WithDepthLimit] with a limit of 0, followed by opts. Those
 // options turn off the byte limit and the depth limit of a
-// [*niceyaml.Source], so a test or a benchmark that reads a large or
-// deeply nested document passes them:
+// [*niceyaml.Source]. A test or a benchmark that reads a large or deeply
+// nested document passes them:
 //
 //	doc := yamltest.FirstDocument(b, input, yamltest.NoSizeLimits()...)
 //

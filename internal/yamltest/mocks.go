@@ -31,8 +31,8 @@ func (f RoundTripFunc) Client() *http.Client {
 }
 
 // Respond returns a [RoundTripFunc] that answers every request with
-// status and body. It opens no socket, so it works inside a synctest
-// bubble and no other process can reach it.
+// status and body. It does not open a socket, so it works inside a
+// synctest bubble, and other processes cannot reach it.
 func Respond(status int, body string) RoundTripFunc {
 	return func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -44,7 +44,7 @@ func Respond(status int, body string) RoundTripFunc {
 }
 
 // CountingClient returns an [*http.Client] that sends every request
-// through rt, along with a count of the requests it has sent.
+// through rt, along with a count of the requests that it has sent.
 func CountingClient(rt http.RoundTripper) (*http.Client, *atomic.Int32) {
 	var requests atomic.Int32
 
@@ -58,9 +58,9 @@ func CountingClient(rt http.RoundTripper) (*http.Client, *atomic.Int32) {
 }
 
 // RespondBody returns a [RoundTripFunc] that answers a request with
-// status 200 and the bytes body reads, so a test serves a body that fails
-// partway or that runs past a limit. Every response reads from the one
-// body, so a second request gets what the first left unread.
+// status 200 and the bytes that body reads. A test uses it to serve a body
+// that fails partway or that runs past a limit. Every response reads from
+// the one body, so a second request gets what the first left unread.
 func RespondBody(body io.Reader) RoundTripFunc {
 	return func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
