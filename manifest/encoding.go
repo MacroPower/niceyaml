@@ -21,8 +21,8 @@ var (
 // checkEncoding returns the problem of src, a file of a load, when its
 // text is not UTF-8, or nil. A UTF-8 byte order mark can start the text. A
 // text whose byte order mark or leading zero bytes show UTF-16 or UTF-32
-// fails whole, and any other text fails at its first byte that UTF-8 does
-// not allow. The message calls a Source with a file path a file, and any
+// fails whole. Any other text fails at its first byte that UTF-8 does not
+// allow. The message calls a Source with a file path a file, and any
 // other Source a text.
 func checkEncoding(src *niceyaml.Source) error {
 	text := src.Text()

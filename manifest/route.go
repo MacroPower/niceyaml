@@ -17,17 +17,17 @@ import (
 )
 
 // maxMergeDepth is the number of nested `<<` merge keys that the search of
-// a field follows into the mappings they bring in.
+// a field follows into the mappings that they bring in.
 const maxMergeDepth = 16
 
 // fieldRead is what a load reads at the path of a type field or of the
 // name of a document.
 type fieldRead struct {
-	// The problem of a path that passes through an alias or a merge key,
-	// or of a value that is no text, unbound, or nil.
+	// The unbound problem of a path that passes through an alias or a
+	// merge key, or of a value that is not text, or nil.
 	err  error
 	text string
-	// The document writes a scalar at the path.
+	// Whether the document writes a scalar at the path.
 	found bool
 }
 
@@ -45,7 +45,7 @@ func fieldName(p paths.Path) string {
 // document doc. A path that passes through an alias or a `<<` merge key
 // fails at that alias or merge key. The read cannot follow an alias into a
 // reference document, and a rewrite of the field reaches every value that
-// shares the anchor. A null reads as a field the document leaves out.
+// shares the anchor. A null reads as a field that the document leaves out.
 func readField(doc *niceyaml.Node, p paths.Path) fieldRead {
 	res := doc.Resolver()
 	name := fieldName(p)
@@ -215,20 +215,22 @@ func startOf(doc *niceyaml.Node) niceyaml.ErrorOption {
 	return atToken(astnode.StartToken(doc.AST()))
 }
 
-// route is where a document goes: its kind and its version, once the load
-// read its type fields.
+// route is where a document goes, its kind and its version, after the load
+// reads its type fields.
 type route struct {
-	// The kind the document goes to, or nil.
+	// The kind that the document goes to, or nil.
 	kind *kindEntry
-	// The version the document declares, or nil when routing failed.
+	// The version that the document declares, or nil when routing failed.
 	version *versionEntry
-	// The kind the document counts toward for [Required] and [Singleton],
-	// which its kind field names whatever its version, or nil.
+	// The kind that the document counts toward for [Required] and
+	// [Singleton], or nil. Its kind field names this kind, whatever its
+	// version.
 	counted *kindEntry
 	// The details on the first error of a document that the load reads as
-	// a kind it does not name.
+	// a kind that it does not name.
 	adoption []error
-	// The text of the kind field, or "" without one.
+	// The text of the kind field, or "" when the document does not have
+	// one.
 	wroteKind  string
 	versionTxt fieldRead
 	kindTxt    fieldRead
@@ -253,7 +255,8 @@ func (r *Registry) label(v *versionEntry) string {
 	return r.versionLabel(v.cfg.name)
 }
 
-// app returns the name of the app, or "this program" without one.
+// app returns the name that [WithAppName] gives the app, or "this program"
+// without it.
 func (r *Registry) app() string {
 	if r.cfg.appName != "" {
 		return r.cfg.appName
@@ -262,8 +265,8 @@ func (r *Registry) app() string {
 	return "this program"
 }
 
-// newerRelease returns the detail that a newer release might read what,
-// such as "this version".
+// newerRelease returns the detail that a later release of the app might
+// read what, such as "this version".
 func (r *Registry) newerRelease(what string) error {
 	return fmt.Errorf("a newer release of %s might read %s", r.app(), what)
 }
@@ -305,8 +308,9 @@ func (r *Registry) removedProblem(doc *niceyaml.Node, rm *removal, hint bool) er
 		niceyaml.AtPath(r.cfg.versionField), niceyaml.WithDetails(details...))
 }
 
-// unknownKind returns the problem of a document whose kind field names no
-// kind, with the version text it declares, or "" without one.
+// unknownKind returns the problem of a document whose kind field does not
+// name a kind of the registry. The parameter version holds the version
+// text that the document declares, or "" when it does not declare one.
 func (r *Registry) unknownKind(name, version string) error {
 	var details []error
 
@@ -330,7 +334,9 @@ func (r *Registry) unknownKind(name, version string) error {
 }
 
 // closestKind returns the name of a kind, registered or old, that name
-// most likely misspells, or "" when none comes close.
+// misspells, or "". It picks the name with the least edit distance from
+// name, ignoring case. It returns "" when that distance is more than 2 and
+// more than a third of the runes of name.
 func (r *Registry) closestKind(name string) string {
 	best, bestDist := "", 0
 
@@ -385,8 +391,9 @@ func distance(a, b string) int {
 }
 
 // unknownVersion returns the problem of a document that declares version,
-// which the kind of entry does not have. The document writes the kind
-// name wrote, or "" without a kind field.
+// which the kind of entry does not have. The parameter wrote holds the kind
+// name that the document writes, or "" when the document does not have a
+// kind field.
 func (r *Registry) unknownVersion(entry *kindEntry, version, wrote string) error {
 	var reads []string
 
@@ -441,10 +448,12 @@ func (r *Registry) kindMismatch(v *versionEntry, wrote string) error {
 		niceyaml.AtPath(r.cfg.kindField), niceyaml.WithDetails(details...))
 }
 
-// gives returns the version of entry that a document writing the kind name
-// should declare: the newest at or below the written version that gives
-// name and that no removal names, or else the newest that gives it. It
-// returns nil when no version gives name.
+// gives returns the version of entry that a document should declare when
+// it writes the kind name name. Among the written version and the versions
+// before it, it returns the newest version that gives name and that
+// [WithRemoved] does not name. Without such a version, it returns the
+// newest version that gives name. It returns nil when name is not the kind
+// name of a version.
 func gives(entry *kindEntry, name string) *versionEntry {
 	var newest *versionEntry
 
@@ -465,8 +474,9 @@ func gives(entry *kindEntry, name string) *versionEntry {
 	return newest
 }
 
-// missingTypeFields returns the problem of a document that lacks the type
-// fields that version and kind report.
+// missingTypeFields returns the problem of a document that lacks a type
+// field. The flags version and kind report whether the document holds
+// each field.
 func (r *Registry) missingTypeFields(doc *niceyaml.Node, version, kind bool, details []error) error {
 	vName, kName := fieldName(r.cfg.versionField), fieldName(r.cfg.kindField)
 
@@ -484,8 +494,8 @@ func (r *Registry) missingTypeFields(doc *niceyaml.Node, version, kind bool, det
 	return newProblem(ErrMissingTypeField, msg, startOf(doc), niceyaml.WithDetails(details...))
 }
 
-// typeFieldsText returns the type fields the registry reads, as a detail
-// names them: "apiVersion and kind", or "version".
+// typeFieldsText returns the type fields that the registry reads, as a
+// detail names them: "apiVersion and kind", or "version".
 func (r *Registry) typeFieldsText() string {
 	if r.cfg.versionOnly {
 		return fieldName(r.cfg.versionField)

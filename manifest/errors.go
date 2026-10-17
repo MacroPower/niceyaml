@@ -12,9 +12,9 @@ import (
 )
 
 // Each problem that a load, a plan, or Apply reports matches one of these
-// sentinels with [errors.Is], so a program branches on the cause without
-// reading the message. [niceyaml.IsInvalid] reports each problem of a load,
-// because the files that the user wrote cause them.
+// sentinels with [errors.Is]. A program can thus branch on the cause
+// without reading the message. [niceyaml.IsInvalid] reports each problem
+// that the files of the user cause.
 var (
 	// ErrEncoding indicates a text that is not UTF-8, such as a file with a
 	// byte that UTF-8 does not allow or one in UTF-16.
@@ -72,8 +72,8 @@ var (
 	// ErrReadOnly indicates a file that Apply cannot rewrite.
 	ErrReadOnly = errors.New("read-only file")
 
-	// ErrChanged indicates a file that changed or went away after the plan
-	// read it.
+	// ErrChanged indicates a file that changed or disappeared after the
+	// plan read it.
 	ErrChanged = errors.New("file changed")
 
 	// ErrDeprecated indicates the warning about a deprecated version, kind,
@@ -86,7 +86,7 @@ var (
 )
 
 // problemError is the error of a problem that a load writes itself: its
-// message, and the errors it matches beside it.
+// message, and the errors that it matches beside it.
 type problemError struct {
 	msg   string
 	marks []error
@@ -115,12 +115,12 @@ func newWarning(mark error, msg string, opts ...niceyaml.ErrorOption) error {
 }
 
 // Warning describes one warning of a load. Each warning that a load
-// reports wraps one, so [errors.As] finds it in each row that
+// reports wraps one. [errors.As] thus finds it in each row that
 // [niceyaml.Problems] yields, in strict mode too. A filter from
 // [WithWarningFilter] receives it to decide whether the load keeps the
 // warning.
 //
-// The message of a Warning is the message of Err, and Warning adds no
+// The message of a Warning is the message of Err. Warning does not add a
 // severity of its own, so a warning stays a warning inside it.
 type Warning struct { //nolint:errname // A Warning is no error, though it wraps one.
 	// Err holds the warning that the check produced, with its message
@@ -128,7 +128,8 @@ type Warning struct { //nolint:errname // A Warning is no error, though it wraps
 	// it.
 	Err error
 	// File is the name of the file that messages show, such as
-	// "config/menu.yaml". It is empty for a warning that binds in no file.
+	// "config/menu.yaml". It is empty for a warning that does not bind in a
+	// file.
 	File string
 	// Kind is the registered name of the kind, as [Object.Kind] holds it,
 	// also for a document that writes an old name from [KindName].
@@ -138,7 +139,7 @@ type Warning struct { //nolint:errname // A Warning is no error, though it wraps
 	// a plan, it is the version that the document declares after Apply.
 	Version string
 	// Path is the path that the message shows, such as
-	// `$.spec.legacyPricing~`, or `$` for a warning with no path. A `~` at
+	// `$.spec.legacyPricing~`, or `$` for a warning without a path. A `~` at
 	// its end marks a warning about a key. In a plan, it names the value as
 	// the text that the plan read spells it. A step that renames a key thus
 	// changes the path that a load after Apply shows.
@@ -168,7 +169,7 @@ func (w *Warning) Unwrap() error {
 //
 // [LoadError.Error] returns the heading, then one line per problem, with
 // [niceyaml.ErrorListLimit] lines at most and a last line that counts the
-// rest. Every renderer of niceyaml shows the heading over the problems, each
+// rest. Every renderer of niceyaml shows the heading above the problems, each
 // with its details and its excerpt. [errors.Is], [errors.As], and
 // [niceyaml.Problems] reach each problem.
 type LoadError struct {
@@ -177,7 +178,7 @@ type LoadError struct {
 }
 
 // newLoadError returns a [LoadError] over rows, bound problems in load
-// order, under a heading bound to named, or nil for no row.
+// order, under a heading bound to named, or nil when rows is empty.
 func newLoadError(named *niceyaml.Source, rows []error) error {
 	if len(rows) == 0 {
 		return nil
@@ -197,8 +198,8 @@ func (e *LoadError) Unwrap() []error {
 	return []error{e.err}
 }
 
-// AsErrors returns a LoadError with an error mark above each warning of e,
-// so each reads as an error and the heading counts it as one.
+// AsErrors returns a LoadError with an error mark above each warning of e.
+// Each warning thus reads as an error, and the heading counts it as one.
 // [niceyaml.AsErrors] calls it.
 func (e *LoadError) AsErrors() error {
 	return &LoadError{err: niceyaml.AsErrors(e.err)}

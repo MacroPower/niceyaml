@@ -44,7 +44,8 @@ type Object[T any] struct {
 	Value T
 	// Node holds the document as the user wrote it.
 	Node *niceyaml.Node
-	// Binds an error with the paths of the current version.
+	// The function that binds an error with the paths of the current
+	// version.
 	bind func(error) error
 	// Name holds the name, from the field of [WithNameField].
 	Name string
@@ -54,8 +55,8 @@ type Object[T any] struct {
 	// Version holds the version that the file declares, and is empty for
 	// an unversioned document.
 	Version string
-	// UpToDate is true when a rewrite leaves the document as it is: the
-	// file declares the written version of its kind, or a newer one.
+	// UpToDate is true when the file declares the written version of its
+	// kind or a newer one. A rewrite then leaves the document as it is.
 	UpToDate bool
 }
 
@@ -115,12 +116,12 @@ func (l *loader) newSet() *Set {
 }
 
 // One returns the manifest of the kind whose Go type is T, and false when
-// the set holds none. The kind carries [Singleton], so the set holds one at
-// most.
+// the set does not hold one. The kind carries [Singleton], so the set
+// holds one at most.
 //
 // One panics when T is not the Go type of a kind of the registry, or when
-// the kind does not carry [Singleton], so the first test that runs the
-// call fails.
+// the kind does not carry [Singleton]. The first test that runs the call
+// thus fails.
 func (s *Set) One[T any]() (Object[T], bool) {
 	entry := s.reg.kindOf(reflect.TypeFor[T]())
 	if !entry.kind.cfg.singleton {
@@ -153,10 +154,10 @@ func (s *Set) All[T any]() iter.Seq[Object[T]] {
 }
 
 // Get returns the manifest of the kind whose Go type is T with the given
-// name, and false when the set holds none.
+// name, and false when the set does not hold one.
 //
 // Get panics when T is not the Go type of a kind of the registry, or when
-// the registry reads no names, as [WithNameField] gives them.
+// the registry does not read names, as [WithNameField] gives them.
 func (s *Set) Get[T any](name string) (Object[T], bool) {
 	entry := s.reg.kindOf(reflect.TypeFor[T]())
 	if !s.reg.cfg.hasNameField {
@@ -186,15 +187,15 @@ func (s *Set) Objects() iter.Seq[Object[any]] {
 }
 
 // Warnings returns the warnings of the load as a [*LoadError], or nil when
-// the load found none. Warnings returns nil for the set of a [Checked]
-// whose [Checked.Err] returns an error, because that error holds the
-// warnings.
+// the load did not find a warning. Warnings returns nil for the set of a
+// [Checked] whose [Checked.Err] returns an error, because that error holds
+// the warnings.
 func (s *Set) Warnings() error {
 	return s.warnings
 }
 
 // Sources returns the Source of each file that the load read, in load
-// order, a file without manifests included.
+// order, including a file without manifests.
 func (s *Set) Sources() []*niceyaml.Source {
 	return s.sources
 }
@@ -298,8 +299,8 @@ func (l *loader) checkCounts() {
 }
 
 // countAt returns where an error about the count of the kind of d binds.
-// That is its kind field, its version field when it has no kind field, or
-// its start when it has no type fields.
+// The place is its kind field, its version field when it does not have a
+// kind field, or its start when it does not have a type field.
 func (d *docState) countAt() niceyaml.ErrorOption {
 	reg := d.l.reg
 
@@ -314,8 +315,8 @@ func (d *docState) countAt() niceyaml.ErrorOption {
 }
 
 // missingDetails returns the details of the problem of a kind that the
-// set lacks: what the user adds, and why each directory input that
-// selected no file did so.
+// set lacks. The first detail names the document that the user should add.
+// Each other detail tells why a directory input did not select a file.
 func (l *loader) missingDetails(entry *kindEntry) []error {
 	reg := l.reg
 	written := entry.written

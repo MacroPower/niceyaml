@@ -16,9 +16,9 @@ import (
 )
 
 // prepareWork sets the working copy to a copy of doc, the document or a
-// migrated copy of it, with no field blanked. It keeps doc and locate, so
-// that a schema check can build a copy that blanks the type fields its
-// schema does not declare.
+// migrated copy of it, without a blanked field. It keeps doc and locate,
+// so that a schema check can build a copy that blanks the type fields that
+// its schema does not declare.
 func (d *docState) prepareWork(doc *niceyaml.Node, locate func(hook.Located) hook.Place) bool {
 	work, ok := d.workingCopy(doc, locate, nil)
 	if !ok {
@@ -36,7 +36,7 @@ func (d *docState) prepareWork(doc *niceyaml.Node, locate func(hook.Located) hoo
 // into the document. A nil locate leaves the location as it is, for doc
 // itself. The copy takes the unmarshalers of the registry ahead of those
 // of the Source of doc. It adds the problem of a copy that does not parse,
-// or that holds nothing after the blanking, and reports false.
+// or that is empty after the blanking, and reports false.
 func (d *docState) workingCopy(
 	doc *niceyaml.Node,
 	locate func(hook.Located) hook.Place,
@@ -111,8 +111,8 @@ func textBounds(doc *niceyaml.Node) (int, int) {
 }
 
 // hiddenFields returns the type fields that sch, the schema of a version,
-// does not declare, which the check of the schema sees blank. A schema
-// that checks nothing hides none.
+// does not declare. The check of the schema sees these fields blank. It
+// returns nil for a schema that does not check anything.
 func (r *Registry) hiddenFields(sch *schema.Schema) []paths.Path {
 	v := schemahook.Validator(sch)
 	if v == nil {
@@ -141,21 +141,24 @@ func (r *Registry) hiddenFields(sch *schema.Schema) []paths.Path {
 }
 
 // blanker blanks type fields of a document in a working copy of its
-// lines, rune by rune, so every other rune keeps its line and its column.
+// lines. It works rune by rune, so every other rune keeps its line and its
+// column.
 type blanker struct {
 	doc  *niceyaml.Node
 	src  *niceyaml.Source
 	text string
 	work []rune
-	// The rune index in work of the first rune the blanker cleared, or -1.
+	// The rune index in work of the first rune that the blanker cleared,
+	// or -1.
 	first int
 	// The byte offset in text where work starts.
 	base int
-	// The root entries the blanker cleared.
+	// The number of root entries that the blanker cleared.
 	cleared int
 }
 
-// field blanks the entry at p, a field the document writes as a scalar.
+// field blanks the entry at p, a field that the document writes as a
+// scalar.
 func (b *blanker) field(p paths.Path) {
 	if r := readField(b.doc, p); !r.found {
 		return
@@ -209,7 +212,7 @@ func (b *blanker) runeAt(pos position.Position) (int, bool) {
 }
 
 // flowComma widens the range [from, to) of an entry of a flow mapping to
-// take the comma after it, or the comma before it for the last entry.
+// include the comma after it, or the comma before it for the last entry.
 func (b *blanker) flowComma(from, to int) (int, int) {
 	i := to
 	for i < len(b.work) && (b.work[i] == ' ' || b.work[i] == '\t') {
@@ -237,8 +240,8 @@ func (b *blanker) flowComma(from, to int) (int, int) {
 }
 
 // fillEmptyRoot writes "{}" over the first blanked runes when the root
-// mapping held nothing but the blanked fields, so the copy holds an empty
-// mapping rather than nothing.
+// mapping held only the blanked fields. The copy then holds an empty
+// mapping rather than an empty document.
 func (b *blanker) fillEmptyRoot() {
 	if b.cleared == 0 || b.first < 0 || b.first+2 > len(b.work) {
 		return

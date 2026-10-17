@@ -26,7 +26,7 @@ var defaultInclude = []string{"*.yaml", "*.yml"}
 type file struct {
 	// The problem of the file as a whole, bound, or nil.
 	err error
-	// The Source of the file, or nil when it did not read.
+	// The Source of the file, or nil when the read of the file failed.
 	src *niceyaml.Source
 	// The change of the file that a plan writes, or nil.
 	plan *PlanFile
@@ -38,18 +38,18 @@ type file struct {
 	docs []*docState
 	// Where Apply writes the file.
 	target target
-	// The documents of the file that a plan does not migrate, because they
-	// fail to route.
+	// The number of documents of the file that fail to route, so a plan
+	// leaves them as they are.
 	notMigrated int
-	// A problem blocks the rewrite of the file.
+	// Whether a problem blocks the rewrite of the file.
 	blocked bool
 }
 
-// targetKind tells apart where a file came from, which decides whether
-// Apply rewrites it.
+// targetKind names the place that a file came from. The place decides
+// whether Apply rewrites the file.
 type targetKind int
 
-// The places a file comes from.
+// The places that a file comes from.
 const (
 	targetDisk targetKind = iota + 1
 	targetStdin
@@ -67,8 +67,8 @@ type target struct {
 	// input names directly.
 	path string
 	kind targetKind
-	// A walk reached the file through a link that leads outside the input
-	// directory.
+	// Whether a walk reached the file through a link that leads outside
+	// the input directory.
 	outside bool
 }
 
@@ -80,8 +80,8 @@ type pattern struct {
 }
 
 // compilePatterns returns the patterns of globs. An include pattern picks
-// files alone, so one that ends with "/" fails, as does any pattern with a
-// ".." element.
+// only files, so an include pattern that ends with "/" fails. Any pattern
+// with a ".." element fails too.
 func compilePatterns(globs []string, include bool) ([]pattern, error) {
 	patterns := make([]pattern, 0, len(globs))
 
@@ -129,7 +129,7 @@ func compilePattern(glob string, include bool) (pattern, error) {
 }
 
 // matchAny reports whether one of patterns matches rel, the slash path of
-// an entry below the input directory, which is a directory when dir is
+// an entry below the input directory. The entry is a directory when dir is
 // set.
 func matchAny(patterns []pattern, rel string, dir bool) bool {
 	return slices.ContainsFunc(patterns, func(p pattern) bool {
@@ -211,7 +211,7 @@ func prepare(ctx context.Context, in Input, out []*prepared) ([]*prepared, error
 }
 
 // inputError returns the error of an input path that the load cannot
-// stat, which names the path as the user gave it.
+// stat. The error names the path as the user gave it.
 func inputError(d *inputDef, err error) error {
 	name := filepath.Clean(d.path)
 	if d.kind == inputFS {
@@ -239,10 +239,10 @@ func cleanFSPath(p string) string {
 // reader reads the files of the inputs of a load, each once.
 type reader struct {
 	ctx context.Context
-	// The details of each directory input that selected no file.
+	// The details of each directory input that did not select a file.
 	empty []string
 	files []*file
-	// The unmarshalers of the registry, which every Source the reader
+	// The unmarshalers of the registry, which every Source that the reader
 	// builds takes ahead of the options of its input.
 	unmarshalers []niceyaml.Unmarshaler
 	// The files, Sources, and streams that the load has read, which a later
@@ -259,8 +259,8 @@ type fsKey struct {
 	path string
 }
 
-// readInputs reads the files of in, in load order. Each Source it builds
-// takes the unmarshalers us.
+// readInputs reads the files of in, in load order. Each Source that it
+// builds takes the unmarshalers in us.
 func readInputs(ctx context.Context, in Input, us []niceyaml.Unmarshaler) (*reader, error) {
 	inputs, err := prepare(ctx, in, nil)
 	if err != nil {
@@ -302,14 +302,14 @@ func readInputs(ctx context.Context, in Input, us []niceyaml.Unmarshaler) (*read
 	return r, nil
 }
 
-// fail adds the file name, which did not read, with its problem err.
+// fail adds the file name, whose read failed, with its problem err.
 func (r *reader) fail(name string, err error, t target) {
 	r.files = append(r.files, &file{err: namedSource(name).Bind(err), target: t, name: name})
 }
 
-// add adds f, a file the load read, with the problem of its encoding. A
-// Source whose text is past its byte limit holds no lines, so the load
-// reports that limit instead.
+// add adds f, a file that the load read, with the problem of its encoding.
+// A Source whose text is longer than its byte limit does not hold a line,
+// so the load reports that limit instead.
 func (r *reader) add(f *file) {
 	f.name = f.src.Name()
 
@@ -465,16 +465,16 @@ func equalFS(a, b reflect.Value) bool {
 	return equal
 }
 
-// sourceOptions returns the options of a Source the reader builds: the
-// unmarshalers of the registry, then the options of the user, then own.
-// Each later option wins.
+// sourceOptions returns the options of a Source that the reader builds:
+// the unmarshalers of the registry, then the options of the user, then
+// own. Each later option wins.
 func (r *reader) sourceOptions(user []niceyaml.SourceOption, own ...niceyaml.SourceOption) []niceyaml.SourceOption {
 	return slices.Concat([]niceyaml.SourceOption{niceyaml.WithUnmarshalers(r.unmarshalers...)}, user, own)
 }
 
-// readError returns the problem of a file that did not read: the reason
-// that the system gives, such as "permission denied", or the error of a
-// file past the byte limit.
+// readError returns the problem of a file whose read failed. The problem
+// is the reason that the system gives, such as "permission denied", or the
+// error of a file longer than the byte limit.
 func readError(err error) error {
 	if errors.Is(err, niceyaml.ErrLimit) {
 		return err
@@ -488,20 +488,20 @@ func readError(err error) error {
 }
 
 // namedSource returns an empty Source that messages name name, where a
-// problem with no document of its own binds.
+// problem without a document of its own binds.
 func namedSource(name string) *niceyaml.Source {
 	return niceyaml.NewSourceFromString("", niceyaml.WithName(name))
 }
 
-// walkEntry is one entry of a directory walk that selected it.
+// walkEntry is one entry that a directory walk selected.
 type walkEntry struct {
 	// The problem of the entry, unbound, or nil.
 	err error
 	// The slash path of the entry below the input directory.
 	rel string
-	// The path the file reads from, which a link resolves.
+	// The path that the file reads from, which a link resolves.
 	from string
-	// The entry is a link that leads outside the input directory.
+	// Whether the entry is a link that leads outside the input directory.
 	outside bool
 }
 
@@ -655,8 +655,8 @@ func (w *diskWalk) link(rel, full string) {
 }
 
 // below returns the slash path of resolved, a file with every link
-// resolved, below the directory the input leads to, and whether one of the
-// directories above the file is that directory.
+// resolved, below the directory that the input leads to. It also reports
+// whether one of the directories above the file is that directory.
 func (w *diskWalk) below(resolved string) (string, bool) {
 	for dir := filepath.Dir(resolved); ; {
 		info, err := os.Stat(dir)
@@ -689,7 +689,8 @@ func linkTarget(full string) string {
 }
 
 // danglingProblem returns the problem of a link whose target, as the
-// link writes it, is gone. It matches err, which matches [fs.ErrNotExist].
+// link writes it, does not exist. It matches err, which matches
+// [fs.ErrNotExist].
 func danglingProblem(written string, err error) error {
 	return niceyaml.Invalid(&problemError{
 		msg:   fmt.Sprintf("links to %s, which does not exist", escape.Control(written)),

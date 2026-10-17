@@ -22,8 +22,8 @@ import (
 type Kind struct {
 	// The Go type of the current version.
 	typ reflect.Type
-	// Decodes a document into a value of typ, as [niceyaml.Node.Decode]
-	// does.
+	// The function that decodes a document into a value of typ, as
+	// [niceyaml.Node.Decode] does.
 	decode func(ctx context.Context, n *niceyaml.Node, opts []niceyaml.DecodeOption) (any, error)
 	name   string
 	cfg    kindConfig
@@ -89,10 +89,10 @@ func Version(name string, opts ...VersionOption) KindOption {
 }
 
 // Unversioned is a [KindOption] that adds the unversioned layout of the
-// kind, which reads the documents without type fields. It takes the place
-// of the oldest version, so it comes first among the versions, and it takes
-// the options of [Version] except [KindName], as "Adopting Versions" in the
-// package documentation describes.
+// kind. The layout reads the documents without type fields, as the Routing
+// section of the package documentation describes. It takes the place of
+// the oldest version, so it must come first among the versions. It takes
+// the options of [Version] except [KindName].
 func Unversioned(opts ...VersionOption) KindOption {
 	return func(c *kindConfig) {
 		v := &versionConfig{unversioned: true}
@@ -105,18 +105,19 @@ func Unversioned(opts ...VersionOption) KindOption {
 	}
 }
 
-// Claim is a [KindOption] that loads each document without a kind field
-// that m accepts as the kind. A load asks the claims of the kinds in the
-// order of [WithKinds], and the first that accepts the document wins. A
-// matcher that returns an error fails the document with that error.
+// Claim is a [KindOption] that loads each document as the kind when the
+// document does not have a kind field and m accepts it. A load asks the
+// claims of the kinds in the order of [WithKinds], and the first that
+// accepts the document wins. A matcher that returns an error fails the
+// document with that error.
 func Claim(m matcher.Matcher) KindOption {
 	return func(c *kindConfig) {
 		c.claim = m
 	}
 }
 
-// Required is a [KindOption] that fails a load whose set holds no manifest
-// of the kind.
+// Required is a [KindOption] that fails a load whose set does not hold a
+// manifest of the kind.
 func Required() KindOption {
 	return func(c *kindConfig) {
 		c.required = true
@@ -165,10 +166,10 @@ type versionConfig struct {
 	loosened    bool
 }
 
-// Schema is a [VersionOption] that gives the version the schema ref names.
-// A load checks each document that declares the version, or that passes
-// through it on the way to the current version, against the schema. A
-// version without a schema skips the check.
+// Schema is a [VersionOption] that gives the version the schema that ref
+// names. A load checks each document that declares the version, or that
+// passes through it on the way to the current version, against the
+// schema. A version without a schema skips the check.
 func Schema(ref schema.Ref) VersionOption {
 	return func(c *versionConfig) {
 		c.schema, c.hasSchema = ref, true
@@ -183,16 +184,17 @@ type step struct {
 
 // Migrate is a [VersionOption] that adds a step to the version, after the
 // steps before it. The steps of a version bring a document from the version
-// before it, so the oldest version takes none. The step calls fn once for
-// each place that p selects, in document order, and a path that selects
-// nothing calls it zero times. The path starts at `$` and holds no `~`.
-// "Versions" in the package documentation describes the calls.
+// before it, so the oldest version must not take a step. The step calls fn
+// once for each place that p selects, in document order, and zero times
+// when p selects zero places. The path must start at `$` and must not hold
+// a `~`. The Versions section of the package documentation describes the
+// calls.
 //
 // The step runs as one [edit.Doc.Apply], whose messages name the version.
 // [edit.Node.Decode] in fn applies the unmarshalers of [WithUnmarshalers].
 // It leaves out the decode options of the registry and the kind, which
-// describe the current version. Fn should pass the ctx it got to Decode,
-// so the warnings of the decode join the warnings of the load.
+// describe the current version. Fn should pass the ctx that it got to
+// Decode, so the warnings of the decode join the warnings of the load.
 func Migrate(p paths.Path, fn edit.Func) VersionOption {
 	return func(c *versionConfig) {
 		c.steps = append(c.steps, step{path: p, fn: fn})
@@ -219,7 +221,8 @@ func KindName(name string) VersionOption {
 }
 
 // Written is a [VersionOption] that marks the version that a rewrite
-// writes. A kind without the mark writes its oldest version.
+// writes. For a kind without the mark, a rewrite writes the oldest
+// version.
 func Written() VersionOption {
 	return func(c *versionConfig) {
 		c.written = true

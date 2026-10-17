@@ -17,22 +17,22 @@ import (
 	"go.jacobcolvin.com/niceyaml/line"
 )
 
-// PlanMigration reads the documents of in, runs the checks of a load on
-// each, and works out the new text of each file whose documents declare a
-// version older than the written version of their kind. It writes nothing,
-// and [Plan.Apply] writes the files. The options apply as they do to a
-// load, and the plan skips the checks across the set.
+// PlanMigration reads the documents of in and runs the checks of a load on
+// each. It computes the new text of each file whose documents declare a
+// version older than the written version of their kind. It does not write
+// a file, and [Plan.Apply] writes the files. The options apply as they do
+// to a load, and the plan skips the checks across the set.
 //
-// A document that fails to parse, or that routes and then fails a check,
-// blocks its file, which the plan leaves as it is. A document that fails
-// to route keeps its text, and the other documents of its file still
-// migrate. The plan reports each problem in [Plan.Err], so the other files
-// still migrate.
+// A document blocks its file when it fails to parse, or when it routes and
+// then fails a check. The plan leaves a blocked file as it is. A document
+// that fails to route keeps its text, and the other documents of its file
+// still migrate. The plan reports each problem in [Plan.Err], so the other
+// files still migrate.
 //
-// PlanMigration returns an error and no plan in two cases alone. One is a
-// ctx that ends. The other is a load of the same input that fails before
-// it reads a file, as for a pattern that does not parse or an input path
-// that does not exist.
+// PlanMigration returns a nil plan and an error only in two cases. One is
+// a ctx that ends. The other is a load of the same input that fails before
+// it reads a file. A pattern that does not parse and an input path that
+// does not exist each fail a load that way.
 func (r *Registry) PlanMigration(ctx context.Context, in Input, opts ...LoadOption) (*Plan, error) {
 	cfg := newLoadConfig(opts)
 	cfg.plan = true
@@ -46,12 +46,13 @@ func (r *Registry) PlanMigration(ctx context.Context, in Input, opts ...LoadOpti
 	return l.newPlan(), nil
 }
 
-// Plan is the rewrite that [Registry.PlanMigration] works out: the new text
-// of each file that changes, and the problems that a load of the files
-// finds once [Plan.Apply] writes them. A Plan writes nothing.
+// Plan is the rewrite that [Registry.PlanMigration] computes. It holds the
+// new text of each file that changes, and the problems that a load of the
+// files finds after [Plan.Apply] writes them. Apply is the only method of
+// a Plan that writes a file.
 //
 // The methods of a Plan are safe for concurrent use, but Apply writes each
-// file once, so a program calls it once.
+// file once, so a program should call it once.
 //
 // Receive instances from [Registry.PlanMigration].
 type Plan struct {
@@ -82,8 +83,8 @@ type PlanFile struct {
 	docs     []migratedDoc
 	// The index of the file in the load.
 	index int
-	// The documents of the file that do not migrate, because they fail to
-	// route.
+	// The number of documents of the file that fail to route, so the
+	// rewrite leaves them as they are.
 	notMigrated int
 }
 
@@ -140,9 +141,10 @@ func (l *loader) newPlan() *Plan {
 	return p
 }
 
-// Files returns the files that the plan changes, in load order. A file
-// that is up to date, or that a problem blocks, has no entry. A file that
-// [Plan.Apply] cannot write has one too, so a dry run shows its diff.
+// Files returns the files that the plan changes, in load order. It leaves
+// out each file that is up to date or that a problem blocks. It also
+// returns each file that [Plan.Apply] cannot write, so a dry run shows its
+// diff.
 func (p *Plan) Files() []*PlanFile {
 	return p.files
 }
@@ -165,16 +167,16 @@ func (p *Plan) Summary() string {
 	return p.counts.text("to migrate") + ", nothing written"
 }
 
-// Warnings returns the warnings that remain once [Plan.Apply] writes the
-// files, as a [*LoadError], or nil when none remains or [Plan.Err] returns
-// an error.
+// Warnings returns the warnings that remain after [Plan.Apply] writes the
+// files, as a [*LoadError]. It returns nil when the files do not hold a
+// warning after Apply, or when [Plan.Err] returns an error.
 func (p *Plan) Warnings() error {
 	return p.warnings
 }
 
 // Err returns the problems that fail the plan as a [*LoadError] that holds
-// the warnings too, or nil. The problems are each problem that blocks a
-// file, each document that fails to route, and each warning that
+// the warnings too, or nil. It holds each problem that blocks a file, the
+// problem of each document that fails to route, and each warning that
 // [WithWarningsAsErrors] makes an error.
 func (p *Plan) Err() error {
 	return p.err
@@ -182,7 +184,8 @@ func (p *Plan) Err() error {
 
 // StepCalls returns the number of calls of each step of the registry that
 // the plan made, with 0 for a step that never ran. A test that plans the
-// files of each release finds a step whose path selects nothing.
+// files of each release can thus find a step whose path never selects a
+// value.
 func (p *Plan) StepCalls() map[StepID]int {
 	return maps.Clone(p.calls)
 }
@@ -197,11 +200,12 @@ func (f *PlanFile) After() []byte {
 	return f.after
 }
 
-// Removals returns the values that the rewrite deletes from the file as a
+// Removals returns the values that the rewrite deletes from the file, or
+// nil when the rewrite does not delete a value. It returns them as a
 // [*LoadError] of the warnings that a load reports for them, bound in the
-// text that the plan read, or nil when the rewrite deletes nothing. Neither
-// the filter of [WithWarningFilter] nor [WithWarningsAsErrors] applies, so
-// a rewrite never deletes a value without a row that says so.
+// text that the plan read. Removals does not apply the filter of
+// [WithWarningFilter] or [WithWarningsAsErrors], so each value that a
+// rewrite deletes has a row that says so.
 func (f *PlanFile) Removals() error {
 	return newLoadError(namedSource(f.f.name), f.removals)
 }
@@ -210,8 +214,8 @@ func (f *PlanFile) Removals() error {
 // in `config/hours.yaml: Hours "weekday" from cafe.jacobcolvin.com/v1alpha1
 // to cafe.jacobcolvin.com/v1`. An indented row below the line of a
 // document names each value that the rewrite deletes, with the reason of
-// its step. A last line counts the documents of the file that do not
-// migrate.
+// its step. When the file holds documents that do not migrate, a last
+// line counts them.
 func (f *PlanFile) Header() string {
 	var b strings.Builder
 
@@ -237,9 +241,10 @@ func (f *PlanFile) Header() string {
 }
 
 // Diff returns the change of the file as a view of its hunks, with the
-// line numbers of the file and lines of context around each hunk. A file
-// whose Source hides its excerpts, as [niceyaml.WithExcerpts] asks, shows
-// no line, and its view holds one row that counts the lines that change.
+// line numbers of the file and lines of context around each hunk. When
+// [niceyaml.WithExcerpts] hides the excerpts of the Source, the view does
+// not show a line of the file. It holds one row instead, which counts the
+// lines that change.
 func (f *PlanFile) Diff(lines int) *line.View {
 	after, _ := hook.Reread(f.f.src, string(f.after)).(*niceyaml.Source) //nolint:errcheck // The hook returns a Source.
 	result := diff.Diff(f.f.src.Lines(), after.Lines())
@@ -283,10 +288,10 @@ func removalPath(rm edit.Removal) string {
 }
 
 // planFile decides what the plan does with f and adds the problems of its
-// documents to the report. A document that fails to parse, or that routes
-// and then fails a check, blocks the file. A file without a document that
-// migrates is up to date. Any other file changes, unless its new text
-// passes a limit of its Source.
+// documents to the report. A document blocks the file when it fails to
+// parse, or when it routes and then fails a check. A file without a
+// document that migrates is up to date. Any other file changes, unless its
+// new text exceeds a limit of its Source.
 func (l *loader) planFile(i int, f *file) {
 	var migrating []*docState
 
@@ -355,8 +360,9 @@ func (l *loader) planFile(i int, f *file) {
 	f.plan = pf
 }
 
-// blocks reports whether the document blocks the rewrite of its file,
-// because it fails to parse, or it routes and then fails a check.
+// blocks reports whether the document blocks the rewrite of its file. A
+// document blocks it when it fails to parse, or when it routes and then
+// fails a check.
 func (d *docState) blocks() bool {
 	if d.doc.Err() != nil {
 		return true
@@ -365,9 +371,9 @@ func (d *docState) blocks() bool {
 	return d.routed && !d.passed && slices.ContainsFunc(d.problems, niceyaml.HasErrors)
 }
 
-// label returns the document as a header names it: its kind and its name
-// when the registry reads names, and its kind after its place in a file
-// of several otherwise.
+// label returns the document as a header names it. The label is the kind
+// and the name when the registry reads names. Otherwise it is the kind,
+// after the place of the document when the file holds several.
 func (d *docState) label() string {
 	name := d.route.kind.kind.name
 	if d.hasName {
@@ -402,10 +408,10 @@ func newText(text string, docs []*docState) string {
 }
 
 // checkLimits returns the problem of after, the new text of the file of
-// src, when it passes a limit of src, so the next load reads every file
-// that Apply writes. The problem matches [niceyaml.ErrLimit], and
-// [niceyaml.IsInvalid] does not report it, because a load of the file
-// passes.
+// src, when it exceeds a limit of src. The check keeps every file that
+// Apply writes readable by the next load. The problem matches
+// [niceyaml.ErrLimit]. A load of the file passes, so [niceyaml.IsInvalid]
+// does not report the problem.
 func checkLimits(src *niceyaml.Source, after string) error {
 	bytes, depth := hook.Limits(src)
 

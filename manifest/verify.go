@@ -21,10 +21,10 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// Verify loads and compiles the schema of each version, and returns an
+// Verify loads and compiles the schema of each version. It returns an
 // error that names each version whose schema fails, with the error of the
 // schema. A load fails each document that reaches such a version, so a
-// test calls Verify to find the mistake before a user does:
+// test should call Verify to find the mistake before a user does:
 //
 //	func TestRegistry(t *testing.T) {
 //		t.Parallel()
@@ -47,28 +47,28 @@ import (
 // The check follows the chains of schemas that the Deprecations section
 // describes. It does not look inside a branch or behind a $ref to another
 // document. A branch is a schema under anyOf, oneOf, not, if, then, else,
-// or dependentSchemas. Verify reports each type field that a branch
-// declares or requires, and each on a path through such a $ref, when the
-// schema does not also declare the field outside them:
+// or dependentSchemas. A type field that the schema also declares outside
+// them passes. Verify reports each other type field that a branch declares
+// or requires, or that lies on a path through such a $ref:
 //
 //	MenuItem v1: $.kind: a branch or a $ref to another document might read it
 //
-// Verify skips each version that [Unversioned] adds, whose documents
-// hold no type fields.
+// Verify skips each version that [Unversioned] adds, because the documents
+// of such a version do not hold type fields.
 //
 // # Deprecations
 //
 // Verify also reports each use of the deprecated keyword in the schema of
-// the current version that leaves a user no way to follow the warning:
+// the current version whose warning a user cannot follow:
 //
-//   - A property that the schema requires and marks deprecated. The user
-//     cannot remove it without failing the load:
+//   - A property that the schema requires and marks deprecated. A removal
+//     of the property fails the load:
 //
 //     MenuItem v1: $.spec.legacyPricing: required and deprecated
 //
 //   - A property that the schema deprecates and the schema of the written
 //     version requires. A file at the written version warns about it, and
-//     the user cannot remove it until the mark moves:
+//     the user can remove it only after [Written] moves:
 //
 //     Hours v2: $.spec.notes: deprecated, but v1 requires it
 //
@@ -78,16 +78,16 @@ import (
 //
 //     Hours v1: $: the root schema is deprecated
 //
-// A chain of $ref, $dynamicRef, and allOf with no branch on the way joins
-// schemas. So does the anyOf that gen writes around the schema of a
+// A chain of $ref, $dynamicRef, and allOf without a branch on the way
+// joins schemas. So does the anyOf that gen writes around the schema of a
 // pointer, whose other branch admits only null. A property schema marks
-// its property deprecated or required
-// through its own keywords and those of each schema that such a chain
-// reaches from it. The root schema is the schema of the version and each
-// schema that such a chain reaches from it. Verify matches the properties
-// of two versions by path, so it misses a property that a step renames
-// between them. It follows each $ref inside the schema document, and
-// passes over a $ref to another document.
+// its property deprecated or required through its own keywords and those
+// of each schema that such a chain reaches from it. The root schema is the
+// schema of the version and each schema that such a chain reaches from it.
+//
+// Verify matches the properties of two versions by path, so it misses a
+// property that a step renames between them. It follows each $ref inside
+// the schema document, and skips a $ref to another document.
 //
 // # Defaults
 //
@@ -99,20 +99,20 @@ import (
 //	Cafe v1: $.spec.seats: required, so its default 20 never applies
 //
 // The defaults come from the [niceyaml.WithDefaults] options among the
-// decode options of the registry and the kind. A document replaces whole
-// every value but a struct, which a mapping merges into field by field,
-// and a pointer to one. The walk follows properties, items, and
+// decode options of the registry and the kind. A document replaces every
+// value whole, except a struct and a pointer to a struct, which a mapping
+// merges into field by field. The walk follows properties, items, and
 // additionalProperties through the chains of schemas. Under an item, a
 // map value, or a nil pointer, it reads the defaults of the type. Under a
 // pointer that a parent function sets, it reads the value that the
 // function set.
 //
-// A function of a parent type might set a field of a child type, as one
-// of CafeSpec sets the port of its kitchen Printer. A detail then names
-// the default that the child type gives itself, when the default at the
-// place differs. The omitzero option on the field makes it optional at
-// each place of the child type. A panic in a function of WithDefaults reaches the
-// caller.
+// A function of a parent type might set a field of a child type, as the
+// function of CafeSpec sets the port of its kitchen Printer. A detail then
+// names the default that the child type gives itself, when the default at
+// the place differs. The omitzero option on the field makes it optional
+// at each place of the child type. A panic in a function of WithDefaults
+// reaches the caller.
 func (r *Registry) Verify(ctx context.Context) error {
 	var errs []error
 
@@ -145,7 +145,7 @@ func (r *Registry) Verify(ctx context.Context) error {
 // verifyTypeFields returns the problems of the type fields in the schema
 // of each version of entry, as [Registry.Verify] describes. The compiled
 // map holds the validator of each version whose schema compiled, or nil
-// for a schema that checks nothing.
+// for a schema that does not check anything.
 func (r *Registry) verifyTypeFields(entry *kindEntry, compiled map[*versionEntry]*jsonschema.Validator) []error {
 	var errs []error
 
@@ -189,7 +189,7 @@ func (r *Registry) verifyTypeFields(entry *kindEntry, compiled map[*versionEntry
 // verifyDeprecations returns the problems of the deprecated keywords in
 // the schema of the current version of entry, as [Registry.Verify]
 // describes. The compiled map holds the validator of each version whose
-// schema compiled, or nil for a schema that checks nothing.
+// schema compiled, or nil for a schema that does not check anything.
 func verifyDeprecations(entry *kindEntry, compiled map[*versionEntry]*jsonschema.Validator) []error {
 	current := entry.versions[len(entry.versions)-1]
 
@@ -241,7 +241,7 @@ func verifyDeprecations(entry *kindEntry, compiled map[*versionEntry]*jsonschema
 }
 
 // authorError returns the problem msg of a registry, with each of details
-// as a detail. The author of the registry is at fault for it, not a
+// as a detail. The author of the registry is at fault for it rather than a
 // document.
 func authorError(msg string, details ...string) error {
 	errs := make([]error, 0, len(details))
@@ -259,7 +259,8 @@ type schemaDoc struct {
 	byPointer map[string]*jsonschema.Schema
 	byAnchor  map[string]*jsonschema.Schema
 	root      *jsonschema.Schema
-	// The document ignores each sibling of a $ref, as Draft-07 does.
+	// Whether the document ignores each sibling of a $ref, as Draft-07
+	// does.
 	refOnly bool
 }
 
@@ -293,7 +294,7 @@ func newSchemaDoc(v *jsonschema.Validator) *schemaDoc {
 }
 
 // resolve returns the schema that ref names inside the document, or nil
-// for a ref to another document or to nothing.
+// for a ref to another document or to a place that does not exist.
 func (d *schemaDoc) resolve(ref string) *jsonschema.Schema {
 	frag, ok := strings.CutPrefix(ref, "#")
 	if !ok {
@@ -312,11 +313,11 @@ func (d *schemaDoc) resolve(ref string) *jsonschema.Schema {
 	return d.byAnchor[frag]
 }
 
-// chain returns the schemas whose keywords apply to a value along with
-// the schema s itself. Each schema that a chain of $ref, $dynamicRef, and
-// allOf reaches from s is one of them, and so is the branch of an anyOf
-// that [nullable] reads through. Under Draft-07, a schema with a $ref
-// adds only the schema that the $ref reaches.
+// chain returns the schema s and each schema whose keywords apply to a
+// value along with s. Each schema that a chain of $ref, $dynamicRef, and
+// allOf reaches from s is such a schema. So is the branch of an anyOf that
+// [nullable] reads through. Under Draft-07, a schema with a $ref adds only
+// the schema that the $ref reaches.
 func (d *schemaDoc) chain(s *jsonschema.Schema) []*jsonschema.Schema {
 	out, _ := d.chainOf(s)
 
@@ -403,14 +404,15 @@ func (d *schemaDoc) marked(s *jsonschema.Schema) bool {
 // schemaField is what a schema document says about one value, as
 // [schemaDoc.field] finds it.
 type schemaField struct {
-	// The schema declares the value, through properties for a name or
-	// items for an index.
+	// Whether the schema declares the value, through properties for a name
+	// or items for an index.
 	declared bool
-	// A required keyword names the value.
+	// Whether a required keyword names the value.
 	required bool
-	// A schema that the walk does not read might read the value. Such a
-	// schema is a branch that declares or requires the value, or one behind
-	// a $ref or $dynamicRef on the way that the document does not resolve.
+	// Whether a schema that the walk does not read might read the value.
+	// Such a schema is a branch that declares or requires the value, or
+	// one behind a $ref or $dynamicRef on the way that the document does
+	// not resolve.
 	unsure bool
 }
 
@@ -466,9 +468,9 @@ func (d *schemaDoc) field(p paths.Path) schemaField {
 }
 
 // below returns the chain of the schema that s gives the value at sel, a
-// name or an index, or nil when s gives the value none. It also reports
-// whether that chain holds a ref that the document does not resolve, as
-// [schemaDoc.chainOf] does.
+// name or an index, or nil when s does not give the value a schema. It
+// also reports whether that chain holds a ref that the document does not
+// resolve, as [schemaDoc.chainOf] does.
 func (d *schemaDoc) below(s *jsonschema.Schema, sel paths.Selector) ([]*jsonschema.Schema, bool) {
 	var sub *jsonschema.Schema
 
@@ -492,9 +494,9 @@ func (d *schemaDoc) below(s *jsonschema.Schema, sel paths.Selector) ([]*jsonsche
 // each branch of a schema that such a chain holds. A branch is a schema
 // under anyOf, oneOf, not, if, then, else, or dependentSchemas. Its
 // keywords apply to a value in some documents and not in others. The
-// anyOf that [nullable] reads through adds no branch, because the chain
-// holds its other branch already. The result also reports whether a
-// chain holds a ref that the document does not resolve.
+// chain already holds the other branch of the anyOf that [nullable] reads
+// through, so that anyOf does not add a branch. The result also reports
+// whether a chain holds a ref that the document does not resolve.
 func (d *schemaDoc) branches(group []*jsonschema.Schema) ([]*jsonschema.Schema, bool) {
 	var out []*jsonschema.Schema
 
@@ -525,8 +527,8 @@ func (d *schemaDoc) branches(group []*jsonschema.Schema) ([]*jsonschema.Schema, 
 }
 
 // branchesOf returns the branches of s, as [schemaDoc.branches] names
-// them, in no fixed order. It holds nil for each branch keyword that s
-// leaves out.
+// them. The order is not fixed. The result holds nil for each branch
+// keyword that s leaves out.
 func branchesOf(s *jsonschema.Schema) []*jsonschema.Schema {
 	var out []*jsonschema.Schema
 
@@ -542,8 +544,8 @@ func branchesOf(s *jsonschema.Schema) []*jsonschema.Schema {
 }
 
 // item returns the schema that prefixItems, items, or additionalItems
-// gives the element at index i of an array that s checks, or nil when
-// none of them gives one.
+// gives the element at index i of an array that s checks. It returns nil
+// when s does not give the element a schema through one of these keywords.
 func item(s *jsonschema.Schema, i int) *jsonschema.Schema {
 	switch {
 	case i < len(s.PrefixItems):
@@ -634,11 +636,11 @@ func (d *schemaDoc) collect(
 	}
 }
 
-// verifyDefaults returns a problem for each property that the schema of
-// the current version of entry requires, that the document replaces
-// whole, and whose default is not zero, as [Registry.Verify] describes.
-// The compiled map holds the validator of each version whose schema
-// compiled.
+// verifyDefaults returns the problems of the defaults of entry, as the
+// Defaults section of [Registry.Verify] describes. Each problem names a
+// property that the schema of the current version requires, that the
+// document replaces whole, and whose default is not zero. The compiled
+// map holds the validator of each version whose schema compiled.
 func (r *Registry) verifyDefaults(entry *kindEntry, compiled map[*versionEntry]*jsonschema.Validator) []error {
 	current := entry.versions[len(entry.versions)-1]
 
@@ -683,8 +685,8 @@ type defaultsKey struct {
 // walk reads the value of type t at path, which starts from v, with the
 // schema s. The walk follows properties, items, additionalProperties,
 // and each schema in the chain of s. A pointer reads its target, which
-// starts from the value the pointer holds, or from the defaults of its
-// type for a nil pointer.
+// starts from the value that the pointer holds, or from the defaults of
+// its type for a nil pointer.
 func (w *defaultsWalk) walk(s *jsonschema.Schema, t reflect.Type, v reflect.Value, path paths.Path) {
 	for t.Kind() == reflect.Pointer {
 		if v.IsNil() {
@@ -754,7 +756,7 @@ func (w *defaultsWalk) fields(group []*jsonschema.Schema, t reflect.Type, v refl
 }
 
 // defaultProblem returns the problem of the field f at path, which the
-// schema requires though its default is not zero. When the default at
+// schema requires although its default is not zero. When the default at
 // path differs from the one that the type that declares f gives itself, a
 // detail says so.
 func (w *defaultsWalk) defaultProblem(path paths.Path, f structField) error {
@@ -782,7 +784,8 @@ type structField struct {
 
 // fieldsOf returns each field that a decode of v, a struct of type t,
 // reads by name, with the fields of each struct that t holds inline. It
-// leaves out the fields the decoder skips and those it cannot set.
+// leaves out the fields that the decoder skips and those that it cannot
+// set.
 func fieldsOf(t reflect.Type, v reflect.Value) []structField {
 	var out []structField
 

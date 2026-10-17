@@ -7,20 +7,20 @@ import (
 	"os"
 )
 
-// writable reports whether the process can write the file at path. The
-// mode of the file decides on this platform.
+// writable reports whether the process can write the file at path. It
+// reports true on this platform, so the mode of the file decides.
 func writable(string) bool {
 	return true
 }
 
 // linkCount returns the number of hard links of the file that info
-// describes. This platform reports one.
+// describes. It returns 1 on this platform.
 func linkCount(fs.FileInfo) int {
 	return 1
 }
 
 // keepOwner gives tmp the owner and the group of the file that info
-// describes. This platform sets neither.
+// describes. It does not set them on this platform.
 func keepOwner(*os.File, fs.FileInfo) error {
 	return nil
 }

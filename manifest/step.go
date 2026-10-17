@@ -29,7 +29,7 @@ func (id StepID) String() string {
 	return fmt.Sprintf("%s %s step %d", id.Kind, id.Version, id.Step)
 }
 
-// migrate runs the steps of each version after the one the document
+// migrate runs the steps of each version after the one that the document
 // declares, and checks the result against the schema of each. The working
 // copy then holds the document in the layout of the current version. It
 // reports whether the document reached the current version.
@@ -140,8 +140,9 @@ func callStep(ctx context.Context, id StepID, fn edit.Func, n *edit.Node) (err e
 	return fn(ctx, n)
 }
 
-// setTypeFields sets the type fields of ed to those of v: the kind field
-// first, so a version field that the document lacks goes above it.
+// setTypeFields sets the type fields of ed to those of v, and reports
+// whether the writes passed. It sets the kind field first, so a version
+// field that the document lacks goes above it.
 func (d *docState) setTypeFields(ctx context.Context, ed *edit.Doc, v *versionEntry) bool {
 	cfg := &d.l.reg.cfg
 	label := d.l.reg.label(v)
@@ -166,9 +167,10 @@ func (d *docState) setTypeFields(ctx context.Context, ed *edit.Doc, v *versionEn
 }
 
 // removals adds the warning of each value that a step of v removed. A
-// value that a rewrite deletes carries the migrate hint. A step newer than
-// the written version deletes nothing in a rewrite, so its warning stays a
-// warning in strict mode.
+// value that a rewrite deletes carries the migrate hint. A rewrite does not
+// delete a value that a step of a version later than the written version
+// removes. The warning about such a value thus stays a warning in strict
+// mode.
 func (d *docState) removals(removed []edit.Removal, v *versionEntry) {
 	written := v.index <= d.route.kind.written.index
 

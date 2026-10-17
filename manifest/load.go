@@ -21,14 +21,14 @@ import (
 //   - [WithSetChecks]
 type LoadOption func(*loadConfig)
 
-// loadConfig holds the settings each [LoadOption] configures.
+// loadConfig holds the settings that each [LoadOption] configures.
 type loadConfig struct {
 	filter      func(*Warning) bool
 	strict      bool
 	noSetChecks bool
-	// The checks run for a plan, which migrates a document at a version
-	// that a removal names, and reports each file once it knows whether the
-	// plan rewrites it.
+	// Whether the checks run for a plan. A plan migrates a document at a
+	// version that a removal names. The load reports each file after it
+	// knows whether the plan rewrites the file.
 	plan bool
 }
 
@@ -79,8 +79,8 @@ func WithSetChecks(enabled bool) LoadOption {
 // Load reads the documents of in and returns the [Set] of their
 // manifests. It checks every file and every document before it returns,
 // and a problem in one does not stop the others. A load that fails returns
-// a [*LoadError] that holds every error and every warning in load order,
-// and no set. A load that passes returns its warnings from
+// a nil set and a [*LoadError] that holds every error and every warning in
+// load order. A load that passes returns its warnings from
 // [Set.Warnings]. [Registry.Check] runs the same checks and returns the
 // manifests that pass beside the problems.
 //
@@ -89,12 +89,12 @@ func WithSetChecks(enabled bool) LoadOption {
 // or [Reader] input. A lone [Sources] input that holds one Source gives
 // the name of that Source. Any other load leaves the name out.
 //
-// Load fails before it reads a file for a pattern that does not parse,
-// with an error that matches
-// [go.jacobcolvin.com/niceyaml/schema/matcher.ErrInvalidPattern], and
-// for an input path that does not exist, with an error that matches
-// [fs.ErrNotExist]. A load whose ctx ends fails with an error that matches
-// ctx.Err().
+// A pattern that does not parse fails Load before it reads a file, with an
+// error that matches
+// [go.jacobcolvin.com/niceyaml/schema/matcher.ErrInvalidPattern]. An input
+// path that does not exist also fails Load before it reads a file, with an
+// error that matches [fs.ErrNotExist]. A load whose ctx ends fails with an
+// error that matches ctx.Err().
 func (r *Registry) Load(ctx context.Context, in Input, opts ...LoadOption) (*Set, error) {
 	c, err := r.Check(ctx, in, opts...)
 	if err != nil {
@@ -109,8 +109,8 @@ func (r *Registry) Load(ctx context.Context, in Input, opts ...LoadOption) (*Set
 }
 
 // Check reads the documents of in and runs the checks of [Registry.Load].
-// It returns the manifests that pass beside the problems of the load, so
-// an editor can show the problems of each file and still use the
+// It returns the manifests that pass beside the problems of the load. An
+// editor can thus show the problems of each file and still use the
 // manifests that pass. [Checked.Err] returns the error that Load returns
 // for the same input.
 //
@@ -172,8 +172,8 @@ type Checked struct {
 	warnings error
 }
 
-// Set returns the manifests of the documents that hold no error, in load
-// order. A document holds an error when one of its own checks fails, or
+// Set returns the manifests of the documents that do not hold an error, in
+// load order. A document holds an error when one of its own checks fails, or
 // when a later error binds in it.
 //
 // The checks across the set bind an error in each manifest of a
@@ -182,29 +182,30 @@ type Checked struct {
 // a function of [WithCheck] binds with [Object.Bind] binds in the document
 // of the Object. [WithWarningsAsErrors] binds each error that it makes
 // from a warning in the document of the warning. An error of a whole file
-// or of the whole set, such as a [Required] kind that the set lacks, binds
-// in no document and removes no manifest.
+// or of the whole set does not bind in a document and does not remove a
+// manifest. A [Required] kind that the set lacks causes such an error.
 //
 // When [Checked.Err] returns nil, the set is the one that [Registry.Load]
 // returns. When Err returns an error, the set might lack a Required kind.
 // It might also hold a manifest with a problem that only a function of
 // WithCheck finds, such as a reference that dangles. Those functions run
-// only when the documents and the other checks across the set find no
-// error. They run before WithWarningsAsErrors turns warnings into errors.
+// only when the documents and the other checks across the set do not find
+// an error. They run before WithWarningsAsErrors turns warnings into
+// errors.
 func (c *Checked) Set() *Set {
 	return c.set
 }
 
 // Err returns the problems of the load as a [*LoadError] that holds the
-// warnings too, or nil when the load found no error. It is the error that
-// [Registry.Load] returns.
+// warnings too, or nil when the load did not find an error. It is the
+// error that [Registry.Load] returns.
 func (c *Checked) Err() error {
 	return c.err
 }
 
 // Warnings returns the warnings of the load as a [*LoadError], or nil when
-// the load found none or [Checked.Err] returns an error. The Warnings
-// method of the set from [Checked.Set] returns the same.
+// the load did not find a warning or [Checked.Err] returns an error. The
+// Warnings method of the set from [Checked.Set] returns the same.
 func (c *Checked) Warnings() error {
 	return c.warnings
 }
@@ -218,7 +219,7 @@ type loader struct {
 	// The number of calls of each step that ran.
 	calls map[StepID]int
 	cfg   loadConfig
-	// The details of each directory input that selected no file.
+	// The details of each directory input that did not select a file.
 	empty []string
 	files []*file
 	docs  []*docState
@@ -247,9 +248,10 @@ type row struct {
 	// the whole file.
 	index int
 	pos   position.Position
-	// The problem has no position, so it sorts first within its document.
+	// Whether the problem lacks a position. Such a problem sorts first
+	// within its document.
 	unplaced bool
-	// The problem is a warning that strict mode leaves a warning.
+	// Whether the problem is a warning that strict mode leaves a warning.
 	lenient bool
 }
 
@@ -343,8 +345,8 @@ func (l *loader) writesTypeField(doc *niceyaml.Node) bool {
 	return k.found || k.err != nil
 }
 
-// add adds the problems of err to the report, each as a row with the sort
-// key of tmpl.
+// add adds the problems of tmpl.err to the report, each as a row with the
+// sort key of tmpl.
 func (l *loader) add(tmpl *row) {
 	for problem := range niceyaml.Problems(tmpl.err) {
 		r := *tmpl
@@ -361,8 +363,8 @@ func (l *loader) add(tmpl *row) {
 }
 
 // locate returns the index of the file and of the document of problem, a
-// row bound in a file of the load, or the number of files and -1 for one
-// bound in none.
+// row bound in a file of the load. For a problem that does not bind in a
+// file of the load, it returns the number of files and -1.
 func (l *loader) locate(problem niceyaml.ErrorTree) (int, int) {
 	src := problem.Source()
 
@@ -406,9 +408,9 @@ func (l *loader) docOf(r *row) *docState {
 	return r.doc
 }
 
-// finishRows returns rows in load order, with the filter of
-// [WithWarningFilter] and the strict mode of [WithWarningsAsErrors]
-// applied to the warnings, and each warning wrapped in a [*Warning].
+// finishRows returns rows in load order, and wraps each warning in a
+// [*Warning]. It applies the filter of [WithWarningFilter] and the strict
+// mode of [WithWarningsAsErrors] to the warnings.
 func (l *loader) finishRows(rows []*row) []*row {
 	slices.SortStableFunc(rows, compareRows)
 
@@ -436,13 +438,14 @@ func (l *loader) finishRows(rows []*row) []*row {
 	return out
 }
 
-// wrapWarning returns the warning of r wrapped in a [*Warning], with no
-// filter and no strict mode.
+// wrapWarning returns the warning of r wrapped in a [*Warning]. It does
+// not apply the filter or the strict mode.
 func (l *loader) wrapWarning(r *row) error {
 	return wrapIn(r.err, l.warningOf(r))
 }
 
-// wrapIn returns err, a bound warning, with w around the error it binds.
+// wrapIn returns err, a bound warning, with w around the error that it
+// binds.
 func wrapIn(err error, w *Warning) error {
 	//nolint:wrapcheck // The wrapper is the warning of the row.
 	return hook.Rewrap(err, func(inner error) error {
@@ -452,8 +455,9 @@ func wrapIn(err error, w *Warning) error {
 	})
 }
 
-// outcome returns the error of finished rows that hold an error, or else
-// the warnings of the rows, each a [*LoadError] or nil.
+// outcome returns a [*LoadError] that holds the finished rows. It returns
+// the LoadError as the error when a row holds an error, and as the
+// warnings otherwise. Both results are nil when rows is empty.
 func (l *loader) outcome(rows []*row) (error, error) {
 	errs := make([]error, 0, len(rows))
 	for _, r := range rows {
@@ -468,7 +472,7 @@ func (l *loader) outcome(rows []*row) (error, error) {
 }
 
 // compareRows orders two rows in load order: by file, then by document,
-// then by position, with the rows of no position first.
+// then by position, with the rows that lack a position first.
 func compareRows(a, b *row) int {
 	return cmp.Or(
 		cmp.Compare(a.file, b.file),
@@ -558,7 +562,8 @@ func (l *loader) runChecks(ctx context.Context, set *Set) error {
 }
 
 // addChecked adds err, the result of a check of [WithCheck], to the
-// report. A problem bound in no document binds to the heading of the load.
+// report. A problem that does not bind in a Source binds to the heading of
+// the load.
 func (l *loader) addChecked(err error) {
 	if err == nil {
 		return
@@ -587,7 +592,7 @@ func runCheck(ctx context.Context, check func(context.Context, *Set) error, set 
 }
 
 // errHint returns the migrate hint of the registry as an error, or nil
-// without one.
+// when the registry does not have one.
 func (r *Registry) errHint() error {
 	if r.cfg.migrateHint == "" {
 		return nil

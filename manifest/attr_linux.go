@@ -8,8 +8,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// The extended attributes that a rewrite keeps, with the name that a
-// message gives each.
+// keptAttributes lists the extended attributes that a rewrite keeps, with
+// the name that a message gives each.
 var keptAttributes = []struct {
 	name string
 	what string
@@ -37,7 +37,7 @@ func keepAttributes(tmp, old *os.File) error {
 }
 
 // getxattr returns the value of the attribute name of f, or nil when f
-// has none.
+// does not have it.
 func getxattr(f *os.File, name string) ([]byte, error) {
 	fd := int(f.Fd()) //nolint:gosec // A descriptor fits an int.
 

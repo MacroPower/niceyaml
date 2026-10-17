@@ -11,8 +11,9 @@ import (
 	"go.jacobcolvin.com/niceyaml/escape"
 )
 
-// maxLinkHops is the number of links a walk of an [fs.FS] follows from one
-// entry before it stops, as a system stops at a loop of links.
+// maxLinkHops is the number of links that a walk of an [fs.FS] follows
+// from one entry before it stops, as an operating system stops at a loop
+// of links.
 const maxLinkHops = 40
 
 // walkFS adds the files that the walk of the directory input p, an [FS]
@@ -55,8 +56,8 @@ type fsWalk struct {
 	fsys fs.FS
 	p    *prepared
 	root string
-	// The input directory with its own links resolved, once a link needs
-	// it.
+	// The input directory with its own links resolved. The walk resolves
+	// it when the first link needs it.
 	realRoot string
 	entries  []walkEntry
 	selected int
@@ -108,10 +109,11 @@ func (w *fsWalk) selects(rel string) bool {
 }
 
 // link adds the entry of the link at rel when it leads to a regular file,
-// or the problem of a link that the walk cannot follow. A file system that
-// reports links through [fs.ReadLinkFS] resolves the link one element at
-// a time, and a target that is absolute or climbs out of the input
-// directory leads outside. Any other file system reads what Open returns.
+// or the problem of a link that the walk cannot follow. In a file system
+// that reports links through [fs.ReadLinkFS], the walk resolves the link
+// one element at a time. A target that is absolute or climbs out of the
+// input directory leads outside. In any other file system, the walk reads
+// what Open returns.
 func (w *fsWalk) link(rel string) {
 	full := path.Join(w.root, rel)
 
@@ -189,10 +191,11 @@ func (w *fsWalk) link(rel string) {
 }
 
 // resolve follows the links of name, a path in the file system, one
-// element at a time, as the system does. It returns the path that name
-// leads to, and whether that path lies inside the input directory once
-// the links of the directory resolve too. A link with an absolute target,
-// or one that climbs above the root of the file system, leads outside.
+// element at a time, as an operating system does. It returns the path that
+// name leads to, and whether that path lies inside the input directory
+// with the links of the directory resolved too. A link with an absolute
+// target, or one that climbs above the root of the file system, leads
+// outside.
 func (w *fsWalk) resolve(rl fs.ReadLinkFS, name string) (string, bool, error) {
 	resolved, ok, err := evalFS(rl, name)
 	if err != nil || !ok {
@@ -221,8 +224,8 @@ func within(root, name string) bool {
 }
 
 // evalFS returns name, a path in the file system of rl, with the links of
-// each element resolved, and reports whether the path stays inside the
-// file system. A link with an absolute target, or a path that climbs
+// each element resolved. It also reports whether the path stays inside
+// the file system. A link with an absolute target, or a path that climbs
 // above the root, leaves it.
 func evalFS(rl fs.ReadLinkFS, name string) (string, bool, error) {
 	dir := "."

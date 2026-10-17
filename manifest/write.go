@@ -18,11 +18,12 @@ import (
 // works in.
 var errOutside = errors.New("link leads outside the directory")
 
-// The most links that the resolve of one path follows.
+// maxLinks is the number of links that the resolve of one path follows at
+// most.
 const maxLinks = 40
 
 // write writes the new text of f over its file on disk, or returns the
-// problem that keeps Apply from writing it.
+// problem that prevents Apply from writing it.
 func (f *PlanFile) write() error {
 	err := f.readOnly()
 	if err != nil {
@@ -53,9 +54,10 @@ func (t target) diskPath() string {
 }
 
 // place returns the directory that Apply works in and the path of the file
-// below it. A directory input works in the directory that it leads to, and
-// a file that an input names directly works in the directory of the file
-// with every link resolved.
+// below it. For a file that a directory input found, Apply works in the
+// directory that the input leads to. For a file that an input names
+// directly, Apply works in the directory of the file, with every link
+// resolved.
 func (t target) place() (string, string, error) {
 	if t.root != "" {
 		return t.root, filepath.FromSlash(t.path), nil
@@ -107,11 +109,11 @@ func diskReadOnly(path string) error {
 	return nil
 }
 
-// writeFile replaces the file at name below dir, whose text must still be
-// old, with text. It writes text to a new file beside the old one, gives
-// the new file the mode, the owner, the group, and the attributes of the
-// old one, and renames it over the old one. The directory never lets a
-// link lead out of it.
+// writeFile replaces the text of the file at name below dir with text,
+// when the file still holds old. It writes text to a new file beside the
+// old one. It gives the new file the mode, the owner, the group, and the
+// attributes of the old one. Then it renames the new file over the old
+// one. The directory never lets a link lead out of it.
 func writeFile(dir, name string, old, text []byte, app string) error {
 	root, err := os.OpenRoot(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -148,8 +150,8 @@ func writeFile(dir, name string, old, text []byte, app string) error {
 	return replace(root, name, old, text, app)
 }
 
-// replace writes text to a new file beside the file at name in root, and
-// renames it over that file once its text is still old.
+// replace writes text to a new file beside the file at name in root. It
+// renames the new file over that file when that file still holds old.
 func replace(root *os.Root, name string, old, text []byte, app string) error {
 	oldFile, err := root.Open(name)
 	if err != nil {
@@ -206,7 +208,7 @@ func replace(root *os.Root, name string, old, text []byte, app string) error {
 }
 
 // fill writes text to tmp and gives it the mode, the owner, the group, and
-// the attributes of old, whose details info holds, then syncs it.
+// the attributes of old, whose details info holds. Then it syncs tmp.
 func fill(tmp, old *os.File, info fs.FileInfo, text []byte) error {
 	_, err := tmp.Write(text)
 	if err != nil {
@@ -264,7 +266,7 @@ func createTemp(root *os.Root, name string) (*os.File, string, error) {
 }
 
 // sameText returns the problem of the file at name in root when its text
-// is no longer old, or when it is gone.
+// differs from old, or when the file does not exist.
 func sameText(root *os.Root, name string, old []byte, app string) error {
 	current, err := root.ReadFile(name)
 
@@ -281,8 +283,8 @@ func sameText(root *os.Root, name string, old []byte, app string) error {
 }
 
 // syncDir syncs the directory at dir in root, so the rename survives a
-// crash. A file counts as written once its rename succeeds, so a sync that
-// does not succeed changes nothing.
+// crash. A file counts as written after its rename succeeds, so a failed
+// sync does not change the outcome.
 func syncDir(root *os.Root, dir string) {
 	d, err := root.Open(dir)
 	if err != nil {
@@ -294,8 +296,8 @@ func syncDir(root *os.Root, dir string) {
 }
 
 // resolveIn returns the path of the file at name in root with every link
-// resolved. Each link must lead to a path below root, whose path with
-// every link resolved is abs, or resolveIn returns [errOutside].
+// resolved. Each link must lead to a path below root, or resolveIn returns
+// [errOutside]. The path abs is the path of root with every link resolved.
 func resolveIn(root *os.Root, abs, name string) (string, error) {
 	parts := strings.Split(filepath.ToSlash(name), "/")
 

@@ -14,21 +14,21 @@ import (
 
 // Apply writes the new text of each file of [Plan.Files] and returns a
 // [Result] that records what it did. It writes each file atomically, so a
-// crash leaves the old text or the new text, and the file keeps its mode,
-// its owner, and its group. A symlink keeps pointing at its target, which
+// crash leaves the old text or the new text. Each file keeps its mode, its
+// owner, and its group. A symlink keeps pointing at its target, which
 // receives the new text.
 //
-// Apply checks each file just before it replaces it, and leaves the file
-// as it is when it cannot replace it whole. A file that the plan did not
-// read from disk, or that the process cannot write, fails with an error
-// that matches [ErrReadOnly]. A file whose text differs from the text that
-// the plan read fails with an error that matches [ErrChanged]. Apply goes
-// on with the other files, and [Result.Err] returns an error for each file
-// that it did not write.
+// Apply checks each file immediately before it replaces it, and leaves the
+// file as it is when it cannot replace it whole. A file that the plan did
+// not read from disk, or that the process cannot write, fails with an
+// error that matches [ErrReadOnly]. A file whose text differs from the
+// text that the plan read fails with an error that matches [ErrChanged].
+// Apply continues with the other files, and [Result.Err] returns an error
+// for each file that Apply did not write.
 //
-// Apply returns an error that matches ctx.Err(), and writes nothing, when
-// ctx has ended before the first file. When ctx ends partway, each file
-// that Apply has not reached counts as not written.
+// When ctx has ended before the first file, Apply returns an error that
+// matches ctx.Err() and does not write a file. When ctx ends partway, each
+// file that Apply has not reached counts as not written.
 func (p *Plan) Apply(ctx context.Context) (*Result, error) {
 	err := ctx.Err()
 	if err != nil {
@@ -87,10 +87,10 @@ func (r *Result) Files() []*PlanFile {
 	return r.files
 }
 
-// Summary returns a line for each document that Apply migrated and for each
-// file that a problem blocked or that Apply did not write, then a line that
-// counts the files, as in "2 files migrated, 1 up to date". A row below
-// the line of a document names each value that Apply deleted.
+// Summary returns a line for each document that Apply migrated and for
+// each file that a problem blocked or that Apply did not write. A row
+// below the line of a document names each value that Apply deleted. The
+// last line counts the files, as in "2 files migrated, 1 up to date".
 func (r *Result) Summary() string {
 	var b strings.Builder
 
@@ -140,16 +140,16 @@ func (r *Result) Summary() string {
 }
 
 // Warnings returns the warnings that remain in the files as Apply left
-// them, as a [*LoadError], or nil when none remains or [Result.Err]
-// returns an error.
+// them, as a [*LoadError]. It returns nil when the files do not hold a
+// warning, or when [Result.Err] returns an error.
 func (r *Result) Warnings() error {
 	return r.warnings
 }
 
 // Err returns the problems that fail the rewrite as a [*LoadError] that
-// holds the warnings too, or nil. It holds the problems of the plan, apart
-// from those of a file that Apply did not write, for which it holds the
-// reason alone.
+// holds the warnings too, or nil. The error holds the problems of the
+// plan, but for each file that Apply did not write, it holds the reason
+// alone.
 func (r *Result) Err() error {
 	return r.err
 }
@@ -281,14 +281,14 @@ func (f *PlanFile) layersProblem() error {
 	return problem
 }
 
-// readOnlyProblem returns the problem of a file that Apply cannot write,
-// which matches [ErrReadOnly], with details.
+// readOnlyProblem returns the problem, with details, of a file that Apply
+// cannot write. The problem matches [ErrReadOnly].
 func readOnlyProblem(msg string, details ...error) error {
 	return niceyaml.Unchecked(&problemError{msg: msg, marks: []error{ErrReadOnly}}, niceyaml.WithDetails(details...))
 }
 
 // changedProblem returns the problem of a file whose text differs from
-// the text that the plan read, which matches [ErrChanged].
+// the text that the plan read. The problem matches [ErrChanged].
 func changedProblem(msg string) error {
 	return niceyaml.Unchecked(&problemError{msg: msg, marks: []error{ErrChanged}},
 		niceyaml.WithDetails(errors.New("run the command again")))

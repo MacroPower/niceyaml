@@ -1,8 +1,8 @@
 // Package manifest loads configuration that users write the way they write
 // Kubernetes manifests. An app reads every YAML file in a directory that
-// the user names, and each document declares what it is with an
-// `apiVersion` field and a `kind` field. A load decodes each document into
-// the Go type that the app registered for its kind.
+// the user names. Each document declares what it is with an `apiVersion`
+// field and a `kind` field. A load decodes each document into the Go type
+// that the app registered for its kind.
 //
 // # Registries
 //
@@ -31,11 +31,12 @@
 //
 // # Versions
 //
-// Each version except the oldest can hold steps, which [Migrate] adds, and
-// which bring a document from the version before it. A load runs the steps
-// of every later version in order, so the app reads one version of each
-// kind and the file of the user stays as it is. The author of a new
-// version writes its steps against the previous version alone:
+// Each version except the oldest can hold steps that bring a document from
+// the version before it. [Migrate] adds each step. A load runs the steps of
+// each version after the one that a document declares, in order. The app
+// thus reads one version of each kind, and the file of the user stays as
+// it is. The author of a new version writes its steps against the previous
+// version alone:
 //
 //	manifest.Version("cafe.jacobcolvin.com/v1",
 //		manifest.Written(),
@@ -49,7 +50,7 @@
 // calls the step once for each place that its path selects, in document
 // order. Each call gets a node that reads the value there and edits the
 // document. Each call sees the edits of the calls before it. A document
-// that moves into the next version gets both type fields of that version,
+// that moves into the next version gets the type fields of that version,
 // so a step never writes them. An error from a step fails the document,
 // and a panic in a step fails it with a [niceyaml.PanicError].
 //
@@ -83,11 +84,11 @@
 //
 // # Rewriting Files
 //
-// A rewrite moves each document to the written version of its kind, so a
-// user who upgrades gets files that the new release reads without steps.
-// [Registry.PlanMigration] runs the checks of a load and works out the new
-// text of each file, and writes nothing. [Plan.Apply] writes the files
-// that change:
+// A rewrite moves each document to the written version of its kind. A
+// user who upgrades thus gets files that the new release reads without
+// steps. [Registry.PlanMigration] runs the checks of a load and computes
+// the new text of each file, but it does not write a file. [Plan.Apply]
+// writes the files that change:
 //
 //	plan, err := config.Registry.PlanMigration(ctx, manifest.Path(dir))
 //	if err != nil {
@@ -112,28 +113,33 @@
 // blank lines, the key order, the quoting, and the line endings. A
 // document that fails a check blocks its file, so a rewrite never writes a
 // document that a load then rejects. A value that a step removes appears
-// in [PlanFile.Header] and [PlanFile.Removals], so a rewrite never deletes
-// a value without a row that says so.
+// in [PlanFile.Header] and [PlanFile.Removals], so each value that a
+// rewrite deletes has a row that says so.
 //
 // Apply writes each file atomically and keeps its mode, its owner, and its
-// group. It writes only a file that a [Path] input read from disk, and a
-// file whose text changed after the plan read it fails with an error that
-// matches [ErrChanged]. Every other file fails with an error that matches
-// [ErrReadOnly], and its plan still holds its new text, so a dry run shows
-// the diff.
+// group. It writes only the files that a [Path] input read from disk. Each
+// other file fails with an error that matches [ErrReadOnly], but its plan
+// still holds its new text, so a dry run shows the diff. A file whose text
+// changed after the plan read it fails with an error that matches
+// [ErrChanged].
 //
 // # Loading
 //
-// [Registry.Load] reads an [Input] and returns a [Set]. [Path] reads a
-// file or a directory, so a --config flag takes either. [FS] reads a file
-// or a directory of an [io/fs.FS], [Stdin] reads standard input, [Reader]
-// reads an [io.Reader], [Sources] reads Sources that the app built, and
-// [Inputs] reads several inputs in order:
+// [Registry.Load] reads an [Input] and returns a [Set]:
 //
 //	set, err := config.Registry.Load(ctx, manifest.Path(dir))
 //	if err != nil {
 //		return err
 //	}
+//
+// These functions build an Input:
+//
+//   - [Path] reads a file or a directory, so a --config flag takes either.
+//   - [FS] reads a file or a directory of an [io/fs.FS].
+//   - [Stdin] reads standard input.
+//   - [Reader] reads an [io.Reader].
+//   - [Sources] reads Sources that the app built.
+//   - [Inputs] reads several inputs in order.
 //
 // Path reads only the file system, so a CLI whose --config flag takes "-"
 // for standard input picks Stdin itself:
@@ -151,9 +157,10 @@
 // skips each entry whose name starts with ".". [WithRecursive],
 // [WithInclude], and [WithExclude] change the selection. A walk reads a
 // file that a symbolic link names only when the link leads inside the
-// input directory to a file that the patterns select. Any other link fails
-// with an error that matches [ErrOutsideLink], unless [WithOutsideLinks]
-// lets it lead outside. A file loads once, however many paths reach it.
+// input directory to a file that the patterns select. [WithOutsideLinks]
+// also lets a link lead outside. Any other link to a regular file fails
+// with an error that matches [ErrOutsideLink]. A file loads once, however
+// many paths reach it.
 //
 // A load reads the inputs in order, the files of a directory sorted by
 // path, and the documents of each file in order. Every report and every
@@ -166,24 +173,26 @@
 // [WithUnmarshalers] sets how the Go types of the kinds read YAML, such
 // as a type of another package that a document writes as text. A load
 // gives the unmarshalers to each Source that it builds. Every decode that
-// the load runs on a document applies them too, so the decode of a
-// manifest, the decode inside a validator, and the decode of a migration
-// step read the types alike. The Node of an [Object] from a Source that
+// the load runs on a document applies them too. The decode of a manifest,
+// the decode inside a validator, and the decode of a migration step thus
+// read the types alike. The Node of an [Object] from a Source that
 // [Sources] reads keeps the unmarshalers of that Source alone.
 //
 // # Routing
 //
 // A load reads the type fields of each document and picks the kind and the
-// version whose names match the text the document writes. A type field must
-// sit in the document itself, so a path through an alias or a `<<` merge
-// key fails with an error that matches [ErrFieldAlias]. An unknown kind
-// suggests the closest name, and an unknown version lists the versions that
-// the app reads. [WithVersionField] and [WithKindField] move the type
-// fields, and [WithVersionOnly] gives a registry of one kind a version field
-// alone. [WithIgnore] skips the documents of other tools.
+// version whose names match the text that the document writes.
+// [WithVersionField] and [WithKindField] move the type fields, and
+// [WithVersionOnly] gives a registry of one kind a version field alone.
+// [WithIgnore] skips the documents of other tools.
+//
+// A type field must sit in the document itself. A path through an alias or
+// a `<<` merge key thus fails with an error that matches [ErrFieldAlias].
+// The error about an unknown kind suggests the closest name. The error
+// about an unknown version lists the versions that the app reads.
 //
 // A kind that [Unversioned] gives a layout without type fields reads plain
-// documents, so an app that already reads plain YAML adopts manifests.
+// documents, so an app that already reads plain YAML can adopt manifests.
 // [Claim] picks the kind of a document without a kind field.
 //
 // # Checks
@@ -192,37 +201,36 @@
 // ends the checks of that document:
 //
 //  1. The document must parse.
-//  2. The document must write its type fields in place, and they must name
-//     a kind and a version that the registry holds and that no removal
-//     names.
-//  3. The document must pass the schema of the version it declares.
+//  2. The document must write its type fields in place. They must name a
+//     kind and a version that the registry holds and that [WithRemoved]
+//     does not name.
+//  3. The document must pass the schema of the version that it declares.
 //  4. For each later version in turn, up to the current version, the steps
-//     of the version run, and the result must pass the schema of the
-//     version.
+//     of the version run. The result must pass the schema of the version.
 //  5. The result decodes into the Go type of its kind, and every value
 //     that implements [niceyaml.SelfValidator] validates itself.
 //  6. The document must hold a name, when [WithNameField] reads names.
 //
-// The check of each schema sees the type fields that the schema declares
-// under properties, with the names of its version, and sees no other type
-// field. A closed schema that leaves the type fields out thus passes. Only
-// a declaration in the schema document itself, outside every branch such
-// as a schema under oneOf, counts. [Registry.Verify] reports each schema
-// that requires a type field and does not declare it, because such a
-// schema fails every document. It also reports each type field that a
-// branch or another document might declare.
+// The check of each schema sees only the type fields that the schema
+// declares under properties, with the names of its version. A closed
+// schema that leaves the type fields out thus passes. Only a declaration
+// in the schema document itself, outside every branch such as a schema
+// under oneOf, counts. [Registry.Verify] reports each schema that requires
+// a type field and does not declare it, because such a schema fails every
+// document. It also reports each type field that a branch or another
+// document might declare.
 //
 // The decode admits the type fields, and rejects every other key that the
 // Go type does not declare. A Go type that reads the type fields, such as
 // one that embeds the TypeMeta of Kubernetes or a map[string]any, gets the
 // names of the current version. Each validator of [WithDecodeOptions] and
-// [DecodeOptions] sees them too. A value that decodes itself, through a
-// method such as UnmarshalYAML or through an unmarshaler of
-// [WithUnmarshalers], sees no type field below it. Every error and every
-// warning binds in the file of the user.
+// [DecodeOptions] sees them too. A value that decodes itself does not see
+// a type field below it, whether it decodes through a method such as
+// UnmarshalYAML or through an unmarshaler of [WithUnmarshalers]. Every
+// error and every warning binds in the file of the user.
 //
-// Once each document has run its checks, the load compares the names of
-// the manifests of each kind, and counts the manifests of each kind that
+// After each document has run its checks, the load compares the names of
+// the manifests of each kind. It counts the manifests of each kind that
 // [Required] or [Singleton] marks. Then it calls the functions of
 // [WithCheck] with the set. [WithSetChecks] turns these checks off, for a
 // load of part of a set.
@@ -241,8 +249,9 @@
 //		fmt.Printf("%s: %d kr\n", item.Name, item.Value.Spec.Price)
 //	}
 //
-// Each panics on a call that no set can answer, such as a type that is not
-// the Go type of a kind, so the first test that runs the line fails.
+// Each of these methods panics on a call that cannot succeed on any set,
+// such as a type that is not the Go type of a kind. The first test that
+// runs the line thus fails.
 //
 // # Problems
 //
@@ -258,7 +267,7 @@
 //	    `-- did you mean "MenuItem"?
 //
 // A load that passes returns its warnings from [Set.Warnings], which the app
-// prints with the renderers it uses for errors. Each problem matches its
+// prints with the renderers that it uses for errors. Each problem matches its
 // sentinel with [errors.Is], such as [ErrUnknownKind] or [ErrDeprecated],
 // and [niceyaml.IsInvalid] reports each problem that the files of the user
 // cause.
@@ -292,15 +301,17 @@
 // [Deprecated] marks a version deprecated, and a load warns about each
 // document that declares it. Each warning that a load reports wraps a
 // [*Warning], which names the file, the kind, the version, and the path.
-// [WithWarningFilter] decides which warnings a load keeps, so a team
-// accepts one deprecation for a while. [WithWarningsAsErrors] turns each
+// [WithWarningFilter] decides which warnings a load keeps, so a team can
+// accept one deprecation for a while. [WithWarningsAsErrors] turns each
 // warning that the filter keeps into an error, so a strict load in CI fails
-// on a deprecated file. The warning about a value that a step of a version
-// newer than the written one removes stays a warning, because no rewrite
-// deletes the value before [Written] moves:
+// on a deprecated file:
 //
 //	set, err := config.Registry.Load(ctx, manifest.Path(dir),
 //		manifest.WithWarningsAsErrors(strict))
+//
+// A step of a version later than the written one can remove a value. The
+// warning about that value stays a warning in strict mode, because a
+// rewrite does not delete the value before [Written] moves.
 //
 // The schema of the current version marks a field or a value deprecated
 // with the deprecated keyword, as the Deprecations section of
@@ -319,9 +330,9 @@
 // schema of an older version still checks a document, but a later release
 // might drop one of its marks and keep the field.
 //
-// A load collects the warnings of its checks itself, so a
-// [niceyaml.Warnings] on the context of the load receives none of the
-// warnings that the load reports. Inside a call of niceyaml, such as in a
+// A load collects the warnings of its checks itself. A [niceyaml.Warnings]
+// on the context of the load thus does not receive the warnings that the
+// load reports. Inside a call of niceyaml, such as in a
 // [niceyaml.Validator], the warnings also reach the collectors of that
 // call, as [niceyaml.Warnings.Context] describes.
 package manifest

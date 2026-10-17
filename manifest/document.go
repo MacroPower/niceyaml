@@ -19,7 +19,7 @@ import (
 
 // docState is one document of a load, as its checks leave it.
 type docState struct {
-	// The decoded value, once the decode passed.
+	// The decoded value, after the decode passed.
 	value any
 	// The warning of the deprecated version that the document declares, or
 	// nil.
@@ -35,8 +35,8 @@ type docState struct {
 	work *niceyaml.Node
 	// The document or migrated copy that work copies.
 	workFrom *niceyaml.Node
-	// Moves a location of work into the document, or nil for the document
-	// itself.
+	// The function that moves a location of work into the document, or
+	// nil for the document itself.
 	workLocate func(hook.Located) hook.Place
 	// The name, when the document reached the layout of the current version
 	// with a name that is a non-empty string.
@@ -60,24 +60,25 @@ type docState struct {
 	index int
 	file  int
 	// The number of warnings in warned that the steps up to the written
-	// version handed over, which a rewrite clears.
+	// version produced, which a rewrite clears.
 	earlyWarned int
-	// A document of the file writes a type field.
+	// Whether a document of the file writes a type field.
 	typedFile bool
-	// The load skips the document, which holds no content or which
-	// [WithIgnore] accepts.
+	// Whether the load skips the document, because the document is empty
+	// or [WithIgnore] accepts it.
 	skipped bool
-	// The document routed to a kind and a version.
+	// Whether the document routed to a kind and a version.
 	routed bool
-	// The document reached the layout of the current version with a name
-	// that is a non-empty string.
+	// Whether the document reached the layout of the current version with
+	// a name that is a non-empty string.
 	hasName bool
-	// The document passed every check of its own.
+	// Whether the document passed every check of its own.
 	passed bool
-	// An error of the finished report binds in the document, so the set of
-	// [Registry.Check] leaves it out.
+	// Whether an error of the finished report binds in the document, so
+	// the set of [Registry.Check] leaves it out.
 	rejected bool
-	// A plan rewrites the document to the written version of its kind.
+	// Whether a plan rewrites the document to the written version of its
+	// kind.
 	rewritten bool
 }
 
@@ -144,7 +145,7 @@ func (d *docState) fail(err error) {
 }
 
 // warn adds w, the warnings that a check collected, to those of the
-// document. A nil w adds nothing.
+// document. A nil w does not add a warning.
 func (d *docState) warn(w error) {
 	if w != nil {
 		d.warned = append(d.warned, w)
@@ -152,14 +153,15 @@ func (d *docState) warn(w error) {
 }
 
 // report adds the problems of the document to the report of the load. The
-// first error of a document that the load reads as a kind it does not
-// name carries the details of that choice.
+// first error of a document that the load reads as a kind that it does
+// not name carries the details of that choice.
 //
-// A document that a plan rewrites leaves out the warnings that the
-// rewrite clears: the deprecation of its version, the warnings of the
-// steps up to the written version, and its removals, which the plan lists
-// with the file. Its migrated text stays a migrated text, so the warnings
-// of the steps after the written version stay.
+// A plan sets migrated for a document that it rewrites. The report then
+// leaves out the warnings that the rewrite clears. These are the
+// deprecation of the version, the warnings of the steps up to the written
+// version, and the removals. The plan lists the removals with the file.
+// The migrated text stays a migrated text, so the warnings of the steps
+// after the written version stay.
 func (d *docState) report(migrated bool) {
 	adoption := d.route.adoption
 	problems := slices.Concat(d.problems, d.removed, d.warned)
@@ -198,8 +200,8 @@ func (d *docState) rewritable() bool {
 }
 
 // hint returns the migrate hint as the last detail of a problem that a
-// rewrite clears, or nil when the registry has none or a rewrite cannot
-// write the file of the document.
+// rewrite clears. It returns nil when the registry does not have a hint,
+// or when a rewrite cannot write the file of the document.
 func (d *docState) hint() []error {
 	h := d.l.reg.errHint()
 	if h == nil || !d.rewritable() {
@@ -210,9 +212,9 @@ func (d *docState) hint() []error {
 }
 
 // skipDetail returns the detail that says how to skip the file of the
-// document, which starts with what. It returns the detail when a directory
-// walk found the file and no document of the file writes a type field, and
-// nil otherwise.
+// document, which starts with what. It returns the detail for a file that
+// a directory walk found, when the file does not hold a document that
+// writes a type field. It returns nil for any other file.
 func (d *docState) skipDetail(what string) error {
 	if d.f.dir == "" || d.typedFile {
 		return nil
@@ -314,9 +316,10 @@ func listed(entry *kindEntry, rm *removal) bool {
 	return false
 }
 
-// routeVersion picks the version of entry that the document declares, for
-// a document that writes the kind name wrote, or "" without a kind field.
-// It reports whether the document routed.
+// routeVersion picks the version of entry that the document declares. The
+// parameter wrote holds the kind name that the document writes, or ""
+// when the document does not have a kind field. It reports whether the
+// document routed.
 func (d *docState) routeVersion(entry *kindEntry, wrote string) bool {
 	reg := d.l.reg
 	rt := &d.route
@@ -385,10 +388,11 @@ func (d *docState) routeVersion(entry *kindEntry, wrote string) bool {
 	return true
 }
 
-// adopt picks the kind of a document without a kind field: the first kind
-// whose [Claim] accepts it, or for a document without type fields, the
-// kind that reads the unversioned layout without a claim. It reports
-// whether the document routed.
+// adopt picks the kind of a document without a kind field. It picks the
+// first kind whose [Claim] accepts the document. For a document without
+// type fields that no claim accepts, it picks the kind that reads the
+// unversioned layout without a claim. It reports whether the document
+// routed.
 func (d *docState) adopt(ctx context.Context) bool {
 	reg := d.l.reg
 	rt := &d.route
@@ -472,7 +476,8 @@ func (d *docState) adopt(ctx context.Context) bool {
 	return true
 }
 
-// article returns name after "a", or "an" before a vowel.
+// article returns name after "a", or after "an" when name starts with a
+// vowel.
 func article(name string) string {
 	if name != "" && strings.ContainsRune("AEIOUaeiou", rune(name[0])) {
 		return "an " + name
@@ -738,7 +743,7 @@ type objectBinder struct {
 	work *niceyaml.Node
 	// The label of the current version of the kind, as messages name it.
 	currentLabel string
-	// The document declares the current version of its kind.
+	// Whether the document declares the current version of its kind.
 	atCurrent bool
 }
 
@@ -762,10 +767,10 @@ func (b *objectBinder) bind(err error) error {
 
 // leftOut returns err, an error bound in the document, with a detail on
 // each problem at a field that the document leaves out. It returns err as
-// it is when no problem needs the detail. The detail walks the path of the
-// problem and names the first key that the document lacks. The check that
-// reported the problem read the decoded value, so the detail also says
-// that the field holds its default.
+// it is when it does not add a detail. To build the detail, leftOut
+// walks the path of the problem and names the first key that the document
+// lacks. The check that reported the problem read the decoded value, so
+// the detail also says that the field holds its default.
 func (b *objectBinder) leftOut(err error) error {
 	if err == nil {
 		return nil

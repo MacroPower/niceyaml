@@ -18,7 +18,8 @@ const stdinName = "<stdin>"
 // as standard input, or [niceyaml.Source] values that the app built. It
 // can also name several inputs in order.
 //
-// The zero Input names no file, so a load of it finds no manifest.
+// The zero Input does not name a file, so a load of it does not find a
+// manifest.
 //
 // Create instances with [Path], [FS], [Stdin], [Reader], [Sources], or
 // [Inputs].
@@ -37,7 +38,7 @@ type inputDef struct {
 	kind   inputKind
 }
 
-// inputKind tells the kinds of [Input] apart.
+// inputKind names the kind of an [Input].
 type inputKind int
 
 // The kinds of [Input].
@@ -52,12 +53,12 @@ const (
 // Path creates a new [Input] that reads the file at p or the files of the
 // directory at p. A file that p names loads whatever its name or its
 // type, so p can name a pipe. A directory loads the files that match
-// "*.yaml" or "*.yml", as "File Selection" in the package documentation
+// "*.yaml" or "*.yml", as the Loading section of the package documentation
 // describes, and opts change the selection. A p of "-" names the file "-".
 // [Stdin] reads standard input.
 //
-// [Plan.Apply] rewrites only the files of a Path input, so an app reads
-// the files of its user with Path.
+// [Plan.Apply] rewrites only the files of a Path input, so an app should
+// read the files of its user with Path.
 func Path(p string, opts ...InputOption) Input {
 	return Input{in: &inputDef{kind: inputPath, path: p, cfg: newInputConfig(opts)}}
 }
@@ -94,9 +95,10 @@ func Stdin(opts ...InputOption) Input {
 // text. One Input thus serves [Registry.PlanMigration] and the
 // [Registry.Load] after it.
 //
-// A load reports a read that fails, and a text past the byte limit of
-// [niceyaml.WithByteLimit], as it reports a file of [Path] that does not
-// read. Every later load of the Input reports the same problem.
+// A load reports a read that fails as it reports a file of [Path] that it
+// cannot read. It reports a text longer than the byte limit of
+// [niceyaml.WithByteLimit] the same way. Every later load of the Input
+// reports the same problem.
 func Reader(name string, r io.Reader, opts ...InputOption) Input {
 	return newStreamInput(name, r, targetReader, opts)
 }
@@ -130,8 +132,8 @@ type stream struct {
 	// first one found.
 	read func() (string, error)
 	name string
-	// The place the text came from, which tells why Apply cannot rewrite
-	// it.
+	// The place that the text came from, which tells why Apply cannot
+	// rewrite it.
 	kind targetKind
 }
 
@@ -165,7 +167,7 @@ func Inputs(ins ...Input) Input {
 //   - [WithSourceOptions]
 type InputOption func(*inputConfig)
 
-// inputConfig holds the settings each [InputOption] configures.
+// inputConfig holds the settings that each [InputOption] configures.
 type inputConfig struct {
 	include       []string
 	exclude       []string
@@ -196,10 +198,10 @@ func WithRecursive(recursive bool) InputOption {
 
 // WithOutsideLinks is an [InputOption] that sets whether a walk reads a
 // file that a symbolic link leads to outside the input directory. An app
-// passes it for the directory it reads by default, such as
-// ~/.config/cafe, where tools such as GNU stow link each file out of the
-// directory, and not for a directory that a flag names. [Plan.Apply] never
-// rewrites a file outside the directory.
+// should pass it for the directory that it reads by default, such as
+// ~/.config/cafe. Tools such as GNU stow fill that directory with links to
+// files outside it. An app should not pass it for a directory that a
+// flag names. [Plan.Apply] never rewrites a file outside the directory.
 func WithOutsideLinks(follow bool) InputOption {
 	return func(c *inputConfig) {
 		c.outsideLinks = follow
@@ -220,23 +222,22 @@ func WithInclude(globs ...string) InputOption {
 
 // WithExclude is an [InputOption] that skips each file and each directory
 // that a pattern matches, such as "*.example.yaml" or "testdata/". A
-// pattern reads as [WithInclude] describes, and one that ends with "/"
-// matches directories alone.
+// pattern reads as [WithInclude] describes. A pattern that ends with "/"
+// matches only directories.
 func WithExclude(globs ...string) InputOption {
 	return func(c *inputConfig) {
 		c.exclude = append(c.exclude, globs...)
 	}
 }
 
-// WithSourceOptions is an [InputOption] that hands opts to each
+// WithSourceOptions is an [InputOption] that passes opts to each
 // [niceyaml.Source] that the input builds, such as
 // [niceyaml.WithReferences] or [niceyaml.WithByteLimit]. [Path] and [FS]
 // name each file themselves, so [niceyaml.WithName],
-// [niceyaml.WithFilePath], and [niceyaml.WithFS] change nothing for them.
+// [niceyaml.WithFilePath], and [niceyaml.WithFS] do not affect them.
 // [Stdin] and [Reader] name their text themselves, so [niceyaml.WithName]
-// changes nothing for them. The unmarshalers of a
-// [niceyaml.WithUnmarshalers] among opts apply over those of
-// [WithUnmarshalers].
+// does not affect them. The unmarshalers of a [niceyaml.WithUnmarshalers]
+// among opts apply over those of [WithUnmarshalers].
 func WithSourceOptions(opts ...niceyaml.SourceOption) InputOption {
 	return func(c *inputConfig) {
 		c.sourceOptions = append(c.sourceOptions, opts...)
@@ -244,9 +245,9 @@ func WithSourceOptions(opts ...niceyaml.SourceOption) InputOption {
 }
 
 // heading returns the name that the heading of a load of in starts with,
-// or "" when the load has none. The name is the path of a lone [Path] or
-// [FS] input, the name of a lone [Stdin] or [Reader] input, or the name of
-// a lone Source.
+// or "" when the load does not have one. The name is the path of a lone
+// [Path] or [FS] input, the name of a lone [Stdin] or [Reader] input, or
+// the name of a lone Source.
 func (in Input) heading() string {
 	d := in.in
 

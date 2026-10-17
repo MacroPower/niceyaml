@@ -31,7 +31,7 @@ func linkCount(info fs.FileInfo) int {
 }
 
 // keepOwner gives tmp the owner and the group of the file that info
-// describes, and returns the problem of an owner or a group that it cannot
+// describes. It returns the problem of an owner or a group that it cannot
 // give.
 func keepOwner(tmp *os.File, info fs.FileInfo) error {
 	want, ok := info.Sys().(*syscall.Stat_t)
