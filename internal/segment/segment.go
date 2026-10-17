@@ -15,7 +15,8 @@ import (
 //
 // Every segment cut from a multi-line token shares the same source pointer
 // and holds a distinct part. A segment never modifies its tokens, and its
-// accessors return the stored pointers, so callers treat them as read-only.
+// accessors return the stored pointers, so callers must treat them as
+// read-only.
 //
 // Create instances with [New].
 type Segment struct {
@@ -58,9 +59,9 @@ func (s Segment) Part() *token.Token {
 }
 
 // Contains reports whether tk is this segment's source or part token, or
-// a copy of either as [token.Token.Clone] makes one: a token of the same
-// type with the same value, origin, and position. The AST a parser builds
-// holds such copies, so a token taken from a node finds its segment.
+// a copy of either as [token.Token.Clone] makes one. Such a copy has the
+// same type, value, origin, and position. The AST a parser builds holds
+// such copies, so a token taken from a node finds its segment.
 func (s Segment) Contains(tk *token.Token) bool {
 	if tk == nil {
 		return false
@@ -100,7 +101,8 @@ func samePosition(a, b *token.Position) bool {
 
 // ContentSpan returns the columns of the part's content relative to the
 // segment start, excluding leading and trailing spaces and tabs. The span
-// is empty when the part holds only whitespace or the segment has no part.
+// is empty when the part holds only whitespace or the segment lacks a
+// part.
 func (s Segment) ContentSpan() position.Span {
 	if s.part == nil {
 		return position.Span{}
@@ -137,13 +139,13 @@ func (s Segments) PartTokens() token.Tokens {
 }
 
 // SourceTokenAt returns the source token covering the given 0-indexed
-// column, or nil when no token does.
+// column. It returns nil for a column outside the line.
 //
 // The lexer bundles a line's indentation into the token that ends on the
-// line before, so a column in that indentation resolves to the token whose
-// text follows it on this line instead. It is nil when no such token
-// follows, as on a line that holds only whitespace before the line ending
-// of the next token.
+// line before. So a column in that indentation resolves to the token
+// whose text follows it on this line instead. The result is nil when such
+// a token does not follow, as on a line that holds only whitespace before
+// the line ending of the next token.
 func (s Segments) SourceTokenAt(col int) *token.Token {
 	c := 0
 
@@ -168,8 +170,8 @@ func (s Segments) SourceTokenAt(col int) *token.Token {
 	return nil
 }
 
-// indentation reports whether the part holds only spaces or tabs and no
-// line ending, as the indentation at the start of a line does.
+// indentation reports whether the part holds only spaces or tabs, without
+// a line ending, as the indentation at the start of a line does.
 func (s Segment) indentation() bool {
 	return s.part != nil && isPureHorizontalWhitespace(s.part.Origin)
 }
