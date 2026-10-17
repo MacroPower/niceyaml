@@ -31,6 +31,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/capture"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
@@ -295,6 +296,25 @@ func TestRegistry_Lookup(t *testing.T) {
 
 		_, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Service"))
 		require.ErrorIs(t, err, schema.ErrNoMatch)
+	})
+
+	t.Run("a guard that refuses the aliases of the document binds at the alias", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithResolvers(schema.When(
+			matcher.Content(kindPath, "Deployment"),
+			schema.Embedded(schemaData),
+		)))
+
+		input := yamltest.AliasLevels(7) + yamltest.AliasKey("kind", 7)
+
+		_, err := reg.Lookup(t.Context(), yamltest.FirstDocumentWithPath(t, input, "app.yaml"))
+		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
+		require.ErrorIs(t, err, schema.ErrResolve)
+
+		got, ok := yamltest.RequireSourceError(t, err).Position()
+		require.True(t, ok)
+		assert.Equal(t, position.New(10, 4), got)
 	})
 
 	t.Run("variadic Register keeps order", func(t *testing.T) {
@@ -1050,16 +1070,19 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 	})
 }
 
-func TestRegistry_Check_SyntaxError(t *testing.T) {
+func TestRegistry_Check_Unparsed(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
 		reg   *schema.Registry
+		err   error
 		input string
+		opts  []niceyaml.SourceOption
 	}{
 		"registry that requires a schema": {
 			reg:   schema.NewRegistry(schema.WithResolvers(schema.Embedded([]byte(`{"type": "object"}`)))),
 			input: "kind: [\n",
+			err:   niceyaml.ErrSyntax,
 		},
 		"resolver that reads the content": {
 			reg: schema.NewRegistry(schema.WithResolvers(schema.When(
@@ -1067,6 +1090,7 @@ func TestRegistry_Check_SyntaxError(t *testing.T) {
 				schema.Embedded([]byte(`{"type": "object"}`)),
 			))),
 			input: "kind: [\n",
+			err:   niceyaml.ErrSyntax,
 		},
 		"registry that accepts a document no resolver applies to": {
 			reg: schema.NewRegistry(
@@ -1074,10 +1098,24 @@ func TestRegistry_Check_SyntaxError(t *testing.T) {
 				schema.WithRequireSchema(false),
 			),
 			input: "kind: [\n",
+			err:   niceyaml.ErrSyntax,
 		},
 		"directive that turns validation off": {
 			reg:   schema.NewRegistry(schema.WithResolvers(schema.Directive())),
 			input: yamltest.SchemaDirective("none", "kind: [\n"),
+			err:   niceyaml.ErrSyntax,
+		},
+		"document past the depth limit": {
+			reg:   schema.NewRegistry(schema.WithResolvers(schema.Embedded([]byte(`{"type": "object"}`)))),
+			input: "kind: {spec: {name: x}}\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithDepthLimit(2)},
+			err:   niceyaml.ErrLimit,
+		},
+		"text past the byte limit": {
+			reg:   schema.NewRegistry(schema.WithResolvers(schema.Embedded([]byte(`{"type": "object"}`)))),
+			input: "kind: Deployment\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(8)},
+			err:   niceyaml.ErrLimit,
 		},
 	}
 
@@ -1085,11 +1123,11 @@ func TestRegistry_Check_SyntaxError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.UnparsedDocument(t, tc.input)
-			require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
+			doc := yamltest.UnparsedDocument(t, tc.input, tc.opts...)
+			require.ErrorIs(t, doc.Err(), tc.err)
 
 			// The document did not parse, so every route to the registry
-			// returns its syntax error.
+			// returns the error of the document.
 			assert.Same(t, doc.Err(), tc.reg.Check(t.Context(), doc))
 			assert.Same(t, doc.Err(), doc.Validate(t.Context(), tc.reg))
 
@@ -4416,6 +4454,214 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		lenient := schema.NewRegistry(schema.WithResolvers(schema.Directive()), schema.WithRequireSchema(false))
 		require.NoError(t, lenient.Check(t.Context(), doc))
+	})
+}
+
+// A directive names its schema in the text of the document, so a lookup
+// binds each error of that schema, and each error of the reference, at
+// the comment that holds the directive.
+func TestRegistry_Lookup_AtDirective(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	yamltest.WriteFile(t, dir, "broken.json", `{"type": 5}`)
+
+	app := filepath.Join(dir, "app.yaml")
+	plain := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+	confined := schema.NewRegistry(withAccess(t), schema.WithResolvers(schema.Directive()))
+	nested := schema.NewRegistry(schema.WithResolvers(confined))
+
+	tcs := map[string]struct {
+		reg   *schema.Registry
+		input string
+		// The file path of the document, or "" for one without.
+		filePath string
+		// The index of the document that the lookup runs for.
+		index int
+		// The first line of the message.
+		want string
+		// The position of the directive.
+		at  position.Position
+		err []error
+	}{
+		"schema that does not load": {
+			reg:      plain,
+			input:    yamltest.SchemaDirective("./missing.json", "a: 1\n"),
+			filePath: app,
+			want:     `app.yaml:1:1: load schema: "` + plainFileURL(filepath.Join(dir, "missing.json")) + `"`,
+			err:      []error{schema.ErrLoad, fs.ErrNotExist},
+		},
+		"schema that does not compile": {
+			reg:      plain,
+			input:    yamltest.SchemaDirective("./broken.json", "a: 1\n"),
+			filePath: app,
+			want:     `app.yaml:1:1: compile schema: "` + plainFileURL(filepath.Join(dir, "broken.json")) + `"`,
+			err:      []error{schema.ErrCompile},
+		},
+		"directive below another document": {
+			reg:      plain,
+			input:    "a: 1\n---\n" + yamltest.SchemaDirective("./missing.json", "b: 2\n"),
+			filePath: app,
+			index:    1,
+			want:     `app.yaml:3:1: load schema: "` + plainFileURL(filepath.Join(dir, "missing.json")) + `"`,
+			at:       position.New(2, 0),
+			err:      []error{schema.ErrLoad},
+		},
+		"URL that a confined registry refuses": {
+			reg:   nested,
+			input: yamltest.SchemaDirective("https://evil.test/s.json", "a: 1\n"),
+			want:  `app.yaml:1:1: load schema: "https://evil.test/s.json": URL not under an allowed prefix`,
+			err:   []error{schema.ErrLoad, schema.ErrURLNotAllowed},
+		},
+		"relative directive without a file path": {
+			reg:   plain,
+			input: yamltest.SchemaDirective("./s.json", "a: 1\n"),
+			want:  "app.yaml:1:1: resolve schema: document has no file path",
+			err:   []error{schema.ErrResolve, schema.ErrNoFilePath, schema.ErrNoBaseDir},
+		},
+		"relative directive without a file path in a nested registry": {
+			reg:   nested,
+			input: yamltest.SchemaDirective("./s.json", "a: 1\n"),
+			want:  "app.yaml:1:1: resolve schema: document has no file path",
+			err:   []error{schema.ErrResolve, schema.ErrNoFilePath},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := []niceyaml.SourceOption{niceyaml.WithName("app.yaml")}
+			if tc.filePath != "" {
+				opts = append(opts, niceyaml.WithFilePath(tc.filePath))
+			}
+
+			source := niceyaml.NewSourceFromString(tc.input, opts...)
+			doc := source.Documents()[tc.index]
+
+			_, err := tc.reg.Lookup(t.Context(), doc)
+			require.Error(t, err)
+			assert.True(t, strings.HasPrefix(err.Error(), tc.want), "got %q", err.Error())
+
+			for _, target := range tc.err {
+				require.ErrorIs(t, err, target)
+			}
+
+			// The program set up the registry, so the document is not at
+			// fault for any of these errors.
+			assert.False(t, niceyaml.IsInvalid(err))
+
+			at, ok := yamltest.RequireSourceError(t, err).Position()
+			require.True(t, ok)
+			assert.Equal(t, tc.at, at)
+		})
+	}
+
+	t.Run("each document binds at its own directive", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(stringtest.JoinLF(
+			"# yaml-language-server: $schema=./broken.json",
+			"a: 1",
+			"---",
+			"# yaml-language-server: $schema=./broken.json",
+			"b: 2",
+		), niceyaml.WithName("app.yaml"), niceyaml.WithFilePath(app))
+
+		docs := yamltest.Documents(t, source, 2)
+
+		// The registry remembers the failed compile of the first lookup, and
+		// the second lookup binds that failure at its own directive.
+		for i, want := range []string{"app.yaml:1:1: compile schema:", "app.yaml:4:1: compile schema:"} {
+			_, err := plain.Lookup(t.Context(), docs[i])
+			require.ErrorIs(t, err, schema.ErrCompile)
+			assert.True(t, strings.HasPrefix(err.Error(), want), "got %q", err.Error())
+		}
+	})
+
+	t.Run("a Ref that another document reuses binds without a position", func(t *testing.T) {
+		t.Parallel()
+
+		base := niceyaml.NewSourceFromString(stringtest.JoinLF(
+			"# a",
+			"# b",
+			"# yaml-language-server: $schema=./missing.json",
+			"a: 1",
+		), niceyaml.WithName("base.yaml"), niceyaml.WithFilePath(app))
+
+		ref, err := schema.Directive().Resolve(t.Context(), base.Documents()[0])
+		require.NoError(t, err)
+
+		reg := schema.NewRegistry(schema.WithResolvers(ref))
+
+		// The directive stands on the third line of base.yaml, and the
+		// third line of other.yaml holds a value that does not name any
+		// schema.
+		other := niceyaml.NewSourceFromString(stringtest.JoinLF(
+			"name: x",
+			"kind: App",
+			"spec:",
+			"  a: 1",
+		), niceyaml.WithName("other.yaml"), niceyaml.WithFilePath(filepath.Join(dir, "other.yaml")))
+
+		_, err = reg.Lookup(t.Context(), other.Documents()[0])
+		requireLoadError(t, err, fs.ErrNotExist)
+		assert.True(t, strings.HasPrefix(err.Error(), "other.yaml: load schema:"), "got %q", err.Error())
+
+		_, ok := yamltest.RequireSourceError(t, err).Position()
+		assert.False(t, ok)
+
+		// The document that holds the directive still binds at it.
+		_, err = reg.Lookup(t.Context(), base.Documents()[0])
+		requireLoadError(t, err, fs.ErrNotExist)
+		assert.True(t, strings.HasPrefix(err.Error(), "base.yaml:3:1: load schema:"), "got %q", err.Error())
+	})
+
+	t.Run("a schema that a guard names binds without a position", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithResolvers(
+			schema.When(matcher.Exists(paths.Doc().Child("a")), schema.File(filepath.Join(dir, "missing.json"))),
+		))
+
+		source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("app.yaml"), niceyaml.WithFilePath(app))
+
+		_, err := reg.Lookup(t.Context(), source.Documents()[0])
+		requireLoadError(t, err, fs.ErrNotExist)
+		assert.True(t, strings.HasPrefix(err.Error(), "app.yaml: load schema:"), "got %q", err.Error())
+
+		_, ok := yamltest.RequireSourceError(t, err).Position()
+		assert.False(t, ok)
+	})
+
+	t.Run("the directive of a merged document binds without a position", func(t *testing.T) {
+		t.Parallel()
+
+		// The merged text starts with the preamble of the layer that the
+		// Source stands for. No value lies at the directive, so the error
+		// binds in that layer without a position.
+		layers := t.TempDir()
+		base := yamltest.WriteFile(t, layers, "base.yaml", yamltest.SchemaDirective("./missing.json", "a: 1\nb: 2\n"))
+		prod := yamltest.WriteFile(t, layers, "prod.yaml", "b: 3\n")
+
+		var sources []*niceyaml.Source
+
+		for _, path := range []string{base, prod} {
+			source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithName(filepath.Base(path)))
+			require.NoError(t, err)
+
+			sources = append(sources, source)
+		}
+
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), sources)
+		require.NoError(t, err)
+
+		_, err = plain.Lookup(t.Context(), merged.Documents()[0])
+		requireLoadError(t, err, fs.ErrNotExist)
+		assert.True(t, strings.HasPrefix(err.Error(), "base.yaml: load schema:"), "got %q", err.Error())
+
+		_, ok := yamltest.RequireSourceError(t, err).Position()
+		assert.False(t, ok)
 	})
 }
 

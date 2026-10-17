@@ -529,8 +529,8 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // # Unparsed Documents
 //
 // A document that did not parse does not have data to check. Check
-// returns the syntax error that [niceyaml.Node.Err] returns for it,
-// whatever the schema accepts.
+// returns the error that [niceyaml.Node.Err] returns for it, whatever the
+// schema accepts.
 //
 // # Empty Documents
 //
@@ -639,7 +639,7 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 	err := n.Err()
 	if err != nil {
-		//nolint:wrapcheck // The source bound the syntax error already.
+		//nolint:wrapcheck // The source bound the error of the document already.
 		return err
 	}
 

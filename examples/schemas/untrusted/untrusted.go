@@ -164,7 +164,7 @@ func report(p *printer.Printer, doc *niceyaml.Node, err error) {
 	// that the registry loads. For a file, the text of the error names the
 	// path that the registry tried on the server. The answer therefore
 	// comes from the sentinels that the error matches, and it binds at the
-	// directive.
+	// directive, as the error of the registry does.
 	case loadFailed && directive != nil:
 		answer := doc.Bind(niceyaml.NewError(
 			fmt.Sprintf("schema %q: %s", directive.Schema, reason(err)),

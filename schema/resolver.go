@@ -102,7 +102,11 @@ type Ref struct {
 	// The compiled schema that the Ref carries, from Schema.Ref. The
 	// registry validates with it as it is.
 	schema *Schema
-	key    string
+	// Where the directive that named the Ref stands, or nil for a Ref
+	// that no directive named. A lookup of the document that holds the
+	// directive locates the load or compile error of the schema there.
+	at  *directiveSite
+	key string
 	// The path of the file, as given to File or FileFS. For a Ref that
 	// names the file in a file system, the registry reads this path from
 	// that file system and names the Ref by it in messages.

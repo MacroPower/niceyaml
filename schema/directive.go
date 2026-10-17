@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"weak"
 
 	"github.com/goccy/go-yaml/token"
 
@@ -135,6 +136,28 @@ func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
 // directiveResolver resolves schemas from yaml-language-server directives.
 type directiveResolver struct{}
 
+// A directiveSite is where the directive that named a [Ref] stands. It
+// holds the root of the document with the directive and the position of
+// the comment there. The Ref holds the root through a weak pointer, so a
+// Ref that a program or a cache keeps does not keep the document alive.
+type directiveSite struct {
+	doc weak.Pointer[niceyaml.Node]
+	pos position.Position
+}
+
+// locate returns err located at the directive when the directive stands
+// in doc. A program might keep a Ref from an earlier lookup and check
+// another document with it. The directive does not stand in that
+// document, so locate returns err as it is. It does the same for a nil
+// site.
+func (s *directiveSite) locate(doc *niceyaml.Node, err error) error {
+	if s == nil || s.doc != weak.Make(doc.Document()) {
+		return err
+	}
+
+	return niceyaml.Locate(err, niceyaml.AtPosition(s.pos))
+}
+
 // Directive creates a new [Resolver] for yaml-language-server schema
 // directives.
 //
@@ -147,6 +170,16 @@ type directiveResolver struct{}
 // have a file system, as RefBeside describes. A URL or an absolute path
 // does not need a file path and resolves either way. Resolve reports
 // [ErrNoDirective] for a document without a directive.
+//
+// The directive names the schema in the text of the document, so each
+// other error carries the position of the comment that holds the
+// directive. A lookup binds there the error of a directive that cannot
+// name a schema, such as [ErrNoFilePath]. It also binds there the error
+// of a schema that the directive names and that does not load or
+// compile, as [Registry.Lookup] describes. The [Ref] that Resolve
+// returns keeps that position for its own document only. A lookup of
+// another document with that Ref binds the error of the schema without a
+// position.
 //
 // The schema lives where the document does. A document that
 // [niceyaml.NewSourceFromFile] opened names a file on disk. A document
@@ -244,19 +277,25 @@ func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Node) (Ref, er
 		}
 	}
 
+	// The directive names the schema in the text of the document, so its
+	// comment locates each error of the reference and of the schema.
+	at := niceyaml.AtPosition(directive.Position)
+
 	ref, err := RefBeside(doc, path)
 	if errors.Is(err, ErrNoBaseDir) && doc.FilePath() == "" {
-		return Ref{}, fmt.Errorf("%w: %w", ErrNoFilePath, err)
+		return Ref{}, niceyaml.Locate(fmt.Errorf("%w: %w", ErrNoFilePath, err), at)
 	}
 
 	if err != nil {
 		//nolint:wrapcheck // The reference error already names the reference.
-		return Ref{}, err
+		return Ref{}, niceyaml.Locate(err, at)
 	}
 
 	if fragment != "" {
 		ref.key += "#" + fragment
 	}
+
+	ref.at = &directiveSite{doc: weak.Make(doc.Document()), pos: directive.Position}
 
 	return ref, nil
 }

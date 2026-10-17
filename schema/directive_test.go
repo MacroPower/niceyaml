@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"weak"
 
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
@@ -1080,4 +1082,45 @@ func TestDirective_ResolvesAfterChdir(t *testing.T) {
 
 	err = source.ValidateDocuments(t.Context(), reg)
 	require.ErrorContains(t, err, `configs/app.yaml:2:7: $.name: expected "string", got "integer"`)
+}
+
+func TestDirective_Resolve_DoesNotHoldDocument(t *testing.T) {
+	t.Parallel()
+
+	// The Ref keeps the position of the directive for its document, but a
+	// program that keeps the Ref does not keep the document alive. Only
+	// the closure holds the source, so the source dies when it returns.
+	held, ref := func() (weak.Pointer[niceyaml.Node], schema.Ref) {
+		source := niceyaml.NewSourceFromString(
+			yamltest.SchemaDirective("./missing.json", "a: 1\n"),
+			niceyaml.WithFilePath(filepath.Join(t.TempDir(), "app.yaml")),
+		)
+
+		doc := source.Documents()[0]
+
+		ref, err := schema.Directive().Resolve(t.Context(), doc)
+		require.NoError(t, err)
+
+		return weak.Make(doc), ref
+	}()
+
+	// The collector runs a few times, in case a run leaves the document
+	// for the next.
+	collected := false
+
+	for range 10 {
+		runtime.GC()
+
+		if held.Value() == nil {
+			collected = true
+
+			break
+		}
+
+		runtime.Gosched()
+	}
+
+	assert.True(t, collected)
+
+	runtime.KeepAlive(ref)
 }

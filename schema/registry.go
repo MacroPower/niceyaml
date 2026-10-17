@@ -393,8 +393,8 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // An empty document, such as one that holds only comments, is the null
 // document, and a resolver sees it as it sees any other. A document that
 // did not parse does not have content for a resolver to read. So Lookup
-// returns the syntax error that [niceyaml.Node.Err] returns and does not
-// ask any resolver.
+// returns the error that [niceyaml.Node.Err] returns and does not ask any
+// resolver.
 //
 // The resolvers pick a schema for a whole document, from its file path,
 // its preamble, or its content, so n must be the root [niceyaml.Node] of
@@ -406,9 +406,23 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 //
 // Lookup binds every error to the root of the document through
 // [niceyaml.Node.Bind], so its message names the file that the document
-// came from. An error of the lookup is about the schema rather than a
-// value of the document. So it does not carry a position, even when n is
-// a Node from [niceyaml.Node.At].
+// came from. An error about the schema itself, such as [ErrNoMatch] or a
+// schema that does not load, does not carry a position, with one
+// exception. A [Directive] names the schema in the text of the document.
+// When that schema does not load or compile, or the directive cannot
+// name a schema, the error binds at the comment that holds the
+// directive:
+//
+//	app.yaml:3:1: load schema: "https://cdn.example.org/menu.json": URL not under an allowed prefix
+//
+// A merged document from [niceyaml.NewSourceFromLayers] does not hold a
+// value at the comment, so there such an error binds without a position.
+//
+// An error that a resolver returns bound in the document keeps its
+// position. A [matcher.Content] or [matcher.Text] guard that refuses the
+// document for its aliases returns such an error, bound at the alias
+// that repeats the most. So does a matcher.Content guard whose want type
+// fails its Validate method, bound at the value.
 //
 // For most uses, prefer [Registry.Check], which combines lookup and
 // validation. Use Lookup when you need the validator for custom
@@ -416,7 +430,7 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (*Schema, error) {
 	err := n.Err()
 	if err != nil {
-		//nolint:wrapcheck // The source bound the syntax error already.
+		//nolint:wrapcheck // The source bound the error of the document already.
 		return nil, err
 	}
 
@@ -473,13 +487,14 @@ func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (*Schema, error
 // does not load fails the lookup with that load error.
 //
 // Lookup binds its error to the document, but Resolve returns the error
-// unbound, because the registry that asked binds it. For a document that
-// did not parse, Resolve returns the syntax error that
+// unbound, because the registry that asked binds it. An error at a
+// directive carries the position of the directive, so it binds there.
+// For a document that did not parse, Resolve returns the error that
 // [niceyaml.Node.Err] returns.
 func (r *Registry) Resolve(ctx context.Context, doc *niceyaml.Node) (Ref, error) {
 	err := doc.Err()
 	if err != nil {
-		//nolint:wrapcheck // The source bound the syntax error already.
+		//nolint:wrapcheck // The source bound the error of the document already.
 		return Ref{}, err
 	}
 
@@ -501,12 +516,12 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 	}
 
 	// A resolver that ignores its context, as a Ref does, would name a
-	// schema for a canceled lookup, and a cached schema needs no context
-	// to load. Check the context before the first resolver and after each
-	// one, before the lookup uses what the resolver returned. A lookup
-	// whose context ends before a resolver names a schema then reports the
-	// context's error whether the resolver named a schema, declined, or
-	// failed.
+	// schema for a canceled lookup, and a cached schema does not need a
+	// context to load. Check the context before the first resolver and
+	// after each one, before the lookup uses what the resolver returned. A
+	// lookup whose context ends before a resolver names a schema then
+	// reports the context's error whether the resolver named a schema,
+	// declined, or failed.
 	if ctx.Err() != nil {
 		return nil, false, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
 	}
@@ -541,6 +556,12 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 		}
 
 		v, err := r.Schema(ctx, ref)
+		if err != nil {
+			// The cache remembers the failure without a location, so each
+			// document that names the schema locates it at its own
+			// directive.
+			err = ref.at.locate(doc, err)
+		}
 
 		return v, false, err
 	}
@@ -751,22 +772,24 @@ func (e reasonError) Unwrap() error {
 // preparation fails. When ctx ends before the lookup finishes, Check
 // returns the error that [Registry.Lookup] returns for it, even with
 // [WithRequireSchema] set false. For a document that did not parse,
-// Check returns the syntax error that [niceyaml.Node.Err] returns, even
-// with [WithRequireSchema] set false. So a loop that validates every
-// document of a file reports each syntax error beside the violations of
-// the documents that parsed.
+// Check returns the error that [niceyaml.Node.Err] returns, even with
+// [WithRequireSchema] set false. So a loop that validates every document
+// of a file reports the error of each document that did not parse beside
+// the violations of the documents that parsed.
 //
-// Check binds every error that it returns. The error of the lookup is
-// about the schema and not a value of the document. So Check binds that
-// error through the root of the document, as [Registry.Lookup] does. It
-// runs the schema through [niceyaml.Node.Validate], which binds each
-// violation. So a direct call returns the error that Node.Validate
-// returns for the registry, but [Schema.Check] returns its violations as
-// it wrote them.
+// Check binds every error that it returns. It binds the error of the
+// lookup through the root of the document, as [Registry.Lookup] does. An
+// error at a [Directive] of the document thus binds at the comment that
+// holds the directive. An error that a resolver bound in the document
+// keeps its position, and every other error of the lookup binds without
+// one. Check runs the schema through [niceyaml.Node.Validate], which
+// binds each violation. So a direct call returns the error that
+// Node.Validate returns for the registry, but [Schema.Check] returns its
+// violations as it wrote them.
 func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 	err := n.Err()
 	if err != nil {
-		//nolint:wrapcheck // The source bound the syntax error already.
+		//nolint:wrapcheck // The source bound the error of the document already.
 		return err
 	}
 
