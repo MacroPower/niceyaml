@@ -12,7 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/printer"
 )
 
-// hours is when the cafe opens and closes.
+// hours holds the times when the cafe opens and closes.
 type hours struct {
 	Open  string `yaml:"open"`
 	Close string `yaml:"close"`
