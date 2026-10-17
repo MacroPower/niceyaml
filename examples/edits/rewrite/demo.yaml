@@ -1,0 +1,21 @@
+---
+# Café Yamüll, as the owner wrote it.
+restaurant:
+  name: Café Yamüll
+  stars: 4 # From the 2019 guide.
+  hours:
+    open: "07:00"
+    close: "17:00" # Fika is over by then.
+
+wifi: yamull-guest # Ask at the counter for the password.
+
+menu:
+  breakfast:
+    # Swedish cookies with coffee
+    - item: "Småkakor & Kaffe"
+      cost: 200 # kr
+    - item: Kanelbulle
+      cost: 45
+  lunch:
+    - item: Räksmörgås
+      cost: 180

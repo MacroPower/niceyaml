@@ -174,6 +174,12 @@ The resolvers of a registry run in order, and the first one that does not declin
 
 [`niceyaml.NewSourceFromLayers`][niceyaml.NewSourceFromLayers] merges several files into one document, such as a base file with the file of one environment over it. The example merges two files and traces each value to the file that set it. It then validates the merged document, overrides a value from the environment, skips a missing optional file, and decodes the result over defaults. The docs of `NewSourceFromLayers` list the merge rules.
 
+### Edits
+
+- [examples/edits/rewrite](examples/edits/rewrite)
+
+[`edit.Doc`][niceyaml/edit.Doc] renames keys and sets, moves, and removes values. It keeps every byte that an edit leaves alone. The rewrite example edits a file and validates the result, so each error points at the line that the owner wrote.
+
 ### Viewport
 
 See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pages, searches, diffs, and validates YAML documents.
@@ -193,6 +199,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml.Warnings]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Warnings
 [niceyaml/diff]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/diff
 [niceyaml/edit]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/edit
+[niceyaml/edit.Doc]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/edit#Doc
 [niceyaml/encoder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/encoder
 [niceyaml/finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/finder
 [niceyaml/line]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line
