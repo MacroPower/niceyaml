@@ -9,12 +9,12 @@ import (
 
 // DecodeView returns node as the go-yaml decoder reads it: the same tree,
 // with the name of each alias free of comments. The parser attaches a
-// comment on the line of an alias to its name, and the decoder looks the
-// anchor up by the text of the name, comment included, so `*x # note`
-// would name no anchor. The view copies each alias and the nodes above
-// it, and shares every other node and every token with node. The tree the
-// Source shares thus stays as the parser built it, and every error the
-// decoder reports names a token of the source.
+// comment on the line of an alias to its name. The decoder finds the
+// anchor by the text of the name, comment included, so `*x # note` finds
+// its anchor only through the view. The view copies each alias and the
+// nodes above it, and shares every other node and every token with node.
+// The tree the Source shares thus stays as the parser built it, and every
+// error the decoder reports names a token of the source.
 func DecodeView(node ast.Node) ast.Node {
 	view, _ := viewOf(node)
 
@@ -129,7 +129,7 @@ func mappingValueView(n *ast.MappingValueNode) (*ast.MappingValueNode, bool) {
 }
 
 // viewsOf applies view to each of nodes, and returns a new slice when any
-// of them changed, or nodes itself when none did.
+// of them changed, or nodes itself otherwise.
 func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 	var views []T
 
@@ -158,16 +158,17 @@ func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 	return views, true
 }
 
-// verbatimIntegerTag is the verbatim form of the !!int tag, which the
-// [Tree] gives the token of each tag [isIntegerTag] reports. The go-yaml
-// decoder rejects an integer under the short form for every integer type,
-// but it reserves only short forms, so it reads an integer under this one
-// as it reads the integer alone.
+// verbatimIntegerTag is the verbatim form of the !!int tag. The [Tree]
+// gives this form to the token of each tag that [isIntegerTag] reports.
+// The go-yaml decoder rejects an integer under the short form for every
+// integer type. It reserves only short forms, so it reads an integer under
+// the verbatim form as it reads the integer alone.
 const verbatimIntegerTag = "!<tag:yaml.org,2002:int>"
 
 // isIntegerTag reports whether node is a !!int tag on an integer, or on
-// an anchor on one. A tag after a %TAG directive that redefines the "!!"
-// handle does not count, as the go-yaml decoder reads it as text.
+// an anchor on one. The go-yaml decoder reads as text each tag after a
+// %TAG directive that redefines the "!!" handle, so such a tag does not
+// count.
 func isIntegerTag(node ast.Node) bool {
 	tag, ok := node.(*ast.TagNode)
 	if !ok || tag.Start == nil || tag.Directive != nil ||
