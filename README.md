@@ -136,8 +136,9 @@ The reports example checks several files and keeps each error after [`niceyaml.D
 ### Decoding
 
 - [examples/decoding](examples/decoding)
+- [examples/limits](examples/limits)
 
-The decoding example starts each value that a document leaves out from the defaults of its type. It also reports every problem of a document at once.
+The decoding example starts each value that a document leaves out from the defaults of its type. It also reports every problem of a document at once. The limits example decodes uploads that a server does not trust. It caps the size, depth, and aliases of each upload, and it reads shared anchors from a file that the server ships. It then maps each error to an HTTP status with [`niceyaml.IsInvalid`][niceyaml.IsInvalid].
 
 ### Validators
 
@@ -180,6 +181,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [go.jacobcolvin.com/x/jsonschema]: https://github.com/MacroPower/x/tree/main/jsonschema
 [niceyaml.Detach]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Detach
 [niceyaml.Error]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Error
+[niceyaml.IsInvalid]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#IsInvalid
 [niceyaml.NewSourceFromLayers]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#NewSourceFromLayers
 [niceyaml.Node]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Node
 [niceyaml.Source]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Source

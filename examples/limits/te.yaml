@@ -1,0 +1,5 @@
+---
+table: 4
+items:
+  - *kaffe
+  - *te

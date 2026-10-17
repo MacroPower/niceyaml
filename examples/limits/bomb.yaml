@@ -1,0 +1,14 @@
+---
+# Each list after the first holds ten aliases of the list before it. The
+# one price of this order thus holds a billion fika in a few hundred bytes.
+a: &a [fika, fika, fika, fika, fika, fika, fika, fika, fika, fika]
+b: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]
+c: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]
+d: &d [*c, *c, *c, *c, *c, *c, *c, *c, *c, *c]
+e: &e [*d, *d, *d, *d, *d, *d, *d, *d, *d, *d]
+f: &f [*e, *e, *e, *e, *e, *e, *e, *e, *e, *e]
+g: &g [*f, *f, *f, *f, *f, *f, *f, *f, *f, *f]
+h: &h [*g, *g, *g, *g, *g, *g, *g, *g, *g, *g]
+i: &i [*h, *h, *h, *h, *h, *h, *h, *h, *h, *h]
+table: 7
+items: [{ item: Fika, price: *i }]

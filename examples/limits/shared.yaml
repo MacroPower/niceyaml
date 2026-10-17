@@ -1,0 +1,12 @@
+---
+# The drinks and pastries of Café Yamüll. The server ships this file, so
+# an upload can name each of them by its anchor.
+kaffe: &kaffe
+  item: Kaffe
+  price: 35 kr
+te: &te
+  item: Te
+  price: 30 kr
+kanelbulle: &kanelbulle
+  item: Kanelbulle
+  price: 45 kr
