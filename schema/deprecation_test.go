@@ -92,6 +92,18 @@ func TestSchema_Check_Deprecations(t *testing.T) {
 				"  cafe 5.0 replaces security with wifi.mode.",
 			),
 		},
+		"block scalar value": {
+			// The warning gives the string that a decode reads, not the
+			// indicator of the block scalar.
+			input: stringtest.LinesLF("sizes: >-", "  extra", "  large"),
+			want:  `cafe.yaml:1:8: warning: $.sizes: deprecated value "extra large"`,
+		},
+		"value under a tag that converts it": {
+			// The warning gives the string that the decode reads and the
+			// schema validates, not the text of the token.
+			input: "sizes: !!str ~\n",
+			want:  `cafe.yaml:1:14: warning: $.sizes: deprecated value ""`,
+		},
 		"two schemas at one value": {
 			input: stringtest.LinesLF("wifi:", "  security: wep"),
 			want: stringtest.JoinLF(

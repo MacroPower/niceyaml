@@ -175,13 +175,14 @@ func main() {
 	lipgloss.Println(p.PrintError(err, niceyaml.WithContextLines(0)))
 
 	// The unknown kind, the duplicate name, and the missing Cafe each match a
-	// sentinel, so a program branches on the cause without reading the
-	// message. The schema violation does not match a sentinel. It wraps a
-	// *schema.Violation instead, and the Violation names the keyword that the
-	// value breaks.
+	// manifest sentinel, and the schema violation matches
+	// schema.ErrViolation, so a program branches on the cause without reading
+	// the message. The *schema.Violation that errors.As finds names the
+	// keyword that the value breaks.
 	fmt.Println("Matches ErrUnknownKind:", errors.Is(err, manifest.ErrUnknownKind))
 	fmt.Println("Matches ErrDuplicateName:", errors.Is(err, manifest.ErrDuplicateName))
 	fmt.Println("Matches ErrMissingManifest:", errors.Is(err, manifest.ErrMissingManifest))
+	fmt.Println("Matches schema.ErrViolation:", errors.Is(err, schema.ErrViolation))
 
 	if v, ok := errors.AsType[*schema.Violation](err); ok {
 		fmt.Println("Breaks the schema keyword:", v.Keyword)

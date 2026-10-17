@@ -105,7 +105,8 @@ func (c converter) nodeID(rec jsonschema.Deprecation, t datapath.Target) nodeID 
 // deprecationWarning returns the warning of d. A record that marks a key
 // reads `deprecated field "name"`, and one that marks a value reads
 // `deprecated value "text"` for a scalar and `deprecated value` for a
-// mapping or a sequence. Each message of a schema becomes a detail.
+// mapping or a sequence. The text is that of the value in instance, which
+// the schema validated. Each message of a schema becomes a detail.
 func (c converter) deprecationWarning(d *deprecated, instance any) error {
 	key := d.first.TargetsKey()
 
@@ -113,7 +114,7 @@ func (c converter) deprecationWarning(d *deprecated, instance any) error {
 
 	if key {
 		headline = fmt.Errorf("%w field %q", ErrDeprecated, keyName(d))
-	} else if text, ok := c.valueText(d, instance); ok {
+	} else if text, ok := instanceText(instance, d.first.InstanceSegments()); ok {
 		headline = fmt.Errorf("%w value %q", ErrDeprecated, text)
 	}
 
@@ -145,32 +146,10 @@ func keyName(d *deprecated) string {
 	return segs[len(segs)-1].Key
 }
 
-// valueText returns the text of the scalar that d marks, and reports
-// whether d marks a scalar with text. It reads the text of the node, and
-// the value in instance where d does not reach a node.
-func (c converter) valueText(d *deprecated, instance any) (string, bool) {
-	switch node := c.idx.Deref(d.target.Node).(type) {
-	case nil:
-	case *ast.MappingNode, *ast.MappingValueNode, *ast.SequenceNode:
-		return "", false
-	default:
-		if text, ok := stringText(node); ok {
-			return text, true
-		}
-
-		tk := node.GetToken()
-		if tk == nil || tk.Value == "" {
-			return "", false
-		}
-
-		return tk.Value, true
-	}
-
-	return instanceText(instance, d.first.InstanceSegments())
-}
-
 // instanceText returns the JSON text of the scalar at segments in
-// instance, and reports whether instance holds a scalar there.
+// instance, and reports whether instance holds a scalar there. The
+// instance is the value that go-yaml decoded and the schema validated, so
+// "!!str ~" gives "" and a block scalar gives its string.
 func instanceText(instance any, segments []jsonschema.Segment) (string, bool) {
 	v := instance
 

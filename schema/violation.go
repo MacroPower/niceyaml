@@ -26,8 +26,9 @@ const noFormMessage = "value matches none of the allowed forms"
 // `$` is the root of the document. For ValidateValue, it is the value,
 // which did not come from a document.
 //
-// A caller reads the constraint from the Violation instead of matching on
-// the text of the message. Some reports suppress a rule, reword a
+// [errors.Is] with [ErrViolation] tells a violation from the other errors
+// of a check. A caller reads the constraint from the Violation instead of
+// matching on the text of the message. Some reports suppress a rule, reword a
 // message, or write a format such as the Static Analysis Results
 // Interchange Format (SARIF). Such a report walks the problems of the
 // error and reads the Violation of each:
@@ -131,16 +132,16 @@ func (v *Violation) Error() string {
 	return v.Message
 }
 
-// Is reports whether target is the mark that [niceyaml.IsInvalid] reads.
-// A value that breaks a constraint is the fault of the document, so a
-// Violation matches that mark. The module keeps the mark internal, so
-// the method does not match any target that a caller can name. The
+// Is reports whether target is [ErrViolation], or the mark that
+// [niceyaml.IsInvalid] reads. A value that breaks a constraint is the
+// fault of the document, so a Violation matches that mark. The module
+// keeps the mark internal, so a caller cannot name it. The
 // [*niceyaml.Error] that a schema builds around each Violation declares
-// the fault already. So Is matters for a Violation that reaches a caller
-// on its own, such as one that a [niceyaml.Validator] returns without a
-// wrapper. A nil Violation does not match any target.
+// the fault already. So the mark matters for a Violation that reaches a
+// caller on its own, such as one that a [niceyaml.Validator] returns
+// without a wrapper. A nil Violation does not match any target.
 func (v *Violation) Is(target error) bool {
-	return v != nil && target == fault.ErrInvalid
+	return v != nil && (target == ErrViolation || target == fault.ErrInvalid)
 }
 
 // newViolation returns the [*Violation] that the failure e reports.

@@ -33,16 +33,26 @@ var (
 	// ErrValidate indicates an unexpected, non-validation failure while
 	// validating against a schema, such as a reference resolution problem.
 	// A [Schema] returns each schema constraint violation as a
-	// [*niceyaml.Error] with path information. Such an error does not wrap
-	// this sentinel. [niceyaml.IsInvalid] reports a violation. An error that
-	// wraps ErrValidate means that the validation could not run. IsInvalid
-	// does not report such an error, even when a scoped
-	// [niceyaml.Node.Bind] places it at the value it checked. When a
-	// Validate method or a [niceyaml.WithValueCheck] function returns an
-	// error that does not declare anything, a decode presumes the document
-	// at fault. Either one thus returns an error that wraps ErrValidate
-	// inside [niceyaml.Unchecked].
+	// [*niceyaml.Error] with path information. Such an error matches
+	// [ErrViolation] and does not wrap this sentinel. [niceyaml.IsInvalid]
+	// reports a violation. An error that wraps ErrValidate means that the
+	// validation could not run. IsInvalid does not report such an error,
+	// even when a scoped [niceyaml.Node.Bind] places it at the value it
+	// checked. When a Validate method or a [niceyaml.WithValueCheck]
+	// function returns an error that does not declare anything, a decode
+	// presumes the document at fault. Either one thus returns an error that
+	// wraps ErrValidate inside [niceyaml.Unchecked].
 	ErrValidate = errors.New("validate schema")
+
+	// ErrViolation indicates a value that breaks a constraint of a schema.
+	// Each violation that [Schema.Check] and [Schema.ValidateValue] report
+	// matches it through the [*Violation] that it wraps. So [errors.Is]
+	// finds it in the error of a check, of a decode with
+	// [niceyaml.WithValidator], and of a manifest load. [errors.As] finds
+	// the Violation itself, which names the keyword. A deprecation matches
+	// [ErrDeprecated] instead. An error that wraps [ErrValidate], whose
+	// validation could not run, does not match ErrViolation.
+	ErrViolation = errors.New("schema violation")
 
 	// ErrExcessiveAliasing indicates a value that shares maps, slices, or
 	// byte slices so heavily that validating it reads far more data than
@@ -431,14 +441,14 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 }
 
 // Schema is a compiled JSON schema. It is a [niceyaml.Validator] that
-// checks a document against the schema. It reports constraint violations
-// as [*niceyaml.Error] values that carry the YAML path to each failing
+// checks a document against the schema. It reports constraint violations as
+// [*niceyaml.Error] values that carry the YAML path to each failing
 // location. The errors bind to the source, so
-// [go.jacobcolvin.com/niceyaml/printer.Printer] can display them. Each
-// one wraps a [*Violation] that names the keyword the value fails. For each
-// value that a deprecated schema applies to, a Schema hands a warning
-// that matches [ErrDeprecated] to the [niceyaml.Warnings] collector of
-// the context.
+// [go.jacobcolvin.com/niceyaml/printer.Printer] can display them. Each one
+// wraps a [*Violation] that names the keyword the value fails, so it
+// matches [ErrViolation]. For each value that a deprecated schema applies
+// to, a Schema hands a warning that matches [ErrDeprecated] to the
+// [niceyaml.Warnings] collector of the context.
 //
 // [Schema.Check] checks a node. The root [niceyaml.Node] of a document
 // stands for the whole document, and a Node from [niceyaml.Node.At]
@@ -703,14 +713,15 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 //
 // A single violation carries its YAML path on the error itself. Several
 // violations become a count summary from [niceyaml.NewSummary] that heads
-// one error per violation, each with the path to one failing location.
-// The error of each violation wraps a [*Violation] that names the keyword
-// the value fails and where that keyword stands in the schema. A value
-// that does not match any branch of an anyOf or oneOf counts as one
-// violation. Its details are the failures of each branch that the author
-// might have meant the value for, as [Violation] describes. Any other
-// failure wraps [ErrValidate], because the value is not at fault for it.
-// A $ref the validator cannot resolve is one such failure.
+// one error per violation, each with the path to one failing location. The
+// error of each violation wraps a [*Violation] that names the keyword the
+// value fails and where that keyword stands in the schema. Through that
+// Violation, the error matches [ErrViolation]. A value that does not match
+// any branch of an anyOf or oneOf counts as one violation. Its details are
+// the failures of each branch that the author might have meant the value
+// for, as [Violation] describes. Any other failure wraps [ErrValidate],
+// because the value is not at fault for it. A $ref the validator cannot
+// resolve is one such failure.
 //
 // # Deprecations
 //

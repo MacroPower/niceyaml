@@ -1100,11 +1100,100 @@ func TestViolation_Is(t *testing.T) {
 		})
 	}
 
-	t.Run("matches no exported target", func(t *testing.T) {
+	t.Run("matches ErrViolation and no other exported target", func(t *testing.T) {
 		t.Parallel()
 
+		require.ErrorIs(t, violation, schema.ErrViolation)
 		require.NotErrorIs(t, violation, schema.ErrValidate)
 		require.NotErrorIs(t, violation, schema.ErrNoMatch)
+		require.NotErrorIs(t, violation, schema.ErrDeprecated)
+	})
+
+	t.Run("ErrViolation", func(t *testing.T) {
+		t.Parallel()
+
+		limits := compileSchema(t, `{"properties": {"a": {"type": "string"}, "b": {"maximum": 1}}}`)
+		forms := compileSchema(t, `{"properties": {"v": {"anyOf": [{"minLength": 3}, {"pattern": "^x"}]}}}`)
+		deprecated := compileSchema(t, `{"properties": {"old": {"deprecated": true}}}`)
+		unchecked := compileSchema(t,
+			`{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`,
+			schema.WithRequireRefs(false),
+		)
+		registry := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+
+		check := func(s *schema.Schema, input string) func(t *testing.T) error {
+			return func(t *testing.T) error {
+				t.Helper()
+
+				return s.Check(t.Context(), yamltest.FirstDocument(t, input))
+			}
+		}
+
+		tcs := map[string]struct {
+			input func(t *testing.T) error
+			want  bool
+		}{
+			"one violation of a check": {
+				input: check(limits, "b: 2"),
+				want:  true,
+			},
+			"several violations under a summary": {
+				input: check(limits, stringtest.LinesLF("a: 1", "b: 2")),
+				want:  true,
+			},
+			"a violation of a value": {
+				input: func(t *testing.T) error {
+					t.Helper()
+
+					return limits.ValidateValue(t.Context(), map[string]any{"b": 2})
+				},
+				want: true,
+			},
+			"a value that matches none of the allowed forms": {
+				input: check(forms, "v: ab"),
+				want:  true,
+			},
+			"a deprecation": {
+				input: func(t *testing.T) error {
+					t.Helper()
+
+					warnings := niceyaml.NewWarnings()
+					doc := yamltest.FirstDocument(t, "old: 1")
+					require.NoError(t, deprecated.Check(warnings.Context(t.Context()), doc))
+
+					return warnings.Err()
+				},
+			},
+			"a validation that could not run": {
+				input: func(t *testing.T) error {
+					t.Helper()
+
+					return unchecked.ValidateValue(t.Context(), map[string]any{"a": 1})
+				},
+			},
+			"a registry that matches no schema": {
+				input: func(t *testing.T) error {
+					t.Helper()
+
+					return registry.Check(t.Context(), yamltest.FirstDocument(t, "a: 1"))
+				},
+			},
+			"a nil violation behind a wrapper": {
+				input: func(*testing.T) error {
+					return fmt.Errorf("check config: %w", nilViolation)
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := tc.input(t)
+				require.Error(t, err)
+				assert.Equal(t, tc.want, errors.Is(err, schema.ErrViolation))
+			})
+		}
 	})
 
 	t.Run("every violation of a validation is invalid", func(t *testing.T) {

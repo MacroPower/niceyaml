@@ -888,7 +888,8 @@ func TestRegistry_Check(t *testing.T) {
 				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
 				`MenuItem "kanelbulle" cafe.jacobcolvin.com/v1beta1 up-to-date=false`,
 			},
-			err: "config/menu.yaml:15:10: $.spec.price: 0 is less than 1",
+			err:     "config/menu.yaml:15:10: $.spec.price: 0 is less than 1",
+			matches: []error{schema.ErrViolation},
 		},
 		"duplicate name": {
 			files: map[string]string{"cafe.yaml": cafeDoc, "menu-extra.yaml": menuExtra, "menu.yaml": menuDoc},

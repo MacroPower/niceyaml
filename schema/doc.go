@@ -130,9 +130,9 @@
 //
 // The error of each violation wraps a [*Violation], which names the JSON
 // Schema keyword the value fails and where that keyword stands in the
-// schema. A program that suppresses a rule, rewords a message, or writes
-// a report of its own reads the Violation instead of parsing the text of
-// the message.
+// schema. Through that Violation, the error matches [ErrViolation]. A
+// program that suppresses a rule, rewords a message, or writes a report of
+// its own reads the Violation instead of parsing the text of the message.
 //
 // Settings of the JSON Schema library pass through [WithJSONSchemaOptions].
 // Its JSONSchema prefix shows the dependency at the call site, as the YAML
@@ -178,8 +178,9 @@
 //
 // The keyword anywhere else marks the value, the schema that a $ref
 // reaches included, and the warning binds at the value. The headline
-// quotes the text of a scalar, as in `deprecated value "wep"`, and reads
-// `deprecated value` alone for a mapping or a sequence. The detail comes
+// quotes the scalar that the schema validated, as the decode reads it, so
+// "!!str ~" gives "". It reads `deprecated value "wep"` for the scalar wep,
+// and `deprecated value` alone for a mapping or a sequence. The detail comes
 // from the deprecationMessage keyword of the schema, which the JSON
 // language service of VS Code also reads. The generator of
 // [go.jacobcolvin.com/x/jsonschema] writes that keyword from the
