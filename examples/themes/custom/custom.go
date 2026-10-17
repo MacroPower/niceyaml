@@ -22,9 +22,6 @@ var (
 
 	//go:embed broken.yaml
 	exampleBroken string
-
-	// A theme file names its mode with a key of this map.
-	modes = map[string]theme.Mode{"dark": theme.Dark, "light": theme.Light}
 )
 
 // themeFile is the type a theme file decodes into. Each key under tokens
@@ -32,7 +29,6 @@ var (
 // goes to [theme.FromColors] as it is.
 type themeFile struct {
 	Name   string                    `yaml:"name"`
-	Mode   string                    `yaml:"mode"`
 	Tokens map[kind.Kind]theme.Token `yaml:"tokens"`
 	Colors struct {
 		Fg     string `yaml:"fg"`
@@ -42,6 +38,7 @@ type themeFile struct {
 		Warn   string `yaml:"warn"`
 		Error  string `yaml:"error"`
 	} `yaml:"colors"`
+	Mode theme.Mode `yaml:"mode"`
 }
 
 func main() {
@@ -87,7 +84,7 @@ func main() {
 		OK:     lipgloss.Color(fikaFile.Colors.OK),
 		Warn:   lipgloss.Color(fikaFile.Colors.Warn),
 		Error:  lipgloss.Color(fikaFile.Colors.Error),
-		Mode:   modes[fikaFile.Mode],
+		Mode:   fikaFile.Mode,
 	}, fikaFile.Tokens)
 
 	// Catalog.With adds the theme to a copy of the catalog, so a picker
@@ -130,13 +127,16 @@ func main() {
 	lipgloss.Println(p.PrintError(err))
 }
 
-// knownMode rejects a theme file without a mode, or with a mode that is
-// neither dark nor light. Without the rule, the lookup in modes gives such
-// a file the zero [theme.Mode], which is [theme.Light].
+// knownMode rejects a theme file without a mode, with a null mode, or with
+// a mode that is neither dark nor light. Without the rule, a file without
+// a mode or with mode: ~ decodes as [theme.Light], the zero [theme.Mode].
 func knownMode(ctx context.Context, n *niceyaml.Node) error {
 	modePath := paths.Current().Child("mode")
 
-	var mode string
+	// A null never reaches UnmarshalText, but it sets a pointer to nil, so
+	// the rule decodes into a *theme.Mode. The decode rejects a name other
+	// than dark and light.
+	var mode *theme.Mode
 
 	found, err := n.DecodeIfPresent(ctx, modePath, &mode)
 	if err != nil {
@@ -147,8 +147,8 @@ func knownMode(ctx context.Context, n *niceyaml.Node) error {
 		return niceyaml.NewError("mode is missing")
 	}
 
-	if _, ok := modes[mode]; !ok {
-		return niceyaml.NewError("mode is neither dark nor light", niceyaml.AtPath(modePath))
+	if mode == nil {
+		return niceyaml.NewError("mode is empty", niceyaml.AtPath(modePath))
 	}
 
 	return nil

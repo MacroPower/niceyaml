@@ -51,6 +51,12 @@
 //		fmt.Println(t.Name)
 //	}
 //
+// A Mode prints as "light" or "dark" and reads the same names back, so a
+// program takes one from a flag or a theme file:
+//
+//	var mode theme.Mode
+//	flag.TextVar(&mode, "mode", theme.Dark, "light or dark")
+//
 // # Custom Themes
 //
 // [FromColors] creates a theme from a [Colors] value and a [Token] for

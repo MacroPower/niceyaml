@@ -1,6 +1,8 @@
 package theme
 
 import (
+	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -13,7 +15,22 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// Mode is the background a theme targets.
+// Mode is the background a theme targets. Its text form is "light" or
+// "dark", so a Mode decodes from a YAML or JSON string, and
+// [flag.TextVar] reads one from a flag.
+//
+// A decoder does not call [Mode.UnmarshalText] for a missing or null
+// value. The Mode then keeps the value it held, which is [Light] for a
+// zero Mode. A program that requires a mode decodes it into a [*Mode]
+// and treats nil as missing.
+//
+// A type that holds a Mode reads text. A niceyaml decode into such a type
+// thus holds the aliases of the whole document to the bound on the text
+// they repeat, as the Limits section of [go.jacobcolvin.com/niceyaml]
+// describes. When the document holds an alias, the decode counts that
+// text once for the whole document. A config loader whose documents repeat
+// large anchors decodes the mode as a string and calls
+// [Mode.UnmarshalText] itself.
 type Mode int
 
 // Background modes.
@@ -23,6 +40,46 @@ const (
 	// Dark marks themes that target dark backgrounds.
 	Dark
 )
+
+// String returns "light" for [Light] and "dark" for [Dark]. For any other
+// value, it returns the value in the form Mode(2).
+func (m Mode) String() string {
+	switch m {
+	case Light:
+		return "light"
+	case Dark:
+		return "dark"
+	}
+
+	return fmt.Sprintf("Mode(%d)", int(m))
+}
+
+// MarshalText returns the name that [Mode.String] returns. For a value
+// other than [Light] and [Dark], it returns an error that wraps
+// [ErrUnknownMode].
+func (m Mode) MarshalText() ([]byte, error) {
+	if m != Light && m != Dark {
+		return nil, fmt.Errorf("%w: %d", ErrUnknownMode, int(m))
+	}
+
+	return []byte(m.String()), nil
+}
+
+// UnmarshalText sets m from the name "light" or "dark". For any other
+// text, it returns an error that wraps [ErrUnknownMode] and leaves m as it
+// was.
+func (m *Mode) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "light":
+		*m = Light
+	case "dark":
+		*m = Dark
+	default:
+		return fmt.Errorf("%w %q, want light or dark", ErrUnknownMode, text)
+	}
+
+	return nil
+}
 
 // Theme is a named color theme with its mode and a lazily built
 // [style.Styles]. [Theme.Style] resolves one kind from those styles, so a
@@ -81,6 +138,10 @@ func (t Theme) Style(st kind.Kind) lipgloss.Style {
 }
 
 var (
+	// ErrUnknownMode reports text or a [Mode] value that names neither
+	// [Light] nor [Dark].
+	ErrUnknownMode = errors.New("unknown mode")
+
 	// Charm is the theme of CharmTone colors. It paints the palette of
 	// [style.Default] on a Pepper surface, which [style.Default] leaves
 	// out. The catalog lists it so a picker can offer it by name.

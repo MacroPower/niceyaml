@@ -1,6 +1,8 @@
 package theme_test
 
 import (
+	"encoding/json"
+	"fmt"
 	"image/color"
 	"slices"
 	"sync/atomic"
@@ -12,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/printer"
@@ -19,6 +22,155 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
+
+func TestMode_String(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want string
+		mode theme.Mode
+	}{
+		"light":        {mode: theme.Light, want: "light"},
+		"dark":         {mode: theme.Dark, want: "dark"},
+		"out of range": {mode: theme.Mode(2), want: "Mode(2)"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.mode.String())
+		})
+	}
+}
+
+func TestMode_MarshalText(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err  error
+		want string
+		mode theme.Mode
+	}{
+		"light":        {mode: theme.Light, want: "light"},
+		"dark":         {mode: theme.Dark, want: "dark"},
+		"out of range": {mode: theme.Mode(2), err: theme.ErrUnknownMode},
+		"negative":     {mode: theme.Mode(-1), err: theme.ErrUnknownMode},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := tc.mode.MarshalText()
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(got))
+		})
+	}
+}
+
+func TestMode_UnmarshalText(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err  error
+		text string
+		want theme.Mode
+	}{
+		"light":            {text: "light", want: theme.Light},
+		"dark":             {text: "dark", want: theme.Dark},
+		"capitalized name": {text: "Dark", err: theme.ErrUnknownMode},
+		"unknown name":     {text: "dusk", err: theme.ErrUnknownMode},
+		"number":           {text: "1", err: theme.ErrUnknownMode},
+		"empty":            {text: "", err: theme.ErrUnknownMode},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// Each case starts from a value that no text names, so a
+			// failing case shows that it leaves the value in place.
+			got := theme.Mode(2)
+
+			err := got.UnmarshalText([]byte(tc.text))
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				require.ErrorContains(t, err, fmt.Sprintf("%q", tc.text))
+				assert.Equal(t, theme.Mode(2), got)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestMode_Encoding(t *testing.T) {
+	t.Parallel()
+
+	// A Mode reads and writes its name through any decoder that honors
+	// the text methods.
+	t.Run("JSON round trip", func(t *testing.T) {
+		t.Parallel()
+
+		var got struct {
+			Mode theme.Mode `json:"mode"`
+		}
+
+		require.NoError(t, json.Unmarshal([]byte(`{"mode":"dark"}`), &got))
+		assert.Equal(t, theme.Dark, got.Mode)
+
+		out, err := json.Marshal(got)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"mode":"dark"}`, string(out))
+	})
+
+	t.Run("YAML document", func(t *testing.T) {
+		t.Parallel()
+
+		type file struct {
+			Mode theme.Mode `yaml:"mode"`
+		}
+
+		source := niceyaml.NewSourceFromString("mode: dusk\n", niceyaml.WithName("theme.yaml"))
+
+		_, err := source.Decode[file](t.Context())
+		require.ErrorIs(t, err, theme.ErrUnknownMode)
+		assert.Equal(t, "$.mode", yamltest.PathOf(t, yamltest.RequireError(t, err)).String())
+	})
+
+	// A null never reaches UnmarshalText. A Mode keeps its value, and a
+	// *Mode reads the null as nil.
+	t.Run("null", func(t *testing.T) {
+		t.Parallel()
+
+		got := struct {
+			Mode theme.Mode `json:"mode"`
+		}{Mode: theme.Dark}
+
+		require.NoError(t, json.Unmarshal([]byte(`{"mode":null}`), &got))
+		assert.Equal(t, theme.Dark, got.Mode)
+
+		type file struct {
+			Mode *theme.Mode `yaml:"mode"`
+		}
+
+		for _, text := range []string{"mode: ~\n", "mode:\n"} {
+			decoded, err := niceyaml.NewSourceFromString(text).Decode[file](t.Context())
+			require.NoError(t, err)
+			assert.Nil(t, decoded.Mode, text)
+		}
+	})
+}
 
 func TestNew_NilBuild(t *testing.T) {
 	t.Parallel()

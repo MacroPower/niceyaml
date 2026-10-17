@@ -20,13 +20,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
-var (
-	//go:embed demo.yaml
-	example string
-
-	// A Mode prints as a number, so the program names each one.
-	modes = map[theme.Mode]string{theme.Dark: "dark", theme.Light: "light"}
-)
+//go:embed demo.yaml
+var example string
 
 func main() {
 	// A program lets its user pick the theme and the color profile with
@@ -72,7 +67,7 @@ func main() {
 		fmt.Printf("No theme is named %q.\n", *themeName)
 
 		for _, m := range []theme.Mode{theme.Dark, theme.Light} {
-			fmt.Printf("Themes for a %s terminal:\n", modes[m])
+			fmt.Printf("Themes for a %s terminal:\n", m)
 
 			for _, entry := range catalog.Mode(m).All() {
 				fmt.Println(" ", entry.Name)
@@ -82,7 +77,7 @@ func main() {
 		return
 	}
 
-	fmt.Printf("%s is one of %d themes for a %s terminal.\n", t.Name, catalog.Mode(t.Mode).Len(), modes[t.Mode])
+	fmt.Printf("%s is one of %d themes for a %s terminal.\n", t.Name, catalog.Mode(t.Mode).Len(), t.Mode)
 
 	// A theme paints its surface behind every kind without a fill of its
 	// own. The style of each such kind thus holds the surface as its
