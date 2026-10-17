@@ -8,13 +8,14 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
-// quoter is an [ast.Visitor] that double-quotes every string go-yaml
-// would write unquoted, in single quotes, or as a literal block in a form
-// that reads back as a different value or does not parse. It also
-// double-quotes a literal block from a marshaler's YAML that sits where
-// YAML forbids one. It leaves a block collection in a flow collection as
-// it is, since go-yaml writes that collection in block style, which no
-// quoting makes valid there. Only a marshaler's YAML puts one there.
+// quoter is an [ast.Visitor] that double-quotes each string that go-yaml
+// otherwise writes in a form that reads back as a different value or does
+// not parse. It checks the unquoted, single-quoted, and literal block
+// forms. It also double-quotes a literal block from a marshaler's YAML
+// that sits where YAML forbids one. It leaves a block collection in a flow
+// collection as it is. Go-yaml writes that collection in block style, and
+// quoting does not make block style valid there. Only a marshaler's YAML
+// puts a block collection there.
 type quoter struct {
 	// Reports whether the visited node sits in a flow collection.
 	flow bool
@@ -72,8 +73,9 @@ func (q quoter) Visit(node ast.Node) ast.Visitor {
 }
 
 // flowSafe returns n, or a double-quoted string in place of n when n is a
-// literal block in a flow collection, which cannot hold one. Such a block
-// comes from a marshaler whose output go-yaml parses.
+// literal block in a flow collection. A flow collection cannot hold a
+// literal block. Such a block comes from a marshaler whose output go-yaml
+// parses.
 func (q quoter) flowSafe(n ast.Node) ast.Node {
 	lit, ok := n.(*ast.LiteralNode)
 	if !ok || !q.flow {
@@ -84,10 +86,10 @@ func (q quoter) flowSafe(n ast.Node) ast.Node {
 }
 
 // keySafe returns key, or a double-quoted string in place of key when key
-// is a literal block, which cannot be an implicit key. It quotes a string
-// in key under the rules of an implicit key. It looks through the tags and
-// anchors that a marshaler's YAML can put on a key, and it replaces a
-// literal block under them the same way.
+// is a literal block. A literal block cannot be an implicit key. It quotes
+// a string in key under the rules of an implicit key. It looks through
+// the tags and anchors that a marshaler's YAML can put on a key. It
+// replaces a literal block under them the same way.
 func (q quoter) keySafe(key ast.MapKeyNode) ast.MapKeyNode {
 	switch k := key.(type) {
 	case *ast.StringNode:
@@ -115,9 +117,10 @@ func doubleQuoted(lit *ast.LiteralNode) *ast.StringNode {
 	return ast.String(token.DoubleQuote(s, strconv.Quote(s), lit.Start.Position))
 }
 
-// quote double-quotes n when go-yaml would write it unquoted or in single
-// quotes in a form that does not read back as its value. A mapping key
-// follows the stricter rules of an implicit key.
+// quote double-quotes n when go-yaml otherwise writes it in a form that
+// does not read back as its value. It checks the unquoted, single-quoted,
+// and literal block forms. A mapping key follows the stricter rules of an
+// implicit key.
 func (q quoter) quote(n *ast.StringNode, key bool) {
 	if n.Token.Type == token.SingleQuoteType && strings.ContainsAny(n.Value, "\n\r") {
 		// Only a marshaler's YAML holds a single-quoted string, and the
@@ -163,10 +166,10 @@ func (q quoter) quote(n *ast.StringNode, key bool) {
 }
 
 // quoteEntry double-quotes n, an entry of a block sequence, when go-yaml
-// would write it as a literal block that does not read back as its
+// otherwise writes it as a literal block that does not read back as its
 // value. The go-yaml printer removes two spaces from the start of each
-// line of such a block. With an indent of one space, that also removes
-// the first space of a line that starts with one.
+// line of such a block. With an indent of one space, the printer also
+// removes the first space of a line that starts with one.
 func quoteEntry(n *ast.StringNode) {
 	if n.Token.Type == token.SingleQuoteType || n.Token.Type == token.DoubleQuoteType {
 		return
@@ -180,8 +183,9 @@ func quoteEntry(n *ast.StringNode) {
 	}
 }
 
-// plainSafe reports whether s, a string with no line break and no keyword
-// for another type, reads back as s when go-yaml writes it as is.
+// plainSafe reports whether s reads back as s when go-yaml writes it as
+// is. The caller passes a string that does not hold a line break or a
+// keyword for another type.
 func plainSafe(s string, key, flow bool) bool {
 	switch {
 	case s == "":
@@ -213,10 +217,10 @@ func plainSafe(s string, key, flow bool) bool {
 	return true
 }
 
-// literalSafe reports whether s, a string with a line break, can go out
-// as a literal block. It reports false when go-yaml can write s as a
-// block that reads back as a different value or does not parse, apart
-// from the sequence entries that [quoteEntry] checks.
+// literalSafe reports whether s, a string with a line break, is safe to
+// write as a literal block. It reports false when go-yaml might write s as
+// a block that reads back as a different value or does not parse. It
+// leaves the sequence entries that [quoteEntry] checks to that function.
 func literalSafe(s string) bool {
 	// A literal block reads every line break back as "\n".
 	if strings.ContainsRune(s, '\r') {

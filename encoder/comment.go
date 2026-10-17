@@ -39,10 +39,10 @@ func parseComments(cm yaml.CommentMap) ([]pathComments, error) {
 
 // parsePath parses key as a YAML path. It returns an error that wraps
 // [yaml.ErrInvalidPathString] for the two kinds of key that make go-yaml
-// panic. The go-yaml parser turns an empty key into a path with no root,
-// and that path panics when it selects a node. The parser itself panics
-// on a key that ends inside an index, such as "$.a[0", because it reads
-// past the end of the key.
+// panic. The go-yaml parser turns an empty key into a path that does not
+// have a root. That path panics when it selects a node. The parser itself
+// panics on a key that ends inside an index, such as "$.a[0", because it
+// reads past the end of the key.
 func parsePath(key string) (_ *yaml.Path, err error) {
 	if key == "" {
 		return nil, fmt.Errorf("required '$' character at first: %w", yaml.ErrInvalidPathString)
@@ -58,8 +58,8 @@ func parsePath(key string) (_ *yaml.Path, err error) {
 }
 
 // setComments puts the comments of each entry on the node its path selects
-// in the tree under root. It skips an entry whose path selects no node. It
-// places every comment where the go-yaml encoder places it for a
+// in the tree under root. It skips an entry whose path does not select a
+// node. It places every comment where the go-yaml encoder places it for a
 // [yaml.WithComment] map, and it returns the errors that encoder returns.
 func setComments(root ast.Node, entries []pathComments) error {
 	for _, entry := range entries {
@@ -128,8 +128,8 @@ func setHeadComment(root, target ast.Node, comment *ast.CommentGroupNode) error 
 }
 
 // setLineComment puts comment at the end of the line that target starts
-// on. A mapping entry or a sequence has no line of its own, so its comment
-// goes on its parent.
+// on. Mapping entries and sequences do not have lines of their own, so
+// setLineComment puts the comment of each one on its parent.
 func setLineComment(root, target ast.Node, comment *ast.CommentGroupNode) error {
 	switch target.(type) {
 	case *ast.MappingValueNode, *ast.SequenceNode:
