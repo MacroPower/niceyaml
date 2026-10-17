@@ -1,0 +1,34 @@
+---
+# Café Yamüll on Södermalm leaves most settings to their defaults.
+cafe:
+  name: Café Yamüll
+
+menu:
+  - item: Kaffe
+    price: 35
+  - item: Kanelbulle
+    price: 45
+    available: false
+  - item: Semla
+    price: 55
+
+kitchen:
+  host: kök.local
+
+printers:
+  bar:
+  terrass:
+    host: terrass.local
+---
+# The branch in Gamla Stan makes three mistakes.
+cafe:
+  name: Café Yamüll Gamla Stan
+  seats: många
+
+wifi: gamla-stan-gäst
+
+menu:
+  - item: Kaffe
+    price: 70000
+  - item: Semla
+    pris: 55

@@ -133,6 +133,12 @@ The reports example checks several files and keeps each error after [`niceyaml.D
 
 [`niceyaml.Warnings`][niceyaml.Warnings] collects the problems that do not fail a decode. The example reports warnings beside errors, turns them into errors for a strict mode, and reads the severity of each problem.
 
+### Decoding
+
+- [examples/decoding](examples/decoding)
+
+The decoding example starts each value that a document leaves out from the defaults of its type. It also reports every problem of a document at once.
+
 ### Validators
 
 - [examples/validators](examples/validators)
