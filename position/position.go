@@ -12,10 +12,10 @@ import (
 // Position represents a 0-indexed line and column location. Col counts
 // runes, which are Unicode code points, and not bytes or terminal cells.
 //
-// It is not an offset of [token.Position] values. It names a line and a
-// column of some content, such as the lines of a file or the rows of a
-// diff. A diff can hold two instances of one token, and each gets a
-// position of its own. A position applies to the content that produced
+// A Position is not an offset of [token.Position] values. It names a line
+// and a column of some content, such as the lines of a file or the rows of
+// a diff. A diff can hold two instances of one token, and each gets a
+// position of its own. Each position applies to the content that produced
 // it. [go.jacobcolvin.com/niceyaml/diff.Result] maps between the rows of a
 // diff and the lines of each revision.
 //
@@ -34,9 +34,10 @@ func New(line, col int) Position {
 // coordinates this package uses.
 //
 // The token comes from [go.jacobcolvin.com/niceyaml/tokens.Tokenize] or
-// from a parse over such tokens, whose Line and Column name the rune where
-// the token's text starts, so the result names the same rune in the lines
-// of the source. Returns the zero position if tk or its position is nil.
+// from a parse over such tokens. The Line and Column of such a token name
+// the rune where its text starts, so the result names the same rune in the
+// lines of the source. NewFromToken returns the zero position when tk or
+// its position is nil.
 func NewFromToken(tk *token.Token) Position {
 	var line, col int
 
@@ -48,10 +49,10 @@ func NewFromToken(tk *token.Token) Position {
 	return Position{Line: line, Col: col}
 }
 
-// String returns the position as "line:col" with the fields as they
-// are, counted from 0 as every value in this package is, so a logged
-// position reads as the fields compare. An error bound to a source
-// prints its position counted from 1 in its message, as editors and
+// String returns the position as "line:col" with the fields unchanged.
+// Both fields count from 0, like every value in this package, so a logged
+// position matches the values the fields hold. An error bound to a source
+// prints its position counted from 1 in its message, the way editors and
 // build tools count.
 func (p Position) String() string {
 	return fmt.Sprintf("%d:%d", p.Line, p.Col)
@@ -86,20 +87,22 @@ func (r Range) Contains(pos Position) bool {
 }
 
 // String returns the range as "startLine:startCol-endLine:endCol" with
-// the fields as they are, counted from 0, as [Position.String] does.
+// the fields unchanged and counted from 0, like [Position.String].
 func (r Range) String() string {
 	return fmt.Sprintf("%s-%s", r.Start.String(), r.End.String())
 }
 
 // LastLine returns the last line the [Range] covers. A multi-line range
-// that ends at column 0 holds nothing on its end line, so it stops at the
-// line before. For a range that ends before its start, on an earlier line
-// or at an earlier column of the same line, LastLine returns a line before
-// Start.Line, so the range covers none. No line comes before
-// [math.MinInt], so an inverted range on that line returns that line
-// rather than wrapping around. An empty range, whose end is its start,
-// covers the line it sits on although [Range.Contains] reports nothing
-// inside it.
+// that ends at column 0 does not hold any position on its end line, so
+// LastLine returns the line before. An empty range, whose end is its
+// start, covers the line it sits on, although [Range.Contains] reports
+// false for every position.
+//
+// An inverted range ends before its start, on an earlier line or at an
+// earlier column of the same line. For an inverted range, LastLine returns
+// a line before Start.Line, so the range does not cover any line. Line
+// [math.MinInt] is the lowest line, so LastLine returns that line for an
+// inverted range on it rather than wrapping around.
 func (r Range) LastLine() int {
 	if r.Start.Line == r.End.Line && r.End.Col < r.Start.Col {
 		return subSat(r.Start.Line, 1)
@@ -113,14 +116,14 @@ func (r Range) LastLine() int {
 }
 
 // inverted reports whether the [Range] ends before its start, on an
-// earlier line or at an earlier column of the same line, so it covers no
-// lines.
+// earlier line or at an earlier column of the same line, so it does not
+// cover any line.
 func (r Range) inverted() bool {
 	return r.End.Line < r.Start.Line || r.End.Line == r.Start.Line && r.End.Col < r.Start.Col
 }
 
-// Span represents a half-open range [Start, End) of integers.
-// Use for 1-dimensional ranges like column spans or line spans.
+// Span represents a half-open range [Start, End) of integers, such as a
+// span of columns or a span of lines.
 // Create instances with [NewSpan].
 type Span struct {
 	Start, End int
@@ -131,8 +134,8 @@ func NewSpan(start, end int) Span {
 	return Span{Start: start, End: end}
 }
 
-// Len returns the length of the span, End minus Start, which is negative
-// for a span whose Start is past its End. The length saturates at
+// Len returns the length of the span, End minus Start. The length is
+// negative for a span whose Start is past its End. It saturates at
 // [math.MinInt] and [math.MaxInt] instead of wrapping around, so it keeps
 // the sign of a span wider than the int range.
 func (s Span) Len() int {
@@ -145,7 +148,7 @@ func (s Span) Contains(v int) bool {
 }
 
 // Overlaps reports whether this [Span] overlaps with another.
-// Empty spans (where Start == End) never overlap with anything.
+// Empty spans, whose Start equals their End, never overlap any span.
 func (s Span) Overlaps(other Span) bool {
 	if s.Start >= s.End || other.Start >= other.End {
 		return false
@@ -165,9 +168,9 @@ type Spans []Span
 // Expand returns new spans with each span expanded by amount on both sides.
 // It decreases Start by amount and increases End by amount, and each value
 // saturates at the int limits rather than wrapping around. A negative amount
-// shrinks the spans, which can invert one.
-// Expand clamps nothing, so call [Spans.Clamp] afterward to keep the spans
-// within bounds.
+// shrinks the spans and can invert one.
+// Expand does not clamp the spans, so call [Spans.Clamp] afterward to keep
+// them within bounds.
 func (s Spans) Expand(amount int) Spans {
 	if len(s) == 0 {
 		return nil
@@ -182,10 +185,10 @@ func (s Spans) Expand(amount int) Spans {
 }
 
 // Clamp returns new spans with all values clamped to [lower, upper). It
-// drops every span that holds nothing there: one that lies outside the
-// bounds, one that is empty, and one whose Start is past its End. Every
-// span it returns has a positive [Span.Len] and lies within the bounds.
-// Returns nil when no span remains.
+// drops every span that does not hold any value within the bounds: one
+// that lies outside them, one that is empty, and one whose Start is past
+// its End. Every span it returns has a positive [Span.Len] and lies within
+// the bounds. Clamp returns nil when it drops every span.
 func (s Spans) Clamp(lower, upper int) Spans {
 	var result Spans
 
@@ -204,8 +207,8 @@ func (s Spans) Clamp(lower, upper int) Spans {
 	return result
 }
 
-// addSat returns a+b, saturating at [math.MinInt] and [math.MaxInt] instead
-// of wrapping around.
+// addSat returns a+b. The sum saturates at [math.MinInt] and [math.MaxInt]
+// instead of wrapping around.
 func addSat(a, b int) int {
 	sum := a + b
 
@@ -221,8 +224,8 @@ func addSat(a, b int) int {
 	}
 }
 
-// subSat returns a-b, saturating at [math.MinInt] and [math.MaxInt] instead
-// of wrapping around.
+// subSat returns a-b. The difference saturates at [math.MinInt] and
+// [math.MaxInt] instead of wrapping around.
 func subSat(a, b int) int {
 	diff := a - b
 
@@ -262,11 +265,12 @@ func (rs Ranges) UniqueValues() Ranges {
 }
 
 // LineIndices returns all line indices the [Ranges] cover.
-// A multi-line range contributes each line within it, except an end line it
-// touches only at column 0, which holds none of it. A range that ends on a
-// line before its start line contributes none, while an empty range
-// contributes the line it sits on, as [Range.LastLine] counts them.
-// A line covered by multiple ranges appears once per range.
+// Each range contributes the lines from its start line through
+// [Range.LastLine], inclusive. A multi-line range therefore skips an end
+// line that it touches only at column 0, and an empty range contributes
+// the line it sits on. A range that ends before its start does not
+// contribute any line. A line that multiple ranges cover appears once per
+// range.
 func (rs Ranges) LineIndices() []int {
 	if len(rs) == 0 {
 		return nil
@@ -316,19 +320,20 @@ func (rs Ranges) String() string {
 	return b.String()
 }
 
-// GroupIndices groups indices into [Span] values. Indices within context
-// distance of each other share a span. The indices may come in any order,
-// and a negative context counts as 0.
+// GroupIndices groups indices into [Span] values. Indices whose context
+// windows overlap or touch share a span. GroupIndices accepts the indices
+// in any order and treats a negative context as 0.
 //
-// The threshold is 2*context + 1, so indices merge when their context
-// windows would overlap or be adjacent. The threshold saturates at
-// [math.MaxInt], so a huge context merges every index into one span.
+// The threshold is 2*context + 1. In sorted order, each index joins the
+// span before it when the index is less than the End of that span plus the
+// threshold. The threshold saturates at [math.MaxInt], so a huge context
+// merges every index into one span.
 //
-// Returns half-open [Spans] [Start, End).
+// GroupIndices returns half-open [Spans] [Start, End).
 //
 // For example, with context=2 (threshold=5):
-//   - Indices [0, 4] merge because 4 < 0+1+5 → span [0, 5)
-//   - Indices [0, 6] don't merge because 6 >= 0+1+5 → spans [0, 1), [6, 7)
+//   - Indices [0, 4] merge into span [0, 5) because 4 < 0+1+5.
+//   - Indices [0, 6] form spans [0, 1) and [6, 7) because 6 >= 0+1+5.
 func GroupIndices(indices []int, context int) Spans {
 	if len(indices) == 0 {
 		return nil
@@ -365,14 +370,14 @@ func GroupIndices(indices []int, context int) Spans {
 }
 
 // ContextSpans returns the spans of lines to show around indices. It gives
-// each index context lines on either side, merges windows that would overlap
-// or be adjacent, and clamps the result to [0, total). It is [GroupIndices]
-// followed by [Spans.Expand] and [Spans.Clamp], which is how error excerpts
-// and diff hunks pick the lines they render. A negative context counts as 0,
-// and a context at or above total covers every line. Every span returned
+// each index context lines on either side, merges windows that overlap or
+// touch, and clamps the result to [0, total). It runs [GroupIndices],
+// [Spans.Expand], and [Spans.Clamp] in turn. Error excerpts and diff hunks
+// use it to pick the lines they render. A negative context counts as 0, and
+// a context of at least total covers every line. Every span it returns
 // holds at least one index of [0, total), so an index outside that range
-// contributes none. Returns nil when no span remains, such as when indices is
-// empty.
+// does not add any line. ContextSpans returns nil when indices does not
+// hold an index of [0, total), such as when indices is empty.
 func ContextSpans(indices []int, context, total int) Spans {
 	context = max(0, context)
 
