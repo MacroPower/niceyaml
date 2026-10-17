@@ -1,0 +1,9 @@
+---
+restaurant:
+  name: Café Yamüll
+
+menu:
+  - item: "Småkakor & Kaffe"
+    price: 200 kr # refills included
+  - item: Kanelbulle
+    price: 45 kr

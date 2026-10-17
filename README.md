@@ -88,8 +88,11 @@ flowchart LR
 
 - [examples/printer](examples/printer)
 - [examples/annotations](examples/annotations)
+- [examples/renderer](examples/renderer)
 
-A [`line.View`][niceyaml/line.View] carries the notes and marks of one rendering, and the printer decides how they look. The second example annotates lines, marks ranges, and prints the same view wrapped to a width and with a gutter of its own.
+A [`line.View`][niceyaml/line.View] carries the notes and marks of one rendering, and the printer decides how they look. The annotations example annotates lines, marks ranges, and prints the same view wrapped to a width and with a gutter of its own.
+
+Views do not depend on the printer. The renderer example writes an HTML renderer from the segments, flags, and annotations of a view. It renders a diff with the same function.
 
 ### Diffs
 
