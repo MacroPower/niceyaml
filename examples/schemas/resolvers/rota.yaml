@@ -1,0 +1,6 @@
+---
+kind: Rota
+baristas:
+  monday: [Astrid, Linnea]
+  tuesday: [Astrid]
+  sunday: []

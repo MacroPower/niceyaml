@@ -1,0 +1,7 @@
+---
+# Fika at Café Yamüll, with prices in kr.
+items:
+  - name: Kanelbulle
+    price: 45
+  - name: Semla
+    price: 64.50

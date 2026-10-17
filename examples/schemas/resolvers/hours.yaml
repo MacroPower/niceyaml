@@ -1,0 +1,4 @@
+---
+# yaml-language-server: $schema=./schemas/cafe.schema.yaml#/$defs/hours
+open: "07:00"
+close: 7pm

@@ -1,0 +1,16 @@
+---
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Menu
+type: object
+required: [items]
+additionalProperties: false
+properties:
+  items:
+    type: array
+    items:
+      type: object
+      required: [name, price]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1 }
+        price: { $ref: cafe.schema.yaml#/$defs/price }
