@@ -31,11 +31,11 @@
 // The viewport tracks multiple versions of a document using
 // [Model.AddRevision].
 //
-// Users can navigate between revisions with Tab/Shift+Tab
-// (configurable via [KeyMap]).
+// Users can navigate between revisions with Tab and Shift+Tab, and [KeyMap]
+// sets those keys.
 //
-// When viewing revision N>0, the viewport automatically computes and displays
-// a diff.
+// At a revision index greater than 0, the viewport computes and displays a
+// diff.
 //
 //	m.AddRevision(niceyaml.NewSourceFromString(v1, niceyaml.WithName("v1")))
 //	m.AddRevision(niceyaml.NewSourceFromString(v2, niceyaml.WithName("v2")))
@@ -52,10 +52,10 @@
 // Set [ViewModeHunks] via [Model.SetViewMode] to render a condensed diff
 // showing only changed lines with surrounding context, or
 // [ViewModeSideBySide] to render the before and after content in two
-// panes. [Model.ToggleViewMode] cycles through all three modes.
+// panes. [Model.ToggleViewMode] cycles through the view modes.
 //
 // A line of a diff keeps the overlays and annotations it has in its
-// revision, so a diff shows the error marks of the lines it holds.
+// revision. A diff therefore shows the error marks of the lines it holds.
 // [Revision] says which revision each line comes from.
 //
 // # Search
@@ -63,9 +63,9 @@
 // Call [Model.SetSearchTerm] to highlight matches.
 // Navigate between matches with [Model.SearchNext] and [Model.SearchPrevious].
 // The viewport automatically scrolls to center the row of the current
-// match. With wrapping off, it scrolls sideways only when the match would
-// end past the right edge of the first screen, and then centers the start
-// of the match. A match that fits the first screen leaves the view at the
+// match. With wrapping off, it scrolls sideways only when the match ends
+// past the right edge of the first screen. It then centers the start of the
+// match. A match that fits the first screen leaves the view at the
 // first column. The parent can set a term before the content area has room
 // for a row, such as before the first [tea.WindowSizeMsg]. The viewport then
 // scrolls to the current match when the area has room.
@@ -78,9 +78,9 @@
 //
 // # Mouse
 //
-// The viewport scrolls with the mouse wheel and acts on no click.
-// [Model.HitAt] maps a cell of the viewport to a position in a revision,
-// so the parent model decides what a click or a hover does there:
+// The viewport scrolls with the mouse wheel and ignores clicks.
+// [Model.HitAt] maps a cell of the viewport to a position in a revision.
+// The parent model then decides what a click or a hover does there:
 //
 //	case tea.MouseClickMsg:
 //		if hit, ok := m.viewport.HitAt(msg.X, msg.Y); ok {
@@ -88,13 +88,15 @@
 //		}
 //
 // A diff shows lines of two revisions, so the [Hit] names the revision
-// that holds the line under the cell with the position in it.
+// that holds the line under the cell. Its position is a place in that
+// revision.
 //
 // [Model.Reveal] scrolls the viewport to a Hit, whether HitAt returned it
 // or the parent built it from a position in a revision, such as the place
-// of an error. Like a search, a Reveal before the content area has room for
-// a row scrolls when the area has room. A parent can therefore reveal the
-// first error before the first [tea.WindowSizeMsg] arrives.
+// of an error. A Reveal before the content area has room for a row waits,
+// as a search does, and scrolls when the area has room. A parent can
+// therefore reveal the first error before the first [tea.WindowSizeMsg]
+// arrives.
 //
 // # Customization
 //
@@ -104,7 +106,7 @@
 // box of [printer.WithBox].
 //
 // Provide a [finder.Finder] via [WithFinder] to change how search terms
-// match, such as the normalization applied, or a custom [Searcher] via
+// match, such as the normalization it applies, or a custom [Searcher] via
 // [WithSearcher] for another search implementation.
 //
 // Configure keybindings through the [KeyMap] field on [Model].

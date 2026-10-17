@@ -27,7 +27,7 @@ import (
 const defaultHorizontalStep = 6
 
 // Searcher builds an [Index] over the content of a view. The viewport calls
-// Load the first time it searches for a term after its content changes, and
+// Load the first time it searches for a term after its content changes. It
 // runs every term through the Index it gets back until the content changes
 // again. A side-by-side diff has two panes, and the viewport calls Load
 // once for each of them. Without a diff, side-by-side mode shows the same
@@ -35,11 +35,11 @@ const defaultHorizontalStep = 6
 //
 // Load receives the view as a [line.Sequence], which yields the lines the
 // view holds, each with its index in the content of the view. The ranges
-// the Index finds are in the coordinates of that content, so a match on a
-// line of a hunk reports the index that line has in the unified diff. In
-// hunks mode the view skips the lines between the hunks, so no match
-// starts on one of them. A nil Index, or one holding a nil pointer, finds
-// no match for any term.
+// the Index finds are in the coordinates of that content. A match on a line
+// of a hunk therefore reports the index that line has in the unified diff.
+// In hunks mode the view skips the lines between the hunks, so a match does
+// not start on one of them. A nil Index, or one holding a nil pointer, does
+// not match any term.
 //
 // [WithFinder] adapts a [finder.Finder] to this interface.
 type Searcher interface {
@@ -47,8 +47,8 @@ type Searcher interface {
 }
 
 // Index finds each [position.Range] that matches a search string in the lines
-// it was built from. Find may return the ranges in any order, because the
-// viewport sorts them into document order.
+// it indexes. Find can return the ranges in any order, because the viewport
+// sorts them into document order.
 //
 // See [finder.Index] for an implementation.
 type Index interface {
@@ -67,34 +67,35 @@ func (s finderSearcher) Load(lines line.Sequence) Index {
 
 // Revision is one version of a document in the viewport's history: a name
 // for the revision picker and a view of its content. A [*niceyaml.Source]
-// is a Revision, so a source goes straight to [Model.AddRevision] or
-// [Model.SetRevision]. A view that carries decoration, such as the marks
-// [niceyaml.Annotate] adds, goes in through [NewRevision]:
+// is a Revision, so a source goes to [Model.AddRevision] or
+// [Model.SetRevision] as it is. A view that carries decoration, such as the
+// marks [niceyaml.Annotate] adds, goes in through [NewRevision]:
 //
 //	view := source.View()
 //	niceyaml.Annotate(err, view)
 //	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
 //
 // The viewport reads the view of a revision it shows without a diff when
-// the revision changes, or when [Model.SetDiffMode] turns the diff off, and
-// never decorates it. It computes the diff between two revisions from their
-// views and keeps it until it compares another pair or the history changes.
-// The marks the views carry then stay with the diff, so a change of view
-// mode or hunk context reuses both without reading the views again. Search
-// highlights go on a clone, so the marks a caller adds stay, and the
-// caller's view stays as the caller left it. Marks added after the viewport
-// read the view show once the revision is set again.
+// the revision changes, or when [Model.SetDiffMode] turns the diff off. It
+// never decorates the view. It computes the diff between two revisions from
+// their views and keeps it until it compares another pair or the history
+// changes. The marks the views carry then stay with the diff. A change of
+// view mode or hunk context reuses the diff and its marks without reading
+// the views again. Search highlights go on a clone, so the marks a caller
+// adds stay, and the caller's view stays as the caller left it. Marks that a
+// caller adds after the viewport read the view show after the caller passes
+// the revision in again.
 //
 // A diff shows lines of two revisions, and each line carries the overlays
-// and annotations it has in the view of the revision that holds it. That is
-// the revision the diff compares with for a deleted line and for every line
-// of the left pane of [ViewModeSideBySide], and the current revision for
-// any other line. Outside that pane an unchanged line comes from the
+// and annotations it has in the view of the revision that holds it. For a
+// deleted line, and for every line of the left pane of [ViewModeSideBySide],
+// that is the revision the diff compares with. For any other line it is the
+// current revision. Outside that pane an unchanged line comes from the
 // current revision, so a mark it has in the other revision does not show.
 // [ViewModeHunks] shows the lines around each change, and a mark on any
 // other line stays hidden with its line. The diff sets the flag of each
-// line and shows the line whole, so the flags of a view and its
-// [line.View.Clip] show only without a diff.
+// line and shows the line whole. The flags of a view and the clip that
+// [line.View.Clip] sets therefore show only without a diff.
 //
 // The viewport renders the lines the view holds in the order
 // [line.View.All] yields them, which is content order, and windows them
@@ -145,8 +146,7 @@ type DiffMode int
 
 const (
 	// DiffModeAdjacent compares the current revision with the immediately
-	// preceding revision.
-	// This is the default mode.
+	// preceding revision. It is the default mode.
 	DiffModeAdjacent DiffMode = iota
 	// DiffModeOrigin compares the current revision with the first (origin)
 	// revision, so the diff shows cumulative changes.
@@ -162,8 +162,8 @@ const (
 type ViewMode int
 
 const (
-	// ViewModeFull displays all lines including unchanged content.
-	// This is the default mode.
+	// ViewModeFull displays all lines, including unchanged content. It is
+	// the default mode.
 	ViewModeFull ViewMode = iota
 	// ViewModeHunks displays only changed lines with surrounding context.
 	ViewModeHunks
@@ -204,8 +204,8 @@ type config struct {
 	searcher Searcher
 }
 
-// WithPrinter is an [Option] that sets the [*printer.Printer] used for
-// rendering. Without it, the viewport creates a printer that renders with
+// WithPrinter is an [Option] that sets the [*printer.Printer] the viewport
+// renders with. Without it, the viewport creates a printer that renders with
 // [theme.Charm] inside the box of [printer.WithBox]. A nil p selects that
 // same default. Pass [printer.WithBox] to a printer of your own to draw the
 // same box, with one cell of padding at the right of each row.
@@ -222,9 +222,9 @@ func WithPrinter(p *printer.Printer) Option {
 	}
 }
 
-// WithContainerStyle is an [Option] that sets the [lipgloss.Style] wrapped
-// around the viewport, as [printer.WithContainerStyle] does for a printer.
-// See [Model.SetContainerStyle].
+// WithContainerStyle is an [Option] that sets the [lipgloss.Style] the
+// viewport renders around its content, as [printer.WithContainerStyle] does
+// for a printer. See [Model.SetContainerStyle].
 //
 //nolint:gocritic // hugeParam: Copying.
 func WithContainerStyle(s lipgloss.Style) Option {
@@ -274,62 +274,63 @@ func New(opts ...Option) Model {
 // Model is the Bubble Tea model for the YAML viewport.
 // Create instances with [New].
 //
-// A zero Model has no printer, keymap, or searcher. It counts no rows, so
-// [Model.View] returns "" and both scroll offsets stay at 0. Searching needs
-// the searcher that [New] creates, so a zero Model finds no match for any
-// term. Construct every Model with [New] and any [Option] values.
+// A zero Model does not have a printer, keymap, or searcher. It does not
+// have rows, so [Model.View] returns "" and both scroll offsets stay at 0.
+// Searching needs the searcher that [New] creates, so a zero Model does not
+// match any term. Construct every Model with [New] and any [Option] values.
 //
 // # Rows
 //
 // The viewport scrolls by rendered row, not by source line. A line that
-// wraps to the viewport width or carries an annotation takes several rows,
-// and the vertical offset ([Model.YOffset], [Model.SetYOffset], and the
-// scroll methods) counts those rows, so every row of the view is reachable.
-// The frame of the printer's container style ([printer.WithContainerStyle])
-// adds rows above the first line and below the last. Methods named after rows
-// ([Model.TotalRowCount], [Model.VisibleRowCount]) count rows; methods named
-// after lines ([Model.TotalLineCount], [Model.VisibleLineCount]) count the
-// lines of the view.
+// wraps to the viewport width or carries an annotation takes several rows.
+// The vertical offset that [Model.YOffset], [Model.SetYOffset], and the
+// scroll methods use counts those rows, so every row of the view is
+// reachable. [printer.WithContainerStyle] gives the printer a container
+// style, and the frame of that style adds rows above the first line and
+// below the last. The methods named after rows, such as
+// [Model.TotalRowCount] and [Model.VisibleRowCount], count rows. The methods
+// named after lines, such as [Model.TotalLineCount] and
+// [Model.VisibleLineCount], count the lines of the view.
 //
 // A layout change, such as a new width, style, printer, or wrap setting,
 // keeps the same line at the top of the view. The top row stays at the same
-// row of that line, or at its last row if the line no longer has that many.
-// A top row in the container frame stays at the same row of that frame in
-// the same way, and a view at the top stays at the top, so a frame that
+// row of that line, or at its last row when the line has fewer rows than
+// that. A top row in the container frame stays at the same row of that frame
+// in the same way. A view at the top stays at the top, so a frame that
 // appears or grows shows its outer row. A change of view mode without a diff
-// is a layout change too, since every mode shows the same lines.
+// is a layout change too, because every mode shows the same lines.
 //
 // A change of content scrolls to the top, or to the first search match when
 // the term has one. A new revision changes the content. So do a diff mode
 // that changes the diff on display, a view mode while a diff shows, and a
 // hunk context while hunks of a diff show.
 //
-// A search or [Model.Reveal] waits to scroll while the content area has no
-// room for a row, such as before the parent sizes the viewport from the
+// A search or [Model.Reveal] waits to scroll while the content area does not
+// have room for a row, such as before the parent sizes the viewport from the
 // first [tea.WindowSizeMsg]. When the area has room, the viewport centers
 // the current match or the revealed position in the layout it has then. A
-// search without a current match at that point leaves the view in place. A
-// layout change before that point does not keep the top line, because the
-// scroll sets the offsets. Reveal reports its result at the call, before
-// the scroll runs. [Model.SetYOffset], [Model.SetXOffset], and the scroll
+// search without a current match at that point leaves the view in place.
+// The scroll sets the offsets, so a layout change before that point does not
+// keep the top line. Reveal reports its result at the call, before the
+// scroll runs. [Model.SetYOffset], [Model.SetXOffset], and the scroll
 // methods drop a scroll that waits, and so does a change of content.
 type Model struct {
 	config
 
-	// Index over the lines on display, built when they change. In
-	// side-by-side mode index covers the left pane and indexRight the
-	// right one.
+	// Index over the lines on display. The Model loads it from the searcher
+	// on the first search after the lines change. In side-by-side mode,
+	// index covers the left pane and indexRight covers the right one.
 	index      Index
 	indexRight Index
-	// Revision history; revIndex below selects the revision on display.
+	// Revision history. The revIndex field selects the revision on display.
 	revisions []Revision
-	// Cached diff between the base and current revisions at the indexes in
-	// diffKey below.
+	// Cached diff between the base and current revisions at the indexes that
+	// diffKey holds.
 	diffResult *diff.Result
 	// Copies of the views of the base and current revisions, by
-	// [diff.Side], taken when the Model computed diffResult from them. They
-	// hold every line the diff shows and the marks each line carries into
-	// the views of the diff.
+	// [diff.Side], that the Model took when it computed diffResult from
+	// them. They hold every line the diff shows and the marks each line
+	// carries into the views of the diff.
 	diffViews [2]*line.View
 	// The content on display before search highlights, for the left pane or
 	// main content and for the right pane of a side-by-side diff.
@@ -340,10 +341,10 @@ type Model struct {
 	// left and nil on the right.
 	//
 	// A base is the model's own copy of the view the Revision hands out, or
-	// the view of the diff, and it never carries search highlights. A
+	// the view of the diff. A base never carries search highlights. A
 	// layout or a render slices the lines it needs from a base and adds the
-	// highlights of those lines to the slice, so each term or selection
-	// starts without the highlights of the last.
+	// highlights of those lines to the slice. Each term or selection
+	// therefore starts without the highlights of the last.
 	baseLeft, baseRight *line.View
 	// The indexes in leftMatches and rightMatches of the matches that cover
 	// each line, keyed by the index of the line in the content, in
@@ -351,14 +352,15 @@ type Model struct {
 	// here.
 	leftLines, rightLines map[int][]int
 	// Rendered row counts of the view. Copies of the Model share one cache
-	// until a layout change gives a copy its own, so the counts that the
-	// value-receiver View fills in stay filled for the Model it copied. The
-	// cache locks its fill, so copies can render on separate goroutines.
+	// until a layout change gives a copy its own. The counts that the
+	// value-receiver View fills therefore stay filled for the Model it
+	// copied. The cache locks its fill, so copies can render on separate
+	// goroutines.
 	rows *rowCache
-	// The scroll that scrollTo deferred because the content area had no
-	// room for a row, or nil. The first call to ensureRows with room runs
-	// it. Every change that gives the area room calls ensureRows, so a
-	// scroll waits only while the area has no room.
+	// The scroll that scrollTo deferred because the content area did not
+	// have room for a row, or nil. The first call to ensureRows with room
+	// runs it. Every change that gives the area room calls ensureRows, so a
+	// scroll waits only while the area does not have room.
 	pending *scrollTarget
 	// Current search query.
 	searchTerm string
@@ -387,9 +389,9 @@ type Model struct {
 	hunkContext     int
 	// The line at the top of the view and the row within it when a layout
 	// change dropped the row counts. A line of -1 stands for the top of the
-	// view or the container frame above the first line, and a line one past
-	// the last stands for the frame below the last line. The row then counts
-	// from the first row of that frame.
+	// view or the container frame above the first line. A line one past the
+	// last stands for the frame below the last line. For either frame, the
+	// row counts from the first row of the frame.
 	anchorLine int
 	anchorRow  int
 	// Reports that the base views changed since the searcher last loaded
@@ -438,15 +440,16 @@ func (m *Model) setInitialValues() {
 	m.relayout()
 }
 
-// defaultPrinter returns the printer that a [Model] renders with when none
-// is set. It renders with [theme.Charm] inside the box of [printer.WithBox].
+// defaultPrinter returns the printer that a [Model] renders with when the
+// caller does not set one. It renders with [theme.Charm] inside the box of
+// [printer.WithBox].
 func defaultPrinter() *printer.Printer {
 	return printer.New(printer.WithStyles(theme.Charm), printer.WithBox())
 }
 
-// Init returns the command that starts the viewport, which is nil because
-// the viewport requires no initialization commands. It follows the shape of
-// [tea.Model.Init], so a parent model can call it from its own Init.
+// Init returns the command that starts the viewport. The viewport does not
+// need one, so Init returns nil. Its signature matches [tea.Model.Init], so
+// a parent model can call it from its own Init.
 //
 //nolint:gocritic // hugeParam: value receivers match the Bubble Tea update loop.
 func (m Model) Init() tea.Cmd {
@@ -476,9 +479,9 @@ func (m *Model) Width() int {
 }
 
 // SetWidth sets the width of the viewport and clamps the scroll offsets to
-// the new bounds. A width that leaves the content width as it is, such as
-// the width already set or one the container style caps, leaves the view
-// where it is.
+// the new bounds. A width that leaves the content width as it is leaves the
+// view where it is. The current width leaves the content width as it is,
+// and so does a width that the container style caps.
 func (m *Model) SetWidth(w int) {
 	old := m.paneWidth()
 
@@ -506,7 +509,8 @@ func (m *Model) SetWidth(w int) {
 // Row offsets from the old cache point at other lines after the rows reflow,
 // so relayout calls anchorTop to record the top line as the old layout shows
 // it. The next call to ensureRows scrolls back to that line. A scroll that
-// waits for room replaces the anchor, so anchorTop records nothing then.
+// waits for room replaces the anchor, so anchorTop does not record the top
+// line then.
 func (m *Model) relayout() {
 	m.anchorTop()
 
@@ -515,15 +519,16 @@ func (m *Model) relayout() {
 
 // remeasure responds to a change of decoration confined to the lines that
 // ranges cover, such as a move of the selected search match. It lays out
-// those lines again, since a highlight style may change the width of the
-// text it styles. When a row count or width differs from the cache,
-// remeasure gives the Model a new cache that carries over the counts of
-// every other line. Otherwise the Model keeps its cache, which already
-// holds those counts. Like relayout, it leaves any copy that shares the
-// old cache untouched and records the top line for ensureRows to restore.
-// An empty cache has no counts to carry over, so remeasure drops it as
-// relayout does. Without ranges no line changed, so the cache stays as it
-// is.
+// those lines again, because a highlight style can change the width of the
+// text it styles.
+//
+// When a row count or width differs from the cache, remeasure gives the
+// Model a new cache that keeps the counts of every other line. Otherwise
+// the Model keeps its cache, which already holds those counts. Like
+// relayout, it leaves any copy that shares the old cache untouched and
+// records the top line for ensureRows to restore. An empty cache does not
+// hold any counts to keep, so remeasure drops it as relayout does. A call
+// without ranges does not lay out any line, so the cache stays as it is.
 func (m *Model) remeasure(ranges ...position.Range) {
 	if m.rows == nil || !m.rows.filled() {
 		m.relayout()
@@ -579,21 +584,21 @@ func (m *Model) remeasure(ranges ...position.Range) {
 	m.rows = c
 }
 
-// anchorTop records the line at the top of the view and the row within it,
-// with the vertical offset clamped to the bounds of the current layout, for
-// ensureRows to restore after the rows reflow. An anchor that ensureRows has
-// not restored yet stays, so several changes in a row keep the original top
-// line.
+// anchorTop records the line at the top of the view and the row within it
+// for ensureRows to restore after the rows reflow. It reads the top line
+// from the vertical offset clamped to the bounds of the current layout.
+// An anchor that ensureRows has not restored yet stays, so several changes
+// in sequence keep the original top line.
 //
-// No line owns a frame row, so a top row in the container frame anchors to
-// the frame instead. The first row of the view anchors to the top frame even
-// when the layout has none, so a view at the top stays there when a frame
-// appears.
+// A frame row does not belong to any line, so a top row in the container
+// frame anchors to the frame instead. The first row of the view anchors to
+// the top frame even when the layout does not have one. A view at the top
+// therefore stays there when a frame appears.
 //
-// A deferred scroll replaces the anchor, so anchorTop records nothing while
-// one waits. The caller might have set the new size already. The rows have
-// not reflowed yet, so a read of the top line here runs that scroll on the
-// old row counts.
+// A deferred scroll replaces the anchor, so anchorTop does not record an
+// anchor while one waits. The caller might have set the new size already.
+// The rows have not reflowed yet, so a read of the top line here runs that
+// scroll on the old row counts.
 func (m *Model) anchorTop() {
 	if m.anchored || m.pending != nil || m.rows == nil || !m.rows.filled() || len(m.rows.left) == 0 {
 		return
@@ -625,22 +630,22 @@ func (m *Model) anchorTop() {
 // style in that width, so a wrapped line and the frame around it together
 // fit the content area.
 //
-// Pinning the printer's container to the given width makes the box it draws
-// cover the same columns for every window. Without the pin it would shrink
-// to the widest row of the window, and a window of short lines would carry
-// its border in from the edge of the content area.
+// The printer's container takes the given width, so the box it draws covers
+// the same columns for every window. A container without that width shrinks
+// to the widest row of the window. A window of short lines then draws its
+// border inside the edge of the content area.
 //
 // The viewport sizes the printer's container itself, so renderPrinter drops
-// any Width, Height, MaxWidth, or MaxHeight from its style. Those would make
-// Print wrap, pad, or cut the rows after the layout has counted them, and the
-// scroll bounds would no longer match the rows on screen.
+// any Width, Height, MaxWidth, or MaxHeight from its style. With those
+// sizes, Print wraps, pads, or cuts the rows after the layout counts them.
+// The scroll bounds then differ from the rows on screen.
 //
 // A render prints a slice of the view, so renderPrinter sizes the gutter for
-// the largest line number of the whole view rather than of the window, and
-// every window lines up with the layout. In side-by-side mode both panes
-// get the gutter of the longer revision, so the one horizontal offset lands
-// on the same content column in both. The row cache holds that number,
-// which fillRows computes whenever the lines, the printer, or the panes
+// the largest line number of the whole view rather than of the window. Every
+// window then lines up with the layout. In side-by-side mode both panes get
+// the gutter of the longer revision, so the one horizontal offset lands on
+// the same content column in both. The row cache holds that number. The
+// fillRows method computes it whenever the lines, the printer, or the panes
 // change, so the caller fills the cache first.
 func (m *Model) renderPrinter(width int) *printer.Printer {
 	wrapWidth := 0
@@ -662,12 +667,13 @@ func (m *Model) renderPrinter(width int) *printer.Printer {
 	)
 }
 
-// SetPrinter sets the [*printer.Printer] used for rendering. See
+// SetPrinter sets the [*printer.Printer] the viewport renders with. See
 // [WithPrinter]. A nil p selects the default printer, as a nil
 // [WithPrinter] does.
 //
-// The view, its diff, and its search matches stay as they are, so switching
-// themes costs one render and no diff or search index rebuild.
+// The view, its diff, and its search matches stay as they are. A theme
+// switch therefore costs one render and does not rebuild the diff or the
+// search index.
 func (m *Model) SetPrinter(p *printer.Printer) {
 	if p == nil {
 		p = defaultPrinter()
@@ -685,29 +691,30 @@ func (m *Model) SetPrinter(p *printer.Printer) {
 
 // SetRevision replaces the revision history with a single revision.
 //
-// This is a convenience method equivalent to [Model.ClearRevisions] followed by
+// It matches a call to [Model.ClearRevisions] and then a call to
 // [Model.AddRevision].
 func (m *Model) SetRevision(r Revision) {
 	m.ClearRevisions()
 	m.AddRevision(r)
 }
 
-// AddRevision adds a new revision to the history.
-// After adding, the viewport moves to the newly added revision.
+// AddRevision adds a new revision to the history. The viewport then moves
+// to the new revision.
 //
-// The viewport displays the view r hands out, decoration included, and
-// adds its search highlights to a clone of it, so the view itself stays as
-// the caller left it. See [Revision]. A nil r, or an r that holds a nil
-// pointer or nil func, such as a nil [*niceyaml.Source], adds nothing.
+// The viewport displays the view r hands out, decoration included. It adds
+// its search highlights to a clone of the view, so the view itself stays as
+// the caller left it. See [Revision]. AddRevision ignores a nil r, or an r
+// that holds a nil pointer or nil func, such as a nil [*niceyaml.Source].
 func (m *Model) AddRevision(r Revision) {
 	m.AddRevisions(r)
 }
 
 // AddRevisions adds revisions to the history in order and moves to the last
 // one. It matches a call to [Model.AddRevision] for each revision, except
-// that the viewport builds only the view and diff of the last one, so
-// loading a history costs one diff rather than one per revision. A nil
-// revision, or one that holds a nil pointer or nil func, adds nothing.
+// that the viewport builds only the view and diff of the last one. Loading
+// a history therefore costs one diff rather than one per revision.
+// AddRevisions skips a nil revision, or one that holds a nil pointer or nil
+// func.
 func (m *Model) AddRevisions(rs ...Revision) {
 	// Copies of a Model share the backing array of revisions, so the appends
 	// must not write into spare capacity that another copy can reach.
@@ -738,14 +745,14 @@ func (m *Model) ClearRevisions() {
 	m.rebuildViews()
 }
 
-// RevisionIndex returns the current revision index.
-// Returns 0 without revisions.
+// RevisionIndex returns the current revision index. It returns 0 without
+// revisions.
 func (m *Model) RevisionIndex() int {
 	return m.revIndex
 }
 
-// RevisionName returns the name of the current revision.
-// Returns an empty string without revisions.
+// RevisionName returns the name of the current revision. It returns an
+// empty string without revisions.
 func (m *Model) RevisionName() string {
 	if !m.hasRevision() {
 		return ""
@@ -770,8 +777,8 @@ func (m *Model) RevisionNames() []string {
 }
 
 // GotoRevision navigates to the revision at index, clamped to the valid range.
-// Index 0 always shows the first revision without diff markers.
-// Index 1 to N-1 shows a diff based on the current [DiffMode].
+// Index 0 always shows the first revision without diff markers. Indexes 1
+// through N-1, inclusive, show a diff based on the current [DiffMode].
 func (m *Model) GotoRevision(index int) {
 	if !m.hasRevision() {
 		return
@@ -804,8 +811,8 @@ func (m *Model) AtLatestRevision() bool {
 // ShowingDiff reports whether the viewport is displaying a diff between
 // revisions.
 //
-// This is true when not at the first revision and [DiffMode] is not
-// [DiffModeNone].
+// It reports true when the viewport is past the first revision and the
+// [DiffMode] is not [DiffModeNone].
 func (m *Model) ShowingDiff() bool {
 	return m.hasRevision() && m.revIndex > 0 && m.diffMode != DiffModeNone
 }
@@ -813,8 +820,8 @@ func (m *Model) ShowingDiff() bool {
 // DiffStats returns the number of added and removed lines in the current
 // diff, as [diff.Result.Stats] counts them.
 //
-// Returns the zero [diff.Stats] when the viewport shows no diff (at first
-// revision, diff mode is none, or no revisions exist).
+// It returns the zero [diff.Stats] when the viewport does not show a diff:
+// at the first revision, in [DiffModeNone], or without revisions.
 func (m *Model) DiffStats() diff.Stats {
 	if !m.ShowingDiff() {
 		return diff.Stats{}
@@ -830,11 +837,11 @@ func (m *Model) DiffMode() DiffMode {
 
 // SetDiffMode sets the diff display mode and rebuilds the view when the
 // change shows other content. The view stays where it is when the mode is
-// already set or when the viewport shows no diff before or after the change.
-// It also stays when both modes compare against the same revision, as
-// [DiffModeAdjacent] and [DiffModeOrigin] do at revision index 1.
-// An undefined mode falls back to [DiffModeAdjacent], the default.
-// A rebuild moves the view back to the top, and a caller keeps its place
+// already set, or when the viewport does not show a diff before the change
+// or after it. It also stays when both modes compare against the same
+// revision, as [DiffModeAdjacent] and [DiffModeOrigin] do at revision
+// index 1. An undefined mode counts as [DiffModeAdjacent], the default. A
+// rebuild moves the view back to the top, and a caller can keep its place
 // as [Model.SetViewMode] describes.
 func (m *Model) SetDiffMode(mode DiffMode) {
 	if mode < DiffModeAdjacent || mode > DiffModeNone {
@@ -854,7 +861,7 @@ func (m *Model) SetDiffMode(mode DiffMode) {
 }
 
 // ToggleDiffMode cycles between diff modes, in the order [DiffModeAdjacent],
-// [DiffModeOrigin], [DiffModeNone]. The view rebuilds as for
+// [DiffModeOrigin], [DiffModeNone]. The view rebuilds as it does for
 // [Model.SetDiffMode].
 func (m *Model) ToggleDiffMode() {
 	switch m.diffMode {
@@ -875,15 +882,15 @@ func (m *Model) ViewMode() ViewMode {
 // SetViewMode sets the view mode and rebuilds the view when the viewport
 // shows a diff. Without a diff every mode shows the same lines, so the
 // change counts as a layout change and keeps the top line. Only
-// [ViewModeSideBySide] changes the width lines wrap to, so without a diff a
-// switch between [ViewModeFull] and [ViewModeHunks] leaves the view where it
-// is, as does the mode already set. An undefined mode falls back to
-// [ViewModeFull], the default.
+// [ViewModeSideBySide] changes the width lines wrap to. Without a diff, a
+// switch between [ViewModeFull] and [ViewModeHunks] therefore leaves the
+// view where it is, as does the mode already set. An undefined mode counts
+// as [ViewModeFull], the default.
 //
-// A rebuild moves the view back to the top, since each mode of a diff
-// shows other rows. A caller that wants to keep its place takes a [Hit]
-// from [Model.HitAt] for a cell of the content before the change, and
-// passes it to [Model.Reveal] after it.
+// A rebuild moves the view back to the top, because each mode of a diff
+// shows other rows. To keep its place, a caller takes a [Hit] from
+// [Model.HitAt] for a cell of the content before the change and passes it
+// to [Model.Reveal] after the change.
 func (m *Model) SetViewMode(mode ViewMode) {
 	if mode < ViewModeFull || mode > ViewModeSideBySide {
 		mode = ViewModeFull
@@ -928,7 +935,7 @@ func (m *Model) SetViewMode(mode ViewMode) {
 }
 
 // ToggleViewMode cycles through the view modes in the order [ViewModeFull],
-// [ViewModeHunks], [ViewModeSideBySide]. The view rebuilds as for
+// [ViewModeHunks], [ViewModeSideBySide]. The view rebuilds as it does for
 // [Model.SetViewMode].
 func (m *Model) ToggleViewMode() {
 	switch m.viewMode {
@@ -948,7 +955,7 @@ func (m *Model) HunkContext() int {
 
 // SetHunkContext sets the number of context lines shown around diff hunks
 // in [ViewModeHunks]. The view rebuilds when that mode shows a diff, and
-// otherwise stays where it is. Default is 3.
+// otherwise stays where it is. The default is 3.
 func (m *Model) SetHunkContext(n int) {
 	n = max(0, n)
 	if n == m.hunkContext {
@@ -997,9 +1004,10 @@ func (m *Model) ContainerStyle() lipgloss.Style {
 // SetContainerStyle sets the container style applied to the viewport frame.
 // The frame size changes the content area, so the scroll offsets clamp to
 // it. A style that changes the content width keeps the same line at the
-// top, as far as that clamp allows. A style that leaves the content width as
-// it is, such as one that changes only a border color or the vertical
-// padding, moves the view only as far as that clamp does.
+// top, as far as that clamp allows. A style that leaves the content width
+// as it is moves the view only as far as that clamp does. A style that
+// changes only a border color or the vertical padding leaves the content
+// width as it is.
 //
 //nolint:gocritic // hugeParam: Copying.
 func (m *Model) SetContainerStyle(s lipgloss.Style) {
@@ -1032,11 +1040,11 @@ func (m *Model) SetContainerStyle(s lipgloss.Style) {
 }
 
 // NextRevision moves to the next revision in history. At the latest
-// revision it does nothing.
+// revision it leaves the viewport as it is.
 func (m *Model) NextRevision() { m.GotoRevision(m.revIndex + 1) }
 
 // PreviousRevision moves to the previous revision in history. At the first
-// revision, index 0, it does nothing.
+// revision, index 0, it leaves the viewport as it is.
 func (m *Model) PreviousRevision() { m.GotoRevision(m.revIndex - 1) }
 
 // rebuildViews rebuilds the displayed views from the revision, diff mode, and
@@ -1044,9 +1052,9 @@ func (m *Model) PreviousRevision() { m.GotoRevision(m.revIndex - 1) }
 // Rendering itself waits for View, which renders only the visible window.
 //
 // Every change of content goes through rebuildViews. A match index or row
-// offset carried over from the old content points at an arbitrary line, so
-// the view scrolls to the top, or to the first match in the new content when
-// the search term has one.
+// offset from the old content points at an arbitrary line of the new
+// content. The view therefore scrolls to the top, or to the first match in
+// the new content when the search term has one.
 func (m *Model) rebuildViews() {
 	m.baseLeft = nil
 	m.baseRight = nil
@@ -1091,13 +1099,13 @@ func (m *Model) rebuildViews() {
 }
 
 // refreshSearch recomputes the search matches of the current base views and
-// the lines each match covers, without rebuilding the views. A zero Model,
-// one not created with [New], has no searcher, so it finds no match for any
-// term.
+// the lines each match covers, without rebuilding the views. A zero Model
+// does not have the searcher that [New] creates, so refreshSearch does not
+// find a match for any term there.
 //
-// The caller brings the row counts up to date with the new highlights. They
-// change only on the lines of the old and the new matches, so a caller that
-// changes the term measures only those lines again.
+// The caller updates the row counts for the new highlights. They change
+// only on the lines of the old and the new matches, so a caller that changes
+// the term measures only those lines again.
 func (m *Model) refreshSearch() {
 	switch {
 	case m.baseLeft == nil, m.searcher == nil, m.searchTerm == "":
@@ -1145,8 +1153,9 @@ func (m *Model) clearMatches() {
 // matchLines returns the indexes in matches of the matches that cover each
 // line of the content of view, keyed by the index of the line, in
 // ascending order. A match covers each line from its start line through
-// [position.Range.LastLine], the lines its highlight marks, so a match
-// that ends at column 0 of a later line does not cover that line.
+// [position.Range.LastLine], which are the lines its highlight marks. A
+// match that ends at column 0 of a later line therefore does not cover
+// that line.
 func matchLines(view *line.View, matches position.Ranges) map[int][]int {
 	// The last line the view holds bounds the walk, since a line past it
 	// never renders, and an Index of another package may report a range
@@ -1170,9 +1179,9 @@ func matchLines(view *line.View, matches position.Ranges) map[int][]int {
 // highlightedWithin returns a slice of the base view of the left pane, or
 // of the right one when right is true. The slice holds the lines within
 // spans with the search highlights of the matches that cover them.
-// Without spans, the slice holds no line. The base view keeps no
-// highlight, so a move of the selection costs the lines a caller lays out
-// or renders rather than every match of the document.
+// Without spans, the slice is empty. The base view does not keep
+// highlights. A move of the selection therefore costs the lines a caller
+// lays out or renders, not every match of the document.
 func (m *Model) highlightedWithin(right bool, spans ...position.Span) *line.View {
 	base := m.baseLeft
 	if right {
@@ -1185,7 +1194,7 @@ func (m *Model) highlightedWithin(right bool, spans ...position.Span) *line.View
 // highlight blends into view the search highlights of the matches that
 // cover the lines it holds, and returns view. View must be a clone or a
 // slice of the base view of the left pane, or of the right one when right
-// is true. The base view keeps no highlight.
+// is true. The base view does not keep highlights.
 //
 // It blends the matches in the order of the match list, so each line gets
 // its overlays in the same order however the caller slices the view.
@@ -1221,7 +1230,7 @@ func (m *Model) highlight(right bool, view *line.View) *line.View {
 // selectedMatch returns a function that reports whether the left pane, or
 // the right one when right is true, shows its k-th match as the selected
 // match. In side-by-side mode a match on an equal line shows as selected
-// in both panes, since the search counts it once.
+// in both panes, because the search counts it once.
 func (m *Model) selectedMatch(right bool) func(k int) bool {
 	if m.searchIndex < 0 || m.searchIndex >= len(m.searchMatches) {
 		return func(int) bool { return false }
@@ -1248,7 +1257,8 @@ func (m *Model) selectedMatch(right bool) func(k int) bool {
 
 // equalLine reports whether both side-by-side panes hold line l unchanged.
 // The padding a diff puts opposite an inserted or deleted line is empty and
-// carries the default flag too, so one pane alone cannot tell the two apart.
+// carries the default flag too. One pane alone therefore cannot distinguish
+// the padding from an unchanged line.
 func (m *Model) equalLine(l int) bool {
 	return m.baseLeft.Contains(l) && m.baseRight.Contains(l) &&
 		m.baseLeft.Flag(l) == line.FlagDefault && m.baseRight.Flag(l) == line.FlagDefault
@@ -1264,9 +1274,9 @@ type searchMatch struct {
 // in side-by-side mode. It needs a searcher, and it leaves the match index
 // to refreshSearch.
 //
-// It combines the matches from both panes and deduplicates them. Equal lines
-// count as a single match, while deleted and inserted lines count as separate
-// matches.
+// It combines the matches from both panes and deduplicates them. A match on
+// an equal line counts once, but each match on a deleted or inserted line
+// counts on its own.
 func (m *Model) updateSideBySideSearchState() {
 	// Load both panes once per change of content, as the unified path
 	// does, so typing a term does not rebuild the indexes on every
@@ -1366,8 +1376,8 @@ func comparePos(a, b position.Position) int {
 	return cmp.Or(cmp.Compare(a.Line, b.Line), cmp.Compare(a.Col, b.Col))
 }
 
-// find returns the matches of search in idx. A [Searcher] may return a nil
-// idx or one holding a nil pointer, and either finds nothing.
+// find returns the matches of search in idx. A [Searcher] can return a nil
+// idx or one holding a nil pointer, and find returns nil for either.
 func find(idx Index, search string) position.Ranges {
 	if isNil(idx) {
 		return nil
@@ -1377,9 +1387,9 @@ func find(idx Index, search string) position.Ranges {
 }
 
 // heldMatches returns the matches that start on a line view holds. A
-// [Searcher] loads those lines alone, but an Index of another package may
-// report a range on a line the view skips, such as one between two hunks
-// or outside the document of a [niceyaml.Node.View].
+// [Searcher] loads only those lines. An Index of another package might
+// still report a range on a line the view skips, such as one between two
+// hunks or outside the document of a [niceyaml.Node.View].
 func heldMatches(view *line.View, matches position.Ranges) position.Ranges {
 	held := make(position.Ranges, 0, len(matches))
 
@@ -1394,7 +1404,7 @@ func heldMatches(view *line.View, matches position.Ranges) position.Ranges {
 
 // diffBaseIndex returns the index of the revision that the diff compares
 // the current one against under the current [DiffMode], or -1 when the
-// viewport shows no diff.
+// viewport does not show a diff.
 func (m *Model) diffBaseIndex() int {
 	if !m.ShowingDiff() {
 		return -1
@@ -1423,10 +1433,11 @@ func (m *Model) revision(index int) Revision {
 }
 
 // getDisplayLines returns the base view to display for the current
-// revision and [DiffMode]: a fresh unified diff with the marks of its
-// revisions, or a copy of the view the revision hands out. The copy holds
-// the marks the view carried when the content changed, so marks the caller
-// adds later stay off the display. Returns nil when there is no revision.
+// revision and [DiffMode]. With a diff, that is a new unified diff with the
+// marks of its revisions. Without one, it is a copy of the view the revision
+// hands out. The copy holds the marks the view carried when the content
+// changed, so marks the caller adds later stay off the display. It returns
+// nil without a revision.
 func (m *Model) getDisplayLines() *line.View {
 	if m.ShowingDiff() {
 		return m.carryMarks(m.getDiffResult().Unified())
@@ -1444,8 +1455,8 @@ func (m *Model) getDisplayLines() *line.View {
 // pair of revision indexes, and computes the diff again when the pair
 // changes or [Model.ClearRevisions] drops the cache.
 //
-// Callers must check [Model.ShowingDiff] first. Without a diff there is no
-// base revision.
+// Callers must check [Model.ShowingDiff] first. Without a diff, the Model
+// does not have a base revision.
 func (m *Model) getDiffResult() *diff.Result {
 	base := m.diffBaseIndex()
 	pair := [2]int{base, m.revIndex}
@@ -1486,7 +1497,8 @@ func (m *Model) paneWidth() int {
 //
 // The Models that share a cache can fill it from separate goroutines, so
 // fillRows and filled hold the lock while they write or test the counts. A
-// filled cache never changes, so a read after either call needs no lock.
+// filled cache never changes, so a read after either call does not need the
+// lock.
 type rowCache struct {
 	// Row counts of each line the view renders, in content order, for the
 	// left and right panes. The right counts are nil outside side-by-side
@@ -1498,16 +1510,17 @@ type rowCache struct {
 	leftWidths, rightWidths []int
 	// The index in the content of the k-th rendered line, ascending.
 	indices []int
-	// Prefix sums of the taller pane after the top frame, so sums[k] is the
-	// first row of the k-th rendered line and the last entry is the first row
-	// of the bottom frame. Nil until filled.
+	// Prefix sums of the taller pane after the top frame. The entry sums[k]
+	// is the first row of the k-th rendered line, and the last entry is the
+	// first row of the bottom frame. The slice stays nil until fillRows
+	// fills the cache.
 	sums []int
 	// Width in cells of the widest row of either pane.
 	width int
 	// Largest line number of either pane, which sizes the gutter.
 	maxNumber int
 	// Rows of the printer's container frame above the first line and below
-	// the last. A view without lines has no frame rows.
+	// the last. A view without lines does not have frame rows.
 	top, bottom int
 	// Guards the fill of an empty cache.
 	mu sync.Mutex
@@ -1527,8 +1540,8 @@ func (c *rowCache) filled() bool {
 }
 
 // clone returns a copy of a filled cache with row counts and widths of its
-// own, so a change to the copy leaves every Model that shares c as it was.
-// It copies each field rather than the whole struct, so the copy starts
+// own. A change to the copy therefore leaves every Model that shares c as it
+// was. It copies each field rather than the whole struct, so the copy starts
 // with a lock of its own.
 func (c *rowCache) clone() *rowCache {
 	return &rowCache{
@@ -1567,8 +1580,8 @@ func (c *rowCache) sum() {
 }
 
 // measure copies the row count and width of each line of view from layout,
-// the layout of view, into rows and widths, which hold an entry for each
-// rendered line of the cache.
+// the layout of view, into rows and widths. The rows and widths slices hold
+// an entry for each rendered line of the cache.
 func (c *rowCache) measure(layout printer.Layout, view *line.View, rows, widths []int) {
 	for i := range view.All() {
 		if k, ok := slices.BinarySearch(c.indices, i); ok {
@@ -1579,8 +1592,8 @@ func (c *rowCache) measure(layout printer.Layout, view *line.View, rows, widths 
 }
 
 // differs reports whether layout, the layout of view, gives any line of
-// view a row count or width other than the one in rows and widths, which
-// hold an entry for each rendered line of the cache.
+// view a row count or width other than the one in rows and widths. The rows
+// and widths slices hold an entry for each rendered line of the cache.
 func (c *rowCache) differs(layout printer.Layout, view *line.View, rows, widths []int) bool {
 	for i := range view.All() {
 		k, ok := slices.BinarySearch(c.indices, i)
@@ -1593,7 +1606,7 @@ func (c *rowCache) differs(layout printer.Layout, view *line.View, rows, widths 
 }
 
 // ensureRows fills the row count cache when it is empty, scrolls back to the
-// row that relayout recorded, and clamps both scroll offsets to the cache's
+// row that anchorTop recorded, and clamps both scroll offsets to the cache's
 // bounds. When the content area has room for a row, it then runs the scroll
 // that scrollTo deferred, which replaces the restored row. It checks on
 // every call, because a copy of the Model can fill a shared cache without
@@ -1637,13 +1650,14 @@ func (m *Model) ensureRows() {
 }
 
 // fillRows computes the row counts of the view into the cache when it is
-// empty. A Model without a printer, such as a zero Model, has no rows.
+// empty. A Model without a printer, such as a zero Model, does not have
+// rows.
 //
-// Copies of the Model that share the cache may fill it at the same time,
-// so fillRows holds the lock of the cache and leaves a filled cache as it
+// Copies of the Model that share the cache can fill it at the same time,
+// so fillRows holds the lock of the cache. It leaves a filled cache as it
 // is. A layout change gives a Model a cache of its own, so every Model that
-// shares a cache has the same layout, and the first fill holds the counts
-// of them all.
+// shares a cache has the same layout. The first fill therefore holds the
+// counts of them all.
 func (m *Model) fillRows() {
 	if m.rows == nil {
 		m.rows = &rowCache{}
@@ -1698,12 +1712,13 @@ func (m *Model) lineRows(k int) int {
 }
 
 // rowWindow returns the rendered lines [first, last) that own the rows of the
-// visible window, which starts at the vertical offset and is one content
-// height tall.
+// visible window. The window starts at the vertical offset and is one
+// content height tall.
 //
-// The range holds at least one line whenever the view has lines. No line owns
-// a frame row, so a window that lies entirely inside the top or the bottom
-// frame still needs a line to render the frame around.
+// The range holds at least one line whenever the view has lines. A frame
+// row does not belong to any line. A window that lies entirely inside the
+// top or the bottom frame therefore still needs a line to render the frame
+// around.
 func (m *Model) rowWindow() (int, int) {
 	m.ensureRows()
 
@@ -1724,8 +1739,8 @@ func (m *Model) rowWindow() (int, int) {
 }
 
 // window returns the span of content indices that selects the rendered
-// lines [first, last) from the view, which holds its lines in ascending
-// order, so a slice of the view by the span renders those lines alone.
+// lines [first, last) from the view. The view holds its lines in ascending
+// order, so a slice of the view by the span renders only those lines.
 func (m *Model) window(first, last int) position.Span {
 	if first >= last {
 		return position.Span{}
@@ -1751,9 +1766,9 @@ func (m *Model) trimWindow(rows []string, first int) []string {
 	return rows[:min(len(rows), m.maxHeight())]
 }
 
-// trimFrame drops the container frame rows that Print adds around the lines
-// [first, last) in rows, except the top frame above the first line of the
-// view and the bottom frame below its last line.
+// trimFrame drops from rows the container frame rows that Print adds around
+// the lines [first, last). It keeps the top frame above the first line of
+// the view and the bottom frame below its last line.
 func (m *Model) trimFrame(rows []string, first, last int) []string {
 	if first > 0 {
 		rows = rows[min(m.rows.top, len(rows)):]
@@ -1776,8 +1791,8 @@ func (m *Model) AtBottom() bool {
 	return !m.hasContent() || m.YOffset() >= m.maxYOffset()
 }
 
-// ScrollPercent returns the vertical scroll position as a float between 0 and 1.
-// It is 1 at the bottom, where [Model.AtBottom] reports true.
+// ScrollPercent returns the vertical scroll position as a float between 0 and
+// 1, inclusive. It is 1 at the bottom, where [Model.AtBottom] reports true.
 func (m *Model) ScrollPercent() float64 {
 	if m.baseLeft == nil {
 		return 1.0
@@ -1787,9 +1802,9 @@ func (m *Model) ScrollPercent() float64 {
 }
 
 // HorizontalScrollPercent returns the horizontal scroll position as a float
-// between 0 and 1. It is 1 when every row fits the content width, which
-// wrapped rows do unless an annotation column past the end of its line lies
-// past the wrap width or a style transform widens a row.
+// between 0 and 1, inclusive. It is 1 when every row fits the content width.
+// Wrapped rows fit unless an annotation column past the end of its line lies
+// past the wrap width, or a style transform widens a row.
 func (m *Model) HorizontalScrollPercent() float64 {
 	if m.baseLeft == nil || m.printer == nil {
 		return 1.0
@@ -1799,8 +1814,8 @@ func (m *Model) HorizontalScrollPercent() float64 {
 }
 
 // scrollPercent returns offset as a fraction of limit, the largest offset
-// the view can reach, clamped between 0 and 1. It is 1 when limit leaves no
-// room to scroll.
+// the view can reach, clamped between 0 and 1, inclusive. It is 1 when limit
+// is 0 or less.
 func scrollPercent(offset, limit int) float64 {
 	if limit <= 0 {
 		return 1.0
@@ -1817,11 +1832,11 @@ func (m *Model) maxYOffset() int {
 }
 
 // rowOffsetLimit returns the last row the view can start at, from a filled
-// cache. That is the row that brings the last row of the view to the bottom
-// of the content area. When the content area is shorter than the view, it is
-// the last row of the view instead. A content area with no height, which a
-// height of 0 or a container frame as tall as the height gives, would
-// otherwise put the offset one row past the end of the view.
+// cache. That row brings the last row of the view to the bottom of the
+// content area. The content area has a height of 0 when the height is 0 or
+// the container frame is as tall as the height. For such an area, that row
+// lies one row past the end of the view, so rowOffsetLimit returns the last
+// row of the view instead.
 func (m *Model) rowOffsetLimit() int {
 	total := m.rows.total()
 
@@ -1835,8 +1850,8 @@ func (m *Model) lineCount() int {
 
 // maxXOffset returns the maximum X offset, which brings the last column of
 // the widest rendered row into view. It is 0 when every row fits the content
-// width, which wrapped rows do unless an annotation column past the end of
-// its line lies past the wrap width or a style transform widens a row.
+// width. Wrapped rows fit unless an annotation column past the end of its
+// line lies past the wrap width, or a style transform widens a row.
 func (m *Model) maxXOffset() int {
 	if m.baseLeft == nil || m.printer == nil {
 		return 0
@@ -1846,7 +1861,7 @@ func (m *Model) maxXOffset() int {
 }
 
 // rowWidth returns the width in cells of the widest row the printer renders
-// for the view before the container frame applies, over both panes in
+// for the view before the container frame applies, across both panes in
 // side-by-side mode. It reads the line widths the layouts report, so
 // annotation rows and wide characters count toward the horizontal scroll
 // bound.
@@ -1875,9 +1890,9 @@ func layoutRows(layout printer.Layout, view *line.View) ([]int, []int, []int) {
 	return indices, rows, widths
 }
 
-// scrollWidth returns the number of row columns a pane shows at once: the
-// pane width less the horizontal frame of the printer's container, which
-// cutRow keeps in place.
+// scrollWidth returns the number of row columns a pane shows at a time: the
+// pane width minus the horizontal frame of the printer's container. The
+// cutRow method keeps that frame in place.
 func (m *Model) scrollWidth() int {
 	return max(0, m.paneWidth()-m.printer.ContainerStyle().GetHorizontalFrameSize())
 }
@@ -1922,12 +1937,12 @@ func (m *Model) maxHeight() int {
 	return max(0, h-m.style.GetVerticalFrameSize())
 }
 
-// hasContent reports whether there is content to display.
+// hasContent reports whether the view has lines to display.
 func (m *Model) hasContent() bool {
 	return m.lineCount() > 0
 }
 
-// hasRevision reports whether a revision exists.
+// hasRevision reports whether the history holds a revision.
 func (m *Model) hasRevision() bool {
 	return len(m.revisions) > 0
 }
@@ -1967,9 +1982,10 @@ func (m *Model) visibleRows() []string {
 	return rows
 }
 
-// rowOffset returns the horizontal offset of the rendered row r: 0 for a row
-// of the container frame above the first line or below the last, which holds
-// no content, and the horizontal scroll offset for a row of a line.
+// rowOffset returns the horizontal offset of the rendered row r. A row of
+// the container frame above the first line or below the last does not hold
+// content, so its offset is 0. A row of a line takes the horizontal scroll
+// offset.
 func (m *Model) rowOffset(r int) int {
 	if r < m.rows.top || r >= m.rows.total()-m.rows.bottom {
 		return 0
@@ -1981,8 +1997,8 @@ func (m *Model) rowOffset(r int) int {
 // cutRow fits a rendered row to width by cutting its content columns to the
 // horizontal window that starts at offset. The columns of the printer's
 // container frame on either side stay in place, so a border keeps its edges
-// while the content between them scrolls. A wide character cut by the left
-// edge of the window shows as blank cells.
+// while the content between them scrolls. A wide character that the left
+// edge of the window cuts shows as blank cells.
 func (m *Model) cutRow(row string, offset, width int) string {
 	left, right := m.printerFrame()
 
@@ -2020,15 +2036,15 @@ func (m *Model) printerFrame() (int, int) {
 	return left, frame.GetHorizontalFrameSize() - left
 }
 
-// cutWindow cuts body, the content columns of a rendered row, which take
-// inner cells, to the window of visible cells that starts at offset. It
-// returns the cut, the cell of body the cut starts at, and the cells it
-// takes.
+// cutWindow cuts body to the window of visible cells that starts at offset.
+// The body holds the content columns of a rendered row and takes inner
+// cells. It returns the cut, the cell of body the cut starts at, and the
+// cells it takes.
 //
 // The cut drops a wide cluster that straddles either edge of the window. A
-// cut that ends at a column inside a cluster comes up short of that
-// column, so the start moves to the next cluster boundary, and the caller
-// fills the columns of the dropped cluster with blank cells.
+// cut that ends at a column inside a cluster stops before that column. The
+// start therefore moves to the next cluster boundary, and the caller fills
+// the columns of the dropped cluster with blank cells.
 func cutWindow(body string, inner, offset, visible int) (string, int, int) {
 	start := offset
 	for start < min(inner, offset+visible) {
@@ -2099,7 +2115,7 @@ func (m *Model) PageUp() {
 }
 
 // HalfPageDown moves the view down by half a page, and by one row when half
-// a page rounds down to none.
+// a page rounds down to 0 rows.
 func (m *Model) HalfPageDown() {
 	if h := m.maxHeight(); h > 0 {
 		m.ScrollDown(max(1, h/2))
@@ -2107,7 +2123,7 @@ func (m *Model) HalfPageDown() {
 }
 
 // HalfPageUp moves the view up by half a page, and by one row when half a
-// page rounds down to none.
+// page rounds down to 0 rows.
 func (m *Model) HalfPageUp() {
 	if h := m.maxHeight(); h > 0 {
 		m.ScrollUp(max(1, h/2))
@@ -2141,8 +2157,9 @@ func (m *Model) GotoBottom() {
 	m.SetYOffset(m.maxYOffset())
 }
 
-// TotalLineCount returns the number of lines in the view. In [ViewModeHunks]
-// that is the lines inside a hunk, not the whole diff.
+// TotalLineCount returns the number of lines in the view. When
+// [ViewModeHunks] shows a diff, it counts only the lines inside the hunks,
+// not the whole diff.
 func (m *Model) TotalLineCount() int {
 	return m.lineCount()
 }
@@ -2150,9 +2167,9 @@ func (m *Model) TotalLineCount() int {
 // TopLine returns the index of the line that owns the top row of the view.
 // It counts lines as [Model.TotalLineCount] does, not rows, so a line that
 // wraps to several rows counts once. When the top row belongs to the frame
-// of the container style, TopLine returns the nearest line: the first line
-// for a row in the top frame, and the last line for a row in the bottom
-// frame. It returns 0 when the view has no lines.
+// of the container style, TopLine returns the nearest line. The nearest
+// line is the first line for a row in the top frame, and the last line for
+// a row in the bottom frame. It returns 0 for a view without lines.
 func (m *Model) TopLine() int {
 	first, _ := m.rowWindow()
 
@@ -2160,10 +2177,11 @@ func (m *Model) TopLine() int {
 }
 
 // VisibleLineCount returns the number of lines with at least one row on
-// screen. It returns 0 when the content area has no room for a row, such as
-// at a height of 0 or when the container frame fills the width. Otherwise it
-// reports at least 1 whenever the view has lines, since a window that lies
-// wholly inside the container frame still renders around a line.
+// screen. It returns 0 when the content area does not have room for a row,
+// such as at a height of 0 or when the container frame fills the width.
+// Otherwise it reports at least 1 whenever the view has lines, because a
+// window that lies wholly inside the container frame still renders around a
+// line.
 func (m *Model) VisibleLineCount() int {
 	if !m.canRender() || !m.hasContent() {
 		return 0
@@ -2210,25 +2228,25 @@ func (m *Model) VisibleRowCount() int {
 //		}
 //
 // A diff shows lines of two revisions, so the [Hit] names the revision
-// that holds the line under the cell. That is the revision the diff
-// compares with for a deleted line and for every line of the left pane of
-// [ViewModeSideBySide], and the current revision for any other line. The
+// that holds the line under the cell. For a deleted line, and for every
+// line of the left pane of [ViewModeSideBySide], that is the revision the
+// diff compares with. For any other line it is the current revision. The
 // position counts in the content of that revision, whatever the diff
 // shows around the line. Without a diff both panes of ViewModeSideBySide
 // show the current revision.
 //
-// HitAt reports false for a cell that shows no content of a revision. Such
-// a cell lies in the frame of either container style, in the gutter, in
-// the separator between two panes, or on an annotation row such as a hunk
-// header. The filler past the end of a row, beside a shorter pane, and
-// below the last row shows none either. A wide character that an edge of
-// the window cuts shows as blank cells, and HitAt reports false for those
-// too. It reports false for every cell of a zero Model.
+// HitAt reports false for a cell that does not show content of a revision.
+// Such a cell lies in the frame of either container style, in the gutter,
+// in the separator between two panes, or on an annotation row such as a
+// hunk header. The filler past the end of a row, beside a shorter pane, and
+// below the last row does not show content either. A wide character that an
+// edge of the window cuts shows as blank cells, and HitAt reports false for
+// those too. It reports false for every cell of a zero Model.
 //
-// A revision whose view clips its lines, as [line.View.Clip] sets one
-// to, shows part of a long line with "..." for the rest. A cell of such
-// a line gives the column of the line it shows, and a cell of a "..."
-// reports false.
+// [line.View.Clip] returns a view that clips its lines. A revision with
+// such a view shows part of each long line, with "..." for the columns the
+// clip leaves out. A cell of such a line gives the column of the line it
+// shows, and HitAt reports false for a cell of a "...".
 func (m *Model) HitAt(x, y int) (Hit, bool) {
 	if m.printer == nil || !m.canRender() || !m.hasContent() {
 		return Hit{}, false
@@ -2293,11 +2311,12 @@ func (m *Model) HitAt(x, y int) (Hit, bool) {
 	return m.revisionHit(right, pos)
 }
 
-// paneHit returns the position in the content of the left pane, or of the
-// right one when right is true, that a cell of the pane shows, and true.
-// The cell counts from the left edge of the pane, which is width cells
-// wide, on the given row of the k-th rendered line. It reports false for a
-// cell that shows no content, as [Model.HitAt] lists them.
+// paneHit returns the position in the content of a pane that a cell of the
+// pane shows, and true. The pane is the right one when right is true, and
+// the left one otherwise. The cell counts from the left edge of the pane,
+// which is width cells wide, on the given row of the k-th rendered line. It
+// reports false for a cell that does not show content, as [Model.HitAt]
+// lists them.
 func (m *Model) paneHit(right bool, k, row, cell, width int) (position.Position, bool) {
 	left, rightFrame := m.printerFrame()
 	visible := max(0, width-left-rightFrame)
@@ -2341,9 +2360,9 @@ func (m *Model) paneHit(right bool, k, row, cell, width int) (position.Position,
 	return pos, true
 }
 
-// revisionHit returns the [Hit] of pos, a position in the content of the
-// left pane, or of the right one when right is true, and true. A diff
-// holds the lines of the two revisions it compares. The hit names the
+// revisionHit returns the [Hit] of pos, and true. The position pos lies in
+// the content of the left pane, or of the right one when right is true. A
+// diff holds the lines of the two revisions it compares. The hit names the
 // revision of the line the row shows and the index of the line there, as
 // [diff.Result.UnifiedOrigin] and [diff.Result.PaneOrigin] report them. It
 // reports false for a filler row.
@@ -2391,19 +2410,19 @@ func (m *Model) revisionHit(right bool, pos position.Position) (Hit, bool) {
 //
 // Reveal scrolls as a search does for its current match. It centers the
 // row that shows the position. With wrapping off it scrolls sideways only
-// when the position lies past the right edge of the first screen, and then
+// when the position lies past the right edge of the first screen. It then
 // centers the position. Before the content area has room for a row, Reveal
 // reports its result at the call and scrolls when the area has room, as the
 // [Model] doc describes.
 //
-// Reveal changes neither the revision on display nor the [ViewMode] nor
-// the [DiffMode]. It reports false and leaves the viewport as it is when
-// the view on display does not show the position. The viewport shows the
-// current revision and, with a diff, the revision the diff compares with,
-// so Reveal reports false for a Hit of any other revision. It reports
-// false as well for a line outside every hunk of [ViewModeHunks], for a
-// line the view of the revision does not hold, and for a column past the
-// end of its line. It reports false for every Hit on a zero Model.
+// Reveal does not change the revision on display, the [ViewMode], or the
+// [DiffMode]. It reports false and leaves the viewport as it is when the
+// view on display does not show the position. The viewport shows the
+// current revision and, with a diff, the revision the diff compares with.
+// Reveal reports false for a Hit of any other revision. It also reports
+// false for a line outside every hunk of [ViewModeHunks] and for a line
+// that the view of the revision does not hold. It reports false for a
+// column past the end of its line and for every Hit on a zero Model.
 //
 // A diff shows an unchanged line of the revision it compares with in the
 // left pane of [ViewModeSideBySide]. Every other view of the diff shows
@@ -2425,8 +2444,8 @@ func (m *Model) Reveal(hit Hit) bool {
 
 // locate finds hit in the views on display. It returns whether the right
 // pane shows hit rather than the left, the position that shows it in the
-// content of that pane, and true. The last result is false when no line on
-// display shows hit, as [Model.Reveal] lists the cases.
+// content of that pane, and true. The last result is false when the lines
+// on display do not show hit, as [Model.Reveal] lists the cases.
 func (m *Model) locate(hit Hit) (bool, position.Position, bool) {
 	pos := hit.Position
 
@@ -2472,17 +2491,17 @@ func (m *Model) locate(hit Hit) (bool, position.Position, bool) {
 }
 
 // holds reports whether view holds the line of pos and the line reaches the
-// column of pos, which may be the end of the line.
+// column of pos. That column can be the end of the line.
 func holds(view *line.View, pos position.Position) bool {
 	return pos.Col >= 0 && view.Contains(pos.Line) && pos.Col <= view.Line(pos.Line).Width()
 }
 
-// SetSearchTerm sets the search term and updates highlights.
-// If the term is empty, clears all search highlights.
+// SetSearchTerm sets the search term and updates highlights. An empty term
+// clears all search highlights, as [Model.ClearSearch] does.
 //
 // The term stays set across content changes. A change of content, as the
-// [Model] doc defines it, starts the search over at the first match in the
-// new content and scrolls to it. A new term likewise starts at its first
+// [Model] doc defines it, restarts the search at the first match in the new
+// content and scrolls to it. A new term likewise starts at its first
 // match, but setting the same term again keeps the current match. Before the
 // content area has room for a row, the scroll to the match waits until the
 // area has room, as the [Model] doc describes.
@@ -2521,7 +2540,7 @@ func (m *Model) SearchTerm() string {
 }
 
 // ClearSearch removes all search highlights and clears the search term.
-// With no term set, ClearSearch leaves the view and its layout as they are.
+// Without a term, ClearSearch leaves the view and its layout as they are.
 func (m *Model) ClearSearch() {
 	if m.searchTerm == "" {
 		return
@@ -2545,7 +2564,8 @@ func (m *Model) SearchPrevious() {
 	m.navigateSearch(-1)
 }
 
-// navigateSearch moves the search index by delta, wrapping around.
+// navigateSearch moves the search index by delta and wraps around at either
+// end of the matches.
 func (m *Model) navigateSearch(delta int) {
 	if len(m.searchMatches) == 0 {
 		return
@@ -2562,8 +2582,8 @@ func (m *Model) navigateSearch(delta int) {
 	m.scrollToCurrentMatch()
 }
 
-// SearchIndex returns the current search match index (0-based), or -1 if no
-// matches.
+// SearchIndex returns the index of the current search match, counting from
+// 0, or -1 without matches.
 func (m *Model) SearchIndex() int {
 	// The stored index of a zero Model stays 0 until a search runs, so the
 	// match count decides whether a current match exists.
@@ -2596,13 +2616,13 @@ func (m *Model) scrollToCurrentMatch() {
 }
 
 // scrollTo scrolls to center the row that holds the start of the range of
-// target. It returns to the first screen sideways, unless wrap is off and
-// the range ends past that screen, and then it centers the start of the
-// range. It reports whether the pane renders the line the range starts on,
-// and leaves both offsets as they are when it does not.
+// target. Sideways, it returns to the first screen. When wrap is off and
+// the range ends past that screen, it centers the start of the range
+// instead. It reports whether the pane renders the line the range starts
+// on, and leaves both offsets as they are when it does not.
 //
-// A content area without room for a row has no center row and no first
-// screen, so scrollTo defers both offsets. The first call to ensureRows
+// A content area without room for a row does not have a center row or a
+// first screen, so scrollTo defers both offsets. The first call to ensureRows
 // with room runs the scroll, and a search target scrolls to the match that
 // is current then. The row counts fill at any size, so scrollTo reports its
 // result at the call.
@@ -2768,11 +2788,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// getViewDimensions returns (width, height, ok). A false ok means the content
-// area has no room for rows, and View renders "". That happens when a
-// dimension is zero or negative, when the frame of the container style takes
-// all of it, or when the separator of the side-by-side view leaves its panes
-// no column.
+// getViewDimensions returns (width, height, ok). A false ok means that the
+// content area does not have room for rows, and View renders "". The area
+// lacks room in these cases:
+//   - A dimension is 0 or less.
+//   - The frame of the container style takes all of a dimension.
+//   - The separator of the side-by-side view leaves its panes without a
+//     column.
 func (m *Model) getViewDimensions() (int, int, bool) {
 	if !m.canRender() {
 		return 0, 0, false
@@ -2782,11 +2804,12 @@ func (m *Model) getViewDimensions() (int, int, bool) {
 }
 
 // renderContent applies styling and renders lines into final output. It cuts
-// each row to contentW, a width the printer's gutter can force a row past on
-// a viewport of only a few columns, and pads it out to contentW, so the style
-// only fills the rows below them. A style with a width would word-wrap every
-// row on each render, and wrap a row wider than contentW onto a second
-// screen row that the scroll math does not count.
+// each row to contentW and pads it to contentW, so the style fills only the
+// rows below them. On a viewport of only a few columns, the printer's gutter
+// can force a row past contentW. A style with a width word-wraps every row
+// on each render. It also wraps a row wider than contentW onto a second
+// screen row that the scroll math does not count. The container style
+// therefore renders without its width.
 func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 	textStyle := m.printer.Style(kind.Text)
 
@@ -2815,8 +2838,8 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 		Render(contents)
 }
 
-// View renders the viewport. A zero Model, one not created with [New],
-// renders "".
+// View renders the viewport. It renders "" for a zero Model, which [New]
+// did not create.
 //
 // The rendering behavior depends on the current [ViewMode]:
 //   - [ViewModeFull]: Renders all lines (default behavior).
@@ -2946,13 +2969,13 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	return m.renderContent(combined, contentW, contentH)
 }
 
-// blankPaneRow renders the row a side-by-side pane shows where it has run
-// out of rows, because the line wraps taller in the other pane. It is one
-// empty content row with the frame of p's container style around it, so the
-// pane keeps its border down the whole window. Print pads the row out to p's
-// container width, which the side-by-side view pins to the pane width, so a
-// container without a horizontal frame gives a row of [kind.Text] spaces as
-// wide as the pane.
+// blankPaneRow renders the row that a side-by-side pane shows below its own
+// rows when the line wraps taller in the other pane. It is one empty content
+// row with the frame of p's container style around it, so the pane keeps
+// its border down the whole window. Print pads the row to p's container
+// width, and the side-by-side view pins that width to the pane width. A
+// container without a horizontal frame therefore gives a row of
+// [kind.Text] spaces as wide as the pane.
 func (m *Model) blankPaneRow(p *printer.Printer) string {
 	// The row holds no content, so an empty view prints it without copying
 	// the decoration of a view as long as the document.
