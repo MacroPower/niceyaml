@@ -21,7 +21,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-// Default catalog URL and timings for the store.
+// These constants hold the default catalog URL and timings of the store.
 const (
 	defaultCatalogURL     = "https://www.schemastore.org/api/json/catalog.json"
 	defaultCacheTTL       = 1 * time.Hour
@@ -30,26 +30,27 @@ const (
 )
 
 var (
-	// ErrFetchCatalog indicates the store could not fetch the SchemaStore
-	// catalog and no earlier fetch succeeded, so there is no catalog to
-	// match against.
+	// ErrFetchCatalog indicates that the store could not fetch the
+	// SchemaStore catalog and does not hold an earlier one to match
+	// against.
 	ErrFetchCatalog = errors.New("fetch schema catalog")
 
-	// ErrNoCatalogMatch indicates no catalog entry matches the document's file
-	// path. It wraps [schema.ErrNoMatch], so a
+	// ErrNoCatalogMatch indicates that the file path of the document does
+	// not match any catalog entry. It wraps [schema.ErrNoMatch], so a
 	// [go.jacobcolvin.com/niceyaml/schema.Registry] moves on to the
 	// next resolver.
 	ErrNoCatalogMatch = fmt.Errorf("%w: no catalog entry matches", schema.ErrNoMatch)
 
-	// An extglob group, such as the "!(config)" in
-	// "**/.github/ISSUE_TEMPLATE/!(config).yml". The matcher implements no
-	// extglob and reads such a group as literal text.
+	// The extglobRE pattern detects an extglob group, such as the
+	// "!(config)" in "**/.github/ISSUE_TEMPLATE/!(config).yml". The matcher
+	// does not implement extglob and reads such a group as literal text.
 	extglobRE = regexp.MustCompile(`[?*+@!]\(`)
 
-	// File extensions of formats that a YAML parser rejects, such as TOML
-	// and JSON with comments. The catalog lists many YAML and JSON formats
-	// under extensions of their own, such as CITATION.cff and
-	// *.sublime-syntax, so the store drops only these.
+	// The nonYAMLExtensions map holds the file extensions of formats that a
+	// YAML parser rejects, such as TOML and JSON with comments. The catalog
+	// lists many YAML and JSON formats under extensions of their own, such
+	// as CITATION.cff and *.sublime-syntax. So the store drops only the
+	// patterns for these extensions.
 	nonYAMLExtensions = map[string]bool{
 		"cjs": true, "cts": true, "ini": true, "js": true,
 		"json5": true, "jsonc": true, "mjs": true, "mts": true,
@@ -67,72 +68,72 @@ type Catalog struct {
 type CatalogEntry struct {
 	// Name is the display name of the schema.
 	Name string `json:"name"`
-	// Description provides details about the schema's purpose.
+	// Description describes the purpose of the schema.
 	Description string `json:"description"`
 	// URL is the HTTP or HTTPS URL to fetch the schema from. When the
-	// store loads the catalog, it drops an entry with any other URL.
+	// store loads the catalog, it drops the entries with any other URL.
 	URL string `json:"url"`
-	// FileMatch contains the glob patterns for the files this schema
-	// applies to. When the store loads the catalog, it drops the patterns
-	// for formats known not to be YAML, such as *.toml and *.jsonc, the
-	// patterns that hold an extglob group, such as "!(config).yml", and
-	// the patterns whose braces would expand to too many patterns or take
-	// too much work to expand, so the slice may be shorter than the
-	// catalog's.
+	// FileMatch contains the glob patterns for the files that this schema
+	// applies to. When the store loads the catalog, it drops some
+	// patterns, so the slice might be shorter than the one in the catalog.
+	// It drops the patterns for formats that are not YAML, such as *.toml
+	// and *.jsonc. It drops the patterns that hold an extglob group, such
+	// as "!(config).yml". It also drops the patterns whose braces expand to
+	// too many patterns or take too much work to expand.
 	FileMatch []string `json:"fileMatch"`
 
-	// The store prepares FileMatch for matching once per catalog load, so
-	// a lookup does not rewrite every pattern in the catalog.
+	// The globs field holds FileMatch prepared for matching. The store
+	// prepares it once per catalog load, so a lookup does not rewrite every
+	// pattern in the catalog.
 	globs filepaths.AnyDepthPatterns
 }
 
 // Store matches documents to SchemaStore.org catalog entries.
 //
-// The store names a matched schema by the entry's URL, and the registry
-// fetches it with the client
+// The store names a matched schema by the URL of the entry, and the
+// registry fetches it with the client that
 // [go.jacobcolvin.com/niceyaml/schema.WithHTTPClient] gave the registry.
-// The store's own client, refresh timeout, and load limit apply to the
-// catalog alone.
+// The store's own client, refresh timeout, and load limit apply only to
+// the catalog.
 //
 // The store fetches the catalog on the first lookup and caches it for the
-// configured TTL. Once the cache expires, the next lookup refreshes it. A
-// refresh that fails leaves the previous catalog in use, and a fetch that
-// fails before any catalog has loaded reports [ErrFetchCatalog]. After a
-// failed fetch the store waits the retry interval before contacting the
-// catalog URL again, so an unreachable catalog costs one timeout per
-// interval rather than one per lookup.
+// configured time to live (TTL). After the cache expires, the next lookup
+// refreshes it. A refresh that fails leaves the previous catalog in use.
+// When a fetch fails before any catalog has loaded, the lookup reports
+// [ErrFetchCatalog]. After a failed fetch, the store waits the retry
+// interval before it contacts the catalog URL again. So an unreachable
+// catalog costs one timeout per interval rather than one per lookup.
 //
-// The TTL covers the catalog alone. The registry keeps each schema it
-// fetched for an entry after a refresh of the catalog. A program passes
-// the URL of an entry to
-// [go.jacobcolvin.com/niceyaml/schema.Registry.Invalidate] to fetch its
-// schema again. The documents the $refs of that schema name stay in the
-// cache. A program calls
-// [go.jacobcolvin.com/niceyaml/schema.Registry.Purge] to fetch those
-// documents again too.
+// The TTL covers only the catalog. The registry keeps each schema that it
+// fetched for an entry, even after a refresh of the catalog. To fetch the
+// schema of an entry again, pass the URL of the entry to
+// [go.jacobcolvin.com/niceyaml/schema.Registry.Invalidate]. The documents
+// that the $refs of that schema name stay in the cache. To fetch those
+// documents again too, call
+// [go.jacobcolvin.com/niceyaml/schema.Registry.Purge].
 //
 // Concurrent lookups share a single fetch. A lookup that arrives while a
 // refresh is running uses the previous catalog without waiting. The lookup
-// that starts a fetch, and any lookup with no catalog to fall back on, waits
-// for the fetch to finish or for its own context to end. A lookup that stops
-// waiting leaves the fetch running, so the fetched catalog still reaches
-// later lookups.
+// that starts a fetch waits for the fetch to finish or for its own context
+// to end. So does every lookup that does not have a previous catalog to
+// use. Lookups that stop waiting leave the fetch running, so the fetched
+// catalog still reaches later lookups.
 //
-// Store implements [schema.Resolver] and goes straight into a
+// Store implements [schema.Resolver], so you can pass it to a
 // [go.jacobcolvin.com/niceyaml/schema.Registry] through
 // [schema.WithResolvers]. [ErrFetchCatalog] does not wrap
-// [schema.ErrNoMatch], so while no catalog has loaded, the registry stops
+// [schema.ErrNoMatch]. So until a catalog has loaded, the registry stops
 // at the store and does not try the resolvers after it. Place the store
-// after any resolver that should still apply without the catalog. Create
-// instances with [New].
+// after every resolver that should still apply without the catalog.
+// Create instances with [New].
 //
 // Example:
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schemastore.New()))
 type Store struct {
-	lastFetch   time.Time                 // Last successful fetch; zero until the first one succeeds.
+	lastFetch   time.Time                 // Last successful fetch, or zero before the first one succeeds.
 	lastAttempt time.Time                 // Last fetch, successful or not.
-	inflight    *fetchCall                // Fetch in progress, or nil when none is running.
+	inflight    *fetchCall                // Fetch in progress, or nil when the store is not fetching.
 	lastErr     error                     // Error from the last fetch, or nil when it succeeded.
 	lastMatch   atomic.Pointer[matchMemo] // Outcome of the last scan in FindMatch.
 	entries     []CatalogEntry
@@ -160,8 +161,9 @@ type fetchCall struct {
 //   - [WithLoadLimit]
 type Option func(*config)
 
-// config holds the settings an [Option] configures. An option takes it in
-// place of the [Store] that embeds it, so only [New] can apply one.
+// config holds the settings that [Option] functions configure. Each option
+// takes a config in place of the [Store] that embeds it, so only [New] can
+// apply an option.
 type config struct {
 	client         *http.Client
 	filter         func(CatalogEntry) bool
@@ -174,7 +176,7 @@ type config struct {
 
 // WithCatalogURL is an [Option] that sets a custom catalog URL.
 //
-// Defaults to "https://www.schemastore.org/api/json/catalog.json".
+// The default URL is "https://www.schemastore.org/api/json/catalog.json".
 func WithCatalogURL(url string) Option {
 	return func(c *config) {
 		c.catalogURL = url
@@ -183,8 +185,8 @@ func WithCatalogURL(url string) Option {
 
 // WithHTTPClient is an [Option] that sets a custom HTTP client for fetching
 // the catalog. A nil client keeps the default, [http.DefaultClient]. The
-// registry fetches the schemas the catalog names with its own client, from
-// [go.jacobcolvin.com/niceyaml/schema.WithHTTPClient].
+// registry fetches the schemas that the catalog names with its own client,
+// from [go.jacobcolvin.com/niceyaml/schema.WithHTTPClient].
 func WithHTTPClient(client *http.Client) Option {
 	return func(c *config) {
 		if client != nil {
@@ -193,9 +195,11 @@ func WithHTTPClient(client *http.Client) Option {
 	}
 }
 
-// WithCacheTTL is an [Option] that sets the cache time-to-live for the catalog.
+// WithCacheTTL is an [Option] that sets the cache time to live (TTL) for
+// the catalog.
 //
-// Defaults to 1 hour. Set to 0 to disable caching (fetch on every lookup).
+// The default is 1 hour. A TTL of 0 disables the cache, so the store
+// fetches the catalog on every lookup.
 func WithCacheTTL(ttl time.Duration) Option {
 	return func(c *config) {
 		c.cacheTTL = ttl
@@ -207,15 +211,14 @@ func WithCacheTTL(ttl time.Duration) Option {
 //
 // A lookup that finds the cache expired fetches the catalog under this
 // timeout. If the fetch fails or times out, the lookup uses the previous
-// catalog when one exists, so a temporarily unreachable SchemaStore.org
+// catalog when one exists. So a temporarily unreachable SchemaStore.org
 // degrades to stale matches rather than errors. The fetch does not inherit
-// the cancellation or deadline of the lookup that started it, so this
-// timeout alone bounds how long it runs. The registry fetches a matched
-// schema itself, and its client and the context of the lookup bound that
-// fetch.
+// the cancellation or deadline of the lookup that started it, so only this
+// timeout bounds how long it runs. The registry fetches a matched schema
+// itself, and its client and the context of the lookup bound that fetch.
 //
-// Defaults to 10 seconds. A timeout of zero or less keeps the default,
-// since a fetch under an expired deadline could never succeed.
+// The default is 10 seconds. A timeout of zero or less keeps the default,
+// because a fetch cannot succeed under an expired deadline.
 func WithRefreshTimeout(timeout time.Duration) Option {
 	return func(c *config) {
 		if timeout > 0 {
@@ -225,14 +228,14 @@ func WithRefreshTimeout(timeout time.Duration) Option {
 }
 
 // WithRetryAfter is an [Option] that sets how long the store waits after a
-// failed catalog fetch before trying again.
+// failed catalog fetch before it tries again.
 //
-// Until the interval passes, lookups use the previous catalog when one
-// exists and report [ErrFetchCatalog] with the last fetch error otherwise,
-// without contacting the catalog URL.
+// Until the interval passes, lookups do not contact the catalog URL. They
+// use the previous catalog when one exists, and otherwise report
+// [ErrFetchCatalog] with the last fetch error.
 //
-// Defaults to 1 minute. An interval of zero or less keeps the default,
-// since it would retry on every lookup.
+// The default is 1 minute. An interval of zero or less keeps the default,
+// so the store does not retry on every lookup.
 func WithRetryAfter(interval time.Duration) Option {
 	return func(c *config) {
 		if interval > 0 {
@@ -242,15 +245,15 @@ func WithRetryAfter(interval time.Duration) Option {
 }
 
 // WithLoadLimit is an [Option] that sets the most bytes of the catalog
-// the store reads. A catalog that holds more fails to fetch with a
+// that the store reads. The fetch of a larger catalog fails with a
 // [*schema.FetchError] whose cause matches [niceyaml.ErrLimit]. The store
-// treats that failure as any other failed fetch and keeps the previous
-// catalog, or reports [ErrFetchCatalog] when none has loaded. The limit
-// covers the catalog alone. The registry reads each schema the catalog
-// names within the limit of [schema.WithLoadLimit].
+// treats that failure like any other failed fetch. It keeps the previous
+// catalog when one has loaded, and otherwise reports [ErrFetchCatalog].
+// The limit covers only the catalog. The registry reads each schema that
+// the catalog names within the limit of [schema.WithLoadLimit].
 //
-// Defaults to [schema.DefaultLoadLimit]. A limit of zero or less keeps
-// the default, and a program that wants no limit passes [math.MaxInt].
+// The default is [schema.DefaultLoadLimit]. A limit of zero or less keeps
+// the default. To remove the limit, pass [math.MaxInt].
 func WithLoadLimit(n int) Option {
 	return func(c *config) {
 		if n > 0 {
@@ -264,12 +267,11 @@ func WithLoadLimit(n int) Option {
 // The store matches only the entries for which the filter returns true.
 // It calls the filter during catalog refresh, so the filter should avoid
 // expensive or stateful operations. A panic or a call to [runtime.Goexit]
-// in the filter happens
-// again in each lookup that waits for the refresh.
+// in the filter repeats in each lookup that waits for the refresh.
 //
 // Example:
 //
-//	// Only match GitHub-related schemas
+//	// Match only GitHub-related schemas.
 //	store := schemastore.New(schemastore.WithFilter(func(e schemastore.CatalogEntry) bool {
 //	    return strings.Contains(strings.ToLower(e.Name), "github")
 //	}))
@@ -281,9 +283,9 @@ func WithFilter(fn func(CatalogEntry) bool) Option {
 
 // New creates a new [*Store].
 //
-// New performs no I/O. The store fetches the catalog on the first lookup
-// and caches it for the configured TTL. Configure with options to
-// customize behavior:
+// New does not perform I/O. The store fetches the catalog on the first
+// lookup and caches it for the configured TTL. Pass options to configure
+// the store:
 //
 //	store := schemastore.New(
 //	    schemastore.WithCacheTTL(1 * time.Hour),
@@ -307,13 +309,13 @@ func New(opts ...Option) *Store {
 	return store
 }
 
-// Resolve names the schema for the catalog entry matching the document's
-// file path. The returned [schema.Ref] names the entry's URL, which the
-// registry fetches with its own client. A document that matches no entry
-// reports [ErrNoCatalogMatch], and a catalog that has never loaded reports
-// [ErrFetchCatalog].
+// Resolve names the schema for the catalog entry that matches the file
+// path of the document. The returned [schema.Ref] names the URL of the
+// entry, which the registry fetches with its own client. Resolve returns
+// [ErrNoCatalogMatch] for a document that does not match any entry, and
+// [ErrFetchCatalog] when the store has not loaded a catalog.
 //
-// Implements [schema.Resolver].
+// Resolve implements [schema.Resolver].
 func (s *Store) Resolve(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 	entry, err := s.FindMatch(ctx, doc.FilePath())
 	if err != nil {
@@ -325,28 +327,29 @@ func (s *Store) Resolve(ctx context.Context, doc *niceyaml.Node) (schema.Ref, er
 	return schema.URL(entry.URL), nil
 }
 
-// FindMatch finds the catalog entry matching a file path.
+// FindMatch finds the catalog entry that matches a file path.
 //
 // FindMatch resolves a relative path against the working directory before
-// matching, since yaml-language-server matches the absolute path of a
+// it matches, because yaml-language-server matches the absolute path of a
 // document. A pattern such as ".github/workflows/*.yml" then matches
-// "ci.yml" read from inside that directory. A pattern matches at any
-// depth, so the directories above the working directory never stop a
-// match. For a path from [niceyaml.NewSourceFromFS], the root of the file
-// system stands for the working directory.
+// "ci.yml" read from inside that directory. Patterns match at any depth,
+// so the directories above the working directory never stop a match. For
+// a path from [niceyaml.NewSourceFromFS], the root of the file system
+// stands for the working directory.
 //
 // When several entries match, FindMatch returns the one whose matching
-// pattern requires the most characters of the path's names literally,
-// ignoring separators and wildcards. So "**/.moon/tasks/**/*.yml" wins
-// over "**/tasks/*.yml" for ".moon/tasks/node.yml". Among entries that
-// tie, the one listed first in the catalog wins.
+// pattern spells out the most characters of the names in the path.
+// Separators and wildcards do not count. So "**/.moon/tasks/**/*.yml"
+// wins over "**/tasks/*.yml" for ".moon/tasks/node.yml". Among entries
+// that tie, the one listed first in the catalog wins.
 //
-// The returned entry owns its FileMatch patterns, so writing to them
-// leaves the cached catalog alone.
+// The returned entry owns its FileMatch patterns, so a write to them does
+// not change the cached catalog.
 //
-// Returns [ErrNoCatalogMatch] when no entry matches, which includes an
-// empty file path, and [ErrFetchCatalog] when no catalog has loaded, either
-// because the fetch failed or because ctx ended before it finished.
+// FindMatch returns [ErrNoCatalogMatch] for an empty file path and for a
+// path that does not match any entry. Before any catalog has loaded, it
+// returns [ErrFetchCatalog] when the fetch fails or when ctx ends before
+// the fetch finishes.
 func (s *Store) FindMatch(ctx context.Context, filePath string) (CatalogEntry, error) {
 	if filePath == "" {
 		return CatalogEntry{}, fmt.Errorf("%w: document has no file path", ErrNoCatalogMatch)
@@ -401,7 +404,7 @@ func (s *Store) FindMatch(ctx context.Context, filePath string) (CatalogEntry, e
 
 // bestMatch returns the entry whose pattern matches cleanPath most
 // specifically, and the first such entry on a tie. It reports false when
-// no entry matches.
+// cleanPath does not match any entry.
 func bestMatch(entries []CatalogEntry, cleanPath string) (CatalogEntry, bool) {
 	var (
 		best      CatalogEntry
@@ -421,16 +424,16 @@ func bestMatch(entries []CatalogEntry, cleanPath string) (CatalogEntry, bool) {
 
 // matchMemo records the outcome of one catalog scan in [Store.FindMatch].
 type matchMemo struct {
-	entries []CatalogEntry // Catalog load the scan read.
-	path    string         // Cleaned path the scan matched.
+	entries []CatalogEntry // Catalog load that the scan read.
+	path    string         // Cleaned path that the scan matched.
 	best    CatalogEntry   // Matching entry, shared with entries.
 	found   bool
 }
 
 // answers reports whether m holds the scan of path against entries. Each
 // catalog load builds a new slice, and m keeps its own slice alive, so a
-// later load cannot reuse its address. An empty catalog matches nothing,
-// so any two empty loads give the same outcome.
+// later load cannot reuse its address. An empty catalog does not match
+// any path, so any two empty loads give the same outcome.
 func (m *matchMemo) answers(entries []CatalogEntry, path string) bool {
 	return m != nil && m.path == path && len(m.entries) == len(entries) &&
 		(len(entries) == 0 || &m.entries[0] == &entries[0])
@@ -441,8 +444,8 @@ func (m *matchMemo) answers(entries []CatalogEntry, path string) bool {
 //
 // A lookup that waits for a fetch stops waiting when ctx ends, unless the
 // fetch has finished by then. When the fetch fails or the wait ends early,
-// the lookup falls back to the previous entries, or reports ErrFetchCatalog
-// when none exist.
+// the lookup uses the previous entries when they exist, and otherwise
+// reports [ErrFetchCatalog].
 func (s *Store) catalog(ctx context.Context) ([]CatalogEntry, error) {
 	call, entries, err := s.join(ctx)
 	if call == nil {
@@ -474,9 +477,9 @@ func (s *Store) catalog(ctx context.Context) ([]CatalogEntry, error) {
 }
 
 // join decides under the lock whether a lookup can answer without waiting
-// for a fetch. It returns the entries or error to report when the lookup
-// can, and otherwise the fetch to wait on, starting one when none is
-// running.
+// for a fetch. When the lookup can, join returns the entries or the error
+// to report. Otherwise it returns the fetch to wait on, and it starts that
+// fetch first when the store is not fetching.
 func (s *Store) join(ctx context.Context) (*fetchCall, []CatalogEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -516,14 +519,15 @@ func (s *Store) join(ctx context.Context) (*fetchCall, []CatalogEntry, error) {
 }
 
 // refresh fetches the catalog for call, records the outcome, and closes
-// call.done. The fetch drops the cancellation and deadline of ctx, which
-// belongs to the lookup that started it, so a lookup that stops waiting
-// does not cancel a fetch that other lookups share. The refresh timeout
-// bounds the fetch instead.
+// call.done. The ctx argument belongs to the lookup that started the
+// fetch. The fetch drops the cancellation and deadline of ctx, so a lookup
+// that stops waiting does not cancel a fetch that other lookups share. The
+// refresh timeout bounds the fetch instead.
 //
-// No lookup can recover a panic on the refresh goroutine, so refresh
-// records a panic or a call to [runtime.Goexit] in the filter, the HTTP
-// transport, or the catalog parsing as the fetch's error.
+// Lookups cannot recover a panic on the refresh goroutine. So refresh
+// records a panic or a call to [runtime.Goexit] as the error of the fetch,
+// whether it comes from the filter, the HTTP transport, or the catalog
+// parsing.
 func (s *Store) refresh(ctx context.Context, call *fetchCall) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.refreshTimeout)
 	defer cancel()
@@ -554,8 +558,8 @@ func (s *Store) refresh(ctx context.Context, call *fetchCall) {
 	close(call.done)
 }
 
-// stale returns the previous entries when a fetch has ever succeeded and
-// otherwise wraps cause in ErrFetchCatalog.
+// stale returns the previous entries when a fetch has ever succeeded, and
+// otherwise wraps cause in [ErrFetchCatalog].
 func (s *Store) stale(cause error) ([]CatalogEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -573,10 +577,10 @@ func (s *Store) staleLocked(cause error) ([]CatalogEntry, error) {
 }
 
 // fetch retrieves the catalog from the configured URL and returns the
-// filtered entries. It holds no lock, so a slow catalog server blocks only
-// the lookups waiting on this fetch.
+// filtered entries. It does not hold a lock, so a slow catalog server
+// blocks only the lookups that wait on this fetch.
 //
-// The HTTP GET is the one [schema.URL] uses, with the limit of
+// The HTTP GET is the one that [schema.URL] uses, with the limit of
 // [WithLoadLimit]. A fetch that fails after the URL passes the checks of
 // [httpfetch.Get] returns a [*schema.FetchError]. Only the catalog JSON
 // parsing is specific to SchemaStore.
@@ -609,9 +613,10 @@ func (s *Store) fetch(ctx context.Context) ([]CatalogEntry, error) {
 	return s.filterAndNormalizeEntries(catalog.Schemas), nil
 }
 
-// filterAndNormalizeEntries filters catalog entries to only those with
-// supported patterns that pass the configured filter. It also normalizes each
-// entry's FileMatch to the patterns [filterSupportedPatterns] keeps.
+// filterAndNormalizeEntries keeps only the catalog entries that have an
+// HTTP or HTTPS URL and supported patterns, and that pass the configured
+// filter. It also trims the FileMatch of each entry to the patterns that
+// [filterSupportedPatterns] keeps.
 func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry {
 	entries := make([]CatalogEntry, 0, len(schemas))
 
@@ -652,22 +657,23 @@ func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry
 }
 
 // filterSupportedPatterns returns the patterns that can match a YAML or
-// JSON file, since JSON is a valid subset of YAML. It drops a pattern
-// that holds an extglob group, and a pattern whose last segment carries
-// the literal extension of a format known not to be YAML, such as
-// "*.toml" or ".eslintrc.jsonc". It also drops a pattern for which
-// [filepaths.ExpandBraces] returns [filepaths.ErrBraceLimit], since
-// [filepaths.NewAnyDepthPatterns] would drop it from matching anyway. It
-// keeps every other pattern. A pattern with brace alternatives, such as
-// "*.{toml,yaml}", counts when any of its alternatives can match a YAML
-// file. It reads an exclusion without its leading "!", as
-// [filepaths.NewAnyDepthPatterns] does, so the "!" cannot push the
-// braces of an exclusion past the limit.
+// JSON file, because JSON is a valid subset of YAML. It drops the patterns
+// that hold an extglob group. It also drops the patterns whose last
+// segment carries the literal extension of a format that is not YAML,
+// such as "*.toml" or ".eslintrc.jsonc". It drops the patterns for which
+// [filepaths.ExpandBraces] returns [filepaths.ErrBraceLimit] too, because
+// [filepaths.NewAnyDepthPatterns] drops them from matching anyway.
+//
+// It keeps every other pattern. A pattern with brace alternatives, such
+// as "*.{toml,yaml}", counts when any of its alternatives can match a
+// YAML file. It reads an exclusion without its leading "!", as
+// [filepaths.NewAnyDepthPatterns] does, so the "!" cannot push the braces
+// of an exclusion past the limit.
 //
 // The matcher reads an extglob group literally, so a pattern with one
-// could only match a file named after the text of the group. With those
-// patterns gone, the entry count reflects only the entries that can match
-// a file someone would write.
+// matches only a file named after the text of the group. With those
+// patterns dropped, the entry count includes only the entries that can
+// match a file that people write.
 func filterSupportedPatterns(patterns []string) []string {
 	var result []string
 
@@ -691,10 +697,11 @@ func filterSupportedPatterns(patterns []string) []string {
 
 // canMatchYAML reports whether pattern can match a YAML or JSON file, in
 // any letter case. It reports false only when the last segment ends in
-// the literal extension of a format known not to be YAML, such as
-// ".toml". A wildcard extension, as in "azure-pipelines*.y*ml", a name
-// without an extension, such as ".clang-format", and the extension of
-// another YAML format, such as "CITATION.cff", all pass.
+// the literal extension of a format that is not YAML, such as ".toml". It
+// reports true for a wildcard extension, as in "azure-pipelines*.y*ml",
+// and for a name without an extension, such as ".clang-format". It also
+// reports true for the extension of another YAML format, such as
+// "CITATION.cff".
 func canMatchYAML(pattern string) bool {
 	lower := strings.ToLower(pattern)
 	base := lower[strings.LastIndex(lower, "/")+1:]
