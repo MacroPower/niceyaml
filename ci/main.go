@@ -1,15 +1,15 @@
 // Ci runs the CI gates for the niceyaml repository. Most quality gates are
-// Taskfile targets that call local tools (go, golangci-lint, prettier) from the
-// devbox PATH. These functions run the same tasks inside the project's devbox
-// environment through the devbox toolchain, so CI runs the same commands that
-// developers run locally. A local run skips the container for speed, and CI
-// keeps it for reproducibility.
+// Taskfile targets that call local tools from the devbox PATH, such as go,
+// golangci-lint, and prettier. These functions run the same tasks inside the
+// project's devbox environment through the devbox toolchain, so CI runs the
+// same commands that developers run locally. A local run skips the container
+// for speed, and CI keeps it for reproducibility.
 //
-// Two gates compose a sibling toolchain directly instead, because their tools
-// are not on the devbox PATH. LintActions runs the zizmor toolchain, and
-// Security runs the security toolchain (Trivy). LintRenovate runs a pinned
-// renovate-config-validator in a Node container, because neither devbox nor a
-// shared toolchain provides the validator.
+// LintActions and Security each compose a sibling toolchain directly
+// instead, because their tools are not on the devbox PATH. LintActions runs the zizmor
+// toolchain, and Security runs the security toolchain, which wraps Trivy.
+// LintRenovate runs a pinned renovate-config-validator in a Node container,
+// because devbox and the shared toolchains do not provide the validator.
 package main
 
 import (
@@ -24,9 +24,10 @@ const (
 	renovateConfig = ".github/renovate.json5"
 
 	// renovateImage is the Docker Official Node image. The module pulls it
-	// from Docker's verified publisher space on ECR Public to avoid Docker
-	// Hub pull rate limits. The renovateVersion constant pins the Renovate
-	// release that provides renovate-config-validator.
+	// from Docker's verified publisher space on Amazon Elastic Container
+	// Registry (ECR) Public to avoid Docker Hub pull rate limits. The
+	// renovateVersion constant pins the Renovate release that provides
+	// renovate-config-validator.
 	renovateImage   = "public.ecr.aws/docker/library/node:24-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/node
 	renovateVersion = "44.151.5"                                   // renovate: datasource=npm depName=renovate
 
@@ -40,8 +41,8 @@ const (
 	// devboxHome is the home directory of the devbox image's non-root user.
 	// The env method mounts the Go and golangci-lint caches under it.
 	devboxHome = "/home/devbox"
-	// devboxUser owns the mounted caches so the containerized tasks can
-	// write to them.
+	// devboxUser is the user that owns the mounted caches, so the
+	// containerized tasks can write to them.
 	devboxUser = "devbox"
 )
 
@@ -52,10 +53,10 @@ type Ci struct {
 	Source *dagger.Directory
 	// Devbox is the devbox toolchain that the task-based checks run inside.
 	Devbox *dagger.Devbox // +private
-	// Scanner is the security toolchain (Trivy) backing [Ci.Security]. The
-	// name Scanner avoids a collision with that method.
+	// Scanner is the security toolchain that backs [Ci.Security] with Trivy.
+	// The name Scanner avoids a collision with that method.
 	Scanner *dagger.Security // +private
-	// Zizmor is the zizmor toolchain backing [Ci.LintActions].
+	// Zizmor is the zizmor toolchain that backs [Ci.LintActions].
 	Zizmor *dagger.Zizmor // +private
 }
 
@@ -91,8 +92,9 @@ func New(
 //
 // Go keeps its checksum database state beside the module cache, in a
 // directory the devbox user cannot create. [Ci.BuildPinned] downloads a
-// module version that no go.sum lists, and Go verifies it against that
-// database, so the mount gives Go a directory it can write.
+// module version that is missing from every go.sum file, and Go verifies
+// that version against the database. The mount gives Go a directory it can
+// write for that state.
 func (m *Ci) env() *dagger.Container {
 	owner := dagger.ContainerWithMountedCacheOpts{Owner: devboxUser}
 	return m.Devbox.WithSource().
@@ -105,14 +107,14 @@ func (m *Ci) env() *dagger.Container {
 }
 
 // task returns the devbox environment with `devbox run -- task <target>` queued
-// as its next exec. Every task-based function builds on it so they all run
-// their targets the same way.
+// as its next exec. Every task-based function calls it, directly or through
+// [Ci.runTask], so they all run their targets the same way.
 func (m *Ci) task(target string) *dagger.Container {
 	return m.env().WithExec([]string{"devbox", "run", "--", "task", target})
 }
 
 // runTask runs a Taskfile target inside the devbox environment and returns an
-// error if the target exits non-zero.
+// error when the target exits with a nonzero status.
 func (m *Ci) runTask(ctx context.Context, target string) error {
 	_, err := m.task(target).Sync(ctx)
 	return err
@@ -127,10 +129,10 @@ func (m *Ci) Lint(ctx context.Context) error {
 }
 
 // BuildPinned builds and vets the bubbles and fangs modules through
-// `task go:build:pinned` inside the devbox environment. The target turns the
-// workspace off and drops the replace directive, so each module builds against
-// the niceyaml version its go.mod requires, as it does for a module outside
-// the repository.
+// `task go:build:pinned` inside the devbox environment. The target disables
+// the workspace and drops the replace directive for niceyaml. Each module then
+// builds against the niceyaml version its go.mod requires, as it does for a
+// module outside the repository.
 //
 // +check
 func (m *Ci) BuildPinned(ctx context.Context) error {
@@ -161,9 +163,9 @@ func (m *Ci) TestCoverage() *dagger.File {
 }
 
 // Security scans source dependencies for known vulnerabilities by composing the
-// security toolchain (Trivy) directly. It scans the `ci` toolchain's source,
-// whose root dagger.json customization already excludes the build and cache
-// directories.
+// security toolchain directly. That toolchain runs Trivy. Security scans the
+// source of the `ci` toolchain, and the customization of that toolchain in
+// the root dagger.json excludes the build and cache directories.
 //
 // +check
 func (m *Ci) Security(ctx context.Context) error {
@@ -171,10 +173,11 @@ func (m *Ci) Security(ctx context.Context) error {
 }
 
 // SecuritySourceSarif scans source dependencies for known vulnerabilities and
-// returns the results as a SARIF file for upload to GitHub Code Scanning. Unlike
-// [Ci.Security], it does not gate on findings. The SARIF capture must produce
-// the file even when the scan finds vulnerabilities, so that GitHub can show
-// them in the Security tab. It scans the same source as [Ci.Security].
+// returns the results as a Static Analysis Results Interchange Format (SARIF)
+// file for upload to GitHub Code Scanning. Unlike [Ci.Security], it does not
+// fail on findings. The SARIF capture must produce the file even when the scan
+// finds vulnerabilities, so that GitHub can show them in the Security tab. It
+// scans the same source as [Ci.Security].
 func (m *Ci) SecuritySourceSarif() *dagger.File {
 	return m.Scanner.ScanSourceSarif()
 }
@@ -191,9 +194,9 @@ func (m *Ci) LintActions(ctx context.Context) error {
 
 // LintRenovate validates the Renovate configuration with
 // renovate-config-validator. It installs the validator at a pinned version in
-// a Node container, so the gate is self-contained and Renovate can bump its own
-// validator version. It is the one gate that composes neither devbox nor a
-// shared toolchain.
+// a Node container, so the gate is self-contained. Renovate can then update
+// the version of its own validator. It is the one gate that does not compose
+// devbox or a shared toolchain.
 //
 // +check
 func (m *Ci) LintRenovate(ctx context.Context) error {
