@@ -24,7 +24,7 @@ type Located struct {
 	// text, when HasRange is set.
 	Range   position.Range
 	HasPath bool
-	// HasRange is false for an error that resolved no location.
+	// HasRange is false for an error that did not resolve a location.
 	HasRange bool
 }
 
@@ -39,7 +39,7 @@ type Place struct {
 	Path paths.Path
 	// Range is the range of the text that the error marks in the home
 	// document, when HasRange is set. Without it, the error binds to the
-	// home document with no position.
+	// home document without a position.
 	Range    position.Range
 	HasPath  bool
 	HasRange bool
@@ -48,7 +48,8 @@ type Place struct {
 var (
 	// Tally returns the heading that niceyaml writes over members, which
 	// counts their errors and their warnings, as in "2 errors, 1 warning".
-	// It returns the one member alone, and nil for no member.
+	// It returns the member itself when members holds one error, and nil
+	// when members is empty.
 	Tally func(members []error) error
 
 	// MarkWarning returns err with a warning mark above it, as
@@ -56,20 +57,20 @@ var (
 	MarkWarning func(err error) error
 
 	// Warn reports err as a warning to the collector of ctx, as
-	// niceyaml.Node.Warn does, and binds it to no document.
+	// niceyaml.Node.Warn does, and does not bind it to a document.
 	Warn func(ctx context.Context, err error)
 
 	// Rewrap returns err with wrap applied to the error that it binds, when
 	// err is a *niceyaml.SourceError, and wrap(err) otherwise. The result
-	// keeps the location, the source, and the children of the binding, so
+	// keeps the location, the source, and the children of the binding. So
 	// a wrapper whose message is the message of the error it wraps adds a
-	// type to the chain and changes nothing that a renderer shows.
+	// type to the chain and does not change anything that a renderer shows.
 	Rewrap func(err error, wrap func(error) error) error
 
 	// WorkingSource returns a *niceyaml.Source of text, a working copy of
 	// the document home, a *niceyaml.Node. The Source holds the settings of
-	// the Source of home, its name and its reference documents included,
-	// and skips the limits, because niceyaml wrote its text. It takes the
+	// the Source of home, including its name and its reference documents.
+	// It skips the limits, because niceyaml wrote its text. It takes the
 	// unmarshalers us, a []niceyaml.Unmarshaler, ahead of those of the
 	// Source of home, as though niceyaml.WithUnmarshalers gave them first.
 	// Every error bound in it binds in home instead, at the place that
@@ -94,15 +95,15 @@ var (
 	// Layers returns the layers that niceyaml.NewSourceFromLayers merged
 	// into src, a *niceyaml.Source, as the *niceyaml.Node of the document
 	// that each layer reads, lowest first. It returns nil for a Source that
-	// merges no layers.
+	// does not merge layers.
 	Layers func(src any) []any
 
 	// KnownKeys returns a niceyaml.DecodeOption that admits the key at
 	// each of keys, a path from `$` in the document that the decode reads.
 	// A decode under niceyaml.WithDisallowUnknownFields then rejects every
 	// unknown field except those keys. A key with a field in the target
-	// decodes into that field. The decode skips a key that no field reads,
-	// and every key below a value that decodes itself. The validators of
-	// the decode still see each key.
+	// decodes into that field. The decode skips each key without a field
+	// that reads it, and every key below a value that decodes itself. The
+	// validators of the decode still see each key.
 	KnownKeys func(keys []paths.Path) any
 )
