@@ -1,7 +1,7 @@
 // Package finder locates strings within the lines of a [line.Sequence].
 //
 // A [Finder] maps matches back to [position.Ranges] in the original lines,
-// even when normalization changes the character count, so the ranges can
+// even when normalization changes the character count. The ranges can then
 // highlight matches in rendered output. Create one with [New], build an
 // [Index] over the lines once with [Finder.Load], and search the index any
 // number of times with [Index.Find]:
@@ -11,7 +11,7 @@
 //	view.BlendOverlay(kind.GenericHighlight, idx.Find("search term")...)
 //
 // Load takes the [line.Lines] of a whole file or a [*line.View]. A view
-// loads the lines it holds, and the ranges of its matches are in the
+// loads the lines it holds. The ranges of its matches are in the
 // coordinates of its content, as every range a view takes is. A search of
 // one document of a file that holds several therefore marks the view of
 // that document:
@@ -41,12 +41,13 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// Normalizer transforms strings for comparison (e.g., removing diacritics).
+// Normalizer transforms strings for comparison, for example by removing
+// diacritics.
 //
-// A [Finder] and every [Index] it builds share one normalizer, so goroutines
+// A [Finder] and every [Index] it builds share one normalizer. Goroutines
 // that load with the Finder or search any of those Indexes at the same time
-// call Normalize concurrently. A normalizer used that way must be safe for
-// concurrent use, as [normalizer.Normalizer] is.
+// therefore call Normalize concurrently. A normalizer used that way must be
+// safe for concurrent use, as [normalizer.Normalizer] is.
 //
 // See [normalizer.Normalizer] for an implementation.
 type Normalizer interface {
@@ -62,12 +63,12 @@ type Normalizer interface {
 //
 // Finder uses a load-once, search-many design. [Finder.Load] reads the
 // lines once and returns an [Index] that maps offsets in the loaded text
-// back to [position.Position] values in the original lines, and
-// [Index.Find] uses that map on every call without re-reading the lines.
+// back to [position.Position] values in the original lines. [Index.Find]
+// uses that map on every call without reading the lines again.
 //
-// A Finder holds only its settings and never changes after [New], so it is
-// safe for concurrent use when its [Normalizer] is, as the default from
-// [normalizer.New] is, and so is every Index it builds.
+// A Finder holds only its settings and never changes after [New]. It is
+// therefore safe for concurrent use when its [Normalizer] is, as the
+// default from [normalizer.New] is, and so is every Index it builds.
 //
 // Example:
 //
@@ -76,11 +77,11 @@ type Normalizer interface {
 //	view.BlendOverlay(kind.GenericHighlight, idx.Find("search term")...)
 //	lipgloss.Println(p.Print(view))
 //
-// By default, a search folds case and ignores diacritics, so "cafe"
-// matches "Café", through the [normalizer.Normalizer] that
-// [normalizer.New] builds. [WithNormalizer] sets a normalizer of the
-// caller's own, and [WithNormalizer] with nil matches characters exactly,
-// with no case folding or diacritic stripping.
+// By default, a search folds case and ignores diacritics through the
+// [normalizer.Normalizer] that [normalizer.New] builds, so "cafe" matches
+// "Café". [WithNormalizer] sets a normalizer of the caller's own.
+// [WithNormalizer] with nil makes a search match characters exactly,
+// without case folding or diacritic stripping.
 //
 // Create instances with [New].
 type Finder struct {
@@ -122,8 +123,8 @@ type config struct {
 //
 //	exact := finder.New(finder.WithNormalizer(nil))
 //
-// A nil [*normalizer.Normalizer] works the same way, so a normalizer
-// built only on some condition can pass through as it is:
+// A nil [*normalizer.Normalizer] works the same way, so a caller can pass
+// a normalizer that it builds only on some condition without a nil check:
 //
 //	var n *normalizer.Normalizer
 //	if fold {
@@ -140,16 +141,18 @@ type config struct {
 // character here is a unit that Unicode normalization composes as a whole:
 // a rune with the combining marks that follow it, or the conjoining jamo of
 // one Hangul syllable. A precomposed "ガ" and a "カ" followed by the voicing
-// mark U+3099 each reach the normalizer whole, so a normalizer that composes
-// them, as the default does, finds either spelling with the other. A
-// transformer whose output depends on surrounding characters, such as title
-// casing, sees none and behaves as it would on a one-character string.
-// Line endings reach the normalizer as "\n" too, so a normalizer that
-// drops "\n", such as one that removes all whitespace, lets a match run
-// from the end of one line into the next.
+// mark U+3099 each reach the normalizer whole. A normalizer that composes
+// them, as the default does, then finds either spelling with the other. A
+// transformer whose output depends on surrounding characters does not see
+// any, and it behaves as it does on a one-character string. Title casing is
+// one such transformer.
 //
-// The [Finder] and every [Index] it builds share n, so goroutines that use
-// any of them at once need a normalizer that is safe for concurrent use.
+// Line endings reach the normalizer as "\n" too. A normalizer that drops
+// "\n", such as one that removes all whitespace, lets a match run from the
+// end of one line into the next.
+//
+// The [Finder] and every [Index] it builds share n. When goroutines use
+// any of them at once, n must be safe for concurrent use.
 //
 // See [normalizer.Normalizer] for an implementation.
 func WithNormalizer(n Normalizer) Option {
@@ -164,20 +167,21 @@ func WithNormalizer(n Normalizer) Option {
 //
 // [line.Lines] loads every line. A [*line.View] loads the lines it holds,
 // and [Index.Find] reports each match in the coordinates of the view's
-// content, so the ranges apply to the view and to any other view over that
-// content. A view holds whole lines. The view of a node that shares its
-// line with other nodes, such as host in `server: {host: h, port: 80}`,
-// loads that whole line, so a search of it for "port" finds a match there.
+// content. The ranges then apply to the view and to any other view over
+// that content. A view holds whole lines. A node might share its line with
+// other nodes, such as host in `server: {host: h, port: 80}`. The view of
+// such a node loads that whole line, so a search of it for "port" finds a
+// match there.
 //
-// A view can skip lines of its content, as the hunks of a diff do. No
-// match runs from the line before the skipped lines into the line after
-// them.
+// A view can skip lines of its content, as the hunks of a diff do.
+// Matches never run from the line before the skipped lines into the line
+// after them.
 //
-// Each call builds a new Index and leaves the Finder as it was, so load once
-// per distinct content and call [Index.Find] as many times as needed. The
-// lines never change, so the index stays valid however callers decorate the
-// views over them. A nil sequence loads no lines, and so does one that
-// holds a nil pointer, such as a nil [*line.View].
+// Each call builds a new Index and leaves the Finder as it was. Load once
+// per distinct content and call [Index.Find] for each search. The lines
+// never change, so the index stays valid however callers decorate the
+// views over them. Load returns an empty Index for a nil sequence and for
+// one that holds a nil pointer, such as a nil [*line.View].
 func (f *Finder) Load(lines line.Sequence) *Index {
 	idx := &Index{normalizer: f.normalizer}
 	idx.text, idx.posMap = f.buildTextAndPositionMap(lines)
@@ -204,30 +208,34 @@ type Index struct {
 // appear in the text.
 //
 // The search string goes through the same per-character normalization as
-// the loaded text, so Find finds any run of whole characters that appears
-// in the source, as [WithNormalizer] defines a character.
-// Bytes that are not valid UTF-8 read as U+FFFD on both sides, and a CRLF
-// or bare CR line ending reads as "\n" on both sides. Every loaded line but
-// the last reads as ending in "\n", even one with no line ending of its
-// own, such as the last line of a diff revision or a placeholder row. That
-// "\n" keeps a match from joining two lines unless the normalizer drops it.
-// A normalizer that removes all whitespace drops it, so "1b" then matches
-// across the lines "a: 1" and "b: 2". Where the loaded lines skip lines of
-// their content, as a [line.View] of hunks does, no match joins the lines
-// on either side, whatever the normalizer drops.
+// the loaded text. Find then finds any run of whole characters that
+// appears in the source, as [WithNormalizer] defines a character. Bytes
+// that are not valid UTF-8 read as U+FFFD on both sides. A CRLF or bare CR
+// line ending reads as "\n" on both sides.
+//
+// Every loaded line but the last reads as ending in "\n", even one without
+// a line ending of its own. The last line of a diff revision and a
+// placeholder row are such lines. A match joins two lines only when the
+// normalizer drops that "\n". A normalizer that removes all whitespace
+// drops it, so "1b" then matches across the lines "a: 1" and "b: 2". Where
+// the loaded lines skip lines of their content, as a [line.View] of hunks
+// does, matches never join the lines on either side, whatever the
+// normalizer drops.
 //
 // Every match starts at a source character, and every range covers whole
-// characters, so an exact search for "cafe" in a "café" that spells its
-// accent as a combining mark covers the accent too. When normalization
-// expands one character into several, as case folding turns "ß" into "ss",
-// a needle that matches only the tail of the expansion is not a match, and
-// a match that ends inside an expansion covers the whole character. When
-// it drops a character, as a normalizer that removes whitespace drops a
-// space, a match that ends right before the dropped character covers it
-// too, so the range ends where the next character begins.
+// characters. An exact search for "cafe" in a "café" that spells its
+// accent as a combining mark therefore covers the accent too.
 //
-// Returns nil if the search string is empty, or normalizes to empty, or the
-// Index is nil or holds no text.
+// When normalization expands one character into several, as case folding
+// turns "ß" into "ss", a search string that matches only the tail of the
+// expansion is not a match. A match that ends inside an expansion covers
+// the whole character. When normalization drops a character, as a
+// normalizer that removes whitespace drops a space, a match that ends
+// immediately before the dropped character covers it too. The range then
+// ends where the next character begins.
+//
+// Find returns nil when the search string is empty or normalizes to empty,
+// and when the Index is nil or its loaded text is empty.
 func (i *Index) Find(search string) position.Ranges {
 	if i == nil || search == "" || i.text == "" {
 		return nil
@@ -279,10 +287,10 @@ func (i *Index) Find(search string) position.Ranges {
 }
 
 // normalizeText normalizes s the way [Finder.Load] normalizes the loaded
-// text, one character at a time, so a search string and the text Find
-// compares it against pass through the normalizer identically. Line endings
-// collapse to "\n" first, since the loaded text reads every line ending that
-// way.
+// text, one character at a time. A search string and the text that Find
+// compares it against then pass through the normalizer identically. Line
+// endings collapse to "\n" first, because the loaded text reads every line
+// ending that way.
 func (i *Index) normalizeText(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
@@ -332,8 +340,9 @@ func normalize(n Normalizer, char string) string {
 	return n.Normalize(char)
 }
 
-// writeRunes writes s to sb rune by rune, so a byte that is not valid UTF-8,
-// which a normalizer can emit, becomes U+FFFD on both sides.
+// writeRunes writes s to sb rune by rune. A normalizer might emit a byte
+// that is not valid UTF-8, and writing rune by rune turns that byte into
+// U+FFFD on both sides.
 func writeRunes(sb *strings.Builder, s string) {
 	for _, r := range s {
 		sb.WriteRune(r)
@@ -342,13 +351,14 @@ func writeRunes(sb *strings.Builder, s string) {
 
 // buildTextAndPositionMap concatenates the runes of every line into the
 // loaded text and builds a position map. [line.Line.Runes] yields every
-// line ending as a single "\n", and every line but the last without an
-// ending of its own gets a "\n" at column [line.Line.Width], where an
-// ending would sit, so no match joins the text of two lines unless the
-// normalizer drops "\n". The position map records a gap where a line
-// begins whose index does not follow the index of the line before it. No
-// match crosses a gap, so the lines on either side of lines the sequence
-// skips never join, even when the normalizer drops "\n".
+// line ending as a single "\n". Each line other than the last gets a "\n"
+// at column [line.Line.Width] when it lacks an ending of its own. A match
+// then joins the text of two lines only when the normalizer drops "\n".
+//
+// The position map records a gap at the start of each line whose index
+// does not follow the index of the line before it. [Index.Find] skips
+// every match that crosses a gap. The lines on either side of a skipped run
+// of lines therefore never join, even when the normalizer drops "\n".
 //
 // When the Finder has a normalizer, the normalizer transforms the returned
 // text one character at a time, as [eachCharacter] splits each line. The
@@ -443,22 +453,22 @@ func (f *Finder) buildTextAndPositionMap(lines line.Sequence) (string, *position
 // [position.Position] values in the loaded lines. It holds one entry per
 // source character whose normalized form is non-empty, at the offset where
 // that form begins, in increasing order. A character that normalizes to
-// nothing has no entry of its own and extends the entry before it on its
-// line.
+// nothing does not get an entry of its own and extends the entry before it
+// on its line.
 type positionMap struct {
 	offsets   []int
 	positions []position.Position
-	// The column just past each entry's source character and the
+	// The column after the source character of each entry, past the
 	// characters after it on its line that normalize to nothing.
 	ends []int
-	// The offset where each line begins that does not follow the line
+	// The starting offset of each line that does not follow the line
 	// loaded before it in the content, in increasing order.
 	gaps []int
 }
 
 // crossesGap reports whether the bytes of the loaded text from start up to
-// end hold text from both sides of a gap, which is so when a gap lies
-// after start and before end.
+// end hold text from both sides of a gap. They do when a gap lies after
+// start and before end.
 func (m *positionMap) crossesGap(start, end int) bool {
 	idx := sort.SearchInts(m.gaps, start+1)
 
@@ -473,11 +483,11 @@ func (m *positionMap) add(offset int, pos position.Position) {
 	m.ends = append(m.ends, pos.Col+1)
 }
 
-// extend records a source rune at pos that has no entry of its own, so the
-// entry before it on the same line runs past it. Such a rune is a later rune
-// of the character before it, or a rune of a character that normalizes to
-// nothing. A rune with no entry before it on its line extends nothing,
-// since no match starts at it.
+// extend records a source rune at pos that lacks an entry of its own, so
+// the entry before it on the same line runs past it. Such a rune is a later
+// rune of the character before it, or a rune of a character that
+// normalizes to nothing. Matches never start at a rune without an entry
+// before it on its line, so extend leaves the map unchanged for that rune.
 func (m *positionMap) extend(pos position.Position) {
 	last := len(m.positions) - 1
 	if last >= 0 && m.positions[last].Line == pos.Line {
@@ -485,7 +495,7 @@ func (m *positionMap) extend(pos position.Position) {
 	}
 }
 
-// end returns the position just past the source character that holds the
+// end returns the position after the source character that holds the
 // byte at offset, past any characters after it on the line that normalize
 // to nothing. The offset must lie at or after the first entry.
 func (m *positionMap) end(offset int) position.Position {
@@ -506,7 +516,7 @@ func (m *positionMap) floor(offset int) int {
 }
 
 // at returns the entry of the source character whose normalized form begins
-// at offset, and false when no entry begins there.
+// at offset. It reports whether an entry begins at offset.
 func (m *positionMap) at(offset int) (int, bool) {
 	idx := m.floor(offset)
 
