@@ -23,11 +23,12 @@ var (
 	Locator func(d any) func(hook.Located) hook.Place
 
 	// SetField sets the type field at path of d, a *edit.Doc, to the
-	// string text, as the edit that messages name label. A scalar that the
+	// string text. Messages name that edit by label. A scalar that the
 	// document writes keeps its style where text allows it. A field that
 	// the document lacks goes first in its mapping, after the comment lines
-	// at the top of the document. A document whose values above path leave
-	// no mapping to hold the field, such as one whose root is a sequence,
-	// stays as it is. Every error of SetField shows a bug in the engine.
+	// at the top of the document. A document whose values above path do
+	// not leave a mapping to hold the field, such as one whose root is a
+	// sequence, stays as it is. Every error of SetField shows a bug in
+	// the engine.
 	SetField func(ctx context.Context, d any, label string, path paths.Path, text string) error
 )
