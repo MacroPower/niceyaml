@@ -8,37 +8,42 @@ import (
 // Hirschberg implements [Algorithm] with a space-efficient LCS algorithm.
 //
 // Diff splits the inputs in two at a point that some shortest edit script
-// passes through, then solves each half the same way, as Hirschberg's
+// passes through. It then solves each half the same way, as Hirschberg's
 // divide-and-conquer algorithm does. It finds that point with the
-// linear-space search from Myers' "An O(ND) Difference Algorithm", which
-// walks from both ends of the inputs at once and stops where the two walks
-// meet. Before the search, Diff marks each line that the other input
-// never holds as changed and leaves it out, since no common subsequence
-// can hold it. The search takes O((m+n)*d) time, where m and n are the
-// lengths of before and after and d is the number of lines the shortest
-// edit script deletes or inserts among the lines both inputs hold. A diff
-// of large inputs that differ in a few lines therefore runs in close to
-// linear time, wherever those lines sit, and so does a diff of inputs
-// whose changed lines each appear in only one of them. The search keeps
-// two arrays of O(m+n) integers. The result holds one [Op] per line of
-// either input, so it takes space linear in the length of both inputs as
-// well. The pool keeps the working buffers for later calls until the
-// garbage collector clears it.
+// linear-space search from Myers' "An O(ND) Difference Algorithm". The
+// search walks from both ends of the inputs at once and stops where the
+// two walks meet. Before the search, Diff marks each line that the other
+// input does not hold as changed and excludes it from the search. No
+// common subsequence can hold such a line.
+//
+// The search takes O((m+n)*d) time. In that bound, m and n are the lengths
+// of before and after. The value d counts the lines that the shortest edit
+// script deletes or inserts among the lines both inputs hold. A diff of
+// large inputs that differ in a few lines therefore runs in close to
+// linear time, wherever those lines sit. So does a diff of inputs whose
+// changed lines each appear in only one of them.
+//
+// The search keeps two arrays of O(m+n) integers. The result holds one
+// [Op] per line of either input, so it takes space linear in the length of
+// both inputs as well.
 //
 // Repeated lines often allow several shortest edit scripts. When the
-// inputs hold the same lines in a different order, several longest
-// common subsequences can exist, and the split points of the search
-// decide which one the result keeps. Hirschberg then settles where each
-// run of changed lines sits among the kept lines by sliding it as GNU
-// diff does. A run moves down as far as the content allows, then back up
-// to where it lines up with a run of changes in the other input. A
-// removed or added copy of a repeated block therefore shows as the later
-// copy, and a replaced line stays next to its replacement. Within each
-// run of changes, the deletions come before the insertions.
+// inputs hold the same lines in a different order, several longest common
+// subsequences might exist. The split points of the search decide which
+// one the result keeps.
+//
+// After the search, Hirschberg settles where each run of changed lines
+// sits among the kept lines by sliding it as GNU diff does. A run moves
+// down as far as the content allows, then back up to where it aligns with
+// a run of changes in the other input. A removed or added copy of a
+// repeated block therefore shows as the later copy, and a replaced line
+// stays next to its replacement. Within each run of changes, the deletions
+// come before the insertions.
 //
 // A Hirschberg is safe for concurrent use. Each call borrows a set of
-// working buffers from a pool, so concurrent calls never share one, and the
-// buffers stay in the pool for later calls. Each call returns a fresh slice.
+// working buffers from a pool, so concurrent calls never share one. The
+// buffers stay in the pool for later calls until the garbage collector
+// clears the pool. Each call returns a fresh slice.
 //
 // Create instances with [NewHirschberg].
 type Hirschberg struct {
@@ -84,9 +89,8 @@ type buffers struct {
 	// diagonal.
 	fwdDiag, bwdDiag []int
 
-	// Line IDs of the lines the search covers, in input order. An ID
-	// names equal lines by one number, so the search compares ints
-	// instead of strings.
+	// Line IDs of the lines the search covers, in input order. Equal
+	// lines share one ID, so the search compares ints instead of strings.
 	beforeIDs, afterIDs []int
 
 	// Index in its input of the line behind each entry of beforeIDs and
@@ -97,22 +101,23 @@ type buffers struct {
 	inBefore, inAfter []bool
 
 	// ID of each line while intern runs. The map is empty between calls,
-	// so the pool holds no reference to the caller's lines. Clearing a map
-	// keeps its capacity.
+	// so the pool does not hold a reference to the caller's lines. Clearing
+	// a map keeps its capacity.
 	ids map[string]int
 
 	// Changed lines of each input. The search marks them, and compact
 	// slides them into place.
 	changedBefore, changedAfter []bool
 
-	// Most entries ids has room for. It starts at the number of entries
-	// intern made the map for and grows with the most the map has held.
+	// Estimate of the number of entries ids has room for. It starts at the
+	// size hint that intern made the map with, and it grows to the most
+	// entries the map has held.
 	idsPeak int
 }
 
-// reset clears the change marks and sizes the buffers for inputs of the
-// given lengths, whose search covers bLen before lines and aLen after
-// lines.
+// reset clears the change marks and sizes the buffers for inputs of
+// lengths beforeLen and afterLen. The search covers bLen lines of before
+// and aLen lines of after.
 func (b *buffers) reset(beforeLen, afterLen, bLen, aLen int) {
 	// The walks of midpoint touch the diagonals from -aLen-1 through
 	// bLen+1.
@@ -130,8 +135,8 @@ func (b *buffers) reset(beforeLen, afterLen, bLen, aLen int) {
 	b.changedAfter = cleared(b.changedAfter, afterLen)
 }
 
-// intern gives each line of before and after an ID, the same one for
-// equal lines, in b.beforeIDs and b.afterIDs. It returns the number of
+// intern stores an ID for each line of before and after in b.beforeIDs
+// and b.afterIDs. Equal lines get the same ID. It returns the number of
 // distinct lines, and every ID is less than that number.
 func (b *buffers) intern(before, after []string) int {
 	// Inserting into a map and clearing it take time that grows with its
@@ -172,15 +177,17 @@ func (b *buffers) intern(before, after []string) int {
 	return len(ids)
 }
 
-// discard marks each line of b.beforeIDs and b.afterIDs whose ID the other
-// input never holds as changed, since no common subsequence can hold it,
-// and drops it from the search. Every line the other input never holds
-// adds to the number of edits the search walks through, so inputs that
-// share few lines would otherwise take time close to the square of their
-// length. The lines left keep their order at the front of b.beforeIDs and
-// b.afterIDs, and b.beforeIdx and b.afterIdx record the index of each in
-// its input. The first entry of b.beforeIDs and of b.afterIDs is the line
-// at index offset of its input.
+// discard marks as changed each line of b.beforeIDs and b.afterIDs whose
+// ID the other input does not hold, and it drops that line from the
+// search. No common subsequence can hold such a line. Each such line adds
+// to the number of edits that the search walks through. Without this step,
+// inputs that share few lines take time close to the square of their
+// length.
+//
+// The lines left keep their order at the front of b.beforeIDs and
+// b.afterIDs, and b.beforeIdx and b.afterIdx record the index of each one
+// in its input. The first entry of b.beforeIDs and of b.afterIDs is the
+// line at index offset of its input.
 func (b *buffers) discard(offset, numIDs int) {
 	b.inBefore = cleared(b.inBefore, numIDs)
 	b.inAfter = cleared(b.inAfter, numIDs)
@@ -198,10 +205,10 @@ func (b *buffers) discard(offset, numIDs int) {
 }
 
 // keepShared moves each entry of ids whose ID inOther holds to the front
-// of ids, in order, and records the index of its line in idx, which it
-// empties first. The entry at position i of ids names the input line at
-// index offset+i. It marks each line it drops in changed, and returns
-// the kept IDs and their indices.
+// of ids, in order. It empties idx first, then records the index of the
+// line of each kept entry in idx. It marks each line it drops in changed,
+// and it returns the kept IDs and their indices. The entry at position i
+// of ids names the input line at index offset+i.
 func keepShared(ids, idx []int, inOther, changed []bool, offset int) ([]int, []int) {
 	kept := ids[:0]
 	idx = idx[:0]
@@ -221,7 +228,8 @@ func keepShared(ids, idx []int, inOther, changed []bool, offset int) ([]int, []i
 }
 
 // commonEnds returns the number of lines that before and after share at
-// the start, and then the number they share at the end of what remains.
+// the start. Its second result is the number they share at the end of
+// what remains.
 func commonEnds(before, after []string) (int, int) {
 	prefix := 0
 	for prefix < len(before) && prefix < len(after) && before[prefix] == after[prefix] {
@@ -276,8 +284,8 @@ func (b *buffers) recurse(bStart, bEnd, aStart, aEnd int) {
 }
 
 // midpoint returns a point (x, y) that some shortest edit script of before
-// and after passes through, so that the script splits into one for
-// before[:x] and after[:y] and one for before[x:] and after[y:].
+// and after passes through. The script thus splits into one script for
+// before[:x] and after[:y] and another for before[x:] and after[y:].
 //
 // It follows diag in GNU diff without its heuristics, the linear-space
 // search from Myers' "An O(ND) Difference Algorithm". Point (x, y) lies on
@@ -287,10 +295,11 @@ func (b *buffers) recurse(bStart, bEnd, aStart, aEnd int) {
 // search stops where the two walks meet on a diagonal. On each diagonal, a
 // walk takes whichever of the deletion and the insertion reaches further
 // along it. When both reach the same point, the walk records only that
-// point, so the choice has no effect.
+// point, so the choice does not change the result.
 //
-// The caller must trim the lines both inputs share at the start and at the
-// end, so both are non-empty and need at least two edits.
+// The caller must pass two non-empty inputs and must trim the lines that
+// both share at the start and at the end. Such inputs need at least two
+// edits.
 func (b *buffers) midpoint(before, after []int) (int, int) {
 	n, m := len(before), len(after)
 

@@ -7,7 +7,7 @@ type Algorithm interface {
 	// Diff returns operations that transform before into after. Operations
 	// reference indices in the original slices, and the returned slice is the
 	// caller's to keep. Between two [OpEqual] operations, the deletions and
-	// insertions may come in any order.
+	// insertions might come in any order.
 	Diff(before, after []string) []Op
 }
 
@@ -16,11 +16,11 @@ type OpKind int
 
 // [OpKind] constants.
 const (
-	// OpEqual indicates the element exists in both sequences.
+	// OpEqual indicates that the element exists in both sequences.
 	OpEqual OpKind = iota
-	// OpDelete indicates the element exists only in the before sequence.
+	// OpDelete indicates that the element exists only in the before sequence.
 	OpDelete
-	// OpInsert indicates the element exists only in the after sequence.
+	// OpInsert indicates that the element exists only in the after sequence.
 	OpInsert
 )
 
@@ -28,9 +28,10 @@ const (
 //
 // Kind is one of [OpEqual], [OpDelete], or [OpInsert], and consumers such
 // as the diff package reject any other value. Before is the index into the
-// before sequence and After the index into the after sequence. The side an
-// operation does not touch holds -1. An [OpInsert] has no Before and an
-// [OpDelete] has no After, while an [OpEqual] carries both.
+// before sequence, and After is the index into the after sequence. The side
+// that an operation does not touch holds -1, so an [OpInsert] holds -1 in
+// Before and an [OpDelete] holds -1 in After. An [OpEqual] holds an index
+// in both.
 type Op struct {
 	Kind   OpKind
 	Before int

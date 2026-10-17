@@ -2,14 +2,14 @@ package lcs
 
 // compact slides each run of changes that recurse marked with
 // [shiftBoundaries], then returns the ops that the marks describe. A
-// slide swaps a changed line with an equal line beside its run, so the
-// set of lines the two inputs pair up stays the same and only the place
-// of each run among them changes. Sliding does not fully undo where
-// recurse put a run among equal lines. The pass over before reads the
-// marks of after before they slide, as GNU diff does, so two placements
-// of a run in after can settle into different results. When the inputs
-// share several longest common subsequences, the split points that
-// midpoint finds still choose which one the result keeps.
+// slide swaps a changed line with an equal line beside its run. The two
+// inputs still pair up the same set of lines, and only the place of each
+// run among them changes. Sliding does not fully undo where recurse put a
+// run among equal lines. The pass over before reads the marks of after
+// before they slide, as GNU diff does, so two placements of a run in
+// after might settle into different results. When the inputs share
+// several longest common subsequences, the split points that midpoint
+// finds still choose which one the result keeps.
 func (b *buffers) compact(before, after []string) []Op {
 	shiftBoundaries(before, b.changedBefore, b.changedAfter)
 	shiftBoundaries(after, b.changedAfter, b.changedBefore)
@@ -59,14 +59,16 @@ func (b *buffers) compact(before, after []string) []Op {
 // other input.
 //
 // A run can move down by one line when its first line equals the line
-// below it, since the two lines then swap roles and the unchanged lines
-// still pair up in order. Moving up works the same way with the run's last
-// line and the line above it. Each run moves up as far as it can, merging
-// with any run it meets, then down as far as it can. The run then moves
-// back up to the last place where its end lines up with a run of changes
-// in the other input, so a replaced line stays next to its replacement.
-// With no such place, the run stays as far down as it goes, so a deleted
-// copy of a repeated block shows as the last copy.
+// below it. The two lines then swap roles, and the unchanged lines still
+// pair up in order. Moving up works the same way with the run's last line
+// and the line above it.
+//
+// Each run moves up as far as it can and merges with any run it meets,
+// then moves down as far as it can. The run then moves back up to the last
+// place where its end aligns with a run of changes in the other input.
+// A replaced line thus stays next to its replacement. When no such place
+// exists, the run stays as far down as it goes, so a deleted copy of a
+// repeated block shows as the last copy.
 func shiftBoundaries(lines []string, changed, other []bool) {
 	n := len(lines)
 
