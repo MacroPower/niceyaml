@@ -1,19 +1,21 @@
-// Package aliaslimit holds the limit on how much YAML aliases may make a
-// reader read. A reader counts the nodes it reads once, as distinct, and
-// the nodes the aliases repeat, as aliased. [Excessive] reports whether
-// the aliased nodes make up too large a share, under the rule
-// gopkg.in/yaml.v3 applies to the aliases in a document it decodes.
+// Package aliaslimit holds the limit on how much YAML aliases can make a
+// reader read. A reader counts the nodes that it reads once, as
+// distinct, and the nodes that the aliases repeat, as aliased. [Excessive]
+// reports whether the aliased nodes make up too large a share, under the
+// rule that gopkg.in/yaml.v3 applies to the aliases in a document that it
+// decodes.
 //
 // The decode check of the aliasing package applies the limit to what a
 // decode of a document reads. The schema validator applies it to a
-// decoded value whose maps and slices a decode shares between aliases,
-// and the paths package to the nodes one selector of a path reaches.
-// Each refuses a count past the limit with [ErrExcessiveAliasing].
+// decoded value whose maps and slices a decode shares between aliases.
+// The paths package applies it to the nodes that one selector of a path
+// reaches. Each refuses a count past the limit with
+// [ErrExcessiveAliasing].
 //
 // With niceyaml.WithAliasLimit, the source of a document turns the limit
-// off for a decode of the document and for a value the schema validator
-// decodes from it. The limit stays on for a value a caller hands the
-// validator and for the selectors of a path.
+// off for a decode of the document and for a value that the schema
+// validator decodes from it. The limit stays on for a value that a caller
+// hands the validator and for the selectors of a path.
 package aliaslimit
 
 import (
@@ -26,24 +28,26 @@ import (
 // paths, and schema packages export the same error value.
 var ErrExcessiveAliasing = errors.New("excessive aliasing")
 
-// The limits on shared values follow the rule gopkg.in/yaml.v3 applies
-// to the aliases in a document it decodes.
+// The limits on shared values follow the rule that gopkg.in/yaml.v3
+// applies to the aliases in a document that it decodes.
 const (
-	// A value's aliases count as excessive only once the value passes
+	// The aliases of a value count as excessive only when the value passes
 	// both of these node counts, for aliased nodes and for all nodes.
 	minAliased  = 100
 	minExpanded = 1000
 
-	// Aliases may make up the larger share of the nodes in a value of up
-	// to the lower count, and the smaller share in a value of the higher
-	// count or more. The share falls in a straight line between them.
+	// In a value of at most the lower count of nodes, aliases can make up
+	// the larger share of the nodes. In a value of the higher count or
+	// more, they can make up only the smaller share. The share falls in a
+	// straight line between the two counts.
 	maxAliasRatio       = 0.99
 	minAliasRatio       = 0.10
 	aliasRatioRangeLow  = 400_000
 	aliasRatioRangeHigh = 4_000_000
 
-	// CountCap is where a node count stops growing, far past every limit
-	// above, so a chain of nested aliases cannot overflow it.
+	// CountCap is where a node count stops growing, far past every other
+	// limit of this package, so a chain of nested aliases cannot overflow
+	// it.
 	CountCap = math.MaxInt32
 )
 
@@ -57,8 +61,8 @@ func Excessive(distinct, aliased int) bool {
 		float64(aliased)/float64(expanded) > allowedAliasRatio(expanded)
 }
 
-// AddCapped returns a+b, or [CountCap] when the sum would pass it. Both a
-// and b fall between zero and CountCap.
+// AddCapped returns a+b, or [CountCap] when the sum is more than CountCap.
+// Both a and b fall between zero and CountCap, inclusive.
 func AddCapped(a, b int) int {
 	if a > CountCap-b {
 		return CountCap
@@ -68,7 +72,7 @@ func AddCapped(a, b int) int {
 }
 
 // allowedAliasRatio returns the share of the expanded nodes that aliases
-// may make up in a value of expanded nodes.
+// can make up in a value of expanded nodes.
 func allowedAliasRatio(expanded int) float64 {
 	switch {
 	case expanded <= aliasRatioRangeLow:
