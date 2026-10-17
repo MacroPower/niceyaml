@@ -9,10 +9,10 @@ import (
 
 // Override returns the overlay color, or the base color when the overlay
 // is absent. An overlay is absent when it is nil, [lipgloss.NoColor], or
-// invisible, the same rule [Blend] applies. When both colors are absent,
-// Override returns nil, as [Blend] does. Override clamps the color it
-// returns into the sRGB gamut, as [Blend] clamps, so the result renders as
-// a valid SGR sequence.
+// invisible, the same rule that [Blend] applies. When both colors are
+// absent, Override returns nil, as [Blend] does. Override clamps the color
+// that it returns into the sRGB gamut, as [Blend] clamps. The result then
+// renders as a valid Select Graphic Rendition (SGR) sequence.
 func Override(base, overlay color.Color) color.Color {
 	if _, ok := visible(overlay); ok {
 		return Clamped(overlay)
@@ -25,18 +25,19 @@ func Override(base, overlay color.Color) color.Color {
 	return nil
 }
 
-// Blend blends two colors using LAB color space (50/50 mix), clamps the
-// result to the sRGB gamut, and returns it as an 8-bit [color.RGBA] that
-// renders as a valid SGR sequence. Blend keeps the high byte of each
-// channel, the byte that the SGR writer prints for a 16-bit channel above
-// 0xff. The writer prints a channel at or below 0xff as it is, so a blend
-// near black left at 16 bits would print a channel below 1/256 as a bright
-// one.
+// Blend blends two colors with an even mix in LAB color space and clamps
+// the result to the sRGB gamut. It returns the result as an 8-bit
+// [color.RGBA] that renders as a valid Select Graphic Rendition (SGR)
+// sequence. Blend keeps the high byte of each channel, the byte that the
+// SGR writer prints for a 16-bit channel of more than 0xff. The writer
+// prints a channel of at most 0xff as it is. Without the 8-bit result, a
+// blend near black prints a channel of less than 1/256 as a bright one.
+//
 // A color is absent when it is nil, [lipgloss.NoColor], or invisible. When
-// both colors are absent, Blend returns nil, and when one is, it returns
-// the other, clamped the same way when it lies outside the gamut.
-// Blend also clamps a color outside the gamut before mixing, since the
-// RGBA conversion it reads wraps a negative channel to a bright one.
+// both colors are absent, Blend returns nil. When one is absent, Blend
+// returns the other, clamped the same way when it lies outside the gamut.
+// Blend also clamps a color outside the gamut before mixing, because the
+// RGBA conversion that it reads wraps a negative channel to a bright one.
 func Blend(c1, c2 color.Color) color.Color {
 	cf1, visible1 := visible(c1)
 	cf2, visible2 := visible(c2)
@@ -54,7 +55,7 @@ func Blend(c1, c2 color.Color) color.Color {
 }
 
 // visible converts c for blending and reports whether c is visible: not
-// nil, not [lipgloss.NoColor], and with an alpha above zero.
+// nil, not [lipgloss.NoColor], and with an alpha of more than zero.
 func visible(c color.Color) (colorful.Color, bool) {
 	if c == nil {
 		return colorful.Color{}, false
@@ -69,7 +70,8 @@ func visible(c color.Color) (colorful.Color, bool) {
 
 // Clamped returns c as it is when every channel lies in [0, 1], and c
 // clamped to the sRGB gamut otherwise. Only a [colorful.Color] can hold a
-// channel outside that range; integer channels bound every other color type.
+// channel outside that range, because integer channels bound every other
+// color type.
 func Clamped(c color.Color) color.Color {
 	if cf, ok := c.(colorful.Color); ok && !cf.IsValid() {
 		return cf.Clamped()
@@ -80,9 +82,10 @@ func Clamped(c color.Color) color.Color {
 
 // BlendStyles blends two [lipgloss.Style] values. It blends the foreground,
 // background, and underline colors in LAB color space and composes
-// transforms so overlay wraps base. Text attributes the overlay sets, such
-// as bold or italic, apply on top of the base's, and an underline style or
-// hyperlink the overlay sets replaces the base's.
+// transforms so overlay wraps base. Text attributes that the overlay sets,
+// such as bold or italic, apply on top of the attributes of the base. An
+// underline style or a hyperlink that the overlay sets replaces the one of
+// the base.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
 func BlendStyles(base, overlay lipgloss.Style) lipgloss.Style {
@@ -136,9 +139,9 @@ func BlendStyles(base, overlay lipgloss.Style) lipgloss.Style {
 //
 // OverrideStyles replaces the foreground, background, and underline colors
 // rather than blending them, and transforms rather than composing them.
-// Text attributes the overlay sets, such as bold or italic, apply on top of
-// the base's, and an underline style or hyperlink the overlay sets replaces
-// the base's.
+// Text attributes that the overlay sets, such as bold or italic, apply on
+// top of the attributes of the base. An underline style or a hyperlink
+// that the overlay sets replaces the one of the base.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
 func OverrideStyles(base, overlay lipgloss.Style) lipgloss.Style {
@@ -167,10 +170,10 @@ func OverrideStyles(base, overlay lipgloss.Style) lipgloss.Style {
 }
 
 // layerAttributes returns base with every text attribute that over sets
-// turned on, and with the underline style and hyperlink that over sets in
-// place of the base's, so a curly underline on over stays curly. A
-// [lipgloss.Style] reports an unset attribute as false, so an overlay
-// cannot turn an attribute of the base off.
+// turned on. It also puts the underline style and the hyperlink that over
+// sets in place of those of base, so a curly underline on over stays
+// curly. A [lipgloss.Style] reports an unset attribute as false, so an
+// overlay cannot turn an attribute of the base off.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
 func layerAttributes(base, over lipgloss.Style) lipgloss.Style {

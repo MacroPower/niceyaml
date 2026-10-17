@@ -1,4 +1,4 @@
-// Package colors provides style combination utilities for layered styling.
+// Package colors combines layered styles and the colors that they set.
 //
 // A printer can apply several style layers to one region of text. For
 // example, a YAML key can carry syntax highlighting and an error highlight
@@ -7,9 +7,11 @@
 //
 // # Combination Strategies
 //
-// The package combines a base style with an overlay in one of two ways.
+// The package combines a base style with an overlay by blending or by
+// overriding.
 //
-// Blending mixes colors in LAB color space for perceptually uniform results.
+// Blending mixes colors in the CIELAB (LAB) color space for perceptually
+// uniform results.
 //
 // A red syntax color blended with a yellow error highlight produces an orange
 // that visually represents both.
@@ -27,6 +29,6 @@
 //	// The result.Foreground is overlay's foreground when it sets one.
 //	// The result.Transform is overlay's transform when it sets one, not a composition.
 //
-// Both strategies fall back to whichever color is visible when the other is
-// nil, invisible, or [lipgloss.NoColor].
+// Both strategies use whichever color is visible when the other is nil,
+// invisible, or [lipgloss.NoColor].
 package colors
