@@ -16,17 +16,18 @@ import (
 // reads, and a later table among those hides an earlier one. Within the
 // documents, the last anchor of a name in the text wins, even one after
 // the alias that reads it. An anchor inside another anchor comes after
-// it in the text. The rule decides each alias of a document that names
-// no anchor before it, and every alias inside a reference document.
+// it in the text. In a document, the rule decides each alias that does
+// not follow an anchor of its name. It also decides every alias inside a
+// reference document.
 //
 // A decode departs from the rule in one case. When the decoder reads an
 // anchor, it registers each anchor inside it again. An alias that it
 // reads after the outer anchor then finds the inner one, even when the
 // table holds a later anchor of that name.
 //
-// The go-yaml decoder reads the trees of a table and writes nothing to
-// them, so the decodes of many goroutines share them. A nil Table holds
-// no anchor.
+// The go-yaml decoder reads the trees of a table and does not write to
+// them, so the decodes of many goroutines share them. A nil Table does
+// not hold any anchors.
 //
 // Create instances with [New].
 type Table struct {
@@ -48,8 +49,8 @@ type entry struct {
 }
 
 // New creates a new [*Table] of the anchors under bodies, the bodies of
-// documents in order, over the anchors of refs. A nil table in refs holds
-// no anchor.
+// documents in order, over the anchors of refs. New skips each nil table
+// in refs.
 func New(bodies []ast.Node, refs ...*Table) *Table {
 	t := &Table{own: map[string]*entry{}, refs: slices.DeleteFunc(slices.Clone(refs), isNil)}
 
@@ -88,7 +89,7 @@ func newEntry(anchor *ast.AnchorNode) *entry {
 }
 
 // Anchor returns the anchor the table holds for name, and reports false
-// when it holds none.
+// when it does not hold one.
 func (t *Table) Anchor(name string) (*ast.AnchorNode, bool) {
 	e := t.entry(name)
 	if e == nil {
@@ -130,8 +131,8 @@ func (t *Table) entry(name string) *entry {
 // closes a loop, because the anchor that alias names comes later in the
 // list.
 //
-// Each anchor comes back as [decodetree.DecodeView] gives it. A name the
-// table holds no anchor for adds nothing.
+// Each anchor comes back as [decodetree.DecodeView] gives it. Prime skips
+// each name that the table does not hold an anchor for.
 func (t *Table) Prime(names []string) []ast.Node {
 	if t == nil || len(names) == 0 {
 		return nil
