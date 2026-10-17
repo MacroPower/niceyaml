@@ -3,10 +3,11 @@
 //
 // A location highlights the content of the token at it, or the range an
 // error carried, as [Ranges] finds it. [Annotate] marks each [Mark] on a
-// view: an overlay on each line of the text it covers, and an annotation
-// below each of those lines that labels the same columns. A renderer
-// draws each annotation as a caret run under its columns, with the
-// message of the mark beside the run on the line of the mark.
+// view. It adds an overlay on each line of the text the mark covers. It
+// also adds an annotation below each of those lines that labels the same
+// columns. A renderer draws each annotation as a caret run under its
+// columns, with the message of the mark beside the run on the line of the
+// mark.
 package excerpt
 
 import (
@@ -23,15 +24,16 @@ import (
 // Mark is the resolved location of one error, with the text to annotate
 // its line with.
 type Mark struct {
-	// The text of the annotation, or the empty string for none.
+	// Message is the text of the annotation, or the empty string when the
+	// annotation does not have text.
 	Message string
-	// The ranges to highlight, as [Ranges] returns them.
+	// Ranges holds the ranges to highlight, as [Ranges] returns them.
 	Ranges position.Ranges
-	// The position of the error.
+	// Pos is the position of the error.
 	Pos position.Position
-	// The mark belongs to a warning, so it highlights in
-	// [kind.GenericWarn] and annotates in [kind.TextWarn] rather than in
-	// the kinds of an error.
+	// Warning reports whether the mark belongs to a warning. A warning
+	// mark highlights in [kind.GenericWarn] and annotates in
+	// [kind.TextWarn] rather than in the kinds of an error.
 	Warning bool
 }
 
@@ -53,10 +55,10 @@ func (m Mark) textKind() kind.Kind {
 	return kind.TextError
 }
 
-// Annotate puts each mark in marks on view, where marks hold the resolved
-// locations of the errors in lines, and reports whether it marked any
-// line. It marks nothing when marks is empty or the view holds none of
-// their lines.
+// Annotate puts each mark in marks on view and reports whether it marked
+// any line. The marks hold the resolved locations of the errors in lines.
+// Annotate leaves the view as it is and reports false when marks is empty
+// or the view does not hold any of their lines.
 //
 // The view can hold the lines at any indices, as a diff does, so every
 // mark goes to the index that holds its line. A mark highlights each line
@@ -65,21 +67,25 @@ func (m Mark) textKind() kind.Kind {
 // them without color.
 //
 // The first annotation on the line of the mark, in the order of its
-// ranges, carries its message, and every other annotation of the mark
-// carries none. A mark with no message thus gets caret runs alone. The
-// highlight on the line of a mark can start past the column of the mark,
-// as for a mark on the spaces before a token. The message then sits under
-// the token.
+// ranges, carries its message. The other annotations of the mark do not
+// carry a message. A mark with an empty message thus gets only caret
+// runs. The highlight on the line of a mark might start past the column
+// of the mark, as for a mark on the spaces before a token. The message
+// then sits under the token.
 //
-// A mark whose highlight leaves out its own line labels the column of the
-// mark with an annotation of no width, which carries its message. That
-// holds for a mark with no token under it and a range that covers no
-// column of its lines. It also holds for a mark on a line of only spaces
-// inside a block scalar, and a range that starts at the end of its first
-// line. The annotation marks the line as decorated, so the line joins the
-// hunks [line.View.Hunks] keeps. A column past the end of its line moves
-// to the column after its last rune. A far column then costs a renderer
-// no more cells than a column at the end.
+// A mark whose highlight omits its own line labels the column of the mark
+// with an annotation of zero width, which carries its message. The
+// highlight omits that line for a mark without a token under it, and for
+// a range that covers zero columns of its lines. It also omits that line
+// for a mark on a line of only spaces inside a block scalar. The
+// highlight omits that line for a range that starts at the end of its
+// first line too. The annotation marks the line as decorated, so the line
+// joins the hunks [line.View.Hunks] keeps.
+//
+// When the column of the mark lies past the end of its line, the
+// annotation of zero width moves to the column after the last rune of the
+// line. A far column then costs a renderer the same number of cells as a
+// column at the end.
 //
 // A mark of a warning highlights in [kind.GenericWarn] and annotates in
 // [kind.TextWarn], and a mark of an error in [kind.GenericError] and
@@ -90,9 +96,9 @@ func (m Mark) textKind() kind.Kind {
 // A renderer draws the other control characters of an annotation as
 // their pictures.
 //
-// A line keeps each mark once. Marks that repeat, in one call or across
-// several, leave the view as the first of them does, so a message that
-// repeats on one run reads once.
+// A line keeps each mark one time. Each repeat of a mark, in one call or
+// across several, leaves the view as the first copy left it. A message
+// that repeats on one run therefore reads one time.
 func Annotate(view *line.View, lines line.Lines, marks []Mark) bool {
 	if len(marks) == 0 {
 		return false
@@ -169,8 +175,9 @@ func addAnnotation(view *line.View, i int, a line.Annotation) {
 }
 
 // lineIndex returns a lookup from a line index of lines to the index of
-// view that holds that line, found by identity. A line index lines does
-// not hold, or a line the view does not hold, reports false.
+// view that holds that line. The lookup finds the line by identity. It
+// reports false for a line index that lines does not hold, and for a line
+// that the view does not hold.
 func lineIndex(view *line.View, lines line.Lines) func(int) (int, bool) {
 	return func(i int) (int, bool) {
 		if i < 0 || i >= lines.Len() {
@@ -181,12 +188,13 @@ func lineIndex(view *line.View, lines line.Lines) func(int) (int, bool) {
 	}
 }
 
-// Ranges returns the ranges to highlight for a location in lines: rng cut
-// to lines, or else the content of tk, the token a path resolved to, or
-// else the content of the token at pos. The parser makes a token for an
-// empty value that no line holds, so a path to one has no ranges, where
-// the token at its position would be a comment or the spaces after the
-// colon.
+// Ranges returns the ranges to highlight for a location in lines. The
+// ranges are rng cut to lines, or else the content of tk, the token a path
+// resolved to. Without either, they are the content of the token at pos.
+// The parser makes a token for an empty value that the lines do not hold.
+// So the ranges of a path to such a value are empty. The token at its
+// position is a comment or the spaces after the colon, so Ranges does not
+// use it.
 func Ranges(lines line.Lines, rng *position.Range, tk *token.Token, pos position.Position) position.Ranges {
 	if rng != nil {
 		return position.Ranges{clampRange(lines, *rng)}
@@ -218,8 +226,8 @@ func clampRange(lines line.Lines, r position.Range) position.Range {
 }
 
 // Cover returns the one range that spans ranges, from the start of the
-// first to the end of the last. With no ranges, it returns the empty
-// range at pos.
+// first to the end of the last. When ranges is empty, it returns the
+// empty range at pos.
 func Cover(ranges position.Ranges, pos position.Position) position.Range {
 	if len(ranges) == 0 {
 		return position.NewRange(pos, pos)
