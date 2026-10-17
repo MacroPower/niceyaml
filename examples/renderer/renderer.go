@@ -10,6 +10,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
+	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -97,8 +98,15 @@ func renderHTML(view *line.View) string {
 		// set of overlays, so the renderer never reads a token. A segment
 		// ends where an overlay starts or ends, so the search match cuts
 		// the quoted item into three segments.
+		//
+		// The printer draws every segment of a changed line in the diff
+		// kind of its flag, with the overlays over that. The class of the
+		// line carries that color, so the segments of a changed line leave
+		// out the spans of their kinds.
+		tokens := view.Flag(i) == line.FlagDefault
+
 		for seg := range view.Segments(i) {
-			sb.WriteString(renderSegment(seg))
+			sb.WriteString(renderSegment(seg, tokens))
 		}
 
 		sb.WriteString("</span>\n")
@@ -133,25 +141,22 @@ func writeNotes(sb *strings.Builder, gutter int, content string, notes line.Anno
 	}
 }
 
-// renderSegment renders one segment as a span with the class of its kind,
-// and a span inside it for each overlay that covers it.
-func renderSegment(seg line.Segment) string {
-	// The text holds the source as written, so escape it for HTML.
-	out := html.EscapeString(seg.Text)
+// renderSegment renders one segment as a span inside a span for each
+// overlay that covers it. With tokens set, a span with the class of its
+// kind wraps them all.
+func renderSegment(seg line.Segment, tokens bool) string {
+	// The text holds the source as written, control characters included.
+	// Control draws each one as one visible rune, as the printer does, so
+	// the carets of DefaultAnnotation stay under their runes. Then escape
+	// it for HTML.
+	out := html.EscapeString(escape.Control(seg.Text))
 
-	// The printer applies the overlays in the order the view took them, so
-	// the last one wins where two set the same property. In CSS the
-	// innermost element wins, so the last overlay, which the printer
-	// applies outermost, becomes the innermost span here. The token span
-	// wraps every overlay span.
-	//
-	// A rule for an overlay span changes only the properties it sets, and
-	// the token span shows through for the rest, as in the printer. A
-	// replacing overlay thus recolors its token. The printer mixes the
-	// colors of a blended overlay with the colors under it. The blend class
-	// lets a stylesheet do the same, such as with a translucent background.
-	// The renderer writes each overlay as a span, because browsers give
-	// every mark element a color and a background of their own.
+	// The overlays nest as the doc of View.Segments shows, with the last
+	// one innermost, so the overlay that the printer applies last wins in
+	// CSS too. The renderer writes each overlay as a span, because
+	// browsers give every mark element a color and a background of their
+	// own. A renderer that writes inline colors instead, blends included,
+	// reads the style of each segment from Printer.Segments.
 	for _, ov := range slices.Backward(seg.Overlays) {
 		class := string(ov.Kind)
 		if ov.Blend {
@@ -163,7 +168,7 @@ func renderSegment(seg line.Segment) string {
 
 	// The spaces around a token are kind.Text, the root that every other
 	// kind inherits from, so they do not need a span.
-	if seg.Kind != kind.Text {
+	if tokens && seg.Kind != kind.Text {
 		out = fmt.Sprintf("<span class=%q>%s</span>", seg.Kind, out)
 	}
 

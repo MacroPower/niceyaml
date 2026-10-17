@@ -2,6 +2,7 @@ package printer
 
 import (
 	"fmt"
+	"iter"
 	"slices"
 	"strconv"
 	"strings"
@@ -856,6 +857,65 @@ func (p *Printer) Style(s kind.Kind) lipgloss.Style {
 	return p.styles.Style(s)
 }
 
+// Segments returns an iterator over the segments of line i of view, as
+// [line.View.Segments] yields them, each with the style [Printer.Print]
+// draws it in. The style starts from the style of the Kind of the
+// segment. On a line that carries [line.FlagInserted] or
+// [line.FlagDeleted], it starts from [kind.GenericInserted] or
+// [kind.GenericDeleted] instead. Each overlay of the segment then applies
+// in order. A replacing overlay sets the properties its style sets. A
+// blending overlay mixes its colors with the style under it, so a search
+// highlight keeps the token color it covers.
+//
+// A renderer that writes another format, such as HTML with inline colors,
+// reads the colors of each segment from its style. Its output then shows
+// the colors that Print draws:
+//
+//	for seg, st := range p.Segments(view, i) {
+//		fg, bg := st.GetForeground(), st.GetBackground()
+//		// ...
+//	}
+//
+// The style can hold a transform, which a format other than a terminal
+// cannot apply as Print does. Print draws a grapheme cluster that two
+// segments share in the style of the segment that holds its first rune.
+//
+// Segments yields the segments of the whole line, whatever
+// [line.View.Clip] set, as line.View.Segments does. It panics if i is
+// outside the content.
+func (p *Printer) Segments(view *line.View, i int) iter.Seq2[line.Segment, lipgloss.Style] {
+	segs := view.Segments(i)
+	base := flagKind(view.Flag(i))
+
+	return func(yield func(line.Segment, lipgloss.Style) bool) {
+		for seg := range segs {
+			styled := seg
+			if base != "" {
+				styled.Kind = base
+			}
+
+			if !yield(seg, p.blended(blendKey(styled), styled)) {
+				return
+			}
+		}
+	}
+}
+
+// flagKind returns the kind that every segment of a line with flag f
+// renders in. That kind is [kind.GenericDeleted] or [kind.GenericInserted]
+// for a line a diff changed. It is "" for a line whose segments each
+// render in their own kind.
+func flagKind(f line.Flag) kind.Kind {
+	switch f {
+	case line.FlagDeleted:
+		return kind.GenericDeleted
+	case line.FlagInserted:
+		return kind.GenericInserted
+	default:
+		return ""
+	}
+}
+
 // Print renders view and wraps the result in the container style. Each
 // line takes one row for each wrapped piece of its content and one for
 // each row its styled annotations take. [Printer.Layout] counts the same
@@ -1212,18 +1272,7 @@ type runSpan struct {
 // first rune, the one [cells.Row] measures it by. It returns the rendered
 // content and a [runSpan] for each run, in order.
 func (p *Printer) renderRuns(vl viewLine) (string, []runSpan) {
-	var base kind.Kind
-
-	switch vl.view.Flag(vl.idx) {
-	case line.FlagDeleted:
-		base = kind.GenericDeleted
-
-	case line.FlagInserted:
-		base = kind.GenericInserted
-
-	case line.FlagDefault:
-		// Each segment renders in its own kind.
-	}
+	base := flagKind(vl.view.Flag(vl.idx))
 
 	var (
 		sb      strings.Builder

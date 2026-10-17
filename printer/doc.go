@@ -45,20 +45,32 @@
 // in, so a model draws what Print returns as it is.
 //
 // A program that chooses the profile itself, such as one with a --color
-// flag, prints through a [github.com/charmbracelet/colorprofile.Writer].
-// [github.com/charmbracelet/colorprofile.NewWriter] detects the profile
-// of its destination as the lipgloss functions do, and the Profile field
-// of the writer overrides it:
+// flag, sets the Profile field of the
+// [github.com/charmbracelet/colorprofile.Writer] it prints through.
+// [lipgloss.Print], [lipgloss.Println], and [lipgloss.Printf] print through
+// [lipgloss.Writer], which detects the profile of stdout when the program
+// starts. A program that prints with them sets the field there:
 //
-//	w := colorprofile.NewWriter(os.Stdout, os.Environ())
+//	if forceColor {
+//		lipgloss.Writer.Profile = colorprofile.TrueColor
+//	}
+//	lipgloss.Println(p.Print(view))
+//
+// [lipgloss.Fprintln] and the other lipgloss functions that take a writer
+// build a writer of their own on every call. The field of lipgloss.Writer
+// thus does not reach them. A program that prints elsewhere, such as to
+// stderr, builds a writer for that destination with
+// [github.com/charmbracelet/colorprofile.NewWriter] and sets its field:
+//
+//	w := colorprofile.NewWriter(os.Stderr, os.Environ())
 //	if forceColor {
 //		w.Profile = colorprofile.TrueColor
 //	}
-//	fmt.Fprintln(w, p.Print(view))
+//	fmt.Fprintln(w, p.PrintError(err))
 //
-// NewWriter and [lipgloss.Fprintln] detect the profile on every call.
-// Inside tmux, each detection starts a process, so a program that prints
-// many views builds one writer and prints them all through it.
+// NewWriter detects the profile when it builds a writer. Inside tmux,
+// each detection starts a process, so a program that prints many views
+// builds one writer and prints them all through it.
 //
 // Output without its sequences is not the plain text of a view.
 // [WithWrapWidth] wraps a long line onto several rows. [WithBox],

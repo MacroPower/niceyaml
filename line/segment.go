@@ -16,16 +16,30 @@ import (
 // Receive instances from [View.Segments].
 type Segment struct {
 	// Text is the content of the line on Cols, without the line ending.
+	// It holds the source as written, control characters included, such
+	// as a tab or an escape. The printer and [View.String] draw each
+	// control character as one visible rune, as
+	// [go.jacobcolvin.com/niceyaml/escape.Control] does. A renderer that
+	// draws the text as the printer does passes it through escape.Control
+	// before any escaping its format needs. The text then cannot move the
+	// cursor of a terminal, and each control character takes the one cell
+	// that [go.jacobcolvin.com/niceyaml/printer.ColWidth] and the caret
+	// rows count for it.
 	Text string
 	// Kind is the kind of the token the text belongs to, as [Line.Kind]
 	// reads it, or [kind.Text] for the whitespace a token carries before
-	// or after its text.
+	// or after its text. The printer draws a flagged line in the kind of
+	// its flag instead, as [View.Segments] describes.
 	Kind kind.Kind
 	// Overlays are the overlays of the view that cover Cols, in the order
-	// the view took them in. The overlay that the caller added last is the
-	// outermost. The slice belongs to the segment and holds copies of the
-	// view's overlays, so changing it does not change the view or the
-	// other segments.
+	// the view took them in. The printer applies them in that order over
+	// the style of Kind, or over [kind.GenericInserted] or
+	// [kind.GenericDeleted] on a line that carries [FlagInserted] or
+	// [FlagDeleted]. Where two of them set the same property, the one the
+	// caller added last thus wins. A blending overlay mixes its colors with
+	// the style under it instead, as [Overlay.Blend] describes. The slice
+	// belongs to the segment and holds copies of the view's overlays, so
+	// changing it does not change the view or the other segments.
 	Overlays Overlays
 	// Cols are the columns of the line the segment covers, counted in
 	// runes.
@@ -47,21 +61,57 @@ type Segment struct {
 // wants them joined joins them itself.
 //
 // A renderer of any kind reads the segments in place of the tokens and
-// the overlays, so it styles the line as the printer does without
-// reading either:
+// the overlays, so it styles the line without reading either. The
+// printer applies the overlays of a segment in order, so the last one
+// wins. In CSS the innermost element wins, so an HTML renderer nests the
+// last overlay innermost, inside a span for the token kind:
 //
 //	for i := range view.All() {
 //		for seg := range view.Segments(i) {
-//			class := string(seg.Kind)
-//			if n := len(seg.Overlays); n > 0 {
-//				class = string(seg.Overlays[n-1].Kind)
+//			text := html.EscapeString(escape.Control(seg.Text))
+//			for _, ov := range slices.Backward(seg.Overlays) {
+//				class := string(ov.Kind)
+//				if ov.Blend {
+//					class += " blend"
+//				}
+//
+//				text = fmt.Sprintf(`<span class=%q>%s</span>`, class, text)
 //			}
 //
-//			fmt.Fprintf(w, `<span class=%q>%s</span>`, class, html.EscapeString(seg.Text))
+//			k := seg.Kind
+//			switch view.Flag(i) {
+//			case line.FlagInserted:
+//				k = kind.GenericInserted
+//			case line.FlagDeleted:
+//				k = kind.GenericDeleted
+//			}
+//
+//			fmt.Fprintf(w, `<span class=%q>%s</span>`, k, text)
 //		}
 //
 //		fmt.Fprintln(w)
 //	}
+//
+// The snippet passes the text through escape.Control first, as
+// [Segment.Text] describes. A rule for an overlay span sets only the
+// properties it names. The token span thus shows through for the rest,
+// as a replacing overlay does in the printer. A stylesheet gives a blend
+// span a translucent background, so a search highlight keeps the token
+// color under it.
+//
+// On a line that carries [FlagInserted] or [FlagDeleted], the printer
+// draws each segment in [kind.GenericInserted] or [kind.GenericDeleted] in
+// place of its Kind, with its overlays over that. The snippet reads
+// [View.Flag] for each line and does the same. A renderer that writes the
+// colors themselves, blends included, reads each segment with the style
+// the printer draws it in from
+// [go.jacobcolvin.com/niceyaml/printer.Printer.Segments].
+//
+// An overlay can start or end inside a grapheme cluster, such as between
+// a letter and its combining mark, so a segment can hold part of a
+// cluster. The printer draws each cluster whole, in the style of the
+// segment that holds its first rune. A renderer that matches the printer
+// styles the whole cluster by its first rune.
 //
 // Segments covers the whole line, whatever [View.Clip] set. A renderer
 // that shows a clipped line in part keeps the columns [View.Windows]

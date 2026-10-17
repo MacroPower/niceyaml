@@ -2014,6 +2014,154 @@ func TestPrinter_Style(t *testing.T) {
 	}
 }
 
+func TestPrinter_Segments(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		decorate func(view *line.View)
+		// The kind each segment of the line renders in, by its text.
+		want map[string]kind.Kind
+	}{
+		"plain line takes the kind of each segment": {
+			want: map[string]kind.Kind{
+				"name":  kind.NameTag,
+				":":     kind.PunctuationMappingValue,
+				" ":     kind.Text,
+				"kaffe": kind.LiteralString,
+			},
+		},
+		"inserted line takes the inserted kind": {
+			decorate: func(view *line.View) { view.SetFlag(0, line.FlagInserted) },
+			want: map[string]kind.Kind{
+				"name":  kind.GenericInserted,
+				":":     kind.GenericInserted,
+				" ":     kind.GenericInserted,
+				"kaffe": kind.GenericInserted,
+			},
+		},
+		"deleted line takes the deleted kind": {
+			decorate: func(view *line.View) { view.SetFlag(0, line.FlagDeleted) },
+			want: map[string]kind.Kind{
+				"name":  kind.GenericDeleted,
+				"kaffe": kind.GenericDeleted,
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString("name: kaffe\n").View()
+			if tc.decorate != nil {
+				tc.decorate(view)
+			}
+
+			p := printer.New(printer.WithStyles(theme.Charm))
+
+			// The segments come as line.View.Segments yields them, with
+			// their own kinds.
+			var segs []line.Segment
+
+			for seg, st := range p.Segments(view, 0) {
+				segs = append(segs, seg)
+
+				if k, ok := tc.want[seg.Text]; ok {
+					assert.Equal(t, p.Style(k).Render(seg.Text), st.Render(seg.Text), "segment %q", seg.Text)
+				}
+			}
+
+			assert.Equal(t, slices.Collect(view.Segments(0)), segs)
+		})
+	}
+}
+
+func TestPrinter_Segments_MatchPrint(t *testing.T) {
+	t.Parallel()
+
+	// The value "kaffe" takes columns 6 through 11, and the segments
+	// around it render in other styles, so Print draws it as a run of its
+	// own.
+	value := position.NewRange(position.New(0, 6), position.New(0, 11))
+
+	tcs := map[string]struct {
+		decorate func(view *line.View)
+		// The foreground the value takes, or "" when the case does not
+		// check it.
+		wantForeground kind.Kind
+	}{
+		"blended highlight": {
+			decorate: func(view *line.View) { view.BlendOverlay(kind.GenericHighlight, value) },
+		},
+		"replacing overlay": {
+			decorate:       func(view *line.View) { view.AddOverlay(kind.GenericError, value) },
+			wantForeground: kind.GenericError,
+		},
+		"overlays apply in order": {
+			decorate: func(view *line.View) {
+				view.AddOverlay(kind.GenericError, value)
+				view.AddOverlay(kind.TextOK, value)
+			},
+			wantForeground: kind.TextOK,
+		},
+		"blended highlight on an inserted line": {
+			decorate: func(view *line.View) {
+				view.SetFlag(0, line.FlagInserted)
+				view.BlendOverlay(kind.GenericHighlight, value)
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString("name: kaffe # x\n").View()
+			tc.decorate(view)
+
+			p := printer.New(printer.WithStyles(theme.Charm))
+			printed := p.Print(view)
+
+			var found bool
+
+			for seg, st := range p.Segments(view, 0) {
+				if seg.Text != "kaffe" {
+					continue
+				}
+
+				found = true
+
+				// The overlays change the style of the value, and Print
+				// draws the value in the style that Segments yields.
+				assert.NotEqual(t, p.Style(seg.Kind).Render(seg.Text), st.Render(seg.Text))
+				assert.Contains(t, printed, st.Render(seg.Text))
+
+				if tc.wantForeground != "" {
+					assert.Equal(t, p.Style(tc.wantForeground).GetForeground(), st.GetForeground())
+				}
+			}
+
+			assert.True(t, found, "the line holds a segment of the value")
+		})
+	}
+}
+
+func TestPrinter_Segments_Stop(t *testing.T) {
+	t.Parallel()
+
+	view := niceyaml.NewSourceFromString("name: kaffe\n").View()
+
+	var n int
+
+	for range printer.New().Segments(view, 0) {
+		n++
+
+		break
+	}
+
+	assert.Equal(t, 1, n)
+}
+
 func TestPrinter_Print_Tokens(t *testing.T) {
 	t.Parallel()
 

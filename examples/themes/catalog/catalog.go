@@ -39,15 +39,10 @@ func main() {
 
 	fmt.Println("\nPick a color profile:")
 
-	// The lipgloss functions Print, Println, and Printf write through
-	// lipgloss.Writer, which detects the profile of stdout when the program
-	// starts. Its Profile field overrides that profile for every later call
-	// of those functions. A forced profile writes its colors even into a
-	// pipe, so -color always behaves as --color=always does in other tools.
-	// The lipgloss functions Fprint, Fprintln, and Fprintf detect the profile
-	// of their writer again on every call. A program that also prints to
-	// stderr thus builds a colorprofile.Writer for it and sets its Profile
-	// too.
+	// The Profile field of lipgloss.Writer overrides the detected profile
+	// for lipgloss.Println, as the Color Profiles section of the printer docs
+	// describes. A forced profile writes its colors even into a pipe, so
+	// -color always behaves as --color=always does in other tools.
 	profiles := map[string]colorprofile.Profile{
 		"auto":   lipgloss.Writer.Profile,
 		"always": colorprofile.TrueColor,

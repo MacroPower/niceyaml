@@ -135,12 +135,9 @@
 //
 // [View.Segments] cuts a line into the runs that one kind and one set of
 // overlays style, each with its text. A renderer that writes HTML, or any
-// other format, styles the line from the segments alone, as the printer
-// does:
-//
-//	for seg := range view.Segments(i) {
-//		fmt.Fprintf(w, `<span class=%q>%s</span>`, seg.Kind, html.EscapeString(seg.Text))
-//	}
+// other format, styles the line from its segments and its flag alone. The
+// View.Segments doc shows one that nests the overlays of each segment in
+// the order the printer applies them.
 //
 // [Flag] values categorize lines for special handling. A diff marks lines with
 // [FlagInserted] and [FlagDeleted]:
