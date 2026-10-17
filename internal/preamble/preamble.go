@@ -4,8 +4,9 @@
 // The preamble is the run of tokens before the first token of content:
 // comments, the tokens of each %YAML or %TAG directive line, and the "---"
 // and "..." markers. Package niceyaml cuts the preamble of each document
-// with [Len], and the schema directive scan reads the comments of the
-// same run, so both agree on which comments come before content.
+// with [Len]. The schema directive scan reads the comments of the same
+// run, so niceyaml and the scan agree on which comments come before
+// content.
 //
 //	content := tks[preamble.Len(tks):]
 package preamble
@@ -14,16 +15,16 @@ import "github.com/goccy/go-yaml/token"
 
 // Len returns the number of tokens at the start of tks before the first
 // token of content. Comments, the tokens of each %YAML or %TAG directive
-// line, and the "---" and "..." markers count as preamble, and Len passes
-// over a nil token. A stream without content is all preamble.
+// line, and the "---" and "..." markers count as preamble, and Len skips
+// each nil token. A stream without content is all preamble.
 //
 // The lexer splits a directive line into a directive token and the tokens
-// holding its value, which would read as content, so Len counts every
-// token on the line of a directive as preamble. The first token on a
-// later line ends the directive line. A token without a position leaves
-// the line open, but Len cannot place it on the line, so it counts as
-// preamble only when it is a comment or a marker. A directive token
-// without a position opens no line.
+// that hold its value. Those value tokens read as content on their own,
+// so Len counts every token on the line of a directive as preamble. The
+// first token on a later line ends the directive line. A token without a
+// position leaves the line open. Len cannot place such a token on the
+// line, so the token counts as preamble only when it is a comment or a
+// marker. A directive token without a position does not open a line.
 func Len(tks token.Tokens) int {
 	inDirective, directiveLine := false, 0
 
