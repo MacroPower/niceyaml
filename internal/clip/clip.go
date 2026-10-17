@@ -3,11 +3,13 @@
 // A view that clips a long line keeps a few windows of its columns and
 // leaves out the rest. The row that renders the line holds the text of
 // each window in order, with [Ellipsis] in place of each run of columns
-// left out. A [Map] holds that layout. It cuts the text of the row from
-// the text of the line. It also maps a column of the line to the column
-// of the row that shows it, so a renderer draws a caret or a style under
-// the rune it marks. It maps a column of the row back to the column of
-// the line it shows, so a viewer finds the rune under a pointer.
+// left out. A [Map] holds that layout.
+//
+// A Map cuts the text of the row from the text of the line. It also maps
+// a column of the line to the column of the row that shows it. A renderer
+// then draws a caret or a style under the rune that it marks. The Map also
+// maps a column of the row back to the column of the line that it shows.
+// A viewer then finds the rune under a pointer.
 //
 //	m := clip.New(26, []position.Span{position.NewSpan(0, 4), position.NewSpan(20, 26)})
 //	m.Content("abcdefghijklmnopqrstuvwxyz") // "abcd...uvwxyz"
@@ -26,26 +28,27 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// Ellipsis is the text a row shows in place of each run of columns it
-// leaves out.
+// Ellipsis is the text that a row shows in place of each run of columns
+// that it leaves out.
 const Ellipsis = "..."
 
-// EllipsisCols is the number of columns [Ellipsis] takes in a row. A cut
-// of that many columns or fewer saves nothing, so a caller keeps them.
+// EllipsisCols is the number of columns that [Ellipsis] takes in a row. A
+// cut of that many columns or fewer does not save a column, so a caller
+// keeps them.
 const EllipsisCols = len(Ellipsis)
 
-// Piece is one part of a row: a run of columns the row keeps, or the
-// [Ellipsis] that stands for a run it leaves out.
+// Piece is one part of a row: a run of columns that the row keeps, or the
+// [Ellipsis] that stands for a run that it leaves out.
 type Piece struct {
-	// Cols are the columns of the line the piece stands for.
+	// Cols are the columns of the line that the piece stands for.
 	Cols position.Span
-	// At is the column of the row the piece starts at.
+	// At is the column of the row that the piece starts at.
 	At int
 	// Gap reports whether the piece is an ellipsis.
 	Gap bool
 }
 
-// cols returns the number of columns the piece takes in the row.
+// cols returns the number of columns that the piece takes in the row.
 func (p Piece) cols() int {
 	if p.Gap {
 		return EllipsisCols
@@ -71,7 +74,7 @@ type Map struct {
 // New creates a new [*Map] for a line of width columns whose row keeps
 // windows, the runs of columns to show, in ascending order. It clamps
 // each window to the line and to the end of the window before it, and
-// drops one that holds no column there.
+// drops one that does not hold a column there.
 func New(width int, windows []position.Span) *Map {
 	m := &Map{width: max(0, width)}
 
@@ -117,13 +120,13 @@ func (m *Map) Pieces() iter.Seq[Piece] {
 	}
 }
 
-// Width returns the number of columns the row takes.
+// Width returns the number of columns that the row takes.
 func (m *Map) Width() int {
 	return m.shown
 }
 
 // Col returns the column of the row that shows col, a column of the
-// line. A column the row leaves out maps to the start of the ellipsis
+// line. A column that the row leaves out maps to the start of the ellipsis
 // that stands for it. A column past the end of the line maps as far past
 // the end of the row, and the result saturates at [math.MaxInt].
 func (m *Map) Col(col int) int {
@@ -144,9 +147,9 @@ func (m *Map) Col(col int) int {
 }
 
 // LineCol returns the column of the line that col, a column of the row,
-// shows, and true. It inverts [Map.Col] on the columns the row keeps. It
-// reports false for a column of an ellipsis, which shows no column of the
-// line, and for a column past the end of the row.
+// shows, and true. It inverts [Map.Col] on the columns that the row keeps.
+// It reports false for a column past the end of the row and for a column
+// of an ellipsis, which does not show a column of the line.
 func (m *Map) LineCol(col int) (int, bool) {
 	col = max(0, col)
 	if col >= m.shown {
@@ -166,9 +169,9 @@ func (m *Map) LineCol(col int) (int, bool) {
 
 // Spans returns the columns of the row that show cols, a run of columns
 // of the line: one span for each window that holds some of them, in
-// order. The columns the row leaves out, and those past the end of the
-// line, map to nothing, so a run that an ellipsis cuts in two comes back
-// as two spans.
+// order. Spans does not map the columns that the row leaves out or the
+// columns past the end of the line. A run that an ellipsis cuts in two
+// therefore yields two spans.
 func (m *Map) Spans(cols position.Span) position.Spans {
 	var out position.Spans
 
@@ -186,10 +189,10 @@ func (m *Map) Spans(cols position.Span) position.Spans {
 
 // Span returns a single run of columns of the row that covers what the
 // row shows of cols, a run of columns of the line. The run starts at the
-// column [Map.Col] maps the start of cols to and ends after the last
-// column of the row that shows one of cols. It holds each ellipsis
-// between them. A run of the line that the row shows none of, such as an
-// empty one, maps to the empty span at its start.
+// column that [Map.Col] maps the start of cols to. It ends after the last
+// column of the row that shows one of cols, and it holds each ellipsis
+// between them. A run of the line that the row does not show any of, such
+// as an empty run, maps to the empty span at its start.
 func (m *Map) Span(cols position.Span) position.Span {
 	start := m.Col(cols.Start)
 
@@ -202,8 +205,9 @@ func (m *Map) Span(cols position.Span) position.Span {
 }
 
 // Content returns the text of the row for content, the text of the line
-// without its line ending: the runes of each window, with [Ellipsis] in
-// place of each run of columns the row leaves out.
+// without its line ending. The text of the row holds the runes of each
+// window, with [Ellipsis] in place of each run of columns that the row
+// leaves out.
 func (m *Map) Content(content string) string {
 	runes := []rune(content)
 
