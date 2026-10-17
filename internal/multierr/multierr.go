@@ -1,17 +1,17 @@
-// Package multierr reads and builds errors that hold several errors: the
-// joins [errors.Join] builds, the wrappers [fmt.Errorf] builds with
-// several %w verbs, and errors of other types whose message is the
-// messages of their branches one per line.
+// Package multierr reads and builds errors that hold several errors.
+// These are the joins that [errors.Join] builds, the wrappers that
+// [fmt.Errorf] builds with several %w verbs, and errors of other types
+// whose message is the messages of their branches one per line.
 //
 // A caller that rebuilds such an error around new branches keeps what
 // the old error matched. [Rejoin], [Rewrap], and [Replace] return
-// stand-ins that match the old error for [errors.Is] and [errors.As]
-// while they unwrap to the new errors. A caller that must drop the old
-// error rebuilds a wrapper of [fmt.Errorf] with [Wrap] or [WrapErrors]
-// instead. The fmt package does not export the types of those wrappers,
-// so no caller targets them with [errors.As], and the rebuilt wrapper
-// matches nothing itself. [Map] rebuilds an error of this package around
-// new copies of the errors it holds.
+// stand-ins that match the old error for [errors.Is] and [errors.As] and
+// unwrap to the new errors. A caller that must drop the old error
+// rebuilds a wrapper of [fmt.Errorf] with [Wrap] or [WrapErrors] instead.
+// The fmt package does not export the types of those wrappers, so a
+// caller cannot target them with [errors.As]. The rebuilt wrapper does
+// not match anything itself. [Map] rebuilds an error of this package
+// around new copies of the errors it holds.
 package multierr
 
 import (
@@ -33,8 +33,8 @@ var (
 	wrapType = reflect.TypeOf(fmt.Errorf("%w", errors.New("")))
 )
 
-// Join returns nil for no errors, the error itself for one, and the
-// [errors.Join] of errs for more.
+// Join returns nil for an empty errs, the error itself for one error, and
+// the [errors.Join] of errs for more.
 func Join(errs []error) error {
 	switch len(errs) {
 	case 0:
@@ -69,13 +69,13 @@ func IsWrap(err error) bool {
 }
 
 // JoinMessage reports whether msg is the messages of branches one per
-// line, which is how [errors.Join] writes the message of the error it
-// builds. A nil branch carries no message and no line of its own, so it
-// takes no separator either.
+// line. [errors.Join] writes the message of the error it builds that way.
+// A nil branch does not carry a message or a line of its own, so it does
+// not take a separator either.
 //
 // It matches msg against the branches in place and stops at the first
-// mismatch, so a caller that checks every level of a chain of wrappers
-// copies no message.
+// mismatch. So a caller that checks every level of a chain of wrappers
+// does not copy a message.
 func JoinMessage(msg string, branches []error) bool {
 	first := true
 
@@ -125,9 +125,9 @@ func First(branches []error) error {
 // Rejoin returns a join of branches in place of joined, an error that
 // holds several. A join [errors.Join] built comes back as another such
 // join. A join of any other type comes back as a stand-in whose message
-// is the messages of branches one per line, and which unwraps to
-// branches. The stand-in matches joined for [errors.Is] and
-// [errors.As], as joined matches itself, rather than unwrapping to it.
+// is the messages of branches one per line. The stand-in unwraps to
+// branches. It matches joined for [errors.Is] and [errors.As], as joined
+// matches itself, rather than unwrapping to it.
 func Rejoin(joined error, branches []error) error {
 	if IsJoin(joined) {
 		return errors.Join(branches...)
@@ -146,27 +146,28 @@ func Rewrap(wrapper error, branches []error, msg string) error {
 	return &wrapError{like: wrapper, branches: branches, msg: msg}
 }
 
-// Replace returns a stand-in for wrapper, an error that wraps others,
-// which unwraps to err in place of what wrapper wraps. Its message is
-// msg. It matches wrapper for [errors.Is] and [errors.As], as wrapper
-// matches itself, and it matches what each error of beside matches.
+// Replace returns a stand-in for wrapper, an error that wraps others.
+// The stand-in unwraps to err in place of what wrapper wraps, and its
+// message is msg. It matches wrapper for [errors.Is] and [errors.As], as
+// wrapper matches itself, and it matches what each error of beside
+// matches.
 func Replace(wrapper, err error, msg string, beside []error) error {
 	return &placedError{like: wrapper, err: err, msg: msg, beside: beside}
 }
 
 // Wrap returns an error whose message is msg and which unwraps to err, as
 // a wrapper that [fmt.Errorf] builds with one %w verb does. The error
-// keeps no reference to the wrapper it replaces, so it matches nothing
-// itself, unlike the stand-in [Replace] returns.
+// does not keep a reference to the wrapper it replaces, so it does not
+// match anything itself, unlike the stand-in [Replace] returns.
 func Wrap(err error, msg string) error {
 	return &placedError{err: err, msg: msg}
 }
 
 // WrapErrors returns an error whose message is msg and which unwraps to
 // branches, as a wrapper that [fmt.Errorf] builds with several %w verbs
-// does. [IsWrapErrors] reports it as such a wrapper. The error keeps no
-// reference to the wrapper it replaces, so it matches nothing itself,
-// unlike the stand-in [Rewrap] returns.
+// does. [IsWrapErrors] reports it as such a wrapper. The error does not
+// keep a reference to the wrapper it replaces, so it does not match
+// anything itself, unlike the stand-in [Rewrap] returns.
 func WrapErrors(branches []error, msg string) error {
 	return &wrapError{branches: branches, msg: msg}
 }
@@ -188,9 +189,9 @@ func IsBuilt(err error) bool {
 // stands in for, the errors it unwraps to, and the errors beside it that
 // [Replace] describes. The function f returns the error that the copy
 // holds in place of the one f receives. It also reports whether the two
-// differ. Map passes no nil error to f, and it reports whether f changed
-// an error. When f changes none, or [IsBuilt] reports false for err, Map
-// returns err itself and false.
+// differ. Map does not pass a nil error to f, and it reports whether f
+// changed an error. When f does not change any error, or [IsBuilt]
+// reports false for err, Map returns err itself and false.
 func Map(err error, f func(error) (error, bool)) (error, bool) {
 	switch x := err.(type) { //nolint:errorlint // The error itself, not a chain search.
 	case *joinError:
@@ -240,7 +241,8 @@ func mapOne(err error, f func(error) (error, bool)) (error, bool) {
 }
 
 // mapAll returns errs with each mapped as [mapOne] maps it, and whether
-// that changed any of them. It returns errs itself when it changed none.
+// that changed any of them. It returns errs itself when it did not change
+// any of them.
 func mapAll(errs []error, f func(error) (error, bool)) ([]error, bool) {
 	var out []error
 
@@ -350,14 +352,16 @@ func (p *placedError) As(target any) bool {
 }
 
 // mimic matches what its error matches itself, as [errors.Is] and
-// [errors.As] ask of one error in a chain. It reads no error its error
-// unwraps to. A mimic with no error matches nothing.
+// [errors.As] ask of one error in a chain. It does not read the errors
+// that its error unwraps to. A mimic without an error does not match
+// anything.
 type mimic struct {
 	like error
 }
 
 // Is compares the error with target when the type of target is
-// comparable, and then calls the Is method of the error, if it has one.
+// comparable. It then calls the Is method of the error, when the error
+// has one.
 func (m mimic) Is(target error) bool {
 	//nolint:errorlint // The error itself, not a chain search.
 	if target != nil && reflect.TypeOf(target).Comparable() && m.like == target {
@@ -370,8 +374,8 @@ func (m mimic) Is(target error) bool {
 }
 
 // As sets target to the error when target points at a type the error is
-// assignable to. Otherwise it reports what the As method of the error,
-// if it has one, reports.
+// assignable to. Otherwise it calls the As method of the error, when the
+// error has one, and reports its result.
 func (m mimic) As(target any) bool {
 	if m.like == nil {
 		return false
