@@ -1,7 +1,7 @@
 // Package kind names the kinds of text a rendering styles.
 //
-// A [Kind] is the name of one kind of text. It may name a kind of YAML
-// token, such as a mapping key or a number, or a diff or error mark. It may
+// A [Kind] is the name of one kind of text. It can name a kind of YAML
+// token, such as a mapping key or a number, or a diff or error mark. It can
 // also name a heading in a status bar, or a piece of the chrome a renderer
 // draws around content, such as a line number. The constants follow
 // Pygments token naming conventions where they apply. A
@@ -9,9 +9,9 @@
 // style it renders with, and a [go.jacobcolvin.com/niceyaml/line.Overlay]
 // names the Kind of its highlight.
 //
-// The package holds names alone, with no styles behind them, so the packages
-// that mark content, such as line and diff, depend on it without depending
-// on a terminal library.
+// The package holds names alone, without styles behind them. The packages
+// that mark content, such as line and diff, therefore depend on it without
+// depending on a terminal library.
 //
 // # Hierarchy
 //
@@ -21,44 +21,46 @@
 // which inherits from [Literal], which inherits from [Text], the root.
 // The main branches of the tree hold these kinds:
 //
-//   - Base text styles: Text -> TextOK, TextWarn, TextError.
-//   - Comments and directives: Comment -> CommentPreproc.
-//   - Values: Literal -> LiteralString, LiteralNumber, LiteralBoolean,
-//     LiteralNull.
-//   - Identifiers: Name -> NameTag, NameAnchor, NameAlias, NameDecorator.
-//   - Syntax: Punctuation -> PunctuationMapping, PunctuationSequence,
-//     PunctuationBlock, PunctuationCollectEntry, PunctuationHeading.
-//   - Diff and error markers: Generic -> GenericDeleted, GenericInserted,
-//     GenericError.
-//   - Warning markers: TextWarn -> GenericWarn.
-//   - Search and selection highlights: Generic -> GenericHighlight ->
-//     GenericHighlightDim.
-//   - Headings: Generic -> GenericHeading -> GenericHeadingAccent,
-//     GenericHeadingSubtle, GenericHeadingOK, GenericHeadingWarn,
-//     GenericHeadingError.
-//   - Emphasized text: TextAccent -> TextAccentDim.
-//   - De-emphasized text: TextSubtle -> TextSubtleDim.
-//   - The chrome a renderer draws around content: Comment -> UI ->
-//     UILineNumber, UIAnnotation -> UIHunkHeader, UISeparator.
+//   - Base text styles: TextOK, TextWarn, and TextError under Text.
+//   - Comments and directives: CommentPreproc under Comment.
+//   - Values: LiteralString, LiteralNumber, LiteralBoolean, and LiteralNull
+//     under Literal.
+//   - Identifiers: NameTag, NameAnchor, NameAlias, and NameDecorator under
+//     Name.
+//   - Syntax: PunctuationMapping, PunctuationSequence, PunctuationBlock,
+//     PunctuationCollectEntry, and PunctuationHeading under Punctuation.
+//   - Diff and error markers: GenericDeleted, GenericInserted, and
+//     GenericError under Generic.
+//   - Warning markers: GenericWarn under TextWarn.
+//   - Search and selection highlights: GenericHighlight under Generic, and
+//     GenericHighlightDim under GenericHighlight.
+//   - Headings: GenericHeading under Generic, and GenericHeadingAccent,
+//     GenericHeadingSubtle, GenericHeadingOK, GenericHeadingWarn, and
+//     GenericHeadingError under GenericHeading.
+//   - Emphasized text: TextAccentDim under TextAccent.
+//   - De-emphasized text: TextSubtleDim under TextSubtle.
+//   - The chrome a renderer draws around content: UI under Comment,
+//     UILineNumber and UIAnnotation under UI, and UIHunkHeader and
+//     UISeparator under UIAnnotation.
 //
 // The highlight and heading kinds inherit from [Generic] rather than from
 // [Text], so a theme that sets Generic and leaves them unset draws
 // highlights and headings in its Generic style.
 //
 // The UI kinds inherit from [Comment] rather than from [Text]. A theme
-// that sets none of them draws gutters, annotations, and hunk headers in
-// its whole comment style, which carries the italic, bold, or background
-// of the comments along with their color. A theme with such comments sets
-// [UI] through [go.jacobcolvin.com/niceyaml/style.Set], as the built-in
-// themes do, so the gutters do not read as comments. Setting [UI]
-// restyles all the chrome at once without touching the comments.
+// that does not set any of them draws gutters, annotations, and hunk
+// headers in its whole comment style. That style carries the italic, bold,
+// or background of the comments along with their color. A theme with such
+// comments sets [UI] through [go.jacobcolvin.com/niceyaml/style.Set], as
+// the built-in themes do, so the gutters do not read as comments. Setting
+// [UI] restyles all the chrome at once without changing the comments.
 //
 // A rendering names its own kinds, such as one for search matches, as
-// conversions of a string: kind.Kind("mine"). A custom Kind has no parent
-// in the hierarchy, so [Parent] returns [Text] for it, and a theme styles
-// it as plain text. The [go.jacobcolvin.com/niceyaml/style.Inherit] option
-// places it under a predefined Kind, so it takes that Kind's style under
-// any theme:
+// conversions of a string: kind.Kind("mine"). A custom Kind does not have
+// a parent in the hierarchy, so [Parent] returns [Text] for it, and a
+// theme styles it as plain text. The
+// [go.jacobcolvin.com/niceyaml/style.Inherit] option places it under a
+// predefined Kind, so it takes that Kind's style under any theme:
 //
 //	const mine kind.Kind = "mine"
 //
@@ -77,7 +79,8 @@ type Kind string
 // Kinds of YAML tokens and rendered text. Names follow Pygments token
 // naming conventions where they apply.
 const (
-	// Text is the default style and the root every other kind falls back to.
+	// Text is the default style and the root that every other kind
+	// inherits from.
 	Text Kind = "text"
 	// TextAccent styles accented text.
 	TextAccent Kind = "textAccent"
@@ -87,7 +90,7 @@ const (
 	TextSubtle Kind = "textSubtle"
 	// TextSubtleDim styles dimmed de-emphasized text.
 	TextSubtleDim Kind = "textSubtleDim"
-	// TextOK styles success/OK text.
+	// TextOK styles success text.
 	TextOK Kind = "textOK"
 	// TextWarn styles warning text.
 	TextWarn Kind = "textWarn"
@@ -99,7 +102,7 @@ const (
 	CommentPreproc Kind = "commentPreproc"
 	// Generic is a parent style for generic tokens.
 	Generic Kind = "generic"
-	// GenericDeleted styles lines deleted in diff (-).
+	// GenericDeleted styles the deleted lines of a diff (-).
 	GenericDeleted Kind = "genericDeleted"
 	// GenericError styles error tokens.
 	GenericError Kind = "genericError"
@@ -107,7 +110,7 @@ const (
 	GenericErrorInvalid Kind = "genericErrorInvalid"
 	// GenericErrorUnknown styles unknown tokens.
 	GenericErrorUnknown Kind = "genericErrorUnknown"
-	// GenericInserted styles lines inserted in diff (+).
+	// GenericInserted styles the inserted lines of a diff (+).
 	GenericInserted Kind = "genericInserted"
 	// GenericWarn styles the location of a warning, as GenericError styles
 	// the location of an error. It inherits from [TextWarn], so a theme
@@ -123,7 +126,7 @@ const (
 	GenericHeadingAccent Kind = "genericHeadingAccent"
 	// GenericHeadingSubtle styles de-emphasized titles.
 	GenericHeadingSubtle Kind = "genericHeadingSubtle"
-	// GenericHeadingOK styles success/OK titles.
+	// GenericHeadingOK styles success titles.
 	GenericHeadingOK Kind = "genericHeadingOK"
 	// GenericHeadingWarn styles warning titles.
 	GenericHeadingWarn Kind = "genericHeadingWarn"
@@ -201,15 +204,16 @@ const (
 	PunctuationSequenceStart Kind = "punctuationSequenceStart"
 	// UI is a parent style for the chrome a renderer draws around content:
 	// gutters, annotations, and the headers and separators between hunks.
-	// It inherits the whole [Comment] style, so a theme that sets nothing
-	// for it draws the chrome with the color of the comments and with
-	// their italic, bold, or background too. A theme with such comments
-	// sets UI to keep the chrome plain.
+	// It inherits the whole [Comment] style, so a theme that does not set
+	// it draws the chrome with the color of the comments and with their
+	// italic, bold, or background too. A theme with such comments sets UI
+	// to keep the chrome plain.
 	UI Kind = "ui"
 	// UILineNumber styles the line numbers of a gutter and the marker of a
 	// soft-wrapped continuation row.
 	UILineNumber Kind = "uiLineNumber"
-	// UIAnnotation styles an annotation that names no kind of its own.
+	// UIAnnotation styles an annotation that does not name a kind of its
+	// own.
 	UIAnnotation Kind = "uiAnnotation"
 	// UIHunkHeader styles the header above each hunk of a diff, such as
 	// "@@ -1,3 +1,4 @@".
@@ -219,8 +223,8 @@ const (
 	UISeparator Kind = "uiSeparator"
 )
 
-// The inheritance hierarchy for kinds. Each kind maps to its parent, and
-// [Text] is the root with no parent.
+// parent holds the inheritance hierarchy for kinds. Each kind maps to its
+// parent, and [Text] is the root, which does not have a parent.
 var parent = map[Kind]Kind{
 	Comment:                  Text,
 	CommentPreproc:           Comment,
@@ -289,8 +293,8 @@ var parent = map[Kind]Kind{
 }
 
 // Parent returns the parent of k in the hierarchy. [Text] is the root, and a
-// Kind outside the hierarchy, such as a custom one, has no parent, so Parent
-// returns Text for both.
+// Kind outside the hierarchy, such as a custom one, does not have a parent,
+// so Parent returns Text for both.
 func Parent(k Kind) Kind {
 	if p, ok := parent[k]; ok {
 		return p
@@ -300,7 +304,7 @@ func Parent(k Kind) Kind {
 }
 
 // All returns an iterator over every predefined Kind, [Text] included, in
-// no particular order.
+// an unspecified order.
 func All() iter.Seq[Kind] {
 	return func(yield func(Kind) bool) {
 		if !yield(Text) {
