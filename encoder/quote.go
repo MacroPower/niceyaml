@@ -1,6 +1,7 @@
 package encoder
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -19,6 +20,10 @@ import (
 type quoter struct {
 	// Reports whether the visited node sits in a flow collection.
 	flow bool
+	// Reports whether a tag stands on the visited node, as in a
+	// marshaler's YAML. A tag decides how go-yaml reads the scalar under
+	// it.
+	tagged bool
 }
 
 // Visit implements [ast.Visitor].
@@ -37,6 +42,9 @@ func (q quoter) Visit(node ast.Node) ast.Visitor {
 		return nil
 	case *ast.TagNode:
 		n.Value = q.flowSafe(n.Value)
+
+		return quoter{flow: q.flow, tagged: true}
+
 	case *ast.MappingNode:
 		if q.flow && !n.IsFlowStyle {
 			return nil
@@ -98,7 +106,7 @@ func (q quoter) keySafe(key ast.MapKeyNode) ast.MapKeyNode {
 		return doubleQuoted(k)
 	case *ast.TagNode:
 		if inner, ok := k.Value.(ast.MapKeyNode); ok {
-			k.Value = q.keySafe(inner)
+			k.Value = quoter{flow: q.flow, tagged: true}.keySafe(inner)
 		}
 
 	case *ast.AnchorNode:
@@ -153,17 +161,27 @@ func (q quoter) quote(n *ast.StringNode, key bool) {
 	default:
 		// The go-yaml encoder types the token of a string by its text,
 		// so a type other than string marks a keyword such as ".inf" or
-		// ".nan", which reads back as a float. In a marshaler's YAML, the
-		// go-yaml parser gives the string type to the plain scalar after
-		// a custom tag, whatever its text, and that scalar stays as the
-		// marshaler wrote it.
-		safe = n.Token.Type == token.StringType && plainSafe(n.Value, key, q.flow)
+		// ".nan", which reads back as a float. Go-yaml types some texts
+		// as strings that YAML 1.2 reads as other values, such as 1e3. In
+		// a marshaler's YAML, the go-yaml parser gives the string type to
+		// the plain scalar after a custom tag, whatever its text, and that
+		// scalar stays as the marshaler wrote it.
+		safe = n.Token.Type == token.StringType && (q.tagged || !coreScalar.MatchString(n.Value)) &&
+			plainSafe(n.Value, key, q.flow)
 	}
 
 	if !safe {
 		n.Token.Type = token.DoubleQuoteType
 	}
 }
+
+// coreScalar matches the plain scalars that the core schema of YAML 1.2
+// reads as a null, a bool, an int, or a float, as its section 10.3.2 lists
+// them. A string of such a text reads as another value when it stays
+// plain.
+var coreScalar = regexp.MustCompile(`^(?:null|Null|NULL|~|true|True|TRUE|false|False|FALSE|` +
+	`[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+|[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?|` +
+	`[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$`)
 
 // quoteEntry double-quotes n, an entry of a block sequence, when go-yaml
 // otherwise writes it as a literal block that does not read back as its

@@ -247,12 +247,53 @@ func (x *Index) PathAt(r *paths.Resolver, off int) (paths.Path, bool) {
 
 	at := x.stepAt(off)
 
-	path, selects, ok := x.spell(r, at, x.inKey(at, off), false)
-	if !ok || !selects {
+	path, ok := x.spell(r, at, x.inKey(at, off), false)
+	if !ok || !x.selects(r, at) {
 		return paths.Path{}, false
 	}
 
 	return path, true
+}
+
+// SitePath returns the path of the node that holds the token at offset
+// off, as the document spells it, with r resolving the keys of the
+// document. The node is the innermost entry of a mapping or element of a
+// sequence around the offset, as [Index.PathAt] finds it. With key, it is
+// the collection that holds that entry or element. The path names the node
+// whether or not a lookup of the path selects it, as the earlier of two
+// entries with one key shows. No path names a `<<` merge entry, so inside
+// one the node is the mapping that holds the outermost such entry. No path
+// names an entry whose key lacks a name, such as a collection, so inside
+// one the node is the mapping that holds the outermost such entry too. The
+// root path stands for an offset outside every entry and element. The bool
+// result reports whether the offset lies in the key of the entry that the
+// path names, whose key path thus ends in `~`.
+func (x *Index) SitePath(r *paths.Resolver, off int, key bool) (paths.Path, bool) {
+	at := -1
+	if x.body.Holds(off) {
+		at = x.stepAt(off)
+	}
+
+	inner := at
+
+	for i := at; i >= 0; i = x.steps[i].parent {
+		entry := x.steps[i].entry()
+		if entry == nil {
+			continue
+		}
+
+		if _, named := r.KeyName(entry.Key); !named || astnode.IsMergeKey(entry.Key) {
+			at, key = x.steps[i].parent, false
+		}
+	}
+
+	if key && at >= 0 {
+		at = x.steps[at].parent
+	}
+
+	path, _ := x.spell(r, at, false, false)
+
+	return path, at == inner && x.inKey(at, off)
 }
 
 // OwnerPath returns the path of the outermost node that has tk as its own
@@ -277,13 +318,14 @@ func (x *Index) OwnerPath(r *paths.Resolver, tk *token.Token) (paths.Path, bool,
 
 	at, key := x.owner(tk)
 
-	path, selects, ok := x.spell(r, at, key, false)
-	if selects {
-		_, err := r.Node(path)
-		selects = err == nil
+	path, ok := x.spell(r, at, key, false)
+	if !ok || !x.selects(r, at) {
+		return path, false, ok
 	}
 
-	return path, selects, ok
+	_, err := r.Node(path)
+
+	return path, err == nil, true
 }
 
 // MergedOwnerPath returns the path that [Index.OwnerPath] returns for tk,
@@ -301,9 +343,8 @@ func (x *Index) MergedOwnerPath(r *paths.Resolver, tk *token.Token) (paths.Path,
 	}
 
 	at, key := x.owner(tk)
-	path, _, ok := x.spell(r, at, key, true)
 
-	return path, ok
+	return x.spell(r, at, key, true)
 }
 
 // OwnerToken returns the token that a path to the node that
@@ -374,15 +415,11 @@ func (x *Index) inKey(at, off int) bool {
 // spell returns the path of the node of the step at index at, or the root
 // path for -1, ending in `~` when key is set. With merged set, the path
 // leaves out each step through a `<<` merge key. It also leaves out each
-// element of a sequence that a merge key holds.
-// The selects result is false when a lookup of a key name on the way
-// returns an error or finds another entry. The ok result is false when a
-// key on the way lacks a name, as [paths.Resolver.KeyName] reports, so a
-// path cannot spell the node.
-func (x *Index) spell(r *paths.Resolver, at int, key, merged bool) (paths.Path, bool, bool) {
+// element of a sequence that a merge key holds. It reports false when a key
+// on the way lacks a name, as [paths.Resolver.KeyName] reports, so a path
+// cannot spell the node.
+func (x *Index) spell(r *paths.Resolver, at int, key, merged bool) (paths.Path, bool) {
 	var selectors []paths.Path
-
-	selects := true
 
 	for i := at; i >= 0; i = x.steps[i].parent {
 		step := x.steps[i]
@@ -400,12 +437,7 @@ func (x *Index) spell(r *paths.Resolver, at int, key, merged bool) (paths.Path, 
 
 		name, ok := r.KeyName(entry.Key)
 		if !ok {
-			return paths.Path{}, false, false
-		}
-
-		found, err := r.Entry(step.mapping, name)
-		if err != nil || found != ast.Node(entry) {
-			selects = false
+			return paths.Path{}, false
 		}
 
 		selectors = append(selectors, paths.Current().Child(name))
@@ -417,7 +449,31 @@ func (x *Index) spell(r *paths.Resolver, at int, key, merged bool) (paths.Path, 
 		selectors = append(selectors, paths.Current().Key())
 	}
 
-	return paths.Doc().Join(selectors...), selects, true
+	return paths.Doc().Join(selectors...), true
+}
+
+// selects reports whether each entry on the way to the step at index at is
+// the entry that its name selects in its mapping, with the names that
+// [Index.spell] spells. It reports false when a lookup of a name returns an
+// error or finds another entry. Every key on the way must have a name.
+func (x *Index) selects(r *paths.Resolver, at int) bool {
+	for i := at; i >= 0; i = x.steps[i].parent {
+		step := x.steps[i]
+
+		entry := step.entry()
+		if entry == nil {
+			continue
+		}
+
+		name, _ := r.KeyName(entry.Key)
+
+		found, err := r.Entry(step.mapping, name)
+		if err != nil || found != ast.Node(entry) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // mergeStep reports whether the step at index at is an entry with a `<<`

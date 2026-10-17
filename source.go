@@ -115,6 +115,9 @@ type Source struct {
 	// different names for it. So the names of such keys belong to the
 	// Source, and they grow with the alias keys of the reference documents.
 	mergeKeys decodewalk.Keys
+	// The line breaks of the text that the edit package read, as
+	// hook.LineBreaks keeps them.
+	lineBreaks lazy[any]
 	sourceConfig
 	hasInput bool
 }
@@ -491,8 +494,13 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 // With the limit off, a few hundred bytes of nested aliases can keep a
 // decode running for minutes, because the go-yaml decoder never checks
 // the context. They can also keep a schema validation running for
-// seconds and using hundreds of MiB. Turn the limit off only for input
-// the program trusts, such as a file it ships:
+// seconds and using hundreds of MiB. The checks of
+// [go.jacobcolvin.com/niceyaml/edit.Doc.Apply] grow with the square of the
+// length of a chain of `<<` merge keys, in which each mapping merges the
+// one before it. The Transactions section of the package documentation
+// of [go.jacobcolvin.com/niceyaml/edit] gives the cost of one Set on such
+// a chain. Turn the limit off only for input the program trusts, such as
+// a file it ships:
 //
 //	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithAliasLimit(false))
 //
@@ -524,6 +532,14 @@ func WithAliasLimit(enabled bool) SourceOption {
 // anchor wins. WithReferences skips a nil Source. It parses each Source
 // of refs, and a reference document that does not parse fails every
 // decode of the Source with the error of that parse.
+//
+// The edit package does not edit a document that defines and aliases an
+// anchor name that refs define too.
+// [go.jacobcolvin.com/niceyaml/edit.New] refuses such a document with an
+// error that matches [go.jacobcolvin.com/niceyaml/edit.ErrUnsupported]. A
+// reference anchor that a server adds thus blocks the edits of each upload
+// that defines and aliases its name. A document that defines the name and
+// does not alias it stays editable.
 //
 // Every Source that reads a reference Source shares its parse. A decode
 // reads the anchors of refs that its aliases reach, so its cost grows
@@ -897,6 +913,47 @@ func (s *Source) referenceValue(name string) (ast.Node, bool) {
 	}
 
 	return anchor.Value, true
+}
+
+// referenceName returns the name of the reference Source whose anchor of
+// name the reference documents of s define, as [Source.referenceValue]
+// finds it. A reference Source that reads the anchor through its own
+// reference documents names it too. It reports false when the reference
+// documents do not define name.
+func (s *Source) referenceName(name string) (string, bool) {
+	anchor, ok := s.referenceAnchors().Anchor(name)
+	if !ok {
+		return "", false
+	}
+
+	for _, ref := range slices.Backward(s.references) {
+		if a, ok := ref.exportedAnchors().Anchor(name); ok && a == anchor {
+			return ref.Name(), true
+		}
+	}
+
+	return "", false
+}
+
+// referenceDocuments returns the documents of the reference Sources of s,
+// and of their own reference Sources, as [hook.ReferenceDocuments] gives
+// them. Seen holds the Sources that an earlier call read, so a Source that
+// two references read counts once.
+func (s *Source) referenceDocuments(seen map[*Source]bool) []*Node {
+	var out []*Node
+
+	for _, ref := range s.references {
+		if seen[ref] {
+			continue
+		}
+
+		seen[ref] = true
+
+		out = append(out, ref.documents()...)
+		out = append(out, ref.referenceDocuments(seen)...)
+	}
+
+	return out
 }
 
 // exportedAnchors returns the anchors a Source finds in s when it reads s

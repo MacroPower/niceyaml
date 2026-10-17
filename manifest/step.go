@@ -150,7 +150,7 @@ func (d *docState) setTypeFields(ctx context.Context, ed *edit.Doc, v *versionEn
 	if !cfg.versionOnly {
 		err := edithook.SetField(ctx, ed, label, cfg.kindField, v.kindName)
 		if err != nil {
-			d.fail(err)
+			d.fail(unwritten(err))
 
 			return false
 		}
@@ -158,12 +158,29 @@ func (d *docState) setTypeFields(ctx context.Context, ed *edit.Doc, v *versionEn
 
 	err := edithook.SetField(ctx, ed, label, cfg.versionField, v.cfg.name)
 	if err != nil {
-		d.fail(err)
+		d.fail(unwritten(err))
 
 		return false
 	}
 
 	return true
+}
+
+// unwritten returns err, the error of a type field that a migration does
+// not write. A problem of the document that comes from a `<<` merge key
+// that reads a reference document on the path of the field matches
+// [ErrFieldAlias] too, as [edithook.SetField] describes it. Every other
+// error stays as it is. Such errors include the error of a bug in the
+// engine and the problem of a write that changes what an alias reads.
+// They also include the problem of a field whose key repeats a key of its
+// mapping, of a field that a `<<` merge key hides, and of a field that no
+// mapping of the document can hold.
+func unwritten(err error) error {
+	if errors.Is(err, edit.ErrEngine) || !errors.Is(err, paths.ErrReferenceAlias) {
+		return err
+	}
+
+	return markProblem(ErrFieldAlias, err)
 }
 
 // removals adds the warning of each value that a step of v removed. A

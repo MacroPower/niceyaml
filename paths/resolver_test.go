@@ -2962,6 +2962,26 @@ func TestWithReferenceAnchors(t *testing.T) {
 				path:  "$..port",
 				want:  []string{"$.a.port=*shared", "$.b.port=2"},
 			},
+			"name after a merge key that reads a reference": {
+				// A control: the entry after the merge key wins over every
+				// entry that the merge key brings in.
+				input: stringtest.LinesLF("<<: *shared", "a:", "  port: 1"),
+				path:  "$..port",
+				want:  []string{"$.a.port=1"},
+			},
+			"every value after a merge key that reads a reference": {
+				// A control: the walk leaves out the entries that a merge key
+				// brings in.
+				input: stringtest.LinesLF("<<: *shared", "a: {port: 1}"),
+				path:  "$..*",
+				want:  []string{"$.a={port: 1}", "$.a.port=1"},
+			},
+			"mapping beside a mapping that merges a reference": {
+				// A control: the merge key holds no entry that the walk visits.
+				input: "items: [{<<: *shared}, {port: 1}]\n",
+				path:  "$..port",
+				want:  []string{"$.items[1].port=1"},
+			},
 		}
 
 		for name, tc := range tcs {
@@ -3000,6 +3020,42 @@ func TestWithReferenceAnchors(t *testing.T) {
 				input: stringtest.LinesLF("name: app", "server: *shared"),
 				path:  "$.server.*",
 				want:  "resolve $.server.*: 2:9: alias reads a reference document: *shared",
+			},
+			"name below an entry before a merge key that reads a reference": {
+				// The merge key can bring in a, which then wins over the entry
+				// of the mapping, so the reference decides what $.a selects.
+				input: stringtest.LinesLF("a:", "  port: 1", "<<: *shared"),
+				path:  "$..port",
+				want:  "resolve $..port: 3:5: alias reads a reference document: *shared",
+			},
+			"every value with an entry before a merge key that reads a reference": {
+				input: stringtest.LinesLF("a:", "  port: 1", "<<: *shared"),
+				path:  "$..*",
+				want:  "resolve $..*: 3:5: alias reads a reference document: *shared",
+			},
+			"entry of a nested mapping before a merge key that reads a reference": {
+				input: stringtest.LinesLF("m:", "  a: {port: 1}", "  <<: *shared", "  c: {port: 2}"),
+				path:  "$..port",
+				want:  "resolve $..port: 3:7: alias reads a reference document: *shared",
+			},
+			"scalar entry before a merge key that reads a reference": {
+				// The walk looks below each entry that it visits, so it fails
+				// at the entry before the merge key whatever that entry holds.
+				input: "m: {a: 1, <<: *shared, c: 2}\n",
+				path:  "$..c",
+				want:  "resolve $..c: 1:15: alias reads a reference document: *shared",
+			},
+			"mapping written in the sequence of a merge key that reads a reference": {
+				// The reference can bring in a real `<<` key, which a path
+				// through `<<` then selects in place of the merge key.
+				input: "<<: [*shared, {port: 1}]\n",
+				path:  "$..port",
+				want:  "resolve $..port: 1:6: alias reads a reference document: *shared",
+			},
+			"merge key that reads a reference under the name of the merge key": {
+				input: stringtest.LinesLF("<<: *shared", "b: 1"),
+				path:  "$..'<<'",
+				want:  "resolve $..<<: 1:5: alias reads a reference document: *shared",
 			},
 		}
 

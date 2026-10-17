@@ -95,6 +95,66 @@ func TestIndex_PathAt_Unselected(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestIndex_SitePath(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.LinesLF(
+		"a: 1",
+		"d:",
+		"  - e",
+		"  - f: g",
+		"base: &b {k: 1}",
+		"m: {k: 2, <<: *b}",
+		"n:",
+		"  <<: {p: {q: 3}}",
+		"c: &c [x]",
+		"*c : y",
+	)
+
+	tcs := map[string]struct {
+		text  string
+		want  string
+		key   bool
+		inKey bool
+	}{
+		"a key":                         {text: "a", want: "$.a", inKey: true},
+		"a key of its mapping":          {text: "a", key: true, want: "$"},
+		"a value":                       {text: "1", want: "$.a"},
+		"a dash":                        {text: "-", want: "$.d[0]"},
+		"a dash of its sequence":        {text: "-", key: true, want: "$.d"},
+		"a key in an item":              {text: "f", want: "$.d[1].f", inKey: true},
+		"a key in an item of its item":  {text: "f", key: true, want: "$.d[1]"},
+		"an entry that no path selects": {text: "2", want: "$.m.k"},
+		"a merge key":                   {text: "<<", want: "$.m"},
+		"a merge key of its mapping":    {text: "<<", key: true, want: "$.m"},
+		"a key inside a merge entry":    {text: "p", want: "$.n"},
+		"a value inside a merge entry":  {text: "3", key: true, want: "$.n"},
+		"a key without a name":          {text: "y", want: "$"},
+	}
+
+	doc := yamltest.FirstDocument(t, input)
+	idx := pathindex.New(doc.AST())
+	tks := doc.Tokens()
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			path, inKey := idx.SitePath(doc.Resolver(), find(t, tks, tc.text).Position.Offset, tc.key)
+			assert.Equal(t, tc.want, path.String())
+			assert.Equal(t, tc.inKey, inKey)
+		})
+	}
+
+	t.Run("an offset past the body", func(t *testing.T) {
+		t.Parallel()
+
+		path, inKey := idx.SitePath(doc.Resolver(), len(input)+10, false)
+		assert.Equal(t, "$", path.String())
+		assert.False(t, inKey)
+	})
+}
+
 func TestIndex_OwnerPath(t *testing.T) {
 	t.Parallel()
 

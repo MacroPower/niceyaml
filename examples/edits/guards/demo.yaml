@@ -6,7 +6,7 @@ kind: Menu
 # Oat milk is the house default.
 milk: &oat
   name: Havremjölk
-  cost: 5
+  cost: 5 # kr
 
 drinks:
   - item: Kaffe

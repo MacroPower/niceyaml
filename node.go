@@ -249,10 +249,10 @@ func (n *Node) Err() error {
 // [Node.AST] and [Node.DocumentAST] return.
 //
 // The document creates the resolver once, when the first of its Nodes
-// needs it, and the resolver binds the aliases of the document then. A
-// [Validator] that runs for each item of a list therefore binds them
-// once, but a resolver from [paths.NewResolver] binds them again for every
-// item.
+// needs it. The resolver binds the aliases of the document once, when a
+// path first needs them. A [Validator] that runs for each item of a list
+// therefore binds them once, but a resolver from [paths.NewResolver] binds
+// them again for every item.
 //
 // The resolver knows the anchors of the reference documents of
 // [WithReferences], as [paths.WithReferenceAnchors] describes. A path that
@@ -739,7 +739,8 @@ func (n *Node) View() *line.View {
 // at that path. The path resolves as it does in such an Error.
 //
 // A scalar covers every line of its text, and a block scalar covers its
-// indicator. A mapping or a sequence covers the token that introduces it.
+// indicator. A value that holds a tag alone, as in "a: !!null", covers its
+// tag. A mapping or a sequence covers the token that introduces it.
 // That token is the key of its entry, the "-" of its element in a block
 // sequence, or else its own "{" or "[". A block mapping or a block
 // sequence at the root covers its first key or element. A path from
@@ -758,8 +759,9 @@ func (n *Node) View() *line.View {
 // A path that does not resolve returns the error [paths.Resolver.Token]
 // describes, bound to the source as [Node.At] binds it. A token without a
 // position returns an error wrapping [ErrNoLocation]. A document that did
-// not parse returns the error that [Node.Err] returns. Ranges
-// returns nil when the value does not hold content on any line.
+// not parse returns the error that [Node.Err] returns. Ranges returns nil
+// for a value without text of its own, such as the null of an entry
+// without a value.
 func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
 	if n.doc.err != nil {
 		return nil, n.doc.err

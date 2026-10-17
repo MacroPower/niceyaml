@@ -125,8 +125,8 @@ func TestStepID_String(t *testing.T) {
 func TestRegistry_Load_Steps(t *testing.T) {
 	t.Parallel()
 
-	// The price step of "Anchors and Aliases", which reaches each price
-	// through At, so a price that a merge key shares changes twice.
+	// A price step, which reaches each price through At, so a price that a
+	// merge key or an alias shares changes once for each entry.
 	prices := []manifest.RegistryOption{
 		manifest.WithAppName("cafe"),
 		manifest.WithKinds(manifest.NewKind[map[string]any]("MenuItem",
@@ -199,7 +199,7 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				),
 			},
 			err: stringtest.JoinLF(
-				`config/menu.yaml:6:9: $.spec.cost: expected "integer", got "string"`,
+				`config/menu.yaml:6:9: $.spec.price: expected "integer", got "string"`,
 				"",
 				"   4 |   name: kanelbulle",
 				"   5 | spec:",
@@ -224,6 +224,7 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			},
 			err: stringtest.JoinLF(
 				"config/menu.yaml:7:3: $.spec.tags: expected string, got sequence",
+				"`-- cafe.jacobcolvin.com/v1 reads $.spec.tags",
 				"",
 				"   5 | spec:",
 				"   6 |   cost: 45 # kr",
@@ -231,6 +232,33 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				"     |   ^^^^",
 			),
 			matches: []error{niceyaml.ErrDecode},
+		},
+		"version field write of an anchored version that an alias reads": {
+			// The text defines &v twice, so the load refuses the document.
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2"),
+				)),
+			},
+			files: map[string]string{
+				"hours.yaml": stringtest.LinesLF("apiVersion: &v v1", "kind: Hours", "m:", "  <<: &v {a: 1}", "x: *v"),
+			},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:4:7: $.m: cafe does not edit a document that defines the anchor &v twice",
+				"|-- 1:13: $.apiVersion: &v is defined here",
+				"`-- rename one of the two anchors and the aliases that read it",
+				"",
+				"   1 | apiVersion: &v v1",
+				"     |             ^^ &v is defined here",
+				"   2 | kind: Hours",
+				"   3 | m:",
+				"   4 |   <<: &v {a: 1}",
+				"     |       ^^",
+				"   5 | x: *v",
+			),
+			matches: []error{edit.ErrUnsupported},
 		},
 		"rename to a key that exists": {
 			opts: cafeOptions(),
@@ -253,7 +281,8 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				"`-- config/hours.yaml:7:3: $.spec.opens~: cafe.jacobcolvin.com/v1 renames \"opens\" to \"open\", "+
 					"which already exists",
 				`    |-- 6:3: $.spec.open~: "open" is defined here`,
-				"    `-- remove one of the two",
+				"    |-- remove one of the two",
+				"    `-- cafe.jacobcolvin.com/v1 renames $.spec.opens to \"open\"",
 				"",
 				"config/hours.yaml",
 				"   1 | apiVersion: cafe.jacobcolvin.com/v1alpha1",
@@ -351,7 +380,7 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				),
 			},
 			err: stringtest.JoinLF(
-				`config/holiday.yaml:4:10: $.spec.opens: string does not match pattern "^[0-9]{2}:[0-9]{2}$"`,
+				`config/holiday.yaml:4:10: $.spec.open: string does not match pattern "^[0-9]{2}:[0-9]{2}$"`,
 				"`-- cafe.jacobcolvin.com/v1 rejects this value on the way to cafe.jacobcolvin.com/v3",
 				"",
 				"   2 | kind: Shift",
@@ -361,6 +390,8 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			),
 		},
 		"value that a merge key shares changes twice": {
+			// The calls of the step act in order. The call on soy reads the price
+			// that the call on oat wrote through the merge key, and raises it again.
 			opts: prices,
 			files: map[string]string{
 				"menu.yaml": stringtest.LinesLF(
@@ -372,20 +403,12 @@ func TestRegistry_Load_Steps(t *testing.T) {
 					"    soy: { <<: *milk }",
 				),
 			},
-			err: stringtest.JoinLF(
-				"config/menu.yaml:6:16: $.spec.extras.soy.price: cafe.jacobcolvin.com/v1 changes this value a second time",
-				"|-- 5:25: $.spec.extras.oat.price: cafe.jacobcolvin.com/v1 changes it here first",
-				"`-- write the value out in place of *milk",
-				"",
-				"   3 | spec:",
-				"   4 |   extras:",
-				"   5 |     oat: &milk { price: 5 }",
-				"     |                         ^ cafe.jacobcolvin.com/v1 changes it here first",
-				"   6 |     soy: { <<: *milk }",
-				"     |                ^^^^^",
-			),
+			want: []string{`MenuItem "" cafe.jacobcolvin.com/v1beta1 up-to-date=false`},
 		},
-		"value that a path selects once": {
+		"value that two entries of a path share through an alias": {
+			// Each entry takes a call of its own, and the calls act in order. The
+			// call on soy reads the price that the call on oat wrote through the
+			// alias, and raises it again.
 			opts: prices,
 			files: map[string]string{
 				"menu.yaml": stringtest.LinesLF(
@@ -399,15 +422,146 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			},
 			want: []string{`MenuItem "" cafe.jacobcolvin.com/v1beta1 up-to-date=false`},
 		},
+		// The write of the version field is a call too, so its problem names
+		// it. The message draws the U+0001 of the label as U+2401 (fix23
+		// G23-2).
+		"G23-2: engine error of the write of the version field at a field of the user": {
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v\x012"),
+				)),
+			},
+			files: map[string]string{"hours.yaml": stringtest.LinesLF("apiVersion: v1", "kind: Hours", "x: 1")},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:1:13: $.apiVersion: go-yaml's encoder writes U+0001 as it is, and YAML does "+
+					"not allow that in a text",
+				"|-- report this to the authors of cafe",
+				"`-- v\u24012 sets $.apiVersion from this value",
+				"",
+				"   1 | apiVersion: v1",
+				"     |             ^^",
+				"   2 | kind: Hours",
+				"   3 | x: 1",
+			),
+		},
+		"G23-2: engine error of the write of a version field of its own": {
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithVersionOnly(paths.Doc().Child("version")),
+				manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
+					manifest.Version("1"),
+					manifest.Version("v\x012"),
+				)),
+			},
+			files: map[string]string{"hours.yaml": stringtest.LinesLF("version: 1", "x: 1")},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:1:10: $.version: go-yaml's encoder writes U+0001 as it is, and YAML does "+
+					"not allow that in a text",
+				"|-- report this to the authors of cafe",
+				"`-- version v\u24012 sets $.version from this value",
+				"",
+				"   1 | version: 1",
+				"     |          ^",
+				"   2 | x: 1",
+			),
+		},
+		// The write of the version field over a field of the user writes the
+		// token of the field, as a Set does. A later problem at the field
+		// names that write, and the next write checks its text before it
+		// writes, as a Set checks its value (fix24 G24-2).
+		"G24-2: engine error of the write of the version field over the write of an earlier version": {
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2"),
+					manifest.Version("v\x013"),
+				)),
+			},
+			files: map[string]string{"hours.yaml": stringtest.LinesLF("apiVersion: v1", "kind: Hours", "x: 1")},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:1:13: $.apiVersion: go-yaml's encoder writes U+0001 as it is, and YAML does "+
+					"not allow that in a text",
+				"|-- report this to the authors of cafe",
+				"|-- v2 sets $.apiVersion from this value",
+				"`-- v\u24013 sets $.apiVersion from this value",
+				"",
+				"   1 | apiVersion: v1",
+				"     |             ^^",
+				"   2 | kind: Hours",
+				"   3 | x: 1",
+			),
+		},
+		"G24-2: step that sets the version field after the write of an earlier version": {
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2"),
+					manifest.Version("v3", manifest.Migrate(paths.Doc(), func(ctx context.Context, n *edit.Node) error {
+						return n.At(paths.MustParse("$.apiVersion")).Set(ctx, "zz")
+					})),
+				)),
+			},
+			files: map[string]string{"hours.yaml": stringtest.LinesLF("apiVersion: v1", "kind: Hours", "x: 1")},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:1:13: $.apiVersion: v3 sets $.apiVersion, which is a protected value",
+				"|-- v2 sets $.apiVersion from this value",
+				"`-- v3 sets $.apiVersion from this value",
+				"",
+				"   1 | apiVersion: v1",
+				"     |             ^^",
+				"   2 | kind: Hours",
+				"   3 | x: 1",
+			),
+		},
+		"step that sets the version field through an alias of its mapping": {
+			// The version field is the value that the alias reads, so the
+			// step cannot change it there either. The problem binds at the
+			// field, under its path in the user's text (fix19 P56).
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithVersionField(paths.MustParse("$.metadata.version")),
+				manifest.WithKinds(manifest.NewKind[map[string]any]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2", manifest.Migrate(paths.Doc(), func(ctx context.Context, n *edit.Node) error {
+						return n.At(paths.MustParse("$.other.version")).Set(ctx, "v9")
+					})),
+				)),
+			},
+			files: map[string]string{"hours.yaml": stringtest.LinesLF(
+				"kind: Hours",
+				"metadata: &m",
+				"  version: v1",
+				"other: *m",
+			)},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:3:12: $.metadata.version: v2 sets $.other.version, which is a protected value",
+				"`-- v2 sets $.other.version from this value",
+				"",
+				"   1 | kind: Hours",
+				"   2 | metadata: &m",
+				"   3 |   version: v1",
+				"     |            ^^",
+				"   4 | other: *m",
+			),
+		},
 		"rename that a merge key undoes": {
 			opts:  closes("$.spec.closes"),
 			files: map[string]string{"hours.yaml": merged},
 			err: stringtest.JoinLF(
-				`config/hours.yaml:7:3: $.spec.closes~: v2 renames "closes" to "close", but <<: *summer also brings in "closes"`,
-				"`-- write the value out in place of *summer",
+				`config/hours.yaml:7:3: $.spec.closes: v2 renames $.spec.closes to "close", but <<: *summer at 6:3 `+
+					"also brings in closes, so $.spec still reads closes",
+				"|-- 6:3: $.spec: <<: *summer brings in closes here",
+				"|-- set $.spec.closes to the value it needs, or remove closes from $.summer too",
+				"`-- v2 renames $.spec.closes to \"close\"",
 				"",
+				`   4 |   closes: "21:00"`,
 				"   5 | spec:",
 				"   6 |   <<: *summer",
+				"     |   ^^ <<: *summer brings in closes here",
 				`   7 |   closes: "19:00"`,
 				"     |   ^^^^^^",
 			),
@@ -420,25 +574,44 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				"summer: &summer",
 				`  closes: "21:00"`,
 				"spec:",
-				`  closes: "19:00"`,
 				"  <<: *summer",
+				`  closes: "19:00"`,
 			)},
 			// The failed step removes nothing, so no removal warns.
 			err: stringtest.JoinLF(
-				`config/hours.yaml:6:3: $.spec.closes~: v2 removes "closes", but <<: *summer also brings in "closes"`,
-				"`-- write the value out in place of *summer",
+				"config/hours.yaml:7:3: $.spec.closes: v2 removes $.spec.closes, but <<: *summer at 6:3 also brings "+
+					"in closes, so $.spec still reads closes",
+				"|-- 6:3: $.spec: <<: *summer brings in closes here",
+				"|-- set $.spec.closes to the value it needs, or remove closes from $.summer too",
+				"`-- v2 removes $.spec.closes",
 				"",
 				`   4 |   closes: "21:00"`,
 				"   5 | spec:",
-				`   6 |   closes: "19:00"`,
+				"   6 |   <<: *summer",
+				"     |   ^^ <<: *summer brings in closes here",
+				`   7 |   closes: "19:00"`,
 				"     |   ^^^^^^",
-				"   7 |   <<: *summer",
 			),
 		},
 		"rename of every match": {
+			// The rename of the source comes first, so the rename of the
+			// mapping that merges it then hides the renamed key.
 			opts:  closes("$..closes"),
 			files: map[string]string{"hours.yaml": merged},
-			want:  []string{`Hours "" v1 up-to-date=false`},
+			err: stringtest.JoinLF(
+				`config/hours.yaml:7:3: $.spec.closes: v2 renames $.spec.closes to "close", but <<: *summer at 6:3 `+
+					"also brings in close, so $.spec then hides the close of $.summer",
+				"|-- 6:3: $.spec: <<: *summer brings in close here",
+				"|-- write a key that $.summer does not hold, or remove close from $.summer first",
+				"`-- v2 renames $.spec.closes to \"close\"",
+				"",
+				`   4 |   closes: "21:00"`,
+				"   5 | spec:",
+				"   6 |   <<: *summer",
+				"     |   ^^ <<: *summer brings in close here",
+				`   7 |   closes: "19:00"`,
+				"     |   ^^^^^^",
+			),
 		},
 		"unversioned document that moves its fields": {
 			opts:  adoptOptions(),
@@ -456,14 +629,18 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			)},
 			in: []manifest.InputOption{manifest.WithSourceOptions(niceyaml.WithAllowDuplicateKeys(true))},
 			err: stringtest.JoinLF(
-				`config/hours.yaml:5:3: $.spec.closes~: v2 renames "closes" to "close", `+
-					`but the mapping also writes "closes"`,
-				"`-- remove one of the two",
+				`config/hours.yaml:4:3: $.spec.closes: v2 renames $.spec.closes to "close", which reaches "closes", `+
+					`a key that its mapping repeats, and cafe does not edit the entries of a repeated key`,
+				"|-- 5:3: $.spec.closes: the key \"closes\" is written again here",
+				"|-- remove all but one of the entries of the key",
+				"`-- v2 renames $.spec.closes to \"close\"",
 				"",
+				"   2 | kind: Hours",
 				"   3 | spec:",
 				`   4 |   closes: "21:00"`,
-				`   5 |   closes: "19:00"`,
 				"     |   ^^^^^^",
+				`   5 |   closes: "19:00"`,
+				`     |   ^^^^^^ the key "closes" is written again here`,
 			),
 		},
 		"rename through an alias of a reference document": {
@@ -476,7 +653,15 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			in: []manifest.InputOption{manifest.WithSourceOptions(niceyaml.WithReferences(
 				niceyaml.NewSourceFromString(stringtest.LinesLF("summer: &summer", `  closes: "21:00"`)),
 			))},
-			err:     "config/hours.yaml: resolve $.spec.closes: 3:7: alias reads a reference document: *summer",
+			// The problem binds at the alias that the path reads through.
+			err: stringtest.JoinLF(
+				"config/hours.yaml:3:7: $.spec: v2 reads $.spec.closes, which goes through *summer, an alias of a reference document",
+				"",
+				"   1 | apiVersion: v1",
+				"   2 | kind: Hours",
+				"   3 | spec: *summer",
+				"     |       ^^^^^^^",
+			),
 			matches: []error{paths.ErrReferenceAlias, paths.ErrAlias},
 		},
 	}

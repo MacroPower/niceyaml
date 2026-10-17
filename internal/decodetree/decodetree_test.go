@@ -130,6 +130,47 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestChanges(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  bool
+	}{
+		"a text without anchors": {
+			input: stringtest.LinesLF("a: 1", "b: [2]"),
+		},
+		"anchors of unique names and their aliases": {
+			input: stringtest.LinesLF("a: &x 1", "b: *x", "c: &y {d: *x}", "e: *y"),
+		},
+		"reused anchor names": {
+			input: stringtest.LinesLF("a: &x 1", "b: *x", "c: &x 2", "d: *x"),
+			want:  true,
+		},
+		"an alias inside its anchor": {
+			input: "a: &x [1, *x]\n",
+			want:  true,
+		},
+		"an integer tag": {
+			input: "a: !!int 1\n",
+			want:  true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tree, doc := newTree(t, tc.input)
+			facts := aliasing.NewFacts(doc.AST(), doc.Resolver())
+
+			got := decodetree.Changes(doc.AST(), facts, false)
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tree.Changed(), got)
+		})
+	}
+}
+
 func TestTree_Holds(t *testing.T) {
 	t.Parallel()
 

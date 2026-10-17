@@ -1385,10 +1385,15 @@ func (n *Node) DataLocator() *DataLocator {
 // binds without a position.
 //
 // A name can lead behind an alias that the document cannot follow, such
-// as an alias to an anchor of a document from [WithReferences]. Such a
-// name keeps its form too, and the option does not set a position. A name
-// that does not match a member but whose text a path selects, such as
-// 3.10 for the member 3.1, binds at the last value the names lead to.
+// as an alias to an anchor of a document from [WithReferences]. So can a
+// name in a mapping whose `<<` merge key holds such an alias, where that
+// document decides which entry a path through the name selects, as the
+// paths package describes. Such a name keeps its form too, and so does
+// each name below it. The option does not set a position, so the error
+// binds where that path binds. A name such as 3.10 there binds where a path
+// through the key 3.10 binds. Elsewhere, a name that does not match a
+// member but whose text a path selects, such as 3.10 for the member 3.1,
+// binds at the last value the names lead to.
 func (l *DataLocator) At(names ...string) ErrorOption {
 	return l.option(names, false)
 }
@@ -1404,7 +1409,8 @@ func (l *DataLocator) At(names ...string) ErrorOption {
 // An element of a sequence and the data as a whole do not have a key, so
 // the error binds at the value there. A member that the data lacks does
 // not have a key either, so the option locates it as [DataLocator.At]
-// does.
+// does. A name behind an alias that the document cannot follow keeps its
+// form, as [DataLocator.At] describes, and the path still ends in `~`.
 func (l *DataLocator) AtKey(names ...string) ErrorOption {
 	return l.option(names, true)
 }

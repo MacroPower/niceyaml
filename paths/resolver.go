@@ -16,12 +16,13 @@ import (
 // [Resolver.NodeFrom] takes the node that an `@` path reads from. Every
 // path a Resolver returns starts at `$`.
 //
-// [NewResolver] binds each alias of the document to its anchor once.
-// Resolving many paths in one document thus walks it once rather than
-// once per path. A Resolver also reads the keys of a mapping once, the
-// first time a path looks up a key there. Resolving every key of a mapping
-// thus takes time in proportion to its size. A Resolver is safe for
-// concurrent use. After a change to the document, create a new Resolver.
+// A Resolver binds each alias of the document to its anchor once, when a
+// path first needs the binding, as at an alias. Resolving many paths in one
+// document thus walks it once at most, rather than once per path. A
+// Resolver also reads the keys of a mapping once, the first time a path
+// looks up a key there. Resolving every key of a mapping thus takes time in
+// proportion to its size. A Resolver is safe for concurrent use. After a
+// change to the document, create a new Resolver.
 //
 // Create instances with [NewResolver].
 type Resolver struct {
@@ -52,8 +53,12 @@ type resolverConfig struct {
 // as [Resolver.Node] describes. A path through it returns an error that
 // wraps [ErrReferenceAlias], as in "alias reads a reference document:
 // *base". An alias key that reads such an anchor takes its name from the
-// value of the anchor, as [Resolver.KeyName] describes. A nil anchor does
-// not change anything.
+// value of the anchor, as [Resolver.KeyName] describes. A `<<` merge key
+// that reads such an anchor decides which entries of its mapping a path
+// selects, as the package documentation describes. A path through a key
+// that it decides returns that error too, and so does a `.*`, `..name`, or
+// `..*` selector that reaches such a key. A nil anchor does not change
+// anything.
 func WithReferenceAnchors(anchor func(name string) (ast.Node, bool)) ResolverOption {
 	return func(c *resolverConfig) {
 		c.references = anchor
@@ -71,7 +76,7 @@ func NewResolver(doc *ast.DocumentNode, opts ...ResolverOption) *Resolver {
 	}
 
 	if doc == nil {
-		return &Resolver{resolver: &resolver{references: cfg.references}}
+		return &Resolver{resolver: &resolver{binding: noBinding, references: cfg.references}}
 	}
 
 	r := newResolver(doc)
@@ -177,7 +182,8 @@ func (r *Resolver) nodeOf(p Path, m match) (ast.Node, error) {
 
 // Token resolves the [*token.Token] that p points at in the document of
 // the Resolver. An error at the path binds to that token. A scalar is its
-// own token. A mapping or a sequence spans many lines, so it points at
+// own token, and a value that holds a tag alone, as in "a: !!null", points
+// at its tag. A mapping or a sequence spans many lines, so it points at
 // the token that introduces it:
 //
 //   - The value of a mapping entry points at the key of the entry,
@@ -449,9 +455,11 @@ func (r *Resolver) matchesOf(p Path, found []match, absolute bool) ([]Match, err
 // merge key of its mapping and of the mappings it merges, so an alias that
 // one of them names counts as on the path. A `..*` selector lists every
 // value below the node it starts from, so an alias it lists also counts as
-// on the path, unless the alias reads a reference document. The error
-// names the line and the column of the alias after the path, as
-// [Resolver.Node] names them.
+// on the path, unless the alias reads a reference document. A `..name` or
+// `..*` selector looks up the key of each entry that a `<<` merge key after
+// it might override. An alias of a reference document that such a lookup
+// reads thus counts as on the path too. The error names the line and the
+// column of the alias after the path, as [Resolver.Node] names them.
 //
 // Wraps [ErrExcessiveAliasing] when aliases lead a selector to far more
 // nodes than the document holds. Wraps [ErrExcessiveMerging] when the key
@@ -618,7 +626,7 @@ func (r *Resolver) Anchor(node ast.Node) (ast.Node, error) {
 		return nil, fmt.Errorf("anchor: %w: alias has no name", ErrAlias)
 	}
 
-	anchor, ok := r.resolver.targets[alias]
+	anchor, ok := r.resolver.binding().targets[alias]
 	if !ok {
 		return nil, fmt.Errorf("anchor: %w", r.resolver.missingAnchor(tk.Value))
 	}

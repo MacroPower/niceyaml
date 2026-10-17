@@ -165,8 +165,9 @@ type loadCase struct {
 	warns string
 	err   string
 	// Matches lists the errors that the error of the load, or its
-	// warnings when the load succeeds, must match.
-	matches []error
+	// warnings when the load succeeds, must match. NotMatches lists the
+	// errors that the error of the load must not match.
+	matches, notMatches []error
 }
 
 // run loads the files of tc with the registry of its opts, and compares
@@ -183,6 +184,10 @@ func (tc loadCase) run(t *testing.T) {
 
 		for _, m := range tc.matches {
 			require.ErrorIs(t, err, m)
+		}
+
+		for _, m := range tc.notMatches {
+			require.NotErrorIs(t, err, m)
 		}
 
 		return
@@ -1348,7 +1353,7 @@ func TestRegistry_Check(t *testing.T) {
 				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
 				`MenuItem "semla" cafe.jacobcolvin.com/v1 up-to-date=true`,
 			},
-			err: "config/menu.yaml:7:9: $.spec.cost: too cheap",
+			err: "config/menu.yaml:7:9: $.spec.price: too cheap",
 		},
 		"check error bound in no document": {
 			files: map[string]string{"cafe.yaml": cafeDoc, "menu.yaml": menuDoc},
@@ -1521,19 +1526,63 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 		}
 	}
 
+	// A registry whose kind field sits below metadata.
+	nested := []manifest.RegistryOption{
+		manifest.WithAppName("cafe"),
+		manifest.WithKindField(meta.Child("kind")),
+		manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
+			manifest.Unversioned(),
+			manifest.Version("cafe.jacobcolvin.com/v1"),
+		)),
+	}
+
+	// The input of a reference document that holds the anchor b.
+	baseReference := []manifest.InputOption{
+		manifest.WithSourceOptions(niceyaml.WithReferences(
+			niceyaml.NewSourceFromString("base: &b {seats: 5}\n"),
+		)),
+	}
+
 	tcs := map[string]loadCase{
 		"plain document": {
 			opts:  opts(),
 			files: map[string]string{"cafe.yaml": "seats: 40\n"},
 			want:  []string{`Cafe "" unversioned up-to-date=false`},
 		},
+		"G23-2: engine error of the write of the version field over a field that an earlier version created": {
+			// The write of v2 created the field, and the write of the next
+			// version fails there, so the problem names both (fix23 G23-2).
+			opts: []manifest.RegistryOption{
+				manifest.WithAppName("cafe"),
+				manifest.WithKinds(manifest.NewKind[map[string]any]("Cafe",
+					manifest.Unversioned(),
+					manifest.Version("v2"),
+					manifest.Version("v\x013"),
+				)),
+			},
+			files: map[string]string{"cafe.yaml": "seats: 40\n"},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:1:1: $: go-yaml's encoder writes U+0001 as it is, and YAML does not allow "+
+					"that in a text",
+				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
+				"|-- move the file out of config if it is not a Cafe",
+				"|-- report this to the authors of cafe",
+				"|-- v2 sets $.apiVersion",
+				"`-- v\u24013 sets $.apiVersion",
+				"",
+				"   1 | seats: 40",
+				"     | ^^^^^",
+			),
+		},
 		"plain document of the wrong layout": {
 			opts:  opts(),
 			files: map[string]string{"notes.yaml": "- a\n"},
+			// The kind field needs a mapping at the root.
 			err: stringtest.JoinLF(
-				"config/notes.yaml:1:3: $: expected mapping, got sequence",
+				"config/notes.yaml:1:3: $: cafe.jacobcolvin.com/v1 sets $.kind, but the document holds a sequence",
 				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
-				"`-- move the file out of config if it is not a Cafe",
+				"|-- move the file out of config if it is not a Cafe",
+				"`-- cafe.jacobcolvin.com/v1 sets $.kind",
 				"",
 				"   1 | - a",
 				"     |   ^",
@@ -1796,6 +1845,137 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 				)),
 			},
 			want: []string{`Cafe "" cafe.jacobcolvin.com/v1 up-to-date=true`},
+		},
+		// The lookup of each type field goes through the merge key, whose
+		// alias reads a reference document, so the migration fails.
+		"plain document with a merge key that reads a reference document": {
+			opts:  opts(),
+			files: map[string]string{"cafe.yaml": "<<: *b\n"},
+			in:    baseReference,
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:1:5: $: cafe.jacobcolvin.com/v1 sets $.kind, "+
+					"which goes through <<: *b at 1:1, a merge key that reads a reference document, so that document decides which names $ reads",
+				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
+				"|-- move the file out of config if it is not a Cafe",
+				"`-- cafe.jacobcolvin.com/v1 sets $.kind",
+				"",
+				"   1 | <<: *b",
+				"     |     ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias, paths.ErrReferenceAlias},
+		},
+		"plain document with an entry before a merge key that reads a reference document": {
+			// The reference document does not hold hours, so the text holds
+			// no precedence misread.
+			opts:  opts(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF("hours: 1", "<<: *b")},
+			in:    baseReference,
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:2:5: $: cafe.jacobcolvin.com/v1 sets $.kind, "+
+					"which goes through <<: *b at 2:1, a merge key that reads a reference document, so that document decides which names $ reads",
+				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
+				"|-- move the file out of config if it is not a Cafe",
+				"`-- cafe.jacobcolvin.com/v1 sets $.kind",
+				"",
+				"   1 | hours: 1",
+				"   2 | <<: *b",
+				"     |     ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias, paths.ErrReferenceAlias},
+		},
+		"plain document with an entry before a merge key that reads the same key in a reference document": {
+			// The edit package reads the document alone for the misreads that
+			// New refuses, and the reference document decides which names the
+			// mapping reads, so the type field fails as a path through the
+			// alias does.
+			opts:  opts(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF("seats: 1", "<<: *b")},
+			in:    baseReference,
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:2:5: $: cafe.jacobcolvin.com/v1 sets $.kind, "+
+					"which goes through <<: *b at 2:1, a merge key that reads a reference document, so that document decides which names $ reads",
+				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
+				"|-- move the file out of config if it is not a Cafe",
+				"`-- cafe.jacobcolvin.com/v1 sets $.kind",
+				"",
+				"   1 | seats: 1",
+				"   2 | <<: *b",
+				"     |     ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias, paths.ErrReferenceAlias},
+		},
+		"plain document with an entry after a merge key that reads a reference document": {
+			opts:  opts(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF("<<: *b", "seats: 1")},
+			in:    baseReference,
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:1:5: $: cafe.jacobcolvin.com/v1 sets $.kind, "+
+					"which goes through <<: *b at 1:1, a merge key that reads a reference document, so that document decides which names $ reads",
+				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
+				"|-- move the file out of config if it is not a Cafe",
+				"`-- cafe.jacobcolvin.com/v1 sets $.kind",
+				"",
+				"   1 | <<: *b",
+				"     |     ^^",
+				"   2 | seats: 1",
+			),
+			matches: []error{manifest.ErrFieldAlias, paths.ErrReferenceAlias},
+		},
+		"plain flow document with a trailing comma after a merge key that reads a reference document": {
+			opts:  opts(),
+			files: map[string]string{"cafe.yaml": "{hours: 1, <<: *b,}\n"},
+			in:    baseReference,
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:1:16: $: cafe.jacobcolvin.com/v1 sets $.kind, "+
+					"which goes through <<: *b at 1:12, a merge key that reads a reference document, so that document decides which names $ reads",
+				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
+				"|-- move the file out of config if it is not a Cafe",
+				"`-- cafe.jacobcolvin.com/v1 sets $.kind",
+				"",
+				"   1 | {hours: 1, <<: *b,}",
+				"     |                ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias, paths.ErrReferenceAlias},
+		},
+		"plain document whose merge key reads a reference document, with a nested kind field": {
+			opts:  nested,
+			files: map[string]string{"cafe.yaml": "<<: *b\n"},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {spec: {seats: 5}}\n"),
+				)),
+			},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:1:5: $: cafe.jacobcolvin.com/v1 sets $.metadata.kind, "+
+					"which goes through <<: *b at 1:1, a merge key that reads a reference document, so that document decides which names $ reads",
+				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
+				"|-- move the file out of config if it is not a Cafe",
+				"`-- cafe.jacobcolvin.com/v1 sets $.metadata.kind",
+				"",
+				"   1 | <<: *b",
+				"     |     ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias, paths.ErrReferenceAlias},
+		},
+		"plain document whose merge key brings in the mapping of a nested kind field": {
+			opts:  nested,
+			files: map[string]string{"cafe.yaml": "<<: *b\n"},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {metadata: {name: yamull}}\n"),
+				)),
+			},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:1:5: $: cafe.jacobcolvin.com/v1 sets $.metadata.kind, "+
+					"which goes through <<: *b at 1:1, a merge key that reads a reference document, so that document decides which names $ reads",
+				"|-- the document has no apiVersion and no kind, so cafe reads it as an unversioned Cafe",
+				"|-- move the file out of config if it is not a Cafe",
+				"`-- cafe.jacobcolvin.com/v1 sets $.metadata.kind",
+				"",
+				"   1 | <<: *b",
+				"     |     ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias, paths.ErrReferenceAlias},
 		},
 		"claimed document with a version": {
 			opts: opts(manifest.Claim(matcher.Exists(paths.Doc().Child("seats")))),

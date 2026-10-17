@@ -34,6 +34,11 @@ import (
 //     alias limit of [niceyaml.WithAliasLimit] matches
 //     [niceyaml.ErrExcessiveAliasing], so a program that refuses oversized
 //     input tests for both.
+//   - A document that a step cannot edit keeps the error of the edit
+//     package, as the Versions section of the package documentation
+//     describes. A refusal of YAML outside the subset that the package
+//     edits matches [go.jacobcolvin.com/niceyaml/edit.ErrUnsupported], for
+//     example.
 //   - An error that a step, a validator, a matcher of [WithIgnore] or
 //     [Claim], or a function of [WithCheck] returns keeps what it matched.
 //     A panic in a step, a validator, or a function of WithCheck wraps a
@@ -129,8 +134,10 @@ var (
 )
 
 // problemError is the error of a problem that a load writes itself: its
-// message, and the errors that it matches beside it.
+// message, the errors that it matches beside it, and the error that it
+// wraps, or nil.
 type problemError struct {
+	err   error
 	msg   string
 	marks []error
 }
@@ -145,10 +152,24 @@ func (e *problemError) Is(target error) bool {
 	return slices.ContainsFunc(e.marks, func(m error) bool { return errors.Is(m, target) })
 }
 
+// Unwrap returns the error that e wraps, or nil.
+func (e *problemError) Unwrap() error {
+	return e.err
+}
+
 // newProblem returns the problem msg, which matches mark, at the location
 // of opts. The document is at fault for it.
 func newProblem(mark error, msg string, opts ...niceyaml.ErrorOption) error {
 	return niceyaml.Invalid(&problemError{msg: msg, marks: []error{mark}}, opts...)
+}
+
+// markProblem returns err, a bound problem, so that it matches mark too.
+// Its text and its location stay as they are.
+func markProblem(mark, err error) error {
+	//nolint:wrapcheck // The mark adds no text.
+	return hook.Rewrap(err, func(inner error) error {
+		return &problemError{err: inner, msg: inner.Error(), marks: []error{mark}}
+	})
 }
 
 // newWarning returns the warning msg, which matches each of marks, at the
@@ -185,9 +206,12 @@ type Warning struct { //nolint:errname // A Warning is no error, though it wraps
 	Version string
 	// Path is the path that the message shows, such as
 	// `$.spec.legacyPricing~`, or `$` for a warning without a path. A `~` at
-	// its end marks a warning about a key. In a plan, it names the value as
-	// the text that the plan read spells it. A step that renames a key thus
-	// changes the path that a load after Apply shows.
+	// its end marks a warning about a key. The warning of a decode or a
+	// schema names the value by its path in the current version, in a load
+	// and in a plan. The warning of a value that a step removes names the
+	// value as the text that the load or the plan read spells it. A step
+	// that renames a key above such a value thus changes the path that a
+	// load after Apply shows.
 	Path paths.Path
 }
 

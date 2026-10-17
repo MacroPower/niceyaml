@@ -5847,6 +5847,71 @@ func TestNode_Nodes(t *testing.T) {
 		assert.Equal(t, map[string]any{"item": "Kaffe", "price": uint64(35)}, got)
 	})
 
+	t.Run("a descent fails at an entry that a merge of a reference decides", func(t *testing.T) {
+		t.Parallel()
+
+		// The merge key of web can bring in environment, which then wins
+		// over the entry that web writes before it. The descent cannot tell,
+		// so it fails at the alias, as a path through web.environment does.
+		// The second text writes the merge key first, a control in which web
+		// writes its own environment.
+		tcs := map[string]struct {
+			input string
+			// The paths of the nodes, or the error.
+			want []string
+			err  string
+		}{
+			"entry before the merge key": {
+				input: stringtest.LinesLF(
+					"services:",
+					"  web:",
+					"    environment: {A: 1}",
+					"    <<: *base",
+					"  db:",
+					"    environment: {A: 2}",
+				),
+				err: "compose.yaml:4:9: $.services.web: resolve $..environment: alias reads a reference document: *base",
+			},
+			"entry after the merge key": {
+				input: stringtest.LinesLF(
+					"services:",
+					"  web:",
+					"    <<: *base",
+					"    environment: {A: 1}",
+					"  db:",
+					"    environment: {A: 2}",
+				),
+				want: []string{"$.services.web.environment", "$.services.db.environment"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("compose.yaml"),
+					yamltest.References("base: &base {image: app}\n"))
+
+				nodes, err := doc.Nodes(paths.Current().Recursive("environment"))
+				if tc.err != "" {
+					require.ErrorIs(t, err, paths.ErrReferenceAlias)
+					require.EqualError(t, err, tc.err)
+
+					return
+				}
+
+				require.NoError(t, err)
+
+				got := make([]string, 0, len(nodes))
+				for _, n := range nodes {
+					got = append(got, n.Path().String())
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
 	t.Run("a document with no content yields no nodes", func(t *testing.T) {
 		t.Parallel()
 

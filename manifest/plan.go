@@ -410,42 +410,22 @@ func newText(text string, docs []*docState) string {
 }
 
 // checkLimits returns the problem of after, the new text of the file of
-// src, when it exceeds a limit of src. The check keeps every file that
-// Apply writes readable by the next load. The problem matches
-// [niceyaml.ErrLimit]. A load of the file passes, so [niceyaml.IsInvalid]
-// does not report the problem.
+// src, when it holds more bytes than the byte limit of src. The edits of
+// each document keep the limits of src, but the documents of one file can
+// each grow within the byte limit and hold more bytes together. The check
+// keeps every file that Apply writes readable by the next load. The
+// problem matches [niceyaml.ErrLimit]. A load of the file passes, so
+// [niceyaml.IsInvalid] does not report the problem.
 func checkLimits(src *niceyaml.Source, after string) error {
-	bytes, depth := hook.Limits(src)
-
-	if bytes > 0 && len(after) > bytes {
-		var details []error
-
-		if len(src.Documents()) > 1 {
-			details = append(details, errors.New("split its documents across several files"))
-		}
-
-		return niceyaml.Unchecked(&problemError{
-			msg:   "cannot rewrite a file whose new text holds more than " + quantity.Bytes(bytes),
-			marks: []error{niceyaml.ErrLimit},
-		}, niceyaml.WithDetails(details...))
-	}
-
-	if depth <= 0 {
+	bytes, _ := hook.Limits(src)
+	if bytes <= 0 || len(after) <= bytes {
 		return nil
 	}
 
-	reread, _ := hook.Reread(src, after).(*niceyaml.Source) //nolint:errcheck // The hook returns a Source.
-
-	for _, doc := range reread.Documents() {
-		if errors.Is(doc.Err(), niceyaml.ErrLimit) {
-			return &problemError{
-				msg:   fmt.Sprintf("cannot rewrite a document whose new text nests more than %d levels", depth),
-				marks: []error{niceyaml.ErrLimit},
-			}
-		}
-	}
-
-	return nil
+	return niceyaml.Unchecked(&problemError{
+		msg:   "cannot rewrite a file whose new text holds more than " + quantity.Bytes(bytes),
+		marks: []error{niceyaml.ErrLimit},
+	}, niceyaml.WithDetails(errors.New("split its documents across several files")))
 }
 
 // text returns the line of c, where verb names what happens to the files

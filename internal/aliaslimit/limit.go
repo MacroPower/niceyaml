@@ -61,6 +61,14 @@ func Excessive(distinct, aliased int) bool {
 		float64(aliased)/float64(expanded) > allowedAliasRatio(expanded)
 }
 
+// Allows reports whether the limit allows aliased nodes beside any count of
+// distinct nodes, so that [Excessive] reports false for them. A reader that
+// knows a bound on the aliased nodes can thus leave the distinct nodes
+// uncounted when the limit allows that bound.
+func Allows(aliased int) bool {
+	return aliased <= minAliased
+}
+
 // AddCapped returns a+b, or [CountCap] when the sum is more than CountCap.
 // Both a and b fall between zero and CountCap, inclusive.
 func AddCapped(a, b int) int {

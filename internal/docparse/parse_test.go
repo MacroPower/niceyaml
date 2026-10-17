@@ -229,3 +229,43 @@ func TestParse_Panic(t *testing.T) {
 	require.Len(t, r.File.Docs, 1)
 	assert.Nil(t, r.File.Docs[0].Body)
 }
+
+func TestParseWithoutComments(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		// The keys of the root mapping of the first document.
+		want []string
+	}{
+		"a text without comments parses as Parse parses it": {
+			input: stringtest.LinesLF("a: 1", "b: [x, y]"),
+			want:  []string{"a", "b"},
+		},
+		"a comment line after a converting tag before an anchor": {
+			// Go-yaml's parser drops the entry after the collection without the
+			// comment line, as yaml.Unmarshal reads the text.
+			input: stringtest.LinesLF("p: !!str &k [1]", "# l", "q: 1"),
+			want:  []string{"p"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := docparse.ParseWithoutComments(tokens.Tokenize(tc.input))
+			require.Empty(t, r.Failures)
+
+			mapping, ok := r.File.Docs[0].Body.(*ast.MappingNode)
+			require.True(t, ok, "got %T", r.File.Docs[0].Body)
+
+			got := make([]string, len(mapping.Values))
+			for i, e := range mapping.Values {
+				got[i] = e.Key.String()
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

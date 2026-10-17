@@ -179,7 +179,9 @@ The resolvers of a registry run in order, and the first one that does not declin
 - [examples/edits/rewrite](examples/edits/rewrite)
 - [examples/edits/guards](examples/edits/guards)
 
-[`edit.Doc`][niceyaml/edit.Doc] renames keys and sets, moves, and removes values. It keeps every byte that an edit leaves alone. The rewrite example edits a file and validates the result, so each error points at the line that the owner wrote. The guards example shows the checks that keep an edit from damaging a file. When an `Apply` fails, it drops every edit it made. Edits that change one value twice through its aliases fail, and wildcards skip the protected keys.
+[`edit.Doc`][niceyaml/edit.Doc] renames keys and sets, moves, and removes values. It keeps every byte that an edit leaves alone. The rewrite example edits a file and validates the result, so each error points at the line that the owner wrote. The guards example shows the checks that keep an edit from damaging a file. When an `Apply` fails, it drops every edit it made. Wildcards skip the protected keys.
+
+The `edit` package edits a subset of YAML and refuses the rest with `edit.ErrUnsupported`, whose detail says what to write instead. The guards example shows such a refusal for the removal of an anchored value that aliases still read. The engine reads and edits a document as go-yaml reads it, also where go-yaml reads valid YAML otherwise than YAML does. `edit.New` refuses a few such documents with `edit.ErrMisread`, such as one with an own key before a `<<` merge key that brings in the same key. Its detail says what to write so that go-yaml reads the text as YAML does. The Supported YAML section of the [package documentation][niceyaml/edit] lists the subset and those documents.
 
 ### Manifests
 

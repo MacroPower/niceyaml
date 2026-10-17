@@ -21,8 +21,9 @@
 //
 // A path points at one token of the document. [PathToken] returns that
 // token for the node that the path selects and the [Parent] that holds
-// the node. A scalar is its own token. A mapping or a sequence spans many
-// lines, so it points at the token that introduces it. That token is the
+// the node. A scalar is its own token, and a value that holds a tag alone
+// points at its tag. A mapping or a sequence spans many lines, so it points
+// at the token that introduces it. That token is the
 // key of the entry whose value it is, or the "-" of the block sequence
 // element that it is. Code that points at a node that it reached without
 // a path calls PathToken too, so both name the same place for one node.
@@ -114,7 +115,8 @@ type Parent struct {
 
 // PathToken returns the token that a path to node points at, where in
 // holds node. A scalar is its own token, and so is an alias, whatever its
-// anchor holds. A mapping or a sequence points at the token that
+// anchor holds. A value that holds a tag alone, as in "a: !!null", points
+// at its tag. A mapping or a sequence points at the token that
 // introduces it, under the anchors and tags on node. The first of these
 // rules that fits the node gives that token.
 //
@@ -229,8 +231,10 @@ func entryToken(seq *ast.SequenceNode, index int) *token.Token {
 // key of a mapping, the first element of a sequence, or the scalar itself.
 // It looks through anchors and tags, and through the `?` indicator,
 // anchors, and tags of the first key of a mapping. An alias is its own
-// token. An entry without a key starts at its own token. It returns nil
-// for a nil node, including a typed nil.
+// token. An entry without a key starts at its own token. A tag over a
+// value that the text does not write, as in "a: !!null", starts at the
+// tag, which is the token that the user wrote. It returns nil for a nil
+// node, including a typed nil.
 func firstToken(node ast.Node) *token.Token {
 	for {
 		if IsNil(node) {
@@ -241,7 +245,12 @@ func firstToken(node ast.Node) *token.Token {
 		case *ast.AnchorNode:
 			node = n.Value
 		case *ast.TagNode:
+			if unwritten(n.Value, n.GetToken()) {
+				return n.GetToken()
+			}
+
 			node = n.Value
+
 		case *ast.MappingNode:
 			if len(n.Values) == 0 || n.Values[0] == nil {
 				return n.GetToken()
@@ -265,6 +274,25 @@ func firstToken(node ast.Node) *token.Token {
 			return node.GetToken()
 		}
 	}
+}
+
+// unwritten reports whether node, the value under the tag tag, is a value
+// that go-yaml's parser writes where the text writes none. In a block
+// collection such a value has an implicit null token. In a flow collection
+// its token has the offset of the tag, as the null under "!!null" and the
+// empty string under "!!str" do.
+func unwritten(node ast.Node, tag *token.Token) bool {
+	if IsNil(node) {
+		return false
+	}
+
+	tk := node.GetToken()
+	if tk == nil {
+		return false
+	}
+
+	return tk.Type == token.ImplicitNullType ||
+		tk.Position != nil && tag != nil && tag.Position != nil && tk.Position.Offset == tag.Position.Offset
 }
 
 // Inspect calls f for node and for each node below it, in the order that

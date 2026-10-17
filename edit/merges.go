@@ -2,11 +2,6 @@ package edit
 
 import (
 	"cmp"
-	"errors"
-	"fmt"
-	"maps"
-	"slices"
-	"strings"
 
 	"github.com/goccy/go-yaml/ast"
 
@@ -16,184 +11,44 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// The most levels of `<<` merge keys that a view follows.
-const maxMergeDepth = 32
-
-// mergeView is what one mapping that merges or repeats keys reads, as the
-// decode reads it. An entry is the place of its key in the user's text,
-// which a rename keeps.
-type mergeView struct {
-	// The entry that each key name reads.
-	reads map[string]position.Position
-	// The entries that the mapping hides, with the name of each.
-	hidden map[position.Position]string
-	// The text of the first merge key entry, such as "<<: *summer", or ""
-	// for a mapping that does not merge.
-	merge string
-	// The value of that merge key, such as "*summer".
-	via string
-}
-
 // editRecord is an edit of the Apply running, as a message names it.
 type editRecord struct {
-	// What the edit does, such as "renames "closes" to "close"".
+	// The note of the edit that wrote the value at the place of the edit, as
+	// the writer of a [site] holds it, or nil.
+	writer *note
+	// What the edit does, as a message at the place of the edit names it,
+	// such as "renames "closes" to "close"".
 	desc string
+	// What the edit does, as a message at another place names it, by the
+	// path of the place, such as "renames $.hours.closes to "close"".
+	named string
+	// Where an error at the place of the edit binds, and the path there, as
+	// [Doc.valueSite] gives the site. A place that an earlier edit created
+	// binds at the site that [Doc.placeSite] gives, under the path of that
+	// site.
 	path paths.Path
 	at   position.Range
 }
 
-// mergeViews returns the view of each mapping that merges or repeats a
-// key, or that keep names. The returned map keys a mapping that merges by
-// the entry of its first merge key, and any other mapping by the entry of
-// its first key.
-func (d *Doc) mergeViews(keep map[position.Position]*mergeView) map[position.Position]*mergeView {
-	views := make(map[position.Position]*mergeView)
-	res := d.node.Resolver()
-	inMapping := make(map[*ast.MappingValueNode]bool)
+// holder returns the path of the place of the edit of r without the `~` of
+// a key. That path names its entry or its item, or the nearest value above
+// it that the user wrote.
+func (r editRecord) holder() paths.Path {
+	if last, ok := r.path.Last(); ok && last.Kind == paths.SelectorKey {
+		path, _ := r.path.Parent()
 
-	astnode.Inspect(d.node.AST(), func(n ast.Node) bool {
-		if m, ok := n.(*ast.MappingNode); ok {
-			for _, v := range m.Values {
-				inMapping[v] = true
-			}
-		}
+		return path
+	}
 
-		return true
-	})
-
-	astnode.Inspect(d.node.AST(), func(n ast.Node) bool {
-		switch x := n.(type) {
-		case *ast.MappingNode:
-			d.addView(views, keep, res, x)
-		case *ast.MappingValueNode:
-			if !inMapping[x] {
-				d.addView(views, keep, res, x)
-			}
-		}
-
-		return true
-	})
-
-	return views
+	return r.path
 }
 
-// addView adds the view of the mapping m to views when m merges or
-// repeats a key, or when keep names it.
-func (d *Doc) addView(views, keep map[position.Position]*mergeView, res *paths.Resolver, m ast.Node) {
-	entries, _ := astnode.Entries(m)
-	if len(entries) == 0 {
-		return
-	}
-
-	candidates := make(map[string][]*ast.MappingValueNode)
-	repeats := false
-
-	var merge *ast.MappingValueNode
-
-	for _, e := range entries {
-		if astnode.IsMergeKey(e.Key) {
-			if merge == nil {
-				merge = e
-			}
-
-			continue
-		}
-
-		name, ok := res.KeyName(e.Key)
-		if !ok {
-			continue
-		}
-
-		repeats = repeats || len(candidates[name]) > 0
-		candidates[name] = append(candidates[name], e)
-	}
-
-	// No path of an Apply reaches a merge key. The first merge key thus
-	// names its mapping after an edit removes the entries around it.
-	id := d.entryID(entries[0])
-	if merge != nil {
-		id = d.entryID(merge)
-	}
-
-	if merge == nil && !repeats && keep[id] == nil {
-		return
-	}
-
-	if merge != nil && !mergedEntries(res, m, candidates, 0) {
-		return
-	}
-
-	view := &mergeView{
-		reads:  make(map[string]position.Position),
-		hidden: make(map[position.Position]string),
-	}
-
-	for name, list := range candidates {
-		read, _, err := findChild(res, astnode.Content(m), name)
-		if err != nil || read == nil {
-			return
-		}
-
-		view.reads[name] = d.entryID(read)
-
-		for _, c := range list {
-			if c != read {
-				view.hidden[d.entryID(c)] = name
-			}
-		}
-	}
-
-	if merge != nil {
-		if s, ok := d.nodeSpan(merge); ok {
-			view.merge = strings.TrimSpace(d.cur[s.start:s.end])
-		}
-
-		if s, ok := d.nodeSpan(merge.Value); ok {
-			view.via = strings.TrimSpace(d.cur[s.start:s.end])
-		}
-	}
-
-	views[id] = view
-}
-
-// mergedEntries adds to candidates, by name, the entries that the `<<`
-// merge keys of m bring in. It reports false when a merge key does not
-// resolve.
-func mergedEntries(res *paths.Resolver, m ast.Node, candidates map[string][]*ast.MappingValueNode, depth int) bool {
-	if depth > maxMergeDepth {
-		return false
-	}
-
-	sources, err := res.MergeSources(m)
-	if err != nil {
-		return false
-	}
-
-	for _, src := range sources {
-		entries, _ := astnode.Entries(astnode.Content(src))
-
-		for _, e := range entries {
-			if astnode.IsMergeKey(e.Key) {
-				continue
-			}
-
-			if name, ok := res.KeyName(e.Key); ok {
-				candidates[name] = append(candidates[name], e)
-			}
-		}
-
-		if !mergedEntries(res, astnode.Content(src), candidates, depth+1) {
-			return false
-		}
-	}
-
-	return true
-}
-
-// entryID returns the place in the user's text of the key of e, which a
-// rename keeps. A key that an edit created takes a place of its own.
-func (d *Doc) entryID(e *ast.MappingValueNode) position.Position {
-	s, ok := d.nodeSpan(e.Key)
+// entryPlace returns the place in the user's text of the key of e, an
+// entry of the current text, which a rename keeps. The place is that of
+// the first byte of the key under its tags: the anchor of the key, or else
+// the key itself. A key that an edit created takes a place of its own.
+func (d *Doc) entryPlace(e *ast.MappingValueNode) position.Position {
+	s, ok := d.placeSpan(keyContent(e))
 	if !ok || s.start >= len(d.origin) {
 		return position.New(-1, 0)
 	}
@@ -203,99 +58,140 @@ func (d *Doc) entryID(e *ast.MappingValueNode) position.Position {
 		return d.userPos(s.start)
 	}
 
-	// A renamed key keeps the place of the key it replaced, and a created
-	// key takes the place of its note alone.
+	// A renamed key keeps the place of the key it replaced. A created key,
+	// and a key that a move wrote, take the place of the note alone.
 	n := d.notes[-1-o]
-	if n.located && n.detail == "" {
+	if n.located && n.detail == "" && !n.moved {
 		return n.at.Start
 	}
 
 	return position.New(-2, o)
 }
 
-// recordEdit records an edit of the Apply running. A message about what a
-// mapping reads names that edit. The edit is at the place p of h, and at the
-// key of its entry when it renames, removes, or moves the entry.
-func (d *Doc) recordEdit(h *Node, p *place, desc string) {
-	start, ok := d.startOf(p)
-	if !ok {
-		start = d.valueStart(p)
+// placeSpan returns the span whose first byte names the place of key, the
+// key of an entry, as [Doc.entryPlace] reads it: the anchor of the key under
+// its tags, or else the token of the key.
+func (d *Doc) placeSpan(key ast.Node) (span, bool) {
+	for tag, ok := key.(*ast.TagNode); ok; tag, ok = key.(*ast.TagNode) {
+		key = tag.Value
 	}
 
-	end := d.valueEnd(p)
-	if ks, _, ok := d.keySpan(p); ok {
-		end = ks.end
+	s, ok := d.propsSpan(key)
+	if tk := astnode.PathToken(key, astnode.Parent{}); !ok && tk != nil {
+		s, ok = d.tokenSpan(tk)
 	}
 
-	at := d.userRange(start, max(start, end))
-	if start < len(d.origin) && d.origin[start] < 0 {
-		if n := d.notes[-1-d.origin[start]]; n.located {
-			at = n.at
-		}
-	}
-
-	path := h.path
-	if p.entry != nil && !strings.HasPrefix(desc, "sets ") {
-		path = path.Key()
-	}
-
-	d.lastEdit = &editRecord{desc: desc, path: d.userPath(path, at.Start), at: at}
+	return s, ok
 }
 
-// checkMerges returns a problem when a mapping that merges or repeats a key
-// reads a different entry after the Apply. The mapping then reads either an
-// entry that it hid before the Apply, or a different entry in place of one
-// that it now hides.
-func (d *Doc) checkMerges() error {
-	before := d.merges
-	d.merges = nil
+// recordEdit records an edit of the Apply running, which desc describes.
+// A message about a later problem of the Apply names that edit. Named describes
+// the edit by its path for a message about another place, or it is "" for
+// an edit whose desc names its path already. The edit is at the place p, and
+// a problem at that place binds where a problem of the edit binds, as
+// [Doc.placeOfSite] gives the site, with its writer.
+func (d *Doc) recordEdit(p *place, desc, named string) {
+	s := d.placeOfSite(p)
 
-	if len(before) == 0 || d.lastEdit == nil {
-		return nil
-	}
-
-	after := d.mergeViews(before)
-
-	for _, id := range slices.SortedFunc(maps.Keys(before), comparePositions) {
-		b, a := before[id], after[id]
-		if a == nil {
-			continue
-		}
-
-		for _, name := range slices.Sorted(maps.Keys(a.reads)) {
-			if _, hid := b.hidden[a.reads[name]]; hid {
-				return d.mergeProblem(a, name)
-			}
-		}
-
-		for _, name := range slices.Sorted(maps.Keys(b.reads)) {
-			if _, hid := a.hidden[b.reads[name]]; hid {
-				return d.mergeProblem(a, name)
-			}
-		}
-	}
-
-	return nil
+	d.lastEdit = &editRecord{desc: desc, named: cmp.Or(named, desc), path: s.path, at: s.at, writer: s.writer}
 }
 
-// mergeProblem returns the problem of the last edit of the Apply, after
-// which the mapping of view reads another entry under name.
-func (d *Doc) mergeProblem(view *mergeView, name string) error {
-	e := d.lastEdit
+// site returns the site where an error at the place of the edit of r
+// binds, as the record holds it.
+func (r editRecord) site() site {
+	return site{path: r.holder(), at: r.at, writer: r.writer}
+}
 
-	msg := fmt.Sprintf("%s %s, but the mapping also writes %q", d.subject(), e.desc, name)
-	detail := errors.New("remove one of the two")
-
-	if view.merge != "" {
-		msg = fmt.Sprintf("%s %s, but %s also brings in %q", d.subject(), e.desc, view.merge, name)
-		detail = fmt.Errorf("write the value out in place of %s", view.via)
+// keepOrigins gives each byte of the current text the origin that it had
+// before the call running, when the call leaves the text as it found it.
+// Such a call changes nothing that a decode could miss. Each record of the
+// Apply that reads the origins, such as the merges of [Doc.mergeState],
+// then keeps naming the bytes that it named before the call.
+func (d *Doc) keepOrigins() {
+	if d.cur != d.callStart.cur {
+		return
 	}
 
-	err := d.user.Bind(niceyaml.NewError(msg, niceyaml.AtPath(e.path), niceyaml.AtRange(e.at),
-		niceyaml.WithDetails(detail)))
-	d.record(err)
+	d.origin = d.callStart.origin
+}
 
-	return err //nolint:wrapcheck // The binding is the problem of the Apply.
+// holderStart returns the offset of the byte that holds node, a value of
+// the current text under its anchors and tags. That byte starts the key or
+// the "?" of an explicit key of the entry, or the "-" of an item of a
+// block sequence. For an item of a flow sequence, it is the first byte of
+// the item. It reports false for the root and for a key.
+func (d *Doc) holderStart(node ast.Node) (int, bool) {
+	up := d.ancestors(node)
+	child := node
+
+	for len(up) > 0 && isProps(up[0]) {
+		child, up = up[0], up[1:]
+	}
+
+	if len(up) == 0 {
+		return 0, false
+	}
+
+	switch parent := up[0].(type) {
+	case *ast.MappingValueNode:
+		s, ok := d.nodeSpan(parent.Key)
+		if !ok || parent.Value != child {
+			return 0, false
+		}
+
+		if start := d.explicitKeyStart(s.start); start >= 0 {
+			return start, true
+		}
+
+		return s.start, true
+
+	case *ast.SequenceNode:
+		i, ok := d.tree().item[child]
+		if !ok || i >= len(parent.Values) || parent.Values[i] != child {
+			return 0, false
+		}
+
+		if parent.IsFlowStyle || i >= len(parent.Entries) {
+			s, ok := d.nodeSpan(child)
+
+			return s.start, ok
+		}
+
+		s, ok := d.tokenSpan(parent.Entries[i].Start)
+
+		return s.start, ok
+	}
+
+	return 0, false
+}
+
+// userWrote reports whether the byte at off, the first byte of a key, a
+// "-", or an item of a flow sequence, stands for such text of the user's
+// text. A byte that an edit wrote with a note that names the edit does
+// not, as for a key that Set creates. A renamed key stands for the key of
+// the user, and so do the key and the "-" that a move writes for its
+// value. A byte that an edit wrote with the origin of another byte, such
+// as a "-" that takes the origin of its value, does not stand for such
+// text either.
+func (d *Doc) userWrote(off int) bool {
+	return d.standsFor(off) || d.ownByte(off)
+}
+
+// entryProblem returns the problem msg bound at the key of e, an entry of
+// the current text, with the options opts. The problem shows path, the
+// path that the user's text spells for the key, unless the user's text
+// holds another path there.
+func (d *Doc) entryProblem(e *ast.MappingValueNode, path paths.Path, msg string, opts ...niceyaml.ErrorOption) error {
+	opts = append(opts, niceyaml.AtPath(path))
+
+	if s, ok := d.nodeSpan(e.Key); ok {
+		opts = append(opts, niceyaml.AtRange(position.NewRange(
+			positionIn(d.cur, d.curLines, s.start),
+			positionIn(d.cur, d.curLines, s.end),
+		)))
+	}
+
+	return d.bindOwn(niceyaml.NewError(msg, opts...))
 }
 
 // comparePositions orders two positions by line, then by column.

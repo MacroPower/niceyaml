@@ -33,6 +33,37 @@ func TestExcessive(t *testing.T) {
 	}
 }
 
+func TestAllows(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		aliased int
+		want    bool
+	}{
+		"no aliased nodes":     {aliased: 0, want: true},
+		"at the floor":         {aliased: 100, want: true},
+		"past the floor":       {aliased: 101},
+		"far past the floor":   {aliased: 4_000_000},
+		"the cap of the count": {aliased: aliaslimit.CountCap},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, aliaslimit.Allows(tc.aliased))
+
+			// Excessive reports false for each count of distinct nodes beside
+			// aliased nodes that the limit allows.
+			if tc.want {
+				for _, distinct := range []int{0, 1, 1000, 400_000, 4_000_000, aliaslimit.CountCap} {
+					assert.False(t, aliaslimit.Excessive(distinct, tc.aliased), "distinct %d", distinct)
+				}
+			}
+		})
+	}
+}
+
 func TestAddCapped(t *testing.T) {
 	t.Parallel()
 

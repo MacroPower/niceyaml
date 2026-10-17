@@ -2549,6 +2549,39 @@ func TestSourceError_Format_Plain(t *testing.T) {
 				"   2 | b: 2",
 			),
 		},
+		// The parser writes the null of a value that holds a tag alone, so
+		// the tag is the first token that the user wrote there.
+		"path to a value that holds a tag alone": {
+			input: "b: 2\na: !!null\n",
+			err:   yamltest.ErrorAt("bad", "a"),
+			want:  stringtest.JoinLF("2:4: $.a: bad", "", "   1 | b: 2", "   2 | a: !!null", "     |    ^^^^^^"),
+		},
+		"path to an item that holds a tag alone": {
+			input: "l:\n- !!str\n",
+			err:   niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("l").Index(0))),
+			want:  stringtest.JoinLF("2:3: $.l[0]: bad", "", "   1 | l:", "   2 | - !!str", "     |   ^^^^^"),
+		},
+		"path to a value of a flow mapping that holds a tag alone": {
+			input: "m: {a: !!null , b: 1}\n",
+			err:   niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("m", "a"))),
+			want:  stringtest.JoinLF("1:8: $.m.a: bad", "", "   1 | m: {a: !!null , b: 1}", "     |        ^^^^^^"),
+		},
+		"path to an item of a flow sequence that holds a tag alone": {
+			input: "l: [!!str , 1]\n",
+			err:   niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("l").Index(0))),
+			want:  stringtest.JoinLF("1:5: $.l[0]: bad", "", "   1 | l: [!!str , 1]", "     |     ^^^^^"),
+		},
+		"path to a root sequence whose item holds a tag alone": {
+			input: "- !!null\n",
+			err:   niceyaml.NewError("bad", niceyaml.AtPath(paths.Current())),
+			want:  stringtest.JoinLF("1:3: $: bad", "", "   1 | - !!null", "     |   ^^^^^^"),
+		},
+		"path to a tagged value": {
+			// Control: the scalar is the first token of the value.
+			input: "a: !!str x\nb: 2\n",
+			err:   yamltest.ErrorAt("bad", "a"),
+			want:  stringtest.JoinLF("1:10: $.a: bad", "", "   1 | a: !!str x", "     |          ^", "   2 | b: 2"),
+		},
 		"path to an empty element before a comment": {
 			input: "- # c\n- 1\n",
 			err:   niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Index(0))),

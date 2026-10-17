@@ -53,6 +53,19 @@
 // so a step never writes them. An error from a step fails the document,
 // and a panic in a step fails it with a [niceyaml.PanicError].
 //
+// The steps edit a subset of YAML, as the Supported YAML section of the
+// edit package lists it. A document that migrates fails with an error that
+// matches [go.jacobcolvin.com/niceyaml/edit.ErrUnsupported] when it holds
+// a construct that [go.jacobcolvin.com/niceyaml/edit.New] refuses, or when
+// a step reaches a construct that a call refuses. A step reads and edits
+// the document as go-yaml reads it. A document that migrates fails with an
+// error that matches [go.jacobcolvin.com/niceyaml/edit.ErrMisread] when
+// go-yaml's decoder reads it otherwise than YAML does in one of the ways
+// the Supported YAML section lists. A plan then lists its file in
+// [Plan.Blocked], as it lists every file that a problem blocks. A document
+// of the current version does not migrate, so it loads with go-yaml's
+// reading.
+//
 // A step must make the same edits for the same document. A load runs it
 // at each load of an older document, and a plan runs it again. A step
 // that reads the clock, the environment, or a random source thus gives
@@ -63,14 +76,32 @@
 // in a later version, and the step must still write what it wrote before.
 //
 // Every error and every warning about a migrated document binds at the
-// line that the user wrote, under the path that the file spells. An error
-// at a value that a step set carries a detail that names the version of
-// the step. The detail also names the path of the value in that version,
-// as in "cafe.jacobcolvin.com/v1 sets $.spec.dietary[0] from this value".
-// A value that a step removes warns, and the warning matches
-// [ErrRemoved]. A reason that the step gives with
-// [go.jacobcolvin.com/niceyaml/edit.WithReason] appears as a detail of the
-// warning.
+// line that the user wrote. The decode and [Object.Bind] read the document
+// in the layout of the current version. Their errors and warnings thus show
+// the path of the value in that version. The schema of each version checks
+// the layout of that version, and its errors and warnings show the path
+// there. So after a step renames old to spec, a decode error at the port
+// shows $.spec.port. An error of the schema of the version before the step
+// shows $.old.port.
+//
+// An error that a step returns shows the path that the step reads, such as
+// the path of its node. So does an error of
+// [go.jacobcolvin.com/niceyaml/edit.Node.Decode] in the step. Each other
+// problem that the edit package finds in a step shows the path that the
+// file spells, as the Errors section of that package describes. Such
+// problems include a refusal of YAML outside the subset and the error of a
+// limit. A value that a step removes warns under the path that the file
+// spells, and the warning matches [ErrRemoved]. A reason that the step
+// gives with [go.jacobcolvin.com/niceyaml/edit.WithReason] appears as a
+// detail of the warning.
+//
+// An error at a value that a step set carries a detail that names the
+// step, as in "cafe.jacobcolvin.com/v1 sets $.spec.dietary from this
+// value". The detail gives the version of the step and the path that the
+// step gave its call. It keeps that path when a later step moves or
+// renames the value. The error shows the path where its check found the
+// problem, such as $.spec.dietary[0] for an item of the list that the step
+// set.
 //
 // Versions compare by their place in the list and never by their text. A
 // rewrite writes the current version of each kind, or the older version
@@ -165,9 +196,14 @@
 // path, and the documents of each file in order. Every report and every
 // iteration of a set follows that load order. A load fails each file that
 // is not UTF-8 with an error that matches [ErrEncoding]. The text of a
-// [Stdin], [Reader], or [Sources] input counts as a file. A load applies
-// the limits of each Source, as [niceyaml.WithByteLimit],
-// [niceyaml.WithDepthLimit], and [niceyaml.WithAliasLimit] describe.
+// [Stdin], [Reader], or [Sources] input counts as a file.
+//
+// A load applies the limits of each Source, as [niceyaml.WithByteLimit],
+// [niceyaml.WithDepthLimit], and [niceyaml.WithAliasLimit] describe. The
+// migration of a document fails with an error that matches
+// [niceyaml.ErrLimit] when its steps take the file past the byte limit or
+// the document past the depth limit. [niceyaml.IsInvalid] does not report
+// that error, because the text that the user wrote keeps the limits.
 //
 // [WithUnmarshalers] sets how the Go types of the kinds read YAML, such
 // as a type of another package that a document writes as text. A load
@@ -186,7 +222,13 @@
 // another string fails with an error that matches [ErrMissingTypeField].
 // Such scalars include 1.10, which reads "1.1", 0x10, which reads "16",
 // and "!!str 1.0", which reads "1". The error asks for the text in quotes.
-// A null, such as "~", leaves the field out.
+// A null, such as "~", leaves the field out. A rewrite writes a type field
+// in quotes where go-yaml's decoder reads the plain text as another
+// string, so `version: "1.10"` replaces `version: 1.9`. A migration writes
+// a type field that the document lacks, with the mappings above it. When a
+// value on the path of the field holds a scalar, null, or a sequence, no
+// mapping can hold the field. The migration of the document then fails at
+// that value, as in "v2 sets $.meta.version, but meta holds a scalar".
 // [WithVersionField] and [WithKindField] move the type fields, and
 // [WithVersionOnly] gives a registry of one kind a version field alone.
 // [WithIgnore] skips the documents of other tools.
@@ -202,6 +244,11 @@
 // decode might read that key in place of the field. A type
 // field before a merge key that reads a reference document fails too.
 // The load cannot tell whether that merge key replaces the field.
+//
+// A migration that writes a type field that a mapping with such a merge
+// key lacks looks the field up through the merge key. So it fails with an
+// error that matches ErrFieldAlias and [paths.ErrReferenceAlias].
+//
 // The error about an unknown kind suggests the closest name. The error
 // about an unknown version lists the versions that the app reads.
 //
@@ -214,7 +261,8 @@
 // A load runs these checks on each document, and the first that fails
 // ends the checks of that document:
 //
-//  1. The document must parse.
+//  1. The document must parse. A document that go-yaml's parser refuses
+//     fails with the error of the parse.
 //  2. The document must write its type fields in place. They must name a
 //     kind and a version that the registry holds and that [WithRemoved]
 //     does not name.

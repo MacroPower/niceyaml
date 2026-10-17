@@ -153,9 +153,7 @@ func New(body ast.Node, facts *aliasing.Facts, opts Options) *Tree {
 	t := &Tree{source: body, facts: facts}
 
 	names := renamedAnchorNames(facts, opts.References)
-
-	changes := len(names) > 0 || len(facts.Enclosed) > 0 || holdsIntegerTag(body)
-	if !changes || !t.parse(names, opts) {
+	if !changes(body, facts, names) || !t.parse(names, opts) {
 		t.body = DecodeView(body)
 	}
 
@@ -399,6 +397,33 @@ func (t *Tree) View(node ast.Node) ast.Node {
 	}
 
 	return DecodeView(node)
+}
+
+// Changes reports whether the [*Tree] that [New] makes for body, a document
+// body with facts, can change the document, as [Tree.Changed] tells. It
+// reads the anchors, the aliases, and the tags of body, and it does not make
+// the tree. A tree changes its document only when Changes reports true.
+// References reports whether the Source has reference documents, as
+// [Options] holds it.
+func Changes(body ast.Node, facts *aliasing.Facts, references bool) bool {
+	return changes(body, facts, renamedAnchorNames(facts, references))
+}
+
+// changes reports whether a tree of body with facts, whose anchors of the
+// names in names take new names, changes the document, as [Changes] tells.
+func changes(body ast.Node, facts *aliasing.Facts, names map[string]bool) bool {
+	return len(names) > 0 || len(facts.Enclosed) > 0 || holdsIntegerTag(body)
+}
+
+// Changed reports whether the tree changes the document. A tree that
+// renames an anchor, holds a null in place of an alias inside its anchor,
+// or spells an !!int tag in verbatim form changes it. Such a tree comes
+// from a second parse. The decoder reads any other tree as it reads the
+// document. Go-yaml's comment-free parse of the text, which yaml.Unmarshal
+// reads, can still read the text apart from the document, as it reads
+// "p: !!str &k [1]", "# l", and "q: 1" without q.
+func (t *Tree) Changed() bool {
+	return t.nodes != nil
 }
 
 // Parsed returns the node of the tree that stands for node when the tree

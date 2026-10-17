@@ -77,6 +77,19 @@ func Parse(tks token.Tokens, opts ...parser.Option) *Result {
 // depth, so the parser never reads such a run. A depth of zero or less
 // does not set a limit.
 func ParseDepth(tks token.Tokens, depth int, opts ...parser.Option) *Result {
+	return parse(tks, depth, parser.ParseComments, opts)
+}
+
+// ParseWithoutComments is [Parse] without the comments of tks, as
+// yaml.Unmarshal parses a text. The mode of the parser decides only
+// whether it reads the comment tokens, so a stream without a comment
+// parses as Parse parses it.
+func ParseWithoutComments(tks token.Tokens, opts ...parser.Option) *Result {
+	return parse(tks, 0, 0, opts)
+}
+
+// parse parses tks in mode, as [ParseDepth] describes.
+func parse(tks token.Tokens, depth int, mode parser.Mode, opts []parser.Option) *Result {
 	copies := tokens.ForParser(tks)
 
 	index := make(map[*token.Token]int, len(copies))
@@ -101,13 +114,13 @@ func ParseDepth(tks token.Tokens, depth int, opts ...parser.Option) *Result {
 	r := &Result{File: &ast.File{Docs: []*ast.DocumentNode{}}, Index: index, Tokens: copies}
 
 	for _, run := range splitDocumentRuns(copies) {
-		if at, deep := tooDeep(run, depth); deep {
+		if at, deep := TooDeep(run, depth); deep {
 			r.fail(Failure{Err: &DepthError{Token: at, Limit: depth}, Run: run})
 
 			continue
 		}
 
-		f, failure := parseRun(dropStrandedComments(run), opts)
+		f, failure := parseRun(dropStrandedComments(run), mode, opts)
 		if failure == nil {
 			nullEmptyAnchors(f)
 
@@ -204,11 +217,11 @@ func (r *Result) fail(f Failure) {
 	}
 }
 
-// parseRun parses run, one run of [splitDocumentRuns], with opts. It
+// parseRun parses run, one run of [splitDocumentRuns], in mode with opts. It
 // returns the [Failure] of a run the parser rejects or panics on. The
 // deferred function that recovers a panic takes the stack, so the stack
 // still holds the frames of the parser.
-func parseRun(run token.Tokens, opts []parser.Option) (*ast.File, *Failure) {
+func parseRun(run token.Tokens, mode parser.Mode, opts []parser.Option) (*ast.File, *Failure) {
 	var (
 		f       *ast.File
 		failure *Failure
@@ -226,7 +239,7 @@ func parseRun(run token.Tokens, opts []parser.Option) (*ast.File, *Failure) {
 
 		var err error
 
-		f, err = parser.Parse(run, parser.ParseComments, opts...)
+		f, err = parser.Parse(run, mode, opts...)
 		if err != nil {
 			failure = &Failure{Err: err}
 		}

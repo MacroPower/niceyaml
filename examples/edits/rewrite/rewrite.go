@@ -129,10 +129,11 @@ func main() {
 	fmt.Println("\nValidate the edited document:")
 
 	// Node returns the edited document, and its errors bind in the text
-	// that the owner wrote. The owner's file spells each price as cost, so
-	// an error at a price names the line and the path that the owner
-	// knows. An error at a value that an edit wrote also names the edit.
-	// Each runs affordable on every price and reports each one that fails.
+	// that the owner wrote. An error keeps the path that the program
+	// checked. So an error at a price binds where the owner wrote the price
+	// under cost, and it shows $.menu.breakfast[0].price. An error at a
+	// value that an edit wrote also names the edit. Each runs affordable on
+	// every price and reports each one that fails.
 	prices := paths.MustParse("$.menu.*[*].price")
 	rules := niceyaml.MultiValidator(
 		niceyaml.Each(prices, niceyaml.ValidatorFunc(affordable)),

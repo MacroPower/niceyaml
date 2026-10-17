@@ -22,16 +22,17 @@ func (e *DepthError) Error() string {
 	return "document nests more than " + strconv.Itoa(e.Limit) + " levels"
 }
 
-// blockLevel is one block collection that the scan in [tooDeep] is inside
+// blockLevel is one block collection that the scan in [TooDeep] is inside
 // of.
 type blockLevel struct {
 	col int
 	seq bool
 }
 
-// tooDeep returns the first token of run that opens a level past limit,
+// TooDeep returns the first token of run that opens a level past limit,
 // and true, or nil and false when the documents of run do not nest that
-// deep. A limit of zero or less disables the check.
+// deep. A limit of zero or less disables the check. [ParseDepth] runs the
+// check on each run of documents.
 //
 // A flow collection opens a level at its "[" or "{". A block collection
 // opens one at its first key or "-" when that token stands in a column
@@ -40,7 +41,7 @@ type blockLevel struct {
 // aliasing package bounds the levels that aliases add where a reader
 // expands them, so an alias does not open a level. Each document counts
 // from zero.
-func tooDeep(run token.Tokens, limit int) (*token.Token, bool) {
+func TooDeep(run token.Tokens, limit int) (*token.Token, bool) {
 	if limit <= 0 {
 		return nil, false
 	}

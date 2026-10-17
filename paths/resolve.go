@@ -102,32 +102,51 @@ func (m match) key() match {
 	return m.with(key, nil, seg, -1)
 }
 
-// resolver walks a document for the selectors of a [Path]. Its targets map
-// holds the anchor each alias refers to. The enclosed set holds each alias
-// that lies inside the content of the anchor it refers to, other than one
-// that a `<<` merge key names. The decoder reads such an alias as null, so
-// the alias does not resolve.
+// resolver walks a document for the selectors of a [Path]. Its binding
+// function returns the [*aliasBinding] of the document, and its first call
+// reads the document. A resolver that follows no alias and weighs no match
+// against the size of the document thus never reads it.
 //
 // The keys map holds the [*mappingKeys] of each mapping that a lookup or a
 // recursive walk has read. A later lookup or walk in that mapping thus
 // finds a key without reading its entries again. A [Resolver] can serve
-// several goroutines, so the map is a [sync.Map].
+// several goroutines, so the map is a [sync.Map], and the binding function
+// reads the document once.
+//
+// Create instances with [newResolver].
+type resolver struct {
+	binding func() *aliasBinding
+	// Returns the value of the anchor of a name that a reference document
+	// defines, as [WithReferenceAnchors] sets it, or nil.
+	references func(name string) (ast.Node, bool)
+	keys       sync.Map
+}
+
+// aliasBinding holds what a [resolver] reads from the aliases of its
+// document. The targets map holds the anchor each alias refers to. The
+// enclosed set holds each alias that lies inside the content of the anchor
+// it refers to, other than one that a `<<` merge key names. The decoder
+// reads such an alias as null, so the alias does not resolve.
 //
 // The nodes field counts the nodes of the document. [resolver.excessive]
 // weighs the matches of a selector against that count, and
 // [resolver.excessiveMerging] weighs the merge reads of a selector or of
 // an [EntryFinder] against it.
-//
-// Create instances with [newResolver].
-type resolver struct {
+type aliasBinding struct {
 	targets  map[*ast.AliasNode]*ast.AnchorNode
 	enclosed map[*ast.AliasNode]bool
-	// Returns the value of the anchor of a name that a reference document
-	// defines, as [WithReferenceAnchors] sets it, or nil.
-	references func(name string) (ast.Node, bool)
-	keys       sync.Map
-	nodes      int
+	nodes    int
 }
+
+// noBinding returns the binding of a [resolver] without a document, which
+// holds no alias and no node. Every such resolver shares it and only reads
+// it.
+func noBinding() *aliasBinding {
+	return emptyBinding
+}
+
+// emptyBinding is the binding that [noBinding] returns.
+var emptyBinding = &aliasBinding{}
 
 // mappingKeys indexes the entries of one mapping for [resolver.lookup] and
 // [recursiveWalk.descend]. The names map holds the index of the last entry
@@ -195,7 +214,13 @@ func (k *mappingKeys) mergeAfter(i int) bool {
 	return len(k.merges) > 0 && k.merges[len(k.merges)-1] > i
 }
 
-// newResolver creates a new [*resolver] for doc.
+// newResolver creates a new [*resolver] for doc. The first call of its
+// binding function reads doc with [bindAliases].
+func newResolver(doc *ast.DocumentNode) *resolver {
+	return &resolver{binding: sync.OnceValue(func() *aliasBinding { return bindAliases(doc) })}
+}
+
+// bindAliases returns the [*aliasBinding] of doc.
 //
 // It binds each alias to the last anchor of its name before it in doc. An
 // anchor counts from where it starts and again where its content ends.
@@ -211,10 +236,10 @@ func (k *mappingKeys) mergeAfter(i int) bool {
 // describes. The go-yaml decoder binds some aliases of reused anchor names
 // otherwise, as the package documentation describes.
 //
-// After it binds every alias, newResolver counts the nodes of doc,
+// After it binds every alias, bindAliases counts the nodes of doc,
 // comments included. It also calls [enclosedAliases] to find the aliases
 // that lie inside the content of the anchor they refer to.
-func newResolver(doc *ast.DocumentNode) *resolver {
+func bindAliases(doc *ast.DocumentNode) *aliasBinding {
 	b := &aliasBinder{
 		anchors: newAnchorSet(),
 		targets: map[*ast.AliasNode]*ast.AnchorNode{},
@@ -236,7 +261,7 @@ func newResolver(doc *ast.DocumentNode) *resolver {
 		return true
 	})
 
-	return &resolver{targets: b.targets, enclosed: enclosedAliases(doc, b.targets, b.merges), nodes: nodes}
+	return &aliasBinding{targets: b.targets, enclosed: enclosedAliases(doc, b.targets, b.merges), nodes: nodes}
 }
 
 // enclosedAliases returns the aliases of doc that lie inside the content
@@ -852,8 +877,10 @@ func (r *resolver) selected(node ast.Node) (ast.Node, error) {
 		case *ast.AnchorNode:
 			node = n.Value
 		case *ast.AliasNode:
-			target, ok := r.targets[n]
-			if !ok || r.enclosed[n] {
+			b := r.binding()
+
+			target, ok := b.targets[n]
+			if !ok || b.enclosed[n] {
 				return n, nil
 			}
 
@@ -944,17 +971,18 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 			}
 
 			name := tk.Value
+			b := r.binding()
 
 			switch {
 			case followed[n]:
 				return nil, &aliasError{alias: n, err: fmt.Errorf("%w: *%s forms a cycle", ErrAlias, name)}
-			case r.enclosed[n]:
+			case b.enclosed[n]:
 				return nil, &aliasError{alias: n, err: &enclosedAliasError{name: name}}
 			}
 
 			followed[n] = true
 
-			target, ok := r.targets[n]
+			target, ok := b.targets[n]
 			if !ok {
 				return nil, &aliasError{alias: n, err: r.missingAnchor(name)}
 			}
@@ -1007,7 +1035,7 @@ func (r *resolver) referenceContent(node ast.Node) (ast.Node, bool) {
 		case *ast.TagNode:
 			node = n.Value
 		case *ast.AliasNode:
-			if target, ok := r.targets[n]; ok {
+			if target, ok := r.binding().targets[n]; ok {
 				node = target.Value
 
 				continue
@@ -1189,8 +1217,18 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 // the document at most one time. Only aliases can thus take count past the
 // number of nodes in the document. [aliaslimit.Excessive] weighs the
 // matches past that number as the nodes that aliases repeat in a decode.
+//
+// The aliased matches are those past the nodes of the document, so count
+// bounds them. Where the limit allows count, excessive leaves the nodes of
+// the document uncounted.
 func (r *resolver) excessive(count int) bool {
-	return aliaslimit.Excessive(r.nodes, max(count-r.nodes, 0))
+	if aliaslimit.Allows(count) {
+		return false
+	}
+
+	nodes := r.binding().nodes
+
+	return aliaslimit.Excessive(nodes, max(count-nodes, 0))
 }
 
 // lookupReads holds what the key lookups of one selector, or of one
@@ -1230,7 +1268,7 @@ const (
 // document passes the limit when the chain that each lookup reads grows
 // with the document. Reads then grow with the square of its nodes.
 func (r *resolver) excessiveMerging(reads int) bool {
-	return reads > max(mergeReadFloor, mergeReadFactor*r.nodes)
+	return reads > mergeReadFloor && reads > mergeReadFactor*r.binding().nodes
 }
 
 // uniqueMatches returns the first match of each entry or element, in the
@@ -1660,7 +1698,9 @@ func (r *resolver) lookupMerge(
 // keys do not resolve, a path through name does not select any entry, so
 // overridden also reports true. Its lookup adds to the count of reads as
 // [resolver.lookup] describes. Overridden returns the [ErrExcessiveMerging]
-// that lookup returns.
+// that lookup returns. It also returns the error of lookup at an alias that
+// reads a reference document. The reference document then decides which
+// entry a path through name selects.
 func (r *resolver) overridden(
 	mapping *ast.MappingNode, keys *mappingKeys, name string, i int, reads *lookupReads,
 ) (bool, error) {
@@ -1672,7 +1712,7 @@ func (r *resolver) overridden(
 	// Lookup gives the index of the merge key for an entry that a merge
 	// source holds, so overridden compares the entries.
 	found, _, ok, err := r.lookup(mapping, name, nil, reads)
-	if errors.Is(err, ErrExcessiveMerging) {
+	if errors.Is(err, ErrExcessiveMerging) || errors.Is(err, ErrReferenceAlias) {
 		return false, err
 	}
 
@@ -1841,9 +1881,15 @@ func covers(a, b []int) bool {
 //
 // The reads field holds the [lookupReads] of the key lookups of the walk,
 // across the walks of every match.
+//
+// The undecided field holds the error of an alias that reads a reference
+// document while the walk descends into the value of a `<<` merge key whose
+// entry that document decides, as [recursiveWalk.descend] describes, or
+// nil.
 type recursiveWalk struct {
 	resolver  *resolver
 	starts    map[ast.Node][]int
+	undecided error
 	name      string
 	from      []match
 	skip      []bool
@@ -1896,6 +1942,17 @@ type recursiveWalk struct {
 // the mappings they bring in. Returns [ErrExcessiveMerging] when the
 // lookups of the walk read past the limit that [resolver.excessiveMerging]
 // applies.
+//
+// A lookup that meets an alias of a reference document cannot tell whether
+// the merge key brings in the key, so the reference document decides which
+// entry a path through the key selects. Descend then returns the error of
+// that alias, which wraps [ErrReferenceAlias], as a path through the key
+// does. For the last merge key, the reference document decides only
+// whether a path through `<<` selects the merge key. The walk fails at that
+// merge key when it lists it, and at the first entry or listed element that
+// it would visit in the value of the merge key. It does not fail at the
+// value of the merge key otherwise, because an alias there brings in
+// nothing that the walk visits.
 func (w *recursiveWalk) descend(node ast.Node, sources bool) error {
 	if astnode.IsNil(node) {
 		return nil
@@ -1921,12 +1978,20 @@ func (w *recursiveWalk) descend(node ast.Node, sources bool) error {
 				continue
 			}
 
-			overridden, err := w.resolver.overridden(n, keys, key, i, &w.reads)
-			if err != nil {
-				return err
+			if w.undecided != nil {
+				return w.undecided
 			}
 
-			if overridden {
+			overridden, err := w.resolver.overridden(n, keys, key, i, &w.reads)
+
+			undecided := error(nil)
+
+			switch {
+			case errors.Is(err, ErrReferenceAlias) && astnode.IsMergeKey(entry.Key) && !w.lists(entry, key):
+				undecided = err
+			case err != nil:
+				return err
+			case overridden:
 				continue
 			}
 
@@ -1937,7 +2002,10 @@ func (w *recursiveWalk) descend(node ast.Node, sources bool) error {
 				w.found = append(w.found, match{node: entry.Value, entry: entry, segs: segs, order: order})
 			}
 
+			w.undecided = undecided
 			err = w.descend(entry.Value, astnode.IsMergeKey(entry.Key))
+			w.undecided = nil
+
 			if err != nil {
 				return err
 			}
@@ -1952,6 +2020,10 @@ func (w *recursiveWalk) descend(node ast.Node, sources bool) error {
 			w.push(segsDepth, orderDepth, segment{kind: segmentIndex, index: i}, i)
 
 			if w.all && !sources {
+				if w.undecided != nil {
+					return w.undecided
+				}
+
 				segs, order := w.hold()
 				w.found = append(w.found, match{node: v, seq: n, index: i, segs: segs, order: order})
 			}

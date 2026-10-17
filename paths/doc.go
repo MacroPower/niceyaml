@@ -19,7 +19,8 @@
 //	key, err := r.Token(p.Key())      // the key token "name"
 //
 // [Resolver.Token] gives the one token a path points at, and an error at
-// the path binds to that token. A scalar is its own token. A mapping or a
+// the path binds to that token. A scalar is its own token, and a value that
+// holds a tag alone, as in "a: !!null", points at its tag. A mapping or a
 // sequence spans many lines, so its path points at the token that
 // introduces it. The value of a mapping entry points at the key of the
 // entry, and an element of a block sequence points at its "-". Any other
@@ -185,6 +186,19 @@
 // [ErrReferenceAlias] as well as ErrAlias. An alias key that reads one
 // takes its name from the anchor, so `*k` matches `.name` after `&k name`
 // in a reference document.
+//
+// A `<<` merge key that reads such an alias can bring in any key. The
+// reference document then decides which entry a path through a key of its
+// mapping selects. A path through a key that the mapping writes before
+// such a merge key returns an error that wraps ErrReferenceAlias. So does a
+// path through a key that the mapping does not write after every such
+// merge key. A `.*` selector on the mapping returns that error too, and so
+// does a `..name` or `..*` selector at an entry that the reference
+// document decides. At the last merge key of a mapping, the reference
+// document decides whether a path through `<<` selects the merge key or a
+// real `<<` key. A `..name` or `..*` selector then returns the error when
+// it lists the merge key, or when it reaches an entry or an element in the
+// value of the merge key.
 //
 // A `.*` selector selects every entry of a mapping, as `[*]` selects every
 // element of a sequence. One path thus reaches each job of a workflow or

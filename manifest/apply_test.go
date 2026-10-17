@@ -27,6 +27,7 @@ func planDir(t *testing.T, reg *manifest.Registry, files map[string]string) (*ma
 
 	plan, err := reg.PlanMigration(t.Context(), manifest.Path(config))
 	require.NoError(t, err)
+	requireReloads(t, reg, plan, nil)
 
 	return plan, config
 }

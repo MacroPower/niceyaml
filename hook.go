@@ -7,9 +7,11 @@ import (
 
 	"github.com/goccy/go-yaml/ast"
 
+	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // init sets the calls that niceyaml hands to its manifest and schema
@@ -41,6 +43,11 @@ func init() {
 
 		return s.bytes(), s.depth()
 	}
+	hook.AllowsDuplicateKeys = func(src any) bool {
+		s, _ := src.(*Source) //nolint:errcheck // The hook takes a *Source.
+
+		return s.allowDuplicateKeys
+	}
 	hook.Defaults = func(t reflect.Type, opts any) reflect.Value {
 		o, _ := opts.([]DecodeOption) //nolint:errcheck // The hook takes the options of a decode.
 
@@ -51,10 +58,68 @@ func init() {
 
 		return s.layerNodes()
 	}
+	hook.ReferenceName = func(n any, name string) (string, bool) {
+		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
+
+		return node.source.referenceName(name)
+	}
+	hook.ReferenceDocuments = func(n any) []any {
+		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
+
+		var out []any
+
+		for _, doc := range node.source.referenceDocuments(map[*Source]bool{}) {
+			out = append(out, doc)
+		}
+
+		return out
+	}
 	hook.AliasContent = func(n any, alias *ast.AliasNode) (ast.Node, error) {
 		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
 
 		return node.doc.aliasContent(alias)
+	}
+	hook.Content = func(n any, node ast.Node) ast.Node {
+		doc, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
+
+		return doc.doc.content(node)
+	}
+	hook.Scope = func(n any, path paths.Path, node ast.Node) any {
+		doc, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
+
+		return doc.scoped(path, node)
+	}
+	hook.OwnDecode = func(ctx context.Context, n any, text string, comments bool) (any, error) {
+		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
+
+		return node.source.ownDecode(ctx, text, comments)
+	}
+	hook.SitePath = func(n any, pos position.Position, key bool) (paths.Path, bool, bool) {
+		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
+
+		tk := node.source.lines.TokenAt(pos)
+		if tk == nil || tk.Position == nil || node.doc.err != nil {
+			return paths.Path{}, false, false
+		}
+
+		path, inKey := node.doc.pathIndex().SitePath(node.doc.pathResolver(), tk.Position.Offset, key)
+
+		return path, inKey, true
+	}
+	hook.LineBreaks = func(src any, read func(string) any) any {
+		s, _ := src.(*Source) //nolint:errcheck // The hook takes a *Source.
+
+		return s.lineBreaks.get(func() any { return read(s.Text()) })
+	}
+	hook.DecodeChanges = func(n any) bool {
+		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
+		d := node.doc
+
+		// A tree changes its document only where decodetree.Changes reports
+		// that it can, so a document without such a change does not build
+		// the tree.
+		return decodetree.Changes(d.root.Body, d.state.Facts(), len(d.node.source.references) > 0) &&
+			d.tree().Changed()
 	}
 	hook.KnownKeys = func(keys []paths.Path) any {
 		keys = slices.Clone(keys)
@@ -120,8 +185,9 @@ func (e *SourceError) relocate(r *relocation, found anchor) []error {
 	}
 
 	// The path that the message shows names the value as the home
-	// document spells it.
-	if place.HasPath && found.hasPath {
+	// document spells it. The place can give a path to an error without
+	// one, such as a refusal of the parser at a byte that an edit wrote.
+	if place.HasPath {
 		moved := &Error{err: e.err}
 		moved.path, moved.hasPath = place.Path, true
 		e.err = moved

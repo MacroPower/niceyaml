@@ -4433,18 +4433,16 @@ func (e *SourceError) isWarning() bool {
 // does not hold or at a column before the first. The message counts lines
 // and columns from 1, as the text does.
 func checkInRange(loc location, lines line.Lines) error {
-	textLine := oneBased(loc.pos.Line)
-
 	if loc.pos.Line < 0 || loc.pos.Line >= lines.Len() {
 		if lines.Len() == 0 {
-			return fmt.Errorf("%w: line %s of an empty source", ErrOutOfRange, textLine)
+			return fmt.Errorf("%w: line %s of an empty source", ErrOutOfRange, oneBased(loc.pos.Line))
 		}
 
-		return fmt.Errorf("%w: line %s not in lines 1-%d", ErrOutOfRange, textLine, lines.Len())
+		return fmt.Errorf("%w: line %s not in lines 1-%d", ErrOutOfRange, oneBased(loc.pos.Line), lines.Len())
 	}
 
 	if loc.pos.Col < 0 {
-		return fmt.Errorf("%w: column %d of line %s", ErrOutOfRange, loc.pos.Col+1, textLine)
+		return fmt.Errorf("%w: column %d of line %s", ErrOutOfRange, loc.pos.Col+1, oneBased(loc.pos.Line))
 	}
 
 	return nil

@@ -10,6 +10,8 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+
+	"go.jacobcolvin.com/niceyaml/internal/hook"
 )
 
 // ErrNoNode indicates a value that go-yaml does not encode to a YAML node.
@@ -169,7 +171,12 @@ func New(w io.Writer, opts ...Option) *Encoder {
 // Encode double-quotes each string that go-yaml otherwise writes unquoted
 // or as a literal block in a form that reads back as a different value or
 // does not parse. Such strings include ".inf", a one-line string with a
-// tab, and any string with a carriage return.
+// tab, and any string with a carriage return. Encode also double-quotes a
+// string without a tag that the core schema of YAML 1.2 reads as another
+// value when it is unquoted, such as "1e3", which go-yaml reads as a string
+// and YAML 1.2 reads as a float. The tag of a scalar in the YAML that a
+// marshaler returns decides how a reader reads the scalar, so Encode leaves
+// such a scalar unquoted.
 //
 // A literal block in the YAML that a marshaler returns is the exception.
 // Encode writes such a block with the indentation it had in that YAML, so
@@ -191,25 +198,34 @@ func New(w io.Writer, opts ...Option) *Encoder {
 // negative [yaml.Indent] from [WithYAMLOptions]. In both cases, Encode
 // does not write to the writer.
 func (e *Encoder) Encode(ctx context.Context, v any) error {
+	_, err := e.encode(ctx, v)
+
+	return err
+}
+
+// encode is [Encoder.Encode], and it also returns the node that it printed
+// for v. The scalars of the node hold the values that go-yaml's encoder
+// gave them.
+func (e *Encoder) encode(ctx context.Context, v any) (ast.Node, error) {
 	// After a refused write, v never reaches go-yaml, so its marshalers do
 	// not run and an encoding error cannot hide the write error.
 	err := e.writeErr()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// A comment path that does not parse is an error before v reaches
 	// go-yaml, as it is with the WithComment option of go-yaml.
 	comments, err := parseComments(e.comments)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// A go-yaml encoder keeps every anchor it has seen, even from a call
 	// that failed, so each call marshals with a fresh one.
 	node, err := yaml.NewEncoder(io.Discard, e.opts...).EncodeToNodeContext(ctx, v)
 	if err != nil {
-		return err //nolint:wrapcheck // Return the original error.
+		return nil, err //nolint:wrapcheck // Return the original error.
 	}
 
 	// The go-yaml encoder leaves a nil node where a value encodes to no
@@ -220,7 +236,7 @@ func (e *Encoder) Encode(ctx context.Context, v any) error {
 	ast.Walk(&holes, node)
 
 	if holes.found {
-		return ErrNoNode
+		return nil, ErrNoNode
 	}
 
 	// The go-yaml encoder leaves some strings unquoted in a form that
@@ -235,12 +251,12 @@ func (e *Encoder) Encode(ctx context.Context, v any) error {
 	// The comments go on after the quoting, which can replace a node.
 	err = setComments(node, comments)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	b, err := render(node)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if e.written {
@@ -251,12 +267,12 @@ func (e *Encoder) Encode(ctx context.Context, v any) error {
 	if err != nil {
 		e.err = err
 
-		return e.writeErr()
+		return nil, e.writeErr()
 	}
 
 	e.written = true
 
-	return nil
+	return node, nil
 }
 
 // Marshal returns v as one YAML document that ends in a line break. The
@@ -272,6 +288,25 @@ func Marshal(ctx context.Context, v any, opts ...Option) ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+// init sets the call that the encoder hands to the edit package, as the
+// package [hook] describes.
+//
+//nolint:gochecknoinits // The hook reaches no API, so only init can set it.
+func init() {
+	hook.Marshal = func(ctx context.Context, v, opts any) ([]byte, ast.Node, error) {
+		o, _ := opts.([]Option) //nolint:errcheck // The hook takes the options of Marshal.
+
+		var buf bytes.Buffer
+
+		node, err := New(&buf, o...).encode(ctx, v)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		return buf.Bytes(), node, nil
+	}
 }
 
 // render returns the YAML text of node, or an error when the go-yaml

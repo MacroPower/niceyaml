@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"charm.land/lipgloss/v2"
@@ -17,6 +18,12 @@ import (
 
 //go:embed demo.yaml
 var example string
+
+// milk is a milk of the menu, which both drinks read through an alias.
+type milk struct {
+	Name string `yaml:"name"`
+	Cost int    `yaml:"cost"`
+}
 
 func main() {
 	ctx := context.Background()
@@ -39,6 +46,19 @@ func main() {
 		return
 	}
 
+	// Each call of show prints the changes of the Doc to the file.
+	show := func() {
+		text, err := edit.FileText(d)
+		if err != nil {
+			lipgloss.Println(p.PrintError(err))
+
+			return
+		}
+
+		edited := niceyaml.NewSourceFromString(text)
+		lipgloss.Println(p.Print(diff.Diff(source.Lines(), edited.Lines()).Hunks(1)))
+	}
+
 	// WithLabel names the edits of one Apply in its messages.
 	label := edit.WithLabel("v2")
 	drinks := paths.MustParse("$.drinks[*]")
@@ -54,13 +74,13 @@ func main() {
 	lipgloss.Println(p.PrintError(err))
 	fmt.Println("Edited:", d.Edited())
 
-	fmt.Println("\nRefuse a second edit of a shared value:")
+	fmt.Println("\nEdit a shared value through each alias:")
 
 	// Both drinks read the milk through the alias *oat, so the first call
-	// raises the cost of the milk for every drink. The call for the Latte
-	// reads the cost that the first call wrote, and the Apply fails before
-	// it raises the cost a second time. A price rise is not a step of v2,
-	// so it takes a label of its own.
+	// raises the cost of the milk for every drink. The calls act in order,
+	// so the call for the Latte reads the cost that the first call wrote
+	// and raises it again. A price rise is not a step of v2, so it takes a
+	// label of its own.
 	err = d.Apply(ctx, drinks, func(ctx context.Context, n *edit.Node) error {
 		cost := n.At(paths.Current().Child("milk", "cost"))
 
@@ -71,7 +91,27 @@ func main() {
 
 		return cost.Set(ctx, amount+1)
 	}, edit.WithLabel("the price rise"))
-	lipgloss.Println(p.PrintError(err))
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
+
+	cost, err := d.Node().At(paths.MustParse("$.milk.cost"))
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
+
+	amount, err := cost.Decode[int](ctx)
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
+
+	fmt.Println("The milk costs", amount)
 
 	fmt.Println("\nProtect the type fields:")
 
@@ -95,13 +135,21 @@ func main() {
 	}, label)
 	lipgloss.Println(p.PrintError(err))
 
-	fmt.Println("\nRemove an anchored value:")
+	fmt.Println("\nReplace an anchored value:")
 
-	// The milk entry defines the anchor that both drinks read. Remove
-	// writes the value with its anchor at the first alias that reads it, so
-	// the alias of the Latte still reads the same milk.
-	err = d.Apply(ctx, paths.Doc().Child("milk"), func(_ context.Context, n *edit.Node) error {
-		return n.Remove()
+	// The milk entry defines the anchor that both drinks read. A Set there
+	// keeps the anchor and writes the new value after it, so both drinks
+	// read the new milk. The Set writes the whole value, so the comment
+	// inside the milk goes.
+	err = d.Apply(ctx, paths.Doc().Child("milk"), func(ctx context.Context, n *edit.Node) error {
+		m, err := n.Decode[milk](ctx)
+		if err != nil {
+			return fmt.Errorf("decode milk: %w", err)
+		}
+
+		m.Name = "Havremjölk Barista"
+
+		return n.Set(ctx, m)
 	}, label)
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
@@ -109,16 +157,63 @@ func main() {
 		return
 	}
 
-	// Each Apply that failed left the Doc as it was, so the removal is the
-	// only change to the file. The Kaffe keeps the key cost, and the milk
-	// still costs 5.
-	text, err := edit.FileText(d)
+	name, err := d.Node().At(paths.MustParse("$.drinks[1].milk.name"))
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
 
 		return
 	}
 
-	edited := niceyaml.NewSourceFromString(text)
-	lipgloss.Println(p.Print(diff.Diff(source.Lines(), edited.Lines()).Hunks(1)))
+	latte, err := name.Decode[string](ctx)
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
+
+	fmt.Println("The Latte takes", latte)
+	show()
+
+	fmt.Println("\nRemove an anchored value:")
+
+	// Both drinks still read the milk through their aliases, and the engine
+	// does not write a copy of the milk at an alias. So the Remove fails
+	// with ErrUnsupported, and the Doc stays as it was.
+	remove := func(_ context.Context, n *edit.Node) error {
+		return n.Remove()
+	}
+
+	err = d.Apply(ctx, paths.Doc().Child("milk"), remove, label)
+	lipgloss.Println(p.PrintError(err))
+	fmt.Println("Unsupported:", errors.Is(err, edit.ErrUnsupported))
+
+	// The error asks for a Set of each alias to the value that it reads
+	// first. A Set at an alias replaces the alias, so after those Sets no
+	// alias reads the milk, and the Remove passes.
+	err = d.Apply(ctx, paths.MustParse("$.drinks[*].milk"), func(ctx context.Context, n *edit.Node) error {
+		m, err := n.Decode[milk](ctx)
+		if err != nil {
+			return fmt.Errorf("decode milk: %w", err)
+		}
+
+		return n.Set(ctx, m)
+	}, label)
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
+
+	err = d.Apply(ctx, paths.Doc().Child("milk"), remove, label)
+	if err != nil {
+		lipgloss.Println(p.PrintError(err))
+
+		return
+	}
+
+	// Each Apply that failed left the Doc as it was. So the price rise, the
+	// new milk, the Sets of the aliases, and the removal are the only
+	// changes to the file. The Kaffe keeps the key cost, and the milk costs
+	// 7.
+	show()
 }

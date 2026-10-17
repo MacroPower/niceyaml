@@ -6,11 +6,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"reflect"
 	"runtime/debug"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -892,6 +894,52 @@ func (n *Node) newDecoder(cfg decodeConfig, extra ...yaml.DecodeOption) *yaml.De
 	}
 
 	return yaml.NewDecoder(bytes.NewReader(nil), append(opts, extra...)...)
+}
+
+// ownDecode decodes the first document of text into an any with go-yaml's
+// decoder alone, as yaml.Unmarshal decodes it. With comments, the decoder
+// parses the text with its comments, as yaml.CommentToMap asks it to. The
+// decoder parses the text itself, because its decode of a parse that it did
+// not make keeps the value that its first pass gave each anchor, so an alias
+// inside the value of its own anchor reads that value there and not the
+// anchor again. The decoder reads the text of each reference document of s,
+// and it takes a key that a mapping repeats only when s allows duplicate
+// keys. A panic of the decoder comes back as a [*PanicError].
+func (s *Source) ownDecode(ctx context.Context, text string, comments bool) (any, error) {
+	var (
+		v    any
+		err  error
+		opts []yaml.DecodeOption
+	)
+
+	for _, ref := range s.references {
+		opts = append(opts, yaml.ReferenceReaders(strings.NewReader(ref.Text())))
+	}
+
+	if s.allowDuplicateKeys {
+		opts = append(opts, yaml.AllowDuplicateMapKey())
+	}
+
+	if comments {
+		opts = append(opts, yaml.CommentToMap(yaml.CommentMap{}))
+	}
+
+	func() {
+		defer func() {
+			if p := recover(); p != nil {
+				v, err = nil, &PanicError{Value: p, Stack: debug.Stack()}
+			}
+		}()
+
+		err = yaml.NewDecoder(strings.NewReader(text), opts...).DecodeContext(ctx, &v)
+	}()
+
+	// A text without a document decodes to nil, as yaml.Unmarshal reads it.
+	if errors.Is(err, io.EOF) {
+		v, err = nil, nil
+	}
+
+	return v, err //nolint:wrapcheck // The caller names go-yaml's decoder.
 }
 
 // decodeValue decodes text, the value a [CustomUnmarshaler] function

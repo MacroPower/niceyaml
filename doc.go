@@ -1180,6 +1180,14 @@
 // path that enters the alias returns it, such as At, Node.Nodes,
 // [Node.DecodeAt], [Node.DecodeIfPresent], and [Node.Ranges].
 //
+// A `<<` merge key that reads such an alias can bring in any name, so the
+// reference document decides which names its mapping reads. A path through
+// a name that the mapping writes before the merge key returns the same
+// error. So does a path through a name that the mapping does not write after
+// every such merge key, as the go.jacobcolvin.com/niceyaml/paths package
+// describes. A decode of the Node of the mapping reads the entries that the
+// merge key brings in.
+//
 // A validator that reads a value below such an alias decodes the Node it
 // gets, as [Each] hands it, rather than call Node.DecodeAt with a path
 // through the alias:

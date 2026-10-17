@@ -137,21 +137,27 @@ func TestObject_Bind(t *testing.T) {
 	item, ok := set.Get[MenuItem]("kanelbulle")
 	require.True(t, ok)
 
+	// The migration writes a sequence over the scalar, so the item that it
+	// creates binds at the key of the sequence and keeps its path (fix20
+	// B1). The detail names the call that wrote the sequence by its path
+	// (fix21 P65).
 	err := item.Bind(niceyaml.NewError(`unknown tag "vegan"`, niceyaml.AtPath(spec.Child("tags").Index(0))))
 	assert.Equal(t, stringtest.JoinLF(
-		`config/menu.yaml:8:9: $.spec.tags: unknown tag "vegan"`,
-		"`-- cafe.jacobcolvin.com/v1 sets $.spec.tags[0] from this value",
+		`config/menu.yaml:8:3: $.spec.tags[0]: unknown tag "vegan"`,
+		"`-- cafe.jacobcolvin.com/v1 sets $.spec.tags from this value",
 		"",
 		"   6 | spec:",
 		"   7 |   cost: 45 # kr",
 		"   8 |   tags: vegan",
-		"     |         ^^^^^",
+		"     |   ^^^^",
 		"   9 | ---",
 		"  10 | apiVersion: cafe.jacobcolvin.com/v1",
 	), niceyaml.FormatError(err))
 
+	// The migration renames cost to price. The error binds where the file
+	// writes cost and keeps the path that the caller gave (fix21 P65).
 	err = item.Bind(niceyaml.NewError("too cheap", niceyaml.AtPath(spec.Child("price"))))
-	assert.Equal(t, "config/menu.yaml:7:9: $.spec.cost: too cheap", err.Error())
+	assert.Equal(t, "config/menu.yaml:7:9: $.spec.price: too cheap", err.Error())
 
 	left, err := newCafeRegistry(t).Load(t.Context(), configFS(map[string]string{
 		"cafe.yaml": stringtest.LinesLF(
@@ -194,7 +200,7 @@ func TestObject_Bind(t *testing.T) {
 		firstTwoLines(niceyaml.FormatError(err)))
 
 	err = hours.Bind(niceyaml.NewError("too early", niceyaml.AtPath(spec.Child("open"))))
-	assert.Equal(t, "config/hours.yaml:6:10: $.spec.opens: too early", firstLine(niceyaml.FormatError(err)))
+	assert.Equal(t, "config/hours.yaml:6:10: $.spec.open: too early", firstLine(niceyaml.FormatError(err)))
 
 	t.Run("a value behind an alias to a reference document", func(t *testing.T) {
 		t.Parallel()
