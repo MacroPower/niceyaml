@@ -51,6 +51,12 @@
 //	view := result.Unified()
 //	result.Carry(view, beforeView, afterView)
 //
+// [Result.Hunks] picks its rows from the changes alone. [Result.HunksOf]
+// forms a hunk around each mark of a view as well, so an error on an
+// unchanged line shows in the hunks:
+//
+//	hunks := result.HunksOf(view, 3)
+//
 // A diff compares lines by their content without line endings, so a change
 // from LF to CRLF endings or a missing final newline is not a difference.
 //

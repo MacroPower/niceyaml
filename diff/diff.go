@@ -256,6 +256,8 @@ type Origin struct {
 // directly:
 //   - [Result.Unified] returns all lines in unified diff format.
 //   - [Result.Hunks] returns only the changed lines with context.
+//   - [Result.HunksOf] returns the changed lines and the lines that a
+//     decorated view marks, with context.
 //   - [Result.Before] and [Result.After] return aligned views
 //     for side-by-side rendering.
 //
@@ -402,30 +404,69 @@ func (r *Result) Unified() *line.View {
 //
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another.
+//
+// Hunks picks its rows from the changes alone. [Result.HunksOf] also picks
+// the rows that a decorated view marks, such as an error that
+// [Result.Carry] copies onto an unchanged row.
 func (r *Result) Hunks(context int) *line.View {
+	return r.HunksOf(r.Unified(), context)
+}
+
+// HunksOf returns the hunks of view, a view of [Result.Unified] that
+// carries decoration, such as the marks that [Result.Carry] copies from
+// the inputs. A hunk forms around each row that view decorates: a row with
+// a [line.Flag] other than [line.FlagDefault], an overlay, or an
+// annotation of a kind other than [kind.UIHunkHeader] and
+// [kind.UISeparator]. The flags of the unified view mark the changes, so
+// an error on an unchanged row gets a hunk of its own:
+//
+//	view := result.Unified()
+//	result.Carry(view, before, after)
+//	hunks := result.HunksOf(view, 2)
+//
+// The hunks follow the rules of [Result.Hunks]: context lines around each
+// marked row, a header above each hunk, and no hunk across a gap in
+// either side's numbering. A row the view does not hold is a gap too.
+// Context stops at it, no hunk crosses it, and each header counts only the
+// lines of each side that its hunk holds.
+//
+// Each row of the result keeps the flag, the overlays, and the annotations
+// that view gives it, except the hunk headers and the separators. HunksOf
+// adds headers of its own, so the hunks of hunks match the hunks. The
+// result keeps the clip that [line.View.Clip] gave view, as
+// [line.View.Slice] does. HunksOf panics when view is not over the content
+// of Result.Unified, as [line.View.Over] reports.
+func (r *Result) HunksOf(view *line.View, context int) *line.View {
+	if !view.Over(r.unified) {
+		panic("diff: HunksOf: view is not a view of this Result")
+	}
+
 	var (
 		spans position.Spans
 		parts []consecutivePart // The part that holds each span.
 	)
 
 	for _, part := range r.consecutiveParts() {
-		var changes []int
+		for _, run := range heldRuns(view, part.ops) {
+			var marked []int
 
-		for i := part.ops.Start; i < part.ops.End; i++ {
-			if r.ops[i].kind != lcs.OpEqual {
-				changes = append(changes, i)
+			for i := run.Start; i < run.End; i++ {
+				if hunkMarked(view, i) {
+					marked = append(marked, i)
+				}
 			}
-		}
 
-		// Each change takes its context lines from its own part, so no
-		// hunk reaches across a gap in either side's numbering.
-		for _, span := range position.ContextSpans(changes, context, part.ops.End).Clamp(part.ops.Start, part.ops.End) {
-			spans = append(spans, span)
-			parts = append(parts, part)
+			// Each marked row takes its context lines from its own run of
+			// held rows in its own part. No hunk thus reaches across a row
+			// the view does not hold or a gap in either side's numbering.
+			for _, span := range position.ContextSpans(marked, context, run.End).Clamp(run.Start, run.End) {
+				spans = append(spans, span)
+				parts = append(parts, part)
+			}
 		}
 	}
 
-	view := r.Unified().Slice(spans...)
+	hunks := r.Unified().Slice(spans...).Clip(view.ClipCols())
 
 	// The spans come in order, so one pass over the ops counts the lines
 	// each side holds before each hunk and within it.
@@ -447,7 +488,7 @@ func (r *Result) Hunks(context int) *line.View {
 		}
 
 		// The hunk header goes above the first line of each hunk.
-		view.Annotate(span.Start, line.Annotation{
+		hunks.Annotate(span.Start, line.Annotation{
 			Content:   r.formatHunkHeader(parts[i], beforeIdx, beforeCount, afterIdx, afterCount),
 			Kind:      kind.UIHunkHeader,
 			Placement: line.Above,
@@ -457,7 +498,68 @@ func (r *Result) Hunks(context int) *line.View {
 		afterIdx += afterCount
 	}
 
-	return view
+	// Each row takes the decoration of view after the header, so the
+	// header stays above the marks, as Carry keeps it. The headers and the
+	// separators that a view of hunks carries need not match the hunks of
+	// the result, so they stay out.
+	for i := range hunks.All() {
+		hunks.SetFlag(i, view.Flag(i))
+
+		if o := view.Overlays(i); len(o) > 0 {
+			hunks.AddLineOverlay(i, o...)
+		}
+
+		for _, a := range view.Annotations(i) {
+			if !isHunkMark(a) {
+				hunks.Annotate(i, a)
+			}
+		}
+	}
+
+	return hunks
+}
+
+// heldRuns returns the runs of consecutive rows within ops that view
+// holds, in order.
+func heldRuns(view *line.View, ops position.Span) []position.Span {
+	var (
+		runs []position.Span
+		run  = position.NewSpan(ops.Start, ops.Start)
+	)
+
+	for i := ops.Start; i < ops.End; i++ {
+		if !view.Contains(i) {
+			if run.End > run.Start {
+				runs = append(runs, run)
+			}
+
+			run = position.NewSpan(i+1, i+1)
+
+			continue
+		}
+
+		run.End = i + 1
+	}
+
+	if run.End > run.Start {
+		runs = append(runs, run)
+	}
+
+	return runs
+}
+
+// hunkMarked reports whether row i of view carries a flag, an overlay, or
+// an annotation of a kind other than the ones [isHunkMark] reports.
+func hunkMarked(view *line.View, i int) bool {
+	return view.Flag(i) != line.FlagDefault || len(view.Overlays(i)) > 0 ||
+		slices.ContainsFunc(view.Annotations(i), func(a line.Annotation) bool { return !isHunkMark(a) })
+}
+
+// isHunkMark reports whether a is a hunk header, of kind
+// [kind.UIHunkHeader], or a separator, of kind [kind.UISeparator], as a
+// view of hunks carries them.
+func isHunkMark(a line.Annotation) bool {
+	return a.Kind == kind.UIHunkHeader || a.Kind == kind.UISeparator
 }
 
 // consecutivePart is a run of a diff's ops within which each side's lines

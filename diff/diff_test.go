@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"iter"
+	"strings"
 	"sync"
 	"testing"
 
@@ -848,6 +849,236 @@ func TestDiffer_Hunks(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDiffResult_HunksOf(t *testing.T) {
+	t.Parallel()
+
+	// The diff changes l2 of fourteen lines, so the unified view shows the
+	// before and after l2 on rows 1 and 2, and l12 on row 12.
+	lines := make([]string, 0, 14)
+	for n := 1; n <= 14; n++ {
+		lines = append(lines, fmt.Sprintf("l%d: %d", n, n))
+	}
+
+	before := stringtest.LinesLF(lines...)
+
+	lines[1] = "l2: changed"
+	after := stringtest.LinesLF(lines...)
+
+	// The func errorAt marks the columns cols of line i of the after
+	// revision with an error, as a validation of that revision does.
+	errorAt := func(i int, cols position.Span) func(result *diff.Result, beforeView, afterView *line.View) *line.View {
+		return func(result *diff.Result, beforeView, afterView *line.View) *line.View {
+			afterView.Annotate(i, yamltest.ErrorAnnotation(cols, "bad"))
+
+			view := result.Unified()
+			result.Carry(view, beforeView, afterView)
+
+			return view
+		}
+	}
+
+	tcs := map[string]struct {
+		view    func(result *diff.Result, beforeView, afterView *line.View) *line.View
+		want    string
+		context int
+	}{
+		"unified view gives the hunks of the changes": {
+			view: func(result *diff.Result, _, _ *line.View) *line.View { return result.Unified() },
+			want: stringtest.JoinLF(
+				"     | @@ -1,3 +1,3 @@",
+				"   1 | l1: 1",
+				"   2 | l2: 2",
+				"   2 | l2: changed",
+				"   3 | l3: 3",
+			),
+			context: 1,
+		},
+		"error on an unchanged row gets a hunk of its own": {
+			view: errorAt(11, position.NewSpan(5, 7)),
+			want: stringtest.JoinLF(
+				"     | @@ -1,3 +1,3 @@",
+				"   1 | l1: 1",
+				"   2 | l2: 2",
+				"   2 | l2: changed",
+				"   3 | l3: 3",
+				"     | @@ -11,3 +11,3 @@",
+				"  11 | l11: 11",
+				"  12 | l12: 12",
+				"     |      ^^ bad",
+				"  13 | l13: 13",
+			),
+			context: 1,
+		},
+		"error with no context": {
+			view: errorAt(11, position.NewSpan(5, 7)),
+			want: stringtest.JoinLF(
+				"     | @@ -2 +2 @@",
+				"   2 | l2: 2",
+				"   2 | l2: changed",
+				"     | @@ -12 +12 @@",
+				"  12 | l12: 12",
+				"     |      ^^ bad",
+			),
+		},
+		"error near a change joins its hunk": {
+			view: errorAt(3, position.NewSpan(4, 5)),
+			want: stringtest.JoinLF(
+				"     | @@ -1,5 +1,5 @@",
+				"   1 | l1: 1",
+				"   2 | l2: 2",
+				"   2 | l2: changed",
+				"   3 | l3: 3",
+				"   4 | l4: 4",
+				"     |     ^ bad",
+				"   5 | l5: 5",
+			),
+			context: 1,
+		},
+		"header stays above a carried note": {
+			view: func(result *diff.Result, beforeView, afterView *line.View) *line.View {
+				afterView.Annotate(9, line.Annotation{Content: "note", Placement: line.Above})
+
+				view := result.Unified()
+				result.Carry(view, beforeView, afterView)
+
+				return view
+			},
+			want: stringtest.JoinLF(
+				"     | @@ -2 +2 @@",
+				"   2 | l2: 2",
+				"   2 | l2: changed",
+				"     | @@ -10 +10 @@",
+				"     | note",
+				"  10 | l10: 10",
+			),
+		},
+		"hunks of hunks match the hunks": {
+			view: func(result *diff.Result, beforeView, afterView *line.View) *line.View {
+				return result.HunksOf(errorAt(11, position.NewSpan(5, 7))(result, beforeView, afterView), 1)
+			},
+			want: stringtest.JoinLF(
+				"     | @@ -1,3 +1,3 @@",
+				"   1 | l1: 1",
+				"   2 | l2: 2",
+				"   2 | l2: changed",
+				"   3 | l3: 3",
+				"     | @@ -11,3 +11,3 @@",
+				"  11 | l11: 11",
+				"  12 | l12: 12",
+				"     |      ^^ bad",
+				"  13 | l13: 13",
+			),
+			context: 1,
+		},
+		"context stops at the rows the view leaves out": {
+			view: func(result *diff.Result, _, _ *line.View) *line.View {
+				return result.Hunks(1)
+			},
+			want: stringtest.JoinLF(
+				"     | @@ -1,3 +1,3 @@",
+				"   1 | l1: 1",
+				"   2 | l2: 2",
+				"   2 | l2: changed",
+				"   3 | l3: 3",
+			),
+			context: 3,
+		},
+		// The slice leaves out row 1, the deleted l2, so the context of the
+		// inserted l2 stops there and leaves l1 out. Each header counts
+		// the lines that its hunk holds.
+		"a slice of two spans stops at the gap": {
+			view: func(result *diff.Result, _, _ *line.View) *line.View {
+				return result.Unified().Slice(position.NewSpan(0, 1), position.NewSpan(2, 6))
+			},
+			want: stringtest.JoinLF(
+				"     | @@ -3,3 +2,4 @@",
+				"   2 | l2: changed",
+				"   3 | l3: 3",
+				"   4 | l4: 4",
+				"   5 | l5: 5",
+			),
+			context: 3,
+		},
+		"a slice without the inserted row": {
+			view: func(result *diff.Result, _, _ *line.View) *line.View {
+				return result.Unified().Slice(position.NewSpan(0, 2), position.NewSpan(3, 6))
+			},
+			want: stringtest.JoinLF(
+				"     | @@ -1,2 +1 @@",
+				"   1 | l1: 1",
+				"   2 | l2: 2",
+			),
+			context: 3,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			beforeView := niceyaml.NewSourceFromString(before).View()
+			afterView := niceyaml.NewSourceFromString(after).View()
+			result := diff.Diff(beforeView, afterView)
+
+			view := tc.view(result, beforeView, afterView)
+			assert.Equal(t, tc.want, result.HunksOf(view, tc.context).String())
+		})
+	}
+}
+
+func TestDiffResult_HunksOf_KeepsClip(t *testing.T) {
+	t.Parallel()
+
+	long := "k: " + strings.Repeat("x", 60)
+
+	tcs := map[string]struct {
+		before, after string
+		// The row of the unified view that shows the long line. An error
+		// marks a column near its end.
+		row int
+	}{
+		"long row inside a hunk": {
+			before: stringtest.LinesLF("a: 1", long),
+			after:  stringtest.LinesLF("a: 2", long),
+			row:    2,
+		},
+		// The hunk header sits above the long row, and the clip does not
+		// center a window on it.
+		"long row that starts a hunk": {
+			before: stringtest.LinesLF("a: 1", "b: 2", "c: 3", long),
+			after:  stringtest.LinesLF("a: 2", "b: 2", "c: 3", long),
+			row:    4,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			result := yamltest.Diff(tc.before, tc.after)
+
+			view := result.Unified()
+			view.Annotate(tc.row, yamltest.ErrorAnnotation(position.NewSpan(50, 51), "bad"))
+
+			clipped := view.Clip(20)
+			hunks := result.HunksOf(clipped, 0)
+
+			assert.Equal(t, 20, hunks.ClipCols())
+			assert.Equal(t, clipped.Windows(tc.row), hunks.Windows(tc.row))
+			assert.Equal(t, result.HunksOf(view, 0).Clip(20).String(), hunks.String())
+		})
+	}
+}
+
+func TestDiffResult_HunksOf_Panics(t *testing.T) {
+	t.Parallel()
+
+	result := yamltest.Diff("a: 1\n", "a: 2\n")
+	other := niceyaml.NewSourceFromString("a: 1\n").View()
+
+	require.Panics(t, func() { result.HunksOf(other, 1) })
 }
 
 func TestDiffResult_HunksKeepUnifiedIndices(t *testing.T) {

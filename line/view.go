@@ -553,6 +553,13 @@ func isSeparator(a Annotation) bool {
 	return a.Kind == kind.UISeparator
 }
 
+// marksWindow reports whether a is a mark that [View.Windows] centers a
+// window on. Separators and the hunk headers of a diff label the line
+// they sit above, not a column of it.
+func marksWindow(a Annotation) bool {
+	return a.Kind != kind.UISeparator && a.Kind != kind.UIHunkHeader
+}
+
 // Clip returns a copy of the [View] that shows part of each line longer
 // than cols columns. The copy shows a window of cols columns around each
 // mark on such a line, with "..." in place of each run of columns it
@@ -561,10 +568,11 @@ func isSeparator(a Annotation) bool {
 // marks, thus renders as a row of bounded length.
 //
 // A mark is the first column of an [Overlay], or of the [Annotation.Cols]
-// of an annotation of a kind other than [kind.UISeparator]. A line without
-// a mark keeps its first cols columns. A window centers on its mark and
-// moves to stay inside the line. An overlay longer than its window
-// therefore shows the columns from its start that the window holds.
+// of an annotation of a kind other than [kind.UISeparator] or
+// [kind.UIHunkHeader]. A line without a mark keeps its first cols columns.
+// A window centers on its mark and moves to stay inside the line. An
+// overlay longer than its window therefore shows the columns from its
+// start that the window holds.
 //
 // The "..." marker takes three columns, so windows that overlap or lie
 // three columns or fewer apart join into one. For the same reason, a
@@ -635,7 +643,7 @@ func (v *View) Windows(i int) position.Spans {
 	}
 
 	for _, a := range v.annotations[i] {
-		if !isSeparator(a) {
+		if marksWindow(a) {
 			marks = append(marks, a.Cols.Start)
 		}
 	}

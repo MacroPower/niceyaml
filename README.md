@@ -106,7 +106,7 @@ The catalog example looks up a [theme][niceyaml/style/theme] by name for a `-the
 - [examples/diffs](examples/diffs)
 - [examples/review](examples/review)
 
-The review example diffs one document of a file, so the gutter keeps the line numbers of the file. It carries the validation errors of each revision onto the diff and prints the two revisions side by side.
+The review example diffs one document of a file, so the gutter keeps the line numbers of the file. It carries the validation errors of each revision onto the diff, prints the hunks around the changes and the errors, and prints the two revisions side by side.
 
 ### Finder
 

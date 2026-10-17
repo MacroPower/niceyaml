@@ -1706,6 +1706,20 @@ func TestView_Clip(t *testing.T) {
 				"     |         ^",
 			},
 		},
+		"hunk header is no mark": {
+			input: letters,
+			cols:  10,
+			marks: []position.Span{position.NewSpan(40, 41)},
+			annotations: []line.Annotation{
+				{Content: "@@ -1 +1 @@", Kind: kind.UIHunkHeader, Placement: line.Above},
+			},
+			windows: position.Spans{position.NewSpan(35, 45)},
+			want: []string{
+				"     | @@ -1 +1 @@",
+				"   1 | ...EFGHIJKLMN...",
+				"     |         ^",
+			},
+		},
 		"wide runes count one column and take two cells": {
 			input:   "k: " + strings.Repeat("日本語", 8),
 			cols:    8,

@@ -88,11 +88,15 @@ func main() {
 	fmt.Println("\nPrint the hunks with the errors of both revisions:")
 
 	// A diff reads the lines of its inputs and ignores their marks. Carry
-	// copies the marks of each input view onto the rows that show its
-	// lines. An unchanged row shows the line of the after revision, so it
-	// takes the marks of that revision alone.
-	hunks := result.Hunks(1)
-	result.Carry(hunks, viewBefore, viewAfter)
+	// copies the marks of each input view onto the rows of the unified
+	// view that show its lines. An unchanged row shows the line of the
+	// after revision, so it takes the marks of that revision alone.
+	// HunksOf forms a hunk around each change and around each mark, so an
+	// error on an unchanged line shows too.
+	unified := result.Unified()
+	result.Carry(unified, viewBefore, viewAfter)
+
+	hunks := result.HunksOf(unified, 1)
 	lipgloss.Println(p.Print(hunks))
 
 	fmt.Println("\nFind the row that shows each error:")
@@ -109,10 +113,9 @@ func main() {
 	// UnifiedRow reports false for a line that its input does not hold. A
 	// viewer skips such an error, as it skips an error without a position.
 	//
-	// Hunks pick their rows from the changes alone, and Carry adds marks
-	// but does not add rows. An error on an unchanged line outside the
-	// context of every change thus stays out of the hunks. Contains reports
-	// whether a hunk shows the row.
+	// HunksOf forms a hunk around each error that the unified view shows,
+	// so each such row lands in a hunk. Contains reports whether a hunk
+	// shows the row.
 	errs := map[diff.Side]error{diff.Before: errBefore, diff.After: errAfter}
 	for _, side := range []diff.Side{diff.Before, diff.After} {
 		for problem := range niceyaml.Problems(errs[side]) {
