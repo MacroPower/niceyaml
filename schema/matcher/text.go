@@ -17,22 +17,22 @@ type textMatcher struct {
 // Text creates a new [Matcher] that matches documents whose scalar at
 // path holds text that match accepts.
 //
-// Match calls match with the string the scalar holds, quoted or plain.
-// A plain number or bool keeps its spelling, so swagger: 2.0 gives "2.0"
-// and python: 3.10 gives "3.10", where a decode into a string gives "2"
-// and "3.1". A quoted scalar gives the characters its escapes name, so
-// "a\tb" gives a tab between its letters. A block scalar gives its lines
-// with the line breaks its header keeps, so a `|` scalar that holds 1.10
-// gives "1.10\n". A tag that makes a quoted scalar a number or a bool
-// respells it, so !!float "1.10" gives "1.1".
+// Match calls match with the string that the scalar holds, quoted or
+// plain. A plain number or bool keeps its spelling, so swagger: 2.0 gives
+// "2.0" and python: 3.10 gives "3.10". A decode into a string gives "2"
+// and "3.1" instead. A quoted scalar gives the characters that its escapes
+// name, so "a\tb" gives a tab between its letters. A block scalar gives
+// its lines with the line breaks that its header keeps, so a `|` scalar
+// that holds 1.10 gives "1.10\n". A tag that makes a quoted scalar a
+// number or a bool respells it, so !!float "1.10" gives "1.1".
 //
-// A null, a mapping, and a sequence hold no text, so none of them
-// matches and Match calls match for none. The same goes for a document
+// Nulls, mappings, and sequences do not hold text, so they do not match,
+// and Match does not call match for them. The same goes for a document
 // without the path. The path resolves as it does for [Content]. Match
 // returns an error where [Content] does, and it refuses the documents
 // that [Content] refuses for their aliases.
 //
-// Panics if match is nil.
+// Text panics if match is nil.
 //
 //	// Matches apiVersion: apps/v1 and apiVersion: apps/v1beta1.
 //	matcher.Text(paths.Doc().Child("apiVersion"), func(text string) bool {

@@ -19,9 +19,9 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// Scalar is the set of types a want of [Content] may have: a string, a
-// bool, an integer, or a float, or a type defined on one of them, such
-// as [time.Duration].
+// Scalar is the set of types that the want of [Content] can have. It holds
+// the string, bool, integer, and float types, and every type defined on
+// one of them, such as [time.Duration].
 type Scalar interface {
 	~string | ~bool |
 		~int | ~int8 | ~int16 | ~int32 | ~int64 |
@@ -36,53 +36,53 @@ type contentMatcher[T Scalar] struct {
 }
 
 // Content creates a new [Matcher] that matches documents whose scalar at
-// path holds want. The type of want decides how Match reads the scalar.
-//
-// A string matches the text of the scalar, quoted or plain, as [Text]
-// reads it. A plain number or bool keeps its spelling, so "1.10" matches
-// version: 1.10 and "1.1" does not.
-//
-// A number matches a scalar that YAML reads as a number, and a bool
-// matches one that YAML reads as a bool, each by its value. So 16
-// matches version: 0x10 and 1.0 matches version: 1, but 2 does not match
-// version: "2", which is a string. An integer matches no value with a
-// fraction, and a NaN matches .nan.
-//
-// A type defined on a string, a bool, or a number reads as that type
-// does. A type that decodes itself, through an UnmarshalYAML or
-// UnmarshalText method, matches the value its own decode gives, and so
-// does a [time.Duration], which reads from text such as 5s and never
-// from a number. A type with a Validate method validates the value Match
-// reads, as a decode into it does, and Match returns the error of a
-// value that fails.
-//
-// A null, a mapping, and a sequence match no want. Neither does a
-// document without the path, or a scalar that does not read as the type
-// of want. To match a null, use a [Func], as its example does. To test
-// the text of a scalar rather than compare it, use [Text].
-//
-// The path resolves as [niceyaml.Node.At] resolves it: a `$` path from
-// the root of the document, and an `@` path from the Node the matcher
-// gets. A path that cannot resolve comes back as the error, so a
-// registry stops at the document rather than routing it elsewhere. Such
-// a path holds a wildcard selector, or an alias that names no anchor
-// before it in the document. The error of a context that ended comes
-// back too, and so does the error of a panic in an UnmarshalYAML or
-// UnmarshalText method of the type of want, which holds a
-// [niceyaml.PanicError].
-//
-// Match also refuses a document whose aliases would make the read cost
-// far more than the document holds, unless [niceyaml.WithAliasLimit]
-// turned the limit off for its source. It refuses such a document before
-// it decodes anything, as a decode does. The document is at fault for
-// that error, as [niceyaml.IsInvalid] describes, and it matches
-// [go.jacobcolvin.com/niceyaml/schema.ErrExcessiveAliasing]:
+// path holds want. The type of want decides how Match reads the scalar:
 //
 //	// Matches kind: Deployment.
 //	matcher.Content(paths.Doc().Child("kind"), "Deployment")
 //
 //	// Matches version: 1.0 and version: 1.
 //	matcher.Content(paths.Doc().Child("version"), 1.0)
+//
+// A string matches the text of the scalar, quoted or plain, as [Text]
+// reads it. A plain number or bool keeps its spelling, so "1.10" matches
+// version: 1.10 and "1.1" does not.
+//
+// Numbers and bools match by value. A number matches a scalar that YAML
+// reads as a number, and a bool matches one that YAML reads as a bool. So
+// 16 matches version: 0x10 and 1.0 matches version: 1, but 2 does not
+// match version: "2", which is a string. An integer does not match a
+// value with a fraction, and a NaN matches .nan.
+//
+// A type defined on a string, a bool, or a number reads as that
+// underlying type does. A type that decodes itself through an
+// UnmarshalYAML or UnmarshalText method matches the value that its own
+// decode gives. So does a [time.Duration], which reads from text such as
+// 5s but not from a number. When the type of want has a Validate method,
+// Match validates the value it reads, as a decode into that type does. It
+// returns the error of a value that fails.
+//
+// Nulls, mappings, and sequences do not match any want. Neither does a
+// document without the path, or a scalar that does not read as the type
+// of want. To match a null, use a [Func], as its example does. To test
+// the text of a scalar rather than compare it, use [Text].
+//
+// The path resolves as [niceyaml.Node.At] resolves it. A `$` path starts
+// from the root of the document, and an `@` path starts from the Node
+// that the matcher gets. Match returns the error of a path that cannot
+// resolve, so a registry stops at the document rather than routing it
+// elsewhere. Such a path holds a wildcard selector, or an alias that does
+// not name an earlier anchor in the document. Match also returns the error
+// of a context that ended. It returns the error of a panic in an
+// UnmarshalYAML or UnmarshalText method of the type of want too, and that
+// error holds a [*niceyaml.PanicError].
+//
+// Match also refuses a document whose aliases make the read cost far more
+// than the document holds, unless [niceyaml.WithAliasLimit] disabled the
+// limit for its source. It refuses such a document before it decodes
+// anything, as a decode does. The error marks the document at fault, as
+// [niceyaml.IsInvalid] describes, and it matches
+// [go.jacobcolvin.com/niceyaml/schema.ErrExcessiveAliasing].
 //
 // For several conditions, use [All] (AND) or [Any] (OR):
 //
@@ -128,10 +128,11 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 }
 
 // readScalar returns the node at path below doc and the value of that
-// node as the YAML types name it. The value is nil, with no error, where
-// no want matches: doc holds no node at path, the node holds a null, or
-// the decoder rejects the node. The caller decodes the node as a t next,
-// so readScalar applies the alias limit of such a decode first.
+// node as the YAML types name it. It returns a nil value and a nil error
+// when doc does not hold a node at path, when the node holds a null, or
+// when the decoder rejects the node. The matcher reports false in those
+// cases. The caller decodes the node as a t next, so readScalar applies
+// the alias limit of such a decode first.
 func readScalar(ctx context.Context, doc *niceyaml.Node, path paths.Path, t reflect.Type) (*niceyaml.Node, any, error) {
 	err := ctx.Err()
 	if err != nil {
@@ -189,24 +190,24 @@ func readScalar(ctx context.Context, doc *niceyaml.Node, path paths.Path, t refl
 	return node, raw, nil
 }
 
-// declines reports whether err, the error of a decode a matcher ran,
-// says the value does not read as the type the matcher asked for, which
-// is a no rather than a failure. An error that matches
-// [niceyaml.ErrDecode] says so, unless it holds a
-// [*niceyaml.PanicError]. A panic is a bug in code and answers nothing
-// about the document, so a matcher returns its error.
+// declines reports whether err, the error of a decode that a matcher ran,
+// says that the value does not read as the type that the matcher asked
+// for. A matcher reads such an error as a no rather than a failure. It
+// reports true for errors that match [niceyaml.ErrDecode] and do not hold
+// a [*niceyaml.PanicError]. A panic marks a bug in code rather than a
+// fault in the document, so a matcher returns its error.
 func declines(err error) bool {
 	var p *niceyaml.PanicError
 
 	return !errors.As(err, &p) && errors.Is(err, niceyaml.ErrDecode)
 }
 
-// decodeScalar returns the value node decodes to as a T, validated as a
-// decode of a T validates it. A T that [isPlain] reports decodes as the
-// basic type of its kind, which the decoder reads the same way. The
-// go-yaml decoder cannot set a float type with a name of its own from a
-// float it reads as a string, such as 1e3, and the basic type has no
-// such gap.
+// decodeScalar returns the value that node decodes to as a T, validated
+// as a decode of a T validates it. When [isPlain] reports true for T,
+// decodeScalar decodes into the basic type of the kind of T, which the
+// decoder reads the same way. The go-yaml decoder cannot set a type
+// defined on a float from a float that it reads as a string, such as
+// 1e3. It can set the basic type from such a float.
 func decodeScalar[T Scalar](ctx context.Context, node *niceyaml.Node) (T, error) {
 	var got T
 
@@ -235,8 +236,9 @@ func decodeScalar[T Scalar](ctx context.Context, node *niceyaml.Node) (T, error)
 }
 
 // matchScalar reports whether got, the value that node decoded to,
-// matches want, where raw holds the value of node as the YAML types name
-// it. Both got and want hold the type of the want that [Content] took.
+// matches want. The raw argument holds the value of node as the YAML
+// types name it. Both got and want hold the type of the want that
+// [Content] took.
 func matchScalar(node *niceyaml.Node, raw any, got, want reflect.Value) bool {
 	plain := isPlain(got.Type())
 
@@ -274,7 +276,7 @@ func matchScalar(node *niceyaml.Node, raw any, got, want reflect.Value) bool {
 }
 
 var (
-	// The basic type of each kind a [Scalar] has.
+	// The basicTypes map holds the basic type of each kind of [Scalar].
 	basicTypes = map[reflect.Kind]reflect.Type{
 		reflect.String:  reflect.TypeFor[string](),
 		reflect.Bool:    reflect.TypeFor[bool](),
@@ -293,17 +295,17 @@ var (
 		reflect.Float64: reflect.TypeFor[float64](),
 	}
 
-	// The pattern of the decimal and exponent spellings of a float in the
-	// YAML 1.2 core schema. It leaves out the infinity and NaN spellings.
-	// The decoder reads most of them as floats, and it cannot convert the
-	// rest, such as +.inf, into a number type.
+	// The floatSyntax pattern matches the decimal and exponent spellings of
+	// a float in the YAML 1.2 core schema. It leaves out the infinity and
+	// NaN spellings. The decoder reads most of those spellings as floats,
+	// and it cannot convert the rest, such as +.inf, into a number type.
 	floatSyntax = regexp.MustCompile(`^[-+]?(\.\d+|\d+(\.\d*)?)([eE][-+]?\d+)?$`)
 )
 
 // isFloatScalar reports whether raw, the value of node as the YAML types
-// name it, holds a float or a string in the YAML float syntax. The syntax
-// alone decides, so 1e999, which overflows a float64, counts. A scalar
-// the document writes as a string does not count, so "1e3" does not.
+// name it, holds a float or a string in the YAML float syntax. Only the
+// syntax decides, so 1e999, which overflows a float64, counts. A scalar
+// that the document writes as a string, such as "1e3", does not count.
 func isFloatScalar(node *niceyaml.Node, raw any) bool {
 	if isExplicitString(node, raw) {
 		return false
@@ -320,25 +322,27 @@ func isFloatScalar(node *niceyaml.Node, raw any) bool {
 }
 
 // isPlain reports whether the decoder reads t as it reads the basic type
-// of its kind, which holds when t is no [time.Duration] and its pointer
-// implements no unmarshaler the decoder honors. The decoder reads an
-// UnmarshalJSON method only when a [niceyaml.JSONUnmarshalers](true)
-// reaches the decode, and a match never passes one in its own options.
-// Methods that play no part in decoding, such as a String method, leave a
-// type plain. A [time.Duration] decodes by a rule of its own, as a type
-// with an unmarshaler does, and a type defined on one gets no such rule.
+// of its kind. It reports true when t is not [time.Duration] and its
+// pointer does not implement any of the unmarshalers that the decoder
+// honors. The decoder reads an UnmarshalJSON method only when a
+// [niceyaml.JSONUnmarshalers](true) reaches the decode, and a match never
+// passes one in its own options. Methods that do not take part in
+// decoding, such as a String method, leave a type plain. A
+// [time.Duration] decodes by a rule of its own, as a type with an
+// unmarshaler does. A type defined on [time.Duration] does not get that
+// rule.
 func isPlain(t reflect.Type) bool {
 	return t != unmarshaler.DurationType &&
 		!slices.ContainsFunc(unmarshaler.Interfaces, reflect.PointerTo(t).Implements)
 }
 
-// writtenText returns the text of the scalar node holds, where decoded
-// is the string node decodes to. The decoder respells a number or a bool
-// it reads into a string, so 1.10 becomes "1.1", 0x10 becomes "16", and
-// True becomes "true". For such a scalar, which is an integer, a float,
-// an infinity, a NaN, or a bool, writtenText returns the text as the
-// document spells it. It returns decoded for any other. It reaches the
-// scalar as [valueNode] does.
+// writtenText returns the text of the scalar that node holds. The decoded
+// argument is the string that node decodes to. The decoder respells a
+// number or a bool that it reads into a string, so 1.10 becomes "1.1",
+// 0x10 becomes "16", and True becomes "true". For an integer, a float, an
+// infinity, a NaN, or a bool, writtenText returns the text as the
+// document spells it. For any other scalar, it returns decoded. It finds
+// the scalar with [valueNode].
 func writtenText(node *niceyaml.Node, decoded string) string {
 	n, _ := valueNode(node)
 
@@ -350,11 +354,11 @@ func writtenText(node *niceyaml.Node, decoded string) string {
 	}
 }
 
-// isExplicitString reports whether node holds a scalar the document
-// writes as a string: a quoted scalar, a block scalar, or a scalar with
-// a !!str tag. It reaches the scalar as [valueNode] does. The value raw
-// holds, as the YAML types name it, must be a string, so a tag such as
-// !!int on a quoted scalar decides the type.
+// isExplicitString reports whether node holds a scalar that the document
+// writes as a string: a quoted scalar, a block scalar, or a scalar with a
+// !!str tag. It finds the scalar with [valueNode]. It reports false when
+// raw, the value as the YAML types name it, is not a string. So a tag
+// such as !!int on a quoted scalar decides the type.
 func isExplicitString(node *niceyaml.Node, raw any) bool {
 	if _, ok := raw.(string); !ok {
 		return false
@@ -378,13 +382,13 @@ func isExplicitString(node *niceyaml.Node, raw any) bool {
 	}
 }
 
-// valueNode returns the node that node selects with its anchors, tags,
-// and aliases looked through, and reports whether a !!str tag sits on the
-// way. It follows each alias to the content of its anchor, as the decoder
-// does. [niceyaml.Node.At] follows an alias at the end of a path but stops
-// at a tag on it, so the node of `version: !t *v` still holds the alias.
-// The first result is nil for an alias that does not resolve or that
-// leads back to itself.
+// valueNode looks through the anchors, tags, and aliases of node and
+// returns the node that they wrap. It also reports whether one of the
+// tags it passed is !!str. It follows each alias to the content of its
+// anchor, as the decoder does. [niceyaml.Node.At] follows an alias at the
+// end of a path but stops at a tag on it, so the node of
+// `version: !t *v` still holds the alias. The first result is nil for an
+// alias that does not resolve or that leads back to itself.
 func valueNode(node *niceyaml.Node) (ast.Node, bool) {
 	var (
 		n         = node.AST()
@@ -428,8 +432,8 @@ func valueNode(node *niceyaml.Node) (ast.Node, bool) {
 
 // isNonNumberString reports whether raw, the value of node as the YAML
 // types name it, is a string that YAML does not read as a number. Such a
-// string is a scalar the document writes as a string, or a plain scalar
-// outside the YAML float syntax, such as inf or 0x1p-2.
+// string is a scalar that the document writes as a string, or a plain
+// scalar outside the YAML float syntax, such as inf or 0x1p-2.
 func isNonNumberString(node *niceyaml.Node, raw any) bool {
 	if _, ok := raw.(string); !ok {
 		return false
@@ -448,15 +452,15 @@ func isNonNumberString(node *niceyaml.Node, raw any) bool {
 // spells out.
 const strTagURI = "tag:yaml.org,2002:str"
 
-// floatEqual reports whether a and b hold the same value, counting two
+// floatEqual reports whether a and b hold the same value. It counts two
 // NaNs as equal, so a NaN want matches a .nan in the document.
 func floatEqual(a, b float64) bool {
 	return a == b || (math.IsNaN(a) && math.IsNaN(b))
 }
 
 // floatEqualsInteger reports whether f holds exactly the value of the
-// integer v. The comparison runs in the integer's own type, since a
-// float64 cannot hold every integer above 2^53.
+// integer v. It compares the two as 64-bit integers, because a float64
+// cannot hold every integer greater than 2^53.
 func floatEqualsInteger(f float64, v reflect.Value) bool {
 	if f != math.Trunc(f) {
 		return false
@@ -478,13 +482,13 @@ func floatEqualsInteger(f float64, v reflect.Value) bool {
 }
 
 // floatHoldsInteger reports whether raw, the value as the YAML types name
-// it, can match v, the integer a decode of it gave, and reports true for
-// a raw value that holds no float. An integer never matches a float with
-// a fraction. The decoder converts a float to an integer type of its own
-// without a range check, which turns -.inf or 1e19 into the lowest or
-// highest int64 on some platforms, so the float must also hold the value
-// of v. A type that decodes itself reads the float its own way, so only
-// the fraction counts for it.
+// it, can match v, the integer that a decode of raw gave. It reports true
+// for a raw value that does not hold a float. An integer never matches a
+// float with a fraction. The decoder converts a float to an integer type
+// without a range check. On some platforms, the conversion turns -.inf or
+// 1e19 into the lowest or highest int64, so the float must also hold the
+// value of v. A type that decodes itself reads the float its own way, so
+// only the fraction counts for it.
 func floatHoldsInteger(raw any, v reflect.Value) bool {
 	f, ok := rawFloat(raw)
 	if !ok {
@@ -499,12 +503,12 @@ func floatHoldsInteger(raw any, v reflect.Value) bool {
 }
 
 // floatHoldsFloat32 reports whether raw, the value as the YAML types name
-// it, can match v, the float32 a decode of it gave, and reports true for
-// a raw value that holds no float. The decoder converts a float to a
-// float32 without a range check, which turns a finite value too large
-// for a float32, such as 1e39, into an infinity, so an infinite v
-// matches only an infinite float. A type that decodes itself reads the
-// float its own way, so floatHoldsFloat32 reports true for it.
+// it, can match v, the float32 that a decode of raw gave. It reports true
+// for a raw value that does not hold a float. The decoder converts a
+// float to a float32 without a range check. The conversion turns a finite
+// value too large for a float32, such as 1e39, into an infinity, so an
+// infinite v matches only an infinite float. A type that decodes itself
+// reads the float its own way, so floatHoldsFloat32 reports true for it.
 func floatHoldsFloat32(raw any, v reflect.Value) bool {
 	if !isPlain(v.Type()) || !math.IsInf(v.Float(), 0) {
 		return true
@@ -515,12 +519,12 @@ func floatHoldsFloat32(raw any, v reflect.Value) bool {
 	return !ok || math.IsInf(f, 0)
 }
 
-// rawFloat returns the float that raw, the value as the YAML types name
-// it, holds, and reports whether it holds one. The decoder reads some
-// plain floats, such as 25e-1 and 1e19, as strings and converts them when
-// it decodes them into an integer, so a string counts when it has the
-// YAML float syntax. A string that Go alone parses as a float, such as
-// inf or 0x1p-2, does not count.
+// rawFloat returns the float that raw holds, and reports whether raw
+// holds one. The raw argument is the value as the YAML types name it. The
+// decoder reads some plain floats, such as 25e-1 and 1e19, as strings,
+// and it converts them when it decodes them into an integer. So a string
+// counts when it has the YAML float syntax. A string that only Go parses
+// as a float, such as inf or 0x1p-2, does not count.
 func rawFloat(raw any) (float64, bool) {
 	switch v := raw.(type) {
 	case float64:

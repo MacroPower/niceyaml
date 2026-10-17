@@ -15,14 +15,15 @@ type allMatcher struct {
 }
 
 // All creates a new [Matcher] that matches if ALL sub-matchers match (AND
-// logic). Evaluation short-circuits on the first non-matching matcher, and
-// the first matcher that returns an error ends it with that error.
+// logic). Match calls the sub-matchers in order and stops at the first one
+// that does not match or that returns an error. It returns the error of
+// that sub-matcher.
 //
-// Returns true when the caller passes no matchers.
+// When matchers is empty, the matcher matches every document.
 //
-// Panics if any matcher is nil, including a nil pointer or a nil [Func].
-// The matcher keeps its own copy of matchers, so writing to the caller's
-// slice afterwards changes nothing.
+// All panics if any matcher is nil, including a nil pointer or a nil
+// [Func]. The matcher keeps its own copy of matchers, so a later write to
+// the caller's slice does not change it.
 //
 //	// Matches YAML files in k8s directories with kind: Deployment.
 //	matcher.All(

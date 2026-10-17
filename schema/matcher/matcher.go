@@ -9,26 +9,28 @@ import (
 // Matcher determines whether a schema applies to a document.
 //
 // A Matcher guards a [go.jacobcolvin.com/niceyaml/schema.Resolver] through
-// [go.jacobcolvin.com/niceyaml/schema.When], which reports
-// [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] for a document the
-// Matcher declines and returns the error of one that cannot decide, so a
-// registry moves past the first and stops at the second.
+// [go.jacobcolvin.com/niceyaml/schema.When]. The guarded resolver reports
+// [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] for a document that the
+// Matcher declines, so a registry moves on to its next resolver. It
+// returns the error of a Matcher that cannot decide, so the registry stops
+// at the document.
 //
 // See [Content], [Text], [Exists], [FilePath], [Any], [All], and [Func]
 // for implementations.
 type Matcher interface {
-	// Match reports whether the document satisfies the matcher. The error
-	// is for a matcher that cannot decide, such as one whose context ended
-	// or whose path an alias in the document leaves unresolved. A document
-	// that reads as a plain no is false with no error.
+	// Match reports whether the document satisfies the matcher. Match
+	// returns an error only when it cannot decide, such as when its context
+	// ended or when an alias in the document leaves its path unresolved.
+	// For a document that does not match, Match returns false and a nil
+	// error.
 	Match(ctx context.Context, doc *niceyaml.Node) (bool, error)
 }
 
-// Func adapts a function to the [Matcher] interface. The function below
-// matches a null at enabled, which [Content] has no want for. A document
-// without the path reads as a plain no, and so does a value the decoder
-// rejects, so the function returns false with no error for each, as
-// [Content] does:
+// Func adapts a function to the [Matcher] interface.
+//
+// The example Func matches a null at enabled, which [Content] does not
+// match for any want. Like [Content], it returns false and a nil error for
+// a document without the path and for a value that the decoder rejects:
 //
 //	enabledPath := paths.Doc().Child("enabled")
 //	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Node) (bool, error) {

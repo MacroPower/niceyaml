@@ -15,11 +15,11 @@ type existsMatcher struct {
 
 // Exists creates a new [Matcher] that matches documents that hold a node
 // at path, whatever its value. The path resolves as [niceyaml.Node.At]
-// resolves it. A key with a null or empty value is present,
-// so `kind:` and `kind: ""` both match. A document without the path does
-// not match. A path that cannot resolve, because an alias on it names no
-// anchor or it holds a wildcard selector, comes back as the error. To
-// match a particular value, use [Content].
+// resolves it. Keys with a null or empty value count as present, so
+// `kind:` and `kind: ""` both match. Documents without the path do not
+// match. Match returns the error of a path that cannot resolve. Such a
+// path holds a wildcard selector, or an alias that does not name an
+// earlier anchor. To match a particular value, use [Content].
 //
 //	// Matches documents that have a kind field.
 //	matcher.Exists(paths.Doc().Child("kind"))
