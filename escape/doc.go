@@ -2,10 +2,10 @@
 // characters.
 //
 // A terminal acts on the control characters it receives. An escape
-// sequence can clear the screen or move the cursor, and a carriage return
-// lets the text after it overwrite the start of its row. Text a program
-// did not write can hold either. The error of an unmarshaler that quotes
-// a value of the document is such a text, and so is the name of a file.
+// sequence can clear the screen or move the cursor. A carriage return lets
+// the text after it overwrite the start of its row. Text that a program
+// did not write can hold either. The error of an unmarshaler that quotes a
+// value of the document is such a text, and so is the name of a file.
 //
 // [go.jacobcolvin.com/niceyaml.FormatError] and
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] escape the
@@ -20,10 +20,10 @@
 //
 // [Control] replaces the C0 controls, U+0000 through U+001F, and DEL,
 // U+007F, each with its Unicode Control Picture, so an escape reads as
-// "␛" and DEL as "␡". The C1 controls, U+0080 through U+009F, have no
-// pictures, and each becomes the replacement character, U+FFFD. So does
-// each byte that is not valid UTF-8, which covers a C1 control written as
-// one byte, such as 0x9B.
+// "␛" and DEL as "␡". The C1 controls, U+0080 through U+009F, do not
+// have pictures, so each becomes the replacement character, U+FFFD. So
+// does each byte that is not valid UTF-8. A C1 control written as one
+// byte, such as 0x9B, is not valid UTF-8.
 //
 // Control leaves every other rune as it is. Among them are the Unicode
 // format characters, such as the right-to-left override U+202E, and the
