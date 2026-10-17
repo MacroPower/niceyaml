@@ -3,22 +3,22 @@
 // and the fields it decodes inline.
 //
 // Code that pairs the fields of a decoded struct with the entries of the
-// mapping they came from calls [Name] for each field, so it pairs them as
-// the decoder does. The fields of an inline struct sit beside the fields
-// of its parent, and go-yaml zeroes each one whose name a field of the
-// parent that is not inline also uses. [OwnNames] returns the names of
-// the parent that zero such a field.
+// mapping they came from calls [Name] for each field. So it pairs them as
+// the decoder does. The fields of an inline struct sit beside the
+// fields of its parent. Go-yaml zeroes each such field whose name a field
+// of the parent that is not inline also uses. [OwnNames] returns the
+// names of the parent that zero such a field.
 //
-// One kind of field reads no entry of the mapping. An inline field that
-// carries an alias option gets the value of the anchor a `<<` key names.
-// [ReadsAnchor] reports such a field, so the pairing code can leave its
-// struct alone. With an omitempty option beside the alias option, go-yaml
-// also leaves out the entries the `<<` keys of the mapping bring in, which
-// [IgnoresMerges] reports.
+// One kind of field does not read an entry of the mapping. An inline
+// field that carries an alias option gets the value of the anchor a `<<`
+// key names. [ReadsAnchor] reports such a field, so the pairing code can
+// leave its struct alone. With an omitempty option beside the alias
+// option, go-yaml also leaves out the entries that the `<<` keys of the
+// mapping bring in. [IgnoresMerges] reports that case.
 //
-// A search for a type the decoder can reach from another, such as one
-// with a method a decode calls, goes through [Reaches], which follows
-// the fields the decoder reads.
+// Code that searches for a type the decoder can reach from another, such
+// as a type with a method that a decode calls, uses [Reaches]. [Reaches]
+// follows the fields that the decoder reads.
 package yamlfield
 
 import (
@@ -31,8 +31,9 @@ import (
 // is inline so its own fields sit beside its siblings, and whether
 // go-yaml skips the field. It skips an unexported field that is not
 // embedded, and one whose tag is "-". The name comes from the yaml tag,
-// or the json tag when the field has no yaml tag. It is the lowercased
-// field name when neither tag names it, as go-yaml spells it.
+// or the json tag when the field lacks a yaml tag. It is the lowercased
+// field name when the tag that go-yaml reads does not name the field, as
+// go-yaml spells it.
 func Name(field reflect.StructField) (string, bool, bool) {
 	tag, skip := fieldTag(field)
 	if skip {
@@ -51,11 +52,12 @@ func Name(field reflect.StructField) (string, bool, bool) {
 
 // ReadsAnchor reports whether go-yaml fills field from an anchor in
 // place of the entries of the mapping it decodes. It does so for an
-// inline field whose tag carries an alias option that names no anchor,
-// such as `yaml:",inline,alias"`. The field gets the value of the anchor
-// that a `<<` key of the mapping names with an alias, and stays zero
-// when the mapping has no such key. Any option that starts with alias
-// and holds no = counts as that option, as it does in go-yaml.
+// inline field whose tag carries an alias option that does not name an
+// anchor, such as `yaml:",inline,alias"`. The field gets the value of the
+// anchor that a `<<` key of the mapping names with an alias, and stays
+// zero when the mapping lacks such a key. Any option that starts with
+// alias and does not hold an = counts as that option, as it does in
+// go-yaml.
 func ReadsAnchor(field reflect.StructField) bool {
 	// Few tags hold the word, so most fields return before the split.
 	tag, skip := fieldTag(field)
@@ -74,8 +76,8 @@ func ReadsAnchor(field reflect.StructField) bool {
 // merge key brings in when it decodes a mapping into t, a struct type.
 // It does so when t holds a field that [ReadsAnchor] reports and whose
 // tag carries the omitempty option too, such as
-// `yaml:",inline,alias,omitempty"`. The fields of t then read the entries
-// of the mapping itself alone.
+// `yaml:",inline,alias,omitempty"`. The fields of t then read only the
+// entries of the mapping itself.
 func IgnoresMerges(t reflect.Type) bool {
 	for field := range t.Fields() {
 		if !ReadsAnchor(field) {
@@ -92,7 +94,7 @@ func IgnoresMerges(t reflect.Type) bool {
 }
 
 // fieldTag returns the tag go-yaml reads for field, which is the yaml
-// tag, or the json tag when the field has no yaml tag. The second result
+// tag, or the json tag when the field lacks a yaml tag. The second result
 // reports whether go-yaml skips the field.
 func fieldTag(field reflect.StructField) (string, bool) {
 	if field.PkgPath != "" && !field.Anonymous {
@@ -107,9 +109,9 @@ func fieldTag(field reflect.StructField) (string, bool) {
 	return tag, tag == "-"
 }
 
-// OwnNames returns the names go-yaml decodes the fields of t, a struct
-// type, under, leaving out the fields it skips and those that are
-// inline.
+// OwnNames returns the names that go-yaml decodes the fields of t, a
+// struct type, under. It leaves out the fields that go-yaml skips and the
+// fields that are inline.
 func OwnNames(t reflect.Type) map[string]bool {
 	names := map[string]bool{}
 
@@ -122,9 +124,10 @@ func OwnNames(t reflect.Type) map[string]bool {
 	return names
 }
 
-// Reaches reports whether at finds a type that a decode into t reaches:
-// t itself, or a type the decoder reaches from t through a pointer, an
-// array or slice element, a map key or element, or a struct field it
+// Reaches reports whether at finds a type that a decode into t reaches.
+// Those types are t itself and each type that the decoder reaches from t
+// through a pointer, an array or slice element, a map key or element, or
+// a struct field. The search follows only the struct fields that go-yaml
 // does not skip, as [Name] reports. For each type, at returns whether it
 // found the type, and whether the search stops there without looking
 // below it. The search reads each type once, so it ends for a type that
