@@ -12,32 +12,34 @@ import (
 type DepthError struct {
 	// Token is the token that opens the first level past the limit.
 	Token *token.Token
-	// Limit is the number of levels a document may nest.
+	// Limit is the number of levels that a document can nest.
 	Limit int
 }
 
-// Error returns the message of e, as "document nests more than 100
+// Error returns the message of e, such as "document nests more than 100
 // levels".
 func (e *DepthError) Error() string {
 	return "document nests more than " + strconv.Itoa(e.Limit) + " levels"
 }
 
-// blockLevel is one block collection that a [depthScan] is inside of.
+// blockLevel is one block collection that the scan in [tooDeep] is inside
+// of.
 type blockLevel struct {
 	col int
 	seq bool
 }
 
 // tooDeep returns the first token of run that opens a level past limit,
-// and true, or nil and false when no document of run nests that deep. A
-// limit of zero or less turns the check off.
+// and true, or nil and false when the documents of run do not nest that
+// deep. A limit of zero or less disables the check.
 //
 // A flow collection opens a level at its "[" or "{". A block collection
-// opens one at its first key or "-", in a column deeper than the block
-// collection that holds it, or in the column of its key for a sequence
-// that is the value of a mapping entry. An alias opens no level, because
-// the aliasing package bounds the levels that aliases add where a reader
-// writes them out. Each document counts from zero.
+// opens one at its first key or "-" when that token stands in a column
+// deeper than the block collection that holds it. A sequence that is the
+// value of a mapping entry also opens one in the column of its key. The
+// aliasing package bounds the levels that aliases add where a reader
+// expands them, so an alias does not open a level. Each document counts
+// from zero.
 func tooDeep(run token.Tokens, limit int) (*token.Token, bool) {
 	if limit <= 0 {
 		return nil, false
@@ -108,7 +110,7 @@ func tooDeep(run token.Tokens, limit int) (*token.Token, bool) {
 	return nil, false
 }
 
-// enterBlock returns stack once a block entry at level opens, and whether
+// enterBlock returns stack after a block entry at level opens, and whether
 // the entry opened a level of its own rather than joining the collection
 // that holds it. An entry at a column left of a collection ends that
 // collection, and so does a key in the column of a sequence that is the
@@ -136,10 +138,10 @@ func enterBlock(stack []blockLevel, level blockLevel) ([]blockLevel, bool) {
 }
 
 // blockKeyStart returns the token that starts the key of colon, a block
-// mapping value indicator, where prev is the index in run of the token
-// before colon, or -1. It is the first anchor or tag in front of the key
-// on its line, or the key itself. A colon that opens its line, as after
-// an explicit key, starts its own entry.
+// mapping value indicator. The argument prev is the index in run of the
+// token before colon, or -1. The token is the first anchor or tag in front
+// of the key on its line, or the key itself. A colon that opens its line,
+// as after an explicit key, starts its own entry.
 func blockKeyStart(run token.Tokens, prev int, colon *token.Token) *token.Token {
 	if prev < 0 || run[prev].Position == nil || run[prev].Position.Line != colon.Position.Line {
 		return colon

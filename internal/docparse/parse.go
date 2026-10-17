@@ -22,8 +22,8 @@ type Result struct {
 	// Index maps each copy of a token that Parse hands the parser to the
 	// index of the token in the input.
 	Index map[*token.Token]int
-	// Holds each stand-in among the Docs of File. The map is nil when every
-	// run parsed.
+	// Each stand-in among the Docs of File. The map is nil when every run
+	// parsed.
 	standIns map[*ast.DocumentNode]standIn
 	// Tokens holds the copies of the input that Parse hands the parser,
 	// each at the index of its own token.
@@ -45,22 +45,23 @@ type Failure struct {
 	Run token.Tokens
 }
 
-// standIn describes a node that [Result.fail] puts in the file in place of
-// the nodes the parser would have made of a run it rejected.
+// standIn describes a node that [Result.fail] puts in the file for a run
+// that the parser rejected, in place of the nodes of that run.
 type standIn struct {
-	// The token that places the stand-in in the file, which is nil when
-	// its tokens carry no position.
+	// The token that gives the stand-in its place in the file. It is nil
+	// when the tokens of the stand-in do not carry a position.
 	anchor *token.Token
 	// The index in Failures of the run, for a stand-in that stands for a
 	// document. It is -1 for one that stands for the comments and
-	// directives the parser cuts off above a header.
+	// directives above a header, which the parser gives a node of their
+	// own.
 	failure int
 }
 
 // Parse parses tks, a stream of tokens, with [parser.ParseComments] and
 // opts. It hands the parser the copies of the tokens that
-// [tokens.ForParser] makes, so tks, which the caller shares, stays
-// untouched while the parser relinks comment tokens. Once the parser
+// [tokens.ForParser] makes. The caller shares tks, and the copies keep tks
+// untouched while the parser relinks comment tokens. After the parser
 // returns, each copy takes back the Origin and position of its own token.
 //
 // Each run of documents parses on its own, so a run the parser rejects
@@ -70,10 +71,11 @@ func Parse(tks token.Tokens, opts ...parser.Option) *Result {
 	return ParseDepth(tks, 0, opts...)
 }
 
-// ParseDepth is [Parse] with a limit on the levels a document may nest. A
+// ParseDepth is [Parse] with a limit on the levels a document can nest. A
 // run that holds a document past the limit fails with a [*DepthError] in
-// place of a parse, so the parser, whose memory grows with the square of
-// the depth, never reads it. A depth of zero or less sets no limit.
+// place of a parse. The memory of the parser grows with the square of the
+// depth, so the parser never reads such a run. A depth of zero or less
+// does not set a limit.
 func ParseDepth(tks token.Tokens, depth int, opts ...parser.Option) *Result {
 	copies := tokens.ForParser(tks)
 
@@ -149,12 +151,13 @@ func Failed(err error) *Result {
 	return r
 }
 
-// fail records f, a run the parser rejected, and adds a stand-in to the
-// file for each token group [tokens.SplitDocuments] cuts the run into, so
-// the documents of the run keep their places and tokens. The stand-in of
-// a group [isDocumentGroup] reports carries f, and any other folds into a
-// document as the node the parser cuts off does. A run with no document
-// group carries f on its first group, so f always names a document.
+// fail records f, a run the parser rejected. It adds a stand-in to the
+// file for each token group of the run, as [tokens.SplitDocuments] splits
+// it. The documents of the run thus keep their places and tokens. The
+// stand-in of a group that [isDocumentGroup] reports carries f. Any other
+// stand-in folds into a document, as a node that the parser separates
+// from its document does. A run without a document group carries f on its
+// first group, so f always names a document.
 func (r *Result) fail(f Failure) {
 	r.Failures = append(r.Failures, f)
 
@@ -233,9 +236,9 @@ func parseRun(run token.Tokens, opts []parser.Option) (*ast.File, *Failure) {
 }
 
 // isDocumentGroup reports whether group, a token group of
-// [tokens.SplitDocuments], holds a YAML document, which it does when it
-// opens with a "---" header or holds content. A group of comments,
-// directives, and "..." markers alone holds none.
+// [tokens.SplitDocuments], holds a YAML document. A group holds one when
+// it opens with a "---" header or holds content. A group of comments,
+// directives, and "..." markers alone does not hold one.
 func isDocumentGroup(group token.Tokens) bool {
 	if len(group) > 0 && group[0].Type == token.DocumentHeaderType {
 		return true
@@ -247,12 +250,12 @@ func isDocumentGroup(group token.Tokens) bool {
 // splitDocumentRuns cuts tks into runs that each parse on their own. The
 // createDocumentTokens step of the go-yaml parser
 // (v1.19.3-0.20260407131736-edee2f91616c) takes quadratic time over the
-// documents of one run, and it mishandles a scalar document below a "..."
-// marker and a "---" header right after a header or a marker. A run ends
-// after each marker that a token on a later line follows, and before each
-// header that follows a token other than a comment. A header stays in the
-// run of a directive or an anchor with no value before it, since the
-// parser rejects a run that ends in either.
+// documents of one run. It also mishandles a scalar document below a
+// "..." marker, and a "---" header right after a header or a marker. A run
+// ends after each marker that a token on a later line follows, and before
+// each header that follows a token other than a comment. A header stays in
+// the run of a directive or an anchor without a value before it, because
+// the parser rejects a run that ends in either.
 func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 	var (
 		runs  []token.Tokens
@@ -311,15 +314,18 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 }
 
 // dropStrandedComments returns run without the whole-line comments that
-// make the go-yaml parser reject or misread valid YAML, which the decoder
-// reads without comments. It drops those after a directive or a "?",
-// before a ":", ",", "]", or "}", and where a flow mapping expects a key.
-// It drops those that close a document below a scalar or flow collection,
-// or left of the first key or "-" of a block root. Below a "&" with no
-// name, only those after a directive drop. Outside a flow collection,
-// [breaksAnchor] and [takesNull] decide below an anchor with no value.
-// The dropped comments stay among the tokens of the input, where
-// [tokens.SplitDocuments] still hands them to their documents.
+// make the go-yaml parser reject or misread valid YAML. The decoder reads
+// YAML without its comments.
+//
+// It drops the comments after a directive or a "?", before a ":", ",",
+// "]", or "}", and where a flow mapping expects a key. It drops the
+// comments that close a document below a scalar or flow collection, or
+// left of the first key or "-" of a block root. Below a "&" without a
+// name, it drops only the comments after a directive. Outside a flow
+// collection, [breaksAnchor] and [takesNull] decide below an anchor
+// without a value. The dropped comments stay among the tokens of the
+// input, where [tokens.SplitDocuments] still hands them to their
+// documents.
 func dropStrandedComments(run token.Tokens) token.Tokens {
 	kept := make(token.Tokens, 0, len(run))
 
@@ -372,9 +378,10 @@ type scan struct {
 	rootCol int
 	// The index of the last anchor in run.
 	anchor int
-	// What the document the scan is in has shown so far: a token of its
-	// content, an indicator of a block mapping or a block sequence at its
-	// top level, and a directive that awaits its header.
+	// What the document the scan is in has shown so far. The content flag
+	// records a token of its content. The block flag records an indicator
+	// of a block mapping or a block sequence at its top level. The
+	// directive flag records a directive that awaits its header.
 	content, block, directive bool
 }
 
@@ -422,8 +429,8 @@ func (s *scan) read(i int) {
 }
 
 // drops reports which of the comments at run[i:next] drop when they sit
-// on lines of their own. The first result reports that all of them drop,
-// and the second that those left of rootCol drop.
+// on lines of their own. The first result reports whether all of them
+// drop, and the second whether the comments left of rootCol drop.
 func (s *scan) drops(i, next int) (bool, bool) {
 	run := s.run
 
@@ -475,10 +482,10 @@ func (s *scan) drops(i, next int) (bool, bool) {
 }
 
 // nullEmptyAnchors puts a null in place of each comment that the parser
-// took as the value of an anchor of file, with the token type and position
-// of the implicit null the parser gives an anchor with no value. The
-// go-yaml decoder would reject the comment in a typed target and give a
-// pointer a value for it.
+// took as the value of an anchor of file. The null has the token type and
+// position of the implicit null that the parser gives an anchor without a
+// value. Without the null, the go-yaml decoder rejects the comment in a
+// typed target and gives a pointer a value for it.
 func nullEmptyAnchors(file *ast.File) {
 	for _, doc := range file.Docs {
 		for _, node := range astnode.Nodes(doc) {
@@ -525,12 +532,13 @@ func startsFlowKey(tk *token.Token, flow token.Type) bool {
 	return tk.Type == token.MappingStartType || tk.Type == token.CollectEntryType
 }
 
-// breaksAnchor reports whether the comments between the anchor at run[at],
-// which has its name, and the node at run[next] change the value the
-// parser gives the anchor, or false when a token it compares has no
+// breaksAnchor reports whether the comments between the named anchor at
+// run[at] and the node at run[next] change the value the parser gives the
+// anchor. It reports false when a token it compares does not have a
 // position. The parseMapValue and parseSequenceValue steps of the parser
-// give an anchor right after a "-" or a key's ":" a null value when the
-// first whole-line comment, at run[below], starts left of the "-" or key.
+// give a null value to an anchor right after a "-" or a key's ":". They
+// do so when the first whole-line comment, at run[below], starts left of
+// the "-" or key.
 func breaksAnchor(run token.Tokens, at, below, next int) bool {
 	comment, tk := run[below], run[next]
 	if comment.Position == nil || tk.Position == nil {
@@ -570,10 +578,10 @@ func breaksAnchor(run token.Tokens, at, below, next int) bool {
 }
 
 // startsKey reports whether a key of a block mapping starts at run[at],
-// the first token on its line. That token is a "?" or a ":", or a ":"
-// follows it on its line. A "[" or "{" before that ":" makes the line a
-// flow collection, which the parser does not read as a key, so startsKey
-// reports false for it.
+// the first token on its line. A key starts there when that token is a
+// "?" or a ":", or when a ":" follows it on its line. A "[" or "{" before
+// that ":" makes the line a flow collection, which the parser does not
+// read as a key, so startsKey reports false for it.
 func startsKey(run token.Tokens, at int) bool {
 	if run[at].Type == token.MappingKeyType {
 		return true
@@ -594,11 +602,11 @@ func startsKey(run token.Tokens, at int) bool {
 	return false
 }
 
-// takesNull reports whether the parser gives the anchor at run[at], which
-// has its name, a null value when a token left of its key or "-" follows
-// it. It does so in parseMapValue and parseSequenceValue for an anchor
-// that directly follows a "-", or a key and its ":", on its line. The
-// parser rejects any other anchor that no node follows.
+// takesNull reports whether the parser gives the anchor at run[at] a null
+// value when a token left of its key or "-" follows it. The anchor has its
+// name. The parser gives that null in parseMapValue and parseSequenceValue
+// for an anchor that directly follows a "-", or a key and its ":", on its
+// line. The parser rejects any other anchor that a node does not follow.
 func takesNull(run token.Tokens, at int) bool {
 	holder, _ := anchorHolder(run, at)
 
@@ -607,8 +615,9 @@ func takesNull(run token.Tokens, at int) bool {
 
 // anchorHolder returns the index of the "-" that the anchor at run[at]
 // directly follows on its line, or of the start of the key whose ":" it
-// directly follows there, as [keyStart] finds it. The boolean reports a
-// key. It returns -1 when the anchor follows neither.
+// directly follows there, as [keyStart] finds it. The boolean reports
+// whether the anchor follows a key. It returns -1 when the anchor does
+// not follow either.
 func anchorHolder(run token.Tokens, at int) (int, bool) {
 	i := at - 1
 	if i < 0 || !sameLine(run[i], run[at]) {
@@ -628,10 +637,10 @@ func anchorHolder(run token.Tokens, at int) (int, bool) {
 }
 
 // rootColumn returns the column where the entry of the "-", "?", or ":"
-// at run[at] starts, or -1 when the token there has no position. An
-// entry starts at its "-" or "?". For a ":", it starts where [keyStart]
-// finds the start of the key, or at the ":" itself when no token of a
-// key precedes the ":" on its line.
+// at run[at] starts, or -1 when the token there does not have a position.
+// An entry starts at its "-" or "?". For a ":", it starts where
+// [keyStart] finds the start of the key, or at the ":" itself when
+// [keyStart] does not find one.
 func rootColumn(run token.Tokens, at int) int {
 	tk := run[at]
 
@@ -649,10 +658,10 @@ func rootColumn(run token.Tokens, at int) int {
 }
 
 // keyStart returns the index of the token where the key of the ":" at
-// run[colon] starts on its line: its "?", or else the first token past any
-// "-" or ":", which may be an anchor or a tag. It returns -1 when no token
-// of a key precedes the ":" on its line, or when the "?" of the key sits
-// on a line above.
+// run[colon] starts on its line. That token is its "?", or else the first
+// token past any "-" or ":", which might be an anchor or a tag. It
+// returns -1 when the ":" does not follow a token of a key on its line,
+// or when the "?" of the key sits on a line above.
 func keyStart(run token.Tokens, colon int) int {
 	start := -1
 
@@ -684,14 +693,14 @@ func keyStart(run token.Tokens, colon int) int {
 }
 
 // sameLine reports whether a and b start on the same line. It reports
-// false when either token has no position.
+// false when either token does not have a position.
 func sameLine(a, b *token.Token) bool {
 	return a.Position != nil && b.Position != nil && a.Position.Line == b.Position.Line
 }
 
 // startsBelow reports whether tk starts on a line below the line mark
-// starts on. It reports false when mark is nil or either token has no
-// position.
+// starts on. It reports false when mark is nil or either token does not
+// have a position.
 func startsBelow(tk, mark *token.Token) bool {
 	return mark != nil && tk.Position != nil && mark.Position != nil &&
 		tk.Position.Line > mark.Position.Line

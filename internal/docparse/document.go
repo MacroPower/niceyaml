@@ -18,7 +18,7 @@ import (
 // Document is one YAML document of a parsed file.
 type Document struct {
 	// Root is the node the document parsed into. For a document that did
-	// not parse, it is a stand-in with no body.
+	// not parse, it is a stand-in with a nil body.
 	Root *ast.DocumentNode
 	// Tokens holds the tokens of the whole document.
 	Tokens token.Tokens
@@ -27,8 +27,8 @@ type Document struct {
 	Positioned token.Tokens
 	// Span holds the lines the document covers.
 	Span position.Span
-	// FileIndex is the index of Root in the Docs of the file, which can
-	// differ from the index of the document, since preamble nodes fold
+	// FileIndex is the index of Root in the Docs of the file. It might
+	// differ from the index of the document, because preamble nodes fold
 	// into documents.
 	FileIndex int
 	// Preamble is the number of tokens at the start of Tokens before the
@@ -41,10 +41,11 @@ type Document struct {
 
 // Documents returns each YAML document of the file r holds, in file
 // order. The file holds a stand-in for each document the parser rejected,
-// so that document is one too, and its Failure names its run. Tks holds
-// the tokens r parsed, and lines is the number of lines they cover. The
-// comments and directives the parser cut into nodes of their own join the
-// document below them, or the last document when none follows.
+// so that document is one too, and its Failure names its run. The
+// argument tks holds the tokens r parsed, and lines is the number of lines
+// they cover. The comments and directives the parser cut into nodes of
+// their own join the document below them, or the last document when they
+// sit below it.
 func (r *Result) Documents(tks token.Tokens, lines int) []Document {
 	docs := foldPreambles(r.File.Docs, alignDocumentTokens(r.File, tks, r.standIns), r.standIns)
 	liftHeaderComments(docs)
@@ -73,8 +74,8 @@ func (r *Result) Documents(tks token.Tokens, lines int) []Document {
 
 // foldPreambles pairs each document node with its token group and folds
 // each node [isPreambleNode] reports into the next document as its
-// preamble, or into the last document when none follows. A file of such
-// nodes alone keeps the first as its one document. A stand-in that
+// preamble, or into the last document when the node follows it. A file of
+// such nodes alone keeps the first as its one document. A stand-in that
 // carries a failure stays a document, and its document takes the failure.
 func foldPreambles(
 	nodes []*ast.DocumentNode,
@@ -119,9 +120,9 @@ func foldPreambles(
 
 // liftHeaderComments moves the whole-line comments that close the tokens
 // of each document to the front of the document below when that one has
-// a "---" header. The parser leaves them with the document above, so
-// without the move a schema directive written above a header would miss
-// the preamble of the document it describes.
+// a "---" header. The parser leaves them with the document above.
+// Without the move, a schema directive written above a header misses the
+// preamble of the document it describes.
 func liftHeaderComments(docs []*Document) {
 	for i := 1; i < len(docs); i++ {
 		if docs[i].Root.Start == nil {
@@ -142,7 +143,7 @@ func liftHeaderComments(docs []*Document) {
 
 // returnSameLineComments moves the comments that open the tokens of each
 // document back to the document above when they sit on the line of its
-// last token. A comment on the line of a "..." marker is one, since it
+// last token. A comment on the line of a "..." marker is one, because it
 // starts the token group after the marker. It runs after
 // liftHeaderComments, which moves only comments on lines of their own.
 func returnSameLineComments(docs []*Document) {
@@ -188,10 +189,11 @@ func returnSameLineComments(docs []*Document) {
 }
 
 // trailingCommentsStart returns the index of the first token in the run of
-// comments that closes tks, where each comment sits on a line below the
-// last token of any other type that holds text. Returns len(tks) when no
-// comment closes tks, or when the token before the run is a "---" header,
-// whose document the comments below it belong to.
+// comments that closes tks. Each comment of the run sits on a line below
+// the last token of any other type that holds text. It returns len(tks)
+// when the run is empty. It also returns len(tks) when the token before
+// the run is a "---" header, because the comments below a header belong to
+// its document.
 func trailingCommentsStart(tks token.Tokens) int {
 	last := -1
 
@@ -222,27 +224,27 @@ func trailingCommentsStart(tks token.Tokens) int {
 }
 
 // textEndLine returns the line where the text of tk ends, past the line
-// breaks within it. The spaces, tabs, and line breaks around the text do
-// not count, since the lexer can end a token with a line break and the
-// next line's indentation, while YAML reads other Unicode spaces as text.
-// The position of tk must not be nil.
+// breaks within it. The lexer might end a token with a line break and the
+// indentation of the next line. The spaces, tabs, and line breaks around
+// the text therefore do not count. YAML reads other Unicode spaces as
+// text, so those spaces count. The position of tk must not be nil.
 func textEndLine(tk *token.Token) int {
 	return tk.Position.Line + lineend.CountBreaks(strings.Trim(tk.Origin, " \t\r\n"))
 }
 
-// isPreambleNode reports whether node is one the parser cut off from the
-// document it belongs to: a node with no "---" header whose body holds no
-// value. A node with a header and a body of comments is an explicit empty
-// document and stays one.
+// isPreambleNode reports whether node is one the parser separated from the
+// document it belongs to: a node without a "---" header whose body does
+// not hold a value. A node with a header and a body of comments is an
+// explicit empty document and stays one.
 func isPreambleNode(node *ast.DocumentNode) bool {
 	return node.Start == nil && !astnode.HasContent(node.Body)
 }
 
 // documentSpans returns the lines of a view of total lines that each token
 // group covers. A group runs from the line of its first token to the line
-// the next group starts on, the first from the top of the view and the
-// last to its end. A group after the first with no tokens covers no lines
-// and sits where the next group starts.
+// the next group starts on. The first group runs from the top of the view,
+// and the last group runs to its end. An empty group after the first gets
+// an empty span at the line where the next group starts.
 func documentSpans(groups []token.Tokens, total int) []position.Span {
 	spans := make([]position.Span, len(groups))
 
@@ -271,10 +273,11 @@ func documentSpans(groups []token.Tokens, total int) []position.Span {
 
 // alignDocumentTokens returns the tokens of each document of file, from
 // the groups [tokens.SplitDocuments] cuts tks into. It pairs them by
-// offset, since the parser and the splitter can disagree on bounds, as
-// they do on a leading "..." marker. A document anchors at the offset
-// [documentOffset] or its stand-in gives, and takes the groups no earlier
-// document took, up to the one the next document anchors in.
+// offset, because the parser and the splitter might disagree on bounds,
+// such as on a leading "..." marker. A document anchors at the offset
+// that [documentOffset] or its stand-in gives. It takes the groups that
+// earlier documents did not take, up to the one the next document anchors
+// in.
 func alignDocumentTokens(file *ast.File, tks token.Tokens, standIns map[*ast.DocumentNode]standIn) []token.Tokens {
 	var (
 		groups []token.Tokens
@@ -343,10 +346,11 @@ func alignDocumentTokens(file *ast.File, tks token.Tokens, standIns map[*ast.Doc
 	return result
 }
 
-// documentOffset returns the offset of the token that anchors doc: its header
-// token, its body's first token when it has no header, or the "..." marker
-// that ends it when it has neither, as the empty document of a stream of
-// markers alone does. The boolean is false when doc has none of them.
+// documentOffset returns the offset of the token that anchors doc. That
+// token is its header token, or its body's first token when it does not
+// have a header. When doc does not have either, the token is the "..."
+// marker that ends it, as for the empty document of a stream of markers
+// alone. The boolean is false when doc does not have any of them.
 func documentOffset(doc *ast.DocumentNode) (int, bool) {
 	if doc.Start != nil && doc.Start.Position != nil {
 		return doc.Start.Position.Offset, true
