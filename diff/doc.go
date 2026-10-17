@@ -11,19 +11,24 @@
 //	lipgloss.Println(p.Print(result.Hunks(3)))
 //
 // Each revision is the [line.Lines] of a whole file, or a [*line.View] for
-// the lines it holds. The views of one document in two revisions of a file
-// that holds several diff that document alone, and the gutter and hunk
-// headers show the line numbers of the file:
+// the lines it holds. When a file holds several documents, the views of one
+// document in two revisions of the file diff that document alone. The
+// gutter and hunk headers then show the line numbers of the file:
 //
 //	result := diff.Diff(before[1].View(), after[1].View())
 //
-// The [Result] renders in three shapes. [Result.Unified] interleaves the
-// lines of both inputs, [Result.Hunks] keeps only the changes with context
-// lines around each and a hunk header above it, and [Result.Before] with
-// [Result.After] return aligned views for side-by-side rendering. Each call
-// returns a fresh [line.View], so overlays added to one rendering do not
-// affect another. The hunks are a slice of the unified view and keep its
-// line indices, so one index marks the same line in both.
+// A [Result] renders the diff in several layouts:
+//
+//   - [Result.Unified] interleaves the lines of both inputs.
+//   - [Result.Hunks] keeps only the changes, with context lines around each
+//     and a hunk header above it.
+//   - [Result.Before] and [Result.After] return aligned views for
+//     side-by-side rendering.
+//
+// Each call returns a fresh [line.View], so overlays that a caller adds to
+// one rendering do not affect another. The hunks are a slice of the
+// unified view and keep its line indices, so one index marks the same line
+// in both.
 //
 // Each rendering is new content, and its indices are its rows. A position
 // in an input does not apply to a rendering, so the Result maps between
@@ -45,14 +50,14 @@
 //	view := result.Unified()
 //	result.Carry(view, beforeView, afterView)
 //
-// Lines compare by their content with line endings stripped, so a change
+// A diff compares lines by their content without line endings, so a change
 // from LF to CRLF endings or a missing final newline is not a difference.
 //
-// Diff output is a [line.View] rather than a YAML document, since the
+// Diff output is a [line.View] rather than a YAML document, because the
 // interleaved lines of two revisions do not parse as one. Each line carries a
-// [line.Flag] that marks it as inserted, deleted, or unchanged, and hunk
-// headers are [line.Annotation] values placed [line.Above] the first line
-// of each hunk.
+// [line.Flag] that marks it as inserted, deleted, or unchanged. Each hunk
+// header is a [line.Annotation] that [Result.Hunks] places [line.Above] the
+// first line of its hunk.
 //
 // A Differ is safe for concurrent use when its [lcs.Algorithm] is, as
 // [lcs.Hirschberg] is. A Result is safe for concurrent use.
