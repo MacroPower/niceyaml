@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Menu",
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "currency": {
+      "deprecated": true,
+      "deprecationMessage": "Every price is in kr, so currency has no effect. Remove it."
+    },
+    "fika": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/item" }
+    }
+  },
+  "required": ["name", "fika"],
+  "additionalProperties": false,
+  "$defs": {
+    "item": {
+      "type": "object",
+      "properties": {
+        "item": { "type": "string", "minLength": 1 },
+        "price": {
+          "anyOf": [
+            { "type": "integer", "minimum": 0 },
+            {
+              "type": "string",
+              "pattern": "^[0-9]+ kr$",
+              "deprecated": true,
+              "deprecationMessage": "Write the price as a number of kr, as in 45."
+            }
+          ]
+        },
+        "vegan": {
+          "type": "boolean",
+          "deprecated": true,
+          "deprecationMessage": "List vegan under dietary instead."
+        },
+        "dietary": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["item", "price"],
+      "additionalProperties": false
+    }
+  }
+}

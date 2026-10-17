@@ -1,0 +1,17 @@
+---
+name: Café Yamüll
+currency: SEK
+fika:
+  - &kanelbulle
+    item: Kanelbulle
+    price: 45
+    vegan: true
+  - item: Semla
+    price: "55 kr"
+  - <<: *kanelbulle
+    item: Kardemummabulle
+  - item: Havreboll
+    price: 30
+    vegan: true
+  - item: "Småkakor & Kaffe"
+    price: "200 SEK"

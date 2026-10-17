@@ -152,6 +152,7 @@ A validator checks a document before the decoder reads it. The example rejects a
 - [examples/schemas/registry](examples/schemas/registry)
 - [examples/schemas/resolvers](examples/schemas/resolvers)
 - [examples/schemas/untrusted](examples/schemas/untrusted)
+- [examples/schemas/deprecations](examples/schemas/deprecations)
 
 Types declare their constraints with `jsonschema` struct tags. The `gen` tool from [go.jacobcolvin.com/x/jsonschema](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema) turns them into [cafe.v1.json](examples/schemas/cafe/cafe.v1.json). Run `go run ./examples/schemas/cafe/demo` to validate a config against that schema and render any failures as source-annotated errors.
 
@@ -159,7 +160,7 @@ Types declare their constraints with `jsonschema` struct tags. The `gen` tool fr
 
 A [`schema.Registry`][niceyaml/schema.Registry] picks the schema of each document, so one file can hold documents of several kinds. Run `go run ./examples/schemas/registry` to route the documents of a stream by a `$schema` comment or by their `kind` and report the ones that fail.
 
-The resolvers of a registry run in order, and the first one that does not decline picks the schema. The resolvers example puts a directive in the file ahead of a match on its path. When no resolver picks a schema, the error lists the reasons that the resolvers gave. The untrusted example validates uploads whose directives name files and URLs that the server must not read.
+The resolvers of a registry run in order, and the first one that does not decline picks the schema. The resolvers example puts a directive in the file ahead of a match on its path. When no resolver picks a schema, the error lists the reasons that the resolvers gave. The untrusted example validates uploads whose directives name files and URLs that the server must not read. The deprecations example reports the `deprecated` keyword of a schema as a warning beside the violations.
 
 ### Encoder
 
