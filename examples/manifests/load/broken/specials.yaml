@@ -1,0 +1,7 @@
+---
+apiVersion: cafe.jacobcolvin.com/v1
+kind: MenuItem
+metadata:
+  name: kanelbulle
+spec:
+  price: 40

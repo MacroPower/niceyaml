@@ -181,6 +181,12 @@ The resolvers of a registry run in order, and the first one that does not declin
 
 [`edit.Doc`][niceyaml/edit.Doc] renames keys and sets, moves, and removes values. It keeps every byte that an edit leaves alone. The rewrite example edits a file and validates the result, so each error points at the line that the owner wrote. The guards example shows the checks that keep an edit from damaging a file. When an `Apply` fails, it drops every edit it made. Edits that change one value twice through its aliases fail, and wildcards skip the protected keys.
 
+### Manifests
+
+- [examples/manifests/load](examples/manifests/load)
+
+[`manifest.Registry`][niceyaml/manifest.Registry] declares the kinds of an app once and loads a directory of manifests into typed Go values. The load example reports every problem of a broken directory in one error.
+
 ### Viewport
 
 See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pages, searches, diffs, and validates YAML documents.
@@ -206,6 +212,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml/line]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line
 [niceyaml/line.View]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/line#View
 [niceyaml/manifest]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/manifest
+[niceyaml/manifest.Registry]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/manifest#Registry
 [niceyaml/paths]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/paths
 [niceyaml/printer]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer
 [niceyaml/printer.Cut]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/printer#Cut

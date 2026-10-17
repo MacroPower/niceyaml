@@ -1,0 +1,16 @@
+---
+apiVersion: cafe.jacobcolvin.com/v1
+kind: MenuItem
+metadata:
+  name: kanelbulle
+spec:
+  price: 45
+  dietary: [gluten, mjölk]
+---
+apiVersion: cafe.jacobcolvin.com/v1
+kind: MenuItem
+metadata:
+  name: semla
+spec:
+  price: 65
+  dietary: [gluten, mjölk, nötter]

@@ -1,0 +1,9 @@
+---
+apiVersion: cafe.jacobcolvin.com/v1
+kind: Cafe
+metadata:
+  name: yamull
+spec:
+  title: Café Yamüll
+  seats: 40
+  featured: semla

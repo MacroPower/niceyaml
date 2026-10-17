@@ -1,0 +1,28 @@
+---
+apiVersion: cafe.jacobcolvin.com/v1
+kind: MenuItem
+metadata:
+  name: kanelbulle
+spec:
+  price: 45
+---
+apiVersion: cafe.jacobcolvin.com/v1
+kind: Menuitem
+metadata:
+  name: kladdkaka
+spec:
+  price: 55
+---
+apiVersion: cafe.jacobcolvin.com/v1
+kind: MenuItem
+metadata:
+  name: semla
+spec:
+  price: 0
+---
+apiVersion: cafe.jacobcolvin.com/v1
+kind: MenuItem
+metadata:
+  name: kaffe
+spec:
+  price: 30

@@ -274,6 +274,11 @@ linters:
       - text: "go\\.jacobcolvin\\.com/niceyaml/edit\\.Node"
         linters:
           - wrapcheck
+      # Object.Bind binds an error in the file of its manifest, as
+      # Source.Bind does.
+      - text: "go\\.jacobcolvin\\.com/niceyaml/manifest\\.Object"
+        linters:
+          - wrapcheck
       - path: cmd/
         linters:
           - wrapcheck
