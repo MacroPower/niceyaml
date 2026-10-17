@@ -5,7 +5,6 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -43,9 +42,12 @@ func main() {
 	p := printer.New()
 
 	// An Access confines the reads from disk. A source from WithFS reads
-	// only its own file system and never reaches the Access. The example
-	// therefore lays out the disk of a server: the upload of a tenant, and
-	// a private schema beside it.
+	// the schema files that it names through its own file system, and the
+	// Access never sees those reads. A server that keeps each upload in a
+	// file system of its own, such as a zip.Reader, confines the upload
+	// through that file system instead. This example confines the disk, so
+	// it lays out the disk of a server: the upload of a tenant, and a
+	// private schema beside it.
 	dir, err := os.MkdirTemp("", "cafe-")
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
@@ -161,7 +163,8 @@ func report(p *printer.Printer, doc *niceyaml.Node, err error) {
 	// the program compiles at startup, so only a directive names a schema
 	// that the registry loads. For a file, the text of the error names the
 	// path that the registry tried on the server. The answer therefore
-	// comes from the fields of the error, and it binds at the directive.
+	// comes from the sentinels that the error matches, and it binds at the
+	// directive.
 	case loadFailed && directive != nil:
 		answer := doc.Bind(niceyaml.NewError(
 			fmt.Sprintf("schema %q: %s", directive.Schema, reason(err)),
@@ -177,24 +180,17 @@ func report(p *printer.Printer, doc *niceyaml.Node, err error) {
 // reason says why the schema of a directive did not load or compile,
 // without the path or URL that the registry tried.
 func reason(err error) string {
+	switch {
 	// The registry refuses a URL outside the prefixes before it sends a
-	// request.
-	if errors.Is(err, schema.ErrURLNotAllowed) {
+	// request, and a path outside the root before it reads anything.
+	case errors.Is(err, schema.ErrURLNotAllowed):
 		return "URL not allowed"
-	}
-
-	// The registry reports each file that it could not read, and each URL
-	// that it could not fetch, as a FetchError. For a file, its URL field
-	// holds the path on the server. The registry refuses a path outside
-	// the root with fs.ErrInvalid before it reads anything. A path that
-	// names a directory, or anything else that is not a regular file,
-	// fails with fs.ErrInvalid too.
-	fetchErr, ok := errors.AsType[*schema.FetchError](err)
-	if ok && errors.Is(fetchErr.Err, fs.ErrInvalid) {
-		return "not a schema file in the upload"
-	}
+	case errors.Is(err, schema.ErrFileNotAllowed):
+		return "outside the upload"
 
 	// A missing file and a schema that does not compile get the same
 	// answer.
-	return "not available"
+	default:
+		return "not available"
+	}
 }

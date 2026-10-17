@@ -108,16 +108,28 @@ func (e *LoadError) Unwrap() error {
 // The registry refuses some URLs before any fetch, such as a URL that
 // does not parse or one that its [Access] does not allow. The error of
 // such a URL does not hold a FetchError. The registry still reports a
-// FetchError for a path that it refuses before any read. Such paths
-// include an absolute path in a file system and a path that the Access
-// does not allow. The Err of each such FetchError matches
-// [fs.ErrInvalid].
+// FetchError for a path that it refuses before any read. The Err of
+// such a FetchError matches [ErrFileNotAllowed] for a path that the
+// Access does not allow. It matches the same sentinel for a path that
+// leads out of a file system, such as an absolute path. Off Windows, a
+// drive-letter path on disk fails before any read with [fs.ErrInvalid]
+// under an Access that allows any file, as [Unrestricted] does. A path
+// that names a directory, or anything else that is not a regular file,
+// fails with [fs.ErrInvalid] too.
 //
 // The message reads as "fetch https://example.com/s.json: status 404"
-// for a URL and as "read /srv/schemas/s.json: ..." for a file. A
-// document can name a path through its directive, so the message draws
-// each control character as a picture and each tab as four spaces. URL
-// and Err keep their text as written.
+// for a URL and as "read /srv/schemas/s.json: ..." for a file. The
+// message of a refused path reads "read <path>: file not allowed: ...",
+// though the registry did not read anything.
+//
+// A document can name a path through its directive. So the message
+// replaces each tab with four spaces and each other control character
+// as [go.jacobcolvin.com/niceyaml/escape.Control] does. The other C0
+// control characters and DEL become their Unicode Control Pictures, such
+// as "␛" for an escape. The C1 control characters, U+0080 through
+// U+009F, do not have pictures, so each becomes U+FFFD, the replacement
+// character. So does each byte that is not valid UTF-8. URL and Err keep
+// their text as written.
 type FetchError struct {
 	// Err is why the read or fetch of the document failed. It matches
 	// [niceyaml.ErrLimit] for a document past the limit of

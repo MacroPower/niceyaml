@@ -819,6 +819,26 @@ func TestDirective_Resolve(t *testing.T) {
 	})
 }
 
+func TestDirective_ErrorDrawsControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	// The file URL percent-encodes each control character of the path. The
+	// fragment keeps its control characters, so the LoadError quotes them
+	// with Go escapes.
+	doc := yamltest.FirstDocumentWithPath(t,
+		yamltest.SchemaDirective("./a\x1b[2J.json#/$defs/\x1b[31mx", "a: 1\n"),
+		filepath.Join(t.TempDir(), "config.yaml"),
+	)
+
+	err := schema.NewRegistry(schema.WithResolvers(schema.Directive())).Check(t.Context(), doc)
+	require.ErrorIs(t, err, schema.ErrLoad)
+
+	msg := err.Error()
+	assert.NotContains(t, msg, "\x1b")
+	assert.Contains(t, msg, `/a%1B%5B2J.json#/$defs/\x1b[31mx": `)
+	assert.Contains(t, msg, "/a␛[2J.json: ")
+}
+
 func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 	t.Parallel()
 

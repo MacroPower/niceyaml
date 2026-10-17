@@ -3,7 +3,6 @@ package schema_test
 import (
 	"cmp"
 	"context"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -443,7 +442,7 @@ func TestRefBeside(t *testing.T) {
 		require.NoError(t, err)
 
 		_, err = reg.Load(t.Context(), out)
-		requireLoadError(t, err, fs.ErrInvalid)
+		requireLoadError(t, err, schema.ErrFileNotAllowed)
 	})
 
 	t.Run("a URL names a URL wherever the document lives", func(t *testing.T) {
@@ -466,7 +465,7 @@ func TestRefBeside(t *testing.T) {
 			require.NoError(t, err)
 
 			_, err = reg.Load(t.Context(), ref)
-			requireLoadError(t, err, fs.ErrInvalid)
+			requireLoadError(t, err, schema.ErrFileNotAllowed)
 
 			// The same reference beside a document on disk reads the file.
 			ref, err = schema.RefBeside(onDisk, written)

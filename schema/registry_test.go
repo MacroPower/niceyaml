@@ -390,8 +390,8 @@ func TestRegistry_Resolve(t *testing.T) {
 			},
 			"directive outside the root": {
 				input: yamltest.SchemaDirective("../prog/schema.json", "kind: App\n"),
-				err:   fs.ErrInvalid,
-				want:  "not under " + tenant,
+				err:   schema.ErrFileNotAllowed,
+				want:  "file not allowed: not under " + tenant,
 			},
 			"directive that names a URL": {
 				input: yamltest.SchemaDirective("https://evil.test/s.json", "kind: App\n"),
@@ -2554,10 +2554,12 @@ func TestRegistry_FileFS(t *testing.T) {
 				reg := schema.NewRegistry()
 
 				_, err := reg.Load(t.Context(), schema.FileFS(bundle, tc.path))
-				requireLoadError(t, err, fs.ErrInvalid)
+				requireLoadError(t, err, schema.ErrFileNotAllowed)
+				require.NotErrorIs(t, err, fs.ErrInvalid)
 
 				_, err = reg.Schema(t.Context(), schema.FileFS(bundle, tc.path))
-				requireLoadError(t, err, fs.ErrInvalid)
+				requireLoadError(t, err, schema.ErrFileNotAllowed)
+				assert.False(t, niceyaml.IsInvalid(err))
 			})
 		}
 	})
@@ -2572,7 +2574,7 @@ func TestRegistry_FileFS(t *testing.T) {
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
 		err := reg.Check(t.Context(), doc)
-		requireLoadError(t, err, fs.ErrInvalid)
+		requireLoadError(t, err, schema.ErrFileNotAllowed)
 	})
 
 	t.Run("a file and a loadable with one name stay apart", func(t *testing.T) {
@@ -2647,6 +2649,7 @@ func TestRegistry_FileFS(t *testing.T) {
 
 		_, err := reg.Load(t.Context(), schema.FileFS(rootFS(t, root), "s.json"))
 		require.ErrorIs(t, err, schema.ErrLoad)
+		require.NotErrorIs(t, err, schema.ErrFileNotAllowed)
 
 		// The file system of os.DirFS follows the link and reads the file
 		// outside the tree.
@@ -2683,7 +2686,7 @@ func TestRegistry_FileFS(t *testing.T) {
 		assert.Equal(t, schemaData, data)
 
 		_, err = reg.Load(t.Context(), schema.File(filepath.Join(wd, "schemas", "pod.json")))
-		requireLoadError(t, err, fs.ErrInvalid)
+		requireLoadError(t, err, schema.ErrFileNotAllowed)
 	})
 }
 
@@ -3861,12 +3864,12 @@ func TestRegistry_DocumentOutsideFileSystem(t *testing.T) {
 	}{
 		"file system on the source": {
 			source: []niceyaml.SourceOption{niceyaml.WithFS(os.DirFS(tenant))},
-			err:    fs.ErrInvalid,
+			err:    schema.ErrFileNotAllowed,
 			want:   "an absolute path names no file",
 		},
 		"AllowRoot": {
 			opts: []schema.RegistryOption{withAccess(t, allowRoot(t, tenant))},
-			err:  fs.ErrInvalid,
+			err:  schema.ErrFileNotAllowed,
 			want: "not under " + tenant,
 		},
 		"no file system": {want: `expected "string", got "integer"`},

@@ -391,7 +391,14 @@ func WithFilePath(path string) SourceOption {
 // the [Source] names a file in. Each document of the Source reports the
 // file system from [Node.FS]. A schema reference written beside the
 // document, such as a yaml-language-server directive, then resolves in
-// that file system and never on disk.
+// that file system rather than as a path on disk. A schema registry reads
+// each path that a directive names from fsys, so fsys decides which files
+// the directive can read. The
+// [go.jacobcolvin.com/niceyaml/schema.Access] of the registry does not
+// apply to those reads, but each URL still goes through it. An
+// [os.DirFS] serves the files that its symbolic links lead to, wherever
+// they are. The FS of an [os.Root] refuses a link that leads out of its
+// directory.
 //
 // [NewSourceFromFS] sets the file system. A program that reads the bytes
 // itself passes WithFS beside [WithFilePath], so a Source built from those

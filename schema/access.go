@@ -64,9 +64,20 @@ var Unrestricted = &Access{accessConfig{anyFile: true, anyURL: true}}
 // gives [WithHTTPClient].
 //
 // An Access covers the disk and the network. A Ref from [FileFS], and a
-// reference beside a document in a file system, read from that file
-// system. The Access does not apply to them. A Ref from [Embedded]
-// or [Loadable] loads its own bytes.
+// reference beside a document from [niceyaml.NewSourceFromFS] or
+// [niceyaml.WithFS], read from that file system. The Access never sees
+// those reads, even an Access that allows no file. The URLs that such a
+// document names still go through the Access. A Ref from [Embedded] or
+// [Loadable] loads its own bytes.
+//
+// For a document in a file system, the file system is the confinement of
+// its files. A directive that names a path reads what the file system
+// serves, and a path that leads out of it fails with [ErrFileNotAllowed].
+// Give a document from another trust domain a file system that holds only
+// the files of its author. The [*archive/zip.Reader] of an upload holds
+// them, and so does the FS of an [os.Root] on the directory of the upload.
+// An [os.DirFS] follows a symbolic link out of its directory, so a link in
+// the upload reads any file that the process can read.
 //
 // A registry applies one Access to every resolver that it holds. It
 // keeps each schema that it loads under that Access. A program that
@@ -145,7 +156,8 @@ func NewAccess(opts ...AccessOption) (*Access, error) {
 // resolves against the working directory at the time File runs. It then
 // reads the path relative to the directory through root. A path outside
 // the directory does not name a file, so it fails to load with
-// [fs.ErrInvalid].
+// [ErrFileNotAllowed]. Off Windows, a path with a drive letter fails the
+// same way.
 //
 // The registry reads only regular files within the limit of
 // [WithLoadLimit], as [File] describes. The registry reads through root,
@@ -160,8 +172,9 @@ func NewAccess(opts ...AccessOption) (*Access, error) {
 //
 // The registry reads through root, so a symbolic link inside the
 // directory that leads out of it does not name a file. An absolute link
-// does not name one either. A link that stays inside the directory reads
-// the file that it leads to.
+// does not name one either. The error of such a link is the error of the
+// [os.Root], which does not match [ErrFileNotAllowed]. A link that stays
+// inside the directory reads the file that it leads to.
 //
 // # Directory Paths
 //
@@ -284,16 +297,18 @@ func WithAccess(a *Access) RegistryOption {
 // disk, within limit, when c allows the file. Under [AllowAnyFile], it
 // reads path from disk. Under [AllowRoot], it reads path relative to the
 // directory of the root through the root, and a path outside that
-// directory fails with [fs.ErrInvalid]. For an Access that does not
-// have either option, every path fails with [fs.ErrInvalid]. Each error
-// is a [*FetchError] that names path.
+// directory fails with [ErrFileNotAllowed]. For an Access that does not
+// have either option, every path fails with ErrFileNotAllowed. Each
+// error is a [*FetchError] that names path.
 func (c *accessConfig) readFile(path string, limit int) ([]byte, error) {
 	switch {
 	case c.anyFile:
 		return readDisk(path, limit)
 
 	case c.fsys == nil:
-		return nil, readError(path, fmt.Errorf("%w: the access of the registry allows no file on disk", fs.ErrInvalid))
+		return nil, readError(path, fmt.Errorf(
+			"%w: the access of the registry allows no file on disk", ErrFileNotAllowed,
+		))
 
 	default:
 		name, err := c.dir.rel(path)

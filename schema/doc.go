@@ -528,8 +528,11 @@
 // pass an absolute path to [go.jacobcolvin.com/niceyaml.WithFilePath]. A
 // relative reference beside a document whose path is relative and that
 // does not have a file system fails with [ErrNoBaseDir]. A document in
-// the file system [go.jacobcolvin.com/niceyaml.WithFS] gives it reads
-// only that file system, whatever the Access allows.
+// the file system that [go.jacobcolvin.com/niceyaml.WithFS] gives it
+// reads each schema file that it names from that file system. The Access
+// does not apply to those reads, as [Access] describes. Give each upload
+// a file system of its own, such as the FS of an [os.Root]. An
+// [os.DirFS] follows symbolic links out of its directory.
 //
 // [AllowURLPrefixes] confines the fetches to the URLs under its prefixes.
 // An Access allows URLs only through AllowURLPrefixes or [AllowAnyURL].
@@ -581,11 +584,20 @@
 // error, so such a server can distinguish it from a fault of the
 // document and return a message of its own.
 //
-// The error holds a [*LoadError] with the [Ref] of the schema, and
+// A server builds that message from the sentinels that the error
+// matches, not from its text:
+//
+//   - [ErrURLNotAllowed] and [ErrFileNotAllowed] for a schema that the
+//     Access or the file system refused. The error of a symbolic link
+//     that leads out of the [os.Root] of AllowRoot matches neither, as
+//     [AllowRoot] describes.
+//   - [fs.ErrNotExist] for a missing file.
+//   - [go.jacobcolvin.com/niceyaml.ErrLimit] for a schema past
+//     [WithLoadLimit].
+//   - [ErrCompile] for a schema that does not compile.
+//
+// A [*FetchError] inside the error holds the status of the response for
+// a URL. The error holds a [*LoadError] with the [Ref] of the schema, and
 // [errors.As] finds that LoadError. [Ref.Name] names that Ref without the
-// password of a URL. Each file or URL that the registry could not read is
-// a [*FetchError] inside the LoadError, with the status of the response
-// for a URL. The server builds its message from those fields, such as one
-// that names the URL but not the path, or one that distinguishes a
-// missing schema from a host that failed.
+// password of a URL.
 package schema

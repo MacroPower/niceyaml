@@ -71,12 +71,14 @@ func TestNewAccess(t *testing.T) {
 				reg := schema.NewRegistry(schema.WithHTTPClient(client), schema.WithAccess(tc.access))
 
 				_, err := reg.Load(t.Context(), schema.File(path))
-				requireLoadError(t, err, fs.ErrInvalid)
+				requireLoadError(t, err, schema.ErrFileNotAllowed)
+				require.NotErrorIs(t, err, fs.ErrInvalid)
 				require.ErrorContains(
 					t,
 					err,
-					"read "+path+": invalid argument: the access of the registry allows no file",
+					"read "+path+": file not allowed: the access of the registry allows no file",
 				)
+				assert.False(t, niceyaml.IsInvalid(err))
 
 				_, err = reg.Load(t.Context(), schema.URL("https://schemas.test/s.json"))
 				requireLoadError(t, err, schema.ErrURLNotAllowed)
@@ -229,12 +231,12 @@ func TestAllowAnyURL(t *testing.T) {
 	}{
 		"alone": {
 			opts:   []schema.AccessOption{schema.AllowAnyURL()},
-			inErr:  fs.ErrInvalid,
-			outErr: fs.ErrInvalid,
+			inErr:  schema.ErrFileNotAllowed,
+			outErr: schema.ErrFileNotAllowed,
 		},
 		"beside a root": {
 			opts:   []schema.AccessOption{schema.AllowAnyURL(), allowRoot(t, tenant)},
-			outErr: fs.ErrInvalid,
+			outErr: schema.ErrFileNotAllowed,
 		},
 	}
 
@@ -282,7 +284,7 @@ func TestWithAccess(t *testing.T) {
 		reg = schema.NewRegistry(schema.WithAccess(schema.Unrestricted), withAccess(t))
 
 		_, err = reg.Load(t.Context(), schema.File(path))
-		requireLoadError(t, err, fs.ErrInvalid)
+		requireLoadError(t, err, schema.ErrFileNotAllowed)
 	})
 
 	t.Run("keeps its own copy of the access", func(t *testing.T) {
@@ -369,34 +371,47 @@ func TestAllowRoot(t *testing.T) {
 
 		missing := filepath.Join(tenant, "schemas", "missing.json")
 
+		// A refusal names the directory of the root and matches
+		// ErrFileNotAllowed alone. A path under the directory that does not
+		// name a regular file is invalid, not refused.
 		tcs := map[string]struct {
 			path string
 			err  error
+			// The sentinel that err rules out.
+			not  error
 			want string
 		}{
 			"path in another directory": {
 				path: filepath.Join(base, "shared", "schema.json"),
-				err:  fs.ErrInvalid,
-				want: "not under " + tenant,
+				err:  schema.ErrFileNotAllowed,
+				not:  fs.ErrInvalid,
+				want: "file not allowed: not under " + tenant,
 			},
 			"path through the parent": {
 				path: filepath.Join(tenant, "..", "shared", "schema.json"),
-				err:  fs.ErrInvalid,
-				want: "not under " + tenant,
+				err:  schema.ErrFileNotAllowed,
+				not:  fs.ErrInvalid,
+				want: "file not allowed: not under " + tenant,
 			},
 			"the directory itself": {
 				path: tenant,
 				err:  fs.ErrInvalid,
+				not:  schema.ErrFileNotAllowed,
 				want: "not a regular file",
 			},
 			"drive-letter path": {
 				path: "Q:/schemas/config.json",
-				err:  fs.ErrInvalid,
+				err:  schema.ErrFileNotAllowed,
+				not:  fs.ErrInvalid,
+				// Off Windows, the drive letter names no file under the
+				// directory. On Windows, the drive lies outside it.
+				want: "file not allowed",
 			},
 			// The error reports the path on disk.
 			"missing file": {
 				path: missing,
 				err:  fs.ErrNotExist,
+				not:  schema.ErrFileNotAllowed,
 				want: "read " + missing,
 			},
 		}
@@ -409,7 +424,9 @@ func TestAllowRoot(t *testing.T) {
 
 				_, err := reg.Load(t.Context(), schema.File(tc.path))
 				requireLoadError(t, err, tc.err)
+				require.NotErrorIs(t, err, tc.not)
 				require.ErrorContains(t, err, tc.want)
+				assert.False(t, niceyaml.IsInvalid(err))
 			})
 		}
 	})
@@ -495,7 +512,7 @@ func TestAllowRoot(t *testing.T) {
 			"path beside the link": {
 				at:   dir,
 				path: filepath.Join(base, "schemas", "s.json"),
-				err:  fs.ErrInvalid,
+				err:  schema.ErrFileNotAllowed,
 			},
 		}
 
@@ -545,6 +562,8 @@ func TestAllowRoot(t *testing.T) {
 				data, err := reg.Load(t.Context(), schema.File(filepath.Join(dir, "s.json")))
 				if tc.err != nil {
 					require.ErrorIs(t, err, tc.err)
+					// The os.Root refuses the link with an error of its own.
+					require.NotErrorIs(t, err, schema.ErrFileNotAllowed)
 
 					return
 				}
@@ -618,7 +637,7 @@ func TestAllowRoot_RelativeName(t *testing.T) {
 
 		for _, dir := range []string{before, after} {
 			_, err := reg.Load(t.Context(), schema.File(filepath.Join(dir, "s.json")))
-			require.ErrorIs(t, err, fs.ErrInvalid, dir)
+			require.ErrorIs(t, err, schema.ErrFileNotAllowed, dir)
 		}
 	})
 

@@ -97,29 +97,36 @@ func TestFile_ErrorDrawsControlCharacters(t *testing.T) {
 
 	fsys := yamltest.MapFS(map[string]string{"dir\x1b[2J/x.json": "{}"})
 
+	// The LoadError quotes the name of the schema with Go escapes, and the
+	// name of a file on disk is its file URL.
 	tcs := map[string]struct {
-		ref  schema.Ref
-		err  error
-		want string
+		ref    schema.Ref
+		err    error
+		quoted string
+		want   string
 	}{
 		"missing file on disk": {
-			ref:  schema.File(filepath.Join(t.TempDir(), name)),
-			want: "a␛[2J␊b.json",
+			ref:    schema.File(filepath.Join(t.TempDir(), name)),
+			quoted: `/a%1B%5B2J%0Ab.json": `,
+			want:   "a␛[2J␊b.json",
 		},
 		"missing file in a file system": {
-			ref:  schema.FileFS(fsys, name),
-			err:  fs.ErrNotExist,
-			want: "read a␛[2J␊b.json: ",
+			ref:    schema.FileFS(fsys, name),
+			err:    fs.ErrNotExist,
+			quoted: `"a\x1b[2J\nb.json": `,
+			want:   "read a␛[2J␊b.json: ",
 		},
 		"directory in a file system": {
-			ref:  schema.FileFS(fsys, "dir\x1b[2J"),
-			err:  fs.ErrInvalid,
-			want: "read dir␛[2J: ",
+			ref:    schema.FileFS(fsys, "dir\x1b[2J"),
+			err:    fs.ErrInvalid,
+			quoted: `"dir\x1b[2J": `,
+			want:   "read dir␛[2J: ",
 		},
 		"absolute path in a file system": {
-			ref:  schema.FileFS(fsys, "/"+name),
-			err:  fs.ErrInvalid,
-			want: "read /a␛[2J␊b.json: ",
+			ref:    schema.FileFS(fsys, "/"+name),
+			err:    schema.ErrFileNotAllowed,
+			quoted: `"/a\x1b[2J\nb.json": `,
+			want:   "read /a␛[2J␊b.json: ",
 		},
 	}
 
@@ -137,6 +144,7 @@ func TestFile_ErrorDrawsControlCharacters(t *testing.T) {
 			msg := err.Error()
 			assert.NotContains(t, msg, "\x1b")
 			assert.NotContains(t, msg, "\n")
+			assert.Contains(t, msg, tc.quoted)
 			assert.Contains(t, msg, tc.want)
 		})
 	}

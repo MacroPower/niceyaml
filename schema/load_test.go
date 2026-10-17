@@ -340,6 +340,14 @@ func TestFetchError(t *testing.T) {
 			err:  &schema.FetchError{URL: "a\x1b[2J\nb.json", Err: fs.ErrNotExist},
 			want: "read a␛[2J␊b.json: file does not exist",
 		},
+		"path with a tab": {
+			err:  &schema.FetchError{URL: "a\tb.json", Err: fs.ErrNotExist},
+			want: "read a    b.json: file does not exist",
+		},
+		"path with DEL, a C1 control, and a byte that is not UTF-8": {
+			err:  &schema.FetchError{URL: "a\x7f\u0085\x9bb.json", Err: fs.ErrNotExist},
+			want: "read a␡\uFFFD\uFFFDb.json: file does not exist",
+		},
 		"no cause": {
 			err:  &schema.FetchError{URL: "/srv/s.json"},
 			want: "read /srv/s.json",
@@ -427,11 +435,20 @@ func TestFetchError_RefusedPath(t *testing.T) {
 	// The registry refuses an absolute path in a file system before any
 	// read, and the error still holds a FetchError that names the path.
 	_, err := schema.NewRegistry().Load(t.Context(), schema.FileFS(yamltest.MapFS(nil), "/schemas/s.json"))
-	requireLoadError(t, err, fs.ErrInvalid)
+	requireLoadError(t, err, schema.ErrFileNotAllowed)
+	assert.False(t, niceyaml.IsInvalid(err))
 
 	fetchErr, ok := errors.AsType[*schema.FetchError](err)
 	require.True(t, ok)
 	assert.Equal(t, "/schemas/s.json", fetchErr.URL)
 	assert.Zero(t, fetchErr.StatusCode)
-	require.ErrorIs(t, fetchErr, fs.ErrInvalid)
+	require.ErrorIs(t, fetchErr, schema.ErrFileNotAllowed)
+	require.NotErrorIs(t, fetchErr, fs.ErrInvalid)
+
+	// The message keeps the verb of a read, though nothing was read.
+	assert.Equal(t,
+		"read /schemas/s.json: file not allowed: "+
+			"an absolute path names no file in the file system of the document or the Ref",
+		fetchErr.Error(),
+	)
 }

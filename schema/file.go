@@ -16,9 +16,23 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/limitread"
 )
 
-// ErrEmptyPath reports an empty path given to [FileOrURL]. An empty path
-// does not name a file.
-var ErrEmptyPath = errors.New("schema file path is empty")
+var (
+	// ErrEmptyPath reports an empty path given to [FileOrURL]. An empty
+	// path does not name a file.
+	ErrEmptyPath = errors.New("schema file path is empty")
+
+	// ErrFileNotAllowed indicates that a registry refused to read a file
+	// and did not read anything for it. The file is a path on disk that
+	// the [Access] of the registry does not allow, such as one outside the
+	// directory of [AllowRoot]. It can also be a path that leads out of the
+	// file system of a document or of a [Ref] from [FileFS], such as an
+	// absolute path or one that starts with "..". The program set the
+	// Access and picked the file system, so the document that names the
+	// file is not at fault, and [niceyaml.IsInvalid] reports false for the
+	// error. The registry reports the refusal as a [*FetchError] that
+	// names the path. A refused URL matches [ErrURLNotAllowed] instead.
+	ErrFileNotAllowed = errors.New("file not allowed")
+)
 
 // onWindows reports whether the program runs on Windows, the one platform
 // where a drive letter names a drive.
@@ -39,7 +53,7 @@ const driveLen = 2
 //
 // A schema shipped in an [embed.FS], or in any other file system, takes
 // [FileFS] instead. The registry reads the path of such a Ref from that
-// file system and never from disk. The [Access] of the registry decides
+// file system, never as a path on disk. The [Access] of the registry decides
 // which files on disk it reads. Under [AllowRoot], the registry reads the
 // path through an [os.Root], so a path outside the directory of the root
 // does not name a file. See that option for details.
@@ -197,10 +211,11 @@ func file(path string) (Ref, error) {
 //	    schema.When(isWidget, schema.FileFS(bundle, "schemas/widget.json")),
 //	))
 //
-// The working directory does not affect the Ref, and the registry never
-// reads the disk for it. An absolute path does not name a file in fsys,
-// and neither does a relative path that leads out of its root, such as
-// "../schema.json". Both fail to load with [fs.ErrInvalid].
+// The working directory does not affect the Ref, and the registry reads
+// it only through fsys, never as a path on disk. An absolute path does
+// not name a file in fsys, and neither does a relative path that leads
+// out of its root, such as "../schema.json". Both fail to load with
+// [ErrFileNotAllowed].
 //
 // The registry knows the file by the URL of its path in fsys, such as
 // file:///schemas/widget.json, which is its [Ref.Key]. A $ref in the
@@ -317,12 +332,14 @@ func newFSDir(root *os.Root) (*fsDir, error) {
 // That second comparison finds a path made absolute against a working
 // directory that a link led to. For any other path, and for a
 // drive-letter path off Windows, rel returns an error that matches
-// [fs.ErrInvalid].
+// [ErrFileNotAllowed].
 func (d *fsDir) rel(path string) (string, error) {
 	// Off Windows, a drive letter is an ordinary directory name, so the
-	// path is relative there, while its key names the drive.
+	// path is relative there, but its key names the drive. Such a path
+	// never names a file under the directory.
 	if hasDriveLetter(path) && !onWindows {
-		return "", noDriveLetter()
+		return "", fmt.Errorf("%w: a drive letter names no file under %s, the directory of the registry's root",
+			ErrFileNotAllowed, d.dir)
 	}
 
 	// Windows reads a rooted path without a volume, such as \proj\x.json,
@@ -343,7 +360,7 @@ func (d *fsDir) rel(path string) (string, error) {
 	}
 
 	if !ok {
-		return "", fmt.Errorf("%w: not under %s, the directory of the registry's root", fs.ErrInvalid, d.dir)
+		return "", fmt.Errorf("%w: not under %s, the directory of the registry's root", ErrFileNotAllowed, d.dir)
 	}
 
 	return filepath.ToSlash(rel), nil
@@ -401,8 +418,8 @@ func isRelative(path string) bool {
 // slash form, with a leading slash. For example, schemas/config.json
 // becomes /schemas/config.json. The working directory does not affect
 // that path. An absolute path, or one that leads out of the root, is
-// [fs.ErrInvalid]. Each error is a [*FetchError] that names the path as
-// given.
+// [ErrFileNotAllowed]. Each error is a [*FetchError] that names the path
+// as given.
 func filePath(ref Ref) (string, error) {
 	if ref.fsys == nil {
 		if ref.abs == "" {
@@ -415,7 +432,7 @@ func filePath(ref Ref) (string, error) {
 	if !isRelative(ref.file) {
 		return "", readError(ref.file, fmt.Errorf(
 			"%w: an absolute path names no file in the file system of the document or the Ref",
-			fs.ErrInvalid,
+			ErrFileNotAllowed,
 		))
 	}
 
@@ -423,7 +440,7 @@ func filePath(ref Ref) (string, error) {
 	if !fs.ValidPath(name) {
 		return "", readError(ref.file, fmt.Errorf(
 			"%w: not a path in the file system of the document or the Ref",
-			fs.ErrInvalid,
+			ErrFileNotAllowed,
 		))
 	}
 
@@ -438,15 +455,15 @@ func filePath(ref Ref) (string, error) {
 //
 // With a file system, readFile reads path from it without the leading
 // slash, and its errors name that path. A drive-letter path is
-// [fs.ErrInvalid] there on every platform. Without a file system,
+// [ErrFileNotAllowed] there on every platform. Without a file system,
 // readFile reads path from disk as the [Access] of the registry allows,
-// and its errors name path. Off Windows, a drive-letter path is invalid
-// the same way.
+// and its errors name path. Off Windows, a drive-letter path does not
+// name a file on disk either, as [AllowRoot] and [readDisk] describe.
 //
 // Each error is a [*FetchError]. A document names the path through a
 // $schema directive, and a schema names it through a $ref. The message
-// of each error therefore draws its control characters as pictures, as
-// FetchError describes.
+// of each error therefore replaces its control characters with printable
+// text, as FetchError describes.
 func (r *Registry) readFile(fsys fs.FS, path string) ([]byte, error) {
 	if fsys == nil {
 		return r.access.readFile(path, r.loadLimit)
@@ -456,7 +473,7 @@ func (r *Registry) readFile(fsys fs.FS, path string) ([]byte, error) {
 	if !strings.HasPrefix(rooted, "/") {
 		return nil, readError(path, fmt.Errorf(
 			"%w: a drive letter names no file in the file system of the document or the Ref",
-			fs.ErrInvalid,
+			ErrFileNotAllowed,
 		))
 	}
 

@@ -152,10 +152,14 @@ type directiveResolver struct{}
 // [niceyaml.NewSourceFromFile] opened names a file on disk. A document
 // that [niceyaml.NewSourceFromFS] opened, or one whose source
 // [niceyaml.WithFS] gave a file system, names a file in that file
-// system. The registry never reads the disk for such a document. An
-// absolute path does not name a file there and fails to load with
-// [fs.ErrInvalid]. One registry thus validates bundled documents and
-// documents on disk, each against the schema beside it.
+// system. One registry thus validates bundled documents and documents on
+// disk, each against the schema beside it.
+//
+// The registry reads each path that a document in a file system names
+// only through that file system, whatever the [Access] of the registry
+// allows. An [os.DirFS] follows a symbolic link out of its directory, as
+// Access describes. An absolute path does not name a file there and fails
+// to load with [ErrFileNotAllowed]. A URL still goes through the Access.
 //
 // A fragment selects a subschema on a path as it does on a URL, and as it
 // does in yaml-language-server. The directive
@@ -204,10 +208,14 @@ type directiveResolver struct{}
 // directive leaves Directive out of the resolvers.
 //
 // The path that a directive names can hold control characters. The
-// message of each error from a read of the file draws them as pictures.
-// A document thus cannot start a line of its own or write to a terminal
-// through the path. [errors.As] still finds the error of the file
-// system, whose own text holds the path as the directive wrote it.
+// message of each error from a read of the file replaces them with
+// printable text, as [FetchError] describes. The [LoadError] that holds
+// such an error quotes the name of the schema with Go escapes, such as
+// "\x1b" for an escape. The name of a file on disk is its file URL, which
+// percent-encodes each control character of the path, as in "%1B". A
+// document thus cannot start a line of its own or write to a terminal
+// through the path. [errors.As] still finds the error of the file system,
+// whose own text holds the path as the directive wrote it.
 func Directive() Resolver {
 	return directiveResolver{}
 }

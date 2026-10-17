@@ -149,8 +149,11 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 // [niceyaml.WithFS] gave a file system, the file lives in that file
 // system, as a file that [FileFS] names does. An absolute path and a
 // file:// URL then do not name a file, and both fail to load with
-// [fs.ErrInvalid]. A document in a file system thus never reaches the
-// disk. An HTTP or HTTPS reference names a URL either way.
+// [ErrFileNotAllowed]. The registry reads such a file only through the
+// file system, so the file system decides what the reference can read,
+// and the [Access] of the registry does not apply. An [os.DirFS] follows
+// a symbolic link out of its directory, as Access describes. An HTTP or
+// HTTPS reference names a URL either way.
 //
 // The registry tells the file system of one document from that of
 // another by its value. The file system must be a value that Go can
