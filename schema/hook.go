@@ -6,8 +6,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/schemahook"
 )
 
-// What the schema package hands to its manifest package, as the package
-// [schemahook] describes.
+// init sets what the schema package hands to its manifest package
+// through [schemahook], as that package describes.
 //
 //nolint:gochecknoinits // The hooks reach no API, so only init can set them.
 func init() {

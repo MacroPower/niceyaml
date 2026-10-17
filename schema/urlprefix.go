@@ -12,10 +12,10 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
 
-// ErrURLNotAllowed indicates the registry refused to fetch a URL that its
-// [Access] does not allow, and sent no request for it. The program set
-// the Access, so the document that names the URL is not at fault, and
-// [niceyaml.IsInvalid] reports false for the error.
+// ErrURLNotAllowed indicates that the registry refused to fetch a URL
+// that its [Access] does not allow, and did not send a request for it.
+// The program set the Access, so the document that names the URL is not
+// at fault, and [niceyaml.IsInvalid] reports false for the error.
 var ErrURLNotAllowed = errors.New("URL not under an allowed prefix")
 
 // AllowURLPrefixes is an [AccessOption] that allows the URLs under each
@@ -25,38 +25,39 @@ var ErrURLNotAllowed = errors.New("URL not under an allowed prefix")
 //	    schema.AllowURLPrefixes("https://schemas.example.com/"),
 //	)
 //
-// An [Access] with neither this option nor [AllowAnyURL] allows no URL.
-// The prefixes cover every fetch of a registry that holds the Access:
+// An [Access] without this option or [AllowAnyURL] does not allow any
+// URL. The prefixes cover every fetch of a registry that holds the
+// Access:
 //
-//   - The schema a [Ref] from [URL] names, whether a resolver of the
-//     program holds the Ref or [Directive] builds it from a document.
-//   - Each document a $ref of a schema names.
+//   - The schema that a [Ref] from [URL] names, whether a resolver of
+//     the program holds the Ref or [Directive] builds it from a document.
+//   - Each document that a $ref of a schema names.
 //   - Each hop of a redirect.
 //
 // A refused URL fails to load with an error wrapping [ErrURLNotAllowed].
-// The registry fetches with a copy of the client [WithHTTPClient] gave
-// it. The copy keeps the Timeout, Transport, and Jar of that client, and
-// its CheckRedirect refuses a hop outside the prefixes before it calls
+// The registry fetches with a copy of the client that [WithHTTPClient]
+// gave it. The copy keeps the Timeout, Transport, and Jar of that client.
+// Its CheckRedirect refuses a hop outside the prefixes before it calls
 // the CheckRedirect of the client.
 //
 // The prefixes apply to every resolver of the registry. A program that
-// gives such an Access to a registry holding a
+// gives such an Access to a registry that holds a
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] must pass the
 // hosts of the catalog's schemas to AllowURLPrefixes, or those schemas
 // fail to load. Those hosts include https://json.schemastore.org/,
 // https://www.schemastore.org/, and https://raw.githubusercontent.com/. A
-// program that confines only the schemas its documents name gives the
-// Store a registry of its own, as [Registry.Resolve] describes. The Store
-// fetches the catalog with a client of its own, so the prefixes do not
-// reach the catalog.
+// program that confines only the schemas that its documents name gives
+// the Store a registry of its own, as [Registry.Resolve] describes. The
+// Store fetches the catalog with a client of its own, so the prefixes do
+// not reach the catalog.
 //
 // # Matching
 //
-// Each prefix is an http or https URL with a host and with no userinfo,
-// query, or fragment. A URL falls under a prefix when its scheme, host,
-// and port match those of the prefix and its path starts with the path
-// of the prefix at a segment boundary. The registry parses both URLs
-// and compares the parts, not the text:
+// Each prefix is an http or https URL with a host and without userinfo,
+// a query, or a fragment. A URL falls under a prefix when its scheme,
+// host, and port match those of the prefix. Its path must also start
+// with the path of the prefix at a segment boundary. The registry parses
+// both URLs and compares the parts, not the text:
 //
 //   - The host matches in any letter case. A URL without a port stands
 //     for the default port of its scheme, 80 for http and 443 for https.
@@ -64,19 +65,20 @@ var ErrURLNotAllowed = errors.New("URL not under an allowed prefix")
 //     /v1/app.json, but not /v10/app.json. With a trailing slash, as in
 //     https://schemas.example.com/v1/, it leaves out /v1 itself.
 //   - The path must fall under the prefix as written and with its dot
-//     segments removed, so neither /v1/../admin nor /admin/../v1/app.json
-//     falls under /v1. An escaped slash, as in /v1%2F..%2Fadmin, ends no
-//     segment.
-//   - The prefix https://schemas.example.com covers no URL on the host
-//     schemas.example.com.evil.net, and none whose host follows an "@",
-//     as in https://schemas.example.com@evil.net/.
+//     segments removed. The path /v1/../admin does not fall under /v1,
+//     and /admin/../v1/app.json does not either. An escaped slash, as in
+//     /v1%2F..%2Fadmin, does not end a segment.
+//   - The prefix https://schemas.example.com does not cover a URL on the
+//     host schemas.example.com.evil.net. It does not cover a URL whose
+//     host follows an "@" either, as in
+//     https://schemas.example.com@evil.net/.
 //
-// The query and the fragment of a URL play no part.
+// Matching ignores the query and the fragment of a URL.
 //
 // A prefix names a host, not an address. A host whose DNS answer points
 // at an internal address still receives the request, as in DNS
 // rebinding. A program that must keep the fetches off its own network
-// checks each address in the Dialer of the client it gives
+// checks each address in the Dialer of the client that it gives
 // [WithHTTPClient]. The Untrusted Documents section of the package
 // documentation pairs the Access with the other options that confine a
 // registry.
@@ -88,7 +90,7 @@ var ErrURLNotAllowed = errors.New("URL not under an allowed prefix")
 // an http or https URL with a host, or holds userinfo, a query, or a
 // fragment. The error hides the password of the prefix. NewAccess also
 // returns an error for a prefix beside [AllowAnyURL], because the
-// prefixes confine nothing when the Access allows every URL.
+// prefixes do not confine any URL when the Access allows every URL.
 func AllowURLPrefixes(prefixes ...string) AccessOption {
 	return func(c *accessConfig) error {
 		if c.anyURL && len(prefixes) > 0 {
@@ -136,10 +138,10 @@ func (c *accessConfig) checkURL(rawURL string) error {
 }
 
 // guard returns a copy of client whose CheckRedirect refuses a redirect
-// to a URL c does not allow. It then asks the CheckRedirect of client,
-// or, when client has none, stops after ten redirects as the default
-// policy of [http.Client] does. For an Access that allows every URL,
-// guard returns client itself.
+// to a URL that c does not allow. The copy passes any other redirect to
+// the CheckRedirect of client. When client does not have one, the copy
+// stops after ten redirects, as the default policy of [http.Client] does.
+// For an Access that allows every URL, guard returns client itself.
 func (c *accessConfig) guard(client *http.Client) *http.Client {
 	if c.anyURL {
 		return client
@@ -168,22 +170,22 @@ func (c *accessConfig) guard(client *http.Client) *http.Client {
 	return &guarded
 }
 
-// maxRedirects is the number of redirects a client without a
+// maxRedirects is the number of redirects that a client without a
 // CheckRedirect of its own follows, as the default policy of
 // [http.Client] does.
 const maxRedirects = 10
 
 // A urlPrefix is a prefix of [AllowURLPrefixes], or a URL to compare with
-// one, split into the parts the registry compares.
+// one, split into the parts that the registry compares.
 type urlPrefix struct {
 	// The scheme, "http" or "https".
 	scheme string
 	// The host in lower case, without the brackets of an IPv6 address.
 	host string
-	// The port, or the default port of the scheme when the URL names
-	// none, in decimal without leading zeros.
+	// The port in decimal without leading zeros. It holds the default
+	// port of the scheme when the URL does not name a port.
 	port string
-	// The escaped path as written, with each escape in the form
+	// The escaped path as written, with each escape in the form that
 	// [canonicalEscapes] gives it, and "/" for an empty path.
 	path string
 	// The path with its dot segments removed.
@@ -191,7 +193,7 @@ type urlPrefix struct {
 }
 
 // parseURLPrefix returns the parts of prefix, or an error when prefix is
-// not a prefix [AllowURLPrefixes] takes.
+// not a prefix that [AllowURLPrefixes] takes.
 func parseURLPrefix(prefix string) (urlPrefix, error) {
 	if strings.ContainsAny(prefix, "?#") {
 		return urlPrefix{}, errors.New("prefix holds a query or a fragment")
@@ -218,8 +220,9 @@ func parseURLPrefix(prefix string) (urlPrefix, error) {
 	return p, nil
 }
 
-// parseHTTPURL returns the parts of rawURL, and false when rawURL does
-// not parse or is not an http or https URL with a host and a valid port.
+// parseHTTPURL returns the parts of rawURL. It returns false when rawURL
+// does not parse or is not an http or https URL with a host and a valid
+// port.
 func parseHTTPURL(rawURL string) (urlPrefix, bool) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -282,8 +285,8 @@ func (p urlPrefix) covers(u urlPrefix) bool {
 }
 
 // pathUnder reports whether path starts with prefix at a segment
-// boundary: path equals prefix, prefix ends in a slash, or a slash
-// follows prefix in path.
+// boundary. The boundary holds when path equals prefix, when prefix ends
+// in a slash, or when a slash follows prefix in path.
 func pathUnder(prefix, path string) bool {
 	if !strings.HasPrefix(path, prefix) {
 		return false
@@ -294,8 +297,8 @@ func pathUnder(prefix, path string) bool {
 
 // removeDotSegments returns path, an escaped path that starts with a
 // slash, without its "." and ".." segments, as RFC 3986 section 5.2.4
-// removes them. An escaped dot counts as a dot only once
-// [canonicalEscapes] has decoded it, and an escaped slash ends no
+// removes them. An escaped dot counts as a dot only after
+// [canonicalEscapes] has decoded it, and an escaped slash does not end a
 // segment.
 func removeDotSegments(path string) string {
 	segments := strings.Split(path, "/")[1:]

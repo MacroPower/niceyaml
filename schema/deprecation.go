@@ -18,12 +18,13 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// deprecated is the deprecations of one node of the text that a check
-// reads, which give one warning.
+// deprecated holds the deprecations of one node of the text that a check
+// reads. Together they give one warning.
 type deprecated struct {
 	// The record that the check evaluated first, which gives the headline.
 	first jsonschema.Deprecation
-	// The token at each step of the path of target, which orders it.
+	// The token at each step of the path of target. [compareRoutes]
+	// orders the paths to one node by these tokens.
 	route []*token.Token
 	// The messages of the schemas, each once, in the order that the check
 	// evaluated them.
@@ -32,10 +33,11 @@ type deprecated struct {
 	target datapath.Target
 }
 
-// nodeID names the node of the text that a record reaches: the entry of a
-// member for a record that marks its key, and the content of the value
-// otherwise. A record that reaches no node, as one of a value from no
-// document does, takes its path in place of the node.
+// nodeID names the node of the text that a record reaches. For a record
+// that marks the key of a member, the node is the entry of the member.
+// For any other record, the node is the content of the value. A record
+// that does not reach a node, such as a record of a value that no
+// document holds, takes its path in place of the node.
 //
 //nolint:unused // The fields tell the keys of a map apart.
 type nodeID struct {
@@ -46,7 +48,7 @@ type nodeID struct {
 
 // deprecations returns one warning for each node of the text that records
 // reach, as [Schema.Check] describes. The instance is the value that the
-// check read, which gives the text of a value that no node holds.
+// check read. It gives the text of a value that no node holds.
 func (c converter) deprecations(records []jsonschema.Deprecation, instance any) []error {
 	var found []*deprecated
 
@@ -145,7 +147,7 @@ func keyName(d *deprecated) string {
 
 // valueText returns the text of the scalar that d marks, and reports
 // whether d marks a scalar with text. It reads the text of the node, and
-// the value in instance where d reaches no node.
+// the value in instance where d does not reach a node.
 func (c converter) valueText(d *deprecated, instance any) (string, bool) {
 	switch node := c.idx.Deref(d.target.Node).(type) {
 	case nil:
@@ -215,9 +217,9 @@ func deprecationMessage(s *jsonschema.Schema) string {
 	return msg
 }
 
-// compareRoutes orders two paths that reach one node by document order: by
-// the position of the token at each step in turn, with a step that has no
-// token last.
+// compareRoutes orders two paths that reach one node by document order.
+// It compares the position of the token at each step in turn, and puts a
+// step without a token last.
 func compareRoutes(a, b []*token.Token) int {
 	for i := range min(len(a), len(b)) {
 		if c := compareTokens(a[i], b[i]); c != 0 {
@@ -228,8 +230,8 @@ func compareRoutes(a, b []*token.Token) int {
 	return cmp.Compare(len(a), len(b))
 }
 
-// compareTokens orders two tokens by line, then by column, with a token
-// that has no position last.
+// compareTokens orders two tokens by line, then by column, and puts a
+// token without a position last.
 func compareTokens(a, b *token.Token) int {
 	switch hasA, hasB := a != nil && a.Position != nil, b != nil && b.Position != nil; {
 	case !hasA && !hasB:

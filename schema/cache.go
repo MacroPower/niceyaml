@@ -10,42 +10,44 @@ import (
 )
 
 // WithCacheLimit is a [RegistryOption] that bounds the number of schemas
-// the registry keeps at n. Once the cache holds n entries, the registry
-// drops the entry no request has used for the longest time before it
-// keeps a new one. The next request for a schema the registry dropped
-// loads and compiles it again:
+// that the registry keeps at n. When the cache holds n entries, the
+// registry drops the entry that requests used least recently before it
+// keeps a new one. The next request for a schema that the registry
+// dropped loads and compiles it again:
 //
 //	reg := schema.NewRegistry(
 //	    schema.WithCacheLimit(1024),
 //	    schema.WithResolvers(schema.Directive()),
 //	)
 //
-// A failure the registry remembers counts toward n until the interval of
-// [WithRetryAfter] has passed, and the registry then drops it whatever
-// the limit.
+// A failure that the registry remembers counts toward n until the
+// interval of [WithRetryAfter] has passed, and the registry then drops it
+// whatever the limit.
 //
 // The registry keeps the documents that $refs name apart from the
 // schemas, and n bounds their number too. A compile or a validation that
-// reaches a document the registry dropped loads it again.
+// reaches a document that the registry dropped loads it again.
 //
 // The registry holds each file system for as long as it keeps an entry
 // from that file system, as [FileFS] describes. The limit thus bounds
-// the file systems the registry holds too. A program can open each
+// the file systems that the registry holds too. A program can open each
 // upload in a file system of its own, such as an [fs.Sub] or an
 // [*archive/zip.Reader]. When the cache is full, the registry drops the
-// entries used least recently and stops holding the uploads they came
-// from. [Registry.Forget] drops the entries of one file system without
+// entries used least recently and stops holding the uploads that they
+// came from. [Registry.Forget] drops the entries of one file system without
 // waiting for the limit.
 //
-// Without a limit, the registry keeps each schema it compiles until
+// Without a limit, the registry keeps each schema that it compiles until
 // [Registry.Forget], [Registry.Invalidate], or [Registry.Purge] drops
-// it. It holds the file system the schema comes from for that long.
+// it. It holds the file system that the schema comes from for that long.
+//
 // Each distinct [Ref.Key] adds an entry. A URL that differs from another
-// only in its query string or fragment is a Key of its own. Documents
-// that name endless distinct Keys therefore grow the memory of a
-// long-lived registry without bound. A registry that serves documents
-// from another trust domain for its whole lifetime sets a limit, as the
-// Untrusted Documents section of the package documentation describes.
+// only in its query string or fragment is a Key of its own. In a
+// long-lived registry without a limit, documents that name endless
+// distinct Keys therefore grow the memory without bound. A registry that
+// serves documents from another trust domain for its whole lifetime sets
+// a limit, as the Untrusted Documents section of the package
+// documentation describes.
 //
 // A limit of zero or less leaves the registry as it is, and by default
 // the registry keeps every entry. Given more than once, the last option
@@ -59,25 +61,26 @@ func WithCacheLimit(n int) RegistryOption {
 }
 
 // A cache holds what a [Registry] keeps between requests: its compiled
-// schemas, the documents $refs name, and an index of the documents each
-// schema reached. One lock guards all of it, so a release such as
+// schemas, the documents that $refs name, and an index of the documents
+// that each schema reached. One lock guards all of it, so a release such as
 // [Registry.Invalidate] drops a document and every schema that reached
 // it in one step. A cache is safe for concurrent use.
 //
 // The cache counts its generations. [cache.invalidate] and [cache.purge]
 // each start a new one. A load keeps its outcome only in the generation
-// it started in. A load that ran across a release thus keeps nothing,
-// whether or not the release meant to drop what the load returns.
+// that it started in. A load that ran across a release thus does not keep its
+// outcome, whether or not the release meant to drop what the load
+// returns.
 type cache struct {
 	schemas *lru[cacheKey, cacheEntry]
 	docs    *lru[cacheKey, refDoc]
-	// The reach of each schema the cache keeps, by each document it
-	// reached.
+	// The reach of each schema that the cache keeps, by each document
+	// that it reached.
 	dependents map[docID]map[*reach]struct{}
-	// The keys of the documents a $ref names, by document. Several keys
-	// name one document when they spell its URL with different userinfo,
-	// or with none, or when they spell one file in different ways, as
-	// [docOf] describes.
+	// The keys of the documents that a $ref names, by document. Several
+	// keys name one document when they spell its URL with different
+	// userinfo, or without userinfo, or when they spell one file in
+	// different ways, as [docOf] describes.
 	docKeys map[docID]map[cacheKey]struct{}
 	gen     uint64
 	mu      sync.Mutex
@@ -98,8 +101,8 @@ func newCache(limit int, retryAfter time.Duration) *cache {
 	return c
 }
 
-// schema returns the entry c keeps under key, and the generation a load
-// for key that misses starts in.
+// schema returns the entry that c keeps under key, and the generation
+// that a load for key starts in after a miss.
 func (c *cache) schema(key cacheKey) (cacheEntry, uint64, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -110,9 +113,9 @@ func (c *cache) schema(key cacheKey) (cacheEntry, uint64, bool) {
 }
 
 // keepSchema keeps e, with rc as its reach, under key for a compile that
-// started in generation gen. It returns the entry c then holds under
-// key. A compile from an earlier generation keeps nothing, and
-// keepSchema returns e for it.
+// started in generation gen. It returns the entry that c then holds under
+// key. For a compile from an earlier generation, keepSchema does not keep
+// e, and returns e as it is.
 func (c *cache) keepSchema(key cacheKey, e cacheEntry, failedAt time.Time, gen uint64, rc *reach) cacheEntry {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -142,8 +145,8 @@ func (c *cache) keepSchema(key cacheKey, e cacheEntry, failedAt time.Time, gen u
 }
 
 // doc records that the schema of rc reached the document that key names.
-// It returns what c keeps under key, with the generation a load for key
-// that misses starts in. The record comes before the read, so a release
+// It returns what c keeps under key, with the generation that a load for
+// key starts in after a miss. The record comes before the read, so a release
 // of the document that runs after doc returns finds the schema of rc.
 func (c *cache) doc(key cacheKey, rc *reach) (refDoc, uint64, bool) {
 	id := docOf(key)
@@ -167,8 +170,8 @@ func (c *cache) doc(key cacheKey, rc *reach) (refDoc, uint64, bool) {
 }
 
 // keepDoc keeps d under key for a load that started in generation gen,
-// and returns the document c then holds under key. A load from an
-// earlier generation keeps nothing, and keepDoc returns d for it.
+// and returns the document that c then holds under key. For a load from
+// an earlier generation, keepDoc does not keep d, and returns d as it is.
 func (c *cache) keepDoc(key cacheKey, d refDoc, failedAt time.Time, gen uint64) refDoc {
 	id := docOf(key)
 
@@ -215,9 +218,9 @@ func (c *cache) invalidate(ids map[docID]struct{}) {
 	}
 }
 
-// forget drops each schema and document from the file system id names.
-// It does not start a new generation, so a load from that file system in
-// flight might keep its outcome after forget returns.
+// forget drops each schema and document from the file system that id
+// names. It does not start a new generation, so a load from that file
+// system in flight might keep its outcome after forget returns.
 func (c *cache) forget(id fsID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -242,8 +245,8 @@ func (c *cache) purge() {
 }
 
 // releaseSchema removes e, an entry that c.schemas dropped, from the
-// index of dependents. After the release, the reach of e records no more
-// documents.
+// index of dependents. After the release, the reach of e does not record
+// any further documents.
 func (c *cache) releaseSchema(_ cacheKey, e cacheEntry) {
 	rc := e.reach
 
@@ -261,16 +264,16 @@ func (c *cache) releaseDoc(key cacheKey, _ refDoc) {
 }
 
 // A reach records the documents that one compile of a schema reached:
-// the document of the schema itself, and each document a $ref names. A
-// validation with the compiled schema that loads a $ref document adds
-// that document. A [cache] guards it.
+// the document of the schema itself, and each document that a $ref
+// names. A validation with the compiled schema that loads a $ref document
+// adds that document. A [cache] guards it.
 type reach struct {
 	docs  map[docID]struct{}
 	key   cacheKey // the key the registry keeps the schema under
 	state reachState
 }
 
-// newReach creates a new [reach] for a compile of the schema the
+// newReach creates a new [reach] for a compile of the schema that the
 // registry keeps under key. The reach starts with the document of the
 // schema itself.
 func newReach(key cacheKey) *reach {
@@ -291,11 +294,12 @@ const (
 	reachDropped
 )
 
-// A docID names a document the registry loads, whatever key a request
-// spells it with. It holds the file system the document lives in, as a
-// [cacheKey] does, and a URI without userinfo or fragment. The URI of a
-// file is the URL [fileURL] gives for the path the registry reads. Any
-// other URI is in the normal form [canonicalURL] gives.
+// A docID names a document that the registry loads, whatever key a
+// request spells it with. It holds the file system that the document
+// lives in, as a [cacheKey] does, and a URI without userinfo or fragment.
+// The URI of a file is the URL that [fileURL] gives for the path that the
+// registry reads. Any other URI is in the normal form that [canonicalURL]
+// gives.
 //
 //nolint:unused // The fields tell the documents of the registry apart.
 type docID struct {
@@ -304,7 +308,7 @@ type docID struct {
 }
 
 // docOf returns the [docID] of the document that key names. The registry
-// reads a file URL by the path [fileURLPath] finds in it. That path
+// reads a file URL by the path that [fileURLPath] finds in it. That path
 // leaves out a query and a localhost authority, so every URL that reads
 // one file gets one docID. Windows reads a drive letter in either case, so
 // docOf spells it in upper case.
@@ -324,7 +328,7 @@ func docOf(key cacheKey) docID {
 	return docID{fs: key.fs, uri: canonicalURL(uri)}
 }
 
-// link adds v to the set m holds under k.
+// link adds v to the set that m holds under k.
 func link[K, V comparable](m map[K]map[V]struct{}, k K, v V) {
 	set, ok := m[k]
 	if !ok {
@@ -335,8 +339,8 @@ func link[K, V comparable](m map[K]map[V]struct{}, k K, v V) {
 	set[v] = struct{}{}
 }
 
-// unlink removes v from the set m holds under k, and removes the set
-// when it holds nothing more.
+// unlink removes v from the set that m holds under k, and removes the
+// set when it is empty.
 func unlink[K, V comparable](m map[K]map[V]struct{}, k K, v V) {
 	set := m[k]
 	delete(set, v)
@@ -350,7 +354,7 @@ func unlink[K, V comparable](m map[K]map[V]struct{}, k K, v V) {
 // the value used least recently when it holds more than its limit. It
 // drops a value that records a failure when the retry interval has
 // passed since the failure. It calls its release function with each
-// value it drops. It is not safe for concurrent use, and a [cache]
+// value that it drops. It is not safe for concurrent use, and a [cache]
 // guards it.
 type lru[K comparable, V any] struct {
 	items      map[K]*lruItem[K, V]
@@ -361,11 +365,11 @@ type lru[K comparable, V any] struct {
 	limit      int // the most items the lru keeps, or 0 for no limit
 }
 
-// An lruItem is a value an [lru] keeps, with its key and its place in
-// each list of the lru.
+// An lruItem is a value that an [lru] keeps, with its key and its place
+// in each list of the lru.
 type lruItem[K comparable, V any] struct {
-	// When the failure the value records happened, or the zero time for
-	// a value that records none.
+	// The time of the failure that the value records, or the zero time
+	// for a value that does not record a failure.
 	failedAt time.Time
 	key      K
 	value    V
@@ -375,7 +379,7 @@ type lruItem[K comparable, V any] struct {
 
 // newLRU creates a new [lru] that keeps at most limit values, or any
 // number for a limit of 0. The lru drops a failure retryAfter after it
-// happened, and it calls release with each value it drops.
+// happened, and it calls release with each value that it drops.
 func newLRU[K comparable, V any](limit int, retryAfter time.Duration, release func(K, V)) *lru[K, V] {
 	return &lru[K, V]{
 		items:      make(map[K]*lruItem[K, V]),
@@ -385,8 +389,9 @@ func newLRU[K comparable, V any](limit int, retryAfter time.Duration, release fu
 	}
 }
 
-// get returns the value c keeps under key and marks it used. A failure
-// whose retry interval has passed counts as no value, and get drops it.
+// get returns the value that c keeps under key and marks it used. For a
+// failure whose retry interval has passed, get drops the failure and
+// reports false.
 func (c *lru[K, V]) get(key K) (V, bool) {
 	item, ok := c.items[key]
 	if !ok {
@@ -409,13 +414,14 @@ func (c *lru[K, V]) get(key K) (V, bool) {
 }
 
 // keep keeps v under key and returns it. A failedAt other than the zero
-// time says v records a failure that happened then. When c keeps a value
-// that records no failure under key already, keep marks that value used
-// and returns it in place of v, so every caller sees one value per key.
+// time says that v records a failure that happened then. When c already
+// keeps a value under key that does not record a failure, keep marks
+// that value used and returns it in place of v. Every caller thus sees
+// one value per key.
 //
 // Before it adds v, keep drops each failure whose retry interval has
-// passed. After it, keep drops the values used least recently until c
-// holds no more than its limit.
+// passed. After it adds v, keep drops the values used least recently
+// until c holds at most its limit.
 func (c *lru[K, V]) keep(key K, v V, failedAt time.Time) V {
 	if item, ok := c.items[key]; ok {
 		if item.failure == nil {
@@ -445,7 +451,7 @@ func (c *lru[K, V]) keep(key K, v V, failedAt time.Time) V {
 	return v
 }
 
-// discard drops the value c keeps under key, if any.
+// discard drops the value that c keeps under key, if any.
 func (c *lru[K, V]) discard(key K) {
 	if item, ok := c.items[key]; ok {
 		c.remove(item)
@@ -493,7 +499,7 @@ func (c *lru[K, V]) remove(item *lruItem[K, V]) {
 	c.release(item.key, item.value)
 }
 
-// itemOf returns the item e holds. Every element of the lists of an
+// itemOf returns the item that e holds. Every element of the lists of an
 // [lru] holds an [*lruItem].
 func itemOf[K comparable, V any](e *list.Element) *lruItem[K, V] {
 	item, _ := e.Value.(*lruItem[K, V]) //nolint:errcheck // Every element holds an item.
@@ -501,9 +507,9 @@ func itemOf[K comparable, V any](e *list.Element) *lruItem[K, V] {
 	return item
 }
 
-// A flightGroup runs one call at a time for each key, and every caller
-// that asks for the key while the call runs shares its result. Its zero
-// value is ready to use, and it is safe for concurrent use.
+// A flightGroup runs one call at a time for each key. Every caller that
+// asks for the key while the call runs shares its result. Its zero value
+// is ready to use, and it is safe for concurrent use.
 type flightGroup[K comparable, V any] struct {
 	calls map[K]*flightCall[V]
 	mu    sync.Mutex
@@ -517,7 +523,7 @@ type flightCall[V any] struct {
 	val  V
 }
 
-// do returns the call in flight for key. When none is in flight, do
+// do returns the call in flight for key. When no call is in flight, do
 // starts fn on a goroutine of its own and returns the new call. The
 // group forgets the call when it ends, so the next do for key starts a
 // new call.

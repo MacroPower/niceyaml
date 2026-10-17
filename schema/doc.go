@@ -4,8 +4,8 @@
 // # Schema Directives
 //
 // Schema directives let YAML files declare their own schema. The directive
-// format follows the yaml-language-server convention, so editors like VS Code
-// read it:
+// format follows the yaml-language-server convention, so editors such as
+// VS Code read it:
 //
 //	# yaml-language-server: $schema=./config.schema.json
 //	name: example
@@ -34,10 +34,11 @@
 //
 // The generator names each property as encoding/json names the field. It
 // reads the json tag, and takes the Go name of the field when the tag
-// names none. The decoder names the key of each field as go-yaml does.
-// It reads the yaml tag, or the json tag when the field has no yaml tag.
-// It lowercases the Go name when the tag it reads names none. The
-// property and the key agree for every field of a type only when:
+// does not name one. The decoder names the key of each field as go-yaml
+// does. It reads the yaml tag, or the json tag when the field does not
+// have a yaml tag. It lowercases the Go name when the tag it reads does
+// not name one. The property and the key agree for every field of a type
+// only when:
 //
 //   - Each field that the decoder reads by name has a json tag that names
 //     it.
@@ -46,7 +47,7 @@
 //   - Each field with yaml:"-" that the generator reads carries json:"-"
 //     too.
 //   - Each field that the generator reads inline carries yaml:",inline",
-//     and no other field does. The generator reads inline each embedded
+//     and the other fields do not. The generator reads inline each embedded
 //     struct without a JSON name, and each struct field with the embed
 //     option of encoding/json/v2.
 //   - Only struct fields carry the embed option.
@@ -74,12 +75,13 @@
 //	var Config = schema.MustCompile(schemaBytes)
 //
 //	if err := doc.Validate(ctx, Config); err != nil {
-//	    // err is a *niceyaml.SourceError; niceyaml.FormatError prints the failing lines.
+//	    // err is a *niceyaml.SourceError, and niceyaml.FormatError prints the failing lines.
 //	}
 //
-// One violation is the error itself. Several come back as one error that
-// counts them, and its message lists each behind its own position, so a
-// program that prints the error alone still names every violation:
+// A single violation is the error itself. Several violations arrive as one
+// error that counts them. Its message lists each violation behind its own
+// position, so a program that prints the error alone still names every
+// violation:
 //
 //	config.yaml: 2 schema violations
 //	config.yaml:2:7: $.port: 0 is less than 1
@@ -90,35 +92,35 @@
 // of a member, so its path ends in `~`, as
 // [go.jacobcolvin.com/niceyaml/paths.Path.Key] writes one. A violation
 // about a mapping or a sequence as a whole, such as one of maxItems,
-// carries the path of that value and binds at the key that holds it, as
-// [go.jacobcolvin.com/niceyaml.AtPath] describes:
+// carries the path of that value. It binds at the key that holds the
+// value, as [go.jacobcolvin.com/niceyaml.AtPath] describes:
 //
 //	config.yaml:4:1: $.tags: array has 3 items, maximum is 2
 //
-// A member the schema requires and the document leaves out reports the
-// path it would have, such as $.server.name, and the error binds at the
-// key of the mapping that lacks it.
+// A violation about a required member that the document omits carries
+// the path of the missing member, such as $.server.name. The error binds
+// at the key of the mapping that lacks the member.
 //
 // [Schema.Check] is the raw step. It returns its violations as it wrote
-// them, with no source and no position, so a validator of the program's
-// own runs the schema on a node it picks through
-// [go.jacobcolvin.com/niceyaml.Node.Validate] and returns that error.
+// them, without a source or a position. A validator of the program's own
+// can therefore run the schema on a node it picks through
+// [go.jacobcolvin.com/niceyaml.Node.Validate] and return that error.
 //
-// [Schema.ValidateValue] checks decoded data that came from no document,
-// such as the body of a request. The text of its error names the path of
-// each violation from the value, so a program prints or returns the
-// error as it is:
+// [Schema.ValidateValue] checks decoded data that did not come from a
+// document, such as the body of a request. The text of its error names
+// the path of each violation from the value, so a program prints or
+// returns the error as it is:
 //
 //	2 schema violations
 //	$.port: 0 is less than 1
 //	$.name: missing required property "name"
 //
-// That error stands in no document, so a caller that knows where the
-// data stands in one places it there.
+// That error does not stand in a document, so a caller that knows where
+// the data stands in one places it there.
 // [go.jacobcolvin.com/niceyaml.Rebase] or the
 // [go.jacobcolvin.com/niceyaml.Node] of that value puts the errors under
-// its path, and the bound error then names the file and the position of
-// each violation.
+// its path. The bound error then names the file and the position of each
+// violation.
 //
 // To validate and decode in one step, pass the schema to
 // [go.jacobcolvin.com/niceyaml.Node.Decode] with
@@ -129,22 +131,22 @@
 // The error of each violation wraps a [*Violation], which names the JSON
 // Schema keyword the value fails and where that keyword stands in the
 // schema. A program that suppresses a rule, rewords a message, or writes
-// a report of its own reads the Violation and leaves the text of the
-// message alone.
+// a report of its own reads the Violation instead of parsing the text of
+// the message.
 //
 // Settings of the JSON Schema library pass through [WithJSONSchemaOptions].
 // Its JSONSchema prefix shows the dependency at the call site, as the YAML
 // prefix does on the options of the root package that pass go-yaml values
 // through.
 //
-// [Compile] reads no file and fetches no URL, so a $ref to another
+// [Compile] does not read files or fetch URLs, so a $ref to another
 // document resolves only through a ref resolver given with
 // [WithJSONSchemaOptions]. Without one, the schema does not compile. A
 // schema whose $refs name files or URLs beside it loads through a
 // [Registry], which resolves each $ref against the location of the
-// schema. [FileFS] names a schema in a file system, and the registry
-// reads it and the files its $refs name from there, such as from an
-// [embed.FS]:
+// schema. [FileFS] names a schema in a file system, such as an
+// [embed.FS]. The registry reads that schema and the files its $refs name
+// from that file system:
 //
 //	//go:embed schemas
 //	var schemasFS embed.FS
@@ -152,8 +154,8 @@
 //	reg := schema.NewRegistry()
 //	root, err := reg.Schema(ctx, schema.FileFS(schemasFS, "schemas/root.json"))
 //
-// A schema loads only when each document its $refs name loads too, so a
-// $ref to a file that is missing fails the schema once, with an error
+// A schema loads only when each document its $refs name loads too. A
+// $ref to a missing file therefore fails the schema once, with an error
 // wrapping [ErrLoad], rather than each document that reaches the $ref.
 // [WithRequireRefs] turns the check off for schemas the program does not
 // maintain, such as the ones a catalog names. Such a schema then
@@ -181,18 +183,19 @@
 // from the deprecationMessage keyword of the schema, which the JSON
 // language service of VS Code also reads. The generator of
 // [go.jacobcolvin.com/x/jsonschema] writes that keyword from the
-// Deprecated: paragraph of a doc comment. A schema without it warns with
-// the headline alone.
+// Deprecated: paragraph of a doc comment. A schema without that keyword
+// warns with only the headline.
 //
 // A choice in the schema decides whether a deprecation applies. A
 // deprecation under a branch of anyOf or oneOf warns only when the value
 // passes that branch. One under if warns only when the value passes if,
-// one under contains only for the items that match, and one under not
-// never. [go.jacobcolvin.com/x/jsonschema.Validator.ValidateDeprecations]
-// lists the rules. Draft-07 ignores each sibling of a $ref, so under that
-// draft a deprecated keyword beside a $ref warns nothing.
+// and one under contains warns only for the items that match. A
+// deprecation under not never warns.
+// [go.jacobcolvin.com/x/jsonschema.Validator.ValidateDeprecations] lists
+// the rules. Draft-07 ignores each sibling of a $ref, so under that draft
+// a deprecated keyword beside a $ref does not warn.
 //
-// One check gives one warning for each node of the text. The
+// A check gives each node of the text at most one warning. The
 // deprecations that reach a node through an alias, a merge key, or two
 // schemas share its warning. The warning lists each distinct message
 // once, in the order that the check evaluated them, and names the path
@@ -204,17 +207,19 @@
 // # YAML Schemas
 //
 // A schema document holds JSON or YAML. [Compile] and a [Registry] read
-// data whose first byte after white space is '{' as JSON and any other
-// data as YAML, whatever the name of its file or URL. The rule covers the
-// schema a [Ref] names and each document a $ref names, so a directive
-// names a YAML schema as it does in yaml-language-server:
+// data whose first byte after white space is '{' as JSON, and any other
+// data as YAML. The name of the file or URL does not change the reader.
+// The rule covers the schema a [Ref] names and each document a $ref
+// names. A directive therefore names a YAML schema as it does in
+// yaml-language-server:
 //
 //	# yaml-language-server: $schema=./config.schema.yaml
 //	name: example
 //
 // That byte alone picks the reader. JSON that does not parse fails as
-// JSON, and nothing reads it again as YAML, where a trailing comma would
-// pass and a member with no value would be null.
+// JSON, and the package does not read it again as YAML. YAML accepts some
+// malformed JSON, because it allows a trailing comma and reads a member
+// without a value as null.
 //
 // A YAML schema is one document. A duplicate key, a second document, and
 // aliases past the limit [go.jacobcolvin.com/niceyaml.WithAliasLimit]
@@ -223,9 +228,9 @@
 //
 //	compile schema: "file:///etc/app/config.schema.yaml": YAML decode: 3:9: ...
 //
-// The schema is at fault for that error, so it wraps no error of the
-// root package. [go.jacobcolvin.com/niceyaml.IsInvalid] does not report
-// it for the document the schema would validate.
+// The schema is at fault for that error, so it does not wrap an error of
+// the root package. [go.jacobcolvin.com/niceyaml.IsInvalid] does not
+// report it as a fault of the document that the schema validates.
 //
 // The go-yaml decoder takes several hundred times the size of the text
 // in memory. A registry therefore refuses a schema file, URL, or YAML
@@ -240,8 +245,8 @@
 // [Schema.Check] reads the numbers of a document the same way. The
 // go-yaml decoder reads three spellings of a number in its own way:
 //
-//   - A number with an exponent and no decimal point, such as 1e3, is
-//     the text "1e3". The number is 1.0e3.
+//   - A number with an exponent but without a decimal point, such as
+//     1e3, is the text "1e3". The number is 1.0e3.
 //   - An integer with a leading zero, such as 010, is octal, so it is 8.
 //   - An integer that does not fit in 64 bits, such as
 //     18446744073709551616, is text.
@@ -250,23 +255,25 @@
 // compile. Under const or enum, the schema compiles and accepts only
 // that text. The YAML 1.2 core schema reads 1e3 as 1000 and 010 as 10,
 // so an editor that follows it reads such a schema another way. The
-// numbers .inf and .nan fail the compile, since JSON has neither.
+// numbers .inf and .nan fail the compile, because JSON does not have
+// them.
 //
 // # Resolution
 //
-// When a document's schema is unknown ahead of time, a [Resolver] finds
-// it. Resolve inspects the document and returns a [Ref] naming the
-// schema, or reports [ErrNoMatch] when the resolver does not apply. A
-// [Registry] tries its resolvers in order and validates the document
-// against the first schema named. A Ref names either bytes under a key or
-// a [*Schema] compiled already. The registry loads the bytes from a file,
-// a URL, or the function given to [Loadable], and caches the compiled
-// schema by the key. A Ref is a Resolver itself, so the loaders below go
-// in directly or behind a [When] guard:
+// When the program does not know a document's schema in advance, a
+// [Resolver] finds it. Its Resolve method inspects the document and
+// returns a [Ref] naming the schema, or reports [ErrNoMatch] when the
+// resolver does not apply. A [Registry] tries its resolvers in order and
+// validates the document against the first schema a resolver names. A
+// Ref names either bytes under a key or a [*Schema] compiled already. The
+// registry loads the bytes from a file, a URL, or the function given to
+// [Loadable], and caches the compiled schema by the key. A Ref is a
+// Resolver itself, so the Ref of each loader goes into a registry
+// directly or behind a [When] guard:
 //
 //	kindPath := paths.Doc().Child("kind")
 //	reg := schema.NewRegistry(schema.WithResolvers(
-//	    // Directive matching first (i.e. explicit user intent).
+//	    // Directive matching first, for explicit user intent.
 //	    schema.Directive(),
 //	    // Content-based matching.
 //	    schema.When(
@@ -284,11 +291,11 @@
 //
 // A Registry implements [go.jacobcolvin.com/niceyaml.Validator],
 // so [go.jacobcolvin.com/niceyaml.WithValidator] runs it before a decode.
-// A document no resolver applies to fails with [ErrNoMatch], which is the
-// answer a validation command wants.
+// When every resolver reports [ErrNoMatch] for a document, the document
+// fails with ErrNoMatch, which is the answer a validation command wants.
 // [go.jacobcolvin.com/niceyaml.IsInvalid] reports that error, so the
-// command counts it as a fault of the document. A decode that should
-// check the documents it recognizes and accept the rest builds the
+// command counts it as a fault of the document. To check the documents
+// the registry recognizes and accept the rest, a program builds the
 // registry with [WithRequireSchema] set false:
 //
 //	reg := schema.NewRegistry(
@@ -298,17 +305,18 @@
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
-// [Directive] lets each document pick its own schema. A decode of
-// documents from another trust domain confines the registry first, as
-// Untrusted Documents describes.
+// [Directive] lets each document pick its own schema. A program that
+// decodes documents from another trust domain should confine the registry
+// first, as the Untrusted Documents section describes.
 //
 // # Loaders
 //
-// [Embedded], [File], and [URL] return a [Ref] that names one schema, and
-// [FileOrURL] returns one for a reference that may be either, as written
-// in a directive or on a command line. A Ref is a resolver that names
-// its schema for every document and never reports [ErrNoMatch], so a
-// registry holding one alone validates everything against it:
+// [Embedded], [File], and [URL] each return a [Ref] that names one
+// schema. [FileOrURL] returns one for a reference that might be either a
+// file or a URL, such as one written in a directive or on a command line.
+// A Ref is a resolver that names its schema for every document and never
+// reports [ErrNoMatch]. A registry whose only resolver is a Ref validates
+// every document against the schema of that Ref:
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaBytes)))
 //
@@ -330,17 +338,18 @@
 // The loaders return a [Ref] whose key identifies the schema and whose
 // bytes the registry loads through [Registry.Load]. [Embedded] holds a
 // copy of the bytes. The registry reads a file from the file system its
-// Ref names, or from disk, where its [Access] decides which files it
-// reads. It fetches a URL with the client [WithHTTPClient] gave it.
-// [Registry.Schema] checks its cache by
-// key before it loads and compiles those bytes, so once a schema
-// compiles, the registry serves it to every later document that names it
-// without loading it again. The registry remembers a failed load or
-// compile for the interval [WithRetryAfter] sets, one minute by default.
-// The documents that name a broken schema inside the interval cost one
-// attempt between them, and the first document after the interval loads
-// the schema again. [WithCacheLimit] bounds the number of schemas the
-// cache keeps.
+// Ref names, or from disk. The [Access] of the registry decides which
+// files on disk the registry reads. The registry fetches a URL with the client
+// [WithHTTPClient] gave it.
+//
+// [Registry.Schema] checks its cache by key before it loads and compiles
+// those bytes. After a schema compiles, the registry serves it to every
+// later document that names it without loading it again. The registry
+// remembers a failed load or compile for the interval [WithRetryAfter]
+// sets, one minute by default. The documents that name a broken schema
+// inside the interval cost one attempt between them. The first document
+// after the interval loads the schema again. [WithCacheLimit] bounds the
+// number of schemas the cache keeps.
 //
 // The registry serves a schema from its cache after the file or URL it
 // came from changes. A program that watches its schema files, such as an
@@ -390,21 +399,22 @@
 // A schema file lives on disk or in a file system, and each [Ref] says
 // which. [File] names a file on disk, and [FileFS] names one in a file
 // system, such as an [embed.FS]. A reference written beside a document
-// lives where the document does, so [Directive] and [RefBeside] read it
-// from the file system of a document that
-// [go.jacobcolvin.com/niceyaml.NewSourceFromFS] opened and from disk for
+// lives where the document does. [Directive] and [RefBeside] therefore
+// read it from the file system of a document that
+// [go.jacobcolvin.com/niceyaml.NewSourceFromFS] opened, and from disk for
 // one that [go.jacobcolvin.com/niceyaml.NewSourceFromFile] opened. One
 // registry thus serves bundled documents and documents on disk.
 //
 // An [Access] from [WithAccess] decides which files a registry reads
 // from disk and which URLs it fetches. [AllowRoot] confines the reads to
 // the directory of an [os.Root], and a path outside that directory fails
-// to load. Untrusted Documents pairs the Access with the other options
-// that confine a registry for documents from another trust domain.
+// to load. The Untrusted Documents section pairs the Access with the
+// other options that confine a registry for documents from another trust
+// domain.
 //
-// [FileOrURL] routes a reference as written in a directive or on a command
-// line, which may be a file path or a URL, and returns an error for one
-// that names nothing. The registry fetches every URL with one client, which
+// [FileOrURL] routes a reference that might be a file path or a URL, such
+// as one written in a directive or on a command line. It returns an error
+// for an empty reference. The registry fetches every URL with one client, which
 // [WithHTTPClient] sets, so that client's timeout or proxy applies to every
 // resolver that names a URL:
 //
@@ -436,11 +446,10 @@
 // A resolver error that does not wrap [ErrNoMatch] ends the lookup, and the
 // resolvers after it do not run. An error that matches [ErrResolve],
 // [ErrLoad], or [ErrCompile] ends it too, even when it wraps ErrNoMatch.
-// The error of a [Registry] that is a resolver is one example. While no
-// catalog has loaded, a
-// [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] that cannot
-// reach SchemaStore.org ends the lookup this way, so place it after any
-// resolver that should still apply without the catalog.
+// The error of a [Registry] that is a resolver is one example. Until a
+// catalog loads, a [go.jacobcolvin.com/niceyaml/schema/schemastore.Store]
+// that cannot reach SchemaStore.org ends the lookup this way. Place it
+// after any resolver that should still apply without the catalog.
 //
 // # SchemaStore Integration
 //
@@ -453,14 +462,14 @@
 // # Untrusted Documents
 //
 // [Directive] lets the author of a document pick the files the registry
-// reads and the URLs it fetches, and the schema a directive names can
-// name more through its $refs. A registry reads any file and fetches any
-// URL by default, as [Unrestricted] allows. A program that validates
-// documents from another trust domain, such as uploads or pull requests,
-// gives Directive a registry of its own. It confines that registry with
-// [WithAccess], [WithCacheLimit], and [WithLoadLimit]. The [Access] acts
-// on every load that registry performs: the schema a [Ref] names, each
-// $ref, and each redirect.
+// reads and the URLs it fetches. The schema a directive names can name
+// more files and URLs through its $refs. A registry reads any file and
+// fetches any URL by default, as [Unrestricted] allows. A program that
+// validates documents from another trust domain, such as uploads or pull
+// requests, gives Directive a registry of its own. It confines that
+// registry with [WithAccess], [WithCacheLimit], and [WithLoadLimit]. The
+// [Access] acts on every load that registry performs: the schema a [Ref]
+// names, each $ref, and each redirect.
 //
 // A second registry, without those limits, holds the program's schemas,
 // the catalog, and the confined registry as its first resolver. The two
@@ -496,12 +505,12 @@
 //	source, err := niceyaml.NewSourceFromFile(filepath.Join(tenantDir, "app.yaml"))
 //
 // The registry reg asks untrusted first. A document with a directive
-// validates against the schema that untrusted loaded under the Access. A
-// document without one falls through to the catalog and then to the
-// schema of the program. A directive that names a schema the Access does
-// not allow ends the lookup of reg with a load error. The registry reg
-// then tries none of its later resolvers. [Registry.Resolve] describes
-// how the two registries pass errors.
+// validates against the schema that untrusted loaded under the Access.
+// For a document without one, reg tries the catalog and then the schema
+// of the program. A directive that names a schema the Access does not allow
+// ends the lookup of reg with a load error. The registry reg then does
+// not try any of its later resolvers. [Registry.Resolve] describes how
+// the two registries pass errors.
 //
 // [AllowRoot] confines the reads from disk to tenantDir. A directive that
 // names ./schema.json reads schema.json in tenantDir. One that names
@@ -509,35 +518,36 @@
 // load, and so does a $ref that leads there. The confined registry reads
 // through the [os.Root], which refuses a symbolic link that leads out of
 // the tree. The program must keep the Root open while it uses the
-// registry. An Access with neither AllowRoot nor [AllowAnyFile] allows no
-// file on disk.
+// registry. An Access allows files on disk only through AllowRoot or
+// [AllowAnyFile].
 //
 // The Access confines every document on disk.
 // [go.jacobcolvin.com/niceyaml.NewSourceFromFile] gives each document
-// an absolute path. A program that builds a document from bytes passes
-// an absolute path to [go.jacobcolvin.com/niceyaml.WithFilePath]. A
+// an absolute path. A program that builds a document from bytes should
+// pass an absolute path to [go.jacobcolvin.com/niceyaml.WithFilePath]. A
 // relative reference beside a document whose path is relative and that
-// has no file system fails with [ErrNoBaseDir]. A document in the file
-// system [go.jacobcolvin.com/niceyaml.WithFS] gives it reads only that
-// file system, whatever the Access allows.
+// does not have a file system fails with [ErrNoBaseDir]. A document in
+// the file system [go.jacobcolvin.com/niceyaml.WithFS] gives it reads
+// only that file system, whatever the Access allows.
 //
 // [AllowURLPrefixes] confines the fetches to the URLs under its prefixes.
-// An Access with neither AllowURLPrefixes nor [AllowAnyURL] allows no
-// URL. The catalog sits in reg, which reads and fetches what Unrestricted
+// An Access allows URLs only through AllowURLPrefixes or [AllowAnyURL].
+// The catalog sits in reg, which reads and fetches what Unrestricted
 // allows. The prefixes therefore do not have to list the hosts of the
-// schemas the catalog names. A prefix names a host, not an address.
-// A host whose DNS answer points at an internal address still receives
-// the request, as in DNS rebinding. A program that must keep the fetches
-// off its own network checks each address in the Dialer of the client it
-// gives [WithHTTPClient]. With that check, the program can pass
-// [AllowAnyURL] in place of the prefixes. A directive then names any URL,
-// as it does in yaml-language-server.
+// schemas the catalog names.
+//
+// A prefix names a host, not an address. A host whose DNS answer points
+// at an internal address still receives the request, as in DNS
+// rebinding. A program that must keep the fetches off its own network
+// checks each address in the Dialer of the client it gives
+// [WithHTTPClient]. With that check, the program can pass [AllowAnyURL]
+// in place of the prefixes. A directive then names any URL, as it does in
+// yaml-language-server.
 //
 // [WithCacheLimit] bounds the number of schemas the confined registry
-// keeps.
-// Without it, documents that name endless distinct schemas, such as one
-// URL with a new query string each time, grow the cache until the
-// program calls [Registry.Purge].
+// keeps. Without it, documents that name an unbounded number of distinct
+// schemas, such as one URL with a new query string each time, grow the
+// cache until the program calls [Registry.Purge].
 //
 // The confined registry holds the file system of a document from
 // [go.jacobcolvin.com/niceyaml.WithFS] for as long as it keeps an entry
@@ -557,24 +567,24 @@
 // to 1 MiB. The registry keeps each schema it compiles, so the load limit
 // and the cache limit together bound the memory of the cache.
 //
-// The options do not keep the author from turning validation off. A
+// The options do not stop the author from turning validation off. A
 // directive of "$schema=none" passes its document, and so does a
 // directive that names a schema that accepts the document. A program
-// that must check every document against a schema of its own leaves
-// Directive out of the resolvers.
+// that must check every document against a schema of its own omits
+// Directive from the resolvers.
 //
 // The text of a load error names the file or URL the registry tried,
 // such as a path under tenantDir. A server that returns the formatted
 // error to the author of the document reveals that path.
 // [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for a load
-// error, so such a server can tell it apart from a fault of the document
-// and return a message of its own.
+// error, so such a server can distinguish it from a fault of the
+// document and return a message of its own.
 //
-// The error holds a [*LoadError], which [errors.As] finds, with the
-// [Ref] of the schema. [Ref.Name] names that Ref without the password of
-// a URL. Each file or URL that did not read is a [*FetchError] inside
-// the LoadError, with the status of the response for a URL. The server
-// builds its message from those fields, such as one that names the URL
-// but not the path, or one that tells a missing schema from a host that
-// failed.
+// The error holds a [*LoadError] with the [Ref] of the schema, and
+// [errors.As] finds that LoadError. [Ref.Name] names that Ref without the
+// password of a URL. Each file or URL that the registry could not read is
+// a [*FetchError] inside the LoadError, with the status of the response
+// for a URL. The server builds its message from those fields, such as one
+// that names the URL but not the path, or one that distinguishes a
+// missing schema from a host that failed.
 package schema

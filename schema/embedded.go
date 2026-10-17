@@ -17,12 +17,13 @@ import (
 //	r := schema.Embedded(schemaBytes)
 //
 // The [Ref.Key] is a digest of the bytes, so two Embedded Refs over the
-// same bytes name one schema to the registry, which compiles it once with
-// the options [WithCompileOptions] gave it. Embedded copies data, so a
-// caller that writes to its slice afterward cannot make the key name
-// different bytes. A schema compiled already, such as one held at
-// package scope through [MustCompile], goes into a registry as it is
-// rather than as its bytes, since a [*Schema] is a [Resolver].
+// same bytes name one schema to the registry. The registry compiles that
+// schema once with the options that [WithCompileOptions] gave it.
+// Embedded copies data, so a caller that writes to its slice afterward
+// cannot make the key name different bytes. A [*Schema] is a [Resolver].
+// A compiled schema, such as one held at package scope through
+// [MustCompile], therefore goes into a registry as it is, not as its
+// bytes.
 func Embedded(data []byte) Ref {
 	sum := sha256.Sum256(data)
 	schemaData := bytes.Clone(data)

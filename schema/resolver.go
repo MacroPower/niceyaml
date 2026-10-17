@@ -10,26 +10,27 @@ import (
 )
 
 // ErrNoMatch reports that a [Resolver] does not apply to a document. A
-// registry moves on to its next resolver when Resolve returns an error
-// wrapping ErrNoMatch, and reports it to the caller when no resolver
-// applies. The document then names no schema the registry knows, so
-// [niceyaml.IsInvalid] reports the error the registry returns. A sentinel
-// a resolver declines with, as [ErrNoDirective] is, must wrap ErrNoMatch
-// for the error the registry reports to match it.
+// registry tries its next resolver when Resolve returns an error wrapping
+// ErrNoMatch, and reports the error to the caller when no resolver
+// applies. The document then does not name a schema that the registry
+// knows, so [niceyaml.IsInvalid] reports true for the error that the
+// registry returns. A sentinel that a resolver declines with, such as
+// [ErrNoDirective], must wrap ErrNoMatch for the error that the registry
+// reports to match it.
 var ErrNoMatch = errors.New("no matching schema")
 
-// Ref is the schema a [Resolver] names for a document. A Ref from
-// [Loadable], which [Embedded] builds, holds a key and a function that
-// loads the bytes to compile. A Ref from [File] names a file the registry
-// reads from disk, one from [FileFS] names a file in a file system, and
-// one from [URL] names an HTTP URL the registry fetches. A Ref from
+// Ref is the schema that a [Resolver] names for a document. A Ref from
+// [Loadable] or [Embedded] holds a key and a function that loads the
+// bytes to compile. A Ref from [File] names a file that the registry
+// reads from disk. One from [FileFS] names a file in a file system, and
+// one from [URL] names an HTTP URL that the registry fetches. A Ref from
 // [Schema.Ref] carries a [*Schema] compiled already. [FileOrURL] builds a
 // file or a URL Ref from a reference as written, and [RefBeside] builds
 // one for a reference that belongs to a document.
 //
 // A Ref is itself a [Resolver] that names its schema for every document,
-// so one goes into [WithResolvers] or [When] as it is, and a resolver that
-// picks a schema from the document returns one:
+// so a Ref goes into [WithResolvers] or [When] as it is. A resolver that
+// picks a schema from the document returns a Ref:
 //
 //	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 //	    var kind string
@@ -51,63 +52,67 @@ var ErrNoMatch = errors.New("no matching schema")
 //	    return schema.File("schemas/" + kind + ".json"), nil
 //	})
 //
-// A Ref is data, and the registry is where the bytes move. It checks its
-// cache by [Ref.Key] first, and loads and compiles the schema only on a
-// cache miss, so once a schema compiles, the registry serves it to every
-// later document that names it without loading it again. The registry
-// remembers a failed load or compile for the interval [WithRetryAfter]
-// sets, and the first document that names the Key after the interval
-// loads it again. The registry caches a Ref from [FileFS] by its
-// file system and its path together, so one path in two file systems is
-// two schemas. The registry compiles every schema with the options
-// [WithCompileOptions] gave it. [Registry.Load] reads a file from the
-// file system its Ref names, or from disk, where the [Access] of the
-// registry decides which files it reads. It fetches a URL with the client
-// [WithHTTPClient] gave the registry. A Ref that carries a compiled schema
-// has nothing to load, and the registry validates with the schema as it
-// is.
+// A Ref is data, and the registry loads the bytes that the Ref names.
+// The registry checks its cache by [Ref.Key] first, and loads and compiles
+// the schema only on a cache miss. After a schema compiles, the registry
+// serves it to every later document that names it without loading it
+// again. The registry remembers a failed load or compile for the interval
+// that [WithRetryAfter] sets. The first document that names the Key after
+// the interval loads it again.
+//
+// The registry caches a Ref from [FileFS] by its file system and its path
+// together, so one path in two file systems is two schemas. The registry
+// compiles every schema with the options that [WithCompileOptions] gave
+// it. [Registry.Load] reads a file from the file system that its Ref
+// names, or from disk. On disk, the [Access] of the registry decides
+// which files it reads. Load fetches a URL with the client that
+// [WithHTTPClient] gave the registry. A Ref that carries a compiled
+// schema does not have anything to load, and the registry validates with
+// the schema as it is.
 //
 // Create instances with [Loadable], [Embedded], [File], [FileFS], [URL],
-// [FileOrURL], [RefBeside], or [Schema.Ref]. The zero Ref names no
-// schema. Return it
-// beside an error, as a resolver does with [ErrNoMatch].
+// [FileOrURL], [RefBeside], or [Schema.Ref]. The zero Ref does not name a
+// schema. Return it beside an error, as a resolver does with
+// [ErrNoMatch].
 type Ref struct {
 	load func(ctx context.Context) ([]byte, error)
-	// The compiled schema the Ref carries, from Schema.Ref, which the
-	// registry validates with as it is.
+	// The compiled schema that the Ref carries, from Schema.Ref. The
+	// registry validates with it as it is.
 	schema *Schema
 	key    string
-	// The path of the file, as given to File or FileFS. A Ref that names
-	// the file in a file system reads this path from it, and the registry
-	// names the Ref by it in a message.
+	// The path of the file, as given to File or FileFS. For a Ref that
+	// names the file in a file system, the registry reads this path from
+	// that file system and names the Ref by it in messages.
 	file string
-	// The file system the file lives in, or nil for a file on disk.
+	// The file system that the file lives in, or nil for a file on disk.
 	fsys fs.FS
-	// Why File could not make the path absolute, which leaves abs empty.
-	// A read of the Ref from disk reports it.
+	// The reason that File could not make the path absolute, or nil. When
+	// it is set, abs is empty, and a read of the Ref from disk reports it.
 	absErr error
-	// The file made absolute against the working directory as File made
-	// it to build the key, and empty for a Ref with a file system. Every
-	// read from disk, through a root of AllowRoot or not, uses it, so the
-	// bytes under the key stay the same wherever the read happens.
+	// The path of the file that File made absolute against the working
+	// directory to build the key, or empty for a Ref with a file system.
+	// Every read from disk uses it, through a root of AllowRoot or not.
+	// The bytes under the key thus stay the same whatever the working
+	// directory is at the time of the read.
 	abs string
-	// The key is an HTTP URL the registry fetches with its client.
+	// Whether the key is an HTTP URL that the registry fetches with its
+	// client.
 	url bool
 }
 
 // Loadable creates a new [Ref] that names a schema by key and loads its
 // bytes with load on demand.
 //
-// The key must identify the schema uniquely, since two Refs with the same
-// key are one schema to every registry that caches on it. The key is a
-// name, not necessarily a fetchable address. [URL] uses the URL, [File]
+// The key must identify the schema uniquely, because two Refs with the
+// same key are one schema to every registry that caches on it. The key is
+// a name, not necessarily a fetchable address. [URL] uses the URL, [File]
 // the file URL of the absolute path, and [Embedded] a digest of the bytes.
 // [FileFS] uses the file URL of the path in its file system, and the
-// registry tells two file systems apart itself. The load may be
-// expensive and may fail, and must return the same bytes each time it
-// runs for one key.
+// registry tells two file systems apart itself. The load might be
+// expensive or fail, but it must return the same bytes each time it runs
+// for one key.
 //
-// Panics if key is empty or load is nil.
+// Loadable panics if key is empty or load is nil.
 func Loadable(key string, load func(ctx context.Context) ([]byte, error)) Ref {
 	if key == "" {
 		panic("schema.Loadable: key is empty")
@@ -120,15 +125,15 @@ func Loadable(key string, load func(ctx context.Context) ([]byte, error)) Ref {
 	return Ref{key: key, load: load}
 }
 
-// Key returns the key of a [Ref] from [Loadable], [File], or [URL], or
-// "" for the zero Ref and for a Ref from [Schema.Ref], which names no
-// bytes to cache.
+// Key returns the key of a [Ref] from [Loadable], [File], or [URL]. It
+// returns "" for the zero Ref and for a Ref from [Schema.Ref], which does
+// not name bytes to cache.
 func (r Ref) Key() string {
 	return r.key
 }
 
-// Name returns the name the errors of a [Registry] give r. That is the
-// [Ref.Key] with any password in the userinfo of a URL replaced by
+// Name returns the name that the errors of a [Registry] give r. The name
+// is the [Ref.Key] with any password in the userinfo of a URL replaced by
 // "xxxxx", so the errors do not print the password. A Ref that names its
 // file in a file system, such as one from [FileFS], goes by the path as
 // given, with the fragment of its key. The file system reads that path.
@@ -142,8 +147,8 @@ func (r Ref) Name() string {
 
 // Schema returns the compiled schema of a [Ref] from [Schema.Ref], or nil
 // for a Ref that names bytes to load. [Registry.Schema] returns it as it
-// is for such a Ref, and a caller that loads bytes without a registry
-// checks it before [Registry.Load], as the registry does.
+// is for such a Ref. A caller that loads bytes without a registry checks
+// it before [Registry.Load], as the registry does.
 func (r Ref) Schema() *Schema {
 	return r.schema
 }
@@ -156,20 +161,23 @@ func (r Ref) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 
 // Resolver finds the schema for a document.
 //
-// Resolve returns a [Ref] naming the schema for doc, such as one from
-// [Loadable], or an error wrapping [ErrNoMatch] when the resolver does not
-// apply to the document. A registry tries its resolvers in the order given
-// and moves past each one that reports ErrNoMatch, so a resolver decides
-// whether it applies and names the schema in the same call. Any other
-// error stops the lookup. An error that wraps ErrNoMatch but also matches
-// [ErrResolve], [ErrLoad], or [ErrCompile] stops the lookup too, and the
-// registry returns it without a second ErrResolve.
+// Resolve returns a [Ref] that names the schema for doc, such as one from
+// [Loadable]. When the resolver does not apply to the document, Resolve
+// returns an error wrapping [ErrNoMatch].
 //
-// A resolver may inspect the document's content, file path, or tokens, or
-// ignore the document and always name the same schema. The document is
-// never nil, so a resolver reads it without checking. A [Ref] and a
-// [*Schema] are resolvers of the second kind, and [When] guards any
-// resolver with a [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher].
+// A registry tries its resolvers in the order given and moves past each
+// one that reports ErrNoMatch. A resolver thus decides whether it applies
+// and names the schema in the same call. Any other error stops the
+// lookup. An error that wraps ErrNoMatch but also matches [ErrResolve],
+// [ErrLoad], or [ErrCompile] stops the lookup too, and the registry
+// returns it without a second ErrResolve.
+//
+// A resolver can read the document's content, file path, or tokens, or
+// it can ignore the document and always name the same schema. The
+// document is never nil, so a resolver reads it without checking. A [Ref]
+// and a [*Schema] are resolvers that ignore the document, and each always
+// names its own schema. [When] guards any resolver with a
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher].
 //
 // See [ResolverFunc], [Ref], [Schema], [Directive], [*Registry], and
 // [go.jacobcolvin.com/niceyaml/schema/schemastore.Store] for

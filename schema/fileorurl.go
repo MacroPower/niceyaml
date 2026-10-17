@@ -13,47 +13,53 @@ import (
 )
 
 // ErrNoBaseDir reports a relative file path given to [FileOrURL] with an
-// empty baseDir, which leaves nothing to resolve the path against.
-// [RefBeside] reports it for a relative path beside a document that has
-// no file path, or whose file path is relative and names no file system.
+// empty baseDir. An empty baseDir does not give the path a directory to
+// resolve against. [RefBeside] reports it for a relative path beside a
+// document that does not have a file path. It also reports it beside a
+// document that has a relative file path and does not have a file
+// system.
 var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 
 // FileOrURL creates a [Ref] for a schema reference as written in a
-// directive or on a command line. It names a URL as [URL] does for an
-// HTTP/HTTPS reference and a file as [File] does for a file path. Use
-// those directly for a reference written in the program, where an empty
-// one is a mistake rather than input to report.
+// directive or on a command line. For an HTTP or HTTPS reference, it
+// names a URL as [URL] does. For a file path, it names a file as [File]
+// does. Use those functions directly for a reference written in the
+// program, where an empty reference is a mistake rather than input to
+// report.
 //
-// Schemes match case-insensitively, and an HTTP/HTTPS reference resolves
-// to a [Ref] whose URL carries the scheme in lower case. A file:// URL
-// resolves to the local path it names. A file:// URL with a host other
-// than localhost names no local path, so FileOrURL treats the whole
-// reference as a relative file path, which then fails to resolve or read.
-// A fragment on an HTTP/HTTPS or file:// URL selects a subschema, as the
-// note on [URL] says, and a '#' in a plain path is part of the file name.
+// Schemes match case-insensitively, and an HTTP or HTTPS reference
+// resolves to a [Ref] whose URL carries the scheme in lower case. The
+// registry fetches such a reference with the client that
+// [WithHTTPClient] gave it. A file:// URL resolves to the local path
+// that it names. A file:// URL with a host other than localhost does not
+// name a local path. FileOrURL treats the whole of such a reference as a
+// relative file path, which then fails to resolve or read.
+//
+// A fragment on an HTTP, HTTPS, or file:// URL selects a subschema, as
+// the note on [URL] says. A '#' in a plain path is part of the file name.
 // [Directive] splits a fragment off a plain path before it calls
-// FileOrURL, as yaml-language-server does. A relative file path joins
-// baseDir. The path a file:// URL names, an absolute or rooted path, and
-// an HTTP/HTTPS URL ignore baseDir, so on Windows "/schemas/config.json"
-// names a file at the root of the current drive rather than one below
-// baseDir. When baseDir is empty and the path is relative, the error wraps
-// [ErrNoBaseDir], and an empty ref is [ErrEmptyPath] whatever baseDir is.
-// The registry fetches an HTTP/HTTPS reference with the client
-// [WithHTTPClient] gave it.
+// FileOrURL, as yaml-language-server does.
+//
+// A relative file path joins baseDir. The path that a file:// URL names,
+// an absolute or rooted path, and an HTTP or HTTPS URL ignore baseDir. On
+// Windows, "/schemas/config.json" therefore names a file at the root of
+// the current drive rather than one below baseDir. When baseDir is empty
+// and the path is relative, the error wraps [ErrNoBaseDir]. An empty ref
+// is [ErrEmptyPath] whatever baseDir is.
 //
 // FileOrURL uses the reference as written, so whoever wrote it picks the
 // file or host, as the note on [File] says of a path. A registry that
 // takes references from another trust domain confines its reads, its
-// fetches, and its cache, as the Untrusted Documents section of the
-// package documentation describes.
+// fetches, and its cache. The Untrusted Documents section of the package
+// documentation describes how.
 //
 // FileOrURL names a file on disk. A reference that belongs to a document
-// goes through [RefBeside] instead, which takes the base directory from
-// the document and names the file in the file system the document came
-// from.
+// goes through [RefBeside] instead. RefBeside takes the base directory
+// from the document and names the file in the file system that the
+// document came from.
 //
-// A reference from a command line reports its error where the flag is
-// read:
+// A program reports the error of a reference from a command line where
+// it reads the flag:
 //
 //	ref, err := schema.FileOrURL(cwd, flag)
 //	if err != nil {
@@ -114,42 +120,45 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 }
 
 // RefBeside creates a [Ref] for a schema reference that belongs to doc,
-// such as one a field of the document holds or a resolver derives from
-// its content. It reads the reference as [FileOrURL] does, with the
-// directory of the document's file as the base directory, so a relative
-// path names a file beside the document. A document without a file path
-// has no such directory, and a relative path then reports [ErrNoBaseDir].
+// such as one that a field of the document holds or that a resolver
+// derives from its content. It reads the reference as [FileOrURL] does,
+// with the directory of the document's file as the base directory. A
+// relative path thus names a file beside the document. A document
+// without a file path does not have such a directory, and a relative
+// path then reports [ErrNoBaseDir].
 //
-// A relative file path with no file system has no such directory either,
-// so a relative reference beside it reports ErrNoBaseDir too. Such a
-// path names a file on disk only against the working directory, which
-// the author of the document does not pick. [niceyaml.NewSourceFromFile]
-// sets an absolute path. A program that builds a document from bytes
-// passes an absolute path to [niceyaml.WithFilePath], or gives the
-// document a file system with [niceyaml.WithFS].
+// A document with a relative file path and without a file system does
+// not have such a directory either. A relative reference beside it
+// reports ErrNoBaseDir too. Such a file path names a file on disk only
+// against the working directory, which the author of the document does
+// not pick. [niceyaml.NewSourceFromFile] sets an absolute path. A program
+// that builds a document from bytes passes an absolute path to
+// [niceyaml.WithFilePath], or gives the document a file system with
+// [niceyaml.WithFS].
 //
-// A Node of the document [niceyaml.NewSourceFromLayers] builds has the
-// file path of the layer [niceyaml.MergeAs] names, or else of the lowest
-// layer, whichever layer holds the reference. A resolver that
+// A Node of the document that [niceyaml.NewSourceFromLayers] builds has
+// the file path of the layer that [niceyaml.MergeAs] names, or else of
+// the lowest layer, whichever layer holds the reference. A resolver that
 // reads the reference from a field passes [niceyaml.Node.Origin] of the
-// Node of that field, and a relative path then names a file beside the
-// layer that sets the field.
+// Node of that field. A relative path then names a file beside the layer
+// that sets the field.
 //
-// The file the Ref names lives where the document does. For a document
-// from [niceyaml.NewSourceFromFile], that is the disk. For one from
-// [niceyaml.NewSourceFromFS], or one whose source [niceyaml.WithFS] gave
-// a file system, it is that file system, as [FileFS] names a file in
-// one. An absolute path and a file:// URL then name no file and fail to
-// load with [fs.ErrInvalid], so a document in a file system never
-// reaches the disk. An HTTP/HTTPS reference names a URL either way.
+// The file that the Ref names lives where the document does. For a
+// document from [niceyaml.NewSourceFromFile], the file lives on disk. For
+// one from [niceyaml.NewSourceFromFS], or one whose source
+// [niceyaml.WithFS] gave a file system, the file lives in that file
+// system, as a file that [FileFS] names does. An absolute path and a
+// file:// URL then do not name a file, and both fail to load with
+// [fs.ErrInvalid]. A document in a file system thus never reaches the
+// disk. An HTTP or HTTPS reference names a URL either way.
 //
 // The registry tells the file system of one document from that of
-// another by its value. It must be a value Go can compare, or a map, as
-// FileFS describes, and a Ref in a file system of any other type fails
-// to load with [fs.ErrInvalid].
+// another by its value. The file system must be a value that Go can
+// compare, or a map, as FileFS describes. A Ref in a file system of any
+// other type fails to load with [fs.ErrInvalid].
 //
 // [Directive] resolves the reference of a directive this way. A resolver
-// of the program does the same for a reference it reads itself:
+// of the program does the same for a reference that it reads itself:
 //
 //	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 //	    return schema.RefBeside(doc, pickSchema(doc))
@@ -197,25 +206,27 @@ func hasPrefixFold(s, prefix string) bool {
 	return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
 }
 
-// fileURLPath returns the local path a file URL names, in the native
-// separator of the platform, whether the URL carries an empty authority
-// (file:///path) or none (file:/path), and whether the URL names a path
-// at all. A URL that does not parse, names a host other than localhost,
-// or names no path comes back unchanged and false, so resolving or
-// reading the reference reports it.
+// fileURLPath returns the local path that a file URL names, and whether
+// the URL names a path at all. The path uses the native separator of the
+// platform. fileURLPath reads a URL with an empty authority (file:///path)
+// and one without an authority (file:/path) alike. A URL that does not
+// parse, names a host other than localhost, or does not name a path comes
+// back unchanged with false. The later resolve or read of the reference
+// then reports it.
 //
 // A Windows path carries its drive letter behind the leading slash of the
-// URL path, as in file:///C:/schemas/config.json, which is the form
-// [File] names such a path by. The function drops that slash so the
-// result is the absolute path C:\schemas\config.json rather than the
-// relative path \C:\schemas\config.json.
+// URL path, as in file:///C:/schemas/config.json. [File] names such a
+// path by that form. The function drops that slash, so the result is the
+// absolute path C:\schemas\config.json rather than the relative path
+// \C:\schemas\config.json.
 //
 // Off Windows, a colon escaped as %3A, as in
-// file:///C%3A/schemas/config.json, marks a directory at the root that
-// only looks like a drive, the form [File] names the POSIX path
-// /C:/schemas/config.json by, so the function keeps that slash. Windows
-// has no such directory, so there the escaped colon names the drive, as
-// it does in the URLs VS Code writes, and the function drops the slash.
+// file:///C%3A/schemas/config.json, marks a directory at the root whose
+// name looks like a drive. [File] names the POSIX path
+// /C:/schemas/config.json by that form, so the function keeps that
+// slash. Windows does not have such a directory. There, the escaped colon
+// names the drive, as it does in the URLs that VS Code writes, and the
+// function drops the slash.
 func fileURLPath(ref string) (string, bool) {
 	u, err := url.Parse(ref)
 	if err != nil || u.Path == "" || (u.Host != "" && !strings.EqualFold(u.Host, "localhost")) {
@@ -262,14 +273,14 @@ func trimDriveSlash(u *url.URL) string {
 	return p[1:]
 }
 
-// hasDriveLetter reports whether p starts with a Windows drive letter and
-// nothing else or a separator behind it, as in "C:" or "C:/schemas". Such
-// a path is absolute wherever a program reads it, so the check does not
-// depend on the platform running it.
+// hasDriveLetter reports whether p starts with a Windows drive letter
+// followed by the end of p or a separator, as in "C:" or "C:/schemas".
+// Such a path is absolute wherever a program reads it, so the check does
+// not depend on the platform that runs it.
 //
 // A colon is a legal character in a POSIX file name, so "a:b.json" is a
 // relative path. Windows reads it as a path relative to the current
-// directory of drive A, which is no more absolute.
+// directory of drive A, so it is relative there too.
 func hasDriveLetter(p string) bool {
 	if len(p) < driveLen || p[1] != ':' {
 		return false

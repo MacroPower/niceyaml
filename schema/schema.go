@@ -32,40 +32,40 @@ import (
 var (
 	// ErrValidate indicates an unexpected, non-validation failure while
 	// validating against a schema, such as a reference resolution problem.
-	// Schema constraint violations come back as [*niceyaml.Error] values
-	// with path information instead of wrapping this sentinel.
-	// [niceyaml.IsInvalid] reports a violation. The validation could not
-	// run for an error that wraps ErrValidate, so IsInvalid does not report
-	// one, even when a scoped [niceyaml.Node.Bind] places it at the value
-	// it checked. A decode presumes the document at fault for an error
-	// that declares nothing from a Validate method or a
-	// [niceyaml.WithValueCheck] function. Either one thus returns an error
-	// that wraps ErrValidate inside [niceyaml.Unchecked].
+	// A [Schema] returns each schema constraint violation as a
+	// [*niceyaml.Error] with path information. Such an error does not wrap
+	// this sentinel. [niceyaml.IsInvalid] reports a violation. An error that
+	// wraps ErrValidate means that the validation could not run. IsInvalid
+	// does not report such an error, even when a scoped
+	// [niceyaml.Node.Bind] places it at the value it checked. When a
+	// Validate method or a [niceyaml.WithValueCheck] function returns an
+	// error that does not declare anything, a decode presumes the document
+	// at fault. Either one thus returns an error that wraps ErrValidate
+	// inside [niceyaml.Unchecked].
 	ErrValidate = errors.New("validate schema")
 
 	// ErrExcessiveAliasing indicates a value that shares maps, slices, or
-	// byte slices so heavily that the validator would read far more data
-	// than the value holds, as aliases in a YAML document make a decode
-	// share them. It also indicates a document whose aliases would make
-	// the decoder itself read that much. [Schema.Check] and
-	// [Schema.ValidateValue] return it. A
-	// [matcher.Content] or [matcher.Text] guard refuses such a document
-	// with it too, and [Registry.Lookup] then returns it wrapped together
-	// with [ErrResolve]. The document or the value is at fault in every
-	// case, so [niceyaml.IsInvalid] reports each of these errors, and none
-	// of them wraps [ErrValidate].
+	// byte slices so heavily that validating it reads far more data than
+	// the value holds. Aliases in a YAML document make a decode share them
+	// that way. ErrExcessiveAliasing also indicates a document whose
+	// aliases make the decoder itself read that much. [Schema.Check] and
+	// [Schema.ValidateValue] return it. A [matcher.Content] or
+	// [matcher.Text] guard refuses such a document with it too, and
+	// [Registry.Lookup] then returns it wrapped together with [ErrResolve].
+	// The document or the value is at fault in every case, so
+	// [niceyaml.IsInvalid] reports each of these errors, and they do not
+	// wrap [ErrValidate].
 	//
 	// [niceyaml.WithAliasLimit] on the source of a document turns the
-	// limit off for Check and for the guard. ValidateValue takes no
-	// source, so it applies the limit to every value.
-	// It is the same error value as [niceyaml.ErrExcessiveAliasing].
+	// limit off for Check and for the guard. ValidateValue does not take a
+	// source, so it applies the limit to every value. ErrExcessiveAliasing
+	// is the same error value as [niceyaml.ErrExcessiveAliasing].
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// ErrCompile indicates a schema document that does not compile.
 	// [Compile] returns it, and a [Registry] returns it as the Phase of a
-	// [*LoadError]. A schema with a $ref to another document and no ref
-	// resolver to serve that document does not compile, as
-	// [WithRequireRefs] describes.
+	// [*LoadError]. Without a ref resolver, a schema with a $ref to another
+	// document fails to compile, as [WithRequireRefs] describes.
 	ErrCompile = errors.New("compile schema")
 
 	// ErrDeprecated indicates the warning about a value that a schema with
@@ -86,7 +86,8 @@ type CompileOption func(*compileConfig)
 // compileConfig holds the settings a [CompileOption] configures.
 type compileConfig struct {
 	jsonOpts []jsonschema.ValidateOption
-	// Fails a compile that leaves a $ref to another document unresolved.
+	// Whether a compile fails when it leaves a $ref to another document
+	// unresolved.
 	requireRefs bool
 }
 
@@ -103,19 +104,21 @@ func newCompileConfig(opts []CompileOption) compileConfig {
 
 // WithJSONSchemaOptions is a [CompileOption] that passes
 // [jsonschema.ValidateOption] values to the underlying
-// [jsonschema.Compile]. It is the escape hatch for settings of the JSON
-// Schema library that have no option of their own, such as format
-// assertions or a custom format validator:
+// [jsonschema.Compile]. Use it for settings of the JSON Schema library
+// that this package does not offer as options, such as format assertions
+// or a custom format validator:
 //
 //	v, err := schema.Compile(ctx, data, schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)))
 //
 // A [Registry] resolves the $refs of a schema from [File] or [URL] with
-// a resolver of its own, and [WithCompileOptions] says when a
-// [jsonschema.WithRefResolver] given here replaces it. A compile checks
-// no document such a resolver serves, as [WithRequireRefs] describes.
+// a resolver of its own. [WithCompileOptions] says when a
+// [jsonschema.WithRefResolver] given here replaces that resolver. A
+// compile does not check which documents such a resolver serves, as
+// [WithRequireRefs] describes.
 //
-// The option keeps its own copy of opts, so writing to the caller's slice
-// afterwards changes nothing, even for a [Registry] that compiles later.
+// The option keeps its own copy of opts. A later write to the caller's
+// slice does not change the option, even for a [Registry] that compiles
+// later.
 func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 	opts = slices.Clone(opts)
 
@@ -127,18 +130,18 @@ func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 // WithRequireRefs is a [CompileOption] that sets whether a schema
 // compiles only when each $ref to another document resolves. The default
 // is true. A compile resolves every $ref in the schema, whether or not a
-// document can reach it, so a schema with a $ref that does not resolve
-// fails once, where it compiles. [Compile] has no ref resolver of its
-// own, so it returns an error wrapping [ErrCompile] for such a $ref
-// unless [WithJSONSchemaOptions] gives it a resolver. A [Registry]
-// returns an error wrapping [ErrLoad] for a document it cannot load, as
-// [Registry.Schema] describes.
+// document can reach it. A schema with a $ref that does not resolve
+// therefore fails once, when it compiles. [Compile] does not have a ref
+// resolver of its own. It returns an error wrapping [ErrCompile] for such
+// a $ref unless [WithJSONSchemaOptions] gives it a resolver. A
+// [Registry] returns an error wrapping [ErrLoad] for a document it cannot
+// load, as [Registry.Schema] describes.
 //
 // With false, such a schema compiles. Each document whose validation
 // reaches the $ref then fails with an error wrapping [ErrValidate], and a
 // document that never reaches it passes. A registry of schemas the
-// program does not maintain takes false, since a public schema may name
-// a document that is gone under a branch few documents take:
+// program does not maintain takes false, because a public schema might
+// name a missing document under a rare branch:
 //
 //	reg := schema.NewRegistry(
 //	    schema.WithResolvers(schema.Directive(), schemastore.New()),
@@ -146,9 +149,11 @@ func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 //	)
 //
 // A ref resolver given with [WithJSONSchemaOptions] answers the JSON
-// Schema library itself, so the compile cannot tell which documents it
-// serves. A $ref to a document that resolver does not serve compiles
-// under either setting and fails validation as above.
+// Schema library itself, so the compile cannot tell which documents that
+// resolver serves. A schema with a $ref to a document that the resolver
+// does not serve compiles under either setting. Each document whose
+// validation reaches that $ref fails with an error wrapping
+// [ErrValidate].
 func WithRequireRefs(require bool) CompileOption {
 	return func(cfg *compileConfig) {
 		cfg.requireRefs = require
@@ -157,18 +162,18 @@ func WithRequireRefs(require bool) CompileOption {
 
 // Compile creates a new [*Schema] from a JSON schema document. The
 // context reaches the reference resolver for references it resolves
-// while compiling. An error wraps [ErrCompile].
+// while compiling. Each error Compile returns wraps [ErrCompile].
 //
-// It is the path for a program that holds one schema, such as one embedded
-// in the binary:
+// Compile suits a program that holds one schema, such as one embedded in
+// the binary:
 //
 //	//go:embed config.schema.json
 //	var schemaJSON []byte
 //
 //	v, err := schema.Compile(ctx, schemaJSON)
 //
-// The document holds JSON or YAML. Data whose first byte after white
-// space is '{' reads as JSON, and any other data reads as YAML:
+// The document holds JSON or YAML. Compile reads data whose first byte
+// after white space is '{' as JSON, and any other data as YAML:
 //
 //	//go:embed config.schema.yaml
 //	var schemaYAML []byte
@@ -183,10 +188,10 @@ func WithRequireRefs(require bool) CompileOption {
 //
 //	compile schema: YAML decode: 3:9: ...
 //
-// The data is at fault for that error, so it wraps no error of the root
-// package, and [niceyaml.IsInvalid] does not report it. A YAML schema
-// holds the values a decode into any yields, and the package
-// documentation says how that reads numbers such as 1e3 and 010.
+// The data is at fault for that error, so it does not wrap an error of
+// the root package, and [niceyaml.IsInvalid] does not report it. A YAML
+// schema holds the values a decode into any yields. The package
+// documentation says how that decode reads numbers such as 1e3 and 010.
 //
 // The go-yaml decoder takes several hundred times the size of the text
 // in memory, so Compile refuses YAML of more than [DefaultLoadLimit]
@@ -197,21 +202,21 @@ func WithRequireRefs(require bool) CompileOption {
 //
 // A schema known valid at build time compiles with [MustCompile] at package
 // scope. A registry compiles the schemas its resolvers name as bytes the
-// same way, with the options [WithCompileOptions] gives it, and takes a
+// same way, with the options [WithCompileOptions] gives it. It takes a
 // compiled Schema as it is.
 //
-// Compile reads no file and fetches no URL. A $ref to another document,
+// Compile does not read files or fetch URLs. A $ref to another document,
 // such as "server.json" or an https URL, resolves only through a ref
 // resolver given with [WithJSONSchemaOptions]. Without one, the schema
 // does not compile, and the error names the document:
 //
 //	compile schema: no ref resolver for $ref to "server.json": schema URI not resolved
 //
-// The schema fails wherever the $ref stands, even under a branch no
-// document takes. [WithRequireRefs] lets such a schema compile and
+// The schema fails wherever the $ref stands, even under a branch that
+// documents never take. [WithRequireRefs] lets such a schema compile and
 // leaves the $ref to fail the documents that reach it. A $ref to a
-// document the schema holds under an $id resolves there and needs no
-// resolver. A $ref to a location the document lacks, such as
+// document the schema holds under an $id resolves there and does not
+// need a resolver. A $ref to a location the document lacks, such as
 // "#/$defs/missing", fails the compile under either setting.
 //
 // A schema whose $refs name files or URLs beside it loads through a
@@ -228,8 +233,8 @@ func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Schema, 
 	return compiled, nil
 }
 
-// compileDocument is [Compile] before wrapping the error with [ErrCompile],
-// with YAML text within limit.
+// compileDocument is [Compile] without the [ErrCompile] wrap. It refuses
+// YAML text of more than limit bytes.
 func compileDocument(ctx context.Context, data []byte, limit int, opts []CompileOption) (*Schema, error) {
 	doc, err := parseDocument(ctx, data, limit)
 	if err != nil {
@@ -267,12 +272,12 @@ func compileDocument(ctx context.Context, data []byte, limit int, opts []Compile
 }
 
 // parseDocument reads data as one schema document without compiling it.
-// Data that [isJSONObject] reports reads as JSON, and any other data reads
+// It reads data that [isJSONObject] reports as JSON, and any other data
 // as YAML through [decodeYAML] within limit. One byte picks the reader, so
-// data never goes to the second reader after the first refuses it.
-// Malformed JSON would otherwise compile as the YAML it also is, where a
-// member with no value is null and the schema library reads a null
-// keyword as absent.
+// parseDocument never hands data that one reader refused to the other.
+// Some malformed JSON is also valid YAML, which reads a member without a
+// value as null. The schema library reads a null keyword as absent. The
+// JSON reader refuses such data instead of compiling it as YAML.
 func parseDocument(ctx context.Context, data []byte, limit int) (*jsonschema.Schema, error) {
 	if isJSONObject(data) {
 		//nolint:wrapcheck // Callers wrap the error with ErrCompile.
@@ -291,28 +296,29 @@ func parseDocument(ctx context.Context, data []byte, limit int) (*jsonschema.Sch
 }
 
 // isJSONObject reports whether the first byte of data after JSON white
-// space is '{'. A schema document in JSON is an object or a boolean, and
-// YAML reads a boolean as JSON does, so only an object needs the JSON
-// reader.
+// space is '{'. A schema document in JSON is an object or a boolean. YAML
+// reads a boolean as JSON does, so only an object needs the JSON reader.
 func isJSONObject(data []byte) bool {
 	return bytes.HasPrefix(bytes.TrimLeft(data, " \t\r\n"), []byte("{"))
 }
 
 // decodeYAML decodes data, the text of a schema document in YAML, into
-// the value a decode into any yields. The text is one document of at most
-// limit bytes, and the decode refuses a duplicate key and aliases past
+// the value a decode into any yields. The text must be one document of at
+// most limit bytes. The decode refuses a duplicate key and aliases past
 // the limit [niceyaml.WithAliasLimit] describes.
 //
 // The error of a text past limit wraps the error of [httpfetch.TooLarge],
-// which matches [niceyaml.ErrLimit] and declares no fault. Any other
-// error holds the text of the decode error and wraps nothing. The schema
-// is at fault for the decode error, and [niceyaml.IsInvalid] would report
-// it for the document the schema validates.
+// which matches [niceyaml.ErrLimit] and does not declare a fault. The
+// schema is at fault for any other decode error, not the document that
+// the schema validates. The error that decodeYAML returns for it holds
+// the text of the decode error but does not wrap it. [niceyaml.IsInvalid]
+// therefore does not report that error.
 //
-// The decode takes the context without its cancellation, because the
-// error of a context that has ended would become text here too. A JSON
-// read checks no context either, so a context that ends stops the
-// compile at the same step for JSON and for YAML.
+// The decode takes the context without its cancellation. Each decode
+// error becomes text here, and the error of a context that has ended must
+// not become text. A JSON read does not check the context either, so a
+// context that ends stops the compile at the same step for JSON and for
+// YAML.
 func decodeYAML(ctx context.Context, data []byte, limit int) (any, error) {
 	// The go-yaml decoder takes several hundred times the size of the text
 	// in memory, so the decode refuses text past limit.
@@ -330,20 +336,20 @@ func decodeYAML(ctx context.Context, data []byte, limit int) (any, error) {
 	return doc, nil
 }
 
-// noRefResolver is the ref resolver of a compile whose options hold none.
-// It serves no document, as the schema library does without a resolver,
-// and its error says why the $ref does not resolve.
+// noRefResolver is the ref resolver of a compile whose options do not
+// hold one. Like the schema library without a resolver, it does not serve
+// any document, but its error says why the $ref does not resolve.
 func noRefResolver(_ context.Context, uri string) (*jsonschema.Schema, error) {
 	return nil, fmt.Errorf("no ref resolver for $ref to %q: %w", httpfetch.Redacted(uri), jsonschema.ErrNotResolved)
 }
 
 // refRecorder records the errors a ref resolver returns while a schema
 // compiles. The schema library compiles a schema whose $ref names a
-// document the resolver does not serve, and reports the $ref only to a
+// document the resolver does not serve. It reports the $ref only to a
 // validation that reaches it. The recorder lets the compile fail for
 // such a document instead. The compiled schema keeps the resolver for its
-// validations, which run concurrently, so [refRecorder.stop] ends the
-// recording once the compile returns.
+// validations, which run concurrently. [refRecorder.stop] therefore ends
+// the recording when the compile returns.
 type refRecorder struct {
 	errs    []error
 	mu      sync.Mutex
@@ -351,7 +357,7 @@ type refRecorder struct {
 }
 
 // resolver returns a resolver that answers as next does and records each
-// error next returns until [refRecorder.stop].
+// error next returns until [refRecorder.stop] runs.
 func (rec *refRecorder) resolver(next jsonschema.RefResolver) jsonschema.RefResolver {
 	return jsonschema.RefResolverFunc(func(ctx context.Context, uri string) (*jsonschema.Schema, error) {
 		s, err := next.ResolveRef(ctx, uri)
@@ -375,7 +381,7 @@ func (rec *refRecorder) record(err error) {
 }
 
 // stop ends the recording and returns the errors recorded as one error,
-// or nil when the resolver returned none.
+// or nil when the resolver did not return an error.
 func (rec *refRecorder) stop() error {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
@@ -392,15 +398,15 @@ func (rec *refRecorder) stop() error {
 	return errors.Join(errs...)
 }
 
-// MustCompile is [Compile] with a background context that panics when the
-// schema does not compile. Use it for a package-scope schema compiled
+// MustCompile is [Compile] with a background context, and it panics when
+// the schema does not compile. Use it for a package-scope schema compiled
 // from a document go:embed brings in:
 //
 //	var Config = schema.MustCompile(schemaJSON)
 //
-// A schema with a $ref to another document does not compile without a
-// ref resolver, as [Compile] describes, so MustCompile panics for it
-// when the package initializes.
+// A schema with a $ref to another document compiles only through a ref
+// resolver, as [Compile] describes. Without one, MustCompile panics for
+// such a schema when the package initializes.
 func MustCompile(data []byte, opts ...CompileOption) *Schema {
 	v, err := Compile(context.Background(), data, opts...)
 	if err != nil {
@@ -415,7 +421,7 @@ func MustCompile(data []byte, opts ...CompileOption) *Schema {
 // [jsonschema.Compile]. A schema held as JSON or YAML text compiles with
 // [Compile] or [MustCompile] instead.
 //
-// Panics if v is nil.
+// FromJSONSchema panics if v is nil.
 func FromJSONSchema(v *jsonschema.Validator) *Schema {
 	if v == nil {
 		panic("schema.FromJSONSchema: validator is nil")
@@ -425,28 +431,29 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 }
 
 // Schema is a compiled JSON schema. It is a [niceyaml.Validator] that
-// checks a document against the schema and reports constraint violations
+// checks a document against the schema. It reports constraint violations
 // as [*niceyaml.Error] values that carry the YAML path to each failing
-// location, bound to the source for
-// [go.jacobcolvin.com/niceyaml/printer.Printer] to display.
-// Each one wraps a [*Violation] that names the keyword the value fails.
-// Each value that a deprecated schema applies to goes to the
-// [niceyaml.Warnings] collector of the context as a warning that matches
-// [ErrDeprecated].
-// [Schema.Check] checks a node, which is the whole document for the
-// root [niceyaml.Node] of a document and one value inside it for a Node
-// from [niceyaml.Node.At]. [Schema.ValidateValue] checks decoded data
-// that came from no document, such as the body of a request, and the
-// text of its error names the path of each violation. A caller that
+// location. The errors bind to the source, so
+// [go.jacobcolvin.com/niceyaml/printer.Printer] can display them. Each
+// one wraps a [*Violation] that names the keyword the value fails. For each
+// value that a deprecated schema applies to, a Schema hands a warning
+// that matches [ErrDeprecated] to the [niceyaml.Warnings] collector of
+// the context.
+//
+// [Schema.Check] checks a node. The root [niceyaml.Node] of a document
+// stands for the whole document, and a Node from [niceyaml.Node.At]
+// stands for one value inside it. [Schema.ValidateValue] checks decoded
+// data that did not come from a document, such as the body of a request.
+// The text of its error names the path of each violation. A caller that
 // knows where the data stands in a document places that error there with
 // [niceyaml.Rebase] and [niceyaml.Node.Bind]. It places the warnings the
 // same way, as the Placement section of ValidateValue describes.
 //
 // A Schema is the validator for a program that holds one schema and
 // compiles it itself. It is also a [Resolver] that names itself for every
-// document, so one goes into a [Registry] as it is, on its own or behind
-// a [When] guard. The registry then validates with it without loading or
-// compiling anything:
+// document. A Schema therefore goes into a [Registry] as it is, on its own
+// or behind a [When] guard. The registry then validates with it without
+// loading or compiling anything:
 //
 //	var Config = schema.MustCompile(schemaJSON)
 //
@@ -459,8 +466,8 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // [MustCompile], or [FromJSONSchema].
 type Schema struct {
 	compiled *jsonschema.Validator
-	// Passes every document and value without reading it, as the schema a
-	// "$schema=none" directive names does.
+	// Whether the schema passes every document and value without reading
+	// it, as the schema that a "$schema=none" directive names does.
 	acceptAll bool
 }
 
@@ -476,9 +483,9 @@ type Schema struct {
 //	    return schema.Ref{}, schema.ErrNoMatch
 //	})
 //
-// The Ref has no [Ref.Key], since the registry has nothing to load or
-// cache for it. [Registry.Schema] returns the schema as it is, and
-// [Registry.Load] returns an error wrapping [ErrLoad].
+// The [Ref.Key] of the Ref is empty, because the registry does not load
+// or cache anything for it. [Registry.Schema] returns the schema as it
+// is, and [Registry.Load] returns an error wrapping [ErrLoad].
 func (s *Schema) Ref() Ref {
 	return Ref{schema: s}
 }
@@ -496,59 +503,59 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // Node from [niceyaml.Node.At] decodes to the node it selects, so the
 // schema checks that node and a violation's `@` path reads from it.
 // Check returns each violation as it wrote it, and Node.Validate binds
-// it through n, as [niceyaml.Validator] describes. A document past the
-// alias limit returns an error matching [ErrExcessiveAliasing].
-// [Schema.ValidateValue] checks data for a caller that reports the errors
-// somewhere else.
+// it through n, as [niceyaml.Validator] describes. For a document past
+// the alias limit, Check returns an error matching
+// [ErrExcessiveAliasing]. [Schema.ValidateValue] checks data for a caller
+// that reports the errors somewhere else.
 //
 // # Deprecations
 //
 // Check reports each value that a schema with the deprecated keyword
 // applies to as a warning, as the Deprecations section of the package
-// documentation describes. Check reports its warnings with
-// [niceyaml.Node.Warn] whether n passes or fails, and returns its errors
-// alone.
+// documentation describes. It reports its warnings with
+// [niceyaml.Node.Warn] whether n passes or fails, and it returns only its
+// errors.
 //
 // # Unparsed Documents
 //
-// A document that did not parse has no data to check, so Check returns
-// the syntax error [niceyaml.Node.Err] returns for it, whatever the
-// schema accepts.
+// A document that did not parse does not have data to check. Check
+// returns the syntax error that [niceyaml.Node.Err] returns for it,
+// whatever the schema accepts.
 //
 // # Empty Documents
 //
 // An empty document, such as an empty file, decodes to null, so a schema
-// that wants a mapping rejects it. [niceyaml.Source.Documents] leaves out
-// the empty document a trailing "---" leaves beside one with content, and
-// [niceyaml.SkipEmpty] wraps the schema to pass an empty document
-// wherever it runs.
+// that wants a mapping rejects it. [niceyaml.Source.Documents] omits the
+// empty document that a trailing "---" leaves beside one with content.
+// [niceyaml.SkipEmpty] wraps the schema so that it passes an empty
+// document wherever it runs.
 //
 // # Key Spelling
 //
-// Holding the node lets Check spell each key in a violation's path as
-// the source does, so a key the decoder respells, such as the hexadecimal
+// Check holds the node, so it spells each key in a violation's path as
+// the source does. A key the decoder respells, such as the hexadecimal
 // 0x10 for the member name 16, still names its member. Where a later key
 // in the mapping or its merge sources has the same spelling, a path
-// through that spelling selects the later key, so the path names the
+// through that spelling selects the later key. The path then names the
 // member and each key below it as the decoder does. Such a path does not
 // select the member, so the violation carries the position of the value
 // beside the path and binds there.
 //
-// A violation about a member the mapping leaves out, such as one of
-// required, carries the path the member would have, as [Violation]
-// describes. The path names the member as the schema does, since the
-// source spells no key for it. The mapping can hold a key with that
-// spelling for a member of another name, as the key 0x10 sets the member
-// 16 under a schema that requires 0x10. The path then selects the entry
-// of that key, so the violation carries the position of the mapping
-// beside the path and binds there.
+// A violation about a member that the mapping omits, such as one of
+// required, carries the path of the missing member, as [Violation]
+// describes. The path names the member as the schema does, because the
+// source does not spell a key for it. The mapping can hold a key with
+// that spelling for a member of another name, as the key 0x10 sets the
+// member 16 under a schema that requires 0x10. The path then selects the
+// entry of that key, so the violation carries the position of the
+// mapping beside the path and binds there.
 //
-// To tell which key a spelling selects, Check reads the sources of
-// each `<<` merge key that brings the key in or stands after it. The
-// violations of one call may read as many nodes that way as
-// [paths.ErrExcessiveMerging] allows one path selector. Past that limit
-// Check still reports every violation, and a path through such a key
-// names the member and each key below it as the decoder does.
+// To tell which key a spelling selects, Check reads the sources of each
+// `<<` merge key that supplies the key or stands after it. For the
+// violations of one call, Check can read as many nodes that way as
+// [paths.ErrExcessiveMerging] allows one path selector. Past that limit,
+// Check still reports every violation. A path through such a key names
+// the member and each key below it as the decoder does.
 //
 // # Timestamps
 //
@@ -558,59 +565,63 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // 2001-12-14 does. Check finds that scalar behind an alias or a merge
 // key as it finds the key it spells in a violation's path. Where Check
 // cannot tell which scalar a timestamp came from, the timestamp keeps the
-// date-time spelling that [Schema.ValidateValue] gives it. That holds
-// behind an alias that does not resolve. It also holds under a mapping,
-// at any depth, with a key whose member name Check cannot tell at or
-// after the member leading to the timestamp, since such a key may set a
-// member of the same name. A merge key whose sources do not resolve is
-// one such key.
+// date-time spelling that [Schema.ValidateValue] gives it. A timestamp
+// behind an alias that does not resolve keeps that spelling. So does a
+// timestamp under a mapping, at any depth, where a key at or after the
+// member that leads to the timestamp has a member name that Check cannot
+// tell. Such a key might set a member of the same name. A merge key whose
+// sources do not resolve is one such key.
 //
 // # Alias Limit
 //
 // The decode applies the alias limit to the document of n before it reads
-// anything. Check applies the limit to the result as well only where
+// anything. Check also applies the limit to the result, but only where
 // the document holds an alias to a reference document.
 // [niceyaml.WithAliasLimit] on the source of n turns both off.
 //
-// The decoder writes out the whole content of an alias it spells as text,
-// such as an alias used as a key. It also reads a mapping a merge key
-// brings in again at every merge. A small document can therefore cost far
-// more to decode than the decoded value shows. The decode Check runs
-// therefore counts before it reads. For a node that holds an alias, it
-// counts the nodes a decode of the whole document reads, with each alias
-// reading its content in full, as [niceyaml.Node.DecodeInto] describes.
-// The count covers the whole document even for a node below the root, so
-// every node in a document that holds an alias gets the same verdict. The
-// decode applies the alias limit of [Schema.ValidateValue] to the count.
+// The decoder writes the whole content of an alias it spells as text,
+// such as an alias used as a key. It also reads the sources of a merge
+// key again at every merge. A small document can cost far more to decode
+// than the decoded value shows. The decode that Check runs therefore
+// counts before it reads. For a node that holds an alias, it counts the
+// nodes that a decode of the whole document reads. In that count, each
+// alias reads its content in full, as [niceyaml.Node.DecodeInto]
+// describes. The count covers the whole document even for a node below
+// the root, so every node in a document that holds an alias gets the same
+// verdict. The decode applies the alias limit of [Schema.ValidateValue]
+// to the count.
+//
 // An alias to a text tag, such as !!binary or !!str, counts one node per
 // byte of the text under the tag. So does an alias that reaches a
 // !!binary scalar through another tagged alias, as *s does for
-// `&s !foo *b`. Each copy of a scalar the decoder writes out as text,
+// `&s !foo *b`. Each copy of a scalar that the decoder writes as text,
 // such as in a key that holds a sequence, counts the same way. Any other
 // alias to a scalar counts as one unaliased node. For a document past the
-// limit, Check returns the error of that decode, which matches
+// limit, Check returns the error of that decode. That error matches
 // [ErrExcessiveAliasing] and binds at the first token of the node that is
 // not a comment:
 //
 //	app.yaml:1:1: excessive aliasing
 //
 // The aliases of the document are the cause, so [niceyaml.IsInvalid]
-// reports the error, and it does not wrap [ErrValidate]. Check puts no
-// limit of its own on the result of the decode. A node below the root
-// then passes the limit wherever its document does, even when aliases
-// make up a larger share of the node than of the document.
+// reports the error, and it does not wrap [ErrValidate]. Check does not
+// put a limit of its own on the result of the decode. A node below the
+// root then passes the limit wherever its document does, even when
+// aliases make up a larger share of the node than of the document.
 //
-// A document that holds an alias with no anchor of its name before it
+// A document that holds an alias without an anchor of its name before it
 // is the exception. A decode resolves such an alias against a reference
 // document, such as one of [niceyaml.WithReferences]. The count cannot
 // see a reference document, so it takes the alias as one node. For such
-// a document Check also applies the limit to the result of the
-// decode, as [Schema.ValidateValue] does. A node below the root can then
-// exceed the limit where its document passes. That error matches
-// ErrExcessiveAliasing as well, and IsInvalid reports it. It carries no
-// location, so the Node that runs the schema binds it as any such
-// error. A node below the root binds it at the node, under its path,
-// and a root binds it with no position.
+// a document, Check also applies the limit to the result of the decode,
+// as [Schema.ValidateValue] does. A node below the root can then exceed
+// the limit where its document passes.
+//
+// The error of the check on the result matches ErrExcessiveAliasing as
+// well, and IsInvalid reports it. It does not carry a location, so the
+// Node that runs the schema binds it as it binds any such error. A node
+// below the root binds it at the node, under its path, and a root binds
+// it without a position.
 //
 // [niceyaml.WithAliasLimit] on the source of n turns the limit off for
 // the decode and for the result. Check then reads every use of every
@@ -659,45 +670,47 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 }
 
 // ValidateValue checks data, the decoded form of a YAML value, against the
-// schema. The value is the shape a decode into any yields: maps with
+// schema. The value holds the types a decode into any yields: maps with
 // string keys, slices, strings, bools, nil, and numbers, nested as the
-// document nests them. The validator does not accept a Go struct, since it
-// reads the data as JSON does. ValidateValue returns nil when data
-// conforms. For a value that breaks a constraint, it returns a
-// [*niceyaml.SourceError] bound to no document, whose text names the path
-// of each violation, as in "$.port: 0 is less than 1". A check that could
-// not run, such as a $ref the validator cannot resolve, returns an error
-// wrapping [ErrValidate]. A decode presumes the document at fault for an
-// error that declares nothing from a Validate method or a
-// [niceyaml.WithValueCheck] function. Either one that calls ValidateValue
-// thus returns such an error inside [niceyaml.Unchecked].
+// document nests them. The validator reads the data as JSON does, so it
+// does not accept a Go struct.
+//
+// ValidateValue returns nil when data conforms. For a value that breaks a
+// constraint, it returns a [*niceyaml.SourceError] that is not bound to a
+// document. The text of that error names the path of each violation, as
+// in "$.port: 0 is less than 1". When the check cannot run, such as for a
+// $ref the validator cannot resolve, ValidateValue returns an error
+// wrapping [ErrValidate]. When a Validate method or a
+// [niceyaml.WithValueCheck] function returns an error that does not
+// declare anything, a decode presumes the document at fault. Either one
+// that calls ValidateValue thus returns an error that wraps ErrValidate
+// inside [niceyaml.Unchecked].
 //
 // # Conversions
 //
 // ValidateValue first converts the YAML-native values the JSON Schema
 // validator does not accept into the JSON spelling of the same data,
-// anywhere in the value. A !!binary becomes its base64 text and a
-// !!timestamp its RFC 3339 date-time text, even for a timestamp the
-// source wrote as a bare date, since a [time.Time] does not record that.
-// [Schema.Check] reads the source and spells such a timestamp as a
-// full-date where it can. The [yaml.MapSlice] a decode with
+// anywhere in the value. A !!binary becomes its base64 text. A
+// !!timestamp becomes its RFC 3339 date-time text, even when the source
+// wrote it as a bare date, because a [time.Time] does not record the
+// spelling. [Schema.Check] reads the source and spells such a timestamp
+// as a full-date where it can. The [yaml.MapSlice] that a decode with
 // [niceyaml.WithYAMLOrderedMaps] yields for each mapping becomes a map
-// with the same members, and where two items share a key, the later one
-// wins, as it does in a decode into a map.
+// with the same members. Where two items share a key, the later one wins,
+// as it does in a decode into a map.
 //
 // # Violations
 //
-// Returns nil when data conforms. On a constraint violation, returns a
-// [*niceyaml.SourceError]. A single violation carries its YAML path on
-// the error itself, and several violations become a count summary from
-// [niceyaml.NewSummary] that heads one error per violation, each with the
-// path to one failing location. The error of each violation wraps a
-// [*Violation] that names the keyword the value fails and where that
-// keyword stands in the schema. A value that matches no branch of an
-// anyOf or oneOf counts as one violation, whose details are the failures
-// of each branch the value could have been meant for, as [Violation]
-// describes. Any other failure wraps [ErrValidate], including a $ref the
-// validator cannot resolve, since the value is not at fault for that.
+// A single violation carries its YAML path on the error itself. Several
+// violations become a count summary from [niceyaml.NewSummary] that heads
+// one error per violation, each with the path to one failing location.
+// The error of each violation wraps a [*Violation] that names the keyword
+// the value fails and where that keyword stands in the schema. A value
+// that does not match any branch of an anyOf or oneOf counts as one
+// violation. Its details are the failures of each branch that the author
+// might have meant the value for, as [Violation] describes. Any other
+// failure wraps [ErrValidate], because the value is not at fault for it.
+// A $ref the validator cannot resolve is one such failure.
 //
 // # Deprecations
 //
@@ -706,7 +719,7 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // package documentation describes. It hands each warning to the
 // collector that [niceyaml.Warnings.Context] put on ctx, whether data
 // passes or fails. Each warning binds as [niceyaml.BindValue] binds an
-// error. ValidateValue returns its errors alone, and
+// error. ValidateValue returns only its errors, and
 // [niceyaml.Warnings.Report] puts the warnings beside them:
 //
 //	1 error, 1 warning
@@ -715,32 +728,33 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 //
 // # Error Text
 //
-// ValidateValue takes no document, so it binds its errors to none, as
-// [niceyaml.BindValue] does. The binding puts each path in the text of
-// the error, so the error names every failing location through %v,
-// inside a wrapper from [fmt.Errorf], in a join from [errors.Join], and
-// in a log. One violation reads "$.port: 0 is less than 1", and several
-// read as the summary with one violation per line:
+// ValidateValue does not take a document, so it binds its errors without
+// one, through [niceyaml.BindValue]. The binding puts each path in the
+// text of the error. The error therefore names every failing location
+// through %v, inside a wrapper from [fmt.Errorf], in a join from
+// [errors.Join], and in a log. One violation reads
+// "$.port: 0 is less than 1", and several read as the summary with one
+// violation per line:
 //
 //	2 schema violations
 //	$.port: 0 is less than 1
 //	$.name: missing required property "name"
 //
-// Each path starts at `$`, which here is the value data stands for, and
-// no position stands in front of it. [niceyaml.IsInvalid] reports the
-// error of a violation, and [errors.As] finds the [*Violation] in it,
-// which is the first among several. [niceyaml.FormatError] prints the
-// same errors as a tree.
+// Each path starts at `$`, which here names the value data stands for.
+// No position stands in front of a path. [niceyaml.IsInvalid] reports
+// the error of a violation, and [errors.As] finds the [*Violation] in it,
+// or the first of several. [niceyaml.FormatError] prints the same errors
+// as a tree.
 //
 // # Placement
 //
-// The result stands in no document, so a document can still place it,
-// as BindValue describes. [niceyaml.Rebase] and every Bind return an
-// error bound to a document as it is, and they read this result as the
-// errors it was made from, whose paths start at `@`, the value data
-// stands for. A caller that knows where the value stands in a document
-// puts the errors under that path, and a [niceyaml.Node] of the document
-// then binds them:
+// The result does not stand in a document, so a document can still place
+// it, as BindValue describes. [niceyaml.Rebase] and every Bind return an
+// error bound to a document as it is. They read this result as the errors
+// that ValidateValue built it from. The paths of those errors start at
+// `@`, the value data stands for. A caller that knows where the value
+// stands in a document puts the errors under that path. A
+// [niceyaml.Node] of the document then binds them:
 //
 //	err := s.ValidateValue(ctx, data)
 //
@@ -748,9 +762,11 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 //
 // The bound error reads "app.yaml:2:9: $.request.port: 0 is less than 1".
 // The same holds for a result that a Validate method of a type or a
-// [niceyaml.Validator] returns, which a decode places at the value it
-// checked. A wrapper such as [fmt.Errorf] around the result keeps its
-// text through both calls, behind the position and the path, as in
+// [niceyaml.Validator] returns. A decode places such a result at the
+// value it checked.
+//
+// A wrapper such as [fmt.Errorf] around the result keeps its text through
+// both calls, behind the position and the path, as in
 // "app.yaml:2:9: $.request.port: check: 0 is less than 1". BindValue
 // describes a wrapper that rewrites the text of the result, and a result
 // inside [niceyaml.Invalid], [niceyaml.Unchecked], or [niceyaml.Locate].
@@ -769,40 +785,42 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 // collects them with a [niceyaml.Warnings] of its own and places what
 // [niceyaml.Warnings.Err] returns. A function of
 // [niceyaml.WithValueCheck] passes its context to ValidateValue, and the
-// decode places each warning that ValidateValue hands over at the value
+// decode places each warning that ValidateValue reports at the value
 // that the function checked. A [niceyaml.Validator] passes its context
 // the same way, and the Node that runs the validator places each warning
 // at that Node.
 //
 // # Key Names
 //
-// ValidateValue holds no source, so each path names a key as the decoder
-// does, such as 16 for a key the document spells 0x10. A caller that
-// reports the errors in the document the data came from takes each
+// ValidateValue does not hold a source, so each path names a key as the
+// decoder does, such as 16 for a key the document spells 0x10. A caller
+// that reports the errors in the document the data came from takes each
 // location from [niceyaml.Node.DataLocator].
 //
 // # Rejected Data
 //
-// ValidateValue rejects two shapes of data before checking anything. A
-// value whose shared maps, slices, or byte slices would expand past the
-// alias limit, as YAML aliases make them, returns an error matching
-// [ErrExcessiveAliasing]. The value is at fault for it, so
-// [niceyaml.IsInvalid] reports the error, and it does not wrap
-// [ErrValidate]. The limit follows the rule gopkg.in/yaml.v3 applies to
-// the share of aliased nodes in a document, and a []byte counts as one
-// node per character of its base64 text. Where yaml.v3 applies the rule
-// node by node as it decodes, ValidateValue applies it once to the whole
-// value. It counts each use of an aliased scalar other than a !!binary as
-// an unaliased node, so it accepts some documents yaml.v3 rejects.
-// ValidateValue takes no source, so it applies the limit to every value,
-// including one decoded from a source that [niceyaml.WithAliasLimit]
-// turned the limit off for. A map or slice that contains itself returns
-// an error wrapping [ErrValidate].
+// ValidateValue rejects some data before it checks anything. For a map or
+// slice that contains itself, it returns an error wrapping [ErrValidate].
+// YAML aliases make a decode share maps, slices, and byte slices. For a
+// value whose shared parts expand past the alias limit, ValidateValue
+// returns an error matching [ErrExcessiveAliasing]. The value is at fault
+// for that error, so [niceyaml.IsInvalid] reports it, and it does not
+// wrap [ErrValidate].
+//
+// The limit follows the rule that gopkg.in/yaml.v3 applies to the share
+// of aliased nodes in a document. A []byte counts as one node per
+// character of its base64 text. The yaml.v3 decoder applies the rule to
+// each node during its decode, but ValidateValue applies it once to the
+// whole value. It counts each use of an aliased scalar other than a
+// !!binary as an unaliased node, so it accepts some documents that
+// yaml.v3 rejects. ValidateValue does not take a source, so it applies
+// the limit to every value, even one decoded from a source that
+// [niceyaml.WithAliasLimit] turned the limit off for.
 //
 // # Context
 //
-// The context reaches the underlying [jsonschema.Validator], where remote
-// reference resolution honors its cancellation and deadlines.
+// The context reaches the underlying [jsonschema.Validator], and the
+// resolution of remote references honors its cancellation and deadline.
 func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 	warnings, err := s.checkValue(ctx, data)
 
@@ -815,10 +833,10 @@ func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 }
 
 // checkValue checks data against the schema. It returns the warnings of
-// the value, and the error of a value that fails. Each comes back
-// unbound, with a path that starts at `@`, the value data stands for. It
-// holds no source, so each path names a key as the decoder does, such as
-// 16 for a key the document spells 0x10.
+// the value, and the error of a value that fails. Each is unbound, with a
+// path that starts at `@`, the value data stands for. It does not hold a
+// source, so each path names a key as the decoder does, such as 16 for a
+// key the document spells 0x10.
 func (s *Schema) checkValue(ctx context.Context, data any) ([]error, error) {
 	if s.acceptAll {
 		return nil, nil
@@ -835,12 +853,12 @@ func (s *Schema) checkValue(ctx context.Context, data any) ([]error, error) {
 }
 
 // validate checks data against the schema as [Schema.checkValue] does
-// once data passes its expansion check. It takes the node a decode read
-// data from, which [Schema.Check] has and [Schema.ValidateValue]
-// does not. A violation at a key the decoder respells, such as the
-// hexadecimal 0x10, needs the node to spell the key in its path as the
-// source does, and a !!timestamp needs it to show whether the source
-// wrote only a date.
+// after data passes its expansion check. It takes the node a decode read
+// data from, which [Schema.Check] has and [Schema.ValidateValue] does
+// not. A violation at a key the decoder respells, such as the hexadecimal
+// 0x10, needs the node to spell the key in its path as the source does. A
+// !!timestamp needs the node to show whether the source wrote only a
+// date.
 //
 // It returns the warnings of data beside the error of a value that fails,
 // each unbound.
@@ -895,11 +913,12 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) ([]er
 
 // unresolvedRefs returns the failures in the tree of ve that report a $ref
 // or $dynamicRef the validator could not resolve, each as an
-// [unresolvedRefError]. Either a resolver returned an error, which wraps
-// [jsonschema.ErrRefResolve], or no resolver served the reference, which
-// the message names. A reference keyword that is itself a leaf for any
-// other reason names a target that allows nothing, such as false or
-// {"not": {}}, so its failure is the document's and stays a violation.
+// [unresolvedRefError]. Such a failure wraps [jsonschema.ErrRefResolve]
+// when a resolver returned an error. When no resolver served the
+// reference, its message says so. A reference keyword that is itself a
+// leaf for any other reason names a target that does not allow any value,
+// such as false or {"not": {}}. Its failure is the document's, so it
+// stays a violation.
 func unresolvedRefs(ve *jsonschema.ValidationError) []error {
 	var errs []error
 
@@ -918,11 +937,11 @@ func unresolvedRefs(ve *jsonschema.ValidationError) []error {
 // unresolvedRefError is the failure of a $ref or $dynamicRef the validator
 // could not resolve. Its message is the message of the failure, which
 // states the error of the resolver when one returned an error. The
-// failure unwraps to a list that holds that error, and an error tree
-// gives each error of such a list a row of its own, so the tree would
-// show the error of the resolver twice. An unresolvedRefError unwraps to
-// that error alone, as a wrapper from [fmt.Errorf] does, so the tree
-// shows the failure in one row. [errors.As] still finds the
+// failure unwraps to a list that holds that error. An error tree gives
+// each error of such a list a row of its own. A tree of the bare failure
+// therefore shows the error of the resolver twice. An unresolvedRefError
+// unwraps to that error alone, as a wrapper from [fmt.Errorf] does. The
+// tree then shows the failure in one row. [errors.As] still finds the
 // [*jsonschema.ValidationError].
 type unresolvedRefError struct {
 	leaf *jsonschema.ValidationError
@@ -934,7 +953,7 @@ func (e unresolvedRefError) Error() string {
 
 // Unwrap returns the error of the resolver, or nil when no resolver
 // served the reference. The failure of a reference keyword that is a leaf
-// has no causes, so it holds one error at most.
+// does not have causes, so it holds at most one error.
 func (e unresolvedRefError) Unwrap() error {
 	if attached := e.leaf.Unwrap(); len(attached) > 0 {
 		return attached[0]
@@ -943,8 +962,8 @@ func (e unresolvedRefError) Unwrap() error {
 	return nil
 }
 
-// As sets target to the failure when target is a
-// [*jsonschema.ValidationError] pointer.
+// As sets target to the failure when target is a pointer to a
+// [*jsonschema.ValidationError], and reports whether it did.
 func (e unresolvedRefError) As(target any) bool {
 	ve, ok := target.(**jsonschema.ValidationError)
 	if ok {
@@ -954,7 +973,7 @@ func (e unresolvedRefError) As(target any) bool {
 	return ok
 }
 
-// rootOf returns the tree of n, or nil for no node.
+// rootOf returns the tree of n, or nil when n is nil.
 func rootOf(n *niceyaml.Node) ast.Node {
 	if n == nil {
 		return nil
@@ -966,11 +985,11 @@ func rootOf(n *niceyaml.Node) ast.Node {
 // sourcePath converts instance-location segments to a [paths.Path] that
 // resolves in root, and returns it in a [datapath.Target] with the node
 // the walk reached. Each [jsonschema.Segment] already distinguishes an
-// array index from a property name, so sourcePath does no numeric
-// guessing.
+// array index from a property name, so sourcePath never guesses whether
+// a segment is an index.
 //
-// A property name is the name the decoder produced, which the source may
-// spell another way, as it spells the member name 16 as 0x10. The walk
+// A property name is the name the decoder produced, which the source
+// might spell another way, such as 0x10 for the member name 16. The walk
 // writes the source spelling of each key into the path wherever a path
 // selector with that spelling selects the entry of the member, as
 // [datapath.Index.Member] describes. Where it cannot, the segment and
@@ -987,10 +1006,10 @@ func sourcePath(root ast.Node, idx *datapath.Index, segments []jsonschema.Segmen
 }
 
 // sourceRoute returns the [datapath.Target] that [sourcePath] returns for
-// segments, and the token at each step of its path, which orders the
+// segments, and the token at each step of its path. The tokens order the
 // paths that reach one node. The token of a step is the one
-// [datapath.Target.Start] gives, and the last step takes the key of its
-// entry when key is set.
+// [datapath.Target.Start] gives. The last step takes the key of its entry
+// when key is set.
 func sourceRoute(
 	root ast.Node,
 	idx *datapath.Index,
@@ -1017,24 +1036,26 @@ func sourceRoute(
 // JSON Schema validator does not accept into the JSON spellings of the
 // same data. A !!binary becomes its base64 text. A !!timestamp becomes an
 // RFC 3339 full-date, such as 2001-12-14, when the scalar in root that a
-// decode read it from holds only a date, and an RFC 3339 date-time
-// otherwise. Root is the node a decode read data from, and without it
-// every timestamp becomes a date-time. The index idx finds the members of
-// the mappings in the document of root, and its resolver follows the
-// aliases there. A [yaml.MapSlice], which a decode with
-// [niceyaml.WithYAMLOrderedMaps] yields for each mapping, becomes a map
-// with the same members, and a later item replaces an earlier one with
-// the same key, as a decode into a map does. It walks maps, slices, and
-// ordered mappings so such a value anywhere in a document stays
-// validatable. Every other value comes back unchanged, non-finite floats
-// included, since the validator treats those as numbers.
+// decode read it from holds only a date. Any other !!timestamp becomes an
+// RFC 3339 date-time. The node root is the one a decode read data from,
+// and without it every timestamp becomes a date-time. The index idx finds
+// the members of the mappings in the document of root, and its resolver
+// follows the aliases there.
 //
-// A map or slice that holds none of these values comes back as the same
-// container, and one that does comes back as a copy. An ordered mapping
-// always comes back as a new map. Either way, normalizeJSON never writes
-// into the caller's data. Handing the validator the caller's own
-// containers is safe because [jsonschema.Validator.Validate] only reads
-// its instance and keeps no reference to it.
+// Each [yaml.MapSlice] that a decode with [niceyaml.WithYAMLOrderedMaps]
+// yields becomes a map with the same members. A later item replaces an
+// earlier one with the same key, as a decode into a map does. The walk
+// covers maps, slices, and ordered mappings, so it converts each of these
+// values anywhere in a document. Every other value comes back unchanged,
+// non-finite floats included, because the validator treats those as
+// numbers.
+//
+// A map or slice without any of these values comes back as the same
+// container. One that holds such a value comes back as a copy. An ordered
+// mapping always comes back as a new map. Either way, normalizeJSON never
+// writes into the caller's data. Handing the validator the caller's own
+// containers is safe because [jsonschema.Validator.Validate] does not
+// write to its instance or keep a reference to it.
 func normalizeJSON(data any, root ast.Node, idx *datapath.Index) any {
 	w := normalizer{
 		idx:   idx,
@@ -1047,13 +1068,14 @@ func normalizeJSON(data any, root ast.Node, idx *datapath.Index) any {
 }
 
 // normalizer walks a value for [normalizeJSON]. It records the path from
-// the top of the value down to the value it visits, and looks up the node
+// the top of the value down to the value it visits. It looks up the node
 // in root that the path leads to only when it reaches a timestamp. It
-// keeps each node it finds while the walk stays under that node, so the
-// lookups step down root at most once for each value the walk visits. The
-// index reads each mapping at most once.
+// keeps each node it finds while the walk stays under that node. The
+// lookups therefore step down root at most once for each value the walk
+// visits. The index reads each mapping at most once.
 type normalizer struct {
-	// Finds the members of each mapping the lookups step through.
+	// The index that finds the members of each mapping the lookups step
+	// through.
 	idx  *datapath.Index
 	path []jsonschema.Segment
 	// The node each prefix of path leads to in root, as far down path as
@@ -1145,9 +1167,10 @@ func (w *normalizer) child(seg jsonschema.Segment, elem any) (any, bool) {
 }
 
 // node returns the content of the node that a decode read the visited
-// value from, following each alias on the way through the resolver of
-// the index. It returns nil when root is nil, behind an alias that does
-// not resolve, and at a member name the index finds no value node for.
+// value from. It follows each alias on the way through the resolver of
+// the index. It returns nil when root is nil or when an alias on the way
+// does not resolve. It also returns nil when the index does not find a
+// value node for a member name.
 func (w *normalizer) node() ast.Node {
 	for len(w.nodes) <= len(w.path) {
 		parent := w.nodes[len(w.nodes)-1]
@@ -1175,8 +1198,8 @@ const dateOnlyLayout = "2006-1-2"
 // timestampText returns the RFC 3339 text of t, the value of a !!timestamp
 // decoded from node. When the string scalar under the tag holds only a
 // date, and that date is t, the text is a full-date such as 2001-12-14.
-// Any other node gives a date-time, and so does a nil node, since t alone
-// does not show whether the source wrote only a date.
+// Any other node gives a date-time, and so does a nil node, because t
+// alone does not show whether the source wrote only a date.
 func timestampText(t time.Time, node ast.Node) string {
 	text, ok := stringText(node)
 	if ok {
@@ -1193,8 +1216,8 @@ func timestampText(t time.Time, node ast.Node) string {
 
 // stringText returns the text of the string scalar under the anchors and
 // tags of node, and reports whether node holds one. A block scalar gives
-// its content without the header, as a decode reads it. A typed nil holds
-// no text.
+// its content without the header, as a decode reads it. A typed nil does
+// not hold text.
 func stringText(node ast.Node) (string, bool) {
 	switch n := astnode.Content(node).(type) {
 	case *ast.StringNode:
@@ -1211,8 +1234,8 @@ func stringText(node ast.Node) (string, bool) {
 // checkExpansion returns an error wrapping [ErrValidate] when a map or
 // slice in data contains itself. It returns one matching
 // [ErrExcessiveAliasing] when aliases make up too much of the data the
-// validator would read. The data is at fault for that error, so it comes
-// from [niceyaml.Invalid] and does not wrap ErrValidate.
+// validator reads. The data is at fault for that error, so it comes from
+// [niceyaml.Invalid] and does not wrap ErrValidate.
 func checkExpansion(data any) error {
 	w := expansionWalker{sizes: map[sharedKey]int{}, onPath: map[sharedKey]bool{}}
 
@@ -1230,14 +1253,17 @@ func checkExpansion(data any) error {
 
 // expansionWalker counts the nodes of a decoded value the way the
 // validator reads them, which is every use of a shared value in full. A
-// decode shares the map, slice, or byte slice an anchor holds between
-// its aliases, and a byte slice counts as one node per character of the
-// base64 text normalizeJSON builds from it. The walker holds the size of
-// each shared value it has walked, so it walks one once and adds that
-// size at every later use. It also holds the shared values on the path
-// it is walking down, so a value that contains itself stops the walk.
-// It counts the nodes it visits as distinct, with a later use of a
-// shared value as one node, and the nodes such a use repeats as aliased.
+// decode shares the map, slice, or byte slice that an anchor holds
+// between its aliases. A byte slice counts as one node per character of
+// the base64 text that normalizeJSON builds from it. The walker holds the
+// size of each shared value it has walked, so it walks one once and adds
+// that size at every later use. It also holds the shared values on the
+// path it is walking down, so a value that contains itself stops the
+// walk.
+//
+// The walker counts the nodes it visits as distinct, and a later use of
+// a shared value counts as one distinct node. The walker counts the nodes
+// that such a use repeats as aliased.
 type expansionWalker struct {
 	sizes    map[sharedKey]int
 	onPath   map[sharedKey]bool
@@ -1246,7 +1272,7 @@ type expansionWalker struct {
 }
 
 // sharedKey names a map, slice, or byte slice by type, address, and
-// length, since a slice and a shorter slice of it share an address. The
+// length, because a slice and a shorter slice of it share an address. The
 // fields serve as the map key.
 //
 //nolint:unused // The fields tell the keys of the sizes and onPath maps apart.
@@ -1258,7 +1284,7 @@ type sharedKey struct {
 
 // sharedKeyOf returns the key that names data when it is a map, slice,
 // or byte slice. It returns false for any other value and for an empty
-// one, which holds nothing to share.
+// one, which does not hold anything to share.
 func sharedKeyOf(data any) (sharedKey, bool) {
 	switch data.(type) {
 	case map[string]any, []any, yaml.MapSlice, []byte:
@@ -1274,10 +1300,11 @@ func sharedKeyOf(data any) (sharedKey, bool) {
 	return sharedKey{typ: rv.Type(), ptr: rv.Pointer(), len: rv.Len()}, true
 }
 
-// walk returns the size of data: one for a scalar, one per character of
-// the base64 text of a byte slice, and one for a map or slice plus the
-// size of each key and value in it. A map or slice that the walk reaches
-// from inside itself returns an error wrapping [ErrValidate].
+// walk returns the size of data. A scalar has a size of one, and a byte
+// slice has one per character of its base64 text. A map or slice has one
+// plus the size of each key and value in it. For a map or slice that the
+// walk reaches from inside itself, walk returns an error wrapping
+// [ErrValidate].
 func (w *expansionWalker) walk(data any) (int, error) {
 	w.distinct = aliaslimit.AddCapped(w.distinct, 1)
 

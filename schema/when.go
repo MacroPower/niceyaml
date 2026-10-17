@@ -8,19 +8,20 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
-// guarded applies a [Resolver] only to documents a [matcher.Matcher]
-// accepts.
+// guarded applies a [Resolver] only to documents that a
+// [matcher.Matcher] accepts.
 type guarded struct {
 	matcher  matcher.Matcher
 	resolver Resolver
 }
 
-// When creates a [Resolver] that delegates to r for documents m
-// accepts, reports [ErrNoMatch] for the rest, and returns the error of a
-// matcher that cannot decide, which ends a registry's lookup.
+// When creates a [Resolver] that delegates to r for documents that m
+// accepts and reports [ErrNoMatch] for the rest. For a document that m
+// cannot decide on, the Resolver returns the error from m, and that error
+// ends the lookup of a registry.
 //
-// This pairs a [Ref], which applies to every document, with a matcher that
-// decides which documents it should apply to:
+// When pairs a [Ref], which applies to every document, with a matcher
+// that decides which documents the Ref applies to:
 //
 //	kindPath := paths.Doc().Child("kind")
 //	reg := schema.NewRegistry(schema.WithResolvers(schema.When(
@@ -28,11 +29,12 @@ type guarded struct {
 //	    schema.Embedded(deploymentSchema),
 //	)))
 //
-// A resolver that decides and names the schema from the same parse, such as
-// [Directive], implements [Resolver] directly and needs no guard.
+// A resolver that decides and names the schema from the same parse, such
+// as [Directive], implements [Resolver] directly and does not need a
+// guard.
 //
-// Panics if m or r is nil, including a nil pointer, a nil [matcher.Func],
-// or a nil [ResolverFunc].
+// When panics if m or r is nil, including a nil pointer, a nil
+// [matcher.Func], or a nil [ResolverFunc].
 func When(m matcher.Matcher, r Resolver) Resolver {
 	if nilness.IsNil(m) {
 		panic("schema.When: matcher is nil")
