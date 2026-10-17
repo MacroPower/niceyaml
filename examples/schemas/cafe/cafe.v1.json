@@ -87,7 +87,7 @@
       "properties": {
         "available": {
           "title": "Available",
-          "description": "Available indicates whether the item is currently available.",
+          "description": "Available indicates whether customers can order the item.",
           "default": true,
           "anyOf": [
             {
@@ -232,7 +232,7 @@
           "anyOf": [
             {
               "type": "string",
-              "description": "Duration is a [time.Duration] encoded as text. It parses any\n[time.ParseDuration] form, such as \"15m\", and marshals with\n[time.Duration.String], so 15 minutes becomes \"15m0s\". A bare\n[time.Duration] has no encoding/json/v2 representation, so the schema\ngenerator refuses it. The text form keeps the field a string.",
+              "description": "Duration is a [time.Duration] encoded as text. It parses any\n[time.ParseDuration] form, such as \"15m\", and marshals with\n[time.Duration.String], so 15 minutes becomes \"15m0s\". A bare\n[time.Duration] does not have an encoding/json/v2 representation, so the\nschema generator refuses it. The text form keeps the field a string.",
               "pattern": "^([0-9]+(\\.[0-9]+)?(ns|[uµμ]s|ms|s|m|h))+$"
             },
             {

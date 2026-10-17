@@ -32,7 +32,7 @@ type Menu struct {
 
 // MenuItem represents a single item on the menu.
 type MenuItem struct {
-	// Available indicates whether the item is currently available.
+	// Available indicates whether customers can order the item.
 	Available *bool `json:"available,omitempty" jsonschema:"title=Available,default=true"`
 	// Name is the name of the menu item.
 	Name string `json:"name" jsonschema:"title=Name,minLength=1"`
@@ -110,8 +110,8 @@ type Settings struct {
 // Duration is a [time.Duration] encoded as text. It parses any
 // [time.ParseDuration] form, such as "15m", and marshals with
 // [time.Duration.String], so 15 minutes becomes "15m0s". A bare
-// [time.Duration] has no encoding/json/v2 representation, so the schema
-// generator refuses it. The text form keeps the field a string.
+// [time.Duration] does not have an encoding/json/v2 representation, so the
+// schema generator refuses it. The text form keeps the field a string.
 type Duration time.Duration
 
 // MarshalText formats the duration with [time.Duration.String].
@@ -120,9 +120,10 @@ func (d Duration) MarshalText() ([]byte, error) {
 }
 
 // UnmarshalText parses the duration with [time.ParseDuration]. The schema
-// pattern checks the form of a duration but not its range, so a value too
-// large for a [time.Duration], such as "99999999999h", passes the schema
-// and fails here. A decode binds that failure at the path of the value.
+// pattern checks the form of a duration but not its range. A value too
+// large for a [time.Duration], such as "99999999999h", therefore passes the
+// schema and fails here. A decode binds that failure at the path of the
+// value.
 func (d *Duration) UnmarshalText(b []byte) error {
 	v, err := time.ParseDuration(string(b))
 	if err != nil {
