@@ -14,23 +14,23 @@ import (
 )
 
 // Validator returns the validator that s, a *schema.Schema, checks with,
-// or nil for a schema that checks nothing, as the schema of a
-// "$schema=none" directive does.
+// or nil for a schema that does not check anything, such as the schema of
+// a "$schema=none" directive.
 var Validator func(s any) *jsonschema.Validator
 
 // offKey is the key of the switch on a context.
 type offKey struct{}
 
-// DeprecationsOff returns a copy of ctx under which a schema check reports
-// no deprecation. The schema of an older version still checks a document,
-// but its deprecated keywords warn nothing, so a load runs that check
-// under such a context.
+// DeprecationsOff returns a copy of ctx under which a schema check does
+// not report deprecations. The schema of an older version still checks a
+// document. A load runs that check under such a context, so the
+// deprecated keywords of that schema do not warn.
 func DeprecationsOff(ctx context.Context) context.Context {
 	return context.WithValue(ctx, offKey{}, true)
 }
 
 // ReportsDeprecations reports whether a schema check under ctx reports
-// its deprecations, which it does unless ctx comes from
+// its deprecations. It reports false only when ctx comes from
 // [DeprecationsOff].
 func ReportsDeprecations(ctx context.Context) bool {
 	off, _ := ctx.Value(offKey{}).(bool) //nolint:errcheck // A missing switch reads as false.
