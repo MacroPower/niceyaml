@@ -1,0 +1,20 @@
+---
+# The house theme of Café Yamüll, in the colors of a fika table.
+name: fika
+mode: dark
+
+# This file leaves out the ok, warn, and error colors, so each takes a
+# default that the mode picks.
+colors:
+  fg: "#f3e9dc"
+  bg: "#2b1d14"
+  accent: "#e0a458"
+
+# Each token lists the attributes and colors of one kind. Quote every
+# token that holds a color, because a "#" after a space starts a
+# comment. Unquoted, bold #e0a458 reads as bold and loses its color.
+tokens:
+  comment: "italic #9c8a7a"
+  nameTag: "bold #e0a458"
+  literalString: "#a3c585"
+  literalNumber: "#d08770"

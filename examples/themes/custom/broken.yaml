@@ -1,0 +1,14 @@
+---
+name: fika
+mode: dusk
+
+colors:
+  fg: "#f3e9dc"
+  bg: "#2b1d1"
+  accent: "#e0a458"
+
+tokens:
+  comment: "italic #9c8a7a"
+  nameTag: "bolder #e0a458"
+  literalStrin: "#a3c585"
+  literalNumber: "#d0877"
