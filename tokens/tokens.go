@@ -14,7 +14,7 @@ import (
 )
 
 // Tokenize returns the token stream for the given YAML source. It runs
-// the go-yaml lexer and gives back the text the lexer drops from the
+// the go-yaml lexer and restores the text the lexer drops from the
 // Origins. The joined Origins then match the source without its byte
 // order marks, except in a few places Tokenize leaves as the lexer made
 // them. Every token's Line, Column, and Offset name the rune where its
@@ -27,83 +27,89 @@ import (
 // Tokenize and [IsPlaceholder] are the only places niceyaml calls the
 // go-yaml lexer, and every token stream the module works with comes
 // through Tokenize. The lexer drops some text from the Origins, and
-// Tokenize gives it back from the source. It restores the
-// letter and hex digits of a "\x", "\u", or "\U" escape in a double-quoted
-// scalar. It restores them in the invalid token the lexer makes of such a
-// scalar too. The lexer makes one of a scalar that no quote closes, as when
-// an escape reads the closing quote as a hex digit, and of a scalar it cuts
-// at a "---" or "..." line or at an escape it rejects. It restores the
-// spaces and tabs that end a line or fill a blank line, the space in front
-// of a ":" after a quoted or alias key, and the space between a "-" and a
-// "?". It restores the line breaks and
-// indentation in front of some tokens, such as a "?" or ":" indicator that
-// follows a flow collection, a quoted scalar, or a comment. When the lexer
-// gives up on a "\u" or "\U" escape, such as one the source ends too soon
-// for, it reads the escape's backslash into two tokens, and Tokenize
-// leaves it in the second alone. [SplitDocuments] cuts the stream into one
-// stream per document.
+// Tokenize restores it from the source. It restores the letter and hex
+// digits of a "\x", "\u", or "\U" escape in a double-quoted scalar. It
+// restores them in the invalid token the lexer makes of such a scalar too.
+// The lexer makes that invalid token of an unclosed scalar, as when an
+// escape reads the closing quote as a hex digit. It also makes one of a
+// scalar it cuts at a "---" or "..." line or at an escape it rejects.
+//
+// Tokenize restores the spaces and tabs that end a line or fill a blank
+// line. It also restores the space in front of a ":" after a quoted or
+// alias key, and the space between a "-" and a "?". It restores the line
+// breaks and indentation in front of some tokens, such as a "?" or ":"
+// indicator that follows a flow collection, a quoted scalar, or a comment.
+// When the lexer abandons a "\u" or "\U" escape, such as one the source
+// ends too soon for, it reads the escape's backslash into two tokens.
+// Tokenize leaves the backslash only in the second token.
 //
 // # Byte Order Marks
 //
 // Tokenize drops a UTF-8 byte order mark where YAML allows one: at the
 // start of a line before the content of a document, and in front of a
-// "---" or "..." marker. The lexer would read the mark as text and put it
-// in the first key. Every position names a rune of the text without
-// those marks.
+// "---" or "..." marker. Otherwise the lexer reads the mark as text and
+// puts it in the first key. Every position names a rune of the text
+// without those marks.
 //
 // # Unclosed Flow Collections
 //
 // The lexer counts the flow collections it has open, and a "---" or "..."
-// marker does not reset the counts. After a "{" or "[" that nothing
-// closes, the lexer reads every later document as the inside of a flow
-// collection, where a "," splits a plain scalar. After a "]" that closes
-// nothing, it reads the content of the next flow sequence as one scalar.
-// Tokenize lexes the source again from each marker the lexer reaches with
-// a count off zero, so the documents after it lex as they do in a source
-// that starts at that marker. The stream stays as the lexer made it at a
-// marker that follows text the lexer dropped or swallowed, such as a ":"
-// after a tab used as indentation.
+// marker does not reset the counts. After an unclosed "{" or "[", the
+// lexer reads every later document as the inside of a flow collection,
+// where a "," splits a plain scalar. After a "]" that does not close a
+// collection, it reads the content of the next flow sequence as one
+// scalar. Tokenize lexes the source again from each marker the lexer
+// reaches with a count off zero. The documents after that marker then lex
+// as they do in a source that starts at it. The stream stays as the lexer
+// made it at a marker that follows text the lexer dropped or swallowed,
+// such as a ":" after a tab used as indentation.
 //
 // # Unrestored Text
 //
-// The joined Origins match that text, except in a few places Tokenize
-// leaves as the lexer made them. The lexer drops some text outright, such
-// as a tag that ends a file after other text, and it can drop some or all
-// the whitespace in front of the tag, line breaks included. Only a space,
-// a line break, or a "," in a flow collection closes a tag, so from a file
-// of "[!t]" the lexer keeps only the "[". A "{" or "}" in the tag makes
-// the lexer keep its text as an invalid token instead. A tab used as
-// indentation makes the lexer read an invalid token that can swallow the
-// characters after it, such as a ":" indicator, and the text around such
-// a token keeps the lexer's shape. When the tab indents a later line of a
-// quoted scalar, the lexer ends the scalar's invalid token with the tab
-// and reads the tab again as a token of its own. Tokenize drops that
-// repeat. A repeat that ends the stream stays without the tab and takes
-// any whitespace that ends the source. In a flow collection, the repeat
-// can take the place of the indicator after the tab, and Tokenize keeps
-// such a repeat. The lexer also ends one token with a line ending and
-// opens the next with it again, as after a tag that ends its line and
-// after the invalid token it makes of text that follows a block scalar
-// header. Tokenize keeps the repeat, and a blank line between the two
-// tokens loses its spaces and tabs. When that invalid token ends the file
-// with no line ending, the lexer repeats the last rune of its text as a
-// token of its own instead, and Tokenize drops that token.
+// The joined Origins match the source without its byte order marks,
+// except in a few places Tokenize leaves as the lexer made them. The lexer
+// drops some text outright, such as a tag that ends a file after other
+// text. It can also drop some or all the whitespace in front of the tag,
+// line breaks included. Only a space, a line break, or a "," in a flow
+// collection closes a tag, so from a file of "[!t]" the lexer keeps only
+// the "[". A "{" or "}" in the tag makes the lexer keep its text as an
+// invalid token instead.
+//
+// A tab used as indentation makes the lexer read an invalid token that can
+// swallow the characters after it, such as a ":" indicator. The text
+// around such a token stays as the lexer made it. When the tab indents a
+// later line of a quoted scalar, the lexer ends the scalar's invalid token
+// with the tab and reads the tab again as a token of its own. Tokenize
+// drops that repeat. A repeat that ends the stream stays without the tab
+// and takes any whitespace that ends the source. In a flow collection, the
+// repeat can take the place of the indicator after the tab, and Tokenize
+// keeps such a repeat.
+//
+// The lexer also ends one token with a line ending and opens the next with
+// it again. It does so after a tag that ends its line, and after the
+// invalid token it makes of text that follows a block scalar header.
+// Tokenize keeps the repeat, and a blank line between the two tokens loses
+// its spaces and tabs. When that invalid token ends the file without a line
+// ending, the lexer repeats the last rune of its text as a token of its own
+// instead. Tokenize drops that token.
 //
 // # Positions
 //
 // Every token's Line, Column, and Offset name the rune where its text
-// starts, counting lines, columns, and offsets from 1 and offsets in runes.
-// The Origin may open with whitespace and line endings before that rune.
-// The text of a token is its Origin without the whitespace around it, and
-// for a token cut across lines, such as a block scalar, the position names
-// the first line that holds text. A token whose Origin holds no text, such
-// as the empty content of a block scalar, sits where the next text starts,
-// so it shares the position of the token after it. A source of whitespace
-// alone comes back as one token at line 1, column 1. The lexer itself
-// places a token behind the trailing spaces it drops, one rune short after
-// a comment or a tag, and on the last line of a multi-line block scalar.
-// Tokenize moves each such token to where the source holds its text, and
-// the Origins hold the spaces the lexer dropped.
+// starts. Lines, columns, and offsets count from 1, and offsets count
+// runes. The Origin can open with whitespace and line endings before that
+// rune. The text of a token is its Origin without the whitespace around
+// it. For a token cut across lines, such as a block scalar, the position
+// names the first line that holds text. A token whose Origin does not hold
+// text, such as the empty content of a block scalar, sits where the next
+// text starts. It thus shares the position of the token after it.
+//
+// A source of whitespace alone comes back as one token at line 1,
+// column 1. The lexer itself places a token behind the trailing spaces it
+// drops, one rune short after a comment or a tag, and on the last line of
+// a multi-line block scalar. Tokenize moves each such token to where the
+// source holds its text, and the Origins hold the spaces the lexer
+// dropped.
 //
 // # Parser Input
 //
@@ -158,15 +164,15 @@ const firstWindow = 64
 // tokenizeRest tokenizes src, the rest of a source from a marker on, as
 // [tokenize] does. It returns the tokens through the next marker to lex
 // again from, with the index of that marker, or every token of src and -1
-// when src holds no such marker.
+// when src does not hold such a marker.
 //
 // It lexes a window of whole lines from the start of src and doubles the
 // window until it holds that marker or all of src. The time it takes thus
-// grows with the distance to the marker and not with the length of src. A
-// source of many documents that each leave a flow collection open would
-// otherwise take time quadratic in their number. The lexer and the repairs
-// read the source from left to right, so the tokens through a marker are
-// the same whatever follows the line of the marker.
+// grows with the distance to the marker and not with the length of src.
+// Without the window, a source of many documents that each leave a flow
+// collection open takes time quadratic in their number. The lexer and the
+// repairs read the source from left to right, so the tokens through a
+// marker are the same whatever follows the line of the marker.
 func tokenizeRest(src string) (token.Tokens, int) {
 	for size := firstWindow; ; size *= 2 {
 		end := 0
@@ -192,7 +198,7 @@ func tokenizeRest(src string) (token.Tokens, int) {
 // tokenize returns the token stream [Tokenize] makes of src, a source
 // without byte order marks, from one run of the lexer. It also returns the
 // index of the marker [openFlowMarker] finds in that stream, or -1 when it
-// finds none.
+// does not find one.
 func tokenize(src string) (token.Tokens, int) {
 	tks := dropHeaderRepeat(src, lexer.Tokenize(src))
 	if len(tks) == 0 {
@@ -304,29 +310,33 @@ func tokenize(src string) (token.Tokens, int) {
 
 // openFlowMarker returns the first "---" or "..." marker of tks that the
 // lexer reached with a flow count off zero and that spans places in src,
-// or nil when tks holds none. [Tokenize] lexes the source again from that
-// marker.
+// or nil when tks does not hold one. [Tokenize] lexes the source again
+// from that marker.
 //
 // The go-yaml scanner (v1.19.3-0.20260407131736-edee2f91616c) counts the
-// flow mappings and the flow sequences it has open, and reads its input
-// as the inside of a flow collection while either count is above zero. It
-// resets neither count at a marker (scanner/scanner.go:1509), so a "{" or
-// "[" that nothing closes keeps every later document in flow context.
-// There a "," splits a plain scalar, and after a "{" the scanner takes no
-// ":" as an indicator right after another one, so a mapping nested under a
-// key reads as one scalar. A "]" that closes nothing takes its count below
-// zero. The next "[" brings the count back to zero, and the scanner reads
-// the content of that sequence as one plain scalar. The scanner changes a
-// count only where it makes the token that opens or closes a flow
-// collection (scanner/scanner.go:917, 931, 945, and 959), so the tokens
-// ahead of a marker give the counts the scanner reached it with.
+// flow mappings and the flow sequences it has open. It reads its input as
+// the inside of a flow collection while either count is more than zero.
+// It does not reset either count at a marker (see Scanner.clearState in
+// scanner/scanner.go), so an unclosed "{" or "[" keeps every later
+// document in flow context. There a "," splits a plain scalar. After a
+// "{", the scanner does not take a ":" right after another one as an
+// indicator, so a mapping nested under a key reads as one scalar. A "]"
+// that does not close a collection makes its count negative. The next "["
+// brings the count back to zero, and the scanner reads the content of
+// that sequence as one plain scalar.
 //
-// Tokenize cuts the source in front of the marker, so the marker has to
-// sit where the stream puts it. It does when the source holds the text of
-// the marker and of the token before it, with whitespace alone between
-// the two. Around text the lexer dropped or swallowed, such as a ":"
-// after a tab used as indentation, the position of the marker can name
-// another rune, and openFlowMarker passes over such a marker.
+// The scanner changes a count only where it makes the token that opens or
+// closes a flow collection, in scanFlowMapStart, scanFlowMapEnd,
+// scanFlowArrayStart, and scanFlowArrayEnd. The tokens ahead of a marker
+// thus give the counts the scanner reached it with.
+//
+// Tokenize cuts the source in front of the marker, so the cut is right
+// only when the marker sits where the stream puts it. The marker sits
+// there when the source holds the text of the marker and of the token
+// before it, with whitespace alone between the two. Around text the lexer
+// dropped or swallowed, such as a ":" after a tab used as indentation, the
+// position of the marker can name another rune, and openFlowMarker skips
+// such a marker.
 func openFlowMarker(src []rune, tks token.Tokens, spans []span) *token.Token {
 	var maps, seqs int
 
@@ -372,7 +382,7 @@ func openFlowMarker(src []rune, tks token.Tokens, spans []span) *token.Token {
 }
 
 // runeIndex returns the byte index of rune n of s, or the length of s
-// when s holds no more than n runes.
+// when s holds n runes or fewer.
 func runeIndex(s string, n int) int {
 	for i := range s {
 		if n == 0 {
@@ -388,9 +398,9 @@ func runeIndex(s string, n int) int {
 // dropHeaderRepeat returns tks without the token the lexer adds when the
 // invalid token it makes of text after a block scalar header ends the
 // source. That invalid token's text opens with the "|" or ">" of the
-// header. The lexer repeats the end of the text as a token of its own,
-// which sits inside the invalid token and holds text the source does not
-// have. The repeat can be an invalid token too, as when the text ends
+// header. The lexer repeats the end of the text as a token of its own.
+// That repeat sits inside the invalid token and holds text the source does
+// not have. The repeat can be an invalid token too, as when the text ends
 // with a quote or a reserved indicator.
 func dropHeaderRepeat(src string, tks token.Tokens) token.Tokens {
 	if len(tks) < 2 {
@@ -424,16 +434,18 @@ func dropHeaderRepeat(src string, tks token.Tokens) token.Tokens {
 
 // emptyTabRepeats empties the Origin of each token the lexer adds when a
 // tab indents a later line of a quoted scalar. The lexer ends the invalid
-// token it makes of the scalar with that tab, then reads the tab again as
-// an invalid token of its own, which holds text the source does not have.
+// token it makes of the scalar with that tab. It then reads the tab again
+// as an invalid token of its own, and that token holds text the source
+// does not have.
+//
 // It returns the repeats that have a token after them, in stream order,
-// and [Tokenize] drops those with [dropTokens] once it has repaired the
-// positions. The positioner tells where such a scalar ends from the token
-// after it, which is the repeat, so the repeat stays in the stream until
-// then. A repeat that ends the stream stays in it, so the scalar's invalid
-// token still has a token after it, as [cutQuoted] expects of a scalar the
-// lexer cut. The repair of the final line ending in [Tokenize] gives that
-// repeat any whitespace that ends the source.
+// and [Tokenize] drops those with [dropTokens] after it has repaired the
+// positions. The positioner finds where such a scalar ends from the token
+// after it. That token is the repeat, so the repeat stays in the stream
+// until then. A repeat that ends the stream stays in it, so the scalar's
+// invalid token still has a token after it, as [cutQuoted] expects of a
+// scalar the lexer cut. The repair of the final line ending in [Tokenize]
+// gives that repeat any whitespace that ends the source.
 func emptyTabRepeats(tks token.Tokens) token.Tokens {
 	var repeats token.Tokens
 
@@ -484,7 +496,7 @@ func dropTokens(tks, drop token.Tokens) token.Tokens {
 // tabRepeat reports whether tk is the token the lexer repeats after prev,
 // the invalid token of a quoted scalar it cut at a tab that indents a
 // later line, as [cutAtTab] reports. The lexer reads the repeat from the
-// rune where it gave up, so both invalid tokens share the lexer's Offset.
+// rune where it stopped, so both invalid tokens share the lexer's Offset.
 // The last line of the Origin of prev ends with the tabs tk holds.
 func tabRepeat(prev, tk *token.Token) bool {
 	if !cutAtTab(prev) || tk.Type != token.InvalidType ||
@@ -497,14 +509,14 @@ func tabRepeat(prev, tk *token.Token) bool {
 	return tk.Origin != "" && strings.Trim(tk.Origin, "\t") == "" && strings.HasSuffix(last, tk.Origin)
 }
 
-// cutAtTab reports whether tk has the shape of the invalid token the lexer
-// makes of a single- or double-quoted scalar it cut at a tab that indents
-// a later line. The lexer ends that token with the tab, so the last line
-// of its Origin holds spaces and tabs alone and ends with a tab. Other
-// invalid tokens that open with a quote can have that shape too, such as
-// the one the lexer makes of text that follows a block scalar header when
-// a tab indents the line after it. So [tabRepeat] checks tk against the
-// token after it, and [restoreTabLine] checks it against the source.
+// cutAtTab reports whether tk looks like the invalid token the lexer makes
+// of a single- or double-quoted scalar it cut at a tab that indents a
+// later line. The lexer ends that token with the tab, so the last line of
+// its Origin holds spaces and tabs alone and ends with a tab. Other
+// invalid tokens that open with a quote can look the same. One is the
+// token the lexer makes of text that follows a block scalar header when a
+// tab indents the next line. So [tabRepeat] checks tk against the token
+// after it, and [restoreTabLine] checks it against the source.
 func cutAtTab(tk *token.Token) bool {
 	if tk.Type != token.InvalidType {
 		return false
@@ -540,12 +552,13 @@ func advance(line, col int, s string) (int, int) {
 }
 
 // IsPlaceholder reports whether tk is the token [Tokenize] made for text
-// the lexer emits nothing for, such as a source of whitespace alone. The
-// parser reads that token as a plain scalar holding the text, while the
-// go-yaml Unmarshal reads the text as no value at all, so a decoder that
-// wants to agree with it treats the token as no content. Tokenize makes the
-// placeholder as the only token of its stream, so a token linked to a
-// neighbor, such as the content of a block scalar, is never one.
+// that the lexer does not emit a token for, such as a source of whitespace
+// alone. The parser reads that token as a plain scalar that holds the
+// text. The go-yaml Unmarshal does not read a value from the text, so a
+// decoder that wants to agree with Unmarshal treats the token as empty.
+// Tokenize makes the placeholder as the only token of its stream, so a
+// token linked to a neighbor, such as the content of a block scalar, is
+// never one.
 func IsPlaceholder(tk *token.Token) bool {
 	if tk == nil || tk.Type != token.StringType || tk.Origin != tk.Value || tk.Prev != nil || tk.Next != nil {
 		return false
@@ -557,26 +570,26 @@ func IsPlaceholder(tk *token.Token) bool {
 // ForParser returns clones of tks for the go-yaml parser to read.
 //
 // [Tokenize] gives the first token that holds text all the whitespace
-// ahead of that text, blank lines included, where the lexer keeps only the
-// line breaks of the blank lines and the indentation of the last line. The
+// ahead of that text, blank lines included. The lexer keeps only the line
+// breaks of the blank lines and the indentation of the last line. The
 // parser trims spaces and line breaks from the start of a key's Origin and
 // rejects the key when a line break remains. A blank line that holds a tab
-// in front of the first key would therefore make it reject valid YAML. In
-// the clone of that token, each blank line in front of the text keeps only
-// its line break, and the indentation of the line the text starts on
+// in front of the first key therefore makes the parser reject valid YAML.
+// In the clone of that token, each blank line in front of the text keeps
+// only its line break, and the indentation of the line the text starts on
 // stays. Every other clone keeps the Origin of its token.
 //
 // Tokenize puts the content of a block scalar that holds whitespace alone
 // where the next text starts. When that text is a comment, the parser
-// would read the comment as sharing a line with the scalar and attach it
+// reads the comment as sharing a line with the scalar and attaches it
 // there. The clone of that content moves to where the token before it
 // ends, on the line after the header, as the lexer places it. An empty
-// content, such as that of a header with no lines after it, keeps its
+// content, such as that of a header without lines after it, keeps its
 // position, as does every other clone.
 //
-// The parser relinks Next and Prev as it moves comment tokens, and the
+// The parser relinks Next and Prev when it moves comment tokens, and the
 // clones take that change in place of tks. The clones link to each other
-// and to nothing outside the result. ForParser drops nil tokens.
+// and not to any token outside the result. ForParser drops nil tokens.
 func ForParser(tks token.Tokens) token.Tokens {
 	result := make(token.Tokens, 0, len(tks))
 
@@ -625,8 +638,8 @@ func blockHeader(tk *token.Token) bool {
 	return tk != nil && (tk.Type == token.LiteralType || tk.Type == token.FoldedType)
 }
 
-// placeAfter moves tk to the rune that follows the text of prev, counting
-// from the rune prev's position names.
+// placeAfter moves tk to the rune that follows the text of prev. It counts
+// from the rune that the position of prev names.
 func placeAfter(tk, prev *token.Token) {
 	if tk.Position == nil || prev.Position == nil {
 		return
@@ -640,7 +653,7 @@ func placeAfter(tk, prev *token.Token) {
 
 // bareLeadingLines returns origin with each blank line in front of its
 // text cut down to its line break. The indentation of the line the text
-// starts on stays. An Origin that holds no text comes back as it is.
+// starts on stays. An Origin that does not hold text comes back as it is.
 func bareLeadingLines(origin string) string {
 	text := strings.TrimLeft(origin, " \t\r\n")
 	if text == "" {
@@ -663,8 +676,8 @@ func bareLeadingLines(origin string) string {
 
 // repairPositions moves every token of tks to the rune of src where its
 // text starts, so Line, Column, and Offset agree with the source whatever
-// the lexer counted. It walks src once from left to right, since each
-// token starts at or after the end of the text before it, and leaves
+// the lexer counted. It walks src once from left to right, because each
+// token starts at or after the end of the text before it. It leaves
 // IndentNum and IndentLevel as they are. It gives each token the line
 // breaks the lexer dropped in front of it, so the Origins ahead of a
 // token's text hold as many lines as the source does. It returns the runes
@@ -700,7 +713,7 @@ func repairPositions(src []rune, tks token.Tokens) []span {
 // from its first text rune to its last.
 type span struct {
 	start int // The rune index where the text starts.
-	end   int // The rune index just past where the text ends.
+	end   int // The rune index one past the end of the text.
 
 	// Whether the source holds each text line of the Origin, in order,
 	// between start and end. It is false for a token without text and
@@ -710,32 +723,35 @@ type span struct {
 }
 
 // restoreWhitespace gives the Origins of tks the whitespace of src that
-// the lexer drops. The lexer drops the spaces and tabs that end a line,
-// the spaces and tabs of a blank line, the space in front of a ":" after
-// a quoted or alias key, and the space between a "-" and a "?". It leaves
-// every position as it is.
+// the lexer drops. The lexer drops the spaces and tabs that end a line and
+// those of a blank line. It also drops the space in front of a ":" after a
+// quoted or alias key, and the space between a "-" and a "?". The
+// positions of the tokens stay as they are.
 //
 // Each token that holds text takes the source's runes from its first text
 // rune to its last when the two differ in whitespace alone. Between two
 // tokens that hold text, the Origins take the whitespace of the source
-// when the whitespace they hold there lacks some of its runes and adds
-// none, or when it holds as many line breaks. The line breaks and the
-// lines they close go to the end of the earlier Origin, where the lexer
-// puts the line ending that closes a line of text. The indentation of
-// the line the later token starts on goes to the start of the later one.
+// when the whitespace they hold there lacks some of its runes and does not
+// add any. They also take it when that whitespace holds as many line
+// breaks as the source. The line breaks and the lines they close go to the
+// end of the earlier Origin, where the lexer puts the line ending that
+// closes a line of text. The indentation of the line the later token
+// starts on goes to the start of the later one.
+//
 // A ":" whose Origin opens with a line break keeps the line breaks in
-// front of it, because the earlier Origin is a key, and the parser
-// rejects a key whose Origin ends with a line break. That key takes
-// only the spaces and tabs that end its own line. The first token that
-// holds text opens with all the whitespace ahead of its text, blank
-// lines included. The Origins stay as they are on both sides of a token
-// of whitespace alone and of a token whose [span] is not ok. They also
-// stay as they are where the lexer repeats a line ending, such as after
-// a tag, because the repeat adds a line break the source lacks. A blank
-// line there loses its spaces and tabs. The invalid token of a quoted
-// scalar the lexer cut at a tab that indents a later line still takes the
-// spaces and tabs the lexer drops after that tab when tokens of
-// whitespace alone follow it, as [restoreTabLine] describes. The repair
+// front of it, because the earlier Origin is a key. The parser rejects a
+// key whose Origin ends with a line break. That key takes only the spaces
+// and tabs that end its own line. The first token that holds text opens
+// with all the whitespace ahead of its text, blank lines included.
+//
+// The Origins stay as they are on both sides of a token of whitespace
+// alone and of a token whose [span] is not ok. They also stay as they are
+// where the lexer repeats a line ending, such as after a tag, because the
+// repeat adds a line break the source lacks. A blank line there loses its
+// spaces and tabs. One exception holds for the invalid token of a quoted
+// scalar the lexer cut at a tab that indents a later line. When tokens of
+// whitespace alone follow that token, it still takes the spaces and tabs
+// the lexer drops after the tab, as [restoreTabLine] describes. The repair
 // of the final line ending in [Tokenize] handles the whitespace after the
 // last token that holds text.
 func restoreWhitespace(src []rune, tks token.Tokens, spans []span) {
@@ -780,8 +796,8 @@ func restoreWhitespace(src []rune, tks token.Tokens, spans []span) {
 }
 
 // restoreText gives tk the runes of src its text covers, in place of the
-// text of its Origin, when the source adds whitespace alone, such as the
-// spaces of a blank line inside a multi-line plain scalar.
+// text of its Origin. It does so when the source adds whitespace alone,
+// such as the spaces of a blank line inside a multi-line plain scalar.
 func restoreText(src []rune, tk *token.Token, sp span) {
 	lead := len(tk.Origin) - len(strings.TrimLeft(tk.Origin, " \t\r\n"))
 	trail := len(strings.TrimRight(tk.Origin, " \t\r\n"))
@@ -796,17 +812,19 @@ func restoreText(src []rune, tk *token.Token, sp span) {
 	tk.Origin = tk.Origin[:lead] + want + tk.Origin[trail:]
 }
 
-// restoreTabLine gives prev, the invalid token of a quoted scalar the
-// lexer cut at a tab that indents a later line, the spaces and tabs the
-// lexer drops after that tab. Tokens of whitespace alone follow prev, such
-// as the one the lexer makes of a further line that opens with a tab. The
-// text of prev covers prevSpan, and the stream holds ws between the end of
-// the Origin of prev and rune index end, where the next text starts or the
-// source ends. The source must hold the whitespace that ends the Origin
-// right after its text. From there to end, it must hold a run of spaces
-// and tabs followed by ws. It can hold further spaces and tabs among the
-// runes of ws, because the lexer drops those from the later lines too.
-// Then prev takes the run. The Origins stay as they are otherwise.
+// restoreTabLine gives prev the spaces and tabs the lexer drops after the
+// tab that ends it. The token prev is the invalid token of a quoted scalar
+// the lexer cut at a tab that indents a later line. Tokens of whitespace
+// alone follow prev, such as the one the lexer makes of a further line
+// that opens with a tab. The text of prev covers prevSpan. The stream
+// holds ws between the end of the Origin of prev and rune index end, where
+// the next text starts or the source ends.
+//
+// The source must hold the whitespace that ends the Origin right after its
+// text. From there to end, it must hold a run of spaces and tabs followed
+// by ws. It can hold further spaces and tabs among the runes of ws,
+// because the lexer drops those from the later lines too. Then prev takes
+// the run. The Origins stay as they are otherwise.
 func restoreTabLine(src []rune, prev *token.Token, prevSpan span, ws string, end int) {
 	trail := prev.Origin[len(strings.TrimRight(prev.Origin, " \t\r\n")):]
 
@@ -832,25 +850,25 @@ func restoreTabLine(src []rune, prev *token.Token, prevSpan span, ws string, end
 	prev.Origin += gap[:run-held]
 }
 
-// restoreBetween gives prev and cur the whitespace of src between the
-// text of the two, when the whitespace the Origins hold between them is
-// part of it or holds as many line breaks. The line breaks and the lines
-// they close go to the end of the Origin of prev, and the rest to the
-// start of the Origin of cur. When cur is a ":" whose Origin opens with a
-// line break and prev holds none after its text, prev is a key, so prev
-// takes only the spaces and tabs that end its line, and cur takes the
-// rest. A nil prev stands for the start of the source, and cur then opens
-// with all the whitespace ahead of its text.
+// restoreBetween gives prev and cur the whitespace of src between their
+// texts. It does so when the whitespace the Origins hold between them is
+// part of that whitespace or holds as many line breaks. The line breaks
+// and the lines they close go to the end of the Origin of prev, and the
+// rest to the start of the Origin of cur. When cur is a ":" whose Origin
+// opens with a line break and prev does not hold one after its text, prev
+// is a key. Then prev takes only the spaces and tabs that end its line,
+// and cur takes the rest. A nil prev stands for the start of the source,
+// and cur then opens with all the whitespace ahead of its text.
 //
 // The count of line breaks covers a bare "\r" followed by a blank line of
-// spaces. The lexer reads the "\r", the spaces, and the "\n" as one CRLF,
-// and [positioner.restoreGap] puts the line break it seems to drop back as
-// a bare "\r", so the Origins hold a "\r" where the source holds spaces.
+// spaces. The lexer reads the "\r", the spaces, and the "\n" as one CRLF.
+// [positioner.restoreGap] restores the line break the stream lacks as a
+// bare "\r", so the Origins hold a "\r" where the source holds spaces.
 //
 // A gap that holds anything but whitespace holds text the lexer dropped,
 // so the Origins stay as they are. They also stay as they are when they
-// hold a rune the gap lacks and a different count of line breaks, such
-// as where the lexer repeats the line ending after a tag.
+// hold a rune the gap lacks and a different count of line breaks. A line
+// ending that the lexer repeats after a tag is one example.
 func restoreBetween(src []rune, prev *token.Token, prevSpan span, cur *token.Token, curSpan span) {
 	from := 0
 	if prev != nil {
@@ -925,37 +943,37 @@ func withoutWhitespace(s string) string {
 
 // positioner finds the rune each token's text starts at.
 //
-// The cursor stands just past the last text placed, and the next token's
-// text starts at the first rune after it that is not whitespace, because
-// the stream covers the source. The lexer's Offset gives a second
-// candidate. The lexer counts the runes it consumes, so its Offset stands a
-// fixed distance from the truth until it drops or repeats a rune, and that
-// distance is delta. The offset candidate places the tokens after one the
-// lexer rewrote, where the cursor is unreliable. The cursor is reliable
-// again once either candidate finds a token.
+// The cursor stands immediately past the last text placed. The stream
+// covers the source, so the next token's text starts at the first rune
+// after the cursor that is not whitespace. The lexer's Offset gives a
+// second candidate. The lexer counts the runes it consumes, so its Offset
+// stands a fixed distance from the truth until it drops or repeats a rune.
+// That distance is delta. The offset candidate places the tokens after one
+// the lexer rewrote, where the cursor is unreliable. The cursor is
+// reliable again after either candidate finds a token.
 //
 // The lexer shortens the Origin of a double-quoted scalar at a "\x", "\u",
 // or "\U" escape, so the positioner finds such a token by its text through
 // the first backslash. The cursor then moves past the scalar's closing
-// quote in the source rather than past the shortened text, where the next
-// token would land inside the scalar. A scalar that no quote closes runs
-// to the end of the source, and the cursor moves past its last text. A
-// scalar the lexer cut at a "---" or "..." line or at an escape it rejects
-// runs to where the source holds the text of the next token, and the
-// cursor moves past its last text before that.
+// quote in the source rather than past the shortened text. A cursor past
+// the shortened text puts the next token inside the scalar. An unclosed
+// scalar runs to the end of the source, and the cursor moves past its last
+// text. A scalar the lexer cut at a "---" or "..." line or at an escape it
+// rejects runs to where the source holds the text of the next token. The
+// cursor moves past the last text of the scalar before that point.
 //
-// When the lexer gives up on a "\u" or "\U" escape, it ends the invalid
+// When the lexer abandons a "\u" or "\U" escape, it ends the invalid
 // token of the scalar with the escape's backslash and opens the next
-// token with the backslash again. The invalid token gives up the
-// backslash, and the cursor stops in front of it, so the next token lands
-// on it.
+// token with the backslash again. The positioner removes the backslash
+// from the invalid token, and the cursor stops in front of it, so the next
+// token lands on it.
 type positioner struct {
 	tail string // The whitespace the stream holds after the text placed last.
 
 	src []rune
 	end int // The rune index where the last line of src ends, before its final line ending.
 
-	cursor   int // The rune index just past the text placed so far, at most the length of src.
+	cursor   int // The rune index immediately past the text placed so far, at most the length of src.
 	reliable bool
 
 	// The rune index the line and column count runs up to.
@@ -968,19 +986,22 @@ type positioner struct {
 
 // place moves tk to the rune where its text starts and advances the cursor
 // past the text of every line of its Origin, never past the end of the
-// source. A token without text sits where the next text starts, or at the
-// end of the last line when no text follows, and leaves the cursor where
-// it is. A token with text sits at the end of the last line too when the
-// source holds whitespace alone past the cursor. When the text follows the
-// cursor past whitespace alone, place gives tk the line breaks the lexer
-// dropped from that whitespace. A double-quoted scalar found in the source
-// moves the cursor past its closing quote instead. When no quote closes
-// it, the cursor moves past the last text of the source. When the lexer
-// cut it short, the cursor moves past its last text before the next token.
-// Such a scalar takes its Origin from the source when the lexer shortened
-// it. The invalid token of a scalar the lexer cut at the backslash of an
-// escape gives that backslash up to the token after it. It returns the
-// runes of the source the text of tk covers.
+// source. A token without text leaves the cursor where it is. It sits
+// where the next text starts, or at the end of the last line when the
+// source does not hold text past the cursor. A token with text sits at the
+// end of the last line too when the source holds whitespace alone past the
+// cursor. When the text follows the cursor past whitespace alone, place
+// gives tk the line breaks the lexer dropped from that whitespace. It
+// returns the runes of the source the text of tk covers.
+//
+// A double-quoted scalar found in the source moves the cursor past its
+// closing quote instead. When the scalar is unclosed, the cursor moves
+// past the last text of the source. When the lexer cut the scalar before
+// its closing quote, the cursor moves past its last text before the next
+// token. Such a scalar takes its Origin from the source when the lexer
+// shortened it. The invalid token of a scalar the lexer cut at the
+// backslash of an escape loses that backslash, so the token after it holds
+// the backslash alone.
 func (p *positioner) place(tk *token.Token) span {
 	var (
 		placed, found bool
@@ -1083,8 +1104,8 @@ func (p *positioner) place(tk *token.Token) span {
 }
 
 // doubleQuoted reports whether tk holds a double-quoted scalar: a token the
-// lexer read through its closing quote, or the invalid token it makes of a
-// scalar no quote closes. The lexer reads such a scalar to the end of the
+// lexer read through its closing quote, or the invalid token it makes of
+// an unclosed scalar. The lexer reads such a scalar to the end of the
 // source, so that invalid token ends the stream. See [cutQuoted] for the
 // invalid token of a scalar that has tokens after it.
 func doubleQuoted(tk *token.Token) bool {
@@ -1099,10 +1120,10 @@ func doubleQuoted(tk *token.Token) bool {
 }
 
 // cutQuoted reports whether tk is the invalid token the lexer makes of the
-// start of a double-quoted scalar it cut before the closing quote, and the
+// start of a double-quoted scalar it cut before the closing quote. The
 // tokens after tk hold the rest of the source. The lexer cuts a scalar at
 // a "---" or "..." line that follows it, and at an escape it rejects, such
-// as an unknown one or a "\u" escape it gives up on.
+// as an unknown one or a "\u" escape it abandons.
 func cutQuoted(tk *token.Token) bool {
 	return tk.Type == token.InvalidType &&
 		tk.Next != nil && tk.Next.Position != nil &&
@@ -1110,16 +1131,18 @@ func cutQuoted(tk *token.Token) bool {
 }
 
 // cutAtEscape reports whether tk is the invalid token the lexer makes of a
-// double-quoted scalar when it gives up on a "\u" or "\U" escape, such as
-// one the source ends too soon for. The lexer ends that token with the
-// escape's backslash and reads on from the backslash, so the token after
-// tk opens with it too. The text of tk starts at rune index start. An
-// escaped backslash also ends the text of tk, and the token after tk may
-// open with a backslash of its own, so cutAtEscape reads the source. The
-// backslash the lexer gives up on opens an escape there, and an escaped
-// one ends the escape the backslash in front of it opens. It finds the
-// text of tk in the source with [positioner.matchText], and it reports
-// false when the source does not hold the text of tk.
+// double-quoted scalar when it abandons a "\u" or "\U" escape. The lexer
+// abandons such an escape when, for example, the source ends too soon for
+// it. The lexer ends that token with the escape's backslash and reads on
+// from the backslash, so the token after tk opens with it too. The text of
+// tk starts at rune index start.
+//
+// An escaped backslash also ends the text of tk, and the token after tk
+// can open with a backslash of its own, so cutAtEscape reads the source.
+// The backslash the lexer abandons opens an escape there, and an escaped
+// backslash ends the escape that the backslash in front of it opens. It
+// finds the text of tk in the source with [positioner.matchText], and it
+// reports false when the source does not hold the text of tk.
 func (p *positioner) cutAtEscape(tk *token.Token, start int) bool {
 	if tk.Type != token.InvalidType || tk.Next == nil {
 		return false
@@ -1141,12 +1164,12 @@ func (p *positioner) cutAtEscape(tk *token.Token, start int) bool {
 // matchText finds the runes of text in the source in order from rune index
 // start and skips the whitespace in text. It steps over the code the lexer
 // drops for each "\x", "\u", and "\U" escape, so a rune of text never
-// matches a rune inside one. An escape the lexer gives up on, as
+// matches a rune inside one. An escape the lexer abandons, as
 // [positioner.givesUp] reports, keeps its code in the source. The second
-// backslash of a "\\" escape opens no escape. It returns the rune index
-// past the last rune it matched and any code it stepped over after that
-// rune, whether that rune is a backslash that opens an escape, and whether
-// the source holds text.
+// backslash of a "\\" escape does not open an escape. It returns the rune
+// index past the last rune it matched and any code it stepped over after
+// that rune. It also reports whether that rune is a backslash that opens
+// an escape, and whether the source holds text.
 func (p *positioner) matchText(text string, start int) (int, bool, bool) {
 	// Whether the rune of the text matched last opens an escape, and
 	// whether the escape keeps the rune after its backslash in the text.
@@ -1188,10 +1211,10 @@ func (p *positioner) matchText(text string, start int) (int, bool, bool) {
 	return i, opens, true
 }
 
-// dropBackslash takes the backslash that ends the text of tk off its
+// dropBackslash removes the backslash that ends the text of tk from its
 // Origin, so the token after tk holds it alone. The text of tk starts at
-// rune index start, and the cursor stands just past the backslash. The
-// whitespace in front of the backslash then ends the Origin, and the
+// rune index start, and the cursor stands immediately past the backslash.
+// The whitespace in front of the backslash then ends the Origin, and the
 // cursor moves back to the end of the text left.
 func (p *positioner) dropBackslash(tk *token.Token, start int) {
 	trail := len(strings.TrimRight(tk.Origin, " \t\r\n"))
@@ -1205,14 +1228,14 @@ func (p *positioner) dropBackslash(tk *token.Token, start int) {
 
 // restoreQuoted moves the cursor past the end of the double-quoted scalar
 // tk, whose opening quote sits at rune index start. The scalar ends with
-// its closing quote. The invalid token the lexer makes of a scalar no
-// quote closes runs to the end of the source, and it ends with the last
-// text of the source. The lexer drops the code of a "\x", "\u", or "\U"
-// escape from the Origin. When the source from the opening quote to the
-// end of the scalar differs from the text of the Origin, the Origin takes
-// the source's runes in place of its text and keeps the whitespace around
-// it. It reports whether it found the end, and a DoubleQuoteType token
-// that no quote closes leaves the cursor and the Origin as they are.
+// its closing quote. The invalid token the lexer makes of an unclosed
+// scalar runs to the end of the source, and it ends with the last text of
+// the source. The lexer drops the code of a "\x", "\u", or "\U" escape
+// from the Origin. The Origin takes the source's runes from the opening
+// quote to the end of the scalar in place of its text when the two
+// differ. It keeps the whitespace around its text. The result reports
+// whether restoreQuoted found the end. For an unclosed DoubleQuoteType
+// token, the cursor and the Origin stay as they are.
 func (p *positioner) restoreQuoted(tk *token.Token, start int) bool {
 	end, ok := p.closingQuote(start)
 	if !ok {
@@ -1239,22 +1262,23 @@ func (p *positioner) restoreQuoted(tk *token.Token, start int) bool {
 // restoreCut moves the cursor past the text of tk, the invalid token of a
 // double-quoted scalar the lexer cut before its closing quote, as
 // [cutQuoted] reports. The opening quote sits at rune index start. The
-// lexer drops the code of a "\x", "\u", or "\U" escape from the Origin, so
-// the source holds the text of the Origin in order with those codes and
-// whitespace between its runes. It finds the text of the Origin in the
+// lexer drops the code of a "\x", "\u", or "\U" escape from the Origin.
+// The source thus holds the text of the Origin in order, with those codes
+// and whitespace between its runes. It finds the text of the Origin in the
 // source with [positioner.matchText], which steps over each such code, so
 // a rune of the Origin never matches a rune inside one. An escape the
-// lexer gives up on keeps its code in the source for the token after tk.
+// lexer abandons keeps its code in the source for the token after tk.
+//
 // The scalar ends where the source first holds the text of the token after
 // tk past the text of the Origin, with only escape codes and whitespace in
 // between. An escape takes the runes [positioner.escapeWidth] counts
-// whatever they are, so its code may hold the closing quote or other runes
+// whatever they are, so its code can hold the closing quote or other runes
 // that are not hex digits. The Origin takes the source's runes up to there
 // in place of its text and keeps the whitespace around it. When the token
 // after tk opens with the backslash that ends tk, as
-// [positioner.cutAtEscape] reports, tk gives that backslash up and ends
-// with the whitespace in front of it, as [positioner.dropBackslash] leaves
-// it.
+// [positioner.cutAtEscape] reports, tk loses that backslash. It then ends
+// with the whitespace in front of the backslash, as
+// [positioner.dropBackslash] leaves it.
 //
 // The lexer puts the Offset of tk at the fault, where the token after tk
 // starts, so restoreCut takes delta from the token after tk. It reports
@@ -1327,10 +1351,10 @@ func (p *positioner) restoreCut(tk *token.Token, start int) bool {
 	return true
 }
 
-// closingQuote returns the rune index just past the quote that closes the
-// double-quoted scalar opening at rune index start, and whether one does.
-// It steps over each escape as the lexer reads it, so a quote inside an
-// escape does not close the scalar.
+// closingQuote returns the rune index immediately past the quote that
+// closes the double-quoted scalar opening at rune index start, and whether
+// one does. It steps over each escape as the lexer reads it, so a quote
+// inside an escape does not close the scalar.
 func (p *positioner) closingQuote(start int) (int, bool) {
 	for i := start + 1; i < len(p.src); i++ {
 		switch p.src[i] {
@@ -1345,12 +1369,16 @@ func (p *positioner) closingQuote(start int) (int, bool) {
 }
 
 // escapeWidth returns how many runes after the backslash at rune index i
-// the lexer reads as part of the escape. A "\x" escape takes the letter
-// and two hex digits when the source holds them, "\u" takes the letter and
-// four, "\U" the letter and eight, and any other escape takes the one rune
-// after the backslash. A "\u" escape of a high surrogate that a "\u"
-// escape of a low surrogate follows takes both, as the lexer reads the
-// pair as one escape.
+// the lexer reads as part of the escape:
+//
+//   - A "\x" escape takes the letter and two hex digits when the source
+//     holds them.
+//   - A "\u" escape takes the letter and four hex digits.
+//   - A "\U" escape takes the letter and eight hex digits.
+//   - Any other escape takes the one rune after the backslash.
+//
+// A "\u" escape of a high surrogate that a "\u" escape of a low surrogate
+// follows takes both, because the lexer reads the pair as one escape.
 func (p *positioner) escapeWidth(i int) int {
 	switch {
 	case i+1 >= len(p.src):
@@ -1382,11 +1410,11 @@ func (p *positioner) droppedWidth(i int) int {
 	return 0
 }
 
-// givesUp reports whether the lexer gives up on the escape at rune index
-// i, whose backslash then ends the invalid token it makes of the scalar.
-// It gives up on a "\u" or "\U" escape the source ends too soon for, and on
-// a "\u" escape of a high surrogate that no "\u" escape of a low surrogate
-// follows.
+// givesUp reports whether the lexer abandons the escape at rune index i.
+// The backslash of an abandoned escape ends the invalid token the lexer
+// makes of the scalar. The lexer abandons a "\u" or "\U" escape the source
+// ends too soon for. It also abandons a "\u" escape of a high surrogate
+// when a "\u" escape of a low surrogate does not follow it.
 func (p *positioner) givesUp(i int) bool {
 	switch {
 	case i+1 >= len(p.src):
@@ -1444,25 +1472,28 @@ func hexValue(rs []rune) int {
 // restoreGap gives tk the line breaks and indentation the lexer dropped
 // between the text placed last and the text of tk, which starts at rune
 // index at. The lexer drops them in front of a "?" or ":" indicator that
-// follows a flow collection, a quoted scalar, or a comment, and after a
-// double-quoted scalar that holds a tab it drops one line of a run of
-// blank lines. It also reads a "\r" and a "\n" that only spaces part as
+// follows a flow collection, a quoted scalar, or a comment. After a
+// double-quoted scalar that holds a tab, it drops one line of a run of
+// blank lines. It also reads a "\r" and a "\n" that spaces alone part as
 // one CRLF, so the stream holds one line break where the source holds
-// two. The line breaks the stream lacks go at the start of the Origin as
-// bare line endings, the way the lexer keeps the blank lines it does not
-// drop. Bare line endings keep tabs out of the Origin. The parser
-// trims spaces and line breaks from the start of a key's Origin and
-// rejects the key when a line break is left, so a tab in front of a line
-// break would make it reject the key. A space parts a bare "\r" from a
-// "\n" that would follow it, at either end of those line breaks or between
-// two of them, since together they would make one CRLF. [restoreWhitespace]
-// later moves the line breaks to the end of the Origin before, together
-// with the spaces and tabs of the source, when the two Origins hold
-// nothing else of the gap. In front of a ":" they stay where they are,
-// since the Origin before belongs to a key. When the lexer dropped every
-// line break in front of tk, the indentation of the line tk starts on goes
-// with them. An Origin stays as it is when the stream already holds every
-// line break of the source.
+// two.
+//
+// The line breaks the stream lacks go at the start of the Origin as bare
+// line endings, the way the lexer keeps the blank lines it does not drop.
+// Bare line endings keep tabs out of the Origin. The parser trims spaces
+// and line breaks from the start of a key's Origin and rejects the key
+// when a line break is left. A tab in front of a line break therefore
+// makes the parser reject the key. A "\r" directly in front of a "\n"
+// makes one CRLF. So a space parts a bare "\r" from a "\n" after it, at
+// either end of those line breaks or between two of them.
+//
+// [restoreWhitespace] later moves the line breaks to the end of the Origin
+// before, together with the spaces and tabs of the source. It does so when
+// the two Origins do not hold any other part of the gap. In front of a ":"
+// they stay where they are, because the Origin before belongs to a key.
+// When the lexer dropped every line break in front of tk, the indentation
+// of the line tk starts on goes with them. An Origin stays as it is when
+// the stream already holds every line break of the source.
 func (p *positioner) restoreGap(tk *token.Token, at int) {
 	gap := string(p.src[p.cursor:at])
 	lead := tk.Origin[:len(tk.Origin)-len(strings.TrimLeft(tk.Origin, " \t\r\n"))]
@@ -1517,11 +1548,11 @@ func (p *positioner) restoreGap(tk *token.Token, at int) {
 	tk.Origin = breaks + tk.Origin
 }
 
-// cutLineBreaks returns the first n line breaks of s joined together,
-// dropping the spaces and tabs between them, and the rest of s after the
-// last of them. A CRLF counts as one line break. A bare "\r" and a "\n"
-// that follows it on the next line keep one space between them, since
-// together they would make one CRLF.
+// cutLineBreaks returns the first n line breaks of s, joined without the
+// spaces and tabs between them, and the rest of s after the last of them.
+// A CRLF counts as one line break. A bare "\r" and a "\n" that follows it
+// on the next line keep one space between them, because without the space
+// the two form one CRLF.
 func cutLineBreaks(s string, n int) (string, string) {
 	var sb strings.Builder
 
@@ -1554,7 +1585,7 @@ func cutLineBreaks(s string, n int) (string, string) {
 // cutWhitespace returns gap without the whitespace ws the stream holds
 // for its start, and reports whether gap opens with ws. The lexer drops
 // the spaces and tabs that end a line of text and collapses a blank line
-// of spaces into a bare line ending, so ws may lack some spaces and tabs
+// of spaces into a bare line ending. So ws might lack some spaces and tabs
 // of gap, but never a line break. A "\r" that ends ws leaves the "\n"
 // of a CRLF in gap, where the lexer cut the CRLF between two tokens. A
 // CRLF in ws also matches a "\r" and a "\n" that spaces part in gap,
@@ -1583,13 +1614,14 @@ func cutWhitespace(gap, ws string) (string, bool) {
 // starts, and reports whether the source holds text there. It asks
 // [positioner.pick] for the whole text first. A double-quoted scalar
 // whose Origin the lexer shortened at an escape holds its text verbatim
-// only through the first backslash, so pick tries that prefix next.
-// Failing both, the text sits at the first place on the line of the next
-// text that holds it, past text the lexer dropped in front of the token,
-// such as the ":" after a tab used as indentation. The search stops at the
-// end of that line, so a token the lexer rewrote does not jump to text
-// further on. When the line does not hold the text, the token sits where
-// the next text starts, and the cursor is unreliable from there on.
+// only through the first backslash, so pick tries that prefix next. When
+// both fail, the text sits at the first place on the line of the next text
+// that holds it. That place can lie past text the lexer dropped in front of
+// the token, such as the ":" after a tab used as indentation. The search
+// stops at the end of that line, so a token the lexer rewrote does not
+// jump to text further on. When the line does not hold the text, the token
+// sits where the next text starts, and the cursor is unreliable from there
+// on.
 func (p *positioner) locate(tk *token.Token, text []rune) (int, bool) {
 	if at, ok := p.pick(tk, text); ok {
 		return at, true
@@ -1620,13 +1652,13 @@ func (p *positioner) locate(tk *token.Token, text []rune) (int, bool) {
 
 // pick returns the rune index where text, the first text line of tk or
 // the start of it, starts, and reports whether one of the candidates
-// holds it. It prefers the first rune after the cursor that is not
-// whitespace while the cursor is reliable, and the lexer's Offset shifted
-// by delta otherwise, and takes whichever of the two holds the text when
-// only one does. When neither does, delta may come from a token the lexer
-// misplaced, such as a scalar it cut at an invalid escape, so pick tries
-// the lexer's Offset as it stands. When no candidate holds the text, pick
-// leaves the positioner as it is.
+// holds it. While the cursor is reliable, pick prefers the first rune
+// after the cursor that is not whitespace. Otherwise it prefers the
+// lexer's Offset shifted by delta. When only one of the two holds the
+// text, pick takes that one. When neither holds it, delta might come from
+// a token the lexer misplaced, such as a scalar it cut at an invalid
+// escape. So pick tries the lexer's Offset as it stands. When none of the
+// candidates holds the text, pick leaves the positioner as it is.
 func (p *positioner) pick(tk *token.Token, text []rune) (int, bool) {
 	b := p.skipSpace()
 	foundB := p.hasText(b, text)
@@ -1655,8 +1687,8 @@ func (p *positioner) pick(tk *token.Token, text []rune) (int, bool) {
 	return at, true
 }
 
-// anchor marks the cursor reliable once the text of tk sits at rune index
-// at, and takes delta from the lexer's Offset for it.
+// anchor records that the text of tk sits at rune index at. It marks the
+// cursor reliable and takes delta from the lexer's Offset for tk.
 func (p *positioner) anchor(tk *token.Token, at int) {
 	p.reliable = true
 
@@ -1666,9 +1698,9 @@ func (p *positioner) anchor(tk *token.Token, at int) {
 }
 
 // setPosition writes the line, column, and offset of the rune at index at
-// into tk, counting the runes between the last position written and it.
-// Each token starts at or past the start of the token before it, and at
-// never passes the end of the source, so the count only moves forward.
+// into tk. It counts the runes between the last position written and that
+// rune. Each token starts at or past the start of the token before it, and
+// at never passes the end of the source, so the count moves only forward.
 // Index at never names the "\n" of a CRLF, so the runes counted never
 // split one.
 func (p *positioner) setPosition(tk *token.Token, at int) {
@@ -1704,52 +1736,58 @@ func (p *positioner) hasText(at int, text []rune) bool {
 }
 
 // TrimLineEnding returns s without its trailing line ending: "\n", "\r\n",
-// or a bare "\r". The go-yaml lexer splits CRLF endings across tokens, so a
-// token may end with the "\r" alone while the "\n" opens the next one.
+// or a bare "\r". The go-yaml lexer can split a CRLF ending across two
+// tokens. One token then ends with the "\r" alone, and the "\n" opens the
+// next one.
 func TrimLineEnding(s string) string {
 	return strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r")
 }
 
-// ResetPositions clones tks and shifts the positions of the clones so that
-// a stream cut from a longer one, such as the tokens of one document from
-// [SplitDocuments], counts its lines from 1 as [Tokenize] does. Every token
-// moves by the same number of lines and the same offset distance, and
-// tokens on the first line also move by the same number of columns. A
+// ResetPositions clones tks and shifts the positions of the clones. A
+// stream cut from a longer one, such as the tokens of one document from
+// [SplitDocuments], then counts its lines from 1 as [Tokenize] does. Every
+// token moves by the same number of lines and the same offset distance,
+// and tokens on the first line also move by the same number of columns. A
 // stream whose text starts at line 1, column 1, offset 1, such as a whole
 // stream from [Tokenize], comes back as clones with the same positions.
 // The exception is a stream whose first text the lexer swallowed, such as
 // a "-" or ":" after a tab that indents the first line (see [Tokenize]).
 // ResetPositions counts from the joined Origins, which lack that text, so
-// the clones of such a stream can move. The clones keep the invariant of
-// [Tokenize], so Line, Column, and Offset name the rune where the token's
-// text starts, and the Origin may open with whitespace and line endings
-// before it.
+// the clones of such a stream can move.
+//
+// The clones keep the invariant of [Tokenize]. Line, Column, and Offset
+// name the rune where the token's text starts, and the Origin can open
+// with whitespace and line endings before it.
 //
 // The first token that has a non-nil position and holds something other
-// than whitespace anchors the shift, and a fresh tokenize places it after
-// all the whitespace and line breaks ahead of its text. Earlier tokens can
-// hold some of that whitespace alone, such as the invalid token the lexer
-// emits for a tab that indents the line after "...". The anchor's own
-// Origin can open with the rest, such as the line break that ends a
-// preceding "..." line. The anchor lands at line 1, column 1, offset 1,
-// where the lexer places the first token of a fresh stream, only when no
-// whitespace comes before its text. A token whose Origin is empty, such as
-// the empty content of a block scalar, shares the position of the text
-// after it, so it anchors the shift only when no token of the stream holds
-// text. The tokens of a stream carrying whitespace alone move to line 1,
-// column 1, offset 1, where [Tokenize] places the token it makes of such
+// than whitespace anchors the shift. A fresh tokenize places that token
+// after all the whitespace and line breaks ahead of its text. Earlier
+// tokens can hold some of that whitespace alone, such as the invalid token
+// the lexer emits for a tab that indents the line after "...". The
+// anchor's own Origin can open with the rest, such as the line break that
+// ends a preceding "..." line.
+//
+// The anchor lands at line 1, column 1, offset 1, where the lexer places
+// the first token of a fresh stream, only when its text opens the joined
+// Origins. A token whose Origin is empty, such as the empty content of a
+// block scalar, shares the position of the text after it. It therefore
+// anchors the shift only when none of the tokens of the stream holds text.
+// The tokens of a stream that carries whitespace alone move to line 1,
+// column 1, offset 1. There [Tokenize] places the token it makes of such
 // text, ahead of the whitespace rather than inside it.
 //
 // A stream cut before the end of a longer one can end with tokens without
 // text, such as the empty content of a block scalar that the next
 // document's header closes. The last token of such a stream still links to
-// a token after it. No text of the clones follows them, so they move to
-// the end of the last line of the joined Origins, before its final line
-// ending, where [Tokenize] places them, rather than by the common shift.
+// a token after it. These tokens follow the last text of the clones, so
+// they do not take the common shift. They move to the end of the last line
+// of the joined Origins, before its final line ending, where [Tokenize]
+// places them.
 //
-// The clones link to each other through Next and Prev and to nothing outside
-// the result, so the stream stands alone. Tokens with nil positions come
-// back as clones with nil positions, and ResetPositions drops nil tokens.
+// The clones link to each other through Next and Prev and not to any token
+// outside the result, so the stream stands alone. Tokens with nil
+// positions come back as clones with nil positions, and ResetPositions
+// drops nil tokens.
 func ResetPositions(tks token.Tokens) token.Tokens {
 	if len(tks) == 0 {
 		return tks
@@ -1850,13 +1888,14 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 	return result
 }
 
-// endTrailing moves each token of tks that has a position and follows the
-// last token holding text to the end of the last line of the joined
-// Origins, before its final line ending. That is where [Tokenize] places a
-// token without text that no text follows. The positions of tks count from
-// line 1, column 1, offset 1 at the start of the joined Origins. A stream
-// without a token holding text keeps its positions, which [ResetPositions]
-// has already moved to line 1, column 1, offset 1.
+// endTrailing moves the tokens of tks that have a position and follow the
+// last token that holds text. It moves them to the end of the last line of
+// the joined Origins, before its final line ending. That is where
+// [Tokenize] places a token without text after the last text of a source.
+// The positions of tks count from line 1, column 1, offset 1 at the start
+// of the joined Origins. A stream without a token that holds text keeps
+// its positions, which [ResetPositions] has already moved to line 1,
+// column 1, offset 1.
 func endTrailing(tks token.Tokens) {
 	last := -1
 
@@ -1894,9 +1933,9 @@ func endTrailing(tks token.Tokens) {
 // start of it. A document end token ('...') closes the current document and
 // belongs to the end of it, so content that follows without a header forms
 // a new document. These are the boundaries the go-yaml parser uses for
-// well-formed streams. The parser may produce fewer documents than this
-// function yields, for example when a "..." marker opens the stream, so
-// pair the two by token offset rather than by index.
+// well-formed streams. The parser might produce fewer documents than
+// SplitDocuments yields, for example when a "..." marker opens the stream.
+// Pair the two by token offset rather than by index.
 //
 // Each returned slice holds the tokens of one document in their original
 // order and with their original positions. The tokens are the caller's, not
