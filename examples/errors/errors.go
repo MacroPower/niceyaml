@@ -70,7 +70,8 @@ func main() {
 	// A detail is no problem of its own, so the walk yields two rows. A
 	// problem holds the name of its source and its message as written,
 	// and either can hold a control character, such as a line feed.
-	// Control draws each as its picture, so a problem takes one row.
+	// Control replaces each control character with one visible rune, so a
+	// problem takes one row.
 	for problem := range niceyaml.Problems(err) {
 		pos, _ := problem.Position()
 		path, _ := problem.Path()

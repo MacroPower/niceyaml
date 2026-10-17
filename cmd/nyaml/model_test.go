@@ -558,9 +558,9 @@ func TestTitleLinePosition(t *testing.T) {
 func TestTextLineEscapesRevisionName(t *testing.T) {
 	t.Parallel()
 
-	// A glob match takes its name from the file system, so a control
-	// character in it reaches the status bar as a visible picture rather
-	// than as a byte the terminal acts on.
+	// A glob match takes its name from the file system. A control character
+	// in it thus reaches the status bar as a visible rune rather than as a
+	// byte the terminal acts on.
 	tcs := map[string]struct {
 		name string
 		want string

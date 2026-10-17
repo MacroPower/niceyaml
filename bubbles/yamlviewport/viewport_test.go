@@ -6420,7 +6420,7 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 			},
 			wantRow: -1,
 		},
-		// The renderer escapes a control character to a picture, so the row
+		// The renderer escapes a control character to one rune, so the row
 		// the match lands on is the same as with a printable character in its
 		// place. Walking the raw content instead stops at the control
 		// character and centers the last row of the line.

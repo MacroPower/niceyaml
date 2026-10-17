@@ -94,7 +94,7 @@ func (m Mark) textKind() kind.Kind {
 //
 // Each tab in a message becomes four spaces, as [escape.Tabs] returns it.
 // A renderer draws the other control characters of an annotation as
-// their pictures.
+// [escape.Control] draws them.
 //
 // A line keeps each mark one time. Each repeat of a mark, in one call or
 // across several, leaves the view as the first copy left it. A message

@@ -1356,6 +1356,11 @@ func TestRegistry_Load_Deprecations(t *testing.T) {
 		`     |   ^^^^^^^^^^^^^ warning: deprecated field "legacyPricing"`,
 		"   8 | ---",
 		"   9 | apiVersion: cafe.jacobcolvin.com/v1",
+		"     | ...",
+		"  13 | spec:",
+		"  14 |   price: 65",
+		"  15 |   legacyPricing: true",
+		`     |   ^^^^^^^^^^^^^ warning: deprecated field "legacyPricing"`,
 	),
 		niceyaml.FormatError(set.Warnings()))
 

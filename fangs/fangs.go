@@ -116,8 +116,8 @@ func WithExcerptOptions(opts ...niceyaml.ExcerptOption) Option {
 // [printer.Printer.PrintReport] renders for the [niceyaml.ErrorReport] of
 // err. The handler builds that report with the options that
 // [WithExcerptOptions] sets. The output starts with the message as a tree,
-// with the context its wrappers added in front and a connector before each
-// error below another. The excerpt of each
+// with the context its wrappers added in front of each message and a
+// connector before each error below another. The excerpt of each
 // [*go.jacobcolvin.com/niceyaml.SourceError] in the error's tree follows,
 // so a joined error annotates each failure it holds.
 //

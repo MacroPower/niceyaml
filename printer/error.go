@@ -23,12 +23,15 @@ const errorConnectorWidth = 4
 // in front of each error below another. Each excerpt keeps the context
 // lines that opts set on either side of each marked line, as
 // [niceyaml.ExcerptOption] describes. It draws a caret run under each
-// location.
+// location. A source whose every mark repeats a warning that another
+// excerpt marks does not get an excerpt, as [niceyaml.ErrorReport.Tree]
+// describes.
 //
 // PrintError draws the tree and the excerpts with the styles of the
-// printer and fits them to the width [WithWrapWidth] sets. A nil err
-// prints as "". A program configures one printer and prints its errors
-// through it:
+// printer and fits them to the width [WithWrapWidth] sets. The output
+// ends with its last row and no line feed, as [Printer.Print] describes. A
+// nil err prints as "". A program configures one printer and prints its
+// errors through it:
 //
 //	p := printer.New(printer.WithWrapWidth(width))
 //	lipgloss.Fprintln(os.Stderr, p.PrintError(err, niceyaml.WithContextLines(3)))
@@ -48,8 +51,8 @@ const errorConnectorWidth = 4
 //	└── 22:11: $.spec.hours.days: expected "array", got "string"
 //
 // An error without errors below it prints as a tree of one node that holds
-// its whole message. The context a wrapper added thus stays in front of
-// the position.
+// its whole message. The context that a wrapper around a binding added
+// follows the position and the path, as [niceyaml.NewErrorTree] describes.
 //
 // # Excerpts
 //
@@ -107,11 +110,13 @@ const errorConnectorWidth = 4
 // # Control Characters
 //
 // In every message of the tree, the root's included, and in each
-// "no excerpt:" line, PrintError draws control characters as their
-// pictures. An excerpt draws them the same way. A line feed in a message
-// of the tree starts a new row instead. A tab becomes four spaces in the
-// tree, in a "no excerpt:" line, and in the message an excerpt carries
-// beside its carets.
+// "no excerpt:" line, PrintError draws each control character as
+// [go.jacobcolvin.com/niceyaml/escape.Control] draws it. A C0 control and
+// DEL show as their Unicode Control Pictures, and a C1 control shows as
+// U+FFFD. An excerpt draws them the same way. A line feed in a message of
+// the tree starts a new row instead. A tab becomes four spaces in the tree,
+// in a "no excerpt:" line, and in the message an excerpt carries beside its
+// carets.
 //
 // # Wrapping
 //
@@ -147,7 +152,8 @@ func (p *Printer) PrintError(err error, opts ...niceyaml.ExcerptOption) string {
 // printer and puts a blank line between the parts. A program that builds
 // a report once with [niceyaml.NewErrorReport], such as one that reads
 // its parts or also renders it as plain text, prints that same report
-// with PrintReport. The zero ErrorReport prints as "".
+// with PrintReport. The output ends with its last row and no line feed, as
+// [Printer.Print] describes. The zero ErrorReport prints as "".
 func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 	parts := make([]string, 0, 1+len(rep.Excerpts)+len(rep.Unresolved))
 
@@ -159,8 +165,8 @@ func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 		part := p.Print(excerpt.View)
 
 		// The name is the caller's text, so its control characters render
-		// as pictures like those of the tree. It sits outside the
-		// container, so it wraps to the whole width.
+		// as those of the tree do. It sits outside the container, so it
+		// wraps to the whole width.
 		if excerpt.Named {
 			name := p.wrapTo(escape.Line(excerpt.Name), p.textWidth(0))
 			part = strings.Join(name, "\n") + "\n" + part
@@ -171,9 +177,9 @@ func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 
 	for _, bound := range rep.Unresolved {
 		// The reason names the path that did not resolve, which a key of
-		// the document spells, so its control characters render as
-		// pictures like those of the tree. A tab in the key becomes four
-		// spaces, as it does in the tree.
+		// the document spells, so its control characters render as those
+		// of the tree do. A tab in the key becomes four spaces, as it does
+		// in the tree.
 		text := escape.Line("no excerpt: " + bound.Unresolved().Error())
 
 		parts = append(parts, strings.Join(p.wrapTo(text, p.textWidth(0)), "\n"))
@@ -266,14 +272,13 @@ func (p *Printer) errorRows(t niceyaml.ErrorTree, depth int) []string {
 // position.
 const warningLabel = "warning:"
 
-// errorText returns the rows of one message of the tree at depth
-// connectors from the left edge, wrapped to the width that the
-// connectors leave. [escape.Message] lays the text out first. It replaces
-// each tab with four spaces, such as the tab in front of each suggestion
-// that Cobra lists. It draws the other control characters as their
-// pictures. A line break in the message stays a line break, because a
-// wrapper around a joined error keeps the breaks between its branches in
-// its own text.
+// errorText returns the rows of one message of the tree at depth connectors
+// from the left edge, wrapped to the width that the connectors leave.
+// [escape.Message] lays the text out first. It replaces each tab with four
+// spaces, such as the tab in front of each suggestion that Cobra lists. It
+// draws the other control characters as [escape.Control] draws them. A line
+// break in the message stays a line break, because a wrapper around a
+// joined error keeps the breaks between its branches in its own text.
 func (p *Printer) errorText(text string, depth int) []string {
 	return p.wrapTo(escape.Message(text), p.textWidth(depth*errorConnectorWidth))
 }

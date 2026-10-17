@@ -324,10 +324,12 @@ func (ctx AnnotationContext) ColWidth(col int) int {
 // is the text of a line without its line ending.
 //
 // The width is that of the row the printer renders. In that row, a
-// control character shows as a one-cell picture. A grapheme cluster, such
-// as a letter with a combining mark or an emoji ZWJ sequence, takes its
-// display width once. A column inside a cluster does not have a cell of
-// its own, so it measures up to the start of its cluster.
+// control character shows as the one-cell rune that
+// [go.jacobcolvin.com/niceyaml/escape.Control] draws for it. A grapheme
+// cluster, such as a letter with a combining mark or an emoji ZWJ
+// sequence, takes its display width once. A column inside a cluster does
+// not have a cell of its own, so it measures up to the start of its
+// cluster.
 //
 // ColWidth measures the content alone. A viewer that scrolls horizontally
 // asks [Layout.CellOf] for the cell of a column instead, because that
@@ -390,7 +392,8 @@ type AnnotationRow struct {
 	Marker string
 
 	// Text is the body of the row. A newline in it starts a new row. Every
-	// other control character renders as its picture, so an escape
+	// other control character renders as
+	// [go.jacobcolvin.com/niceyaml/escape.Control] draws it, so an escape
 	// sequence in a message shows as text rather than styling the output.
 	Text string
 
@@ -469,8 +472,9 @@ func NoAnnotation(AnnotationContext) []AnnotationRow {
 // run. Apart from that single caret, a space the wrap drops, at a break
 // or at the end of the line, does not get a caret.
 //
-// Every control character in an annotation renders as its picture, so a
-// newline does not start a row.
+// Every control character in an annotation renders as
+// [go.jacobcolvin.com/niceyaml/escape.Control] draws it, so a newline does
+// not start a row.
 func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 	if ctx.Placement != line.Below {
 		// Filter the annotations rather than their contents, so the column
@@ -837,6 +841,9 @@ func (p *Printer) Style(s kind.Kind) lipgloss.Style {
 // each row its styled annotations take. [Printer.Layout] counts the same
 // rows. To print part of a document, pass the view [line.View.Slice]
 // returns. An empty view renders as the container around one empty row.
+// The output ends with its last row and no line feed, as
+// [line.View.String] does. A program that writes it into a file or a
+// fenced block adds that line feed itself.
 //
 // A line the view clips, as a view from [line.View.Clip] does, renders the
 // windows [line.View.Windows] returns. A "..." in [kind.UISeparator] takes
@@ -1435,9 +1442,9 @@ func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Pl
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
 func (p *Printer) renderAnnotationRow(row AnnotationRow, kindStyle lipgloss.Style, pad, gutterWidth int) []string {
 	// The printer escapes the text, so a control character in a message
-	// shows as its picture and the wrap measures the cells the terminal
-	// shows. The escape keeps each newline, and the wrap starts a new row
-	// at each one.
+	// shows as the rune that escape.Control draws for it, and the wrap
+	// measures the cells the terminal shows. The escape keeps each newline,
+	// and the wrap starts a new row at each one.
 	marker := escape.Control(row.Marker)
 	mark := strings.TrimRight(marker, " ")
 	padding := strings.Repeat(" ", pad)

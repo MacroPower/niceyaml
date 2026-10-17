@@ -1102,9 +1102,9 @@ func TestPrinter_WordWrap(t *testing.T) {
 			rows:  map[int]int{10: 1, 11: 1, 12: 2, 13: 2},
 		},
 
-		// The printer escapes each control character to a one rune picture,
-		// so the escaped text keeps one rune per source column and the wrap
-		// falls at the same column in both.
+		// The printer escapes each control character to one rune, so the
+		// escaped text keeps one rune per source column and the wrap falls
+		// at the same column in both.
 		"tabs and control characters keep columns aligned": {
 			input: "k: \"\tx\x1by zz ww\"",
 			width: 10,
@@ -4717,9 +4717,9 @@ func rowLetterGutter(ctx printer.GutterContext) string {
 func TestColWidth(t *testing.T) {
 	t.Parallel()
 
-	// The width is that of the rendered row. A control character shows as
-	// a one-cell picture, a wide rune takes two cells, and every rune of a
-	// grapheme cluster after its first renders within the first. An
+	// The width is that of the rendered row. A control character shows in
+	// one cell, a wide rune takes two cells, and every rune of a grapheme
+	// cluster after its first renders within the first. An
 	// AnnotationContext measures its content the same way.
 	tcs := map[string]struct {
 		content string

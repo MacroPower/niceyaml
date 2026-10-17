@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"iter"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -100,6 +102,23 @@ func (e sparseJoinError) Error() string {
 // Unwrap returns the branches, nil ones included.
 func (e sparseJoinError) Unwrap() []error {
 	return e.errs
+}
+
+// rewrittenError wraps err with a message of its own that does not hold
+// the message of err.
+type rewrittenError struct {
+	err error
+	msg string
+}
+
+// Error returns the message of the wrapper alone.
+func (e rewrittenError) Error() string {
+	return e.msg
+}
+
+// Unwrap returns the error the wrapper wraps.
+func (e rewrittenError) Unwrap() error {
+	return e.err
 }
 
 // violationsError is a multi-error of its own type, as a validator might
@@ -477,6 +496,7 @@ func TestErrorTree_New(t *testing.T) {
 	source := errorTreeSource()
 	other := niceyaml.NewSourceFromString("c: 3\n", niceyaml.WithName("g.yaml"))
 	wide := niceyaml.NewSourceFromString("a: hello world\nb: 2\n", niceyaml.WithName("f.yaml"))
+	second := yamltest.Documents(t, niceyaml.NewSourceFromString("a: 1\n---\na: 1\nb: 2\n", niceyaml.WithName("m.yaml")), 2)[1]
 
 	badA, badB, badC := badKeyError("a"), badKeyError("b"), badKeyError("c")
 
@@ -557,7 +577,7 @@ func TestErrorTree_New(t *testing.T) {
 				fmt.Errorf("ctx: %w", yamltest.Bind(t, source, badA())),
 			))),
 			want: textNode("f.yaml: outer",
-				textNode("ctx: f.yaml:1:4: $.a: bad a"),
+				textNode("1:4: $.a: ctx: bad a"),
 			),
 		},
 		"child wrapping a binding in Errors alone reads as the binding": {
@@ -585,11 +605,11 @@ func TestErrorTree_New(t *testing.T) {
 				textNode("2:4: $.b: bad b"),
 			),
 		},
-		"wrapper context stays in front of the root": {
+		"wrapper context reads as a wrapper inside the binding": {
 			err: fmt.Errorf("document 0: %w", yamltest.Bind(t, source,
 				niceyaml.NewSummary("2 problems", badA(), badB()),
 			)),
-			want: textNode("document 0: f.yaml: 2 problems",
+			want: textNode("f.yaml: document 0: 2 problems",
 				textNode("1:4: $.a: bad a"),
 				textNode("2:4: $.b: bad b"),
 			),
@@ -630,8 +650,39 @@ func TestErrorTree_New(t *testing.T) {
 			err: yamltest.Bind(t, source, fmt.Errorf("outer: %w",
 				yamltest.Bind(t, other, niceyaml.NewError("inner", niceyaml.WithDetails(badC()))),
 			)),
-			want: textNode("outer: g.yaml: inner",
+			want: textNode("g.yaml: outer: inner",
 				textNode("1:4: $.c: bad c"),
+			),
+		},
+		"located error above a binding without a location gives it the location": {
+			err: yamltest.Bind(t, source, niceyaml.Invalid(
+				yamltest.Bind(t, source, errors.New("inner")),
+				niceyaml.AtPath(paths.Current().Child("a")),
+			)),
+			want: textNode("f.yaml:1:4: $.a: inner"),
+		},
+		"located error above a binding whose location did not resolve gives it the location": {
+			err: yamltest.Bind(t, source, niceyaml.Locate(
+				yamltest.Bind(t, source, niceyaml.NewError("far", niceyaml.AtPosition(position.New(9, 0)))),
+				niceyaml.AtPath(paths.Current().Child("a")),
+			)),
+			want: textNode("f.yaml:1:4: $.a: far"),
+		},
+		"located error above a located binding of another source keeps its own location": {
+			err: yamltest.Bind(t, source, niceyaml.Invalid(
+				yamltest.Bind(t, other, badC()),
+				niceyaml.AtPath(paths.Current().Child("a")),
+			)),
+			want: textNode("f.yaml:1:4: $.a: g.yaml:1:4: $.c: bad c"),
+		},
+		"located error above a located binding keeps the inner location": {
+			err: yamltest.Bind(t, source, niceyaml.Locate(
+				yamltest.Bind(t, source, badB()),
+				niceyaml.AtPath(paths.Current().Child("a")),
+				niceyaml.WithDetails(niceyaml.NewError("see a", niceyaml.AtPath(paths.Current().Child("a")))),
+			)),
+			want: textNode("f.yaml:2:4: $.b: bad b",
+				textNode("1:4: $.a: see a"),
 			),
 		},
 		"located error above an inner binding positions its own nested errors": {
@@ -821,6 +872,53 @@ func TestErrorTree_New(t *testing.T) {
 			want: textNode("f.yaml: ctx:",
 				textNode("1:4: $.a: bad a"),
 				textNode("2:4: $.b: bad b"),
+			),
+		},
+		"wrapper around a join of bindings at the root names its source": {
+			// The rows below the wrapper leave out the name, so the root
+			// names it.
+			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", errors.Join(
+				yamltest.Bind(t, source, badA()),
+				yamltest.Bind(t, source, badB()),
+			))),
+			want: textNode("f.yaml: ctx:",
+				textNode("1:4: $.a: bad a"),
+				textNode("2:4: $.b: bad b"),
+			),
+		},
+		"wrapper around a join of bindings in a later document names the document": {
+			err: second.Bind(fmt.Errorf("ctx: %w", errors.Join(second.Bind(badA()), second.Bind(badB())))),
+			want: textNode("m.yaml: document 2: ctx:",
+				textNode("3:4: $.a: bad a"),
+				textNode("4:4: $.b: bad b"),
+			),
+		},
+		"wrapper around a bound join in a bound join names its source": {
+			// The rows below the wrapper leave out the name, so the row of
+			// the wrapper names it.
+			err: yamltest.Bind(t, source, errors.Join(
+				errA,
+				fmt.Errorf("ctx: %w", yamltest.Bind(t, source, errors.Join(badB(), badA()))),
+			)),
+			want: textForest(
+				textNode("f.yaml: first"),
+				textNode("f.yaml: ctx:",
+					textNode("1:4: $.a: bad a"),
+					textNode("2:4: $.b: bad b"),
+				),
+			),
+		},
+		"wrapper around a bound join of another source names that source": {
+			err: yamltest.Bind(t, source, errors.Join(
+				badA(),
+				fmt.Errorf("ctx: %w", yamltest.Bind(t, other, errors.Join(badC(), errB))),
+			)),
+			want: textForest(
+				textNode("f.yaml:1:4: $.a: bad a"),
+				textNode("g.yaml: ctx:",
+					textNode("1:4: $.c: bad c"),
+					textNode("second"),
+				),
 			),
 		},
 		"bound join that leads with another source names the root": {
@@ -1182,7 +1280,7 @@ func TestErrorTree_Bound(t *testing.T) {
 				bound := bind(t, badA())
 				err := fmt.Errorf("load: %w", bound)
 
-				return tree{err: err, want: []node{{text: "load: f.yaml:1:4: $.a: bad a", err: err, bound: bound}}}
+				return tree{err: err, want: []node{{text: "f.yaml:1:4: $.a: load: bad a", err: err, bound: bound}}}
 			},
 		},
 		"children of a binding": {
@@ -1234,11 +1332,97 @@ func TestErrorTree_Bound(t *testing.T) {
 			build: func(t *testing.T) tree {
 				t.Helper()
 
+				// The binding resolved its location already, so the node
+				// reports the binding, and the location of the Error does
+				// not show.
+				bound := bind(t, badA())
+				err := niceyaml.Invalid(bound, niceyaml.AtPath(paths.Current().Child("b")))
+
+				return tree{err: err, want: []node{{text: "f.yaml:1:4: $.a: bad a", err: err, bound: bound}}}
+			},
+		},
+		"located Error above a binding without a location": {
+			build: func(t *testing.T) tree {
+				t.Helper()
+
 				// No source resolved the location of the Error, so the node
 				// has no binding to report it through.
-				err := niceyaml.Invalid(bind(t, badA()), niceyaml.AtPath(paths.Current().Child("b")))
+				err := niceyaml.Invalid(bind(t, errors.New("bad")), niceyaml.AtPath(paths.Current().Child("b")))
 
-				return tree{err: err, want: []node{{text: "@.b: f.yaml:1:4: $.a: bad a", err: err}}}
+				return tree{err: err, want: []node{{text: "@.b: f.yaml: bad", err: err}}}
+			},
+		},
+		"located Error with the path of a binding whose path did not resolve": {
+			build: func(t *testing.T) tree {
+				t.Helper()
+
+				// The row of the binding shows the path of the Error
+				// already, so the node reads as the binding.
+				far := paths.Doc().Child("a").Child("far")
+				bound := bind(t, niceyaml.NewError("far", niceyaml.AtPath(far)))
+				err := niceyaml.Invalid(bound, niceyaml.AtPath(far))
+
+				return tree{err: err, want: []node{{text: "f.yaml: $.a.far: far", err: err, bound: bound}}}
+			},
+		},
+		"located Errors with the path of a binding whose path did not resolve": {
+			build: func(t *testing.T) tree {
+				t.Helper()
+
+				// A helper and its caller both locate the binding at its
+				// path, so the node reads as the binding.
+				far := paths.Doc().Child("a").Child("far")
+				bound := bind(t, niceyaml.NewError("far", niceyaml.AtPath(far)))
+				err := niceyaml.Locate(niceyaml.Locate(bound, niceyaml.AtPath(far)), niceyaml.AtPath(far))
+
+				return tree{err: err, want: []node{{text: "f.yaml: $.a.far: far", err: err, bound: bound}}}
+			},
+		},
+		"located Error around a wrapper of a located Error with the path of a binding": {
+			build: func(t *testing.T) tree {
+				t.Helper()
+
+				// The text of the wrapper follows the path of the binding, as
+				// it does after the bind.
+				far := paths.Doc().Child("a").Child("far")
+				bound := bind(t, niceyaml.NewError("far", niceyaml.AtPath(far)))
+				err := niceyaml.Locate(
+					fmt.Errorf("check: %w", niceyaml.Locate(bound, niceyaml.AtPath(far))),
+					niceyaml.AtPath(far),
+				)
+
+				return tree{err: err, want: []node{{text: "f.yaml: $.a.far: check: far", err: err, bound: bound}}}
+			},
+		},
+		"located Error with the path of a binding above one at its parent": {
+			build: func(t *testing.T) tree {
+				t.Helper()
+
+				// A bind takes the location of the outer Error, so the
+				// location of the inner one does not show before the bind
+				// either.
+				far := paths.Doc().Child("a").Child("far")
+				bound := bind(t, niceyaml.NewError("far", niceyaml.AtPath(far)))
+				err := niceyaml.Locate(
+					niceyaml.Locate(bound, niceyaml.AtPath(paths.Doc().Child("a"))),
+					niceyaml.AtPath(far),
+				)
+
+				return tree{err: err, want: []node{{text: "f.yaml: $.a.far: far", err: err, bound: bound}}}
+			},
+		},
+		"located Error with the path of a binding above one at a position": {
+			build: func(t *testing.T) tree {
+				t.Helper()
+
+				far := paths.Doc().Child("a").Child("far")
+				bound := bind(t, niceyaml.NewError("far", niceyaml.AtPath(far)))
+				err := niceyaml.Locate(
+					niceyaml.Locate(bound, niceyaml.AtPosition(position.New(1, 0))),
+					niceyaml.AtPath(far),
+				)
+
+				return tree{err: err, want: []node{{text: "f.yaml: $.a.far: far", err: err, bound: bound}}}
 			},
 		},
 		"unbound summary that heads a binding": {
@@ -2499,6 +2683,9 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 	pathA := paths.Current().Child("a")
 	pathB := paths.Current().Child("b")
 
+	// The value of a is a number, so this path does not resolve.
+	farPath := paths.Doc().Child("a").Child("far")
+
 	badA, badB := badKeyError("a"), badKeyError("b")
 	withDetail := func() *niceyaml.Error {
 		return badA().With(niceyaml.WithDetails(yamltest.ErrorAt("see b", "b")))
@@ -2566,11 +2753,51 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 			want: "read file: open missing.yaml: file does not exist",
 		},
 		"wrapper around a binding": {
-			// The node reports the binding, without the text the
-			// wrapper added.
+			// The message holds the text the wrapper added and leaves out
+			// the location of the binding.
 			node:     niceyaml.NewErrorTree(fmt.Errorf("load config: %w", yamltest.Bind(t, source, badA()))),
+			want:     "load config: bad a",
+			wantPath: "$.a",
+		},
+		"wrapper that adds text after a binding": {
+			node:     niceyaml.NewErrorTree(fmt.Errorf("%w: see docs", yamltest.Bind(t, source, badA()))),
+			want:     "bad a: see docs",
+			wantPath: "$.a",
+		},
+		"wrapper that rewrites the line of a binding": {
+			// The text of the wrapper does not hold the line of the
+			// binding, so the message is the one the binding reports.
+			node: niceyaml.NewErrorTree(rewrittenError{
+				msg: "config is invalid",
+				err: yamltest.Bind(t, source, badA()),
+			}),
 			want:     "bad a",
 			wantPath: "$.a",
+		},
+		"wrapper around a wrapped warning in a bound join": {
+			node: problems(yamltest.Bind(t, source, errors.Join(
+				fmt.Errorf("ctx: %w", yamltest.Bind(t, source, niceyaml.NewWarning("old", niceyaml.AtPath(pathA)))),
+				badB(),
+			)))[0],
+			want:     "ctx: old",
+			wantPath: "$.a",
+		},
+		"wrapper around a binding in a bound join": {
+			node: problems(yamltest.Bind(t, source, errors.Join(
+				fmt.Errorf("load config: %w", yamltest.Bind(t, source, badA())),
+				badB(),
+			)))[0],
+			want:     "load config: bad a",
+			wantPath: "$.a",
+		},
+		"wrapper around a bound join": {
+			// The wrapper heads the problems of the join, so its message
+			// is its own text and leaves the problems out.
+			node: niceyaml.NewErrorTree(errors.Join(
+				fmt.Errorf("spec: %w", yamltest.Bind(t, source, errors.Join(badA(), badB()))),
+				errors.New("lint"),
+			)).Children[0],
+			want: "spec:",
 		},
 		"wrapper around an unbound Error": {
 			// The text of the node puts the path in front of the text the
@@ -2580,12 +2807,37 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 			wantPath: "@.a",
 		},
 		"Error with a path of its own around a binding": {
-			// No source resolved the outer path, so the node has no
-			// binding, and the message keeps the line of the inner one.
+			// The binding resolved its location already, so the node reads
+			// as the binding, and the outer path does not move it.
 			node: niceyaml.NewErrorTree(
 				niceyaml.Invalid(yamltest.Bind(t, source, badA()), niceyaml.AtPath(pathB)),
 			),
-			want:     "f.yaml:1:4: $.a: bad a",
+			want:     "bad a",
+			wantPath: "$.a",
+		},
+		"Error with a path of its own around a binding whose location did not resolve": {
+			// The binding does not name a place in the text, so the node
+			// reads as the Error, which no source bound yet.
+			node: niceyaml.NewErrorTree(niceyaml.Invalid(
+				yamltest.Bind(t, source, niceyaml.NewError("far", niceyaml.AtPosition(position.New(9, 0)))),
+				niceyaml.AtPath(pathB),
+			)),
+			want:     "f.yaml: far",
+			wantPath: "@.b",
+		},
+		"Error with the path of a binding whose path did not resolve": {
+			// The row of the binding shows the path of the Error already,
+			// so the node reads as the binding.
+			node: niceyaml.NewErrorTree(niceyaml.Invalid(
+				yamltest.Bind(t, source, niceyaml.NewError("far", niceyaml.AtPath(farPath))),
+				niceyaml.AtPath(farPath),
+			)),
+			want:     "far",
+			wantPath: "$.a.far",
+		},
+		"Error with a path of its own around a value binding": {
+			node:     niceyaml.NewErrorTree(niceyaml.Invalid(niceyaml.BindValue(badA()), niceyaml.AtPath(pathB))),
+			want:     "$.a: bad a",
 			wantPath: "@.b",
 		},
 		"summary": {
@@ -2683,6 +2935,36 @@ func TestErrorTree_Accessors(t *testing.T) {
 		assert.Zero(t, index)
 	})
 
+	t.Run("a node reads the file path of its source", func(t *testing.T) {
+		t.Parallel()
+
+		// The file system of NewSourceFromFS names the file by its path
+		// there, and WithName gives it another name for the report.
+		fsys := fstest.MapFS{"config/menu.yaml": {Data: []byte("b: 2\n")}}
+
+		source, err := niceyaml.NewSourceFromFS(fsys, "config/menu.yaml", niceyaml.WithName("menu"))
+		require.NoError(t, err)
+
+		bound := yamltest.Bind(t, source, badB)
+
+		tcs := map[string]struct {
+			err error
+		}{
+			"live":     {err: bound},
+			"detached": {err: niceyaml.Detach(bound)},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				node := niceyaml.NewErrorTree(tc.err)
+				assert.Equal(t, "menu", node.Name())
+				assert.Equal(t, "config/menu.yaml", node.FilePath())
+			})
+		}
+	})
+
 	t.Run("a detached node keeps the name and no source", func(t *testing.T) {
 		t.Parallel()
 
@@ -2715,6 +2997,7 @@ func TestErrorTree_Accessors(t *testing.T) {
 				require.Nil(t, tc.node.Bound)
 				assert.Nil(t, tc.node.Source())
 				assert.Empty(t, tc.node.Name())
+				assert.Empty(t, tc.node.FilePath())
 
 				pos, ok := tc.node.Position()
 				assert.False(t, ok)
@@ -3203,6 +3486,38 @@ func TestNewErrorReport(t *testing.T) {
 		assert.Same(t, second, rep.Excerpts[1].Source)
 	})
 
+	t.Run("an excerpt holds the file path of its source", func(t *testing.T) {
+		t.Parallel()
+
+		path := filepath.Join(t.TempDir(), "menu.yaml")
+		require.NoError(t, os.WriteFile(path, []byte("a: 1\n"), 0o600))
+
+		// WithName gives the file another name for the report, so the
+		// file path differs from the name.
+		source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithName("menu"))
+		require.NoError(t, err)
+
+		bound := yamltest.Bind(t, source, yamltest.ErrorAt("bad a", "a"))
+
+		tcs := map[string]struct {
+			err error
+		}{
+			"live":     {err: bound},
+			"detached": {err: niceyaml.Detach(bound)},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				rep := niceyaml.NewErrorReport(tc.err)
+				require.Len(t, rep.Excerpts, 1)
+				assert.Equal(t, "menu", rep.Excerpts[0].Name)
+				assert.Equal(t, path, rep.Excerpts[0].FilePath)
+			})
+		}
+	})
+
 	t.Run("each excerpt is a view of its own", func(t *testing.T) {
 		t.Parallel()
 
@@ -3563,4 +3878,309 @@ func TestNewErrorReport_ExcerptsOff(t *testing.T) {
 			"     |       ^ bad port",
 		), view.String())
 	})
+}
+
+func TestNewErrorReport_RepeatedWarnings(t *testing.T) {
+	t.Parallel()
+
+	const hours = "apiVersion: v1alpha1\nkind: Hours\n"
+
+	docs := func(name, text string) []*niceyaml.Node {
+		return niceyaml.NewSourceFromString(text, niceyaml.WithName(name)).Documents()
+	}
+
+	deprecated := func(doc *niceyaml.Node, key string) error {
+		return doc.Bind(niceyaml.NewWarning(`deprecated version "v1alpha1"`,
+			niceyaml.AtPath(paths.Doc().Child(key)),
+			niceyaml.WithDetails(errors.New("cafe 4.0 removes v1alpha1"))))
+	}
+
+	tcs := map[string]struct {
+		build func() error
+		want  string
+	}{
+		"two files with one warning each": {
+			// The second file shows only its row, so the report stays short
+			// for many files that share one deprecation.
+			build: func() error {
+				return errors.Join(
+					deprecated(docs("hours-01.yaml", hours)[0], "apiVersion"),
+					deprecated(docs("hours-02.yaml", hours)[0], "apiVersion"),
+				)
+			},
+			want: stringtest.JoinLF(
+				`|-- hours-01.yaml:1:13: warning: $.apiVersion: deprecated version "v1alpha1"`,
+				"|   `-- cafe 4.0 removes v1alpha1",
+				"`-- hours-02.yaml:1:13: warning: $.apiVersion: deprecated version \"v1alpha1\"",
+				"",
+				"hours-01.yaml",
+				"   1 | apiVersion: v1alpha1",
+				`     |             ^^^^^^^^ warning: deprecated version "v1alpha1"`,
+				"   2 | kind: Hours",
+			),
+		},
+		"one file with the warning at two keys": {
+			build: func() error {
+				doc := docs("hours.yaml", hours+"baseVersion: v1alpha1\n")[0]
+
+				return errors.Join(deprecated(doc, "apiVersion"), deprecated(doc, "baseVersion"))
+			},
+			want: stringtest.JoinLF(
+				`|-- hours.yaml:1:13: warning: $.apiVersion: deprecated version "v1alpha1"`,
+				"|   `-- cafe 4.0 removes v1alpha1",
+				"`-- hours.yaml:3:14: warning: $.baseVersion: deprecated version \"v1alpha1\"",
+				"",
+				"   1 | apiVersion: v1alpha1",
+				`     |             ^^^^^^^^ warning: deprecated version "v1alpha1"`,
+				"   2 | kind: Hours",
+				"   3 | baseVersion: v1alpha1",
+				`     |              ^^^^^^^^ warning: deprecated version "v1alpha1"`,
+			),
+		},
+		"two documents of one file": {
+			build: func() error {
+				both := docs("hours.yaml", hours+"---\n"+hours)
+
+				return errors.Join(deprecated(both[0], "apiVersion"), deprecated(both[1], "apiVersion"))
+			},
+			want: stringtest.JoinLF(
+				`|-- hours.yaml:1:13: warning: $.apiVersion: deprecated version "v1alpha1"`,
+				"|   `-- cafe 4.0 removes v1alpha1",
+				"`-- hours.yaml:4:13: warning: $.apiVersion: deprecated version \"v1alpha1\"",
+				"",
+				"   1 | apiVersion: v1alpha1",
+				`     |             ^^^^^^^^ warning: deprecated version "v1alpha1"`,
+				"   2 | kind: Hours",
+				"   3 | ---",
+				"   4 | apiVersion: v1alpha1",
+				`     |             ^^^^^^^^ warning: deprecated version "v1alpha1"`,
+				"   5 | kind: Hours",
+			),
+		},
+		"a shared collector where the second file also holds another warning": {
+			// The excerpt of b.yaml shows for its other warning, so it marks
+			// the repeat too.
+			build: func() error {
+				a, b := docs("a.yaml", hours)[0], docs("b.yaml", hours)[0]
+
+				return errors.Join(
+					deprecated(a, "apiVersion"),
+					deprecated(b, "apiVersion"),
+					b.Bind(niceyaml.NewWarning("old kind", niceyaml.AtPath(paths.Doc().Child("kind")))),
+				)
+			},
+			want: stringtest.JoinLF(
+				`|-- a.yaml:1:13: warning: $.apiVersion: deprecated version "v1alpha1"`,
+				"|   `-- cafe 4.0 removes v1alpha1",
+				`|-- b.yaml:1:13: warning: $.apiVersion: deprecated version "v1alpha1"`,
+				"`-- b.yaml:2:7: warning: $.kind: old kind",
+				"",
+				"a.yaml",
+				"   1 | apiVersion: v1alpha1",
+				`     |             ^^^^^^^^ warning: deprecated version "v1alpha1"`,
+				"   2 | kind: Hours",
+				"",
+				"b.yaml",
+				"   1 | apiVersion: v1alpha1",
+				`     |             ^^^^^^^^ warning: deprecated version "v1alpha1"`,
+				"   2 | kind: Hours",
+				"     |       ^^^^^ warning: old kind",
+			),
+		},
+		"a source that only a detail of another source marks": {
+			// The detail gives b.yaml an excerpt, so the repeat there keeps
+			// its mark too.
+			build: func() error {
+				a, b := docs("a.yaml", hours+"name: x\n")[0], docs("b.yaml", hours+"z: 1\n")[0]
+				taken := b.Bind(niceyaml.NewError("taken here", niceyaml.AtPath(paths.Doc().Child("z"))))
+
+				return errors.Join(
+					deprecated(a, "apiVersion"),
+					deprecated(b, "apiVersion"),
+					a.Bind(niceyaml.NewWarning("name is taken",
+						niceyaml.AtPath(paths.Doc().Child("name")), niceyaml.WithDetails(taken))),
+				)
+			},
+			want: stringtest.JoinLF(
+				`|-- a.yaml:1:13: warning: $.apiVersion: deprecated version "v1alpha1"`,
+				"|   `-- cafe 4.0 removes v1alpha1",
+				`|-- b.yaml:1:13: warning: $.apiVersion: deprecated version "v1alpha1"`,
+				"`-- a.yaml:3:7: warning: $.name: name is taken",
+				"    `-- b.yaml:3:4: $.z: taken here",
+				"",
+				"a.yaml",
+				"   1 | apiVersion: v1alpha1",
+				`     |             ^^^^^^^^ warning: deprecated version "v1alpha1"`,
+				"   2 | kind: Hours",
+				"   3 | name: x",
+				"     |       ^ warning: name is taken",
+				"",
+				"b.yaml",
+				"   1 | apiVersion: v1alpha1",
+				`     |             ^^^^^^^^ warning: deprecated version "v1alpha1"`,
+				"   2 | kind: Hours",
+				"   3 | z: 1",
+				"     |    ^ taken here",
+			),
+		},
+		"an unbound first copy": {
+			// The first copy does not mark an excerpt, so the bound repeat
+			// marks its own in place of it.
+			build: func() error {
+				return errors.Join(
+					niceyaml.NewWarning(`deprecated version "v1alpha1"`,
+						niceyaml.AtPath(paths.Doc().Child("apiVersion")),
+						niceyaml.WithDetails(errors.New("cafe 4.0 removes v1alpha1"))),
+					deprecated(docs("hours.yaml", hours)[0], "apiVersion"),
+				)
+			},
+			want: stringtest.JoinLF(
+				`|-- warning: $.apiVersion: deprecated version "v1alpha1"`,
+				"|   `-- cafe 4.0 removes v1alpha1",
+				"`-- hours.yaml:1:13: warning: $.apiVersion: deprecated version \"v1alpha1\"",
+				"",
+				"   1 | apiVersion: v1alpha1",
+				"     |             ^^^^^^^^",
+				"   2 | kind: Hours",
+			),
+		},
+		"unbound repeats": {
+			build: func() error {
+				old := func() error {
+					return niceyaml.NewWarning("old", niceyaml.WithDetails(errors.New("remove it")))
+				}
+
+				return errors.Join(old(), old())
+			},
+			want: stringtest.JoinLF(
+				"|-- warning: old",
+				"|   `-- remove it",
+				"`-- warning: old",
+			),
+		},
+		"the same binding twice": {
+			// The repeat is the first copy, so its mark is the mark of that
+			// copy and stays.
+			build: func() error {
+				w := deprecated(docs("hours.yaml", hours)[0], "apiVersion")
+
+				return errors.Join(w, w)
+			},
+			want: stringtest.JoinLF(
+				`|-- hours.yaml:1:13: warning: $.apiVersion: deprecated version "v1alpha1"`,
+				"|   `-- cafe 4.0 removes v1alpha1",
+				"`-- hours.yaml:1:13: warning: $.apiVersion: deprecated version \"v1alpha1\"",
+				"",
+				"   1 | apiVersion: v1alpha1",
+				`     |             ^^^^^^^^ warning: deprecated version "v1alpha1"`,
+				"   2 | kind: Hours",
+			),
+		},
+		"the same binding twice with a detail in another source": {
+			// The detail of the repeat is the detail of the first copy, so
+			// the excerpt of its source stays too.
+			build: func() error {
+				a, b := docs("a.yaml", hours+"name: x\n")[0], docs("b.yaml", hours+"z: 1\n")[0]
+				taken := b.Bind(niceyaml.NewError("taken here", niceyaml.AtPath(paths.Doc().Child("z"))))
+				w := a.Bind(niceyaml.NewWarning("name is taken",
+					niceyaml.AtPath(paths.Doc().Child("name")), niceyaml.WithDetails(taken)))
+
+				return errors.Join(w, w)
+			},
+			want: stringtest.JoinLF(
+				"|-- a.yaml:3:7: warning: $.name: name is taken",
+				"|   `-- b.yaml:3:4: $.z: taken here",
+				"`-- a.yaml:3:7: warning: $.name: name is taken",
+				"",
+				"a.yaml",
+				"   1 | apiVersion: v1alpha1",
+				"   2 | kind: Hours",
+				"   3 | name: x",
+				"     |       ^ warning: name is taken",
+				"",
+				"b.yaml",
+				"   1 | apiVersion: v1alpha1",
+				"   2 | kind: Hours",
+				"   3 | z: 1",
+				"     |    ^ taken here",
+			),
+		},
+		"separate Detach calls": {
+			// Each call keeps a copy of its own source, and the repeat across
+			// the copies still loses its detail and its excerpt.
+			build: func() error {
+				return errors.Join(
+					niceyaml.Detach(deprecated(docs("hours-01.yaml", hours)[0], "apiVersion")),
+					niceyaml.Detach(deprecated(docs("hours-02.yaml", hours)[0], "apiVersion")),
+				)
+			},
+			want: stringtest.JoinLF(
+				`|-- hours-01.yaml:1:13: warning: $.apiVersion: deprecated version "v1alpha1"`,
+				"|   `-- cafe 4.0 removes v1alpha1",
+				"`-- hours-02.yaml:1:13: warning: $.apiVersion: deprecated version \"v1alpha1\"",
+				"",
+				"hours-01.yaml",
+				"   1 | apiVersion: v1alpha1",
+				`     |             ^^^^^^^^ warning: deprecated version "v1alpha1"`,
+				"   2 | kind: Hours",
+			),
+		},
+		"two files each wrapped with their name": {
+			// The text of each wrapper stays out of the match, so the second
+			// file still shows only its row.
+			build: func() error {
+				return errors.Join(
+					fmt.Errorf("check hours-01.yaml: %w", deprecated(docs("hours-01.yaml", hours)[0], "apiVersion")),
+					fmt.Errorf("check hours-02.yaml: %w", deprecated(docs("hours-02.yaml", hours)[0], "apiVersion")),
+				)
+			},
+			want: stringtest.JoinLF(
+				`|-- hours-01.yaml:1:13: warning: $.apiVersion: check hours-01.yaml: deprecated version "v1alpha1"`,
+				"|   `-- cafe 4.0 removes v1alpha1",
+				"`-- hours-02.yaml:1:13: warning: $.apiVersion: check hours-02.yaml: deprecated version \"v1alpha1\"",
+				"",
+				"hours-01.yaml",
+				"   1 | apiVersion: v1alpha1",
+				`     |             ^^^^^^^^ warning: check hours-01.yaml: deprecated version "v1alpha1"`,
+				"   2 | kind: Hours",
+			),
+		},
+		"two files each wrapped with their name and bound again": {
+			// Each source binds the wrapper of its file again inside a join,
+			// and the text of the wrapper still stays out of the match.
+			build: func() error {
+				one, two := docs("hours-01.yaml", hours)[0], docs("hours-02.yaml", hours)[0]
+
+				return errors.Join(
+					one.Bind(errors.Join(fmt.Errorf("check hours-01.yaml: %w", deprecated(one, "apiVersion")))),
+					two.Bind(errors.Join(fmt.Errorf("check hours-02.yaml: %w", deprecated(two, "apiVersion")))),
+				)
+			},
+			want: stringtest.JoinLF(
+				`|-- hours-01.yaml:1:13: warning: $.apiVersion: check hours-01.yaml: deprecated version "v1alpha1"`,
+				"|   `-- cafe 4.0 removes v1alpha1",
+				"`-- hours-02.yaml:1:13: warning: $.apiVersion: check hours-02.yaml: deprecated version \"v1alpha1\"",
+				"",
+				"hours-01.yaml",
+				"   1 | apiVersion: v1alpha1",
+				`     |             ^^^^^^^^ warning: check hours-01.yaml: deprecated version "v1alpha1"`,
+				"   2 | kind: Hours",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.build()
+			assert.Equal(t, tc.want, niceyaml.FormatError(err))
+
+			// The tree of the error keeps every detail.
+			tree := niceyaml.NewErrorTree(err)
+			require.GreaterOrEqual(t, len(tree.Children), 2)
+			assert.Len(t, tree.Children[1].Children, 1)
+			assert.True(t, tree.Warning)
+		})
+	}
 }

@@ -711,7 +711,9 @@ func (v *View) shown(i int, ln *Line) shownRow {
 // and the annotations above and below it on rows of their own. String
 // does not render flags. The number column is at least four wide and
 // grows to fit the largest number in the view, so every row lines up.
-// An empty view renders as "".
+// An empty view renders as "". A line feed separates the rows, and the
+// last row does not end with one. A program that writes the text into a
+// file or a fenced block adds that line feed itself.
 //
 // Above a line, each kind of annotation with content gets one row, in
 // the order the kinds first appear, as [Annotations.ByKind] groups them.
@@ -735,8 +737,9 @@ func (v *View) shown(i int, ln *Line) shownRow {
 //
 // Annotations that start more than [MaxColPastEnd] columns past the end
 // of the content start at that bound, as the printer starts them.
-// Control characters render as their pictures. A rune that takes two
-// cells in a terminal gets two carets, so the carets stay under the runes
+// Each control character renders as
+// [go.jacobcolvin.com/niceyaml/escape.Control] draws it. A rune that takes
+// two cells in a terminal gets two carets, so the carets stay under the runes
 // they mark in a fixed-width font. The output does not hold escape
 // sequences, so it goes into a log or a golden file unchanged.
 // [go.jacobcolvin.com/niceyaml.FormatError] prints the excerpt of a bound

@@ -29,9 +29,9 @@ import (
 // fields from the node rather than from the label. Such reports include
 // JSON lines, CI annotations, and editor diagnostics. They read
 // [ErrorTree.Message] and [ErrorTree.Path] from the node, and
-// [ErrorTree.Name] and [ErrorTree.Position] from its binding. [Problems]
-// yields the nodes that such a report lists, one per problem, and
-// [ErrorTree.All] yields every node of the tree.
+// [ErrorTree.Name], [ErrorTree.FilePath], and [ErrorTree.Position] from
+// its binding. [Problems] yields the nodes that such a report lists, one
+// per problem, and [ErrorTree.All] yields every node of the tree.
 //
 // Each node with Detail set explains its parent, and a renderer that
 // draws details apart from problems reads that field.
@@ -81,19 +81,24 @@ type ErrorTree struct {
 
 // NewErrorTree creates a new [ErrorTree] from err. The root holds the
 // message of err without the errors below it. The context that a wrapper
-// added thus stays in front, and each error shows once. Each problem err
-// heads and each of its details is a child, and a child with children of
-// its own is a subtree. A nil err yields the zero ErrorTree.
+// added thus stays in front of the message, and each error shows once.
+// Each problem err heads and each of its details is a child, and a child
+// with children of its own is a subtree. A nil err yields the zero
+// ErrorTree.
 //
 // The root of a binding keeps the "name:line:col:" position
-// [SourceError.Error] gives it. Each child reads "line:col:" without the
-// name. A child bound to a document other than that of its parent names
-// its document instead, as "document 2: msg". The children of a binding
-// sort by position within their source, with the sources in the order
-// they first appear and the children whose location did not resolve
-// last. Outside a binding, children keep the order the error lists them
-// in. The node of an error that is not bound to a source puts the path
-// of its [*Error] in front of the message, as "@.path: msg".
+// [SourceError.Error] gives it. So does the node of a wrapper around a
+// binding, which reads as a binding of the wrapper reads. The text of the
+// wrapper follows the position and the path, although the message that
+// [fmt.Errorf] builds for the wrapper holds it in front. Each child reads
+// "line:col:" without the name. A child bound to a document other than
+// that of its parent names its document instead, as "document 2: msg".
+// The children of a binding sort by position within their source, with
+// the sources in the order they first appear and the children whose
+// location did not resolve last. Outside a binding, children keep the
+// order the error lists them in. The node of an error that is not bound to
+// a source puts the path of its [*Error] in front of the message, as
+// "@.path: msg".
 //
 // An [errors.Join] error is a node that does not have text. So is any
 // other error that unwraps to several and whose message is theirs one per
@@ -111,8 +116,22 @@ type ErrorTree struct {
 //
 // Each node holds its error in Err and its binding in Bound. The node of
 // a wrapper around a binding holds the wrapper in Err and the binding in
-// Bound. A located [*Error] above a binding names a location that a
-// source never resolved, so Bound is nil for its node.
+// Bound. So does the node of a located [*Error] above a binding whose
+// location resolved, because the binding keeps its own location, as
+// [Locate] describes. The node of a located Error that names the path of
+// a binding whose location did not resolve holds that binding too,
+// whatever the located Errors between the two name. The line of the
+// binding shows that path already. Above any other binding, the Error
+// names a location that a source never resolved, so Bound is nil for its
+// node.
+//
+// Until a source binds the Error, the binding below it keeps its location
+// whatever its source. The node of a located Error around an error of an
+// included file thus holds the binding of that error and reads as it. A
+// program that reports one such problem at the place of the include binds
+// the Error to the including source first, as [Node.Validate] does. Each
+// bound problem of a join keeps its own place after that bind too, as
+// [Locate] describes.
 func NewErrorTree(err error) ErrorTree {
 	return newTree(ErrorTree{}, appendTrees(nil, err))
 }
@@ -303,18 +322,25 @@ func declaresInvalid(err error) bool {
 	return false
 }
 
-// Message returns the message of the node, and it does not put a
-// position, a document, or a path in front. A report carries that field
-// beside the position and the path. Label holds the same message behind
-// the location the row of the node shows, in a form that depends on where
-// the node sits in the tree.
+// Message returns the message of the node, and it does not put its own
+// position, document, or path in front. A report carries that field beside
+// the position and the path. Label holds the same message behind the
+// location the row of the node shows, in a form that depends on where the
+// node sits in the tree. A [Locate], [Invalid], or [Unchecked] result can
+// give its location to a binding inside it. The message of such a result
+// then holds the path, the document, or the whole line of that binding,
+// as [SourceError.Message] describes.
 //
 //   - For a node with a binding, it is the [SourceError.Message] of
-//     Bound.
+//     Bound, with the text that a wrapper around Bound added.
 //   - For a node that is not bound to a source and names a path, as
 //     [ErrorTree.Path] reports, it is the message of Err without the path
-//     Label puts in front of it. [SourceError.Message] returns the same
-//     message for a binding of Err.
+//     Label puts in front of it. A binding of Err to another source has the
+//     same [SourceError.Message]. When the source of a binding inside Err
+//     binds Err, the message leaves out the name of that source, and the
+//     document and the path as SourceError.Message describes. The node
+//     message "main.yaml: $.other.deep: bad deep" thus becomes
+//     "$.other.deep: bad deep".
 //   - For any other node, it is Label.
 //
 // A node that does not have a label of its own, such as the root of a
@@ -323,11 +349,24 @@ func declaresInvalid(err error) bool {
 // of each detail.
 //
 // The node of a wrapper around a binding holds that binding in Bound. Its
-// message is thus the message of the binding. The text that the wrapper
-// added, such as the context of a [fmt.Errorf] call, stays in Label.
+// message is the one that [SourceError.Message] returns for a binding of
+// the wrapper. It holds the text that the wrapper added, such as the
+// context of a [fmt.Errorf] call, without the location of the binding. A
+// wrapper around the binding of a join heads the problems of the join,
+// and the join does not have a line of its own. The message of its node
+// is thus the text of the wrapper alone, as "load config:".
+//
+// The text of a wrapper thus reaches the message of a problem only when
+// the wrapper wraps that problem alone. For a wrapper from
+// [fmt.Errorf]("load %s: %w", path, err), an err with one problem gives
+// that problem the message "load cfg.yaml: not found". An err with several
+// problems gives each of them its own message, as "not found", below the
+// heading of the wrapper. A report that needs the context of every
+// problem adds it to each row itself, or reads it from the heading above
+// the problems in the tree.
 func (t ErrorTree) Message() string {
 	if t.Bound != nil {
-		return t.Bound.Message()
+		return wrapperMessage(t.Err, t.Bound)
 	}
 
 	if _, ok := t.Path(); !ok {
@@ -339,6 +378,36 @@ func (t ErrorTree) Message() string {
 	end := walkChildren(t.Err, func(*SourceError) {}, func(error, childBase, bool) {})
 
 	return bareMessage(t.Err, end)
+}
+
+// wrapperMessage returns the message of err, which bound is or wraps along
+// its cause chain. The message of a wrapper that keeps the line of bound
+// is its text with the message of bound in place of that line, as
+// [wrapLine] finds it. A wrapper around the binding of a join has its own
+// text as its message, because the join does not have a line. Any other
+// err has the message of bound.
+func wrapperMessage(err error, bound *SourceError) string {
+	x, self := err.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
+	if err == nil || (self && x == bound) {
+		return bound.Message()
+	}
+
+	// The part of the message the children show depends on the end of the
+	// cause chain, so the walk finds that end alone.
+	end := walkChildren(err, func(*SourceError) {}, func(error, childBase, bool) {})
+
+	own, _, _, cut := end.cut(err.Error())
+
+	rows, msg := wrapLine(own, bound, bound.Message())
+	if cut && rows != nil {
+		return msg
+	}
+
+	if joinBinding(bound) != nil {
+		return bareMessage(err, end)
+	}
+
+	return bound.Message()
 }
 
 // Path returns the [paths.Path] the node is about and true, or the zero
@@ -386,6 +455,19 @@ func (t ErrorTree) Name() string {
 	return t.Bound.Name()
 }
 
+// FilePath returns the file path of the source the node is bound to, as
+// [SourceError.FilePath] returns it for Bound, or "" for a node that is
+// not bound to a source. A node of an error that [Detach] detached keeps
+// the file path. [ErrorTree.Name] spells the file as the program named it,
+// for a person who reads the report. FilePath is the path that
+// [Source.FilePath] reports, for a tool that opens the file. It is the
+// absolute path that [NewSourceFromFile] sets, the path that
+// [WithFilePath] sets, as given, or the path in the file system of
+// [NewSourceFromFS]. A detached node does not keep that file system.
+func (t ErrorTree) FilePath() string {
+	return t.Bound.FilePath()
+}
+
 // Position returns the [position.Position] the location of the node
 // resolved to and true, as [SourceError.Position] returns it for Bound. It
 // returns the zero Position and false for a node that is not bound to a
@@ -411,14 +493,51 @@ func (t ErrorTree) DocumentIndex() (int, bool) {
 }
 
 // bindingOf returns the binding err is or wraps along its cause chain, or
-// nil. A located [*Error] above a binding anchors the chain itself, so
-// bindingOf returns nil for such an error.
+// nil. A located [*Error] above a binding whose location did not resolve
+// anchors the chain itself, so bindingOf returns nil for such an error.
+// An Error that names the path of that binding is the exception. The line
+// of the binding shows that path already, so bindingOf returns the
+// binding, a summary included. Other located Errors can sit between the
+// two, as when a helper and its caller both locate an error. A source
+// that binds err takes the location of the outermost Error, so the
+// location of each Error between does not show, whatever it names.
 func bindingOf(err error) *SourceError {
-	if bound, ok := anchorOf(err).err.(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
+	a := anchorOf(err)
+	if bound, ok := a.err.(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
+		return bound
+	}
+
+	located, ok := a.err.(*Error) //nolint:errorlint // The anchor itself, found by the walk.
+	if !ok || !a.hasPath {
+		return nil
+	}
+
+	bound := bindingBelow(located.err)
+	if bound == nil {
+		return nil
+	}
+
+	if path, hasPath := bound.Path(); hasPath && path.Equal(a.path) {
 		return bound
 	}
 
 	return nil
+}
+
+// bindingBelow returns the binding that the cause chain of err reaches
+// through the located [*Error]s along it, or nil. It looks below each
+// Error that anchors the chain, whatever its location.
+func bindingBelow(err error) *SourceError {
+	for {
+		switch x := anchorOf(err).err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
+		case *SourceError:
+			return x
+		case *Error:
+			err = x.err
+		default:
+			return nil
+		}
+	}
 }
 
 // appendTrees appends the nodes that err stands for to dst. A join
@@ -454,7 +573,18 @@ func appendTrees(dst []ErrorTree, err error) []ErrorTree {
 	if binds {
 		node.Label = x.headline()
 	} else {
-		node.Label, _, _, _ = end.cut(err.Error())
+		label, _, _, cut := end.cut(err.Error())
+		node.Label = label
+
+		// A wrapper around a binding that keeps the line of the binding
+		// writes that line, with its own text around the message. The
+		// line holds the message of the wrapper, so it takes the severity
+		// of the wrapper rather than that of the binding.
+		rows, msg := wrapLine(label, node.Bound, node.Bound.Message())
+		if cut && rows != nil {
+			warns := isWarning(err) && !(ErrorTree{Children: kids}).heads()
+			_, node.Label = rows.lineAs(msg, warns)
+		}
 
 		// A heading with no text of its own has no row, like its binding,
 		// because each problem below it that carries no location names the
@@ -498,9 +628,14 @@ func holdsBinding(err error) bool {
 }
 
 // unboundText puts the path of the first located [*Error] on the cause
-// chain of err in front of text, as a binding does. A [*SourceError]
-// earlier on the chain names its own path, so text then stays as it is.
+// chain of err in front of text, as a binding does. The binding that
+// [bindingOf] finds for err names its own path, so text then stays as it
+// is.
 func unboundText(err error, text string) string {
+	if bindingOf(err) != nil {
+		return text
+	}
+
 	if a := anchorOf(err); a.hasPath {
 		return withPath(a.path, text)
 	}
@@ -733,6 +868,10 @@ func walkChildren(
 				onChild(n, base, true)
 			}
 
+			// The children below a located Error stand in the error that
+			// it wraps.
+			base.inLocated = base.inLocated || x.hasLocation()
+
 			// An Error that adds nothing has the message of its cause.
 			wrapped = wrapped || !x.addsNothing()
 			cur = x.err
@@ -858,6 +997,10 @@ type childBase struct {
 	// The fault that the Errors above the children declare, as
 	// [declaration.under] passes it down.
 	fault declaration
+	// Whether the children stand in the error that an Error with a
+	// location wraps, as the err of a [Locate] result does. The children
+	// of that Error itself, such as the details of its options, do not.
+	inLocated bool
 }
 
 // cross returns the base below x. The base is c with the move of x after
@@ -865,7 +1008,8 @@ type childBase struct {
 // passes down, as [declaration.under] gives it. A location on x becomes
 // the location that the children below inherit. A Rebase that does not
 // carry a location points the children below it at its base, so it ends
-// what they inherit from above.
+// what they inherit from above. The base below x stands in the error of
+// a located Error when c does.
 func (c childBase) cross(x *Error) childBase {
 	at := c.at
 
@@ -876,7 +1020,7 @@ func (c childBase) cross(x *Error) childBase {
 		at = nil
 	}
 
-	return childBase{move: c.move.then(x.move), at: at, fault: c.fault.under(x)}
+	return childBase{move: c.move.then(x.move), at: at, fault: c.fault.under(x), inLocated: c.inLocated}
 }
 
 // rebase returns n under the base. A detail explains the error above it,
@@ -976,23 +1120,21 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 		child, parent := kid.bound, kid.parent
 
 		// Strip the line back to the message and put the position back
-		// without the name. A child behind a wrapper with text of its own
+		// without the name. A child behind a wrapper that rewrote its line
 		// carries its position in that text, so there is nothing to strip.
-		src := textBinding(child)
-
-		text := src.headline()
-		if !kid.named && src.origin() == parent.origin() {
-			if inner := src.texts().own; inner != text {
+		text := child.headline()
+		if !kid.named && child.origin() == parent.origin() {
+			if inner := child.texts().own; inner != text {
 				text = inner
 
 				switch {
 				case kid.located:
 					text = prefix(editorPosition(kid.pos)+":", text)
 
-				case !sameDocument(src, parent):
+				case !sameDocument(child, parent):
 					// The parent names another document of the source, or
 					// none, so the child keeps the one it wrote.
-					text = prefix(suffixed(src.documentLabel()), text)
+					text = prefix(suffixed(child.documentLabel()), text)
 				}
 			}
 		}
@@ -1036,28 +1178,6 @@ func flatten(kids []positioned, children []boundChild, parent *SourceError, name
 	}
 
 	return kids
-}
-
-// textBinding returns the binding that an adopted e reaches through
-// Errors alone, or e itself. Those Errors do not add text. A binding that
-// writes its source name in front of its message adds text, so the walk
-// stops there.
-func textBinding(e *SourceError) *SourceError {
-	for e.adopted && e.keepsMessage() {
-		x, ok := e.err.(*Error) //nolint:errorlint // The node itself, not a chain search.
-		if !ok {
-			break
-		}
-
-		inner, ok := x.textCause().(*SourceError) //nolint:errorlint // The node itself, not a chain search.
-		if !ok || inner == nil {
-			break
-		}
-
-		e = inner
-	}
-
-	return e
 }
 
 // positioned is a child node with the source and the position, when
@@ -1363,11 +1483,19 @@ type ErrorReport struct {
 	Unresolved []*SourceError
 	// Tree is the [ErrorTree] of the error. Under one heading, a warning
 	// whose message and details match those of an earlier warning keeps
-	// its row and loses its details. Fifteen files with one deprecated
-	// version thus print fifteen rows and one set of details. Such a
-	// warning does not mark anything in the excerpts either. Every other
-	// node is the node that [NewErrorTree] builds, which keeps every
-	// detail.
+	// its row and loses its details. The message is that of its binding,
+	// without the text that a wrapper above the binding added, such as
+	// the name of a file. That text stays out when a source binds the
+	// wrapper again too. Fifteen files with one deprecated version thus
+	// print fifteen rows and one set of details, and so do fifteen
+	// documents of one file.
+	//
+	// A repeat does not mark an excerpt that nothing else in the tree
+	// marks, when an earlier copy marks an excerpt already. A source whose
+	// every mark would be such a repeat thus does not get an excerpt, and
+	// every other excerpt marks each problem of its source. Each node that
+	// is not a repeat is the node that [NewErrorTree] builds, which keeps
+	// every detail.
 	//
 	// The tree does not have a row for an error that holds only nil
 	// errors, such as a bound join of typed-nil errors. When Excerpts and
@@ -1391,6 +1519,12 @@ type ErrorExcerpt struct {
 	// Name is the name of the source, as [Source.Name] returns it. The
 	// excerpt of a detached error has the name its Source had.
 	Name string
+	// FilePath is the file path of the source, as [Source.FilePath]
+	// returns it. The excerpt of a detached error has the file path its
+	// Source had. A path in the file system of [NewSourceFromFS] names a
+	// file in that file system, which the excerpt does not keep, as
+	// [ErrorTree.FilePath] describes.
+	FilePath string
 	// Named reports whether Name leads the excerpt on a row of its own, so
 	// a reader can tell the excerpts of several sources apart. Named is
 	// true when the bindings of the error touch more than one source and
@@ -1419,7 +1553,8 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 	// A repeated warning still names its source, so the excerpts of a
 	// report that reaches several sources keep their names.
 	quiet := make(map[*SourceError]bool)
-	tree := dropRepeats(NewErrorTree(err), quiet)
+	full := NewErrorTree(err)
+	tree := dropRepeats(full, quiet)
 
 	var skipped map[*SourceError]bool
 
@@ -1435,7 +1570,7 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 	// The own location of a binding carries its message only among
 	// several bindings, where the message tells the carets of one excerpt
 	// apart.
-	sources, positions := treePositions(bindings, len(bindings) > 1, skipped, quiet)
+	sources, positions := treePositions(bindings, len(bindings) > 1, skipped, quiet, wrapperMarks(full))
 
 	var rep ErrorReport
 
@@ -1446,10 +1581,11 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 		}
 
 		rep.Excerpts = append(rep.Excerpts, ErrorExcerpt{
-			Source: src.live(),
-			View:   view,
-			Name:   src.Name(),
-			Named:  len(sources) > 1 && src.Name() != "",
+			Source:   src.live(),
+			View:     view,
+			Name:     src.Name(),
+			FilePath: src.FilePath(),
+			Named:    len(sources) > 1 && src.Name() != "",
 		})
 	}
 
@@ -1479,19 +1615,130 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 	return rep
 }
 
-// dropRepeats returns t without the details of each repeated warning. It
-// adds the bindings of each such warning to skip, so the excerpts do not
-// mark it.
-// A warning repeats when its message and its details match those of an
-// earlier warning under the same heading. Its row stays, so each file
-// with the warning still shows in the tree.
-func dropRepeats(t ErrorTree, skip map[*SourceError]bool) ErrorTree {
+// wrapperMark is what the node of a wrapper around a binding gives the
+// mark of that binding: the message of the node, as [ErrorTree.Message]
+// returns it, and the severity of the node.
+type wrapperMark struct {
+	message string
+	warning bool
+}
+
+// wrapperMarks returns the mark of each node of t that wraps its binding,
+// keyed by that binding. The mark of such a binding then carries the
+// message of its node, with the text that the wrapper added. It also
+// carries the severity of the node, so the caret of a warning that
+// [AsErrors] marked above its binding reads as an error, as the row does.
+// A binding that the tree reaches several times takes the mark of the
+// first node that holds it.
+func wrapperMarks(t ErrorTree) map[*SourceError]wrapperMark {
+	var marks map[*SourceError]wrapperMark
+
+	seen := make(map[*SourceError]bool)
+
+	for node := range t.nodes() {
+		if node.Bound == nil || node.Label == "" || seen[node.Bound] {
+			continue
+		}
+
+		seen[node.Bound] = true
+
+		x, self := node.Err.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
+		if self && x == node.Bound {
+			continue
+		}
+
+		if marks == nil {
+			marks = make(map[*SourceError]wrapperMark)
+		}
+
+		// A heading is not a warning, and neither is a binding that heads.
+		marks[node.Bound] = wrapperMark{message: node.Message(), warning: node.Warning && !node.heads()}
+	}
+
+	return marks
+}
+
+// dropRepeats returns t without the details of each repeated warning, and
+// adds the bindings that the excerpts do not mark to quiet. A warning
+// repeats when its message and its details match those of an earlier
+// warning under the same heading, from any source. Its row stays, so each
+// file with the warning still shows in the tree.
+//
+// The bindings of the dropped details go into quiet. The binding of a
+// repeat goes there too when an earlier copy marks an excerpt and nothing
+// else in the tree marks the source of the repeat. Such a source then gets
+// no excerpt, and every other excerpt marks each problem of its source. A
+// binding that a node other than a repeat holds stays out of quiet, so a
+// binding that the error reaches twice keeps its marks.
+func dropRepeats(t ErrorTree, quiet map[*SourceError]bool) ErrorTree {
 	if !t.heads() {
 		return t
 	}
 
-	every := func(*SourceError) bool { return true }
-	seen := make(map[string]bool)
+	var repeats, details []*SourceError
+
+	t = markRepeats(t, &repeats, &details)
+
+	// The tree still holds a repeat, so the count of each binding leaves the
+	// repeats out.
+	held := make(map[*SourceError]int)
+
+	for node := range t.nodes() {
+		if node.Bound != nil {
+			held[node.Bound]++
+		}
+	}
+
+	for _, bound := range repeats {
+		held[bound]--
+	}
+
+	seen := make(map[*SourceError]bool)
+	silence := func(bound *SourceError) {
+		bound.all(seen, func(x *SourceError) bool {
+			if held[x] == 0 {
+				quiet[x] = true
+			}
+
+			return true
+		})
+	}
+
+	for _, bound := range details {
+		silence(bound)
+	}
+
+	// A source shows when a node that is not a repeat marks it, as a
+	// problem, a heading with a line of its own, or a detail does.
+	shown := make(map[excerptSource]bool)
+
+	for bound, n := range held {
+		if n > 0 && marksExcerpt(bound) && !quiet[bound] {
+			shown[bound.origin()] = true
+		}
+	}
+
+	for _, bound := range repeats {
+		if !shown[bound.origin()] {
+			silence(bound)
+		}
+	}
+
+	return t
+}
+
+// markRepeats returns t without the details of each warning that repeats
+// an earlier one under the same heading, as [dropRepeats] describes. It
+// appends the binding of each dropped detail to details. It appends the
+// binding of each repeat that follows a copy that marks an excerpt to
+// repeats. A repeat that follows only copies without a mark, such as
+// unbound ones, marks its excerpt in their place.
+func markRepeats(t ErrorTree, repeats, details *[]*SourceError) ErrorTree {
+	var (
+		seen   = make(map[string]bool)
+		marked = make(map[string]bool)
+	)
+
 	children := make([]ErrorTree, 0, len(t.Children))
 
 	for _, child := range t.Children {
@@ -1500,18 +1747,28 @@ func dropRepeats(t ErrorTree, skip map[*SourceError]bool) ErrorTree {
 
 		case child.isProblem() && child.Warning:
 			key := repeatKey(child)
+
 			if seen[key] {
 				for node := range child.nodes() {
-					node.Bound.all(skip, every)
+					if node.Detail && node.Bound != nil {
+						*details = append(*details, node.Bound)
+					}
 				}
 
 				child.Children = nil
+
+				if marked[key] {
+					*repeats = append(*repeats, child.Bound)
+				}
 			}
 
 			seen[key] = true
+			marked[key] = marked[key] || marksExcerpt(child.Bound)
+
+		case child.isProblem():
 
 		default:
-			child = dropRepeats(child, skip)
+			child = markRepeats(child, repeats, details)
 		}
 
 		children = append(children, child)
@@ -1522,12 +1779,29 @@ func dropRepeats(t ErrorTree, skip map[*SourceError]bool) ErrorTree {
 	return t
 }
 
+// marksExcerpt reports whether bound marks a line in an excerpt: whether
+// its location resolved and it has a line of its own. A nil bound does
+// not mark a line.
+func marksExcerpt(bound *SourceError) bool {
+	return bound != nil && bound.locErr == nil && !bound.headsAlone()
+}
+
 // repeatKey returns the text that two warnings share when one repeats the
-// other: the message of t and the rows of its details.
+// other: the message of the binding of t and the rows of its details. The
+// text that a wrapper above the binding adds stays out of the key, and so
+// does the text of a wrapper that a binding adopted, as
+// [SourceError.innermost] leaves it out. A program that wraps the error of
+// each file with the name of the file thus still gets the repeats of a
+// warning that the files share, whether or not a source binds the wrapper.
 func repeatKey(t ErrorTree) string {
 	var sb strings.Builder
 
-	sb.WriteString(t.Message())
+	msg := t.Message()
+	if t.Bound != nil {
+		msg = t.Bound.innermost().Message()
+	}
+
+	sb.WriteString(msg)
 
 	for node := range t.nodes() {
 		if node.Detail {

@@ -171,6 +171,35 @@
 // thus add context anywhere between the check and the binding, and the bound
 // line keeps that context after the path.
 //
+// An error from a method of a [Node], such as [Node.DecodeAt], is bound
+// already. A wrapper around it reads as the same wrapper inside the binding
+// does. A [Validator] that adds "decode price:" to such an error with
+// [fmt.Errorf] thus gets the row "cfg.yaml:4:3: $.price: decode price: not
+// found". The row reads the same when the call joins that problem with
+// others.
+//
+// [ErrorTree.Message] of that problem, as [Problems] yields it, holds
+// "decode price: not found" in both cases. In a join, so do the
+// [SourceError.Message] of the binding that niceyaml builds around the
+// wrapper and the mark in the excerpt. [errors.As] on a lone wrapper finds
+// the binding inside it, whose message is "not found", so a report reads
+// its fields from Problems. The message of the wrapper itself keeps the
+// position behind the context, as [fmt.Errorf] wrote it.
+//
+// An [Invalid], [Unchecked], or [Locate] with a location around such an
+// error does not move it, because the binding resolved its location in
+// the document. The excerpt then marks the value that the method read,
+// and the details of the options still show. A binding whose location did
+// not resolve takes the location of the options instead. So does an error
+// of another source, such as an included file, and its row then names
+// both files.
+//
+// Each bound problem of a join keeps its own place, whether a source bound
+// the whole join or that problem alone. The location of the options does
+// not show on it, as [Locate] describes. An included file whose check
+// returns several problems thus reads "inc.yaml:1:6: $.key: bad key" and
+// "inc.yaml:2:7: $.port: bad port".
+//
 // Each error plays one of three roles. A problem is one thing wrong, such as
 // an Error from [NewError]. A detail from [WithDetails] explains a problem,
 // as its reasons or a related location do, and is never a problem of its own.
@@ -385,8 +414,9 @@
 // yields one node of the [ErrorTree] per problem, with its details below it.
 // A row takes its fields from the node through [ErrorTree.Message],
 // [ErrorTree.Path], [ErrorTree.Name], and [ErrorTree.Position], rather than
-// from its label. [errors.As] on the Err field of the node finds the typed
-// error of that problem.
+// from its label. A tool that opens the file, such as an editor, reads
+// [ErrorTree.FilePath] in place of the name. [errors.As] on the Err field
+// of the node finds the typed error of that problem.
 //
 // A terminal gets color from
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which takes the
@@ -408,16 +438,24 @@
 // excerpts show, and it renders as the error did:
 //
 //	warnings := niceyaml.NewWarnings()
-//	if err := source.ValidateDocuments(warnings.Context(ctx), reg); err != nil {
-//		errs = append(errs, niceyaml.Detach(warnings.Report(err)))
+//	err := source.ValidateDocuments(warnings.Context(ctx), reg)
+//	if report := warnings.Report(err); report != nil {
+//		errs = append(errs, niceyaml.Detach(report))
 //	}
+//
+// Report returns the warnings of a file that passes too, so the program
+// calls it whether or not err is nil. [HasErrors] then tells the report of
+// a file that failed from the report of one that only warns. Each file gets
+// a collector of its own, because Report returns every warning that the
+// collector holds.
 //
 // The program detaches the whole error of a file once, after
 // [Warnings.Report] adds the warnings of the collector. When the bindings of
 // one source go through separate calls of Detach, they render as bindings of
-// separate sources, each under an excerpt of its own. A collector keeps the
-// Source of each warning it holds alive until the program drops the
-// collector.
+// separate sources, each under an excerpt of its own. Such a binding in the
+// error of a [Locate] result with a location reads as a live binding when its
+// source binds the result, as Locate describes. A collector keeps the Source
+// of each warning it holds alive until the program drops the collector.
 //
 // The marks of an error decorate a [line.View], so this package does not
 // depend on the printer. [Annotate] marks every binding of an error on a view
@@ -500,6 +538,9 @@
 //	if err != nil {
 //		return warnings.Report(err)
 //	}
+//
+// When the call passes, its warnings stay in the collector, and
+// [Warnings.Err] returns them.
 //
 // Wherever niceyaml reads a result to decide whether a check passed, a result
 // in which every problem is a warning counts as a pass. The self-validation

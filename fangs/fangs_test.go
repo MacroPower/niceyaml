@@ -236,7 +236,7 @@ func TestErrorHandler(t *testing.T) {
 		"niceyaml error with an empty message keeps the wrapper text and the path": {
 			err: fmt.Errorf("document 0: %w", emptyMessageErr),
 			want: report(stringtest.JoinLF(
-				"document 0: 1:1: $.name~:",
+				"1:1: $.name~: document 0:",
 				"",
 				nameExcerpt,
 			)),

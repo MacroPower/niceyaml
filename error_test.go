@@ -901,11 +901,11 @@ func TestSourceError_Error_MultiError(t *testing.T) {
 		// none, so each branch follows on a line of its own.
 		"wrapper with one verb": {
 			err:  errors.Join(fmt.Errorf("ctx: %w", boundA), plain),
-			want: stringtest.JoinLF("ctx: f.yaml:1:4: $.a: bad a", "f.yaml: plain"),
+			want: stringtest.JoinLF("f.yaml:1:4: $.a: ctx: bad a", "f.yaml: plain"),
 		},
 		"sentinel wrapper": {
 			err:  errors.Join(fmt.Errorf("%w: %w", errSentinel, boundA), plain),
-			want: stringtest.JoinLF("sentinel: f.yaml:1:4: $.a: bad a", "f.yaml: plain"),
+			want: stringtest.JoinLF("f.yaml:1:4: $.a: sentinel: bad a", "f.yaml: plain"),
 		},
 		"wrapper of two bindings": {
 			err:  errors.Join(fmt.Errorf("%w and %w", boundA, boundB), plain),
@@ -1217,6 +1217,40 @@ func TestSourceError_Error_List(t *testing.T) {
 				"f.yaml:2:4: $.b: bad b",
 			),
 		},
+		"wrapper around a bound join in a join names its source": {
+			// The join was bound before the wrapper, and the line of the
+			// wrapper reads as it does around a join that was not.
+			err: errors.Join(
+				fmt.Errorf("ctx: %w", yamltest.Bind(t, source, errors.Join(badA, badB))),
+				badC,
+			),
+			want: stringtest.JoinLF(
+				"f.yaml:3:4: $.c: bad c",
+				"f.yaml: ctx:",
+				"f.yaml:1:4: $.a: bad a",
+				"f.yaml:2:4: $.b: bad b",
+			),
+		},
+		"wrapper around a join of bindings in a join names its source": {
+			err: errors.Join(
+				fmt.Errorf("ctx: %w", errors.Join(yamltest.Bind(t, source, badA), yamltest.Bind(t, source, badB))),
+				badC,
+			),
+			want: stringtest.JoinLF(
+				"f.yaml:3:4: $.c: bad c",
+				"f.yaml: ctx:",
+				"f.yaml:1:4: $.a: bad a",
+				"f.yaml:2:4: $.b: bad b",
+			),
+		},
+		"wrapper around a join of bindings at the root names its source": {
+			err: fmt.Errorf("ctx: %w", errors.Join(yamltest.Bind(t, source, badA), yamltest.Bind(t, source, badB))),
+			want: stringtest.JoinLF(
+				"f.yaml: ctx:",
+				"f.yaml:1:4: $.a: bad a",
+				"f.yaml:2:4: $.b: bad b",
+			),
+		},
 		"wrapper with no text of its own around a join is the join": {
 			err: fmt.Errorf("%w", errors.Join(badA, badB)),
 			want: stringtest.JoinLF(
@@ -1230,7 +1264,7 @@ func TestSourceError_Error_List(t *testing.T) {
 				niceyaml.WithDetails(badC),
 			),
 			want: stringtest.JoinLF(
-				"load: f.yaml: 2 problems",
+				"f.yaml: load: 2 problems",
 				"f.yaml:1:4: $.a: bad a",
 				"f.yaml:2:4: $.b: bad b",
 			),
@@ -1258,6 +1292,24 @@ func TestSourceError_Error_List(t *testing.T) {
 			assert.Equal(t, tc.want, err.Error())
 		})
 	}
+
+	t.Run("a wrapper around a join of bindings in a later document names the document", func(t *testing.T) {
+		t.Parallel()
+
+		multi := niceyaml.NewSourceFromString(
+			stringtest.LinesLF("a: 1", "---", "a: 1", "b: 2"),
+			niceyaml.WithName("m.yaml"),
+		)
+		second := yamltest.Documents(t, multi, 2)[1]
+
+		err := second.Bind(fmt.Errorf("ctx: %w", errors.Join(second.Bind(badA), second.Bind(badB))))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"m.yaml: document 2: ctx:",
+			"m.yaml:3:4: $.a: bad a",
+			"m.yaml:4:4: $.b: bad b",
+		), err.Error())
+	})
 
 	t.Run("a wrapper carries the list", func(t *testing.T) {
 		t.Parallel()
@@ -2448,16 +2500,18 @@ func TestSourceError_Format_Plain(t *testing.T) {
 			err:   niceyaml.NewError("bad value", niceyaml.AtPath(paths.Current().Child("b").Index(0))),
 			want:  stringtest.JoinLF("$.b[0]: bad value", "", "no excerpt: resolve $.b[0]: not found"),
 		},
+		// The value holds a tab, which the excerpt draws as its one-cell
+		// picture, so the carets keep one cell per column.
 		"control characters render as pictures": {
-			input: stringtest.LinesLF(`a: "x\ty"`),
+			input: stringtest.LinesLF("a: \"x\ty\""),
 			err: niceyaml.NewError("bad", niceyaml.AtRange(
-				yamltest.LineRange(0, 3, 9),
+				yamltest.LineRange(0, 3, 8),
 			)),
 			want: stringtest.JoinLF(
 				"1:4: bad",
 				"",
-				`   1 | a: "x\ty"`,
-				"     |    ^^^^^^",
+				"   1 | a: \"x\u2409y\"",
+				"     |    ^^^^^",
 			),
 		},
 		// The root carries no message in the excerpt, so the caret alone
@@ -5745,6 +5799,31 @@ func TestAnnotate(t *testing.T) {
 		), view.String())
 	})
 
+	t.Run("a wrapper around a binding gives its message to the mark", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
+		badA := yamltest.Bind(t, source, yamltest.ErrorAt("bad a", "a"))
+		badB := yamltest.Bind(t, source, yamltest.ErrorAt("bad b", "b"))
+
+		// The mark carries the message of the tree row of each binding,
+		// so the text of the wrapper stays and the location does not
+		// repeat. The view thus agrees with the excerpt of FormatError.
+		err := errors.Join(fmt.Errorf("decode a: %w", badA), badB)
+
+		view := source.View()
+		require.True(t, niceyaml.Annotate(err, view))
+
+		want := stringtest.JoinLF(
+			"   1 | a: 1",
+			"     |    ^ decode a: bad a",
+			"   2 | b: 2",
+			"     |    ^ bad b",
+		)
+		assert.Equal(t, want, view.String())
+		assert.Contains(t, niceyaml.FormatError(err), want)
+	})
+
 	t.Run("errors of two files mark the view of one with its own errors", func(t *testing.T) {
 		t.Parallel()
 
@@ -6037,7 +6116,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 					niceyaml.Invalid(yamltest.Bind(t, src, badA), niceyaml.AtPosition(position.New(0, 3))),
 					badC,
 				)),
-				want: stringtest.JoinLF("f.yaml:1:4: f.yaml:1:4: $.a: bad a", "f.yaml:3:4: $.c: bad c"),
+				want: stringtest.JoinLF("f.yaml:1:4: $.a: bad a", "f.yaml:3:4: $.c: bad c"),
 			},
 		}
 
@@ -6669,7 +6748,7 @@ func TestFormatError_ExcerptsOff(t *testing.T) {
 		},
 		"a wrapper keeps its context": {
 			err:  fmt.Errorf("load config: %w", badPort),
-			want: "load config: secrets.yaml:3:9: $.db.port: port must be at least 1",
+			want: "secrets.yaml:3:9: $.db.port: load config: port must be at least 1",
 		},
 		"a summary keeps every branch": {
 			err: yamltest.Bind(t, secrets, niceyaml.NewSummary("2 problems",
@@ -9071,7 +9150,7 @@ func TestFormatError(t *testing.T) {
 		"lists the nodes below a wrapped binding": {
 			err: fmt.Errorf("checking: %w", excerptError(t)),
 			want: stringtest.JoinLF(
-				"checking: 2:4: $.b: bad b",
+				"2:4: $.b: checking: bad b",
 				"`-- 8:4: $.h: bad h",
 				"",
 				"   1 | a: 1",
@@ -9280,11 +9359,11 @@ func TestFormatError(t *testing.T) {
 		err := fmt.Errorf("load config: %w", bound)
 
 		// The wrapper does not format as the binding does, so the %+v verb
-		// prints the message alone.
+		// prints the message alone, as fmt wrote it.
 		assert.Equal(t, "load config: x.yaml:2:4: $.b: bad", fmt.Sprintf("%+v", err))
 
 		assert.Equal(t, stringtest.JoinLF(
-			"load config: x.yaml:2:4: $.b: bad",
+			"x.yaml:2:4: $.b: load config: bad",
 			"",
 			"   1 | a: 1",
 			"   2 | b: 2",
@@ -9550,6 +9629,73 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		assert.Equal(t, "2 problems", bound.Message())
 	})
 
+	t.Run("a join lists the message of each problem", func(t *testing.T) {
+		t.Parallel()
+
+		bad := func() error { return niceyaml.NewError("bad", niceyaml.AtPath(bPath)) }
+		worse := func() error { return niceyaml.NewError("worse", niceyaml.AtPath(bPath)) }
+
+		// Each message leaves out the location of its problem, whether a
+		// binding inside the join wrote that location or the join did.
+		tcs := map[string]struct {
+			err     error
+			want    string
+			message string
+		}{
+			"of errors": {
+				err:     errors.Join(bad(), errors.New("plain")),
+				want:    stringtest.JoinLF("x.yaml:2:6: $.a.b: bad", "x.yaml: plain"),
+				message: stringtest.JoinLF("bad", "plain"),
+			},
+			"of bindings": {
+				err:     errors.Join(src.Bind(bad()), src.Bind(errors.New("plain"))),
+				want:    stringtest.JoinLF("x.yaml:2:6: $.a.b: bad", "x.yaml: plain"),
+				message: stringtest.JoinLF("bad", "plain"),
+			},
+			"of wrappers around bindings": {
+				err: errors.Join(
+					fmt.Errorf("ctx: %w", src.Bind(bad())),
+					fmt.Errorf("ctx: %w", src.Bind(worse())),
+				),
+				want:    stringtest.JoinLF("x.yaml:2:6: $.a.b: ctx: bad", "x.yaml:2:6: $.a.b: ctx: worse"),
+				message: stringtest.JoinLF("ctx: bad", "ctx: worse"),
+			},
+			// A heading inside the join adds its own message above the
+			// messages of its problems.
+			"of a wrapper around a join": {
+				err: errors.Join(fmt.Errorf("spec: %w", errors.Join(bad(), worse())), errors.New("plain")),
+				want: stringtest.JoinLF(
+					"x.yaml: spec:",
+					"x.yaml:2:6: $.a.b: bad",
+					"x.yaml:2:6: $.a.b: worse",
+					"x.yaml: plain",
+				),
+				message: stringtest.JoinLF("spec:", "bad", "worse", "plain"),
+			},
+			"of a summary": {
+				err: errors.Join(niceyaml.NewSummary("2 problems", bad(), worse()), errors.New("plain")),
+				want: stringtest.JoinLF(
+					"x.yaml: 2 problems",
+					"x.yaml:2:6: $.a.b: bad",
+					"x.yaml:2:6: $.a.b: worse",
+					"x.yaml: plain",
+				),
+				message: stringtest.JoinLF("2 problems", "bad", "worse", "plain"),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				bound := requireBound(t, src, tc.err)
+
+				assert.Equal(t, tc.want, bound.Error())
+				assert.Equal(t, tc.message, bound.Message())
+			})
+		}
+	})
+
 	t.Run("a wrapper around a summary keeps the errors it lists out of its message", func(t *testing.T) {
 		t.Parallel()
 
@@ -9567,13 +9713,13 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 
 		assert.Equal(t,
 			stringtest.JoinLF(
-				"spec check: x.yaml: 2 problems",
+				"x.yaml: spec check: 2 problems",
 				"x.yaml:2:6: $.a.b: bad",
 				"x.yaml:2:6: $.a.b: worse",
 			),
 			children[0].Bound.Error(),
 		)
-		assert.Equal(t, "spec check: x.yaml: 2 problems", children[0].Bound.Message())
+		assert.Equal(t, "spec check: 2 problems", children[0].Bound.Message())
 	})
 
 	t.Run("the excerpt marks a range beside a path", func(t *testing.T) {
@@ -9622,9 +9768,72 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 
 		child := yamltest.DetailsOf(outer)[0].Bound
 		require.NotSame(t, inner, child)
-		assert.Equal(t, "ctx: x.yaml:2:6: $.a.b: bad", child.Message())
+		assert.Equal(t, "ctx: bad", child.Message())
+		assert.Equal(t, "x.yaml:2:6: $.a.b: ctx: bad", child.Error())
 
 		assert.Equal(t, wantB, yamltest.PathOf(t, child))
+	})
+
+	t.Run("a binding that wraps a binding reads as a binding of the wrapper", func(t *testing.T) {
+		t.Parallel()
+
+		inner := requireBound(t, src, niceyaml.NewError("bad", niceyaml.AtPath(bPath)))
+		before := requireBound(t, src, fmt.Errorf("ctx: %w", niceyaml.NewError("bad", niceyaml.AtPath(bPath))))
+
+		tcs := map[string]struct {
+			wrap    func(error) error
+			want    string
+			message string
+		}{
+			"text in front": {
+				wrap:    func(err error) error { return fmt.Errorf("ctx: %w", err) },
+				want:    before.Error(),
+				message: before.Message(),
+			},
+			"text after": {
+				wrap:    func(err error) error { return fmt.Errorf("%w: see docs", err) },
+				want:    "x.yaml:2:6: $.a.b: bad: see docs",
+				message: "bad: see docs",
+			},
+			"a wrapper around a binding that adopted a wrapper": {
+				wrap: func(err error) error {
+					mid := requireBound(t, src, errors.Join(fmt.Errorf("ctx: %w", err), errors.New("other")))
+
+					return fmt.Errorf("load: %w", yamltest.ProblemsOf(mid)[0].Bound)
+				},
+				want:    "x.yaml:2:6: $.a.b: load: ctx: bad",
+				message: "load: ctx: bad",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				// The join holds a second problem, so the binding of the
+				// wrapper is a binding of its own that adopts inner.
+				outer := requireBound(t, src, errors.Join(tc.wrap(inner), errors.New("other")))
+				child := yamltest.ProblemsOf(outer)[0].Bound
+
+				assert.Equal(t, tc.want, child.Error())
+				assert.Equal(t, tc.message, child.Message())
+				assert.Equal(t, wantB, yamltest.PathOf(t, child))
+			})
+		}
+	})
+
+	t.Run("a binding that wraps the binding of a join keeps the text of the wrapper", func(t *testing.T) {
+		t.Parallel()
+
+		joined := requireBound(t, src, errors.Join(
+			niceyaml.NewError("bad", niceyaml.AtPath(bPath)),
+			niceyaml.NewError("worse", niceyaml.AtPath(bPath)),
+		))
+		outer := requireBound(t, src, errors.Join(fmt.Errorf("spec: %w", joined), errors.New("lint")))
+
+		child := yamltest.ProblemsOf(outer)[0]
+		assert.Equal(t, "spec:", child.Bound.Message())
+		assert.Equal(t, "spec:", child.Message())
 	})
 
 	t.Run("an Error with details around a binding keeps the inner message", func(t *testing.T) {
@@ -11393,6 +11602,822 @@ func TestLocate(t *testing.T) {
 
 					assert.Equal(t, tc.problems, problems, hook)
 				}
+			})
+		}
+	})
+
+	t.Run("a bound error", func(t *testing.T) {
+		t.Parallel()
+
+		// The error of DecodeAt names the value that it read, and the
+		// location the check gives Locate names another one.
+		check := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			_, err := n.DecodeAt[int](ctx, licensePath)
+
+			return niceyaml.Locate(err, niceyaml.AtPath(closePath))
+		})
+
+		decoded := doc.Validate(t.Context(), check)
+		require.ErrorIs(t, decoded, niceyaml.ErrDecode)
+
+		// A merged document binds each error in a layer, and the layer of
+		// the value at fault is not the one that the path of the options
+		// resolves in.
+		layered := yamltest.Document(t, yamltest.Layers(t,
+			yamltest.FirstDocument(t, "license: x\nclose: 5\n", niceyaml.WithName("base.yaml")),
+			yamltest.FirstDocument(t, "close: 6\n", niceyaml.WithName("over.yaml")),
+		))
+
+		merged := layered.Validate(t.Context(), check)
+		require.ErrorIs(t, merged, niceyaml.ErrDecode)
+
+		included := niceyaml.NewSourceFromString("key: x\n", niceyaml.WithName("inc.yaml"))
+		badKey := included.Bind(niceyaml.NewError("bad key", niceyaml.AtPath(paths.Doc().Child("key"))))
+		oldKey := included.Bind(niceyaml.NewWarning("old key", niceyaml.AtPath(paths.Doc().Child("key"))))
+
+		// A check of the included file located the warning at the root of
+		// that file, and the binding of the result adopted the warning.
+		adoptedKey := included.Bind(niceyaml.Locate(oldKey, niceyaml.AtPath(paths.Doc())))
+
+		// The license holds a string, so this path does not resolve.
+		ownerPath := paths.Doc().Child("license").Child("owner")
+
+		// The close key holds a number, so this path does not resolve
+		// below the hours either.
+		hours := yamltest.At(t, doc, paths.Doc().Child("hours"))
+		deepPath := closePath.Child("deep")
+
+		// The line of each value names its document in a file of several.
+		multiSource := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\nc: 3\n", niceyaml.WithName("m.yaml"))
+		multi := yamltest.AllDocuments(t, multiSource, 2)
+
+		bDeepPath := paths.Current().Child("b").Child("deep")
+
+		secondLine := stringtest.JoinLF(
+			"   2 | ---",
+			"   3 | b: 2",
+			"   4 | c: 3",
+			"     |    ^",
+		)
+
+		licenseLine := stringtest.JoinLF(
+			"   2 |   open: 9",
+			"   3 |   close: 5",
+			"   4 | license: /root/x",
+			"     |          ^^^^^^^",
+		)
+
+		tcs := map[string]struct {
+			err     error
+			want    string
+			message string
+			// The excerpt below the row, which marks the license line of
+			// cfg.yaml when empty.
+			excerpt string
+		}{
+			"keeps a location that resolved": {
+				err:     decoded,
+				want:    "cfg.yaml:4:10: $.license: expected integer, got string",
+				message: "expected integer, got string",
+			},
+			"of a layer keeps a location that resolved": {
+				err:     merged,
+				want:    "base.yaml:1:10: $.license: expected integer, got string",
+				message: "expected integer, got string",
+				excerpt: stringtest.JoinLF(
+					"   1 | license: x",
+					"     |          ^",
+					"   2 | close: 5",
+				),
+			},
+			"without a location takes the location": {
+				err:     doc.Bind(niceyaml.Locate(doc.Bind(errors.New("no license")), niceyaml.AtPath(licensePath))),
+				want:    "cfg.yaml:4:10: $.license: no license",
+				message: "no license",
+			},
+			"whose location did not resolve takes the location": {
+				// The line of the binding names no place in the text, so the
+				// location of the options takes its place.
+				err: doc.Bind(niceyaml.Locate(
+					doc.Bind(niceyaml.NewError("no license", niceyaml.AtPosition(position.New(40, 0)))),
+					niceyaml.AtPath(licensePath),
+				)),
+				want:    "cfg.yaml:4:10: $.license: no license",
+				message: "no license",
+			},
+			"whose path did not resolve keeps that path": {
+				// The line keeps the path of the binding behind the location
+				// of the options, because that path names the key at fault.
+				err: doc.Bind(niceyaml.Locate(
+					doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath))),
+					niceyaml.AtPath(licensePath),
+				)),
+				want:    "cfg.yaml:4:10: $.license: $.license.owner: no owner",
+				message: "$.license.owner: no owner",
+			},
+			"whose path did not resolve and matches the options names it once": {
+				// The row shows the path of the options, which is the path of
+				// the binding, so the line behind it leaves the path out.
+				err: doc.Bind(niceyaml.Locate(
+					doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath))),
+					niceyaml.AtPath(ownerPath),
+				)),
+				want:    "cfg.yaml: $.license.owner: no owner",
+				message: "no owner",
+				excerpt: "no excerpt: resolve $.license.owner: not found",
+			},
+			"of a scoped node whose path matches the options names it once": {
+				err: hours.Bind(niceyaml.Locate(
+					hours.Bind(niceyaml.NewError("required", niceyaml.AtPath(deepPath))),
+					niceyaml.AtPath(deepPath),
+				)),
+				want:    "cfg.yaml: $.hours.close.deep: required",
+				message: "required",
+				excerpt: "no excerpt: resolve $.hours.close.deep: not found",
+			},
+			"in the document of the result leaves out the document": {
+				// The line of the options lies in the second document, so it
+				// names that document already.
+				err: multi[1].Bind(niceyaml.Locate(
+					multi[1].Bind(errors.New("plain")),
+					niceyaml.AtPath(paths.Current().Child("c")),
+				)),
+				want:    "m.yaml:4:4: $.c: plain",
+				message: "plain",
+				excerpt: secondLine,
+			},
+			"whose path did not resolve in the document of the result keeps that path": {
+				err: multi[1].Bind(niceyaml.Locate(
+					multi[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b").Child("deep")))),
+					niceyaml.AtPath(paths.Current().Child("c")),
+				)),
+				want:    "m.yaml:4:4: $.c: $.b.deep: bad",
+				message: "$.b.deep: bad",
+				excerpt: secondLine,
+			},
+			"in another document names that document": {
+				// The line of the options lies in the first document, so the
+				// line behind it names the second.
+				err: multi[0].Bind(niceyaml.Locate(
+					multi[1].Bind(errors.New("plain")),
+					niceyaml.AtPath(paths.Current().Child("a")),
+				)),
+				want:    "m.yaml:1:4: $.a: document 2: plain",
+				message: "document 2: plain",
+				excerpt: stringtest.JoinLF(
+					"   1 | a: 1",
+					"     |    ^",
+					"   2 | ---",
+					"   3 | b: 2",
+				),
+			},
+			"whose path matches the options in another document keeps that path": {
+				// The line names the document of the binding, so the path
+				// behind that document is not the one the row shows.
+				err: multi[0].Bind(niceyaml.Locate(
+					multi[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(bDeepPath))),
+					niceyaml.AtPath(bDeepPath),
+				)),
+				want:    "m.yaml:1:1: $.b.deep: document 2: $.b.deep: bad",
+				message: "document 2: $.b.deep: bad",
+				excerpt: stringtest.JoinLF(
+					"   1 | a: 1",
+					"     | ^",
+					"   2 | ---",
+					"   3 | b: 2",
+				),
+			},
+			"bound by the source whose path matches the options names it once": {
+				// The source binds the error outside every document, so the
+				// line of the binding does not name a document, and nothing
+				// sets its path apart from the path of the row.
+				err: multi[1].Bind(niceyaml.Locate(
+					multiSource.Bind(niceyaml.NewError("x", niceyaml.AtPath(paths.Doc().Child("c")))),
+					niceyaml.AtPath(paths.Current().Child("c")),
+				)),
+				want:    "m.yaml:4:4: $.c: x",
+				message: "x",
+				excerpt: secondLine,
+			},
+			"in a document of a result that the source binds names that document": {
+				// The source binds the result outside every document, so the
+				// row does not name the document of the binding.
+				err: multiSource.Bind(niceyaml.Locate(
+					multi[1].Bind(errors.New("plain")),
+					niceyaml.AtPath(paths.Doc().Child("c")),
+				)),
+				want:    "m.yaml: $.c: document 2: plain",
+				message: "document 2: plain",
+				excerpt: "no excerpt: path needs a document to resolve in: $.c: multiple documents in source: 2 documents",
+			},
+			"detached from the source of the result reads as a binding of it": {
+				err: multi[1].Bind(niceyaml.Locate(
+					niceyaml.Detach(multi[1].Bind(errors.New("plain"))),
+					niceyaml.AtPath(paths.Current().Child("c")),
+				)),
+				want:    "m.yaml:4:4: $.c: plain",
+				message: "plain",
+				excerpt: secondLine,
+			},
+			"detached, whose path did not resolve and matches the options names it once": {
+				err: doc.Bind(niceyaml.Locate(
+					niceyaml.Detach(doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath)))),
+					niceyaml.AtPath(ownerPath),
+				)),
+				want:    "cfg.yaml: $.license.owner: no owner",
+				message: "no owner",
+				excerpt: "no excerpt: resolve $.license.owner: not found",
+			},
+			"detached in the document of the result, whose path matches the options names it once": {
+				err: multi[1].Bind(niceyaml.Locate(
+					niceyaml.Detach(multi[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(bDeepPath)))),
+					niceyaml.AtPath(bDeepPath),
+				)),
+				want:    "m.yaml: document 2: $.b.deep: bad",
+				message: "bad",
+				excerpt: "no excerpt: resolve $.b.deep: not found",
+			},
+			"detached, whose location resolved keeps it": {
+				// The result binds in cfg.yaml again, so the excerpt shows
+				// the lines of the source.
+				err: doc.Bind(niceyaml.Locate(
+					niceyaml.Detach(doc.Bind(niceyaml.NewError("bad license", niceyaml.AtPath(licensePath)))),
+					niceyaml.AtPath(closePath),
+				)),
+				want:    "cfg.yaml:4:10: $.license: bad license",
+				message: "bad license",
+			},
+			"before the bind, whose path did not resolve and matches the options names it once": {
+				// No source binds the result, so the row is the row of the
+				// binding, which shows the path of the options already.
+				err: niceyaml.Locate(
+					doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath))),
+					niceyaml.AtPath(ownerPath),
+				),
+				want:    "cfg.yaml: $.license.owner: no owner",
+				message: "no owner",
+				excerpt: "no excerpt: resolve $.license.owner: not found",
+			},
+			"before the bind, nested results whose path matches the options name it once": {
+				// A helper and its caller both locate the binding at its path,
+				// so the row is the row of the binding.
+				err: niceyaml.Locate(
+					niceyaml.Locate(
+						doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath))),
+						niceyaml.AtPath(ownerPath),
+					),
+					niceyaml.AtPath(ownerPath),
+				),
+				want:    "cfg.yaml: $.license.owner: no owner",
+				message: "no owner",
+				excerpt: "no excerpt: resolve $.license.owner: not found",
+			},
+			"before the bind, a result at the path of the binding around one at its parent names it once": {
+				// A bind takes the location of the outer result alone, so the
+				// row leaves out the location of the inner one.
+				err: niceyaml.Locate(
+					niceyaml.Locate(
+						doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath))),
+						niceyaml.AtPath(licensePath),
+					),
+					niceyaml.AtPath(ownerPath),
+				),
+				want:    "cfg.yaml: $.license.owner: no owner",
+				message: "no owner",
+				excerpt: "no excerpt: resolve $.license.owner: not found",
+			},
+			"before the bind, a result at the path of the binding around one at a position names it once": {
+				err: niceyaml.Locate(
+					niceyaml.Locate(
+						doc.Bind(niceyaml.NewError("no owner", niceyaml.AtPath(ownerPath))),
+						niceyaml.AtPosition(position.New(0, 0)),
+					),
+					niceyaml.AtPath(ownerPath),
+				),
+				want:    "cfg.yaml: $.license.owner: no owner",
+				message: "no owner",
+				excerpt: "no excerpt: resolve $.license.owner: not found",
+			},
+			"of a warning whose path did not resolve labels the row once": {
+				// The row of the result carries the warning label, so the
+				// line of the binding behind it leaves the label out.
+				err: doc.Bind(niceyaml.Locate(
+					doc.Bind(niceyaml.NewWarning("old owner", niceyaml.AtPath(ownerPath))),
+					niceyaml.AtPath(licensePath),
+				)),
+				want:    "cfg.yaml:4:10: warning: $.license: $.license.owner: old owner",
+				message: "$.license.owner: old owner",
+			},
+			"of a warning of another source labels the row once": {
+				// The row of the result carries the warning label, so the
+				// line of the included file behind it leaves the label out.
+				err:     doc.Bind(niceyaml.Locate(oldKey, niceyaml.AtPath(licensePath))),
+				want:    "cfg.yaml:4:10: warning: $.license: inc.yaml:1:6: $.key: old key",
+				message: "inc.yaml:1:6: $.key: old key",
+			},
+			"of a warning of another source as an error has no label": {
+				// AsErrors marks the result as an error, so neither the row
+				// nor the line of the included file carries the label.
+				err:     niceyaml.AsErrors(doc.Bind(niceyaml.Locate(oldKey, niceyaml.AtPath(licensePath)))),
+				want:    "cfg.yaml:4:10: $.license: inc.yaml:1:6: $.key: old key",
+				message: "inc.yaml:1:6: $.key: old key",
+			},
+			"of an adopted warning of another source labels the row once": {
+				// The line of the included file carries the label of the
+				// warning that its binding adopted, and leaves it out here.
+				err:     doc.Bind(niceyaml.Locate(adoptedKey, niceyaml.AtPath(licensePath))),
+				want:    "cfg.yaml:4:10: warning: $.license: inc.yaml:1:6: $.key: old key",
+				message: "inc.yaml:1:6: $.key: old key",
+			},
+			"of an adopted warning of another source as an error has no label": {
+				err:     niceyaml.AsErrors(doc.Bind(niceyaml.Locate(adoptedKey, niceyaml.AtPath(licensePath)))),
+				want:    "cfg.yaml:4:10: $.license: inc.yaml:1:6: $.key: old key",
+				message: "inc.yaml:1:6: $.key: old key",
+			},
+			"of a wrapper of an adopted warning of another source labels the row once": {
+				err: doc.Bind(niceyaml.Locate(
+					included.Bind(fmt.Errorf("lint: %w", adoptedKey)),
+					niceyaml.AtPath(licensePath),
+				)),
+				want:    "cfg.yaml:4:10: warning: $.license: lint: inc.yaml:1:6: $.key: old key",
+				message: "lint: inc.yaml:1:6: $.key: old key",
+			},
+			"of another source takes the location": {
+				// The location of the options names a place in cfg.yaml that
+				// the binding does not, so the row names both files.
+				err:     doc.Bind(niceyaml.Locate(badKey, niceyaml.AtPath(licensePath))),
+				want:    "cfg.yaml:4:10: $.license: inc.yaml:1:6: $.key: bad key",
+				message: "inc.yaml:1:6: $.key: bad key",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				excerpt := tc.excerpt
+				if excerpt == "" {
+					excerpt = licenseLine
+				}
+
+				assert.Equal(t, tc.want, tc.err.Error())
+				assert.Equal(t, tc.message, yamltest.OnlyProblem(t, tc.err).Message())
+				assert.Equal(t, stringtest.JoinLF(tc.want, "", excerpt), niceyaml.FormatError(tc.err))
+			})
+		}
+
+		t.Run("detached, whose location resolved binds in the source again", func(t *testing.T) {
+			t.Parallel()
+
+			// The result binds in cfg.yaml at the location of the detached
+			// binding, as it does for a live binding. A view of the source
+			// thus gets its mark.
+			detached := niceyaml.Detach(doc.Bind(niceyaml.NewError("bad license", niceyaml.AtPath(licensePath))))
+			err := doc.Bind(niceyaml.Locate(detached, niceyaml.AtPath(closePath)))
+
+			problem := yamltest.OnlyProblem(t, err)
+			assert.Same(t, doc.Source(), problem.Source())
+
+			root, ok := problem.Bound.Document()
+			require.True(t, ok)
+			assert.Same(t, doc, root)
+
+			view := doc.Source().View()
+			require.True(t, niceyaml.Annotate(err, view))
+			assert.Equal(t, stringtest.JoinLF(
+				"   1 | hours:",
+				"   2 |   open: 9",
+				"   3 |   close: 5",
+				"   4 | license: /root/x",
+				"     |          ^^^^^^^ bad license",
+			), view.String())
+		})
+
+		t.Run("detached, whose location resolved shares the excerpt of its source", func(t *testing.T) {
+			t.Parallel()
+
+			// A sibling bound in cfg.yaml shares the excerpt, and the rows
+			// sort by position.
+			detached := niceyaml.Detach(doc.Bind(niceyaml.NewError("bad license", niceyaml.AtPath(licensePath))))
+			err := doc.Bind(errors.Join(
+				niceyaml.Locate(detached, niceyaml.AtPath(closePath)),
+				niceyaml.NewError("bad open", niceyaml.AtPath(paths.Doc().Child("hours").Child("open"))),
+			))
+
+			assert.Equal(t, stringtest.JoinLF(
+				"|-- cfg.yaml:2:9: $.hours.open: bad open",
+				"`-- cfg.yaml:4:10: $.license: bad license",
+				"",
+				"   1 | hours:",
+				"   2 |   open: 9",
+				"     |         ^ bad open",
+				"   3 |   close: 5",
+				"   4 | license: /root/x",
+				"     |          ^^^^^^^ bad license",
+			), niceyaml.FormatError(err))
+		})
+
+		t.Run("detached in the error of the result binds in the source again", func(t *testing.T) {
+			t.Parallel()
+
+			openPath := paths.Doc().Child("hours").Child("open")
+			tooEarly := func() error { return niceyaml.NewError("too early", niceyaml.AtPath(openPath)) }
+			badLicense := func() error { return niceyaml.NewError("bad license", niceyaml.AtPath(licensePath)) }
+			hoursClose := paths.Doc().Child("hours").Child("close")
+
+			// Each case builds an error with live bindings, and again with
+			// detach applied where the case says. Doc binds the result
+			// around each. The detached bindings bind in cfg.yaml again, so
+			// both results read alike.
+			tcs := map[string]struct {
+				bind func(detach func(error) error) error
+				wrap func(error) error
+				want string
+			}{
+				"detail of a binding whose location resolved": {
+					bind: func(detach func(error) error) error {
+						return detach(doc.Bind(niceyaml.NewError("bad license",
+							niceyaml.AtPath(licensePath), niceyaml.WithDetails(tooEarly()))))
+					},
+					wrap: func(err error) error { return niceyaml.Locate(err, niceyaml.AtPath(closePath)) },
+					want: stringtest.JoinLF(
+						"cfg.yaml:4:10: $.license: bad license",
+						"`-- 2:9: $.hours.open: too early",
+						"",
+						"   1 | hours:",
+						"   2 |   open: 9",
+						"     |         ^ too early",
+						"   3 |   close: 5",
+						"   4 | license: /root/x",
+						"     |          ^^^^^^^",
+					),
+				},
+				"detail of a binding below Invalid": {
+					bind: func(detach func(error) error) error {
+						return detach(doc.Bind(niceyaml.NewError("bad license",
+							niceyaml.AtPath(licensePath), niceyaml.WithDetails(tooEarly()))))
+					},
+					wrap: func(err error) error { return niceyaml.Invalid(err, niceyaml.AtPath(closePath)) },
+					want: stringtest.JoinLF(
+						"cfg.yaml:4:10: $.license: bad license",
+						"`-- 2:9: $.hours.open: too early",
+						"",
+						"   1 | hours:",
+						"   2 |   open: 9",
+						"     |         ^ too early",
+						"   3 |   close: 5",
+						"   4 | license: /root/x",
+						"     |          ^^^^^^^",
+					),
+				},
+				"detail of a binding below a wrapper that rewrites its text": {
+					// The wrapper text names no location, so the row shows it
+					// as the row of a live binding does.
+					bind: func(detach func(error) error) error {
+						return detach(doc.Bind(niceyaml.NewError("bad license",
+							niceyaml.AtPath(licensePath), niceyaml.WithDetails(tooEarly()))))
+					},
+					wrap: func(err error) error {
+						return niceyaml.Locate(yamltest.RewriteError{Err: err}, niceyaml.AtPath(closePath))
+					},
+					want: stringtest.JoinLF(
+						"rewritten",
+						"`-- 2:9: $.hours.open: too early",
+						"",
+						"   1 | hours:",
+						"   2 |   open: 9",
+						"     |         ^ too early",
+						"   3 |   close: 5",
+						"   4 | license: /root/x",
+						"     |          ^^^^^^^",
+					),
+				},
+				"binding of the source below a detail of another source": {
+					bind: func(detach func(error) error) error {
+						key := included.Bind(niceyaml.NewError("bad key",
+							niceyaml.AtPath(paths.Doc().Child("key")), niceyaml.WithDetails(doc.Bind(tooEarly()))))
+
+						return detach(doc.Bind(niceyaml.NewError("bad license",
+							niceyaml.AtPath(licensePath), niceyaml.WithDetails(key))))
+					},
+					wrap: func(err error) error { return niceyaml.Locate(err, niceyaml.AtPath(closePath)) },
+					want: stringtest.JoinLF(
+						"cfg.yaml:4:10: $.license: bad license",
+						"`-- inc.yaml:1:6: $.key: bad key",
+						"    `-- cfg.yaml:2:9: $.hours.open: too early",
+						"",
+						"cfg.yaml",
+						"   1 | hours:",
+						"   2 |   open: 9",
+						"     |         ^ too early",
+						"   3 |   close: 5",
+						"   4 | license: /root/x",
+						"     |          ^^^^^^^",
+						"",
+						"inc.yaml",
+						"   1 | key: x",
+						"     |      ^ bad key",
+					),
+				},
+				"problem of a summary whose location did not resolve": {
+					// The summary takes the location of the options, and its
+					// problems keep their own.
+					bind: func(detach func(error) error) error {
+						return detach(doc.Bind(niceyaml.NewSummary("two problems", tooEarly(), badLicense())))
+					},
+					wrap: func(err error) error {
+						return niceyaml.Locate(err, niceyaml.AtPath(hoursClose))
+					},
+					want: stringtest.JoinLF(
+						"cfg.yaml:3:10: $.hours.close: two problems",
+						"|-- 2:9: $.hours.open: too early",
+						"`-- 4:10: $.license: bad license",
+						"",
+						"   1 | hours:",
+						"   2 |   open: 9",
+						"     |         ^ too early",
+						"   3 |   close: 5",
+						"     |          ^",
+						"   4 | license: /root/x",
+						"     |          ^^^^^^^ bad license",
+					),
+				},
+				"problems of a join": {
+					bind: func(detach func(error) error) error {
+						return detach(errors.Join(
+							doc.Bind(niceyaml.NewError("bad license",
+								niceyaml.AtPath(licensePath), niceyaml.WithDetails(tooEarly()))),
+							doc.Bind(errors.New("no owner")),
+						))
+					},
+					wrap: func(err error) error { return niceyaml.Locate(err, niceyaml.AtPath(hoursClose)) },
+					want: stringtest.JoinLF(
+						"|-- cfg.yaml:4:10: $.license: bad license",
+						"|   `-- 2:9: $.hours.open: too early",
+						"`-- cfg.yaml: no owner",
+						"",
+						"   1 | hours:",
+						"   2 |   open: 9",
+						"     |         ^ too early",
+						"   3 |   close: 5",
+						"   4 | license: /root/x",
+						"     |          ^^^^^^^ bad license",
+					),
+				},
+				"problem of a join beside a live one": {
+					bind: func(detach func(error) error) error {
+						return errors.Join(detach(doc.Bind(tooEarly())), doc.Bind(badLicense()))
+					},
+					wrap: func(err error) error { return niceyaml.Locate(err, niceyaml.AtPath(hoursClose)) },
+					want: stringtest.JoinLF(
+						"|-- cfg.yaml:2:9: $.hours.open: too early",
+						"`-- cfg.yaml:4:10: $.license: bad license",
+						"",
+						"   1 | hours:",
+						"   2 |   open: 9",
+						"     |         ^ too early",
+						"   3 |   close: 5",
+						"   4 | license: /root/x",
+						"     |          ^^^^^^^ bad license",
+					),
+				},
+				"problem of a join below Invalid": {
+					bind: func(detach func(error) error) error {
+						return errors.Join(detach(doc.Bind(tooEarly())), doc.Bind(badLicense()))
+					},
+					wrap: func(err error) error { return niceyaml.Invalid(err, niceyaml.AtPath(hoursClose)) },
+					want: stringtest.JoinLF(
+						"|-- cfg.yaml:2:9: $.hours.open: too early",
+						"`-- cfg.yaml:4:10: $.license: bad license",
+						"",
+						"   1 | hours:",
+						"   2 |   open: 9",
+						"     |         ^ too early",
+						"   3 |   close: 5",
+						"   4 | license: /root/x",
+						"     |          ^^^^^^^ bad license",
+					),
+				},
+				"problem of a join below a wrapper": {
+					bind: func(detach func(error) error) error {
+						joined := errors.Join(detach(doc.Bind(tooEarly())), doc.Bind(badLicense()))
+
+						return fmt.Errorf("check: %w", joined)
+					},
+					wrap: func(err error) error { return niceyaml.Locate(err, niceyaml.AtPath(hoursClose)) },
+					want: stringtest.JoinLF(
+						"cfg.yaml:3:10: $.hours.close: check:",
+						"|-- 2:9: $.hours.open: too early",
+						"`-- 4:10: $.license: bad license",
+						"",
+						"   1 | hours:",
+						"   2 |   open: 9",
+						"     |         ^ too early",
+						"   3 |   close: 5",
+						"     |          ^",
+						"   4 | license: /root/x",
+						"     |          ^^^^^^^ bad license",
+					),
+				},
+				"wrapper of a problem of a join": {
+					bind: func(detach func(error) error) error {
+						wrapped := fmt.Errorf("check: %w", detach(doc.Bind(tooEarly())))
+
+						return errors.Join(wrapped, doc.Bind(badLicense()))
+					},
+					wrap: func(err error) error { return niceyaml.Locate(err, niceyaml.AtPath(hoursClose)) },
+					want: stringtest.JoinLF(
+						"|-- cfg.yaml:2:9: $.hours.open: check: too early",
+						"`-- cfg.yaml:4:10: $.license: bad license",
+						"",
+						"   1 | hours:",
+						"   2 |   open: 9",
+						"     |         ^ check: too early",
+						"   3 |   close: 5",
+						"   4 | license: /root/x",
+						"     |          ^^^^^^^ bad license",
+					),
+				},
+				"problem of a summary in the error": {
+					bind: func(detach func(error) error) error {
+						return niceyaml.NewSummary("two problems", detach(doc.Bind(tooEarly())), doc.Bind(badLicense()))
+					},
+					wrap: func(err error) error { return niceyaml.Locate(err, niceyaml.AtPath(hoursClose)) },
+					want: stringtest.JoinLF(
+						"cfg.yaml:3:10: $.hours.close: two problems",
+						"|-- 2:9: $.hours.open: too early",
+						"`-- 4:10: $.license: bad license",
+						"",
+						"   1 | hours:",
+						"   2 |   open: 9",
+						"     |         ^ too early",
+						"   3 |   close: 5",
+						"     |          ^",
+						"   4 | license: /root/x",
+						"     |          ^^^^^^^ bad license",
+					),
+				},
+				"detail of an error in the error": {
+					bind: func(detach func(error) error) error {
+						return niceyaml.NewError("closes early", niceyaml.WithDetails(detach(doc.Bind(tooEarly()))))
+					},
+					wrap: func(err error) error { return niceyaml.Locate(err, niceyaml.AtPath(hoursClose)) },
+					want: stringtest.JoinLF(
+						"cfg.yaml:3:10: $.hours.close: closes early",
+						"`-- 2:9: $.hours.open: too early",
+						"",
+						"   1 | hours:",
+						"   2 |   open: 9",
+						"     |         ^ too early",
+						"   3 |   close: 5",
+						"     |          ^",
+						"   4 | license: /root/x",
+					),
+				},
+				"detail of a located result in the error": {
+					bind: func(detach func(error) error) error {
+						return niceyaml.Locate(errors.New("closes early"),
+							niceyaml.AtPath(hoursClose), niceyaml.WithDetails(detach(doc.Bind(tooEarly()))))
+					},
+					wrap: func(err error) error { return niceyaml.Locate(err, niceyaml.AtPath(licensePath)) },
+					want: stringtest.JoinLF(
+						"cfg.yaml:4:10: $.license: closes early",
+						"`-- 2:9: $.hours.open: too early",
+						"",
+						"   1 | hours:",
+						"   2 |   open: 9",
+						"     |         ^ too early",
+						"   3 |   close: 5",
+						"   4 | license: /root/x",
+						"     |          ^^^^^^^",
+					),
+				},
+			}
+
+			for name, tc := range tcs {
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+
+					live := doc.Bind(tc.wrap(tc.bind(func(err error) error { return err })))
+					detached := doc.Bind(tc.wrap(tc.bind(func(err error) error { return niceyaml.Detach(err) })))
+
+					assert.Equal(t, tc.want, niceyaml.FormatError(live), "live")
+					assert.Equal(t, tc.want, niceyaml.FormatError(detached), "detached")
+
+					// A view of cfg.yaml gets the marks of the live result.
+					liveView, detachedView := doc.Source().View(), doc.Source().View()
+					require.True(t, niceyaml.Annotate(live, liveView))
+					require.True(t, niceyaml.Annotate(detached, detachedView))
+					assert.Equal(t, liveView.String(), detachedView.String())
+
+					// Each problem of the result reports the Source of the
+					// problem of the live result.
+					want := make([]*niceyaml.Source, 0, 2)
+					for problem := range niceyaml.Problems(live) {
+						want = append(want, problem.Source())
+					}
+
+					got := make([]*niceyaml.Source, 0, 2)
+					for problem := range niceyaml.Problems(detached) {
+						got = append(got, problem.Source())
+					}
+
+					assert.Equal(t, want, got)
+				})
+			}
+		})
+
+		t.Run("detached, as a detail of the options renders as a source of its own", func(t *testing.T) {
+			t.Parallel()
+
+			// The options give the detail, so it stands outside the error of
+			// the result and keeps an excerpt of its own, as it does as a
+			// detail of NewError.
+			detail := niceyaml.Detach(doc.Bind(niceyaml.NewError("too early",
+				niceyaml.AtPath(paths.Doc().Child("hours").Child("open")))))
+			err := doc.Bind(niceyaml.Locate(errors.New("closes early"),
+				niceyaml.AtPath(paths.Doc().Child("hours").Child("close")), niceyaml.WithDetails(detail)))
+
+			assert.Equal(t, stringtest.JoinLF(
+				"cfg.yaml:3:10: $.hours.close: closes early",
+				"`-- cfg.yaml:2:9: $.hours.open: too early",
+				"",
+				"cfg.yaml",
+				"   1 | hours:",
+				"   2 |   open: 9",
+				"   3 |   close: 5",
+				"     |          ^",
+				"   4 | license: /root/x",
+				"",
+				"cfg.yaml",
+				"   1 | hours:",
+				"   2 |   open: 9",
+				"     |         ^ too early",
+				"   3 |   close: 5",
+				"   4 | license: /root/x",
+			), niceyaml.FormatError(err))
+		})
+
+		t.Run("detached from a scoped node binds at a node of its path", func(t *testing.T) {
+			t.Parallel()
+
+			// The Node of the detached binding is gone, so the result binds
+			// to the Node of cfg.yaml at the path of that Node.
+			badClose := func() error { return hours.Bind(niceyaml.NewError("bad close", niceyaml.AtPath(closePath))) }
+
+			for name, inner := range map[string]error{
+				"live":     badClose(),
+				"detached": niceyaml.Detach(badClose()),
+			} {
+				err := doc.Bind(niceyaml.Locate(inner, niceyaml.AtPath(licensePath)))
+				require.EqualError(t, err, "cfg.yaml:3:10: $.hours.close: bad close", name)
+
+				node, ok := yamltest.OnlyProblem(t, err).Bound.Node()
+				require.True(t, ok, name)
+				assert.Equal(t, "$.hours", node.Path().String(), name)
+				assert.Same(t, doc, node.Document(), name)
+			}
+		})
+	})
+
+	t.Run("each bound problem of a join keeps its place", func(t *testing.T) {
+		t.Parallel()
+
+		included := yamltest.FirstDocument(t, "key: 1\nport: x\n", niceyaml.WithName("inc.yaml"))
+
+		tcs := map[string]struct {
+			err  error
+			want string
+		}{
+			"join that the source of the result bound": {
+				err:  doc.Bind(errors.Join(errors.New("a"), errors.New("b"))),
+				want: "cfg.yaml: a\ncfg.yaml: b",
+			},
+			"join of bindings": {
+				err:  errors.Join(doc.Bind(errors.New("a")), doc.Bind(errors.New("b"))),
+				want: "cfg.yaml: a\ncfg.yaml: b",
+			},
+			"join that another source bound": {
+				err: included.Bind(errors.Join(
+					niceyaml.NewError("bad key", niceyaml.AtPath(paths.Current().Child("key"))),
+					niceyaml.NewError("bad port", niceyaml.AtPath(paths.Current().Child("port"))),
+				)),
+				want: "inc.yaml:1:6: $.key: bad key\ninc.yaml:2:7: $.port: bad port",
+			},
+			"join of a binding and a problem that no source bound": {
+				// The problem that no source bound takes the location.
+				err:  errors.Join(doc.Bind(errors.New("a")), errors.New("b")),
+				want: "cfg.yaml:4:10: $.license: b\ncfg.yaml: a",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := doc.Bind(niceyaml.Locate(tc.err, niceyaml.AtPath(licensePath)))
+
+				require.EqualError(t, err, tc.want)
 			})
 		}
 	})

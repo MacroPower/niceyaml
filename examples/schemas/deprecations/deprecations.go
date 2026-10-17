@@ -58,7 +58,7 @@ func main() {
 	// warning to the collector on the context and returns the violation
 	// alone. Report sorts the warnings and the violation into one list. A
 	// warning that repeats the message and detail of an earlier one keeps
-	// its row but loses its detail and its mark in the excerpt.
+	// its row and its mark in the excerpt but loses its detail.
 	//
 	// Kardemummabulle merges Kanelbulle through <<, so the check reaches the
 	// vegan key of Kanelbulle at $.fika[0] and at $.fika[2]. Both paths lead

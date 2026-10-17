@@ -1,13 +1,17 @@
 // Package cells measures the terminal cells that a line of content takes
 // as the printer renders it.
 //
-// A rendered row shows each control character as a one-cell picture and
-// each grapheme cluster at its display width. A cluster can hold several
-// runes, as a combining mark, an emoji zero-width joiner sequence, or a
-// keycap does, but positions count runes. A [Row] maps each rune column to
-// its cells. The first rune of a cluster takes the width of the whole
-// cluster, and every other rune of it does not take a cell. A marker aimed
-// at any rune of a cluster therefore lands under the whole cluster.
+// A rendered row shows each control character in one cell, as the rune
+// that [escape.Control] puts in its place. That rune is a picture for a C0
+// control or DEL, and U+FFFD for a C1 control.
+//
+// A rendered row shows each grapheme cluster at its display width. A
+// cluster can hold several runes, as a combining mark, an emoji zero-width
+// joiner sequence, or a keycap does, but positions count runes. A [Row]
+// maps each rune column to its cells. The first rune of a cluster takes
+// the width of the whole cluster, and every other rune of it does not take
+// a cell. A marker aimed at any rune of a cluster therefore lands under
+// the whole cluster.
 //
 //	row := cells.NewRow("a: 1️⃣ x")
 //	row.Width(7) // 6, the cells before x
@@ -216,7 +220,8 @@ func CutWidth(s string, left, right int) (string, int) {
 // character that a user sees. It splits s at the grapheme cluster boundaries of
 // the raw text. These match the boundaries that [NewRow] uses except
 // around control characters. NewRow segments each control character as
-// its picture, so a CR LF pair is one cluster here but two in a [Row].
+// the rune that [escape.Control] puts in its place. A CR LF pair is thus
+// one cluster here but two in a [Row].
 func TrimLastCluster(s string) string {
 	var cluster string
 

@@ -4,12 +4,14 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"weak"
 
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -18,11 +20,12 @@ import (
 // token, and parse of it. A detached copy keeps what renders the error
 // but not the Source. A program that keeps errors past the files they came
 // from detaches each error first, as a check that reports every file at
-// the end does:
+// the end does. Here check returns the report of the file from
+// [Warnings.Report], warnings included:
 //
 //	for _, path := range files {
-//		if err := check(path); err != nil {
-//			errs = append(errs, niceyaml.Detach(err))
+//		if report := check(path); report != nil {
+//			kept = append(kept, niceyaml.Detach(report))
 //		}
 //	}
 //
@@ -58,7 +61,9 @@ import (
 // of its own. A program thus calls Detach one time on the error that it
 // keeps, after [Warnings.Report] adds the warnings of a collector to it.
 // The collector keeps the Source of each warning it holds alive until the
-// program drops the collector.
+// program drops the collector. A detached binding in the error of a
+// [Locate] result with a location reads as a live binding when its Source
+// binds the result, as Locate describes.
 //
 // Detach rebuilds the errors that this package builds around bindings,
 // the joins of [errors.Join], and the wrappers of [fmt.Errorf], each with
@@ -103,7 +108,8 @@ type detacher struct {
 	rebuilt map[error]error
 	// What the detached bindings keep of each Source, one per Source.
 	sources map[*Source]*keptSource
-	// What the detached bindings keep of each document, one per root.
+	// What the detached bindings keep of the document and the Node each is
+	// bound to, one per Node.
 	docs map[*Node]*keptDocument
 	// The bindings that the walk detached. Their marks decide the lines
 	// that each source keeps.
@@ -346,11 +352,12 @@ func (d *detacher) mapped(err error) error {
 
 // keep returns what a detached copy of x keeps of the source and the
 // document x is bound in. The copies of the bindings of one source share
-// what they keep of it, and so do those of one document.
+// what they keep of it, and so do those of one Node.
 func (d *detacher) keep(x *SourceError) (*keptSource, *keptDocument) {
 	src, ok := d.sources[x.source]
 	if !ok {
 		src = &keptSource{
+			from:     weak.Make(x.source),
 			name:     x.source.Name(),
 			filePath: x.source.FilePath(),
 			shows:    x.source.ShowsExcerpts(),
@@ -364,12 +371,10 @@ func (d *detacher) keep(x *SourceError) (*keptSource, *keptDocument) {
 		return src, nil
 	}
 
-	root := x.node.Document()
-
-	doc, ok := d.docs[root]
+	doc, ok := d.docs[x.node]
 	if !ok {
-		doc = &keptDocument{index: root.DocumentIndex(), label: documentName(x.node)}
-		d.docs[root] = doc
+		doc = &keptDocument{index: x.node.DocumentIndex(), label: documentName(x.node), path: x.node.Path()}
+		d.docs[x.node] = doc
 	}
 
 	return src, doc
@@ -378,7 +383,7 @@ func (d *detacher) keep(x *SourceError) (*keptSource, *keptDocument) {
 // keepLines copies the lines that the excerpts of the detached bindings
 // show, for each source that the walk detached bindings of.
 func (d *detacher) keepLines() {
-	sources, positions := treePositions(d.met, true, nil, nil)
+	sources, positions := treePositions(d.met, true, nil, nil, nil)
 
 	for _, origin := range sources {
 		src := origin.live()
@@ -399,6 +404,10 @@ func (d *detacher) keepLines() {
 // makes one keptSource per Source, which every binding it detaches from
 // that Source shares.
 type keptSource struct {
+	// The Source the text came from. The weak pointer does not keep the
+	// Source alive, and [sameSource] compares a detached binding with a
+	// live one through it.
+	from     weak.Pointer[Source]
 	name     string
 	filePath string
 	// A copy of each line that an excerpt shows, in the order of the
@@ -420,9 +429,20 @@ func (k *keptSource) Name() string {
 	return k.name
 }
 
+// FilePath returns the file path the Source had, as [Source.FilePath]
+// returned it.
+func (k *keptSource) FilePath() string {
+	return k.filePath
+}
+
 // live returns nil, because k does not hold a Source.
 func (*keptSource) live() *Source {
 	return nil
+}
+
+// identity returns the weak pointer to the Source that k came from.
+func (k *keptSource) identity() weak.Pointer[Source] {
+	return k.from
 }
 
 // keep copies the lines of src that an excerpt with marks shows, with the
@@ -505,12 +525,14 @@ func (k *keptSource) move(m excerpt.Mark) excerpt.Mark {
 }
 
 // keptDocument is what a detached binding keeps of the document it was
-// bound in.
+// bound in and of the Node it was bound to.
 type keptDocument struct {
 	// The label that names the document in the message of a binding that
 	// does not carry a position, as "document 3", or "" in a file of one
 	// document.
 	label string
+	// The path of the Node, as [Node.Path] reports it.
+	path paths.Path
 	// The index of the document among every document of its file.
 	index int
 }

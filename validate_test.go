@@ -6767,7 +6767,7 @@ func TestMultiValidator(t *testing.T) {
 		assert.Equal(t, "x.yaml:2:6: $.a.b: bad b", err.Error())
 	})
 
-	t.Run("a sentinel around a binding stands in front of its position", func(t *testing.T) {
+	t.Run("a sentinel around a binding joins its message", func(t *testing.T) {
 		t.Parallel()
 
 		errInvalid := errors.New("invalid")
@@ -6779,7 +6779,7 @@ func TestMultiValidator(t *testing.T) {
 		require.ErrorIs(t, err, errInvalid)
 		assert.Equal(t, stringtest.JoinLF(
 			"x.yaml:2:6: $.a.b: bad b",
-			"invalid: x.yaml:3:6: $.a.c: bad c",
+			"x.yaml:3:6: $.a.c: invalid: bad c",
 		), err.Error())
 	})
 
@@ -7596,6 +7596,65 @@ func TestEach(t *testing.T) {
 		// A typed nil pointer reports no failure, as it does from a
 		// validator given alone.
 		require.NoError(t, doc.Validate(t.Context(), niceyaml.Each(items, typedNilValidator())))
+	})
+
+	t.Run("a wrapper around the error of a Node method names one location", func(t *testing.T) {
+		t.Parallel()
+
+		// DecodePrice wraps the error of DecodeAt, which is bound already,
+		// as a caller adds context to an error.
+		decodePrice := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			_, err := n.DecodeAt[int](ctx, paths.Current().Child("price"))
+			if err != nil {
+				return fmt.Errorf("decode price: %w", err)
+			}
+
+			return nil
+		})
+
+		const message = "decode price: expected integer, got string"
+
+		tcs := map[string]struct {
+			input string
+			want  []string
+		}{
+			"one item fails": {
+				input: "menu:\n  - item: a\n    price: free\n  - item: b\n    price: 2\n",
+				want:  []string{"f.yaml:3:12: $.menu[0].price: " + message},
+			},
+			"two items fail": {
+				input: "menu:\n  - item: a\n    price: free\n  - item: b\n    price: free\n",
+				want: []string{
+					"f.yaml:3:12: $.menu[0].price: " + message,
+					"f.yaml:5:12: $.menu[1].price: " + message,
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				menu := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("f.yaml"))
+				err := menu.Validate(t.Context(), niceyaml.Each(paths.Current().Child("menu").IndexAll(), decodePrice))
+				require.Error(t, err)
+
+				var labels []string
+
+				for problem := range niceyaml.Problems(err) {
+					assert.Equal(t, message, problem.Message())
+
+					labels = append(labels, problem.Label)
+				}
+
+				assert.Equal(t, tc.want, labels)
+
+				// The excerpt marks each location, and no caret repeats it.
+				formatted := niceyaml.FormatError(err)
+				assert.Contains(t, formatted, "    price: free\n     |            ^^^^")
+				assert.Equal(t, 1, strings.Count(formatted, "f.yaml:3:12:"))
+			})
+		}
 	})
 
 	t.Run("returns the error of Nodes", func(t *testing.T) {

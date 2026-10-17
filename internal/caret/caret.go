@@ -45,7 +45,7 @@ type Row struct {
 	// with a space after them when the row holds text.
 	Marker string
 	// Text holds the texts of the labels of the run joined with "; ", with
-	// every control character as its picture.
+	// every control character as [escape.Control] draws it.
 	Text string
 	// Col is the column of the line that the first caret sits under.
 	Col int

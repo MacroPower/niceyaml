@@ -152,7 +152,7 @@ func TestPrinter_PrintError(t *testing.T) {
 		},
 		"wrapped bound error keeps the wrapper's context": {
 			err:  fmt.Errorf("document 0: %w", bound),
-			want: stringtest.JoinLF("document 0: 2:4: $.b: bad", "", excerpt),
+			want: stringtest.JoinLF("2:4: $.b: document 0: bad", "", excerpt),
 		},
 		"bound error on an indented line": {
 			err:  yamltest.Bind(t, nested, yamltest.ErrorAt("bad", "a", "b")),
@@ -208,12 +208,15 @@ func TestPrinter_PrintError(t *testing.T) {
 				fmt.Errorf("second: %w", yamltest.Bind(t, other, yamltest.ErrorAt("bad", "c"))),
 			),
 			want: stringtest.JoinLF(
-				"├── first: 2:4: $.b: bad",
-				"└── second: 1:4: $.c: bad",
+				"├── 2:4: $.b: first: bad",
+				"└── 1:4: $.c: second: bad",
 				"",
-				labeled,
+				stringtest.JoinLF(rowA, markedB, "<textError>   ^ first: bad</textError>"),
 				"",
-				otherLabeled,
+				stringtest.JoinLF(
+					"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>3</genericError>",
+					"<textError>   ^ second: bad</textError>",
+				),
 			),
 		},
 		"joined bound errors of one source share an excerpt": {
@@ -226,6 +229,38 @@ func TestPrinter_PrintError(t *testing.T) {
 				"└── 2:4: $.b: bad b",
 				"",
 				annotated,
+			),
+		},
+		"a bound join of wrapped bindings labels each caret with its message": {
+			err: yamltest.Bind(t, source, errors.Join(
+				fmt.Errorf("decode: %w", yamltest.Bind(t, source, yamltest.ErrorAt("bad a", "a"))),
+				fmt.Errorf("decode: %w", yamltest.Bind(t, source, yamltest.ErrorAt("bad b", "b"))),
+			)),
+			want: stringtest.JoinLF(
+				"├── 1:4: $.a: decode: bad a",
+				"└── 2:4: $.b: decode: bad b",
+				"",
+				markedA,
+				"<textError>   ^ decode: bad a</textError>",
+				markedB,
+				"<textError>   ^ decode: bad b</textError>",
+			),
+		},
+		"wrapped warnings with one message in one source keep both carets": {
+			err: yamltest.Bind(t, source, errors.Join(
+				fmt.Errorf("ctx: %w", yamltest.Bind(t, source,
+					niceyaml.NewWarning("old", niceyaml.AtPath(paths.Current().Child("a"))))),
+				fmt.Errorf("ctx: %w", yamltest.Bind(t, source,
+					niceyaml.NewWarning("old", niceyaml.AtPath(paths.Current().Child("b"))))),
+			)),
+			want: stringtest.JoinLF(
+				"├── 1:4: <textWarn>warning:</textWarn> $.a: ctx: old",
+				"└── 2:4: <textWarn>warning:</textWarn> $.b: ctx: old",
+				"",
+				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericWarn>1</genericWarn>",
+				"<textWarn>   ^ warning: ctx: old</textWarn>",
+				"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericWarn>2</genericWarn>",
+				"<textWarn>   ^ warning: ctx: old</textWarn>",
 			),
 		},
 		"joined bound errors of named sources print each name": {

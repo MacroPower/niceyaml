@@ -805,9 +805,9 @@ func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 // a `$` path from the root. Bind resolves every location as it binds, so
 // the position that [SourceError.Error] reports and the excerpt that
 // [SourceError.Excerpt] returns stay fixed from then on. The Node methods
-// bind their errors already. Bind is for an error built elsewhere, such as
-// the result of a check that the caller runs on a value it took from the
-// document:
+// bind their errors already. Bind is for errors that other code builds,
+// such as the results of checks that callers run on values that they took
+// from the document:
 //
 //	return item.Bind(check(value))
 //

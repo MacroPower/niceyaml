@@ -12519,6 +12519,45 @@ func (*canceling) UnmarshalYAML(ctx context.Context, _ []byte) error {
 	return errUnmarshal
 }
 
+// tierConfig names a service and its tier, which a T decodes.
+type tierConfig[T any] struct {
+	Name string `yaml:"name"`
+	Tier T      `yaml:"tier"`
+}
+
+// wrappedTierWarnings decodes nothing, and its UnmarshalYAML method returns
+// two warnings under a heading of its own.
+type wrappedTierWarnings struct{}
+
+func (*wrappedTierWarnings) UnmarshalYAML([]byte) error {
+	return fmt.Errorf("tier: %w", errors.Join(
+		niceyaml.NewWarning(`"mid" is deprecated`),
+		niceyaml.NewWarning(`"mid" ends in 2027`),
+	))
+}
+
+// joinedTierWarnings decodes nothing, and its UnmarshalYAML method returns
+// a join of two warnings.
+type joinedTierWarnings struct{}
+
+func (*joinedTierWarnings) UnmarshalYAML([]byte) error {
+	return errors.Join(
+		niceyaml.NewWarning(`"mid" is deprecated`),
+		niceyaml.NewWarning(`"mid" ends in 2027`),
+	)
+}
+
+// summarizedTierWarnings decodes nothing, and its UnmarshalYAML method
+// returns a summary of two warnings.
+type summarizedTierWarnings struct{}
+
+func (*summarizedTierWarnings) UnmarshalYAML([]byte) error {
+	return niceyaml.NewSummary("2 problems",
+		niceyaml.NewWarning(`"mid" is deprecated`),
+		niceyaml.NewWarning(`"mid" ends in 2027`),
+	)
+}
+
 // rejectionServer is an element of [rejectionConfig].
 type rejectionServer struct {
 	Host  string `yaml:"host"`
@@ -13930,6 +13969,56 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				if tc.is != nil {
 					require.ErrorIs(t, err, tc.is)
 				}
+			})
+		}
+	})
+
+	// The decoder stops at the first problem and reads no value past it, so
+	// each warning that an unmarshaler returns fails the decode.
+	t.Run("reports each warning that an unmarshaler returns as an error", func(t *testing.T) {
+		t.Parallel()
+
+		rows := []string{
+			`cfg.yaml:2:7: $.tier: "mid" is deprecated`,
+			`cfg.yaml:2:7: $.tier: "mid" ends in 2027`,
+		}
+
+		tcs := map[string]struct {
+			decode func(context.Context, *niceyaml.Node) error
+			want   string
+		}{
+			"below a wrapper": {
+				decode: decodeAs[tierConfig[wrappedTierWarnings]](),
+				want:   stringtest.JoinLF(append([]string{"cfg.yaml: tier:"}, rows...)...),
+			},
+			"in a join": {
+				decode: decodeAs[tierConfig[joinedTierWarnings]](),
+				want:   stringtest.JoinLF(rows...),
+			},
+			"in a summary": {
+				decode: decodeAs[tierConfig[summarizedTierWarnings]](),
+				want:   stringtest.JoinLF(append([]string{"cfg.yaml: 2 problems"}, rows...)...),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, midTier, niceyaml.WithName("cfg.yaml"))
+				warnings := niceyaml.NewWarnings()
+
+				err := tc.decode(warnings.Context(t.Context()), doc)
+				require.EqualError(t, err, tc.want)
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
+				assert.True(t, niceyaml.HasErrors(err))
+				assert.NotContains(t, niceyaml.FormatError(err), "warning:")
+
+				for problem := range niceyaml.Problems(err) {
+					assert.False(t, problem.Warning, problem.Message())
+				}
+
+				require.NoError(t, warnings.Err())
 			})
 		}
 	})

@@ -349,9 +349,11 @@ func readLimited(r io.Reader, limit int) ([]byte, error) {
 // [SourceError.Error] puts the name in front of the position of every
 // error bound to the Source, as in "name:line:col: msg". Without the
 // option, [Source.Name] returns the path [NewSourceFromFile] took, or
-// else the file path. A message draws each control character of the name
-// as its picture, so a file name that holds a line feed stays on one
-// line. Source.Name returns the name as given.
+// else the file path. A message draws each tab of the name as four
+// spaces, as [FormatError] draws a tab of the tree. It draws each other
+// control character as [go.jacobcolvin.com/niceyaml/escape.Control] draws
+// it, so a file name that holds a line feed stays on one line. Source.Name
+// returns the name as given.
 func WithName(name string) SourceOption {
 	return func(c *sourceConfig) {
 		c.name = name
@@ -1352,11 +1354,12 @@ func (s *Source) single() (*Node, error) {
 // describes. One such error comes back as a [*SourceError], and several
 // come back joined, in file order, each bound to its own document. Every
 // syntax error matches [ErrSyntax], and its message draws each control
-// character as its Unicode Control Picture. The error of a document past
-// the depth limit, or of a text past the byte limit, matches [ErrLimit]
-// and not ErrSyntax. A panic in the parser comes back as a SourceError
-// too, bound at the first token with a position among those the parser
-// was reading. It holds a [PanicError] and does not match ErrSyntax.
+// character as [go.jacobcolvin.com/niceyaml/escape.Control] draws it. The
+// error of a document past the depth limit, or of a text past the byte
+// limit, matches [ErrLimit] and not ErrSyntax. A panic in the parser comes
+// back as a SourceError too, bound at the first token with a position
+// among those the parser was reading. It holds a [PanicError] and does
+// not match ErrSyntax.
 func (s *Source) File() (*ast.File, error) {
 	p := s.parsed.get(s.parse)
 	if p.err != nil {
@@ -1413,8 +1416,8 @@ func (s *Source) parseError(f docparse.Failure) error {
 	var err error
 
 	// The go-yaml scanner spells the tab it rejects as a raw tab, which
-	// the renderers would lay out as four spaces, so the message names
-	// each control character by its picture.
+	// the renderers lay out as four spaces. So the message draws each
+	// control character as escape.Control draws it.
 	yamlErr, ok := errors.AsType[yaml.Error](f.Err)
 
 	depthErr, deep := errors.AsType[*docparse.DepthError](f.Err)
