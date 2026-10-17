@@ -8,7 +8,8 @@ import (
 )
 
 // fileIdentity returns the device and inode numbers of the file that info
-// describes. It reports false when info carries no [syscall.Stat_t].
+// describes. It reports false when info does not carry a
+// [syscall.Stat_t].
 func fileIdentity(info os.FileInfo) (fileID, bool) {
 	st, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {

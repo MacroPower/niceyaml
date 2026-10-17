@@ -150,32 +150,31 @@ func validateCmd() *cobra.Command {
 }
 
 // validateFile validates every document of the file at yamlPath against the
-// registry with [niceyaml.Source.ValidateDocuments], which joins what every
-// document reports, so one run names each invalid document. A document
-// that does not parse reports its syntax error, and the documents around
-// it validate as they do in a file that parses. Once ctx is canceled, no
-// further document validates, and the error reports the cancellation
-// once.
+// registry with [niceyaml.Source.ValidateDocuments]. That method joins what
+// every document reports, so one run names each invalid document. A
+// document that does not parse reports its syntax error, and the documents
+// around it validate as they do in a file that parses. After ctx is
+// canceled, the remaining documents do not validate, and the error reports
+// the cancellation once.
 //
-// Each error it returns is bound to the source, and the source takes
-// yamlPath as the user typed it for its name, with its control characters
-// escaped as the result line of the command escapes them. Each message
-// then opens with "path:line:col:" when the error has a position in the
-// file, and the error handler in main renders the excerpt with the
-// terminal width. A document with no tokens, such as an empty or
-// comment-only file, has no position, so its messages open with "path:"
-// alone.
+// Each error it returns is bound to the source. The source takes yamlPath
+// as the user typed it for its name, with its control characters escaped
+// as the result line of the command escapes them. Each message then opens
+// with "path:line:col:" when the error has a position in the file. The
+// error handler in main renders the excerpt with the terminal width. A
+// document without tokens, such as an empty or comment-only file, does not
+// have a position, so its messages open with "path:" alone.
 //
-// Each call hands the warnings of the file, such as the deprecations its
-// schema marks, to the collector of ctx, whether the file passes or
-// fails, and returns its errors alone.
+// Each call hands the warnings of the file to the collector of ctx,
+// whether the file passes or fails, and returns only its errors. A
+// deprecation that the schema of the file marks is one such warning.
 //
 // The file path of the source is the [physicalAbs] form of yamlPath.
 // SchemaStore patterns that name parent directories, such as
 // "**/.github/workflows/*.yml", then match whatever the working directory
 // is. Schema directives resolve against the directory of the file the read
 // opens. When the read fails, the error from [readSource] already names
-// the file, so validateFile adds no name of its own.
+// the file, so validateFile does not add a name of its own.
 func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, extra ...niceyaml.SourceOption) error {
 	absPath := physicalAbs(yamlPath)
 
@@ -202,13 +201,15 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, ex
 }
 
 // readSource reads the file at path into a [*niceyaml.Source] with opts, as
-// [niceyaml.NewSourceFromFile] does, except that the file path of the
-// source stays path as given and a read error names path with its control
-// characters escaped. A glob match takes its name from the file system.
-// The error handler in main keeps each line break in a message as a row
-// break, so a raw newline in the name would start a row of its own. A
-// file past the byte limit of opts fails without a full read, with an
-// error bound to the name of the source.
+// [niceyaml.NewSourceFromFile] does. Unlike NewSourceFromFile, it keeps
+// path as given for the file path of the source, unless opts sets another.
+// A read error names path with its control characters escaped.
+//
+// A glob match takes its name from the file system. The error handler in
+// main keeps each line break in a message as a row break. A raw newline in
+// an unescaped name then starts a row of its own. A file past the byte
+// limit of opts fails without a full read, with an error bound to the name
+// of the source.
 func readSource(path string, opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
 	// The file path goes first, so opts can override it.
 	opts = append([]niceyaml.SourceOption{niceyaml.WithFilePath(path)}, opts...)
@@ -240,16 +241,16 @@ func readSource(path string, opts ...niceyaml.SourceOption) (*niceyaml.Source, e
 // physicalAbs returns an absolute form of path that names the file the
 // OS opens for it. [filepath.Abs] drops a ".." element together with the
 // element before it, as text. On Unix, the OS instead steps up from the
-// directory a symlink leads to, which can be a different directory. So
+// directory a symlink leads to, which might be a different directory. So
 // physicalAbs resolves the symlinks in path up to its last ".." element,
 // including those in the working directory a relative path starts from.
-// It leaves the symlinks after that point alone, so a symlinked name
+// It does not resolve the symlinks after that point, so a symlinked name
 // such as ".github" stays visible to patterns.
 //
-// A path with no ".." element, or one whose part up to the last ".."
-// does not resolve, comes back as [filepath.Abs] returns it. So does
-// every path on Windows, which drops ".." elements as text before it
-// follows a symlink.
+// For a path without a ".." element, and for a path whose part up to the
+// last ".." does not resolve, physicalAbs returns the [filepath.Abs] form.
+// It returns that form for every path on Windows too, because Windows
+// drops ".." elements as text before it follows a symlink.
 func physicalAbs(path string) string {
 	lexical, err := filepath.Abs(path)
 	if err != nil {
@@ -286,14 +287,16 @@ func physicalAbs(path string) string {
 	return filepath.Join(resolved, abs[end:])
 }
 
-// readsAsPath reports whether [schema.FileOrURL] reads ref as a path that
-// starts with a separator or as a relative path, rather than as a URL or
-// a path that opens with a drive letter such as "C:/". It asks FileOrURL
-// with an empty base directory, which reports [schema.ErrNoBaseDir] for a
-// relative path, so the two agree on every ref. A relative path whose
-// first element holds a colon, such as "v1:dir/schema.json", reads as a
-// path, and so does a file URL that names no local path, such as one with
-// a host other than localhost.
+// readsAsPath reports whether [schema.FileOrURL] reads ref as a relative
+// path or as a path that starts with a separator. It reports false for a
+// ref that FileOrURL reads as a URL or as a path that opens with a drive
+// letter, such as "C:/". It calls FileOrURL with an empty base directory,
+// and FileOrURL then reports [schema.ErrNoBaseDir] for a relative path.
+// The two functions thus agree on every ref.
+//
+// A relative path whose first element holds a colon, such as
+// "v1:dir/schema.json", reads as a path. So does a file URL that does not
+// name a local path, such as one with a host other than localhost.
 func readsAsPath(ref string) bool {
 	if ref != "" && os.IsPathSeparator(ref[0]) {
 		return true
@@ -304,8 +307,8 @@ func readsAsPath(ref string) bool {
 	return errors.Is(err, schema.ErrNoBaseDir)
 }
 
-// lastDotDotEnd returns the index just past the last ".." element of
-// path, or -1 when path has none.
+// lastDotDotEnd returns the index after the last ".." element of path,
+// or -1 when path does not have one.
 func lastDotDotEnd(path string) int {
 	end, start := -1, 0
 
@@ -324,29 +327,32 @@ func lastDotDotEnd(path string) int {
 	return end
 }
 
-// buildRegistry creates a schema registry based on CLI flags.
+// buildRegistry creates a schema registry from schemaRef, the value of the
+// --schema flag.
 //
 // When schemaRef is not empty, buildRegistry loads and compiles that schema
 // once, before the command reads any file. The compiled schema is then the
 // only resolver, so every document validates against it. A schema that
-// cannot load or compile fails the command with one "--schema:" error. A
+// does not load or compile fails the command with one "--schema:" error. A
 // schema path resolves relative to the current working directory, through
 // [physicalAbs], so it names the file the OS opens for it. A $ref inside
-// the schema resolves relative to the schema's own file or URL, and one
+// the schema resolves relative to the schema's own file or URL. A $ref
 // that names a file or URL that does not load fails the command the same
 // way.
 //
-// Otherwise the registry matches on schema directives first, and a
-// directive's reference resolves relative to its own YAML file. A document
-// that no directive claims falls through to SchemaStore's automatic
-// discovery by file path. SchemaStore fetches its catalog on the first
-// document that reaches it, and a file it cannot fetch the catalog for
-// reports that in the file's error. Schema validation is optional here, so
-// a document that no resolver claims passes rather than failing the file.
-// A catalog schema is not the user's to fix, and a public schema can name
-// a document that is gone under a branch few documents take. The registry
-// therefore compiles a schema without the documents its $refs fail to
-// load, and only a document that reaches such a $ref fails.
+// Otherwise the registry matches on schema directives first, and the
+// reference of each directive resolves relative to its own YAML file. A
+// document that does not have a schema directive goes to SchemaStore,
+// which discovers a schema by file path. SchemaStore fetches its catalog
+// for the first document that reaches it. When it cannot fetch the catalog
+// for a file, the error of that file reports the failure.
+//
+// Schema validation is optional here, so a document that the resolvers do
+// not claim passes rather than failing the file. A catalog schema is not
+// the user's to fix. A public schema might name a document that is gone
+// under a branch few documents take. The registry therefore compiles a
+// schema without the documents that its $refs fail to load, and only a
+// document that reaches such a $ref fails.
 func buildRegistry(ctx context.Context, schemaRef string) (*schema.Registry, error) {
 	if schemaRef != "" {
 		// FileOrURL cleans a path as text, which drops a ".." together

@@ -20,7 +20,7 @@ import (
 )
 
 var (
-	// The error for a glob pattern that matches no file.
+	// The error for a glob pattern that does not match any file.
 	errNoMatch = errors.New("no files match pattern")
 
 	// The error for an argument that names a directory.
@@ -50,7 +50,7 @@ var (
 //   - `[abc]` matches any character in the set.
 //   - `[a-z]` matches any character in the range.
 //   - `{a,b}` matches any of the comma-separated alternatives. An
-//     alternative may hold "." and ".." elements, as in
+//     alternative can hold "." and ".." elements, as in
 //     "app/{../shared,.}/*.yaml".
 //   - `\` escapes the character after it, so `\*` matches a literal `*`
 //     and `{a\,b,c}` matches "a,b" or "c". On Windows, `\` is a
@@ -101,15 +101,16 @@ func glob(pattern string) ([]string, error) {
 	return slices.Compact(files), nil
 }
 
-// globAlternative returns the paths matching pattern, a pattern with
-// slash separators and no brace group left to expand. It may include
-// directories.
+// globAlternative returns the paths matching pattern, a pattern that
+// uses slash separators and does not have a brace group left to expand.
+// The paths might include directories.
 //
 // The literal part of the pattern, before the first metacharacter, loses
 // its escapes and otherwise stays as typed, both where the walk starts
-// and in each match. Cleaning it as text, as [doublestar.FilepathGlob]
-// does, would drop a ".." together with a symlinked directory before it,
-// while the OS steps up from the directory the link leads to.
+// and in each match. Cleaning that part as text, as
+// [doublestar.FilepathGlob] does, drops a ".." together with a symlinked
+// directory before it. The OS instead steps up from the directory the
+// link leads to.
 func globAlternative(pattern string) ([]string, error) {
 	base, rest, literal := splitLiteral(pattern)
 
@@ -193,14 +194,15 @@ func globAlternative(pattern string) ([]string, error) {
 }
 
 // splitLiteral splits pattern at the last "/" before its first unescaped
-// metacharacter, as [doublestar.SplitPattern] does, and reports whether
-// pattern holds no metacharacter. It returns the part before that "/"
-// with every escape removed, which is "." when no "/" comes first and "/"
-// for a lone leading one. It returns the part after that "/" as typed.
+// metacharacter, as [doublestar.SplitPattern] does. It returns the part
+// before that "/" with every escape removed, the part after that "/" as
+// typed, and whether pattern lacks an unescaped metacharacter. The first
+// part is "." when pattern does not have such a "/", and "/" when that "/"
+// opens the pattern.
 //
-// [doublestar.SplitPattern] removes only the escapes of metacharacters,
-// so it keeps the backslash of an escaped comma, which
-// [filepaths.ExpandBraces] leaves in a brace alternative.
+// [filepaths.ExpandBraces] leaves the backslash of an escaped comma in a
+// brace alternative. [doublestar.SplitPattern] removes only the escapes of
+// metacharacters, so it keeps that backslash.
 func splitLiteral(pattern string) (string, string, bool) {
 	split := -1
 	literal := true
@@ -297,15 +299,17 @@ func (s *fileSet) add(info os.FileInfo) bool {
 // of two explicit files then decides which revision a diff treats as
 // older.
 //
+// Arguments without metacharacters join the list as typed. An argument
+// with metacharacters joins the list as typed too when it names an
+// existing file or a dangling symlink, even when it also matches other
+// files as a pattern. So files such as "cfg[1].yaml" and "report[2024.txt"
+// stay reachable. Every other argument with metacharacters expands as a
+// pattern.
+//
 // An argument that names a directory is an error wrapping
-// [errIsDirectory], with or without glob metacharacters. An argument
-// without metacharacters joins the list as-is. An argument with
-// metacharacters that names an existing file or a dangling symlink joins
-// the list as-is too, even when it also matches other files as a
-// pattern, so a file such as "cfg[1].yaml" or "report[2024.txt" stays
-// reachable. Any other argument with metacharacters expands as a
-// pattern. A pattern that matches no file is an error wrapping
-// [errNoMatch], and an invalid pattern is its own error.
+// [errIsDirectory], with or without glob metacharacters. A pattern that
+// does not match any file is an error wrapping [errNoMatch]. When [glob]
+// rejects a pattern, expandPaths returns the error of glob.
 func expandPaths(args ...string) ([]string, error) {
 	var (
 		result    []string

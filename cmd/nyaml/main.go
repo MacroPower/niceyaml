@@ -58,17 +58,18 @@ const (
 	exitInvalid = 1
 
 	// The status of a run that met any other error, such as a file that
-	// does not read, a schema that does not load, a canceled run, or a
-	// flag that does not parse. A document that trips a panic in go-yaml
-	// exits with it too.
+	// does not read or a schema that does not load. A canceled run and a
+	// flag that does not parse exit with it too, and so does a document
+	// that makes go-yaml panic.
 	exitFailure = 2
 )
 
 // exitCode returns the status nyaml exits with for err, the error a
-// command returned. It is 0 for no error, [exitInvalid] when
+// command returned. It is 0 when err is nil, [exitInvalid] when
 // [niceyaml.IsInvalid] reports err, and [exitFailure] otherwise. A run
-// whose documents are at fault thus exits 1 only when nothing else went
-// wrong, so a script tells a document to fix from a check to retry.
+// thus exits 1 only when its documents are at fault for every problem of
+// err. A script can then distinguish a document to fix from a check to
+// retry.
 func exitCode(err error) int {
 	switch {
 	case err == nil:
@@ -82,9 +83,10 @@ func exitCode(err error) int {
 
 // notifyContext returns a copy of parent that the first SIGINT or SIGTERM
 // cancels. The run then stops its work, and main still stops the
-// profiler, which writes the profiles. The signal then gets its default
-// action back, so a second one kills a run stuck in work that ignores
-// the context. Call the returned function once the command returns.
+// profiler, which writes the profiles. After the cancellation, the signal
+// regains its default action, so a second one kills a run stuck in work
+// that ignores the context. Call the returned function after the command
+// returns.
 func notifyContext(parent context.Context) (context.Context, context.CancelFunc) {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 

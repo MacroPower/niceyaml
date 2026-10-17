@@ -36,16 +36,16 @@ type model struct {
 	searchInput string
 	// The themes the picker lists, in the order it lists them.
 	themeList []theme.Theme
-	// Styles of the current theme. The model builds them once per theme
-	// switch, and the printer, the status bar, and the theme picker share
-	// them.
+	// The styles of the current theme. The model builds them once per
+	// theme switch, and the printer, the status bar, and the theme picker
+	// share them.
 	styles   style.Styles
 	viewport yamlviewport.Model
 	width    int
 	height   int
-	// Index into themeList of the current theme.
+	// The index into themeList of the current theme.
 	themeIndex int
-	// The themeIndex the picker opened with, which esc returns to.
+	// The themeIndex that the picker opened with, which esc restores.
 	previousIndex int
 	lineNumbers   bool
 	searching     bool
@@ -76,10 +76,11 @@ func newModel(opts *modelOptions) model {
 	return m
 }
 
-// revisionLabels names each file for the status bar. A file's base name
-// labels it, so a full path stays out of the bar. Two files sharing a base
-// name, such as a/config.yaml and b/config.yaml, each fall back to the path
-// as the user typed it, so the bar tells the revisions apart.
+// revisionLabels names each file for the status bar. Each label is the
+// base name of its file, so a full path stays out of the bar. Files that
+// share a base name, such as a/config.yaml and b/config.yaml, each take
+// the path as the user typed it instead. The bar then distinguishes the
+// revisions.
 func revisionLabels(paths []string) []string {
 	labels := make([]string, len(paths))
 	counts := make(map[string]int, len(paths))
@@ -196,10 +197,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // pastedSearchText returns the part of pasted text that the search prompt
 // takes: the first line, without control characters. The first line ends
-// at the first carriage return or line feed, since terminals deliver
-// pasted line breaks as either. The prompt shows the term on one line,
-// and a line break or tab in it would make the term the viewport searches
-// for differ from the term the prompt shows.
+// at the first carriage return or line feed, because terminals deliver
+// pasted line breaks as either. The prompt shows the term on one line. A
+// line break or tab in the term then makes the viewport search for a term
+// that differs from the one the prompt shows.
 func pastedSearchText(s string) string {
 	first := s
 	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
@@ -284,8 +285,8 @@ func (m *model) updateThemeWheel(msg tea.MouseWheelMsg) {
 }
 
 // moveThemeSelection moves the picker's selection by delta entries and
-// previews the theme it lands on. The selection stops at either end of
-// the list.
+// previews the theme at the new selection. The selection stops at either
+// end of the list.
 func (m *model) moveThemeSelection(delta int) {
 	i := min(max(m.themeIndex+delta, 0), len(m.themeList)-1)
 	if i < 0 || i == m.themeIndex {
@@ -298,7 +299,7 @@ func (m *model) moveThemeSelection(delta int) {
 // applySearch searches for term and scrolls to its first match. The viewport
 // keeps its current match and scroll position when it gets the term it
 // already has, so applySearch clears the term first. Submitting the active
-// term again then brings its first match back into view.
+// term again then scrolls to its first match.
 func (m *model) applySearch(term string) {
 	m.viewport.ClearSearch()
 	m.viewport.SetSearchTerm(term)
@@ -337,14 +338,16 @@ func (m model) View() tea.View {
 // baseView renders the viewport above the status bar, in the rows the
 // terminal has. The viewport and the status bar each render rows as wide
 // as the terminal, so a newline between them stacks them without padding.
-// A terminal of two rows leaves the viewport none. A viewport with no rows
-// renders an empty string that the newline would still turn into a row,
-// so baseView leaves the viewport out instead. A viewport with rows but no
-// columns, as in a terminal too narrow for a side-by-side pane, also
-// renders an empty string, so baseView fills its rows with blank ones and
-// the status bar stays on the bottom rows. A terminal of one row shows
-// the title line alone. A terminal with no rows, as before the first
-// window size arrives, renders nothing.
+//
+// A terminal of two rows does not leave the viewport any rows. A viewport
+// of zero rows renders an empty string, and the newline after it still
+// adds a row, so baseView leaves the viewport out instead. A viewport with
+// rows but zero columns also renders an empty string, as in a terminal too
+// narrow for a side-by-side pane. In that case baseView fills those rows
+// with blank ones, so the status bar stays on the bottom rows.
+//
+// A terminal of one row shows the title line alone. A terminal of zero
+// rows, as before the first window size arrives, renders an empty string.
 func (m *model) baseView() string {
 	switch {
 	case m.height <= 0:
@@ -367,9 +370,10 @@ func (m *model) baseView() string {
 	}
 }
 
-// overlayOffset centers an overlay of size inner in a terminal of size outer.
-// An overlay larger than the terminal sits at the origin, so the terminal
-// shows its top left corner rather than clipping it away.
+// overlayOffset returns the offset that centers an overlay of size inner
+// in a terminal of size outer. An overlay larger than the terminal sits at
+// the origin, so the terminal shows its top left corner instead of
+// clipping that corner.
 func overlayOffset(outer, inner int) int {
 	return max(0, (outer-inner)/2)
 }
@@ -378,8 +382,9 @@ func (m *model) statusBar() string {
 	return m.titleLine() + "\n" + m.textLine()
 }
 
-// powerlineSep renders a powerline separator with fg from the previous
-// segment's background and bg from the next segment's background.
+// powerlineSep renders a powerline separator between two segments. Its
+// foreground is the background of from, the previous segment, and its
+// background is the background of to, the next segment.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
 func powerlineSep(from, to lipgloss.Style) string {
@@ -480,9 +485,9 @@ func (m *model) titleLine() string {
 }
 
 // clampWidth truncates a status bar row to the terminal width. A row whose
-// fixed segments outgrow a narrow terminal then ends at that width. Without
-// the clamp, the row would wrap onto a second row and push the rows below
-// it off the screen.
+// fixed segments outgrow a narrow terminal then ends at that width. A row
+// without the clamp wraps onto a second row and pushes the rows below it
+// off the screen.
 func (m *model) clampWidth(row string) string {
 	return lipgloss.NewStyle().MaxWidth(m.width).Render(row)
 }
@@ -619,9 +624,10 @@ func buildPrinterOpts(lineNumbers bool, styles style.Styles) []printer.Option {
 }
 
 // selectTheme switches the model to the theme at index i of themeList. It
-// is the one place that moves the picker's selection and builds a theme's
-// styles and printer, for the first frame and for the theme picker alike,
-// so the selection and the styles always name the same theme.
+// is the one place that moves the picker's selection and builds the styles
+// and printer of a theme. It runs for the first frame and for each change
+// of theme in the picker. The selection and the styles therefore always
+// name the same theme.
 func (m *model) selectTheme(i int) {
 	m.themeIndex = i
 	m.styles = m.themeList[i].Styles()

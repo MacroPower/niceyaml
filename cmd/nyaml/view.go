@@ -74,7 +74,7 @@ func viewCmd() *cobra.Command {
 // loadSources reads the file at each path into a [*niceyaml.Source] and
 // names each Source with the status bar label that [revisionLabels] gives
 // its path. A read error from [readSource] already names the path, so
-// loadSources adds no name of its own.
+// loadSources does not add a name of its own.
 func loadSources(paths []string, opts ...niceyaml.SourceOption) ([]*niceyaml.Source, error) {
 	labels := revisionLabels(paths)
 	sources := make([]*niceyaml.Source, 0, len(paths))
