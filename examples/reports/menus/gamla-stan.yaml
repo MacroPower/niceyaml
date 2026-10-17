@@ -1,0 +1,7 @@
+---
+cafe: Café Yamüll Gamla stan
+menu:
+  - item: "Kaffe"
+    price: 35
+  - item: "Kanelbulle"
+    price: 45

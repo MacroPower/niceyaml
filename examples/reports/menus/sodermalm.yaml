@@ -1,0 +1,13 @@
+---
+cafe: Café Yamüll Södermalm
+menu:
+  - item: "Kaffe"
+    price: 35
+  - item: "Kanelbulle"
+    price: 45
+  - item: "Semla"
+    pris: 65
+  - item: "Kardemummabulle"
+    price: 45
+  - item: "Kaffe"
+    price: 38

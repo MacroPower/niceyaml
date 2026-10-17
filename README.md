@@ -121,8 +121,11 @@ A [`paths.Path`][niceyaml/paths] such as `$.menu.lunch[0].price` names one node 
 ### Errors
 
 - [examples/errors](examples/errors)
+- [examples/reports](examples/reports)
 
-An [`Error`][niceyaml.Error] names a path and holds no source. The example binds such errors to a `Source`, then renders them as a styled excerpt, as plain text for a log, as marks on the whole document, and as one row per problem.
+An [`Error`][niceyaml.Error] names a path and holds no source. The errors example binds such errors to a `Source`. It then renders them as a styled excerpt, as plain text for a log, as marks on the whole document, and as one row per problem.
+
+The reports example checks several files and keeps each error after [`niceyaml.Detach`][niceyaml.Detach] frees its `Source`. At the end, it reports every problem as an excerpt, as GitHub workflow commands, and as Markdown.
 
 ### Validators
 
@@ -163,6 +166,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [lipgloss]: https://github.com/charmbracelet/lipgloss
 [bubbletea]: https://github.com/charmbracelet/bubbletea
 [go.jacobcolvin.com/x/jsonschema]: https://github.com/MacroPower/x/tree/main/jsonschema
+[niceyaml.Detach]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Detach
 [niceyaml.Error]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Error
 [niceyaml.NewSourceFromLayers]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#NewSourceFromLayers
 [niceyaml.Node]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Node

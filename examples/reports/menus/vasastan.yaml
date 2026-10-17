@@ -1,0 +1,7 @@
+---
+cafe: Café Yamüll Vasastan
+menu:
+  - item: "Prinsesstårta"
+    pris: 95
+  - item: "Kaffe"
+    price: 35
