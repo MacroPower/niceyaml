@@ -2030,8 +2030,8 @@ func (m *Model) rowOffset(r int) int {
 // cutRow fits a rendered row to width by cutting its content columns to the
 // horizontal window that starts at offset. The columns of the printer's
 // container frame on either side stay in place, so a border keeps its edges
-// while the content between them scrolls. A wide character that the left
-// edge of the window cuts shows as blank cells.
+// and the content between them scrolls. A wide character that an edge of
+// the window cuts shows as spaces in its style.
 func (m *Model) cutRow(row string, offset, width int) string {
 	left, right := m.printerFrame()
 
@@ -2043,19 +2043,11 @@ func (m *Model) cutRow(row string, offset, width int) string {
 	visible := max(0, width-left-right)
 	body := printer.Cut(row, left, left+inner)
 
-	content, start, contentWidth := cutWindow(body, inner, offset, visible)
-	if start > offset {
-		content = m.printer.Style(kind.Text).Render(strings.Repeat(" ", start-offset)) + content
-		contentWidth += start - offset
-	}
-
-	// The side-by-side view pads a pane to its own widest row, while the
-	// offset runs to the widest row of either pane, so the window can
-	// reach past the content of this row. Filling the window keeps the
-	// right frame in its column.
-	if padding := visible - contentWidth; padding > 0 {
-		content += m.printer.Style(kind.Text).Render(strings.Repeat(" ", padding))
-	}
+	// The side-by-side view pads a pane to its own widest row. The offset
+	// runs to the widest row of either pane, so the window can reach past
+	// the content of this row. Filling the window keeps the right frame in
+	// its column.
+	content := m.printer.Pad(printer.Cut(body, offset, offset+visible), visible)
 
 	return printer.Cut(row, 0, left) + content + printer.Cut(row, left+inner, left+inner+right)
 }
@@ -2067,30 +2059,6 @@ func (m *Model) printerFrame() (int, int) {
 	left := frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft()
 
 	return left, frame.GetHorizontalFrameSize() - left
-}
-
-// cutWindow cuts body to the window of visible cells that starts at offset.
-// The body holds the content columns of a rendered row and takes inner
-// cells. It returns the cut, the cell of body the cut starts at, and the
-// cells it takes.
-//
-// The cut drops a wide cluster that straddles either edge of the window. A
-// cut that ends at a column inside a cluster stops before that column. The
-// start therefore moves to the next cluster boundary, and the caller fills
-// the columns of the dropped cluster with blank cells.
-func cutWindow(body string, inner, offset, visible int) (string, int, int) {
-	start := offset
-	for start < min(inner, offset+visible) {
-		if _, w := printer.CutWidth(body, 0, start); w == start {
-			break
-		}
-
-		start++
-	}
-
-	content, width := printer.CutWidth(body, start, offset+visible)
-
-	return content, start, width
 }
 
 // SetYOffset sets the vertical offset, in rows, clamped to the scrollable
@@ -2273,8 +2241,9 @@ func (m *Model) VisibleRowCount() int {
 // in the separator between two panes, or on an annotation row such as a
 // hunk header. The filler past the end of a row, beside a shorter pane, and
 // below the last row does not show content either. A wide character that an
-// edge of the window cuts shows as blank cells, and HitAt reports false for
-// those too. It reports false for every cell of a zero Model.
+// edge of the window cuts shows as spaces in its style, and HitAt reports
+// that character for each of them. It reports false for every cell of a
+// zero Model.
 //
 // [line.View.Clip] returns a view that clips its lines. A revision with
 // such a view shows part of each long line, with "..." for the columns the
@@ -2361,36 +2330,14 @@ func (m *Model) paneHit(right bool, k, row, cell, width int) (position.Position,
 		return position.Position{}, false
 	}
 
+	// The cut keeps every cell of the row in place, so the cell of the
+	// window plus the offset is the cell of the rendered row. A cell that
+	// shows a space in place of a cluster an edge of the window cuts gives
+	// the column of that cluster.
 	i := m.rows.indices[k]
-	p := m.renderPrinter(width)
-	view := m.highlightedWithin(right, position.NewSpan(i, i+1))
-	layout := p.Layout(view)
+	layout := m.renderPrinter(width).Layout(m.highlightedWithin(right, position.NewSpan(i, i+1)))
 
-	at := m.xOffset + cell
-
-	pos, ok := layout.PositionAt(row, at-layout.GutterWidth())
-	if !ok {
-		return position.Position{}, false
-	}
-
-	// Print frames the line it renders, so the rows of the line follow the
-	// top frame.
-	rows := splitLines(p.Print(view))
-	if m.rows.top+row >= len(rows) {
-		return position.Position{}, false
-	}
-
-	rendered := rows[m.rows.top+row]
-	inner := ansi.StringWidth(rendered) - left - rightFrame
-
-	// The window shows blank cells in place of a cluster that either of
-	// its edges cuts, as cutRow draws the row.
-	_, start, shown := cutWindow(printer.Cut(rendered, left, left+inner), inner, m.xOffset, visible)
-	if at < start || at >= start+shown {
-		return position.Position{}, false
-	}
-
-	return pos, true
+	return layout.PositionAt(row, m.xOffset+cell-layout.GutterWidth())
 }
 
 // revisionHit returns the [Hit] of pos, and true. The position pos lies in
@@ -2853,12 +2800,7 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 	}
 
 	for i, row := range lines {
-		row, width := printer.CutWidth(row, 0, contentW)
-		if pad := contentW - width; pad > 0 {
-			row += textStyle.Render(strings.Repeat(" ", pad))
-		}
-
-		lines[i] = row
+		lines[i] = m.printer.Pad(printer.Cut(row, 0, contentW), contentW)
 	}
 
 	contents := textStyle.
@@ -2967,10 +2909,7 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 			// view cuts both panes to the pane width, which the gutter of
 			// a pane row can exceed on its own, so the joined row fits the
 			// content width.
-			leftPadded, leftWidth := printer.CutWidth(left, 0, paneWidth)
-			if padding := paneWidth - leftWidth; padding > 0 {
-				leftPadded += textStyle.Render(strings.Repeat(" ", padding))
-			}
+			leftPadded := m.printer.Pad(printer.Cut(left, 0, paneWidth), paneWidth)
 
 			combined = append(combined, leftPadded+separator+printer.Cut(right, 0, paneWidth))
 		}

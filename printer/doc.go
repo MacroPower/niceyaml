@@ -137,8 +137,12 @@
 //
 // A viewer that scrolls horizontally shows a window of each printed row.
 // [Layout.CellOf] gives the cell of a column, and [Cut] cuts a printed row
-// to a range of those cells with its styles intact:
+// to a range of those cells with its styles intact. [Printer.Pad] pads a
+// short row to the window. The rows and cells of the layout leave out the
+// frame of the container, as the [Layout] doc describes. Without a frame,
+// row n of the layout is row n of the output:
 //
 //	rows := strings.Split(p.Print(view), "\n")
-//	window := printer.Cut(rows[0], offset, offset+width)
+//	row := rows[layout.RowOf(pos)]
+//	window := p.Pad(printer.Cut(row, offset, offset+width), width)
 package printer

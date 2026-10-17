@@ -2457,8 +2457,9 @@ func TestViewport_HorizontalScrollKeepsFrameAtWideCluster(t *testing.T) {
 		// its right cell inside the window. The cut once kept the whole
 		// character, which pushed the rest of the row one column right and
 		// the right border out of the view. The window shows that cell as a
-		// blank, so the border keeps its column. The gutter and "k: " take
-		// four columns, so an offset of 5 falls inside the character.
+		// space in the style of the character, so the border keeps its
+		// column. The gutter and "k: " take four columns, so an offset of 5
+		// falls inside the character.
 		"wide rune": {
 			line:  "k: 日" + strings.Repeat("b", 36),
 			wants: map[int]string{5: "│ b"},
@@ -7016,6 +7017,8 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 				"................",
 			),
 		},
+		// The window shows a space in place of the half of a wide
+		// character that it cuts, and the space gives that character.
 		"wide character the right edge cuts": {
 			revisions: []string{hitV1},
 			width:     8,
@@ -7026,7 +7029,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 			},
 			want: stringtest.JoinLF(
 				"0000....", // a: 1
-				"0000000.", // b: 日本·
+				"00000000", // b: 日本·
 				"0000....", // c: 3
 			),
 		},
@@ -7040,7 +7043,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 			},
 			want: stringtest.JoinLF(
 				"......",
-				".00000", // ·本語·
+				"000000", // ·本語·
 				"......",
 			),
 		},
@@ -7175,7 +7178,9 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 
 			require.Equal(t, tc.want, hitMap(&m), screenMessage(&m))
 
-			// Every hit names the rune its cell shows.
+			// Every hit names the rune its cell shows. A space stands in
+			// for the half of a wide character that an edge of the window
+			// cuts, and its hit names that character.
 			cells := screenCells(m.View())
 
 			for y := -1; y <= m.Height(); y++ {
@@ -7196,6 +7201,10 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 						if col == hit.Position.Col {
 							want = string(r)
 						}
+					}
+
+					if cells[y][x] == " " && ansi.StringWidth(want) > 1 {
+						continue
 					}
 
 					require.Equal(t, want, cells[y][x], "cell %d,%d gives %s of revision %d",

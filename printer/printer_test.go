@@ -1670,9 +1670,10 @@ func TestGutter(t *testing.T) {
 			want:      stringtest.JoinLF("aa: 1", "ab: 2"),
 			wantWidth: 1,
 		},
-		// The two-cell rune does not fit in one cell, so the cut leaves
-		// nothing and the printer pads the row back to the width.
-		"pads a row whose cut drops a wide rune": {
+		// The two-cell rune does not fit in one cell. The cut shows the
+		// cell inside the width as a space, so the row reaches the width
+		// without a pad.
+		"fills a wide rune the width splits": {
 			gutter: fixedGutter{width: 1, text: "日"},
 			want: stringtest.JoinLF(
 				" a: 1",
@@ -1681,7 +1682,7 @@ func TestGutter(t *testing.T) {
 			wantWidth: 1,
 		},
 		// Two keycaps take four cells, so a cut to three keeps the first
-		// and pads the row back to the width.
+		// and shows the cell of the second inside the width as a space.
 		"cuts a keycap by the two cells it takes": {
 			gutter:    fixedGutter{width: 3, text: strings.Repeat("1\ufe0f\u20e3", 2)},
 			want:      stringtest.JoinLF("1\ufe0f\u20e3 a: 1", "1\ufe0f\u20e3 b: 2"),
@@ -2012,6 +2013,45 @@ func TestPrinter_Style(t *testing.T) {
 			assert.Equal(t, tc.wantItalic, got.GetItalic())
 		})
 	}
+}
+
+func TestPrinter_Pad(t *testing.T) {
+	t.Parallel()
+
+	// The Charm theme sets a surface, so the spaces of the padding carry
+	// its background.
+	p := printer.New(printer.WithStyles(theme.Charm))
+	text := p.Style(kind.Text)
+
+	tcs := map[string]struct {
+		row   string
+		want  string
+		width int
+	}{
+		"pads a short row":          {row: "ab", width: 5, want: "ab" + text.Render("   ")},
+		"row at the width":          {row: "abcde", width: 5, want: "abcde"},
+		"row past the width":        {row: "abcdefg", width: 5, want: "abcdefg"},
+		"zero width":                {row: "ab", width: 0, want: "ab"},
+		"negative width":            {row: "ab", width: -3, want: "ab"},
+		"empty row":                 {row: "", width: 2, want: text.Render("  ")},
+		"wide rune takes two cells": {row: "日", width: 3, want: "日" + text.Render(" ")},
+		"styled row counts its text": {
+			row:   "\x1b[31mab\x1b[0m",
+			width: 4,
+			want:  "\x1b[31mab\x1b[0m" + text.Render("  "),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, p.Pad(tc.row, tc.width))
+		})
+	}
+
+	// A plain space leaves a hole in the surface.
+	assert.NotEqual(t, "ab   ", p.Pad("ab", 5))
 }
 
 func TestPrinter_Segments(t *testing.T) {
@@ -4960,15 +5000,25 @@ func TestCut(t *testing.T) {
 		"ascii":                    {row: "abcdef", left: 1, right: 4, want: "bcd", wantWidth: 3},
 		"empty range":              {row: "\x1b[31mabcdef\x1b[0m", left: 2, right: 2, want: "", wantWidth: 0},
 		"range past the end":       {row: "ab", left: 1, right: 9, want: "b", wantWidth: 1},
+		"negative left":            {row: "abcdef", left: -2, right: 3, want: "abc", wantWidth: 3},
 		"keycap whole":             {row: keycap, left: 0, right: 4, want: "ab1\ufe0f\u20e3", wantWidth: 4},
-		"right edge inside keycap": {row: keycap, left: 0, right: 3, want: "ab", wantWidth: 2},
+		"right edge inside keycap": {row: keycap, left: 0, right: 3, want: "ab ", wantWidth: 3},
+		"left edge inside keycap":  {row: keycap, left: 3, right: 6, want: " cd", wantWidth: 3},
 		"past a keycap":            {row: keycap, left: 4, right: 6, want: "cd", wantWidth: 2},
-		"edges inside a wide rune": {row: "a日b", left: 2, right: 4, want: "b", wantWidth: 1},
+		"edges inside a wide rune": {row: "a日b", left: 2, right: 4, want: " b", wantWidth: 2},
+		"wide rune wider than it":  {row: "a日b", left: 2, right: 3, want: " ", wantWidth: 1},
 		"styled keeps escapes": {
 			row:       "\x1b[31m" + keycap + "\x1b[0m",
 			left:      1,
 			right:     3,
-			want:      "\x1b[31mb\x1b[0m",
+			want:      "\x1b[31mb \x1b[0m",
+			wantWidth: 2,
+		},
+		"filler keeps the style": {
+			row:       "\x1b[41m日\x1b[0m",
+			left:      1,
+			right:     2,
+			want:      "\x1b[41m \x1b[0m",
 			wantWidth: 1,
 		},
 	}
@@ -5028,6 +5078,59 @@ func TestCut_LayoutCells(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCut_KeepsCells(t *testing.T) {
+	t.Parallel()
+
+	// The row holds a wide rune, a keycap, and a highlight. Every window of
+	// it keeps each whole cluster at the cell the layout gives it, less the
+	// left edge of the window. The window takes right-left cells up to the
+	// end of the row.
+	keycap := "1\ufe0f\u20e3"
+	content := "k: ab日本" + keycap + "c🥒x"
+	runes := []rune(content)
+
+	view := niceyaml.NewSourceFromString(content + "\n").View()
+	view.BlendOverlay(kind.GenericHighlight, position.NewRange(position.New(0, 5), position.New(0, 7)))
+
+	p := printer.New(printer.WithGutter(printer.NoGutter), printer.WithStyles(theme.Charm))
+	l := p.Layout(view)
+	row := p.Print(view)
+	rowWidth := ansi.StringWidth(row)
+
+	// Each column that starts a cluster, with the cluster it starts.
+	clusters := map[int]string{}
+
+	for col := 0; col < len(runes); {
+		cluster, _ := ansi.FirstGraphemeCluster(string(runes[col:]), ansi.GraphemeWidth)
+		clusters[col] = cluster
+		col += len([]rune(cluster))
+	}
+
+	for left := 0; left <= rowWidth; left++ {
+		for right := left; right <= rowWidth+2; right++ {
+			cut, width := printer.CutWidth(row, left, right)
+			require.Equal(t, max(0, min(right, rowWidth)-left), width, "window [%d, %d)", left, right)
+
+			for col, want := range clusters {
+				cell := l.CellOf(position.New(0, col))
+				w := ansi.StringWidth(want)
+
+				if cell < left || cell+w > right {
+					continue
+				}
+
+				got := ansi.Strip(printer.Cut(cut, cell-left, cell-left+w))
+				require.Equal(t, want, got, "window [%d, %d), column %d", left, right, col)
+			}
+		}
+	}
+
+	// A window can show half of 日. The space in its place sits where the
+	// rune sits in a window that shows all of it, so it keeps the
+	// background of the highlight.
+	assert.Equal(t, strings.Replace(printer.Cut(row, 5, 7), "日", " ", 1), printer.Cut(row, 6, 7))
 }
 
 // clipLetters is a line long enough for a clip of ten columns to cut it

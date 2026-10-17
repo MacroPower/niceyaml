@@ -352,25 +352,34 @@ func ColWidth(content string, col int) int {
 	return cells.NewRow(content).Width(col)
 }
 
-// Cut returns the grapheme clusters of row that start at or after cell left
-// and end by cell right, or "" when right is at or before left. The row is
-// one row of what [Printer.Print] returns, with the escape sequences of its
-// styles. Cut counts the cells of the row as [Layout.CellOf] and
-// [Layout.GutterWidth] do. A viewer that scrolls horizontally thus cuts
-// each row to its window from the cells those methods return.
+// Cut returns cells left through right-1 of row, or "" when right is at or
+// before left. A negative left counts as 0. The row is one row of what
+// [Printer.Print] returns, with the escape sequences of its styles. Cut
+// counts the cells of the row as [Layout.CellOf] and [Layout.GutterWidth]
+// do, so cell left+k of the row is cell k of the result. A viewer that
+// scrolls horizontally thus cuts each row to its window from the cells
+// those methods return. Every rune in the window keeps the cell the
+// layout gives it.
 //
-// A keycap takes two cells here, but [ansi.Cut] counts one for its ASCII
-// base. Cut leaves out every cluster that straddles either edge, so the
-// result can span fewer than right-left cells. A zero-width cluster at
-// cell right falls outside the result. Every escape sequence stays, so a
-// style the row opens still closes.
+// A grapheme cluster that straddles either edge, such as a wide rune that
+// the window shows half of, becomes a space for each of its cells inside
+// the window. The spaces take the place of the cluster, so they keep its
+// style, such as the background of a search highlight. [Layout.PositionAt]
+// gives the column of that cluster for each of them. A zero-width cluster
+// at cell right falls outside the result. A keycap takes two cells here,
+// but [ansi.Cut] counts one for its ASCII base. Every escape sequence
+// stays, so a style the row opens still closes. The result spans
+// right-left cells when the row reaches cell right, and fewer when the
+// row ends before it. [Printer.Pad] pads such a result to the window.
 func Cut(row string, left, right int) string {
 	return cells.Cut(row, left, right)
 }
 
-// CutWidth returns what [Cut] returns along with the width of the cut in
-// cells. A viewer that pads the cut to the width of its window measures it
-// in the same pass.
+// CutWidth returns what [Cut] returns along with its width in cells. Like
+// Cut, it counts a negative left as 0. The width is right-left when the
+// row reaches cell right, and the cells the row has past left otherwise.
+// A viewer that pads the cut to its window pads right-left less that
+// width.
 func CutWidth(row string, left, right int) (string, int) {
 	return cells.CutWidth(row, left, right)
 }
@@ -699,6 +708,11 @@ func (noGutter) Render(GutterContext) string {
 // pads every row to the widest one. It replaces the box of an earlier
 // [WithBox].
 //
+// A width or a height on s applies to the joined rows. A narrow width
+// wraps them, and a vertical alignment moves them, so the rows of a
+// [Layout] then do not match the rows of [Printer.Print]. Use
+// [WithContainerWidth] to pin the width.
+//
 // To set the theme, which styles the tokens inside, use [WithStyles].
 //
 //nolint:gocritic // hugeParam: Copying.
@@ -737,7 +751,8 @@ func WithBox() Option {
 // The printer pads rows but never cuts them. A row can still run past n.
 // An annotation column can push the layout wider than [WithWrapWidth], and
 // a style transform can widen a row after it wraps. A viewer that scrolls
-// horizontally cuts the rows itself.
+// horizontally cuts the rows itself and pads each cut row to its window
+// with [Printer.Pad].
 //
 // Use it for a viewer that renders one window of a document at a time.
 // Without a pinned width, a window of short lines draws a narrower
@@ -939,7 +954,25 @@ func (p *Printer) Print(view *line.View) string {
 	return p.style.Render(strings.Join(p.padRows(p.renderRows(view)), "\n"))
 }
 
-// padRows pads each of rows with [kind.Text] spaces out to the container
+// Pad returns row with spaces in [kind.Text] after it, out to width
+// cells, as [WithContainerWidth] pads each row that [Printer.Print]
+// renders. A theme that sets a surface, such as
+// [go.jacobcolvin.com/niceyaml/style/theme.Charm], fills the spaces with
+// its background, which a plain space leaves out. A row that takes width
+// cells or more comes back as it is, so Pad never cuts. A viewer that
+// scrolls horizontally pads each row it cuts to its window:
+//
+//	window := p.Pad(printer.Cut(row, left, right), right-left)
+func (p *Printer) Pad(row string, width int) string {
+	pad := width - lipgloss.Width(row)
+	if pad <= 0 {
+		return row
+	}
+
+	return row + p.Style(kind.Text).Render(strings.Repeat(" ", pad))
+}
+
+// padRows pads each of rows with [Printer.Pad] out to the container
 // width, less the horizontal frame of the container. It returns rows
 // unchanged when the container width is 0, and it does not pad a row that
 // already reaches the width.
@@ -955,12 +988,9 @@ func (p *Printer) padRows(rows []string) []string {
 	}
 
 	width := max(0, p.containerWidth-p.style.GetHorizontalFrameSize())
-	textStyle := p.Style(kind.Text)
 
 	for i, row := range rows {
-		if pad := width - lipgloss.Width(row); pad > 0 {
-			rows[i] = row + textStyle.Render(strings.Repeat(" ", pad))
-		}
+		rows[i] = p.Pad(row, width)
 	}
 
 	return rows
@@ -999,8 +1029,8 @@ func (p *Printer) gutterWidth(maxNumber int) int {
 // each stays, so the gutter never adds a row to the ones [Printer.Layout]
 // counts.
 func (p *Printer) renderGutter(ctx GutterContext, width int) string {
-	// The cut drops a wide rune that straddles the width whole, so the
-	// printer pads a row that runs over as well as one that falls short.
+	// The cut shows a wide rune that straddles the width as a space in its
+	// style, so only a row that falls short takes the pad.
 	text, w := cells.CutWidth(firstRow(p.gutter.Render(ctx)), 0, width)
 	if w < width {
 		text += firstRow(p.styles.Style(kind.Text).Render(strings.Repeat(" ", width-w)))

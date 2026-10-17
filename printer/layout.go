@@ -47,6 +47,25 @@ import (
 // container style out. An empty view takes zero rows, but [Printer.Print]
 // draws one empty row for it to carry the container.
 //
+// Row r of the layout is thus row r+top of what [Printer.Print] returns.
+// The count top holds the rows that the container style draws above the
+// content: its top margin, border, and padding. A cell of the layout
+// likewise leaves out the left frame of the container:
+//
+//	frame := p.ContainerStyle()
+//	top := frame.GetMarginTop() + frame.GetBorderTopSize() + frame.GetPaddingTop()
+//	left := frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft()
+//	rows := strings.Split(p.Print(view), "\n")
+//	row := rows[top+layout.RowOf(pos)]
+//	cell := left + layout.GutterWidth() + layout.CellOf(pos)
+//
+// The box of [WithBox] adds only right padding, so its rows and cells
+// match the layout. The mapping holds when the container style does not
+// set a width, a height, or a vertical alignment of its own. A width
+// narrower than the rows wraps them, and a height that aligns the rows
+// other than at the top moves them down. [WithContainerWidth] pins the
+// width without wrapping.
+//
 // Create instances with [Printer.Layout].
 type Layout struct {
 	lines       []lineLayout
@@ -591,17 +610,26 @@ func (l Layout) CellOf(pos position.Position) int {
 //
 // Any cell of a grapheme cluster gives the column where the cluster
 // starts. The second cell of a wide rune thus gives the column of that
-// rune. A style's transform can add runes around the run it styles, such
+// rune. [Cut] shows a cluster that an edge of a window splits as spaces
+// in its style, and each of those cells gives the column of that cluster
+// too. A style's transform can add runes around the run it styles, such
 // as brackets. A cell that shows such a rune gives a column of that run.
 // A rune before the text of the run gives its first column, and a rune
 // after the text gives its last.
 //
 // PositionAt reports false for a cell that does not show content. Such a
 // cell lies on a row outside the layout, on an annotation row, or past
-// the last rune the row shows. A negative cell lies in the gutter and
-// reports false too. The line ending, the spaces the wrapper dropped at a
-// break, and every rune of zero width, such as a zero-width space, do not
-// take a cell. PositionAt thus never returns their columns.
+// the last rune the row shows. The line ending, the spaces the wrapper
+// dropped at a break, and every rune of zero width, such as a zero-width
+// space, do not take a cell. PositionAt thus never returns their columns.
+//
+// A negative cell reports false too. The cell counts in the layout, not
+// in a window that a viewer shows of it. A viewer whose gutter scrolls
+// with the content subtracts [Layout.GutterWidth] from the cell of the
+// printed row, so a cell of the gutter comes out negative. A viewer that
+// keeps the gutter in place and scrolls the content beside it tests for a
+// cell of the gutter before it adds its scroll offset. After the offset,
+// a cell of the gutter lands on content.
 //
 // On a line the view clips, a cell gives the column of the line it
 // shows, whatever the row leaves out before it. A cell of a "..." does

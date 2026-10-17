@@ -81,9 +81,9 @@ func main() {
 	// match and keeps the window inside the rows the view takes.
 	top := clamp(layout.RowOf(dish.Start)-height/2, layout.Rows()-height)
 
-	// The rows of a layout leave out the container style. These printers
-	// draw no frame above the content, so row n of the layout is row n of
-	// the output of Print. The container width pads every row to the window
+	// These printers draw no frame around the content, so row n of the
+	// layout is row n of the output of Print. The doc of Layout maps the
+	// rows under a frame. The container width pads every row to the window
 	// in kind.Text, so the surface of the theme fills the window. A view
 	// that takes fewer rows than the window fills only the top of it.
 	rows := strings.Split(wrapped.Print(view), "\n")
@@ -110,34 +110,17 @@ func main() {
 	left := clamp(layout.CellOf(lemon.End)-room, layout.Width()-gutter-room)
 	top = clamp(layout.RowOf(lemon.Start)-height/2, layout.Rows()-height)
 
-	// The viewer pads in kind.Text, as the container width does. A plain
-	// space does not take a background, so it leaves a hole in the surface.
-	fill := func(n int) string {
-		return p.Style(kind.Text).Render(strings.Repeat(" ", n))
-	}
-
 	from, to := gutter+left, gutter+left+room
-	shown := make([]position.Span, height)
 	rows = strings.Split(p.Print(view), "\n")
 	rows = rows[top:min(top+height, len(rows))]
 
 	for i, row := range rows {
 		// Cut keeps every escape sequence of the row, so the text in the
-		// window keeps the color of a token that starts before it.
-		// CutWidth also returns the cells the cut takes.
-		body, n := printer.CutWidth(row, from, to)
-
-		// Cut leaves out a wide rune that either edge of the window splits.
-		// When the left edge splits one, the cut starts where that rune
-		// ends. CutWidth from cell 0 to the right edge counts the cells
-		// before the window, the part of that rune inside it, and the cut.
-		// The viewer pads that part, so each rune of the cut keeps the cell
-		// that the layout gives it. The span records the cells that show
-		// content.
-		_, reach := printer.CutWidth(row, 0, to)
-		split := max(0, reach-from-n)
-		shown[i] = position.NewSpan(split, split+n)
-		rows[i] = printer.Cut(row, 0, gutter) + fill(split) + body + fill(room-split-n)
+		// window keeps the color of a token that starts before it. It keeps
+		// every cell in place too, so each rune of the window takes the cell
+		// that the layout gives it. Pad fills the rest of a short row with
+		// the surface of the theme, as the container width does.
+		rows[i] = printer.Cut(row, 0, gutter) + p.Pad(printer.Cut(row, from, to), room)
 	}
 
 	frame(rows)
@@ -146,19 +129,19 @@ func main() {
 
 	// A click names a row of the window and a cell inside its frame,
 	// both counted from 0. The left edge of this window splits the cucumber
-	// emoji in the note of Köttbullar, so the viewer pads cell 6 of row 6.
-	// The lemon match and the width of the window set that edge, so a
-	// change to either moves it off the emoji.
+	// emoji in the note of Köttbullar. Cut shows the part of the emoji
+	// inside the window as a space in its style, so cell 6 of row 6 gives
+	// the emoji. The lemon match and the width of the window set that edge,
+	// so a change to either moves it off the emoji.
 	clicks := []struct{ row, cell int }{{3, 20}, {6, 8}, {6, 6}, {0, 20}, {2, 20}, {3, 2}}
 	for _, c := range clicks {
 		at := fmt.Sprintf("Row %d, cell %2d:", c.row, c.cell)
 		row := top + c.row
 
 		// The gutter stays in place when the content scrolls, so the viewer
-		// tests for a gutter cell before it adds the scroll offset.
-		// PositionAt reports false for a negative cell, but after the offset
-		// a gutter cell lands on a column of content. LineAt still names the
-		// line that a gutter cell sits beside.
+		// tests for a gutter cell before it adds the scroll offset, as the
+		// doc of PositionAt describes. LineAt still names the line that a
+		// gutter cell sits beside.
 		if c.cell < gutter {
 			fmt.Println(at, "the gutter of line", layout.LineAt(row)+1)
 
@@ -172,15 +155,6 @@ func main() {
 		pos, ok := layout.PositionAt(row, left+cell)
 		if !ok {
 			fmt.Println(at, "no content beside line", layout.LineAt(row)+1)
-
-			continue
-		}
-
-		// PositionAt reads the layout and not the window. On a cell that the
-		// viewer padded, it gives the column of the rune that the window
-		// left out. The viewer thus checks the cells that the row shows.
-		if !shown[c.row].Contains(cell) {
-			fmt.Println(at, "padding for a rune that the edge splits")
 
 			continue
 		}
