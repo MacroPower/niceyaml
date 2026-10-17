@@ -6,10 +6,10 @@ import "iter"
 // that content. The diff and finder packages read one, so they take
 // [Lines] and a [*View] alike. Lines yields every line it holds. A View
 // yields the lines it holds, each with the index it has in the content of
-// the View, which [View.Line] takes, and the indices skip wherever the
-// View skips lines of its content. A
-// [position.Range] built from those indices therefore applies to the View
-// and to every other View over that content.
+// the View. [View.Line] takes that index. The indices skip wherever the
+// View skips lines of its content. A [position.Range] built from those
+// indices therefore applies to the View and to every other View over that
+// content.
 //
 // See [Lines] and [*View] for implementations.
 type Sequence interface {

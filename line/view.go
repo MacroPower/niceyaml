@@ -24,23 +24,25 @@ import (
 // a bound error, hands one out.
 //
 // A View shares its lines with every other View over the same content and
-// owns its decoration alone. Creating one costs an index of the lines it
-// holds and no copy of their content, and decorating one reaches no
-// other. Two renderings of one document, such as search
+// owns its decoration alone. Creating one builds an index of the lines it
+// holds but does not copy their content, and decorating one View does not
+// change another. Two renderings of one document, such as search
 // highlights and error marks, are two Views over the same [Lines].
 //
-// Every index and every [position.Range] a View takes or yields is in the
-// coordinates of its content, the [Lines] it is over, where line i is the
-// line [View.Line] returns for i. A View holds each line of its content at
-// most once, in content order. A View from [View.Slice] holds some of those
-// lines and keeps their indices. A range from a search of the content or
-// from the path of a document applies to a slice as it applies to the
-// whole, and slicing before or after decorating renders the same.
-// [View.All] yields the lines the View holds with their indices,
-// [View.Contains] reports whether it holds a line, [View.Index] finds the
-// index of a line it holds, and [View.Count] is the number it holds. A
-// View from [View.Clip] shows a long line in part, and the columns it
-// takes and yields are still those of the content.
+// Every index and every [position.Range] that a View takes or yields is in
+// the coordinates of its content, the [Lines] it is over. Line i is the
+// line that [View.Line] returns for i. A View holds each line of its
+// content at most once, in content order. A View from [View.Slice] holds
+// some of those lines and keeps their indices. A range from a search of
+// the content or from the path of a document applies to a slice as it
+// applies to the whole. Slicing before or after decorating renders the
+// same.
+//
+// [View.All] yields the lines the View holds with their indices, and
+// [View.Contains] reports whether it holds a line. [View.Index] finds the
+// index of a line it holds, and [View.Count] returns the number of lines it
+// holds. A View from [View.Clip] shows a long line in part, and the columns
+// it takes and yields are still those of the content.
 //
 // Index-taking methods panic when the index is outside the content, as
 // indexing a slice does. A View keeps decoration on a line it does not
@@ -52,21 +54,21 @@ import (
 // empty view.
 type View struct {
 	// The decoration of the lines that carry some, keyed by index. An
-	// undecorated line has no entry, so a slice or a clone costs the
-	// lines it holds and the decoration it copies, whatever the length of
-	// the content.
+	// undecorated line does not have an entry. A slice or a clone
+	// therefore costs the lines it holds and the decoration it copies,
+	// whatever the length of the content.
 	flags       map[int]Flag
 	overlays    map[int]Overlays
 	annotations map[int]Annotations
 	lines       Lines
-	// The index in lines of each line the View holds, ascending.
+	// The index in lines of each line the View holds, in ascending order.
 	held []int
 	// The number of columns each window of a clipped line holds, as
 	// [View.Clip] sets it, or 0 when the View shows every line whole.
 	clip int
 }
 
-// NewView creates a new [*View] over lines with no decoration. The view
+// NewView creates a new [*View] over lines without decoration. The view
 // holds every line, in content order. [NewViewWithin] creates a view that
 // holds the lines of some spans, such as one document of a file that
 // holds several.
@@ -80,10 +82,10 @@ func NewView(lines Lines) *View {
 	return v
 }
 
-// NewViewWithin creates a new [*View] over lines with no decoration. The
+// NewViewWithin creates a new [*View] over lines without decoration. The
 // view holds the lines within any of the given spans, in content order and
-// each once, as [Lines.Within] yields them. Without spans, the view holds
-// no line. The view holds the lines that a [View.Slice] of a [NewView] by
+// each once, as [Lines.Within] yields them. Without spans, the view is
+// empty. The view holds the lines that a [View.Slice] of a [NewView] by
 // the same spans holds. The index it builds grows with those lines alone.
 func NewViewWithin(lines Lines, spans ...position.Span) *View {
 	v := &View{lines: lines}
@@ -96,23 +98,24 @@ func NewViewWithin(lines Lines, spans ...position.Span) *View {
 }
 
 // Line returns line i of the content of the [View], whether or not the
-// View holds it, so a position in the coordinates of the content reaches
-// its line. It panics when i is outside the content, as the other
-// index-taking methods do. The text of the lines the View holds comes from
-// [View.Held].
+// View holds it. A position in the coordinates of the content therefore
+// reaches its line. Line panics when i is outside the content, as the
+// other index-taking methods do. The text of the lines the View holds
+// comes from [View.Held].
 func (v *View) Line(i int) *Line {
 	return v.lines.lines[i]
 }
 
-// Over reports whether lines is the content of the [View], so an index or
-// a [position.Range] in the coordinates of lines applies to the View. A
-// View is over the [Lines] that [NewView] or [NewViewWithin] took, and so
-// is every View that [View.Slice], [View.Clone], [View.Hunks], or
-// [View.Clip] returns from it. A Lines value and its copies are one
-// content. Two values that [Collect] created are two contents, even when
-// they hold the same lines. Every Lines value that holds no line is the
-// zero Lines, so two empty values are one content. A nil View and the zero
-// View are over it.
+// Over reports whether lines is the content of the [View]. When it is, an
+// index or a [position.Range] in the coordinates of lines applies to the
+// View. A View is over the [Lines] that [NewView] or [NewViewWithin] took,
+// and so is every View that [View.Slice], [View.Clone], [View.Hunks], or
+// [View.Clip] returns from it.
+//
+// A Lines value and its copies are one content. Two values that [Collect]
+// created are two contents, even when they hold the same lines. Every
+// empty Lines value is the zero Lines, so two empty values are one
+// content. A nil View and the zero View are over the zero Lines.
 func (v *View) Over(lines Lines) bool {
 	var content Lines
 
@@ -126,18 +129,18 @@ func (v *View) Over(lines Lines) bool {
 // Held returns the lines the [View] holds as new [Lines], in the order
 // [View.All] yields them. The result shares the lines by pointer with the
 // content, as [Collect] does. It has the methods a View lacks, such as
-// [Lines.Content], [Lines.Tokens], [Lines.Runes], and [Lines.TokenAt], so
-// it reaches the text of the lines a slice holds, such as one document of
-// a file that holds several:
+// [Lines.Content], [Lines.Tokens], [Lines.Runes], and [Lines.TokenAt].
+// With them, a caller reaches the text of the lines a slice holds, such as
+// one document of a file that holds several:
 //
 //	text := doc.View().Held().Content()
 //
 // Each line keeps the number it has in the file, but the indices of the
 // result start at zero. Line i of the result is the i-th held line, not
-// line i of the content, so an index or a range computed on the result
-// does not apply to the View. A diff or a search of the held lines takes
-// the View itself, as a [Sequence], and works in the coordinates of the
-// content. A nil View holds no lines.
+// line i of the content. An index or a range computed on the result
+// therefore does not apply to the View. A diff or a search of the held
+// lines takes the View itself, as a [Sequence], and works in the
+// coordinates of the content. Held returns the zero Lines for a nil View.
 func (v *View) Held() Lines {
 	if v == nil {
 		return Lines{}
@@ -153,8 +156,8 @@ func (v *View) Held() Lines {
 }
 
 // Count returns the number of lines the [View] holds, which is the number
-// [View.All] yields and [View.Held] returns. The content can hold more,
-// which [View.Line] reaches by index.
+// [View.All] yields and [View.Held] returns. The content can hold more
+// lines, and [View.Line] reaches them by index.
 func (v *View) Count() int {
 	if v == nil {
 		return 0
@@ -163,8 +166,8 @@ func (v *View) Count() int {
 	return len(v.held)
 }
 
-// Contains reports whether the [View] holds line i of its content. A nil
-// View holds no line, and no View holds an index outside its content.
+// Contains reports whether the [View] holds line i of its content. It
+// reports false for a nil View and for an index outside the content.
 func (v *View) Contains(i int) bool {
 	if v == nil {
 		return false
@@ -175,16 +178,17 @@ func (v *View) Contains(i int) bool {
 	return ok
 }
 
-// Index returns the index of the line the [View] holds that is l and
-// true. Every View over the same content shares its lines by pointer. A
-// decorator that knows a line of a [Lines] value finds it in a slice of
-// that content, or in a diff that interleaves it with another revision,
-// without knowing what built the view. A line the view does not hold,
-// such as one from other content, reports false. A unified diff shows an
-// unchanged line of the before revision as the line of the after
-// revision, so Index does not find the before line there.
-// [go.jacobcolvin.com/niceyaml/diff.Result.UnifiedRow] maps every line of
-// either revision to its row.
+// Index returns the index at which the [View] holds l, and true. Every
+// View over the same content shares its lines by pointer. A decorator that
+// knows a line of a [Lines] value therefore finds it without knowing what
+// built the view. The view can be a slice of that content or a diff that
+// interleaves it with another revision. For a line the View does not hold,
+// such as one from other content, Index returns false.
+//
+// A unified diff shows an unchanged line of the before revision as the
+// line of the after revision, so Index does not find the before line
+// there. [go.jacobcolvin.com/niceyaml/diff.Result.UnifiedRow] maps every
+// line of either revision to its row.
 func (v *View) Index(l *Line) (int, bool) {
 	if v == nil || l == nil {
 		return 0, false
@@ -206,7 +210,7 @@ func (v *View) Index(l *Line) (int, bool) {
 
 // All returns an iterator over every line the [View] holds, in content
 // order. Each iteration yields the index of the line in the content and
-// the [*Line], and the index reaches the line's decoration through
+// the [*Line]. The index reaches the line's decoration through
 // [View.Flag], [View.Overlays], and [View.Annotations]. [View.Within]
 // yields the lines of some spans.
 func (v *View) All() iter.Seq2[int, *Line] {
@@ -224,13 +228,15 @@ func (v *View) All() iter.Seq2[int, *Line] {
 }
 
 // Within returns an iterator over the lines the [View] holds within any of
-// the given spans, in content order and each once whatever order the
-// spans come in and however they overlap. Without spans, Within yields no
-// line, so the empty result of [position.ContextSpans] selects nothing.
-// [View.All] yields every line the View holds. Each iteration
-// yields the index of the line in the content and the [*Line], as
-// View.All does. A span reaching outside the content selects the lines it
-// does hold.
+// the given spans. It yields them in content order and yields each line
+// one time, whatever order the spans come in and however they overlap.
+// Without spans, the iterator is empty, so the nil result of
+// [position.ContextSpans] does not select any line. [View.All] yields every
+// line the View holds.
+//
+// Each iteration yields the index of the line in the content and the
+// [*Line], as View.All does. A span that reaches outside the content
+// selects only the lines inside the content that the View holds.
 func (v *View) Within(spans ...position.Span) iter.Seq2[int, *Line] {
 	return func(yield func(int, *Line) bool) {
 		if v == nil {
@@ -278,7 +284,8 @@ func mergeSpans(spans []position.Span, n int) position.Spans {
 	return merged
 }
 
-// Flag returns the [Flag] of line i. The zero value is [FlagDefault].
+// Flag returns the [Flag] of line i, or [FlagDefault] when line i does not
+// have one.
 func (v *View) Flag(i int) Flag {
 	_ = v.lines.lines[i]
 
@@ -334,7 +341,7 @@ func (v *View) Overlays(i int) Overlays {
 
 // AddLineOverlay adds the given [Overlay] values to line i as given.
 // [View.AddOverlay] and [View.BlendOverlay] clamp a range to the lines it
-// covers before adding; AddLineOverlay does not.
+// covers before they add it, but AddLineOverlay does not clamp an overlay.
 func (v *View) AddLineOverlay(i int, o ...Overlay) {
 	_ = v.lines.lines[i]
 
@@ -349,11 +356,12 @@ func (v *View) AddLineOverlay(i int, o ...Overlay) {
 // in the coordinates of the content. The overlay replaces the style
 // underneath it. Use [View.BlendOverlay] to mix with it instead.
 //
-// It splits each range into one overlay per line with [Lines.SliceLines],
-// which clamps the columns to the width of the line and skips lines
-// outside the content, so a range computed against longer content is safe
-// to apply. A range that covers no columns of a line adds no overlay to
-// it, and an overlay on a line the View does not hold never renders.
+// It splits each range into one overlay per line with [Lines.SliceLines].
+// SliceLines clamps the columns to the width of the line and skips lines
+// outside the content. A caller can therefore safely apply a range
+// computed against longer content. AddOverlay adds an overlay to a line
+// only where the range covers at least one of its columns. An overlay on
+// a line the View does not hold never renders.
 func (v *View) AddOverlay(s kind.Kind, ranges ...position.Range) {
 	for _, r := range ranges {
 		v.addOverlayRange(s, false, r)
@@ -361,8 +369,8 @@ func (v *View) AddOverlay(s kind.Kind, ranges ...position.Range) {
 }
 
 // BlendOverlay adds an overlay like [View.AddOverlay], but one that blends
-// with the style underneath it. A search highlight added this way keeps the
-// token or diff color of the text it covers.
+// with the style underneath it. A search highlight that BlendOverlay adds
+// keeps the token or diff color of the text it covers.
 func (v *View) BlendOverlay(s kind.Kind, ranges ...position.Range) {
 	for _, r := range ranges {
 		v.addOverlayRange(s, true, r)
@@ -382,9 +390,10 @@ func (v *View) addOverlayRange(s kind.Kind, blend bool, r position.Range) {
 }
 
 // Clone returns a copy of the [View] with its own decoration. The copy
-// shares the lines with the original and holds the same ones. It costs
-// one copy of the index of the lines it holds and of the flags, overlays,
-// and annotations, and decorating either reaches nothing in the other.
+// shares the lines with the original and holds the same ones. Its cost is
+// one copy of the index of the lines it holds and one copy of the flags,
+// overlays, and annotations. Decorating either View does not change the
+// other.
 func (v *View) Clone() *View {
 	if v == nil {
 		return nil
@@ -403,18 +412,17 @@ func (v *View) Clone() *View {
 	return c
 }
 
-// Slice returns a new [*View] over the same content that holds the lines
-// the receiver holds within any of the given spans, in content order and
-// each once, as [View.Within] yields them, each with its index and its
-// decoration. The result owns its decoration and carries that of the
-// lines it holds, so it is the view a caller renders to show part of a
-// document, such as the hunks around an error. A range or an index that
-// applies to the receiver applies to it. Slicing an already sliced
-// view narrows it further.
+// Slice returns a new [*View] over the same content. The result holds the
+// lines that the receiver holds within any of the given spans, in content
+// order and each once, as [View.Within] yields them. Each line keeps its
+// index and its decoration. The result owns its decoration. It is the view
+// a caller renders to show part of a document, such as the hunks around an
+// error. A range or an index that applies to the receiver applies to the
+// result, and slicing an already sliced view narrows it further.
 //
-// With no span, the result holds no line, so a slice by the empty result
-// of [position.ContextSpans] renders nothing. [View.Clone] holds every
-// line the receiver holds.
+// Without spans, the result is empty, so a slice by the nil result of
+// [position.ContextSpans] does not render any line. [View.Clone] holds
+// every line the receiver holds.
 func (v *View) Slice(spans ...position.Span) *View {
 	if v == nil {
 		return &View{}
@@ -441,30 +449,31 @@ func (v *View) Slice(spans ...position.Span) *View {
 	return out
 }
 
-// Hunks returns a [*View] that holds the decorated lines of the View
-// with context lines of unchanged content on either side of each one,
-// so a caller that marks a document shows the marked parts alone. A
+// Hunks returns a [*View] that holds the decorated lines of the View,
+// with context lines of unchanged content on either side of each one. A
+// caller that marks a document thus shows the marked parts alone. A
 // decorated line carries a [Flag] other than [FlagDefault], an [Overlay],
 // or an [Annotation] of a kind other than [kind.UISeparator]. Decorated
 // lines whose context windows overlap or touch share a hunk, and distant
-// ones become separate hunks. A "..." annotation of kind
-// [kind.UISeparator] sits above the first line after each gap between
-// two lines the result holds, so the separator marks the gap between
-// two hunks and any gap the View itself skips inside one. No separator
-// marks the lines skipped before the first hunk. The result
-// drops every separator the View carries before adding its own, so the
-// hunks of hunks match the hunks of the original View at the same or a
-// smaller context. A negative context shows the decorated lines alone,
-// as 0 does, and a View with no decorated line yields a View that holds
-// no line, as a nil View does.
+// ones become separate hunks. A negative context shows the decorated lines
+// alone, as 0 does. A View without decorated lines yields an empty View,
+// as a nil View does.
 //
-// The result is a [View.Slice], so the lines keep their indices, a
-// range from the content applies to it, and decoration added after
-// slicing lands on the lines it holds. Context lines count in the
-// content, and the hunks hold those of them the View holds, so a slice
-// of a document yields hunks within the slice.
+// A "..." annotation of kind [kind.UISeparator] sits above the first line
+// after each gap between two lines the result holds. The separator
+// therefore marks the gap between two hunks and any gap the View itself
+// skips inside one. The lines that the result skips before the first hunk
+// do not get a separator. The result drops every separator the View
+// carries before it adds its own. The hunks of hunks therefore match the
+// hunks of the original View at the same or a smaller context.
 //
-// An error excerpt is the hunks of a view the error marked, and a caller
+// The result is a [View.Slice]. Its lines keep their indices, a range from
+// the content applies to it, and decoration that a caller adds later lands
+// on the lines it holds. Context lines count in the content, and the hunks
+// hold the context lines that the View holds. The hunks of a slice of a
+// document therefore lie within the slice.
+//
+// An error excerpt is the hunks of a view that the error marked. A caller
 // that marks several errors, or search matches, on one view takes the
 // hunks of that view the same way:
 //
@@ -531,7 +540,8 @@ func (v *View) Hunks(context int) *View {
 }
 
 // decorated reports whether line i carries a flag, an overlay, or an
-// annotation other than a separator [View.Hunks] adds.
+// annotation of a kind other than [kind.UISeparator], the kind of the
+// separators that [View.Hunks] adds.
 func (v *View) decorated(i int) bool {
 	return v.Flag(i) != FlagDefault || len(v.Overlays(i)) > 0 ||
 		slices.ContainsFunc(v.Annotations(i), func(a Annotation) bool { return !isSeparator(a) })
@@ -544,30 +554,32 @@ func isSeparator(a Annotation) bool {
 }
 
 // Clip returns a copy of the [View] that shows part of each line longer
-// than cols columns: a window of cols columns around each mark on the
-// line, with "..." in place of each run of columns it leaves out. Clip
-// cuts columns as [View.Hunks] cuts lines. A document minified onto one
-// line, or a long encoded value on the line an error marks, thus renders
-// as a row of bounded length.
+// than cols columns. The copy shows a window of cols columns around each
+// mark on such a line, with "..." in place of each run of columns it
+// leaves out. Clip cuts columns as [View.Hunks] cuts lines. A document
+// minified onto one line, or a long encoded value on the line an error
+// marks, thus renders as a row of bounded length.
 //
-// A mark is the first column of an [Overlay] or of the [Annotation.Cols]
-// of an annotation of a kind other than [kind.UISeparator], and a line with
-// no mark keeps its first cols columns. A window centers on its mark and
+// A mark is the first column of an [Overlay], or of the [Annotation.Cols]
+// of an annotation of a kind other than [kind.UISeparator]. A line without
+// a mark keeps its first cols columns. A window centers on its mark and
 // moves to stay inside the line. An overlay longer than its window
 // therefore shows the columns from its start that the window holds.
-// Windows that overlap or lie three columns or fewer apart join into one,
-// and a window three columns or fewer from either end of the line reaches
-// that end, since "..." takes three columns itself. A window keeps each
-// grapheme cluster whole, so it grows to hold the rest of a cluster at
-// either edge.
+//
+// The "..." marker takes three columns, so windows that overlap or lie
+// three columns or fewer apart join into one. For the same reason, a
+// window three columns or fewer from either end of the line reaches that
+// end. A window keeps each grapheme cluster whole, so it grows to hold the
+// rest of a cluster at either edge.
 //
 // The copy holds the lines the View holds with their indices and their
 // decoration, so a range from the content still applies to it. It picks
-// the windows when it renders, from the decoration it carries then, so a
-// mark added after the clip gets a window too. [View.Windows] returns the
-// windows of a line, and [View.String] and the printer render them.
-// [View.Slice], [View.Hunks], and [View.Clone] keep the clip. A cols of
-// zero or less shows every line whole, so it undoes a clip.
+// the windows when it renders, from the decoration it carries then. A mark
+// that a caller adds after the clip therefore gets a window too.
+// [View.Windows] returns the windows of a line, and [View.String] and the
+// printer render them. [View.Slice], [View.Hunks], and [View.Clone] keep
+// the clip. A cols of zero or less shows every line whole, so it undoes a
+// clip.
 //
 // An error excerpt clips its hunks this way, and a caller that marks a
 // view of its own does the same:
@@ -585,9 +597,9 @@ func (v *View) Clip(cols int) *View {
 }
 
 // Windows returns the runs of columns of line i that the [View] shows,
-// in order, as [View.Clip] picks them. It returns nil for a line the View
-// shows whole, which every line of a View with no clip is, and every
-// line no longer than the clip. The spans count columns of the content.
+// in order, as [View.Clip] picks them. It returns nil for a line that the
+// View shows whole, such as every line of a View without a clip and every
+// line that fits within the clip. The spans count columns of the content.
 // A renderer shows "..." for each run of columns between two of them,
 // before the first, and after the last.
 func (v *View) Windows(i int) position.Spans {
@@ -706,38 +718,40 @@ func (v *View) shown(i int, ln *Line) shownRow {
 // The row holds their contents joined with "; " in column order, from the
 // first column they start at.
 //
-// Below a line, each run of columns that annotations label, their
-// [Annotation.Cols], gets a row of its own. The row holds a caret under
+// Below a line, each run of columns that the [Annotation.Cols] of its
+// annotations label gets a row of its own. The row holds a caret under
 // each column of the run and the contents of its annotations after the
 // carets. Annotations of one kind that label the same columns share a
 // row, with their contents joined with "; ". An annotation without
-// content draws its carets alone. A run that covers no column of the
-// content, such as an empty one, gets a single caret at its start.
+// content draws its carets alone. A run that does not cover any column of
+// the content, such as an empty one, gets a single caret at its start.
 //
 // Below a line, the rows of [kind.TextError] annotations come first, then
 // those of [kind.TextWarn], then those of the other kinds in the order
 // the kinds first appear. The rows of one kind come in the order their
 // runs start, and runs that start at one column come shorter first.
-// Overlays render no row, so a line with overlays and no annotation below
-// it renders no caret.
+// Overlays do not render a row, so a line with overlays but without an
+// annotation below it does not render a caret.
 //
 // Annotations that start more than [MaxColPastEnd] columns past the end
 // of the content start at that bound, as the printer starts them.
 // Control characters render as their pictures. A rune that takes two
 // cells in a terminal gets two carets, so the carets stay under the runes
-// they mark in a fixed-width font. The output holds no escape sequences,
-// so it goes into a log or a golden file as it is, and
-// [go.jacobcolvin.com/niceyaml.FormatError] prints the excerpt of a
-// bound error this way. A printer renders the same view with styles.
+// they mark in a fixed-width font. The output does not hold escape
+// sequences, so it goes into a log or a golden file unchanged.
+// [go.jacobcolvin.com/niceyaml.FormatError] prints the excerpt of a bound
+// error this way.
+//
+// A printer renders the same view with styles.
 // [go.jacobcolvin.com/niceyaml/printer.DefaultAnnotation] lays out the
 // rows below a line as String does, and the printer wraps the line and
 // those rows to its width.
 //
-// A line the View clips, as [View.Clip] sets a View to, renders the
-// windows [View.Windows] returns, with "..." in place of each run of
-// columns it leaves out. The carets and the annotations of the line sit
-// under the columns of that row. An annotation that starts at a column
-// the row leaves out starts at the "..." that stands for the column.
+// A line that [View.Clip] clips renders the windows [View.Windows]
+// returns, with "..." in place of each run of columns it leaves out. The
+// carets and the annotations of the line sit under the columns of that
+// row. An annotation that starts at a column the row leaves out starts at
+// the "..." that stands for the column.
 func (v *View) String() string {
 	width := 4
 	for _, ln := range v.All() {
@@ -800,8 +814,8 @@ func (v *View) String() string {
 }
 
 // caretLabels returns the labels that mark anns below a line whose content
-// is width columns wide. Each label starts no further than [MaxColPastEnd]
-// columns past the end of the content.
+// is width columns wide. Each label starts at most [MaxColPastEnd] columns
+// past the end of the content.
 func caretLabels(anns Annotations, width int) []caret.Label {
 	labels := make([]caret.Label, 0, len(anns))
 
@@ -816,10 +830,10 @@ func caretLabels(anns Annotations, width int) []caret.Label {
 }
 
 // contentRow returns the row that renders content, the text of a line,
-// behind number, the number of the line, right-aligned in a gutter width
-// cells wide. A line with no number, such as the placeholder a diff puts
-// opposite an inserted or deleted line, gets a blank gutter, as the
-// printer gives it one.
+// behind number, the number of the line. The number sits right-aligned in
+// a gutter that is width cells wide. A line without a number, such as the
+// placeholder a diff puts opposite an inserted or deleted line, gets a
+// blank gutter, as the printer gives it one.
 func contentRow(number int, content string, width int) string {
 	gutter := ""
 	if number > 0 {

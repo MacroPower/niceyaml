@@ -7,7 +7,7 @@ import (
 )
 
 // tokenKinds maps each [token.Type] to the [kind.Kind] its text renders
-// with. A type with no entry, such as a space, renders as [kind.Text].
+// with. A type without an entry, such as a space, renders as [kind.Text].
 var tokenKinds = map[token.Type]kind.Kind{
 	token.AliasType:          kind.NameAlias,
 	token.AnchorType:         kind.NameAnchor,
@@ -44,37 +44,40 @@ var tokenKinds = map[token.Type]kind.Kind{
 	token.UnknownType:        kind.GenericErrorUnknown,
 }
 
-// TokenKind returns the [kind.Kind] the text of tk renders with: the kind
-// of its [token.Type], read with its neighbors in the chain it links
-// into. A scalar, such as a plain or quoted string, a number, a bool, or
-// a null, reads as a mapping key, [kind.NameTag], when a colon follows
-// it, even with comments between the two. Punctuation, tags, comments,
-// and merge keys keep their own kinds before a colon. A token after an
-// anchor or an alias takes the kind of that anchor or alias, so the name
-// of "&base" renders as the "&" does. A type with no kind of its own,
-// such as a space, and a nil token render as [kind.Text].
+// TokenKind returns the [kind.Kind] the text of tk renders with. It reads
+// the kind from the [token.Type] of tk and from its neighbors in the chain
+// it links into. A type without a kind of its own, such as a space, and a
+// nil token render as [kind.Text].
+//
+// A scalar, such as a plain or quoted string, a number, a bool, or a null,
+// reads as a mapping key, [kind.NameTag], when a colon follows it.
+// Comments between the scalar and the colon do not change the result.
+// Punctuation, tags, comments, and merge keys keep their own kinds before
+// a colon. A token after an anchor or an alias takes the kind of that
+// anchor or alias, so the name of "&base" renders as the "&" does.
 //
 // TokenKind reads a token of a whole stream, such as one from
-// [Lines.Tokens]. [Line.Kind] reads a token on a line, whose chain stops
-// at the line boundary, through the lexer token it is a part of, so a
-// key whose colon sits on the next line still reads as a key there.
+// [Lines.Tokens]. [Line.Kind] reads a token on a line instead. The chain
+// of such a token stops at the line boundary, so Line.Kind reads past it
+// through the lexer token it is a part of. A key whose colon sits on the
+// next line therefore still reads as a key there.
 func TokenKind(tk *token.Token) kind.Kind {
 	return tokenKind(tk, nil)
 }
 
 // Kind returns the [kind.Kind] the text of the token at idx renders with,
-// as [TokenKind] reads it, with the neighbors of the lexer token it is a
-// part of standing in where the chain of the line stops. It is the kind
-// [View.Segments] gives the content of the token, and the kind a renderer
-// styles it with. Panics if idx is out of range.
+// as [TokenKind] reads it. Where the chain of the line stops, Kind reads
+// the neighbors of the lexer token that the token is a part of.
+// [View.Segments] gives the content of the token this kind, and a renderer
+// styles the content with it. Kind panics if idx is out of range.
 func (l *Line) Kind(idx int) kind.Kind {
 	seg := l.segments[idx]
 
 	return tokenKind(seg.Part(), seg.Source())
 }
 
-// tokenKind returns the [kind.Kind] for tk, with src the lexer token tk
-// is a part of, or nil for a token of a whole stream.
+// tokenKind returns the [kind.Kind] for tk. The src token is the lexer
+// token that tk is a part of, or nil for a token of a whole stream.
 func tokenKind(tk, src *token.Token) kind.Kind {
 	if tk == nil {
 		return kind.Text
@@ -90,13 +93,13 @@ func tokenKind(tk, src *token.Token) kind.Kind {
 // visualType returns the token type the kind lookup uses, which differs
 // from tk.Type when a neighbor changes how the token reads.
 //
-// The part chain stops at the line boundary, so where tk has no neighbor
-// the lookup reads the neighbor of src, whose chain spans the whole stream.
-// A key whose colon sits on the next line still reads as a key that way.
+// The part chain stops at the line boundary. Where tk lacks a neighbor, the
+// lookup reads the neighbor of src, whose chain spans the whole stream. A
+// key whose colon sits on the next line still reads as a key that way.
 //
-// Only a scalar that [isKeyType] accepts turns into a key before a colon,
-// and the lookup skips comments on the way to that colon. Every other
-// token keeps its own type.
+// Only a scalar that [isKeyType] accepts becomes a key before a colon, and
+// the lookup skips comments on the way to that colon. Every other token
+// keeps its own type before a colon.
 func visualType(tk, src *token.Token) token.Type {
 	prevType := tk.PreviousType()
 	if tk.Prev == nil && src != nil {
@@ -115,7 +118,7 @@ func visualType(tk, src *token.Token) token.Type {
 }
 
 // isKeyType reports whether typ is a scalar type that reads as a mapping
-// key when a colon follows it. [token.MergeKeyType] stays out, since the
+// key when a colon follows it. It rejects [token.MergeKeyType] because the
 // lexer reports "<<" as a merge key only when a colon already follows it.
 func isKeyType(typ token.Type) bool {
 	switch typ {
@@ -139,9 +142,9 @@ func isKeyType(typ token.Type) bool {
 }
 
 // nextSignificantType returns the type of the first token after tk that
-// is not a comment, or [token.UnknownType] when none follows. Where the
-// chain of tk runs out, the walk carries on from src, whose chain spans
-// the whole stream.
+// is not a comment. Where the chain of tk ends, the walk continues from
+// src, whose chain spans the whole stream. It returns [token.UnknownType]
+// when the walk does not find such a token.
 func nextSignificantType(tk, src *token.Token) token.Type {
 	next := skipComments(tk.Next)
 	if next == nil && src != nil {

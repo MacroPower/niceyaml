@@ -18,16 +18,16 @@ import (
 // Lines is an ordered collection of [*Line] values, the content that a
 // [View] decorates and that the finder and diff packages read.
 //
-// Lines carries the tokens split per line. It has no knowledge of YAML
-// documents, parsing, or files, so a Lines value may describe content that
-// is not a YAML document at all, such as a diff that interleaves lines from
-// two revisions. The lines never change after creation, and nothing outside
-// this package can add to, remove from, or reorder a Lines value. It is
-// safe to share between views and goroutines, and a view over it shares
-// the lines instead of copying them.
+// Lines carries the tokens split per line. It does not know about YAML
+// documents, parsing, or files. A Lines value can therefore describe
+// content that is not a YAML document, such as a diff that interleaves
+// lines from two revisions. The lines never change after creation, and
+// code outside this package cannot add to, remove from, or reorder a Lines
+// value. It is safe to share between views and goroutines, and a view over
+// it shares the lines instead of copying them.
 //
 // Reach a line with [Lines.Line] or by ranging over [Lines.All], as
-// with a [View]. The zero value holds no lines.
+// with a [View]. The zero value is empty.
 //
 // Create instances with [NewLines], which cuts a token stream into one
 // [Line] per source line, or [Collect], which gathers lines taken from
@@ -38,17 +38,17 @@ type Lines struct {
 }
 
 // NewLines creates new [Lines] from [token.Tokens], one [Line] per source
-// line. The tokens are ones [tokens.Tokenize] returns or the clones
-// [tokens.ResetPositions] makes of them, whose positions name the rune
-// where each token's text starts.
+// line. NewLines expects the tokens that [tokens.Tokenize] returns, or the
+// clones that [tokens.ResetPositions] makes of them. The positions of such
+// tokens name the rune where each token's text starts.
 //
 // NewLines cuts multiline tokens, such as block scalars and quoted multiline
 // strings, into one part per line. Each part is a token whose Position
 // describes its own line. The first part that holds the token's text keeps
-// the token's Column and Offset, every later part names the rune where it
-// starts, and every part keeps a reference to the original token NewLines
-// cut it from. [Lines.Tokens] recombines the parts into the original tokens.
-// Returns the zero Lines when tks is empty.
+// the token's Column and Offset, and every later part names the rune where
+// it starts. Every part keeps a reference to the original token that
+// NewLines cut it from. [Lines.Tokens] recombines the parts into the
+// original tokens. NewLines returns the zero Lines when tks is empty.
 func NewLines(tks token.Tokens) Lines {
 	split := segment.Split(tks)
 	if len(split) == 0 {
@@ -63,10 +63,11 @@ func NewLines(tks token.Tokens) Lines {
 	return newLines(lines)
 }
 
-// Collect creates new [Lines] holding ls in the order given, such as the
+// Collect creates new [Lines] that hold ls in the order given, such as the
 // lines of two revisions a diff interleaves. The result shares the lines
 // with the Lines values they came from, so a [View] over it finds them by
-// identity as it finds them in the originals. Panics when a line is nil.
+// identity as it finds them in the originals. Collect panics when a line is
+// nil.
 func Collect(ls ...*Line) Lines {
 	for i, l := range ls {
 		if l == nil {
@@ -78,7 +79,7 @@ func Collect(ls ...*Line) Lines {
 }
 
 // newLines creates new [Lines] that own ls, which the caller must not
-// change afterward. Returns the zero Lines when ls is empty.
+// change afterward. It returns the zero Lines when ls is empty.
 func newLines(ls []*Line) Lines {
 	if len(ls) == 0 {
 		return Lines{}
@@ -89,7 +90,7 @@ func newLines(ls []*Line) Lines {
 
 // lineIndex finds the indices that hold a [*Line] by identity, and the
 // indices of the lines that hold a token. The first lookup of each kind
-// builds its maps, so creating [Lines] costs no map.
+// builds its maps, so creating [Lines] does not build a map.
 type lineIndex struct {
 	// The first index that holds each line.
 	first map[*Line]int
@@ -97,7 +98,7 @@ type lineIndex struct {
 	// source or part token sits at each position.
 	byPos map[posKey][]int
 	// The next index that holds the same line as each index, or -1 at its
-	// last occurrence. Nil when no line repeats.
+	// last occurrence. It is nil when every line occurs once.
 	next    []int
 	once    sync.Once
 	posOnce sync.Once
@@ -187,8 +188,8 @@ func (x *lineIndex) addPosition(tk *token.Token, i int) {
 	x.byPos[k] = append(idxs, i)
 }
 
-// index returns the identity index of ls, building it on first use, or
-// nil when ls holds no lines.
+// index returns the identity index of ls, or nil when ls is empty. The
+// first call builds the index.
 func (ls Lines) index() *lineIndex {
 	if ls.idx == nil {
 		return nil
@@ -200,7 +201,7 @@ func (ls Lines) index() *lineIndex {
 }
 
 // firstIndex returns the first index that holds l and true, or false when
-// no index holds it.
+// ls does not hold l.
 func (ls Lines) firstIndex(l *Line) (int, bool) {
 	x := ls.index()
 	if x == nil {
@@ -229,8 +230,8 @@ func (ls Lines) nextIndex(i int) (int, bool) {
 }
 
 // linesAt returns the indices, in ascending order, of the lines with a
-// segment whose source or part token sits at p, building the position
-// index on first use. Every line where a token at p can match a segment is
+// segment whose source or part token sits at p. The first call builds the
+// position index. Every line where a token at p can match a segment is
 // among them.
 func (ls Lines) linesAt(p *token.Position) []int {
 	if ls.idx == nil {
@@ -242,7 +243,7 @@ func (ls Lines) linesAt(p *token.Position) []int {
 	return ls.idx.byPos[keyOf(p)]
 }
 
-// Line returns the [*Line] at index i. Panics when i is outside the
+// Line returns the [*Line] at index i. Line panics when i is outside the
 // collection, as indexing a slice does.
 func (ls Lines) Line(i int) *Line {
 	return ls.lines[i]
@@ -253,7 +254,7 @@ func (ls Lines) Len() int {
 	return len(ls.lines)
 }
 
-// IsEmpty reports whether there are no lines.
+// IsEmpty reports whether the collection holds zero lines.
 func (ls Lines) IsEmpty() bool {
 	return len(ls.lines) == 0
 }
@@ -284,15 +285,15 @@ func (ls Lines) All() iter.Seq2[int, *Line] {
 	}
 }
 
-// Within returns an iterator over the lines within any of the given spans,
-// in content order and each once whatever order the spans come in and
-// however they overlap. Without spans, Within yields no line, so the empty
-// result of [position.ContextSpans] selects nothing. [Lines.All] yields
-// every line.
+// Within returns an iterator over the lines within any of the given spans.
+// It yields them in content order and yields each line one time, whatever
+// order the spans come in and however they overlap. Without spans, the
+// iterator is empty, so the nil result of [position.ContextSpans] does not
+// select any line. [Lines.All] yields every line.
 //
 // Each iteration yields the 0-indexed line index and the [*Line] at that
-// index. A span reaching outside the collection selects the lines it does
-// hold.
+// index. A span that reaches outside the collection selects only the lines
+// inside the collection.
 func (ls Lines) Within(spans ...position.Span) iter.Seq2[int, *Line] {
 	return func(yield func(int, *Line) bool) {
 		for _, s := range mergeSpans(spans, len(ls.lines)) {
@@ -309,9 +310,9 @@ func (ls Lines) Within(spans ...position.Span) iter.Seq2[int, *Line] {
 // order. [Lines.RunesIn] yields the runes of some ranges.
 //
 // Each iteration yields a [position.Position] and the rune at that
-// position. The iteration includes line endings as a single '\n', as
-// [Line.Runes] does, so a newline occupies the column after the last
-// visible rune whether the source used LF or CRLF, and columns match
+// position. The iteration includes each line ending as a single '\n', as
+// [Line.Runes] does. The newline occupies the column after the last
+// visible rune whether the source used LF or CRLF, so its column matches
 // [Line.Width].
 func (ls Lines) Runes() iter.Seq2[position.Position, rune] {
 	return func(yield func(position.Position, rune) bool) {
@@ -326,10 +327,10 @@ func (ls Lines) Runes() iter.Seq2[position.Position, rune] {
 }
 
 // RunesIn returns an iterator over the runes within any of the given
-// ranges, in content order and each once whatever order the ranges come in
-// and however they overlap. Without ranges, RunesIn yields no rune, so the
-// ranges of a search that matches nothing select nothing. [Lines.Runes]
-// yields every rune.
+// ranges. It yields them in content order and yields each rune one time,
+// whatever order the ranges come in and however they overlap. Without
+// ranges, the iterator is empty, so the ranges of a search without matches
+// do not select any rune. [Lines.Runes] yields every rune.
 //
 // Each iteration yields a [position.Position] and the rune at that
 // position, line endings included, as [Lines.Runes] yields them.
@@ -381,7 +382,7 @@ func (ls Lines) RunesIn(ranges ...position.Range) iter.Seq2[position.Position, r
 }
 
 // lineCols returns the columns of line i that r contains, as
-// [position.Range.Contains] tests them. A range that goes on past line i
+// [position.Range.Contains] tests them. A range that continues past line i
 // contains every column after its start, the line ending included.
 func lineCols(r position.Range, i int) position.Span {
 	start, end := 0, math.MaxInt
@@ -397,9 +398,9 @@ func lineCols(r position.Range, i int) position.Span {
 	return position.NewSpan(start, end)
 }
 
-// yieldRunes yields the runes of the line at index lineIdx that lie
-// within one of cols, which must be sorted and disjoint, as positions.
-// Returns false when yield stops the iteration.
+// yieldRunes yields, as positions, the runes of the line at index lineIdx
+// that lie within one of cols. The caller must sort cols and keep its
+// spans disjoint. It returns false when yield stops the iteration.
 func (ls Lines) yieldRunes(lineIdx int, cols position.Spans, yield func(position.Position, rune) bool) bool {
 	if len(cols) == 0 {
 		return true
@@ -430,9 +431,10 @@ func (ls Lines) yieldRunes(lineIdx int, cols position.Spans, yield func(position
 
 // Tokens reconstructs the full [token.Tokens] stream from all lines.
 //
-// Each original token appears once, where it first occurs, so a multiline
-// token split across lines returns as the single token the lexer produced,
-// and so does a token a line repeats. The slice is new, but the tokens are
+// Each original token appears once, where it first occurs. A multiline
+// token that [NewLines] split across lines therefore appears as the single
+// token the lexer produced. The tokens of a line that the collection holds
+// more than once also appear once. The slice is new, but the tokens are
 // the originals. Treat them as read-only.
 func (ls Lines) Tokens() token.Tokens {
 	if len(ls.lines) == 0 {
@@ -460,20 +462,21 @@ func (ls Lines) Tokens() token.Tokens {
 }
 
 // SliceLines splits r into one [position.Range] per line of the [Lines]
-// it covers, each holding the columns of r on that line. A range starts
-// at the start column of r on the first line and at column 0 on every
-// later one. It ends at the end column of r on the last line and at
+// it covers, and each range holds the columns of r on that line. A range
+// starts at the start column of r on the first line and at column 0 on
+// every later one. It ends at the end column of r on the last line and at
 // [Line.Width] on every earlier one.
 // The result is what [View.AddOverlay] marks for r, so a caller that
 // inspects or compares the per-line ranges sees the columns the lines
 // hold.
 //
-// A range that ends at column 0 of a later line covers nothing on that
-// line, as [position.Range.LastLine] counts it, and a range that ends
-// before its start covers no lines. SliceLines leaves out lines outside
-// the collection, columns before 0, and columns past the width of a line,
-// and a line on which r covers no column contributes no range. Returns nil
-// when no range remains.
+// A range that ends at column 0 of a later line does not cover any column
+// of that line, as [position.Range.LastLine] counts it. A range that ends
+// before its start does not cover any line. SliceLines leaves out lines
+// outside the collection, columns before 0, and columns past the width of
+// a line. It returns a range only for a line on which r covers at least
+// one column. SliceLines returns nil when r does not cover a column of any
+// line.
 func (ls Lines) SliceLines(r position.Range) position.Ranges {
 	var result position.Ranges
 
@@ -498,17 +501,19 @@ func (ls Lines) SliceLines(r position.Range) position.Ranges {
 	return result
 }
 
-// TokenAt returns the original [*token.Token] covering the given position.
+// TokenAt returns the original [*token.Token] that covers the given
+// position.
 //
 // The token is the one the lexer produced, so a caller can pass it back
 // to [Lines.TokenRanges] or [Lines.ContentRanges] to find every range it
 // occupies. Treat it as read-only.
 //
 // The lexer bundles the indentation of a line into the token that ends on
-// the line before, so a position in the indentation resolves to the token
-// that follows it on the same line instead.
+// the line before. A position in the indentation therefore resolves to the
+// token that follows it on the same line instead.
 //
-// Returns nil if the position is out of bounds or no token exists there.
+// TokenAt returns nil when the position is out of bounds or does not lie
+// in any token.
 func (ls Lines) TokenAt(pos position.Position) *token.Token {
 	if pos.Line < 0 || pos.Line >= len(ls.lines) {
 		return nil
@@ -519,38 +524,41 @@ func (ls Lines) TokenAt(pos position.Position) *token.Token {
 
 // TokenRanges returns the ranges tk occupies, one per line where it holds
 // runes besides a line ending. A line where tk holds only a line ending,
-// such as a blank line kept by a block scalar, contributes no range. The
-// lexer bundles the indentation of a line into the token that ends on the
-// line before, so that token's range on the indented line covers the
-// indentation alone.
+// such as a blank line that a block scalar keeps, does not contribute a
+// range. The lexer bundles the indentation of a line into the token that
+// ends on the line before. That token's range on the indented line
+// therefore covers the indentation alone.
 //
-// The token may be a lexer token, such as one [Lines.TokenAt] or
-// [Lines.Tokens] returns, one of the per-line parts from [Line.Tokens], or
-// a copy of either, such as a token taken from the AST a parser built from
-// the same stream. When a line holds tk itself, only the lines that hold
-// it match, so a token from one revision of a diff skips the other
-// revision's token at the same position. When no line holds tk, it
-// matches every token with its type, value, origin, and position. Returns
-// nil if tk is nil or not found.
+// The token can be a lexer token, such as one that [Lines.TokenAt] or
+// [Lines.Tokens] returns. It can also be one of the per-line parts from
+// [Line.Tokens], or a copy of either. A token taken from the AST that a
+// parser built from the same stream is such a copy.
+//
+// When a line holds tk itself, only the lines that hold it match. A token
+// from one revision of a diff therefore skips the other revision's token
+// at the same position. Otherwise, tk matches every token with the same
+// type, value, origin, and position. TokenRanges returns nil when tk is
+// nil or when it does not find tk.
 func (ls Lines) TokenRanges(tk *token.Token) position.Ranges {
 	return ls.ranges(tk, (*Line).TokenSpan)
 }
 
 // ContentRanges returns the ranges of tk's content, one per line it appears
 // on, excluding leading and trailing spaces and tabs. A line where tk holds
-// only spaces and tabs contributes no range.
+// only spaces and tabs does not contribute a range.
 //
-// The token may be a lexer token, one of the per-line parts, or a copy of
-// either, as for [Lines.TokenRanges]. Returns nil if tk is nil or not
-// found.
+// The token can be a lexer token, one of the per-line parts, or a copy of
+// either, as for [Lines.TokenRanges]. ContentRanges returns nil when tk is
+// nil or when it does not find tk.
 func (ls Lines) ContentRanges(tk *token.Token) position.Ranges {
 	return ls.ranges(tk, (*Line).ContentSpan)
 }
 
-// ranges collects one range per line that holds tk, using span to pick the
-// columns within the line. Lines where span is empty contribute no range.
-// It visits only the lines that hold a token at tk's position, and only
-// the lines that hold tk itself when there are any.
+// ranges collects one range per line that holds tk. The span function
+// picks the columns within each line, and a line where span is empty does
+// not contribute a range. It visits only the lines that hold a token at
+// tk's position, and only the lines that hold tk itself when any line
+// does.
 func (ls Lines) ranges(
 	tk *token.Token, span func(*Line, *token.Token) (position.Span, bool),
 ) position.Ranges {
@@ -610,7 +618,7 @@ func (ls Lines) Content() string {
 }
 
 // String renders the lines as [View.String] renders a view over them
-// with no decoration: each line behind its number, one per row.
+// without decoration: each line behind its number, one per row.
 func (ls Lines) String() string {
 	return NewView(ls).String()
 }

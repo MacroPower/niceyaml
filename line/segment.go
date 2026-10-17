@@ -9,9 +9,9 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
-// Segment is a run of the content of one line that renders in one style:
-// the columns it covers, the text on them, the [kind.Kind] of the token
-// the text belongs to, and the overlays of the view that cover it.
+// Segment is a run of the content of one line that renders in one style.
+// It holds the columns it covers, the text on them, the [kind.Kind] of the
+// token the text belongs to, and the overlays of the view that cover it.
 //
 // Receive instances from [View.Segments].
 type Segment struct {
@@ -22,24 +22,28 @@ type Segment struct {
 	// or after its text.
 	Kind kind.Kind
 	// Overlays are the overlays of the view that cover Cols, in the order
-	// the view took them in, so the last one added is the outermost. The
-	// slice is the segment's own and holds copies of the view's overlays,
-	// so changing it leaves the view and the other segments as they were.
+	// the view took them in. The overlay that the caller added last is the
+	// outermost. The slice belongs to the segment and holds copies of the
+	// view's overlays, so changing it does not change the view or the
+	// other segments.
 	Overlays Overlays
 	// Cols are the columns of the line the segment covers.
 	Cols position.Span
 }
 
 // Segments returns an iterator over the segments of line i, in column
-// order, covering its content once: one per run of text that one kind
-// and one set of overlays style. Each token on the line is one segment
-// for its text, in the kind [Line.Kind] gives it. The spaces and tabs a
-// token carries before and after that text, such as the indentation
-// before a value or the gap before a comment, are segments of their own
-// in [kind.Text]. A segment splits where an overlay of the view starts
-// or ends inside it, and [Segment.Overlays] holds the overlays that cover
-// each piece. Adjacent segments that style the same are separate, so a
-// renderer that joins them decides that itself.
+// order. Each column of the content falls in exactly one segment. Each
+// segment is a run of text that one kind and one set of overlays style.
+// Each token on the line is one segment for its text, in the kind
+// [Line.Kind] gives it. The spaces and tabs a token carries before and
+// after that text are segments of their own in [kind.Text]. The
+// indentation before a value and the gap before a comment are two such
+// segments.
+//
+// A segment splits where an overlay of the view starts or ends inside it,
+// and [Segment.Overlays] holds the overlays that cover each piece.
+// Adjacent segments with the same style stay separate, so a renderer that
+// wants them joined joins them itself.
 //
 // A renderer of any kind reads the segments in place of the tokens and
 // the overlays, so it styles the line as the printer does without
@@ -62,7 +66,8 @@ type Segment struct {
 // that shows a clipped line in part keeps the columns [View.Windows]
 // returns.
 //
-// An empty line has no segments. Panics if i is outside the content.
+// Segments yields an empty sequence for an empty line. It panics if i is
+// outside the content.
 func (v *View) Segments(i int) iter.Seq[Segment] {
 	ln := v.lines.lines[i]
 	overlays := v.Overlays(i)
@@ -119,26 +124,26 @@ func (v *View) Segments(i int) iter.Seq[Segment] {
 // overlayRuns cuts the columns of one line into runs where its overlays
 // start or end, so every column of a run has the same overlays over it.
 // Each call to [overlayRuns.next] asks for columns at or after the ones
-// the call before asked for, so it moves through the edges once, from
-// left to right.
+// the previous call asked for. An overlayRuns therefore walks the edges a
+// single time, from left to right.
 //
 // Create instances with [newOverlayRuns].
 type overlayRuns struct {
-	// Edges are the columns where an overlay starts or ends, ascending and
+	// The columns where an overlay starts or ends, in ascending order and
 	// without repeats.
 	edges []int
-	// Covers holds the overlays over each run, in the order the view took
-	// them in. Covers[k] is the run after the first k edges, so covers[0]
-	// is the run before the first edge. It is nil when there are no
-	// overlays.
+	// The overlays over each run, in the order the view took them in.
+	// Entry k holds the overlays of the run after the first k edges, so
+	// covers[0] holds those of the run before the first edge. The slice is
+	// nil when the line lacks overlays.
 	covers []Overlays
-	// K is the run holding the col the last call to next asked for.
+	// The run that holds the column the last call to next asked for.
 	k int
 }
 
 // newOverlayRuns creates a new [overlayRuns] over the given overlays. An
-// overlay that covers no columns, one added with its end at or before its
-// start, still cuts the line at both edges.
+// overlay that does not cover any column, one with its end at or before
+// its start, still cuts the line at both edges.
 func newOverlayRuns(overlays Overlays) overlayRuns {
 	if len(overlays) == 0 {
 		return overlayRuns{}
@@ -173,9 +178,9 @@ func newOverlayRuns(overlays Overlays) overlayRuns {
 	return overlayRuns{edges: edges, covers: covers}
 }
 
-// next returns where the run holding col ends, at the next edge after col
-// or at end if that comes first, and a new slice of the overlays over it,
-// or nil for none.
+// next returns where the run that holds col ends, at the next edge after
+// col or at end, whichever comes first. It also returns a new slice of the
+// overlays over the run, or nil when the run lacks overlays.
 func (r *overlayRuns) next(col, end int) (int, Overlays) {
 	for r.k < len(r.edges) && r.edges[r.k] <= col {
 		r.k++

@@ -17,13 +17,13 @@ import (
 // on a [View], so views render one Line many ways without copying it.
 //
 // A Line never changes after [NewLines] creates it, so it is safe to share
-// between views and goroutines. Every token a Line hands out, from
-// [Line.Tokens], [Line.Token], [Line.TokenAt], or [Line.SourceTokens],
-// belongs to the line. Treat them as read-only and call
-// [token.Token.Clone] before modifying one.
+// between views and goroutines. Every token that [Line.Tokens],
+// [Line.Token], [Line.TokenAt], or [Line.SourceTokens] hands out belongs
+// to the line. Treat them as read-only and call [token.Token.Clone] before
+// modifying one.
 //
-// The zero value is an empty line with no number, which a side-by-side
-// diff uses as the placeholder opposite an inserted or deleted line.
+// The zero value is an empty line without a number. A side-by-side diff
+// uses it as the placeholder opposite an inserted or deleted line.
 //
 // Create instances with [NewLines], which cuts a token stream into one Line
 // per source line.
@@ -66,7 +66,7 @@ func (l *Line) Tokens() token.Tokens {
 
 // Token returns the [*token.Token] at the given index. The token belongs
 // to the line, so treat it as read-only.
-// Panics if idx is out of range.
+// Token panics if idx is out of range.
 func (l *Line) Token(idx int) *token.Token {
 	return l.segments[idx].Part()
 }
@@ -96,20 +96,20 @@ func (l *Line) SourceTokens() token.Tokens {
 	return result
 }
 
-// TokenAt returns the original lexer token covering the given 0-indexed
-// column, or nil when no token does. A column in the indentation resolves
-// to the token that follows it, as [Lines.TokenAt] describes. Treat it as
-// read-only.
+// TokenAt returns the original lexer token that covers the given 0-indexed
+// column, or nil when the column does not lie in any token. A column in
+// the indentation resolves to the token that follows it, as
+// [Lines.TokenAt] describes. Treat the token as read-only.
 func (l *Line) TokenAt(col int) *token.Token {
 	return l.segments.SourceTokenAt(col)
 }
 
-// TokenSpan returns the columns tk occupies on this [Line]. The token may be
+// TokenSpan returns the columns tk occupies on this [Line]. The token can be
 // a lexer token, one of the per-line parts from [Line.Tokens], or a copy of
 // either. Any token on this line with tk's type, value, origin, and
 // position matches, even one from the other revision of a diff, which
 // [Lines.TokenRanges] skips. The second result is false when tk is nil or
-// has no part on this line.
+// does not have a part on this line.
 func (l *Line) TokenSpan(tk *token.Token) (position.Span, bool) {
 	return l.span(tk, func(seg segment.Segment) position.Span {
 		return position.NewSpan(0, seg.Width())
@@ -118,9 +118,9 @@ func (l *Line) TokenSpan(tk *token.Token) (position.Span, bool) {
 
 // ContentSpan returns the columns of tk's content on this [Line], excluding
 // leading and trailing spaces and tabs. The span is empty when tk holds only
-// spaces and tabs on this line. The token may be a lexer token or one of the
+// spaces and tabs on this line. The token can be a lexer token or one of the
 // per-line parts, as for [Line.TokenSpan]. The second result is false when
-// tk is nil or has no part on this line.
+// tk is nil or does not have a part on this line.
 func (l *Line) ContentSpan(tk *token.Token) (position.Span, bool) {
 	return l.span(tk, segment.Segment.ContentSpan)
 }
@@ -133,8 +133,8 @@ func (l *Line) holds(tk *token.Token) bool {
 	})
 }
 
-// span finds the segment holding tk and returns the columns that span picks
-// within it, offset to the line.
+// span finds the segment that holds tk and returns the columns that span
+// picks within it, offset to the line.
 func (l *Line) span(tk *token.Token, span func(segment.Segment) position.Span) (position.Span, bool) {
 	if tk == nil {
 		return position.Span{}, false
@@ -155,15 +155,15 @@ func (l *Line) span(tk *token.Token, span func(segment.Segment) position.Span) (
 	return position.Span{}, false
 }
 
-// IsEmpty reports whether this [Line] holds no tokens.
+// IsEmpty reports whether this [Line] holds zero tokens.
 func (l *Line) IsEmpty() bool {
 	return len(l.segments) == 0
 }
 
 // Width returns the number of runes in this line's content, excluding the
 // line ending. Positions on the line count columns in the same unit. Width
-// is not the display width, because a wide rune such as a CJK ideograph
-// takes one column but two terminal cells.
+// does not measure the display width. A wide rune, such as a Chinese,
+// Japanese, or Korean ideograph, takes one column but two terminal cells.
 func (l *Line) Width() int {
 	var w int
 
@@ -177,11 +177,12 @@ func (l *Line) Width() int {
 // Runes returns an iterator over the runes on this [Line]. Each iteration
 // yields the 0-indexed column and the rune at that column.
 //
-// The iteration includes the line ending as a single '\n' at the column
-// after the last visible rune, which is [Line.Width], whether the source
-// used LF, CRLF, or a bare CR. A line yields at most one newline. The lexer
-// sometimes repeats a line ending at the start of the next token, and that
-// repeat sits on the same line as the ending it copies.
+// The iteration includes the line ending as a single '\n' at column
+// [Line.Width], the column after the last visible rune. It yields '\n'
+// whether the source used LF, CRLF, or a bare CR. A line yields at most
+// one newline. The lexer sometimes repeats a line ending at the start of
+// the next token. That repeat sits on the same line as the ending it
+// copies.
 func (l *Line) Runes() iter.Seq2[int, rune] {
 	return func(yield func(int, rune) bool) {
 		col := 0
@@ -221,9 +222,9 @@ func hasLineEnding(origin string) bool {
 	return tokens.TrimLineEnding(origin) != origin
 }
 
-// String returns the line number and content, as "   1 | key: value",
-// which is the row [View.String] renders for a line with no decoration in
-// a view whose largest line number is under ten thousand. A line with no
+// String returns the line number and content, as "   1 | key: value". The
+// result matches the row [View.String] renders for an undecorated line in
+// a view whose largest line number is less than 10000. A line without a
 // number, such as a zero Line, gets a blank gutter.
 func (l *Line) String() string {
 	return contentRow(l.Number(), l.Content(), 4)
