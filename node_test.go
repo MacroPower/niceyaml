@@ -27,6 +27,29 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
+func TestNodeKind_String(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want string
+		kind niceyaml.NodeKind
+	}{
+		"none":         {kind: niceyaml.NodeNone, want: "none"},
+		"mapping":      {kind: niceyaml.NodeMapping, want: "mapping"},
+		"sequence":     {kind: niceyaml.NodeSequence, want: "sequence"},
+		"scalar":       {kind: niceyaml.NodeScalar, want: "scalar"},
+		"out of range": {kind: niceyaml.NodeKind(4), want: "NodeKind(4)"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.kind.String())
+		})
+	}
+}
+
 func TestNode_Kind(t *testing.T) {
 	t.Parallel()
 

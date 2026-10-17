@@ -42,8 +42,8 @@ var (
 	//go:embed after.yaml
 	exampleAfter string
 
-	// A [diff.Side] does not print as a name, so this map names each
-	// revision after its file.
+	// A [diff.Side] prints as "before" or "after". This map names each
+	// revision after its file instead.
 	sides = map[diff.Side]string{diff.Before: "before.yaml", diff.After: "after.yaml"}
 )
 

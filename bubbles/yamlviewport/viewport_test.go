@@ -33,6 +33,50 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
+func TestDiffMode_String(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want string
+		mode yamlviewport.DiffMode
+	}{
+		"adjacent":     {mode: yamlviewport.DiffModeAdjacent, want: "adjacent"},
+		"origin":       {mode: yamlviewport.DiffModeOrigin, want: "origin"},
+		"none":         {mode: yamlviewport.DiffModeNone, want: "none"},
+		"out of range": {mode: yamlviewport.DiffMode(3), want: "DiffMode(3)"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.mode.String())
+		})
+	}
+}
+
+func TestViewMode_String(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want string
+		mode yamlviewport.ViewMode
+	}{
+		"full":         {mode: yamlviewport.ViewModeFull, want: "full"},
+		"hunks":        {mode: yamlviewport.ViewModeHunks, want: "hunks"},
+		"side by side": {mode: yamlviewport.ViewModeSideBySide, want: "side-by-side"},
+		"out of range": {mode: yamlviewport.ViewMode(-1), want: "ViewMode(-1)"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.mode.String())
+		})
+	}
+}
+
 func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
 	t.Parallel()
 

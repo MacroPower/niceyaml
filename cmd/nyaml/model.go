@@ -530,17 +530,6 @@ func (m *model) diffModeLabel() string {
 	}
 }
 
-func (m *model) viewModeLabel() string {
-	switch m.viewport.ViewMode() {
-	case yamlviewport.ViewModeHunks:
-		return "hunks"
-	case yamlviewport.ViewModeSideBySide:
-		return "side-by-side"
-	default:
-		return "full"
-	}
-}
-
 func (m *model) textLine() string {
 	textStyle := m.styles.Style(kind.Text).Inline(true)
 
@@ -586,7 +575,7 @@ func (m *model) textLine() string {
 		{escape.Control(m.viewport.RevisionName()), kind.TextAccentDim},
 		{searchLabel, kind.TextAccent},
 		{m.diffModeLabel(), kind.TextOK},
-		{m.viewModeLabel(), kind.TextWarn},
+		{m.viewport.ViewMode().String(), kind.TextWarn},
 		{wrapLabel, kind.TextError},
 		{fmt.Sprintf("%d/%d", m.viewport.VisibleLineCount(), m.viewport.TotalLineCount()), kind.TextSubtleDim},
 		{fmt.Sprintf("col %d", m.viewport.XOffset()), kind.TextSubtle},

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -997,6 +998,24 @@ const (
 	// tag.
 	NodeScalar
 )
+
+// String returns "none" for [NodeNone], "mapping" for [NodeMapping],
+// "sequence" for [NodeSequence], "scalar" for [NodeScalar], and
+// "NodeKind(n)" for any other value n.
+func (k NodeKind) String() string {
+	switch k {
+	case NodeNone:
+		return "none"
+	case NodeMapping:
+		return "mapping"
+	case NodeSequence:
+		return "sequence"
+	case NodeScalar:
+		return "scalar"
+	default:
+		return "NodeKind(" + strconv.Itoa(int(k)) + ")"
+	}
+}
 
 // Kind reports whether the Node holds a mapping, a sequence, or a
 // scalar, or [NodeNone] when it does not hold a value. A caller that

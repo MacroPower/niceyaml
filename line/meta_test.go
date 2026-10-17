@@ -13,6 +13,49 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
+func TestPlacement_String(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want      string
+		placement line.Placement
+	}{
+		"above":        {placement: line.Above, want: "above"},
+		"below":        {placement: line.Below, want: "below"},
+		"out of range": {placement: line.Placement(2), want: "Placement(2)"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.placement.String())
+		})
+	}
+}
+
+func TestFlag_String(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want string
+		flag line.Flag
+	}{
+		"default":      {flag: line.FlagDefault, want: "default"},
+		"inserted":     {flag: line.FlagInserted, want: "inserted"},
+		"deleted":      {flag: line.FlagDeleted, want: "deleted"},
+		"out of range": {flag: line.Flag(-1), want: "Flag(-1)"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.flag.String())
+		})
+	}
+}
+
 func TestAnnotation_RenderKind(t *testing.T) {
 	t.Parallel()
 

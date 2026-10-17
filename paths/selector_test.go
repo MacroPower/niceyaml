@@ -14,6 +14,32 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
+func TestSelectorKind_String(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want string
+		kind paths.SelectorKind
+	}{
+		"child":         {kind: paths.SelectorChild, want: "child"},
+		"index":         {kind: paths.SelectorIndex, want: "index"},
+		"child all":     {kind: paths.SelectorChildAll, want: "child-all"},
+		"index all":     {kind: paths.SelectorIndexAll, want: "index-all"},
+		"recursive":     {kind: paths.SelectorRecursive, want: "recursive"},
+		"recursive all": {kind: paths.SelectorRecursiveAll, want: "recursive-all"},
+		"key":           {kind: paths.SelectorKey, want: "key"},
+		"zero":          {kind: paths.SelectorKind(0), want: "SelectorKind(0)"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.kind.String())
+		})
+	}
+}
+
 func TestSelector_String(t *testing.T) {
 	t.Parallel()
 

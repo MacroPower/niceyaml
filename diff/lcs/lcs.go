@@ -1,5 +1,7 @@
 package lcs
 
+import "strconv"
+
 // Algorithm computes a sequence of operations to transform before into after.
 //
 // See [*Hirschberg] for the default implementation.
@@ -23,6 +25,21 @@ const (
 	// OpInsert indicates that the element exists only in the after sequence.
 	OpInsert
 )
+
+// String returns "equal" for [OpEqual], "delete" for [OpDelete], "insert"
+// for [OpInsert], and "OpKind(n)" for any other value n.
+func (k OpKind) String() string {
+	switch k {
+	case OpEqual:
+		return "equal"
+	case OpDelete:
+		return "delete"
+	case OpInsert:
+		return "insert"
+	default:
+		return "OpKind(" + strconv.Itoa(int(k)) + ")"
+	}
+}
 
 // Op represents a diff operation with its index in each input sequence.
 //

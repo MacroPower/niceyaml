@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -155,6 +156,22 @@ const (
 	DiffModeNone
 )
 
+// String returns "adjacent" for [DiffModeAdjacent], "origin" for
+// [DiffModeOrigin], "none" for [DiffModeNone], and "DiffMode(n)" for any
+// other value n.
+func (d DiffMode) String() string {
+	switch d {
+	case DiffModeAdjacent:
+		return "adjacent"
+	case DiffModeOrigin:
+		return "origin"
+	case DiffModeNone:
+		return "none"
+	default:
+		return "DiffMode(" + strconv.Itoa(int(d)) + ")"
+	}
+}
+
 // ViewMode specifies how the viewport renders diff content.
 //
 // Use [Model.SetViewMode] to change the mode, or [Model.ToggleViewMode] to
@@ -170,6 +187,22 @@ const (
 	// ViewModeSideBySide displays before and after content in separate panes.
 	ViewModeSideBySide
 )
+
+// String returns "full" for [ViewModeFull], "hunks" for [ViewModeHunks],
+// "side-by-side" for [ViewModeSideBySide], and "ViewMode(n)" for any other
+// value n.
+func (v ViewMode) String() string {
+	switch v {
+	case ViewModeFull:
+		return "full"
+	case ViewModeHunks:
+		return "hunks"
+	case ViewModeSideBySide:
+		return "side-by-side"
+	default:
+		return "ViewMode(" + strconv.Itoa(int(v)) + ")"
+	}
+}
 
 // Hit is a place in a revision of the viewport's history. [Model.HitAt]
 // returns the Hit that the cell under a pointer shows, and [Model.Reveal]

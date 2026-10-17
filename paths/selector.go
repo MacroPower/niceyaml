@@ -1,6 +1,9 @@
 package paths
 
-import "iter"
+import (
+	"iter"
+	"strconv"
+)
 
 // SelectorKind identifies the kind of a [Selector]. The kinds start at 1,
 // so the zero [Selector] does not match any kind and differs from a
@@ -27,6 +30,31 @@ const (
 	// SelectorKey is the `~` selector, which [Path.Key] appends.
 	SelectorKey
 )
+
+// String returns the name of the kind in kebab case: "child",
+// "index", "child-all", "index-all", "recursive", "recursive-all", or
+// "key". It returns "SelectorKind(n)" for any other value n, such as the
+// kind of the zero [Selector].
+func (k SelectorKind) String() string {
+	switch k {
+	case SelectorChild:
+		return "child"
+	case SelectorIndex:
+		return "index"
+	case SelectorChildAll:
+		return "child-all"
+	case SelectorIndexAll:
+		return "index-all"
+	case SelectorRecursive:
+		return "recursive"
+	case SelectorRecursiveAll:
+		return "recursive-all"
+	case SelectorKey:
+		return "key"
+	default:
+		return "SelectorKind(" + strconv.Itoa(int(k)) + ")"
+	}
+}
 
 // Selector is one selector of a [Path], as [Path.Selectors] and
 // [Path.Last] give it. Kind says which selector it is. Name holds the

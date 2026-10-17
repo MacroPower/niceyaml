@@ -3,6 +3,7 @@ package line
 import (
 	"cmp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"go.jacobcolvin.com/niceyaml/position"
@@ -19,6 +20,19 @@ const (
 	Below
 )
 
+// String returns "above" for [Above], "below" for [Below], and
+// "Placement(n)" for any other value n.
+func (p Placement) String() string {
+	switch p {
+	case Above:
+		return "above"
+	case Below:
+		return "below"
+	default:
+		return "Placement(" + strconv.Itoa(int(p)) + ")"
+	}
+}
+
 // Flag categorizes a [Line] for rendering.
 type Flag int
 
@@ -32,6 +46,22 @@ const (
 	// prefix.
 	FlagDeleted
 )
+
+// String returns "default" for [FlagDefault], "inserted" for
+// [FlagInserted], "deleted" for [FlagDeleted], and "Flag(n)" for any other
+// value n.
+func (f Flag) String() string {
+	switch f {
+	case FlagDefault:
+		return "default"
+	case FlagInserted:
+		return "inserted"
+	case FlagDeleted:
+		return "deleted"
+	default:
+		return "Flag(" + strconv.Itoa(int(f)) + ")"
+	}
+}
 
 // MaxColPastEnd is the furthest past the end of the content of a line, in
 // columns, that a renderer starts an [Annotation]. [View.String] and the

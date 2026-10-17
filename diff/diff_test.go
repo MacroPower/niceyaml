@@ -2,6 +2,7 @@ package diff_test
 
 import (
 	"cmp"
+	"fmt"
 	"iter"
 	"sync"
 	"testing"
@@ -2396,4 +2397,33 @@ func assertSameContent(t *testing.T, unified, got *line.View) {
 	}
 
 	assert.Panics(t, func() { got.Line(unified.Count()) }, "the content ends where unified ends")
+}
+
+func TestSide_String(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want string
+		side diff.Side
+	}{
+		"before":       {side: diff.Before, want: "before"},
+		"after":        {side: diff.After, want: "after"},
+		"out of range": {side: diff.Side(7), want: "Side(7)"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.side.String())
+		})
+	}
+}
+
+func TestOrigin_Print(t *testing.T) {
+	t.Parallel()
+
+	// An Origin prints its side by name, as a log or a failed test shows
+	// it.
+	assert.Equal(t, "{after 3}", fmt.Sprint(diff.Origin{Side: diff.After, Index: 3}))
 }

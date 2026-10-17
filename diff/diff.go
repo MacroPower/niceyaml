@@ -3,6 +3,7 @@ package diff
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -218,6 +219,19 @@ const (
 	// changes to.
 	After
 )
+
+// String returns "before" for [Before], "after" for [After], and
+// "Side(n)" for any other value n.
+func (s Side) String() string {
+	switch s {
+	case Before:
+		return "before"
+	case After:
+		return "after"
+	default:
+		return "Side(" + strconv.Itoa(int(s)) + ")"
+	}
+}
 
 // Origin names the line of an input that a row of a diff shows, by the
 // [Side] that holds the line and its index there. A row is an index of a
