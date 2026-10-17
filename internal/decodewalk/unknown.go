@@ -18,34 +18,37 @@ import (
 // UnknownFields returns the rejection of each unknown field of a decode
 // of node into a value of type t, for a decoder that rejects unknown
 // fields, in the order of the source. The decoder stops at the first
-// unknown field it finds, and it finds the fields of one mapping in no
+// unknown field it finds. It does not find the fields of one mapping in a
 // fixed order, so one decode names one field, and not always the same
-// one. A decode that rejects a value names none.
+// one. A decode that rejects a value does not name an unknown field.
 //
 // The search walks t as [Walk] does and reads each mapping a struct
-// decodes from. A key of such a mapping is a candidate when no field of
-// the struct has its name, as [yamlfield.Name] names the fields, the
-// fields of inline structs among them. The search leaves every other
-// rule of the decode to the decoder, such as the prefixes of keys it
-// allows, and it cannot see the types a function decodes. So the decoder
-// confirms each candidate. The search decodes the one entry of the
-// candidate into a new value of the struct type, and keeps the candidate
-// only when that decode rejects its key as an unknown field.
+// decodes from. A key of such a mapping is a candidate when the struct
+// does not have a field of that name. The search reads the field names as
+// [yamlfield.Name] gives them, including the fields of inline structs.
 //
-// The fields of a struct that decodes itself, as
-// [unmarshaler.Options.ReportsOwnError] reports, need not mirror the
-// document, and only its unmarshaler says whether the decoder checks
-// them. The search therefore reads such a struct, and the values
-// below it, as if the fields mirrored the document, and takes every key
-// of its own mapping for a candidate. The decode that confirms a
-// candidate at or below such a struct runs the unmarshaler of the
-// outermost one, on the entries and elements that lead from its mapping
-// down to the candidate. So the unmarshaler decides, as it does in the
-// decode itself.
+// The search leaves every other rule of the decode to the decoder, such
+// as the prefixes of keys it allows. It also cannot see the types a
+// function decodes. So the decoder confirms each candidate. The search
+// decodes the one entry of the candidate into a new value of the struct
+// type. It keeps the candidate only when that decode rejects its key as
+// an unknown field.
 //
-// The search reads nothing below any other type that decodes itself,
-// below a struct that decodes itself held inline, or below the members
-// of an inline map.
+// The search finds each struct that decodes itself with
+// [unmarshaler.Options.ReportsOwnError]. The fields of such a struct do
+// not need to mirror the document, and only its unmarshaler says whether
+// the decoder checks them. The search therefore reads such a struct and
+// the values below it as if the fields mirrored the document. It takes
+// every key of the struct's own mapping as a candidate.
+//
+// The decode that confirms a candidate at or below such a struct runs the
+// unmarshaler of the outermost such struct. It runs that unmarshaler on
+// the entries and elements that lead from its mapping down to the
+// candidate. So the unmarshaler decides, as it does in the decode itself.
+//
+// The search does not read below any other type that decodes itself,
+// below a struct that decodes itself held inline, or below the members of
+// an inline map.
 func UnknownFields(ctx context.Context, r Rules, t reflect.Type, node ast.Node) []*yaml.UnknownFieldError {
 	found := map[int]*yaml.UnknownFieldError{}
 
@@ -107,8 +110,9 @@ func UnknownFields(ctx context.Context, r Rules, t reflect.Type, node ast.Node) 
 // mapping v reads, as an unknown field of the struct v, or nil for any
 // other outcome. It decodes a mapping of entry alone into a new value of
 // the type of v. Under a struct that decodes itself, it decodes the
-// outermost one from nodes that hold only the way down to entry, so the
-// unmarshaler reads entry where the document holds it.
+// outermost such struct from nodes that hold only the entries and
+// elements that lead down to entry. The unmarshaler then reads entry
+// where the document holds it.
 func (w *walker) confirm(v *Value, entry *ast.MappingValueNode) *yaml.UnknownFieldError {
 	view := w.view(entry)
 	if view == nil || view.Key == nil {
@@ -165,8 +169,8 @@ func (w *walker) confirm(v *Value, entry *ast.MappingValueNode) *yaml.UnknownFie
 // fieldNames returns the names of the keys that t, a struct type, has a
 // field for, as [yamlfield.Name] names them, at any depth of inline
 // structs. The seen set holds the inline structs the walk is inside of,
-// so a struct that holds itself inline ends the walk. An inline field
-// that [yamlfield.ReadsAnchor] reports adds no name.
+// so the walk stops at a struct that holds itself inline. An inline field
+// that [yamlfield.ReadsAnchor] reports does not add a name.
 func fieldNames(t reflect.Type, seen map[reflect.Type]bool) map[string]bool {
 	names := yamlfield.OwnNames(t)
 

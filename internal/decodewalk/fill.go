@@ -26,21 +26,22 @@ type Starts struct {
 
 // Fill returns the value of type t that a decode of node gives when it
 // starts from start. Such a decode starts each value it creates from the
-// value that starts gives its type. Decoded is the value that the
-// go-yaml decoder gave for node into a value that held start.
+// value that starts gives its type. The argument decoded is the value
+// that the go-yaml decoder gave for node into a value that held start.
 //
 // The decoder starts each field of a struct from the value the field
-// holds, so decoded holds start wherever the document leaves a field
-// out. It starts every other value from the zero value of its type: each
-// element of a slice or an array, each value of a map, and the target of
-// each pointer. At an alias, it takes the value that the anchor decoded
-// to. Fill builds each of those values again from its start, field by
-// field, as a decode that starts there does:
+// holds, so decoded holds start wherever the document omits a field. It
+// starts every other value from the zero value of its type: each element
+// of a slice or an array, each value of a map, and the target of each
+// pointer. At an alias, it takes the value that the anchor decoded to.
+// Fill builds each of those values again from its start, field by field,
+// as a decode that starts there does:
 //
 //   - A struct that reads a mapping takes each field that the document
 //     writes from the value below it, and keeps the start of every other
-//     field. A field of a struct held inline that the struct holding it
-//     also names keeps its start, where the decoder sets it to zero.
+//     field. A field of an inline struct keeps its start when the struct
+//     that holds it inline also names the field. The decoder sets such a
+//     field to zero.
 //   - A pointer that the document fills gets a target of its own. The
 //     target starts from the value the pointer held, or from the start of
 //     its type for a nil pointer. A null sets the pointer to nil.
@@ -53,18 +54,19 @@ type Starts struct {
 //   - A null leaves any other value at its start. A value at an alias
 //     that the resolver of r cannot follow, such as one to a reference
 //     document, keeps the value of the decoder.
-//   - A value that decodes itself, which [unmarshaler.Options.Whole]
-//     reports, decodes again from its start when the decoder did not
-//     start it there, so its method sees the start.
-//   - An interface and a [yaml.MapSlice] keep the value of the decoder,
-//     which at an alias is the value of the anchor. So does every scalar.
+//   - A value that [unmarshaler.Options.Whole] reports as decoding itself
+//     decodes again from its start when the decoder did not start it
+//     there. Its method then sees the start.
+//   - Each interface, each [yaml.MapSlice], and each scalar keeps the
+//     value of the decoder. At an alias, that value is the value of the
+//     anchor.
 //
-// A value that starts from zero keeps the value of the decoder when no
-// type it reaches starts from another value, because the fill would build
-// that value again. The keys of a map keep the value of the decoder. A value below a node
-// that holds itself through an alias keeps the value of the decoder too.
-// Fill returns the error of starts, and that of a value that decodes
-// itself again.
+// A value that starts from zero keeps the value of the decoder when every
+// type it reaches starts from zero. Building such a value again gives the
+// same value. The keys of a map keep the value of the decoder. A value
+// below a node that holds itself through an alias keeps the value of the
+// decoder too. Fill returns any error from starts, and any error from a
+// value that decodes itself again.
 func Fill(
 	ctx context.Context, r Rules, starts Starts, t reflect.Type, node ast.Node, start, decoded reflect.Value,
 ) (reflect.Value, error) {
@@ -182,8 +184,8 @@ func (f *filler) reaches(t reflect.Type) bool {
 // built returns the value that the fill built for the node and the type
 // of key from a start equal to start, and reports whether it built one.
 // The places that aliases of one anchor fill thus share a value when they
-// start from equal values, as the decoder shares it, and a chain of
-// aliases fills in linear time.
+// start from equal values, as the decoder shares it. A chain of aliases
+// also fills in linear time.
 func (f *filler) built(key seenKey, start reflect.Value) (reflect.Value, bool) {
 	if !start.CanInterface() {
 		return reflect.Value{}, false
@@ -198,8 +200,9 @@ func (f *filler) built(key seenKey, start reflect.Value) (reflect.Value, bool) {
 	return reflect.Value{}, false
 }
 
-// build returns the value of type t that a decode of held, which reads
-// node and its content, gives from start, as [filler.place] describes.
+// build returns the value of type t that a decode of held gives from
+// start, as [filler.place] describes. The decode of held reads node and
+// its content.
 func (f *filler) build(
 	t reflect.Type, held, node, content ast.Node, start, decoded reflect.Value, exact bool,
 ) (reflect.Value, error) {
@@ -230,11 +233,11 @@ func (f *filler) build(
 	}
 }
 
-// pointer returns the value of the pointer type t that a decode of held,
-// which reads node, gives from start. The target is new, and it starts
-// from the target of start, or from the start of its type when start is
-// nil. With exact set, the decoder started a target from the target of
-// start too.
+// pointer returns the value of the pointer type t that a decode of held
+// gives from start. The decode of held reads node. The target is new, and
+// it starts from the target of start, or from the start of its type when
+// start is nil. With exact set, the decoder started a target from the
+// target of start too.
 func (f *filler) pointer(
 	t reflect.Type, held, node ast.Node, start, decoded reflect.Value, exact bool,
 ) (reflect.Value, error) {
@@ -267,8 +270,8 @@ func (f *filler) pointer(
 	return p, nil
 }
 
-// whole returns the value of type t, which decodes itself, that a decode
-// of node gives from start. The value decodes again from start unless
+// whole returns the value of type t that a decode of node gives from
+// start, where t decodes itself. The value decodes again from start unless
 // the decoder started it there or start is zero.
 func (f *filler) whole(t reflect.Type, node ast.Node, start, decoded reflect.Value, exact bool) (reflect.Value, error) {
 	if exact || start.IsZero() {
@@ -309,10 +312,10 @@ func (f *filler) structOf(
 	return result, nil
 }
 
-// fields sets each field of result, a struct of type t that holds its
-// start, that a decode of mapping writes, from decoded. A struct held
-// inline leaves alone each field that hidden names, because the struct
-// holding it names it too.
+// fields sets each field of result that a decode of mapping writes, from
+// decoded. The argument result is a struct of type t that holds its
+// start. A struct held inline skips each field that hidden names, because
+// the struct that holds it names that field too.
 func (f *filler) fields(
 	t reflect.Type,
 	mapping *ast.MappingNode,
@@ -366,9 +369,9 @@ func (f *filler) fields(
 	return nil
 }
 
-// inline returns the value of a field of type t that a struct of type
-// owner holds inline, which reads mapping, the mapping of owner, from
-// start.
+// inline returns the value, from start, of a field of type t that a
+// struct of type owner holds inline. The field reads mapping, the mapping
+// of owner.
 func (f *filler) inline(
 	t, owner reflect.Type,
 	mapping *ast.MappingNode,
@@ -545,11 +548,10 @@ func (f *filler) elements(t reflect.Type, seq *ast.SequenceNode, decoded reflect
 	return result, nil
 }
 
-// renderNames returns the names go-yaml gives the fields of t, a struct
-// type, the inline ones among them. It leaves out the fields go-yaml
-// skips. The
-// decoder sets a field of a struct that t holds inline to zero when one
-// of these names it too.
+// renderNames returns the names that go-yaml gives the fields of t, a
+// struct type, including the inline fields. It omits the fields that
+// go-yaml skips. The decoder sets a field of a struct that t holds inline
+// to zero when the name of that field is also one of these names.
 func renderNames(t reflect.Type) map[string]bool {
 	names := map[string]bool{}
 
@@ -562,10 +564,10 @@ func renderNames(t reflect.Type) map[string]bool {
 	return names
 }
 
-// null reports whether the decoder reads held, the node the document
-// holds for a value, as a null, as it does no node, a null, and an alias
-// to a null. An alias that the resolver of the walk cannot follow reads
-// as no null.
+// null reports whether the decoder reads held as a null. The argument
+// held is the node the document holds for a value. The decoder reads a
+// nil node, a null, and an alias to a null as a null. An alias that the
+// resolver of the walk cannot follow does not read as a null.
 func (f *filler) null(held ast.Node) bool {
 	if alias, ok := held.(*ast.AliasNode); ok {
 		anchor, err := f.rules.Resolver.Anchor(alias)
