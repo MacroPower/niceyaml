@@ -65,6 +65,10 @@
 //	const mine kind.Kind = "mine"
 //
 //	styles := theme.Charm.Styles().With(style.Inherit(mine, kind.GenericHighlight))
+//
+// [IsPredefined] tells a predefined Kind from a custom one. A program that
+// reads kinds from a file, such as the keys of a theme file, uses it to
+// reject a misspelled name.
 package kind
 
 import (
@@ -302,6 +306,20 @@ func Parent(k Kind) Kind {
 	}
 
 	return Text
+}
+
+// IsPredefined reports whether k is one of the kinds this package
+// declares, [Text] included. It reports false for a custom kind, such as
+// kind.Kind("mine"), and for a misspelled name, such as
+// kind.Kind("literalStrin").
+func IsPredefined(k Kind) bool {
+	if k == Text {
+		return true
+	}
+
+	_, ok := parent[k]
+
+	return ok
 }
 
 // All returns an iterator over every predefined Kind, [Text] included, in

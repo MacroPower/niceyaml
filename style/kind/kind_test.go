@@ -55,3 +55,35 @@ func TestParent(t *testing.T) {
 		})
 	}
 }
+
+func TestIsPredefined(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		kind kind.Kind
+		want bool
+	}{
+		"root":            {kind: kind.Text, want: true},
+		"token kind":      {kind: kind.LiteralString, want: true},
+		"chrome kind":     {kind: kind.UILineNumber, want: true},
+		"custom kind":     {kind: kind.Kind("mine"), want: false},
+		"misspelled name": {kind: kind.Kind("literalStrin"), want: false},
+		"empty name":      {kind: kind.Kind(""), want: false},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, kind.IsPredefined(tc.kind))
+		})
+	}
+
+	t.Run("every kind from All", func(t *testing.T) {
+		t.Parallel()
+
+		for k := range kind.All() {
+			assert.True(t, kind.IsPredefined(k), "kind %q", k)
+		}
+	})
+}

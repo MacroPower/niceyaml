@@ -117,6 +117,12 @@ func (t *Token) UnmarshalText(text []byte) error {
 // include one converted from a string with theme.Token(spec), and one set
 // by a decoder that does not call UnmarshalText, such as mapstructure
 // without its TextUnmarshallerHookFunc.
+//
+// A token for a kind outside the hierarchy, such as a custom kind or a
+// misspelled name, styles that kind alone. Only a renderer or an overlay
+// that names the kind draws it. A program that reads tokens from a file
+// checks each key with [kind.IsPredefined] when the file must not style
+// kinds of its own.
 func FromColors(name string, c Colors, tokens map[kind.Kind]Token) (Theme, error) {
 	err := checkTokens(tokens)
 	if err != nil {

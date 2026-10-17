@@ -202,10 +202,8 @@ func knownKind(ctx context.Context, n *niceyaml.Node) error {
 		return fmt.Errorf("decode kind: %w", err)
 	}
 
-	for k := range kind.All() {
-		if k == name {
-			return nil
-		}
+	if kind.IsPredefined(name) {
+		return nil
 	}
 
 	return niceyaml.NewError("unknown kind")
