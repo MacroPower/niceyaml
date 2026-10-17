@@ -72,6 +72,10 @@
 // each detection starts a process, so a program that prints many views
 // builds one writer and prints them all through it.
 //
+// Under the 16-color and 256-color profiles, a theme's surface and the
+// text or highlights on it can become the same color. The Surfaces section
+// of [go.jacobcolvin.com/niceyaml/style/theme] covers it.
+//
 // Output without its sequences is not the plain text of a view.
 // [WithWrapWidth] wraps a long line onto several rows. [WithBox],
 // [WithContainerWidth], and a container style that sets any property pad

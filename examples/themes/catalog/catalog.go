@@ -123,13 +123,9 @@ func main() {
 		fmt.Printf("The background of this terminal does not suit %s.\n", t.Name)
 	}
 
-	// Under the 16-color profile, lipgloss.Writer turns each color into the
-	// nearest of the 16 standard ANSI colors. The terminal then draws each of
-	// those from its own palette. Many dark surfaces turn blue or cyan, and
-	// text close to the surface might turn the same color. In nord, the keys
-	// and the surface both turn cyan, so the keys disappear from the box but
-	// show without the surface. A program that offers 16 colors should drop
-	// the surface under that profile.
+	// Under the 16-color profile, the keys of nord take the color of its
+	// surface and vanish from the box, but they show here. The Surfaces
+	// section of the theme docs covers the collision.
 	plain := printer.New(printer.WithStyles(styles.With(style.WithSurface(nil))))
 	lipgloss.Println(plain.Print(view))
 }

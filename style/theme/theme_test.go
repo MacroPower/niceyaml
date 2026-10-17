@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
+	"math"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -1006,6 +1007,45 @@ func TestPalette_HighlightsReadable(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPalette_HighlightNearAccent(t *testing.T) {
+	t.Parallel()
+
+	// In each of these themes, a hue close to the accent meets the rules
+	// for the highlight tints, so the highlight takes a hue near the
+	// accent's. The cases pin the step of the hue search, and a later
+	// change to the constants behind Derive might move them.
+	tcs := map[string]struct{}{
+		"tokyonight-night": {},
+		"xcode-dark":       {},
+		"dracula":          {},
+		"evergarden":       {},
+	}
+
+	for name := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := builtin(t, name).Styles()
+			accent := hue(styles.Style(kind.TextAccent).GetForeground())
+			highlight := hue(styles.Style(kind.GenericHighlight).GetBackground())
+
+			turn := math.Abs(accent - highlight)
+			turn = min(turn, 360-turn)
+
+			assert.LessOrEqual(t, turn, 20.0,
+				"highlight hue %.1f sits %.1f degrees from the accent hue %.1f", highlight, turn, accent)
+		})
+	}
+}
+
+// hue returns the HSV hue of c in degrees, from 0 up to 360.
+func hue(c color.Color) float64 {
+	cf, _ := colorful.MakeColor(c)
+	h, _, _ := cf.Hsv()
+
+	return h
 }
 
 func TestPalette_SurfaceHeadingsReadable(t *testing.T) {

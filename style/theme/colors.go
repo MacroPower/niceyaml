@@ -40,8 +40,8 @@ type Colors struct {
 	// black for a [Dark] one.
 	Bg color.Color
 	// Accent colors the plain headings and accented text. The highlights
-	// take its hue, or the nearest hue that lets them stand apart. An unset
-	// Accent takes a blue picked for the mode.
+	// take its hue where they can, as [Derive] describes. An unset Accent
+	// takes a blue picked for the mode.
 	Accent color.Color
 	// OK colors success text, success headings, and inserted lines. An
 	// unset OK takes a green picked for the mode.
@@ -213,6 +213,26 @@ func fromColors(name string, c Colors, tokens map[kind.Kind]Token) Theme {
 // the text. On each tint, the body text and the comments stay readable.
 // So does the text of each diff line or badge that paints a fill of its
 // own.
+//
+// The search for the hue of the tints starts from the hue of Accent. An
+// Accent without a hue, such as gray, white, or black, starts the search
+// from blue. The tints take the starting hue when a tint of that hue meets
+// these rules. Otherwise Derive turns away from that hue in steps, on
+// alternate sides, out to the opposite hue, and takes the first hue that
+// meets them. When no hue meets the rules, the tints keep the starting
+// hue, and the stronger tint reaches as far from Bg as the rules allow.
+//
+// The hue that the search takes can sit far from Accent. At the luminance
+// of Bg, the gamut leaves some hues little color, such as yellow and
+// orange near black and blue near white. An amber Accent on a dark Bg can
+// thus give magenta highlights.
+//
+// A token that sets a background for [kind.GenericHighlight] or
+// [kind.GenericHighlightDim] replaces that tint, and Derive does not hold
+// it to these rules. A token without a background, such as "bold", keeps
+// the derived tint. [kind.GenericHeadingAccent] and
+// [kind.GenericHeadingSubtle] draw on the derived tints unless tokens set
+// their backgrounds too.
 //
 // Bg becomes the surface of the styles, as [style.WithSurface] sets it, so
 // a kind holds a background of its own only when it paints one.
@@ -761,7 +781,7 @@ func toLinear(c color.Color) linear {
 
 // hueTurn is the angle, in degrees, between neighboring hues that [hues]
 // returns.
-const hueTurn = 30
+const hueTurn = 10
 
 // blueHue is the angle, in degrees, of blue on the color wheel.
 const blueHue = 240

@@ -114,12 +114,13 @@ func main() {
 	// literalString. The line numbers inherit from ui. Derive gives ui the
 	// color of the comments but not their italics.
 	//
-	// Derive gives the highlight the hue of the accent when a tint of that
-	// hue stands apart from the background and keeps the text on it
-	// readable. Otherwise it takes the nearest hue that does, and that hue
-	// can sit far from the accent. When no hue does, it keeps the hue of the
-	// accent. A file that wants a highlight of its own sets a token for
-	// genericHighlight.
+	// Derive gives the highlights the hue of the accent where a tint of
+	// that hue stands apart from the background and keeps the text on it
+	// readable. A dark tint of amber does not stand apart from the brown of
+	// fika, so the highlights turn magenta. A file that wants highlights of
+	// its own sets backgrounds in tokens for genericHighlight and
+	// genericHighlightDim. It also sets them for genericHeadingAccent and
+	// genericHeadingSubtle, which draw on the same tints.
 	fmt.Printf("%-20s %-14s %s\n", "KIND", "PARENT", "STYLE")
 
 	for _, k := range []kind.Kind{

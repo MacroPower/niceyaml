@@ -165,6 +165,38 @@
 // those colors meet the terminal's background instead, and some of them
 // might be hard to read there.
 //
+// A highlight that the printer blends, such as a search match from
+// [go.jacobcolvin.com/niceyaml/line.View.BlendOverlay], mixes its fill
+// with the surface beneath it. On the surface, it thus shows a softer
+// color than its fill. Without the surface, nothing lies beneath the fill,
+// and the match shows the fill unmixed, as a highlight that replaces the
+// style does.
+//
+// Under the 16-color profile, [github.com/charmbracelet/colorprofile.ANSI],
+// the writer maps each color to one of the 16 basic ANSI colors through a
+// fixed table. The terminal then draws each of those from its own palette.
+// Many dark surfaces become ANSI black or blue, and a token color near the
+// surface can become the same color and vanish. Nord's surface and its
+// keys both become cyan, for example. A program that can print under that
+// profile removes the surface there:
+//
+//	styles := t.Styles()
+//	if profile == colorprofile.ANSI {
+//		styles = styles.With(style.WithSurface(nil))
+//	}
+//
+// The profile comes from the writer that prints, such as the Profile field
+// of [lipgloss.Writer], or from a [charm.land/bubbletea/v2.ColorProfileMsg]
+// in a Bubble Tea program.
+//
+// Under the 16-color profile, the two highlights of some themes, such as
+// nord and solarized-dark, become one color. The current search match then
+// looks like the others. Under the 256-color profile,
+// [github.com/charmbracelet/colorprofile.ANSI256], the text of each
+// built-in theme keeps a color apart from its surface. The dim highlight
+// of some dark themes, such as monokai and gruvbox, becomes the color of
+// the surface there. So does the background of [kind.GenericHeadingSubtle].
+//
 // Most themes in this package derive from the Chroma syntax highlighter:
 // https://github.com/alecthomas/chroma
 package theme
