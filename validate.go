@@ -23,15 +23,15 @@ import (
 )
 
 // SelfValidate runs the self-validation step of [Node.DecodeInto] on its
-// own. It walks v, calls Validate on every value in it that implements
-// [SelfValidator], runs each function of [WithValueCheck] in opts on the
-// values of its type, and binds what they report as [Node.Bind] binds an
-// error, with each `@` path under the path of its value in the node. It
-// returns nil when nothing failed. It runs the walk whatever
-// [WithSelfValidation] says, and runs no [Validator]. A program that
-// fills v after the decode, such as from its environment, calls
-// SelfValidate once v is whole, as the Validation section of the package
-// documentation describes:
+// own. It walks v and calls Validate on every value in it that implements
+// [SelfValidator]. It also runs each function of [WithValueCheck] in opts
+// on the values of its type. It binds what they report as [Node.Bind]
+// binds an error, with each `@` path under the path of its value in the
+// node. It returns nil when every check passes. It runs the walk whatever
+// [WithSelfValidation] says, and it does not run a [Validator]. A program
+// that fills v after the decode, such as from its environment, calls
+// SelfValidate after v is complete, as the Validation section of the
+// package documentation describes:
 //
 //	if err := doc.DecodeInto(ctx, &cfg, settings, niceyaml.WithSelfValidation(false)); err != nil {
 //		return err
@@ -41,31 +41,31 @@ import (
 //
 //	return doc.SelfValidate(ctx, &cfg, settings)
 //
-// On a value that nothing changed, SelfValidate returns what the decode
-// with the walk on returns, given the same functions of WithValueCheck.
-// To spell each map key as the document does, the walk decodes the keys
-// with the settings of the [Source], the unmarshalers of
-// [WithUnmarshalers] among them, and with the options in opts that say
-// how a value decodes: [WithUnmarshaler], [WithDisallowUnknownFields],
-// [WithAllowedFieldPrefixes], and [WithYAMLOrderedMaps]. It reads no
-// other option. A program that gives its unmarshalers to the Source thus
-// passes none of them here, and a caller passes the other options of the
-// decode again.
+// On a value that did not change after the decode, SelfValidate returns
+// what the decode with the walk on returns, given the same functions of
+// WithValueCheck. To spell each map key as the document does, the walk
+// decodes the keys with the settings of the [Source], the unmarshalers of
+// [WithUnmarshalers] among them. It also applies the options in opts that
+// say how a value decodes: [WithUnmarshaler], [WithDisallowUnknownFields],
+// [WithAllowedFieldPrefixes], and [WithYAMLOrderedMaps]. It does not read
+// any other option. A program that gives its unmarshalers to the Source
+// thus does not pass them here, but a caller passes the other options of
+// the decode again.
 //
-// In a document that did not parse, every error binds with no position,
-// and SelfValidate returns those errors rather than the syntax error
-// [Node.Err] returns. Any v but nil and a nil pointer works, and those
-// return an error wrapping [ErrSelfValidateTarget], bound to the source.
-// A v that is no pointer validates as a copy. The walk stops once ctx
-// ends, as the Cancellation section of the package documentation
-// describes.
+// In a document that did not parse, every error binds without a position.
+// SelfValidate returns those errors rather than the syntax error that
+// [Node.Err] returns. Any v works except nil and a nil pointer. For those
+// two, SelfValidate returns an error wrapping [ErrSelfValidateTarget],
+// bound to the source. A v that is not a pointer validates as a copy. The
+// walk stops when ctx ends, as the Cancellation section of the package
+// documentation describes.
 func (n *Node) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
 	return n.selfValidate(ctx, v, newDecodeConfig(n.source, opts))
 }
 
 // selfValidate is [Node.SelfValidate] with its settings resolved.
-// [Node.DecodeInto] runs it once the decode has filled v, so a decode and
-// a later call of SelfValidate on the same value return the same error.
+// [Node.DecodeInto] runs it after the decode fills v, so a decode and a
+// later call of SelfValidate on the same value return the same error.
 func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error {
 	err := checkTarget(v, ErrSelfValidateTarget, false)
 	if err != nil {
@@ -80,48 +80,50 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 }
 
 // SelfValidateValue runs the self-validation step of [Node.DecodeInto]
-// on a value that came from no document, such as one the program built
-// or the body of a request. It walks v as [Node.SelfValidate] does, and
-// binds the result as [BindValue] binds an error, so the text names each
-// failing path from v, as in "$.servers[1].port: port is required", and
-// a document can still place the error. It returns nil when nothing
-// failed.
+// on a value that did not come from a document, such as one the program
+// built or the body of a request. It walks v as [Node.SelfValidate] does
+// and binds the result as [BindValue] binds an error. The text thus names
+// each failing path from v, as in "$.servers[1].port: port is required",
+// and a document can still place the error. It returns nil when every
+// check passes.
 //
 // The walk names a field as a YAML decode names it, by its yaml tag, its
 // json tag, or its lowercased name. A map key takes the text of its Go
-// value, so where a document spells the key another way, such as 0x10
-// for 16, an error below the entry binds at the key of the map. A caller
-// that holds the document validates through the Node of the value with
+// value. When a document spells the key another way, such as 0x10 for
+// 16, an error below the entry binds at the key of the map. A caller that
+// holds the document validates through the Node of the value with
 // Node.SelfValidate instead. Several keys of one map that share a text,
-// such as 1 and "1", bind with no position, as [ErrAmbiguousPath]
+// such as 1 and "1", bind without a position, as [ErrAmbiguousPath]
 // describes.
 //
 // SelfValidateValue runs each function of [WithValueCheck] in opts on the
-// values of its type, as Node.SelfValidate does, so a server checks the
-// body of a request with the functions it gives a decode. It knows a type
-// that decodes itself by its own unmarshaler method, and by the
-// unmarshalers of [WithUnmarshaler] in opts. It reads no other option.
-// The value has no [Source], so the unmarshalers of [WithUnmarshalers] do
-// not reach the walk, and a caller passes them in opts with
-// WithUnmarshaler.
+// values of its type, as Node.SelfValidate does. A server thus checks the
+// body of a request with the functions it gives a decode. SelfValidateValue
+// recognizes a type that decodes itself through its own unmarshaler
+// method or through an unmarshaler of [WithUnmarshaler] in opts. It does
+// not read any other option. The value does not have a [Source], so the
+// unmarshalers of [WithUnmarshalers] do not reach the walk. A caller
+// passes them in opts with WithUnmarshaler instead.
 //
 // A Validate whose value holds fields a decode does not reach, such as
 // one tagged `yaml:"-"`, validates them with SelfValidateValue and
-// moves the result under their path with [Rebase]. A Validate gets no
-// context, so it collects the warnings of the call with a [Warnings] of
-// its own and returns them beside its errors, and the walk places both:
+// moves the result under their path with [Rebase]. A Validate does not
+// get a context, so it collects the warnings of the call with a
+// [Warnings] of its own. It returns them beside its errors, and the walk
+// places both:
 //
 //	warnings := niceyaml.NewWarnings()
 //	err := niceyaml.SelfValidateValue(warnings.Context(context.Background()), p.Upstreams)
 //
 //	return niceyaml.Rebase(errors.Join(err, warnings.Err()), paths.Current().Child("upstreams"))
 //
-// A Validate must not pass its own receiver, which would call that
-// Validate again without end.
+// A Validate must not pass its own receiver to SelfValidateValue, because
+// the call then runs that Validate again without end.
 //
-// Any v but nil and a nil pointer works, and those return an error
-// wrapping [ErrSelfValidateTarget]. The walk stops once ctx ends, as the
-// Cancellation section of the package documentation describes.
+// Any v works except nil and a nil pointer, for which SelfValidateValue
+// returns an error wrapping [ErrSelfValidateTarget]. The walk stops when
+// ctx ends, as the Cancellation section of the package documentation
+// describes.
 func SelfValidateValue(ctx context.Context, v any, opts ...DecodeOption) error {
 	err := checkTarget(v, ErrSelfValidateTarget, false)
 	if err != nil {
@@ -135,14 +137,14 @@ func SelfValidateValue(ctx context.Context, v any, opts ...DecodeOption) error {
 	return BindValue(failure)
 }
 
-// walkSelfValidators runs Validate on every [SelfValidator] in v, a non-nil
-// pointer or a value that is no pointer, and the functions of cfg from
-// [WithValueCheck] on the values of their types. It joins the errors under
-// the path of each value in the document of n, where a nil n stands for no
-// document, and returns the failures and then the warnings. The warnings
-// are those that each check returns and those that each function hands to
-// its context, whether the check passes or fails. A check whose result
-// holds warnings alone passes.
+// walkSelfValidators runs Validate on every [SelfValidator] in v, which is
+// a non-nil pointer or a value that is not a pointer. It also runs the
+// functions of cfg from [WithValueCheck] on the values of their types. It
+// joins the errors under the path of each value in the document of n, and
+// it returns the failures and then the warnings. A nil n stands for a
+// value outside any document. The warnings are those that each check
+// returns and those that each function hands to its context, whether the
+// check passes or fails. A check whose result holds warnings alone passes.
 func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (error, error) {
 	w := selfWalker{
 		ctx:      ctx,
@@ -165,8 +167,8 @@ func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (
 
 // selfWalker collects the errors of the [SelfValidator] values in a decoded
 // value, and of the functions from [WithValueCheck]. It walks each pointer,
-// map, and slice once, so a value two paths share reports its errors under
-// the first, and a back edge of a cycle passes.
+// map, and slice once. A value that two paths share thus reports its
+// errors under the first path, and a back edge of a cycle passes.
 type selfWalker struct {
 	ctx     context.Context
 	node    *Node
@@ -174,17 +176,18 @@ type selfWalker struct {
 	// The settings of the decode, which name the types its options give
 	// an unmarshaler and hold the functions from [WithValueCheck].
 	cfg decodeConfig
-	// The types the functions of cfg check, which the walk counts as
-	// validators where it skips a value that holds none.
+	// The types that the functions of cfg check. The walk skips each value
+	// that does not hold a validator, and it counts these types as
+	// validators for that test.
 	checked *checkedTypes
-	// The result of the walk through each pointer, map, and slice the walk
-	// has entered, as [walkResult] describes.
+	// The result of the walk through each pointer, map, and slice that the
+	// walk has entered, as [walkResult] describes.
 	walked map[visit]walkResult
 	// The values that finished inside a cycle whose first value the walk
 	// is still inside of, in the order they finished.
 	pending []visit
-	// The pointers, maps, and slices the current scan has reached, so the
-	// scan reads each once however many paths lead to it.
+	// The pointers, maps, and slices that the current scan has reached, so
+	// the scan reads each once however many paths lead to it.
 	scanning map[visit]bool
 	// The result of the scan of each pointer, map, and slice. The result
 	// for a pointer covers the value it points to, and the result for a
@@ -194,32 +197,34 @@ type selfWalker struct {
 	// The warnings of the checks, which [selfWalker.report] takes out of
 	// their results.
 	warns []error
-	// The error of a context that ended, once it stops the walk, as
-	// [selfWalker.stopped] describes.
+	// The error of a context that ended, as [selfWalker.stopped]
+	// describes. It is nil until that error stops the walk.
 	ended error
-	// The places of the values the walk is inside of that decode
+	// The places of the values that the walk is inside of and that decode
 	// themselves, the outermost first, as [selfWalker.enter] records them.
 	within []place
 	// The node of the value the walk starts at, held as a [step] holds the
-	// node of its own value, once [selfWalker.nodeOf] resolves it.
+	// node of its own value, after [selfWalker.nodeOf] resolves it.
 	start step
-	// The number of pointers, maps, and slices the walk has entered, which
-	// numbers each one in turn.
+	// The count of pointers, maps, and slices that the walk has entered.
+	// The walk gives each one the count as its number.
 	entered int
 	// The lowest number of a value the walk is inside of that the values
-	// below the current one lead back to, or math.MaxInt when none does.
+	// below the current one lead back to. It is math.MaxInt when they do
+	// not lead back to such a value.
 	reach int
 	// Whether the walk is below a map entry whose path names the entries
 	// of several keys, as [selfWalker.walkEntries] finds one. The path of
 	// each error the walk collects there is ambiguous.
 	ambiguous bool
-	// Whether the last of within is a slice, an array, or a map, so no path
-	// below it says where its value sits in the document.
+	// Whether the last of within is a slice, an array, or a map. The paths
+	// below it then do not say where its value sits in the document.
 	sealed bool
 }
 
-// visit names a pointer, map, or slice by type and address, since a struct
-// and its first field share one, and by length, since two slices can too.
+// visit names a pointer, map, or slice by type and address, because a
+// struct and its first field share an address. It also names it by
+// length, because two slices of one type can share an address too.
 //
 //nolint:unused // The fields tell the keys of the walker's maps apart.
 type visit struct {
@@ -229,27 +234,30 @@ type visit struct {
 }
 
 // walkResult is the result of the walk through a pointer, map, or slice.
-// While the walk is inside the value, it passes with the number of the
-// value as its reach, so a value below that leads back joins its cycle.
+// While the walk is inside the value, the result passes with the number of
+// the value as its reach. A value below it that leads back to it thus
+// joins its cycle.
 type walkResult struct {
-	// Whether nothing under the value failed.
+	// Whether everything under the value passed.
 	ok bool
 
 	// The lowest number of a value the walk is inside of that the value
-	// leads back to, or math.MaxInt once the result is final.
+	// leads back to, or math.MaxInt when the result is final.
 	reach int
 }
 
 // place is where a value of the walk lies, held as the last [step] below
-// the start, which the zero place stands for. A [paths.Path] copies its
-// selectors as it grows, so a place builds a path only to rebase an error.
+// the start. The zero place stands for the start. A [paths.Path] copies
+// its selectors as it grows, so a place builds a path only to rebase an
+// error.
 type place struct {
 	last *step
 }
 
-// step is one selector on the way to a value of the walk, where key marks
-// a `~`. It keeps the node [selfWalker.nodeOf] resolves, and resolved tells
-// a value the document did not set, with a nil node, from one not yet read.
+// step is one selector on the way to a value of the walk, and key marks a
+// `~` selector. It keeps the node that [selfWalker.nodeOf] resolves. When
+// resolved is true, a nil node means that the document did not set the
+// value. When resolved is false, nodeOf has not resolved the step yet.
 type step struct {
 	prev     *step
 	node     ast.Node
@@ -295,7 +303,7 @@ func (p place) path() paths.Path {
 }
 
 // walk validates v and everything below it at the place at, and reports
-// whether nothing under v failed. For an inline struct, or a pointer to
+// whether everything under v passed. For an inline struct, or a pointer to
 // one, shadowed names the fields of its parent that are not inline.
 func (w *selfWalker) walk(v reflect.Value, at place, shadowed map[string]bool) bool {
 	if !v.IsValid() {
@@ -349,9 +357,10 @@ func (w *selfWalker) walk(v reflect.Value, at place, shadowed map[string]bool) b
 	return w.walkValue(v, at, shadowed)
 }
 
-// walkValue walks v, which is no pointer or interface, as [selfWalker.walk]
-// does. A struct it cannot address walks as a copy, so [exposed] can read
-// its fields, and a struct an embedded field decodes walks that field alone.
+// walkValue walks v, which is neither a pointer nor an interface, as
+// [selfWalker.walk] does. A struct that it cannot address walks as a copy,
+// so [exposed] can read its fields. A struct that an embedded field
+// decodes walks that field alone.
 func (w *selfWalker) walkValue(v reflect.Value, at place, shadowed map[string]bool) bool {
 	if v.Kind() == reflect.Struct {
 		v = addressable(v)
@@ -381,7 +390,8 @@ func (w *selfWalker) walkValue(v reflect.Value, at place, shadowed map[string]bo
 
 // enter records the value at at, which decodes itself, as where an error
 // below it binds when the document lacks the error's path. A slice, array,
-// or map seals the record, since no tag says where its elements sit.
+// or map seals the record, because tags do not say where its elements
+// sit.
 func (w *selfWalker) enter(kind reflect.Kind, at place) {
 	if w.sealed {
 		return
@@ -400,8 +410,9 @@ func (w *selfWalker) enter(kind reflect.Kind, at place) {
 }
 
 // fallback returns where an error of the value the walk is at binds when
-// the document does not hold its path: the values the walk is inside of
-// that decode themselves, the nearest first.
+// the document does not hold the path of the error. The result lists the
+// paths of the values that the walk is inside of and that decode
+// themselves, the nearest first.
 func (w *selfWalker) fallback() fallback {
 	if len(w.within) == 0 {
 		return fallback{}
@@ -417,7 +428,7 @@ func (w *selfWalker) fallback() fallback {
 
 // exposed returns v, or a view of v when v is an unexported embedded field,
 // which go-yaml can fill through a method it promotes. The view shares the
-// memory of v, which needs an address, as [selfWalker.walkValue] ensures.
+// memory of v, so v must be addressable, as [selfWalker.walkValue] ensures.
 func exposed(v reflect.Value) reflect.Value {
 	if v.CanInterface() {
 		return v
@@ -439,9 +450,10 @@ func addressable(v reflect.Value) reflect.Value {
 	return c
 }
 
-// walkOwned walks v, a non-nil pointer, map, or slice that owns its address,
-// once. It finds cycles as Tarjan's algorithm does, so the values of a cycle
-// wait on pending until its first value finishes and sets all their results.
+// walkOwned walks v once. It takes a non-nil pointer, map, or slice that
+// owns its address. It finds cycles as Tarjan's algorithm does. The values
+// of a cycle wait on pending until its first value finishes and sets all
+// their results.
 func (w *selfWalker) walkOwned(v reflect.Value, at place, shadowed map[string]bool) bool {
 	key := visitOf(v)
 	if r, seen := w.walked[key]; seen {
@@ -487,9 +499,10 @@ func (w *selfWalker) walkOwned(v reflect.Value, at place, shadowed map[string]bo
 	return ok
 }
 
-// ownsAddress reports whether the address of v, a non-nil pointer, map, or
-// slice, names v alone. A v with zero-size data, or an empty slice, can
-// share its address yet holds nothing that leads back, so it needs no record.
+// ownsAddress reports whether the address of v names v alone. It takes a
+// non-nil pointer, map, or slice. A v with zero-size data, or an empty
+// slice, can share its address. Such a v does not hold anything that leads
+// back, so it does not need a record.
 func ownsAddress(v reflect.Value) bool {
 	switch v.Kind() {
 	case reflect.Pointer:
@@ -515,7 +528,8 @@ var (
 	// The result of [implementsSelfValidator] for each type it has read.
 	ownsValidator unmarshaler.TypeCache[bool]
 
-	// The set of no types, from which [checkedTypesOf] reaches every other.
+	// The empty set of types, from which [checkedTypesOf] reaches every
+	// other set.
 	noCheckedTypes = &checkedTypes{}
 )
 
@@ -523,11 +537,11 @@ var (
 // check, with the answers about each type that the walk prunes by. A
 // validator of the walk is a value that implements [SelfValidator] or
 // whose type the set holds. [checkedTypesOf] returns one instance for each
-// set, so every walk with the same set shares the answers, and the walks
-// with no function share those of [noCheckedTypes].
+// set, so every walk with the same set shares the answers. The walks
+// without a function share the answers of [noCheckedTypes].
 type checkedTypes struct {
-	// The set that holds types and one more type, which sorts after them,
-	// by that type.
+	// Maps each type t that sorts after types to the set that holds types
+	// and t.
 	next map[reflect.Type]*checkedTypes
 	// The result of [checkedTypes.mayHold] for each type it has read.
 	holds unmarshaler.TypeCache[bool]
@@ -542,9 +556,9 @@ type checkedTypes struct {
 
 // checkedTypesOf returns the set of the types that checks check. It sorts
 // the types by their names, so the same types in another order return the
-// same instance. Two types with one name keep the order checks gives them,
-// so those types in another order return a second instance, which holds
-// answers of its own.
+// same instance. Two types that share a name keep the order that checks
+// gives them. Those types in another order thus return a second instance,
+// which holds answers of its own.
 func checkedTypesOf(checks []valueCheck) *checkedTypes {
 	var types []reflect.Type
 
@@ -566,8 +580,9 @@ func checkedTypesOf(checks []valueCheck) *checkedTypes {
 	return set
 }
 
-// with returns the set that holds the types of c and t, which sorts after
-// them, and creates it when no walk has asked for it before.
+// with returns the set that holds the types of c plus t. The type t sorts
+// after the types of c. The method creates the set when a walk first asks
+// for it.
 func (c *checkedTypes) with(t reflect.Type) *checkedTypes {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -593,8 +608,9 @@ func (c *checkedTypes) validates(t reflect.Type) bool {
 }
 
 // mayHold reports whether a value of type t, or one below it the walk
-// reaches, can be a validator, as any interface can. It reads no value, so
-// every walk with the set shares the answer, which can overreport.
+// reaches, can be a validator, as any interface can. It does not read a
+// value, so every walk with the set shares the answer, which can
+// overreport.
 func (c *checkedTypes) mayHold(t reflect.Type) bool {
 	return c.holds.Get(t, func(t reflect.Type) bool {
 		// The walk reads nothing below a node of the syntax tree.
@@ -605,8 +621,9 @@ func (c *checkedTypes) mayHold(t reflect.Type) bool {
 }
 
 // children walks the values below v and reports whether each passed. It
-// skips the fields of an inline struct that shadowed names, since go-yaml
-// zeroes an inline field that shares its name with a field of the parent.
+// skips the fields of an inline struct that shadowed names, because
+// go-yaml zeroes an inline field that shares its name with a field of the
+// parent.
 func (w *selfWalker) children(v reflect.Value, at place, shadowed map[string]bool) bool {
 	switch v.Kind() {
 	case reflect.Slice, reflect.Array, reflect.Map:
@@ -669,10 +686,11 @@ func (w *selfWalker) children(v reflect.Value, at place, shadowed map[string]boo
 }
 
 // walkEntries walks entries, which share the place at, and reports whether
-// nothing under them failed. It sorts the errors of each entry as a group by
-// their text, since the keys share a text and formatting a value may not end.
-// A value several entries share walks once, under the first the map yields.
-// When ambiguous is true, it binds the errors first so the text names paths.
+// everything under them passed. It sorts the errors of each entry as a group
+// by their text, because the keys share a text and formatting a value might
+// not end. A value that several entries share walks once, under the first
+// entry that the map yields. When ambiguous is true, it binds the errors
+// first so the text names paths.
 func (w *selfWalker) walkEntries(at place, entries []datapath.MapEntry, ambiguous bool) bool {
 	ok := true
 	start := len(w.errs)
@@ -718,9 +736,9 @@ func (w *selfWalker) walkEntries(at place, entries []datapath.MapEntry, ambiguou
 	return ok
 }
 
-// bind binds err where the walk binds an error before it returns: through
-// the [Node] of the walk, as [Node.bindOwn] binds it, or to no document
-// when the walk has no Node, as [BindValue] binds it.
+// bind binds err as the walk binds an error before it returns. When the
+// walk has a [Node], bind binds err through it, as [Node.bindOwn] does.
+// Otherwise it binds err outside any document, as [BindValue] does.
 func (w *selfWalker) bind(err error) error {
 	if w.node == nil {
 		return BindValue(err)
@@ -733,8 +751,8 @@ func (w *selfWalker) bind(err error) error {
 // [checkedTypes.fieldsOf] returns them.
 type structFields struct {
 	// The names of the fields of the struct that are not inline, as
-	// [yamlfield.OwnNames] returns them, or nil when no field in held
-	// is inline.
+	// [yamlfield.OwnNames] returns them, or nil when held does not hold an
+	// inline field.
 	own map[string]bool
 
 	// The fields that go-yaml decodes and whose types can hold a
@@ -742,7 +760,7 @@ type structFields struct {
 	held []heldField
 }
 
-// heldField is a field of a struct whose type can hold a validator.
+// heldField is a struct field whose type can hold a validator.
 type heldField struct {
 	// The name go-yaml decodes the field under, as [yamlfield.Name]
 	// returns it.
@@ -756,10 +774,10 @@ type heldField struct {
 	inline bool
 }
 
-// fieldsOf returns the fields of t, a struct type, that the walk reads,
-// which leaves out each field go-yaml skips or that holds no validator.
-// Every walk with the set shares the result, so a caller must not change
-// it.
+// fieldsOf returns the fields of the struct type t that the walk reads. It
+// leaves out each field that go-yaml skips and each field whose type
+// cannot hold a validator. Every walk with the set shares the result, so a
+// caller must not change it.
 func (c *checkedTypes) fieldsOf(t reflect.Type) *structFields {
 	return c.fields.Get(t, c.readFields)
 }
@@ -789,9 +807,9 @@ func (c *checkedTypes) readFields(t reflect.Type) *structFields {
 	return fields
 }
 
-// entriesMayHold reports whether an element of a value of type t, a
-// slice, array, or map, or a key or value of a map, can hold a validator,
-// as [checkedTypes.mayHold] reads it.
+// entriesMayHold reports whether an element of a slice, array, or map of
+// type t, or a key of such a map, can hold a validator, as
+// [checkedTypes.mayHold] reads it.
 func (c *checkedTypes) entriesMayHold(t reflect.Type) bool {
 	if t.Kind() == reflect.Map && c.mayHold(t.Key()) {
 		return true
@@ -831,7 +849,7 @@ func (w *selfWalker) holdsBelow(v reflect.Value) bool {
 	return held
 }
 
-// scanValue reports whether the walk would validate v or a value below it.
+// scanValue reports whether the walk validates v or a value below it.
 // Its second result is false when the scan met a value it was still reading,
 // so a false first result then holds for this scan alone.
 func (w *selfWalker) scanValue(v reflect.Value) (bool, bool) {
@@ -900,7 +918,7 @@ func (w *selfWalker) scanOwned(v reflect.Value) (bool, bool) {
 	return w.scanSelf(v)
 }
 
-// scanSelf scans v, a value that is no pointer or interface, as
+// scanSelf scans v, a value that is neither a pointer nor an interface, as
 // [selfWalker.scanValue] describes.
 func (w *selfWalker) scanSelf(v reflect.Value) (bool, bool) {
 	if w.checked.validates(v.Type()) {
@@ -916,7 +934,8 @@ func (w *selfWalker) scanSelf(v reflect.Value) (bool, bool) {
 
 // scanChildren scans the values below v, as [selfWalker.scanValue] does.
 // It reads the shadowed fields of an inline struct too, so it can report a
-// validator the walk never reaches, which only costs the walk a look.
+// validator that the walk never reaches. Such a report costs the walk only
+// a look.
 func (w *selfWalker) scanChildren(v reflect.Value) (bool, bool) {
 	complete := true
 
@@ -1006,13 +1025,13 @@ func implementsSelfValidator(t reflect.Type) bool {
 	})
 }
 
-// validate runs Validate on v, through a copy when v has no address, and
-// then each function of the walk from [WithValueCheck] for the type of v,
-// in order. It reports whether v passed, and stops at the first that
-// fails. Rebasing the error of Validate or of a function under at presumes
-// every problem invalid, unless an Error from [Unchecked] sits on its
-// cause chain. Each such problem matches [errInvalid] whether it has a
-// location or not.
+// validate runs Validate on v, through a copy when v is not addressable.
+// It then runs each function of the walk from [WithValueCheck] for the
+// type of v, in order. It stops at the first check that fails and reports
+// whether v passed. Rebasing the error of Validate or of a function under
+// at presumes every problem invalid, unless an Error from [Unchecked] sits
+// on its cause chain. Each such problem matches [errInvalid] whether it
+// has a location or not.
 func (w *selfWalker) validate(v reflect.Value, at place) bool {
 	if !w.checked.validates(v.Type()) {
 		return true
@@ -1054,9 +1073,9 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 	return true
 }
 
-// report records the errors and the warnings of a check of one value,
-// each rebased with d under the place of that value, and reports whether
-// the value passed. A check with warnings alone passes, so the values
+// report records the errors and the warnings of a check of one value, and
+// it reports whether the value passed. It rebases each one with d under the
+// place of that value. A check with warnings alone passes, so the values
 // above it still validate. The error of a context that ended stops the
 // walk, as [selfWalker.stopped] describes.
 func (w *selfWalker) report(failure, warnings error, at place, d declaration) bool {
@@ -1081,8 +1100,8 @@ func (w *selfWalker) report(failure, warnings error, at place, d declaration) bo
 	return false
 }
 
-// stopped reports whether the walk has stopped, which it does once its
-// context ends, or once a Validate or a function from [WithValueCheck]
+// stopped reports whether the walk has stopped. The walk stops when its
+// context ends, or when a Validate or a function from [WithValueCheck]
 // returns the error of a context that ended. The first such error
 // replaces every other error of the walk.
 func (w *selfWalker) stopped() bool {
@@ -1094,8 +1113,8 @@ func (w *selfWalker) stopped() bool {
 }
 
 // nodeOf returns the node the value at the end of s decoded from, or nil
-// when the document holds none there. A nil s stands for the walk's start.
-// Each step resolves once, from the node of the step before.
+// when the document does not hold one there. A nil s stands for the walk's
+// start. Each step resolves once, from the node of the step before.
 func (w *selfWalker) nodeOf(s *step) ast.Node {
 	if w.node == nil {
 		return nil
@@ -1140,7 +1159,8 @@ func (w *selfWalker) nodeOf(s *step) ast.Node {
 
 // keyNames maps each key of the mapping at node, by the value it decodes to
 // as type t, to the text a path resolves it by, such as 0x10 for 16. Of the
-// entries that set one key, merges included, the one the decode keeps wins.
+// entries that set one key, merges included, the one that the decode keeps
+// wins.
 func (w *selfWalker) keyNames(node ast.Node, t reflect.Type) map[any]string {
 	names := map[any]string{}
 
@@ -1165,9 +1185,9 @@ func (w *selfWalker) pathResolver() *paths.Resolver {
 	return w.node.doc.pathResolver()
 }
 
-// keyDecoder returns the go-yaml decoder for the keys of the walk, and
-// creates it with the options of the decode when the walk first decodes
-// a key.
+// keyDecoder returns the go-yaml decoder for the keys of the walk. It
+// creates the decoder with the options of the decode when the walk first
+// decodes a key.
 func (w *selfWalker) keyDecoder() *yaml.Decoder {
 	if w.decoder == nil {
 		w.decoder = w.node.newDecoder(w.cfg)
@@ -1177,8 +1197,9 @@ func (w *selfWalker) keyDecoder() *yaml.Decoder {
 }
 
 // addKeyName adds the text of key to names under the value key decodes to
-// as type t, unless names holds that value. As in go-yaml, only a null key
-// or an alias to one, not a key such as `&a ~`, leaves a pointer t nil.
+// as type t, unless names already holds that value. As in go-yaml, only a
+// null key or an alias to one, not a key such as `&a ~`, leaves a pointer t
+// nil.
 func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[any]string) {
 	name, ok := w.pathResolver().KeyName(key)
 	if !ok {
@@ -1276,13 +1297,14 @@ func (w *selfWalker) valueNode(node ast.Node, parsed bool) ast.Node {
 
 // DataLocator finds where a location in decoded data lies in the document
 // the data came from. A check of decoded data, such as an adapter for
-// CUE, OPA, or another JSON Schema library, names what it finds by the
-// member names and indices of that data. A path matches a key by its
-// source text instead, so [AtPath] of those names misses a key the
-// decoder respells, such as the key 0x10 of the member 16. A DataLocator
-// reads the names as the decoder does, and its options give an error the
-// location [go.jacobcolvin.com/niceyaml/schema.Schema] gives a violation
-// of the same value:
+// CUE, Open Policy Agent, or another JSON Schema library, names what it
+// finds by the member names and indices of that data. A path matches a key
+// by its source text instead. [AtPath] of those names thus misses a key
+// that the decoder respells, such as the key 0x10 of the member 16. A
+// DataLocator reads the names as the decoder does. Its options give an
+// error the same location that
+// [go.jacobcolvin.com/niceyaml/schema.Schema] gives a violation of the
+// same value:
 //
 //	loc := n.DataLocator()
 //
@@ -1293,20 +1315,20 @@ func (w *selfWalker) valueNode(node ast.Node, parsed bool) ast.Node {
 // Create instances with [Node.DataLocator].
 //
 // The names are those of the data from Decode[any] of the Node. A string
-// key gives its text, and any other key gives its Go value as [fmt.Sprint]
+// key gives its text. Any other key gives its Go value as [fmt.Sprint]
 // prints it, so 0x10 is 16, 3.10 is 3.1, and True is true. An element has
 // its index in decimal digits, as [strconv.Itoa] writes it. A decode into
 // another type can name a key another way, such as 1e3 for the key 1000
-// of a map[int]string, and such a name leads nowhere. A check that
-// reports JSON Pointers splits each pointer into its names and unescapes
-// `~1` and `~0` in each.
+// of a map[int]string. Such a name leads nowhere. A check that reports
+// JSON Pointers splits each pointer into its names and unescapes `~1` and
+// `~0` in each.
 //
 // A DataLocator is safe for concurrent use, and it reads each mapping
 // once, so a check creates one for all the findings of a run. Its reads
-// of `<<` merge keys share one budget, as large as
-// [paths.ErrExcessiveMerging] allows one path selector, so a check
-// creates a DataLocator for each run and keeps none for the life of the
-// document.
+// of `<<` merge keys share one budget, as large as the budget that
+// [paths.ErrExcessiveMerging] allows one path selector. A check thus
+// creates a DataLocator for each run and does not keep one for the life
+// of the document.
 type DataLocator struct {
 	// The node the names read from.
 	root ast.Node
@@ -1314,19 +1336,19 @@ type DataLocator struct {
 	idx *datapath.Index
 	// The `$` path to root.
 	base paths.Path
-	// Guards idx, which no two walks may read at once.
+	// Guards idx, which two walks must not read at the same time.
 	mu sync.Mutex
 }
 
 // DataLocator creates a new [*DataLocator] for the data the Node decodes
 // to. The names it reads start at the Node, as the data from
-// [Node.Decode] does, so a [Validator] creates one from the Node it got
+// [Node.Decode] does. A [Validator] thus creates one from the Node it got,
 // whatever the scope of that Node. Each path it writes starts at `$`, so
 // the errors bind through any Node of the document.
 //
-// A document that did not parse decodes to no data, as [Node.Err]
-// describes, so every name then leads nowhere and each error binds with
-// no position.
+// A document that did not parse does not decode to any data, as
+// [Node.Err] describes. Every name then leads nowhere, and each error
+// binds without a position.
 func (n *Node) DataLocator() *DataLocator {
 	return &DataLocator{
 		root: n.AST(),
@@ -1336,44 +1358,46 @@ func (n *Node) DataLocator() *DataLocator {
 }
 
 // At returns an [ErrorOption] that locates an error at the value the
-// names lead to in the data of the [DataLocator], and no names lead to
-// the whole of that data. The option sets the `$` path of the value, as
-// [AtPath] does, with each key spelled as the source spells it:
+// names lead to in the data of the [DataLocator]. An empty list of names
+// leads to the whole of that data. The option sets the `$` path of the
+// value, as [AtPath] does, with each key spelled as the source spells it:
 //
 //	niceyaml.NewError("must not be empty", loc.At("ports", "16", "name"))
 //	// cfg.yaml:3:11: $.ports.0x10.name: must not be empty
 //
-// Where several keys of a mapping decode to one name, the names lead to
-// the last of them, whose value the decode keeps. Where no path selects
-// the value, since another key spells the same text, the option also sets
-// its position, as [AtPosition] does, and the path names the member as
-// the decoder does.
+// When several keys of a mapping decode to one name, the names lead to
+// the last of them, whose value the decode keeps. When another key spells
+// the same text, a path cannot select the value. The option then also
+// sets its position, as [AtPosition] does, and the path names the member
+// as the decoder does.
 //
 // Names that lead past the data keep the form the caller wrote from there
-// on, and the error binds where that path binds, as [SourceError.Nearest]
-// describes. A member a mapping lacks binds at the key of the mapping,
-// and an index past the end of a sequence or a name below a scalar binds
-// with no position. A name behind an alias the document cannot follow,
-// such as one to an anchor of a document from [WithReferences], keeps its
-// form too, and the option sets no position. A name that matches no
-// member but whose text a path selects, such as 3.10 for the member 3.1,
-// binds at the last value the names lead to.
+// on. The error binds where that path binds, as [SourceError.Nearest]
+// describes. A member that a mapping lacks binds at the key of the
+// mapping. An index past the end of a sequence, or a name below a scalar,
+// binds without a position.
+//
+// A name can lead behind an alias that the document cannot follow, such
+// as an alias to an anchor of a document from [WithReferences]. Such a
+// name keeps its form too, and the option does not set a position. A name
+// that does not match a member but whose text a path selects, such as
+// 3.10 for the member 3.1, binds at the last value the names lead to.
 func (l *DataLocator) At(names ...string) ErrorOption {
 	return l.option(names, false)
 }
 
 // AtKey returns an [ErrorOption] that locates an error at the key of the
-// mapping entry the names lead to, which suits an error about the key
-// itself, such as an unknown member. It reads the names as
-// [DataLocator.At] does, and the path it sets ends in `~`, as one from
-// [paths.Path.Key] does:
+// mapping entry the names lead to. It suits an error about the key itself,
+// such as an unknown member. It reads the names as [DataLocator.At] does,
+// and the path it sets ends in `~`, as a path from [paths.Path.Key] does:
 //
 //	niceyaml.NewError("unknown port", loc.AtKey("ports", "16"))
 //	// cfg.yaml:2:3: $.ports.0x10~: unknown port
 //
-// An element of a sequence and the data as a whole have no key, so the
-// error binds at the value there. A member the data lacks has no key
-// either, so the option locates it as [DataLocator.At] does.
+// An element of a sequence and the data as a whole do not have a key, so
+// the error binds at the value there. A member that the data lacks does
+// not have a key either, so the option locates it as [DataLocator.At]
+// does.
 func (l *DataLocator) AtKey(names ...string) ErrorOption {
 	return l.option(names, true)
 }
@@ -1403,10 +1427,10 @@ func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token
 // SelfValidator is a type that validates itself after a decode.
 // [Node.Decode] and [Node.DecodeInto] call Validate on every value in the
 // result that implements it, through a value or a pointer receiver,
-// unless [WithSelfValidation] turns that off. Validate reports a problem
-// as an [*Error] with an `@` path, which reads from the value, so a type
-// checks its invariants once and reports the right lines in any
-// document:
+// unless [WithSelfValidation] disables these calls. Validate reports a
+// problem as an [*Error] with an `@` path, which reads from the value. A
+// type thus checks its invariants in one place and reports the right
+// lines in any document:
 //
 //	func (h Hours) Validate() error {
 //		if h.Close.Before(h.Open) {
@@ -1416,11 +1440,11 @@ func (l *DataLocator) locate(names []string, key bool) (paths.Path, *token.Token
 //		return nil
 //	}
 //
-// A decode presumes the document at fault for an error a Validate returns
-// that declares nothing, a plain I/O error included. A check that can
-// fail for reasons outside the document returns such an error inside
-// [Unchecked], which turns the presumption off, as the Errors section of
-// the package documentation describes. The Validation section describes
+// A decode presumes the document at fault for each error from Validate
+// that does not declare a fault, a plain I/O error included. A check that
+// can fail for reasons outside the document returns such an error inside
+// [Unchecked]. Unchecked disables the presumption, as the Errors section
+// of the package documentation describes. The Validation section describes
 // the order the values validate in, the path of each value, and where
 // each error binds.
 type SelfValidator interface {
@@ -1429,12 +1453,12 @@ type SelfValidator interface {
 
 // Validator validates a [*Node] before it decodes, as a JSON schema does.
 // Pass one to a decode with [WithValidator], or run one on its own with
-// [Node.Validate]. A validator that runs another validator on a
-// different Node, such as each element of a list, passes it to [Each] or
-// to the Validate method of that Node. A call to Check returns errors
-// whose `@` paths read from the Node that Check got. A validator of the
-// root that returns the Check result of `$.items[1]` as its own thus
-// reports `@.name` at `$.name` rather than at `$.items[1].name`.
+// [Node.Validate]. A validator that runs another validator on a different
+// Node, such as each element of a list, passes the other validator to [Each]
+// or to the Validate method of that Node. A call to Check returns errors
+// whose `@` paths read from the Node that Check got. A validator of the root
+// that returns the Check result of `$.items[1]` as its own thus reports
+// `@.name` at `$.name` rather than at `$.items[1].name`.
 //
 // See [ValidatorFunc], [MultiValidator], [ChainValidator], [SkipEmpty],
 // [Each], [go.jacobcolvin.com/niceyaml/schema.Schema], and
@@ -1460,16 +1484,16 @@ type SelfValidator interface {
 // A decode and Node.Validate return the syntax error of a document that
 // did not parse before any validator runs. A caller that calls Check
 // itself on such a Node gets the syntax error from Node.Decode, Node.At,
-// and Node.Nodes, and the validators of this module return it before
-// they read the Node.
+// and Node.Nodes. The validators of this module return it before they
+// read the Node.
 type Validator interface {
 	Check(ctx context.Context, n *Node) error
 }
 
 // ValidatorFunc adapts a function to the [Validator] interface. The
 // function writes its errors from the Node it gets, as Validator
-// describes, and [ValidatorFunc.Check] returns what the function returns,
-// so the same body works as the Check method of a type:
+// describes. [ValidatorFunc.Check] returns what the function returns, so
+// the same body works as the Check method of a type:
 //
 //	known := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 //		kind, err := n.DecodeAt[string](ctx, kindPath)
@@ -1484,8 +1508,8 @@ type Validator interface {
 //		return nil
 //	})
 //
-// A check that knows nothing of YAML returns a plain error, which
-// declares no fault. The function declares the document at fault for that
+// A check that does not know about YAML returns a plain error, which does
+// not declare a fault. The function declares the document at fault for that
 // error by returning the check inside [Invalid], which returns nil for a
 // value that passes:
 //
@@ -1494,12 +1518,13 @@ type ValidatorFunc func(ctx context.Context, n *Node) error
 
 // Check implements [Validator]. It returns the errors of what f returns,
 // and nil when f returns warnings alone or a nil [*Error] or [*SourceError]
-// pointer. The warnings that f returns, and those that f hands to its
-// context, go to the [Warnings] collector of ctx, bound as [Node.Bind]
-// binds an error. A failure that holds no warning comes back as f wrote
-// it, and the Warnings section of the package documentation describes a
-// failure that holds both. For a document that did not parse, Check
-// returns the syntax error [Node.Err] returns without calling f.
+// pointer. The [Warnings] collector of ctx gets the warnings that f
+// returns and the warnings that f hands to its context, bound as
+// [Node.Bind] binds an error. A failure that does not hold a warning comes
+// back as f wrote it. The Warnings section of the package documentation
+// describes a failure that holds both. For a document that did not parse,
+// Check returns the syntax error that [Node.Err] returns without calling
+// f.
 func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 	if n.doc.err != nil {
 		return n.doc.err
@@ -1509,28 +1534,28 @@ func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 }
 
 // MultiValidator returns a [Validator] that runs every validator in
-// order and reports every failure, where [ChainValidator] stops at the
-// first. It suits rules that check a document independently, as the
-// rules of a linter do:
+// order and reports every failure. [ChainValidator] instead stops at the
+// first. MultiValidator suits rules that check a document independently,
+// as the rules of a linter do:
 //
 //	err := doc.Validate(ctx, niceyaml.MultiValidator(schema, names))
 //
 // Each validator sees the node whatever the ones before it reported. The
 // run skips a nil validator, and one that holds a nil pointer or func.
-// No failure is no error, and a lone failure comes back as that validator
-// wrote it, unless it also holds a warning, as the Warnings section of
-// the package documentation describes. Two or more come back joined in
-// the order given, so [errors.Is] matches any one of them, and the Node
-// that runs the MultiValidator binds each at its own location, as
-// [Node.Bind] describes:
+// When every validator passes, the run returns nil. A lone failure comes
+// back as its validator wrote it, unless it also holds a warning, as the
+// Warnings section of the package documentation describes. Two or more
+// failures come back joined in the order given, so [errors.Is] matches
+// any one of them. The Node that runs the MultiValidator binds each at
+// its own location, as [Node.Bind] describes:
 //
 //	svc.yaml:1:7: $.name: reserved name
 //	svc.yaml:2:7: $.port: 0 is less than 1
 //
 // A context that ends stops the run, as the Cancellation section of the
 // package documentation describes. MultiValidator copies the validators
-// it gets, so a caller that edits the slice it passed changes nothing in
-// the Validator.
+// it gets, so a caller that edits the slice it passed does not change the
+// Validator.
 func MultiValidator(validators ...Validator) Validator {
 	validators = slices.Clone(validators)
 
@@ -1566,26 +1591,26 @@ func MultiValidator(validators ...Validator) Validator {
 }
 
 // ChainValidator returns a [Validator] that runs the validators in order
-// and stops at the first that fails, where [MultiValidator] runs every
-// one. It suits a check that needs an earlier one to pass, such as a
-// check that follows the references of a document once a schema has
-// accepted its shape:
+// and stops at the first that fails. [MultiValidator] instead runs every
+// one. ChainValidator suits a check that needs an earlier one to pass,
+// such as a check that follows the references of a document after a
+// schema has accepted the document:
 //
 //	err := doc.Validate(ctx, niceyaml.ChainValidator(schema, refs))
 //
-// A validator runs only after every validator before it has passed, so
-// one that decodes the node reports no value the schema already
-// rejected. The run skips a nil validator, and one that holds a nil
-// pointer or func, and a ChainValidator of no validators passes every
-// Node. A decode runs the validators of repeated [WithValidator] options
-// the same way.
+// A validator runs only after every validator before it has passed. A
+// validator that decodes the node thus does not report a value that the
+// schema already rejected. The run skips a nil validator, and one that
+// holds a nil pointer or func. A ChainValidator without validators passes
+// every Node. A decode runs the validators of repeated [WithValidator]
+// options the same way.
 //
 // The failure comes back as the validator wrote it, unless it also holds
 // a warning. The Node that runs the ChainValidator thus binds it as it
 // binds the failure of that validator alone. The Warnings section of the
 // package documentation describes a failure that holds a warning.
 // ChainValidator copies the validators it gets, so a caller that edits
-// the slice it passed changes nothing in the Validator.
+// the slice it passed does not change the Validator.
 func ChainValidator(validators ...Validator) Validator {
 	validators = slices.Clone(validators)
 
@@ -1594,20 +1619,21 @@ func ChainValidator(validators ...Validator) Validator {
 	})
 }
 
-// SkipEmpty returns a [Validator] that passes a document with no content,
+// SkipEmpty returns a [Validator] that passes a document without content,
 // which [Node.IsEmpty] reports, and runs v on every other Node. A caller
-// whose file may be empty as a whole wraps its validator, so an empty
-// file validates, and a decode of it returns the zero value:
+// whose file might be empty as a whole wraps its validator with SkipEmpty.
+// An empty file then validates, and a decode of it returns the zero value:
 //
 //	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(reg))
 //
 // A document that holds any value runs v, so v still checks an explicit
-// null such as `--- null` and an alias with no anchor before it. A Node
-// that [Node.At] or [Node.Nodes] scopes below the root is no document, so
-// v runs on it. A document that did not parse returns its syntax error.
+// null such as `--- null` and an alias without an anchor before it. A
+// Node that [Node.At] or [Node.Nodes] scopes below the root is not a
+// document, so v runs on it. A document that did not parse returns its
+// syntax error.
 //
 // SkipEmpty returns the errors of v as [ValidatorFunc.Check] returns the
-// errors of its function, and a nil v passes every Node. It takes one
+// errors of its function. A nil v passes every Node. SkipEmpty takes one
 // validator, so it wraps the one that [MultiValidator] or
 // [ChainValidator] makes of several.
 func SkipEmpty(v Validator) Validator {
@@ -1637,12 +1663,12 @@ func SkipEmpty(v Validator) Validator {
 // Each reports every failure in document order, as [MultiValidator]
 // reports the failures of its validators. It hands the warnings of v to
 // the [Warnings] collector of its context, bound at the Node that v
-// checked. A path that selects nothing passes, and so does a nil v, or
-// one that holds a nil pointer or func, without resolving the path. An
-// error from Node.Nodes comes back as Node.Nodes returns it, and a
-// document that did not parse returns its syntax error. A context that
-// ends stops the run, as the Cancellation section of the package
-// documentation describes.
+// checked. A path that does not select a Node passes. A nil v, or one that
+// holds a nil pointer or func, also passes, and Each does not resolve the
+// path for it. An error from Node.Nodes comes back as Node.Nodes returns
+// it, and a document that did not parse returns its syntax error. A
+// context that ends stops the run, as the Cancellation section of the
+// package documentation describes.
 func Each(path paths.Path, v Validator) Validator {
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
 		if nilness.IsNil(v) {
@@ -1687,31 +1713,32 @@ func Each(path paths.Path, v Validator) Validator {
 //
 // Validate takes one validator, so a caller with several combines them
 // with [MultiValidator] or [ChainValidator], and [SkipEmpty] lets a
-// document with no content pass.
+// document without content pass.
 //
 // Validate binds what v returns through [Node.Bind], so an [*Error]
-// renders its location with its `@` paths read from the node. An error v
-// bound itself comes back as it is, unless it also holds a warning.
-// Validate hands the warnings of v to the [Warnings] collector of ctx, as
-// the Warnings section of the package documentation describes. A Node
-// from [Node.At] or [Node.Nodes] points an error with no location at its
-// own value. A validator that runs another on a Node of its choosing
-// calls Validate on that Node, because a call to Check returns the error
-// as the validator wrote it. [Each] runs a validator that way on every
-// Node a path selects, such as each element of a list.
+// renders its location with its `@` paths read from the node. An error
+// that v bound itself comes back as it is, unless it also holds a
+// warning. Validate hands the warnings of v to the [Warnings] collector of
+// ctx, as the Warnings section of the package documentation describes.
 //
-// A document that did not parse returns the syntax error [Node.Err]
+// A Node from [Node.At] or [Node.Nodes] points an error without a
+// location at its own value. A validator that runs another on a Node of
+// its choosing calls Validate on that Node, because a call to Check
+// returns the error as the validator wrote it. [Each] runs a validator
+// that way on every Node a path selects, such as each element of a list.
+//
+// A document that did not parse returns the syntax error that [Node.Err]
 // returns before v runs, even when v is nil. Otherwise a nil v, or one
-// that holds a nil pointer or func, runs nothing and passes, and so does
-// a validator that returns a nil [*Error] or [*SourceError] pointer.
+// that holds a nil pointer or func, passes without running. A validator
+// that returns a nil [*Error] or [*SourceError] pointer passes too.
 func (n *Node) Validate(ctx context.Context, v Validator) error {
 	return n.validate(ctx, []Validator{v})
 }
 
 // validate runs validators in order on n, and binds the first error with
 // n when the validator left it unbound. A document that did not parse
-// returns its syntax error, and no validator runs. The warnings of the
-// validators go to the collectors of ctx.
+// returns its syntax error, and validate does not run a validator. The
+// warnings of the validators go to the collectors of ctx.
 func (n *Node) validate(ctx context.Context, validators []Validator) error {
 	if n.doc.err != nil {
 		return n.doc.err
@@ -1741,11 +1768,11 @@ func (n *Node) firstFailure(ctx context.Context, validators []Validator) error {
 	return nil
 }
 
-// checkWith runs check on n, as [runHook] runs a hook, and returns the
-// errors of its result as [splitWarnings] splits them, or nil when the
-// result holds none. The warnings of the result, and those that check
-// hands to its context, go to the collectors of ctx, bound as [Node.Bind]
-// binds them.
+// checkWith runs check on n, as [runHook] runs a hook. It returns the
+// errors of the result as [splitWarnings] splits them, or nil when the
+// result does not hold such an error. The collectors of ctx get the
+// warnings of the result and the warnings that check hands to its
+// context, bound as [Node.Bind] binds them.
 func (n *Node) checkWith(ctx context.Context, check func(context.Context, *Node) error) error {
 	failure, warnings := runHook(ctx, func(ctx context.Context) error {
 		return check(ctx, n)

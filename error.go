@@ -27,85 +27,84 @@ import (
 )
 
 var (
-	// ErrNoLocation indicates a path resolves to a token that carries no
-	// position. [Node.Ranges] returns it, and [SourceError.Unresolved]
+	// ErrNoLocation indicates that a path resolves to a token that does not
+	// carry a position. [Node.Ranges] returns it, and [SourceError.Unresolved]
 	// reports it for an error bound at such a path.
 	ErrNoLocation = errors.New("no location provided")
 
 	// ErrMultipleDocuments indicates a [Source] that holds more than one YAML
-	// document where one was expected, among the documents
-	// [Source.Documents] returns. [Source.Document] returns it, located at
-	// the second of them. The document is at fault for it, as [IsInvalid]
+	// document where a caller expects one. The count covers the documents
+	// [Source.Documents] returns. [Source.Document] returns it, located at the
+	// second of them. The document is at fault for it, as [IsInvalid]
 	// describes.
 	ErrMultipleDocuments = errors.New("multiple documents in source")
 
-	// ErrDecodeTarget indicates the value given to [Node.DecodeInto] or
-	// [Node.DecodeIfPresent] is not a non-nil pointer, so there is nothing
-	// to decode into. The error comes back bound to the source as a
-	// [SourceError] with no location. It is a mistake of the caller, so
-	// [IsInvalid] does not report it.
+	// ErrDecodeTarget indicates that the value given to [Node.DecodeInto] or
+	// [Node.DecodeIfPresent] is nil, a nil pointer, or not a pointer, so the
+	// decode cannot write into it. The call returns the error bound to the
+	// source as a [SourceError] with no location. It is a mistake of the
+	// caller, so [IsInvalid] does not report it.
 	ErrDecodeTarget = errors.New("decode target is not a non-nil pointer")
 
-	// ErrSelfValidateTarget indicates the value given to
-	// [Node.SelfValidate], [Source.SelfValidate], or [SelfValidateValue]
-	// is nil or a nil pointer, so there is nothing to validate. The error
-	// comes back bound to the source as a [SourceError] with no location,
-	// and SelfValidateValue binds it to no document. It is a mistake of the
-	// caller, so [IsInvalid] does not report it.
+	// ErrSelfValidateTarget indicates that the value given to
+	// [Node.SelfValidate], [Source.SelfValidate], or [SelfValidateValue] is
+	// nil or a nil pointer, so the call does not have a value to validate.
+	// Node.SelfValidate and Source.SelfValidate return the error bound to the
+	// source as a [SourceError] with no location. SelfValidateValue binds it
+	// with [BindValue], outside any document. It is a mistake of the caller,
+	// so [IsInvalid] does not report it.
 	ErrSelfValidateTarget = errors.New("self-validation target is nil")
 
-	// ErrDecode indicates that the go-yaml decoder did not decode a node
-	// into its target. [Node.Decode] and [Node.DecodeInto] return it, and
-	// so does a [Validator] that decodes the node it checks, as a
+	// ErrDecode indicates that the go-yaml decoder did not decode a node into
+	// its target. [Node.Decode] and [Node.DecodeInto] return it, and so does a
+	// [Validator] that decodes the node it checks, as a
 	// [go.jacobcolvin.com/niceyaml/schema.Schema] does. These errors match:
 	//
-	//   - A value the decoder rejects, such as one of the wrong kind, a
-	//     number that overflows its type, an alias with no anchor, or a
-	//     field the target lacks under [WithDisallowUnknownFields].
-	//   - The error a value's own UnmarshalYAML or UnmarshalText returns,
-	//     which stays in the chain, unless it holds an Error from
-	//     [Unchecked].
-	//   - The error for a target type whose definition the decoder
-	//     refuses, such as a struct with two fields of one name.
+	//   - A value the decoder rejects, such as one of the wrong kind, a number
+	//     that overflows its type, an alias with no anchor, or a field the
+	//     target lacks under [WithDisallowUnknownFields].
+	//   - The error that a value's own UnmarshalYAML or UnmarshalText method
+	//     returns, unless it holds an Error from [Unchecked]. That error stays
+	//     in the chain.
+	//   - The error for a target type whose definition the decoder refuses,
+	//     such as a struct with two fields of one name.
 	//
 	// The error of a context that ended does not match, even when an
-	// unmarshaler wraps it. Neither does a [PanicError], [ErrDecodeTarget],
-	// or [ErrExcessiveAliasing]. An error from [Unchecked] that an
-	// unmarshaler or a [CustomUnmarshaler] function returns does not match
-	// either. Neither does an error that a [Validator], a
-	// [SelfValidator], or a function from [WithValueCheck] reports about
-	// the value it checks.
+	// unmarshaler wraps it. Neither does a [PanicError], [ErrDecodeTarget], or
+	// [ErrExcessiveAliasing]. An error from [Unchecked] that an unmarshaler or
+	// a [CustomUnmarshaler] function returns does not match either. Neither
+	// does an error that a [Validator], a [SelfValidator], or a function from
+	// [WithValueCheck] reports about the value it checks.
+	//
 	// Text the parser rejects matches [ErrSyntax] instead. [ErrUnknownField],
 	// [ErrWrongKind], and [ErrOverflow] label some of the rejections, and a
-	// problem with a label matches ErrDecode too. The document is at fault
-	// for each problem that matches, as [IsInvalid] describes, and the
-	// Decoding section of the package documentation describes where each
-	// error binds.
+	// problem with a label matches ErrDecode too. The document is at fault for
+	// each problem that matches, as [IsInvalid] describes. The Decoding
+	// section of the package documentation describes where each error binds.
 	//
-	// [errors.Is] reports whether any problem of an error matches
-	// ErrDecode, so an error that matches can hold a problem of another
-	// kind beside it. A detail from [WithDetails] is no problem, so an
-	// error that names a decode error only among its details does not
-	// match.
+	// [errors.Is] reports whether any problem of an error matches ErrDecode,
+	// so an error that matches can hold a problem of another kind beside it. A
+	// detail from [WithDetails] is not a problem, so an error that names a
+	// decode error only among its details does not match.
 	ErrDecode = errors.New("value does not decode")
 
-	// ErrUnknownField indicates a mapping key that no field of the target
-	// struct reads, which a decode rejects under
+	// ErrUnknownField indicates a mapping key that does not match any field of
+	// the target struct. A decode rejects such a key under
 	// [WithDisallowUnknownFields]. The problem reads `unknown field
 	// "replicsa"` and carries the path of the key.
 	//
-	// ErrUnknownField, [ErrWrongKind], and [ErrOverflow] each label some
-	// of the problems that match [ErrDecode], and a problem with a label
-	// matches ErrDecode too. A label follows the message the decode writes,
-	// not the go-yaml error behind it. A problem that keeps the text of
-	// go-yaml or of an unmarshaler matches no label, such as an alias with
-	// no anchor or text that does not parse as a [time.Duration]. A
-	// [CustomUnmarshaler] function that returns or wraps the rejection of
-	// its decode function keeps the label of that rejection.
+	// ErrUnknownField, [ErrWrongKind], and [ErrOverflow] each label some of
+	// the problems that match [ErrDecode], and a problem with a label matches
+	// ErrDecode too. A label follows the message the decode writes, not the
+	// go-yaml error behind it. A problem that keeps the text of go-yaml or of
+	// an unmarshaler does not match any label. An alias with no anchor and
+	// text that does not parse as a [time.Duration] are such problems. A
+	// [CustomUnmarshaler] function that returns or wraps the rejection of its
+	// decode function keeps the label of that rejection.
 	//
-	// [errors.Is] reports whether any problem of an error matches a
-	// label, so a caller that sorts the problems of a decode tests the Err
-	// of each node [Problems] yields, with ErrDecode last:
+	// [errors.Is] reports whether any problem of an error matches a label. A
+	// caller that sorts the problems of a decode thus tests the Err of each
+	// node [Problems] yields, with ErrDecode last:
 	//
 	//	for problem := range niceyaml.Problems(err) {
 	//		switch {
@@ -133,129 +132,129 @@ var (
 	// integer type matches [ErrOverflow] instead.
 	ErrWrongKind = errors.New("value of the wrong kind")
 
-	// ErrOverflow indicates a number outside the range of the integer
-	// type that reads it, such as 300 for an int8. The problem reads
-	// "expected integer from -128 to 127, got 300". An infinity for an
-	// integer matches too. A float field reports no overflow, so `1e400`
-	// there reads "expected float, got string" and matches [ErrWrongKind].
+	// ErrOverflow indicates a number outside the range of the integer type
+	// that reads it, such as 300 for an int8. The problem reads "expected
+	// integer from -128 to 127, got 300". An infinity for an integer matches
+	// too. A float field does not report an overflow, so `1e400` there reads
+	// "expected float, got string" and matches [ErrWrongKind].
 	//
 	// ErrOverflow is a label on a problem that matches [ErrDecode], as
-	// [ErrUnknownField] describes. [ErrOutOfRange] is for a location
-	// outside the source and says nothing of a number.
+	// [ErrUnknownField] describes. [ErrOutOfRange] is about a location outside
+	// the source, not about a number.
 	ErrOverflow = errors.New("number outside the range of its type")
 
 	// ErrExcessiveAliasing indicates a node whose document holds so many
-	// nested aliases that a decode would read far more than the document
-	// holds, which can take the go-yaml decoder minutes on a few hundred
-	// bytes. [Node.Decode] and [Node.DecodeInto] refuse to decode a node
-	// that holds an alias when the aliases of its document go past the
-	// limit gopkg.in/yaml.v3 applies. A [Validator] that decodes the node
-	// it checks returns the same error, as a
-	// [go.jacobcolvin.com/niceyaml/schema.Schema] does. [WithAliasLimit]
-	// on the [Source] turns the limit off for every one of them. The error
-	// comes back bound as a [SourceError] at the first token of the node
-	// that is not a comment. The document is at fault for it, as
+	// nested aliases that decoding the node reads far more than the document
+	// holds. The go-yaml decoder can take minutes on such a document of a few
+	// hundred bytes.
+	//
+	// [Node.Decode] and [Node.DecodeInto] refuse to decode a node that holds
+	// an alias when the aliases of its document exceed the limit that
+	// gopkg.in/yaml.v3 applies. A [Validator] that decodes the node it checks
+	// returns the same error, as a [go.jacobcolvin.com/niceyaml/schema.Schema]
+	// does. [WithAliasLimit] on the [Source] disables the limit for each of
+	// them. Each returns the error bound as a [SourceError] at the first token
+	// of the node that is not a comment. The document is at fault for it, as
 	// [IsInvalid] describes, and it does not match [ErrDecode].
 	//
-	// A decode into a type that reads text and [NewSourceFromLayers] also
-	// fail when the aliases of a document repeat more text than the byte
-	// limit of the Source allows. They fail as well when the aliases nest
-	// the document past its depth limit. That error matches [ErrLimit] too,
-	// and it binds at the alias that takes the text past the bound, as
-	// ErrLimit describes. WithAliasLimit turns off those bounds with the
-	// limit.
+	// A decode into a type that reads text and [NewSourceFromLayers] also fail
+	// when the aliases of a document repeat more text than the byte limit of
+	// the Source allows. They fail as well when the aliases nest the document
+	// past its depth limit. Either error matches [ErrLimit] too, and it binds
+	// at the alias that takes the text past the bound, as ErrLimit describes.
+	// WithAliasLimit disables those bounds along with the limit.
 	//
 	// [Node.Nodes] returns ErrExcessiveAliasing too, bound to its receiver
-	// with no location, when aliases lead a selector of the path to far
-	// more nodes than the document holds. IsInvalid does not report that
-	// error, and WithAliasLimit leaves that limit on. The paths and schema
+	// with no location, when aliases lead a selector of the path to far more
+	// nodes than the document holds. IsInvalid does not report that error, and
+	// WithAliasLimit does not disable that limit. The paths and schema
 	// packages export the same error value.
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// ErrSyntax indicates text the go-yaml parser rejects, such as a flow
-	// sequence with no closing bracket, a tab that indents a key, or a key
-	// a mapping holds twice without [WithAllowDuplicateKeys]. Every error
-	// the parser returns matches it. [Source.File] and [Source.Document]
-	// return it, and [Node.Err] returns it for a document that did not
-	// parse, among the documents [Source.Documents] returns. When a
-	// reference document from [WithReferences] does not parse, every
-	// decode of a Source that reads it returns the error of that document.
+	// sequence with no closing bracket, a tab that indents a key, or a key a
+	// mapping holds twice without [WithAllowDuplicateKeys]. Every error the
+	// parser returns matches it. [Source.File] and [Source.Document] return
+	// it, and [Node.Err] returns it for each document that did not parse among
+	// the documents [Source.Documents] returns. When a reference document from
+	// [WithReferences] does not parse, every decode of a Source that reads it
+	// returns the error of that document.
 	//
-	// Each error comes back bound as a [SourceError] at the offending
-	// token. The error of a file with several such documents is a join,
-	// which matches through each of them. [errors.As] still finds the
-	// go-yaml error, which no error of the chain unwraps to. The document
-	// is at fault for each problem the parse reports with ErrSyntax, as
+	// Each of these calls returns the error bound as a [SourceError] at the
+	// offending token. The error of a file with several such documents is a
+	// join, which matches through each of them. [errors.As] still finds the
+	// go-yaml error, although the chain does not unwrap to it. The document is
+	// at fault for each problem the parse reports with ErrSyntax, as
 	// [IsInvalid] describes.
 	//
-	// A panic in the parser does not match, such as one on a token with
-	// no position that [NewSourceFromTokens] received. It comes back from
-	// the same calls as a [PanicError], bound at the first token with a
-	// position among the ones the parser was reading.
+	// A panic in the parser does not match. A token without a position that
+	// [NewSourceFromTokens] received can cause such a panic. The same calls
+	// return the panic as a [PanicError], bound at the first token with a
+	// position among the tokens the parser was reading.
 	//
-	// [errors.Is] reports whether any problem of an error matches
-	// ErrSyntax, so an error that matches can hold a problem of another
-	// kind beside it. A detail from [WithDetails] is no problem, so an
-	// error that names a syntax error only among its details does not
-	// match.
+	// [errors.Is] reports whether any problem of an error matches ErrSyntax,
+	// so an error that matches can hold a problem of another kind beside it. A
+	// detail from [WithDetails] is not a problem, so an error that names a
+	// syntax error only among its details does not match.
 	ErrSyntax = errors.New("invalid YAML syntax")
 
-	// ErrOutOfRange indicates the error's location lies outside the source.
-	// The location starts on a line past the last or before the first,
-	// which happens when a position or range came from other text, or at a
-	// column before the first. [SourceError.Unresolved] reports it. A
-	// number outside the range of its integer type matches [ErrOverflow]
+	// ErrOutOfRange indicates that the location of an error lies outside the
+	// source. The location starts on a line past the last or before the first,
+	// or at a column before the first. A position or a range that came from
+	// other text can start on such a line. [SourceError.Unresolved] reports
+	// it. A number outside the range of its integer type matches [ErrOverflow]
 	// instead.
 	ErrOutOfRange = errors.New("location outside source")
 
 	// ErrPathNeedsDocument indicates that [Source.Bind] bound an error that
-	// carries a path in a source that holds no single document to resolve
-	// the path in. It wraps the reason [Source.Document] gives:
+	// carries a path in a source that does not hold a single document to
+	// resolve the path in. It wraps the reason [Source.Document] gives:
 	// [ErrMultipleDocuments], or the error the file fails to parse with.
 	// [SourceError.Unresolved] reports it. Bind such an error through
-	// [Node.Bind] with the document the check ran against. Node.Bind
-	// reports it too for a path bound through a document that did not
-	// parse, where it wraps the syntax error [Node.Err] returns.
+	// [Node.Bind] with the document the check ran against. Node.Bind reports
+	// it too for a path bound through a document that did not parse, where it
+	// wraps the syntax error [Node.Err] returns.
 	ErrPathNeedsDocument = errors.New("path needs a document to resolve in")
 
-	// ErrAmbiguousPath indicates a path that names the entries of more
-	// than one key of a decoded map. Keys of different types that the
-	// document spells with one text, such as 1 and "1" in a map[any]T,
-	// share one path, and so do several NaN keys. Such a path resolves to
-	// the document entry of one of them at most. A decode binds the
-	// errors a [SelfValidator] reports under such a path with no
-	// position, so none points at the line of another entry.
-	// [SourceError.Unresolved] reports it. An error below a slice, an
-	// array, or a map that decodes itself binds at that value instead, as
-	// the Validation section of the package documentation describes.
+	// ErrAmbiguousPath indicates a path that names the entries of more than
+	// one key of a decoded map. Keys of different types that the document
+	// spells with one text share one path, such as 1 and "1" in a map[any]T.
+	// Several NaN keys share one path too. Such a path resolves to the
+	// document entry of one of them at most. A decode binds the errors a
+	// [SelfValidator] reports under such a path without a position. Those
+	// errors thus do not point at the line of another entry.
+	// [SourceError.Unresolved] reports it.
+	//
+	// An error below a slice, an array, or a map that decodes itself binds at
+	// that value instead, as the Validation section of the package
+	// documentation describes.
 	ErrAmbiguousPath = errors.New("path names the entries of several keys")
 
 	// ErrLimit indicates a text past a limit of its [Source]. A file that
-	// holds more bytes than [WithByteLimit] allows fails as a file that
-	// does not read. A document that nests more levels than
-	// [WithDepthLimit] allows fails as a document that does not parse.
-	// The document is at fault for each, as [IsInvalid] describes.
+	// holds more bytes than [WithByteLimit] allows fails as a file that does
+	// not read. A document that nests more levels than [WithDepthLimit] allows
+	// fails as a document that does not parse. The document is at fault for
+	// each, as [IsInvalid] describes.
 	//
-	// The same limits set bounds on the text that the aliases of a
-	// document write out, for a decode into a type that reads text and for
-	// [NewSourceFromLayers]. A node that holds an alias fails such a
-	// decode or merge when the aliases of its document repeat more text
-	// than the byte limit allows. It also fails when they nest the
-	// document more levels than the depth limit allows. Either error also
-	// matches [ErrExcessiveAliasing] and binds at the first alias that
-	// takes the text past the bound, as in "aliases repeat more than 256
-	// KiB of text". The Limits section of the package documentation
-	// describes the bounds.
+	// The same limits bound the text that the aliases of a document expand to,
+	// for a decode into a type that reads text and for [NewSourceFromLayers].
+	// A node that holds an alias fails such a decode or merge when the aliases
+	// of its document repeat more text than the byte limit allows. It also
+	// fails when they nest the document more levels than the depth limit
+	// allows. Either error also matches [ErrExcessiveAliasing] and binds at
+	// the first alias that takes the text past the bound, as in "aliases
+	// repeat more than 256 KiB of text". The Limits section of the package
+	// documentation describes the bounds.
 	//
 	// The error of a schema past its load limit, as
-	// [go.jacobcolvin.com/niceyaml/schema.WithLoadLimit] describes,
-	// matches ErrLimit too. So does the error of a schema catalog past its
-	// limit. The schema or the catalog is at fault for that error, not the
-	// document, so IsInvalid reports false for it.
+	// [go.jacobcolvin.com/niceyaml/schema.WithLoadLimit] describes, matches
+	// ErrLimit too. So does the error of a schema catalog past its limit. The
+	// schema or the catalog is at fault for that error, not the document, so
+	// IsInvalid reports false for it.
 	ErrLimit = fault.ErrLimit
 
-	// The reason of a [SourceError] whose error carries no location at
-	// all, which is not a failure to resolve one, so
+	// The reason of a [SourceError] whose error does not carry a location. A
+	// missing location is not a failure to resolve one, so
 	// [SourceError.Unresolved] reports nil for it.
 	errUnlocated = errors.New("no location")
 
@@ -264,8 +263,8 @@ var (
 	// the schema package matches the same value.
 	errInvalid = fault.ErrInvalid
 
-	// The empty source [BindValue] binds to, so an error bound to it reads
-	// as its path and its message. Every call shares it, since it never
+	// The empty source [BindValue] binds to, so an error bound to it reads as
+	// its path and its message. Every call shares it, because it never
 	// changes.
 	valueSource = sync.OnceValue(func() *Source {
 		return NewSourceFromString("")
@@ -276,27 +275,27 @@ var (
 	panicRefused = []error{ErrDecode, ErrUnknownField, ErrWrongKind, ErrOverflow, ErrSyntax, errInvalid}
 )
 
-// Error is an error that points at a location in a YAML document: a path
-// to the value the error is about, a position or a range of the
-// characters at fault, or a path with either. An Error holds what a check
-// knows and no source, so a validator builds one from a path alone.
-// Binding the Error through a [Node] resolves the location and produces a
-// [*SourceError], which puts the position and the path in front of the
-// message. [Error.Error] returns the message alone.
+// Error is an error that points at a location in a YAML document. The
+// location is a path to the value the error is about, a position or a range
+// of the characters at fault, or a path with either. An Error holds what a
+// check knows but not a source, so a validator builds one from a path
+// alone. Binding the Error through a [Node] resolves the location and
+// produces a [*SourceError], which puts the position and the path in front
+// of the message. [Error.Error] returns the message alone.
 //
 // An Error is one problem. [WithDetails] adds the errors that explain it,
-// and [NewSummary] heads several problems with one message. The
-// constructor says whether the document is at fault for the Error, as
-// [IsInvalid] describes. The Errors section of the package documentation
-// describes these roles, the locations, and the faults.
+// and [NewSummary] heads several problems with one message. The constructor
+// says whether the document is at fault for the Error, as [IsInvalid]
+// describes. The Errors section of the package documentation describes
+// these roles, the locations, and the faults.
 //
 // [errors.Is] and [errors.As] search the error an Error wraps and each
-// problem a summary heads, as [Error.Unwrap] returns them, and pass over
-// the details. An Error is immutable once created, and [Error.With]
+// problem a summary heads, as [Error.Unwrap] returns them, and skip the
+// details. An Error never changes after its creation, and [Error.With]
 // returns a copy with more options applied.
 //
-// Create instances with [NewError], [Invalid], [Unchecked], [Locate],
-// or [NewSummary].
+// Create instances with [NewError], [Invalid], [Unchecked], [Locate], or
+// [NewSummary].
 type Error struct {
 	err    error
 	move   *move
@@ -317,7 +316,8 @@ type Error struct {
 type declaration uint8
 
 const (
-	// The Error declares nothing, as one from [Rebase] or [Locate] does.
+	// Like an Error from [Rebase] or [Locate], the Error does not declare
+	// anything.
 	undeclared declaration = iota
 	// The Error comes from [Unchecked], so its check could not run. A
 	// fault that a hook presumes does not reach the error the Error wraps.
@@ -362,38 +362,39 @@ func (d declaration) under(x *Error) declaration {
 
 // move is how an [Error] from [Rebase] moves the paths below it.
 type move struct {
-	// The path the errors below write their `@` paths from, since a path
-	// with no selectors is a base like any other.
+	// The path that the errors below write their `@` paths from. A path with
+	// no selectors is a base like any other.
 	base paths.Path
 	// Where a path below binds when the document does not hold it. Its
 	// paths read from the node that base reads from. The rebase of the
 	// self-validation walk sets it below a value that decodes itself.
 	fallback fallback
-	// The move shifts paths alone, as a detail takes the base of the
-	// problem it explains, so it points nothing at its base.
+	// Like the move of a detail, the move shifts paths alone and does not
+	// point an error at its base. A detail takes the base of the problem it
+	// explains.
 	movesOnly bool
-	// The move comes from a binding in a layer of a merged [Source], so
-	// its base stands in place of the root of a `$` path below it, where a
-	// Rebase leaves such a path as it is.
+	// The move comes from a binding in a layer of a merged [Source], so its
+	// base replaces the root of a `$` path below it. A Rebase leaves such a
+	// path as it is.
 	reroots bool
-	// The base names the entries of several keys of a decoded map, so it
-	// resolves in no document, and [SourceError.Unresolved] reports
+	// The base names the entries of several keys of a decoded map, so it does
+	// not resolve in any document. [SourceError.Unresolved] reports
 	// ErrAmbiguousPath for every error below.
 	ambiguous bool
 }
 
 // NewError creates a new [*Error] with the given message. The Error is a
-// problem the document is at fault for, so [IsInvalid] reports it.
-// Use [Invalid] instead to declare the document at fault for an existing
-// error.
+// problem the document is at fault for, so [IsInvalid] reports it. Use
+// [Invalid] instead to declare the document at fault for an existing error.
 //
-// An Error may carry a location and no message, as a detail that marks a
-// related location does. Such an Error comes from an empty message:
+// An Error can carry a location without a message, as a detail that marks a
+// related location does. NewError builds such an Error from an empty
+// message:
 //
 //	niceyaml.NewError("", niceyaml.AtPath(firstUse))
 //
 // Its binding names the position and the path alone, and an excerpt marks
-// the location with a caret run and no text beside it.
+// the location with a caret run alone.
 func NewError(msg string, opts ...ErrorOption) *Error {
 	e := wrapUndeclared(errors.New(msg), opts...)
 	e.fault = declared
@@ -403,33 +404,34 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 
 // Invalid creates a new [*Error] that wraps err and declares the document
 // at fault for it, so [IsInvalid] reports it. The document is at fault for
-// each problem the Error heads too, such as each branch of a join it
-// wraps, bound or not. An err that matches [context.Canceled] or
+// each problem the Error heads too, such as each branch of a join it wraps,
+// bound or not. An err that matches [context.Canceled] or
 // [context.DeadlineExceeded], or a join with such a branch, gets the
-// options and no declaration, since that error is about the call. A
-// detail of err decides nothing. Use [NewError] instead to create an
-// error from a message, [Unchecked] to declare that a check could not
-// run, and [Locate] to add a location and declare nothing.
+// options but not the declaration. Such an error is about the call, not the
+// document. A detail of err does not decide the fault. Use [NewError]
+// instead to create an error from a message, [Unchecked] to declare that a
+// check could not run, and [Locate] to add a location without a
+// declaration.
 //
 // Invalid returns nil for a nil err, and for a nil [*Error] or
-// [*SourceError] pointer, whatever the options. It returns an error
-// rather than an [*Error], so the nil compares equal to nil wherever it
-// goes, and a validator returns the result as it is:
+// [*SourceError] pointer, whatever the options. It returns an error rather
+// than an [*Error], so the nil compares equal to nil wherever it goes. A
+// validator thus returns the result as it is:
 //
 //	return niceyaml.Invalid(spec.Check())
 //
-// An err that is a join stays a list of problems, and the options give
-// their location to each problem of the join that carries none of its
-// own. A problem with a location of its own keeps it, so the first
-// problem here binds at sizePath and the second at namePath:
+// An err that is a join stays a list of problems. The options give their
+// location to each problem of the join that does not carry one of its own.
+// A problem with a location of its own keeps it, so the first problem here
+// binds at sizePath and the second at namePath:
 //
 //	return niceyaml.Invalid(errors.Join(
 //		errors.New("too big"),
 //		niceyaml.NewError("name is taken", niceyaml.AtPath(namePath)),
 //	), niceyaml.AtPath(sizePath))
 //
-// The join has no line of its own, so the location shows only on the
-// lines of the problems that take it. The Errors section of the package
+// The join does not have a line of its own, so the location shows only on
+// the lines of the problems that take it. The Errors section of the package
 // documentation describes a location on a heading.
 func Invalid(err error, opts ...ErrorOption) error {
 	if isNothing(err) {
@@ -446,36 +448,38 @@ func Invalid(err error, opts ...ErrorOption) error {
 
 // Unchecked creates a new [*Error] that wraps err, gives it the location
 // and the details of the options, and declares that the check could not
-// run. A check whose I/O fails returns its error this way, at the value
-// it read:
+// run. A check whose I/O fails returns its error this way, at the value it
+// read:
 //
 //	return niceyaml.Unchecked(fmt.Errorf("stat license: %w", err),
 //		niceyaml.AtRange(licenseRange), niceyaml.WithDetails(why))
 //
 // The result binds and prints as one from [Invalid] with the same options
-// does. Unchecked declares no fault, so [IsInvalid] reports the result
-// only when it reports err. An err the document is at fault for through
-// its own chain, such as an Error from [NewError] or a decode rejection,
-// stays a fault inside Unchecked. An Unchecked inside Invalid is a fault
-// too.
+// does. Unchecked does not declare a fault, so [IsInvalid] reports the
+// result only when it reports err. An err the document is at fault for
+// through its own chain, such as an Error from [NewError] or a decode
+// rejection, stays a fault inside Unchecked. An Unchecked inside Invalid is
+// a fault too.
 //
-// A hook presumes the document at fault for an error it returns that
-// declares nothing, as the Errors section of the package documentation
-// describes. An Error from Unchecked on the cause chain of the error
-// turns that presumption off. An I/O error that a Validate method, a
-// function from [WithValueCheck], or an unmarshaler wraps in Unchecked is
-// thus no fault, and one from an unmarshaler does not match [ErrDecode].
-// An Unchecked around a join turns the presumption off for each branch it
-// heads, and a branch that declares a fault itself stays one. An
-// Unchecked in one branch of a join, or of a wrapper that [fmt.Errorf]
-// builds with several %w verbs and that heads several problems, turns the
-// presumption off for that branch alone.
+// A hook presumes the document at fault for an error that it returns and
+// that does not declare anything, as the Errors section of the package
+// documentation describes. An Error from Unchecked on the cause chain of
+// the error cancels that presumption. An I/O error that a Validate method,
+// a function from [WithValueCheck], or an unmarshaler wraps in Unchecked is
+// thus not a fault. Such an error from an unmarshaler does not match
+// [ErrDecode] either.
+//
+// An Unchecked around a join cancels the presumption for each branch it
+// heads. A branch that declares a fault itself stays a fault. An Unchecked
+// in one branch of a join cancels the presumption for that branch alone. So
+// does an Unchecked in one branch of a wrapper that [fmt.Errorf] builds
+// with several %w verbs and that heads several problems.
 //
 // Unchecked returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, whatever the options. It returns an error rather
 // than an [*Error] for the reason Invalid gives. An err that is a join
-// stays a list of problems, and the options give their location to each
-// problem of the join that carries none of its own, as Invalid describes.
+// stays a list of problems, as Invalid describes. The options give their
+// location to each problem of the join that does not carry one of its own.
 func Unchecked(err error, opts ...ErrorOption) error {
 	if isNothing(err) {
 		return nil
@@ -488,10 +492,10 @@ func Unchecked(err error, opts ...ErrorOption) error {
 }
 
 // Locate creates a new [*Error] that wraps err and gives it the location
-// and the details of the options. It declares nothing, so the fault stays
-// with err. A check that calls a helper adds the location of the value to
-// the error of the helper this way. The error keeps what the helper
-// declared:
+// and the details of the options. It does not declare anything, so the
+// fault stays with err. A check that calls a helper adds the location of
+// the value to the error of the helper this way. The error keeps what the
+// helper declared:
 //
 //	if err := checkName(cfg.Name); err != nil {
 //		return niceyaml.Locate(err, niceyaml.AtPath(paths.Current().Child("name")))
@@ -499,22 +503,22 @@ func Unchecked(err error, opts ...ErrorOption) error {
 //
 // With a location or details, the result binds and prints as one from
 // [Invalid] or [Unchecked] with the same options does. A result with
-// neither reads as err does in a wrapper with several %w verbs. One around
-// a plain error thus reads as a sentinel there.
+// neither reads as err does in a wrapper with several %w verbs. A result
+// around a plain error thus reads as a sentinel there.
 //
 // [IsInvalid] reports the result only when it reports err. A hook presumes
 // a fault for the result exactly when it presumes one for err, as the
-// Errors section of the package documentation describes. A plain I/O
-// error that a Validate method or a function from [WithValueCheck]
-// returns inside Locate is thus a fault. Such a check wraps the error in
-// Unchecked instead. A [Validator] declares its own faults, so a plain
-// error that it returns inside Locate is not a fault.
+// Errors section of the package documentation describes. A plain I/O error
+// that a Validate method or a function from [WithValueCheck] returns inside
+// Locate is thus a fault. Such a check should wrap the error in Unchecked
+// instead. A [Validator] declares its own faults, so a plain error that it
+// returns inside Locate is not a fault.
 //
 // Locate returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, whatever the options. It returns an error rather
 // than an [*Error] for the reason Invalid gives. An err that is a join
-// stays a list of problems, and the options give their location to each
-// problem of the join that carries none of its own, as Invalid describes.
+// stays a list of problems, as Invalid describes. The options give their
+// location to each problem of the join that does not carry one of its own.
 // To move the `@` paths of an error under the path of a value, use
 // [Rebase].
 func Locate(err error, opts ...ErrorOption) error {
@@ -526,11 +530,11 @@ func Locate(err error, opts ...ErrorOption) error {
 }
 
 // holdsUnchecked reports whether an [Error] from [Unchecked] sits on the
-// cause chain of err. The walk skips details and the problems a summary heads,
-// and it stops at a join, whose branches each answer for themselves. A
-// wrapper with several %w verbs that heads several problems stops the
-// walk as a join does, and one with a single problem among its branches
-// goes on through that problem. An Error from Unchecked is always a
+// cause chain of err. The walk skips details and the problems a summary
+// heads, and it stops at a join, whose branches each answer for themselves.
+// A wrapper with several %w verbs that heads several problems stops the
+// walk as a join does. A wrapper with a single problem among its branches
+// continues through that problem. An Error from Unchecked is always a
 // problem, so the walk never drops one as a sentinel. Any other error with
 // several branches is one problem, so an Unchecked in any of its branches
 // counts.
@@ -571,9 +575,9 @@ func holdsUnchecked(err error) bool {
 }
 
 // wrapUndeclared returns an [*Error] around err with opts applied. The
-// Error does not match [errInvalid] itself, so it declares nothing about
-// err. [NewError], [Invalid], [Unchecked], and [Locate] build on it, and
-// a decode uses it to put a location on an error it rewrites.
+// Error does not match [errInvalid] itself, so it does not declare anything
+// about err. [NewError], [Invalid], [Unchecked], and [Locate] build on it,
+// and a decode uses it to put a location on an error it rewrites.
 func wrapUndeclared(err error, opts ...ErrorOption) *Error {
 	e := &Error{err: err}
 	for _, opt := range opts {
@@ -584,32 +588,32 @@ func wrapUndeclared(err error, opts ...ErrorOption) *Error {
 }
 
 // NewSummary creates a new summary of errs: an [*Error] whose message msg
-// heads several separate problems, such as "3 schema violations" above
-// one error per violation. The summary is a heading and never a problem
-// itself. [SourceError.Error] lists each of errs below the line of the
-// summary, [ErrorTree.Problems] yields each of them and never the
-// summary, and [FormatError] draws each as a branch.
+// heads several separate problems, such as "3 schema violations" above one
+// error per violation. The summary is a heading and never a problem itself.
+// [SourceError.Error] lists each of errs below the line of the summary.
+// [ErrorTree.Problems] yields each of them and never the summary, and
+// [FormatError] draws each as a branch.
 //
-// [Rebase] and a scoped [Node.Bind] give no location to a summary, and
-// they locate each of errs on its own, as they locate each branch of a
-// join. A validator's summary above violations with no location thus binds
-// each violation at the value it checked. A location that [Error.With]
-// puts on a summary stands in front of the line of the summary. Each of
-// errs that carries no location takes that location in place of the base
-// of a Rebase or a scoped Node.Bind.
+// [Rebase] and a scoped [Node.Bind] do not give a location to a summary.
+// They locate each of errs on its own, as they locate each branch of a
+// join. A validator's summary above violations without a location thus
+// binds each violation at the value it checked. A location that
+// [Error.With] puts on a summary stands in front of the line of the
+// summary. Each of errs that does not carry a location takes that location
+// in place of the base of a Rebase or a scoped Node.Bind.
 //
-// NewSummary skips a nil error in errs. With no error left it returns
-// nil, and with one it returns that error alone, since a heading such as
-// a count says nothing the one error does not. It returns an error rather
-// than an [*Error], as [errors.Join] does, so the nil compares equal to
-// nil wherever it goes. A validator therefore returns the result for any
-// number of violations:
+// NewSummary skips a nil error in errs. When errs is empty or holds only nil
+// errors, it returns nil. When one error is left, it returns that error
+// alone, because a heading such as a count does not add information to one
+// error. It returns an error rather than an [*Error], as [errors.Join] does,
+// so the nil compares equal to nil wherever it goes. A validator therefore
+// returns the result for any number of violations:
 //
 //	return niceyaml.NewSummary(fmt.Sprintf("%d violations", len(errs)), errs...)
 //
-// [errors.Join] lists several problems with no heading. An error built
-// with [WithDetails] is one problem, with the errors that explain it
-// below it.
+// [errors.Join] lists several problems without a heading. An error built
+// with [WithDetails] is one problem, with the errors that explain it below
+// it.
 func NewSummary(msg string, errs ...error) error {
 	var members []error
 
@@ -630,45 +634,46 @@ func NewSummary(msg string, errs ...error) error {
 }
 
 // Is reports whether target is the mark of a problem the document is at
-// fault for and the [Error] declares that fault. The module keeps the
-// mark internal, so the method matches no target a caller can name, and
-// a caller asks [IsInvalid] or [ErrorTree.IsInvalid] instead of
-// [errors.Is]. An Error from [NewError] or [Invalid] declares the
-// fault, with a location or without. So does the Error a decode puts
-// around an error that a [SelfValidator] or a function from
-// [WithValueCheck] returns, unless an Error from [Unchecked] sits on the
-// cause chain of that error. An Error from Unchecked, [Locate], or
-// [Rebase], a summary from [NewSummary], and the Error a scoped
-// [Node.Bind] puts around an error declare no fault. Neither does an Error
-// from Invalid around the error of a context that ended. Any other target
-// matches through the errors the Error wraps, as [Error.Unwrap] returns
-// them.
+// fault for and the [Error] declares that fault. The module keeps the mark
+// internal, so the method does not match any target that a caller can name.
+// A caller asks [IsInvalid] or [ErrorTree.IsInvalid] instead of
+// [errors.Is].
+//
+// An Error from [NewError] or [Invalid] declares the fault, with a location
+// or without. So does the Error a decode puts around an error that a
+// [SelfValidator] or a function from [WithValueCheck] returns, unless an
+// Error from [Unchecked] sits on the cause chain of that error. An Error
+// from Unchecked, [Locate], or [Rebase], a summary from [NewSummary], and
+// the Error a scoped [Node.Bind] puts around an error do not declare a
+// fault. Neither does an Error from Invalid around the error of a context
+// that ended. Any other target matches through the errors the Error wraps,
+// as [Error.Unwrap] returns them.
 func (e *Error) Is(target error) bool {
 	return target == errInvalid && e != nil && e.fault.invalid()
 }
 
-// IsInvalid reports whether the document is at fault for every problem
-// of err, the question a caller asks to pick a status code or an exit
-// code. The problems are the nodes [ErrorTree.Problems] yields for err,
-// so IsInvalid(err) and NewErrorTree(err).IsInvalid() agree. One problem
-// that is no fault makes IsInvalid report false for the whole error, and
-// a heading or a detail decides nothing. IsInvalid reports false for a
-// nil err too, and for an error with no problem, such as one with an
-// empty message.
+// IsInvalid reports whether the document is at fault for every problem of
+// err. A caller calls it to pick a status code or an exit code. The
+// problems are the nodes [ErrorTree.Problems] yields for err, so
+// IsInvalid(err) and NewErrorTree(err).IsInvalid() agree. One problem that
+// is not a fault makes IsInvalid report false for the whole error, and a
+// heading or a detail does not decide the result. IsInvalid reports false
+// for a nil err too, and for an error that does not hold a problem, such as
+// one with an empty message.
 //
-// A retry does not clear a fault of the document, so an error with a
-// problem of each kind fails again although IsInvalid reports false for
-// it. A caller that decides whether to retry asks [ErrorTree.IsInvalid]
-// of each problem instead.
+// A retry does not clear a fault of the document. An error with a problem
+// of each kind thus fails again, although IsInvalid reports false for it. A
+// caller that decides whether to retry asks [ErrorTree.IsInvalid] of each
+// problem instead.
 //
 // The code that builds an error declares the fault, as the Errors section
 // of the package documentation describes. Beside the errors that section
-// names, the document is at fault for [ErrMultipleDocuments], a value
-// that [Node.At] or [Node.Ranges] does not find, a schema violation, the
-// ErrNoMatch of a schema registry, and [ErrExcessiveAliasing] from every
-// reader but [Node.Nodes].
+// names, the document is at fault for [ErrMultipleDocuments] and for a
+// value that [Node.At] or [Node.Ranges] does not find. It is also at fault
+// for a schema violation, for the ErrNoMatch of a schema registry, and for
+// [ErrExcessiveAliasing] from every reader but [Node.Nodes].
 //
-// A server asks IsInvalid before it tests for a sentinel, since
+// A server asks IsInvalid before it tests for a sentinel, because
 // [errors.Is] reports whether any problem matches:
 //
 //	switch {
@@ -685,13 +690,13 @@ func IsInvalid(err error) bool {
 }
 
 // With returns a copy of the [Error] with the given options applied. The
-// receiver is unchanged, so an Error shared between callers can be
-// specialized per use:
+// receiver does not change, so each caller that shares an Error can
+// specialize a copy for its own use:
 //
 //	located := err.With(niceyaml.AtPath(namePath))
 //
 // A location on a summary from [NewSummary] reaches each problem it heads
-// that carries none, as NewSummary describes.
+// that does not carry one, as NewSummary describes.
 func (e *Error) With(opts ...ErrorOption) *Error {
 	if e == nil {
 		return nil
@@ -708,44 +713,46 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 	return &c
 }
 
-// Rebase returns err with base in front of every `@` path in its tree: on
-// the [*Error] that anchors it, on each problem a summary or a join heads,
-// and on each detail. A `$` path stays as it is, as [paths.Path.Join]
-// leaves it, and so does a position or a range. Each problem that carries
-// no location points at base itself, and a heading or a detail gains none.
-// A heading inside err that carries a location gives that location, in
-// place of base, to each problem below it that carries none. Rebases
-// compose, and a `$` base stops the bases above it from moving the paths
-// below it. The Errors section of the package documentation describes
-// rebasing.
+// Rebase returns err with base in front of every `@` path in its tree. The
+// paths it moves are those on the [*Error] that anchors err, on each
+// problem that a summary or a join heads, and on each detail. A `$` path
+// stays as it is, as [paths.Path.Join] leaves it, and so does a position or
+// a range.
 //
-// A check written for a type writes `@` paths from the value it checks.
-// A caller that runs it on a value inside a document rebases the result
-// under the path of that value before it binds the result:
+// Each problem that does not carry a location points at base itself, and a
+// heading or a detail does not gain a location. A heading inside err that
+// carries a location gives that location, in place of base, to each problem
+// below it that does not carry one. Rebases compose, and a `$` base stops
+// the bases above it from moving the paths below it. The Errors section of
+// the package documentation describes rebasing.
+//
+// A check written for a type writes `@` paths from the value it checks. A
+// caller that runs it on a value inside a document rebases the result under
+// the path of that value before it binds the result:
 //
 //	return doc.Bind(niceyaml.Rebase(checkHours(&cfg.Hours), paths.Doc().Child("hours")))
 //
-// A path names a map key as the document spells it, so a base built from
-// a decoded key can miss. The key 0x10 of a map[int]Server decodes to 16,
+// A path names a map key as the document spells it, so a base built from a
+// decoded key might miss. The key 0x10 of a map[int]Server decodes to 16,
 // and an error under `$.ports.16` then binds at the `ports:` key, as
 // [SourceError.Nearest] describes. A [DataLocator] finds an entry by its
 // decoded key.
 //
-// The result keeps the message of err, and [errors.Is] and [errors.As]
-// see through it, including through a join that Rebase rebuilds branch by
-// branch. Rebase declares nothing, so [IsInvalid] reports the result only
-// when it reports err. A nil err, or a nil [*Error] or [*SourceError]
-// pointer, returns nil. An error that is bound already comes back as it
-// is, except the result of [BindValue], which rebases as the error it was
-// made from.
+// The result keeps the message of err, and [errors.Is] and [errors.As] see
+// through it, including through a join that Rebase rebuilds branch by
+// branch. Rebase does not declare anything, so [IsInvalid] reports the
+// result only when it reports err. Rebase returns nil for a nil err, and
+// for a nil [*Error] or [*SourceError] pointer. It returns an error that is
+// bound already as it is, except the result of [BindValue], which it
+// rebases as the error that BindValue bound.
 func Rebase(err error, base paths.Path) error {
 	return rebase(err, move{base: base}, undeclared)
 }
 
 // rebase is [Rebase] with the paths of err moved as m moves them. Each
 // Error it builds declares d, as [declaration.on] puts d on the error it
-// wraps. A binding takes no base, and one that stands in no document
-// rebases as [placeable] returns.
+// wraps. A binding does not take a base, and one that does not stand in a
+// document rebases as [placeable] returns it.
 func rebase(err error, m move, d declaration) error {
 	if isNothing(err) {
 		return nil
@@ -784,11 +791,11 @@ func rebase(err error, m move, d declaration) error {
 	return &Error{err: err, move: &m, fault: d}
 }
 
-// markFault returns err with d on it, as [declaration.on] puts d on err.
-// An err whose own Error declares as much comes back as it is, and so
-// does one that d declares no fault for. Any other err comes back inside
-// an Error that adds only the mark, so it keeps its text, location, and
-// children, and [isBound] still reports it.
+// markFault returns err with d on it, as [declaration.on] puts d on err. An
+// err whose own Error declares as much stays as it is, and so does an err
+// that d does not declare a fault for. It wraps any other err in an Error
+// that adds only the mark. The result keeps the text, location, and
+// children of err, and [isBound] still reports it.
 func markFault(err error, d declaration) error {
 	if isNothing(err) {
 		return err
@@ -810,9 +817,9 @@ func markFault(err error, d declaration) error {
 // ErrorOption configures an [Error]. [NewError], [Invalid], [Unchecked],
 // [Locate], and [Error.With] take the same options. [AtPath] sets the path
 // of the Error. [AtPosition] or [AtRange] sets its position or range, and
-// the last of those two given wins. [WithDetails] adds the errors that
-// explain it. A [DataLocator] returns the options that locate an error by
-// the names of decoded data.
+// the last one given wins. [WithDetails] adds the errors that explain it. A
+// [DataLocator] returns the options that locate an error by the names of
+// decoded data.
 //
 // Available options:
 //   - [AtPath]
@@ -827,55 +834,57 @@ type ErrorOption func(*errorConfig)
 // takes it in place of the [Error] that embeds it, so only a constructor
 // and [Error.With] can apply one.
 type errorConfig struct {
-	// The position or the range: a position.Position or a position.Range,
-	// or nil when neither is set.
+	// The position or the range: a position.Position or a position.Range, or
+	// nil when no option sets either.
 	loc any
-	// The errors from WithDetails, which leave out the nil ones.
+	// The errors from WithDetails, without the nil ones.
 	details []error
-	// The path, when hasPath, since a path with no selectors is a path
-	// like any other.
+	// The path, when hasPath is true. A path with no selectors is a path like
+	// any other, so hasPath marks whether an option set a path.
 	path    paths.Path
 	hasPath bool
 }
 
-// AtPath is an [ErrorOption] that sets the YAML path of the value the
-// error is about. It replaces a path set before it. An `@` path resolves
-// from the [Node] that binds the Error and a `$` path from the root of the
-// document, as the Errors section of the package documentation describes.
+// AtPath is an [ErrorOption] that sets the YAML path of the value the error
+// is about. It replaces a path that an earlier option set. An `@` path
+// resolves from the [Node] that binds the Error and a `$` path from the
+// root of the document, as the Errors section of the package documentation
+// describes.
 //
-// The error points at the node the path selects, which for a mapping
-// entry is its value. A mapping or a sequence spans many lines, so an
-// error there points at the token that introduces it, as
-// [paths.Resolver.Token] describes. That token is the key of the entry
-// that holds it, or the "-" of its element in a block sequence. With
-// neither, it is the "{" or "[" of a flow collection, or the first key or
-// element of a block collection at the root. A path from [paths.Path.Key]
-// points at the key of the entry whatever its value holds, which suits an
-// error about the key itself:
+// The error points at the node the path selects, which for a mapping entry
+// is its value. A mapping or a sequence spans many lines, so an error there
+// points at the token that introduces it, as [paths.Resolver.Token]
+// describes. That token is the key of the entry that holds it, or the "-"
+// of its element in a block sequence. Without either, it is the "{" or "["
+// of a flow collection, or the first key or element of a block collection
+// at the root. A path from [paths.Path.Key] points at the key of the entry
+// whatever its value holds. Such a path suits an error about the key
+// itself:
 //
 //	niceyaml.NewError("unknown field", niceyaml.AtPath(paths.Current().Child("spec", "foo").Key()))
 //
-// A path the document leaves out, as a check for a required field names,
-// binds at the key of the mapping that lacks the value. A path that enters
-// an alias the document cannot follow binds at the alias, as
-// [SourceError.Nearest] describes. With [AtPosition] or [AtRange], the
-// error binds there instead, and the path names the value in the message
-// alone. [DataLocator.At] builds both from the names of decoded data.
+// A path that the document leaves out, such as the path a check for a
+// required field names, binds at the key of the mapping that lacks the
+// value. A path that enters an alias the document cannot follow binds at
+// the alias, as [SourceError.Nearest] describes. With [AtPosition] or
+// [AtRange], the error binds there instead, and the path names the value in
+// the message alone. [DataLocator.At] builds both from the names of decoded
+// data.
 func AtPath(p paths.Path) ErrorOption {
 	return func(c *errorConfig) {
 		c.path, c.hasPath = p, true
 	}
 }
 
-// AtPosition is an [ErrorOption] that sets the 0-indexed position where
-// the error occurred. It replaces a position or a range set before it. The
-// position is in the coordinates of the lines [Source.Lines] returns,
-// where line 0 is line 1 of the text. [SourceError.Excerpt] highlights
-// the content of the token at that position. A path from [AtPath] on the
-// same Error names the value in the message, and the position locates
-// the error. A producer that holds a go-yaml token converts it with
-// [position.NewFromToken], and one that holds none names the position on
-// its own.
+// AtPosition is an [ErrorOption] that sets the 0-indexed position where the
+// error occurred. It replaces a position or a range that an earlier option
+// set. The position is in the coordinates of the lines [Source.Lines]
+// returns, which count the first line of the text as 0.
+// [SourceError.Excerpt] highlights the content of the token at that
+// position. A path from [AtPath] on the same Error names the value in the
+// message, and the position locates the error. A producer that holds a
+// go-yaml token converts it with [position.NewFromToken], and one that does
+// not hold a token builds the position itself.
 func AtPosition(p position.Position) ErrorOption {
 	return func(c *errorConfig) {
 		c.loc = p
@@ -883,8 +892,8 @@ func AtPosition(p position.Position) ErrorOption {
 }
 
 // atToken returns an [ErrorOption] that sets the position of tk, or one
-// that sets nothing when tk or its position is nil, as the token of a
-// go-yaml error can be.
+// that does not set anything when tk or its position is nil. The token of a
+// go-yaml error, or its position, might be nil.
 func atToken(tk *token.Token) ErrorOption {
 	if tk == nil || tk.Position == nil {
 		return func(*errorConfig) {}
@@ -894,19 +903,21 @@ func atToken(tk *token.Token) ErrorOption {
 }
 
 // AtRange is an [ErrorOption] that sets the 0-indexed range the error
-// covers. It replaces a position or a range set before it. The range is in
-// the coordinates of the view [Source.Lines] returns, where line 0 is
-// line 1 of the text. [SourceError.Excerpt] highlights the whole range
-// rather than one token, so it is the option for a check that knows the
-// columns an error covers, such as one that runs on rendered lines. A
-// path from [AtPath] on the same Error names the value in the message,
-// and the range locates the error, so a check on the characters inside a
-// value names the value and highlights the characters:
+// covers. It replaces a position or a range that an earlier option set. The
+// range is in the coordinates of the lines [Source.Lines] returns, which
+// count the first line of the text as 0. [SourceError.Excerpt] highlights
+// the whole range rather than one token. AtRange thus suits a check that
+// knows the columns an error covers, such as one that runs on rendered
+// lines.
+//
+// A path from [AtPath] on the same Error names the value in the message,
+// and the range locates the error. A check on the characters inside a value
+// thus names the value and highlights the characters:
 //
 //	niceyaml.NewError("invalid character", niceyaml.AtPath(namePath), niceyaml.AtRange(charRange))
 //
-// A range that ends before its start covers nothing, so it binds as the
-// empty range at its start.
+// A range that ends before its start does not cover any text, so it binds
+// as the empty range at its start.
 func AtRange(r position.Range) ErrorOption {
 	return func(c *errorConfig) {
 		c.loc = r
@@ -920,22 +931,23 @@ func AtRange(r position.Range) ErrorOption {
 //	niceyaml.NewError("port 80 conflicts", niceyaml.AtPath(b),
 //		niceyaml.WithDetails(niceyaml.NewError("first declared here", niceyaml.AtPath(a))))
 //
-// The Error stays one problem, and a detail is never a problem of its
-// own. [ErrorTree.Problems] yields the Error once, with its details as the
-// Children of its node, and [SourceError.Error] leaves them out of its
-// message, while [FormatError] draws each as a branch. Binding binds each
-// detail at the location its own error carries, if any, and a detail that
-// is or wraps a [*SourceError] stays as it is, so it can point into
-// another file. [Rebase] and a scoped [Node.Bind] move the paths of a
-// detail and give it no location. A location on the Error or on a heading
-// above it does not reach a detail either. A join has no line of its own,
-// so the details that [Invalid], [Unchecked], or [Locate] put on a join
-// sit beside its problems.
+// The Error stays one problem, and a detail is never a problem of its own.
+// [ErrorTree.Problems] yields the Error once, with its details as the
+// Children of its node. [SourceError.Error] leaves the details out of its
+// message, but [FormatError] draws each as a branch.
 //
-// [errors.Is] and [errors.As] on the Error pass over its details, so a
-// sentinel that a detail wraps never matches for the problem it explains.
-// WithDetails skips a nil error. To report several separate problems,
-// join them with [errors.Join] or head them with [NewSummary].
+// Binding binds each detail at the location its own error carries, if it
+// carries one. A detail that is or wraps a [*SourceError] stays as it is,
+// so it can point into another file. [Rebase] and a scoped [Node.Bind] move
+// the paths of a detail but do not give it a location. A location on the
+// Error or on a heading above it does not reach a detail either. A join
+// does not have a line of its own, so the details that [Invalid],
+// [Unchecked], or [Locate] put on a join sit beside its problems.
+//
+// [errors.Is] and [errors.As] on the Error skip its details, so a sentinel
+// that a detail wraps never matches for the problem it explains.
+// WithDetails skips a nil error. To report several separate problems, join
+// them with [errors.Join] or head them with [NewSummary].
 func WithDetails(errs ...error) ErrorOption {
 	return func(c *errorConfig) {
 		for _, n := range errs {
@@ -946,14 +958,14 @@ func WithDetails(errs ...error) ErrorOption {
 	}
 }
 
-// Error returns the message of the error the [Error] wraps, with no
+// Error returns the message of the error the [Error] wraps, without a
 // location in it. A wrapper such as [fmt.Errorf] around the Error thus
-// holds the message alone, and the [SourceError] that binds the Error puts
-// the position and the path that [Error.Path] reports in front of the
-// whole text. The errors a summary heads and the details stay out of the
-// message too. An Error from [NewError] with an empty message, and a nil
-// Error, have no text. [FormatError] and [BindValue] put the path in front
-// of an Error that no binding holds.
+// holds the message alone. The [SourceError] that binds the Error puts the
+// position and the path that [Error.Path] reports in front of the whole
+// text. The errors a summary heads and the details stay out of the message
+// too. An Error from [NewError] with an empty message and a nil Error both
+// return an empty string. [FormatError] and [BindValue] put the path in
+// front of an Error that a binding does not hold.
 func (e *Error) Error() string {
 	if e == nil || e.err == nil {
 		return ""
@@ -964,14 +976,14 @@ func (e *Error) Error() string {
 
 // Format implements [fmt.Formatter].
 //
-// The %v and %s verbs print [Error.Error], which holds no location. The
-// %+v verb prints what [FormatError] renders for the error, its message
-// behind its path with the errors below it as a tree, with
-// [ErrorListLimit] problems at most and a last row that counts the rest.
-// The excerpt of a binding below the error takes the default options, or,
-// for a detached binding, the options [Detach] received. Every other verb
-// formats [Error.Error] as it formats a string, with the width,
-// precision, and flags given, so %q quotes the message.
+// The %v and %s verbs print [Error.Error], which does not hold a location.
+// The %+v verb prints what [FormatError] renders for the error: its message
+// behind its path, with the errors below it as a tree. The tree shows at
+// most [ErrorListLimit] problems and a last row that counts the rest. The
+// excerpt of a binding below the error takes the default options, or, for a
+// detached binding, the options [Detach] received. Every other verb formats
+// [Error.Error] as it formats a string, with the width, precision, and
+// flags given, so %q quotes the message.
 func (e *Error) Format(f fmt.State, verb rune) {
 	formatVerb(f, verb, e)
 }
@@ -979,17 +991,18 @@ func (e *Error) Format(f fmt.State, verb rune) {
 // LogValue implements [slog.LogValuer].
 //
 // The value is the tree [FormatError] prints for the error, as a string
-// with no source excerpt, with [ErrorListLimit] problems at most and a
-// last row that counts the rest. A wrapper such as [fmt.Errorf] around the
-// Error logs as its own message, which holds no path, so a program that
-// wants the path of any error logs [FormatError] as a string.
+// without a source excerpt. It shows at most [ErrorListLimit] problems and
+// a last row that counts the rest. A wrapper such as [fmt.Errorf] around
+// the Error logs as its own message, which does not hold a path. A program
+// that wants the path of any error thus logs the string FormatError
+// returns.
 func (e *Error) LogValue() slog.Value {
 	return logValue(e)
 }
 
-// locus is the location an [Error] carries: a path when hasPath, a
-// position or a range in loc, or both. An ambiguous path names entries of
-// several keys of a decoded map, so [locate] resolves it in no document.
+// locus is the location an [Error] carries: a path when hasPath, a position
+// or a range in loc, or both. An ambiguous path names entries of several
+// keys of a decoded map, so [locate] does not resolve it in any document.
 type locus struct {
 	loc       any
 	path      paths.Path
@@ -999,8 +1012,8 @@ type locus struct {
 }
 
 // rebase returns l with base joined in front of its path and its fallback
-// paths, as [paths.Path.Join] joins them. A locus with no path comes back
-// as it is, since a base moves paths alone.
+// paths, as [paths.Path.Join] joins them. It returns a locus without a path
+// unchanged, because a base moves paths alone.
 func (l locus) rebase(base paths.Path) locus {
 	if l.hasPath {
 		l.path = base.Join(l.path)
@@ -1012,14 +1025,15 @@ func (l locus) rebase(base paths.Path) locus {
 
 // fallback is where an error binds when the document does not hold its
 // path. The self-validation walk sets one below a value that decodes
-// itself, since the fields of such a value need not mirror the document.
+// itself, because the fields of such a value do not have to mirror the
+// document.
 type fallback struct {
 	// The paths of the values above the error that decode themselves, the
 	// nearest first. The error binds at the first one the document holds.
 	at []paths.Path
-	// The first of at is a slice, an array, or a map, whose elements no
-	// field tags place, so the error binds at the first of at the document
-	// holds even when the document holds its path.
+	// The first of at is a slice, an array, or a map, and field tags do not
+	// place its elements. The error thus binds at the first of at that the
+	// document holds, even when the document holds the path of the error.
 	only bool
 }
 
@@ -1040,9 +1054,9 @@ func (f fallback) rebase(base paths.Path) fallback {
 	return f
 }
 
-// then returns f followed by outer, the fallback of an [Error] above, once
-// the paths of both read from one node, since the values of f lie lower.
-// An outer that binds every error below it stands alone.
+// then returns f followed by outer, the fallback of an [Error] above, when
+// the paths of both read from one node. The values of f come first because
+// they lie lower. An outer that binds every error below it stands alone.
 func (f fallback) then(outer fallback) fallback {
 	if outer.only {
 		return outer
@@ -1058,8 +1072,9 @@ func (e *Error) locus() locus {
 }
 
 // apply returns l moved as m moves the errors below it. A rerooting base
-// replaces the `$` root, since it is where a layer holds the merged value.
-// An only fallback stands in for the path, so m alone sets ambiguous.
+// replaces the `$` root, because the base is where a layer holds the merged
+// value. An only fallback stands in for the path, so m alone sets
+// ambiguous.
 func (m *move) apply(l locus) locus {
 	l.ambiguous = l.ambiguous || m.ambiguous
 
@@ -1084,15 +1099,16 @@ func (m *move) apply(l locus) locus {
 	return l
 }
 
-// at returns the location an [Error] that moves paths as m does points a
-// problem with no location of its own at: its base.
+// at returns the location that an [Error] that moves paths as m does gives
+// each problem below it that does not carry a location of its own. That
+// location is the base of m, with the fallback and the ambiguous mark of m.
 func (m *move) at() locus {
 	return locus{path: m.base, hasPath: true, ambiguous: m.ambiguous, fallback: m.fallback}
 }
 
 // then returns the move of a child below m and then inner, with the bases,
 // fallbacks, and marks joined as [move.apply] joins them from below. A nil
-// inner moves nothing, and the result never reroots.
+// inner does not move anything, and the result never reroots.
 func (m *move) then(inner *move) *move {
 	if inner == nil {
 		return m
@@ -1121,8 +1137,8 @@ func (m *move) then(inner *move) *move {
 	return &joined
 }
 
-// addsNothing reports whether e adds nothing to the error it wraps, so e
-// has the text and the children of that error.
+// addsNothing reports whether e does not add anything to the error it
+// wraps, so e has the text and the children of that error.
 func (e *Error) addsNothing() bool {
 	return e != nil && e.move == nil && !e.hasLocation() && !e.nests()
 }
@@ -1140,16 +1156,16 @@ func (e *Error) hasLocation() bool {
 }
 
 // Unwrap returns the errors [errors.Is] and [errors.As] search: the error
-// the [Error] wraps, then each error a summary from [NewSummary] heads.
-// A match thus means that the problem matches, or a problem the summary
+// the [Error] wraps, then each error a summary from [NewSummary] heads. A
+// match thus means that the problem matches, or a problem the summary
 // heads.
 //
-// Unwrap leaves out the details from [WithDetails], which explain a
-// problem and are none themselves. A sentinel or a typed error that a
-// detail wraps thus never matches for the problem it explains. The
-// children with Detail set of the node of the Error in the tree
-// [NewErrorTree] builds are the details. A nil Error unwraps to nothing,
-// so a chain that holds one is safe to walk.
+// Unwrap leaves out the details from [WithDetails], which explain a problem
+// and are not problems themselves. A sentinel or a typed error that a
+// detail wraps thus never matches for the problem it explains. In the tree
+// that [NewErrorTree] builds, the details are the children of the node of
+// the Error that have Detail set. A nil Error does not unwrap to any error,
+// so a caller can safely walk a chain that holds one.
 func (e *Error) Unwrap() []error {
 	if e == nil || (e.err == nil && len(e.errors) == 0) {
 		return nil
@@ -1164,8 +1180,8 @@ func (e *Error) Unwrap() []error {
 }
 
 // location returns the locus of the nearest located Error along the chain
-// of e, as [anchorOf] finds it. A [*SourceError] there reports the locus
-// it bound, with no base from above, so e and its binding agree.
+// of e, as [anchorOf] finds it. A [*SourceError] there reports the locus it
+// bound, without a base from above, so e and its binding agree.
 func (e *Error) location() locus {
 	if e == nil {
 		return locus{}
@@ -1179,25 +1195,27 @@ func (e *Error) location() locus {
 	return a.locus
 }
 
-// Path returns the [paths.Path] the [Error] is about and true, or the
-// zero Path and false when the Error carries none. The location is the
-// one [AtPath] set on the Error itself or on the nearest located Error
-// along its cause chain. An Error built with [Invalid] around a located
-// Error thus reports that location, with the base of every [Rebase] on
-// the way joined in front. A [*SourceError] along the chain ends the
-// walk, and the Error reports the path [SourceError.Path] reports for
-// that binding, with no base from a Rebase above the binding in front.
-// An Error that carries a position or a range beside the path reports
-// both. A nil Error has none.
+// Path returns the [paths.Path] the [Error] is about and true, or the zero
+// Path and false when the Error does not carry one. The location is the one
+// [AtPath] set on the Error itself or on the nearest located Error along
+// its cause chain. An Error built with [Invalid] around a located Error
+// thus reports that location, with the base of every [Rebase] on the way
+// joined in front.
+//
+// A [*SourceError] along the chain ends the walk. The Error then reports
+// the path [SourceError.Path] reports for that binding, without the base of
+// a Rebase above the binding. An Error that carries a position or a range
+// beside the path reports both. A nil Error does not have a path.
 func (e *Error) Path() (paths.Path, bool) {
 	l := e.location()
 
 	return l.path, l.hasPath
 }
 
-// Position returns the [position.Position] the [Error] points at and
-// true, or the zero Position and false when the Error carries a range or
-// no position. It looks through wrapping as [Error.Path] does.
+// Position returns the [position.Position] the [Error] points at and true,
+// or the zero Position and false when the Error does not carry a position,
+// such as when it carries a range. It looks through wrapping as
+// [Error.Path] does.
 func (e *Error) Position() (position.Position, bool) {
 	p, ok := e.location().loc.(position.Position)
 
@@ -1205,20 +1223,20 @@ func (e *Error) Position() (position.Position, bool) {
 }
 
 // Range returns the [position.Range] the [Error] covers and true, or the
-// zero Range and false when the Error carries a position or no range. It
-// looks through wrapping as [Error.Path] does. The range is the one
-// [AtRange] set, in the coordinates of [Source.Lines].
-// [SourceError.Range] returns the range a location of any kind resolved
-// to once a binding holds the Error.
+// zero Range and false when the Error does not carry a range, such as when
+// it carries a position. It looks through wrapping as [Error.Path] does.
+// The range is the one [AtRange] set, in the coordinates of [Source.Lines].
+// [SourceError.Range] returns the range a location of any kind resolved to
+// after a binding holds the Error.
 func (e *Error) Range() (position.Range, bool) {
 	r, ok := e.location().loc.(position.Range)
 
 	return r, ok
 }
 
-// textCause returns the innermost error along the causes of e that is
-// not an Error, the one whose text [Error.Error] returns, or nil when
-// the causes end at nil or at a nil Error, which has no text.
+// textCause returns the innermost error along the causes of e that is not
+// an Error. [Error.Error] returns the text of that error. It returns nil
+// when the causes end at nil or at a nil Error, which does not have text.
 func (e *Error) textCause() error {
 	for cur := e; ; {
 		inner, ok := cur.err.(*Error) //nolint:errorlint // Identity of the direct child, not a chain search.
@@ -1234,16 +1252,17 @@ func (e *Error) textCause() error {
 	}
 }
 
-// location is a resolved error location. A path that bound at a node
-// other than its own, for a missing key, an alias, or a fallback, sets tk
-// to that node's token and near to its path, and an alias sets unfollowed.
+// location is a resolved error location. A path can bind at a node other
+// than its own, for a missing key, an alias, or a fallback. Such a path
+// sets tk to the token of that node and near to its path, and an alias also
+// sets unfollowed.
 type location struct {
 	unfollowed error
 	rng        *position.Range
 	tk         *token.Token
 	near       *paths.Path
-	// Set when the location resolved in a layer of a [NewSourceFromLayers]
-	// document, to the path of the merged root in the document of the layer.
+	// The path of the merged root in the document of the layer, when the
+	// location resolved in a layer of a [NewSourceFromLayers] document.
 	layerRoot *paths.Path
 	pos       position.Position
 }
@@ -1288,8 +1307,8 @@ func locate(b binder, l locus) (location, *Node, error) {
 }
 
 // locateBelow resolves the path of l, or else the first fallback path
-// that resolves, which becomes near unless it equals the path. When
-// nothing resolves, it returns the result of the first path it tried.
+// that resolves, which becomes near unless it equals the path. When every
+// path fails to resolve, it returns the result of the first path it tried.
 func locateBelow(b binder, l locus) (location, *Node, error) {
 	var (
 		loc   location
@@ -1354,9 +1373,10 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 	return loc, layer.node, err
 }
 
-// locateMerged resolves the position at in node, a merged document whose
-// text is no file of the caller, so the error binds at the value there in
-// the layer that holds it. With no value there, the path of l locates it.
+// locateMerged resolves the position at in node, a merged document. The
+// text of that document is not a file of the caller, so the error binds at
+// the value at that position in the layer that holds it. Without a value
+// there, the path of l locates the error.
 func locateMerged(b binder, node *Node, at position.Position, l locus) (location, *Node, error) {
 	b.node = node
 
@@ -1375,57 +1395,59 @@ func locateMerged(b binder, node *Node, at position.Position, l locus) (location
 // resolves the location of the error against the source once, so a
 // SourceError never changes and every method reads that result.
 // [SourceError.Error] puts the position and the `$` path in front of the
-// message and lists the problems a heading heads, one per line, and
+// message and lists the problems a heading heads, one per line.
 // [SourceError.Excerpt] returns the surrounding lines with the location
-// highlighted. A SourceError unwraps to the error it binds, so
-// [errors.Is] and [errors.As] see through it.
+// highlighted. A SourceError unwraps to the error it binds, so [errors.Is]
+// and [errors.As] see through it.
 //
-// Binding binds the whole tree of the error. Each problem a summary or a
-// join heads and each detail binds as a SourceError of its own, at the
-// location its own error carries, and [NewErrorTree] lays them out as a
-// tree. A problem that carries no location binds at the location of the
-// nearest heading above it that carries one, unless a [Rebase] lies
-// between them. A path the document leaves out binds at the nearest node
-// above it, as [SourceError.Nearest] describes, and any other location
-// that does not resolve costs the SourceError its position, for the
-// reason [SourceError.Unresolved] returns. The Errors section of the
-// package documentation describes these cases. [FormatError] prints the
-// tree and the excerpts as plain text, however a caller wrapped or joined
-// the error:
+// Binding binds the whole tree of the error. Each problem that a summary or
+// a join heads, and each detail, binds as a SourceError of its own at the
+// location its own error carries. [NewErrorTree] arranges them as a tree.
+//
+// A problem that does not carry a location binds at the location of the
+// nearest heading above it that carries one, unless a [Rebase] lies between
+// them. A path that the document leaves out binds at the nearest node above
+// it, as [SourceError.Nearest] describes. Any other location that does not
+// resolve costs the SourceError its position, for the reason
+// [SourceError.Unresolved] returns. The Errors section of the package
+// documentation describes these cases.
+//
+// [FormatError] prints the tree and the excerpts as plain text, however a
+// caller wrapped or joined the error:
 //
 //	if _, err := source.File(); err != nil {
 //		log.Print(niceyaml.FormatError(err))
 //	}
 //
-// A SourceError keeps its Source, with every line, token, and parse of
-// it, alive until the program drops the error. A program that keeps the
-// error past the Source calls [Detach], which returns a copy that keeps
-// what renders the error and no Source.
+// A SourceError keeps its Source alive, with every line, token, and parse
+// of it, until the program drops the error. A program that keeps the error
+// longer than the Source calls [Detach]. Detach returns a copy that keeps
+// what renders the error but not the Source.
 //
-// Create instances with [Node.Bind] or [Source.Bind], or receive them
-// from the [Source] and [Node] methods. [BindValue] creates one for a
-// value that came from no document.
+// Create instances with [Node.Bind] or [Source.Bind], or receive them from
+// the [Source] and [Node] methods. [BindValue] creates one for a value that
+// did not come from a document.
 type SourceError struct {
 	err error
-	// The error a [BindValue] binding, or one below it, was made from, which
-	// [placeable] hands to a later binding in place of this one. It is nil
+	// The error that a [BindValue] binding, or a binding below one, bound.
+	// [placeable] hands it to a later binding in place of this one. It is nil
 	// for every other binding.
 	free error
 	// The reason the location did not resolve, or nil when it did:
 	// errUnlocated, the error of a path, or ErrOutOfRange.
 	locErr error
 	source *Source
-	// The node paths resolved from, which is nil for an error the Source
-	// bound to no document.
+	// The node that paths resolved from. It is nil for an error that the
+	// Source did not bind to a document.
 	node *Node
-	// The binding the first line of the message comes from when Error
-	// leaves the message as it is, or nil when Error puts a position or
-	// name in front, or when no binding wrote the first line.
+	// The binding the first line of the message comes from when Error leaves
+	// the message as it is. It is nil when Error puts a position or a name in
+	// front, or when the first line did not come from a binding.
 	lead *SourceError
 	// What a detached binding keeps of the source and the document it was
-	// bound in, in place of source and node, which are nil. Both are nil
-	// for a binding that holds its source. A detached binding that was
-	// bound to no document has no keptDoc.
+	// bound in, in place of source and node, which are nil. Both are nil for a
+	// binding that holds its source. A detached binding that was not bound to
+	// a document has a nil keptDoc.
 	kept    *keptSource
 	keptDoc *keptDocument
 	// The location, which binding resolved.
@@ -1445,16 +1467,17 @@ type SourceError struct {
 	rng position.Range
 	// Makes passedLead find lead once, the first time a message asks.
 	leadOnce sync.Once
-	// Makes texts build built once.
+	// Makes texts set built once.
 	builtOnce sync.Once
 	// The error wraps a binding, whose location, source, and children this
-	// one took over, and whose position its message carries already.
+	// one adopted, and whose position its message carries already.
 	adopted bool
 }
 
-// boundChild is a child of a [SourceError]. A located child was bound
-// anew from an [*Error] whose location its text lacks. An unbound one was
-// bound from no binding, so its text omits the problems a summary heads.
+// boundChild is a child of a [SourceError]. A located child is a new
+// binding of an [*Error] whose location its text lacks. An unbound child is
+// a new binding of an error that did not hold a binding, so its text omits
+// the problems a summary heads.
 type boundChild struct {
 	bound   *SourceError
 	detail  bool
@@ -1469,26 +1492,26 @@ type boundChild struct {
 const DefaultContextLines = 2
 
 // DefaultExcerptWidth is the number of columns an error excerpt shows
-// around each location it marks on a line longer than that, unless
-// [WithExcerptWidth] sets another for the excerpt, or for the call of
+// around each location it marks on a line longer than that.
+// [WithExcerptWidth] sets another width for the excerpt, or for the call of
 // [Detach] that detached its binding.
 const DefaultExcerptWidth = 160
 
 // ExcerptOption configures the excerpts of an error, which [FormatError],
-// [NewErrorReport], and [SourceError.Excerpt] build and [Detach] keeps.
-// An excerpt is a view of the lines of a source around the locations an
-// error marks in it. The options say how many lines it keeps around each
-// one and how much of a long line it shows. The renderer of an error
-// chooses both, so one program renders the same error with whole lines in
-// a terminal and with bounded rows in a log. Detach chooses them in place
-// of the renderer, as [Detach] describes.
+// [NewErrorReport], and [SourceError.Excerpt] build and [Detach] keeps. An
+// excerpt is a view of the lines of a source around the locations an error
+// marks in it. The options say how many lines it keeps around each one and
+// how much of a long line it shows. The renderer of an error chooses both.
+// One program can thus render the same error with whole lines in a terminal
+// and with bounded rows in a log. Detach chooses them in place of the
+// renderer, as [Detach] describes.
 //
 // Available options:
 //   - [WithContextLines]
 //   - [WithExcerptWidth]
 //
-// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] takes the
-// same options for the excerpts it draws with styles, and
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] takes the same
+// options for the excerpts it draws with styles, and
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintReport] draws the
 // report [NewErrorReport] builds with them.
 type ExcerptOption func(*excerptConfig)
@@ -1538,19 +1561,19 @@ func WithContextLines(n int) ExcerptOption {
 }
 
 // WithExcerptWidth is an [ExcerptOption] that sets how many columns of a
-// long line an excerpt shows around each location it marks. The default
-// is [DefaultExcerptWidth]. A line of cols columns or fewer prints whole,
-// and a longer line prints a window of cols columns around each mark,
-// with "..." in place of the rest, as [line.View.Clip] cuts a view. A
-// context line with no mark keeps its first cols columns. A cols of 0
-// shows every line whole, and a negative cols counts as 0:
+// long line an excerpt shows around each location it marks. The default is
+// [DefaultExcerptWidth]. A line of cols columns or fewer prints whole. A
+// longer line prints a window of cols columns around each mark, with "..."
+// in place of the rest, as [line.View.Clip] cuts a view. A context line
+// without a mark keeps its first cols columns. A cols of 0 shows every line
+// whole, and a negative cols counts as 0:
 //
 //	fmt.Print(niceyaml.FormatError(err, niceyaml.WithExcerptWidth(0)))
 //
 // The width drops the columns outside each window, so it bounds what an
 // excerpt adds to a log. To fit rows to a terminal, wrap them with
-// [go.jacobcolvin.com/niceyaml/printer.WithWrapWidth] instead. The %+v
-// verb of an [*Error] or a [*SourceError] takes no option, so it renders
+// [go.jacobcolvin.com/niceyaml/printer.WithWrapWidth] instead. The %+v verb
+// of an [*Error] or a [*SourceError] does not take an option, so it renders
 // at the default width.
 func WithExcerptWidth(cols int) ExcerptOption {
 	return func(c *excerptConfig) {
@@ -1562,33 +1585,35 @@ func WithExcerptWidth(cols int) ExcerptOption {
 // its first line. A message that holds more ends with a line that counts
 // the rest.
 //
-// It is also the number of problems the %+v verb and the LogValue method
-// of an [*Error] or a [*SourceError] show, each with its details, above
-// a last row that counts the rest. A logger calls those two for a
-// program, so an error with thousands of problems reaches a log as a
-// short text. [FormatError] and
+// It also caps the problems that the %+v verb and the LogValue method of an
+// [*Error] or a [*SourceError] show, each with its details. A last row
+// below them counts the rest. A logger calls those two for a program, so an
+// error with thousands of problems reaches a log as a short text.
+// [FormatError] and
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] show every
 // problem.
 const ErrorListLimit = 10
 
-// boundTexts holds the texts a [SourceError] gives out, built once, since
-// the message of a binding holds those of the bindings below it, and
-// rebuilding per call would rebuild each once per binding above it.
+// boundTexts holds the texts that the methods of a [SourceError] return,
+// built once.
+// The message of a binding holds the messages of the bindings below it, so
+// building them on every call rebuilds each message once per binding above
+// it.
 type boundTexts struct {
 	// The text of the bound error without the part the children show, as
 	// [chainEnd.cut] returns it, behind the path [SourceError.ownPath]
-	// returns, when there is one.
+	// returns, if it returns one.
 	own string
-	// The line of the binding itself: own behind the position or the
-	// name. It is empty for a binding with no text of its own, such as
-	// one of a join.
+	// The line of the binding itself: own behind the position or the name. It
+	// is empty for a binding that does not have text of its own, such as the
+	// binding of a join.
 	head string
 	// The message [SourceError.Error] returns.
 	msg string
 	// The first lines of the list, [ErrorListLimit] at most.
 	entries []string
-	// The number of lines the whole list holds, which is zero when msg
-	// lists no error below the binding.
+	// The number of lines the whole list holds. It is zero when msg does not
+	// list an error below the binding.
 	count int
 	// The number of children at the end of the list of children whose
 	// text own holds already, so the list leaves out each of them that
@@ -1601,8 +1626,9 @@ type boundTexts struct {
 }
 
 // binder is where an error binds: a source, and a node that is nil for
-// [Source.Bind]. A binder that routes picks a document per location, so the
-// parser's must not, since the parse builds no document until it ends.
+// [Source.Bind]. A binder that routes picks a document per location. The
+// binder of the parser must not route, because the parse builds the
+// documents only when it ends.
 type binder struct {
 	src      *Source
 	node     *Node
@@ -1612,7 +1638,7 @@ type binder struct {
 }
 
 // located returns err rebased under [paths.Current] for a binder that
-// locates, so each problem with no location binds at the Node, and a
+// locates. Each problem without a location then binds at the Node, and a
 // scoped bind agrees with a [Rebase] under the path of the Node.
 func (b binder) located(err error) error {
 	if !b.locate || b.node == nil || b.node.base.IsRoot() || contextEnded(err) {
@@ -1631,7 +1657,8 @@ type scopedError struct {
 }
 
 // scoped returns err under the scope of the node b binds with, or under
-// [paths.Doc] with no node, so its `@` paths start at `$`.
+// [paths.Doc] when b does not hold a node. The `@` paths of err then start
+// at `$`.
 func (b binder) scoped(err error) scopedError {
 	scope := paths.Doc()
 	if b.node != nil {
@@ -1697,8 +1724,8 @@ func underScope(err error, scope paths.Path) (scopedError, bool) {
 }
 
 // mapJoin applies f to each non-nil branch of the join err and rejoins the
-// results that are not nil. It returns nil when err reads as no join or
-// when every result is nil.
+// results that are not nil. It returns nil when err does not read as a join
+// or when every result is nil.
 func mapJoin(err error, f func(error) error) error {
 	branches, _, ok := joinBranches(err)
 	if !ok {
@@ -1730,9 +1757,10 @@ func anchored(err error) scopedError {
 	return scopedError{err: err, anchor: anchorOf(err)}
 }
 
-// nodeAt returns the node an error on line idx binds to: that of b, or,
-// when b routes, the root of the document whose span holds the line. The
-// spans are sorted and contiguous, so a binary search finds it.
+// nodeAt returns the node that an error on line idx binds to. That node is
+// the node of b or, when b routes, the root of the document whose span
+// holds the line. The spans are in line order and contiguous, so a binary
+// search finds it.
 func (b binder) nodeAt(idx int) *Node {
 	if b.node != nil || !b.route {
 		return b.node
@@ -1754,45 +1782,46 @@ func (b binder) nodeAt(idx int) *Node {
 	return nil
 }
 
-// BindValue binds err to no document, for a check on a value that came
-// from none, such as the body of a request or a value the program built.
-// [Error.Error] writes no path, and the error BindValue returns puts each
-// path in its text, so it names every failing location through %v,
-// inside a wrapper, in a join, and in a log. A summary of two violations
-// reads:
+// BindValue binds err outside any document, for a check on a value that did
+// not come from a document, such as the body of a request or a value the
+// program built. [Error.Error] does not write a path. The error BindValue
+// returns puts each path in its text, so it names every failing location
+// through %v, inside a wrapper, in a join, and in a log. A summary of two
+// violations reads:
 //
 //	2 violations
 //	$.port: 0 is less than 1
 //	$.name: name is required
 //
-// Each path starts at `$`, which here is the value the check ran on, and
-// no file and no position stand in front of a line.
+// Each path starts at `$`, which here is the value the check ran on. A line
+// does not start with a file or a position.
 // [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] returns its
-// violations this way, and [SelfValidateValue] binds what it finds the
-// same way.
+// violations this way, and [SelfValidateValue] binds what it finds the same
+// way.
 //
-// The result stands in no document, so a document can still place it.
-// [Rebase], every Bind, and a decode read the result as the error it was
-// made from, as the Errors section of the package documentation
+// The result does not stand in a document, so a document can still place
+// it. [Rebase], every Bind, and a decode read the result as the error that
+// BindValue bound, as the Errors section of the package documentation
 // describes. Placing builds a new error and leaves the result as it is.
 //
-// The result is a [*SourceError] bound to no [Node], and so is each
-// binding below it. Its methods that report a document, a position, or a
-// range report false, and [SourceError.Source] returns a source with no
-// name and no lines. [SourceError.Unresolved] returns a reason that wraps
+// The result is a [*SourceError] that is not bound to a [Node], and so is
+// each binding below it. Its methods that report a document, a position, or
+// a range report false, and [SourceError.Source] returns a source without a
+// name or lines. [SourceError.Unresolved] returns a reason that wraps
 // [go.jacobcolvin.com/niceyaml/paths.ErrNoDocument] for a path, and
 // [ErrOutOfRange] for a position or a range.
 //
 // BindValue returns nil for a nil err, and for a nil [*Error] or
-// [*SourceError] pointer. An error that is bound already comes back as it
+// [*SourceError] pointer. It returns an error that is bound already as it
 // is, whether a document bound it or BindValue did.
 func BindValue(err error) error {
 	return bindTree(err, binder{src: valueSource(), route: true, unplaced: true})
 }
 
-// bindTree binds err to b. It returns an untyped nil for a nil err of any
-// shape, and err as it is when [isBound] reports it. Only an unplaced
-// binder counts a [BindValue] binding as bound, and any other places it.
+// bindTree binds err to b. It returns an untyped nil for an err that
+// [isNothing] reports, and err as it is when [isBound] reports it. Only an
+// unplaced binder counts a [BindValue] binding as bound, and any other
+// binder places it.
 func bindTree(err error, b binder) error {
 	if isNothing(err) {
 		return nil
@@ -1820,7 +1849,7 @@ func bindTree(err error, b binder) error {
 }
 
 // placeable returns err with a [BindValue] binding replaced by the error
-// it was made from, so a document can place it. Each wrapper above it
+// that BindValue bound, so a document can place it. Each wrapper above it
 // becomes a stand-in, as [replaceBelow] and [mapWrapper] build them.
 func placeable(err error) error {
 	placed, _ := replaceUnplaced(err)
@@ -1883,8 +1912,9 @@ func replaceUnplaced(err error) (error, bool) {
 	}
 }
 
-// holdsUnplaced reports whether [replaceUnplaced] could find a binding
-// that stands in no document below err, without formatting any message.
+// holdsUnplaced reports, without formatting any message, whether
+// [replaceUnplaced] can find a binding below err that does not stand in a
+// document.
 func holdsUnplaced(err error) bool {
 	for {
 		switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -1910,9 +1940,10 @@ func holdsUnplaced(err error) bool {
 	}
 }
 
-// replaceBelow is [replaceUnplaced] for wrapper, whose chain goes on
-// through below. Branches holds every error wrapper unwraps to, if several,
-// and the stand-in keeps the leaves among them to match as wrapper does.
+// replaceBelow is [replaceUnplaced] for wrapper, whose chain continues
+// through below. Branches holds every error wrapper unwraps to, when it
+// unwraps to several. The stand-in keeps the leaves among them so that it
+// matches as wrapper does.
 func replaceBelow(wrapper, below error, branches []error) (error, bool) {
 	if below == nil {
 		return wrapper, false
@@ -1942,11 +1973,11 @@ func replaceBelow(wrapper, below error, branches []error) (error, bool) {
 
 // mapWrapper applies f to each problem among branches, the errors that
 // wrapper unwraps to. Wrapper is a wrapper that [fmt.Errorf] builds with
-// several %w verbs, and [isLeaf] picks out its sentinels, which f never
-// sees. When f reports a change, mapWrapper returns true and a stand-in
-// for wrapper over the results and the sentinels. The message of the
-// stand-in has the text of each changed branch replaced. Otherwise
-// mapWrapper returns wrapper and false.
+// several %w verbs, and [isLeaf] picks its sentinels, which f never sees.
+// When f reports a change, mapWrapper returns true and a stand-in for
+// wrapper over the results and the sentinels. The message of the stand-in
+// has the text of each changed branch replaced. Otherwise mapWrapper
+// returns wrapper and false.
 func mapWrapper(wrapper error, branches []error, f func(error) (error, bool)) (error, bool) {
 	msg := wrapper.Error()
 	mapped := slices.Clone(branches)
@@ -1974,8 +2005,8 @@ func mapWrapper(wrapper error, branches []error, f func(error) (error, bool)) (e
 }
 
 // replaceText returns msg with old, the text of an error that msg holds,
-// replaced by with. A message that holds old exactly once shows where
-// that text stands, so any other message comes back as it is.
+// replaced by with. A message that holds old exactly once shows where that
+// text stands, so replaceText returns any other message as it is.
 func replaceText(msg, old, with string) string {
 	if old == "" || strings.Count(msg, old) != 1 {
 		return msg
@@ -1984,9 +2015,9 @@ func replaceText(msg, old, with string) string {
 	return strings.Replace(msg, old, with, 1)
 }
 
-// isBound reports whether err is a [*SourceError], or wraps one with no
-// [*Error] above it that adds a location, problems, or details, since such
-// an Error binds anew around the binding.
+// isBound reports whether err is a [*SourceError] or wraps one without an
+// [*Error] above it that adds a location, problems, or details. Such an
+// Error binds anew around the binding.
 func isBound(err error) bool {
 	for cur := err; ; {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -2014,7 +2045,8 @@ func isBound(err error) bool {
 
 // leadingBinding returns the binding that wrote the first line of the
 // message of err, or nil. It follows the text each error writes, not the
-// structure [isBound] reads, since an [*Error] omits the errors below it.
+// structure [isBound] reads, because an [*Error] leaves the errors below it
+// out of its text.
 func leadingBinding(err error) *SourceError {
 	for cur := err; ; {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -2076,8 +2108,9 @@ func leadingBinding(err error) *SourceError {
 }
 
 // passedLead returns the binding that wrote the first line of the message
-// of e, for an e that writes no position or path. It finds the lead once,
-// since finding it per message walks each binding once per binding above.
+// of e, for an e that does not write a position or a path. It finds the
+// lead a single time, because a search per message walks each binding once
+// per binding above it.
 func (e *SourceError) passedLead() *SourceError {
 	if e == nil {
 		return nil
@@ -2101,18 +2134,20 @@ func (e *SourceError) passedLead() *SourceError {
 	return e.lead
 }
 
-// ownPath returns the path e puts in front of the text it binds, from the
-// anchor of the bound error, and false when it puts none, as for an adopted
-// binding whose text names its own path already.
+// ownPath returns the path that e puts in front of the text it binds, from
+// the anchor of the bound error. It returns false when e does not put a
+// path there, as for an adopted binding whose text names its own path
+// already.
 func (e *SourceError) ownPath() (paths.Path, bool) {
 	a := anchorOf(e.err)
 
 	return a.path, a.hasPath
 }
 
-// keepsMessage reports whether [SourceError.Error] returns the message of
-// e with no position, name, or document in front, because e resolved no
-// location and either a lead names the source already or e has no place.
+// keepsMessage reports whether [SourceError.Error] returns the message of e
+// without a position, a name, or a document in front. Error does so when e
+// did not resolve a location and either a lead names the source already or
+// e does not have a place.
 func (e *SourceError) keepsMessage() bool {
 	if e.locErr == nil && !e.adopted {
 		return false
@@ -2121,9 +2156,9 @@ func (e *SourceError) keepsMessage() bool {
 	return e.passedLead() != nil || e.place() == ""
 }
 
-// place returns what stands in front of the message of a binding that
-// writes no position, as "cafe.yaml: document 3:", with either part left
-// out when e has none.
+// place returns what stands in front of the message of a binding that does
+// not write a position, as "cafe.yaml: document 3:". It leaves out either
+// part when e does not have it.
 func (e *SourceError) place() string {
 	name, doc := e.label(), e.documentLabel()
 
@@ -2146,10 +2181,11 @@ func suffixed(s string) string {
 	return s + ":"
 }
 
-// documentLabel returns "document 3" for an e with no position bound in the
-// third document of a file of several, since no line names it. The number
-// counts every document of the file, as [Source.AllDocuments] does. A
-// detached binding reads the label it kept.
+// documentLabel returns "document 3" for an e without a position that is
+// bound in the third document of a file of several. The message of such an
+// e does not have a line number that names the document. The number counts
+// every document of the file, as [Source.AllDocuments] does. A detached
+// binding reads the label it kept.
 func (e *SourceError) documentLabel() string {
 	switch {
 	case e.locErr == nil:
@@ -2174,8 +2210,8 @@ func documentName(node *Node) string {
 }
 
 // holdsSource reports whether a child of e is bound to src. It looks
-// through a child that binds a join to its branches, since such a child
-// has no text of its own.
+// through a child that binds a join to its branches, because such a child
+// does not have text of its own.
 func holdsSource(e *SourceError, src excerptSource) bool {
 	for _, c := range e.below {
 		joined := joinBinding(c.bound)
@@ -2204,17 +2240,17 @@ type anchor struct {
 }
 
 // anchorOf returns the first located [*Error] or [*SourceError] along the
-// cause chain of err. A [Rebase] with nothing located below anchors at its
-// base, unless the chain below heads several problems.
+// cause chain of err. A [Rebase] without a located error below it anchors
+// at its base, unless the chain below heads several problems.
 func anchorOf(err error) anchor {
 	a, _ := findAnchor(err)
 
 	return a
 }
 
-// findAnchor returns the anchor of err and, when it finds none, whether
-// the chain heads separate problems. One walk answers both, so a chain of
-// [Rebase] Errors reads the chain below each once.
+// findAnchor returns the anchor of err and, when it does not find one,
+// whether the chain heads separate problems. One walk answers both, so a
+// chain of [Rebase] Errors reads the chain below each once.
 func findAnchor(err error) (anchor, bool) {
 	switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
 	case *SourceError:
@@ -2272,8 +2308,8 @@ func findAnchor(err error) (anchor, bool) {
 }
 
 // boundLocus returns the location e resolved its position from, with every
-// base inside e joined in and none from above. A binding that wraps
-// another reports the one it wraps.
+// base inside e joined in and without a base from above. A binding that
+// wraps another reports the one it wraps.
 func boundLocus(e *SourceError) locus {
 	found := anchorOf(e.err)
 
@@ -2285,8 +2321,8 @@ func boundLocus(e *SourceError) locus {
 }
 
 // newSourceError binds err to b and resolves its location. The binding
-// holds err scoped, so its paths start at `$`, and takes the source of the
-// node it resolved in, which in a merged document is a layer.
+// holds err scoped, so its paths start at `$`. It takes the source of the
+// node it resolved in, which is a layer in a merged document.
 func newSourceError(err error, b binder) *SourceError {
 	scoped := b.scoped(err)
 	found := scoped.anchor
@@ -2409,23 +2445,24 @@ func (e *SourceError) addChild(n error, b binder, base childBase, detail bool) {
 	e.below = append(e.below, boundChild{bound: bound, detail: detail, located: located, unbound: unbound})
 }
 
-// heads reports whether e heads separate problems: whether a child of e
-// is no detail.
+// heads reports whether e heads separate problems: whether a child of e is
+// not a detail.
 func (e *SourceError) heads() bool {
 	return slices.ContainsFunc(e.below, func(c boundChild) bool { return !c.detail })
 }
 
-// headsAlone reports whether e heads separate problems and has no line of
-// its own, as the binding of a join does. Such a binding marks nothing in
-// an excerpt, even with a location, because each problem below it that
-// carries no location takes that location.
+// headsAlone reports whether e heads separate problems and does not have a
+// line of its own, such as the binding of a join. Each problem below such a
+// binding that does not carry a location takes the location of the binding.
+// The binding itself thus does not mark anything in an excerpt, even with a
+// location.
 func (e *SourceError) headsAlone() bool {
 	return e.heads() && e.headline() == ""
 }
 
-// Source returns the [*Source] the error is bound to. A binding that
-// [Detach] detached keeps no Source and returns nil, and so does a nil
-// SourceError. [SourceError.Name] and [SourceError.FilePath] report the
+// Source returns the [*Source] the error is bound to. It returns nil for a
+// binding that [Detach] detached, which does not keep a Source, and for a
+// nil SourceError. [SourceError.Name] and [SourceError.FilePath] report the
 // name and the file path of the Source for a live binding and a detached
 // one alike.
 func (e *SourceError) Source() *Source {
@@ -2438,7 +2475,7 @@ func (e *SourceError) Source() *Source {
 
 // Name returns the name of the [Source] the error was bound to, as
 // [Source.Name] returns it. A binding that [Detach] detached returns the
-// name its Source had. A nil SourceError has no name.
+// name its Source had. A nil SourceError returns an empty name.
 func (e *SourceError) Name() string {
 	if e == nil {
 		return ""
@@ -2447,9 +2484,9 @@ func (e *SourceError) Name() string {
 	return e.origin().Name()
 }
 
-// FilePath returns the file path of the [Source] the error was bound to,
-// as [Source.FilePath] returns it. A binding that [Detach] detached
-// returns the file path its Source had. A nil SourceError has no file
+// FilePath returns the file path of the [Source] the error was bound to, as
+// [Source.FilePath] returns it. A binding that [Detach] detached returns
+// the file path its Source had. A nil SourceError returns an empty file
 // path.
 func (e *SourceError) FilePath() string {
 	switch {
@@ -2471,8 +2508,8 @@ func (e *SourceError) label() string {
 
 // origin returns the text the excerpts of e show: its Source, or what a
 // detached binding kept of one. Bindings with the same origin share an
-// excerpt, and a child with the origin of its parent drops the name the
-// row of the parent shows. A nil e has none.
+// excerpt, and a child with the origin of its parent drops the name the row
+// of the parent shows. It returns nil for a nil e.
 func (e *SourceError) origin() excerptSource {
 	switch {
 	case e == nil:
@@ -2484,9 +2521,9 @@ func (e *SourceError) origin() excerptSource {
 	}
 }
 
-// sameDocument reports whether a and b are bound to one document, or both
-// to none. A detached binding compares by the document it kept, so it
-// never shares a document with a live binding.
+// sameDocument reports whether a and b are bound to one document, or
+// whether neither is bound to a document. A detached binding compares by
+// the document it kept, so it never shares a document with a live binding.
 func sameDocument(a, b *SourceError) bool {
 	if (a.kept == nil) != (b.kept == nil) {
 		return false
@@ -2499,27 +2536,31 @@ func sameDocument(a, b *SourceError) bool {
 	return a.node.Document() == b.node.Document()
 }
 
-// Node returns the [*Node] the error is bound to and true, or nil and
-// false for an error bound to none. The Node is the one whose methods and
-// validators produced the error or whose [Node.Bind] bound it, and an `@`
-// path in the error resolves from it. [Source.Bind] binds to the root of
-// the document the location falls in, and the error stays bound to that
-// root when its location does not resolve there. A position or a range
+// Node returns the [*Node] the error is bound to and true, or nil and false
+// for an error that is not bound to a Node. The Node is the one whose
+// methods and validators produced the error or whose [Node.Bind] bound it,
+// and an `@` path in the error resolves from it. [Source.Bind] binds to the
+// root of the document the location falls in, and the error stays bound to
+// that root when its location does not resolve there. A position or a range
 // falls in the document whose [Node.Span] holds its line, whether or not
-// that document parsed, and a path falls in the one document of the
-// source. Source.Bind binds to none an error with no location, a position
-// or a range on a line no document holds, and a path in a source that
-// holds several documents or has a YAML syntax error.
+// that document parsed. A path falls in the one document of the source.
 //
-// A YAML syntax error is bound to the root of the document whose span
-// holds its location, or to the first document it fails when it has no
-// location in the source. An error that wraps a binding keeps the Node of
-// that binding. An error bound in a merged [Source] is bound to the Node
-// of the layer its location resolved in. When it carries no location, it
-// is bound to the Node of the layer [MergeAs] names, or else of the lowest
-// layer. The error [BindValue] returns and each binding below it are
-// bound to none. A binding that [Detach] detached and a nil SourceError
-// are bound to none too.
+// Source.Bind does not bind an error to a Node when the error lacks a
+// location, or when its position or range lies on a line outside every
+// document. It does not bind an error with a path to a Node either when the
+// source holds several documents or has a YAML syntax error.
+//
+// The parse binds a YAML syntax error to the root of the document whose
+// span holds its location. A syntax error that does not have a location in
+// the source binds to the first document it fails. An error that wraps a
+// binding keeps the Node of that binding. An error bound in a merged
+// [Source] is bound to the Node of the layer its location resolved in. When
+// it does not carry a location, it is bound to the Node of the layer
+// [MergeAs] names, or else to the Node of the lowest layer.
+//
+// The error [BindValue] returns and each binding below it are not bound to
+// a Node. A binding that [Detach] detached and a nil SourceError are not
+// bound to a Node either.
 func (e *SourceError) Node() (*Node, bool) {
 	if e == nil || e.node == nil {
 		return nil, false
@@ -2546,13 +2587,13 @@ func (e *SourceError) Document() (*Node, bool) {
 
 // DocumentIndex returns the 0-indexed position within the file of the
 // document the error is bound to and true, or 0 and false for a binding
-// in no document. It is the [Node.DocumentIndex] of the root that
-// [SourceError.Document] returns. A binding that [Detach] detached
+// that is not in a document. It is the [Node.DocumentIndex] of the root
+// that [SourceError.Document] returns. A binding that [Detach] detached
 // reports the index of the document it was bound to, although
 // SourceError.Document reports false for it. The message of a bound error
 // counts documents from 1, as it counts lines, so "document 3" in
-// [SourceError.Error] is the document at index 2. A report that groups
-// the problems of a file by document reads the index of each:
+// [SourceError.Error] is the document at index 2. A report that groups the
+// problems of a file by document reads the index of each:
 //
 //	for problem := range niceyaml.Problems(err) {
 //		if index, ok := problem.DocumentIndex(); ok {
@@ -2572,32 +2613,33 @@ func (e *SourceError) DocumentIndex() (int, bool) {
 	return doc.DocumentIndex(), true
 }
 
-// Message returns the text of the bound error with no position, document,
+// Message returns the text of the bound error without a position, document,
 // or path in front. It is the message [NewError] or [Invalid] gave an
 // [*Error], or the text of any other error as it is, with any text a
 // wrapper such as [fmt.Errorf] added around it. [SourceError.Excerpt]
 // annotates a location with it, and a structured report carries it beside
 // [SourceError.Position] and [SourceError.Path], as [Problems] describes.
 // The errors [SourceError.Error] lists below the message are not part of
-// it, so the message of a summary is the summary. A binding of a join has
-// no line of its own, and its message is the text of the join. A nil
-// SourceError has an empty message.
+// it, so the message of a summary is its heading alone. A binding of a
+// join does not have a line of its own, and its message is the text of the
+// join. A nil SourceError has an empty message.
 func (e *SourceError) Message() string {
 	return e.text()
 }
 
 // Path returns the [paths.Path] the bound error is about and true, or the
-// zero Path and false when it carries none. It is the path [Error.Path]
-// reports for the [*Error] that gave the binding its location, with the
-// [Node.Path] of the Node that bound it in front of an `@` path, so it
-// starts at `$`. An error written as `@.price` and bound through the Node
-// at `$.items[1]` reports `$.items[1].price`. A rejection of the go-yaml
-// decoder reports the path where the document writes the value, which
-// can lie outside the scope of the Node, as the Decoding and Scoped Nodes
-// sections of the package documentation describe. An error that binds at
-// a range or a position beside its path reports that path, resolved or
-// not. A binding that wraps another reports the path of the one it
-// wraps, and a nil SourceError has none.
+// zero Path and false when it does not carry one. It is the path that
+// [Error.Path] reports for the [*Error] that gave the binding its location.
+// An `@` path gets the [Node.Path] of the Node that bound it in front, so
+// the result starts at `$`. An error written as `@.price` and bound through
+// the Node at `$.items[1]` reports `$.items[1].price`.
+//
+// A rejection of the go-yaml decoder reports the path where the document
+// writes the value. That path might lie outside the scope of the Node, as
+// the Decoding and Scoped Nodes sections of the package documentation
+// describe. An error that binds at a range or a position beside its path
+// reports that path, resolved or not. A binding that wraps another reports
+// the path of the one it wraps, and a nil SourceError does not have a path.
 func (e *SourceError) Path() (paths.Path, bool) {
 	if e == nil {
 		return paths.Path{}, false
@@ -2609,7 +2651,7 @@ func (e *SourceError) Path() (paths.Path, bool) {
 }
 
 // Unwrap returns the error the [SourceError] binds. A nil SourceError
-// unwraps to nothing, so a chain that holds one is safe to walk.
+// unwraps to nil, so a caller can safely walk a chain that holds one.
 func (e *SourceError) Unwrap() error {
 	if e == nil {
 		return nil
@@ -2619,51 +2661,54 @@ func (e *SourceError) Unwrap() error {
 }
 
 // Error returns the message of the bound error with its resolved position
-// in front, as "name:line:col: $.path: msg" when the error carries a path
-// and "name:line:col: msg" when it does not. The name is [Source.Name],
-// and a source with no name leads with "line:col:". An error with no
-// position reads "name: msg". In a source that holds several documents,
-// such an error names its document behind the name, counted from 1 among
-// [Source.AllDocuments], as "name: document 3: msg". The text a wrapper
-// added to the bound error sits behind the path. A first line that a
-// binding of the same source wrote already gains no second position.
+// in front. The message reads "name:line:col: $.path: msg" when the error
+// carries a path, and "name:line:col: msg" when it does not. The name is
+// [Source.Name], and the message of a source without a name starts with
+// "line:col:". An error without a position reads "name: msg". In a source
+// that holds several documents, such an error names its document behind the
+// name, counted from 1 among [Source.AllDocuments], as "name: document 3:
+// msg".
 //
-// The message holds one line per problem, and details stay out. A
-// heading, which is a summary, a join, or a wrapper around either, lists
-// the problems it heads below its own line in the order of their
-// positions, [ErrorListLimit] at most, with a last line that counts the
-// rest:
+// The text a wrapper added to the bound error sits behind the path. A first
+// line that a binding of the same source wrote already does not gain a
+// second position.
+//
+// The message holds one line per problem and leaves out the details. A
+// heading is a summary, a join, or a wrapper around either. It lists the
+// problems it heads below its own line in the order of their positions, at
+// most [ErrorListLimit] of them, with a last line that counts the rest:
 //
 //	cafe.yaml: 2 schema violations
 //	cafe.yaml:6:8: $.spec.sla: string does not match pattern
 //	cafe.yaml:22:11: $.spec.hours.days: expected "array", got "string"
 //
-// A join has no line of its own, even when [Invalid], [Unchecked], or
-// [Locate] gives it a location, because each of its problems that carries
-// no location takes that location. Any other error that unwraps to several
-// keeps its own message, and each branch follows as a line unless that
-// message holds its text already, as "a; b" does. A branch located from
-// an [*Error] follows either way, because its line names a position the
-// message lacks.
+// Each problem of a join that does not carry a location takes the location
+// that [Invalid], [Unchecked], or [Locate] gives the join. The join thus
+// does not have a line of its own, even with a location. Any other error
+// that unwraps to several errors keeps its own message. Each branch follows
+// as a line unless that message holds its text already, as a message that
+// lists the texts of its branches does. A branch located from an [*Error]
+// follows either way, because its line names a position the message lacks.
 //
-// The name, each path, and the text of a decode rejection reach the
-// message with their control characters drawn or escaped, while a message
-// the caller wrote stays as it is. The message holds no source lines, so
-// it stays short in a log. Error builds the message on its first call and
-// returns it from then on. A nil SourceError has an empty message.
+// The name, each path, and the text of a decode rejection reach the message
+// with their control characters drawn or escaped. A message the caller
+// wrote stays as it is. The message does not hold source lines, so it stays
+// short in a log. Error builds the message on its first call and returns
+// the same message on every later call. A nil SourceError has an empty
+// message.
 func (e *SourceError) Error() string {
 	return e.texts().msg
 }
 
-// headline returns the line of e itself, without the errors below it:
-// the text [NewErrorTree] gives the node of e. It is empty for a binding
-// with no text of its own.
+// headline returns the line of e itself, without the errors below it: the
+// text [NewErrorTree] gives the node of e. It is empty for a binding that
+// does not have text of its own.
 func (e *SourceError) headline() string {
 	return e.texts().head
 }
 
-// texts returns the texts of e, which it builds the first time it is
-// called. A nil e has none.
+// texts returns the texts of e, which it builds the first time a caller
+// asks for them. It returns empty texts for a nil e.
 func (e *SourceError) texts() boundTexts {
 	if e == nil {
 		return boundTexts{}
@@ -2675,8 +2720,9 @@ func (e *SourceError) texts() boundTexts {
 }
 
 // buildTexts builds the texts of e, with the problems it heads listed under
-// its own line. Its line cuts out the errors the chain end shows, unless a
-// wrapper rewrote that text, which then stays as the wrapper wrote it.
+// its own line. Its line drops the text of the errors that the chain end
+// shows, unless a wrapper rewrote that text. A rewritten text stays as the
+// wrapper wrote it.
 func (e *SourceError) buildTexts() boundTexts {
 	var (
 		t    boundTexts
@@ -2755,8 +2801,9 @@ func (e *SourceError) buildTexts() boundTexts {
 }
 
 // warns reports whether e binds one problem that is a warning, so its line
-// carries the "warning:" label. A heading takes no label, and neither does
-// a binding that adopted a warning, whose text holds the label already.
+// carries the "warning:" label. A heading does not take the label, and
+// neither does a binding that adopted a warning, whose text holds the label
+// already.
 func (e *SourceError) warns() bool {
 	if e.heads() || !isWarning(e.err) {
 		return false
@@ -2772,16 +2819,16 @@ func (e *SourceError) warns() bool {
 	return true
 }
 
-// bare reports whether e has neither a message nor a position, so it
-// adds no line to the list of the binding above it.
+// bare reports whether e has neither a message nor a position, so it does
+// not add a line to the list of the binding above it.
 func (e *SourceError) bare() bool {
 	t := e.texts()
 
 	return t.count == 0 && t.own == "" && (e.locErr != nil || e.adopted)
 }
 
-// more returns the line that ends a list which leaves n errors out. It
-// names the source of e, as every other line of the list names its own.
+// more returns the line that ends a list that leaves n errors out. It names
+// the source of e, as every other line of the list names its own.
 func (e *SourceError) more(n int) string {
 	rest := "and " + strconv.Itoa(n) + " more"
 
@@ -2855,7 +2902,7 @@ func (e *SourceError) list(shown int) ([]string, int) {
 }
 
 // ordered returns the problems e heads in [NewErrorTree] order, minus the
-// last shown ones e did not locate, since the text of e holds them. An
+// last shown ones e did not locate, because the text of e holds them. An
 // unbound child among those gives the problems below it in its place.
 func (e *SourceError) ordered(shown int) []*SourceError {
 	held := len(e.below) - shown
@@ -2900,7 +2947,7 @@ func (e *SourceError) ordered(shown int) []*SourceError {
 	return out
 }
 
-// formatPosition returns pos as "name:line:col:", the shape editors and
+// formatPosition returns pos as "name:line:col:", the format editors and
 // build tools read, or "line:col:" when name is empty.
 func formatPosition(name string, pos position.Position) string {
 	if name == "" {
@@ -2910,15 +2957,15 @@ func formatPosition(name string, pos position.Position) string {
 	return name + ":" + editorPosition(pos) + ":"
 }
 
-// editorPosition returns pos as "line:col" counted from 1, as editors
-// and build tools count, where [position.Position.String] counts from 0
-// as the fields do.
+// editorPosition returns pos as "line:col" counted from 1, as editors and
+// build tools count. [position.Position.String] counts from 0, as the
+// fields do.
 func editorPosition(pos position.Position) string {
 	return oneBased(pos.Line) + ":" + oneBased(pos.Col)
 }
 
 // oneBased returns the decimal text of n + 1. It prints [math.MaxInt] + 1
-// through a uint64, since the sum would wrap to a negative int.
+// through a uint64, because the sum wraps to a negative int.
 func oneBased(n int) string {
 	if n == math.MaxInt {
 		return strconv.FormatUint(uint64(n)+1, 10)
@@ -2938,7 +2985,7 @@ func prefix(p, msg string) string {
 }
 
 // isNothing reports whether err is nil or a nil [*Error] or [*SourceError]
-// pointer, which carries no message and no location.
+// pointer, which does not carry a message or a location.
 func isNothing(err error) bool {
 	switch x := err.(type) { //nolint:errorlint // The node itself, not a chain search.
 	case nil:
@@ -2952,9 +2999,9 @@ func isNothing(err error) bool {
 	}
 }
 
-// text returns the text the excerpt annotates e with, the bare message of
-// the binding [textBinding] finds, with no position or path, since the
-// caret marks the location.
+// text returns the text that the excerpt annotates e with: the bare message
+// of the binding [textBinding] finds. The caret marks the location, so the
+// text leaves out the position and the path.
 func (e *SourceError) text() string {
 	if e == nil {
 		return ""
@@ -2965,7 +3012,7 @@ func (e *SourceError) text() string {
 	return bareMessage(e.err, e.end)
 }
 
-// bareMessage returns the message of err without the part end cuts out
+// bareMessage returns the message of err without the part that end removes
 // for the errors below it. A message that is all such a part, as that of a
 // join is, stays whole.
 func bareMessage(err error, end chainEnd) string {
@@ -2977,9 +3024,9 @@ func bareMessage(err error, end chainEnd) string {
 	return msg
 }
 
-// all yields e and every binding below it in depth-first order, each
-// once however many times the tree reaches it, and reports whether the
-// caller wants more. A nil e yields nothing.
+// all yields e and every binding below it in depth-first order, and reports
+// whether the caller wants more. It yields each binding once, however many
+// times the tree reaches it. A nil e does not yield anything.
 func (e *SourceError) all(seen map[*SourceError]bool, yield func(*SourceError) bool) bool {
 	if e == nil || seen[e] {
 		return true
@@ -3000,18 +3047,18 @@ func (e *SourceError) all(seen map[*SourceError]bool, yield func(*SourceError) b
 	return true
 }
 
-// Bindings returns an iterator over each [*SourceError] reached through
-// the wrappers and joins around err, in depth-first order, so the
-// outermost comes first and each branch of an [errors.Join] follows the
-// one before it. It does not look below a binding, so each binding comes
-// as one unit. A caller that renders each binding on its own, such as one
-// section per document of a file, walks it:
+// Bindings returns an iterator over each [*SourceError] that the wrappers
+// and joins around err lead to, in depth-first order. The outermost comes
+// first, and each branch of an [errors.Join] follows the one before it. It
+// does not look below a binding, so each binding comes as one unit. A
+// caller that renders each binding on its own, such as one section per
+// document of a file, walks it:
 //
 //	for bound := range niceyaml.Bindings(err) {
 //		fmt.Println(niceyaml.FormatError(bound))
 //	}
 //
-// A nil err has no bindings.
+// The iterator does not yield a binding for a nil err.
 func Bindings(err error) iter.Seq[*SourceError] {
 	return func(yield func(*SourceError) bool) {
 		for below := range errorsBelow(err) {
@@ -3033,8 +3080,8 @@ func errorsBelow(err error) iter.Seq[error] {
 }
 
 // eachBelow yields what [errorsBelow] yields and reports whether yield
-// wanted more. It passes yield down, since nested iterators would take
-// time quadratic in the depth of a chain of joins.
+// wanted more. It passes yield down, because nested iterators take time
+// quadratic in the depth of a chain of joins.
 func eachBelow(err error, yield func(error) bool) bool {
 	if isNothing(err) {
 		return true
@@ -3098,16 +3145,16 @@ func allBindings(err error) iter.Seq[*SourceError] {
 //
 // The %v and %s verbs print [SourceError.Error]. The %+v verb prints what
 // [FormatError] renders for the error at [DefaultContextLines] lines of
-// context and [DefaultExcerptWidth] columns, with [ErrorListLimit]
-// problems at most and a last row that counts the rest. A binding that
-// [Detach] detached renders at the options Detach received instead.
-// Every other verb formats [SourceError.Error] as it formats a string,
-// with the width, precision, and flags given, so %q quotes the message.
+// context and [DefaultExcerptWidth] columns. The tree shows at most
+// [ErrorListLimit] problems and a last row that counts the rest. A binding
+// that [Detach] detached renders at the options Detach received instead.
+// Every other verb formats [SourceError.Error] as it formats a string, with
+// the width, precision, and flags given, so %q quotes the message.
 //
 // A wrapper such as [fmt.Errorf] around a SourceError formats as its own
-// message under every verb, so a program that holds any error calls
+// message under every verb. A program that holds any error thus calls
 // FormatError for the excerpt. A source with excerpts off, as
-// [WithExcerpts] sets it, shows no line under any verb.
+// [WithExcerpts] sets it, does not show a source line under any verb.
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	formatVerb(f, verb, e)
 }
@@ -3115,46 +3162,46 @@ func (e *SourceError) Format(f fmt.State, verb rune) {
 // LogValue implements [slog.LogValuer].
 //
 // The value is the tree [FormatError] prints for the error, as a string
-// with each error behind its own position and no source excerpt, with
-// [ErrorListLimit] problems at most and a last row that counts the rest.
-// A wrapper such as [fmt.Errorf] around a SourceError logs as its own
+// with each error behind its own position and without a source excerpt. It
+// shows at most [ErrorListLimit] problems and a last row that counts the
+// rest. A wrapper such as [fmt.Errorf] around a SourceError logs as its own
 // message, which holds the list [SourceError.Error] returns.
 func (e *SourceError) LogValue() slog.Value {
 	return logValue(e)
 }
 
 // FormatError renders err as plain text for a log or a terminal without
-// color. Its message comes first as the tree [NewErrorTree] builds, with
-// a connector in front of each error below another and each error behind
-// the position its location resolved to:
+// color. Its message comes first as the tree [NewErrorTree] builds, with a
+// connector in front of each error below another and each error behind the
+// position its location resolved to:
 //
 //	cafe.yaml: 2 schema violations
 //	|-- 6:8: $.spec.sla: string does not match pattern
 //	`-- 22:11: $.spec.hours.days: expected "array", got "string"
 //
-// An excerpt follows for each source the bindings in err touch, led by
-// the name of its source when there are several. Each excerpt shows the
+// An excerpt follows for each source the bindings in err touch, led by the
+// name of its source when err touches several. Each excerpt shows the
 // marked lines with context lines on either side, carets under each
-// location, and the message of each error below a binding beside its
-// caret. The context lines and the width of long lines come from opts, as
-// [ExcerptOption] describes. An excerpt of a binding that [Detach]
-// detached keeps those of the options Detach received instead.
+// location, and the message of each error below a binding beside its caret.
+// The context lines and the width of long lines come from opts, as
+// [ExcerptOption] describes. An excerpt of a binding that [Detach] detached
+// keeps those of the options Detach received instead.
 //
 // A line starting "no excerpt:" follows the excerpts for each binding
-// [Bindings] yields whose tree resolves no location, with the reason
-// [SourceError.Unresolved] returns for it. A binding with no reason, and
-// one whose reason wraps
-// [go.jacobcolvin.com/niceyaml/paths.ErrNoDocument], gets no such line. A
-// source with excerpts off, as [WithExcerpts] sets it, adds no excerpt and
-// no line in its place.
+// [Bindings] yields whose tree does not resolve any location, with the
+// reason [SourceError.Unresolved] returns for it. A binding without a
+// reason, and one whose reason wraps
+// [go.jacobcolvin.com/niceyaml/paths.ErrNoDocument], does not get such a
+// line. A source with excerpts off, as [WithExcerpts] sets it, does not add
+// an excerpt or a line in its place.
 //
 // FormatError looks through the wrappers and joins around a [SourceError]
-// and renders every problem, however many err holds. An error bound to no
-// source renders as its tree alone, with the path of its [*Error] in
-// front, as "@.open: closes before it opens". An error whose tree renders
-// nothing renders its message instead. The output holds no escape
-// sequences, since control characters render as their pictures and a tab
-// as four spaces. A nil err renders as "".
+// and renders every problem, however many err holds. An error that is not
+// bound to a source renders as its tree alone, with the path of its
+// [*Error] in front, as "@.open: closes before it opens". An error whose
+// tree renders as empty text renders its message instead. Control
+// characters render as their pictures and a tab as four spaces, so the
+// output does not hold escape sequences. A nil err renders as "".
 func FormatError(err error, opts ...ExcerptOption) string {
 	return formatError(err, newExcerptConfig(opts), 0)
 }
@@ -3189,7 +3236,7 @@ func formatError(err error, cfg excerptConfig, limit int) string {
 	return joinParts(parts...)
 }
 
-// renderErrorTree lays t out as plain text, each child behind a connector
+// renderErrorTree renders t as plain text, each child behind a connector
 // as [FormatError] shows. Each text passes through [escape.Message], so
 // text the library did not write cannot send escape sequences.
 func renderErrorTree(t ErrorTree) string {
@@ -3217,9 +3264,9 @@ func formatVerb(f fmt.State, verb rune, err error) {
 	}
 }
 
-// logValue returns the tree of err cut to [ErrorListLimit] problems, or
-// the [messageTree] of err when the tree has no row, such as for a bound
-// join of typed-nil errors.
+// logValue returns the tree of err cut to [ErrorListLimit] problems. It
+// returns the [messageTree] of err instead when the tree does not have a
+// row, such as for a bound join of typed-nil errors.
 func logValue(err error) slog.Value {
 	tree, _ := limitTree(NewErrorTree(err), ErrorListLimit)
 
@@ -3260,20 +3307,22 @@ func writeString(f fmt.State, s string) {
 	_, _ = io.WriteString(f, s) //nolint:errcheck // Formatter has no error channel.
 }
 
-// Range returns the range in the source that the error points at and
-// true. It is the range the error carries, or the content of the token at
-// its position or at the node its path resolves to, across several lines
-// for a token that spans them. For a position from [AtPosition] inside a
-// token, on the spaces before it, or on a later line of a multi-line
-// token, the range starts where the content of the token starts, so it
-// can differ from [SourceError.Position]. For a path the document leaves
-// out, or one that enters an alias it cannot follow, the range covers the
-// token [SourceError.Nearest] describes. The range is in the coordinates
+// Range returns the range in the source that the error points at and true.
+// It is the range the error carries, or the content of the token at its
+// position or at the node its path resolves to. For a token that spans
+// several lines, the range spans them too. The range is in the coordinates
 // of [Source.Lines].
 //
-// Range reports false when the error carries no location or its location
-// did not resolve, as [SourceError.Unresolved] explains, and for a nil
-// SourceError.
+// A position from [AtPosition] can fall inside a token, on the spaces
+// before it, or on a later line of a multi-line token. The range then
+// starts where the content of the token starts, so it might differ from
+// [SourceError.Position]. For a path the document leaves out, or one that
+// enters an alias it cannot follow, the range covers the token
+// [SourceError.Nearest] describes.
+//
+// Range reports false when the error does not carry a location or its
+// location did not resolve, as [SourceError.Unresolved] explains, and for a
+// nil SourceError.
 func (e *SourceError) Range() (position.Range, bool) {
 	if e == nil || e.locErr != nil {
 		return position.Range{}, false
@@ -3284,16 +3333,16 @@ func (e *SourceError) Range() (position.Range, bool) {
 
 // Position returns the position [SourceError.Error] puts in front of the
 // message and true. It counts from 0 as [position.Position] does, so a
-// message that opens with "3:9:" has the position of line 2, column 8.
-// For a range or a path, it is the start of [SourceError.Range]. A
-// position from [AtPosition] comes back as the error gave it, where Range
-// starts at the content of the token the position falls in. A report
-// that names the place of an error as its message does reads Position,
-// and one that marks the text reads Range.
+// message that opens with "3:9:" has the position `{Line: 2, Col: 8}`. For
+// a range or a path, it is the start of [SourceError.Range]. Position
+// returns a position from [AtPosition] as the error gave it, but Range
+// starts at the content of the token the position falls in. A report that
+// names the place of an error as its message does reads Position, and one
+// that marks the text reads Range.
 //
-// Position reports false when Range does, for an error that carries no
-// location or whose location did not resolve. A nil SourceError has no
-// position.
+// Position reports false when Range does, for an error that does not carry
+// a location or whose location did not resolve. It also reports false for a
+// nil SourceError.
 func (e *SourceError) Position() (position.Position, bool) {
 	if e == nil || e.locErr != nil {
 		return position.Position{}, false
@@ -3302,28 +3351,28 @@ func (e *SourceError) Position() (position.Position, bool) {
 	return e.loc.pos, true
 }
 
-// Unresolved returns why the location of the bound error did not
-// resolve. It returns nil when the location resolved, and when the error
-// carries no location at all, as an error from [fmt.Errorf] bound through
-// the root of a document does. The reason is one of these:
+// Unresolved returns why the location of the bound error did not resolve.
+// It returns nil when the location resolved. It also returns nil when the
+// error does not carry a location, such as an error from [fmt.Errorf] bound
+// through the root of a document. The reason is one of these:
 //
 //   - [ErrOutOfRange] for a location on a line the source does not hold or
 //     at a column before the first.
-//   - [ErrPathNeedsDocument] for a path with no single document to resolve
-//     in.
+//   - [ErrPathNeedsDocument] for a path without a single document to
+//     resolve in.
 //   - The resolution error from [go.jacobcolvin.com/niceyaml/paths] for a
-//     path that selects nothing in the document.
-//   - [ErrNoLocation] for a path whose token carries no position.
+//     path that does not select anything in the document.
+//   - [ErrNoLocation] for a path whose token does not carry a position.
 //   - [ErrAmbiguousPath] for a path that names the entries of several keys
 //     of a decoded map.
 //
 // A path to a key a mapping leaves out binds at that mapping, as
-// [SourceError.Nearest] describes, and has no reason. A path that enters
-// an alias the document cannot follow is the one binding with both a
+// [SourceError.Nearest] describes, and does not have a reason. A path that
+// enters an alias the document cannot follow is the one binding with both a
 // position and a reason. It binds at the alias, and the reason wraps
-// [go.jacobcolvin.com/niceyaml/paths.ErrAlias], so a caller tells that
-// position from one at the value itself. A nil SourceError has nothing to
-// resolve.
+// [go.jacobcolvin.com/niceyaml/paths.ErrAlias], so a caller can distinguish
+// that position from one at the value itself. Unresolved returns nil for a
+// nil SourceError.
 func (e *SourceError) Unresolved() error {
 	if e == nil || errors.Is(e.locErr, errUnlocated) {
 		return nil
@@ -3339,33 +3388,33 @@ func (e *SourceError) Unresolved() error {
 // Nearest returns the path of the node the error is bound at, and true,
 // when the document does not hold the value the path of the error names.
 // Binding then locates the error at the nearest node above the path that
-// the document holds, and [SourceError.Path] and the message keep the path
-// the error carries. Nearest reports false for an error bound at the node
-// its path selects, for one with no path or no position, and for a nil
-// SourceError. The nearest node is one of these:
+// the document holds. [SourceError.Path] and the message keep the path the
+// error carries. Nearest reports false for an error bound at the node its
+// path selects, for one that lacks either a path or a position, and for a
+// nil SourceError. The nearest node is one of these:
 //
 //   - The mapping that lacks a key the path names, as for a required field
 //     or a misspelled name. The range covers the key of that mapping, or
-//     the token [AtPath] describes for a mapping with no key, and
+//     the token [AtPath] describes for a mapping without a key, and
 //     [SourceError.Unresolved] returns nil.
 //   - An alias on the path that the document cannot follow, such as one to
 //     an anchor of a reference document from [WithReferences]. The range
 //     covers the `*` of the alias, and SourceError.Unresolved returns a
 //     reason that wraps [go.jacobcolvin.com/niceyaml/paths.ErrAlias].
 //   - A value that decodes itself, for an error a [SelfValidator] returns
-//     at or below it, since its fields need not mirror the document. The
-//     range covers the text of the value. Every error below a slice, an
-//     array, or a map that decodes itself binds at it.
+//     at or below it, because its fields do not have to mirror the
+//     document. The range covers the text of the value. Every error below a
+//     slice, an array, or a map that decodes itself binds at it.
 //
-// An error about a required field thus binds at the key of the mapping
-// that lacks the field:
+// An error about a required field thus binds at the key of the mapping that
+// lacks the field:
 //
 //	niceyaml.NewError("name is required", niceyaml.AtPath(paths.Doc().Child("server", "name")))
 //	// cfg.yaml:3:1: $.server.name: name is required
 //
-// A key that a `<<` merge key could set from an alias the document cannot
-// follow has no position, since the document cannot tell which line holds
-// its value.
+// A `<<` merge key might set a key from an alias the document cannot
+// follow. The document does not show which line holds the value of such a
+// key, so the key does not have a position.
 func (e *SourceError) Nearest() (paths.Path, bool) {
 	if e == nil || e.locErr != nil || e.loc.near == nil {
 		return paths.Path{}, false
@@ -3377,55 +3426,57 @@ func (e *SourceError) Nearest() (paths.Path, bool) {
 // Annotate marks the error and every binding below it on view, as
 // [Annotate] marks them, and reports whether it marked any line. A caller
 // that holds one binding, such as one [Bindings] yields or [errors.As]
-// finds, thus marks its whole tree with one call. A binding with no
-// location, such as one of a summary that carries none, adds no mark for
-// itself. Neither does a binding with no line of its own, such as one of
-// a join, even with a location. The bindings below either one still mark
-// their lines. A binding that [Detach] detached marks nothing, and
-// neither does a nil SourceError.
+// finds, thus marks its whole tree with one call. A binding without a
+// location, such as the binding of a summary that does not carry one, does
+// not add a mark for itself. Neither does a binding without a line of its
+// own, such as the binding of a join, even with a location. The bindings
+// below either one still mark their lines. A binding that [Detach] detached
+// does not mark anything, and neither does a nil SourceError.
 func (e *SourceError) Annotate(view *line.View) bool {
 	return Annotate(e, view)
 }
 
 // Annotate marks every binding in the tree of err on view, once each, on
-// the lines of its source that view holds, and reports whether it marked
-// any line. A viewer that shows a document with its errors in place marks
-// its view and renders it as it is:
+// the lines of its source that view holds. It reports whether it marked any
+// line. A viewer that shows a document with its errors in place marks its
+// view and renders it as it is:
 //
 //	view := source.View()
 //	niceyaml.Annotate(err, view)
 //	lipgloss.Println(p.Print(view))
 //
-// Each binding highlights its location with [kind.GenericError] and
-// labels the same columns with an annotation in [kind.TextError] below
-// each line the highlight covers. A renderer draws a caret run under the
-// columns of each annotation. The first annotation on the line of the
-// location carries its [SourceError.Message], with each tab as four
-// spaces, and the others carry no message. An error with no message thus
-// gets caret runs alone.
+// Each binding highlights its location with [kind.GenericError] and labels
+// the same columns with an annotation in [kind.TextError] below each line
+// the highlight covers. A renderer draws a caret run under the columns of
+// each annotation. The first annotation on the line of the location carries
+// its [SourceError.Message], with each tab as four spaces, and the others
+// do not carry a message. An error without a message thus gets caret runs
+// alone.
 //
 // A location whose highlight leaves out its own line, such as a position
-// past the end of a line, gets an annotation of no width at its column.
-// The annotation makes [line.View.Hunks] keep the line. A column past the
-// end of its line moves to the column after its last rune. A binding
-// whose location did not resolve adds no mark. Neither does a binding
-// with no line of its own, such as one of a join with a location, because
-// each problem of the join that carries no location marks that location.
+// past the end of a line, gets a zero-width annotation at its column. The
+// annotation makes [line.View.Hunks] keep the line. A column past the end
+// of its line moves to the column after its last rune. A binding whose
+// location did not resolve does not add a mark. Each problem of a join that
+// does not carry a location marks the location of the join. The binding of
+// the join does not have a line of its own, so it does not add a mark even
+// with a location.
 //
-// Annotate finds each line by identity, so the view may be the whole
-// source, a slice of it, or a diff against another revision, and a
-// binding marks only the lines of its own source. A line keeps each mark
-// once, so marking a view again, or with a binding inside an error that
-// marked it already, doubles no message. Annotate marks a source with
-// excerpts off too, because the caller decides who sees the view. A
-// binding that [Detach] detached keeps no line of any view, so it marks
-// nothing. Annotate reports true when it marked a line, counting one that
+// Annotate finds each line by identity, so the view can be the whole
+// source, a slice of it, or a diff against another revision. A binding
+// marks only the lines of its own source. A line keeps each mark once, so
+// marking a view again, or with a binding inside an error that marked it
+// already, does not double a message. Annotate marks a source with excerpts
+// off too, because the caller decides who sees the view. A binding that
+// [Detach] detached does not keep a line of any view, so it does not mark
+// anything. Annotate reports true when it marked a line, counting one that
 // held the marks already, and false for a nil err.
 //
 // A unified diff shows each unchanged line as the line of the after
 // revision, so a binding of the before revision marks only the lines the
-// diff deletes from it. [go.jacobcolvin.com/niceyaml/diff.Result.UnifiedRow]
-// maps each line of the before revision to its row.
+// diff deletes from it.
+// [go.jacobcolvin.com/niceyaml/diff.Result.UnifiedRow] maps each line of
+// the before revision to its row.
 func Annotate(err error, view *line.View) bool {
 	sources, positions := treePositions(slices.Collect(Bindings(err)), true, nil, nil)
 
@@ -3441,27 +3492,28 @@ func Annotate(err error, view *line.View) bool {
 	return marked
 }
 
-// Excerpt returns a [line.View] of the source the error is bound to
-// around the locations of its tree, and true. It marks a fresh
-// [Source.View] as [Annotate] does, with a caret run alone at the location
-// of the root, since the tree [FormatError] prints above the excerpt names
-// the root. [line.View.Hunks] then keeps the context lines opts set on
-// either side of each marked line, with distant locations in separate
-// hunks, and [line.View.Clip] cuts long lines to the width opts set, as
-// [ExcerptOption] describes. The lines keep their numbers in the source,
-// so any [go.jacobcolvin.com/niceyaml/printer.Printer] renders the
-// excerpt with the line numbers of the file.
+// Excerpt returns a [line.View] of the source the error is bound to around
+// the locations of its tree, and true. It marks a fresh [Source.View] as
+// [Annotate] does. The location of the root gets a caret run alone, because
+// the tree that [FormatError] prints above the excerpt names the root.
+// [line.View.Hunks] then keeps the context lines that opts sets on either
+// side of each marked line, with distant locations in separate hunks.
+// [line.View.Clip] cuts long lines to the width that opts sets, as
+// [ExcerptOption] describes. The lines keep their numbers in the source, so
+// any [go.jacobcolvin.com/niceyaml/printer.Printer] renders the excerpt
+// with the line numbers of the file.
 //
 // Excerpt leaves out a node bound to another source and a node whose
-// location does not resolve. It reports false, with no view, when no
-// location in the tree resolves in the source, when the source has
-// excerpts off, as [WithExcerpts] describes, and for a nil SourceError.
+// location does not resolve. It returns a nil view and false for a nil
+// SourceError and for a source with excerpts off, as [WithExcerpts]
+// describes. It does the same for a tree in which every location fails to
+// resolve in the source.
 //
 // A binding that [Detach] detached builds its excerpt from the lines it
 // kept, with the context lines and the width of the options Detach
-// received, whatever opts holds. The view holds those lines alone,
-// so its indices are not those of [Source.Lines]. Each line keeps its
-// number in the file.
+// received, whatever opts holds. The view holds those lines alone, so its
+// indices differ from those of [Source.Lines]. Each line keeps its number
+// in the file.
 func (e *SourceError) Excerpt(opts ...ExcerptOption) (*line.View, bool) {
 	if e == nil {
 		return nil, false
@@ -3477,15 +3529,15 @@ func (e *SourceError) Excerpt(opts ...ExcerptOption) (*line.View, bool) {
 	return src.excerpt(positions[src], newExcerptConfig(opts))
 }
 
-// excerptSource is the text the excerpts of a binding show: the
-// [*Source] the binding is bound to, or the [*keptSource] a detached
+// excerptSource is the text that the excerpts of a binding show. It is the
+// [*Source] the binding is bound to, or the [*keptSource] that a detached
 // binding holds in its place.
 type excerptSource interface {
 	// Name returns the name of the text, as [Source.Name] returns it.
 	Name() string
-	// The excerpt method returns a view of the text with marks on it, cut
-	// to hunks and clipped as cfg sets, or as the options the text kept.
-	// It reports false when it marked no line.
+	// The excerpt method returns a view of the text with marks on it, cut to
+	// hunks and clipped as cfg sets, or as the options the text kept. It
+	// reports false when it did not mark a line.
 	excerpt(marks []excerpt.Mark, cfg excerptConfig) (*line.View, bool)
 	// The live method returns the Source of the text, or nil for the text
 	// a detached binding kept.
@@ -3516,7 +3568,7 @@ func (s *Source) excerpt(positions []excerpt.Mark, cfg excerptConfig) (*line.Vie
 
 // marks reports whether the location of e, or of a binding below it,
 // resolved, so an excerpt marks a line for the tree of e. A binding that
-// [SourceError.headsAlone] reports marks no line.
+// [SourceError.headsAlone] reports does not mark a line.
 func (e *SourceError) marks() bool {
 	found := false
 
@@ -3545,11 +3597,11 @@ func joinParts(parts ...string) string {
 
 // treePositions returns the sources the trees of bindings touch, as
 // [SourceError.origin] gives them, in walk order, with the resolved
-// locations bound to each. A root carries its message only when labeled
-// is set, and a node in skipped adds nothing. A node in quiet adds its
-// source and no mark. The mark of a warning carries the "warning:" label
-// beside its message, and a detail takes the severity of the problem it
-// explains and never the label.
+// locations bound to each. A root carries its message only when labeled is
+// true, and a node in skipped does not add anything. A node in quiet adds
+// its source but not a mark. The mark of a warning carries the "warning:"
+// label beside its message. A detail takes the severity of the problem it
+// explains but never the label.
 func treePositions(
 	bindings []*SourceError,
 	labeled bool,
@@ -3621,7 +3673,7 @@ func (e *SourceError) isWarning() bool {
 	return !e.heads() && isWarning(e.err)
 }
 
-// checkInRange reports [ErrOutOfRange] when loc starts on a line lines
+// checkInRange reports [ErrOutOfRange] when loc starts on a line that lines
 // does not hold or at a column before the first. The message counts lines
 // and columns from 1, as the text does.
 func checkInRange(loc location, lines line.Lines) error {
@@ -3642,26 +3694,26 @@ func checkInRange(loc location, lines line.Lines) error {
 	return nil
 }
 
-// PanicError is the error of a panic that the parse or a decode
-// recovered. Value holds the value the code passed to panic, and Stack
-// holds the stack of the goroutine at the panic, as [debug.Stack] formats
-// it. The message leaves the stack out.
+// PanicError is the error of a panic that the parse or a decode recovered.
+// Value holds the value the code passed to panic, and Stack holds the stack
+// of the goroutine at the panic, as [debug.Stack] formats it. The message
+// leaves the stack out.
 //
 // The go-yaml parser and decoder run under a recover, and so do the
 // UnmarshalYAML and UnmarshalText methods and the [CustomUnmarshaler]
-// functions the decoder calls. A panic in any of them comes back as a
-// [SourceError] that holds a PanicError, with a message such as "decoder
+// functions the decoder calls. A panic in any of them reaches the caller as
+// a [SourceError] that holds a PanicError, with a message such as "decoder
 // panicked: registry not initialized":
 //
 //	if p, ok := errors.AsType[*niceyaml.PanicError](err); ok {
 //		slog.Error("decode panicked", "value", p.Value, "stack", string(p.Stack))
 //	}
 //
-// A panic is a bug in code and says nothing about the document. The error
-// matches none of [ErrDecode], [ErrSyntax], and the decode labels such as
-// [ErrWrongKind], and [IsInvalid] does not report it. Nothing recovers a
-// panic in a [Validator] or a [SelfValidator], so it reaches the caller as
-// a panic.
+// A panic is a bug in code, not a fault of the document. The error does not
+// match [ErrDecode], [ErrSyntax], or a decode label such as [ErrWrongKind],
+// and [IsInvalid] does not report it. The library does not recover a panic
+// in a [Validator] or a [SelfValidator], so such a panic reaches the caller
+// as a panic.
 type PanicError struct {
 	// Value is the value the code passed to panic.
 	Value any
@@ -3685,10 +3737,10 @@ func (e *PanicError) Unwrap() error {
 	return nil
 }
 
-// panicked returns p sealed with marks on top, with a message that
-// starts with in, the name of the code that panicked, as "decoder
-// panicked: boom". The seal keeps a panic value, even an [*Error], from
-// adding a location, a problem, or a fault.
+// panicked returns p sealed with marks on top. The message starts with in,
+// the name of the code that panicked, as in "decoder panicked: boom". The
+// seal keeps a panic value, even an [*Error], from adding a location, a
+// problem, or a fault.
 func panicked(in string, p *PanicError, marks ...error) *markedError {
 	return &markedError{
 		err:     p,
@@ -3701,7 +3753,7 @@ func panicked(in string, p *PanicError, marks ...error) *markedError {
 
 // holdsPanic reports whether err is, or wraps, a [*PanicError]. The
 // document is not at fault for such an error, so a decode and the parse
-// pass it on as they pass on the error of a context that ended.
+// return it as they return the error of a context that ended.
 func holdsPanic(err error) bool {
 	var p *PanicError
 
@@ -3709,8 +3761,9 @@ func holdsPanic(err error) bool {
 }
 
 // markedError is an error with marks of its own on top of the error it
-// holds. A sealed one unwraps to nothing, so no chain walk prints the
-// position and excerpt go-yaml writes into the text of that error.
+// holds. A sealed one does not unwrap to an error. A chain walk thus does
+// not print the position and the excerpt that go-yaml writes into the text
+// of that error.
 type markedError struct {
 	err error
 	// The text that stands in for the message of err. A sealed error always
@@ -3720,7 +3773,7 @@ type markedError struct {
 	marks []error
 	// The targets the Is method never matches through err.
 	refused []error
-	// The error unwraps to nothing.
+	// The error does not unwrap to err.
 	sealed bool
 }
 
@@ -3762,8 +3815,8 @@ func (e *markedError) As(target any) bool {
 	return e.sealed && errors.As(e.err, target)
 }
 
-// without returns e without mark among its marks. It shares no marks
-// with e.
+// without returns e without mark among its marks. The result does not share
+// a slice of marks with e.
 func (e *markedError) without(mark error) *markedError {
 	out := *e
 	out.marks = slices.DeleteFunc(slices.Clone(e.marks), func(m error) bool { return errors.Is(m, mark) })

@@ -12,8 +12,8 @@ import (
 )
 
 // knownKeys returns each known key of cfg that the document of n holds
-// below the node of n. The map holds the `@` path of each key from that
-// node, by the position of the key. It returns nil for a decode that
+// below the node of n. The map takes the position of each key to the `@`
+// path of the key from that node. It returns nil for a decode that
 // accepts unknown fields.
 func (n *Node) knownKeys(cfg decodeConfig) map[position.Position]paths.Path {
 	if !cfg.disallowUnknownFields || len(cfg.knownKeys) == 0 {
@@ -39,9 +39,9 @@ func (n *Node) knownKeys(cfg decodeConfig) map[position.Position]paths.Path {
 }
 
 // admitKnownKeys returns view without the entry of each known key of cfg
-// that [leavesOut] reports for a decode into a value of type t. The view
-// is the node that the decoder reads for the node of n. The decoder still
-// fills the field of each known key that t declares.
+// that a decode into a value of type t leaves out, as [leavesOut]
+// reports. The view is the node that the decoder reads for the node of n.
+// The decoder still fills the field of each known key that t declares.
 func (n *Node) admitKnownKeys(cfg decodeConfig, t reflect.Type, view ast.Node) ast.Node {
 	drop := make(map[position.Position]bool)
 
@@ -62,14 +62,13 @@ func (n *Node) admitKnownKeys(cfg decodeConfig, t reflect.Type, view ast.Node) a
 
 // leavesOut reports whether a decode into a value of type t leaves out
 // the entry at path, an `@` path whose last selector names the key of
-// the entry. The decode leaves out an entry that the struct reading it
-// has no field for, as [keyField] finds the fields. It also leaves out
-// every entry below a value that decodes itself, as
+// the entry. The decode leaves out each entry that does not have a field
+// in the struct that reads the entry, as [keyField] finds the fields. It
+// also leaves out every entry below a value that decodes itself, as
 // [unmarshaler.Options.Whole] reports for u. The unmarshaler of such a
-// value thus never reads a known key. A map and an interface keep every
-// entry.
-// The answer comes from the types alone, and leavesOut calls no
-// unmarshaler.
+// value thus never reads a known key. Maps and interfaces keep every
+// entry. The answer comes from the types alone, and leavesOut does not
+// call an unmarshaler.
 func leavesOut(u unmarshaler.Options, t reflect.Type, path paths.Path) bool {
 	left := path.Len()
 
@@ -106,15 +105,17 @@ func leavesOut(u unmarshaler.Options, t reflect.Type, path paths.Path) bool {
 	return false
 }
 
-// keyField returns the type of the field of t, a struct type, that reads
-// the key name, and false when t has no such field. The field is one of
-// t itself, or one of a struct that t holds inline, at any depth, as
-// [yamlfield.Name] names the fields. A field of t wins over a field of an
-// inline struct, as it does in go-yaml. An inline struct that decodes
-// itself, as [unmarshaler.Options.Whole] reports for u, reads its keys
-// through its unmarshaler. For such a key, keyField returns the type of
-// that struct. The seen set holds the structs the search has read, so a
-// struct that holds itself inline ends the search.
+// keyField returns the type of the field that reads the key name in t, a
+// struct type. It returns false when t does not have such a field. The
+// field is one of t itself, or one of a struct that t holds inline, at
+// any depth, as [yamlfield.Name] names the fields. A field of t takes
+// precedence over a field of an inline struct, as it does in go-yaml.
+//
+// Some inline structs decode themselves, as [unmarshaler.Options.Whole]
+// reports for u. Each such struct reads its keys through its
+// unmarshaler, so for those keys keyField returns the type of the struct.
+// The seen set holds the structs that the search has read. The search
+// skips those structs, so it ends for a struct that holds itself inline.
 func keyField(u unmarshaler.Options, t reflect.Type, name string, seen map[reflect.Type]bool) (reflect.Type, bool) {
 	seen[t] = true
 

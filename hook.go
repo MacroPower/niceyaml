@@ -10,8 +10,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// The calls that niceyaml hands to its manifest and schema packages, as
-// the package [hook] describes.
+// init sets the calls that niceyaml hands to its manifest and schema
+// packages, as the package [hook] describes.
 //
 //nolint:gochecknoinits // The hooks reach no API, so only init can set them.
 func init() {
@@ -61,9 +61,11 @@ func init() {
 // relocation sends each error bound in a working [Source] to the document
 // that the working text stands for.
 type relocation struct {
-	// The document the working text stands for, where each error binds.
+	// The document that the working text stands for. Each error binds
+	// there.
 	home *Node
-	// Gives the place in home of a location in the working text.
+	// The function that gives the place in home of a location in the
+	// working text.
 	locate func(hook.Located) hook.Place
 }
 
@@ -83,9 +85,9 @@ func newWorkingSource(text string, home *Node, us []Unmarshaler, locate func(hoo
 	return src
 }
 
-// relocate moves e, bound in a working Source at the location that found
-// gave it, to the home document of r. It returns the details that the
-// place of the location adds.
+// relocate moves e from a working Source to the home document of r. In
+// the working Source, e binds at the location that found gives it. It
+// returns the details that the place of the location adds.
 func (e *SourceError) relocate(r *relocation, found anchor) []error {
 	var at hook.Located
 
@@ -129,8 +131,9 @@ func (e *SourceError) addRelocatedDetails(r *relocation, details []error) {
 	}
 }
 
-// rewrap returns err, a binding, with wrap applied to the error it binds,
-// as [hook.Rewrap] describes.
+// rewrap returns a copy of err, a binding, with wrap applied to the error
+// that err binds, as [hook.Rewrap] describes. For any other err, it
+// returns wrap(err).
 func rewrap(err error, wrap func(error) error) error {
 	x, ok := err.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
 	if !ok || x == nil {
@@ -160,7 +163,7 @@ func rewrap(err error, wrap func(error) error) error {
 }
 
 // layerNodes returns the document of each layer that s merges, lowest
-// first, or nil for a Source that merges none.
+// first, or nil for a Source that does not merge layers.
 func (s *Source) layerNodes() []any {
 	if s == nil || s.layers == nil {
 		return nil

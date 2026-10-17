@@ -29,12 +29,12 @@ import (
 //	)
 //
 // The function gets a value whose struct fields hold the defaults of
-// their own types, and changes what it needs. A parent thus wins where
-// its function writes, and the defaults of each child hold elsewhere.
-// Above, the kitchen printer of a CafeSpec defaults to port 9101, and
-// every other Printer to 9100. A later WithDefaults for a type replaces
-// an earlier one. The Defaults section of the package documentation
-// describes which values a decode creates.
+// their own types, and changes what it needs. The function of a parent
+// thus decides each value that it writes, and the defaults of each child
+// hold elsewhere. In the example, the kitchen printer of a CafeSpec
+// defaults to port 9101, and every other Printer to 9100. A later
+// WithDefaults for a type replaces an earlier one. The Defaults section of
+// the package documentation describes which values a decode creates.
 //
 // A decode calls fn once for each value it creates, so a map or a
 // pointer that fn sets belongs to that value alone. A panic in fn makes
@@ -55,10 +55,10 @@ func WithDefaults[T any](fn func(*T)) DecodeOption {
 }
 
 // Defaults returns the value of type T that [Node.Decode] starts from with
-// opts. It is the zero value with each struct field built from the
-// defaults of its own type, after which the function that [WithDefaults]
-// gives T runs. A caller that fills its own value for [Node.DecodeInto]
-// starts there:
+// opts. The value starts as the zero value, with each struct field built
+// from the defaults of its own type. The function that [WithDefaults]
+// gives T then runs on it. A caller that fills its own value for
+// [Node.DecodeInto] starts there:
 //
 //	spec := niceyaml.Defaults[CafeSpec](decoding)
 //	if err := doc.DecodeInto(ctx, &spec, decoding); err != nil {
@@ -76,9 +76,9 @@ func Defaults[T any](opts ...DecodeOption) T {
 // defaultFuncs holds the function that [WithDefaults] gives each type.
 type defaultFuncs map[reflect.Type]func(reflect.Value)
 
-// value returns the defaults of t: the zero value, with each struct field
-// built from the defaults of its own type, and then the function of t.
-// The value is addressable.
+// value returns the defaults of t. It starts from the zero value and sets
+// each struct field to the defaults of the type of the field. It then
+// runs the function of t on the result. The value is addressable.
 func (d defaultFuncs) value(t reflect.Type) reflect.Value {
 	v := reflect.New(t).Elem()
 	if len(d) == 0 {
@@ -102,9 +102,9 @@ func (d defaultFuncs) sets(t reflect.Type) bool {
 	return ok
 }
 
-// fillFields sets each field of v, when v is a struct, to the defaults of
-// the type of the field. A field of an unexported embedded struct cannot
-// take a value whole, so its own fields take theirs.
+// fillFields sets each field of v to the defaults of the type of the
+// field, when v is a struct. An unexported embedded field cannot take a
+// value whole, so fillFields sets each of its own fields instead.
 func (d defaultFuncs) fillFields(v reflect.Value) {
 	if v.Kind() != reflect.Struct {
 		return
@@ -126,7 +126,7 @@ func (d defaultFuncs) fillFields(v reflect.Value) {
 }
 
 // start returns the defaults of t for a decode that creates a value of t
-// from node. A panic in a function of [WithDefaults] comes back as an
+// from node. It returns a panic in a function of [WithDefaults] as an
 // error at node that holds a [PanicError].
 func (d defaultFuncs) start(t reflect.Type, node ast.Node) (reflect.Value, error) {
 	var (
@@ -153,11 +153,11 @@ func (d defaultFuncs) start(t reflect.Type, node ast.Node) (reflect.Value, error
 }
 
 // startTarget allocates each nil pointer below v, a non-nil pointer, as
-// [allocate] does, and returns the last with the value the decode starts
-// from there. The value is the defaults of its type when v held a nil
-// pointer, and a copy of the value v reaches otherwise, which the
-// decoder overwrites. It returns an invalid start past [maxPointerDepth]
-// pointers.
+// [allocate] does. It returns the last pointer and the value that the
+// decode starts from there. When v held a nil pointer, the start is the
+// defaults of its type. Otherwise the start is a copy of the value that v
+// reaches, because the decoder overwrites that value. The start is
+// invalid past [maxPointerDepth] pointers.
 func startTarget(v any, cfg decodeConfig, node ast.Node) (any, reflect.Value, error) {
 	created := false
 
@@ -195,7 +195,7 @@ func startTarget(v any, cfg decodeConfig, node ast.Node) (any, reflect.Value, er
 
 // fillDefaults builds again each value that a decode of node into target
 // created, from the start of its type, as [decodewalk.Fill] describes.
-// The value target points to started from start.
+// The value that target points to started from start.
 func (n *Node) fillDefaults(
 	ctx context.Context,
 	dec *yaml.Decoder,

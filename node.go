@@ -51,14 +51,16 @@ type document struct {
 	// The root Node of the document.
 	node *Node
 	// The node the document parsed into. For a document that did not
-	// parse, it is the stand-in [docparse.Parse] made, which has no body.
+	// parse, it is the stand-in [docparse.Parse] made, which does not have
+	// a body.
 	root *ast.DocumentNode
-	// The syntax error of a document that did not parse, bound to the
-	// Source and to the document bindSyntaxErrors picks for it, which is
-	// nil for one that parsed.
+	// The syntax error of a document that did not parse, or nil for one
+	// that parsed. The bindSyntaxErrors function binds it to the Source
+	// and to the document that it picks for the error.
 	err error
 	// Returns the resolver of every path in root, and creates it on the
-	// first call. No Node edits the tree, so it binds the aliases once.
+	// first call. Nodes do not edit the tree, so the resolver binds the
+	// aliases once.
 	resolver func() *paths.Resolver
 	// Returns the tree the go-yaml decoder reads for the document, and
 	// builds it on the first call.
@@ -75,8 +77,8 @@ type document struct {
 	// which the extent of a Node searches.
 	positioned token.Tokens
 	index      int
-	// The index of root in the Docs of the file the Source parsed, which
-	// can differ from index, since preamble nodes fold into documents.
+	// The index of root in the Docs of the file that the Source parsed. It
+	// can differ from index, because preamble nodes fold into documents.
 	fileIndex int
 	// The number of tokens at the start of tokens before the content.
 	preamble int
@@ -88,7 +90,7 @@ func (d *document) pathResolver() *paths.Resolver {
 }
 
 // newResolver creates the [paths.Resolver] of the document. A document
-// that did not parse gets one with no document, so a path returns an
+// that did not parse gets one without a document, so a path returns an
 // error rather than an empty match.
 func (d *document) newResolver() *paths.Resolver {
 	if d.err != nil {
@@ -98,37 +100,37 @@ func (d *document) newResolver() *paths.Resolver {
 	return paths.NewResolver(d.root)
 }
 
-// Node is a scope in a YAML document: the root of the document, which
-// [Source.Documents] and [Source.Document] return, or a node a path
-// selects. Every method reads from the node and resolves an `@` path from
-// it, and a `$` path resolves from the root of the document through any
-// Node. [Node.Decode] decodes the node alone, [Node.Validate] runs a
-// [Validator] on it, and [Node.Bind] resolves the `@` paths of an error
-// from it, so a check written for the type of a value reports the same
-// lines whether the value is the whole document or one inside it.
+// Node is a scope in a YAML document. It is either the root of the
+// document, which [Source.Documents] and [Source.Document] return, or a
+// node that a path selects. Every method reads from the node and resolves
+// an `@` path from it. A `$` path resolves from the root of the document
+// through any Node. [Node.Decode] decodes the node alone, [Node.Validate]
+// runs a [Validator] on it, and [Node.Bind] resolves the `@` paths of an
+// error from it. A check written for the type of a value thus reports the
+// same lines whether the value is the whole document or one inside it.
 //
 // Receive instances from [Source.Documents], [Source.AllDocuments],
 // [Source.Document], [Node.At], [Node.Nodes], [Node.Document],
 // [SourceError.Node], or [SourceError.Document].
 //
 // The Decoding section of the package documentation describes the steps
-// a decode runs, and the Scoped Nodes section describes what a Node from
+// a decode runs. The Scoped Nodes section describes what a Node from
 // [Node.At] or [Node.Nodes] reports. [Node.DocumentAST],
 // [Node.DocumentIndex], [Node.Preamble], [Node.FilePath], and
 // [Node.PathAt] describe the document as a whole, whatever Node of it a
 // caller holds.
 //
-// A document with a YAML syntax error has no tree. The methods [Node.Err]
-// lists return the error it returns, and the methods that read the tokens
-// and the lines work as they do for any document, so a caller renders or
-// diffs a document that does not parse yet.
+// A document with a YAML syntax error does not have a tree. The methods
+// that [Node.Err] lists return the error that Err returns. The methods
+// that read the tokens and the lines work as they do for any document, so
+// a caller renders or diffs a document that does not parse yet.
 //
-// A Node of the Source [NewSourceFromLayers] builds belongs to the
-// document its layers merge into, and each error it returns binds in the
+// A Node of the Source that [NewSourceFromLayers] builds belongs to the
+// document that its layers merge into. Each error it returns binds in the
 // file of a layer, as NewSourceFromLayers describes.
 type Node struct {
 	// The node the scope selects, which At or Nodes resolves once when it
-	// scopes the Node. The root of a document leaves it unset, since its
+	// scopes the Node. The root of a document leaves it unset, because its
 	// node is the body of the document.
 	node   ast.Node
 	source *Source
@@ -146,13 +148,13 @@ type Node struct {
 
 // DocumentAST returns the [*ast.DocumentNode] of the whole document the
 // Node belongs to, the go-yaml node the document parsed into.
-// [Node.Document] returns the root [*Node] of the same document,
-// [Node.AST] returns the go-yaml node the Node selects, and [Node.Path]
-// is the path from the document root to it. The node is part of the
-// tree [Source.File] returns, which every Node of the Source shares and
-// resolves against, so a caller must not modify it. A document that did
-// not parse has no node, so DocumentAST returns nil for it, as [Node.Err]
-// describes.
+// [Node.Document] returns the root [*Node] of the same document.
+// [Node.AST] returns the go-yaml node the Node selects, and [Node.Path] is
+// the path from the document root to it. The node is part of the tree
+// that [Source.File] returns. Every Node of the Source shares that tree
+// and resolves against it, so a caller must not modify the node. A
+// document that did not parse does not have a node, so DocumentAST
+// returns nil for it, as [Node.Err] describes.
 func (n *Node) DocumentAST() *ast.DocumentNode {
 	if n.doc.err != nil {
 		return nil
@@ -181,14 +183,14 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 //
 // [Node.Decode], [Node.DecodeInto], [Node.DecodeAt],
 // [Node.DecodeIfPresent], [Node.Validate], [Node.At], [Node.Nodes], and
-// [Node.Ranges] return the error Err returns, and no [Validator] runs.
-// [Node.AST] and [Node.DocumentAST] return nil, and [Node.PathAt] reports
-// false for every position.
+// [Node.Ranges] return the error that Err returns, and they do not run a
+// [Validator]. [Node.AST] and [Node.DocumentAST] return nil, and
+// [Node.PathAt] reports false for every position.
 //
-// A panic in the parser fails the documents it was reading the same way,
-// and Err then returns an error that holds a [PanicError] and does not
-// match ErrSyntax. A "---" header that directly follows an anchor with no
-// value parses together with the document above it, so both documents
+// A panic in the parser fails the documents it was reading the same way.
+// Err then returns an error that holds a [PanicError] and does not match
+// ErrSyntax. A "---" header that directly follows an anchor without a
+// value parses together with the document above it. Both documents then
 // return the same error, bound to the one that holds its location.
 func (n *Node) Err() error {
 	if n == nil {
@@ -203,27 +205,31 @@ func (n *Node) Err() error {
 // path from the document root, whether it starts at `$` or `@`, as
 // [paths.Resolver] describes. A path below the Node therefore starts with
 // [Node.Path], which [paths.Path.Join] puts in front of an `@` path. The
-// resolver follows the aliases and merge keys of the go-yaml
-// nodes [Node.AST] and [Node.DocumentAST] return. The document creates
-// the resolver once, when the first of its Nodes needs it, and the
-// resolver binds the aliases of the document then. A [Validator] that
-// runs for each item of a list therefore binds them once, where a
-// resolver from [paths.NewResolver] binds them again for every item.
+// resolver follows the aliases and merge keys of the go-yaml nodes that
+// [Node.AST] and [Node.DocumentAST] return.
 //
-// A document that did not parse has no tree, as [Node.Err] describes, so
-// its resolver holds no document, as [paths.NewResolver] of a nil
-// document does. Every path it resolves returns an error wrapping
-// [paths.ErrNoDocument], where [paths.Resolver.Matches] returns no
-// matches and no error in an empty document that parsed.
+// The document creates the resolver once, when the first of its Nodes
+// needs it, and the resolver binds the aliases of the document then. A
+// [Validator] that runs for each item of a list therefore binds them
+// once, but a resolver from [paths.NewResolver] binds them again for every
+// item.
+//
+// A document that did not parse does not have a tree, as [Node.Err]
+// describes. Its resolver is thus the one that [paths.NewResolver] creates
+// for a nil document. Every path it resolves returns an error wrapping
+// [paths.ErrNoDocument]. In an empty document that parsed,
+// [paths.Resolver.Matches] instead returns an empty result and a nil
+// error.
 func (n *Node) Resolver() *paths.Resolver {
 	return n.doc.pathResolver()
 }
 
-// Document returns the root [*Node] of the document the Node belongs to,
-// so a Node from [Node.At] reaches the whole document, as a validator
-// that picks a schema from the file path or the content of the document
-// does. Every Node of a document returns the root [Source.AllDocuments]
-// returns, and that root returns itself. A nil Node belongs to none.
+// Document returns the root [*Node] of the document the Node belongs to.
+// A Node from [Node.At] thus reaches the whole document, as a validator
+// does when it picks a schema from the file path or the content of the
+// document. Every Node of a document returns the root that
+// [Source.AllDocuments] returns, and that root returns itself. A nil Node
+// does not belong to a document, so Document returns nil for it.
 func (n *Node) Document() *Node {
 	if n == nil {
 		return nil
@@ -233,10 +239,10 @@ func (n *Node) Document() *Node {
 }
 
 // AST returns the [ast.Node] the Node selects, the one [Node.Decode]
-// decodes. For the root Node that is the body of the whole document, and
-// for one from [Node.At] or [Node.Nodes] it is the node that method
-// resolved when it scoped the Node. The text of any node, including a
-// mapping or a sequence, is its String method:
+// decodes. For the root Node, it is the body of the whole document. For a
+// Node from [Node.At] or [Node.Nodes], it is the node that method resolved
+// when it scoped the Node. The String method of any node, a mapping or a
+// sequence included, returns its text:
 //
 //	scoped, err := doc.At(path)
 //	if err != nil {
@@ -246,18 +252,20 @@ func (n *Node) Document() *Node {
 //	fmt.Println(scoped.AST().String())
 //
 // The body is what the parser built: nil for an empty document, and a
-// comment group for one holding only comments. When the whole file holds
-// whitespace alone, or text the lexer emits nothing for such as a lone
-// "!", the body of its one document is a scalar holding the placeholder
-// token [tokens.Tokenize] makes, and [tokens.IsPlaceholder] tells it
-// apart from a scalar the file holds. A document of whitespace below a
-// "---" header has a nil body. AST returns each of these bodies as it
-// is, as such a document decodes to nothing. [Node.IsEmpty] reports
-// each of these documents, so a caller need not tell the bodies apart.
-// A document that did not parse has no body either, and [Node.Err]
-// tells it apart from an empty document. The node is part of the tree
-// [Source.File] returns, which every Node of the Source shares and
-// resolves against, so a caller must not modify it.
+// comment group for one holding only comments. A file might hold only
+// whitespace, or text that the lexer does not emit a token for, such as a
+// lone "!". The body of its one document is then a scalar that holds the
+// placeholder token [tokens.Tokenize] makes. [tokens.IsPlaceholder] tells
+// that scalar apart from a scalar the file holds. A document of whitespace
+// below a "---" header has a nil body.
+//
+// AST returns each of these bodies as it is, because such a document does
+// not decode to a value. [Node.IsEmpty] reports each of these documents,
+// so a caller does not need to tell the bodies apart. A document that did
+// not parse does not have a body either, and [Node.Err] tells it apart
+// from an empty document. The node is part of the tree that [Source.File]
+// returns. Every Node of the Source shares that tree and resolves against
+// it, so a caller must not modify the node.
 //
 // The node keeps the anchor or the tag written on it, so a type switch on
 // it can see an [*ast.AnchorNode] or an [*ast.TagNode] where the source
@@ -271,25 +279,27 @@ func (n *Node) AST() ast.Node {
 	return n.node
 }
 
-// At returns a [*Node] scoped to the node path selects. An `@` path
-// resolves from the receiver and a `$` path from the root of the
-// document, so a path from [Node.Path] or [Node.PathAt] of any Node of
-// the document scopes the node it names. The Node shares the source and
+// At returns a [*Node] scoped to the node that path selects. An `@` path
+// resolves from the receiver, and a `$` path resolves from the root of the
+// document. A path from [Node.Path] or [Node.PathAt] of any Node of the
+// document thus scopes the node it names. The Node shares the source and
 // the document with the receiver, and decodes, validates, and binds
 // errors as the Scoped Nodes section of the package documentation
 // describes.
 //
-// A path that selects nothing returns the error [paths.Resolver.Node]
-// describes, bound to the source. It wraps [paths.ErrNotFound] when
-// nothing exists at the path, and [paths.ErrNoDocument] too when the
-// document has no content. It wraps [paths.ErrAlias] for an alias on the
-// path that does not resolve, [paths.ErrExcessiveMerging] when `<<` merge
-// keys make the lookups read far more nodes than the document holds, and
-// [paths.ErrWildcard] for a path that could match several nodes, which
-// [Node.Nodes] scopes one by one. A document that did not parse returns
-// the syntax error [Node.Err] returns. The Scoped Nodes section describes
-// where a not-found error binds, and why only the error of At tells that
-// a value is absent.
+// A path that does not select a node returns the error that
+// [paths.Resolver.Node] describes, bound to the source. It wraps
+// [paths.ErrNotFound] when the document does not hold a value at the
+// path, and [paths.ErrNoDocument] too when the document does not have
+// content. It wraps [paths.ErrAlias] for an alias on the path that does
+// not resolve. It wraps [paths.ErrExcessiveMerging] when `<<` merge keys
+// make the lookups read far more nodes than the document holds. It wraps
+// [paths.ErrWildcard] for a path that can match several nodes, and
+// [Node.Nodes] scopes each node that such a path selects.
+//
+// A document that did not parse returns the syntax error that [Node.Err]
+// returns. The Scoped Nodes section describes where a not-found error
+// binds, and why only the error of At tells that a value is absent.
 func (n *Node) At(path paths.Path) (*Node, error) {
 	if n.doc.err != nil {
 		return nil, n.doc.err
@@ -307,14 +317,14 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 	return n.scoped(base, node), nil
 }
 
-// Nodes returns a [*Node] scoped to each node path selects, in document
-// order. A path with a `[*]`, `.*`, `..name`, or `..*` selector, which
-// [Node.At] rejects, thus scopes every element of a sequence, every entry
-// of a mapping, every entry with a name at any depth, or every node at
-// any depth, each once. The path resolves as for Node.At, and each Node
-// is scoped as one from Node.At is. [Node.Path] of each is the `$` path
-// that selects its node alone, so an error bound to it reports the
-// element it came from:
+// Nodes returns a [*Node] scoped to each node that path selects, in
+// document order. [Node.At] rejects a path with a `[*]`, `.*`, `..name`,
+// or `..*` selector. Through such a path, Nodes scopes every element of a
+// sequence, every entry of a mapping, every entry with a name at any
+// depth, or every node at any depth, each once. The path resolves as for
+// Node.At, and Nodes scopes each Node as Node.At scopes its result.
+// [Node.Path] of each is the `$` path that selects its node alone, so an
+// error bound to it reports the element it came from:
 //
 //	items, err := doc.Nodes(paths.Current().Child("items").IndexAll())
 //	if err != nil {
@@ -330,19 +340,23 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // [Each] turns that loop into a [Validator], so a decode or a
 // [MultiValidator] can run it beside other validators.
 //
-// The last selector of that path, which [paths.Path.Last] gives, names an
-// entry by the text [paths.Resolver.KeyName] gives its key.
+// The last selector of that path names an entry by the text that
+// [paths.Resolver.KeyName] gives its key. [paths.Path.Last] gives that
+// selector.
 //
-// A path that selects nothing returns no Nodes and no error, and so does
-// a path with a selector in a document with no content, where Node.At
-// returns an error wrapping [paths.ErrNoDocument]. The root path selects
-// the null under the "---" header of such a document, and nothing in one
-// without a header. The errors [paths.Resolver.Nodes] returns come back
-// bound to the source: one wrapping [paths.ErrAlias] for an alias that
-// does not resolve, and [ErrExcessiveAliasing] or
-// [paths.ErrExcessiveMerging] when aliases or merge keys lead a selector
-// to far more nodes than the document holds. A document that did not
-// parse returns the syntax error [Node.Err] returns.
+// A path that does not select a node returns an empty slice and a nil
+// error. A path with a selector returns the same in a document without
+// content, but Node.At returns an error wrapping [paths.ErrNoDocument]
+// for it. In such a document, the root path selects the null under the
+// "---" header. It does not select a node when the document lacks a
+// header.
+//
+// The errors that [paths.Resolver.Nodes] returns come back bound to the
+// source. An alias that does not resolve gives one wrapping
+// [paths.ErrAlias]. Aliases or merge keys that lead a selector to far
+// more nodes than the document holds give [ErrExcessiveAliasing] or
+// [paths.ErrExcessiveMerging]. A document that did not parse returns the
+// syntax error that [Node.Err] returns.
 func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	if n.doc.err != nil {
 		return nil, n.doc.err
@@ -407,7 +421,8 @@ func (n *Node) scoped(path paths.Path, node ast.Node) *Node {
 
 // extent returns the lines and the tokens of node in the document. The
 // lines end at the last one that holds content of those tokens. A node
-// with no token in the document, such as an implicit null, covers its line.
+// without a token in the document, such as an implicit null, covers its
+// line.
 func (n *Node) extent(node ast.Node) (position.Span, token.Tokens) {
 	first, last := astnode.Bounds(node)
 	if len(first) == 0 {
@@ -464,8 +479,9 @@ func (n *Node) extent(node ast.Node) (position.Span, token.Tokens) {
 }
 
 // lastContentLine returns the last line that holds content of tk other
-// than spaces, or false for none. Skipping the indentation the lexer folds
-// into a scalar keeps the line of a sibling out of the span.
+// than spaces, or false when tk does not hold such content on any line.
+// Skipping the indentation that the lexer folds into a scalar keeps the
+// line of a sibling out of the span.
 func (n *Node) lastContentLine(tk *token.Token) (int, bool) {
 	lines := n.source.lines
 
@@ -487,13 +503,13 @@ func (n *Node) lastContentLine(tk *token.Token) (int, bool) {
 	return last, found
 }
 
-// Path returns the scope of the [Node]: the `$` path from the document
-// root to the node, which is [paths.Doc] for the root Node of a document
-// and the joined paths for one from [Node.At]. A Node from [Node.Nodes]
-// reports the path that selects its node alone, so the Node for the first
-// match of `$.items[*]` reports `$.items[0]`. The path starts at `$`, so
-// it goes back to [Node.At], [Node.Ranges], or [AtPath] through any Node
-// of the document and names the same node.
+// Path returns the scope of the [Node], which is the `$` path from the
+// document root to the node. It is [paths.Doc] for the root Node of a
+// document and the joined paths for a Node from [Node.At]. A Node from
+// [Node.Nodes] reports the path that selects its node alone, so the Node
+// for the first match of `$.items[*]` reports `$.items[0]`. The path
+// starts at `$`, so a caller can pass it to [Node.At], [Node.Ranges], or
+// [AtPath] through any Node of the document. It names the same node there.
 func (n *Node) Path() paths.Path {
 	return n.base
 }
@@ -505,45 +521,51 @@ func (n *Node) Source() *Source {
 
 // DocumentIndex returns the 0-indexed position within the file of the
 // document the Node belongs to. It counts every document of the file, an
-// empty one included, so it is the index of the root in the slice
+// empty one included, so it is the index of the root in the slice that
 // [Source.AllDocuments] returns. [Source.Documents] leaves out the empty
 // documents beside one with content, so a root below one of them has a
-// smaller index in that slice. A Node from [Node.At] reports the index
-// of the document that holds it, and the index of the node itself within
-// a sequence is the Index of the selector [paths.Path.Last] gives for
-// [Node.Path]. The message of a bound error counts documents from 1, as
-// it counts lines, so "document 3" in [SourceError.Error] is the document
-// at index 2. [SourceError.DocumentIndex] reports the index of the
-// document an error is bound to, for a caller that holds the error and
-// no Node.
+// smaller index in that slice. A Node from [Node.At] reports the index of
+// the document that holds it. The index of the node itself within a
+// sequence is the Index of the selector that [paths.Path.Last] gives for
+// [Node.Path].
+//
+// The message of a bound error counts documents from 1, as it counts
+// lines, so "document 3" in [SourceError.Error] is the document at
+// index 2. [SourceError.DocumentIndex] reports the index of the document
+// an error is bound to, for a caller that holds the error but not a Node.
 func (n *Node) DocumentIndex() int {
 	return n.doc.index
 }
 
 // Tokens returns the tokens of the node, with the positions they have in
-// the source. For the root of a document they are its preamble, its
-// content, and, when no document follows, the comments after a "..."
-// marker that ends it, which otherwise become the preamble of the next
-// document. They are nil when no token anchors the document, such as one
-// with neither a header nor a body. For a Node from [Node.At] they run
-// from the first token under the node through the last, comments between
-// them included, and are nil when the scope selects nothing. The slice
-// is a copy, so reordering it reaches nothing. Every Node shares the
-// tokens themselves, so a caller must not modify them.
+// the source. For the root of a document, they are its preamble and its
+// content. For the root of the last document, they also hold the comments
+// after a "..." marker that ends it. After any other document, those
+// comments become the preamble of the next document. The tokens are nil
+// when the document does not have a token to anchor it, such as a
+// document with neither a header nor a body.
+//
+// For a Node from [Node.At], they run from the first token under the node
+// through the last, comments between them included. They are nil when the
+// scope does not select anything. The slice is a copy, so reordering it
+// does not affect the Node. Every Node shares the tokens themselves, so a
+// caller must not modify them.
 func (n *Node) Tokens() token.Tokens {
 	return slices.Clone(n.content)
 }
 
-// Preamble returns the tokens of the document the Node belongs to before
-// its content: the comments and %YAML or %TAG directives above its "---"
-// header, the header itself, and the comments between the header and the
-// first token of the content. The parser cuts the tokens above the header
-// off as a node of their own, and [Source.Documents] folds them back into
-// the document the YAML spec attaches them to. A schema directive written
-// above the header is thus in the preamble of the document it describes.
-// A document without content, such as one holding comments alone, is all
-// preamble. The slice is a copy of shared tokens that a caller must not
-// modify, as for [Node.Tokens].
+// Preamble returns the tokens before the content of the document the Node
+// belongs to. They are the comments and %YAML or %TAG directives above
+// its "---" header, the header itself, and the comments between the
+// header and the first token of the content.
+//
+// The parser splits the tokens above the header into a node of their own.
+// [Source.Documents] folds them back into the document that the YAML spec
+// attaches them to. A schema directive written above the header is thus
+// in the preamble of the document it describes. A document without
+// content, such as one holding comments alone, is all preamble. The slice
+// is a copy of shared tokens that a caller must not modify, as for
+// [Node.Tokens].
 func (n *Node) Preamble() token.Tokens {
 	return slices.Clone(n.doc.tokens[:n.doc.preamble])
 }
@@ -551,20 +573,21 @@ func (n *Node) Preamble() token.Tokens {
 // FilePath returns the path of the file the document came from, which is
 // [Source.FilePath]. It is absolute for a document [NewSourceFromFile]
 // read, so a schema routes on the file and not on how the caller
-// spelled its path. Returns an empty string when the source has none.
+// spelled its path. It returns an empty string when the source does not
+// have a path.
 //
-// The document [NewSourceFromLayers] builds came from no file, and its
-// Source has the path of the layer [MergeAs] names, or else of the lowest
-// layer. Every Node of it returns that path, whichever layer holds its
-// value. [Node.Origin] returns the Node of the value in the file of its
-// layer, and FilePath of that Node names the file.
+// The document that [NewSourceFromLayers] builds did not come from a file.
+// Its Source has the path of the layer [MergeAs] names, or else of the
+// lowest layer. Every Node of it returns that path, whichever layer holds
+// its value. [Node.Origin] returns the Node of the value in the file of
+// its layer, and FilePath of that Node names the file.
 func (n *Node) FilePath() string {
 	return n.source.FilePath()
 }
 
-// FS returns the file system the path of the file the document came from
-// names a file in, which is [Source.FS]. It returns nil when the source
-// has none, where a path names a file on disk. A Node of the document
+// FS returns the file system that [Node.FilePath] names a file in, which
+// is [Source.FS]. It returns nil when the source does not have one. A path
+// then names a file on disk. A Node of the document that
 // [NewSourceFromLayers] builds returns the file system of the layer
 // [MergeAs] names, or else of the lowest layer, as [Node.FilePath]
 // describes.
@@ -574,29 +597,30 @@ func (n *Node) FS() fs.FS {
 
 // Span returns the lines of [Source.Lines] that the node covers. A whole
 // document covers the lines from the one its first token starts on to the
-// one before the next document starts, or to the end of the source for
-// the last document. The first document also covers the lines above its
-// first token, so the spans of a source cover every one of its lines. A
-// document after the first with no tokens covers no lines.
+// one before the next document starts. The last document covers the lines
+// to the end of the source. The first document also covers the lines
+// above its first token, so the spans of a source cover every one of its
+// lines. A document without tokens, other than the first, does not cover
+// any line.
 //
 // A Node from [Node.At] or [Node.Nodes] covers the lines from the first
-// token under its node through the last, and a scope that selects nothing
-// covers none. A scalar covers its own lines alone. A mapping or a
-// sequence also covers the line of the key or the "-" that introduces it,
-// so the span holds the token that [Node.Ranges] and an error bound at
-// the root of the scope resolve to:
+// token under its node through the last. A scope that does not select
+// anything does not cover any line. A scalar covers its own lines alone. A
+// mapping or a sequence also covers the line of the key or the "-" that
+// introduces it. The span thus holds the token that [Node.Ranges] and an
+// error bound at the root of the scope resolve to:
 //
 //	hours:      # the span of $.hours starts here
 //	  open: 9
 //
 // A path that ends at an alias, such as `$.c` in `c: *x`, covers the
-// content of the anchor, which [Node.AST] and [Node.Decode] read, while
-// Node.Ranges and an error at its root resolve to the alias. Unless the
-// two share a line, [SourceError.Annotate] then marks nothing on
-// [Node.View] and reports false, and a caller adds the line of the error
-// with [line.View.Slice]. An error at a Node of the document
-// [NewSourceFromLayers] builds binds in the file of a layer, so a caller
-// marks the view of its [Node.Origin] instead.
+// content of the anchor, which [Node.AST] and [Node.Decode] read.
+// Node.Ranges and an error at its root resolve to the alias instead. When
+// the anchor and the alias lie on different lines, [SourceError.Annotate]
+// does not mark anything on [Node.View] and reports false. A caller then
+// adds the line of the error with [line.View.Slice]. An error at a Node of
+// the document that [NewSourceFromLayers] builds binds in the file of a
+// layer, so a caller marks the view of its [Node.Origin] instead.
 //
 // [Node.View] returns a view sliced to the span, and the span slices any
 // other view over the source, such as one with decoration already:
@@ -613,27 +637,27 @@ func (n *Node) Span() position.Span {
 //
 //	result := diff.Diff(before[1].View(), after[1].View())
 //
-// Each call returns a view of its own with no decoration, as [Source.View]
+// Each call returns a view of its own without decoration, as [Source.View]
 // does, and [line.View.Held] returns its lines on their own. The view
-// shares its lines with every view over the source, so
-// [SourceError.Annotate] marks a bound error on it when the location of
-// the error lies in the span, and reports false otherwise, as Node.Span
-// describes.
+// shares its lines with every view over the source. [SourceError.Annotate]
+// thus marks a bound error on it when the location of the error lies in
+// the span, and reports false otherwise, as Node.Span describes.
 func (n *Node) View() *line.View {
 	return line.NewViewWithin(n.source.lines, n.span)
 }
 
-// Ranges returns the ranges of the token path points at, the token
-// [paths.Resolver.Token] resolves, one per line the token spans, without
-// the spaces around its content. They are the ranges
-// [SourceError.Excerpt] highlights for an [Error] built with [AtPath] at
-// that path, and the path resolves as it does in such an Error. A scalar
-// covers every line of its text, and a block scalar its indicator. A
-// mapping or a sequence covers the token that introduces it, which is the
-// key of its entry, the "-" of its element in a block sequence, or else
-// its own "{" or "[". A block mapping or a block sequence at the root
-// covers its first key or element. A path from [paths.Path.Key] covers
-// the key of the entry:
+// Ranges returns the ranges of the token that path points at, the token
+// that [paths.Resolver.Token] resolves. It returns one range per line the
+// token spans, without the spaces around its content. They are the ranges
+// that [SourceError.Excerpt] highlights for an [Error] built with [AtPath]
+// at that path. The path resolves as it does in such an Error.
+//
+// A scalar covers every line of its text, and a block scalar covers its
+// indicator. A mapping or a sequence covers the token that introduces it.
+// That token is the key of its entry, the "-" of its element in a block
+// sequence, or else its own "{" or "[". A block mapping or a block
+// sequence at the root covers its first key or element. A path from
+// [paths.Path.Key] covers the key of the entry:
 //
 //	ranges, err := doc.Ranges(paths.Doc().Child("spec", "replicas"))
 //	if err != nil {
@@ -646,10 +670,10 @@ func (n *Node) View() *line.View {
 // [Node.View] of the Node [Node.At] returns.
 //
 // A path that does not resolve returns the error [paths.Resolver.Token]
-// describes, bound to the source as [Node.At] binds it. A token with no
-// position returns an error wrapping [ErrNoLocation], and a document that
-// did not parse returns the syntax error [Node.Err] returns. Ranges
-// returns nil when the value holds no content on any line.
+// describes, bound to the source as [Node.At] binds it. A token without a
+// position returns an error wrapping [ErrNoLocation]. A document that did
+// not parse returns the syntax error that [Node.Err] returns. Ranges
+// returns nil when the value does not hold content on any line.
 func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
 	if n.doc.err != nil {
 		return nil, n.doc.err
@@ -682,7 +706,8 @@ func (n *Node) pathLocation(path paths.Path) (location, error) {
 
 // nearestLocation returns the location an error binds at when path names
 // a missing key, which is the key of the mapping that lacks it. It reports
-// false unless reason wraps [paths.ErrNotFound] and that key has a position.
+// true only when reason wraps [paths.ErrNotFound] and that key has a
+// position.
 func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 	if !errors.Is(reason, paths.ErrNotFound) {
 		return location{}, false
@@ -703,9 +728,10 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 	return location{pos: position.NewFromToken(tk), tk: tk, near: &near}, true
 }
 
-// aliasLocation returns the location of the alias that path cannot follow,
-// or false unless reason wraps [paths.ErrAlias]. It reports false for an
-// alias under a `<<` merge key too, which may set any key or none.
+// aliasLocation returns the location of the alias that path cannot follow.
+// It reports false when reason does not wrap [paths.ErrAlias]. It also
+// reports false for an alias under a `<<` merge key, because such an alias
+// might set any key or might not set one.
 func (n *Node) aliasLocation(path paths.Path, reason error) (location, bool) {
 	if !errors.Is(reason, paths.ErrAlias) {
 		return location{}, false
@@ -738,7 +764,8 @@ func (n *Node) aliasLocation(path paths.Path, reason error) (location, bool) {
 
 // bindUnresolved binds reason, the error path failed to resolve with. A
 // missing key binds as [Invalid] at the mapping that lacks it, with the
-// bare [paths.ErrNotFound] text, since the binding writes the path in front.
+// bare [paths.ErrNotFound] text, because the binding writes the path in
+// front of it.
 func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 	if !errors.Is(reason, paths.ErrNotFound) {
 		return n.bindOwn(reason)
@@ -751,39 +778,39 @@ func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 	return n.bindOwn(Invalid(&markedError{err: reason, msg: paths.ErrNotFound.Error()}, AtPath(path)))
 }
 
-// Bind binds err to the source of the document, with each path in err
-// resolving in this document, an `@` path from the scope of the Node and
-// a `$` path from the root. It resolves every location as it binds, so
-// the position [SourceError.Error] reports and the excerpt
-// [SourceError.Excerpt] returns are fixed from then on. The Node methods
-// bind their errors already, so Bind is for an error built elsewhere,
-// such as the result of a check the caller runs on a value it took from
-// the document:
+// Bind binds err to the source of the document. Each path in err resolves
+// in the document of the Node, an `@` path from the scope of the Node and
+// a `$` path from the root. Bind resolves every location as it binds, so
+// the position that [SourceError.Error] reports and the excerpt that
+// [SourceError.Excerpt] returns stay fixed from then on. The Node methods
+// bind their errors already. Bind is for an error built elsewhere, such as
+// the result of a check that the caller runs on a value it took from the
+// document:
 //
 //	return item.Bind(check(value))
 //
 // Bind binds the whole tree of err, each problem and detail at its own
-// location, as the Errors section of the package documentation
-// describes, and a Node from [Node.At] or [Node.Nodes] binds a problem
-// with no location at its own value, as the Scoped Nodes section
-// describes. The message of an error with no location names the source,
-// and the document in a source of several, as in
-// "name: document 3: msg". To keep several errors as separate bindings,
-// bind each one before joining them.
+// location, as the Errors section of the package documentation describes.
+// A Node from [Node.At] or [Node.Nodes] binds a problem without a location
+// at its own value, as the Scoped Nodes section describes. The message of
+// an error without a location names the source, and the document in a
+// source of several, as in "name: document 3: msg". To keep several errors
+// as separate bindings, bind each one before joining them.
 //
 // Bind returns nil for a nil err, and for a nil [*Error] or
-// [*SourceError] pointer. An error bound already, as the Errors section
-// defines it, comes back as it is, so Bind is idempotent. Bind never
-// modifies err. In a document that did not parse, a path resolves
-// nowhere, and [SourceError.Unresolved] returns [ErrPathNeedsDocument]
+// [*SourceError] pointer. Bind returns an already bound error unchanged,
+// so Bind is idempotent. The Errors section defines a bound error. Bind
+// never modifies err. In a document that did not parse, a path does not
+// resolve, and [SourceError.Unresolved] returns [ErrPathNeedsDocument]
 // wrapping the syntax error.
 func (n *Node) Bind(err error) error {
 	return bindTree(err, binder{src: n.source, node: n, locate: true})
 }
 
-// bindOwn binds an error of a call on n as [Node.Bind] does, except that an
-// error with no location gains none, even for a scoped Node, because the
-// error is about the call and not the value.
+// bindOwn binds an error of a call on n as [Node.Bind] does, except that
+// an error without a location does not gain one, even for a scoped Node.
+// The exception holds because the error is about the call and not the
+// value.
 func (n *Node) bindOwn(err error) error {
 	return bindTree(err, binder{src: n.source, node: n})
 }
@@ -824,9 +851,10 @@ func (d *document) newDecodeTree() *decodetree.Tree {
 	})
 }
 
-// rejectionText returns the message and the sentinel [rejection.Classify]
-// gives err, with the anchor names of the document and each control
-// character escaped, since the decoder copies document text into messages.
+// rejectionText returns the message and the sentinel that
+// [rejection.Classify] gives err. It spells each anchor name in the
+// message as the document does. It also escapes each control character,
+// because the decoder copies document text into messages.
 func (d *document) rejectionText(err yaml.Error) (string, error) {
 	msg, label := rejection.Classify(err)
 
@@ -835,7 +863,7 @@ func (d *document) rejectionText(err yaml.Error) (string, error) {
 
 // restoreError returns err with each anchor name the [decodetree.Tree]
 // gave spelled as the document spells it. It leaves an [*Error] or a
-// [*SourceError] alone, since the binding writes their messages.
+// [*SourceError] alone, because the binding writes their messages.
 func (d *document) restoreError(err error) error {
 	var (
 		located *Error
@@ -856,9 +884,10 @@ func (d *document) restoreError(err error) error {
 	return &markedError{err: err, msg: restored}
 }
 
-// spellingTexts returns the texts a new anchor name must not spell, which
-// are the joined text of tks and the value of each token that holds " [".
-// A value differs from its text where a scalar holds an escape or a fold.
+// spellingTexts returns the texts that a new anchor name must not spell.
+// They are the joined text of tks and the value of each token that holds
+// " [". A value differs from its text where a scalar holds an escape or a
+// fold.
 func spellingTexts(tks token.Tokens) []string {
 	var (
 		text   strings.Builder
@@ -883,31 +912,34 @@ func spellingTexts(tks token.Tokens) []string {
 // PathAt returns the `$` path of the innermost node of the document at
 // pos, and true. The position is in the coordinates of [Source.Lines], as
 // a cursor in a viewer, a [go.jacobcolvin.com/niceyaml/finder.Finder]
-// match, or [SourceError.Position] gives one, so a viewer names the value
-// under its cursor:
+// match, or [SourceError.Position] gives one. A viewer thus names the
+// value under its cursor:
 //
 //	if path, ok := doc.PathAt(cursor); ok {
 //		status = path.String() // $.spec.containers[0].image
 //	}
 //
-// The path goes back to [Node.At] or [Node.Ranges] of any Node of the
-// document. The innermost node is an entry of a mapping or an element of
-// a sequence. A position on the key of an entry gives a path that ends in
-// `~`, as [paths.Path.Key] writes one, and a position on the ":" or the
-// value gives the path of the entry. The "-" of a block sequence belongs
-// to its element, and the "[", "{", ",", anchor, or tag of a collection
-// to the collection. A position in the indentation of a line resolves to
-// the token after it. The path names where the document writes the node,
-// so a position on an alias gives the entry that holds the alias, and a
-// position inside an anchor gives the path where the anchor defines it.
+// A caller can pass the path back to [Node.At] or [Node.Ranges] of any
+// Node of the document. The innermost node is an entry of a mapping or an
+// element of a sequence. A position on the key of an entry gives a path
+// that ends in `~`, as [paths.Path.Key] writes one. A position on the ":"
+// or the value gives the path of the entry. The "-" of a block sequence
+// belongs to its element, and the "[", "{", ",", anchor, or tag of a
+// collection belongs to the collection.
+//
+// A position in the indentation of a line resolves to the token after it.
+// The path names where the document writes the node. A position on an
+// alias thus gives the entry that holds the alias, and a position inside
+// an anchor gives the path where the anchor defines it.
 //
 // PathAt reports false on a comment, a blank line, a "---" header, a
-// "..." marker, or a directive, outside the lines of the source, and in
-// another document of the source, so a caller with several documents asks
-// each. It also reports false for a document that did not parse or holds
-// no content, and inside an entry that no path selects, such as the
-// earlier of two entries with one key. A path it returns selects the node
-// at pos, and none of its selectors is a wildcard.
+// "..." marker, or a directive. It also reports false outside the lines
+// of the source and in another document of the source, so a caller with
+// several documents asks each. It reports false for a document that did
+// not parse or that does not hold content. It reports false inside an
+// entry that paths cannot select, such as the earlier of two entries with
+// one key. Every path it returns selects the node at pos and does not
+// hold a wildcard selector.
 func (n *Node) PathAt(pos position.Position) (paths.Path, bool) {
 	if n == nil || n.doc.err != nil {
 		return paths.Path{}, false
@@ -927,13 +959,13 @@ type NodeKind int
 
 // [NodeKind] constants.
 const (
-	// NodeNone is the kind of a Node that holds no value: the root of an
-	// empty document, of a document of comments or directives alone, or
-	// of a document that did not parse, and a nil Node. The root of a
-	// document that is an alias with no anchor before it has this kind
-	// too. [Node.IsEmpty] reports the documents with no content among
-	// these, and [Node.Err] tells a document that did not parse apart
-	// from an empty one.
+	// NodeNone is the kind of a Node that does not hold a value. Such a
+	// Node is the root of an empty document, of a document of comments or
+	// directives alone, or of a document that did not parse, or a nil
+	// Node. The root of a document that is an alias without an anchor
+	// before it has this kind too. [Node.IsEmpty] reports the documents
+	// among these that do not have content, and [Node.Err] tells a
+	// document that did not parse apart from an empty one.
 	NodeNone NodeKind = iota
 	// NodeMapping is the kind of a mapping, block or flow.
 	NodeMapping
@@ -945,9 +977,9 @@ const (
 )
 
 // Kind reports whether the Node holds a mapping, a sequence, or a
-// scalar, or [NodeNone] when it holds no value. A caller that walks a
-// document picks the selector that lists the children of the Node from
-// it:
+// scalar, or [NodeNone] when it does not hold a value. A caller that
+// walks a document uses the kind to pick the selector that lists the
+// children of the Node:
 //
 //	var children []*niceyaml.Node
 //
@@ -960,15 +992,15 @@ const (
 //
 // Kind looks through the anchor and the tag on the node, an alias and
 // the anchor it refers to, and the `?` of an explicit key. The root of
-// `&r {a: 1}` and of `!!map {a: 1}` is thus a mapping, where [Node.AST]
+// `&r {a: 1}` and of `!!map {a: 1}` is thus a mapping, but [Node.AST]
 // gives the anchor or the tag that wraps it. A Node that [Node.At] or
-// [Node.Nodes] scopes at an alias holds the content of its anchor, so no
-// kind stands for an alias. The root of a document that is an alias with
-// no anchor before it holds no value.
+// [Node.Nodes] scopes at an alias holds the content of its anchor, so
+// [NodeKind] does not have a kind for an alias. The root of a document
+// that is an alias without an anchor before it does not hold a value.
 //
-// Every scalar has the one kind. The type a scalar decodes to depends on
-// its tag, on its text, and on the Go type a decode fills, so a caller
-// that needs it decodes the Node.
+// Every scalar has the same kind, [NodeScalar]. The type that a scalar
+// decodes to depends on its tag, its text, and the Go type that a decode
+// fills. A caller that needs that type decodes the Node.
 func (n *Node) Kind() NodeKind {
 	if n == nil || n.doc.err != nil {
 		return NodeNone
@@ -992,25 +1024,25 @@ func (n *Node) Kind() NodeKind {
 }
 
 // IsEmpty reports whether the Node is the root of a document that parsed
-// and holds no content. Such a document is an empty file, a file of
-// whitespace or comments alone, or a "---" header with nothing but
-// comments below it. A %YAML or %TAG directive above the header adds no
+// and does not hold content. Such a document is an empty file, a file of
+// whitespace or comments alone, or a "---" header with only comments
+// below it. A %YAML or %TAG directive above the header does not add
 // content.
 //
 // IsEmpty describes the document and not a value in it. A document that
-// holds any value is not empty, so IsEmpty is false for an empty mapping
-// `{}`, an empty sequence `[]`, an empty string `""`, an explicit null
-// such as `~`, and an alias, even one with no anchor before it. A caller
-// that asks whether a mapping or a sequence holds anything lists its
-// entries with [Node.Nodes].
+// holds any value is not empty. IsEmpty is thus false for an empty
+// mapping `{}`, an empty sequence `[]`, an empty string `""`, an explicit
+// null such as `~`, and an alias, even one without an anchor before it. A
+// caller that asks whether a mapping or a sequence holds anything lists
+// its entries with [Node.Nodes].
 //
 // IsEmpty is false for a document that did not parse, for a Node that
 // [Node.At] or [Node.Nodes] scopes below the root, and for a nil Node.
-// [Node.Kind] is [NodeNone] for every Node IsEmpty reports, and for the
-// root of a document that did not parse or that is an alias with no
-// anchor before it, so a caller that passes over empty documents asks
-// IsEmpty. [SkipEmpty] wraps a [Validator] so that it passes an empty
-// document.
+// [Node.Kind] is [NodeNone] for every Node that IsEmpty reports. It is
+// also [NodeNone] for the root of a document that did not parse or that
+// is an alias without an anchor before it. A caller that skips empty
+// documents thus asks IsEmpty. [SkipEmpty] wraps a [Validator] so that it
+// passes an empty document.
 func (n *Node) IsEmpty() bool {
 	if n == nil || n.doc.err != nil || !n.base.IsRoot() {
 		return false
@@ -1045,14 +1077,15 @@ func (n *Node) resolveLocation(path paths.Path) (location, error) {
 }
 
 // merges reports whether n is a Node of a [NewSourceFromLayers] document,
-// whose errors bind in the layers. A nil n is none.
+// whose errors bind in the layers. A nil n is not such a Node.
 func (n *Node) merges() bool {
 	return n != nil && n.source.layers != nil
 }
 
-// anchorToken returns the token that locates the document, which is its
-// header, or else the first token of its content past the preamble. It is
-// nil when the document has neither.
+// anchorToken returns the token that locates the document. That token is
+// its header, or else the first token of its content past the preamble,
+// or else its first token. It is nil when the document does not have a
+// token.
 func (d *document) anchorToken() *token.Token {
 	if d.root.Start != nil {
 		return d.root.Start

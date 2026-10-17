@@ -13,12 +13,14 @@ import (
 )
 
 // severity is the mark that decides whether a problem is an error or a
-// warning. A problem with no mark on its cause chain is an error.
+// warning. A problem that does not carry a mark on its cause chain is an
+// error.
 type severity uint8
 
-// The marks a problem carries. With no mark, the mark further down the
-// chain decides. [NewWarning] and [Node.Warn] mark a warning, and
-// [AsErrors] marks an error above each warning.
+// The severity values are the marks that a problem carries. The value
+// severityNone is not a mark, so the mark further down the chain decides.
+// [NewWarning] and [Node.Warn] mark a warning, and [AsErrors] marks an
+// error above each warning.
 const (
 	severityNone severity = iota
 	severityWarning
@@ -26,10 +28,10 @@ const (
 )
 
 // NewWarning creates a new [*Error] with the given message that is a
-// warning rather than an error. It takes the options of [NewError], so a
-// warning carries a path, a position, a range, and details, and binds to
-// a [Source] as an error does. The document is at fault for a warning,
-// the same way it is for an error from NewError, so [IsInvalid] reports a
+// warning rather than an error. It takes the options of [NewError]. A
+// warning thus carries a path, a position, a range, and details, and
+// binds to a [Source] as an error does. The document is at fault for a
+// warning as it is for an error from NewError, so [IsInvalid] reports a
 // warning that stands alone.
 //
 // A warning does not make a check fail. A [Validator] reports one with
@@ -54,12 +56,12 @@ func NewWarning(msg string, opts ...ErrorOption) *Error {
 	return e
 }
 
-// severityOf returns the nearest severity mark on the cause chain of err,
-// which callers read for one problem. A wrapper with several branches is
-// a warning when one of its branches is. The branches of a wrapper that
-// is one problem are that problem and sentinels, which carry no mark, so
-// the problem decides. The walk stops at a sealed error and at a
-// [*PanicError], which mark nothing.
+// severityOf returns the nearest severity mark on the cause chain of err.
+// Callers read it for one problem. A wrapper with several branches is a
+// warning when any of its branches is. The branches of a wrapper that is
+// one problem are that problem and sentinels, which do not carry a mark,
+// so the problem decides. The walk stops at a sealed error and at a
+// [*PanicError], and returns severityNone for either.
 func severityOf(err error) severity {
 	for cur := err; !isNothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -104,9 +106,10 @@ func isWarning(err error) bool {
 	return severityOf(err) == severityWarning
 }
 
-// marksWarning reports whether err or any error below it, details and
-// bindings included, carries the mark of a warning. A false answer means
-// that every problem of err is an error, so a caller skips the tree.
+// marksWarning reports whether err or any error below it carries the
+// mark of a warning. The errors below err include its details and its
+// bindings. A false answer means that every problem of err is an error,
+// so a caller skips the tree.
 func marksWarning(err error) bool {
 	switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
 	case nil:
@@ -146,11 +149,12 @@ func marksWarning(err error) bool {
 }
 
 // HasErrors reports whether err holds an error, as opposed to warnings
-// alone. It reports false for a nil err, for a nil [*Error] or
-// [*SourceError] pointer, and for an error whose every problem is a
-// warning, as [NewWarning] and [Node.Warn] mark one. It reports true for
-// any other error, one with no problem included, such as an error with an
-// empty message. The problems are the nodes [Problems] yields.
+// alone. It reports false for a nil err and for a nil [*Error] or
+// [*SourceError] pointer. It also reports false for an error whose every
+// problem is a warning, as [NewWarning] and [Node.Warn] mark one. It
+// reports true for any other error, including one that does not hold a
+// problem, such as an error with an empty message. The problems are the
+// nodes that [Problems] yields.
 //
 // A Validate method returns its warnings beside its errors, so code that
 // calls one itself asks HasErrors whether the method failed:
@@ -196,11 +200,11 @@ func holdsWarning(err error) bool {
 }
 
 // AsErrors returns err with an error mark above each warning, so each
-// warning of err becomes an error. The mark leaves the text of a
-// problem as it was, without the "warning:" label, and each heading that
+// warning of err becomes an error. The mark leaves the text of each
+// problem as it was, without the "warning:" label. Each heading that
 // niceyaml wrote to count the errors and the warnings below it counts
 // them again, so "2 errors, 1 warning" reads "3 errors". A program in
-// strict mode applies it to the report of a call. [Warnings.Report]
+// strict mode applies AsErrors to the report of a call. [Warnings.Report]
 // builds that report from the error of the call and its warnings:
 //
 //	warnings := niceyaml.NewWarnings()
@@ -211,16 +215,18 @@ func holdsWarning(err error) bool {
 //	}
 //
 // AsErrors rebuilds the errors that niceyaml builds, such as an [*Error],
-// a [*SourceError], and a join, and calls the AsErrors method of an error
+// a [*SourceError], and a join. It calls the AsErrors method of an error
 // that has one, so the result of such an error keeps its type. A wrapper
 // that [fmt.Errorf] builds with several %w verbs and that heads several
 // problems gets a mark above each problem, as a join does. The result
 // keeps the message of the wrapper and matches it for [errors.Is] and
-// [errors.As]. AsErrors marks any other error above the warning it wraps.
-// A program thus applies it to the error that [Warnings.Report] or
-// [Warnings.Err] returns, before it wraps the error with [fmt.Errorf]. An
-// err that holds no warning comes back as it is, and a nil err returns
-// nil.
+// [errors.As].
+//
+// AsErrors marks any other error above the warning it wraps. A program
+// thus applies AsErrors to the error that [Warnings.Report] or
+// [Warnings.Err] returns, before it wraps the error with [fmt.Errorf].
+// AsErrors returns an err that does not hold a warning as it is, and
+// returns nil for a nil err.
 func AsErrors(err error) error {
 	if isNothing(err) {
 		return nil
@@ -238,8 +244,9 @@ func AsErrors(err error) error {
 }
 
 // remark returns err with sev marked above each of its problems that
-// carries another severity, where no mark counts as an error. It rebuilds
-// each heading over its problems, and counts the problems of a tally again.
+// carries another severity. A problem that does not carry a mark counts
+// as an error here. It rebuilds each heading over its problems, and
+// counts the problems of a tally again.
 func remark(err error, sev severity) error {
 	if isNothing(err) {
 		return err
@@ -411,8 +418,9 @@ func (e *SourceError) remarked(sev severity) *SourceError {
 	return c
 }
 
-// retally returns err with each tally along its chain of Errors counted
-// again once its problems carry sev, and with those problems remarked.
+// retally returns err with each tally along its chain of Errors rebuilt.
+// The problems of each rebuilt tally carry sev, and the tally counts them
+// again.
 func retally(err error, sev severity) error {
 	x, ok := err.(*Error) //nolint:errorlint // Walks the chain one node at a time.
 	if !ok || x == nil {
@@ -435,7 +443,7 @@ func retally(err error, sev severity) error {
 
 // newTally returns a heading over members that counts the errors and the
 // warnings among them, as "2 errors, 1 warning", or the one member alone.
-// A nil member adds nothing.
+// It skips each nil member.
 func newTally(members []error) error {
 	members = slices.DeleteFunc(slices.Clone(members), isNothing)
 
@@ -450,7 +458,8 @@ func newTally(members []error) error {
 }
 
 // tallyText returns the count of the errors and the warnings among
-// members, as "2 errors, 1 warning". A severity with none stays out.
+// members, as "2 errors, 1 warning". It names only the severities that
+// the members carry.
 func tallyText(members []error) string {
 	warnings := 0
 
@@ -464,7 +473,7 @@ func tallyText(members []error) string {
 }
 
 // countText returns errs errors and warns warnings as "2 errors, 1
-// warning". A count of zero stays out, and two zeros read "0 errors".
+// warning". It leaves out a count of zero, but two zeros read "0 errors".
 func countText(errs, warns int) string {
 	var parts []string
 
@@ -486,8 +495,8 @@ func countText(errs, warns int) string {
 // Warnings collects the warnings of the calls of niceyaml and its schema
 // package that run with a context from [Warnings.Context]. The calls that
 // collect warnings are [Node.Validate], [Source.ValidateDocuments], the
-// Decode methods of [Node] and [Source], both SelfValidate methods,
-// [SelfValidateValue], and
+// Decode methods of [Node] and [Source], [Node.SelfValidate],
+// [Source.SelfValidate], [SelfValidateValue], and
 // [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue]. Each call
 // hands every warning of the checks it runs to the collector, whether the
 // call passes or fails, and returns its errors alone:
@@ -503,12 +512,12 @@ func countText(errs, warns int) string {
 //		log.Print(niceyaml.FormatError(w))
 //	}
 //
-// A call that runs with no collector drops its warnings, whether it
-// passes or fails. The collector keeps one of the warnings that share a
-// source, a position, a path, and a message, so a deprecation that two
-// checks report shows once. It is safe for concurrent use, so calls in
-// several goroutines can share one. A nil *Warnings collects nothing and
-// holds no warning.
+// A call whose context does not carry a collector drops its warnings,
+// whether it passes or fails. Of the warnings that share a source, a
+// position, a path, and a message, the collector keeps one. A deprecation
+// that two checks report thus shows once. A Warnings is safe for
+// concurrent use, so calls in several goroutines can share one. A nil
+// *Warnings does not collect or hold any warning.
 //
 // Create instances with [NewWarnings].
 type Warnings struct {
@@ -516,24 +525,24 @@ type Warnings struct {
 	mu   sync.Mutex
 }
 
-// NewWarnings creates a new [*Warnings] that holds no warning.
+// NewWarnings creates a new, empty [*Warnings].
 func NewWarnings() *Warnings {
 	return &Warnings{}
 }
 
 // Context returns a copy of ctx that carries w, so each call of niceyaml
 // that runs with the context hands its warnings to w. A [Validator]
-// reports to w through [Node.Warn] with the context it gets.
+// reports to w through [Node.Warn] with the context it gets. For a nil w,
+// Context returns ctx as it is.
 //
 // Outside a call of niceyaml, a later Context replaces w for the calls
-// that run with the derived context. A hook, such as a Validator or a
-// function of [WithValueCheck], gets its context from a call. On that
-// context, a later Context hands each warning to the collectors of the
+// that run with the derived context. A hook gets its context from a call.
+// Validators and functions of [WithValueCheck] are hooks. On the context
+// of a hook, a later Context hands each warning to the collectors of the
 // call as well. So does each Context derived from the context it
 // returns. A validator that reads the warnings of a check it runs
-// collects them with a Warnings of its own, and the caller of the
-// enclosing call still gets them. For a nil w, Context returns ctx as it
-// is.
+// collects them with a Warnings of its own. The caller of the enclosing
+// call still gets them.
 func (w *Warnings) Context(ctx context.Context) context.Context {
 	if w == nil {
 		return ctx
@@ -557,10 +566,10 @@ func (w *Warnings) Context(ctx context.Context) context.Context {
 
 // All returns an iterator over the warnings that w holds, one
 // [ErrorTree] per warning. The warnings sort by position, within the
-// order their sources first reached w, and the warnings with no position
-// come last. Each tree holds the warning bound as the call bound it, with
-// its details as its Children. A program reads the fields of each tree as
-// it reads those of a node that [Problems] yields:
+// order their sources first reached w, and the warnings that do not carry
+// a position come last. Each tree holds the warning bound as the call
+// bound it, with its details as its Children. A program reads the fields
+// of each tree as it reads those of a node that [Problems] yields:
 //
 //	for warning := range warnings.All() {
 //		pos, _ := warning.Position()
@@ -577,14 +586,14 @@ func (w *Warnings) All() iter.Seq[ErrorTree] {
 }
 
 // Err returns the warnings that w holds as one error, in the order
-// [Warnings.All] yields them, or nil when w holds none. One warning comes
-// back alone. Several come back under a heading that counts them, as in
-// "cafe.yaml: 2 warnings". The heading binds to the source of the
-// warnings when they share one, and to no document otherwise, as
-// [BindValue] binds an error. Warnings that [Detach] detached bind their
-// heading to no document. [Warnings.Report] puts the warnings beside the
-// errors of a call that fails, and a program in strict mode turns either
-// result into errors with [AsErrors].
+// [Warnings.All] yields them, or nil when w does not hold a warning. Err
+// returns one warning alone, and several under a heading that counts
+// them, as in "cafe.yaml: 2 warnings". The heading binds to the source of
+// the warnings when they share one, and otherwise [BindValue] binds it
+// outside any document. Warnings that [Detach] detached do not keep a
+// Source, so BindValue binds their heading too. [Warnings.Report] puts
+// the warnings beside the errors of a call that fails, and a program in
+// strict mode turns either result into errors with [AsErrors].
 func (w *Warnings) Err() error {
 	return tallyRows(w.sorted())
 }
@@ -603,9 +612,9 @@ func (w *Warnings) Err() error {
 // A warning of err that w holds as well shows once. Report builds a new
 // error and leaves err as it is. The result keeps each problem of err for
 // [errors.Is] and [errors.As], but not the headings and the wrappers above
-// them. A program thus classifies the failure with err itself. With no
-// warning in w, err comes back as it is. For a nil err, Report returns
-// what [Warnings.Err] returns.
+// them. A program thus classifies the failure with err itself. When w
+// does not hold a warning, Report returns err as it is. For a nil err,
+// Report returns what [Warnings.Err] returns.
 func (w *Warnings) Report(err error) error {
 	held := w.sorted()
 	if len(held) == 0 {
@@ -641,7 +650,7 @@ func (w *Warnings) keep(rows []warningRow) {
 }
 
 // sorted returns a copy of the rows of w, sorted as [sortRows] sorts them.
-// A nil w holds no row.
+// A nil w does not hold a row.
 func (w *Warnings) sorted() []warningRow {
 	if w == nil {
 		return nil
@@ -662,14 +671,17 @@ type warningKey struct{}
 // warningScope is what a context carries for the calls that collect
 // warnings: the collector that each of them hands its warnings to.
 type warningScope struct {
-	// The collector that takes every warning delivered on the context.
+	// The collector that takes every warning that a call delivers on the
+	// context.
 	w *Warnings
 	// The scope of the enclosing call, which takes each warning as well.
-	// It is set for a scope that [Warnings.Context] derived inside a call
-	// and for the scopes that enterCall marks from one, and nil otherwise.
+	// [Warnings.Context] sets it on a scope that it derives inside a call.
+	// [enterCall] keeps it on the scope that it marks from such a scope. It
+	// is nil otherwise.
 	outer *warningScope
-	// A call of this package runs with the context, so a scope that
-	// Warnings.Context derives from this one hands its warnings here too.
+	// Whether a call of this package runs with the context. When it is
+	// set, a scope that Warnings.Context derives from this one hands its
+	// warnings to this one too.
 	call bool
 }
 
@@ -681,11 +693,11 @@ func scopeOf(ctx context.Context) *warningScope {
 }
 
 // enterCall returns ctx marked as the context of a call of this package
-// that collects warnings, for a call that passes ctx to code of the
-// program outside [runHook], as a decode passes it to each unmarshaler
-// that takes a context. A collector that such code puts on the context
-// then hands its warnings to the collectors of the call as well. A ctx
-// with no collector comes back as it is.
+// that collects warnings. A call passes the result to code of the program
+// that runs outside [runHook], as a decode passes it to each unmarshaler
+// that takes a context. A collector that such code puts on the context then
+// hands its warnings to the collectors of the call as well. For a ctx
+// that does not carry a collector, enterCall returns ctx as it is.
 func enterCall(ctx context.Context) context.Context {
 	s := scopeOf(ctx)
 	if s == nil || s.call {
@@ -695,12 +707,12 @@ func enterCall(ctx context.Context) context.Context {
 	return context.WithValue(ctx, warningKey{}, &warningScope{w: s.w, outer: s.outer, call: true})
 }
 
-// runHook runs a hook of a call, such as a [Validator] or a function of
-// [WithValueCheck], and returns the errors and then the warnings of the
-// result. The warnings include those that the hook hands to its context,
-// a copy of ctx whose collector holds them and none of the collectors of
-// ctx. The call thus binds every warning of the hook as it binds the
-// result.
+// runHook runs a hook of a call and returns the errors and then the
+// warnings of the result. The hooks of a call include a [Validator] and a
+// function of [WithValueCheck]. The warnings include those that the hook
+// hands to its context. That context is a copy of ctx whose collector
+// holds those warnings, and the collectors of ctx do not get them. The
+// call thus binds every warning of the hook as it binds the result.
 func runHook(ctx context.Context, run func(ctx context.Context) error) (error, error) {
 	held := NewWarnings()
 
@@ -718,9 +730,10 @@ func runHook(ctx context.Context, run func(ctx context.Context) error) (error, e
 	return failure, errors.Join(warnings, handed)
 }
 
-// deliver hands each problem of err, a warning bound as the call binds
-// it, to every collector that ctx carries. A nil err hands nothing, and a
-// ctx with no collector drops err.
+// deliver hands each problem of err to every collector that ctx carries.
+// The error err is a warning bound as the call binds it. For a nil err,
+// deliver does nothing, and a ctx that does not carry a collector drops
+// err.
 func deliver(ctx context.Context, err error) {
 	s := scopeOf(ctx)
 	if s == nil || isNothing(err) {
@@ -735,11 +748,12 @@ func deliver(ctx context.Context, err error) {
 }
 
 // splitWarnings returns the errors and then the warnings among the
-// problems of err. An err with no warning among its problems comes back
-// whole as the errors, and one with no error whole as the warnings. For
-// an err that holds both, [splitBelow] keeps the join or the wrapper on
-// top of the errors where it can. Otherwise each severity comes back as
-// the join of its problems, in the order [Problems] yields them.
+// problems of err. When err does not hold a warning, splitWarnings
+// returns it whole as the errors. When err does not hold an error, it
+// returns err whole as the warnings. For an err that holds both,
+// [splitBelow] keeps the join or the wrapper on top of the errors when it
+// can split err. Otherwise splitWarnings returns each severity as the
+// join of its problems, in the order that [Problems] yields them.
 func splitWarnings(err error) (error, error) {
 	var failure, warnings error
 
@@ -776,11 +790,12 @@ func splitProblems(err error) (error, error) {
 	return multierr.Join(errs), multierr.Join(warns)
 }
 
-// splitBelow splits err, which holds both errors and warnings, below its
-// top. It splits a join branch by branch, as [splitJoin] does, and a
-// wrapper of one error below the wrapper, as [splitWrapper] does. An
-// [*Error] and a [*SourceError] do not split. For an err that does not
-// split, splitBelow returns a nil failure.
+// splitBelow splits err below its top, for an err that holds both errors
+// and warnings. It splits a join branch by branch, as [splitJoin] does,
+// and a wrapper of one error below the wrapper, as [splitWrapper] does.
+// It does not split an [*Error], a [*SourceError], a [*markedError], or a
+// [*PanicError]. For an err that does not split, splitBelow returns a nil
+// failure.
 func splitBelow(err error) (error, error) {
 	var failure, warnings error
 
@@ -795,11 +810,11 @@ func splitBelow(err error) (error, error) {
 	return failure, warnings
 }
 
-// splitJoin splits err branch by branch, as [splitWarnings] splits each
-// branch, when err is a join. The errors keep the join over the branches
-// that hold errors, and an [errors.Join] of one such branch reads as
-// that branch. For an err that is no join, splitJoin returns a nil
-// failure.
+// splitJoin splits err branch by branch when err is a join, as
+// [splitWarnings] splits each branch. The errors keep the join over the
+// branches that hold errors, and an [errors.Join] of one such branch
+// reads as that branch. For an err that is not a join, splitJoin returns
+// a nil failure.
 func splitJoin(err error) (error, error) {
 	branches, _, ok := joinBranches(err)
 	if !ok {
@@ -826,11 +841,11 @@ func splitJoin(err error) (error, error) {
 	return multierr.Rejoin(err, errs), multierr.Join(warns)
 }
 
-// splitWrapper splits wrapper, which wraps below alone, below it. The
-// errors keep the wrapper as a stand-in that matches it, and whose text
-// holds the errors of below in place of the text of below. For a wrapper
-// whose text does not show below once, splitWrapper returns a nil
-// failure.
+// splitWrapper splits wrapper below it. The wrapper wraps below alone.
+// The errors keep a stand-in that matches the wrapper. The text of the
+// stand-in holds the errors of below in place of the text of below. For a
+// wrapper whose text does not show the text of below exactly one time,
+// splitWrapper returns a nil failure.
 func splitWrapper(wrapper, below error) (error, error) {
 	failure, warnings := splitWarnings(below)
 	if failure == nil || warnings == nil {
@@ -859,8 +874,9 @@ func splitWrapper(wrapper, below error) (error, error) {
 //	}
 //
 // The validator passes the context it got to each check and decode that it
-// runs, or the warnings of that work go nowhere. A nil err warns nothing,
-// and a context with no collector drops the warning.
+// runs. Otherwise the collectors do not get the warnings of that work.
+// Warn does nothing for a nil err, and a context that does not carry a
+// collector drops the warning.
 func (n *Node) Warn(ctx context.Context, err error) {
 	if isNothing(err) {
 		return
@@ -870,12 +886,12 @@ func (n *Node) Warn(ctx context.Context, err error) {
 }
 
 // warningRow is one problem that a [Warnings] holds or that
-// [Warnings.Report] lists, with the source, the position, the path, and
-// the message that tell it apart.
+// [Warnings.Report] lists. It holds the source, the position, the path,
+// and the message that identify the problem.
 type warningRow struct {
 	err error
 	// The source of the problem, as [SourceError.origin] gives it, or nil
-	// for a problem bound to no source.
+	// for a problem that is not bound to a source.
 	src     excerptSource
 	msg     string
 	path    string
@@ -884,7 +900,7 @@ type warningRow struct {
 }
 
 // rowsOf returns a row for each problem of err, or one row for err itself
-// when it holds no problem.
+// when it does not hold a problem.
 func rowsOf(err error) []warningRow {
 	var rows []warningRow
 
@@ -913,7 +929,8 @@ func (r warningRow) same(o warningRow) bool {
 }
 
 // sortRows sorts rows by position within the order their sources first
-// appear, with the rows that have no position last, and returns them.
+// appear, and returns them. The rows that do not have a position come
+// last.
 func sortRows(rows []warningRow) []warningRow {
 	var sources []excerptSource
 
@@ -956,11 +973,12 @@ func sortRows(rows []warningRow) []warningRow {
 }
 
 // tallyRows returns the errors of rows as one error. It returns nil for
-// no row, the error of a lone row, and otherwise a heading that counts
-// the errors and the warnings among them. The heading binds to the source
-// of the rows when every row has that source, and to no document
-// otherwise, as [BindValue] binds an error. Rows that [Detach] detached
-// have no Source to bind to, so their heading binds to no document too.
+// an empty slice, and the error of the row for a lone row. Otherwise it
+// returns a heading that counts the errors and the warnings among them.
+// The heading binds to the source of the rows when every row has that
+// source, and otherwise [BindValue] binds it outside any document. Rows
+// that [Detach] detached do not keep a Source, so BindValue binds their
+// heading too.
 func tallyRows(rows []warningRow) error {
 	switch len(rows) {
 	case 0:

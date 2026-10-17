@@ -16,7 +16,7 @@ import (
 // Detach returns err with each [*SourceError] in its tree replaced by a
 // detached copy. A binding keeps its [Source] alive, with every line,
 // token, and parse of it. A detached copy keeps what renders the error
-// and no Source. A program that keeps errors past the files they came
+// but not the Source. A program that keeps errors past the files they came
 // from detaches each error first, as a check that reports every file at
 // the end does:
 //
@@ -31,14 +31,14 @@ import (
 // resolve and the index of its document. It keeps the name and the file
 // path of its source, which [SourceError.Name] and [SourceError.FilePath]
 // report. [SourceError.Source] returns nil for it, and [SourceError.Node]
-// and [SourceError.Document] report false, as they do for a binding in no
-// document.
+// and [SourceError.Document] report false, as they do for a binding
+// outside any document.
 //
 // Detach detaches each binding below a binding too. The copy keeps the
 // errors the binding wraps, so [errors.Is], [errors.As], [IsInvalid], and
 // the severity of each problem answer as they did for err. A detached
-// result of [BindValue] stands in no document, so a document can place
-// it.
+// result of [BindValue] does not stand in a document, so a document can
+// place it.
 //
 // Detach keeps a copy of each line that the excerpts of its bindings show
 // with the context lines opts set. It keeps the width opts set too, as
@@ -46,32 +46,34 @@ import (
 // detached error, whatever options the renderer receives, so a detached
 // error renders as err renders with opts. Those options hold for
 // [FormatError], [NewErrorReport], [SourceError.Excerpt], and the %+v
-// verb. [Annotate] marks nothing for a detached binding, whose lines
-// belong to no view of a source. Detach keeps no line of a source with
-// excerpts off, as [WithExcerpts] sets it.
+// verb. The lines of a detached binding are not part of any view of a
+// source, so [Annotate] does not mark anything for it. Detach does not
+// keep any line of a source with excerpts off, as [WithExcerpts] sets
+// them.
 //
 // The bindings of one source share the copy that one call of Detach
 // keeps, so they render together as they did in err. A program might join
 // the results of separate calls, or a result and a live binding. Each
 // copy of a source then renders as a source of its own, with an excerpt
-// of its own. A program thus detaches the error it keeps once, after
-// [Warnings.Report] adds the warnings of a collector to it. The collector
-// keeps the Source of each warning it holds alive until the program drops
-// the collector.
+// of its own. A program thus calls Detach one time on the error that it
+// keeps, after [Warnings.Report] adds the warnings of a collector to it.
+// The collector keeps the Source of each warning it holds alive until the
+// program drops the collector.
 //
 // Detach rebuilds the errors that this package builds around bindings,
 // the joins of [errors.Join], and the wrappers of [fmt.Errorf], each with
-// the message it had. Any other error that wraps a binding, such as a
-// [go.jacobcolvin.com/niceyaml/manifest.LoadError], keeps the Source of
-// that binding. Detach keeps such an error as it is, so [errors.Is] and
-// [errors.As] find it in the result as they find it in err. An error
-// of go-yaml in the chain, such as the one behind [ErrSyntax], holds a
-// token of the parse. That token links to the other tokens of the parse
-// and keeps them alive.
+// the message it had. Any other error that wraps a binding keeps the
+// Source of that binding, as a
+// [go.jacobcolvin.com/niceyaml/manifest.LoadError] does. Detach keeps
+// such an error as it is, so [errors.Is] and [errors.As] find it in the
+// result as they find it in err. Each go-yaml error in the chain holds a
+// token of the parse, as the one behind [ErrSyntax] does. That token
+// links to the other tokens of the parse and keeps them alive.
 //
-// Detach returns err itself when it detaches no binding of err, such as
-// when err holds no binding or only detached ones. It returns nil for a
-// nil err, and for a nil [*Error] or [*SourceError] pointer.
+// Detach returns err itself when it does not detach any binding of err,
+// such as when err does not hold a binding, or holds only detached ones.
+// It returns nil for a nil err, and for a nil [*Error] or [*SourceError]
+// pointer.
 func Detach(err error, opts ...ExcerptOption) error {
 	if isNothing(err) {
 		return nil
@@ -93,24 +95,25 @@ func Detach(err error, opts ...ExcerptOption) error {
 
 // detacher detaches the bindings of one error, as [Detach] describes.
 type detacher struct {
-	// The detached copy of each binding the walk met, or the binding itself
-	// when it does not need a copy.
+	// The detached copy of each binding that the walk met, or the binding
+	// itself when it does not need a copy.
 	bindings map[*SourceError]*SourceError
 	// The copy of each error that the walk rebuilt and that a pointer
-	// stands for. An error the tree reaches twice thus has one copy.
+	// stands for. An error that the tree reaches twice thus has one copy.
 	rebuilt map[error]error
 	// What the detached bindings keep of each Source, one per Source.
 	sources map[*Source]*keptSource
 	// What the detached bindings keep of each document, one per root.
 	docs map[*Node]*keptDocument
-	// The bindings the walk detached, whose marks decide the lines that
-	// each source keeps.
+	// The bindings that the walk detached. Their marks decide the lines
+	// that each source keeps.
 	met []*SourceError
 	cfg excerptConfig
 }
 
 // walk returns err with each binding in its tree detached, and whether
-// that changed err. An error the walk cannot rebuild comes back as it is.
+// the walk changed err. It returns an error that it cannot rebuild as it
+// is.
 func (d *detacher) walk(err error) (error, bool) {
 	if isNothing(err) {
 		return err, false
@@ -194,8 +197,8 @@ func (d *detacher) rebuild(err error) (error, bool) {
 }
 
 // walkAll returns errs with each walked as [detacher.walk] walks it, and
-// whether that changed any of them. It returns errs itself when it
-// changed none.
+// whether the walk changed any of them. It returns errs itself when the
+// walk did not change any of them.
 func (d *detacher) walkAll(errs []error) ([]error, bool) {
 	var out []error
 
@@ -236,8 +239,8 @@ func (d *detacher) error(x *Error) (error, bool) {
 
 // binding returns the detached copy of x, and whether x needed one. The
 // copy keeps the location x resolved and drops its source, its node, and
-// the token its path resolved to. A detached x comes back as it is when
-// every binding below it is detached too.
+// the token its path resolved to. When an earlier call of [Detach]
+// detached x and every binding below it, the result is x itself.
 func (d *detacher) binding(x *SourceError) (*SourceError, bool) {
 	if c, ok := d.bindings[x]; ok {
 		return c, c != x
@@ -299,7 +302,7 @@ func (d *detacher) binding(x *SourceError) (*SourceError, bool) {
 }
 
 // children returns below, the children of a binding, with each bound
-// child detached, and whether that changed any of them.
+// child detached, and whether the walk changed any of them.
 func (d *detacher) children(below []boundChild) ([]boundChild, bool) {
 	var out []boundChild
 
@@ -322,7 +325,7 @@ func (d *detacher) children(below []boundChild) ([]boundChild, bool) {
 }
 
 // mapped returns the copy the walk made of err, or err itself when the
-// walk made none.
+// walk did not make one.
 func (d *detacher) mapped(err error) error {
 	if isNothing(err) || reflect.TypeOf(err).Kind() != reflect.Pointer {
 		return err
@@ -372,8 +375,8 @@ func (d *detacher) keep(x *SourceError) (*keptSource, *keptDocument) {
 	return src, doc
 }
 
-// keepLines copies, for each source the walk detached bindings of, the
-// lines that the excerpts of those bindings show.
+// keepLines copies the lines that the excerpts of the detached bindings
+// show, for each source that the walk detached bindings of.
 func (d *detacher) keepLines() {
 	sources, positions := treePositions(d.met, true, nil, nil)
 
@@ -398,16 +401,17 @@ func (d *detacher) keepLines() {
 type keptSource struct {
 	name     string
 	filePath string
-	// A copy of each line an excerpt shows, in the order of the source.
-	// An empty line stands in for the lines between two copies that are
-	// not next to each other in the source.
+	// A copy of each line that an excerpt shows, in the order of the
+	// source. An empty line stands in for the lines between two copies
+	// that are not next to each other in the source.
 	lines line.Lines
 	// The index in the source of each copied line, ascending.
 	rows []int
 	// The index in lines of the copy of each line of rows.
 	at  []int
 	cfg excerptConfig
-	// The source shows its text in an excerpt, as [WithExcerpts] sets it.
+	// Whether the source shows its text in an excerpt, as [WithExcerpts]
+	// sets it.
 	shows bool
 }
 
@@ -416,7 +420,7 @@ func (k *keptSource) Name() string {
 	return k.name
 }
 
-// live returns nil, because k holds no Source.
+// live returns nil, because k does not hold a Source.
 func (*keptSource) live() *Source {
 	return nil
 }
@@ -444,7 +448,7 @@ func (k *keptSource) keep(src *Source, marks []excerpt.Mark) {
 // excerpt returns a fresh view of the lines k kept, with marks on them,
 // cut to hunks and clipped as the options of k set, whatever options the
 // caller passes. The marks lie in the lines of the source, which k does
-// not hold, so each moves to the lines k kept first.
+// not hold. So excerpt first moves each mark to the lines that k kept.
 func (k *keptSource) excerpt(marks []excerpt.Mark, _ excerptConfig) (*line.View, bool) {
 	if !k.shows {
 		return nil, false
@@ -465,9 +469,9 @@ func (k *keptSource) excerpt(marks []excerpt.Mark, _ excerptConfig) (*line.View,
 }
 
 // move returns m, a mark in the lines of the source, in the lines k kept.
-// A position on a line k did not keep moves to line -1, which marks
-// nothing. Each range becomes one range per line k kept, with the columns
-// [line.Lines.SliceLines] gives the range on that line.
+// A position on a line k did not keep moves to line -1, so it does not
+// mark any line. Each range becomes one range per line k kept, with the
+// columns [line.Lines.SliceLines] gives the range on that line.
 func (k *keptSource) move(m excerpt.Mark) excerpt.Mark {
 	moved := excerpt.Mark{Message: m.Message, Warning: m.Warning, Pos: position.New(-1, m.Pos.Col)}
 
@@ -503,17 +507,18 @@ func (k *keptSource) move(m excerpt.Mark) excerpt.Mark {
 // keptDocument is what a detached binding keeps of the document it was
 // bound in.
 type keptDocument struct {
-	// The label that the message of a binding with no position names the
-	// document with, as "document 3", or "" in a file of one document.
+	// The label that names the document in the message of a binding that
+	// does not carry a position, as "document 3", or "" in a file of one
+	// document.
 	label string
 	// The index of the document among every document of its file.
 	index int
 }
 
-// copyLines returns copies of the lines of src at held, which ascend, and
-// the index of each copy in the result. An empty line stands in for each
-// run of lines between two of held. The hunks of a view of the result
-// thus stay apart where those of the source do.
+// copyLines returns copies of the lines of src at held, and the index of
+// each copy in the result. The indexes in held ascend. An empty line
+// stands in for each run of lines between two of held. The hunks of a
+// view of the result thus stay apart where those of the source do.
 func copyLines(src line.Lines, held []int) (line.Lines, []int) {
 	var c lineCopier
 
@@ -534,7 +539,8 @@ func copyLines(src line.Lines, held []int) (line.Lines, []int) {
 
 // lineCopier copies lines of a source onto clones of their tokens.
 type lineCopier struct {
-	// The token that stands in for every neighbor of one type.
+	// For each token type, the token that stands in for every neighbor of
+	// that type.
 	stubs map[token.Type]*token.Token
 }
 
@@ -581,8 +587,8 @@ func (c *lineCopier) copy(ln *line.Line) *line.Line {
 	return copied
 }
 
-// stub returns a token of the type of tk that links to nothing, or nil
-// for a nil tk.
+// stub returns a token of the type of tk that does not link to any token,
+// or nil for a nil tk.
 func (c *lineCopier) stub(tk *token.Token) *token.Token {
 	if tk == nil {
 		return nil
