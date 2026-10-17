@@ -4,14 +4,15 @@
 // name of its go:generate tool.
 //
 // Gen follows encoding/json. It names the property of a field by the
-// json tag, or by the Go name of the field when the tag names none. It
-// leaves out a field whose json tag is "-". It reads inline each embedded
-// struct without a JSON name, and each struct field with the embed option
-// of encoding/json/v2. It merges the entries of a map field with the
-// embed option into the parent. The decoder follows [yamlfield.Name]. It
-// reads the yaml tag, or the json tag when the field has no yaml tag. It
-// lowercases the Go name when the tag it reads names none. It reads a
-// struct inline only for a field with an inline option.
+// json tag, or by the Go name of the field when the tag does not name
+// one. It leaves out a field whose json tag is "-". It reads inline each
+// embedded struct without a JSON name, and each struct field with the
+// embed option of encoding/json/v2. It merges the entries of a map field
+// with the embed option into the parent. The decoder follows
+// [yamlfield.Name]. It reads the yaml tag, or the json tag when the field
+// does not have a yaml tag. It lowercases the Go name when the tag it
+// reads does not name one. It reads a struct inline only for a field
+// with an inline option.
 //
 // Where the two disagree, a schema that gen writes for a type rejects
 // documents that the decoder reads, or passes documents whose values the
@@ -42,11 +43,11 @@ func Inline(t reflect.Type) []string {
 }
 
 // Check is [Inline] with the rules for names too. It also returns a
-// message for each field whose property gen names other than the key
-// that the decoder reads. Each field that only one of the two reads gets
-// a message too. It skips each type that supplies its own schema through
-// a JSONSchema method, because gen does not read the fields of such a
-// type.
+// message for each field where the property name that gen gives differs
+// from the key that the decoder reads. Each field that only one of the
+// two reads gets a message too. It skips each type that supplies its own
+// schema through a JSONSchema method, because gen does not read the
+// fields of such a type.
 func Check(t reflect.Type) []string {
 	return check(t, true)
 }
@@ -131,7 +132,7 @@ func inlineProblem(f reflect.StructField, inline bool) string {
 }
 
 // nameProblem returns how gen and the decoder disagree on the name of f,
-// a field that neither reads inline, or "" when they agree. The decoder
+// or "" when they agree. Neither of them reads f inline. The decoder
 // reads f under name.
 func nameProblem(f reflect.StructField, name string) string {
 	genName, skip := jsonName(f)
@@ -182,8 +183,9 @@ func skipProblem(f reflect.StructField) string {
 
 // promotes reports whether gen reads the fields of f beside the fields
 // of the struct that holds f. Gen does so for an embedded field, or one
-// with the embed option, whose json tag is not "-" and names no property.
-// It does so only when the type of f is a struct or a pointer to one.
+// with the embed option, whose json tag is not "-" and does not name a
+// property. It does so only when the type of f is a struct or a pointer
+// to one.
 func promotes(f reflect.StructField) bool {
 	tag := f.Tag.Get("json")
 	if tag == "-" {
@@ -205,9 +207,9 @@ func embeds(f reflect.StructField) bool {
 
 // jsonName returns the name gen gives the property of f, a field it does
 // not read inline, and whether gen leaves f out. The name comes from the
-// json tag, or is the Go name of f when the tag names none. Gen leaves
-// out a field whose json tag is "-", and an unexported field that is not
-// embedded.
+// json tag, or is the Go name of f when the tag does not name one. Gen
+// leaves out a field whose json tag is "-", and an unexported field that
+// is not embedded.
 func jsonName(f reflect.StructField) (string, bool) {
 	tag := f.Tag.Get("json")
 	if tag == "-" || !f.IsExported() && !f.Anonymous {
