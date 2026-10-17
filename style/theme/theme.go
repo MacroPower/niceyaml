@@ -29,15 +29,16 @@ const (
 // Theme goes wherever a [style.Styler] does, such as
 // [go.jacobcolvin.com/niceyaml/printer.WithStyles].
 //
-// Look one up by name with [Catalog.Get] or enumerate them with
+// Find one by name with [Catalog.Get], or list them all with
 // [Catalog.All]. Create custom themes with [FromColors] or [New] and add
 // them to a catalog with [Catalog.With].
 type Theme struct {
-	// Memoized builder for the [style.Styles]. The first call builds them
-	// and copies of the Theme share the result. Nil for the zero value.
+	// The memoized builder for the [style.Styles]. The first call builds
+	// them, and copies of the Theme share the result. It is nil for the
+	// zero value.
 	styles func() style.Styles
-	// Name is the kebab-case identifier for the theme (e.g., "monokai",
-	// "dracula").
+	// Name is the kebab-case identifier for the theme, such as "monokai" or
+	// "dracula".
 	Name string
 	// Mode is the background the theme targets, light or dark.
 	Mode Mode
@@ -107,9 +108,9 @@ var (
 // Catalog is an ordered set of [Theme] values, one per name.
 //
 // A Catalog never changes after construction. [Catalog.With] returns a new
-// Catalog holding more themes, and the receiver stays as it was, so a
-// program builds one at startup and shares it with every picker and
-// printer that needs it. The zero Catalog holds no themes.
+// Catalog that holds more themes and leaves the receiver as it was. A
+// program therefore builds one at startup and shares it with every picker
+// and printer that needs it. The zero Catalog is empty.
 //
 // Create instances with [Builtin], or from the zero value with
 // [Catalog.With].
@@ -126,11 +127,12 @@ func Builtin() Catalog {
 	return builtin
 }
 
-// With returns a [Catalog] holding the themes of the receiver and then the
-// given ones. A theme whose name the receiver already holds replaces that
-// entry in place, and one with a new name goes on the end, so a program
-// shadows a built-in theme by adding one of the same name. When several
-// given themes share a name, the last one wins. The receiver is unchanged.
+// With returns a [Catalog] that holds the themes of the receiver and then
+// the given ones. A theme whose name the receiver already holds replaces
+// that entry in place, and one with a new name goes on the end. A program
+// thus shadows a built-in theme by adding one of the same name. When
+// several given themes share a name, the last one wins. With leaves the
+// receiver unchanged.
 func (c Catalog) With(themes ...Theme) Catalog {
 	out := Catalog{
 		index:  make(map[string]int, len(c.themes)+len(themes)),
@@ -167,13 +169,13 @@ func (c Catalog) Get(name string) (Theme, bool) {
 }
 
 // All returns every [Theme] in the [Catalog], in order. The slice is a
-// copy, so reordering it reaches nothing.
+// copy, so reordering it does not change the catalog.
 func (c Catalog) All() []Theme {
 	return slices.Clone(c.themes)
 }
 
 // Mode returns the [Catalog] of the themes that target mode, in the order
-// the receiver holds them, so a picker lists the themes for one
+// the receiver holds them. A picker uses it to list the themes for one
 // background:
 //
 //	for _, t := range theme.Builtin().Mode(theme.Dark).All() {

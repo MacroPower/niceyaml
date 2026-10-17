@@ -1,8 +1,8 @@
 // Package theme provides a catalog of pre-built color themes for YAML syntax
 // highlighting, and builds custom themes from a few colors.
 //
-// Themes translate popular editor and terminal color schemes (Monokai, Dracula,
-// Catppuccin, etc.) into [style.Styles] configurations.
+// Themes translate editor and terminal color schemes, such as Monokai,
+// Dracula, and Catppuccin, into [style.Styles] configurations.
 //
 // Applications offer familiar color palettes through them without defining
 // token colors by hand.
@@ -10,10 +10,11 @@
 // # Usage
 //
 // [Builtin] returns the [Catalog] of every theme this package ships.
-// [Catalog.Get] looks a [Theme] up by its kebab-case name. A Theme resolves
+// [Catalog.Get] finds a [Theme] by its kebab-case name. A Theme resolves
 // each [kind.Kind] through [Theme.Style], so it goes to
 // [go.jacobcolvin.com/niceyaml/printer.WithStyles] as it is. A theme builds
-// its styles on the first call and returns the same value afterwards:
+// its styles on the first call to [Theme.Styles] or [Theme.Style] and
+// returns the same value afterwards:
 //
 //	if t, ok := theme.Builtin().Get("dracula"); ok {
 //		p := printer.New(printer.WithStyles(t), printer.WithBox())
@@ -37,14 +38,14 @@
 //	p := printer.New(printer.WithStyles(styles), printer.WithBox())
 //
 // A program that names a kind of its own, such as one for an overlay, gives
-// it a parent with [style.Inherit], and it then takes the parent's style
+// it a parent with [style.Inherit]. The kind then takes the parent's style
 // under every theme in the catalog:
 //
 //	styles := t.Styles().With(style.Inherit(match, kind.GenericHighlight))
 //
 // [Catalog.All] returns every theme in the catalog, with the name and
-// [Mode] alongside the styles for building a picker, and [Catalog.Mode]
-// keeps the themes for one background:
+// [Mode] alongside the styles for building a picker. [Catalog.Mode] keeps
+// the themes for one background:
 //
 //	for _, t := range theme.Builtin().Mode(theme.Dark).All() {
 //		fmt.Println(t.Name)
@@ -90,9 +91,9 @@
 //	})
 //
 // Such a theme styles only the kinds it sets. Every other kind takes the
-// style of its closest set ancestor, which is often the body text. A theme
-// built with New should set each of the kinds that a renderer paints
-// besides the token kinds, so that its marks stand apart from the text:
+// style of its closest set ancestor, which is often the body text. To keep
+// the marks of a theme built with New apart from the text, a program
+// should set each kind that a renderer paints besides the token kinds:
 //
 //   - [kind.GenericInserted] and [kind.GenericDeleted] for the lines of a
 //     diff.
@@ -107,13 +108,13 @@
 //
 // # Theme Structure
 //
-// Themes define colors for YAML token kinds: keys ([kind.NameTag]), strings
-// ([kind.LiteralString]), numbers ([kind.LiteralNumber]), comments
-// ([kind.Comment]), and so on.
+// Themes define colors for YAML token kinds, such as keys
+// ([kind.NameTag]), strings ([kind.LiteralString]), numbers
+// ([kind.LiteralNumber]), and comments ([kind.Comment]).
 //
 // Through the inheritance of the [style] package, a theme specifies only
-// the kinds it customizes, and every other kind falls back to the style of
-// its parent.
+// the kinds it customizes, and every other kind takes the style of its
+// parent.
 //
 // Every built-in theme other than [Charm] comes from [FromColors]. Each of
 // these themes lists a base foreground and background, an accent color,
@@ -127,8 +128,8 @@
 // [FromColors] builds from it, as [style.WithSurface] sets it. Every kind
 // without a fill of its own draws on that color, and
 // [go.jacobcolvin.com/niceyaml/printer.WithBox] fills the rest of the
-// rectangle around the rows with it. A few themes, such
-// as pygments, have no background and draw on the terminal's own.
+// rectangle around the rows with it. A few themes, such as pygments, do
+// not have a background and draw on the terminal's own.
 //
 // To draw any theme on the terminal's background, remove its surface:
 //

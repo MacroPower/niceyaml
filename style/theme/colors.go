@@ -28,8 +28,8 @@ type Colors struct {
 	// black for a [Light] theme and from white for a [Dark] one.
 	Fg color.Color
 	// Bg is the background of the theme, and it becomes the surface of
-	// the styles, as [style.WithSurface] sets it. An unset Bg sets no
-	// surface, so the text shows the terminal's own background. [Derive]
+	// the styles, as [style.WithSurface] sets it. An unset Bg does not set
+	// a surface, so the text shows the terminal's own background. [Derive]
 	// then derives the other kinds from white for a [Light] theme and from
 	// black for a [Dark] one.
 	Bg color.Color
@@ -59,17 +59,17 @@ type Colors struct {
 // Token styles one kind of a theme that [Derive] builds. It holds a spec
 // in the form that [style.Parse] reads, such as "bold #268bd2".
 //
-// Derive layers each Token over the style its kind would otherwise take. A
-// Token that names only attributes thus keeps the colors of that style.
-// The "nobold", "noitalic", and "nounderline" keywords turn off an
-// attribute that the style beneath sets, where [style.Parse] only leaves
-// the attribute unset.
+// Derive layers each Token over the style its kind takes without the
+// Token. A Token that names only attributes thus keeps the colors of that
+// style. The "nobold", "noitalic", and "nounderline" keywords turn off an
+// attribute that the style beneath sets. In [style.Parse], those keywords
+// leave the attribute unset instead.
 type Token string
 
 // FromColors creates a new [Theme] named name, whose [Theme.Styles]
 // returns the styles that [Derive] builds from c and tokens. The theme
 // takes its [Mode] from c. It keeps a copy of tokens, so a later change
-// to the map does not reach it.
+// to the map does not change the theme.
 //
 // FromColors checks each token when it creates the theme, and it panics
 // when [style.Parse] rejects one. The panic value is an error that wraps
@@ -136,13 +136,13 @@ func fromColors(name string, c Colors, tokens map[kind.Kind]Token) Theme {
 //
 // Derive then layers each token over the style its kind inherits, parents
 // ahead of children. A token for a child thus layers over the finished
-// style of its parent. Two kinds take a style from another kind:
+// style of its parent. These kinds take a style from another kind:
 //
 //   - [kind.LiteralNull] takes the token of [kind.LiteralBoolean] when
 //     tokens sets the booleans and leaves null out. Most editor color
 //     schemes color null, true, and false as one keyword constant.
 //   - [kind.UI] takes the foreground of the finished [kind.Comment] style
-//     and none of its attributes. The gutters and annotations thus do not
+//     but not its attributes. The gutters and annotations thus do not
 //     take the italics or bold of the comments. A UI token layers over
 //     that color, and the kinds below UI inherit from it.
 //
@@ -153,12 +153,12 @@ func fromColors(name string, c Colors, tokens map[kind.Kind]Token) Theme {
 // So does the text of each diff line or badge that paints a fill of its
 // own.
 //
-// Bg becomes the surface of the styles, as [style.WithSurface] sets it,
-// so the kinds hold no background of their own unless they paint one.
+// Bg becomes the surface of the styles, as [style.WithSurface] sets it, so
+// a kind holds a background of its own only when it paints one.
 //
 // The rules and the constants behind the derived colors might change in a
 // later release. A test that pins the exact output of Derive might then
-// need updating.
+// fail.
 //
 // Derive panics when [style.Parse] rejects a token. The panic value is an
 // error that wraps the error from [style.Parse].
@@ -227,10 +227,10 @@ func (c Colors) filled() Colors {
 
 // build builds the [style.Styles] for c and tokens, with dimSurface and
 // surface as the backgrounds of the highlights and of the subtle and
-// accent headings. Build expects every color of c other than Fg and Bg to
-// be set, as filled leaves them. Bg becomes the surface of the result, as
-// [style.WithSurface] sets it, so the kinds hold no background of their
-// own unless they paint a fill.
+// accent headings. The caller must set every color of c other than Fg and
+// Bg, as filled does. Bg becomes the surface of the result, as
+// [style.WithSurface] sets it, so a kind holds a background of its own only
+// when it paints a fill.
 func build(c Colors, tokens map[kind.Kind]Token, dimSurface, surface color.Color) style.Styles {
 	base := lipgloss.NewStyle()
 	if isColorSet(c.Fg) {
@@ -404,7 +404,7 @@ func byDepth(kinds []kind.Kind) []kind.Kind {
 }
 
 // depth returns how many steps separate st from [kind.Text], the root of
-// the hierarchy. A custom kind counts as one step, since [kind.Parent]
+// the hierarchy. A custom kind counts as one step, because [kind.Parent]
 // reports [kind.Text] for it.
 func depth(st kind.Kind) int {
 	n := 0
@@ -446,29 +446,31 @@ func (c Colors) surface() (color.Color, color.Color) {
 // surfaces also step toward the luminance of fg.
 //
 // Each surface takes the smallest step, and the least tint at that step,
-// that puts it blendDistance from the color beneath it once the printer
-// blends both into bg, and paintDistance from it once the printer paints
-// both. The search stops before fg drops below minTextContrast on a
-// surface, or below its own contrast with bg divided by maxContrastLoss
-// where that is lower, and before the comments drop below their own
+// that puts it far enough from the color beneath it. Far enough means
+// blendDistance when the printer blends both into bg, and paintDistance
+// when the printer paints both. The search stops before the contrast of fg
+// on a surface becomes less than the lower of minTextContrast and the
+// contrast of fg with bg divided by maxContrastLoss. It also stops before
+// the contrast of the comments on a surface becomes less than their
 // contrast with bg divided by maxContrastLoss.
 //
 // The search tries the hues that [hues] returns for accent, in order, and
 // takes the first that reaches both distances within these floors. The
 // gamut holds less chroma for some hues than for others at a given
-// luminance, such as blue near white, so the hue of accent alone may fall
-// short. Where no hue reaches both distances, the surfaces take the first
-// hue. The highlight then takes the surface farthest from bg, and the dim
-// highlight takes the surface that splits the room most evenly.
+// luminance, such as blue near white, so the hue of accent alone might not
+// reach them. When none of the hues reaches both distances, the surfaces
+// take the first hue. The highlight then takes the surface farthest from
+// bg, and the dim highlight takes the surface that splits the room most
+// evenly.
 //
 // Text that the theme draws on a fill of its own, such as an inserted line
 // or an error mark, keeps less contrast. A highlight that the printer paints
-// replaces the fill with a surface near the luminance of bg, so text drawn
-// in the color of bg keeps a contrast of at most about maxContrastLoss
+// replaces the fill with a surface near the luminance of bg. Text drawn in
+// the color of bg then keeps a contrast of at most about maxContrastLoss
 // there. A highlight that the printer blends mixes the fill halfway toward
-// a surface near bg, so the text loses about as much as it would if the
-// printer blended bg itself into the fill. The search holds the text to
-// that contrast divided by maxContrastLoss.
+// a surface near bg. The text then keeps about the contrast it has on a
+// blend of the fill with bg itself. The search holds the text to that
+// contrast divided by maxContrastLoss.
 func highlightSurfaces(s style.Styles, fg, bg, accent color.Color, mode Mode) (color.Color, color.Color) {
 	comment := s.Style(kind.Comment).GetForeground()
 	if !isColorSet(comment) {
@@ -591,7 +593,7 @@ func (t tint) at(i, j int) (color.Color, bool) {
 }
 
 // keeps reports whether fg and comment keep their floors on c, and whether
-// the text of each fill keeps its floor once the printer blends c into the
+// the text of each fill keeps its floor when the printer blends c into the
 // fill.
 func (t tint) keeps(c color.Color) bool {
 	if contrast(t.fg, c) < t.textFloor || contrast(t.comment, c) < t.commentFloor {
@@ -610,7 +612,7 @@ func (t tint) keeps(c color.Color) bool {
 // candidates returns the candidates that keep the floors, in the order
 // that [highlightSurfaces] prefers them: the smallest luminance step
 // first, and the least tint first within a step. It stops at the first
-// luminance step where no tint keeps the floors.
+// luminance step where none of the tints keeps the floors.
 func (t tint) candidates() []candidate {
 	var found []candidate
 
@@ -636,7 +638,7 @@ func (t tint) candidates() []candidate {
 	}
 }
 
-// candidate is a surface that [tint] tries, with the color it shows once
+// candidate is a surface that [tint] tries, with the color it shows when
 // the printer blends it into the base background, and with its luminance
 // and tint steps.
 type candidate struct {
@@ -644,7 +646,7 @@ type candidate struct {
 	lift, share    int
 }
 
-// apart returns the CIEDE2000 distance between c and below once the
+// apart returns the CIEDE2000 distance between c and below when the
 // printer blends both into the base background.
 func (c candidate) apart(below candidate) float64 {
 	return distance(c.blended, below.blended)
@@ -652,8 +654,8 @@ func (c candidate) apart(below candidate) float64 {
 
 // next returns the first of found, at the luminance and tint steps of c or
 // past them, that sits far enough from c. It returns false when none does.
-// Far enough means blendDistance once the printer blends both into the base
-// background, and paintDistance once it paints both.
+// Far enough means blendDistance when the printer blends both into the base
+// background, and paintDistance when it paints both.
 func (c candidate) next(found []candidate) (candidate, bool) {
 	for _, n := range found {
 		if n.lift >= c.lift && n.share >= c.share &&
@@ -687,7 +689,8 @@ const blueHue = 240
 // hues returns the hues that [highlightSurfaces] tries, in the order it
 // tries them, as from [hueAt]. The first is the hue of accent, and the
 // rest turn hueTurn further from it at each step, on alternate sides, out
-// to the opposite hue. A gray has no hue, so its hues start from blue.
+// to the opposite hue. A gray does not have a hue, so its hues start from
+// blue.
 func hues(accent color.Color) []linear {
 	l := toLinear(accent)
 
@@ -787,8 +790,8 @@ func luminance(c color.Color) float64 {
 // top. The other properties of base stay in place. Attribute keywords
 // apply left to right as they do in [style.Parse], so the last keyword for
 // an attribute wins. A "nobold", "noitalic", or "nounderline" keyword
-// turns the attribute off even when base sets it, where [style.Parse] only
-// leaves it unset.
+// turns the attribute off even when base sets it. In [style.Parse], that
+// keyword leaves the attribute unset instead.
 //
 //nolint:gocritic // Value semantics match lipgloss.
 func layer(base lipgloss.Style, spec Token) lipgloss.Style {
