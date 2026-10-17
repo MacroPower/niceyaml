@@ -133,7 +133,11 @@ func TestWhen(t *testing.T) {
 
 				doc := yamltest.FirstDocumentWithPath(t, input, "app.yaml")
 				err := reg.Check(t.Context(), doc)
-				require.EqualError(t, err, "resolve schema: app.yaml: excessive aliasing")
+				require.EqualError(
+					t,
+					err,
+					"resolve schema: app.yaml:11:5: aliases expand the document past the alias limit",
+				)
 				require.ErrorIs(t, err, schema.ErrResolve)
 				require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
 

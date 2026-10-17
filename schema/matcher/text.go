@@ -2,7 +2,6 @@ package matcher
 
 import (
 	"context"
-	"reflect"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -53,7 +52,7 @@ func Text(path paths.Path, match func(text string) bool) Matcher {
 
 // Match implements [Matcher].
 func (m *textMatcher) Match(ctx context.Context, doc *niceyaml.Node) (bool, error) {
-	node, raw, err := readScalar(ctx, doc, m.path, reflect.TypeFor[string]())
+	node, raw, err := readScalar(ctx, doc, m.path)
 	if err != nil || raw == nil {
 		return false, err
 	}

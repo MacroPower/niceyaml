@@ -54,8 +54,8 @@ type document struct {
 	// parse, it is the stand-in [docparse.Parse] made, which does not have
 	// a body.
 	root *ast.DocumentNode
-	// The syntax error of a document that did not parse, or nil for one
-	// that parsed. The bindSyntaxErrors function binds it to the Source
+	// The error of a document that did not parse, or nil for one that
+	// parsed. The bindSyntaxErrors function binds it to the Source
 	// and to the document that it picks for the error.
 	err error
 	// Returns the resolver of every path in root, and creates it on the
@@ -120,8 +120,8 @@ func (d *document) newResolver() *paths.Resolver {
 // [Node.PathAt] describe the document as a whole, whatever Node of it a
 // caller holds.
 //
-// A document with a YAML syntax error does not have a tree. The methods
-// that [Node.Err] lists return the error that Err returns. The methods
+// A document that did not parse does not have a tree. The methods that
+// [Node.Err] lists return the error that Err returns. The methods
 // that read the tokens and the lines work as they do for any document, so
 // a caller renders or diffs a document that does not parse yet.
 //
@@ -163,13 +163,14 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 	return n.doc.root
 }
 
-// Err returns the YAML syntax error of the document the Node belongs to,
-// or nil for a document that parsed and for a nil Node. A syntax error
-// fails the one document that holds it, and [Source.AllDocuments] returns
-// a Node for that document too. The error is a [*SourceError] bound to
-// the Source and to that document, so [SourceError.Document] returns its
-// root. It matches [ErrSyntax], and it is among the errors [Source.File]
-// returns:
+// Err returns the error of a document that did not parse, or nil for a
+// document that parsed and for a nil Node. The error matches [ErrSyntax] for
+// text that the parser rejects. It matches [ErrLimit] for a document past the
+// depth limit or a text past the byte limit of the Source. A syntax error
+// fails the one document that holds it, and [Source.AllDocuments] returns a
+// Node for that document too. The error is a [*SourceError] bound to the
+// Source and to that document, so [SourceError.Document] returns its root. It
+// is among the errors [Source.File] returns:
 //
 //	for _, doc := range source.AllDocuments() {
 //		if err := doc.Err(); err != nil {
@@ -297,7 +298,7 @@ func (n *Node) AST() ast.Node {
 // [paths.ErrWildcard] for a path that can match several nodes, and
 // [Node.Nodes] scopes each node that such a path selects.
 //
-// A document that did not parse returns the syntax error that [Node.Err]
+// A document that did not parse returns the error that [Node.Err]
 // returns. The Scoped Nodes section describes where a not-found error
 // binds, and why only the error of At tells that a value is absent.
 func (n *Node) At(path paths.Path) (*Node, error) {
@@ -356,7 +357,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // [paths.ErrAlias]. Aliases or merge keys that lead a selector to far
 // more nodes than the document holds give [ErrExcessiveAliasing] or
 // [paths.ErrExcessiveMerging]. A document that did not parse returns the
-// syntax error that [Node.Err] returns.
+// error that [Node.Err] returns.
 func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	if n.doc.err != nil {
 		return nil, n.doc.err
@@ -672,7 +673,7 @@ func (n *Node) View() *line.View {
 // A path that does not resolve returns the error [paths.Resolver.Token]
 // describes, bound to the source as [Node.At] binds it. A token without a
 // position returns an error wrapping [ErrNoLocation]. A document that did
-// not parse returns the syntax error that [Node.Err] returns. Ranges
+// not parse returns the error that [Node.Err] returns. Ranges
 // returns nil when the value does not hold content on any line.
 func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
 	if n.doc.err != nil {
@@ -802,7 +803,7 @@ func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 // so Bind is idempotent. The Errors section defines a bound error. Bind
 // never modifies err. In a document that did not parse, a path does not
 // resolve, and [SourceError.Unresolved] returns [ErrPathNeedsDocument]
-// wrapping the syntax error.
+// wrapping the error of the parse.
 func (n *Node) Bind(err error) error {
 	return bindTree(err, binder{src: n.source, node: n, locate: true})
 }

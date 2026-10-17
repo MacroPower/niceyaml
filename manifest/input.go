@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -112,7 +113,11 @@ func newStreamInput(name string, r io.Reader, kind targetKind, opts []InputOptio
 		name: name,
 		kind: kind,
 		read: sync.OnceValues(func() (string, error) {
-			src, err := niceyaml.NewSourceFromReader(r, cfg.sourceOptions...)
+			// The name goes last, so the error of a text past the byte limit
+			// names the Input as every other problem of the Input does.
+			opts := append(slices.Clone(cfg.sourceOptions), niceyaml.WithName(name))
+
+			src, err := niceyaml.NewSourceFromReader(r, opts...)
 			if err != nil {
 				return "", err
 			}

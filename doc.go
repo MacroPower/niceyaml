@@ -123,16 +123,17 @@
 //
 // Each document parses on its own, so a YAML syntax error fails only the
 // document that holds it. The [Node] of a document that did not parse keeps
-// its place among the documents of the file. [Node.Err] returns its syntax
-// error, and so do the methods that Node.Err lists, such as [Node.Decode] and
-// [Node.Validate]. [Node.AST] returns nil for it, and [Node.View] renders its
-// lines as it renders those of any document.
+// its place among the documents of the file. [Node.Err] returns the error of
+// its parse, and so do the methods that Node.Err lists, such as [Node.Decode]
+// and [Node.Validate]. [Node.AST] returns nil for it, and [Node.View] renders
+// its lines as it renders those of any document.
 //
 // A "---" header that directly follows an anchor without a value parses
 // together with the document above it. A syntax error in either document thus
 // fails both, and both return that one error. [Source.File] returns the
-// syntax errors of the file as one error, and each of them matches
-// [ErrSyntax].
+// errors of the documents that did not parse as one error. Each syntax error
+// matches [ErrSyntax], and each error of a document past a limit of the
+// Source matches [ErrLimit].
 //
 // A document without content is empty, as [Node.IsEmpty] reports. A trailing
 // "---" leaves one, as in `name: x\n---\n`. So does a Helm template that
@@ -531,11 +532,11 @@
 //		}
 //	}
 //
-// The Node of a document that did not parse returns its syntax error from
-// [Node.Decode]. A loop over the documents thus gets that error beside the
-// errors of the documents that parsed. [Source.ValidateDocuments] validates
-// every document and joins their errors. The Documents section describes
-// syntax errors and empty documents.
+// The Node of a document that did not parse returns the error of its parse
+// from [Node.Decode]. A loop over the documents thus gets that error beside
+// the errors of the documents that parsed. [Source.ValidateDocuments]
+// validates every document and joins their errors. The Documents section
+// describes syntax errors and empty documents.
 //
 // [Node.Decode] returns a new value, and [Node.DecodeInto] fills one that the
 // caller holds. A decode runs these steps in order, and the first step that
@@ -543,16 +544,19 @@
 //
 //  1. The target must be a non-nil pointer, or the decode returns an error
 //     that wraps [ErrDecodeTarget].
-//  2. For a document that did not parse, the decode returns its syntax error.
+//  2. For a document that did not parse, the decode returns the error of its
+//     parse.
 //  3. Each [Validator] from [WithValidator] checks the node, in the order the
 //     caller gives them.
 //  4. A node that holds an alias fails with an error that matches
-//     [ErrExcessiveAliasing] when nested aliases make a decode of the
-//     document read far more than the document holds. A decode into a type
-//     that reads text also fails when the aliases of the document repeat more
-//     text than the byte limit of the [Source] allows. It fails as well when
-//     they nest the document past its depth limit, as the Limits section
-//     describes.
+//     [ErrExcessiveAliasing] when nested aliases make a decode of the document
+//     read far more than the document holds. The type of the target reads text
+//     when any type that a decode into it reaches reads text. Those types
+//     include the types of its fields and elements, and the key and value
+//     types of its maps. For such a target, the decode also fails when the
+//     aliases of the whole document repeat more text than the byte limit of
+//     the [Source] allows. It fails as well when they nest the document past
+//     its depth limit, as the Limits section describes.
 //  5. The go-yaml decoder fills the target.
 //  6. Every value in the result that implements [SelfValidator] validates
 //     itself, and each function from [WithValueCheck] checks the values of
@@ -1190,7 +1194,9 @@
 // a node that holds an alias when the aliases of its document exceed the
 // limit. The error matches [ErrExcessiveAliasing], and [IsInvalid] reports
 // it, because the aliases of the document are the cause wherever the count
-// runs.
+// runs. The error binds at the alias of the document that repeats the most
+// nodes, as in "app.yaml:14:30: aliases expand the document past the alias
+// limit". That alias can lie outside the node that the call reads.
 //
 // [WithAliasLimit] set to false turns the limit off for the documents of one
 // Source, for input that the program trusts, such as a file it ships. It also
@@ -1225,16 +1231,18 @@
 // A file past the byte limit fails as a file that does not read. A document
 // past the depth limit fails as a document that does not parse, at the token
 // that opens its first level past the limit. The other documents of the
-// Source still parse. Each such error matches [ErrLimit], and [IsInvalid]
-// reports it.
+// Source still parse. Each such error matches [ErrLimit] and not [ErrSyntax],
+// and [IsInvalid] reports it.
 //
-// A decode into a type that reads text writes the node out as text with each
-// alias in full. Types that read text include those with an UnmarshalText
-// method or an UnmarshalYAML method that takes bytes, and those that a
-// function of [CustomUnmarshaler] decodes. [NewSourceFromLayers] writes each
-// layer out the same way. The aliases of a small document can make that text
-// far longer and deeper than the document, so the limits of the Source bound
-// what the aliases add:
+// The go-yaml decoder writes the node of each value that reads text out as
+// text, with each alias in full. Types that read text include those with an
+// UnmarshalText method or an UnmarshalYAML method that takes bytes, and those
+// that a function of [CustomUnmarshaler] decodes. A target reads text when
+// any type that a decode into it reaches reads text, such as one field of
+// type [netip.Addr]. [NewSourceFromLayers] writes each layer out the same
+// way. The aliases of a small document can make that text far longer and
+// deeper than the document, so the limits of the Source bound what the
+// aliases add:
 //
 //   - The text that the aliases of the document repeat stays within the byte
 //     limit. The count weighs the text of each alias in two ways and takes
@@ -1248,12 +1256,16 @@
 //     nests, through the aliases there.
 //
 // Such a decode or merge of a node that holds an alias checks the whole
-// document before it writes any text. It fails on a document past either
-// bound with an error that matches both [ErrLimit] and
-// [ErrExcessiveAliasing], as in "app.yaml:30:5: aliases repeat more than 256
-// KiB of text". The error binds at the first alias that takes the text past
-// the bound. A decode into a value that does not read text shares each anchor
-// between its aliases, so the bounds do not apply to it.
+// document before it writes any text. The check does not follow which values
+// read text. It counts every alias of the document, including an alias that a
+// plain string field reads. It fails on a document past either bound with an
+// error that matches both [ErrLimit] and [ErrExcessiveAliasing], as in
+// "app.yaml:30:5: aliases repeat more than 256 KiB of text". The error binds
+// at the first alias that takes the text past the bound. That alias might not
+// reach any value that reads text.
+//
+// A decode into a value that does not read text does not write any text, so
+// these bounds do not apply to it. The alias limit still applies.
 //
 // A [go.jacobcolvin.com/niceyaml/schema/matcher.Content] matcher that decodes
 // into a type that reads text applies the same bounds. [WithAliasLimit] set

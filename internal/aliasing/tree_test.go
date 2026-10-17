@@ -655,6 +655,97 @@ func TestExpansionError(t *testing.T) {
 	}
 }
 
+func TestRatioError(t *testing.T) {
+	t.Parallel()
+
+	// A sequence of 1000 scalars that 200 aliases repeat, so the aliases
+	// make up more than 99 percent of the read.
+	repeated := stringtest.LinesLF("s: &s "+yamltest.FlowSequence("x", 1000), "l:") +
+		strings.Repeat("  - *s\n", 200)
+
+	// A mapping of 1000 entries that 200 merge keys bring in.
+	merged := "base: &base\n" + yamltest.GenerateLines(1000, "  k%d: v") + "l:\n" +
+		strings.Repeat("  - <<: *base\n", 200)
+
+	tcs := map[string]struct {
+		input string
+		// The position of the alias that the error names, as line:col.
+		want string
+		opts []niceyaml.SourceOption
+		// Whether the case checks the document through CheckDecodeText in
+		// place of CheckDecode.
+		text bool
+	}{
+		"alias that reads the chain": {
+			// The use repeats ten times what each alias of the last level
+			// repeats.
+			input: yamltest.AliasLevels(7) + "use: *l7\n",
+			want:  "10:6",
+		},
+		"chain without a use": {
+			// Every alias of the last level repeats the same count, so the
+			// first of them wins.
+			input: yamltest.AliasLevels(7),
+			want:  "9:10",
+		},
+		"aliases that repeat the same count": {
+			input: repeated,
+			want:  "3:5",
+		},
+		"heavier alias after the others": {
+			input: repeated + stringtest.LinesLF("t: &t [*s, *s]", "u: *t"),
+			want:  "204:4",
+		},
+		"merge keys": {
+			input: merged,
+			want:  "1003:9",
+		},
+		"aliases past the count cap": {
+			// The counts of the last level and of the use stop at the cap,
+			// so the use wins as the one alias outside every anchor.
+			input: yamltest.AliasLevels(11) + "use: *l11\n",
+			want:  "14:6",
+		},
+		"aliases past the count cap without a use": {
+			input: yamltest.AliasLevels(11),
+			want:  "13:11",
+		},
+		"text of many aliases to a long scalar": {
+			// With the byte limit off, the text of the aliases still makes
+			// up too much of the read.
+			input: stringtest.LinesLF(longScalar, "kind: "+yamltest.FlowSequence("*a", 500)),
+			opts:  []niceyaml.SourceOption{niceyaml.WithByteLimit(0)},
+			want:  "2:8",
+			text:  true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
+
+			check := aliasing.CheckDecode
+			if tc.text {
+				check = aliasing.CheckDecodeText
+			}
+
+			err := check(doc)
+			require.ErrorIs(t, err, aliaslimit.ErrExcessiveAliasing)
+			require.NotErrorIs(t, err, fault.ErrLimit)
+			require.EqualError(t, err, "aliases expand the document past the alias limit")
+
+			var ratio *aliasing.RatioError
+
+			require.ErrorAs(t, err, &ratio)
+
+			at := ratio.Alias.GetToken().Position
+			assert.Equal(t, tc.want, fmt.Sprintf("%d:%d", at.Line, at.Column))
+		})
+	}
+}
+
 func TestLimited(t *testing.T) {
 	t.Parallel()
 

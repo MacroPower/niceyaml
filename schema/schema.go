@@ -598,10 +598,10 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // such as in a key that holds a sequence, counts the same way. Any other
 // alias to a scalar counts as one unaliased node. For a document past the
 // limit, Check returns the error of that decode. That error matches
-// [ErrExcessiveAliasing] and binds at the first token of the node that is
-// not a comment:
+// [ErrExcessiveAliasing] and binds at the alias of the document that
+// repeats the most nodes, which can lie outside the node:
 //
-//	app.yaml:1:1: excessive aliasing
+//	app.yaml:14:30: aliases expand the document past the alias limit
 //
 // The aliases of the document are the cause, so [niceyaml.IsInvalid]
 // reports the error, and it does not wrap [ErrValidate]. Check does not

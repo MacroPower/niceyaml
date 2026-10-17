@@ -615,7 +615,7 @@ func TestCompile_Document(t *testing.T) {
 		},
 		"YAML aliases past the limit": {
 			schema: yamltest.AliasLevels(7),
-			want:   "compile schema: YAML decode: 1:1: excessive aliasing",
+			want:   "compile schema: YAML decode: 9:10: aliases expand the document past the alias limit",
 		},
 		"YAML infinity": {
 			schema: "maximum: .inf\n",
@@ -3047,10 +3047,10 @@ func TestSchema_Check_Bound(t *testing.T) {
 			want:  `menu.yaml:1:8: $.price: could not find alias "nope"`,
 		},
 		// The decode the schema runs refuses the document, and binds the
-		// error at the first token of the node.
+		// error at the alias that repeats the most.
 		"a document past the alias limit": {
 			input:     yamltest.AliasLevels(7),
-			want:      "menu.yaml:1:1: excessive aliasing",
+			want:      "menu.yaml:9:10: aliases expand the document past the alias limit",
 			excessive: true,
 		},
 		// The error carries a position already, so the scoped node adds
@@ -3058,7 +3058,7 @@ func TestSchema_Check_Bound(t *testing.T) {
 		"a scoped node past the alias limit": {
 			input:     yamltest.AliasLevels(7),
 			path:      paths.Current().Child("a"),
-			want:      "menu.yaml:2:3: excessive aliasing",
+			want:      "menu.yaml:9:10: aliases expand the document past the alias limit",
 			excessive: true,
 		},
 	}

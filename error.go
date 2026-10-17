@@ -153,16 +153,21 @@ var (
 	// gopkg.in/yaml.v3 applies. A [Validator] that decodes the node it checks
 	// returns the same error, as a [go.jacobcolvin.com/niceyaml/schema.Schema]
 	// does. [WithAliasLimit] on the [Source] disables the limit for each of
-	// them. Each returns the error bound as a [SourceError] at the first token
-	// of the node that is not a comment. The document is at fault for it, as
-	// [IsInvalid] describes, and it does not match [ErrDecode].
+	// them. Each returns the error bound as a [SourceError] at the alias of the
+	// document that repeats the most nodes, as in "app.yaml:14:30: aliases
+	// expand the document past the alias limit". The count covers the whole
+	// document, so that alias can lie outside the node that the call decodes.
+	// The document is at fault for the error, as [IsInvalid] describes, and it
+	// does not match [ErrDecode].
 	//
-	// A decode into a type that reads text and [NewSourceFromLayers] also fail
-	// when the aliases of a document repeat more text than the byte limit of
-	// the Source allows. They fail as well when the aliases nest the document
-	// past its depth limit. Either error matches [ErrLimit] too, and it binds
-	// at the alias that takes the text past the bound, as ErrLimit describes.
-	// WithAliasLimit disables those bounds along with the limit.
+	// A decode into a type that reads text anywhere and [NewSourceFromLayers]
+	// also fail when the aliases of a document repeat more text than the byte
+	// limit of the Source allows. They fail as well when the aliases nest the
+	// document past its depth limit. Either error matches [ErrLimit] too, and
+	// it binds at the alias that takes the text past the bound, as ErrLimit
+	// describes. WithAliasLimit disables those bounds along with the limit.
+	// The alias limit does not have a size, so the error of that limit alone
+	// does not match ErrLimit, as ErrLimit describes.
 	//
 	// [Node.Nodes] returns ErrExcessiveAliasing too, bound to its receiver
 	// with no location, when aliases lead a selector of the path to far more
@@ -175,10 +180,14 @@ var (
 	// sequence with no closing bracket, a tab that indents a key, or a key a
 	// mapping holds twice without [WithAllowDuplicateKeys]. Every error the
 	// parser returns matches it. [Source.File] and [Source.Document] return
-	// it, and [Node.Err] returns it for each document that did not parse among
-	// the documents [Source.Documents] returns. When a reference document from
-	// [WithReferences] does not parse, every decode of a Source that reads it
-	// returns the error of that document.
+	// it, and [Node.Err] returns it for each document that the parser
+	// rejected among the documents [Source.Documents] returns. When a
+	// reference document from [WithReferences] does not parse, every decode
+	// of a Source that reads it returns the error of that document.
+	//
+	// A document past the depth limit of [WithDepthLimit] does not parse
+	// either, and neither does the one document of a text past the byte limit
+	// of [WithByteLimit]. The errors of both match [ErrLimit] instead.
 	//
 	// Each of these calls returns the error bound as a [SourceError] at the
 	// offending token. The error of a file with several such documents is a
@@ -213,7 +222,7 @@ var (
 	// [SourceError.Unresolved] reports it. Bind such an error through
 	// [Node.Bind] with the document the check ran against. Node.Bind reports
 	// it too for a path bound through a document that did not parse, where it
-	// wraps the syntax error [Node.Err] returns.
+	// wraps the error that [Node.Err] returns.
 	ErrPathNeedsDocument = errors.New("path needs a document to resolve in")
 
 	// ErrAmbiguousPath indicates a path that names the entries of more than
@@ -232,19 +241,26 @@ var (
 
 	// ErrLimit indicates a text past a limit of its [Source]. A file that
 	// holds more bytes than [WithByteLimit] allows fails as a file that does
-	// not read. A document that nests more levels than [WithDepthLimit] allows
-	// fails as a document that does not parse. The document is at fault for
-	// each, as [IsInvalid] describes.
+	// not read. A document that nests more levels than [WithDepthLimit]
+	// allows fails as a document that does not parse, as [Node.Err] reports.
+	// Its error matches ErrLimit and not [ErrSyntax]. The document is at
+	// fault for each, as [IsInvalid] describes.
 	//
-	// The same limits bound the text that the aliases of a document expand to,
-	// for a decode into a type that reads text and for [NewSourceFromLayers].
-	// A node that holds an alias fails such a decode or merge when the aliases
-	// of its document repeat more text than the byte limit allows. It also
-	// fails when they nest the document more levels than the depth limit
-	// allows. Either error also matches [ErrExcessiveAliasing] and binds at
-	// the first alias that takes the text past the bound, as in "aliases
-	// repeat more than 256 KiB of text". The Limits section of the package
-	// documentation describes the bounds.
+	// The same limits bound the text that the aliases of a document expand
+	// to, for a decode into a type that reads text anywhere and for
+	// [NewSourceFromLayers]. A node that holds an alias fails such a decode
+	// or merge when the aliases of its document repeat more text than the
+	// byte limit allows. It also fails when they nest the document more
+	// levels than the depth limit allows. Either error also matches
+	// [ErrExcessiveAliasing] and binds at the first alias that takes the text
+	// past the bound, as in "aliases repeat more than 256 KiB of text". The
+	// Limits section of the package documentation describes the bounds.
+	//
+	// Errors that match ErrLimit name a limit that the caller sets as a size,
+	// and a larger limit lets the same text pass. The alias limit of
+	// [WithAliasLimit] does not have a size, so an error of that limit alone
+	// matches [ErrExcessiveAliasing] and not ErrLimit. Programs that refuse
+	// both kinds, such as servers that answer 413, test for both sentinels.
 	//
 	// The error of a schema past its load limit, as
 	// [go.jacobcolvin.com/niceyaml/schema.WithLoadLimit] describes, matches

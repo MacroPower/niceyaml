@@ -733,6 +733,13 @@ func TestContent(t *testing.T) {
 				if tc.err != nil {
 					require.ErrorIs(t, err, tc.err)
 					assert.True(t, niceyaml.IsInvalid(err))
+
+					var bound *niceyaml.SourceError
+
+					require.ErrorAs(t, err, &bound)
+
+					_, positioned := bound.Position()
+					assert.True(t, positioned)
 				} else {
 					require.NoError(t, err)
 				}

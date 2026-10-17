@@ -7740,8 +7740,8 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 			decode: []niceyaml.DecodeOption{customList},
 		},
 		"aliased list without its custom unmarshaler": {
-			// A decode into a value shares the anchor a between the
-			// aliases.
+			// A decode into a value does not write any text, so the byte
+			// limit does not bound the aliases.
 			input:  repeated,
 			target: func() any { return new(listed) },
 			opts:   []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
@@ -7751,6 +7751,20 @@ func TestDocument_Decode_AliasExpansion(t *testing.T) {
 			target: func() any {
 				return new(struct {
 					L []aliasText `yaml:"l"`
+				})
+			},
+			opts: []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},
+			err:  "doc.yaml:12:5: aliases repeat more than 1 KiB of text",
+		},
+		"text field that no alias reaches": {
+			// The bound covers every alias of the document whenever the
+			// target reads text anywhere, so the aliases that a plain
+			// string reads count too.
+			input: repeated + "t: x\n",
+			target: func() any {
+				return new(struct {
+					T aliasText `yaml:"t"`
+					L []string  `yaml:"l"`
 				})
 			},
 			opts: []niceyaml.SourceOption{niceyaml.WithByteLimit(1024)},

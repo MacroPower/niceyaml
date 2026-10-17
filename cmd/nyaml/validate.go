@@ -215,13 +215,6 @@ func readSource(path string, opts ...niceyaml.SourceOption) (*niceyaml.Source, e
 	opts = append([]niceyaml.SourceOption{niceyaml.WithFilePath(path)}, opts...)
 
 	source, err := niceyaml.NewSourceFromFile(path, opts...)
-	if errors.Is(err, niceyaml.ErrLimit) {
-		// The error names no file, so it binds to an empty Source that
-		// takes the name of the file.
-		named := niceyaml.NewSourceFromString("", opts...)
-
-		return nil, named.Bind(err) //nolint:wrapcheck // The binding names the file.
-	}
 
 	// The read made this error, so no other caller holds it. The wrapper
 	// holds its text from before the escape, so a new one replaces it.

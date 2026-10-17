@@ -1217,13 +1217,14 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 		assert.True(t, niceyaml.IsInvalid(err))
 
 		// With the byte limit off, the aliases still make up too much of
-		// the text.
+		// the text. Every alias repeats the same text, so the error binds
+		// at the first.
 		unbounded := yamltest.FirstDocument(t, input, niceyaml.WithName("prod.yaml"), niceyaml.WithByteLimit(0))
 
 		_, err = niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Node{unbounded})
 		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
 		require.NotErrorIs(t, err, niceyaml.ErrLimit)
-		require.EqualError(t, err, "prod.yaml:1:1: excessive aliasing")
+		require.EqualError(t, err, "prod.yaml:3:5: aliases expand the document past the alias limit")
 
 		trusted := yamltest.FirstDocument(t, input, niceyaml.WithAliasLimit(false))
 

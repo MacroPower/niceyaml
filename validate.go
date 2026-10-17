@@ -53,12 +53,12 @@ import (
 // the decode again.
 //
 // In a document that did not parse, every error binds without a position.
-// SelfValidate returns those errors rather than the syntax error that
-// [Node.Err] returns. Any v works except nil and a nil pointer. For those
-// two, SelfValidate returns an error wrapping [ErrSelfValidateTarget],
-// bound to the source. A v that is not a pointer validates as a copy. The
-// walk stops when ctx ends, as the Cancellation section of the package
-// documentation describes.
+// SelfValidate returns those errors rather than the error that [Node.Err]
+// returns. Any v works except nil and a nil pointer. For those two,
+// SelfValidate returns an error wrapping [ErrSelfValidateTarget], bound to
+// the source. A v that is not a pointer validates as a copy. The walk stops
+// when ctx ends, as the Cancellation section of the package documentation
+// describes.
 func (n *Node) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
 	return n.selfValidate(ctx, v, newDecodeConfig(n.source, opts))
 }
@@ -1481,11 +1481,10 @@ type SelfValidator interface {
 // describes how a validator declares a fault and how one checks decoded
 // data.
 //
-// A decode and Node.Validate return the syntax error of a document that
-// did not parse before any validator runs. A caller that calls Check
-// itself on such a Node gets the syntax error from Node.Decode, Node.At,
-// and Node.Nodes. The validators of this module return it before they
-// read the Node.
+// A decode and Node.Validate return the error of a document that did not
+// parse before any validator runs. A caller that calls Check itself on such a
+// Node gets that error from Node.Decode, Node.At, and Node.Nodes. The
+// validators of this module return it before they read the Node.
 type Validator interface {
 	Check(ctx context.Context, n *Node) error
 }
@@ -1523,8 +1522,7 @@ type ValidatorFunc func(ctx context.Context, n *Node) error
 // [Node.Bind] binds an error. A failure that does not hold a warning comes
 // back as f wrote it. The Warnings section of the package documentation
 // describes a failure that holds both. For a document that did not parse,
-// Check returns the syntax error that [Node.Err] returns without calling
-// f.
+// Check returns the error that [Node.Err] returns without calling f.
 func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 	if n.doc.err != nil {
 		return n.doc.err
@@ -1629,8 +1627,8 @@ func ChainValidator(validators ...Validator) Validator {
 // A document that holds any value runs v, so v still checks an explicit
 // null such as `--- null` and an alias without an anchor before it. A
 // Node that [Node.At] or [Node.Nodes] scopes below the root is not a
-// document, so v runs on it. A document that did not parse returns its
-// syntax error.
+// document, so v runs on it. A document that did not parse returns the
+// error of its parse.
 //
 // SkipEmpty returns the errors of v as [ValidatorFunc.Check] returns the
 // errors of its function. A nil v passes every Node. SkipEmpty takes one
@@ -1660,15 +1658,15 @@ func SkipEmpty(v Validator) Validator {
 //
 //	svc.yaml:3:11: $.items[1].name: reserved name
 //
-// Each reports every failure in document order, as [MultiValidator]
-// reports the failures of its validators. It hands the warnings of v to
-// the [Warnings] collector of its context, bound at the Node that v
-// checked. A path that does not select a Node passes. A nil v, or one that
-// holds a nil pointer or func, also passes, and Each does not resolve the
-// path for it. An error from Node.Nodes comes back as Node.Nodes returns
-// it, and a document that did not parse returns its syntax error. A
-// context that ends stops the run, as the Cancellation section of the
-// package documentation describes.
+// Each reports every failure in document order, as [MultiValidator] reports
+// the failures of its validators. It hands the warnings of v to the
+// [Warnings] collector of its context, bound at the Node that v checked. A
+// path that does not select a Node passes. A nil v, or one that holds a nil
+// pointer or func, also passes, and Each does not resolve the path for it. An
+// error from Node.Nodes comes back as Node.Nodes returns it, and a document
+// that did not parse returns the error of its parse. A context that ends
+// stops the run, as the Cancellation section of the package documentation
+// describes.
 func Each(path paths.Path, v Validator) Validator {
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
 		if nilness.IsNil(v) {
@@ -1727,18 +1725,18 @@ func Each(path paths.Path, v Validator) Validator {
 // returns the error as the validator wrote it. [Each] runs a validator
 // that way on every Node a path selects, such as each element of a list.
 //
-// A document that did not parse returns the syntax error that [Node.Err]
-// returns before v runs, even when v is nil. Otherwise a nil v, or one
-// that holds a nil pointer or func, passes without running. A validator
-// that returns a nil [*Error] or [*SourceError] pointer passes too.
+// A document that did not parse returns the error that [Node.Err] returns
+// before v runs, even when v is nil. Otherwise a nil v, or one that holds a
+// nil pointer or func, passes without running. A validator that returns a nil
+// [*Error] or [*SourceError] pointer passes too.
 func (n *Node) Validate(ctx context.Context, v Validator) error {
 	return n.validate(ctx, []Validator{v})
 }
 
-// validate runs validators in order on n, and binds the first error with
-// n when the validator left it unbound. A document that did not parse
-// returns its syntax error, and validate does not run a validator. The
-// warnings of the validators go to the collectors of ctx.
+// validate runs validators in order on n, and binds the first error with n
+// when the validator left it unbound. A document that did not parse returns
+// the error of its parse, and validate does not run a validator. The warnings
+// of the validators go to the collectors of ctx.
 func (n *Node) validate(ctx context.Context, validators []Validator) error {
 	if n.doc.err != nil {
 		return n.doc.err

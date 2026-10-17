@@ -269,6 +269,15 @@ func testAliasBomb(t *testing.T, m matcher.Matcher) {
 				// The aliases of the document are the cause, so the
 				// document is at fault for the refusal.
 				assert.True(t, niceyaml.IsInvalid(err))
+
+				// The decode binds the refusal in the document, as it binds
+				// the refusal of any decode.
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+
+				_, positioned := bound.Position()
+				assert.True(t, positioned)
 			})
 		}
 	})

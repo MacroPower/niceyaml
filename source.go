@@ -252,21 +252,23 @@ func (c *sourceConfig) budget() aliasing.Budget {
 //	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithByteLimit(1<<20))
 //
 // [NewSourceFromFile], [NewSourceFromFS], and [NewSourceFromReader] read
-// at most one byte past the limit. When the text holds more, they return
-// an error that matches [ErrLimit], as in "file is larger than 256 KiB".
-// For a text past the limit, [NewSourceFromString] and
-// [NewSourceFromBytes] keep the text and skip the lexer. Such a Source
-// does not hold any lines, and its one document fails with that error, as
-// a document that does not parse does. A reference document past a limit
-// fails every decode of the Source that reads it through
-// [WithReferences].
+// at most one byte past the limit. When the text holds more, they return a
+// nil Source and an error that matches [ErrLimit]. The error is a
+// [*SourceError] that names the Source as [WithName] or the constructor
+// names it, as in "app.yaml: file is larger than 256 KiB". For a text past
+// the limit, [NewSourceFromString] and [NewSourceFromBytes] keep the text
+// and skip the lexer. Such a Source does not hold any lines, and its one
+// document fails with the same error, as a document that does not parse
+// does. A reference document past a limit fails every decode of the Source
+// that reads it through [WithReferences].
 //
-// A decode into a type that reads text and [NewSourceFromLayers] each
-// write the aliases of a document out in full. The limit also bounds the
-// text that those aliases repeat, as the Limits section of the package
-// documentation describes. The merged text of NewSourceFromLayers skips
-// the limit, because it holds at most its layers and the text that the
-// limit lets their aliases repeat.
+// The limit also bounds the text that the aliases of a document repeat,
+// for a decode into a type that reads text anywhere and for
+// [NewSourceFromLayers]. Such a call checks the aliases of the whole
+// document before it writes any text, as the Limits section of the package
+// documentation describes. The merged text of NewSourceFromLayers skips the
+// limit, because it holds at most its layers and the text that the limit
+// lets their aliases repeat.
 func WithByteLimit(n int) SourceOption {
 	return func(c *sourceConfig) {
 		c.byteLimit, c.byteLimitSet = max(0, n), true
@@ -286,17 +288,20 @@ func WithByteLimit(n int) SourceOption {
 // check reads the tokens of each document before the parser runs.
 //
 // A document past the limit fails as a document that does not parse
-// does. Its error matches [ErrLimit] and binds at the token that opens
-// its first level past the limit, as in "document nests more than 100
-// levels". The other documents of the Source still parse. A reference
-// document past the limit fails every decode of the Source that reads it
-// through [WithReferences].
+// does. [Node.Err] returns its error, [Node.AST] returns nil, and the
+// other documents of the Source still parse. Its error matches [ErrLimit]
+// and not [ErrSyntax], because the check runs before the parser. The
+// error binds at the token that opens the first level past the limit, as
+// in "document nests more than 100 levels". A reference document past the
+// limit fails every decode of the Source that reads it through
+// [WithReferences].
 //
-// A decode into a type that reads text and [NewSourceFromLayers] each
-// write the aliases of a document out in full. The limit also bounds the
-// levels that those aliases add, as the Limits section of the package
-// documentation describes. The merged text of NewSourceFromLayers skips
-// the limit, because each layer passed it with its aliases written out.
+// The limit also bounds the levels that the aliases of a document add, for
+// a decode into a type that reads text anywhere and for
+// [NewSourceFromLayers]. Such a call checks the aliases of the whole
+// document before it writes any text, as the Limits section of the package
+// documentation describes. The merged text of NewSourceFromLayers skips the
+// limit, because each layer passed it with its aliases written out.
 func WithDepthLimit(n int) SourceOption {
 	return func(c *sourceConfig) {
 		c.depthLimit, c.depthLimitSet = max(0, n), true
@@ -455,6 +460,11 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 // [go.jacobcolvin.com/niceyaml/schema/matcher.Text] matcher refuse a
 // node of such a document that holds an alias. The error matches
 // [ErrExcessiveAliasing], and [IsInvalid] reports it.
+//
+// The limit follows the rule of gopkg.in/yaml.v3, which weighs the share
+// of the nodes that aliases repeat rather than a size, so the option takes
+// a bool. [WithByteLimit] and [WithDepthLimit] set the sizes that also
+// bound the text that aliases write out.
 //
 // With the limit off, a few hundred bytes of nested aliases can keep a
 // decode running for minutes, because the go-yaml decoder never checks
@@ -622,7 +632,8 @@ func WithExcerpts(enabled bool) SourceOption {
 // case, pass WithFilePath with the path that the program resolved itself.
 //
 // NewSourceFromFile returns a nil Source and an error when it cannot read
-// the file.
+// the file. A file past the byte limit gives an error that names the
+// Source, as [WithByteLimit] describes.
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 	// Abs fails only when the working directory has no name, and the path
 	// as given is then the closest one left.
@@ -636,6 +647,10 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 	cfg := newSourceConfig(append([]SourceOption{WithName(path), WithFilePath(filePath)}, opts...))
 
 	data, err := readFile(path, cfg.bytes())
+	if errors.Is(err, ErrLimit) {
+		return nil, limitSourceError(cfg, err)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -659,7 +674,8 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 // fsys for as long as it keeps an entry from it, as [WithFS] describes.
 //
 // NewSourceFromFS returns a nil Source and an error when it cannot read
-// the file.
+// the file. A file past the byte limit gives an error that names the
+// Source, as [WithByteLimit] describes.
 func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, error) {
 	cfg := newSourceConfig(append([]SourceOption{WithFilePath(path), WithFS(fsys)}, opts...))
 
@@ -672,7 +688,7 @@ func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, er
 
 	data, err := readLimited(f, cfg.bytes())
 	if errors.Is(err, ErrLimit) {
-		return nil, err
+		return nil, limitSourceError(cfg, err)
 	}
 
 	if err != nil {
@@ -688,13 +704,15 @@ func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, er
 //
 //	source, err := niceyaml.NewSourceFromReader(os.Stdin, niceyaml.WithName("<stdin>"))
 //
-// NewSourceFromReader returns an error when it cannot read r.
+// NewSourceFromReader returns a nil Source and an error when it cannot
+// read r. A text past the byte limit gives an error that names the Source,
+// as [WithByteLimit] describes.
 func NewSourceFromReader(r io.Reader, opts ...SourceOption) (*Source, error) {
 	cfg := newSourceConfig(opts)
 
 	data, err := readLimited(r, cfg.bytes())
 	if errors.Is(err, ErrLimit) {
-		return nil, err
+		return nil, limitSourceError(cfg, err)
 	}
 
 	if err != nil {
@@ -734,6 +752,14 @@ func newStringSource(src string, cfg sourceConfig) *Source {
 	s.input, s.hasInput = src, true
 
 	return s
+}
+
+// limitSourceError returns err, the error of a text past the byte limit,
+// bound to a [Source] of cfg that does not hold the text. The error thus
+// names the Source as the error of a Source from [NewSourceFromString]
+// names it.
+func limitSourceError(cfg sourceConfig, err error) error {
+	return (&Source{sourceConfig: cfg, limitErr: err}).Bind(err)
 }
 
 // readFile reads the file at path from disk, to one byte past limit when
@@ -1022,12 +1048,12 @@ func (s *Source) Tokens() token.Tokens {
 // describes which documents are empty.
 //
 // The Node of a document that did not parse keeps its place in the
-// slice. [Node.Err] returns its syntax error, and so do the methods that
-// read its tree, such as [Node.Decode]. The loop in the example thus
-// meets each syntax error where it meets the errors of the documents that
-// parsed. [Source.File] returns every syntax error of the file at once,
-// and [Source.ValidateDocuments] reports a single copy of an error that
-// two documents share.
+// slice. [Node.Err] returns the error of its parse, and so do the methods
+// that read its tree, such as [Node.Decode]. The loop in the example thus
+// meets each such error where it meets the errors of the documents that
+// parsed. [Source.File] returns every such error of the file at once, and
+// [Source.ValidateDocuments] reports a single copy of an error that two
+// documents share.
 //
 // The first call parses the Source. Every call returns the same Nodes in
 // a new slice, so a caller that reorders the slice does not change the
@@ -1052,8 +1078,8 @@ func (s *Source) Documents() []*Node {
 //	}
 //
 // The Node at index i is the one whose [Node.DocumentIndex] is i. For a
-// file without a syntax error, AllDocuments returns the Nodes that
-// [Source.Documents] returns when each document of the file holds
+// file in which every document parses, AllDocuments returns the Nodes
+// that [Source.Documents] returns when each document of the file holds
 // content, or when the file holds one empty document alone.
 //
 // A "---" header that directly follows an anchor without a value parses
@@ -1070,11 +1096,11 @@ func (s *Source) AllDocuments() []*Node {
 
 // ValidateDocuments runs v on each document that [Source.Documents]
 // returns, in file order, as [Node.Validate] runs it. It joins the errors
-// that the documents return. A document that did not parse reports
-// its syntax error, and two documents that parse together report theirs
-// once, as [Source.AllDocuments] describes. One call thus reports each
-// syntax error of the file beside what v reports for each document that
-// parsed:
+// that the documents return. A document that did not parse reports the
+// error of its parse, and two documents that parse together report theirs
+// once, as [Source.AllDocuments] describes. One call thus reports the
+// error of each document that did not parse beside what v reports for
+// each document that parsed:
 //
 //	err := source.ValidateDocuments(ctx, niceyaml.MultiValidator(schema, names))
 //	if err != nil {
@@ -1085,8 +1111,8 @@ func (s *Source) AllDocuments() []*Node {
 // validator v thus runs on the documents with content, or on the one
 // empty document of a file without content. A schema that wants a
 // mapping then rejects an empty file, unless [SkipEmpty] wraps v. A nil v
-// checks the syntax alone, so with a ctx that has not ended,
-// ValidateDocuments returns the error [Source.File] returns.
+// checks only the parse of each document, so with a ctx that has not
+// ended, ValidateDocuments returns the error [Source.File] returns.
 //
 // ValidateDocuments checks ctx before each document and one more time
 // after the last. After ctx ends, ValidateDocuments does not validate
@@ -1100,12 +1126,12 @@ func (s *Source) AllDocuments() []*Node {
 func (s *Source) ValidateDocuments(ctx context.Context, v Validator) error {
 	var (
 		errs []error
-		// The syntax error of the document before, which the next document
-		// shares when the two parsed together.
+		// The error of the parse of the document before, which the next
+		// document shares when the two parsed together.
 		prev error
 	)
 
-	// Each document that did not parse reports its own syntax error.
+	// Each document that did not parse reports the error of its own parse.
 	for _, doc := range s.contentDocuments() {
 		if ctx.Err() != nil {
 			break
@@ -1313,16 +1339,17 @@ func (s *Source) single() (*Node, error) {
 // and between an anchor and the node below it. The tokens of the Source
 // and of each Node still hold those comments.
 //
-// A file with a YAML syntax error does not have a tree. For such a file,
-// File returns nil and an error that covers every document that did not
-// parse, as the Documents section of the package documentation
-// describes. One syntax error comes back as a [*SourceError], and several
+// A file with a document that did not parse does not have a tree. For such
+// a file, File returns nil and an error that covers every document that
+// did not parse, as the Documents section of the package documentation
+// describes. One such error comes back as a [*SourceError], and several
 // come back joined, in file order, each bound to its own document. Every
 // syntax error matches [ErrSyntax], and its message draws each control
-// character as its Unicode Control Picture. A panic in the parser comes
-// back as a SourceError too, bound at the first token with a position
-// among those the parser was reading. It holds a [PanicError] and does
-// not match ErrSyntax.
+// character as its Unicode Control Picture. The error of a document past
+// the depth limit, or of a text past the byte limit, matches [ErrLimit]
+// and not ErrSyntax. A panic in the parser comes back as a SourceError
+// too, bound at the first token with a position among those the parser
+// was reading. It holds a [PanicError] and does not match ErrSyntax.
 func (s *Source) File() (*ast.File, error) {
 	p := s.parsed.get(s.parse)
 	if p.err != nil {

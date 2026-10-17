@@ -21,15 +21,15 @@ type Node interface {
 	AST() ast.Node
 }
 
-// CheckDecode returns [aliaslimit.ErrExcessiveAliasing] when n holds an
-// alias and aliases make up too much of what a decode of its document
-// reads. The count covers the whole document, with each alias reading
-// its content in full. A decode of a node below the root reads only the
-// anchors that the node needs. But CheckDecode applies one limit per
-// document, so every node that holds an alias gets the verdict of its
-// document. A node without an alias decodes on its own and does not read
-// anything twice, so it passes. A nil Node passes too. So does every node
-// of a document that the limit does not apply to, as [Limited] reports.
+// CheckDecode returns a [*RatioError] when n holds an alias and aliases make
+// up too much of what a decode of its document reads. The count covers the
+// whole document, with each alias reading its content in full. A decode of a
+// node below the root reads only the anchors that the node needs. But
+// CheckDecode applies one limit per document, so every node that holds an
+// alias gets the verdict of its document. A node without an alias decodes on
+// its own and does not read anything twice, so it passes. A nil Node passes
+// too. So does every node of a document that the limit does not apply to, as
+// [Limited] reports.
 //
 // The count depends on the document alone, so the document keeps it, and
 // a check of each item of a list counts the document once.
@@ -54,8 +54,8 @@ func CheckDecode(n Node) error {
 // The text must fit the [Budget] of the document as well as the limit.
 // An [*ExpansionError] reports the first alias of the document that takes
 // the text past a bound of the Budget. For a document past the limit and
-// within the Budget, CheckDecodeText returns
-// [aliaslimit.ErrExcessiveAliasing]. A node without an alias passes. So
+// within the Budget, CheckDecodeText returns a [*RatioError]. A node
+// without an alias passes. So
 // do a nil Node and every node of a document that the limit does not
 // apply to. The document keeps the result of the count, as it keeps the
 // result of CheckDecode.
@@ -124,6 +124,30 @@ func (e *ExpansionError) Is(target error) bool {
 	return target == aliaslimit.ErrExcessiveAliasing || target == fault.ErrLimit
 }
 
+// RatioError is the failure of a document whose aliases make up too much
+// of what a decode of it reads, as [aliaslimit.Excessive] reports. It
+// matches [aliaslimit.ErrExcessiveAliasing].
+type RatioError struct {
+	// Alias is the alias outside the content of every other alias that
+	// repeats the most nodes. When several aliases repeat that count,
+	// Alias is the first of them outside every anchor, such as the value
+	// that reads a chain of anchors, or else the first of them. Counts stop
+	// at [aliaslimit.CountCap], so in a deep enough chain several aliases
+	// repeat the same count.
+	Alias *ast.AliasNode
+}
+
+// Error returns the message of e, "aliases expand the document past the
+// alias limit".
+func (e *RatioError) Error() string {
+	return "aliases expand the document past the alias limit"
+}
+
+// Is reports whether target is [aliaslimit.ErrExcessiveAliasing].
+func (e *RatioError) Is(target error) bool {
+	return target == aliaslimit.ErrExcessiveAliasing
+}
+
 // Limited reports whether the alias limit applies to the document of n.
 // It applies unless the source of the document turned it off with
 // niceyaml.WithAliasLimit. [CheckDecode] and [CheckDecodeText] pass
@@ -170,9 +194,8 @@ func stateOf(n Node) *State {
 
 // checkRead returns the error of what a decode of the document of f reads
 // as mode. It returns an [*ExpansionError] when the aliases of the
-// document take it past a bound of budget. It returns
-// [aliaslimit.ErrExcessiveAliasing] when they make up too much of the
-// read.
+// document take it past a bound of budget. It returns a [*RatioError]
+// when they make up too much of the read.
 func checkRead(f *Facts, mode readMode, budget Budget) error {
 	c := treeCounter{
 		resolver:    f.resolver,
@@ -195,7 +218,7 @@ func checkRead(f *Facts, mode readMode, budget Budget) error {
 	}
 
 	if aliaslimit.Excessive(c.distinct, c.aliased) {
-		return aliaslimit.ErrExcessiveAliasing
+		return &RatioError{Alias: c.heaviest}
 	}
 
 	return nil
@@ -322,6 +345,13 @@ const (
 // of each alias that measure is reading. The overrun field holds the
 // error of the first alias that takes the tree past a bound of the
 // budget.
+//
+// The heaviest field holds the alias of the tree that repeats the most
+// nodes so far, as [RatioError] picks it. The heaviestSize field holds
+// what that alias repeats. The anchored field counts the anchors around
+// the node that the counter reads in the tree, outside the content of
+// every alias. The heaviestAnchored field holds whether an anchor lies
+// around heaviest.
 type treeCounter struct {
 	resolver    *paths.Resolver
 	nulls       map[*ast.AliasNode]bool
@@ -334,11 +364,16 @@ type treeCounter struct {
 	binaries    map[*ast.AliasNode]bool
 	repeated    map[ast.Node]bool
 	overrun     *ExpansionError
+	heaviest    *ast.AliasNode
 	budget      Budget
 	level       int
 	written     int
 	distinct    int
 	aliased     int
+	anchored    int
+
+	heaviestSize     int
+	heaviestAnchored bool
 }
 
 // count returns the number of nodes that a decode of node reads as mode.
@@ -479,7 +514,15 @@ func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool, mode readMode) in
 		mode = readText
 	}
 
-	return c.count(anchor.Value, top, mode)
+	if !top {
+		return c.count(anchor.Value, top, mode)
+	}
+
+	c.anchored++
+	size := c.count(anchor.Value, top, mode)
+	c.anchored--
+
+	return size
 }
 
 // alias returns the number of nodes that a decode of the alias reads as
@@ -524,10 +567,28 @@ func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 		c.distinct = aliaslimit.AddCapped(c.distinct, 1)
 		c.aliased = aliaslimit.AddCapped(c.aliased, size)
 
+		c.weigh(alias, size)
 		c.spend(alias)
 	}
 
 	return size
+}
+
+// weigh records alias, an alias of the tree that repeats size nodes, as
+// the heaviest when it repeats more nodes than the heaviest so far. On a
+// tie, an alias outside every anchor takes the place of one inside an
+// anchor, and otherwise the earlier alias stays.
+func (c *treeCounter) weigh(alias *ast.AliasNode, size int) {
+	anchored := c.anchored > 0
+
+	switch {
+	case c.heaviest == nil, size > c.heaviestSize:
+	case size == c.heaviestSize && c.heaviestAnchored && !anchored:
+	default:
+		return
+	}
+
+	c.heaviest, c.heaviestSize, c.heaviestAnchored = alias, size, anchored
 }
 
 // spend records an [*ExpansionError] at alias, an alias of the tree, when

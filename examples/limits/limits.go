@@ -117,12 +117,11 @@ func main() {
 	fmt.Println("\nRefuse an alias bomb:")
 
 	// Before the decoder starts, the decode counts what the aliases make a
-	// reader read. A price reads its own text. Without the limit, the
-	// go-yaml decoder thus writes out a billion fika to read the one price
-	// of this upload. It never checks the context, so a deadline does not
-	// stop it. The error binds at the first token of the decoded node rather
-	// than at an alias. Source.Decode reads the whole document, so that
-	// token is the first key.
+	// reader read. A price reads its own text. Without the limit, the go-yaml
+	// decoder thus writes out a billion fika to read the one price of this
+	// upload. It never checks the context, so a deadline does not stop it.
+	// The error binds at the alias that repeats the most, the one price of
+	// the upload.
 	serve(ctx, p, shared, open, "bomb.yaml", exampleBomb)
 
 	fmt.Println("\nRefuse a document that nests too deep:")
@@ -142,12 +141,10 @@ func main() {
 
 	fmt.Println("\nRefuse an upload whose aliases repeat too much text:")
 
-	// A price reads its own text, so a decode into an order writes each
-	// alias of the upload out in full. The byte limit bounds that text
-	// too, even for an alias of a note, which is a plain string. The upload
-	// holds less than 4 KiB, but its aliases repeat more text than that. A
-	// decode into a type without any field that reads text shares each
-	// anchor between its aliases, and this upload then passes.
+	// A price reads its own text. The decode thus bounds the text that
+	// every alias of the upload repeats, even an alias of a note, which is
+	// a plain string. The upload holds less than 4 KiB, but its aliases
+	// repeat more text than that.
 	notes := "table: 7\nitems:\n" +
 		"  - {item: Kaffe, price: 35 kr, note: &note " + strings.Repeat("kanel ", 40) + "}\n" +
 		strings.Repeat("  - {item: Kaffe, price: 35 kr, note: *note}\n", 20)
@@ -206,9 +203,7 @@ func decode(ctx context.Context, shared *niceyaml.Source, s stock, name string, 
 		niceyaml.WithReferences(shared),
 	)
 	if err != nil {
-		// A body past the byte limit fails the read before any Source
-		// exists, so the error does not name the upload. The wrap names it.
-		return order{}, fmt.Errorf("read %s: %w", name, err)
+		return order{}, err
 	}
 
 	return source.Decode[order](ctx, niceyaml.WithValueCheck(s.inStock))
@@ -231,9 +226,10 @@ func status(err error) int {
 	case !niceyaml.IsInvalid(err):
 		return http.StatusInternalServerError
 
-	// An alias bomb matches ErrExcessiveAliasing, and an upload past a
-	// limit of its Source matches ErrLimit. A document that nests too deep
-	// does not parse, but its error matches ErrLimit and not ErrSyntax.
+	// An upload past a size limit of its Source matches ErrLimit, and an
+	// alias bomb matches ErrExcessiveAliasing. The server answers 413 for
+	// both. A document that nests too deep does not parse, but its error
+	// matches ErrLimit and not ErrSyntax.
 	case errors.Is(err, niceyaml.ErrLimit), errors.Is(err, niceyaml.ErrExcessiveAliasing):
 		return http.StatusRequestEntityTooLarge
 	case errors.Is(err, niceyaml.ErrSyntax):

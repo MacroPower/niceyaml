@@ -13,7 +13,6 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -99,7 +98,7 @@ func Content[T Scalar](path paths.Path, want T) Matcher {
 func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool, error) {
 	t := reflect.TypeFor[T]()
 
-	node, raw, err := readScalar(ctx, doc, m.path, t)
+	node, raw, err := readScalar(ctx, doc, m.path)
 	if err != nil || raw == nil {
 		return false, err
 	}
@@ -131,9 +130,10 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 // node as the YAML types name it. It returns a nil value and a nil error
 // when doc does not hold a node at path, when the node holds a null, or
 // when the decoder rejects the node. The matcher reports false in those
-// cases. The caller decodes the node as a t next, so readScalar applies
-// the alias limit of such a decode first.
-func readScalar(ctx context.Context, doc *niceyaml.Node, path paths.Path, t reflect.Type) (*niceyaml.Node, any, error) {
+// cases. Each decode applies the alias limit of the document before the
+// decoder reads the node. An alias error does not match
+// [niceyaml.ErrDecode], so readScalar returns it.
+func readScalar(ctx context.Context, doc *niceyaml.Node, path paths.Path) (*niceyaml.Node, any, error) {
 	err := ctx.Err()
 	if err != nil {
 		//nolint:wrapcheck // The error of the context is the reason the matcher cannot decide.
@@ -150,34 +150,11 @@ func readScalar(ctx context.Context, doc *niceyaml.Node, path paths.Path, t refl
 		return nil, nil, err
 	}
 
-	// A few hundred bytes of nested aliases can make a decode take
-	// minutes, so a node that holds an alias decodes only when its whole
-	// document passes the alias limit. The aliases of the document are
-	// the cause of a refusal, so the error declares the document at
-	// fault.
-	err = aliasing.CheckDecode(node)
-	if err != nil {
-		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
-		return nil, nil, doc.Bind(niceyaml.Invalid(err))
-	}
-
-	// A decode into a type that decodes itself from text writes the node
-	// out with a copy of the text of each alias, which the count above
-	// leaves out. A type whose UnmarshalYAML takes a decode function gets
-	// the same treatment, since it may decode the node into such a type.
-	if aliasing.DecodesText(t) {
-		err = aliasing.CheckDecodeText(node)
-		if err != nil {
-			//nolint:wrapcheck // Binding names the document; the error keeps its own context.
-			return nil, nil, doc.Bind(niceyaml.Invalid(err))
-		}
-	}
-
-	// Read the value as the YAML types name it first, because a decode
-	// into t loses what tells a null from an empty string or a false,
-	// and a fraction from the integer it truncates to. A decode into any
-	// yields only the YAML built-in types, none of which validates itself,
-	// so the self-validation walk would find nothing.
+	// Read the value as the YAML types name it first, because a decode into
+	// the type of the matcher loses what tells a null from an empty string or
+	// a false, and a fraction from the integer it truncates to. A decode into
+	// any yields only the YAML built-in types, none of which validates
+	// itself, so the self-validation walk would find nothing.
 	raw, err := node.Decode[any](ctx, niceyaml.WithSelfValidation(false))
 	if declines(err) {
 		return nil, nil, nil

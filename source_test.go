@@ -6421,7 +6421,8 @@ func TestWithAliasLimit(t *testing.T) {
 	t.Parallel()
 
 	// Each item of the bomb lists ten aliases to the item above it, so the
-	// last one expands to 10^5 scalars.
+	// last one expands to 10^5 scalars. The first alias of the last item
+	// repeats the most, so every refusal binds there.
 	bomb := yamltest.AliasLevels(5)
 	last := paths.Current().Child("a").Index(5)
 
@@ -6462,43 +6463,43 @@ func TestWithAliasLimit(t *testing.T) {
 	}{
 		"decode": {
 			read: decode(),
-			want: "bomb.yaml:1:1: excessive aliasing",
+			want: "bomb.yaml:7:10: aliases expand the document past the alias limit",
 		},
 		"decode with a schema validator": {
 			read: decode(niceyaml.WithValidator(shape)),
-			want: "bomb.yaml:1:1: excessive aliasing",
+			want: "bomb.yaml:7:10: aliases expand the document past the alias limit",
 		},
 		"schema validation": {
 			read: validate(shape),
-			want: "bomb.yaml:1:1: excessive aliasing",
+			want: "bomb.yaml:7:10: aliases expand the document past the alias limit",
 		},
 		"validation of every document": {
 			read: func(ctx context.Context, n *niceyaml.Node) error {
 				return n.Source().ValidateDocuments(ctx, shape)
 			},
-			want: "bomb.yaml:1:1: excessive aliasing",
+			want: "bomb.yaml:7:10: aliases expand the document past the alias limit",
 		},
 		"registry with a content matcher": {
 			read:    validate(routed),
-			want:    "resolve schema: bomb.yaml: excessive aliasing",
+			want:    "resolve schema: bomb.yaml:7:10: aliases expand the document past the alias limit",
 			resolve: true,
 		},
 		"decode with a registry with a content matcher": {
 			read:    decode(niceyaml.WithValidator(routed)),
-			want:    "resolve schema: bomb.yaml: excessive aliasing",
+			want:    "resolve schema: bomb.yaml:7:10: aliases expand the document past the alias limit",
 			resolve: true,
 		},
-		// The decode binds its refusal at the first token of the node, so
-		// a scoped node names no path in front of it.
+		// The decode binds its refusal at the position of the alias that
+		// repeats the most, so a scoped node names no path in front of it.
 		"decode of a scoped node": {
 			path: last,
 			read: decode(),
-			want: "bomb.yaml:7:9: excessive aliasing",
+			want: "bomb.yaml:7:10: aliases expand the document past the alias limit",
 		},
 		"schema validation of a scoped node": {
 			path: last,
 			read: validate(shape),
-			want: "bomb.yaml:7:9: excessive aliasing",
+			want: "bomb.yaml:7:10: aliases expand the document past the alias limit",
 		},
 	}
 
@@ -6825,7 +6826,10 @@ func TestWithByteLimit(t *testing.T) {
 		assert.Equal(t, "big.yaml: file is larger than 1 KiB", err.Error())
 		assert.True(t, niceyaml.IsInvalid(err))
 
-		require.ErrorIs(t, yamltest.Documents(t, source, 1)[0].Err(), niceyaml.ErrLimit)
+		doc := yamltest.Documents(t, source, 1)[0]
+		require.ErrorIs(t, doc.Err(), niceyaml.ErrLimit)
+		require.NotErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
+		assert.Nil(t, doc.AST())
 
 		_, err = source.Decode[map[string]any](t.Context())
 		require.ErrorIs(t, err, niceyaml.ErrLimit)
@@ -6843,18 +6847,44 @@ func TestWithByteLimit(t *testing.T) {
 		path := yamltest.WriteFile(t, t.TempDir(), "big.yaml", text)
 		fsys := yamltest.MapFS(map[string]string{"big.yaml": text})
 
+		// Each error names the Source as the constructor or WithName names
+		// it, as the error of a string past the limit does.
 		tcs := map[string]struct {
 			read func() (*niceyaml.Source, error)
+			// The name of the Source that the error binds to.
+			name string
 		}{
-			"file": {read: func() (*niceyaml.Source, error) {
-				return niceyaml.NewSourceFromFile(path, niceyaml.WithByteLimit(1000))
-			}},
-			"file system": {read: func() (*niceyaml.Source, error) {
-				return niceyaml.NewSourceFromFS(fsys, "big.yaml", niceyaml.WithByteLimit(1000))
-			}},
-			"reader": {read: func() (*niceyaml.Source, error) {
-				return niceyaml.NewSourceFromReader(strings.NewReader(text), niceyaml.WithByteLimit(1000))
-			}},
+			"file": {
+				read: func() (*niceyaml.Source, error) {
+					return niceyaml.NewSourceFromFile(path, niceyaml.WithByteLimit(1000))
+				},
+				name: path,
+			},
+			"file system": {
+				read: func() (*niceyaml.Source, error) {
+					return niceyaml.NewSourceFromFS(fsys, "big.yaml", niceyaml.WithByteLimit(1000))
+				},
+				name: "big.yaml",
+			},
+			"named file system": {
+				read: func() (*niceyaml.Source, error) {
+					return niceyaml.NewSourceFromFS(fsys, "big.yaml",
+						niceyaml.WithByteLimit(1000), niceyaml.WithName("bundle.yaml"))
+				},
+				name: "bundle.yaml",
+			},
+			"named reader": {
+				read: func() (*niceyaml.Source, error) {
+					return niceyaml.NewSourceFromReader(strings.NewReader(text),
+						niceyaml.WithByteLimit(1000), niceyaml.WithName("upload.yaml"))
+				},
+				name: "upload.yaml",
+			},
+			"reader": {
+				read: func() (*niceyaml.Source, error) {
+					return niceyaml.NewSourceFromReader(strings.NewReader(text), niceyaml.WithByteLimit(1000))
+				},
+			},
 		}
 
 		for name, tc := range tcs {
@@ -6863,8 +6893,20 @@ func TestWithByteLimit(t *testing.T) {
 
 				source, err := tc.read()
 				require.ErrorIs(t, err, niceyaml.ErrLimit)
+				assert.True(t, niceyaml.IsInvalid(err))
 				assert.Nil(t, source)
-				assert.Equal(t, "file is larger than 1000 bytes", err.Error())
+
+				want := "file is larger than 1000 bytes"
+				if tc.name != "" {
+					want = tc.name + ": " + want
+				}
+
+				assert.Equal(t, want, err.Error())
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+				assert.Equal(t, tc.name, bound.Source().Name())
 			})
 		}
 	})
@@ -7012,6 +7054,8 @@ func TestWithDepthLimit(t *testing.T) {
 
 		docs := yamltest.Documents(t, source, 2)
 		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrLimit)
+		require.NotErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
+		assert.Nil(t, docs[0].AST())
 		require.NoError(t, docs[1].Err())
 	})
 

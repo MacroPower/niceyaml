@@ -7,21 +7,20 @@
 // brings in again at every merge. A document of a few hundred bytes can
 // therefore take minutes to decode.
 //
-// [CheckDecode] counts what a decode of the whole document reads. It
-// returns [aliaslimit.ErrExcessiveAliasing] for a document past the limit
-// before anything decodes a node in it that holds an alias. Where the
-// decoder writes a node out as text, each alias to a scalar copies the
-// text of the scalar. The count therefore weighs such a copy by its length
-// in bytes.
+// [CheckDecode] counts what a decode of the whole document reads. It returns
+// a [*RatioError] for a document past the limit before anything decodes a
+// node in it that holds an alias. The error matches
+// [aliaslimit.ErrExcessiveAliasing] and names the alias that repeats the
+// most. Where the decoder writes a node out as text, each alias to a scalar
+// copies the text of the scalar. The count therefore weighs such a copy by
+// its length in bytes.
 //
 // Every decode of a niceyaml Node runs [CheckDecode], including the decode
-// that the schema validator runs. The content and text matchers also run
-// it before they decode. A registry that routes a document by its content
-// thus refuses the same documents that its schemas refuse. A decode into a
-// type that [DecodesText] reports, by a Node or by the content matcher,
-// runs [CheckDecodeText] as well. So does a decode by a Node into a type
-// that [DecodesTextWith] reports for the unmarshalers that its options
-// name.
+// that the schema validator runs and the decodes of the content and text
+// matchers. A registry that routes a document by its content thus refuses
+// the same documents that its schemas refuse. A decode by a Node into a
+// type that [DecodesTextWith] reports for the unmarshalers of the decode
+// runs [CheckDecodeText] as well.
 //
 // The text that the decoder writes out must also fit the [Budget] of the
 // document. The niceyaml package takes the Budget from the byte limit and

@@ -547,16 +547,16 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // document. A program that decodes many nodes with the same options
 // states them once with [DecodeOptions].
 //
-// The decode runs the steps the Decoding section of the package
-// documentation lists, and the first that fails ends it. For a v that is
-// nil, a nil pointer, or not a pointer, DecodeInto returns an error that
-// wraps [ErrDecodeTarget] before anything runs. When the node holds an
-// alias, the decode counts what a decode of the whole document reads,
-// with each alias reading its content in full. When aliases make up too
-// much of that count, DecodeInto returns an error that matches
-// [ErrExcessiveAliasing]. For a v that reads text, the error for aliases
-// past the bounds that the byte limit and the depth limit of the [Source]
-// set on them matches [ErrLimit] too.
+// The decode runs the steps the Decoding section of the package documentation
+// lists, and the first that fails ends it. For a v that is nil, a nil
+// pointer, or not a pointer, DecodeInto returns an error that wraps
+// [ErrDecodeTarget] before anything runs. When the node holds an alias, the
+// decode counts what a decode of the whole document reads, with each alias
+// reading its content in full. When aliases make up too much of that count,
+// DecodeInto returns an error that matches [ErrExcessiveAliasing], bound at
+// the alias of the document that repeats the most. For a v whose type reads
+// text anywhere, the error for aliases past the bounds that the byte limit
+// and the depth limit of the [Source] set on them matches [ErrLimit] too.
 //
 // A step that fails before the go-yaml decoder runs leaves v as it is. A
 // field the document leaves out keeps its value. The Decoding section
@@ -619,19 +619,27 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 
 // aliasingError returns err, the error of an alias check of n, bound to n
 // with the document at fault. An [*aliasing.ExpansionError] binds at the
-// alias that takes the text past a bound of the Source. The bound error
-// does not keep a node of the document, so [Detach] can release the
-// parse. Any other error binds at the first token of n that is not a
-// comment.
+// alias that takes the text past a bound of the Source, and an
+// [*aliasing.RatioError] binds at the alias that repeats the most. The
+// bound error does not keep a node of the document, so [Detach] can
+// release the parse. Any other error binds at the first token of n that is
+// not a comment.
 func (n *Node) aliasingError(err error) error {
 	expansion, ok := errors.AsType[*aliasing.ExpansionError](err)
-	if !ok {
-		return n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
+	if ok {
+		limit := &markedError{err: errors.New(expansion.Error()), marks: []error{ErrLimit, ErrExcessiveAliasing}}
+
+		return n.Bind(Invalid(limit, atToken(expansion.Alias.GetToken())))
 	}
 
-	limit := &markedError{err: errors.New(expansion.Error()), marks: []error{ErrLimit, ErrExcessiveAliasing}}
+	ratio, ok := errors.AsType[*aliasing.RatioError](err)
+	if ok && ratio.Alias != nil {
+		excessive := &markedError{err: errors.New(ratio.Error()), marks: []error{ErrExcessiveAliasing}}
 
-	return n.Bind(Invalid(limit, atToken(expansion.Alias.GetToken())))
+		return n.Bind(Invalid(excessive, atToken(ratio.Alias.GetToken())))
+	}
+
+	return n.Bind(Invalid(err, atToken(astnode.StartToken(n.AST()))))
 }
 
 // checkTarget returns sentinel when v is nil or a nil pointer, or, with
@@ -1125,7 +1133,7 @@ func (n *Node) prime(ctx context.Context, dec *yaml.Decoder, node ast.Node) (ast
 // describes. Every error is the one At or Decode returns. A path that
 // does not select a node returns the error of At, such as
 // "cfg.yaml:1:1: $.kind: not found". A document that did not parse
-// returns the syntax error [Node.Err] returns.
+// returns the error that [Node.Err] returns.
 //
 // In a document without content, which [Node.IsEmpty] reports, every
 // path with a selector returns an error that wraps [paths.ErrNoDocument].
@@ -1173,10 +1181,11 @@ func (n *Node) DecodeAt[T any](ctx context.Context, path paths.Path, opts ...Dec
 //
 // DecodeIfPresent returns false and a nil error only when At returns an
 // error that matches [paths.ErrNotFound]. Every other failure returns
-// false and the error. Those failures include a syntax error, an alias on
-// the path that does not resolve, a wildcard path, and every error of the
-// decode, even one that matches paths.ErrNotFound. A node that fails a
-// [Validator] thus never reads as absent.
+// false and the error. Those failures include the error of a document
+// that did not parse, an alias on the path that does not resolve, and a
+// wildcard path. They also include every error of the decode, even one
+// that matches paths.ErrNotFound. A node that fails a [Validator] thus
+// never reads as absent.
 //
 // A null is present, so `version: ~` reports true and leaves version at
 // its default. When v points to a pointer or an interface, such a null
