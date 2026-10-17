@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -12,6 +13,8 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/hook"
+	"go.jacobcolvin.com/niceyaml/internal/mapkey"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -25,7 +28,12 @@ const maxMergeDepth = 16
 type fieldRead struct {
 	// The unbound problem of a path that passes through an alias or a
 	// merge key, or of a value that is not text, or nil.
-	err  error
+	err error
+	// The unbound problem of a scalar that go-yaml's decoder reads as
+	// another string than its text, or nil.
+	misread error
+	// The string that go-yaml's decoder reads from the scalar, as
+	// [mapkey.StringOf] gives it.
 	text string
 	// Whether the document writes a scalar at the path.
 	found bool
@@ -41,17 +49,48 @@ func fieldName(p paths.Path) string {
 	return p.String()
 }
 
+// fieldPaths returns the paths of the type fields and of the name that a
+// load reads.
+func (c *registryConfig) fieldPaths() []paths.Path {
+	fields := []paths.Path{c.versionField}
+	if !c.versionOnly {
+		fields = append(fields, c.kindField)
+	}
+
+	if c.hasNameField {
+		fields = append(fields, c.nameField)
+	}
+
+	return fields
+}
+
 // readField reads the scalar at p, a path of names and indexes, in the
 // document doc. A path that passes through an alias or a `<<` merge key
 // fails at that alias or merge key. The read cannot follow an alias into a
 // reference document, and a rewrite of the field reaches every value that
-// shares the anchor. A null reads as a field that the document leaves out.
-func readField(doc *niceyaml.Node, p paths.Path) fieldRead {
+// shares the anchor. A path through a key that a later merge key from a
+// reference document might replace fails at that merge key too. The
+// detail of that problem names the first key before the merge key that p
+// or a path of reads passes through. The author thus moves the merge key
+// above every such key at once. A path through a key whose place a decode
+// reads from another key of the mapping fails at that key, such as 0x10
+// for 16. So does a path through a key before a key that does not decode,
+// because the decode might read that key in its place. The keys read as
+// niceyaml's decode of the document reads them, with the anchors of the
+// reference documents of its Source. The field reads as go-yaml's decoder
+// reads its value into a string, under its tags. So "!!null x" reads as a
+// field that the document leaves out, as any null does, and the number 2
+// reads "2". A value that the decoder does not read into a string, such as
+// a mapping or a timestamp, is not text. The read also notes a scalar that
+// the decoder reads as another string than its text, such as 1.10 as "1.1".
+func readField(doc *niceyaml.Node, p paths.Path, reads []paths.Path) fieldRead {
 	res := doc.Resolver()
+	keys := hook.Keys(doc)
 	name := fieldName(p)
 	cur := doc.AST()
+	selectors := slices.Collect(p.Selectors())
 
-	for sel := range p.Selectors() {
+	for depth, sel := range selectors {
 		if alias, ok := astnode.Content(cur).(*ast.AliasNode); ok {
 			return fieldRead{err: aliasProblem(p, name, alias)}
 		}
@@ -60,13 +99,23 @@ func readField(doc *niceyaml.Node, p paths.Path) fieldRead {
 
 		switch sel.Kind {
 		case paths.SelectorChild:
-			entry, merge := findEntry(res, content, sel.Name)
+			entry, other, read := findEntry(res, keys, content, sel.Name)
 
 			switch {
+			case read == readsUndecoded:
+				return fieldRead{err: undecodedProblem(p, name, other)}
+
+			case read == readsReference:
+				advice := mergeAdvice(res, content, other, selectors[:depth], append([]paths.Path{p}, reads...))
+
+				return fieldRead{err: unreadProblem(p, name, advice, astnode.KeyToken(other))}
+
+			case other != nil && astnode.IsMergeKey(other.Key):
+				return fieldRead{err: mergeProblem(p, name, astnode.KeyToken(other))}
+			case other != nil:
+				return fieldRead{err: repeatProblem(doc, p, name, other, entry)}
 			case entry != nil:
 				cur = entry.Value
-			case merge != nil:
-				return fieldRead{err: mergeProblem(p, name, astnode.KeyToken(merge))}
 			default:
 				return fieldRead{}
 			}
@@ -88,53 +137,368 @@ func readField(doc *niceyaml.Node, p paths.Path) fieldRead {
 		return fieldRead{err: aliasProblem(p, name, alias)}
 	}
 
-	content := astnode.Content(cur)
-	if astnode.IsNil(content) || content.Type() == ast.NullType {
-		return fieldRead{}
-	}
+	text, ok, err := mapkey.StringOf(cur)
+	own, scalar := astnode.ScalarText(cur)
 
-	tk := astnode.Token(content)
-	if !astnode.IsScalar(content) || tk == nil {
+	switch {
+	case err != nil || ok && !scalar:
 		return fieldRead{err: newProblem(ErrMissingTypeField, name+" must be text", niceyaml.AtPath(p))}
+	case !ok:
+		return fieldRead{}
+	case own != text:
+		return fieldRead{text: text, found: true, misread: misreadProblem(p, cur, own, text)}
 	}
 
-	return fieldRead{text: tk.Value, found: true}
+	return fieldRead{text: text, found: true}
 }
 
-// findEntry returns the entry of the mapping node whose key reads name, the
-// later one when the mapping writes the key twice. Without such an entry,
-// it returns the `<<` merge entry that brings the key in, or nil.
-func findEntry(res *paths.Resolver, node ast.Node, name string) (*ast.MappingValueNode, *ast.MappingValueNode) {
-	entries, ok := astnode.Entries(node)
-	if !ok {
-		return nil, nil
+// readTypeField reads the type field at p in doc, as [readField] reads it.
+// A scalar that go-yaml's decoder reads as another string than its text,
+// such as 1.10 as "1.1" or "!!str 1.0" as "1", names no kind or version
+// that the document writes, so its read fails.
+func readTypeField(doc *niceyaml.Node, p paths.Path, reads []paths.Path) fieldRead {
+	r := readField(doc, p, reads)
+	if r.misread != nil {
+		return fieldRead{err: r.misread}
 	}
 
-	var hit, merge *ast.MappingValueNode
+	return r
+}
 
-	for _, e := range entries {
+// misreadProblem returns the problem of the field at p, whose value is the
+// scalar node with the text own, which go-yaml's decoder reads as the
+// string text. The message shows the tags of node with own, and it asks
+// for own in quotes.
+func misreadProblem(p paths.Path, node ast.Node, own, text string) error {
+	shown := own
+	if strings.ContainsAny(own, "\r\n") || strings.TrimSpace(own) != own {
+		shown = strconv.Quote(own)
+	}
+
+	var tags []string
+
+	for n := node; n != nil; {
+		switch x := n.(type) {
+		case *ast.AnchorNode:
+			n = x.Value
+		case *ast.TagNode:
+			tags = append(tags, x.Start.Value)
+			n = x.Value
+
+		default:
+			n = nil
+		}
+	}
+
+	shown = strings.Join(append(tags, shown), " ")
+
+	return newProblem(ErrMissingTypeField, fmt.Sprintf("go-yaml's decoder reads %s as %q; write %q", shown, text, own),
+		niceyaml.AtPath(p))
+}
+
+// findEntry returns the entry of the mapping node that a path through name
+// selects. The decode reads another entry in its place when the mapping
+// holds a later entry whose key the decode reads as the key of the entry,
+// such as 0x10 for 16. That later entry can be an entry of the mapping
+// itself or one that a `<<` merge key brings in. The function also returns
+// the later entry then, or the last merge entry that brings it in. That
+// merge entry wins over the merge entries before it. A key that a write
+// of the field creates reads as name, so without the entry, findEntry
+// returns the entry that the decode reads as name. The keys that a decode
+// reads come from keys, a reader of the keys of the document.
+//
+// The lookup cannot read the sources of a merge key that reads a reference
+// document. Such a merge key after the entry of the mapping itself might
+// replace that entry, so findEntry returns the merge key with
+// readsReference. It also returns a later key that does not decode, or the
+// merge key that brings it in, with readsUndecoded, because the decode
+// might read that key as the key of the entry. After a merge key that the
+// lookup cannot read for another reason, such as an alias without an
+// anchor, findEntry returns the entry of the mapping itself. It returns nil
+// for both when neither the mapping nor a merge source that it can read
+// holds the key.
+func findEntry(
+	res *paths.Resolver, keys *mapkey.Keys, node ast.Node, name string,
+) (*ast.MappingValueNode, *ast.MappingValueNode, laterKind) {
+	entries, ok := astnode.Entries(node)
+	if !ok {
+		return nil, nil, readsKey
+	}
+
+	found, err := res.Entry(node, name)
+	if e, ok := found.(*ast.MappingValueNode); ok && err == nil && slices.Contains(entries, e) {
+		if key, ok := keys.Key(e.Key); ok {
+			later, read := laterRead(res, keys, entries[slices.Index(entries, e)+1:], name, key)
+
+			return e, later, read
+		}
+
+		return e, nil, readsKey
+	}
+
+	if err != nil && !errors.Is(err, paths.ErrNotFound) {
+		for i, e := range slices.Backward(entries) {
+			key, ok := res.KeyName(e.Key)
+			if !ok || key != name || astnode.IsMergeKey(e.Key) {
+				continue
+			}
+
+			if !errors.Is(err, paths.ErrReferenceAlias) {
+				return e, nil, readsKey
+			}
+
+			if merge := unreadMerge(res, entries[i+1:]); merge != nil {
+				return nil, merge, readsReference
+			}
+
+			return e, nil, readsKey
+		}
+	}
+
+	later, read := laterRead(res, keys, entries, name, name)
+
+	return nil, later, read
+}
+
+// laterKind is how a decode might read a later entry of a mapping in place
+// of the entry of a field, as [findEntry] reports it.
+type laterKind uint8
+
+const (
+	// The later entry, if any, reads as the key of the field.
+	readsKey laterKind = iota
+	// The later entry is a merge key that reads a reference document.
+	readsReference
+	// The later entry has a key that does not decode, or is a merge key
+	// that brings in such a key.
+	readsUndecoded
+)
+
+// laterRead returns the last of entries whose key a decode reads as key.
+// That entry is an entry itself or a merge entry. The merge entry brings
+// in an entry that a path through name selects, or one that the decode
+// reads as key, as [mergeHolds] tells. The result is nil when none of
+// entries does. A key that does not decode might read as key, so
+// laterRead returns the last entry with such a key, or the merge entry
+// that brings it in, with readsUndecoded, when no later entry reads as
+// key.
+func laterRead(
+	res *paths.Resolver, keys *mapkey.Keys, entries []*ast.MappingValueNode, name, key string,
+) (*ast.MappingValueNode, laterKind) {
+	for _, e := range slices.Backward(entries) {
 		if astnode.IsMergeKey(e.Key) {
-			if merge == nil && mergeHolds(res, e, name, 0) {
-				merge = e
+			holds, undecoded := mergeHolds(res, keys, e, name, key, 0)
+
+			switch {
+			case holds:
+				return e, readsKey
+			case undecoded:
+				return e, readsUndecoded
 			}
 
 			continue
 		}
 
-		if key, ok := res.KeyName(e.Key); ok && key == name {
-			hit = e
+		decoded, ok := keys.Key(e.Key)
+
+		switch {
+		case !ok:
+			return e, readsUndecoded
+		case decoded == key:
+			return e, readsKey
 		}
 	}
 
-	return hit, merge
+	return nil, readsKey
 }
 
-// mergeHolds reports whether a mapping that the merge entry e brings in
-// holds the key name, itself or through a merge key of its own.
-func mergeHolds(res *paths.Resolver, e *ast.MappingValueNode, name string, depth int) bool {
+// mergeAdvice returns the detail of the problem of a field that the merge
+// entry of the mapping node might replace. The selectors of at lead to
+// node. The detail asks the author to put the merge key before the first
+// entry of node that one of the paths of reads passes through, as
+// [readEntries] finds those entries. An alias of the merge key must come
+// after the anchor it reads. When that anchor lies in such an entry, or in
+// an entry between that one and the merge key, the move would put the alias
+// before its anchor. The detail then asks to move the anchor out of an
+// entry that a path of reads passes through, or to move the entries that
+// hold the anchors too.
+func mergeAdvice(
+	res *paths.Resolver, node ast.Node, merge *ast.MappingValueNode, at []paths.Selector, reads []paths.Path,
+) string {
+	entries, _ := astnode.Entries(node)
+	end := max(slices.Index(entries, merge), 0)
+	read := readEntries(res, entries[:end], at, reads)
+
+	first := slices.IndexFunc(entries[:end], func(e *ast.MappingValueNode) bool { return read[e] })
+	if first < 0 {
+		return "put the merge key before the fields that the load reads"
+	}
+
+	key, _ := res.KeyName(entries[first].Key)
+
+	var moved []string
+
+	for _, e := range entries[first:end] {
+		anchor, ok := mergeAnchor(res, merge, e)
+		if !ok {
+			continue
+		}
+
+		own, _ := res.KeyName(e.Key)
+		if read[e] {
+			return fmt.Sprintf("move the anchor %s out of %s, then put the merge key before %s", anchor, own, key)
+		}
+
+		moved = append(moved, own)
+	}
+
+	if len(moved) == 0 {
+		return "put the merge key before " + key
+	}
+
+	return fmt.Sprintf("put %s and the merge key before %s", inSentence(moved), key)
+}
+
+// readEntries returns each of entries that one of the paths of reads passes
+// through, in a mapping that the selectors of at lead to. Such an entry is
+// the last entry of the mapping with its key, because the lookup of a key
+// reads that entry.
+func readEntries(
+	res *paths.Resolver, entries []*ast.MappingValueNode, at []paths.Selector, reads []paths.Path,
+) map[*ast.MappingValueNode]bool {
+	names := map[string]bool{}
+
+	for _, r := range reads {
+		selectors := slices.Collect(r.Selectors())
+		if len(selectors) > len(at) && slices.Equal(selectors[:len(at)], at) &&
+			selectors[len(at)].Kind == paths.SelectorChild {
+			names[selectors[len(at)].Name] = true
+		}
+	}
+
+	last := map[string]*ast.MappingValueNode{}
+
+	for _, e := range entries {
+		if key, ok := res.KeyName(e.Key); ok && !astnode.IsMergeKey(e.Key) && names[key] {
+			last[key] = e
+		}
+	}
+
+	read := make(map[*ast.MappingValueNode]bool, len(last))
+	for _, e := range last {
+		read[e] = true
+	}
+
+	return read
+}
+
+// mergeAnchor returns the name of an anchor inside entry that an alias of
+// the merge entry reads, and reports whether entry holds one.
+func mergeAnchor(res *paths.Resolver, merge, entry *ast.MappingValueNode) (string, bool) {
+	for _, v := range astnode.MergeValues(merge) {
+		alias, ok := v.(*ast.AliasNode)
+		if !ok {
+			continue
+		}
+
+		anchor, err := res.Anchor(alias)
+		if err != nil {
+			continue
+		}
+
+		inside := false
+
+		astnode.Inspect(entry, func(n ast.Node) bool {
+			inside = inside || n == anchor
+
+			return !inside
+		})
+
+		if name, ok := astnode.Name(alias.Value); ok && inside {
+			return name, true
+		}
+	}
+
+	return "", false
+}
+
+// inSentence returns names as a list in a sentence, as in "a, b, and c".
+func inSentence(names []string) string {
+	switch len(names) {
+	case 1:
+		return names[0]
+	case 2:
+		return names[0] + " and " + names[1]
+	default:
+		return strings.Join(names[:len(names)-1], ", ") + ", and " + names[len(names)-1]
+	}
+}
+
+// unreadMerge returns the last merge entry of entries that brings in a
+// mapping of a reference document, as [mergeUnread] reports. Without one,
+// it returns the last merge entry of entries.
+func unreadMerge(res *paths.Resolver, entries []*ast.MappingValueNode) *ast.MappingValueNode {
+	var last *ast.MappingValueNode
+
+	for _, e := range slices.Backward(entries) {
+		if !astnode.IsMergeKey(e.Key) {
+			continue
+		}
+
+		if mergeUnread(res, e, 0) {
+			return e
+		}
+
+		if last == nil {
+			last = e
+		}
+	}
+
+	return last
+}
+
+// mergeUnread reports whether a mapping that the merge entry e brings in,
+// itself or through a merge key of its own, comes from a reference
+// document.
+func mergeUnread(res *paths.Resolver, e *ast.MappingValueNode, depth int) bool {
 	if depth > maxMergeDepth {
 		return false
 	}
+
+	for _, v := range astnode.MergeValues(e) {
+		m, err := res.Deref(v)
+		if errors.Is(err, paths.ErrReferenceAlias) {
+			return true
+		}
+
+		entries, ok := astnode.Entries(astnode.Content(m))
+		if err != nil || !ok {
+			continue
+		}
+
+		for _, inner := range entries {
+			if astnode.IsMergeKey(inner.Key) && mergeUnread(res, inner, depth+1) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// mergeHolds reports whether a mapping that the merge entry e brings in
+// holds an entry that a path through name selects. It also reports whether
+// the mapping holds an entry that a decode reads as key, itself or through
+// a merge key of its own. Its second result reports whether such a mapping
+// holds a key that does not decode, which might read as key.
+func mergeHolds(
+	res *paths.Resolver, keys *mapkey.Keys, e *ast.MappingValueNode, name, key string, depth int,
+) (bool, bool) {
+	if depth > maxMergeDepth {
+		return false, false
+	}
+
+	unread := false
 
 	for _, v := range astnode.MergeValues(e) {
 		m, err := res.Deref(v)
@@ -149,20 +513,30 @@ func mergeHolds(res *paths.Resolver, e *ast.MappingValueNode, name string, depth
 
 		for _, inner := range entries {
 			if astnode.IsMergeKey(inner.Key) {
-				if mergeHolds(res, inner, name, depth+1) {
-					return true
+				holds, undecoded := mergeHolds(res, keys, inner, name, key, depth+1)
+				if holds {
+					return true, false
 				}
+
+				unread = unread || undecoded
 
 				continue
 			}
 
-			if key, ok := res.KeyName(inner.Key); ok && key == name {
-				return true
+			if text, ok := res.KeyName(inner.Key); ok && text == name {
+				return true, false
 			}
+
+			decoded, ok := keys.Key(inner.Key)
+			if ok && decoded == key {
+				return true, false
+			}
+
+			unread = unread || !ok
 		}
 	}
 
-	return false
+	return false, unread
 }
 
 // aliasProblem returns the problem of the field name at p, which comes from
@@ -179,6 +553,73 @@ func mergeProblem(p paths.Path, name string, tk *token.Token) error {
 	return newProblem(ErrFieldAlias, name+" must not come from a merge key",
 		niceyaml.AtPath(p), atToken(tk),
 		niceyaml.WithDetails(fmt.Errorf("write the %s in the document itself", name)))
+}
+
+// repeatProblem returns the problem of the field name at p, which the
+// decode reads from other, an entry of the mapping whose key it reads as
+// the key of the field. The problem binds at the key of other. The detail
+// binds at the key of entry, the entry of the field in doc, or the problem
+// does not have it for a nil entry.
+func repeatProblem(doc *niceyaml.Node, p paths.Path, name string, other, entry *ast.MappingValueNode) error {
+	text := keyText(other)
+	details := []error{fmt.Errorf("write the key as %s", name)}
+
+	if entry != nil {
+		details = []error{
+			doc.Bind(niceyaml.NewError(fmt.Sprintf("a decode reads %s in place of this %s", text, name),
+				atKey(entry))),
+			errors.New("remove one of the two"),
+		}
+	}
+
+	return newProblem(ErrFieldAlias, fmt.Sprintf("%s must not come from the key %s", name, text),
+		niceyaml.AtPath(p), atKey(other), niceyaml.WithDetails(details...))
+}
+
+// atKey returns an [niceyaml.ErrorOption] that locates an error at the key
+// of entry, as [atAlias] locates an alias key.
+func atKey(entry *ast.MappingValueNode) niceyaml.ErrorOption {
+	if alias, ok := astnode.Content(entry.Key).(*ast.AliasNode); ok {
+		return atAlias(alias)
+	}
+
+	return atToken(astnode.KeyToken(entry))
+}
+
+// keyText returns the key of entry as the document writes it, such as 0x10
+// or *k.
+func keyText(entry *ast.MappingValueNode) string {
+	key := ast.Node(entry.Key)
+	if explicit, ok := key.(*ast.MappingKeyNode); ok {
+		key = explicit.Value
+	}
+
+	return strings.TrimSpace(key.String())
+}
+
+// undecodedProblem returns the problem of the field name at p, which a
+// decode might read from other: an entry whose key does not decode, or a
+// merge entry that brings in such a key. The problem binds at the key of
+// other.
+func undecodedProblem(p paths.Path, name string, other *ast.MappingValueNode) error {
+	msg := fmt.Sprintf("%s might come from the key %s, which does not decode", name, keyText(other))
+	advice := fmt.Errorf("write the key %s so that it decodes", keyText(other))
+
+	if astnode.IsMergeKey(other.Key) {
+		msg = name + " might come from a merge key that brings in a key that does not decode"
+		advice = fmt.Errorf("write the %s in the document itself", name)
+	}
+
+	return newProblem(ErrFieldAlias, msg, niceyaml.AtPath(p), atKey(other), niceyaml.WithDetails(advice))
+}
+
+// unreadProblem returns the problem of the field name at p, which the
+// merge key at tk might replace. The merge key reads a reference document.
+// The detail gives advice, as [mergeAdvice] writes it.
+func unreadProblem(p paths.Path, name, advice string, tk *token.Token) error {
+	return newProblem(ErrFieldAlias, name+" might come from a merge key that reads a reference document",
+		niceyaml.AtPath(p), atToken(tk),
+		niceyaml.WithDetails(errors.New(advice)))
 }
 
 // atToken returns an [niceyaml.ErrorOption] that locates an error at the

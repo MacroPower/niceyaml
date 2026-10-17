@@ -133,7 +133,7 @@ func tabOptions() []manifest.RegistryOption {
 		manifest.WithRemoved("v0", "Tab"),
 		manifest.WithKinds(manifest.NewKind[Tip]("Tab",
 			manifest.Version("v0"),
-			manifest.Version("v1", manifest.Written()),
+			manifest.Version("v1"),
 		)),
 	}
 }
@@ -387,6 +387,96 @@ func TestRegistry_Load(t *testing.T) {
 			),
 			matches: []error{manifest.ErrMissingTypeField},
 		},
+		"kind under a null tag": {
+			// The decode reads the kind as null, so the document lacks it.
+			files: map[string]string{
+				"cafe.yaml": cafeDoc,
+				"x.yaml":    stringtest.LinesLF("apiVersion: cafe.jacobcolvin.com/v1", "kind: !!null Cafe"),
+			},
+			err: stringtest.JoinLF(
+				"config/x.yaml:1:1: missing kind",
+				"",
+				"   1 | apiVersion: cafe.jacobcolvin.com/v1",
+				"     | ^^^^^^^^^^",
+				"   2 | kind: !!null Cafe",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"version under a null tag": {
+			files: map[string]string{
+				"cafe.yaml": cafeDoc,
+				"x.yaml": stringtest.LinesLF(
+					"apiVersion: !!null cafe.jacobcolvin.com/v1", "kind: MenuItem", "metadata:", "  name: z",
+				),
+			},
+			err: stringtest.JoinLF(
+				"config/x.yaml:1:1: missing apiVersion",
+				"",
+				"   1 | apiVersion: !!null cafe.jacobcolvin.com/v1",
+				"     | ^^^^^^^^^^",
+				"   2 | kind: MenuItem",
+				"   3 | metadata:",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"version under an int tag": {
+			// The decode reads the text under !!int as 0, which is not the
+			// text of the field.
+			files: map[string]string{
+				"cafe.yaml": cafeDoc,
+				"x.yaml": stringtest.LinesLF(
+					"apiVersion: !!int cafe.jacobcolvin.com/v1", "kind: MenuItem", "metadata:", "  name: z",
+				),
+			},
+			err: stringtest.JoinLF(
+				`config/x.yaml:1:19: $.apiVersion: go-yaml's decoder reads !!int cafe.jacobcolvin.com/v1 as "0"; `+
+					`write "cafe.jacobcolvin.com/v1"`,
+				"",
+				"   1 | apiVersion: !!int cafe.jacobcolvin.com/v1",
+				"     |                   ^^^^^^^^^^^^^^^^^^^^^^^",
+				"   2 | kind: MenuItem",
+				"   3 | metadata:",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"version under a binary tag": {
+			// The decode reads the text under !!binary as base64, which stops
+			// at the first byte that base64 does not spell.
+			files: map[string]string{
+				"cafe.yaml": cafeDoc,
+				"x.yaml": stringtest.LinesLF(
+					"apiVersion: !!binary cafe.jacobcolvin.com/v1", "kind: MenuItem", "metadata:", "  name: z",
+				),
+			},
+			err: stringtest.JoinLF(
+				`config/x.yaml:1:22: $.apiVersion: go-yaml's decoder reads !!binary cafe.jacobcolvin.com/v1 as `+
+					`"q\xa7\xde"; write "cafe.jacobcolvin.com/v1"`,
+				"",
+				"   1 | apiVersion: !!binary cafe.jacobcolvin.com/v1",
+				"     |                      ^^^^^^^^^^^^^^^^^^^^^^^",
+				"   2 | kind: MenuItem",
+				"   3 | metadata:",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
+		"version under a timestamp tag": {
+			// The decode reads a time, which is not text.
+			files: map[string]string{
+				"cafe.yaml": cafeDoc,
+				"x.yaml": stringtest.LinesLF(
+					"apiVersion: !!timestamp cafe.jacobcolvin.com/v1", "kind: MenuItem", "metadata:", "  name: z",
+				),
+			},
+			err: stringtest.JoinLF(
+				"config/x.yaml:1:25: $.apiVersion: apiVersion must be text",
+				"",
+				"   1 | apiVersion: !!timestamp cafe.jacobcolvin.com/v1",
+				"     |                         ^^^^^^^^^^^^^^^^^^^^^^^",
+				"   2 | kind: MenuItem",
+				"   3 | metadata:",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
 		"kind from an alias": {
 			files: map[string]string{
 				"cafe.yaml":  cafeDoc,
@@ -422,6 +512,255 @@ func TestRegistry_Load(t *testing.T) {
 				"     |   ^^",
 			),
 			matches: []error{manifest.ErrFieldAlias},
+		},
+		"name that a later merge key brings in over the entry of the mapping": {
+			files: map[string]string{
+				"cafe.yaml": stringtest.LinesLF(
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Cafe",
+					"metadata:",
+					"  labels: &b {name: other}",
+					"  name: yamull",
+					"  <<: *b",
+				),
+			},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:6:3: $.metadata.name: name must not come from a merge key",
+				"`-- write the name in the document itself",
+				"",
+				"   4 |   labels: &b {name: other}",
+				"   5 |   name: yamull",
+				"   6 |   <<: *b",
+				"     |   ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"type fields before a merge key that reads a reference document": {
+			// The decoder reads the kind of the reference document, so the
+			// load must not route the document as Hours. It cannot read
+			// the reference document, so it fails whatever that document
+			// holds.
+			opts: []manifest.RegistryOption{
+				manifest.WithDecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore)),
+			},
+			files: map[string]string{
+				"cafe.yaml": cafeDoc,
+				"hours.yaml": stringtest.LinesLF(
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Hours",
+					"<<: *b",
+					"metadata:",
+					"  name: weekday",
+				),
+			},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {kind: Cafe, spec: {seats: 2}}\n"),
+				)),
+			},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:3:1: $.apiVersion: apiVersion might come from a merge key that reads a reference document",
+				"`-- put the merge key before apiVersion",
+				"",
+				"   1 | apiVersion: cafe.jacobcolvin.com/v1",
+				"   2 | kind: Hours",
+				"   3 | <<: *b",
+				"     | ^^",
+				"   4 | metadata:",
+				"   5 |   name: weekday",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"kind before apiVersion and a merge key that reads a reference document": {
+			// The detail names the first type field before the merge key,
+			// so the document loads after the move it asks for.
+			opts: []manifest.RegistryOption{
+				manifest.WithDecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore)),
+			},
+			files: map[string]string{
+				"cafe.yaml": cafeDoc,
+				"hours.yaml": stringtest.LinesLF(
+					"kind: Hours",
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"<<: *b",
+					"metadata:",
+					"  name: weekday",
+				),
+			},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {spec: {open: 8}}\n"),
+				)),
+			},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:3:1: $.apiVersion: apiVersion might come from a merge key that reads a reference document",
+				"`-- put the merge key before kind",
+				"",
+				"   1 | kind: Hours",
+				"   2 | apiVersion: cafe.jacobcolvin.com/v1",
+				"   3 | <<: *b",
+				"     | ^^",
+				"   4 | metadata:",
+				"   5 |   name: weekday",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"name and type fields before a merge key that reads a reference document": {
+			// The path of the name passes through metadata, so the detail
+			// names metadata, the first of those keys.
+			opts: []manifest.RegistryOption{
+				manifest.WithDecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore)),
+			},
+			files: map[string]string{
+				"cafe.yaml": cafeDoc,
+				"hours.yaml": stringtest.LinesLF(
+					"metadata:",
+					"  name: weekday",
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Hours",
+					"<<: *b",
+				),
+			},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {spec: {open: 8}}\n"),
+				)),
+			},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:5:1: $.apiVersion: apiVersion might come from a merge key that reads a reference document",
+				"`-- put the merge key before metadata",
+				"",
+				"   3 | apiVersion: cafe.jacobcolvin.com/v1",
+				"   4 | kind: Hours",
+				"   5 | <<: *b",
+				"     | ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"merge key whose alias reads an anchor in metadata": {
+			// The merge key must come after the anchor that it reads, so the
+			// detail does not ask to put it before metadata alone.
+			opts: []manifest.RegistryOption{
+				manifest.WithDecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore)),
+			},
+			files: map[string]string{
+				"cafe.yaml": cafeDoc,
+				"hours.yaml": stringtest.LinesLF(
+					"metadata: {name: weekday, labels: &x {<<: *b}}",
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Hours",
+					"<<: *x",
+				),
+			},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {a: '1'}\n"),
+				)),
+			},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:4:1: $.apiVersion: apiVersion might come from a merge key that reads a reference document",
+				"`-- move the anchor x out of metadata, then put the merge key before metadata",
+				"",
+				"   2 | apiVersion: cafe.jacobcolvin.com/v1",
+				"   3 | kind: Hours",
+				"   4 | <<: *x",
+				"     | ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"merge key whose alias reads an anchor between the type fields": {
+			// The entry that holds the anchor must move with the merge key.
+			opts: []manifest.RegistryOption{
+				manifest.WithDecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore)),
+			},
+			files: map[string]string{
+				"cafe.yaml": cafeDoc,
+				"hours.yaml": stringtest.LinesLF(
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"extra: &x {<<: *b}",
+					"kind: Hours",
+					"<<: *x",
+					"metadata:",
+					"  name: weekday",
+				),
+			},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {a: '1'}\n"),
+				)),
+			},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:4:1: $.apiVersion: apiVersion might come from a merge key that reads a reference document",
+				"`-- put extra and the merge key before apiVersion",
+				"",
+				"   2 | extra: &x {<<: *b}",
+				"   3 | kind: Hours",
+				"   4 | <<: *x",
+				"     | ^^",
+				"   5 | metadata:",
+				"   6 |   name: weekday",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"type fields after a merge key that reads a reference document": {
+			files: map[string]string{
+				"cafe.yaml": stringtest.LinesLF(
+					"<<: *b",
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Cafe",
+					"metadata:",
+					"  name: yamull",
+				),
+			},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {spec: {seats: 2}}\n"),
+				)),
+			},
+			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
+		},
+		"name before a merge key that reads a reference document": {
+			files: map[string]string{
+				"cafe.yaml": stringtest.LinesLF(
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Cafe",
+					"metadata:",
+					"  name: yamull",
+					"  <<: *b",
+				),
+			},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {labels: {floor: one}}\n"),
+				)),
+			},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:5:3: $.metadata.name: name might come from a merge key that reads a reference document",
+				"`-- put the merge key before name",
+				"",
+				"   3 | metadata:",
+				"   4 |   name: yamull",
+				"   5 |   <<: *b",
+				"     |   ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"name after a merge key that reads a reference document": {
+			files: map[string]string{
+				"cafe.yaml": stringtest.LinesLF(
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Cafe",
+					"metadata:",
+					"  <<: *b",
+					"  name: yamull",
+				),
+			},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {name: other, labels: {floor: one}}\n"),
+				)),
+			},
+			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
 		},
 		"name that is no string": {
 			files: map[string]string{
@@ -656,9 +995,8 @@ func TestRegistry_Load(t *testing.T) {
 			load: []manifest.LoadOption{
 				manifest.WithWarningsAsErrors(true),
 				manifest.WithWarningFilter(func(w *manifest.Warning) bool {
-					allowed := w.Kind == "Hours" && w.Version == "cafe.jacobcolvin.com/v1alpha1" &&
-						w.Path.String() == "$.apiVersion" && w.File == "config/hours.yaml" &&
-						errors.Is(w, manifest.ErrDeprecated)
+					allowed := errors.Is(w, manifest.ErrDeprecatedVersion) && w.Kind == "Hours" &&
+						w.Version == "cafe.jacobcolvin.com/v1alpha1" && w.File == "config/hours.yaml"
 
 					return !allowed
 				}),
@@ -711,6 +1049,18 @@ func TestRegistry_Load(t *testing.T) {
 			},
 			opts: []manifest.RegistryOption{manifest.WithIgnore(matcher.Text(paths.Doc().Child("apiVersion"),
 				func(v string) bool { return !strings.HasPrefix(v, "cafe.jacobcolvin.com/") }))},
+			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
+		},
+		"documents that several ignores skip": {
+			files: map[string]string{
+				"cafe.yaml":   cafeDoc,
+				"deploy.yaml": stringtest.LinesLF("apiVersion: apps/v1", "kind: Deployment"),
+				"map.yaml":    stringtest.LinesLF("apiVersion: v1", "kind: ConfigMap"),
+			},
+			opts: []manifest.RegistryOption{
+				manifest.WithIgnore(matcher.Content(paths.Doc().Child("apiVersion"), "apps/v1")),
+				manifest.WithIgnore(matcher.Content(paths.Doc().Child("kind"), "ConfigMap")),
+			},
 			want: []string{`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`},
 		},
 		"empty and comment files": {
@@ -1001,6 +1351,21 @@ func TestRegistry_Check(t *testing.T) {
 			err:     `config/specials.yaml:2:7: $.kind: unknown kind "Menuitem"`,
 			matches: []error{manifest.ErrUnknownKind},
 		},
+		"check runs after an error of an earlier check": {
+			files: map[string]string{"cafe.yaml": cafeDoc, "menu.yaml": menuDoc},
+			opts: []manifest.RegistryOption{
+				manifest.WithCheck(func(context.Context, *manifest.Set) error {
+					return errPricey
+				}),
+				failKanelbulle,
+			},
+			want: []string{
+				`Cafe "yamull" cafe.jacobcolvin.com/v1 up-to-date=true`,
+				`MenuItem "semla" cafe.jacobcolvin.com/v1 up-to-date=true`,
+			},
+			err:     "config: 2 errors",
+			matches: []error{errPricey},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1090,6 +1455,19 @@ func TestRegistry_Check_Fails(t *testing.T) {
 	}
 }
 
+// sixteenOptions returns the options of a registry whose version field is
+// 16, which a decode also reads for the keys 0x10 and 0o20.
+func sixteenOptions() []manifest.RegistryOption {
+	return []manifest.RegistryOption{
+		manifest.WithAppName("cafe"),
+		manifest.WithVersionField(paths.Doc().Child("16")),
+		manifest.WithKinds(manifest.NewKind[CafeSpec]("Cafe",
+			manifest.Unversioned(),
+			manifest.Version("cafe.jacobcolvin.com/v1"),
+		)),
+	}
+}
+
 func TestRegistry_Load_Unversioned(t *testing.T) {
 	t.Parallel()
 
@@ -1107,7 +1485,7 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 		"plain document": {
 			opts:  opts(),
 			files: map[string]string{"cafe.yaml": "seats: 40\n"},
-			want:  []string{`Cafe "" unversioned up-to-date=true`},
+			want:  []string{`Cafe "" unversioned up-to-date=false`},
 		},
 		"plain document of the wrong layout": {
 			opts:  opts(),
@@ -1121,6 +1499,218 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 				"     |   ^",
 			),
 		},
+		"version that a later merge key brings in under another key text": {
+			// The decode reads the 0x10 that the merge key brings in as the
+			// key 16, so it reads that entry in place of the version.
+			opts: sixteenOptions(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"16: cafe.jacobcolvin.com/v1", "kind: Cafe", "b: &b {0x10: a}", "<<: *b", "seats: 9",
+			)},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:4:1: $.16: 16 must not come from a merge key",
+				"`-- write the 16 in the document itself",
+				"",
+				"   2 | kind: Cafe",
+				"   3 | b: &b {0x10: a}",
+				"   4 | <<: *b",
+				"     | ^^",
+				"   5 | seats: 9",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version that a merge key brings in through an alias key that reads its anchor at its own place": {
+			// The alias key *n reads the anchor before it, 0x10, also where
+			// the merge key brings in the mapping of s, so the merge key
+			// brings in the key 16.
+			opts: sixteenOptions(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"x: &n 0x10", "s: &s {*n : cafe.jacobcolvin.com/v1}", "y: &n 1", "<<: *s", "seats: 9",
+			)},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:4:1: $.16: 16 must not come from a merge key",
+				"`-- write the 16 in the document itself",
+				"",
+				"   2 | s: &s {*n : cafe.jacobcolvin.com/v1}",
+				"   3 | y: &n 1",
+				"   4 | <<: *s",
+				"     | ^^",
+				"   5 | seats: 9",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version that a later alias key of a reference document reads": {
+			opts: sixteenOptions(),
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(niceyaml.NewSourceFromString("r: &r 0x10\n"))),
+			},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"16: cafe.jacobcolvin.com/v1", "kind: Cafe", "? *r", ": other",
+			)},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:3:3: $.16: 16 must not come from the key *r",
+				"|-- 1:1: a decode reads *r in place of this 16",
+				"`-- remove one of the two",
+				"",
+				"   1 | 16: cafe.jacobcolvin.com/v1",
+				"     | ^^ a decode reads *r in place of this 16",
+				"   2 | kind: Cafe",
+				"   3 | ? *r",
+				"     |   ^^",
+				"   4 | : other",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version that a later alias key reads past an anchor on a merge value": {
+			// The anchor on the merge value does not hide the anchor of a
+			// from *x, so *x reads 0x10.
+			opts: sixteenOptions(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"a: &x 0x10", "m:", "  <<: &x {p: 1}", "16: cafe.jacobcolvin.com/v1", "kind: Cafe", "? *x", ": other",
+			)},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:6:3: $.16: 16 must not come from the key *x",
+				"|-- 4:1: a decode reads *x in place of this 16",
+				"`-- remove one of the two",
+				"",
+				"   2 | m:",
+				"   3 |   <<: &x {p: 1}",
+				"   4 | 16: cafe.jacobcolvin.com/v1",
+				"     | ^^ a decode reads *x in place of this 16",
+				"   5 | kind: Cafe",
+				"   6 | ? *x",
+				"     |   ^^",
+				"   7 | : other",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version that a later alias key reads at an anchor that a merge key reads again": {
+			// The merge key of m2 reads the mapping of k3 again, so *c reads
+			// the inner anchor &c 0x10.
+			opts: sixteenOptions(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"k3: &c {0x10: &c 0x10}",
+				"m2:",
+				"  <<: *c",
+				"16: cafe.jacobcolvin.com/v1",
+				"kind: Cafe",
+				"? *c",
+				": other",
+			)},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:6:3: $.16: 16 must not come from the key *c",
+				"|-- 4:1: a decode reads *c in place of this 16",
+				"`-- remove one of the two",
+				"",
+				"   2 | m2:",
+				"   3 |   <<: *c",
+				"   4 | 16: cafe.jacobcolvin.com/v1",
+				"     | ^^ a decode reads *c in place of this 16",
+				"   5 | kind: Cafe",
+				"   6 | ? *c",
+				"     |   ^^",
+				"   7 | : other",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version before a later key that does not decode": {
+			// A decode cannot read the key !!bool x, so it might read it as 16.
+			opts: sixteenOptions(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"16: cafe.jacobcolvin.com/v1", "kind: Cafe", "? !!bool x", ": other",
+			)},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:3:10: $.16: 16 might come from the key !!bool x, which does not decode",
+				"`-- write the key !!bool x so that it decodes",
+				"",
+				"   1 | 16: cafe.jacobcolvin.com/v1",
+				"   2 | kind: Cafe",
+				"   3 | ? !!bool x",
+				"     |          ^",
+				"   4 | : other",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version that a merge key brings in under another key text": {
+			opts:  sixteenOptions(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF("b: &b {0o20: a}", "<<: *b", "seats: 9")},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:2:1: $.16: 16 must not come from a merge key",
+				"`-- write the 16 in the document itself",
+				"",
+				"   1 | b: &b {0o20: a}",
+				"   2 | <<: *b",
+				"     | ^^",
+				"   3 | seats: 9",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version that a later key of the mapping replaces": {
+			// The decode reads the key 0x10 as 16, and a later entry wins, so
+			// the decode reads v9 as the version.
+			opts: sixteenOptions(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"16: cafe.jacobcolvin.com/v1", "kind: Cafe", "0x10: cafe.jacobcolvin.com/v9", "seats: 9",
+			)},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:3:1: $.16: 16 must not come from the key 0x10",
+				"|-- 1:1: a decode reads 0x10 in place of this 16",
+				"`-- remove one of the two",
+				"",
+				"   1 | 16: cafe.jacobcolvin.com/v1",
+				"     | ^^ a decode reads 0x10 in place of this 16",
+				"   2 | kind: Cafe",
+				"   3 | 0x10: cafe.jacobcolvin.com/v9",
+				"     | ^^^^",
+				"   4 | seats: 9",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version that a later alias key of the mapping replaces": {
+			opts: sixteenOptions(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"x: &k 0x10", "16: cafe.jacobcolvin.com/v1", "*k : other", "kind: Cafe", "seats: 9",
+			)},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:3:1: $.16: 16 must not come from the key *k",
+				"|-- 2:1: a decode reads *k in place of this 16",
+				"`-- remove one of the two",
+				"",
+				"   1 | x: &k 0x10",
+				"   2 | 16: cafe.jacobcolvin.com/v1",
+				"     | ^^ a decode reads *k in place of this 16",
+				"   3 | *k : other",
+				"     | ^^",
+				"   4 | kind: Cafe",
+				"   5 | seats: 9",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version under a key that a decode reads as the version field": {
+			// A path names a key by its text, so $.16 does not select 0x10,
+			// but a decode reads 0x10 as 16.
+			opts: sixteenOptions(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"0x10: cafe.jacobcolvin.com/v1", "kind: Cafe", "seats: 9",
+			)},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:1:1: $.16: 16 must not come from the key 0x10",
+				"`-- write the key as 16",
+				"",
+				"   1 | 0x10: cafe.jacobcolvin.com/v1",
+				"     | ^^^^",
+				"   2 | kind: Cafe",
+				"   3 | seats: 9",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"version after an earlier key that a decode reads as the version field": {
+			// The decode reads the last of the two entries.
+			opts: sixteenOptions(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"0x10: other", "16: cafe.jacobcolvin.com/v1", "kind: Cafe", "seats: 9",
+			)},
+			want: []string{`Cafe "" cafe.jacobcolvin.com/v1 up-to-date=true`},
+		},
 		"versioned document": {
 			opts: opts(),
 			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
@@ -1130,12 +1720,74 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 			)},
 			want: []string{`Cafe "" cafe.jacobcolvin.com/v1 up-to-date=true`},
 		},
+		"versioned document with a merge key that reads a reference document": {
+			opts: append(opts(), manifest.WithDecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn))),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Cafe",
+				"<<: *b",
+			)},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {seats: 5}\n"),
+				)),
+			},
+			err: stringtest.JoinLF(
+				"config/cafe.yaml:3:1: $.apiVersion: apiVersion might come from a merge key that reads a reference document",
+				"`-- put the merge key before apiVersion",
+				"",
+				"   1 | apiVersion: cafe.jacobcolvin.com/v1",
+				"   2 | kind: Cafe",
+				"   3 | <<: *b",
+				"     | ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"versioned document after a merge key that reads a reference document": {
+			opts: opts(),
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"<<: *b",
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Cafe",
+			)},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(
+					niceyaml.NewSourceFromString("base: &b {seats: 5}\n"),
+				)),
+			},
+			want: []string{`Cafe "" cafe.jacobcolvin.com/v1 up-to-date=true`},
+		},
 		"claimed document with a version": {
 			opts: opts(manifest.Claim(matcher.Exists(paths.Doc().Child("seats")))),
 			files: map[string]string{
 				"cafe.yaml": stringtest.LinesLF("apiVersion: cafe.jacobcolvin.com/v1", "seats: 1"),
 			},
 			want: []string{`Cafe "" cafe.jacobcolvin.com/v1 up-to-date=true`},
+		},
+		"documents that several claims accept": {
+			opts: withKinds(
+				manifest.NewKind[CafeSpec]("Cafe",
+					manifest.Claim(matcher.Exists(paths.Doc().Child("seats"))),
+					manifest.Claim(matcher.Exists(paths.Doc().Child("currency"))),
+					manifest.Unversioned(),
+					manifest.Version("cafe.jacobcolvin.com/v1"),
+				),
+				manifest.NewKind[HoursSpec](
+					"Hours",
+					manifest.Unversioned(),
+					manifest.Version("cafe.jacobcolvin.com/v1"),
+				),
+			),
+			files: map[string]string{
+				"a.yaml": "seats: 40\n",
+				"b.yaml": "currency: SEK\n",
+				"c.yaml": `open: "07:00"` + "\n",
+			},
+			want: []string{
+				`Cafe "" unversioned up-to-date=false`,
+				`Cafe "" unversioned up-to-date=false`,
+				`Hours "" unversioned up-to-date=false`,
+			},
 		},
 		"removed unversioned layout": {
 			opts: []manifest.RegistryOption{
@@ -1167,6 +1819,88 @@ func TestRegistry_Load_Unversioned(t *testing.T) {
 				"   1 | version: 3",
 				"     |          ^",
 			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tc.run(t)
+		})
+	}
+}
+
+func TestRegistry_Load_Written(t *testing.T) {
+	t.Parallel()
+
+	// The options of a registry whose Required Cafe lists versions, beside a
+	// Tip whose file stands in for the rest of a set that lacks the Cafe.
+	opts := func(versions ...manifest.KindOption) []manifest.RegistryOption {
+		return []manifest.RegistryOption{
+			manifest.WithAppName("cafe"),
+			manifest.WithKinds(
+				manifest.NewKind[CafeSpec]("Cafe", append([]manifest.KindOption{manifest.Required()}, versions...)...),
+				manifest.NewKind[Tip]("Tip", manifest.Version("cafe.jacobcolvin.com/v1")),
+			),
+		}
+	}
+
+	tip := map[string]string{"tip.yaml": stringtest.LinesLF("apiVersion: cafe.jacobcolvin.com/v1", "kind: Tip")}
+	beta := map[string]string{"cafe.yaml": stringtest.LinesLF(
+		"apiVersion: cafe.jacobcolvin.com/v1beta1",
+		"kind: Cafe",
+		"seats: 40",
+	)}
+
+	tcs := map[string]loadCase{
+		"hint without written": {
+			opts:  opts(manifest.Version("cafe.jacobcolvin.com/v1beta1"), manifest.Version("cafe.jacobcolvin.com/v1")),
+			files: tip,
+			err: stringtest.JoinLF(
+				"config: missing Cafe",
+				"`-- add a document with apiVersion: cafe.jacobcolvin.com/v1 and kind: Cafe",
+			),
+		},
+		"hint with written on an older version": {
+			opts: opts(
+				manifest.Version("cafe.jacobcolvin.com/v1beta1", manifest.Written()),
+				manifest.Version("cafe.jacobcolvin.com/v1"),
+			),
+			files: tip,
+			err: stringtest.JoinLF(
+				"config: missing Cafe",
+				"`-- add a document with apiVersion: cafe.jacobcolvin.com/v1beta1 and kind: Cafe",
+			),
+		},
+		"hint of an unversioned kind without written": {
+			opts:  opts(manifest.Unversioned(), manifest.Version("cafe.jacobcolvin.com/v1")),
+			files: tip,
+			err: stringtest.JoinLF(
+				"config: missing Cafe",
+				"`-- add a document with apiVersion: cafe.jacobcolvin.com/v1 and kind: Cafe",
+			),
+		},
+		"hint of an unversioned kind with written on the layout": {
+			opts:  opts(manifest.Unversioned(manifest.Written()), manifest.Version("cafe.jacobcolvin.com/v1")),
+			files: tip,
+			err: stringtest.JoinLF(
+				"config: missing Cafe",
+				"`-- add a Cafe document without apiVersion and kind",
+			),
+		},
+		"older document without written": {
+			opts:  opts(manifest.Version("cafe.jacobcolvin.com/v1beta1"), manifest.Version("cafe.jacobcolvin.com/v1")),
+			files: beta,
+			want:  []string{`Cafe "" cafe.jacobcolvin.com/v1beta1 up-to-date=false`},
+		},
+		"older document with written on its version": {
+			opts: opts(
+				manifest.Version("cafe.jacobcolvin.com/v1beta1", manifest.Written()),
+				manifest.Version("cafe.jacobcolvin.com/v1"),
+			),
+			files: beta,
+			want:  []string{`Cafe "" cafe.jacobcolvin.com/v1beta1 up-to-date=true`},
 		},
 	}
 
@@ -1325,7 +2059,6 @@ func deprecationOptions() []manifest.RegistryOption {
 				manifest.Schema(schema.Embedded([]byte(older))),
 			),
 			manifest.Version("cafe.jacobcolvin.com/v1",
-				manifest.Written(),
 				manifest.Schema(schema.Embedded([]byte(current))),
 				manifest.Migrate(spec.Child("cost"), rename("price")),
 			),
@@ -1397,6 +2130,198 @@ func TestRegistry_Load_Deprecations(t *testing.T) {
 		"config/menu.yaml:6:10: $.spec.price: 0 is less than 1",
 		`config/menu.yaml:7:3: warning: $.spec.legacyPricing~: deprecated field "legacyPricing"`,
 	), err.Error())
+}
+
+func TestRegistry_Load_DeprecationMarks(t *testing.T) {
+	t.Parallel()
+
+	// The schema of a current version that deprecates $.spec.legacy.
+	legacy := schema.Embedded([]byte(`{"properties": {"spec": {"properties": {"legacy": {"deprecated": true}}}}}`))
+
+	// The options of a registry of one kind, Hours, with versions.
+	hours := func(versions ...manifest.KindOption) []manifest.RegistryOption {
+		return withKinds(manifest.NewKind[map[string]any]("Hours", versions...))
+	}
+
+	// The options of a registry of one kind, Config, whose documents write
+	// a version field alone. Version 1 and the whole kind are deprecated.
+	versionOnly := []manifest.RegistryOption{
+		manifest.WithVersionOnly(paths.Doc().Child("version")),
+		manifest.WithKinds(manifest.NewKind[map[string]any]("Config",
+			manifest.Version("1", manifest.Deprecated()),
+			manifest.Version("2", manifest.Deprecated()),
+		)),
+	}
+
+	// A filter that accepts the deprecated version 1 of Config and the
+	// deprecated version x/v1alpha1 of Hours.
+	accept := manifest.WithWarningFilter(func(w *manifest.Warning) bool {
+		accepted := errors.Is(w, manifest.ErrDeprecatedVersion) &&
+			(w.Kind == "Config" && w.Version == "1" || w.Kind == "Hours" && w.Version == "x/v1alpha1")
+
+		return !accepted
+	})
+
+	oldHours := stringtest.LinesLF("apiVersion: x/v1alpha1", "kind: Hours", "spec:", "  legacy: true")
+
+	tcs := map[string]struct {
+		opts []manifest.RegistryOption
+		load []manifest.LoadOption
+		file string
+		// Want holds the path and the message of each warning, and the
+		// sentinels among version, kind, and deprecated that it matches.
+		want []string
+	}{
+		"deprecated version": {
+			opts: hours(manifest.Version("x/v1alpha1", manifest.Deprecated()), manifest.Version("x/v1")),
+			file: stringtest.LinesLF("apiVersion: x/v1alpha1", "kind: Hours"),
+			want: []string{`$.apiVersion: deprecated version "x/v1alpha1": version, deprecated`},
+		},
+		"deprecated unversioned layout": {
+			opts: hours(manifest.Unversioned(manifest.Deprecated()), manifest.Version("x/v1")),
+			file: "spec: {}\n",
+			want: []string{"$: deprecated unversioned layout of Hours: version, deprecated"},
+		},
+		"deprecated kind": {
+			opts: hours(manifest.Version("x/v1", manifest.Deprecated())),
+			file: stringtest.LinesLF("apiVersion: x/v1", "kind: Hours"),
+			want: []string{`$.kind: deprecated kind "Hours": kind, deprecated`},
+		},
+		"deprecated field": {
+			opts: hours(manifest.Version("x/v1", manifest.Schema(legacy))),
+			file: stringtest.LinesLF("apiVersion: x/v1", "kind: Hours", "spec:", "  legacy: true"),
+			want: []string{`$.spec.legacy~: deprecated field "legacy": deprecated`},
+		},
+		"deprecated version and kind under a version field alone": {
+			opts: versionOnly,
+			file: "version: 1\n",
+			want: []string{
+				`$.version: deprecated version "1": version, deprecated`,
+				`$.version: deprecated kind "Config": kind, deprecated`,
+			},
+		},
+		"filter that accepts a deprecated version": {
+			opts: hours(
+				manifest.Version("x/v1alpha1", manifest.Deprecated()),
+				manifest.Version("x/v1", manifest.Schema(legacy)),
+			),
+			load: []manifest.LoadOption{accept},
+			file: oldHours,
+			want: []string{`$.spec.legacy~: deprecated field "legacy": deprecated`},
+		},
+		"filter that accepts a deprecated version under a version field alone": {
+			opts: versionOnly,
+			load: []manifest.LoadOption{accept},
+			file: "version: 1\n",
+			want: []string{`$.version: deprecated kind "Config": kind, deprecated`},
+		},
+	}
+
+	marks := []struct {
+		err  error
+		name string
+	}{
+		{name: "version", err: manifest.ErrDeprecatedVersion},
+		{name: "kind", err: manifest.ErrDeprecatedKind},
+		{name: "deprecated", err: manifest.ErrDeprecated},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := manifest.MustNewRegistry(tc.opts...)
+
+			set, err := reg.Load(t.Context(), configFS(map[string]string{"hours.yaml": tc.file}), tc.load...)
+			require.NoError(t, err)
+
+			var got []string
+
+			for problem := range niceyaml.Problems(set.Warnings()) {
+				w, ok := errors.AsType[*manifest.Warning](problem.Err)
+				require.True(t, ok)
+
+				var matched []string
+
+				for _, m := range marks {
+					if errors.Is(problem.Err, m.err) {
+						matched = append(matched, m.name)
+					}
+				}
+
+				got = append(got, fmt.Sprintf("%s: %s: %s", w.Path, w.Error(), strings.Join(matched, ", ")))
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestRegistry_Load_WarningFilters(t *testing.T) {
+	t.Parallel()
+
+	reg := newCafeRegistry(t)
+	files := map[string]string{"cafe.yaml": cafeDoc, "hours.yaml": hoursDoc}
+
+	// Each case loads one warning, about the deprecated version of the
+	// hours, with one filter for each entry of keeps.
+	tcs := map[string]struct {
+		// Keeps holds what each filter returns, in the order of the options.
+		keeps []bool
+		// Calls holds the number of warnings that each filter gets.
+		calls []int
+		// Kept reports whether the load keeps the warning.
+		kept bool
+	}{
+		"one filter that keeps": {
+			keeps: []bool{true},
+			calls: []int{1},
+			kept:  true,
+		},
+		"filter that keeps before one that drops": {
+			keeps: []bool{true, false},
+			calls: []int{1, 1},
+		},
+		"filter that drops before one that keeps": {
+			keeps: []bool{false, true},
+			calls: []int{1, 0},
+		},
+		"two filters that keep": {
+			keeps: []bool{true, true},
+			calls: []int{1, 1},
+			kept:  true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			calls := make([]int, len(tc.keeps))
+
+			var opts []manifest.LoadOption
+
+			for i, keep := range tc.keeps {
+				opts = append(opts, manifest.WithWarningFilter(func(w *manifest.Warning) bool {
+					assert.ErrorIs(t, w, manifest.ErrDeprecatedVersion)
+
+					calls[i]++
+
+					return keep
+				}))
+			}
+
+			set, err := reg.Load(t.Context(), configFS(files), opts...)
+			require.NoError(t, err)
+			assert.Equal(t, tc.calls, calls)
+
+			if tc.kept {
+				require.ErrorIs(t, set.Warnings(), manifest.ErrDeprecatedVersion)
+			} else {
+				require.NoError(t, set.Warnings())
+			}
+		})
+	}
 }
 
 func TestRegistry_Load_Defaults(t *testing.T) {
@@ -1849,13 +2774,13 @@ func TestRegistry_Load_Hint(t *testing.T) {
 			hint:  true,
 		},
 		"removal by the written version": {
-			opts:  drinkOptions(true),
+			opts:  drinkOptions(false),
 			files: map[string]string{"drink.yaml": colorDrinkDoc},
 			want:  stringtest.LinesLF("|-- menu colors moved to the theme of the Cafe", hint),
 			hint:  true,
 		},
 		"removal by a version newer than the written one": {
-			opts:  drinkOptions(false),
+			opts:  drinkOptions(true),
 			files: map[string]string{"drink.yaml": colorDrinkDoc},
 			want:  "`-- menu colors moved to the theme of the Cafe\n",
 		},
@@ -2129,6 +3054,17 @@ func TestRegistry_Load_TypeFields(t *testing.T) {
 		},
 		"older version": {
 			doc: coffee,
+		},
+		"current version in block scalars": {
+			// Each type field holds the string that a decode reads.
+			doc: stringtest.LinesLF(
+				"apiVersion: |-", "  v2", "kind: |-", "  Brew", "metadata:", "  name: bryggkaffe",
+			),
+		},
+		"older version in block scalars": {
+			doc: stringtest.LinesLF(
+				"apiVersion: |-", "  v1", "kind: |-", "  Coffee", "metadata:", "  name: bryggkaffe",
+			),
 		},
 		"schemas that declare the type fields": {
 			v1:  brewSchema("v1", "Coffee"),
@@ -2611,6 +3547,98 @@ func TestRegistry_Load_NestedTypeField(t *testing.T) {
 
 			_, ok := set.Get[Cafe]("yamull")
 			assert.True(t, ok)
+		})
+	}
+}
+
+func TestRegistry_Load_VersionText(t *testing.T) {
+	t.Parallel()
+
+	// The versions name each reading of the numbers below, so a load that
+	// read a number as go-yaml's decoder prints it would pick another
+	// version.
+	reg := manifest.MustNewRegistry(
+		manifest.WithKinds(manifest.NewKind[map[string]any]("Cafe",
+			manifest.Version("1.0"), manifest.Version("1.1"), manifest.Version("1.10"), manifest.Version("v1"),
+			manifest.Version("16"), manifest.Version("0x10"), manifest.Version("8"), manifest.Version("010"),
+			manifest.Version("1"), manifest.Version("null"), manifest.Version("~"),
+		)),
+	)
+
+	tcs := map[string]struct {
+		version string
+		// The version that the document loads at, or the error of the load.
+		want, err string
+	}{
+		"plain text":                {version: "v1", want: "v1"},
+		"plain integer":             {version: "16", want: "16"},
+		"double-quoted float":       {version: `"1.10"`, want: "1.10"},
+		"single-quoted hex integer": {version: "'0x10'", want: "0x10"},
+		"block scalar":              {version: "|-\n  1.10", want: "1.10"},
+		"quoted null word":          {version: `"null"`, want: "null"},
+		"quoted tilde":              {version: `"~"`, want: "~"},
+		"plain float with a zero": {
+			version: "1.10",
+			err:     `c.yaml:2:13: $.apiVersion: go-yaml's decoder reads 1.10 as "1.1"; write "1.10"`,
+		},
+		"plain float": {
+			version: "1.0",
+			err:     `c.yaml:2:13: $.apiVersion: go-yaml's decoder reads 1.0 as "1"; write "1.0"`,
+		},
+		"plain hex integer": {
+			version: "0x10",
+			err:     `c.yaml:2:13: $.apiVersion: go-yaml's decoder reads 0x10 as "16"; write "0x10"`,
+		},
+		"plain octal integer": {
+			version: "010",
+			err:     `c.yaml:2:13: $.apiVersion: go-yaml's decoder reads 010 as "8"; write "010"`,
+		},
+		"plain infinity": {
+			version: ".inf",
+			err:     `c.yaml:2:13: $.apiVersion: go-yaml's decoder reads .inf as "+Inf"; write ".inf"`,
+		},
+		"float under a string tag": {
+			version: "!!str 1.0",
+			err:     `c.yaml:2:19: $.apiVersion: go-yaml's decoder reads !!str 1.0 as "1"; write "1.0"`,
+		},
+		"anchored float under a tag": {
+			version: "&v !!str 1.0",
+			err:     `c.yaml:2:22: $.apiVersion: go-yaml's decoder reads !!str 1.0 as "1"; write "1.0"`,
+		},
+		"plain null":                  {version: "null", err: "c.yaml:1:1: missing apiVersion"},
+		"plain tilde":                 {version: "~", err: "c.yaml:1:1: missing apiVersion"},
+		"double-quoted string escape": {version: `"v\x31"`, want: "v1"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			text := stringtest.LinesLF("kind: Cafe", "apiVersion: "+tc.version)
+
+			set, err := reg.Load(
+				t.Context(),
+				manifest.Sources(niceyaml.NewSourceFromString(text, niceyaml.WithName("c.yaml"))),
+			)
+			if tc.err != "" {
+				require.Error(t, err)
+				assert.Equal(t, tc.err, err.Error())
+				require.ErrorIs(t, err, manifest.ErrMissingTypeField)
+				require.NotErrorIs(t, err, manifest.ErrUnknownVersion)
+				assert.True(t, niceyaml.IsInvalid(err))
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			var got []string
+
+			for o := range set.Objects() {
+				got = append(got, o.Version)
+			}
+
+			assert.Equal(t, []string{tc.want}, got)
 		})
 	}
 }

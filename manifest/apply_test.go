@@ -133,13 +133,10 @@ func TestPlan_Apply_ReadOnly(t *testing.T) {
 		summary string
 	}{
 		"file of a file system": {
-			in: configFS(map[string]string{"hours.yaml": hoursDoc}),
-			err: stringtest.JoinLF(
-				"config/hours.yaml: cannot rewrite a file that cafe provides",
-				"`-- only a newer release of cafe updates this file",
-			),
+			in:  configFS(map[string]string{"hours.yaml": hoursDoc}),
+			err: "config/hours.yaml: cannot rewrite a file of a file system that cafe only reads",
 			summary: stringtest.JoinLF(
-				"config/hours.yaml: not written, cannot rewrite a file that cafe provides",
+				"config/hours.yaml: not written, cannot rewrite a file of a file system that cafe only reads",
 				"1 file not written",
 			),
 		},
@@ -173,11 +170,11 @@ func TestPlan_Apply_ReadOnly(t *testing.T) {
 			require.Len(t, plan.Files(), 1)
 
 			res, err := plan.Apply(t.Context())
-			require.NoError(t, err)
+			require.ErrorIs(t, err, manifest.ErrReadOnly)
+			assert.Equal(t, res.Err(), err)
 			assert.Empty(t, res.Files())
-			require.ErrorIs(t, res.Err(), manifest.ErrReadOnly)
-			assert.False(t, niceyaml.IsInvalid(res.Err()))
-			assert.Equal(t, tc.err, niceyaml.FormatError(res.Err()))
+			assert.False(t, niceyaml.IsInvalid(err))
+			assert.Equal(t, tc.err, niceyaml.FormatError(err))
 
 			if tc.summary != "" {
 				assert.Equal(t, tc.summary, res.Summary())
@@ -223,10 +220,10 @@ func TestPlan_Apply_Changed(t *testing.T) {
 			tc.change(t, path)
 
 			res, err := plan.Apply(t.Context())
-			require.NoError(t, err)
+			require.ErrorIs(t, err, manifest.ErrChanged)
+			assert.Equal(t, res.Err(), err)
 			assert.Empty(t, res.Files())
-			require.ErrorIs(t, res.Err(), manifest.ErrChanged)
-			assert.Equal(t, filepath.Join(config, tc.err), niceyaml.FormatError(res.Err()))
+			assert.Equal(t, filepath.Join(config, tc.err), niceyaml.FormatError(err))
 		})
 	}
 }
@@ -234,13 +231,20 @@ func TestPlan_Apply_Changed(t *testing.T) {
 func TestPlan_Apply_Context(t *testing.T) {
 	t.Parallel()
 
-	plan, _ := planDir(t, newCafeRegistry(t), map[string]string{"hours.yaml": hoursDoc})
+	plan, config := planDir(t, newCafeRegistry(t), map[string]string{"hours.yaml": hoursDoc})
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, err := plan.Apply(ctx)
+	res, err := plan.Apply(ctx)
 	require.ErrorIs(t, err, context.Canceled)
+	require.NotNil(t, res)
+	assert.Empty(t, res.Files())
+	assert.Equal(t, stringtest.JoinLF(
+		config+"/hours.yaml: not written, context canceled",
+		"1 file not written",
+	), res.Summary())
+	assert.Equal(t, hoursDoc, yamltest.ReadFile(t, filepath.Join(config, "hours.yaml")))
 }
 
 // endingContext is a context whose Err reports [context.Canceled] after
@@ -268,37 +272,69 @@ func TestPlan_Apply_ContextEndsPartway(t *testing.T) {
 	plan, config := planDir(t, newCafeRegistry(t), map[string]string{"hours.yaml": hoursDoc, "menu.yaml": menuDoc})
 
 	// The context ends after Apply writes the first file.
-	res, err := plan.Apply(&endingContext{Context: t.Context(), live: 2})
-	require.NoError(t, err)
+	res, err := plan.Apply(&endingContext{Context: t.Context(), live: 1})
+	require.ErrorIs(t, err, context.Canceled)
 	require.Len(t, res.Files(), 1)
-	require.ErrorIs(t, res.Err(), context.Canceled)
-	assert.Equal(t, config+"/menu.yaml: context canceled", res.Err().Error())
+	assert.Equal(t, config+"/menu.yaml: context canceled", err.Error())
 	assert.Equal(t, string(plan.Files()[0].After()), yamltest.ReadFile(t, filepath.Join(config, "hours.yaml")))
 }
 
 func TestResult_Summary(t *testing.T) {
 	t.Parallel()
 
-	reg := manifest.MustNewRegistry(drinkOptions(true)...)
+	reg := manifest.MustNewRegistry(drinkOptions(false)...)
 
-	plan, config := planDir(t, reg, map[string]string{
-		"a.yaml": drinkDoc + "  size: XL\n",
-		"b.yaml": drinkDoc + stringtest.LinesLF(
-			"  size: S",
-			"---",
-			"apiVersion: cafe.jacobcolvin.com/v9",
-			"kind: Drink",
-		),
-	})
+	tcs := map[string]struct {
+		files map[string]string
+		// Want holds the lines of the summary, where {config} stands for
+		// the directory of the files.
+		want []string
+		err  bool
+	}{
+		"blocked file and document that fails to route": {
+			files: map[string]string{
+				"a.yaml": drinkDoc + "  size: XL\n",
+				"b.yaml": drinkDoc + stringtest.LinesLF(
+					"  size: S",
+					"---",
+					"apiVersion: cafe.jacobcolvin.com/v9",
+					"kind: Drink",
+				),
+			},
+			want: []string{
+				"{config}/a.yaml: not migrated, 1 error",
+				"{config}/b.yaml: migrated document 1: Drink to cafe.jacobcolvin.com/v1",
+				"{config}/b.yaml: 1 document not migrated",
+				"1 file migrated, 1 document not migrated, 1 file not migrated",
+			},
+			err: true,
+		},
+		"clean plan": {
+			files: map[string]string{"a.yaml": drinkDoc + "  size: S\n"},
+			want: []string{
+				"{config}/a.yaml: migrated Drink to cafe.jacobcolvin.com/v1",
+				"1 file migrated",
+			},
+		},
+	}
 
-	res, err := plan.Apply(t.Context())
-	require.NoError(t, err)
-	assert.Equal(t, stringtest.JoinLF(
-		config+"/a.yaml: not migrated, 1 error",
-		config+"/b.yaml: migrated document 1: Drink to cafe.jacobcolvin.com/v1",
-		config+"/b.yaml: 1 document not migrated",
-		"1 file migrated, 1 document not migrated, 1 not migrated",
-	), res.Summary())
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			plan, config := planDir(t, reg, tc.files)
+
+			res, err := plan.Apply(t.Context())
+			if tc.err {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+
+			want := strings.ReplaceAll(stringtest.JoinLF(tc.want...), "{config}", config)
+			assert.Equal(t, want, res.Summary())
+		})
+	}
 }
 
 // lastLine returns the last line of s.

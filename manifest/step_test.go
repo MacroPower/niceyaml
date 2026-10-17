@@ -36,11 +36,12 @@ var (
 
 // drinkOptions returns the options of a registry with one kind, Drink,
 // whose v1 holds the steps of the size example, the color removal, and a
-// step that panics. The written version is v1 when written is set.
-func drinkOptions(written bool) []manifest.RegistryOption {
+// step that panics. The written version is v1beta1 when lagging is set,
+// and v1 otherwise.
+func drinkOptions(lagging bool) []manifest.RegistryOption {
 	var mark []manifest.VersionOption
 
-	if written {
+	if lagging {
 		mark = append(mark, manifest.Written())
 	}
 
@@ -48,8 +49,8 @@ func drinkOptions(written bool) []manifest.RegistryOption {
 		manifest.WithAppName("cafe"),
 		manifest.WithMigrateHint(migrateHint),
 		manifest.WithKinds(manifest.NewKind[map[string]any]("Drink",
-			manifest.Version("cafe.jacobcolvin.com/v1beta1"),
-			manifest.Version("cafe.jacobcolvin.com/v1", append(mark,
+			manifest.Version("cafe.jacobcolvin.com/v1beta1", mark...),
+			manifest.Version("cafe.jacobcolvin.com/v1",
 				manifest.Migrate(spec.Child("size"), func(ctx context.Context, n *edit.Node) error {
 					size, ok := sizes[n.Text()]
 					if !ok {
@@ -65,34 +66,28 @@ func drinkOptions(written bool) []manifest.RegistryOption {
 				manifest.Migrate(spec.Child("boom"), func(context.Context, *edit.Node) error {
 					panic("boom")
 				}),
-			)...),
+			),
 		)),
 	}
 }
 
 // adoptOptions returns the options of a registry with one kind, Cafe,
 // whose v1 moves the name and the seats of an unversioned document below
-// metadata and spec. The written version is v1 when written is set.
-func adoptOptions(written bool) []manifest.RegistryOption {
-	var mark []manifest.VersionOption
-
-	if written {
-		mark = append(mark, manifest.Written())
-	}
-
+// metadata and spec.
+func adoptOptions() []manifest.RegistryOption {
 	return []manifest.RegistryOption{
 		manifest.WithAppName("cafe"),
 		manifest.WithNameField(meta.Child("name")),
 		manifest.WithKinds(manifest.NewKind[Cafe]("Cafe",
 			manifest.Unversioned(),
-			manifest.Version("cafe.jacobcolvin.com/v1", append(mark,
+			manifest.Version("cafe.jacobcolvin.com/v1",
 				manifest.Migrate(paths.Doc().Child("name"), func(_ context.Context, n *edit.Node) error {
 					return n.Move(meta.Child("name"))
 				}),
 				manifest.Migrate(paths.Doc().Child("seats"), func(_ context.Context, n *edit.Node) error {
 					return n.Move(spec.Child("seats"))
 				}),
-			)...),
+			),
 		)),
 	}
 }
@@ -274,7 +269,7 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			),
 		},
 		"error of a step": {
-			opts:  drinkOptions(true),
+			opts:  drinkOptions(false),
 			files: map[string]string{"drink.yaml": drinkDoc + "  size: XL\n"},
 			err: stringtest.JoinLF(
 				`config/drink.yaml:6:9: $.spec.size: no cafe.jacobcolvin.com/v1 size for "XL"`,
@@ -287,7 +282,7 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			),
 		},
 		"panic in a step": {
-			opts:  drinkOptions(true),
+			opts:  drinkOptions(false),
 			files: map[string]string{"drink.yaml": drinkDoc + "  boom: 1\n"},
 			err: stringtest.JoinLF(
 				"config/drink.yaml:6:9: $.spec.boom: Drink cafe.jacobcolvin.com/v1 step 3 panicked: boom",
@@ -299,7 +294,7 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			),
 		},
 		"removal by the written version in a file that a rewrite cannot write": {
-			opts:  drinkOptions(true),
+			opts:  drinkOptions(false),
 			files: map[string]string{"drink.yaml": drinkDoc + stringtest.LinesLF("  color: red", "  size: S")},
 			want:  []string{`Drink "" cafe.jacobcolvin.com/v1beta1 up-to-date=false`},
 			warns: stringtest.JoinLF(
@@ -315,7 +310,7 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			matches: []error{manifest.ErrRemoved},
 		},
 		"removal by the written version in strict mode": {
-			opts:  drinkOptions(true),
+			opts:  drinkOptions(false),
 			files: map[string]string{"drink.yaml": colorDrinkDoc},
 			load:  []manifest.LoadOption{manifest.WithWarningsAsErrors(true)},
 			err: stringtest.JoinLF(
@@ -330,7 +325,7 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			matches: []error{manifest.ErrRemoved},
 		},
 		"removal by a version newer than the written one in strict mode": {
-			opts:  drinkOptions(false),
+			opts:  drinkOptions(true),
 			files: map[string]string{"drink.yaml": colorDrinkDoc},
 			load:  []manifest.LoadOption{manifest.WithWarningsAsErrors(true)},
 			want:  []string{`Drink "" cafe.jacobcolvin.com/v1beta1 up-to-date=true`},
@@ -402,7 +397,7 @@ func TestRegistry_Load_Steps(t *testing.T) {
 					"    soy: *milk",
 				),
 			},
-			want: []string{`MenuItem "" cafe.jacobcolvin.com/v1beta1 up-to-date=true`},
+			want: []string{`MenuItem "" cafe.jacobcolvin.com/v1beta1 up-to-date=false`},
 		},
 		"rename that a merge key undoes": {
 			opts:  closes("$.spec.closes"),
@@ -443,12 +438,12 @@ func TestRegistry_Load_Steps(t *testing.T) {
 		"rename of every match": {
 			opts:  closes("$..closes"),
 			files: map[string]string{"hours.yaml": merged},
-			want:  []string{`Hours "" v1 up-to-date=true`},
+			want:  []string{`Hours "" v1 up-to-date=false`},
 		},
 		"unversioned document that moves its fields": {
-			opts:  adoptOptions(false),
+			opts:  adoptOptions(),
 			files: map[string]string{"cafe.yaml": stringtest.LinesLF("name: yamull", "seats: 40")},
-			want:  []string{`Cafe "yamull" unversioned up-to-date=true`},
+			want:  []string{`Cafe "yamull" unversioned up-to-date=false`},
 		},
 		"rename of a key that the mapping writes twice": {
 			opts: closes("$.spec.closes"),
@@ -470,6 +465,19 @@ func TestRegistry_Load_Steps(t *testing.T) {
 				`   5 |   closes: "19:00"`,
 				"     |   ^^^^^^",
 			),
+		},
+		"rename through an alias of a reference document": {
+			opts: closes("$.spec.closes"),
+			files: map[string]string{"hours.yaml": stringtest.LinesLF(
+				"apiVersion: v1",
+				"kind: Hours",
+				"spec: *summer",
+			)},
+			in: []manifest.InputOption{manifest.WithSourceOptions(niceyaml.WithReferences(
+				niceyaml.NewSourceFromString(stringtest.LinesLF("summer: &summer", `  closes: "21:00"`)),
+			))},
+			err:     "config/hours.yaml: resolve $.spec.closes: alias reads a reference document: *summer",
+			matches: []error{paths.ErrReferenceAlias, paths.ErrAlias},
 		},
 	}
 
@@ -520,7 +528,7 @@ func TestRegistry_Load_StepValues(t *testing.T) {
 		assert.Equal(t, "cafe.jacobcolvin.com/v1alpha1", shift.Version)
 	}
 
-	drinkReg := manifest.MustNewRegistry(drinkOptions(true)...)
+	drinkReg := manifest.MustNewRegistry(drinkOptions(false)...)
 
 	drinks, err := drinkReg.Load(t.Context(), manifest.Sources(niceyaml.NewSourceFromString(drinkDoc+"  size: M\n")))
 	require.NoError(t, err)

@@ -59,7 +59,9 @@ const (
 // [Stdin] reads standard input.
 //
 // [Plan.Apply] rewrites only the files of a Path input, so an app should
-// read the files of its user with Path.
+// read the files of its user with Path. An app that keeps its files
+// elsewhere, such as a server that stores them in a database, writes
+// [PlanFile.After] for each file of [Plan.Files] itself.
 func Path(p string, opts ...InputOption) Input {
 	return Input{in: &inputDef{kind: inputPath, path: p, cfg: newInputConfig(opts)}}
 }
@@ -69,6 +71,9 @@ func Path(p string, opts ...InputOption) Input {
 // files as [Path] does. A walk follows the symbolic links of a file system
 // that reports them through [fs.ReadLinkFS], and reads what Open returns
 // in any other file system.
+//
+// [Plan.Apply] does not write a file of fsys, and fails it with an error
+// that matches [ErrReadOnly].
 func FS(fsys fs.FS, p string, opts ...InputOption) Input {
 	return Input{in: &inputDef{kind: inputFS, fsys: fsys, path: p, cfg: newInputConfig(opts)}}
 }

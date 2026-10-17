@@ -23,18 +23,17 @@ import (
 // not read from disk, or that the process cannot write, fails with an
 // error that matches [ErrReadOnly]. A file whose text differs from the
 // text that the plan read fails with an error that matches [ErrChanged].
-// Apply continues with the other files, and [Result.Err] returns an error
-// for each file that Apply did not write.
+// Apply continues with the other files.
 //
-// When ctx has ended before the first file, Apply returns an error that
-// matches ctx.Err() and does not write a file. When ctx ends partway, each
-// file that Apply has not reached counts as not written.
+// A program that keeps its files elsewhere writes [PlanFile.After] itself,
+// under the name that [PlanFile.Source] gives. [Plan.Err] and
+// [Plan.Warnings] report what a load of the new text finds.
+//
+// Apply returns a Result even when it returns an error, so a program
+// prints [Result.Summary] in either case. The error is the one that
+// [Result.Err] returns. A file that Apply has not reached when ctx ends
+// counts as not written, and its problem matches ctx.Err().
 func (p *Plan) Apply(ctx context.Context) (*Result, error) {
-	err := ctx.Err()
-	if err != nil {
-		return nil, err //nolint:wrapcheck // Apply ends with the error of its context.
-	}
-
 	res := &Result{plan: p, failed: make(map[int]failure)}
 
 	for _, f := range p.files {
@@ -56,7 +55,7 @@ func (p *Plan) Apply(ctx context.Context) (*Result, error) {
 	// whether or not ctx ended, so the end of ctx fails none of them.
 	res.check(context.WithoutCancel(ctx))
 
-	return res, nil
+	return res, res.err
 }
 
 // Result records what [Plan.Apply] did: the files that it wrote, and the
@@ -89,8 +88,10 @@ func (r *Result) Files() []*PlanFile {
 
 // Summary returns a line for each document that Apply migrated and for
 // each file that a problem blocked or that Apply did not write. A row
-// below the line of a document names each value that Apply deleted. The
-// last line counts the files, as in "2 files migrated, 1 up to date".
+// below the line of a document names each value that Apply deleted. When
+// a file that Apply wrote holds documents that fail to route, a line
+// counts them as not migrated. The last line counts the files, as in
+// "2 files migrated, 1 up to date", and the documents that fail to route.
 func (r *Result) Summary() string {
 	var b strings.Builder
 
@@ -146,10 +147,12 @@ func (r *Result) Warnings() error {
 	return r.warnings
 }
 
-// Err returns the problems that fail the rewrite as a [*LoadError] that
-// holds the warnings too, or nil. The error holds the problems of the
-// plan, but for each file that Apply did not write, it holds the reason
-// alone.
+// Err returns the error that [Plan.Apply] returned: the problems that fail
+// the rewrite as a [*LoadError] that holds the warnings too, or nil. The
+// error holds the reason of each file that Apply did not write and each
+// problem that a load finds in the files that Apply wrote. For each other
+// file, it holds the problems of the plan. [Plan.Err] keeps the problems
+// of the plan in each file that Apply did not write.
 func (r *Result) Err() error {
 	return r.err
 }
@@ -239,8 +242,7 @@ func (f *PlanFile) readOnly() error {
 		return readOnlyProblem("cannot rewrite a file that " + app + " read from a stream")
 
 	case targetFS:
-		return readOnlyProblem("cannot rewrite a file that "+app+" provides",
-			fmt.Errorf("only a newer release of %s updates this file", app))
+		return readOnlyProblem("cannot rewrite a file of a file system that " + app + " only reads")
 
 	case targetSource:
 		if len(hook.Layers(f.f.src)) > 0 {

@@ -160,7 +160,7 @@ type blanker struct {
 // field blanks the entry at p, a field that the document writes as a
 // scalar.
 func (b *blanker) field(p paths.Path) {
-	if r := readField(b.doc, p); !r.found {
+	if r := readField(b.doc, p, nil); !r.found {
 		return
 	}
 

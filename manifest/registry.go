@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
@@ -89,11 +90,11 @@ type RegistryOption func(*registryConfig)
 
 // registryConfig holds the settings that each [RegistryOption] configures.
 type registryConfig struct {
-	ignore          matcher.Matcher
 	appName         string
 	migrateHint     string
 	decodeOptions   []niceyaml.DecodeOption
 	unmarshalers    []niceyaml.Unmarshaler
+	ignores         []matcher.Matcher
 	kinds           []*Kind
 	checks          []func(ctx context.Context, set *Set) error
 	removed         []*removal
@@ -136,7 +137,10 @@ func WithAppName(name string) RegistryOption {
 
 // WithMigrateHint is a [RegistryOption] that sets the detail that comes
 // last on each problem that a rewrite clears, such as
-// `run "cafe config migrate" to update this file`.
+// `run "cafe config migrate" to update this file`. Only the problems of the
+// files of a [Path] input carry it, because [Plan.Apply] rewrites only
+// those. A file that a link leads to outside the input directory does not
+// carry it either.
 func WithMigrateHint(hint string) RegistryOption {
 	return func(c *registryConfig) {
 		c.migrateHint = hint
@@ -211,9 +215,15 @@ func WithVersionOnly(p paths.Path) RegistryOption {
 // WithIgnore is a [RegistryOption] that skips each document that m
 // accepts, such as the Kubernetes manifests in a directory beside those of
 // the app. A skipped document does not produce an object or a message.
+//
+// Each WithIgnore adds a matcher, and a load skips each document that one
+// of the matchers accepts. The load asks the matchers in the order given,
+// and stops at the first that accepts the document or returns an error. A
+// matcher that returns an error fails the document with that error.
+// [NewRegistry] rejects a nil matcher.
 func WithIgnore(m matcher.Matcher) RegistryOption {
 	return func(c *registryConfig) {
-		c.ignore = m
+		c.ignores = append(c.ignores, m)
 	}
 }
 
@@ -230,12 +240,14 @@ func WithRemoved(version, kind string, details ...string) RegistryOption {
 
 // WithCheck is a [RegistryOption] that adds a check across the manifests
 // of a set, such as a reference from one manifest to another. A load calls
-// check with the set of its manifests when the documents and the other
-// checks across the set do not find an error. [Registry.Load] returns
-// that set when the load does not find a later error. Each error and
-// warning that check returns joins the report of the load. An error that
-// check binds in a document, such as through [Object.Bind], leaves that
-// manifest out of [Checked.Set]. Several checks run in the order given.
+// check with the set of its manifests when it does not find an error in
+// the files, the documents, or the checks of names and counts.
+// [Registry.Load] returns that set when the load does not find a later
+// error. Each error and warning that check returns joins the report of the
+// load. An error that check binds in a document, such as through
+// [Object.Bind], leaves that manifest out of [Checked.Set]. Several checks
+// run in the order given, and each one runs even when an earlier one
+// returns an error. [NewRegistry] rejects a nil function.
 func WithCheck(check func(ctx context.Context, set *Set) error) RegistryOption {
 	return func(c *registryConfig) {
 		c.checks = append(c.checks, check)
@@ -266,6 +278,8 @@ func NewRegistry(opts ...RegistryOption) (*Registry, error) {
 
 	b := &registryBuilder{r: r}
 	b.checkFields()
+
+	b.checkFuncs()
 
 	for _, k := range cfg.kinds {
 		b.addKind(k)
@@ -355,6 +369,22 @@ func (b *registryBuilder) checkFields() {
 	}
 }
 
+// checkFuncs checks the matchers of [WithIgnore] and the functions of
+// [WithCheck].
+func (b *registryBuilder) checkFuncs() {
+	for _, m := range b.r.cfg.ignores {
+		if nilness.IsNil(m) {
+			b.failf("manifest.WithIgnore got a nil matcher")
+		}
+	}
+
+	for _, check := range b.r.cfg.checks {
+		if check == nil {
+			b.failf("manifest.WithCheck got a nil function")
+		}
+	}
+}
+
 // plainPath reports whether p starts at `$` and holds names and indexes
 // alone, as the fields that a load reads before it decodes need.
 func plainPath(p paths.Path) bool {
@@ -401,8 +431,14 @@ func (b *registryBuilder) addKind(k *Kind) {
 		r.types[k.typ] = entry
 	}
 
-	if r.cfg.versionOnly && k.cfg.claim != nil {
+	if r.cfg.versionOnly && len(k.cfg.claims) > 0 {
 		b.failf("kind %s: manifest.WithVersionOnly names the only type field, so it takes no manifest.Claim", k.name)
+	}
+
+	for _, m := range k.cfg.claims {
+		if nilness.IsNil(m) {
+			b.failf("kind %s: manifest.Claim got a nil matcher", k.name)
+		}
 	}
 
 	b.addVersions(entry)
@@ -477,17 +513,11 @@ func (b *registryBuilder) addVersions(entry *kindEntry) {
 			entry.written = v
 		}
 
-		if vc.written && vc.loosened {
-			b.failf("kind %s: %s carries manifest.Loosened, so an earlier release rejects what a rewrite "+
-				"writes there; move manifest.Written below the version whose step stopped removing the value",
-				k.name, label)
-		}
-
 		entry.versions = append(entry.versions, v)
 	}
 
 	if entry.written == nil {
-		entry.written = entry.versions[0]
+		entry.written = entry.versions[len(entry.versions)-1]
 	}
 }
 
@@ -605,13 +635,15 @@ func (b *registryBuilder) checkKinds() {
 	var plain []string
 
 	for _, entry := range b.r.kinds {
+		b.checkWritten(entry)
+		b.checkLoosened(entry)
 		b.checkDeprecations(entry)
 		b.checkInline(entry)
 
 		reads := entry.removedUnversioned != nil ||
 			len(entry.versions) > 0 && entry.versions[0].cfg.unversioned
 
-		if reads && entry.kind.cfg.claim == nil {
+		if reads && len(entry.kind.cfg.claims) == 0 {
 			plain = append(plain, entry.kind.name)
 		}
 	}
@@ -620,6 +652,102 @@ func (b *registryBuilder) checkKinds() {
 		b.failf("kinds %s read documents without type fields, which cannot pick between them; give each but one "+
 			"manifest.Claim", joinAnd(plain))
 	}
+}
+
+// checkWritten checks where [Written] marks the versions of entry.
+func (b *registryBuilder) checkWritten(entry *kindEntry) {
+	if len(entry.versions) == 0 {
+		return
+	}
+
+	k := entry.kind
+	current := entry.versions[len(entry.versions)-1]
+
+	for _, v := range entry.versions {
+		switch {
+		case !v.cfg.written:
+			continue
+
+		case v == current:
+			b.failf("kind %s: %s is the current version, which a rewrite writes without manifest.Written; %s",
+				k.name, v.label(), writtenAdvice(entry, v))
+
+		case v.cfg.loosened:
+			b.failf("kind %s: %s carries manifest.Loosened, so an earlier release rejects what a rewrite "+
+				"writes there; %s", k.name, v.label(), writtenAdvice(entry, v))
+		}
+	}
+}
+
+// checkLoosened checks [Loosened] on the current version of entry, which
+// a rewrite writes when no version of entry carries [Written].
+func (b *registryBuilder) checkLoosened(entry *kindEntry) {
+	w := entry.written
+	if w == nil || w.cfg.written || !w.cfg.loosened || w.index == 0 {
+		return
+	}
+
+	b.failf("kind %s: %s carries manifest.Loosened, so an earlier release rejects what a rewrite writes there; %s",
+		entry.kind.name, w.label(), loosenedAdvice(w, entry.versions[:w.index]))
+}
+
+// loosenedAdvice returns the change that clears the problem of [Loosened]
+// on w, the current version of a kind without [Written]. The versions of
+// older come before w.
+func loosenedAdvice(w *versionEntry, older []*versionEntry) string {
+	if vs := writableVersions(older); len(vs) > 0 {
+		return "mark " + labelList(vs) + " with manifest.Written"
+	}
+
+	var kept []*versionEntry
+
+	for _, v := range older {
+		if v.removal == nil {
+			kept = append(kept, v)
+		}
+	}
+
+	if len(kept) == 0 {
+		// WithRemoved names every older version. Without them, the kind
+		// lists the current version alone. Loosened fits there, but a step
+		// does not, because the oldest version takes no step.
+		if len(w.cfg.steps) > 0 {
+			return "stop listing the versions that manifest.WithRemoved names and drop the manifest.Migrate " +
+				"steps of " + w.label() + ", or drop manifest.Loosened"
+		}
+
+		return "stop listing the versions that manifest.WithRemoved names, or drop manifest.Loosened"
+	}
+
+	keptVs := writableVersions(kept)
+	if len(keptVs) == 0 {
+		return "drop manifest.Loosened"
+	}
+
+	// The removals alone keep Written off the older versions. Let x be
+	// the newest kept version that Written can mark. The mark fits on x
+	// when the kind stops listing each removed version after x, and the
+	// versions before x stay listed. A load of a document older than a
+	// removed version runs the steps of that version and checks its
+	// schema. The advice offers the unlisting only when no removed
+	// version after x carries steps or a schema.
+	x := keptVs[len(keptVs)-1]
+
+	var unlist []string
+
+	for _, v := range older[x.index+1:] {
+		switch {
+		case v.removal == nil:
+			continue
+		case len(v.cfg.steps) > 0 || v.cfg.hasSchema:
+			return "drop manifest.Loosened"
+		}
+
+		unlist = append(unlist, v.label())
+	}
+
+	return fmt.Sprintf("stop listing %s and mark %s with manifest.Written, or drop manifest.Loosened",
+		joinAnd(unlist), x.label())
 }
 
 // checkDeprecations checks where [Deprecated] marks the versions of entry.
@@ -642,9 +770,84 @@ func (b *registryBuilder) checkDeprecations(entry *kindEntry) {
 
 		case v.index != current && v.index >= entry.written.index:
 			b.failf("kind %s: %s carries manifest.Deprecated, but a rewrite does not move a document off the "+
-				"written version or a newer one; move manifest.Written to a newer version first", k.name, v.label())
+				"written version or a newer one; %s", k.name, v.label(), deprecatedAdvice(entry, v))
 		}
 	}
+}
+
+// deprecatedAdvice returns the change that clears the problem of v, a
+// deprecated version of entry. The version v is older than the current
+// version, and it is the version that [Written] marks or a newer one.
+func deprecatedAdvice(entry *kindEntry, v *versionEntry) string {
+	advice := writtenAdvice(entry, entry.written)
+
+	if vs, drop := writtenFixes(entry); !drop && len(vs) == 0 {
+		return fmt.Sprintf("drop manifest.Deprecated from %s, or %s", v.label(), advice)
+	}
+
+	return advice
+}
+
+// writtenAdvice returns the change that clears a problem of where [Written]
+// sits on w, a version of entry. When neither dropping the mark nor moving
+// it clears the problem, the change also drops [Loosened].
+func writtenAdvice(entry *kindEntry, w *versionEntry) string {
+	vs, drop := writtenFixes(entry)
+
+	switch current := entry.versions[len(entry.versions)-1]; {
+	case drop && len(vs) > 0:
+		return "drop manifest.Written, or move it to " + labelList(vs)
+	case drop:
+		return "drop manifest.Written"
+	case len(vs) > 0:
+		return "move manifest.Written to " + labelList(vs)
+	case w == current:
+		return "drop manifest.Written and manifest.Loosened from " + w.label()
+	default:
+		return fmt.Sprintf("drop manifest.Written from %s and manifest.Loosened from %s", w.label(),
+			current.label())
+	}
+}
+
+// writtenFixes returns the versions of entry that [Written] can move to, and
+// whether the kind can drop the mark. Without the mark, a rewrite writes the
+// current version, which checkLoosened rejects when it carries [Loosened]
+// and follows an older version.
+func writtenFixes(entry *kindEntry) ([]*versionEntry, bool) {
+	current := entry.versions[len(entry.versions)-1]
+
+	return writableVersions(entry.versions[:current.index]), !current.cfg.loosened || current.index == 0
+}
+
+// writableVersions returns the versions of older that [Written] can mark,
+// where older holds the versions of a kind before its current one. Each
+// such version does not carry [Loosened], and it is newer than every
+// version that [WithRemoved] names and every version that carries
+// [Deprecated].
+func writableVersions(older []*versionEntry) []*versionEntry {
+	var vs []*versionEntry
+
+	for _, v := range older {
+		switch {
+		case v.removal != nil || v.cfg.deprecated:
+			vs = nil
+		case !v.cfg.loosened:
+			vs = append(vs, v)
+		}
+	}
+
+	return vs
+}
+
+// labelList returns the labels of vs as a list in prose, as in "v1, v2,
+// or v3".
+func labelList(vs []*versionEntry) string {
+	labels := make([]string, len(vs))
+	for i, v := range vs {
+		labels[i] = v.label()
+	}
+
+	return joinList(labels, "or")
 }
 
 // label returns the name of v as an author reads it in a message of

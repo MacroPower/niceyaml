@@ -143,7 +143,6 @@ func cafeOptions(extra ...manifest.RegistryOption) []manifest.RegistryOption {
 					manifest.Deprecated("cafe 4.0 removes cafe.jacobcolvin.com/v1alpha1"),
 				),
 				manifest.Version("cafe.jacobcolvin.com/v1",
-					manifest.Written(),
 					manifest.Migrate(spec.Child("opens"), rename("open")),
 					manifest.Migrate(spec.Child("closes"), rename("close")),
 				),
@@ -151,7 +150,6 @@ func cafeOptions(extra ...manifest.RegistryOption) []manifest.RegistryOption {
 			manifest.NewKind[MenuItem]("MenuItem",
 				manifest.Version("cafe.jacobcolvin.com/v1beta1", manifest.KindName("Dish")),
 				manifest.Version("cafe.jacobcolvin.com/v1",
-					manifest.Written(),
 					manifest.Schema(schema.Embedded([]byte(itemSchema))),
 					manifest.Migrate(spec.Child("cost"), rename("price")),
 					manifest.Migrate(spec.Child("tags"), tagList),
@@ -210,13 +208,14 @@ func TestNewRegistry(t *testing.T) {
 		},
 		"version listed twice": {
 			opts: withKinds(manifest.NewKind[Cafe]("Cafe",
-				manifest.Version("v1"), manifest.Version("v1", manifest.Written()))),
+				v1, manifest.Version("v1"))),
 			err: "kind Cafe lists v1 twice",
 		},
 		"two written versions": {
 			opts: withKinds(manifest.NewKind[Hours]("Hours",
 				manifest.Version("cafe.jacobcolvin.com/v1", manifest.Written()),
 				manifest.Version("cafe.jacobcolvin.com/v2", manifest.Written()),
+				manifest.Version("cafe.jacobcolvin.com/v3"),
 			)),
 			err: "Hours carries manifest.Written on cafe.jacobcolvin.com/v1 and on cafe.jacobcolvin.com/v2",
 		},
@@ -224,6 +223,7 @@ func TestNewRegistry(t *testing.T) {
 			opts: withKinds(manifest.NewKind[Hours]("Hours",
 				manifest.Version("v1"),
 				manifest.Version("v2", manifest.Written(), manifest.Loosened()),
+				manifest.Version("v3"),
 			)),
 			err: "kind Hours: v2 carries manifest.Loosened",
 		},
@@ -295,12 +295,20 @@ func TestNewRegistry(t *testing.T) {
 			)),
 			err: "kind Cafe: v1 has a schema.Ref that names no schema",
 		},
-		"deprecated written version": {
+		"deprecated older version without written": {
 			opts: withKinds(manifest.NewKind[Hours]("Hours",
 				manifest.Version("v1", manifest.Deprecated()),
 				manifest.Version("v2"),
 			)),
-			err: "kind Hours: v1 carries manifest.Deprecated, but a rewrite does not move a document off",
+		},
+		"loosened only version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours", manifest.Version("v2", manifest.Loosened()))),
+		},
+		"loosened only version beside a removal of the old one": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v1", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours", manifest.Version("v2", manifest.Loosened()))),
+			},
 		},
 		"deprecated current version of a required kind": {
 			opts: withKinds(manifest.NewKind[Cafe]("Cafe",
@@ -314,7 +322,7 @@ func TestNewRegistry(t *testing.T) {
 				manifest.WithRemoved("v1", "Hours"),
 				manifest.WithKinds(manifest.NewKind[Hours]("Hours",
 					manifest.Version("v1", manifest.Deprecated()),
-					manifest.Version("v2", manifest.Written()),
+					manifest.Version("v2"),
 				)),
 			},
 			err: "kind Hours: v1 carries manifest.Deprecated, but manifest.WithRemoved names it",
@@ -334,16 +342,43 @@ func TestNewRegistry(t *testing.T) {
 			},
 			err: "manifest.WithRemoved names v1 of Hours, which is the written version of Hours or newer",
 		},
+		"removal of the current version": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v2", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours", v1, manifest.Version("v2"))),
+			},
+			err: "manifest.WithRemoved names v2 of Hours, which is the written version of Hours or newer",
+		},
+		"removal of an older version that the kind lists": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v1", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours", v1, manifest.Version("v2"))),
+			},
+		},
 		"removal under a name the version does not give": {
 			opts: []manifest.RegistryOption{
 				manifest.WithRemoved("v1", "Dish"),
 				manifest.WithKinds(manifest.NewKind[MenuItem]("MenuItem",
 					manifest.Version("v0", manifest.KindName("Dish")),
 					manifest.Version("v1"),
-					manifest.Version("v2", manifest.Written()),
+					manifest.Version("v2"),
 				)),
 			},
 			err: `manifest.WithRemoved names v1 of Dish, but that version calls the kind "MenuItem"`,
+		},
+		"nil ignore": {
+			opts: []manifest.RegistryOption{
+				manifest.WithIgnore(nil),
+				manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", v1)),
+			},
+			err: "manifest.WithIgnore got a nil matcher",
+		},
+		"nil check": {
+			opts: []manifest.RegistryOption{
+				manifest.WithCheck(nil),
+				manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", v1)),
+			},
+			err: "manifest.WithCheck got a nil function",
 		},
 		"version only beside a kind field": {
 			opts: []manifest.RegistryOption{
@@ -380,6 +415,10 @@ func TestNewRegistry(t *testing.T) {
 				manifest.WithKinds(manifest.NewKind[Cafe]("Cafe", v1)),
 			},
 			err: "manifest.WithNameField takes a $ path of names and indexes, not $.metadata.*",
+		},
+		"nil claim": {
+			opts: withKinds(manifest.NewKind[Cafe]("Cafe", manifest.Claim(nil), v1)),
+			err:  "kind Cafe: manifest.Claim got a nil matcher",
 		},
 		"two unversioned kinds without a claim": {
 			opts: withKinds(
@@ -428,6 +467,317 @@ func TestNewRegistry(t *testing.T) {
 			require.Error(t, err)
 			assert.Nil(t, reg)
 			assert.Contains(t, err.Error(), tc.err)
+		})
+	}
+}
+
+func TestNewRegistry_Advice(t *testing.T) {
+	t.Parallel()
+
+	const (
+		deprecated = "carries manifest.Deprecated, but a rewrite does not move a document off the written " +
+			"version or a newer one; "
+		loosened = "carries manifest.Loosened, so an earlier release rejects what a rewrite writes there; "
+		current  = "is the current version, which a rewrite writes without manifest.Written; "
+	)
+
+	tcs := map[string]struct {
+		opts []manifest.RegistryOption
+		err  string
+	}{
+		"written on the current version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1"),
+				manifest.Version("v2", manifest.Written()),
+			)),
+			err: "manifest: kind Hours: v2 " + current + "drop manifest.Written, or move it to v1",
+		},
+		"written on the only version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours", manifest.Version("v1", manifest.Written()))),
+			err:  "manifest: kind Hours: v1 " + current + "drop manifest.Written",
+		},
+		"written on the current version after a loosened version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1", manifest.Loosened()),
+				manifest.Version("v2", manifest.Written()),
+			)),
+			err: "manifest: kind Hours: v2 " + current + "drop manifest.Written",
+		},
+		"written on the current version beside a removal of the older one": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v1", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2", manifest.Written()),
+				)),
+			},
+			err: "manifest: kind Hours: v2 " + current + "drop manifest.Written",
+		},
+		"written on a loosened current version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1"),
+				manifest.Version("v2", manifest.Written(), manifest.Loosened()),
+			)),
+			err: "manifest: kind Hours: v2 " + current + "move manifest.Written to v1",
+		},
+		"written on a loosened current version after a loosened version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1", manifest.Loosened()),
+				manifest.Version("v2", manifest.Written(), manifest.Loosened()),
+			)),
+			err: "manifest: kind Hours: v2 " + current + "drop manifest.Written and manifest.Loosened from v2",
+		},
+		"written on the only version, which carries loosened": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1", manifest.Written(), manifest.Loosened()),
+			)),
+			err: "manifest: kind Hours: v1 " + current + "drop manifest.Written",
+		},
+		"written and loosened after a loosened version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1", manifest.Loosened()),
+				manifest.Version("v2", manifest.Written(), manifest.Loosened()),
+				manifest.Version("v3"),
+			)),
+			err: "manifest: kind Hours: v2 " + loosened + "drop manifest.Written",
+		},
+		"written and loosened between versions that Written fits": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1"),
+				manifest.Version("v2", manifest.Written(), manifest.Loosened()),
+				manifest.Version("v3"),
+				manifest.Version("v4"),
+			)),
+			err: "manifest: kind Hours: v2 " + loosened + "drop manifest.Written, or move it to v1 or v3",
+		},
+		"written and loosened before a loosened current version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1"),
+				manifest.Version("v2", manifest.Written(), manifest.Loosened()),
+				manifest.Version("v3", manifest.Loosened()),
+			)),
+			err: "manifest: kind Hours: v2 " + loosened + "move manifest.Written to v1",
+		},
+		"written and loosened beside a removal before a loosened current version": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v1", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2", manifest.Written(), manifest.Loosened()),
+					manifest.Version("v3", manifest.Loosened()),
+				)),
+			},
+			err: "manifest: kind Hours: v2 " + loosened + "drop manifest.Written from v2 and manifest.Loosened from v3",
+		},
+		"deprecated written version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1", manifest.Deprecated(), manifest.Written()),
+				manifest.Version("v2"),
+			)),
+			err: "manifest: kind Hours: v1 " + deprecated + "drop manifest.Written",
+		},
+		"deprecated written version before two newer ones": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1", manifest.Deprecated(), manifest.Written()),
+				manifest.Version("v2"),
+				manifest.Version("v3"),
+			)),
+			err: "manifest: kind Hours: v1 " + deprecated + "drop manifest.Written, or move it to v2",
+		},
+		"deprecated written version before a loosened current version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1", manifest.Deprecated(), manifest.Written()),
+				manifest.Version("v2", manifest.Loosened()),
+			)),
+			err: "manifest: kind Hours: v1 " + deprecated +
+				"drop manifest.Deprecated from v1, or drop manifest.Written from v1 and manifest.Loosened from v2",
+		},
+		"deprecated version after the written one before a loosened current version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1", manifest.Written()),
+				manifest.Version("v2", manifest.Deprecated()),
+				manifest.Version("v3", manifest.Loosened()),
+			)),
+			err: "manifest: kind Hours: v2 " + deprecated +
+				"drop manifest.Deprecated from v2, or drop manifest.Written from v1 and manifest.Loosened from v3",
+		},
+		"deprecated written version before a loosened version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1", manifest.Deprecated(), manifest.Written()),
+				manifest.Version("v2", manifest.Loosened()),
+				manifest.Version("v3"),
+			)),
+			err: "manifest: kind Hours: v1 " + deprecated + "drop manifest.Written",
+		},
+		"deprecated written version before a version that Written fits and a loosened current version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1", manifest.Deprecated(), manifest.Written()),
+				manifest.Version("v2"),
+				manifest.Version("v3", manifest.Loosened()),
+			)),
+			err: "manifest: kind Hours: v1 " + deprecated + "move manifest.Written to v2",
+		},
+		"loosened current version without written": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1"),
+				manifest.Version("v2", manifest.Loosened()),
+			)),
+			err: "manifest: kind Hours: v2 " + loosened + "mark v1 with manifest.Written",
+		},
+		"loosened current version after two versions": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1"),
+				manifest.Version("v2"),
+				manifest.Version("v3", manifest.Loosened()),
+			)),
+			err: "manifest: kind Hours: v3 " + loosened + "mark v1 or v2 with manifest.Written",
+		},
+		"loosened current version beside a removal of the older one": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v1", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2", manifest.Loosened()),
+				)),
+			},
+			err: "manifest: kind Hours: v2 " + loosened +
+				"stop listing the versions that manifest.WithRemoved names, or drop manifest.Loosened",
+		},
+		"loosened current version with steps beside a removal of the older one": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v1", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2", manifest.Loosened(), manifest.Migrate(spec.Child("shut"), rename("close"))),
+				)),
+			},
+			err: "manifest: kind Hours: v2 " + loosened +
+				"stop listing the versions that manifest.WithRemoved names and drop the manifest.Migrate steps of v2, " +
+				"or drop manifest.Loosened",
+		},
+		"loosened current version beside a removal of the version before it": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v2", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2"),
+					manifest.Version("v3", manifest.Loosened()),
+				)),
+			},
+			err: "manifest: kind Hours: v3 " + loosened +
+				"stop listing v2 and mark v1 with manifest.Written, or drop manifest.Loosened",
+		},
+		"loosened current version beside removals of the versions before it": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v2", "Hours"),
+				manifest.WithRemoved("v3", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2"),
+					manifest.Version("v3"),
+					manifest.Version("v4", manifest.Loosened()),
+				)),
+			},
+			err: "manifest: kind Hours: v4 " + loosened +
+				"stop listing v2 and v3 and mark v1 with manifest.Written, or drop manifest.Loosened",
+		},
+		"loosened current version beside a removal of a version with steps": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v2", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2", manifest.Migrate(spec.Child("shut"), rename("close"))),
+					manifest.Version("v3", manifest.Loosened()),
+				)),
+			},
+			err: "manifest: kind Hours: v3 " + loosened + "drop manifest.Loosened",
+		},
+		"loosened current version beside a removal of a version with a schema": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v2", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2", manifest.Schema(schema.Embedded([]byte(`{"type": "object"}`)))),
+					manifest.Version("v3", manifest.Loosened()),
+				)),
+			},
+			err: "manifest: kind Hours: v3 " + loosened + "drop manifest.Loosened",
+		},
+		"loosened current version beside removals around a version with steps": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v1", "Hours"),
+				manifest.WithRemoved("v3", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2", manifest.Migrate(spec.Child("shut"), rename("close"))),
+					manifest.Version("v3"),
+					manifest.Version("v4", manifest.Loosened()),
+				)),
+			},
+			err: "manifest: kind Hours: v4 " + loosened +
+				"stop listing v3 and mark v2 with manifest.Written, or drop manifest.Loosened",
+		},
+		"loosened current version beside a removal with steps and a removal without": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v2", "Hours"),
+				manifest.WithRemoved("v4", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2", manifest.Migrate(spec.Child("shut"), rename("close"))),
+					manifest.Version("v3"),
+					manifest.Version("v4"),
+					manifest.Version("v5", manifest.Loosened()),
+				)),
+			},
+			err: "manifest: kind Hours: v5 " + loosened +
+				"stop listing v4 and mark v3 with manifest.Written, or drop manifest.Loosened",
+		},
+		"loosened current version beside a removal of the oldest version": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v1", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2"),
+					manifest.Version("v3", manifest.Loosened()),
+				)),
+			},
+			err: "manifest: kind Hours: v3 " + loosened + "mark v2 with manifest.Written",
+		},
+		"loosened current version after a removal and a loosened version": {
+			opts: []manifest.RegistryOption{
+				manifest.WithRemoved("v1", "Hours"),
+				manifest.WithKinds(manifest.NewKind[Hours]("Hours",
+					manifest.Version("v1"),
+					manifest.Version("v2", manifest.Loosened()),
+					manifest.Version("v3", manifest.Loosened()),
+				)),
+			},
+			err: "manifest: kind Hours: v3 " + loosened + "drop manifest.Loosened",
+		},
+		"loosened current version after a deprecated version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1"),
+				manifest.Version("v2", manifest.Deprecated()),
+				manifest.Version("v3", manifest.Loosened()),
+			)),
+			err: "manifest: kind Hours: v3 " + loosened + "drop manifest.Loosened",
+		},
+		"loosened current version after a deprecated oldest version": {
+			opts: withKinds(manifest.NewKind[Hours]("Hours",
+				manifest.Version("v1", manifest.Deprecated()),
+				manifest.Version("v2", manifest.Loosened()),
+			)),
+			err: "manifest: kind Hours: v2 " + loosened + "drop manifest.Loosened",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg, err := manifest.NewRegistry(tc.opts...)
+			require.EqualError(t, err, tc.err)
+			assert.Nil(t, reg)
 		})
 	}
 }

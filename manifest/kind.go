@@ -64,7 +64,7 @@ type KindOption func(*kindConfig)
 
 // kindConfig holds the parts that each [KindOption] declares.
 type kindConfig struct {
-	claim         matcher.Matcher
+	claims        []matcher.Matcher
 	versions      []*versionConfig
 	decodeOptions []niceyaml.DecodeOption
 	required      bool
@@ -110,9 +110,13 @@ func Unversioned(opts ...VersionOption) KindOption {
 // claims of the kinds in the order of [WithKinds], and the first that
 // accepts the document wins. A matcher that returns an error fails the
 // document with that error.
+//
+// Each Claim adds a matcher, and the kind claims each document that one of
+// its matchers accepts. A load asks the matchers of a kind in the order
+// given. [NewRegistry] rejects a nil matcher.
 func Claim(m matcher.Matcher) KindOption {
 	return func(c *kindConfig) {
-		c.claim = m
+		c.claims = append(c.claims, m)
 	}
 }
 
@@ -220,9 +224,14 @@ func KindName(name string) VersionOption {
 	}
 }
 
-// Written is a [VersionOption] that marks the version that a rewrite
-// writes. For a kind without the mark, a rewrite writes the oldest
-// version.
+// Written is a [VersionOption] that marks an older version as the version
+// that a rewrite writes. Without the mark, a rewrite writes the current
+// version, the last version of the kind. An author marks an older version
+// while users might go back to a release that does not read the current
+// one. A rewrite then writes files that the older release reads. The mark
+// stays on its version when the author adds a newer one. [NewRegistry]
+// rejects the mark on the current version, which a rewrite writes without
+// it.
 func Written() VersionOption {
 	return func(c *versionConfig) {
 		c.written = true
@@ -231,7 +240,10 @@ func Written() VersionOption {
 
 // Loosened is a [VersionOption] that marks a version whose schema admits
 // more than its release did, because a step stopped removing a value.
-// [NewRegistry] rejects [Written] on such a version.
+// [NewRegistry] rejects [Written] on such a version. It also rejects
+// Loosened on the current version of a kind whose versions do not carry
+// Written, when the kind lists an older version. A rewrite of such a kind
+// moves each document of the older version to the current one.
 func Loosened() VersionOption {
 	return func(c *versionConfig) {
 		c.loosened = true

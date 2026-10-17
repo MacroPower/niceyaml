@@ -65,9 +65,9 @@ func TestPlan_Apply_ReadOnlyFile(t *testing.T) {
 			tc.change(t, path)
 
 			res, err := plan.Apply(t.Context())
-			require.NoError(t, err)
-			require.ErrorIs(t, res.Err(), manifest.ErrReadOnly)
-			assert.Equal(t, config+"/"+tc.err, niceyaml.FormatError(res.Err()))
+			require.ErrorIs(t, err, manifest.ErrReadOnly)
+			assert.Equal(t, res.Err(), err)
+			assert.Equal(t, config+"/"+tc.err, niceyaml.FormatError(err))
 			assert.Equal(t, hoursDoc, yamltest.ReadFile(t, path))
 		})
 	}

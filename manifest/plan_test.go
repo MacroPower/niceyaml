@@ -2,6 +2,7 @@ package manifest_test
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -132,7 +133,7 @@ func TestRegistry_PlanMigration(t *testing.T) {
 			summary: "1 file to migrate, nothing written",
 		},
 		"removal": {
-			opts: drinkOptions(true),
+			opts: drinkOptions(false),
 			files: map[string]string{
 				"drink.yaml": drinkDoc + stringtest.LinesLF(
 					"  # Matches the brand palette.",
@@ -157,7 +158,7 @@ func TestRegistry_PlanMigration(t *testing.T) {
 			summary: "1 file to migrate, nothing written",
 		},
 		"quoted type fields": {
-			opts: drinkOptions(true),
+			opts: drinkOptions(false),
 			files: map[string]string{
 				"drink.yaml": stringtest.LinesLF(
 					`apiVersion: "cafe.jacobcolvin.com/v1beta1" # since 2024`,
@@ -206,7 +207,7 @@ func TestRegistry_PlanMigration(t *testing.T) {
 			warns:   "config: 2 warnings",
 		},
 		"step error blocks the file": {
-			opts:    drinkOptions(true),
+			opts:    drinkOptions(false),
 			files:   map[string]string{"drink.yaml": drinkDoc + "  size: XL\n"},
 			blocked: []string{"config/drink.yaml"},
 			summary: "1 file not migrated, nothing written",
@@ -229,6 +230,64 @@ func TestRegistry_PlanMigration(t *testing.T) {
 			summary: "1 file to migrate, 1 document not migrated, nothing written",
 			err:     `config/menu.yaml:20:7: $.kind: unknown kind "Menuitem"`,
 		},
+		"up-to-date document beside one that migrates": {
+			opts: drinkOptions(false),
+			files: map[string]string{
+				"drink.yaml": drinkDoc + stringtest.LinesLF(
+					"  size: S",
+					"---",
+					"apiVersion: cafe.jacobcolvin.com/v1",
+					"kind: Drink",
+				),
+			},
+			headers: []string{
+				"config/drink.yaml: document 1: Drink from cafe.jacobcolvin.com/v1beta1 to cafe.jacobcolvin.com/v1",
+			},
+			afters: []string{stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Drink",
+				"metadata:",
+				"  name: kaffe",
+				"spec:",
+				"  size: small",
+				"---",
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Drink",
+			)},
+			summary: "1 file to migrate, nothing written",
+		},
+		"blocked file beside a document that fails to route": {
+			opts: drinkOptions(false),
+			files: map[string]string{
+				"a.yaml": drinkDoc + "  size: XL\n",
+				"b.yaml": drinkDoc + stringtest.LinesLF(
+					"  size: S",
+					"---",
+					"apiVersion: cafe.jacobcolvin.com/v9",
+					"kind: Drink",
+				),
+			},
+			headers: []string{
+				stringtest.JoinLF(
+					"config/b.yaml: document 1: Drink from cafe.jacobcolvin.com/v1beta1 to cafe.jacobcolvin.com/v1",
+					"config/b.yaml: 1 document not migrated",
+				),
+			},
+			afters: []string{stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Drink",
+				"metadata:",
+				"  name: kaffe",
+				"spec:",
+				"  size: small",
+				"---",
+				"apiVersion: cafe.jacobcolvin.com/v9",
+				"kind: Drink",
+			)},
+			blocked: []string{"config/a.yaml"},
+			summary: "1 file to migrate, 1 document not migrated, 1 file not migrated, nothing written",
+			err:     "config: 2 errors",
+		},
 		"up to date": {
 			opts:    cafeOptions(),
 			files:   map[string]string{"cafe.yaml": cafeDoc},
@@ -242,7 +301,7 @@ func TestRegistry_PlanMigration(t *testing.T) {
 			summary: "1 file to migrate, nothing written",
 		},
 		"type fields of an unversioned document": {
-			opts: adoptOptions(true),
+			opts: adoptOptions(),
 			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
 				"# Café Yamüll, the main room.",
 				"name: yamull",
@@ -282,7 +341,7 @@ func TestRegistry_PlanMigration(t *testing.T) {
 			summary: "1 file to migrate, nothing written",
 		},
 		"removal by a version newer than the written one in strict mode": {
-			opts:    drinkOptions(false),
+			opts:    drinkOptions(true),
 			files:   map[string]string{"drink.yaml": colorDrinkDoc},
 			load:    []manifest.LoadOption{manifest.WithWarningsAsErrors(true)},
 			summary: "1 file up to date, nothing written",
@@ -365,7 +424,6 @@ func TestRegistry_PlanMigration_Limits(t *testing.T) {
 				manifest.WithKinds(manifest.NewKind[map[string]any]("Config",
 					manifest.Version("1"),
 					manifest.Version("2",
-						manifest.Written(),
 						manifest.Migrate(paths.Doc().Child("port"), func(ctx context.Context, n *edit.Node) error {
 							return n.Set(ctx, map[string]any{"listen": map[string]any{"port": 80}})
 						}),
@@ -455,7 +513,7 @@ func TestPlanFile_Diff(t *testing.T) {
 func TestPlanFile_Removals(t *testing.T) {
 	t.Parallel()
 
-	plan := planOf(t, drinkOptions(true), map[string]string{"drink.yaml": colorDrinkDoc},
+	plan := planOf(t, drinkOptions(false), map[string]string{"drink.yaml": colorDrinkDoc},
 		manifest.WithWarningsAsErrors(true), manifest.WithWarningFilter(func(*manifest.Warning) bool { return false }))
 	require.Len(t, plan.Files(), 1)
 
@@ -479,6 +537,68 @@ func TestPlanFile_Removals(t *testing.T) {
 	assert.NoError(t, planOf(t, cafeOptions(), map[string]string{"hours.yaml": hoursDoc}).Files()[0].Removals())
 }
 
+func TestPlanFile_After(t *testing.T) {
+	t.Parallel()
+
+	reg := manifest.MustNewRegistry(drinkOptions(false)...)
+	files := map[string]string{"drink.yaml": drinkDoc + stringtest.LinesLF("  color: red", "  size: S")}
+
+	tcs := map[string]struct {
+		// In returns the input of files and the name that messages give the
+		// file.
+		in func(t *testing.T) (manifest.Input, string)
+		// Hint reports whether the removal carries the migrate hint.
+		hint bool
+	}{
+		"file of a file system": {
+			in: func(*testing.T) (manifest.Input, string) {
+				return configFS(files), "config/drink.yaml"
+			},
+		},
+		"file of a directory": {
+			in: func(t *testing.T) (manifest.Input, string) {
+				t.Helper()
+
+				config := filepath.Join(t.TempDir(), "config")
+				yamltest.WriteFiles(t, config, files)
+
+				return manifest.Path(config), filepath.Join(config, "drink.yaml")
+			},
+			hint: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			in, file := tc.in(t)
+
+			plan, err := reg.PlanMigration(t.Context(), in)
+			require.NoError(t, err)
+			require.Len(t, plan.Files(), 1)
+
+			f := plan.Files()[0]
+			assert.Equal(t, file, f.Source().Name())
+			assert.Equal(t, stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Drink",
+				"metadata:",
+				"  name: kaffe",
+				"spec:",
+				"  size: small",
+			), string(f.After()))
+
+			removals := niceyaml.FormatError(f.Removals())
+			if tc.hint {
+				assert.Contains(t, removals, migrateHint)
+			} else {
+				assert.NotContains(t, removals, migrateHint)
+			}
+		})
+	}
+}
+
 // configOptions returns the options of a registry of one kind, Config,
 // whose documents write a version field alone, followed by extra. Version
 // 2 renames port to listen.
@@ -487,7 +607,7 @@ func configOptions(extra ...manifest.RegistryOption) []manifest.RegistryOption {
 		manifest.WithVersionOnly(paths.Doc().Child("version")),
 		manifest.WithKinds(manifest.NewKind[map[string]any]("Config",
 			manifest.Version("1"),
-			manifest.Version("2", manifest.Written(), manifest.Migrate(paths.Doc().Child("port"), rename("listen"))),
+			manifest.Version("2", manifest.Migrate(paths.Doc().Child("port"), rename("listen"))),
 		)),
 	}, extra...)
 }

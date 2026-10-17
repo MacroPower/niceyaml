@@ -23,7 +23,8 @@ type LoadOption func(*loadConfig)
 
 // loadConfig holds the settings that each [LoadOption] configures.
 type loadConfig struct {
-	filter      func(*Warning) bool
+	// The functions of WithWarningFilter, in the order given.
+	filters     []func(*Warning) bool
 	strict      bool
 	noSetChecks bool
 	// Whether the checks run for a plan. A plan migrates a document at a
@@ -44,7 +45,7 @@ func newLoadConfig(opts []LoadOption) loadConfig {
 }
 
 // WithWarningsAsErrors is a [LoadOption] that turns each warning that the
-// filter of [WithWarningFilter] keeps into an error, as
+// functions of [WithWarningFilter] keep into an error, as
 // [niceyaml.AsErrors] does. The load then fails on a deprecation, and each
 // message loses its "warning:" label. An app sets it from a flag, so a CI
 // pipeline catches a deprecated file before a release removes support
@@ -55,14 +56,19 @@ func WithWarningsAsErrors(strict bool) LoadOption {
 	}
 }
 
-// WithWarningFilter is a [LoadOption] that gives the load a function that
-// decides which warnings it keeps. The function gets each warning as a
-// [*Warning], one at a time in load order, and returns false to drop it.
-// It runs before [WithWarningsAsErrors] applies, so a dropped warning
-// never fails a strict load.
+// WithWarningFilter is a [LoadOption] that adds a function that decides
+// which warnings a load keeps. A load keeps a warning only when every such
+// function keeps it. A nil function adds nothing.
+//
+// The functions run in the order given. Each gets the warnings that the
+// functions before it keep, one at a time in load order, each as a
+// [*Warning]. It returns false to drop a warning. The functions run before
+// [WithWarningsAsErrors] applies, so a dropped warning never fails a
+// strict load. A filter that accepts a deprecated version for a while
+// matches [ErrDeprecatedVersion] with the Kind and Version of the warning.
 func WithWarningFilter(keep func(*Warning) bool) LoadOption {
 	return func(c *loadConfig) {
-		c.filter = keep
+		c.filters = append(c.filters, keep)
 	}
 }
 
@@ -189,9 +195,9 @@ type Checked struct {
 // returns. When Err returns an error, the set might lack a Required kind.
 // It might also hold a manifest with a problem that only a function of
 // WithCheck finds, such as a reference that dangles. Those functions run
-// only when the documents and the other checks across the set do not find
-// an error. They run before WithWarningsAsErrors turns warnings into
-// errors.
+// only when the load does not find an error in the files, the documents,
+// or the checks of names and counts. They run before WithWarningsAsErrors
+// turns warnings into errors.
 func (c *Checked) Set() *Set {
 	return c.set
 }
@@ -218,7 +224,6 @@ type loader struct {
 	named *niceyaml.Source
 	// The number of calls of each step that ran.
 	calls map[StepID]int
-	cfg   loadConfig
 	// The details of each directory input that did not select a file.
 	empty []string
 	files []*file
@@ -227,6 +232,7 @@ type loader struct {
 	// document.
 	byPlace map[docPlace]*docState
 	rows    []*row
+	cfg     loadConfig
 }
 
 // docPlace names a document of a load: the index of its file and its
@@ -331,7 +337,7 @@ func (l *loader) writesTypeField(doc *niceyaml.Node) bool {
 		return false
 	}
 
-	v := readField(doc, l.reg.cfg.versionField)
+	v := readTypeField(doc, l.reg.cfg.versionField, l.reg.cfg.fieldPaths())
 	if v.found || v.err != nil {
 		return true
 	}
@@ -340,7 +346,7 @@ func (l *loader) writesTypeField(doc *niceyaml.Node) bool {
 		return false
 	}
 
-	k := readField(doc, l.reg.cfg.kindField)
+	k := readTypeField(doc, l.reg.cfg.kindField, l.reg.cfg.fieldPaths())
 
 	return k.found || k.err != nil
 }
@@ -409,8 +415,8 @@ func (l *loader) docOf(r *row) *docState {
 }
 
 // finishRows returns rows in load order, and wraps each warning in a
-// [*Warning]. It applies the filter of [WithWarningFilter] and the strict
-// mode of [WithWarningsAsErrors] to the warnings.
+// [*Warning]. It applies the functions of [WithWarningFilter] and the
+// strict mode of [WithWarningsAsErrors] to the warnings.
 func (l *loader) finishRows(rows []*row) []*row {
 	slices.SortStableFunc(rows, compareRows)
 
@@ -421,7 +427,7 @@ func (l *loader) finishRows(rows []*row) []*row {
 			w := l.warningOf(r)
 			wrapped := wrapIn(r.err, w)
 
-			if l.cfg.filter != nil && !l.cfg.filter(w) {
+			if !l.keeps(w) {
 				continue
 			}
 
@@ -438,8 +444,20 @@ func (l *loader) finishRows(rows []*row) []*row {
 	return out
 }
 
+// keeps reports whether every function of [WithWarningFilter] keeps w.
+// The functions run in order, and the first that drops w ends the check.
+func (l *loader) keeps(w *Warning) bool {
+	for _, keep := range l.cfg.filters {
+		if keep != nil && !keep(w) {
+			return false
+		}
+	}
+
+	return true
+}
+
 // wrapWarning returns the warning of r wrapped in a [*Warning]. It does
-// not apply the filter or the strict mode.
+// not apply the filters or the strict mode.
 func (l *loader) wrapWarning(r *row) error {
 	return wrapIn(r.err, l.warningOf(r))
 }

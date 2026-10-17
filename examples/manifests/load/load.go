@@ -79,13 +79,13 @@ var (
 				),
 			),
 			// A kind lists its versions oldest first, and its Go type reads
-			// the last. Written must mark a version newer than each
-			// deprecated one, or MustNewRegistry panics.
+			// the last. A rewrite moves each document off the deprecated
+			// version to the last version.
 			manifest.NewKind[Hours]("Hours",
 				manifest.Version("cafe.jacobcolvin.com/v1alpha1",
 					manifest.Deprecated("cafe 2.0 removes cafe.jacobcolvin.com/v1alpha1"),
 				),
-				manifest.Version("cafe.jacobcolvin.com/v1", manifest.Written()),
+				manifest.Version("cafe.jacobcolvin.com/v1"),
 			),
 		),
 		manifest.WithCheck(featuredOnMenu),
@@ -142,16 +142,16 @@ func main() {
 	fmt.Println("\nAccept a deprecation with a filter:")
 
 	// A team that accepts the deprecated version of the hours for a while
-	// drops the warning about it with a filter. The filter matches the kind,
-	// the version, and the apiVersion path. Every other warning about the
-	// hours stays, such as one about a deprecated field. The filter runs
-	// before strict mode, so the strict load passes and reads the hours from
-	// v1alpha1.
+	// drops the warning about it with a filter. The filter matches the
+	// warning about a deprecated version by its sentinel, its kind, and its
+	// version. Every other warning about the hours stays, such as one about
+	// a deprecated field. The filter runs before strict mode, so the strict
+	// load passes and reads the hours from v1alpha1.
 	acceptV1alpha1 := manifest.WithWarningFilter(func(w *manifest.Warning) bool {
-		deprecated := w.Kind == "Hours" && w.Version == "cafe.jacobcolvin.com/v1alpha1" &&
-			w.Path.String() == "$.apiVersion"
+		accepted := errors.Is(w, manifest.ErrDeprecatedVersion) && w.Kind == "Hours" &&
+			w.Version == "cafe.jacobcolvin.com/v1alpha1"
 
-		return !deprecated
+		return !accepted
 	})
 
 	accepted, err := registry.Load(ctx, config, strict, acceptV1alpha1)

@@ -190,7 +190,7 @@ func (d *docState) removals(removed []edit.Removal, v *versionEntry) {
 			details = append(details, d.hint()...)
 		}
 
-		w := d.doc.Bind(newWarning(ErrRemoved, msg, niceyaml.AtPath(rm.Path), niceyaml.AtRange(rm.Range),
+		w := d.doc.Bind(newWarning([]error{ErrRemoved}, msg, niceyaml.AtPath(rm.Path), niceyaml.AtRange(rm.Range),
 			niceyaml.WithDetails(details...)))
 
 		if written {

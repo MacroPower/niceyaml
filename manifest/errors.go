@@ -11,10 +11,38 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-// Each problem that a load, a plan, or Apply reports matches one of these
-// sentinels with [errors.Is]. A program can thus branch on the cause
-// without reading the message. [niceyaml.IsInvalid] reports each problem
-// that the files of the user cause.
+// Each of these sentinels names a cause that this package checks, and
+// [errors.Is] finds it in each problem with that cause. A program can thus
+// branch on the cause without reading the message. Every other problem of a
+// load, a plan, or [Plan.Apply] keeps the errors of its own cause:
+//
+//   - A document that does not parse matches [niceyaml.ErrSyntax]. A
+//     document past the depth limit of its Source does not parse either,
+//     but its error matches [niceyaml.ErrLimit] instead.
+//   - A value that does not decode matches [niceyaml.ErrDecode]. A key that
+//     the Go type does not declare also matches [niceyaml.ErrUnknownField].
+//   - A value that breaks a schema matches [schema.ErrViolation], and
+//     [errors.As] finds its [*schema.Violation].
+//   - A schema that does not load or compile matches [schema.ErrLoad] or
+//     [schema.ErrCompile].
+//   - A file that a load cannot read keeps the error of the read, such as
+//     [fs.ErrPermission]. A link to a file that does not exist matches
+//     [fs.ErrNotExist].
+//   - A file or a new text that exceeds a size limit of its Source, such
+//     as that of [niceyaml.WithByteLimit] or [niceyaml.WithDepthLimit],
+//     matches [niceyaml.ErrLimit]. A document whose aliases expand past the
+//     alias limit of [niceyaml.WithAliasLimit] matches
+//     [niceyaml.ErrExcessiveAliasing], so a program that refuses oversized
+//     input tests for both.
+//   - An error that a step, a validator, a matcher of [WithIgnore] or
+//     [Claim], or a function of [WithCheck] returns keeps what it matched.
+//     A panic in a step, a validator, or a function of WithCheck wraps a
+//     [*niceyaml.PanicError].
+//   - A file that Apply has not reached when its context ends matches
+//     ctx.Err().
+//
+// [niceyaml.IsInvalid] reports each problem that the files of the user
+// cause.
 var (
 	// ErrEncoding indicates a text that is not UTF-8, such as a file with a
 	// byte that UTF-8 does not allow or one in UTF-16.
@@ -26,11 +54,19 @@ var (
 	ErrOutsideLink = errors.New("link leads outside the input directory")
 
 	// ErrMissingTypeField indicates a document without one of the type
-	// fields, or without both.
+	// fields, or without both. It also indicates a type field that is not
+	// text, or a scalar that go-yaml's decoder reads as another string than
+	// the text that the document writes, such as 1.10 as "1.1".
 	ErrMissingTypeField = errors.New("missing type field")
 
 	// ErrFieldAlias indicates a type field or a name whose path passes
-	// through an alias or a `<<` merge key.
+	// through an alias or a `<<` merge key. It also indicates such a path
+	// through a key that a later merge key from a reference document might
+	// replace. A path through a key whose place a decode reads from another
+	// key of its mapping matches it too, such as 0x10 for 16. So does a path
+	// through a key before a later key that does not decode, such as
+	// "!!bool x", because the decode might read the later key in its place.
+	// A later merge key that brings in such a key counts too.
 	ErrFieldAlias = errors.New("field comes from an alias")
 
 	// ErrMixedLayers indicates the layers of a merged document that write
@@ -65,10 +101,6 @@ var (
 	// [Singleton] marks.
 	ErrExtraManifest = errors.New("more than one manifest")
 
-	// ErrReferenceEdit indicates a document whose steps edit a reference
-	// document, which a rewrite cannot change.
-	ErrReferenceEdit = errors.New("steps edit a reference document")
-
 	// ErrReadOnly indicates a file that Apply cannot rewrite.
 	ErrReadOnly = errors.New("read-only file")
 
@@ -79,7 +111,18 @@ var (
 	// ErrDeprecated indicates the warning about a deprecated version, kind,
 	// field, or value. It is [schema.ErrDeprecated], which the warning of
 	// a schema check about a deprecated field or value matches.
+	// [ErrDeprecatedVersion] and [ErrDeprecatedKind] tell the warning about
+	// a version and the warning about a kind apart from the others.
 	ErrDeprecated = schema.ErrDeprecated
+
+	// ErrDeprecatedVersion indicates the warning about a version, or the
+	// unversioned layout, that [Deprecated] marks. The warning also matches
+	// [ErrDeprecated].
+	ErrDeprecatedVersion = errors.New("deprecated version")
+
+	// ErrDeprecatedKind indicates the warning about a kind whose current
+	// version [Deprecated] marks. The warning also matches [ErrDeprecated].
+	ErrDeprecatedKind = errors.New("deprecated kind")
 
 	// ErrRemoved indicates the warning about a value that a step removed.
 	ErrRemoved = errors.New("removed by a migration")
@@ -108,10 +151,12 @@ func newProblem(mark error, msg string, opts ...niceyaml.ErrorOption) error {
 	return niceyaml.Invalid(&problemError{msg: msg, marks: []error{mark}}, opts...)
 }
 
-// newWarning returns the warning msg, which matches mark, at the location
-// of opts.
-func newWarning(mark error, msg string, opts ...niceyaml.ErrorOption) error {
-	return hook.MarkWarning(newProblem(mark, msg, opts...)) //nolint:wrapcheck // The mark adds no text.
+// newWarning returns the warning msg, which matches each of marks, at the
+// location of opts.
+func newWarning(marks []error, msg string, opts ...niceyaml.ErrorOption) error {
+	problem := niceyaml.Invalid(&problemError{msg: msg, marks: marks}, opts...)
+
+	return hook.MarkWarning(problem) //nolint:wrapcheck // The mark adds no text.
 }
 
 // Warning describes one warning of a load. Each warning that a load
@@ -124,8 +169,8 @@ func newWarning(mark error, msg string, opts ...niceyaml.ErrorOption) error {
 // severity of its own, so a warning stays a warning inside it.
 type Warning struct { //nolint:errname // A Warning is no error, though it wraps one.
 	// Err holds the warning that the check produced, with its message
-	// unchanged. [errors.Is] finds [ErrDeprecated] or [ErrRemoved] through
-	// it.
+	// unchanged. [errors.Is] finds a sentinel such as [ErrDeprecatedVersion]
+	// or [ErrRemoved] through it.
 	Err error
 	// File is the name of the file that messages show, such as
 	// "config/menu.yaml". It is empty for a warning that does not bind in a

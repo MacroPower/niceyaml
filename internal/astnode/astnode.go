@@ -646,6 +646,37 @@ func IsTaggedNull(node ast.Node) bool {
 	}
 }
 
+// ScalarText returns the string that a decode reads from node, a scalar
+// under its anchors and tags, before a tag converts it. That string is the
+// value of the token of the scalar, with its quotes, its escapes, and its
+// folding resolved. The token of a block scalar is its header, such as
+// "|-". The string of a block scalar is its content instead, with the
+// indentation, the folding, and the chomping of the block applied.
+// ScalarText reports false for a node that does not hold a scalar: nil, a
+// mapping, a sequence, an alias, and the null of an entry or an item
+// without a value.
+func ScalarText(node ast.Node) (string, bool) {
+	switch n := Content(node).(type) {
+	case nil, *ast.MappingNode, *ast.MappingValueNode, *ast.SequenceNode, *ast.AliasNode:
+		return "", false
+
+	case *ast.LiteralNode:
+		if n.Value == nil {
+			return "", true
+		}
+
+		return n.Value.Value, true
+
+	default:
+		tk := Token(n)
+		if tk == nil || tk.Type == token.ImplicitNullType {
+			return "", false
+		}
+
+		return tk.Value, true
+	}
+}
+
 // IsScalar reports whether node is any node but a mapping, a sequence, or
 // nil. A node that wraps another, such as an anchor or a tag, counts as
 // a scalar whatever it holds.

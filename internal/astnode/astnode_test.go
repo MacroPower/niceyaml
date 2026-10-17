@@ -860,6 +860,45 @@ func TestIsTaggedNull(t *testing.T) {
 	}
 }
 
+func TestScalarText(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  string
+		// Whether the value holds a scalar.
+		scalar bool
+	}{
+		"plain scalar":          {input: "a: b c\n", want: "b c", scalar: true},
+		"folded plain scalar":   {input: "a: b\n  c\n", want: "b c", scalar: true},
+		"double-quoted scalar":  {input: `a: "b\tc"` + "\n", want: "b\tc", scalar: true},
+		"single-quoted scalar":  {input: "a: 'it''s'\n", want: "it's", scalar: true},
+		"literal block scalar":  {input: "a: |-\n  b\n  c\n", want: "b\nc", scalar: true},
+		"folded block scalar":   {input: "a: >\n  b\n  c\n", want: "b c\n", scalar: true},
+		"empty block scalar":    {input: "a: |\n", want: "", scalar: true},
+		"tagged and anchored":   {input: "a: &x !!str |-\n  b\n", want: "b", scalar: true},
+		"integer":               {input: "a: 0x10\n", want: "0x10", scalar: true},
+		"null":                  {input: "a: ~\n", want: "~", scalar: true},
+		"entry without a value": {input: "a:\n"},
+		"mapping":               {input: "a: {b: 1}\n"},
+		"sequence":              {input: "a: [1]\n"},
+		"alias":                 {input: "x: &x 1\na: *x\n"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			entries, ok := astnode.Entries(parse(t, tc.input))
+			require.True(t, ok)
+
+			got, scalar := astnode.ScalarText(entries[len(entries)-1].Value)
+			assert.Equal(t, tc.scalar, scalar)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestIsScalar(t *testing.T) {
 	t.Parallel()
 

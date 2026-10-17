@@ -49,9 +49,10 @@ var (
 		manifest.WithKinds(manifest.NewKind[MenuItem]("MenuItem",
 			// Documents of v1beta1 write the kind as Dish, its old name.
 			manifest.Version("cafe.jacobcolvin.com/v1beta1", manifest.KindName("Dish")),
+			// A rewrite writes the last version. An older version that carries
+			// manifest.Written keeps rewrites there while users might go back
+			// to a release that does not read the last one.
 			manifest.Version("cafe.jacobcolvin.com/v1",
-				// A rewrite moves each document to the version that Written marks.
-				manifest.Written(),
 				manifest.Schema(schema.FileFS(files, "menu-item.v1.json")),
 				manifest.Migrate(spec.Child("diet"), func(_ context.Context, n *edit.Node) error {
 					return n.SetKey("dietary")
@@ -145,19 +146,12 @@ func main() {
 
 	fmt.Println("\nApply the plan:")
 
-	// Apply returns an error only when its context has ended before the
-	// first file. It continues past each file that it cannot write, such as
-	// one that changed after the plan read it. Err reports those files.
+	// Apply continues past each file that it cannot write, such as one that
+	// changed after the plan read it. Its error names each such file and
+	// each problem that remains in the files.
 	res, err := plan.Apply(ctx)
-	if err != nil {
-		lipgloss.Println(p.PrintError(err))
-
-		return
-	}
-
 	fmt.Println(res.Summary())
 
-	err = res.Err()
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
 

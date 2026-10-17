@@ -162,7 +162,8 @@ func (p *Plan) Sources() []*niceyaml.Source {
 }
 
 // Summary returns a line that counts the files of the plan, as in
-// "2 files to migrate, 1 up to date, nothing written".
+// "2 files to migrate, 1 up to date, nothing written". The line also
+// counts the documents that fail to route as not migrated.
 func (p *Plan) Summary() string {
 	return p.counts.text("to migrate") + ", nothing written"
 }
@@ -203,9 +204,9 @@ func (f *PlanFile) After() []byte {
 // Removals returns the values that the rewrite deletes from the file, or
 // nil when the rewrite does not delete a value. It returns them as a
 // [*LoadError] of the warnings that a load reports for them, bound in the
-// text that the plan read. Removals does not apply the filter of
-// [WithWarningFilter] or [WithWarningsAsErrors], so each value that a
-// rewrite deletes has a row that says so.
+// text that the plan read. Removals does not apply [WithWarningFilter] or
+// [WithWarningsAsErrors], so each value that a rewrite deletes has a row
+// that says so.
 func (f *PlanFile) Removals() error {
 	return newLoadError(namedSource(f.f.name), f.removals)
 }
@@ -214,8 +215,9 @@ func (f *PlanFile) Removals() error {
 // in `config/hours.yaml: Hours "weekday" from cafe.jacobcolvin.com/v1alpha1
 // to cafe.jacobcolvin.com/v1`. An indented row below the line of a
 // document names each value that the rewrite deletes, with the reason of
-// its step. When the file holds documents that do not migrate, a last
-// line counts them.
+// its step. When the file holds documents that fail to route, which the
+// rewrite leaves as they are, a last line counts them as not migrated. A
+// document that is up to date does not get a line.
 func (f *PlanFile) Header() string {
 	var b strings.Builder
 
@@ -448,7 +450,9 @@ func checkLimits(src *niceyaml.Source, after string) error {
 
 // text returns the line of c, where verb names what happens to the files
 // that migrate, as "to migrate" or "migrated". The first count of files
-// names them, as in "2 files migrated, 1 up to date".
+// names them, as in "2 files migrated, 1 up to date". So does the first
+// count of files after the count of documents, as in "1 file migrated, 1
+// document not migrated, 1 file not migrated".
 func (c counts) text(verb string) string {
 	var parts []string
 
@@ -471,6 +475,7 @@ func (c counts) text(verb string) string {
 
 	if c.notMigrated > 0 {
 		parts = append(parts, quantity.Plural(c.notMigrated, "document")+" not migrated")
+		named = false
 	}
 
 	files(c.blocked, "not migrated")

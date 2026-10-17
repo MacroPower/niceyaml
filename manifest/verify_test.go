@@ -253,7 +253,7 @@ func TestRegistry_Verify_Deprecations(t *testing.T) {
 			current: `{"properties": {"spec": {"properties": {"notes": {"deprecated": true}}}}}`,
 			want: stringtest.JoinLF(
 				"MenuItem v2: $.spec.notes: deprecated, but v1 requires it",
-				"`-- tag the field jsonschema:\"deprecated=false\" until v2 carries manifest.Written",
+				"`-- tag the field jsonschema:\"deprecated=false\" until manifest.Written leaves v1",
 			),
 		},
 		"deprecated where the written version leaves it optional": {
@@ -271,8 +271,6 @@ func TestRegistry_Verify_Deprecations(t *testing.T) {
 
 			if tc.written != "" {
 				first = append(first, manifest.Written(), manifest.Schema(schema.Embedded([]byte(tc.written))))
-			} else {
-				second = append(second, manifest.Written())
 			}
 
 			reg := manifest.MustNewRegistry(manifest.WithKinds(manifest.NewKind[MenuItem]("MenuItem",

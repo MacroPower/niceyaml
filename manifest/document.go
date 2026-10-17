@@ -102,8 +102,8 @@ func (d *docState) check(ctx context.Context) {
 
 	reg := d.l.reg
 
-	if reg.cfg.ignore != nil {
-		ok, err := reg.cfg.ignore.Match(ctx, doc)
+	for _, m := range reg.cfg.ignores {
+		ok, err := m.Match(ctx, doc)
 		if err != nil {
 			d.fail(doc.Bind(err))
 
@@ -238,7 +238,7 @@ func (d *docState) routeDoc(ctx context.Context) bool {
 		return false
 	}
 
-	rt.versionTxt = readField(doc, cfg.versionField)
+	rt.versionTxt = readTypeField(doc, cfg.versionField, cfg.fieldPaths())
 	if rt.versionTxt.err != nil {
 		d.fail(rt.versionTxt.err)
 
@@ -246,7 +246,7 @@ func (d *docState) routeDoc(ctx context.Context) bool {
 	}
 
 	if !cfg.versionOnly {
-		rt.kindTxt = readField(doc, cfg.kindField)
+		rt.kindTxt = readTypeField(doc, cfg.kindField, cfg.fieldPaths())
 		if rt.kindTxt.err != nil {
 			d.fail(rt.kindTxt.err)
 
@@ -405,16 +405,7 @@ func (d *docState) adopt(ctx context.Context) bool {
 	)
 
 	for _, e := range reg.kinds {
-		if e.kind.cfg.claim == nil {
-			continue
-		}
-
-		warnings := niceyaml.NewWarnings()
-
-		ok, err := e.kind.cfg.claim.Match(warnings.Context(ctx), doc)
-
-		d.warn(warnings.Err())
-
+		ok, err := d.claims(ctx, e)
 		if err != nil {
 			d.fail(err)
 
@@ -430,7 +421,7 @@ func (d *docState) adopt(ctx context.Context) bool {
 
 	if entry == nil && !hasVersion {
 		for _, e := range reg.kinds {
-			if e.kind.cfg.claim == nil && (e.versions[0].cfg.unversioned || e.removedUnversioned != nil) {
+			if len(e.kind.cfg.claims) == 0 && (e.versions[0].cfg.unversioned || e.removedUnversioned != nil) {
 				entry = e
 
 				break
@@ -476,6 +467,27 @@ func (d *docState) adopt(ctx context.Context) bool {
 	return true
 }
 
+// claims reports whether one of the matchers that [Claim] gives the kind
+// of e accepts the document. It asks them in order, and stops at the first
+// that accepts the document or returns an error. The warnings of each
+// match join the warnings of the document.
+func (d *docState) claims(ctx context.Context, e *kindEntry) (bool, error) {
+	for _, m := range e.kind.cfg.claims {
+		warnings := niceyaml.NewWarnings()
+
+		ok, err := m.Match(warnings.Context(ctx), d.doc)
+
+		d.warn(warnings.Err())
+
+		if err != nil || ok {
+			//nolint:wrapcheck // The error of the matcher fails the document.
+			return ok, err
+		}
+	}
+
+	return false, nil
+}
+
 // article returns name after "a", or after "an" when name starts with a
 // vowel.
 func article(name string) string {
@@ -515,7 +527,7 @@ func (d *docState) checkLayers() error {
 				continue
 			}
 
-			if r := readField(n, p); r.found {
+			if r := readTypeField(n, p, reg.cfg.fieldPaths()); r.found {
 				writers = append(writers, writer{node: n, read: r})
 			}
 		}
@@ -558,12 +570,13 @@ func (d *docState) deprecations() {
 
 	if v.cfg.deprecated && v != current {
 		details := append(detailsOf(v.cfg.details), d.hint()...)
+		marks := []error{ErrDeprecatedVersion, ErrDeprecated}
 
 		if v.cfg.unversioned {
-			d.fail(newWarning(ErrDeprecated, "deprecated unversioned layout of "+entry.kind.name,
+			d.fail(newWarning(marks, "deprecated unversioned layout of "+entry.kind.name,
 				startOf(d.doc), niceyaml.WithDetails(details...)))
 		} else {
-			d.fail(newWarning(ErrDeprecated, fmt.Sprintf("deprecated version %q", v.cfg.name),
+			d.fail(newWarning(marks, fmt.Sprintf("deprecated version %q", v.cfg.name),
 				niceyaml.AtPath(reg.cfg.versionField), niceyaml.WithDetails(details...)))
 		}
 
@@ -580,7 +593,9 @@ func (d *docState) deprecations() {
 			at = niceyaml.AtPath(reg.cfg.versionField)
 		}
 
-		d.fail(newWarning(ErrDeprecated, fmt.Sprintf("deprecated kind %q", entry.kind.name),
+		marks := []error{ErrDeprecatedKind, ErrDeprecated}
+
+		d.fail(newWarning(marks, fmt.Sprintf("deprecated kind %q", entry.kind.name),
 			at, niceyaml.WithDetails(detailsOf(current.cfg.details)...)))
 	}
 }
@@ -699,7 +714,7 @@ func (d *docState) readName(ctx context.Context) {
 		return
 	}
 
-	d.nameRead = readField(d.work, cfg.nameField)
+	d.nameRead = readField(d.work, cfg.nameField, cfg.fieldPaths())
 	if d.nameRead.err != nil || !d.nameRead.found {
 		return
 	}

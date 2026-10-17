@@ -231,8 +231,8 @@ func verifyDeprecations(entry *kindEntry, compiled map[*versionEntry]*jsonschema
 		if p.deprecated && required[p.path.String()] {
 			errs = append(errs, authorError(
 				fmt.Sprintf("%s: %s: deprecated, but %s requires it", name, p.path, written.label()),
-				fmt.Sprintf("tag the field jsonschema:%q until %s carries manifest.Written",
-					"deprecated=false", current.label()),
+				fmt.Sprintf("tag the field jsonschema:%q until manifest.Written leaves %s",
+					"deprecated=false", written.label()),
 			))
 		}
 	}
