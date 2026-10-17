@@ -17,19 +17,23 @@ import (
 // match is one node a path resolved to. The entry field holds the mapping
 // entry that holds the node when the last selector picked a mapping key.
 // The seq field holds the sequence that holds the node when the last
-// selector picked an element, and the index field holds the index of the
-// node there. A `~` selector that selects the node the path before it
-// does keeps all three. The segs field holds the selectors that name the
-// node alone. Those are the ones applied so far, with a `[*]` replaced by
-// the index it matched, a `.*` by the name of the entry it matched, and a
-// `..name` or `..*` by the selectors down to the node it found.
+// selector picked an element. The index field holds the index of the node
+// in that sequence. A `~` selector that selects the node the path before
+// it does keeps all three fields.
+//
+// The segs field holds the selectors that name the node alone. They are
+// the selectors that the resolve has applied so far, and the resolve
+// replaces each wildcard with the selectors that name what it matched. A
+// `[*]` becomes the index it matched, and a `.*` becomes the name of the
+// entry it matched. A `..name` or `..*` becomes the selectors down to the
+// node it found.
 //
 // The order field holds one place for each step of the walk that reached
-// the node. A step into a mapping adds the index of the entry, a step into
-// a sequence adds the index of the element, and a step to the key of an
+// the node. A step into a mapping adds the index of the entry, and a step
+// into a sequence adds the index of the element. A step to the key of an
 // entry adds -1, so a key comes before its value. Comparing two orders
-// puts the matches in document order along the path. An entry a `<<` merge
-// key brings in takes the place of that merge key, and a node reached
+// puts the matches in document order along the path. An entry that a `<<`
+// merge key brings in takes the place of that merge key. A node reached
 // through an alias takes the place of the alias.
 type match struct {
 	node  ast.Node
@@ -40,13 +44,13 @@ type match struct {
 	index int
 }
 
-// with returns the match at node that extends m, with seg appended to its
-// selectors and ord to its order. It appends in place, so a resolve of a
-// path of k selectors costs time in k rather than in k squared. The
-// result may thus share the spare capacity of m, so only one match may
-// extend it. A selector that reaches several nodes from m clips m first,
-// so each of its matches copies the selectors and the order of m rather
-// than writing past their end.
+// with returns the match at node that extends m. It appends seg to the
+// selectors of m and ord to the order of m, in place. A resolve of a path
+// of k selectors thus takes time in proportion to k rather than to k
+// squared. The result can share the spare capacity of m, so at most one
+// match can safely extend m. A selector that reaches several nodes from m
+// clips m first. Each of its matches then copies the selectors and the
+// order of m rather than writing past their end.
 func (m match) with(node ast.Node, entry *ast.MappingValueNode, seg segment, ord ...int) match {
 	return match{node: node, entry: entry, segs: append(m.segs, seg), order: append(m.order, ord...)}
 }
@@ -66,11 +70,11 @@ func (m match) parent() astnode.Parent {
 	return astnode.Parent{Entry: m.entry, Sequence: m.seq, Index: m.index}
 }
 
-// key returns the match for the `~` selector applied to m. That is the key
-// of the entry m holds, or m itself when m holds no entry or its entry has
-// no key. A `~` on a sequence element or the root thus selects what the
-// path before it does. The `~` joins the selectors either way, as the path
-// wrote it.
+// key returns the match for the `~` selector applied to m. The match is
+// the key of the entry that m holds. It is m itself when m does not hold
+// an entry or its entry does not have a key. A `~` on a sequence element
+// or the root thus selects what the path before it does. Either way, key
+// appends the `~` to the selectors, as the path wrote it.
 //
 // The match drops the `?` of an explicit key but keeps the anchors and
 // tags on the key, as a match of a value keeps those on the value. A tag
@@ -101,13 +105,13 @@ func (m match) key() match {
 // resolver walks a document for the selectors of a [Path]. Its targets map
 // holds the anchor each alias refers to. The enclosed set holds each alias
 // that lies inside the content of the anchor it refers to, other than one
-// a `<<` merge key names. The decoder reads such an alias as null, so it
-// has no content.
+// that a `<<` merge key names. The decoder reads such an alias as null, so
+// the alias does not resolve.
 //
-// The keys map holds the [*mappingKeys] of each mapping a lookup or a
-// recursive walk has read, so a later lookup or walk in that mapping finds
-// a key without reading its entries again. A [Resolver] may serve several
-// goroutines, so the map is a [sync.Map].
+// The keys map holds the [*mappingKeys] of each mapping that a lookup or a
+// recursive walk has read. A later lookup or walk in that mapping thus
+// finds a key without reading its entries again. A [Resolver] can serve
+// several goroutines, so the map is a [sync.Map].
 //
 // The nodes field counts the nodes of the document. [resolver.excessive]
 // weighs the matches of a selector against that count, and
@@ -124,14 +128,16 @@ type resolver struct {
 
 // mappingKeys indexes the entries of one mapping for [resolver.lookup] and
 // [recursiveWalk.descend]. The names map holds the index of the last entry
-// with each key name, and the merges slice holds the index of each `<<`
-// entry, in document order. The names map leaves out an entry whose key
-// has no name, as [resolver.keyName] reports it, so no lookup finds that
-// entry. A merge key and a real key whose text is `<<`, such as an alias
-// key, are separate keys to the decoder, so names holds the last merge key
-// under `<<` only when no real key of the mapping has that name.
-// [resolver.lookup] selects that merge key only when no merge source holds
-// such a real key either.
+// with each key name. The merges slice holds the index of each `<<` entry,
+// in document order. The names map leaves out an entry whose key does not
+// have a name, as [resolver.keyName] reports it, so a lookup never finds
+// that entry.
+//
+// The decoder keeps a merge key apart from a real key whose text is `<<`,
+// such as an alias key. The names map thus holds the last merge key under
+// `<<` only when the mapping does not hold a real key of that name.
+// [resolver.lookup] selects that merge key only when it does not find such
+// a real key in any merge source either.
 type mappingKeys struct {
 	names  map[string]int
 	merges []int
@@ -139,7 +145,8 @@ type mappingKeys struct {
 
 // mappingKeys returns the [*mappingKeys] of mapping, and reads its entries
 // the first time a lookup or walk asks for them. Two goroutines that ask
-// at once may each read the entries, and each gets the same index.
+// at the same time might each read the entries, and each gets an index
+// with the same contents.
 func (r *resolver) mappingKeys(mapping *ast.MappingNode) *mappingKeys {
 	if cached, ok := r.keys.Load(mapping); ok {
 		if keys, ok := cached.(*mappingKeys); ok {
@@ -187,19 +194,23 @@ func (k *mappingKeys) mergeAfter(i int) bool {
 
 // newResolver creates a new [*resolver] for doc.
 //
-// It binds each alias to the last anchor of its name before it in doc, which
-// is the anchor the goccy/go-yaml decoder uses for that alias when it fills
-// a map. An anchor counts from where it starts and again where its content
-// ends, so it wins over an anchor of the same name inside that content for
-// the aliases after it. The decoder reads a mapping a `<<` merge key brings
-// in again at the merge key, and so does newResolver, so the anchors of
-// that mapping count again there. An anchor on the value of a `<<` merge
-// key, or on an element of a sequence there, counts for the aliases other
-// merge keys name. It counts for an alias in a value only when no other
-// anchor of its name comes before that alias, as [anchorSet] describes.
-// Once every alias is bound, [enclosedAliases] finds the aliases that lie
-// inside the content of the anchor they refer to, and newResolver counts
-// the nodes of doc, comments included.
+// It binds each alias to the last anchor of its name before it in doc. The
+// goccy/go-yaml decoder uses that anchor for the alias when it fills a map.
+// An anchor counts from where it starts and again where its content ends.
+// For the aliases after it, the anchor thus wins over an anchor of the
+// same name inside its content.
+//
+// At each `<<` merge key, the decoder reads again each mapping that the
+// merge key brings in, and so does newResolver. The anchors of that
+// mapping thus count again there. Some anchors sit on the value of a `<<`
+// merge key or on an element of a sequence there. Such an anchor counts
+// for the aliases that other merge keys name. It counts for an alias in a
+// value only when doc does not define another anchor of its name before
+// that alias, as [anchorSet] describes.
+//
+// After it binds every alias, newResolver counts the nodes of doc,
+// comments included. It also calls [enclosedAliases] to find the aliases
+// that lie inside the content of the anchor they refer to.
 func newResolver(doc *ast.DocumentNode) *resolver {
 	b := &aliasBinder{
 		anchors: newAnchorSet(),
@@ -227,8 +238,8 @@ func newResolver(doc *ast.DocumentNode) *resolver {
 
 // enclosedAliases returns the aliases of doc that lie inside the content
 // of the anchor they refer to. The targets map holds the anchor each
-// alias refers to, and the merges set holds the aliases `<<` merge keys
-// name, which the result leaves out.
+// alias refers to. The merges set holds the aliases that `<<` merge keys
+// name, and the result leaves those aliases out.
 func enclosedAliases(
 	doc *ast.DocumentNode,
 	targets map[*ast.AliasNode]*ast.AnchorNode,
@@ -264,16 +275,18 @@ func enclosedAliases(
 	return enclosed
 }
 
-// anchorSet holds the anchors the decoder has recorded so far, in the two
-// maps the decoder keeps. The nodes map holds the last anchor of each
-// name, and the values map holds the last anchor of each name on a value
-// the decoder reads. An anchor on the value of a `<<` merge key, or on an
-// element of a sequence there, goes into the nodes map alone, since the
-// decoder reads such a value only for the mappings it merges.
+// anchorSet holds the anchors that the decoder has recorded so far, in the
+// two maps the decoder keeps. The nodes map holds the last anchor of each
+// name. The values map holds the last anchor of each name on a value that
+// the decoder reads. Some anchors sit on the value of a `<<` merge key or
+// on an element of a sequence there. Such an anchor goes into the nodes
+// map alone, because the decoder reads the value of a merge key only for
+// the mappings it merges.
 //
-// An alias in a value refers to the anchor in the values map, and to the
-// one in the nodes map when the values map holds none of its name. An
-// alias a merge key names refers to the anchor in the nodes map.
+// An alias in a value refers to the anchor in the values map. When the
+// values map does not hold an anchor of its name, the alias refers to the
+// one in the nodes map. An alias that a merge key names refers to the
+// anchor in the nodes map.
 //
 // Create instances with [newAnchorSet].
 type anchorSet struct {
@@ -286,8 +299,7 @@ func newAnchorSet() anchorSet {
 	return anchorSet{nodes: map[string]*ast.AnchorNode{}, values: map[string]*ast.AnchorNode{}}
 }
 
-// record records anchor under name in both maps. A nil name records
-// nothing.
+// record records anchor under name in both maps. It skips a nil name.
 func (s anchorSet) record(name *token.Token, anchor *ast.AnchorNode) {
 	if name == nil {
 		return
@@ -317,28 +329,30 @@ func (s anchorSet) add(other anchorSet) {
 }
 
 // aliasBinder binds aliases to anchors while [ast.Walk] visits a document in
-// order. The anchors set holds the anchors visited so far, and the targets
-// map holds the anchor each visited alias refers to. Walk visits an anchor
-// before its content, so an alias inside that content refers to the anchor
-// around it. The binder records the anchor again once it has walked the content,
-// as the decoder does, so an alias after the content refers to the anchor
-// around it rather than to one of the same name inside it.
+// order. The anchors set holds the anchors that the walk has visited so
+// far, and the targets map holds the anchor each visited alias refers to.
+// Walk visits an anchor before its content, so an alias inside that
+// content refers to the anchor around it. Like the decoder, the binder
+// records the anchor again after it walks the content. An alias after the
+// content thus refers to that anchor rather than to one of the same name
+// inside it.
 //
-// The merged map holds, for each mapping a merge key has brought in through
-// an alias, the anchors that merging it records, from
-// [aliasBinder.mergedAnchors], when that result holds for every later
-// merge. The pending map holds the other results mergedAnchors has read,
-// each with the state it depends on. The open map holds the anchored and
-// merged mappings the walk is inside of, and the ones mergedAnchors is
-// reading, so a mapping that merges itself stops there.
+// The merged map holds the anchors that merging a mapping records, from
+// [aliasBinder.mergedAnchors], for each mapping that a merge key has
+// brought in through an alias. It holds them only when that result holds
+// for every later merge. The pending map holds the other results
+// that mergedAnchors has read, each with the state it depends on. The open
+// map holds the anchored and merged mappings that the walk is inside of,
+// and the ones that mergedAnchors is reading. A mapping that merges itself
+// thus stops there.
 //
 // The watched set holds each mapping and alias that a result in the
 // pending map depends on. The version field counts the changes to the
-// state of a watched node, so a result that held at one version holds
+// state of a watched node. A result that held at one version thus holds
 // until the next, as [aliasBinder.holds] describes.
 //
-// The merges set holds each alias a `<<` merge key names that the binder
-// has bound.
+// The merges set holds each alias that a `<<` merge key names and that
+// the binder has bound.
 type aliasBinder struct {
 	anchors anchorSet
 	targets map[*ast.AliasNode]*ast.AnchorNode
@@ -354,8 +368,9 @@ type aliasBinder struct {
 // continues into the children of node. It walks the content of an anchor
 // and the entry of a `<<` merge key itself and returns nil for them.
 //
-// It returns nil for a nil node, including a typed nil a hand-built tree may
-// hold, so Walk stops rather than reading the fields behind it.
+// It returns nil for a nil node, including a typed nil that a hand-built
+// tree might hold. Walk then stops rather than reading the fields behind
+// that node.
 func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 	if astnode.IsNil(node) {
 		return nil
@@ -427,18 +442,18 @@ type mergeSource struct {
 	inline  bool
 }
 
-// findSources returns the mappings a `<<` merge key with value brings in,
-// in the order the decoder reads them. As the decoder does before it
-// reads any of them, findSources looks through the anchors, tags, and
-// aliases on value and on each element of a sequence of them. It records
-// each anchor on the way into nodes, the nodes map of an [anchorSet]. It
-// follows an alias to the anchor it is bound to, and stops at an alias it
-// has already followed. It also returns each alias it stops at because the
-// alias is not bound.
+// findSources returns the mappings that a `<<` merge key with value brings
+// in, in the order the decoder reads them. It looks through the anchors,
+// tags, and aliases on value and on each element of a sequence of them.
+// The decoder does the same before it reads any of the mappings.
+// FindSources records each anchor on the way into nodes, the nodes map of
+// an [anchorSet]. It follows an alias to the anchor that the alias is
+// bound to, and stops at an alias it has already followed. It also returns
+// each alias it stops at because the alias is not bound.
 //
 // With bind set, findSources binds each alias of value itself to the
-// anchor of its name in nodes, and walks any other node of value where the
-// decoder expects a mapping, so the aliases inside that node bind too.
+// anchor of its name in nodes. It also walks any other node of value where
+// the decoder expects a mapping, so the aliases inside that node bind too.
 func (b *aliasBinder) findSources(
 	value ast.Node, nodes map[string]*ast.AnchorNode, bind bool,
 ) ([]mergeSource, []*ast.AliasNode) {
@@ -514,9 +529,9 @@ func (b *aliasBinder) findSources(
 	return sources, unbound
 }
 
-// bindMergeAlias binds alias, which a `<<` merge key names, to the anchor
-// of its name in nodes, the nodes map of an [anchorSet], and adds it to the
-// merges set.
+// bindMergeAlias binds alias to the anchor of its name in nodes and adds
+// alias to the merges set. A `<<` merge key names alias, and nodes is the
+// nodes map of an [anchorSet].
 func (b *aliasBinder) bindMergeAlias(alias *ast.AliasNode, nodes map[string]*ast.AnchorNode) {
 	name := astnode.Token(alias.Value)
 	if name == nil {
@@ -547,8 +562,8 @@ func (b *aliasBinder) setOpen(mapping *ast.MappingNode, open bool) {
 	b.touch(mapping)
 }
 
-// touch starts a new version when node, whose state has just changed, is
-// one a result in the pending map depends on.
+// touch starts a new version when a result in the pending map depends on
+// node. Callers call touch after the state of node changes.
 func (b *aliasBinder) touch(node ast.Node) {
 	if b.watched[node] {
 		b.version++
@@ -556,22 +571,26 @@ func (b *aliasBinder) touch(node ast.Node) {
 }
 
 // mergedRead is the result of [aliasBinder.mergedAnchors]. The anchors
-// set holds the anchors merging a mapping records, and the final field
+// set holds the anchors that merging a mapping records. The final field
 // reports whether they hold for every later merge of the mapping.
 //
-// A result that is not final holds while the state it read stays the
-// same. The mapping field holds the mapping the result is for, and the
-// open field whether that mapping was open, which is true only for the
-// empty result of a mapping mergedAnchors found open. The unbound set
-// holds each alias of a merge key the read could not follow, and the
-// reads slice holds the results that are not final of the mappings the
-// read merged. A result that holds any such alias or result is not
-// final. The result holds while its mapping stays open or closed
-// as the open field records and has no final result yet, while each of
-// its unbound aliases stays unbound, and while each of its reads holds.
+// The mapping field holds the mapping that the result is for. The open
+// field reports whether that mapping was open. It is true only for the
+// empty result of a mapping that mergedAnchors found open. The unbound set
+// holds each alias of a merge key that the read found unbound. The reads
+// slice holds the non-final results of the mappings that the read merged.
+// A result that holds any such alias or result is not final.
+//
+// A result that is not final holds as long as the state it read stays the
+// same:
+//
+//   - Its mapping stays open or closed as the open field records, and the
+//     mapping does not have a final result yet.
+//   - Each of its unbound aliases stays unbound.
+//   - Each of its reads holds.
 //
 // The checked field holds the version at which [aliasBinder.holds] last
-// checked the result, and the held field what it found then.
+// checked the result, and the held field holds what that check found.
 type mergedRead struct {
 	anchors anchorSet
 	mapping *ast.MappingNode
@@ -583,20 +602,23 @@ type mergedRead struct {
 	held    bool
 }
 
-// mergedAnchors returns the anchors the decoder records when a `<<` merge
-// key brings mapping in. Those are the last anchor of each name in mapping,
-// in document order, where a `<<` merge key inside mapping counts the
-// anchors of the mappings it merges. It finds the mappings those merge keys
-// bring in through the aliases as Visit bound them. The result is not
-// final when mapping, or a mapping it merges, is open, since those merge
-// nothing until the walk leaves them. It is also not final when one of
-// those merge keys names an alias Visit has not bound yet, since the
-// alias can bring in a mapping once it binds.
+// mergedAnchors returns the anchors that the decoder records when a `<<`
+// merge key brings mapping in. Those are the last anchor of each name in
+// mapping, in document order. A `<<` merge key inside mapping counts the
+// anchors of the mappings it merges. MergedAnchors finds the mappings that
+// those merge keys bring in through the aliases as Visit bound them.
 //
-// It keeps a final result in the merged map, and any other result in the
-// pending map, which it reuses while the result holds. A result that is
-// not final refers to the results it merged rather than copying what they
-// depend on, so each read adds only the merge keys of its own mapping.
+// A merge records the anchors of a mapping only after the walk leaves that
+// mapping. The result is thus not final when mapping or a mapping it
+// merges is open. An alias that Visit has not bound yet can bring in a
+// mapping after it binds. The result is thus also not final when one of
+// those merge keys names such an alias.
+//
+// MergedAnchors keeps a final result in the merged map. It keeps any other
+// result in the pending map, and reuses that result as long as the result
+// holds. A result that is not final refers to the results it merged rather
+// than copying what they depend on. Each read thus adds only the merge
+// keys of its own mapping.
 func (b *aliasBinder) mergedAnchors(mapping *ast.MappingNode) *mergedRead {
 	if anchors, ok := b.merged[mapping]; ok {
 		return &mergedRead{anchors: anchors, final: true}
@@ -651,14 +673,15 @@ func (b *aliasBinder) mergedAnchors(mapping *ast.MappingNode) *mergedRead {
 	return read
 }
 
-// holds reports whether read, a result of [aliasBinder.mergedAnchors]
-// that is not final, still holds, as [mergedRead] describes.
+// holds reports whether read still holds, as [mergedRead] describes. The
+// read argument is a result of [aliasBinder.mergedAnchors] that is not
+// final.
 //
-// Every mapping and alias a result depends on is in the watched set, so
-// a result that held at the current version still holds. The checked
-// and held fields of each result keep what the last check found, so a
-// chain of results that merge the ones before them costs one check for
-// each result at each version.
+// Every mapping and alias that a result depends on is in the watched set,
+// so a result that held at the current version still holds. The checked
+// and held fields of each result keep what the last check found. A chain
+// of results that merge the ones before them thus costs one check for each
+// result at each version.
 func (b *aliasBinder) holds(read *mergedRead) bool {
 	if read.checked == b.version {
 		return read.held
@@ -686,11 +709,12 @@ func (b *aliasBinder) holds(read *mergedRead) bool {
 	return held
 }
 
-// anchorReader collects the anchors [aliasBinder.mergedAnchors] returns
-// while [ast.Walk] visits a mapping. The anchors set holds the anchors
-// recorded so far, and final reports whether the result holds for every
-// merge. The unbound set and the reads slice hold the state the result
-// depends on, as [mergedRead] describes.
+// anchorReader collects the anchors that [aliasBinder.mergedAnchors]
+// returns while [ast.Walk] visits a mapping. The anchors set holds the
+// anchors that the reader has recorded so far, and the final field reports
+// whether the result holds for every merge. The unbound set and the reads
+// slice hold the state that the result depends on, as [mergedRead]
+// describes.
 type anchorReader struct {
 	binder  *aliasBinder
 	anchors anchorSet
@@ -699,13 +723,15 @@ type anchorReader struct {
 	final   bool
 }
 
-// Visit records an anchor, or at a `<<` merge key records the anchors of
-// the mappings it merges, then returns r so [ast.Walk] continues into the
-// children of node. It walks the content of an anchor itself and records
-// the anchor again after it, as [aliasBinder.Visit] does, and returns nil
-// for it. It returns nil for a nil node, including a typed nil a
-// hand-built tree may hold, and for an alias, whose content the merge
-// records nothing from.
+// Visit records an anchor, or at a `<<` merge key the anchors of the
+// mappings it merges. It walks the content of an anchor itself and records
+// the anchor again after it, as [aliasBinder.Visit] does.
+//
+// Visit returns nil for an anchor and for the entry of a merge key. It
+// also returns nil for a nil node, including a typed nil that a hand-built
+// tree might hold. It returns nil for an alias because the merge does not
+// record any anchor from the content of an alias. It returns r for any
+// other node, so [ast.Walk] continues into the children of that node.
 func (r *anchorReader) Visit(node ast.Node) ast.Visitor {
 	if astnode.IsNil(node) {
 		return nil
@@ -757,8 +783,9 @@ func (r *anchorReader) merge(value ast.Node) {
 	}
 }
 
-// walkOpen walks mapping, the content of an anchor or a mapping a `<<`
-// merge key holds inline, and holds it open while the walk is inside it.
+// walkOpen walks mapping and holds it open while the walk is inside it.
+// The mapping is the content of an anchor or a mapping that a `<<` merge
+// key holds inline.
 func (b *aliasBinder) walkOpen(mapping *ast.MappingNode) {
 	if !b.open[mapping] {
 		b.setOpen(mapping, true)
@@ -768,8 +795,8 @@ func (b *aliasBinder) walkOpen(mapping *ast.MappingNode) {
 	ast.Walk(b, mapping)
 }
 
-// anchoredMapping returns the mapping an anchor's content holds, looking
-// through tags, or nil when the content is not a mapping.
+// anchoredMapping returns the mapping that an anchor's content holds, or
+// nil when the content is not a mapping. It looks through tags.
 func anchoredMapping(content ast.Node) *ast.MappingNode {
 	for !astnode.IsNil(content) {
 		switch n := content.(type) {
@@ -786,25 +813,25 @@ func anchoredMapping(content ast.Node) *ast.MappingNode {
 }
 
 // deref looks through anchors and aliases to the content node they carry.
-// It returns the first tag it reaches as it is, since the tag applies to
-// the content under it, and the anchors and aliases under the tag stay in
+// It returns the first tag it reaches unchanged, because the tag applies
+// to the content under it. The anchors and aliases under the tag stay in
 // the result.
 //
-// Returns an error wrapping [ErrAlias] for an alias with no anchor of its
-// name before it, or for an alias that leads back to itself, as
-// [resolver.follow] describes. It checks the aliases under the tag too, as
-// [resolver.unwrap] follows them, so an alias with a tag on it fails as
-// one without a tag does.
+// Returns an error wrapping [ErrAlias] for an alias that does not have an
+// anchor of its name before it, or for an alias that leads back to itself,
+// as [resolver.follow] describes. It also checks the aliases under the
+// tag, which [resolver.unwrap] follows. An alias with a tag on it thus
+// fails the same way as one without a tag.
 func (r *resolver) deref(node ast.Node) (ast.Node, error) {
 	tagged, _, err := r.content(node)
 
 	return tagged, err
 }
 
-// unwrap is [resolver.deref] followed by stripping tags, so the result is a
-// mapping, sequence, or scalar that selectors can apply to. It stops at a
-// nil node, including a typed nil a hand-built tree may hold, and returns
-// an untyped nil for it, as [resolver.follow] does.
+// unwrap does what [resolver.deref] does and then strips tags, so the
+// result is a mapping, sequence, or scalar that selectors can apply to. It
+// stops at a nil node, including a typed nil that a hand-built tree might
+// hold. It returns an untyped nil for that node, as [resolver.follow] does.
 func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
 	_, content, err := r.content(node)
 
@@ -812,13 +839,14 @@ func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
 }
 
 // content looks through anchors, aliases, and tags from node. It returns
-// two nodes: the first tag it reaches, or the content when it reaches no
-// tag, and the content under every tag. [resolver.deref] gives the first
-// and [resolver.unwrap] the second.
+// two nodes. The first is the first tag it reaches, or the content when it
+// does not reach a tag. The second is the content under every tag.
+// [resolver.deref] gives the first node and [resolver.unwrap] gives the
+// second.
 //
-// It tracks the aliases it follows across every tag it looks through, so
-// an alias that leads back to itself through a tag returns an error
-// wrapping [ErrAlias].
+// It tracks the aliases it follows across every tag it looks through. For
+// an alias that leads back to itself through a tag, content thus returns
+// an error wrapping [ErrAlias].
 func (r *resolver) content(node ast.Node) (ast.Node, ast.Node, error) {
 	followed := map[*ast.AliasNode]bool{}
 
@@ -843,13 +871,14 @@ func (r *resolver) content(node ast.Node) (ast.Node, ast.Node, error) {
 }
 
 // follow looks through anchors and aliases from node and adds each alias it
-// follows to followed. It returns an error wrapping [ErrAlias] when it
-// reaches an alias that leads back to itself, an alias with no anchor, or
-// an alias with no name. An alias leads back to itself when it is already
-// in followed, or when it lies inside the content of the anchor it refers
-// to and no `<<` merge key names it. It stops at a nil node, including a
-// typed nil a hand-built tree may hold, and returns an untyped nil for it,
-// so a type assertion on the result never yields a nil pointer.
+// follows to followed. It returns an error wrapping [ErrAlias] for an
+// alias that leads back to itself, that does not have an anchor, or that
+// does not have a name. An alias leads back to itself when it is already
+// in followed. It also leads back to itself when it lies inside the
+// content of the anchor it refers to, unless a `<<` merge key names it.
+// Follow stops at a nil node, including a typed nil that a hand-built tree
+// might hold. It returns an untyped nil for that node, so a type assertion
+// on the result never yields a nil pointer.
 func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.Node, error) {
 	for {
 		if astnode.IsNil(node) {
@@ -896,13 +925,13 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 // drops repeats, so a later `.name`, `.*`, `[n]`, or `[*]` selector can
 // still reach one node through several aliases.
 //
-// Returns [ErrExcessiveAliasing] once the matches of one selector pass the
-// limit [resolver.excessive] applies. Resolve checks after each match the
-// selector applies to, so a `[*]` lists at most one sequence past the
-// limit before it stops, and a `.*` at most one mapping. Returns
-// [ErrExcessiveMerging] once the key lookups of one selector read past the
-// limit [resolver.excessiveMerging] applies, as [resolver.lookup]
-// describes.
+// Returns [ErrExcessiveAliasing] when the matches of one selector pass the
+// limit that [resolver.excessive] applies. Resolve checks the limit after
+// it applies the selector to each match. A `[*]` thus lists at most one
+// sequence past the limit before it stops, and a `.*` at most one mapping.
+// Returns [ErrExcessiveMerging] when the key lookups of one selector read
+// past the limit that [resolver.excessiveMerging] applies, as
+// [resolver.lookup] describes.
 func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 	matches := []match{{node: root}}
 
@@ -958,57 +987,59 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 }
 
 // excessive reports whether count matches of one selector pass the alias
-// limit of the document. Without aliases a selector reaches each node of
-// the document at most once, so only aliases can take count past the
-// nodes of the document. [aliaslimit.Excessive] weighs the matches past
-// that count as the nodes aliases repeat in a decode.
+// limit of the document. Without aliases, a selector reaches each node of
+// the document at most one time. Only aliases can thus take count past the
+// number of nodes in the document. [aliaslimit.Excessive] weighs the
+// matches past that number as the nodes that aliases repeat in a decode.
 func (r *resolver) excessive(count int) bool {
 	return aliaslimit.Excessive(r.nodes, max(count-r.nodes, 0))
 }
 
 // lookupReads holds what the key lookups of one selector, or of one
 // [EntryFinder], share. The count field counts the nodes under `<<` merge
-// keys that those lookups have read, which [resolver.excessiveMerging]
-// weighs. The sources field is a stack of the merge sources that the
-// lookups in progress have yet to search. [resolver.lookup] pushes the
-// sources of each merge key it reads and pops them once it has searched
-// them. Those lookups thus share one buffer, where each would otherwise
-// allocate one for every merge key it reads.
+// keys that those lookups have read, and [resolver.excessiveMerging]
+// weighs that count. The sources field is a stack of the merge sources
+// that the lookups in progress have yet to search. [resolver.lookup]
+// pushes the sources of each merge key it reads and pops them after it
+// searches them. Those lookups thus share one buffer rather than each
+// allocating one for every merge key it reads.
 type lookupReads struct {
 	sources []*ast.MappingNode
 	count   int
 }
 
-// The limits on the nodes under `<<` merge keys that the key lookups of
-// one selector, or of one [EntryFinder], may read.
+// These constants limit the nodes under `<<` merge keys that the key
+// lookups of one selector or of one [EntryFinder] can read.
 const (
-	// The lookups may read this many times the nodes of the document.
+	// The lookups can read this many times the number of nodes in the
+	// document.
 	mergeReadFactor = 64
 
-	// The lookups may read this many nodes in any document, however few
+	// The lookups can read this many nodes in any document, however few
 	// nodes it holds.
 	mergeReadFloor = 1 << 19
 )
 
-// excessiveMerging reports whether reads, the nodes under `<<` merge keys
-// that the key lookups of one selector or of one [EntryFinder] have read,
-// pass the limit for the document. Each lookup reads the merge chain
-// behind its mapping again, so those lookups can read many times the
-// nodes of the document. While the mappings and merge chains of a
-// document keep their size as the document grows, reads stay a fixed
-// multiple of its nodes. The limit is a fixed multiple of those nodes
-// too, so a document does not pass it by growing that way. A document
-// passes it when the chain that each lookup reads grows with the
-// document, since reads then grow with the square of its nodes.
+// excessiveMerging reports whether reads pass the limit for the document.
+// The reads argument counts the nodes under `<<` merge keys that the key
+// lookups of one selector or of one [EntryFinder] have read.
+//
+// Each lookup reads the merge chain behind its mapping again, so those
+// lookups can read many times the number of nodes in the document. When a
+// document grows but its mappings and merge chains keep their size, reads
+// stay a fixed multiple of its nodes. The limit is a fixed multiple of
+// those nodes too, so a document that grows that way stays within it. A
+// document passes the limit when the chain that each lookup reads grows
+// with the document. Reads then grow with the square of its nodes.
 func (r *resolver) excessiveMerging(reads int) bool {
 	return reads > max(mergeReadFloor, mergeReadFactor*r.nodes)
 }
 
 // uniqueMatches returns the first match of each entry or element, in the
 // order matches holds them. It compares the entries, and the sequence and
-// index of the elements, rather than their values, so two entries or two
-// elements of a hand-built tree that share one value node, or that both
-// hold nil, count as two matches.
+// index of the elements, rather than their values. Two entries or two
+// elements of a hand-built tree thus count as two matches when they share
+// one value node or both hold nil.
 func uniqueMatches(matches []match) []match {
 	seen := make(map[matchID]bool, len(matches))
 	unique := make([]match, 0, len(matches))
@@ -1031,9 +1062,10 @@ func uniqueMatches(matches []match) []match {
 	return unique
 }
 
-// matchID identifies the entry or the element a recursive selector found,
-// for [uniqueMatches]. An entry sets entry alone, and an element sets the
-// sequence that holds it and its index there.
+// matchID identifies the entry or the element that a recursive selector
+// found, for [uniqueMatches]. The ID of an entry sets the entry field
+// alone. The ID of an element sets the seq field to the sequence that
+// holds the element and the index field to its index there.
 //
 //nolint:unused // The fields tell the keys of the set apart.
 type matchID struct {
@@ -1043,11 +1075,11 @@ type matchID struct {
 }
 
 // apply applies one `.name`, `.*`, `[n]`, or `[*]` selector to the node of
-// m, and returns the matches with the selector that names each one
-// appended to the selectors m holds. A `.name` adds to the count of reads
-// the nodes its lookup reads under merge keys, as [resolver.lookup]
-// describes, and a `.*` adds the nodes [resolver.entries] reads. A nil
-// node, including a typed nil, has nothing to select.
+// m and returns the matches. Each match holds the selectors of m followed
+// by the selector that names that match. A `.name` adds the nodes that its
+// lookup reads under merge keys to the count of reads, as [resolver.lookup]
+// describes. A `.*` adds the nodes that [resolver.entries] reads. Apply
+// does not select anything from a nil node, including a typed nil.
 func (r *resolver) apply(seg segment, m match, reads *lookupReads) ([]match, error) {
 	content, err := r.unwrap(m.node)
 	if err != nil || astnode.IsNil(content) {
@@ -1108,26 +1140,29 @@ func (r *resolver) apply(seg segment, m match, reads *lookupReads) ([]match, err
 
 // entries applies the `.*` selector to mapping, the content of the node of
 // m. It returns a match for each entry that a `.name` selector resolves in
-// mapping, one for each name, with that `.name` appended to the selectors
-// m holds. Each match thus holds the entry [resolver.lookup] finds for its
-// name, at the place lookup gives it: the later of two entries with one
-// key, and an entry a `<<` merge key brings in at the place of that merge
-// key. A merge key is a source of entries rather than an entry, so entries
-// leaves out a merge key that lookup finds for the name `<<`. A key with
-// no name, as [resolver.keyName] reports it, has no entry a lookup finds.
+// mapping, one for each name. Each match thus holds the entry that
+// [resolver.lookup] finds for its name, at the place that lookup gives it.
+// Of two entries with one key, that is the later entry. An entry that a
+// `<<` merge key brings in takes the place of that merge key. Each match
+// holds the selectors of m followed by the `.name` selector for its name.
 //
-// The matches come in the order of their places, and those at the place
-// of one merge key in the order [resolver.mergedNames] lists their names.
-// To get that order, entries reads the keys of mapping in turn and looks
-// up each name it reads there, or under a merge key, the first time it
-// reads that name. It lists the entry lookup found once it reaches the
-// place of that entry.
+// A merge key is a source of entries rather than an entry, so entries
+// leaves out a merge key that lookup finds for the name `<<`. A lookup
+// finds an entry only when its key has a name, as [resolver.keyName]
+// reports it.
 //
-// Entries adds to the count of reads the nodes that mergedNames and each
-// lookup read under merge keys, and returns [ErrExcessiveMerging] once
-// that count passes the limit [resolver.excessiveMerging] applies. It
-// returns the error mergedNames gives for a merge source that does not
-// resolve.
+// The matches come in the order of their places. The matches at the place
+// of one merge key come in the order that [resolver.mergedNames] lists
+// their names. To get that order, entries reads the keys of mapping in
+// turn. It looks up each name it reads there, or under a merge key, the
+// first time it reads that name. It lists the entry that lookup found when
+// it reaches the place of that entry.
+//
+// Entries adds the nodes that mergedNames and each lookup read under merge
+// keys to the count of reads. It returns [ErrExcessiveMerging] when that
+// count passes the limit that [resolver.excessiveMerging] applies. It
+// returns the error that mergedNames gives for a merge source that does
+// not resolve.
 func (r *resolver) entries(mapping *ast.MappingNode, m match, reads *lookupReads) ([]match, error) {
 	// Clipped, m has no spare capacity, so each entry copies its selectors
 	// and its order rather than sharing one backing array.
@@ -1191,31 +1226,36 @@ func (r *resolver) entries(mapping *ast.MappingNode, m match, reads *lookupReads
 	return matches, nil
 }
 
-// placedEntry is the entry [resolver.lookup] finds for one name in the
-// mapping [resolver.entries] lists, with the place of that entry in the
-// mapping. The zero value stands for a name with no entry to list.
+// placedEntry is the entry that [resolver.lookup] finds for one name in the
+// mapping that [resolver.entries] lists, with the place of that entry in
+// the mapping. The zero value stands for a name that does not have an
+// entry to list.
 type placedEntry struct {
 	entry *ast.MappingValueNode
 	place int
 }
 
 // mergedNames appends to names the name of each key that one `<<` merge
-// key brings in, where value is the value of that key, and returns the
-// result. The names come in the order of the sources of the merge key, and
-// those of one source in the order of its keys, as [resolver.keyName]
-// gives them. A merge key of a source adds the names it brings in at its
-// own place, so the names cover every key a lookup can find under value.
-// One name may appear more than once. A key with no name adds nothing.
+// key brings in, and returns the result. The value argument is the value
+// of that merge key.
 //
-// The seen set holds each mapping mergedNames has read, so it reads a
-// source that several merge keys under value bring in once, and a cycle of
-// merges ends. MergedNames adds to the count of reads the nodes it reads
-// under merge keys, as [resolver.mergeSources] counts them, and returns
-// [ErrExcessiveMerging] once that count passes the limit
-// [resolver.excessiveMerging] applies. It returns an error wrapping
-// [ErrAlias] when an alias a merge key names does not resolve, since that
-// merge could bring in any key. MergedNames leaves the sources stack of
-// reads at the length it found it, unless it returns an error.
+// The names come in the order of the sources of the merge key. The names
+// of one source come in the order of its keys, as [resolver.keyName] gives
+// them. A merge key of a source adds the names it brings in at its own
+// place. The names thus cover every key that a lookup can find under
+// value. One name might appear more than once. MergedNames skips a key
+// that does not have a name.
+//
+// The seen set holds each mapping that mergedNames has read. MergedNames
+// thus reads each source one time, even when several merge keys under
+// value bring it in, and a cycle of merges ends. MergedNames adds the
+// nodes it reads under merge keys to the count of reads, as
+// [resolver.mergeSources] counts them. It returns [ErrExcessiveMerging]
+// when that count passes the limit that [resolver.excessiveMerging]
+// applies. When an alias that a merge key names does not resolve, the
+// merge might bring in any key, so mergedNames returns an error wrapping
+// [ErrAlias]. MergedNames leaves the sources stack of reads at the length
+// it found it, unless it returns an error.
 func (r *resolver) mergedNames(
 	names []string, value ast.Node, seen map[*ast.MappingNode]bool, reads *lookupReads,
 ) ([]string, error) {
@@ -1271,32 +1311,35 @@ func (r *resolver) mergedNames(
 	return names, nil
 }
 
-// lookup finds the entry for name in mapping, looking through its `<<`
-// merge keys as well as its own entries. The later entry in document order
-// wins, whether it is an entry of the mapping itself or a merge key whose
-// sources hold that key, and a later merge source wins over an earlier
-// one. That is the entry whose value the goccy/go-yaml decoder keeps, since
-// it sets the entries of a mapping in order and a merge sets the keys of its
-// sources where the merge key stands.
+// lookup finds the entry for name in mapping. It looks through the `<<`
+// merge keys of mapping as well as its own entries. The later entry in
+// document order wins, whether it is an entry of the mapping itself or a
+// merge key whose sources hold that key. A later merge source also wins
+// over an earlier one. The goccy/go-yaml decoder keeps the value of that
+// entry. It sets the entries of a mapping in order, and it sets the keys
+// of the merge sources where the merge key stands.
 //
 // The seen set guards against merge cycles through aliases, so one lookup
-// reads each mapping at most once. It still reads the whole value of each
-// merge key it reaches, so a sequence of sources that many mappings merge
-// through an alias costs its length once for each of them. Lookup adds to
-// the count of reads the nodes it reads under merge keys, as
-// [resolver.mergeSources] counts them, and returns [ErrExcessiveMerging]
-// once that count passes the limit [resolver.excessiveMerging] applies. A
-// caller that shares reads among many lookups thus weighs them together
-// against that limit. Where the count has already passed the limit,
-// lookup returns the error at the first merge key it reaches, before it
-// reads the value of that key. Lookup adds those nodes even when it
-// returns an error for an alias that does not resolve, so a caller that
-// ignores the error still weighs them. Lookup leaves the sources stack of
-// reads at the length it found it.
+// reads each mapping at most one time. It still reads the whole value of
+// each merge key it reaches. A sequence of sources that many mappings
+// merge through an alias thus costs its length one time for each of them.
+// Lookup adds the nodes it reads under merge keys to the count of reads,
+// as [resolver.mergeSources] counts them. It returns [ErrExcessiveMerging]
+// when that count passes the limit that [resolver.excessiveMerging]
+// applies. A caller that shares reads among many lookups thus weighs them
+// together against that limit.
 //
-// The int result is the index in mapping of the entry lookup found, or,
-// for an entry a merge source holds, of the `<<` entry that brings it in.
-// The bool result reports whether lookup found an entry.
+// When the count has already passed the limit, lookup returns the error at
+// the first merge key it reaches, before it reads the value of that key.
+// Lookup adds the nodes it read even when it returns an error for an alias
+// that does not resolve. A caller that ignores the error thus still weighs
+// them. Lookup leaves the sources stack of reads at the length it found
+// it.
+//
+// The int result is the index in mapping of the entry that lookup found.
+// For an entry that a merge source holds, it is the index of the `<<`
+// entry that brings that entry in. The bool result reports whether lookup
+// found an entry.
 func (r *resolver) lookup(
 	mapping *ast.MappingNode, name string, seen map[*ast.MappingNode]bool, reads *lookupReads,
 ) (*ast.MappingValueNode, int, bool, error) {
@@ -1352,12 +1395,12 @@ func (r *resolver) lookup(
 }
 
 // lookupMerge finds the entry for name that the sources of one `<<` merge
-// key bring in, where value is the value of that key. It pushes the
-// sources onto the stack of reads and leaves them there for
-// [resolver.lookup] to pop. A later source wins over an earlier one, so
-// lookupMerge searches them from the last one back. It adds to the count
-// of reads, and returns [ErrExcessiveMerging], as lookup describes. The
-// bool result reports whether lookupMerge found an entry.
+// key bring in. The value argument is the value of that merge key.
+// LookupMerge pushes the sources onto the stack of reads and leaves them
+// there for [resolver.lookup] to pop. A later source wins over an earlier
+// one, so lookupMerge searches them from the last one back. It adds to the
+// count of reads and returns [ErrExcessiveMerging] as lookup describes.
+// The bool result reports whether lookupMerge found an entry.
 func (r *resolver) lookupMerge(
 	value ast.Node, name string, seen map[*ast.MappingNode]bool, reads *lookupReads,
 ) (*ast.MappingValueNode, bool, error) {
@@ -1409,11 +1452,11 @@ func (r *resolver) lookupMerge(
 // entry other than the one at index i, the last entry of mapping with that
 // name. A `<<` key after that entry can win over it, as [resolver.lookup]
 // describes. When the entry at i is the last merge key, a real `<<` key
-// that one of the merge sources holds wins over it too. It also reports
-// true when those merge keys do not resolve, since a path through name
-// then selects nothing. Its lookup adds to the count of reads as
-// [resolver.lookup] describes, and overridden returns the
-// [ErrExcessiveMerging] that lookup returns.
+// that one of the merge sources holds wins over it too. When those merge
+// keys do not resolve, a path through name does not select any entry, so
+// overridden also reports true. Its lookup adds to the count of reads as
+// [resolver.lookup] describes. Overridden returns the [ErrExcessiveMerging]
+// that lookup returns.
 func (r *resolver) overridden(
 	mapping *ast.MappingNode, keys *mappingKeys, name string, i int, reads *lookupReads,
 ) (bool, error) {
@@ -1434,14 +1477,16 @@ func (r *resolver) overridden(
 	return !selects, nil
 }
 
-// mergeSources appends to buf the mappings a `<<` value merges in, and
-// returns the buffer. Those are the value itself when it is a mapping, or
-// each mapping element when it is a sequence. It skips a nil node,
-// including a typed nil. The int result counts the nodes mergeSources
-// reads: one for the value, and one more for each element when the value
-// is a sequence, whether or not that element is a mapping. When the value
-// or an element is an alias that does not resolve, the count ends with
-// that node, and the buffer holds the sources before it.
+// mergeSources appends to buf the mappings that a `<<` value merges in,
+// and returns the buffer. The mappings are the value itself when it is a
+// mapping, or each mapping element when it is a sequence. MergeSources
+// skips a nil node, including a typed nil.
+//
+// The int result counts the nodes that mergeSources reads. It counts one
+// for the value, and one more for each element when the value is a
+// sequence, whether or not that element is a mapping. When the value or
+// an element is an alias that does not resolve, the count ends with that
+// node. The buffer then holds the sources before that node.
 func (r *resolver) mergeSources(buf []*ast.MappingNode, value ast.Node) ([]*ast.MappingNode, int, error) {
 	content, err := r.unwrap(value)
 	if err != nil {
@@ -1480,22 +1525,22 @@ func (r *resolver) mergeSources(buf []*ast.MappingNode, value ast.Node) ([]*ast.
 	}
 }
 
-// recurse applies seg, a `..name` or `..*` selector, to each of matches,
-// in order, and returns every node it finds below each, in the order it
+// recurse applies seg, a `..name` or `..*` selector, to each of matches in
+// order. It returns every node it finds below each match, in the order it
 // finds them. It returns an error wrapping [ErrAlias] when the node of a
-// match is an alias that does not resolve, and [ErrExcessiveMerging] when
-// the key lookups of the walk read too many nodes under merge keys, as
-// [recursiveWalk.descend] describes.
+// match is an alias that does not resolve. It returns
+// [ErrExcessiveMerging] when the key lookups of the walk read too many
+// nodes under merge keys, as [recursiveWalk.descend] describes.
 //
 // A walk from one match can reach the start of another, such as when one
 // match lies inside another. Take an earlier walk that reaches the start
-// of a later match at an order that [covers] the order of that match. No
-// entry below the start sorts earlier from the later walk than from the
-// earlier one, so resolve keeps the entry the earlier walk finds. Hence
-// recurse skips a later match whose start an earlier walk covers, and a
-// walk stops at the start of an earlier match whose order covers the walk
-// there. On a chain of nested matches the first walk thus covers the rest,
-// and the step costs one walk rather than one for each match.
+// of a later match at an order that [covers] the order of that match.
+// Entries below the start never sort earlier from the later walk than from
+// the earlier one, so resolve keeps the entry that the earlier walk finds.
+// Hence recurse skips a later match whose start an earlier walk covers. A
+// walk also stops at the start of an earlier match whose order covers the
+// walk there. On a chain of nested matches the first walk thus covers the
+// rest, and the step costs one walk rather than one for each match.
 func (r *resolver) recurse(matches []match, seg segment) ([]match, error) {
 	w := &recursiveWalk{
 		resolver: r,
@@ -1549,10 +1594,10 @@ func (r *resolver) recurse(matches []match, seg segment) ([]match, error) {
 
 // covers reports whether a walk that reaches a node at order a finds each
 // entry below the node no later than a walk that reaches it at order b
-// does. That holds when the orders are equal, or when they first differ
-// at a place both hold and a is lower there. When one order extends the
-// other, the entry decides which walk finds it first, so covers reports
-// false.
+// does. Covers reports true when the orders are equal, or when they first
+// differ at a place both hold and a is lower there. When one order
+// extends the other, the entry decides which walk finds it first, so
+// covers reports false.
 func covers(a, b []int) bool {
 	for i := range min(len(a), len(b)) {
 		if a[i] != b[i] {
@@ -1563,22 +1608,22 @@ func covers(a, b []int) bool {
 	return len(a) == len(b)
 }
 
-// recursiveWalk walks the subtrees of the matches one `..name` or `..*`
-// selector applies to, as [resolver.recurse] describes. The name field
-// holds the name of a `..name` selector, and the all field reports a `..*`
-// selector.
+// recursiveWalk walks the subtrees of the matches that one `..name` or
+// `..*` selector applies to, as [resolver.recurse] describes. The name
+// field holds the name of a `..name` selector, and the all field reports
+// whether the selector is `..*`.
 //
 // The from field holds those matches, and the starts field maps the
 // content each one starts from to its indexes in from. The cur field is
-// the index of the current match, and the skip field marks the matches an
-// earlier walk covers.
+// the index of the current match, and the skip field marks the matches
+// that an earlier walk covers.
 //
 // The segs and order stacks hold the selectors and the order down to the
-// node the walk has reached. Each entry the walk finds holds the stacks as
-// they stand, and the held fields record how much of each stack the
-// entries hold, so a push that would overwrite a held place copies the
-// stack first. Entries along one branch thus share their selectors and their
-// order rather than holding a copy each.
+// node the walk has reached. Each entry that the walk finds holds the
+// stacks as they stand. The held fields record how much of each stack the
+// entries hold, so a push to a held place copies the stack first. Entries
+// along one branch thus share their selectors and their order rather than
+// holding a copy each.
 //
 // The reads field holds the [lookupReads] of the key lookups of the walk,
 // across the walks of every match.
@@ -1598,18 +1643,19 @@ type recursiveWalk struct {
 	all       bool
 }
 
-// descend collects every mapping entry keyed name at any depth below node, in
-// document order, or for a `..*` selector every entry and every element of
-// a sequence, each before the nodes below it. It looks through anchors and
-// tags but not aliases, so it visits an entry of the source at most once,
-// at its definition. It skips a mapping or sequence that the walk of
-// another match covers, as [resolver.recurse] describes.
+// descend collects every mapping entry keyed name at any depth below node,
+// in document order. For a `..*` selector it collects every entry and
+// every element of a sequence instead, each before the nodes below it. It
+// looks through anchors and tags but not aliases, so it visits an entry of
+// the source at most one time, at its definition. It skips a mapping or
+// sequence that the walk of another match covers, as [resolver.recurse]
+// describes.
 //
-// The sources flag reports that node is the value of a `<<` merge key. A
-// `..*` selector leaves out the entry of a merge key, and each element of
-// a sequence that lists the sources of one, since those are sources of
-// entries rather than entries. Descend still walks them, so it lists the
-// entries of a mapping written inline there.
+// The sources flag reports whether node is the value of a `<<` merge key. A
+// `..*` selector leaves out the entry of a merge key and each element of a
+// sequence that lists the sources of one. Those are sources of entries
+// rather than entries. Descend still walks them, so it lists the entries
+// of a mapping written inline there.
 //
 // For each entry and element it visits, descend pushes the selector and
 // the place of that step onto the stacks. Before it returns, descend cuts
@@ -1618,20 +1664,20 @@ type recursiveWalk struct {
 // It visits only the entry that a path through its key selects, and skips
 // every other entry of that key and everything below it. When a mapping
 // holds several `<<` keys, descend thus visits only the inline mapping of
-// the last one, even though the decoder merges them all. When a mapping
-// holds a real key whose text is `<<` next to a merge key, or a merge
-// source brings in such a key, a path through `<<` selects the real key,
-// so descend skips the merge key. When a later `<<` key brings in the key
-// of an entry, a path through that key selects the merged entry, so
-// descend skips the entry of the mapping itself. No path selects an entry
-// whose key has no name, so descend skips that entry and everything below
-// it as well.
+// the last one, even though the decoder merges them all. A mapping can
+// hold a real key whose text is `<<` next to a merge key, or a merge
+// source can bring in such a key. A path through `<<` then selects the
+// real key, so descend skips the merge key. When a later `<<` key brings
+// in the key of an entry, a path through that key selects the merged
+// entry, so descend skips the entry of the mapping itself. A path selects
+// an entry only when its key has a name. Descend thus also skips an entry
+// whose key does not have a name, and everything below that entry.
 //
 // To find the entries that a `<<` key overrides, descend looks up the key
 // of each entry that has a `<<` key after it, and of the last merge key
 // itself. Each lookup reads the values of the merge keys it searches and
-// the mappings they bring in. Returns [ErrExcessiveMerging] once the
-// lookups of the walk read past the limit [resolver.excessiveMerging]
+// the mappings they bring in. Returns [ErrExcessiveMerging] when the
+// lookups of the walk read past the limit that [resolver.excessiveMerging]
 // applies.
 func (w *recursiveWalk) descend(node ast.Node, sources bool) error {
 	if astnode.IsNil(node) {
@@ -1739,9 +1785,9 @@ func (w *recursiveWalk) covered(node ast.Node) bool {
 	return false
 }
 
-// push sets the selector and the order place of one step, at the depths
-// given, onto the stacks. It copies a stack first when the place it sets
-// is one an entry holds.
+// push sets the selector and the order place of one step onto the stacks,
+// at the given depths. It copies a stack first when the place it sets is
+// one that an entry holds.
 func (w *recursiveWalk) push(segsDepth, orderDepth int, seg segment, ord int) {
 	if segsDepth < w.heldSegs {
 		w.segs = slices.Clone(w.segs[:segsDepth])
@@ -1757,9 +1803,9 @@ func (w *recursiveWalk) push(segsDepth, orderDepth int, seg segment, ord int) {
 	w.order = append(w.order[:orderDepth], ord)
 }
 
-// hold returns the stacks as they stand, for an entry the walk finds, and
-// records that an entry holds them. The results have no spare capacity,
-// so an append to one copies it.
+// hold returns the stacks as they stand, for an entry that the walk finds,
+// and records that an entry holds them. Hold clips the results to their
+// length, so an append to one copies it.
 func (w *recursiveWalk) hold() ([]segment, []int) {
 	w.heldSegs = max(w.heldSegs, len(w.segs))
 	w.heldOrder = max(w.heldOrder, len(w.order))
@@ -1767,15 +1813,17 @@ func (w *recursiveWalk) hold() ([]segment, []int) {
 	return slices.Clip(w.segs), slices.Clip(w.order)
 }
 
-// keyName returns the key text a child selector compares against. A
-// string key gives its unquoted text, a literal or folded block scalar key
-// gives its content, as the decoder reads it, and any other key gives its
-// source text. An alias key, tagged or not, gives the name the content of
-// its anchor would give as a key. The bool result is false for a key with
-// no content, or with content a selector cannot name, such as a sequence,
-// and for an alias key with no anchor before it or one that leads back to
-// itself. Such a key has no name, so keyName gives the empty string for
-// it, and no child selector matches it.
+// keyName returns the key text that a child selector compares against. A
+// string key gives its unquoted text. A literal or folded block scalar key
+// gives its content, as the decoder reads it. Any other key gives its
+// source text. An alias key gives the name that the content of its anchor
+// gives as a key, whether or not the alias has a tag.
+//
+// The bool result is false for a key that does not have content, or that
+// has content that a selector cannot name, such as a sequence. It is also
+// false for an alias key that does not have an anchor before it, or one
+// that leads back to itself. Such a key does not have a name, so keyName
+// gives the empty string for it, and a child selector never matches it.
 func (r *resolver) keyName(key ast.Node) (string, bool) {
 	content := astnode.Content(key)
 

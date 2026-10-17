@@ -11,18 +11,17 @@ import (
 )
 
 // Resolver resolves paths in one document, from its root. The root is the
-// node a `$` path reads from, and a Resolver has no other node for an `@`
-// path to read from, so it reads both from the root.
-// [Resolver.NodeFrom] takes the node an `@` path reads from. Every path a
-// Resolver returns starts at `$`.
+// node a `$` path reads from. A Resolver does not have another node for an
+// `@` path to read from, so it reads both kinds of path from the root.
+// [Resolver.NodeFrom] takes the node that an `@` path reads from. Every
+// path a Resolver returns starts at `$`.
 //
-// [NewResolver] binds each alias
-// of the document to its anchor once, so resolving many paths in one
-// document walks it once rather than once per path. A Resolver also reads
-// the keys of a mapping once, the first time a path looks up a key there,
-// so resolving every key of a mapping takes time in proportion to its
-// size. A Resolver is safe for concurrent use. After a change to the
-// document, create a new Resolver.
+// [NewResolver] binds each alias of the document to its anchor once.
+// Resolving many paths in one document thus walks it once rather than
+// once per path. A Resolver also reads the keys of a mapping once, the
+// first time a path looks up a key there. Resolving every key of a mapping
+// thus takes time in proportion to its size. A Resolver is safe for
+// concurrent use. After a change to the document, create a new Resolver.
 //
 // Create instances with [NewResolver].
 type Resolver struct {
@@ -31,8 +30,8 @@ type Resolver struct {
 }
 
 // NewResolver creates a new [*Resolver] for doc. A nil doc gives a Resolver
-// that resolves nothing, so each of its resolve methods returns an error
-// wrapping [ErrNoDocument].
+// without a document to resolve in, so each of its resolve methods returns
+// an error wrapping [ErrNoDocument].
 func NewResolver(doc *ast.DocumentNode) *Resolver {
 	if doc == nil {
 		return &Resolver{resolver: &resolver{}}
@@ -43,24 +42,25 @@ func NewResolver(doc *ast.DocumentNode) *Resolver {
 
 // Node resolves the node at p in the document of the Resolver.
 //
-// The document root is the node a `$` path reads from. A Resolver has no
-// other node to start at, so an `@` path reads from the document root
-// too, and selects the node the `$` path with its selectors selects.
-// [Resolver.NodeFrom] takes the node an `@` path reads from.
+// The document root is the node a `$` path reads from. A Resolver does not
+// have another node to start at, so an `@` path also reads from the
+// document root. Such a path selects the node that the `$` path with the
+// same selectors selects. [Resolver.NodeFrom] takes the node that an `@`
+// path reads from.
 //
-// It looks through anchors and aliases, so the result is the content the
-// path names. It stops at a tag, which decides how that content decodes,
-// and keeps any anchor or alias under the tag. The `.name` and `[n]`
-// selectors follow aliases to their anchor and see the entries a `<<`
-// merge key brings into a mapping.
+// Node looks through anchors and aliases, so the result is the content the
+// path names. It stops at a tag, because the tag decides how that content
+// decodes, and it keeps any anchor or alias under the tag. The `.name` and
+// `[n]` selectors follow aliases to their anchor and see the entries a
+// `<<` merge key brings into a mapping.
 //
-// Returns [ErrWildcard] for a path with a `.*`, `[*]`, or `..` selector,
-// which needs [Resolver.Nodes]. Wraps [ErrNotFound] when nothing exists at the
-// path, together with [ErrNoDocument] when the document has no content to
-// resolve in. Wraps [ErrAlias] when an alias on the path does not resolve,
-// including one under a tag, and [ErrExcessiveMerging] when the key lookups
-// of a selector read far more nodes under `<<` merge keys than the document
-// holds.
+// Returns [ErrWildcard] for a path with a `.*`, `[*]`, or `..` selector.
+// Resolve such a path with [Resolver.Nodes]. Wraps [ErrNotFound] when
+// nothing exists at the path, together with [ErrNoDocument] when the
+// document lacks content to resolve in. Wraps [ErrAlias] when an alias on
+// the path does not resolve, including one under a tag. Wraps
+// [ErrExcessiveMerging] when the key lookups of a selector read far more
+// nodes under `<<` merge keys than the document holds.
 func (r *Resolver) Node(p Path) (ast.Node, error) {
 	m, err := p.single(r.resolver, r.doc)
 	if err != nil {
@@ -70,27 +70,27 @@ func (r *Resolver) Node(p Path) (ast.Node, error) {
 	return r.nodeOf(p, m)
 }
 
-// NodeFrom resolves the node at p with node as the current node, which
-// an `@` path reads from, as [Resolver.Node] resolves p from the root of
-// the document. The node belongs to the document of the Resolver, such
-// as one that Node or NodeFrom returned. A caller that walks down the
-// document can resolve each step from the node above it, rather than a
-// longer path from the root each time:
+// NodeFrom resolves the node at p with node as the current node, as
+// [Resolver.Node] resolves p from the root of the document. An `@` path
+// reads from the current node. The node belongs to the document of the
+// Resolver, such as one that Node or NodeFrom returned. A caller that
+// walks down the document can resolve each step from the node above it,
+// rather than a longer path from the root each time:
 //
 //	spec, err := r.Node(paths.Doc().Child("spec"))
 //	replicas, err := r.NodeFrom(spec, paths.Current().Child("replicas"))
 //
 // Where q is the path that resolves to node, NodeFrom gives the node
 // that q joined with an `@` path p resolves to, unless p starts with the
-// `~` selector from [Path.Key]. A path starts at node as it would at the
+// `~` selector from [Path.Key]. A path starts at node as it does at the
 // root, so a `~` there selects node itself. A `$` path reads from the
-// document root wherever it resolves, so NodeFrom resolves it as
-// Resolver.Node does and node plays no part.
+// document root wherever it resolves. NodeFrom thus resolves it as
+// Resolver.Node does and ignores node.
 //
-// Returns the errors [Resolver.Node] returns. Only a `$` path wraps
-// [ErrNoDocument], since an `@` path resolves in node rather than in the
-// document. A nil node holds nothing to resolve in, so NodeFrom wraps
-// [ErrNotFound] for an `@` path and a nil node.
+// Returns the errors [Resolver.Node] returns. An `@` path resolves in node
+// rather than in the document, so only the errors for a `$` path wrap
+// [ErrNoDocument]. A nil node does not hold anything to resolve in, so
+// NodeFrom wraps [ErrNotFound] for an `@` path and a nil node.
 func (r *Resolver) NodeFrom(node ast.Node, p Path) (ast.Node, error) {
 	if p.absolute {
 		return r.Node(p)
@@ -121,10 +121,10 @@ func (r *Resolver) nodeOf(p Path, m match) (ast.Node, error) {
 	return node, nil
 }
 
-// Token resolves the [*token.Token] p points at in the document of the
-// Resolver, where an error at the path binds. A scalar is its own token. A mapping or a
-// sequence spans many lines, so it points at the token that introduces
-// it:
+// Token resolves the [*token.Token] that p points at in the document of
+// the Resolver. An error at the path binds to that token. A scalar is its
+// own token. A mapping or a sequence spans many lines, so it points at
+// the token that introduces it:
 //
 //   - The value of a mapping entry points at the key of the entry,
 //     whether the value is in block or flow style.
@@ -136,21 +136,22 @@ func (r *Resolver) nodeOf(p Path, m match) (ast.Node, error) {
 //
 // Token looks through the anchors and tags on a mapping or a sequence to
 // find that token. For a mapping or a sequence under a key, the token
-// lies outside the node [Resolver.Node] returns, and a path to the value
-// points where the same path ending in the `~` selector from [Path.Key]
-// does. A path ending in that selector points at the key of the entry.
-// An alias resolves to its own token rather than the anchor's content,
-// since that is where the path points in the source.
+// lies outside the node that [Resolver.Node] returns. A path to such a
+// value points where the same path ending in the `~` selector from
+// [Path.Key] does. A path ending in that selector points at the key of
+// the entry. An alias resolves to its own token rather than to the
+// content of its anchor, because the alias is where the path points in
+// the source.
 //
-// The path resolves against the document body only, from its root whether
-// the path starts at `$` or `@`, so the same path resolves to different
-// tokens in different documents of one file. Token returns the same
-// errors as [Resolver.Node], except that it does not look through the node
-// the last selector reaches. An alias there that does not resolve, such
-// as one that names no anchor or one inside the content of its own
-// anchor, yields the alias's own token rather than [ErrAlias].
-// Token still returns [ErrAlias] for an alias an earlier selector
-// resolves through.
+// The path resolves only against the document body, from its root,
+// whether the path starts at `$` or `@`. The same path thus resolves to
+// different tokens in different documents of one file. Token returns the
+// same errors as [Resolver.Node], except that it does not look through
+// the node the last selector reaches. An alias there that does not
+// resolve yields the alias's own token rather than [ErrAlias]. Such an
+// alias might not name an anchor, or it might sit inside the content of
+// its own anchor. Token still returns [ErrAlias] for an alias that an
+// earlier selector resolves through.
 func (r *Resolver) Token(p Path) (*token.Token, error) {
 	m, err := p.single(r.resolver, r.doc)
 	if err != nil {
@@ -161,26 +162,28 @@ func (r *Resolver) Token(p Path) (*token.Token, error) {
 }
 
 // Nearest returns the path of the mapping that lacks a key p names, and
-// reports whether the document holds one. It resolves p from the root of
-// the document, whether p starts at `$` or `@`, and the path it returns
-// starts at `$`. When p selects nothing because the document leaves a key
-// out, the longest prefix of p that resolves is where that key belongs.
-// Nearest returns that prefix when it resolves to a mapping, or to a
-// null, which stands where a mapping would, and every selector of p after
-// it is a `.name` selector. An error about a value the document leaves
-// out, such as a required field, points there:
+// reports whether the document holds such a mapping. It resolves p from
+// the root of the document, whether p starts at `$` or `@`, and the path
+// it returns starts at `$`.
+//
+// When the document leaves out a key that p names, p does not select
+// anything. The longest prefix of p that resolves is then where that key
+// belongs. Nearest returns that prefix when every selector of p after it
+// is a `.name` selector and the prefix resolves to a mapping or to a null.
+// Such a null stands in the place of a mapping. An error about a value
+// the document leaves out, such as a required field, points there:
 //
 //	// In a document that holds server and no tls under it.
 //	near, ok := r.Nearest(paths.Doc().Child("server", "tls", "cert"))
 //	// $.server, true
 //
-// It reports false for a path that resolves, which misses no key. It
-// reports false too for a path that selects nothing for another reason,
-// such as an index past the end of a sequence or a name looked up in a
-// scalar or a sequence. A `[*]`, `..`, or `~` selector at or after the
-// missing key gives false as well, and a `.*` selector anywhere in p
-// does. So does an alias that does not resolve, and so does a document
-// with no content.
+// It reports false for a path that resolves, because such a path does
+// not miss a key. It also reports false when p fails to select a node for
+// another reason. An index past the end of a sequence is one such reason,
+// and a name looked up in a scalar or a sequence is another. A `.*`,
+// `[*]`, or `..` selector anywhere in p gives false, and so does a `~`
+// selector at or after the missing key. An alias that does not resolve
+// also gives false, and so does a document without content.
 func (r *Resolver) Nearest(p Path) (Path, bool) {
 	if p.wildcard() || r.doc == nil || !astnode.HasContent(r.doc.Body) {
 		return Path{}, false
@@ -219,21 +222,22 @@ func (r *Resolver) Nearest(p Path) (Path, bool) {
 	return Path{}, false
 }
 
-// Matches resolves every node p selects in the document of the Resolver,
-// as [Resolver.Nodes] does, and returns each with the path that selects
-// it alone. A caller
-// that checks each element of a sequence, each entry of a mapping, or
-// each node a `..` selector finds thus reports the one it checked:
+// Matches resolves every node that p selects in the document of the
+// Resolver, as [Resolver.Nodes] does. It returns each node with the path
+// that selects it alone. A caller that checks each element of a sequence,
+// each entry of a mapping, or each node a `..` selector finds can thus
+// report the one it checked:
 //
 //	for _, m := range matches {
 //		fmt.Println(m.Path) // $.items[0], $.items[1], ...
 //	}
 //
-// A path without `.*`, `[*]`, or `..` selectors yields at most one match,
-// whose path is the path as given, at `$`. The path of a node reached
-// through an alias is the path as written, not the location of the
-// anchor, and the path of an entry a `<<` merge key brings in is the path
-// of the mapping that merges it. Returns the errors [Resolver.Nodes] returns.
+// A path without `.*`, `[*]`, or `..` selectors yields at most one match.
+// The path of that match is the path as given, starting at `$`. The path
+// of a node reached through an alias is the path as written, not the
+// location of the anchor. The path of an entry that a `<<` merge key
+// brings in is the path of the mapping that merges it. Returns the errors
+// [Resolver.Nodes] returns.
 func (r *Resolver) Matches(p Path) ([]Match, error) {
 	found, err := p.matches(r.resolver, r.doc)
 	if err != nil {
@@ -260,85 +264,95 @@ func (r *Resolver) Matches(p Path) ([]Match, error) {
 	return matches, nil
 }
 
-// Nodes resolves every node p selects in the document of the Resolver,
-// in document order, from the document root, whether the path starts at
-// `$` or `@`, as [Resolver.Node] does. A path without `.*`, `[*]`, or
-// `..` selectors yields at most one node, and an empty result means
-// nothing exists at the path.
-// Nodes lists one node for each path that selects it, as [Resolver.Matches]
-// does. A node that several aliases or `<<` merge keys lead to appears
-// once for each, in the place of that alias or merge key. A `..name` or
-// `..*` selector lists each node once, even when chained `..` selectors
-// reach it more than once. An alias on the path that does not resolve
-// returns an error wrapping [ErrAlias].
+// Nodes resolves every node that p selects in the document of the
+// Resolver, in document order. As [Resolver.Node] does, it resolves from
+// the document root whether the path starts at `$` or `@`. A path without
+// `.*`, `[*]`, or `..` selectors yields at most one node, and an empty
+// result means nothing exists at the path. [Resolver.Matches] returns the
+// same nodes with the path that selects each one alone.
+//
+// Nodes lists one node for each path that selects it, as
+// [Resolver.Matches] does. A node that several aliases or `<<` merge keys
+// lead to appears once for each, in the place of that alias or merge key.
+// A `..name` or `..*` selector lists each node once, even when chained
+// `..` selectors reach it more than once.
 //
 // # Aliases and Tags
 //
-// Nodes looks through anchors and aliases, so each node is the content
-// the path names, and stops at a tag, as [Resolver.Node] does. The `.name`,
-// `.*`, `[n]`, and `[*]` selectors follow aliases to their anchor and see
-// the entries a `<<` merge key brings into a mapping.
+// As [Resolver.Node] does, Nodes looks through anchors and aliases, so
+// each node is the content the path names. It stops at a tag. The
+// `.name`, `.*`, `[n]`, and `[*]` selectors follow aliases to their anchor
+// and see the entries a `<<` merge key brings into a mapping.
 //
 // # Wildcard Selectors
 //
 // The `.*` selector lists the value of each entry that a `.name` selector
-// resolves in a mapping, once for each name. It lists an entry a `<<`
-// merge key brings in at the place of that merge key, and the entries of
-// one merge key in the order its sources first name them. Among entries
-// that share a key it lists the one a path through that key selects, so a
-// later entry or a later merge wins. It leaves out a merge key, whose
-// value is a source of entries, and an entry whose key has no name, as
-// [Resolver.KeyName] reports it. On a node that is not a mapping it
-// selects nothing, as `[*]` does on a node that is not a sequence.
+// resolves in a mapping, once for each name. It lists an entry that a
+// `<<` merge key brings in at the place of that merge key. It lists the
+// entries of one merge key in the order its sources first name them.
+// Among entries that share a key, it lists the one that a path through
+// that key selects, so a later entry or a later merge wins. It leaves out
+// a merge key, whose value is a source of entries. It also leaves out an
+// entry whose key does not have a name, as [Resolver.KeyName] reports it.
+// Like `[*]` on a node that is not a sequence, it does not select anything
+// on a node that is not a mapping.
 //
 // # Recursive Selectors
 //
-// The `..name` selector looks through
-// an alias or tag on the node it starts from, as the other selectors do.
-// Below that node it visits each entry once, where the source defines it.
-// It does not follow aliases there, including one a `<<` merge key names,
-// and it does not list the entries a merge key brings into a mapping under
-// that mapping. It walks a mapping written inline under a `<<` key as it
-// walks any other value, and lists its entries under the `<<` selector even
-// when a later source or a key of the mapping itself overrides them. When a
-// path through `<<` selects a real key with the text `<<`, whether the
-// mapping holds it or a merge brings it in, the `..name` selector skips the
-// merge key and its inline mapping, since no path through `<<` reaches
-// them. It skips an entry that a later entry with the same key shadows,
-// whether that entry belongs to its mapping or comes from a later `<<`
-// merge key. It also skips an entry whose key has no name, as
-// [Resolver.KeyName] reports it, and everything below that entry, since no
-// path names them. An alias key with no anchor before it has no name, and
-// so does one whose anchor holds a collection.
+// The `..name` selector looks through an alias or tag on the node it
+// starts from, as the other selectors do. Below that node, it visits each
+// entry once, where the source defines it. It does not follow aliases
+// there, including one that a `<<` merge key names. It does not list the
+// entries that a merge key brings into a mapping under that mapping.
+//
+// The `..name` selector walks a mapping written inline under a `<<` key as
+// it walks any other value. It lists the entries of that mapping under the
+// `<<` selector, even when a later source or a key of the mapping itself
+// overrides them. A path through `<<` can select a real key with the text
+// `<<`. The `..name` selector then skips the merge key and its inline
+// mapping, because no path through `<<` reaches them. That real key can
+// belong to the mapping that holds the merge key, or a merge can bring it
+// in.
+//
+// The `..name` selector skips an entry that a later entry with the same
+// key shadows, whether the later entry belongs to its mapping or comes
+// from a later `<<` merge key. It also skips an entry whose key does not
+// have a name, as [Resolver.KeyName] reports it, and everything below that
+// entry, because no path names them. An alias key without an anchor before
+// it does not have a name, and neither does one whose anchor holds a
+// collection.
 //
 // The `..*` selector visits what the `..name` selector visits. It lists
 // the value of every entry it visits, whatever its key, and every element
 // of a sequence it visits, each before the nodes below it. It leaves out
 // the entry of a `<<` merge key, as `.*` does, and each element of a
-// sequence that lists the sources of one, but lists the entries of a
-// mapping written inline there.
+// sequence that lists the sources of one. It still lists the entries of a
+// mapping written inline under a merge key.
 //
 // # Empty Documents
 //
-// A document with no content, such as an empty one or one of comments
-// alone, holds no node for a selector to reach. Nodes returns an empty
-// result for a path with selectors there, as it does wherever a path
-// selects nothing. The root path selects the null at the "---" header of
-// such a document, and nothing when the document has no header.
+// A document without content, such as an empty one or one of comments
+// alone, does not hold a node for a selector to reach. The root path
+// selects the null at the "---" header of such a document, and so does a
+// path of only `~` selectors. When the document lacks a header, those
+// paths do not select anything. Nodes returns an empty result there for a
+// path with any other selector, as it does wherever a path does not
+// select anything.
 //
 // # Errors
 //
 // Wraps [ErrNoDocument], together with [ErrNotFound], when the Resolver
-// has a nil document, and [ErrAlias] when an alias on the path does not
+// has a nil document. Wraps [ErrAlias] when an alias on the path does not
 // resolve, including one under a tag. A `.*` selector reads every `<<`
-// merge key of its mapping and of the mappings it merges, so an alias one
-// of them names counts as on the path. A `..*` selector lists every value
-// below the node it starts from, so an alias it lists counts as on the
-// path too. Wraps [ErrExcessiveAliasing] when
-// aliases lead a selector to far more nodes than the document holds, and
-// [ErrExcessiveMerging] when the key lookups of a selector read far more
-// nodes under `<<` merge keys than that. [Resolver.Matches] returns the same
-// nodes with the path that selects each one alone.
+// merge key of its mapping and of the mappings it merges, so an alias that
+// one of them names counts as on the path. A `..*` selector lists every
+// value below the node it starts from, so an alias it lists also counts as
+// on the path.
+//
+// Wraps [ErrExcessiveAliasing] when aliases lead a selector to far more
+// nodes than the document holds. Wraps [ErrExcessiveMerging] when the key
+// lookups of a selector read far more nodes under `<<` merge keys than
+// the document holds.
 func (r *Resolver) Nodes(p Path) ([]ast.Node, error) {
 	found, err := r.Matches(p)
 	if err != nil {
@@ -356,17 +370,18 @@ func (r *Resolver) Nodes(p Path) ([]ast.Node, error) {
 // Deref returns the content under node. It looks through the anchors on
 // node and follows an alias to the content of the anchor it refers to, as
 // [Resolver.Node] does. It stops at a tag on node or on that content, and
-// keeps any anchor or alias under the tag, so the result reads as the
-// decoder reads node. A caller that walks the document itself follows
-// aliases with Deref to reach the node a path through the same alias
-// resolves to, and looks through a tag it reaches on the way. Deref gives
-// an untyped nil for a nil node and for an anchor or alias whose content
-// is nil, including a typed nil a hand-built tree may hold.
+// keeps any anchor or alias under the tag. The result thus reads as the
+// decoder reads node. A caller that walks the document itself can follow
+// aliases with Deref to reach the node that a path through the same alias
+// resolves to. That caller should look through each tag it reaches on the
+// way. Deref gives an untyped nil for a nil node and for an anchor or
+// alias whose content is nil, including a typed nil that a hand-built
+// tree might hold.
 //
-// Returns an error wrapping [ErrAlias] for an alias that names no anchor
-// or that leads back to itself, such as one inside the content of the
-// anchor it refers to. Deref checks the aliases under the tag it stops at
-// the same way.
+// Returns an error wrapping [ErrAlias] for an alias that does not name an
+// anchor or that leads back to itself, such as one inside the content of
+// the anchor it refers to. Deref checks the aliases under the tag it stops
+// at the same way.
 func (r *Resolver) Deref(node ast.Node) (ast.Node, error) {
 	content, err := r.resolver.deref(node)
 	if err != nil {
@@ -383,13 +398,13 @@ func (r *Resolver) Deref(node ast.Node) (ast.Node, error) {
 // unquoted text, a block scalar key gives its content, and any other
 // scalar key gives its source text, such as 0x10 for an int. An alias
 // key, tagged or not, gives the text of the content of its anchor. The
-// `?` of an explicit key, and the anchors and tags on key, add nothing
-// to its text.
+// `?` of an explicit key and the anchors and tags on key do not change
+// its text.
 //
-// The bool result is false for a key with no text a selector can match:
-// a nil key, a sequence or mapping key, and an alias key with no anchor
-// before it or one that leads back to itself. It is true for the quoted
-// empty key `""`.
+// The bool result is false for a key that does not have text a selector
+// can match. Such a key is nil, a sequence, a mapping, or an alias key
+// that leads back to itself or lacks an anchor before it. The result is
+// true for the quoted empty key `""`.
 func (r *Resolver) KeyName(key ast.Node) (string, bool) {
 	return r.resolver.keyName(key)
 }
@@ -398,17 +413,18 @@ func (r *Resolver) KeyName(key ast.Node) (string, bool) {
 // with name selects in the mapping at node. Where a `<<` merge key brings
 // that entry in, it belongs to the merge source. Entry looks through the
 // anchors, tags, and aliases on node. A caller that walks a mapping
-// itself compares the result with an entry it reached to learn whether a
-// path through name selects that entry. A later entry with the same key
-// text can win the selector, such as a later key of the mapping or of a
-// later merge source.
+// itself can compare the result with an entry it reached to learn whether
+// a path through name selects that entry. A later entry with the same key
+// text can win the selector. That entry can be a later key of the mapping
+// or of a later merge source.
 //
 // Returns an error wrapping [ErrNotFound] when node is not a mapping or
-// name selects no entry in it, and one wrapping [ErrAlias] when an alias on
-// the way does not resolve. Returns one wrapping [ErrExcessiveMerging] when
-// the lookup reads far more nodes under `<<` merge keys than the document
-// holds. Each call weighs its own reads against that limit, where the
-// calls of one [EntryFinder] weigh theirs together.
+// name does not select an entry in it. Returns one wrapping [ErrAlias]
+// when an alias on the way does not resolve. Returns one wrapping
+// [ErrExcessiveMerging] when the lookup reads far more nodes under `<<`
+// merge keys than the document holds. Each call weighs its own reads
+// against that limit, but the calls of one [EntryFinder] weigh theirs
+// together.
 func (r *Resolver) Entry(node ast.Node, name string) (ast.Node, error) {
 	return r.EntryFinder().Entry(node, name)
 }
@@ -416,11 +432,12 @@ func (r *Resolver) Entry(node ast.Node, name string) (ast.Node, error) {
 // EntryFinder finds entries in the mappings of one document, as
 // [Resolver.Entry] does, and weighs the reads of all its lookups together
 // against the limit behind [ErrExcessiveMerging]. A lookup of a key with
-// a `<<` merge key after it reads the sources of that merge key, so
-// looking up each key of such a mapping reads those sources once for
-// each key. A caller that looks up many entries uses one EntryFinder for
-// them, so those reads stop at the limit rather than grow with the
-// square of the document. An EntryFinder is not safe for concurrent use.
+// a `<<` merge key after it reads the sources of that merge key. Looking
+// up each key of such a mapping thus reads those sources once for each
+// key. A caller that looks up many entries should use one EntryFinder for
+// them. Those reads then stop at the limit rather than grow with the
+// square of the size of the document. An EntryFinder is not safe for
+// concurrent use.
 //
 // Create instances with [Resolver.EntryFinder].
 type EntryFinder struct {
@@ -439,10 +456,10 @@ func (r *Resolver) EntryFinder() *EntryFinder {
 // errors.
 //
 // It returns the error wrapping [ErrExcessiveMerging] for the lookup that
-// takes the reads of the EntryFinder past the limit, and for every later
-// lookup that reads a merge key. A later lookup that reads no merge key
-// still returns its entry, such as one of a key with no merge key after
-// it.
+// takes the reads of the EntryFinder past the limit. It also returns that
+// error for every later lookup that reads a merge key. A later lookup
+// that does not read a merge key still returns its entry, such as a
+// lookup of a key without a merge key after it.
 func (f *EntryFinder) Entry(node ast.Node, name string) (ast.Node, error) {
 	content, err := f.resolver.unwrap(node)
 	if err != nil {
@@ -467,15 +484,17 @@ func (f *EntryFinder) Entry(node ast.Node, name string) (ast.Node, error) {
 }
 
 // Anchor returns the anchor, an [*ast.AnchorNode], that node refers to
-// when node is an alias. That is the anchor whose content
+// when node is an alias. The result is the anchor whose content
 // [Resolver.Deref] reaches first when it follows the alias. Where the
-// anchor holds another alias, Anchor stops at the anchor, while Deref
-// goes on to the content of the anchor the second alias refers to.
-// Anchor also returns the anchor of an alias that leads back to itself,
-// such as one inside the content of that anchor, which Deref rejects.
+// anchor holds another alias, Anchor stops at the anchor, but Deref
+// continues to the content of the anchor that the second alias refers
+// to. Anchor also returns the anchor of an alias that leads back to
+// itself, such as one inside the content of that anchor. Deref rejects
+// such an alias.
 //
 // Returns an error wrapping [ErrAlias] when node is not an alias, and for
-// an alias that has no name or names no anchor before it.
+// an alias that does not have a name or does not name an anchor before
+// it.
 func (r *Resolver) Anchor(node ast.Node) (ast.Node, error) {
 	alias, ok := node.(*ast.AliasNode)
 	if !ok || alias == nil {
@@ -497,10 +516,11 @@ func (r *Resolver) Anchor(node ast.Node) (ast.Node, error) {
 
 // MergeSources returns the mappings the `<<` merge keys of the mapping at
 // node bring in, in the order the decoder applies them. The merge keys go
-// in document order and the sources of one merge key in sequence order,
-// so a later source wins over an earlier one for a key both define. It
-// looks through the anchors, tags, and aliases on node, on each merge
-// value, and on each element of a sequence of sources.
+// in document order, and the sources of one merge key go in sequence
+// order. A later source thus wins over an earlier one for a key both
+// define. MergeSources looks through the anchors, tags, and aliases on
+// node, on each merge value, and on each element of a sequence of
+// sources.
 //
 // Returns nil when node is not a mapping, and an error wrapping [ErrAlias]
 // when an alias on the way does not resolve.

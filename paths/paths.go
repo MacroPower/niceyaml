@@ -18,31 +18,32 @@ import (
 )
 
 var (
-	// ErrNoDocument indicates a document with no content to resolve in: a
-	// nil document, a document without a body, a document holding only
-	// directives or comments, or a document of whitespace alone. Errors
-	// that wrap it also wrap [ErrNotFound], since nothing exists at any
-	// path in such a document. The root path of such a document under a
-	// "---" header still resolves, to the null at the header.
-	// [Resolver.Node] and [Resolver.Token] return it for each of these
-	// documents. [Resolver.Nodes] and [Resolver.Matches] return it for a
-	// nil document alone, and select nothing in the others.
+	// ErrNoDocument indicates a document without content to resolve in.
+	// Such a document is nil, lacks a body, holds only directives or
+	// comments, or holds only whitespace. Nothing exists at any path in
+	// such a document, so the errors that wrap ErrNoDocument also wrap
+	// [ErrNotFound]. The root path of such a document under a "---" header
+	// still resolves, to the null at the header. [Resolver.Node] and
+	// [Resolver.Token] return ErrNoDocument for each of these documents.
+	// [Resolver.Nodes] and [Resolver.Matches] return it only for a nil
+	// document, and do not select anything in the others.
 	ErrNoDocument = errors.New("document has no content")
 
 	// ErrNotFound indicates that nothing exists at the path in the document.
 	ErrNotFound = errors.New("not found")
 
-	// ErrAlias indicates an alias on the path that names no anchor or that
-	// leads back to itself, so it has no content.
+	// ErrAlias indicates an alias on the path that does not name an anchor
+	// or that leads back to itself. Such an alias does not resolve to any
+	// content.
 	ErrAlias = errors.New("alias does not resolve")
 
 	// ErrWildcard indicates a request for a single node or token from a path
 	// with a `.*`, `[*]`, or `..` selector. Use [Resolver.Nodes] for such paths.
 	ErrWildcard = errors.New("wildcard path matches any number of nodes")
 
-	// ErrNoYAMLPath indicates a path with a `.*` or `..*` selector, which
-	// the goccy/go-yaml path syntax has no selector for. [Path.YAMLPath]
-	// returns it.
+	// ErrNoYAMLPath indicates a path with a `.*` or `..*` selector. The
+	// goccy/go-yaml path syntax does not have a selector for either.
+	// [Path.YAMLPath] returns it.
 	ErrNoYAMLPath = errors.New("selector has no goccy/go-yaml equivalent")
 
 	// ErrExcessiveAliasing indicates a path whose selectors reach far more
@@ -50,38 +51,41 @@ var (
 	// of a sequence once for each alias that leads to it, and a `.*`
 	// selector lists the entries of a mapping the same way. A few hundred
 	// bytes of nested aliases can thus make a path select millions of
-	// nodes. A selector may reach each node of the document once, and the
-	// nodes it reaches past that count may make up only the share of them
-	// that gopkg.in/yaml.v3 allows the aliases in a document it decodes.
-	// It is the same error value as
+	// nodes. The limit lets a selector reach as many nodes as the document
+	// holds. Past that count, the extra nodes can make up only the share of
+	// all the nodes the selector reaches that gopkg.in/yaml.v3 allows the
+	// aliases in a document it decodes. It is the same error value as
 	// [go.jacobcolvin.com/niceyaml.ErrExcessiveAliasing].
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// ErrExcessiveMerging indicates a path whose key lookups read far more
 	// nodes under `<<` merge keys than the document holds. A key lookup
 	// reads the value of each merge key it reaches, and each element of
-	// that value when it is a sequence of sources. It goes on into the
-	// mappings those merge keys bring in until it finds the key, so a
-	// lookup on a chain of merges can read the whole chain. A lookup that
+	// that value when it is a sequence of sources. It continues into the
+	// mappings those merge keys bring in until it finds the key. A lookup
+	// on a chain of merges can thus read the whole chain. A lookup that
 	// reaches many mappings that merge one sequence through an alias reads
-	// that sequence once for each of them. A `..name` selector looks up
-	// each key that a later merge key may override. It also looks up `<<`
-	// at the last merge key of each mapping it walks, to learn whether a
-	// merge brings in a real `<<` key. That lookup reads the whole merge
-	// chain behind the mapping, whatever name the selector searches for. A
+	// that sequence once for each of them.
+	//
+	// Some selectors look up many keys. A `..name` selector looks up each
+	// key that a later merge key might override. It also looks up `<<` at
+	// the last merge key of each mapping it walks, to learn whether a merge
+	// brings in a real `<<` key. That lookup reads the whole merge chain
+	// behind the mapping, whatever name the selector searches for. A
 	// `.name` after a `[*]` looks up its key in each element, and a `.*`
 	// looks up each key of its mapping and of the mappings it merges. Each
-	// of these can make one selector read a chain many times. A selector
-	// may read 64 times as many of these nodes as the document holds, or
-	// 524,288 of them when that is more. A call of [Resolver.Entry] may
-	// read as many as one selector, and the calls of one [EntryFinder] may
-	// read that many between them.
+	// of these selectors can read one chain many times.
+	//
+	// A selector can read 64 times as many of these nodes as the document
+	// holds, or 524,288 of them, whichever is more. A call of
+	// [Resolver.Entry] can read as many as one selector, and the calls of
+	// one [EntryFinder] can read that many between them.
 	ErrExcessiveMerging = errors.New("excessive merging")
 
-	// Before goccyString wraps a selector name in single quotes,
-	// nameEscaper escapes its backslashes and single quotes. A
-	// [strings.Replacer] is safe for concurrent use, so every call shares
-	// this one.
+	// The nameEscaper replacer escapes the backslashes and single quotes of
+	// a selector name before goccyString wraps the name in single quotes.
+	// A [strings.Replacer] is safe for concurrent use, so every call of
+	// goccyString shares this one.
 	nameEscaper = strings.NewReplacer(`\`, `\\`, `'`, `\'`)
 )
 
@@ -138,20 +142,21 @@ const lineSeparator = '\u2028'
 const paragraphSeparator = '\u2029'
 
 // quoteName returns name in the form [Parse] accepts as a child or
-// recursive selector. It wraps the name in single quotes when it contains
-// reserved characters or is empty, since an unquoted empty name would leave
-// a bare `.` that Parse rejects. It also quotes a name that holds `:` or
-// whitespace, which Parse reads back unquoted too, so the name stays apart
-// from the ": " that follows a path in an error message, and a space at
-// either end of it stays visible.
+// recursive selector. It wraps the name in single quotes when the name is
+// empty or contains reserved characters. An unquoted empty name leaves a
+// bare `.`, which Parse rejects. The function also quotes a name that
+// holds `:` or whitespace, though Parse reads such a name unquoted too.
+// The quotes keep the name apart from the ": " that follows a path in an
+// error message. They also keep a space at either end of the name visible.
 //
-// A name that holds a control character comes back in quotes too, with
-// the character written as an escape Parse reads back: `\n`, `\r`, or
-// `\t` for a line feed, a carriage return, or a tab, and `\u` with four
-// hexadecimal digits for any other. The Unicode line and paragraph
-// separators, U+2028 and U+2029, are no control characters, and they
-// come back as `\u` escapes too. A path thus stays on one line and
-// sends no control character to a terminal, whatever key it names.
+// A name that holds a control character also comes back in quotes, with
+// the character written as an escape that Parse reads back. The escape is
+// `\n` for a line feed, `\r` for a carriage return, `\t` for a tab, and
+// `\u` with four hexadecimal digits for any other control character. The
+// Unicode line and paragraph separators, U+2028 and U+2029, are not
+// control characters, but they also come back as `\u` escapes. A path
+// thus stays on one line and does not send a control character to a
+// terminal, whatever key it names.
 func quoteName(name string) string {
 	if name != "" && !strings.ContainsAny(name, reservedNameChars) &&
 		!strings.ContainsFunc(name, isSeparatorRune) {
@@ -194,8 +199,8 @@ func quoteName(name string) string {
 }
 
 // isSeparatorRune reports whether r is `:`, whitespace, or a control
-// character. The first two read as part of the text around a path rather
-// than part of a name, and a control character changes how a terminal
+// character. Colons and whitespace read as part of the text around a path
+// rather than as part of a name. Control characters change how a terminal
 // shows that text.
 func isSeparatorRune(r rune) bool {
 	return r == ':' || unicode.IsSpace(r) || unicode.IsControl(r)
@@ -207,18 +212,18 @@ func isSeparatorRune(r rune) bool {
 // The two starting points follow RFC 9535 JSONPath. A path that starts at
 // `$` reads from the document root, wherever it resolves. A path that
 // starts at `@` reads from the current node: the node that resolves the
-// path, binds an error that carries it, or rebases it. [Doc] and
-// [Current] start a path at each:
+// path, binds an error that carries it, or rebases it. [Doc] starts a
+// path at `$`, and [Current] starts one at `@`:
 //
 //	paths.Doc().Child("spec", "replicas")  // $.spec.replicas
 //	paths.Current().Child("replicas")      // @.replicas
 //
 // A check written for a type reports its paths from `@`, the value it
-// checked, and the [go.jacobcolvin.com/niceyaml.Node] of that value puts
-// them under its own path when it binds them. A path the library hands
-// out, such as [go.jacobcolvin.com/niceyaml.Node.Path] or the path of a
-// bound error, starts at `$`, so it names the same node from any Node of
-// the document. A resolve that has no current node, such as
+// checked. The [go.jacobcolvin.com/niceyaml.Node] of that value puts
+// those paths under its own path when it binds them. Every path that the
+// library returns, such as [go.jacobcolvin.com/niceyaml.Node.Path] or the
+// path of a bound error, starts at `$`. Such a path names the same node
+// from any Node of the document. A resolve without a current node, such as
 // [Resolver.Node], reads an `@` path from the document root.
 //
 // A Path is a value and never changes. Each selector method returns a new
@@ -229,17 +234,17 @@ func isSeparatorRune(r rune) bool {
 //	replicas := spec.Child("replicas") // $.spec.replicas
 //	image := spec.Child("image")       // $.spec.image
 //
-// The zero value is the current node, the same as [Current]. A path
-// selects a node, which for a mapping entry is its value. [Path.Key]
-// appends the `~` selector, which picks the key of that entry instead, so
-// one Path names either node of an entry and every method that takes a
-// Path, such as [Resolver.Token] or [go.jacobcolvin.com/niceyaml.AtPath],
-// reads the key or the value from the Path alone.
+// The zero value is `@` with no selectors, the same as [Current]. A path
+// selects a node, and for a mapping entry that node is the value.
+// [Path.Key] appends the `~` selector, which picks the key of the entry
+// instead. One Path thus names either node of an entry. [Resolver.Token],
+// [go.jacobcolvin.com/niceyaml.AtPath], and every other function that
+// takes a Path read the key or the value from the Path alone.
 //
 // [Path.String] returns the path as a path expression, `$` or `@` and the
-// selectors after it, and [Parse] reads it back as an equal Path.
-// [Path.Equal] compares two paths, since the `==` operator does not
-// compile for a Path. A Path writes itself as that expression through
+// selectors after it, and [Parse] reads it back as an equal Path. The
+// `==` operator does not compile for a Path, so [Path.Equal] compares two
+// paths. A Path writes itself as that expression through
 // [Path.MarshalText] and reads it through [Path.UnmarshalText], so it
 // encodes as a string in JSON and YAML. [Path.Selectors] yields the
 // selectors themselves, so a caller reads each name and index without
@@ -248,8 +253,8 @@ func isSeparatorRune(r rune) bool {
 // Create instances with [Doc], [Current], [Parse], or [MustParse].
 type Path struct {
 	segments []segment
-	// The path starts at `$`, the document root, rather than at `@`, the
-	// current node.
+	// Whether the path starts at `$`, the document root, rather than at
+	// `@`, the current node.
 	absolute bool
 }
 
@@ -267,8 +272,7 @@ func Current() Path {
 // extend returns a copy of p with segs appended to its selectors. The copy
 // owns its selectors, so extending the same prefix twice yields two
 // independent paths. The copy starts where p does. With no segs, extend
-// returns p itself, so extending by nothing leaves a path equal to the
-// receiver.
+// returns p itself.
 func (p Path) extend(segs ...segment) Path {
 	if len(segs) == 0 {
 		return p
@@ -293,10 +297,10 @@ func (p Path) Child(name ...string) Path {
 }
 
 // ChildAll returns a copy of the path with a `.*` wildcard selector
-// appended, which selects the value of every entry of a mapping. It
-// selects the entries that a `.name` selector resolves in that mapping,
-// one for each name, so it sees the entries a `<<` merge key brings in and
-// leaves out the merge key itself:
+// appended. The `.*` selector selects the value of every entry of a
+// mapping. It selects the entries that a `.name` selector resolves in that
+// mapping, one for each name. It thus sees the entries a `<<` merge key
+// brings in and leaves out the merge key itself:
 //
 //	paths.Doc().Child("jobs").ChildAll()                 // $.jobs.*
 //	paths.Doc().Child("jobs").ChildAll().Child("steps")  // $.jobs.*.steps
@@ -311,10 +315,10 @@ func (p Path) ChildAll() Path {
 // Index returns a copy of the path with an `[idx]` selector appended for
 // each index.
 //
-// Panics if an index is below 0, since no sequence has such an element
-// and [Parse] rejects the selector. A search such as [slices.Index]
-// returns -1 when it finds nothing, so a caller checks that result before
-// it builds the path.
+// Panics if an index is negative, because a sequence does not have an
+// element at a negative index and [Parse] rejects the selector. A search
+// such as [slices.Index] returns -1 when it does not find a match, so a
+// caller should check that result before it builds the path.
 func (p Path) Index(idx ...int) Path {
 	segs := make([]segment, 0, len(idx))
 	for _, i := range idx {
@@ -334,18 +338,19 @@ func (p Path) IndexAll() Path {
 	return p.extend(segment{kind: segmentIndexAll})
 }
 
-// Key returns a copy of the path with a `~` selector appended, which picks
-// the key of the mapping entry the selector before it picked rather than
-// its value. The selector looks through the `?` indicator of an explicit
-// key. It keeps a tag on the key, as a path to a value keeps a tag on the
-// value, so the key decodes as it does when the decoder reads the
-// mapping, and [Resolver.Token] still gives the key text. Where the path
-// selects no entry, such as a sequence element or the root, the `~`
-// selects the node the path already does, so an error at such a path
-// highlights the same text with or without it. A path to a mapping or a
-// sequence under a key points at that key already, as [Resolver.Token]
-// describes, so the `~` there changes the node the path selects and
-// leaves the token it points at.
+// Key returns a copy of the path with a `~` selector appended. The `~`
+// selector picks the key of the mapping entry that the selector before it
+// picked, rather than its value. It looks through the `?` indicator of an
+// explicit key. It keeps a tag on the key, as a path to a value keeps a
+// tag on the value. The key thus decodes as it does when the decoder
+// reads the mapping, and [Resolver.Token] still gives the key text.
+//
+// Where the path does not select an entry, such as where it selects a
+// sequence element or the root, the `~` selects the node the path already
+// does. An error at such a path thus highlights the same text with or
+// without the `~`. A path to a mapping or a sequence under a key already
+// points at that key, as [Resolver.Token] describes. The `~` there changes
+// the node the path selects but not the token it points at.
 //
 //	name := paths.Doc().Child("metadata", "name")
 //	r := paths.NewResolver(doc)
@@ -362,13 +367,14 @@ func (p Path) Recursive(selector string) Path {
 }
 
 // RecursiveAll returns a copy of the path with a `..*` recursive wildcard
-// selector appended, which selects every node below the node the path
-// before it selects: the value of each mapping entry and each element of
-// a sequence, at any depth, in document order. It follows the rules
-// [Resolver.Nodes] gives for a `..name` selector, so it lists each node once,
-// where the source writes it, and does not follow aliases. It leaves out
-// the entry of a `<<` merge key, as `.*` does, and the sources that key
-// lists, but walks a mapping written inline there:
+// selector appended. The `..*` selector selects every node below the node
+// that the path before it selects, at any depth and in document order.
+// Those nodes are the value of each mapping entry and each element of a
+// sequence. The selector follows the rules [Resolver.Nodes] gives for a
+// `..name` selector. It thus lists each node once, where the source writes
+// it, and does not follow aliases. It leaves out the entry of a `<<` merge
+// key, as `.*` does, and the sources that key lists, but walks a mapping
+// written inline there:
 //
 //	paths.Doc().RecursiveAll()               // $..*
 //	paths.Doc().Child("spec").RecursiveAll() // $.spec..*
@@ -381,24 +387,25 @@ func (p Path) RecursiveAll() Path {
 }
 
 // Join returns a copy of the path with the selectors of each of qs
-// appended in order, so a path written from one node of a document
-// resolves from the root:
+// appended in order. With Join, a path written from one node of a
+// document resolves from the root:
 //
 //	hours := paths.Doc().Child("spec", "hours")
 //	open := paths.Current().Child("open")
 //	hours.Join(open) // $.spec.hours.open
 //
-// An `@` path in qs reads from the node the path before it selects, so
-// Join appends its selectors, and the result starts where the receiver
-// does. A `$`
-// path reads from the document root wherever it appears, so it replaces
-// the path before it, and Join appends the paths after it:
+// An `@` path in qs reads from the node that the path before it selects,
+// so Join appends its selectors. When qs does not hold a `$` path, the
+// result thus starts where the receiver does. A `$` path reads from the
+// document root wherever it appears, so it replaces the path before it,
+// and Join appends the paths after it:
 //
 //	hours.Join(paths.Doc().Child("name")) // $.name
 //
-// Joining [Current], or nothing, changes nothing, and joining an `@` path
-// to Current yields that path. Join copies each selector once, so joining
-// many short paths in one call takes time linear in their total length.
+// Join returns the receiver as it is when qs is empty or holds only
+// [Current], and joining an `@` path to Current yields that path. Join
+// copies each selector once, so joining many short paths in one call takes
+// time in proportion to their total length.
 func (p Path) Join(qs ...Path) Path {
 	start, rest := p, qs
 
@@ -432,21 +439,22 @@ func (p Path) Join(qs ...Path) Path {
 // CutPrefix returns the path without the leading selectors of prefix and
 // reports whether the path starts with prefix, as [strings.CutPrefix] does
 // for a string. It undoes [Path.Join], so a path that reads from the root
-// of a document reads from one node of it:
+// of a document becomes one that reads from a node of it:
 //
 //	hours := paths.Doc().Child("spec", "hours")
 //	open := paths.Doc().Child("spec", "hours", "open")
 //	open.CutPrefix(hours) // @.open, true
 //
-// The rest reads from the node prefix selects, so it is an `@` path
-// wherever the receiver starts, and a path cut by itself is [Current]. A
-// path starts with prefix when both start at the same point and the
-// selectors of prefix lead its own, so a `$` path never starts with an
-// `@` path, nor an `@` path with a `$` path. A path that does not start
-// with prefix comes back as it is, with false. Two selectors match when
-// they are equal, so `[*]` matches `[*]` and not the index of an element
-// it selects, and `.*` matches `.*` and not the name of an entry it
-// selects.
+// The rest reads from the node that prefix selects. It is thus an `@`
+// path wherever the receiver starts, and a path cut by itself is
+// [Current]. A path starts with prefix when both start at the same point
+// and the selectors of prefix lead its own. A `$` path thus never starts
+// with an `@` path, and an `@` path never starts with a `$` path. A path
+// that does not start with prefix comes back as it is, with false.
+//
+// Two selectors match when they are equal. A `[*]` thus matches `[*]` but
+// not the index of an element it selects, and `.*` matches `.*` but not
+// the name of an entry it selects.
 func (p Path) CutPrefix(prefix Path) (Path, bool) {
 	n := len(prefix.segments)
 	if p.absolute != prefix.absolute || n > len(p.segments) || !slices.Equal(p.segments[:n], prefix.segments) {
@@ -468,7 +476,7 @@ func (p Path) CutPrefix(prefix Path) (Path, bool) {
 //
 // The parent starts where the path does. Parent drops one selector of
 // any kind. The parent of a path that ends in `~` is the path to the value
-// of the same entry, and the parent of a path that ends in `.*`, `[*]`,
+// of the same entry. The parent of a path that ends in `.*`, `[*]`,
 // `..name`, or `..*` is the path to the node that selector reads.
 func (p Path) Parent() (Path, bool) {
 	n := len(p.segments)
@@ -485,9 +493,9 @@ func (p Path) Parent() (Path, bool) {
 
 // IsRoot reports whether the path names the document root: `$` with no
 // selectors, as [Doc] creates. A path of `@` with no selectors names the
-// current node, which is the root only for a resolve that has no current
-// node, so IsRoot reports false for it. [Path.Len] reports whether any
-// path holds selectors.
+// current node. That node is the root only for a resolve without a
+// current node, so IsRoot reports false for such a path. [Path.Len]
+// counts the selectors of a path that starts at either point.
 func (p Path) IsRoot() bool {
 	return p.absolute && len(p.segments) == 0
 }
@@ -504,12 +512,13 @@ func (p Path) IsAbsolute() bool {
 // place.
 //
 // Two selectors are equal when they have the same kind and the same name
-// or index. A wildcard therefore equals the same wildcard and no selector
-// it stands for, so `$.items[*]` differs from `$.items[0]`, and `$.jobs.*`
-// from `$.jobs.build`. Equal compares the paths and not the nodes they
-// select, so `$.name` differs from `@.name`, and two paths that reach one
-// node through an alias differ. Paths that print the same [Path.String]
-// are equal, and that string keys a map of paths.
+// or index. A wildcard therefore equals the same wildcard but does not
+// equal a selector it stands for. The path `$.items[*]` thus differs from
+// `$.items[0]`, and `$.jobs.*` differs from `$.jobs.build`. Equal
+// compares the paths and not the nodes they select, so `$.name` differs
+// from `@.name`, and two paths that reach one node through an alias
+// differ. Paths that print the same [Path.String] are equal, so a caller
+// can key a map of paths by that string.
 func (p Path) Equal(q Path) bool {
 	return p.absolute == q.absolute && slices.Equal(p.segments, q.segments)
 }
@@ -519,9 +528,9 @@ func (p Path) Equal(q Path) bool {
 // that holds a reserved character, `:`, or whitespace comes back in
 // single quotes, as in "$.'x: y'". A control character in a name comes
 // back as an escape inside the quotes, as in `$.'a\nb'` for a line feed
-// and `$.'a\u001bb'` for an escape, and so does a Unicode line or
-// paragraph separator. The expression thus stays on one line and changes
-// nothing in a terminal that prints it.
+// and `$.'a\u001bb'` for an escape. A Unicode line or paragraph separator
+// also comes back as an escape. The expression thus stays on one line and
+// does not send a control character to a terminal that prints it.
 func (p Path) String() string {
 	var sb strings.Builder
 
@@ -549,8 +558,8 @@ func (p Path) MarshalText() ([]byte, error) {
 // expression as [Parse] does, so a Path decodes from a string of JSON or
 // YAML, and from the text [Path.MarshalText] writes.
 //
-// Returns the error of Parse for a malformed expression, which wraps
-// [ErrInvalidPath], and leaves the path as it was.
+// Returns the error of Parse for a malformed expression and leaves the
+// path as it was. That error wraps [ErrInvalidPath].
 func (p *Path) UnmarshalText(text []byte) error {
 	parsed, err := Parse(string(text))
 	if err != nil {
@@ -563,56 +572,58 @@ func (p *Path) UnmarshalText(text []byte) error {
 }
 
 // YAMLPath returns the equivalent [*yaml.Path] for use with the goccy/go-yaml
-// API, such as [yaml.Path.FilterNode] on a tree the caller parsed. Every Node
-// of a Source shares the tree [go.jacobcolvin.com/niceyaml.Source.File]
-// returns, and [go.jacobcolvin.com/niceyaml.Node.AST] and
-// [go.jacobcolvin.com/niceyaml.Node.DocumentAST] return parts of that tree,
-// so a call that edits a tree, such as [yaml.Path.ReplaceWithNode], runs on
-// a tree of the caller's own.
+// API, such as [yaml.Path.FilterNode] on a tree the caller parsed. Every
+// Node of a Source shares the tree that
+// [go.jacobcolvin.com/niceyaml.Source.File] returns.
+// [go.jacobcolvin.com/niceyaml.Node.AST] and
+// [go.jacobcolvin.com/niceyaml.Node.DocumentAST] return parts of that tree.
+// A caller should thus run a call that edits a tree, such as
+// [yaml.Path.ReplaceWithNode], on a tree of its own.
 //
-// The goccy/go-yaml syntax has no `@`, and a goccy/go-yaml path always
-// reads from the node a call such as FilterNode starts at. YAMLPath
-// writes `$` for both `$` and `@`, so the result of an `@` path applies
-// its selectors from that node, and so does the result of a `$` path. A
-// caller with an `@` path passes FilterNode the node the path reads from.
+// The goccy/go-yaml syntax lacks `@`, and a goccy/go-yaml path always
+// reads from the node that a call such as FilterNode starts at. YAMLPath
+// writes `$` for both `$` and `@`, so the result of either path applies
+// its selectors from that node. A caller with an `@` path should pass
+// FilterNode the node that the path reads from.
 //
 // The result holds each child name as its raw text. [yaml.Path.FilterNode]
 // and [yaml.Path.ReplaceWithNode] compare that name with the text of the
-// first token of each key, where [Resolver.Node] compares it with the name
+// first token of each key, but [Resolver.Node] compares it with the name
 // [Resolver.KeyName] gives. A key with an anchor, a tag, an alias, an
 // explicit `?`, or a block scalar header matches the text of that
 // indicator, such as `&`, `!!str`, `*`, `?`, or `|-`, rather than its name.
-// Neither function sees the entries a `<<` merge key brings in. Among
-// duplicate keys, FilterNode selects the first and ReplaceWithNode
-// replaces them all, where [Resolver.Node] selects the last.
+// FilterNode and ReplaceWithNode do not see the entries a `<<` merge key
+// brings in. Among duplicate keys, FilterNode selects the first and
+// ReplaceWithNode replaces all of them. [Resolver.Node] selects the last.
 //
 // FilterNode also strips single quotes from around a name and quotes from
-// around the text of a key, so Child("'id'") may select the key id. A path
-// has no goccy/go-yaml string form when it holds an empty name, a name that
-// is not valid UTF-8, or a recursive name with `.`, `[`, `]`, `$`, or `*`.
-// YAMLPath builds such a path with [yaml.PathBuilder], whose
-// ReplaceWithNode skips any child name that holds `.` or `*`.
+// around the text of a key. The result for Child("'id'") thus selects the
+// key id. A path does not have a goccy/go-yaml string form when it holds
+// an empty name, a name that is not valid UTF-8, or a recursive name with
+// `.`, `[`, `]`, `$`, or `*`. YAMLPath builds such a path with
+// [yaml.PathBuilder], whose ReplaceWithNode skips any child name that
+// holds `.` or `*`.
 //
-// The String of the result is the goccy/go-yaml form, which differs from
-// [Path.String] for names with reserved characters, and [yaml.PathString]
-// does not always read it back. The goccy/go-yaml syntax has no quoting for recursive
-// selectors, so Recursive("a.b") prints as `$..a.b`, which
-// [yaml.PathString] reads as two selectors. Use [Path.String] for a form
-// that [Parse] reads back.
+// The String of the result is the goccy/go-yaml form. That form differs
+// from [Path.String] for names with reserved characters, and
+// [yaml.PathString] does not always read it back. The goccy/go-yaml
+// syntax does not quote recursive selectors, so Recursive("a.b") prints as
+// `$..a.b`. [yaml.PathString] reads that text as two selectors. Use
+// [Path.String] for a form that [Parse] reads back.
 //
-// The goccy/go-yaml syntax has no selector for the key of an entry, so
-// YAMLPath leaves out the `~` selector from [Path.Key] and the selectors
-// after it apply to the value. The path $.a~.b becomes $.a.b, which can
-// select a node where [Resolver.Node] finds nothing.
+// The goccy/go-yaml syntax does not have a selector for the key of an
+// entry. YAMLPath thus leaves out the `~` selector from [Path.Key], and
+// the selectors after it apply to the value. The path $.a~.b becomes
+// $.a.b, which can select a node where [Resolver.Node] does not find one.
 //
-// The goccy/go-yaml syntax has no selector for every entry of a mapping
-// either, and its `[*]` lists the elements of a sequence alone. A path
-// without the `.*` selector from [Path.ChildAll] would name the mapping
-// in place of its entries, so YAMLPath returns an error wrapping
-// [ErrNoYAMLPath] for a path that holds one. Its `..` takes a name alone,
-// so YAMLPath returns that error for the `..*` selector from
-// [Path.RecursiveAll] too. A caller resolves such a path with
-// [Resolver.Matches] and converts the path of each match.
+// The goccy/go-yaml syntax also lacks a selector for every entry of a
+// mapping, and its `[*]` lists only the elements of a sequence. Dropping
+// the `.*` selector from [Path.ChildAll] leaves a path to the mapping
+// rather than to its entries. YAMLPath thus returns an error wrapping
+// [ErrNoYAMLPath] for a path that holds a `.*` selector. The goccy/go-yaml
+// `..` takes only a name, so YAMLPath also returns that error for the
+// `..*` selector from [Path.RecursiveAll]. A caller can resolve such a
+// path with [Resolver.Matches] and convert the path of each match.
 func (p Path) YAMLPath() (*yaml.Path, error) {
 	// Only a path that yaml.PathString reads holds a quoted name as its raw
 	// text. The builder holds a name with `.` or `*` still quoted, and the
@@ -650,10 +661,11 @@ func (p Path) YAMLPath() (*yaml.Path, error) {
 
 // builderName returns the text to pass [yaml.PathBuilder.Child] so that
 // [yaml.Path.FilterNode] compares keys with name. The builder puts single
-// quotes around a name with `.` or `*` and escapes the quotes inside it,
-// and FilterNode strips the outer quotes but keeps the escapes, so a'.b
-// would match no key. The builder keeps a name that starts and ends with a
-// single quote as it is, so builderName wraps the raw name itself.
+// quotes around a name with `.` or `*` and escapes the quotes inside it.
+// FilterNode strips the outer quotes but keeps the escapes, so a path that
+// the builder makes from the name a'.b does not match any key. The builder
+// keeps a name that starts and ends with a single quote as it is, so
+// builderName wraps the raw name itself.
 func builderName(name string) string {
 	enclosed := strings.HasPrefix(name, "'") && strings.HasSuffix(name, "'")
 	if enclosed || !strings.ContainsAny(name, ".*") {
@@ -663,12 +675,12 @@ func builderName(name string) string {
 	return "'" + name + "'"
 }
 
-// goccyString returns the path in the syntax [yaml.PathString] reads, with
-// every child name quoted so that PathString holds it as its raw text. It
-// reports false for a path that syntax cannot hold. PathString rejects an
-// empty name, has no quoting for a recursive name, has no selector for
-// every entry of a mapping or every node below one, and reads a name that
-// is not valid UTF-8 as a different name.
+// goccyString returns the path in the syntax that [yaml.PathString] reads,
+// with every child name quoted so that PathString holds it as its raw
+// text. It reports false for a path that syntax cannot hold. PathString
+// rejects an empty name and reads a name that is not valid UTF-8 as a
+// different name. The syntax does not quote a recursive name, and it lacks
+// a selector for every entry of a mapping or for every node below one.
 func (p Path) goccyString() (string, bool) {
 	var sb strings.Builder
 
@@ -724,15 +736,18 @@ func (p Path) wildcard() bool {
 // matches resolves the path in doc with r, a resolver for doc, and
 // returns every match.
 //
-// A document below a "---" header that holds no content is the null
-// document. Its body is nil, or it holds only comments or directives, as a
-// parse that keeps comments leaves in a comment-only document. A path with
-// no selectors matches that null at the header, so an error about the
-// document as a whole points at its header line. Every deeper path
-// matches nothing there, and no path matches anything in a document
-// without a header that holds no content. A file of whitespace alone
-// parses to such a document, whose body is a placeholder scalar, and
-// [astnode.HasContent] finds no content in it.
+// A document under a "---" header is the null document when it does not
+// hold content. Its body is nil, or the body holds only comments or
+// directives. A parse that keeps comments leaves them in the body of a
+// comment-only document. A path with no selectors, or with only `~`
+// selectors, matches that null at the header. An error about the document
+// as a whole thus points at its header line. No deeper path matches
+// anything there.
+//
+// In a document without content and without a header, no path matches
+// anything. A file of whitespace alone parses to such a document, whose
+// body is a placeholder scalar, and [astnode.HasContent] does not find
+// content in it.
 //
 // Returns an error wrapping [ErrNotFound] and [ErrNoDocument] when doc is
 // nil.
@@ -758,8 +773,8 @@ func (p Path) matches(r *resolver, doc *ast.DocumentNode) ([]match, error) {
 }
 
 // selectsRoot reports whether the path names the root node. A path names
-// the root when it has no segments, or only the `~` segments of
-// [Path.Key], which on the root select the node the path already does.
+// the root when it does not have segments, or has only the `~` segments
+// of [Path.Key]. On the root, a `~` segment selects the root itself.
 func (p Path) selectsRoot() bool {
 	for _, s := range p.segments {
 		if s.kind != segmentKey {
@@ -775,7 +790,7 @@ func (p Path) selectsRoot() bool {
 //
 // Returns [ErrWildcard] for a path with a `.*`, `[*]`, or `..` selector and
 // wraps [ErrNotFound] when nothing exists at the path, together with
-// [ErrNoDocument] when doc is nil or holds no content.
+// [ErrNoDocument] when doc is nil or does not hold content.
 func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 	if p.wildcard() {
 		return match{}, fmt.Errorf("resolve %s: %w", p, ErrWildcard)
@@ -798,7 +813,7 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 }
 
 // singleFrom resolves the path from node with r, a resolver for the
-// document node belongs to, to exactly one match, as [Path.single]
+// document that node belongs to, to exactly one match, as [Path.single]
 // resolves it from the root of a document.
 //
 // Returns [ErrWildcard] for a path with a `.*`, `[*]`, or `..` selector and
@@ -823,11 +838,12 @@ func (p Path) singleFrom(r *resolver, node ast.Node) (match, error) {
 // Match is one node a [Path] selects in a document, together with the path
 // that selects that node alone. That path is the path as given, with each
 // `[*]` selector replaced by the index of the element and each `.*` selector
-// by the name of the entry, as [Resolver.KeyName] gives it. Each `..name`
-// or `..*` selector gives way to the selectors from the node it applied to
-// down to the node it found, so the path names the node wherever it lies.
-// The path starts at `$`, since the node lies in the document, so a match
-// of an `@` path holds the `$` path with its selectors.
+// by the name of the entry, as [Resolver.KeyName] gives it. In place of
+// each `..name` or `..*` selector, the path holds the selectors from the
+// node that selector applied to down to the node it found. The path thus
+// names the node wherever it lies. The path starts at `$` because the
+// node lies in the document, so each match of an `@` path holds the `$`
+// path with its selectors.
 //
 // Receive instances from [Resolver.Matches].
 type Match struct {
@@ -835,10 +851,10 @@ type Match struct {
 	Path Path
 }
 
-// tokenOf returns the token p points at for m, a match of p, as
-// [astnode.PathToken] finds it. A tree built by hand may hold a typed nil
-// where the parser always puts a node, and such a node has no token to
-// point at, which is [ErrNotFound].
+// tokenOf returns the token that p points at for m, a match of p, as
+// [astnode.PathToken] finds it. A tree built by hand might hold a typed
+// nil where the parser always puts a node. Such a node does not have a
+// token to point at, so tokenOf returns an error wrapping [ErrNotFound].
 func (p Path) tokenOf(m match) (*token.Token, error) {
 	tk := astnode.PathToken(m.node, m.parent())
 	if tk == nil {

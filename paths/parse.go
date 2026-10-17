@@ -20,7 +20,7 @@ var (
 	errIndexOutOfRange = errors.New("out of range")
 
 	// A `\u` in a quoted selector with fewer than four hexadecimal digits
-	// behind it produces errUnicodeEscapeDigits.
+	// after it produces errUnicodeEscapeDigits.
 	errUnicodeEscapeDigits = errors.New(`\u escape in quoted selector needs four hexadecimal digits`)
 )
 
@@ -45,13 +45,15 @@ var (
 //   - `~` selects the key of the entry the selector before it picked.
 //
 // Inside quotes, `\` escapes the next character, so `\'` is a quote and
-// `\\` is a backslash. Four escapes name a control character, which is
-// how [Path.String] writes one: `\n` is a line feed, `\r` a carriage
-// return, `\t` a tab, and `\u` with four hexadecimal digits the character
-// with that code, as `\u001b` is an escape. Any other character after `\`
-// stands for itself. An index is a decimal with no sign and no leading
-// zero. [Path.Key] appends the `~` selector. A `*` in an unquoted name is
-// malformed.
+// `\\` is a backslash. Parse reads the escapes that [Path.String] writes
+// for a control character. The escape `\n` is a line feed, `\r` is a
+// carriage return, and `\t` is a tab. The escape `\u` with four
+// hexadecimal digits is the character with that code, such as `\u001b`
+// for the escape character. Any other character after `\` stands for
+// itself.
+//
+// An index is a decimal without a sign or a leading zero. A `*` in an
+// unquoted name is malformed. [Path.Key] appends the `~` selector.
 //
 // Returns an error wrapping [ErrInvalidPath] for a malformed expression.
 func Parse(expr string) (Path, error) {
@@ -70,7 +72,7 @@ func Parse(expr string) (Path, error) {
 
 // MustParse is like [Parse] but panics if the expression is invalid.
 //
-// Use it for path expressions known to be valid at compile time.
+// Use it for path expressions that you know are valid at compile time.
 func MustParse(expr string) Path {
 	p, err := Parse(expr)
 	if err != nil {
@@ -120,9 +122,9 @@ func parseSegments(expr string) ([]segment, error) {
 	return segs, nil
 }
 
-// unexpectedError reports the character that starts rest, found at byte
-// offset in the expression. A byte that does not start valid UTF-8 prints
-// as an escape such as "\xff".
+// unexpectedError returns an error that names the character that starts
+// rest and its byte offset in the expression. A byte that does not start
+// valid UTF-8 prints as an escape such as "\xff".
 func unexpectedError(rest string, offset int) error {
 	r, size := utf8.DecodeRuneInString(rest)
 	if r == utf8.RuneError && size == 1 {
@@ -155,8 +157,8 @@ func parseName(rest string) (string, string, error) {
 // parseNameOrStar reads the selector after `.` or `..`: the `*` of a
 // wildcard selector of kind all, such as `.*`, or the unquoted name of a
 // selector of kind named, such as `.name`. A `*` is the whole selector, so
-// a name that goes on after it is malformed, as any other unquoted name
-// with a `*` is.
+// a name that continues after it is malformed, as is any other unquoted
+// name with a `*`.
 func parseNameOrStar(rest string, all, named segmentKind) (segment, string, error) {
 	after, ok := strings.CutPrefix(rest, "*")
 	if ok && (after == "" || strings.IndexByte(".[~", after[0]) >= 0) {
@@ -178,8 +180,8 @@ func parseUnquoted(rest string, kind segmentKind) (segment, string, error) {
 }
 
 // parseQuoted reads a single-quoted name after `.'` or `..'` as a selector
-// of the given kind, where `\` escapes the next character as [Parse]
-// describes. The quotes may hold nothing, which names the empty key.
+// of the given kind. Inside the quotes, `\` escapes the next character as
+// [Parse] describes. Empty quotes name the empty key.
 func parseQuoted(rest string, kind segmentKind) (segment, string, error) {
 	var sb strings.Builder
 
@@ -230,8 +232,8 @@ const unicodeEscapeDigits = 4
 
 // parseUnicodeEscape reads the [unicodeEscapeDigits] hexadecimal digits
 // that start rest as the code of a character. It returns an error when
-// rest starts with fewer, and when the digits name a surrogate half,
-// which is no character.
+// rest starts with fewer such digits. It also returns an error when the
+// digits name a surrogate half, which is not a character.
 func parseUnicodeEscape(rest string) (rune, error) {
 	if len(rest) < unicodeEscapeDigits {
 		return 0, errUnicodeEscapeDigits
@@ -300,8 +302,8 @@ func parseIndex(rest string) (segment, string, error) {
 }
 
 // isCanonicalIndex reports whether s is a non-negative decimal integer as
-// [Path.String] writes one: at least one digit, and no leading zero unless
-// the number is zero itself.
+// [Path.String] writes one. Such an integer has at least one digit, and it
+// starts with a zero only when the number is zero itself.
 func isCanonicalIndex(s string) bool {
 	if s == "" || (len(s) > 1 && s[0] == '0') {
 		return false
