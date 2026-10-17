@@ -16,16 +16,16 @@
 //
 // # Messages
 //
-// In the message of an error, a tab lays out the text after it, as the
-// tab in front of each suggestion Cobra lists does. [Message] replaces
+// In the message of an error, a tab aligns the text after it, as the tab
+// in front of each suggestion that Cobra lists does. [Message] replaces
 // each tab with four spaces and replaces the other control characters as
 // [Rows] does:
 //
 //	escape.Message("did you mean this?\n\tvalidate") // "did you mean this?\n    validate"
 //
-// [Tabs] replaces the tabs alone, for a message that a renderer escapes
+// [Tabs] replaces only the tabs, for a message that a renderer escapes
 // later, such as the message an annotation carries. [Line] replaces each
 // tab the same way for text that must stay on one row, such as the name
-// of a source, and replaces every other control character, line feeds
-// included, as [Control] does.
+// of a source. It replaces every other control character as [Control]
+// does, line feeds included.
 package escape

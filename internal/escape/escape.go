@@ -23,7 +23,7 @@ const (
 	// DELPicture is the Unicode Control Picture for [DEL].
 	DELPicture = 0x2421
 	// ReplacementCharacter is the Unicode replacement character.
-	// [Control] uses it for C1 control characters, which have no
+	// [Control] uses it for C1 control characters, which do not have
 	// control pictures.
 	ReplacementCharacter = 0xFFFD
 )
@@ -34,7 +34,7 @@ const (
 //   - C1 controls ([PAD]-[APC]) become [ReplacementCharacter].
 //   - [DEL] becomes [DELPicture].
 //
-// For example, an ANSI escape sequence like "\x1b[31m" becomes "␛[31m".
+// For example, an ANSI escape sequence such as "\x1b[31m" becomes "␛[31m".
 func Control(s string) string {
 	var sb strings.Builder
 
@@ -82,9 +82,9 @@ func Tabs(s string) string {
 	return strings.ReplaceAll(s, "\t", strings.Repeat(" ", TabWidth))
 }
 
-// Message is like [Rows], but it lays s out as the text of a message,
-// such as the message of an error. A tab in a message lays out the text
-// after it, so Message replaces each tab as [Tabs] does.
+// Message is like [Rows], but it formats s as the text of a message, such
+// as the message of an error. A tab in a message aligns the text after
+// it, so Message replaces each tab as [Tabs] does.
 //
 // For example, "did you mean this?\n\tvalidate" becomes
 // "did you mean this?\n    validate".
@@ -92,9 +92,9 @@ func Message(s string) string {
 	return Rows(Tabs(s))
 }
 
-// Line is like [Control], but it lays s out as one line of text, such as
-// the name of a source or a message on a row of its own, so it replaces
-// each tab as [Tabs] does first.
+// Line is like [Control], but it formats s as one line of text, such as
+// the name of a source or a message on a row of its own. It first replaces
+// each tab as [Tabs] does.
 //
 // For example, "a\tb\n" becomes "a    b␊".
 func Line(s string) string {
