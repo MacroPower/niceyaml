@@ -1,19 +1,19 @@
-// Package cells measures the terminal cells a line of content takes as the
-// printer renders it.
+// Package cells measures the terminal cells that a line of content takes
+// as the printer renders it.
 //
 // A rendered row shows each control character as a one-cell picture and
 // each grapheme cluster at its display width. A cluster can hold several
-// runes, as a combining mark, an emoji ZWJ sequence, or a keycap does,
-// while positions count runes. A [Row] maps each rune column to its cells.
-// The first rune of a cluster takes the width of the whole cluster, and
-// every other rune of it takes none, so a marker aimed at any rune of a
-// cluster lands under the whole cluster.
+// runes, as a combining mark, an emoji zero-width joiner sequence, or a
+// keycap does, but positions count runes. A [Row] maps each rune column to
+// its cells. The first rune of a cluster takes the width of the whole
+// cluster, and every other rune of it does not take a cell. A marker aimed
+// at any rune of a cluster therefore lands under the whole cluster.
 //
 //	row := cells.NewRow("a: 1️⃣ x")
 //	row.Width(7) // 6, the cells before x
 //
 // A rendered row also carries the escape sequences of its styles. [Cut]
-// cuts such a row to a range of cells, measuring each cluster the same
+// cuts such a row to a range of cells. It measures each cluster the same
 // way, so the width of what it returns agrees with [ansi.StringWidth].
 package cells
 
@@ -29,14 +29,14 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 )
 
-// Row holds the cells each rune column of one line of content takes, and
-// the cells before each column, so it measures any column in constant
-// time. Its methods treat a negative column as column 0.
+// Row holds the cells that each rune column of one line of content takes,
+// and the cells before each column. It therefore measures any column in
+// constant time. Its methods treat a negative column as column 0.
 //
 // Create instances with [NewRow].
 type Row struct {
 	// For each column up to the end of the content, before holds the
-	// cells the columns before it take.
+	// cells that the columns before it take.
 	before []int
 	starts []int
 }
@@ -68,7 +68,7 @@ func NewRow(content string) Row {
 	return r
 }
 
-// Start returns the column of the rune that starts the cluster holding
+// Start returns the column of the rune that starts the cluster that holds
 // col. A column past the end of the content starts its own cluster.
 func (r Row) Start(col int) int {
 	col = max(0, col)
@@ -79,9 +79,9 @@ func (r Row) Start(col int) int {
 	return col
 }
 
-// Cells returns the cells col takes: the width of its cluster on the first
-// rune of a cluster, zero on every other rune of it, and one past the end
-// of the content.
+// Cells returns the cells that col takes. The first rune of a cluster
+// takes the width of its cluster, and every other rune of it takes zero.
+// A column past the end of the content takes one.
 func (r Row) Cells(col int) int {
 	col = max(0, col)
 	if col < len(r.starts) {
@@ -91,8 +91,8 @@ func (r Row) Cells(col int) int {
 	return 1
 }
 
-// Width returns the cells the content takes before col, with a column past
-// the end of the content taking one cell. A column inside a cluster
+// Width returns the cells that the content takes before col. A column past
+// the end of the content takes one cell. A column inside a cluster
 // measures up to the start of its cluster. The width saturates at
 // [math.MaxInt].
 func (r Row) Width(col int) int {
@@ -106,10 +106,10 @@ func (r Row) Width(col int) int {
 	return total + min(col-len(r.starts), math.MaxInt-total)
 }
 
-// Col returns the first column at or after the cluster holding lo that
-// starts a grapheme cluster at or past cell. A cell past the end of the
-// content maps to a column past it, one column per cell. The column
-// saturates at [math.MaxInt].
+// Col returns the first column that starts a grapheme cluster at or past
+// cell. It searches from the start of the cluster that holds lo. A cell
+// past the end of the content maps to a column past it, one column per
+// cell. The column saturates at [math.MaxInt].
 func (r Row) Col(lo, cell int) int {
 	lo = r.Start(lo)
 	n := len(r.starts)
@@ -139,7 +139,7 @@ func (r Row) Next(col int) int {
 	return col
 }
 
-// total returns the cells the whole content takes.
+// total returns the cells that the whole content takes.
 func (r Row) total() int {
 	if len(r.before) == 0 {
 		return 0
@@ -151,20 +151,20 @@ func (r Row) total() int {
 // Cut returns the grapheme clusters of s that start at or after column
 // left and end by column right, or "" when right is not past left. It
 // measures each cluster as [ansi.StringWidth] does, so a keycap takes its
-// two cells, where [ansi.Cut] counts one for its ASCII base. A cluster
-// that straddles either edge drops out whole, so the result can come up
-// short of right-left cells. A cluster of no width at column right falls
-// outside. Every byte outside a cluster, such as an escape sequence,
-// stays, so a style s opens still closes.
+// two cells. [ansi.Cut] counts one cell for the ASCII base of a keycap.
+// Cut drops a cluster that straddles either edge whole, so the result can
+// hold fewer than right-left cells. A zero-width cluster at column right
+// falls outside. Cut keeps every byte outside a cluster, such as an
+// escape sequence, so a style that s opens still closes.
 func Cut(s string, left, right int) string {
 	cut, _ := CutWidth(s, left, right)
 
 	return cut
 }
 
-// CutWidth returns what [Cut] returns along with the cells the cut takes,
-// the width [ansi.StringWidth] measures for it. A caller that pads the cut
-// to a width needs no second pass to measure it.
+// CutWidth returns what [Cut] returns along with the cells that the cut
+// takes, the width that [ansi.StringWidth] measures for it. A caller that
+// pads the cut to a width does not need a second pass to measure it.
 func CutWidth(s string, left, right int) (string, int) {
 	if right <= left {
 		return "", 0
@@ -213,10 +213,10 @@ func CutWidth(s string, left, right int) (string, int) {
 }
 
 // TrimLastCluster returns s without its last grapheme cluster, the
-// character a user sees. It splits s at the grapheme cluster boundaries of
-// the raw text. These match the boundaries [NewRow] uses except around
-// control characters, which NewRow segments as their pictures, so a CR LF
-// pair is one cluster here but two in a [Row].
+// character that a user sees. It splits s at the grapheme cluster boundaries of
+// the raw text. These match the boundaries that [NewRow] uses except
+// around control characters. NewRow segments each control character as
+// its picture, so a CR LF pair is one cluster here but two in a [Row].
 func TrimLastCluster(s string) string {
 	var cluster string
 
