@@ -1,0 +1,12 @@
+---
+# Fika at Café Yamüll, with prices in kr.
+name: Café Yamüll
+fika:
+  - item: Kanelbulle
+    price: 45
+  - item: Semla
+    price: 55
+    tags: [seasonal]
+  - item: "Småkakor & Kaffe"
+    price: 200
+    dietry: [mjölk, gluten]

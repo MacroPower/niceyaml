@@ -127,6 +127,12 @@ An [`Error`][niceyaml.Error] names a path and holds no source. The errors exampl
 
 The reports example checks several files and keeps each error after [`niceyaml.Detach`][niceyaml.Detach] frees its `Source`. At the end, it reports every problem as an excerpt, as GitHub workflow commands, and as Markdown.
 
+### Warnings
+
+- [examples/warnings](examples/warnings)
+
+[`niceyaml.Warnings`][niceyaml.Warnings] collects the problems that do not fail a decode. The example reports warnings beside errors, turns them into errors for a strict mode, and reads the severity of each problem.
+
 ### Validators
 
 - [examples/validators](examples/validators)
@@ -171,6 +177,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [niceyaml.NewSourceFromLayers]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#NewSourceFromLayers
 [niceyaml.Node]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Node
 [niceyaml.Source]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Source
+[niceyaml.Warnings]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Warnings
 [niceyaml/diff]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/diff
 [niceyaml/edit]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/edit
 [niceyaml/encoder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/encoder
