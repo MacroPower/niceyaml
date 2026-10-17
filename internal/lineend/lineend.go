@@ -16,9 +16,9 @@ import (
 )
 
 // Lines yields the lines of s. It cuts each line after its line ending,
-// which is "\n", "\r\n", or a bare "\r". Each line keeps its line ending,
-// and the last line has none when s does not end with one. An empty s
-// yields nothing.
+// which is "\n", "\r\n", or a bare "\r". Each line keeps its line ending.
+// When s does not end with a line ending, the last line lacks one. An
+// empty s does not yield any lines.
 func Lines(s string) iter.Seq[string] {
 	return func(yield func(string) bool) {
 		start := 0
