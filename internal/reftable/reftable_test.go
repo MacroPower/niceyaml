@@ -116,6 +116,71 @@ func TestTable_Anchor(t *testing.T) {
 	}
 }
 
+func TestTable_View(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		table *reftable.Table
+		name  string
+		// The text of the anchor the table holds for name, or empty for
+		// none.
+		want string
+	}{
+		"anchor of a document": {
+			table: newTable(t, []string{"a: &x 1\n"}),
+			name:  "x",
+			want:  "&x 1",
+		},
+		"anchor of a table it reads": {
+			table: reftable.New(nil, newTable(t, []string{"a: &x 1\n"})),
+			name:  "x",
+			want:  "&x 1",
+		},
+		"name of no anchor": {
+			table: newTable(t, []string{"a: &x 1\n"}),
+			name:  "y",
+		},
+		"nil table": {
+			name: "x",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := tc.table.View(tc.name)
+			if tc.want == "" {
+				assert.False(t, ok)
+
+				return
+			}
+
+			require.True(t, ok)
+			assert.Equal(t, tc.want, got.String())
+		})
+	}
+
+	t.Run("view that Prime returns", func(t *testing.T) {
+		t.Parallel()
+
+		// The view holds each alias with a name free of comments, as the
+		// decoder reads it.
+		table := newTable(t, []string{stringtest.LinesLF("x: &x 1", "a: &a [*x # note", "]")})
+
+		got, ok := table.View("a")
+		require.True(t, ok)
+
+		primed := table.Prime([]string{"a"})
+		require.Len(t, primed, 2)
+		assert.Same(t, primed[1], got)
+
+		raw, ok := table.Anchor("a")
+		require.True(t, ok)
+		assert.NotSame(t, raw, got)
+	})
+}
+
 func TestTable_Prime(t *testing.T) {
 	t.Parallel()
 

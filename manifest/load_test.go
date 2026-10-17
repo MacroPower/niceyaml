@@ -1417,6 +1417,30 @@ func TestRegistry_Load_Defaults(t *testing.T) {
 	assert.Equal(t, CafeSpec{Seats: 40, Currency: "EUR"}, cafe.Value.Spec)
 }
 
+func TestRegistry_Load_UnknownFieldsWarn(t *testing.T) {
+	t.Parallel()
+
+	// The load warns about the unknown key and still admits the type
+	// fields, which the Go type does not declare.
+	reg := newCafeRegistry(t, manifest.WithDecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn)))
+
+	set, err := reg.Load(t.Context(), configFS(map[string]string{"cafe.yaml": stringtest.LinesLF(
+		"apiVersion: cafe.jacobcolvin.com/v1",
+		"kind: Cafe",
+		"metadata:",
+		"  name: yamull",
+		"wifi: open",
+	)}))
+	require.NoError(t, err)
+
+	warnings := set.Warnings()
+	require.ErrorIs(t, warnings, niceyaml.ErrUnknownField)
+	require.EqualError(t, warnings, `config/cafe.yaml:5:1: warning: $.wifi~: unknown field "wifi"`)
+
+	_, ok := set.Get[Cafe]("yamull")
+	assert.True(t, ok)
+}
+
 // Alarm is a kind whose level a document writes by name, which a
 // function from niceyaml.CustomUnmarshaler reads.
 type Alarm struct {
@@ -2199,6 +2223,178 @@ func TestRegistry_Load_TypeFields(t *testing.T) {
 			got, ok := set.Get[Brew]("bryggkaffe")
 			require.True(t, ok)
 			assert.Equal(t, TypeMeta{APIVersion: "v2", Kind: "Brew"}, got.Value.TypeMeta)
+		})
+	}
+}
+
+func TestRegistry_Load_MergedTypeFields(t *testing.T) {
+	t.Parallel()
+
+	// The type fields of the document come after the merge key, so they
+	// hide each type field that the merge key brings in.
+	typeFields := stringtest.LinesLF(
+		"apiVersion: cafe.jacobcolvin.com/v1",
+		"kind: Cafe",
+		"metadata:",
+		"  name: yamull",
+	)
+
+	tcs := map[string]struct {
+		doc  string
+		ref  string
+		mode *niceyaml.UnknownFieldsMode
+		want Cafe
+		err  string
+	}{
+		"reference document that writes the kind": {
+			doc:  "<<: *b\n" + typeFields,
+			ref:  "base: &b {kind: Hours, spec: {seats: 2}}\n",
+			want: Cafe{Metadata: Metadata{Name: "yamull"}, Spec: CafeSpec{Seats: 2}},
+		},
+		"reference document that writes the version": {
+			doc:  "<<: *b\n" + typeFields,
+			ref:  "base: &b {apiVersion: v0, spec: {seats: 2}}\n",
+			want: Cafe{Metadata: Metadata{Name: "yamull"}, Spec: CafeSpec{Seats: 2}},
+		},
+		"merge key of a reference document that brings in the kind": {
+			doc:  "<<: *b\n" + typeFields,
+			ref:  stringtest.LinesLF("hours: &h {kind: Hours}", "base: &b {<<: *h, spec: {seats: 2}}"),
+			want: Cafe{Metadata: Metadata{Name: "yamull"}, Spec: CafeSpec{Seats: 2}},
+		},
+		"reference document that writes the kind under the warn mode": {
+			doc:  "<<: *b\n" + typeFields,
+			ref:  "base: &b {kind: Hours, spec: {seats: 2}}\n",
+			mode: new(niceyaml.UnknownFieldsWarn),
+			want: Cafe{Metadata: Metadata{Name: "yamull"}, Spec: CafeSpec{Seats: 2}},
+		},
+		"mapping of the document that writes the kind": {
+			doc:  "<<: {kind: Hours, spec: {seats: 2}}\n" + typeFields,
+			want: Cafe{Metadata: Metadata{Name: "yamull"}, Spec: CafeSpec{Seats: 2}},
+		},
+		"anchored mapping that another alias reads": {
+			// The labels read the anchor as the document writes it, with
+			// the kind.
+			doc:  "<<: &extra {kind: Hours}\n" + typeFields + "  labels: *extra\n",
+			want: Cafe{Metadata: Metadata{Name: "yamull", Labels: map[string]string{"kind": "Hours"}}},
+		},
+		// The decode leaves out the kind that the merge key brings in, but
+		// the labels read the anchor on it.
+		"anchor on the kind that a merge key brings in": {
+			doc: "<<: {kind: &k Hours, spec: {seats: 2}}\n" + typeFields + "  labels: {a: *k}\n",
+			want: Cafe{
+				Metadata: Metadata{Name: "yamull", Labels: map[string]string{"a": "Hours"}},
+				Spec:     CafeSpec{Seats: 2},
+			},
+		},
+		"anchor on the kind that a merge key brings in under the warn mode": {
+			doc:  "<<: {kind: &k Hours, spec: {seats: 2}}\n" + typeFields + "  labels: {a: *k}\n",
+			mode: new(niceyaml.UnknownFieldsWarn),
+			want: Cafe{
+				Metadata: Metadata{Name: "yamull", Labels: map[string]string{"a": "Hours"}},
+				Spec:     CafeSpec{Seats: 2},
+			},
+		},
+		// The merged anchor reads an anchor that the document writes
+		// before it.
+		"merged anchor that reads an earlier anchor": {
+			doc: stringtest.LinesLF(
+				"metadata:",
+				"  name: yamull",
+				"  labels: {a: &z '5'}",
+				"<<: &a {kind: Hours, spec: {currency: *z}}",
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Cafe",
+			),
+			want: Cafe{
+				Metadata: Metadata{Name: "yamull", Labels: map[string]string{"a": "5"}},
+				Spec:     CafeSpec{Currency: "5"},
+			},
+		},
+		"merged anchor that reads an earlier anchor under the warn mode": {
+			doc: stringtest.LinesLF(
+				"metadata:",
+				"  name: yamull",
+				"  labels: {a: &z '5'}",
+				"<<: &a {kind: Hours, spec: {currency: *z}}",
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Cafe",
+			),
+			mode: new(niceyaml.UnknownFieldsWarn),
+			want: Cafe{
+				Metadata: Metadata{Name: "yamull", Labels: map[string]string{"a": "5"}},
+				Spec:     CafeSpec{Currency: "5"},
+			},
+		},
+		// The decode leaves out the kind of the document, but the labels
+		// read the anchor on it.
+		"anchor on the kind of the document": {
+			doc: stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: &k Cafe",
+				"metadata:",
+				"  name: yamull",
+				"  labels: {a: *k}",
+			),
+			want: Cafe{Metadata: Metadata{Name: "yamull", Labels: map[string]string{"a": "Cafe"}}},
+		},
+		"anchor on the kind of the document under the warn mode": {
+			doc: stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: &k Cafe",
+				"metadata:",
+				"  name: yamull",
+				"  labels: {a: *k}",
+			),
+			mode: new(niceyaml.UnknownFieldsWarn),
+			want: Cafe{Metadata: Metadata{Name: "yamull", Labels: map[string]string{"a": "Cafe"}}},
+		},
+		"unknown field of a reference document": {
+			doc: "<<: *b\n" + typeFields,
+			ref: "base: &b {kind: Hours, seat: 2}\n",
+			err: stringtest.JoinLF(
+				`config/cafe.yaml:1:5: unknown field "seat"`,
+				"",
+				"   1 | <<: *b",
+				"     |     ^",
+				"   2 | apiVersion: cafe.jacobcolvin.com/v1",
+				"   3 | kind: Cafe",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var opts []manifest.RegistryOption
+
+			if tc.mode != nil {
+				opts = append(opts, manifest.WithDecodeOptions(niceyaml.WithUnknownFields(*tc.mode)))
+			}
+
+			var in []manifest.InputOption
+
+			if tc.ref != "" {
+				ref := niceyaml.NewSourceFromString(tc.ref)
+				in = append(in, manifest.WithSourceOptions(niceyaml.WithReferences(ref)))
+			}
+
+			set, err := manifest.MustNewRegistry(cafeOptions(opts...)...).Load(t.Context(),
+				configFS(map[string]string{"cafe.yaml": tc.doc}, in...))
+			if tc.err != "" {
+				require.Error(t, err)
+				assert.Equal(t, tc.err, niceyaml.FormatError(err))
+				require.ErrorIs(t, err, niceyaml.ErrUnknownField)
+
+				return
+			}
+
+			require.NoError(t, err)
+			require.NoError(t, set.Warnings())
+
+			got, ok := set.Get[Cafe]("yamull")
+			require.True(t, ok)
+			assert.Equal(t, tc.want, got.Value)
 		})
 	}
 }

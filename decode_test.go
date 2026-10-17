@@ -64,6 +64,7 @@ var (
 	errBadServer    = errors.New("bad server")
 	errRepoRequired = errors.New("repo is required")
 	errPortRequired = errors.New("port is required")
+	errNegativeA    = errors.New("a must not be negative")
 
 	// Has go-yaml decode a problemRegistered as decodePulled decodes a
 	// problemPulled, in every decode of the program.
@@ -1683,7 +1684,7 @@ func (v *fieldValidator) Check(context.Context, *niceyaml.Node) error {
 	return v.err
 }
 
-func TestWithDisallowUnknownFields(t *testing.T) {
+func TestWithUnknownFields(t *testing.T) {
 	t.Parallel()
 
 	type strictConfig struct {
@@ -1715,7 +1716,10 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 				// The same node decodes strictly on one call and loosely on
 				// the next, so the option belongs to the call rather than
 				// the Source.
-				_, err := node.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+				_, err := node.Decode[strictConfig](
+					t.Context(),
+					niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+				)
 				require.ErrorAs(t, err, new(*niceyaml.Error))
 
 				result, err := node.Decode[strictConfig](t.Context())
@@ -1725,17 +1729,290 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 		}
 	})
 
-	t.Run("a later false turns the option off", func(t *testing.T) {
+	t.Run("a later mode replaces an earlier one", func(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, "name: test\nextra: field\n")
 
 		result, err := dd.Decode[strictConfig](t.Context(),
-			niceyaml.WithDisallowUnknownFields(true),
-			niceyaml.WithDisallowUnknownFields(false),
+			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "test", result.Name)
+	})
+
+	t.Run("a mode outside the constants panics", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t,
+			"niceyaml.WithUnknownFields: UnknownFieldsMode(3) is not one of the UnknownFieldsMode constants",
+			func() { niceyaml.WithUnknownFields(niceyaml.UnknownFieldsMode(3)) })
+	})
+
+	t.Run("warn", func(t *testing.T) {
+		t.Parallel()
+
+		type item struct {
+			Item  string `yaml:"item"`
+			Price int    `yaml:"price"`
+		}
+
+		type menu struct {
+			Name string `yaml:"name"`
+			Fika []item `yaml:"fika"`
+		}
+
+		cafe := stringtest.LinesLF(
+			"name: Fika",
+			"fika:",
+			"  - item: Kaffe",
+			"    price: 35",
+			"  - item: Semla",
+			"    prise: 55",
+			"    x-note: seasonal",
+			"extra: 1",
+		)
+		decodeMenu := func(ctx context.Context, n *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
+			_, err := n.Decode[menu](ctx, opts...)
+
+			return err
+		}
+		warn := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn)
+		custom := niceyaml.CustomUnmarshaler(func(_ context.Context, m *problemMirror, decode func(any) error) error {
+			type plain problemMirror
+
+			return decode((*plain)(m))
+		})
+
+		tcs := map[string]struct {
+			read  func(ctx context.Context, n *niceyaml.Node, opts ...niceyaml.DecodeOption) error
+			path  paths.Path
+			input string
+			// The options of the Source, after its name.
+			source []niceyaml.SourceOption
+			opts   []niceyaml.DecodeOption
+			// The error of the decode, or empty for a decode that passes.
+			err string
+			// The warnings that the collector holds, or empty for none.
+			warnings string
+		}{
+			"ignore": {
+				input: cafe,
+				opts:  []niceyaml.DecodeOption{niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore)},
+			},
+			"each unknown field, in the order of the source": {
+				input: cafe,
+				opts:  []niceyaml.DecodeOption{warn},
+				warnings: stringtest.JoinLF(
+					"menu.yaml: 3 warnings",
+					`menu.yaml:6:5: warning: $.fika[1].prise~: unknown field "prise"`,
+					`menu.yaml:7:5: warning: $.fika[1].x-note~: unknown field "x-note"`,
+					`menu.yaml:8:1: warning: $.extra~: unknown field "extra"`,
+				),
+			},
+			"a prefix that the decode allows": {
+				input: cafe,
+				opts:  []niceyaml.DecodeOption{warn, niceyaml.WithAllowedFieldPrefixes("x-")},
+				warnings: stringtest.JoinLF(
+					"menu.yaml: 2 warnings",
+					`menu.yaml:6:5: warning: $.fika[1].prise~: unknown field "prise"`,
+					`menu.yaml:8:1: warning: $.extra~: unknown field "extra"`,
+				),
+			},
+			"a value that the decoder rejects": {
+				input: strings.Replace(cafe, "price: 35", "price: many", 1),
+				opts:  []niceyaml.DecodeOption{warn},
+				err:   "menu.yaml:4:12: $.fika[0].price: expected integer, got string",
+				warnings: stringtest.JoinLF(
+					"menu.yaml: 3 warnings",
+					`menu.yaml:6:5: warning: $.fika[1].prise~: unknown field "prise"`,
+					`menu.yaml:7:5: warning: $.fika[1].x-note~: unknown field "x-note"`,
+					`menu.yaml:8:1: warning: $.extra~: unknown field "extra"`,
+				),
+			},
+			"a validator that fails": {
+				// The decoder does not run, so the decode does not search.
+				input: cafe,
+				opts: []niceyaml.DecodeOption{
+					warn,
+					niceyaml.WithValidator(rejectingValidator(yamltest.ErrorAt("closed", "name"))),
+				},
+				err: "menu.yaml:1:7: $.name: closed",
+			},
+			"a scoped node": {
+				input: cafe,
+				path:  paths.Current().Child("fika").Index(1),
+				read: func(ctx context.Context, n *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
+					_, err := n.Decode[item](ctx, opts...)
+
+					return err
+				},
+				opts: []niceyaml.DecodeOption{warn},
+				warnings: stringtest.JoinLF(
+					"menu.yaml: 2 warnings",
+					`menu.yaml:6:5: warning: $.fika[1].prise~: unknown field "prise"`,
+					`menu.yaml:7:5: warning: $.fika[1].x-note~: unknown field "x-note"`,
+				),
+			},
+			"a struct that decodes itself through its fields": {
+				input: "self: {a: 1, d: 2}\n",
+				read: func(ctx context.Context, n *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
+					_, err := n.Decode[struct {
+						Self problemMirror `yaml:"self"`
+					}](ctx, opts...)
+
+					return err
+				},
+				opts:     []niceyaml.DecodeOption{warn},
+				warnings: `menu.yaml:1:14: warning: $.self.d~: unknown field "d"`,
+			},
+			"a struct that a custom unmarshaler decodes": {
+				// The search does not read below the value, as the option
+				// documents.
+				input: "self: {a: 1, d: 2}\n",
+				read: func(ctx context.Context, n *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
+					_, err := n.Decode[struct {
+						Self problemMirror `yaml:"self"`
+					}](ctx, opts...)
+
+					return err
+				},
+				opts: []niceyaml.DecodeOption{warn, niceyaml.WithUnmarshaler(custom)},
+			},
+			"a key before a merge key that reads a reference document": {
+				input:    stringtest.LinesLF("name: Fika", "extra: 1", "<<: *base"),
+				source:   []niceyaml.SourceOption{yamltest.References("base: &base {name: Kafe}\n")},
+				opts:     []niceyaml.DecodeOption{warn},
+				warnings: `menu.yaml:2:1: warning: $.extra~: unknown field "extra"`,
+			},
+			"a key below an entry that a merge key of a reference document replaces": {
+				// The decoder reads the fika of the reference document, so it
+				// does not read the prise.
+				input:  stringtest.LinesLF("name: Fika", "fika:", "  - prise: 35", "<<: *base"),
+				source: []niceyaml.SourceOption{yamltest.References("base: &base {fika: [{item: Te}]}\n")},
+				opts:   []niceyaml.DecodeOption{warn},
+			},
+			"a key below an entry before a merge key that reads a reference document": {
+				// The search cannot tell whether the merge key replaces the
+				// fika, so it does not read below it, as the option documents.
+				input:  stringtest.LinesLF("name: Fika", "fika:", "  - prise: 35", "<<: *base"),
+				source: []niceyaml.SourceOption{yamltest.References("base: &base {name: Kafe}\n")},
+				opts:   []niceyaml.DecodeOption{warn},
+			},
+			"a key that a merge key brings in from a reference document": {
+				// The search does not read the reference document, as the
+				// option documents.
+				input:  stringtest.LinesLF("name: Fika", "<<: *base"),
+				source: []niceyaml.SourceOption{yamltest.References("base: &base {extra: 1}\n")},
+				opts:   []niceyaml.DecodeOption{warn},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				read := tc.read
+				if read == nil {
+					read = decodeMenu
+				}
+
+				doc := yamltest.FirstDocument(t, tc.input,
+					append([]niceyaml.SourceOption{niceyaml.WithName("menu.yaml")}, tc.source...)...)
+				node := yamltest.AtOrSelf(t, doc, tc.path)
+				warnings := niceyaml.NewWarnings()
+
+				err := read(warnings.Context(t.Context()), node, tc.opts...)
+				if tc.err == "" {
+					require.NoError(t, err)
+				} else {
+					require.EqualError(t, err, tc.err)
+				}
+
+				got := warnings.Err()
+				if tc.warnings == "" {
+					require.NoError(t, got)
+
+					return
+				}
+
+				require.EqualError(t, got, tc.warnings)
+				assert.False(t, niceyaml.HasErrors(got))
+			})
+		}
+
+		t.Run("warnings match the sentinels of a rejection", func(t *testing.T) {
+			t.Parallel()
+
+			warnings := niceyaml.NewWarnings()
+
+			require.NoError(t, decodeMenu(warnings.Context(t.Context()), yamltest.FirstDocument(t, cafe), warn))
+
+			count := 0
+
+			for problem := range niceyaml.Problems(warnings.Err()) {
+				count++
+
+				assert.True(t, problem.Warning)
+				require.ErrorIs(t, problem.Err, niceyaml.ErrUnknownField)
+				require.ErrorIs(t, problem.Err, niceyaml.ErrDecode)
+				require.ErrorAs(t, problem.Err, new(*yaml.UnknownFieldError))
+			}
+
+			assert.Equal(t, 3, count)
+		})
+
+		t.Run("a decode without a collector does not search", func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, "self: {a: 1, b: 2, c: 3}\n")
+			decode := func(ctx context.Context) int {
+				calls := &problemCalls{}
+
+				_, err := doc.Decode[struct {
+					Self problemMirror `yaml:"self"`
+				}](context.WithValue(ctx, callsKey{}, calls), warn)
+				require.NoError(t, err)
+
+				return calls.count
+			}
+
+			// The search decodes the struct once more, and only for a decode
+			// whose context carries a collector.
+			assert.Equal(t, 1, decode(t.Context()))
+			assert.Equal(t, 2, decode(niceyaml.NewWarnings().Context(t.Context())))
+		})
+
+		t.Run("the aliases of one anchor share the decode of the search", func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, "self: &s {a: 1, b: 2}\nlist:\n"+strings.Repeat("  - *s\n", 50))
+			calls := &problemCalls{}
+			ctx := context.WithValue(niceyaml.NewWarnings().Context(t.Context()), callsKey{}, calls)
+
+			_, err := doc.Decode[struct {
+				Self problemMirror   `yaml:"self"`
+				List []problemMirror `yaml:"list"`
+			}](ctx, warn)
+			require.NoError(t, err)
+
+			// The decoder calls the method once for the anchor, and the
+			// search once more.
+			assert.Equal(t, 2, calls.count)
+		})
+
+		t.Run("a field of a layer binds in its layer", func(t *testing.T) {
+			t.Parallel()
+
+			base := niceyaml.NewSourceFromString("name: Fika\n", niceyaml.WithName("base.yaml"))
+			user := niceyaml.NewSourceFromString("fika:\n  - item: Te\n    prise: 30\n", niceyaml.WithName("user.yaml"))
+			warnings := niceyaml.NewWarnings()
+
+			_, err := yamltest.Layers(t, base, user).Decode[menu](warnings.Context(t.Context()), warn)
+			require.NoError(t, err)
+			require.EqualError(t, warnings.Err(), `user.yaml:3:5: warning: $.fika[0].prise~: unknown field "prise"`)
+		})
 	})
 
 	t.Run("a key with control characters", func(t *testing.T) {
@@ -1781,7 +2058,10 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 
 				source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("f.yaml"))
 
-				_, err := source.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+				_, err := source.Decode[strictConfig](
+					t.Context(),
+					niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+				)
 				require.EqualError(t, err, tc.want)
 				assert.NotContains(t, err.Error(), "\x1b")
 
@@ -1803,6 +2083,86 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 	})
 }
 
+func TestUnknownFieldsMode(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		mode niceyaml.UnknownFieldsMode
+		want string
+		// Whether the mode is one of the constants, which reads back from
+		// its text.
+		valid bool
+	}{
+		"ignore":           {mode: niceyaml.UnknownFieldsIgnore, want: "ignore", valid: true},
+		"warn":             {mode: niceyaml.UnknownFieldsWarn, want: "warn", valid: true},
+		"reject":           {mode: niceyaml.UnknownFieldsReject, want: "reject", valid: true},
+		"past the last":    {mode: niceyaml.UnknownFieldsMode(3), want: "UnknownFieldsMode(3)"},
+		"before the first": {mode: niceyaml.UnknownFieldsMode(-1), want: "UnknownFieldsMode(-1)"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.mode.String())
+
+			text, err := tc.mode.MarshalText()
+			if !tc.valid {
+				require.ErrorIs(t, err, niceyaml.ErrUnknownFieldsMode)
+				require.EqualError(t, err, "not an unknown fields mode: "+tc.want)
+				assert.Nil(t, text)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(text))
+
+			var got niceyaml.UnknownFieldsMode
+
+			require.NoError(t, got.UnmarshalText(text))
+			assert.Equal(t, tc.mode, got)
+		})
+	}
+
+	t.Run("text that does not name a mode", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]string{
+			"another word":       "strict",
+			"a name in capitals": "Warn",
+			"empty text":         "",
+		}
+
+		for name, text := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				mode := niceyaml.UnknownFieldsWarn
+
+				err := mode.UnmarshalText([]byte(text))
+				require.ErrorIs(t, err, niceyaml.ErrUnknownFieldsMode)
+				require.EqualError(
+					t,
+					err,
+					fmt.Sprintf("not an unknown fields mode: %q, want ignore, warn, or reject", text),
+				)
+				assert.Equal(t, niceyaml.UnknownFieldsWarn, mode)
+			})
+		}
+	})
+
+	t.Run("a document field reads its text", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := yamltest.FirstDocument(t, "unknown: warn\n").Decode[struct {
+			Unknown niceyaml.UnknownFieldsMode `yaml:"unknown"`
+		}](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, niceyaml.UnknownFieldsWarn, got.Unknown)
+	})
+}
+
 func TestWithAllowedFieldPrefixes(t *testing.T) {
 	t.Parallel()
 
@@ -1810,7 +2170,7 @@ func TestWithAllowedFieldPrefixes(t *testing.T) {
 		Name string `yaml:"name"`
 	}
 
-	strict := niceyaml.WithDisallowUnknownFields(true)
+	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
 
 	tcs := map[string]struct {
 		input string
@@ -2266,7 +2626,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 					"  - from: 1",
 					"    until: 2",
 				),
-				opts: []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
+				opts: []niceyaml.DecodeOption{niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)},
 				want: `3:5: $.spans[0].until~: unknown field "until"`,
 			},
 			// The decoder stops at the first value a function rejects, and
@@ -4256,7 +4616,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 
 				dd := yamltest.FirstDocument(t, tc.input)
 
-				_, err := dd.Decode[config](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+				_, err := dd.Decode[config](t.Context(), niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
 				require.EqualError(t, err, tc.err)
 			})
 		}
@@ -4439,7 +4799,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		ref := yamltest.References(stringtest.LinesLF(`r: &r {"x [1]": 2}`))
 		dd := yamltest.FirstDocument(t, "x: &x 9\nv: *r\n", ref)
 
-		_, err := dd.Decode[config](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+		_, err := dd.Decode[config](t.Context(), niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
 		require.EqualError(t, err, `2:4: unknown field "x [1]"`)
 	})
 
@@ -6127,7 +6487,7 @@ func ExampleDecodeOptions() {
 
 	manifests := schema.MustCompile([]byte(`{"type": "object", "required": ["kind", "name"]}`))
 
-	settings := niceyaml.DecodeOptions(niceyaml.WithDisallowUnknownFields(true))
+	settings := niceyaml.DecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
 	strict := niceyaml.DecodeOptions(niceyaml.WithValidator(manifests), settings)
 
 	docs := niceyaml.NewSourceFromString(
@@ -6192,8 +6552,8 @@ func TestDecodeOptions(t *testing.T) {
 		return niceyaml.WithValidator(recordingValidator(order, name))
 	}
 
-	strict := niceyaml.WithDisallowUnknownFields(true)
-	lax := niceyaml.WithDisallowUnknownFields(false)
+	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
+	lax := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsIgnore)
 
 	dd := yamltest.FirstDocument(t, input)
 
@@ -6257,7 +6617,7 @@ func TestDecodeOptions(t *testing.T) {
 		assert.Equal(t, []string{"first"}, order)
 	})
 
-	t.Run("the last WithDisallowUnknownFields of the call sets the value", func(t *testing.T) {
+	t.Run("the last WithUnknownFields of the call sets the mode", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
@@ -6586,7 +6946,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 
 						return nil
 					})),
-					niceyaml.WithDisallowUnknownFields(true),
+					niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
 					niceyaml.WithSelfValidation(false),
 				})
 
@@ -6733,7 +7093,7 @@ func TestErrDecode(t *testing.T) {
 		},
 		"unknown field": {
 			input:  "other: 1",
-			decode: decodeAs[struct{ Value int }](niceyaml.WithDisallowUnknownFields(true)),
+			decode: decodeAs[struct{ Value int }](niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)),
 		},
 		"mapping into scalar": {
 			input: stringtest.JoinLF(
@@ -7950,7 +8310,7 @@ func rejectionRows(err error) string {
 func TestDocument_Decode_UnknownFields(t *testing.T) {
 	t.Parallel()
 
-	strict := niceyaml.WithDisallowUnknownFields(true)
+	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
 
 	registerStrict()
 
@@ -8379,6 +8739,24 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				`3:1: $.yyy~: unknown field "yyy"`,
 			),
 		},
+		// The lookup of each key cannot read the merge key after it, so
+		// the search reads the entries of the mapping itself.
+		"several before a merge key that reads a reference document": {
+			decode: decodeAs[struct {
+				Name string `yaml:"name"`
+			}](strict),
+			input: stringtest.LinesLF(
+				"baz: 3",
+				"name: x",
+				"foo: 1",
+				"<<: *base",
+			),
+			sourceOpts: []niceyaml.SourceOption{yamltest.References("base: &base {name: y}\n")},
+			want: stringtest.JoinLF(
+				`1:1: $.baz~: unknown field "baz"`,
+				`3:1: $.foo~: unknown field "foo"`,
+			),
+		},
 		"quoted, tagged, and explicit keys": {
 			decode: decodeAs[struct {
 				Name string `yaml:"name"`
@@ -8576,7 +8954,7 @@ func TestDocument_Decode_UnknownFields_KeyKinds(t *testing.T) {
 		B strictInner `yaml:"b"`
 	}
 
-	strict := niceyaml.WithDisallowUnknownFields(true)
+	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
 
 	// The decoder reads the keys of a struct as strings. It decodes
 	// nothing from a mapping that holds a key of another kind, and
@@ -8668,7 +9046,7 @@ func TestDocument_Decode_UnknownFields_IgnoredMerges(t *testing.T) {
 		Defs *StrictBase `yaml:"defs"`
 	}
 
-	strict := niceyaml.WithDisallowUnknownFields(true)
+	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
 
 	tcs := map[string]struct {
 		merge string
@@ -8884,9 +9262,9 @@ func TestNode_DecodeAt(t *testing.T) {
 			err:     niceyaml.ErrDecode,
 			wantErr: "cfg.yaml:1:7: $.kind: expected integer, got string",
 		},
-		"a field the type lacks under WithDisallowUnknownFields": {
+		"a field the type lacks under UnknownFieldsReject": {
 			path:    hoursPath,
-			read:    readAs[openHours](niceyaml.WithDisallowUnknownFields(true)),
+			read:    readAs[openHours](niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)),
 			want:    openHours{},
 			err:     niceyaml.ErrDecode,
 			wantErr: `cfg.yaml:8:5: $.spec.hours.days~: unknown field "days"`,
@@ -9748,6 +10126,118 @@ func (c *problemCounted) UnmarshalYAML(ctx context.Context, unmarshal func(any) 
 	return nil
 }
 
+// problemMirror decodes itself through a second type with the same
+// fields, so the decoder checks those fields, and counts its calls.
+type problemMirror struct {
+	A int `yaml:"a"`
+	B int `yaml:"b"`
+	C int `yaml:"c"`
+}
+
+func (m *problemMirror) UnmarshalYAML(ctx context.Context, unmarshal func(any) error) error {
+	if calls, ok := ctx.Value(callsKey{}).(*problemCalls); ok {
+		calls.count++
+	}
+
+	type plain problemMirror
+
+	return unmarshal((*plain)(m))
+}
+
+// problemWarner decodes itself through a second type with the same
+// fields, as [problemMirror] does. Each call hands a warning to its
+// context from a Source of its own, so a collector keeps the warning of
+// every call. A negative A fails the call with an error that does not
+// carry a token.
+type problemWarner struct {
+	A int `yaml:"a"`
+}
+
+func (w *problemWarner) UnmarshalYAML(ctx context.Context, unmarshal func(any) error) error {
+	doc, err := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("inner.yaml")).Document()
+	if err != nil {
+		return err
+	}
+
+	doc.Warn(ctx, niceyaml.NewWarning("a is deprecated"))
+
+	type plain problemWarner
+
+	err = unmarshal((*plain)(w))
+	if err != nil {
+		return err
+	}
+
+	if w.A < 0 {
+		return errNegativeA
+	}
+
+	return nil
+}
+
+// problemWarned holds a [problemWarner] beside a port that the decoder
+// can reject.
+type problemWarned struct {
+	Self problemWarner `yaml:"self"`
+	Port int           `yaml:"port"`
+}
+
+// problemWarnerKey decodes itself from a string, and each call hands a
+// warning to its context, as [problemWarner] does.
+type problemWarnerKey string
+
+func (k *problemWarnerKey) UnmarshalYAML(ctx context.Context, unmarshal func(any) error) error {
+	doc, err := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("inner.yaml")).Document()
+	if err != nil {
+		return err
+	}
+
+	doc.Warn(ctx, niceyaml.NewWarning("a is deprecated"))
+
+	return unmarshal((*string)(k))
+}
+
+// problemWarnerInline holds a map of [problemWarnerKey] keys inline beside
+// a port.
+type problemWarnerInline struct {
+	Extra map[problemWarnerKey]int `yaml:",inline"`
+	Port  int                      `yaml:"port"`
+}
+
+// problemModeWarner decodes itself as [problemWarner] does, and each call
+// warns with the mode that it ends with.
+type problemModeWarner struct {
+	Mode string `yaml:"mode"`
+}
+
+func (w *problemModeWarner) UnmarshalYAML(ctx context.Context, unmarshal func(any) error) error {
+	type plain problemModeWarner
+
+	err := unmarshal((*plain)(w))
+	if err != nil {
+		return err
+	}
+
+	doc, err := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("inner.yaml")).Document()
+	if err != nil {
+		return err
+	}
+
+	doc.Warn(ctx, niceyaml.NewWarning(fmt.Sprintf("mode %q", w.Mode)))
+
+	return nil
+}
+
+// problemValid validates itself and passes, so the self-validation walk
+// names the path of each one.
+type problemValid struct {
+	Port int `yaml:"port"`
+}
+
+func (problemValid) Validate() error {
+	return nil
+}
+
 // problemEnding decodes itself from any value and ends the context of
 // the decode.
 type problemEnding struct{}
@@ -9770,7 +10260,7 @@ func (*problemNested) UnmarshalYAML(ctx context.Context, data []byte) error {
 
 	_, err := source.Decode[struct {
 		Port int `yaml:"port"`
-	}](ctx, niceyaml.WithDisallowUnknownFields(true))
+	}](ctx, niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
 
 	return err
 }
@@ -9941,7 +10431,7 @@ func TestSource_Decode_Problems(t *testing.T) {
 		niceyaml.WithName("app.yaml"),
 	)
 
-	_, err := source.Decode[problemConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+	_, err := source.Decode[problemConfig](t.Context(), niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
 	requireRejected(t, err, stringtest.JoinLF(
 		"app.yaml: 3 problems",
 		`app.yaml:1:1: $.replcas~: unknown field "replcas"`,
@@ -10008,7 +10498,7 @@ func TestSource_Decode_Problems(t *testing.T) {
 func TestDocument_Decode_Problems(t *testing.T) {
 	t.Parallel()
 
-	strict := niceyaml.WithDisallowUnknownFields(true)
+	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
 
 	tcs := map[string]struct {
 		decode func(context.Context, *niceyaml.Node) error
@@ -10885,13 +11375,16 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 func TestDocument_Decode_Problems_References(t *testing.T) {
 	t.Parallel()
 
-	strict := niceyaml.WithDisallowUnknownFields(true)
+	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
 
 	// The reference document defines b, as some of the documents do.
 	references := stringtest.LinesLF(
 		"defaults: &defaults {port: http}",
 		"limit: &limit soon",
 		"b: &b {port: 1}",
+		"named: &named {name: x}",
+		"counts: &counts {x: 2}",
+		"spec: &spec {spec: {a: 3}}",
 	)
 
 	// The decoder reads the timeout before any other field.
@@ -10899,6 +11392,20 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		Timeout  int             `yaml:"timeout"`
 		Replicas int             `yaml:"replicas"`
 		Servers  []problemServer `yaml:"servers"`
+	}
+
+	// The counts hold the keys of the mapping inline.
+	type countsInline struct {
+		Name   string         `yaml:"name"`
+		Counts map[string]int `yaml:",inline"`
+	}
+
+	// The spec holds a field of its own.
+	type kindSpec struct {
+		Kind string `yaml:"kind"`
+		Spec struct {
+			A int `yaml:"a"`
+		} `yaml:"spec"`
 	}
 
 	tcs := map[string]struct {
@@ -10994,6 +11501,44 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 				"  - {port: y}",
 			),
 			want: "expected integer, got string",
+		},
+		// The decoder reads the port that the merge key brings in from the
+		// reference document, and not the port of the mapping. The search
+		// cannot read that document, so it skips each entry that such a
+		// merge key after it might replace.
+		"entry before a merge key that reads a reference document": {
+			decode: decodeAs[problemServer](),
+			input:  stringtest.LinesLF("name: [a]", "port: x", "<<: *b"),
+			want:   "1:7: $.name: expected string, got sequence",
+		},
+		// The decoder reads the name of the reference document, so it
+		// rejects the port alone.
+		"entry that a merge key of a reference document replaces": {
+			decode: decodeAs[problemServer](),
+			input:  stringtest.LinesLF("name: [a]", "port: x", "<<: *named"),
+			want:   "2:7: $.port: expected integer, got string",
+		},
+		"member of an inline map before a merge key that reads a reference document": {
+			decode: decodeAs[countsInline](),
+			input:  stringtest.LinesLF("name: [a]", "x: y", "<<: *counts"),
+			want:   "1:7: $.name: expected string, got sequence",
+		},
+		// The decoder reads the spec of the reference document, so it does
+		// not read the unknown field of the spec of the mapping.
+		"unknown field below an entry before a merge key that reads a reference document": {
+			decode: decodeAs[kindSpec](strict),
+			input:  stringtest.LinesLF("kind: [1]", "spec: {a: 1, bogus: 2}", "<<: *spec"),
+			want:   "1:7: $.kind: expected string, got sequence",
+		},
+		"entry of a nested mapping before a merge key that reads a reference document": {
+			decode: decodeAs[problemConfig](),
+			input: stringtest.LinesLF(
+				"servers:",
+				"  - name: [a]",
+				"    port: x",
+				"    <<: *b",
+			),
+			want: "2:11: $.servers[0].name: expected string, got sequence",
 		},
 		"scoped decode": {
 			decode: decodeAs[problemServer](),
@@ -11172,6 +11717,171 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 		))
 		assert.Equal(t, 1, calls.count)
 	})
+
+	// The decode calls the method once and rejects the port. The search
+	// for unknown fields decodes the struct whole once more. The decoder
+	// accepts it, so the search does not decode each of its keys.
+	t.Run("struct that decodes itself without an unknown field", func(t *testing.T) {
+		t.Parallel()
+
+		calls := &problemCalls{}
+		ctx := context.WithValue(t.Context(), callsKey{}, calls)
+
+		_, err := yamltest.FirstDocument(t, "self: {a: 1, b: 2, c: 3}\nport: x\n").Decode[struct {
+			Self problemMirror `yaml:"self"`
+			Port int           `yaml:"port"`
+		}](ctx, niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
+		require.EqualError(t, err, "2:7: $.port: expected integer, got string")
+		assert.Equal(t, 2, calls.count)
+	})
+}
+
+func TestDocument_Decode_Problems_Warnings(t *testing.T) {
+	t.Parallel()
+
+	// The decoder calls the method once, and the method warns once. The
+	// decodes that find the problems, locate an error without a token,
+	// fill the defaults, and spell the map keys call it again. The
+	// collector does not get the warnings of those calls.
+	deprecated := "inner.yaml: warning: a is deprecated"
+	legacy := &problemModeWarner{Mode: "legacy"}
+
+	tcs := map[string]struct {
+		target any
+		value  any
+		input  string
+		opts   []niceyaml.DecodeOption
+		want   string
+		err    string
+	}{
+		"the search for unknown fields": {
+			target: &problemWarned{},
+			input:  "self: {a: 1}\nport: x\n",
+			opts:   []niceyaml.DecodeOption{niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)},
+			want:   deprecated,
+			err:    "2:7: $.port: expected integer, got string",
+		},
+		"the search for unknown fields of a decode that passes": {
+			target: &problemWarned{},
+			input:  "self: {a: 1}\nport: 1\n",
+			opts:   []niceyaml.DecodeOption{niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn)},
+			want:   deprecated,
+		},
+		"the search for unknown fields of a decode that fails": {
+			target: &problemWarned{},
+			input:  "self: {a: 1}\nport: x\n",
+			opts:   []niceyaml.DecodeOption{niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn)},
+			want:   deprecated,
+			err:    "2:7: $.port: expected integer, got string",
+		},
+		"the search for an error without a token": {
+			target: &problemWarned{},
+			input:  "self: {a: -1}\nport: 1\n",
+			want:   deprecated,
+			err:    "1:1: $.self: a must not be negative",
+		},
+		// The decoder starts the element from zero, so the decode
+		// decodes it again from its defaults.
+		"the fill of an element from its defaults": {
+			target: &[]problemWarner{},
+			input:  "- {a: 1}\n",
+			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(w *problemWarner) { w.A = 9 })},
+			want:   deprecated,
+		},
+		// The decoder calls the method on an element that starts from
+		// zero, and the fill calls it again on one that starts from the
+		// defaults. The element keeps the mode of the second call, and
+		// the collector keeps the warning of the first.
+		"the fill of an element whose method warns about its defaults": {
+			target: &[]problemModeWarner{},
+			value:  &[]problemModeWarner{{Mode: "legacy"}},
+			input:  "- {}\n",
+			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(w *problemModeWarner) { w.Mode = "legacy" })},
+			want:   `inner.yaml: warning: mode ""`,
+		},
+		// The decoder starts the element and its field from zero, so the
+		// fill decodes the field again from its defaults.
+		"the fill of a field of an element": {
+			target: &[]problemWarned{},
+			input:  "- {self: {a: 1}, port: 1}\n",
+			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(w *problemWarner) { w.A = 9 })},
+			want:   deprecated,
+		},
+		// The decode allocates a value for a nil pointer that the target
+		// points to, and that value starts from its defaults. So the
+		// decoder calls the method once, on the defaults.
+		"the target of a nil pointer that the target points to": {
+			target: new(*problemModeWarner),
+			value:  &legacy,
+			input:  "{}\n",
+			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(w *problemModeWarner) { w.Mode = "legacy" })},
+			want:   `inner.yaml: warning: mode "legacy"`,
+		},
+		// The decode starts from the map that the target holds, so the
+		// fill decodes each key again to find its entry.
+		"the fill of a map that the target holds": {
+			target: &map[problemWarnerKey]int{},
+			input:  "a: 1\n",
+			want:   deprecated,
+		},
+		// The key type has defaults, so the fill decodes each key again
+		// to find its entry, although the target holds a nil map.
+		"the fill of a map whose key type has defaults": {
+			target: new(map[problemWarnerKey]int),
+			value:  &map[problemWarnerKey]int{"a": 1},
+			input:  "a: 1\n",
+			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(k *problemWarnerKey) { *k = "d" })},
+			want:   deprecated,
+		},
+		// The key type has a function of WithDefaults, so the fill decodes
+		// each key again, although the function leaves the key at zero.
+		"the fill of a map whose key type has a function that sets nothing": {
+			target: new(map[problemWarnerKey]int),
+			value:  &map[problemWarnerKey]int{"a": 1},
+			input:  "a: 1\n",
+			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(*problemWarnerKey) {})},
+			want:   deprecated,
+		},
+		// The struct that holds the map inline has defaults, so the fill
+		// builds the struct again and decodes each key of its mapping.
+		// The target starts from its own value, so its port stays zero.
+		"the fill of a map that a struct with defaults holds inline": {
+			target: &problemWarnerInline{},
+			value:  &problemWarnerInline{Extra: map[problemWarnerKey]int{"a": 1}},
+			input:  "a: 1\n",
+			opts:   []niceyaml.DecodeOption{niceyaml.WithDefaults(func(w *problemWarnerInline) { w.Port = 8080 })},
+			want:   deprecated,
+		},
+		// The value below the key validates itself, so the walk decodes
+		// the key again to name its path. The target holds a nil map, so
+		// the fill does not decode the key.
+		"the key that the self-validation walk spells": {
+			target: new(map[problemWarnerKey]problemValid),
+			input:  "a: {port: 1}\n",
+			want:   deprecated,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			warnings := niceyaml.NewWarnings()
+
+			err := yamltest.FirstDocument(t, tc.input).DecodeInto(warnings.Context(t.Context()), tc.target, tc.opts...)
+			if tc.err == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.err)
+			}
+
+			require.EqualError(t, warnings.Err(), tc.want)
+
+			if tc.value != nil {
+				assert.Equal(t, tc.value, tc.target)
+			}
+		})
+	}
 }
 
 func TestDocument_Decode_Problems_Context(t *testing.T) {
@@ -11284,7 +11994,7 @@ func TestDocument_Decode_Problems_Context(t *testing.T) {
 func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 	t.Parallel()
 
-	strict := niceyaml.WithDisallowUnknownFields(true)
+	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
 
 	// Own returns a file whose own key holds word, below a comment and a
 	// blank line and between a port and a timeout the decoder rejects.
@@ -12025,12 +12735,12 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 		},
 		"unknown field": {
 			input: "name: x\nfoo: 1\n",
-			opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
+			opts:  []niceyaml.DecodeOption{niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)},
 			want:  `2:1: $.foo~: unknown field "foo"`,
 		},
 		"unknown field in an element": {
 			input: stringtest.LinesLF("servers:", "  - zzz: 1"),
-			opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
+			opts:  []niceyaml.DecodeOption{niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)},
 			want:  `2:5: $.servers[0].zzz~: unknown field "zzz"`,
 		},
 		"unknown field a merge key brings in": {
@@ -12040,7 +12750,7 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 				"one:",
 				"  <<: *d",
 			),
-			opts: []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
+			opts: []niceyaml.DecodeOption{niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)},
 			want: `2:3: $.labels.zzz~: unknown field "zzz"`,
 		},
 		"alias with no anchor": {
@@ -12310,7 +13020,7 @@ func TestDocument_Decode_Rejection_GoYAMLError(t *testing.T) {
 		var v rejectionConfig
 
 		err := yamltest.FirstDocument(t, "foo: 1\n").
-			DecodeInto(t.Context(), &v, niceyaml.WithDisallowUnknownFields(true))
+			DecodeInto(t.Context(), &v, niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
 		require.EqualError(t, err, `1:1: $.foo~: unknown field "foo"`)
 
 		got, ok := errors.AsType[*yaml.UnknownFieldError](err)
@@ -12361,7 +13071,7 @@ func TestDocument_Decode_Rejection_Label(t *testing.T) {
 		Tier   tier                     `yaml:"tier"`
 	}
 
-	strict := niceyaml.WithDisallowUnknownFields(true)
+	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
 
 	// The function decodes the value as an int8 and puts text of its own
 	// in front of the rejection.

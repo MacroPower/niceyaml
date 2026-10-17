@@ -794,7 +794,7 @@ func TestSource_File_BlankLineBeforeFirstKey(t *testing.T) {
 			)
 			assert.Len(t, yamltest.At(t, doc, paths.Current().Child("a").Key()).Tokens(), 1)
 
-			_, err = doc.Decode[struct{ B int }](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+			_, err = doc.Decode[struct{ B int }](t.Context(), niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
 			require.ErrorIs(t, err, niceyaml.ErrDecode)
 		})
 	}
@@ -6181,7 +6181,10 @@ func TestWithUnmarshalers(t *testing.T) {
 			"a bundle of decode options applies the unmarshalers it holds": {
 				input: "level: high\n",
 				opts: []niceyaml.DecodeOption{
-					niceyaml.DecodeOptions(niceyaml.WithDisallowUnknownFields(true), niceyaml.WithUnmarshaler(seven)),
+					niceyaml.DecodeOptions(
+						niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+						niceyaml.WithUnmarshaler(seven),
+					),
 				},
 				want: 7,
 			},

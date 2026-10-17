@@ -707,6 +707,22 @@ func enterCall(ctx context.Context) context.Context {
 	return context.WithValue(ctx, warningKey{}, &warningScope{w: s.w, outer: s.outer, call: true})
 }
 
+// withoutWarnings returns a copy of ctx that does not carry a collector,
+// so a call that runs with it drops its warnings. The copy keeps the
+// deadline, the cancellation, and the other values of ctx. A step that
+// decodes a value the decoder already decoded runs that decode with it.
+// The search for the problems of a decode is such a step. So are the
+// locator of an error without a token, the fill of the defaults, and the
+// walk that spells the map keys. The collectors of ctx thus do not get the
+// warnings that an unmarshaler hands to its context again.
+func withoutWarnings(ctx context.Context) context.Context {
+	if scopeOf(ctx) == nil {
+		return ctx
+	}
+
+	return context.WithValue(ctx, warningKey{}, (*warningScope)(nil))
+}
+
 // runHook runs a hook of a call and returns the errors and then the
 // warnings of the result. The hooks of a call include a [Validator] and a
 // function of [WithValueCheck]. The warnings include those that the hook

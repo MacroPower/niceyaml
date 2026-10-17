@@ -39,9 +39,9 @@ func main() {
 	source := niceyaml.NewSourceFromString(example, niceyaml.WithName("demo.yaml"))
 	p := printer.New()
 
-	// The validator warns about each key that no field of menu reads, so
-	// the misspelled dietry key passes with a warning.
-	warnUnknown := niceyaml.WithValidator(niceyaml.ValidatorFunc(unknownFields[menu]))
+	// The decode warns about each key that no field of menu reads, so the
+	// misspelled dietry key passes with a warning.
+	warnUnknown := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn)
 
 	fmt.Println("\nDecode without a collector:")
 
@@ -150,26 +150,4 @@ func (i item) Validate() error {
 	// Each problem in the join keeps its own severity, so a decode returns
 	// the errors of the join and hands its warnings to the collector.
 	return errors.Join(problems...)
-}
-
-// unknownFields warns about each key that no field of T reads.
-// WithDisallowUnknownFields makes every such key an error, and no option
-// makes one a warning. The validator thus runs a strict decode of its own
-// and reports each unknown key that it finds as a warning. It returns nil,
-// so the decode that runs it skips those keys, as a decode does without
-// WithDisallowUnknownFields.
-func unknownFields[T any](ctx context.Context, n *niceyaml.Node) error {
-	// The decode that runs this validator calls the Validate methods
-	// later, so this decode skips them.
-	_, err := n.Decode[T](ctx, niceyaml.WithDisallowUnknownFields(true), niceyaml.WithSelfValidation(false))
-
-	for problem := range niceyaml.Problems(err) {
-		// The decode that runs the validator reports every other problem.
-		if errors.Is(problem.Err, niceyaml.ErrUnknownField) {
-			// Warn marks the error a warning and hands it to the collector.
-			n.Warn(ctx, problem.Err)
-		}
-	}
-
-	return nil
 }

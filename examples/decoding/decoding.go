@@ -26,7 +26,7 @@ var (
 	// Every decode in the program takes these options, so each call reads
 	// the documents by the same rules.
 	decoding = niceyaml.DecodeOptions(
-		niceyaml.WithDisallowUnknownFields(true),
+		niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
 		// The decode builds each field of a config from the defaults of its
 		// own type, and then this function runs. The function of the parent
 		// thus decides each value it writes, so the kitchen printer listens

@@ -182,7 +182,7 @@ func fieldsCaseFor[T any](input string, want ...string) fieldsCase {
 			return schema.FromJSONSchema(jsonschema.MustCompile(generated))
 		},
 		decode: func(ctx context.Context, doc *niceyaml.Node) error {
-			_, err := doc.Decode[T](ctx, niceyaml.WithDisallowUnknownFields(true))
+			_, err := doc.Decode[T](ctx, niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
 
 			return err
 		},

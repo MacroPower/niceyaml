@@ -140,7 +140,7 @@ func (l *lazy[T]) get(f func() T) T {
 // states how the types of the program read the documents of this Source.
 // Every decode of those documents applies it too, wherever the decode
 // runs. Every setting that depends on the target of one decode, such as
-// [WithDisallowUnknownFields], stays a [DecodeOption] of each call.
+// [WithUnknownFields], stays a [DecodeOption] of each call.
 //
 // [WithExcerpts] sets whether errors show the text in excerpts, for
 // every renderer of the errors of the Source. [ExcerptOption] sets how

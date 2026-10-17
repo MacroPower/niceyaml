@@ -100,10 +100,13 @@ var (
 
 	// KnownKeys returns a niceyaml.DecodeOption that admits the key at
 	// each of keys, a path from `$` in the document that the decode reads.
-	// A decode under niceyaml.WithDisallowUnknownFields then rejects every
-	// unknown field except those keys. A key with a field in the target
+	// A decode under niceyaml.UnknownFieldsReject or
+	// niceyaml.UnknownFieldsWarn then reports every unknown field except
+	// those keys. A key with a field in the target
 	// decodes into that field. The decode skips each key without a field
-	// that reads it, and every key below a value that decodes itself. The
-	// validators of the decode still see each key.
+	// that reads it, and every key below a value that decodes itself. Such
+	// a key replaces each entry of its name that a `<<` merge key before it
+	// brings in, so the decode skips those entries too. The validators of
+	// the decode still see each key.
 	KnownKeys func(keys []paths.Path) any
 )

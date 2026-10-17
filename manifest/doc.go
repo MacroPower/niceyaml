@@ -220,14 +220,19 @@
 // document. It also reports each type field that a branch or another
 // document might declare.
 //
-// The decode admits the type fields, and rejects every other key that the
-// Go type does not declare. A Go type that reads the type fields, such as
-// one that embeds the TypeMeta of Kubernetes or a map[string]any, gets the
-// names of the current version. Each validator of [WithDecodeOptions] and
-// [DecodeOptions] sees them too. A value that decodes itself does not see
-// a type field below it, whether it decodes through a method such as
-// UnmarshalYAML or through an unmarshaler of [WithUnmarshalers]. Every
-// error and every warning binds in the file of the user.
+// The decode admits the type fields, and by default rejects every other key
+// that the Go type does not declare. A [niceyaml.WithUnknownFields] among
+// the options of [WithDecodeOptions] or [DecodeOptions] replaces that mode,
+// so [niceyaml.UnknownFieldsWarn] makes each such key a warning of the load.
+// A type field of the document replaces each type field of its name that a
+// `<<` merge key before it brings in, so the decode admits those too. A Go
+// type that reads the type fields, such as one that embeds the TypeMeta
+// of Kubernetes or a map[string]any, gets the names of the current version.
+// Each validator of [WithDecodeOptions] and [DecodeOptions] sees them too. A
+// value that decodes itself does not see a type field below it, whether it
+// decodes through a method such as UnmarshalYAML or through an unmarshaler
+// of [WithUnmarshalers]. Every error and every warning binds in the file of
+// the user.
 //
 // After each document has run its checks, the load compares the names of
 // the manifests of each kind. It counts the manifests of each kind that

@@ -34,7 +34,7 @@ func main() {
 
 	// Without the option the decoder skips a key that no field reads, so
 	// the misspelled key on line 6 would pass.
-	strict := niceyaml.WithDisallowUnknownFields(true)
+	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
 	_, err := source.Decode[menu](ctx, strict)
 	lipgloss.Println(p.PrintError(err))
 

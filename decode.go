@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"runtime/debug"
 	"slices"
+	"strconv"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -36,7 +38,7 @@ import (
 //   - [WithValidator]
 //   - [WithSelfValidation]
 //   - [WithValueCheck]
-//   - [WithDisallowUnknownFields]
+//   - [WithUnknownFields]
 //   - [WithAllowedFieldPrefixes]
 //   - [WithUnmarshaler]
 //   - [WithYAMLOrderedMaps]
@@ -65,10 +67,10 @@ type decodeConfig struct {
 	knownKeys []paths.Path
 	// The types that the options give an unmarshaler, which the go-yaml
 	// decoder does not call on its own.
-	unmarshalers          unmarshaler.Options
-	skipSelfValidation    bool
-	disallowUnknownFields bool
-	orderedMaps           bool
+	unmarshalers       unmarshaler.Options
+	unknownFields      UnknownFieldsMode
+	skipSelfValidation bool
+	orderedMaps        bool
 }
 
 // valueCheck is a function from [WithValueCheck] for the values of one
@@ -101,11 +103,13 @@ func newDecodeConfig(s *Source, opts []DecodeOption) decodeConfig {
 }
 
 // WithValidator is a [DecodeOption] that validates the document with dv
-// before the decode. A validation error ends the decode before any typed
-// decoding. Each WithValidator option adds a validator. The decode runs
-// them as [ChainValidator] runs them, so it runs them in the order given
-// and stops at the first that fails. A caller that wants every failure
-// of several validators gives one option a [MultiValidator].
+// before the decode. A validation error ends the decode before the decoder
+// runs. The decode then does not call any Validate method, so the warnings
+// of those methods do not reach the [Warnings] collector of the context.
+// Each WithValidator option adds a validator. The decode runs them as
+// [ChainValidator] runs them, so it runs them in the order given and stops
+// at the first that fails. A caller that wants every failure of several
+// validators gives one option a [MultiValidator].
 //
 // Validation skips a nil dv, and a dv that holds a nil pointer or func,
 // such as a schema a program loads only on some paths. A
@@ -215,13 +219,79 @@ func WithValueCheck[T any](fn func(ctx context.Context, v *T) error) DecodeOptio
 	}
 }
 
-// WithDisallowUnknownFields is a [DecodeOption] that sets whether a
-// mapping key without a field in the target struct is an error. The
-// default is false, and the decode then skips unknown keys.
+// UnknownFieldsMode sets what a decode does with each unknown field, which
+// is a mapping key that does not have a field in the target struct.
+// [WithUnknownFields] takes one. Its text is "ignore", "warn", or
+// "reject", so a program reads a flag into one with [flag.TextVar]:
 //
-// With the option on, a decode that fails reports every unknown field
-// that the document holds, in the order of the source. Each one sits at
-// the path of its key and matches [ErrUnknownField] beside [ErrDecode]:
+//	mode := niceyaml.UnknownFieldsReject
+//	flag.TextVar(&mode, "unknown-fields", mode, "ignore, warn, or reject unknown fields")
+type UnknownFieldsMode int
+
+const (
+	// UnknownFieldsIgnore skips each unknown field. It is the default.
+	UnknownFieldsIgnore UnknownFieldsMode = iota
+	// UnknownFieldsWarn decodes as UnknownFieldsIgnore does, and it hands
+	// each unknown field to the [Warnings] collector of the context as a
+	// warning.
+	UnknownFieldsWarn
+	// UnknownFieldsReject fails the decode with an error for each unknown
+	// field.
+	UnknownFieldsReject
+)
+
+// String returns the name of m: "ignore", "warn", or "reject". For a value
+// that is not one of the [UnknownFieldsMode] constants, it returns the
+// value in the form "UnknownFieldsMode(3)".
+func (m UnknownFieldsMode) String() string {
+	switch m {
+	case UnknownFieldsIgnore:
+		return "ignore"
+	case UnknownFieldsWarn:
+		return "warn"
+	case UnknownFieldsReject:
+		return "reject"
+	default:
+		return "UnknownFieldsMode(" + strconv.Itoa(int(m)) + ")"
+	}
+}
+
+// MarshalText implements [encoding.TextMarshaler]. The text is the name
+// that [UnknownFieldsMode.String] returns. For a value that is not one of
+// the UnknownFieldsMode constants, MarshalText returns an error that wraps
+// [ErrUnknownFieldsMode].
+func (m UnknownFieldsMode) MarshalText() ([]byte, error) {
+	if m < UnknownFieldsIgnore || m > UnknownFieldsReject {
+		return nil, fmt.Errorf("%w: %v", ErrUnknownFieldsMode, m)
+	}
+
+	return []byte(m.String()), nil
+}
+
+// UnmarshalText implements [encoding.TextUnmarshaler]. It reads the name
+// of a mode, "ignore", "warn", or "reject", as [UnknownFieldsMode.String]
+// writes it. For any other text, it returns an error that wraps
+// [ErrUnknownFieldsMode] and leaves m as it was.
+func (m *UnknownFieldsMode) UnmarshalText(text []byte) error {
+	for mode := UnknownFieldsIgnore; mode <= UnknownFieldsReject; mode++ {
+		if string(text) == mode.String() {
+			*m = mode
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("%w: %q, want ignore, warn, or reject", ErrUnknownFieldsMode, text)
+}
+
+// WithUnknownFields is a [DecodeOption] that sets what the decode does with
+// each unknown field, as [UnknownFieldsMode] describes. The default is
+// [UnknownFieldsIgnore]. WithUnknownFields panics for a mode that is not
+// one of the UnknownFieldsMode constants.
+//
+// Under [UnknownFieldsReject], a decode that fails reports every unknown
+// field that the document holds, in the order of the source. Each one sits
+// at the path of its key and matches [ErrUnknownField] beside [ErrDecode]:
 //
 //	cfg.yaml: 2 unknown fields
 //	cfg.yaml:3:1: $.replicsa~: unknown field "replicsa"
@@ -229,42 +299,102 @@ func WithValueCheck[T any](fn func(ctx context.Context, v *T) error) DecodeOptio
 //
 // The fields join the other problems of the decode, as the Decoding
 // section of the package documentation describes, and [errors.As] finds
-// the [yaml.UnknownFieldError] of each. The report holds only keys the
-// go-yaml decoder rejects, so it leaves out a key under a prefix that
-// [WithAllowedFieldPrefixes] allows.
+// the [yaml.UnknownFieldError] of each.
 //
-// The decoder does not reject a key below a field of an interface type.
-// It also does not reject a key in a mapping that holds a key it does not
-// read as a string, or in a mapping whose `<<` merge key it refuses. A
-// struct that decodes itself decides for its own fields. When an
+// Under [UnknownFieldsWarn], the decoder fills the value as it does under
+// UnknownFieldsIgnore. The decode then hands the same fields to the
+// [Warnings] collector of ctx, whether the decoder accepts the document or
+// not. The self-validation walk still runs. Each warning matches
+// ErrUnknownField and ErrDecode, as each error under UnknownFieldsReject
+// does:
+//
+//	warnings := niceyaml.NewWarnings()
+//
+//	cfg, err := doc.Decode[Config](warnings.Context(ctx), niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn))
+//
+// Under UnknownFieldsWarn, a decode whose context carries a [Warnings]
+// collector searches the document for unknown fields, even when the
+// decode passes. A decode without a collector drops every warning, so it
+// does not search. Under UnknownFieldsReject, the search runs only after
+// the decoder rejects the document.
+//
+// The search decodes once more each struct that decodes itself from a
+// mapping and that it reads, so the unmarshaler of that struct runs again.
+// It skips each such struct that another struct holds inline. The aliases
+// of one anchor share that decode. When the decode rejects a field, the
+// search runs the unmarshaler of the outermost such struct again for each
+// key at or below it. Those calls get a context without the collector, so
+// their warnings do not reach it.
+//
+// UnknownFieldsWarn and UnknownFieldsReject differ beyond the severity of
+// the fields. Under UnknownFieldsReject, the decoder stops at the first
+// unknown field, so the Validate methods of the value do not run. Under
+// UnknownFieldsWarn, they run when the decoder accepts the rest of the
+// document.
+//
+// UnknownFieldsWarn reports the fields that the search finds. The search
+// does not read below a value that decodes itself, except a struct whose
+// UnmarshalYAML method decodes it through the decoder. UnknownFieldsWarn
+// thus does not report a field below a value that a function of
+// [CustomUnmarshaler] decodes, or below a slice with an UnmarshalYAML
+// method. UnknownFieldsReject reports such a field when the decoder
+// rejects it before any other value.
+//
+// The search does not read a reference document either, so
+// UnknownFieldsWarn does not report a key that a `<<` merge key brings in
+// from one. UnknownFieldsReject reports such a key at the alias of the
+// merge key when the decoder rejects it before any other value.
+//
+// The search also cannot tell whether such a merge key replaces an entry
+// that comes before it in the same mapping. So the search does not read
+// below the value of that entry, whether or not the reference document
+// holds its key. UnknownFieldsWarn then does not report a key there.
+// UnknownFieldsReject reports such a key when the decoder reads the value
+// of the entry and rejects the key before any other value.
+//
+// A decode that a [Validator] fails does not reach the decoder, so it does
+// not report any unknown field. Neither UnknownFieldsWarn nor
+// UnknownFieldsReject reports these keys:
+//
+//   - A key under a prefix that [WithAllowedFieldPrefixes] allows.
+//   - A key below a field of an interface type.
+//   - A key in a mapping that holds a key that the decoder does not read as
+//     a string.
+//   - A key in a mapping whose `<<` merge key the decoder refuses.
+//
+// A struct that decodes itself decides for its own fields. When an
 // UnmarshalYAML method decodes into a second type with the same fields,
-// the decoder checks those fields. When the method parses the text
-// itself, the decoder does not check them.
+// the decoder checks those fields. When the method parses the text itself,
+// the decoder does not check them.
 //
 // Below a struct that decodes itself into fields that do not mirror the
-// document, the report holds an unknown field only when the decoder
-// names it. The report can also hold a key that a function from
+// document, the report holds an unknown field only when the decoder names
+// it. The report can also hold a key that a function from
 // [yaml.RegisterCustomUnmarshaler] accepts. A function from
 // [CustomUnmarshaler] does not have that limit.
-func WithDisallowUnknownFields(disallow bool) DecodeOption {
+func WithUnknownFields(mode UnknownFieldsMode) DecodeOption {
+	if mode < UnknownFieldsIgnore || mode > UnknownFieldsReject {
+		panic(fmt.Sprintf("niceyaml.WithUnknownFields: %v is not one of the UnknownFieldsMode constants", mode))
+	}
+
 	return func(c *decodeConfig) {
-		c.disallowUnknownFields = disallow
+		c.unknownFields = mode
 	}
 }
 
 // WithAllowedFieldPrefixes is a [DecodeOption] that lets a mapping hold a
 // key without a field when the key starts with one of prefixes, even
-// under [WithDisallowUnknownFields]. Such keys include the `x-` keys that
-// a format reserves for extensions:
+// under [UnknownFieldsReject] or [UnknownFieldsWarn]. Such keys include
+// the `x-` keys that a format reserves for extensions:
 //
 //	spec, err := doc.Decode[Spec](ctx,
-//		niceyaml.WithDisallowUnknownFields(true),
+//		niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
 //		niceyaml.WithAllowedFieldPrefixes("x-"),
 //	)
 //
 // Each WithAllowedFieldPrefixes adds to the prefixes given before it. An
 // empty prefix allows every key. The option does not change a decode
-// that accepts unknown fields.
+// under [UnknownFieldsIgnore].
 func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 	return func(c *decodeConfig) {
 		c.allowedFieldPrefixes = append(c.allowedFieldPrefixes, prefixes...)
@@ -506,7 +636,7 @@ func WithYAMLOrderedMaps(enabled bool) DecodeOption {
 // program that decodes many documents names its settings in one place.
 // A call applies the result as it applies opts written in its place:
 //
-//	settings := niceyaml.DecodeOptions(niceyaml.WithDisallowUnknownFields(true))
+//	settings := niceyaml.DecodeOptions(niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
 //	strict := niceyaml.DecodeOptions(niceyaml.WithValidator(reg), settings)
 //
 //	manifest, err := doc.Decode[Manifest](ctx, strict)
@@ -604,8 +734,13 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 	}
 
 	// The decoder step reports each problem as an error, whatever it wraps,
-	// since the decoder stops at the first and reads no value past it.
+	// because the decoder stops at the first and reads no value past it.
 	err = n.bindOwn(AsErrors(n.decodeUnbound(ctx, n.AST(), v, cfg, comments)))
+
+	if cfg.unknownFields == UnknownFieldsWarn {
+		n.warnUnknownFields(ctx, reflect.TypeOf(v).Elem(), cfg, err)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -615,6 +750,38 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 	}
 
 	return n.selfValidate(ctx, v, cfg)
+}
+
+// warnUnknownFields hands each unknown field of a decode of n into a value
+// of type t to the [Warnings] collector of ctx, in the order of the
+// source, as [UnknownFieldsWarn] describes. A decoder that rejects unknown
+// fields confirms each one, with the other settings of cfg. The search
+// does not run when ctx does not carry a collector, when ctx has ended, or
+// when err, the error of the decoder step, holds a panic.
+func (n *Node) warnUnknownFields(ctx context.Context, t reflect.Type, cfg decodeConfig, err error) {
+	if scopeOf(ctx) == nil || ctx.Err() != nil || holdsPanic(err) || !astnode.HasContent(n.AST()) {
+		return
+	}
+
+	strict := cfg
+	strict.unknownFields = UnknownFieldsReject
+
+	c := newProblemCollector(ctx, n, strict)
+	c.register(n.AST())
+	c.collectUnknown(t, n.AST())
+
+	if ctx.Err() != nil {
+		return
+	}
+
+	problems := slices.Collect(maps.Values(c.found))
+	slices.SortFunc(problems, func(a, b decodeProblem) int {
+		return cmp.Or(cmp.Compare(a.at.Line, b.at.Line), cmp.Compare(a.at.Col, b.at.Col))
+	})
+
+	for _, problem := range problems {
+		n.Warn(ctx, problem.err)
+	}
 }
 
 // aliasingError returns err, the error of an alias check of n, bound to n
@@ -704,7 +871,7 @@ func (n *Node) newDecoder(cfg decodeConfig, extra ...yaml.DecodeOption) *yaml.De
 
 	opts := slices.Concat(n.source.decodeOptions(), cfg.unmarshalers.YAMLOptions(decode))
 
-	if cfg.disallowUnknownFields {
+	if cfg.unknownFields == UnknownFieldsReject {
 		opts = append(opts, yaml.DisallowUnknownField())
 	}
 
@@ -800,10 +967,24 @@ func (n *Node) decodeUnbound(
 		return n.decodeRejection(err)
 	}
 
-	view = n.admitKnownKeys(cfg, reflect.TypeOf(v).Elem(), view)
+	cut := n.admitKnownKeys(cfg, reflect.TypeOf(v).Elem(), view)
+
+	// The view that the decoder reads leaves out entries and the anchors in
+	// them. Its copies of the mappings that merge keys bring in do not hold
+	// the anchors of those mappings either. The decoder reads the view
+	// without the cut first, so it registers every anchor of the node in
+	// document order. Each alias then reads its anchor as the document
+	// writes it. The decode that follows reports any error of the view.
+	if cut.read != view {
+		var sink any
+
+		_ = decodeWithRecover(ctx, dec, view, &sink) //nolint:errcheck // The decode of the cut reports it.
+	}
+
+	view = cut.view
 
 	// The pass decoded anchors outside node with dec, which wrote their
-	// comments to the map.
+	// comments to the map. So did the read of the view without the cut.
 	clear(comments)
 
 	// The decoder tests an alias for null, rather than the anchor it
@@ -828,7 +1009,7 @@ func (n *Node) decodeUnbound(
 
 	// The recover turns a panic in the go-yaml decoder, or in a value's
 	// own UnmarshalYAML, into an error that holds a PanicError.
-	err = decodeWithRecover(ctx, dec, view, target)
+	err = decodeWithRecover(ctx, dec, cut.read, target)
 
 	// The decoder starts each value it creates from zero, so the Node
 	// builds those values again from their defaults.
@@ -1402,8 +1583,10 @@ type problemCollector struct {
 }
 
 // newProblemCollector creates a new [*problemCollector] for a decode of
-// n with cfg.
+// n with cfg. The collector decodes with a copy of ctx that drops each
+// warning, as [withoutWarnings] describes.
 func newProblemCollector(ctx context.Context, n *Node, cfg decodeConfig) *problemCollector {
+	ctx = withoutWarnings(ctx)
 	dec := n.newDecoder(cfg)
 
 	return &problemCollector{
@@ -1430,19 +1613,25 @@ func (n *Node) walkRules(ctx context.Context, dec *yaml.Decoder, u unmarshaler.O
 }
 
 // collect finds the problems of a decode of node into a value of type t.
-// Those are the leaves that the decoder rejects and, when the decoder
-// rejects unknown fields, the unknown fields other than the known keys of
-// the decode.
+// Those are the leaves that the decoder rejects and, under
+// [UnknownFieldsReject], the unknown fields that
+// [problemCollector.collectUnknown] finds.
 func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 	c.register(node)
 
 	from := datapath.ParentAt(c.rules.Resolver, c.node.base)
 	decodewalk.Walk(c.ctx, c.rules, t, node, from, c.visit)
 
-	if !c.cfg.disallowUnknownFields {
-		return
+	if c.cfg.unknownFields == UnknownFieldsReject {
+		c.collectUnknown(t, node)
 	}
+}
 
+// collectUnknown finds the unknown fields of a decode of node into a value
+// of type t, other than the known keys of the decode. The decoder of the
+// collector must reject unknown fields, and [problemCollector.register]
+// must have read node.
+func (c *problemCollector) collectUnknown(t reflect.Type, node ast.Node) {
 	known := c.node.knownKeys(c.cfg)
 
 	for _, field := range decodewalk.UnknownFields(c.ctx, c.rules, t, node) {
@@ -1690,6 +1879,8 @@ func (n *Node) locateDecodeError(
 		return err
 	}
 
+	// The locator decodes values again, as [withoutWarnings] describes.
+	ctx = withoutWarnings(ctx)
 	dec := n.newDecoder(cfg)
 	l := &errorLocator{
 		ctx:     ctx,

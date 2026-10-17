@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"go.jacobcolvin.com/x/stringtest"
 
@@ -49,6 +50,50 @@ type acceptsAll struct {
 
 func (*acceptsAll) UnmarshalYAML(func(any) error) error { return nil }
 
+// pickedSelf decodes itself into the type that its kind key picks. A
+// mapping of the kind a decodes into a type with the field x, and any
+// other mapping into one with the field y.
+type pickedSelf struct {
+	X int
+	Y int
+}
+
+func (s *pickedSelf) UnmarshalYAML(unmarshal func(any) error) error {
+	var fields map[string]any
+
+	err := unmarshal(&fields)
+	if err != nil {
+		return err
+	}
+
+	if fields["kind"] == "a" {
+		var a struct {
+			Kind string `yaml:"kind"`
+			X    int    `yaml:"x"`
+		}
+
+		err = unmarshal(&a)
+		s.X = a.X
+
+		return err
+	}
+
+	var b struct {
+		Kind string `yaml:"kind"`
+		Y    int    `yaml:"y"`
+	}
+
+	err = unmarshal(&b)
+	s.Y = b.Y
+
+	return err
+}
+
+// pickedHolder holds a [pickedSelf].
+type pickedHolder struct {
+	Self pickedSelf `yaml:"self"`
+}
+
 // mergeHolder holds a map of pairs beside the anchor its entries merge.
 type mergeHolder struct {
 	Base  any             `yaml:"base"`
@@ -69,6 +114,12 @@ type selfHolder struct {
 // acceptsHolder holds an [acceptsAll].
 type acceptsHolder struct {
 	Self acceptsAll `yaml:"self"`
+}
+
+// selfListHolder holds a [plainSelf] and a list of them.
+type selfListHolder struct {
+	Self plainSelf   `yaml:"self"`
+	List []plainSelf `yaml:"list"`
 }
 
 func TestUnknownFields(t *testing.T) {
@@ -114,6 +165,12 @@ func TestUnknownFields(t *testing.T) {
 			input: "self: {in: {q: 1}, r: 2}\n",
 			typ:   reflect.TypeFor[acceptsHolder](),
 		},
+		"no key a struct that picks its type accepts": {
+			// The decoder accepts the whole struct, so the search does not
+			// decode x without the kind that picks the type with x.
+			input: "self: {kind: a, x: 1}\n",
+			typ:   reflect.TypeFor[pickedHolder](),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -122,6 +179,57 @@ func TestUnknownFields(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input)
 			assert.Equal(t, tc.want, unknownKeys(t, doc, tc.typ))
+		})
+	}
+}
+
+func TestUnknownFields_Aliases(t *testing.T) {
+	t.Parallel()
+
+	// The search decodes the content of the anchor once for all its
+	// aliases, as it reads the keys below it once.
+	tcs := map[string]struct {
+		input string
+		want  []string
+		// The decodes that the search runs.
+		decodes int
+	}{
+		"an anchor that the decoder accepts": {
+			// The one decode of the whole struct.
+			input:   stringtest.LinesLF("self: &s {in: {a: 1}, x: 1}", "list: [*s, *s, *s]"),
+			decodes: 1,
+		},
+		"an anchor with an unknown key": {
+			// The decode of the whole struct, and one decode to confirm
+			// each candidate: in, x, and q.
+			input:   stringtest.LinesLF("self: &s {in: {q: 1}, x: 1}", "list: [*s, *s, *s]"),
+			want:    []string{"q@1:16"},
+			decodes: 4,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+			r := rules(t, doc, yaml.DisallowUnknownField())
+			decode := r.Decode
+			decodes := 0
+			r.Decode = func(node ast.Node, v any) error {
+				decodes++
+
+				return decode(node, v)
+			}
+
+			var keys []string
+
+			for _, field := range decodewalk.UnknownFields(t.Context(), r, reflect.TypeFor[selfListHolder](), doc.AST()) {
+				keys = append(keys, yamltest.TokenPlace(field.Token))
+			}
+
+			assert.Equal(t, tc.want, keys)
+			assert.Equal(t, tc.decodes, decodes)
 		})
 	}
 }

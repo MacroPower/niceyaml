@@ -2,6 +2,7 @@ package decodewalk
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"slices"
 
@@ -183,7 +184,9 @@ func (v *Value) Selected() bool {
 // differ from that one where the struct ignores merges, as
 // [yamlfield.IgnoresMerges] reports. The decoder drops a source that
 // holds a key it does not read as a string, along with the sources that
-// source merges.
+// source merges. The walk cannot read the sources of some merge keys,
+// such as an alias of a reference document. It skips each entry that
+// such a merge key after the entry might replace.
 //
 // The walk skips each value that the decoder does not read anything for:
 // a null, an alias to one, an alias that does not resolve, and a field
@@ -405,7 +408,7 @@ func (w *walker) fields(v *Value, mapping *ast.MappingNode) bool {
 // field of it. It reports false when the walk ends.
 func (w *walker) field(parent *Value, owner, t reflect.Type, name string, mapping *ast.MappingNode) bool {
 	entry := w.entryOf(mapping, name, parent.merges)
-	if entry == nil {
+	if entry == nil || parent.merges && w.mayReplace(mapping, entry, name) {
 		return true
 	}
 
@@ -449,7 +452,15 @@ func (w *walker) inline(parent *Value, owner, t reflect.Type, mapping *ast.Mappi
 	case t.Kind() == reflect.Map:
 		for entry := range datapath.Members(w.rules.Resolver, mapping, parent.merges) {
 			name, ok := w.rules.Resolver.KeyName(entry.Key)
-			if ok && w.entryOf(mapping, name, parent.merges) == entry && !w.entry(parent, owner, t, entry, name, true) {
+			if !ok || w.entryOf(mapping, name, parent.merges) != entry {
+				continue
+			}
+
+			if parent.merges && w.mayReplace(mapping, entry, name) {
+				continue
+			}
+
+			if !w.entry(parent, owner, t, entry, name, true) {
 				return false
 			}
 		}
@@ -515,10 +526,19 @@ func (w *walker) entry(
 // key name when it decodes a struct, or nil when mapping does not hold
 // one. With merges set, the entry is the one a path through name selects,
 // unless [walker.droppedBy] reports it. Without merges, the entry is the
-// last entry of mapping itself with that name.
+// last entry of mapping itself with that name. So is the entry when the
+// lookup cannot read the sources of a `<<` merge key, such as an alias of
+// a reference document. The decoder reads that entry unless such a
+// source holds the key too, as [walker.mayReplace] reports. The search
+// of [UnknownFields] takes the key of that entry as a candidate. The walk
+// skips its value.
 func (w *walker) entryOf(mapping *ast.MappingNode, name string, merges bool) *ast.MappingValueNode {
 	if merges {
 		selected, err := w.rules.Resolver.Entry(mapping, name)
+		if errors.Is(err, paths.ErrReferenceAlias) {
+			return w.entryOf(mapping, name, false)
+		}
+
 		if err != nil {
 			return nil
 		}
@@ -542,6 +562,25 @@ func (w *walker) entryOf(mapping *ast.MappingNode, name string, merges bool) *as
 	}
 
 	return nil
+}
+
+// mayReplace reports whether a `<<` merge key after entry, the entry of
+// mapping itself for the key name, might replace entry. It reports true
+// when the lookup of name cannot read the sources of such a merge key,
+// such as an alias of a reference document. One of those sources might
+// then hold the key. The walk skips such an entry, so it does not read a
+// value that the decoder might not read.
+func (w *walker) mayReplace(mapping *ast.MappingNode, entry *ast.MappingValueNode, name string) bool {
+	at := slices.Index(mapping.Values, entry)
+	if at < 0 || !slices.ContainsFunc(mapping.Values[at+1:], func(e *ast.MappingValueNode) bool {
+		return e != nil && astnode.IsMergeKey(e.Key)
+	}) {
+		return false
+	}
+
+	_, err := w.rules.Resolver.Entry(mapping, name)
+
+	return errors.Is(err, paths.ErrReferenceAlias)
 }
 
 // droppedBy returns the entries the `<<` merge keys of mapping bring in

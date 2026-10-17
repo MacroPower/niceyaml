@@ -144,9 +144,13 @@ func WithMigrateHint(hint string) RegistryOption {
 }
 
 // WithDecodeOptions is a [RegistryOption] that adds options to each decode
-// of a manifest. They apply after the rejection of unknown fields and
-// before the options of [DecodeOptions]. A [niceyaml.WithDefaults] of a
-// kind thus replaces one of the registry for the same type.
+// of a manifest. They apply after the option that rejects unknown fields
+// and before the options of [DecodeOptions]. A [niceyaml.WithDefaults] of a
+// kind thus replaces one of the registry for the same type. With
+// niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn) among them, the
+// unknown fields of each manifest become warnings of the load. Neither
+// UnknownFieldsWarn nor UnknownFieldsReject reports the type fields that
+// the registry reads.
 func WithDecodeOptions(opts ...niceyaml.DecodeOption) RegistryOption {
 	return func(c *registryConfig) {
 		c.decodeOptions = append(c.decodeOptions, opts...)

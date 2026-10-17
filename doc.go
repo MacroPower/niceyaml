@@ -474,6 +474,14 @@
 // call drops its warnings. The call returns only its errors, so a call that
 // returns nil passed, and [errors.Is] on its error does not match a warning.
 //
+// A decode stops at the first step that fails, as the Decoding section
+// describes, so its collector gets the warnings of the steps that ran. When
+// a [Validator] fails, the decoder and the Validate methods do not run. When
+// the decoder rejects the document, the Validate methods do not run. Rules
+// that apply to one call and must report beside the warnings of the Validate
+// methods go in functions of [WithValueCheck]. Those functions run in the
+// step of the Validate methods.
+//
 // The call returns a failure that does not hold a warning as the check wrote
 // it. In a result that holds both, the call removes the warnings from the
 // joins and from the wrappers of one %w verb that [fmt.Errorf] builds. It
@@ -497,8 +505,9 @@
 // in which every problem is a warning counts as a pass. The self-validation
 // walk thus runs the Validate method of a value when the values below it gave
 // only warnings, and [ChainValidator] continues to the next validator. The
-// decoder step reports each problem as an error, whatever it wraps, so a
-// value that decodes itself warns from its Validate method rather than from
+// decoder step reports each problem as an error, whatever it wraps, except
+// the unknown fields that [UnknownFieldsWarn] reports as warnings. A value
+// that decodes itself thus warns from its Validate method rather than from
 // its unmarshaler.
 //
 // A wrapper that [fmt.Errorf] builds with several %w verbs heads a warning
@@ -622,7 +631,7 @@
 // problem, the decode returns that problem alone. The search adds values of
 // the wrong kind, numbers out of range, durations that do not parse, scalars
 // that an UnmarshalText method rejects, and unknown fields under
-// [WithDisallowUnknownFields]. The decoder confirms each one.
+// [UnknownFieldsReject]. The decoder confirms each one.
 //
 // Apart from those scalars and a [time.Time], the search does not read
 // anything at or below a value that decodes itself. A type with an
@@ -647,6 +656,13 @@
 // that answers differently the second time can move the error to another
 // value. When an error does not recur at any value, the decode returns it
 // without a location.
+//
+// The search, the decodes that locate an error, and the fill of the
+// defaults decode values again. So does the self-validation walk, which
+// decodes map keys to spell them. Each unmarshaler that such a decode runs
+// gets a context without the [Warnings] collector of the call. The
+// collector thus gets only the warnings that the unmarshalers hand to the
+// context of the decoder step.
 //
 // The decode recovers a panic in the go-yaml decoder and in the unmarshalers
 // it calls. It returns the panic as an error that holds a [PanicError] and
@@ -686,10 +702,25 @@
 // section describes. A null element or map value holds the defaults of its
 // type, and a null sets a pointer to nil. The target of a pointer that
 // already points to a value, such as one that a function of WithDefaults
-// sets, starts from that value. The value it pointed to stays as it was. A
-// value that decodes itself, through an unmarshaler method or a
-// [CustomUnmarshaler] function, starts from its defaults too. Its method
+// sets, starts from that value. The value it pointed to stays as it was.
+//
+// A value that decodes itself, through an unmarshaler method or a
+// [CustomUnmarshaler] function, starts from its defaults too. Its unmarshaler
 // decides what to keep.
+//
+// The decoder starts from zero each element, each map value, and the target of
+// each nil pointer in a field, element, or map value, and so every value
+// inside them. When such a value decodes itself and the defaults give it a
+// value other than zero, the decode calls its unmarshaler again on a value
+// that starts from the defaults. The decode keeps the value of the second
+// call, and the [Warnings] collector gets only the warnings of the first call.
+// The decode calls the unmarshaler of every other value except a map key
+// once, on the value that it starts from. The target of [Node.Decode] thus
+// decodes itself once from its defaults, and so does the value that
+// [Node.DecodeInto] allocates for a nil pointer that its target points to.
+// Under [UnknownFieldsWarn], a decode whose context carries a collector also
+// calls again the unmarshalers of the structs that decode themselves from a
+// mapping, as [WithUnknownFields] describes.
 //
 // The value at an alias starts from the defaults of its own place. The places
 // that aliases of one anchor fill share one value when they start from equal
@@ -701,6 +732,21 @@
 // Each key of a map keeps the value that the decoder gives it, and so does a
 // value behind an alias to a reference document. A panic in a function of
 // WithDefaults makes the decode return an error that holds a [PanicError].
+//
+// The decode reads each key of a map again to find its entry in these cases:
+//
+//   - The map starts from a map that is not nil.
+//   - The map type, the key type, the value type, or a type inside them has a
+//     function of WithDefaults.
+//   - A struct holds the map inline, directly or through inline structs, and
+//     that struct starts from a value other than zero.
+//   - A struct holds the map inline, directly or through inline structs, and
+//     its type or a type inside it has a function of WithDefaults.
+//
+// Each such read calls again the unmarshaler of each key that decodes itself.
+// The decode reads the keys once for a map below a value that decodes itself.
+// It also reads them once for a map behind an alias to a reference document.
+// The [Warnings] collector gets only the warnings of the decoder's call.
 //
 // # Validation
 //
@@ -1174,7 +1220,7 @@
 // A layer that a program builds from its environment or its flags merges and
 // binds as a file does. It cannot set one element of a sequence. By default,
 // the decode ignores a key that the target does not read, and
-// [WithDisallowUnknownFields] reports such a key. After the layer sets one
+// [WithUnknownFields] reports such a key. After the layer sets one
 // key of a mapping, an error at that mapping binds in that layer, whichever
 // layer the fix belongs in. So does an error for a key that the mapping
 // lacks.

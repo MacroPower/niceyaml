@@ -228,3 +228,64 @@ func TestWriteNull(t *testing.T) {
 	assert.Same(t, prev, alias.Prev)
 	assert.Same(t, next, alias.Next)
 }
+
+func TestTree_Anchor(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		steps []any
+		// The text of the anchor of the tree that the alias at steps
+		// reads, and the name that the tree gives it. An empty text means
+		// that the alias reads none.
+		want, name string
+	}{
+		"alias of an anchor before it": {
+			input: stringtest.LinesLF("a: &x {b: 1}", "c: *x"),
+			steps: []any{"c"},
+			want:  "&x {b: 1}",
+			name:  "x",
+		},
+		"alias of a renamed anchor": {
+			// The text of the anchor spells the name of the document.
+			input: stringtest.LinesLF("a: &x 1", "b: *x", "c: &x 2", "d: *x"),
+			steps: []any{"d"},
+			want:  "&x 2",
+			name:  "x [2]",
+		},
+		"alias without an anchor": {
+			input: "a: *r\n",
+			steps: []any{"a"},
+		},
+		"alias inside its anchor": {
+			input: "a: &x {<<: *x}\n",
+			steps: []any{"a", "<<"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tree, doc := newTree(t, tc.input)
+
+			alias, ok := tree.View(at(t, doc, tc.steps...)).(*ast.AliasNode)
+			require.True(t, ok, "not an alias")
+
+			got, ok := tree.Anchor(alias)
+			if tc.want == "" {
+				assert.False(t, ok)
+
+				return
+			}
+
+			require.True(t, ok)
+			assert.Equal(t, tc.want, got.String())
+
+			name, ok := astnode.Name(got.Name)
+			require.True(t, ok)
+			assert.Equal(t, tc.name, name)
+			assert.True(t, tree.Holds(got.GetToken()))
+		})
+	}
+}

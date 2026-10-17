@@ -415,6 +415,37 @@ func (t *Tree) Parsed(node ast.Node) ast.Node {
 	return node
 }
 
+// Anchor returns the anchor of the tree that the decoder reads for alias,
+// an alias of the tree. That anchor is the one the document's resolver
+// binds the alias to. Anchor reports false when the resolver does not
+// bind alias to an anchor, as for an alias to a reference document. It
+// also reports false for an alias inside the anchor it refers to, which
+// the decoder does not read through.
+func (t *Tree) Anchor(alias *ast.AliasNode) (*ast.AnchorNode, bool) {
+	if alias == nil || alias.Start == nil || alias.Start.Position == nil {
+		return nil, false
+	}
+
+	off := alias.Start.Position.Offset
+	aliases := t.aliases()
+
+	i := sort.Search(len(aliases), func(i int) bool {
+		return aliases[i].token.Position.Offset >= off
+	})
+	if i == len(aliases) || aliases[i].token.Position.Offset != off {
+		return nil, false
+	}
+
+	a := aliases[i]
+	if a.anchor == nil || a.enclosed {
+		return nil, false
+	}
+
+	anchor, ok := t.View(a.anchor).(*ast.AnchorNode)
+
+	return anchor, ok
+}
+
 // Holds reports whether tk is a token of the parse the tree reads. Such a
 // token is one of the tokens of its second parse, or the token of a node
 // of its body. The null that the parser makes for a key without a value

@@ -27,6 +27,12 @@ import (
 // does not have a field of that name. The search reads the field names as
 // [yamlfield.Name] gives them, including the fields of inline structs.
 //
+// A later merge key of a reference document might replace an entry of
+// such a mapping. The key of that entry is still a candidate. Whichever
+// entry the decoder takes for the key, the struct does not have a field
+// of that name. The walk skips the value of the entry, as [Walk]
+// describes, so the search does not read the keys below that value.
+//
 // The search leaves every other rule of the decode to the decoder, such
 // as the prefixes of keys it allows. It also cannot see the types a
 // function decodes. So the decoder confirms each candidate. The search
@@ -46,11 +52,20 @@ import (
 // the entries and elements that lead from its mapping down to the
 // candidate. So the unmarshaler decides, as it does in the decode itself.
 //
+// Before it reads the keys of the outermost such struct, the search
+// decodes the whole struct once. When the decoder accepts it, the search
+// does not read anything at or below the struct, because the decoder does
+// not reject a key there. The search decodes the content of an anchor
+// once for all the aliases that reach it. The unmarshaler of a struct
+// without an unknown field thus runs once more rather than once more for
+// each of its keys or aliases.
+//
 // The search does not read below any other type that decodes itself,
 // below a struct that decodes itself held inline, or below the members of
 // an inline map.
 func UnknownFields(ctx context.Context, r Rules, t reflect.Type, node ast.Node) []*yaml.UnknownFieldError {
 	found := map[int]*yaml.UnknownFieldError{}
+	verdicts := map[seenKey]bool{}
 
 	w := newWalker(ctx, r, func(v *Value) Action {
 		decodesItself := r.Unmarshalers.ReportsOwnError(v.Type)
@@ -59,6 +74,8 @@ func UnknownFields(ctx context.Context, r Rules, t reflect.Type, node ast.Node) 
 		case v.Kind == Key, v.Kind == Member && v.Struct != nil:
 			return Skip
 		case decodesItself && (v.Kind == Inline || v.Type.Kind() != reflect.Struct):
+			return Skip
+		case decodesItself && v.Reads == Fields && ownerOf(r, v.Parent) == nil && accepts(r, v, verdicts):
 			return Skip
 		default:
 			return Descend
@@ -119,16 +136,9 @@ func (w *walker) confirm(v *Value, entry *ast.MappingValueNode) *yaml.UnknownFie
 		return nil
 	}
 
-	var (
-		node  ast.Node = ast.Mapping(view.Start, false, view)
-		owner *Value
-	)
+	var node ast.Node = ast.Mapping(view.Start, false, view)
 
-	for at := v; at != nil; at = at.Parent {
-		if at.Kind != Inline && at.Reads == Fields && w.rules.Unmarshalers.ReportsOwnError(at.Type) {
-			owner = at
-		}
-	}
+	owner := ownerOf(w.rules, v)
 
 	t := v.Type
 
@@ -164,6 +174,40 @@ func (w *walker) confirm(v *Value, entry *ast.MappingValueNode) *yaml.UnknownFie
 	}
 
 	return rejected
+}
+
+// ownerOf returns the outermost struct that decodes itself among v and
+// the values that hold v, or nil when there is none. Such a struct reads
+// its mapping through its unmarshaler, as [UnknownFields] describes.
+func ownerOf(r Rules, v *Value) *Value {
+	var owner *Value
+
+	for at := v; at != nil; at = at.Parent {
+		if at.Kind != Inline && at.Reads == Fields && r.Unmarshalers.ReportsOwnError(at.Type) {
+			owner = at
+		}
+	}
+
+	return owner
+}
+
+// accepts reports whether the decoder accepts the node of v, a struct
+// that decodes itself, as a new value of the type of v. The verdicts map
+// holds the answer for each content node and type that the search has
+// decoded, so the aliases of one anchor share one decode.
+func accepts(r Rules, v *Value, verdicts map[seenKey]bool) bool {
+	key := seenKey{typ: v.Type, node: datapath.Deref(r.Resolver, v.Node)}
+
+	ok, held := verdicts[key]
+	if held {
+		return ok
+	}
+
+	view := r.View(v.Node)
+	ok = !astnode.IsNil(view) && r.Decode(view, reflect.New(v.Type).Interface()) == nil
+	verdicts[key] = ok
+
+	return ok
 }
 
 // fieldNames returns the names of the keys that t, a struct type, has a

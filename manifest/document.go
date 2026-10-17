@@ -657,15 +657,17 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 // decode decodes the working copy into a value of the Go type of the kind,
 // and reports whether the decode passed. The decode admits the type
 // fields, and fills each field of the Go type that reads one, unless a
-// value on the way decodes itself. It rejects every other key that the Go
-// type does not declare.
+// value on the way decodes itself. By default, it rejects every other key
+// that the Go type does not declare. A [niceyaml.WithUnknownFields] among
+// the decode options of the registry or the kind replaces that mode.
 func (d *docState) decode(ctx context.Context) bool {
 	reg := d.l.reg
 	entry := d.route.kind
 
 	known, _ := hook.KnownKeys(reg.typeFields()).(niceyaml.DecodeOption) //nolint:errcheck // The hook returns a DecodeOption.
 
-	opts := append([]niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true), known}, reg.cfg.decodeOptions...)
+	opts := append([]niceyaml.DecodeOption{niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject), known},
+		reg.cfg.decodeOptions...)
 	opts = append(opts, entry.kind.cfg.decodeOptions...)
 
 	warnings := niceyaml.NewWarnings()

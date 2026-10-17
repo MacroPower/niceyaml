@@ -62,7 +62,7 @@ var (
 	//
 	//   - A value the decoder rejects, such as one of the wrong kind, a number
 	//     that overflows its type, an alias with no anchor, or a field the
-	//     target lacks under [WithDisallowUnknownFields].
+	//     target lacks under [UnknownFieldsReject].
 	//   - The error that a value's own UnmarshalYAML or UnmarshalText method
 	//     returns, unless it holds an Error from [Unchecked]. That error stays
 	//     in the chain.
@@ -89,8 +89,9 @@ var (
 	ErrDecode = errors.New("value does not decode")
 
 	// ErrUnknownField indicates a mapping key that does not match any field of
-	// the target struct. A decode rejects such a key under
-	// [WithDisallowUnknownFields]. The problem reads `unknown field
+	// the target struct. A decode reports such a key under
+	// [WithUnknownFields], as an error with [UnknownFieldsReject] or as a
+	// warning with [UnknownFieldsWarn]. The problem reads `unknown field
 	// "replicsa"` and carries the path of the key.
 	//
 	// ErrUnknownField, [ErrWrongKind], and [ErrOverflow] each label some of
@@ -119,6 +120,14 @@ var (
 	//		}
 	//	}
 	ErrUnknownField = errors.New("unknown field")
+
+	// ErrUnknownFieldsMode indicates a value or a text that does not name an
+	// [UnknownFieldsMode]. [UnknownFieldsMode.MarshalText] and
+	// [UnknownFieldsMode.UnmarshalText] return it. The caller of such a call
+	// passed the value or the text, so [IsInvalid] does not report its
+	// error. A decode of a document whose text does not name a mode wraps
+	// the error beside [ErrDecode], and IsInvalid reports that error.
+	ErrUnknownFieldsMode = errors.New("not an unknown fields mode")
 
 	// ErrWrongKind indicates a value of a kind its target does not take,
 	// such as a string for an integer or a sequence for a mapping. The

@@ -796,7 +796,7 @@ func TestNewSourceFromLayers_Decode_Equivalence_Errors(t *testing.T) {
 	// reports it, with the same text.
 	tcs := map[string][]niceyaml.DecodeOption{
 		"values the decoder rejects": nil,
-		"keys no field reads":        {niceyaml.WithDisallowUnknownFields(true)},
+		"keys no field reads":        {niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)},
 		"a validator that fails": {niceyaml.WithValidator(niceyaml.ValidatorFunc(
 			func(_ context.Context, n *niceyaml.Node) error {
 				return niceyaml.NewSummary(
@@ -3450,7 +3450,10 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 
 				nodes := layerNodes(t, tc.layers...)
 
-				_, err := mergedLayers(t, nodes).Decode[config](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+				_, err := mergedLayers(t, nodes).Decode[config](
+					t.Context(),
+					niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+				)
 				require.EqualError(t, err, tc.want)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
@@ -3479,7 +3482,10 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 			),
 		)
 
-		_, err := mergedLayers(t, nodes).Decode[layerConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+		_, err := mergedLayers(t, nodes).Decode[layerConfig](
+			t.Context(),
+			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+		)
 		require.EqualError(t, err, stringtest.JoinLF(
 			"base.yaml: 2 unknown fields",
 			`base.yaml:2:3: $.server.prot~: unknown field "prot"`,
@@ -3498,7 +3504,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 			"zone: base",
 		)
 
-		strict := niceyaml.WithDisallowUnknownFields(true)
+		strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
 
 		_, err := layerFiles(t, base, "name: prod\n").Decode[layerConfig](t.Context(), strict)
 		require.EqualError(t, err, stringtest.JoinLF(

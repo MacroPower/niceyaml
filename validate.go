@@ -45,12 +45,15 @@ import (
 // what the decode with the walk on returns, given the same functions of
 // WithValueCheck. To spell each map key as the document does, the walk
 // decodes the keys with the settings of the [Source], the unmarshalers of
-// [WithUnmarshalers] among them. It also applies the options in opts that
-// say how a value decodes: [WithUnmarshaler], [WithDisallowUnknownFields],
-// [WithAllowedFieldPrefixes], and [WithYAMLOrderedMaps]. It does not read
-// any other option. A program that gives its unmarshalers to the Source
-// thus does not pass them here, but a caller passes the other options of
-// the decode again.
+// [WithUnmarshalers] among them. A program that gives its unmarshalers to
+// the Source thus does not pass them here. The decodes of the keys drop the
+// warnings that every unmarshaler they run hands to its context.
+//
+// The walk also applies the options in opts that say how a value decodes:
+// [WithUnmarshaler], [WithUnknownFields], [WithAllowedFieldPrefixes], and
+// [WithYAMLOrderedMaps]. It does not read any other option. The walk does
+// not report an unknown field, even under [UnknownFieldsWarn]. A caller
+// passes the options of the decode again.
 //
 // In a document that did not parse, every error binds without a position.
 // SelfValidate returns those errors rather than the error that [Node.Err]
@@ -148,6 +151,7 @@ func SelfValidateValue(ctx context.Context, v any, opts ...DecodeOption) error {
 func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (error, error) {
 	w := selfWalker{
 		ctx:      ctx,
+		keyCtx:   withoutWarnings(ctx),
 		node:     n,
 		cfg:      cfg,
 		checked:  checkedTypesOf(cfg.checks),
@@ -170,12 +174,12 @@ func walkSelfValidators(ctx context.Context, v any, n *Node, cfg decodeConfig) (
 // map, and slice once. A value that two paths share thus reports its
 // errors under the first path, and a back edge of a cycle passes.
 type selfWalker struct {
-	ctx     context.Context
+	ctx context.Context
+	// The context of the decodes that spell the map keys, which drops
+	// their warnings, as [withoutWarnings] describes.
+	keyCtx  context.Context
 	node    *Node
 	decoder *yaml.Decoder
-	// The settings of the decode, which name the types its options give
-	// an unmarshaler and hold the functions from [WithValueCheck].
-	cfg decodeConfig
 	// The types that the functions of cfg check. The walk skips each value
 	// that does not hold a validator, and it counts these types as
 	// validators for that test.
@@ -206,6 +210,9 @@ type selfWalker struct {
 	// The node of the value the walk starts at, held as a [step] holds the
 	// node of its own value, after [selfWalker.nodeOf] resolves it.
 	start step
+	// The settings of the decode, which name the types its options give
+	// an unmarshaler and hold the functions from [WithValueCheck].
+	cfg decodeConfig
 	// The count of pointers, maps, and slices that the walk has entered.
 	// The walk gives each one the count as its number.
 	entered int
@@ -1220,7 +1227,7 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 
 	decoded := reflect.New(t)
 
-	err := decodeWithRecover(w.ctx, w.keyDecoder(), node, decoded.Interface())
+	err := decodeWithRecover(w.keyCtx, w.keyDecoder(), node, decoded.Interface())
 	if err != nil {
 		return
 	}

@@ -6805,7 +6805,10 @@ func TestFormatError_ExcerptsOff_Documents(t *testing.T) {
 	decode := func(t *testing.T, source *niceyaml.Source) error {
 		t.Helper()
 
-		_, err := source.Decode[checkedSecretConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+		_, err := source.Decode[checkedSecretConfig](
+			t.Context(),
+			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject),
+		)
 
 		return err
 	}
@@ -6960,7 +6963,7 @@ func TestFormatError_ExcerptsOff_EchoedText(t *testing.T) {
 			source := niceyaml.NewSourceFromString(tc.input,
 				niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
 
-			_, err := source.Decode[secretConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+			_, err := source.Decode[secretConfig](t.Context(), niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
 			require.Error(t, err)
 
 			assert.Equal(t, tc.want, niceyaml.FormatError(err))
@@ -11604,7 +11607,7 @@ func TestIsInvalid(t *testing.T) {
 			want: true,
 		},
 		"unknown field": {
-			err:  decoded("name: cafe\nprot: 80\n", niceyaml.WithDisallowUnknownFields(true)),
+			err:  decoded("name: cafe\nprot: 80\n", niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)),
 			is:   niceyaml.ErrDecode,
 			want: true,
 		},

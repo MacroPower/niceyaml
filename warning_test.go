@@ -450,7 +450,7 @@ func TestAsErrors_Tally(t *testing.T) {
 
 	_, err := doc.Decode[warningSpec](warnings.Context(t.Context()),
 		niceyaml.WithValidator(warnAtKey("legacyPricing", `deprecated field "legacyPricing"`)),
-		niceyaml.WithDisallowUnknownFields(true))
+		niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
 	require.Error(t, err)
 
 	report := warnings.Report(err)
@@ -484,6 +484,11 @@ func TestWarnings(t *testing.T) {
 		"  seats: -1",
 		"extra: x",
 	), niceyaml.WithName("cafe.yaml"))
+	rejected := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"spec:",
+		"  seats: 4",
+		"extra: [x]",
+	), niceyaml.WithName("cafe.yaml"))
 	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
 		"spec: 1",
 		"---",
@@ -505,6 +510,11 @@ func TestWarnings(t *testing.T) {
 			return err
 		})
 	}
+	warnsAndFails := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+		n.Warn(ctx, niceyaml.NewWarning("old spec", niceyaml.AtPath(paths.Current().Child("spec").Key())))
+
+		return yamltest.ErrorAt("bad extra", "extra")
+	})
 	secondFails := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 		n.Warn(ctx, niceyaml.NewWarning("old spec", niceyaml.AtPath(paths.Current().Child("spec").Key())))
 
@@ -545,6 +555,24 @@ func TestWarnings(t *testing.T) {
 			},
 			err:      "cafe.yaml:2:10: $.spec.seats: seats must not be negative",
 			warnings: "cafe.yaml:3:8: warning: $.extra: extra is unused",
+		},
+		"a decode whose validator fails skips the Validate methods": {
+			run: func(_ *testing.T, ctx context.Context) error {
+				_, err := doc.Decode[warningCafeDoc](ctx, niceyaml.WithValidator(warnsAndFails))
+
+				return err
+			},
+			err:      "cafe.yaml:3:8: $.extra: bad extra",
+			warnings: "cafe.yaml:1:1: warning: $.spec~: old spec",
+		},
+		"a decode that the decoder rejects skips the Validate methods": {
+			run: func(_ *testing.T, ctx context.Context) error {
+				_, err := rejected.Decode[warningCafeDoc](ctx, niceyaml.WithValidator(warnExtra))
+
+				return err
+			},
+			err:      "cafe.yaml:3:1: $.extra: expected string, got sequence",
+			warnings: "cafe.yaml:3:1: warning: $.extra: extra is unused",
 		},
 		"a Validate result of an error and a warning": {
 			run: func(_ *testing.T, ctx context.Context) error {

@@ -99,6 +99,20 @@ func (t *Table) Anchor(name string) (*ast.AnchorNode, bool) {
 	return e.anchor, true
 }
 
+// View returns the anchor the table holds for name as the decoder reads
+// it, the view that [Table.Prime] returns for that anchor. It reports
+// false when the table does not hold an anchor for name.
+func (t *Table) View(name string) (*ast.AnchorNode, bool) {
+	e := t.entry(name)
+	if e == nil {
+		return nil, false
+	}
+
+	anchor, ok := e.view().(*ast.AnchorNode)
+
+	return anchor, ok
+}
+
 // entry returns the entry the table holds for name, or nil.
 func (t *Table) entry(name string) *entry {
 	if t == nil {

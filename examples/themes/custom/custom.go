@@ -63,7 +63,7 @@ func main() {
 
 	// The decoder rejects a key that no field reads, such as acent in place
 	// of accent.
-	strict := niceyaml.WithDisallowUnknownFields(true)
+	strict := niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)
 
 	fmt.Println("\nBuild a theme from its file:")
 
