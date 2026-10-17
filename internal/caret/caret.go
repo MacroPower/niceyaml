@@ -4,13 +4,13 @@
 // Each run of columns that labels mark gets a row of its own. The row
 // holds carets under the columns of the run, then the text of its labels
 // after a space. Labels that mark the same columns share their row, with
-// their texts joined by "; ". A label with no text gets its caret run
-// alone. The rows come in the order their runs start, and runs that start
-// at one column come shorter first.
+// their texts joined by "; ". A label without text gets its caret run
+// alone. The rows come in the order that their runs start, and runs that
+// start at one column come shorter first.
 //
-// A column gets one caret for each cell its rune renders in. The carets
-// thus stay under the runes they mark on a line that holds wide or
-// control characters.
+// A column gets one caret for each cell that its rune renders in. The
+// carets thus stay under the runes that they mark on a line that holds
+// wide or control characters.
 //
 // On a line that wraps, a run gets a row beside each wrapped row that
 // shows some of its columns. The text follows the carets beside the
@@ -31,10 +31,11 @@ import (
 // Label is a run of columns of a line to mark, with the text that names
 // it.
 type Label struct {
-	// Text is the text beside the carets, or the empty string for none.
+	// Text is the text beside the carets, or the empty string for a label
+	// without text.
 	Text string
-	// Cols are the columns of the line the label marks. An empty span marks
-	// the one column at its start.
+	// Cols are the columns of the line that the label marks. An empty span
+	// marks the one column at its start.
 	Cols position.Span
 }
 
@@ -46,23 +47,23 @@ type Row struct {
 	// Text holds the texts of the labels of the run joined with "; ", with
 	// every control character as its picture.
 	Text string
-	// Col is the column of the line the first caret sits under.
+	// Col is the column of the line that the first caret sits under.
 	Col int
 }
 
 // Rows returns the rows that mark labels below content, the text of a line
-// without its line ending, in the order a renderer draws them.
+// without its line ending, in the order that a renderer draws them.
 //
 // Wrapped holds the columns of content that each row of the line shows
-// when the line wraps, in order, each without the spaces the wrap drops.
-// A nil wrapped stands for one row that shows the whole line. The row
-// that holds the end of content also marks the columns past its end.
+// when the line wraps, in order, each without the spaces that the wrap
+// drops. A nil wrapped stands for one row that shows the whole line. The
+// row that holds the end of content also marks the columns past its end.
 //
-// A label marks the columns of its span that content holds. A label whose
-// span holds none of them, such as an empty span or one past the end of
-// content, marks the column at its start. That column can lie past the
-// end. A start before column zero counts as zero. Callers must bound the
-// start, because a row pads out to it.
+// A label marks the columns of its span that content holds. It marks the
+// column at its start when its span does not hold any of those columns,
+// as with an empty span or one past the end of content. That column can
+// lie past the end. A start before column zero counts as zero. Callers
+// must bound the start, because a row pads out to it.
 func Rows(content string, labels []Label, wrapped []position.Span) []Row {
 	if len(labels) == 0 {
 		return nil
@@ -80,13 +81,13 @@ func Rows(content string, labels []Label, wrapped []position.Span) []Row {
 }
 
 // run is the columns that one or more labels mark, with the text of each
-// of them that has some.
+// of those labels that has text.
 type run struct {
 	texts []string
 	cols  position.Span
 }
 
-// layout is the line that [Rows] marks, with the columns each of its
+// layout is the line that [Rows] marks, with the columns that each of its
 // wrapped rows shows.
 type layout struct {
 	row     cells.Row
@@ -107,9 +108,10 @@ func newLayout(content string, wrapped []position.Span) layout {
 	return layout{row: cells.NewRow(content), wrapped: wrapped, width: width}
 }
 
-// runs groups labels by the columns they mark, as [layout.marked] finds
-// them, in the order the runs start. Runs that start at the same column
-// come shorter first, and labels of one run keep the order they come in.
+// runs groups labels by the columns that they mark, as [layout.marked]
+// finds them, in the order that the runs start. Runs that start at the
+// same column come shorter first, and labels of one run keep the order
+// that they come in.
 func (l layout) runs(labels []Label) []run {
 	var out []run
 
@@ -153,7 +155,7 @@ func (l layout) marked(cols position.Span) position.Span {
 }
 
 // piece is a row of carets that [layout.cut] finds, with the index of the
-// wrapped row it sits beside.
+// wrapped row that it sits beside.
 type piece struct {
 	row Row
 	at  int
@@ -161,11 +163,11 @@ type piece struct {
 
 // rows returns the rows that mark r. Each wrapped row that shows some of
 // the columns of r gets a caret row. The text of r follows the carets
-// beside the wrapped row that holds its start. That wrapped row can show
-// none of the columns of r, as when the start falls on a space the wrap
-// drops. The text then follows a single caret at the start, on a row of
-// its own. A run with no text and no caret row gets that single caret
-// alone.
+// beside the wrapped row that holds its start. That wrapped row might not
+// show any of the columns of r, as when the start falls on a space that
+// the wrap drops. The text then follows a single caret at the start, on a
+// row of its own. A run that has neither text nor a caret row gets that
+// single caret alone.
 func (l layout) rows(r run) []Row {
 	start := r.cols.Start
 
@@ -209,8 +211,9 @@ func (l layout) rows(r run) []Row {
 	return out
 }
 
-// rowOf returns the index of the wrapped row that holds col: the last one
-// that starts at or before it, or the first when none does.
+// rowOf returns the index of the wrapped row that holds col. That row is
+// the last one that starts at or before col, or the first when every row
+// starts after col.
 func (l layout) rowOf(col int) int {
 	// Search finds the first row that starts past col. It compares with >
 	// rather than searching for col+1, which overflows at [math.MaxInt].
@@ -218,7 +221,7 @@ func (l layout) rowOf(col int) int {
 }
 
 // single returns the row that marks col alone, with one caret for each
-// cell the rune there renders in. A column past the end of the content
+// cell that the rune there renders in. A column past the end of the content
 // gets one caret.
 func (l layout) single(col int) Row {
 	marks := make([]bool, col+1)
@@ -276,12 +279,13 @@ func (l layout) cut(carets string) []piece {
 // marked column and a space under every other, one byte per cell. The
 // content row renders each grapheme cluster at its display width. The
 // first column of a cluster is therefore as many cells wide as the cluster
-// renders. Every other column of it takes none, and a column past the end
-// of the content takes one cell. A mark on any column of a cluster lands
-// under the whole cluster. A cluster that renders no cells, such as a
-// zero-width space, has nothing to put a caret under. Its mark moves to
-// the next column that takes a cell, which shows what follows the
-// cluster.
+// renders. Every other column of it does not take a cell, and a column
+// past the end of the content takes one cell.
+//
+// A mark on any column of a cluster lands under the whole cluster. A
+// cluster that does not render a cell, such as a zero-width space, does
+// not have a cell to put a caret under. Its mark moves to the next column
+// that takes a cell, which shows what follows the cluster.
 func (l layout) render(marks []bool) string {
 	marks = slices.Clone(marks)
 	for col, marked := range marks {
