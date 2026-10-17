@@ -22,16 +22,16 @@ var (
 	}
 
 	// The interfaces through which the go-yaml decoder hands a value a
-	// function that decodes its node into any type the method picks, such
-	// as one that reads text. A walk of the type cannot see that type, so
-	// a decode into one of these may read text too.
+	// function that decodes its node into any type that the method picks,
+	// such as one that reads text. A walk of the type cannot see that type, so
+	// a decode into one of these might read text too.
 	callbackUnmarshalerTypes = []reflect.Type{
 		reflect.TypeFor[yaml.InterfaceUnmarshalerContext](),
 		reflect.TypeFor[yaml.InterfaceUnmarshaler](),
 	}
 
 	// The interfaces through which the go-yaml decoder hands a value its
-	// node, so the value reads no text.
+	// node, so the value does not read text.
 	nodeUnmarshalerTypes = []reflect.Type{
 		reflect.TypeFor[yaml.NodeUnmarshaler](),
 		reflect.TypeFor[yaml.NodeUnmarshalerContext](),
@@ -41,27 +41,31 @@ var (
 	// text of its node, with each alias in the node written out in full.
 	textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
 
-	// The result of [DecodesText] for each type it has read. A type never
+	// The result of [DecodesText] for each type that it has read. A type never
 	// changes, so every decode shares the results.
 	decodesText sync.Map
 )
 
-// DecodesText reports whether a decode into t may hand some value the
+// DecodesText reports whether a decode into t might hand some value the
 // text of its node, through an UnmarshalText method or an UnmarshalYAML
-// method that takes YAML bytes. That holds when t or a type the decoder
-// reaches from t, through a pointer, a struct field, an array or slice
-// element, or a map key or element, has such a method on its pointer. The
-// decoder skips a struct field that is unexported and not embedded, or
-// that a yaml or json tag of "-" leaves out, so none of those counts. An
-// UnmarshalYAML method that takes a decode function counts too, since it
-// can decode the node into any type, including one that reads text. A
-// decode into such a type runs [CheckDecodeText] as well as
-// [CheckDecode]. An UnmarshalYAML method that takes the node reads no
-// text, and the decoder calls it ahead of an UnmarshalText method. The
-// decoder reaches none of the fields or elements of a type with such a
-// method, so none of them counts. The decoder parses a [time.Time] from
-// the value of its scalar, so it reads no text, though its pointer has
-// UnmarshalText.
+// method that takes YAML bytes. It reports true when t, or a type that
+// the decoder reaches from t, has such a method on its pointer. The
+// decoder reaches a type through a pointer, a struct field, an array or
+// slice element, or a map key or element. An UnmarshalYAML method that
+// takes a decode function counts too, because it can decode the node into
+// any type, including one that reads text.
+//
+// The decoder skips a struct field that is unexported and not embedded,
+// or that a yaml or json tag of "-" leaves out. Those fields do not
+// count. An UnmarshalYAML method that takes the node does not read text,
+// and the decoder calls it ahead of an UnmarshalText method. The decoder
+// does not reach the fields or elements of a type with such a method, so
+// they do not count. The decoder parses a [time.Time] from the value of
+// its scalar. A [time.Time] therefore does not read text, even though its
+// pointer has UnmarshalText.
+//
+// A decode into a type that DecodesText reports runs [CheckDecodeText] as
+// well as [CheckDecode].
 func DecodesText(t reflect.Type) bool {
 	if cached, ok := decodesText.Load(t); ok {
 		if text, ok := cached.(bool); ok {
@@ -76,11 +80,11 @@ func DecodesText(t reflect.Type) bool {
 }
 
 // DecodesTextWith reports what [DecodesText] reports for a decode with
-// the unmarshalers u, where a type u gives a function reads text too, as
-// does a type with an UnmarshalJSON method when u turns those on. The
-// decoder hands either one the node with each alias in it written out in
-// full. The answer holds for that decode alone, so each call reads t
-// again.
+// the unmarshalers u. In such a decode, a type that u gives a function
+// reads text too. So does a type with an UnmarshalJSON method when u turns
+// on UnmarshalJSON methods. The decoder hands either one the node with
+// each alias in it written out in full. The answer holds for that decode
+// alone, so each call reads t again.
 func DecodesTextWith(t reflect.Type, u unmarshaler.Options) bool {
 	if u.Empty() {
 		return DecodesText(t)

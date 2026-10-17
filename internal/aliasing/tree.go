@@ -17,7 +17,7 @@ import (
 // Node is a node of a YAML document, such as a *niceyaml.Node, whose
 // document state [StateOf] returns.
 type Node interface {
-	// AST returns the go-yaml node the Node selects.
+	// AST returns the go-yaml node that the Node selects.
 	AST() ast.Node
 }
 
@@ -25,11 +25,11 @@ type Node interface {
 // alias and aliases make up too much of what a decode of its document
 // reads. The count covers the whole document, with each alias reading
 // its content in full. A decode of a node below the root reads only the
-// anchors the node needs, but CheckDecode applies one limit per
+// anchors that the node needs. But CheckDecode applies one limit per
 // document, so every node that holds an alias gets the verdict of its
-// document. A node without an alias decodes on its own and reads nothing
-// twice, so it passes, as does a nil Node. So does every node of a
-// document the limit does not apply to, as [Limited] reports.
+// document. A node without an alias decodes on its own and does not read
+// anything twice, so it passes. A nil Node passes too. So does every node
+// of a document that the limit does not apply to, as [Limited] reports.
 //
 // The count depends on the document alone, so the document keeps it, and
 // a check of each item of a list counts the document once.
@@ -45,7 +45,7 @@ func CheckDecode(n Node) error {
 }
 
 // CheckDecodeText returns an error when n holds an alias and aliases make
-// up too much of the text the decoder writes out for the node. To decode
+// up too much of the text that the decoder writes out for the node. To decode
 // a type with an UnmarshalText method, or one that reads YAML bytes, the
 // decoder writes the node out as text with each alias in full. The count
 // covers the whole document as [CheckDecode] does. It reads every node as
@@ -55,10 +55,10 @@ func CheckDecode(n Node) error {
 // An [*ExpansionError] reports the first alias of the document that takes
 // the text past a bound of the Budget. For a document past the limit and
 // within the Budget, CheckDecodeText returns
-// [aliaslimit.ErrExcessiveAliasing]. A node without an alias passes, as
-// does a nil Node and every node of a document the limit does not apply
-// to. The document keeps the result of the count, as it keeps the result
-// of CheckDecode.
+// [aliaslimit.ErrExcessiveAliasing]. A node without an alias passes. So
+// do a nil Node and every node of a document that the limit does not
+// apply to. The document keeps the result of the count, as it keeps the
+// result of CheckDecode.
 //
 // A caller that decodes n into a type that [DecodesText] reports runs
 // CheckDecodeText as well as CheckDecode.
@@ -89,7 +89,7 @@ type Budget struct {
 	Bytes int
 	// Depth is the most levels that the document nests with each alias
 	// written out in full. An alias nests the levels around it and the
-	// levels its content nests, through the aliases there.
+	// levels that its content nests, through the aliases there.
 	Depth int
 }
 
@@ -100,16 +100,16 @@ type ExpansionError struct {
 	// Alias is the first alias, in the order of the document, that takes
 	// the text past the bound.
 	Alias *ast.AliasNode
-	// Limit is the bound the text passes, in bytes for the byte bound and
-	// in levels for the depth bound.
+	// Limit is the bound that the text passes, in bytes for the byte bound
+	// and in levels for the depth bound.
 	Limit int
 	// Depth reports that the text passes the depth bound of the Budget
 	// and not its byte bound.
 	Depth bool
 }
 
-// Error returns the message of e, as "aliases repeat more than 256 KiB
-// of text" or "aliases nest the document more than 100 levels".
+// Error returns the message of e, such as "aliases repeat more than
+// 256 KiB of text" or "aliases nest the document more than 100 levels".
 func (e *ExpansionError) Error() string {
 	if e.Depth {
 		return "aliases nest the document more than " + strconv.Itoa(e.Limit) + " levels"
@@ -127,10 +127,10 @@ func (e *ExpansionError) Is(target error) bool {
 // Limited reports whether the alias limit applies to the document of n.
 // It applies unless the source of the document turned it off with
 // niceyaml.WithAliasLimit. [CheckDecode] and [CheckDecodeText] pass
-// every node of a document it does not apply to. A caller that applies
-// [aliaslimit.Excessive] to a value it decoded from n, as
-// [HoldsReferenceAlias] describes, asks Limited first. No limit applies
-// to a nil Node.
+// every node of a document that it does not apply to. A caller that
+// applies [aliaslimit.Excessive] to a value that it decoded from n, as
+// [HoldsReferenceAlias] describes, asks Limited first. The limit does not
+// apply to a nil Node.
 func Limited(n Node) bool {
 	state := stateOf(n)
 
@@ -138,18 +138,18 @@ func Limited(n Node) bool {
 }
 
 // HoldsReferenceAlias reports whether the document of n holds a
-// reference alias, which is an alias with no anchor of its name before
-// it in the document. A decode resolves such an alias only against a
-// reference document, such as one of niceyaml.WithReferences.
-// [CheckDecode] and [CheckDecodeText] cannot see a reference document,
-// so they count the alias as one node whatever its anchor holds. A
-// caller that reads a decoded value again at every alias applies
-// [aliaslimit.Excessive] to that value when the document holds a
+// reference alias. A reference alias is an alias that does not have an
+// anchor of its name before it in the document. A decode resolves such an
+// alias only against a reference document, such as one of
+// niceyaml.WithReferences. [CheckDecode] and [CheckDecodeText] cannot see
+// a reference document, so they count the alias as one node whatever its
+// anchor holds. A caller that reads a decoded value again at every alias
+// applies [aliaslimit.Excessive] to that value when the document holds a
 // reference alias and [Limited] reports that the limit applies. A nil
-// Node holds none.
+// Node does not hold one.
 //
-// The answer depends on the document alone, so it reads the [Facts] the
-// document keeps.
+// The answer depends on the document alone, so HoldsReferenceAlias reads
+// the [Facts] that the document keeps.
 func HoldsReferenceAlias(n Node) bool {
 	state := stateOf(n)
 	if state == nil {
@@ -215,7 +215,7 @@ func holdsAlias(node ast.Node) bool {
 }
 
 // aliasFinder is an [ast.Visitor] that records whether it visited an
-// alias and stops the walk once it has.
+// alias and stops the walk after it has.
 type aliasFinder bool
 
 // Visit implements [ast.Visitor].
@@ -233,8 +233,8 @@ func (f *aliasFinder) Visit(node ast.Node) ast.Visitor {
 	return f
 }
 
-// readMode is how the decoder reads a node, which decides what a read of
-// an alias to a scalar costs.
+// readMode is how the decoder reads a node. The mode decides what a read
+// of an alias to a scalar costs.
 type readMode int
 
 const (
@@ -248,16 +248,18 @@ const (
 	readModes
 )
 
-// treeCounter counts the nodes a decode of a document tree reads, the way
-// gopkg.in/yaml.v3 counts them for its alias limit, where each alias
-// reads the content it refers to in full. That covers a mapping a merge
-// key brings in, which the decoder reads again at every merge. The
-// resolver binds each alias to its content. An alias that does not
-// resolve counts as one unaliased node, as does one in the nulls set,
-// which holds the aliases the decoder reads as null, as [NewFacts] finds
-// them.
-// Such an alias counts as one node wherever the counter reads it, so the
-// count does not depend on the order of the aliases.
+// treeCounter counts the nodes that a decode of a document tree reads,
+// the way gopkg.in/yaml.v3 counts them for its alias limit. In that
+// count, each alias reads the content that it refers to in full. The count
+// covers a mapping that a merge key brings in, which the decoder reads
+// again at every merge.
+//
+// The resolver binds each alias to its content. An alias that does not
+// resolve counts as one unaliased node. So does an alias in the nulls
+// set, which holds the aliases that the decoder reads as null, as
+// [NewFacts] finds them. Either kind of alias counts as one node wherever
+// the counter reads it, so the count does not depend on the order of the
+// aliases.
 //
 // Where the decoder reads a node into a value, an alias to a scalar
 // counts as one unaliased node, as a shared scalar does in a decoded
@@ -265,17 +267,19 @@ const (
 // for a key that is or refers to a mapping, a sequence, or a !!binary
 // scalar, and for the value under a text tag. A text tag is a !!str,
 // !!int, !!bool, or !!binary tag, or any tag after a %TAG directive that
-// redefines the "!!" handle. Each copy of a scalar in that text costs its
-// length, so there a scalar counts one node per byte of its text, and an
-// alias to one adds that count to the aliased nodes. The content of an
-// anchor on a scalar counts its bytes too where the counter reads its
-// definition, so a scalar written out once weighs what its anchor does.
+// redefines the "!!" handle.
+//
+// Each copy of a scalar in that text costs its length. In that text, a
+// scalar therefore counts one node per byte of its text. An alias to one
+// adds that count to the aliased nodes. The content of an anchor on a
+// scalar counts its bytes too where the counter reads its definition. A
+// scalar written out once therefore weighs what its anchor does.
 //
 // An alias to a text tag, such as *s for `&s !!str x`, counts the text
 // under the tag even where the decoder reads the alias into a value.
-// Where the type an alias decodes into cannot take the value the decoder
-// converted for the anchor, such as a named string type, the decoder
-// converts the text under the tag again at each alias.
+// Some types, such as a named string type, cannot take the value that the
+// decoder converted for the anchor. Where an alias decodes into such a
+// type, the decoder converts the text under the tag again at each alias.
 //
 // An alias to a tag over another alias, such as *s for `&s !foo *k`,
 // refers to what *k refers to. A mapping under k then counts in full at
@@ -285,35 +289,39 @@ const (
 // An alias that refers to a !!binary scalar counts the text of the
 // scalar even where the decoder reads the alias into a value. A decode
 // shares the bytes between such aliases, and the schema validator spells
-// them as text again at each one. The !!binary tag may lie under another
+// them as text again at each one. The !!binary tag can lie under another
 // tag and anchor, as in `&s !foo &b !!binary x`, or behind a tagged
 // alias, as it does for *s with `&s !foo *b`.
 //
 // The distinct field counts the nodes of the tree once each, and an alias
-// in the tree is one of them. The aliased field counts the nodes the
-// aliases in the tree repeat. The sizes maps hold the size of each
-// alias's content once the counter has read it, one map for each read
-// mode, so a chain of nested aliases costs one read per anchor. The open
-// map holds the content of each alias the counter is reading, so an alias
-// that leads back into that content counts as one node and the count
-// ends. For each alias [treeCounter.reaches] has followed, the
-// collections map holds whether the alias refers to a mapping or a
-// sequence, and the textKeys map holds whether the decoder writes out a
-// key that is the alias as text. The binaries map holds whether such an
-// alias refers to a !!binary scalar. A chain of tagged aliases then costs
-// one walk, however many aliases lead into it. The repeated map holds
-// what [treeCounter.repeats] has found for the content of each alias.
+// in the tree is one of them. The aliased field counts the nodes that the
+// aliases in the tree repeat. The sizes maps hold the size of the content
+// of each alias after the counter has read it, one map for each read
+// mode. A chain of nested aliases therefore costs one read per anchor.
+// The open map holds the content of each alias that the counter is
+// reading. An alias that leads back into that content then counts as one
+// node, and the count ends.
 //
-// The budget bounds the text the aliases repeat and the levels they add
-// to the tree, as [Budget] describes. A bound of zero is off. The level
-// field holds the levels around the node that the counter reads in the
-// tree, outside the content of every alias. The written field holds the
-// text that the aliases of the tree repeat so far, as the byte bound
-// weighs it. The extents map holds the [extent] of the content of each
-// alias, after [treeCounter.measure] has read it. The measuring map holds
-// the content of each alias that measure is reading. The overrun field
-// holds the error of the first alias that takes the tree past a bound of
-// the budget.
+// For each alias that [treeCounter.reaches] has followed, the collections
+// map holds whether the alias refers to a mapping or a sequence. The
+// textKeys map holds whether the decoder writes out a key that is the
+// alias as text. The binaries map holds whether such an alias refers to a
+// !!binary scalar. A chain of tagged aliases then costs one walk, however
+// many aliases lead into it. The repeated map holds what
+// [treeCounter.repeats] has found for the content of each alias.
+//
+// The budget bounds the text that the aliases repeat and the levels that
+// they add to the tree, as [Budget] describes. A bound of zero is off. The
+// level field holds the levels around the node that the counter reads in
+// the tree, outside the content of every alias. The written field holds
+// the text that the aliases of the tree repeat so far, as the byte bound
+// weighs it.
+//
+// The extents map holds the [extent] of the content of each alias, after
+// [treeCounter.measure] has read it. The measuring map holds the content
+// of each alias that measure is reading. The overrun field holds the
+// error of the first alias that takes the tree past a bound of the
+// budget.
 type treeCounter struct {
 	resolver    *paths.Resolver
 	nulls       map[*ast.AliasNode]bool
@@ -333,13 +341,13 @@ type treeCounter struct {
 	aliased     int
 }
 
-// count returns the number of nodes a decode of node reads as mode. A
-// scalar counts one, or its length in bytes when read as text. A mapping
-// or a sequence counts one plus the count of each key, value, or element
-// in it. An anchor, a tag, or the `?` of an explicit key counts what it
-// wraps. With top set, node lies outside the content of every alias, and
-// count adds its nodes to distinct and the nodes its aliases repeat to
-// aliased.
+// count returns the number of nodes that a decode of node reads as mode.
+// A scalar counts one, or its length in bytes when read as text. A
+// mapping or a sequence counts one plus the count of each key, value, or
+// element in it. An anchor, a tag, or the `?` of an explicit key counts
+// what it wraps. With top set, node lies outside the content of every
+// alias, and count adds its nodes to distinct and the nodes that its
+// aliases repeat to aliased.
 func (c *treeCounter) count(node ast.Node, top bool, mode readMode) int {
 	if astnode.IsNil(node) {
 		return 0
@@ -396,8 +404,8 @@ func (c *treeCounter) count(node ast.Node, top bool, mode readMode) int {
 	return size
 }
 
-// entry returns the number of nodes a decode of the key and the value of
-// a mapping entry reads, as [treeCounter.count] counts them. The key
+// entry returns the number of nodes that a decode of the key and the
+// value of a mapping entry reads, as [treeCounter.count] counts them. The key
 // counts as text where the decoder writes it out as text.
 func (c *treeCounter) entry(entry *ast.MappingValueNode, top bool, mode readMode) int {
 	if entry == nil {
@@ -413,9 +421,9 @@ func (c *treeCounter) entry(entry *ast.MappingValueNode, top bool, mode readMode
 }
 
 // keyAsText reports whether the decoder writes key out as text. It does
-// so for a key that decodes to neither a string nor a number. That is a
-// mapping, a sequence, or a !!binary scalar, or an alias that refers to
-// one through the aliases [treeCounter.reaches] follows.
+// so for a key that decodes to neither a string nor a number. Such a key
+// is a mapping, a sequence, or a !!binary scalar, or an alias that refers
+// to one through the aliases that [treeCounter.reaches] follows.
 func (c *treeCounter) keyAsText(key ast.Node) bool {
 	if astnode.IsNil(key) {
 		return false
@@ -456,15 +464,15 @@ func isTextTag(node ast.Node) bool {
 	}
 }
 
-// anchor returns the number of nodes a decode of the content of the
+// anchor returns the number of nodes that a decode of the content of the
 // anchor reads, as [treeCounter.count] counts them. With top set, the
-// counter reads the definition of the anchor, and the content of an
-// anchor on a scalar counts as text there, since an alias to it may copy
-// that text. Elsewhere, such as in an alias to a mapping around the
-// anchor, the decoder reads the anchored scalar as it reads any other,
-// so the scalar counts as mode reads it. An anchor on an alias defines no
-// content of its own, so its alias counts as it would without the
-// anchor.
+// counter reads the definition of the anchor. The content of an anchor on
+// a scalar counts as text there, because an alias to it might copy that
+// text. Elsewhere, such as in an alias to a mapping around the anchor, the
+// decoder reads the anchored scalar as it reads any other. The scalar
+// then counts as mode reads it. An anchor on an alias does not define
+// content of its own, so its alias counts the same as an alias without
+// the anchor.
 func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool, mode readMode) int {
 	_, onAlias := astnode.Content(anchor.Value).(*ast.AliasNode)
 	if top && !onAlias && !isCollection(anchor.Value) {
@@ -474,20 +482,24 @@ func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool, mode readMode) in
 	return c.count(anchor.Value, top, mode)
 }
 
-// alias returns the number of nodes a decode of the alias reads as mode.
-// That is one for an alias the decoder reads as null. Otherwise it is the
-// size of the mapping or sequence the alias refers to, or the length of
-// the text of a scalar it refers to when read as text. An alias to a text
-// tag, such as a !!str tag or any tag after a %TAG directive that
-// redefines the "!!" handle, reads the text under the tag in either mode.
-// So does an alias that refers to a !!binary scalar under other tags and
-// anchors or through a tagged alias, as [treeCounter.holdsBinary] finds
-// it. Any other alias counts one. An alias to a tag over another alias,
-// as in `&s !foo *k`, refers to what that alias refers to. With top set,
-// the alias lies outside the content of every other alias. It is then a
-// node of the tree itself, so alias adds one to distinct, and it adds
-// the size of what the alias repeats to aliased. It then checks the alias
-// against the budget with [treeCounter.spend].
+// alias returns the number of nodes that a decode of the alias reads as
+// mode. The number is one for an alias that the decoder reads as null.
+// Otherwise it is the size of the mapping or sequence that the alias
+// refers to, or the length of the text of a scalar that it refers to when
+// read as text.
+//
+// An alias to a text tag, such as a !!str tag or any tag after a %TAG
+// directive that redefines the "!!" handle, reads the text under the tag
+// in either mode. So does an alias that refers to a !!binary scalar under
+// other tags and anchors or through a tagged alias, as
+// [treeCounter.holdsBinary] finds it. Any other alias counts one. An
+// alias to a tag over another alias, as in `&s !foo *k`, refers to what
+// that alias refers to.
+//
+// With top set, the alias lies outside the content of every other alias.
+// It is then a node of the tree itself, so alias adds one to distinct and
+// adds the size of what the alias repeats to aliased. It then checks the
+// alias against the budget with [treeCounter.spend].
 func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 	target, err := c.resolver.Deref(alias)
 	if err != nil || c.nulls[alias] || c.open[target] || (mode == readValue && !c.repeats(target)) {
@@ -519,11 +531,11 @@ func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 }
 
 // spend records an [*ExpansionError] at alias, an alias of the tree, when
-// alias takes the tree past a bound of the budget and no alias before it
-// did. It adds the text that alias repeats to written, as
+// alias is the first alias that takes the tree past a bound of the budget.
+// It adds the text that alias repeats to written, as
 // [extent.text] weighs the content of alias at the level of alias. The
 // written field must not pass the byte bound. The levels around alias
-// and the levels its content nests must not pass the depth bound.
+// and the levels that its content nests must not pass the depth bound.
 func (c *treeCounter) spend(alias *ast.AliasNode) {
 	if c.overrun != nil || c.budget == (Budget{}) {
 		return
@@ -543,17 +555,17 @@ func (c *treeCounter) spend(alias *ast.AliasNode) {
 	}
 }
 
-// extent is what a node holds with each alias in it written out in full,
-// which the budget weighs. A writer can give the node the text of block
-// style, with each mapping entry and each sequence element on a line of
-// its own. It can also copy the node as the document spells it, with the
-// text of each alias in place of the alias.
+// extent is what a node holds with each alias in it written out in full.
+// The budget weighs the extent. A writer can give the node the text of
+// block style, with each mapping entry and each sequence element on a
+// line of its own. It can also copy the node as the document spells it,
+// with the text of each alias in place of the alias.
 type extent struct {
-	// The levels the node nests, one for each mapping or sequence on the
-	// way from the node to its deepest value.
+	// The levels that the node nests, one for each mapping or sequence on
+	// the way from the node to its deepest value.
 	depth int
 	// The text of the node in block style without the indentation and the
-	// punctuation of its lines. That is the length in bytes of each
+	// punctuation of its lines. It counts the length in bytes of each
 	// scalar and tag, and two bytes for each mapping or sequence.
 	units int
 	// The lines of the node in block style. Each key and each other leaf
@@ -575,7 +587,7 @@ type extent struct {
 
 // text returns the bytes that a writer of the node of e gives it when
 // level mappings and sequences lie around it, as [Budget] weighs them.
-// That is the larger of the text in block style and the text as the
+// The result is the larger of the text in block style and the text as the
 // document spells it. In block style, each line weighs one byte of
 // punctuation and two bytes of indentation for each level around the
 // leaf that starts it.
@@ -599,8 +611,8 @@ func (e *extent) nest(child extent) {
 
 // measure returns the [extent] of node. A mapping or a sequence nests one
 // level more than the deepest key, value, or element in it. A scalar
-// starts one line and nests no level. An anchor, a tag, or the `?` of an
-// explicit key holds what it wraps, and a tag adds its own text. An
+// starts one line and does not nest a level. An anchor, a tag, or the `?`
+// of an explicit key holds what it wraps, and a tag adds its own text. An
 // alias holds the extent of its content, as [treeCounter.aliasExtent]
 // finds it. The spelled text of node counts only the aliases in it, and
 // aliasExtent adds the text of the content that holds them.
@@ -657,7 +669,7 @@ func (c *treeCounter) measure(node ast.Node) extent {
 
 // measureEntry nests the key and the value of entry, an entry of the
 // mapping of e, in e. A leaf value goes on the line of its key, so it
-// starts no line of its own.
+// does not start a line of its own.
 func (c *treeCounter) measureEntry(e *extent, entry *ast.MappingValueNode) {
 	if entry == nil {
 		return
@@ -673,10 +685,10 @@ func (c *treeCounter) measureEntry(e *extent, entry *ast.MappingValueNode) {
 	e.nest(value)
 }
 
-// aliasExtent returns the [extent] of the content of alias. An alias that
-// does not resolve, one that the decoder reads as null, and one that
-// leads back into content that [treeCounter.measure] is reading each hold
-// a leaf of one byte. A writer that copies the content of an alias as the
+// aliasExtent returns the [extent] of the content of alias. An alias holds
+// a leaf of one byte when it does not resolve, when the decoder reads it
+// as null, or when it leads back into content that [treeCounter.measure]
+// is reading. A writer that copies the content of an alias as the
 // document spells it indents each line of that text to the line of the
 // alias. The spelled text of alias grows by that indentation. The
 // extents map holds the extent of the content of each alias, so a chain
@@ -727,8 +739,9 @@ func spell(node ast.Node, bytes, lines int) (int, int) {
 	return bytes, lines
 }
 
-// mulCapped returns a*b, or [aliaslimit.CountCap] when the product would
-// pass it. Both a and b fall between zero and CountCap.
+// mulCapped returns a*b, or [aliaslimit.CountCap] when the product is
+// more than CountCap. Both a and b fall between zero and CountCap,
+// inclusive.
 func mulCapped(a, b int) int {
 	if b != 0 && a > aliaslimit.CountCap/b {
 		return aliaslimit.CountCap
@@ -741,8 +754,8 @@ func mulCapped(a, b int) int {
 // anchor, reads more than a shared scalar where the decoder reads the
 // alias into a value. It does for a text tag, for a !!binary scalar, and
 // for a mapping or a sequence. The answer depends on target alone, so
-// the counter keeps it, and it walks the anchors and tags of target once
-// however many aliases refer to the anchor.
+// the counter keeps it. The counter walks the anchors and tags of target
+// once, however many aliases refer to the anchor.
 func (c *treeCounter) repeats(target ast.Node) bool {
 	repeated, ok := c.repeated[target]
 	if !ok {
@@ -753,8 +766,8 @@ func (c *treeCounter) repeats(target ast.Node) bool {
 	return repeated
 }
 
-// textSize returns the length in bytes of the text of the scalar node
-// holds, and at least one.
+// textSize returns the length in bytes of the text of the scalar that
+// node holds, but at least one.
 func textSize(node ast.Node) int {
 	size := 0
 
@@ -777,14 +790,14 @@ func textSize(node ast.Node) int {
 }
 
 // holdsCollection reports whether node holds a mapping or a sequence
-// under its anchors and tags, or refers to one through the aliases
+// under its anchors and tags, or refers to one through the aliases that
 // [treeCounter.reaches] follows.
 func (c *treeCounter) holdsCollection(node ast.Node) bool {
 	return c.reaches(node, isCollection, c.collections)
 }
 
 // holdsBinary reports whether node holds a !!binary tag among its
-// anchors and tags, or refers to one through the aliases
+// anchors and tags, or refers to one through the aliases that
 // [treeCounter.reaches] follows.
 func (c *treeCounter) holdsBinary(node ast.Node) bool {
 	return c.reaches(node, underBinary, c.binaries)
@@ -793,18 +806,18 @@ func (c *treeCounter) holdsBinary(node ast.Node) bool {
 // reaches reports whether match holds for node or for the content of an
 // alias that node leads to. It follows the alias under the anchors and
 // tags of node to the content of its anchor, and goes on from there in
-// the same way. [paths.Resolver.Deref] stops at a tag, so an alias to an
-// anchor such as `&s !foo *k` gives the tag over *k, and reaches goes on
-// to the content *k refers to. It stops at an alias that does not
-// resolve, at one the decoder reads as null, and at one it has followed
-// before.
+// the same way. [paths.Resolver.Deref] stops at a tag. An alias to an
+// anchor such as `&s !foo *k` therefore gives the tag over *k, and
+// reaches goes on to the content that *k refers to. It stops at an alias
+// that does not resolve, at one that the decoder reads as null, and at
+// one that it has followed before.
 //
-// The results map holds, for each alias reaches has followed with match,
-// whether match holds for the content that alias leads to. That answer
-// does not depend on where the walk began, so reaches records it for
-// every alias on the way and stops at an alias it has recorded. It
-// records an alias as false before it follows it, so a walk that comes
-// back to that alias finds false.
+// For each alias that reaches has followed with match, the results map
+// holds whether match holds for the content that the alias leads to. That
+// answer does not depend on where the walk began. So reaches records it
+// for every alias on the way and stops at an alias that it has recorded. It
+// records an alias as false before it follows it, so a walk that returns
+// to that alias finds false.
 func (c *treeCounter) reaches(node ast.Node, match func(ast.Node) bool, results map[*ast.AliasNode]bool) bool {
 	if match(node) {
 		return true

@@ -10,14 +10,15 @@ import (
 
 // StateOf returns the [*State] of the document of n, which must be a
 // *niceyaml.Node, or nil for a nil Node. The niceyaml package sets it
-// when it loads, since this package cannot import that one.
+// when it loads, because this package cannot import niceyaml.
 var StateOf func(n any) *State
 
 // State is what one YAML document keeps for the checks of this package.
-// It holds whether the alias limit applies to the document, the [Budget]
-// of the text its aliases write out, the [Facts] of its anchors and
-// aliases, and the result of each count. Every Node of the document
-// shares it, so a check of each item of a list counts the document once.
+// It holds whether the alias limit applies to the document and the
+// [Budget] of the text that its aliases write out. It also holds the
+// [Facts] of its anchors and aliases and the result of each count. Every Node of the
+// document shares it, so a check of each item of a list counts the
+// document once.
 //
 // Create instances with [NewState].
 type State struct {
@@ -31,10 +32,10 @@ type State struct {
 }
 
 // NewState creates a new [*State] for a document. The alias limit
-// applies to the document when limit is set, and the text its aliases
-// write out must fit budget. The first call of [State.Facts] calls doc
-// for the body of the document and the resolver its aliases resolve
-// through.
+// applies to the document when limit is set, and the text that its
+// aliases write out must fit budget. The first call of [State.Facts] calls
+// doc for the body of the document and the resolver that its aliases
+// resolve through.
 func NewState(limit bool, budget Budget, doc func() (ast.Node, *paths.Resolver)) *State {
 	return &State{
 		facts:  sync.OnceValue(func() *Facts { return NewFacts(doc()) }),
@@ -48,14 +49,14 @@ func (s *State) AliasLimit() bool {
 	return s.limit
 }
 
-// Budget returns the [Budget] of the text the aliases of the document
-// write out.
+// Budget returns the [Budget] of the text that the aliases of the
+// document write out.
 func (s *State) Budget() Budget {
 	return s.budget
 }
 
 // Facts returns the [*Facts] of the document, and finds them on the first
-// call. Every caller gets the same Facts, so no caller may change them.
+// call. Every caller gets the same Facts, so callers must not change them.
 func (s *State) Facts() *Facts {
 	return s.facts()
 }
@@ -72,7 +73,7 @@ func (s *State) ExcessiveAliasing(count func() error) error {
 }
 
 // ExcessiveTextAliasing returns the error of count, which checks the text
-// the decoder writes out for the document. The first call runs count, and
+// that the decoder writes out for the document. The first call runs count, and
 // every later call returns its error. The State keeps it apart from the
 // error of [State.ExcessiveAliasing].
 func (s *State) ExcessiveTextAliasing(count func() error) error {
