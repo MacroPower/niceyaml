@@ -1,0 +1,18 @@
+---
+# The drinks at Café Yamüll.
+apiVersion: cafe.jacobcolvin.com/v1
+kind: Menu
+
+# Oat milk is the house default.
+milk: &oat
+  name: Havremjölk
+  cost: 5
+
+drinks:
+  - item: Kaffe
+    cost: 35 # kr
+    milk: *oat
+  - item: Latte
+    cost: 45
+    price: 50 # From March.
+    milk: *oat
