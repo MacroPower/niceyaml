@@ -11,20 +11,24 @@ import (
 )
 
 // errorConnectorWidth is the width of the connector in front of each
-// error below another in the tree [Printer.PrintError] draws: the three
-// cells of "├──" or "└──", and the one cell of padding after them. The
-// indent below a connector, "│  " and its padding, is as wide.
+// error below another in the tree that [Printer.PrintError] draws. The
+// connector takes the three cells of "├──" or "└──" and one cell of
+// padding after them. The indent below a connector, "│  " and its
+// padding, is as wide.
 const errorConnectorWidth = 4
 
 // PrintError renders err for a reader: its message as a tree, then one
 // excerpt per source the bindings in err touch, as
 // [niceyaml.ErrorReport.Excerpts] holds them. The tree puts a connector
 // in front of each error below another. Each excerpt keeps the context
-// lines opts set on either side of each marked line, as
-// [niceyaml.ExcerptOption] describes, and draws a caret run under each
-// location. PrintError draws both with the styles of the printer and
-// fits them to the width [WithWrapWidth] sets. A nil err prints as "". A
-// program configures one printer and prints its errors through it:
+// lines that opts set on either side of each marked line, as
+// [niceyaml.ExcerptOption] describes. It draws a caret run under each
+// location.
+//
+// PrintError draws the tree and the excerpts with the styles of the
+// printer and fits them to the width [WithWrapWidth] sets. A nil err
+// prints as "". A program configures one printer and prints its errors
+// through it:
 //
 //	p := printer.New(printer.WithWrapWidth(width))
 //	lipgloss.Fprintln(os.Stderr, p.PrintError(err, niceyaml.WithContextLines(3)))
@@ -34,43 +38,46 @@ const errorConnectorWidth = 4
 // PrintError draws the message as a tree with a connector in front of each
 // error below another, in the color of the gutter's line numbers. A
 // validator's report thus reads as its summary with one branch per
-// violation, and the details of an error branch off below it. The root
-// keeps the message as its wrappers wrote it, without the errors the
-// branches show, and each branch carries the "line:col:" its location
+// violation, and each detail of an error sits on a branch below it. The
+// root keeps the message as its wrappers wrote it, without the errors the
+// branches show. Each branch carries the "line:col:" its location
 // resolved to, without the name the root already gives:
 //
 //	cafe.yaml: 2 schema violations
 //	├── 6:8: $.spec.sla: string does not match pattern
 //	└── 22:11: $.spec.hours.days: expected "array", got "string"
 //
-// An error with nothing below it prints as a tree of one node that holds
-// its whole message, so the context a wrapper added stays in front of the
-// position.
+// An error without errors below it prints as a tree of one node that holds
+// its whole message. The context a wrapper added thus stays in front of
+// the position.
 //
 // # Excerpts
 //
 // Each excerpt keeps the context lines [niceyaml.WithContextLines] sets
 // on either side of each marked line. A line longer than the width
 // [niceyaml.WithExcerptWidth] sets shows a window of that many columns
-// around each location on it, with "..." in place of the rest. An error joined
-// from one bound error per document of a file therefore prints that file
-// once, with the errors of every document on it. A binding whose
-// children point into another file, such as a detail that names where a
-// value was first declared, prints an excerpt of that file too.
+// around each location on it, with "..." in place of the rest. Each
+// source gets one excerpt. An error joined from one bound error per
+// document of a file thus prints that file once, with the errors of every
+// document on it. A binding whose children point into another file, such
+// as a detail that names where a value was first declared, prints an
+// excerpt of that file too.
 //
 // # Carets
 //
 // Each location gets a row below its line with a caret run under its
-// range, as [niceyaml.FormatError] draws one, so the range shows its
-// extent without color. A location that covers no column, such as a path
-// to an empty value, gets a single caret at its column instead. A range
-// that runs onto later lines gets a caret run below each of them too.
+// range, as [niceyaml.FormatError] draws one. The range thus shows its
+// extent without color. A location that does not cover a column, such as
+// a path to an empty value, gets a single caret at its column instead. A
+// range that runs onto later lines gets a caret run below each of them
+// too.
+//
 // Among several bindings, the message of each sits after the carets of
 // its own range. Locations that share a range share its row, with their
-// messages joined by "; ", and the rows of errors come before those of
+// messages joined by "; ". The rows of errors come before those of
 // warnings.
 //
-// A location with no message beside it in the excerpt, such as the root
+// A location without a message beside it in the excerpt, such as the root
 // of a lone bound error, gets its carets alone.
 // [niceyaml.SourceError.Excerpt] marks such a line with an annotation
 // without content, and [DefaultAnnotation] draws the carets for it.
@@ -81,26 +88,28 @@ const errorConnectorWidth = 4
 // # Missing Excerpts
 //
 // A line starting "no excerpt:" follows the excerpts for each SourceError
-// [niceyaml.Bindings] finds whose tree resolves no location, with the
-// reason the location of the SourceError itself did not resolve. A
-// SourceError that carries no location of its own gets no such line.
-// Neither does a SourceError that carries a path into a document with no
-// content, such as an empty file, since no path resolves there and the
-// tree names the path already. A SourceError whose own location does not
-// resolve but whose children do gets their excerpts and no reason, and
-// its message stays in the tree without a position.
+// that [niceyaml.Bindings] finds whose tree does not resolve any location.
+// The line gives the reason the location of the SourceError itself did
+// not resolve. A SourceError without a location of its own does not get
+// such a line. A SourceError that carries a path into a document without
+// content, such as an empty file, does not get one either. A path cannot
+// resolve in such a document, and the tree already names the path.
+//
+// A SourceError whose own location does not resolve but whose children do
+// gets their excerpts without a reason. Its message stays in the tree
+// without a position.
 //
 // A source with excerpts off, as [niceyaml.WithExcerpts] sets it for a
-// text that holds secrets, prints no excerpt and no line in its place.
-// The tree names the position, the path, and the message of each error
-// bound in that source.
+// text that holds secrets, does not print an excerpt or a line in its
+// place. The tree names the position, the path, and the message of each
+// error bound in that source.
 //
 // # Control Characters
 //
-// PrintError draws every message of the tree, the root's included, and
-// each "no excerpt:" line with control characters as their pictures, as
-// an excerpt draws them. A line feed in a message of the tree starts a
-// new row instead. A tab becomes four spaces wherever it falls, in the
+// In every message of the tree, the root's included, and in each
+// "no excerpt:" line, PrintError draws control characters as their
+// pictures. An excerpt draws them the same way. A line feed in a message
+// of the tree starts a new row instead. A tab becomes four spaces in the
 // tree, in a "no excerpt:" line, and in the message an excerpt carries
 // beside its carets.
 //
@@ -112,13 +121,14 @@ const errorConnectorWidth = 4
 //
 // # Unbound Errors
 //
-// An error whose tree holds no SourceError prints as its tree alone,
-// which for an error with nothing below it is its message. So does an
-// error whose SourceErrors yield no excerpt and carry no location of
-// their own that failed to resolve. A nil err prints as "". An error
-// whose tree and excerpts both render nothing, such as a bound join of
-// typed-nil errors, prints its message in their place, escaped and
-// wrapped like any other.
+// An error whose tree does not hold a SourceError prints as its tree
+// alone. For an error without errors below it, the tree is its message.
+// An error also prints as its tree alone when its SourceErrors do not
+// yield an excerpt and do not carry a location of their own that failed
+// to resolve. A nil err prints as "". When neither the tree nor the
+// excerpts of an error render any text, as for a bound join of typed-nil
+// errors, PrintError prints the message of the error in their place. It
+// escapes and wraps that message like any other.
 //
 // # Other Renderers
 //
@@ -136,8 +146,8 @@ func (p *Printer) PrintError(err error, opts ...niceyaml.ExcerptOption) string {
 // line. PrintReport draws them with the styles and the width of the
 // printer and puts a blank line between the parts. A program that builds
 // a report once with [niceyaml.NewErrorReport], such as one that reads
-// its parts or renders it as plain text too, prints that same report
-// here. The zero ErrorReport prints as "".
+// its parts or also renders it as plain text, prints that same report
+// with PrintReport. The zero ErrorReport prints as "".
 func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 	parts := make([]string, 0, 1+len(rep.Excerpts)+len(rep.Unresolved))
 
@@ -172,11 +182,11 @@ func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// renderErrorTree draws t with a connector in front of each child, in the
-// foreground of [kind.UILineNumber], so the connectors take the color of
-// the gutter's line numbers without the background of the gutter, which
-// the message text beside them does not have. Each message lays out as
-// errorText returns it.
+// renderErrorTree draws t with a connector in front of each child. The
+// connectors render in the foreground of [kind.UILineNumber], so they
+// take the color of the gutter's line numbers. They leave out the
+// background of the gutter, because the message text beside them does
+// not have it. Each message takes the rows errorText returns for it.
 func (p *Printer) renderErrorTree(t niceyaml.ErrorTree) string {
 	branch := lipgloss.NewStyle().
 		Foreground(p.styles.Style(kind.UILineNumber).GetForeground()).
@@ -202,13 +212,13 @@ func (p *Printer) renderErrorTree(t niceyaml.ErrorTree) string {
 	return strings.Join(rows, "\n")
 }
 
-// appendErrorBranches appends the rows of children, which sit depth
-// connectors from the left edge, to rows, each behind indent, the
-// connectors its ancestors draw. The first row of a child starts with
-// "├──", or "└──" for the last child. The child's later rows and its own
-// children sit under "│  ", or blank cells for the last child, so a line
-// runs down from each connector to its next sibling. Each connector
-// renders with branch.
+// appendErrorBranches appends the rows of children to rows. The children
+// sit depth connectors from the left edge. Each row of a child starts
+// with indent, the connectors that the ancestors of the child draw. After
+// indent, the first row of a child takes "├──", or "└──" for the last
+// child. The child's later rows and its own children sit under "│  ", or
+// under blank cells for the last child. A line thus runs down from each
+// connector to its next sibling. Each connector renders with branch.
 func (p *Printer) appendErrorBranches(
 	rows []string,
 	children []niceyaml.ErrorTree,
@@ -257,12 +267,13 @@ func (p *Printer) errorRows(t niceyaml.ErrorTree, depth int) []string {
 const warningLabel = "warning:"
 
 // errorText returns the rows of one message of the tree at depth
-// connectors from the left edge, wrapped to the width left of the
-// connectors. [escape.Message] lays the text out first. It replaces each
-// tab with four spaces, such as the tab in front of each suggestion Cobra
-// lists, and draws the other control characters as their pictures. A line
-// break in the message stays a line break, since a wrapper around a
-// joined error keeps the breaks between its branches in its own text.
+// connectors from the left edge, wrapped to the width that the
+// connectors leave. [escape.Message] lays the text out first. It replaces
+// each tab with four spaces, such as the tab in front of each suggestion
+// that Cobra lists. It draws the other control characters as their
+// pictures. A line break in the message stays a line break, because a
+// wrapper around a joined error keeps the breaks between its branches in
+// its own text.
 func (p *Printer) errorText(text string, depth int) []string {
 	return p.wrapTo(escape.Message(text), p.textWidth(depth*errorConnectorWidth))
 }

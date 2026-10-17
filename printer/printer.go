@@ -34,13 +34,12 @@ const wrapOnCharacters = " " + breakpoints
 // Printer prints YAML with syntax highlighting for terminal output.
 //
 // It accepts a [line.View], such as the view of a niceyaml Source, and
-// renders its YAML tokens as styled terminal output using
-// [lipgloss.Style] values, with customizable gutters, annotations, styled
-// overlays, and word wrapping. The package documentation covers each of
-// these.
+// renders its YAML tokens as styled terminal output with [lipgloss.Style]
+// values. Options customize its gutters, annotations, styled overlays, and
+// word wrapping, and the package documentation covers each of them.
 //
 // A Printer is immutable after construction and safe for concurrent use.
-// Every setting is an [Option]; to change one on an existing Printer,
+// Every setting is an [Option]. To change one on an existing Printer,
 // derive a copy with [Printer.With]:
 //
 //	narrow := p.With(printer.WithWrapWidth(40))
@@ -51,7 +50,7 @@ const wrapOnCharacters = " " + breakpoints
 //
 // Use [Printer.Print] to render every line of a view. To render part of a
 // document, such as the lines around an error or the hunks of a diff, print
-// the view [line.View.Slice] returns, whose lines keep their numbers:
+// the view [line.View.Slice] returns. Its lines keep their numbers:
 //
 //	p.Print(view)                       // All lines.
 //	p.Print(view.Slice(span1, span2))   // The lines of two spans.
@@ -63,19 +62,19 @@ const wrapOnCharacters = " " + breakpoints
 // # Errors
 //
 // [Printer.PrintError] renders any error as a tree, with a connector in
-// front of each error below another, and the source excerpt of every
-// [niceyaml.SourceError] in it, with the printer's styles and width and
-// the context lines a [niceyaml.ExcerptOption] sets. A program configures
-// one printer with its terminal width and theme and prints its errors
-// through it.
+// front of each error below another. It adds the source excerpt of every
+// [niceyaml.SourceError] in the error. It draws both with the printer's
+// styles and width and the context lines a [niceyaml.ExcerptOption] sets.
+// A program configures one printer with its terminal width and theme and
+// prints its errors through it.
 type Printer struct {
 	config
 }
 
 // New creates a new [*Printer].
 // By default it uses [style.Default], [DefaultGutter], [DefaultAnnotation],
-// and an empty container style. Unless [WithContainerWidth] pins a width,
-// each row of the output is then as wide as its content.
+// and an empty container style, so each row of the output is as wide as
+// its content. [WithContainerWidth] pins a width instead.
 func New(opts ...Option) *Printer {
 	p := &Printer{
 		styles:         style.Default(),
@@ -95,7 +94,7 @@ func New(opts ...Option) *Printer {
 //	wrapped := p.With(printer.WithWrapWidth(80))
 //
 // The copy shares the receiver's cache of blended styles unless [WithStyles]
-// is among the options; the cache is safe for concurrent use.
+// is among the options. The cache is safe for concurrent use.
 func (p *Printer) With(opts ...Option) *Printer {
 	c := *p
 	c.apply(opts)
@@ -139,8 +138,9 @@ type config struct {
 	style          lipgloss.Style
 	gutter         Gutter
 	annotationFunc AnnotationFunc
-	// Blended styles by the kinds that produce them. WithStyles replaces
-	// it, since the kinds then resolve to other styles.
+	// The cache of blended styles, keyed by the kinds that produce them.
+	// WithStyles replaces it, because the kinds then resolve to other
+	// styles.
 	blends         *blendCache
 	wrap           int
 	containerWidth int
@@ -150,22 +150,26 @@ type config struct {
 	box bool
 }
 
-// GutterContext provides context about the current row for gutter rendering.
-// The printer passes it to [Gutter.Render] to determine the gutter content.
+// GutterContext describes the current row for gutter rendering. The
+// printer passes it to [Gutter.Render], and the gutter renders its text
+// for the row from it.
 //
 // Index, Number, and Flag describe the line the row belongs to. MaxNumber
-// is the number the gutter sizes its line number column for, the larger
-// of the view's largest line number and the one [WithMaxNumber] sets, so
-// every row of the view lines up. Annotation marks a row that holds one
-// of the line's annotations rather than its content, so the built-in
-// gutters leave the line number and diff marker out of it. Soft marks a
-// row that continues the one above it. On a content row, Soft marks a
-// wrapped continuation of the line. On an annotation row, Soft marks
-// every row after the first of the line's annotations at one placement
-// beside one wrapped row of its content. Those rows include the first row
-// of a later [AnnotationRow] and a row that starts at a newline in its
-// Text. A gutter that draws a wrap marker only beside wrapped content
-// checks Annotation before Soft.
+// is the number the gutter sizes its line number column for. It is the
+// larger of the view's largest line number and the one [WithMaxNumber]
+// sets, so every row of the view lines up. Annotation marks a row that
+// holds one of the line's annotations rather than its content. The
+// built-in gutters leave the line number and the diff marker off such a
+// row.
+//
+// Soft marks a row that continues the one above it. On a content row,
+// Soft marks a wrapped continuation of the line. On an annotation row,
+// Soft marks every row after the first in its block. A block holds the
+// annotation rows of a line at one placement beside one wrapped row of
+// its content. The soft rows include the first row of a later
+// [AnnotationRow] and a row that starts at a newline in its Text. A
+// gutter that draws a wrap marker only beside wrapped content checks
+// Annotation before Soft.
 type GutterContext struct {
 	Styles     style.Styler
 	Index      int
@@ -176,9 +180,10 @@ type GutterContext struct {
 	Annotation bool
 }
 
-// styler returns the styles a gutter renders with: the ones the context
-// carries, or the default styles when it carries none or a nil pointer,
-// so a gutter called with a zero context renders rather than panics.
+// styler returns the styles a gutter renders with. It returns the styles
+// the context carries, or [style.Default] when the context carries nil or
+// a nil pointer. A gutter called with a zero context thus renders rather
+// than panics.
 func (c GutterContext) styler() style.Styler {
 	if nilness.IsNil(c.Styles) {
 		return style.Default()
@@ -187,17 +192,20 @@ func (c GutterContext) styler() style.Styler {
 	return c.Styles
 }
 
-// Gutter renders the left edge of each row. The printer asks it once per
-// view for the width of the gutter and budgets word wrapping and
-// [Layout.GutterWidth] from that. The printer renders every row's gutter
-// at that width. It pads text that falls short with spaces in [kind.Text]
-// and cuts text that runs over, so the content of every row starts in the
-// same column whatever the gutter renders for the row. The gutter takes
-// one row, so the printer keeps only the first row of text that holds a
-// newline, such as text in a style with a margin or a border.
+// Gutter renders the left edge of each row. The printer asks it for the
+// width of the gutter once per view and budgets word wrapping and
+// [Layout.GutterWidth] from that width. The printer renders every row's
+// gutter at that width. It pads text that falls short with spaces in
+// [kind.Text] and cuts text that runs over. The content of every row thus
+// starts in the same column, whatever the gutter renders for the row.
 //
-// A gutter that shows a marker on some rows and nothing on others
-// therefore declares the width of the marker and renders what it likes:
+// The gutter takes one row. When its text holds a newline, as text in a
+// style with a margin or a border does, the printer keeps only the first
+// row.
+//
+// Because the printer pads text that falls short, a gutter that shows a
+// marker on some rows and nothing on others declares the width of the
+// marker and renders what it likes:
 //
 //	type markerGutter struct{}
 //
@@ -214,27 +222,27 @@ func (c GutterContext) styler() style.Styler {
 //	p := printer.New(printer.WithGutter(markerGutter{}))
 //
 // [DefaultGutter], [DiffGutter], [LineNumberGutter], and [NoGutter] are
-// ready-made gutters, and [GutterFunc] adapts a function; pass one to
-// [WithGutter].
+// ready-made gutters, and [GutterFunc] adapts a function. [WithGutter]
+// sets the gutter a printer uses.
 type Gutter interface {
 	// Width returns the width in cells of the gutter on every row of a
-	// view. The context holds the styles the gutter renders with and, in
-	// both Number and MaxNumber, the number the gutter sizes for: the
+	// view. The context holds the styles the gutter renders with. Both
+	// Number and MaxNumber hold the number the gutter sizes for, the
 	// larger of the view's largest line number and the one
-	// [WithMaxNumber] sets. It holds no other fields, since the width
-	// may not depend on the row.
+	// [WithMaxNumber] sets. The printer leaves every other field zero,
+	// because the width must not depend on the row.
 	Width(ctx GutterContext) int
 	// Render returns the gutter text for a row. The printer keeps its
-	// first row and pads or cuts that to Width.
+	// first row and pads or cuts that row to Width.
 	Render(ctx GutterContext) string
 }
 
 // GutterFunc adapts a function to the [Gutter] interface. Its width is
 // the width of what the function renders for the context [Gutter.Width]
 // receives. A function whose width depends on the line number alone, as
-// the built-in gutters do, measures as it renders. For a function that
-// varies its width on the flag or the row, the printer pads or cuts every
-// row to what the function renders for that context:
+// the built-in gutters do, measures as it renders. For a function whose
+// width varies with the flag or the row, the printer pads or cuts every
+// row to the width of what the function renders for that context:
 //
 //	p := printer.New(printer.WithGutter(printer.GutterFunc(func(ctx printer.GutterContext) string {
 //		return fmt.Sprintf("%3d ", ctx.Number)
@@ -251,8 +259,8 @@ func (f GutterFunc) Render(ctx GutterContext) string {
 	return f(ctx)
 }
 
-// AnnotationContext is what the printer hands an [AnnotationFunc] for the
-// annotations of one line and placement that render in one kind, as
+// AnnotationContext is what the printer passes to an [AnnotationFunc] for
+// the annotations of one line and placement that render in one kind, as
 // [line.Annotation.RenderKind] reports it. Each annotation keeps its Kind
 // as given, so a context for [kind.UIAnnotation] can hold annotations of
 // the zero Kind alongside ones of that kind. The func returns the
@@ -260,38 +268,41 @@ func (f GutterFunc) Render(ctx GutterContext) string {
 // styles each one.
 //
 // Every column the context holds counts runes of Content. For a line the
-// view clips, as [line.View.Clip] sets a view to, Content is the text of
-// the row, and Overlays, Annotations, RowStarts, and RowEnds hold the
+// view clips, as a view from [line.View.Clip] does, Content is the text
+// of the row. Overlays, Annotations, RowStarts, and RowEnds then hold the
 // columns of that row. A func thus marks a clipped line as it marks any
 // other.
 type AnnotationContext struct {
 	// Content is the text of the annotated line, without its line ending.
-	// Annotation columns count runes of this text, and their display
-	// width gives the padding a marker needs to sit under them. The text
-	// of a clipped line holds the windows [line.View.Windows] returns,
-	// with "..." in place of each run of columns it leaves out.
+	// Annotation columns count runes of this text. The display width of
+	// the text before a column gives the padding that puts a marker under
+	// it. The text of a clipped line holds the windows
+	// [line.View.Windows] returns, with "..." in place of each run of
+	// columns that the windows leave out.
 	Content string
 
 	// Overlays are the overlays of the annotated line, the styles its
-	// columns render in. [DefaultAnnotation] reads no overlay. A func can
-	// read them to match the colors of the line. Each context holds a
-	// copy, so the func may change it without changing the view.
+	// columns render in. [DefaultAnnotation] does not read the overlays.
+	// A func can read them to match the colors of the line. Each context
+	// holds a copy, so the func can change it without changing the view.
 	Overlays line.Overlays
 
 	// RowStarts holds the column of Content at which each row of the line
-	// begins once the printer wraps it, in order, so a func that marks
-	// columns can return a row for each wrapped row it marks. The first
-	// row begins after any leading spaces the wrap drops, so it can begin
-	// past column 0. It holds the single column 0 when the line fits one
-	// row as it is, and nil counts the same. Each context holds a copy.
+	// begins after the printer wraps it, in row order. A func that marks
+	// columns can thus return a row for each wrapped row it marks. The
+	// first row begins after any leading spaces the wrap drops, so it can
+	// begin past column 0. RowStarts holds the single column 0 when the
+	// line fits one row as it is, and a nil RowStarts means the same. Each
+	// context holds a copy.
 	RowStarts []int
 
-	// RowEnds holds the column of Content just past the last rune each
-	// row of the line shows once the printer wraps it, one for each entry
-	// of RowStarts. A row thus ends before the spaces the wrap drops at
-	// its break or at the end of the line. When it is nil, each row ends
-	// where the next begins, less the spaces before that, and the last
-	// row ends at the end of Content. Each context holds a copy.
+	// RowEnds holds the column of Content after the last rune each row of
+	// the line shows when the printer wraps it, one for each entry of
+	// RowStarts. A row thus ends before the spaces the wrap drops at its
+	// break or at the end of the line. When RowEnds is nil, each row ends
+	// where the next begins, less the spaces the wrap drops before that
+	// start. The last row then ends at the end of Content. Each context
+	// holds a copy.
 	RowEnds []int
 
 	// Annotations are the annotations the func renders, each with the
@@ -301,101 +312,110 @@ type AnnotationContext struct {
 }
 
 // ColWidth returns the display width of the first col runes of ctx.Content,
-// plus one cell for every column past the end of the content, so a marker
-// padded by it lands under the rune at col whatever the width of the runes
-// before it. See [ColWidth] for the rules it measures by.
+// plus one cell for every column past the end of the content. A marker
+// padded by that width lands under the rune at col, whatever the width of
+// the runes before it. See [ColWidth] for the rules it measures by.
 func (ctx AnnotationContext) ColWidth(col int) int {
 	return ColWidth(ctx.Content, col)
 }
 
-// ColWidth returns the display width of the first col runes of content, the
-// text of a line without its line ending, plus one cell for every column
-// past the end of the content. The width is that of the row the printer
-// renders. In that row a control character shows as a one-cell picture,
-// and a grapheme cluster, such as a letter with a combining mark or an
-// emoji ZWJ sequence, takes its display width once. A column inside a
-// cluster has no cell of its own, so it measures up to the start of its
-// cluster. It measures the content alone, so a viewer that scrolls
-// horizontally asks [Layout.CellOf] for the cell of a column, which also
-// counts the cells a style's transform adds.
+// ColWidth returns the display width of the first col runes of content,
+// plus one cell for every column past the end of the content. The content
+// is the text of a line without its line ending.
+//
+// The width is that of the row the printer renders. In that row, a
+// control character shows as a one-cell picture. A grapheme cluster, such
+// as a letter with a combining mark or an emoji ZWJ sequence, takes its
+// display width once. A column inside a cluster does not have a cell of
+// its own, so it measures up to the start of its cluster.
+//
+// ColWidth measures the content alone. A viewer that scrolls horizontally
+// asks [Layout.CellOf] for the cell of a column instead, because that
+// method also counts the cells a style's transform adds.
 func ColWidth(content string, col int) int {
 	return cells.NewRow(content).Width(col)
 }
 
 // Cut returns the grapheme clusters of row that start at or after cell left
-// and end by cell right, or "" when right is not past left. The row is one
-// row of what [Printer.Print] returns, with the escape sequences of its
+// and end by cell right, or "" when right is at or before left. The row is
+// one row of what [Printer.Print] returns, with the escape sequences of its
 // styles. Cut counts the cells of the row as [Layout.CellOf] and
-// [Layout.GutterWidth] do, so a viewer that scrolls horizontally cuts each
-// row to its window from the cells they return. A keycap takes two cells
-// here, where [ansi.Cut] counts one for its ASCII base. A cluster that
-// straddles either edge drops out whole, so the result can come up short of
-// right-left cells. A cluster of no width at cell right falls outside.
-// Every escape sequence stays, so a style the row opens still closes.
+// [Layout.GutterWidth] do. A viewer that scrolls horizontally thus cuts
+// each row to its window from the cells those methods return.
+//
+// A keycap takes two cells here, but [ansi.Cut] counts one for its ASCII
+// base. Cut leaves out every cluster that straddles either edge, so the
+// result can span fewer than right-left cells. A zero-width cluster at
+// cell right falls outside the result. Every escape sequence stays, so a
+// style the row opens still closes.
 func Cut(row string, left, right int) string {
 	return cells.Cut(row, left, right)
 }
 
-// CutWidth returns what [Cut] returns along with the cells the cut takes.
-// A viewer that pads the cut to the width of its window measures it in the
-// same pass.
+// CutWidth returns what [Cut] returns along with the width of the cut in
+// cells. A viewer that pads the cut to the width of its window measures it
+// in the same pass.
 func CutWidth(row string, left, right int) (string, int) {
 	return cells.CutWidth(row, left, right)
 }
 
 // AnnotationRow is a row an [AnnotationFunc] renders for the annotations
 // of one line and placement that render in one kind, as
-// [line.Annotation.RenderKind] reports it, so one [kind.UIAnnotation] row
-// can hold annotations of the zero Kind alongside ones of that kind. The
-// printer pads the row to Col as [AnnotationContext.ColWidth] measures it,
-// writes Marker, then Text, and styles the row in the kind the annotations
-// render in, so the func decides what the row says and where it starts
-// and the printer decides how it looks. When the content wraps, the
-// printer writes the row beside the wrapped row that holds Col, above it
-// for [line.Above] and below it for [line.Below], and measures the padding
-// from the start of that wrapped row, so the row starts in the cell Col
-// takes on it.
+// [line.Annotation.RenderKind] reports it. One [kind.UIAnnotation] row can
+// thus hold annotations of the zero Kind alongside ones of that kind.
+//
+// The printer pads the row to Col as [AnnotationContext.ColWidth] measures
+// it, writes Marker, then Text, and styles the row in the kind the
+// annotations render in. The func thus decides what the row says and
+// where it starts, and the printer decides how it looks.
+//
+// When the content wraps, the printer writes the row beside the wrapped
+// row that holds Col, above it for [line.Above] and below it for
+// [line.Below]. It measures the padding from the start of that wrapped
+// row, so the row starts in the cell Col takes on it.
 type AnnotationRow struct {
 	// Marker is the text between the padding and Text on the first row,
 	// such as the carets and the space [DefaultAnnotation] puts before the
 	// text of a [line.Below] annotation. The printer keeps the Marker
-	// whole on one row, even when it runs past the width, so a func that
-	// marks columns puts the marks in the Marker, as [DefaultAnnotation]
-	// does with its carets. When Text wraps, its continuation rows
-	// indent past the Marker, so they align under the start of Text. When
-	// the column leaves Text less room than its widest word, the Marker
-	// keeps its column on a row of its own, and Text moves to the rows
-	// below under a smaller indent. That indent leaves Text 20 cells, or
-	// its widest word when that is wider, and shrinks to nothing when the
-	// printer width has less room.
+	// whole on one row, even when it runs past the width. A func that
+	// marks columns thus puts the marks in the Marker, as
+	// [DefaultAnnotation] does with its carets.
+	//
+	// When Text wraps, its continuation rows indent past the Marker, so
+	// they align under the start of Text. When the column leaves Text less
+	// room than its widest word, the Marker keeps its column on a row of
+	// its own. Text then moves to the rows below under a smaller indent.
+	// That indent leaves Text 20 cells, or its widest word when that is
+	// wider, and shrinks to zero when the printer width has less room.
 	Marker string
 
-	// Text is the body of the row. A newline in it starts a new row, and
-	// every other control character renders as its picture, so an escape
+	// Text is the body of the row. A newline in it starts a new row. Every
+	// other control character renders as its picture, so an escape
 	// sequence in a message shows as text rather than styling the output.
 	Text string
 
-	// Kind is the style the row renders in when it is not the zero Kind,
-	// in place of the kind the annotations render in.
+	// Kind is the kind the row renders in, in place of the kind its
+	// annotations render in. The zero Kind keeps the kind of the
+	// annotations.
 	Kind kind.Kind
 
 	// Col is the column of the content the row starts under, in runes of
-	// [AnnotationContext.Content]. A negative Col starts at column zero,
-	// and a Col more than [line.MaxColPastEnd] columns past the end of the
+	// [AnnotationContext.Content]. A negative Col starts at column zero. A
+	// Col more than [line.MaxColPastEnd] columns past the end of the
 	// content starts that many columns past it.
 	Col int
 }
 
 // AnnotationFunc renders the annotations an [AnnotationContext] holds as
-// [AnnotationRow]s, in the order the printer writes them, and returns none
-// to leave them out, so the printer drops the rows they would take. A
-// func that describes the annotations returns one row. One that marks
-// columns of a wrapped line returns a row for each wrapped row it marks,
-// as [DefaultAnnotation] does, since the printer writes each row beside
-// one wrapped row.
+// [AnnotationRow]s, in the order the printer writes them. A func that
+// returns zero rows leaves the annotations out of the output. A func
+// that describes the annotations returns one row. The printer writes
+// each row beside one wrapped row. A func that marks columns of a wrapped
+// line thus returns a row for each wrapped row it marks, as
+// [DefaultAnnotation] does.
 //
-// The printer does the padding, escaping, wrapping, and styling, so a
-// func returns the text of each row and the column it starts under:
+// The printer pads, escapes, wraps, and styles each row, so a func
+// returns the text of each row and the column it starts under:
 //
 //	func(ctx printer.AnnotationContext) []printer.AnnotationRow {
 //		kept := ctx.Annotations.WithContent()
@@ -412,44 +432,45 @@ type AnnotationRow struct {
 type AnnotationFunc func(AnnotationContext) []AnnotationRow
 
 // NoAnnotation is an [AnnotationFunc] that renders nothing, so the printer
-// leaves out the rows annotations would take.
+// leaves annotations out of the output.
 func NoAnnotation(AnnotationContext) []AnnotationRow {
 	return nil
 }
 
 // DefaultAnnotation is the [AnnotationFunc] [New] uses. Annotations with
-// empty content add no text.
+// empty content do not add text.
 //
 // Above the line, it joins the contents of the annotations with "; " in
-// column order, as [line.Annotations.WithContent] sorts them, on one row
-// that starts at the first column they start at, [line.Annotations.Start].
-// Annotations with no content render nothing, as [line.Annotation.String]
-// does.
+// column order, as [line.Annotations.WithContent] sorts them. The row
+// starts at the first column they start at, which
+// [line.Annotations.Start] reports. Annotations without content do not
+// render above the line. [line.Annotation.String] also returns "" for
+// them.
 //
-// Below the line, each run of columns the annotations label, their
-// [line.Annotation.Cols], gets a row of its own, so a marked range shows
+// Below the line, each run of columns that the annotations label in their
+// [line.Annotation.Cols] gets a row of its own. A marked range thus shows
 // its extent without color. The row holds a caret under each column of
 // the run, then the contents of its annotations after a space.
 // Annotations that label the same columns share a row, with their
-// contents joined with "; ". An annotation with no content gets its
-// carets alone. A run that covers no column of the content, such as an
-// empty one, gets a single caret at its start.
+// contents joined with "; ". An annotation without content gets its
+// carets alone. A run that does not cover a column of the content, such
+// as an empty one, gets a single caret at its start.
 //
 // The rows below the line come in the order their runs start, and runs
 // that start at the same column come shorter first. [line.View.String]
-// lays out the rows below a line the same way. DefaultAnnotation reads no
-// overlay, so the overlays of the line render no caret.
+// arranges the rows below a line the same way. DefaultAnnotation does not
+// read the overlays, so the overlays of the line do not get carets.
 //
 // When the line wraps, a run gets a caret row beside each wrapped row
 // that shows some of its columns. The contents follow the carets beside
-// the wrapped row that holds the start of the run. That wrapped row can
-// show none of the run, as when the run starts on a space the wrap drops.
-// The contents then follow a single caret at the start of the run. Apart
-// from that single caret, a space the wrap drops, at a break or at the
-// end of the line, gets no caret.
+// the wrapped row that holds the start of the run. That wrapped row might
+// not show any column of the run, as when the run starts on a space the
+// wrap drops. The contents then follow a single caret at the start of the
+// run. Apart from that single caret, a space the wrap drops, at a break
+// or at the end of the line, does not get a caret.
 //
-// A newline in an annotation renders as its picture rather than starting
-// a row, as every other control character does.
+// Every control character in an annotation renders as its picture, so a
+// newline does not start a row.
 func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 	if ctx.Placement != line.Below {
 		// Filter the annotations rather than their contents, so the column
@@ -491,12 +512,13 @@ func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 
 // wrappedRows returns the columns of ctx.Content each wrapped row of the
 // line shows, from [AnnotationContext.RowStarts] and
-// [AnnotationContext.RowEnds]. A row with no entry in RowEnds ends where
-// the next row begins, less the spaces the wrap drops before that. The
-// last such row ends at the end of the content. It escapes the content
-// first, as the printer shows it, so a tab counts as its picture rather
-// than a space. It returns nil when RowStarts is empty. [caret.Rows]
-// reads nil as one row that shows the whole line.
+// [AnnotationContext.RowEnds]. A row without an entry in RowEnds ends
+// where the next row begins, less the spaces the wrap drops before that
+// start. The last such row ends at the end of the content. First,
+// wrappedRows escapes the content as the printer shows it, so a tab
+// counts as its picture rather than a space. It returns nil when
+// RowStarts is empty. [caret.Rows] reads nil as one row that shows the
+// whole line.
 func wrappedRows(ctx AnnotationContext) []position.Span {
 	if len(ctx.RowStarts) == 0 {
 		return nil
@@ -528,10 +550,10 @@ func wrappedRows(ctx AnnotationContext) []position.Span {
 }
 
 // renderLineNumber renders the line number portion of a gutter. The number
-// column is at least four wide and grows to fit the largest line number in
-// the view, so every row of the view lines up. A line with no number, such
-// as the placeholder a side-by-side diff inserts opposite an inserted or
-// deleted line, gets a blank column.
+// column is at least four cells wide and grows to fit the largest line
+// number in the view. Every row of the view thus lines up. A line without
+// a number, such as the placeholder a side-by-side diff inserts opposite
+// an inserted or deleted line, gets a blank column.
 func renderLineNumber(ctx GutterContext) string {
 	lineNumStyle := ctx.styler().Style(kind.UILineNumber)
 
@@ -550,9 +572,9 @@ func renderLineNumber(ctx GutterContext) string {
 }
 
 // renderDiffMarker renders the diff marker portion of a gutter. An
-// annotation row carries no marker and renders in [kind.Text] whatever
-// its flag. A soft-wrapped continuation row keeps the color of its line
-// but not the marker.
+// annotation row does not carry a marker, and it renders in [kind.Text]
+// whatever its flag. A soft-wrapped continuation row keeps the color of
+// its line but not the marker.
 func renderDiffMarker(ctx GutterContext) string {
 	k, marker := kind.Text, " "
 
@@ -574,8 +596,8 @@ func renderDiffMarker(ctx GutterContext) string {
 }
 
 // numberWidth returns the width of the line number column for a view
-// whose largest line number is maxNumber: at least four, and as many
-// digits as the number has.
+// whose largest line number is maxNumber. The width is the larger of four
+// and the number of digits in maxNumber.
 func numberWidth(maxNumber int) int {
 	return max(4, len(strconv.Itoa(maxNumber)))
 }
@@ -585,11 +607,11 @@ var (
 	// followed by the diff marker.
 	DefaultGutter Gutter = numberGutter{marker: true}
 
-	// DiffGutter is a [Gutter] that renders diff markers only (" ", "+",
+	// DiffGutter is a [Gutter] that renders only diff markers (" ", "+",
 	// "-"), styled with [kind.GenericInserted] and [kind.GenericDeleted].
 	DiffGutter Gutter = diffGutter{}
 
-	// LineNumberGutter is a [Gutter] that renders line numbers only, in
+	// LineNumberGutter is a [Gutter] that renders only line numbers, in
 	// [kind.UILineNumber]. Soft-wrapped continuation rows show " - ".
 	LineNumberGutter Gutter = numberGutter{}
 
@@ -598,8 +620,8 @@ var (
 )
 
 // numberGutter is the [Gutter] behind [DefaultGutter] and
-// [LineNumberGutter]: the line number column, followed by the diff marker
-// when marker is set.
+// [LineNumberGutter]. It renders the line number column, followed by the
+// diff marker when marker is set.
 type numberGutter struct {
 	marker bool
 }
@@ -645,11 +667,12 @@ func (noGutter) Render(GutterContext) string {
 	return ""
 }
 
-// WithContainerStyle is an [Option] that sets the [lipgloss.Style]
-// wrapped around the whole rendered output. By default the container is an
-// empty style, which leaves each row as the printer renders it. A container
-// that sets any property, such as a border or a background, pads every row
-// to the widest one. It replaces the box of an earlier [WithBox].
+// WithContainerStyle is an [Option] that sets the [lipgloss.Style] the
+// printer wraps around the whole rendered output. By default the container
+// is an empty style, which leaves each row as the printer renders it. A
+// container that sets any property, such as a border or a background,
+// pads every row to the widest one. It replaces the box of an earlier
+// [WithBox].
 //
 // To set the theme, which styles the tokens inside, use [WithStyles].
 //
@@ -664,11 +687,11 @@ func WithContainerStyle(s lipgloss.Style) Option {
 // WithBox is an [Option] that draws the output as a box in the [kind.Text]
 // style of the theme. The container takes that style with one cell of
 // right padding. Every row reaches the width of the widest row plus one
-// cell, or, when [WithContainerWidth] pins a width, that width. A theme
-// that sets a surface, such as
+// cell. When [WithContainerWidth] pins a width, every row reaches that
+// width instead. A theme that sets a surface, such as
 // [go.jacobcolvin.com/niceyaml/style/theme.Charm], fills the box with that
-// color. Use it for a full-screen viewer, where the document shows as one
-// block of the theme's background.
+// color. Use WithBox for a full-screen viewer, where the document shows as
+// one block of the theme's background.
 //
 // The box takes its style from the styles the printer holds after every
 // option applies. It thus follows a [WithStyles] that comes before or
@@ -683,27 +706,27 @@ func WithBox() Option {
 // to n columns. [Printer.Print] pads every row it renders with [kind.Text]
 // spaces out to n less the container's horizontal frame. The frame thus
 // sits in the same columns whatever the widest row of the view is. A width
-// of 0, the default, pins no width, so a container such as the box of
-// [WithBox] shrinks to the widest row.
+// of 0, the default, does not pin a width, so a container such as the box
+// of [WithBox] shrinks to the widest row.
 //
-// The printer pads a row and never cuts one. A row can still run past n,
-// since an annotation column may push the layout wider than [WithWrapWidth]
-// and a style transform may widen a row after it wraps. A viewer that
-// scrolls horizontally cuts the rows itself.
+// The printer pads rows but never cuts them. A row can still run past n.
+// An annotation column can push the layout wider than [WithWrapWidth], and
+// a style transform can widen a row after it wraps. A viewer that scrolls
+// horizontally cuts the rows itself.
 //
-// Use it for a viewer that renders one window of a document at a time, where
-// a window of short lines would otherwise draw a narrower container than
-// the one beside it.
+// Use it for a viewer that renders one window of a document at a time.
+// Without a pinned width, a window of short lines draws a narrower
+// container than a window of long lines.
 func WithContainerWidth(n int) Option {
 	return func(c *config) {
 		c.containerWidth = max(0, n)
 	}
 }
 
-// WithStyles is an [Option] that sets the [style.Styler], typically a
-// theme from [go.jacobcolvin.com/niceyaml/style/theme], that styles tokens,
-// gutters, and annotations. A nil s, or one holding a nil pointer such as
-// a nil [*style.Styles], selects [style.Default].
+// WithStyles is an [Option] that sets the [style.Styler] that styles
+// tokens, gutters, and annotations. The styler is typically a theme from
+// [go.jacobcolvin.com/niceyaml/style/theme]. A nil s, or one holding a nil
+// pointer such as a nil [*style.Styles], selects [style.Default].
 //
 // To draw the output as a box in the theme's colors, use [WithBox]. To
 // style the frame around the output, use [WithContainerStyle].
@@ -718,7 +741,7 @@ func WithStyles(s style.Styler) Option {
 	}
 }
 
-// WithGutter is an [Option] that sets the [Gutter] for rendering.
+// WithGutter is an [Option] that sets the [Gutter] the printer renders with.
 // By default, [DefaultGutter] renders line numbers and diff markers. A nil
 // g, or one holding a nil func or pointer such as a nil [GutterFunc],
 // selects [NoGutter].
@@ -749,10 +772,10 @@ func WithAnnotation(fn AnnotationFunc) Option {
 
 // WithWrapWidth is an [Option] that sets the width the output fits, in
 // columns. The gutter, the content, and the horizontal frame of the
-// container share it, so a row [Printer.Print] renders with its frame
-// takes no more than width columns, and the printer wraps the content of
-// a line at the columns the gutter and the frame leave. A row can still
-// run past the width, as [WithContainerWidth] describes.
+// container share the width. A row that [Printer.Print] renders, frame
+// included, thus takes at most width columns. The printer wraps the
+// content of a line at the columns the gutter and the frame leave. A row
+// can still run past the width, as [WithContainerWidth] describes.
 // [Printer.PrintError] fits its tree and each excerpt to the same width.
 //
 // A width of 0, the default, disables wrapping, and a negative width
@@ -783,42 +806,43 @@ func (p *Printer) WrapWidth() int {
 	return p.wrap
 }
 
-// ContainerWidth returns the width the container is pinned to, or 0 when
-// no width is pinned. See [WithContainerWidth].
+// ContainerWidth returns the width [WithContainerWidth] pins the container
+// to, or 0 when the printer does not pin a width.
 func (p *Printer) ContainerWidth() int {
 	return p.containerWidth
 }
 
-// MaxNumber returns the line number the gutter sizes itself for when
-// rendering view: the larger of the number [WithMaxNumber] set and the
-// largest line number in the view.
+// MaxNumber returns the line number the gutter sizes itself for when the
+// printer renders view. It is the larger of the number [WithMaxNumber] set
+// and the largest line number in the view.
 func (p *Printer) MaxNumber(view *line.View) int {
 	return max(p.maxNumber, maxNumber(view))
 }
 
-// ContainerStyle returns the [lipgloss.Style] wrapped around the whole
-// rendered output: the style of [WithContainerStyle], the box of
+// ContainerStyle returns the [lipgloss.Style] the printer wraps around the
+// whole rendered output: the style of [WithContainerStyle], the box of
 // [WithBox], or the empty style by default.
 func (p *Printer) ContainerStyle() lipgloss.Style {
 	return p.style
 }
 
-// Style retrieves the [lipgloss.Style] for the given [kind.Kind] from the
+// Style returns the [lipgloss.Style] for the given [kind.Kind] from the
 // printer's [style.Styler].
 func (p *Printer) Style(s kind.Kind) lipgloss.Style {
 	return p.styles.Style(s)
 }
 
-// Print renders each line of view as one row for each wrapped piece of its
-// content and one for each row its styled annotations take, and wraps the
-// result in the container style. [Printer.Layout] counts the same rows. To
-// print part of a document, pass the view [line.View.Slice] returns. An
-// empty view renders as the container around one empty row.
+// Print renders view and wraps the result in the container style. Each
+// line takes one row for each wrapped piece of its content and one for
+// each row its styled annotations take. [Printer.Layout] counts the same
+// rows. To print part of a document, pass the view [line.View.Slice]
+// returns. An empty view renders as the container around one empty row.
 //
-// A line the view clips, as [line.View.Clip] sets a view to, renders the
-// windows [line.View.Windows] returns, with "..." in [kind.UISeparator] in
-// place of each run of columns it leaves out. The overlays and the
-// annotations of the line follow its columns onto that row.
+// A line the view clips, as a view from [line.View.Clip] does, renders the
+// windows [line.View.Windows] returns. A "..." in [kind.UISeparator] takes
+// the place of each run of columns that the windows leave out. The
+// overlays and the annotations of the line follow its columns onto that
+// row.
 //
 // The default container leaves each row as wide as its content. A
 // container that sets any property, such as the box of [WithBox], pads
@@ -828,10 +852,10 @@ func (p *Printer) Print(view *line.View) string {
 	return p.style.Render(strings.Join(p.padRows(p.renderRows(view)), "\n"))
 }
 
-// padRows pads rows out to the container width, which pins the width of the
-// container around them. It returns rows unchanged when the container
-// width is 0, and pads a row that already reaches the width by nothing at
-// all.
+// padRows pads each of rows with [kind.Text] spaces out to the container
+// width, less the horizontal frame of the container. It returns rows
+// unchanged when the container width is 0, and it does not pad a row that
+// already reaches the width.
 func (p *Printer) padRows(rows []string) []string {
 	if p.containerWidth == 0 {
 		return rows
@@ -879,13 +903,14 @@ func (p *Printer) gutterWidth(maxNumber int) int {
 	}))
 }
 
-// renderGutter renders the gutter for ctx at width cells: the first row of
-// the text the [Gutter] renders, padded with spaces in [kind.Text] to width
-// or cut to it, so every row of a view starts its content in the same
-// column whatever the gutter renders for the row. A style with a margin,
-// vertical padding, a border, or a width can lay the text or the pad out
-// over several rows. Only the first row of each stays, so the gutter never
-// adds a row that [Printer.Layout] does not count.
+// renderGutter renders the gutter for ctx at width cells. It takes the
+// first row of the text the [Gutter] renders, and it pads that row with
+// spaces in [kind.Text] or cuts it to width. Every row of a view thus
+// starts its content in the same column, whatever the gutter renders for
+// the row. A style with a margin, vertical padding, a border, or a width
+// can spread the text or the pad over several rows. Only the first row of
+// each stays, so the gutter never adds a row to the ones [Printer.Layout]
+// counts.
 func (p *Printer) renderGutter(ctx GutterContext, width int) string {
 	// The cut drops a wide rune that straddles the width whole, so the
 	// printer pads a row that runs over as well as one that falls short.
@@ -928,9 +953,10 @@ func (p *Printer) renderRows(view *line.View) []string {
 	return rows
 }
 
-// renderLine renders line idx of view, which is ln, as rows: its content
-// wrapped to the printer width, each row with its gutter, and each of its
-// annotation rows above or below the wrapped row that holds its column.
+// renderLine renders ln, line idx of view, as rows. It wraps the content
+// to the printer width and puts the gutter in front of each row. Each
+// annotation row of the line sits above or below the wrapped row that
+// holds its column.
 func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber, gutterWidth int) []string {
 	vl := newViewLine(view, idx, ln)
 
@@ -971,11 +997,11 @@ func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber,
 
 // viewLine is one line of a view as the printer shows it: its content,
 // segments, overlays, and annotations in the columns of its row. Those
-// are the columns of the line unless the view clips it, as
-// [line.View.Clip] sets a view to. The row of a clipped line holds the
-// windows [line.View.Windows] returns, with an ellipsis in place of each
-// run of columns between and beside them, and everything the printer
-// lays out for the line counts the columns of that row.
+// are the columns of the line unless the view clips it, as a view from
+// [line.View.Clip] does. The row of a clipped line holds the windows
+// [line.View.Windows] returns, with an ellipsis in place of each run of
+// columns between and beside them. Everything the printer lays out for
+// the line counts the columns of that row.
 //
 // Create instances with [newViewLine].
 type viewLine struct {
@@ -987,7 +1013,7 @@ type viewLine struct {
 	idx  int
 }
 
-// newViewLine creates a new [viewLine] for line idx of view, which is ln.
+// newViewLine creates a new [viewLine] for ln, line idx of view.
 func newViewLine(view *line.View, idx int, ln *line.Line) viewLine {
 	vl := viewLine{view: view, ln: ln, idx: idx}
 
@@ -1067,7 +1093,8 @@ func (vl viewLine) segments() []line.Segment {
 	return out
 }
 
-// cutRunes returns the runes of s from index lo up to index hi.
+// cutRunes returns the runes of s from rune index lo, inclusive, to rune
+// index hi, exclusive.
 func cutRunes(s string, lo, hi int) string {
 	start, end := len(s), len(s)
 	n := 0
@@ -1140,22 +1167,23 @@ type runSpan struct {
 	// The offset, counted from shown, at which the shown runes of the run
 	// hold its text verbatim, or -1 when they do not. A transform that
 	// adds runes around the text, such as brackets or a prefix, keeps it
-	// verbatim, and one that rewrites the text itself does not. Matching
-	// the text as a whole keeps an added rune that equals a rune of the
-	// text from counting as that rune. When the added runes hold the text
-	// too, as "a"+s does for "a", the first occurrence counts.
+	// verbatim. A transform that rewrites the text itself does not. The
+	// printer matches the text as a whole, so an added rune that equals a
+	// rune of the text does not count as that rune. When the added runes
+	// hold the text too, as "a"+s does for "a", the first occurrence
+	// counts.
 	textAt int
 }
 
 // renderRuns renders the content of vl with its overlays, one styled run
 // per run of its segments that style the same. A deleted or inserted line
 // takes the diff style for its flag, and any other line takes the kind of
-// each segment, with the overlays that cover the segment applied over
-// that. A run never ends inside a grapheme cluster, so no escape sequence
-// splits one. A cluster that segments of different styles share renders
-// in the style of the segment holding its first rune, the one [cells.Row]
-// measures it by. It returns the rendered content and a [runSpan] for
-// each run, in order.
+// each segment. On either kind of line, the overlays that cover a segment
+// apply over that style. A run never ends inside a grapheme cluster, so
+// an escape sequence never splits one. A cluster that segments of
+// different styles share renders in the style of the segment holding its
+// first rune, the one [cells.Row] measures it by. It returns the rendered
+// content and a [runSpan] for each run, in order.
 func (p *Printer) renderRuns(vl viewLine) (string, []runSpan) {
 	var base kind.Kind
 
@@ -1285,7 +1313,7 @@ func (p *Printer) annotationGutters(rows []string, gutterCtx GutterContext, gutt
 }
 
 // rowsAt returns the rows blocks holds for wrapped row j of a line, or
-// nil when it holds none.
+// nil when blocks does not hold an entry for j.
 func rowsAt(blocks [][]string, j int) []string {
 	if j < len(blocks) {
 		return blocks[j]
@@ -1295,21 +1323,23 @@ func rowsAt(blocks [][]string, j int) []string {
 }
 
 // minAnnotationWidth is the fewest cells the text of an annotation wraps
-// to once it moves off the marker row, when the printer width has room
+// to after it moves off the marker row, when the printer width has room
 // for them.
 const minAnnotationWidth = 20
 
 // annotationRows renders the annotations of vl at the given placement as
-// terminal rows without the gutter. W holds the columns of the content
-// each wrapped row of the line shows, and the result holds a block of
-// rows for each wrapped row:
-// the rows of each [AnnotationRow] whose column that wrapped row holds.
+// terminal rows without the gutter. The wrapped line w holds the columns
+// of the content each wrapped row of the line shows. The result holds a
+// block of rows for each wrapped row, with the rows of each
+// [AnnotationRow] whose column that wrapped row holds. It returns nil when
+// the line does not have annotations at the placement.
+//
 // Within a block, the kinds above a line come in [line.Annotations.ByKind]
 // order. Below a line, a [kind.TextError] group comes first, then a
 // [kind.TextWarn] group, then the other kinds in [line.Annotations.ByKind]
 // order. Within each kind, the rows the [AnnotationFunc] returns come in
 // order, each wrapped to the printer width and styled in the style of its
-// kind. It returns nil when the line has no annotations at the placement.
+// kind.
 func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Placement, w wrappedLine) [][]string {
 	anns := vl.annotations().Filter(placement)
 	if len(anns) == 0 {
@@ -1398,9 +1428,9 @@ func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Pl
 	return out
 }
 
-// renderAnnotationRow lays out row, an [AnnotationRow], as the terminal
-// rows it takes once the printer pads it by pad cells, wraps it, and
-// styles it with kindStyle, without the gutter.
+// renderAnnotationRow renders row, an [AnnotationRow], as terminal rows
+// without the gutter. It pads the row by pad cells, wraps it, and styles
+// it with kindStyle.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
 func (p *Printer) renderAnnotationRow(row AnnotationRow, kindStyle lipgloss.Style, pad, gutterWidth int) []string {
@@ -1465,11 +1495,11 @@ func (p *Printer) renderAnnotationRow(row AnnotationRow, kindStyle lipgloss.Styl
 	return rows
 }
 
-// widestWord returns the width in cells of the widest word of text, where
-// words run between newlines, the spaces the wrap breaks at, which
-// [isBreakSpace] reports, and [breakpoints]. A word includes the '/' or
-// '-' that ends it, since the wrap keeps that character with the word
-// before it.
+// widestWord returns the width in cells of the widest word of text. Words
+// run between newlines, the spaces the wrap breaks at, and [breakpoints].
+// [isBreakSpace] reports the spaces the wrap breaks at. A word includes
+// the '/' or '-' that ends it, because the wrap keeps that character with
+// the word before it.
 func widestWord(text string) int {
 	widest := 0
 
@@ -1488,12 +1518,12 @@ func widestWord(text string) int {
 	return widest
 }
 
-// blendKey returns the cache key of the effective style of seg: its kind
-// followed by each overlay that covers it, in order, marked by whether it
-// blends with or replaces the style underneath. Two segments with the
-// same key render with the same style. It quotes each name, so a name
-// that contains a marker cannot collide with a different overlay
-// sequence.
+// blendKey returns the cache key of the effective style of seg. The key
+// holds the kind of seg, then each overlay that covers seg, in order. A
+// marker in front of each overlay tells whether it blends with or
+// replaces the style underneath. Two segments with the same key render
+// with the same style. The key quotes each name, so a name that contains
+// a marker cannot collide with a different overlay sequence.
 func blendKey(seg line.Segment) string {
 	var sb strings.Builder
 
@@ -1513,9 +1543,9 @@ func blendKey(seg line.Segment) string {
 }
 
 // blended returns the style for key, which [blendKey] built from seg. It
-// computes the style on the first request and serves the cache after
-// that. The overlays apply in order. A blending overlay mixes with the
-// result so far, and any other replaces it.
+// computes the style on the first request for key and returns the cached
+// style after that. The overlays apply in order. A blending overlay mixes
+// with the result so far, and any other replaces it.
 func (p *Printer) blended(key string, seg line.Segment) lipgloss.Style {
 	if st, ok := p.blends.get(key); ok {
 		return st
@@ -1536,7 +1566,8 @@ func (p *Printer) blended(key string, seg line.Segment) lipgloss.Style {
 
 // blendCache holds the styles a [Printer] blends for overlays, keyed by
 // [blendKey]. Copies of a Printer share one cache until [WithStyles] gives
-// a copy its own, so it is safe for concurrent use.
+// a copy its own. The cache is safe for concurrent use, so copies that
+// share it can render at the same time.
 type blendCache struct {
 	styles map[string]lipgloss.Style
 	mu     sync.RWMutex
@@ -1573,9 +1604,7 @@ func (c *blendCache) put(key string, st lipgloss.Style) lipgloss.Style {
 // container, after the horizontal frame of the container and a gutter
 // gutterWidth wide. A positive printer width always wraps, so the result
 // is at least one column even when the frame and the gutter alone fill
-// the width.
-//
-// Returns 0 when the printer does not wrap.
+// the width. It returns 0 when the printer does not wrap.
 func (p *Printer) contentWidth(gutterWidth int) int {
 	if p.wrap <= 0 {
 		return 0
@@ -1585,7 +1614,7 @@ func (p *Printer) contentWidth(gutterWidth int) int {
 }
 
 // textWidth returns the width left for text outside the container, such
-// as the tree of an error, after indent columns in front of it. As
+// as the tree of an error, after indent columns in front of it. Like
 // [Printer.contentWidth], it is at least one column when the printer
 // wraps and 0 when it does not.
 func (p *Printer) textWidth(indent int) int {
@@ -1602,8 +1631,8 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 	return p.wrapTo(content, p.contentWidth(gutterWidth))
 }
 
-// wrapTo splits content into rows of at most cw cells, or at newlines
-// alone when cw is 0.
+// wrapTo splits content into rows of at most cw cells, or only at
+// newlines when cw is 0 or less.
 func (p *Printer) wrapTo(content string, cw int) []string {
 	if cw <= 0 {
 		// A newline in the content is a row of its own with or without
@@ -1620,8 +1649,8 @@ func (p *Printer) wrapTo(content string, cw int) []string {
 	return out
 }
 
-// wrapText wraps text, which holds no newline, to rows of at most cw
-// cells. It keeps every grapheme cluster whole on one row, and a cluster
+// wrapText wraps text, a line without a newline, to rows of at most cw
+// cells. It keeps every grapheme cluster whole on one row. A cluster
 // wider than cw takes a row of its own and runs past the width.
 func wrapText(text string, cw int) []string {
 	rows := wrapRows(text, cw, wrapOnCharacters)
@@ -1702,9 +1731,9 @@ func wrapText(text string, cw int) []string {
 }
 
 // cutText returns row with its text cut to the first n bytes. It counts
-// bytes of text, so a keycap, which [ansi.Truncate] counts as one cell
-// for its ASCII base, cannot move the cut. Every escape sequence stays,
-// so a style the row opens still closes.
+// bytes of text rather than cells, so a keycap cannot move the cut.
+// [ansi.Truncate] counts a keycap as one cell for its ASCII base. Every
+// escape sequence stays, so a style the row opens still closes.
 func cutText(row string, n int) string {
 	var b strings.Builder
 
@@ -1730,12 +1759,12 @@ func cutText(row string, n int) string {
 	return b.String()
 }
 
-// hardwrap breaks row before each grapheme cluster that would take it past
-// cw cells, and returns the rows joined by newlines. It measures each
-// cluster as [lipgloss.Width] does, so a keycap counts its two cells,
-// where [ansi.Hardwrap] counts one for its ASCII base. A cluster wider
-// than cw stays whole on a row of its own. The escape sequences stay
-// where they are, so a row the cut ends may leave a style open.
+// hardwrap breaks row before each grapheme cluster that takes the row
+// past cw cells, and returns the rows joined by newlines. It measures each
+// cluster as [lipgloss.Width] does, so a keycap counts its two cells, but
+// [ansi.Hardwrap] counts one for its ASCII base. A cluster wider than cw
+// stays whole on a row of its own. The escape sequences stay where they
+// are, so a row that a break ends might leave a style open.
 func hardwrap(row string, cw int) string {
 	var b strings.Builder
 
@@ -1767,18 +1796,20 @@ func hardwrap(row string, cw int) string {
 	return b.String()
 }
 
-// wrapRows wraps text to rows of at most cw cells with [lipgloss.Wrap],
-// which breaks at the characters in breaks, and returns the rows. The
-// wrap takes each ASCII byte as a cluster of its own, so it can start a
-// row with the runes that continue the cluster the row before ends with.
-// The combining accent of an "e" and the rest of a keycap are two such
-// runs. Those runes move back onto the last row with text on it, which keeps the
-// cluster whole even when the wrap puts empty rows between them, and a
-// row they empty goes. They move only when that row ends right where
-// theirs begins in text. When the wrap drops a space between the two,
-// as it does at a break, the runes continue the space rather than the
-// row's last cluster, so they stay at the start of their row. A newline
-// in text, such as one [hardwrap] adds, ends a row and drops nothing.
+// wrapRows wraps text to rows of at most cw cells with [lipgloss.Wrap] and
+// returns the rows. The wrap breaks at the characters in breaks. It takes
+// each ASCII byte as a cluster of its own. It can thus start a row with
+// the runes that continue the cluster that ends the row before. The
+// combining accent of an "e" and the rest of a keycap are two such runs.
+//
+// Those runes move back onto the last row with text on it. The move
+// keeps the cluster whole even when the wrap puts empty rows between
+// them, and wrapRows drops a row that the move leaves empty. The runes
+// move only when that row ends where theirs begins in text. When the wrap
+// drops a space between the two rows, as it does at a break, the runes
+// continue the space rather than the last cluster of the row. They then
+// stay at the start of their row. A newline in text, such as one
+// [hardwrap] adds, ends a row and does not drop anything.
 func wrapRows(text string, cw int, breaks string) []string {
 	rows := strings.Split(lipgloss.Wrap(text, cw, breaks), "\n")
 
@@ -1815,12 +1846,12 @@ func wrapRows(text string, cw int, breaks string) []string {
 }
 
 // rejoinCluster moves the runes at the start of row that continue the
-// last grapheme cluster of prev onto the end of that cluster, and reports
+// last grapheme cluster of prev onto the end of that cluster. It reports
 // whether it moved any. The runes go ahead of any escape sequences that
-// close prev, so no escape sequence splits the cluster, and the cluster
-// measures as the terminal draws it. The escape sequences among those
-// runes stay at the start of row, so the style they open still covers
-// the rest of row.
+// close prev, so an escape sequence never splits the cluster. The cluster
+// thus measures as the terminal draws it. The escape sequences among
+// those runes stay at the start of row, so the style they open still
+// covers the rest of row.
 func rejoinCluster(prev, row string) (string, string, bool) {
 	plainPrev, plainRow := ansi.Strip(prev), ansi.Strip(row)
 	if plainPrev == "" || plainRow == "" {
@@ -1859,8 +1890,8 @@ func rejoinCluster(prev, row string) (string, string, bool) {
 	return prev[:end] + runes.String() + prev[end:], escapes.String() + row[i:], true
 }
 
-// textEnd returns the byte offset in row just past its last byte of text,
-// so that only escape sequences follow it.
+// textEnd returns the byte offset in row after its last byte of text, so
+// that only escape sequences follow it.
 func textEnd(row string) int {
 	end := 0
 

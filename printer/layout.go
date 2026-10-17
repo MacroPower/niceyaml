@@ -16,39 +16,42 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// Layout is the row structure of a view as [Printer.Print] renders it: how
-// many rows each line takes once its content wraps and its annotations take
-// rows of their own, which row a position in the view lands on, and how
-// wide the rows are. A viewer that scrolls by rendered row maps rows to
-// lines and back through it, and one that scrolls horizontally reads the
-// width of the widest row. A viewer that takes a pointer maps the cell
-// under it back to a position.
+// Layout is the row structure of a view as [Printer.Print] renders it. It
+// tells how many rows each line takes after its content wraps and its
+// annotations take rows of their own. It also tells which row a position
+// in the view lands on, and how wide the rows are. A viewer that scrolls
+// by rendered row maps rows to lines and back through it. A viewer that
+// scrolls horizontally reads the width of the widest row. A viewer that
+// takes a pointer maps the cell under it back to a position.
 //
-// A Layout styles and wraps each line as [Printer.Print] does, since a
-// style may transform the text it styles and change its width. It
-// assembles no output, so one Layout replaces a render for every question
+// A Layout styles and wraps each line as [Printer.Print] does, because a
+// style can transform the text it styles and change its width. It does
+// not assemble output, so one Layout replaces a render for every question
 // about rows. It stays valid until the view or the printer changes.
 //
 // The layout speaks in the coordinates of the view. [Layout.LineRows],
 // [Layout.LineWidth], [Layout.LineStart], and [Layout.LineAt] take and
-// return the index of a line in the content of the view, the one every
-// [line.View] method takes, so a viewer that finds the line at a row
-// reaches its decoration through the view with the same index.
+// return the index of a line in the content of the view. Every
+// [line.View] method takes that same index, so a viewer that finds the
+// line at a row reaches its decoration through the view with it.
 // [Layout.RowOf] and [Layout.CellOf] take a position in the content, as a
-// search yields one, and [Layout.PositionAt] returns one. On a line the
-// view clips, as [line.View.Clip] sets a view to, a column the row leaves
-// out takes the row and the cell of the "..." that stands for it, and no
-// cell gives that column back.
-// A line the view does not hold takes no rows and starts nowhere. Rows
-// count from 0 at the first row of the first line and leave the container
-// style out. An empty view has no rows, though [Printer.Print] draws one
-// empty row for it to carry the container.
+// search yields one, and [Layout.PositionAt] returns one.
+//
+// On a line the view clips, as a view from [line.View.Clip] does, a
+// column the row leaves out takes the row and the cell of the "..." that
+// stands for it. [Layout.PositionAt] does not return that column for any
+// cell.
+//
+// A line the view does not hold takes zero rows and does not start on any
+// row. Rows count from 0 at the first row of the first line and leave the
+// container style out. An empty view takes zero rows, but [Printer.Print]
+// draws one empty row for it to carry the container.
 //
 // Create instances with [Printer.Layout].
 type Layout struct {
 	lines       []lineLayout
 	indices     []int // indices[k] is the index in the view's content of the k-th line, ascending.
-	starts      []int // starts[k] is the first row of the k-th line; starts[len(lines)] is the row count.
+	starts      []int // starts[k] is the first row of the k-th line, and starts[len(lines)] is the row count.
 	width       int
 	gutterWidth int
 }
@@ -59,7 +62,8 @@ type Layout struct {
 // rows the line takes, annotation rows included, and the width of the
 // widest of them. Its shown text maps a column of the content to the cell
 // it takes on its row. For a line the view clips, the content is the text
-// of its row, and clip maps a column of the line to it and back.
+// of its row. Its clip maps a column of the line to a column of the row
+// and back.
 type lineLayout struct {
 	clip    *clip.Map
 	cols    []int
@@ -81,7 +85,8 @@ func (ll lineLayout) col(col int) int {
 
 // lineCol returns the column of the line that col, a column of the
 // content of the row, shows, and true. It reports false for a column of
-// a "..." on a line the view clips, which shows no column of the line.
+// a "..." on a line the view clips, because a "..." does not show a
+// column of the line.
 func (ll lineLayout) lineCol(col int) (int, bool) {
 	if ll.clip == nil {
 		return col, true
@@ -92,8 +97,8 @@ func (ll lineLayout) lineCol(col int) (int, bool) {
 
 // shownLine is the shown text of one line, the rendered line without its
 // escape sequences, with the runs it renders in. It holds the offset in
-// the text at which each wrapped row begins, and the offset just past the
-// last rune each row shows.
+// the text at which each wrapped row begins, and the offset after the last
+// rune each row shows.
 type shownLine struct {
 	text       string
 	runs       []runSpan
@@ -102,7 +107,7 @@ type shownLine struct {
 	contentLen int
 }
 
-// Layout computes the [Layout] of view as [Printer.Print] would render it.
+// Layout computes the [Layout] of view as [Printer.Print] renders it.
 func (p *Printer) Layout(view *line.View) Layout {
 	maxNumber := p.MaxNumber(view)
 	gutterWidth := p.gutterWidth(maxNumber)
@@ -125,8 +130,8 @@ func (p *Printer) Layout(view *line.View) Layout {
 	return l
 }
 
-// layoutLine computes the row structure of line idx of view, which is ln,
-// as [Printer.renderLine] writes its rows.
+// layoutLine computes the row structure of ln, line idx of view, as
+// [Printer.renderLine] writes its rows.
 func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidth int) lineLayout {
 	vl := newViewLine(view, idx, ln)
 
@@ -161,7 +166,7 @@ func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidt
 type wrappedLine struct {
 	pieces []string  // The wrapped rows of the rendered content.
 	starts []int     // The column of the content at which each piece begins.
-	ends   []int     // The column of the content just past the last rune each piece shows.
+	ends   []int     // The column of the content after the last rune each piece shows.
 	shown  shownLine // The shown text of the line.
 }
 
@@ -176,10 +181,10 @@ func (p *Printer) wrapLine(vl viewLine, gutterWidth int) wrappedLine {
 	return mapRows(vl.width(), rendered, runs, p.wrapContent(rendered, gutterWidth))
 }
 
-// mapRows returns pieces, the rows the wrap cut from rendered, the
-// rendered content of a line that holds contentLen columns, with the
-// columns of the content each piece shows. Runs holds the runs that style
-// rendered.
+// mapRows returns pieces with the columns of the content each piece
+// shows. The pieces are the rows the wrap cut from rendered, the rendered
+// content of a line that holds contentLen columns. The slice runs holds
+// the runs that style rendered.
 func mapRows(contentLen int, rendered string, runs []runSpan, pieces []string) wrappedLine {
 	// The wrap cuts the pieces from the shown text of the line, so each
 	// piece matches the shown text at the offset where it begins. The
@@ -218,18 +223,18 @@ func mapRows(contentLen int, rendered string, runs []runSpan, pieces []string) w
 
 // shownOffset returns the offset in shown, the shown text of a line, at
 // which col, a column of the content, begins. It inverts [sourceCol] with
-// the same runs and contentLen, so it returns the first offset that
+// the same runs and contentLen. It thus returns the first offset that
 // sourceCol maps to col or past it. A column at or past the end of the
 // content maps to the end of shown.
 //
 // In a run that shows as many runes as it covers, the offset moves rune
 // for rune. The first column of any other run begins where the run
-// begins, so it takes the runes a transform adds before the text of the
-// run, such as an opening bracket. A later column of a run that shows
-// its text verbatim begins at its rune within that text, which starts
-// at the textAt field of [runSpan]. In a run whose transform rewrites
-// the text, the shown runes match against the text of the run as
-// sourceCol matches them.
+// begins. It thus takes the runes a transform adds before the text of the
+// run, such as an opening bracket. A later column of a run that shows its
+// text verbatim begins at its rune within that text. The textAt field of
+// [runSpan] holds the offset where that text starts. In a run whose
+// transform rewrites the text, the shown runes match against the text of
+// the run as sourceCol matches them.
 func shownOffset(runs []runSpan, shown []rune, col, contentLen int) int {
 	switch {
 	case col <= 0 || len(runs) == 0:
@@ -273,20 +278,21 @@ func shownOffset(runs []runSpan, shown []rune, col, contentLen int) int {
 }
 
 // sourceCol returns the column of the content at which offset in shown,
-// the shown text of a line, falls. Runs holds the runs the line renders
-// in, and contentLen is the number of columns of the content. Offset 0 is
-// column 0, and an offset at or past the end of shown is contentLen.
+// the shown text of a line, falls. The slice runs holds the runs the line
+// renders in, and contentLen is the number of columns of the content.
+// Offset 0 is column 0, and an offset at or past the end of shown is
+// contentLen.
 //
 // The run that shows the rune at offset decides the column, and the
 // column stays within the run. A run that shows as many runes as it
 // covers maps rune for rune, as a style that only colors its text or
 // changes its case does. A run that shows its text verbatim among runes
 // a transform adds maps rune for rune from the textAt field of
-// [runSpan], where the text starts. An added rune before the text takes
-// the first column of the run, and one after it takes the column past
-// the run. In a run whose transform rewrites the text, the shown runes
-// before offset match against the text of the run as [rowBounds]
-// matches pieces.
+// [runSpan]. That field holds the offset where the text starts. An added
+// rune before the text takes the first column of the run, and one after
+// it takes the column past the run. In a run whose transform rewrites the
+// text, the shown runes before offset match against the text of the run
+// as [rowBounds] matches pieces.
 func sourceCol(runs []runSpan, shown []rune, offset, contentLen int) int {
 	switch {
 	case offset <= 0:
@@ -325,8 +331,8 @@ func sourceCol(runs []runSpan, shown []rune, offset, contentLen int) int {
 // shownCol returns the column of the content that the rune at offset in
 // shown, the shown text of a line, shows. It is the column [sourceCol]
 // returns, kept inside the run that shows the rune. A rune a transform
-// adds after the text of a run thus takes the last column of the run,
-// where sourceCol gives it the column past the run.
+// adds after the text of a run thus takes the last column of the run.
+// [sourceCol] gives such a rune the column past the run.
 func shownCol(runs []runSpan, shown []rune, offset, contentLen int) int {
 	col := sourceCol(runs, shown, offset, contentLen)
 	if len(runs) == 0 {
@@ -349,17 +355,20 @@ func isBreakSpace(r rune) bool {
 }
 
 // rowBounds returns the rune offset in text at which each piece of its
-// wrapped form begins, and the offset just past the last rune of text
-// each piece shows. It matches the runes of each piece against text
-// in order, and skips the runes of text the wrapper drops. The wrapper
-// drops every Unicode space but [nbsp] at a break and at the end of the
-// text. From a grapheme cluster that starts with such a space outside
-// ASCII, it keeps at most the space and drops the runes after it
+// wrapped form begins. It also returns the offset after the last rune of
+// text that each piece shows. It matches the runes of each piece against
+// text in order, and skips the runes of text the wrapper drops.
+//
+// The wrapper drops every Unicode space but [nbsp] at a break and at the
+// end of the text. From a grapheme cluster that starts with such a space
+// outside ASCII, it keeps at most the space and drops the runes after it
 // wherever the cluster falls. The first piece begins after any leading
-// spaces the wrapper drops, which it does when the first word does not
-// fit beside them. The caller escapes the text, so no tab reaches it.
-// An excerpt shows a tab as its control picture, and the text of an
-// error shows it as four spaces.
+// spaces the wrapper drops. The wrapper drops them when the first word
+// does not fit beside them.
+//
+// The caller escapes the text, so a tab never reaches rowBounds. An
+// excerpt shows a tab as its control picture, and the text of an error
+// shows it as four spaces.
 func rowBounds(text string, pieces []string) ([]int, []int) {
 	runes := []rune(text)
 	tails := spaceTails(text, len(runes))
@@ -392,11 +401,11 @@ func rowBounds(text string, pieces []string) ([]int, []int) {
 	return starts, ends
 }
 
-// spaceTails marks the runes of text, which holds n runes, that follow the
-// first rune of a grapheme cluster starting with a break space outside
-// ASCII. The wrapper segments text into clusters wherever a rune outside
-// ASCII starts one and takes each ASCII byte alone, so a mark after an
-// ASCII space stays.
+// spaceTails marks the runes of text that follow the first rune of a
+// grapheme cluster starting with a break space outside ASCII. The text
+// holds n runes. The wrapper segments text into clusters wherever a rune
+// outside ASCII starts one, and it takes each ASCII byte alone. A rune
+// after an ASCII space, such as a combining mark, thus stays.
 func spaceTails(text string, n int) []bool {
 	tails := make([]bool, n)
 	col := 0
@@ -425,9 +434,9 @@ func spaceTails(text string, n int) []bool {
 }
 
 // skipDropped returns the index of the first rune of runes at or after
-// next that r can match. It skips every rune tails marks, which the
-// wrapper always drops, and every break space that is not r. A nil tails
-// marks no rune.
+// next that r can match. It skips every break space other than r, and
+// every rune that tails marks. The wrapper always drops the runes that
+// tails marks. A nil tails does not mark any rune.
 func skipDropped(runes []rune, tails []bool, next int, r rune) int {
 	for next < len(runes) {
 		tail := next < len(tails) && tails[next]
@@ -442,8 +451,8 @@ func skipDropped(runes []rune, tails []bool, next int, r rune) int {
 }
 
 // rowIndex returns the index of the row that holds col, given the column
-// at which each row begins: the last row that begins at or before col, or
-// the first row when col comes before them all.
+// at which each row begins. The row is the last one that begins at or
+// before col, or the first row when col comes before them all.
 func rowIndex(starts []int, col int) int {
 	// Search finds the first row that begins past col. It compares with >
 	// rather than searching for col+1, which overflows at [math.MaxInt].
@@ -459,21 +468,22 @@ func (l Layout) Rows() int {
 	return l.starts[len(l.starts)-1]
 }
 
-// Count returns the number of lines the layout holds, which is
+// Count returns the number of lines the layout holds, the
 // [line.View.Count] of the view it came from.
 func (l Layout) Count() int {
 	return len(l.lines)
 }
 
-// position returns the position among the lines the layout holds of line
-// i of the content, and whether the layout holds it.
+// position returns the position of line i of the content among the lines
+// the layout holds, and whether the layout holds that line.
 func (l Layout) position(i int) (int, bool) {
 	return slices.BinarySearch(l.indices, i)
 }
 
-// LineRows returns the number of rows line i of the content takes: one
-// for each wrapped piece of its content and one for each row its styled
-// annotations take. A line the layout does not hold takes none.
+// LineRows returns the number of rows line i of the content takes. The
+// line takes one row for each wrapped piece of its content and one for
+// each row its styled annotations take. A line the layout does not hold
+// takes zero rows.
 func (l Layout) LineRows(i int) int {
 	k, ok := l.position(i)
 	if !ok {
@@ -495,9 +505,9 @@ func (l Layout) LineStart(i int) int {
 }
 
 // LineAt returns the index in the content of the line that holds row. A
-// row before the first belongs to the first line and a row past the last
-// to the last, so a scroll offset always names a line. Returns -1 when the
-// layout holds no lines.
+// row before the first belongs to the first line, and a row past the last
+// belongs to the last line. A scroll offset thus always names a line.
+// LineAt returns -1 when the layout does not hold any lines.
 func (l Layout) LineAt(row int) int {
 	n := len(l.lines)
 	if n == 0 {
@@ -512,13 +522,15 @@ func (l Layout) LineAt(row int) int {
 
 // RowOf returns the row that holds column pos.Col of line pos.Line of the
 // content: the content row the column wraps onto. The line's annotation
-// rows sit beside the wrapped rows that hold their columns, so the rows
-// before it include those of the earlier wrapped rows and those above
-// it. A column in the spaces the wrapper dropped at a break belongs to
-// the row before the break, and one past the end of the content to the
-// last row. A column a clipped line leaves out belongs to the row that
-// holds the "..." in its place. Returns -1 when the layout does not hold
-// the line.
+// rows sit beside the wrapped rows that hold their columns. The rows
+// before the content row thus include the earlier wrapped rows with their
+// annotation rows, and the annotation rows above the content row.
+//
+// A column in the spaces the wrapper dropped at a break belongs to the
+// row before the break. A column past the end of the content belongs to
+// the last row. A column a clipped line leaves out belongs to the row
+// that holds the "..." in its place. RowOf returns -1 when the layout
+// does not hold the line.
 func (l Layout) RowOf(pos position.Position) int {
 	k, ok := l.position(pos.Line)
 	if !ok {
@@ -531,19 +543,21 @@ func (l Layout) RowOf(pos position.Position) int {
 }
 
 // CellOf returns the cell that column pos.Col of line pos.Line of the
-// content takes on the row [Layout.RowOf] puts it on, counted from the
-// start of that row with the gutter left out. A viewer that scrolls
-// horizontally adds [Layout.GutterWidth] to find the cell of a column.
+// content takes on the row that [Layout.RowOf] puts it on. The cell
+// counts from the start of that row with the gutter left out. A viewer
+// that scrolls horizontally adds [Layout.GutterWidth] to find the cell of
+// a column. CellOf returns -1 when the layout does not hold the line.
+//
 // The cell comes from the shown text, so it counts the cells a style's
-// transform adds or removes before the column. The first column of a
-// run takes the cell where the run begins, so it covers any rune a
-// transform adds before the text of the run, such as an opening
-// bracket. A column inside a grapheme cluster takes the cell where its
-// cluster starts. A column past the end of the content takes one cell
-// for every column past it, as [ColWidth] counts them. On a clipped
-// line, the cell counts the row the line renders as, and a column the
-// row leaves out takes the cell where the "..." in its place begins.
-// Returns -1 when the layout does not hold the line.
+// transform adds or removes before the column. The first column of a run
+// takes the cell where the run begins. The column thus covers any rune a
+// transform adds before the text of the run, such as an opening bracket.
+//
+// A column inside a grapheme cluster takes the cell where its cluster
+// starts. A column past the end of the content takes one cell for every
+// column past it, as [ColWidth] counts them. On a clipped line, the cell
+// counts the row the line renders as. A column the row leaves out takes
+// the cell where the "..." in its place begins.
 func (l Layout) CellOf(pos position.Position) int {
 	k, ok := l.position(pos.Line)
 	if !ok {
@@ -572,26 +586,26 @@ func (l Layout) CellOf(pos position.Position) int {
 // cell of row shows, and true. It inverts [Layout.LineAt],
 // [Layout.RowOf], and [Layout.CellOf], so a viewer finds the content
 // under a pointer with it. The cell counts from the start of the row with
-// the gutter left out, as [Layout.CellOf] counts it, so a viewer
+// the gutter left out, as [Layout.CellOf] counts it. A viewer thus
 // subtracts [Layout.GutterWidth] from a cell of the rendered row.
 //
 // Any cell of a grapheme cluster gives the column where the cluster
-// starts, so the second cell of a wide rune gives the column of that
-// rune. A style's transform adds runes around the run it styles, such as
-// brackets. A cell that shows one gives a column of that run: the first
-// for a rune before the text of the run, and the last for a rune after
-// it.
+// starts. The second cell of a wide rune thus gives the column of that
+// rune. A style's transform can add runes around the run it styles, such
+// as brackets. A cell that shows such a rune gives a column of that run.
+// A rune before the text of the run gives its first column, and a rune
+// after the text gives its last.
 //
-// PositionAt reports false where a row shows no content, which is on a
-// row outside the layout, on an annotation row, and on a cell past the
-// last rune the row shows. A negative cell lies in the gutter and reports
-// false too. The line ending, the spaces the wrapper dropped at a break,
-// and a rune of no width, such as a zero-width space, take no cell, so no
-// cell gives their columns.
+// PositionAt reports false for a cell that does not show content. Such a
+// cell lies on a row outside the layout, on an annotation row, or past
+// the last rune the row shows. A negative cell lies in the gutter and
+// reports false too. The line ending, the spaces the wrapper dropped at a
+// break, and every rune of zero width, such as a zero-width space, do not
+// take a cell. PositionAt thus never returns their columns.
 //
 // On a line the view clips, a cell gives the column of the line it
-// shows, whatever the row leaves out before it. A cell of a "..." shows
-// no column of the line, so PositionAt reports false for it.
+// shows, whatever the row leaves out before it. A cell of a "..." does
+// not show a column of the line, so PositionAt reports false for it.
 // [line.View.Windows] returns the columns the row keeps.
 func (l Layout) PositionAt(row, cell int) (position.Position, bool) {
 	if row < 0 || row >= l.Rows() || cell < 0 {
@@ -638,8 +652,8 @@ func (l Layout) Width() int {
 
 // LineWidth returns the width in cells of the widest row of line i of the
 // content, annotation rows and gutter included, before the container style
-// applies. [Layout.Width] is the largest of these. A line the layout does
-// not hold has width 0.
+// applies. [Layout.Width] is the largest of these widths. A line the
+// layout does not hold has width 0.
 func (l Layout) LineWidth(i int) int {
 	k, ok := l.position(i)
 	if !ok {
@@ -649,7 +663,7 @@ func (l Layout) LineWidth(i int) int {
 	return l.lines[k].width
 }
 
-// GutterWidth returns the width in cells of the gutter on every row, so a
+// GutterWidth returns the width in cells of the gutter on every row. A
 // viewer that scrolls horizontally subtracts it from [Layout.Width] to
 // find the width of the content.
 func (l Layout) GutterWidth() int {
