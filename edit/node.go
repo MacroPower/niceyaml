@@ -15,14 +15,15 @@ import (
 // mapping, or an item of a sequence. It reads the value there and edits
 // the document. Each edit keeps the path of the node up to date. A node on
 // a value that an edit renamed or moved thus names its new place. Each
-// edit of a node fails after an edit took its place away, by a removal of
-// the place or a replacement of a value above it.
+// edit of a node fails after an edit removed its place, either directly or
+// by replacing a value above it.
 //
-// A method that cannot make its edit returns an error that names the
+// When a method cannot make its edit, it returns an error that names the
 // problem. [Doc.Apply] then fails with that error, even when the [Func]
-// goes on and returns nil. A node takes edits until the Apply that gave it
-// returns. After that, each method that edits or decodes returns an error,
-// and Exists, Kind, and Text report no value.
+// continues and returns nil. A node takes edits until the Apply that gave
+// it returns. After that, each method that edits or decodes returns an
+// error. Exists, Kind, and Text then answer as they do for a place that
+// does not hold a value.
 //
 // Receive instances as the argument of a [Func], or from [Node.At].
 type Node struct {
@@ -31,14 +32,14 @@ type Node struct {
 	// decodes returns.
 	err  error
 	path paths.Path
-	// An edit took the place of the node away.
+	// Whether an edit removed the place of the node.
 	gone bool
-	// The Apply that gave the node returned.
+	// Whether the Apply that gave the node returned.
 	ended bool
 }
 
 // newNode returns a node on the place at path, a `$` path of names and
-// indexes, which might hold no value.
+// indexes, which might not hold a value.
 func (d *Doc) newNode(path paths.Path) *Node {
 	n := &Node{d: d, path: path}
 	d.nodes = append(d.nodes, n)
@@ -110,9 +111,10 @@ func (d *Doc) isProtected(path paths.Path) bool {
 	})
 }
 
-// protection returns why no edit changes the value at path, as a message
-// words it after "which", or "" for a value that edits can change. Such a
-// value is a protected value, lies inside one, or holds one.
+// protection returns the reason that edits cannot change the value at
+// path, in the words that a message uses after "which". It returns "" for
+// a value that edits can change. Edits cannot change a protected value, a
+// value inside one, or a value that holds one.
 func (d *Doc) protection(path paths.Path) string {
 	switch {
 	case slices.ContainsFunc(d.cfg.protected, path.Equal):
@@ -186,7 +188,7 @@ func (n *Node) Exists() bool {
 }
 
 // Kind returns the kind of the value, or [niceyaml.NodeNone] when the
-// place holds none.
+// place does not hold a value.
 func (n *Node) Kind() niceyaml.NodeKind {
 	v, err := n.value()
 	if err != nil {
@@ -197,7 +199,8 @@ func (n *Node) Kind() niceyaml.NodeKind {
 }
 
 // Text returns the text of a scalar as the document writes it, without its
-// quotes, or "" for a mapping, a sequence, or a place that holds no value.
+// quotes, or "" for a mapping, a sequence, or a place that does not hold a
+// value.
 func (n *Node) Text() string {
 	if !n.readable() {
 		return ""
@@ -225,8 +228,8 @@ func (n *Node) Text() string {
 // reference documents and its unmarshalers. The unmarshalers of
 // [WithUnmarshalers] apply ahead of those of the Source. A [Func] should
 // pass the ctx it got, so the warnings of the decode reach the
-// [niceyaml.Warnings] on the context of [Doc.Apply]. Decode fails on a place that holds no
-// value.
+// [niceyaml.Warnings] on the context of [Doc.Apply]. Decode fails on a
+// place that does not hold a value.
 func (n *Node) Decode[T any](ctx context.Context, opts ...niceyaml.DecodeOption) (T, error) {
 	var zero T
 
@@ -262,10 +265,10 @@ func (n *Node) value() (*niceyaml.Node, error) {
 	return n.d.node.At(n.path) //nolint:wrapcheck // The Node binds the error.
 }
 
-// At returns a node on the place at path, which might hold no value. A `$`
-// path reads from the root, and an `@` path reads from n. Exists reports
-// false where the place holds no value, and every method but Set changes
-// nothing there.
+// At returns a node on the place at path, which might not hold a value. A
+// `$` path reads from the root, and an `@` path reads from n. Exists
+// reports false when the place does not hold a value, and only Set changes
+// such a place.
 //
 // At fails the Apply on a path that selects more than one value, holds a
 // `~`, or goes through an alias that does not resolve. Each method of its
@@ -347,7 +350,8 @@ func (d *Doc) fail(n *Node, format string, args ...any) error {
 	return err
 }
 
-// record keeps err as the problem of the call, unless the call has one.
+// record keeps err as the problem of the call, unless the call already has
+// one.
 func (d *Doc) record(err error) {
 	if d.callErr == nil {
 		d.callErr = err
@@ -359,7 +363,8 @@ func (d *Doc) moved(from, to paths.Path) {
 	repoint(d.nodesAt(from), from, to)
 }
 
-// nodesAt returns the nodes at path and below it that no edit took away.
+// nodesAt returns the nodes at path and below it, except each node whose
+// place an edit removed.
 func (d *Doc) nodesAt(path paths.Path) []*Node {
 	var out []*Node
 
@@ -383,7 +388,7 @@ func repoint(nodes []*Node, from, to paths.Path) {
 }
 
 // took marks each node below path as gone, and the node at path too when
-// self is set.
+// self is true.
 func (d *Doc) took(path paths.Path, self bool) {
 	for _, n := range d.nodes {
 		rest, ok := n.path.CutPrefix(path)
@@ -398,7 +403,7 @@ func (d *Doc) took(path paths.Path, self bool) {
 }
 
 // shifted updates the nodes below the items of the sequence at seq after
-// the item at index left it, so each later item takes the index before it.
+// the item at index left it. Each later item takes the index before it.
 func (d *Doc) shifted(seq paths.Path, index int) {
 	for _, n := range d.nodes {
 		if !n.gone {

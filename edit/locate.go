@@ -17,16 +17,17 @@ import (
 // text, and what it says about the edit.
 type note struct {
 	// The subject of the Apply that wrote a value, as messages name it. It
-	// is "" for text that holds no value, and for text that stands for text
-	// of the user, such as a renamed key.
+	// is "" for text that does not hold a value, and for text that stands
+	// for text of the user, such as a renamed key.
 	detail string
 	path   paths.Path
 	at     position.Range
-	// The note names a value the file holds, so an error binds there.
+	// Whether the note names a value that the file holds. An error then
+	// binds there.
 	located bool
 	hasPath bool
-	// The text replaced a value, so the detail says the Apply set the value
-	// from the one the file holds.
+	// Whether the text replaced a value. The detail then says that the
+	// Apply set the value from the one that the file holds.
 	replaced bool
 }
 
@@ -81,7 +82,8 @@ func (d *Doc) offset(pos position.Position) int {
 	return offsetIn(d.cur, d.curLines, pos)
 }
 
-// offsetIn returns the offset in text, whose lines start at starts, of pos.
+// offsetIn returns the offset of pos in text. The lines of text start at
+// starts.
 func offsetIn(text string, starts []int, pos position.Position) int {
 	if pos.Line >= len(starts) {
 		return len(text)
@@ -101,8 +103,8 @@ func offsetIn(text string, starts []int, pos position.Position) int {
 	return off
 }
 
-// positionIn returns the position in text, whose lines start at starts,
-// of the byte at off.
+// positionIn returns the position of the byte at off in text. The lines of
+// text start at starts.
 func positionIn(text string, starts []int, off int) position.Position {
 	line, _ := slices.BinarySearch(starts, off+1)
 	line--
@@ -144,8 +146,8 @@ func (d *Doc) locate(at hook.Located) hook.Place {
 	return place
 }
 
-// place returns place, the place of at, a location in text that an edit
-// wrote with n, moved to where n binds.
+// place returns place moved to where n binds. The argument place is the
+// place of at, a location in text that an edit wrote with n.
 func (n note) place(place hook.Place, at hook.Located) hook.Place {
 	if n.located {
 		place.Range, place.HasRange = n.at, true
@@ -202,7 +204,7 @@ func (d *Doc) userPos(off int) position.Position {
 
 // userPath returns the path of the value that the user's text holds at
 // pos, for an error at path in the current text. A path that the current
-// text does not hold, such as a field the document leaves out, stays as it
+// text does not hold, such as a field that the document omits, stays as it
 // is, in the terms of the current text.
 func (d *Doc) userPath(path paths.Path, pos position.Position) paths.Path {
 	// The resolver binds no error. A bound error locates itself through d,
@@ -257,8 +259,8 @@ type edit struct {
 
 // apply applies edits, which must not overlap, and parses the result once.
 // An insertion goes in front of an edit that replaces the bytes after it,
-// and insertions at one offset keep their order. New text that does not
-// parse leaves the text as it was.
+// and insertions at one offset keep their order. When the new text does
+// not parse, apply leaves the text as it was.
 func (d *Doc) apply(edits ...edit) error {
 	cur, origin, src, node, lines, edited := d.cur, d.origin, d.src, d.node, d.curLines, d.edited
 

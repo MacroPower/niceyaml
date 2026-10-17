@@ -20,7 +20,7 @@ var (
 	ErrEngine = errors.New("the edited text does not read back as written")
 
 	// The problem of a call of New with a nil Node, a Node below the root,
-	// or a document that holds no value.
+	// or a document that does not hold a value.
 	errDocument = errors.New("New takes the root of a document that holds a value")
 	// The problem of a call of New with a protected path that is not a `$`
 	// path of names and indexes.
@@ -55,7 +55,7 @@ type Option func(*config)
 type config struct {
 	// The name of the app in the message of a bug in the engine.
 	app string
-	// The paths of the values that no [Func] edits.
+	// The paths of the values that [WithProtected] protects.
 	protected []paths.Path
 	// The unmarshalers that each decode applies ahead of those of the
 	// Source of the document.
@@ -73,7 +73,7 @@ func WithApp(name string) Option {
 
 // WithProtected is an [Option] that protects the value at each of ps, a
 // `$` path of names and indexes, and every value inside it. A path of
-// [Doc.Apply] selects no protected value. A [Func] cannot set, rename,
+// [Doc.Apply] never selects a protected value. A [Func] cannot set, rename,
 // move, or remove a protected value, or a value that holds one. Each
 // WithProtected adds to the paths before it.
 func WithProtected(ps ...paths.Path) Option {
@@ -136,7 +136,7 @@ type Doc struct {
 	lastEdit *editRecord
 	// The text of the lines of the user's document.
 	orig string
-	// The byte order mark the text starts with, which the parse leaves out.
+	// The byte order mark the text starts with, which the parse drops.
 	bom string
 	// The current text, without the byte order mark.
 	cur string
@@ -162,9 +162,9 @@ type Doc struct {
 	// The bytes [start, end) of the text of the user's Source that orig
 	// holds, with its byte order mark.
 	start, end int
-	// An edit changed the text.
+	// Whether an edit changed the text.
 	edited bool
-	// An Apply runs.
+	// Whether an Apply is running.
 	applying bool
 }
 
@@ -195,7 +195,7 @@ func (d *Doc) save() state {
 	}
 }
 
-// restore puts back the text of d that s saved.
+// restore replaces the text of d with the text that s saved.
 func (d *Doc) restore(s state) {
 	d.src, d.node, d.cur, d.origin, d.curLines, d.edited = s.src, s.node, s.cur, s.origin, s.curLines, s.edited
 	d.notes = d.notes[:s.notes]
@@ -216,7 +216,7 @@ type Removal struct {
 	Path paths.Path
 	// Range is the range of the key or the item in the user's text.
 	Range position.Range
-	// Item is set for the removal of a sequence item.
+	// Item is true for the removal of a sequence item.
 	Item bool
 }
 
@@ -231,7 +231,7 @@ type writtenValue struct {
 // document of a [niceyaml.Source] that read text, such as one that
 // [niceyaml.Source.Documents] returns. It returns the error of a document
 // that does not parse. It also returns an error for a nil doc, a Node
-// below the root, and a document that holds no value. A path of
+// below the root, and a document that does not hold a value. A path of
 // [WithProtected] that is not a `$` path of names and indexes fails New
 // too.
 func New(doc *niceyaml.Node, opts ...Option) (*Doc, error) {
@@ -309,18 +309,18 @@ func New(doc *niceyaml.Node, opts ...Option) (*Doc, error) {
 }
 
 // Apply runs fn once on each place that path selects, in document order,
-// and then checks the result. The path starts at `$` and holds no `~`. A
-// path that selects nothing calls fn zero times. Places that an alias or
-// a `<<` merge key shares take one call. To create a value, apply at a
-// place that exists, such as `$`, and call [Node.Set] on the node that
-// [Node.At] returns.
+// and then checks the result. The path starts at `$` and does not hold a
+// `~`. When path does not select any place, Apply calls fn zero times.
+// Places that an alias or a `<<` merge key shares take one call. To create
+// a value, apply at a place that exists, such as `$`, and call [Node.Set]
+// on the node that [Node.At] returns.
 //
-// Each call sees the edits of the calls before it. A place that an earlier
-// call took away, by a removal of the place or a replacement of a value
-// above it, takes no call. A method of [Node] that cannot make its edit
-// fails the Apply, even when fn goes on and returns nil. The calls of one
-// Apply edit a shared value once. A second edit of a value fails when one
-// of the two calls reached it through an alias or a `<<` merge key.
+// Each call sees the edits of the calls before it. Apply skips each place
+// that an earlier call removed, either directly or by replacing a value
+// above it. When a method of [Node] cannot make its edit, the Apply fails,
+// even when fn continues and returns nil. The calls of one Apply edit a
+// shared value once. A second edit of a value fails when one of the two
+// calls reached it through an alias or a `<<` merge key.
 //
 // After the last call, Apply checks the text. Each mapping that merges or
 // repeats a key must read the same entry for each key as it did before.
@@ -427,8 +427,8 @@ func (d *Doc) Text() string {
 // [Doc.Text] of each Doc in place of the text of its document. The other
 // documents of the Source keep their text. A program that edits several
 // documents of one file passes the Doc of each. FileText returns an error
-// for no Doc, for Docs of more than one Source, and for two Docs of one
-// document.
+// when docs is empty, when the Docs come from more than one Source, and
+// when two Docs come from one document.
 func FileText(docs ...*Doc) (string, error) {
 	if len(docs) == 0 {
 		return "", errFileText
@@ -474,7 +474,7 @@ func (d *Doc) Edited() bool {
 }
 
 // Removals returns the values of the user's text that the edits removed,
-// in the order of the calls. It leaves out a value that an earlier edit
+// in the order of the calls. It omits each value that an earlier edit
 // created.
 func (d *Doc) Removals() []Removal {
 	return slices.Clone(d.removals)

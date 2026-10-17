@@ -27,24 +27,25 @@ type mergeView struct {
 	reads map[string]position.Position
 	// The entries that the mapping hides, with the name of each.
 	hidden map[position.Position]string
-	// The text of the first merge key entry, as "<<: *summer", or "" for a
-	// mapping that merges nothing.
+	// The text of the first merge key entry, such as "<<: *summer", or ""
+	// for a mapping that does not merge.
 	merge string
-	// The value of that merge key, as "*summer".
+	// The value of that merge key, such as "*summer".
 	via string
 }
 
 // editRecord is an edit of the Apply running, as a message names it.
 type editRecord struct {
-	// What the edit does, as "renames "closes" to "close"".
+	// What the edit does, such as "renames "closes" to "close"".
 	desc string
 	path paths.Path
 	at   position.Range
 }
 
 // mergeViews returns the view of each mapping that merges or repeats a
-// key, or that keep names. A mapping that merges goes by the entry of its
-// first merge key, and any other by the entry of its first key.
+// key, or that keep names. The returned map keys a mapping that merges by
+// the entry of its first merge key, and any other mapping by the entry of
+// its first key.
 func (d *Doc) mergeViews(keep map[position.Position]*mergeView) map[position.Position]*mergeView {
 	views := make(map[position.Position]*mergeView)
 	res := d.node.Resolver()
@@ -155,8 +156,8 @@ func (d *Doc) addView(views, keep map[position.Position]*mergeView, res *paths.R
 	views[id] = view
 }
 
-// mergedEntries adds the entries that the `<<` merge keys of m bring in to
-// candidates, by name, and reports false when a merge key does not
+// mergedEntries adds to candidates, by name, the entries that the `<<`
+// merge keys of m bring in. It reports false when a merge key does not
 // resolve.
 func mergedEntries(res *paths.Resolver, m ast.Node, candidates map[string][]*ast.MappingValueNode, depth int) bool {
 	if depth > maxMergeDepth {
@@ -212,8 +213,8 @@ func (d *Doc) entryID(e *ast.MappingValueNode) position.Position {
 	return position.New(-2, o)
 }
 
-// recordEdit records an edit of the Apply running, which a message about
-// what a mapping reads names. The edit is at the place p of h, and at the
+// recordEdit records an edit of the Apply running. A message about what a
+// mapping reads names that edit. The edit is at the place p of h, and at the
 // key of its entry when it renames, removes, or moves the entry.
 func (d *Doc) recordEdit(h *Node, p *place, desc string) {
 	start, ok := d.startOf(p)
@@ -241,9 +242,10 @@ func (d *Doc) recordEdit(h *Node, p *place, desc string) {
 	d.lastEdit = &editRecord{desc: desc, path: d.userPath(path, at.Start), at: at}
 }
 
-// checkMerges returns the problem of an Apply after which a mapping that
-// merges or repeats a key reads another entry: one that it hid before the
-// Apply, or another one in place of an entry that it now hides.
+// checkMerges returns a problem when a mapping that merges or repeats a key
+// reads a different entry after the Apply. The mapping then reads either an
+// entry that it hid before the Apply, or a different entry in place of one
+// that it now hides.
 func (d *Doc) checkMerges() error {
 	before := d.merges
 	d.merges = nil

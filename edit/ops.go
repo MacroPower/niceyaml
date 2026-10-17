@@ -15,9 +15,10 @@ import (
 )
 
 // SetKey renames the key of the entry. The value and its comments stay in
-// place, and the key keeps its quotes. A key that the entry already has,
-// as the decode reads it, changes nothing. SetKey fails on a sequence
-// item, which has no key, and on a key that the mapping holds already.
+// place, and the key keeps its quotes. When the entry already has the key,
+// as the decode reads it, SetKey leaves the text as it is. SetKey fails on
+// a sequence item, because an item does not have a key. It also fails on a
+// key that the mapping holds already.
 //
 //nolint:contextcheck // A rename writes text and reads no state that a context carries.
 func (n *Node) SetKey(key string) error {
@@ -158,9 +159,9 @@ func WithReason(reason string) RemoveOption {
 
 // Remove removes the entry or the item, with its comments. [Doc.Removals]
 // lists the removal of a value of the user's text. When blank lines
-// surround the lines that Remove deletes, one of them goes too. A block
-// collection that it empties becomes "{}" or "[]". A place that holds no
-// value stays as it is.
+// surround the lines that Remove deletes, Remove deletes one of them too.
+// A block collection that it empties becomes "{}" or "[]". A place that
+// does not hold a value stays as it is.
 func (n *Node) Remove(opts ...RemoveOption) error {
 	d := n.d
 
@@ -220,8 +221,8 @@ func (n *Node) Remove(opts ...RemoveOption) error {
 	return d.keepAnchors(n, anchors)
 }
 
-// recordRemoval records the removal of the value of p through h, unless
-// it holds no text of the user's file.
+// recordRemoval records the removal of the value of p through h when the
+// value holds text of the user's file.
 func (d *Doc) recordRemoval(h *Node, p *place, reason string) {
 	start, ok := d.startOf(p)
 	if !ok {
@@ -372,8 +373,8 @@ func (d *Doc) afterProps(p *place) int {
 	return at
 }
 
-// propsSpan returns the bytes of the anchor or the tag that node writes, the
-// name of an anchor included.
+// propsSpan returns the bytes of the anchor or the tag that node writes,
+// including the name of an anchor.
 func (d *Doc) propsSpan(node ast.Node) (span, bool) {
 	switch x := node.(type) {
 	case *ast.AnchorNode:
@@ -466,7 +467,7 @@ func (e *engineError) Unwrap() []error {
 }
 
 // scalarToken returns the token of the scalar of node, or nil for a node
-// that holds no scalar.
+// that does not hold a scalar.
 func scalarToken(node ast.Node) *token.Token {
 	c := astnode.Content(node)
 	if !astnode.IsScalar(c) || isImplicitNull(c) {

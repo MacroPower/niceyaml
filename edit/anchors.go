@@ -9,8 +9,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// keptAnchor is an anchor that an edit takes away while an alias outside
-// the edit still reads it.
+// keptAnchor is an anchor that an edit removes or moves but that an alias
+// outside the edit still reads.
 type keptAnchor struct {
 	// The name of the anchor.
 	name string
@@ -131,7 +131,7 @@ func (d *Doc) capture(name string, value ast.Node) (keptAnchor, bool) {
 
 // keepAnchors writes the value of each anchor of kept, with the anchor, at
 // the first alias that reads it. It skips each anchor that the document
-// still defines before that alias. The aliases thus go on reading the
+// still defines before that alias. The aliases thus keep reading the
 // value after an edit removes the anchor or moves it past them.
 func (d *Doc) keepAnchors(h *Node, kept []keptAnchor) error {
 	for _, k := range kept {

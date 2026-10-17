@@ -11,9 +11,9 @@ import (
 )
 
 // Move moves the value and its comments to target, a `$` path, which it
-// creates as [Node.Set] does. The index past the last item of a sequence
-// thus appends an item. The value keeps its text, indented for its new
-// place. Move fails on a target that holds a value or that lies inside the
+// creates as [Node.Set] does. A target at the index past the last item of
+// a sequence thus appends an item. The value keeps its text, indented for
+// its new place. Move fails when target holds a value or lies inside the
 // value.
 //
 //nolint:contextcheck // A move writes text and reads no state that a context carries.
@@ -100,7 +100,7 @@ func (n *Node) Move(target paths.Path) error {
 	return d.keepAnchors(n, anchors)
 }
 
-// plain reports whether path holds names and indexes alone.
+// plain reports whether path holds only names and indexes.
 func plain(path paths.Path) bool {
 	for sel := range path.Selectors() {
 		if sel.Kind != paths.SelectorChild && sel.Kind != paths.SelectorIndex {
@@ -238,8 +238,8 @@ func (d *Doc) flowOf(h *Node, p *place) run {
 	return newRun(r.flow, origin)
 }
 
-// insertAt inserts pl at target, a place that holds no value, and creates
-// the mappings above it that the document lacks.
+// insertAt inserts pl at target, a place that does not hold a value, and
+// creates the mappings above it that the document lacks.
 func (d *Doc) insertAt(h *Node, target paths.Path, pl payload) error {
 	tp, err := d.resolve(target)
 	if err != nil {

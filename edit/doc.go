@@ -1,7 +1,7 @@
 // Package edit changes the text of one YAML document. It keeps every byte
-// that an edit leaves alone: the comments, the blank lines, the key order,
-// the quoting, and the line endings. An error in the new text binds at the
-// line that the user wrote.
+// that an edit does not target: the comments, the blank lines, the key
+// order, the quoting, and the line endings. An error in the new text binds
+// at the line that the user wrote.
 //
 // # Edits
 //
@@ -40,15 +40,15 @@
 //	fmt.Print(text)
 //
 // A Node renames a key, sets or creates a value, moves a value to another
-// path, or removes an entry or an item. A rename, a set, or a move keeps
-// the comments of the entry that it changes. A removal takes them with the
-// entry. A value that an edit writes takes the indent step of the mapping
-// that holds it. A Go string keeps the quotes of the scalar that it
-// replaces.
+// path, or removes an entry or an item. Renames, sets, and moves keep the
+// comments of the entry that they change. Removals delete them with the
+// entry. Each value that an edit writes takes the indent step of the
+// mapping that holds it. Go strings keep the quotes of the scalars that
+// they replace.
 //
 // An edit that replaces, removes, or moves an anchored value writes the
-// value out at the first alias that reads it, unless the document still
-// defines the anchor before that alias. The aliases thus go on reading the
+// value at the first alias that reads it, unless the document still
+// defines the anchor before that alias. The aliases thus keep reading the
 // value.
 //
 // After the edits, a program reads the text of the document with
@@ -58,8 +58,8 @@
 // # Transactions
 //
 // Each call of Apply is one transaction. The calls of its Func see the
-// edits of the calls before them. A method of Node that cannot make its
-// edit fails the Apply, even when the Func ignores the error. When two
+// edits of the calls before them. When a method of Node cannot make its
+// edit, the Apply fails, even when the Func ignores the error. When two
 // calls edit one value, and one of them reached the value through an alias
 // or a `<<` merge key, the second edit fails.
 //
@@ -69,7 +69,7 @@
 // shows a bug in the engine, and its error matches [ErrEngine].
 //
 // Apply returns the first problem and stops there. A failed Apply leaves
-// the Doc as it found it, so the Doc keeps none of the edits of that
+// the Doc as it found it, so the Doc does not keep any of the edits of that
 // Apply. A Node works only during the Apply that gave it. After that Apply
 // returns, each method of the node that edits or decodes returns an error.
 //

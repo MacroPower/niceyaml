@@ -24,7 +24,7 @@ type place struct {
 	// The sequence that holds the value as an item, or nil.
 	seq *ast.SequenceNode
 	// The value as the text writes it, with its anchor or tag, or nil when
-	// the place holds none.
+	// the place does not hold a value.
 	value ast.Node
 	// The first alias, or the value of the first `<<` merge key, that the
 	// path went through, or nil.
@@ -33,16 +33,17 @@ type place struct {
 	path paths.Path
 	// The index of the item in seq.
 	index int
-	// The number of selectors of path that resolved, for a place that holds
-	// no value.
+	// The number of selectors of path that resolved, for a place that does
+	// not hold a value.
 	found int
-	// The place is the root of the document.
+	// Whether the place is the root of the document.
 	root bool
-	// The place holds a value.
+	// Whether the place holds a value.
 	exists bool
-	// The path reached the place through an alias or a `<<` merge key.
+	// Whether the path reached the place through an alias or a `<<` merge
+	// key.
 	shared bool
-	// The container is a flow collection, or lies inside one.
+	// Whether the container is a flow collection, or lies inside one.
 	flow bool
 }
 
@@ -247,7 +248,7 @@ func isNull(node ast.Node) bool {
 }
 
 // isImplicitNull reports whether node is the null that the parser writes
-// for an entry or an item with no value.
+// for an entry or an item without a value.
 func isImplicitNull(node ast.Node) bool {
 	if astnode.IsNil(node) {
 		return true
@@ -276,8 +277,8 @@ func (d *Doc) tokenSpan(tk *token.Token) (span, bool) {
 }
 
 // nodeSpan returns the bytes of node, from its first token through its
-// last, comments left out. It reports false for a node with no token, such
-// as the null of an entry with no value.
+// last, without comments. It reports false for a node without a token,
+// such as the null of an entry without a value.
 func (d *Doc) nodeSpan(node ast.Node) (span, bool) {
 	var (
 		s     span
@@ -390,7 +391,7 @@ func (d *Doc) isBlankLine(line int) bool {
 }
 
 // commentColumn returns the column where line starts a comment, and true,
-// for a line that holds a comment alone.
+// for a line that holds only a comment.
 func (d *Doc) commentColumn(line int) (int, bool) {
 	text := d.lineText(line)
 	trimmed := strings.TrimLeft(text, " \t")
@@ -415,7 +416,7 @@ func (d *Doc) column(off int) int {
 }
 
 // trailingComment returns the start of the comment that ends the line of
-// off, past off, or -1 when the line has no such comment.
+// off, past off, or -1 when the line does not have such a comment.
 func (d *Doc) trailingComment(off int) int {
 	line := d.lineOf(off)
 	end := d.lineEnd(line)
@@ -467,7 +468,7 @@ func (d *Doc) startOf(p *place) (int, bool) {
 }
 
 // explicitKeyStart returns the offset of the "?" of an explicit key that
-// starts at off, or -1 when the key has none.
+// starts at off, or -1 when the key does not have one.
 func (d *Doc) explicitKeyStart(off int) int {
 	i := off - 1
 	for i >= 0 && (d.cur[i] == ' ' || d.cur[i] == '\t') {
@@ -482,7 +483,7 @@ func (d *Doc) explicitKeyStart(off int) int {
 }
 
 // valueEnd returns the offset where the value of p ends, past its last
-// token, or past the ":" of an entry with no value.
+// token, or past the ":" of an entry without a value.
 func (d *Doc) valueEnd(p *place) int {
 	if p.value != nil && !isImplicitNull(p.value) {
 		if s, ok := d.nodeSpan(p.value); ok {
@@ -506,7 +507,7 @@ func (d *Doc) valueEnd(p *place) int {
 }
 
 // valueStart returns the offset where the value of p starts. For an entry
-// with no value, it returns the offset past its ":".
+// without a value, it returns the offset past its ":".
 func (d *Doc) valueStart(p *place) int {
 	if p.value != nil && !isImplicitNull(p.value) {
 		if s, ok := d.nodeSpan(p.value); ok {

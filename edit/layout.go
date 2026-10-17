@@ -9,7 +9,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// defaultStep is the indent step of a document with no nested mapping.
+// defaultStep is the indent step of a document that does not hold a nested
+// mapping.
 const defaultStep = 2
 
 // region is the lines of an entry or an item of a block collection, with
@@ -74,8 +75,9 @@ func (d *Doc) blockRegion(p *place) region {
 	return region{start: d.lineStart(first), end: d.lineStart(last + 1), first: first, last: last}
 }
 
-// topComments reports whether the comment lines from line on reach the top
-// of the document, so they belong to the document and stay at its top.
+// topComments reports whether the lines above line hold only comments and
+// blank lines up to the top of the document. Comment lines that reach the
+// top belong to the document and stay at its top.
 func (d *Doc) topComments(line int) bool {
 	for l := line - 1; l >= 0; l-- {
 		text := strings.TrimSpace(d.lineText(l))
@@ -106,11 +108,11 @@ func (d *Doc) keepsTrailingLines(p *place) bool {
 		(strings.HasPrefix(tk.Value, "|") || strings.HasPrefix(tk.Value, ">"))
 }
 
-// stepOf returns the indent step of the block mapping at path: the
-// distance from the key of the entry that holds it to its keys. For a
-// mapping that is an item, it takes the step of the nearest mapping above
-// it that is the value of an entry, and the step of the document at the
-// root.
+// stepOf returns the indent step of the block mapping at path. The step is
+// the distance from the key of the entry that holds the mapping to its
+// keys. For a mapping that is an item, it takes the step of the nearest
+// mapping above it that is the value of an entry. At the root, it takes the
+// step of the document.
 func (d *Doc) stepOf(path paths.Path) int {
 	for cur := path; !cur.IsRoot(); {
 		last, _ := cur.Last()
@@ -160,7 +162,8 @@ func (d *Doc) entryStep(path paths.Path) (int, bool) {
 }
 
 // docStep returns the step of the first block mapping in the document that
-// is the value of an entry, or two spaces when the document has none.
+// is the value of an entry, or two spaces when the document does not have
+// one.
 func (d *Doc) docStep() int {
 	step := 0
 
@@ -198,10 +201,10 @@ func (d *Doc) docStep() int {
 	return step
 }
 
-// sequenceIndent reports whether a block sequence that an edit
-// creates under a key indents its "-" one step deeper than the key, as
-// the first block sequence under a key in the document does. Without one,
-// it does.
+// sequenceIndent reports whether a block sequence that an edit creates
+// under a key indents its "-" one step deeper than the key. It follows the
+// first block sequence under a key in the document. When the document does
+// not have one, it reports true.
 func (d *Doc) sequenceIndent() bool {
 	indent, found := true, false
 
@@ -233,9 +236,10 @@ func (d *Doc) sequenceIndent() bool {
 	return indent
 }
 
-// breakBefore returns the line break that a line added at the start of
-// line ends with: the break of the line above it, or of the first line at
-// the top. It returns "\n" where no line has a break.
+// breakBefore returns the line break that ends a line that an edit adds at
+// the start of line. It takes the break of the line above, and otherwise
+// the break of the first line that has one. It returns "\n" when the text
+// does not have a line break.
 func (d *Doc) breakBefore(line int) string {
 	if line > 0 {
 		if b := d.lineBreak(line - 1); b != "" {

@@ -20,19 +20,20 @@ type rendered struct {
 	// The text in flow style, on one line, which a flow collection holds.
 	flow string
 	// The lines in block style, without a line break at the end, for a
-	// collection or a block scalar. A plain or quoted scalar has none.
+	// collection or a block scalar. A plain or quoted scalar does not have
+	// block lines.
 	block []string
-	// The value is a mapping or a sequence.
+	// Whether the value is a mapping or a sequence.
 	collection bool
-	// The value is a mapping.
+	// Whether the value is a mapping.
 	mapping bool
-	// The value is an empty mapping or sequence.
+	// Whether the value is an empty mapping or sequence.
 	empty bool
 }
 
 // render returns the text of v. A block collection indents by step, and
 // a block sequence under a key indents its "-" by step when seqIndent is
-// set.
+// true.
 func render(ctx context.Context, v any, step int, seqIndent bool) (rendered, error) {
 	flow, err := encoder.Marshal(ctx, v, encoder.WithYAMLOptions(yaml.Flow(true)))
 	if err != nil {
@@ -72,8 +73,8 @@ func render(ctx context.Context, v any, step int, seqIndent bool) (rendered, err
 }
 
 // scalarStyle returns the text of s, a Go string that replaces a scalar of
-// the style of old, in that style where the text allows it. It reports
-// false where the style of old does not apply.
+// the style of old, in that style when the text allows it. It reports
+// false when the style of old does not apply.
 func scalarStyle(s string, old *token.Token) (string, bool) {
 	if old == nil {
 		return "", false
@@ -135,10 +136,10 @@ func doubleQuoted(s string) string {
 	return b.String()
 }
 
-// renderKey returns the text of key as a key of a mapping, where the key
-// it replaces had the token old, or nil for a new key. A plain key takes
-// double quotes where it might read back as another value, and inside a
-// flow collection where it holds a flow indicator.
+// renderKey returns the text of key as a key of a mapping. The argument
+// old is the token of the key that key replaces, or nil for a new key. A
+// plain key takes double quotes when it might read back as another value,
+// and inside a flow collection when it holds a flow indicator.
 func renderKey(ctx context.Context, key string, old *token.Token, flow bool) (string, error) {
 	if s, ok := scalarStyle(key, old); ok {
 		return s, nil

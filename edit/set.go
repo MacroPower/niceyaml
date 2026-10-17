@@ -49,8 +49,8 @@ type payload struct {
 	// The lines of a block collection, or of a block scalar after its
 	// indicator.
 	lines []line
-	// The value is a mapping, so an item writes its first line after the
-	// "-".
+	// Whether the value is a mapping. An item that holds a mapping writes
+	// its first line after the "-".
 	mapping bool
 }
 
@@ -58,13 +58,14 @@ type payload struct {
 // It writes v as [go.jacobcolvin.com/niceyaml/encoder.Marshal] does, keeps
 // the comments of the entry, and drops the tag of the old value and the
 // comments inside it. A Go string keeps the quotes of the scalar that it
-// replaces. Set at the index past the last item of a sequence appends an
-// item.
+// replaces. A call of Set at the index past the last item of a sequence
+// appends an item.
 func (n *Node) Set(ctx context.Context, v any) error {
 	return n.set(ctx, v, false)
 }
 
-// set is [Node.Set], which sets a protected value when protected is set.
+// set is [Node.Set], but it also sets a protected value when protected is
+// true.
 func (n *Node) set(ctx context.Context, v any, protected bool) error {
 	d := n.d
 
@@ -604,7 +605,7 @@ func (d *Doc) entryLines(key run, pl payload, col int, brk string) run {
 }
 
 // opening is an empty flow collection that an edit wrote in block
-// context, which takes block style when a later edit adds to it.
+// context. The collection takes block style when a later edit adds to it.
 type opening struct {
 	// The bytes that the block lines replace: the collection and the space
 	// before it.

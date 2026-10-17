@@ -104,8 +104,8 @@ func (d *Doc) rootNode() *Node {
 	return &Node{d: d, path: paths.Doc()}
 }
 
-// canonical returns v as a decode into any reads the text that the encoder
-// writes for it.
+// canonical returns the value that a decode into any reads from the text
+// that the encoder writes for v.
 func canonical(ctx context.Context, v any) (any, error) {
 	data, err := encoder.Marshal(ctx, v)
 	if err != nil {

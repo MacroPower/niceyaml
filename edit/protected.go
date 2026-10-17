@@ -9,8 +9,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// init fills in the calls of [edithook], which the manifest package uses
-// and which stay out of the API of edit.
+// init sets the hooks of [edithook]. The manifest package calls those
+// hooks, and they are not part of the API of edit.
 //
 //nolint:gochecknoinits // edithook cannot import edit, so edit sets the hooks when it loads.
 func init() {
@@ -69,8 +69,9 @@ func (d *Doc) setField(ctx context.Context, path paths.Path, text string) error 
 	return d.insertField(ctx, n, p, path, text)
 }
 
-// holdsMapping reports whether the value at the first found selectors of
-// path is a mapping, where the mappings of the rest of path can go.
+// holdsMapping reports whether the value that the first found selectors
+// of path reach is a mapping. An edit can then create the mappings for the
+// rest of path inside it.
 func (d *Doc) holdsMapping(path paths.Path, found int) bool {
 	var sels []paths.Selector
 
