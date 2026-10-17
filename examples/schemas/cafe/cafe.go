@@ -23,8 +23,9 @@ var (
 	//go:embed defaults.yaml
 	DefaultYAML string
 
-	// BrokenYAML is an invalid cafe configuration that trips several schema
-	// constraints. The demo and tests use it to show validation errors.
+	// BrokenYAML is an invalid cafe configuration that violates several
+	// schema constraints. The demo and tests use it to show validation
+	// errors.
 	//go:embed broken.yaml
 	BrokenYAML string
 )
