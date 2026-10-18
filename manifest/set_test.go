@@ -195,6 +195,91 @@ func TestObject_Bind(t *testing.T) {
 
 	err = hours.Bind(niceyaml.NewError("too early", niceyaml.AtPath(spec.Child("open"))))
 	assert.Equal(t, "config/hours.yaml:6:10: $.spec.opens: too early", firstLine(niceyaml.FormatError(err)))
+
+	t.Run("a value behind an alias to a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		ref := niceyaml.NewSourceFromString("base: &base {currency: SEK}\n")
+
+		set, err := newCafeRegistry(t).Load(t.Context(), manifest.Sources(niceyaml.NewSourceFromString(
+			stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Cafe",
+				"metadata:",
+				"  name: yamull",
+				"spec: *base",
+			),
+			niceyaml.WithName("cafe.yaml"),
+			niceyaml.WithReferences(ref),
+		)))
+		require.NoError(t, err)
+
+		cafe, ok := set.One[Cafe]()
+		require.True(t, ok)
+		assert.Equal(t, CafeSpec{Currency: "SEK"}, cafe.Value.Spec)
+
+		// The file writes the spec as the alias, so a problem there or
+		// below it binds at the alias, and no detail says that the file
+		// leaves the spec out.
+		tcs := map[string]struct {
+			problem error
+			want    string
+		}{
+			"the alias": {
+				problem: niceyaml.NewError("closed", niceyaml.AtPath(spec)),
+				want:    "cafe.yaml:5:7: $.spec: closed",
+			},
+			"a field below the alias": {
+				problem: niceyaml.NewError("too few seats", niceyaml.AtPath(spec.Child("seats"))),
+				want:    "cafe.yaml:5:7: $.spec.seats: too few seats",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got := niceyaml.FormatError(cafe.Bind(tc.problem))
+
+				// The blank line above the excerpt follows the message.
+				assert.Equal(t, stringtest.JoinLF(tc.want, ""), firstTwoLines(got))
+			})
+		}
+	})
+
+	t.Run("a field that a merge key of a reference document brings in", func(t *testing.T) {
+		t.Parallel()
+
+		ref := niceyaml.NewSourceFromString("base: &base {seats: 4}\n")
+
+		set, err := newCafeRegistry(t).Load(t.Context(), manifest.Sources(niceyaml.NewSourceFromString(
+			stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1",
+				"kind: Cafe",
+				"metadata:",
+				"  name: yamull",
+				"spec:",
+				"  <<: *base",
+				"  currency: SEK",
+			),
+			niceyaml.WithName("cafe.yaml"),
+			niceyaml.WithReferences(ref),
+		)))
+		require.NoError(t, err)
+
+		cafe, ok := set.One[Cafe]()
+		require.True(t, ok)
+		assert.Equal(t, CafeSpec{Seats: 4, Currency: "SEK"}, cafe.Value.Spec)
+
+		// The merge key writes the seats, so no detail says that the file
+		// leaves them out. The problem binds at the alias of the merge key,
+		// because the reference document holds the line of the seats.
+		got := niceyaml.FormatError(cafe.Bind(niceyaml.NewError("too few seats", niceyaml.AtPath(spec.Child("seats")))))
+		assert.Equal(t, stringtest.JoinLF(
+			"cafe.yaml:6:7: $.spec.seats: too few seats",
+			"",
+		), firstTwoLines(got))
+	})
 }
 
 // keepOne loads cafe.yaml and hours.yaml, and returns the manifest whose

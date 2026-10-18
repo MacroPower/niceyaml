@@ -842,13 +842,18 @@ func TestIsTaggedNull(t *testing.T) {
 		input string
 		want  bool
 	}{
-		"null tag over a value":    {input: "a: !!null x\n", want: true},
-		"map tag over no value":    {input: "a: !!map\n", want: true},
-		"local tag over no value":  {input: "a: !local\n", want: true},
-		"anchor on a tagged null":  {input: "a: &x !!seq\n", want: true},
-		"string tag over no value": {input: "a: !!str\n"},
-		"local tag over a value":   {input: "a: !local x\n"},
-		"no tag":                   {input: "a: x\n"},
+		"null tag over a value":     {input: "a: !!null x\n", want: true},
+		"map tag over no value":     {input: "a: !!map\n", want: true},
+		"local tag over no value":   {input: "a: !local\n", want: true},
+		"anchor on a tagged null":   {input: "a: &x !!seq\n", want: true},
+		"string tag over no value":  {input: "a: !!str\n"},
+		"integer tag over no value": {input: "a: !!int\n"},
+		"binary tag over no value":  {input: "a: !!binary\n"},
+		"local tag over a tilde":    {input: "a: !local ~\n"},
+		"local tag over a value":    {input: "a: !local x\n"},
+		"null tag over an alias":    {input: "a: !!null *k\n", want: true},
+		"local tag over an alias":   {input: "a: !local *k\n"},
+		"no tag":                    {input: "a: x\n"},
 	}
 
 	for name, tc := range tcs {

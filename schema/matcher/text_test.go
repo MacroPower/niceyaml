@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
@@ -97,7 +98,9 @@ func TestText_Reads(t *testing.T) {
 	// the same text.
 	tcs := map[string]struct {
 		input string
-		want  string
+		// The text of a reference document, or empty for none.
+		refs string
+		want string
 	}{
 		"plain string":                               {input: `version: apps/v1`, want: "apps/v1"},
 		"plain float with a trailing zero":           {input: `version: 2.0`, want: "2.0"},
@@ -149,13 +152,29 @@ func TestText_Reads(t *testing.T) {
 			want:  "1.1",
 		},
 		"bool-tagged quoted scalar": {input: `version: !!bool "True"`, want: "true"},
+		"float behind an alias to a reference": {
+			input: `version: *v`,
+			refs:  `v: &v 1.10`,
+			want:  "1.10",
+		},
+		"float behind a tagged alias to a reference": {
+			input: `version: !t *v`,
+			refs:  `v: &v 1.10`,
+			want:  "1.10",
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
+			var opts []niceyaml.SourceOption
+
+			if tc.refs != "" {
+				opts = append(opts, yamltest.References(tc.refs))
+			}
+
+			doc := yamltest.FirstDocument(t, tc.input, opts...)
 
 			var got []string
 

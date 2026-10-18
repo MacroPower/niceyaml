@@ -27,6 +27,19 @@
 // with [Read]. It reads the entries a decode sets with [Members] and
 // [MembersBackward]. A walk of a decoded map names each of its keys as the
 // document spells it, with [KeyOf] and [MapGroups].
+//
+// [MemberName] copies the rule by which go-yaml's decoder names a key. It
+// names a key that a decode read as a Go value, such as the key of a
+// [github.com/goccy/go-yaml.MapItem]. The decoder offers no call that
+// names a Go value. Its encoder cannot stand in for one, because
+// [github.com/goccy/go-yaml.ValueToNode] gives some keys a node that the
+// decoder reads as another value. The float 2e+06 gets a node that reads
+// as 0, and a [time.Time] gets a string.
+//
+// [Members] with merges and [MembersBackward] copy the order in which the
+// decoder sets the entries of a mapping with `<<` merge keys. The decoder
+// gives the values that it sets, but not the entries of the document that
+// set them. The tests check each copy against the decoder.
 package datapath
 
 import (
@@ -46,6 +59,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/mapkey"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -123,6 +137,7 @@ func (t Target) Start(key bool) *token.Token {
 type Index struct {
 	resolver *paths.Resolver
 	finder   *paths.EntryFinder
+	keys     *mapkey.Keys
 	members  map[ast.Node]memberTable
 }
 
@@ -136,9 +151,11 @@ type memberTable struct {
 	complete bool
 }
 
-// NewIndex creates a new [*Index] that follows aliases through r.
-func NewIndex(r *paths.Resolver) *Index {
-	return &Index{resolver: r, finder: r.EntryFinder(), members: map[ast.Node]memberTable{}}
+// NewIndex creates a new [*Index] that follows aliases through r. It
+// names each key of the document as keys names it, so a member takes the
+// name that niceyaml's decode gives its key.
+func NewIndex(r *paths.Resolver, keys *mapkey.Keys) *Index {
+	return &Index{resolver: r, finder: r.EntryFinder(), keys: keys, members: map[ast.Node]memberTable{}}
 }
 
 // Member returns the [Target] one step down from t, at the member that a
@@ -383,10 +400,12 @@ func MergeSources(r *paths.Resolver, entry *ast.MappingValueNode) ([]*ast.Mappin
 // Members returns the entries of mapping in document order. It skips each
 // entry without a key and each entry with a `<<` merge key. With merges
 // set, it also yields the entries of the mappings those merge keys bring
-// in, each where its merge key stands. It skips each merge key whose
-// sources do not resolve. It reads each mapping one time, so a merge key
-// that brings in a mapping the walk already read does not yield more
-// entries.
+// in, each where its merge key stands. That order copies the order in
+// which go-yaml's decoder sets the entries, as the package documentation
+// describes. It skips each merge key whose sources do not resolve, such as
+// one that reads a reference document, with every source of that key. It
+// reads each mapping one time, so a merge key that brings in a mapping the
+// walk already read does not yield more entries.
 func Members(r *paths.Resolver, mapping *ast.MappingNode, merges bool) iter.Seq[*ast.MappingValueNode] {
 	return func(yield func(*ast.MappingValueNode) bool) {
 		members(r, mapping, merges, map[*ast.MappingNode]bool{}, yield)
@@ -439,9 +458,10 @@ func members(
 
 // MembersBackward returns the entries of mapping and of the mappings its
 // `<<` merge keys bring in. It yields them in reverse of the order the
-// decoder sets them. The first entry it yields for a key is therefore the
-// one the decode keeps. It skips each entry without a key and each entry
-// with a merge key.
+// decoder sets them, which it copies from go-yaml's decoder, as the
+// package documentation describes. The first entry it yields for a key is
+// therefore the one the decode keeps. It skips each entry without a key
+// and each entry with a merge key.
 //
 // A merge key whose sources do not resolve might set any key, so the walk
 // ends there. It does not yield an earlier entry, of mapping or of a
@@ -621,11 +641,10 @@ type memberNode struct {
 // resolve, or lead back to the mapping, might set a member of any name.
 // The table therefore omits every member before that merge key.
 //
-// An alias key decodes to the name that the content of its anchor gives.
 // A key without a name might set a member of any name. Such keys include
-// an alias key that [aliasKeyName] cannot name, and a typed-nil key that
-// a tree built by hand might hold. The table omits every member before
-// such a key rather than hold a member that the key might replace.
+// an alias key that does not resolve, and a typed-nil key that a tree
+// built by hand might hold. The table omits every member before such a
+// key rather than hold a member that the key might replace.
 func (idx *Index) memberNodes(node ast.Node) memberTable {
 	node = astnode.Content(node)
 
@@ -672,15 +691,15 @@ func (idx *Index) memberNodes(node ast.Node) memberTable {
 	return table
 }
 
-// keyName returns the member name a decode gives key, and reports whether
-// the key has one. An alias key has the name that [aliasKeyName] gives
-// it. Any other key has the name that [decodedKey] gives it.
+// keyName returns the member name that a decode gives key, as the keys of
+// the index name it, and reports whether the key has one. A merge key has
+// no name, because the decoder folds its value into the mapping.
 func (idx *Index) keyName(key ast.MapKeyNode) (string, bool) {
-	if _, isAlias := astnode.Content(key).(*ast.AliasNode); isAlias {
-		return aliasKeyName(idx.resolver, key)
+	if astnode.IsMergeKey(key) {
+		return "", false
 	}
 
-	return decodedKey(key)
+	return idx.keys.Key(key)
 }
 
 // addMerged adds to found each member that the sources of the merge key
@@ -710,69 +729,21 @@ func (idx *Index) addMerged(found map[string]memberNode, member *ast.MappingValu
 	return true
 }
 
-// aliasKeyName returns the member name a decode gives an alias key. The
-// name is the one [decodedKey] gives the content of the anchor that r
-// resolves the alias to. It reports false for an alias that does not
-// resolve and for content without a name. It also reports false for an
-// alias under a tag or an anchor of the key's own, because either one
-// might change the name.
-func aliasKeyName(r *paths.Resolver, key ast.MapKeyNode) (string, bool) {
-	var node ast.Node = key
-
-	if explicit, ok := node.(*ast.MappingKeyNode); ok && explicit != nil {
-		node = explicit.Value
-	}
-
-	alias, ok := node.(*ast.AliasNode)
-	if !ok || alias == nil {
-		return "", false
-	}
-
-	target, err := r.Deref(alias)
-	if err != nil {
-		return "", false
-	}
-
-	content, ok := target.(ast.MapKeyNode)
-	if !ok {
-		return "", false
-	}
-
-	return decodedKey(content)
-}
-
-// decodedKey returns the member name a decode gives the key node, with
-// the key's tag applied, and reports whether the key has a name. A
-// string key gives its unquoted text, and any other scalar gives its Go
-// value as the decoder spells it. The hexadecimal key 0x10 reads as 16,
-// !!bool yes reads as true, and a !!timestamp key reads as its time
-// value. A null key reads as null in every spelling.
-//
-// It reports false for a merge key, because the decoder folds its value
-// into the mapping. It also reports false for a key that is not a
-// scalar, such as a sequence. It reports false for a key that the decoder
-// cannot read on its own, such as an alias. A nil key gets false too,
-// including a typed nil that a tree built by hand might hold.
-func decodedKey(key ast.MapKeyNode) (string, bool) {
-	if _, ok := astnode.Content(key).(ast.ScalarNode); !ok || astnode.IsMergeKey(key) {
-		return "", false
-	}
-
-	var v any
-
-	err := yaml.NodeToValue(key, &v)
-	if err != nil {
-		return "", false
-	}
-
-	return MemberName(v), true
-}
-
 // MemberName returns the member name that a decode into a map gives a key
-// it reads as the Go value key. That value can be the key of a
-// [yaml.MapItem] or the value a decode reads from a key node. A string key
-// gives its text, and any other key gives its printed Go value. A nil key
-// gives null rather than the <nil> that [fmt.Sprint] prints for it.
+// that it read as the Go value key, such as the key of a
+// [github.com/goccy/go-yaml.MapItem]. A string key gives its text, and any
+// other key gives its printed Go value. A nil key gives null rather than
+// the <nil> that [fmt.Sprint] prints for it. The go-yaml decoder names a
+// key value that way, but it offers no call that names a Go value. An
+// [Index] names each key node of a document through [mapkey.Keys] instead.
+//
+// A decode with [github.com/goccy/go-yaml.UseOrderedMap] reads a mapping
+// in a key as a [github.com/goccy/go-yaml.MapSlice], where a decode into a
+// map reads a map[string]any, which prints otherwise. MemberName prints
+// each MapSlice in key as that map, with the members that a decode into a
+// map gives its items, so a later item of a name replaces an earlier one.
+// The decode names each key inside such a mapping itself, as a string, so
+// MemberName keeps that name.
 func MemberName(key any) string {
 	switch k := key.(type) {
 	case nil:
@@ -780,7 +751,32 @@ func MemberName(key any) string {
 	case string:
 		return k
 	default:
-		return fmt.Sprint(k)
+		return fmt.Sprint(unordered(k))
+	}
+}
+
+// unordered returns v with each [yaml.MapSlice] in it as the map[string]any
+// that a decode into a map reads, as [MemberName] names its items.
+func unordered(v any) any {
+	switch x := v.(type) {
+	case yaml.MapSlice:
+		m := make(map[string]any, len(x))
+		for _, item := range x {
+			m[MemberName(item.Key)] = unordered(item.Value)
+		}
+
+		return m
+
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = unordered(e)
+		}
+
+		return out
+
+	default:
+		return v
 	}
 }
 

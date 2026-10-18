@@ -1556,14 +1556,13 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				targets: []any{new(merged)},
 				want:    "1:20: $.m.16.price: negative price",
 			},
-			// A merge whose alias does not resolve in the document, as one to
-			// an anchor of WithReferences, may set any key. No entry before it
-			// names a key, so the error reports the decoded value instead.
+			// The merge of an anchor of WithReferences sets the key, so the
+			// error binds at the alias of the merge.
 			"key of the mapping before the merge": {
 				input:      "m: {0x10: {price: 1}, <<: *r}\n",
 				targets:    []any{new(merged)},
 				references: "r: &r {16: {price: -1}}\n",
-				want:       "$.m.16.price: negative price",
+				want:       "1:27: $.m.16.price: negative price",
 			},
 			"key of the mapping after the merge": {
 				input:      "m: {<<: *r, 0x10: {price: -1}}\n",
@@ -1575,7 +1574,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				input:      stringtest.LinesLF("s: &s {<<: *r}", "m: {0x10: {price: 1}, <<: *s}"),
 				targets:    []any{new(merged)},
 				references: "r: &r {16: {price: -1}}\n",
-				want:       "$.m.16.price: negative price",
+				want:       "1:12: $.m.16.price: negative price",
 			},
 			"resolvable merge after the merge": {
 				input:      stringtest.LinesLF("b: &b {0x10: {price: -1}}", "m: {<<: *r, <<: *b}"),
@@ -3292,8 +3291,8 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 			`),
 			source: []niceyaml.SourceOption{yamltest.References("r: &r {16: {price: 1}, 32: {price: -2}}\n")},
 			err: stringtest.JoinLF(
+				"2:7: $.by_id.32.price: negative price",
 				"3:17: $.by_id.0x10.price: negative price",
-				"$.by_id.32.price: negative price",
 			),
 		},
 		"key an alias reads from a reference document": {
@@ -5606,9 +5605,10 @@ func TestDataLocator(t *testing.T) {
 			want:  "f.yaml:3:9: $.server.port: x",
 		},
 		"member a merge of a reference document sets": {
-			input: referringDoc,
-			names: []string{"server", "timeout"},
-			want:  "f.yaml: $.server.timeout: x",
+			input:    referringDoc,
+			names:    []string{"server", "timeout"},
+			want:     "f.yaml:2:7: $.server.timeout: x",
+			wantNear: "$.server",
 		},
 		"name a key spells beside a merge of a reference document": {
 			input: referringDoc,
@@ -7678,6 +7678,189 @@ func TestEach(t *testing.T) {
 		assert.Zero(t, calls)
 	})
 
+	t.Run("runs v at an alias to a reference among the elements", func(t *testing.T) {
+		t.Parallel()
+
+		type item struct {
+			Item  string `yaml:"item"`
+			Price int    `yaml:"price"`
+		}
+
+		// The first element reads its value from the reference, and the
+		// other two hold their own.
+		order := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"items:",
+			"  - *kaffe",
+			"  - {item: Te, price: 30}",
+			"  - {item: Bulle, price: 45}",
+		), niceyaml.WithName("order.yaml"), yamltest.References("kaffe: &kaffe {item: Kaffe, price: 35}\n"))
+
+		// The validator decodes the Node it gets, so it reads the price
+		// behind the alias.
+		priced := func(highest int) niceyaml.Validator {
+			return niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+				got, err := n.Decode[item](ctx)
+				if err != nil {
+					return err
+				}
+
+				if got.Price > highest {
+					return niceyaml.NewError("too expensive", niceyaml.AtPath(paths.Current().Child("price")))
+				}
+
+				return nil
+			})
+		}
+
+		tcs := map[string]struct {
+			validator niceyaml.Validator
+			// The message of the error, or none for a pass.
+			want string
+		}{
+			"every element passes": {
+				validator: priced(50),
+			},
+			"the alias and an element of the document fail": {
+				// The document does not hold a line for the price behind the
+				// alias, so that failure binds at the alias.
+				validator: priced(32),
+				want: stringtest.JoinLF(
+					"order.yaml:2:5: $.items[0].price: too expensive",
+					"order.yaml:4:26: $.items[2].price: too expensive",
+				),
+			},
+			"a path through the alias": {
+				// DecodeAt resolves its path in the document, so it does not
+				// enter the alias.
+				validator: niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+					_, err := n.DecodeAt[int](ctx, paths.Current().Child("price"))
+
+					return err
+				}),
+				want: "order.yaml:2:5: $.items[0]: resolve $.items[0].price: alias reads a reference document: *kaffe",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				each := niceyaml.Each(items, tc.validator)
+
+				validated := order.Validate(t.Context(), each)
+				_, decoded := order.Decode[any](t.Context(), niceyaml.WithValidator(each))
+
+				if tc.want == "" {
+					require.NoError(t, validated)
+					require.NoError(t, decoded)
+
+					return
+				}
+
+				require.EqualError(t, validated, tc.want)
+				require.EqualError(t, decoded, tc.want)
+			})
+		}
+
+		t.Run("an error through the alias is not the document's fault", func(t *testing.T) {
+			t.Parallel()
+
+			err := order.Validate(t.Context(), niceyaml.Each(items, tcs["a path through the alias"].validator))
+			require.ErrorIs(t, err, paths.ErrReferenceAlias)
+			assert.False(t, niceyaml.IsInvalid(err))
+		})
+
+		t.Run("a path below the alias fails before v runs", func(t *testing.T) {
+			t.Parallel()
+
+			calls := 0
+
+			counted := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				calls++
+
+				return nil
+			})
+
+			err := order.Validate(t.Context(), niceyaml.Each(items.Child("price"), counted))
+			require.EqualError(
+				t,
+				err,
+				"order.yaml:2:5: $.items[0]: resolve $.items[*].price: alias reads a reference document: *kaffe",
+			)
+			require.ErrorIs(t, err, paths.ErrReferenceAlias)
+			assert.False(t, niceyaml.IsInvalid(err))
+			assert.Zero(t, calls)
+		})
+	})
+
+	t.Run("runs v at an alias to a null of a reference among the elements", func(t *testing.T) {
+		t.Parallel()
+
+		type item struct {
+			Item  string `yaml:"item"`
+			Price int    `yaml:"price"`
+		}
+
+		// The first element reads a null from the reference. A decode of it
+		// thus leaves the item as it is, as a decode of an element `~` does.
+		order := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"items:",
+			"  - *none",
+			"  - {item: Te, price: 30}",
+		), niceyaml.WithName("order.yaml"), yamltest.References("none: &none ~\n"))
+
+		priced := func(highest int) niceyaml.Validator {
+			return niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+				got, err := n.Decode[item](ctx)
+				if err != nil {
+					return err
+				}
+
+				if got.Price > highest {
+					return niceyaml.NewError("too expensive", niceyaml.AtPath(paths.Current().Child("price")))
+				}
+
+				return nil
+			})
+		}
+
+		tcs := map[string]struct {
+			validator niceyaml.Validator
+			// The message of the error, or none for a pass.
+			want string
+		}{
+			"every element passes": {
+				validator: priced(50),
+			},
+			"the element of the document fails": {
+				validator: priced(20),
+				want:      "order.yaml:3:23: $.items[1].price: too expensive",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				each := niceyaml.Each(items, tc.validator)
+
+				validated := order.Validate(t.Context(), each)
+				_, decoded := order.Decode[any](t.Context(), niceyaml.WithValidator(each))
+
+				if tc.want == "" {
+					require.NoError(t, validated)
+					require.NoError(t, decoded)
+
+					return
+				}
+
+				require.EqualError(t, validated, tc.want)
+				require.EqualError(t, decoded, tc.want)
+				assert.True(t, niceyaml.IsInvalid(validated))
+			})
+		}
+	})
+
 	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
 		t.Parallel()
 
@@ -7812,6 +7995,69 @@ func TestNode_Validate(t *testing.T) {
 		_, err = docs[1].Decode[map[string]any](t.Context())
 		require.NoError(t, err)
 		assert.Empty(t, order, "the validator of one call ran on another")
+	})
+
+	t.Run("validations beside a merge of a reference bind on several goroutines", func(t *testing.T) {
+		t.Parallel()
+
+		// The reference keeps the keys of the anchor that the lookups read,
+		// so the validations of the items share them, even when they run on
+		// goroutines of their own.
+		doc := yamltest.FirstDocument(t,
+			"items:\n"+yamltest.GenerateLines(8, "  - {v: %d, <<: *base}"),
+			niceyaml.WithName("app.yaml"),
+			yamltest.References("base: &base {replicas: 1, size: S}\n"),
+		)
+
+		item := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("v")))
+		})
+
+		var mu sync.Mutex
+
+		// The validator hands over its context, so a later validation can
+		// run under it.
+		kept := make(chan context.Context, 1)
+
+		parallel := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			kept <- ctx
+
+			nodes, err := n.Nodes(paths.MustParse("$.items[*]"))
+			require.NoError(t, err)
+
+			errs := make([]error, len(nodes))
+
+			var wg sync.WaitGroup
+
+			for i, node := range nodes {
+				wg.Go(func() {
+					err := node.Validate(ctx, item)
+
+					mu.Lock()
+					defer mu.Unlock()
+
+					errs[i] = err
+				})
+			}
+
+			wg.Wait()
+
+			return errors.Join(errs...)
+		})
+
+		var want []string
+
+		for i := range 8 {
+			want = append(want, fmt.Sprintf("app.yaml:%d:9: $.items[%d].v: bad", i+2, i))
+		}
+
+		require.EqualError(t, doc.Validate(t.Context(), parallel), stringtest.JoinLF(want...))
+
+		// A validation under the context that the validator kept, after the
+		// call returned, binds the same way.
+		nodes, err := doc.Nodes(paths.MustParse("$.items[*]"))
+		require.NoError(t, err)
+		require.EqualError(t, nodes[3].Validate(<-kept, item), want[3])
 	})
 }
 

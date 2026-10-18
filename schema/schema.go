@@ -25,6 +25,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
+	"go.jacobcolvin.com/niceyaml/internal/mapkey"
 	"go.jacobcolvin.com/niceyaml/internal/schemahook"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -877,15 +878,16 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) ([]er
 	// The resolver binds aliases across the whole document, so an alias
 	// inside a scoped node reaches an anchor outside it. The document
 	// keeps one for every Node of it, so a check of each item of a list
-	// binds the document once.
-	resolver := paths.NewResolver(nil)
+	// binds the document once. The keys of the document read their aliases
+	// as a decode of the document reads them.
+	resolver, keys := paths.NewResolver(nil), mapkey.NewKeys(nil, nil, nil)
 	if n != nil {
-		resolver = n.Resolver()
+		resolver, keys = n.Resolver(), hook.Keys(n)
 	}
 
 	// The timestamp lookups and every violation share one index, so each
 	// key decodes once however many of them lie under its mapping.
-	idx := datapath.NewIndex(resolver)
+	idx := datapath.NewIndex(resolver, keys)
 	c := converter{root: rootOf(n), idx: idx}
 	instance := normalizeJSON(data, c.root, idx)
 

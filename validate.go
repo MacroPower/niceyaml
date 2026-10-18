@@ -1359,7 +1359,7 @@ type DataLocator struct {
 func (n *Node) DataLocator() *DataLocator {
 	return &DataLocator{
 		root: n.AST(),
-		idx:  datapath.NewIndex(n.Resolver()),
+		idx:  datapath.NewIndex(n.Resolver(), n.keyReader()),
 		base: n.base,
 	}
 }
@@ -1664,6 +1664,17 @@ func SkipEmpty(v Validator) Validator {
 // When the second element of the list is named admin, err reads:
 //
 //	svc.yaml:3:11: $.items[1].name: reserved name
+//
+// Where path selects an alias that reads a reference document of
+// [WithReferences], Each hands v the Node of that alias, as Node.Nodes
+// scopes it. A v that decodes the Node it gets reads the anchor through the
+// reference documents. An error at a path below the Node binds at the
+// alias. A v that calls [Node.DecodeAt] with a path below the Node, such as
+// @.price, gets an error that wraps [paths.ErrReferenceAlias] instead. A
+// path of Each that goes below such an alias, such as @.items[*].price,
+// returns that error before v runs on any Node. A rule for a value inside
+// each element thus selects the element and reads below it in v, as the
+// References section of the package documentation describes.
 //
 // Each reports every failure in document order, as [MultiValidator] reports
 // the failures of its validators. It hands the warnings of v to the

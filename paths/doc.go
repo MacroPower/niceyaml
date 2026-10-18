@@ -78,10 +78,16 @@
 //
 // # Resolution
 //
-// Selectors apply to the content of a node. An anchor (`&name`) or tag
-// (`!!map`) on a value is transparent, and an alias (`*name`) resolves to
-// the anchor it names. A mapping key lookup sees the entries a `<<` merge
-// key brings in. Where the mapping and a merge both define a key, the
+// Selectors apply to the content of a node. An anchor (`&name`) on a value
+// is transparent, and an alias (`*name`) resolves to the anchor it names.
+// A tag is transparent when the decoder reads the collection under it as
+// a collection, as it does for a local tag such as `!t` and for `!!map`. A
+// tag that the decoder reads as converting a collection into a value of
+// another kind, such as `!!str` or `!!null`, holds a scalar. A selector
+// thus selects nothing below it, on the collection itself or on an alias
+// of one, as in `!!str *k`. A `<<` merge key reads its mappings through
+// every tag. A mapping key lookup sees the entries a `<<` merge key brings
+// in. Where the mapping and a merge both define a key, the
 // later entry in document order wins, as it does when the decoder fills a
 // map.
 //
@@ -90,9 +96,8 @@
 // or `>`) by its content. [Resolver.KeyName] gives the text that a child
 // selector matches a key node by. A caller can use it to build a path from
 // the keys it walks. Some keys do not have a name, such as an alias key
-// that does not have an anchor before it. A child selector never matches
-// such a key. A `..name` selector thus skips its entry and everything
-// below that entry.
+// that reads no anchor. A child selector never matches such a key. A
+// `..name` selector thus skips its entry and everything below that entry.
 //
 // [go.jacobcolvin.com/niceyaml.WithAllowDuplicateKeys] lets the parser
 // accept a mapping that defines one key twice. A path then selects the
@@ -120,32 +125,66 @@
 // mapping.
 //
 // When several anchors share a name, an alias refers to the last one
-// before it. The goccy/go-yaml decoder uses that anchor when it fills a
-// map. The decoder records an anchor on the value of a `<<` merge key only
-// for the aliases that other merge keys name. An alias elsewhere refers to
-// such an anchor only when the document does not define another anchor of
-// its name before the alias.
+// before it. An anchor counts where it starts and again where its content
+// ends, so for the aliases after it, an anchor wins over an anchor of its
+// name inside its content. An anchor on the value of a `<<` merge key, or
+// on an element of a sequence there, counts for the aliases that other
+// merge keys name. An alias elsewhere refers to such an anchor only when
+// the document does not define another anchor of its name before the
+// alias. At each `<<` merge key, the anchors inside each mapping that the
+// merge key brings in count again. Each alias keeps the anchor that this
+// rule binds it to, wherever a decode reads it, as at a merge key that
+// brings in the mapping that holds the alias.
 //
-// At each `<<` merge key, the decoder reads again each mapping that the
-// merge key brings in. The anchors inside that mapping thus count again
-// there. The decoder also looks up the aliases inside that mapping again.
-// A path instead keeps each of those aliases bound to the anchor it refers
-// to where the mapping defines it. When the decoder fills a struct, it
-// resolves aliases in the order of the struct's fields. A path does not
-// follow that order.
+// The decodes of go.jacobcolvin.com/niceyaml read each alias at the anchor
+// that a Resolver binds it to, and so do the keys that a decode names and
+// the edits of go.jacobcolvin.com/niceyaml/edit. The decoder of
+// goccy/go-yaml binds some aliases of reused anchor names otherwise, so
+// yaml.Unmarshal reads some documents apart from niceyaml:
+//
+//   - An alias after an anchor on a merge value reads the last other anchor
+//     of its name in the document, even one after the alias. In
+//     "m: {<<: &x {p: 1}}", "b: *x", and "c: &x 2", go-yaml reads b as 2,
+//     and niceyaml reads b as {p: 1}.
+//   - At a merge key, go-yaml looks up again each alias inside the mapping
+//     that the merge key brings in. In "k1: &k 1", "b: &b {v: *k}",
+//     "k2: &k 2", and "m: {<<: *b}", go-yaml reads m.v as 2, and niceyaml
+//     reads m.v as 1.
+//   - An alias inside the content of an anchor of its name reads null in
+//     go-yaml, even after an inner anchor of that name. In
+//     "r1: &x0 {z1: [&x0 d, *x0]}", go-yaml reads z1 as [d, null], and
+//     niceyaml reads z1 as [d, d].
+//   - An alias key inside the content of its anchor reads that anchor
+//     where a merge key brings it in. In "b: &b {*b : 1}" and
+//     "m: {<<: *b}", go-yaml reads m as {"map[null:1]": 1}, and niceyaml
+//     reads m as {null: 1}.
+//
+// When the decoder fills a struct, it resolves aliases in the order of the
+// struct's fields. A path does not follow that order.
 //
 // An alias does not resolve when it leads back to itself or when the document
 // does not define an anchor of its name before it. A resolve through such an
-// alias returns an error wrapping [ErrAlias]. An alias inside the content of
-// the anchor it refers to leads back to itself, unless a `<<` merge key names
-// it. The decoder reads such an alias as null, and [Resolver.Token] still
-// finds its token.
+// alias returns an error wrapping [ErrAlias], which names the line and the
+// column of the alias after the path, as in "resolve $.a.b: 1:7: alias does
+// not resolve: *x forms a cycle". An alias inside the content of the anchor
+// it refers to leads back to itself, unless a `<<` merge key names it. The
+// decoder reads such an alias as null, so a path that ends at the
+// alias selects it, or the tag on it, as it selects an alias that reads a
+// reference document. So does a path that ends at an alias of an anchor
+// that holds such an alias, as "&x !t *x" does. A `..*` selector lists
+// such an alias and does not descend below it. A `.*`, `[*]`, or `..`
+// selector at the alias selects nothing, as on any other null. Any other
+// selector below the alias returns an error wrapping ErrAlias.
+// [Resolver.Token] finds the token of every alias at the end of a path.
 //
 // A document can read the anchors of reference documents that the Resolver
 // does not hold, such as those of niceyaml.WithReferences.
-// [WithReferenceAnchors] names those anchors. A resolve through an alias
-// that reads one returns an error that wraps [ErrReferenceAlias] as well as
-// ErrAlias.
+// [WithReferenceAnchors] gives those anchors. A path that ends at an alias
+// that reads one selects the alias, as a path that ends at a tag selects
+// the tag. A resolve through such an alias returns an error that wraps
+// [ErrReferenceAlias] as well as ErrAlias. An alias key that reads one
+// takes its name from the anchor, so `*k` matches `.name` after `&k name`
+// in a reference document.
 //
 // A `.*` selector selects every entry of a mapping, as `[*]` selects every
 // element of a sequence. One path thus reaches each job of a workflow or

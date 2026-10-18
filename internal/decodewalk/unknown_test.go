@@ -233,3 +233,64 @@ func TestUnknownFields_Aliases(t *testing.T) {
 		})
 	}
 }
+
+func TestUnknownFields_Merges(t *testing.T) {
+	t.Parallel()
+
+	const reference = "ref: &ref {a: 1, z: 3}\n"
+
+	tcs := map[string]struct {
+		input string
+		// The place of the key of each unknown field.
+		want []string
+	}{
+		// The search does not report a key that a merge key brings in from a
+		// reference document, such as the z of ref.
+		"entry before a merge key of a reference document": {
+			input: stringtest.LinesLF("x: 1", "<<: *ref", "y: 2"),
+			want:  []string{"x@1:1", "y@3:1"},
+		},
+		// The decoder reads the z of the merge key, not the z of the mapping.
+		"entry that a merge key of a reference document replaces": {
+			input: stringtest.LinesLF("z: 1", "<<: *ref"),
+		},
+		"entry after a merge key of a reference document": {
+			input: stringtest.LinesLF("<<: *ref", "z: 1"),
+			want:  []string{"z@2:1"},
+		},
+		"entry before a merge key of the document": {
+			input: stringtest.LinesLF("base: &base {a: 2}", "v:", "  x: 1", "  <<: *base"),
+			want:  []string{"base@1:1", "x@3:3"},
+		},
+		"entry of a nested mapping": {
+			input: "v: {x: 1, <<: *ref}\n",
+			want:  []string{"x@1:5"},
+		},
+		"merge key of the document that reads a reference document": {
+			input: stringtest.LinesLF("base: &base {<<: *ref}", "v:", "  z: 1", "  <<: *base"),
+			want:  []string{"base@1:1"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, yamltest.References(reference))
+			r := referenceRules(t, doc, yamltest.FirstDocument(t, reference), yaml.DisallowUnknownField())
+
+			type holder struct {
+				V pair `yaml:"v"`
+				A int  `yaml:"a"`
+			}
+
+			var got []string
+
+			for _, field := range decodewalk.UnknownFields(t.Context(), r, reflect.TypeFor[holder](), doc.AST()) {
+				got = append(got, yamltest.TokenPlace(field.Token))
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}

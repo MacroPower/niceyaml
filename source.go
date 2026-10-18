@@ -19,6 +19,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/bom"
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
+	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/limitread"
@@ -87,8 +88,8 @@ type Source struct {
 	// The index that maps a position to an offset in input, built on the
 	// first call of [Source.Offset].
 	offsets lazy[bom.Index]
-	// The stream that [Source.Tokens] rebuilds from lines.
-	stream lazy[token.Tokens]
+	// The tokens that lines holds, in order, which [Source.Tokens] returns.
+	stream token.Tokens
 	// The anchors an alias of the documents finds in the reference
 	// documents, as referenceAnchors builds them.
 	refAnchors lazy[*reftable.Table]
@@ -102,6 +103,18 @@ type Source struct {
 	// The spellings of the reference documents, as referenceSpellings
 	// collects them.
 	refSpellings lazy[[]*decodetree.Spellings]
+	// The keys of the merge sources of the documents that the lookups
+	// beside the `<<` merge keys of reference documents read, for every
+	// document. The lookups read each source once, whatever the number of
+	// documents that merge it. So the keys grow with the text of the
+	// Source. The reference table keeps the keys of each merge source of a
+	// reference document for every Source that reads it, as
+	// [Node.referenceAnchorKeys] describes. It does not keep the names of
+	// the alias keys there. Such a key reads the anchor that the references
+	// of the Source pick. Two Sources that read one reference can thus find
+	// different names for it. So the names of such keys belong to the
+	// Source, and they grow with the alias keys of the reference documents.
+	mergeKeys decodewalk.Keys
 	sourceConfig
 	hasInput bool
 }
@@ -757,7 +770,9 @@ func newStringSource(src string, cfg sourceConfig) *Source {
 		return &Source{sourceConfig: cfg, input: src, hasInput: true, limitErr: limitError(limit)}
 	}
 
-	s := newTokenSource(tokens.Tokenize(src), cfg)
+	// Nothing else holds the stream that Tokenize returns, so the Source
+	// shifts its tokens in place.
+	s := newResetSource(tokens.ResetPositionsInPlace(tokens.Tokenize(src)), cfg)
 	s.input, s.hasInput = src, true
 
 	return s
@@ -815,7 +830,22 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 // newTokenSource returns the [Source] that [NewSourceFromTokens] creates
 // from tks with the settings cfg.
 func newTokenSource(tks token.Tokens, cfg sourceConfig) *Source {
-	return &Source{lines: line.NewLines(tokens.ResetPositions(tks)), sourceConfig: cfg}
+	return newResetSource(tokens.ResetPositions(tks), cfg)
+}
+
+// newResetSource returns the [Source] of tks with the settings cfg. Either
+// [tokens.ResetPositions] or [tokens.ResetPositionsInPlace] reset the
+// positions of tks, and the Source holds its tokens.
+func newResetSource(tks token.Tokens, cfg sourceConfig) *Source {
+	s := &Source{lines: line.NewLines(tks), sourceConfig: cfg}
+
+	// The lines hold each token of tks, and tks holds no nil token, so the
+	// lines give back tks. The stream of lines without a token is nil.
+	if len(tks) > 0 {
+		s.stream = tks
+	}
+
+	return s
 }
 
 // parserOptions returns the options the Source parses its tokens with.
@@ -854,6 +884,19 @@ func (s *Source) referenceAnchors() *reftable.Table {
 
 		return reftable.New(nil, tables...)
 	})
+}
+
+// referenceValue returns the value of the anchor of name that the
+// reference documents of the Source define, as
+// [paths.WithReferenceAnchors] takes it. It reports false when they do not
+// define one.
+func (s *Source) referenceValue(name string) (ast.Node, bool) {
+	anchor, ok := s.referenceAnchors().Anchor(name)
+	if !ok {
+		return nil, false
+	}
+
+	return anchor.Value, true
 }
 
 // exportedAnchors returns the anchors a Source finds in s when it reads s
@@ -1018,16 +1061,17 @@ func (s *Source) Offset(pos position.Position) (int, bool) {
 	return s.offsets.get(func() bom.Index { return bom.NewIndex(s.input) }).Offset(pos.Line, pos.Col)
 }
 
-// Tokens returns the full [token.Tokens] stream of the [Source]. The first
-// call rebuilds the stream from every [line.Line], and each call returns a
-// new slice that holds the same tokens. See [line.Lines.Tokens] for how a
-// token cut across lines comes back whole.
+// Tokens returns the full [token.Tokens] stream of the [Source], the
+// tokens that its lines hold, in order, as [line.Lines.Tokens] rebuilds
+// them. Each call returns a new slice that holds the same tokens. See
+// [line.Lines.Tokens] for how a token cut across lines comes back whole.
 //
-// The tokens are the clones [NewSourceFromTokens] made through
-// [tokens.ResetPositions], not the tokens the caller passed. The Source keeps
-// using them, so treat them as read-only. When the input came from
-// [tokens.Tokenize], as it does for every constructor that reads text, the
-// Line and Column of each token name the rune where its text starts.
+// The tokens of a Source of tokens are the clones [NewSourceFromTokens]
+// made through [tokens.ResetPositions], not the tokens the caller passed.
+// The Source keeps using them, so treat them as read-only. When the input
+// came from [tokens.Tokenize], as it does for every constructor that reads
+// text, the Line and Column of each token name the rune where its text
+// starts.
 //
 // A nil Source does not hold any tokens, so Tokens returns nil for it.
 func (s *Source) Tokens() token.Tokens {
@@ -1035,7 +1079,7 @@ func (s *Source) Tokens() token.Tokens {
 		return nil
 	}
 
-	return slices.Clone(s.stream.get(s.lines.Tokens))
+	return slices.Clone(s.stream)
 }
 
 // Documents returns the root [*Node] of each YAML document of this

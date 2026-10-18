@@ -19,7 +19,10 @@ type existsMatcher struct {
 // `kind:` and `kind: ""` both match. Documents without the path do not
 // match. Match returns the error of a path that cannot resolve. Such a
 // path holds a wildcard selector, or an alias that does not name an
-// earlier anchor. To match a particular value, use [Content].
+// earlier anchor. An alias at the end of the path that reads a reference
+// document of [niceyaml.WithReferences] resolves, so the document matches.
+// A path through such an alias returns an error that wraps
+// [paths.ErrReferenceAlias]. To match a particular value, use [Content].
 //
 // The Matcher describes itself as `$.kind exists`, through [Describer].
 // That description is the reason that

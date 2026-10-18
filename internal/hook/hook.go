@@ -11,6 +11,8 @@ import (
 	"context"
 	"reflect"
 
+	"github.com/goccy/go-yaml/ast"
+
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -97,6 +99,17 @@ var (
 	// that each layer reads, lowest first. It returns nil for a Source that
 	// does not merge layers.
 	Layers func(src any) []any
+
+	// AliasContent returns the node that the anchor of alias holds, where
+	// alias belongs to the document of n, a *niceyaml.Node, or to one of
+	// the reference documents of its Source. An alias that reads a
+	// reference document reads the anchor there, as a decode does. The node
+	// can hold an alias inside the value of its own anchor, as in
+	// "&k !!str *k", which a decode reads as null. A caller that follows
+	// such an alias again comes back to the same node. AliasContent returns
+	// the error of paths.Resolver.Anchor for an alias that does not find an
+	// anchor.
+	AliasContent func(n any, alias *ast.AliasNode) (ast.Node, error)
 
 	// KnownKeys returns a niceyaml.DecodeOption that admits the key at
 	// each of keys, a path from `$` in the document that the decode reads.

@@ -18,6 +18,7 @@ import (
 	"testing"
 	"testing/fstest"
 	"testing/iotest"
+	"time"
 	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
@@ -3699,14 +3700,10 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 			want:   []string{`f.yaml:2:5: $: could not find alias "nope"`},
 		},
 		"registry, alias with no anchor": {
-			v:     registry,
-			input: stringtest.LinesLF("kind: Pod", "--- *nope"),
-			strict: []string{
-				"f.yaml: document 2: resolve $.kind: alias does not resolve: *nope has no anchor before it",
-			},
-			want: []string{
-				"f.yaml: document 2: resolve $.kind: alias does not resolve: *nope has no anchor before it",
-			},
+			v:      registry,
+			input:  stringtest.LinesLF("kind: Pod", "--- *nope"),
+			strict: []string{"f.yaml:2:5: $: resolve $.kind: alias does not resolve: *nope has no anchor before it"},
+			want:   []string{"f.yaml:2:5: $: resolve $.kind: alias does not resolve: *nope has no anchor before it"},
 		},
 		// The message counts every document of the file, so the one below
 		// an empty document keeps its number.
@@ -5562,40 +5559,68 @@ func TestWithReferences(t *testing.T) {
 
 		doc := yamltest.Document(t, src)
 
+		merged := yamltest.Document(t, niceyaml.NewSourceFromString(
+			stringtest.LinesLF("name: app", "server: {<<: *base}"),
+			niceyaml.WithName("app.yaml"),
+			niceyaml.WithReferences(defaults),
+		))
+
 		alias := paths.Current().Child("server")
 		port := alias.Child("port")
 
-		_, atBelow := doc.At(port)
-		_, atAlias := doc.At(alias)
-		_, nodesBelow := doc.Nodes(alias.ChildAll())
-		_, nodesAlias := doc.Nodes(alias)
-		_, rangesBelow := doc.Ranges(port)
-		_, matchBelow := matcher.Content(port, 8080).Match(t.Context(), doc)
-
-		// The error of each read that stops at the alias.
-		tcs := map[string]error{
-			"At below the alias":              atBelow,
-			"At the alias":                    atAlias,
-			"Nodes below the alias":           nodesBelow,
-			"Nodes at the alias":              nodesAlias,
-			"Ranges below the alias":          rangesBelow,
-			"Content matcher below the alias": matchBelow,
+		// The error of each read that enters the alias, and the position of
+		// the alias. Each error binds at the alias, under the path of the
+		// value that reads it.
+		type read struct {
+			err error
+			at  position.Position
 		}
 
-		for name, err := range tcs {
+		ifPresent := func(doc *niceyaml.Node) error {
+			var v int
+
+			_, err := doc.DecodeIfPresent(t.Context(), port, &v)
+
+			return err //nolint:wrapcheck // The test reads the error of the decode.
+		}
+
+		_, atBelow := doc.At(port)
+		_, decodeBelow := doc.DecodeAt[int](t.Context(), port)
+		_, nodesBelow := doc.Nodes(alias.ChildAll())
+		_, rangesBelow := doc.Ranges(port)
+		_, matchBelow := matcher.Content(port, 8080).Match(t.Context(), doc)
+		_, atMerge := merged.At(port)
+		_, decodeMerge := merged.DecodeAt[int](t.Context(), port)
+		_, nodesMerge := merged.Nodes(alias.ChildAll())
+
+		at, mergeAt := position.New(1, 8), position.New(1, 13)
+
+		tcs := map[string]read{
+			"At below the alias":                         {err: atBelow, at: at},
+			"DecodeAt below the alias":                   {err: decodeBelow, at: at},
+			"DecodeIfPresent below the alias":            {err: ifPresent(doc), at: at},
+			"Nodes below the alias":                      {err: nodesBelow, at: at},
+			"Ranges below the alias":                     {err: rangesBelow, at: at},
+			"Content matcher below the alias":            {err: matchBelow, at: at},
+			"At below a merge of the alias":              {err: atMerge, at: mergeAt},
+			"DecodeAt below a merge of the alias":        {err: decodeMerge, at: mergeAt},
+			"DecodeIfPresent below a merge of the alias": {err: ifPresent(merged), at: mergeAt},
+			"Nodes below a merge of the alias":           {err: nodesMerge, at: mergeAt},
+		}
+
+		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				require.ErrorIs(t, err, paths.ErrAlias)
-				require.ErrorIs(t, err, paths.ErrReferenceAlias)
-				require.ErrorContains(t, err, "alias reads a reference document: *base")
-				assert.False(t, niceyaml.IsInvalid(err))
-				assert.Len(t, slices.Collect(niceyaml.Problems(err)), 1)
+				require.ErrorIs(t, tc.err, paths.ErrAlias)
+				require.ErrorIs(t, tc.err, paths.ErrReferenceAlias)
+				require.ErrorContains(t, tc.err, "alias reads a reference document: *base")
+				assert.False(t, niceyaml.IsInvalid(tc.err))
+				assert.Len(t, slices.Collect(niceyaml.Problems(tc.err)), 1)
 
-				bound := yamltest.RequireSourceError(t, err)
-
-				_, ok := bound.Position()
-				assert.False(t, ok)
+				bound := yamltest.RequireSourceError(t, tc.err)
+				assert.Equal(t, tc.at, yamltest.PositionOf(t, bound))
+				assert.Equal(t, "$.server", yamltest.PathOf(t, bound).String())
 			})
 		}
 
@@ -5608,6 +5633,59 @@ func TestWithReferences(t *testing.T) {
 				yamltest.LineRange(1, 8, 9),
 			}, got)
 		})
+
+		t.Run("At and Nodes at the alias", func(t *testing.T) {
+			t.Parallel()
+
+			// The path selects the alias, and a decode of its Node reads the
+			// anchor of the reference.
+			at := yamltest.At(t, doc, alias)
+
+			nodes, err := doc.Nodes(alias)
+			require.NoError(t, err)
+			require.Len(t, nodes, 1)
+
+			for _, n := range []*niceyaml.Node{at, nodes[0]} {
+				assert.Equal(t, paths.Doc().Child("server"), n.Path())
+				assert.Equal(t, "*base", n.AST().String())
+				assert.Equal(t, position.NewSpan(1, 2), n.Span())
+
+				got, err := n.Decode[server](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, server{Port: 8080}, got)
+			}
+		})
+	})
+
+	t.Run("a path names an alias key of a reference anchor", func(t *testing.T) {
+		t.Parallel()
+
+		// The decode reads the key of the anchor k at the alias key, and so
+		// does a path.
+		keys := niceyaml.NewSourceFromString("&k name: 1\n")
+
+		tcs := map[string]struct {
+			input string
+		}{
+			"block mapping": {input: "m:\n  x: 1\n  *k : 2\n"},
+			"flow mapping":  {input: "m: {x: 1, *k : 2}\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("app.yaml"), niceyaml.WithReferences(keys))
+
+				got, err := doc.Decode[map[string]map[string]int](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, map[string]map[string]int{"m": {"x": 1, "name": 2}}, got)
+
+				value, err := doc.DecodeAt[int](t.Context(), paths.Current().Child("m", "name"))
+				require.NoError(t, err)
+				assert.Equal(t, 2, value)
+			})
+		}
 	})
 
 	t.Run("error under an alias to a reference binds at the alias", func(t *testing.T) {
@@ -5678,12 +5756,28 @@ func TestWithReferences(t *testing.T) {
 		}
 	})
 
-	t.Run("error at a key beside a merge of a reference has no position", func(t *testing.T) {
+	t.Run("value that decodes itself at a root alias binds at the alias", func(t *testing.T) {
 		t.Parallel()
 
-		// The merge sets no kind, so the decode keeps the misspelled one.
-		// The document cannot tell, so a caret under the alias would point
-		// one line below the typo.
+		// A time.Duration reports its own error, which does not carry a
+		// token. The decode places it at the alias, as it places the error
+		// of a scalar that the document writes.
+		doc := yamltest.FirstDocument(t, "*wait\n",
+			niceyaml.WithName("app.yaml"),
+			yamltest.References("wait: &wait soon\n"),
+		)
+
+		_, err := doc.Decode[time.Duration](t.Context())
+		require.EqualError(t, err, `app.yaml:1:1: $: time: invalid duration "soon"`)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		assert.True(t, niceyaml.IsInvalid(err))
+	})
+
+	t.Run("error at a key before a merge of a reference binds at the key", func(t *testing.T) {
+		t.Parallel()
+
+		// The merge sets no kind, so the decode keeps the misspelled one, and
+		// the caret points at the typo.
 		doc := yamltest.FirstDocument(t, stringtest.LinesLF("kind: Deploymnet", "<<: *base"),
 			niceyaml.WithName("app.yaml"),
 			yamltest.References(stringtest.LinesLF(
@@ -5695,18 +5789,352 @@ func TestWithReferences(t *testing.T) {
 		kinds := schema.MustCompile([]byte(`{"properties": {"kind": {"enum": ["Deployment", "Service"]}}}`))
 
 		err := doc.Validate(t.Context(), kinds)
-		require.EqualError(t, err, "app.yaml: $.kind: value does not match any enum member")
+		require.EqualError(t, err, "app.yaml:1:7: $.kind: value does not match any enum member")
 		assert.Equal(t, stringtest.JoinLF(
-			"app.yaml: $.kind: value does not match any enum member",
+			"app.yaml:1:7: $.kind: value does not match any enum member",
 			"",
-			"no excerpt: resolve $.kind: alias reads a reference document: *base",
+			"   1 | kind: Deploymnet",
+			"     |       ^^^^^^^^^^",
 		), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 		bound := yamltest.RequireSourceError(t, err)
 
 		_, ok := bound.Nearest()
 		assert.False(t, ok)
-		require.ErrorIs(t, bound.Unresolved(), paths.ErrAlias)
+		require.NoError(t, bound.Unresolved())
+	})
+
+	t.Run("error beside a merge of a reference binds by the keys of the reference", func(t *testing.T) {
+		t.Parallel()
+
+		// The anchor base sets the replicas and leaves out the name. The
+		// fallback is an alias to a reference document itself.
+		doc := yamltest.FirstDocument(t,
+			stringtest.LinesLF("kind: a", "list: [1]", "spec: {q: 1}", "fallback: *base", "<<: *base"),
+			niceyaml.WithName("app.yaml"),
+			yamltest.References(stringtest.LinesLF(
+				"base: &base",
+				"  replicas: 1",
+			)),
+		)
+
+		tcs := map[string]struct {
+			path paths.Path
+			want string
+			// The path that Nearest reports, or empty for none.
+			near string
+			// The text of the error that Unresolved returns, or empty for
+			// none.
+			unresolved string
+			// Whether that error wraps paths.ErrReferenceAlias.
+			reference bool
+		}{
+			"key the mapping writes": {
+				path: paths.Doc().Child("kind"),
+				want: "app.yaml:1:7: $.kind: bad",
+			},
+			"key the merge brings in": {
+				path:       paths.Doc().Child("replicas"),
+				want:       "app.yaml:5:5: $.replicas: bad",
+				near:       "$",
+				unresolved: "resolve $.replicas: alias reads a reference document: *base",
+				reference:  true,
+			},
+			"key that neither writes": {
+				path: paths.Doc().Child("name"),
+				want: "app.yaml:1:1: $.name: bad",
+				near: "$",
+			},
+			"key below an alias that the mapping writes": {
+				path:       paths.Doc().Child("fallback", "replicas"),
+				want:       "app.yaml:4:11: $.fallback.replicas: bad",
+				near:       "$.fallback",
+				unresolved: "resolve $.fallback.replicas: alias reads a reference document: *base",
+				reference:  true,
+			},
+			// No entry has a real key "<<", so the name selects the merge key.
+			"merge key": {
+				path: paths.Doc().Child("<<"),
+				want: "app.yaml:5:5: $.<<: bad",
+			},
+			"key below the merge key": {
+				path:       paths.Doc().Child("<<", "replicas"),
+				want:       "app.yaml:5:5: $.<<.replicas: bad",
+				near:       "$.<<",
+				unresolved: "resolve $.<<.replicas: alias reads a reference document: *base",
+				reference:  true,
+			},
+			// A path that selects nothing below a key that the merge does not
+			// bring in reads as it reads in a mapping without the merge key.
+			"index past the end of a sequence that the mapping writes": {
+				path:       paths.Doc().Child("list").Index(5),
+				want:       "app.yaml: $.list[5]: bad",
+				unresolved: "resolve $.list[5]: not found",
+			},
+			"index into a scalar that the mapping writes": {
+				path:       paths.Doc().Child("kind").Index(0),
+				want:       "app.yaml: $.kind[0]: bad",
+				unresolved: "resolve $.kind[0]: not found",
+			},
+			"key below a scalar that the mapping writes": {
+				path:       paths.Doc().Child("spec", "q", "r"),
+				want:       "app.yaml: $.spec.q.r: bad",
+				unresolved: "resolve $.spec.q.r: not found",
+			},
+			"entry of a key that neither writes": {
+				path:       paths.Doc().Child("missing").Key(),
+				want:       "app.yaml: $.missing~: bad",
+				unresolved: "resolve $.missing~: not found",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(tc.path)))
+				require.EqualError(t, err, tc.want)
+
+				bound := yamltest.RequireSourceError(t, err)
+
+				near, ok := bound.Nearest()
+				if tc.near == "" {
+					assert.False(t, ok)
+				} else {
+					require.True(t, ok)
+					assert.Equal(t, tc.near, near.String())
+				}
+
+				if tc.unresolved == "" {
+					require.NoError(t, bound.Unresolved())
+
+					return
+				}
+
+				require.EqualError(t, bound.Unresolved(), tc.unresolved)
+				assert.Equal(t, tc.reference, errors.Is(bound.Unresolved(), paths.ErrReferenceAlias))
+			})
+		}
+	})
+
+	t.Run("error beside a merge of a reference in a document past the alias limit", func(t *testing.T) {
+		t.Parallel()
+
+		// The lookup of the keys that the merge key brings in reads merge
+		// sources through the aliases of the document. A document past the
+		// alias limit does not read them, so the error binds as the
+		// resolver binds it.
+		input := yamltest.AliasLevels(5) + stringtest.LinesLF("x:", "  kind: a", "  <<: *base")
+		refs := yamltest.References("base: &base {replicas: 1}\n")
+		path := paths.Doc().Child("x", "kind")
+
+		doc := yamltest.FirstDocument(t, input, niceyaml.WithName("app.yaml"), refs)
+
+		_, err := doc.Decode[any](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+
+		err = doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(path)))
+		require.EqualError(t, err, "app.yaml: $.x.kind: bad")
+
+		bound := yamltest.RequireSourceError(t, err)
+		require.EqualError(t, bound.Unresolved(), "resolve $.x.kind: 10:7: alias reads a reference document: *base")
+		require.ErrorIs(t, bound.Unresolved(), paths.ErrReferenceAlias)
+
+		// With the limit off, the same document reads the merge sources.
+		trusted := yamltest.FirstDocument(t, input, niceyaml.WithName("app.yaml"), refs, niceyaml.WithAliasLimit(false))
+		err = trusted.Bind(niceyaml.NewError("bad", niceyaml.AtPath(path)))
+		require.EqualError(t, err, "app.yaml:9:9: $.x.kind: bad")
+	})
+
+	t.Run("goroutines bind beside a merge of a reference at once", func(t *testing.T) {
+		t.Parallel()
+
+		// The reference keeps the keys that the merge key brings in, so
+		// bindings on many goroutines read and keep them at once.
+		doc := yamltest.FirstDocument(t,
+			stringtest.LinesLF("kind: a", "<<: *base"),
+			niceyaml.WithName("app.yaml"),
+			yamltest.References("base: &base {replicas: 1}\n"),
+		)
+
+		bad := errors.Join(
+			yamltest.ErrorAt("bad", "kind"),
+			yamltest.ErrorAt("bad", "replicas"),
+			yamltest.ErrorAt("bad", "name"),
+		)
+
+		var wg sync.WaitGroup
+
+		for range 8 {
+			wg.Go(func() {
+				assert.EqualError(t, doc.Bind(bad), stringtest.JoinLF(
+					"app.yaml:1:1: $.name: bad",
+					"app.yaml:1:7: $.kind: bad",
+					"app.yaml:2:5: $.replicas: bad",
+				))
+			})
+		}
+
+		wg.Wait()
+	})
+
+	t.Run("documents bind beside merges of one reference anchor at once", func(t *testing.T) {
+		t.Parallel()
+
+		// The documents of a Source share the keys of a reference anchor
+		// that their merge keys read. So the bindings of many documents, each
+		// on a goroutine of its own, read and keep those keys at once.
+		source := niceyaml.NewSourceFromString(
+			strings.Repeat("---\nx: {kind: a, <<: *base}\n", 8),
+			niceyaml.WithName("app.yaml"),
+			yamltest.References("base: &base {replicas: 1}\n"),
+		)
+
+		bad := errors.Join(
+			yamltest.ErrorAt("bad", "x", "kind"),
+			yamltest.ErrorAt("bad", "x", "replicas"),
+		)
+
+		var wg sync.WaitGroup
+
+		for i, doc := range yamltest.Documents(t, source, 8) {
+			wg.Go(func() {
+				row := 2*i + 2
+				assert.EqualError(t, doc.Bind(bad), stringtest.JoinLF(
+					fmt.Sprintf("app.yaml:%d:11: $.x.kind: bad", row),
+					fmt.Sprintf("app.yaml:%d:18: $.x.replicas: bad", row),
+				))
+			})
+		}
+
+		wg.Wait()
+	})
+
+	t.Run("sources that share a reference read its alias keys apart", func(t *testing.T) {
+		t.Parallel()
+
+		// An alias key of a reference anchor reads the anchor that the
+		// references of each Source pick. Two Sources that read one
+		// reference can thus find different keys in one anchor. Each binds
+		// the key that its own decode reads at the alias.
+		shared := niceyaml.NewSourceFromString(stringtest.LinesLF("k: &k a", "u: &u {*k : 1}"))
+		later := niceyaml.NewSourceFromString("k: &k b\n")
+
+		tcs := map[string]struct {
+			refs       []*niceyaml.Source
+			key, other string
+		}{
+			"one reference":   {refs: []*niceyaml.Source{shared}, key: "a", other: "b"},
+			"later reference": {refs: []*niceyaml.Source{shared, later}, key: "b", other: "a"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, "x: {<<: *u}\n",
+					niceyaml.WithName("d.yaml"),
+					niceyaml.WithReferences(tc.refs...),
+				)
+
+				got, err := doc.Decode[map[string]map[string]int](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, map[string]map[string]int{"x": {tc.key: 1}}, got)
+
+				err = doc.Bind(yamltest.ErrorAt("bad", "x", tc.key))
+				require.EqualError(t, err, "d.yaml:1:9: $.x."+tc.key+": bad")
+
+				err = doc.Bind(yamltest.ErrorAt("bad", "x", tc.other))
+				require.EqualError(t, err, "d.yaml:1:1: $.x."+tc.other+": bad")
+			})
+		}
+	})
+
+	t.Run("sources that share a reference find the last entry of a key beside its alias keys", func(t *testing.T) {
+		t.Parallel()
+
+		// The alias key *k names a for a Source that reads the shared
+		// reference alone. It names b for a Source that also reads the later
+		// one. The merge key between the two entries of a reads the anchor
+		// m, which only the later reference defines. The first Source thus
+		// cannot read that merge key. It binds a key at the alias only when
+		// the last entry of the key comes after the merge key.
+		later := niceyaml.NewSourceFromString(stringtest.LinesLF("k: &k b", "m: &m {c: 3}"))
+
+		tcs := map[string]struct {
+			anchor string
+		}{
+			"alias key after a key of its name":  {anchor: "{a: 1, <<: *m, *k : 2}"},
+			"alias key before a key of its name": {anchor: "{*k : 1, <<: *m, a: 2}"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				shared := niceyaml.NewSourceFromString(stringtest.LinesLF("k: &k a", "u: &u "+tc.anchor))
+
+				readers := []struct {
+					refs []*niceyaml.Source
+					want []string
+				}{
+					{
+						refs: []*niceyaml.Source{shared},
+						want: []string{"d.yaml:1:9: $.x.a: bad", "d.yaml: $.x.b: bad", "d.yaml: $.x.c: bad"},
+					},
+					{
+						refs: []*niceyaml.Source{shared, later},
+						want: []string{"d.yaml:1:9: $.x.a: bad", "d.yaml:1:9: $.x.b: bad", "d.yaml:1:9: $.x.c: bad"},
+					},
+				}
+
+				for _, reader := range readers {
+					doc := yamltest.FirstDocument(t, "x: {<<: *u}\n",
+						niceyaml.WithName("d.yaml"),
+						niceyaml.WithReferences(reader.refs...),
+					)
+
+					for i, key := range []string{"a", "b", "c"} {
+						require.EqualError(t, doc.Bind(yamltest.ErrorAt("bad", "x", key)), reader.want[i])
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("sources that share a reference bind beside merges of its anchor at once", func(t *testing.T) {
+		t.Parallel()
+
+		// Every Source that reads one reference shares the keys of its
+		// anchors, other than the names of alias keys. So the bindings of
+		// many Sources, each on a goroutine of its own, read and keep those
+		// keys at once.
+		shared := niceyaml.NewSourceFromString(stringtest.LinesLF("k: &k kind", "base: &base {replicas: 1, *k : a}"))
+
+		bad := errors.Join(
+			yamltest.ErrorAt("bad", "x", "kind"),
+			yamltest.ErrorAt("bad", "x", "replicas"),
+			yamltest.ErrorAt("bad", "x", "name"),
+		)
+
+		var wg sync.WaitGroup
+
+		for range 8 {
+			wg.Go(func() {
+				doc := yamltest.FirstDocument(t, "x: {<<: *base}\n",
+					niceyaml.WithName("app.yaml"),
+					niceyaml.WithReferences(shared),
+				)
+
+				assert.EqualError(t, doc.Bind(bad), stringtest.JoinLF(
+					"app.yaml:1:1: $.x.name: bad",
+					"app.yaml:1:9: $.x.kind: bad",
+					"app.yaml:1:9: $.x.replicas: bad",
+				))
+			})
+		}
+
+		wg.Wait()
 	})
 
 	t.Run("references read from the files of a directory", func(t *testing.T) {

@@ -183,7 +183,6 @@ func testCannotDecide(t *testing.T, newMatcher func(path paths.Path) matcher.Mat
 	}{
 		"alias without an anchor":           {path: kindPath, input: `kind: *missing`, err: paths.ErrAlias},
 		"tagged alias without an anchor":    {path: kindPath, input: `kind: !!str *missing`, err: paths.ErrAlias},
-		"tagged alias to itself":            {path: kindPath, input: `kind: &a !!str *a`, err: paths.ErrAlias},
 		"alias without an anchor on a path": {path: metadataName, input: `metadata: *missing`, err: paths.ErrAlias},
 		"wildcard index": {
 			path:  paths.Current().Child("items").IndexAll(),

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"sync"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -12,6 +13,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
+	"go.jacobcolvin.com/niceyaml/internal/pathshook"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -27,6 +29,36 @@ type Rules struct {
 	// its anchors. The node is one View returned, or one a walk built from
 	// such nodes.
 	Decode func(node ast.Node, v any) error
+	// Anchor returns the value of the anchor that alias reads, as the
+	// decoder reads it, when Resolver does not hold that anchor, such as an
+	// anchor of a reference document. It reports false when it does not
+	// find one. A nil Anchor does not find any.
+	Anchor func(alias *ast.AliasNode) (ast.Node, bool)
+	// PastAliasLimit reports whether the aliases of the document take it
+	// past the alias limit. A lookup of the entries that a `<<` merge key
+	// brings in does not read a merge source through an alias of such a
+	// document. A key that such a source might hold is then not known. A
+	// nil PastAliasLimit reports false.
+	PastAliasLimit func() bool
+	// Keys keeps the keys of the merge sources of the document that the
+	// lookups of a walk read, for the walks that share it. It also keeps
+	// the names of the alias keys of the merge sources of reference
+	// documents. Walks that share a Keys must read each document with one
+	// resolver. They must also find one anchor for each name that an alias
+	// of a reference document reads. A nil Keys keeps the keys for one
+	// walk.
+	Keys *Keys
+	// AnchorKeys returns the [Keys] that keep the keys of the merge
+	// sources under the anchor that Anchor returns for alias, other than
+	// the alias keys. Those keys do not depend on the anchors that an alias
+	// finds, so walks that find other anchors for an alias key can share
+	// them. A lookup keeps the keys of each source that it reads through
+	// alias in that Keys, until it reads another alias of a reference
+	// document. The sources under the anchors inside the anchor go there
+	// too. Anchors whose values share a node thus keep its keys once when
+	// AnchorKeys returns one Keys for all of them. A nil AnchorKeys keeps
+	// the keys for one walk.
+	AnchorKeys func(alias *ast.AliasNode) *Keys
 	// Unmarshalers names the types the options of the decode give an
 	// unmarshaler.
 	Unmarshalers unmarshaler.Options
@@ -69,6 +101,12 @@ const (
 	Members
 	// Elements is a slice or an array that reads a sequence.
 	Elements
+	// Reference is a value at an alias whose anchor the resolver of the
+	// walk does not hold, such as an anchor of a reference document. The
+	// walk cannot read below such a value. The decoder reads the anchor,
+	// whatever the type of the value. A field whose entry a `<<` merge key
+	// brings in from a reference document reads Reference too.
+	Reference
 )
 
 // Action tells a walk where to go after a [Value].
@@ -92,12 +130,20 @@ type Value struct {
 	// Type is the type of the value, with pointers removed.
 	Type reflect.Type
 	// Held is the node the document holds for the value, and it might be
-	// an alias. For a key, it is the key of the entry.
+	// an alias. For a key, it is the key of the entry. For a field whose
+	// entry a `<<` merge key brings in from a reference document, it is the
+	// alias of the document through which the merge key reads that entry.
 	Held ast.Node
 	// Node is the node the decoder reads the value from, as
 	// [datapath.Read] returns it for Held. For a key, it is the key of the
 	// entry. An inline field reads the node of the struct that holds it.
+	// For a value that reads [Reference], Node is Held.
 	Node ast.Node
+	// Merged is the value of the entry of a reference document that the
+	// decoder reads for a field, as the decoder reads it, when a `<<` merge
+	// key brings that entry in. It is nil for any other value. Such a field
+	// reads [Reference], and its Entry is that entry.
+	Merged ast.Node
 	// Struct is the struct whose mapping holds Entry, for a field or for a
 	// member or key of an inline map. For a field of an inline struct, it
 	// is the struct the decoder decodes the mapping into, which holds the
@@ -127,6 +173,8 @@ type Value struct {
 	// The walk sets it for a struct and an inline field that it has gone
 	// below.
 	merges bool
+	// Whether the value is at an alias that reads [Reference].
+	reference bool
 }
 
 // Path returns the path of v under the value the walk starts at, as an
@@ -184,18 +232,22 @@ func (v *Value) Selected() bool {
 // differ from that one where the struct ignores merges, as
 // [yamlfield.IgnoresMerges] reports. The decoder drops a source that
 // holds a key it does not read as a string, along with the sources that
-// source merges. The walk cannot read the sources of some merge keys,
-// such as an alias of a reference document. It skips each entry that
-// such a merge key after the entry might replace.
+// source merges. The walk reads a source in a reference document through
+// [Rules.Anchor]. A field whose entry such a source brings in reads
+// [Reference], and its [Value.Merged] holds the value of that entry. When
+// the walk cannot read a source, it skips each entry that a merge key after
+// the entry might replace.
 //
 // The walk skips each value that the decoder does not read anything for:
 // a null, an alias to one, an alias that does not resolve, and a field
-// that [yamlfield.ReadsAnchor] reports. It skips every field of a struct
-// whose mapping holds a merge key that the decoder refuses, or a key that
-// the decoder does not read as a string. The walk reaches an inline
-// struct and an inline type that decodes itself as an [Inline] value. It
-// reaches the members an inline map reads, one for each key the decoder
-// reads.
+// that [yamlfield.ReadsAnchor] reports. It reaches a value at an alias
+// that reads an anchor of a reference document as a value that reads
+// [Reference], and it does not read below such a value. It skips every
+// field of a struct whose mapping holds a merge key that the decoder
+// refuses, or a key that the decoder does not read as a string. The walk
+// reaches an inline struct and an inline type that decodes itself as an
+// [Inline] value. It reaches the members an inline map reads, one for each
+// key the decoder reads.
 //
 // The walk goes below a struct, a map, or a sequence one time for each
 // type it reads the node as. It thus reads a node that several aliases
@@ -219,7 +271,20 @@ type walker struct {
 	seen map[seenKey]bool
 	// The entries [walker.droppedBy] found for each mapping it has read.
 	dropped map[*ast.MappingNode]map[*ast.MappingValueNode]bool
-	rules   Rules
+	// The keys of each merge source that a lookup of [walker.mergedEntry]
+	// has read, as [walker.keysOf] finds them, when [Rules.Keys] is nil.
+	keys map[keysOfKey]*sourceKeys
+	// The keys that [Rules.AnchorKeys] keeps, when it is nil, made on
+	// first use.
+	anchorKeys *Keys
+	// Whether the document is past the alias limit, as
+	// [walker.pastAliasLimit] finds it, or nil before it asks.
+	pastLimit *bool
+	rules     Rules
+	// Whether a lookup of [walker.mergedEntry] reads each merge source, as
+	// a path does, rather than skip each source that a decode of a struct
+	// drops.
+	paths bool
 }
 
 // seenKey names a node the walk has gone below, by the type it read the
@@ -239,6 +304,7 @@ func newWalker(ctx context.Context, r Rules, visit func(*Value) Action) *walker 
 		visit:   visit,
 		seen:    map[seenKey]bool{},
 		dropped: map[*ast.MappingNode]map[*ast.MappingValueNode]bool{},
+		keys:    map[keysOfKey]*sourceKeys{},
 		rules:   r,
 	}
 }
@@ -252,14 +318,33 @@ func (w *walker) root(t reflect.Type, node ast.Node, from astnode.Parent) {
 // the Held field of v. It reports false when the walk ends.
 func (w *walker) value(v *Value) bool {
 	node, ok := datapath.Read(w.rules.Resolver, v.Held)
-	if !ok {
+
+	switch {
+	case ok:
+		v.Node = node
+	case readsReference(w.rules.Resolver, v.Held):
+		v.Node, v.reference = v.Held, true
+	default:
 		return true
 	}
 
-	v.Node = node
 	v.Type = unmarshaler.Base(v.Type)
 
 	return w.yield(v)
+}
+
+// readsReference reports whether the decoder reads held, the node the
+// document holds for a value, through an alias whose anchor r does not
+// hold because a reference document defines it.
+func readsReference(r *paths.Resolver, held ast.Node) bool {
+	alias, ok := astnode.Content(held).(*ast.AliasNode)
+	if !ok {
+		return false
+	}
+
+	_, err := r.Deref(alias)
+
+	return errors.Is(err, paths.ErrReferenceAlias)
 }
 
 // yield visits v, and walks the values below it when the visit asks for
@@ -291,6 +376,8 @@ func (w *walker) reads(v *Value) Reads {
 	switch {
 	case v.Kind == Key:
 		return Whole
+	case v.reference:
+		return Reference
 	case t.Kind() == reflect.Interface || t == unmarshaler.MapSliceType:
 		return Nothing
 	}
@@ -354,8 +441,8 @@ func (w *walker) below(v *Value) bool {
 			}
 		}
 
-	case Whole, Nothing:
-		// The decoder reads nothing below the value.
+	case Whole, Nothing, Reference:
+		// The walk reads nothing below the value.
 	}
 
 	return true
@@ -407,8 +494,34 @@ func (w *walker) fields(v *Value, mapping *ast.MappingNode) bool {
 // reads from mapping. The argument parent is that struct or an inline
 // field of it. It reports false when the walk ends.
 func (w *walker) field(parent *Value, owner, t reflect.Type, name string, mapping *ast.MappingNode) bool {
-	entry := w.entryOf(mapping, name, parent.merges)
-	if entry == nil || parent.merges && w.mayReplace(mapping, entry, name) {
+	read := w.lookup(mapping, name, parent.merges)
+
+	switch {
+	case read.alias != nil:
+		if w.referenceNull(read.entry.Value) {
+			return true
+		}
+
+		// The walk cannot read below the entry of a reference document, so
+		// the alias stands for the field, as for a value at such an alias.
+		return w.yield(&Value{
+			Parent:    parent,
+			Kind:      Field,
+			Type:      unmarshaler.Base(t),
+			Held:      read.alias,
+			Node:      read.alias,
+			Merged:    read.entry.Value,
+			From:      read.from,
+			Entry:     read.entry,
+			Struct:    owner,
+			Name:      name,
+			Named:     true,
+			reference: true,
+		})
+
+	// A merge key after the entry might replace it, so the walk does not
+	// read a value that the decoder might not read.
+	case read.entry == nil || !read.known:
 		return true
 	}
 
@@ -416,9 +529,9 @@ func (w *walker) field(parent *Value, owner, t reflect.Type, name string, mappin
 		Parent: parent,
 		Kind:   Field,
 		Type:   t,
-		Held:   entry.Value,
-		From:   astnode.Parent{Entry: entry},
-		Entry:  entry,
+		Held:   read.entry.Value,
+		From:   astnode.Parent{Entry: read.entry},
+		Entry:  read.entry,
 		Struct: owner,
 		Name:   name,
 		Named:  true,
@@ -452,11 +565,13 @@ func (w *walker) inline(parent *Value, owner, t reflect.Type, mapping *ast.Mappi
 	case t.Kind() == reflect.Map:
 		for entry := range datapath.Members(w.rules.Resolver, mapping, parent.merges) {
 			name, ok := w.rules.Resolver.KeyName(entry.Key)
-			if !ok || w.entryOf(mapping, name, parent.merges) != entry {
+			if !ok {
 				continue
 			}
 
-			if parent.merges && w.mayReplace(mapping, entry, name) {
+			// A merge key after an entry that the lookup cannot tell about
+			// might replace it.
+			if read := w.lookup(mapping, name, parent.merges); read.alias != nil || read.entry != entry || !read.known {
 				continue
 			}
 
@@ -523,34 +638,77 @@ func (w *walker) entry(
 }
 
 // entryOf returns the entry of mapping that the decoder reads for the
-// key name when it decodes a struct, or nil when mapping does not hold
-// one. With merges set, the entry is the one a path through name selects,
-// unless [walker.droppedBy] reports it. Without merges, the entry is the
-// last entry of mapping itself with that name. So is the entry when the
-// lookup cannot read the sources of a `<<` merge key, such as an alias of
-// a reference document. The decoder reads that entry unless such a
-// source holds the key too, as [walker.mayReplace] reports. The search
-// of [UnknownFields] takes the key of that entry as a candidate. The walk
-// skips its value.
+// key name when it decodes a struct, as [walker.lookup] finds it. It
+// returns nil when the decoder reads an entry of a reference document for
+// name, or when it does not read any entry.
 func (w *walker) entryOf(mapping *ast.MappingNode, name string, merges bool) *ast.MappingValueNode {
-	if merges {
-		selected, err := w.rules.Resolver.Entry(mapping, name)
-		if errors.Is(err, paths.ErrReferenceAlias) {
-			return w.entryOf(mapping, name, false)
-		}
-
-		if err != nil {
-			return nil
-		}
-
-		entry, ok := selected.(*ast.MappingValueNode)
-		if !ok || w.droppedBy(mapping)[entry] {
-			return nil
-		}
-
-		return entry
+	read := w.lookup(mapping, name, merges)
+	if read.alias != nil {
+		return nil
 	}
 
+	return read.entry
+}
+
+// entryRead is the entry that the decoder reads for a key of a mapping
+// when it decodes a struct, as [walker.lookup] finds it.
+type entryRead struct {
+	// The entry, or nil when the decoder does not read one. It is a node of
+	// a reference document, as the decoder reads it, when alias is not nil.
+	entry *ast.MappingValueNode
+	// The alias of the document through which a `<<` merge key brings in
+	// entry from a reference document, or nil when the document holds
+	// entry.
+	alias *ast.AliasNode
+	// What holds alias in the document.
+	from astnode.Parent
+	// Whether the lookup read every merge source it needed.
+	known bool
+}
+
+// lookup returns the entry of mapping that the decoder reads for the key
+// name when it decodes a struct. With merges set, the entry is the one
+// that a path through name selects, unless [walker.droppedBy] reports it.
+// Without merges, the entry is the last entry of mapping itself with that
+// name.
+//
+// The resolver cannot read the sources of a `<<` merge key that reads a
+// reference document. For such a lookup, the walk reads the merge keys
+// itself, as [walker.mergedEntry] describes, so the entry might lie in a
+// reference document. When the walk cannot read a source either, the
+// result holds the last entry of mapping itself with that name, and it
+// reports that the lookup is not known. A merge key after that entry might
+// then replace it.
+func (w *walker) lookup(mapping *ast.MappingNode, name string, merges bool) entryRead {
+	if !merges {
+		return entryRead{entry: w.ownEntry(mapping, name), known: true}
+	}
+
+	selected, err := w.rules.Resolver.Entry(mapping, name)
+	if errors.Is(err, paths.ErrReferenceAlias) {
+		read := w.mergedEntry(mapping, name)
+		if !read.known {
+			read.entry = w.ownEntry(mapping, name)
+		}
+
+		return read
+	}
+
+	if err != nil {
+		return entryRead{known: true}
+	}
+
+	entry, ok := selected.(*ast.MappingValueNode)
+	if !ok || w.droppedBy(mapping)[entry] {
+		return entryRead{known: true}
+	}
+
+	return entryRead{entry: entry, known: true}
+}
+
+// ownEntry returns the last entry of mapping itself whose key is name, or
+// nil when mapping does not hold one.
+func (w *walker) ownEntry(mapping *ast.MappingNode, name string) *ast.MappingValueNode {
 	for _, entry := range slices.Backward(mapping.Values) {
 		if entry == nil || entry.Key == nil || astnode.IsMergeKey(entry.Key) {
 			continue
@@ -564,24 +722,680 @@ func (w *walker) entryOf(mapping *ast.MappingNode, name string, merges bool) *as
 	return nil
 }
 
-// mayReplace reports whether a `<<` merge key after entry, the entry of
-// mapping itself for the key name, might replace entry. It reports true
-// when the lookup of name cannot read the sources of such a merge key,
-// such as an alias of a reference document. One of those sources might
-// then hold the key. The walk skips such an entry, so it does not read a
-// value that the decoder might not read.
-func (w *walker) mayReplace(mapping *ast.MappingNode, entry *ast.MappingValueNode, name string) bool {
-	at := slices.Index(mapping.Values, entry)
-	if at < 0 || !slices.ContainsFunc(mapping.Values[at+1:], func(e *ast.MappingValueNode) bool {
-		return e != nil && astnode.IsMergeKey(e.Key)
-	}) {
+// mergedEntry returns the entry of mapping that the decoder reads for the
+// key name, as [walker.lookup] describes, by reading the merge keys of
+// mapping and of each mapping they bring in. The decoder reads the entries
+// of a mapping in order, the entries of a merge key where the key stands,
+// and a later entry of a key replaces an earlier one. The lookup thus reads
+// the entries from the last back, and the first entry with the key name
+// wins. It reads an alias of a reference document through [Rules.Anchor].
+// The decoder drops each source with a key that it does not read as a
+// string, as [walker.readsAsStruct] tells, so the lookup skips such a source
+// and the sources it merges. A walker that reads every source as a path
+// does skips none. One lookup reads each mapping once.
+//
+// The lookup stops at the first source that it cannot read. A key that it
+// has not found by then is not known. It reads only the merge keys that
+// come after the last entry of mapping itself with the key name, so a
+// lookup costs about as much as the merge sources it reads. The keys of
+// each merge source that it reads stay in [Rules.Keys] and
+// [Rules.AnchorKeys], as [walker.keysOf] describes. The lookups of many
+// mappings and many documents that merge one source thus read its entries
+// once.
+func (w *walker) mergedEntry(mapping *ast.MappingNode, name string) entryRead {
+	l := nameLookup{w: w, name: name, seen: map[ast.Node]bool{}}
+
+	read, stop := l.entries(mapping, nil, nil, astnode.Parent{}, true)
+
+	switch {
+	case stop:
+		return entryRead{}
+	case read.entry == nil:
+		return entryRead{known: true}
+	default:
+		return read
+	}
+}
+
+// nameLookup holds the state of one lookup of [walker.mergedEntry].
+type nameLookup struct {
+	w *walker
+	// The mappings and the sequences of merge sources that the lookup has
+	// read. An alias inside its own anchor reads that anchor, so a source
+	// can hold itself.
+	seen map[ast.Node]bool
+	// The key the lookup finds the entry of.
+	name string
+}
+
+// entries returns the entry with the key name that the decoder reads in
+// node, a mapping, as [walker.mergedEntry] describes. The argument via is
+// the alias through which the lookup reads a reference document, and from
+// is what holds via in the document. Both are zero for a mapping of the
+// document. The argument anchor keeps the keys of the anchor of a reference
+// document that holds node, as [Rules.AnchorKeys] describes. It is nil for
+// a mapping of the document. With top set, node is the mapping of the
+// struct itself. The lookup reads that mapping whatever its keys hold, as
+// the walk of its fields does. The entry is nil when node does not bring
+// in an entry of that key. The bool result reports that the lookup reached
+// a source it cannot read, which ends it.
+func (l *nameLookup) entries(
+	node ast.Node, via *ast.AliasNode, anchor *Keys, from astnode.Parent, top bool,
+) (entryRead, bool) {
+	entries, ok := astnode.Entries(node)
+	if !ok || l.seen[node] {
+		return entryRead{}, false
+	}
+
+	l.seen[node] = true
+
+	keys := l.w.keysOf(node, entries, anchor, via != nil, top)
+	if !top && !l.w.paths && !keys.strings {
+		return entryRead{}, false
+	}
+
+	own, hasOwn := keys.last(l.name)
+	if hasOwn && astnode.IsMergeKey(entries[own].Key) {
+		// The index of the resolver holds the last merge key under `<<`,
+		// which is not an entry that a merge key brings in.
+		hasOwn = false
+	}
+
+	// A merge key after the last entry of the key wins over that entry, and
+	// a later merge key wins over an earlier one.
+	for _, i := range slices.Backward(keys.merges) {
+		if hasOwn && i < own {
+			break
+		}
+
+		at := from
+		if via == nil {
+			at = astnode.Parent{Entry: entries[i]}
+		}
+
+		read, stop := l.merge(entries[i].Value, via, anchor, at)
+		if stop || read.entry != nil {
+			return read, stop
+		}
+	}
+
+	if !hasOwn {
+		return entryRead{}, false
+	}
+
+	return entryRead{entry: entries[own], alias: via, from: from, known: true}, false
+}
+
+// merge returns the entry with the key name that the mappings of value,
+// the value of a `<<` merge key, bring in, the last source first, as
+// [nameLookup.entries] reads them. The arguments via, anchor, and from
+// are those of [nameLookup.entries], for value.
+func (l *nameLookup) merge(
+	value ast.Node, via *ast.AliasNode, anchor *Keys, from astnode.Parent,
+) (entryRead, bool) {
+	switch v := value.(type) {
+	case *ast.AnchorNode:
+		return l.merge(v.Value, via, anchor, from)
+
+	case *ast.TagNode:
+		return l.merge(v.Value, via, anchor, from)
+
+	case *ast.AliasNode:
+		target, ref, ok := l.w.follow(v, via)
+		if !ok {
+			return entryRead{}, true
+		}
+
+		if ref {
+			anchor = l.w.keysOfAnchor(v)
+
+			if via == nil {
+				via = v
+			}
+		}
+
+		return l.merge(target, via, anchor, from)
+
+	case *ast.SequenceNode:
+		if l.seen[v] {
+			return entryRead{}, false
+		}
+
+		l.seen[v] = true
+
+		for i, elem := range slices.Backward(v.Values) {
+			at := from
+			if via == nil {
+				at = astnode.Parent{Sequence: v, Index: i}
+			}
+
+			read, stop := l.merge(elem, via, anchor, at)
+			if stop || read.entry != nil {
+				return read, stop
+			}
+		}
+
+		return entryRead{}, false
+
+	default:
+		return l.entries(value, via, anchor, from, false)
+	}
+}
+
+// sourceKeys indexes the entries of one mapping that a lookup reads, as
+// [walker.keysOf] finds them.
+type sourceKeys struct {
+	// The index of the last entry with each key name. It might also hold
+	// the last `<<` merge key under the name `<<`. For a mapping of a
+	// reference document, it does not hold the alias keys.
+	names map[string]int
+	// The index of each `<<` merge key, in order.
+	merges []int
+	// The index of each alias key of a mapping of a reference document, in
+	// order.
+	aliases []int
+	// Whether the decoder reads each key that is not a merge key as a
+	// string, as [walker.readsAsStrings] tells.
+	strings bool
+}
+
+// mappingKeys holds the keys of one mapping that a lookup reads, as
+// [walker.keysOf] finds them.
+type mappingKeys struct {
+	*sourceKeys
+	// The index of the last alias key with each name, for a mapping of a
+	// reference document. An alias key has the name of the anchor that
+	// [Rules.Anchor] finds for it.
+	aliasNames map[string]int
+}
+
+// last returns the index of the last entry whose key has name. It reports
+// false when no entry has that name.
+func (k mappingKeys) last(name string) (int, bool) {
+	i, ok := k.names[name]
+	if j, held := k.aliasNames[name]; held && (!ok || j > i) {
+		return j, true
+	}
+
+	return i, ok
+}
+
+// keysOfKey names the keys of a mapping that [walker.keysOf] read. A key
+// of a reference document reads the anchor that [Rules.Anchor] finds for
+// an alias key, so the kind of document is part of the name.
+//
+//nolint:unused // The fields tell the keys of the map apart.
+type keysOfKey struct {
+	node ast.Node
+	ref  bool
+}
+
+// keysOf returns the keys of node, whose entries are entries. With top
+// set, node is the mapping at which a lookup starts, a mapping of the
+// document. The resolver has read the keys of such a mapping for the
+// lookup of its own that failed. So keysOf reads them from the resolver,
+// without the verdict of [walker.readsAsStrings], which such a mapping
+// does not need. It does not keep them.
+//
+// Any other mapping is a merge source. The first lookup that asks for the
+// keys of a merge source reads them, and keysOf keeps them. It keeps the
+// keys of a merge source of the document in [Rules.Keys], or in the walker
+// when the rules do not hold a Keys. With ref set, node belongs to a
+// reference document, under the anchor whose keys anchor keeps. The keys
+// of such a node do not depend on the resolver of the document. Only the
+// alias keys depend on the anchors that an alias finds. So keysOf keeps
+// the other keys in anchor, which every walk that reads the anchor
+// shares. It keeps the names of the alias keys as it keeps the keys of a
+// merge source of the document.
+func (w *walker) keysOf(node ast.Node, entries []*ast.MappingValueNode, anchor *Keys, ref, top bool) mappingKeys {
+	if top {
+		if mapping, ok := node.(*ast.MappingNode); ok && pathshook.MappingKeys != nil {
+			if names, merges := pathshook.MappingKeys(w.rules.Resolver, mapping); names != nil {
+				return mappingKeys{sourceKeys: &sourceKeys{names: names, merges: merges}}
+			}
+		}
+
+		return mappingKeys{sourceKeys: w.indexKeys(entries, false)}
+	}
+
+	key := keysOfKey{node: node, ref: ref}
+	if !ref {
+		return mappingKeys{sourceKeys: w.heldKeys(key, func() *sourceKeys { return w.indexKeys(entries, false) })}
+	}
+
+	keys := mappingKeys{sourceKeys: anchor.held(key, func() *sourceKeys { return w.indexKeys(entries, true) })}
+	if len(keys.aliases) > 0 {
+		keys.aliasNames = w.heldKeys(key, func() *sourceKeys { return w.aliasKeys(entries, keys.aliases) }).names
+	}
+
+	return keys
+}
+
+// indexKeys indexes entries, the entries of a mapping. With ref set, the
+// entries belong to a reference document. The index then holds the
+// place of each alias key, but not its name.
+func (w *walker) indexKeys(entries []*ast.MappingValueNode, ref bool) *sourceKeys {
+	keys := &sourceKeys{names: make(map[string]int, len(entries)), strings: w.readsAsStrings(entries, ref)}
+
+	for i, entry := range entries {
+		switch {
+		case entry == nil || entry.Key == nil:
+		case astnode.IsMergeKey(entry.Key):
+			keys.merges = append(keys.merges, i)
+		case ref && isAliasKey(entry.Key):
+			keys.aliases = append(keys.aliases, i)
+		default:
+			if name, ok := w.keyName(entry.Key, ref); ok {
+				keys.names[name] = i
+			}
+		}
+	}
+
+	return keys
+}
+
+// aliasKeys indexes the alias keys of entries, the entries of a mapping
+// of a reference document, at the places that aliases holds. The index
+// holds the name of each alias key, which reads the anchor that
+// [Rules.Anchor] finds for it.
+func (w *walker) aliasKeys(entries []*ast.MappingValueNode, aliases []int) *sourceKeys {
+	keys := &sourceKeys{names: make(map[string]int, len(aliases))}
+
+	for _, i := range aliases {
+		if name, ok := w.keyName(entries[i].Key, true); ok {
+			keys.names[name] = i
+		}
+	}
+
+	return keys
+}
+
+// isAliasKey reports whether key, the key of a mapping entry, is an
+// alias.
+func isAliasKey(key ast.Node) bool {
+	_, ok := astnode.Content(key).(*ast.AliasNode)
+
+	return ok
+}
+
+// heldKeys returns the keys that [Rules.Keys] keeps for key, or that the
+// walker keeps when the rules do not hold a Keys. The first call for key
+// builds them with index.
+func (w *walker) heldKeys(key keysOfKey, index func() *sourceKeys) *sourceKeys {
+	if w.rules.Keys != nil {
+		return w.rules.Keys.held(key, index)
+	}
+
+	if keys, ok := w.keys[key]; ok {
+		return keys
+	}
+
+	keys := index()
+	if w.keys != nil {
+		w.keys[key] = keys
+	}
+
+	return keys
+}
+
+// keysOfAnchor returns the [Keys] that keep the keys of the merge sources
+// under the anchor of a reference document that alias reads, as
+// [Rules.AnchorKeys] returns them. The walker keeps those keys when the
+// rules do not hold an AnchorKeys, or it does not return a Keys.
+func (w *walker) keysOfAnchor(alias *ast.AliasNode) *Keys {
+	if w.rules.AnchorKeys != nil {
+		if keys := w.rules.AnchorKeys(alias); keys != nil {
+			return keys
+		}
+	}
+
+	if w.anchorKeys == nil {
+		w.anchorKeys = &Keys{}
+	}
+
+	return w.anchorKeys
+}
+
+// Keys keeps the keys of the merge sources that the lookups of walks read,
+// as [Rules.Keys] and [Rules.AnchorKeys] describe. It tells the sources
+// apart by node. So it keeps the keys of each node once, whatever the
+// number of mappings, aliases, anchors, and documents that merge it. The
+// keys it keeps thus grow with the entries of the nodes that the walks
+// read. Two nodes that stand for one mapping, such as two copies of it,
+// each have keys of their own. The zero Keys is empty and ready for use.
+// A Keys is safe for concurrent use.
+type Keys struct {
+	// The keys of each source, by its [keysOfKey].
+	sources sync.Map
+}
+
+// held returns the keys that k keeps for key. The first call for key
+// builds them with index. Two walks that read one source at the same time
+// might each build its keys. Each builds the same keys, as [Rules.Keys]
+// and [Rules.AnchorKeys] require. A nil Keys builds the keys on each call.
+func (k *Keys) held(key keysOfKey, index func() *sourceKeys) *sourceKeys {
+	if k == nil {
+		return index()
+	}
+
+	if held, ok := k.sources.Load(key); ok {
+		if keys, ok := held.(*sourceKeys); ok {
+			return keys
+		}
+	}
+
+	keys := index()
+	k.sources.Store(key, keys)
+
+	return keys
+}
+
+// PathEntries finds the entries that paths select in the mappings of one
+// document, as [PathEntries.Entry] describes. The keys of the merge
+// sources that its lookups read stay in [Rules.Keys] and
+// [Rules.AnchorKeys]. So the lookups of many paths that merge one source
+// read its entries once. A PathEntries is safe for concurrent use.
+//
+// Create instances with [NewPathEntries].
+type PathEntries struct {
+	rules Rules
+}
+
+// NewPathEntries creates new [PathEntries] that read the document of the
+// resolver of r, and the anchors of reference documents through
+// [Rules.Anchor].
+func NewPathEntries(r Rules) *PathEntries {
+	return &PathEntries{rules: r}
+}
+
+// Entry returns the entry that a path through the key name selects in
+// mapping, a mapping of the document. The resolver of the path cannot read
+// a `<<` merge key that reads a reference document. Entry reads such a
+// merge key as the resolver reads the merge keys of the document. It
+// reads an alias of a reference document through [Rules.Anchor]. It reads
+// every merge source, as a path does, even one that a decode of a struct
+// drops. The entry is nil when no entry has the key. The alias is the
+// alias of the document through which a `<<` merge key brings in the entry
+// from a reference document, or nil when the document holds the entry.
+// The name `<<` selects the last merge key of mapping when no entry has a
+// real key of that text, as the resolver reads it. Entry reports false
+// when the lookup cannot read a merge source, such as one past
+// [Rules.PastAliasLimit].
+func (p *PathEntries) Entry(mapping *ast.MappingNode, name string) (*ast.MappingValueNode, *ast.AliasNode, bool) {
+	// The walker reads every merge source as a path does.
+	w := lookupWalker(p.rules)
+	w.paths = true
+
+	read := w.mergedEntry(mapping, name)
+	if !read.known || read.entry != nil {
+		return read.entry, read.alias, read.known
+	}
+
+	merges := w.keysOf(mapping, mapping.Values, nil, false, true).merges
+	if len(merges) == 0 {
+		return nil, nil, true
+	}
+
+	last := mapping.Values[merges[len(merges)-1]]
+	if key, ok := w.rules.Resolver.KeyName(last.Key); ok && key == name {
+		return last, nil, true
+	}
+
+	return nil, nil, true
+}
+
+// ReferenceKey returns the alias of the document through which a `<<`
+// merge key brings in the entry of mapping, a mapping of the document,
+// whose key has the token tk. The entry lies in a reference document, and
+// the decoder reads it for a struct, as [walker.mergedEntry] finds such an
+// entry. It reports false when no such entry has the key tk.
+func ReferenceKey(r Rules, mapping *ast.MappingNode, tk *token.Token) (*ast.AliasNode, bool) {
+	for _, read := range lookupWalker(r).mergedEntries(mapping) {
+		if read.entry.Key != nil && read.entry.Key.GetToken() == tk {
+			return read.alias, true
+		}
+	}
+
+	return nil, false
+}
+
+// lookupWalker returns a walker that looks up the entries of mappings with
+// r, as [walker.mergedEntry] does, and does not walk anything.
+func lookupWalker(r Rules) *walker {
+	return &walker{
+		dropped: map[*ast.MappingNode]map[*ast.MappingValueNode]bool{},
+		keys:    map[keysOfKey]*sourceKeys{},
+		rules:   r,
+	}
+}
+
+// mergedEntries returns each entry of a reference document that the
+// decoder reads for a struct from mapping, one for each key, as
+// [walker.mergedEntry] finds them. The entries come in the order the walk
+// reaches them, which reads the entries of each mapping from the last
+// back. It returns nil when the walk cannot read every source. It reads
+// every merge source of mapping each time, and does not keep what it read.
+func (w *walker) mergedEntries(mapping *ast.MappingNode) []entryRead {
+	l := &mergeLookup{w: w, seen: map[ast.Node]bool{}, found: map[string]entryRead{}}
+	l.entries(mapping, nil, astnode.Parent{}, true)
+
+	if l.unknown {
+		return nil
+	}
+
+	var reads []entryRead
+
+	for _, name := range l.names {
+		if read := l.found[name]; read.alias != nil {
+			reads = append(reads, read)
+		}
+	}
+
+	return reads
+}
+
+// mergeLookup holds the state of one lookup of [walker.mergedEntries],
+// which reads every key of a mapping as [walker.mergedEntry] reads one.
+type mergeLookup struct {
+	w *walker
+	// The mappings and the sequences of merge sources that the lookup has
+	// read. An alias inside its own anchor reads that anchor, so a source
+	// can hold itself.
+	seen map[ast.Node]bool
+	// The entry the decoder reads for each key that the lookup has found.
+	found map[string]entryRead
+	// The keys of found, in the order the lookup found them.
+	names []string
+	// Whether the lookup reached a merge source it cannot read.
+	unknown bool
+}
+
+// entries reads the entries of node, a mapping, from the last back, as
+// [walker.mergedEntry] describes. The arguments via, from, and top are
+// those of [nameLookup.entries]. It reports true when the lookup cannot
+// read a source, which ends it.
+func (l *mergeLookup) entries(node ast.Node, via *ast.AliasNode, from astnode.Parent, top bool) bool {
+	entries, ok := astnode.Entries(node)
+	if !ok || l.seen[node] {
 		return false
 	}
 
-	_, err := w.rules.Resolver.Entry(mapping, name)
+	l.seen[node] = true
 
-	return errors.Is(err, paths.ErrReferenceAlias)
+	if !top && !l.w.paths && !l.w.readsAsStrings(entries, via != nil) {
+		return false
+	}
+
+	for _, entry := range slices.Backward(entries) {
+		if entry == nil || entry.Key == nil {
+			continue
+		}
+
+		if astnode.IsMergeKey(entry.Key) {
+			at := from
+			if via == nil {
+				at = astnode.Parent{Entry: entry}
+			}
+
+			if l.merge(entry.Value, via, at) {
+				return true
+			}
+
+			continue
+		}
+
+		name, ok := l.w.keyName(entry.Key, via != nil)
+		if !ok {
+			continue
+		}
+
+		if _, held := l.found[name]; held {
+			continue
+		}
+
+		l.found[name] = entryRead{entry: entry, alias: via, from: from, known: true}
+		l.names = append(l.names, name)
+	}
+
+	return false
 }
+
+// merge reads the mappings that value, the value of a `<<` merge key,
+// brings in, the last first, as [mergeLookup.entries] reads them.
+func (l *mergeLookup) merge(value ast.Node, via *ast.AliasNode, from astnode.Parent) bool {
+	switch v := value.(type) {
+	case *ast.AnchorNode:
+		return l.merge(v.Value, via, from)
+
+	case *ast.TagNode:
+		return l.merge(v.Value, via, from)
+
+	case *ast.AliasNode:
+		target, ref, ok := l.w.follow(v, via)
+		if !ok {
+			l.unknown = true
+
+			return true
+		}
+
+		if via == nil && ref {
+			via = v
+		}
+
+		return l.merge(target, via, from)
+
+	case *ast.SequenceNode:
+		if l.seen[v] {
+			return false
+		}
+
+		l.seen[v] = true
+
+		for i, elem := range slices.Backward(v.Values) {
+			at := from
+			if via == nil {
+				at = astnode.Parent{Sequence: v, Index: i}
+			}
+
+			if l.merge(elem, via, at) {
+				return true
+			}
+		}
+
+		return false
+
+	default:
+		return l.entries(value, via, from, false)
+	}
+}
+
+// follow returns the value of the anchor that the decoder reads for alias,
+// and reports whether that anchor lies in a reference document. The
+// argument via is not nil for an alias of a reference document. An alias
+// of the document reads the anchor that the resolver binds it to, or else
+// the anchor of a reference document that [Rules.Anchor] finds. The last
+// result is false when the lookup cannot read the anchor. A lookup does
+// not read an alias of a document past the alias limit, as
+// [Rules.PastAliasLimit] reports it.
+func (w *walker) follow(alias, via *ast.AliasNode) (ast.Node, bool, bool) {
+	if via == nil {
+		if w.pastAliasLimit() {
+			return nil, false, false
+		}
+
+		value, done, ok := w.documentAnchor(alias)
+		if done {
+			return value, false, ok
+		}
+	}
+
+	if w.rules.Anchor == nil {
+		return nil, false, false
+	}
+
+	value, ok := w.rules.Anchor(alias)
+
+	return value, true, ok
+}
+
+// documentAnchor returns the value of the anchor of the document that the
+// resolver binds alias to. The done result is false when the resolver
+// finds that alias reads a reference document instead, and the last
+// result is false when the lookup cannot read the anchor.
+func (w *walker) documentAnchor(alias *ast.AliasNode) (ast.Node, bool, bool) {
+	anchor, err := w.rules.Resolver.Anchor(alias)
+	if errors.Is(err, paths.ErrReferenceAlias) {
+		return nil, false, false
+	}
+
+	held, ok := anchor.(*ast.AnchorNode)
+	if err != nil || !ok {
+		return nil, true, false
+	}
+
+	return held.Value, true, true
+}
+
+// pastAliasLimit reports whether the document of the walk is past the
+// alias limit, as [Rules.PastAliasLimit] reports it. The walker asks the
+// rules once and keeps the answer.
+func (w *walker) pastAliasLimit() bool {
+	if w.pastLimit == nil {
+		past := w.rules.PastAliasLimit != nil && w.rules.PastAliasLimit()
+		w.pastLimit = &past
+	}
+
+	return *w.pastLimit
+}
+
+// keyName returns the text that a child selector matches key by, as
+// [paths.Resolver.KeyName] gives it. With ref set, key belongs to a
+// reference document, and an alias key reads the anchor that
+// [Rules.Anchor] finds.
+func (w *walker) keyName(key ast.Node, ref bool) (string, bool) {
+	if !ref {
+		return w.rules.Resolver.KeyName(key)
+	}
+
+	if alias, ok := astnode.Content(key).(*ast.AliasNode); ok {
+		if w.rules.Anchor == nil {
+			return "", false
+		}
+
+		value, ok := w.rules.Anchor(alias)
+		if !ok {
+			return "", false
+		}
+
+		key = value
+	}
+
+	return referenceKeys.KeyName(key)
+}
+
+// referenceKeys spells the keys of reference documents, which the resolver
+// of a walk does not hold.
+var referenceKeys = paths.NewResolver(nil)
 
 // droppedBy returns the entries the `<<` merge keys of mapping bring in
 // that the decoder drops when it decodes a struct. The decoder drops each
@@ -653,12 +1467,25 @@ func (w *walker) eachSource(
 // as a string, as [readsAsString] tells, so it decodes a struct from the
 // mapping.
 func (w *walker) readsAsStruct(mapping *ast.MappingNode) bool {
-	for _, entry := range mapping.Values {
+	return w.readsAsStrings(mapping.Values, false)
+}
+
+// readsAsStrings reports whether the decoder reads the key of each of
+// entries as a string, as [readsAsString] tells. It skips the `<<` merge
+// keys. With ref set, the entries belong to a reference document, whose
+// aliases the resolver of the walk does not bind.
+func (w *walker) readsAsStrings(entries []*ast.MappingValueNode, ref bool) bool {
+	resolver := w.rules.Resolver
+	if ref {
+		resolver = referenceKeys
+	}
+
+	for _, entry := range entries {
 		if entry == nil || entry.Key == nil || astnode.IsMergeKey(entry.Key) {
 			continue
 		}
 
-		if !readsAsString(w.rules.Resolver, entry.Key) {
+		if !readsAsString(resolver, entry.Key) {
 			return false
 		}
 	}
@@ -713,6 +1540,34 @@ func (w *walker) view(entry *ast.MappingValueNode) *ast.MappingValueNode {
 	}
 
 	return view
+}
+
+// referenceNull reports whether the decoder reads value, the value of an
+// anchor of a reference document, as a null. An alias in value reads the
+// anchor that [Rules.Anchor] finds for it. The seen set ends a loop of
+// aliases, which the decoder reads as a null too.
+func (w *walker) referenceNull(value ast.Node) bool {
+	seen := map[ast.Node]bool{}
+
+	for {
+		value = astnode.Content(value)
+
+		alias, ok := value.(*ast.AliasNode)
+		if !ok {
+			return astnode.IsNil(value) || value.Type() == ast.NullType
+		}
+
+		if seen[alias] {
+			return true
+		}
+
+		seen[alias] = true
+
+		value, ok = w.rules.Anchor(alias)
+		if !ok {
+			return false
+		}
+	}
 }
 
 // readsAsString reports whether the go-yaml decoder reads key, the key

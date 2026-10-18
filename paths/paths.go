@@ -40,9 +40,9 @@ var (
 
 	// ErrReferenceAlias indicates an alias on the path whose anchor a
 	// reference document defines, as [WithReferenceAnchors] names those
-	// anchors. A path does not enter such an alias, because the Resolver
-	// does not hold the reference documents. Every error that wraps
-	// ErrReferenceAlias also wraps [ErrAlias].
+	// anchors. A path selects such an alias but does not enter it, because
+	// the Resolver does not hold the reference documents. Every error that
+	// wraps ErrReferenceAlias also wraps [ErrAlias].
 	ErrReferenceAlias = errors.New("alias reads a reference document")
 
 	// ErrWildcard indicates a request for a single node or token from a path
@@ -774,7 +774,7 @@ func (p Path) matches(r *resolver, doc *ast.DocumentNode) ([]match, error) {
 
 	found, err := r.resolve(doc.Body, p.segments)
 	if err != nil {
-		return nil, fmt.Errorf("resolve %s: %w", p, err)
+		return nil, resolveError(p, err)
 	}
 
 	return found, nil
@@ -833,7 +833,7 @@ func (p Path) singleFrom(r *resolver, node ast.Node) (match, error) {
 
 	found, err := r.resolve(node, p.segments)
 	if err != nil {
-		return match{}, fmt.Errorf("resolve %s: %w", p, err)
+		return match{}, resolveError(p, err)
 	}
 
 	if len(found) == 0 {
@@ -849,11 +849,13 @@ func (p Path) singleFrom(r *resolver, node ast.Node) (match, error) {
 // by the name of the entry, as [Resolver.KeyName] gives it. In place of
 // each `..name` or `..*` selector, the path holds the selectors from the
 // node that selector applied to down to the node it found. The path thus
-// names the node wherever it lies. The path starts at `$` because the
-// node lies in the document, so each match of an `@` path holds the `$`
-// path with its selectors.
+// names the node wherever it lies. The path of a match of
+// [Resolver.Matches] starts at `$` because the node lies in the document,
+// so each match of an `@` path holds the `$` path with its selectors. The
+// path of a match of an `@` path of [Resolver.MatchesFrom] starts at `@`,
+// because it reads from the node that MatchesFrom starts at.
 //
-// Receive instances from [Resolver.Matches].
+// Receive instances from [Resolver.Matches] or [Resolver.MatchesFrom].
 type Match struct {
 	Node ast.Node
 	Path Path

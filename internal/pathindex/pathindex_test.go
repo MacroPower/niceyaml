@@ -1,10 +1,12 @@
 package pathindex_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
@@ -24,6 +26,14 @@ func find(tb testing.TB, tks token.Tokens, text string) *token.Token {
 	tb.Fatalf("no token %q", text)
 
 	return nil
+}
+
+// foreign returns a token of another text, at an offset past the end of
+// each text of these tests, so no node of their documents holds it.
+func foreign(tb testing.TB) *token.Token {
+	tb.Helper()
+
+	return find(tb, yamltest.FirstDocument(tb, strings.Repeat("\n", 1000)+"z: 1\n").Tokens(), "z")
 }
 
 func TestIndex_PathAt(t *testing.T) {
@@ -107,7 +117,7 @@ func TestIndex_OwnerPath(t *testing.T) {
 		"a scalar names its entry": {
 			tk: find(t, tks, "c"), want: "$.b[0]", selects: true, ok: true,
 		},
-		"a token of no node": {tk: token.New("z", "z", &token.Position{Offset: 1000})},
+		"a token of no node": {tk: foreign(t)},
 		"a nil token":        {},
 	}
 
@@ -118,6 +128,124 @@ func TestIndex_OwnerPath(t *testing.T) {
 			path, selects, ok := idx.OwnerPath(doc.Resolver(), tc.tk)
 			assert.Equal(t, tc.ok, ok)
 			assert.Equal(t, tc.selects, selects)
+
+			if tc.ok {
+				assert.Equal(t, tc.want, path.String())
+			}
+		})
+	}
+
+	t.Run("a scalar below a tag that converts its collection", func(t *testing.T) {
+		t.Parallel()
+
+		// The resolver selects nothing below the tag, so the path spells the
+		// node without selecting it.
+		doc := yamltest.FirstDocument(t, "a: !!str &k [x, 4]\n")
+		idx := pathindex.New(doc.AST())
+
+		path, selects, ok := idx.OwnerPath(doc.Resolver(), find(t, doc.Tokens(), "x"))
+		require.True(t, ok)
+		assert.False(t, selects)
+		assert.Equal(t, "$.a[0]", path.String())
+	})
+}
+
+func TestIndex_OwnerToken(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF("a: 1", "b:", "  - c", "  - {g: h}", "d:", "  e: f"))
+	idx := pathindex.New(doc.AST())
+	tks := doc.Tokens()
+
+	// The token is the one that the path of the node resolves to.
+	tcs := map[string]struct {
+		tk   *token.Token
+		want string
+	}{
+		"the colon of the first entry names the root": {tk: find(t, tks, ":"), want: "a"},
+		"a key names its entry":                       {tk: find(t, tks, "a"), want: "a"},
+		"a scalar names itself":                       {tk: find(t, tks, "1"), want: "1"},
+		"the dash of the first element names the key": {tk: find(t, tks, "-"), want: "b"},
+		"a flow mapping in a block sequence":          {tk: find(t, tks, "{"), want: "-"},
+		"a block mapping names its key":               {tk: find(t, tks, "e"), want: "e"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := idx.OwnerToken(tc.tk)
+			require.NotNil(t, got)
+			assert.Equal(t, tc.want, got.Value)
+
+			path, selects, ok := idx.OwnerPath(doc.Resolver(), tc.tk)
+			require.True(t, ok)
+			require.True(t, selects)
+
+			want, err := doc.Resolver().Token(path)
+			require.NoError(t, err)
+			assert.Same(t, want, got)
+		})
+	}
+
+	t.Run("a token of no node", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Nil(t, idx.OwnerToken(foreign(t)))
+		assert.Nil(t, idx.OwnerToken(nil))
+	})
+}
+
+func TestIndex_MergedOwnerPath(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"b: &b {c: 1}",
+		"m:",
+		"  <<: {q: v1}",
+		"  r: v2",
+		"s:",
+		"  <<: [{a: v3}, *b]",
+		"n:",
+		"  <<: {<<: {e: v4}}",
+		`"<<": {d: v5}`,
+	))
+	idx := pathindex.New(doc.AST())
+	tks := doc.Tokens()
+
+	// The one alias of the document is the value of the merge key of s.
+	var alias *token.Token
+
+	for _, tk := range tks {
+		if tk.Type == token.AliasType {
+			alias = tk
+		}
+	}
+
+	tcs := map[string]struct {
+		tk   *token.Token
+		want string
+		ok   bool
+	}{
+		"an entry that a merge key brings in": {tk: find(t, tks, "v1"), want: "$.m.q", ok: true},
+		"an entry of the mapping":             {tk: find(t, tks, "v2"), want: "$.m.r", ok: true},
+		"an entry of an element of a sequence of merge sources": {
+			tk: find(t, tks, "v3"), want: "$.s.a", ok: true,
+		},
+		"the alias of a merge key":      {tk: alias, want: "$.s", ok: true},
+		"an entry of nested merge keys": {tk: find(t, tks, "v4"), want: "$.n.e", ok: true},
+		// A quoted key is not a merge key.
+		"an entry of a quoted key": {tk: find(t, tks, "v5"), want: "$.<<.d", ok: true},
+		"a token of no node":       {tk: foreign(t)},
+		"a nil token":              {},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			path, ok := idx.MergedOwnerPath(doc.Resolver(), tc.tk)
+			assert.Equal(t, tc.ok, ok)
 
 			if tc.ok {
 				assert.Equal(t, tc.want, path.String())

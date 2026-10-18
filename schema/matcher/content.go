@@ -15,6 +15,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -76,6 +77,13 @@ type contentMatcher[T Scalar] struct {
 // of a context that ended. It returns the error of a panic in an
 // UnmarshalYAML or UnmarshalText method of the type of want too, and that
 // error holds a [*niceyaml.PanicError].
+//
+// An alias at the end of the path that reads a reference document of
+// [niceyaml.WithReferences] resolves. The path selects that alias, and
+// Match reads the scalar of its anchor through the decode, with the
+// spelling and the quotes that the reference document gives it. A path
+// through such an alias returns an error that wraps
+// [paths.ErrReferenceAlias].
 //
 // Match also refuses a document whose aliases make the read cost far more
 // than the document holds, unless [niceyaml.WithAliasLimit] disabled the
@@ -397,10 +405,12 @@ func isExplicitString(node *niceyaml.Node, raw any) bool {
 // valueNode looks through the anchors, tags, and aliases of node and
 // returns the node that they wrap. It also reports whether one of the
 // tags it passed is !!str. It follows each alias to the content of its
-// anchor, as the decoder does. [niceyaml.Node.At] follows an alias at the
-// end of a path but stops at a tag on it, so the node of
-// `version: !t *v` still holds the alias. The first result is nil for an
-// alias that does not resolve or that leads back to itself.
+// anchor, as the decoder does, and an alias that reads a reference
+// document to the anchor there. [niceyaml.Node.At] follows an alias at
+// the end of a path but stops at a tag on it, so the node of
+// `version: !t *v` still holds the alias. At also stops at an alias that
+// reads a reference document. The first result is nil for an alias that
+// does not resolve or that leads back to itself.
 func valueNode(node *niceyaml.Node) (ast.Node, bool) {
 	var (
 		n         = node.AST()
@@ -427,7 +437,7 @@ func valueNode(node *niceyaml.Node) (ast.Node, bool) {
 
 			followed = append(followed, v)
 
-			target, err := node.Resolver().Deref(v)
+			target, err := hook.AliasContent(node, v)
 			if err != nil {
 				return nil, strTagged
 			}

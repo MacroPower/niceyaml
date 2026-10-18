@@ -17,8 +17,10 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
+	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
+	"go.jacobcolvin.com/niceyaml/internal/pathshook"
 	"go.jacobcolvin.com/niceyaml/internal/rejection"
 	"go.jacobcolvin.com/niceyaml/internal/segment"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -108,11 +110,33 @@ func (d *document) newResolver() *paths.Resolver {
 	// The table of the reference anchors builds on the first alias that
 	// lacks an anchor, so a path that does not meet one does not read the
 	// reference documents.
-	return paths.NewResolver(d.root, paths.WithReferenceAnchors(func(name string) bool {
-		_, ok := src.referenceAnchors().Anchor(name)
+	return paths.NewResolver(d.root, paths.WithReferenceAnchors(src.referenceValue))
+}
 
-		return ok
-	}))
+// newPathEntries creates new [decodewalk.PathEntries] for the document.
+// They read the anchors of the reference documents of the Source. They do
+// not read a merge source through an alias of a document past the alias
+// limit, as [document.pastAliasLimit] reports it. They keep the keys of
+// each merge source that they read on the Source, as [Source.mergeKeys]
+// describes, or on the reference table for an anchor of a reference
+// document, as [Node.referenceAnchorKeys] describes.
+func (d *document) newPathEntries() *decodewalk.PathEntries {
+	return decodewalk.NewPathEntries(decodewalk.Rules{
+		Resolver:       d.pathResolver(),
+		Anchor:         d.node.referenceAnchor,
+		AnchorKeys:     d.node.referenceAnchorKeys,
+		PastAliasLimit: d.pastAliasLimit,
+		Keys:           &d.node.source.mergeKeys,
+	})
+}
+
+// pastAliasLimit reports whether the aliases of the document take it past
+// the alias limit, as [aliasing.PastLimit] reports it. A lookup of the
+// entries that a `<<` merge key brings in reads its merge sources through
+// the aliases of the document. Those reads are part of what the limit
+// weighs, so a document past the limit does not read them.
+func (d *document) pastAliasLimit() bool {
+	return aliasing.PastLimit(d.node)
 }
 
 // Node is a scope in a YAML document. It is either the root of the
@@ -231,11 +255,14 @@ func (n *Node) Err() error {
 // item.
 //
 // The resolver knows the anchors of the reference documents of
-// [WithReferences], as [paths.WithReferenceAnchors] describes. A path
-// through an alias that reads one of them thus returns an error that wraps
+// [WithReferences], as [paths.WithReferenceAnchors] describes. A path that
+// ends at an alias that reads one of them selects the alias. A node that
+// [paths.Resolver.Node] or [paths.Resolver.Matches] returns can thus be
+// such an alias, or the tag on one, rather than the content of its anchor.
+// A path through the alias returns an error that wraps
 // [paths.ErrReferenceAlias]. A resolver from paths.NewResolver does not
-// know those anchors, so its error for the same path names an alias
-// without an anchor.
+// know those anchors, so it fails at the alias with an error that names an
+// alias without an anchor.
 //
 // A document that did not parse does not have a tree, as [Node.Err]
 // describes. Its resolver is thus the one that [paths.NewResolver] creates
@@ -292,8 +319,11 @@ func (n *Node) Document() *Node {
 //
 // The node keeps the anchor or the tag written on it, so a type switch on
 // it can see an [*ast.AnchorNode] or an [*ast.TagNode] where the source
-// holds a mapping. [Node.Kind] looks through those and through an alias,
-// and reports whether the Node holds a mapping, a sequence, or a scalar.
+// holds a mapping. A Node at an alias that reads a reference document of
+// [WithReferences] holds the [*ast.AliasNode], or the tag on it, because
+// the anchor lies in that document. [Node.Kind] looks through those and
+// through an alias, and reports whether the Node holds a mapping, a
+// sequence, or a scalar.
 func (n *Node) AST() ast.Node {
 	if n.base.IsRoot() {
 		return n.doc.root.Body
@@ -309,6 +339,19 @@ func (n *Node) AST() ast.Node {
 // the document with the receiver, and decodes, validates, and binds
 // errors as the Scoped Nodes section of the package documentation
 // describes.
+//
+// A path that ends at an alias that reads a reference document of
+// [WithReferences] scopes the alias, and a decode of that Node reads the
+// anchor there. A path that enters such an alias returns an error that
+// wraps [paths.ErrReferenceAlias], as the References section of the
+// package documentation describes.
+//
+// An alias inside the content of the anchor that it refers to reads null,
+// as the go.jacobcolvin.com/niceyaml/paths package describes. A path that
+// ends at such an alias scopes the alias, or the tag on it, and a decode
+// of that Node reads null. So in "a: &x {b: *x}" and "c: *x", the path
+// $.a.b scopes the alias *x, and the path $.c scopes {b: *x}. A path that
+// enters such an alias returns an error that wraps [paths.ErrAlias].
 //
 // A path that does not select a node returns the error that
 // [paths.Resolver.Node] describes, bound to the source. It wraps
@@ -374,6 +417,13 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // "---" header. It does not select a node when the document lacks a
 // header.
 //
+// Nodes scopes an alias that reads a reference document of
+// [WithReferences] as Node.At does. A `[*]` thus scopes an element that
+// reads its value from a reference document at its alias, beside the
+// elements that the document holds. Nodes also scopes an alias inside the
+// content of its own anchor as Node.At does, and a `..*` selector does not
+// descend below such an alias.
+//
 // The errors that [paths.Resolver.Nodes] returns come back bound to the
 // source. An alias that does not resolve gives one wrapping
 // [paths.ErrAlias]. Aliases or merge keys that lead a selector to far
@@ -387,6 +437,10 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 
 	found, err := n.doc.pathResolver().Matches(n.base.Join(path))
 	if err != nil {
+		if bound, ok := n.bindAlias(path, err); ok {
+			return nil, bound
+		}
+
 		return nil, n.bindOwn(err)
 	}
 
@@ -636,14 +690,23 @@ func (n *Node) FS() fs.FS {
 //	hours:      # the span of $.hours starts here
 //	  open: 9
 //
-// A path that ends at an alias, such as `$.c` in `c: *x`, covers the
-// content of the anchor, which [Node.AST] and [Node.Decode] read.
-// Node.Ranges and an error at its root resolve to the alias instead. When
-// the anchor and the alias lie on different lines, [SourceError.Annotate]
-// does not mark anything on [Node.View] and reports false. A caller then
-// adds the line of the error with [line.View.Slice]. An error at a Node of
-// the document that [NewSourceFromLayers] builds binds in the file of a
-// layer, so a caller marks the view of its [Node.Origin] instead.
+// A path that ends at an alias whose anchor the document defines, such as
+// `$.c` in `c: *x`, covers the content of the anchor. That content is what
+// [Node.AST] and [Node.Decode] read. Node.Ranges and an error at its root
+// resolve to the alias instead. When the anchor and the alias lie on
+// different lines, [SourceError.Annotate] does not mark anything on
+// [Node.View] and reports false. A caller then adds the line of the error
+// with [line.View.Slice]. An error at a Node of the document that
+// [NewSourceFromLayers] builds binds in the file of a layer, so a caller
+// marks the view of its [Node.Origin] instead.
+//
+// A path that ends at an alias that reads a reference document of
+// [WithReferences] covers the lines of the alias alone. The anchor of such
+// an alias lies in the reference document. The span of `spec:` with
+// `*base` on the next line thus leaves out the line of the key, even where
+// [Node.Kind] reports a mapping. Node.Ranges and an error at or below such
+// a Node resolve to the alias, so SourceError.Annotate marks the error on
+// Node.View.
 //
 // [Node.View] returns a view sliced to the span, and the span slices any
 // other view over the source, such as one with decoration already:
@@ -751,35 +814,44 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 	return location{pos: position.NewFromToken(tk), tk: tk, near: &near}, true
 }
 
-// aliasLocation returns the location of the alias that path cannot follow.
-// It reports false when reason does not wrap [paths.ErrAlias]. It also
-// reports false for an alias under a `<<` merge key, because such an alias
-// might set any key or might not set one.
+// aliasLocation returns the location of the alias that path cannot follow,
+// as reason names it. Its place is the longest path above path, or path
+// itself, that points at a token, which is the path that reads the alias.
+// A path that can select several nodes, such as one with a `..*`
+// selector, reads the alias at the place of the alias in the document, so
+// the walk starts from the path that spells that place there. It reports
+// false when reason does not name an alias of the document that does not
+// resolve.
 func (n *Node) aliasLocation(path paths.Path, reason error) (location, bool) {
-	if !errors.Is(reason, paths.ErrAlias) {
+	alias, ok := pathshook.UnresolvedAlias(reason)
+	if !ok {
+		return location{}, false
+	}
+
+	tk := alias.GetToken()
+	if tk == nil || tk.Position == nil {
 		return location{}, false
 	}
 
 	resolver := n.doc.pathResolver()
+	start := n.base.Join(path)
 
-	// The path fails at the first selector that reads through the alias,
-	// so the longest path above it that resolves ends at the node that
-	// selector reads.
-	for at, ok := n.base.Join(path).Parent(); ok; at, ok = at.Parent() {
-		tk, err := resolver.Token(at)
-		if err != nil {
-			continue
-		}
-
-		// The resolver reads through every node but an alias it cannot
-		// follow. Where it reads through this one, the selector failed at
-		// an alias under a `<<` merge key of the mapping here.
-		_, err = resolver.Node(at)
-		if !errors.Is(err, paths.ErrAlias) || tk == nil || tk.Position == nil {
+	if slices.ContainsFunc(slices.Collect(start.Selectors()), func(sel paths.Selector) bool {
+		return sel.Kind != paths.SelectorChild && sel.Kind != paths.SelectorIndex && sel.Kind != paths.SelectorKey
+	}) {
+		spelled, _, ok := n.doc.pathIndex().OwnerPath(resolver, tk)
+		if !ok {
 			return location{}, false
 		}
 
-		return location{pos: position.NewFromToken(tk), tk: tk, near: &at, unfollowed: reason}, true
+		start = spelled
+	}
+
+	for at, ok := start, true; ok; at, ok = at.Parent() {
+		_, err := resolver.Token(at)
+		if err == nil {
+			return location{pos: position.NewFromToken(tk), tk: tk, near: &at, unfollowed: reason}, true
+		}
 	}
 
 	return location{}, false
@@ -788,8 +860,14 @@ func (n *Node) aliasLocation(path paths.Path, reason error) (location, bool) {
 // bindUnresolved binds reason, the error path failed to resolve with. A
 // missing key binds as [Invalid] at the mapping that lacks it, with the
 // bare [paths.ErrNotFound] text, because the binding writes the path in
-// front of it.
+// front of it. An alias that the path cannot follow, such as one without
+// an anchor or one inside the value of its own anchor, binds at the alias,
+// as [Node.bindAlias] binds it.
 func (n *Node) bindUnresolved(path paths.Path, reason error) error {
+	if bound, ok := n.bindAlias(path, reason); ok {
+		return bound
+	}
+
 	if !errors.Is(reason, paths.ErrNotFound) {
 		return n.bindOwn(reason)
 	}
@@ -799,6 +877,44 @@ func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 	}
 
 	return n.bindOwn(Invalid(&markedError{err: reason, msg: paths.ErrNotFound.Error()}, AtPath(path)))
+}
+
+// bindAlias binds reason, the error that path failed to resolve with, as
+// [Invalid] at the alias that reason names, under the path that reads that
+// alias, as [Node.aliasLocation] finds it, when the alias lies in the
+// document and does not resolve. An alias that reads a reference document
+// binds there too, but the document is not at fault for it, so
+// [IsInvalid] reports false. The message names path when the alias lies
+// elsewhere. It reports false for any other reason.
+func (n *Node) bindAlias(path paths.Path, reason error) (error, bool) {
+	loc, ok := n.aliasLocation(path, reason)
+	if !ok {
+		return nil, false
+	}
+
+	// The binding writes the path of the alias in front of the message, and
+	// the position of the alias comes from the binding.
+	msg := reason.Error()
+
+	inner := errors.Unwrap(reason)
+	if inner != nil {
+		msg = inner.Error()
+	}
+
+	if full := n.base.Join(path); !full.Equal(*loc.near) {
+		msg = fmt.Sprintf("resolve %s: %s", full, msg)
+	}
+
+	// An alias of a reference document is no fault of the document, so its
+	// error binds there without a fault.
+	locate := Invalid
+	if errors.Is(reason, paths.ErrReferenceAlias) {
+		locate = Locate
+	}
+
+	err := locate(&markedError{err: reason, msg: msg}, AtPath(*loc.near), AtPosition(loc.pos))
+
+	return n.bindOwn(err), true
 }
 
 // Bind binds err to the source of the document. Each path in err resolves
@@ -984,11 +1100,12 @@ type NodeKind int
 const (
 	// NodeNone is the kind of a Node that does not hold a value. Such a
 	// Node is the root of an empty document, of a document of comments or
-	// directives alone, or of a document that did not parse, or a nil
-	// Node. The root of a document that is an alias without an anchor
-	// before it has this kind too. [Node.IsEmpty] reports the documents
-	// among these that do not have content, and [Node.Err] tells a
-	// document that did not parse apart from an empty one.
+	// directives alone, or of a document that did not parse, or a nil Node.
+	// The root of a document that is an alias without an anchor before it
+	// or in its reference documents has this kind too. [Node.IsEmpty]
+	// reports the documents among these that do not have content, and
+	// [Node.Err] tells a document that did not parse apart from an empty
+	// one.
 	NodeNone NodeKind = iota
 	// NodeMapping is the kind of a mapping, block or flow.
 	NodeMapping
@@ -1031,13 +1148,20 @@ func (k NodeKind) String() string {
 //		children, err = n.Nodes(paths.Current().IndexAll())
 //	}
 //
-// Kind looks through the anchor and the tag on the node, an alias and
-// the anchor it refers to, and the `?` of an explicit key. The root of
-// `&r {a: 1}` and of `!!map {a: 1}` is thus a mapping, but [Node.AST]
-// gives the anchor or the tag that wraps it. A Node that [Node.At] or
-// [Node.Nodes] scopes at an alias holds the content of its anchor, so
-// [NodeKind] does not have a kind for an alias. The root of a document
-// that is an alias without an anchor before it does not hold a value.
+// Kind looks through the anchor and the tag on the node, an alias and the
+// anchor it refers to, and the `?` of an explicit key. The root of
+// `&r {a: 1}` and of `!!map {a: 1}` is thus a mapping, but [Node.AST] gives
+// the anchor or the tag that wraps it. A decode reads the value under a tag
+// such as !!str or !!null as a scalar, so "!!str *k" and "!!null *k" are
+// scalars when k is a sequence. A Node that [Node.At] or [Node.Nodes] scopes
+// at an alias holds the content of its anchor, so [NodeKind] does not have a
+// kind for an alias. A Node at an alias that reads a reference document of
+// [WithReferences] holds the alias, and Kind reports the kind of the content
+// of its anchor there, as a decode reads it. A Node at an alias inside the
+// content of its own anchor holds the alias too. A decode reads that alias
+// as null, so Kind reports [NodeScalar]. The root of a document that is
+// an alias without an anchor before it or in its reference documents does
+// not hold a value.
 //
 // Every scalar has the same kind, [NodeScalar]. The type that a scalar
 // decodes to depends on its tag, its text, and the Go type that a decode
@@ -1052,7 +1176,7 @@ func (n *Node) Kind() NodeKind {
 		return NodeNone
 	}
 
-	switch datapath.Deref(n.doc.pathResolver(), node).(type) {
+	switch n.doc.content(node).(type) {
 	case nil:
 		return NodeNone
 	case *ast.MappingNode:
@@ -1062,6 +1186,91 @@ func (n *Node) Kind() NodeKind {
 	default:
 		return NodeScalar
 	}
+}
+
+// content returns the mapping, sequence, or scalar under node, as
+// [datapath.Deref] finds it, except that it follows an alias that reads a
+// reference document to the content of the anchor there. A tag that
+// converts a collection under it, as "!!str *k" does for a sequence k,
+// holds a scalar, as [astnode.Converted] reads such a tag, so content
+// returns the tag there. The decoder reads an alias inside the content of
+// the anchor it refers to as null, so content returns such an alias as a
+// scalar. It returns nil for an alias that does not resolve, and for an
+// alias it reaches a second time.
+func (d *document) content(node ast.Node) ast.Node {
+	return d.contentAfter(node, nil)
+}
+
+// contentAfter returns the content of node as [document.content] does,
+// after the aliases of followed on the way to node.
+func (d *document) contentAfter(node ast.Node, followed []*ast.AliasNode) ast.Node {
+	for {
+		if tag, ok := astnode.Converted(node).(*ast.TagNode); ok {
+			inner := d.contentAfter(tag.Value, followed)
+			if _, ok := inner.(*ast.MappingNode); ok {
+				return tag
+			}
+
+			if _, ok := inner.(*ast.SequenceNode); ok {
+				return tag
+			}
+
+			return inner
+		}
+
+		node = astnode.Content(node)
+
+		alias, ok := node.(*ast.AliasNode)
+		if !ok {
+			return node
+		}
+
+		switch {
+		case d.state.Facts().Enclosed[alias]:
+			return alias
+		case slices.Contains(followed, alias):
+			return nil
+		}
+
+		followed = append(followed, alias)
+
+		target, err := d.aliasContent(alias)
+		if err != nil {
+			return nil
+		}
+
+		node = target
+	}
+}
+
+// aliasContent returns the node that the anchor of alias holds, where
+// alias belongs to the document or to one of its reference documents. An
+// alias that reads a reference document reads the anchor that the
+// reference documents hold for its name, as a decode does. The node can
+// hold another alias, such as one inside the value of its own anchor, as
+// in "&k !!str *k", which a decode reads as null. Returns the error of
+// [paths.Resolver.Anchor] for an alias that does not find an anchor.
+func (d *document) aliasContent(alias *ast.AliasNode) (ast.Node, error) {
+	res := d.pathResolver()
+
+	anchor, err := res.Anchor(alias)
+	if errors.Is(err, paths.ErrReferenceAlias) {
+		name, _ := astnode.Name(alias.Value)
+
+		if ref, ok := d.node.source.referenceAnchors().Anchor(name); ok {
+			return ref.Value, nil
+		}
+	}
+
+	if err != nil {
+		//nolint:wrapcheck // The paths error names the alias.
+		return nil, err
+	}
+
+	// Anchor returns an anchor whenever it does not fail.
+	held, _ := anchor.(*ast.AnchorNode) //nolint:errcheck // See above.
+
+	return held.Value, nil
 }
 
 // IsEmpty reports whether the Node is the root of a document that parsed
@@ -1079,11 +1288,11 @@ func (n *Node) Kind() NodeKind {
 //
 // IsEmpty is false for a document that did not parse, for a Node that
 // [Node.At] or [Node.Nodes] scopes below the root, and for a nil Node.
-// [Node.Kind] is [NodeNone] for every Node that IsEmpty reports. It is
-// also [NodeNone] for the root of a document that did not parse or that
-// is an alias without an anchor before it. A caller that skips empty
-// documents thus asks IsEmpty. [SkipEmpty] wraps a [Validator] so that it
-// passes an empty document.
+// [Node.Kind] is [NodeNone] for every Node that IsEmpty reports. It is also
+// [NodeNone] for the root of a document that did not parse or that is an
+// alias without an anchor before it or in its reference documents. A caller
+// that skips empty documents thus asks IsEmpty. [SkipEmpty] wraps a
+// [Validator] so that it passes an empty document.
 func (n *Node) IsEmpty() bool {
 	if n == nil || n.doc.err != nil || !n.base.IsRoot() {
 		return false
@@ -1107,14 +1316,293 @@ func (n *Node) resolveLocation(path paths.Path) (location, error) {
 			return near, nil
 		}
 
-		if alias, ok := root.aliasLocation(path, err); ok {
+		// An alias under a `<<` merge key might set any key or might not set
+		// one, so a path below the mapping that holds the merge key goes on
+		// as [Node.mergeLocation] tells.
+		if alias, ok := root.aliasLocation(path, err); ok && !root.mergedBy(alias.tk) {
 			return alias, nil
 		}
 
-		return location{}, err
+		return root.mergeLocation(path, err)
 	}
 
 	return loc, nil
+}
+
+// mergedBy reports whether tk is the token of an alias under a `<<` merge
+// key of the document.
+func (n *Node) mergedBy(tk *token.Token) bool {
+	for _, a := range n.doc.state.Facts().Aliases {
+		if a.Node.GetToken() == tk {
+			return a.Merge
+		}
+	}
+
+	return false
+}
+
+// mergeLocation returns the location of path, which did not resolve with
+// reason. The resolver cannot read the entries that a `<<` merge key
+// brings in from a reference document of [WithReferences], so a key of a
+// mapping that holds such a merge key does not resolve, and reason wraps
+// [paths.ErrReferenceAlias]. The lookup of a decode reads those entries,
+// as [decodewalk.PathEntries.Entry] does. The walk thus goes on from the
+// mapping through the entry that the decoder reads for the key:
+//
+//   - An entry that the merge key brings in binds at the alias of the
+//     merge key, near the mapping that holds it.
+//   - An entry of the document goes on along the rest of path.
+//   - A key that no entry has binds at the mapping, as
+//     [Node.nearestLocation] binds a key that the document leaves out.
+//
+// The rest of path binds as [Node.resolveLocation] binds a path. A path
+// that enters an alias the document cannot follow binds at the alias, near
+// the path of the alias, with a reason that names that alias. The location
+// of a merge key binds so too. A rest of path that does not resolve fails as
+// it fails in a mapping without the merge key, so a rest that selects
+// nothing returns an error that wraps [paths.ErrNotFound]. The result is
+// reason when the lookup cannot read the merge source of the key, or reason
+// does not wrap [paths.ErrReferenceAlias].
+//
+// The walk reads the merge sources of a mapping through the aliases of the
+// document, and such reads are part of what the alias limit weighs. The
+// result is thus reason for a document past that limit, as
+// [document.pastAliasLimit] reports it. The Source and the reference table
+// keep the keys of each merge source that a walk reads, as
+// [Source.mergeKeys] describes. So the walks of many paths read each
+// source once.
+func (n *Node) mergeLocation(path paths.Path, reason error) (location, error) {
+	if !errors.Is(reason, paths.ErrReferenceAlias) || n.doc.pastAliasLimit() {
+		return location{}, reason
+	}
+
+	resolver := n.doc.pathResolver()
+	w := mergeWalk{
+		resolver: resolver,
+		entries:  n.doc.newPathEntries(),
+		reason:   reason,
+		full:     n.base.Join(path),
+	}
+
+	// The resolver stops at the first selector it cannot apply, so the
+	// walk starts at the longest path above path that resolves.
+	for at, ok := w.full.Parent(); ok; at, ok = at.Parent() {
+		node, err := resolver.Node(at)
+		if err != nil {
+			continue
+		}
+
+		rest, _ := w.full.CutPrefix(at)
+
+		return w.walk(datapath.Target{Node: node, Path: at}, rest)
+	}
+
+	return location{}, reason
+}
+
+// mergeWalk walks a path that the resolver cannot resolve, as
+// [Node.mergeLocation] describes.
+type mergeWalk struct {
+	resolver *paths.Resolver
+	// The lookups of the entries of the mappings of the document.
+	entries *decodewalk.PathEntries
+	// The reason that the resolver gives for full.
+	reason error
+	// The path that the walk resolves, which starts at `$`.
+	full paths.Path
+	// Whether the walk has passed a mapping whose `<<` merge key reads a
+	// reference document by a key that the merge key does not bring in.
+	// The document holds the entry of that key, or no entry has it.
+	left bool
+}
+
+// walk applies the selectors of rest, an `@` path, from t, the node that
+// the resolver resolves at the path of t. It returns the location of the
+// path, as [Node.mergeLocation] describes.
+func (w *mergeWalk) walk(t datapath.Target, rest paths.Path) (location, error) {
+	sels := slices.Collect(rest.Selectors())
+
+	for i, sel := range sels {
+		if sel.Kind == paths.SelectorKey {
+			if i != len(sels)-1 {
+				return w.miss(nil)
+			}
+
+			return w.at(t, true, nil)
+		}
+
+		content, err := w.resolver.Deref(t.Node)
+		if err != nil {
+			if !errors.Is(err, paths.ErrAlias) {
+				return w.miss(err)
+			}
+
+			return w.at(t, false, w.unresolved(err))
+		}
+
+		switch sel.Kind {
+		case paths.SelectorChild:
+			var entry *ast.MappingValueNode
+
+			found, err := w.resolver.Entry(content, sel.Name)
+			if held, ok := found.(*ast.MappingValueNode); ok {
+				entry = held
+			}
+
+			switch {
+			case errors.Is(err, paths.ErrReferenceAlias):
+				mapping, ok := datapath.Deref(w.resolver, content).(*ast.MappingNode)
+				if !ok {
+					return w.miss(err)
+				}
+
+				var (
+					alias *ast.AliasNode
+					known bool
+				)
+
+				entry, alias, known = w.entries.Entry(mapping, sel.Name)
+				if !known {
+					return w.miss(err)
+				}
+
+				if alias != nil {
+					return w.merge(t, alias)
+				}
+
+				w.left = true
+
+			case err != nil && !errors.Is(err, paths.ErrNotFound):
+				return w.miss(err)
+			}
+
+			if entry == nil {
+				return w.missing(t, content, sels[i:])
+			}
+
+			t = datapath.Target{Node: entry.Value, Parent: astnode.Parent{Entry: entry}, Path: t.Path.Child(sel.Name)}
+
+		case paths.SelectorIndex:
+			seq, ok := datapath.Deref(w.resolver, content).(*ast.SequenceNode)
+			if !ok || sel.Index >= len(seq.Values) {
+				return w.miss(nil)
+			}
+
+			t = datapath.Target{
+				Node:   seq.Values[sel.Index],
+				Parent: astnode.Parent{Sequence: seq, Index: sel.Index},
+				Path:   t.Path.Index(sel.Index),
+			}
+
+		default:
+			return w.miss(nil)
+		}
+	}
+
+	return w.at(t, false, nil)
+}
+
+// merge returns the location of an entry that alias, the alias of a `<<`
+// merge key of the mapping at t, brings in from a reference document.
+func (w *mergeWalk) merge(t datapath.Target, alias *ast.AliasNode) (location, error) {
+	tk := alias.GetToken()
+
+	_, err := w.resolver.Deref(alias)
+	if err == nil || tk == nil || tk.Position == nil {
+		return location{}, w.reason
+	}
+
+	return location{pos: position.NewFromToken(tk), tk: tk, near: &t.Path, unfollowed: w.unresolved(err)}, nil
+}
+
+// missing returns the location of a key that the mapping at t, whose
+// content is content, leaves out. The selectors of rest start at that key.
+// It binds as [Node.nearestLocation] binds such a key. Where that binding
+// does not bind, the path does not resolve. That holds for a selector of
+// rest that is not a child selector, and for content that is neither a
+// mapping nor a null.
+func (w *mergeWalk) missing(t datapath.Target, content ast.Node, rest []paths.Selector) (location, error) {
+	for _, sel := range rest {
+		if sel.Kind != paths.SelectorChild {
+			return w.miss(nil)
+		}
+	}
+
+	held := datapath.Deref(w.resolver, content)
+	if _, ok := held.(*ast.MappingNode); !ok && (astnode.IsNil(held) || held.Type() != ast.NullType) {
+		return w.miss(nil)
+	}
+
+	loc, err := w.at(t, true, nil)
+	loc.near = &t.Path
+
+	return loc, err
+}
+
+// miss returns the reason that the path does not resolve where the walk
+// stops, for err, the error of the lookup there, or for nil when that
+// lookup selects nothing. Until the walk passes a mapping by a key that
+// its `<<` merge key of a reference document does not bring in, the
+// resolver stops where the walk stops. The reason is then the reason of
+// the resolver. After that mapping, the path fails as it fails in a
+// mapping without the merge key. The reason reads as the resolver words
+// err with the whole path, or wraps [paths.ErrNotFound].
+func (w *mergeWalk) miss(err error) (location, error) {
+	switch {
+	case !w.left:
+		return location{}, w.reason
+	case err != nil:
+		return location{}, w.unresolved(err)
+	default:
+		return location{}, fmt.Errorf("resolve %s: %w", w.full, paths.ErrNotFound)
+	}
+}
+
+// at returns the location of the token of t, or of the key of its entry
+// with key set. A reason that is not nil is the reason that the path does
+// not resolve at t, an alias, so the location is near the path of t.
+func (w *mergeWalk) at(t datapath.Target, key bool, reason error) (location, error) {
+	tk := w.token(t, key)
+	if tk == nil || tk.Position == nil {
+		return location{}, w.reason
+	}
+
+	loc := location{pos: position.NewFromToken(tk), tk: tk}
+	if reason != nil {
+		loc.near, loc.unfollowed = &t.Path, reason
+	}
+
+	return loc, nil
+}
+
+// token returns the token that a path to t points at, or to the key of its
+// entry with key set, as [paths.Resolver.Token] gives it. The walk starts
+// at a node without what holds it, which the resolver resolves, so the
+// resolver gives the token there.
+func (w *mergeWalk) token(t datapath.Target, key bool) *token.Token {
+	if t.Parent != (astnode.Parent{}) {
+		return t.Start(key)
+	}
+
+	p := t.Path
+	if key {
+		p = p.Key()
+	}
+
+	tk, err := w.resolver.Token(p)
+	if err != nil {
+		return nil
+	}
+
+	return tk
+}
+
+// unresolved returns the reason that the path does not resolve where the
+// walk stops, from err, the error of a lookup of the resolver there, such
+// as [paths.Resolver.Deref] for an alias. It reads as the resolver words
+// such a reason, with the whole path.
+func (w *mergeWalk) unresolved(err error) error {
+	return fmt.Errorf("resolve %s: %w", w.full, errors.Unwrap(err))
 }
 
 // merges reports whether n is a Node of a [NewSourceFromLayers] document,

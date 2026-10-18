@@ -2921,6 +2921,32 @@ func TestSchema_Check_Scope(t *testing.T) {
 		})
 	}
 
+	t.Run("a violation at a Node of an alias to a reference binds at the alias", func(t *testing.T) {
+		t.Parallel()
+
+		// The schema reads the value of the anchor through the decode. The
+		// document holds no line for the replicas, so the violation binds
+		// at the alias, as it does in a check of the whole document.
+		dd := yamltest.FirstDocument(t, stringtest.Input(`
+			replicas: 1
+			spec: *base
+		`), yamltest.References("base: &base {replicas: many}\n"))
+
+		scoped := yamltest.At(t, dd, spec)
+		whole := compileSchema(t, `{
+			"type": "object",
+			"properties": {"spec": {"properties": {"replicas": {"type": "integer"}}}}
+		}`)
+
+		for _, err := range []error{scoped.Validate(t.Context(), v), dd.Validate(t.Context(), whole)} {
+			bound := yamltest.RequireSourceError(t, err)
+
+			assert.Equal(t, position.New(1, 6), yamltest.RangeOf(t, bound).Start)
+			assert.Equal(t, `2:7: $.spec.replicas: expected "integer", got "string"`, bound.Error())
+			require.ErrorIs(t, bound.Unresolved(), paths.ErrReferenceAlias)
+		}
+	})
+
 	t.Run("the whole document conforms where the node does not", func(t *testing.T) {
 		t.Parallel()
 
@@ -3274,14 +3300,12 @@ func TestSchema_SourcePath(t *testing.T) {
 			`),
 			want: `2:21: $.m.16: expected "integer", got "string"`,
 		},
-		"unnameable alias key hides earlier keys": {
-			// The alias key refers to a sequence, which the walk cannot
-			// name, so the key 0x10 before it cannot name the member 16.
-			// The walk finds no member there, so the error binds at m.
-			schema:     integersInM,
-			input:      stringtest.LinesLF("s: &s [a]", "m: {0x10: x, ? *s : 1}"),
-			want:       `2:1: $.m.16: expected "integer", got "string"`,
-			unresolved: true,
+		"alias key of a sequence beside a respelled key": {
+			// The alias key reads a sequence, which a decode names [a], so
+			// the walk names each key of m and finds the member 16 at 0x10.
+			schema: integersInM,
+			input:  stringtest.LinesLF("s: &s [a]", "m: {0x10: x, ? *s : 1}"),
+			want:   `2:11: $.m.0x10: expected "integer", got "string"`,
 		},
 		"spelled-out null key": {
 			schema: stringMembers,

@@ -402,6 +402,26 @@ func TestRegistry_Load(t *testing.T) {
 			),
 			matches: []error{manifest.ErrMissingTypeField},
 		},
+		"kind below a null tag on its mapping": {
+			// The decode reads metadata as null, so the document lacks the
+			// kind.
+			opts: []manifest.RegistryOption{manifest.WithKindField(meta.Child("kind"))},
+			files: map[string]string{"cafe.yaml": stringtest.LinesLF(
+				"apiVersion: cafe.jacobcolvin.com/v1", "metadata: !!null &m {kind: Cafe, name: yamull}",
+			)},
+			err: stringtest.JoinLF(
+				"config: 2 errors",
+				"|-- config/cafe.yaml:1:1: missing kind",
+				"`-- missing Cafe",
+				"    `-- add a document with apiVersion: cafe.jacobcolvin.com/v1 and kind: Cafe",
+				"",
+				"config/cafe.yaml",
+				"   1 | apiVersion: cafe.jacobcolvin.com/v1",
+				"     | ^^^^^^^^^^ missing kind",
+				"   2 | metadata: !!null &m {kind: Cafe, name: yamull}",
+			),
+			matches: []error{manifest.ErrMissingTypeField},
+		},
 		"version under a null tag": {
 			files: map[string]string{
 				"cafe.yaml": cafeDoc,
@@ -481,6 +501,26 @@ func TestRegistry_Load(t *testing.T) {
 			files: map[string]string{
 				"cafe.yaml":  cafeDoc,
 				"hours.yaml": stringtest.LinesLF("apiVersion: cafe.jacobcolvin.com/v1", "kind: *k"),
+			},
+			err: stringtest.JoinLF(
+				"config/hours.yaml:2:7: $.kind: kind must not come from an alias",
+				"`-- write the kind in the document itself",
+				"",
+				"   1 | apiVersion: cafe.jacobcolvin.com/v1",
+				"   2 | kind: *k",
+				"     |       ^^",
+			),
+			matches: []error{manifest.ErrFieldAlias},
+		},
+		"kind from an alias of a reference document": {
+			// The path to the kind selects the alias, but the load reads a
+			// type field only where the document writes it.
+			files: map[string]string{
+				"cafe.yaml":  cafeDoc,
+				"hours.yaml": stringtest.LinesLF("apiVersion: cafe.jacobcolvin.com/v1", "kind: *k"),
+			},
+			in: []manifest.InputOption{
+				manifest.WithSourceOptions(niceyaml.WithReferences(niceyaml.NewSourceFromString("k: &k Hours\n"))),
 			},
 			err: stringtest.JoinLF(
 				"config/hours.yaml:2:7: $.kind: kind must not come from an alias",
@@ -3294,7 +3334,7 @@ func TestRegistry_Load_MergedTypeFields(t *testing.T) {
 			doc: "<<: *b\n" + typeFields,
 			ref: "base: &b {kind: Hours, seat: 2}\n",
 			err: stringtest.JoinLF(
-				`config/cafe.yaml:1:5: unknown field "seat"`,
+				`config/cafe.yaml:1:5: $.seat~: unknown field "seat"`,
 				"",
 				"   1 | <<: *b",
 				"     |     ^",
@@ -3339,6 +3379,80 @@ func TestRegistry_Load_MergedTypeFields(t *testing.T) {
 			assert.Equal(t, tc.want, got.Value)
 		})
 	}
+}
+
+func TestRegistry_Load_DefaultsReferenceMerge(t *testing.T) {
+	t.Parallel()
+
+	// The metadata of a config, which holds its version beside fields
+	// that the Go type declares.
+	type configMeta struct {
+		Name string `yaml:"name"`
+		Size string `yaml:"size"`
+	}
+
+	type config struct {
+		Meta *configMeta `yaml:"meta"`
+	}
+
+	reg := manifest.MustNewRegistry(
+		manifest.WithVersionOnly(paths.Doc().Child("meta", "version")),
+		manifest.WithKinds(manifest.NewKind[config]("Config", manifest.Singleton(), manifest.Version("1"))),
+		manifest.WithDecodeOptions(niceyaml.WithDefaults(func(m *configMeta) { m.Size = "M" })),
+	)
+
+	ref := niceyaml.NewSourceFromString("base: &base {size: L}\n")
+
+	// The decoder creates the metadata from zero, so it decodes again from
+	// its defaults. That decode reads the mapping without the version,
+	// which the Go type does not declare, as the decoder read it.
+	set, err := reg.Load(t.Context(), configFS(map[string]string{
+		"app.yaml": stringtest.LinesLF("meta:", "  <<: *base", "  version: 1", "  name: app"),
+	}, manifest.WithSourceOptions(niceyaml.WithReferences(ref))))
+	require.NoError(t, err)
+
+	got, ok := set.One[config]()
+	require.True(t, ok)
+	assert.Equal(t, &configMeta{Name: "app", Size: "L"}, got.Value.Meta)
+}
+
+// selfMeta is metadata that decodes itself into a type without the
+// version field, which the load admits as a known key.
+type selfMeta struct {
+	Name string `yaml:"name"`
+	Size string `yaml:"size"`
+}
+
+func (m *selfMeta) UnmarshalYAML(unmarshal func(any) error) error {
+	type fields selfMeta
+
+	return unmarshal((*fields)(m))
+}
+
+func TestRegistry_Load_DefaultsBelowTypeField(t *testing.T) {
+	t.Parallel()
+
+	type config struct {
+		Meta *selfMeta `yaml:"meta"`
+	}
+
+	reg := manifest.MustNewRegistry(
+		manifest.WithVersionOnly(paths.Doc().Child("meta", "version")),
+		manifest.WithKinds(manifest.NewKind[config]("Config", manifest.Singleton(), manifest.Version("1"))),
+		manifest.WithDecodeOptions(niceyaml.WithDefaults(func(m *selfMeta) { m.Size = "M" })),
+	)
+
+	// The decoder creates the metadata from zero, so it decodes again from
+	// its defaults. That decode reads the mapping without the version, as
+	// the decoder read it, so the unmarshaler does not reject the version.
+	set, err := reg.Load(t.Context(), configFS(map[string]string{
+		"app.yaml": stringtest.LinesLF("meta:", "  version: 1", "  name: app"),
+	}))
+	require.NoError(t, err)
+
+	got, ok := set.One[config]()
+	require.True(t, ok)
+	assert.Equal(t, &selfMeta{Name: "app", Size: "M"}, got.Value.Meta)
 }
 
 // cafeFields holds the fields of a Cafe, for an unmarshaler of Cafe that

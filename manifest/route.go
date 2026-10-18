@@ -95,7 +95,12 @@ func readField(doc *niceyaml.Node, p paths.Path, reads []paths.Path) fieldRead {
 			return fieldRead{err: aliasProblem(p, name, alias)}
 		}
 
-		content := astnode.Content(cur)
+		// A decode reads a tag that converts a collection as a scalar, as
+		// [astnode.Converted] reads such a tag, which holds no field.
+		content := astnode.Converted(cur)
+		if _, ok := content.(*ast.TagNode); ok {
+			return fieldRead{}
+		}
 
 		switch sel.Kind {
 		case paths.SelectorChild:

@@ -122,9 +122,9 @@ func (m match) key() match {
 type resolver struct {
 	targets  map[*ast.AliasNode]*ast.AnchorNode
 	enclosed map[*ast.AliasNode]bool
-	// Reports whether a reference document defines an anchor of a name, as
-	// [WithReferenceAnchors] sets it, or nil.
-	references func(name string) bool
+	// Returns the value of the anchor of a name that a reference document
+	// defines, as [WithReferenceAnchors] sets it, or nil.
+	references func(name string) (ast.Node, bool)
 	keys       sync.Map
 	nodes      int
 }
@@ -197,19 +197,19 @@ func (k *mappingKeys) mergeAfter(i int) bool {
 
 // newResolver creates a new [*resolver] for doc.
 //
-// It binds each alias to the last anchor of its name before it in doc. The
-// goccy/go-yaml decoder uses that anchor for the alias when it fills a map.
-// An anchor counts from where it starts and again where its content ends.
+// It binds each alias to the last anchor of its name before it in doc. An
+// anchor counts from where it starts and again where its content ends.
 // For the aliases after it, the anchor thus wins over an anchor of the
 // same name inside its content.
 //
-// At each `<<` merge key, the decoder reads again each mapping that the
-// merge key brings in, and so does newResolver. The anchors of that
-// mapping thus count again there. Some anchors sit on the value of a `<<`
-// merge key or on an element of a sequence there. Such an anchor counts
-// for the aliases that other merge keys name. It counts for an alias in a
-// value only when doc does not define another anchor of its name before
-// that alias, as [anchorSet] describes.
+// At each `<<` merge key, newResolver reads again each mapping that the
+// merge key brings in, so the anchors of that mapping count again there.
+// Some anchors sit on the value of a `<<` merge key or on an element of a
+// sequence there. Such an anchor counts for the aliases that other merge
+// keys name. It counts for an alias in a value only when doc does not
+// define another anchor of its name before that alias, as [anchorSet]
+// describes. The go-yaml decoder binds some aliases of reused anchor names
+// otherwise, as the package documentation describes.
 //
 // After it binds every alias, newResolver counts the nodes of doc,
 // comments included. It also calls [enclosedAliases] to find the aliases
@@ -278,13 +278,13 @@ func enclosedAliases(
 	return enclosed
 }
 
-// anchorSet holds the anchors that the decoder has recorded so far, in the
-// two maps the decoder keeps. The nodes map holds the last anchor of each
-// name. The values map holds the last anchor of each name on a value that
-// the decoder reads. Some anchors sit on the value of a `<<` merge key or
-// on an element of a sequence there. Such an anchor goes into the nodes
-// map alone, because the decoder reads the value of a merge key only for
-// the mappings it merges.
+// anchorSet holds the anchors that the binder has recorded so far, in two
+// maps. The nodes map holds the last anchor of each name. The values map
+// holds the last anchor of each name outside the values of `<<` merge
+// keys. Some anchors sit on the value of a merge key or on an element of a
+// sequence there. Such an anchor goes into the nodes map alone, because it
+// counts for an alias in a value only when no other anchor of its name
+// comes before the alias.
 //
 // An alias in a value refers to the anchor in the values map. When the
 // values map does not hold an anchor of its name, the alias refers to the
@@ -335,10 +335,9 @@ func (s anchorSet) add(other anchorSet) {
 // order. The anchors set holds the anchors that the walk has visited so
 // far, and the targets map holds the anchor each visited alias refers to.
 // Walk visits an anchor before its content, so an alias inside that
-// content refers to the anchor around it. Like the decoder, the binder
-// records the anchor again after it walks the content. An alias after the
-// content thus refers to that anchor rather than to one of the same name
-// inside it.
+// content refers to the anchor around it. The binder records the anchor
+// again after it walks the content. An alias after the content thus refers
+// to that anchor rather than to one of the same name inside it.
 //
 // The merged map holds the anchors that merging a mapping records, from
 // [aliasBinder.mergedAnchors], for each mapping that a merge key has
@@ -390,8 +389,8 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 			ast.Walk(b, n.Value)
 		}
 
-		// The decoder records an anchor again once it has read the
-		// content, over any anchor of the same name inside it.
+		// An anchor counts again where its content ends, over any anchor of
+		// the same name inside it.
 		b.anchors.record(name, n)
 
 		return nil
@@ -605,11 +604,11 @@ type mergedRead struct {
 	held    bool
 }
 
-// mergedAnchors returns the anchors that the decoder records when a `<<`
-// merge key brings mapping in. Those are the last anchor of each name in
-// mapping, in document order. A `<<` merge key inside mapping counts the
-// anchors of the mappings it merges. MergedAnchors finds the mappings that
-// those merge keys bring in through the aliases as Visit bound them.
+// mergedAnchors returns the anchors that count again when a `<<` merge key
+// brings mapping in. Those are the last anchor of each name in mapping, in
+// document order. A `<<` merge key inside mapping counts the anchors of the
+// mappings it merges. MergedAnchors finds the mappings that those merge
+// keys bring in through the aliases as Visit bound them.
 //
 // A merge records the anchors of a mapping only after the walk leaves that
 // mapping. The result is thus not final when mapping or a mapping it
@@ -826,9 +825,44 @@ func anchoredMapping(content ast.Node) *ast.MappingNode {
 // tag, which [resolver.unwrap] follows. An alias with a tag on it thus
 // fails the same way as one without a tag.
 func (r *resolver) deref(node ast.Node) (ast.Node, error) {
-	tagged, _, err := r.content(node)
+	tagged, _, err := r.content(node, false)
 
 	return tagged, err
+}
+
+// selected returns the node that a path selects when its last selector
+// reaches node, as [Resolver.Node] gives it. That node is the one that
+// [resolver.deref] returns, unless the content lies in a reference
+// document, as [WithReferenceAnchors] names those, or deref reaches an
+// alias inside the content of the anchor it refers to. The decoder reads
+// such an alias as null, so the alias holds a value. The node is then the
+// alias that reads the reference document or null, or the first tag that
+// deref reaches above that alias.
+func (r *resolver) selected(node ast.Node) (ast.Node, error) {
+	tagged, err := r.deref(node)
+	if !errors.Is(err, ErrReferenceAlias) && !readsNull(err) {
+		return tagged, err
+	}
+
+	// Deref checked each alias before the one that reads the reference
+	// document or null, so the walk stops at that alias or at a tag above
+	// it.
+	for {
+		switch n := node.(type) {
+		case *ast.AnchorNode:
+			node = n.Value
+		case *ast.AliasNode:
+			target, ok := r.targets[n]
+			if !ok || r.enclosed[n] {
+				return n, nil
+			}
+
+			node = target.Value
+
+		default:
+			return node, nil
+		}
+	}
 }
 
 // unwrap does what [resolver.deref] does and then strips tags, so the
@@ -836,21 +870,33 @@ func (r *resolver) deref(node ast.Node) (ast.Node, error) {
 // stops at a nil node, including a typed nil that a hand-built tree might
 // hold. It returns an untyped nil for that node, as [resolver.follow] does.
 func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
-	_, content, err := r.content(node)
+	_, content, err := r.content(node, false)
+
+	return content, err
+}
+
+// selectable does what [resolver.unwrap] does, but it stops at a tag that
+// converts the value under it, as [astnode.Converted] reads such a tag.
+// The decoder reads that value as a scalar, so a selector does not select
+// anything below it. A `<<` merge key reads its mappings through every
+// tag, so the lookup of merge sources reads them with unwrap.
+func (r *resolver) selectable(node ast.Node) (ast.Node, error) {
+	_, content, err := r.content(node, true)
 
 	return content, err
 }
 
 // content looks through anchors, aliases, and tags from node. It returns
 // two nodes. The first is the first tag it reaches, or the content when it
-// does not reach a tag. The second is the content under every tag.
-// [resolver.deref] gives the first node and [resolver.unwrap] gives the
-// second.
+// does not reach a tag. The second is the content under every tag. With
+// converts set, the second is the first tag that converts the value under
+// it, when content reaches one. [resolver.deref] gives the first node, and
+// [resolver.unwrap] and [resolver.selectable] give the second.
 //
 // It tracks the aliases it follows across every tag it looks through. For
 // an alias that leads back to itself through a tag, content thus returns
 // an error wrapping [ErrAlias].
-func (r *resolver) content(node ast.Node) (ast.Node, ast.Node, error) {
+func (r *resolver) content(node ast.Node, converts bool) (ast.Node, ast.Node, error) {
 	followed := map[*ast.AliasNode]bool{}
 
 	tagged, err := r.follow(node, followed)
@@ -862,7 +908,7 @@ func (r *resolver) content(node ast.Node) (ast.Node, ast.Node, error) {
 
 	for {
 		tag, ok := content.(*ast.TagNode)
-		if !ok {
+		if !ok || converts && astnode.ConvertsCollection(tag) {
 			return tagged, content, nil
 		}
 
@@ -894,20 +940,23 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 		case *ast.AliasNode:
 			tk := astnode.Token(n.Value)
 			if tk == nil {
-				return nil, fmt.Errorf("%w: alias has no name", ErrAlias)
+				return nil, &aliasError{alias: n, err: fmt.Errorf("%w: alias has no name", ErrAlias)}
 			}
 
 			name := tk.Value
 
-			if followed[n] || r.enclosed[n] {
-				return nil, fmt.Errorf("%w: *%s forms a cycle", ErrAlias, name)
+			switch {
+			case followed[n]:
+				return nil, &aliasError{alias: n, err: fmt.Errorf("%w: *%s forms a cycle", ErrAlias, name)}
+			case r.enclosed[n]:
+				return nil, &aliasError{alias: n, err: &enclosedAliasError{name: name}}
 			}
 
 			followed[n] = true
 
 			target, ok := r.targets[n]
 			if !ok {
-				return nil, r.missingAnchor(name)
+				return nil, &aliasError{alias: n, err: r.missingAnchor(name)}
 			}
 
 			node = target.Value
@@ -923,11 +972,123 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 // wraps [ErrReferenceAlias] too when a reference document defines such an
 // anchor, as [WithReferenceAnchors] reports.
 func (r *resolver) missingAnchor(name string) error {
-	if r.references != nil && r.references(name) {
+	if _, ok := r.reference(name); ok {
 		return &referenceAliasError{name: name}
 	}
 
 	return fmt.Errorf("%w: *%s has no anchor before it", ErrAlias, name)
+}
+
+// reference returns the value of the anchor of name that a reference
+// document defines, as [WithReferenceAnchors] gives it, and reports false
+// when none does.
+func (r *resolver) reference(name string) (ast.Node, bool) {
+	if r.references == nil {
+		return nil, false
+	}
+
+	return r.references(name)
+}
+
+// referenceContent returns the content of the anchor of a reference
+// document that node reads, under the anchors, the aliases, and the tags
+// on the way. Node is an alias whose lookup ends at such an anchor. Each
+// alias of the document reads its anchor. Each alias of a reference
+// document reads the anchor of its name that the reference documents
+// define. It reports false for an alias that reads no anchor, or that
+// leads back to an alias of a reference document before it.
+func (r *resolver) referenceContent(node ast.Node) (ast.Node, bool) {
+	read := make(map[string]bool)
+
+	for !astnode.IsNil(node) {
+		switch n := node.(type) {
+		case *ast.AnchorNode:
+			node = n.Value
+		case *ast.TagNode:
+			node = n.Value
+		case *ast.AliasNode:
+			if target, ok := r.targets[n]; ok {
+				node = target.Value
+
+				continue
+			}
+
+			name, ok := astnode.Name(n.Value)
+			if !ok || read[name] {
+				return nil, false
+			}
+
+			read[name] = true
+
+			value, ok := r.reference(name)
+			if !ok {
+				return nil, false
+			}
+
+			node = value
+
+		default:
+			return node, true
+		}
+	}
+
+	return nil, false
+}
+
+// aliasError is the error of an alias that does not resolve, as
+// [resolver.follow] finds it. It reads as err, and [resolveError] names the
+// line and the column of the alias in front of it.
+type aliasError struct {
+	err   error
+	alias *ast.AliasNode
+}
+
+func (e *aliasError) Error() string {
+	return e.err.Error()
+}
+
+// Unwrap returns the error of the alias.
+func (e *aliasError) Unwrap() error {
+	return e.err
+}
+
+// resolveError returns err, the error of a resolve of p, after the path.
+// When err is the error of an alias of the document that does not
+// resolve, the line and the column of the alias come between the two, as
+// in "resolve $.a.b: 1:7: alias does not resolve: *x forms a cycle". So
+// does the error of an alias that reads a reference document, as in
+// "resolve $.a.x: 1:4: alias reads a reference document: *r0".
+func resolveError(p Path, err error) error {
+	if a, ok := errors.AsType[*aliasError](err); ok {
+		if tk := a.alias.GetToken(); tk != nil && tk.Position != nil {
+			return fmt.Errorf("resolve %s: %d:%d: %w", p, tk.Position.Line, tk.Position.Column, err)
+		}
+	}
+
+	return fmt.Errorf("resolve %s: %w", p, err)
+}
+
+// enclosedAliasError is the error of an alias inside the content of the
+// anchor it refers to, which the decoder reads as null. It wraps
+// [ErrAlias].
+type enclosedAliasError struct {
+	name string
+}
+
+func (e *enclosedAliasError) Error() string {
+	return ErrAlias.Error() + ": *" + e.name + " forms a cycle"
+}
+
+// Unwrap returns [ErrAlias].
+func (e *enclosedAliasError) Unwrap() error {
+	return ErrAlias
+}
+
+// readsNull reports whether err is the error of a node whose content is an
+// alias inside the content of the anchor it refers to, through anchors,
+// aliases, and tags. The decoder reads the node as null.
+func readsNull(err error) bool {
+	return err != nil && errors.As(err, new(*enclosedAliasError))
 }
 
 // referenceAliasError is the error of an alias whose anchor a reference
@@ -1118,8 +1279,14 @@ type matchID struct {
 // describes. A `.*` adds the nodes that [resolver.entries] reads. Apply
 // does not select anything from a nil node, including a typed nil.
 func (r *resolver) apply(seg segment, m match, reads *lookupReads) ([]match, error) {
-	content, err := r.unwrap(m.node)
-	if err != nil || astnode.IsNil(content) {
+	content, err := r.selectable(m.node)
+
+	switch {
+	case readsNull(err) && (seg.kind == segmentChildAll || seg.kind == segmentIndexAll):
+		// The decoder reads an alias inside the content of its own anchor as
+		// null, and a `.*` or `[*]` selector selects nothing there.
+		return nil, nil
+	case err != nil || astnode.IsNil(content):
 		return nil, err
 	}
 
@@ -1591,8 +1758,22 @@ func (r *resolver) recurse(matches []match, seg segment) ([]match, error) {
 	contents := make([]ast.Node, len(matches))
 
 	for i, m := range matches {
-		content, err := r.unwrap(m.node)
-		if err != nil {
+		// A match of `.'<<'` or `..'<<'` starts at the sources of a merge
+		// key, which it reads through every tag. Any other match stops at
+		// a tag that converts its collection, as the other selectors do.
+		read := r.selectable
+		if m.entry != nil && astnode.IsMergeKey(m.entry.Key) {
+			read = r.unwrap
+		}
+
+		content, err := read(m.node)
+
+		switch {
+		case readsNull(err):
+			// The decoder reads an alias inside the content of its own anchor
+			// as null, so the walk visits nothing below it.
+			continue
+		case err != nil:
 			return nil, err
 		}
 
@@ -1616,11 +1797,7 @@ func (r *resolver) recurse(matches []match, seg segment) ([]match, error) {
 		w.order = slices.Clip(m.order)
 		w.heldSegs, w.heldOrder = 0, 0
 
-		// A match of `.'<<'` or `..'<<'` starts at the sources of a merge
-		// key.
-		sources := m.entry != nil && astnode.IsMergeKey(m.entry.Key)
-
-		err := w.descend(contents[i], sources)
+		err := w.descend(contents[i], m.entry != nil && astnode.IsMergeKey(m.entry.Key))
 		if err != nil {
 			return nil, err
 		}
@@ -1684,15 +1861,18 @@ type recursiveWalk struct {
 // in document order. For a `..*` selector it collects every entry and
 // every element of a sequence instead, each before the nodes below it. It
 // looks through anchors and tags but not aliases, so it visits an entry of
-// the source at most one time, at its definition. It skips a mapping or
-// sequence that the walk of another match covers, as [resolver.recurse]
-// describes.
+// the source at most one time, at its definition. It stops at a tag that
+// converts the collection under it, as [astnode.ConvertsCollection] reads
+// such a tag, because the decoder reads that collection as a scalar. It
+// skips a mapping or sequence that the walk of another match covers, as
+// [resolver.recurse] describes.
 //
 // The sources flag reports whether node is the value of a `<<` merge key. A
 // `..*` selector leaves out the entry of a merge key and each element of a
 // sequence that lists the sources of one. Those are sources of entries
-// rather than entries. Descend still walks them, so it lists the entries
-// of a mapping written inline there.
+// rather than entries. Descend still walks them, through every tag, as a
+// merge key reads them, so it lists the entries of a mapping written
+// inline there.
 //
 // For each entry and element it visits, descend pushes the selector and
 // the place of that step onto the stacks. Before it returns, descend cuts
@@ -1785,6 +1965,10 @@ func (w *recursiveWalk) descend(node ast.Node, sources bool) error {
 	case *ast.AnchorNode:
 		return w.descend(n.Value, sources)
 	case *ast.TagNode:
+		if !sources && astnode.ConvertsCollection(n) {
+			return nil
+		}
+
 		return w.descend(n.Value, sources)
 	}
 
@@ -1854,7 +2038,8 @@ func (w *recursiveWalk) hold() ([]segment, []int) {
 // string key gives its unquoted text. A literal or folded block scalar key
 // gives its content, as the decoder reads it. Any other key gives its
 // source text. An alias key gives the name that the content of its anchor
-// gives as a key, whether or not the alias has a tag.
+// gives as a key, whether or not the alias has a tag. That anchor can lie
+// in a reference document, as [resolver.referenceContent] reads it.
 //
 // The bool result is false for a key that does not have content, or that
 // has content that a selector cannot name, such as a sequence. It is also
@@ -1866,7 +2051,13 @@ func (r *resolver) keyName(key ast.Node) (string, bool) {
 
 	if alias, ok := content.(*ast.AliasNode); ok {
 		target, err := r.unwrap(alias)
-		if err != nil || astnode.IsNil(target) {
+
+		ok = err == nil
+		if errors.Is(err, ErrReferenceAlias) {
+			target, ok = r.referenceContent(alias)
+		}
+
+		if !ok || astnode.IsNil(target) {
 			return "", false
 		}
 

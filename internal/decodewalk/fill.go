@@ -46,14 +46,26 @@ type Starts struct {
 //     target starts from the value the pointer held, or from the start of
 //     its type for a nil pointer. A null sets the pointer to nil.
 //   - The places that aliases of one anchor fill share one value when
-//     they start from equal values, as the decoder shares it. Two pointers
-//     there share one target. A place that starts from another value
-//     builds a value of its own.
+//     they start from equal values. Two pointers there share one target,
+//     though the decoder gives each place a value of its own. A place that
+//     starts from another value builds a value of its own.
 //   - Each element and each map value starts from the start of its type,
 //     and so does one the document writes as a null.
-//   - A null leaves any other value at its start. A value at an alias
-//     that the resolver of r cannot follow, such as one to a reference
-//     document, keeps the value of the decoder.
+//   - A null leaves any other value at its start.
+//   - A value at an alias of a reference document, whose anchor the
+//     resolver of r does not hold, decodes again from its start when the
+//     decoder did not start it there. The decode reads the anchor that
+//     [Rules.Anchor] finds. Fill cannot read below that anchor, so each
+//     value that the decoder creates inside it keeps the value of the
+//     decoder. A null there leaves the value at its start, as a null of
+//     the document does. A value at any other alias that the resolver
+//     cannot follow keeps the value of the decoder.
+//   - A struct field whose entry a `<<` merge key brings in from a
+//     reference document keeps the value of the decoder. So does a field
+//     whose entry Fill cannot tell, as [Walk] describes. When the
+//     decoder did not start the struct from its start, the struct decodes
+//     again from its start first, so each such field starts from the value
+//     the start holds.
 //   - A value that [unmarshaler.Options.Whole] reports as decoding itself
 //     decodes again from its start when the decoder did not start it
 //     there. Its method then sees the start.
@@ -124,9 +136,11 @@ func (f *filler) place(t reflect.Type, held ast.Node, start, decoded reflect.Val
 	node, ok := datapath.Read(f.rules.Resolver, held)
 
 	switch {
+	case !ok && readsReference(f.rules.Resolver, held):
+		return f.referenced(t, held, start, decoded, exact)
+
 	case !ok && !f.null(held):
-		// The decoder read an alias that the document cannot follow, such
-		// as one to an anchor of a reference document.
+		// The decoder read an alias that the document cannot follow.
 		return decoded, nil
 
 	case !ok && t.Kind() == reflect.Pointer:
@@ -156,16 +170,22 @@ func (f *filler) place(t reflect.Type, held ast.Node, start, decoded reflect.Val
 		return reflect.Value{}, err
 	}
 
+	f.remember(key, start, v)
+
+	return v, nil
+}
+
+// remember records v as the value that the fill built for the node and
+// the type of key from start, for [filler.built].
+func (f *filler) remember(key seenKey, start, v reflect.Value) {
 	// The start might be a field of a value the fill is building, which
 	// changes when the field takes v.
 	if start.CanInterface() {
-		saved := reflect.New(t).Elem()
+		saved := reflect.New(key.typ).Elem()
 		saved.Set(start)
 
 		f.memo[key] = append(f.memo[key], memoEntry{start: saved, value: v})
 	}
-
-	return v, nil
 }
 
 // reaches reports whether a value of type t reaches a type that starts
@@ -184,8 +204,7 @@ func (f *filler) reaches(t reflect.Type) bool {
 // built returns the value that the fill built for the node and the type
 // of key from a start equal to start, and reports whether it built one.
 // The places that aliases of one anchor fill thus share a value when they
-// start from equal values, as the decoder shares it. A chain of aliases
-// also fills in linear time.
+// start from equal values. A chain of aliases also fills in linear time.
 func (f *filler) built(key seenKey, start reflect.Value) (reflect.Value, bool) {
 	if !start.CanInterface() {
 		return reflect.Value{}, false
@@ -270,6 +289,116 @@ func (f *filler) pointer(
 	return p, nil
 }
 
+// referenced returns the value of type t that a decode of held gives from
+// start, where held reads an anchor of a reference document that the
+// resolver of the fill does not hold. The fill cannot read below such an
+// anchor, so the value decodes again from start, as [filler.again]
+// describes. A null there leaves the value at start, and sets a pointer
+// to nil. The places that aliases of the anchor fill share a value when
+// they start from equal values, as [filler.built] describes.
+func (f *filler) referenced(
+	t reflect.Type, held ast.Node, start, decoded reflect.Value, exact bool,
+) (reflect.Value, error) {
+	// The parser does not take an anchor or a tag on an alias, so held is
+	// the alias.
+	alias, ok := held.(*ast.AliasNode)
+	if !ok || f.rules.Anchor == nil {
+		return decoded, nil
+	}
+
+	value, ok := f.rules.Anchor(alias)
+	if !ok {
+		return decoded, nil
+	}
+
+	// A null of a reference document leaves the value at its start, as a
+	// null of the document does.
+	if f.referenceNull(value) {
+		if t.Kind() == reflect.Pointer {
+			return reflect.Zero(t), nil
+		}
+
+		return start, nil
+	}
+
+	key := seenKey{typ: t, node: value}
+
+	if v, ok := f.built(key, start); ok {
+		return v, nil
+	}
+
+	v, err := f.again(t, held, value, start, decoded, exact)
+	if err != nil {
+		return reflect.Value{}, err
+	}
+
+	f.remember(key, start, v)
+
+	return v, nil
+}
+
+// again returns the value of type t that a decode of value, the value of
+// the anchor of a reference document that held reads, gives from start.
+// The value decodes again from start unless the decoder started it there
+// or start is zero. A pointer gets a target of its own, as
+// [filler.againPointer] describes.
+func (f *filler) again(
+	t reflect.Type, held, value ast.Node, start, decoded reflect.Value, exact bool,
+) (reflect.Value, error) {
+	if t.Kind() == reflect.Pointer {
+		return f.againPointer(t, held, value, start, decoded, exact)
+	}
+
+	if exact || start.IsZero() || t.Kind() == reflect.Interface || t == unmarshaler.MapSliceType {
+		return decoded, nil
+	}
+
+	v := reflect.New(t)
+	v.Elem().Set(start)
+
+	err := f.rules.Decode(value, v.Interface())
+	if err != nil {
+		return reflect.Value{}, err
+	}
+
+	return v.Elem(), nil
+}
+
+// againPointer is [filler.again] for the pointer type t. The target is
+// new, and it starts from the target of start, or from the start of its
+// type when start is nil.
+func (f *filler) againPointer(
+	t reflect.Type, held, value ast.Node, start, decoded reflect.Value, exact bool,
+) (reflect.Value, error) {
+	if decoded.IsNil() {
+		return decoded, nil
+	}
+
+	var (
+		from reflect.Value
+		err  error
+	)
+
+	if start.IsNil() {
+		from, err = f.starts.Of(t.Elem(), held)
+		if err != nil {
+			return reflect.Value{}, err
+		}
+	} else {
+		from = start.Elem()
+	}
+
+	target, err := f.again(t.Elem(), held, value, from, decoded.Elem(), exact && !start.IsNil())
+	if err != nil {
+		return reflect.Value{}, err
+	}
+
+	p := reflect.New(t.Elem())
+	p.Elem().Set(target)
+
+	return p, nil
+}
+
 // whole returns the value of type t that a decode of node gives from
 // start, where t decodes itself. The value decodes again from start unless
 // the decoder started it there or start is zero.
@@ -301,6 +430,21 @@ func (f *filler) structOf(
 		return start, nil
 	}
 
+	// The decoder starts each field from the value it holds, so a decode
+	// from start gives a field that a merge key of a reference document
+	// brings in the value it starts from there.
+	if merges && !exact && f.readsReferenceField(t, mapping) {
+		again := reflect.New(t)
+		again.Elem().Set(start)
+
+		err := f.rules.Decode(f.rules.View(mapping), again.Interface())
+		if err != nil {
+			return reflect.Value{}, err
+		}
+
+		decoded, exact = again.Elem(), true
+	}
+
 	result := reflect.New(t).Elem()
 	result.Set(start)
 
@@ -310,6 +454,20 @@ func (f *filler) structOf(
 	}
 
 	return result, nil
+}
+
+// readsReferenceField reports whether t, a struct type, has a field whose
+// entry in mapping a `<<` merge key brings in from a reference document,
+// as [walker.lookup] finds it. A field whose lookup is not known counts
+// too, because such a merge key might bring in its entry.
+func (f *filler) readsReferenceField(t reflect.Type, mapping *ast.MappingNode) bool {
+	for name := range fieldNames(t, map[reflect.Type]bool{}) {
+		if read := f.lookup(mapping, name, true); read.alias != nil || !read.known {
+			return true
+		}
+	}
+
+	return false
 }
 
 // fields sets each field of result that a decode of mapping writes, from
@@ -351,12 +509,20 @@ func (f *filler) fields(
 			continue
 
 		default:
-			entry := f.entryOf(mapping, name, merges)
-			if entry == nil {
-				continue
-			}
+			read := f.lookup(mapping, name, merges)
 
-			v, err = f.place(field.Type, entry.Value, result.Field(i), decoded.Field(i), exact)
+			switch {
+			// The fill cannot read below the entry of a reference document
+			// that the decoder read, nor tell which entry it read.
+			case read.alias != nil || !read.known:
+				v = decoded.Field(i)
+
+			case read.entry == nil:
+				continue
+
+			default:
+				v, err = f.place(field.Type, read.entry.Value, result.Field(i), decoded.Field(i), exact)
+			}
 		}
 
 		if err != nil {

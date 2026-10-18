@@ -476,7 +476,7 @@ func TestRegistry_Load_Steps(t *testing.T) {
 			in: []manifest.InputOption{manifest.WithSourceOptions(niceyaml.WithReferences(
 				niceyaml.NewSourceFromString(stringtest.LinesLF("summer: &summer", `  closes: "21:00"`)),
 			))},
-			err:     "config/hours.yaml: resolve $.spec.closes: alias reads a reference document: *summer",
+			err:     "config/hours.yaml: resolve $.spec.closes: 3:7: alias reads a reference document: *summer",
 			matches: []error{paths.ErrReferenceAlias, paths.ErrAlias},
 		},
 	}

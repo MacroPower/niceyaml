@@ -198,17 +198,26 @@ func TestTree_UnresolvedMerge(t *testing.T) {
 func TestTree_ReferenceAliases(t *testing.T) {
 	t.Parallel()
 
-	tree, doc := newTree(t, stringtest.LinesLF("a: *r1", "b: &x {c: *r2}", "d: *x", "e: *r3"))
+	tree, doc := newTree(t, stringtest.LinesLF("a: *r1", "b: &x {c: *r2}", "d: *x", "e: {<<: *r3}"))
 
 	var got []string
 
-	for _, tk := range tree.ReferenceAliases(tree.View(at(t, doc, "d"))) {
-		got = append(got, tk.Next.Value)
+	for _, alias := range tree.ReferenceAliases(tree.View(at(t, doc, "d"))) {
+		got = append(got, alias.Token.Next.Value)
 	}
 
 	// The alias d reads the anchor x, which holds r2.
 	assert.Equal(t, []string{"r2"}, got)
-	assert.Len(t, tree.ReferenceAliases(tree.View(doc.AST())), 3)
+
+	all := tree.ReferenceAliases(tree.View(doc.AST()))
+	require.Len(t, all, 3)
+
+	// A merge key merges r3 alone.
+	assert.Equal(t, []decodetree.ReferenceAlias{
+		{Token: all[0].Token, Name: "r1"},
+		{Token: all[1].Token, Name: "r2"},
+		{Token: all[2].Token, Name: "r3", Merge: true},
+	}, all)
 }
 
 func TestWriteNull(t *testing.T) {

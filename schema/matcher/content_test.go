@@ -45,6 +45,12 @@ func TestContent(t *testing.T) {
 			matcher: matcher.Content(missingPath, "value"),
 			input:   `kind: Deployment`,
 		},
+		"string tag on an alias inside its own anchor": {
+			// The decoder reads the alias as null, and !!str reads null as "".
+			matcher: matcher.Content(kindPath, ""),
+			input:   `kind: &a !!str *a`,
+			want:    true,
+		},
 		"string does not match respelled float text": {
 			matcher: versionIs("1.1"),
 			input:   `version: 1.10`,
@@ -622,13 +628,70 @@ func TestContent(t *testing.T) {
 		assert.False(t, match(t, matcher.Content(kindPath, "Pod"), doc))
 	})
 
+	t.Run("scalar behind an alias to a reference reads as its anchor writes it", func(t *testing.T) {
+		t.Parallel()
+
+		// The matcher decodes the Node at the alias, and reads the scalar of
+		// the anchor in the reference for its spelling and its quotes.
+		tcs := map[string]struct {
+			matcher matcher.Matcher
+			input   string
+			refs    string
+			want    bool
+		}{
+			"int matches a plain integer": {
+				matcher: versionIs(2),
+				input:   `version: *v`,
+				refs:    `v: &v 2`,
+				want:    true,
+			},
+			"int does not match a quoted integer": {
+				matcher: versionIs(2),
+				input:   `version: *v`,
+				refs:    `v: &v "2"`,
+			},
+			"int does not match a str-tagged integer": {
+				matcher: versionIs(2),
+				input:   `version: *v`,
+				refs:    `v: &v !!str 2`,
+			},
+			"int does not match a quoted integer behind a tagged alias of the reference": {
+				matcher: versionIs(2),
+				input:   `version: *w`,
+				refs:    stringtest.LinesLF(`v: &v "2"`, `w: &w !t *v`),
+			},
+			"string matches the spelling of a float": {
+				matcher: versionIs("1.10"),
+				input:   `version: *v`,
+				refs:    `v: &v 1.10`,
+				want:    true,
+			},
+			"string matches hex text behind a tagged alias": {
+				matcher: versionIs("0x10"),
+				input:   `version: !t *v`,
+				refs:    `v: &v 0x10`,
+				want:    true,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input, yamltest.References(tc.refs))
+
+				assert.Equal(t, tc.want, match(t, tc.matcher, doc))
+			})
+		}
+	})
+
 	t.Run("node a decode hands its validator", func(t *testing.T) {
 		t.Parallel()
 
 		// The Node a validator gets decodes with the settings of its
 		// source, so a decode of it reads an alias to an anchor of a
-		// reference document. The path of a matcher resolves in the
-		// document alone, so it cannot follow such an alias. Each case
+		// reference document. The path of a matcher selects such an alias,
+		// and the matcher reads its value through the decode. Each case
 		// matches a version of 2.
 		refs := yamltest.References("r: &r 2")
 
@@ -644,14 +707,14 @@ func TestContent(t *testing.T) {
 				`),
 				want: true,
 			},
-			"alias to a reference anchor is an error":        {input: `version: *r`, err: paths.ErrAlias},
-			"tagged alias to a reference anchor is an error": {input: `version: !!int *r`, err: paths.ErrAlias},
-			"alias that leads to a tagged alias to a reference anchor is an error": {
+			"alias to a reference anchor matches":        {input: `version: *r`, want: true},
+			"tagged alias to a reference anchor matches": {input: `version: !t *r`, want: true},
+			"alias that leads to a tagged alias to a reference anchor matches": {
 				input: stringtest.Input(`
-					x: &x !!int *r
+					x: &x !t *r
 					version: *x
 				`),
-				err: paths.ErrAlias,
+				want: true,
 			},
 		}
 

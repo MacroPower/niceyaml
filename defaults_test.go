@@ -10,6 +10,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 // defaultsCafe describes the café of the defaults tests.
@@ -266,6 +267,177 @@ func TestNode_Decode_DefaultsAtAliases(t *testing.T) {
 
 	// An interface value holds the value of its anchor.
 	assert.Equal(t, map[string]any{"k": "v"}, got.Y)
+}
+
+func TestNode_Decode_DefaultsAtReferenceAliases(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"stations: [*bar, {host: b}]",
+		"printers: {main: *bar}",
+		"owner: *bar",
+		"backups: [*bar, *bar]",
+		"kitchen: *bar",
+		"labels: *labels",
+	), yamltest.References(stringtest.LinesLF(
+		"bar: &bar {host: bar.yamull}",
+		"labels: &labels {floor: '1'}",
+	)))
+
+	got, err := doc.Decode[defaultsCafe](t.Context(), defaultsDecoding)
+	require.NoError(t, err)
+
+	// Each value at an alias starts from the defaults of its place, as at
+	// an alias of the document.
+	bar := defaultsPrinter{Host: "bar.yamull", Port: 9100}
+	assert.Equal(t, defaultedCafe(func(c *defaultsCafe) {
+		c.Stations = []defaultsPrinter{bar, {Host: "b", Port: 9100}}
+		c.Printers = map[string]defaultsPrinter{"main": bar}
+		c.Owner = &bar
+		c.Backups = []*defaultsPrinter{&bar, &bar}
+		c.Kitchen = defaultsPrinter{Host: "bar.yamull", Port: 9101}
+		c.Labels = map[string]string{"floor": "1"}
+	}), got)
+
+	// The places that start from equal values share the target.
+	assert.Same(t, got.Backups[0], got.Backups[1])
+
+	// A decode of the Node of the alias starts from the same defaults.
+	at := yamltest.At(t, doc, paths.MustParse("$.stations[0]"))
+
+	station, err := at.Decode[defaultsPrinter](t.Context(), defaultsDecoding)
+	require.NoError(t, err)
+	assert.Equal(t, got.Stations[0], station)
+
+	t.Run("alias to a null", func(t *testing.T) {
+		t.Parallel()
+
+		// A null of a reference document leaves each element and map value
+		// at the defaults of its type, as a null of the document does, and
+		// sets a pointer to nil.
+		nulls := yamltest.References("nul: &nul null\ntil: &til ~\n")
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"stations: [*nul, *til]",
+			"printers: {main: *nul}",
+			"owner: *nul",
+		), nulls)
+
+		got, err := doc.Decode[defaultsCafe](t.Context(), defaultsDecoding)
+		require.NoError(t, err)
+		assert.Equal(t, defaultedCafe(func(c *defaultsCafe) {
+			c.Stations = []defaultsPrinter{{Port: 9100}, {Port: 9100}}
+			c.Printers = map[string]defaultsPrinter{"main": {Port: 9100}}
+		}), got)
+
+		ints, err := yamltest.FirstDocument(t, "ints: [*nul]\n", nulls).Decode[struct {
+			Ints []int `yaml:"ints"`
+		}](t.Context(), niceyaml.WithDefaults(func(i *int) { *i = 7 }))
+		require.NoError(t, err)
+		assert.Equal(t, []int{7}, ints.Ints)
+	})
+}
+
+func TestNode_Decode_DefaultsInsideReferenceAnchors(t *testing.T) {
+	t.Parallel()
+
+	// The decode cannot read the anchor, so each value that the decoder
+	// creates inside it keeps the value of the decoder, in a decode of the
+	// document and in a decode of the Node of the alias.
+	doc := yamltest.FirstDocument(t, "stations: *crew\n",
+		yamltest.References("crew: &crew [{host: a}]\n"))
+
+	got, err := doc.Decode[defaultsCafe](t.Context(), defaultsDecoding)
+	require.NoError(t, err)
+	assert.Equal(t, []defaultsPrinter{{Host: "a"}}, got.Stations)
+
+	at := yamltest.At(t, doc, paths.MustParse("$.stations"))
+
+	stations, err := at.Decode[[]defaultsPrinter](t.Context(), defaultsDecoding)
+	require.NoError(t, err)
+	assert.Equal(t, got.Stations, stations)
+}
+
+func TestNode_Decode_DefaultsReferenceMerges(t *testing.T) {
+	t.Parallel()
+
+	references := yamltest.References(stringtest.LinesLF(
+		"port: &port {port: 1}",
+		"host: &host {host: h}",
+		"seats: &seats {seats: 2}",
+		"crew: &crew {stations: [{host: c}]}",
+	))
+
+	tcs := map[string]struct {
+		input string
+		want  defaultsCafe
+	}{
+		// The kitchen field starts from its defaults, and the merge key
+		// writes its port.
+		"field after a merge key": {
+			input: "kitchen: {<<: *port, host: k}\n",
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Kitchen = defaultsPrinter{Host: "k", Port: 1}
+			}),
+		},
+		"field before a merge key": {
+			input: "kitchen: {host: k, <<: *port}\n",
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Kitchen = defaultsPrinter{Host: "k", Port: 1}
+			}),
+		},
+		// The decoder starts each element from zero, so the element decodes
+		// again from its defaults.
+		"element that merges a reference document": {
+			input: "stations: [{<<: *port, host: s}, {<<: *host}]\n",
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Stations = []defaultsPrinter{{Host: "s", Port: 1}, {Host: "h", Port: 9100}}
+			}),
+		},
+		"target of a pointer that merges a reference document": {
+			input: "owner: {<<: *host}\n",
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Owner = &defaultsPrinter{Host: "h", Port: 9100}
+			}),
+		},
+		// The reference document does not hold the keys of the entries
+		// before the merge key, so the decoder reads those entries, and the
+		// values it creates there start from their defaults.
+		"entries before a merge key that does not hold their keys": {
+			input: stringtest.LinesLF(
+				"stations: [{host: s}]",
+				"printers: {main: {host: p}}",
+				"owner: {host: o}",
+				"<<: *seats",
+			),
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Stations = []defaultsPrinter{{Host: "s", Port: 9100}}
+				c.Printers = map[string]defaultsPrinter{"main": {Host: "p", Port: 9100}}
+				c.Owner = &defaultsPrinter{Host: "o", Port: 9100}
+				c.Seats = 2
+			}),
+		},
+		// The decoder reads the stations of the reference document, and
+		// the fill cannot read inside them.
+		"entry before a merge key that replaces it": {
+			input: stringtest.LinesLF("stations: [{host: s}]", "<<: *crew"),
+			want: defaultedCafe(func(c *defaultsCafe) {
+				c.Stations = []defaultsPrinter{{Host: "c"}}
+			}),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, references)
+
+			got, err := doc.Decode[defaultsCafe](t.Context(), defaultsDecoding)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestNode_Decode_DefaultsInline(t *testing.T) {

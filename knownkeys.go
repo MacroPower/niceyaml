@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
@@ -63,10 +64,10 @@ func (n *Node) admitKnownKeys(cfg decodeConfig, t reflect.Type, view ast.Node) k
 		return keyCut{view: view, read: view}
 	}
 
-	c := &keyCutter{n: n, keys: drop}
+	c := &keyCutter{n: n, keys: drop, reads: map[cutKey]ast.Node{}}
 	trimmed, read, _ := c.cut(view)
 
-	return keyCut{view: trimmed, read: read}
+	return keyCut{view: trimmed, read: read, reads: c.reads}
 }
 
 // keyCut is the view of a decode without the entries of the known keys
@@ -82,6 +83,43 @@ type keyCut struct {
 	// without the key of the entry. The copy takes the place of the alias
 	// or the anchor that holds the mapping.
 	read ast.Node
+	// The node of read that stands for each node of view that the cut
+	// copied, by its [cutKey].
+	reads map[cutKey]ast.Node
+}
+
+// cutKey names a node of the view of a decode. Each copy that
+// [decodetree.DecodeView] makes of a node keeps its type and its token, so
+// the key names every copy of the node.
+//
+//nolint:unused // The fields tell the keys of the map apart.
+type cutKey struct {
+	typ reflect.Type
+	tk  *token.Token
+}
+
+// keyOf returns the [cutKey] of node.
+func keyOf(node ast.Node) cutKey {
+	return cutKey{typ: reflect.TypeOf(node), tk: astnode.Token(node)}
+}
+
+// readView returns view, which returns a node of the document as the
+// decoder reads it, with the cut applied. For a node that the cut copied,
+// the result is the node that the decoder read in its place. A decode
+// that reads a node of the decode again thus reads what the decoder read.
+func (c keyCut) readView(view func(ast.Node) ast.Node) func(ast.Node) ast.Node {
+	if len(c.reads) == 0 {
+		return view
+	}
+
+	return func(node ast.Node) ast.Node {
+		v := view(node)
+		if read, ok := c.reads[keyOf(v)]; ok {
+			return read
+		}
+
+		return v
+	}
 }
 
 // leavesOut reports whether a decode into a value of type t leaves out
@@ -183,6 +221,9 @@ type keyCutter struct {
 	n *Node
 	// The positions of the keys of the entries that the cut leaves out.
 	keys map[position.Position]bool
+	// The node of the read view that stands for each node that the cut
+	// copied, as [keyCut] describes.
+	reads map[cutKey]ast.Node
 }
 
 // cut returns node without each mapping entry whose key starts at a
@@ -191,6 +232,16 @@ type keyCutter struct {
 // an entry out. It copies each node that loses an entry and each node
 // above one, and shares every other node with node.
 func (c *keyCutter) cut(node ast.Node) (ast.Node, ast.Node, bool) {
+	view, read, changed := c.cutNode(node)
+	if changed && !astnode.IsNil(node) {
+		c.reads[keyOf(node)] = read
+	}
+
+	return view, read, changed
+}
+
+// cutNode is [keyCutter.cut] without the record of the copy.
+func (c *keyCutter) cutNode(node ast.Node) (ast.Node, ast.Node, bool) {
 	switch n := node.(type) {
 	case *ast.MappingNode:
 		return c.cutMapping(n)

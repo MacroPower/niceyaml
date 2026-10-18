@@ -820,7 +820,9 @@ func (b *objectBinder) leftOut(err error) error {
 // that the document leaves out, below a mapping that the decode reads
 // field by field, or nil. The path names the field as the current version
 // does, so the detail names that version for a document that declares an
-// older one.
+// older one. A field that a `<<` merge key of a reference document might
+// write does not count as left out, because the document does not show
+// what such a merge key brings in.
 func (b *objectBinder) leftOutDetail(problem niceyaml.ErrorTree) error {
 	p, ok := problem.Path()
 	if !ok {
@@ -840,10 +842,16 @@ func (b *objectBinder) leftOutDetail(problem niceyaml.ErrorTree) error {
 		}
 
 		next := prefix.Child(sel.Name)
-		if exists(b.work, next) {
+
+		n, err := res.Node(next)
+		if err == nil && !astnode.IsNil(n) {
 			prefix = next
 
 			continue
+		}
+
+		if errors.Is(err, paths.ErrReferenceAlias) {
+			return nil
 		}
 
 		holder, err := res.Node(prefix)

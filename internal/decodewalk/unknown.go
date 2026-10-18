@@ -27,11 +27,16 @@ import (
 // does not have a field of that name. The search reads the field names as
 // [yamlfield.Name] gives them, including the fields of inline structs.
 //
-// A later merge key of a reference document might replace an entry of
-// such a mapping. The key of that entry is still a candidate. Whichever
-// entry the decoder takes for the key, the struct does not have a field
-// of that name. The walk skips the value of the entry, as [Walk]
-// describes, so the search does not read the keys below that value.
+// The candidates are the entries that the decoder reads. A later entry of
+// a key replaces an earlier one, and a `<<` merge key brings in the entries
+// of its sources where it stands. The search reads a source in a reference
+// document through [Rules.Anchor], so an entry that such a source replaces
+// drops out. A key that such a source brings in is not a candidate, and
+// the walk does not read below its value, as [Walk] describes. When the
+// search cannot read a source, a merge key after an entry might replace
+// the entry. The key of that entry stays a candidate, because the struct
+// does not have a field of that name whichever entry the decoder reads.
+// The walk skips the value of that entry.
 //
 // The search leaves every other rule of the decode to the decoder, such
 // as the prefixes of keys it allows. It also cannot see the types a
@@ -71,7 +76,7 @@ func UnknownFields(ctx context.Context, r Rules, t reflect.Type, node ast.Node) 
 		decodesItself := r.Unmarshalers.ReportsOwnError(v.Type)
 
 		switch {
-		case v.Kind == Key, v.Kind == Member && v.Struct != nil:
+		case v.Kind == Key, v.Kind == Member && v.Struct != nil, v.Reads == Reference:
 			return Skip
 		case decodesItself && (v.Kind == Inline || v.Type.Kind() != reflect.Struct):
 			return Skip

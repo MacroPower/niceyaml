@@ -623,10 +623,41 @@
 // A [DecodeOption] sets how one decode runs, and it applies only to the call
 // that gets it. A setting that describes the documents, such as
 // [WithReferences] or [WithAliasLimit], belongs to the [Source], which
-// applies it to every decode and validation of them. An alias reads the last
-// anchor of its name before it, inside the decoded node or outside it. When
-// the document does not define an anchor of that name before the alias, the
+// applies it to every decode and validation of them.
+//
+// A decode binds each alias to an anchor by the rule of
+// [go.jacobcolvin.com/niceyaml/paths.Resolver], which the paths package
+// describes. An alias reads the last anchor of its name before it, inside
+// the decoded node or outside it. An anchor counts again where its value
+// ends, so an alias after it reads it rather than an anchor of its name
+// inside its value. An anchor on the value of a `<<` merge key counts for
+// an alias elsewhere only when the document does not define another anchor
+// of its name before the alias. At each merge key, the anchors inside each
+// mapping that the merge key brings in count again. Each alias keeps the
+// anchor that the rule binds it to, wherever a decode reads it. When the
+// document does not define an anchor of that name before the alias, the
 // alias reads one of a reference document.
+//
+// The decoder of goccy/go-yaml binds some aliases of reused anchor names
+// otherwise, so yaml.Unmarshal reads some documents apart from a decode of
+// niceyaml:
+//
+//   - An alias after an anchor on a merge value reads the last other anchor
+//     of its name in go-yaml, even one after the alias. In
+//     "m: {<<: &x {p: 1}}", "b: *x", and "c: &x 2", go-yaml reads b as 2,
+//     and niceyaml reads b as {p: 1}.
+//   - At a merge key, go-yaml looks up again each alias inside the mapping
+//     that the merge key brings in. In "k1: &k 1", "b: &b {v: *k}",
+//     "k2: &k 2", and "m: {<<: *b}", go-yaml reads m.v as 2, and niceyaml
+//     reads m.v as 1.
+//   - An alias inside the value of an anchor of its name reads null in
+//     go-yaml, even after an inner anchor of that name. In
+//     "r1: &x0 {z1: [&x0 d, *x0]}", go-yaml reads z1 as [d, null], and
+//     niceyaml reads z1 as [d, d].
+//   - An alias key inside the value of its anchor reads that anchor in
+//     go-yaml where a merge key brings it in. In "b: &b {*b : 1}" and
+//     "m: {<<: *b}", go-yaml reads m as {"map[null:1]": 1}, and niceyaml
+//     reads m as {null: 1}.
 //
 // The [Unmarshaler] values from [CustomUnmarshaler] and [JSONUnmarshalers]
 // set how the types of the program read YAML, so a program gives them to the
@@ -656,7 +687,26 @@
 // error for a number out of range matches [ErrOverflow], and the error for an
 // unknown field matches [ErrUnknownField]. Each of them also matches
 // ErrDecode. The path names where the document writes the value, so a value
-// that an alias brings in reports the path of its anchor.
+// that an alias brings in reports the path of its anchor. A value of a
+// reference document reports its path below the alias that reads it, as the
+// References section describes. A value below one that a [CustomUnmarshaler]
+// function decodes reports its path below that value, even through an
+// alias. The function reads the value with each alias and each `<<` merge
+// key written out.
+//
+// A `<<` merge key can write its source in place, as a mapping or a sequence
+// of mappings. The path of a value there names the entry in the mapping that
+// holds the merge key, as a path through the merge reads it.
+// `server: {<<: {port: x}}` thus gives `$.server.port`. The path does not name
+// the merge key or an index of a sequence there.
+//
+// A later entry of the key can take that path. Such an entry lies in the
+// mapping that holds the merge key, or in a later source of the same merge
+// key. The path then goes through the merge key instead, and through the index
+// of the source in a sequence of sources. In a decode into
+// map[string]map[string]int, `server: {<<: {port: x}, port: 1}` thus gives
+// `$.server.<<.port`, and `server: {<<: [{port: x}, {port: 1}]}` gives
+// `$.server.<<[0].port`.
 //
 // The decoder stops at the first value it rejects. The decode then searches
 // for the other problems of the document and reports them together, in the
@@ -674,6 +724,11 @@
 // that an UnmarshalText method rejects, and unknown fields under
 // [UnknownFieldsReject]. The decoder confirms each one.
 //
+// The search does not read a value of a reference document, such as the
+// value at an alias of one. Such a value reports a problem only when the
+// decoder rejects it first, so each decode reports at most one problem of
+// the reference documents.
+//
 // Apart from those scalars and a [time.Time], the search does not read
 // anything at or below a value that decodes itself. A type with an
 // UnmarshalYAML method thus reports one bad value per decode. A value
@@ -690,6 +745,9 @@
 // that way:
 //
 //	config.yaml:7:14: $.servers[1].timeout: time: invalid duration "soon"
+//
+// For a value inside an anchor of a reference document, the error binds at
+// the alias that reads the anchor, as the References section describes.
 //
 // An `@` path in an [*Error] from an unmarshaler reads from the value of that
 // unmarshaler. The error stays in the chain beside ErrDecode, unless it holds
@@ -756,8 +814,10 @@
 // that starts from the defaults. The decode keeps the value of the second
 // call, and the [Warnings] collector gets only the warnings of the first call.
 // The decode calls the unmarshaler of every other value except a map key
-// once, on the value that it starts from. The target of [Node.Decode] thus
-// decodes itself once from its defaults, and so does the value that
+// once, on the value that it starts from. It calls the unmarshaler again
+// when it decodes again a value that holds it, as it does for some values
+// that a reference document writes. The target of [Node.Decode] thus decodes
+// itself once from its defaults, and so does the value that
 // [Node.DecodeInto] allocates for a nil pointer that its target points to.
 // Under [UnknownFieldsWarn], a decode whose context carries a collector also
 // calls again the unmarshalers of the structs that decode themselves from a
@@ -765,14 +825,29 @@
 //
 // The value at an alias starts from the defaults of its own place. The places
 // that aliases of one anchor fill share one value when they start from equal
-// values, as the go-yaml decoder shares it. Two pointer fields with equal
-// defaults thus share one target. A place that starts from another value
+// values. Two pointer fields with equal defaults thus share one target, and
+// two maps or slices share their contents. A program that changes one of
+// them in place changes the others too. A decode without WithDefaults gives
+// each place a value of its own. A place that starts from another value
 // builds a value of its own. An interface value at an alias holds the value
 // of its anchor.
 //
-// Each key of a map keeps the value that the decoder gives it, and so does a
-// value behind an alias to a reference document. A panic in a function of
-// WithDefaults makes the decode return an error that holds a [PanicError].
+// The fill of the defaults does not map the values inside an anchor of a
+// reference document to the document. The value at an alias to one still
+// starts from the defaults of its place. When the decoder started that value
+// from zero, the decode decodes it again from its defaults, so the
+// unmarshalers inside it run a second time. Each value that the decoder
+// creates inside the anchor keeps the value of the decoder.
+//
+// A struct field whose entry a `<<` merge key brings in from a reference
+// document keeps the value that the decoder gives it. The decoder starts such
+// a field from the value that its struct holds. When the decoder started the
+// struct from zero, the decode decodes the struct again from its defaults
+// first, so the unmarshalers inside it run a second time.
+//
+// Each key of a map keeps the value that the decoder gives it. A panic in a
+// function of WithDefaults makes the decode return an error that holds a
+// [PanicError].
 //
 // The decode reads each key of a map again to find its entry in these cases:
 //
@@ -786,8 +861,10 @@
 //
 // Each such read calls again the unmarshaler of each key that decodes itself.
 // The decode reads the keys once for a map below a value that decodes itself.
-// It also reads them once for a map behind an alias to a reference document.
-// The [Warnings] collector gets only the warnings of the decoder's call.
+// It also reads them once for a map behind an alias to a reference document,
+// unless that map starts from a map that is not nil. The map then decodes
+// again from that start. The [Warnings] collector gets only the warnings of
+// the decoder's call.
 //
 // # Validation
 //
@@ -968,8 +1045,15 @@
 // check only a whole document, such as a
 // [go.jacobcolvin.com/niceyaml/schema.Registry], refuses a scoped Node. A
 // caller thus validates at the root and decodes the nodes below it without
-// that validator. A value that an alias or a `<<` merge key brings in reports
-// the path where its anchor defines it. That path can lie outside the scope.
+// that validator. A value that an alias of the document brings in reports the
+// path where its anchor defines it. So does a value that a `<<` merge key
+// brings in through such an alias. That path can lie outside the scope. A
+// value of a reference document reports its path below the alias that reads
+// it, as the References section describes. That path lies inside the scope
+// when the alias does. An alias inside an anchor of the document puts the
+// path at the place where that anchor defines it, which can lie outside the
+// scope. A value below one that a [CustomUnmarshaler] function decodes
+// reports its path below that value, as the Decoding section describes.
 //
 // [Node.DecodeAt] scopes and decodes a value that the document must hold.
 // [Node.DecodeIfPresent] scopes and decodes an optional value into a variable
@@ -1083,30 +1167,154 @@
 // cost thus follows those anchors rather than the size of the reference
 // documents, however many documents read them.
 //
-// A path resolves in the document itself and stops at an alias that reads a
-// reference document. [Node.At] and [Node.Nodes] return an error that wraps
-// [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias] for a path that
-// reaches such an alias, and [Node.Ranges] returns one for a path that
-// passes through it. The error also wraps
-// [go.jacobcolvin.com/niceyaml/paths.ErrAlias], as in "app.yaml: resolve
-// $.server.port: alias reads a reference document: *base". [IsInvalid] does
-// not report that error. A
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Content],
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Text], or
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Exists] matcher whose path
-// reaches the alias returns it too, so a registry does not route that
-// document.
+// A path resolves in the document itself. It selects an alias that reads a
+// reference document as the alias, and it does not enter that alias.
+// [Node.At] and [Node.Nodes] thus scope such an alias, and a decode or a
+// validator of the scoped Node reads the anchor through the reference
+// documents. A path that enters the alias returns an error that wraps
+// [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias], and [IsInvalid]
+// does not report that error. The error also wraps
+// [go.jacobcolvin.com/niceyaml/paths.ErrAlias], and it binds at the alias
+// under the path of the alias, as in "app.yaml:1:9: $.server: resolve
+// $.server.port: alias reads a reference document: *base". Every read of a
+// path that enters the alias returns it, such as At, Node.Nodes,
+// [Node.DecodeAt], [Node.DecodeIfPresent], and [Node.Ranges].
 //
-// An error about a value of a reference document binds at the alias that its
-// path enters, because the document does not hold a line for the value:
+// A validator that reads a value below such an alias decodes the Node it
+// gets, as [Each] hands it, rather than call Node.DecodeAt with a path
+// through the alias:
 //
-//	app.yaml:2:9: $.server.port: port must be at least 1
+//	price := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+//		item, err := n.Decode[Item](ctx)
+//		if err != nil {
+//			return err
+//		}
+//
+//		if item.Price > 190 {
+//			return niceyaml.NewError("too expensive", niceyaml.AtPath(paths.Current().Child("price")))
+//		}
+//
+//		return nil
+//	})
+//
+//	items := paths.Current().Child("items").IndexAll()
+//	err := doc.Validate(ctx, niceyaml.Each(items, price))
+//
+// An Each path that goes below such an alias, such as
+// `@.items[*].price`, returns the error before the validator runs on any
+// Node. A rule for a value inside each element thus selects the element, as
+// the example does, and reads below it in the validator.
+//
+// A decode of the scoped Node starts from the defaults of its type, as
+// Node.Decode does. A decode of the document starts the value at such an
+// alias from the defaults of its place. The defaults of a place can differ
+// from the defaults of its type, such as for a field that the function of
+// [WithDefaults] for its parent sets. A validator that decodes the scoped
+// Node thus might see a default that the decode of the document does not
+// hold. Inside the anchor, each value that the decoder creates keeps the
+// value of the decoder in both decodes, as the Defaults section describes.
+//
+// A [go.jacobcolvin.com/niceyaml/schema/matcher.Content] or
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Text] matcher whose path ends
+// at such an alias reads the value through the decode, with the spelling
+// and the quotes that the reference document gives it. A
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Exists] matcher matches,
+// because the path selects the alias. A matcher whose path enters the alias
+// returns the error, so a registry does not route that document.
+//
+// An error whose path enters such an alias binds at the alias, because the
+// document does not hold a line for the value. The price validator returns
+// such an error for an item that the document writes as an alias:
+//
+//	app.yaml:2:5: $.items[0].price: too expensive
 //
 // [SourceError.Nearest] reports the path of that alias, and
 // [SourceError.Unresolved] returns the error that wraps ErrReferenceAlias. A
 // caller can thus distinguish this position from one at the value itself.
-// An error at a key of a mapping that merges a reference document under a
-// `<<` key binds without a position.
+//
+// A `<<` merge key that reads a reference document brings in the entries of a
+// mapping there. A path through a key of the mapping that holds the merge key
+// reads those entries as the decoder reads them. The decoder reads the last
+// entry of a key, so an entry after the merge key replaces the entry of its
+// key that the merge key brings in. An error at a key that the merge key
+// brings in binds at the alias of the merge key. SourceError.Nearest then
+// reports the path of the mapping that holds the merge key, and
+// SourceError.Unresolved returns the error that wraps ErrReferenceAlias, as it
+// does for an alias. An error at any other key binds as it does in a mapping
+// without the merge key. The lookup of those entries reads the merge sources
+// through the aliases of the document, so a document past the alias limit
+// binds such errors as the Alias Limit section describes.
+//
+// The decoder rejects a value of the anchor with a token of the reference
+// document. The decode binds that error at the alias that led the decoder to
+// the token, and its path names the value below the alias. It binds as the
+// error of the price validator binds, so SourceError.Nearest reports the path
+// of the alias:
+//
+//	app.yaml:2:5: $.items[0].price: expected integer, got string
+//
+// A `<<` merge key brings in entries from a reference document, or from a
+// mapping that it writes in place. For such an entry, the path names the entry
+// in the mapping that holds the merge key, as a path through the merge reads
+// it. The path does not name the merge key or an index of a sequence there, so
+// `services: {<<: {q: *img}}` gives `$.services.q.port`. A merge key that reads
+// an anchor of the document brings in the entries where the anchor defines
+// them. The path then names the place of the anchor, as it does for any value
+// of that anchor. The error binds as an error at its path binds.
+//
+// A later entry of the key can take the path through the merge. Such an entry
+// lies in the mapping that holds the merge key, or in a later source of the
+// same merge key. The path then goes through the merge key instead, and
+// through the index of the source in a sequence of sources. That path binds at
+// the alias. `services: {<<: {q: *img}, q: {port: 1}}` thus gives
+// `$.services.<<.q.port`, and `services: {<<: [{q: *img}, {q: {port: 1}}]}`
+// gives `$.services.<<[0].q.port`.
+//
+// Where the path through the merge key does not bind at the alias either, the
+// error keeps the path through the merge and binds at the position of the
+// alias. The error binds at the position of the alias without a path when the
+// anchor reaches the value on two or more paths, such as through two aliases
+// of one inner anchor.
+//
+// The decode finds that alias among the aliases of reference documents that
+// it reads. When it reads one, the error binds there. When it reads several,
+// the error binds at the alias whose anchor reaches the token. When no alias
+// reaches the token, the error binds without a position.
+//
+// Two or more aliases can reach the token, such as two aliases of one anchor.
+// The decode then decodes each value that reaches them again, in the order
+// that the decoder reads the values. It binds the error at the first value
+// that fails the same way. That order takes the fields of a struct in the
+// order its type declares them, and the elements of a sequence and the
+// entries of a map in document order. When no value fails the same way, the
+// error binds without a position.
+//
+// The decoder of a map returns the error of a `<<` merge key before the error
+// of any other entry. So the decode tries the merge keys of a map first. It
+// reads the source of the first merge key whose merge fails the same way as
+// it reads the map. The decoder reads the mappings of a sequence there as one
+// mapping, and the decode reads them the same way. The document does not hold
+// the values of a source in a reference document, so the error binds at the
+// alias that reads such a source.
+//
+// The decode departs from the order of the decoder inside a value that
+// decodes itself. It follows the fields of the type of that value, which
+// might differ from the order its unmarshaler reads them in.
+//
+// The decoder returns the error of a value that decodes itself, such as a
+// [time.Duration], without a token. The decode decodes the value at each
+// alias of a reference document again, and binds the error at the first
+// alias whose value fails the same way:
+//
+//	app.yaml:2:4: $.w: time: invalid duration "soon"
+//
+// When a value inside the anchor reported the error, the decode walks the
+// anchor as it walks the document, and the path goes on to that value, as in
+// `$.w.timeout`. An `@` path in the error reads from that value. A `<<` merge
+// key that reads a reference document stands for each field whose entry it
+// brings in. The decode tries such a field where the decoder reads it among
+// the fields of its struct, and the error binds as an error at the path of
+// the field binds.
 //
 // A reference document brings its anchors and its own reference documents.
 // Its Source parses it once, with its [WithAllowDuplicateKeys],
@@ -1287,6 +1495,16 @@
 // runs. The error binds at the alias of the document that repeats the most
 // nodes, as in "app.yaml:14:30: aliases expand the document past the alias
 // limit". That alias can lie outside the node that the call reads.
+//
+// A path through a mapping whose `<<` merge key reads a reference document
+// finds its entry by reading the merge sources of that mapping, as the
+// References section describes. Those reads follow the aliases of the
+// document, so the count weighs them too. In a document past the limit, an
+// error at such a path binds without reading them. It binds without a
+// position, and [SourceError.Unresolved] returns an error that wraps
+// [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias]. That holds for the
+// errors of a [Validator] of a decode as well, which runs before the decode
+// counts the aliases.
 //
 // [WithAliasLimit] set to false turns the limit off for the documents of one
 // Source, for input that the program trusts, such as a file it ships. It also

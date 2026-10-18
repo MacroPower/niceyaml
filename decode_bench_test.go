@@ -175,6 +175,31 @@ func BenchmarkNode_Decode_ProblemsText(b *testing.B) {
 	)
 }
 
+// BenchmarkNode_Decode_ProblemsBesideReferenceMerge decodes a map whose
+// `<<` merge key reads a reference document, and whose every own entry the
+// decoder rejects. The value of each entry is a scalar in the first layout
+// and a sequence in the second. Each problem binds through the path of
+// its entry, which the resolver cannot read beside such a merge key. The
+// lookups of those paths keep the keys of each merge source that they
+// read, so the time per entry stays flat as the map grows.
+func BenchmarkNode_Decode_ProblemsBesideReferenceMerge(b *testing.B) {
+	ref := yamltest.References("b: &b {zz: 1}\n")
+
+	for _, layout := range []struct{ name, value string }{{"scalars", "bad"}, {"sequences", "[bad]"}} {
+		for _, count := range []int{1000, 4000, 16000} {
+			doc := yamltest.FirstDocument(
+				b,
+				"x:\n"+yamltest.GenerateLines(count, "  a%d: "+layout.value)+"  <<: *b\n",
+				yamltest.NoSizeLimits(ref)...,
+			)
+
+			benchRejected(b, fmt.Sprintf("%s_%d", layout.name, count), count, "entry", decodeAs[struct {
+				X map[string]int `yaml:"x"`
+			}](), doc)
+		}
+	}
+}
+
 // BenchmarkNode_DecodeScoped decodes each item of a list through the
 // node of the item. The items of a merge layout take their value from
 // defaults through a merge key, and the items of the anchored layout
@@ -390,6 +415,80 @@ func BenchmarkNode_DecodeSelfAliases(b *testing.B) {
 	}
 }
 
+// BenchmarkNode_Decode_RejectionInRepeatedReferenceAnchor decodes an alias
+// of a reference anchor u whose values are aliases of an anchor b, whose
+// values are in turn aliases of an anchor a. The text of the reference
+// grows with the count of keys of each anchor, and the decoder reads u as
+// a value of the count cubed. In the root layout, the decoder rejects u
+// itself. In the repeated layout, it rejects b, which every value of u
+// repeats. The decode finds the path to the rejected token through the
+// anchors on the way to it, so the time per key stays flat as the anchors
+// grow. The metric retained-B is the heap that the first decode leaves
+// live on a new document and its Source.
+func BenchmarkNode_Decode_RejectionInRepeatedReferenceAnchor(b *testing.B) {
+	flow := func(count int, format string) string {
+		parts := make([]string, count)
+		for i := range parts {
+			parts[i] = fmt.Sprintf(format, i)
+		}
+
+		return "{" + strings.Join(parts, ", ") + "}"
+	}
+
+	layouts := []struct {
+		decode func(doc *niceyaml.Node) error
+		name   string
+	}{
+		{name: "root", decode: func(doc *niceyaml.Node) error {
+			_, err := doc.Decode[struct {
+				Port int `yaml:"port"`
+			}](b.Context())
+
+			return err
+		}},
+		{name: "repeated", decode: func(doc *niceyaml.Node) error {
+			_, err := doc.Decode[struct {
+				Port struct {
+					Y0 struct {
+						X0 int `yaml:"x0"`
+					} `yaml:"y0"`
+				} `yaml:"port"`
+			}](b.Context())
+
+			return err
+		}},
+	}
+
+	for _, layout := range layouts {
+		for _, count := range []int{50, 100, 200} {
+			ref := yamltest.References(stringtest.LinesLF(
+				"a: &a "+flow(count, "k%d: 1"),
+				"b: &b "+flow(count, "x%d: *a"),
+				"u: &u "+flow(count, "y%d: *b"),
+			))
+			newDoc := func() *niceyaml.Node { return yamltest.FirstDocument(b, "port: *u\n", yamltest.NoSizeLimits(ref)...) }
+			decode := func(doc *niceyaml.Node) {
+				if !errors.Is(layout.decode(doc), niceyaml.ErrWrongKind) {
+					b.Fatal("got no rejection of the kind of a value")
+				}
+			}
+
+			b.Run(fmt.Sprintf("%s_%d", layout.name, count), func(b *testing.B) {
+				b.ReportAllocs()
+
+				doc := newDoc()
+
+				for b.Loop() {
+					decode(doc)
+				}
+
+				yamltest.ReportTimePer(b, count, "key")
+				reportRetained(b, newDoc, decode)
+			})
+		}
+	}
+}
+
 // BenchmarkNode_DecodeBracketedAnchorNames decodes sequences whose quoted
 // anchor names hold a count in brackets, like the new names the decode
 // tree gives reused anchors. The tries sequences spell "x [1]" through
@@ -414,5 +513,68 @@ func BenchmarkNode_DecodeBracketedAnchorNames(b *testing.B) {
 		wide := yamltest.GenerateLines(count, stringtest.JoinLF(`- &"n%[1]d [1]" 1`, `- &"n%[1]d [1]" 2`))
 
 		benchFreshDecode[[]any](b, fmt.Sprintf("wide_%d", count), wide, count, "name")
+	}
+}
+
+// BenchmarkNode_Decode_UnknownFieldsFromReferenceMerge decodes, under
+// [niceyaml.UnknownFieldsReject], mappings whose `<<` merge key brings in
+// keys of a reference document that the struct does not declare. The
+// decoder rejects one such key at the alias of its merge key, and the
+// search for other problems does not report the others. The keys layout
+// reads one mapping that merges an anchor of more and more keys. The
+// mappings layout reads more and more mappings that each merge one anchor
+// of 200 keys, as an untrusted document can. The go-yaml decoder reads
+// each key that each merge key brings in, so the time per merged key stays
+// flat in both layouts. The metric retained-B is the heap that the first
+// decode leaves live on a new document and its Source. The documents of
+// each size read one reference Source. It keeps the keys of its anchor
+// that the decodes before the count read, so the count does not hold them.
+func BenchmarkNode_Decode_UnknownFieldsFromReferenceMerge(b *testing.B) {
+	// The anchor writes each key on a line of its own, as a file of
+	// defaults does.
+	keys := func(count int) string {
+		return "\n  price: 1\n" + yamltest.GenerateLines(count, "  q%d: 1")
+	}
+
+	decode := func(doc *niceyaml.Node) {
+		_, err := doc.Decode[struct {
+			Items []struct {
+				Price int `yaml:"price"`
+			} `yaml:"items"`
+		}](b.Context(), niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
+		if !errors.Is(err, niceyaml.ErrUnknownField) {
+			b.Fatalf("got %v, want unknown fields", err)
+		}
+	}
+
+	sizes := []struct {
+		name            string
+		mappings, count int
+	}{
+		{name: "keys_1000", mappings: 1, count: 1000},
+		{name: "keys_4000", mappings: 1, count: 4000},
+		{name: "keys_16000", mappings: 1, count: 16000},
+		{name: "mappings_100", mappings: 100, count: 200},
+		{name: "mappings_400", mappings: 400, count: 200},
+		{name: "mappings_1600", mappings: 1600, count: 200},
+	}
+
+	for _, size := range sizes {
+		input := "items:\n" + strings.Repeat("  - <<: *u\n", size.mappings)
+		ref := yamltest.References("u: &u" + keys(size.count))
+		newDoc := func() *niceyaml.Node { return yamltest.FirstDocument(b, input, yamltest.NoSizeLimits(ref)...) }
+
+		b.Run(size.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			doc := newDoc()
+
+			for b.Loop() {
+				decode(doc)
+			}
+
+			yamltest.ReportTimePer(b, size.mappings*size.count, "key")
+			reportRetained(b, newDoc, decode)
+		})
 	}
 }

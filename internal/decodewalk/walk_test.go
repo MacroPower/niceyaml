@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -25,9 +26,33 @@ import (
 func rules(tb testing.TB, doc *niceyaml.Node, opts ...yaml.DecodeOption) decodewalk.Rules {
 	tb.Helper()
 
+	return referenceRules(tb, doc, nil, opts...)
+}
+
+// referenceRules returns the rules of a walk of doc, as [rules] does. The
+// aliases of doc read the anchors of ref, a reference document, or of no
+// document for a nil ref. The decoder reads ref before doc, as a decode
+// reads the anchors of its reference documents first.
+func referenceRules(tb testing.TB, doc, ref *niceyaml.Node, opts ...yaml.DecodeOption) decodewalk.Rules {
+	tb.Helper()
+
 	dec := yaml.NewDecoder(bytes.NewReader(nil), opts...)
 
 	var sink any
+
+	anchors := map[string]ast.Node{}
+
+	if ref != nil {
+		require.NoError(tb, dec.DecodeFromNode(ref.AST(), &sink))
+
+		astnode.Inspect(ref.AST(), func(n ast.Node) bool {
+			if anchor, ok := n.(*ast.AnchorNode); ok {
+				anchors[anchor.Name.GetToken().Value] = anchor.Value
+			}
+
+			return true
+		})
+	}
 
 	_ = dec.DecodeFromNode(doc.AST(), &sink) //nolint:errcheck // The walk sees what the decode saw.
 
@@ -45,6 +70,11 @@ func rules(tb testing.TB, doc *niceyaml.Node, opts ...yaml.DecodeOption) decodew
 
 			return dec.DecodeFromNode(node, v)
 		},
+		Anchor: func(alias *ast.AliasNode) (ast.Node, bool) {
+			value, ok := anchors[alias.Value.GetToken().Value]
+
+			return value, ok
+		},
 	}
 }
 
@@ -61,11 +91,12 @@ var (
 
 	// Reads spells each [decodewalk.Reads].
 	reads = map[decodewalk.Reads]string{
-		decodewalk.Whole:    "whole",
-		decodewalk.Nothing:  "nothing",
-		decodewalk.Fields:   "fields",
-		decodewalk.Members:  "members",
-		decodewalk.Elements: "elements",
+		decodewalk.Whole:     "whole",
+		decodewalk.Nothing:   "nothing",
+		decodewalk.Fields:    "fields",
+		decodewalk.Members:   "members",
+		decodewalk.Elements:  "elements",
+		decodewalk.Reference: "reference",
 	}
 )
 
@@ -77,9 +108,22 @@ func walked(
 ) []string {
 	tb.Helper()
 
+	return walkedWith(tb, rules(tb, doc), doc, t, visit)
+}
+
+// walkedWith returns the lines of [walked] for a walk of doc with r.
+func walkedWith(
+	tb testing.TB,
+	r decodewalk.Rules,
+	doc *niceyaml.Node,
+	t reflect.Type,
+	visit func(*decodewalk.Value) decodewalk.Action,
+) []string {
+	tb.Helper()
+
 	var lines []string
 
-	decodewalk.Walk(tb.Context(), rules(tb, doc), t, doc.AST(), astnode.Parent{},
+	decodewalk.Walk(tb.Context(), r, t, doc.AST(), astnode.Parent{},
 		func(v *decodewalk.Value) decodewalk.Action {
 			lines = append(lines, fmt.Sprintf("%s %s %s %s", kinds[v.Kind], v.Path(), v.Type, reads[v.Reads]))
 
@@ -203,6 +247,21 @@ func TestWalk(t *testing.T) {
 				"key @.pairs.y~ string whole",
 				"member @.pairs.y decodewalk_test.pair fields",
 				"field @.pairs.y.a int whole",
+			},
+		},
+		// The walk cannot read the anchor of a reference document, so it
+		// does not go below the alias, and it skips the alias it cannot
+		// resolve.
+		"a value at an alias to a reference document": {
+			input: stringtest.LinesLF("list: [*ref, *missing, *ref]", "name: *ref"),
+			opts:  []niceyaml.SourceOption{yamltest.References("ref: &ref {a: 1}\n")},
+			typ:   reflect.TypeFor[withList](),
+			want: []string{
+				"root @ decodewalk_test.withList fields",
+				"field @.list []decodewalk_test.pair elements",
+				"element @.list[0] decodewalk_test.pair reference",
+				"element @.list[2] decodewalk_test.pair reference",
+				"field @.name string reference",
 			},
 		},
 		"an inline struct where it stands": {
@@ -418,6 +477,88 @@ func TestWalk(t *testing.T) {
 			assert.Equal(t, tc.want, walked(t, doc, tc.typ, visit))
 		})
 	}
+}
+
+func TestWalk_ReferenceMerges(t *testing.T) {
+	t.Parallel()
+
+	const reference = "ref: &ref {a: 1}\n"
+
+	// The decoder reads the a that the merge key brings in from the
+	// reference document, or the entry of the mapping when the reference
+	// document does not hold its key.
+	tcs := map[string]struct {
+		input string
+		want  []string
+	}{
+		"entry that the merge key brings in": {
+			input: "v: {b: 2, <<: *ref}\n",
+			want: []string{
+				"root @ decodewalk_test.pairHolder fields",
+				"field @.v decodewalk_test.pair fields",
+				"field @.v.a int reference",
+				"field @.v.b int whole",
+			},
+		},
+		"entry that the merge key replaces": {
+			input: "v: {a: 5, <<: *ref}\n",
+			want: []string{
+				"root @ decodewalk_test.pairHolder fields",
+				"field @.v decodewalk_test.pair fields",
+				"field @.v.a int reference",
+			},
+		},
+		"entry after the merge key": {
+			input: "v: {<<: *ref, a: 5}\n",
+			want: []string{
+				"root @ decodewalk_test.pairHolder fields",
+				"field @.v decodewalk_test.pair fields",
+				"field @.v.a int whole",
+			},
+		},
+		"merge key of the document that reads the reference document": {
+			input: stringtest.LinesLF("base: &base {<<: *ref}", "v: {b: 2, <<: *base}"),
+			want: []string{
+				"root @ decodewalk_test.pairHolder fields",
+				"field @.v decodewalk_test.pair fields",
+				"field @.v.a int reference",
+				"field @.v.b int whole",
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, yamltest.References(reference))
+			r := referenceRules(t, doc, yamltest.FirstDocument(t, reference))
+
+			assert.Equal(t, tc.want, walkedWith(t, r, doc, reflect.TypeFor[pairHolder](), descend))
+		})
+	}
+
+	t.Run("value that the merge key brings in", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "v: {b: 2, <<: *ref}\n", yamltest.References(reference))
+		r := referenceRules(t, doc, yamltest.FirstDocument(t, reference))
+
+		// The alias stands for the field, and the walk hands on the value
+		// of the entry of the reference document.
+		var merged []string
+
+		decodewalk.Walk(t.Context(), r, reflect.TypeFor[pairHolder](), doc.AST(), astnode.Parent{},
+			func(v *decodewalk.Value) decodewalk.Action {
+				if v.Merged != nil {
+					merged = append(merged, fmt.Sprintf("%s %s %s", v.Path(), v.Held, v.Merged))
+				}
+
+				return decodewalk.Descend
+			})
+
+		assert.Equal(t, []string{"@.v.a *ref 1"}, merged)
+	})
 }
 
 func TestWalk_Value(t *testing.T) {

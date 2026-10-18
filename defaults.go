@@ -196,7 +196,8 @@ func startTarget(v any, cfg decodeConfig, node ast.Node) (any, reflect.Value, er
 // fillDefaults builds again each value that a decode of node into target
 // created, from the start of its type, as [decodewalk.Fill] describes.
 // The value that target points to started from start. The fill decodes
-// values again, as [withoutWarnings] describes.
+// values again, as [withoutWarnings] describes. Each such decode reads
+// what the decoder read, with the cut of the known keys of the decode.
 func (n *Node) fillDefaults(
 	ctx context.Context,
 	dec *yaml.Decoder,
@@ -204,12 +205,14 @@ func (n *Node) fillDefaults(
 	node ast.Node,
 	target any,
 	start reflect.Value,
+	cut keyCut,
 ) error {
 	tv := reflect.ValueOf(target).Elem()
 
 	starts := decodewalk.Starts{Of: cfg.defaults.start, Sets: cfg.defaults.sets}
 
 	rules := n.walkRules(withoutWarnings(ctx), dec, cfg.unmarshalers)
+	rules.View = cut.readView(rules.View)
 
 	filled, err := decodewalk.Fill(ctx, rules, starts, tv.Type(), node, start, tv)
 	if err != nil {

@@ -1,6 +1,8 @@
 package decodetree
 
 import (
+	"sync"
+
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
@@ -16,14 +18,52 @@ import (
 // The tree the Source shares thus stays as the parser built it, and every
 // error the decoder reports names a token of the source.
 func DecodeView(node ast.Node) ast.Node {
-	view, _ := viewOf(node)
+	view, _ := viewer{}.of(node)
 
 	return view
 }
 
-// viewOf returns the [DecodeView] of node, and whether it differs from
-// node.
-func viewOf(node ast.Node) (ast.Node, bool) {
+// AnchorViews gives the [DecodeView] of anchors, and the views it gives
+// share their nodes. The view of an anchor inside another is the node
+// that stands for it in the view of the other, whichever of the two
+// [AnchorViews.View] reads first. The views thus copy each node at most
+// once, however deep the anchors nest. A DecodeView of each anchor apart
+// copies the nodes of an inner anchor once for each anchor that holds
+// it. The zero AnchorViews is empty and ready for use. An AnchorViews is
+// safe for concurrent use.
+type AnchorViews struct {
+	// The view of each anchor that a call of View has built, or the anchor
+	// itself when its view does not differ from it.
+	views map[*ast.AnchorNode]*ast.AnchorNode
+	mu    sync.Mutex
+}
+
+// View returns the [DecodeView] of anchor. The view holds each view of an
+// anchor inside anchor that an earlier call built. When an earlier call
+// built the view of an anchor that holds anchor, View returns the node
+// that stands for anchor there.
+func (a *AnchorViews) View(anchor *ast.AnchorNode) *ast.AnchorNode {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.views == nil {
+		a.views = map[*ast.AnchorNode]*ast.AnchorNode{}
+	}
+
+	view, _ := viewer{anchors: a.views}.anchor(anchor)
+
+	return view
+}
+
+// viewer builds a [DecodeView].
+type viewer struct {
+	// The view of each anchor that the viewer has read, which it reuses,
+	// when not nil.
+	anchors map[*ast.AnchorNode]*ast.AnchorNode
+}
+
+// of returns the [DecodeView] of node, and whether it differs from node.
+func (v viewer) of(node ast.Node) (ast.Node, bool) {
 	if astnode.IsNil(node) {
 		return node, false
 	}
@@ -42,18 +82,12 @@ func viewOf(node ast.Node) (ast.Node, bool) {
 		return &c, true
 
 	case *ast.AnchorNode:
-		value, changed := viewOf(n.Value)
-		if !changed {
-			return n, false
-		}
+		view, changed := v.anchor(n)
 
-		c := *n
-		c.Value = value
-
-		return &c, true
+		return view, changed
 
 	case *ast.TagNode:
-		value, changed := viewOf(n.Value)
+		value, changed := v.of(n.Value)
 		if !changed {
 			return n, false
 		}
@@ -64,7 +98,7 @@ func viewOf(node ast.Node) (ast.Node, bool) {
 		return &c, true
 
 	case *ast.MappingKeyNode:
-		value, changed := viewOf(n.Value)
+		value, changed := v.of(n.Value)
 		if !changed {
 			return n, false
 		}
@@ -75,10 +109,10 @@ func viewOf(node ast.Node) (ast.Node, bool) {
 		return &c, true
 
 	case *ast.MappingValueNode:
-		return mappingValueView(n)
+		return v.entry(n)
 
 	case *ast.MappingNode:
-		values, changed := viewsOf(n.Values, mappingValueView)
+		values, changed := viewsOf(n.Values, v.entry)
 		if !changed {
 			return n, false
 		}
@@ -89,7 +123,7 @@ func viewOf(node ast.Node) (ast.Node, bool) {
 		return &c, true
 
 	case *ast.SequenceNode:
-		values, changed := viewsOf(n.Values, viewOf)
+		values, changed := viewsOf(n.Values, v.of)
 		if !changed {
 			return n, false
 		}
@@ -104,14 +138,34 @@ func viewOf(node ast.Node) (ast.Node, bool) {
 	}
 }
 
-// mappingValueView is [viewOf] for an entry of a mapping.
-func mappingValueView(n *ast.MappingValueNode) (*ast.MappingValueNode, bool) {
+// anchor is [viewer.of] for an anchor.
+func (v viewer) anchor(n *ast.AnchorNode) (*ast.AnchorNode, bool) {
+	if view, ok := v.anchors[n]; ok {
+		return view, view != n
+	}
+
+	view := n
+	if value, changed := v.of(n.Value); changed {
+		c := *n
+		c.Value = value
+		view = &c
+	}
+
+	if v.anchors != nil {
+		v.anchors[n] = view
+	}
+
+	return view, view != n
+}
+
+// entry is [viewer.of] for an entry of a mapping.
+func (v viewer) entry(n *ast.MappingValueNode) (*ast.MappingValueNode, bool) {
 	if n == nil {
 		return nil, false
 	}
 
-	key, keyChanged := viewOf(n.Key)
-	value, valueChanged := viewOf(n.Value)
+	key, keyChanged := v.of(n.Key)
+	value, valueChanged := v.of(n.Value)
 
 	if !keyChanged && !valueChanged {
 		return n, false

@@ -1894,18 +1894,37 @@ func TestWithUnknownFields(t *testing.T) {
 				opts:   []niceyaml.DecodeOption{warn},
 			},
 			"a key below an entry before a merge key that reads a reference document": {
-				// The search cannot tell whether the merge key replaces the
-				// fika, so it does not read below it, as the option documents.
-				input:  stringtest.LinesLF("name: Fika", "fika:", "  - prise: 35", "<<: *base"),
-				source: []niceyaml.SourceOption{yamltest.References("base: &base {name: Kafe}\n")},
-				opts:   []niceyaml.DecodeOption{warn},
+				// The reference document does not hold a fika, so the decoder
+				// reads the fika of the mapping.
+				input:    stringtest.LinesLF("name: Fika", "fika:", "  - prise: 35", "<<: *base"),
+				source:   []niceyaml.SourceOption{yamltest.References("base: &base {name: Kafe}\n")},
+				opts:     []niceyaml.DecodeOption{warn},
+				warnings: `menu.yaml:3:5: warning: $.fika[0].prise~: unknown field "prise"`,
 			},
 			"a key that a merge key brings in from a reference document": {
-				// The search does not read the reference document, as the
-				// option documents.
+				// The search does not read the keys that such a merge key
+				// brings in, as the option documents.
 				input:  stringtest.LinesLF("name: Fika", "<<: *base"),
 				source: []niceyaml.SourceOption{yamltest.References("base: &base {extra: 1}\n")},
 				opts:   []niceyaml.DecodeOption{warn},
+			},
+			"a key behind an alias that reads a reference document": {
+				// The search does not read the reference document, as the
+				// option documents.
+				input:  stringtest.LinesLF("name: Fika", "fika: [*kaffe]"),
+				source: []niceyaml.SourceOption{yamltest.References("kaffe: &kaffe {item: Kaffe, prise: 35}\n")},
+				opts:   []niceyaml.DecodeOption{warn},
+			},
+			"a scoped node at an alias that reads a reference document": {
+				input:  stringtest.LinesLF("name: Fika", "fika: [*kaffe]"),
+				source: []niceyaml.SourceOption{yamltest.References("kaffe: &kaffe {item: Kaffe, prise: 35}\n")},
+				path:   paths.Current().Child("fika").Index(0),
+				read: func(ctx context.Context, n *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
+					_, err := n.Decode[item](ctx, opts...)
+
+					return err
+				},
+				opts: []niceyaml.DecodeOption{warn},
 			},
 		}
 
@@ -2594,7 +2613,8 @@ func TestCustomUnmarshaler(t *testing.T) {
 				want: "1:20: $.spans[0].from: expected integer, got string",
 			},
 			// The text of the value writes out what a merge key brings in,
-			// so the path names the merge key, and resolves through it.
+			// so the path names the field through the merge, as it names a
+			// field of a value that an alias holds.
 			"field a merge key brings in": {
 				input: stringtest.LinesLF(
 					"base: &base {from: nine}",
@@ -2602,7 +2622,7 @@ func TestCustomUnmarshaler(t *testing.T) {
 					"  - <<: *base",
 					"    to: 3",
 				),
-				want: "1:20: $.spans[0].<<.from: expected integer, got string",
+				want: "1:20: $.spans[0].from: expected integer, got string",
 			},
 			"field that holds an alias": {
 				input: stringtest.LinesLF(
@@ -4800,7 +4820,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		dd := yamltest.FirstDocument(t, "x: &x 9\nv: *r\n", ref)
 
 		_, err := dd.Decode[config](t.Context(), niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject))
-		require.EqualError(t, err, `2:4: unknown field "x [1]"`)
+		require.EqualError(t, err, `2:4: $.v.'x [1]'~: unknown field "x [1]"`)
 	})
 
 	t.Run("documents of one source decode at once", func(t *testing.T) {
@@ -4972,6 +4992,44 @@ func TestDocument_Decode_ForwardAlias(t *testing.T) {
 	}
 }
 
+func TestDocument_Decode_AliasErrors(t *testing.T) {
+	t.Parallel()
+
+	// Each error of the decoder at an alias binds at a line and a column,
+	// below a tag that converts a collection too, where no path selects
+	// the alias.
+	tcs := map[string]struct {
+		input string
+		opts  []niceyaml.SourceOption
+		err   string
+	}{
+		"alias with no anchor below a tag that converts a collection": {
+			// The error binds at the alias whose name go-yaml's decoder names.
+			input: "A: !!str &k2 [*k1, 4]\n",
+			err:   `1:15: $.A[0]: could not find alias "k1"`,
+		},
+		"merge alias of an anchor that the decoder does not read": {
+			// The decoder reads the mapping under !!null as null, so it misses
+			// the anchor inside it, and its error names the alias by name.
+			input: stringtest.LinesLF("c: !!null &k1 {B: &k0 {}}", "<<: *k0", "a: 1", "<<: *k0"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			err:   "4:5: decoder rejected the value: cannot find anchor by alias name k0",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, tc.input, tc.opts...)
+
+			_, err := dd.Decode[any](t.Context())
+			require.EqualError(t, err, tc.err)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
+		})
+	}
+}
+
 func TestDocument_DecodeInto(t *testing.T) {
 	t.Parallel()
 
@@ -4991,7 +5049,8 @@ func TestDocument_DecodeInto(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
-			input string
+			input      string
+			references []string
 		}{
 			// The body of each of these documents holds nothing, only
 			// comments, or only a directive above an empty document.
@@ -5010,13 +5069,22 @@ func TestDocument_DecodeInto(t *testing.T) {
 			"null tag":               {input: "!!null\n"},
 			"local tag":              {input: "!custom\n"},
 			"anchored seq tag":       {input: "&a !!seq\n"},
+			// Each of these reads a null from a reference document.
+			"alias to a null of a reference document": {
+				input:      "*none\n",
+				references: []string{"none: &none ~\n"},
+			},
+			"alias to a tagged null of a reference document": {
+				input:      "*none\n",
+				references: []string{"none: &none !!null\n"},
+			},
 		}
 
 		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
+				dd := yamltest.FirstDocument(t, tc.input, yamltest.References(tc.references...))
 
 				slice := []string{"default"}
 
@@ -5082,13 +5150,20 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 		// The go-yaml decoder rejects each of these nulls at the top of a
 		// decode into an int, a uint, a map, or a struct. Each case names
-		// how the document spells the null after a ":" or a "-".
+		// how the document spells the null after a ":" or a "-". A Node at
+		// an alias that reads a reference document holds the alias, and
+		// the decode reads the null of its anchor there.
 		tcs := map[string]struct {
-			null string
+			null       string
+			references []string
 		}{
 			"no value": {null: ""},
 			"null":     {null: " null"},
 			"tilde":    {null: " ~"},
+			"alias to a null of a reference document": {
+				null:       " *none",
+				references: []string{"none: &none ~\n"},
+			},
 		}
 
 		for name, tc := range tcs {
@@ -5102,7 +5177,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 					"config:"+tc.null,
 					"items:",
 					"  -"+tc.null,
-				))
+				), yamltest.References(tc.references...))
 
 				want := defaults()
 				want.Items = []plainConfig{{}}
@@ -5496,6 +5571,12 @@ func TestDocument_DecodeInto(t *testing.T) {
 				references: []string{"a: &x !!null\n"},
 				decode:     decodedAs[*string],
 				want:       (*string)(nil),
+			},
+			"DecodeInto keeps a non-nil pointer for an alias to a tagged null": {
+				input:      "*x\n",
+				references: []string{"a: &x !!null\n"},
+				decode:     intoSameConfig,
+				want:       &plainConfig{Value: 7},
 			},
 			"alias to a scalar of a reference document": {
 				input:      "*x\n",
@@ -5911,6 +5992,52 @@ func TestDocument_Decode_MergeOverride(t *testing.T) {
 			port, err := doc.DecodeAt[int](t.Context(), at.Child("port"))
 			require.NoError(t, err)
 			assert.Equal(t, tc.want.Port, port)
+		})
+	}
+}
+
+func TestDocument_Decode_MergeSourceHoldsItself(t *testing.T) {
+	t.Parallel()
+
+	// An alias inside its own anchor reads that anchor, so a sequence that
+	// a merge key brings in can hold itself. The decode fails as go-yaml's
+	// decoder fails, beside an alias of a reference document too.
+	tcs := map[string]struct {
+		input string
+		refs  string
+		err   string
+	}{
+		"after a scalar of a reference document": {
+			input: "m: {q: &x [*r, *x], <<: *x}\n",
+			refs:  "r: &r 1\n",
+			err:   "1:12: $.m.q[0]: expected mapping, got integer",
+		},
+		"after a mapping of a reference document": {
+			input: "m: {q: &x [*r, *x], <<: *x}\n",
+			refs:  "r: &r {a: 1}\n",
+			err:   "1:16: $.m.q[1]: expected mapping, got null",
+		},
+		"without a reference document": {
+			input: "m: {q: &x [{p: 1}, *x], <<: *x}\n",
+			err:   "1:20: $.m.q[1]: expected mapping, got null",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var opts []niceyaml.SourceOption
+
+			if tc.refs != "" {
+				opts = append(opts, yamltest.References(tc.refs))
+			}
+
+			doc := yamltest.FirstDocument(t, tc.input, opts...)
+
+			_, err := doc.Decode[any](t.Context())
+			require.EqualError(t, err, tc.err)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
 		})
 	}
 }
@@ -7337,13 +7464,23 @@ func TestErrDecode(t *testing.T) {
 				decode: scoped,
 				line:   0,
 			},
-			// The token of the rejection does not tell which of the two
-			// aliases led to it, so the rejection carries no location even
-			// though cfg reads only *base.
+			// Only the anchor base holds the token of the rejection, so the
+			// rejection binds at its alias.
 			"aliases to two references": {
 				input:  "a: *other\nitem: *base\n",
 				decode: decodeAs[cfg](),
-				line:   -1,
+				line:   1,
+			},
+			// Both aliases read base. The decoder reads the fields in the
+			// order the struct declares them, so it reads the second alias
+			// first.
+			"two aliases to one reference": {
+				input: "b: *base\na: *base\n",
+				decode: decodeAs[struct {
+					A struct{ X int } `yaml:"a"`
+					B struct{ X int } `yaml:"b"`
+				}](),
+				line: 1,
 			},
 			// The decoder reports a key of an inline map with no token,
 			// which the decode cannot tell from a token of a reference
@@ -7354,6 +7491,15 @@ func TestErrDecode(t *testing.T) {
 					M map[int]int `yaml:",inline"`
 				}](),
 				line: 0,
+			},
+			// No anchor holds that key, so the rejection carries no location
+			// when the decode reads two aliases.
+			"key of an inline map beside two aliases to references": {
+				input: "a: *other\nb: *other\n",
+				decode: decodeIntoAs[struct {
+					M map[int]int `yaml:",inline"`
+				}](),
+				line: -1,
 			},
 		}
 
@@ -8645,8 +8791,8 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				"  yyy: 2",
 			),
 			want: stringtest.JoinLF(
-				`2:13: $.v.<<.in.qqq~: unknown field "qqq"`,
-				`2:22: $.v.<<.www~: unknown field "www"`,
+				`2:13: $.v.in.qqq~: unknown field "qqq"`,
+				`2:22: $.v.www~: unknown field "www"`,
 				`4:3: $.v.yyy~: unknown field "yyy"`,
 			),
 		},
@@ -9281,7 +9427,7 @@ func TestNode_DecodeAt(t *testing.T) {
 			read:    readAs[string](),
 			want:    "",
 			err:     paths.ErrAlias,
-			wantErr: "cfg.yaml: resolve $.ref: alias does not resolve: *nope has no anchor before it",
+			wantErr: "cfg.yaml:12:6: $.ref: alias does not resolve: *nope has no anchor before it",
 		},
 	}
 
@@ -9310,6 +9456,32 @@ func TestNode_DecodeAt(t *testing.T) {
 			require.EqualError(t, scopedErr, tc.wantErr)
 		})
 	}
+
+	t.Run("an alias to a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "hours: *base\n",
+			niceyaml.WithName("cfg.yaml"),
+			yamltest.References("base: &base {open: 9, close: 17}\n"),
+		)
+
+		// A path that ends at the alias reads the anchor through the
+		// reference documents.
+		got, err := doc.DecodeAt[openHours](t.Context(), paths.Current().Child("hours"))
+		require.NoError(t, err)
+		assert.Equal(t, openHours{Open: 9, Close: 17}, got)
+
+		// A path that enters the alias resolves in the document alone.
+		_, err = doc.DecodeAt[int](t.Context(), paths.Current().Child("hours", "open"))
+		require.EqualError(
+			t,
+			err,
+			"cfg.yaml:1:8: $.hours: resolve $.hours.open: alias reads a reference document: *base",
+		)
+		require.ErrorIs(t, err, paths.ErrAlias)
+		require.ErrorIs(t, err, paths.ErrReferenceAlias)
+		assert.False(t, niceyaml.IsInvalid(err))
+	})
 
 	t.Run("a validator checks the node the path selects", func(t *testing.T) {
 		t.Parallel()
@@ -9551,14 +9723,22 @@ func TestNode_DecodeIfPresent(t *testing.T) {
 			path:    versionPath,
 			want:    1,
 			err:     paths.ErrAlias,
-			wantErr: "cfg.yaml: resolve $.version: alias does not resolve: *nope has no anchor before it",
+			wantErr: "cfg.yaml:1:10: $.version: alias does not resolve: *nope has no anchor before it",
+		},
+		"a path below an alias inside its own anchor": {
+			// A decode reads the alias as null, and the error binds at it.
+			input:   "server: &s {self: *s}\n",
+			path:    paths.Current().Child("server", "self", "port"),
+			want:    1,
+			err:     paths.ErrAlias,
+			wantErr: "cfg.yaml:1:19: $.server.self: resolve $.server.self.port: alias does not resolve: *s forms a cycle",
 		},
 		"a path through an alias that does not resolve": {
 			input:   "server: *nope\n",
 			path:    portPath,
 			want:    1,
 			err:     paths.ErrAlias,
-			wantErr: "cfg.yaml: resolve $.server.port: alias does not resolve: *nope has no anchor before it",
+			wantErr: "cfg.yaml:1:9: $.server: resolve $.server.port: alias does not resolve: *nope has no anchor before it",
 		},
 		"a wildcard path": {
 			input:   "ports: [80, 443]\n",
@@ -10790,7 +10970,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				"1:17: $.base.port: expected integer, got string",
 				`1:32: $.servers[0].timeout: time: invalid duration "soon"`,
 				"4:14: $.servers[1].name: expected string, got sequence",
-				"5:18: $.labels.<<.k: expected integer, got string",
+				"5:18: $.labels.k: expected integer, got string",
 				"5:25: $.labels.j: expected integer, got string",
 				"6:11: $.replicas: expected integer, got string",
 			),
@@ -11382,10 +11562,34 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		"defaults: &defaults {port: http}",
 		"limit: &limit soon",
 		"b: &b {port: 1}",
+		"sidecar: &sidecar {sidecar: {port: 1, note: *defaults}}",
+		"wrap: &wrap {<<: *pair}",
+		"seq: &seq [{ok: {port: 1}}, {bad: *defaults}]",
 		"named: &named {name: x}",
 		"counts: &counts {x: 2}",
 		"spec: &spec {spec: {a: 3}}",
+		"unknown: &unknown {x: 1, y: 2}",
+		"extra: &extra {extra: 2}",
+		"pair: &pair {a: *defaults}",
+		"other: &other {extra: 2, other: 3}",
+		"sub: &sub {sub: {extra: 2}}",
 	)
+
+	// The decoder reads the port before the fallback, which is a server
+	// too.
+	type fallbackPort struct {
+		Name     string         `yaml:"name"`
+		Port     int            `yaml:"port"`
+		Fallback *problemServer `yaml:"fallback"`
+	}
+
+	// The server holds a sub mapping with a name.
+	type subServer struct {
+		Name string `yaml:"name"`
+		Sub  struct {
+			Name string `yaml:"name"`
+		} `yaml:"sub"`
+	}
 
 	// The decoder reads the timeout before any other field.
 	type timeoutFirst struct {
@@ -11468,7 +11672,7 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 			want: stringtest.JoinLF(
 				"3 problems",
 				"1:11: $.replicas: expected integer, got string",
-				"2:10: expected integer, got string",
+				"2:10: $.timeout: expected integer, got string",
 				"4:12: $.servers[0].port: expected integer, got string",
 			),
 		},
@@ -11488,10 +11692,9 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 				"4:12: $.servers[0].port: expected integer, got string",
 			),
 		},
-		// Two aliases read the reference document, and nothing says which
-		// of them led to the rejection. It binds at no position, so it
-		// comes back alone.
-		"rejection with no position": {
+		// Two aliases read the reference document, but only the anchor
+		// defaults holds the port that the decoder rejects.
+		"rejection beside another alias to a reference document": {
 			decode: decodeAs[problemConfig](),
 			input: stringtest.LinesLF(
 				"replicas: x",
@@ -11500,7 +11703,95 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 				"  - *defaults",
 				"  - {port: y}",
 			),
-			want: "expected integer, got string",
+			want: stringtest.JoinLF(
+				"3 problems",
+				"1:11: $.replicas: expected integer, got string",
+				"4:5: $.servers[0].port: expected integer, got string",
+				"5:12: $.servers[1].port: expected integer, got string",
+			),
+		},
+		// Both aliases read the anchor defaults. The decoder reads the
+		// servers in order, so it rejects the port of the first.
+		"two aliases to one anchor of a reference document": {
+			decode: decodeAs[problemConfig](),
+			input: stringtest.LinesLF(
+				"servers:",
+				"  - *defaults",
+				"  - *defaults",
+			),
+			want: "2:5: $.servers[0].port: expected integer, got string",
+		},
+		// The decoder reads the port that the merge key brings in before
+		// the fallback, which reads the same anchor.
+		"merge key and alias that read one anchor of a reference document": {
+			decode: decodeAs[struct {
+				Server fallbackPort `yaml:"server"`
+			}](),
+			input: stringtest.LinesLF("server:", "  <<: *defaults", "  fallback: *defaults"),
+			want:  "2:7: $.server.port: expected integer, got string",
+		},
+		// The decoder reads the field a through the merge key before the
+		// field b.
+		"merge key before a field that reads the same value": {
+			decode: decodeAs[struct {
+				A problemServer `yaml:"a"`
+				B problemServer `yaml:"b"`
+			}](),
+			input: stringtest.LinesLF("<<: *pair", "b: *defaults"),
+			want:  "1:5: $.a.port: expected integer, got string",
+		},
+		// The decoder of a map returns the error of a merge key before the
+		// error of a member, so it rejects the port that the merge key
+		// brings in, whichever comes first.
+		"merge key of a map before a member that reads the same value": {
+			decode: decodeAs[map[string]map[string]problemServer](),
+			input:  stringtest.LinesLF("x:", "  <<: *pair", "  b: *defaults"),
+			want:   "2:7: $.x.a.port: expected integer, got string",
+		},
+		"member of a map before a merge key that reads the same value": {
+			decode: decodeAs[map[string]map[string]problemServer](),
+			input:  stringtest.LinesLF("x:", "  b: *defaults", "  <<: *pair"),
+			want:   "3:7: $.x.a.port: expected integer, got string",
+		},
+		// The merge key reads the same value at a key that the server does
+		// not declare. Its merge thus decodes, and the decoder rejects the
+		// member.
+		"member of a map beside a merge key that reads the same value and decodes": {
+			decode: decodeAs[struct {
+				Services map[string]problemServer `yaml:"services"`
+			}](),
+			input: stringtest.LinesLF("services:", "  web: *defaults", "  <<: *sidecar"),
+			want:  "2:8: $.services.web.port: expected integer, got string",
+		},
+		"member of a nested map beside a merge key that reads the same value and decodes": {
+			decode: decodeAs[map[string]map[string]problemServer](),
+			input:  stringtest.LinesLF("x:", "  a: *defaults", "  <<: *sidecar"),
+			want:   "2:6: $.x.a.port: expected integer, got string",
+		},
+		"member of a map before a merge key whose sources decode": {
+			decode: decodeAs[map[string]map[string]problemServer](),
+			input:  stringtest.LinesLF("x:", "  b: *defaults", "  <<: [*sidecar, *spec]"),
+			want:   "2:6: $.x.b.port: expected integer, got string",
+		},
+		// The decoder merges the sources in order, and the first source
+		// decodes.
+		"second source of a merge key that reads the same value as a member": {
+			decode: decodeAs[map[string]map[string]problemServer](),
+			input:  stringtest.LinesLF("x:", "  b: *defaults", "  <<: [*sidecar, *pair]"),
+			want:   "3:18: $.x.a.port: expected integer, got string",
+		},
+		// The decoder reads the timeout field first, so it rejects the
+		// port that the second server merges in.
+		"two merge keys that read one anchor of a reference document": {
+			decode: decodeAs[struct {
+				Timeout problemServer `yaml:"timeout"`
+				Server  problemServer `yaml:"server"`
+			}](),
+			input: stringtest.LinesLF(
+				"server: {<<: *defaults, name: a}",
+				"timeout: {<<: *defaults, name: b}",
+			),
+			want: "2:15: $.timeout.port: expected integer, got string",
 		},
 		// The decoder reads the port that the merge key brings in from the
 		// reference document, and not the port of the mapping. The search
@@ -11509,7 +11800,7 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		"entry before a merge key that reads a reference document": {
 			decode: decodeAs[problemServer](),
 			input:  stringtest.LinesLF("name: [a]", "port: x", "<<: *b"),
-			want:   "1:7: $.name: expected string, got sequence",
+			want:   "1:1: $.name: expected string, got sequence",
 		},
 		// The decoder reads the name of the reference document, so it
 		// rejects the port alone.
@@ -11521,14 +11812,56 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		"member of an inline map before a merge key that reads a reference document": {
 			decode: decodeAs[countsInline](),
 			input:  stringtest.LinesLF("name: [a]", "x: y", "<<: *counts"),
-			want:   "1:7: $.name: expected string, got sequence",
+			want:   "1:1: $.name: expected string, got sequence",
 		},
 		// The decoder reads the spec of the reference document, so it does
 		// not read the unknown field of the spec of the mapping.
 		"unknown field below an entry before a merge key that reads a reference document": {
 			decode: decodeAs[kindSpec](strict),
 			input:  stringtest.LinesLF("kind: [1]", "spec: {a: 1, bogus: 2}", "<<: *spec"),
-			want:   "1:7: $.kind: expected string, got sequence",
+			want:   "1:1: $.kind: expected string, got sequence",
+		},
+		// The decoder reads the extra of the merge key, not the extra of
+		// the mapping, so the key counts once, at the alias.
+		"unknown field that a merge key of a reference document replaces": {
+			decode: decodeAs[problemServer](strict),
+			input:  stringtest.LinesLF("extra: 1", "<<: *extra"),
+			want:   `2:5: $.extra~: unknown field "extra"`,
+		},
+		"unknown field of a nested mapping that a merge key of a reference document replaces": {
+			decode: decodeAs[problemConfig](strict),
+			input:  stringtest.LinesLF("servers:", "  - extra: 1", "    <<: *extra"),
+			want:   `3:9: $.servers[0].extra~: unknown field "extra"`,
+		},
+		// The reference document holds the key below another key, so the
+		// decoder reads the extra of the mapping.
+		"unknown field that a merge key of a reference document holds below another key": {
+			decode: decodeAs[subServer](strict),
+			input:  stringtest.LinesLF("extra: 1", "<<: *sub"),
+			want: stringtest.JoinLF(
+				"2 unknown fields",
+				`1:1: $.extra~: unknown field "extra"`,
+				`2:5: $.sub.extra~: unknown field "extra"`,
+			),
+		},
+		// The decoder rejects the extra of the first server. The search does
+		// not report the keys that the merge keys bring in, so the extra of
+		// the second server does not count.
+		"unknown field that merge keys of two mappings bring in": {
+			decode: decodeAs[problemConfig](strict),
+			input:  stringtest.LinesLF("servers:", "  - extra: 1", "    <<: *extra", "  - extra: 1", "    <<: *extra"),
+			want:   `3:9: $.servers[0].extra~: unknown field "extra"`,
+		},
+		// The decoder rejects the extra of the reference document, and the
+		// search finds the misspelled key of the document.
+		"unknown fields of a reference document and of the document": {
+			decode: decodeAs[problemConfig](strict),
+			input:  stringtest.LinesLF("servers:", "  - <<: *extra", "rplicas: 2"),
+			want: stringtest.JoinLF(
+				"2 unknown fields",
+				`2:9: $.servers[0].extra~: unknown field "extra"`,
+				`3:1: $.rplicas~: unknown field "rplicas"`,
+			),
 		},
 		"entry of a nested mapping before a merge key that reads a reference document": {
 			decode: decodeAs[problemConfig](),
@@ -11538,7 +11871,7 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 				"    port: x",
 				"    <<: *b",
 			),
-			want: "2:11: $.servers[0].name: expected string, got sequence",
+			want: "2:5: $.servers[0].name: expected string, got sequence",
 		},
 		"scoped decode": {
 			decode: decodeAs[problemServer](),
@@ -11561,7 +11894,9 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			for range 10 {
+			// The decoder picks among the unknown fields of one mapping in no
+			// fixed order, so each case runs many times.
+			for range 20 {
 				doc := yamltest.FirstDocument(t, tc.input, yamltest.References(references))
 				node := yamltest.AtOrSelf(t, doc, tc.scope)
 
@@ -11570,6 +11905,413 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("rejection below an alias to a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		// The path of the price enters the alias, so the rejection binds at
+		// the alias as a validator error at that path does.
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("servers:", "  - *b", "  - {port: 2}"),
+			yamltest.References(stringtest.LinesLF("b: &b", "  name: a", "  port: bad")))
+
+		// A validator that decodes the Node of each element gets the same
+		// error as the decode of the document.
+		servers := paths.Current().Child("servers").IndexAll()
+		each := niceyaml.Each(servers, niceyaml.ValidatorFunc(decodeAs[problemServer]()))
+
+		for _, err := range []error{decodeAs[problemConfig]()(t.Context(), doc), doc.Validate(t.Context(), each)} {
+			require.EqualError(t, err, "2:5: $.servers[0].port: expected integer, got string")
+			require.ErrorIs(t, err, niceyaml.ErrWrongKind)
+
+			bound := yamltest.RequireSourceError(t, err)
+			assert.Equal(t, paths.Doc().Child("servers").Index(0).Child("port"), yamltest.PathOf(t, bound))
+
+			near, ok := bound.Nearest()
+			require.True(t, ok)
+			assert.Equal(t, paths.Doc().Child("servers").Index(0), near)
+			require.ErrorIs(t, bound.Unresolved(), paths.ErrReferenceAlias)
+		}
+	})
+
+	t.Run("rejection of an entry that a merge key brings in", func(t *testing.T) {
+		t.Parallel()
+
+		// The document cannot tell the port of the merge key from a port of
+		// the mapping, so the rejection binds at the alias of the merge key
+		// by its position, and its path names the port.
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("servers:", "  - name: a", "    <<: *defaults"),
+			yamltest.References(references))
+
+		_, err := doc.Decode[problemConfig](t.Context())
+		require.EqualError(t, err, "3:9: $.servers[0].port: expected integer, got string")
+
+		bound := yamltest.RequireSourceError(t, err)
+		assert.Equal(t, paths.Doc().Child("servers").Index(0).Child("port"), yamltest.PathOf(t, bound))
+
+		pos, ok := bound.Position()
+		require.True(t, ok)
+		assert.Equal(t, position.New(2, 8), pos)
+
+		// The value lies in the reference document, as for a value at an
+		// alias, and the mapping that holds the merge key is the nearest
+		// node of the document.
+		near, ok := bound.Nearest()
+		require.True(t, ok)
+		assert.Equal(t, paths.Doc().Child("servers").Index(0), near)
+		require.ErrorIs(t, bound.Unresolved(), paths.ErrReferenceAlias)
+	})
+
+	t.Run("rejection below a value alias before a merge key", func(t *testing.T) {
+		t.Parallel()
+
+		// The anchor named does not hold the key of the alias, so the
+		// decoder reads the alias that the mapping writes, and the rejection
+		// binds there as a validator error at its path does.
+		tcs := map[string]struct {
+			decode func(context.Context, *niceyaml.Node) error
+			input  string
+			want   string
+			near   paths.Path
+			// The alias that the reason of Unresolved names.
+			alias string
+		}{
+			"field of a struct": {
+				decode: decodeAs[fallbackPort](),
+				input:  stringtest.LinesLF("fallback: *defaults", "<<: *named"),
+				want:   "1:11: $.fallback.port: expected integer, got string",
+				near:   paths.Doc().Child("fallback"),
+				alias:  "*defaults",
+			},
+			"field of an element": {
+				decode: decodeAs[struct {
+					Servers []fallbackPort `yaml:"servers"`
+				}](),
+				input: stringtest.LinesLF("servers:", "  - fallback: *defaults", "    <<: *named"),
+				want:  "2:15: $.servers[0].fallback.port: expected integer, got string",
+				near:  paths.Doc().Child("servers").Index(0).Child("fallback"),
+				alias: "*defaults",
+			},
+			"unknown field": {
+				decode: decodeAs[struct {
+					Name     string `yaml:"name"`
+					Fallback *struct {
+						Port int `yaml:"port"`
+					} `yaml:"fallback"`
+				}](strict),
+				input: stringtest.LinesLF("fallback: *named", "<<: *named"),
+				want:  `1:11: $.fallback.name~: unknown field "name"`,
+				near:  paths.Doc().Child("fallback"),
+				alias: "*named",
+			},
+			"member of a map": {
+				decode: decodeAs[map[string]map[string]problemServer](),
+				input:  stringtest.LinesLF("x:", "  b: *defaults", "  <<: *spec"),
+				want:   "2:6: $.x.b.port: expected integer, got string",
+				near:   paths.Doc().Child("x", "b"),
+				alias:  "*defaults",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input, yamltest.References(references))
+
+				err := tc.decode(t.Context(), doc)
+				require.EqualError(t, err, tc.want)
+
+				bound := yamltest.RequireSourceError(t, err)
+
+				near, ok := bound.Nearest()
+				require.True(t, ok)
+				assert.Equal(t, tc.near, near)
+				require.ErrorIs(t, bound.Unresolved(), paths.ErrReferenceAlias)
+				require.ErrorContains(t, bound.Unresolved(), tc.alias)
+
+				// A validator error at the path binds at the same alias.
+				at := niceyaml.AtPath(yamltest.PathOf(t, bound))
+				again := yamltest.RequireSourceError(t, doc.Bind(niceyaml.NewError("x", at)))
+				assert.Equal(t, yamltest.PositionOf(t, bound), yamltest.PositionOf(t, again))
+
+				near, ok = again.Nearest()
+				require.True(t, ok)
+				assert.Equal(t, tc.near, near)
+			})
+		}
+	})
+
+	t.Run("warning for an unknown field that a merge key of a reference document replaces", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder reads the extra of the merge key, so the search does
+		// not warn of the extra of the mapping. It does not read the keys
+		// that the merge key brings in either.
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("extra: 1", "<<: *extra"), yamltest.References(references))
+		warnings := niceyaml.NewWarnings()
+
+		_, err := doc.Decode[problemServer](warnings.Context(t.Context()),
+			niceyaml.WithUnknownFields(niceyaml.UnknownFieldsWarn))
+		require.NoError(t, err)
+		require.NoError(t, warnings.Err())
+	})
+
+	t.Run("unknown field of an anchor that two merge keys read", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder reads the field a first, and it rejects one of the
+		// keys of the anchor, in no fixed order. The search does not report
+		// the keys that the merge keys bring in.
+		type named struct {
+			Name string `yaml:"name"`
+		}
+
+		for range 20 {
+			doc := yamltest.FirstDocument(t, stringtest.LinesLF("b: {<<: *unknown}", "a: {<<: *unknown}"),
+				yamltest.References(references))
+
+			_, err := doc.Decode[struct {
+				A named `yaml:"a"`
+				B named `yaml:"b"`
+			}](t.Context(), strict)
+			want := []string{`2:9: $.a.x~: unknown field "x"`, `2:9: $.a.y~: unknown field "y"`}
+			require.Contains(t, want, err.Error())
+			require.ErrorIs(t, err, niceyaml.ErrUnknownField)
+		}
+	})
+
+	t.Run("unknown field that the decoder picks among the keys of a merge key", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder picks among the unknown keys of one mapping in no fixed
+		// order. The search does not report a key that a merge key of a
+		// reference document brings in, so such a key counts only when the
+		// decoder picks it.
+		tcs := map[string]struct {
+			input string
+			// The errors that a decode might return.
+			want []string
+		}{
+			"keys that a merge key brings in": {
+				input: stringtest.LinesLF("extra: 1", "<<: *other"),
+				want:  []string{`2:5: $.extra~: unknown field "extra"`, `2:5: $.other~: unknown field "other"`},
+			},
+			"keys of the document and of a merge key": {
+				input: stringtest.LinesLF("zzz: 1", "<<: *extra"),
+				want: []string{
+					`1:1: $.zzz~: unknown field "zzz"`,
+					stringtest.JoinLF(
+						"2 unknown fields",
+						`1:1: $.zzz~: unknown field "zzz"`,
+						`2:5: $.extra~: unknown field "extra"`,
+					),
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				for range 20 {
+					doc := yamltest.FirstDocument(t, tc.input, yamltest.References(references))
+
+					_, err := doc.Decode[problemServer](t.Context(), strict)
+					require.Contains(t, tc.want, err.Error())
+					require.ErrorIs(t, err, niceyaml.ErrUnknownField)
+				}
+			})
+		}
+	})
+
+	t.Run("rejection inside a merge source of a map", func(t *testing.T) {
+		t.Parallel()
+
+		type services struct {
+			Tmpl     any                      `yaml:"tmpl"`
+			Services map[string]problemServer `yaml:"services"`
+		}
+
+		// Two or more aliases lead to the token that the decoder rejects. The
+		// decode reads a merge source that the document writes as a map of
+		// the same type. So the rejection binds at the alias that the decoder
+		// rejects, not at the first alias of the source.
+		tcs := map[string]struct {
+			decode func(context.Context, *niceyaml.Node) error
+			input  string
+			want   position.Position
+		}{
+			"flow mapping": {
+				decode: decodeAs[services](),
+				input: stringtest.LinesLF(
+					"services:",
+					"  <<: {q: {name: *limit, port: 1}, r: {name: a, port: *limit}}",
+				),
+				want: position.New(1, 54),
+			},
+			"block mapping": {
+				decode: decodeAs[services](),
+				input: stringtest.LinesLF(
+					"services:",
+					"  <<:",
+					"    q: {name: *limit, port: 1}",
+					"    r: {name: a, port: *limit}",
+				),
+				want: position.New(3, 23),
+			},
+			"anchor of the document": {
+				decode: decodeAs[services](),
+				input: stringtest.LinesLF(
+					"tmpl: &t {q: {name: *limit, port: 1}, r: {name: a, port: *limit}}",
+					"services:",
+					"  <<: *t",
+				),
+				want: position.New(0, 57),
+			},
+			"element of a sequence": {
+				decode: decodeAs[services](),
+				input: stringtest.LinesLF(
+					"services:",
+					"  <<: [{q: {name: *limit, port: 1}, r: {name: a, port: *limit}}]",
+				),
+				want: position.New(1, 55),
+			},
+			// The server does not declare the note, so the decoder does not
+			// read the alias there.
+			"alias at a key that the type does not declare": {
+				decode: decodeAs[services](),
+				input: stringtest.LinesLF(
+					"services:",
+					"  <<: {q: {name: s, port: 1, note: *defaults}, r: *defaults}",
+				),
+				want: position.New(1, 50),
+			},
+			// The decoder reads the entries of the elements as the entries of
+			// one mapping. It returns the error of the merge key of the second
+			// element before the error of the entry of the first.
+			"merge key of a later element of a sequence": {
+				decode: decodeAs[map[string]map[string]problemServer](),
+				input:  stringtest.LinesLF("x:", "  <<: [{b: *defaults}, {<<: *pair}]"),
+				want:   position.New(1, 28),
+			},
+			"merge key of a later element in a reference document": {
+				decode: decodeAs[map[string]map[string]problemServer](),
+				input:  stringtest.LinesLF("x:", "  <<: [{b: *defaults}, *wrap]"),
+				want:   position.New(1, 23),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input, yamltest.References(references))
+
+				err := tc.decode(t.Context(), doc)
+				require.ErrorIs(t, err, niceyaml.ErrWrongKind)
+				assert.Equal(t, tc.want, yamltest.PositionOf(t, yamltest.RequireSourceError(t, err)))
+			})
+		}
+	})
+
+	t.Run("rejection through a merge source names the entry of the merging mapping", func(t *testing.T) {
+		t.Parallel()
+
+		type services struct {
+			Services map[string]problemServer `yaml:"services"`
+		}
+
+		// The path names an entry that a merge key brings in as an entry of
+		// the mapping that holds the merge key, as a validator error at that
+		// path names it. It does not name the merge key or an index of the
+		// sequence there.
+		tcs := map[string]struct {
+			input string
+			want  string
+			near  paths.Path
+			// The alias that the reason of Unresolved names.
+			alias string
+		}{
+			"sequence anchor of a reference document": {
+				input: stringtest.LinesLF("services:", "  <<: *seq"),
+				want:  "2:7: $.services.bad.port: expected integer, got string",
+				near:  paths.Doc().Child("services"),
+				alias: "*seq",
+			},
+			"mapping that the document writes": {
+				input: stringtest.LinesLF("services:", "  web: {port: 1}", "  <<: {q: *defaults}"),
+				want:  "3:11: $.services.q.port: expected integer, got string",
+				near:  paths.Doc().Child("services", "q"),
+				alias: "*defaults",
+			},
+			"sequence beside an alias of a reference document": {
+				input: stringtest.LinesLF("services:", "  <<: [*sidecar, {q: *defaults}]"),
+				want:  "2:22: $.services.q.port: expected integer, got string",
+				near:  paths.Doc().Child("services", "q"),
+				alias: "*defaults",
+			},
+			"merge key of a mapping that the document writes": {
+				input: stringtest.LinesLF("services:", "  <<: {<<: *pair}"),
+				want:  "2:12: $.services.a.port: expected integer, got string",
+				near:  paths.Doc().Child("services"),
+				alias: "*pair",
+			},
+			// A later entry of the key takes the path through the merge, so
+			// the path goes through the merge key, which selects the alias.
+			"mapping that the document writes before an entry of the key": {
+				input: stringtest.LinesLF("services:", "  <<: {q: *defaults}", "  q: {port: 1}"),
+				want:  "2:11: $.services.<<.q.port: expected integer, got string",
+				near:  paths.Doc().Child("services", "<<", "q"),
+				alias: "*defaults",
+			},
+			"sequence element before an element with the key": {
+				input: stringtest.LinesLF("services:", "  <<: [{q: *defaults}, {q: {port: 1}}]"),
+				want:  "2:12: $.services.<<[0].q.port: expected integer, got string",
+				near:  paths.Doc().Child("services", "<<").Index(0).Child("q"),
+				alias: "*defaults",
+			},
+			"sequence element beside an alias of a reference document before an entry of the key": {
+				input: stringtest.LinesLF("services:", "  <<: [{q: *defaults}, *sidecar]", "  q: {port: 1}"),
+				want:  "2:12: $.services.<<[0].q.port: expected integer, got string",
+				near:  paths.Doc().Child("services", "<<").Index(0).Child("q"),
+				alias: "*defaults",
+			},
+			"sequence anchor of a reference document before an entry of the key": {
+				input: stringtest.LinesLF("services:", "  <<: *seq", "  bad: {port: 1}"),
+				want:  "2:7: $.services.<<[1].bad.port: expected integer, got string",
+				near:  paths.Doc().Child("services", "<<"),
+				alias: "*seq",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input, yamltest.References(references))
+
+				err := decodeAs[services]()(t.Context(), doc)
+				require.EqualError(t, err, tc.want)
+
+				bound := yamltest.RequireSourceError(t, err)
+
+				near, ok := bound.Nearest()
+				require.True(t, ok)
+				assert.Equal(t, tc.near, near)
+				require.ErrorIs(t, bound.Unresolved(), paths.ErrReferenceAlias)
+				require.ErrorContains(t, bound.Unresolved(), tc.alias)
+
+				// A validator error at the path binds at the same alias.
+				at := niceyaml.AtPath(yamltest.PathOf(t, bound))
+				again := yamltest.RequireSourceError(t, doc.Bind(niceyaml.NewError("x", at)))
+				assert.Equal(t, yamltest.PositionOf(t, bound), yamltest.PositionOf(t, again))
+
+				near, ok = again.Nearest()
+				require.True(t, ok)
+				assert.Equal(t, tc.near, near)
+			})
+		}
+	})
 }
 
 func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
@@ -12246,6 +12988,15 @@ type tierServer struct {
 	Name    string        `yaml:"name"`
 	Timeout time.Duration `yaml:"timeout"`
 	Tier    tier          `yaml:"tier"`
+}
+
+// fallbackServer is a server with a duration and a server to fall back
+// to. The decoder reads the fields in this order, so it reads the duration
+// before the fallback.
+type fallbackServer struct {
+	Name     string          `yaml:"name"`
+	Timeout  time.Duration   `yaml:"timeout"`
+	Fallback *fallbackServer `yaml:"fallback"`
 }
 
 // aliasedServer is a [tierServer] whose inline field reads the anchor a
@@ -13404,6 +14155,266 @@ func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
 	})
 }
 
+func TestDocument_Decode_Rejection_MergeSources(t *testing.T) {
+	t.Parallel()
+
+	// The values of refmap are integers, as the values of x are.
+	references := yamltest.References("refmap: &refmap {a: 1}")
+
+	type server struct {
+		X problemServer `yaml:"x"`
+	}
+
+	type counts struct {
+		X map[string]int `yaml:"x"`
+	}
+
+	tcs := map[string]struct {
+		decode func(context.Context, *niceyaml.Node) error
+		input  string
+		want   string
+		scope  paths.Path
+	}{
+		// The path names an entry that a merge key writes in place as an
+		// entry of the mapping that holds the merge key.
+		"mapping that the merge key writes": {
+			decode: decodeAs[server](),
+			input:  stringtest.LinesLF("x:", "  <<: {port: bad}"),
+			want:   "2:14: $.x.port: expected integer, got string",
+		},
+		"block mapping that the merge key writes": {
+			decode: decodeAs[server](),
+			input:  stringtest.LinesLF("x:", "  <<:", "    port: bad"),
+			want:   "3:11: $.x.port: expected integer, got string",
+		},
+		"anchored mapping that the merge key writes": {
+			decode: decodeAs[server](),
+			input:  stringtest.LinesLF("x:", "  <<: &a {port: bad}"),
+			want:   "2:17: $.x.port: expected integer, got string",
+		},
+		"tagged mapping that the merge key writes": {
+			decode: decodeAs[server](),
+			input:  stringtest.LinesLF("x:", "  <<: !!map {port: bad}"),
+			want:   "2:20: $.x.port: expected integer, got string",
+		},
+		"mapping for an integer": {
+			decode: decodeAs[server](),
+			input:  stringtest.LinesLF("x:", "  <<: {port: {a: 1}}"),
+			want:   "2:8: $.x.port: expected integer, got mapping",
+		},
+		"unknown field": {
+			decode: decodeAs[server](niceyaml.WithUnknownFields(niceyaml.UnknownFieldsReject)),
+			input:  stringtest.LinesLF("x:", "  <<: {prt: 1}"),
+			want:   `2:8: $.x.prt~: unknown field "prt"`,
+		},
+		"nested merge keys": {
+			decode: decodeAs[counts](),
+			input:  stringtest.LinesLF("x:", "  <<: {<<: {b: bad}}"),
+			want:   "2:16: $.x.b: expected integer, got string",
+		},
+		"element of a sequence of mappings": {
+			decode: decodeAs[counts](),
+			input:  stringtest.LinesLF("x:", "  <<: [{a: 1}, {b: bad}]"),
+			want:   "2:20: $.x.b: expected integer, got string",
+		},
+		"element beside an alias of a reference document": {
+			decode: decodeAs[counts](),
+			input:  stringtest.LinesLF("x:", "  <<: [*refmap, {b: bad}]"),
+			want:   "2:21: $.x.b: expected integer, got string",
+		},
+		"scoped decode": {
+			decode: decodeAs[problemServer](),
+			input:  stringtest.LinesLF("x:", "  <<: {q: {port: 1}, r: {port: bad}}"),
+			scope:  paths.Doc().Child("x", "r"),
+			want:   "2:32: $.x.r.port: expected integer, got string",
+		},
+		// A merge key that reads an anchor of the document brings in the
+		// entries where the anchor defines them.
+		"anchor of the document": {
+			decode: decodeAs[struct {
+				Base any           `yaml:"base"`
+				X    problemServer `yaml:"x"`
+			}](),
+			input: stringtest.LinesLF("base: &b {port: bad}", "x:", "  <<: *b"),
+			want:  "1:17: $.base.port: expected integer, got string",
+		},
+		// A later entry of the key takes the path through the merge, so the
+		// path goes through the merge key.
+		"mapping before an entry of the key": {
+			decode: decodeAs[counts](),
+			input:  stringtest.LinesLF("x:", "  <<: {b: bad}", "  b: 2"),
+			want:   "2:11: $.x.<<.b: expected integer, got string",
+		},
+		"element before an element with the key": {
+			decode: decodeAs[counts](),
+			input:  stringtest.LinesLF("x:", "  <<: [{b: bad}, {b: 2}]"),
+			want:   "2:12: $.x.<<[0].b: expected integer, got string",
+		},
+		"element before an alias of a reference document with the key": {
+			decode: decodeAs[counts](),
+			input:  stringtest.LinesLF("x:", "  <<: [{a: bad}, *refmap]"),
+			want:   "2:12: $.x.<<[0].a: expected integer, got string",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, references)
+
+			err := tc.decode(t.Context(), yamltest.AtOrSelf(t, doc, tc.scope))
+			require.EqualError(t, err, tc.want)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+			srcErr := yamltest.RequireSourceError(t, err)
+			require.NoError(t, srcErr.Unresolved())
+
+			// The rejection binds where an error at its path binds, as one
+			// from a validator does.
+			at := niceyaml.AtPath(yamltest.PathOf(t, srcErr))
+			atPath := yamltest.RequireSourceError(t, doc.Bind(niceyaml.NewError("at the path", at)))
+			require.NoError(t, atPath.Unresolved())
+
+			_, near := atPath.Nearest()
+			require.False(t, near, "the path selects nothing")
+			assert.Equal(t, yamltest.RangeOf(t, atPath), yamltest.RangeOf(t, srcErr))
+		})
+	}
+}
+
+func TestNode_Decode_SelfAliasInReferenceAnchor(t *testing.T) {
+	t.Parallel()
+
+	// A Node at an alias of a reference document decodes the anchor as the
+	// decode of the whole document reads the alias there. An alias inside
+	// the anchor that names it reads null in both.
+	tcs := map[string]struct {
+		// The value at the path in the decode of the whole document.
+		pick  func(t *testing.T, whole map[string]any) any
+		ref   string
+		input string
+		path  paths.Path
+	}{
+		"mapping": {
+			ref:   "r: &r {a: *r}\n",
+			input: "m: *r\nn: 1\n",
+			path:  paths.Current().Child("m"),
+			pick:  func(_ *testing.T, whole map[string]any) any { return whole["m"] },
+		},
+		"sequence": {
+			ref:   "r: &r [*r]\n",
+			input: "m: *r\n",
+			path:  paths.Current().Child("m"),
+			pick:  func(_ *testing.T, whole map[string]any) any { return whole["m"] },
+		},
+		"item": {
+			ref:   "r: &r {a: *r}\n",
+			input: "m: [*r, {b: 1}]\n",
+			path:  paths.Current().Child("m").Index(0),
+			pick: func(t *testing.T, whole map[string]any) any {
+				t.Helper()
+
+				items, ok := whole["m"].([]any)
+				require.True(t, ok)
+
+				return items[0]
+			},
+		},
+		"entry below the root": {
+			ref:   "r: &r {a: *r, b: 2}\n",
+			input: "m: {x: *r}\n",
+			path:  paths.Current().Child("m").Child("x"),
+			pick: func(t *testing.T, whole map[string]any) any {
+				t.Helper()
+
+				m, ok := whole["m"].(map[string]any)
+				require.True(t, ok)
+
+				return m["x"]
+			},
+		},
+		"control: an anchor without an alias of itself": {
+			ref:   "r: &r {a: 1}\n",
+			input: "m: *r\nn: 1\n",
+			path:  paths.Current().Child("m"),
+			pick:  func(_ *testing.T, whole map[string]any) any { return whole["m"] },
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, yamltest.References(tc.ref))
+
+			whole, err := doc.Decode[map[string]any](t.Context())
+			require.NoError(t, err)
+
+			got, err := yamltest.At(t, doc, tc.path).Decode[any](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, tc.pick(t, whole), got)
+		})
+	}
+}
+
+func TestNode_Decode_TextAtReferenceAlias(t *testing.T) {
+	t.Parallel()
+
+	// The decode of a Node at an alias to a reference document reads the
+	// value of the anchor. A text type thus reads the text of that value,
+	// as a field at the alias does.
+	doc := yamltest.FirstDocument(t, "a: *addr\n", yamltest.References("addr: &addr 10.0.0.1\n"))
+	at := yamltest.At(t, doc, paths.Current().Child("a"))
+
+	addr, err := at.Decode[netip.Addr](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, netip.MustParseAddr("10.0.0.1"), addr)
+
+	tiers, err := yamltest.FirstDocument(t, "tier: *low\n", yamltest.References("low: &low low\n")).
+		DecodeAt[tier](t.Context(), paths.Current().Child("tier"))
+	require.NoError(t, err)
+	assert.Equal(t, tier(1), tiers)
+}
+
+func TestNode_Decode_AnchorBeforeNodeReadsReference(t *testing.T) {
+	t.Parallel()
+
+	// The decode of a Node below the body reads the anchors of the document
+	// before the node that its aliases need. Such an anchor can hold an
+	// alias to a reference document, which the decode then reads too.
+	ref := "s2: &r2 a b\n"
+
+	tcs := map[string]struct {
+		input string
+		path  paths.Path
+		want  any
+	}{
+		"alias of an anchor inside an anchored mapping that reads a reference document": {
+			input: stringtest.LinesLF("c: &k0", "  a: *r2", "  d: &k4 1", "b: [*k4]"),
+			path:  paths.Current().Child("b"),
+			want:  []any{uint64(1)},
+		},
+		"alias of the anchored mapping that reads a reference document": {
+			input: stringtest.LinesLF("c: &k0", "  a: *r2", "  d: &k4 1", "b: [*k0]"),
+			path:  paths.Current().Child("b"),
+			want:  []any{map[string]any{"a": "a b", "d": uint64(1)}},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, yamltest.References(ref))
+
+			got, err := yamltest.At(t, doc, tc.path).Decode[any](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 	t.Parallel()
 
@@ -13426,7 +14437,8 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			want   string
 			// The path of the node that decodes, for a case that decodes
 			// below the root.
-			scope paths.Path
+			scope  paths.Path
+			source []niceyaml.SourceOption
 		}{
 			"duration field": {
 				input:  "name: api\ntimeout: soon\n",
@@ -13688,13 +14700,79 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				decode: decodeIntoAs[tierServer](),
 				want:   `2:7: $.tier: unknown tier "mid"`,
 			},
+			// The document does not hold a line for a value of a reference
+			// document, so the error binds at the alias.
+			"duration at an alias to a reference document": {
+				input:  "timeout: *limit\n",
+				source: []niceyaml.SourceOption{yamltest.References("limit: &limit soon\n")},
+				decode: decodeAs[tierServer](),
+				want:   `1:10: $.timeout: time: invalid duration "soon"`,
+			},
+			// The decoder calls the UnmarshalText method of a field at the
+			// alias, but not at the root of a decode, so the decode reads
+			// the alias in place to find the error.
+			"text unmarshaler at an alias to a reference document": {
+				input:  "name: api\ntier: *mid\n",
+				source: []niceyaml.SourceOption{yamltest.References("mid: &mid mid\n")},
+				decode: decodeAs[tierServer](),
+				want:   `2:7: $.tier: unknown tier "mid"`,
+			},
+			// The document does not hold a line for the value inside the
+			// anchor, so the error binds at the alias, and its path names
+			// that value.
+			"value inside an anchor of a reference document": {
+				input:  "servers: [{name: a}, *api]\n",
+				source: []niceyaml.SourceOption{yamltest.References("api: &api {name: api, timeout: soon}\n")},
+				decode: decodeAs[struct {
+					Servers []tierServer `yaml:"servers"`
+				}](),
+				want: `1:22: $.servers[1].timeout: time: invalid duration "soon"`,
+			},
+			// The alias of the merge key stands for the entry that it brings
+			// in, as for a value at an alias.
+			"value that a merge key brings in from a reference document": {
+				input:  "main: {<<: *api, name: main}\n",
+				source: []niceyaml.SourceOption{yamltest.References("api: &api {timeout: soon}\n")},
+				decode: decodeAs[struct {
+					Main tierServer `yaml:"main"`
+				}](),
+				want: `1:12: $.main.timeout: time: invalid duration "soon"`,
+			},
+			// The decoder reads the timeout that the merge key brings in
+			// before the fallback, which reads the same anchor.
+			"value that a merge key brings in beside an alias of its anchor": {
+				input: stringtest.LinesLF("server:", "  <<: *api", "  fallback: *api"),
+				source: []niceyaml.SourceOption{
+					yamltest.References("api: &api {name: api, timeout: soon}\n"),
+				},
+				decode: decodeAs[struct {
+					Server fallbackServer `yaml:"server"`
+				}](),
+				want: `2:7: $.server.timeout: time: invalid duration "soon"`,
+			},
+			// The decode reads the value of the anchor in place of the
+			// alias, so the UnmarshalText method gets the text of the value.
+			"text unmarshaler at a scoped alias to a reference document": {
+				input:  "name: api\ntier: *mid\n",
+				source: []niceyaml.SourceOption{yamltest.References("mid: &mid mid\n")},
+				scope:  paths.Current().Child("tier"),
+				decode: decodeAs[tier](),
+				want:   `2:7: $.tier: unknown tier "mid"`,
+			},
+			"scoped decode at an alias to a reference document": {
+				input:  "name: api\nmain: *api\n",
+				source: []niceyaml.SourceOption{yamltest.References("api: &api {name: api, timeout: soon}\n")},
+				scope:  paths.Current().Child("main"),
+				decode: decodeAs[tierServer](),
+				want:   `2:7: $.main.timeout: time: invalid duration "soon"`,
+			},
 		}
 
 		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.scope)
+				dd := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input, tc.source...), tc.scope)
 
 				err := tc.decode(t.Context(), dd)
 				require.EqualError(t, err, tc.want)
@@ -13870,13 +14948,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					return err
 				},
 				want: "unmarshaler rejected the value",
-			},
-			// No path resolves through an alias to a reference document.
-			"value an alias reads from a reference document": {
-				input:  "timeout: *limit\n",
-				source: []niceyaml.SourceOption{yamltest.References("limit: &limit soon\n")},
-				decode: decodeAs[tierServer](),
-				want:   `time: invalid duration "soon"`,
 			},
 			// Every decode of the node fails the same way, whatever the
 			// target, so no value of the target reported the error. The
@@ -14054,11 +15125,15 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 		)
 		mainSpan := stringtest.LinesLF("main:", "  span: {from: 9, to: 3}")
 
+		// A span that a reference document holds below a mapping.
+		apiSpan := yamltest.References("api: &api {name: api, span: {from: 9, to: 3}}\n")
+
 		tcs := map[string]struct {
 			decode func(ctx context.Context, dd *niceyaml.Node) error
 			is     error
 			input  string
 			want   string
+			source []niceyaml.SourceOption
 		}{
 			"method that takes a decode function": {
 				input: twoSpans,
@@ -14135,6 +15210,27 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				}](),
 				is:   errSpan,
 				want: "1:18: $.spans[0].to: to is below from",
+			},
+			// The document does not hold a line for the span inside the
+			// anchor, so the error binds at the alias, and the path goes
+			// under the span.
+			"value inside an anchor of a reference document": {
+				input:  "mains: [{name: a, span: {from: 1, to: 5}}, *api]\n",
+				source: []niceyaml.SourceOption{apiSpan},
+				decode: decodeAs[struct {
+					Mains []spanMirror `yaml:"mains"`
+				}](),
+				is:   errSpan,
+				want: "1:44: $.mains[1].span.to: to is below from",
+			},
+			"value inside an entry that a merge key brings in from a reference document": {
+				input:  "mains: [{<<: *api, name: a}]\n",
+				source: []niceyaml.SourceOption{apiSpan},
+				decode: decodeAs[struct {
+					Mains []spanMirror `yaml:"mains"`
+				}](),
+				is:   errSpan,
+				want: "1:14: $.mains[0].span.to: to is below from",
 			},
 			"value below a scoped node": {
 				input:  twoSpans,
@@ -14241,7 +15337,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input))
+				err := tc.decode(t.Context(), yamltest.FirstDocument(t, tc.input, tc.source...))
 				require.EqualError(t, err, tc.want)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 

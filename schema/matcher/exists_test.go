@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -37,6 +38,12 @@ func TestExists(t *testing.T) {
 		"field with whitespace value": {path: kindPath, input: `kind: " "`, want: true},
 		"field with numeric value":    {path: kindPath, input: `kind: 123`, want: true},
 		"field with boolean value":    {path: kindPath, input: `kind: true`, want: true},
+		"field that holds an alias inside its own anchor": {
+			// The decoder reads the alias as null, so kind reads "".
+			path:  kindPath,
+			input: `kind: &a !!str *a`,
+			want:  true,
+		},
 		"nested path exists": {
 			path: metadataName,
 			input: stringtest.Input(`
@@ -66,6 +73,18 @@ func TestExists(t *testing.T) {
 			assert.Equal(t, tc.want, match(t, matcher.Exists(tc.path), doc))
 		})
 	}
+
+	t.Run("alias to a reference", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, `kind: *k`, yamltest.References(`k: &k {name: x}`))
+
+		// The path selects the alias, but it does not enter it.
+		assert.True(t, match(t, matcher.Exists(kindPath), doc))
+
+		_, err := matcher.Exists(kindPath.Child("name")).Match(t.Context(), doc)
+		require.ErrorIs(t, err, paths.ErrReferenceAlias)
+	})
 
 	testCannotDecide(t, matcher.Exists)
 }

@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"slices"
 
+	"github.com/goccy/go-yaml/ast"
+
 	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -48,6 +50,11 @@ func init() {
 		s, _ := src.(*Source) //nolint:errcheck // The hook takes a *Source.
 
 		return s.layerNodes()
+	}
+	hook.AliasContent = func(n any, alias *ast.AliasNode) (ast.Node, error) {
+		node, _ := n.(*Node) //nolint:errcheck // The hook takes a *Node.
+
+		return node.doc.aliasContent(alias)
 	}
 	hook.KnownKeys = func(keys []paths.Path) any {
 		keys = slices.Clone(keys)

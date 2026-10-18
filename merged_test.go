@@ -4490,7 +4490,7 @@ func TestNode_Origin(t *testing.T) {
 		}
 	})
 
-	t.Run("a value of a reference document has no Node in its layer", func(t *testing.T) {
+	t.Run("a value that a layer reads from a reference document", func(t *testing.T) {
 		t.Parallel()
 
 		shared := niceyaml.NewSourceFromString(
@@ -4503,20 +4503,15 @@ func TestNode_Origin(t *testing.T) {
 			path paths.Path
 			err  string
 		}{
-			"the alias": {
-				prod: "server: *shared\n",
-				path: server,
-				err:  "prod.yaml: resolve $.server: alias reads a reference document: *shared",
-			},
 			"a value below the alias": {
 				prod: "server: *shared\n",
 				path: port,
-				err:  "prod.yaml: resolve $.server.port: alias reads a reference document: *shared",
+				err:  "prod.yaml:1:9: $.server: resolve $.server.port: alias reads a reference document: *shared",
 			},
 			"a value a merge key reads": {
 				prod: stringtest.LinesLF("server:", "  <<: *shared"),
 				path: port,
-				err:  "prod.yaml: resolve $.server.port: alias reads a reference document: *shared",
+				err:  "prod.yaml:2:7: $.server: resolve $.server.port: alias reads a reference document: *shared",
 			},
 		}
 
@@ -4554,6 +4549,29 @@ func TestNode_Origin(t *testing.T) {
 		require.NoError(t, err)
 		assert.Same(t, prod, origin.Source())
 		assert.Equal(t, stringtest.JoinLF("server:", "  <<: *shared"), origin.View().Held().Content())
+
+		t.Run("the alias", func(t *testing.T) {
+			t.Parallel()
+
+			// The alias has a Node in its layer, which reads the anchor of
+			// the reference.
+			prod := niceyaml.NewSourceFromString(
+				"server: *shared\n",
+				niceyaml.WithName("prod.yaml"),
+				niceyaml.WithReferences(shared),
+			)
+
+			origin, err := yamltest.At(t, layersDocument(t, base, prod), server).Origin()
+			require.NoError(t, err)
+			assert.Same(t, prod, origin.Source())
+			assert.Equal(t, server, origin.Path())
+			assert.Equal(t, "*shared", origin.AST().String())
+			assert.Equal(t, niceyaml.NodeMapping, origin.Kind())
+
+			got, err := origin.Decode[map[string]any](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, map[string]any{"host": "shared.example.com", "port": uint64(9)}, got)
+		})
 	})
 }
 
@@ -4946,10 +4964,11 @@ func TestNewSourceFromLayers_Alias(t *testing.T) {
 			err:        "prod.yaml:1:9: $.server.port: port must be at least 1",
 			unresolved: true,
 		},
-		"a value a merge key reads from the reference document binds in its layer": {
-			shared: "shared: &shared {host: shared.example.com, port: -1}\n",
-			prod:   stringtest.LinesLF("server:", "  <<: *shared"),
-			err:    "prod.yaml: $.server.port: port must be at least 1",
+		"a value a merge key reads from the reference document binds at the alias": {
+			shared:     "shared: &shared {host: shared.example.com, port: -1}\n",
+			prod:       stringtest.LinesLF("server:", "  <<: *shared"),
+			err:        "prod.yaml:2:7: $.server.port: port must be at least 1",
+			unresolved: true,
 		},
 		"a value the reference document leaves out binds in the layer below": {
 			shared: "shared: &shared {host: shared.example.com}\n",

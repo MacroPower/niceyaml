@@ -220,9 +220,12 @@ type Layer interface {
 // origins gives the same [WithUnmarshalers] to the Source of every layer.
 //
 // A value that a layer reads through an alias or a `<<` merge key has its
-// origin at the content of the anchor. For an anchor in a reference
-// document of [WithReferences], Origin returns the error that [Node.At]
-// returns for the path. That error wraps
+// origin at the content of the anchor. A value that a layer reads through
+// an alias to a reference document of [WithReferences] has its origin at
+// that alias, as [Node.At] scopes it. A value below such an alias, or one
+// that a `<<` merge key brings in from a reference document, does not
+// have a Node in its layer. For such a value, Origin returns the error
+// that Node.At returns for its path. That error wraps
 // [go.jacobcolvin.com/niceyaml/paths.ErrAlias] and binds to the layer
 // that holds the alias.
 func (n *Node) Origin() (*Node, error) {

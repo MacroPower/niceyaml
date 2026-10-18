@@ -4077,13 +4077,15 @@ func (e *SourceError) Position() (position.Position, bool) {
 //
 // A path to a key a mapping leaves out binds at that mapping, as
 // [SourceError.Nearest] describes, and does not have a reason. A path that
-// enters an alias the document cannot follow is the one binding with both a
-// position and a reason. It binds at the alias, and the reason wraps
+// enters an alias the document cannot follow binds with both a position and
+// a reason. It binds at the alias, and the reason wraps
 // [go.jacobcolvin.com/niceyaml/paths.ErrAlias], so a caller can distinguish
 // that position from one at the value itself. For an alias that reads a
 // reference document of [WithReferences], the reason wraps
-// [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias] too. Unresolved
-// returns nil for a nil SourceError.
+// [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias] too. So does the
+// reason of a path through a key that a `<<` merge key brings in from such a
+// document, which binds at the alias of the merge key. Unresolved returns
+// nil for a nil SourceError.
 func (e *SourceError) Unresolved() error {
 	if e == nil || errors.Is(e.locErr, errUnlocated) {
 		return nil
@@ -4112,6 +4114,11 @@ func (e *SourceError) Unresolved() error {
 //     an anchor of a reference document from [WithReferences]. The range
 //     covers the `*` of the alias, and SourceError.Unresolved returns a
 //     reason that wraps [go.jacobcolvin.com/niceyaml/paths.ErrAlias].
+//   - The mapping that holds a `<<` merge key, for a path through a key that
+//     the merge key brings in from a reference document. The range covers
+//     the `*` of the alias of the merge key, and SourceError.Unresolved
+//     returns a reason that wraps
+//     [go.jacobcolvin.com/niceyaml/paths.ErrReferenceAlias].
 //   - A value that decodes itself, for an error a [SelfValidator] returns
 //     at or below it, because its fields do not have to mirror the
 //     document. The range covers the text of the value. Every error below a
@@ -4123,9 +4130,9 @@ func (e *SourceError) Unresolved() error {
 //	niceyaml.NewError("name is required", niceyaml.AtPath(paths.Doc().Child("server", "name")))
 //	// cfg.yaml:3:1: $.server.name: name is required
 //
-// A `<<` merge key might set a key from an alias the document cannot
-// follow. The document does not show which line holds the value of such a
-// key, so the key does not have a position.
+// A `<<` merge key might also set a key from an alias that does not resolve.
+// The document does not show which line holds the value of such a key, so
+// the key does not have a position.
 func (e *SourceError) Nearest() (paths.Path, bool) {
 	if e == nil || e.locErr != nil || e.loc.near == nil {
 		return paths.Path{}, false

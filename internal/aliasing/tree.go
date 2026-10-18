@@ -44,6 +44,30 @@ func CheckDecode(n Node) error {
 	})
 }
 
+// PastLimit reports whether aliases make up too much of what a decode of
+// the whole document of n reads, as [CheckDecode] counts it. It reads the
+// verdict of the document whether or not n holds an alias, so it reports
+// true for every node of a document past the limit. It reports false for a
+// nil Node, for a document without an alias, and for every node of a
+// document that the limit does not apply to, as [Limited] reports. The
+// document keeps the count, as it keeps the count of CheckDecode, so only
+// the first call of either counts.
+//
+// A reader that reads the content of the aliases of a document in its own
+// way, such as a lookup of the entries that a `<<` merge key brings in,
+// asks PastLimit first. What it reads is part of what the count weighs, so
+// it does not read the content of an alias of a document past the limit.
+func PastLimit(n Node) bool {
+	state := stateOf(n)
+	if state == nil || !state.AliasLimit() || len(state.Facts().Aliases) == 0 {
+		return false
+	}
+
+	return state.ExcessiveAliasing(func() error {
+		return checkRead(state.Facts(), readValue, Budget{})
+	}) != nil
+}
+
 // CheckDecodeText returns an error when n holds an alias and aliases make
 // up too much of the text that the decoder writes out for the node. To decode
 // a type with an UnmarshalText method, or one that reads YAML bytes, the

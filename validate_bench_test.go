@@ -10,6 +10,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 // BenchmarkNode_Decode_SelfValidation decodes several shapes of document
@@ -326,3 +327,128 @@ func (r *methodRow) Reset() { *r = methodRow{} }
 func (r *methodRow) String() string { return fmt.Sprintf("%+v", *r) }
 
 func (*methodRow) ProtoMessage() {}
+
+// BenchmarkNode_Validate_EachBesideReferenceMerge validates a list whose
+// items each merge a mapping of the document and a mapping of a
+// reference document, as in `<<: [*big, *ref]`. The validator of each
+// item fails at the key v that the item writes, so each failure binds
+// through the merge sources. The lookups keep the keys of each merge
+// source that they read. In the past_limit layout, the aliases to big
+// take the document past the alias limit, so the bindings do not read
+// the merge sources. The trusted layout turns the limit off, and the
+// reference layout merges a reference mapping of 1000 keys alone. The
+// time per item stays flat as the list grows in each layout. The metric
+// retained-B is the heap that the first validation leaves live on a new
+// document and its Source. The documents of each layout read one
+// reference Source. It keeps the keys of its anchor that the validations
+// before the count read, so the count does not hold them.
+func BenchmarkNode_Validate_EachBesideReferenceMerge(b *testing.B) {
+	keys := func(count int) string {
+		parts := make([]string, count)
+		for i := range parts {
+			parts[i] = fmt.Sprintf("k%d: 1", i)
+		}
+
+		return "{" + strings.Join(parts, ", ") + "}"
+	}
+
+	item := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+		return niceyaml.NewError("v must be 2", niceyaml.AtPath(paths.Current().Child("v")))
+	})
+	v := niceyaml.Each(paths.MustParse("$.items[*]"), item)
+
+	layouts := []struct {
+		name, big, ref, merge string
+		trusted               bool
+	}{
+		{name: "past_limit", big: keys(10000), ref: "{zz: 1}", merge: "[*big, *ref]"},
+		{name: "trusted", big: keys(1000), ref: "{zz: 1}", merge: "[*big, *ref]", trusted: true},
+		{name: "reference", big: "{}", ref: keys(1000), merge: "*ref"},
+	}
+
+	for _, layout := range layouts {
+		opts := yamltest.NoSizeLimits(yamltest.References("ref: &ref " + layout.ref + "\n"))
+		if layout.trusted {
+			opts = append(opts, niceyaml.WithAliasLimit(false))
+		}
+
+		for _, items := range []int{250, 1000, 4000} {
+			input := "big: &big " + layout.big + "\nitems:\n" +
+				yamltest.GenerateLines(items, "  - {v: %d, <<: "+layout.merge+"}")
+			newDoc := func() *niceyaml.Node { return yamltest.FirstDocument(b, input, opts...) }
+			validate := func(doc *niceyaml.Node) {
+				if doc.Validate(b.Context(), v) == nil {
+					b.Fatal("got nil, want an error for each item")
+				}
+			}
+
+			b.Run(fmt.Sprintf("%s_%d", layout.name, items), func(b *testing.B) {
+				b.ReportAllocs()
+
+				doc := newDoc()
+
+				for b.Loop() {
+					validate(doc)
+				}
+
+				yamltest.ReportTimePer(b, items, "item")
+				reportRetained(b, newDoc, validate)
+			})
+		}
+	}
+}
+
+// BenchmarkNode_Validate_WarnBesideReferenceMerge validates a mapping whose
+// `<<` merge key brings in the keys of a reference anchor, with a validator
+// that warns at each of those keys through [niceyaml.Node.Warn]. Each
+// warning binds in a call of its own, which looks the key up through the
+// anchor, and goes to the [niceyaml.Warnings] collector of the context.
+// The reference Source keeps the keys of the anchor after the first
+// lookup, so the lookups take time linear in the count of keys. The
+// collector adds its own cost for each warning that it holds. The metric
+// retained-B is the heap that the first validation leaves live on a new
+// document and its Source. The documents of each size read one reference
+// Source, which keeps the keys of its anchor from the validations before
+// the count. So the count does not hold them.
+func BenchmarkNode_Validate_WarnBesideReferenceMerge(b *testing.B) {
+	for _, keys := range []int{1000, 2000, 4000} {
+		ref := yamltest.References("u: &u\n" + yamltest.GenerateLines(keys, "  k%d: 1"))
+		newDoc := func() *niceyaml.Node {
+			return yamltest.FirstDocument(b, "x:\n  <<: *u\n", yamltest.NoSizeLimits(ref)...)
+		}
+
+		warns := make([]error, 0, keys)
+		for i := range keys {
+			at := niceyaml.AtPath(paths.Doc().Child("x", fmt.Sprintf("k%d", i)))
+			warns = append(warns, niceyaml.NewWarning("old key", at))
+		}
+
+		v := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			for _, warn := range warns {
+				n.Warn(ctx, warn)
+			}
+
+			return nil
+		})
+
+		validate := func(doc *niceyaml.Node) {
+			warnings := niceyaml.NewWarnings()
+			if doc.Validate(warnings.Context(b.Context()), v) != nil || warnings.Err() == nil {
+				b.Fatal("got an error or no warnings, want a warning for each key")
+			}
+		}
+
+		b.Run(fmt.Sprintf("keys_%d", keys), func(b *testing.B) {
+			b.ReportAllocs()
+
+			doc := newDoc()
+
+			for b.Loop() {
+				validate(doc)
+			}
+
+			yamltest.ReportTimePer(b, keys, "warning")
+			reportRetained(b, newDoc, validate)
+		})
+	}
+}

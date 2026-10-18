@@ -780,6 +780,52 @@ func TestLimited(t *testing.T) {
 	})
 }
 
+func TestPastLimit(t *testing.T) {
+	t.Parallel()
+
+	bomb := yamltest.AliasLevels(7) + yamltest.AliasKey("b", 7)
+
+	tcs := map[string]struct {
+		input string
+		path  paths.Path
+		opts  []niceyaml.SourceOption
+		want  bool
+	}{
+		"no alias":               {input: "a: [x, y]\n"},
+		"alias within the limit": {input: stringtest.LinesLF("s: &s [a, b]", "t: *s")},
+		"alias bomb":             {input: bomb, want: true},
+		// The verdict is that of the document, even for a node that does
+		// not hold an alias.
+		"node without an alias beside a bomb": {
+			input: bomb + "c: [x]\n",
+			path:  paths.Current().Child("c"),
+			want:  true,
+		},
+		"alias bomb with the limit off": {
+			input: bomb,
+			opts:  []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
+			node := yamltest.AtOrSelf(t, doc, tc.path)
+
+			assert.Equal(t, tc.want, aliasing.PastLimit(node))
+			assert.Equal(t, tc.want, aliasing.PastLimit(node), "second call")
+		})
+	}
+
+	t.Run("nil node", func(t *testing.T) {
+		t.Parallel()
+
+		assert.False(t, aliasing.PastLimit((*niceyaml.Node)(nil)))
+	})
+}
+
 func TestHoldsReferenceAlias(t *testing.T) {
 	t.Parallel()
 

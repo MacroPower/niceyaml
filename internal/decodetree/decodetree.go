@@ -482,6 +482,10 @@ func (t *Tree) Holds(tk *token.Token) bool {
 // alias inside the anchor it names, the failure is also any [yaml.Error]
 // whose token is not one of the tree's, such as the null the decoder
 // merges in its place.
+//
+// The decoder can also miss an anchor that the resolver binds, and its
+// message then names the alias by name alone. UnresolvedMerge then finds
+// the first alias of that name inside scope.
 func (t *Tree) UnresolvedMerge(scope ast.Node, err error) (*token.Token, string, bool) {
 	first, last := astnode.Bounds(scope)
 	if len(first) == 0 {
@@ -500,6 +504,21 @@ func (t *Tree) UnresolvedMerge(scope ast.Node, err error) (*token.Token, string,
 
 		if msg == m.message() || m.enclosed && yamlErr {
 			return m.token, m.message(), true
+		}
+	}
+
+	// The decoder can miss an anchor that the resolver binds, such as one
+	// inside a collection under a tag that converts it, which the decoder
+	// does not read. Its message names the alias by name alone, and the
+	// first alias of that name inside scope is the first that it reads.
+	for _, a := range t.facts.Aliases {
+		tk := a.Node.Start
+		if tk == nil || tk.Position == nil || tk.Position.Offset < lo || tk.Position.Offset > hi {
+			continue
+		}
+
+		if m := (mergeAlias{token: tk, name: a.Name}); msg == m.message() {
+			return tk, msg, true
 		}
 	}
 
@@ -527,21 +546,33 @@ func (t *Tree) unresolvedMerges() []mergeAlias {
 	return found
 }
 
-// ReferenceAliases returns the tokens of the aliases to a reference
-// document from niceyaml.WithReferences that scope holds, in document
-// order. The argument scope is a node of the tree. Such an alias is one
-// that the document's resolver does not bind to an anchor before it. The
-// alias lies inside scope, or inside an anchor of the document that an
-// alias the walk reaches refers to, even an anchor outside scope. The
-// walk ignores the target type of the decode, so it returns aliases the
-// type never reads. An alias inside the anchor it refers to reads null,
-// so the walk does not follow it.
-func (t *Tree) ReferenceAliases(scope ast.Node) []*token.Token {
+// ReferenceAlias is an alias of the document to a reference document
+// from niceyaml.WithReferences, as [Tree.ReferenceAliases] returns it.
+type ReferenceAlias struct {
+	// Token is the token of the alias, a token of the Source.
+	Token *token.Token
+	// Name is the name of the alias as the document spells it, or empty
+	// when the alias does not have one.
+	Name string
+	// Merge reports whether a `<<` merge key merges the alias.
+	Merge bool
+}
+
+// ReferenceAliases returns the aliases to a reference document from
+// niceyaml.WithReferences that scope holds, in document order. The
+// argument scope is a node of the tree. Such an alias is one that the
+// document's resolver does not bind to an anchor before it. The alias
+// lies inside scope, or inside an anchor of the document that an alias
+// the walk reaches refers to, even an anchor outside scope. The walk
+// ignores the target type of the decode, so it returns aliases the type
+// never reads. An alias inside the anchor it refers to reads null, so the
+// walk does not follow it.
+func (t *Tree) ReferenceAliases(scope ast.Node) []ReferenceAlias {
 	reads := t.referenceReads(scope)
 
-	refs := make([]*token.Token, len(reads))
+	refs := make([]ReferenceAlias, len(reads))
 	for i, a := range reads {
-		refs[i] = a.token
+		refs[i] = ReferenceAlias{Token: a.token, Name: a.name, Merge: a.merge}
 	}
 
 	return refs
@@ -637,7 +668,7 @@ func (t *Tree) offsetAliases() []aliasRead {
 			continue
 		}
 
-		read := aliasRead{token: a.Node.Start, name: a.Name, enclosed: a.Inside}
+		read := aliasRead{token: a.Node.Start, name: a.Name, enclosed: a.Inside, merge: a.Merge}
 		if a.Anchor != nil {
 			read.anchor = a.Anchor
 		}
@@ -664,6 +695,8 @@ type aliasRead struct {
 	name string
 	// Whether the alias lies inside anchor.
 	enclosed bool
+	// Whether a `<<` merge key merges the alias.
+	merge bool
 }
 
 // mergeAlias is an alias under a `<<` merge key that the decoder does not

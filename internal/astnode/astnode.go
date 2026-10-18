@@ -35,6 +35,7 @@
 package astnode
 
 import (
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
@@ -616,34 +617,30 @@ func Entries(node ast.Node) ([]*ast.MappingValueNode, bool) {
 }
 
 // IsTaggedNull reports whether node, or the value that an anchor on node
-// names, is a tag that the go-yaml decoder reads as null. A "!!null" tag
-// over any value is such a tag. So is a tag without a value, such as
-// "!!seq", "!!map", or a local tag. The go-yaml Unmarshal reads a document
-// whose body is a tagged null as empty. A tag that converts its value,
-// such as "!!str" or "!!int", reads as a value even when it does not wrap
-// a value. So does any tag after a %TAG directive that redefines the "!!"
-// handle.
+// names, is a tag that the go-yaml decoder reads as null. The decoder
+// answers, through a decode of the tag on its own. A "!!null" tag over
+// any value is such a tag. So is a tag without a value, such as "!!seq",
+// "!!map", or a local tag. The go-yaml Unmarshal reads a document whose
+// body is a tagged null as empty. A tag that converts its value, such as
+// "!!str" or "!!int", reads as a value even when it does not wrap a value.
+// So does any tag after a %TAG directive that redefines the "!!" handle.
+// A decode of the tag on its own does not know the anchor of an alias, so
+// a tag over an alias is a tagged null only when it is "!!null".
 func IsTaggedNull(node ast.Node) bool {
 	if anchor, ok := node.(*ast.AnchorNode); ok {
 		node = anchor.Value
 	}
 
 	tag, ok := node.(*ast.TagNode)
-	if !ok || tag.Start == nil || tag.Directive != nil {
+	if !ok {
 		return false
 	}
 
-	switch token.ReservedTagKeyword(tag.Start.Value) {
-	case token.NullTag:
-		return true
+	var v any
 
-	case token.StringTag, token.IntegerTag, token.FloatTag, token.BooleanTag,
-		token.TimestampTag, token.BinaryTag:
-		return false
+	err := yaml.NodeToValue(tag, &v)
 
-	default:
-		return IsNil(tag.Value) || tag.Value.Type() == ast.NullType
-	}
+	return err == nil && v == nil
 }
 
 // ScalarText returns the string that a decode reads from node, a scalar

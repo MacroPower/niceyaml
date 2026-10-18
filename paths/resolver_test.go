@@ -421,6 +421,141 @@ func TestResolver_NodeFrom(t *testing.T) {
 	})
 }
 
+func TestResolver_MatchesFrom(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err   error
+		input string
+		from  string
+		path  string
+		// The line and the column of the alias that err names.
+		at   string
+		want []string
+	}{
+		"entries": {
+			input: "a: {b: 1, c: 2}\n",
+			from:  "$.a",
+			path:  "@.*",
+			want:  []string{"@.b=1", "@.c=2"},
+		},
+		"items": {
+			input: "a: [x, y]\n",
+			from:  "$.a",
+			path:  "@[*]",
+			want:  []string{"@[0]=x", "@[1]=y"},
+		},
+		"every node below": {
+			input: "a: {b: {c: 1}}\nd: 2\n",
+			from:  "$.a",
+			path:  "@..*",
+			want:  []string{"@.b={c: 1}", "@.b.c=1"},
+		},
+		"from a node an alias leads to": {
+			input: stringtest.LinesLF("base: &b {k: [1]}", "ref: *b"),
+			from:  "$.ref",
+			path:  "@.k[*]",
+			want:  []string{"@.k[0]=1"},
+		},
+		"entries a merge brings in": {
+			input: mergedKeyDoc,
+			from:  "$.m",
+			path:  "@.*",
+			want:  []string{"@.k=x", "@.own=1"},
+		},
+		"current path selects the node itself": {
+			input: "a: [x]\n",
+			from:  "$.a",
+			path:  "@",
+			want:  []string{"@=[x]"},
+		},
+		"nothing below a converting tag": {
+			input: "p: !!str &k {a: 1}\n",
+			from:  "$.p",
+			path:  "@..*",
+		},
+		"absolute path reads from the root": {
+			input: "a: {b: x}\nc: [y]\n",
+			from:  "$.a",
+			path:  "$.c[*]",
+			want:  []string{"$.c[0]=y"},
+		},
+		"unknown alias": {
+			// The error names the line and the column of the alias.
+			input: stringtest.LinesLF("a:", "  b: *nope"),
+			from:  "$.a",
+			path:  "@.*",
+			err:   paths.ErrAlias,
+			at:    "2:6",
+		},
+		"alias inside its own anchor on the way": {
+			input: "a: &x {b: *x, c: 1}\n",
+			from:  "$.a",
+			path:  "@.b.z",
+			err:   paths.ErrAlias,
+			at:    "1:11",
+		},
+		"wildcard at an alias inside its own anchor": {
+			// The decoder reads the alias as null, and a wildcard selects
+			// nothing there.
+			input: "a: &x {b: *x, c: 1}\n",
+			from:  "$.a.b",
+			path:  "@.*",
+		},
+		"recursive wildcard at an alias of an anchor on an alias inside it": {
+			input: stringtest.LinesLF("a: {k: &x !t *x}", "b: *x"),
+			from:  "$.b",
+			path:  "@..*",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			r := paths.NewResolver(documentOf(t, tc.input))
+			from, path := paths.MustParse(tc.from), paths.MustParse(tc.path)
+
+			start, err := r.Node(from)
+			require.NoError(t, err)
+
+			matches, err := r.MatchesFrom(start, path)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				assert.Contains(t, err.Error(), ": "+tc.at+": ")
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, matchValues(matches))
+
+			// The path of each match, joined to the path of the start,
+			// selects the node of the match.
+			for _, m := range matches {
+				node, err := r.Node(from.Join(m.Path))
+				require.NoError(t, err)
+				assert.Same(t, m.Node, node)
+			}
+		})
+	}
+
+	t.Run("nil node", func(t *testing.T) {
+		t.Parallel()
+
+		r := paths.NewResolver(documentOf(t, "a: [x]\n"))
+
+		matches, err := r.MatchesFrom(nil, paths.Current().ChildAll())
+		require.NoError(t, err)
+		assert.Empty(t, matches)
+
+		// A `$` path reads from the root, so a nil node plays no part.
+		matches, err = r.MatchesFrom(nil, paths.Doc().Child("a").IndexAll())
+		require.NoError(t, err)
+		assert.Equal(t, []string{"$.a[0]=x"}, matchValues(matches))
+	})
+}
+
 func TestResolver_Wildcard(t *testing.T) {
 	t.Parallel()
 
@@ -2147,10 +2282,10 @@ func TestResolver_Alias(t *testing.T) {
 	// Node looks through the alias to the last anchor of its name before
 	// it. With no such anchor, Node reports that the alias names none. The
 	// decoder reads an alias inside the content of the anchor it refers to
-	// as null, so a path to such an alias selects no node either. A tag on
-	// an alias stays over the alias, and an alias under a tag that does
-	// not resolve fails as one without a tag does. Node, Nodes, and
-	// [niceyaml.Node.At] agree on which.
+	// as null, so a path to such an alias selects the alias, or the tag on
+	// it. A tag on an alias stays over the alias, and an alias under a tag
+	// that does not resolve fails as one without a tag does. Node, Nodes,
+	// and [niceyaml.Node.At] agree on which.
 	tcs := map[string]struct {
 		err   error
 		input string
@@ -2184,27 +2319,34 @@ func TestResolver_Alias(t *testing.T) {
 		"tagged alias inside its own anchor": {
 			input: "a: &x [!t *x]\n",
 			path:  paths.Doc().Child("a").Index(0),
-			err:   paths.ErrAlias,
+			want:  "!t *x",
 		},
 		"anchor over a tag on an alias to itself": {
 			input: "a: &x !t *x\n",
 			path:  paths.Doc().Child("a"),
-			err:   paths.ErrAlias,
+			want:  "!t *x",
 		},
 		"alias inside its own mapping anchor": {
 			input: "b: &x {s: *x, t: 1}\n",
 			path:  paths.Doc().Child("b", "s"),
-			err:   paths.ErrAlias,
+			want:  "*x",
 		},
 		"alias inside its own sequence anchor": {
 			input: "a: &a [1, *a]\n",
 			path:  paths.Doc().Child("a").Index(1),
-			err:   paths.ErrAlias,
+			want:  "*a",
 		},
 		"alias inside its own anchor on a merge value": {
 			input: "x: {<<: &m {k: *m, j: 1}}\n",
 			path:  paths.Doc().Child("x", "k"),
-			err:   paths.ErrAlias,
+			want:  "*m",
+		},
+		"alias of an anchor on an alias inside its own anchor": {
+			// The decoder reads *x as null, so y holds null under the tag, and
+			// so does c.
+			input: "a: &x\n  b: &y !t *x\nc: *y\n",
+			path:  paths.Doc().Child("c"),
+			want:  "!t *x",
 		},
 		"alias a merge key names inside its own anchor": {
 			// The decode leaves an alias that a `<<` merge key names as it
@@ -2250,6 +2392,75 @@ func TestResolver_Alias(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, nodesErr)
 			require.NoError(t, atErr)
+			assert.Equal(t, tc.want, node.String())
+		})
+	}
+}
+
+func TestResolver_Node_Converted(t *testing.T) {
+	t.Parallel()
+
+	// The decoder reads a collection or an alias of one under !!str or
+	// !!null as a scalar, so a path selects nothing below it. A local tag
+	// keeps the collection, and a `<<` merge key reads its mapping through
+	// any tag.
+	tcs := map[string]struct {
+		input string
+		path  paths.Path
+		// The node that the path selects, or "" for none.
+		want string
+	}{
+		"item below a string tag on an alias of a sequence": {
+			input: "a: &k [x, y]\nm: !!str *k\n",
+			path:  paths.Doc().Child("m").Index(0),
+		},
+		"entry below a null tag on an alias of a mapping": {
+			input: "a: &k {p: 1}\nm: !!null *k\n",
+			path:  paths.Doc().Child("m", "p"),
+		},
+		"entry below an anchor over a string tag on an alias": {
+			input: "a: &k {p: 1}\nm: &x !!str *k\n",
+			path:  paths.Doc().Child("m", "p"),
+		},
+		"string tag on an alias of a sequence": {
+			input: "a: &k [x, y]\nm: !!str *k\n",
+			path:  paths.Doc().Child("m"),
+			want:  "!!str *k",
+		},
+		"entry of a string tag before the anchor of a mapping": {
+			input: "p: !!str &k {a: 1}\n",
+			path:  paths.Doc().Child("p", "a"),
+		},
+		"item of a null tag before the anchor of a block sequence": {
+			input: "p: !!null &k\n  - x\n",
+			path:  paths.Doc().Child("p").Index(0),
+		},
+		"item below a local tag on an alias of a sequence": {
+			input: "a: &k [x, y]\nm: !t *k\n",
+			path:  paths.Doc().Child("m").Index(0),
+			want:  "x",
+		},
+		"entry that a merge key brings in through a null tag": {
+			input: "a: &k {p: 1}\nm:\n  <<: !!null *k\n  q: 2\n",
+			path:  paths.Doc().Child("m", "p"),
+			want:  "1",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			node, err := doc.Resolver().Node(tc.path)
+			if tc.want == "" {
+				require.ErrorIs(t, err, paths.ErrNotFound)
+
+				return
+			}
+
+			require.NoError(t, err)
 			assert.Equal(t, tc.want, node.String())
 		})
 	}
@@ -2371,17 +2582,20 @@ func TestResolver_UnresolvedAlias(t *testing.T) {
 	t.Parallel()
 
 	// A path through an alias that does not resolve fails with ErrAlias,
-	// whose text says why, rather than with ErrNotFound. Token, Node, and
-	// Nodes agree.
+	// whose text says why and names the line and the column of the alias,
+	// rather than with ErrNotFound. Token, Node, and Nodes agree.
 	tcs := map[string]struct {
 		input string
 		want  string
-		path  paths.Path
+		// The line and the column of the alias that does not resolve.
+		at   string
+		path paths.Path
 	}{
 		"alias with no anchor of its name": {
 			input: stringtest.LinesLF("base: &b {a: 1}", "other: *nope"),
 			path:  paths.Doc().Child("other", "v"),
 			want:  "*nope has no anchor before it",
+			at:    "2:8",
 		},
 		"alias before the anchor of its name": {
 			input: stringtest.LinesLF(
@@ -2391,11 +2605,13 @@ func TestResolver_UnresolvedAlias(t *testing.T) {
 			),
 			path: paths.Doc().Child("b", "v"),
 			want: "*x has no anchor before it",
+			at:   "1:4",
 		},
 		"alias inside its own anchor through a tag": {
 			input: "a: &x !t *x\n",
 			path:  paths.Doc().Child("a", "c"),
 			want:  "*x forms a cycle",
+			at:    "1:10",
 		},
 		"merge key through an alias inside its own anchor": {
 			input: stringtest.LinesLF(
@@ -2405,6 +2621,7 @@ func TestResolver_UnresolvedAlias(t *testing.T) {
 			),
 			path: paths.Doc().Child("m", "c"),
 			want: "*x forms a cycle",
+			at:   "1:10",
 		},
 		"anchors whose tags alias each other": {
 			// The *y on line 1 comes before &y, so it names no anchor and
@@ -2412,21 +2629,25 @@ func TestResolver_UnresolvedAlias(t *testing.T) {
 			input: "a: &x !t *y\nb: &y !t *x\n",
 			path:  paths.Doc().Child("b", "c"),
 			want:  "*y has no anchor before it",
+			at:    "1:10",
 		},
 		"alias inside its own mapping anchor": {
 			input: "b: &x {s: *x, t: 1}\n",
 			path:  paths.Doc().Child("b", "s", "t"),
 			want:  "*x forms a cycle",
+			at:    "1:11",
 		},
 		"alias inside its own sequence anchor": {
 			input: "a: &a [1, *a]\n",
 			path:  paths.Doc().Child("a").Index(1).Index(0),
 			want:  "*a forms a cycle",
+			at:    "1:11",
 		},
 		"alias inside its own anchor on a merge value": {
 			input: "x: {<<: &m {k: *m, j: 1}}\n",
 			path:  paths.Doc().Child("x", "k", "j"),
 			want:  "*m forms a cycle",
+			at:    "1:16",
 		},
 	}
 
@@ -2457,6 +2678,7 @@ func TestResolver_UnresolvedAlias(t *testing.T) {
 					require.ErrorIs(t, err, paths.ErrAlias)
 					require.NotErrorIs(t, err, paths.ErrNotFound)
 					assert.Contains(t, err.Error(), tc.want)
+					assert.Contains(t, err.Error(), ": "+tc.at+": ")
 
 				case <-time.After(10 * time.Second):
 					require.FailNow(t, "path resolution did not return within 10s")
@@ -2466,11 +2688,85 @@ func TestResolver_UnresolvedAlias(t *testing.T) {
 	}
 }
 
+func TestResolver_Matches_UnresolvedAlias(t *testing.T) {
+	t.Parallel()
+
+	// A wildcard that reads through an alias that does not resolve fails
+	// with ErrAlias, and the error names the line and the column of the
+	// alias. A wildcard at an alias that the decoder reads as null selects
+	// nothing there.
+	tcs := map[string]struct {
+		input string
+		path  string
+		// The line and the column of the alias that does not resolve, or ""
+		// for a path without an error.
+		at   string
+		want []string
+	}{
+		"entry that holds an alias with no anchor": {
+			input: stringtest.LinesLF("a: *nope", "b: 1"),
+			path:  "$.*",
+			at:    "1:4",
+		},
+		"alias with no anchor below the root": {
+			input: "a: {b: *nope}\n",
+			path:  "$..*",
+			at:    "1:8",
+		},
+		"wildcard at an alias inside its own anchor": {
+			input: "a: &x [*x, 1]\n",
+			path:  "$.a[0][*]",
+		},
+		"wildcard at an alias of an anchor on a tagged alias inside it": {
+			input: stringtest.LinesLF("a: {k: &x !t *x}", "b: *x"),
+			path:  "$.b.*",
+		},
+		"recursive wildcard past an alias of an anchor on a tagged alias inside it": {
+			input: stringtest.LinesLF("a: {k: &x !t *x}", "b: *x"),
+			path:  "$.*..*",
+			want:  []string{"$.a.k=!t *x"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			matches, err := paths.NewResolver(documentOf(t, tc.input)).Matches(paths.MustParse(tc.path))
+			if tc.at != "" {
+				require.ErrorIs(t, err, paths.ErrAlias)
+				assert.Contains(t, err.Error(), ": "+tc.at+": ")
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, matchValues(matches))
+		})
+	}
+}
+
 func TestWithReferenceAnchors(t *testing.T) {
 	t.Parallel()
 
-	// The reference documents define the anchor shared alone.
-	shared := paths.WithReferenceAnchors(func(name string) bool { return name == "shared" })
+	// The reference document defines the anchors shared, key, and chain.
+	// The anchor key holds the key "name", and chain reads key.
+	refs := make(map[string]*ast.AnchorNode)
+
+	ref := documentOf(t, stringtest.LinesLF("shared: &shared {port: 1}", "&key name: 1", "chain: &chain !t *key"))
+	for _, n := range ast.Filter(ast.AnchorType, ref) {
+		anchor := requireAs[*ast.AnchorNode](t, n)
+		refs[anchor.Name.GetToken().Value] = anchor
+	}
+
+	shared := paths.WithReferenceAnchors(func(name string) (ast.Node, bool) {
+		anchor, ok := refs[name]
+		if !ok {
+			return nil, false
+		}
+
+		return anchor.Value, true
+	})
 	port := paths.Doc().Child("server", "port")
 
 	tcs := map[string]struct {
@@ -2481,45 +2777,40 @@ func TestWithReferenceAnchors(t *testing.T) {
 		want string
 		// Whether the error wraps paths.ErrReferenceAlias.
 		reference bool
-		// Whether Token finds a token where Node fails.
-		token bool
 	}{
 		"path through an alias that reads a reference": {
 			opt:       shared,
 			input:     "server: *shared\n",
 			path:      port,
-			want:      "alias reads a reference document: *shared",
+			want:      "resolve $.server.port: 1:9: alias reads a reference document: *shared",
 			reference: true,
-		},
-		"path to an alias that reads a reference": {
-			// Token does not look through the node of the last selector, so
-			// it finds the token of the alias.
-			opt:       shared,
-			input:     "server: *shared\n",
-			path:      paths.Doc().Child("server"),
-			want:      "alias reads a reference document: *shared",
-			reference: true,
-			token:     true,
 		},
 		"path through a tagged alias that reads a reference": {
 			opt:       shared,
 			input:     "server: !t *shared\n",
 			path:      port,
-			want:      "alias reads a reference document: *shared",
+			want:      "resolve $.server.port: 1:12: alias reads a reference document: *shared",
 			reference: true,
 		},
 		"alias before the anchor of its name": {
 			opt:       shared,
 			input:     stringtest.LinesLF("server: *shared", "later: &shared {port: 1}"),
 			path:      port,
-			want:      "alias reads a reference document: *shared",
+			want:      "resolve $.server.port: 1:9: alias reads a reference document: *shared",
+			reference: true,
+		},
+		"path through a merge key that reads a reference": {
+			opt:       shared,
+			input:     "server: {<<: *shared}\n",
+			path:      port,
+			want:      "resolve $.server.port: 1:14: alias reads a reference document: *shared",
 			reference: true,
 		},
 		"alias that no reference defines": {
 			opt:   shared,
 			input: "server: *nope\n",
 			path:  port,
-			want:  "alias does not resolve: *nope has no anchor before it",
+			want:  "resolve $.server.port: 1:9: alias does not resolve: *nope has no anchor before it",
 		},
 		"anchor of the document before the alias": {
 			opt:   shared,
@@ -2530,7 +2821,7 @@ func TestWithReferenceAnchors(t *testing.T) {
 			opt:   paths.WithReferenceAnchors(nil),
 			input: "server: *shared\n",
 			path:  port,
-			want:  "alias does not resolve: *shared has no anchor before it",
+			want:  "resolve $.server.port: 1:9: alias does not resolve: *shared has no anchor before it",
 		},
 	}
 
@@ -2544,14 +2835,7 @@ func TestWithReferenceAnchors(t *testing.T) {
 			_, nodeErr := r.Node(tc.path)
 			_, nodesErr := r.Nodes(tc.path)
 
-			errs := []error{nodeErr, nodesErr}
-			if tc.token {
-				require.NoError(t, tokenErr)
-			} else {
-				errs = append(errs, tokenErr)
-			}
-
-			for _, err := range errs {
+			for _, err := range []error{tokenErr, nodeErr, nodesErr} {
 				if tc.want == "" {
 					require.NoError(t, err)
 
@@ -2560,10 +2844,241 @@ func TestWithReferenceAnchors(t *testing.T) {
 
 				require.ErrorIs(t, err, paths.ErrAlias)
 				assert.Equal(t, tc.reference, errors.Is(err, paths.ErrReferenceAlias))
-				assert.Contains(t, err.Error(), tc.want)
+				assert.EqualError(t, err, tc.want)
 			}
 		})
 	}
+
+	t.Run("path that ends at an alias that reads a reference", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+			// The text of the node that the path selects.
+			want string
+		}{
+			"alias": {
+				input: "server: *shared\n",
+				path:  paths.Doc().Child("server"),
+				want:  "*shared",
+			},
+			"tagged alias": {
+				input: "server: !t *shared\n",
+				path:  paths.Doc().Child("server"),
+				want:  "!t *shared",
+			},
+			"anchored and tagged alias": {
+				// The path looks through the anchor and stops at the tag, as
+				// it does for any tagged value.
+				input: "server: &s !t *shared\n",
+				path:  paths.Doc().Child("server"),
+				want:  "!t *shared",
+			},
+			"alias of the document that leads to one": {
+				// The content of the anchor of the document lies at the
+				// anchor, as it does for any alias.
+				input: stringtest.LinesLF("x: &x !t *shared", "server: *x"),
+				path:  paths.Doc().Child("server"),
+				want:  "!t *shared",
+			},
+			"element of a sequence": {
+				input: "items: [*shared, {port: 1}]\n",
+				path:  paths.Doc().Child("items").Index(0),
+				want:  "*shared",
+			},
+			"root": {
+				input: "*shared\n",
+				path:  paths.Doc(),
+				want:  "*shared",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				r := paths.NewResolver(documentOf(t, tc.input), shared)
+
+				got, err := r.Node(tc.path)
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got.String())
+
+				matches, err := r.Matches(tc.path)
+				require.NoError(t, err)
+				require.Len(t, matches, 1)
+				assert.Same(t, got, matches[0].Node)
+				assert.Equal(t, tc.path, matches[0].Path)
+
+				nodes, err := r.Nodes(tc.path)
+				require.NoError(t, err)
+				assert.Equal(t, []ast.Node{got}, nodes)
+
+				from, err := r.NodeFrom(got, paths.Current())
+				require.NoError(t, err)
+				assert.Same(t, got, from)
+
+				// The content of the anchor lies in the reference document,
+				// so every read below the alias fails.
+				_, derefErr := r.Deref(got)
+				_, belowErr := r.Node(tc.path.Child("port"))
+				_, fromErr := r.NodeFrom(got, paths.Current().Child("port"))
+
+				for _, err := range []error{derefErr, belowErr, fromErr} {
+					require.ErrorIs(t, err, paths.ErrAlias)
+					require.ErrorIs(t, err, paths.ErrReferenceAlias)
+					assert.ErrorContains(t, err, "alias reads a reference document: *shared")
+				}
+			})
+		}
+	})
+
+	t.Run("wildcard that lists an alias that reads a reference", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			path  string
+			// Each match as its path and the text of its node.
+			want []string
+		}{
+			"element of a sequence": {
+				input: "items: [*shared, {port: 1}]\n",
+				path:  "$.items[*]",
+				want:  []string{"$.items[0]=*shared", "$.items[1]={port: 1}"},
+			},
+			"entry of a mapping": {
+				input: stringtest.LinesLF("a: *shared", "b: 1"),
+				path:  "$.*",
+				want:  []string{"$.a=*shared", "$.b=1"},
+			},
+			"every value": {
+				input: stringtest.LinesLF("a: *shared", "b: [1]"),
+				path:  "$..*",
+				want:  []string{"$.a=*shared", "$.b=[1]", "$.b[0]=1"},
+			},
+			"value of a name": {
+				input: stringtest.LinesLF("a: {port: *shared}", "b: {port: 2}"),
+				path:  "$..port",
+				want:  []string{"$.a.port=*shared", "$.b.port=2"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				matches, err := paths.NewResolver(documentOf(t, tc.input), shared).Matches(paths.MustParse(tc.path))
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, matchValues(matches))
+			})
+		}
+	})
+
+	t.Run("wildcard that reads through an alias that reads a reference", func(t *testing.T) {
+		t.Parallel()
+
+		// A `.*` reads every merge key of its mapping, and a `[*]` after
+		// the alias applies below it. The error names the line and the
+		// column of the alias.
+		tcs := map[string]struct {
+			input string
+			path  string
+			want  string
+		}{
+			"entries of a mapping that merges the reference": {
+				input: stringtest.LinesLF("<<: *shared", "b: 1"),
+				path:  "$.*",
+				want:  "resolve $.*: 1:5: alias reads a reference document: *shared",
+			},
+			"elements below the alias": {
+				input: "items: *shared\n",
+				path:  "$.items[*]",
+				want:  "resolve $.items[*]: 1:8: alias reads a reference document: *shared",
+			},
+			"entries below the alias": {
+				input: stringtest.LinesLF("name: app", "server: *shared"),
+				path:  "$.server.*",
+				want:  "resolve $.server.*: 2:9: alias reads a reference document: *shared",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := paths.NewResolver(documentOf(t, tc.input), shared).Matches(paths.MustParse(tc.path))
+				require.ErrorIs(t, err, paths.ErrReferenceAlias)
+				assert.EqualError(t, err, tc.want)
+			})
+		}
+	})
+
+	t.Run("alias key that reads a reference", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			// The name of the key of the entry at the path $.m.name, or ""
+			// when the key does not have a name.
+			want string
+		}{
+			"block mapping": {
+				input: stringtest.LinesLF("m:", "  *key : 2"),
+				want:  "name",
+			},
+			"flow mapping": {
+				input: "m: {x: 1, *key : 2}\n",
+				want:  "name",
+			},
+			"explicit key": {
+				input: stringtest.LinesLF("m:", "  ? *key", "  : 2"),
+				want:  "name",
+			},
+			"alias of the reference document that reads another": {
+				input: stringtest.LinesLF("m:", "  *chain : 2"),
+				want:  "name",
+			},
+			"alias of the document that leads to one": {
+				input: stringtest.LinesLF("x: &x !t *key", "m:", "  *x : 2"),
+				want:  "name",
+			},
+			"anchor of the document before the alias": {
+				input: stringtest.LinesLF("&key other: 1", "m:", "  *key : 2"),
+			},
+			"alias that no reference defines": {
+				input: stringtest.LinesLF("m:", "  *nope : 2"),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := documentOf(t, tc.input)
+				r := paths.NewResolver(doc, shared)
+
+				m, err := r.Node(paths.Doc().Child("m"))
+				require.NoError(t, err)
+
+				entries := requireAs[*ast.MappingNode](t, m).Values
+				key, named := r.KeyName(entries[len(entries)-1].Key)
+
+				got, err := r.Node(paths.Doc().Child("m", "name"))
+				if tc.want == "" {
+					assert.False(t, named && key == "name")
+					require.ErrorIs(t, err, paths.ErrNotFound)
+
+					return
+				}
+
+				assert.True(t, named)
+				assert.Equal(t, tc.want, key)
+				require.NoError(t, err)
+				assert.Equal(t, "2", got.String())
+			})
+		}
+	})
 
 	t.Run("anchor of an alias that reads a reference", func(t *testing.T) {
 		t.Parallel()
@@ -4734,6 +5249,31 @@ func TestResolver_Matches(t *testing.T) {
 			input: "a: 1\n",
 			path:  "$.a..*",
 		},
+		// The decoder reads a collection under a converting tag as a
+		// scalar, so a recursive selector finds nothing below the tag.
+		"converting tag below the start has nothing below it": {
+			input: "q: 1\np: !!str &k {a: 1, b: [2]}\n",
+			path:  "$..*",
+			want:  []string{"$.q=1", "$.p=!!str &k {a: 1, b: [2]}"},
+		},
+		"converting tag below the start hides its names": {
+			input: "r: {a: 3}\np: !!str &k {a: 1}\n",
+			path:  "$..a",
+			want:  []string{"$.r.a=3"},
+		},
+		"converting tag on the start has nothing below it": {
+			input: "p: !!null &n {a: 1}\n",
+			path:  "$.p..*",
+		},
+		"converting tag on an alias at the start has nothing below it": {
+			input: "k: &k {a: 1}\np: !!str *k\n",
+			path:  "$.p..a",
+		},
+		"local tag below the start keeps its collection": {
+			input: "p: !t {a: 1}\n",
+			path:  "$..a",
+			want:  []string{"$.p.a=1"},
+		},
 		"empty collections have nothing below them": {
 			input: "a: {}\nb: []\n",
 			path:  "$..*",
@@ -4846,6 +5386,38 @@ func TestResolver_Matches(t *testing.T) {
 	}
 }
 
+func TestResolver_Matches_EnclosedAlias(t *testing.T) {
+	t.Parallel()
+
+	// The decoder reads an alias inside the content of the anchor it refers
+	// to as null, so a wildcard lists the alias and nothing below it.
+	tcs := map[string]struct {
+		input string
+		path  string
+		want  []string
+	}{
+		"every node over an alias inside its own anchor": {
+			input: "a: &x [*x]\nc: {name: 1}\n",
+			path:  "$..*",
+			want:  []string{"$.a", "$.a[0]", "$.c", "$.c.name"},
+		},
+		"every entry of a mapping that holds an alias of itself": {
+			input: "a: &x {b: *x, c: 1}\n",
+			path:  "$.a.*",
+			want:  []string{"$.a.b", "$.a.c"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := documentOf(t, tc.input)
+			assert.Equal(t, tc.want, matchPaths(requireMatches(t, doc, tc.path)))
+		})
+	}
+}
+
 func TestResolver_Matches_WildcardErrors(t *testing.T) {
 	t.Parallel()
 
@@ -4908,11 +5480,6 @@ func TestResolver_Matches_WildcardErrors(t *testing.T) {
 		"every node below an alias with no anchor": {
 			input: "m: *missing\n",
 			path:  "$.m..*",
-		},
-		"every node over an alias inside its own anchor": {
-			input: "a: &x [*x]\nc: {name: 1}\n",
-			path:  "$..*",
-			named: "$..name",
 		},
 	}
 

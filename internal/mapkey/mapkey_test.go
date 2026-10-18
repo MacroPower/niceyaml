@@ -324,6 +324,8 @@ func TestKeys_KeyMerged(t *testing.T) {
 
 	tcs := map[string]struct {
 		input string
+		// The text of a reference document of the document, or "".
+		ref string
 		// The root key of the mapping of the last merge key of the text.
 		in string
 		// The keys of the entries that the last merge key of the text brings
@@ -345,13 +347,24 @@ func TestKeys_KeyMerged(t *testing.T) {
 		"anchor inside the inline mapping of the merge key": {
 			input: "<<: {k: &a p, *a : x}\np: y\n", in: "", want: []string{"k", "p"},
 		},
+		// An alias of a reference document reads the anchors of the
+		// reference documents alone, even one after it.
+		"alias key of a reference document that reads an anchor before it": {
+			input: "x: &x d\nm: {<<: *r}\n", ref: "x: &x k\nr: &r {*x : 1}\n", in: "m", want: []string{"k"},
+		},
+		"alias key of a reference document that reads an anchor after it": {
+			input: "x: &x d\nm: {<<: *r}\n", ref: "r: &r {*x : 1}\nx: &x k\n", in: "m", want: []string{"k"},
+		},
+		"alias key of a reference document with a comment after it": {
+			input: "m: {<<: *r}\n", ref: "r: &r {? *x # c\n  : 1}\nx: &x k\n", in: "m", want: []string{"k"},
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
+			doc := newDocument(t, tc.input, tc.ref)
 			r := hook.Keys(doc)
 
 			var merges []*ast.MappingValueNode
@@ -370,13 +383,10 @@ func TestKeys_KeyMerged(t *testing.T) {
 
 			source := site.Value
 			if alias, ok := site.Value.(*ast.AliasNode); ok {
-				anchor, err := doc.Resolver().Anchor(alias)
+				var err error
+
+				source, err = hook.AliasContent(doc, alias)
 				require.NoError(t, err)
-
-				a, ok := anchor.(*ast.AnchorNode)
-				require.True(t, ok)
-
-				source = a.Value
 			}
 
 			entries, ok := astnode.Entries(source)
