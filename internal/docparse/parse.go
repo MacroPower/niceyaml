@@ -501,10 +501,10 @@ func (s *scan) drops(i, next int) (bool, bool) {
 // typed target and gives a pointer a value for it.
 func nullEmptyAnchors(file *ast.File) {
 	for _, doc := range file.Docs {
-		for _, node := range astnode.Nodes(doc) {
+		astnode.Inspect(doc, func(node ast.Node) bool {
 			anchor, ok := node.(*ast.AnchorNode)
 			if !ok || astnode.HasContent(anchor.Value) {
-				continue
+				return node.Type() != ast.CommentType
 			}
 
 			var pos *token.Position
@@ -518,7 +518,9 @@ func nullEmptyAnchors(file *ast.File) {
 			tk := token.New("null", " null", pos)
 			tk.Type = token.ImplicitNullType
 			anchor.Value = ast.Null(tk)
-		}
+
+			return true
+		})
 	}
 }
 
