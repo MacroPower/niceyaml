@@ -600,12 +600,7 @@ func ForParser(tks token.Tokens) token.Tokens {
 	// them, is the content of that scalar.
 	var lastBody *token.Token
 
-	for _, tk := range tks {
-		clone := tk.Clone()
-		if clone == nil {
-			continue
-		}
-
+	for _, clone := range clones(tks) {
 		if !shaped && strings.Trim(clone.Origin, " \t\r\n") != "" {
 			clone.Origin = bareLeadingLines(clone.Origin)
 			shaped = true
@@ -630,6 +625,47 @@ func ForParser(tks token.Tokens) token.Tokens {
 	}
 
 	return result
+}
+
+// clones returns a clone of each token of tks that is not nil, in order,
+// as [token.Token.Clone] makes it: a copy of the token with a copy of its
+// position. The clones and their positions take one allocation each in all,
+// however many tokens tks holds.
+func clones(tks token.Tokens) []*token.Token {
+	n, positions := 0, 0
+
+	for _, tk := range tks {
+		if tk != nil {
+			n++
+
+			if tk.Position != nil {
+				positions++
+			}
+		}
+	}
+
+	copies := make([]token.Token, n)
+	posCopies := make([]token.Position, positions)
+	out := make([]*token.Token, 0, n)
+
+	for _, tk := range tks {
+		if tk == nil {
+			continue
+		}
+
+		c := &copies[len(out)]
+		*c = *tk
+
+		if tk.Position != nil {
+			posCopies[0] = *tk.Position
+			c.Position = &posCopies[0]
+			posCopies = posCopies[1:]
+		}
+
+		out = append(out, c)
+	}
+
+	return out
 }
 
 // blockHeader reports whether tk is the header of a literal or folded
@@ -1847,12 +1883,7 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 
 	result := make(token.Tokens, 0, len(tks))
 
-	for _, tk := range tks {
-		clone := tk.Clone()
-		if clone == nil {
-			continue
-		}
-
+	for _, clone := range clones(tks) {
 		switch {
 		case clone.Position == nil:
 		case anchor == nil:
