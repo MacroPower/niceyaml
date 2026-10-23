@@ -2000,38 +2000,46 @@ func endTrailing(tks token.Tokens) {
 func SplitDocuments(tks token.Tokens) iter.Seq2[int, token.Tokens] {
 	return func(yield func(int, token.Tokens) bool) {
 		var (
-			docIdx  int
-			current token.Tokens
+			docIdx int
+			// The index of tks where the document starts, and the number of
+			// its tokens that are not nil.
+			start, n int
 		)
 
-		for _, tk := range tks {
+		// A cut yields the tokens of tks before end that the document holds.
+		cut := func(end int) bool {
+			doc := make(token.Tokens, 0, n)
+
+			for _, tk := range tks[start:end] {
+				if tk != nil {
+					doc = append(doc, tk)
+				}
+			}
+
+			start, n = end, 0
+			docIdx++
+
+			return yield(docIdx-1, doc)
+		}
+
+		for i, tk := range tks {
 			if tk == nil {
 				continue
 			}
 
-			if tk.Type == token.DocumentHeaderType && len(current) > 0 {
-				if !yield(docIdx, current) {
-					return
-				}
-
-				current = token.Tokens{}
-				docIdx++
+			if tk.Type == token.DocumentHeaderType && n > 0 && !cut(i) {
+				return
 			}
 
-			current = append(current, tk)
+			n++
 
-			if tk.Type == token.DocumentEndType {
-				if !yield(docIdx, current) {
-					return
-				}
-
-				current = token.Tokens{}
-				docIdx++
+			if tk.Type == token.DocumentEndType && !cut(i+1) {
+				return
 			}
 		}
 
-		if len(current) > 0 {
-			yield(docIdx, current)
+		if n > 0 {
+			cut(len(tks))
 		}
 	}
 }
