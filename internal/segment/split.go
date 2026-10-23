@@ -70,6 +70,19 @@ func Split(tks token.Tokens) []Line {
 		return nil
 	}
 
+	// A line ends at a line break of an Origin or at the end of the stream,
+	// so the breaks count the lines that the builder makes. A gap in the
+	// positions can add a line.
+	lines := 1
+
+	for _, tk := range tks {
+		if tk != nil {
+			lines += lineend.CountBreaks(tk.Origin)
+		}
+	}
+
+	b.lines = make([]Line, 0, lines)
+
 	ahead := breaksAhead(tks)
 
 	for i, tk := range tks {
@@ -147,6 +160,7 @@ type builder struct {
 	// Allocation.
 	parts  []string    // The parts of the token being added, which each AddToken reuses.
 	tokens []partToken // The part tokens not yet handed out, as [builder.newPart] takes them.
+	segs   Segments    // The segments not yet handed out, as [builder.keep] takes them.
 
 	currentLine int        // Number of the line in progress.
 	prevType    token.Type // Type of the last token added other than a comment.
@@ -293,7 +307,7 @@ func (b *builder) Build() []Line {
 			b.joinCurrentLineToPrevious()
 		} else {
 			b.lines = append(b.lines, Line{
-				Segments: b.currentLineSegments,
+				Segments: b.keep(b.currentLineSegments),
 				Number:   b.currentLine,
 			})
 		}
@@ -339,13 +353,13 @@ func (b *builder) joinCurrentLineToPrevious() {
 	}
 
 	lastLine.Segments = append(lastLine.Segments, b.currentLineSegments...)
-	b.currentLineSegments = nil
+	b.currentLineSegments = b.currentLineSegments[:0]
 }
 
 // finishLine completes the current line and prepares for the next one.
 func (b *builder) finishLine() {
 	b.lines = append(b.lines, Line{
-		Segments: b.currentLineSegments,
+		Segments: b.keep(b.currentLineSegments),
 		Number:   b.currentLine,
 	})
 
@@ -364,7 +378,7 @@ func (b *builder) finishLine() {
 		b.prevLineEndOffset -= len(lineEnding(b.currentLineSegments[n-1].Part().Origin))
 	}
 
-	b.currentLineSegments = nil
+	b.currentLineSegments = b.currentLineSegments[:0]
 	b.currentIndentNum = 0 // The next line's first content sets it again.
 	b.lineIndentSet = false
 	b.currentColumn = 1
@@ -532,6 +546,30 @@ func (b *builder) newPart(tk *token.Token, typ token.Type, origin, value string,
 
 	return &pt.tk
 }
+
+// keep returns a copy of segs, the segments of a line that the builder
+// finished, or nil for a line without segments. The copies come from
+// chunks of [segChunk] segments, and the builder reuses segs for the next
+// line.
+func (b *builder) keep(segs Segments) Segments {
+	if len(segs) == 0 {
+		return nil
+	}
+
+	if len(segs) > len(b.segs) {
+		b.segs = make(Segments, max(segChunk, len(segs)))
+	}
+
+	kept := b.segs[:len(segs):len(segs)]
+	copy(kept, segs)
+
+	b.segs = b.segs[len(segs):]
+
+	return kept
+}
+
+// segChunk is the number of segments of one allocation of [builder.keep].
+const segChunk = 256
 
 // partToken holds the token of a part with its position, so the two take
 // one allocation.
