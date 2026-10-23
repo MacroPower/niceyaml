@@ -1823,8 +1823,24 @@ func TrimLineEnding(s string) string {
 // The clones link to each other through Next and Prev and not to any token
 // outside the result, so the stream stands alone. Tokens with nil
 // positions come back as clones with nil positions, and ResetPositions
-// drops nil tokens.
+// drops nil tokens. [ResetPositionsInPlace] shifts the tokens of a stream
+// that nothing else holds without cloning them.
 func ResetPositions(tks token.Tokens) token.Tokens {
+	if len(tks) == 0 {
+		return tks
+	}
+
+	return ResetPositionsInPlace(clones(tks))
+}
+
+// ResetPositionsInPlace shifts the positions of the tokens of tks as
+// [ResetPositions] shifts those of its clones. It returns the tokens as
+// ResetPositions returns the clones, in order and without nil tokens, and
+// it links them to each other through Next and Prev alone. It changes the
+// tokens and the slice of tks in place, so pass it a stream that nothing
+// else reads, such as the stream that [Tokenize] returns. The result
+// shares the memory of tks.
+func ResetPositionsInPlace(tks token.Tokens) token.Tokens {
 	if len(tks) == 0 {
 		return tks
 	}
@@ -1881,36 +1897,43 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 		startOffset = anchor.Position.Offset - len(lead)
 	}
 
-	result := make(token.Tokens, 0, len(tks))
+	// Each token lands at or before its index in tks, so the result can
+	// take the slice of tks.
+	result := tks[:0]
 
-	for _, clone := range clones(tks) {
-		switch {
-		case clone.Position == nil:
-		case anchor == nil:
-			clone.Position.Line, clone.Position.Column, clone.Position.Offset = 1, 1, 1
-		default:
-			clone.Position.Line = clone.Position.Line - startLine + 1
-			if clone.Position.Line == 1 {
-				clone.Position.Column = clone.Position.Column - startCol + 1
-			}
-
-			clone.Position.Offset = clone.Position.Offset - startOffset + 1
+	for _, tk := range tks {
+		if tk == nil {
+			continue
 		}
 
-		result.Add(clone)
+		switch {
+		case tk.Position == nil:
+		case anchor == nil:
+			tk.Position.Line, tk.Position.Column, tk.Position.Offset = 1, 1, 1
+		default:
+			tk.Position.Line = tk.Position.Line - startLine + 1
+			if tk.Position.Line == 1 {
+				tk.Position.Column = tk.Position.Column - startCol + 1
+			}
+
+			tk.Position.Offset = tk.Position.Offset - startOffset + 1
+		}
+
+		result.Add(tk)
 	}
 
-	// The last clone still links to a token after it when the caller cut
+	clear(tks[len(result):])
+
+	// The last token still links to a token after it when the caller cut
 	// tks before the end of its stream, so no text of the stream follows
 	// the tokens without text that end it.
 	if len(result) > 0 && result[len(result)-1].Next != nil {
 		endTrailing(result)
 	}
 
-	// Clone copies Next and Prev, and Add rewires only the links between
-	// clones, so the first and last clone still point at the un-cloned
-	// tokens of the neighboring documents. Sever those links so the
-	// document stands alone.
+	// Add rewires only the links between the tokens of the result, so the
+	// first and last token can still point at tokens of the neighboring
+	// documents. Sever those links so the document stands alone.
 	if len(result) > 0 {
 		result[0].Prev = nil
 		result[len(result)-1].Next = nil
