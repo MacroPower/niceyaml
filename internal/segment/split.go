@@ -143,8 +143,13 @@ type builder struct {
 
 	lines               []Line
 	currentLineSegments Segments
-	currentLine         int        // Number of the line in progress.
-	prevType            token.Type // Type of the last token added other than a comment.
+
+	// Allocation.
+	parts  []string    // The parts of the token being added, which each AddToken reuses.
+	tokens []partToken // The part tokens not yet handed out, as [builder.newPart] takes them.
+
+	currentLine int        // Number of the line in progress.
+	prevType    token.Type // Type of the last token added other than a comment.
 
 	// Position tracking.
 	currentOffset      int  // Cumulative rune offset (1-indexed like lexer).
@@ -248,7 +253,8 @@ func (b *builder) AddToken(tk *token.Token, ahead int) {
 	origin := tk.Origin
 
 	// Split token at line ending boundaries.
-	parts := splitOriginIntoParts(origin)
+	b.parts = appendOriginParts(b.parts[:0], origin)
+	parts := b.parts
 
 	// For simple tokens, check for line number gaps and sync forward if needed.
 	b.handleGap(tk, parts, isBlockScalarContent)
@@ -463,7 +469,7 @@ func (b *builder) processPart(ctx *partContext) {
 	}
 
 	// Create token for this part.
-	newTk := newPart(ctx.tk, tokenType, ctx.part, val, token.Position{
+	newTk := b.newPart(ctx.tk, tokenType, ctx.part, val, token.Position{
 		Line:        b.currentLine,
 		Column:      col,
 		Offset:      offset,
@@ -490,7 +496,7 @@ func (b *builder) processPart(ctx *partContext) {
 
 	// If this part ends with a line ending, finish the current line.
 	//
-	// Each part but the last ends a line, because splitOriginIntoParts cuts
+	// Each part but the last ends a line, because appendOriginParts cuts
 	// after "\n" and after a bare "\r". The last part ends one when the
 	// Origin did. The lexer advances Position.Line on a bare "\r" as well,
 	// and the builder does the same. The part's Origin keeps the ending, so
@@ -503,18 +509,41 @@ func (b *builder) processPart(ctx *partContext) {
 // newPart creates the token for one part of tk, with origin as its Origin
 // and pos as its Position. The caller picks its type and value. The part
 // copies the rest of its fields from tk, so every part of a token carries
-// the same CharacterType, Indicator, and Error.
-func newPart(tk *token.Token, typ token.Type, origin, value string, pos token.Position) *token.Token {
-	return &token.Token{
+// the same CharacterType, Indicator, and Error. The parts take their
+// tokens and positions from chunks of [partChunk].
+func (b *builder) newPart(tk *token.Token, typ token.Type, origin, value string, pos token.Position) *token.Token {
+	if len(b.tokens) == 0 {
+		b.tokens = make([]partToken, partChunk)
+	}
+
+	pt := &b.tokens[0]
+	b.tokens = b.tokens[1:]
+
+	pt.pos = pos
+	pt.tk = token.Token{
 		Type:          typ,
 		CharacterType: tk.CharacterType,
 		Indicator:     tk.Indicator,
 		Origin:        origin,
 		Value:         value,
 		Error:         tk.Error,
-		Position:      &pos,
+		Position:      &pt.pos,
 	}
+
+	return &pt.tk
 }
+
+// partToken holds the token of a part with its position, so the two take
+// one allocation.
+type partToken struct {
+	tk  token.Token
+	pos token.Position
+}
+
+// partChunk is the number of part tokens of one allocation of
+// [builder.newPart]. A chunk of 60 takes 8,160 bytes, which fits the
+// allocator's size class of 8,192 bytes.
+const partChunk = 60
 
 // textPosition returns the column and offset of the rune where the text of
 // tk starts, as its Position carries them. For each value that the
@@ -550,7 +579,7 @@ func (b *builder) appendToPreviousLine(ctx *partContext) {
 	// not share. Line endings are ASCII, so byte and rune counts agree.
 	delta := len(b.prevLineEnding) - lineEndingOverlap(b.prevLineEnding, ctx.part)
 
-	newTk := newPart(ctx.tk, ctx.tk.Type, ctx.part, "", token.Position{
+	newTk := b.newPart(ctx.tk, ctx.tk.Type, ctx.part, "", token.Position{
 		Line:        lastLine.Number,
 		Column:      max(b.prevLineEndColumn, 1) + delta,
 		Offset:      b.prevLineEndOffset + delta,
@@ -745,19 +774,20 @@ func isPureHorizontalWhitespace(s string) bool {
 	return s != "" && strings.TrimLeft(s, " \t") == ""
 }
 
-// splitOriginIntoParts splits a token's Origin after each line ending
-// that the lexer advances Position.Line on: "\n", "\r\n", or a bare "\r".
+// appendOriginParts appends the parts of a token's Origin to parts and
+// returns the result. It splits origin after each line ending that the
+// lexer advances Position.Line on: "\n", "\r\n", or a bare "\r".
 //
 // An empty origin becomes a single empty part. Empty block scalar content
 // depends on that part.
 //
 // Each part keeps its trailing line ending, when it has one.
-func splitOriginIntoParts(origin string) []string {
+func appendOriginParts(parts []string, origin string) []string {
 	if origin == "" {
-		return []string{""}
+		return append(parts, "")
 	}
 
-	return slices.Collect(lineend.Lines(origin))
+	return slices.AppendSeq(parts, lineend.Lines(origin))
 }
 
 // findLastContentPartIndex returns the index of the last part that holds
