@@ -9,7 +9,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/stretchr/testify v1.12.1
-	go.jacobcolvin.com/niceyaml v0.0.0-20261010190524-0916966504e7
+	go.jacobcolvin.com/niceyaml v0.0.0-20261017070011-5b582981b382
 	go.jacobcolvin.com/x/stringtest v0.2.0
 )
 
