@@ -72,7 +72,7 @@ func TestLoadSources(t *testing.T) {
 
 				// The read error names the path with its control
 				// characters escaped, and loadSources adds no second copy.
-				missing := escape.Control(filepath.Join(dir, tc.missing))
+				missing := escape.Line(filepath.Join(dir, tc.missing))
 				assert.Equal(t, 1, strings.Count(err.Error(), missing), err.Error())
 
 				return

@@ -23,8 +23,8 @@ import (
 	"sort"
 	"strings"
 
+	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/cells"
-	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 

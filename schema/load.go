@@ -3,7 +3,7 @@ package schema
 import (
 	"fmt"
 
-	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
 
@@ -122,13 +122,12 @@ func (e *LoadError) Unwrap() error {
 // though the registry did not read anything.
 //
 // A document can name a path through its directive. So the message
-// replaces each tab with four spaces and each other control character
-// as [go.jacobcolvin.com/niceyaml/escape.Control] does. The other C0
-// control characters and DEL become their Unicode Control Pictures, such
-// as "␛" for an escape. The C1 control characters, U+0080 through
-// U+009F, do not have pictures, so each becomes U+FFFD, the replacement
-// character. So does each byte that is not valid UTF-8. URL and Err keep
-// their text as written.
+// renders as [go.jacobcolvin.com/niceyaml/escape.Line] draws it. Each tab
+// becomes spaces. The other C0 control characters and DEL become their
+// Unicode Control Pictures, such as "␛" for an escape. The C1 control
+// characters, U+0080 through U+009F, do not have pictures, so each
+// becomes U+FFFD, the replacement character. So does each byte that is
+// not valid UTF-8. URL and Err keep their text as written.
 type FetchError struct {
 	// Err is why the read or fetch of the document failed. It matches
 	// [niceyaml.ErrLimit] for a document past the limit of

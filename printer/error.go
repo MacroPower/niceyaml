@@ -6,7 +6,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
@@ -109,14 +109,14 @@ const errorConnectorWidth = 4
 //
 // # Control Characters
 //
-// In every message of the tree, the root's included, and in each
-// "no excerpt:" line, PrintError draws each control character as
-// [go.jacobcolvin.com/niceyaml/escape.Control] draws it. A C0 control and
-// DEL show as their Unicode Control Pictures, and a C1 control shows as
-// U+FFFD. An excerpt draws them the same way. A line feed in a message of
-// the tree starts a new row instead. A tab becomes four spaces in the tree,
-// in a "no excerpt:" line, and in the message an excerpt carries beside its
-// carets.
+// PrintError draws every message of the tree, the root's included, as
+// [go.jacobcolvin.com/niceyaml/escape.Message] draws it, so a tab becomes
+// spaces and a line feed starts a new row. It draws the name of a source,
+// each "no excerpt:" line, and the message an excerpt carries beside its
+// carets as [go.jacobcolvin.com/niceyaml/escape.Line] draws them. A C0
+// control and DEL thus show as their Unicode Control Pictures, and a C1
+// control shows as U+FFFD. An excerpt draws each control character of its
+// source lines as [go.jacobcolvin.com/niceyaml/escape.Control] draws it.
 //
 // # Wrapping
 //
@@ -177,9 +177,9 @@ func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 
 	for _, bound := range rep.Unresolved {
 		// The reason names the path that did not resolve, which a key of
-		// the document spells, so its control characters render as those
-		// of the tree do. A tab in the key becomes four spaces, as it does
-		// in the tree.
+		// the document spells, so the line renders as [escape.Line] draws
+		// it. Its control characters and tabs then render as those of the
+		// tree do.
 		text := escape.Line("no excerpt: " + bound.Unresolved().Error())
 
 		parts = append(parts, strings.Join(p.wrapTo(text, p.textWidth(0)), "\n"))
@@ -274,7 +274,7 @@ const warningLabel = "warning:"
 
 // errorText returns the rows of one message of the tree at depth connectors
 // from the left edge, wrapped to the width that the connectors leave.
-// [escape.Message] lays the text out first. It replaces each tab with four
+// [escape.Message] lays the text out first. It replaces each tab with
 // spaces, such as the tab in front of each suggestion that Cobra lists. It
 // draws the other control characters as [escape.Control] draws them. A line
 // break in the message stays a line break, because a wrapper around a

@@ -121,8 +121,8 @@ func validateCmd() *cobra.Command {
 				}
 
 				// A glob match takes its name from the file system, so
-				// escape it here and in the error, as validateFile does.
-				name := escape.Control(yamlPath)
+				// draw it as the library draws the name of a source.
+				name := escape.Line(yamlPath)
 
 				warned := warnings.Err()
 				if warned != nil {
@@ -158,12 +158,13 @@ func validateCmd() *cobra.Command {
 // the cancellation once.
 //
 // Each error it returns is bound to the source. The source takes yamlPath
-// as the user typed it for its name, with its control characters escaped
-// as the result line of the command escapes them. Each message then opens
-// with "path:line:col:" when the error has a position in the file. The
-// error handler in main renders the excerpt with the terminal width. A
-// document without tokens, such as an empty or comment-only file, does not
-// have a position, so its messages open with "path:" alone.
+// as the user typed it for its name. A message draws the name as
+// [escape.Line] draws it, as the result line of the command does. Each
+// message then opens with "path:line:col:" when the error has a position
+// in the file. The error handler in main renders the excerpt with the
+// terminal width. A document without tokens, such as an empty or
+// comment-only file, does not have a position, so its messages open with
+// "path:" alone.
 //
 // Each call hands the warnings of the file to the collector of ctx,
 // whether the file passes or fails, and returns only its errors. A
@@ -180,15 +181,11 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, ex
 
 	// Resolvers route on the absolute path, and WithName keeps messages
 	// naming the file as the user typed it. The read uses the typed path,
-	// so a read error names the file that way too.
-	//
-	// The library draws the control characters of a name in every
-	// message, so the escape here changes how one of them reads, the tab.
-	// The library draws a tab in a name as four spaces, and the result
-	// line and a read error draw it as "␉". With the name escaped here,
-	// every line of a run spells the file one way.
+	// so a read error names the file that way too. The library draws the
+	// name as escape.Line draws it, and so does every line this command
+	// writes. Every line of a run thus spells the file one way.
 	opts := append([]niceyaml.SourceOption{
-		niceyaml.WithName(escape.Control(yamlPath)),
+		niceyaml.WithName(yamlPath),
 		niceyaml.WithFilePath(absPath),
 	}, extra...)
 
@@ -203,7 +200,8 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, ex
 // readSource reads the file at path into a [*niceyaml.Source] with opts, as
 // [niceyaml.NewSourceFromFile] does. Unlike NewSourceFromFile, it keeps
 // path as given for the file path of the source, unless opts sets another.
-// A read error names path with its control characters escaped.
+// A read error names path as [escape.Line] draws it, as the library names
+// a source.
 //
 // A glob match takes its name from the file system. The error handler in
 // main keeps each line break in a message as a row break. A raw newline in
@@ -219,7 +217,7 @@ func readSource(path string, opts ...niceyaml.SourceOption) (*niceyaml.Source, e
 	// The read made this error, so no other caller holds it. The wrapper
 	// holds its text from before the escape, so a new one replaces it.
 	if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
-		pathErr.Path = escape.Control(pathErr.Path)
+		pathErr.Path = escape.Line(pathErr.Path)
 
 		return nil, fmt.Errorf("read file: %w", pathErr)
 	}

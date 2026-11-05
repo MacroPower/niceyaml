@@ -9,11 +9,12 @@
 //
 // [go.jacobcolvin.com/niceyaml.FormatError] and
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] escape the
-// text they draw. A program that draws an error itself passes each text
-// it shows through [Control], as a listing with one row per problem does:
+// text they draw, with the functions of this package. A program that
+// draws an error itself passes each text it shows through the function
+// that fits the text, as a listing with one row per problem does:
 //
 //	for problem := range niceyaml.Problems(err) {
-//		fmt.Println(escape.Control(problem.Message()))
+//		fmt.Println(escape.Line(problem.Message()))
 //	}
 //
 // # Coverage
@@ -30,10 +31,23 @@
 // line and paragraph separators, U+2028 and U+2029. [strconv.Quote]
 // escapes those, and Control does not.
 //
-// # Rows
+// # Rows and Tabs
 //
-// A line feed and a tab are C0 controls, so they become "␊" and "␉".
-// Control thus suits a text that takes one row, such as a name or a row
-// of a listing. A program that keeps the rows of a message splits the
-// message at its line feeds and passes each row to Control.
+// A line feed and a tab are C0 controls, so Control draws them as "␊"
+// and "␉". The picture of a tab suits the content of a document, where a
+// tab is a character the reader wants to see. In a name or a message, a
+// tab is layout instead, because it aligns the text after it. A line feed
+// in a message starts a new row.
+//
+// A program picks the function by the rows that its text takes. Text that
+// takes one row, such as the name of a source or a message on a row of
+// its own, goes through [Line]. Line draws each tab as spaces and each
+// line feed as "␊", so the text stays on its row. Text that keeps its
+// rows, such as each message of an error tree, goes through [Message].
+// Message draws each tab as spaces too, but it keeps each line feed as a
+// line break.
+//
+// FormatError draws each name with Line and each message of its tree with
+// Message, so a renderer that calls the same functions draws the text
+// as the library does.
 package escape

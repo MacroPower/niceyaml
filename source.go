@@ -16,12 +16,12 @@ import (
 	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/bom"
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 	"go.jacobcolvin.com/niceyaml/internal/docparse"
-	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/limitread"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
@@ -361,11 +361,10 @@ func readLimited(r io.Reader, limit int) ([]byte, error) {
 // [SourceError.Error] puts the name in front of the position of every
 // error bound to the Source, as in "name:line:col: msg". Without the
 // option, [Source.Name] returns the path [NewSourceFromFile] took, or
-// else the file path. A message draws each tab of the name as four
-// spaces, as [FormatError] draws a tab of the tree. It draws each other
-// control character as [go.jacobcolvin.com/niceyaml/escape.Control] draws
-// it, so a file name that holds a line feed stays on one line. Source.Name
-// returns the name as given.
+// else the file path. A message draws the name as
+// [go.jacobcolvin.com/niceyaml/escape.Line] draws it, so a file name that
+// holds a line feed stays on one line. Source.Name returns the name as
+// given.
 func WithName(name string) SourceOption {
 	return func(c *sourceConfig) {
 		c.name = name

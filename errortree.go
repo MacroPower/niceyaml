@@ -1449,9 +1449,10 @@ func (t ErrorTree) eachNode(yield func(ErrorTree) bool) bool {
 // messages from the unmarshalers and validators of a program can hold
 // control characters, and so can the names of sources. A renderer thus
 // escapes each message and each name for its output.
-// [go.jacobcolvin.com/niceyaml/escape.Control] draws a line feed as its
-// picture too, so a renderer that keeps the rows of a message escapes
-// each row on its own.
+// [go.jacobcolvin.com/niceyaml/escape.Message] draws a message as
+// [FormatError] draws it, with its rows kept, and
+// [go.jacobcolvin.com/niceyaml/escape.Line] draws a name as a
+// [*SourceError] draws it.
 //
 // A report keeps each Source that the bindings of its error touch, with
 // every line, token, and parse of it. The report keeps them alive until

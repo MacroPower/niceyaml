@@ -222,7 +222,7 @@ func inputError(d *inputDef, err error) error {
 		err = pe.Err
 	}
 
-	return fmt.Errorf("%s: %w", escape.Control(name), err)
+	return fmt.Errorf("%s: %w", escape.Line(name), err)
 }
 
 // cleanFSPath returns p cleaned as a path of an [fs.FS], where "." names
@@ -552,7 +552,7 @@ func (r *reader) walkDisk(p *prepared) {
 	}
 
 	if w.selected == 0 {
-		r.empty = append(r.empty, fmt.Sprintf("%s holds no file that matches %s", escape.Control(root),
+		r.empty = append(r.empty, fmt.Sprintf("%s holds no file that matches %s", escape.Line(root),
 			joinOr(p.globs)))
 	}
 }
@@ -694,7 +694,7 @@ func linkTarget(full string) string {
 // [fs.ErrNotExist].
 func danglingProblem(written string, err error) error {
 	return niceyaml.Invalid(&problemError{
-		msg:   fmt.Sprintf("links to %s, which does not exist", escape.Control(written)),
+		msg:   fmt.Sprintf("links to %s, which does not exist", escape.Line(written)),
 		marks: []error{err},
 	})
 }
@@ -702,10 +702,10 @@ func danglingProblem(written string, err error) error {
 // outsideProblem returns the problem of a link whose target, as the link
 // writes it, leads outside root.
 func outsideProblem(written, root string) error {
-	root = escape.Control(root)
+	root = escape.Line(root)
 
 	return newProblem(ErrOutsideLink,
-		fmt.Sprintf("links to %s, which leads outside %s", escape.Control(written), root),
+		fmt.Sprintf("links to %s, which leads outside %s", escape.Line(written), root),
 		niceyaml.WithDetails(fmt.Errorf("copy the file into %s, or make %s itself the link", root, root)))
 }
 
@@ -714,7 +714,7 @@ func outsideProblem(written, root string) error {
 // not select.
 func unselectedProblem(written string, globs []string) error {
 	return newProblem(ErrOutsideLink,
-		fmt.Sprintf("links to %s, which does not match %s", escape.Control(written), joinOr(globs)))
+		fmt.Sprintf("links to %s, which does not match %s", escape.Line(written), joinOr(globs)))
 }
 
 // joinOr returns items as a list in prose, as in "*.yaml or *.yml".

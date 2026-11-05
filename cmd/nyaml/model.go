@@ -569,10 +569,10 @@ func (m *model) textLine() string {
 		styleKey kind.Kind
 	}
 
-	// A file name comes from the file system, so escape it as the
-	// validate command does.
+	// A file name comes from the file system, so draw it as the library
+	// draws the name of a source.
 	swatches := []swatch{
-		{escape.Control(m.viewport.RevisionName()), kind.TextAccentDim},
+		{escape.Line(m.viewport.RevisionName()), kind.TextAccentDim},
 		{searchLabel, kind.TextAccent},
 		{m.diffModeLabel(), kind.TextOK},
 		{m.viewport.ViewMode().String(), kind.TextWarn},

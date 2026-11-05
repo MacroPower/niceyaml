@@ -46,7 +46,7 @@ func (r *reader) walkFS(p *prepared) {
 	}
 
 	if w.selected == 0 {
-		r.empty = append(r.empty, fmt.Sprintf("%s holds no file that matches %s", escape.Control(root),
+		r.empty = append(r.empty, fmt.Sprintf("%s holds no file that matches %s", escape.Line(root),
 			joinOr(p.globs)))
 	}
 }
@@ -161,7 +161,7 @@ func (w *fsWalk) link(rel string) {
 		// The file system reads no file outside its root.
 		w.selected++
 		w.entries = append(w.entries, walkEntry{rel: rel, err: newProblem(ErrOutsideLink,
-			fmt.Sprintf("links to %s, which leads outside the file system", escape.Control(written)))})
+			fmt.Sprintf("links to %s, which leads outside the file system", escape.Line(written)))})
 
 		return
 	}

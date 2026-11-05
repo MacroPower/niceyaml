@@ -712,14 +712,11 @@ func TestValidateCmdOutput(t *testing.T) {
 func TestValidateCmdErrorNames(t *testing.T) {
 	t.Parallel()
 
-	// Every error names a matched file with its control characters
-	// escaped. The error handler keeps each line break in a message as a
-	// row break, so a raw newline in this name would start a row that
-	// reads as a branch for a file named "other.yaml". The tab reads as
-	// its picture in every error, as it does in a result line. The
-	// library draws a tab in the name of a source as four spaces, so the
-	// error of an invalid document keeps the picture only while
-	// validateFile escapes the name it gives the source.
+	// Every error names a matched file as escape.Line draws it, as the
+	// library names a source. The error handler keeps each line break in
+	// a message as a row break, so a raw newline in this name would start
+	// a row that reads as a branch for a file named "other.yaml". The tab
+	// reads as spaces in every error, as it does in a result line.
 	const file = "evil\t\n└── other.yaml"
 
 	tcs := map[string]struct {
@@ -763,7 +760,7 @@ func TestValidateCmdErrorNames(t *testing.T) {
 				require.ErrorIs(t, err, tc.err)
 			}
 
-			assert.Equal(t, 1, strings.Count(err.Error(), escape.Control(path)), err.Error())
+			assert.Equal(t, 1, strings.Count(err.Error(), escape.Line(path)), err.Error())
 		})
 	}
 }

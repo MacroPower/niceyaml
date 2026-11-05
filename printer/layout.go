@@ -387,7 +387,8 @@ func isBreakSpace(r rune) bool {
 //
 // The caller escapes the text, so a tab never reaches rowBounds. An
 // excerpt shows a tab as its control picture, and the text of an error
-// shows it as four spaces.
+// shows it as the spaces [go.jacobcolvin.com/niceyaml/escape.Tabs] puts
+// in its place.
 func rowBounds(text string, pieces []string) ([]int, []int) {
 	runes := []rune(text)
 	tails := spaceTails(text, len(runes))

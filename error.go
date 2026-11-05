@@ -18,8 +18,8 @@ import (
 
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
-	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/internal/fault"
 	"go.jacobcolvin.com/niceyaml/internal/multierr"
@@ -2888,8 +2888,8 @@ func (e *SourceError) FilePath() string {
 }
 
 // label returns the name of the source of e as messages show it. The
-// label draws control characters as [escape.Control] draws them and tabs
-// as spaces, so a file name that holds a line feed stays on one line.
+// label draws the name as [escape.Line] draws it, so a file name that
+// holds a line feed stays on one line.
 func (e *SourceError) label() string {
 	return escape.Line(e.Name())
 }
@@ -3903,10 +3903,12 @@ func (e *SourceError) LogValue() slog.Value {
 // [*Error] in front, as "@.open: closes before it opens". An error whose
 // tree renders as empty text renders its message instead.
 //
-// A tab renders as four spaces in the tree, in each "no excerpt:" line,
-// and in the message beside a caret. A line feed in a message of the tree
-// starts a new row. Every other control character, and every control
-// character of the source lines of an excerpt, renders as
+// Each message of the tree renders as
+// [go.jacobcolvin.com/niceyaml/escape.Message] draws it, so a tab renders
+// as spaces and a line feed starts a new row. The name of a source, each
+// "no excerpt:" line, and the message beside a caret render as
+// [go.jacobcolvin.com/niceyaml/escape.Line] draws them. Every control
+// character of the source lines of an excerpt renders as
 // [go.jacobcolvin.com/niceyaml/escape.Control] draws it. A tab in a line
 // of the source thus shows as a picture, and the output does not hold
 // escape sequences. The text ends with its last row and no line feed, so a
