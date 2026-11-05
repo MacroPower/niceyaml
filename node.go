@@ -711,8 +711,191 @@ func (n *Node) FS() fs.FS {
 // other view over the source, such as one with decoration already:
 //
 //	lipgloss.Println(p.Print(view.Slice(doc.Span())))
+//
+// Span is line-granular. [Node.Range] gives the columns of the node, and
+// the lines of Span widen to the key that introduces a collection, so
+// Span is not Range rounded to lines.
 func (n *Node) Span() position.Span {
 	return n.span
+}
+
+// Range returns the range of the text of the node, in the coordinates of
+// [Source.Lines], and true. The range runs from the first token of the
+// node that [Node.AST] returns through the last of its tokens that holds
+// text, without the spaces around either and without comments. For
+// `flow: {a: 1, b: 2}`, `$.flow` covers the braces and the text between
+// them, and `$.flow.a` covers the `1`. The range of a mapping or a
+// sequence thus starts at its first token and not at the key or the "-"
+// that introduces it. A comment after its last entry lies outside the
+// range. A Node from a path that ends in `~` covers its key. A block
+// scalar covers its indicator through the last line of its text.
+//
+// A value without text of its own, such as the null of `y:` or the text
+// of a block scalar without lines, has the empty range at the position of
+// its own token. For `y:` that position is the column after the ":", and
+// for an element written as `- ` alone, the column after the "-".
+//
+// A Node from a path that ends at an alias covers the alias instead, as
+// the document writes it at the path, with the tag written on it. For
+// `c: *x`, `$.c` covers `*x`, which holds the token that [Node.Ranges]
+// highlights. [Node.AST] returns the content of the anchor, and
+// [Node.Span] covers its lines. A path that ends in `~` covers a key
+// written as an alias the same way. A path through the alias, such as
+// `$.c.b`, covers the text at the anchor. So does a path to an entry that
+// a `<<` merge key brings in. The key of such an entry lies at the anchor
+// too.
+//
+// Range, [Node.Ranges], and [Node.Span] describe one node in three ways.
+// Range is its extent. Ranges of a path is what an error at the path
+// highlights, which for a mapping or a sequence is the token that
+// introduces it. Span is the lines that [Node.View] renders. Span widens
+// to the line of the introducing key, and Range starts at the first token
+// of the value, so Span is not Range rounded to lines. [Node.KeyRange]
+// gives the key of the entry that holds the node:
+//
+//	key, _ := n.KeyRange()
+//	value, _ := n.Range()
+//	symbol := Symbol{Range: position.NewRange(key.Start, value.End), SelectionRange: key}
+//
+// Range reports false for a nil Node, for a document that did not parse
+// or that does not hold content, and for a node whose tokens do not carry
+// a position.
+func (n *Node) Range() (position.Range, bool) {
+	if n == nil || n.doc.err != nil {
+		return position.Range{}, false
+	}
+
+	node := n.AST()
+	if alias, ok := n.writtenAlias(); ok {
+		node = alias
+	}
+
+	if !astnode.HasContent(node) {
+		return position.Range{}, false
+	}
+
+	return n.rangeOf(node)
+}
+
+// KeyRange returns the range of the key of the mapping entry whose value
+// the node is, as [Node.Range] gives a range, and true. The range leaves
+// out the "?" of an explicit key and covers the anchor or the tag written
+// on the key. A Node from a path that ends in `~` reports the range of
+// the key it selects, which [Node.Range] reports too.
+//
+// KeyRange reports false for a nil Node and for a document that did not
+// parse. The root of a document and an element of a sequence do not have
+// a key, so it reports false for them too. It also reports false for a
+// key whose tokens do not carry a position.
+func (n *Node) KeyRange() (position.Range, bool) {
+	if n == nil || n.doc.err != nil || n.base.IsRoot() {
+		return position.Range{}, false
+	}
+
+	key := n.entryKey(n.base)
+	if !astnode.HasContent(key) {
+		return position.Range{}, false
+	}
+
+	return n.rangeOf(key)
+}
+
+// entryKey returns the key of the mapping entry that holds the node at
+// path, a `$` path, without the "?" of an explicit key. A path that ends
+// in `~` names the entry of its key. It returns nil when no entry holds
+// the node.
+func (n *Node) entryKey(path paths.Path) ast.Node {
+	if last, ok := path.Last(); ok && last.Kind == paths.SelectorKey {
+		path, _ = path.Parent()
+	}
+
+	in := datapath.ParentAt(n.doc.pathResolver(), path)
+	if in.Entry == nil {
+		return nil
+	}
+
+	key := ast.Node(in.Entry.Key)
+	if explicit, ok := key.(*ast.MappingKeyNode); ok {
+		key = explicit.Value
+	}
+
+	return key
+}
+
+// writtenAlias returns the node that the document writes at the path of
+// n, and true when that node is an alias. The node keeps the tag written
+// on the alias. [Node.AST] holds the content of the anchor that the alias
+// refers to. A path that ends in `~` names the key of its entry, or the
+// element itself when the `~` follows an element of a sequence.
+func (n *Node) writtenAlias() (ast.Node, bool) {
+	if n.base.IsRoot() {
+		return nil, false
+	}
+
+	var written ast.Node
+
+	// ParentAt gives no holder for a `~` that picks the key of an entry, and
+	// the holder of the node itself for any other `~`.
+	in := datapath.ParentAt(n.doc.pathResolver(), n.base)
+
+	switch last, _ := n.base.Last(); {
+	case in.Entry != nil:
+		written = in.Entry.Value
+	case in.Sequence != nil && in.Index < len(in.Sequence.Values):
+		written = in.Sequence.Values[in.Index]
+	case last.Kind == paths.SelectorKey:
+		written = n.entryKey(n.base)
+	}
+
+	if _, ok := astnode.Content(written).(*ast.AliasNode); !ok {
+		return nil, false
+	}
+
+	return written, true
+}
+
+// rangeOf returns the range of the text of node in the lines of the
+// source, as [Node.Range] describes it. It reads the tokens of node that
+// carry a position, comments left out, and bounds the range on the first
+// and the last of them that hold text. A node without such a token has
+// the empty range at the position of its own token.
+func (n *Node) rangeOf(node ast.Node) (position.Range, bool) {
+	lines := n.source.lines
+
+	var (
+		first, last position.Ranges
+		lo, hi      int
+	)
+
+	for _, tk := range astnode.Tokens(node) {
+		ranges := lines.ContentRanges(tk)
+		if len(ranges) == 0 {
+			continue
+		}
+
+		off := tk.Position.Offset
+
+		if first == nil || off < lo {
+			first, lo = ranges, off
+		}
+
+		if last == nil || off > hi {
+			last, hi = ranges, off
+		}
+	}
+
+	if first != nil {
+		return position.NewRange(first[0].Start, last[len(last)-1].End), true
+	}
+
+	tk := astnode.Token(node)
+	if tk == nil || tk.Position == nil {
+		return position.Range{}, false
+	}
+
+	at := position.NewFromToken(tk)
+
+	return position.NewRange(at, at), true
 }
 
 // View returns a new [*line.View] over the lines of [Source.Lines] that
@@ -753,7 +936,8 @@ func (n *Node) View() *line.View {
 //	view.AddOverlay(kind.GenericHighlight, ranges...)
 //
 // To mark every line of a mapping or a sequence, use [Node.Span] or
-// [Node.View] of the Node [Node.At] returns.
+// [Node.View] of the Node [Node.At] returns. [Node.Range] gives the
+// columns of its text, from its first token through its last.
 //
 // A path that does not resolve returns the error [paths.Resolver.Token]
 // describes, bound to the source as [Node.At] binds it. A token without a

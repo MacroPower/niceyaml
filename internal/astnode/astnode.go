@@ -533,6 +533,48 @@ func StartToken(node ast.Node) *token.Token {
 	return b.first[0]
 }
 
+// Tokens returns the tokens under node that carry a position, comments
+// left out, in the order that [Inspect] visits their nodes. It counts the
+// token that closes a flow collection and the "-" of each block sequence
+// element, as [Bounds] does. The order is not the order of their
+// offsets, because the token that closes a collection comes before the
+// tokens of its entries.
+func Tokens(node ast.Node) token.Tokens {
+	var tks token.Tokens
+
+	add := func(tk *token.Token) {
+		if tk != nil && tk.Position != nil {
+			tks = append(tks, tk)
+		}
+	}
+
+	Inspect(node, func(n ast.Node) bool {
+		if n.Type() == ast.CommentType {
+			return false
+		}
+
+		add(n.GetToken())
+
+		switch n := n.(type) {
+		case *ast.SequenceNode:
+			add(n.End)
+
+			for _, entry := range n.Entries {
+				if entry != nil {
+					add(entry.Start)
+				}
+			}
+
+		case *ast.MappingNode:
+			add(n.End)
+		}
+
+		return true
+	})
+
+	return tks
+}
+
 // boundsFinder records the tokens with the lowest and the highest offset
 // among the nodes that it visits, all of them when several share the
 // offset.

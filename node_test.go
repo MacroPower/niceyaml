@@ -1114,6 +1114,347 @@ func TestNode_PathAt_ScopedNode(t *testing.T) {
 	})
 }
 
+func TestNode_Range(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.JoinLF(
+		"flow: {a: 1, b: 2}",
+		"y:",
+		"seq:",
+		"  -",
+		"  - item",
+		"block: |",
+		"  line1",
+		"  line2",
+		"empty: |",
+		"map:",
+		"  k: v  # note",
+		"  # trailing",
+		"text: first",
+		"  second",
+	))
+
+	tcs := map[string]struct {
+		path paths.Path
+		want position.Range
+	}{
+		"root covers the first key through the last value": {
+			path: paths.Doc(),
+			want: position.NewRange(position.New(0, 0), position.New(13, 8)),
+		},
+		"flow mapping covers its braces": {
+			path: paths.Doc().Child("flow"),
+			want: yamltest.LineRange(0, 6, 18),
+		},
+		"entry of a flow mapping covers its value": {
+			path: paths.Doc().Child("flow", "a"),
+			want: yamltest.LineRange(0, 10, 11),
+		},
+		"last entry of a flow mapping": {
+			path: paths.Doc().Child("flow", "b"),
+			want: yamltest.LineRange(0, 16, 17),
+		},
+		"key path covers the key": {
+			path: paths.Doc().Child("flow").Key(),
+			want: yamltest.LineRange(0, 0, 4),
+		},
+		"implicit null is empty after the colon": {
+			path: paths.Doc().Child("y"),
+			want: yamltest.LineRange(1, 2, 2),
+		},
+		"block sequence covers its first dash through its last element": {
+			path: paths.Doc().Child("seq"),
+			want: position.NewRange(position.New(3, 2), position.New(4, 8)),
+		},
+		"element without a value is empty after the dash": {
+			path: paths.Doc().Child("seq").Index(0),
+			want: yamltest.LineRange(3, 3, 3),
+		},
+		"element covers its value": {
+			path: paths.Doc().Child("seq").Index(1),
+			want: yamltest.LineRange(4, 4, 8),
+		},
+		"block scalar covers its indicator through its last line": {
+			path: paths.Doc().Child("block"),
+			want: position.NewRange(position.New(5, 7), position.New(7, 7)),
+		},
+		"block scalar without text covers its indicator": {
+			path: paths.Doc().Child("empty"),
+			want: yamltest.LineRange(8, 7, 8),
+		},
+		"mapping leaves out the comments": {
+			path: paths.Doc().Child("map"),
+			want: yamltest.LineRange(10, 2, 6),
+		},
+		"scalar leaves out the comment after it": {
+			path: paths.Doc().Child("map", "k"),
+			want: yamltest.LineRange(10, 5, 6),
+		},
+		"scalar over several lines": {
+			path: paths.Doc().Child("text"),
+			want: position.NewRange(position.New(12, 6), position.New(13, 8)),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			n := yamltest.At(t, doc, tc.path)
+
+			got, ok := n.Range()
+			require.True(t, ok)
+			assert.Equal(t, tc.want, got)
+
+			// The range lies in the lines the node spans.
+			assert.True(t, n.Span().Contains(got.Start.Line), "span %s holds %s", n.Span(), got)
+			assert.True(t, n.Span().Contains(got.LastLine()), "span %s holds %s", n.Span(), got)
+		})
+	}
+}
+
+func TestNode_Range_NoRange(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		node *niceyaml.Node
+	}{
+		"nil node":       {node: nil},
+		"unparsed":       {node: yamltest.UnparsedDocument(t, "a: [")},
+		"empty document": {node: yamltest.FirstDocument(t, "")},
+		"comments alone": {node: yamltest.FirstDocument(t, "# note\n")},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, ok := tc.node.Range()
+			assert.False(t, ok)
+
+			_, ok = tc.node.KeyRange()
+			assert.False(t, ok)
+		})
+	}
+}
+
+func TestNode_KeyRange(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		path  paths.Path
+		want  position.Range
+		ok    bool
+	}{
+		"block entry": {
+			input: "server:\n  host: a\n",
+			path:  paths.Doc().Child("server", "host"),
+			want:  yamltest.LineRange(1, 2, 6),
+			ok:    true,
+		},
+		"entry whose value is a mapping": {
+			input: "server:\n  host: a\n",
+			path:  paths.Doc().Child("server"),
+			want:  yamltest.LineRange(0, 0, 6),
+			ok:    true,
+		},
+		"flow entry": {
+			input: "flow: {a: 1, b: 2}\n",
+			path:  paths.Doc().Child("flow", "b"),
+			want:  yamltest.LineRange(0, 13, 14),
+			ok:    true,
+		},
+		"key path reports its own key": {
+			input: "flow: {a: 1, b: 2}\n",
+			path:  paths.Doc().Child("flow").Key(),
+			want:  yamltest.LineRange(0, 0, 4),
+			ok:    true,
+		},
+		"explicit key leaves out the question mark": {
+			input: "? k\n: v\n",
+			path:  paths.Doc().Child("k"),
+			want:  yamltest.LineRange(0, 2, 3),
+			ok:    true,
+		},
+		"quoted key covers its quotes": {
+			input: "\"k\": v\n",
+			path:  paths.Doc().Child("k"),
+			want:  yamltest.LineRange(0, 0, 3),
+			ok:    true,
+		},
+		"tagged key covers its tag": {
+			input: "!!str k: v\n",
+			path:  paths.Doc().Child("k"),
+			want:  yamltest.LineRange(0, 0, 7),
+			ok:    true,
+		},
+		"entry of a mapping element": {
+			input: "- name: a\n",
+			path:  paths.Doc().Index(0).Child("name"),
+			want:  yamltest.LineRange(0, 2, 6),
+			ok:    true,
+		},
+		"entry read through a merge key lies at its anchor": {
+			input: "base: &b\n  port: 1\nx:\n  <<: *b\n",
+			path:  paths.Doc().Child("x", "port"),
+			want:  yamltest.LineRange(1, 2, 6),
+			ok:    true,
+		},
+		"root": {
+			input: "a: 1\n",
+			path:  paths.Doc(),
+		},
+		"sequence element": {
+			input: "- a\n",
+			path:  paths.Doc().Index(0),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			n := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.path)
+
+			got, ok := n.KeyRange()
+			require.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+
+			if !tc.ok {
+				return
+			}
+
+			// The key is what an error at the key path highlights.
+			ranges, err := n.Ranges(paths.Current().Key())
+			require.NoError(t, err)
+			require.Len(t, ranges, 1)
+			assert.True(t, got.Contains(ranges[0].Start), "range %s holds %s", got, ranges[0])
+		})
+	}
+}
+
+func TestNode_Range_Alias(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		path  paths.Path
+		want  position.Range
+	}{
+		"alias of a mapping covers the alias": {
+			input: "a: &x {b: 1}\nc: *x\n",
+			path:  paths.Doc().Child("c"),
+			want:  yamltest.LineRange(1, 3, 5),
+		},
+		"alias of a scalar covers the alias": {
+			input: "a: &x 5\nc: *x\n",
+			path:  paths.Doc().Child("c"),
+			want:  yamltest.LineRange(1, 3, 5),
+		},
+		"alias covers its tag": {
+			input: "a: &x 5\nc: !!int *x\n",
+			path:  paths.Doc().Child("c"),
+			want:  yamltest.LineRange(1, 3, 11),
+		},
+		"alias leaves out the comment after it": {
+			input: "a: &x {b: 1}\nc: *x # note\n",
+			path:  paths.Doc().Child("c"),
+			want:  yamltest.LineRange(1, 3, 5),
+		},
+		"alias on the line after its key": {
+			input: "a: &x\n  - 1\nc:\n  *x\n",
+			path:  paths.Doc().Child("c"),
+			want:  yamltest.LineRange(3, 2, 4),
+		},
+		"alias as an element of a block sequence": {
+			input: "- &x {b: 1}\n- *x\n",
+			path:  paths.Doc().Index(1),
+			want:  yamltest.LineRange(1, 2, 4),
+		},
+		"alias element through a key selector": {
+			// A `~` after an element selects the element itself.
+			input: "- &x {b: 1}\n- *x\n",
+			path:  paths.Doc().Index(1).Key(),
+			want:  yamltest.LineRange(1, 2, 4),
+		},
+		"alias as an element of a flow sequence": {
+			input: "a: &x {b: 1}\nc: [*x]\n",
+			path:  paths.Doc().Child("c").Index(0),
+			want:  yamltest.LineRange(1, 4, 6),
+		},
+		"alias after a merge key": {
+			input: "a: &x {b: 1}\nc:\n  <<: *x\n",
+			path:  paths.Doc().Child("c", "<<"),
+			want:  yamltest.LineRange(2, 6, 8),
+		},
+		"alias in the anchor it refers to": {
+			input: "a: &x {b: *x}\n",
+			path:  paths.Doc().Child("a", "b"),
+			want:  yamltest.LineRange(0, 10, 12),
+		},
+		"alias key covers the alias": {
+			input: "a: &x k\n*x : 1\n",
+			path:  paths.Doc().Child("k").Key(),
+			want:  yamltest.LineRange(1, 0, 2),
+		},
+		"explicit alias key covers the alias": {
+			input: "a: &x 5\n? *x\n: 1\n",
+			path:  paths.Doc().Child("5").Key(),
+			want:  yamltest.LineRange(1, 2, 4),
+		},
+		"path through an alias covers the text at the anchor": {
+			input: "a: &x {b: 1}\nc: *x\n",
+			path:  paths.Doc().Child("c", "b"),
+			want:  yamltest.LineRange(0, 10, 11),
+		},
+		"entry a merge key brings in covers the text at the anchor": {
+			input: "a: &x {b: 1}\nc:\n  <<: *x\n",
+			path:  paths.Doc().Child("c", "b"),
+			want:  yamltest.LineRange(0, 10, 11),
+		},
+		"alias in the anchor that a path enters through an alias": {
+			input: "s: &s 5\na: &x {b: *s}\nc: *x\n",
+			path:  paths.Doc().Child("c", "b"),
+			want:  yamltest.LineRange(1, 10, 12),
+		},
+		"alias in an entry a merge key brings in": {
+			input: "s: &s 5\na: &x {b: *s}\nc:\n  <<: *x\n",
+			path:  paths.Doc().Child("c", "b"),
+			want:  yamltest.LineRange(1, 10, 12),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			n := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.path)
+
+			got, ok := n.Range()
+			require.True(t, ok)
+			assert.Equal(t, tc.want, got)
+
+			// The range holds the start of what an error at the path
+			// highlights.
+			ranges, err := n.Ranges(paths.Current())
+			require.NoError(t, err)
+			require.NotEmpty(t, ranges)
+			assert.True(t, got.Contains(ranges[0].Start), "range %s holds %s", got, ranges[0])
+
+			// A symbol from the key through the value holds both.
+			key, ok := n.KeyRange()
+			if !ok {
+				return
+			}
+
+			symbol := position.NewRange(key.Start, got.End)
+			assert.True(t, symbol.Contains(key.Start), "symbol %s holds key %s", symbol, key)
+			assert.True(t, symbol.Contains(got.Start), "symbol %s holds value %s", symbol, got)
+		})
+	}
+}
+
 func TestNode_ConcurrentPaths(t *testing.T) {
 	t.Parallel()
 
