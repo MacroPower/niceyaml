@@ -54,6 +54,21 @@ type Normalizer interface {
 	Normalize(in string) string
 }
 
+// Exact is a [Normalizer] that returns its input, so a search with it
+// matches characters exactly, without case folding or diacritic
+// stripping. [WithNormalizer] with Exact turns normalization off:
+//
+//	exact := finder.New(finder.WithNormalizer(finder.Exact))
+var Exact Normalizer = exactNormalizer{}
+
+// exactNormalizer is the [Normalizer] behind [Exact].
+type exactNormalizer struct{}
+
+// Normalize implements [Normalizer] by returning in as it is.
+func (exactNormalizer) Normalize(in string) string {
+	return in
+}
+
 // Finder builds an [Index] over the lines of a [line.Sequence], so the
 // [position.Ranges] of a search can highlight matches in rendered output.
 //
@@ -80,7 +95,7 @@ type Normalizer interface {
 // By default, a search folds case and ignores diacritics through the
 // [normalizer.Normalizer] that [normalizer.New] builds, so "cafe" matches
 // "Café". [WithNormalizer] sets a normalizer of the caller's own.
-// [WithNormalizer] with nil makes a search match characters exactly,
+// [WithNormalizer] with [Exact] makes a search match characters exactly,
 // without case folding or diacritic stripping.
 //
 // Create instances with [New].
@@ -94,7 +109,7 @@ type Finder struct {
 //
 // Without options, the Finder normalizes with [normalizer.New], which
 // folds case and strips diacritics. [WithNormalizer] replaces that
-// normalizer, or removes it for exact matching.
+// normalizer, with [Exact] for exact matching.
 func New(opts ...Option) *Finder {
 	f := &Finder{normalizer: normalizer.New()}
 	for _, opt := range opts {
@@ -118,23 +133,25 @@ type config struct {
 
 // WithNormalizer is an [Option] that sets the [Normalizer] applied to
 // both the search string and the loaded text before matching, in place
-// of the one [normalizer.New] builds. A nil normalizer removes
-// normalization, so a search then matches characters exactly:
+// of the one [normalizer.New] builds. [Exact] turns normalization off, so
+// a search then matches characters exactly:
 //
-//	exact := finder.New(finder.WithNormalizer(nil))
+//	exact := finder.New(finder.WithNormalizer(finder.Exact))
 //
-// A nil [*normalizer.Normalizer] works the same way, so a caller can pass
-// a normalizer that it builds only on some condition without a nil check:
+// A nil n, or one holding a nil pointer such as a nil
+// [*normalizer.Normalizer], keeps the default normalizer. A caller can
+// thus pass a normalizer that it builds only on some condition without a
+// nil check:
 //
 //	var n *normalizer.Normalizer
-//	if fold {
-//		n = normalizer.New()
+//	if widthFold {
+//		n = normalizer.New(normalizer.WithWidthFold(true))
 //	}
 //
 //	f := finder.New(finder.WithNormalizer(n))
 //
-// Even then, invalid bytes read as U+FFFD and line endings read as "\n",
-// as [Index.Find] describes.
+// Whatever the normalizer, invalid bytes read as U+FFFD and line endings
+// read as "\n", as [Index.Find] describes.
 //
 // The normalizer receives one character at a time, on both sides, so the
 // same character always normalizes the same way wherever it appears. A
@@ -157,6 +174,10 @@ type config struct {
 // See [normalizer.Normalizer] for an implementation.
 func WithNormalizer(n Normalizer) Option {
 	return func(c *config) {
+		if nilness.IsNil(n) {
+			return
+		}
+
 		c.normalizer = n
 	}
 }

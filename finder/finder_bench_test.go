@@ -65,7 +65,7 @@ func BenchmarkFinderFind_WithNormalizer(b *testing.B) {
 		yaml := yamltest.GenerateYAML(sz.lines)
 
 		b.Run(sz.name+"/without_normalizer", func(b *testing.B) {
-			benchFind(b, finder.New(finder.WithNormalizer(nil)), yaml, "value_")
+			benchFind(b, finder.New(finder.WithNormalizer(finder.Exact)), yaml, "value_")
 		})
 
 		b.Run(sz.name+"/with_normalizer", func(b *testing.B) {
@@ -92,7 +92,7 @@ func BenchmarkFinderFind_UnicodeContent(b *testing.B) {
 	yaml := yamltest.GenerateLines(500, `key_%[1]d: "Héllo Wörld Ñoño %[1]d"`)
 
 	b.Run("without_normalizer", func(b *testing.B) {
-		benchFind(b, finder.New(finder.WithNormalizer(nil)), yaml, "Héllo")
+		benchFind(b, finder.New(finder.WithNormalizer(finder.Exact)), yaml, "Héllo")
 	})
 
 	b.Run("with_normalizer", func(b *testing.B) {
@@ -111,7 +111,7 @@ func BenchmarkFinderCreate(b *testing.B) {
 		name       string
 		normalizer func() finder.Normalizer
 	}{
-		{"without_normalizer", func() finder.Normalizer { return nil }},
+		{"without_normalizer", func() finder.Normalizer { return finder.Exact }},
 		{"with_normalizer", func() finder.Normalizer { return normalizer.New() }},
 	}
 

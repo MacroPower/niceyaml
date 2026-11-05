@@ -53,9 +53,9 @@ func main() {
 
 	fmt.Println("\nMatch characters exactly:")
 
-	// A nil normalizer turns off case and diacritic folding, so "cafe"
-	// does not find "Café". Only the exact spelling "Café" matches.
-	exact := finder.New(finder.WithNormalizer(nil)).Load(source.Lines())
+	// Finder.Exact turns off case and diacritic folding, so "cafe" does
+	// not find "Café". Only the exact spelling "Café" matches.
+	exact := finder.New(finder.WithNormalizer(finder.Exact)).Load(source.Lines())
 
 	for _, search := range []string{"cafe", "Café"} {
 		fmt.Printf("%q matches: %d\n", search, len(exact.Find(search)))

@@ -47,9 +47,11 @@ func TestFinder_Find(t *testing.T) {
 		input      string
 		search     string
 		normalizer finder.Normalizer
-		// Matches characters exactly, with no normalizer at all.
+		// Matches characters exactly, through finder.Exact.
 		exact bool
-		want  position.Ranges
+		// Passes a nil Normalizer, which keeps the default.
+		nilOpt bool
+		want   position.Ranges
 	}{
 		"single token match": {
 			input:  "key: value",
@@ -188,16 +190,23 @@ func TestFinder_Find(t *testing.T) {
 			exact:  true,
 			want:   position.Ranges{yamltest.LineRange(0, 6, 11)},
 		},
-		"nil normalizer pointer - no match": {
+		"nil normalizer pointer keeps the default": {
 			input:      "key: VALUE",
 			search:     "value",
 			normalizer: (*normalizer.Normalizer)(nil),
-		},
-		"nil normalizer pointer - exact match": {
-			input:      "key: VALUE",
-			search:     "VALUE",
-			normalizer: (*normalizer.Normalizer)(nil),
 			want:       position.Ranges{yamltest.LineRange(0, 5, 10)},
+		},
+		"nil normalizer func keeps the default": {
+			input:      "key: VALUE",
+			search:     "value",
+			normalizer: yamltest.NormalizerFunc(nil),
+			want:       position.Ranges{yamltest.LineRange(0, 5, 10)},
+		},
+		"nil normalizer keeps the default": {
+			input:  "key: VALUE",
+			search: "value",
+			nilOpt: true,
+			want:   position.Ranges{yamltest.LineRange(0, 5, 10)},
 		},
 		"case insensitive with normalizer": {
 			input:      "key: VALUE",
@@ -464,7 +473,12 @@ func TestFinder_Find(t *testing.T) {
 
 			var opts []finder.Option
 
-			if tc.normalizer != nil || tc.exact {
+			switch {
+			case tc.exact:
+				opts = append(opts, finder.WithNormalizer(finder.Exact))
+			case tc.nilOpt:
+				opts = append(opts, finder.WithNormalizer(nil))
+			case tc.normalizer != nil:
 				opts = append(opts, finder.WithNormalizer(tc.normalizer))
 			}
 
