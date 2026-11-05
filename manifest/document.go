@@ -13,7 +13,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
-	"go.jacobcolvin.com/niceyaml/internal/schemahook"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -621,10 +620,6 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 		return true
 	}
 
-	if v != v.kind.versions[len(v.kind.versions)-1] {
-		ctx = schemahook.DeprecationsOff(ctx)
-	}
-
 	reg := d.l.reg
 
 	sch, err := reg.schemas.Schema(ctx, v.cfg.schema)
@@ -633,6 +628,10 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 		d.fail(niceyaml.Unchecked(&problemError{msg: what, marks: []error{err}}, niceyaml.WithDetails(err)))
 
 		return false
+	}
+
+	if v != v.kind.versions[len(v.kind.versions)-1] {
+		sch = sch.WithoutDeprecations()
 	}
 
 	work := d.work

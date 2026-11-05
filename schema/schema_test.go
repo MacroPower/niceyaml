@@ -3929,3 +3929,168 @@ func TestSchema_Ref(t *testing.T) {
 	assert.Nil(t, schema.Embedded([]byte(`{}`)).Schema())
 	assert.Nil(t, schema.Ref{}.Schema())
 }
+
+func TestSchema_JSONSchema(t *testing.T) {
+	t.Parallel()
+
+	v := jsonschema.MustCompileJSON([]byte(`{"type": "object"}`))
+
+	tcs := map[string]struct {
+		schema *schema.Schema
+		want   *jsonschema.Validator
+	}{
+		"from a validator":     {schema: schema.FromJSONSchema(v), want: v},
+		"without deprecations": {schema: schema.FromJSONSchema(v).WithoutDeprecations(), want: v},
+		"accept all":           {schema: schema.AcceptAll, want: nil},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if tc.want == nil {
+				assert.Nil(t, tc.schema.JSONSchema())
+
+				return
+			}
+
+			assert.Same(t, tc.want, tc.schema.JSONSchema())
+		})
+	}
+
+	t.Run("compiled", func(t *testing.T) {
+		t.Parallel()
+
+		s := compileSchema(t, `{"type": "object"}`)
+		require.NotNil(t, s.JSONSchema())
+		require.NoError(t, s.JSONSchema().Validate(t.Context(), map[string]any{}))
+		require.Error(t, s.JSONSchema().Validate(t.Context(), "value"))
+	})
+}
+
+func TestSchema_WithoutDeprecations(t *testing.T) {
+	t.Parallel()
+
+	s := compileSchema(t, cafeSchema)
+	quiet := s.WithoutDeprecations()
+	doc := yamltest.FirstDocument(
+		t,
+		stringtest.LinesLF("legacyPricing: true", "seats: 0"),
+		niceyaml.WithName("cafe.yaml"),
+	)
+
+	tcs := map[string]struct {
+		schema *schema.Schema
+		warns  bool
+	}{
+		"the schema warns":            {schema: s, warns: true},
+		"the derived schema is quiet": {schema: quiet, warns: false},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			t.Run("check", func(t *testing.T) {
+				t.Parallel()
+
+				warnings := niceyaml.NewWarnings()
+
+				err := doc.Validate(warnings.Context(t.Context()), tc.schema)
+				require.EqualError(t, err, "cafe.yaml:2:8: $.seats: 0 is less than 1")
+				require.ErrorIs(t, err, schema.ErrViolation)
+
+				if tc.warns {
+					require.ErrorIs(t, warnings.Err(), schema.ErrDeprecated)
+				} else {
+					require.NoError(t, warnings.Err())
+				}
+			})
+
+			t.Run("value", func(t *testing.T) {
+				t.Parallel()
+
+				warnings := niceyaml.NewWarnings()
+
+				err := tc.schema.ValidateValue(warnings.Context(t.Context()), map[string]any{"legacyPricing": true})
+				require.NoError(t, err)
+
+				if tc.warns {
+					require.ErrorIs(t, warnings.Err(), schema.ErrDeprecated)
+				} else {
+					require.NoError(t, warnings.Err())
+				}
+			})
+		})
+	}
+
+	t.Run("shares the validator", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Same(t, s.JSONSchema(), quiet.JSONSchema())
+		assert.NotSame(t, s, quiet)
+	})
+
+	t.Run("accept all", func(t *testing.T) {
+		t.Parallel()
+
+		quiet := schema.AcceptAll.WithoutDeprecations()
+		require.NoError(t, quiet.ValidateValue(t.Context(), "value"))
+		assert.Nil(t, quiet.JSONSchema())
+	})
+}
+
+func TestAcceptAll(t *testing.T) {
+	t.Parallel()
+
+	t.Run("passes every value", func(t *testing.T) {
+		t.Parallel()
+
+		warnings := niceyaml.NewWarnings()
+		require.NoError(t, schema.AcceptAll.ValidateValue(warnings.Context(t.Context()), "value"))
+		require.NoError(t, schema.AcceptAll.ValidateValue(t.Context(), nil))
+		require.NoError(t, warnings.Err())
+	})
+
+	t.Run("passes a document without a decode", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			body string
+		}{
+			"mapping":            {body: "kind: Deployment\n"},
+			"undefined alias":    {body: "a: *nope\n"},
+			"excessive aliasing": {body: yamltest.AliasLevels(7)},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.body)
+				require.NoError(t, doc.Validate(t.Context(), schema.AcceptAll))
+			})
+		}
+	})
+
+	t.Run("returns the error of the document", func(t *testing.T) {
+		t.Parallel()
+
+		docs := yamltest.AllDocuments(t, niceyaml.NewSourceFromString("a: 1\n---\nb: [\n"), 2)
+		require.ErrorIs(t, docs[1].Err(), niceyaml.ErrSyntax)
+		require.ErrorIs(t, docs[1].Validate(t.Context(), schema.AcceptAll), niceyaml.ErrSyntax)
+	})
+
+	t.Run("resolves itself", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "a: *nope\n")
+
+		ref, err := schema.AcceptAll.Resolve(t.Context(), doc)
+		require.NoError(t, err)
+		assert.Same(t, schema.AcceptAll, ref.Schema())
+
+		reg := schema.NewRegistry(schema.WithResolvers(schema.AcceptAll, compileSchema(t, `false`)))
+		require.NoError(t, reg.Check(t.Context(), doc))
+	})
+}

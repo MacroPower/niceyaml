@@ -15,7 +15,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
-	"go.jacobcolvin.com/niceyaml/internal/schemahook"
 	"go.jacobcolvin.com/niceyaml/internal/unmarshaler"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -131,7 +130,7 @@ func (r *Registry) Verify(ctx context.Context) error {
 				continue
 			}
 
-			compiled[v] = schemahook.Validator(sch)
+			compiled[v] = sch.JSONSchema()
 		}
 
 		errs = append(errs, r.verifyTypeFields(entry, compiled)...)

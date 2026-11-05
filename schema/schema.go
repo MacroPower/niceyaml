@@ -26,7 +26,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/mapkey"
-	"go.jacobcolvin.com/niceyaml/internal/schemahook"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -84,6 +83,31 @@ var (
 	// [Schema.ValidateValue] report each such value as a warning that
 	// matches it.
 	ErrDeprecated = errors.New("deprecated")
+
+	// AcceptAll is the [*Schema] that passes every document and value without
+	// reading it. For the directive "$schema=none", [Directive] names a
+	// Schema of its own that passes every document as AcceptAll does. A
+	// program that changes AcceptAll does not change the schema that the
+	// directive names. A resolver names AcceptAll for the documents that a
+	// registry must not check:
+	//
+	//	reg := schema.NewRegistry(schema.WithResolvers(
+	//	    schema.When(matcher.Exists(paths.Doc().Child("x-skip")), schema.AcceptAll),
+	//	    schema.Directive(),
+	//	))
+	//
+	// [Schema.Check] on AcceptAll returns only the error of the document,
+	// without a decode, so a document with an undefined alias passes.
+	// [Schema.ValidateValue] returns nil for every value. A schema compiled
+	// from "true" also passes every document, but its check decodes the
+	// document first. [Schema.JSONSchema] on AcceptAll returns nil.
+	AcceptAll = &Schema{acceptAll: true}
+
+	// The schema that [Directive] names for "$schema=none". It passes every
+	// document as [AcceptAll] does. It holds a Schema of its own, so a write
+	// to the variable AcceptAll or through its pointer does not reach the
+	// directive.
+	acceptAllSchema = &Schema{acceptAll: true}
 )
 
 // CompileOption configures [Compile] and [MustCompile], and
@@ -473,13 +497,46 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 //	    schema.When(matcher.Content(kindPath, "Pod"), schema.FromJSONSchema(podValidator)),
 //	))
 //
+// [Schema.JSONSchema] returns the compiled validator, for a program that
+// reads the schema itself, such as an editor that completes keys from
+// its properties. [Schema.WithoutDeprecations] returns a Schema that
+// checks with the same validator and does not hand over deprecations.
+//
 // A Schema is safe for concurrent use. Create instances with [Compile],
-// [MustCompile], or [FromJSONSchema].
+// [MustCompile], or [FromJSONSchema]. [AcceptAll] passes every document.
 type Schema struct {
 	compiled *jsonschema.Validator
 	// Whether the schema passes every document and value without reading
 	// it, as the schema that a "$schema=none" directive names does.
 	acceptAll bool
+	// Whether a check runs without deprecation records, as
+	// [Schema.WithoutDeprecations] sets.
+	noDeprecations bool
+}
+
+// JSONSchema returns the compiled validator that the schema checks with.
+// It returns the validator that [FromJSONSchema] took, or the one that
+// [Compile] built. A program reads the validator for what the schema
+// declares, such as the properties that an editor completes. It returns
+// nil for [AcceptAll], which checks nothing.
+func (s *Schema) JSONSchema() *jsonschema.Validator {
+	return s.compiled
+}
+
+// WithoutDeprecations returns a [*Schema] that checks with the same
+// compiled validator as s and does not hand deprecations to the
+// [niceyaml.Warnings] collector of the context. The returned schema
+// returns the same violations as s, and [Schema.JSONSchema] on it
+// returns the validator of s. A program that checks a document against
+// the schema of a version it has moved past uses it. So the deprecated
+// keywords of that version do not warn. A server that reads no warnings
+// uses it to skip the work of the deprecation records. The schema s
+// stays as it is.
+func (s *Schema) WithoutDeprecations() *Schema {
+	derived := *s
+	derived.noDeprecations = true
+
+	return &derived
 }
 
 // Ref returns the [Ref] that carries the compiled schema, which
@@ -896,10 +953,10 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) ([]er
 		err     error
 	)
 
-	if schemahook.ReportsDeprecations(ctx) {
-		records, err = s.compiled.ValidateDeprecations(ctx, instance)
-	} else {
+	if s.noDeprecations {
 		err = s.compiled.Validate(ctx, instance)
+	} else {
+		records, err = s.compiled.ValidateDeprecations(ctx, instance)
 	}
 
 	if err == nil {

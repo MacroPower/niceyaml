@@ -9,7 +9,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
-	"go.jacobcolvin.com/niceyaml/internal/schemahook"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/schema"
@@ -114,7 +113,7 @@ func textBounds(doc *niceyaml.Node) (int, int) {
 // does not declare. The check of the schema sees these fields blank. It
 // returns nil for a schema that does not check anything.
 func (r *Registry) hiddenFields(sch *schema.Schema) []paths.Path {
-	v := schemahook.Validator(sch)
+	v := sch.JSONSchema()
 	if v == nil {
 		return nil
 	}

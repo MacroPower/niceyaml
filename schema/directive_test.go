@@ -805,7 +805,14 @@ func TestDirective_Resolve(t *testing.T) {
 
 				ref, err := schema.Directive().Resolve(t.Context(), doc)
 				require.NoError(t, err)
-				assert.NotNil(t, ref.Schema())
+
+				// The directive names a schema that checks nothing, as
+				// AcceptAll does, but not AcceptAll itself, so a change to
+				// AcceptAll does not reach it.
+				sch := ref.Schema()
+				require.NotNil(t, sch)
+				assert.NotSame(t, schema.AcceptAll, sch)
+				assert.Nil(t, sch.JSONSchema())
 				assert.Empty(t, ref.Key())
 
 				// A schema that rejects every document follows the directive,

@@ -51,10 +51,6 @@ var (
 	// [Directive] resolves a relative schema path against the directory of
 	// that file path.
 	ErrNoFilePath = errors.New("document has no file path")
-
-	// The schema that a "$schema=none" directive names. It passes every
-	// document without decoding it, so the directive turns validation off.
-	noneSchema = &Schema{acceptAll: true}
 )
 
 // ParsedDirective is a yaml-language-server schema directive read from a
@@ -201,8 +197,9 @@ func (s *directiveSite) locate(doc *niceyaml.Node, err error) error {
 //
 // A directive of "$schema=none", in any letter case, turns validation off
 // for the document, as it does in yaml-language-server. Resolve names a
-// schema that passes every document without decoding it. The lookup thus
-// ends at the directive, and the document does not need a file path.
+// schema that passes every document without decoding it, as [AcceptAll]
+// does. The lookup thus ends at the directive, and the document does not
+// need a file path.
 //
 // The preamble holds the comments above the "---" header of the document
 // and those below it. A directive in either place names the schema of
@@ -263,7 +260,7 @@ func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Node) (Ref, er
 	// Only the bare token turns validation off, as in yaml-language-server;
 	// "./none" and "none.json" still name files.
 	if strings.EqualFold(directive.Schema, "none") {
-		return noneSchema.Ref(), nil
+		return acceptAllSchema.Ref(), nil
 	}
 
 	// Like yaml-language-server, read a '#' after the first character of a
