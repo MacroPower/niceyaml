@@ -1247,6 +1247,43 @@ func (s *Source) Offset(pos position.Position) (int, bool) {
 	return s.offsets.get(func() bom.Index { return bom.NewIndex(s.input) }).Offset(pos.Line, pos.Col)
 }
 
+// PositionAt returns the position in the coordinates of [Source.Lines] of
+// the rune that holds the byte at off in [Source.Text], and true. It is
+// the inverse of [Source.Offset], and it counts as Offset counts. A
+// column counts runes. A line ending takes one column whether it is LF,
+// CRLF, or a bare CR, and so does a byte that is not valid UTF-8. Each
+// byte of a multi-byte rune thus has the position of that rune,
+// and each byte of a line ending has the column after the content of its
+// line. A byte of a byte order mark that [tokens.Tokenize] dropped has
+// column 0 of its line, because the mark lies before that column.
+//
+// The length of the text is a valid offset, as the End of a range at the
+// end of the text is. It has the column past the last rune, or column 0
+// of the line after a final line ending. A program with a byte offset
+// from a regexp over Source.Text finds the path of the value there:
+//
+//	pos, ok := source.PositionAt(match[0])
+//	if ok {
+//		path, _ := doc.PathAt(pos)
+//	}
+//
+// PositionAt reports false for a negative off and for one past the length
+// of the text. It also reports false for a Source that
+// [NewSourceFromTokens] built and for a nil Source, because neither holds
+// any text.
+func (s *Source) PositionAt(off int) (position.Position, bool) {
+	if s == nil || !s.hasInput {
+		return position.Position{}, false
+	}
+
+	ln, col, ok := s.offsets.get(func() bom.Index { return bom.NewIndex(s.input) }).Position(off)
+	if !ok {
+		return position.Position{}, false
+	}
+
+	return position.New(ln, col), true
+}
+
 // Tokens returns the full [token.Tokens] stream of the [Source], the
 // tokens that its lines hold, in order, as [line.Lines.Tokens] rebuilds
 // them. Each call returns a new slice that holds the same tokens. See

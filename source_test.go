@@ -7837,3 +7837,201 @@ func TestSource_WithoutLimits(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[string]any{"a": map[string]any{"b": map[string]any{"c": uint64(123456)}}}, got)
 }
+
+func TestSource_PositionAt(t *testing.T) {
+	t.Parallel()
+
+	// Two lines, each of which ends in a line break.
+	lf := stringtest.LinesLF("a: 1", "b: 2")
+	crlf := stringtest.LinesCRLF("a: 1", "b: 2")
+
+	tcs := map[string]struct {
+		input string
+		off   int
+		want  position.Position
+		ok    bool
+	}{
+		"start of the text": {
+			input: lf,
+			ok:    true,
+		},
+		"byte of a later line": {
+			input: lf,
+			off:   8,
+			want:  position.New(1, 3),
+			ok:    true,
+		},
+		"first byte of a rune of several bytes": {
+			input: "é: 日本\n",
+			off:   7,
+			want:  position.New(0, 4),
+			ok:    true,
+		},
+		"later byte of a rune of several bytes": {
+			input: "é: 日本\n",
+			off:   8,
+			want:  position.New(0, 4),
+			ok:    true,
+		},
+		"LF has the column after the content": {
+			input: lf,
+			off:   4,
+			want:  position.New(0, 4),
+			ok:    true,
+		},
+		"byte past a LF is on the next line": {
+			input: lf,
+			off:   5,
+			want:  position.New(1, 0),
+			ok:    true,
+		},
+		"CR of a CRLF has the column after the content": {
+			input: crlf,
+			off:   4,
+			want:  position.New(0, 4),
+			ok:    true,
+		},
+		"LF of a CRLF has the same column": {
+			input: crlf,
+			off:   5,
+			want:  position.New(0, 4),
+			ok:    true,
+		},
+		"byte past a CRLF is on the next line": {
+			input: crlf,
+			off:   6,
+			want:  position.New(1, 0),
+			ok:    true,
+		},
+		"bare CR ends a line": {
+			input: "a: 1\rb: 2",
+			off:   5,
+			want:  position.New(1, 0),
+			ok:    true,
+		},
+		"length of a text with a final line ending": {
+			input: lf,
+			off:   10,
+			want:  position.New(2, 0),
+			ok:    true,
+		},
+		"length of a text without a final line ending": {
+			input: "a: 1",
+			off:   4,
+			want:  position.New(0, 4),
+			ok:    true,
+		},
+		"empty text": {
+			input: "",
+			ok:    true,
+		},
+		"byte of a dropped mark": {
+			input: "\ufeffa: 1\n",
+			off:   1,
+			ok:    true,
+		},
+		"byte after a dropped mark": {
+			input: "\ufeffa: 1\n",
+			off:   4,
+			want:  position.New(0, 1),
+			ok:    true,
+		},
+		"byte that is not UTF-8 takes one column": {
+			input: "a: \xffb\n",
+			off:   4,
+			want:  position.New(0, 4),
+			ok:    true,
+		},
+		"negative offset": {
+			input: lf,
+			off:   -1,
+		},
+		"offset past the text": {
+			input: lf,
+			off:   11,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			got, ok := source.PositionAt(tc.off)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("nil Source", func(t *testing.T) {
+		t.Parallel()
+
+		var source *niceyaml.Source
+
+		got, ok := source.PositionAt(0)
+		assert.False(t, ok)
+		assert.Equal(t, position.Position{}, got)
+	})
+
+	t.Run("Source of tokens", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromTokens(lexer.Tokenize("a: 1\n"))
+
+		got, ok := source.PositionAt(0)
+		assert.False(t, ok)
+		assert.Equal(t, position.Position{}, got)
+	})
+}
+
+func TestSource_PositionAt_Offset(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]string{
+		"LF":           stringtest.LinesLF("a: 1", "b: é", "c: 日本"),
+		"CRLF":         stringtest.LinesCRLF("a: 1", "b: é", "c: 日本"),
+		"bare CR":      "a: 1\rb: é\rc: 日本\r",
+		"no final LF":  "a: 1\nb: 日本",
+		"mark":         "\ufeffa: 1\n\ufeff---\nb: 2\n",
+		"invalid byte": "a: \xff\nb: 2\n",
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(input)
+			text := source.Text()
+
+			var count int
+
+			// Each rune of the lines comes back from its offset, and from
+			// each later byte of the rune.
+			for pos := range source.Lines().Runes() {
+				off, ok := source.Offset(pos)
+				require.True(t, ok, "position %s", pos)
+
+				_, size := utf8.DecodeRuneInString(text[off:])
+				for i := range size {
+					got, ok := source.PositionAt(off + i)
+					require.True(t, ok, "offset %d", off+i)
+					assert.Equal(t, pos, got, "offset %d", off+i)
+				}
+
+				count++
+			}
+
+			assert.Positive(t, count)
+
+			// The length of the text comes back as the position past the
+			// last rune, and that position gives the length back.
+			end, ok := source.PositionAt(len(text))
+			require.True(t, ok)
+
+			off, ok := source.Offset(end)
+			require.True(t, ok)
+			assert.Equal(t, len(text), off)
+		})
+	}
+}

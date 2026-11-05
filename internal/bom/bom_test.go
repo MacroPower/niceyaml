@@ -132,3 +132,54 @@ func TestIndex_Offset(t *testing.T) {
 		})
 	}
 }
+
+func TestIndex_Position(t *testing.T) {
+	t.Parallel()
+
+	twoLines := stringtest.LinesLF("a: 1", "b: 2")
+
+	tcs := map[string]struct {
+		src       string
+		off       int
+		line, col int
+		ok        bool
+	}{
+		"the start":                    {src: twoLines, ok: true},
+		"a later line":                 {src: twoLines, off: 5, line: 1, ok: true},
+		"the line ending":              {src: twoLines, off: 4, col: 4, ok: true},
+		"the length of the text":       {src: twoLines, off: 10, line: 2, ok: true},
+		"past the text":                {src: twoLines, off: 11},
+		"a negative offset":            {src: twoLines, off: -1},
+		"the end of a text without LF": {src: "a: 1", off: 4, col: 4, ok: true},
+		"the empty text":               {src: "", ok: true},
+		"a mark before the text":       {src: bom.Mark + "a: 1\n", off: 3, ok: true},
+		"a byte of a mark":             {src: bom.Mark + "a: 1\n", off: 1, ok: true},
+		"after a mark":                 {src: bom.Mark + "a: 1\n", off: 4, col: 1, ok: true},
+		"a mark alone":                 {src: bom.Mark, off: 3, ok: true},
+		"a later mark": {
+			src:  "a: 1\n" + bom.Mark + "---\nb: 2\n",
+			off:  9,
+			line: 1,
+			col:  1,
+			ok:   true,
+		},
+		"a carriage return":               {src: "a\r\nb", off: 1, col: 1, ok: true},
+		"a feed after a carriage return":  {src: "a\r\nb", off: 2, col: 1, ok: true},
+		"past a carriage return and feed": {src: "a\r\nb", off: 3, line: 1, ok: true},
+		"a bare carriage return":          {src: "a\rb", off: 2, line: 1, ok: true},
+		"a rune of several bytes":         {src: "é: 日本\n", off: 7, col: 4, ok: true},
+		"a byte inside a rune":            {src: "é: 日本\n", off: 5, col: 3, ok: true},
+		"a byte that is not UTF-8":        {src: "a\xffb\n", off: 2, col: 2, ok: true},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			line, col, ok := bom.NewIndex(tc.src).Position(tc.off)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.line, line, "line")
+			assert.Equal(t, tc.col, col, "col")
+		})
+	}
+}

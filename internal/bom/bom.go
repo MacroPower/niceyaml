@@ -179,3 +179,63 @@ func (x Index) Offset(line, col int) (int, bool) {
 func trimLineEnding(s string) string {
 	return strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r")
 }
+
+// Position returns the line and the column of the rune that holds the
+// byte at off in the text before the drop, both 0-indexed, and true. A
+// column counts runes as [Index.Offset] counts them, so each byte of a
+// multi-byte rune has the column of that rune, and each byte of a line
+// ending has the column after the content of its line. A byte of a mark
+// that the tokenizer dropped has column 0 of its line. The length of the
+// text has the column past the last rune, or column 0 of the empty last
+// line of a text that ends with a line ending.
+//
+// Position reports false for a negative off and for one past the length
+// of the text.
+func (x Index) Position(off int) (int, int, bool) {
+	if off < 0 {
+		return 0, 0, false
+	}
+
+	// Each mark the tokenizer dropped takes len(Mark) bytes of the text
+	// before the drop, so the offset in the text after the drop lies that
+	// many bytes earlier for each mark before off.
+	at := off
+
+	for i, mark := range x.marks {
+		start := mark + i*len(Mark)
+
+		switch {
+		case off >= start+len(Mark):
+			at -= len(Mark)
+		case off >= start:
+			at = mark
+		}
+	}
+
+	if at > len(x.text) {
+		return 0, 0, false
+	}
+
+	line, _ := slices.BinarySearch(x.starts, at+1)
+	line--
+
+	start, end := x.starts[line], len(x.text)
+	if line+1 < len(x.starts) {
+		end = x.starts[line+1]
+	}
+
+	content := trimLineEnding(x.text[start:end])
+	rel := at - start
+	col := 0
+
+	for n := 0; n < len(content); col++ {
+		_, size := utf8.DecodeRuneInString(content[n:])
+		if n+size > rel {
+			break
+		}
+
+		n += size
+	}
+
+	return line, col, true
+}

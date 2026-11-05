@@ -7,7 +7,6 @@ import (
 	"unicode/utf8"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/bom"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -36,16 +35,14 @@ func checkEncoding(src *niceyaml.Source) error {
 		return src.Bind(newProblem(ErrEncoding, noun+" is "+enc+", not UTF-8", niceyaml.WithDetails(fix)))
 	}
 
-	body := strings.TrimPrefix(text, bom.Mark)
-
-	off := invalidByte(body)
+	off := invalidByte(text)
 	if off < 0 {
 		return nil
 	}
 
-	at := positionAt(body, off)
+	at, _ := src.PositionAt(off)
 
-	return src.Bind(newProblem(ErrEncoding, fmt.Sprintf("byte 0x%02x is not UTF-8", body[off]),
+	return src.Bind(newProblem(ErrEncoding, fmt.Sprintf("byte 0x%02x is not UTF-8", text[off]),
 		niceyaml.AtRange(position.NewRange(at, position.New(at.Line, at.Col+1))),
 		niceyaml.WithDetails(fix)))
 }
@@ -89,14 +86,4 @@ func invalidByte(text string) int {
 	}
 
 	return -1
-}
-
-// positionAt returns the position of the byte at off in text, with the
-// column counted in runes, as a [position.Position] counts it.
-func positionAt(text string, off int) position.Position {
-	before := text[:off]
-	line := strings.Count(before, "\n")
-	start := strings.LastIndexByte(before, '\n') + 1
-
-	return position.New(line, utf8.RuneCountInString(before[start:]))
 }

@@ -47,9 +47,10 @@
 // location.
 //
 // The Source keeps the text it read. [Source.Text] returns that text byte for
-// byte, and [Source.Offset] converts a position in its lines to a byte offset
-// in the text. A program that replaces a scalar on one line can splice the
-// text at those offsets. The [go.jacobcolvin.com/niceyaml/edit] package
+// byte, [Source.Offset] converts a position in its lines to a byte offset in
+// the text, and [Source.PositionAt] converts a byte offset back. A program
+// that replaces a scalar on one line can splice the text at those offsets.
+// The [go.jacobcolvin.com/niceyaml/edit] package
 // renames keys and sets, moves, and removes values, and it keeps every byte
 // that an edit does not change.
 //
