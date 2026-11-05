@@ -11,13 +11,18 @@ import (
 )
 
 // pathComments holds the comments for the node that a YAML path selects.
+// Its key holds the path as the caller wrote it in the comment map. An
+// error names the entry by its key, because [yaml.Path.String] can spell
+// the same path another way, such as "$.a" for "$.'a'".
 type pathComments struct {
 	path     *yaml.Path
+	key      string
 	comments []*yaml.Comment
 }
 
 // parseComments parses each key of cm as a YAML path and returns the
-// entries of cm in the order of their keys.
+// entries of cm in the order of their keys. A key that is not a path
+// returns an error that matches [ErrComment].
 func parseComments(cm yaml.CommentMap) ([]pathComments, error) {
 	if len(cm) == 0 {
 		return nil, nil
@@ -28,10 +33,10 @@ func parseComments(cm yaml.CommentMap) ([]pathComments, error) {
 	for _, key := range slices.Sorted(maps.Keys(cm)) {
 		path, err := parsePath(key)
 		if err != nil {
-			return nil, err
+			return nil, commentError(key, err)
 		}
 
-		entries = append(entries, pathComments{path: path, comments: cm[key]})
+		entries = append(entries, pathComments{path: path, key: key, comments: cm[key]})
 	}
 
 	return entries, nil
@@ -57,15 +62,23 @@ func parsePath(key string) (_ *yaml.Path, err error) {
 	return yaml.PathString(key) //nolint:wrapcheck // Return the original error.
 }
 
+// commentError returns err, the problem with the comments under key, as an
+// error that matches [ErrComment] and names the key.
+func commentError(key string, err error) error {
+	return fmt.Errorf("%w: %q: %w", ErrComment, key, err)
+}
+
 // setComments puts the comments of each entry on the node its path selects
 // in the tree under root. It skips an entry whose path does not select a
 // node. It places every comment where the go-yaml encoder places it for a
-// [yaml.WithComment] map, and it returns the errors that encoder returns.
+// [yaml.WithComment] map. A path that does not fit the tree and a comment
+// that its node cannot hold return an error that matches [ErrComment] and
+// wraps the error that encoder returns.
 func setComments(root ast.Node, entries []pathComments) error {
 	for _, entry := range entries {
 		target, err := entry.path.FilterNode(root)
 		if err != nil {
-			return err //nolint:wrapcheck // Return the original error.
+			return commentError(entry.key, err)
 		}
 
 		if target == nil {
@@ -92,7 +105,7 @@ func setComments(root ast.Node, entries []pathComments) error {
 			}
 
 			if err != nil {
-				return err
+				return commentError(entry.key, err)
 			}
 		}
 	}

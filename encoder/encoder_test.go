@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
@@ -546,6 +548,7 @@ func TestEncoder_Encode_noNode(t *testing.T) {
 
 			err := enc.Encode(t.Context(), tc.input)
 			require.ErrorIs(t, err, encoder.ErrNoNode)
+			require.ErrorIs(t, err, encoder.ErrEncode, "ErrNoNode labels an ErrEncode error")
 			assert.Empty(t, buf.String())
 
 			require.NoError(t, enc.Encode(t.Context(), "next"))
@@ -590,7 +593,17 @@ func TestEncoder_Encode_writes(t *testing.T) {
 // failWriter refuses every write with errWrite.
 type failWriter struct{}
 
-var errWrite = errors.New("disk full")
+var (
+	// The error that failWriter refuses each write with.
+	errWrite = errors.New("disk full")
+	// The error that failingMarshaler returns.
+	errMarshal = errors.New("the marshaler fails")
+	// The error that TestPanicError gives a PanicError.
+	errPanic = errors.New("the marshaler panics")
+	// Every sentinel of the encoder package, so a test can check that an
+	// error matches no other sentinel than its own.
+	sentinels = []error{encoder.ErrEncode, encoder.ErrNoNode, encoder.ErrComment, encoder.ErrWrite}
+)
 
 func (failWriter) Write([]byte) (int, error) {
 	return 0, errWrite
@@ -614,12 +627,16 @@ func TestEncoder_Encode_writeError(t *testing.T) {
 
 	err := enc.Encode(t.Context(), map[string]int{"a": 1})
 	require.ErrorIs(t, err, errWrite)
+	requireOnly(t, err, encoder.ErrWrite)
+	require.EqualError(t, err, "writer refused the document: disk full")
 
 	err = enc.Encode(t.Context(), map[string]int{"b": 2})
 	require.ErrorIs(t, err, errWrite, "a later Encode reports the same error")
+	requireOnly(t, err, encoder.ErrWrite)
 
 	err = enc.Encode(t.Context(), make(chan int))
 	require.ErrorIs(t, err, errWrite, "a value go-yaml cannot encode reports the write error")
+	requireOnly(t, err, encoder.ErrWrite)
 
 	calls := 0
 	err = enc.Encode(t.Context(), countingMarshaler{calls: &calls})
@@ -753,76 +770,152 @@ func TestMarshal(t *testing.T) {
 	}
 }
 
+// failingMarshaler returns errMarshal from its MarshalYAML method.
+type failingMarshaler struct{}
+
+func (failingMarshaler) MarshalYAML() (any, error) {
+	return nil, errMarshal
+}
+
+// requireOnly checks that err matches each sentinel in errs and no other
+// sentinel of the encoder package.
+func requireOnly(t *testing.T, err error, errs ...error) {
+	t.Helper()
+
+	for _, sentinel := range sentinels {
+		if slices.Contains(errs, sentinel) {
+			require.ErrorIs(t, err, sentinel)
+		} else {
+			require.NotErrorIs(t, err, sentinel)
+		}
+	}
+}
+
 // TestEncoder_Encode_errors checks that Encode writes nothing and Marshal
-// returns nil bytes for a value or an option that does not encode.
+// returns nil bytes for a value or an option that does not encode. The
+// error matches its sentinels and keeps the cause in its chain.
 func TestEncoder_Encode_errors(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
 		input    any
-		err      error
 		comments yaml.CommentMap
-		// Holds the message of an error that has no sentinel.
+		// Holds the message of the error.
 		msg  string
 		opts []encoder.Option
+		// Holds the sentinels of the encoder package that the error
+		// matches.
+		errs []error
+		// Holds the error of go-yaml or of the marshaler that stays in
+		// the chain.
+		wraps error
 	}{
 		"value that encodes to no node": {
 			input: emptyMarshaler{},
-			err:   encoder.ErrNoNode,
+			errs:  []error{encoder.ErrEncode, encoder.ErrNoNode},
+			msg:   "value encodes to no YAML node",
 		},
 		"value go-yaml cannot encode": {
 			input: make(chan int),
-			msg:   "unknown value type chan int",
+			errs:  []error{encoder.ErrEncode},
+			msg:   "value does not encode: unknown value type chan int",
 		},
-		"negative indent": {
-			input: map[string]map[string]int{"a": {"b": 1}},
-			opts:  []encoder.Option{encoder.WithYAMLOptions(yaml.Indent(-2))},
-			msg:   "print YAML: strings: negative Repeat count",
+		"marshaler that returns an error": {
+			input: failingMarshaler{},
+			errs:  []error{encoder.ErrEncode},
+			wraps: errMarshal,
+			msg:   "value does not encode: the marshaler fails",
+		},
+		"marshaler that returns an error as a map value": {
+			input: map[string]any{"k": failingMarshaler{}},
+			errs:  []error{encoder.ErrEncode},
+			wraps: errMarshal,
+			msg:   "value does not encode: the marshaler fails",
 		},
 		"comment key that is not a path": {
 			input:    map[string]int{"a": 1},
 			comments: yaml.CommentMap{"a": {yaml.LineComment(" x")}},
-			err:      yaml.ErrInvalidPathString,
+			errs:     []error{encoder.ErrComment},
+			wraps:    yaml.ErrInvalidPathString,
+			msg:      `comment does not apply: "a": invalid path at 0: invalid path string`,
 		},
 		"empty comment key": {
 			input:    map[string]int{"a": 1},
 			comments: yaml.CommentMap{"": {yaml.LineComment(" x")}},
-			err:      yaml.ErrInvalidPathString,
+			errs:     []error{encoder.ErrComment},
+			wraps:    yaml.ErrInvalidPathString,
+			msg:      `comment does not apply: "": required '$' character at first: invalid path string`,
 		},
 		"comment key that ends in an index number": {
 			input:    []int{1},
 			comments: yaml.CommentMap{"$[0": {yaml.LineComment(" x")}},
-			err:      yaml.ErrInvalidPathString,
+			errs:     []error{encoder.ErrComment},
+			wraps:    yaml.ErrInvalidPathString,
+			msg:      `comment does not apply: "$[0": unexpected end of YAML Path: invalid path string`,
 		},
 		"comment key that ends in an index number under a key": {
 			input:    map[string][]int{"a": {1, 2}},
 			comments: yaml.CommentMap{"$.a[1": {yaml.LineComment(" x")}},
-			err:      yaml.ErrInvalidPathString,
+			errs:     []error{encoder.ErrComment},
+			wraps:    yaml.ErrInvalidPathString,
 		},
 		"comment key that ends in an index wildcard": {
 			input:    []int{1},
 			comments: yaml.CommentMap{"$[*": {yaml.LineComment(" x")}},
-			err:      yaml.ErrInvalidPathString,
+			errs:     []error{encoder.ErrComment},
+			wraps:    yaml.ErrInvalidPathString,
 		},
 		"comment path that does not fit the document": {
 			input:    map[string]int{"a": 1},
 			comments: yaml.CommentMap{"$.a[0]": {yaml.LineComment(" x")}},
-			err:      yaml.ErrInvalidQuery,
+			errs:     []error{encoder.ErrComment},
+			wraps:    yaml.ErrInvalidQuery,
+			msg:      `comment does not apply: "$.a[0]": expected sequence type node. but got Integer: invalid query`,
+		},
+		"comment path with a quoted key that does not fit the document": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$.'a'[00]": {yaml.LineComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			wraps:    yaml.ErrInvalidQuery,
+			msg:      `comment does not apply: "$.'a'[00]": expected sequence type node. but got Integer: invalid query`,
 		},
 		"unknown comment position": {
 			input:    map[string]int{"a": 1},
 			comments: yaml.CommentMap{"$.a": {{Texts: []string{" x"}, Position: 99}}},
-			err:      yaml.ErrUnknownCommentPositionType,
+			errs:     []error{encoder.ErrComment},
+			wraps:    yaml.ErrUnknownCommentPositionType,
+			msg:      `comment does not apply: "$.a": unknown comment position type`,
+		},
+		"unknown comment position under a quoted key": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$.'a'": {{Texts: []string{" x"}, Position: 99}}},
+			errs:     []error{encoder.ErrComment},
+			wraps:    yaml.ErrUnknownCommentPositionType,
+			msg:      `comment does not apply: "$.'a'": unknown comment position type`,
 		},
 		"head comment on a root scalar": {
 			input:    "x",
 			comments: yaml.CommentMap{"$": {yaml.HeadComment(" x")}},
-			msg:      "unsupported comment head position for String",
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$": unsupported comment head position for String`,
 		},
 		"head comment on an empty root sequence": {
 			input:    []string{},
 			comments: yaml.CommentMap{"$": {yaml.HeadComment(" x")}},
-			msg:      "unsupported comment head position for Sequence",
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$": unsupported comment head position for Sequence`,
+		},
+		"line comment on a root sequence": {
+			input:    []string{"x"},
+			comments: yaml.CommentMap{"$": {yaml.LineComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$": unsupported comment line position for Sequence`,
+		},
+		"foot comment on a root scalar": {
+			input:    "x",
+			comments: yaml.CommentMap{"$": {yaml.FootComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$": unsupported comment foot position for String`,
 		},
 	}
 
@@ -832,9 +925,13 @@ func TestEncoder_Encode_errors(t *testing.T) {
 
 			opts := slices.Concat(tc.opts, []encoder.Option{encoder.WithYAMLComments(tc.comments)})
 			check := func(err error) {
-				if tc.err != nil {
-					require.ErrorIs(t, err, tc.err)
-				} else {
+				requireOnly(t, err, tc.errs...)
+
+				if tc.wraps != nil {
+					require.ErrorIs(t, err, tc.wraps)
+				}
+
+				if tc.msg != "" {
 					require.EqualError(t, err, tc.msg)
 				}
 			}
@@ -847,6 +944,162 @@ func TestEncoder_Encode_errors(t *testing.T) {
 			got, err := encoder.Marshal(t.Context(), tc.input, opts...)
 			check(err)
 			assert.Nil(t, got)
+		})
+	}
+}
+
+// ctxMarshaler returns the error of its context from its MarshalYAML
+// method, or "x" when the context has not ended.
+type ctxMarshaler struct{}
+
+func (ctxMarshaler) MarshalYAML(ctx context.Context) (any, error) {
+	err := ctx.Err()
+	if err != nil {
+		return nil, fmt.Errorf("marshal: %w", err)
+	}
+
+	return "x", nil
+}
+
+func TestEncoder_Encode_contextEnded(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		ctx  func(t *testing.T) context.Context
+		want error
+	}{
+		"canceled": {
+			ctx: func(t *testing.T) context.Context {
+				t.Helper()
+
+				ctx, cancel := context.WithCancel(t.Context())
+				cancel()
+
+				return ctx
+			},
+			want: context.Canceled,
+		},
+		"deadline exceeded": {
+			ctx: func(t *testing.T) context.Context {
+				t.Helper()
+
+				ctx, cancel := context.WithDeadline(t.Context(), time.Unix(0, 0))
+				t.Cleanup(cancel)
+
+				return ctx
+			},
+			want: context.DeadlineExceeded,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+
+			err := encoder.New(&buf).Encode(tc.ctx(t), map[string]any{"k": ctxMarshaler{}})
+			require.ErrorIs(t, err, tc.want)
+			requireOnly(t, err)
+			assert.Empty(t, buf.String())
+
+			got, err := encoder.Marshal(tc.ctx(t), ctxMarshaler{})
+			require.ErrorIs(t, err, tc.want)
+			requireOnly(t, err)
+			assert.Nil(t, got)
+		})
+	}
+}
+
+// timeoutMarshaler returns the error of a context of its own from its
+// MarshalYAML method, as a marshaler that fetches its value with a
+// timeout does.
+type timeoutMarshaler struct{}
+
+func (timeoutMarshaler) MarshalYAML(context.Context) (any, error) {
+	return nil, fmt.Errorf("fetch: %w", context.DeadlineExceeded)
+}
+
+func TestEncoder_Encode_marshalerContextError(t *testing.T) {
+	t.Parallel()
+
+	// The context of the call lives, so the value is at fault.
+	var buf bytes.Buffer
+
+	err := encoder.New(&buf).Encode(t.Context(), map[string]any{"k": timeoutMarshaler{}})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	requireOnly(t, err, encoder.ErrEncode)
+	assert.Empty(t, buf.String())
+
+	got, err := encoder.Marshal(t.Context(), timeoutMarshaler{})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	requireOnly(t, err, encoder.ErrEncode)
+	assert.Nil(t, got)
+}
+
+func TestEncoder_Encode_printPanic(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	opts := []encoder.Option{encoder.WithYAMLOptions(yaml.Indent(-2))}
+	input := map[string]map[string]int{"a": {"b": 1}}
+
+	err := encoder.New(&buf, opts...).Encode(t.Context(), input)
+	require.EqualError(t, err, "printer panicked: strings: negative Repeat count")
+	requireOnly(t, err)
+	assert.Empty(t, buf.String())
+
+	p, ok := errors.AsType[*encoder.PanicError](err)
+	require.True(t, ok, "the error is a *PanicError")
+	assert.Equal(t, "strings: negative Repeat count", p.Value)
+	assert.Contains(t, string(p.Stack), "goroutine", "Stack holds the stack of the panic")
+
+	got, err := encoder.Marshal(t.Context(), input, opts...)
+	require.EqualError(t, err, "printer panicked: strings: negative Repeat count")
+	assert.Nil(t, got)
+}
+
+func TestPanicError(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		value any
+		msg   string
+		// Holds the error that Unwrap returns.
+		unwrap error
+	}{
+		"string": {
+			value: "boom",
+			msg:   "printer panicked: boom",
+		},
+		"error": {
+			value:  errPanic,
+			msg:    "printer panicked: the marshaler panics",
+			unwrap: errPanic,
+		},
+		"nil": {
+			value: nil,
+			msg:   "printer panicked: <nil>",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := &encoder.PanicError{Value: tc.value}
+			require.EqualError(t, err, tc.msg)
+			require.Equal(
+				t,
+				tc.unwrap,
+				err.Unwrap(),
+			) //nolint:testifylint // Unwrap returns a value to compare, not a result to check.
+			requireOnly(t, err)
+
+			if tc.unwrap != nil {
+				require.ErrorIs(t, err, tc.unwrap)
+			}
 		})
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"runtime/debug"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -14,11 +15,99 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 )
 
-// ErrNoNode indicates a value that go-yaml does not encode to a YAML node.
-// Such values include a marshaler that does not return a YAML document and
-// an AST node that holds only comments. [Encoder.Encode] and [Marshal]
-// return it.
-var ErrNoNode = errors.New("value encodes to no YAML node")
+var (
+	// ErrEncode indicates a value that does not encode to YAML.
+	// [Encoder.Encode] and [Marshal] return it. These errors match:
+	//
+	//   - A value of a type that go-yaml does not encode, such as a channel
+	//     or a function.
+	//   - The error that a value's own MarshalYAML or MarshalText method
+	//     returns. That error stays in the chain.
+	//   - A value that encodes to no YAML node, which [ErrNoNode] labels.
+	//
+	// The error of the context of the call does not match after that
+	// context ended, even when a marshaler returns it. A context error
+	// that a marshaler returns while that context lives matches. A
+	// [*PanicError], an [ErrComment] error, and an [ErrWrite] error do
+	// not match.
+	ErrEncode = errors.New("value does not encode")
+
+	// ErrNoNode is a label on an [ErrEncode] error for a value that go-yaml
+	// does not encode to a YAML node. Such values include a marshaler that
+	// does not return a YAML document and an AST node that holds only
+	// comments. An error that matches ErrNoNode matches ErrEncode too.
+	ErrNoNode = errors.New("value encodes to no YAML node")
+
+	// ErrComment indicates a comment from [WithYAMLComments] that the
+	// encoder cannot place in the document. [Encoder.Encode] and [Marshal]
+	// return it for a key that is not a YAML path and for a path that does
+	// not fit the document. They return it for a node that cannot hold a
+	// comment in the position it got. The error of go-yaml stays in the
+	// chain, so [yaml.ErrInvalidPathString] and [yaml.ErrInvalidQuery]
+	// match where they match the error of [yaml.WithComment].
+	ErrComment = errors.New("comment does not apply")
+
+	// ErrWrite indicates a write that the writer of an [Encoder] refused.
+	// The error of the writer stays in the chain. [Encoder.Encode] returns
+	// it for the refused write and for every call after it.
+	ErrWrite = errors.New("writer refused the document")
+)
+
+// PanicError is the error of a panic that the go-yaml printer raised while
+// it laid out a node, such as one with a negative [yaml.Indent] from
+// [WithYAMLOptions]. Value holds the value the code passed to panic, and
+// Stack holds the stack of the goroutine at the panic, as [debug.Stack]
+// formats it. The message leaves the stack out.
+//
+// A panic is a bug in code, not a problem with the value, so the error
+// matches no sentinel of this package:
+//
+//	if p, ok := errors.AsType[*encoder.PanicError](err); ok {
+//		slog.Error("printer panicked", "value", p.Value, "stack", string(p.Stack))
+//	}
+type PanicError struct {
+	// Value is the value the code passed to panic.
+	Value any
+	// Stack is the stack of the goroutine at the panic.
+	Stack []byte
+}
+
+// Error returns the value of the panic behind "printer panicked: ",
+// formatted as the %v verb of [fmt.Sprintf] formats it.
+func (e *PanicError) Error() string {
+	return fmt.Sprintf("printer panicked: %v", e.Value)
+}
+
+// Unwrap returns Value when it is an error, and nil for any other value.
+// [errors.Is] and [errors.As] thus reach an error the code panicked with.
+func (e *PanicError) Unwrap() error {
+	if err, ok := e.Value.(error); ok {
+		return err
+	}
+
+	return nil
+}
+
+// labeled is an error that matches [ErrEncode] beside the label it holds,
+// such as [ErrNoNode]. Its message is the message of the label.
+type labeled struct {
+	label error
+}
+
+// Error returns the message of the label.
+func (e *labeled) Error() string {
+	return e.label.Error()
+}
+
+// Unwrap returns the label.
+func (e *labeled) Unwrap() error {
+	return e.label
+}
+
+// Is reports whether target is [ErrEncode].
+func (e *labeled) Is(target error) bool {
+	return target == ErrEncode
+}
 
 // Pretty is an [Option] that makes the encoder write the layout that
 // prettier writes. That layout indents by two spaces and indents each
@@ -105,17 +194,18 @@ func WithIndentSequence(indent bool) Option {
 // does not add a comment to it. The last WithYAMLComments option replaces
 // the earlier ones.
 //
-// [Encoder.Encode] returns an error and does not write the document when
-// any of these holds:
+// [Encoder.Encode] returns an error that matches [ErrComment] and does
+// not write the document when any of these holds:
 //
 //   - A key is not a YAML path.
 //   - A path does not fit the document, such as a path that indexes a
 //     mapping.
 //   - The selected node cannot hold a comment in that position.
 //
-// The paths, the placement of each comment, and the errors are those of
-// [yaml.WithComment]. As with that option, a line comment on a string that
-// go-yaml writes as a literal block does not reach the output.
+// The paths and the placement of each comment are those of
+// [yaml.WithComment], and the error of go-yaml stays in the chain. As with
+// that option, a line comment on a string that go-yaml writes as a literal
+// block does not reach the output.
 func WithYAMLComments(cm yaml.CommentMap) Option {
 	return func(c *config) {
 		c.comments = cm
@@ -162,11 +252,11 @@ func New(w io.Writer, opts ...Option) *Encoder {
 // Encode returns. Each document defines its own anchors, so a later
 // document never aliases an anchor from an earlier one.
 //
-// When the writer refuses a write, Encode returns an error, and every
-// later call returns that same error without encoding v. The encoder
-// passes ctx to every marshaler that accepts one, such as a
-// [yaml.InterfaceMarshalerContext] or a marshaler registered with
-// [yaml.RegisterCustomMarshalerContext].
+// When the writer refuses a write, Encode returns an error that matches
+// [ErrWrite], and every later call returns that same error without
+// encoding v. The encoder passes ctx to every marshaler that accepts one,
+// such as a [yaml.InterfaceMarshalerContext] or a marshaler registered
+// with [yaml.RegisterCustomMarshalerContext].
 //
 // Encode double-quotes each string that go-yaml otherwise writes unquoted
 // or as a literal block in a form that reads back as a different value or
@@ -192,11 +282,19 @@ func New(w io.Writer, opts ...Option) *Encoder {
 // Encode leaves the collection and the strings in it as go-yaml writes
 // them.
 //
-// Encode returns [ErrNoNode] when v, an entry of a sequence in v, or the
-// value of a map key in v does not encode to a YAML node. Encode also
-// returns an error when go-yaml cannot print the node, such as with a
-// negative [yaml.Indent] from [WithYAMLOptions]. In both cases, Encode
-// does not write to the writer.
+// Encode returns an error that matches [ErrEncode] when v does not encode
+// to YAML. A value of a type go-yaml does not encode and a marshaler that
+// returns an error are such values. The error matches [ErrNoNode] too
+// when a value in v does not encode to a YAML node. That value is v
+// itself, an entry of a sequence in v, or the value of a map key in v.
+// After ctx ended, Encode returns its error as it is. A marshaler can
+// return a context error of its own while ctx lives, and that error
+// matches ErrEncode. Encode returns a
+// [*PanicError] when go-yaml cannot print the node, such as with a
+// negative [yaml.Indent] from [WithYAMLOptions]. A comment from
+// [WithYAMLComments] that the encoder cannot place returns an error that
+// matches [ErrComment]. In every case but a refused write, Encode does
+// not write to the writer.
 func (e *Encoder) Encode(ctx context.Context, v any) error {
 	_, err := e.encode(ctx, v)
 
@@ -225,7 +323,13 @@ func (e *Encoder) encode(ctx context.Context, v any) (ast.Node, error) {
 	// that failed, so each call marshals with a fresh one.
 	node, err := yaml.NewEncoder(io.Discard, e.opts...).EncodeToNodeContext(ctx, v)
 	if err != nil {
-		return nil, err //nolint:wrapcheck // Return the original error.
+		// The value is not at fault when its context ended, so that error
+		// comes back as it is.
+		if contextEnded(ctx, err) {
+			return nil, err //nolint:wrapcheck // Return the original error.
+		}
+
+		return nil, fmt.Errorf("%w: %w", ErrEncode, err)
 	}
 
 	// The go-yaml encoder leaves a nil node where a value encodes to no
@@ -236,7 +340,7 @@ func (e *Encoder) encode(ctx context.Context, v any) (ast.Node, error) {
 	ast.Walk(&holes, node)
 
 	if holes.found {
-		return nil, ErrNoNode
+		return nil, &labeled{label: ErrNoNode}
 	}
 
 	// The go-yaml encoder leaves some strings unquoted in a form that
@@ -309,14 +413,14 @@ func init() {
 	}
 }
 
-// render returns the YAML text of node, or an error when the go-yaml
-// printer panics on a node it cannot lay out, such as one with a negative
-// indent. The PrintNode method of that printer formats the node with fmt,
-// which writes the panic into the text instead.
+// render returns the YAML text of node, or a [*PanicError] when the
+// go-yaml printer panics on a node it cannot lay out, such as one with a
+// negative indent. The PrintNode method of that printer formats the node
+// with fmt, which writes the panic into the text instead.
 func render(node ast.Node) (_ []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("print YAML: %v", r)
+			err = &PanicError{Value: r, Stack: debug.Stack()}
 		}
 	}()
 
@@ -386,12 +490,25 @@ func (h *holeFinder) Visit(node ast.Node) ast.Visitor {
 	return h
 }
 
-// writeErr returns the first error the writer returned, wrapped with the
-// "write YAML" prefix, or nil when every write succeeded.
+// writeErr returns the first error the writer returned, wrapped with
+// [ErrWrite], or nil when every write succeeded.
 func (e *Encoder) writeErr() error {
 	if e.err != nil {
-		return fmt.Errorf("write YAML: %w", e.err)
+		return fmt.Errorf("%w: %w", ErrWrite, e.err)
 	}
 
 	return nil
+}
+
+// contextEnded reports whether ctx ended and err is, or wraps, the error
+// of a context that ended: [context.Canceled] or
+// [context.DeadlineExceeded]. A marshaler can return such an error from a
+// context of its own while ctx lives. That error is a failure of the
+// value, so contextEnded reports false for it.
+func contextEnded(ctx context.Context, err error) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

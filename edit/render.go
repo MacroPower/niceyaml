@@ -234,7 +234,10 @@ const maxMarshalersText = "1,000"
 // instances that it finds come back with the result of the encode. A panic
 // of a marshaler of v that the check calls goes on as it is. A panic of
 // go-yaml's encoder, as on a map key that is nil, returns an error that
-// matches errEncoder. Any other error of the encode comes back as it is.
+// matches errEncoder. Any other error of the encode comes back as the
+// encoder package returns it. That error matches the sentinel of the
+// encoder package that names its cause, except the error of a context
+// that ended, which comes back bare.
 func encode(ctx context.Context, v any, opts ...encoder.Option) ([]byte, ast.Node, []instance, error) {
 	refused, err := checkValue(ctx, v)
 	if err != nil {
@@ -253,14 +256,11 @@ func encode(ctx context.Context, v any, opts ...encoder.Option) ([]byte, ast.Nod
 		data, node, err = hook.Marshal(ctx, v, opts)
 	}()
 
-	switch {
-	case panicked != nil:
+	if panicked != nil {
 		return nil, nil, refused, fmt.Errorf("%w panicked on the value: %v", errEncoder, panicked)
-	case err != nil:
-		return nil, nil, refused, fmt.Errorf("encode the value: %w", err)
 	}
 
-	return data, node, refused, nil
+	return data, node, refused, err //nolint:wrapcheck // The encoder names the cause of its error with a sentinel.
 }
 
 // valueCheck is the walk of [checkValue].

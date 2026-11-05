@@ -30,4 +30,22 @@
 // [WithYAMLOptions] passes go-yaml options through for settings that do
 // not have an option of their own. [WithYAMLComments] adds comments to
 // each document by YAML path.
+//
+// Each error names its cause with a sentinel, so a caller sorts failures
+// with [errors.Is] and does not name the error types of go-yaml. A value
+// that does not encode matches [ErrEncode], and [ErrNoNode] narrows it to
+// a value that encodes to no node. A comment that the encoder cannot
+// place matches [ErrComment], and a write that the writer refused matches
+// [ErrWrite]. The error of go-yaml or of the writer stays in the chain
+// under the sentinel. A [*PanicError] matches no sentinel, and neither
+// does the error of the context of the call after that context ended:
+//
+//	switch {
+//	case errors.Is(err, encoder.ErrWrite):
+//		// The writer refused the document.
+//	case errors.Is(err, encoder.ErrComment):
+//		// A comment key, path, or position does not fit.
+//	case errors.Is(err, encoder.ErrEncode):
+//		// The value does not encode.
+//	}
 package encoder
