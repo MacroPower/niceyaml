@@ -191,13 +191,8 @@ func (d *Doc) readersOf(name string, a *ast.AnchorNode) []ref {
 // alias that reads no anchor of the text, such as one of a reference
 // document.
 func (d *Doc) anchorOf(alias *ast.AliasNode) (ref, bool) {
-	read, err := d.node.Resolver().Anchor(alias)
+	anchor, err := d.node.Resolver().Anchor(alias)
 	if err != nil {
-		return ref{}, false
-	}
-
-	anchor, ok := read.(*ast.AnchorNode)
-	if !ok {
 		return ref{}, false
 	}
 

@@ -20,7 +20,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
 	"go.jacobcolvin.com/niceyaml/internal/decodewalk"
 	"go.jacobcolvin.com/niceyaml/internal/pathindex"
-	"go.jacobcolvin.com/niceyaml/internal/pathshook"
 	"go.jacobcolvin.com/niceyaml/internal/rejection"
 	"go.jacobcolvin.com/niceyaml/internal/segment"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -825,12 +824,12 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 // false when reason does not name an alias of the document that does not
 // resolve.
 func (n *Node) aliasLocation(path paths.Path, reason error) (location, bool) {
-	alias, ok := pathshook.UnresolvedAlias(reason)
-	if !ok {
+	unresolved, ok := errors.AsType[*paths.AliasError](reason)
+	if !ok || unresolved.Alias == nil {
 		return location{}, false
 	}
 
-	tk := alias.GetToken()
+	tk := unresolved.Alias.GetToken()
 	if tk == nil || tk.Position == nil {
 		return location{}, false
 	}
@@ -1269,10 +1268,7 @@ func (d *document) aliasContent(alias *ast.AliasNode) (ast.Node, error) {
 		return nil, err
 	}
 
-	// Anchor returns an anchor whenever it does not fail.
-	held, _ := anchor.(*ast.AnchorNode) //nolint:errcheck // See above.
-
-	return held.Value, nil
+	return anchor.Value, nil
 }
 
 // IsEmpty reports whether the Node is the root of a document that parsed
@@ -1444,12 +1440,7 @@ func (w *mergeWalk) walk(t datapath.Target, rest paths.Path) (location, error) {
 
 		switch sel.Kind {
 		case paths.SelectorChild:
-			var entry *ast.MappingValueNode
-
-			found, err := w.resolver.Entry(content, sel.Name)
-			if held, ok := found.(*ast.MappingValueNode); ok {
-				entry = held
-			}
+			entry, err := w.resolver.Entry(content, sel.Name)
 
 			switch {
 			case errors.Is(err, paths.ErrReferenceAlias):

@@ -1,8 +1,6 @@
 package paths
 
 import (
-	"errors"
-
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/pathshook"
@@ -22,14 +20,5 @@ func init() {
 		keys := res.resolver.mappingKeys(mapping)
 
 		return keys.names, keys.merges
-	}
-
-	pathshook.UnresolvedAlias = func(err error) (*ast.AliasNode, bool) {
-		a, ok := errors.AsType[*aliasError](err)
-		if !ok || a.alias == nil {
-			return nil, false
-		}
-
-		return a.alias, true
 	}
 }

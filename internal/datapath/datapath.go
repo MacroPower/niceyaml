@@ -360,8 +360,8 @@ func ParentAt(r *paths.Resolver, p paths.Path) astnode.Parent {
 	switch last.Kind {
 	case paths.SelectorChild:
 		entry, err := r.Entry(node, last.Name)
-		if found, ok := entry.(*ast.MappingValueNode); err == nil && ok {
-			return astnode.Parent{Entry: found}
+		if err == nil {
+			return astnode.Parent{Entry: entry}
 		}
 
 	case paths.SelectorIndex:
@@ -381,20 +381,7 @@ func ParentAt(r *paths.Resolver, p paths.Path) astnode.Parent {
 // as [paths.Resolver.MergeSources] finds them. It returns an error that
 // wraps [paths.ErrAlias] when an alias on the way does not resolve.
 func MergeSources(r *paths.Resolver, entry *ast.MappingValueNode) ([]*ast.MappingNode, error) {
-	found, err := r.MergeSources(&ast.MappingNode{Values: []*ast.MappingValueNode{entry}})
-	if err != nil {
-		return nil, err
-	}
-
-	sources := make([]*ast.MappingNode, 0, len(found))
-
-	for _, src := range found {
-		if mapping, ok := src.(*ast.MappingNode); ok {
-			sources = append(sources, mapping)
-		}
-	}
-
-	return sources, nil
+	return r.MergeSources(&ast.MappingNode{Values: []*ast.MappingValueNode{entry}})
 }
 
 // Members returns the entries of mapping in document order. It skips each
@@ -590,13 +577,8 @@ func (idx *Index) SelectsOther(node ast.Node, name string) bool {
 		return false
 	}
 
-	found, err := idx.finder.Entry(content, name)
-	if err != nil {
-		return false
-	}
-
-	entry, ok := found.(*ast.MappingValueNode)
-	if !ok || entry == nil {
+	entry, err := idx.finder.Entry(content, name)
+	if err != nil || entry == nil {
 		return false
 	}
 

@@ -145,8 +145,18 @@ func noBinding() *aliasBinding {
 	return emptyBinding
 }
 
-// emptyBinding is the binding that [noBinding] returns.
-var emptyBinding = &aliasBinding{}
+var (
+	// The binding that [noBinding] returns.
+	emptyBinding = &aliasBinding{}
+
+	// The error of an alias without a name, which only a hand-built tree
+	// holds. It wraps [ErrAlias] and matches no reason.
+	errNoAliasName = fmt.Errorf("%w: alias has no name", ErrAlias)
+
+	// Matches the error of an alias inside the content of the anchor it
+	// refers to, which the decoder reads as null.
+	errEnclosed = errors.New("alias lies inside its anchor")
+)
 
 // mappingKeys indexes the entries of one mapping for [resolver.lookup] and
 // [recursiveWalk.descend]. The names map holds the index of the last entry
@@ -947,14 +957,14 @@ func (r *resolver) content(node ast.Node, converts bool) (ast.Node, ast.Node, er
 }
 
 // follow looks through anchors and aliases from node and adds each alias it
-// follows to followed. It returns an error wrapping [ErrAlias] for an
-// alias that leads back to itself, that does not have an anchor, or that
-// does not have a name. An alias leads back to itself when it is already
-// in followed. It also leads back to itself when it lies inside the
-// content of the anchor it refers to, unless a `<<` merge key names it.
-// Follow stops at a nil node, including a typed nil that a hand-built tree
-// might hold. It returns an untyped nil for that node, so a type assertion
-// on the result never yields a nil pointer.
+// follows to followed. It returns an [*AliasError] wrapping [ErrAlias] for
+// an alias that leads back to itself, that does not have an anchor, or
+// that does not have a name. An alias leads back to itself when it is
+// already in followed. It also leads back to itself when it lies inside
+// the content of the anchor it refers to, unless a `<<` merge key names
+// it. Follow stops at a nil node, including a typed nil that a hand-built
+// tree might hold. It returns an untyped nil for that node, so a type
+// assertion on the result never yields a nil pointer.
 func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.Node, error) {
 	for {
 		if astnode.IsNil(node) {
@@ -967,7 +977,7 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 		case *ast.AliasNode:
 			tk := astnode.Token(n.Value)
 			if tk == nil {
-				return nil, &aliasError{alias: n, err: fmt.Errorf("%w: alias has no name", ErrAlias)}
+				return nil, &AliasError{Alias: n, Cause: errNoAliasName}
 			}
 
 			name := tk.Value
@@ -975,16 +985,16 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 
 			switch {
 			case followed[n]:
-				return nil, &aliasError{alias: n, err: fmt.Errorf("%w: *%s forms a cycle", ErrAlias, name)}
+				return nil, &AliasError{Alias: n, Cause: newReasonError(ErrAliasCycle, name, false)}
 			case b.enclosed[n]:
-				return nil, &aliasError{alias: n, err: &enclosedAliasError{name: name}}
+				return nil, &AliasError{Alias: n, Cause: newReasonError(ErrAliasCycle, name, true)}
 			}
 
 			followed[n] = true
 
 			target, ok := b.targets[n]
 			if !ok {
-				return nil, &aliasError{alias: n, err: r.missingAnchor(name)}
+				return nil, &AliasError{Alias: n, Cause: r.missingAnchor(name)}
 			}
 
 			node = target.Value
@@ -996,15 +1006,16 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 }
 
 // missingAnchor returns the error of an alias named name that does not
-// have an anchor of its name before it. The error wraps [ErrAlias]. It
-// wraps [ErrReferenceAlias] too when a reference document defines such an
-// anchor, as [WithReferenceAnchors] reports.
+// have an anchor of its name before it. The error wraps [ErrAlias] and
+// matches [ErrAnchorMissing]. It matches [ErrReferenceAlias] instead when
+// a reference document defines such an anchor, as [WithReferenceAnchors]
+// reports.
 func (r *resolver) missingAnchor(name string) error {
 	if _, ok := r.reference(name); ok {
-		return &referenceAliasError{name: name}
+		return newReasonError(ErrReferenceAlias, name, false)
 	}
 
-	return fmt.Errorf("%w: *%s has no anchor before it", ErrAlias, name)
+	return newReasonError(ErrAnchorMissing, name, false)
 }
 
 // reference returns the value of the anchor of name that a reference
@@ -1063,82 +1074,80 @@ func (r *resolver) referenceContent(node ast.Node) (ast.Node, bool) {
 	return nil, false
 }
 
-// aliasError is the error of an alias that does not resolve, as
-// [resolver.follow] finds it. It reads as err, and [resolveError] names the
-// line and the column of the alias in front of it.
-type aliasError struct {
-	err   error
-	alias *ast.AliasNode
-}
-
-func (e *aliasError) Error() string {
-	return e.err.Error()
-}
-
-// Unwrap returns the error of the alias.
-func (e *aliasError) Unwrap() error {
-	return e.err
-}
-
 // resolveError returns err, the error of a resolve of p, after the path.
-// When err is the error of an alias of the document that does not
-// resolve, the line and the column of the alias come between the two, as
-// in "resolve $.a.b: 1:7: alias does not resolve: *x forms a cycle". So
-// does the error of an alias that reads a reference document, as in
-// "resolve $.a.x: 1:4: alias reads a reference document: *r0".
+// When err holds an [*AliasError], the result is an AliasError for the
+// same alias under p. It reads as in "resolve $.a.b: alias does not
+// resolve: *x forms a cycle". For an alias that reads a reference
+// document, it reads as in "resolve $.a.x: alias reads a reference
+// document: *r0".
 func resolveError(p Path, err error) error {
-	if a, ok := errors.AsType[*aliasError](err); ok {
-		if tk := a.alias.GetToken(); tk != nil && tk.Position != nil {
-			return fmt.Errorf("resolve %s: %d:%d: %w", p, tk.Position.Line, tk.Position.Column, err)
-		}
+	a, ok := errors.AsType[*AliasError](err)
+	if !ok {
+		return fmt.Errorf("resolve %s: %w", p, err)
 	}
 
-	return fmt.Errorf("resolve %s: %w", p, err)
+	// An AliasError that nothing wraps gives its cause to the result, so
+	// the chain of the result holds the alias once.
+	cause := err
+	if err == a { //nolint:errorlint // The check is for the outermost error, not for one in the chain.
+		cause = a.Cause
+	}
+
+	return &AliasError{Path: p, Alias: a.Alias, Cause: cause, resolved: true}
 }
 
-// enclosedAliasError is the error of an alias inside the content of the
-// anchor it refers to, which the decoder reads as null. It wraps
-// [ErrAlias].
-type enclosedAliasError struct {
-	name string
+// reasonError is the error of an alias that does not resolve for reason,
+// which is [ErrAliasCycle], [ErrAnchorMissing], or [ErrReferenceAlias]. It
+// wraps [ErrAlias] and matches reason, so a tree of problems shows it as
+// one problem rather than as one for each sentinel. An enclosed alias, one
+// inside the content of the anchor it refers to, also matches errEnclosed.
+//
+// Create instances with [newReasonError].
+type reasonError struct {
+	reason   error
+	text     string
+	enclosed bool
 }
 
-func (e *enclosedAliasError) Error() string {
-	return ErrAlias.Error() + ": *" + e.name + " forms a cycle"
+// newReasonError creates a new [reasonError] of the alias named name. The
+// error names the alias and the reason, as in "alias does not resolve: *x
+// forms a cycle". An alias that reads a reference document reads as in
+// "alias reads a reference document: *r0".
+func newReasonError(reason error, name string, enclosed bool) *reasonError {
+	text := ErrAlias.Error() + ": *" + name + " forms a cycle"
+
+	if errors.Is(reason, ErrAnchorMissing) {
+		text = ErrAlias.Error() + ": *" + name + " has no anchor before it"
+	}
+
+	if errors.Is(reason, ErrReferenceAlias) {
+		text = ErrReferenceAlias.Error() + ": *" + name
+	}
+
+	return &reasonError{reason: reason, text: text, enclosed: enclosed}
+}
+
+// Error returns the text of e.
+func (e *reasonError) Error() string {
+	return e.text
 }
 
 // Unwrap returns [ErrAlias].
-func (e *enclosedAliasError) Unwrap() error {
+func (e *reasonError) Unwrap() error {
 	return ErrAlias
+}
+
+// Is reports whether target is the reason of e, or errEnclosed for an
+// enclosed alias.
+func (e *reasonError) Is(target error) bool {
+	return target == e.reason || e.enclosed && target == errEnclosed
 }
 
 // readsNull reports whether err is the error of a node whose content is an
 // alias inside the content of the anchor it refers to, through anchors,
 // aliases, and tags. The decoder reads the node as null.
 func readsNull(err error) bool {
-	return err != nil && errors.As(err, new(*enclosedAliasError))
-}
-
-// referenceAliasError is the error of an alias whose anchor a reference
-// document defines. It reads as [ErrReferenceAlias] and the name of the
-// alias. It wraps [ErrAlias] and matches ErrReferenceAlias, so a tree of
-// problems shows it as one problem rather than as one for each sentinel.
-type referenceAliasError struct {
-	name string
-}
-
-func (e *referenceAliasError) Error() string {
-	return ErrReferenceAlias.Error() + ": *" + e.name
-}
-
-// Unwrap returns [ErrAlias].
-func (e *referenceAliasError) Unwrap() error {
-	return ErrAlias
-}
-
-// Is reports whether target is [ErrReferenceAlias].
-func (e *referenceAliasError) Is(target error) bool {
-	return target == ErrReferenceAlias
+	return errors.Is(err, errEnclosed)
 }
 
 // resolve applies segs to root and returns every match, in document order

@@ -8,7 +8,74 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/position"
 )
+
+// AliasError is the error of an alias that does not resolve, as the
+// lookups of a [Resolver] find one. It wraps [ErrAlias] and the reason.
+// The reason is [ErrAliasCycle] for an alias that leads back to itself
+// and [ErrAnchorMissing] for one without an anchor of its name before it.
+// It is [ErrReferenceAlias] for an alias whose anchor a reference
+// document defines. An alias without a name, which only a hand-built
+// tree holds, wraps ErrAlias alone. Find the AliasError in an error with
+// [errors.As], and read the alias from [AliasError.Alias] or its position
+// from [AliasError.Position].
+type AliasError struct {
+	// Alias is the alias that does not resolve. It is nil when
+	// [Resolver.Anchor] gets a node that is not an alias.
+	Alias *ast.AliasNode
+	// Cause says why the alias does not resolve. It wraps [ErrAlias]. A
+	// nil Cause stands for ErrAlias itself.
+	Cause error
+	// Path is the path whose resolve read the alias, for the error of a
+	// resolve such as [Resolver.Node]. A call without a path, such as
+	// [Resolver.Deref], leaves it at the zero value.
+	Path Path
+	// Whether a resolve of Path made the error. The zero Path is also the
+	// `@` path, so Path alone does not tell a resolve of `@` from a call
+	// without a path.
+	resolved bool
+}
+
+// Error names Path in front of Cause, as in "resolve $.a.b: alias does
+// not resolve: *x forms a cycle". The error of a resolve of the `@` path
+// reads as in "resolve @: alias does not resolve: *x forms a cycle". An
+// AliasError of a call without a path, and one that a program builds
+// with a zero Path, reads as Cause alone.
+func (e *AliasError) Error() string {
+	cause := e.Unwrap().Error()
+
+	if !e.resolved && e.Path.Equal(Path{}) {
+		return cause
+	}
+
+	return "resolve " + e.Path.String() + ": " + cause
+}
+
+// Unwrap returns Cause, or [ErrAlias] for a nil Cause.
+func (e *AliasError) Unwrap() error {
+	if e.Cause == nil {
+		return ErrAlias
+	}
+
+	return e.Cause
+}
+
+// Position returns the position of Alias in the document. It reports
+// false for a nil Alias and for an alias without a token or a position,
+// such as one of a hand-built tree.
+func (e *AliasError) Position() (position.Position, bool) {
+	if e.Alias == nil {
+		return position.Position{}, false
+	}
+
+	tk := e.Alias.GetToken()
+	if tk == nil || tk.Position == nil {
+		return position.Position{}, false
+	}
+
+	return position.NewFromToken(tk), true
+}
 
 // Resolver resolves paths in one document, from its root. The root is the
 // node a `$` path reads from. A Resolver does not have another node for an
@@ -112,7 +179,8 @@ func NewResolver(doc *ast.DocumentNode, opts ...ResolverOption) *Resolver {
 // Resolve such a path with [Resolver.Nodes]. Wraps [ErrNotFound] when
 // nothing exists at the path, together with [ErrNoDocument] when the
 // document lacks content to resolve in. Wraps [ErrAlias] when an alias on
-// the path does not resolve, including one under a tag. Wraps
+// the path does not resolve, including one under a tag. That error is an
+// [*AliasError], which carries the alias and the path. Wraps
 // [ErrExcessiveMerging] when the key lookups of a selector read far more
 // nodes under `<<` merge keys than the document holds.
 func (r *Resolver) Node(p Path) (ast.Node, error) {
@@ -458,8 +526,8 @@ func (r *Resolver) matchesOf(p Path, found []match, absolute bool) ([]Match, err
 // on the path, unless the alias reads a reference document. A `..name` or
 // `..*` selector looks up the key of each entry that a `<<` merge key after
 // it might override. An alias of a reference document that such a lookup
-// reads thus counts as on the path too. The error names the line and the
-// column of the alias after the path, as [Resolver.Node] names them.
+// reads thus counts as on the path too. The error is an [*AliasError]
+// that carries the alias, as [Resolver.Node] returns one.
 //
 // Wraps [ErrExcessiveAliasing] when aliases lead a selector to far more
 // nodes than the document holds. Wraps [ErrExcessiveMerging] when the key
@@ -528,23 +596,23 @@ func (r *Resolver) KeyName(key ast.Node) (string, bool) {
 	return r.resolver.keyName(key)
 }
 
-// Entry returns the entry, an [*ast.MappingValueNode], that [Path.Child]
-// with name selects in the mapping at node. Where a `<<` merge key brings
-// that entry in, it belongs to the merge source. Entry looks through the
-// anchors, tags, and aliases on node. A caller that walks a mapping
-// itself can compare the result with an entry it reached to learn whether
-// a path through name selects that entry. A later entry with the same key
-// text can win the selector. That entry can be a later key of the mapping
-// or of a later merge source.
+// Entry returns the entry that [Path.Child] with name selects in the
+// mapping at node. Where a `<<` merge key brings that entry in, it
+// belongs to the merge source. Entry looks through the anchors, tags, and
+// aliases on node. A caller that walks a mapping itself can compare the
+// result with an entry it reached to learn whether a path through name
+// selects that entry. A later entry with the same key text can win the
+// selector. That entry can be a later key of the mapping or of a later
+// merge source.
 //
 // Returns an error wrapping [ErrNotFound] when node is not a mapping or
-// name does not select an entry in it. Returns one wrapping [ErrAlias]
-// when an alias on the way does not resolve. Returns one wrapping
-// [ErrExcessiveMerging] when the lookup reads far more nodes under `<<`
-// merge keys than the document holds. Each call weighs its own reads
-// against that limit, but the calls of one [EntryFinder] weigh theirs
-// together.
-func (r *Resolver) Entry(node ast.Node, name string) (ast.Node, error) {
+// name does not select an entry in it. Returns an [*AliasError] wrapping
+// [ErrAlias] when an alias on the way does not resolve. Returns an error
+// wrapping [ErrExcessiveMerging] when the lookup reads far more nodes
+// under `<<` merge keys than the document holds. Each call weighs its own
+// reads against that limit, but the calls of one [EntryFinder] weigh
+// theirs together.
+func (r *Resolver) Entry(node ast.Node, name string) (*ast.MappingValueNode, error) {
 	return r.EntryFinder().Entry(node, name)
 }
 
@@ -579,7 +647,7 @@ func (r *Resolver) EntryFinder() *EntryFinder {
 // error for every later lookup that reads a merge key. A later lookup
 // that does not read a merge key still returns its entry, such as a
 // lookup of a key without a merge key after it.
-func (f *EntryFinder) Entry(node ast.Node, name string) (ast.Node, error) {
+func (f *EntryFinder) Entry(node ast.Node, name string) (*ast.MappingValueNode, error) {
 	content, err := f.resolver.selectable(node)
 	if err != nil {
 		return nil, fmt.Errorf("entry %q: %w", name, err)
@@ -602,33 +670,34 @@ func (f *EntryFinder) Entry(node ast.Node, name string) (ast.Node, error) {
 	return entry, nil
 }
 
-// Anchor returns the anchor, an [*ast.AnchorNode], that node refers to
-// when node is an alias. The result is the anchor whose content
-// [Resolver.Deref] reaches first when it follows the alias. Where the
-// anchor holds another alias, Anchor stops at the anchor, but Deref
-// continues to the content of the anchor that the second alias refers
-// to. Anchor also returns the anchor of an alias that leads back to
-// itself, such as one inside the content of that anchor. Deref rejects
-// such an alias.
+// Anchor returns the anchor that node refers to when node is an alias.
+// The result is the anchor whose content [Resolver.Deref] reaches first
+// when it follows the alias. Where the anchor holds another alias, Anchor
+// stops at the anchor, but Deref continues to the content of the anchor
+// that the second alias refers to. Anchor also returns the anchor of an
+// alias that leads back to itself, such as one inside the content of that
+// anchor. Deref rejects such an alias.
 //
-// Returns an error wrapping [ErrAlias] when node is not an alias, and for
-// an alias that does not have a name or does not name an anchor before
-// it. The error of an alias whose anchor a reference document defines
-// wraps [ErrReferenceAlias] too, as [WithReferenceAnchors] describes.
-func (r *Resolver) Anchor(node ast.Node) (ast.Node, error) {
+// Returns an [*AliasError] wrapping [ErrAlias] when node is not an alias.
+// It returns one too for an alias that does not have a name or does not
+// name an anchor before it. The AliasError of a node that is not an alias
+// holds a nil alias. The error of an alias whose anchor a reference
+// document defines wraps [ErrReferenceAlias] too, as
+// [WithReferenceAnchors] describes.
+func (r *Resolver) Anchor(node ast.Node) (*ast.AnchorNode, error) {
 	alias, ok := node.(*ast.AliasNode)
 	if !ok || alias == nil {
-		return nil, fmt.Errorf("anchor: %w: not an alias", ErrAlias)
+		return nil, fmt.Errorf("anchor: %w", &AliasError{Cause: fmt.Errorf("%w: not an alias", ErrAlias)})
 	}
 
 	tk := astnode.Token(alias.Value)
 	if tk == nil {
-		return nil, fmt.Errorf("anchor: %w: alias has no name", ErrAlias)
+		return nil, fmt.Errorf("anchor: %w", &AliasError{Alias: alias, Cause: errNoAliasName})
 	}
 
 	anchor, ok := r.resolver.binding().targets[alias]
 	if !ok {
-		return nil, fmt.Errorf("anchor: %w", r.resolver.missingAnchor(tk.Value))
+		return nil, fmt.Errorf("anchor: %w", &AliasError{Alias: alias, Cause: r.resolver.missingAnchor(tk.Value)})
 	}
 
 	return anchor, nil
@@ -642,9 +711,9 @@ func (r *Resolver) Anchor(node ast.Node) (ast.Node, error) {
 // node, on each merge value, and on each element of a sequence of
 // sources.
 //
-// Returns nil when node is not a mapping, and an error wrapping [ErrAlias]
-// when an alias on the way does not resolve.
-func (r *Resolver) MergeSources(node ast.Node) ([]ast.Node, error) {
+// Returns nil when node is not a mapping, and an [*AliasError] wrapping
+// [ErrAlias] when an alias on the way does not resolve.
+func (r *Resolver) MergeSources(node ast.Node) ([]*ast.MappingNode, error) {
 	content, err := r.resolver.unwrap(node)
 	if err != nil {
 		return nil, fmt.Errorf("merge sources: %w", err)
@@ -655,7 +724,7 @@ func (r *Resolver) MergeSources(node ast.Node) ([]ast.Node, error) {
 		return nil, nil
 	}
 
-	var sources []ast.Node
+	var sources []*ast.MappingNode
 
 	for _, entry := range mapping.Values {
 		if entry == nil || !astnode.IsMergeKey(entry.Key) {
@@ -667,9 +736,7 @@ func (r *Resolver) MergeSources(node ast.Node) ([]ast.Node, error) {
 			return nil, fmt.Errorf("merge sources: %w", err)
 		}
 
-		for _, src := range found {
-			sources = append(sources, src)
-		}
+		sources = append(sources, found...)
 	}
 
 	return sources, nil

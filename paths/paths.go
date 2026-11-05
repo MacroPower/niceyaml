@@ -34,9 +34,21 @@ var (
 
 	// ErrAlias indicates an alias on the path that does not name an anchor
 	// or that leads back to itself. Such an alias does not resolve to any
-	// content. The error of an alias whose anchor a reference document
-	// defines wraps [ErrReferenceAlias] too.
+	// content. The error wraps the reason too: [ErrAliasCycle],
+	// [ErrAnchorMissing], or [ErrReferenceAlias]. An [*AliasError] in the
+	// error carries the alias.
 	ErrAlias = errors.New("alias does not resolve")
+
+	// ErrAliasCycle indicates an alias on the path that leads back to
+	// itself, such as one inside the content of the anchor it refers to.
+	// Every error that wraps ErrAliasCycle also wraps [ErrAlias].
+	ErrAliasCycle = errors.New("alias forms a cycle")
+
+	// ErrAnchorMissing indicates an alias on the path that does not have an
+	// anchor of its name before it in the document. Every error that wraps
+	// ErrAnchorMissing also wraps [ErrAlias]. An alias whose anchor a
+	// reference document defines wraps [ErrReferenceAlias] instead.
+	ErrAnchorMissing = errors.New("alias has no anchor before it")
 
 	// ErrReferenceAlias indicates an alias on the path whose anchor a
 	// reference document defines, as [WithReferenceAnchors] names those

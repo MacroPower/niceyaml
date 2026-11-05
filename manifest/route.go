@@ -230,8 +230,8 @@ func findEntry(
 		return nil, nil, readsKey
 	}
 
-	found, err := res.Entry(node, name)
-	if e, ok := found.(*ast.MappingValueNode); ok && err == nil && slices.Contains(entries, e) {
+	e, err := res.Entry(node, name)
+	if err == nil && slices.Contains(entries, e) {
 		if key, ok := keys.Key(e.Key); ok {
 			later, read := laterRead(res, keys, entries[slices.Index(entries, e)+1:], name, key)
 

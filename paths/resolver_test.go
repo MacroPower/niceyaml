@@ -19,6 +19,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 var (
@@ -429,8 +430,8 @@ func TestResolver_MatchesFrom(t *testing.T) {
 		input string
 		from  string
 		path  string
-		// The line and the column of the alias that err names.
-		at   string
+		// The position of the alias that err names.
+		at   position.Position
 		want []string
 	}{
 		"entries": {
@@ -481,19 +482,19 @@ func TestResolver_MatchesFrom(t *testing.T) {
 			want:  []string{"$.c[0]=y"},
 		},
 		"unknown alias": {
-			// The error names the line and the column of the alias.
+			// The error carries the alias.
 			input: stringtest.LinesLF("a:", "  b: *nope"),
 			from:  "$.a",
 			path:  "@.*",
-			err:   paths.ErrAlias,
-			at:    "2:6",
+			err:   paths.ErrAnchorMissing,
+			at:    position.Position{Line: 1, Col: 5},
 		},
 		"alias inside its own anchor on the way": {
 			input: "a: &x {b: *x, c: 1}\n",
 			from:  "$.a",
 			path:  "@.b.z",
-			err:   paths.ErrAlias,
-			at:    "1:11",
+			err:   paths.ErrAliasCycle,
+			at:    position.Position{Line: 0, Col: 10},
 		},
 		"wildcard at an alias inside its own anchor": {
 			// The decoder reads the alias as null, and a wildcard selects
@@ -522,7 +523,7 @@ func TestResolver_MatchesFrom(t *testing.T) {
 			matches, err := r.MatchesFrom(start, path)
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
-				assert.Contains(t, err.Error(), ": "+tc.at+": ")
+				assert.Equal(t, tc.at, aliasPosition(t, err))
 
 				return
 			}
@@ -1664,7 +1665,7 @@ func TestResolver_MergeSources_HandBuilt(t *testing.T) {
 			doc := &ast.DocumentNode{Body: mapping}
 
 			var (
-				sources []ast.Node
+				sources []*ast.MappingNode
 				err     error
 			)
 
@@ -2581,21 +2582,25 @@ func TestResolver_UnnamedKey(t *testing.T) {
 func TestResolver_UnresolvedAlias(t *testing.T) {
 	t.Parallel()
 
-	// A path through an alias that does not resolve fails with ErrAlias,
-	// whose text says why and names the line and the column of the alias,
-	// rather than with ErrNotFound. Token, Node, and Nodes agree.
+	// A path through an alias that does not resolve fails with an
+	// AliasError rather than with ErrNotFound. The AliasError wraps
+	// ErrAlias and the reason, says why in its text, and carries the
+	// alias. Token, Node, and Nodes agree.
 	tcs := map[string]struct {
 		input string
 		want  string
-		// The line and the column of the alias that does not resolve.
-		at   string
-		path paths.Path
+		// The position of the alias that does not resolve.
+		at position.Position
+		// The reason the alias does not resolve.
+		reason error
+		path   paths.Path
 	}{
 		"alias with no anchor of its name": {
-			input: stringtest.LinesLF("base: &b {a: 1}", "other: *nope"),
-			path:  paths.Doc().Child("other", "v"),
-			want:  "*nope has no anchor before it",
-			at:    "2:8",
+			input:  stringtest.LinesLF("base: &b {a: 1}", "other: *nope"),
+			path:   paths.Doc().Child("other", "v"),
+			want:   "*nope has no anchor before it",
+			at:     position.Position{Line: 1, Col: 7},
+			reason: paths.ErrAnchorMissing,
 		},
 		"alias before the anchor of its name": {
 			input: stringtest.LinesLF(
@@ -2603,15 +2608,17 @@ func TestResolver_UnresolvedAlias(t *testing.T) {
 				"a: &x",
 				"  v: 1",
 			),
-			path: paths.Doc().Child("b", "v"),
-			want: "*x has no anchor before it",
-			at:   "1:4",
+			path:   paths.Doc().Child("b", "v"),
+			want:   "*x has no anchor before it",
+			at:     position.Position{Line: 0, Col: 3},
+			reason: paths.ErrAnchorMissing,
 		},
 		"alias inside its own anchor through a tag": {
-			input: "a: &x !t *x\n",
-			path:  paths.Doc().Child("a", "c"),
-			want:  "*x forms a cycle",
-			at:    "1:10",
+			input:  "a: &x !t *x\n",
+			path:   paths.Doc().Child("a", "c"),
+			want:   "*x forms a cycle",
+			at:     position.Position{Line: 0, Col: 9},
+			reason: paths.ErrAliasCycle,
 		},
 		"merge key through an alias inside its own anchor": {
 			input: stringtest.LinesLF(
@@ -2619,35 +2626,40 @@ func TestResolver_UnresolvedAlias(t *testing.T) {
 				"m:",
 				"  <<: *x",
 			),
-			path: paths.Doc().Child("m", "c"),
-			want: "*x forms a cycle",
-			at:   "1:10",
+			path:   paths.Doc().Child("m", "c"),
+			want:   "*x forms a cycle",
+			at:     position.Position{Line: 0, Col: 9},
+			reason: paths.ErrAliasCycle,
 		},
 		"anchors whose tags alias each other": {
 			// The *y on line 1 comes before &y, so it names no anchor and
 			// resolution stops there.
-			input: "a: &x !t *y\nb: &y !t *x\n",
-			path:  paths.Doc().Child("b", "c"),
-			want:  "*y has no anchor before it",
-			at:    "1:10",
+			input:  "a: &x !t *y\nb: &y !t *x\n",
+			path:   paths.Doc().Child("b", "c"),
+			want:   "*y has no anchor before it",
+			at:     position.Position{Line: 0, Col: 9},
+			reason: paths.ErrAnchorMissing,
 		},
 		"alias inside its own mapping anchor": {
-			input: "b: &x {s: *x, t: 1}\n",
-			path:  paths.Doc().Child("b", "s", "t"),
-			want:  "*x forms a cycle",
-			at:    "1:11",
+			input:  "b: &x {s: *x, t: 1}\n",
+			path:   paths.Doc().Child("b", "s", "t"),
+			want:   "*x forms a cycle",
+			at:     position.Position{Line: 0, Col: 10},
+			reason: paths.ErrAliasCycle,
 		},
 		"alias inside its own sequence anchor": {
-			input: "a: &a [1, *a]\n",
-			path:  paths.Doc().Child("a").Index(1).Index(0),
-			want:  "*a forms a cycle",
-			at:    "1:11",
+			input:  "a: &a [1, *a]\n",
+			path:   paths.Doc().Child("a").Index(1).Index(0),
+			want:   "*a forms a cycle",
+			at:     position.Position{Line: 0, Col: 10},
+			reason: paths.ErrAliasCycle,
 		},
 		"alias inside its own anchor on a merge value": {
-			input: "x: {<<: &m {k: *m, j: 1}}\n",
-			path:  paths.Doc().Child("x", "k", "j"),
-			want:  "*m forms a cycle",
-			at:    "1:16",
+			input:  "x: {<<: &m {k: *m, j: 1}}\n",
+			path:   paths.Doc().Child("x", "k", "j"),
+			want:   "*m forms a cycle",
+			at:     position.Position{Line: 0, Col: 15},
+			reason: paths.ErrAliasCycle,
 		},
 	}
 
@@ -2676,9 +2688,10 @@ func TestResolver_UnresolvedAlias(t *testing.T) {
 				select {
 				case err := <-errs:
 					require.ErrorIs(t, err, paths.ErrAlias)
+					require.ErrorIs(t, err, tc.reason)
 					require.NotErrorIs(t, err, paths.ErrNotFound)
 					assert.Contains(t, err.Error(), tc.want)
-					assert.Contains(t, err.Error(), ": "+tc.at+": ")
+					assert.Equal(t, tc.at, aliasPosition(t, err))
 
 				case <-time.After(10 * time.Second):
 					require.FailNow(t, "path resolution did not return within 10s")
@@ -2692,26 +2705,30 @@ func TestResolver_Matches_UnresolvedAlias(t *testing.T) {
 	t.Parallel()
 
 	// A wildcard that reads through an alias that does not resolve fails
-	// with ErrAlias, and the error names the line and the column of the
-	// alias. A wildcard at an alias that the decoder reads as null selects
-	// nothing there.
+	// with an AliasError that carries the alias. A wildcard at an alias
+	// that the decoder reads as null selects nothing there.
 	tcs := map[string]struct {
 		input string
 		path  string
-		// The line and the column of the alias that does not resolve, or ""
-		// for a path without an error.
-		at   string
-		want []string
+		// The position of the alias that does not resolve, for a path with
+		// an error.
+		at position.Position
+		// The reason the alias does not resolve, or nil for a path without
+		// an error.
+		reason error
+		want   []string
 	}{
 		"entry that holds an alias with no anchor": {
-			input: stringtest.LinesLF("a: *nope", "b: 1"),
-			path:  "$.*",
-			at:    "1:4",
+			input:  stringtest.LinesLF("a: *nope", "b: 1"),
+			path:   "$.*",
+			at:     position.Position{Line: 0, Col: 3},
+			reason: paths.ErrAnchorMissing,
 		},
 		"alias with no anchor below the root": {
-			input: "a: {b: *nope}\n",
-			path:  "$..*",
-			at:    "1:8",
+			input:  "a: {b: *nope}\n",
+			path:   "$..*",
+			at:     position.Position{Line: 0, Col: 7},
+			reason: paths.ErrAnchorMissing,
 		},
 		"wildcard at an alias inside its own anchor": {
 			input: "a: &x [*x, 1]\n",
@@ -2733,9 +2750,10 @@ func TestResolver_Matches_UnresolvedAlias(t *testing.T) {
 			t.Parallel()
 
 			matches, err := paths.NewResolver(documentOf(t, tc.input)).Matches(paths.MustParse(tc.path))
-			if tc.at != "" {
+			if tc.reason != nil {
 				require.ErrorIs(t, err, paths.ErrAlias)
-				assert.Contains(t, err.Error(), ": "+tc.at+": ")
+				require.ErrorIs(t, err, tc.reason)
+				assert.Equal(t, tc.at, aliasPosition(t, err))
 
 				return
 			}
@@ -2744,6 +2762,21 @@ func TestResolver_Matches_UnresolvedAlias(t *testing.T) {
 			assert.Equal(t, tc.want, matchValues(matches))
 		})
 	}
+}
+
+// aliasPosition returns the position of the alias that err, an error
+// that holds a paths.AliasError, names.
+func aliasPosition(t *testing.T, err error) position.Position {
+	t.Helper()
+
+	var aliasErr *paths.AliasError
+
+	require.ErrorAs(t, err, &aliasErr)
+
+	pos, ok := aliasErr.Position()
+	require.True(t, ok, "alias has no position")
+
+	return pos
 }
 
 func TestWithReferenceAnchors(t *testing.T) {
@@ -2782,35 +2815,35 @@ func TestWithReferenceAnchors(t *testing.T) {
 			opt:       shared,
 			input:     "server: *shared\n",
 			path:      port,
-			want:      "resolve $.server.port: 1:9: alias reads a reference document: *shared",
+			want:      "resolve $.server.port: alias reads a reference document: *shared",
 			reference: true,
 		},
 		"path through a tagged alias that reads a reference": {
 			opt:       shared,
 			input:     "server: !t *shared\n",
 			path:      port,
-			want:      "resolve $.server.port: 1:12: alias reads a reference document: *shared",
+			want:      "resolve $.server.port: alias reads a reference document: *shared",
 			reference: true,
 		},
 		"alias before the anchor of its name": {
 			opt:       shared,
 			input:     stringtest.LinesLF("server: *shared", "later: &shared {port: 1}"),
 			path:      port,
-			want:      "resolve $.server.port: 1:9: alias reads a reference document: *shared",
+			want:      "resolve $.server.port: alias reads a reference document: *shared",
 			reference: true,
 		},
 		"path through a merge key that reads a reference": {
 			opt:       shared,
 			input:     "server: {<<: *shared}\n",
 			path:      port,
-			want:      "resolve $.server.port: 1:14: alias reads a reference document: *shared",
+			want:      "resolve $.server.port: alias reads a reference document: *shared",
 			reference: true,
 		},
 		"alias that no reference defines": {
 			opt:   shared,
 			input: "server: *nope\n",
 			path:  port,
-			want:  "resolve $.server.port: 1:9: alias does not resolve: *nope has no anchor before it",
+			want:  "resolve $.server.port: alias does not resolve: *nope has no anchor before it",
 		},
 		"anchor of the document before the alias": {
 			opt:   shared,
@@ -2821,7 +2854,7 @@ func TestWithReferenceAnchors(t *testing.T) {
 			opt:   paths.WithReferenceAnchors(nil),
 			input: "server: *shared\n",
 			path:  port,
-			want:  "resolve $.server.port: 1:9: alias does not resolve: *shared has no anchor before it",
+			want:  "resolve $.server.port: alias does not resolve: *shared has no anchor before it",
 		},
 	}
 
@@ -2999,8 +3032,7 @@ func TestWithReferenceAnchors(t *testing.T) {
 		t.Parallel()
 
 		// A `.*` reads every merge key of its mapping, and a `[*]` after
-		// the alias applies below it. The error names the line and the
-		// column of the alias.
+		// the alias applies below it. The error names the alias.
 		tcs := map[string]struct {
 			input string
 			path  string
@@ -3009,53 +3041,53 @@ func TestWithReferenceAnchors(t *testing.T) {
 			"entries of a mapping that merges the reference": {
 				input: stringtest.LinesLF("<<: *shared", "b: 1"),
 				path:  "$.*",
-				want:  "resolve $.*: 1:5: alias reads a reference document: *shared",
+				want:  "resolve $.*: alias reads a reference document: *shared",
 			},
 			"elements below the alias": {
 				input: "items: *shared\n",
 				path:  "$.items[*]",
-				want:  "resolve $.items[*]: 1:8: alias reads a reference document: *shared",
+				want:  "resolve $.items[*]: alias reads a reference document: *shared",
 			},
 			"entries below the alias": {
 				input: stringtest.LinesLF("name: app", "server: *shared"),
 				path:  "$.server.*",
-				want:  "resolve $.server.*: 2:9: alias reads a reference document: *shared",
+				want:  "resolve $.server.*: alias reads a reference document: *shared",
 			},
 			"name below an entry before a merge key that reads a reference": {
 				// The merge key can bring in a, which then wins over the entry
 				// of the mapping, so the reference decides what $.a selects.
 				input: stringtest.LinesLF("a:", "  port: 1", "<<: *shared"),
 				path:  "$..port",
-				want:  "resolve $..port: 3:5: alias reads a reference document: *shared",
+				want:  "resolve $..port: alias reads a reference document: *shared",
 			},
 			"every value with an entry before a merge key that reads a reference": {
 				input: stringtest.LinesLF("a:", "  port: 1", "<<: *shared"),
 				path:  "$..*",
-				want:  "resolve $..*: 3:5: alias reads a reference document: *shared",
+				want:  "resolve $..*: alias reads a reference document: *shared",
 			},
 			"entry of a nested mapping before a merge key that reads a reference": {
 				input: stringtest.LinesLF("m:", "  a: {port: 1}", "  <<: *shared", "  c: {port: 2}"),
 				path:  "$..port",
-				want:  "resolve $..port: 3:7: alias reads a reference document: *shared",
+				want:  "resolve $..port: alias reads a reference document: *shared",
 			},
 			"scalar entry before a merge key that reads a reference": {
 				// The walk looks below each entry that it visits, so it fails
 				// at the entry before the merge key whatever that entry holds.
 				input: "m: {a: 1, <<: *shared, c: 2}\n",
 				path:  "$..c",
-				want:  "resolve $..c: 1:15: alias reads a reference document: *shared",
+				want:  "resolve $..c: alias reads a reference document: *shared",
 			},
 			"mapping written in the sequence of a merge key that reads a reference": {
 				// The reference can bring in a real `<<` key, which a path
 				// through `<<` then selects in place of the merge key.
 				input: "<<: [*shared, {port: 1}]\n",
 				path:  "$..port",
-				want:  "resolve $..port: 1:6: alias reads a reference document: *shared",
+				want:  "resolve $..port: alias reads a reference document: *shared",
 			},
 			"merge key that reads a reference under the name of the merge key": {
 				input: stringtest.LinesLF("<<: *shared", "b: 1"),
 				path:  "$..'<<'",
-				want:  "resolve $..<<: 1:5: alias reads a reference document: *shared",
+				want:  "resolve $..<<: alias reads a reference document: *shared",
 			},
 		}
 
@@ -5669,5 +5701,176 @@ func TestResolver_EmptyDocument(t *testing.T) {
 				}
 			})
 		}
+	})
+}
+
+func TestAliasError(t *testing.T) {
+	t.Parallel()
+
+	shared := paths.WithReferenceAnchors(func(name string) (ast.Node, bool) {
+		if name != "shared" {
+			return nil, false
+		}
+
+		return &ast.MappingNode{}, true
+	})
+
+	// A resolve through an alias that does not resolve returns an
+	// AliasError under the path. The error wraps ErrAlias and one reason,
+	// names the alias of the document, and gives its 0-indexed position.
+	tcs := map[string]struct {
+		opt    paths.ResolverOption
+		input  string
+		path   paths.Path
+		reason error
+		at     position.Position
+		want   string
+	}{
+		"alias without an anchor of its name": {
+			input:  "a: *nope\n",
+			path:   paths.Doc().Child("a", "b"),
+			reason: paths.ErrAnchorMissing,
+			at:     position.Position{Line: 0, Col: 3},
+			want:   "resolve $.a.b: alias does not resolve: *nope has no anchor before it",
+		},
+		"alias that leads back to itself": {
+			input:  stringtest.LinesLF("x: 1", "a: &x [*x]"),
+			path:   paths.Doc().Child("a").Index(0).Index(0),
+			reason: paths.ErrAliasCycle,
+			at:     position.Position{Line: 1, Col: 7},
+			want:   "resolve $.a[0][0]: alias does not resolve: *x forms a cycle",
+		},
+		"alias at the root of an @ path": {
+			input:  "*nope\n",
+			path:   paths.Current(),
+			reason: paths.ErrAnchorMissing,
+			at:     position.Position{Line: 0, Col: 0},
+			want:   "resolve @: alias does not resolve: *nope has no anchor before it",
+		},
+		"alias that reads a reference document": {
+			opt:    shared,
+			input:  "a: *shared\n",
+			path:   paths.Doc().Child("a", "b"),
+			reason: paths.ErrReferenceAlias,
+			at:     position.Position{Line: 0, Col: 3},
+			want:   "resolve $.a.b: alias reads a reference document: *shared",
+		},
+	}
+
+	reasons := []error{paths.ErrAliasCycle, paths.ErrAnchorMissing, paths.ErrReferenceAlias}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := documentOf(t, tc.input)
+			aliases := ast.Filter(ast.AliasType, doc)
+			require.Len(t, aliases, 1)
+
+			var opts []paths.ResolverOption
+
+			if tc.opt != nil {
+				opts = append(opts, tc.opt)
+			}
+
+			_, err := paths.NewResolver(doc, opts...).Node(tc.path)
+			require.EqualError(t, err, tc.want)
+			require.ErrorIs(t, err, paths.ErrAlias)
+
+			for _, reason := range reasons {
+				assert.Equal(t, errors.Is(reason, tc.reason), errors.Is(err, reason), "matches %v", reason)
+			}
+
+			var aliasErr *paths.AliasError
+
+			require.ErrorAs(t, err, &aliasErr)
+			assert.True(t, tc.path.Equal(aliasErr.Path), "path %s", aliasErr.Path)
+			assert.Same(t, aliases[0], aliasErr.Alias)
+			require.ErrorIs(t, aliasErr.Cause, paths.ErrAlias)
+			assert.Equal(t, strings.TrimPrefix(tc.want, "resolve "+tc.path.String()+": "), aliasErr.Cause.Error())
+
+			pos, ok := aliasErr.Position()
+			require.True(t, ok)
+			assert.Equal(t, tc.at, pos)
+		})
+	}
+
+	t.Run("call without a path", func(t *testing.T) {
+		t.Parallel()
+
+		// Deref has no path, so the error names the alias alone.
+		doc := documentOf(t, "a: *nope\n")
+		alias := ast.Filter(ast.AliasType, doc)[0]
+
+		_, err := paths.NewResolver(doc).Deref(alias)
+		require.EqualError(t, err, "deref: alias does not resolve: *nope has no anchor before it")
+		require.ErrorIs(t, err, paths.ErrAnchorMissing)
+
+		var aliasErr *paths.AliasError
+
+		require.ErrorAs(t, err, &aliasErr)
+		assert.True(t, aliasErr.Path.Equal(paths.Path{}), "path %s", aliasErr.Path)
+		assert.Same(t, alias, aliasErr.Alias)
+
+		pos, ok := aliasErr.Position()
+		require.True(t, ok)
+		assert.Equal(t, position.Position{Line: 0, Col: 3}, pos)
+	})
+
+	t.Run("anchor of a node that is not an alias", func(t *testing.T) {
+		t.Parallel()
+
+		doc := documentOf(t, "a: 1\n")
+
+		_, err := paths.NewResolver(doc).Anchor(doc.Body)
+		require.EqualError(t, err, "anchor: alias does not resolve: not an alias")
+		require.ErrorIs(t, err, paths.ErrAlias)
+
+		var aliasErr *paths.AliasError
+
+		require.ErrorAs(t, err, &aliasErr)
+		assert.Nil(t, aliasErr.Alias)
+
+		_, ok := aliasErr.Position()
+		assert.False(t, ok)
+	})
+
+	t.Run("alias without a token", func(t *testing.T) {
+		t.Parallel()
+
+		// Only a hand-built tree holds an alias without a token. The
+		// error names the alias, but it has no position.
+		doc := documentOf(t, "a: 1\n")
+		alias := &ast.AliasNode{}
+		requireAs[*ast.MappingNode](t, doc.Body).Values[0].Value = alias
+
+		_, err := paths.NewResolver(doc).Node(paths.Doc().Child("a"))
+		require.EqualError(t, err, "resolve $.a: alias does not resolve: alias has no name")
+		require.ErrorIs(t, err, paths.ErrAlias)
+
+		for _, reason := range reasons {
+			require.NotErrorIs(t, err, reason)
+		}
+
+		var aliasErr *paths.AliasError
+
+		require.ErrorAs(t, err, &aliasErr)
+		assert.Same(t, alias, aliasErr.Alias)
+
+		_, ok := aliasErr.Position()
+		assert.False(t, ok)
+	})
+
+	t.Run("nil cause", func(t *testing.T) {
+		t.Parallel()
+
+		// A program can build an AliasError itself. Without a Cause, it
+		// reads and matches as ErrAlias.
+		err := &paths.AliasError{}
+		require.EqualError(t, err, "alias does not resolve")
+		require.ErrorIs(t, err, paths.ErrAlias)
+
+		err = &paths.AliasError{Path: paths.Doc().Child("a")}
+		require.EqualError(t, err, "resolve $.a: alias does not resolve")
 	})
 }

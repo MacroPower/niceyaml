@@ -165,13 +165,15 @@
 //
 // An alias does not resolve when it leads back to itself or when the document
 // does not define an anchor of its name before it. A resolve through such an
-// alias returns an error wrapping [ErrAlias], which names the line and the
-// column of the alias after the path, as in "resolve $.a.b: 1:7: alias does
-// not resolve: *x forms a cycle". An alias inside the content of the anchor
-// it refers to leads back to itself, unless a `<<` merge key names it. The
-// decoder reads such an alias as null, so a path that ends at the
-// alias selects it, or the tag on it, as it selects an alias that reads a
-// reference document. So does a path that ends at an alias of an anchor
+// alias returns an [*AliasError] wrapping [ErrAlias], which reads as in
+// "resolve $.a.b: alias does not resolve: *x forms a cycle". The AliasError
+// carries the alias, and [AliasError.Position] gives its position. The
+// error wraps the reason too, [ErrAliasCycle] or [ErrAnchorMissing]. An
+// alias inside the content of the anchor it refers to leads back to
+// itself, unless a `<<` merge key names it. The decoder reads such an
+// alias as null. A path that ends at the alias thus selects it, or the
+// tag on it, as it selects an alias that reads a reference document. So
+// does a path that ends at an alias of an anchor
 // that holds such an alias, as "&x !t *x" does. A `..*` selector lists
 // such an alias and does not descend below it. A `.*`, `[*]`, or `..`
 // selector at the alias selects nothing, as on any other null. Any other

@@ -5937,7 +5937,7 @@ func TestWithReferences(t *testing.T) {
 		require.EqualError(t, err, "app.yaml: $.x.kind: bad")
 
 		bound := yamltest.RequireSourceError(t, err)
-		require.EqualError(t, bound.Unresolved(), "resolve $.x.kind: 10:7: alias reads a reference document: *base")
+		require.EqualError(t, bound.Unresolved(), "resolve $.x.kind: alias reads a reference document: *base")
 		require.ErrorIs(t, bound.Unresolved(), paths.ErrReferenceAlias)
 
 		// With the limit off, the same document reads the merge sources.

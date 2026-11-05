@@ -14,7 +14,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/mapkey"
-	"go.jacobcolvin.com/niceyaml/internal/pathshook"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -140,10 +139,12 @@ func (e *aliasError) Error() string {
 // key, as [Doc.mergeWords] gives it. AliasProblem reports false for any
 // other error.
 func (d *Doc) aliasProblem(err error) (*aliasError, bool) {
-	alias, ok := pathshook.UnresolvedAlias(err)
-	if !ok || !d.inText(alias) {
+	problem, ok := errors.AsType[*paths.AliasError](err)
+	if !ok || problem.Alias == nil || !d.inText(problem.Alias) {
 		return nil, false
 	}
+
+	alias := problem.Alias
 
 	_, derr := d.node.Resolver().Deref(alias)
 	if derr == nil {
@@ -529,7 +530,7 @@ func (d *Doc) childOf(finder *paths.EntryFinder, content ast.Node, name string) 
 		mapping = &ast.MappingNode{BaseNode: &ast.BaseNode{}, Values: []*ast.MappingValueNode{e}}
 	}
 
-	node, err := finder.Entry(mapping, name)
+	entry, err := finder.Entry(mapping, name)
 
 	switch {
 	case errors.Is(err, paths.ErrNotFound):
@@ -542,10 +543,8 @@ func (d *Doc) childOf(finder *paths.EntryFinder, content ast.Node, name string) 
 		return child{}, err //nolint:wrapcheck // The walk binds the error.
 	}
 
-	entry, ok := node.(*ast.MappingValueNode)
-
 	switch {
-	case !ok || astnode.IsMergeKey(entry.Key):
+	case entry == nil || astnode.IsMergeKey(entry.Key):
 		return child{}, nil
 	case slices.Contains(entries, entry):
 		return child{entry: entry}, nil

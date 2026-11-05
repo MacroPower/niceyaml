@@ -183,8 +183,8 @@ func (f *Facts) alias(alias *ast.AliasNode, merge bool, open, nullAnchors map[*a
 	fact.Name, _ = astnode.Name(alias.Value)
 
 	anchor, err := f.resolver.Anchor(alias)
-	if node, ok := anchor.(*ast.AnchorNode); ok && err == nil {
-		fact.Anchor = node
+	if err == nil {
+		fact.Anchor = anchor
 	}
 
 	if fact.Anchor == nil {

@@ -186,8 +186,8 @@ func tagsNoValue(tag *ast.TagNode) bool {
 // of a reference document reads that anchor too.
 func (r *Reader) anchor(alias *ast.AliasNode, ref bool) (*ast.AnchorNode, bool, error) {
 	if !ref {
-		found, err := r.Resolver.Anchor(alias)
-		if anchor, ok := found.(*ast.AnchorNode); err == nil && ok && anchor != nil {
+		anchor, err := r.Resolver.Anchor(alias)
+		if err == nil && anchor != nil {
 			return anchor, false, nil
 		}
 	}

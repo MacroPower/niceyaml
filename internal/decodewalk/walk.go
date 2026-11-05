@@ -212,7 +212,7 @@ func (v *Value) Selected() bool {
 
 	selected, err := v.resolver.Entry(v.Parent.Node, v.Name)
 
-	return err == nil && selected == ast.Node(v.Entry)
+	return err == nil && selected == v.Entry
 }
 
 // Walk reads node as a value of type t and calls visit for each value the
@@ -694,16 +694,11 @@ func (w *walker) lookup(mapping *ast.MappingNode, name string, merges bool) entr
 		return read
 	}
 
-	if err != nil {
+	if err != nil || selected == nil || w.droppedBy(mapping)[selected] {
 		return entryRead{known: true}
 	}
 
-	entry, ok := selected.(*ast.MappingValueNode)
-	if !ok || w.droppedBy(mapping)[entry] {
-		return entryRead{known: true}
-	}
-
-	return entryRead{entry: entry, known: true}
+	return entryRead{entry: selected, known: true}
 }
 
 // ownEntry returns the last entry of mapping itself whose key is name, or
@@ -1348,12 +1343,11 @@ func (w *walker) documentAnchor(alias *ast.AliasNode) (ast.Node, bool, bool) {
 		return nil, false, false
 	}
 
-	held, ok := anchor.(*ast.AnchorNode)
-	if err != nil || !ok {
+	if err != nil || anchor == nil {
 		return nil, true, false
 	}
 
-	return held.Value, true, true
+	return anchor.Value, true, true
 }
 
 // pastAliasLimit reports whether the document of the walk is past the

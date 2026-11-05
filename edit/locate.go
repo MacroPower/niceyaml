@@ -17,7 +17,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
-	"go.jacobcolvin.com/niceyaml/internal/pathshook"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -513,12 +512,12 @@ func (d *Doc) holdsPath(path paths.Path) bool {
 // [Doc.aliasSite] gives it. It reports false for an alias outside the
 // current text.
 func (d *Doc) referenceSite(err error) (site, bool) {
-	alias, ok := pathshook.UnresolvedAlias(err)
-	if !ok || !d.inText(alias) {
+	unresolved, ok := errors.AsType[*paths.AliasError](err)
+	if !ok || unresolved.Alias == nil || !d.inText(unresolved.Alias) {
 		return site{}, false
 	}
 
-	return d.aliasSite(alias)
+	return d.aliasSite(unresolved.Alias)
 }
 
 // tokenlessPlace returns place moved to where an error at path binds, a

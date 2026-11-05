@@ -686,10 +686,8 @@ func (d *Doc) entryRead(node ast.Node, name string) (*ast.MappingValueNode, bool
 		return last, false, last != nil
 	}
 
-	found, err := d.node.Resolver().Entry(node, name)
-	e, ok := found.(*ast.MappingValueNode)
-
-	if err != nil || !ok {
+	e, err := d.node.Resolver().Entry(node, name)
+	if err != nil {
 		return nil, false, false
 	}
 
