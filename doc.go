@@ -82,6 +82,41 @@
 // palettes. Without one, [go.jacobcolvin.com/niceyaml/printer.Printer]
 // renders with [go.jacobcolvin.com/niceyaml/style.Default].
 //
+// # Options
+//
+// Every constructor of the module takes functional options. Each option
+// that sets a value in place of a default keeps that default on a nil
+// argument. An interface that holds a nil pointer or a nil func counts as
+// nil too. A program that builds a value only on some condition thus
+// passes it as it is:
+//
+//	var gutter printer.Gutter
+//	if numbered {
+//		gutter = printer.LineNumberGutter
+//	}
+//
+//	p := printer.New(printer.WithGutter(gutter)) // DefaultGutter when numbered is false
+//
+// Turning a feature off takes a named value, such as
+// [go.jacobcolvin.com/niceyaml/printer.NoGutter] or
+// [go.jacobcolvin.com/niceyaml/finder.Exact], so the off state is visible
+// at the call site. The exception is an option whose value is a security
+// boundary, such as [go.jacobcolvin.com/niceyaml/schema.WithAccess]. A nil
+// there is a bug, such as the result of an ignored error, and the option
+// panics rather than fail open.
+//
+// An option that adds a function or a matcher to a list, such as
+// [go.jacobcolvin.com/niceyaml/manifest.WithCheck], has no default to
+// keep. Its doc says what a nil argument does. Some such options add
+// nothing for a nil argument, and the constructor of others returns an
+// error for it.
+//
+// Every integer limit option, such as [WithByteLimit] or
+// [go.jacobcolvin.com/niceyaml/schema.WithLoadLimit], reads 0 as no
+// limit, counts a negative as 0, and takes the last option given. A zero
+// from a configuration field thus removes a safety bound, as the Limits
+// section describes for the limits of a [Source].
+//
 // # Lines
 //
 // A YAML token can span several lines, as block scalars and multiline strings
@@ -1638,7 +1673,8 @@
 // A search folds case and ignores diacritics by default, through
 // [go.jacobcolvin.com/niceyaml/normalizer.New].
 // [go.jacobcolvin.com/niceyaml/finder.WithNormalizer] sets a normalizer of
-// the caller's own, or nil for exact matching:
+// the caller's own, or [go.jacobcolvin.com/niceyaml/finder.Exact] for exact
+// matching:
 //
 //	idx := finder.New().Load(source.Lines())
 //	view := source.View()
