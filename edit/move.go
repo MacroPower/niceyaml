@@ -17,11 +17,14 @@ import (
 
 // Move moves the value and its comments to target, a `$` path, which it
 // creates as [Node.Set] does. A target at the index past the last item of a
-// sequence thus appends an item. A place that does not hold a value stays
-// as it is. The comments include the comment lines
-// that [Node.Remove] takes with the entry or the item, such as those that
-// the user indented past its key or its "-". Move deletes blank lines next
-// to the old lines of the value as Remove does.
+// sequence thus appends an item. The entry that the move creates goes
+// after the last entry of its mapping, unless an option of opts places it,
+// as the same option places the entry that a Set creates. A [Before] or an
+// [After] that names the key of the entry that moves fails the move. A
+// place that does not hold a value stays as it is. The comments include
+// the comment lines that [Node.Remove] takes with the entry or the item,
+// such as those that the user indented past its key or its "-". Move
+// deletes blank lines next to the old lines of the value as Remove does.
 //
 // A Move makes the checks of a Remove of the value and an insertion of the
 // same text at target. It passes where that pair passes, except where it
@@ -86,7 +89,13 @@ import (
 // without the value resolves target to another place, with another value
 // that holds it, the value goes in at target first and then leaves its
 // place.
-func (n *Node) Move(target paths.Path) error {
+func (n *Node) Move(target paths.Path, opts ...SetOption) error {
+	var cfg setConfig
+
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	c := n.d.modelStart(n, fmt.Sprintf("moves %s to %s", n.path, target), false)
 
 	var to *modelCall
@@ -95,26 +104,31 @@ func (n *Node) Move(target paths.Path) error {
 		to = n.d.modelAt(target)
 	}
 
-	err := n.move(target)
+	where, err := n.move(target, cfg.at)
 
-	return n.d.modelEnd(c, err, func() bool { return c.move(to) })
+	return n.d.modelEnd(c, err, func() bool { return c.move(to, where) })
 }
 
-// move moves the value to target, as [Node.Move] describes.
+// move moves the value to target, as [Node.Move] describes, and puts the
+// entry that it creates at the place that at gives. It returns that place
+// as the model reads it. The move makes each refusal that it can find
+// before it changes the text, and then it resolves the placement. A
+// refusal that the move finds only after it changes the text comes after
+// a problem of the placement.
 //
 //nolint:contextcheck // A move decodes the text after it, which reads no state that a context carries.
-func (n *Node) move(target paths.Path) error {
+func (n *Node) move(target paths.Path, at placement) (modelPlace, error) {
 	d := n.d
 
 	p, err := n.place(useEdit, "moves")
 	if err != nil {
-		return err
+		return modelPlace{}, err
 	}
 
 	// The text lacks the place, so the move does nothing, unless a step of
 	// the path reaches a zone of the Apply.
 	if !p.exists {
-		return n.stepProblem()
+		return modelPlace{}, n.stepProblem()
 	}
 
 	// A message quotes the name of a key and names an item by its path.
@@ -127,17 +141,21 @@ func (n *Node) move(target paths.Path) error {
 
 	switch {
 	case !target.IsAbsolute() || !plain(target):
-		return d.fail(n, "%s moves %s to %s, which is no $ path of names and indexes", d.subject(), name, target)
+		return modelPlace{}, d.fail(n, "%s moves %s to %s, which is no $ path of names and indexes",
+			d.subject(), name, target)
+
 	case target.IsRoot():
-		return d.fail(n, "%s moves %s to $, but a value cannot move to the document root", d.subject(), name)
+		return modelPlace{}, d.fail(n, "%s moves %s to $, but a value cannot move to the document root",
+			d.subject(), name)
+
 	case p.root:
-		return d.fail(n, "%s moves the root of the document", d.subject())
+		return modelPlace{}, d.fail(n, "%s moves the root of the document", d.subject())
 	case why != "":
-		return d.fail(n, "%s moves %s, which %s", d.subject(), name, why)
+		return modelPlace{}, d.fail(n, "%s moves %s, which %s", d.subject(), name, why)
 	}
 
 	if _, inside := target.CutPrefix(n.path); inside {
-		return d.fail(n, "%s moves %s to %s, which lies inside it", d.subject(), name, target)
+		return modelPlace{}, d.fail(n, "%s moves %s to %s, which lies inside it", d.subject(), name, target)
 	}
 
 	// A step of the path to target before its problem can reach a zone of
@@ -149,14 +167,14 @@ func (n *Node) move(target paths.Path) error {
 	if err != nil {
 		refused := d.stepProblem(targetStep)
 		if refused != nil {
-			return refused
+			return modelPlace{}, refused
 		}
 
-		return d.readFail(n, fmt.Errorf("%s moves %s to %s, which %w", d.subject(), name, target, err))
+		return modelPlace{}, d.readFail(n, fmt.Errorf("%s moves %s to %s, which %w", d.subject(), name, target, err))
 	}
 
 	if whyTarget := d.protection(tp, true); whyTarget != "" {
-		return d.fail(n, "%s moves %s to %s, which %s", d.subject(), name, target, whyTarget)
+		return modelPlace{}, d.fail(n, "%s moves %s to %s, which %s", d.subject(), name, target, whyTarget)
 	}
 
 	named := fmt.Sprintf("moves %s to %s", n.path, target)
@@ -171,10 +189,10 @@ func (n *Node) move(target paths.Path) error {
 		if k, key, ok := d.mergedTarget(tw); ok {
 			err = d.reachProblem(reach)
 			if err != nil {
-				return err
+				return modelPlace{}, err
 			}
 
-			return d.mergeKeysProblem(k, new(d.holderSite(p)), key, true, named)
+			return modelPlace{}, d.mergeKeysProblem(k, new(d.holderSite(p)), key, true, named)
 		}
 	}
 
@@ -186,7 +204,7 @@ func (n *Node) move(target paths.Path) error {
 			fmt.Sprintf("%s moves %s to %s, which already exists", d.subject(), name, target))
 		d.record(err)
 
-		return err
+		return modelPlace{}, err
 
 	case tp.exists:
 		// The problem is about the "-" that the move writes for the value, so
@@ -199,39 +217,54 @@ func (n *Node) move(target paths.Path) error {
 		))
 		d.record(err)
 
-		return err //nolint:wrapcheck // The binding is the problem of the edit.
+		return modelPlace{}, err //nolint:wrapcheck // The binding is the problem of the edit.
 	}
 
 	th, why, ok := d.targetHolder(target, tp)
 	if ok && why != "" {
 		refused := d.stepProblem(targetStep)
 		if refused != nil {
-			return refused
+			return modelPlace{}, refused
 		}
 	}
 
 	switch {
 	case ok && why != "":
-		return d.fail(n, "%s moves %s to %s, but %s", d.subject(), name, target, why)
+		return modelPlace{}, d.fail(n, "%s moves %s to %s, but %s", d.subject(), name, target, why)
 	case ok && (th.content == astnode.Content(p.value) || d.liesIn(th.content, p.value)):
 		// The path to target reads the value through an alias.
-		return d.fail(n, "%s moves %s to %s, which lies inside it", d.subject(), name, target)
+		return modelPlace{}, d.fail(n, "%s moves %s to %s, which lies inside it", d.subject(), name, target)
 	}
 
 	err = d.reachProblem(reach)
 	if err != nil {
-		return err
+		return modelPlace{}, err
 	}
 
 	if p.entry != nil {
 		err = d.ownKeysProblem(p.entry, p.container, "", false, named)
 		if err != nil {
-			return err
+			return modelPlace{}, err
 		}
 	}
 
 	if ok && d.inFlow(th.content) && d.userBlock(p.value) {
-		return d.flowMoveProblem(p.value, named)
+		return modelPlace{}, d.flowMoveProblem(p.value, named)
+	}
+
+	// The placement names a key of the mapping that holds target, as the
+	// text stands before the move. The model reads the edge of that key
+	// before the move changes the text.
+	where, err := d.movePlace(n, th, named, at)
+	if err != nil {
+		return modelPlace{}, err
+	}
+
+	// The entry leaves its mapping before the new entry goes in, so the new
+	// entry cannot go before or after it.
+	if p.entry != nil && where.entry == p.entry {
+		return modelPlace{}, d.fail(n, "%s %s %s %q, which is the entry that moves",
+			d.subject(), named, at.side(), at.key)
 	}
 
 	ctx := context.Background()
@@ -257,7 +290,7 @@ func (n *Node) move(target paths.Path) error {
 	saved, callErr := d.save(), d.callErr
 	bound := d.aliasBindings()
 
-	moved, index, err := d.moveValue(n, p, target, named)
+	moved, index, err := d.moveValue(n, p, target, named, where)
 
 	moves := -1
 	if err == nil {
@@ -276,16 +309,16 @@ func (n *Node) move(target paths.Path) error {
 
 	switch {
 	case err != nil:
-		return err
+		return modelPlace{}, err
 	case moves >= 0:
-		return d.moveOrderProblem(moves, named)
+		return modelPlace{}, d.moveOrderProblem(moves, named)
 	case apart:
-		return d.bug(n, fmt.Errorf("%s %s, but go-yaml's decoder reads an alias of the text after the move "+
-			"otherwise than the decode of the text does", d.subject(), named))
+		return modelPlace{}, d.bug(n, fmt.Errorf("%s %s, but go-yaml's decoder reads an alias of the text "+
+			"after the move otherwise than the decode of the text does", d.subject(), named))
 	}
 
 	if items != nil {
-		items.shift(index)
+		items.shift(index+1, -1)
 	}
 
 	// The value takes the place of target, which a path selects, so a node
@@ -297,15 +330,30 @@ func (n *Node) move(target paths.Path) error {
 
 	moving.rebase(func(paths.Path) paths.Path { return moved })
 
-	return nil
+	return where, nil
+}
+
+// movePlace returns the place of the entry that a move of n creates in th,
+// as the model reads it. Here th is the value that holds the target, and
+// at is the placement of the move. Named says what the Move does, as in
+// "moves $.a to $.b". A placement that names a key that the mapping of th
+// does not write fails the move. A target that a sequence holds, or whose
+// holder the text does not resolve, takes the placement as it is.
+func (d *Doc) movePlace(n *Node, th moveHolder, named string, at placement) (modelPlace, error) {
+	if _, isMapping := readEntries(th.content); !isMapping {
+		return modelPlace{placement: at}, nil
+	}
+
+	return d.placeEntry(n, named, th.place, th.path, th.content, at)
 }
 
 // moveValue moves the text of the value of p, the place of n, to target, a
-// place that does not hold a value, as [Node.Move] describes. Named says
-// what the Move does, as in "moves $.a to $.b". MoveValue returns target as
-// the text after the move spells it, and the index of the item of p in its
+// place that does not hold a value, as [Node.Move] describes, and puts the
+// entry that it creates at the place that where gives. Named says what the
+// Move does, as in "moves $.a to $.b". MoveValue returns target as the text
+// after the move spells it, and the index of the item of p in its
 // sequence.
-func (d *Doc) moveValue(n *Node, p *place, target paths.Path, named string) (paths.Path, int, error) {
+func (d *Doc) moveValue(n *Node, p *place, target paths.Path, named string, where modelPlace) (paths.Path, int, error) {
 	pl := d.extract(p)
 	saved := d.save()
 
@@ -326,7 +374,7 @@ func (d *Doc) moveValue(n *Node, p *place, target paths.Path, named string) (pat
 	}
 
 	if after, ok := d.targetHolderID(moved); held && ok && after.same(holder) {
-		err = d.insertAt(n, moved, pl, named)
+		err = d.insertAt(n, moved, pl, named, where)
 		if err != nil {
 			return target, 0, err
 		}
@@ -340,7 +388,7 @@ func (d *Doc) moveValue(n *Node, p *place, target paths.Path, named string) (pat
 	// leaves its place.
 	d.restore(saved)
 
-	err = d.insertAt(n, target, pl, named)
+	err = d.insertAt(n, target, pl, named, where)
 	if err != nil {
 		return target, 0, err
 	}
@@ -956,11 +1004,12 @@ func (d *Doc) targetHolder(target paths.Path, tp *place) (moveHolder, string, bo
 }
 
 // insertAt inserts pl at target, a place that does not hold a value, and
-// creates the mappings above it that the document lacks. Named says what
-// the Move does, for the note of the text that it creates. The caller
-// checks with [Doc.targetHolder] that target can take a value before it
-// changes the text.
-func (d *Doc) insertAt(h *Node, target paths.Path, pl payload, named string) error {
+// creates the mappings above it that the document lacks. The entry that it
+// creates goes at the place that where gives. Named says what the Move
+// does, for the note of the text that it creates. The caller checks with
+// [Doc.targetHolder] that target can take a value before it changes the
+// text.
+func (d *Doc) insertAt(h *Node, target paths.Path, pl payload, named string, where modelPlace) error {
 	tp, err := d.resolve(target)
 	if err != nil {
 		return d.bug(h, fmt.Errorf("%s %w", target, err))
@@ -980,11 +1029,23 @@ func (d *Doc) insertAt(h *Node, target paths.Path, pl payload, named string) err
 		return d.bug(h, fmt.Errorf("%s: %s", target, why))
 	}
 
-	origin := d.addNote(d.createdNote(th.place, named))
-
 	if seq, ok := th.content.(*ast.SequenceNode); ok {
-		return d.appendPayload(h, th.path, th.place, seq, pl, origin)
+		origin := d.addNote(d.createdNote(th.place, named))
+
+		return d.insertPayloadItem(h, th.path, th.place, seq, len(seq.Values), pl, origin)
 	}
+
+	// The text after the removal of the value holds the entry that the new
+	// entry goes before or after, and the model still holds its edge.
+	fresh, err := d.placeEntry(h, named, th.place, th.path, th.content, where.placement)
+	if err != nil {
+		return err
+	}
+
+	fresh.anchor = where.anchor
+	where = fresh
+
+	origin := d.addNote(d.createdNote(th.place, named))
 
 	var keys []run
 
@@ -1015,7 +1076,7 @@ func (d *Doc) insertAt(h *Node, target paths.Path, pl payload, named string) err
 
 	entries, _ := readEntries(th.content)
 
-	return d.insertPayload(h, th.path, th.place, th.content, entries, keys[0], pl, origin)
+	return d.insertPayload(h, th.path, th.place, th.content, entries, keys[0], pl, origin, where)
 }
 
 // nest returns pl as the value of the entry key of a new block mapping,

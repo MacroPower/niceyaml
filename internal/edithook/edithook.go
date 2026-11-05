@@ -22,13 +22,18 @@ var (
 	// binds its errors in the user's document through it.
 	Locator func(d any) func(niceyaml.Located) niceyaml.Place
 
-	// SetField sets the type field at path of d, a *edit.Doc, to the
-	// string text. Messages name that edit by label. A scalar that the
-	// document writes keeps its style where text allows it, and it keeps its
-	// anchor, so each alias of the anchor reads the new value. A field that
-	// the document lacks goes first in its mapping, after the comment lines
-	// at the top of the document. The mappings above the field that the
-	// document lacks go with it, as edit.Node.Set creates them.
+	// SetField sets the protected type field at path of d, a *edit.Doc, to
+	// the string text, outside any Apply. It is the one write that reaches
+	// a value of edit.WithProtected, so the manifest package writes the
+	// type fields that its steps cannot touch. Messages name that edit by
+	// label. A scalar that the document writes keeps its style where text
+	// allows it, and it keeps its anchor, so each alias of the anchor reads
+	// the new value. A field that the document lacks goes first in its
+	// mapping, as edit.Node.Set with edit.First places it, after the
+	// comment lines at the top of the document. Where the document lacks
+	// the mapping too, the field goes in as edit.Node.Set creates a value,
+	// with the mappings above it that the document lacks, after the last
+	// entry of the mapping that takes them.
 	//
 	// SetField fails with a problem of the document when the lookup of path
 	// goes through a `<<` merge key that reads a reference document. The

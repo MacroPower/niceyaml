@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
@@ -2821,4 +2822,505 @@ type panicTextMarshaler struct{}
 // MarshalText panics.
 func (panicTextMarshaler) MarshalText() ([]byte, error) {
 	panic("edit_test.panicTextMarshaler")
+}
+
+func TestNode_Set_Placement(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		value  any
+		before string
+		path   paths.Path
+		opts   []edit.SetOption
+		want   string
+		err    string
+	}{
+		"first after the comment lines at the top of the document": {
+			before: stringtest.LinesLF("# top", "# note", "a: 1", "b: 2"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.LinesLF("# top", "# note", "z: 0", "a: 1", "b: 2"),
+		},
+		"first after the header of the document": {
+			before: stringtest.LinesLF("---", "a: 1"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.LinesLF("---", "z: 0", "a: 1"),
+		},
+		"first in a nested mapping": {
+			before: stringtest.LinesLF("m:", "  a: 1", "  b: 2"),
+			path:   paths.Doc().Child("m").Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.LinesLF("m:", "  z: 0", "  a: 1", "  b: 2"),
+		},
+		"first in a mapping item that shares the line of its dash": {
+			before: stringtest.LinesLF("- a: 1", "  b: 2"),
+			path:   paths.Doc().Index(0).Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.LinesLF("- z: 0", "  a: 1", "  b: 2"),
+		},
+		"first with a block scalar": {
+			before: "a: 1\n",
+			path:   paths.Doc().Child("z"),
+			value:  "x\ny\n",
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.LinesLF("z: |", "  x", "  y", "a: 1"),
+		},
+		"first in a CRLF text": {
+			before: stringtest.JoinCRLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.JoinCRLF("z: 0", "a: 1", "b: 2"),
+		},
+		"first in a flow mapping": {
+			before: "m: {a: 1, b: 2}\n",
+			path:   paths.Doc().Child("m").Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.First()},
+			want:   "m: {z: 0, a: 1, b: 2}\n",
+		},
+		"first in an empty flow mapping": {
+			before: "m: {}\n",
+			path:   paths.Doc().Child("m").Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.First()},
+			want:   "m: {z: 0}\n",
+		},
+		"first with the mappings that the Set creates": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("m").Child("x"),
+			value:  0,
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.LinesLF("m:", "  x: 0", "a: 1", "b: 2"),
+		},
+		"first of a Set that replaces a value": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("b"),
+			value:  0,
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.LinesLF("a: 1", "b: 0"),
+		},
+		"first of a Set that appends an item": {
+			before: "s: [a]\n",
+			path:   paths.Doc().Child("s").Index(1),
+			value:  "b",
+			opts:   []edit.SetOption{edit.First()},
+			want:   "s: [a, b]\n",
+		},
+		"before a key": {
+			before: stringtest.LinesLF("a: 1", "b: 2", "c: 3"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.Before("c")},
+			want:   stringtest.LinesLF("a: 1", "b: 2", "z: 0", "c: 3"),
+		},
+		"before the first key": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.Before("a")},
+			want:   stringtest.LinesLF("z: 0", "a: 1", "b: 2"),
+		},
+		"before a key above the comment lines that belong to it": {
+			before: stringtest.LinesLF("a: 1", "# about b", "b: 2"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.Before("b")},
+			want:   stringtest.LinesLF("a: 1", "z: 0", "# about b", "b: 2"),
+		},
+		"before a key after a blank line": {
+			before: stringtest.LinesLF("a: 1", "", "b: 2"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.Before("b")},
+			want:   stringtest.LinesLF("a: 1", "", "z: 0", "b: 2"),
+		},
+		"before a key in a flow mapping": {
+			before: "m: {a: 1, b: 2}\n",
+			path:   paths.Doc().Child("m").Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.Before("b")},
+			want:   "m: {a: 1, z: 0, b: 2}\n",
+		},
+		"before a quoted key": {
+			before: stringtest.LinesLF("a: 1", `"b": 2`),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.Before("b")},
+			want:   stringtest.LinesLF("a: 1", "z: 0", `"b": 2`),
+		},
+		"before a key that the mapping lacks": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.Before("q")},
+			err:    `test.yaml:1:1: $: cafe.jacobcolvin.com/v1 sets $.z before "q", but the document holds no $.q`,
+		},
+		"before a key that a merge key brings in": {
+			before: stringtest.LinesLF("s: &s {k: 1}", "m:", "  <<: *s", "  a: 1"),
+			path:   paths.Doc().Child("m").Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.Before("k")},
+			err: "test.yaml:2:1: $.m: cafe.jacobcolvin.com/v1 sets $.m.z before \"k\", but a `<<` merge key " +
+				"brings k into m",
+		},
+		"after a key": {
+			before: stringtest.LinesLF("a: 1", "b: 2", "c: 3"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   stringtest.LinesLF("a: 1", "z: 0", "b: 2", "c: 3"),
+		},
+		"after the last key": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.After("b")},
+			want:   stringtest.LinesLF("a: 1", "b: 2", "z: 0"),
+		},
+		"after a key below the comment lines that belong to it": {
+			before: stringtest.LinesLF("a: 1", "  # of a", "b: 2"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   stringtest.LinesLF("a: 1", "  # of a", "z: 0", "b: 2"),
+		},
+		"after a key before a blank line": {
+			before: stringtest.LinesLF("a: 1", "", "b: 2"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   stringtest.LinesLF("a: 1", "z: 0", "", "b: 2"),
+		},
+		"after a key with a mapping": {
+			before: stringtest.LinesLF("a:", "  x: 1", "b: 2"),
+			path:   paths.Doc().Child("z"),
+			value:  map[string]any{"q": 2},
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   stringtest.LinesLF("a:", "  x: 1", "z:", "  q: 2", "b: 2"),
+		},
+		"after a key in a flow mapping": {
+			before: "m: {a: 1, b: 2}\n",
+			path:   paths.Doc().Child("m").Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   "m: {a: 1, z: 0, b: 2}\n",
+		},
+		"after a key with an empty value in a flow mapping": {
+			before: "m: {a: , b: 1}\n",
+			path:   paths.Doc().Child("m").Child("n"),
+			value:  9,
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   "m: {a: , \"n\": 9, b: 1}\n",
+		},
+		"after a key with spaces before its comma in a flow mapping": {
+			before: "m: {a: 1 , b: 1}\n",
+			path:   paths.Doc().Child("m").Child("n"),
+			value:  9,
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   "m: {a: 1 , \"n\": 9, b: 1}\n",
+		},
+		"after a key with a flow sequence in a flow mapping": {
+			before: "m: {a: [1, 2], b: 1}\n",
+			path:   paths.Doc().Child("m").Child("n"),
+			value:  9,
+			opts:   []edit.SetOption{edit.After("a")},
+			want:   "m: {a: [1, 2], \"n\": 9, b: 1}\n",
+		},
+		"after the last key in a flow mapping": {
+			before: "m: {a: 1, b: 2}\n",
+			path:   paths.Doc().Child("m").Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.After("b")},
+			want:   "m: {a: 1, b: 2, z: 0}\n",
+		},
+		"after the last key in a flow mapping with a trailing comma": {
+			before: "m: {a: 1, b: 2,}\n",
+			path:   paths.Doc().Child("m").Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.After("b")},
+			want:   "m: {a: 1, b: 2, z: 0,}\n",
+		},
+		"after a key that the mapping lacks": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.After("q")},
+			err:    `test.yaml:1:1: $: cafe.jacobcolvin.com/v1 sets $.z after "q", but the document holds no $.q`,
+		},
+		"last placement option wins": {
+			before: stringtest.LinesLF("a: 1", "b: 2", "c: 3"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			opts:   []edit.SetOption{edit.First(), edit.After("b")},
+			want:   stringtest.LinesLF("a: 1", "b: 2", "z: 0", "c: 3"),
+		},
+		"no placement": {
+			before: stringtest.LinesLF("a: 1", "b: 2"),
+			path:   paths.Doc().Child("z"),
+			value:  0,
+			want:   stringtest.LinesLF("a: 1", "b: 2", "z: 0"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before)
+
+			err := applyAt(t, d, tc.path, func(ctx context.Context, n *edit.Node) error {
+				return n.Set(ctx, tc.value, tc.opts...)
+			})
+			if tc.err != "" {
+				require.NotErrorIs(t, err, edit.ErrEngine)
+			}
+
+			requireEdit(t, d, err, tc.err, tc.want)
+		})
+	}
+}
+
+func TestNode_Insert(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		value  any
+		before string
+		path   paths.Path
+		want   string
+		err    string
+	}{
+		"first item of a block sequence": {
+			before: stringtest.LinesLF("s:", "  - a", "  - b"),
+			path:   paths.Doc().Child("s").Index(0),
+			value:  "z",
+			want:   stringtest.LinesLF("s:", "  - z", "  - a", "  - b"),
+		},
+		"item between two items": {
+			before: stringtest.LinesLF("s:", "  - a", "  - b"),
+			path:   paths.Doc().Child("s").Index(1),
+			value:  "z",
+			want:   stringtest.LinesLF("s:", "  - a", "  - z", "  - b"),
+		},
+		"item past the last": {
+			before: stringtest.LinesLF("s:", "  - a", "  - b"),
+			path:   paths.Doc().Child("s").Index(2),
+			value:  "z",
+			want:   stringtest.LinesLF("s:", "  - a", "  - b", "  - z"),
+		},
+		"item two past the last": {
+			before: stringtest.LinesLF("s:", "  - a", "  - b"),
+			path:   paths.Doc().Child("s").Index(3),
+			value:  "z",
+			err:    "test.yaml:1:1: $.s: cafe.jacobcolvin.com/v1 inserts $.s[3], but s holds 2 items",
+		},
+		"item above the comment lines of the item that it goes before": {
+			before: stringtest.LinesLF("s:", "  - a", "  # about b", "  - b"),
+			path:   paths.Doc().Child("s").Index(1),
+			value:  "z",
+			want:   stringtest.LinesLF("s:", "  - a", "  - z", "  # about b", "  - b"),
+		},
+		"first item after the comment lines at the top of the document": {
+			before: stringtest.LinesLF("# top", "- a"),
+			path:   paths.Doc().Index(0),
+			value:  "z",
+			want:   stringtest.LinesLF("# top", "- z", "- a"),
+		},
+		"mapping item": {
+			before: stringtest.LinesLF("s:", "  - a"),
+			path:   paths.Doc().Child("s").Index(0),
+			value:  map[string]any{"k": 1},
+			want:   stringtest.LinesLF("s:", "  - k: 1", "  - a"),
+		},
+		"item of a nested sequence that shares the line of its dash": {
+			before: stringtest.LinesLF("- - a", "  - b"),
+			path:   paths.Doc().Index(0).Index(0),
+			value:  "z",
+			want:   stringtest.LinesLF("- - z", "  - a", "  - b"),
+		},
+		"item of a block sequence in a CRLF text": {
+			before: stringtest.JoinCRLF("s:", "  - a", "  - b"),
+			path:   paths.Doc().Child("s").Index(1),
+			value:  "z",
+			want:   stringtest.JoinCRLF("s:", "  - a", "  - z", "  - b"),
+		},
+		"item of a flow sequence": {
+			before: "s: [a, b]\n",
+			path:   paths.Doc().Child("s").Index(1),
+			value:  "z",
+			want:   "s: [a, z, b]\n",
+		},
+		"first item of a flow sequence": {
+			before: "s: [a, b]\n",
+			path:   paths.Doc().Child("s").Index(0),
+			value:  "z",
+			want:   "s: [z, a, b]\n",
+		},
+		"item of an empty flow sequence": {
+			before: "s: []\n",
+			path:   paths.Doc().Child("s").Index(0),
+			value:  "z",
+			want:   "s: [z]\n",
+		},
+		"item of an anchored sequence that an alias reads": {
+			before: stringtest.LinesLF("s: &s", "  - a", "t: *s"),
+			path:   paths.Doc().Child("t").Index(0),
+			value:  "z",
+			want:   stringtest.LinesLF("s: &s", "  - z", "  - a", "t: *s"),
+		},
+		"path of an entry": {
+			before: stringtest.LinesLF("m:", "  a: 1"),
+			path:   paths.Doc().Child("m").Child("a"),
+			value:  "z",
+			err:    "test.yaml:2:6: $.m.a: cafe.jacobcolvin.com/v1 inserts $.m.a, which is no path of an item",
+		},
+		"root": {
+			before: "- a\n",
+			path:   paths.Doc(),
+			value:  "z",
+			err:    "test.yaml:1:3: $: cafe.jacobcolvin.com/v1 inserts $, which is no path of an item",
+		},
+		"index of a mapping": {
+			before: stringtest.LinesLF("m:", "  a: 1"),
+			path:   paths.Doc().Child("m").Index(0),
+			value:  "z",
+			err:    "test.yaml:1:1: $.m: cafe.jacobcolvin.com/v1 inserts $.m[0], but m holds a mapping",
+		},
+		"item of a sequence that the document lacks": {
+			before: "a: 1\n",
+			path:   paths.Doc().Child("s").Index(0),
+			value:  "z",
+			err:    "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 inserts $.s[0], but the document holds no $.s",
+		},
+		"item of a protected sequence": {
+			before: stringtest.LinesLF("kind:", "  - a"),
+			path:   paths.Doc().Child("kind").Index(0),
+			value:  "z",
+			err:    "test.yaml:2:5: $.kind[0]: cafe.jacobcolvin.com/v1 inserts $.kind[0], but kind is a protected value",
+		},
+		"item of a sequence inside a protected value": {
+			before: stringtest.LinesLF("kind:", "  s: [a]"),
+			path:   paths.Doc().Child("kind").Child("s").Index(0),
+			value:  "z",
+			err: "test.yaml:2:7: $.kind.s[0]: cafe.jacobcolvin.com/v1 inserts $.kind.s[0], but s lies inside a " +
+				"protected value",
+		},
+		"string with a control character": {
+			before: "s: [a]\n",
+			path:   paths.Doc().Child("s").Index(0),
+			value:  "\x01",
+			err:    "go-yaml's encoder writes U+0001",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before)
+
+			err := applyAt(t, d, tc.path, func(ctx context.Context, n *edit.Node) error {
+				return n.Insert(ctx, tc.value)
+			})
+
+			requireEdit(t, d, err, tc.err, tc.want)
+		})
+	}
+}
+
+func TestNode_Insert_Nodes(t *testing.T) {
+	t.Parallel()
+
+	d := newDoc(t, stringtest.LinesLF("s:", "  - a", "  - b"))
+
+	err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+		first := root.At(paths.Doc().Child("s").Index(0))
+		second := root.At(paths.Doc().Child("s").Index(1))
+		past := root.At(paths.Doc().Child("s").Index(2))
+
+		err := first.Insert(ctx, "z")
+		if err != nil {
+			return err
+		}
+
+		// The node of the Insert reads the new item, and the nodes on the
+		// items from its index on follow their items.
+		assert.Equal(t, paths.Doc().Child("s").Index(0), first.Path())
+		assert.Equal(t, "z", first.Text())
+		assert.Equal(t, paths.Doc().Child("s").Index(2), second.Path())
+		assert.Equal(t, "b", second.Text())
+		assert.Equal(t, paths.Doc().Child("s").Index(3), past.Path())
+		assert.False(t, past.Exists())
+
+		got, err := first.Decode[string](ctx)
+		if err != nil {
+			return err
+		}
+
+		assert.Equal(t, "z", got)
+
+		err = second.Set(ctx, "B")
+		if err != nil {
+			return err
+		}
+
+		return first.Set(ctx, "Z")
+	}, label)
+
+	requireEdit(t, d, err, "", stringtest.LinesLF("s:", "  - Z", "  - a", "  - B"))
+}
+
+func TestNode_Insert_SharedItems(t *testing.T) {
+	t.Parallel()
+
+	// Both $.s and $.t read the items of the anchored sequence, so the
+	// nodes on the later items follow their items through either path.
+	tcs := map[string]struct {
+		path paths.Path
+	}{
+		"through the alias path": {
+			path: paths.Doc().Child("t").Index(0),
+		},
+		"through the anchor path": {
+			path: paths.Doc().Child("s").Index(0),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, stringtest.LinesLF("s: &x", "  - a", "  - b", "t: *x"))
+
+			err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+				s := root.At(paths.Doc().Child("s").Index(1))
+				tt := root.At(paths.Doc().Child("t").Index(1))
+
+				err := root.At(tc.path).Insert(ctx, "x")
+				if err != nil {
+					return err
+				}
+
+				for n, want := range map[*edit.Node]paths.Path{
+					s:  paths.Doc().Child("s").Index(2),
+					tt: paths.Doc().Child("t").Index(2),
+				} {
+					assert.Equal(t, want, n.Path())
+					require.NoError(t, n.Err())
+					assert.True(t, n.Exists())
+					assert.Equal(t, "b", n.Text())
+				}
+
+				return nil
+			}, label)
+
+			requireEdit(t, d, err, "", stringtest.LinesLF("s: &x", "  - x", "  - a", "  - b", "t: *x"))
+		})
+	}
 }

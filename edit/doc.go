@@ -40,14 +40,16 @@
 //
 //	fmt.Print(text)
 //
-// A Node renames a key, sets or creates a value, moves a value to another
-// path, or removes an entry or an item. Renames, sets, and moves keep the
-// comments of the entry that they change, but a move into a flow
-// collection drops them. Removals delete them with the entry. The comment
-// lines after an entry or an item that the user indented past its key or
-// its "-" belong to it, so a new entry or item goes after them. Each value
-// that an edit writes takes the indent step of the mapping that holds it.
-// Go strings keep the quotes of the scalars that they replace.
+// A Node renames a key, sets or creates a value, inserts an item, moves a
+// value to another path, or removes an entry or an item. Renames, sets,
+// and moves keep the comments of the entry that they change, but a move
+// into a flow collection drops them. Removals delete them with the entry.
+// The comment lines after an entry or an item that the user indented past
+// its key or its "-" belong to it, so a new entry or item goes after them.
+// A new entry goes after the last entry of its mapping, or where [First],
+// [Before], or [After] places it. Each value that an edit writes takes the
+// indent step of the mapping that holds it. Go strings keep the quotes of
+// the scalars that they replace.
 //
 // A path selects each node of the text once. A wildcard or a recursive
 // descent selects a node at its first path in the order of the text. Each
@@ -429,14 +431,18 @@
 //     value comes from the node that go-yaml's encoder makes, and a Set
 //     whose text go-yaml reads as a value of another kind fails, as
 //     [Node.Set] describes. When the place does not hold a value, the Set
-//     creates the values of its path below the nearest value that exists.
+//     creates the values of its path below the nearest value that exists,
+//     where its placement option puts the entry.
+//   - [Node.Insert] puts the value before the item at its place, or after
+//     the last item of the sequence when the place lies past it.
 //   - [Node.SetKey] gives the entry the key that the call names, as a
 //     decode reads that string. When a decode reads the key as the new key
 //     and a path by the new key selects the entry already, the SetKey
 //     leaves the text and the model as they are.
 //   - [Node.Remove] removes the value.
 //   - [Node.Move] takes the value from its place to the target.
-//   - The write of a protected field creates or replaces the field.
+//   - The write of a protected field creates or replaces the field, first
+//     in its mapping.
 //
 // Go-yaml's parser compares the keys of a mapping by their text, as a path
 // names them. A call that writes a key that its mapping holds already fails

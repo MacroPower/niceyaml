@@ -1278,3 +1278,144 @@ func TestNode_Move_EmptyIntoFlow(t *testing.T) {
 		})
 	}
 }
+
+func TestNode_Move_Placement(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		before string
+		path   paths.Path
+		target paths.Path
+		opts   []edit.SetOption
+		want   string
+		err    string
+		// Whether the Func removes the value through the node before the
+		// Move.
+		removed bool
+	}{
+		"first": {
+			before: stringtest.LinesLF("a: 1", "m:", "  x: 1", "  y: 2"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("m").Child("a"),
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.LinesLF("m:", "  a: 1", "  x: 1", "  y: 2"),
+		},
+		"before a key": {
+			before: stringtest.LinesLF("a: 1", "m:", "  x: 1", "  y: 2"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("m").Child("a"),
+			opts:   []edit.SetOption{edit.Before("y")},
+			want:   stringtest.LinesLF("m:", "  x: 1", "  a: 1", "  y: 2"),
+		},
+		"after a key": {
+			before: stringtest.LinesLF("m:", "  x: 1", "  y: 2", "a: 1"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("m").Child("a"),
+			opts:   []edit.SetOption{edit.After("x")},
+			want:   stringtest.LinesLF("m:", "  x: 1", "  a: 1", "  y: 2"),
+		},
+		"after a key in the mapping that the value leaves": {
+			before: stringtest.LinesLF("a: 1", "x: 1", "y: 2"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("b"),
+			opts:   []edit.SetOption{edit.After("x")},
+			want:   stringtest.LinesLF("x: 1", "b: 1", "y: 2"),
+		},
+		"first with the mappings that the move creates": {
+			before: stringtest.LinesLF("x: 1", "a: 1"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("m").Child("p").Child("a"),
+			opts:   []edit.SetOption{edit.First()},
+			want:   stringtest.LinesLF("m:", "  p:", "    a: 1", "x: 1"),
+		},
+		"first in a flow mapping": {
+			before: stringtest.LinesLF("a: 1", "m: {x: 1}"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("m").Child("a"),
+			opts:   []edit.SetOption{edit.First()},
+			want:   "m: {a: 1, x: 1}\n",
+		},
+		"before the key of the value that moves": {
+			before: stringtest.LinesLF("a: 1", "x: 1"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("b"),
+			opts:   []edit.SetOption{edit.Before("a")},
+			err:    `cafe.jacobcolvin.com/v1 moves $.a to $.b before "a", which is the entry that moves`,
+		},
+		"after the key of the value that moves": {
+			before: stringtest.LinesLF("x: 1", "a: 1", "y: 1"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("b"),
+			opts:   []edit.SetOption{edit.After("a")},
+			err:    `cafe.jacobcolvin.com/v1 moves $.a to $.b after "a", which is the entry that moves`,
+		},
+		"before a key that the mapping lacks": {
+			before: stringtest.LinesLF("a: 1", "m:", "  x: 1"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("m").Child("a"),
+			opts:   []edit.SetOption{edit.Before("q")},
+			err: "test.yaml:1:4: $.a: cafe.jacobcolvin.com/v1 moves $.a to $.m.a before \"q\", but the document " +
+				"holds no $.m.q",
+		},
+		"placement of a protected value": {
+			before: stringtest.LinesLF("apiVersion: v1", "kind: K", "m:", "  x: 1"),
+			path:   paths.Doc().Child("kind"),
+			target: paths.Doc().Child("m").Child("kind"),
+			opts:   []edit.SetOption{edit.Before("q")},
+			err:    `cafe.jacobcolvin.com/v1 moves "kind", which is a protected value`,
+		},
+		"placement of a node that lost its place": {
+			before:  stringtest.LinesLF("a: 1", "m:", "  x: 1"),
+			path:    paths.Doc().Child("a"),
+			target:  paths.Doc().Child("m").Child("a"),
+			opts:    []edit.SetOption{edit.Before("q")},
+			removed: true,
+			err:     "cafe.jacobcolvin.com/v1 moves $.a through a node that lost its place to an earlier edit",
+		},
+		"placement of a path that selects more than one value": {
+			before: stringtest.LinesLF("a: 1", "m:", "  x: 1"),
+			path:   paths.Doc().ChildAll(),
+			target: paths.Doc().Child("m").Child("a"),
+			opts:   []edit.SetOption{edit.Before("q")},
+			err:    "test.yaml:1:1: $: cafe.jacobcolvin.com/v1 moves $.*, which selects more than one value",
+		},
+		"placement of a target that exists": {
+			before: stringtest.LinesLF("a: 1", "m:", "  x: 1"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("m").Child("x"),
+			opts:   []edit.SetOption{edit.First()},
+			err:    "cafe.jacobcolvin.com/v1 moves \"a\" to $.m.x, which already exists",
+		},
+		"placement of an item": {
+			before: stringtest.LinesLF("a: 1", "s: [x]"),
+			path:   paths.Doc().Child("a"),
+			target: paths.Doc().Child("s").Index(1),
+			opts:   []edit.SetOption{edit.First()},
+			want:   "s: [x, 1]\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before)
+
+			err := applyAt(t, d, tc.path, func(_ context.Context, n *edit.Node) error {
+				if tc.removed {
+					err := n.Remove()
+					if err != nil {
+						return err
+					}
+				}
+
+				return n.Move(tc.target, tc.opts...)
+			})
+			if tc.err != "" {
+				require.NotErrorIs(t, err, edit.ErrEngine)
+			}
+
+			requireEdit(t, d, err, tc.err, tc.want)
+		})
+	}
+}

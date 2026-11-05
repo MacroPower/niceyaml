@@ -5,10 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/goccy/go-yaml/ast"
-
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/edithook"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -67,7 +64,7 @@ func (d *Doc) setField(ctx context.Context, path paths.Path, text string) error 
 		d.lastEdit = &editRecord{desc: desc, named: desc, path: path.Key()}
 	}
 
-	err = d.modelEnd(&modelCall{x: x, path: path}, err, func() bool { return change.apply(x) })
+	err = d.modelEnd(&modelCall{x: x, path: path}, err, change.apply)
 
 	d.checking = true
 
@@ -91,31 +88,26 @@ func (d *Doc) setField(ctx context.Context, path paths.Path, text string) error 
 }
 
 // fieldChange is the change that a write of a type field makes in the
-// model. The write sets the value at a place, or it puts a new entry first
-// in a mapping. A write that leaves the text as it is makes no change.
+// model. The write sets the value at a place, or it creates the field at
+// the place. A write that leaves the text as it is makes no change.
 type fieldChange struct {
 	// The place that the write sets, as the model reads it, or nil.
 	at *modelCall
-	// The mapping of the model that takes the new entry, or nil, and the
-	// name of the entry.
-	holder *value
 	// The value that the write writes, as the model reads it. It is nil for
 	// a value that the model cannot read.
 	value *value
-	name  string
+	// Where the entry that the write creates goes in its mapping.
+	place modelPlace
 }
 
-// apply makes the change c in x. It reports false when the model cannot
-// take the change.
-func (c fieldChange) apply(x *model) bool {
-	switch {
-	case c.holder != nil:
-		return x.insert(c.holder, c.name, c.value)
-	case c.at != nil:
-		return c.at.set(&edge{val: c.value})
-	default:
+// apply makes the change c in the model. It reports false when the model
+// cannot take the change.
+func (c fieldChange) apply() bool {
+	if c.at == nil {
 		return true
 	}
+
+	return c.at.set(&edge{val: c.value}, c.place)
 }
 
 // writeTypeField writes the type field at path with text. It returns the
@@ -155,7 +147,7 @@ func (d *Doc) writeTypeField(ctx context.Context, path paths.Path, text string) 
 		return d.replaceField(ctx, n, p, text)
 	}
 
-	return d.insertField(ctx, n, p, path, text)
+	return d.insertField(ctx, n, p, text)
 }
 
 // fieldScalar returns the value of the model for a type field that holds
@@ -165,21 +157,6 @@ func (d *Doc) writeTypeField(ctx context.Context, path paths.Path, text string) 
 // text, as [sameScalar] compares it.
 func fieldScalar(text string) *value {
 	return newScalarValue(vScalar, nil, scalar{val: text, decoded: true, field: true})
-}
-
-// modelValue returns the value of the model that pairs with node, a value
-// of the current text, or nil.
-func (d *Doc) modelValue(node ast.Node) *value {
-	x := d.model
-	if x == nil || x.text == nil {
-		return nil
-	}
-
-	if v := x.text.values[astnode.Content(node)]; v != nil {
-		return v.pair
-	}
-
-	return nil
 }
 
 // replaceField replaces the value of p, the place of the type field of n,
@@ -233,87 +210,23 @@ func (d *Doc) replaceField(ctx context.Context, n *Node, p *place, text string) 
 	return change, nil
 }
 
-// insertField inserts the type field at path, which p resolved, first in
-// the mapping that holds it. It returns the change as [Doc.writeTypeField]
-// describes. Where the document lacks that mapping, or the mapping holds no
-// entry, the field goes in as Set creates a value, with the mappings above
-// it that the document lacks. Where the values above the field leave no
-// mapping to hold it, the write fails as such a Set fails.
-func (d *Doc) insertField(ctx context.Context, n *Node, p *place, path paths.Path, text string) (fieldChange, error) {
-	parent, _ := path.Parent()
-
-	holder, err := d.resolve(parent)
-	if err == nil && holder.exists && p.found == path.Len()-1 {
-		entries, ok := readEntries(astnode.Converted(holder.value))
-		if ok && len(entries) > 0 {
-			return d.writeField(ctx, n, holder, entries[0], text)
-		}
-	}
-
-	// The field goes in as Set writes it.
+// insertField inserts the type field of n, whose place is p, first in the
+// mapping that holds it, as a Set with [First] creates a value. It returns
+// the change as [Doc.writeTypeField] describes. Where the document lacks
+// that mapping, the field goes in as Set creates a value, with the
+// mappings above it that the document lacks. Those mappings go after the
+// last entry of the mapping that takes them. Where the values above the
+// field leave no mapping to hold it, the write fails as such a Set fails.
+func (d *Doc) insertField(ctx context.Context, n *Node, p *place, text string) (fieldChange, error) {
 	at := d.model.placeOf(p)
 
-	_, err = n.set(ctx, text, true)
+	var where placement
 
-	return fieldChange{at: &at, value: fieldScalar(text)}, err
-}
-
-// newEntry returns the change of a write that puts the entry name with v
-// into h, the mapping of the model that pairs with the mapping of the write,
-// as its first entry. Both values are values of the model. When the model
-// does not hold the mapping, the model cannot take the change.
-func newEntry(h *value, name string, v *value) fieldChange {
-	if h == nil {
-		return fieldChange{at: &modelCall{}}
+	if p.found == n.path.Len()-1 {
+		where.kind = placeFirst
 	}
 
-	return fieldChange{holder: h, name: name, value: v}
-}
+	_, place, err := n.set(ctx, text, true, where)
 
-// writeField writes the type field of n with text into the mapping of
-// holder, before first, the first entry of the mapping. It returns the
-// change as [Doc.writeTypeField] describes.
-func (d *Doc) writeField(
-	ctx context.Context,
-	n *Node,
-	holder *place,
-	first *ast.MappingValueNode,
-	text string,
-) (fieldChange, error) {
-	content := astnode.Content(holder.value)
-	flow := isFlow(content)
-
-	value, err := fieldText(ctx, text, nil, holder.flow || flow)
-	if err != nil {
-		return fieldChange{}, d.bug(n, err)
-	}
-
-	change := newEntry(d.modelValue(holder.value), fieldOf(n.path), fieldScalar(text))
-
-	key := renderKey(ctx, fieldOf(n.path), nil, holder.flow || flow)
-	origin := d.addNote(d.createdNote(holder, "sets "+n.path.String()))
-	entry := key + ": " + value
-	at := entryPlace(content, first)
-
-	var start int
-
-	if flow {
-		start, _ = d.startOf(at)
-		entry += ", "
-	} else {
-		reg := d.blockRegion(at)
-		col := d.keyColumn(at)
-		brk := d.breakBefore(reg.first)
-		entry = indentLines([]string{entry}, col, brk) + brk
-		start = d.lineStart(reg.first)
-	}
-
-	e := edit{start: start, end: start, text: entry, origins: written(entry, origin)}
-
-	err = d.apply(e)
-	if err != nil {
-		return change, d.bug(n, err)
-	}
-
-	return change, nil
+	return fieldChange{at: &at, value: fieldScalar(text), place: place}, err
 }

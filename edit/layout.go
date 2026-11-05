@@ -1137,24 +1137,3 @@ func firstBreak(text string) string {
 		return text[i : i+1]
 	}
 }
-
-// indentLines returns lines, each after col spaces, joined with brk.
-func indentLines(lines []string, col int, brk string) string {
-	pad := strings.Repeat(" ", col)
-
-	var b strings.Builder
-
-	for i, l := range lines {
-		if i > 0 {
-			b.WriteString(brk)
-		}
-
-		if l != "" {
-			b.WriteString(pad)
-		}
-
-		b.WriteString(l)
-	}
-
-	return b.String()
-}

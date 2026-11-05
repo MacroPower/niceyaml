@@ -1455,13 +1455,15 @@ func (r *reached) rebase(to func(head paths.Path) paths.Path) {
 }
 
 // shift updates each path of r, a path that reaches the items of a
-// sequence, after the item at index left the sequence. A path below a
-// later item takes the index before it. A node that an edit removed keeps
-// its path.
-func (r *reached) shift(index int) {
+// sequence, after an item left the sequence or went into it. A path at or
+// below the item at index from, or a later item, takes the index by
+// places on. So a removal shifts the items after the removed one by -1,
+// and an insertion shifts the items from the new one on by 1. A node that
+// an edit removed keeps its path.
+func (r *reached) shift(from, by int) {
 	for n, k := range r.nodes {
 		if !n.gone {
-			n.path = shiftedPath(n.path, prefixOf(n.path, k), index)
+			n.path = shiftedPath(n.path, prefixOf(n.path, k), from, by)
 		}
 	}
 }
@@ -1521,10 +1523,11 @@ func deeper(k int) func(hiddenEntry) bool {
 	return func(h hiddenEntry) bool { return h.depth > k }
 }
 
-// shiftedPath returns path after the item at index left the sequence at
-// seq. A path below a later item takes the index before it, and any other
+// shiftedPath returns path after the items of the sequence at seq from
+// the index from on moved by places, as [reached.shift] describes. A path
+// at or below such an item takes the index by places on, and any other
 // path stays as it is.
-func shiftedPath(path, seq paths.Path, index int) paths.Path {
+func shiftedPath(path, seq paths.Path, from, by int) paths.Path {
 	rest, ok := path.CutPrefix(seq)
 	if !ok || rest.Len() == 0 {
 		return path
@@ -1536,8 +1539,8 @@ func shiftedPath(path, seq paths.Path, index int) paths.Path {
 	)
 
 	for sel := range rest.Selectors() {
-		if len(sels) == 0 && sel.Kind == paths.SelectorIndex && sel.Index > index {
-			sel.Index--
+		if len(sels) == 0 && sel.Kind == paths.SelectorIndex && sel.Index >= from {
+			sel.Index += by
 			moved = true
 		}
 

@@ -474,10 +474,12 @@ func (c *modelCall) call() int {
 }
 
 // set replaces the value at the place of c with the value of e, or
-// creates the place with it, as [Node.Set] does. The place drops its tag
-// and takes the tag of e, the tag that the encode of the value writes on
-// a collection. It reports false when the model cannot take the call.
-func (c *modelCall) set(e *edge) bool {
+// creates the place with it, as [Node.Set] does. The entry that the call
+// creates goes where the place gives, as [model.place] puts it. The place
+// drops its tag and takes the tag of e, the tag that the encode of the
+// value writes on a collection. It reports false when the model cannot
+// take the call.
+func (c *modelCall) set(e *edge, where modelPlace) bool {
 	switch {
 	case !c.mapped || e == nil || e.val == nil:
 		return false
@@ -501,7 +503,69 @@ func (c *modelCall) set(e *edge) bool {
 
 	// The value takes its tag at its own place, below the mappings that the
 	// call creates on the way.
-	return c.x.created(c.holder, attach(c.holder, c.rest[0], c.rest[1:], &edge{val: e.val, tag: e.tag}, c.call()))
+	top := attach(c.holder, c.rest[0], c.rest[1:], &edge{val: e.val, tag: e.tag}, c.call())
+
+	c.x.place(c.holder, top, where)
+
+	return c.x.created(c.holder, top)
+}
+
+// modelPlace is where a call puts the entry that it creates in a mapping,
+// as the model reads the placement of the call. It holds the placement and
+// the entry of the text that the new entry goes before or after. It also
+// holds the edge of the model that pairs with that entry. The entry and
+// the edge are nil for the last place and the first.
+type modelPlace struct {
+	entry  *ast.MappingValueNode
+	anchor *edge
+	placement
+}
+
+// modelEdge returns the edge of the model that pairs with entry, an entry
+// of the current text, or nil.
+func (d *Doc) modelEdge(entry *ast.MappingValueNode) *edge {
+	x := d.model
+	if x == nil || x.text == nil {
+		return nil
+	}
+
+	if te := x.text.entries[entry]; te != nil {
+		return te.pair
+	}
+
+	return nil
+}
+
+// place moves e, the last edge of h, a mapping of the model, to the place
+// that where gives: before the first edge, or before or after the anchor
+// of where. The edge stays last for the last place, and when h does not
+// hold the anchor.
+func (x *model) place(h *value, e *edge, where modelPlace) {
+	if h == nil || h.kind != vMapping || where.kind == placeLast || len(h.edges) == 0 || h.edges[len(h.edges)-1] != e {
+		return
+	}
+
+	rest := h.edges[:len(h.edges)-1]
+	i := len(rest)
+
+	switch where.kind {
+	case placeFirst:
+		i = 0
+	case placeBefore, placeAfter:
+		at := slices.Index(rest, where.anchor)
+		if at < 0 {
+			return
+		}
+
+		i = at
+		if where.kind == placeAfter {
+			i++
+		}
+
+	case placeLast:
+	}
+
+	h.edges = slices.Insert(slices.Clone(rest), i, e)
 }
 
 // share gives every edge of x that reads old, a value that a Set replaces
@@ -736,8 +800,10 @@ func (x *model) repeat(ws []wrote) (repeated, bool) {
 }
 
 // move takes the value at the place of c to the place of to, as
-// [Node.Move] does. The edge of the value stays the same.
-func (c *modelCall) move(to *modelCall) bool {
+// [Node.Move] does. The edge of the value stays the same. The entry that
+// the move creates at the target goes where the place gives, as
+// [model.place] puts it.
+func (c *modelCall) move(to *modelCall, where modelPlace) bool {
 	switch {
 	case !c.mapped:
 		return false
@@ -751,20 +817,45 @@ func (c *modelCall) move(to *modelCall) bool {
 		return false
 	}
 
-	return c.x.created(to.holder, attach(to.holder, to.rest[0], to.rest[1:], c.edge, c.call()))
+	top := attach(to.holder, to.rest[0], to.rest[1:], c.edge, c.call())
+
+	c.x.place(to.holder, top, where)
+
+	return c.x.created(to.holder, top)
 }
 
-// insert puts the entry name with v into h, a mapping of the model, as the
-// first entry of h.
-func (x *model) insert(h *value, name string, v *value) bool {
-	if h == nil || h.kind != vMapping || v == nil {
+// insertItem puts the value of e into the sequence at the place of c, as
+// [Node.Insert] does: before the item at the place, or as the last item
+// when the place lies past the last item. It reports false when the model
+// cannot take the call.
+func (c *modelCall) insertItem(e *edge) bool {
+	switch {
+	case !c.mapped || e == nil || e.val == nil:
+		return false
+	case c.edge != nil:
+		if c.owner == nil || c.owner.kind != vSequence {
+			return false
+		}
+
+		i := slices.Index(c.owner.edges, c.edge)
+		if i < 0 {
+			return false
+		}
+
+		c.x.wroteIn(e.val)
+
+		item := &edge{val: e.val, tag: e.tag, changed: c.call()}
+		c.owner.edges = slices.Insert(slices.Clone(c.owner.edges), i, item)
+
+		return c.x.created(c.owner, item)
+
+	case c.holder == nil || c.holder.kind != vSequence || len(c.rest) != 1:
 		return false
 	}
 
-	e := &edge{key: name, name: name, val: v, changed: len(x.calls)}
-	h.edges = slices.Insert(slices.Clone(h.edges), 0, e)
+	c.x.wroteIn(e.val)
 
-	return x.created(h, e)
+	return c.x.created(c.holder, attach(c.holder, c.rest[0], nil, &edge{val: e.val, tag: e.tag}, c.call()))
 }
 
 // syncModel returns the model of the Apply running, in step with the

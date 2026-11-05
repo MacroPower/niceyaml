@@ -505,7 +505,7 @@ func (n *Node) remove(opts ...RemoveOption) error {
 	at.take(true, d.takenBy())
 
 	if items != nil {
-		items.shift(p.index)
+		items.shift(p.index+1, -1)
 	}
 
 	return nil

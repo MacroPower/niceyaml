@@ -95,7 +95,10 @@ type payload struct {
 // the old value and the comments inside it. A Set at an anchored value keeps
 // the anchor and writes the new value after it, so each alias reads the new
 // value, as the package documentation describes. A call of Set at the index
-// past the last item of a sequence appends an item. A value that replaces an
+// past the last item of a sequence appends an item, and [Node.Insert] puts
+// an item before another. An entry that Set creates goes after the last
+// entry of its mapping, unless an option of opts places it, as [First],
+// [Before], and [After] do. A value that replaces an
 // empty value takes the place of the spaces and tabs after its ":" or "-",
 // unless a comment follows them. A Set of 3 at a thus turns "{a: , b: 1}"
 // into "{a: 3, b: 1}". A key of a flow mapping without a ":", as in
@@ -220,32 +223,125 @@ type payload struct {
 // of the encode, as an alias whose anchor the YAML lacks does, and the Set
 // then fails with the construct. A scalar that go-yaml reads as a value of
 // another kind fails the Set with ErrEngine before such a construct does.
-func (n *Node) Set(ctx context.Context, v any) error {
+func (n *Node) Set(ctx context.Context, v any, opts ...SetOption) error {
+	var cfg setConfig
+
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	c := n.d.modelStart(n, "sets "+n.path.String(), true)
 
-	mv, err := n.set(ctx, v, false)
+	mv, where, err := n.set(ctx, v, false, cfg.at)
 
-	return n.d.modelEnd(c, err, func() bool { return c.set(mv) })
+	return n.d.modelEnd(c, err, func() bool { return c.set(mv, where) })
+}
+
+// SetOption configures one call of [Node.Set], or the target of one call
+// of [Node.Move].
+//
+// Options:
+//   - [First]
+//   - [Before]
+//   - [After]
+type SetOption func(*setConfig)
+
+// setConfig holds the settings that each [SetOption] gives a Set.
+type setConfig struct {
+	at placement
+}
+
+// placeKind is where a call puts the entry that it creates in a mapping.
+type placeKind uint8
+
+const (
+	// The entry goes after the last entry of the mapping.
+	placeLast placeKind = iota
+	// The entry goes before the first entry of the mapping.
+	placeFirst
+	// The entry goes before the entry of a key.
+	placeBefore
+	// The entry goes after the entry of a key.
+	placeAfter
+)
+
+// placement is where a call puts the entry that it creates in a mapping,
+// as a [SetOption] gives it: the kind of place, and the key of the entry
+// that the new entry goes before or after.
+type placement struct {
+	key  string
+	kind placeKind
+}
+
+// side returns the word that a message gives the place of p, "after" for
+// [After] and "before" for [Before].
+func (p placement) side() string {
+	if p.kind == placeAfter {
+		return "after"
+	}
+
+	return "before"
+}
+
+// First is a [SetOption] that puts the entry that the call creates before
+// the first entry of its mapping. The entry goes after the comment lines
+// at the top of the document, and before the comment lines that belong to
+// the first entry. A call that creates no entry, as a Set that replaces a
+// value or appends an item does, leaves the text where it is. When the
+// call creates mappings above the value too, it places the entry that it
+// creates in the nearest mapping that the text holds, and the new
+// mappings go with it. The last placement option of a call wins.
+func First() SetOption {
+	return func(c *setConfig) {
+		c.at = placement{kind: placeFirst}
+	}
+}
+
+// Before is a [SetOption] that puts the entry that the call creates before
+// the entry of key in its mapping, as [First] places an entry before the
+// first entry. A path names the key by its text, and the key selects the
+// entry that a path of the key selects. The call reads key only when it
+// creates an entry. A call that creates no entry leaves the text where it
+// is, as [First] describes. When the call creates an entry, it fails
+// when the mapping does not write key, also when a `<<` merge key brings
+// key in. The last placement option of a call wins.
+func Before(key string) SetOption {
+	return func(c *setConfig) {
+		c.at = placement{kind: placeBefore, key: key}
+	}
+}
+
+// After is a [SetOption] that puts the entry that the call creates after
+// the entry of key in its mapping, after the comment lines that belong to
+// that entry. The key names the entry as [Before] names it, and the call
+// fails the same way when the mapping does not write key. The last
+// placement option of a call wins.
+func After(key string) SetOption {
+	return func(c *setConfig) {
+		c.at = placement{kind: placeAfter, key: key}
+	}
 }
 
 // set is [Node.Set], but it also sets a protected value when protected is
-// true. It returns the value of v as the model reads it, from the encode
-// that gives the text of v, as the edge to its place holds it.
-func (n *Node) set(ctx context.Context, v any, protected bool) (*edge, error) {
+// true. It puts an entry that it creates at the place that at gives. It
+// returns the value of v as the model reads it, from the encode that gives
+// the text of v, as the edge to its place holds it. It also returns the
+// place of the new entry as the model reads it.
+func (n *Node) set(ctx context.Context, v any, protected bool, at placement) (*edge, modelPlace, error) {
 	d := n.d
 
 	p, err := n.place(useCreate, "sets")
 	if err != nil {
-		return nil, err
+		return nil, modelPlace{}, err
 	}
 
 	why := d.protection(p, true)
 
 	switch {
 	case p.root:
-		return nil, d.fail(n, "%s replaces the root of the document", d.subject())
+		return nil, modelPlace{}, d.fail(n, "%s replaces the root of the document", d.subject())
 	case !protected && why != "":
-		return nil, d.fail(n, "%s sets %s, which %s", d.subject(), n.path, why)
+		return nil, modelPlace{}, d.fail(n, "%s sets %s, which %s", d.subject(), n.path, why)
 	}
 
 	// The Set checks its reach once go-yaml took the text of its value, as
@@ -257,28 +353,177 @@ func (n *Node) set(ctx context.Context, v any, protected bool) (*edge, error) {
 	// The paths below the place go. They reach the place as the text stands
 	// before the edit.
 	s := d.spotOf(n.path, p)
-	at := d.reached(s)
-	inside := d.readersInside(s, at, p)
+	reach := d.reached(s)
+	inside := d.readersInside(s, reach, p)
 
-	var mv *edge
+	var (
+		mv    *edge
+		where modelPlace
+	)
 
 	if p.exists {
 		mv, err = d.setExisting(ctx, n, p, v)
 	} else {
-		mv, err = d.setCreated(ctx, n, p, v)
+		mv, where, err = d.setCreated(ctx, n, p, v, at)
 	}
 
 	if err != nil {
-		return nil, err
+		return nil, modelPlace{}, err
 	}
 
-	at.take(false, d.takenBy())
+	reach.take(false, d.takenBy())
 
 	for _, m := range inside {
 		m.gone, m.goneBy = true, d.takenBy()
 	}
 
+	return mv, where, nil
+}
+
+// Insert inserts v as the item at the index of the path, before the item
+// there, as [Node.Set] writes a value. The items from that index on take
+// the index after theirs, and so do the paths of the nodes on them. The
+// path of the node stays, so the node reads the new item. An Insert at the
+// index past the last item appends the item, as a Set there does. Insert
+// takes the path of an item, and it fails on a path that ends in a name,
+// on the root, and on an index past the index after the last item. It
+// also fails where a Set there fails, such as inside a protected value,
+// and with the problems of the value that Set describes. The new item
+// goes above the comment lines that belong to the item that it goes
+// before. In a flow sequence, it goes before that item with a comma of its
+// own.
+func (n *Node) Insert(ctx context.Context, v any) error {
+	c := n.d.modelStart(n, "inserts "+n.path.String(), false)
+
+	mv, err := n.insert(ctx, v)
+
+	return n.d.modelEnd(c, err, func() bool { return c.insertItem(mv) })
+}
+
+// insert inserts v as the item at the index of the path, as [Node.Insert]
+// describes. It returns the value of v as the model reads it, as
+// [Node.set] does.
+func (n *Node) insert(ctx context.Context, v any) (*edge, error) {
+	d := n.d
+
+	p, err := n.place(useCreate, "inserts")
+	if err != nil {
+		return nil, err
+	}
+
+	last, ok := n.path.Last()
+	if !ok || last.Kind != paths.SelectorIndex {
+		return nil, d.fail(n, "%s inserts %s, which is no path of an item", d.subject(), n.path)
+	}
+
+	holderPath, _ := n.path.Parent()
+
+	holder, seq, why, err := d.insertHolder(n, p, holderPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if why != "" {
+		// A step of the path before the problem can reach a zone of the
+		// Apply, which decides the problem first.
+		refused := n.stepProblem()
+		if refused != nil {
+			return nil, refused
+		}
+
+		return nil, d.fail(n, "%s inserts %s, but %s", d.subject(), n.path, why)
+	}
+
+	if why := d.protection(holder, false); why != "" {
+		return nil, d.fail(n, "%s inserts %s, but %s %s", d.subject(), n.path, d.describe(holderPath), why)
+	}
+
+	named := "inserts " + n.path.String()
+
+	// The Insert reaches the zones of the text as a Set of the item after
+	// the last does, because it takes no item away, as [Doc.renderPayload]
+	// checks it.
+	d.pending = &reachCall{kind: callSet, path: holderPath.Index(len(seq.Values)), hidden: n.hidden, named: named}
+
+	defer func() { d.pending = nil }()
+
+	d.recordEdit(holder, named, "")
+
+	// The nodes on the items from the index on follow their items, and n
+	// stays on its path, where it reads the new item. The place of the item
+	// tells whether another path reaches the items, as for a Remove. The
+	// place of the sequence does not tell. A path such as $.t, whose value
+	// is an alias, ends before it reads through the alias. An Insert past
+	// the last item moves no item.
+	var items *reached
+
+	if p.exists {
+		items = d.reached(d.itemsOf(n.path, p))
+	}
+
+	origin := d.addNote(d.createdNote(holder, named))
+
+	mv, err := d.insertItem(ctx, n, holderPath, holder, seq, last.Index, v, origin)
+	if err != nil {
+		return nil, err
+	}
+
+	if items != nil {
+		delete(items.nodes, n)
+		items.shift(last.Index, 1)
+
+		// The place of n holds the new item, which the model reads at the
+		// edge of the new item.
+		n.slot = nil
+	}
+
+	created, err := d.nodePlace(n)
+	if err == nil && created.exists {
+		d.recordEdit(created, named, "")
+	}
+
 	return mv, nil
+}
+
+// insertHolder returns the sequence that holds the item at holderPath,
+// the place of n, as an Insert of n reads it, with its place. It also
+// returns the reason that the Insert cannot put an item at p, the place
+// of n, or "" when it can. The reason reads as the words that a message
+// puts after "but", such as "s holds 2 items", as [Doc.createProblem]
+// gives it.
+func (d *Doc) insertHolder(n *Node, p *place, holderPath paths.Path) (*place, *ast.SequenceNode, string, error) {
+	seq, _ := p.container.(*ast.SequenceNode) //nolint:errcheck // Another container fails below.
+
+	if p.exists {
+		holder, err := d.resolveFrom(p, holderPath)
+		if err != nil || !holder.exists {
+			return nil, nil, "", d.bug(n, fmt.Errorf("%s holds no value", holderPath))
+		}
+
+		if seq == nil {
+			return holder, nil, d.describe(holderPath) + " holds " + d.kindOf(holder, p.container), nil
+		}
+
+		return holder, seq, "", nil
+	}
+
+	// The place lies past the last item of a sequence, or the document
+	// lacks a value on the way, which fails the Insert as it fails a Set.
+	found := prefixOf(n.path, p.found)
+
+	holder, err := d.resolveFrom(p, found)
+	if err != nil || !holder.exists {
+		return nil, nil, "", d.bug(n, fmt.Errorf("%s holds no value", found))
+	}
+
+	sels := slices.Collect(n.path.Selectors())
+
+	why := d.createProblem(holder, found, p.container, sels[p.found:])
+	if why != "" || seq == nil {
+		return holder, nil, why, nil
+	}
+
+	return holder, seq, "", nil
 }
 
 // readersInside returns each node that reads a place inside the value of
@@ -318,9 +563,11 @@ func (d *Doc) setExisting(ctx context.Context, h *Node, p *place, v any) (*edge,
 	return d.replaceValue(ctx, h, p, v)
 }
 
-// setCreated creates the value of p, the place of h, as v. It returns the
-// value of v as the model reads it, as [Node.set] does.
-func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any) (*edge, error) {
+// setCreated creates the value of p, the place of h, as v, and puts the
+// entry that it creates at the place that at gives. It returns the value
+// of v and the place of the entry as the model reads them, as [Node.set]
+// does.
+func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any, at placement) (*edge, modelPlace, error) {
 	// A merge key can bring in the key that the edit creates in its source
 	// over an entry on the path of h. The path then does not reach the new
 	// value, so the check of the merges names the edit at the value above
@@ -332,9 +579,9 @@ func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any) (*edge, 
 		d.recordEdit(holder, "sets "+h.path.String(), "")
 	}
 
-	mv, err := d.createValue(ctx, h, p, v)
+	mv, where, err := d.createValue(ctx, h, p, v, at)
 	if err != nil {
-		return nil, err
+		return nil, modelPlace{}, err
 	}
 
 	created, err := d.nodePlace(h)
@@ -342,7 +589,7 @@ func (d *Doc) setCreated(ctx context.Context, h *Node, p *place, v any) (*edge, 
 		d.recordEdit(created, "sets "+h.path.String(), "")
 	}
 
-	return mv, nil
+	return mv, where, nil
 }
 
 // renderPayload returns v as a payload for a place whose block collections
@@ -1320,7 +1567,7 @@ func prefixRun(text string, r run, origin int) run {
 // createValue creates the value of p, and the mappings above it that the
 // document lacks. It returns the value of v as the model reads it, as
 // [Node.set] does.
-func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any) (*edge, error) {
+func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any, at placement) (*edge, modelPlace, error) {
 	var sels []paths.Selector
 
 	for sel := range h.path.Selectors() {
@@ -1333,9 +1580,9 @@ func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any) (*edge,
 
 	switch {
 	case err != nil:
-		return nil, d.bug(h, fmt.Errorf("%s %w", holderPath, err))
+		return nil, modelPlace{}, d.bug(h, fmt.Errorf("%s %w", holderPath, err))
 	case !holder.exists:
-		return nil, d.bug(h, fmt.Errorf("%s holds no value", holderPath))
+		return nil, modelPlace{}, d.bug(h, fmt.Errorf("%s holds no value", holderPath))
 	}
 
 	// The walk of the path read the content of the holder as a decode reads
@@ -1349,11 +1596,11 @@ func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any) (*edge,
 		if c := d.pending; c != nil {
 			err := d.stepProblem(*c)
 			if err != nil {
-				return nil, err
+				return nil, modelPlace{}, err
 			}
 		}
 
-		return nil, d.fail(h, "%s sets %s, but %s", d.subject(), h.path, why)
+		return nil, modelPlace{}, d.fail(h, "%s sets %s, but %s", d.subject(), h.path, why)
 	}
 
 	entries, _ := readEntries(content)
@@ -1364,23 +1611,65 @@ func (d *Doc) createValue(ctx context.Context, h *Node, p *place, v any) (*edge,
 		wrapped = map[string]any{sels[i].Name: wrapped}
 	}
 
-	origin := d.addNote(d.createdNote(holder, "sets "+h.path.String()))
-
-	var mv *edge
+	var (
+		mv    *edge
+		where modelPlace
+	)
 
 	if next.Kind == paths.SelectorChild {
-		mv, err = d.insertEntry(ctx, h, holderPath, holder, content, entries, next.Name, wrapped, origin)
+		where, err = d.placeEntry(h, "sets "+h.path.String(), holder, holderPath, content, at)
+		if err != nil {
+			return nil, modelPlace{}, err
+		}
+	}
+
+	origin := d.addNote(d.createdNote(holder, "sets "+h.path.String()))
+
+	if next.Kind == paths.SelectorChild {
+		mv, err = d.insertEntry(ctx, h, holderPath, holder, content, entries, next.Name, wrapped, origin, where)
 	} else {
 		mv, err = d.appendItem(ctx, h, holderPath, holder, seq, wrapped, origin)
 	}
 
 	if err != nil {
-		return nil, err
+		return nil, modelPlace{}, err
 	}
 
 	// The model names the mappings above v by the names of the path, so it
 	// takes v from inside them.
-	return innerEdge(mv, len(sels)-1-p.found), nil
+	return innerEdge(mv, len(sels)-1-p.found), where, nil
+}
+
+// placeEntry returns the place of the entry that the call of h creates in
+// the mapping content at holderPath, the value of holder, as the model
+// reads it. The placement of the call is at. What names the call as a
+// message names it, such as "sets $.a". The call fails when at names a
+// key that the mapping does not write.
+func (d *Doc) placeEntry(
+	h *Node, what string, holder *place, holderPath paths.Path, content ast.Node, at placement,
+) (modelPlace, error) {
+	where := modelPlace{placement: at}
+
+	if at.kind != placeBefore && at.kind != placeAfter {
+		return where, nil
+	}
+
+	anchor, err := d.resolveFrom(holder, holderPath.Child(at.key))
+
+	switch {
+	case err != nil || !anchor.exists || anchor.entry == nil:
+		return modelPlace{}, d.fail(h, "%s %s %s %q, but the document holds no %s",
+			d.subject(), what, at.side(), at.key, holderPath.Child(at.key))
+
+	case anchor.merged || anchor.container != content:
+		return modelPlace{}, d.fail(h, "%s %s %s %q, but a `<<` merge key brings %s into %s",
+			d.subject(), what, at.side(), at.key, at.key, d.describe(holderPath))
+	}
+
+	where.entry = anchor.entry
+	where.anchor = d.modelEdge(anchor.entry)
+
+	return where, nil
 }
 
 // createProblem returns the reason that an edit cannot create a value at
@@ -1504,8 +1793,8 @@ func (d *Doc) createdNote(holder *place, call string) note {
 }
 
 // insertEntry inserts the entry key with value into the mapping content at
-// holderPath, after its last entry. It returns value as the model reads
-// it, as [Node.set] does.
+// holderPath, at the place that where gives. It returns value as the
+// model reads it, as [Node.set] does.
 func (d *Doc) insertEntry(
 	ctx context.Context,
 	h *Node,
@@ -1516,6 +1805,7 @@ func (d *Doc) insertEntry(
 	key string,
 	value any,
 	origin int,
+	where modelPlace,
 ) (*edge, error) {
 	flow := holder.flow || isFlow(content)
 
@@ -1527,13 +1817,14 @@ func (d *Doc) insertEntry(
 		return nil, err
 	}
 
-	err = d.insertPayload(h, holderPath, holder, content, entries, newRun(keyText, origin), pl, origin)
+	err = d.insertPayload(h, holderPath, holder, content, entries, newRun(keyText, origin), pl, origin, where)
 
 	return &edge{val: pl.value, tag: pl.tag}, err
 }
 
 // insertPayload inserts the entry key with the payload pl into the mapping
-// content at holderPath, after its last entry.
+// content at holderPath, at the place that where gives: after the last
+// entry, before the first, or before or after the entry of where.
 func (d *Doc) insertPayload(
 	h *Node,
 	holderPath paths.Path,
@@ -1543,11 +1834,42 @@ func (d *Doc) insertPayload(
 	key run,
 	pl payload,
 	origin int,
+	where modelPlace,
 ) error {
+	// The entries give the places, not their keys, so a `<<` merge key or
+	// a key that the mapping writes twice counts as the entry it is. For an
+	// After, next is the entry that follows the entry of the key, or nil
+	// when that entry is the last.
+	var before, after, next *ast.MappingValueNode
+
+	switch {
+	case len(entries) == 0:
+	case where.kind == placeFirst:
+		before = entries[0]
+	case where.kind == placeBefore && where.entry != nil:
+		before = where.entry
+	case where.kind == placeAfter && where.entry != nil:
+		after = where.entry
+
+		if i := slices.Index(entries, after); i >= 0 && i+1 < len(entries) {
+			next = entries[i+1]
+		}
+	}
+
 	if isFlow(content) {
 		block, ok := d.blockOpening(holder, content)
 		if !ok {
 			text := appendRun(appendRun(key, newRun(": ", origin)), pl.flow)
+
+			// An entry after the entry of a key goes before next. The text of
+			// the entry of the key thus stays as the user wrote it, up to its
+			// comma. After the last entry, the new entry goes last.
+			switch {
+			case before != nil:
+				return d.applyEdit(h, d.flowInsertBefore(entryPlace(content, before), text, origin))
+			case next != nil:
+				return d.applyEdit(h, d.flowInsertBefore(entryPlace(content, next), text, origin))
+			}
 
 			return d.applyEdit(h, d.flowInsert(content, text, origin))
 		}
@@ -1558,17 +1880,48 @@ func (d *Doc) insertPayload(
 		return d.applyEdit(h, d.openingEdits(block, d.entryLines(key, pl, col, brk), brk, pl, origin)...)
 	}
 
-	// The entries give the places, not their keys, so a `<<` merge key or
-	// a key that the mapping writes twice counts as the entry it is.
 	first := entryPlace(content, entries[0])
-	last := entryPlace(content, entries[len(entries)-1])
-
 	col := d.keyColumn(first)
+
+	if before != nil {
+		at := entryPlace(content, before)
+		brk := d.breakBefore(d.blockRegion(at).first)
+
+		return d.insertBefore(h, at, d.entryLines(key, pl, col, brk), brk, origin)
+	}
+
+	last := entryPlace(content, entries[len(entries)-1])
+	if after != nil {
+		last = entryPlace(content, after)
+	}
+
 	lastLine := d.lastLineOf(last)
 	brk := d.breakBefore(lastLine + 1)
 	text := appendRun(d.entryLines(key, pl, col, brk), newRun(brk, origin))
 
 	return d.applyEdit(h, d.linesEdit(lastLine+1, text, brk, pl, origin)...)
+}
+
+// insertBefore inserts lines, the lines of a new entry or item that end
+// with the line break brk, before p, an entry or an item of a block
+// collection, above the comment lines that belong to p. When p starts on
+// the line of the "-" of the item that holds it, the first line of lines
+// takes that place. Then p goes on the line after them at its column.
+func (d *Doc) insertBefore(h *Node, p *place, lines run, brk string, origin int) error {
+	text := appendRun(lines, newRun(brk, origin))
+
+	if !d.sharesLine(p) {
+		at := d.lineStart(d.blockRegion(p).first)
+
+		return d.applyEdit(h, edit{start: at, end: at, text: text.text, origins: text.origins})
+	}
+
+	start, _ := d.startOf(p)
+	cut := len(text.text) - len(strings.TrimLeft(text.text, " "))
+	text = appendRun(run{text: text.text[cut:], origins: text.origins[cut:]},
+		newRun(strings.Repeat(" ", d.column(start)), origin))
+
+	return d.applyEdit(h, edit{start: start, end: start, text: text.text, origins: text.origins})
 }
 
 // lastLineOf returns the last line of p, an entry or an item of a block
@@ -1882,6 +2235,16 @@ func (d *Doc) flowInsert(content ast.Node, text run, origin int) edit {
 	return edit{start: s.end, end: s.end, text: text.text, origins: text.origins}
 }
 
+// flowInsertBefore returns the edit that inserts text as an item or an
+// entry of a flow collection before p, an item or an entry of the
+// collection. The text takes a comma of its own.
+func (d *Doc) flowInsertBefore(p *place, text run, origin int) edit {
+	start, _ := d.startOf(p)
+	text = appendRun(text, newRun(", ", origin))
+
+	return edit{start: start, end: start, text: text.text, origins: text.origins}
+}
+
 // skipBlank returns the offset of the first byte from off up to end that
 // is not a space, a line break, or a comment, or end when every byte is.
 func (d *Doc) skipBlank(off, end int) int {
@@ -1911,6 +2274,23 @@ func (d *Doc) appendItem(
 	value any,
 	origin int,
 ) (*edge, error) {
+	return d.insertItem(ctx, h, holderPath, holder, seq, len(seq.Values), value, origin)
+}
+
+// insertItem inserts value as the item at index of the sequence seq, the
+// value of holder, before the item there. An index past the last item
+// appends the value. It returns value as the model reads it, as
+// [Node.set] does.
+func (d *Doc) insertItem(
+	ctx context.Context,
+	h *Node,
+	holderPath paths.Path,
+	holder *place,
+	seq *ast.SequenceNode,
+	index int,
+	value any,
+	origin int,
+) (*edge, error) {
 	step := d.stepOf(holder, holderPath)
 
 	pl, err := d.renderPayload(ctx, h, value, step, origin, nil)
@@ -1918,24 +2298,43 @@ func (d *Doc) appendItem(
 		return nil, err
 	}
 
-	return &edge{val: pl.value, tag: pl.tag}, d.appendPayload(h, holderPath, holder, seq, pl, origin)
+	return &edge{val: pl.value, tag: pl.tag}, d.insertPayloadItem(h, holderPath, holder, seq, index, pl, origin)
 }
 
-// appendPayload appends the payload pl as the last item of the sequence
-// seq, the value of holder.
-func (d *Doc) appendPayload(
+// insertPayloadItem inserts the payload pl as the item at index of the
+// sequence seq, the value of holder, before the item there. An index past
+// the last item appends the payload.
+func (d *Doc) insertPayloadItem(
 	h *Node,
 	holderPath paths.Path,
 	holder *place,
 	seq *ast.SequenceNode,
+	index int,
 	pl payload,
 	origin int,
 ) error {
 	step := d.stepOf(holder, holderPath)
 
+	var at *place
+
+	if index < len(seq.Values) {
+		atPath := holderPath.Index(index)
+
+		p, err := d.resolveFrom(holder, atPath)
+		if err != nil {
+			return d.bug(h, fmt.Errorf("%s %w", atPath, err))
+		}
+
+		at = p
+	}
+
 	if seq.IsFlowStyle {
 		block, ok := d.blockOpening(holder, seq)
-		if !ok {
+
+		switch {
+		case !ok && at != nil:
+			return d.applyEdit(h, d.flowInsertBefore(at, pl.flow, origin))
+		case !ok:
 			return d.applyEdit(h, d.flowInsert(seq, pl.flow, origin))
 		}
 
@@ -1943,6 +2342,12 @@ func (d *Doc) appendPayload(
 		brk := d.breakBefore(d.lineOf(block.keyStart) + 1)
 
 		return d.applyEdit(h, d.openingEdits(block, d.itemLines(pl, col, brk), brk, pl, origin)...)
+	}
+
+	if at != nil {
+		brk := d.breakBefore(d.blockRegion(at).first)
+
+		return d.insertBefore(h, at, d.itemLines(pl, d.keyColumn(at), brk), brk, origin)
 	}
 
 	lastPath := holderPath.Index(len(seq.Values) - 1)
@@ -2057,18 +2462,4 @@ func contentIndent(lines []line) int {
 	}
 
 	return max(0, least)
-}
-
-// fieldOf returns the name of the last selector of path, for a message.
-func fieldOf(path paths.Path) string {
-	last, ok := path.Last()
-	if !ok {
-		return "$"
-	}
-
-	if last.Kind == paths.SelectorChild {
-		return last.Name
-	}
-
-	return fmt.Sprint(last.Index)
 }
