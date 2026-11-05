@@ -7509,3 +7509,297 @@ func TestWithDepthLimit(t *testing.T) {
 		assert.Equal(t, "ref.yaml:2:8: document nests more than 2 levels", err.Error())
 	})
 }
+
+func TestSource_WithText(t *testing.T) {
+	t.Parallel()
+
+	t.Run("keeps every setting", func(t *testing.T) {
+		t.Parallel()
+
+		type port int
+
+		um := niceyaml.CustomUnmarshaler(func(_ context.Context, v *port, _ func(any) error) error {
+			*v = 7
+
+			return nil
+		})
+
+		source := niceyaml.NewSourceFromString("a: *x\n",
+			niceyaml.WithName("app.yaml"), niceyaml.WithFilePath("/app.yaml"), niceyaml.WithFS(fstest.MapFS{}),
+			yamltest.References("x: &x 1\n"), niceyaml.WithAllowDuplicateKeys(true),
+			niceyaml.WithByteLimit(100), niceyaml.WithDepthLimit(3),
+			niceyaml.WithUnmarshalers(um), niceyaml.WithExcerpts(false))
+
+		next := source.WithText("b: *x\nb: 0\n")
+
+		assert.Equal(t, "app.yaml", next.Name())
+		assert.Equal(t, "/app.yaml", next.FilePath())
+		assert.Equal(t, source.FS(), next.FS())
+		assert.Equal(t, source.References(), next.References())
+		assert.True(t, next.AllowsDuplicateKeys())
+		assert.Equal(t, 100, next.ByteLimit())
+		assert.Equal(t, 3, next.DepthLimit())
+		assert.False(t, next.ShowsExcerpts())
+		assert.Equal(t, "b: *x\nb: 0\n", next.Text())
+
+		// The reference resolves, the repeated key parses, and the
+		// unmarshaler reads the value.
+		got, err := next.Decode[map[string]port](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]port{"b": 7}, got)
+	})
+
+	t.Run("applies opts over the settings", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("app.yaml"), niceyaml.WithByteLimit(100))
+
+		next := source.WithText("b: 2\n", niceyaml.WithName("formatted"), niceyaml.WithByteLimit(4))
+
+		assert.Equal(t, "formatted", next.Name())
+		assert.Equal(t, 4, next.ByteLimit())
+		assert.Equal(t, "app.yaml", source.Name())
+		assert.Equal(t, 100, source.ByteLimit())
+
+		_, err := next.Document()
+		require.ErrorIs(t, err, niceyaml.ErrLimit)
+		assert.Equal(t, "formatted: file is larger than 4 bytes", err.Error())
+	})
+
+	t.Run("adds references of its own", func(t *testing.T) {
+		t.Parallel()
+
+		// Three references leave room past the length of the slice, which
+		// each copy must not share.
+		source := niceyaml.NewSourceFromString("a: *x\n",
+			yamltest.References("r1: &r1 1\n"), yamltest.References("r2: &r2 2\n"),
+			yamltest.References("r3: &r3 3\n"))
+
+		first := niceyaml.NewSourceFromString("x: &x 10\n")
+		second := niceyaml.NewSourceFromString("x: &x 20\n")
+
+		one := source.WithText("a: *x\n", niceyaml.WithReferences(first))
+		two := source.WithText("a: *x\n", niceyaml.WithReferences(second))
+
+		assert.Same(t, first, one.References()[3])
+		assert.Same(t, second, two.References()[3])
+		assert.Len(t, source.References(), 3)
+
+		got, err := one.Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"a": 10}, got)
+	})
+
+	t.Run("keeps the default limits", func(t *testing.T) {
+		t.Parallel()
+
+		next := niceyaml.NewSourceFromString("a: 1\n").WithText("b: 2\n")
+
+		assert.Equal(t, niceyaml.DefaultByteLimit, next.ByteLimit())
+		assert.Equal(t, niceyaml.DefaultDepthLimit, next.DepthLimit())
+	})
+
+	t.Run("a Source of layers gives a Source of text", func(t *testing.T) {
+		t.Parallel()
+
+		base := yamltest.Document(t, niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("base.yaml")))
+		over := yamltest.Document(t, niceyaml.NewSourceFromString("b: 2\n", niceyaml.WithName("over.yaml")))
+		merged := yamltest.Layers(t, base, over)
+
+		next := merged.WithText("c: x\n")
+
+		// The merged Source skips the limits, and so does the next one.
+		assert.Equal(t, 0, next.ByteLimit())
+		assert.Equal(t, 0, next.DepthLimit())
+
+		_, err := next.Decode[struct {
+			C int `yaml:"c"`
+		}](t.Context())
+		require.Error(t, err)
+		yamltest.AssertBoundTo(t, next, err)
+	})
+
+	t.Run("nil Source", func(t *testing.T) {
+		t.Parallel()
+
+		var source *niceyaml.Source
+
+		next := source.WithText("a: 1\n", niceyaml.WithName("new"))
+
+		assert.Equal(t, "new", next.Name())
+		assert.Equal(t, "a: 1\n", next.Text())
+	})
+}
+
+func TestSource_ByteLimit(t *testing.T) {
+	t.Parallel()
+
+	var nilSource *niceyaml.Source
+
+	tcs := map[string]struct {
+		source *niceyaml.Source
+		want   int
+	}{
+		"default":         {source: niceyaml.NewSourceFromString("a: 1\n"), want: niceyaml.DefaultByteLimit},
+		"set":             {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(10)), want: 10},
+		"off":             {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(0))},
+		"negative is off": {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(-1))},
+		"WithoutLimits": {
+			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(10), niceyaml.WithoutLimits()),
+		},
+		"tokens": {
+			source: niceyaml.NewSourceFromTokens(lexer.Tokenize("a: 1\n")),
+			want:   niceyaml.DefaultByteLimit,
+		},
+		"zero value": {source: &niceyaml.Source{}, want: niceyaml.DefaultByteLimit},
+		"nil":        {source: nilSource},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.source.ByteLimit())
+		})
+	}
+
+	t.Run("layers", func(t *testing.T) {
+		t.Parallel()
+
+		merged := yamltest.Layers(
+			t,
+			yamltest.Document(t, niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithByteLimit(10))),
+		)
+
+		assert.Equal(t, 0, merged.ByteLimit())
+	})
+}
+
+func TestSource_DepthLimit(t *testing.T) {
+	t.Parallel()
+
+	var nilSource *niceyaml.Source
+
+	tcs := map[string]struct {
+		source *niceyaml.Source
+		want   int
+	}{
+		"default":         {source: niceyaml.NewSourceFromString("a: 1\n"), want: niceyaml.DefaultDepthLimit},
+		"set":             {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(10)), want: 10},
+		"off":             {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(0))},
+		"negative is off": {source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(-1))},
+		"WithoutLimits": {
+			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithoutLimits(), niceyaml.WithDepthLimit(10)),
+		},
+		"zero value": {source: &niceyaml.Source{}, want: niceyaml.DefaultDepthLimit},
+		"nil":        {source: nilSource},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.source.DepthLimit())
+		})
+	}
+
+	t.Run("layers", func(t *testing.T) {
+		t.Parallel()
+
+		merged := yamltest.Layers(
+			t,
+			yamltest.Document(t, niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithDepthLimit(10))),
+		)
+
+		assert.Equal(t, 0, merged.DepthLimit())
+	})
+}
+
+func TestSource_AllowsDuplicateKeys(t *testing.T) {
+	t.Parallel()
+
+	var nilSource *niceyaml.Source
+
+	tcs := map[string]struct {
+		source *niceyaml.Source
+		want   bool
+	}{
+		"default": {source: niceyaml.NewSourceFromString("a: 1\n")},
+		"allowed": {
+			source: niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithAllowDuplicateKeys(true)),
+			want:   true,
+		},
+		"refused": {
+			source: niceyaml.NewSourceFromString(
+				"a: 1\n",
+				niceyaml.WithAllowDuplicateKeys(true),
+				niceyaml.WithAllowDuplicateKeys(false),
+			),
+		},
+		"zero value": {source: &niceyaml.Source{}},
+		"nil":        {source: nilSource},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.source.AllowsDuplicateKeys())
+		})
+	}
+}
+
+func TestSource_References(t *testing.T) {
+	t.Parallel()
+
+	t.Run("in the order given", func(t *testing.T) {
+		t.Parallel()
+
+		first := niceyaml.NewSourceFromString("x: &x 1\n")
+		second := niceyaml.NewSourceFromString("y: &y 2\n")
+		source := niceyaml.NewSourceFromString(
+			"a: *x\n",
+			niceyaml.WithReferences(first, nil),
+			niceyaml.WithReferences(second),
+		)
+
+		assert.Equal(t, []*niceyaml.Source{first, second}, source.References())
+	})
+
+	t.Run("a copy", func(t *testing.T) {
+		t.Parallel()
+
+		ref := niceyaml.NewSourceFromString("x: &x 1\n")
+		source := niceyaml.NewSourceFromString("a: *x\n", niceyaml.WithReferences(ref))
+
+		refs := source.References()
+		refs[0] = nil
+
+		assert.Equal(t, []*niceyaml.Source{ref}, source.References())
+
+		got, err := source.Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"a": 1}, got)
+	})
+
+	t.Run("none", func(t *testing.T) {
+		t.Parallel()
+
+		var nilSource *niceyaml.Source
+
+		assert.Nil(t, niceyaml.NewSourceFromString("a: 1\n").References())
+		assert.Nil(t, (&niceyaml.Source{}).References())
+		assert.Nil(t, nilSource.References())
+	})
+}
+
+func TestSource_WithoutLimits(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: {b: {c: 123456}}\n",
+		niceyaml.WithByteLimit(8), niceyaml.WithDepthLimit(1), niceyaml.WithoutLimits())
+
+	got, err := source.Decode[map[string]any](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"a": map[string]any{"b": map[string]any{"c": uint64(123456)}}}, got)
+}

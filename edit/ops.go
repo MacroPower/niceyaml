@@ -12,7 +12,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -108,7 +107,7 @@ func (n *Node) setKey(c *modelCall, key string) (renaming, error) {
 		rep, repeats = c.x.repeat(c.renames(&r))
 	}
 
-	if repeats && !hook.AllowsDuplicateKeys(d.user.Source()) {
+	if repeats && !d.user.Source().AllowsDuplicateKeys() {
 		return kept, d.repeatProblem(c.x, rep, *d.lastEdit, n.path)
 	}
 

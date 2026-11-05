@@ -149,6 +149,7 @@ func (l *lazy[T]) get(f func() T) T {
 //   - [WithExcerpts]
 //   - [WithByteLimit]
 //   - [WithDepthLimit]
+//   - [WithoutLimits]
 //
 // [WithAllowDuplicateKeys], [WithReferences], and [WithAliasLimit]
 // describe the documents themselves, so the Source applies them to every
@@ -324,6 +325,19 @@ func WithDepthLimit(n int) SourceOption {
 	}
 }
 
+// WithoutLimits is a [SourceOption] that turns off the byte limit and
+// the depth limit of the [Source], whatever [WithByteLimit] and
+// [WithDepthLimit] set before or after it. The option fits a text that
+// passed the limits already, such as a copy of a document that keeps each
+// of its lines. It also turns off the bounds that the limits put on the
+// aliases of the documents, except in a Source of [NewSourceFromDerived],
+// which keeps the bounds of its home document.
+func WithoutLimits() SourceOption {
+	return func(c *sourceConfig) {
+		c.noLimits = true
+	}
+}
+
 // newSourceConfig returns the settings of opts applied in order.
 func newSourceConfig(opts []SourceOption) sourceConfig {
 	var c sourceConfig
@@ -333,6 +347,26 @@ func newSourceConfig(opts []SourceOption) sourceConfig {
 	}
 
 	return c
+}
+
+// pinned returns the settings of c for a Source of another text. It
+// clears noLimits and aliasBudget. It sets the byte limit and the depth
+// limit to those that c applies, as [Source.ByteLimit] and
+// [Source.DepthLimit] report them. A Source that skips the limits thus
+// gives one that skips them too, because both its limits read as 0 and a
+// limit of 0 turns the check off.
+//
+// The references of the result have no room past their length. A
+// [WithReferences] applied over the result thus appends to a slice of its
+// own. The slice of c and of every other copy stays unchanged.
+func (c *sourceConfig) pinned() sourceConfig {
+	out := *c
+	out.references = slices.Clip(c.references)
+	out.byteLimit, out.byteLimitSet = c.bytes(), true
+	out.depthLimit, out.depthLimitSet = c.depth(), true
+	out.noLimits, out.aliasBudget = false, aliasing.Budget{}
+
+	return out
 }
 
 // limitError returns the error of a text past the byte limit n. The error
@@ -789,6 +823,38 @@ func newStringSource(src string, cfg sourceConfig) *Source {
 	return s
 }
 
+// WithText returns a new [*Source] of text that holds every setting of
+// the [Source], with opts applied over them. The settings are its name,
+// its file path, its file system, its references, its unmarshalers, its
+// limits, and its excerpts. A program that rewrites the file of the
+// Source parses the new text through it, as the next read of the file
+// does:
+//
+//	next := source.WithText(formatted)
+//	next = source.WithText(formatted, niceyaml.WithName("formatted"))
+//
+// The byte limit and the depth limit of the new Source are those of the
+// Source, as [Source.ByteLimit] and [Source.DepthLimit] report them. The
+// new Source is a Source of text as [NewSourceFromString] builds one,
+// whatever the Source is. A Source of layers thus gives a Source of text,
+// not a merge. A Source of [NewSourceFromDerived] gives one that binds
+// its errors in itself.
+//
+// A nil Source holds no settings, so WithText on it is NewSourceFromString.
+func (s *Source) WithText(text string, opts ...SourceOption) *Source {
+	if s == nil {
+		return NewSourceFromString(text, opts...)
+	}
+
+	cfg := s.pinned()
+
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	return newStringSource(text, cfg)
+}
+
 // limitSourceError returns err, the error of a text past the byte limit,
 // bound to a [Source] of cfg that does not hold the text. The error thus
 // names the Source as the error of a Source from [NewSourceFromString]
@@ -1051,6 +1117,52 @@ func (s *Source) FS() fs.FS {
 // it, as it does for a Source without options.
 func (s *Source) ShowsExcerpts() bool {
 	return s == nil || !s.noExcerpts
+}
+
+// ByteLimit returns the most bytes of text the [Source] holds, as
+// [WithByteLimit] sets it, or [DefaultByteLimit] without the option. It
+// returns 0 when the check is off, for a Source whose text niceyaml wrote,
+// such as one of [NewSourceFromLayers], and for a nil Source. A program
+// that rewrites the file of the Source checks the new text against it
+// before the write, so the next read of the file passes.
+func (s *Source) ByteLimit() int {
+	if s == nil {
+		return 0
+	}
+
+	return s.bytes()
+}
+
+// DepthLimit returns the most levels a document of the [Source] nests,
+// as [WithDepthLimit] sets it, or [DefaultDepthLimit] without the
+// option. It returns 0 when the check is off, for a Source whose text
+// niceyaml wrote, such as one of [NewSourceFromLayers], and for a nil
+// Source.
+func (s *Source) DepthLimit() int {
+	if s == nil {
+		return 0
+	}
+
+	return s.depth()
+}
+
+// AllowsDuplicateKeys reports whether the parser accepts a mapping that
+// holds the same key twice in a document of the [Source], as
+// [WithAllowDuplicateKeys] sets it. It reports false for a nil Source.
+func (s *Source) AllowsDuplicateKeys() bool {
+	return s != nil && s.allowDuplicateKeys
+}
+
+// References returns the reference Sources of the [Source], those that
+// [WithReferences] gave, in the order given. Each of them holds its own
+// references. Each call returns a new slice, and References returns nil
+// for a Source without references and for a nil Source.
+func (s *Source) References() []*Source {
+	if s == nil {
+		return nil
+	}
+
+	return slices.Clone(s.references)
 }
 
 // Text returns the text the [Source] read, byte for byte. It keeps the

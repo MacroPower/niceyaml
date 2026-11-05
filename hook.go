@@ -33,21 +33,6 @@ func init() {
 
 		return newWorkingSource(text, n, u, locate)
 	}
-	hook.Reread = func(src any, text string) any {
-		s, _ := src.(*Source) //nolint:errcheck // The hook takes a *Source.
-
-		return newStringSource(text, s.sourceConfig)
-	}
-	hook.Limits = func(src any) (int, int) {
-		s, _ := src.(*Source) //nolint:errcheck // The hook takes a *Source.
-
-		return s.bytes(), s.depth()
-	}
-	hook.AllowsDuplicateKeys = func(src any) bool {
-		s, _ := src.(*Source) //nolint:errcheck // The hook takes a *Source.
-
-		return s.allowDuplicateKeys
-	}
 	hook.Defaults = func(t reflect.Type, opts any) reflect.Value {
 		o, _ := opts.([]DecodeOption) //nolint:errcheck // The hook takes the options of a decode.
 

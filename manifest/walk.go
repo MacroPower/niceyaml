@@ -15,7 +15,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
-	"go.jacobcolvin.com/niceyaml/internal/hook"
 )
 
 // defaultInclude holds the patterns that select the files of a directory
@@ -313,7 +312,7 @@ func (r *reader) fail(name string, err error, t target) {
 func (r *reader) add(f *file) {
 	f.name = f.src.Name()
 
-	if bytes, _ := hook.Limits(f.src); bytes == 0 || len(f.src.Text()) <= bytes {
+	if bytes := f.src.ByteLimit(); bytes == 0 || len(f.src.Text()) <= bytes {
 		f.err = checkEncoding(f.src)
 	}
 

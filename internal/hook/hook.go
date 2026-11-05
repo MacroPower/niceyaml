@@ -81,21 +81,6 @@ var (
 	// locate gives for the location the error resolved in the working text.
 	WorkingSource func(text string, home, us any, locate func(Located) Place) any
 
-	// Reread returns a *niceyaml.Source of text that holds every setting
-	// of src, a *niceyaml.Source: its name, its file path, its reference
-	// documents, and its limits. A program that rewrites the file of src
-	// reads the new text through it, as the next read of the file does.
-	Reread func(src any, text string) any
-
-	// Limits returns the byte limit and the depth limit of src, a
-	// *niceyaml.Source, where zero turns a check off.
-	Limits func(src any) (bytes, depth int)
-
-	// AllowsDuplicateKeys reports whether src, a *niceyaml.Source, parses a
-	// mapping that repeats a key, as niceyaml.WithAllowDuplicateKeys sets
-	// it.
-	AllowsDuplicateKeys func(src any) bool
-
 	// Defaults returns the defaults of t under opts, a
 	// []niceyaml.DecodeOption, as niceyaml.Defaults returns them. A panic
 	// in a function of niceyaml.WithDefaults reaches the caller.

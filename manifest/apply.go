@@ -190,8 +190,7 @@ func (r *Result) check(ctx context.Context) {
 
 		switch {
 		case written[i]:
-			src, _ := hook.Reread(f.src, string(f.plan.after)).(*niceyaml.Source) //nolint:errcheck // The hook returns a Source.
-			nf := &file{src: src, dir: f.dir, target: f.target, name: f.name}
+			nf := &file{src: f.src.WithText(string(f.plan.after)), dir: f.dir, target: f.target, name: f.name}
 			l.files[i] = nf
 			l.checkFile(ctx, i, nf)
 

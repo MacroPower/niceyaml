@@ -12,7 +12,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/edit"
-	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/line"
 )
@@ -248,8 +247,7 @@ func (f *PlanFile) Header() string {
 // not show a line of the file. It holds one row instead, which counts the
 // lines that change.
 func (f *PlanFile) Diff(lines int) *line.View {
-	after, _ := hook.Reread(f.f.src, string(f.after)).(*niceyaml.Source) //nolint:errcheck // The hook returns a Source.
-	result := diff.Diff(f.f.src.Lines(), after.Lines())
+	result := diff.Diff(f.f.src.Lines(), f.f.src.WithText(string(f.after)).Lines())
 
 	if f.f.src.ShowsExcerpts() {
 		return result.Hunks(lines)
@@ -417,7 +415,7 @@ func newText(text string, docs []*docState) string {
 // problem matches [niceyaml.ErrLimit]. A load of the file passes, so
 // [niceyaml.IsInvalid] does not report the problem.
 func checkLimits(src *niceyaml.Source, after string) error {
-	bytes, _ := hook.Limits(src)
+	bytes := src.ByteLimit()
 	if bytes <= 0 || len(after) <= bytes {
 		return nil
 	}

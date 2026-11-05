@@ -1050,7 +1050,7 @@ func (d *Doc) limitProblem(start string) error {
 	}
 
 	src := d.user.Source()
-	bytes, depth := hook.Limits(src)
+	bytes, depth := src.ByteLimit(), src.DepthLimit()
 
 	var problem error
 
