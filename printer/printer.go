@@ -15,7 +15,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/caret"
 	"go.jacobcolvin.com/niceyaml/internal/cells"
-	"go.jacobcolvin.com/niceyaml/internal/clip"
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/line"
@@ -270,16 +269,17 @@ func (f GutterFunc) Render(ctx GutterContext) string {
 // [AnnotationRow]s for them, and the printer pads, escapes, wraps, and
 // styles each one.
 //
-// Every column the context holds counts runes of Content. For a line the
-// view clips, as a view from [line.View.Clip] does, Content is the text
-// of the row. Overlays, Annotations, RowStarts, and RowEnds then hold the
-// columns of that row. A func thus marks a clipped line as it marks any
-// other.
+// Every column the context holds counts runes of Content. Content,
+// Overlays, and Annotations come from the [line.Row] that
+// [line.View.Row] returns for the line. For a line the view clips, as a
+// view from [line.View.Clip] does, Content is the text of the row.
+// Overlays, Annotations, RowStarts, and RowEnds then hold the columns of
+// that row. A func thus marks a clipped line as it marks any other.
 type AnnotationContext struct {
 	// Content is the text of the annotated line, without its line ending.
 	// Annotation columns count runes of this text. The display width of
 	// the text before a column gives the padding that puts a marker under
-	// it. The text of a clipped line holds the windows
+	// it. The text of a clipped line is [line.Row.Content]: the windows
 	// [line.View.Windows] returns, with "..." in place of each run of
 	// columns that the windows leave out.
 	Content string
@@ -877,7 +877,7 @@ func (p *Printer) Style(s kind.Kind) lipgloss.Style {
 }
 
 // Segments returns an iterator over the segments of line i of view, as
-// [line.View.Segments] yields them, each with the style [Printer.Print]
+// [line.View.Row] returns them, each with the style [Printer.Print]
 // draws it in. The style starts from the style of the Kind of the
 // segment. On a line that carries [line.FlagInserted] or
 // [line.FlagDeleted], it starts from [kind.GenericInserted] or
@@ -899,15 +899,18 @@ func (p *Printer) Style(s kind.Kind) lipgloss.Style {
 // cannot apply as Print does. Print draws a grapheme cluster that two
 // segments share in the style of the segment that holds its first rune.
 //
-// Segments yields the segments of the whole line, whatever
-// [line.View.Clip] set, as line.View.Segments does. It panics if i is
-// outside the content.
+// Segments yields the segments of the [line.Row] that [line.View.Row]
+// returns for the line, so on a line the view clips, as a view from
+// [line.View.Clip] does, it yields what Print shows. Each "..." the clip
+// inserts is a segment in [kind.UISeparator], and Print draws it in the
+// style Segments yields for it. [line.View.Segments] yields the segments of
+// the whole line instead. Segments panics if i is outside the content.
 func (p *Printer) Segments(view *line.View, i int) iter.Seq2[line.Segment, lipgloss.Style] {
-	segs := view.Segments(i)
+	segs := view.Row(i).Segments
 	base := flagKind(view.Flag(i))
 
 	return func(yield func(line.Segment, lipgloss.Style) bool) {
-		for seg := range segs {
+		for _, seg := range segs {
 			styled := seg
 			if base != "" {
 				styled.Kind = base
@@ -944,11 +947,11 @@ func flagKind(f line.Flag) kind.Kind {
 // [line.View.String] does. A program that writes it into a file or a
 // fenced block adds that line feed itself.
 //
-// A line the view clips, as a view from [line.View.Clip] does, renders the
-// windows [line.View.Windows] returns. A "..." in [kind.UISeparator] takes
-// the place of each run of columns that the windows leave out. The
-// overlays and the annotations of the line follow its columns onto that
-// row.
+// A line the view clips, as a view from [line.View.Clip] does, renders as
+// the [line.Row] that [line.View.Row] returns: the windows
+// [line.View.Windows] returns, with a "..." in [kind.UISeparator] in
+// place of each run of columns that the windows leave out. The overlays
+// and the annotations of the line follow its columns onto that row.
 //
 // The default container leaves each row as wide as its content. A
 // container that sets any property, such as the box of [WithBox], pads
@@ -1240,8 +1243,8 @@ func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber,
 
 	// Only annotations read the columns each row shows, so a line without
 	// annotations leaves its rows unmapped.
-	if len(view.Annotations(idx)) > 0 {
-		w = mapRows(vl.width(), rendered, runs, w.pieces)
+	if len(vl.row.Annotations) > 0 {
+		w = mapRows(vl.row.Width, rendered, runs, w.pieces)
 	}
 
 	above := p.annotationRows(vl, gutterWidth, line.Above, w)
@@ -1270,163 +1273,31 @@ func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber,
 	return rows, len(rowsAt(above, 0))
 }
 
-// viewLine is one line of a view as the printer shows it: its content,
-// segments, overlays, and annotations in the columns of its row. Those
-// are the columns of the line unless the view clips it, as a view from
-// [line.View.Clip] does. The row of a clipped line holds the windows
-// [line.View.Windows] returns, with an ellipsis in place of each run of
-// columns between and beside them. Everything the printer lays out for
-// the line counts the columns of that row.
+// viewLine is one line of a view as the printer shows it: the [line.Row]
+// that [line.View.Row] returns for it, with the view and the index that
+// reach its flag. Everything the printer lays out for the line counts
+// the columns of that row, which are those of the line unless the view
+// clips it, as a view from [line.View.Clip] does.
 //
 // Create instances with [newViewLine].
 type viewLine struct {
 	view *line.View
-	ln   *line.Line
-	// The layout of the row of a clipped line, or nil for a line the view
-	// shows whole.
-	clip *clip.Map
+	// The map from a column of the line to a column of the row and back.
+	clip line.ClipMap
+	row  line.Row
 	idx  int
 }
 
 // newViewLine creates a new [viewLine] for ln, line idx of view.
 func newViewLine(view *line.View, idx int, ln *line.Line) viewLine {
-	vl := viewLine{view: view, ln: ln, idx: idx}
+	row := view.Row(idx)
 
-	if windows := view.Windows(idx); windows != nil {
-		vl.clip = clip.New(ln.Width(), windows)
+	return viewLine{
+		view: view,
+		row:  row,
+		clip: line.NewClipMap(ln.Width(), row.Windows),
+		idx:  idx,
 	}
-
-	return vl
-}
-
-// content returns the text of the row, without a line ending.
-func (vl viewLine) content() string {
-	if vl.clip == nil {
-		return vl.ln.Content()
-	}
-
-	return vl.clip.Content(vl.ln.Content())
-}
-
-// width returns the number of columns of the row.
-func (vl viewLine) width() int {
-	if vl.clip == nil {
-		return vl.ln.Width()
-	}
-
-	return vl.clip.Width()
-}
-
-// segments returns the segments of the row, in order, as
-// [line.View.Segments] yields those of the line. A clipped line keeps the
-// part of each segment its windows hold, and each ellipsis is a segment
-// of its own in [kind.UISeparator].
-func (vl viewLine) segments() []line.Segment {
-	segs := slices.Collect(vl.view.Segments(vl.idx))
-	if vl.clip == nil {
-		return segs
-	}
-
-	var out []line.Segment
-
-	// The pieces and the segments both ascend, so first moves past the
-	// segments that end before each piece once.
-	first := 0
-
-	for piece := range vl.clip.Pieces() {
-		if piece.Gap {
-			out = append(out, line.Segment{
-				Text: clip.Ellipsis,
-				Kind: kind.UISeparator,
-				Cols: position.NewSpan(piece.At, piece.At+clip.EllipsisCols),
-			})
-
-			continue
-		}
-
-		for first < len(segs) && segs[first].Cols.End <= piece.Cols.Start {
-			first++
-		}
-
-		for _, seg := range segs[first:] {
-			if seg.Cols.Start >= piece.Cols.End {
-				break
-			}
-
-			lo, hi := max(seg.Cols.Start, piece.Cols.Start), min(seg.Cols.End, piece.Cols.End)
-			at := piece.At + lo - piece.Cols.Start
-
-			out = append(out, line.Segment{
-				Text:     cutRunes(seg.Text, lo-seg.Cols.Start, hi-seg.Cols.Start),
-				Kind:     seg.Kind,
-				Overlays: seg.Overlays,
-				Cols:     position.NewSpan(at, at+hi-lo),
-			})
-		}
-	}
-
-	return out
-}
-
-// cutRunes returns the runes of s from rune index lo, inclusive, to rune
-// index hi, exclusive.
-func cutRunes(s string, lo, hi int) string {
-	start, end := len(s), len(s)
-	n := 0
-
-	for i := range s {
-		if n == lo {
-			start = i
-		}
-
-		if n == hi {
-			end = i
-
-			break
-		}
-
-		n++
-	}
-
-	return s[min(start, end):end]
-}
-
-// overlays returns a new slice of the overlays of the line in the columns
-// of the row. A clipped line keeps the part of each overlay its windows
-// hold, as one overlay per window.
-func (vl viewLine) overlays() line.Overlays {
-	overlays := vl.view.Overlays(vl.idx)
-	if vl.clip == nil {
-		return slices.Clone(overlays)
-	}
-
-	var out line.Overlays
-
-	for _, o := range overlays {
-		for _, cols := range vl.clip.Spans(o.Cols) {
-			out = append(out, line.Overlay{Kind: o.Kind, Cols: cols, Blend: o.Blend})
-		}
-	}
-
-	return out
-}
-
-// annotations returns the annotations of the line, each labeling the run
-// of the row that shows its columns.
-func (vl viewLine) annotations() line.Annotations {
-	anns := vl.view.Annotations(vl.idx)
-	if vl.clip == nil {
-		return anns
-	}
-
-	out := make(line.Annotations, len(anns))
-
-	for i, a := range anns {
-		a.Cols = vl.clip.Span(a.Cols)
-		out[i] = a
-	}
-
-	return out
 }
 
 // runSpan places one styled run of a line in both the content and the
@@ -1504,18 +1375,10 @@ func (p *Printer) renderRuns(vl viewLine) (string, []runSpan) {
 		shown += span.shownLen
 	}
 
-	segs := vl.segments()
-
-	var content strings.Builder
-
-	for _, seg := range segs {
-		content.WriteString(seg.Text)
-	}
-
-	row := cells.NewRow(content.String())
+	row := cells.NewRow(vl.row.Content)
 	at := 0 // The column of the content the next rune takes.
 
-	for _, seg := range segs {
+	for _, seg := range vl.row.Segments {
 		if base != "" {
 			seg.Kind = base
 		}
@@ -1606,14 +1469,14 @@ const minAnnotationWidth = 20
 // order, each wrapped to the printer width and styled in the style of its
 // kind.
 func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Placement, w wrappedLine) [][]string {
-	groups := vl.annotations().Groups(placement)
+	groups := vl.row.Annotations.Groups(placement)
 	if len(groups) == 0 {
 		return nil
 	}
 
 	starts := w.starts
 
-	text := vl.content()
+	text := vl.row.Content
 	content := []rune(text)
 	out := make([][]string, max(1, len(starts)))
 
@@ -1627,7 +1490,7 @@ func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Pl
 			Annotations: group,
 			Placement:   placement,
 			Content:     text,
-			Overlays:    vl.overlays(),
+			Overlays:    slices.Clone(vl.row.Overlays),
 			RowStarts:   slices.Clone(starts),
 			RowEnds:     slices.Clone(w.ends),
 		})

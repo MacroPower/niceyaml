@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"go.jacobcolvin.com/niceyaml/internal/cells"
-	"go.jacobcolvin.com/niceyaml/internal/clip"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -84,7 +83,7 @@ type Layout struct {
 // of its row. Its clip maps a column of the line to a column of the row
 // and back.
 type lineLayout struct {
-	clip    *clip.Map
+	clip    line.ClipMap
 	cols    []int
 	offsets []int
 	shown   shownLine
@@ -95,10 +94,6 @@ type lineLayout struct {
 // col returns the column of the content of the row that shows col, a
 // column of the line.
 func (ll lineLayout) col(col int) int {
-	if ll.clip == nil {
-		return col
-	}
-
 	return ll.clip.Col(col)
 }
 
@@ -107,10 +102,6 @@ func (ll lineLayout) col(col int) int {
 // a "..." on a line the view clips, because a "..." does not show a
 // column of the line.
 func (ll lineLayout) lineCol(col int) (int, bool) {
-	if ll.clip == nil {
-		return col, true
-	}
-
 	return ll.clip.LineCol(col)
 }
 
@@ -197,7 +188,7 @@ func (p *Printer) wrapLine(vl viewLine, gutterWidth int) wrappedLine {
 	// ANSI-aware and measures the shown cells.
 	rendered, runs := p.renderRuns(vl)
 
-	return mapRows(vl.width(), rendered, runs, p.wrapContent(rendered, gutterWidth))
+	return mapRows(vl.row.Width, rendered, runs, p.wrapContent(rendered, gutterWidth))
 }
 
 // mapRows returns pieces with the columns of the content each piece

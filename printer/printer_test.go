@@ -2520,6 +2520,98 @@ func TestPrinter_Segments_Stop(t *testing.T) {
 	assert.Equal(t, 1, n)
 }
 
+func TestPrinter_Segments_Clip(t *testing.T) {
+	t.Parallel()
+
+	// A document minified onto one line of 305 runes, clipped to 40
+	// columns around each of two marks, shows "...000...000...". Segments
+	// yields the segments of that row, so a renderer that reads them
+	// draws what Print draws.
+	zeros := func(n int) string { return strings.Repeat("0", n) }
+	long := "key: " + zeros(300)
+	marks := []position.Span{position.NewSpan(100, 101), position.NewSpan(250, 251)}
+
+	p := testPrinterWithStyles(
+		style.Set(kind.UISeparator, bracketStyle("<", ">")),
+		style.Set(kind.GenericError, bracketStyle("[", "]")),
+		style.Set(kind.GenericDeleted, bracketStyle("{", "}")),
+	).With(printer.WithAnnotation(printer.NoAnnotation))
+
+	tcs := map[string]struct {
+		want     string
+		overlays []position.Span
+		flag     line.Flag
+		cols     int
+	}{
+		"line with no mark keeps its first columns": {
+			cols: 40,
+			want: "key: " + zeros(35) + "<...>",
+		},
+		"two marks far apart get a window each": {
+			cols:     40,
+			overlays: marks,
+			want:     "<...>" + zeros(20) + "[0]" + zeros(19) + "<...>" + zeros(20) + "[0]" + zeros(19) + "<...>",
+		},
+		"ellipsis of a deleted line takes its diff style": {
+			cols:     40,
+			overlays: marks,
+			flag:     line.FlagDeleted,
+			// Print joins the ellipsis and the zeros beside it, which
+			// render in one style, into one run.
+			want: "{..." + zeros(20) + "}[0]{" + zeros(19) + "..." + zeros(20) + "}[0]{" + zeros(19) + "...}",
+		},
+		"view without a clip yields the whole line": {
+			overlays: marks,
+			want:     "key: " + zeros(95) + "[0]" + zeros(149) + "[0]" + zeros(54),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := newClippedView(long, tc.cols, tc.overlays)
+			view.SetFlag(0, tc.flag)
+
+			// Print draws adjacent segments of one style as one run, so
+			// the renderer joins them before it styles them.
+			var (
+				rendered strings.Builder
+				text     strings.Builder
+				segs     []line.Segment
+				run      strings.Builder
+				runStyle lipgloss.Style
+			)
+
+			for seg, st := range p.Segments(view, 0) {
+				if run.Len() > 0 && st.Render("x") != runStyle.Render("x") {
+					rendered.WriteString(runStyle.Render(run.String()))
+					run.Reset()
+				}
+
+				run.WriteString(seg.Text)
+
+				runStyle = st
+
+				text.WriteString(seg.Text)
+
+				segs = append(segs, seg)
+
+				if seg.Text == "..." {
+					assert.Equal(t, kind.UISeparator, seg.Kind)
+				}
+			}
+
+			rendered.WriteString(runStyle.Render(run.String()))
+
+			assert.Equal(t, tc.want, p.Print(view))
+			assert.Equal(t, tc.want, rendered.String())
+			assert.Equal(t, view.Row(0).Content, text.String())
+			assert.Equal(t, view.Row(0).Segments, segs)
+		})
+	}
+}
+
 func TestPrinter_Print_Tokens(t *testing.T) {
 	t.Parallel()
 
