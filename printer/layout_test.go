@@ -709,7 +709,7 @@ func TestPrinter_Layout_StyledAnnotationRows(t *testing.T) {
 			)
 
 			p := testPrinterWithStyles(style.Set(kind.UIAnnotation, tc.style)).With(
-				printer.WithGutter(tc.gutter),
+				printer.WithGutter(orNoGutter(tc.gutter)),
 				printer.WithWrapWidth(tc.wrap),
 			)
 

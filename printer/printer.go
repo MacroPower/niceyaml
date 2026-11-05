@@ -787,11 +787,11 @@ func WithStyles(s style.Styler) Option {
 // WithGutter is an [Option] that sets the [Gutter] the printer renders with.
 // By default, [DefaultGutter] renders line numbers and diff markers. A nil
 // g, or one holding a nil func or pointer such as a nil [GutterFunc],
-// selects [NoGutter].
+// selects that same default. [NoGutter] turns the gutter off.
 func WithGutter(g Gutter) Option {
 	return func(c *config) {
 		if nilness.IsNil(g) {
-			g = NoGutter
+			g = DefaultGutter
 		}
 
 		c.gutter = g

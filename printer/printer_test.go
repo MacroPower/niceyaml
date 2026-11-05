@@ -47,15 +47,25 @@ func testPrinter() *printer.Printer {
 	return testPrinterWithGutter(printer.NoGutter)
 }
 
-// testPrinterWithGutter returns a printer without styles but with a custom gutter.
+// testPrinterWithGutter returns a printer without styles but with a custom
+// gutter. A nil gutter renders none, as the tables of these tests write it.
 func testPrinterWithGutter(gutter printer.Gutter) *printer.Printer {
 	return yamltest.NewPlainPrinter(
 		printer.WithStyles(style.New(
 			lipgloss.NewStyle(),
 			style.Set(testOverlayHighlight, bracketStyle("[", "]")),
 		)),
-		printer.WithGutter(gutter),
+		printer.WithGutter(orNoGutter(gutter)),
 	)
+}
+
+// orNoGutter returns gutter, or [printer.NoGutter] for a nil gutter.
+func orNoGutter(gutter printer.Gutter) printer.Gutter {
+	if gutter == nil {
+		return printer.NoGutter
+	}
+
+	return gutter
 }
 
 // testPrinterWithStyles returns a printer without a gutter or padding whose
@@ -4945,10 +4955,11 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 	view := niceyaml.NewSourceFromString("key: value").View()
 	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Cols: position.NewSpan(5, 5)})
 
-	want := testPrinterWithGutter(printer.NoGutter).Print(view)
+	want := yamltest.NewPlainPrinter(printer.WithGutter(printer.DefaultGutter)).Print(view)
 
-	// A nil Gutter, or one holding a nil func or pointer, selects NoGutter
-	// rather than panicking on the first Width or Render call.
+	// A nil Gutter, or one holding a nil func or pointer, selects
+	// DefaultGutter rather than panicking on the first Width or Render
+	// call. NoGutter turns the gutter off.
 	tcs := map[string]struct {
 		gutter printer.Gutter
 	}{
@@ -4964,12 +4975,12 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 			var got string
 
 			require.NotPanics(t, func() {
-				got = testPrinterWithGutter(tc.gutter).Print(view)
+				got = yamltest.NewPlainPrinter(printer.WithGutter(tc.gutter)).Print(view)
 			})
 			assert.Equal(t, want, got)
 			assert.Equal(t, stringtest.JoinLF(
-				"key: value",
-				"     ^ note",
+				"   1  key: value",
+				"           ^ note",
 			), got)
 		})
 	}
