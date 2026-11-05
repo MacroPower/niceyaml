@@ -334,7 +334,8 @@
 // each decode of the document fails with that error.
 //
 // [New] refuses a document that holds one of these, with an error that
-// matches [ErrMisread] and [ErrEngine]:
+// matches [ErrMisread] and that [go.jacobcolvin.com/niceyaml.IsInvalid]
+// reports:
 //
 //   - an own key written before a `<<` merge key that brings in the same
 //     key, as in "{a: 2, <<: *s}", where go-yaml's decoder reads the
@@ -659,7 +660,8 @@
 // Apply returns the first problem and stops there. A failed Apply leaves
 // the Doc as it found it, so the Doc does not keep any of the edits of that
 // Apply. A Node works only during the Apply that gave it. After that Apply
-// returns, each method of the node that edits or decodes returns an error.
+// returns, each method of the node that edits or decodes returns
+// [ErrEnded], and so does [Node.Err].
 //
 // # Errors
 //

@@ -1679,43 +1679,18 @@ func (d *Doc) engineProblem(err error, opts ...niceyaml.ErrorOption) error {
 
 	opts = append([]niceyaml.ErrorOption{niceyaml.WithDetails(detail)}, opts...)
 
-	return niceyaml.Unchecked(&engineError{err: err}, opts...)
+	return niceyaml.Unchecked(&sentinelError{sentinel: ErrEngine, err: err}, opts...)
 }
 
 // engineMisread returns m, a misread of go-yaml in the user's text, as the
 // problem of New at the place that opts give. The problem has the message
-// of m, and its detail gives the fix of m. It matches [ErrMisread] and
-// [ErrEngine].
+// of m, and its detail gives the fix of m. It matches [ErrMisread] and not
+// [ErrEngine], and the document is at fault, because the user can rewrite
+// the text as the fix says.
 func (d *Doc) engineMisread(m *misreadError, opts ...niceyaml.ErrorOption) error {
 	opts = append(opts, niceyaml.WithDetails(errors.New(m.fix)))
 
-	return niceyaml.Unchecked(&engineError{err: m, misread: true}, opts...)
-}
-
-// engineError is the problem of a bug in the engine, which matches
-// [ErrEngine] and has the message of the error behind it. So a report
-// that lists the problems of an error reads one problem, which names
-// go-yaml where go-yaml is at fault. A misread of go-yaml in the user's
-// text, as misread tells, matches [ErrMisread] too.
-type engineError struct {
-	err     error
-	misread bool
-}
-
-// Error returns the message of the error behind e.
-func (e *engineError) Error() string {
-	return e.err.Error()
-}
-
-// Is reports whether target is [ErrEngine], or [ErrMisread] for a misread
-// of go-yaml in the user's text.
-func (e *engineError) Is(target error) bool {
-	return target == ErrEngine || e.misread && target == ErrMisread
-}
-
-// Unwrap returns the error behind e.
-func (e *engineError) Unwrap() error {
-	return e.err
+	return niceyaml.Invalid(&sentinelError{sentinel: ErrMisread, err: m}, opts...)
 }
 
 // scalarToken returns the token of the scalar of node, or nil for a node

@@ -1436,9 +1436,9 @@ func TestNew_ByteOrderMark(t *testing.T) {
 			}
 
 			require.ErrorIs(t, err, edit.ErrMisread)
-			require.ErrorIs(t, err, edit.ErrEngine)
+			require.NotErrorIs(t, err, edit.ErrEngine)
 			require.NotErrorIs(t, err, edit.ErrUnsupported)
-			assert.False(t, niceyaml.IsInvalid(err))
+			assert.True(t, niceyaml.IsInvalid(err))
 			assert.Contains(t, niceyaml.FormatError(err), tc.err)
 			assert.Contains(t, niceyaml.FormatError(err), "`-- remove the byte order mark")
 		})

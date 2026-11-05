@@ -740,9 +740,9 @@ func TestRegistry_PlanMigration_Misread(t *testing.T) {
 
 			if tc.err != "" {
 				require.ErrorIs(t, plan.Err(), edit.ErrMisread)
-				require.ErrorIs(t, plan.Err(), edit.ErrEngine)
+				require.NotErrorIs(t, plan.Err(), edit.ErrEngine)
 				assert.Contains(t, plan.Err().Error(), tc.err)
-				assert.False(t, niceyaml.IsInvalid(plan.Err()))
+				assert.True(t, niceyaml.IsInvalid(plan.Err()))
 
 				return
 			}

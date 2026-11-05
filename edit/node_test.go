@@ -98,6 +98,92 @@ func TestNode_Read(t *testing.T) {
 	}, got)
 }
 
+func TestNode_Err(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		before string
+		// The node whose Err the test reads, from the root.
+		node func(ctx context.Context, root *edit.Node) *edit.Node
+		// The message of the error of Err, or "" for nil.
+		err string
+	}{
+		"place that holds a value": {
+			before: "a: 1\n",
+			node:   func(_ context.Context, root *edit.Node) *edit.Node { return root.At(paths.Doc().Child("a")) },
+		},
+		"place that holds no value": {
+			before: "a: 1\n",
+			node:   func(_ context.Context, root *edit.Node) *edit.Node { return root.At(paths.Doc().Child("z")) },
+		},
+		"root": {
+			before: "a: 1\n",
+			node:   func(_ context.Context, root *edit.Node) *edit.Node { return root },
+		},
+		"path that selects more than one value": {
+			before: "a: 1\n",
+			node:   func(_ context.Context, root *edit.Node) *edit.Node { return root.At(paths.Doc().ChildAll()) },
+			err:    "test.yaml:1:1: $: the edit reads $.*, which selects more than one value",
+		},
+		"node that lost its place": {
+			before: stringtest.LinesLF("m:", "  a: 1"),
+			node: func(_ context.Context, root *edit.Node) *edit.Node {
+				at := root.At(paths.Doc().Child("m").Child("a"))
+				require.NoError(t, root.At(paths.Doc().Child("m")).Remove())
+
+				return at
+			},
+			err: "test.yaml:1:1: $.m: the edit reads $.m.a through a node that lost its place to an earlier edit",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, tc.before)
+
+			var got error
+
+			// Err is a read, so the Apply passes whatever it returns.
+			err := d.Apply(t.Context(), paths.Doc(), func(ctx context.Context, root *edit.Node) error {
+				got = tc.node(ctx, root).Err()
+
+				return nil
+			})
+			require.NoError(t, err)
+
+			if tc.err == "" {
+				require.NoError(t, got)
+
+				return
+			}
+
+			require.EqualError(t, got, tc.err)
+			require.NotErrorIs(t, got, edit.ErrEnded)
+		})
+	}
+
+	t.Run("node after its Apply", func(t *testing.T) {
+		t.Parallel()
+
+		d := newDoc(t, "a: 1\n")
+
+		var kept *edit.Node
+
+		require.NoError(t, d.Apply(t.Context(), paths.Doc(), func(_ context.Context, root *edit.Node) error {
+			kept = root
+
+			require.NoError(t, kept.Err())
+
+			return nil
+		}))
+
+		require.ErrorIs(t, kept.Err(), edit.ErrEnded)
+		assert.False(t, niceyaml.IsInvalid(kept.Err()))
+	})
+}
+
 func TestNode_Path(t *testing.T) {
 	t.Parallel()
 

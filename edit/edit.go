@@ -28,18 +28,18 @@ var (
 	// it. Go-yaml's encoder can panic on the value of a Set, or write text
 	// that go-yaml's decoder reads as another value. It can also write a
 	// character that YAML does not allow in a text, or both "\n" and
-	// "\r\n" line breaks for YAML of one kind. [New] fails with
-	// [ErrMisread], which wraps ErrEngine, for some documents that go-yaml's
-	// decoder reads otherwise than YAML does. The Supported YAML section of
-	// the package documentation lists them. The message names
-	// go-yaml in each of those cases. ErrEngine also indicates new text that
-	// differs from the model of the calls of an
+	// "\r\n" line breaks for YAML of one kind. A call can also write a text
+	// that go-yaml's decoder reads otherwise than YAML does, in one of the
+	// ways that the Supported YAML section of the package documentation
+	// lists. The engine wrote that text, so the call fails with ErrEngine.
+	// The message names go-yaml in each of those cases. ErrEngine also
+	// indicates new text that differs from the model of the calls of an
 	// Apply, as the Transactions section of the package documentation
 	// describes. It also indicates a call that the model cannot take. The
 	// error binds where the user's text holds the value that differs, or at
 	// the place of the call, as the Errors section of the package
 	// documentation describes. An error that matches ErrEngine never
-	// matches [ErrUnsupported].
+	// matches [ErrUnsupported] or [ErrMisread].
 	ErrEngine = errors.New("the engine cannot write this edit")
 
 	// ErrMisread indicates a document of valid YAML that go-yaml's decoder
@@ -47,55 +47,104 @@ var (
 	// YAML section of the package documentation lists. Only [New] fails with
 	// an error that matches ErrMisread. The error names go-yaml and what it
 	// reads, and its detail says what the user can write so that go-yaml
-	// reads the text as YAML does. ErrMisread wraps [ErrEngine], so such an
-	// error matches both. A text that go-yaml's parser refuses fails New with
-	// the error of the parse, as the Source gives it, which matches neither.
+	// reads the text as YAML does. A text that go-yaml's parser refuses
+	// fails New with the error of the parse, as the Source gives it. That
+	// error does not match ErrMisread.
 	//
-	// The text is valid YAML, so [go.jacobcolvin.com/niceyaml.IsInvalid]
-	// reports false for the error, as it does for a bug in the engine. The
-	// user can still fix the text, so a server tests for ErrMisread before
-	// it asks IsInvalid:
+	// The user can fix the text, so [go.jacobcolvin.com/niceyaml.IsInvalid]
+	// reports true for the error. It reports true for a document that holds
+	// YAML outside the subset that the engine edits too. A server thus
+	// classifies the errors of the package with IsInvalid alone:
 	//
 	//	switch {
 	//	case err == nil:
-	//	case errors.Is(err, edit.ErrMisread):
+	//	case niceyaml.IsInvalid(err):
 	//		status = 422 // the user rewrites the text as the detail says
-	//	case !niceyaml.IsInvalid(err):
-	//		status = 500 // a bug in the engine, among other faults
 	//	default:
-	//		status = 422
+	//		status = 500 // a bug in the engine, among other faults
 	//	}
 	//
 	// A call that writes such a text fails with an error that matches
-	// ErrEngine and not ErrMisread, because the engine wrote that text. So
+	// [ErrEngine] and not ErrMisread, because the engine wrote that text. So
 	// does go-yaml's encoder, and go-yaml's parser or decoder when it refuses
 	// the text that the engine wrote.
-	ErrMisread = fmt.Errorf("go-yaml misreads the document: %w", ErrEngine)
+	ErrMisread = errors.New("go-yaml misreads the document")
 
-	// The problem of a call of New with a nil Node, a Node below the root,
-	// or a document that does not hold a value.
-	errDocument = errors.New("New takes the root of a document that holds a value")
+	// ErrUsage indicates a call with an argument that the package does not
+	// take. [New] fails so with a nil Node, a Node below the root of its
+	// document, or a path of [WithProtected] that is not a `$` path of names
+	// and indexes. [Doc.Apply] fails so with a path that does not start at
+	// `$` or that holds a `~`. [FileText] fails so with no Doc, with Docs of
+	// two Sources, or with two Docs of one document. The program is at fault, so
+	// [go.jacobcolvin.com/niceyaml.IsInvalid] reports false for the error,
+	// and the error binds nowhere. The message says what the call takes, as
+	// in "Apply takes a $ path without ~, not @.spec".
+	ErrUsage = errors.New("the program passes an argument that the package does not take")
+
+	// ErrNested indicates an Apply that a [Func] of the same Doc calls. The
+	// nested Apply fails with the error, and so does the outer Apply, in
+	// which the error binds at the root of the document.
+	ErrNested = errors.New("Apply runs inside another Apply of the Doc")
+
+	// ErrEnded indicates an edit or a decode through a [Node] after the
+	// Apply that gave the node returned. [Node.Err] returns the error then,
+	// and so does each method of the node that edits or decodes. The error
+	// binds nowhere, and [go.jacobcolvin.com/niceyaml.IsInvalid] reports
+	// false for it.
+	ErrEnded = errors.New("the Apply that gave the node has returned")
+
+	// The problem of a call of New with a nil Node or a Node below the root.
+	errDocument = usage("New takes the root of a document that holds a value")
+	// The problem of a call of New with a document that does not hold a
+	// value, which is the fault of the document. It reads as errDocument,
+	// but it does not match ErrUsage.
+	errEmptyDocument = errors.New(errDocument.Error())
 	// The problem of a document that holds a byte order mark inside it.
 	errMarkInside = errors.New("a byte order mark")
 	// The problem of a call of New with a protected path that is not a `$`
 	// path of names and indexes.
-	errProtectedPath = errors.New("WithProtected takes a $ path of names and indexes")
-	// The problem of an Apply that a Func of its Doc calls.
-	errNested = errors.New("Apply runs inside another Apply of the Doc")
-	// The problem of an edit or a decode of a node after the Apply that gave
-	// it returned.
-	errEnded = errors.New("the Apply that gave the node has returned")
+	errProtectedPath = usage("WithProtected takes a $ path of names and indexes")
 	// The problem of an Apply on a path that does not start at `$`, or that
 	// holds a `~`.
-	errPath = errors.New("Apply takes a $ path without ~")
+	errPath = usage("Apply takes a $ path without ~")
 	// The problems of a call of FileText without a Doc, with Docs of more
 	// than one Source, and with two Docs of one document.
-	errFileTextEmpty   = errors.New("FileText takes at least one Doc")
-	errFileTextSources = errors.New("FileText takes Docs of one Source")
-	errFileTextTwice   = errors.New("FileText takes each document once")
+	errFileTextEmpty   = usage("FileText takes at least one Doc")
+	errFileTextSources = usage("FileText takes Docs of one Source")
+	errFileTextTwice   = usage("FileText takes each document once")
 	// The problem of a parse of the text that finds no document in it.
 	errNoDocument = errors.New("the text holds no document")
 )
+
+// sentinelError is a problem that matches sentinel, an error of the
+// package such as [ErrEngine]. It has the message of err, the error behind
+// it. A report that lists the problems of the error thus reads the problem
+// once, rather than once for the sentinel and once for err.
+type sentinelError struct {
+	sentinel error
+	err      error
+}
+
+// usage returns the problem of a call that msg describes, which matches
+// [ErrUsage].
+func usage(msg string) error {
+	return &sentinelError{sentinel: ErrUsage, err: errors.New(msg)}
+}
+
+// Error returns the message of the error behind e.
+func (e *sentinelError) Error() string {
+	return e.err.Error()
+}
+
+// Is reports whether target is the sentinel of e.
+func (e *sentinelError) Is(target error) bool {
+	return target == e.sentinel
+}
+
+// Unwrap returns the error behind e.
+func (e *sentinelError) Unwrap() error {
+	return e.err
+}
 
 // Func edits a document through n, a node on one place that the path of
 // [Doc.Apply] selects. An error fails the Apply, and an error without a
@@ -437,14 +486,15 @@ type Removal struct {
 // too. The parser reads an empty value under a tag that a line break or a
 // space follows. So New takes "!t\n" with that value as its root.
 // [niceyaml.IsInvalid] reports the error of a document that does not hold
-// a value, but not the error of a nil doc or a Node below the root. A path
-// of [WithProtected] that is not a `$` path of names and indexes fails New
-// too. New reads the document as go-yaml reads it. It refuses some
-// documents that go-yaml's decoder reads otherwise than YAML does, with an
-// error that matches [ErrMisread]. The Supported YAML section of the
-// package documentation lists them. It then refuses a document that holds
-// YAML outside the subset that the engine edits, as that section lists it,
-// with an error that matches [ErrUnsupported].
+// a value. The error of a nil doc or a Node below the root matches
+// [ErrUsage] instead. So does the error of a path of [WithProtected] that
+// is not a `$` path of names and indexes, which fails New too. New reads
+// the document as go-yaml reads it. It refuses some documents that
+// go-yaml's decoder reads otherwise than YAML does, with an error that
+// matches [ErrMisread]. The Supported YAML section of the package
+// documentation lists them. It then refuses a document that holds YAML
+// outside the subset that the engine edits, as that section lists it, with
+// an error that matches [ErrUnsupported].
 func New(doc *niceyaml.Node, opts ...Option) (*Doc, error) {
 	switch {
 	case doc == nil:
@@ -487,7 +537,7 @@ func New(doc *niceyaml.Node, opts ...Option) (*Doc, error) {
 	// for an empty upload, unlike a program that passes a nil doc.
 	if doc.IsEmpty() {
 		//nolint:wrapcheck // The binding is the problem of the document.
-		return nil, doc.Bind(niceyaml.Invalid(fmt.Errorf("%w, not an empty document", errDocument)))
+		return nil, doc.Bind(niceyaml.Invalid(fmt.Errorf("%w, not an empty document", errEmptyDocument)))
 	}
 
 	for _, refuse := range []func() error{d.markRefusal, d.misreadRefusal, d.newRefusal} {
@@ -688,10 +738,11 @@ func headerEnd(src *niceyaml.Source, line int) int {
 //
 // Apply returns the first problem, bound in the user's text, and stops
 // there. A failed Apply leaves the Doc as it found it, so the Doc drops
-// every edit of the calls before the problem. Apply returns an error, and
-// calls fn zero times, for a path that does not start at `$` or that holds
-// a `~`. It does the same for a call from a Func of the same Doc, and that
-// call fails the outer Apply too. A text whose aliases expand past the
+// every edit of the calls before the problem. Apply returns an error that
+// matches [ErrUsage], and calls fn zero times, for a path that does not
+// start at `$` or that holds a `~`. It returns an error that matches
+// [ErrNested] for a call from a Func of the same Doc, and that call fails
+// the outer Apply too. A text whose aliases expand past the
 // alias limit also fails before fn runs, with the error that a decode of
 // the text gives. A path whose matches read through an alias that the text
 // does not resolve, such as an alias of a reference document at a `<<`
@@ -699,9 +750,9 @@ func headerEnd(src *niceyaml.Source, line int) int {
 // a path of [Node.At] does, and it binds at the alias.
 func (d *Doc) Apply(ctx context.Context, path paths.Path, fn Func, opts ...ApplyOption) error {
 	if d.applying {
-		d.record(errNested)
+		d.record(ErrNested)
 
-		return errNested
+		return ErrNested
 	}
 
 	if !path.IsAbsolute() || holdsKey(path) {

@@ -102,13 +102,18 @@ func TestNew(t *testing.T) {
 		// Whether niceyaml.IsInvalid reports the error, because the text of
 		// the document is at fault.
 		invalid bool
+		// Whether the error matches edit.ErrUsage, because the program is at
+		// fault.
+		usage bool
 	}{
 		"nil document": {
-			err: "New takes the root of a document that holds a value, not nil",
+			err:   "New takes the root of a document that holds a value, not nil",
+			usage: true,
 		},
 		"node below the root": {
-			doc: below,
-			err: "New takes the root of a document that holds a value, not the node at $.a",
+			doc:   below,
+			err:   "New takes the root of a document that holds a value, not the node at $.a",
+			usage: true,
 		},
 		"empty document": {
 			doc:     niceyaml.NewSourceFromString("# only a comment\n").AllDocuments()[0],
@@ -137,14 +142,16 @@ func TestNew(t *testing.T) {
 			invalid: true,
 		},
 		"protected path that selects more than one value": {
-			doc:  doc,
-			opts: []edit.Option{edit.WithProtected(paths.Doc().ChildAll())},
-			err:  "WithProtected takes a $ path of names and indexes, not $.*",
+			doc:   doc,
+			opts:  []edit.Option{edit.WithProtected(paths.Doc().ChildAll())},
+			err:   "WithProtected takes a $ path of names and indexes, not $.*",
+			usage: true,
 		},
 		"relative protected path": {
-			doc:  doc,
-			opts: []edit.Option{edit.WithProtected(paths.Current().Child("a"))},
-			err:  "WithProtected takes a $ path of names and indexes, not @.a",
+			doc:   doc,
+			opts:  []edit.Option{edit.WithProtected(paths.Current().Child("a"))},
+			err:   "WithProtected takes a $ path of names and indexes, not @.a",
+			usage: true,
 		},
 	}
 
@@ -156,6 +163,8 @@ func TestNew(t *testing.T) {
 			require.Error(t, err)
 			assert.Equal(t, tc.err, err.Error())
 			assert.Equal(t, tc.invalid, niceyaml.IsInvalid(err))
+			assert.Equal(t, tc.usage, errors.Is(err, edit.ErrUsage))
+			require.NotErrorIs(t, err, edit.ErrEngine)
 		})
 	}
 }
@@ -3946,6 +3955,44 @@ func TestDoc_Apply(t *testing.T) {
 	})
 }
 
+func TestDoc_Apply_Usage(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		path paths.Path
+		err  string
+	}{
+		"relative path": {
+			path: paths.Current().Child("spec"),
+			err:  "Apply takes a $ path without ~, not @.spec",
+		},
+		"path with a key": {
+			path: paths.Doc().Child("spec").Key(),
+			err:  "Apply takes a $ path without ~, not $.spec~",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := newDoc(t, "spec: 1\n")
+			calls := 0
+
+			err := d.Apply(t.Context(), tc.path, func(context.Context, *edit.Node) error {
+				calls++
+
+				return nil
+			})
+			require.ErrorIs(t, err, edit.ErrUsage)
+			require.NotErrorIs(t, err, edit.ErrEngine)
+			assert.Equal(t, tc.err, err.Error())
+			assert.False(t, niceyaml.IsInvalid(err))
+			assert.Zero(t, calls)
+		})
+	}
+}
+
 func TestDoc_Apply_Nested(t *testing.T) {
 	t.Parallel()
 
@@ -3984,7 +4031,8 @@ func TestDoc_Apply_Nested(t *testing.T) {
 
 				return nil
 			})
-			require.Error(t, err)
+			require.ErrorIs(t, err, edit.ErrNested)
+			require.NotErrorIs(t, err, edit.ErrUsage)
 			assert.Contains(t, err.Error(), nested)
 			assert.Zero(t, calls)
 			assert.Equal(t, "a: 1\n", d.Text())
@@ -4231,11 +4279,15 @@ func TestDoc_Apply_NodeAfterItsApply(t *testing.T) {
 	assert.False(t, kept.Exists())
 	assert.Equal(t, niceyaml.NodeNone, kept.Kind())
 	assert.Empty(t, kept.Text())
-	require.Error(t, kept.Set(t.Context(), 2))
-	require.Error(t, kept.At(paths.Current().Child("b")).Set(t.Context(), 2))
+	require.ErrorIs(t, kept.Err(), edit.ErrEnded)
+	require.ErrorIs(t, kept.Set(t.Context(), 2), edit.ErrEnded)
+	require.ErrorIs(t, kept.At(paths.Current().Child("b")).Set(t.Context(), 2), edit.ErrEnded)
+	require.ErrorIs(t, kept.At(paths.Current().Child("b")).Err(), edit.ErrEnded)
 
 	_, err := kept.Decode[int](t.Context())
-	require.Error(t, err)
+	require.ErrorIs(t, err, edit.ErrEnded)
+	require.NotErrorIs(t, err, edit.ErrEngine)
+	assert.False(t, niceyaml.IsInvalid(err))
 
 	assert.Equal(t, "a: 1\n", d.Text())
 	assert.False(t, d.Edited())
@@ -8901,7 +8953,7 @@ func TestFileText(t *testing.T) {
 
 			got, err := edit.FileText(tc.docs(t)...)
 			if tc.err != "" {
-				require.Error(t, err)
+				require.ErrorIs(t, err, edit.ErrUsage)
 				assert.Equal(t, tc.err, err.Error())
 
 				return

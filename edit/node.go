@@ -52,8 +52,8 @@ import (
 // Func, and the Apply fails with that error only when the Func returns it or
 // when the error matches [ErrEngine]. A node takes edits until the Apply
 // that gave it returns. After that, each method that edits or decodes
-// returns an error. Exists, Kind, and Text then answer as they do for a
-// place that does not hold a value.
+// returns [ErrEnded]. Exists, Kind, and Text then answer as they do for a
+// place that does not hold a value, and [Node.Err] tells the two apart.
 //
 // Receive instances as the argument of a [Func], or from [Node.At].
 type Node struct {
@@ -811,7 +811,7 @@ func (n *Node) Key() string {
 func (n *Node) place(u use, verb string) (*place, error) {
 	switch {
 	case n.ended:
-		return nil, errEnded
+		return nil, ErrEnded
 	case n.gone:
 		return nil, n.d.goneProblem(n, verb)
 	case n.err != nil:
@@ -926,6 +926,32 @@ func (n *Node) Kind() niceyaml.NodeKind {
 	}
 
 	return v.Kind()
+}
+
+// Err returns the problem that stops each method that edits or decodes
+// through the node before it reads the place, or nil when the node reads
+// and edits the place. The message names the call as a read, as in "reads
+// $.a", where an edit names its own call. Err returns [ErrEnded] after the
+// Apply that gave the node returned. It returns the problem of a path of
+// [Node.At] that the node cannot take, and the problem of a node that lost
+// its place to an earlier edit, as [Node] describes. A step of a failed
+// path can reach a zone of the Apply. An edit then fails with the refusal
+// of that zone, but Err returns the problem of the path.
+// Err returns the error of a call of the Apply after which the text
+// differed from the model too, which matches [ErrEngine].
+// Exists, Kind, and Text answer as they do for a place that does not hold
+// a value in each of those cases, so Err tells such a node from a node on
+// a place that holds no value, where Err returns nil. Err is a read, so
+// the Apply fails with its error only when the Func returns it.
+func (n *Node) Err() error {
+	// A problem of the place that a read finds belongs to the Func, so the
+	// Apply keeps the problem that it recorded before the read.
+	callErr := n.d.callErr
+	defer func() { n.d.callErr = callErr }()
+
+	_, err := n.place(useRead, "reads")
+
+	return err
 }
 
 // Text returns the string that a decode reads from a scalar, before a tag

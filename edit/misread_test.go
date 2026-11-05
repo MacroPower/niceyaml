@@ -461,7 +461,7 @@ func TestNew_Misread(t *testing.T) {
 			}
 
 			require.ErrorIs(t, err, edit.ErrMisread)
-			require.ErrorIs(t, err, edit.ErrEngine)
+			require.NotErrorIs(t, err, edit.ErrEngine)
 			require.NotErrorIs(t, err, edit.ErrUnsupported)
 			assert.Contains(t, niceyaml.FormatError(err), tc.err)
 			assert.NotContains(t, niceyaml.FormatError(err), "report this")
@@ -470,16 +470,16 @@ func TestNew_Misread(t *testing.T) {
 				assert.Contains(t, niceyaml.FormatError(err), "`-- "+tc.fix+"\n")
 			}
 
-			// The text is valid YAML, so neither the error nor its problem is
-			// the fault of the document.
-			assert.False(t, niceyaml.IsInvalid(err))
+			// The user can rewrite the text as the fix says, so the error
+			// and its problem are the fault of the document.
+			assert.True(t, niceyaml.IsInvalid(err))
 
 			problems := 0
 
 			for p := range niceyaml.NewErrorTree(err).Problems() {
 				problems++
 
-				assert.False(t, p.IsInvalid())
+				assert.True(t, p.IsInvalid())
 				assert.Contains(t, niceyaml.FormatError(err), p.Message())
 			}
 
