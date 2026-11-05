@@ -2,6 +2,7 @@ package yamlviewport
 
 import (
 	"cmp"
+	"iter"
 	"reflect"
 	"slices"
 	"sort"
@@ -217,6 +218,20 @@ type Hit struct {
 	// Revision is the index in the history of the revision that holds
 	// the position, as [Model.RevisionIndex] counts.
 	Revision int
+}
+
+// Match is a search match of the viewport: the [Hit] of its first column
+// and the end of its range. [Model.SearchMatch] returns the Match of a
+// search match by its index, and [Model.SearchMatches] yields every one.
+type Match struct {
+	Hit
+	// End is the position after the last column of the match, in the
+	// coordinates of Hit.Position. The match thus covers the half-open
+	// range from Hit.Position to End. A match that crosses a line break
+	// ends on a later line of the revision. When a diff shows the next
+	// line of the match from the other revision, End names the start of
+	// the line after the last line the revision holds.
+	End position.Position
 }
 
 // Option configures a [Model].
@@ -2224,6 +2239,38 @@ func (m *Model) TopLine() int {
 	return first
 }
 
+// TopHit returns the [Hit] of the first column of the line that owns the
+// top row of the view, and true. It names the line as [Model.TopLine]
+// picks it, so a row in the frame of the container style gives the
+// nearest line. The Hit is one that [Model.Reveal] takes, so a parent
+// that keeps it can scroll back to the line, and one that
+// [niceyaml.Node.PathAt] takes, so a status bar can show the path at the
+// top of the screen.
+//
+// A diff names the revision of the line as [Model.HitAt] does. In
+// [ViewModeSideBySide] the Hit names the line of the left pane, or the
+// line of the right pane when the left one shows a placeholder beside
+// it. TopHit reports false for a view without lines, such as that of a
+// zero Model.
+func (m *Model) TopHit() (Hit, bool) {
+	if m.printer == nil || !m.hasContent() {
+		return Hit{}, false
+	}
+
+	first, _ := m.rowWindow()
+	pos := position.New(m.rows.indices[first], 0)
+
+	if hit, ok := m.revisionHit(false, pos); ok {
+		return hit, true
+	}
+
+	if m.baseRight == nil {
+		return Hit{}, false
+	}
+
+	return m.revisionHit(true, pos)
+}
+
 // VisibleLineCount returns the number of lines with at least one row on
 // screen. It returns 0 when the content area does not have room for a row,
 // such as at a height of 0 or when the container frame fills the width.
@@ -2471,6 +2518,47 @@ func (m *Model) Reveal(hit Hit) bool {
 	})
 }
 
+// Shows reports whether the viewport shows hit on screen. It takes a [Hit]
+// as [Model.Reveal] does and finds the row that holds the position as
+// Reveal finds the row it centers, so Shows reports true for a Hit that
+// Reveal returned true for, until the viewport scrolls. The row must lie
+// in the window of the view, and with wrapping off the cell of the column
+// must lie in the window too. Shows reports false for a Hit that Reveal
+// reports false for, and for every Hit before the content area has room
+// for a row.
+//
+// Shows finds the column at the end of a line on the row of the last
+// column of the line, as Reveal does. With wrapping off, the column at the
+// end of a line takes the cell past its last rune. On a line as wide as
+// the content, that cell lies past the right edge of the content, and no
+// scroll brings it on screen. Shows counts a cell past that edge as on
+// screen when the window reaches the edge. [Model.HitAt] never reports the
+// column at the end of a line, because no cell shows it.
+func (m *Model) Shows(hit Hit) bool {
+	right, pos, ok := m.locate(hit)
+	if !ok || !m.canRender() {
+		return false
+	}
+
+	row, layout, ok := m.paneRow(right, pos)
+	if !ok || row < m.yOffset || row >= m.yOffset+m.maxHeight() {
+		return false
+	}
+
+	if m.wrapEnabled {
+		return true
+	}
+
+	// The end of a line as wide as the content takes the cell past the
+	// right edge of the content. A zero-width rune at the end of that line
+	// takes the same cell. No X offset brings that cell on screen, so the last cell of the
+	// content stands in for it. The cell of every other column lies inside
+	// the content, so the clamp keeps it.
+	x := min(layout.GutterWidth()+layout.CellOf(pos), max(0, m.rowWidth()-1))
+
+	return x >= m.xOffset && x < m.xOffset+m.scrollWidth()
+}
+
 // locate finds hit in the views on display. It returns whether the right
 // pane shows hit rather than the left, the position that shows it in the
 // content of that pane, and true. The last result is false when the lines
@@ -2628,6 +2716,77 @@ func (m *Model) SearchCount() int {
 	return len(m.searchMatches)
 }
 
+// SearchMatch returns the search match at index i, counting from 0 in the
+// order [Model.SearchNext] steps through the matches, and true. The
+// [Match] of [Model.SearchIndex] is the current match, so a status bar
+// shows its line:
+//
+//	if match, ok := m.viewport.SearchMatch(m.viewport.SearchIndex()); ok {
+//		status = fmt.Sprintf("match %d/%d at line %d",
+//			m.viewport.SearchIndex()+1, m.viewport.SearchCount(), match.Position.Line+1)
+//	}
+//
+// A diff shows lines of two revisions. The Match then names the revision
+// that holds the line the match starts on, as [Model.HitAt] names the
+// revision of a cell. For a match on a deleted line, and for a match in
+// the left pane of [ViewModeSideBySide], that is the revision the diff
+// compares with. For any other match it is the current revision.
+// SearchMatch reports false for an index outside the matches. It also
+// reports false for a match that starts on a placeholder of
+// ViewModeSideBySide, because the placeholder shows no line of a revision.
+func (m *Model) SearchMatch(i int) (Match, bool) {
+	if i < 0 || i >= len(m.searchMatches) {
+		return Match{}, false
+	}
+
+	match := m.searchMatches[i]
+	right := m.baseRight != nil && !match.inLeft
+
+	hit, ok := m.revisionHit(right, match.rng.Start)
+	if !ok {
+		return Match{}, false
+	}
+
+	return Match{Hit: hit, End: m.matchEnd(right, hit, match.rng)}, true
+}
+
+// matchEnd returns the end of rng in the revision of hit, which holds the
+// start of rng. The range lies in the content of the left pane, or of the
+// right one when right is true. A match that crosses a line break goes on
+// with the next line of the pane. The revision holds that line too when
+// the diff shows it from the same revision, right after the line before.
+// Otherwise the match ends for the revision with the line break of its
+// last line there. End names that break as the start of the next line.
+func (m *Model) matchEnd(right bool, hit Hit, rng position.Range) position.Position {
+	last := hit.Position.Line
+
+	for i := rng.Start.Line + 1; i <= rng.End.Line; i++ {
+		next, ok := m.revisionHit(right, position.New(i, 0))
+		if !ok || next.Revision != hit.Revision || next.Position.Line != last+1 {
+			return position.New(last+1, 0)
+		}
+
+		last = next.Position.Line
+	}
+
+	return position.New(last, rng.End.Col)
+}
+
+// SearchMatches returns the search matches in the order [Model.SearchNext]
+// steps through them. Each is the [Match] that [Model.SearchMatch] returns
+// for its index, and the sequence leaves out a match that SearchMatch
+// reports false for.
+func (m *Model) SearchMatches() iter.Seq[Match] {
+	return func(yield func(Match) bool) {
+		for i := range len(m.searchMatches) {
+			match, ok := m.SearchMatch(i)
+			if ok && !yield(match) {
+				return
+			}
+		}
+	}
+}
+
 // scrollToCurrentMatch scrolls to the current search match, as scrollTo
 // does for its range.
 func (m *Model) scrollToCurrentMatch() {
@@ -2644,6 +2803,34 @@ func (m *Model) scrollToCurrentMatch() {
 	})
 }
 
+// paneRow returns the row of the view that shows pos in the content of the
+// left pane, or of the right one when right is true, the layout of its
+// line alone in that pane, and true. It reports false when the pane does
+// not render the line, or the line does not hold the column.
+func (m *Model) paneRow(right bool, pos position.Position) (int, printer.Layout, bool) {
+	m.ensureRows()
+
+	i := pos.Line
+
+	k, ok := slices.BinarySearch(m.rows.indices, i)
+	if !ok {
+		return 0, printer.Layout{}, false
+	}
+
+	// The row of the position within its line comes from a layout of the
+	// line alone in the pane it is in. The line's first row comes from the
+	// sums. PadTop adds the blank rows the pane shows above its own when
+	// the other pane has more rows above its first content row.
+	layout := m.renderPrinter(m.paneWidth()).Layout(m.highlightedWithin(right, position.NewSpan(i, i+1)))
+
+	lineRow := layout.RowOf(pos)
+	if lineRow < 0 {
+		return 0, printer.Layout{}, false
+	}
+
+	return m.rows.sums[k] + m.rows.padTop(k, right) + lineRow, layout, true
+}
+
 // scrollTo scrolls to center the row that holds the start of the range of
 // target. Sideways, it returns to the first screen. When wrap is off and
 // the range ends past that screen, it centers the start of the range
@@ -2656,8 +2843,6 @@ func (m *Model) scrollToCurrentMatch() {
 // is current then. The row counts fill at any size, so scrollTo reports its
 // result at the call.
 func (m *Model) scrollTo(target scrollTarget) bool {
-	m.ensureRows()
-
 	rng, right := target.rng, target.right
 
 	view := m.baseLeft
@@ -2665,20 +2850,8 @@ func (m *Model) scrollTo(target scrollTarget) bool {
 		view = m.baseRight
 	}
 
-	i := rng.Start.Line
-
-	k, ok := slices.BinarySearch(m.rows.indices, i)
+	row, layout, ok := m.paneRow(right, rng.Start)
 	if !ok || view == nil {
-		return false
-	}
-
-	// The row of the range within its line comes from a layout of the line
-	// alone in the pane it is in. The line's first row comes from the sums,
-	// and padTop adds the blank rows the pane shows above its own.
-	layout := m.renderPrinter(m.paneWidth()).Layout(m.highlightedWithin(right, position.NewSpan(i, i+1)))
-
-	lineRow := layout.RowOf(rng.Start)
-	if lineRow < 0 {
 		return false
 	}
 
@@ -2688,9 +2861,7 @@ func (m *Model) scrollTo(target scrollTarget) bool {
 		return true
 	}
 
-	// The pane with fewer rows above the first content row of the line
-	// shows blank rows above its own.
-	row := m.rows.sums[k] + m.rows.padTop(k, right) + lineRow
+	i := rng.Start.Line
 
 	// (maxHeight-1)/2 puts the range on the visual center row. A height of
 	// 22 gives (22-1)/2 = 10, and a height of 21 gives (21-1)/2 = 10, so
