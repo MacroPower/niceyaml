@@ -60,7 +60,6 @@ func TestNewAccess(t *testing.T) {
 		}{
 			"no options":  {access: none},
 			"zero Access": {access: &schema.Access{}},
-			"nil Access":  {},
 		}
 
 		for name, tc := range tcs {
@@ -86,6 +85,17 @@ func TestNewAccess(t *testing.T) {
 				assert.Empty(t, requests())
 			})
 		}
+	})
+
+	t.Run("WithAccess panics on a nil Access", func(t *testing.T) {
+		t.Parallel()
+
+		// A nil Access comes only from an ignored error of NewAccess, so
+		// the option panics rather than pick a default on a security
+		// boundary.
+		assert.PanicsWithValue(t, "schema.WithAccess: access is nil", func() {
+			schema.WithAccess(nil)
+		})
 	})
 
 	t.Run("an option that does not hold is an error", func(t *testing.T) {

@@ -275,18 +275,21 @@ func AllowAnyURL() AccessOption {
 //	)
 //
 // A registry without the option reads and fetches what [Unrestricted]
-// allows. A nil Access, like the zero Access, does not allow any file on
-// disk or any URL. So a program that ignores the error of [NewAccess]
-// gets a registry that does not read or fetch anything.
+// allows. The zero Access does not allow any file on disk or any URL,
+// and so does an Access from [NewAccess] without options.
+//
+// Panics if a is nil. A nil Access comes only from an ignored error of
+// [NewAccess]. The Access is a security boundary, so the option does not
+// pick a default for it.
 //
 // The option keeps its own copy of a, so a later assignment to *a does
 // not change the option. Given more than once, the last option wins.
 func WithAccess(a *Access) RegistryOption {
-	var cfg accessConfig
-
-	if a != nil {
-		cfg = a.accessConfig
+	if a == nil {
+		panic("schema.WithAccess: access is nil")
 	}
+
+	cfg := a.accessConfig
 
 	return func(c *registryConfig) {
 		c.access = cfg
