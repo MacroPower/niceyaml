@@ -26,15 +26,17 @@ import (
 // Create instances with [NewRegistry] or [MustNewRegistry].
 type Registry struct {
 	// The schema registry that loads and compiles the schema of each
-	// version the first time that a document reaches it.
+	// version the first time that a document reaches it. It comes from
+	// [WithSchemaRegistry], or the registry builds one of its own.
 	schemas *schema.Registry
 	// The kind of each name that a document can write in its kind field.
 	// The names are the registered names and the old names from KindName.
 	names map[string]*kindEntry
 	// The kind of each Go type.
 	types map[reflect.Type]*kindEntry
-	// The type fields that each schema does not declare, keyed by the
-	// validator of the schema, as [Registry.hiddenFields] returns them.
+	// The type fields that the schema of each version does not declare,
+	// keyed by the version, as [Registry.hiddenFields] returns them. Each
+	// entry is a [hiddenFields] value that names the validator it reads.
 	hidden  sync.Map
 	kinds   []*kindEntry
 	removed []*removal
@@ -86,6 +88,7 @@ type removal struct {
 //   - [WithIgnore]
 //   - [WithRemoved]
 //   - [WithCheck]
+//   - [WithSchemaRegistry]
 type RegistryOption func(*registryConfig)
 
 // registryConfig holds the settings that each [RegistryOption] configures.
@@ -98,6 +101,7 @@ type registryConfig struct {
 	kinds           []*Kind
 	checks          []func(ctx context.Context, set *Set) error
 	removed         []*removal
+	schemas         *schema.Registry
 	versionField    paths.Path
 	kindField       paths.Path
 	nameField       paths.Path
@@ -254,6 +258,24 @@ func WithCheck(check func(ctx context.Context, set *Set) error) RegistryOption {
 	}
 }
 
+// WithSchemaRegistry is a [RegistryOption] that loads and compiles the
+// schema of each version through r, in place of a registry that
+// [NewRegistry] builds with the defaults of [schema.NewRegistry]. The
+// schemas thus load with the HTTP client, the access rules, the limits,
+// and the compile options of r, and they share its cache with every other
+// user of r. A program that watches a schema file for changes calls
+// [schema.Registry.Invalidate] on r, and the next load reads the file
+// again. A nil r keeps the registry that NewRegistry builds.
+//
+// A load asks r only for the schema that the [Schema] option of a
+// version names, with [schema.Registry.Schema]. The resolvers of r do
+// not take part in a load.
+func WithSchemaRegistry(r *schema.Registry) RegistryOption {
+	return func(c *registryConfig) {
+		c.schemas = r
+	}
+}
+
 // NewRegistry creates a new [Registry] from opts. It returns an error for
 // options that contradict each other, such as a kind that lists a version
 // twice, two kinds of one name, or [Written] on two versions of one kind.
@@ -268,8 +290,13 @@ func NewRegistry(opts ...RegistryOption) (*Registry, error) {
 		opt(&cfg)
 	}
 
+	schemas := cfg.schemas
+	if schemas == nil {
+		schemas = schema.NewRegistry()
+	}
+
 	r := &Registry{
-		schemas: schema.NewRegistry(),
+		schemas: schemas,
 		names:   make(map[string]*kindEntry),
 		types:   make(map[reflect.Type]*kindEntry),
 		removed: cfg.removed,

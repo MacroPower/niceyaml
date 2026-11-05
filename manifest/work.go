@@ -5,6 +5,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/goccy/go-yaml/ast"
+	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
@@ -109,22 +110,37 @@ func textBounds(doc *niceyaml.Node) (int, int) {
 	return start, end
 }
 
-// hiddenFields returns the type fields that sch, the schema of a version,
-// does not declare. The check of the schema sees these fields blank. It
+// hiddenFields is the cache entry of a version, as [Registry.hiddenFields]
+// fills it: the type fields that the schema of the version does not
+// declare, and the validator that it read them from.
+type hiddenFields struct {
+	validator *jsonschema.Validator
+	fields    []paths.Path
+}
+
+// hiddenFields returns the type fields that sch, the schema of v, does
+// not declare. The check of the schema sees these fields blank. It
 // returns nil for a schema that does not check anything.
-func (r *Registry) hiddenFields(sch *schema.Schema) []paths.Path {
-	v := sch.JSONSchema()
-	if v == nil {
+//
+// The registry keeps the fields of each version under the version and
+// the validator that it read them from. The schema registry hands a
+// version a new validator after [schema.Registry.Invalidate], and the
+// fields of the old one leave the cache with the next call. So the cache
+// holds at most one entry for each version.
+func (r *Registry) hiddenFields(v *versionEntry, sch *schema.Schema) []paths.Path {
+	validator := sch.JSONSchema()
+	if validator == nil {
 		return nil
 	}
 
-	if hidden, ok := r.hidden.Load(v); ok {
-		fields, _ := hidden.([]paths.Path) //nolint:errcheck // The map holds the type fields of each validator.
-
-		return fields
+	if cached, ok := r.hidden.Load(v); ok {
+		entry, _ := cached.(hiddenFields) //nolint:errcheck // The map holds the fields of each version.
+		if entry.validator == validator {
+			return entry.fields
+		}
 	}
 
-	doc := newSchemaDoc(v)
+	doc := newSchemaDoc(validator)
 
 	var fields []paths.Path
 
@@ -134,7 +150,7 @@ func (r *Registry) hiddenFields(sch *schema.Schema) []paths.Path {
 		}
 	}
 
-	r.hidden.Store(v, fields)
+	r.hidden.Store(v, hiddenFields{validator: validator, fields: fields})
 
 	return fields
 }

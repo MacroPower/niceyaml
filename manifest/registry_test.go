@@ -3,9 +3,11 @@ package manifest_test
 import (
 	"context"
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/manifest"
@@ -788,5 +790,97 @@ func TestMustNewRegistry(t *testing.T) {
 	assert.NotNil(t, manifest.MustNewRegistry(cafeOptions()...))
 	assert.PanicsWithError(t, "manifest: kind Cafe has no version", func() {
 		manifest.MustNewRegistry(manifest.WithKinds(manifest.NewKind[Cafe]("Cafe")))
+	})
+}
+
+func TestWithSchemaRegistry(t *testing.T) {
+	t.Parallel()
+
+	const (
+		priceSchema = `{"properties": {"spec": {"properties": {"price": {"minimum": 1}}}}}`
+		kindSchema  = `{"properties": {"kind": {"const": "Other"}}}`
+	)
+
+	menu := stringtest.LinesLF(
+		"apiVersion: cafe.jacobcolvin.com/v1",
+		"kind: MenuItem",
+		"metadata:",
+		"  name: semla",
+		"spec:",
+		"  price: 0",
+	)
+
+	// NewRegistry returns a registry whose MenuItem v1 reads its schema
+	// from schema.json in fsys, through schemas.
+	newRegistry := func(t *testing.T, fsys fstest.MapFS, schemas *schema.Registry) *manifest.Registry {
+		t.Helper()
+
+		return manifest.MustNewRegistry(
+			manifest.WithSchemaRegistry(schemas),
+			manifest.WithKinds(manifest.NewKind[MenuItem]("MenuItem",
+				manifest.Version("cafe.jacobcolvin.com/v1", manifest.Schema(schema.FileFS(fsys, "schema.json"))),
+			)),
+		)
+	}
+
+	t.Run("loads and caches through the registry", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := fstest.MapFS{"schema.json": {Data: []byte(priceSchema)}}
+		schemas := schema.NewRegistry()
+		reg := newRegistry(t, fsys, schemas)
+		in := configFS(map[string]string{"menu.yaml": menu})
+
+		_, err := reg.Load(t.Context(), in)
+		require.EqualError(t, err, "config/menu.yaml:6:10: $.spec.price: 0 is less than 1")
+		require.ErrorIs(t, err, schema.ErrViolation)
+
+		// The schema of the file lives in the cache of the caller's
+		// registry. So a change to the file reaches a load only after
+		// the caller invalidates it.
+		fsys["schema.json"] = &fstest.MapFile{Data: []byte(`{}`)}
+
+		_, err = reg.Load(t.Context(), in)
+		require.ErrorIs(t, err, schema.ErrViolation)
+
+		schemas.Invalidate(schema.FileFS(fsys, "schema.json"))
+
+		_, err = reg.Load(t.Context(), in)
+		require.NoError(t, err)
+
+		// The check sees the type fields that the new schema declares, so
+		// the fields that the old schema hid do not stay hidden.
+		fsys["schema.json"] = &fstest.MapFile{Data: []byte(kindSchema)}
+		schemas.Invalidate(schema.FileFS(fsys, "schema.json"))
+
+		_, err = reg.Load(t.Context(), in)
+		require.EqualError(t, err, "config/menu.yaml:2:7: $.kind: value does not match const")
+		require.ErrorIs(t, err, schema.ErrViolation)
+	})
+
+	t.Run("shares the registry", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := fstest.MapFS{"schema.json": {Data: []byte(priceSchema)}}
+		schemas := schema.NewRegistry()
+		reg := newRegistry(t, fsys, schemas)
+
+		require.NoError(t, reg.Verify(t.Context()))
+
+		// Verify compiled the schema into the cache of the caller's
+		// registry, so the caller finds it there.
+		sch, err := schemas.Schema(t.Context(), schema.FileFS(fsys, "schema.json"))
+		require.NoError(t, err)
+		require.NotNil(t, sch.JSONSchema())
+	})
+
+	t.Run("nil keeps the default", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := fstest.MapFS{"schema.json": {Data: []byte(priceSchema)}}
+		reg := newRegistry(t, fsys, nil)
+
+		_, err := reg.Load(t.Context(), configFS(map[string]string{"menu.yaml": menu}))
+		require.ErrorIs(t, err, schema.ErrViolation)
 	})
 }

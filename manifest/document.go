@@ -636,7 +636,7 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 
 	work := d.work
 
-	if hide := reg.hiddenFields(sch); len(hide) > 0 {
+	if hide := reg.hiddenFields(v, sch); len(hide) > 0 {
 		var ok bool
 
 		work, ok = d.workingCopy(d.workFrom, d.workLocate, hide)
