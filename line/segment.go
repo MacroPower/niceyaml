@@ -13,7 +13,7 @@ import (
 // It holds the columns it covers, the text on them, the [kind.Kind] of the
 // token the text belongs to, and the overlays of the view that cover it.
 //
-// Receive instances from [View.Segments].
+// Receive instances from [View.Segments] or [View.Row].
 type Segment struct {
 	// Text is the content of the line on Cols, without the line ending.
 	// It holds the source as written, control characters included, such
@@ -114,8 +114,9 @@ type Segment struct {
 // styles the whole cluster by its first rune.
 //
 // Segments covers the whole line, whatever [View.Clip] set. A renderer
-// that shows a clipped line in part keeps the columns [View.Windows]
-// returns.
+// that shows a clipped line as the printer does reads the segments of
+// the [Row] that [View.Row] returns. Those keep the columns
+// [View.Windows] returns and hold a "..." segment in place of the rest.
 //
 // Segments yields an empty sequence for an empty line. It panics if i is
 // outside the content.

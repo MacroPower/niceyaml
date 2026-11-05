@@ -137,7 +137,9 @@
 // overlays style, each with its text. A renderer that writes HTML, or any
 // other format, styles the line from its segments and its flag alone. The
 // View.Segments doc shows one that nests the overlays of each segment in
-// the order the printer applies them.
+// the order the printer applies them. [View.Row] returns the segments,
+// overlays, and annotations of a line as the printer shows them. Their
+// columns are those of the row that a clip leaves of the line.
 //
 // [Flag] values categorize lines for special handling. A diff marks lines with
 // [FlagInserted] and [FlagDeleted]:

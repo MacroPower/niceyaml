@@ -311,6 +311,10 @@ func (v *View) SetFlag(i int, f Flag) {
 // Annotations returns the [Annotation] values on line i, in the order the
 // caller added them. The slice belongs to the view, so treat it as
 // read-only and add to it with [View.Annotate].
+//
+// The columns of each annotation are those of the whole line, whatever
+// [View.Clip] set. [View.Row] returns the annotations of a clipped line
+// in the columns of the row it shows.
 func (v *View) Annotations(i int) Annotations {
 	_ = v.lines.lines[i]
 
@@ -332,6 +336,10 @@ func (v *View) Annotate(i int, ann ...Annotation) {
 // added them. The slice belongs to the view, so treat it as read-only and
 // add to it with [View.AddOverlay], [View.BlendOverlay], or
 // [View.AddLineOverlay].
+//
+// The columns of each overlay are those of the whole line, whatever
+// [View.Clip] set. [View.Row] returns the overlays of a clipped line in
+// the columns of the row it shows.
 func (v *View) Overlays(i int) Overlays {
 	_ = v.lines.lines[i]
 
@@ -584,9 +592,10 @@ func marksWindow(a Annotation) bool {
 // decoration, so a range from the content still applies to it. It picks
 // the windows when it renders, from the decoration it carries then. A mark
 // that a caller adds after the clip therefore gets a window too.
-// [View.Windows] returns the windows of a line, and [View.String] and the
-// printer render them. [View.Slice], [View.Hunks], and [View.Clone] keep
-// the clip, and [View.ClipCols] reports it. A cols of zero or less shows
+// [View.Windows] returns the windows of a line, and [View.Row] returns
+// the row they lay out, which [View.String] and the printer render.
+// [View.Slice], [View.Hunks], and [View.Clone] keep the clip, and
+// [View.ClipCols] reports it. A cols of zero or less shows
 // every line whole, so it undoes a clip.
 //
 // An error excerpt clips its hunks this way, and a caller that marks a
@@ -623,7 +632,8 @@ func (v *View) ClipCols() int {
 // View shows whole, such as every line of a View without a clip and every
 // line that fits within the clip. The spans count columns of the content.
 // A renderer shows "..." for each run of columns between two of them,
-// before the first, and after the last.
+// before the first, and after the last. [View.Row] lays that row out,
+// and [View.ClipMap] maps the columns of the line to its columns.
 func (v *View) Windows(i int) position.Spans {
 	ln := v.lines.lines[i]
 
@@ -693,42 +703,6 @@ func (v *View) Windows(i int) position.Spans {
 	return windows
 }
 
-// shownRow is one line as [View.String] renders it: the text of its row
-// and the annotations of the line in the columns of that text. They are
-// the content and the annotations of the line itself unless the View
-// clips the line.
-type shownRow struct {
-	content     string
-	annotations Annotations
-	// The number of columns of content.
-	width int
-}
-
-// shown returns line i of the View, which is ln, as [View.String] renders
-// it. For a line the View clips, the content holds the windows
-// [View.Windows] returns with "..." in place of the columns between them.
-// Each annotation labels the run of that text that shows its columns.
-func (v *View) shown(i int, ln *Line) shownRow {
-	windows := v.Windows(i)
-	if windows == nil {
-		return shownRow{
-			content:     ln.Content(),
-			annotations: v.Annotations(i),
-			width:       ln.Width(),
-		}
-	}
-
-	m := clip.New(ln.Width(), windows)
-	row := shownRow{content: m.Content(ln.Content()), width: m.Width()}
-
-	for _, a := range v.Annotations(i) {
-		a.Cols = m.Span(a.Cols)
-		row.annotations = append(row.annotations, a)
-	}
-
-	return row
-}
-
 // String renders the [View] as plain text: each line behind its number,
 // and the annotations above and below it on rows of their own. String
 // does not render flags. The number column is at least four wide and
@@ -772,11 +746,12 @@ func (v *View) shown(i int, ln *Line) shownRow {
 // rows below a line as String does, and the printer wraps the line and
 // those rows to its width.
 //
-// A line that [View.Clip] clips renders the windows [View.Windows]
-// returns, with "..." in place of each run of columns it leaves out. The
-// carets and the annotations of the line sit under the columns of that
-// row. An annotation that starts at a column the row leaves out starts at
-// the "..." that stands for the column.
+// A line that [View.Clip] clips renders as the [Row] that [View.Row]
+// returns: the windows [View.Windows] returns, with "..." in place of each
+// run of columns it leaves out. The carets and the annotations of the
+// line sit under the columns of that row. An annotation that starts at a
+// column the row leaves out starts at the "..." that stands for the
+// column.
 func (v *View) String() string {
 	width := 4
 	for _, ln := range v.All() {
@@ -788,15 +763,15 @@ func (v *View) String() string {
 	var rows []string
 
 	for i, ln := range v.All() {
-		row := v.shown(i, ln)
-		anns := row.annotations
+		row, _ := v.layoutRow(i)
+		anns := row.Annotations
 
 		// A line without annotations pads no row, so it skips measuring
 		// the cells of its content.
 		var cellRow cells.Row
 
 		if len(anns) > 0 {
-			cellRow = cells.NewRow(row.content)
+			cellRow = cells.NewRow(row.Content)
 		}
 
 		// Each kind of annotation above the line gets a row of its own,
@@ -811,17 +786,17 @@ func (v *View) String() string {
 				continue
 			}
 
-			col := annotationCol(kept.Start(), row.width)
+			col := annotationCol(kept.Start(), row.Width)
 			padding := strings.Repeat(" ", cellRow.Width(col))
 			rows = append(rows, blank+padding+escape.Control(strings.Join(kept.Contents(), "; ")))
 		}
 
-		rows = append(rows, contentRow(ln.Number(), row.content, width))
+		rows = append(rows, contentRow(ln.Number(), row.Content, width))
 
 		// Each run of columns the annotations below the line label gets a
 		// row of its own, as the printer lays them out, errors first.
 		for _, group := range anns.Groups(Below) {
-			for _, r := range caret.Rows(row.content, caretLabels(group, row.width), nil) {
+			for _, r := range caret.Rows(row.Content, caretLabels(group, row.Width), nil) {
 				padding := strings.Repeat(" ", cellRow.Width(r.Col))
 				rows = append(rows, blank+padding+r.Marker+r.Text)
 			}

@@ -60,8 +60,10 @@ func main() {
 	fmt.Println(renderHTML(result.Hunks(1)))
 }
 
-// renderHTML renders a view as HTML from the decoration it carries: the
-// flag, overlays, and annotations of each line it holds.
+// renderHTML renders a view as HTML from the decoration it carries. It
+// reads the flag of each line it holds and the row that View.Row lays
+// out for it. The row holds the segments, overlays, and annotations of
+// the line in its own columns.
 func renderHTML(view *line.View) string {
 	var sb strings.Builder
 
@@ -88,16 +90,23 @@ func renderHTML(view *line.View) string {
 		}
 
 		gutter := fmt.Sprintf("%4d %s", ln.Number(), marker)
-		notes := view.Annotations(i)
 
-		writeNotes(&sb, len(gutter), ln.Content(), notes, line.Above)
+		// Row is the line as the printer shows it. A view that clips a
+		// long line, as an error excerpt does, shows a window of columns
+		// around each mark with "..." in place of the rest. The row then
+		// holds that text, with the annotations in the columns of that
+		// text. The rows of this view show every line whole.
+		row := view.Row(i)
+
+		writeNotes(&sb, len(gutter), row.Content, row.Annotations, line.Above)
 
 		fmt.Fprintf(&sb, "<span class=%q>%s", class, gutter)
 
-		// Segments cuts the line into segments, each with one kind and one
+		// The row cuts the line into segments, each with one kind and one
 		// set of overlays, so the renderer never reads a token. A segment
 		// ends where an overlay starts or ends, so the search match cuts
-		// the quoted item into three segments.
+		// the quoted item into three segments. Each "..." of a clipped
+		// line is a segment of its own in kind.UISeparator.
 		//
 		// The printer draws every segment of a changed line in the diff
 		// kind of its flag, with the overlays over that. The class of the
@@ -105,13 +114,13 @@ func renderHTML(view *line.View) string {
 		// out the spans of their kinds.
 		tokens := view.Flag(i) == line.FlagDefault
 
-		for seg := range view.Segments(i) {
+		for _, seg := range row.Segments {
 			sb.WriteString(renderSegment(seg, tokens))
 		}
 
 		sb.WriteString("</span>\n")
 
-		writeNotes(&sb, len(gutter), ln.Content(), notes, line.Below)
+		writeNotes(&sb, len(gutter), row.Content, row.Annotations, line.Below)
 	}
 
 	sb.WriteString("</pre>")
