@@ -72,8 +72,8 @@ type Source struct {
 	// An error bound in the merged document binds in a layer instead.
 	layers *layering
 	// Sends each error bound in the Source to the document that its text
-	// stands for, or nil. Only a working copy, such as the one that a load
-	// of the manifest package edits, has a relocation.
+	// stands for, or nil. Only a Source of [NewSourceFromDerived] has a
+	// relocation.
 	relocation *relocation
 	// Holds the text the Source read, which [Source.Text] returns. A
 	// Source built from tokens did not read any text, and hasInput is
@@ -183,9 +183,10 @@ type sourceConfig struct {
 	// Every decode of the documents applies them ahead of its own
 	// options.
 	unmarshalers []Unmarshaler
-	// The bounds on the text that aliases write out for a Source with
-	// noLimits whose text holds the aliases of another document, such as
-	// the working copy of a manifest.
+	// The bounds on the text that aliases write out for a Source whose
+	// text holds the aliases of another document, such as a Source of
+	// [NewSourceFromDerived]. They apply under noLimits, and in place of
+	// each limit of the Source that reads as 0.
 	aliasBudget aliasing.Budget
 	// The limits from WithByteLimit and WithDepthLimit, each when its
 	// option set it. A zero limit turns the check off.
@@ -248,12 +249,24 @@ func (c *sourceConfig) depth() int {
 
 // budget returns the bounds that the limits of c put on the text that
 // the aliases of a document write out, as [aliasing.Budget] describes.
+// A limit that reads as 0 takes its bound from aliasBudget, which is
+// zero unless the text holds the aliases of another document.
 func (c *sourceConfig) budget() aliasing.Budget {
 	if c.noLimits {
 		return c.aliasBudget
 	}
 
-	return aliasing.Budget{Bytes: c.bytes(), Depth: c.depth()}
+	b := aliasing.Budget{Bytes: c.bytes(), Depth: c.depth()}
+
+	if b.Bytes == 0 {
+		b.Bytes = c.aliasBudget.Bytes
+	}
+
+	if b.Depth == 0 {
+		b.Depth = c.aliasBudget.Depth
+	}
+
+	return b
 }
 
 // WithByteLimit is a [SourceOption] that sets the most bytes of text the
@@ -350,11 +363,15 @@ func newSourceConfig(opts []SourceOption) sourceConfig {
 }
 
 // pinned returns the settings of c for a Source of another text. It
-// clears noLimits and aliasBudget. It sets the byte limit and the depth
-// limit to those that c applies, as [Source.ByteLimit] and
-// [Source.DepthLimit] report them. A Source that skips the limits thus
-// gives one that skips them too, because both its limits read as 0 and a
-// limit of 0 turns the check off.
+// clears noLimits. It sets the byte limit and the depth limit to those
+// that c applies, as [Source.ByteLimit] and [Source.DepthLimit] report
+// them. A Source that skips the limits thus gives one that skips them
+// too, because both its limits read as 0 and a limit of 0 turns the
+// check off.
+//
+// The result keeps aliasBudget when c sets noLimits, and clears it
+// otherwise. A copy of a Source of [NewSourceFromDerived] under
+// [WithoutLimits] thus keeps the alias bounds of its home document.
 //
 // The references of the result have no room past their length. A
 // [WithReferences] applied over the result thus appends to a slice of its
@@ -364,7 +381,11 @@ func (c *sourceConfig) pinned() sourceConfig {
 	out.references = slices.Clip(c.references)
 	out.byteLimit, out.byteLimitSet = c.bytes(), true
 	out.depthLimit, out.depthLimitSet = c.depth(), true
-	out.noLimits, out.aliasBudget = false, aliasing.Budget{}
+	out.noLimits = false
+
+	if !c.noLimits {
+		out.aliasBudget = aliasing.Budget{}
+	}
 
 	return out
 }
@@ -838,7 +859,8 @@ func newStringSource(src string, cfg sourceConfig) *Source {
 // new Source is a Source of text as [NewSourceFromString] builds one,
 // whatever the Source is. A Source of layers thus gives a Source of text,
 // not a merge. A Source of [NewSourceFromDerived] gives one that binds
-// its errors in itself.
+// its errors in itself. It keeps the bounds that the limits of its home
+// document put on the aliases of the text, as the Source does.
 //
 // A nil Source holds no settings, so WithText on it is NewSourceFromString.
 func (s *Source) WithText(text string, opts ...SourceOption) *Source {

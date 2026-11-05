@@ -36,7 +36,7 @@ type docState struct {
 	workFrom *niceyaml.Node
 	// The function that moves a location of work into the document, or
 	// nil for the document itself.
-	workLocate func(hook.Located) hook.Place
+	workLocate func(niceyaml.Located) niceyaml.Place
 	// The name, when the document reached the layout of the current version
 	// with a name that is a non-empty string.
 	name string

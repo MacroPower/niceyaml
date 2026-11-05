@@ -1783,7 +1783,7 @@ func (b binder) yields(bound *SourceError) bool {
 }
 
 // holds reports whether src is s, a layer that s merges, or the source of
-// the document that s stands for as a working copy. An error that a
+// the document that s stands for as a derived text. An error that a
 // binding of s resolves lands in one of them. The text that a detached
 // binding kept of one of them counts as that source, as [sameSource]
 // compares them.
@@ -2510,10 +2510,7 @@ func newSourceError(err error, b binder) *SourceError {
 
 	e := &SourceError{err: scoped.err, source: b.src, node: b.node, locErr: errUnlocated}
 
-	var (
-		reloc     *relocation
-		relocated []error
-	)
+	var relocated []relocatedDetails
 
 	switch a := found.err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
 	case *Error:
@@ -2536,10 +2533,8 @@ func newSourceError(err error, b binder) *SourceError {
 			e.err = &Error{err: e.err, move: &move{base: *root, movesOnly: true, reroots: true}}
 		}
 
-		// No error binds in a working copy, which is no file of the caller.
-		if reloc = e.source.relocation; reloc != nil {
-			relocated = e.relocate(reloc, found)
-		}
+		// No error binds in a derived Source, which is no file of the caller.
+		relocated = e.relocateAll(found.path, found.hasPath)
 
 	case *SourceError:
 		// The error wraps a binding, so it takes over what the binding
@@ -2560,9 +2555,9 @@ func newSourceError(err error, b binder) *SourceError {
 	}
 
 	if !e.adopted {
-		// An error with no location binds in the document that a working
-		// copy stands for.
-		if r := e.source.relocation; r != nil {
+		// An error with no location binds in the document that a derived
+		// Source stands for, through each derived Source on the way.
+		for r := e.source.relocation; r != nil; r = e.source.relocation {
 			e.source, e.node = r.home.source, r.home
 		}
 
@@ -2585,9 +2580,7 @@ func newSourceError(err error, b binder) *SourceError {
 
 	e.collect(err, b)
 
-	if len(relocated) > 0 {
-		e.addRelocatedDetails(reloc, relocated)
-	}
+	e.addRelocatedDetails(relocated)
 
 	return e
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/decodetree"
-	"go.jacobcolvin.com/niceyaml/internal/excerpt"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -27,12 +26,6 @@ func init() {
 		}
 	}
 	hook.Rewrap = rewrap
-	hook.WorkingSource = func(text string, home, us any, locate func(hook.Located) hook.Place) any {
-		n, _ := home.(*Node)       //nolint:errcheck // The hook takes a *Node.
-		u, _ := us.([]Unmarshaler) //nolint:errcheck // The hook takes a []Unmarshaler.
-
-		return newWorkingSource(text, n, u, locate)
-	}
 	hook.Defaults = func(t reflect.Type, opts any) reflect.Value {
 		o, _ := opts.([]DecodeOption) //nolint:errcheck // The hook takes the options of a decode.
 
@@ -112,80 +105,6 @@ func init() {
 		return DecodeOption(func(c *decodeConfig) {
 			c.knownKeys = append(c.knownKeys, keys...)
 		})
-	}
-}
-
-// relocation sends each error bound in a working [Source] to the document
-// that the working text stands for.
-type relocation struct {
-	// The document that the working text stands for. Each error binds
-	// there.
-	home *Node
-	// The function that gives the place in home of a location in the
-	// working text.
-	locate func(hook.Located) hook.Place
-}
-
-// newWorkingSource returns a [Source] of text that stands for home, with
-// the unmarshalers us ahead of those of home, as [hook.WorkingSource]
-// describes. The text holds the aliases of home, so a decode of it keeps
-// the bounds that the limits of home put on them.
-func newWorkingSource(text string, home *Node, us []Unmarshaler, locate func(hook.Located) hook.Place) *Source {
-	cfg := home.source.sourceConfig
-	cfg.noLimits = true
-	cfg.aliasBudget = home.doc.state.Budget()
-	cfg.unmarshalers = slices.Concat(us, cfg.unmarshalers)
-
-	src := newStringSource(text, cfg)
-	src.relocation = &relocation{home: home, locate: locate}
-
-	return src
-}
-
-// relocate moves e from a working Source to the home document of r. In
-// the working Source, e binds at the location that found gives it. It
-// returns the details that the place of the location adds.
-func (e *SourceError) relocate(r *relocation, found anchor) []error {
-	var at hook.Located
-
-	if found.hasPath {
-		at.Path, at.HasPath = found.path, true
-	}
-
-	if e.locErr == nil && checkInRange(e.loc, e.source.lines) == nil {
-		at.Range, at.HasRange = excerpt.Cover(e.loc.highlight(e.source.lines), e.loc.pos), true
-	}
-
-	place := r.locate(at)
-
-	e.source, e.node = r.home.source, r.home
-
-	switch {
-	case place.HasRange:
-		rng := place.Range
-		e.loc, e.locErr = location{pos: rng.Start, rng: &rng}, nil
-
-	case e.locErr == nil:
-		e.loc, e.locErr = location{}, errUnlocated
-	}
-
-	// The path that the message shows names the value as the home
-	// document spells it. The place can give a path to an error without
-	// one, such as a refusal of the parser at a byte that an edit wrote.
-	if place.HasPath {
-		moved := &Error{err: e.err}
-		moved.path, moved.hasPath = place.Path, true
-		e.err = moved
-	}
-
-	return place.Details
-}
-
-// addRelocatedDetails binds each of details in the home document of r and
-// adds it to e as a detail.
-func (e *SourceError) addRelocatedDetails(r *relocation, details []error) {
-	for _, d := range details {
-		e.addChild(d, binder{src: r.home.source, node: r.home, locate: true}, childBase{}, true)
 	}
 }
 

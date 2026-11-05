@@ -19,36 +19,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// Located is where an error resolved in a working Source: the path its
-// message shows, and the range of the text it marks.
-type Located struct {
-	// Path is the path of the error, from `$`, when HasPath is set.
-	Path paths.Path
-	// Range is the range of the text that the error marks in the working
-	// text, when HasRange is set.
-	Range   position.Range
-	HasPath bool
-	// HasRange is false for an error that did not resolve a location.
-	HasRange bool
-}
-
-// Place is where an error that resolved in a working Source binds in the
-// document that the working text stands for.
-type Place struct {
-	// Details holds the errors that the binding gains as details. A detail
-	// with a location binds in the home document.
-	Details []error
-	// Path is the path that the message shows in place of the path of
-	// [Located], when HasPath is set. An error without a path shows it too.
-	Path paths.Path
-	// Range is the range of the text that the error marks in the home
-	// document, when HasRange is set. Without it, the error binds to the
-	// home document without a position.
-	Range    position.Range
-	HasPath  bool
-	HasRange bool
-}
-
 var (
 	// Tally returns the heading that niceyaml writes over members, which
 	// counts their errors and their warnings, as in "2 errors, 1 warning".
@@ -70,16 +40,6 @@ var (
 	// a wrapper whose message is the message of the error it wraps adds a
 	// type to the chain and does not change anything that a renderer shows.
 	Rewrap func(err error, wrap func(error) error) error
-
-	// WorkingSource returns a *niceyaml.Source of text, a working copy of
-	// the document home, a *niceyaml.Node. The Source holds the settings of
-	// the Source of home, including its name and its reference documents.
-	// It skips the limits, because niceyaml wrote its text. It takes the
-	// unmarshalers us, a []niceyaml.Unmarshaler, ahead of those of the
-	// Source of home, as though niceyaml.WithUnmarshalers gave them first.
-	// Every error bound in it binds in home instead, at the place that
-	// locate gives for the location the error resolved in the working text.
-	WorkingSource func(text string, home, us any, locate func(Located) Place) any
 
 	// Defaults returns the defaults of t under opts, a
 	// []niceyaml.DecodeOption, as niceyaml.Defaults returns them. A panic

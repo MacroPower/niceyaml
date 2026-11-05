@@ -10,7 +10,7 @@ package edithook
 import (
 	"context"
 
-	"go.jacobcolvin.com/niceyaml/internal/hook"
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -18,9 +18,9 @@ var (
 	// Locator returns the locate function of d, a *edit.Doc. The function
 	// gives the place in the user's document of a location in the text of
 	// d, or in a copy of that text that keeps every line and column. A
-	// working Source of such a copy binds its errors in the user's
-	// document through it.
-	Locator func(d any) func(hook.Located) hook.Place
+	// Source that niceyaml.NewSourceFromDerived builds from such a copy
+	// binds its errors in the user's document through it.
+	Locator func(d any) func(niceyaml.Located) niceyaml.Place
 
 	// SetField sets the type field at path of d, a *edit.Doc, to the
 	// string text. Messages name that edit by label. A scalar that the

@@ -9,7 +9,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/schema"
@@ -19,7 +18,7 @@ import (
 // migrated copy of it, without a blanked field. It keeps doc and locate,
 // so that a schema check can build a copy that blanks the type fields that
 // its schema does not declare.
-func (d *docState) prepareWork(doc *niceyaml.Node, locate func(hook.Located) hook.Place) bool {
+func (d *docState) prepareWork(doc *niceyaml.Node, locate func(niceyaml.Located) niceyaml.Place) bool {
 	work, ok := d.workingCopy(doc, locate, nil)
 	if !ok {
 		return false
@@ -39,7 +38,7 @@ func (d *docState) prepareWork(doc *niceyaml.Node, locate func(hook.Located) hoo
 // or that is empty after the blanking, and reports false.
 func (d *docState) workingCopy(
 	doc *niceyaml.Node,
-	locate func(hook.Located) hook.Place,
+	locate func(niceyaml.Located) niceyaml.Place,
 	hide []paths.Path,
 ) (*niceyaml.Node, bool) {
 	src := doc.Source()
@@ -56,7 +55,7 @@ func (d *docState) workingCopy(
 
 	blank.fillEmptyRoot()
 
-	working, ok := hook.WorkingSource(string(blank.work), d.doc, d.l.reg.cfg.unmarshalers, func(at hook.Located) hook.Place {
+	working := niceyaml.NewSourceFromDerived(string(blank.work), d.doc, func(at niceyaml.Located) niceyaml.Place {
 		if at.HasRange {
 			at.Range.Start.Line += span.Start
 			at.Range.End.Line += span.Start
@@ -66,11 +65,8 @@ func (d *docState) workingCopy(
 			return locate(at)
 		}
 
-		return hook.Place{Path: at.Path, HasPath: at.HasPath, Range: at.Range, HasRange: at.HasRange}
-	}).(*niceyaml.Source)
-	if !ok {
-		return nil, false
-	}
+		return niceyaml.Place{Path: at.Path, HasPath: at.HasPath, Range: at.Range, HasRange: at.HasRange}
+	}, niceyaml.WithUnmarshalers(d.l.reg.cfg.unmarshalers...), niceyaml.WithoutLimits())
 
 	for _, n := range working.AllDocuments() {
 		if n.Err() != nil {

@@ -120,8 +120,8 @@ func (d *Doc) parse() error {
 
 	defer func() { d.own, d.capture = own, held }()
 
-	//nolint:errcheck // The hook gives a *niceyaml.Source.
-	src, _ := hook.WorkingSource(d.cur+d.tail, d.user, d.cfg.unmarshalers, d.locate).(*niceyaml.Source)
+	src := niceyaml.NewSourceFromDerived(d.cur+d.tail, d.user, d.locate,
+		niceyaml.WithUnmarshalers(d.cfg.unmarshalers...), niceyaml.WithoutLimits())
 
 	d.src = src
 	d.curLines = lineStarts(d.cur)
@@ -315,7 +315,7 @@ func runeStart(text string, from, off int) int {
 // found shows the path of its site. An error that a caller binds by a path,
 // such as an error that a [Func] returns or one that Doc.Node binds, keeps
 // the path that the caller gave.
-func (d *Doc) locate(at hook.Located) hook.Place {
+func (d *Doc) locate(at niceyaml.Located) niceyaml.Place {
 	place := d.sitePlace(at)
 	if !d.own {
 		place.Path, place.HasPath = at.Path, at.HasPath
@@ -329,7 +329,7 @@ func (d *Doc) locate(at hook.Located) hook.Place {
 // come with it, as [Doc.callDetails] gives them for that site. An error that
 // the edit package binds again takes them where it binds again, so while
 // the Doc captures sites, the first site goes to the capture instead.
-func (d *Doc) sitePlace(at hook.Located) hook.Place {
+func (d *Doc) sitePlace(at niceyaml.Located) niceyaml.Place {
 	place, w := d.placeOf(at)
 
 	s := site{writer: w, path: place.Path, at: noRange}
@@ -391,8 +391,8 @@ var noRange = position.NewRange(position.New(-1, 0), position.New(-1, 0))
 
 // placeOf gives the place of at as [Doc.sitePlace] describes, without its
 // details, and the note of the call that wrote the value there, or nil.
-func (d *Doc) placeOf(at hook.Located) (hook.Place, *note) {
-	place := hook.Place{Path: at.Path, HasPath: at.HasPath}
+func (d *Doc) placeOf(at niceyaml.Located) (niceyaml.Place, *note) {
+	place := niceyaml.Place{Path: at.Path, HasPath: at.HasPath}
 
 	// A place that the current text does not hold has no token, such as a
 	// missing field, and so has a place that an edit created. The places of
@@ -524,7 +524,7 @@ func (d *Doc) referenceSite(err error) (site, bool) {
 // place for which the user's text holds no token, as [Doc.tokenlessSite]
 // gives its site, under the path of that site, and the writer of that
 // site.
-func (d *Doc) tokenlessPlace(path paths.Path, place hook.Place) (hook.Place, *note) {
+func (d *Doc) tokenlessPlace(path paths.Path, place niceyaml.Place) (niceyaml.Place, *note) {
 	s, ok := d.tokenlessSite(path)
 	if !ok {
 		return place, nil
@@ -838,7 +838,7 @@ func (d *Doc) rootStartEnd(rng position.Range) int {
 // a "\r" before a line break. It reports false for an error at any other
 // value, and when an edit wrote that byte with the origin of another
 // byte.
-func (d *Doc) emptyAfter(at hook.Located, start, end int) (int, bool) {
+func (d *Doc) emptyAfter(at niceyaml.Located, start, end int) (int, bool) {
 	if start != end || !at.HasPath {
 		return 0, false
 	}
@@ -863,7 +863,7 @@ func (d *Doc) emptyAfter(at hook.Located, start, end int) (int, bool) {
 // emptyPlace returns place moved to where the error of at binds, an error
 // at an empty value, as [Doc.emptyAt] finds it. The byte at before of the
 // current text is the ":" or "-" of the value.
-func (d *Doc) emptyPlace(place hook.Place, at hook.Located, before int) hook.Place {
+func (d *Doc) emptyPlace(place niceyaml.Place, at niceyaml.Located, before int) niceyaml.Place {
 	rng, path := d.emptyAt(at.Path, before)
 
 	place.Range, place.HasRange = rng, true
@@ -963,7 +963,7 @@ func isBlank(b byte) bool {
 // place returns place moved to where n binds, without the details of n.
 // The argument place is the place of at, a location in text that an edit
 // wrote with n.
-func (n note) place(place hook.Place, at hook.Located) hook.Place {
+func (n note) place(place niceyaml.Place, at niceyaml.Located) niceyaml.Place {
 	if n.located {
 		place.Range, place.HasRange = n.at, true
 	}

@@ -7,9 +7,9 @@ import (
 
 	"github.com/goccy/go-yaml/ast"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/edithook"
-	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -18,7 +18,7 @@ import (
 //
 //nolint:gochecknoinits // edithook cannot import edit, so edit sets the hooks when it loads.
 func init() {
-	edithook.Locator = func(d any) func(hook.Located) hook.Place {
+	edithook.Locator = func(d any) func(niceyaml.Located) niceyaml.Place {
 		doc, _ := d.(*Doc) //nolint:errcheck // The hook takes a *Doc.
 
 		return doc.locate

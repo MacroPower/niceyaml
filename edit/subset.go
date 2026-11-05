@@ -1117,8 +1117,8 @@ func (d *Doc) misnestedAliases() map[[2]int]bool {
 
 	b.WriteString(d.cur[last:] + d.tail)
 
-	//nolint:errcheck // The hook gives a *niceyaml.Source.
-	src, _ := hook.WorkingSource(b.String(), d.user, d.cfg.unmarshalers, d.locate).(*niceyaml.Source)
+	src := niceyaml.NewSourceFromDerived(b.String(), d.user, d.locate,
+		niceyaml.WithUnmarshalers(d.cfg.unmarshalers...), niceyaml.WithoutLimits())
 
 	for _, n := range src.AllDocuments() {
 		if n.Err() != nil {

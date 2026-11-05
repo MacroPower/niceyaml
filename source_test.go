@@ -7619,6 +7619,40 @@ func TestSource_WithText(t *testing.T) {
 		yamltest.AssertBoundTo(t, next, err)
 	})
 
+	t.Run("a derived Source gives a Source that binds in itself", func(t *testing.T) {
+		t.Parallel()
+
+		home := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("home.yaml"))
+		work := niceyaml.NewSourceFromDerived("a: 2\n", yamltest.Document(t, home), nil)
+
+		next := work.WithText("a: x\n")
+
+		_, err := next.Decode[struct {
+			A int `yaml:"a"`
+		}](t.Context())
+		require.Error(t, err)
+		yamltest.AssertBoundTo(t, next, err)
+		assert.Equal(t, "home.yaml", next.Name())
+	})
+
+	t.Run("a derived Source keeps the alias bounds of home", func(t *testing.T) {
+		t.Parallel()
+
+		// The two aliases repeat 1200 bytes of text, past the 1 KiB that the
+		// byte limit of home allows.
+		text := "a: &a " + strings.Repeat("x", 600) + "\nb: *a\nc: *a\n"
+		home := niceyaml.NewSourceFromString(text, niceyaml.WithByteLimit(1024))
+		work := niceyaml.NewSourceFromDerived(text, yamltest.Document(t, home), nil, niceyaml.WithoutLimits())
+
+		next := work.WithText(text)
+
+		assert.Equal(t, 0, next.ByteLimit())
+
+		_, err := next.Decode[map[string]rawText](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrLimit)
+		assert.Equal(t, "3:4: aliases repeat more than 1 KiB of text", err.Error())
+	})
+
 	t.Run("nil Source", func(t *testing.T) {
 		t.Parallel()
 
