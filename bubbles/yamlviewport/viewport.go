@@ -280,7 +280,7 @@ func WithSearcher(s Searcher) Option {
 // WithFinder is an [Option] that sets the [finder.Finder] that builds the
 // search index. It is [WithSearcher] with f adapted to [Searcher]:
 //
-//	yamlviewport.WithFinder(finder.New(finder.WithNormalizer(nil)))
+//	yamlviewport.WithFinder(finder.New(finder.WithNormalizer(finder.Exact)))
 //
 // A nil f selects the default searcher, as a nil [WithSearcher] does.
 func WithFinder(f *finder.Finder) Option {
