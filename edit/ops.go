@@ -313,7 +313,9 @@ func (d *Doc) clashKey(x *model, other *edge) (site, bool) {
 
 // keptNote returns the note of text that an edit writes over the bytes
 // [start, end). The note holds the place in the user's text of the first
-// byte, or the note of that byte when an earlier edit wrote it.
+// byte and the path that [niceyaml.Node.PathAt] gives at the start of the
+// token that holds that byte. When an earlier edit wrote the first byte,
+// the note is the note of that byte.
 func (d *Doc) keptNote(start, end int) note {
 	if start < len(d.origin) && d.origin[start] < 0 {
 		n := d.notes[-1-d.origin[start]]
@@ -325,7 +327,16 @@ func (d *Doc) keptNote(start, end int) note {
 	rng := d.userRange(start, end)
 	n := note{at: rng, located: true}
 
-	if path, ok := d.user.PathAt(rng.Start); ok {
+	// The lexer bundles the spaces after the text of a token into the
+	// token, and [niceyaml.Node.PathAt] reports false in them. The start of
+	// the token gives the path there, such as the path of an empty value
+	// for a byte past its ":".
+	at := rng.Start
+	if tk := d.user.Source().Lines().TokenAt(at); tk != nil && tk.Position != nil {
+		at = position.NewFromToken(tk)
+	}
+
+	if path, ok := d.user.PathAt(at); ok {
 		n.path, n.hasPath = path, true
 	}
 

@@ -1581,6 +1581,64 @@ func TestSource_Text(t *testing.T) {
 	}
 }
 
+func TestSource_DocumentAt(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString(stringtest.JoinLF(
+		"a: 1",
+		"---",
+		"b: 2",
+		"---",
+		"",
+	))
+	docs := yamltest.AllDocuments(t, source, 3)
+
+	tcs := map[string]struct {
+		pos  position.Position
+		want int
+		ok   bool
+	}{
+		"first line":             {pos: position.New(0, 0), want: 0, ok: true},
+		"column past the end":    {pos: position.New(0, 40), want: 0, ok: true},
+		"header of the second":   {pos: position.New(1, 0), want: 1, ok: true},
+		"second document":        {pos: position.New(2, 3), want: 1, ok: true},
+		"header of an empty one": {pos: position.New(3, 0), want: 2, ok: true},
+		"line before the source": {pos: position.New(-1, 0)},
+		"line past the source":   {pos: position.New(4, 0)},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := source.DocumentAt(tc.pos)
+			require.Equal(t, tc.ok, ok)
+
+			if !tc.ok {
+				assert.Nil(t, got)
+
+				return
+			}
+
+			assert.Same(t, docs[tc.want], got)
+
+			// Bind routes an error at the position to the same document.
+			bound := yamltest.RequireSourceError(t, source.Bind(niceyaml.NewError("m", niceyaml.AtPosition(tc.pos))))
+			assert.Same(t, got, yamltest.BoundDocument(t, bound))
+		})
+	}
+}
+
+func TestSource_DocumentAt_NilSource(t *testing.T) {
+	t.Parallel()
+
+	var source *niceyaml.Source
+
+	got, ok := source.DocumentAt(position.New(0, 0))
+	assert.False(t, ok)
+	assert.Nil(t, got)
+}
+
 func TestSource_Offset(t *testing.T) {
 	t.Parallel()
 

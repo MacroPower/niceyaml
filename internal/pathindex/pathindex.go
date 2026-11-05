@@ -255,6 +255,29 @@ func (x *Index) PathAt(r *paths.Resolver, off int) (paths.Path, bool) {
 	return path, true
 }
 
+// HolderPath returns the path of the innermost node that holds the token
+// at offset off and that a path selects, with r resolving the keys of the
+// document. The node is an entry of a mapping or an element of a
+// sequence, as [Index.PathAt] finds it, and an offset in the key of an
+// entry gives the path of the entry. PathAt reports false where no path
+// spells or selects the innermost node. HolderPath then returns the path
+// of the nearest node around it that a path selects. It returns the root
+// path for an offset that no entry or element holds, including one that
+// the body does not hold.
+func (x *Index) HolderPath(r *paths.Resolver, off int) paths.Path {
+	if !x.body.Holds(off) {
+		return paths.Doc()
+	}
+
+	for i := x.stepAt(off); i >= 0; i = x.steps[i].parent {
+		if path, ok := x.spell(r, i, false, false); ok && x.selects(r, i) {
+			return path
+		}
+	}
+
+	return paths.Doc()
+}
+
 // SitePath returns the path of the node that holds the token at offset
 // off, as the document spells it, with r resolving the keys of the
 // document. The node is the innermost entry of a mapping or element of a

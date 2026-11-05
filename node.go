@@ -1252,19 +1252,150 @@ func spellingTexts(tks token.Tokens) []string {
 // collection belongs to the collection.
 //
 // A position in the indentation of a line resolves to the token after it.
-// The path names where the document writes the node. A position on an
-// alias thus gives the entry that holds the alias, and a position inside
-// an anchor gives the path where the anchor defines it.
+// The lexer gives the spaces between two tokens on a line to one of them.
+// PathAt resolves a position in the spaces that lead the text of a token
+// to that token, and reports false in the spaces that trail the text of a
+// token. The path names where the document writes the node. A position
+// on an alias thus gives the entry that holds the alias, and a position
+// inside an anchor gives the path where the anchor defines it.
 //
-// PathAt reports false on a comment, a blank line, a "---" header, a
-// "..." marker, or a directive. It also reports false outside the lines
-// of the source and in another document of the source, so a caller with
-// several documents asks each. It reports false for a document that did
-// not parse or that does not hold content. It reports false inside an
-// entry that paths cannot select, such as the earlier of two entries with
-// one key. Every path it returns selects the node at pos and does not
-// hold a wildcard selector.
+// PathAt reports false on a comment, a blank line, a line of spaces
+// alone, a "---" header, a "..." marker, or a directive. It also reports
+// false past the end of a line, as at the end of `y:`. [Node.NodeAt]
+// answers there with the node that encloses the position. PathAt reports
+// false outside the lines
+// of the source and in another document of the source. [Source.DocumentAt]
+// picks the document of a position. PathAt reports false for a document
+// that did not parse or that does not hold content. It reports false
+// inside an entry that paths cannot select, such as the earlier of two
+// entries with one key. Every path it returns selects the node at pos and
+// does not hold a wildcard selector.
 func (n *Node) PathAt(pos position.Position) (paths.Path, bool) {
+	if n == nil || n.doc.err != nil {
+		return paths.Path{}, false
+	}
+
+	tk := contentTokenAt(n.source.lines, pos)
+	if tk == nil {
+		return paths.Path{}, false
+	}
+
+	return n.doc.pathIndex().PathAt(n.doc.pathResolver(), tk.Position.Offset)
+}
+
+// NodeAt returns the innermost [*Node] of the document that holds pos,
+// and true. The position is in the coordinates of [Source.Lines], as for
+// [Node.PathAt]. Where PathAt names the token under a cursor, NodeAt
+// names the node to complete in, so it answers at the positions a user
+// types at:
+//
+//	if n, ok := doc.NodeAt(cursor); ok {
+//		keys := completions(n.Path()) // $.server on its blank line, $.y after "y:"
+//	}
+//
+// The node is an entry of a mapping or an element of a sequence, as
+// [Node.At] scopes it, or the root of the document. A position on the
+// key, the ":", or the value of an entry gives the entry. A position
+// between the entries of a collection gives the collection, as the "{",
+// the "," and the "}" of `{a: 1, b: 2}` do. A position in a comment, in
+// the spaces after the last text of a line, or past the end of the line
+// belongs to the node of the last text before it. The end of `y:` thus
+// gives `$.y`. A blank line or a line of spaces alone belongs
+// to the innermost node whose [Node.Span] holds the line, whatever its
+// column. When no node spans the line, it belongs to the collection that
+// holds the last entry before it. A blank line after `host: a` under
+// `server:` thus gives `$.server`, and a caller that wants a wider node
+// walks up with [paths.Path.Parent]. A line before the first entry of the
+// document, or one that no entry holds, gives the root.
+//
+// A position that lies inside an entry that paths cannot select, such as
+// the earlier of two entries with one key, gives the nearest node around
+// it that a path selects. A Node from [Node.At] answers for the positions
+// of the nodes it holds, and reports false elsewhere in the document.
+//
+// NodeAt reports false for a nil Node, for a document that did not parse
+// or that does not hold content, and for a position outside the lines of
+// the document. [Source.DocumentAt] picks the document of a position in a
+// Source that holds several.
+func (n *Node) NodeAt(pos position.Position) (*Node, bool) {
+	if n == nil || n.doc.err != nil || n.doc.node.IsEmpty() || pos.Col < 0 {
+		return nil, false
+	}
+
+	root := n.doc.node
+	if !root.span.Contains(pos.Line) {
+		return nil, false
+	}
+
+	path, ok := root.pathHolding(pos)
+	if !ok {
+		return nil, false
+	}
+
+	if _, under := path.CutPrefix(n.base); !under {
+		return nil, false
+	}
+
+	node, err := n.At(path)
+	if err != nil {
+		return nil, false
+	}
+
+	return node, true
+}
+
+// pathHolding returns the `$` path of the node that [Node.NodeAt] finds
+// for pos in the document of n, the root of its document.
+func (n *Node) pathHolding(pos position.Position) (paths.Path, bool) {
+	lines := n.source.lines
+	index, r := n.doc.pathIndex(), n.doc.pathResolver()
+
+	if tk := contentTokenAt(lines, pos); tk != nil {
+		return index.HolderPath(r, tk.Position.Offset), true
+	}
+
+	if tk := lastContentTokenOn(lines.Line(pos.Line), pos.Col); tk != nil {
+		return index.HolderPath(r, tk.Position.Offset), true
+	}
+
+	// The line holds no text before pos. Find the node of the last text
+	// on an earlier line of the document. That node holds the line when
+	// its own lines run past it, as the lines of a collection or a block
+	// scalar do. Otherwise the collection that holds that node holds the
+	// line.
+	for i := pos.Line - 1; i >= n.span.Start; i-- {
+		tk := lastContentTokenOn(lines.Line(i), lines.Line(i).Width())
+		if tk == nil {
+			continue
+		}
+
+		path := index.HolderPath(r, tk.Position.Offset)
+
+		before, err := n.At(path)
+		if err != nil {
+			return paths.Path{}, false
+		}
+
+		if before.span.Contains(pos.Line) {
+			return path, true
+		}
+
+		parent, _ := path.Parent()
+
+		return parent, true
+	}
+
+	return paths.Doc(), true
+}
+
+// tokenPathAt returns the path of the node that holds the token at pos,
+// and true, as [Node.PathAt] resolves the start of that token. The lexer
+// bundles the spaces after the text of a token into the token. PathAt
+// reports false in those spaces, but tokenPathAt resolves them to the
+// token. A position in the space after a tag thus names the value of the
+// tag. It reports false where no token holds pos, on a comment, and where
+// PathAt reports false at the start of the token.
+func (n *Node) tokenPathAt(pos position.Position) (paths.Path, bool) {
 	if n == nil || n.doc.err != nil {
 		return paths.Path{}, false
 	}
@@ -1275,6 +1406,43 @@ func (n *Node) PathAt(pos position.Position) (paths.Path, bool) {
 	}
 
 	return n.doc.pathIndex().PathAt(n.doc.pathResolver(), tk.Position.Offset)
+}
+
+// contentTokenAt returns the token of lines whose text holds pos, or
+// whose text follows pos on its line, as [Node.PathAt] resolves a
+// position. It returns nil for a position on a comment or outside the
+// lines. It also returns nil in the spaces after the last text of a line,
+// past the end of the line, and on a line without text.
+func contentTokenAt(lines line.Lines, pos position.Position) *token.Token {
+	tk := lines.TokenAt(pos)
+	if tk == nil || tk.Position == nil || tk.Type == token.CommentType {
+		return nil
+	}
+
+	sp, ok := lines.Line(pos.Line).ContentSpan(tk)
+	if !ok || sp.Len() == 0 || pos.Col >= sp.End {
+		return nil
+	}
+
+	return tk
+}
+
+// lastContentTokenOn returns the last token of l that holds text before
+// column col, comments left out, or nil when no token does.
+func lastContentTokenOn(l *line.Line, col int) *token.Token {
+	var found *token.Token
+
+	for _, tk := range l.SourceTokens() {
+		if tk.Position == nil || tk.Type == token.CommentType {
+			continue
+		}
+
+		if sp, ok := l.ContentSpan(tk); ok && sp.Len() > 0 && sp.Start < col {
+			found = tk
+		}
+	}
+
+	return found
 }
 
 // NodeKind is the structural kind of the value a [Node] holds, as

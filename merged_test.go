@@ -4738,6 +4738,18 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 		require.NoError(t, layers.Bind(nil))
 	})
 
+	t.Run("a position in the space after a tag binds at the tagged value", func(t *testing.T) {
+		t.Parallel()
+
+		tagged := mergedLayers(t, layerNodes(t, "name: shop\n", "port: !!str 80\n"))
+		require.Equal(t, "port: !!str 80", tagged.Lines().Line(1).Content())
+
+		// The lexer gives the space after the tag to the tag, which belongs
+		// to the value, so the position lies in the value of prod.yaml.
+		err := tagged.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(1, 11))))
+		require.EqualError(t, err, "prod.yaml:1:13: bad")
+	})
+
 	t.Run("a position outside the merged text holds no value", func(t *testing.T) {
 		t.Parallel()
 

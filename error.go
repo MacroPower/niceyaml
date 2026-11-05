@@ -1458,12 +1458,14 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 
 // locateMerged resolves the position at in node, a merged document. The
 // text of that document is not a file of the caller, so the error binds at
-// the value at that position in the layer that holds it. Without a value
-// there, the path of l locates the error.
+// the value at that position in the layer that holds it. A position in the
+// spaces after the text of a token names the value of that token, as
+// [Node.tokenPathAt] resolves it. Without a value there, the path of l
+// locates the error.
 func locateMerged(b binder, node *Node, at position.Position, l locus) (location, *Node, error) {
 	b.node = node
 
-	if path, ok := node.PathAt(at); ok {
+	if path, ok := node.tokenPathAt(at); ok {
 		return locatePath(b, path)
 	}
 

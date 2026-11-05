@@ -1284,6 +1284,35 @@ func (s *Source) PositionAt(off int) (position.Position, bool) {
 	return position.New(ln, col), true
 }
 
+// DocumentAt returns the root [*Node] of the document whose [Node.Span]
+// holds the line of pos, a position in the coordinates of [Source.Lines],
+// and true. It picks the document as [Source.Bind] picks the one that a
+// [position.Position] or a [position.Range] in an error binds to. A
+// cursor in a file of several documents thus reaches the Node that
+// [Node.PathAt] and [Node.NodeAt] answer for:
+//
+//	if doc, ok := src.DocumentAt(cursor); ok {
+//		path, _ := doc.PathAt(cursor)
+//	}
+//
+// The column of pos does not matter, so a column past the end of the line
+// names the line too. The document might be an empty one that
+// [Source.Documents] leaves out, or one that did not parse, as
+// [Source.AllDocuments] describes. A Source that [NewSourceFromLayers]
+// built holds one document, which every line of its text belongs to.
+//
+// DocumentAt reports false for a nil Source, for a line outside the
+// lines of the Source, and for a line that no document spans.
+func (s *Source) DocumentAt(pos position.Position) (*Node, bool) {
+	if s == nil || pos.Line < 0 || pos.Line >= s.lines.Len() {
+		return nil, false
+	}
+
+	node := binder{src: s, route: true}.nodeAt(pos.Line)
+
+	return node, node != nil
+}
+
 // Tokens returns the full [token.Tokens] stream of the [Source], the
 // tokens that its lines hold, in order, as [line.Lines.Tokens] rebuilds
 // them. Each call returns a new slice that holds the same tokens. See

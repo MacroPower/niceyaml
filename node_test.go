@@ -475,7 +475,7 @@ func TestNode_PathAt(t *testing.T) {
 				"2:0 $.servers[0]",
 				"2:3 $.servers[0].host~",
 				"2:8 $.servers[0].host",
-				"2:13 -",
+				"2:11 -",
 				"3:0 $.servers[0].port~",
 				"3:8 $.servers[0].port",
 				"3:11 -",
@@ -528,6 +528,8 @@ func TestNode_PathAt(t *testing.T) {
 				"0:0 $.k~",
 				"0:3 -",
 				"1:0 $.k",
+				"1:12 -",
+				"1:13 $.k",
 				"1:14 -",
 				"2:0 $.z~",
 				"2:1 $.z",
@@ -628,7 +630,7 @@ func TestNode_PathAt(t *testing.T) {
 				"1:0 -",
 				"2:0 $.a~",
 				"2:1 $.a",
-				"2:5 -",
+				"2:4 -",
 				"3:0 -",
 			),
 		},
@@ -875,7 +877,7 @@ func TestNode_PathAt(t *testing.T) {
 			want: stringtest.JoinLF(
 				"0:0 $.a~",
 				"0:1 $.a",
-				"0:5 -",
+				"0:4 -",
 				"1:0 $.b~",
 				"1:1 $.b",
 				"1:4 -",
@@ -1112,6 +1114,202 @@ func TestNode_PathAt_ScopedNode(t *testing.T) {
 		assert.Equal(t, hours.Span(), self.Span())
 		assert.Same(t, hours.AST(), self.AST())
 	})
+}
+
+// nodesAt lists what [niceyaml.Node.NodeAt] reports for every position of
+// the lines of its source, one row per run of columns with one answer, as
+// pathsAt lists paths. The columns of a line run two past its last
+// character, so each line shows the answer past its end. It fails the
+// test when the path of a Node it lists does not select that Node.
+func nodesAt(t *testing.T, doc *niceyaml.Node) string {
+	t.Helper()
+
+	var sb strings.Builder
+
+	for i, l := range doc.Source().Lines().All() {
+		prev := ""
+
+		for col := range utf8.RuneCountInString(l.Content()) + 2 {
+			pos := position.New(i, col)
+			got := "-"
+
+			if n, ok := doc.NodeAt(pos); ok {
+				same, err := doc.At(n.Path())
+				require.NoError(t, err, "path %s at %s", n.Path(), pos)
+				assert.Equal(t, same.Span(), n.Span(), "node at %s", pos)
+
+				got = n.Path().String()
+			}
+
+			if got != prev {
+				fmt.Fprintf(&sb, "%s %s\n", pos, got)
+
+				prev = got
+			}
+		}
+	}
+
+	return strings.TrimSuffix(sb.String(), "\n")
+}
+
+func TestNode_NodeAt(t *testing.T) {
+	t.Parallel()
+
+	servers := stringtest.JoinLF(
+		"# head",
+		"servers:",
+		"  - host: h  # note",
+		"    port: 1",
+		"",
+		"  - host: g",
+		"name: x",
+	)
+
+	tcs := map[string]struct {
+		input string
+		want  string
+		path  paths.Path
+		opts  []niceyaml.SourceOption
+	}{
+		"block mapping and sequence": {
+			input: servers,
+			want: stringtest.JoinLF(
+				"0:0 $",
+				"1:0 $.servers",
+				"2:0 $.servers[0]",
+				"2:3 $.servers[0].host",
+				"3:0 $.servers[0].port",
+				"4:0 $.servers[0]",
+				"5:0 $.servers[1]",
+				"5:3 $.servers[1].host",
+				"6:0 $.name",
+			),
+		},
+		"scoped node answers inside its node alone": {
+			input: servers,
+			path:  paths.Doc().Child("servers"),
+			want: stringtest.JoinLF(
+				"0:0 -",
+				"1:0 $.servers",
+				"2:0 $.servers[0]",
+				"2:3 $.servers[0].host",
+				"3:0 $.servers[0].port",
+				"4:0 $.servers[0]",
+				"5:0 $.servers[1]",
+				"5:3 $.servers[1].host",
+				"6:0 -",
+			),
+		},
+		"flow mapping": {
+			input: "flow: {a: 1, b: 2}",
+			want: stringtest.JoinLF(
+				"0:0 $.flow",
+				"0:7 $.flow.a",
+				"0:11 $.flow",
+				"0:12 $.flow.b",
+				"0:17 $.flow",
+			),
+		},
+		"end of an entry without a value": {
+			input: stringtest.JoinLF("y:", "z: 1"),
+			want: stringtest.JoinLF(
+				"0:0 $.y",
+				"1:0 $.z",
+			),
+		},
+		"line of spaces after the last entry of a mapping": {
+			input: stringtest.JoinLF("server:", "  host: a", "  ", "name: x"),
+			want: stringtest.JoinLF(
+				"0:0 $.server",
+				"1:0 $.server.host",
+				"2:0 $.server",
+				"3:0 $.name",
+			),
+		},
+		"blank line before the first entry of a mapping": {
+			input: stringtest.JoinLF("server:", "", "  host: a"),
+			want: stringtest.JoinLF(
+				"0:0 $.server",
+				"1:0 $.server",
+				"2:0 $.server.host",
+			),
+		},
+		"blank line in a block scalar": {
+			input: stringtest.JoinLF("a: |", "  foo", "", "  bar", "b: 2"),
+			want: stringtest.JoinLF(
+				"0:0 $.a",
+				"1:0 $.a",
+				"2:0 $.a",
+				"3:0 $.a",
+				"4:0 $.b",
+			),
+		},
+		"blank lines around the document": {
+			input: stringtest.JoinLF("", "a: 1", "", ""),
+			want: stringtest.JoinLF(
+				"0:0 $",
+				"1:0 $.a",
+				"2:0 $",
+			),
+		},
+		"directive, header, and end marker": {
+			input: stringtest.JoinLF("%YAML 1.2", "---", "a: 1", "..."),
+			want: stringtest.JoinLF(
+				"0:0 $",
+				"1:0 $",
+				"2:0 $.a",
+				"3:0 $",
+			),
+		},
+		"entry that no path selects gives the mapping": {
+			input: stringtest.JoinLF("a: 1", "a: 2"),
+			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			want: stringtest.JoinLF(
+				"0:0 $",
+				"1:0 $.a",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
+			doc = yamltest.AtOrSelf(t, doc, tc.path)
+
+			assert.Equal(t, tc.want, nodesAt(t, doc))
+		})
+	}
+}
+
+func TestNode_NodeAt_NoNode(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		node *niceyaml.Node
+		pos  position.Position
+	}{
+		"nil node":           {node: nil},
+		"unparsed":           {node: yamltest.UnparsedDocument(t, "a: [")},
+		"empty document":     {node: yamltest.FirstDocument(t, "")},
+		"line before source": {node: yamltest.FirstDocument(t, "a: 1\n"), pos: position.New(-1, 0)},
+		"line past source":   {node: yamltest.FirstDocument(t, "a: 1\n"), pos: position.New(5, 0)},
+		"negative column":    {node: yamltest.FirstDocument(t, "a: 1\n"), pos: position.New(0, -1)},
+		"other document": {
+			node: yamltest.Documents(t, niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n"), 2)[0],
+			pos:  position.New(2, 0),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, ok := tc.node.NodeAt(tc.pos)
+			assert.False(t, ok)
+		})
+	}
 }
 
 func TestNode_Range(t *testing.T) {
