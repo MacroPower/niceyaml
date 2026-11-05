@@ -37,15 +37,14 @@ const DefaultLoadLimit = 10 << 20
 //	    schema.WithResolvers(schema.Directive()),
 //	)
 //
-// The limit defaults to [DefaultLoadLimit]. A limit of zero or less
-// keeps the default, and a program that does not want a limit passes
-// [math.MaxInt]. Given more than once, the last option with a positive
-// limit wins.
+// The limit defaults to [DefaultLoadLimit]. A limit of 0 removes it, so
+// the registry reads a document of any size, and a negative limit counts
+// as 0. A program that fills the limit from a configuration field thus
+// removes a safety bound when the field is unset. Given more than once,
+// the last option wins.
 func WithLoadLimit(n int) RegistryOption {
 	return func(c *registryConfig) {
-		if n > 0 {
-			c.loadLimit = n
-		}
+		c.loadLimit = max(n, 0)
 	}
 }
 

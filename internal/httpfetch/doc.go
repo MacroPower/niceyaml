@@ -2,5 +2,6 @@
 //
 // The schema loaders and the SchemaStore catalog fetch share it. Each of
 // them refuses any status other than 200 OK, and any body of more than
-// the limit that its caller gives.
+// the limit that its caller gives. A limit of 0 or less reads a body of
+// any size.
 package httpfetch

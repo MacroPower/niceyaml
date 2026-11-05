@@ -345,16 +345,12 @@ func limitError(n int) error {
 // greater than zero. It returns the error of [limitError] for a text past
 // the limit.
 func readLimited(r io.Reader, limit int) ([]byte, error) {
-	if limit <= 0 {
-		return io.ReadAll(r) //nolint:wrapcheck // The caller wraps the error.
-	}
-
 	data, err := limitread.ReadAll(r, limit)
 	if err != nil {
 		return nil, err //nolint:wrapcheck // The caller wraps the error.
 	}
 
-	if len(data) > limit {
+	if limit > 0 && len(data) > limit {
 		return nil, limitError(limit)
 	}
 

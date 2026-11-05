@@ -252,13 +252,12 @@ func WithRetryAfter(interval time.Duration) Option {
 // The limit covers only the catalog. The registry reads each schema that
 // the catalog names within the limit of [schema.WithLoadLimit].
 //
-// The default is [schema.DefaultLoadLimit]. A limit of zero or less keeps
-// the default. To remove the limit, pass [math.MaxInt].
+// The default is [schema.DefaultLoadLimit]. A limit of 0 removes it, so
+// the store reads a catalog of any size, and a negative limit counts as
+// 0. Given more than once, the last option wins.
 func WithLoadLimit(n int) Option {
 	return func(c *config) {
-		if n > 0 {
-			c.loadLimit = n
-		}
+		c.loadLimit = max(n, 0)
 	}
 }
 

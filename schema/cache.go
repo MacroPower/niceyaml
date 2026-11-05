@@ -49,14 +49,12 @@ import (
 // a limit, as the Untrusted Documents section of the package
 // documentation describes.
 //
-// A limit of zero or less leaves the registry as it is, and by default
-// the registry keeps every entry. Given more than once, the last option
-// with a positive limit wins.
+// By default the registry keeps every entry. A limit of 0 removes a
+// limit, and a negative limit counts as 0. Given more than once, the last
+// option wins.
 func WithCacheLimit(n int) RegistryOption {
 	return func(c *registryConfig) {
-		if n > 0 {
-			c.cacheLimit = n
-		}
+		c.cacheLimit = max(n, 0)
 	}
 }
 

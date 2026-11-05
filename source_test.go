@@ -7345,34 +7345,38 @@ func TestWithByteLimit(t *testing.T) {
 		}
 	})
 
-	t.Run("readers read the whole text with the largest limit", func(t *testing.T) {
+	t.Run("readers read the whole text with a limit of zero or the largest limit", func(t *testing.T) {
 		t.Parallel()
 
 		path := yamltest.WriteFile(t, t.TempDir(), "big.yaml", text)
 		fsys := yamltest.MapFS(map[string]string{"big.yaml": text})
 
 		tcs := map[string]struct {
-			read func() (*niceyaml.Source, error)
+			read func(opt niceyaml.SourceOption) (*niceyaml.Source, error)
 		}{
-			"file": {read: func() (*niceyaml.Source, error) {
-				return niceyaml.NewSourceFromFile(path, niceyaml.WithByteLimit(math.MaxInt))
+			"file": {read: func(opt niceyaml.SourceOption) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromFile(path, opt)
 			}},
-			"file system": {read: func() (*niceyaml.Source, error) {
-				return niceyaml.NewSourceFromFS(fsys, "big.yaml", niceyaml.WithByteLimit(math.MaxInt))
+			"file system": {read: func(opt niceyaml.SourceOption) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromFS(fsys, "big.yaml", opt)
 			}},
-			"reader": {read: func() (*niceyaml.Source, error) {
-				return niceyaml.NewSourceFromReader(strings.NewReader(text), niceyaml.WithByteLimit(math.MaxInt))
+			"reader": {read: func(opt niceyaml.SourceOption) (*niceyaml.Source, error) {
+				return niceyaml.NewSourceFromReader(strings.NewReader(text), opt)
 			}},
 		}
 
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
+		limits := map[string]int{"a limit of zero": 0, "the largest limit": math.MaxInt}
 
-				source, err := tc.read()
-				require.NoError(t, err)
-				assert.Equal(t, text, source.Text())
-			})
+		for name, tc := range tcs {
+			for limitName, limit := range limits {
+				t.Run(name+" with "+limitName, func(t *testing.T) {
+					t.Parallel()
+
+					source, err := tc.read(niceyaml.WithByteLimit(limit))
+					require.NoError(t, err)
+					assert.Equal(t, text, source.Text())
+				})
+			}
 		}
 	})
 

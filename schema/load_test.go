@@ -138,11 +138,21 @@ func TestWithLoadLimit(t *testing.T) {
 		"embedded JSON past the limit": {
 			ref: schema.Embedded([]byte(bigJSON)),
 		},
-		"zero after a limit keeps that limit": {
-			ref:    schema.FileFS(fsys, "big.json"),
-			opts:   []schema.RegistryOption{schema.WithLoadLimit(0)},
-			err:    schema.ErrLoad,
-			status: 0,
+		"zero after a limit removes it for a file": {
+			ref:  schema.FileFS(fsys, "big.json"),
+			opts: []schema.RegistryOption{schema.WithLoadLimit(0)},
+		},
+		"zero after a limit removes it for a URL": {
+			ref:  schema.URL("https://example.com/big.json"),
+			opts: []schema.RegistryOption{schema.WithLoadLimit(0)},
+		},
+		"zero after a limit removes it for embedded YAML": {
+			ref:  schema.Embedded([]byte(bigYAML)),
+			opts: []schema.RegistryOption{schema.WithLoadLimit(0)},
+		},
+		"negative after a limit removes it": {
+			ref:  schema.FileFS(fsys, "big.json"),
+			opts: []schema.RegistryOption{schema.WithLoadLimit(-1)},
 		},
 		"later limit replaces an earlier one": {
 			ref:  schema.FileFS(fsys, "big.json"),
@@ -184,13 +194,12 @@ func TestWithLoadLimit(t *testing.T) {
 	}
 }
 
-func TestWithLoadLimit_Default(t *testing.T) {
+func TestWithLoadLimit_Unbounded(t *testing.T) {
 	t.Parallel()
 
-	// A limit of zero or less keeps the default, and the largest int
-	// reads a document of any size. Each reads a file and a URL far past
-	// a limit of 64 bytes.
-	body := `{"type": "object"}` + strings.Repeat(" ", 1<<10)
+	// A limit of zero or less removes the limit, and so does the largest
+	// int. Each reads a file and a URL past DefaultLoadLimit.
+	body := `{"type": "object"}` + strings.Repeat(" ", schema.DefaultLoadLimit)
 	fsys := yamltest.MapFS(map[string]string{"s.json": body})
 	client := yamltest.Respond(http.StatusOK, body).Client()
 
@@ -211,13 +220,21 @@ func TestWithLoadLimit_Default(t *testing.T) {
 			for _, ref := range []schema.Ref{
 				schema.FileFS(fsys, "s.json"),
 				schema.URL("https://example.com/s.json"),
-				schema.Embedded([]byte("type: object\n" + strings.Repeat("#", 1<<10) + "\n")),
 			} {
 				_, err := reg.Schema(t.Context(), ref)
 				require.NoError(t, err, ref.Name())
 			}
 		})
 	}
+
+	t.Run("the default limit holds without the option", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithHTTPClient(client))
+
+		_, err := reg.Schema(t.Context(), schema.FileFS(fsys, "s.json"))
+		require.ErrorIs(t, err, niceyaml.ErrLimit)
+	})
 }
 
 func TestLoadError(t *testing.T) {

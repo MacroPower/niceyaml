@@ -19,10 +19,12 @@ func TestReadAll(t *testing.T) {
 		limit int
 		want  int
 	}{
-		"text within the limit": {text: "abc", limit: 4, want: 3},
-		"text at the limit":     {text: "abcd", limit: 4, want: 4},
-		"text past the limit":   {text: "abcdefg", limit: 4, want: 5},
-		"largest int":           {text: "abcdefg", limit: math.MaxInt, want: 7},
+		"text within the limit":     {text: "abc", limit: 4, want: 3},
+		"text at the limit":         {text: "abcd", limit: 4, want: 4},
+		"text past the limit":       {text: "abcdefg", limit: 4, want: 5},
+		"largest int":               {text: "abcdefg", limit: math.MaxInt, want: 7},
+		"zero reads to the end":     {text: "abcdefg", limit: 0, want: 7},
+		"negative reads to the end": {text: "abcdefg", limit: -1, want: 7},
 	}
 
 	for name, tc := range tcs {

@@ -1039,25 +1039,36 @@ func TestWithLoadLimit(t *testing.T) {
 
 	body := marshalCatalog(t, testCatalog)
 
-	// A limit of zero or less keeps the default, which reads the catalog,
-	// and so does the largest int.
+	// A catalog past schema.DefaultLoadLimit fails without the option, so
+	// it shows that a limit of zero or less removes the limit, as the
+	// largest int does.
+	huge := body + strings.Repeat(" ", schema.DefaultLoadLimit)
+
 	tcs := map[string]struct {
+		body  string
 		limit int
 	}{
-		"catalog at the limit": {limit: len(body)},
-		"zero":                 {limit: 0},
-		"negative":             {limit: -1},
-		"largest int":          {limit: math.MaxInt},
+		"catalog at the limit": {body: body, limit: len(body)},
+		"zero":                 {body: huge, limit: 0},
+		"negative":             {body: huge, limit: -1},
+		"largest int":          {body: huge, limit: math.MaxInt},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			store := newStore(yamltest.Respond(http.StatusOK, body).Client(), schemastore.WithLoadLimit(tc.limit))
+			store := newStore(yamltest.Respond(http.StatusOK, tc.body).Client(), schemastore.WithLoadLimit(tc.limit))
 			requireEntry(t, store, "Test")
 		})
 	}
+
+	t.Run("the default limit holds without the option", func(t *testing.T) {
+		t.Parallel()
+
+		store := newStore(yamltest.Respond(http.StatusOK, huge).Client())
+		requireFetchError(t, store)
+	})
 }
 
 func TestStore_RetryAfter(t *testing.T) {

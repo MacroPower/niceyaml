@@ -155,7 +155,7 @@ type registryConfig struct {
 	access      accessConfig  // the files on disk that the registry reads and the URLs that it fetches
 	retryAfter  time.Duration // how long the registry remembers a failure
 	cacheLimit  int           // the most entries that each cache keeps, or 0 for unlimited
-	loadLimit   int           // the most bytes of each schema document that the registry reads
+	loadLimit   int           // the most bytes of each schema document that the registry reads, or 0 for unlimited
 	// Makes Check report ErrNoMatch when every resolver declines.
 	requireSchema bool
 }

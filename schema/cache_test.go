@@ -118,11 +118,15 @@ func TestWithCacheLimit(t *testing.T) {
 				opts: []schema.RegistryOption{schema.WithCacheLimit(3)},
 				want: 3,
 			},
-			"zero after a positive limit keeps the limit": {
+			"zero after a positive limit removes it": {
 				opts: []schema.RegistryOption{schema.WithCacheLimit(3), schema.WithCacheLimit(0)},
-				want: 3,
+				want: 8,
 			},
-			"last positive limit wins": {
+			"negative after a positive limit removes it": {
+				opts: []schema.RegistryOption{schema.WithCacheLimit(3), schema.WithCacheLimit(-1)},
+				want: 8,
+			},
+			"last limit wins": {
 				opts: []schema.RegistryOption{schema.WithCacheLimit(3), schema.WithCacheLimit(5)},
 				want: 5,
 			},

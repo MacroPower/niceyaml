@@ -94,6 +94,32 @@ func TestGet(t *testing.T) {
 	}
 }
 
+func TestGet_Unbounded(t *testing.T) {
+	t.Parallel()
+
+	// A limit of zero or less reads a body of any size.
+	body := strings.Repeat("x", 1<<20)
+
+	tcs := map[string]struct {
+		limit int
+	}{
+		"zero":     {limit: 0},
+		"negative": {limit: -1},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			client := yamltest.Respond(http.StatusOK, body).Client()
+
+			data, err := httpfetch.Get(t.Context(), client, "https://example.com/s.json", tc.limit)
+			require.NoError(t, err)
+			assert.Len(t, data, len(body))
+		})
+	}
+}
+
 func TestTooLarge(t *testing.T) {
 	t.Parallel()
 

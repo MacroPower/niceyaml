@@ -10,8 +10,14 @@ import (
 
 // ReadAll reads r to its end or to one byte past limit, whichever comes
 // first. A result longer than limit means that the text holds more than
-// limit bytes. A limit of [math.MaxInt] reads r to its end.
+// limit bytes. A limit of 0 or less, or of [math.MaxInt], reads r to its
+// end.
 func ReadAll(r io.Reader, limit int) ([]byte, error) {
+	if limit <= 0 {
+		//nolint:wrapcheck // The caller wraps the error.
+		return io.ReadAll(r)
+	}
+
 	n := int64(limit)
 	if n < math.MaxInt64 {
 		n++
