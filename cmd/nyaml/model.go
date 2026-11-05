@@ -443,7 +443,21 @@ func (m *model) titleLine() string {
 
 	var subtitleRight string
 
+	// The match line counts the lines of the revision that holds the
+	// match, and the top line counts the lines of the view. Both count
+	// from 1. A view of a diff holds lines of two revisions. The hunks view
+	// also holds only the lines inside its hunks. In those views the two
+	// numbers thus count different lines.
+	match, matched := m.viewport.SearchMatch(m.viewport.SearchIndex())
+
 	switch {
+	case matched:
+		subtitleRight = fmt.Sprintf("match %d/%d at line %d ",
+			m.viewport.SearchIndex()+1,
+			m.viewport.SearchCount(),
+			match.Position.Line+1,
+		)
+
 	case m.viewport.SearchCount() > 0:
 		subtitleRight = fmt.Sprintf("%d/%d matches ",
 			m.viewport.SearchIndex()+1,
