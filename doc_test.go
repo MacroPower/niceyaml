@@ -57,6 +57,12 @@ var policies = []dependencyPolicy{
 			"ast.File",
 			"ast.DocumentNode",
 			"ast.Node",
+			// The nodes that the lookups of a paths.Resolver return or
+			// name in a paths.AliasError.
+			"ast.MappingNode",
+			"ast.MappingValueNode",
+			"ast.AnchorNode",
+			"ast.AliasNode",
 			"token.Token",
 			"token.Tokens",
 			"token.Type",
@@ -150,12 +156,12 @@ func TestCheckFile_Coverage(t *testing.T) {
 		want []string
 	}{
 		"embedded field": {
-			src:  `type Foo struct{ ast.MappingNode }`,
-			want: []string{"Foo.MappingNode"},
+			src:  `type Foo struct{ ast.SequenceNode }`,
+			want: []string{"Foo.SequenceNode"},
 		},
 		"embedded pointer": {
-			src:  `type Foo struct{ *ast.MappingNode }`,
-			want: []string{"Foo.MappingNode"},
+			src:  `type Foo struct{ *ast.SequenceNode }`,
+			want: []string{"Foo.SequenceNode"},
 		},
 		"embedded allowed type": {
 			src: `type Foo struct{ *ast.File }`,
@@ -186,7 +192,7 @@ func TestCheckFile_Coverage(t *testing.T) {
 			src: stringtest.Input(`
 				type Map[K comparable, V any] struct{}
 
-				func (m *Map[K, V]) Node() *ast.MappingNode { return nil }
+				func (m *Map[K, V]) Node() *ast.SequenceNode { return nil }
 			`),
 			want: []string{"Node"},
 		},
@@ -194,7 +200,7 @@ func TestCheckFile_Coverage(t *testing.T) {
 			src: stringtest.Input(`
 				type pair[K comparable, V any] struct{}
 
-				func (p *pair[K, V]) Node() *ast.MappingNode { return nil }
+				func (p *pair[K, V]) Node() *ast.SequenceNode { return nil }
 			`),
 		},
 	}

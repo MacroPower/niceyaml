@@ -1694,7 +1694,9 @@
 // only where niceyaml wraps the document model rather than hiding it. Those
 // types are the [*ast.File] and [*ast.DocumentNode] that a [Source] parses
 // into, the [token.Tokens] it lexes, and the [ast.Node] and [*token.Token]
-// that resolving a [paths.Path] returns. Positions, ranges, lines, errors,
+// that resolving a [paths.Path] returns. They also include the mapping,
+// entry, anchor, and alias nodes that the lookups of a [paths.Resolver]
+// return or name in a [paths.AliasError]. Positions, ranges, lines, errors,
 // and styles are niceyaml's own types, and [paths.Path.YAMLPath] converts to
 // go-yaml's path type when a caller needs it.
 //
