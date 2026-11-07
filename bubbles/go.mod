@@ -11,7 +11,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/exp/golden v0.1.0
 	github.com/stretchr/testify v1.12.1
-	go.jacobcolvin.com/niceyaml v0.0.0-20261031072356-ce2a6c4c720b
+	go.jacobcolvin.com/niceyaml v0.0.0-20261031194333-bdbd51a11990
 	go.jacobcolvin.com/x/stringtest v0.2.0
 )
 
