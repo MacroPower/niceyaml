@@ -1472,6 +1472,10 @@ func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, erro
 // call reads. The map of a whole document thus pairs with an encode of
 // its value. The map of a Node from [Node.At] does not pair with an
 // encode of that node alone.
+//
+// Each key is in the path syntax of go-yaml, which prints a name with
+// whitespace or `:` without quotes, as in `$.my key`. [paths.Parse]
+// rejects such an unquoted name, so it does not read every key.
 func (n *Node) YAMLComments(ctx context.Context) (yaml.CommentMap, error) {
 	var value any
 

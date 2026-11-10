@@ -184,6 +184,16 @@ func TestPath_Build(t *testing.T) {
 			want:     `$.'\'x\''`,
 			wantYAML: "$.'x'",
 		},
+		"backslash in a name is quoted and escaped": {
+			path:     paths.Doc().Child(`a\b`),
+			want:     `$.'a\\b'`,
+			wantYAML: `$.a\b`,
+		},
+		"double quotes in a name are quoted": {
+			path:     paths.Doc().Child(`"a"`),
+			want:     `$.'"a"'`,
+			wantYAML: `$."a"`,
+		},
 		"tilde in a name is quoted": {
 			path:     paths.Doc().Child("a~b"),
 			want:     "$.'a~b'",
@@ -1145,6 +1155,12 @@ func TestPath_UnmarshalText(t *testing.T) {
 
 		err := json.Unmarshal([]byte(`{"path":"$.items["}`), &got)
 		require.ErrorIs(t, err, paths.ErrInvalidPath)
+
+		// A space at the end of the string is not part of the last name.
+		err = json.Unmarshal([]byte(`{"path":"$.items[*].name "}`), &got)
+		require.ErrorIs(t, err, paths.ErrInvalidPath)
+		require.ErrorContains(t, err, `write .'name ' to keep it`)
+		assert.Equal(t, "$.items[0]", got.Path.String())
 	})
 
 	t.Run("reads a YAML string", func(t *testing.T) {

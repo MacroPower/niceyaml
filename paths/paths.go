@@ -151,9 +151,11 @@ func (s segment) String() string {
 	}
 }
 
-// reservedNameChars are the characters that force a selector name into
-// single quotes so that [Parse] reads it back as one selector.
-const reservedNameChars = ".*[]$'~"
+// reservedNameChars are the characters of the path syntax that force a
+// selector name into single quotes. [Parse] ends an unquoted name at `.`,
+// `[`, or `~`, and it rejects an unquoted name that holds any of the
+// others.
+const reservedNameChars = ".*[]$~'\"\\"
 
 // lineSeparator is the Unicode line separator, U+2028.
 const lineSeparator = '\u2028'
@@ -161,28 +163,31 @@ const lineSeparator = '\u2028'
 // paragraphSeparator is the Unicode paragraph separator, U+2029.
 const paragraphSeparator = '\u2029'
 
-// quoteName returns name in the form [Parse] accepts as a child or
+// quoteName returns name as [Path.String] writes it in a child or
 // recursive selector. It wraps the name in single quotes when the name is
-// empty or contains reserved characters. An unquoted empty name leaves a
-// bare `.`, which Parse rejects. The function also quotes a name that
-// holds `:` or whitespace, though Parse reads such a name unquoted too.
-// The quotes keep the name apart from the ": " that follows a path in an
-// error message. They also keep a space at either end of the name visible.
+// empty or holds a character that [forcesQuotes] reports. [Parse] reads an
+// unquoted name only when quoteName returns it as it is, so a name has one
+// unquoted spelling.
 //
-// A name that holds a control character also comes back in quotes, with
-// the character written as an escape that Parse reads back. The escape is
-// `\n` for a line feed, `\r` for a carriage return, `\t` for a tab, and
-// `\u` with four hexadecimal digits for any other control character. The
-// Unicode line and paragraph separators, U+2028 and U+2029, are not
-// control characters, but they also come back as `\u` escapes. A path
-// thus stays on one line and does not send a control character to a
-// terminal, whatever key it names.
+// A name that holds a control character comes back with the character
+// written as an escape that Parse reads back. The escape is `\n` for a
+// line feed, `\r` for a carriage return, `\t` for a tab, and `\u` with
+// four hexadecimal digits for any other control character. The Unicode
+// line and paragraph separators, U+2028 and U+2029, are not control
+// characters, but they also come back as `\u` escapes. A path thus stays
+// on one line and does not send a control character to a terminal,
+// whatever key it names.
 func quoteName(name string) string {
-	if name != "" && !strings.ContainsAny(name, reservedNameChars) &&
-		!strings.ContainsFunc(name, isSeparatorRune) {
+	if name != "" && !strings.ContainsFunc(name, forcesQuotes) {
 		return name
 	}
 
+	return singleQuote(name)
+}
+
+// singleQuote returns name in single quotes, with the escapes that
+// [quoteName] describes.
+func singleQuote(name string) string {
 	var sb strings.Builder
 
 	sb.Grow(len(name) + len("''"))
@@ -218,12 +223,15 @@ func quoteName(name string) string {
 	return sb.String()
 }
 
-// isSeparatorRune reports whether r is `:`, whitespace, or a control
-// character. Colons and whitespace read as part of the text around a path
-// rather than as part of a name. Control characters change how a terminal
-// shows that text.
-func isSeparatorRune(r rune) bool {
-	return r == ':' || unicode.IsSpace(r) || unicode.IsControl(r)
+// forcesQuotes reports whether r forces the selector name that holds it
+// into single quotes. Each character of [reservedNameChars] does, because
+// it is part of the path syntax or of the quoting of another path syntax.
+// A `:` or whitespace reads as part of the text around a path, such as the
+// ": " that follows a path in an error message. The quotes also keep a
+// space at either end of a name visible. A control character changes how
+// a terminal shows that text.
+func forcesQuotes(r rune) bool {
+	return strings.ContainsRune(reservedNameChars, r) || r == ':' || unicode.IsSpace(r) || unicode.IsControl(r)
 }
 
 // Path is a location in a YAML document, given as a sequence of selectors
@@ -544,13 +552,20 @@ func (p Path) Equal(q Path) bool {
 }
 
 // String returns the path expression, such as "$.metadata.name" or
-// "@.name", which [Parse] reads back. It starts with `$` or `@`. A name
-// that holds a reserved character, `:`, or whitespace comes back in
-// single quotes, as in "$.'x: y'". A control character in a name comes
-// back as an escape inside the quotes, as in `$.'a\nb'` for a line feed
-// and `$.'a\u001bb'` for an escape. A Unicode line or paragraph separator
-// also comes back as an escape. The expression thus stays on one line and
-// does not send a control character to a terminal that prints it.
+// "@.name", which [Parse] reads back. It starts with `$` or `@`.
+//
+// A name comes back in single quotes, as in "$.'x: y'", when it is empty
+// or holds whitespace, a control character, or one of the characters `.`,
+// `*`, `[`, `]`, `$`, `~`, `:`, `'`, `"`, and `\`. Parse reads a name
+// without quotes only when String writes it without them. Inside the
+// quotes, a `\` comes before each `'` and each `\` of the name, as in
+// `$.'a\\b'` for the name `a\b`.
+//
+// A control character in a name comes back as an escape inside the
+// quotes, as in `$.'a\nb'` for a line feed and `$.'a\u001bb'` for an
+// escape. A Unicode line or paragraph separator also comes back as an
+// escape. The expression thus stays on one line and does not send a
+// control character to a terminal that prints it.
 func (p Path) String() string {
 	var sb strings.Builder
 
@@ -628,8 +643,10 @@ func (p *Path) UnmarshalText(text []byte) error {
 // from [Path.String] for names with reserved characters, and
 // [yaml.PathString] does not always read it back. The goccy/go-yaml
 // syntax does not quote recursive selectors, so Recursive("a.b") prints as
-// `$..a.b`. [yaml.PathString] reads that text as two selectors. Use
-// [Path.String] for a form that [Parse] reads back.
+// `$..a.b`. [yaml.PathString] reads that text as two selectors. The
+// goccy/go-yaml form also prints a name with whitespace or `:` without
+// quotes, as in `$.my key`, and [Parse] rejects such an unquoted name. Use
+// [Path.String] for a form that Parse reads back.
 //
 // The goccy/go-yaml syntax does not have a selector for the key of an
 // entry. YAMLPath thus leaves out the `~` selector from [Path.Key], and

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -52,8 +53,18 @@ var (
 // for the escape character. Any other character after `\` stands for
 // itself.
 //
-// An index is a decimal without a sign or a leading zero. A `*` in an
-// unquoted name is malformed. [Path.Key] appends the `~` selector.
+// An unquoted name ends at the next `.`, `[`, or `~`, and it must be a
+// name that [Path.String] writes without quotes. Parse thus rejects an
+// unquoted name that holds whitespace, a control character, `:`, `'`,
+// `"`, `\`, `$`, `*`, or `]`, and the error shows the selector with the
+// quotes. An expression with a space or a line feed at its end is
+// malformed, and so is a name in double quotes. Quotes around a name that
+// does not need them are valid, so `$.'a'` parses to the path that prints
+// as `$.a`.
+//
+// An index is a decimal without a sign or a leading zero. Brackets hold
+// an index or `*` and never a quoted name, so the JSONPath form `['name']`
+// is malformed. [Path.Key] appends the `~` selector.
 //
 // Returns an error wrapping [ErrInvalidPath] for a malformed expression.
 func Parse(expr string) (Path, error) {
@@ -134,31 +145,12 @@ func unexpectedError(rest string, offset int) error {
 	return fmt.Errorf("unexpected %q at %d", r, offset)
 }
 
-// parseName reads an unquoted selector name up to the next `.`, `[`, or
-// `~`.
-func parseName(rest string) (string, string, error) {
-	end := strings.IndexAny(rest, ".[~")
-	if end < 0 {
-		end = len(rest)
-	}
-
-	name := rest[:end]
-	if name == "" {
-		return "", "", errors.New("empty selector")
-	}
-
-	if i := strings.IndexAny(name, "$*]"); i >= 0 {
-		return "", "", fmt.Errorf("unexpected %q in selector %q", name[i], name)
-	}
-
-	return name, rest[end:], nil
-}
-
 // parseNameOrStar reads the selector after `.` or `..`: the `*` of a
 // wildcard selector of kind all, such as `.*`, or the unquoted name of a
 // selector of kind named, such as `.name`. A `*` is the whole selector, so
 // a name that continues after it is malformed, as is any other unquoted
-// name with a `*`.
+// name with a `*`. The error for text after a `*` shows the wildcard
+// selector and the quoted name, because the caller meant one of the two.
 func parseNameOrStar(rest string, all, named segmentKind) (segment, string, error) {
 	after, ok := strings.CutPrefix(rest, "*")
 	if ok && (after == "" || strings.IndexByte(".[~", after[0]) >= 0) {
@@ -169,9 +161,118 @@ func parseNameOrStar(rest string, all, named segmentKind) (segment, string, erro
 }
 
 // parseUnquoted reads an unquoted name after `.` or `..` as a selector of
-// the given kind.
+// the given kind. The name runs to the next `.`, `[`, or `~`, and it must
+// be one that [Path.String] writes without quotes. An unquoted name thus
+// has one spelling, and whitespace or the quoting of another path syntax
+// does not parse into a name that matches no key.
 func parseUnquoted(rest string, kind segmentKind) (segment, string, error) {
-	name, remaining, err := parseName(rest)
+	// A name in double quotes can hold a `.`, so read it before the name
+	// ends at one.
+	if name, ok := doubleQuoted(rest); ok {
+		return segment{}, "", fmt.Errorf(`unexpected '"' in selector; quote a name with single quotes, as in %s`,
+			quotedSelector(kind, name))
+	}
+
+	end := strings.IndexAny(rest, ".[~")
+	if end < 0 {
+		end = len(rest)
+	}
+
+	seg := segment{kind: kind, name: rest[:end]}
+	if seg.name == "" {
+		// A `[` with a quote after it is the bracket-quoted name of
+		// another path syntax, as in `..['name']`.
+		if after, ok := strings.CutPrefix(rest, "["); ok {
+			err := bracketQuotedError(after, kind)
+			if err != nil {
+				return segment{}, "", err
+			}
+		}
+
+		return segment{}, "", errors.New("empty selector")
+	}
+
+	if quoteName(seg.name) != seg.name {
+		return segment{}, "", unquotedNameError(seg)
+	}
+
+	return seg, rest[end:], nil
+}
+
+// doubleQuoted returns the name that rest spells in double quotes, as in
+// `"name"`. It reads the escapes of [readQuoted], so `\"` does not end the
+// name. It reports false when rest does not start with a `"` or when
+// readQuoted returns an error for the text after it.
+func doubleQuoted(rest string) (string, bool) {
+	after, ok := strings.CutPrefix(rest, `"`)
+	if !ok {
+		return "", false
+	}
+
+	name, _, err := readQuoted(after, '"')
+
+	return name, err == nil
+}
+
+// quotedSelector returns the child or recursive selector of the given kind
+// for name, with the name in single quotes whether or not it needs them,
+// as in `.'name'`.
+func quotedSelector(kind segmentKind, name string) string {
+	if kind == segmentRecursive {
+		return ".." + singleQuote(name)
+	}
+
+	return "." + singleQuote(name)
+}
+
+// unquotedNameError returns the error for the unquoted selector seg, whose
+// name [Path.String] writes in quotes. The error names the first character
+// that needs the quotes and shows the selector with them.
+//
+// A name that starts with `*` is a wildcard selector with text after it,
+// such as the line feed at the end of `.*\n`. The error for it names the
+// first character after the `*` that needs the quotes, and the `*` itself
+// only when no later character does. It shows the wildcard selector
+// before the quoted one.
+func unquotedNameError(seg segment) error {
+	text := seg.name
+
+	after, wildcard := strings.CutPrefix(seg.name, "*")
+	if wildcard && strings.ContainsFunc(after, forcesQuotes) {
+		text = after
+	}
+
+	r, _ := utf8.DecodeRuneInString(text[strings.IndexFunc(text, forcesQuotes):])
+
+	var what string
+
+	switch {
+	case unicode.IsSpace(r):
+		what = "whitespace"
+	case unicode.IsControl(r):
+		what = "control character"
+	default:
+		what = strconv.QuoteRune(r)
+	}
+
+	if !wildcard {
+		return fmt.Errorf("%s in unquoted selector %q; write %s to keep it", what, seg.name, seg)
+	}
+
+	all := segment{kind: segmentChildAll}
+	if seg.kind == segmentRecursive {
+		all.kind = segmentRecursiveAll
+	}
+
+	return fmt.Errorf("%s in unquoted selector %q; write %s for the wildcard, or %s to keep it",
+		what, seg.name, all, seg)
+}
+
+// parseQuoted reads a single-quoted name after `.'` or `..'` as a selector
+// of the given kind. Inside the quotes, `\` escapes the next character as
+// [Parse] describes. Empty quotes name the empty key.
+func parseQuoted(rest string, kind segmentKind) (segment, string, error) {
+	name, remaining, err := readQuoted(rest, '\'')
 	if err != nil {
 		return segment{}, "", err
 	}
@@ -179,17 +280,18 @@ func parseUnquoted(rest string, kind segmentKind) (segment, string, error) {
 	return segment{kind: kind, name: name}, remaining, nil
 }
 
-// parseQuoted reads a single-quoted name after `.'` or `..'` as a selector
-// of the given kind. Inside the quotes, `\` escapes the next character as
-// [Parse] describes. Empty quotes name the empty key.
-func parseQuoted(rest string, kind segmentKind) (segment, string, error) {
+// readQuoted reads a name up to the quote character that closes it, and
+// it returns the name and the text after that character. Inside the name,
+// `\` escapes the next character as [Parse] describes, so an escaped quote
+// character does not close the name.
+func readQuoted(rest string, quote byte) (string, string, error) {
 	var sb strings.Builder
 
 	for i := 0; i < len(rest); i++ {
 		switch rest[i] {
 		case '\\':
 			if i+1 >= len(rest) {
-				return segment{}, "", errors.New("unterminated escape in quoted selector")
+				return "", "", errors.New("unterminated escape in quoted selector")
 			}
 
 			i++
@@ -204,7 +306,7 @@ func parseQuoted(rest string, kind segmentKind) (segment, string, error) {
 			case 'u':
 				r, err := parseUnicodeEscape(rest[i+1:])
 				if err != nil {
-					return segment{}, "", err
+					return "", "", err
 				}
 
 				sb.WriteRune(r)
@@ -215,15 +317,15 @@ func parseQuoted(rest string, kind segmentKind) (segment, string, error) {
 				sb.WriteByte(rest[i])
 			}
 
-		case '\'':
-			return segment{kind: kind, name: sb.String()}, rest[i+1:], nil
+		case quote:
+			return sb.String(), rest[i+1:], nil
 
 		default:
 			sb.WriteByte(rest[i])
 		}
 	}
 
-	return segment{}, "", errors.New("unterminated quoted selector")
+	return "", "", errors.New("unterminated quoted selector")
 }
 
 // unicodeEscapeDigits is the number of hexadecimal digits after `\u` in
@@ -273,8 +375,15 @@ func hexDigit(c byte) (rune, bool) {
 	}
 }
 
-// parseIndex reads `n]` or `*]` after `[`.
+// parseIndex reads `n]` or `*]` after `[`. A quote after `[` starts the
+// bracket-quoted name of another path syntax, such as `['name']` in
+// JSONPath, and the error for it shows the selector that names the key.
 func parseIndex(rest string) (segment, string, error) {
+	err := bracketQuotedError(rest, segmentChild)
+	if err != nil {
+		return segment{}, "", err
+	}
+
 	body, remaining, ok := strings.Cut(rest, "]")
 	if !ok {
 		return segment{}, "", errors.New("unterminated index")
@@ -316,4 +425,36 @@ func isCanonicalIndex(s string) bool {
 	}
 
 	return true
+}
+
+// bracketQuotedError returns the error for a name in quotes after a `[`,
+// as in `'name']` or `"name"]`. The error shows the selector of the given
+// kind that names the key. It returns nil when rest does not start with a
+// quote.
+func bracketQuotedError(rest string, kind segmentKind) error {
+	name, ok := bracketQuoted(rest)
+	if !ok {
+		return nil
+	}
+
+	return fmt.Errorf("bracket-quoted names are not supported; write %s", quotedSelector(kind, name))
+}
+
+// bracketQuoted returns the name that rest spells in quotes after a `[`,
+// as in `'name']` or `"name"]`. It reads the escapes of [readQuoted] in
+// either kind of quotes. It reports false when rest does not start with a
+// quote. It returns the placeholder `name` when the quotes do not close,
+// when a `]` does not follow them, or when readQuoted returns an error for
+// an escape.
+func bracketQuoted(rest string) (string, bool) {
+	if rest == "" || (rest[0] != '\'' && rest[0] != '"') {
+		return "", false
+	}
+
+	name, remaining, err := readQuoted(rest[1:], rest[0])
+	if err != nil || !strings.HasPrefix(remaining, "]") {
+		return "name", true
+	}
+
+	return name, true
 }

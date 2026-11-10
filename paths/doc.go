@@ -1,10 +1,9 @@
 // Package paths locates nodes and tokens in a YAML document.
 //
-// A [Path] is a sequence of selectors that starts at `$` or `@`. Paths use
-// the YAMLPath syntax of goccy/go-yaml (`$.metadata.name`, `$.items[0]`),
-// with one difference. A quoted name writes a control character as an
-// escape, such as `\n`, but goccy/go-yaml writes the character itself. The
-// escape keeps a path that names a key with a line feed on one line.
+// A [Path] is a sequence of selectors that starts at `$` or `@`, as in
+// `$.metadata.name` or `$.items[0]`. The syntax is close to the YAMLPath
+// syntax of goccy/go-yaml, but each of the two reads text that the other
+// rejects. The section "go-yaml Syntax" lists where the two differ.
 //
 // A path selects a node, and for a mapping entry that node is the value.
 // Error highlighting and precise editing often need the key of an entry
@@ -289,6 +288,52 @@
 //
 // [Path.String] returns the expression, so Parse(p.String()) yields an
 // equal path.
+//
+// Parse reads a name without quotes only when Path.String writes that name
+// without quotes. A name with whitespace, `:`, or a quote character thus
+// needs single quotes, and the error for an unquoted one shows the
+// selector to write:
+//
+//	_, err := paths.Parse("$.spec.name ")
+//	// parse path "$.spec.name ": invalid path: whitespace in unquoted
+//	// selector "name "; write .'name ' to keep it
+//
+// An expression that a program reads from a rule file or a flag can hold
+// a space at its end or the quotes of another path syntax. Such an
+// expression returns an error. It does not parse into a path that selects
+// nothing.
+//
+// # go-yaml Syntax
+//
+// A path expression and a goccy/go-yaml YAMLPath read most text the same
+// way. The differences include:
+//
+//   - `@` starts a path at the current node. go-yaml accepts only `$`.
+//   - `~` selects the key of an entry and ends an unquoted name. go-yaml
+//     reads `~` as part of a name, so `$.a~` names the key `a~` there.
+//   - `.*` and `..*` select every entry of a mapping and every node at
+//     any depth. go-yaml rejects both.
+//   - `..'name'` quotes the name of a recursive selector. go-yaml reads
+//     those quotes as part of the name.
+//   - Empty quotes after `.` name the empty key. go-yaml rejects them.
+//   - An index has one spelling, so `[01]` is malformed. go-yaml reads it
+//     as `[1]`.
+//   - An unquoted name does not hold whitespace, a control character,
+//     `:`, `'`, `"`, or `\`. go-yaml reads each of them as part of an
+//     unquoted name, and it prints such a name without quotes, as in
+//     `$.my key`.
+//   - Inside quotes, `\n` is a line feed, `\r` is a carriage return, `\t`
+//     is a tab, and `\u` with four hexadecimal digits is the character
+//     with that code. [Path.String] writes a control character as one of
+//     these escapes. go-yaml reads the character after a `\` as itself,
+//     so `\n` is the letter n there. It prints a control character as it
+//     is.
+//
+// The string of one syntax is thus not always an expression of the other.
+// Convert a Path with [Path.YAMLPath], not with [yaml.PathString] on the
+// text of Path.String. [Parse] does not read every string that go-yaml
+// prints for a path. A go-yaml comment map, for example, writes the path
+// of an entry with a space in its key without quotes.
 //
 // # Building Paths
 //

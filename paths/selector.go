@@ -87,9 +87,9 @@ type Selector struct {
 }
 
 // String returns the selector in path expression syntax, as [Path.String]
-// writes it, such as `.name`, `[0]`, or `~`. A name that holds a reserved
-// character, `:`, or whitespace comes back in single quotes, and a
-// control character in it comes back as an escape. A selector of an
+// writes it, such as `.name`, `[0]`, or `~`. A name that Path.String
+// quotes comes back in single quotes here too, and a control character
+// in it comes back as an escape. A selector of an
 // unknown kind, such as the zero Selector, gives the empty string.
 func (s Selector) String() string {
 	seg, ok := s.segment()
