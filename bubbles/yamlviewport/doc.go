@@ -8,7 +8,7 @@
 //	m := yamlviewport.New()
 //	m.SetWidth(80)
 //	m.SetHeight(24)
-//	m.SetRevision(niceyaml.NewSourceFromString(yamlContent))
+//	m.SetRevisions(niceyaml.NewSourceFromString(yamlContent))
 //
 // The viewport is a component in the Bubbles convention rather than a
 // [tea.Model]. [Model.Update] returns the updated Model, so hold it as a
@@ -21,15 +21,16 @@
 //
 //	view := source.View()
 //	niceyaml.Annotate(err, view)
-//	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
+//	m.SetRevisions(yamlviewport.NewRevision(source.Name(), view))
 //
 // Search highlights go on a clone of the view, so the marks stay and the
 // viewport never changes the view itself.
 //
 // # Revision History
 //
-// The viewport tracks multiple versions of a document using
-// [Model.AddRevision].
+// The viewport tracks the versions of a document as a history of
+// revisions. [Model.SetRevisions] loads a history and shows its last
+// revision.
 //
 // Users can navigate between revisions with Tab and Shift+Tab, and [KeyMap]
 // sets those keys.
@@ -37,13 +38,26 @@
 // At a revision index greater than 0, the viewport computes and displays a
 // diff.
 //
-//	m.AddRevision(niceyaml.NewSourceFromString(v1, niceyaml.WithName("v1")))
-//	m.AddRevision(niceyaml.NewSourceFromString(v2, niceyaml.WithName("v2")))
+//	m.SetRevisions(
+//		niceyaml.NewSourceFromString(v1, niceyaml.WithName("v1")),
+//		niceyaml.NewSourceFromString(v2, niceyaml.WithName("v2")),
+//	)
 //	// Now showing diff between v1 and v2.
 //
-// Each call moves to the new revision and computes its diff. To load a
-// whole history, pass it to [Model.AddRevisions] instead, which computes
-// only the diff of the last revision.
+// A history that grows or changes while the user reads it has a method for
+// each case, and neither moves the view. [Model.AppendRevision] adds a
+// revision to the end, such as the next version from a watch, and stays on
+// the revision on display. A parent that follows the latest revision calls
+// [Model.GotoRevision] after it. [Model.ReplaceRevision] swaps one revision
+// in place, such as for a view that carries the marks of a validation
+// result that arrived after the first render:
+//
+//	view := sources[i].View()
+//	niceyaml.Annotate(err, view)
+//	m.ReplaceRevision(i, yamlviewport.NewRevision(sources[i].Name(), view))
+//
+// The same line stays at the top of the view, and the selected search match
+// stays selected.
 //
 // A [DiffMode] picks the revision the viewport compares with. By default it
 // compares each revision with the one before it, and [Model.SetDiffMode]

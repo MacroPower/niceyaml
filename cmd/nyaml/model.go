@@ -70,7 +70,7 @@ func newModel(opts *modelOptions) model {
 		revisions[i] = source
 	}
 
-	m.viewport.AddRevisions(revisions...)
+	m.viewport.SetRevisions(revisions...)
 	m.viewport.SetSearchTerm(opts.search)
 
 	return m

@@ -69,24 +69,31 @@ func (s finderSearcher) Load(lines line.Sequence) Index {
 
 // Revision is one version of a document in the viewport's history: a name
 // for the revision picker and a view of its content. A [*niceyaml.Source]
-// is a Revision, so a source goes to [Model.AddRevision] or
-// [Model.SetRevision] as it is. A view that carries decoration, such as the
-// marks [niceyaml.Annotate] adds, goes in through [NewRevision]:
+// is a Revision, so a source goes to [Model.SetRevisions] or
+// [Model.AppendRevision] as it is. A view that carries decoration, such as
+// the marks [niceyaml.Annotate] adds, goes in through [NewRevision]:
 //
 //	view := source.View()
 //	niceyaml.Annotate(err, view)
-//	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
+//	m.SetRevisions(yamlviewport.NewRevision(source.Name(), view))
 //
 // The viewport reads the view of a revision it shows without a diff when
 // the revision changes, or when [Model.SetDiffMode] turns the diff off. It
 // never decorates the view. It computes the diff between two revisions from
-// their views and keeps it until it compares another pair or the history
-// changes. The marks the views carry then stay with the diff. A change of
-// view mode or hunk context reuses the diff and its marks without reading
-// the views again. Search highlights go on a clone, so the marks a caller
-// adds stay, and the caller's view stays as the caller left it. Marks that a
-// caller adds after the viewport read the view show after the caller passes
-// the revision in again.
+// their views. It keeps the diff until it compares another pair,
+// [Model.ReplaceRevision] swaps one of the two, or [Model.SetRevisions] or
+// [Model.ClearRevisions] replaces the history. The marks the views carry
+// then stay with the diff. A change of view mode or hunk context reuses the
+// diff and its marks without reading the views again. Search highlights go
+// on a clone, so the marks a caller adds stay, and the caller's view stays
+// as the caller left it. Marks that a caller adds after the viewport read
+// the view show after the caller passes the revision to
+// [Model.ReplaceRevision]:
+//
+//	// A validation result for revision i arrives after the first render.
+//	view := sources[i].View()
+//	niceyaml.Annotate(err, view)
+//	m.ReplaceRevision(i, yamlviewport.NewRevision(sources[i].Name(), view))
 //
 // A diff shows lines of two revisions, and each line carries the overlays
 // and annotations it has in the view of the revision that holds it. For a
@@ -347,11 +354,15 @@ func New(opts ...Option) Model {
 // in the same way. A view at the top stays at the top, so a frame that
 // appears or grows shows its outer row. A change of view mode without a diff
 // is a layout change too, because every mode shows the same lines.
+// [Model.ReplaceRevision] counts as a layout change as well, whatever the
+// revision it swaps in holds.
 //
 // A change of content scrolls to the top, or to the first search match when
-// the term has one. A new revision changes the content. So do a diff mode
-// that changes the diff on display, a view mode while a diff shows, and a
-// hunk context while hunks of a diff show.
+// the term has one. [Model.SetRevisions] changes the content, and so does a
+// move to another revision. So do a diff mode that changes the diff on
+// display, a view mode while a diff shows, and a hunk context while hunks of
+// a diff show. [Model.AppendRevision] changes the content only when the
+// history is empty.
 //
 // A search or [Model.Reveal] waits to scroll while the content area does not
 // have room for a row, such as before the parent sizes the viewport from the
@@ -362,6 +373,9 @@ func New(opts ...Option) Model {
 // keep the top line. Reveal reports its result at the call, before the
 // scroll runs. [Model.SetYOffset], [Model.SetXOffset], and the scroll
 // methods drop a scroll that waits, and so does a change of content.
+// [Model.ReplaceRevision] keeps one. A Reveal that waits scrolls to the place
+// its [Hit] has in the views the viewport shows when the scroll runs. A
+// Reveal whose Hit those views do not show leaves the view in place.
 type Model struct {
 	config
 
@@ -460,7 +474,11 @@ type Model struct {
 type scrollTarget struct {
 	// The range, in the content of the left pane, or of the right one when
 	// right is true.
-	rng   position.Range
+	rng position.Range
+	// The Hit of a Reveal. ReplaceRevision can swap a revision while the
+	// scroll waits. A deferred scroll without match set therefore finds hit
+	// again in the views on display when ensureRows runs the scroll.
+	hit   Hit
 	right bool
 	// Reports that the range is the current search match. A deferred
 	// scroll with match set scrolls to the match that is current when
@@ -737,60 +755,131 @@ func (m *Model) SetPrinter(p *printer.Printer) {
 	m.relayout()
 }
 
-// SetRevision replaces the revision history with a single revision.
+// SetRevisions replaces the revision history with rs and shows the last
+// revision. The call is a change of content, as the [Model] doc defines one.
+// The view therefore starts at the top, or at the first search match when
+// the search term has one. SetRevisions builds only the view and diff of the
+// last revision, so loading a history costs one diff. Without arguments it
+// leaves the history empty, as [Model.ClearRevisions] does.
 //
-// It matches a call to [Model.ClearRevisions] and then a call to
-// [Model.AddRevision].
-func (m *Model) SetRevision(r Revision) {
-	m.ClearRevisions()
-	m.AddRevision(r)
-}
-
-// AddRevision adds a new revision to the history. The viewport then moves
-// to the new revision.
+// The viewport displays the view each revision hands out, decoration
+// included. It adds its search highlights to a clone of the view, so the
+// view itself stays as the caller left it. See [Revision].
 //
-// The viewport displays the view r hands out, decoration included. It adds
-// its search highlights to a clone of the view, so the view itself stays as
-// the caller left it. See [Revision]. AddRevision ignores a nil r, or an r
-// that holds a nil pointer or nil func, such as a nil [*niceyaml.Source].
-func (m *Model) AddRevision(r Revision) {
-	m.AddRevisions(r)
-}
-
-// AddRevisions adds revisions to the history in order and moves to the last
-// one. It matches a call to [Model.AddRevision] for each revision, except
-// that the viewport builds only the view and diff of the last one. Loading
-// a history therefore costs one diff rather than one per revision.
-// AddRevisions skips a nil revision, or one that holds a nil pointer or nil
-// func.
-func (m *Model) AddRevisions(rs ...Revision) {
-	// Copies of a Model share the backing array of revisions, so the appends
-	// must not write into spare capacity that another copy can reach.
-	revisions := slices.Clip(m.revisions)
-	for _, r := range rs {
-		if !isNil(r) {
-			revisions = append(revisions, r)
-		}
+// SetRevisions reports whether it set the history. It reports false and
+// leaves the viewport as it is when rs holds a nil revision, or one that
+// holds a nil pointer or nil func, such as a nil [*niceyaml.Source]. The
+// index of a revision in the history is therefore its index in rs. A parent
+// that keeps its documents in a slice of its own reads that slice at
+// [Hit.Revision].
+func (m *Model) SetRevisions(rs ...Revision) bool {
+	if slices.ContainsFunc(rs, func(r Revision) bool { return isNil(r) }) {
+		return false
 	}
 
-	if len(revisions) == len(m.revisions) {
-		return
-	}
-
-	m.revisions = revisions
-	m.revIndex = len(m.revisions) - 1
-
+	// The caller keeps rs, so the history takes a copy.
+	m.revisions = slices.Clone(rs)
+	m.revIndex = max(0, len(rs)-1)
+	// The cached diff names its revisions by index, and an index of the
+	// new history can hold another revision.
+	m.diffResult = nil
 	m.rebuildViews()
+
+	return true
+}
+
+// AppendRevision adds r to the end of the history and leaves the view as it
+// is. The revision on display, both scroll offsets, the selected search
+// match, and a scroll that waits all stay. On an empty history the viewport
+// shows r, as [Model.SetRevisions] does. A parent that follows the latest
+// revision moves to it after the call:
+//
+//	following := m.AtLatestRevision()
+//	m.AppendRevision(r)
+//	if following {
+//		m.GotoRevision(m.RevisionCount() - 1)
+//	}
+//
+// AppendRevision reports whether it added r. It reports false and leaves
+// the history as it is for a nil r, or an r that holds a nil pointer or nil
+// func.
+func (m *Model) AppendRevision(r Revision) bool {
+	if isNil(r) {
+		return false
+	}
+
+	// Copies of a Model share the backing array of revisions, so the append
+	// must not write into spare capacity that another copy can reach.
+	m.revisions = append(slices.Clip(m.revisions), r)
+
+	if len(m.revisions) == 1 {
+		m.revIndex = 0
+		m.rebuildViews()
+	}
+
+	return true
+}
+
+// ReplaceRevision swaps the revision at index i of the history for r and
+// reports true. It reports false and leaves the viewport as it is for an
+// index outside the history, a nil r, or an r that holds a nil pointer or
+// nil func.
+//
+// When the viewport shows revision i, as the current revision or as the
+// revision a diff compares with, it reads the views again and computes the
+// diff again. The marks a caller added to a view after the viewport read it
+// then show. The swap counts as a layout change, as the [Model] doc defines
+// one. The line at the top of the view keeps its index, and the top row
+// keeps its place in that line. The horizontal offset stays, and the
+// selected search match keeps its index. A scroll that waits keeps waiting.
+// A view without a line at the index of the top line scrolls to the bottom.
+// A search without a match at the selected index selects the first match.
+//
+// The viewport keeps the index of the top line and not its text. For an r
+// with the content of the revision it replaces, such as a view with other
+// marks, the index names the same line. For an r with other content it
+// names whichever line has that index. A caller that swaps in other content
+// calls [Model.GotoTop] or [Model.Reveal] after the swap.
+//
+// For any other index ReplaceRevision only stores r, and the view stays as
+// it is.
+func (m *Model) ReplaceRevision(i int, r Revision) bool {
+	if i < 0 || i >= len(m.revisions) || isNil(r) {
+		return false
+	}
+
+	shown := i == m.revIndex || i == m.diffBaseIndex()
+
+	// Copies of a Model share the backing array of revisions, so the swap
+	// goes into an array of its own.
+	m.revisions = slices.Clone(m.revisions)
+	m.revisions[i] = r
+
+	// The cached diff can compare a pair that is not on display, such as the
+	// pair that showed before SetDiffMode turned the diff off.
+	if slices.Contains(m.diffKey[:], i) {
+		m.diffResult = nil
+	}
+
+	if shown {
+		m.reloadViews()
+	}
+
+	return true
 }
 
 // ClearRevisions removes all revisions from the history.
 func (m *Model) ClearRevisions() {
-	m.revisions = nil
-	m.revIndex = 0
-	// The cached diff names its revisions by index, and an index of the
-	// next history can hold another revision.
-	m.diffResult = nil
-	m.rebuildViews()
+	m.SetRevisions()
+}
+
+// Revision returns the revision at index i of the history, as
+// [Model.RevisionIndex] counts, and true. It reports false for an index
+// outside the history.
+func (m *Model) Revision(i int) (Revision, bool) {
+	r := m.revision(i)
+
+	return r, r != nil
 }
 
 // RevisionIndex returns the current revision index. It returns 0 without
@@ -1102,12 +1191,51 @@ func (m *Model) PreviousRevision() { m.GotoRevision(m.revIndex - 1) }
 // Every change of content goes through rebuildViews. A match index or row
 // offset from the old content points at an arbitrary line of the new
 // content. The view therefore scrolls to the top, or to the first match in
-// the new content when the search term has one.
+// the new content when the search term has one. ReplaceRevision goes through
+// reloadViews instead.
 func (m *Model) rebuildViews() {
+	m.searchIndex = -1
+	m.loadViews()
+
+	// The old row counts describe other lines, so the cache starts empty
+	// without anchoring to a line of the old content, as relayout would.
+	// The horizontal offset describes them too, and a search match in the
+	// new content sets it again below.
+	m.anchored = false
+	m.yOffset = 0
+	m.xOffset = 0
+	m.rows = &rowCache{}
+
+	// A deferred scroll targets a range of the old content, so rebuildViews
+	// drops it with the offsets. Then scrollToCurrentMatch scrolls to a
+	// match in the new content, or defers that scroll.
+	m.pending = nil
+
+	m.scrollToCurrentMatch()
+}
+
+// reloadViews reads the views on display again after ReplaceRevision swapped
+// one of their revisions. Unlike rebuildViews, it treats the swap as a
+// layout change. The top line keeps its index as relayout keeps it, and the
+// horizontal offset and a deferred scroll stay. The selected match keeps its
+// index while the new matches reach it, and the search starts over at the
+// first match otherwise.
+func (m *Model) reloadViews() {
+	// The old views set the rows the offset counts, so anchorTop reads the
+	// top line before they change.
+	m.anchorTop()
+	m.loadViews()
+
+	m.rows = &rowCache{}
+}
+
+// loadViews builds the base views from the revision, diff mode, and view
+// mode, and refreshes the search state for them. The caller decides where
+// the view scrolls to and gives the Model an empty row count cache.
+func (m *Model) loadViews() {
 	m.baseLeft = nil
 	m.baseRight = nil
 	m.searcherStale = true
-	m.searchIndex = -1
 
 	needsDiff := m.ShowingDiff()
 
@@ -1128,22 +1256,6 @@ func (m *Model) rebuildViews() {
 	}
 
 	m.refreshSearch()
-
-	// The old row counts describe other lines, so the cache starts empty
-	// without anchoring to a line of the old content, as relayout would.
-	// The horizontal offset describes them too, and a search match in the
-	// new content sets it again below.
-	m.anchored = false
-	m.yOffset = 0
-	m.xOffset = 0
-	m.rows = &rowCache{}
-
-	// A deferred scroll targets a range of the old content, so rebuildViews
-	// drops it with the offsets. Then scrollToCurrentMatch scrolls to a
-	// match in the new content, or defers that scroll.
-	m.pending = nil
-
-	m.scrollToCurrentMatch()
 }
 
 // refreshSearch recomputes the search matches of the current base views and
@@ -1166,9 +1278,10 @@ func (m *Model) refreshSearch() {
 		m.updateSearchState()
 	}
 
-	// Every caller resets the index before a new term or new content, so
-	// the search starts over at the first match. SetSearchTerm returns
-	// before this point for the term already set, which keeps its match.
+	// Every caller but reloadViews resets the index before a new term or
+	// new content, so the search starts over at the first match.
+	// SetSearchTerm returns before this point for the term already set,
+	// which keeps its match.
 	switch {
 	case len(m.searchMatches) == 0:
 		m.searchIndex = -1
@@ -1501,7 +1614,7 @@ func (m *Model) getDisplayLines() *line.View {
 // getDiffResult returns the [diff.Result] between the base revision for the
 // current [DiffMode] and the current revision. It caches the result by the
 // pair of revision indexes, and computes the diff again when the pair
-// changes or [Model.ClearRevisions] drops the cache.
+// changes or a change of the history drops the cache.
 //
 // Callers must check [Model.ShowingDiff] first. Without a diff, the Model
 // does not have a base revision.
@@ -1734,7 +1847,7 @@ func (m *Model) ensureRows() {
 		if p.match {
 			m.scrollToCurrentMatch()
 		} else {
-			m.scrollTo(*p)
+			m.Reveal(p.hit)
 		}
 	}
 }
@@ -2489,7 +2602,8 @@ func (m *Model) revisionHit(right bool, pos position.Position) (Hit, bool) {
 // when the position lies past the right edge of the first screen. It then
 // centers the position. Before the content area has room for a row, Reveal
 // reports its result at the call and scrolls when the area has room, as the
-// [Model] doc describes.
+// [Model] doc describes. A [Model.ReplaceRevision] before that point can
+// take the position out of the view, and the viewport then stays in place.
 //
 // Reveal does not change the revision on display, the [ViewMode], or the
 // [DiffMode]. It reports false and leaves the viewport as it is when the
@@ -2514,6 +2628,7 @@ func (m *Model) Reveal(hit Hit) bool {
 	// brings the whole of its cell on screen.
 	return m.scrollTo(scrollTarget{
 		rng:   position.NewRange(pos, position.New(pos.Line, pos.Col+1)),
+		hit:   hit,
 		right: right,
 	})
 }
@@ -2622,6 +2737,9 @@ func holds(view *line.View, pos position.Position) bool {
 // match, but setting the same term again keeps the current match. Before the
 // content area has room for a row, the scroll to the match waits until the
 // area has room, as the [Model] doc describes.
+//
+// [Model.ReplaceRevision] searches the views it reads again, keeps the
+// index of the current match, and does not scroll.
 func (m *Model) SetSearchTerm(term string) {
 	if term == "" {
 		m.ClearSearch()

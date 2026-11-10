@@ -641,16 +641,23 @@ func testModel(p *printer.Printer, width, height int, opts ...yamlviewport.Optio
 // setRevision replaces the history of m with one revision of doc, which
 // has no name.
 func setRevision(m *yamlviewport.Model, doc string) {
-	m.SetRevision(niceyaml.NewSourceFromString(doc))
+	m.SetRevisions(niceyaml.NewSourceFromString(doc))
 }
 
-// addRevisions adds a revision of each document to m. It names each one
-// after its place in the history, so the first is v1, the second v2, and so
-// on.
+// addRevisions adds a revision of each document to m and shows the last.
+// It names each one after its place in the history, so the first is v1, the
+// second v2, and so on.
 func addRevisions(m *yamlviewport.Model, docs ...string) {
 	for _, doc := range docs {
 		name := fmt.Sprintf("v%d", m.RevisionCount()+1)
-		m.AddRevision(niceyaml.NewSourceFromString(doc, niceyaml.WithName(name), niceyaml.WithByteLimit(0)))
+		addRevision(m, niceyaml.NewSourceFromString(doc, niceyaml.WithName(name), niceyaml.WithByteLimit(0)))
+	}
+}
+
+// addRevision appends r to the history of m and shows it.
+func addRevision(m *yamlviewport.Model, r yamlviewport.Revision) {
+	if m.AppendRevision(r) {
+		m.GotoRevision(m.RevisionCount() - 1)
 	}
 }
 
@@ -1958,11 +1965,14 @@ func TestViewport_ScrollBeforeSizeWaits(t *testing.T) {
 
 	// A scroll that waits for the size waits until the size comes. A
 	// later scroll takes its place, and an explicit offset or a change of
-	// content drops it. A search scrolls to the match that is current
-	// when the size comes, so a search left without a match stays at the
-	// top. The size runs the scroll in either order of width and height,
-	// so a step after the size starts from the match. Every line takes one
-	// row, so the offset that centers line n is n-4.
+	// content drops it. A revision that AppendRevision adds or
+	// ReplaceRevision swaps in leaves it waiting, and the scroll then runs
+	// in the views the viewport shows when the size comes. A search scrolls
+	// to the match that is current then, so a search left without a match
+	// stays at the top. The size runs the scroll in either order of width
+	// and height, so a step after the size starts from the match. Every
+	// line takes one row, so the offset that centers line n is n-4. A note
+	// takes one more row above its line.
 	plain := yamltest.GenerateLines(60, "key%d: value")
 	needle := replaceLine(plain, 40, "key40: needle")
 
@@ -1971,6 +1981,14 @@ func TestViewport_ScrollBeforeSizeWaits(t *testing.T) {
 	// Each case checks the offset, which shows whether Reveal found the
 	// line.
 	reveal := func(m *yamlviewport.Model) { m.Reveal(yamlviewport.Hit{Position: position.New(50, 0)}) }
+
+	appendRevision := func(m *yamlviewport.Model) { m.AppendRevision(niceyaml.NewSourceFromString(plain)) }
+
+	// The step swaps the only revision for one of doc that carries a note
+	// of one row above each of the given lines.
+	replace := func(doc string, notes ...int) func(m *yamlviewport.Model) {
+		return func(m *yamlviewport.Model) { m.ReplaceRevision(0, notedRevision("noted", doc, notes...)) }
+	}
 
 	tcs := map[string]struct {
 		// Run before the size.
@@ -2051,6 +2069,34 @@ func TestViewport_ScrollBeforeSizeWaits(t *testing.T) {
 		"reveal then search": {
 			steps: []func(m *yamlviewport.Model){reveal, search},
 			want:  36,
+		},
+		"search then revision appended": {
+			steps: []func(m *yamlviewport.Model){search, appendRevision},
+			want:  36,
+		},
+		"reveal then revision appended": {
+			steps: []func(m *yamlviewport.Model){reveal, appendRevision},
+			want:  46,
+		},
+		"search then revision replaced": {
+			steps: []func(m *yamlviewport.Model){search, replace(needle, 5, 10)},
+			want:  38,
+		},
+		"search then revision replaced without a match": {
+			steps: []func(m *yamlviewport.Model){search, replace(plain)},
+			want:  0,
+		},
+		"search then revision replaced with a match on another line": {
+			steps: []func(m *yamlviewport.Model){search, replace(replaceLine(plain, 20, "key20: needle"))},
+			want:  16,
+		},
+		"reveal then revision replaced": {
+			steps: []func(m *yamlviewport.Model){reveal, replace(needle, 5, 10)},
+			want:  48,
+		},
+		"reveal then revision replaced without the line": {
+			steps: []func(m *yamlviewport.Model){reveal, replace(yamltest.GenerateLines(30, "key%d: value"))},
+			want:  0,
 		},
 	}
 
@@ -2443,8 +2489,7 @@ func TestViewport_SideBySideAlignsRowsAbove(t *testing.T) {
 
 			m := testModel(testPrinterWithLineNumbers(), 33, 5)
 			m.SetViewMode(yamlviewport.ViewModeSideBySide)
-			m.AddRevision(yamlviewport.NewRevision("v1", before))
-			m.AddRevision(yamlviewport.NewRevision("v2", after))
+			m.SetRevisions(yamlviewport.NewRevision("v1", before), yamlviewport.NewRevision("v2", after))
 
 			assert.Equal(t, tc.want, plainRows(&m))
 			assert.Equal(t, tc.wantHits, hitMap(&m), screenMessage(&m))
@@ -2484,8 +2529,7 @@ func TestViewport_SideBySideFillerRowsKeepTheFrame(t *testing.T) {
 
 	m := testModel(framedPrinter(normalBorder()), width, height)
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
-	m.AddRevision(before)
-	m.AddRevision(after)
+	m.SetRevisions(before, after)
 
 	// The wrapped line takes more rows in the right pane than in the left,
 	// so the left pane runs out of rows partway down the window.
@@ -2555,7 +2599,7 @@ func TestViewport_HorizontalScrollKeepsFrameOfNarrowerPane(t *testing.T) {
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
 	m.SetWordWrap(false)
 	setRevision(&m, stringtest.LinesLF("a: 1", "b: s", "c: 3"))
-	m.AddRevision(niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: "+strings.Repeat("y", 50), "c: 3")))
+	addRevision(&m, niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: "+strings.Repeat("y", 50), "c: 3")))
 
 	for _, offset := range []int{1, 10, 40} {
 		m.SetXOffset(offset)
@@ -2731,8 +2775,8 @@ func TestViewport_DiffOfRevisionsOverPartOfTheSource(t *testing.T) {
 	}
 
 	m := testModel(testPrinter(), 80, 10)
-	m.SetRevision(slice("a: 1", "b: 2", "c: 3", "d: 4", "e: 5"))
-	m.AddRevision(slice("a: 9", "b: 2", "c: 3", "d: 4", "e: 9"))
+	m.SetRevisions(slice("a: 1", "b: 2", "c: 3", "d: 4", "e: 5"))
+	addRevision(&m, slice("a: 9", "b: 2", "c: 3", "d: 4", "e: 9"))
 
 	require.True(t, m.ShowingDiff())
 
@@ -2742,7 +2786,7 @@ func TestViewport_DiffOfRevisionsOverPartOfTheSource(t *testing.T) {
 	assert.NotContains(t, m.View(), "e: 5")
 
 	// A change inside the held lines shows as it does for a whole source.
-	m.AddRevision(slice("a: 9", "b: 2", "c: 8", "d: 4", "e: 9"))
+	addRevision(&m, slice("a: 9", "b: 2", "c: 8", "d: 4", "e: 9"))
 
 	assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, m.DiffStats())
 	assert.Contains(t, m.View(), "c: 8")
@@ -3143,7 +3187,7 @@ func TestViewport_Search(t *testing.T) {
 			t.Parallel()
 
 			m := testModel(testPrinter(), 80, 24)
-			m.SetRevision(lines)
+			m.SetRevisions(lines)
 			m.SetSearchTerm(tc.searchTerm)
 
 			tc.test(t, &m)
@@ -3226,7 +3270,7 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.False(t, m.AtLatestRevision())
 			},
 		},
-		"AddRevision/Single": {
+		"SetRevisions/Single": {
 			docs: revs[:1],
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -3238,10 +3282,11 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Equal(t, []string{"v1"}, m.RevisionNames())
 			},
 		},
-		"AddRevision/Multiple": {
-			docs: revs[:3],
+		"SetRevisions/Multiple": {
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
+				require.True(t, m.SetRevisions(rev(1), rev(2), rev(3)))
+
 				assert.Equal(t, 3, m.RevisionCount())
 				assert.Equal(t, 2, m.RevisionIndex()) // At latest (0-indexed).
 				assert.True(t, m.AtLatestRevision())
@@ -3251,42 +3296,136 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Positive(t, m.TotalLineCount())
 			},
 		},
-		"AddRevisions/Multiple": {
-			setup: func(m *yamlviewport.Model) {
-				m.AddRevisions(rev(1), rev(2), rev(3))
-			},
+		"SetRevisions/ReplacesHistory": {
+			docs: revs[:3],
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				assert.Equal(t, 3, m.RevisionCount())
-				assert.Equal(t, 2, m.RevisionIndex())
-				assert.True(t, m.AtLatestRevision())
-				assert.True(t, m.ShowingDiff())
-				assert.Equal(t, []string{"v1", "v2", "v3"}, m.RevisionNames())
+				m.GotoRevision(0)
+				require.True(t, m.SetRevisions(rev(2), rev(3)))
+
+				assert.Equal(t, []string{"v2", "v3"}, m.RevisionNames())
+				assert.Equal(t, 1, m.RevisionIndex())
+				assert.Equal(t, diff.Stats{Added: 3, Removed: 2}, m.DiffStats())
 			},
 		},
-		"AddRevisions/SkipsNil": {
-			setup: func(m *yamlviewport.Model) {
-				m.AddRevisions(nil, rev(1), (*niceyaml.Source)(nil), rev(2), nil)
-			},
+		"SetRevisions/KeepsItsOwnSlice": {
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				assert.Equal(t, 2, m.RevisionCount())
-				assert.Equal(t, 1, m.RevisionIndex())
+
+				// The caller can reuse the slice it passed.
+				rs := []yamlviewport.Revision{rev(1), rev(2)}
+				require.True(t, m.SetRevisions(rs...))
+
+				rs[0] = rev(3)
+
 				assert.Equal(t, []string{"v1", "v2"}, m.RevisionNames())
 			},
 		},
-		"AddRevisions/Empty": {
+		"SetRevisions/RejectsNil": {
 			docs: revs[:2],
-			setup: func(m *yamlviewport.Model) {
-				m.GotoRevision(0)
-				m.AddRevisions()
-				m.AddRevisions(nil, (*niceyaml.Source)(nil))
-			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				assert.Equal(t, 2, m.RevisionCount())
-				assert.Equal(t, 0, m.RevisionIndex()) // Stays on the revision it was at.
+				m.GotoRevision(0)
+
+				// A nil entry would shift every index after it, so the
+				// history stays as it is.
+				assert.False(t, m.SetRevisions(nil, rev(3)))
+				assert.False(t, m.SetRevisions(rev(3), (*niceyaml.Source)(nil)))
+
+				assert.Equal(t, []string{"v1", "v2"}, m.RevisionNames())
+				assert.Equal(t, 0, m.RevisionIndex())
+			},
+		},
+		"SetRevisions/Empty": {
+			docs: revs[:2],
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				require.True(t, m.SetRevisions())
+
+				assert.Equal(t, 0, m.RevisionCount())
+				assert.Equal(t, 0, m.RevisionIndex())
+				assert.Empty(t, m.RevisionNames())
+				assert.Equal(t, 0, m.TotalLineCount())
+			},
+		},
+		"AppendRevision/ShowsTheFirst": {
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				require.True(t, m.AppendRevision(rev(1)))
+
+				assert.Equal(t, 1, m.RevisionCount())
 				assert.Equal(t, "v1", m.RevisionName())
+				assert.Equal(t, 2, m.TotalLineCount())
+				assert.Contains(t, m.View(), "name: original")
+			},
+		},
+		"AppendRevision/StaysOnTheRevisionOnDisplay": {
+			docs: revs[:2],
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				for _, index := range []int{1, 0} {
+					m.GotoRevision(index)
+
+					view := m.View()
+					count := m.RevisionCount()
+
+					require.True(t, m.AppendRevision(rev(3)))
+
+					assert.Equal(t, count+1, m.RevisionCount())
+					assert.Equal(t, index, m.RevisionIndex())
+					assert.False(t, m.AtLatestRevision())
+					assert.Equal(t, view, m.View())
+				}
+
+				// The parent moves to the revision when it follows the
+				// latest one.
+				m.GotoRevision(m.RevisionCount() - 1)
+				assert.Equal(t, "v3", m.RevisionName())
+				assert.Contains(t, m.View(), "new: added")
+			},
+		},
+		"AppendRevision/RejectsNil": {
+			docs: revs[:1],
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.False(t, m.AppendRevision(nil))
+				assert.False(t, m.AppendRevision((*niceyaml.Source)(nil)))
+				assert.Equal(t, 1, m.RevisionCount())
+			},
+		},
+		"ReplaceRevision/Reports": {
+			docs: revs[:2],
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.False(t, m.ReplaceRevision(-1, rev(3)))
+				assert.False(t, m.ReplaceRevision(2, rev(3)))
+				assert.False(t, m.ReplaceRevision(0, nil))
+				assert.False(t, m.ReplaceRevision(0, (*niceyaml.Source)(nil)))
+				assert.Equal(t, []string{"v1", "v2"}, m.RevisionNames())
+
+				assert.True(t, m.ReplaceRevision(0, rev(3)))
+				assert.Equal(t, []string{"v3", "v2"}, m.RevisionNames())
+				assert.Equal(t, 1, m.RevisionIndex())
+			},
+		},
+		"Revision": {
+			docs: revs[:2],
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				r := rev(3)
+				require.True(t, m.ReplaceRevision(1, r))
+
+				got, ok := m.Revision(1)
+				require.True(t, ok)
+				assert.Same(t, r, got)
+
+				for _, i := range []int{-1, 2} {
+					got, ok := m.Revision(i)
+					assert.False(t, ok, "index %d", i)
+					assert.Nil(t, got, "index %d", i)
+				}
 			},
 		},
 		"ClearRevisions": {
@@ -3386,7 +3525,7 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Equal(t, "v1", m.RevisionName())
 			},
 		},
-		"SetRevision/Single": {
+		"SetRevisions/One": {
 			setup: func(m *yamlviewport.Model) {
 				setRevision(m, rev1)
 			},
@@ -3397,14 +3536,13 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.False(t, m.ShowingDiff())
 			},
 		},
-		"SetRevision/ReplacesRevisions": {
+		"SetRevisions/ReplacesRevisionsWithOne": {
 			docs: revs[:2],
 			setup: func(m *yamlviewport.Model) {
-				setRevision(m, rev3) // SetRevision uses the Source's name.
+				setRevision(m, rev3) // The revision takes the Source's name.
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				// SetRevision replaces the history with a single revision.
 				assert.Equal(t, 1, m.RevisionCount())
 				assert.Equal(t, 0, m.RevisionIndex()) // Only one revision at index 0.
 				assert.Empty(t, m.RevisionName())     // A source without a name.
@@ -3572,7 +3710,8 @@ func TestViewport_NilRevision(t *testing.T) {
 	t.Parallel()
 
 	// A revision that is nil, or that holds a nil pointer or a nil func,
-	// has no view to show, so the model leaves it out.
+	// has no view to show, so the model turns it down and keeps the history
+	// it has.
 	tcs := map[string]struct {
 		revision yamlviewport.Revision
 	}{
@@ -3586,12 +3725,22 @@ func TestViewport_NilRevision(t *testing.T) {
 			t.Parallel()
 
 			m := testModel(testPrinter(), 80, 24)
-			m.AddRevision(tc.revision)
-			m.SetRevision(tc.revision)
+
+			assert.False(t, m.AppendRevision(tc.revision))
+			assert.False(t, m.SetRevisions(tc.revision))
 
 			assert.Equal(t, 0, m.RevisionCount())
 			assert.Empty(t, m.RevisionName())
 			assert.Empty(t, m.RevisionNames())
+
+			setRevision(&m, "key: value\n")
+
+			assert.False(t, m.AppendRevision(tc.revision))
+			assert.False(t, m.SetRevisions(tc.revision))
+			assert.False(t, m.ReplaceRevision(0, tc.revision))
+
+			assert.Equal(t, 1, m.RevisionCount())
+			assert.Contains(t, m.View(), "key: value")
 		})
 	}
 }
@@ -3635,6 +3784,516 @@ func TestViewport_SameDiffBaseKeepsPosition(t *testing.T) {
 	m.SetDiffMode(yamlviewport.DiffModeOrigin)
 	assert.Equal(t, 0, m.SearchIndex(), "adjacent to origin at index 2")
 	assert.Equal(t, 0, m.YOffset(), "adjacent to origin at index 2")
+}
+
+// notedRevision returns a revision named name over doc. Each line in notes
+// carries an annotation above it that reads "note" and takes one row.
+func notedRevision(name, doc string, notes ...int) yamlviewport.Revision {
+	view := niceyaml.NewSourceFromString(doc, niceyaml.WithName(name), niceyaml.WithByteLimit(0)).View()
+
+	for _, i := range notes {
+		view.Annotate(i, line.Annotation{Content: "note", Placement: line.Above})
+	}
+
+	return yamlviewport.NewRevision(name, view)
+}
+
+func TestViewport_ReplaceRevisionKeepsPosition(t *testing.T) {
+	t.Parallel()
+
+	// A revision that comes back with marks holds the lines it held, so
+	// the swap keeps the line at the top, the horizontal offset, and the
+	// selected match. Each note takes a row above its line, and both notes
+	// lie above the top line, so the offset grows by the notes that show. A
+	// diff shows a mark of the revision it compares with on a deleted line,
+	// and on every line of the left pane of a side-by-side diff.
+	v1 := yamltest.GenerateLines(50, "k%d: v")
+	v2 := replaceLine(v1, 20, "k20: w")
+	docs := []string{v1, v2}
+
+	tcs := map[string]struct {
+		setup func(m *yamlviewport.Model)
+		// The revision on display and the one to replace.
+		show, replace int
+		// The horizontal offset the view holds at the swap.
+		x int
+		// The rows the notes that show add above the top line.
+		wantRows int
+	}{
+		"first revision": {
+			show:     0,
+			replace:  0,
+			wantRows: 2,
+		},
+		"current revision of a diff": {
+			show:     1,
+			replace:  1,
+			wantRows: 2,
+		},
+		"base of a diff": {
+			show:     1,
+			replace:  0,
+			wantRows: 1,
+		},
+		"base of a side-by-side diff": {
+			setup:    func(m *yamlviewport.Model) { m.SetViewMode(yamlviewport.ViewModeSideBySide) },
+			show:     1,
+			replace:  0,
+			wantRows: 2,
+		},
+		"current revision without a diff": {
+			setup:    func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeNone) },
+			show:     1,
+			replace:  1,
+			wantRows: 2,
+		},
+		"wrap off": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetWordWrap(false)
+				m.SetWidth(4)
+			},
+			show:     0,
+			replace:  0,
+			x:        2,
+			wantRows: 2,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 40, 10)
+			addRevisions(&m, docs...)
+			m.GotoRevision(tc.show)
+
+			if tc.setup != nil {
+				tc.setup(&m)
+			}
+
+			m.SetSearchTerm("k")
+			searchNext(&m, 2)
+			m.SetYOffset(30)
+			// The scroll to a match moves the horizontal offset, so the
+			// offset of the case goes in after the search.
+			m.SetXOffset(tc.x)
+			require.Equal(t, tc.x, m.XOffset())
+
+			top, ok := m.TopHit()
+			require.True(t, ok)
+
+			y, rows := m.YOffset(), m.TotalRowCount()
+			first := firstRow(m.View())
+			snap := m
+
+			require.True(t, m.ReplaceRevision(tc.replace, notedRevision("noted", docs[tc.replace], 5, 20)))
+
+			got, ok := m.TopHit()
+			require.True(t, ok)
+
+			assert.Equal(t, top, got)
+			assert.Equal(t, first, firstRow(m.View()))
+			assert.Equal(t, y+tc.wantRows, m.YOffset())
+			assert.Equal(t, tc.x, m.XOffset())
+			assert.Equal(t, 2, m.SearchIndex())
+			assert.Equal(t, tc.show, m.RevisionIndex())
+
+			assert.Equal(t, rows+tc.wantRows, m.TotalRowCount())
+
+			// A copy from before the swap keeps the revision it held.
+			assert.Equal(t, y, snap.YOffset())
+			assert.Equal(t, rows, snap.TotalRowCount())
+			assert.Equal(t, first, firstRow(snap.View()))
+		})
+	}
+}
+
+func TestViewport_ReplaceRevisionAfterLayoutChange(t *testing.T) {
+	t.Parallel()
+
+	// A narrower width wraps every line, and the viewport restores the top
+	// line when it next counts the rows. A swap before that point keeps
+	// the line the layout change recorded.
+	doc := yamltest.GenerateLines(50, "k%d: word word word word")
+
+	m := testModel(testPrinter(), 40, 10)
+	setRevision(&m, doc)
+	m.SetYOffset(30)
+	require.Equal(t, 30, m.TopLine())
+
+	m.SetWidth(20)
+	require.True(t, m.ReplaceRevision(0, notedRevision("noted", doc, 5, 20)))
+
+	assert.Equal(t, 30, m.TopLine())
+	assert.Greater(t, m.YOffset(), 32)
+	assert.Contains(t, firstRow(m.View()), "k30:")
+}
+
+func TestViewport_ReplaceRevisionOffDisplay(t *testing.T) {
+	t.Parallel()
+
+	// A swap of a revision that is not on display stores the revision and
+	// reads no view. The screen therefore stays as it is. A mark that a view
+	// on display got after the viewport read it stays off the screen.
+	v1 := yamltest.GenerateLines(50, "k%d: v")
+	docs := []string{v1, replaceLine(v1, 20, "k20: w"), replaceLine(v1, 40, "k40: w")}
+
+	tcs := map[string]struct {
+		setup func(m *yamlviewport.Model)
+		// Steps that bring the new revision into a diff.
+		reach func(m *yamlviewport.Model)
+		// The stats of the diff that shows after reach.
+		want diff.Stats
+		// The revision on display and the one to replace.
+		show, replace int
+	}{
+		"before the revisions of a diff": {
+			show:    2,
+			replace: 0,
+			reach:   func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeOrigin) },
+			want:    diff.Stats{Added: 50, Removed: 1},
+		},
+		"after the first revision": {
+			show:    0,
+			replace: 1,
+			reach:   func(m *yamlviewport.Model) { m.GotoRevision(1) },
+			want:    diff.Stats{Added: 1, Removed: 50},
+		},
+		// The revision before the current one is on display only while a
+		// diff shows.
+		"before the current revision without a diff": {
+			setup:   func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeNone) },
+			show:    2,
+			replace: 1,
+			reach:   func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeAdjacent) },
+			want:    diff.Stats{Added: 50, Removed: 1},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 40, 10)
+
+			views := make([]*line.View, len(docs))
+			revs := make([]*countingRevision, len(docs))
+			names := make([]string, len(docs))
+
+			for i, doc := range docs {
+				names[i] = fmt.Sprintf("v%d", i+1)
+				views[i] = niceyaml.NewSourceFromString(doc, niceyaml.WithName(names[i])).View()
+				revs[i] = &countingRevision{Revision: yamlviewport.NewRevision(names[i], views[i])}
+				addRevision(&m, revs[i])
+			}
+
+			m.GotoRevision(tc.show)
+
+			if tc.setup != nil {
+				tc.setup(&m)
+			}
+
+			m.SetSearchTerm("v")
+			searchNext(&m, 2)
+			m.SetYOffset(30)
+
+			view := m.View()
+
+			// Every view gets a mark on a line that is on the screen.
+			for _, v := range views {
+				v.Annotate(31, line.Annotation{Content: "late", Placement: line.Above})
+			}
+
+			for _, r := range revs {
+				r.views = 0
+			}
+
+			other := &countingRevision{
+				Revision: niceyaml.NewSourceFromString("other: doc\n", niceyaml.WithName("other")),
+			}
+			require.True(t, m.ReplaceRevision(tc.replace, other))
+
+			assert.Zero(t, other.views)
+
+			for i, r := range revs {
+				assert.Zero(t, r.views, "revision %d", i)
+			}
+
+			assert.NotContains(t, m.View(), "late")
+			assert.Equal(t, view, m.View())
+			assert.Equal(t, 30, m.YOffset())
+			assert.Equal(t, 2, m.SearchIndex())
+			assert.Equal(t, tc.show, m.RevisionIndex())
+
+			names[tc.replace] = "other"
+			assert.Equal(t, names, m.RevisionNames())
+
+			// The revision shows when the viewport gets to it.
+			tc.reach(&m)
+
+			assert.Positive(t, other.views)
+			assert.Equal(t, tc.want, m.DiffStats())
+
+			m.SetDiffMode(yamlviewport.DiffModeNone)
+			m.GotoRevision(tc.replace)
+
+			assert.Equal(t, 1, m.TotalLineCount())
+			assert.Contains(t, m.View(), "other: doc")
+		})
+	}
+}
+
+func TestViewport_ReplaceRevisionDropsCachedDiff(t *testing.T) {
+	t.Parallel()
+
+	// The viewport keeps the last diff it computed while it shows a view
+	// without one. A swap of either revision of that diff drops it, so
+	// the diff that shows next compares the new revision.
+	before := stringtest.LinesLF("a: 1", "b: 2", "c: 3")
+	after := stringtest.LinesLF("a: 1", "b: 20", "c: 3")
+	other := stringtest.LinesLF("a: 10", "b: 2", "c: 30", "d: 4")
+
+	tcs := map[string]struct {
+		hide    func(m *yamlviewport.Model)
+		show    func(m *yamlviewport.Model)
+		replace int
+	}{
+		"base while the diff is off": {
+			hide:    func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeNone) },
+			show:    func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeAdjacent) },
+			replace: 0,
+		},
+		"current revision while the diff is off": {
+			hide:    func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeNone) },
+			show:    func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeAdjacent) },
+			replace: 1,
+		},
+		"base at the first revision": {
+			hide:    func(m *yamlviewport.Model) { m.GotoRevision(0) },
+			show:    func(m *yamlviewport.Model) { m.GotoRevision(1) },
+			replace: 0,
+		},
+		"current revision at the first revision": {
+			hide:    func(m *yamlviewport.Model) { m.GotoRevision(0) },
+			show:    func(m *yamlviewport.Model) { m.GotoRevision(1) },
+			replace: 1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			docs := []string{before, after}
+
+			m := testModel(testPrinter(), 40, 10)
+			addRevisions(&m, docs...)
+			require.Equal(t, diff.Stats{Added: 1, Removed: 1}, m.DiffStats())
+
+			tc.hide(&m)
+			require.True(t, m.ReplaceRevision(tc.replace, niceyaml.NewSourceFromString(other)))
+			tc.show(&m)
+
+			docs[tc.replace] = other
+
+			want := testModel(testPrinter(), 40, 10)
+			addRevisions(&want, docs...)
+
+			assert.Equal(t, want.DiffStats(), m.DiffStats())
+			assert.Equal(t, want.View(), m.View())
+		})
+	}
+}
+
+func TestViewport_ReplaceRevisionWithOtherContent(t *testing.T) {
+	t.Parallel()
+
+	// The viewport does not compare the revision it gets with the one it
+	// held. It keeps the index of the top line and of the selected match,
+	// whatever line and match the new content has there.
+	doc := yamltest.GenerateLines(50, "k%d: v")
+
+	tcs := map[string]struct {
+		replace     string
+		wantTop     string
+		wantOffset  int
+		wantMatches int
+		wantIndex   int
+	}{
+		"same number of lines": {
+			replace:     yamltest.GenerateLines(50, "n%d: v"),
+			wantTop:     "n30: v",
+			wantOffset:  30,
+			wantMatches: 50,
+			wantIndex:   25,
+		},
+		"more lines": {
+			replace:     yamltest.GenerateLines(80, "n%d: v"),
+			wantTop:     "n30: v",
+			wantOffset:  30,
+			wantMatches: 80,
+			wantIndex:   25,
+		},
+		"fewer lines than the top line": {
+			replace:     yamltest.GenerateLines(26, "n%d: v"),
+			wantTop:     "n16: v",
+			wantOffset:  16,
+			wantMatches: 26,
+			wantIndex:   25,
+		},
+		// The indexes count from 0, so a view of 30 lines does not have a
+		// line at index 30.
+		"as many lines as the index of the top line": {
+			replace:     yamltest.GenerateLines(30, "n%d: v"),
+			wantTop:     "n20: v",
+			wantOffset:  20,
+			wantMatches: 30,
+			wantIndex:   25,
+		},
+		"fewer matches than the selected one": {
+			replace:     yamltest.GenerateLines(40, "n%d: v") + yamltest.GenerateLines(10, "x%d: w"),
+			wantTop:     "n30: v",
+			wantOffset:  30,
+			wantMatches: 40,
+			wantIndex:   25,
+		},
+		"selected match out of range": {
+			replace:     yamltest.GenerateLines(20, "n%d: v") + yamltest.GenerateLines(30, "x%d: w"),
+			wantTop:     "x10: w",
+			wantOffset:  30,
+			wantMatches: 20,
+			wantIndex:   0,
+		},
+		// A search of 25 matches does not have a match at index 25.
+		"as many matches as the index of the selected one": {
+			replace:     yamltest.GenerateLines(25, "n%d: v") + yamltest.GenerateLines(25, "x%d: w"),
+			wantTop:     "x5: w",
+			wantOffset:  30,
+			wantMatches: 25,
+			wantIndex:   0,
+		},
+		"without a match": {
+			replace:     yamltest.GenerateLines(50, "x%d: w"),
+			wantTop:     "x30: w",
+			wantOffset:  30,
+			wantMatches: 0,
+			wantIndex:   -1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 40, 10)
+			setRevision(&m, doc)
+			m.SetSearchTerm("v")
+			searchNext(&m, 25)
+			m.SetYOffset(30)
+
+			require.True(t, m.ReplaceRevision(0, niceyaml.NewSourceFromString(tc.replace)))
+
+			assert.Equal(t, tc.wantOffset, m.YOffset())
+			assert.Equal(t, tc.wantTop, strings.TrimSpace(ansi.Strip(firstRow(m.View()))))
+			assert.Equal(t, tc.wantMatches, m.SearchCount())
+			assert.Equal(t, tc.wantIndex, m.SearchIndex())
+
+			// A caller that wants the top of the new content goes there.
+			m.GotoTop()
+			assert.Equal(t, 0, m.YOffset())
+		})
+	}
+}
+
+func TestViewport_ReplaceRevisionKeepsWaitingReveal(t *testing.T) {
+	t.Parallel()
+
+	// A Reveal that waits for the size names a place in a revision. A
+	// swap of the revision the diff compares with moves the row that shows
+	// that place, and the scroll runs to the row it has when the size
+	// comes. Every line takes one row, so the offset that centers row n is
+	// n-4.
+	after := yamltest.GenerateLines(60, "key%d: value")
+	hit := yamlviewport.Hit{Revision: 1, Position: position.New(50, 0)}
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	addRevisions(&m, after, after)
+
+	require.True(t, m.Reveal(hit))
+
+	// The diff shows the ten lines the new revision 0 holds above the
+	// rest as deleted lines, above the line of the Hit.
+	before := yamltest.GenerateLines(10, "old%d: value") + after
+	require.True(t, m.ReplaceRevision(0, niceyaml.NewSourceFromString(before)))
+
+	m.SetWidth(30)
+	m.SetHeight(10)
+
+	assert.Equal(t, 56, m.YOffset(), screenMessage(&m))
+	assert.True(t, m.Shows(hit))
+}
+
+func TestViewport_AppendRevisionKeepsView(t *testing.T) {
+	t.Parallel()
+
+	// A revision at the end of the history shows only when the viewport
+	// moves to it. The append therefore does not read a view, and it leaves
+	// the screen, the offsets, and the selected match as they are.
+	v1 := yamltest.GenerateLines(50, "k%d: "+strings.Repeat("v", 30))
+	docs := []string{v1, replaceLine(v1, 20, "k20: w")}
+
+	for name, show := range map[string]int{"first revision": 0, "latest revision": 1} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 20, 10)
+			m.SetWordWrap(false)
+
+			revs := make([]*countingRevision, len(docs))
+			for i, doc := range docs {
+				revs[i] = &countingRevision{Revision: niceyaml.NewSourceFromString(doc)}
+			}
+
+			m.SetRevisions(revs[0], revs[1])
+			m.GotoRevision(show)
+			m.SetSearchTerm("k")
+			searchNext(&m, 2)
+			m.SetYOffset(30)
+			m.SetXOffset(5)
+
+			view := m.View()
+
+			for _, r := range revs {
+				r.views = 0
+			}
+
+			added := &countingRevision{
+				Revision: niceyaml.NewSourceFromString("other: doc\n", niceyaml.WithName("added")),
+			}
+			require.True(t, m.AppendRevision(added))
+
+			assert.Zero(t, added.views)
+
+			for i, r := range revs {
+				assert.Zero(t, r.views, "revision %d", i)
+			}
+
+			assert.Equal(t, 3, m.RevisionCount())
+			assert.Equal(t, show, m.RevisionIndex())
+			assert.False(t, m.AtLatestRevision())
+			assert.Equal(t, 30, m.YOffset())
+			assert.Equal(t, 5, m.XOffset())
+			assert.Equal(t, 2, m.SearchIndex())
+			assert.Equal(t, view, m.View())
+
+			// A parent that follows the latest revision moves to it.
+			m.GotoRevision(m.RevisionCount() - 1)
+
+			assert.Equal(t, "added", m.RevisionName())
+			assert.Equal(t, 0, m.YOffset())
+			assert.Equal(t, diff.Stats{Added: 1, Removed: 50}, m.DiffStats())
+		})
+	}
 }
 
 func TestViewport_ViewModeWithoutDiffKeepsPosition(t *testing.T) {
@@ -3945,7 +4604,7 @@ func TestViewport_Update(t *testing.T) {
 			width: 80,
 			setup: func(m *yamlviewport.Model) {
 				// Add a second revision and go to revision 0.
-				m.AddRevision(change())
+				addRevision(m, change())
 				m.GotoRevision(0)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -3961,16 +4620,16 @@ func TestViewport_Update(t *testing.T) {
 			width: 80,
 			setup: func(m *yamlviewport.Model) {
 				// Add a second revision (starts at latest index 1).
-				m.AddRevision(change())
+				addRevision(m, change())
 
 				// Now at index 1 (latest).
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				// After PreviousRevision, we're at index 0 (the revision SetRevision set).
+				// After PreviousRevision, we're at index 0 (the revision SetRevisions set).
 				assert.Equal(t, 0, m.RevisionIndex())
 				assert.False(t, m.ShowingDiff())  // First revision, no diff.
-				assert.Empty(t, m.RevisionName()) // SetRevision uses the Source's name, which is empty.
+				assert.Empty(t, m.RevisionName()) // The revision takes the Source's name, which is empty.
 			},
 		},
 		"Behavior/MToggleDiffMode": {
@@ -3978,7 +4637,7 @@ func TestViewport_Update(t *testing.T) {
 			yaml:  verticalYAML,
 			width: 80,
 			setup: func(m *yamlviewport.Model) {
-				m.AddRevision(change())
+				addRevision(m, change())
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -4133,7 +4792,7 @@ func TestViewport_KeyMap(t *testing.T) {
 			t.Parallel()
 
 			m := testModel(testPrinter(), 80, 2)
-			m.SetRevision(lines)
+			m.SetRevisions(lines)
 			tc.change(&m.KeyMap)
 
 			m, _ = m.Update(tea.KeyPressMsg{Code: tc.key})
@@ -4622,19 +5281,31 @@ func TestViewport_ViewMode(t *testing.T) {
 func TestViewport_CopiesKeepTheirRevisions(t *testing.T) {
 	t.Parallel()
 
+	rev := func(name string) *niceyaml.Source {
+		return niceyaml.NewSourceFromString("key: "+name+"\n", niceyaml.WithName(name))
+	}
+
 	m := yamlviewport.New()
 	for _, name := range []string{"a", "b", "c"} {
-		m.AddRevision(niceyaml.NewSourceFromString("key: "+name+"\n", niceyaml.WithName(name)))
+		m.AppendRevision(rev(name))
 	}
 
 	// A Model is a value, so a copy must keep its own history when either
 	// side adds a revision afterward.
 	snap := m
-	m.AddRevision(niceyaml.NewSourceFromString("key: d\n", niceyaml.WithName("d")))
-	snap.AddRevision(niceyaml.NewSourceFromString("key: e\n", niceyaml.WithName("e")))
+	m.AppendRevision(rev("d"))
+	snap.AppendRevision(rev("e"))
 
 	assert.Equal(t, []string{"a", "b", "c", "d"}, m.RevisionNames())
 	assert.Equal(t, []string{"a", "b", "c", "e"}, snap.RevisionNames())
+
+	// A swap in one of them stays out of the other too.
+	snap = m
+	m.ReplaceRevision(1, rev("f"))
+	snap.ReplaceRevision(2, rev("g"))
+
+	assert.Equal(t, []string{"a", "f", "c", "d"}, m.RevisionNames())
+	assert.Equal(t, []string{"a", "b", "g", "d"}, snap.RevisionNames())
 }
 
 func TestViewport_CopiesRenderConcurrently(t *testing.T) {
@@ -4759,7 +5430,7 @@ func TestViewport_ZeroValue(t *testing.T) {
 	m.SetYOffset(1)
 	assert.Equal(t, 0, m.YOffset())
 
-	m.AddRevision(niceyaml.NewSourceFromString("key: other\n"))
+	addRevision(&m, niceyaml.NewSourceFromString("key: other\n"))
 	m.PreviousRevision()
 	m.NextRevision()
 	m.ToggleDiffMode()
@@ -5103,9 +5774,7 @@ func TestViewport_ViewModeReusesDiff(t *testing.T) {
 			// The new history holds another revision at index 1, so the
 			// diff at that index compares other content.
 			change: func(m *yamlviewport.Model, revs []*countingRevision) {
-				m.ClearRevisions()
-				m.AddRevision(revs[0])
-				m.AddRevision(revs[2])
+				m.SetRevisions(revs[0], revs[2])
 			},
 			history: []int{0, 2},
 			reread:  true,
@@ -5121,7 +5790,7 @@ func TestViewport_ViewModeReusesDiff(t *testing.T) {
 			revs := make([]*countingRevision, len(docs))
 			for i, doc := range docs {
 				revs[i] = &countingRevision{Revision: niceyaml.NewSourceFromString(doc)}
-				m.AddRevision(revs[i])
+				addRevision(&m, revs[i])
 			}
 
 			m.GotoRevision(1)
@@ -5144,7 +5813,7 @@ func TestViewport_ViewModeReusesDiff(t *testing.T) {
 			want := testModel(testPrinter(), 80, 10)
 
 			for _, i := range tc.history {
-				want.AddRevision(niceyaml.NewSourceFromString(docs[i]))
+				addRevision(&want, niceyaml.NewSourceFromString(docs[i]))
 			}
 
 			want.GotoRevision(m.RevisionIndex())
@@ -5158,7 +5827,7 @@ func TestViewport_ViewModeReusesDiff(t *testing.T) {
 	}
 }
 
-func TestViewport_AddRevisionsDiffsOnce(t *testing.T) {
+func TestViewport_SetRevisionsDiffsOnce(t *testing.T) {
 	t.Parallel()
 
 	m := testModel(testPrinter(), 80, 10)
@@ -5175,7 +5844,7 @@ func TestViewport_AddRevisionsDiffsOnce(t *testing.T) {
 		batch[i] = revs[i]
 	}
 
-	m.AddRevisions(batch...)
+	m.SetRevisions(batch...)
 
 	// Only the diff of the last revision against the one before it reads
 	// views.
@@ -5748,7 +6417,7 @@ func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
 			)
 			m := testModel(p, width, 10)
 			m.SetViewMode(tc.mode)
-			m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
+			m.SetRevisions(yamlviewport.NewRevision(source.Name(), view))
 			require.True(t, m.WordWrap())
 
 			out := m.View()
@@ -5973,7 +6642,7 @@ func TestViewport_DoesNotMutateSource(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("key: value\n")
 
-	m.SetRevision(source)
+	m.SetRevisions(source)
 	m.SetSearchTerm("value")
 	require.Positive(t, m.SearchCount())
 
@@ -6006,7 +6675,7 @@ func TestViewport_RevisionOverPartOfTheSource(t *testing.T) {
 		f: six
 	`), niceyaml.WithName("part"))
 
-	m.SetRevision(yamlviewport.NewRevision(source.Name(), source.View().Slice(position.NewSpan(2, 5))))
+	m.SetRevisions(yamlviewport.NewRevision(source.Name(), source.View().Slice(position.NewSpan(2, 5))))
 
 	out := m.View()
 
@@ -6060,7 +6729,7 @@ func TestViewport_RevisionKeepsDecoration(t *testing.T) {
 	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below})
 	view.AddOverlay(kind.GenericError, yamltest.LineRange(1, 0, 5))
 
-	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
+	m.SetRevisions(yamlviewport.NewRevision(source.Name(), view))
 	assert.Equal(t, "marked", m.RevisionName())
 
 	// The marks the caller added show as they are.
@@ -6095,8 +6764,9 @@ func TestViewport_RevisionKeepsDecoration(t *testing.T) {
 func TestViewport_RevisionIgnoresLaterMarks(t *testing.T) {
 	t.Parallel()
 
-	// A mark the caller adds after setting the revision shows once the
-	// revision is set again, and no search action brings it in sooner.
+	// A mark the caller adds after setting the revision shows after the
+	// caller passes the revision to ReplaceRevision, and no search action
+	// brings it in sooner.
 	tcs := map[string]struct {
 		act func(*yamlviewport.Model)
 	}{
@@ -6136,7 +6806,7 @@ func TestViewport_RevisionIgnoresLaterMarks(t *testing.T) {
 			)
 			view := source.View()
 
-			m.SetRevision(yamlviewport.NewRevision(name, view))
+			m.SetRevisions(yamlviewport.NewRevision(name, view))
 			m.SetSearchTerm("value")
 			require.Equal(t, 2, m.SearchCount())
 
@@ -6150,9 +6820,10 @@ func TestViewport_RevisionIgnoresLaterMarks(t *testing.T) {
 			assert.NotContains(t, m.View(), "^ late")
 			assert.Equal(t, rows, m.TotalRowCount())
 
-			m.SetRevision(yamlviewport.NewRevision(name, view))
+			require.True(t, m.ReplaceRevision(0, yamlviewport.NewRevision(name, view)))
 
 			assert.Contains(t, m.View(), "^ late")
+			assert.Equal(t, rows+1, m.TotalRowCount())
 		})
 	}
 }
@@ -6331,7 +7002,7 @@ func TestViewport_DiffKeepsMarks(t *testing.T) {
 			m.SetHunkContext(1)
 			m.SetDiffMode(tc.diffMode)
 			m.SetViewMode(tc.viewMode)
-			m.AddRevisions(
+			m.SetRevisions(
 				markedRevision("v1", doc(1), 1, 2, 4),
 				markedRevision("v2", doc(2), 1, 2, 4),
 				markedRevision("v3", doc(3), 1, 2, 4),
@@ -6393,7 +7064,7 @@ func TestViewport_DiffKeepsMarksOfSharedLines(t *testing.T) {
 
 			m := testModel(testPrinter(), 45, 5)
 			m.SetViewMode(tc.viewMode)
-			m.AddRevisions(
+			m.SetRevisions(
 				yamlviewport.NewRevision("before", before),
 				yamlviewport.NewRevision("after", after),
 			)
@@ -6414,7 +7085,7 @@ func TestViewport_DiffKeepsHunkHeaderAboveMarks(t *testing.T) {
 
 	m := testModel(testPrinter(), 30, 8)
 	m.SetViewMode(yamlviewport.ViewModeHunks)
-	m.AddRevisions(niceyaml.NewSourceFromString(threeYAML), yamlviewport.NewRevision("after", after))
+	m.SetRevisions(niceyaml.NewSourceFromString(threeYAML), yamlviewport.NewRevision("after", after))
 
 	want := stringtest.JoinLF(
 		" @@ -1,3 +1,3 @@",
@@ -6433,7 +7104,8 @@ func TestViewport_DiffIgnoresLaterMarks(t *testing.T) {
 
 	// The viewport keeps the marks the views carried when it computed the
 	// diff, so every view of that diff shows the same marks. A mark the
-	// caller adds later shows once the revisions are set again.
+	// caller adds later shows after the caller passes its revision to
+	// ReplaceRevision, which reads both views of the diff again.
 	tcs := map[string]struct {
 		act func(*yamlviewport.Model)
 	}{
@@ -6464,7 +7136,7 @@ func TestViewport_DiffIgnoresLaterMarks(t *testing.T) {
 			}
 
 			m := testModel(testPrinter(), 45, 10)
-			m.AddRevisions(revisions...)
+			m.SetRevisions(revisions...)
 
 			before.Annotate(1, line.Annotation{Content: "late before", Placement: line.Below})
 			after.Annotate(1, line.Annotation{Content: "late after", Placement: line.Below})
@@ -6475,8 +7147,7 @@ func TestViewport_DiffIgnoresLaterMarks(t *testing.T) {
 
 			viewMode := m.ViewMode()
 
-			m.ClearRevisions()
-			m.AddRevisions(revisions...)
+			require.True(t, m.ReplaceRevision(0, revisions[0]))
 
 			require.Equal(t, viewMode, m.ViewMode())
 			assert.Contains(t, m.View(), "^ late before")
@@ -6538,6 +7209,41 @@ func TestViewport_ContentChangesResetSearch(t *testing.T) {
 
 			assert.Equal(t, 2, m.SearchCount())
 			assert.Equal(t, 0, m.SearchIndex())
+			assert.Contains(t, m.View(), "key20: needle")
+		})
+	}
+}
+
+func TestViewport_FirstRevisionScrollsToFirstMatch(t *testing.T) {
+	t.Parallel()
+
+	doc, _ := needleRevisions()
+
+	tcs := map[string]struct {
+		load func(m *yamlviewport.Model, r yamlviewport.Revision) bool
+	}{
+		"set revisions": {
+			load: func(m *yamlviewport.Model, r yamlviewport.Revision) bool { return m.SetRevisions(r) },
+		},
+		"append to an empty history": {
+			load: func(m *yamlviewport.Model, r yamlviewport.Revision) bool { return m.AppendRevision(r) },
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 80, 5)
+			m.SetSearchTerm("needle")
+
+			// A term set before the content has a match in it, so the content
+			// starts at that match and not at its first row.
+			require.True(t, tc.load(&m, niceyaml.NewSourceFromString(doc)))
+
+			assert.Equal(t, 2, m.SearchCount())
+			assert.Equal(t, 0, m.SearchIndex())
+			assert.False(t, m.AtTop())
 			assert.Contains(t, m.View(), "key20: needle")
 		})
 	}
@@ -6976,7 +7682,7 @@ func TestViewport_ClipsRowsWiderThanContent(t *testing.T) {
 	// math does not count. The view keeps one screen row per printed row,
 	// so the last rows stay reachable.
 	m := testModel(testPrinterWithLineNumbers(), 6, 4)
-	m.AddRevision(niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2", "c: 3", "d: 4", "e: 5")))
+	m.SetRevisions(niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2", "c: 3", "d: 4", "e: 5")))
 
 	// Every screen row opens with the gutter, which a wrapped row would
 	// not, and the last row of the view at the largest offset is a row of
@@ -7009,7 +7715,7 @@ func TestViewport_UnchangedModeKeepsPosition(t *testing.T) {
 	// and the selected match where they are, as the Model doc promises
 	// for anything but a change of content.
 	m := testModel(testPrinter(), 40, 10)
-	m.AddRevision(niceyaml.NewSourceFromString(yamltest.GenerateLines(50, "k%d: v")))
+	m.SetRevisions(niceyaml.NewSourceFromString(yamltest.GenerateLines(50, "k%d: v")))
 	m.SetSearchTerm("v")
 	searchNext(&m, 3)
 	m.SetYOffset(30)
@@ -7298,9 +8004,9 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 				sources = append(sources, source)
 
 				if tc.clip > 0 {
-					m.AddRevision(yamlviewport.NewRevision(source.Name(), source.View().Clip(tc.clip)))
+					addRevision(&m, yamlviewport.NewRevision(source.Name(), source.View().Clip(tc.clip)))
 				} else {
-					m.AddRevision(source)
+					addRevision(&m, source)
 				}
 			}
 
@@ -7771,7 +8477,7 @@ func TestViewport_HitAt(t *testing.T) {
 			t.Parallel()
 
 			m := testModel(tc.printer, tc.width, tc.height, yamlviewport.WithContainerStyle(tc.style))
-			m.AddRevisions(tc.revisions...)
+			m.SetRevisions(tc.revisions...)
 
 			if tc.setup != nil {
 				tc.setup(&m)
@@ -7810,7 +8516,7 @@ func TestViewport_HitAt_PathAt(t *testing.T) {
 	))
 
 	m := testModel(testPrinter(), 24, 6)
-	m.AddRevisions(before, after)
+	m.SetRevisions(before, after)
 
 	sources := []*niceyaml.Source{before, after}
 
@@ -8090,7 +8796,7 @@ func TestViewport_Reveal_SharedLines(t *testing.T) {
 
 			m := testModel(testPrinter(), 44, height)
 			m.SetViewMode(tc.viewMode)
-			m.AddRevisions(
+			m.SetRevisions(
 				yamlviewport.NewRevision("before", line.NewView(lines)),
 				yamlviewport.NewRevision("after", line.NewView(line.Collect(moved...))),
 			)
