@@ -1462,6 +1462,21 @@ func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, erro
 //
 //	out, err := encoder.Marshal(ctx, cfg, encoder.WithYAMLComments(comments))
 //
+// The encoder finds the value of each comment by its path in the changed
+// value. It drops the comments of a removed value, because their path
+// does not select a node. A go-yaml path does not step into a value that
+// has an anchor or a tag. The encoder thus also drops the comments of the
+// keys and items in a value that it writes with an anchor or a tag. The
+// value of a struct field with the anchor option in its yaml tag is such
+// a value.
+//
+// A path with an index names a position in a list, not the item that
+// held it. After the program inserts or removes a list item, the comment
+// of each position from that item to the end goes to the item that holds
+// the position in the changed list. The
+// [go.jacobcolvin.com/niceyaml/edit] package changes the text of a
+// document in place, so each comment stays with its item.
+//
 // The call decodes the node into an any, as [Node.DecodeInto] does
 // without a [DecodeOption], so a program that also decodes the node reads
 // it twice. A decode that fails, such as one of a document that did not

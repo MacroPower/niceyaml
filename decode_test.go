@@ -4114,6 +4114,116 @@ func TestNode_YAMLComments(t *testing.T) {
 		), string(out))
 	})
 
+	t.Run("the encoder drops the comments of removed values", func(t *testing.T) {
+		t.Parallel()
+
+		type database struct {
+			Host string `yaml:"host"`
+		}
+
+		type config struct {
+			Opts  map[string]string `yaml:"opts"`
+			DB    *database         `yaml:"db"`
+			Hosts []string          `yaml:"hosts"`
+		}
+
+		cfgDoc := yamltest.FirstDocument(t, stringtest.Input(`
+			hosts:
+			  - a.example # primary
+			  - b.example # standby
+			opts:
+			  tls: on # required
+			  old: x # legacy
+			db:
+			  host: db.example # internal
+		`))
+
+		tcs := map[string]struct {
+			change func(cfg *config)
+			want   string
+		}{
+			"list item": {
+				change: func(cfg *config) { cfg.Hosts = cfg.Hosts[:1] },
+				want: stringtest.LinesLF(
+					"opts:",
+					"  old: x # legacy",
+					`  tls: "on" # required`,
+					"db:",
+					"  host: db.example # internal",
+					"hosts:",
+					"- a.example # primary",
+				),
+			},
+			"list": {
+				change: func(cfg *config) { cfg.Hosts = nil },
+				want: stringtest.LinesLF(
+					"opts:",
+					"  old: x # legacy",
+					`  tls: "on" # required`,
+					"db:",
+					"  host: db.example # internal",
+					"hosts: []",
+				),
+			},
+			"map entry": {
+				change: func(cfg *config) { delete(cfg.Opts, "old") },
+				want: stringtest.LinesLF(
+					"opts:",
+					`  tls: "on" # required`,
+					"db:",
+					"  host: db.example # internal",
+					"hosts:",
+					"- a.example # primary",
+					"- b.example # standby",
+				),
+			},
+			"section": {
+				change: func(cfg *config) { cfg.DB = nil },
+				want: stringtest.LinesLF(
+					"opts:",
+					"  old: x # legacy",
+					`  tls: "on" # required`,
+					"db: null",
+					"hosts:",
+					"- a.example # primary",
+					"- b.example # standby",
+				),
+			},
+			"an index path stays at its position": {
+				// The comment of the first item goes to the item that
+				// takes its place.
+				change: func(cfg *config) { cfg.Hosts = cfg.Hosts[1:] },
+				want: stringtest.LinesLF(
+					"opts:",
+					"  old: x # legacy",
+					`  tls: "on" # required`,
+					"db:",
+					"  host: db.example # internal",
+					"hosts:",
+					"- b.example # primary",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				cfg, err := cfgDoc.Decode[config](t.Context())
+				require.NoError(t, err)
+
+				comments, err := cfgDoc.YAMLComments(t.Context())
+				require.NoError(t, err)
+
+				tc.change(&cfg)
+
+				out, err := encoder.Marshal(t.Context(), cfg, encoder.WithYAMLComments(comments))
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, string(out))
+			})
+		}
+	})
+
 	t.Run("each call returns a map of its own", func(t *testing.T) {
 		t.Parallel()
 

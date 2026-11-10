@@ -29,7 +29,8 @@
 //
 // [WithYAMLOptions] passes go-yaml options through for settings that do
 // not have an option of their own. [WithYAMLComments] adds comments to
-// each document by YAML path.
+// each document by YAML path. It skips a path of keys and indexes that
+// does not select a node in a document.
 //
 // Each error names its cause with a sentinel, so a caller sorts failures
 // with [errors.Is] and does not name the error types of go-yaml. A value
@@ -44,7 +45,7 @@
 //	case errors.Is(err, encoder.ErrWrite):
 //		// The writer refused the document.
 //	case errors.Is(err, encoder.ErrComment):
-//		// A comment key, path, or position does not fit.
+//		// The encoder cannot place a comment.
 //	case errors.Is(err, encoder.ErrEncode):
 //		// The value does not encode.
 //	}

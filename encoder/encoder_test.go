@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -379,6 +380,20 @@ type anchoredDoc struct {
 	A *shared `yaml:"a,anchor"`
 }
 
+// aliasedDoc anchors the [shared] value of A and writes B as an alias of
+// that anchor.
+type aliasedDoc struct {
+	A *shared `yaml:"a,anchor=x"`
+	B *shared `yaml:"b,alias=x"`
+}
+
+// taggedMapping is a value whose marshaler returns a mapping with a tag.
+type taggedMapping struct{}
+
+func (taggedMapping) MarshalYAML() ([]byte, error) {
+	return []byte("!custom\nname: x\n"), nil
+}
+
 // unencodableDoc anchors a [shared] value before a field go-yaml cannot
 // encode.
 type unencodableDoc struct {
@@ -463,6 +478,27 @@ func TestEncoder_Encode_documents(t *testing.T) {
 				encoder.WithYAMLComments(yaml.CommentMap{"$.a": {yaml.LineComment(" count")}}),
 			},
 			want: stringtest.LinesLF("a: 1 # count", "---", "a: 2 # count"),
+		},
+		"comments only in the documents their path selects a node in": {
+			steps: []step{
+				{value: map[string][]int{"items": {1, 2}}},
+				{value: map[string][]int{"other": {1}}},
+				{value: map[string][]int{"items": {1}}},
+			},
+			opts: []encoder.Option{
+				encoder.WithYAMLComments(yaml.CommentMap{"$.items[1]": {yaml.LineComment(" second")}}),
+			},
+			want: stringtest.LinesLF(
+				"items:",
+				"- 1",
+				"- 2 # second",
+				"---",
+				"other:",
+				"- 1",
+				"---",
+				"items:",
+				"- 1",
+			),
 		},
 	}
 
@@ -865,20 +901,6 @@ func TestEncoder_Encode_errors(t *testing.T) {
 			errs:     []error{encoder.ErrComment},
 			wraps:    yaml.ErrInvalidPathString,
 		},
-		"comment path that does not fit the document": {
-			input:    map[string]int{"a": 1},
-			comments: yaml.CommentMap{"$.a[0]": {yaml.LineComment(" x")}},
-			errs:     []error{encoder.ErrComment},
-			wraps:    yaml.ErrInvalidQuery,
-			msg:      `comment does not apply: "$.a[0]": expected sequence type node. but got Integer: invalid query`,
-		},
-		"comment path with a quoted key that does not fit the document": {
-			input:    map[string]int{"a": 1},
-			comments: yaml.CommentMap{"$.'a'[00]": {yaml.LineComment(" x")}},
-			errs:     []error{encoder.ErrComment},
-			wraps:    yaml.ErrInvalidQuery,
-			msg:      `comment does not apply: "$.'a'[00]": expected sequence type node. but got Integer: invalid query`,
-		},
 		"unknown comment position": {
 			input:    map[string]int{"a": 1},
 			comments: yaml.CommentMap{"$.a": {{Texts: []string{" x"}, Position: 99}}},
@@ -886,12 +908,136 @@ func TestEncoder_Encode_errors(t *testing.T) {
 			wraps:    yaml.ErrUnknownCommentPositionType,
 			msg:      `comment does not apply: "$.a": unknown comment position type`,
 		},
+		"unknown comment position under a path to a missing key": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$.missing": {{Texts: []string{" x"}, Position: 99}}},
+			errs:     []error{encoder.ErrComment},
+			wraps:    yaml.ErrUnknownCommentPositionType,
+			msg:      `comment does not apply: "$.missing": unknown comment position type`,
+		},
+		"unknown comment position under a path to an index past the end": {
+			input:    map[string][]int{"a": {1}},
+			comments: yaml.CommentMap{"$.a[3]": {{Texts: []string{" x"}, Position: 99}}},
+			errs:     []error{encoder.ErrComment},
+			wraps:    yaml.ErrUnknownCommentPositionType,
+			msg:      `comment does not apply: "$.a[3]": unknown comment position type`,
+		},
+		"unknown comment position on a value go-yaml cannot encode": {
+			input:    make(chan int),
+			comments: yaml.CommentMap{"$.a": {{Texts: []string{" x"}, Position: 99}}},
+			errs:     []error{encoder.ErrComment},
+			wraps:    yaml.ErrUnknownCommentPositionType,
+			msg:      `comment does not apply: "$.a": unknown comment position type`,
+		},
+		"unknown comment position after a comment the node cannot hold": {
+			input:    "x",
+			comments: yaml.CommentMap{"$": {yaml.HeadComment(" x"), {Texts: []string{" x"}, Position: 99}}},
+			errs:     []error{encoder.ErrComment},
+			wraps:    yaml.ErrUnknownCommentPositionType,
+			msg:      `comment does not apply: "$": unknown comment position type`,
+		},
 		"unknown comment position under a quoted key": {
 			input:    map[string]int{"a": 1},
 			comments: yaml.CommentMap{"$.'a'": {{Texts: []string{" x"}, Position: 99}}},
 			errs:     []error{encoder.ErrComment},
 			wraps:    yaml.ErrUnknownCommentPositionType,
 			msg:      `comment does not apply: "$.'a'": unknown comment position type`,
+		},
+		"comment path past a mapping key go-yaml cannot read": {
+			input:    map[string]any{"m": rawYAML("'\"x': 1\nb: 2\n")},
+			comments: yaml.CommentMap{"$.m.b": {yaml.LineComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			wraps:    strconv.ErrSyntax,
+			msg:      `comment does not apply: "$.m.b": invalid syntax`,
+		},
+		"comment path to a missing key of a mapping with a key go-yaml cannot read": {
+			input:    map[string]any{"m": rawYAML("b: 2\n'\"x': 1\n")},
+			comments: yaml.CommentMap{"$.m.missing": {yaml.LineComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			wraps:    strconv.ErrSyntax,
+			msg:      `comment does not apply: "$.m.missing": invalid syntax`,
+		},
+		"comment path past a multiline key go-yaml cannot read": {
+			input:    map[string]int{"\"a\nb": 1, "z": 2},
+			opts:     []encoder.Option{encoder.WithYAMLOptions(yaml.UseLiteralStyleIfMultiline(true))},
+			comments: yaml.CommentMap{"$.z": {yaml.LineComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			wraps:    strconv.ErrSyntax,
+			msg:      `comment does not apply: "$.z": invalid syntax`,
+		},
+		"comment path to a missing key of a mapping with a multiline key go-yaml cannot read": {
+			input:    map[string]int{"\"a\nb": 1},
+			opts:     []encoder.Option{encoder.WithYAMLOptions(yaml.UseLiteralStyleIfMultiline(true))},
+			comments: yaml.CommentMap{"$.missing": {yaml.LineComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			wraps:    strconv.ErrSyntax,
+			msg:      `comment does not apply: "$.missing": invalid syntax`,
+		},
+		"head comment under a recursive path that matches no key": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$..missing": {yaml.HeadComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$..missing": unsupported comment head position for Mapping`,
+		},
+		"line comment under a recursive path that matches no key": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$..missing": {yaml.LineComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$..missing": unsupported comment line position for Mapping`,
+		},
+		"foot comment under a recursive path that matches no key": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$..missing": {yaml.FootComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$..missing": unsupported comment foot position for Mapping`,
+		},
+		"line comment under a recursive path that matches one key": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$..a": {yaml.LineComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$..a": unsupported comment line position for Mapping`,
+		},
+		"line comment under a recursive path after a key": {
+			input:    map[string]map[string]int{"a": {"b": 1}},
+			comments: yaml.CommentMap{"$.a..b": {yaml.LineComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$.a..b": unsupported comment line position for Mapping`,
+		},
+		"head comment under a key of every item": {
+			input:    map[string][]map[string]int{"items": {{"name": 1}}},
+			comments: yaml.CommentMap{"$.items[*].name": {yaml.HeadComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$.items[*].name": unsupported comment head position for Mapping`,
+		},
+		"line comment under a key of every item": {
+			input:    map[string][]map[string]int{"items": {{"name": 1}, {"name": 2}}},
+			comments: yaml.CommentMap{"$.items[*].name": {yaml.LineComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$.items[*].name": unsupported comment line position for Mapping`,
+		},
+		"foot comment under a key of every item": {
+			input:    map[string][]map[string]int{"items": {{"name": 1}}},
+			comments: yaml.CommentMap{"$.items[*].name": {yaml.FootComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$.items[*].name": unsupported comment foot position for Mapping`,
+		},
+		"line comment under a key of every item of an empty sequence": {
+			input:    map[string][]map[string]int{"items": {}},
+			comments: yaml.CommentMap{"$.items[*].name": {yaml.LineComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$.items[*].name": unsupported comment line position for Mapping`,
+		},
+		"line comment under a key that an item does not have": {
+			input:    map[string][]map[string]int{"items": {{"name": 1}, {"other": 2}}},
+			comments: yaml.CommentMap{"$.items[*].name": {yaml.LineComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$.items[*].name": unsupported comment line position for Mapping`,
+		},
+		"line comment under an index of every item": {
+			input:    map[string][][]int{"items": {{1, 2}, {3, 4}}},
+			comments: yaml.CommentMap{"$.items[*][1]": {yaml.LineComment(" x")}},
+			errs:     []error{encoder.ErrComment},
+			msg:      `comment does not apply: "$.items[*][1]": unsupported comment line position for Mapping`,
 		},
 		"head comment on a root scalar": {
 			input:    "x",
@@ -1420,6 +1566,8 @@ func TestWithIndentSequence(t *testing.T) {
 func TestWithYAMLComments(t *testing.T) {
 	t.Parallel()
 
+	s := &shared{Name: "x"}
+
 	tcs := map[string]struct {
 		input    any
 		comments yaml.CommentMap
@@ -1487,10 +1635,134 @@ func TestWithYAMLComments(t *testing.T) {
 			comments: yaml.CommentMap{"$.items[0]": {yaml.FootComment(" end")}},
 			want:     stringtest.LinesLF("items:", "- one", "- two", "# end"),
 		},
-		"path that selects no node": {
+		"path to a key the mapping does not have": {
 			input:    map[string]int{"a": 1},
 			comments: yaml.CommentMap{"$.missing": {yaml.HeadComment(" none")}},
 			want:     "a: 1\n",
+		},
+		"path that indexes a scalar": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$.a[0]": {yaml.LineComment(" x")}},
+			want:     "a: 1\n",
+		},
+		"path with a quoted key that indexes a scalar": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$.'a'[00]": {yaml.LineComment(" x")}},
+			want:     "a: 1\n",
+		},
+		"path that indexes a mapping": {
+			input:    map[string]map[string]int{"a": {"b": 1}},
+			comments: yaml.CommentMap{"$.a[0]": {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF("a:", "  b: 1"),
+		},
+		"path to an index past the end of the sequence": {
+			input: map[string][]string{"items": {"one"}},
+			comments: yaml.CommentMap{
+				"$.items[0]": {yaml.LineComment(" first")},
+				"$.items[1]": {yaml.LineComment(" second")},
+			},
+			want: stringtest.LinesLF("items:", "- one # first"),
+		},
+		"path into an empty sequence": {
+			input:    map[string][]string{"items": nil},
+			comments: yaml.CommentMap{"$.items[0]": {yaml.HeadComment(" first")}},
+			want:     "items: []\n",
+		},
+		"path to a key of a sequence": {
+			input:    map[string][]string{"items": {"one"}},
+			comments: yaml.CommentMap{"$.items.name": {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF("items:", "- one"),
+		},
+		"path to a key of a null": {
+			input:    map[string]any{"db": nil, "name": "api"},
+			comments: yaml.CommentMap{"$.db.host": {yaml.LineComment(" x")}, "$.name": {yaml.LineComment(" short")}},
+			want:     stringtest.LinesLF("db: null", "name: api # short"),
+		},
+		"path to a key of a root scalar": {
+			input:    "x",
+			comments: yaml.CommentMap{"$.a": {yaml.FootComment(" x")}},
+			want:     "x\n",
+		},
+		"path to a value with an anchor": {
+			input:    aliasedDoc{A: s, B: s},
+			comments: yaml.CommentMap{"$.a": {yaml.HeadComment(" shared")}},
+			want:     stringtest.LinesLF("# shared", "a: &x", "  name: x", "b: *x"),
+		},
+		"path into a value with an anchor": {
+			input: aliasedDoc{A: s, B: s},
+			comments: yaml.CommentMap{
+				"$.a.name": {yaml.LineComment(" x")},
+				"$.b":      {yaml.HeadComment(" again")},
+			},
+			want: stringtest.LinesLF("a: &x", "  name: x", "# again", "b: *x"),
+		},
+		"path into an alias": {
+			input:    aliasedDoc{A: s, B: s},
+			comments: yaml.CommentMap{"$.b.name": {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF("a: &x", "  name: x", "b: *x"),
+		},
+		"path into a value with a tag": {
+			input: map[string]any{"a": taggedMapping{}, "b": 1},
+			comments: yaml.CommentMap{
+				"$.a.name": {yaml.LineComment(" x")},
+				"$.b":      {yaml.LineComment(" one")},
+			},
+			want: stringtest.LinesLF("a: !custom", "  name: x", "b: 1 # one"),
+		},
+		"path to a key before a mapping key go-yaml cannot read": {
+			input:    map[string]any{"m": rawYAML("b: 2\n'\"x': 1\n")},
+			comments: yaml.CommentMap{"$.m.b": {yaml.LineComment(" two")}},
+			want:     stringtest.LinesLF("m:", "  b: 2 # two", `  '"x': 1`),
+		},
+		"path that ends in an index wildcard": {
+			input:    map[string][]string{"items": {"one", "two"}},
+			comments: yaml.CommentMap{"$.items[*]": {yaml.FootComment(" end")}},
+			want:     stringtest.LinesLF("items:", "- one", "- two", "# end"),
+		},
+		"path that ends in an index wildcard into a scalar": {
+			input:    map[string]int{"items": 1},
+			comments: yaml.CommentMap{"$.items[*]": {yaml.LineComment(" x")}},
+			want:     "items: 1\n",
+		},
+		"recursive path after a key the mapping does not have": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$.missing..a": {yaml.LineComment(" x")}},
+			want:     "a: 1\n",
+		},
+		"recursive path after an index past the end of the sequence": {
+			input:    map[string][]map[string]int{"items": {{"name": 1}}},
+			comments: yaml.CommentMap{"$.items[1]..name": {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF("items:", "- name: 1"),
+		},
+		"path to every item of a key the mapping does not have": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$.items[*].name": {yaml.LineComment(" x")}},
+			want:     "a: 1\n",
+		},
+		"path to every item of a scalar": {
+			input:    map[string]int{"items": 1},
+			comments: yaml.CommentMap{"$.items[*].name": {yaml.LineComment(" x")}},
+			want:     "items: 1\n",
+		},
+		"path to every item of a null": {
+			input:    map[string]*int{"items": nil},
+			comments: yaml.CommentMap{"$.items[*].name": {yaml.LineComment(" x")}},
+			want:     "items: null\n",
+		},
+		"path to a key of every item with an item of another kind": {
+			input:    map[string][]any{"items": {map[string]int{"name": 1}, 3}},
+			comments: yaml.CommentMap{"$.items[*].name": {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF("items:", "- name: 1", "- 3"),
+		},
+		"path to an index of every item past the end of an item": {
+			input:    map[string][][]int{"items": {{1, 2}, {3}}},
+			comments: yaml.CommentMap{"$.items[*][1]": {yaml.LineComment(" x")}},
+			want:     stringtest.LinesLF("items:", "- - 1", "  - 2", "- - 3"),
+		},
+		"nil comment": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$.a": {nil, yaml.LineComment(" one")}, "$.missing": {nil}},
+			want:     "a: 1 # one\n",
 		},
 		"nil map": {
 			input: map[string]int{"a": 1},

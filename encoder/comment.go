@@ -1,6 +1,7 @@
 package encoder
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -17,12 +18,27 @@ import (
 type pathComments struct {
 	path     *yaml.Path
 	key      string
-	comments []*yaml.Comment
+	comments []positionedComment
 }
 
+// positionedComment holds the lines of one comment and the function that
+// puts the comment in its position.
+type positionedComment struct {
+	set   commentSetter
+	texts []string
+}
+
+// commentSetter puts comment in one position at target, a node in the
+// tree under root. It returns the error of go-yaml when the node cannot
+// hold a comment in that position.
+type commentSetter func(root, target ast.Node, comment *ast.CommentGroupNode) error
+
 // parseComments parses each key of cm as a YAML path and returns the
-// entries of cm in the order of their keys. A key that is not a path
-// returns an error that matches [ErrComment].
+// entries of cm in the order of their keys. It leaves out a nil comment,
+// which has no text to place. A key that is not a path and a comment with
+// a position that go-yaml does not define each return an error that
+// matches [ErrComment]. The comment map alone decides both errors, so
+// they do not depend on the document that gets the comments.
 func parseComments(cm yaml.CommentMap) ([]pathComments, error) {
 	if len(cm) == 0 {
 		return nil, nil
@@ -36,10 +52,41 @@ func parseComments(cm yaml.CommentMap) ([]pathComments, error) {
 			return nil, commentError(key, err)
 		}
 
-		entries = append(entries, pathComments{path: path, key: key, comments: cm[key]})
+		entry := pathComments{path: path, key: key}
+
+		for _, comment := range cm[key] {
+			if comment == nil {
+				continue
+			}
+
+			set, err := positionSetter(comment.Position)
+			if err != nil {
+				return nil, commentError(key, err)
+			}
+
+			entry.comments = append(entry.comments, positionedComment{set: set, texts: comment.Texts})
+		}
+
+		entries = append(entries, entry)
 	}
 
 	return entries, nil
+}
+
+// positionSetter returns the function that puts a comment in position.
+// It returns [yaml.ErrUnknownCommentPositionType] for a position that
+// go-yaml does not define.
+func positionSetter(position yaml.CommentPosition) (commentSetter, error) {
+	switch position {
+	case yaml.CommentHeadPosition:
+		return setHeadComment, nil
+	case yaml.CommentLinePosition:
+		return setLineComment, nil
+	case yaml.CommentFootPosition:
+		return setFootComment, nil
+	default:
+		return nil, yaml.ErrUnknownCommentPositionType
+	}
 }
 
 // parsePath parses key as a YAML path. It returns an error that wraps
@@ -69,14 +116,40 @@ func commentError(key string, err error) error {
 }
 
 // setComments puts the comments of each entry on the node its path selects
-// in the tree under root. It skips an entry whose path does not select a
-// node. It places every comment where the go-yaml encoder places it for a
-// [yaml.WithComment] map. A path that does not fit the tree and a comment
-// that its node cannot hold return an error that matches [ErrComment] and
-// wraps the error that encoder returns.
+// in the tree under root. It skips an entry when go-yaml reports that the
+// path of keys and indexes does not select a node. It places every
+// comment where the go-yaml encoder places it for a [yaml.WithComment]
+// map. Each of these returns an error that matches [ErrComment] and wraps
+// the error of go-yaml:
+//
+//   - A comment that its node cannot hold.
+//   - A path that go-yaml cannot follow past a mapping key it cannot read.
+//   - A path that names a group of nodes, which has a recursive step or a
+//     step after "[*]".
 func setComments(root ast.Node, entries []pathComments) error {
 	for _, entry := range entries {
 		target, err := entry.path.FilterNode(root)
+		// Go-yaml returns a nil node for a mapping key that the tree
+		// does not have. It returns this error for an index past the end
+		// of a sequence and for a step into a node of another kind. An
+		// anchor, a tag, and an alias are nodes of another kind too,
+		// because a go-yaml path does not step through them. Every such
+		// path selects no node.
+		if errors.Is(err, yaml.ErrInvalidQuery) {
+			continue
+		}
+
+		// Go-yaml returns one other error. It unquotes each mapping key
+		// whose token value starts with a double quote, and two kinds of
+		// key do not unquote. One is a key from a marshaler's YAML, such
+		// as '"x'. The other is a string key that starts with a double
+		// quote and holds a line break, under
+		// [yaml.UseLiteralStyleIfMultiline]. With that option, go-yaml
+		// leaves a string key with a line break unquoted, so the token
+		// value of the key is its raw text. The quoter marks that key as
+		// double-quoted and does not change its value. The path can
+		// select a node after either key, so setComments does not skip
+		// the entry.
 		if err != nil {
 			return commentError(entry.key, err)
 		}
@@ -85,25 +158,18 @@ func setComments(root ast.Node, entries []pathComments) error {
 			continue
 		}
 
+		// For a recursive step and for a step after "[*]", go-yaml
+		// returns a sequence that it builds to hold the nodes it found.
+		// It builds the sequence even when it found no node. The tree
+		// does not hold that sequence, so each setter returns its error
+		// for the position.
 		for _, comment := range entry.comments {
-			tokens := make([]*token.Token, 0, len(comment.Texts))
-			for _, text := range comment.Texts {
+			tokens := make([]*token.Token, 0, len(comment.texts))
+			for _, text := range comment.texts {
 				tokens = append(tokens, token.New(text, text, nil))
 			}
 
-			group := ast.CommentGroup(tokens)
-
-			switch comment.Position {
-			case yaml.CommentHeadPosition:
-				err = setHeadComment(root, target, group)
-			case yaml.CommentLinePosition:
-				err = setLineComment(root, target, group)
-			case yaml.CommentFootPosition:
-				err = setFootComment(root, target, group)
-			default:
-				err = yaml.ErrUnknownCommentPositionType
-			}
-
+			err = comment.set(root, target, ast.CommentGroup(tokens))
 			if err != nil {
 				return commentError(entry.key, err)
 			}

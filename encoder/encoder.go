@@ -40,11 +40,17 @@ var (
 
 	// ErrComment indicates a comment from [WithYAMLComments] that the
 	// encoder cannot place in the document. [Encoder.Encode] and [Marshal]
-	// return it for a key that is not a YAML path and for a path that does
-	// not fit the document. They return it for a node that cannot hold a
-	// comment in the position it got. The error of go-yaml stays in the
-	// chain, so [yaml.ErrInvalidPathString] and [yaml.ErrInvalidQuery]
-	// match where they match the error of [yaml.WithComment].
+	// return it for a key that is not a YAML path and for a comment
+	// position that go-yaml does not define, whatever value they encode.
+	// They return it for a node that cannot hold a comment in the position
+	// it got. They return it for a path that names a group of nodes, such
+	// as "$..name". They also return it for a mapping key that go-yaml
+	// cannot read when it looks for the key that a path names.
+	// [WithYAMLComments] describes such paths and keys. The error of
+	// go-yaml stays in the chain, so [yaml.ErrInvalidPathString] matches
+	// where it matches the error of [yaml.WithComment]. A path of keys and
+	// indexes that does not select a node in a document does not cause the
+	// error. The encoder skips its comments.
 	ErrComment = errors.New("comment does not apply")
 
 	// ErrWrite indicates a write that the writer of an [Encoder] refused.
@@ -190,22 +196,63 @@ func WithIndentSequence(indent bool) Option {
 // document the encoder writes. Each key of cm is a YAML path, such as
 // "$.a.b" or "$.items[0]", and its comments go on the node that path
 // selects. Build each comment with [yaml.HeadComment], [yaml.LineComment],
-// or [yaml.FootComment]. A path that does not select a node in a document
-// does not add a comment to it. The last WithYAMLComments option replaces
-// the earlier ones.
+// or [yaml.FootComment]. The encoder ignores a nil comment. The last
+// WithYAMLComments option replaces the earlier ones.
+//
+// A path of keys and indexes names one node. So does a path that ends in
+// "[*]", which names the sequence it steps into. The encoder skips the
+// comments of such a path when it does not select a node in the document
+// the encoder writes. These paths select no node:
+//
+//   - A path to a key that its mapping does not have.
+//   - A path to an index past the end of its sequence.
+//   - A path that steps into a node of another kind, such as an index
+//     into a mapping or a key of a scalar or a null.
+//   - A path that steps into a value that has an anchor or a tag, or
+//     into an alias. A go-yaml path selects such a value and does not
+//     select the keys and items in it. A struct field with the anchor
+//     option in its yaml tag encodes to such a value.
+//
+// One comment map thus serves documents with different contents, and a
+// value that lost a commented entry still encodes. An index path names a
+// position in a sequence, so its comment goes to whatever item holds
+// that position in the document.
 //
 // [Encoder.Encode] returns an error that matches [ErrComment] and does
 // not write the document when any of these holds:
 //
 //   - A key is not a YAML path.
-//   - A path does not fit the document, such as a path that indexes a
-//     mapping.
+//   - A comment has a position that go-yaml does not define.
 //   - The selected node cannot hold a comment in that position.
+//   - Go-yaml looks for the mapping key that a path names and cannot
+//     read a key of that mapping. A marshaler's YAML can hold such a
+//     key, for example the single-quoted key `'"x'`. With
+//     [yaml.UseLiteralStyleIfMultiline], a string key that starts with
+//     a double quote and holds a line break is such a key too. Go-yaml
+//     reads the keys from the first one, so a path to a later key
+//     fails. A path to a key that the mapping does not have fails too.
+//   - A path names a group of nodes. A recursive step names a group, as
+//     in "$..name". So does "[*]" with a step after it, as in
+//     "$.items[*].name". No position holds a comment on a group, so the
+//     encode fails even when the group is empty.
+//
+// The encoder skips a path that names a group in a document where a step
+// before the group selects no node. It also skips the path where "[*]"
+// or a step after it steps into a node of another kind, such as "[*]"
+// into a scalar or a null. It skips the path where a step after "[*]"
+// steps to an index past the end of a sequence. A step after "[*]" to a
+// key that an item does not have is not such a step, so that encode
+// fails.
+//
+// Encode checks the keys of cm and the positions before it encodes the
+// value, so a comment map with either fault fails every document.
 //
 // The paths and the placement of each comment are those of
-// [yaml.WithComment], and the error of go-yaml stays in the chain. As with
-// that option, a line comment on a string that go-yaml writes as a literal
-// block does not reach the output.
+// [yaml.WithComment], and the error of go-yaml stays in the chain. Of the
+// paths that select no node, that option skips only a path to a key that
+// its mapping does not have. It fails on the others. As with that option,
+// a line comment on a string that go-yaml writes as a literal block does
+// not reach the output.
 func WithYAMLComments(cm yaml.CommentMap) Option {
 	return func(c *config) {
 		c.comments = cm
@@ -312,8 +359,10 @@ func (e *Encoder) encode(ctx context.Context, v any) (ast.Node, error) {
 		return nil, err
 	}
 
-	// A comment path that does not parse is an error before v reaches
-	// go-yaml, as it is with the WithComment option of go-yaml.
+	// A comment key that is not a path is an error before v reaches
+	// go-yaml, as it is with the WithComment option of go-yaml. So is a
+	// comment position that go-yaml does not define. The comment map alone
+	// decides both errors, so every document gets the same answer.
 	comments, err := parseComments(e.comments)
 	if err != nil {
 		return nil, err
