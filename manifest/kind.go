@@ -92,7 +92,8 @@ func Version(name string, opts ...VersionOption) KindOption {
 // kind. The layout reads the documents without type fields, as the Routing
 // section of the package documentation describes. It takes the place of
 // the oldest version, so it must come first among the versions. It takes
-// the options of [Version] except [KindName].
+// the options of [Version] except [KindName], [Migrate], and
+// [SchemaTypeFields].
 func Unversioned(opts ...VersionOption) KindOption {
 	return func(c *kindConfig) {
 		v := &versionConfig{unversioned: true}
@@ -148,6 +149,7 @@ func DecodeOptions(opts ...niceyaml.DecodeOption) KindOption {
 //
 // Available options:
 //   - [Schema]
+//   - [SchemaTypeFields]
 //   - [Migrate]
 //   - [Deprecated]
 //   - [KindName]
@@ -164,10 +166,13 @@ type versionConfig struct {
 	steps       []step
 	unversioned bool
 	hasSchema   bool
-	deprecated  bool
-	hasKindName bool
-	written     bool
-	loosened    bool
+	// Whether [SchemaTypeFields] states the answer, and the answer.
+	hasTypeFields     bool
+	typeFieldsVisible bool
+	deprecated        bool
+	hasKindName       bool
+	written           bool
+	loosened          bool
 }
 
 // Schema is a [VersionOption] that gives the version the schema that ref
@@ -177,6 +182,29 @@ type versionConfig struct {
 func Schema(ref schema.Ref) VersionOption {
 	return func(c *versionConfig) {
 		c.schema, c.hasSchema = ref, true
+	}
+}
+
+// SchemaTypeFields is a [VersionOption] that states whether the schema of
+// the version reads the type fields. With true, the check of the schema
+// sees every type field as the document writes it, with the names of the
+// version. With false, the check sees every type field blank.
+//
+// Without the option, the registry reads the answer for each type field
+// from the schema, as the Checks section of the package documentation
+// describes. When the schema does not give the answer, a load fails each
+// document that it checks against the schema, with an error that matches
+// [ErrSchemaTypeField]. The option replaces that reading for the version.
+// It suits a schema that reads a type field only inside a branch or behind
+// a $ref to another document. It also suits a schema that the author
+// cannot edit.
+//
+// [NewRegistry] rejects the option on a version without [Schema]. It also
+// rejects the option on the layout of [Unversioned], whose documents do
+// not hold type fields.
+func SchemaTypeFields(visible bool) VersionOption {
+	return func(c *versionConfig) {
+		c.hasTypeFields, c.typeFieldsVisible = true, visible
 	}
 }
 

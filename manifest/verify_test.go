@@ -64,9 +64,36 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 	unsure := func(p string) string {
 		return stringtest.JoinLF(
 			"MenuItem v1: "+p+": a branch or a $ref to another document might read it",
-			"`-- declare "+p+" under properties outside every branch and every such $ref",
+			"`-- declare "+p+" under properties outside every branch and every such $ref, "+
+				"or pass manifest.SchemaTypeFields",
 		)
 	}
+
+	blanked := func(p string) string {
+		return stringtest.JoinLF(
+			"MenuItem v1: "+p+": required, but manifest.SchemaTypeFields(false) blanks it",
+			"`-- remove "+p+" from required, or pass manifest.SchemaTypeFields(true)",
+		)
+	}
+
+	// A schema that reads the kind field inside a branch.
+	branch := `{"if": {"properties": {"kind": {"const": "MenuItem"}}}, "then": {"required": ["metadata"]}}`
+
+	// A schema that reads the kind field behind a $ref to defs.json.
+	outside := `{"$ref": "defs.json#/$defs/item", "properties": {"apiVersion": {"type": "string"}}}`
+	defs := map[string]string{"defs.json": `{"$defs": {"item": {
+  "required": ["kind"],
+  "properties": {"kind": {"type": "string"}}}}}`}
+
+	// The files that the Draft-07 schemas name with a $ref. Draft-07
+	// ignores each sibling of a $ref.
+	draft7 := `"$schema": "http://json-schema.org/draft-07/schema#"`
+	defs7 := map[string]string{"defs.json": `{` + draft7 + `, "definitions": {
+  "kind": {"type": "string"},
+  "meta": {"required": ["kind"], "properties": {"kind": {"type": "string"}}}}}`}
+
+	visible := []manifest.VersionOption{manifest.SchemaTypeFields(true)}
+	blank := []manifest.VersionOption{manifest.SchemaTypeFields(false)}
 
 	tags := paths.Doc().Child("tags").Index(1).Child("kind")
 
@@ -76,9 +103,13 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 		// The other files beside the schema, which a $ref of the schema
 		// can name.
 		files map[string]string
+		// The other options of the version that takes the schema.
+		version []manifest.VersionOption
 		// The schema belongs to the unversioned layout, and v1 has none.
 		unversioned bool
 		want        string
+		// The error that the error of Verify must match, or nil.
+		matches error
 	}{
 		"declared and required": {
 			schema: brewSchema("v1", "MenuItem"),
@@ -123,12 +154,14 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 			want: required("$.tags[1].kind"),
 		},
 		"required in a branch": {
-			schema: `{"oneOf": [{"required": ["kind"]}, {"required": ["metadata"]}]}`,
-			want:   unsure("$.kind"),
+			schema:  `{"oneOf": [{"required": ["kind"]}, {"required": ["metadata"]}]}`,
+			want:    unsure("$.kind"),
+			matches: manifest.ErrSchemaTypeField,
 		},
 		"declared in a branch": {
-			schema: `{"if": {"properties": {"kind": {"const": "MenuItem"}}}, "then": {"required": ["metadata"]}}`,
-			want:   unsure("$.kind"),
+			schema:  branch,
+			want:    unsure("$.kind"),
+			matches: manifest.ErrSchemaTypeField,
 		},
 		"declared outside the branch that reads it": {
 			schema: `{"properties": {"kind": {"type": "string"}},
@@ -140,11 +173,100 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
   {"required": ["spec"], "properties": {"spec": {}}, "additionalProperties": false}]}`,
 		},
 		"$ref to another document": {
-			schema: `{"$ref": "defs.json#/$defs/item", "properties": {"apiVersion": {"type": "string"}}}`,
-			files: map[string]string{"defs.json": `{"$defs": {"item": {
-  "required": ["kind"],
-  "properties": {"kind": {"type": "string"}}}}}`},
-			want: unsure("$.kind"),
+			schema:  outside,
+			files:   defs,
+			want:    unsure("$.kind"),
+			matches: manifest.ErrSchemaTypeField,
+		},
+		"declared with a $ref to another document": {
+			schema: `{"required": ["kind"], "properties": {"kind": {"$ref": "defs.json#/definitions/kind"}}}`,
+			files:  defs7,
+		},
+		"declared with a $ref to another document under Draft-07": {
+			schema: `{` + draft7 + `, "required": ["kind"],
+  "properties": {"kind": {"$ref": "defs.json#/definitions/kind"}}}`,
+			files: defs7,
+		},
+		"declared in a branch with a $ref to another document under Draft-07": {
+			schema: `{` + draft7 + `,
+  "oneOf": [{"properties": {"kind": {"$ref": "defs.json#/definitions/kind"}}}]}`,
+			files:   defs7,
+			want:    unsure("$.kind"),
+			matches: manifest.ErrSchemaTypeField,
+		},
+		"type field below a $ref to another document under Draft-07": {
+			opts: []manifest.RegistryOption{manifest.WithKindField(meta.Child("kind"))},
+			schema: `{` + draft7 + `,
+  "properties": {"metadata": {"$ref": "defs.json#/definitions/meta"}}}`,
+			files:   defs7,
+			want:    unsure("$.metadata.kind"),
+			matches: manifest.ErrSchemaTypeField,
+		},
+		"required outside the branches that declare it": {
+			schema: `{"required": ["kind"], "properties": {"apiVersion": {"type": "string"}},
+  "oneOf": [{"properties": {"kind": {"const": "MenuItem"}}}, {"properties": {"kind": {"const": "Tag"}}}]}`,
+			want:    unsure("$.kind"),
+			matches: manifest.ErrSchemaTypeField,
+		},
+		"required outside the branches that declare it with visible type fields": {
+			schema: `{"required": ["kind"], "properties": {"apiVersion": {"type": "string"}},
+  "oneOf": [{"properties": {"kind": {"const": "MenuItem"}}}, {"properties": {"kind": {"const": "Tag"}}}]}`,
+			version: visible,
+		},
+		"required beside a $ref to another document": {
+			schema: `{"$ref": "defs.json#/$defs/item", "required": ["kind"],
+  "properties": {"apiVersion": {"type": "string"}}}`,
+			files:   defs,
+			want:    unsure("$.kind"),
+			matches: manifest.ErrSchemaTypeField,
+		},
+		"required and not declared beside a type field that a branch declares": {
+			schema: `{"required": ["apiVersion"], "oneOf": [{"properties": {"kind": {"const": "MenuItem"}}}]}`,
+			want: stringtest.JoinLF(
+				"|-- MenuItem v1: $.apiVersion: required, but no properties keyword declares it",
+				"|   `-- declare $.apiVersion under properties, or remove it from required",
+				"`-- MenuItem v1: $.kind: a branch or a $ref to another document might read it",
+				"    `-- declare $.kind under properties outside every branch and every such $ref, "+
+					"or pass manifest.SchemaTypeFields",
+			),
+			matches: manifest.ErrSchemaTypeField,
+		},
+		"declared in a branch with visible type fields": {
+			schema:  branch,
+			version: visible,
+		},
+		"declared in a branch with blank type fields": {
+			schema:  branch,
+			version: blank,
+		},
+		"$ref to another document with visible type fields": {
+			schema:  outside,
+			files:   defs,
+			version: visible,
+		},
+		"$ref to another document with blank type fields": {
+			schema:  outside,
+			files:   defs,
+			version: blank,
+		},
+		"required and not declared with visible type fields": {
+			schema:  `{"required": ["kind"], "properties": {"metadata": {"type": "object"}}}`,
+			version: visible,
+		},
+		"required and not declared with blank type fields": {
+			schema:  `{"required": ["kind"], "properties": {"metadata": {"type": "object"}}}`,
+			version: blank,
+			want:    blanked("$.kind"),
+		},
+		"declared and required with blank type fields": {
+			schema:  brewSchema("v1", "MenuItem"),
+			version: blank,
+			want: stringtest.JoinLF(
+				"|-- MenuItem v1: $.apiVersion: required, but manifest.SchemaTypeFields(false) blanks it",
+				"|   `-- remove $.apiVersion from required, or pass manifest.SchemaTypeFields(true)",
+				"`-- MenuItem v1: $.kind: required, but manifest.SchemaTypeFields(false) blanks it",
+				"    `-- remove $.kind from required, or pass manifest.SchemaTypeFields(true)",
+			),
 		},
 		"unversioned layout": {
 			schema:      `{"required": ["kind"]}`,
@@ -161,11 +283,13 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 				fsys[path] = &fstest.MapFile{Data: []byte(text)}
 			}
 
-			sch := manifest.Schema(schema.FileFS(fsys, "schema.json"))
+			version := append([]manifest.VersionOption{
+				manifest.Schema(schema.FileFS(fsys, "schema.json")),
+			}, tc.version...)
 
-			versions := []manifest.KindOption{manifest.Version("v1", sch)}
+			versions := []manifest.KindOption{manifest.Version("v1", version...)}
 			if tc.unversioned {
-				versions = []manifest.KindOption{manifest.Unversioned(sch), manifest.Version("v1")}
+				versions = []manifest.KindOption{manifest.Unversioned(version...), manifest.Version("v1")}
 			}
 
 			reg := manifest.MustNewRegistry(append(tc.opts,
@@ -181,6 +305,12 @@ func TestRegistry_Verify_TypeFields(t *testing.T) {
 			require.Error(t, err)
 			assert.Equal(t, tc.want, niceyaml.FormatError(err))
 			assert.False(t, niceyaml.IsInvalid(err))
+
+			if tc.matches != nil {
+				require.ErrorIs(t, err, tc.matches)
+			} else {
+				require.NotErrorIs(t, err, manifest.ErrSchemaTypeField)
+			}
 		})
 	}
 }

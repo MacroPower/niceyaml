@@ -297,6 +297,30 @@ func TestNewRegistry(t *testing.T) {
 			)),
 			err: "kind Cafe: v1 has a schema.Ref that names no schema",
 		},
+		"schema type fields without a schema": {
+			opts: withKinds(manifest.NewKind[Cafe]("Cafe",
+				manifest.Version("v1", manifest.SchemaTypeFields(true)),
+			)),
+			err: "kind Cafe: v1 takes no manifest.SchemaTypeFields without manifest.Schema",
+		},
+		"schema type fields on the unversioned layout": {
+			opts: withKinds(manifest.NewKind[Cafe]("Cafe",
+				manifest.Unversioned(manifest.Schema(schema.Embedded([]byte(`{}`))), manifest.SchemaTypeFields(false)),
+				v1,
+			)),
+			err: "kind Cafe: the unversioned layout takes no manifest.SchemaTypeFields, " +
+				"because its documents do not hold type fields",
+		},
+		"schema type fields beside a schema": {
+			opts: withKinds(manifest.NewKind[Cafe](
+				"Cafe",
+				manifest.Version(
+					"v1",
+					manifest.Schema(schema.Embedded([]byte(`{}`))),
+					manifest.SchemaTypeFields(false),
+				),
+			)),
+		},
 		"deprecated older version without written": {
 			opts: withKinds(manifest.NewKind[Hours]("Hours",
 				manifest.Version("v1", manifest.Deprecated()),

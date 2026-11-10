@@ -277,10 +277,25 @@
 // declares under properties, with the names of its version. A closed
 // schema that leaves the type fields out thus passes. Only a declaration
 // in the schema document itself, outside every branch such as a schema
-// under oneOf, counts. [Registry.Verify] reports each schema that requires
-// a type field and does not declare it, because such a schema fails every
-// document. It also reports each type field that a branch or another
-// document might declare.
+// under oneOf, counts. Such a declaration counts whatever its property
+// schema holds, even a $ref to another document. [Registry.Verify] reports
+// each schema that requires a type field and does not declare it, because
+// such a schema fails every document.
+//
+// A schema might read a type field that it does not declare there, inside
+// a branch or behind a $ref to another document. A load cannot tell
+// whether the check of such a schema sees the field. It fails each
+// document that declares the version or passes through it, with an error
+// that matches [ErrSchemaTypeField], and Verify reports the schema.
+//
+// The documents of the layout of [Unversioned] do not hold type fields.
+// The check of the schema of that layout thus sees such a field blank
+// instead. A document of that layout still fails at a later version with
+// such a schema.
+//
+// [SchemaTypeFields] on a version states the answer for every type field.
+// With true, the check sees each type field as the document writes it.
+// With false, the check sees each type field blank.
 //
 // The decode admits the type fields, and by default rejects every other key
 // that the Go type does not declare. A [niceyaml.WithUnknownFields] among

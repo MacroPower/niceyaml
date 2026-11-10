@@ -78,6 +78,20 @@ var (
 	// different text in a type field.
 	ErrMixedLayers = errors.New("layers declare different type fields")
 
+	// ErrSchemaTypeField indicates a schema that might read a type field in
+	// a branch or behind a $ref to another document, on a version without
+	// [SchemaTypeFields]. A load cannot tell whether the check of such a
+	// schema sees the field. It fails each document that declares the
+	// version, and each one that passes through the version on the way to
+	// the current version. The author of the registry is at fault for the
+	// problem, and [Registry.Verify] reports it too.
+	//
+	// The documents of the layout of [Unversioned] do not hold type fields.
+	// The schema of that layout thus does not fail a document with this
+	// error. A document of that layout still fails at a later version with
+	// such a schema.
+	ErrSchemaTypeField = errors.New("schema might read a type field")
+
 	// ErrUnknownKind indicates a kind that the registry does not hold.
 	ErrUnknownKind = errors.New("unknown kind")
 

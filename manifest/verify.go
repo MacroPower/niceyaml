@@ -52,6 +52,19 @@ import (
 //
 //	MenuItem v1: $.kind: a branch or a $ref to another document might read it
 //
+// A load fails each document that declares such a version or passes
+// through it, because it cannot tell whether the check sees the field.
+// The report and the error of the load both match [ErrSchemaTypeField].
+// Verify gives such a field only this report, even when the schema also
+// requires the field outside every branch.
+//
+// [SchemaTypeFields] on a version states whether its schema reads the type
+// fields, so Verify leaves out both reports for that version. With false,
+// the check sees every type field blank, and Verify reports each type
+// field that the schema requires:
+//
+//	MenuItem v1: $.kind: required, but manifest.SchemaTypeFields(false) blanks it
+//
 // Verify skips each version that [Unversioned] adds, because the documents
 // of such a version do not hold type fields.
 //
@@ -158,25 +171,29 @@ func (r *Registry) verifyTypeFields(entry *kindEntry, compiled map[*versionEntry
 		}
 
 		name := entry.kind.name + " " + v.label()
+		fields := r.schemaFields(v, cv)
 		doc := newSchemaDoc(cv)
 
 		for _, p := range r.typeFields() {
-			f := doc.field(p)
-
 			switch {
-			case f.declared:
-				// The check sees the field.
+			case slices.ContainsFunc(fields.unsure, p.Equal):
+				errs = append(errs, markedAuthorError(ErrSchemaTypeField,
+					fmt.Sprintf("%s: %s: %s", name, p, unsureWhy), unsureRemedy(p)))
 
-			case f.required:
+			case !slices.ContainsFunc(fields.hidden, p.Equal) || !doc.field(p).required:
+				// The check sees the field, or the schema does not require
+				// it.
+
+			case v.cfg.hasTypeFields:
+				errs = append(errs, authorError(
+					fmt.Sprintf("%s: %s: required, but manifest.SchemaTypeFields(false) blanks it", name, p),
+					fmt.Sprintf("remove %s from required, or pass manifest.SchemaTypeFields(true)", p),
+				))
+
+			default:
 				errs = append(errs, authorError(
 					fmt.Sprintf("%s: %s: required, but no properties keyword declares it", name, p),
 					fmt.Sprintf("declare %s under properties, or remove it from required", p),
-				))
-
-			case f.unsure:
-				errs = append(errs, authorError(
-					fmt.Sprintf("%s: %s: a branch or a $ref to another document might read it", name, p),
-					fmt.Sprintf("declare %s under properties outside every branch and every such $ref", p),
 				))
 			}
 		}
@@ -243,13 +260,18 @@ func verifyDeprecations(entry *kindEntry, compiled map[*versionEntry]*jsonschema
 // as a detail. The author of the registry is at fault for it rather than a
 // document.
 func authorError(msg string, details ...string) error {
-	errs := make([]error, 0, len(details))
-	for _, d := range details {
-		errs = append(errs, errors.New(d))
-	}
-
 	//nolint:wrapcheck // The error is the problem itself.
-	return niceyaml.Unchecked(errors.New(msg), niceyaml.WithDetails(errs...))
+	return niceyaml.Unchecked(errors.New(msg), niceyaml.WithDetails(detailsOf(details)...))
+}
+
+// markedAuthorError returns the problem msg of a registry, as
+// [authorError] does, so that it matches mark.
+func markedAuthorError(mark error, msg string, details ...string) error {
+	//nolint:wrapcheck // The error is the problem itself.
+	return niceyaml.Unchecked(
+		&problemError{msg: msg, marks: []error{mark}},
+		niceyaml.WithDetails(detailsOf(details)...),
+	)
 }
 
 // schemaDoc is one compiled schema document, which resolves the $ref and
@@ -404,7 +426,8 @@ func (d *schemaDoc) marked(s *jsonschema.Schema) bool {
 // [schemaDoc.field] finds it.
 type schemaField struct {
 	// Whether the schema declares the value, through properties for a name
-	// or items for an index.
+	// or items for an index. The schema that such a keyword gives the value
+	// does not change the answer.
 	declared bool
 	// Whether a required keyword names the value.
 	required bool
@@ -421,6 +444,11 @@ type schemaField struct {
 // not reach is neither declared nor required. Beside the chains, the walk
 // follows the branches of each schema on the way, as [schemaDoc.branches]
 // finds them, to tell whether one of them reads the value.
+//
+// A schema on the way declares the value when it gives the value a schema,
+// whatever that schema holds. A property schema whose chain is empty thus
+// declares its property. Under Draft-07, the chain of a schema that holds
+// a $ref to another document is empty.
 func (d *schemaDoc) field(p paths.Path) schemaField {
 	var f schemaField
 
@@ -437,27 +465,27 @@ func (d *schemaDoc) field(p paths.Path) schemaField {
 
 		var next, nextBranches []*jsonschema.Schema
 
-		f.required = false
+		f.declared, f.required = false, false
 		mentioned = false
 
 		for _, s := range group {
 			f.required = f.required || sel.Kind == paths.SelectorChild && slices.Contains(s.Required, sel.Name)
 
-			sub, subLost := d.below(s, sel)
+			sub, subLost, ok := d.below(s, sel)
 			next = append(next, sub...)
 			lost = lost || subLost
+			f.declared = f.declared || ok
 		}
 
 		for _, s := range branches {
 			mentioned = mentioned || sel.Kind == paths.SelectorChild && slices.Contains(s.Required, sel.Name)
 
-			sub, subLost := d.below(s, sel)
+			sub, subLost, ok := d.below(s, sel)
 			nextBranches = append(nextBranches, sub...)
 			lost = lost || subLost
+			mentioned = mentioned || ok
 		}
 
-		f.declared = len(next) > 0
-		mentioned = mentioned || len(nextBranches) > 0
 		group, branches = next, nextBranches
 	}
 
@@ -467,10 +495,12 @@ func (d *schemaDoc) field(p paths.Path) schemaField {
 }
 
 // below returns the chain of the schema that s gives the value at sel, a
-// name or an index, or nil when s does not give the value a schema. It
-// also reports whether that chain holds a ref that the document does not
-// resolve, as [schemaDoc.chainOf] does.
-func (d *schemaDoc) below(s *jsonschema.Schema, sel paths.Selector) ([]*jsonschema.Schema, bool) {
+// name or an index. It also reports whether that chain holds a ref that
+// the document does not resolve, as [schemaDoc.chainOf] does. The last
+// result reports whether s gives the value a schema. The chain of such a
+// schema is empty under Draft-07 when the schema holds a $ref that the
+// document does not resolve.
+func (d *schemaDoc) below(s *jsonschema.Schema, sel paths.Selector) ([]*jsonschema.Schema, bool, bool) {
 	var sub *jsonschema.Schema
 
 	switch sel.Kind {
@@ -479,14 +509,16 @@ func (d *schemaDoc) below(s *jsonschema.Schema, sel paths.Selector) ([]*jsonsche
 	case paths.SelectorIndex:
 		sub = item(s, sel.Index)
 	default:
-		return nil, false
+		return nil, false, false
 	}
 
 	if sub == nil {
-		return nil, false
+		return nil, false, false
 	}
 
-	return d.chainOf(sub)
+	chain, lost := d.chainOf(sub)
+
+	return chain, lost, true
 }
 
 // branches returns the chain of each branch of a schema in group, and of

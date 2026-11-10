@@ -3427,6 +3427,376 @@ func TestRegistry_Load_TypeFields(t *testing.T) {
 	}
 }
 
+func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
+	t.Parallel()
+
+	bare := stringtest.LinesLF("apiVersion: v2", "kind: Brew")
+	brew := stringtest.LinesLF("apiVersion: v2", "kind: Brew", "metadata:", "  name: bryggkaffe")
+	plain := stringtest.LinesLF("metadata:", "  name: bryggkaffe")
+
+	// Two documents of the same version in one stream.
+	stream := stringtest.LinesLF(
+		"apiVersion: v2", "kind: Brew", "metadata:", "  name: bryggkaffe",
+		"---",
+		"apiVersion: v2", "kind: Brew", "metadata:", "  name: kokekaffe",
+	)
+
+	// A schema that reads the kind field inside a branch.
+	branch := `{
+  "if": {"properties": {"kind": {"const": "Brew"}}, "required": ["kind"]},
+  "then": {"required": ["metadata"]}
+}`
+
+	// A schema that requires the kind field outside every branch and reads
+	// it inside one branch for each kind.
+	union := `{
+  "required": ["kind"],
+  "properties": {"apiVersion": {"type": "string"}},
+  "oneOf": [
+    {"properties": {"kind": {"const": "Brew"}}, "required": ["metadata"]},
+    {"properties": {"kind": {"const": "Tea"}}}
+  ]
+}`
+
+	// A schema that requires the kind field beside a $ref to common.json.
+	requiredOutside := `{
+  "$ref": "common.json#/$defs/TypeMeta",
+  "required": ["kind"],
+  "properties": {"apiVersion": {"type": "string"}}
+}`
+
+	// A schema that reads both type fields behind a $ref to common.json.
+	outside := `{"allOf": [{"$ref": "common.json#/$defs/TypeMeta"}]}`
+
+	// A closed schema that leaves the type fields out, behind a $ref to
+	// common.json.
+	closedOutside := `{"$ref": "common.json#/$defs/Closed"}`
+
+	// A closed schema that leaves the type fields out.
+	closed := `{"type": "object", "properties": {"metadata": {"type": "object"}}, "additionalProperties": false}`
+
+	// A Draft-07 schema that declares the kind field with a $ref to
+	// common.json. Draft-07 ignores each sibling of a $ref.
+	declaredOutside := func(def string) string {
+		return `{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {"apiVersion": {"type": "string"}, "kind": {"$ref": "common.json#/$defs/` + def + `"}}
+}`
+	}
+
+	common := `{"$defs": {
+  "Brew": {"const": "Brew"},
+  "Tea": {"const": "Tea"},
+  "TypeMeta": {
+    "required": ["apiVersion", "kind"],
+    "properties": {"apiVersion": {"type": "string"}, "kind": {"type": "string"}}
+  },
+  "Closed": {"type": "object", "properties": {"metadata": {"type": "object"}}, "additionalProperties": false}
+}}`
+
+	why := "a branch or a $ref to another document might read it"
+	remedy := func(p string) string {
+		return "declare " + p + " under properties outside every branch and every such $ref, " +
+			"or pass manifest.SchemaTypeFields"
+	}
+
+	unsureKind := stringtest.JoinLF(
+		"brew.yaml: this program cannot tell whether its schema of Brew v2 reads $.kind",
+		"|-- "+why,
+		"`-- "+remedy("$.kind"),
+	)
+
+	unsureBoth := stringtest.JoinLF(
+		"brew.yaml: 2 errors",
+		"|-- brew.yaml: this program cannot tell whether its schema of Brew v2 reads $.apiVersion",
+		"|   |-- "+why,
+		"|   `-- "+remedy("$.apiVersion"),
+		"`-- brew.yaml: this program cannot tell whether its schema of Brew v2 reads $.kind",
+		"    |-- "+why,
+		"    `-- "+remedy("$.kind"),
+	)
+
+	// The error of a check that requires both type fields and sees them
+	// blank.
+	missingBoth := stringtest.JoinLF(
+		"brew.yaml: 2 errors",
+		`|-- brew.yaml:3:1: $.apiVersion: missing required property "apiVersion"`,
+		"`-- brew.yaml:3:1: $.kind: missing required property \"kind\"",
+		"",
+		"brew.yaml",
+		"   1 | apiVersion: v2",
+		"   2 | kind: Brew",
+		"   3 | metadata:",
+		`     | ^^^^^^^^ missing required property "apiVersion"; missing required property "kind"`,
+		"   4 |   name: bryggkaffe",
+	)
+
+	visible := []manifest.VersionOption{manifest.SchemaTypeFields(true)}
+	blank := []manifest.VersionOption{manifest.SchemaTypeFields(false)}
+
+	tcs := map[string]struct {
+		// The schema of v2, and the other options of v2.
+		schema  string
+		version []manifest.VersionOption
+		// The schema belongs to v1 instead, a version that every document
+		// of the case leaves behind.
+		older bool
+		// The schema belongs to the unversioned layout instead, which
+		// takes the place of v1.
+		unversioned bool
+		// The unversioned layout takes the place of v1 without a schema,
+		// and the schema stays on v2.
+		layout bool
+		doc    string
+		err    string
+		// The error is the fault of the author of the registry.
+		author bool
+	}{
+		"branch without the option": {
+			schema: branch,
+			doc:    brew,
+			err:    unsureKind,
+			author: true,
+		},
+		"branch without the option on a version that the document does not reach": {
+			schema: branch,
+			older:  true,
+			doc:    brew,
+		},
+		"branch that sees the type fields": {
+			schema:  branch,
+			version: visible,
+			doc:     brew,
+		},
+		"branch that sees the type fields and fails": {
+			schema:  branch,
+			version: visible,
+			doc:     bare,
+			err: stringtest.JoinLF(
+				`brew.yaml:1:1: $.metadata: missing required property "metadata"`,
+				"",
+				"   1 | apiVersion: v2",
+				"     | ^^^^^^^^^^",
+				"   2 | kind: Brew",
+			),
+		},
+		"branch that sees the type fields blank": {
+			// The condition does not hold without the kind field, so the
+			// schema check passes and the check of the name fails.
+			schema:  branch,
+			version: blank,
+			doc:     bare,
+			err: stringtest.JoinLF(
+				"brew.yaml:1:1: $.metadata.name: name must be a non-empty string",
+				"",
+				"   1 | apiVersion: v2",
+				"     | ^^^^^^^^^^",
+				"   2 | kind: Brew",
+			),
+		},
+		"branch without the option on each document of a stream": {
+			schema: branch,
+			doc:    stream,
+			err: stringtest.JoinLF(
+				"brew.yaml: 2 errors",
+				"|-- brew.yaml: document 1: this program cannot tell whether its schema of Brew v2 reads $.kind",
+				"|   |-- "+why,
+				"|   `-- "+remedy("$.kind"),
+				"`-- brew.yaml: document 2: this program cannot tell whether its schema of Brew v2 reads $.kind",
+				"    |-- "+why,
+				"    `-- "+remedy("$.kind"),
+			),
+			author: true,
+		},
+		"branch that sees the type fields on each document of a stream": {
+			schema:  branch,
+			version: visible,
+			doc:     stream,
+		},
+		"branch on the unversioned layout": {
+			schema:      branch,
+			unversioned: true,
+			doc:         plain,
+		},
+		"required outside the branches that read it without the option": {
+			schema: union,
+			doc:    brew,
+			err:    unsureKind,
+			author: true,
+		},
+		"required outside the branches that see the type fields": {
+			schema:  union,
+			version: visible,
+			doc:     brew,
+		},
+		"required beside a $ref to another document without the option": {
+			schema: requiredOutside,
+			doc:    brew,
+			err:    unsureKind,
+			author: true,
+		},
+		"required beside a $ref to another document that sees the type fields": {
+			schema:  requiredOutside,
+			version: visible,
+			doc:     brew,
+		},
+		"$ref to another document without the option": {
+			schema: outside,
+			doc:    brew,
+			err:    unsureBoth,
+			author: true,
+		},
+		"$ref to another document that sees the type fields": {
+			schema:  outside,
+			version: visible,
+			doc:     brew,
+		},
+		"$ref to another document that sees the type fields blank": {
+			schema:  outside,
+			version: blank,
+			doc:     brew,
+			err:     missingBoth,
+		},
+		"declared with a $ref to another document under Draft-07": {
+			schema: declaredOutside("Brew"),
+			doc:    brew,
+		},
+		"declared with a $ref to another document under Draft-07 and fails": {
+			schema: declaredOutside("Tea"),
+			doc:    brew,
+			err: stringtest.JoinLF(
+				"brew.yaml:2:7: $.kind: value does not match const",
+				"",
+				"   1 | apiVersion: v2",
+				"   2 | kind: Brew",
+				"     |       ^^^^",
+				"   3 | metadata:",
+				"   4 |   name: bryggkaffe",
+			),
+		},
+		"closed schema behind a $ref without the option": {
+			schema: closedOutside,
+			doc:    brew,
+			err:    unsureBoth,
+			author: true,
+		},
+		"closed schema behind a $ref on the unversioned layout": {
+			schema:      closedOutside,
+			unversioned: true,
+			doc:         plain,
+		},
+		"closed schema behind a $ref that sees the type fields blank": {
+			schema:  closedOutside,
+			version: blank,
+			doc:     brew,
+		},
+		"closed schema that sees the type fields": {
+			schema:  closed,
+			version: visible,
+			doc:     brew,
+			err: stringtest.JoinLF(
+				"brew.yaml: 2 errors",
+				"|-- brew.yaml:1:1: $.apiVersion~: value is not allowed",
+				"`-- brew.yaml:2:1: $.kind~: value is not allowed",
+				"",
+				"brew.yaml",
+				"   1 | apiVersion: v2",
+				"     | ^^^^^^^^^^ value is not allowed",
+				"   2 | kind: Brew",
+				"     | ^^^^ value is not allowed",
+				"   3 | metadata:",
+				"   4 |   name: bryggkaffe",
+			),
+		},
+		"declared schema that sees the type fields blank": {
+			schema:  brewSchema("v2", "Tea"),
+			version: blank,
+			doc:     brew,
+			err:     missingBoth,
+		},
+		"older document on the way through the version": {
+			schema: branch,
+			doc:    stringtest.LinesLF("apiVersion: v1", "kind: Coffee", "metadata:", "  name: bryggkaffe"),
+			err:    unsureKind,
+			author: true,
+		},
+		"unversioned document on the way through the version": {
+			schema: branch,
+			layout: true,
+			doc:    plain,
+			err: stringtest.JoinLF(
+				"brew.yaml: this program cannot tell whether its schema of Brew v2 reads $.kind",
+				"|-- the document has no apiVersion and no kind, so this program reads it as an unversioned Brew",
+				"|-- "+why,
+				"`-- "+remedy("$.kind"),
+			),
+			author: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			fsys := fstest.MapFS{
+				"schema.json": {Data: []byte(tc.schema)},
+				"common.json": {Data: []byte(common)},
+			}
+
+			sch := manifest.Schema(schema.FileFS(fsys, "schema.json"))
+
+			v1 := manifest.Version("v1", manifest.KindName("Coffee"))
+			v2 := tc.version
+
+			if tc.layout {
+				v1 = manifest.Unversioned()
+			}
+
+			switch {
+			case tc.unversioned:
+				v1 = manifest.Unversioned(sch)
+
+			case tc.older:
+				v1 = manifest.Version("v1", manifest.KindName("Coffee"), sch)
+
+			default:
+				v2 = append([]manifest.VersionOption{sch}, v2...)
+			}
+
+			reg := manifest.MustNewRegistry(
+				manifest.WithNameField(meta.Child("name")),
+				manifest.WithKinds(manifest.NewKind[Brew]("Brew", v1, manifest.Version("v2", v2...))),
+			)
+
+			// The second load reads the type fields of the schema from the
+			// cache of the registry, and must class them as the first did.
+			for range 2 {
+				set, err := reg.Load(t.Context(),
+					manifest.Sources(niceyaml.NewSourceFromString(tc.doc, niceyaml.WithName("brew.yaml"))))
+				if tc.err == "" {
+					require.NoError(t, err)
+
+					_, ok := set.Get[Brew]("bryggkaffe")
+					require.True(t, ok)
+
+					continue
+				}
+
+				require.Error(t, err)
+				assert.Nil(t, set)
+				assert.Equal(t, tc.err, niceyaml.FormatError(err))
+				assert.Equal(t, !tc.author, niceyaml.IsInvalid(err))
+
+				if tc.author {
+					require.ErrorIs(t, err, manifest.ErrSchemaTypeField)
+				} else {
+					require.NotErrorIs(t, err, manifest.ErrSchemaTypeField)
+				}
+			}
+		})
+	}
+}
+
 func TestRegistry_Load_MergedTypeFields(t *testing.T) {
 	t.Parallel()
 

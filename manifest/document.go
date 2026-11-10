@@ -611,10 +611,12 @@ func detailsOf(texts []string) []error {
 
 // checkSchema checks the working copy against the schema of v, and reports
 // whether it passed. A version without a schema passes. The check sees
-// each type field that the schema declares, with the names of v, and sees
-// every other type field blank. Each problem of the check takes detail as
-// its last detail, when detail is not nil. Only the schema of the current
-// version reports deprecations.
+// each type field that [Registry.schemaFields] does not hide, with the
+// names of v, and sees every other type field blank. A schema with a type
+// field that the registry is unsure about fails the document without a
+// check. Each problem of the check takes detail as its last detail, when
+// detail is not nil. Only the schema of the current version reports
+// deprecations.
 func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail error) bool {
 	if !v.cfg.hasSchema {
 		return true
@@ -634,12 +636,22 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 		sch = sch.WithoutDeprecations()
 	}
 
+	fields := reg.schemaFields(v, sch.JSONSchema())
+
+	for _, p := range fields.unsure {
+		d.fail(reg.unsureTypeField(v, p))
+	}
+
+	if len(fields.unsure) > 0 {
+		return false
+	}
+
 	work := d.work
 
-	if hide := reg.hiddenFields(v, sch); len(hide) > 0 {
+	if len(fields.hidden) > 0 {
 		var ok bool
 
-		work, ok = d.workingCopy(d.workFrom, d.workLocate, hide)
+		work, ok = d.workingCopy(d.workFrom, d.workLocate, fields.hidden)
 		if !ok {
 			return false
 		}

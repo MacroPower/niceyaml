@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"fmt"
 	"slices"
 	"unicode/utf8"
 
@@ -11,13 +12,12 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/schema"
 )
 
 // prepareWork sets the working copy to a copy of doc, the document or a
 // migrated copy of it, without a blanked field. It keeps doc and locate,
 // so that a schema check can build a copy that blanks the type fields that
-// its schema does not declare.
+// its schema does not read.
 func (d *docState) prepareWork(doc *niceyaml.Node, locate func(niceyaml.Located) niceyaml.Place) bool {
 	work, ok := d.workingCopy(doc, locate, nil)
 	if !ok {
@@ -106,49 +106,99 @@ func textBounds(doc *niceyaml.Node) (int, int) {
 	return start, end
 }
 
-// hiddenFields is the cache entry of a version, as [Registry.hiddenFields]
-// fills it: the type fields that the schema of the version does not
-// declare, and the validator that it read them from.
-type hiddenFields struct {
+// schemaFields is what the schema of a version says about the type
+// fields, as [Registry.schemaFields] returns it.
+type schemaFields struct {
+	// The validator that the registry read the fields from.
 	validator *jsonschema.Validator
-	fields    []paths.Path
+	// The type fields that the check of the schema sees blank.
+	hidden []paths.Path
+	// The type fields that the schema might read in a place that the
+	// registry does not follow, as [schemaField] describes. The registry
+	// cannot tell whether the check sees them.
+	unsure []paths.Path
 }
 
-// hiddenFields returns the type fields that sch, the schema of v, does
-// not declare. The check of the schema sees these fields blank. It
-// returns nil for a schema that does not check anything.
+// schemaFields returns what validator, the compiled schema of v, says
+// about the type fields. It returns the zero value for a nil validator,
+// which does not check anything. A load and [Registry.Verify] both read
+// the type fields through it, so they class each field alike.
+//
+// [SchemaTypeFields] on v states the answer for every type field. Without
+// the option, the check sees each type field that the schema declares. A
+// type field that the schema does not declare is unsure when a branch or
+// a $ref that the document does not resolve might read it, as
+// [schemaField] describes. Such a field is unsure whether or not the
+// schema also requires it. The check sees every other type field blank.
+// On the unversioned layout, the check sees the unsure fields blank too,
+// because the documents of that layout do not hold type fields.
 //
 // The registry keeps the fields of each version under the version and
 // the validator that it read them from. The schema registry hands a
-// version a new validator after [schema.Registry.Invalidate], and the
-// fields of the old one leave the cache with the next call. So the cache
-// holds at most one entry for each version.
-func (r *Registry) hiddenFields(v *versionEntry, sch *schema.Schema) []paths.Path {
-	validator := sch.JSONSchema()
+// version a new validator after the Invalidate method of that registry
+// runs. The fields of the old validator leave the cache with the next
+// call, so the cache holds at most one entry for each version.
+func (r *Registry) schemaFields(v *versionEntry, validator *jsonschema.Validator) schemaFields {
 	if validator == nil {
-		return nil
+		return schemaFields{}
 	}
 
-	if cached, ok := r.hidden.Load(v); ok {
-		entry, _ := cached.(hiddenFields) //nolint:errcheck // The map holds the fields of each version.
+	if v.cfg.hasTypeFields {
+		if v.cfg.typeFieldsVisible {
+			return schemaFields{validator: validator}
+		}
+
+		return schemaFields{validator: validator, hidden: r.typeFields()}
+	}
+
+	if cached, ok := r.fields.Load(v); ok {
+		entry, _ := cached.(schemaFields) //nolint:errcheck // The map holds the fields of each version.
 		if entry.validator == validator {
-			return entry.fields
+			return entry
 		}
 	}
 
 	doc := newSchemaDoc(validator)
-
-	var fields []paths.Path
+	entry := schemaFields{validator: validator}
 
 	for _, p := range r.typeFields() {
-		if !doc.field(p).declared {
-			fields = append(fields, p)
+		f := doc.field(p)
+
+		switch {
+		case f.declared:
+			// The check sees the field.
+
+		case f.unsure && !v.cfg.unversioned:
+			entry.unsure = append(entry.unsure, p)
+
+		default:
+			entry.hidden = append(entry.hidden, p)
 		}
 	}
 
-	r.hidden.Store(v, hiddenFields{validator: validator, fields: fields})
+	r.fields.Store(v, entry)
 
-	return fields
+	return entry
+}
+
+// unsureTypeField returns the problem of the schema of v, which might
+// read the type field at p in a place that the registry does not follow.
+// The author of the registry is at fault for it rather than a document.
+func (r *Registry) unsureTypeField(v *versionEntry, p paths.Path) error {
+	msg := fmt.Sprintf("%s cannot tell whether its schema of %s %s reads %s", r.app(), v.kind.kind.name, v.label(), p)
+
+	return markedAuthorError(ErrSchemaTypeField, msg, unsureWhy, unsureRemedy(p))
+}
+
+// unsureWhy is the detail that says why the registry cannot tell whether
+// a schema reads a type field.
+const unsureWhy = "a branch or a $ref to another document might read it"
+
+// unsureRemedy returns the detail that says how the author of a registry
+// states whether its schema reads the type field at p.
+func unsureRemedy(p paths.Path) string {
+	return fmt.Sprintf("declare %s under properties outside every branch and every such $ref, "+
+		"or pass manifest.SchemaTypeFields", p)
 }
 
 // blanker blanks type fields of a document in a working copy of its

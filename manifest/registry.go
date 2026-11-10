@@ -34,10 +34,10 @@ type Registry struct {
 	names map[string]*kindEntry
 	// The kind of each Go type.
 	types map[reflect.Type]*kindEntry
-	// The type fields that the schema of each version does not declare,
-	// keyed by the version, as [Registry.hiddenFields] returns them. Each
-	// entry is a [hiddenFields] value that names the validator it reads.
-	hidden  sync.Map
+	// What the schema of each version says about the type fields, keyed by
+	// the version, as [Registry.schemaFields] returns it. Each entry is a
+	// [schemaFields] value that names the validator it reads.
+	fields  sync.Map
 	kinds   []*kindEntry
 	removed []*removal
 	cfg     registryConfig
@@ -522,6 +522,17 @@ func (b *registryBuilder) addVersions(entry *kindEntry) {
 
 		if vc.hasSchema && vc.schema.Key() == "" && vc.schema.Schema() == nil {
 			b.failf("kind %s: %s has a schema.Ref that names no schema", k.name, label)
+		}
+
+		if vc.hasTypeFields {
+			switch {
+			case vc.unversioned:
+				b.failf("kind %s: the unversioned layout takes no manifest.SchemaTypeFields, "+
+					"because its documents do not hold type fields", k.name)
+
+			case !vc.hasSchema:
+				b.failf("kind %s: %s takes no manifest.SchemaTypeFields without manifest.Schema", k.name, label)
+			}
 		}
 
 		if _, ok := entry.byName[vc.name]; ok && !vc.unversioned {
