@@ -70,14 +70,23 @@ func main() {
 	report := warnings.Report(err)
 	lipgloss.Println(p.PrintError(report))
 
-	fmt.Println("\nList the fix for each deprecation:")
+	fmt.Println("\nList the rule and the fix of each deprecation:")
 
-	// Each deprecation matches ErrDeprecated. Problems yields each problem
-	// with its details as its children, and the deprecationMessage of the
-	// schema is the detail of a deprecation. Problems keeps the detail that
-	// the printed report drops from a repeat, so every row names its fix.
+	// Each deprecation wraps a *schema.Deprecation, which lists every
+	// deprecated schema that applies to the node of the warning. A schema
+	// holds its deprecationMessage and the JSON Pointer that the validator
+	// followed to reach it. The pointer steps through each $ref on the way
+	// and does not name the definition that the $ref points at. So the
+	// vegan schema reads /properties/fika/items/$ref/properties/vegan, and
+	// the schema file holds it at /$defs/item/properties/vegan.
+	//
+	// The pointer names the rule, so both vegan rows name one rule, and a
+	// tool groups or accepts them by it. The Deprecation keeps the message
+	// that the printed report drops from a repeat, so every row names its
+	// fix.
 	for problem := range niceyaml.Problems(report) {
-		if !errors.Is(problem.Err, schema.ErrDeprecated) {
+		d, ok := errors.AsType[*schema.Deprecation](problem.Err)
+		if !ok {
 			continue
 		}
 
@@ -85,15 +94,16 @@ func main() {
 		path, _ := problem.Path()
 
 		// Each problem holds the name of its source as written, and each
-		// detail holds text from the schema file. Either can hold a control
+		// schema holds text from the schema file. Either can hold a control
 		// character, such as a line feed. Control replaces each control
 		// character with one visible rune, as in examples/errors, so each fix
 		// takes one row.
 		name := escape.Control(problem.Name())
 
-		for _, detail := range problem.Children {
-			msg := escape.Control(detail.Message())
-			fmt.Printf("%s:%d:%d\t%s\t%s\n", name, pos.Line+1, pos.Col+1, path, msg)
+		for _, s := range d.Schemas {
+			rule := escape.Control(s.SchemaPath)
+			msg := escape.Control(s.Message)
+			fmt.Printf("%s:%d:%d\t%s\t%s\t%s\n", name, pos.Line+1, pos.Col+1, path, rule, msg)
 		}
 	}
 

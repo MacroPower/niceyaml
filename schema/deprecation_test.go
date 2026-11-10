@@ -3,6 +3,8 @@ package schema_test
 import (
 	"cmp"
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -46,6 +48,13 @@ const cafeSchema = `{
     "printer": {"type": "object", "deprecated": true, "deprecationMessage": "cafe 5.0 drops printers."},
     "dish": {"type": "object", "properties": {"cost": {"deprecated": true, "deprecationMessage": "write price"}, "price": {"type": "integer"}}}
   }
+}`
+
+// aliasedSchema deprecates the value of two properties through one
+// definition, so an alias gives one node two deprecated schemas.
+const aliasedSchema = `{
+  "properties": {"special": {"$ref": "#/$defs/dish"}, "offer": {"$ref": "#/$defs/dish"}},
+  "$defs": {"dish": {"type": "string", "deprecated": true, "deprecationMessage": "write the dish under dishes"}}
 }`
 
 // warningRows returns the text of each problem of err on a line, with the
@@ -198,6 +207,15 @@ func TestSchema_Check_Deprecations(t *testing.T) {
 				"  write price",
 			),
 		},
+		// Two schemas with one message give the warning one detail.
+		"one message from two schemas": {
+			schema: aliasedSchema,
+			input:  stringtest.LinesLF("special: &dish semla", "offer: *dish"),
+			want: stringtest.JoinLF(
+				`cafe.yaml:1:16: warning: $.special: deprecated value "semla"`,
+				"  write the dish under dishes",
+			),
+		},
 		"root": {
 			schema: `{"deprecated": true, "deprecationMessage": "cafe 5.0 reads cafe.toml"}`,
 			input:  "seats: 40\n",
@@ -237,6 +255,152 @@ func TestSchema_Check_Deprecations(t *testing.T) {
 				require.ErrorIs(t, problem.Err, schema.ErrDeprecated)
 				assert.True(t, problem.Warning)
 			}
+		})
+	}
+}
+
+// deprecationRows returns one line for each problem of err that wraps a
+// [*schema.Deprecation]. The line holds the path of the problem, whether
+// the deprecation marks a key or a value, and its message. A line below
+// it, indented, holds the schema path and the message of each of its
+// schemas.
+func deprecationRows(t *testing.T, err error) string {
+	t.Helper()
+
+	var rows []string
+
+	for problem := range niceyaml.Problems(err) {
+		d, ok := errors.AsType[*schema.Deprecation](problem.Err)
+		require.True(t, ok)
+
+		target := "value"
+		if d.Key {
+			target = "key"
+		}
+
+		path, _ := problem.Path()
+		rows = append(rows, fmt.Sprintf("%s %s: %s", path, target, d.Message))
+
+		for _, s := range d.Schemas {
+			rows = append(rows, fmt.Sprintf("  %q %q", s.SchemaPath, s.Message))
+		}
+	}
+
+	return stringtest.JoinLF(rows...)
+}
+
+func TestSchema_Check_Deprecation(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		schema string
+		input  string
+		want   string
+	}{
+		"field": {
+			input: "legacyPricing: true\n",
+			want: stringtest.JoinLF(
+				`$.legacyPricing~ key: deprecated field "legacyPricing"`,
+				`  "/properties/legacyPricing" "legacyPricing has no effect. Remove it."`,
+			),
+		},
+		"field without a message": {
+			input: "notes: call the roaster\n",
+			want: stringtest.JoinLF(
+				`$.notes~ key: deprecated field "notes"`,
+				`  "/properties/notes" ""`,
+			),
+		},
+		"two schemas at one value": {
+			input: stringtest.LinesLF("wifi:", "  security: wep"),
+			want: stringtest.JoinLF(
+				`$.wifi.security value: deprecated value "wep"`,
+				`  "/properties/wifi/properties/security/$ref" "cafe 5.0 replaces security with wifi.mode."`,
+				`  "/properties/wifi/properties/security/then" "WEP is not secure. Set security to wpa3."`,
+			),
+		},
+		// Both warnings name one schema, so a report groups them by it.
+		"one schema at two keys": {
+			input: stringtest.LinesLF(
+				"dishes:",
+				"  semla:",
+				"    cost: 45",
+				"  bulle:",
+				"    cost: 40",
+			),
+			want: stringtest.JoinLF(
+				`$.dishes.semla.cost~ key: deprecated field "cost"`,
+				`  "/properties/dishes/additionalProperties/$ref/properties/cost" "write price"`,
+				`$.dishes.bulle.cost~ key: deprecated field "cost"`,
+				`  "/properties/dishes/additionalProperties/$ref/properties/cost" "write price"`,
+			),
+		},
+		// The check reaches the key through each use of the anchor and
+		// along one schema path, so the warning lists the schema once.
+		"alias": {
+			input: stringtest.LinesLF(
+				"dishes:",
+				"  semla: &dish",
+				"    cost: 45",
+				"  bulle: *dish",
+			),
+			want: stringtest.JoinLF(
+				`$.dishes.semla.cost~ key: deprecated field "cost"`,
+				`  "/properties/dishes/additionalProperties/$ref/properties/cost" "write price"`,
+			),
+		},
+		"merge key": {
+			input: stringtest.LinesLF(
+				"dishes:",
+				"  semla: &dish",
+				"    cost: 45",
+				"  bulle:",
+				"    <<: *dish",
+				"    price: 40",
+			),
+			want: stringtest.JoinLF(
+				`$.dishes.semla.cost~ key: deprecated field "cost"`,
+				`  "/properties/dishes/additionalProperties/$ref/properties/cost" "write price"`,
+			),
+		},
+		// Each use of the anchor is the value of its own property, so the
+		// warning of the one node lists both schemas.
+		"alias under two schemas": {
+			schema: aliasedSchema,
+			input:  stringtest.LinesLF("special: &dish semla", "offer: *dish"),
+			want: stringtest.JoinLF(
+				`$.special value: deprecated value "semla"`,
+				`  "/properties/offer/$ref" "write the dish under dishes"`,
+				`  "/properties/special/$ref" "write the dish under dishes"`,
+			),
+		},
+		"key under propertyNames": {
+			input: stringtest.LinesLF("milks:", "  Oat: 1"),
+			want: stringtest.JoinLF(
+				`$.milks.Oat~ key: deprecated field "Oat"`,
+				`  "/properties/milks/propertyNames/anyOf/1" "write the milk in lowercase"`,
+			),
+		},
+		"root": {
+			schema: `{"deprecated": true, "deprecationMessage": "cafe 5.0 reads cafe.toml"}`,
+			input:  "seats: 40\n",
+			want: stringtest.JoinLF(
+				`$ value: deprecated value`,
+				`  "" "cafe 5.0 reads cafe.toml"`,
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s := compileSchema(t, cmp.Or(tc.schema, cafeSchema))
+			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("cafe.yaml"))
+			warnings := niceyaml.NewWarnings()
+
+			require.NoError(t, doc.Validate(warnings.Context(t.Context()), s))
+			assert.Equal(t, tc.want, deprecationRows(t, warnings.Err()))
 		})
 	}
 }
@@ -304,6 +468,16 @@ func TestSchema_ValidateValue_Deprecations(t *testing.T) {
 			`warning: $.wifi.security: deprecated value "wep"`,
 		), warnings.Err().Error())
 		require.ErrorIs(t, warnings.Err(), schema.ErrDeprecated)
+
+		assert.Equal(t, stringtest.JoinLF(
+			`$.legacyPricing~ key: deprecated field "legacyPricing"`,
+			`  "/properties/legacyPricing" "legacyPricing has no effect. Remove it."`,
+			`$.tags[0] value: deprecated value "old"`,
+			`  "/properties/tags/items/then" ""`,
+			`$.wifi.security value: deprecated value "wep"`,
+			`  "/properties/wifi/properties/security/$ref" "cafe 5.0 replaces security with wifi.mode."`,
+			`  "/properties/wifi/properties/security/then" "WEP is not secure. Set security to wpa3."`,
+		), deprecationRows(t, warnings.Err()))
 	})
 
 	t.Run("a value that fails hands its warnings over and returns its violations", func(t *testing.T) {
@@ -335,4 +509,31 @@ func TestSchema_ValidateValue_Deprecations(t *testing.T) {
 			`warning: $.sizes: deprecated value "large"`,
 		), warnings.Err().Error())
 	})
+}
+
+func TestDeprecation(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input *schema.Deprecation
+		want  string
+		is    bool
+	}{
+		"deprecation": {
+			input: &schema.Deprecation{Message: `deprecated field "legacyPricing"`},
+			want:  `deprecated field "legacyPricing"`,
+			is:    true,
+		},
+		"nil": {},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.input.Error())
+			assert.Equal(t, tc.is, errors.Is(tc.input, schema.ErrDeprecated))
+			assert.NotErrorIs(t, tc.input, schema.ErrViolation)
+		})
+	}
 }

@@ -81,7 +81,8 @@ var (
 	// ErrDeprecated indicates the warning about a value that a schema with
 	// "deprecated": true applies to. [Schema.Check] and
 	// [Schema.ValidateValue] report each such value as a warning that
-	// matches it.
+	// matches it through the [*Deprecation] that it wraps. [errors.As]
+	// finds the Deprecation itself, which names each schema.
 	ErrDeprecated = errors.New("deprecated")
 
 	// AcceptAll is the [*Schema] that passes every document and value without
@@ -473,8 +474,9 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // [go.jacobcolvin.com/niceyaml/printer.Printer] can display them. Each one
 // wraps a [*Violation] that names the keyword the value fails, so it
 // matches [ErrViolation]. For each value that a deprecated schema applies
-// to, a Schema hands a warning that matches [ErrDeprecated] to the
-// [niceyaml.Warnings] collector of the context.
+// to, a Schema hands a warning to the [niceyaml.Warnings] collector of the
+// context. The warning wraps a [*Deprecation] that names each such schema,
+// so it matches [ErrDeprecated].
 //
 // [Schema.Check] checks a node. The root [niceyaml.Node] of a document
 // stands for the whole document, and a Node from [niceyaml.Node.At]

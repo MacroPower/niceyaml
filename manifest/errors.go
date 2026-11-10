@@ -117,7 +117,9 @@ var (
 	// field, or value. It is [schema.ErrDeprecated], which the warning of
 	// a schema check about a deprecated field or value matches.
 	// [ErrDeprecatedVersion] and [ErrDeprecatedKind] tell the warning about
-	// a version and the warning about a kind apart from the others.
+	// a version and the warning about a kind apart from the others. Only
+	// the warning of a schema check wraps a [*schema.Deprecation], which
+	// names each schema that marks the field or the value.
 	ErrDeprecated = schema.ErrDeprecated
 
 	// ErrDeprecatedVersion indicates the warning about a version, or the

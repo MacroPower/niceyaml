@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -2325,12 +2326,19 @@ func TestRegistry_Load_Deprecations(t *testing.T) {
 		w, ok := errors.AsType[*manifest.Warning](problem.Err)
 		require.True(t, ok)
 
-		rows = append(rows, fmt.Sprintf("%s %s %s %s", w.File, w.Kind, w.Version, w.Path))
+		// The warning of a schema check also wraps its deprecation, which
+		// names the schema.
+		d, ok := errors.AsType[*schema.Deprecation](problem.Err)
+		require.True(t, ok)
+		require.Len(t, d.Schemas, 1)
+
+		rows = append(rows, fmt.Sprintf("%s %s %s %s %s",
+			w.File, w.Kind, w.Version, w.Path, d.Schemas[0].SchemaPath))
 	}
 
 	assert.Equal(t, []string{
-		"config/menu.yaml MenuItem cafe.jacobcolvin.com/v1beta1 $.spec.legacyPricing~",
-		"config/menu.yaml MenuItem cafe.jacobcolvin.com/v1 $.spec.legacyPricing~",
+		"config/menu.yaml MenuItem cafe.jacobcolvin.com/v1beta1 $.spec.legacyPricing~ /properties/spec/properties/legacyPricing",
+		"config/menu.yaml MenuItem cafe.jacobcolvin.com/v1 $.spec.legacyPricing~ /properties/spec/properties/legacyPricing",
 	}, rows)
 
 	// A document that fails the schema reports its deprecations beside its
@@ -2382,6 +2390,19 @@ func TestRegistry_Load_DeprecationMarks(t *testing.T) {
 		return !accepted
 	})
 
+	// A filter that accepts each deprecation of the schema at
+	// /properties/spec/properties/legacy.
+	acceptSchema := manifest.WithWarningFilter(func(w *manifest.Warning) bool {
+		d, ok := errors.AsType[*schema.Deprecation](w)
+		if !ok {
+			return true
+		}
+
+		return slices.ContainsFunc(d.Schemas, func(s schema.DeprecatedSchema) bool {
+			return s.SchemaPath != "/properties/spec/properties/legacy"
+		})
+	})
+
 	oldHours := stringtest.LinesLF("apiVersion: x/v1alpha1", "kind: Hours", "spec:", "  legacy: true")
 
 	tcs := map[string]struct {
@@ -2390,6 +2411,8 @@ func TestRegistry_Load_DeprecationMarks(t *testing.T) {
 		file string
 		// Want holds the path and the message of each warning, and the
 		// sentinels among version, kind, and deprecated that it matches.
+		// The path of each schema follows for a warning that wraps a
+		// [*schema.Deprecation].
 		want []string
 	}{
 		"deprecated version": {
@@ -2410,7 +2433,7 @@ func TestRegistry_Load_DeprecationMarks(t *testing.T) {
 		"deprecated field": {
 			opts: hours(manifest.Version("x/v1", manifest.Schema(legacy))),
 			file: stringtest.LinesLF("apiVersion: x/v1", "kind: Hours", "spec:", "  legacy: true"),
-			want: []string{`$.spec.legacy~: deprecated field "legacy": deprecated`},
+			want: []string{`$.spec.legacy~: deprecated field "legacy": deprecated, /properties/spec/properties/legacy`},
 		},
 		"deprecated version and kind under a version field alone": {
 			opts: versionOnly,
@@ -2427,7 +2450,16 @@ func TestRegistry_Load_DeprecationMarks(t *testing.T) {
 			),
 			load: []manifest.LoadOption{accept},
 			file: oldHours,
-			want: []string{`$.spec.legacy~: deprecated field "legacy": deprecated`},
+			want: []string{`$.spec.legacy~: deprecated field "legacy": deprecated, /properties/spec/properties/legacy`},
+		},
+		"filter that accepts a deprecated schema": {
+			opts: hours(
+				manifest.Version("x/v1alpha1", manifest.Deprecated()),
+				manifest.Version("x/v1", manifest.Schema(legacy)),
+			),
+			load: []manifest.LoadOption{acceptSchema},
+			file: oldHours,
+			want: []string{`$.apiVersion: deprecated version "x/v1alpha1": version, deprecated`},
 		},
 		"filter that accepts a deprecated version under a version field alone": {
 			opts: versionOnly,
@@ -2466,6 +2498,12 @@ func TestRegistry_Load_DeprecationMarks(t *testing.T) {
 				for _, m := range marks {
 					if errors.Is(problem.Err, m.err) {
 						matched = append(matched, m.name)
+					}
+				}
+
+				if d, ok := errors.AsType[*schema.Deprecation](problem.Err); ok {
+					for _, s := range d.Schemas {
+						matched = append(matched, s.SchemaPath)
 					}
 				}
 

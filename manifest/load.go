@@ -66,6 +66,8 @@ func WithWarningsAsErrors(strict bool) LoadOption {
 // [WithWarningsAsErrors] applies, so a dropped warning never fails a
 // strict load. A filter that accepts a deprecated version for a while
 // matches [ErrDeprecatedVersion] with the Kind and Version of the warning.
+// A filter that accepts a deprecated field or value reads the schema path
+// from the [*schema.Deprecation] that [errors.As] finds in the warning.
 func WithWarningFilter(keep func(*Warning) bool) LoadOption {
 	return func(c *loadConfig) {
 		c.filters = append(c.filters, keep)

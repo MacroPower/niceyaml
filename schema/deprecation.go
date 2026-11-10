@@ -18,6 +18,85 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
+// Deprecation is the warning about one node that deprecated schemas apply
+// to. [Schema.Check] and [Schema.ValidateValue] report each one as a
+// [*niceyaml.Error] that wraps a Deprecation and carries the YAML path to
+// the node, as they report a [*Violation]. So a report reads the schemas
+// from the Deprecation instead of matching on the text of the warning:
+//
+//	for problem := range niceyaml.Problems(warnings.Err()) {
+//		d, ok := errors.AsType[*schema.Deprecation](problem.Err)
+//		if !ok {
+//			continue
+//		}
+//
+//		path, _ := problem.Path()
+//
+//		for _, s := range d.Schemas {
+//			emit(s.SchemaPath, path, s.Message)
+//		}
+//	}
+//
+// A check gives each node at most one warning, as the Deprecations
+// section of the package describes. So one Deprecation lists every
+// deprecated schema that reaches its node.
+//
+// Every Deprecation matches [ErrDeprecated], and so do warnings that a
+// schema did not produce. A load of [go.jacobcolvin.com/niceyaml/manifest]
+// warns about a deprecated version or kind, and that warning does not wrap
+// a Deprecation.
+//
+//nolint:errname // Named for what it reports, as [Violation] is.
+type Deprecation struct {
+	// Message is the headline of the warning, such as `deprecated field
+	// "legacyPricing"`. It is the text that [Deprecation.Error] returns,
+	// and the message of the [*niceyaml.Error] that wraps the Deprecation.
+	Message string
+
+	// Schemas holds each deprecated schema that reaches the node, in the
+	// order that the check evaluated them. A value has two when the
+	// definition behind a $ref and an allOf branch beside the $ref both
+	// deprecate it. The check reaches a node behind an alias or a merge
+	// key once for each use, and Schemas lists each SchemaPath once.
+	Schemas []DeprecatedSchema
+
+	// Key reports whether the schemas mark the key of a member. When it
+	// is false, they mark the value.
+	Key bool
+}
+
+// DeprecatedSchema is one schema with "deprecated": true that applies to
+// the node of a [Deprecation].
+type DeprecatedSchema struct {
+	// SchemaPath is the JSON Pointer to the schema, along the path that
+	// the validator took to reach it. It names the schema and not its
+	// deprecated keyword, so the root schema has the empty pointer. The
+	// path steps through each $ref on the way, as
+	// [Violation.SchemaPath] does. A schema in a definition that several
+	// references reach therefore has one SchemaPath per reference.
+	SchemaPath string
+
+	// Message is the deprecationMessage keyword of the schema. It is
+	// empty for a schema without that keyword.
+	Message string
+}
+
+// Error returns [Deprecation.Message]. A nil Deprecation has an empty
+// message.
+func (d *Deprecation) Error() string {
+	if d == nil {
+		return ""
+	}
+
+	return d.Message
+}
+
+// Is reports whether target is [ErrDeprecated]. A nil Deprecation does
+// not match any target.
+func (d *Deprecation) Is(target error) bool {
+	return d != nil && target == ErrDeprecated
+}
+
 // deprecated holds the deprecations of one node of the text that a check
 // reads. Together they give one warning.
 type deprecated struct {
@@ -26,9 +105,9 @@ type deprecated struct {
 	// The token at each step of the path of target. [compareRoutes]
 	// orders the paths to one node by these tokens.
 	route []*token.Token
-	// The messages of the schemas, each once, in the order that the check
-	// evaluated them.
-	details []string
+	// The schemas of the records, each once per schema path, in the
+	// order that the check evaluated them.
+	schemas []DeprecatedSchema
 	// The target of the path that comes first in document order.
 	target datapath.Target
 }
@@ -69,8 +148,12 @@ func (c converter) deprecations(records []jsonschema.Deprecation, instance any) 
 			d.target, d.route = target, route
 		}
 
-		if msg := deprecationMessage(rec.Schema); msg != "" && !slices.Contains(d.details, msg) {
-			d.details = append(d.details, msg)
+		schemaPath := string(rec.SchemaPath)
+		if !slices.ContainsFunc(d.schemas, func(s DeprecatedSchema) bool { return s.SchemaPath == schemaPath }) {
+			d.schemas = append(d.schemas, DeprecatedSchema{
+				SchemaPath: schemaPath,
+				Message:    deprecationMessage(rec.Schema),
+			})
 		}
 	}
 
@@ -102,35 +185,45 @@ func (c converter) nodeID(rec jsonschema.Deprecation, t datapath.Target) nodeID 
 	return nodeID{node: node, key: key}
 }
 
-// deprecationWarning returns the warning of d. A record that marks a key
-// reads `deprecated field "name"`, and one that marks a value reads
-// `deprecated value "text"` for a scalar and `deprecated value` for a
-// mapping or a sequence. The text is that of the value in instance, which
-// the schema validated. Each message of a schema becomes a detail.
+// deprecationWarning returns the warning of d, which wraps a
+// [*Deprecation]. A record that marks a key reads `deprecated field
+// "name"`, and one that marks a value reads `deprecated value "text"` for
+// a scalar and `deprecated value` for a mapping or a sequence. The text is
+// that of the value in instance, which the schema validated. Each distinct
+// message of a schema becomes a detail.
 func (c converter) deprecationWarning(d *deprecated, instance any) error {
 	key := d.first.TargetsKey()
 
-	headline := fmt.Errorf("%w value", ErrDeprecated)
+	message := ErrDeprecated.Error() + " value"
 
 	if key {
-		headline = fmt.Errorf("%w field %q", ErrDeprecated, keyName(d))
+		message = fmt.Sprintf("%s field %q", ErrDeprecated, keyName(d))
 	} else if text, ok := instanceText(instance, d.first.InstanceSegments()); ok {
-		headline = fmt.Errorf("%w value %q", ErrDeprecated, text)
+		message = fmt.Sprintf("%s value %q", ErrDeprecated, text)
 	}
 
 	opts := c.atTarget(d.target, key)
 
-	if len(d.details) > 0 {
-		details := make([]error, 0, len(d.details))
-		for _, msg := range d.details {
-			details = append(details, errors.New(msg))
+	var (
+		messages []string
+		details  []error
+	)
+
+	for _, s := range d.schemas {
+		if s.Message == "" || slices.Contains(messages, s.Message) {
+			continue
 		}
 
+		messages = append(messages, s.Message)
+		details = append(details, errors.New(s.Message))
+	}
+
+	if len(details) > 0 {
 		opts = append(opts, niceyaml.WithDetails(details...))
 	}
 
 	//nolint:wrapcheck // The mark adds no text.
-	return hook.MarkWarning(niceyaml.Invalid(headline, opts...))
+	return hook.MarkWarning(niceyaml.Invalid(&Deprecation{Message: message, Schemas: d.schemas, Key: key}, opts...))
 }
 
 // keyName returns the name of the member that d marks, as its path spells

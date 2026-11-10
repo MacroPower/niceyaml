@@ -205,6 +205,12 @@
 // whether the check passes or fails, as the Warnings section of
 // [go.jacobcolvin.com/niceyaml] describes.
 //
+// Each warning wraps a [*Deprecation], which holds the schema path and
+// the message of every deprecated schema that reaches the node. The
+// schema path names the rule behind a warning. So a report groups the
+// warnings of one rule, or accepts a rule, without matching on the path
+// in the document or on the text of a message.
+//
 // # YAML Schemas
 //
 // A schema document holds JSON or YAML. [Compile] and a [Registry] read

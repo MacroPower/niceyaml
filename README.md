@@ -162,7 +162,7 @@ Types declare their constraints with `jsonschema` struct tags. The `gen` tool fr
 
 A [`schema.Registry`][niceyaml/schema.Registry] picks the schema of each document, so one file can hold documents of several kinds. Run `go run ./examples/schemas/registry` to route the documents of a stream by a `$schema` comment or by their `kind` and report the ones that fail.
 
-The resolvers of a registry run in order, and the first one that does not decline picks the schema. The resolvers example puts a directive in the file ahead of a match on its path. When no resolver picks a schema, the error lists the reasons that the resolvers gave. The untrusted example validates uploads whose directives name files and URLs that the server must not read. The deprecations example reports the `deprecated` keyword of a schema as a warning beside the violations.
+The resolvers of a registry run in order, and the first one that does not decline picks the schema. The resolvers example puts a directive in the file ahead of a match on its path. When no resolver picks a schema, the error lists the reasons that the resolvers gave. The untrusted example validates uploads whose directives name files and URLs that the server must not read. The deprecations example reports the `deprecated` keyword of a schema as a warning beside the violations. It then lists the schema path and the fix of each deprecation.
 
 ### Encoder
 

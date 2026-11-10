@@ -406,6 +406,11 @@
 // schema of an older version still checks a document, but a later release
 // might drop one of its marks and keep the field.
 //
+// The warning about such a value wraps a [*schema.Deprecation] beside its
+// [*Warning]. The Deprecation holds the schema path of each schema that
+// marks the value, so a filter accepts one rule of a schema by that path.
+// The warning about a deprecated version or kind does not wrap one.
+//
 // A load collects the warnings of its checks itself. A [niceyaml.Warnings]
 // on the context of the load thus does not receive the warnings that the
 // load reports. Inside a call of niceyaml, such as in a
