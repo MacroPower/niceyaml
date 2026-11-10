@@ -68,8 +68,9 @@ func newConfig(opts []Option) config {
 // errors through [printer.Printer.PrintReport]. [printer.WithWrapWidth]
 // sets the width of the printer, and the output of the handler fits that
 // width. The styles of the printer color the highlighted locations.
-// [WithExcerptOptions] sets the context lines around each location and
-// how much of a long line an excerpt shows.
+// [WithExcerptOptions] sets the context lines around each location, how
+// much of a long line an excerpt shows, and how many problems it marks on
+// one line.
 //
 // The handler indents every line by [Indent] columns and wraps what
 // [printer.Printer.PrintReport] renders to the width less those columns.
@@ -85,10 +86,11 @@ func WithPrinter(p *printer.Printer) Option {
 // WithExcerptOptions is an [Option] that sets the [niceyaml.ExcerptOption]
 // values that the handler builds the report of each error with.
 // [niceyaml.WithContextLines] sets the context lines around each location,
-// and [niceyaml.WithExcerptWidth] sets how much of a long line an excerpt
-// shows. The styled output and the plain output of the handler draw one
-// report, so both show the same lines. A later call replaces the options
-// of an earlier one.
+// [niceyaml.WithExcerptWidth] sets how much of a long line an excerpt
+// shows, and [niceyaml.WithExcerptMarks] sets how many problems an excerpt
+// marks on one line. The styled output and the plain output of the handler
+// draw one report, so both show the same lines. A later call replaces the
+// options of an earlier one.
 //
 // WithExcerptOptions copies the options it gets, so a caller that edits
 // the slice it passed does not change the handler.

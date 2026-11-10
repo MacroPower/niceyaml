@@ -1582,18 +1582,26 @@ const DefaultContextLines = 2
 // [Detach] that detached its binding.
 const DefaultExcerptWidth = 160
 
+// DefaultExcerptMarks is the number of problems an error excerpt marks on
+// one line. A line that holds more gets a row that counts the rest.
+// [WithExcerptMarks] sets another number for the excerpt, or for the call
+// of [Detach] that detached its binding.
+const DefaultExcerptMarks = ErrorListLimit
+
 // ExcerptOption configures the excerpts of an error, which [FormatError],
 // [NewErrorReport], and [SourceError.Excerpt] build and [Detach] keeps. An
 // excerpt is a view of the lines of a source around the locations an error
 // marks in it. The options say how many lines it keeps around each one and
-// how much of a long line it shows. The renderer of an error chooses both.
-// One program can thus render the same error with whole lines in a terminal
+// how much of a long line it shows. They also say how many problems it
+// marks on one line. The renderer of an error chooses all of them. One
+// program can thus render the same error with whole lines in a terminal
 // and with bounded rows in a log. Detach chooses them in place of the
 // renderer, as [Detach] describes.
 //
 // Available options:
 //   - [WithContextLines]
 //   - [WithExcerptWidth]
+//   - [WithExcerptMarks]
 //
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] takes the same
 // options for the excerpts it draws with styles, and
@@ -1609,13 +1617,17 @@ type excerptConfig struct {
 	// The columns an excerpt shows around each mark on a long line, where
 	// 0 shows every line whole.
 	width int
+	// The problems an excerpt marks on one line, where 0 marks every
+	// problem.
+	marks int
 }
 
 // defaultExcerptConfig returns the settings an excerpt has when no
-// [ExcerptOption] changes them: [DefaultContextLines] lines of context
-// and [DefaultExcerptWidth] columns of width.
+// [ExcerptOption] changes them: [DefaultContextLines] lines of context,
+// [DefaultExcerptWidth] columns of width, and [DefaultExcerptMarks] marks
+// on one line.
 func defaultExcerptConfig() excerptConfig {
-	return excerptConfig{context: DefaultContextLines, width: DefaultExcerptWidth}
+	return excerptConfig{context: DefaultContextLines, width: DefaultExcerptWidth, marks: DefaultExcerptMarks}
 }
 
 // newExcerptConfig returns the settings of opts applied in order over
@@ -1655,14 +1667,57 @@ func WithContextLines(n int) ExcerptOption {
 //
 //	fmt.Print(niceyaml.FormatError(err, niceyaml.WithExcerptWidth(0)))
 //
-// The width drops the columns outside each window, so it bounds what an
-// excerpt adds to a log. To fit rows to a terminal, wrap them with
+// The width drops the columns outside each window, so it bounds each
+// window and not the row. A long line shows one window for each problem
+// the excerpt marks on it, and [WithExcerptMarks] bounds that number. With
+// n marks and cols columns, the row of a long line holds at most n windows.
+// Each of the n caret rows below it pads to the column of its mark. The
+// line thus adds about n x n x cols bytes at most, whatever it holds.
+//
+// To fit rows to a terminal, wrap them with
 // [go.jacobcolvin.com/niceyaml/printer.WithWrapWidth] instead. The %+v verb
 // of an [*Error] or a [*SourceError] does not take an option, so it renders
 // at the default width.
 func WithExcerptWidth(cols int) ExcerptOption {
 	return func(c *excerptConfig) {
 		c.width = max(0, cols)
+	}
+}
+
+// WithExcerptMarks is an [ExcerptOption] that sets how many problems an
+// excerpt marks on one line. The default is [DefaultExcerptMarks]. On a
+// line that holds more, the excerpt marks the first n in the order of their
+// columns. A row below the carets of that line counts the rest. With an n
+// of 2, [FormatError] renders a line that holds four problems as:
+//
+//	4 schema violations
+//	|-- 1:2: $[0]: expected "string", got "integer"
+//	|-- 1:4: $[1]: expected "string", got "integer"
+//	|-- 1:6: $[2]: expected "string", got "integer"
+//	`-- 1:8: $[3]: expected "string", got "integer"
+//
+//	   1 | [0,1,2,3]
+//	     |  ^ expected "string", got "integer"
+//	     |    ^ expected "string", got "integer"
+//	     | and 2 more on this line
+//
+// The tree above the excerpt still shows every problem with its position
+// and its path, so the option cuts only carets. A problem counts on the
+// line of its position, and so does each detail of a problem. An n of 0
+// marks every problem, and a negative n counts as 0:
+//
+//	fmt.Print(niceyaml.FormatError(err, niceyaml.WithExcerptMarks(0)))
+//
+// Each mark adds a caret row padded to its column, so the rows of one line
+// grow with the square of the marks on it. A document minified onto one
+// line can hold thousands of problems on that line, such as a JSON array
+// whose every item fails a schema. A program that renders the errors of an
+// input it does not trust thus keeps n small. The %+v verb of an [*Error]
+// or a [*SourceError] does not take an option, so it renders at the
+// default.
+func WithExcerptMarks(n int) ExcerptOption {
+	return func(c *excerptConfig) {
+		c.marks = max(0, n)
 	}
 }
 
@@ -1676,7 +1731,8 @@ func WithExcerptWidth(cols int) ExcerptOption {
 // error with thousands of problems reaches a log as a short text.
 // [FormatError] and
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] show every
-// problem.
+// problem in the tree. Their excerpts mark [DefaultExcerptMarks] problems
+// on one line, as [WithExcerptMarks] describes.
 const ErrorListLimit = 10
 
 // boundTexts holds the texts that the methods of a [SourceError] return,
@@ -3840,11 +3896,12 @@ func allBindings(err error) iter.Seq[*SourceError] {
 //
 // The %v and %s verbs print [SourceError.Error]. The %+v verb prints what
 // [FormatError] renders for the error at [DefaultContextLines] lines of
-// context and [DefaultExcerptWidth] columns. The tree shows at most
-// [ErrorListLimit] problems and a last row that counts the rest. A binding
-// that [Detach] detached renders at the options Detach received instead.
-// Every other verb formats [SourceError.Error] as it formats a string, with
-// the width, precision, and flags given, so %q quotes the message.
+// context, [DefaultExcerptWidth] columns, and [DefaultExcerptMarks] marks
+// on one line. The tree shows at most [ErrorListLimit] problems and a last
+// row that counts the rest. A binding that [Detach] detached renders at the
+// options Detach received instead. Every other verb formats
+// [SourceError.Error] as it formats a string, with the width, precision,
+// and flags given, so %q quotes the message.
 //
 // A wrapper such as [fmt.Errorf] around a SourceError formats as its own
 // message under every verb. A program that holds any error thus calls
@@ -3880,9 +3937,10 @@ func (e *SourceError) LogValue() slog.Value {
 // location, and the message of each error below a binding beside its caret.
 // A source whose every mark repeats a warning that another excerpt marks
 // does not get an excerpt, as [ErrorReport.Tree] describes. The context
-// lines and the width of long lines come from opts, as [ExcerptOption]
-// describes. An excerpt of a binding that [Detach] detached keeps those of
-// the options Detach received instead.
+// lines, the width of long lines, and the number of problems an excerpt
+// marks on one line come from opts, as [ExcerptOption] describes. An
+// excerpt of a binding that [Detach] detached keeps those of the options
+// Detach received instead.
 //
 // A line starting "no excerpt:" follows the excerpts for each binding
 // [Bindings] yields whose tree does not resolve any location, with the
@@ -3893,10 +3951,12 @@ func (e *SourceError) LogValue() slog.Value {
 // an excerpt or a line in its place.
 //
 // FormatError looks through the wrappers and joins around a [SourceError]
-// and renders every problem, however many err holds. An error that is not
-// bound to a source renders as its tree alone, with the path of its
-// [*Error] in front, as "@.open: closes before it opens". An error whose
-// tree renders as empty text renders its message instead.
+// and renders every problem in the tree, however many err holds. An excerpt
+// marks the first problems of one line and counts the rest of that line, as
+// [WithExcerptMarks] describes. An error that is not bound to a source
+// renders as its tree alone, with the path of its [*Error] in front, as
+// "@.open: closes before it opens". An error whose tree renders as empty
+// text renders its message instead.
 //
 // Each message of the tree renders as
 // [go.jacobcolvin.com/niceyaml/escape.Message] draws it, so a tab renders
@@ -4194,6 +4254,12 @@ func (e *SourceError) Annotate(view *line.View) bool {
 // anything. Annotate reports true when it marked a line, counting one that
 // held the marks already, and false for a nil err.
 //
+// Annotate marks every problem, however many one line holds, because the
+// caller chose to render that view. [WithExcerptMarks] bounds only the
+// excerpts of an error. Each mark adds a row below its line. A caller that
+// marks the errors of an input it does not trust thus counts the problems
+// first, as [Problems] yields them.
+//
 // A unified diff shows each unchanged line as the line of the after
 // revision, so a binding of the before revision marks only the lines the
 // diff deletes from it.
@@ -4222,9 +4288,12 @@ func Annotate(err error, view *line.View) bool {
 // [line.View.Hunks] then keeps the context lines that opts sets on either
 // side of each marked line, with distant locations in separate hunks.
 // [line.View.Clip] cuts long lines to the width that opts sets, as
-// [ExcerptOption] describes. The lines keep their numbers in the source, so
-// any [go.jacobcolvin.com/niceyaml/printer.Printer] renders the excerpt
-// with the line numbers of the file.
+// [ExcerptOption] describes. On a line that holds more problems than opts
+// sets, the view marks the first of them, as [WithExcerptMarks] describes.
+// An annotation of kind [kind.UISeparator] below that line counts the rest.
+// The lines keep their numbers in the source, so any
+// [go.jacobcolvin.com/niceyaml/printer.Printer] renders the excerpt with
+// the line numbers of the file.
 //
 // Excerpt leaves out a node bound to another source and a node whose
 // location does not resolve. It returns a nil view and false for a nil
@@ -4233,10 +4302,10 @@ func Annotate(err error, view *line.View) bool {
 // resolve in the source.
 //
 // A binding that [Detach] detached builds its excerpt from the lines it
-// kept, with the context lines and the width of the options Detach
-// received, whatever opts holds. The view holds those lines alone, so its
-// indices differ from those of [Source.Lines]. Each line keeps its number
-// in the file.
+// kept, with the context lines, the width, and the marks of the options
+// Detach received, whatever opts holds. The view holds those lines alone, so
+// its indices differ from those of [Source.Lines]. Each line keeps its
+// number in the file.
 func (e *SourceError) Excerpt(opts ...ExcerptOption) (*line.View, bool) {
 	if e == nil {
 		return nil, false
@@ -4292,8 +4361,10 @@ func sameSource(a, b excerptSource) bool {
 }
 
 // excerpt returns a fresh view of s with positions marked, cut to hunks
-// and clipped as cfg sets. Every error excerpt of a Source comes from
-// here, so each passes the [WithExcerpts] check.
+// and clipped as cfg sets. It marks at most the number of positions that
+// cfg sets on each line and counts the rest, as [WithExcerptMarks]
+// describes. Every error excerpt of a Source comes from here, so each
+// passes the [WithExcerpts] check.
 func (s *Source) excerpt(positions []excerpt.Mark, cfg excerptConfig) (*line.View, bool) {
 	if !s.ShowsExcerpts() {
 		return nil, false
@@ -4301,7 +4372,7 @@ func (s *Source) excerpt(positions []excerpt.Mark, cfg excerptConfig) (*line.Vie
 
 	view := s.View()
 
-	if !excerpt.Annotate(view, s.lines, positions) {
+	if !excerpt.Annotate(view, s.lines, excerpt.Limit(positions, cfg.marks)) {
 		return nil, false
 	}
 

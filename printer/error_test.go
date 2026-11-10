@@ -572,6 +572,45 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 		))
 	}
 
+	// Each of the first n items of the line of twelve fails, so one line
+	// holds n problems.
+	badItems := func(n int) error {
+		errs := make([]error, 0, n)
+		for i := range n {
+			errs = append(errs, itemErrorAt("bad", i))
+		}
+
+		return yamltest.Bind(t, items, niceyaml.NewSummary(fmt.Sprintf("%d violations", n), errs...))
+	}
+
+	// ItemBranches returns the branch of the tree for each of those
+	// problems.
+	itemBranches := func(n int) []string {
+		rows := make([]string, 0, n)
+
+		for i := range n {
+			connector := "├──"
+			if i == n-1 {
+				connector = "└──"
+			}
+
+			rows = append(rows, fmt.Sprintf("%s 1:%d: $.items[%d]: bad", connector, 9+8*i, i))
+		}
+
+		return rows
+	}
+
+	// CaretRows returns the caret row of an item that starts at each of
+	// cells, with its message.
+	caretRows := func(cells ...int) []string {
+		rows := make([]string, 0, len(cells))
+		for _, cell := range cells {
+			rows = append(rows, strings.Repeat(" ", cell)+"^^^^^^ bad")
+		}
+
+		return rows
+	}
+
 	// A line of forty items is long enough for an excerpt to clip it.
 	forty := itemNames(40)
 	badForty := yamltest.Bind(t, niceyaml.NewSourceFromString(itemsInput(40)), itemErrorAt("expected number", 20))
@@ -720,6 +759,60 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 				twentyRows[:5],
 				[]string{strings.Repeat(" ", 14) + "^^^^^^ expected string"},
 				twentyRows[5:],
+			)...),
+		},
+		// The excerpt marks the first items of the line and counts the rest
+		// on a row below the last wrapped row.
+		"more problems on one line than the default marks": {
+			err:    badItems(12),
+			gutter: printer.DefaultGutter,
+			width:  40,
+			want: stringtest.JoinLF(slices.Concat(
+				[]string{"12 violations"},
+				itemBranches(12),
+				[]string{"", "   1  items: [item00, item01, item02,"},
+				caretRows(14, 22, 30),
+				[]string{"   -  item03, item04, item05, item06,"},
+				caretRows(6, 14, 22, 30),
+				[]string{"   -  item07, item08, item09, item10,"},
+				caretRows(6, 14, 22),
+				[]string{"   -  item11]", "      and 2 more on this line"},
+			)...),
+		},
+		"marks from the options": {
+			err:    badItems(12),
+			gutter: printer.DefaultGutter,
+			opts:   []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(2)},
+			width:  40,
+			want: stringtest.JoinLF(slices.Concat(
+				[]string{"12 violations"},
+				itemBranches(12),
+				[]string{"", "   1  items: [item00, item01, item02,"},
+				caretRows(14, 22),
+				[]string{
+					"   -  item03, item04, item05, item06,",
+					"   -  item07, item08, item09, item10,",
+					"   -  item11]",
+					"      and 10 more on this line",
+				},
+			)...),
+		},
+		"every mark of a line": {
+			err:    badItems(12),
+			gutter: printer.DefaultGutter,
+			opts:   []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(0)},
+			width:  40,
+			want: stringtest.JoinLF(slices.Concat(
+				[]string{"12 violations"},
+				itemBranches(12),
+				[]string{"", "   1  items: [item00, item01, item02,"},
+				caretRows(14, 22, 30),
+				[]string{"   -  item03, item04, item05, item06,"},
+				caretRows(6, 14, 22, 30),
+				[]string{"   -  item07, item08, item09, item10,"},
+				caretRows(6, 14, 22, 30),
+				[]string{"   -  item11]"},
+				caretRows(6),
 			)...),
 		},
 		"long line clipped to the default width": {

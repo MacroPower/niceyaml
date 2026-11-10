@@ -224,7 +224,9 @@ const (
 	UIHunkHeader Kind = "uiHunkHeader"
 	// UISeparator styles the "..." between the hunks of an excerpt, the
 	// "..." in place of the columns a clipped line leaves out, and the
-	// divider between the panes of a side-by-side view.
+	// divider between the panes of a side-by-side view. It also styles the
+	// row that counts the problems an error excerpt does not mark on a
+	// line.
 	UISeparator Kind = "uiSeparator"
 )
 

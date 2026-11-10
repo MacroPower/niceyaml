@@ -124,7 +124,10 @@
 //
 // Below a line, the rows of errors come first, then those of warnings,
 // then the other kinds. When the line wraps, each row sits above or below
-// the wrapped row that holds its column.
+// the wrapped row that holds its column. An annotation of kind
+// [kind.UISeparator] or [kind.UIHunkHeader] labels its line and not a
+// column of it. Below a line, [DefaultAnnotation] draws it as a row of
+// text without carets, after the caret rows of the line.
 //
 // # Word Wrapping
 //

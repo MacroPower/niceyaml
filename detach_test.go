@@ -76,7 +76,11 @@ func requireDetaches(t *testing.T, err error, opts ...niceyaml.ExcerptOption) er
 	detached := niceyaml.Detach(err, opts...)
 	require.Error(t, detached)
 
-	other := []niceyaml.ExcerptOption{niceyaml.WithContextLines(7), niceyaml.WithExcerptWidth(3)}
+	other := []niceyaml.ExcerptOption{
+		niceyaml.WithContextLines(7),
+		niceyaml.WithExcerptWidth(3),
+		niceyaml.WithExcerptMarks(1),
+	}
 
 	require.EqualError(t, detached, err.Error())
 	assert.Equal(t, niceyaml.FormatError(err, opts...), niceyaml.FormatError(detached, opts...))
@@ -97,6 +101,10 @@ func requireDetaches(t *testing.T, err error, opts ...niceyaml.ExcerptOption) er
 
 	for i, bound := range kept {
 		assert.Equal(t, live[i].LogValue().String(), bound.LogValue().String())
+
+		// A binding renders alone as it did in err, whatever the other
+		// bindings of err mark on its lines.
+		assert.Equal(t, niceyaml.FormatError(live[i], opts...), niceyaml.FormatError(bound, other...))
 
 		// The %+v verb renders at the default options, so it matches err
 		// when opts set none.
@@ -175,6 +183,38 @@ func TestDetach(t *testing.T) {
 		"a: 1\n\n  \nb: |\n  x\n\n  y\n# end\nc: 2\n\n   ",
 		niceyaml.WithName("blank.yaml"),
 	)
+
+	// Every item of one line fails, as the items of a minified document do.
+	flowDoc := yamltest.FirstDocument(
+		t,
+		"tags: [a, b, c, d, e, f, g, h, i, j, k, l]\nnote: x\n",
+		niceyaml.WithName("flow.yaml"),
+	)
+
+	tagErrs := make([]error, 0, 12)
+	for i := range 12 {
+		tagErrs = append(tagErrs, niceyaml.NewError("bad tag", niceyaml.AtPath(paths.Current().Child("tags").Index(i))))
+	}
+
+	manyOnOneLine := flowDoc.Bind(niceyaml.NewSummary("12 violations", tagErrs...))
+
+	// The last item of the line runs on to the five lines after it. The
+	// errors name that item first, and its column comes last.
+	spanDoc := yamltest.FirstDocument(
+		t,
+		"tags: [a, b, c, d, e, f, g, h, i, j, k, \"x\n  y\n  z\n  w\n  v\n  u\"]\nnote: x\nmore: y\nlast: z\nend: w\n",
+		niceyaml.WithName("span.yaml"),
+	)
+
+	spanErrs := slices.Concat(tagErrs[11:], tagErrs[:11])
+
+	spanBindings := make([]error, 0, len(spanErrs))
+	for _, tagErr := range spanErrs {
+		spanBindings = append(spanBindings, spanDoc.Bind(tagErr))
+	}
+
+	longItemOfMany := spanDoc.Bind(niceyaml.NewSummary("12 violations", spanErrs...))
+	longItemOfBindings := errors.Join(spanBindings...)
 
 	_, syntaxErr := niceyaml.NewSourceFromString("a: [1, 2\nb: 3\n", niceyaml.WithName("bad.yaml")).File()
 	require.Error(t, syntaxErr)
@@ -349,6 +389,31 @@ func TestDetach(t *testing.T) {
 		},
 		"default width on a long line": {
 			err: longDoc.Bind(niceyaml.NewError("long", niceyaml.AtPosition(position.New(0, 250)))),
+		},
+		"more problems on one line than the default marks": {
+			err: manyOnOneLine,
+		},
+		"marks on one line from the options": {
+			err:  manyOnOneLine,
+			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(2)},
+		},
+		"every mark of one line": {
+			err:  manyOnOneLine,
+			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(0)},
+		},
+		"item over several lines past the default marks": {
+			err: longItemOfMany,
+		},
+		"item over several lines past the marks of the options": {
+			err:  longItemOfMany,
+			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(1)},
+		},
+		"binding over several lines past the default marks": {
+			err: longItemOfBindings,
+		},
+		"binding over several lines past the marks of the options": {
+			err:  longItemOfBindings,
+			opts: []niceyaml.ExcerptOption{niceyaml.WithContextLines(0), niceyaml.WithExcerptMarks(1)},
 		},
 	}
 

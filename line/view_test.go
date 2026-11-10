@@ -1135,6 +1135,44 @@ func TestView_String(t *testing.T) {
 					"   1 | key: value",
 				),
 			},
+			"a separator below labels the line without carets": {
+				input: "key: value",
+				annotations: []line.Annotation{
+					{
+						Content:   "and 2 more",
+						Kind:      kind.UISeparator,
+						Placement: line.Below,
+						Cols:      position.NewSpan(5, 10),
+					},
+					below(5, 10, "note"),
+					{Content: "error", Kind: kind.TextError, Placement: line.Below},
+				},
+				want: stringtest.JoinLF(
+					"   1 | key: value",
+					"     | ^ error",
+					"     |      ^^^^^ note",
+					"     | and 2 more",
+				),
+			},
+			"labels of the line below share a row for each kind": {
+				input: "key: value",
+				annotations: []line.Annotation{
+					{Content: "second", Kind: kind.UISeparator, Placement: line.Below, Cols: position.NewSpan(5, 10)},
+					{Content: "first\tcut", Kind: kind.UISeparator, Placement: line.Below},
+					{Content: "", Kind: kind.UISeparator, Placement: line.Below},
+					{Content: "header", Kind: kind.UIHunkHeader, Placement: line.Below},
+				},
+				want: stringtest.JoinLF(
+					"   1 | key: value",
+					"     | first\u2409cut; second",
+					"     | header",
+				),
+			},
+			"a separator below without content adds no row": {
+				input:       "key: value",
+				annotations: []line.Annotation{{Kind: kind.UISeparator, Placement: line.Below}},
+				want:        "   1 | key: value",
+			},
 			"annotations above and below": {
 				input: "key: value",
 				annotations: []line.Annotation{
@@ -1424,6 +1462,32 @@ func TestView_Hunks(t *testing.T) {
 		assert.Equal(t, []int{6}, separators(hunks), "narrowing leaves the hunks as they were")
 	})
 
+	t.Run("keeps a separator below a line", func(t *testing.T) {
+		t.Parallel()
+
+		view := newView(input)
+		view.Annotate(
+			1,
+			line.Annotation{Content: "one", Placement: line.Below},
+			line.Annotation{Content: "and 2 more", Kind: kind.UISeparator, Placement: line.Below},
+		)
+		view.Annotate(6, line.Annotation{Content: "two", Placement: line.Below})
+
+		want := stringtest.JoinLF(
+			"   2 | b: 2",
+			"     | ^ one",
+			"     | and 2 more",
+			"     | ...",
+			"   7 | g: 7",
+			"     | ^ two",
+		)
+
+		hunks := view.Hunks(0)
+
+		assert.Equal(t, want, hunks.String())
+		assert.Equal(t, want, hunks.Hunks(0).String(), "the hunks of hunks keep it too")
+	})
+
 	t.Run("renders as an excerpt", func(t *testing.T) {
 		t.Parallel()
 
@@ -1475,6 +1539,16 @@ func TestView_Hunks(t *testing.T) {
 					"     | ...",
 					"     | two",
 					"   7 | g: 7",
+				},
+			},
+			"a separator below a line does not decorate it": {
+				annotations: map[int]line.Annotation{
+					1: one,
+					6: {Content: "and 2 more", Kind: kind.UISeparator, Placement: line.Below},
+				},
+				want: []string{
+					"   2 | b: 2",
+					"     | ^ one",
 				},
 			},
 			"separator keeps the column of an annotation above": {
@@ -1704,6 +1778,20 @@ func TestView_Clip(t *testing.T) {
 				"     | ---",
 				"   1 | ...EFGHIJKLMN...",
 				"     |         ^",
+			},
+		},
+		"separator below is no mark and starts at the first column": {
+			input: letters,
+			cols:  10,
+			marks: []position.Span{position.NewSpan(40, 41)},
+			annotations: []line.Annotation{
+				{Content: "and 2 more", Kind: kind.UISeparator, Placement: line.Below, Cols: position.NewSpan(20, 20)},
+			},
+			windows: position.Spans{position.NewSpan(35, 45)},
+			want: []string{
+				"   1 | ...EFGHIJKLMN...",
+				"     |         ^",
+				"     | and 2 more",
 			},
 		},
 		"hunk header is no mark": {

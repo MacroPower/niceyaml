@@ -56,14 +56,14 @@ const errorConnectorWidth = 4
 //
 // # Excerpts
 //
-// Each excerpt keeps the context lines [niceyaml.WithContextLines] sets
-// on either side of each marked line. A line longer than the width
+// Each excerpt keeps the context lines [niceyaml.WithContextLines] sets on
+// either side of each marked line. A line longer than the width
 // [niceyaml.WithExcerptWidth] sets shows a window of that many columns
-// around each location on it, with "..." in place of the rest. Each
-// source gets one excerpt. An error joined from one bound error per
-// document of a file thus prints that file once, with the errors of every
-// document on it. A binding whose children point into another file, such
-// as a detail that names where a value was first declared, prints an
+// around each location that the excerpt marks on it, with "..." in place of
+// the rest. Each source gets one excerpt. An error joined from one bound
+// error per document of a file thus prints that file once, with the errors
+// of every document on it. A binding whose children point into another file,
+// such as a detail that names where a value was first declared, prints an
 // excerpt of that file too.
 //
 // # Carets
@@ -84,6 +84,14 @@ const errorConnectorWidth = 4
 // of a lone bound error, gets its carets alone.
 // [niceyaml.SourceError.Excerpt] marks such a line with an annotation
 // without content, and [DefaultAnnotation] draws the carets for it.
+//
+// An excerpt marks at most the number of problems on one line that
+// [niceyaml.WithExcerptMarks] sets, [niceyaml.DefaultExcerptMarks] without
+// that option. A line that holds more gets a row below its carets that
+// counts the rest, such as "and 5 more on this line", in
+// [kind.UISeparator]. The tree still shows every problem, so a document
+// minified onto one line prints a bounded excerpt however many problems
+// that line holds.
 //
 // When the bindings touch more than one source, the name of its source
 // leads each excerpt on a row of its own. Blank lines separate the parts.

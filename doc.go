@@ -433,17 +433,24 @@
 // excerpt. The %+v verb and the LogValue methods show at most
 // [ErrorListLimit] problems and count the rest. An error with thousands of
 // problems thus reaches a log as a short text, but FormatError renders every
-// problem.
+// problem in its tree.
 //
 // An excerpt shows lines of the source to whoever reads the log. A program
 // that loads a text with secrets in it, such as the values of its
 // environment, creates that [Source] with [WithExcerpts] set to false. Every
 // renderer then prints the position, the path, and the message of an error
-// that binds there, but not a line of the text. A line longer than
-// [DefaultExcerptWidth] columns shows a window around each location, so a
-// document minified onto one line adds a row of bounded length. For each
-// renderer, [WithContextLines] sets the number of context lines, and
-// [WithExcerptWidth] sets that width.
+// that binds there, but not a line of the text.
+//
+// An excerpt bounds what one line adds to the output. A line longer than
+// [DefaultExcerptWidth] columns shows a window of that many columns around
+// each location that the excerpt marks on it. An excerpt marks at most
+// [DefaultExcerptMarks] problems on one line, and a row below their carets
+// counts the rest, as "and 15990 more on this line". A document minified
+// onto one line thus adds at most that many windows and caret rows,
+// however many problems the line holds. The tree still names every problem.
+// For each renderer, [WithContextLines] sets the number of context lines,
+// [WithExcerptWidth] sets that width, and [WithExcerptMarks] sets that
+// number of marks.
 //
 // To build a report for another program to read, such as JSON lines, CI
 // annotations, or editor diagnostics, a program walks [Problems]. Problems

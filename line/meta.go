@@ -97,6 +97,12 @@ func annotationCol(col, width int) int {
 // alone. Above the line, the content starts at the column Cols starts
 // at.
 //
+// An annotation of kind [kind.UISeparator] or [kind.UIHunkHeader] labels
+// its line and not a column of it. Below the line, a renderer draws the
+// content of such an annotation on a row after the caret rows, from the
+// first column and without carets. [View.Clip] does not center a window on
+// it.
+//
 // Add annotations to a [View] with [View.Annotate].
 type Annotation struct {
 	Content   string
@@ -162,8 +168,10 @@ func (a Annotations) Filter(p Placement) Annotations {
 //
 // Below a line, the group of [kind.TextError] comes first, then the group
 // of [kind.TextWarn], then the other groups in the order their kinds
-// first appear. At any other placement, such as [Above], the groups come
-// in the order their kinds first appear.
+// first appear. The groups of [kind.UISeparator] and [kind.UIHunkHeader]
+// come last in that order, because they label the line and their rows
+// follow the caret rows. At any other placement, such as [Above], the
+// groups come in the order their kinds first appear.
 //
 // [View.String] and the printer draw each group as rows of its own in
 // this order. A renderer of its own that ranges over Groups thus draws
@@ -192,7 +200,8 @@ func (a Annotations) Groups(p Placement) []Annotations {
 		groups[i] = append(groups[i], ann)
 	}
 
-	// The rows below a line come in order of severity, errors first.
+	// The rows below a line come in order of severity, errors first, and
+	// the rows that label the line come after the caret rows.
 	if p == Below {
 		slices.SortStableFunc(groups, func(x, y Annotations) int {
 			return cmp.Compare(severity(x[0].RenderKind()), severity(y[0].RenderKind()))
@@ -203,14 +212,16 @@ func (a Annotations) Groups(p Placement) []Annotations {
 }
 
 // severity returns the sort key of the group of annotations below a line
-// that renders in k: 0 for errors, 1 for warnings, and 2 for every other
-// kind.
+// that renders in k: 0 for errors, 1 for warnings, 3 for the kinds that
+// label the line, and 2 for every other kind.
 func severity(k kind.Kind) int {
 	switch k {
 	case kind.TextError:
 		return 0
 	case kind.TextWarn:
 		return 1
+	case kind.UISeparator, kind.UIHunkHeader:
+		return 3
 	default:
 		return 2
 	}

@@ -66,7 +66,8 @@ const wrapOnCharacters = " " + breakpoints
 // [Printer.PrintError] renders any error as a tree, with a connector in
 // front of each error below another. It adds the source excerpt of every
 // [niceyaml.SourceError] in the error. It draws both with the printer's
-// styles and width and the context lines a [niceyaml.ExcerptOption] sets.
+// styles and width, and it cuts each excerpt as the [niceyaml.ExcerptOption]
+// values it receives set.
 // A program configures one printer with its terminal width and theme and
 // prints its errors through it.
 type Printer struct {
@@ -500,6 +501,14 @@ func NoAnnotation(AnnotationContext) []AnnotationRow {
 // run. Apart from that single caret, a space the wrap drops, at a break
 // or at the end of the line, does not get a caret.
 //
+// An annotation of kind [kind.UISeparator] or [kind.UIHunkHeader] labels
+// its line and not a column of it, as [line.Annotation] describes. Below
+// the line, each of those kinds gets one row without carets. The row holds
+// the contents of its annotations joined with "; ". It starts at the first
+// column of the last wrapped row of the line, so it follows every caret row
+// of the line. The row that counts the problems an error excerpt does not
+// mark on a line, such as "and 5 more on this line", is such an annotation.
+//
 // Every control character in an annotation renders as
 // [go.jacobcolvin.com/niceyaml/escape.Control] draws it, so a newline does
 // not start a row.
@@ -520,6 +529,26 @@ func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 
 		return []AnnotationRow{{
 			Col:  annotationCol(ctx.Content, kept.Start()),
+			Text: escape.Control(strings.Join(kept.Contents(), "; ")),
+		}}
+	}
+
+	if labelsLine(ctx.Annotations) {
+		kept := ctx.Annotations.WithContent()
+		if len(kept) == 0 {
+			return nil
+		}
+
+		// The printer writes a row beside the wrapped row that holds its
+		// column, so the start of the last wrapped row puts the text below
+		// the whole line.
+		col := 0
+		if n := len(ctx.RowStarts); n > 0 {
+			col = ctx.RowStarts[n-1]
+		}
+
+		return []AnnotationRow{{
+			Col:  annotationCol(ctx.Content, col),
 			Text: escape.Control(strings.Join(kept.Contents(), "; ")),
 		}}
 	}
@@ -545,6 +574,20 @@ func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 	}
 
 	return rows
+}
+
+// labelsLine reports whether anns, the annotations of one kind, label
+// their line and not a column of it. The annotations of kind
+// [kind.UISeparator] and [kind.UIHunkHeader] do, as [line.Annotation]
+// describes.
+func labelsLine(anns line.Annotations) bool {
+	if len(anns) == 0 {
+		return false
+	}
+
+	k := anns[0].RenderKind()
+
+	return k == kind.UISeparator || k == kind.UIHunkHeader
 }
 
 // wrappedRows returns the columns of ctx.Content each wrapped row of the
@@ -1465,9 +1508,10 @@ const minAnnotationWidth = 20
 // gives them. Above a line, that is the order the kinds first appear.
 // Below a line, a [kind.TextError] group comes first, then a
 // [kind.TextWarn] group, then the other kinds in the order they first
-// appear. Within each kind, the rows the [AnnotationFunc] returns come in
-// order, each wrapped to the printer width and styled in the style of its
-// kind.
+// appear. The [kind.UISeparator] and [kind.UIHunkHeader] groups come last
+// in that order, because they label the line. Within each kind, the rows
+// the [AnnotationFunc] returns come in order, each wrapped to the printer
+// width and styled in the style of its kind.
 func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Placement, w wrappedLine) [][]string {
 	groups := vl.row.Annotations.Groups(placement)
 	if len(groups) == 0 {

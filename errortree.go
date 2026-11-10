@@ -1493,10 +1493,10 @@ type ErrorReport struct {
 	//
 	// A repeat does not mark an excerpt that nothing else in the tree
 	// marks, when an earlier copy marks an excerpt already. A source whose
-	// every mark would be such a repeat thus does not get an excerpt, and
-	// every other excerpt marks each problem of its source. Each node that
-	// is not a repeat is the node that [NewErrorTree] builds, which keeps
-	// every detail.
+	// every mark would be such a repeat thus does not get an excerpt. Every
+	// other excerpt marks each problem of its source, up to the number that
+	// [WithExcerptMarks] sets for one line. Each node that is not a repeat
+	// is the node that [NewErrorTree] builds, which keeps every detail.
 	//
 	// The tree does not have a row for an error that holds only nil
 	// errors, such as a bound join of typed-nil errors. When Excerpts and
@@ -1536,9 +1536,10 @@ type ErrorExcerpt struct {
 }
 
 // NewErrorReport creates a new [ErrorReport] from err. Each excerpt keeps
-// the context lines and the width the options set, as [ExcerptOption]
-// describes. An excerpt of a detached binding keeps those of the options
-// [Detach] received instead. A nil err yields the zero ErrorReport.
+// the context lines, the width, and the marks on one line that the options
+// set, as [ExcerptOption] describes. An excerpt of a detached binding keeps
+// those of the options [Detach] received instead. A nil err yields the zero
+// ErrorReport.
 func NewErrorReport(err error, opts ...ExcerptOption) ErrorReport {
 	return newErrorReport(err, newExcerptConfig(opts), 0)
 }
@@ -1665,10 +1666,10 @@ func wrapperMarks(t ErrorTree) map[*SourceError]wrapperMark {
 // warning under the same heading, from any source. Its row stays, so each
 // file with the warning still shows in the tree.
 //
-// The bindings of the dropped details go into quiet. The binding of a
-// repeat goes there too when an earlier copy marks an excerpt and nothing
-// else in the tree marks the source of the repeat. Such a source then gets
-// no excerpt, and every other excerpt marks each problem of its source. A
+// The bindings of the dropped details go into quiet. The binding of a repeat
+// goes there too when an earlier copy marks an excerpt and nothing else in
+// the tree marks the source of the repeat. Such a source then gets no
+// excerpt, and the excerpt of every other source marks its repeats too. A
 // binding that a node other than a repeat holds stays out of quiet, so a
 // binding that the error reaches twice keeps its marks.
 func dropRepeats(t ErrorTree, quiet map[*SourceError]bool) ErrorTree {

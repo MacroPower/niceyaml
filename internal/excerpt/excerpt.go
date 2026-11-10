@@ -8,10 +8,18 @@
 // columns. A renderer draws each annotation as a caret run under its
 // columns, with the message of the mark beside the run on the line of the
 // mark.
+//
+// An excerpt of an error draws at most a set number of marks on one line,
+// because each mark costs a row as wide as its column. [Limit] keeps the
+// first marks of each line and adds a mark that counts the rest, which
+// Annotate draws as a row without carets.
 package excerpt
 
 import (
+	"cmp"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/goccy/go-yaml/token"
 
@@ -31,6 +39,11 @@ type Mark struct {
 	Ranges position.Ranges
 	// Pos is the position of the error.
 	Pos position.Position
+	// More is the number of marks that [Limit] left out of the line of Pos.
+	// A mark with a More greater than zero stands for those marks. It does
+	// not highlight or label a column, and [Annotate] reads only its Pos and
+	// its More.
+	More int
 	// Warning reports whether the mark belongs to a warning. A warning
 	// mark highlights in [kind.GenericWarn] and annotates in
 	// [kind.TextWarn] rather than in the kinds of an error.
@@ -99,6 +112,13 @@ func (m Mark) textKind() kind.Kind {
 // A line keeps each mark one time. Each repeat of a mark, in one call or
 // across several, leaves the view as the first copy left it. A message
 // that repeats on one run therefore reads one time.
+//
+// A mark with a [Mark.More] greater than zero counts the marks that
+// [Limit] left out of its line. It adds an annotation of kind
+// [kind.UISeparator] below that line, such as "and 5 more on this line".
+// A renderer draws that annotation as a row of text without carets, after
+// the caret rows of the line. Such a mark does not mark a line, so it does
+// not change what Annotate reports.
 func Annotate(view *line.View, lines line.Lines, marks []Mark) bool {
 	if len(marks) == 0 {
 		return false
@@ -108,6 +128,18 @@ func Annotate(view *line.View, lines line.Lines, marks []Mark) bool {
 	marked := false
 
 	for _, m := range marks {
+		if m.More > 0 {
+			if i, ok := index(m.Pos.Line); ok {
+				addAnnotation(view, i, line.Annotation{
+					Content:   "and " + strconv.Itoa(m.More) + " more on this line",
+					Kind:      kind.UISeparator,
+					Placement: line.Below,
+				})
+			}
+
+			continue
+		}
+
 		var segments []position.Range
 
 		for _, r := range m.Ranges {
@@ -156,6 +188,148 @@ func Annotate(view *line.View, lines line.Lines, marks []Mark) bool {
 	}
 
 	return marked
+}
+
+// Lines returns the index in lines of each line that [Annotate] marks for
+// marks on a view of every line of lines. The indexes ascend, and each
+// comes one time. They are the line of each mark that lines holds and each
+// line on which a range of a mark covers a column. A mark that counts the
+// marks [Limit] left out does not mark a line, so Lines skips it.
+//
+// Lines reads every mark, however many one line holds. A caller thus
+// learns which lines the marks reach without the cost of drawing each one.
+func Lines(lines line.Lines, marks []Mark) []int {
+	var held []int
+
+	for _, m := range marks {
+		if m.More > 0 {
+			continue
+		}
+
+		own := m.Pos.Line >= 0 && m.Pos.Line < lines.Len()
+		if own {
+			held = append(held, m.Pos.Line)
+		}
+
+		for _, r := range m.Ranges {
+			// A range within the line of the mark does not reach another
+			// line. Skipping it saves a measure of that line for each mark
+			// on it, which adds up on a line that holds thousands of marks.
+			if own && r.Start.Line == m.Pos.Line && r.LastLine() <= m.Pos.Line {
+				continue
+			}
+
+			for _, lr := range lines.SliceLines(r) {
+				held = append(held, lr.Start.Line)
+			}
+		}
+	}
+
+	slices.Sort(held)
+
+	return slices.Compact(held)
+}
+
+// Limit returns marks with at most n of them on each line, where the line
+// of a mark is the line of its [Mark.Pos]. On a line that holds more, Limit
+// keeps the first n in the order of their columns. Marks at one column
+// keep the order they come in. For each such line, the result ends with a
+// mark that counts the marks Limit left out, as [Mark.More] holds the
+// count. The marks that Limit keeps stay in the order they come in. The
+// marks that count follow them in the order of their lines.
+//
+// A mark that repeats an earlier mark of its line does not count toward n
+// or toward the rest, because [Annotate] draws both as one. Limit leaves
+// such a repeat out of a line that holds more than n marks.
+//
+// An n of zero or less does not limit the marks, so Limit returns marks as
+// it is. It does the same when every line holds n marks or fewer.
+func Limit(marks []Mark, n int) []Mark {
+	if n <= 0 || len(marks) <= n {
+		return marks
+	}
+
+	held := make(map[int][]int)
+	for i, m := range marks {
+		held[m.Pos.Line] = append(held[m.Pos.Line], i)
+	}
+
+	var (
+		counts []Mark
+		drop   = make([]bool, len(marks))
+		drops  = 0
+	)
+
+	for ln, at := range held {
+		if len(at) <= n {
+			continue
+		}
+
+		slices.SortStableFunc(at, func(a, b int) int {
+			return cmp.Compare(marks[a].Pos.Col, marks[b].Pos.Col)
+		})
+
+		var (
+			seen = make(map[string]bool, len(at))
+			kept = 0
+			more = 0
+		)
+
+		for _, i := range at {
+			key := markKey(marks[i])
+
+			switch {
+			case seen[key]:
+				drop[i] = true
+				drops++
+
+			case kept < n:
+				kept++
+
+			default:
+				drop[i] = true
+				drops++
+				more++
+			}
+
+			seen[key] = true
+		}
+
+		if more > 0 {
+			counts = append(counts, Mark{Pos: position.New(ln, 0), More: more})
+		}
+	}
+
+	if drops == 0 {
+		return marks
+	}
+
+	out := make([]Mark, 0, len(marks)-drops+len(counts))
+
+	for i, m := range marks {
+		if !drop[i] {
+			out = append(out, m)
+		}
+	}
+
+	slices.SortFunc(counts, func(a, b Mark) int {
+		return cmp.Compare(a.Pos.Line, b.Pos.Line)
+	})
+
+	return append(out, counts...)
+}
+
+// markKey returns a text that two marks of one line share only when one
+// repeats the other. The message comes last, so a NUL in it cannot make the
+// keys of two different marks equal.
+func markKey(m Mark) string {
+	return strings.Join([]string{
+		strconv.Itoa(m.Pos.Col),
+		strconv.Itoa(m.More),
+		strconv.FormatBool(m.Warning),
+		m.Ranges.String(),
+		m.Message,
+	}, "\x00")
 }
 
 // addOverlay adds o to line i of view, unless the line holds an equal

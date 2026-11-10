@@ -6597,6 +6597,242 @@ func TestWithExcerptWidth(t *testing.T) {
 	}
 }
 
+func TestWithExcerptMarks(t *testing.T) {
+	t.Parallel()
+
+	// One line holds twelve items, as a minified document does, and the
+	// next line holds three.
+	const (
+		letters = "abcdefghijkl"
+		input   = "tags: [a, b, c, d, e, f, g, h, i, j, k, l]\nmore: [x, y, z]\n"
+	)
+
+	// TagErrors returns an error at the item of the first line at each of
+	// indices, in the order given.
+	tagErrors := func(indices ...int) []error {
+		errs := make([]error, 0, len(indices))
+		for _, i := range indices {
+			errs = append(errs, niceyaml.NewError(
+				"bad "+letters[i:i+1],
+				niceyaml.AtPath(paths.Doc().Child("tags").Index(i)),
+			))
+		}
+
+		return errs
+	}
+
+	all := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
+
+	// Rows returns the excerpt of the first line with a caret row for each
+	// of the first shown items, and a last row that counts rest items when
+	// rest is positive.
+	rows := func(shown, rest int) []string {
+		out := []string{"   1 | tags: [a, b, c, d, e, f, g, h, i, j, k, l]"}
+		for i := range shown {
+			out = append(out, "     | "+strings.Repeat(" ", 7+3*i)+"^ bad "+letters[i:i+1])
+		}
+
+		if rest > 0 {
+			out = append(out, fmt.Sprintf("     | and %d more on this line", rest))
+		}
+
+		return out
+	}
+
+	tcs := map[string]struct {
+		opts []niceyaml.ExcerptOption
+		want []string
+	}{
+		"no option": {
+			want: rows(niceyaml.DefaultExcerptMarks, 12-niceyaml.DefaultExcerptMarks),
+		},
+		"marks": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(3)},
+			want: rows(3, 9),
+		},
+		"one mark": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(1)},
+			want: rows(1, 11),
+		},
+		"a line at the number of marks shows every problem": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(12)},
+			want: rows(12, 0),
+		},
+		"zero marks every problem": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(0)},
+			want: rows(12, 0),
+		},
+		"negative counts as zero": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(-1)},
+			want: rows(12, 0),
+		},
+		"the last option wins": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptMarks(0), niceyaml.WithExcerptMarks(3)},
+			want: rows(3, 9),
+		},
+		"a nil option changes nothing": {
+			opts: []niceyaml.ExcerptOption{nil, niceyaml.WithExcerptMarks(3), nil},
+			want: rows(3, 9),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(input)
+			err := yamltest.Bind(t, source, niceyaml.NewSummary("12 violations", tagErrors(all...)...))
+
+			opts := append([]niceyaml.ExcerptOption{niceyaml.WithContextLines(0)}, tc.opts...)
+			want := stringtest.JoinLF(tc.want...)
+
+			// Every renderer takes the same options, and the tree keeps
+			// every problem.
+			rendered := niceyaml.FormatError(err, opts...)
+			tree, excerpt, ok := strings.Cut(rendered, "\n\n")
+			require.True(t, ok)
+			assert.Equal(t, want, excerpt)
+			assert.Len(t, strings.Split(tree, "\n"), 13)
+
+			rep := niceyaml.NewErrorReport(err, opts...)
+			require.Len(t, rep.Excerpts, 1)
+			assert.Equal(t, want, rep.Excerpts[0].View.String())
+			assert.Len(t, rep.Tree.Children, 12)
+
+			view := requireExcerpt(t, yamltest.RequireSourceError(t, err), opts...)
+			assert.Equal(t, want, view.String())
+
+			// The hunks of an excerpt keep the row that counts the rest.
+			assert.Equal(t, want, view.Hunks(0).String())
+		})
+	}
+
+	t.Run("the first problems in the order of their columns get the marks", func(t *testing.T) {
+		t.Parallel()
+
+		// A join keeps the order of its branches, so the marks reach the
+		// excerpt out of the order of their columns.
+		doc := yamltest.FirstDocument(t, input)
+
+		var bound []error
+
+		for _, e := range tagErrors(11, 2, 7, 0) {
+			bound = append(bound, doc.Bind(e))
+		}
+
+		err := errors.Join(bound...)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"|-- 1:41: $.tags[11]: bad l",
+			"|-- 1:14: $.tags[2]: bad c",
+			"|-- 1:29: $.tags[7]: bad h",
+			"`-- 1:8: $.tags[0]: bad a",
+			"",
+			"   1 | tags: [a, b, c, d, e, f, g, h, i, j, k, l]",
+			"     |        ^ bad a",
+			"     |              ^ bad c",
+			"     | and 2 more on this line",
+		), niceyaml.FormatError(err, niceyaml.WithContextLines(0), niceyaml.WithExcerptMarks(2)))
+	})
+
+	t.Run("each line counts its own problems", func(t *testing.T) {
+		t.Parallel()
+
+		more := func(i int) error {
+			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("more").Index(i)))
+		}
+
+		source := niceyaml.NewSourceFromString(input)
+		err := yamltest.Bind(t, source, niceyaml.NewSummary("6 violations",
+			append(tagErrors(0, 1, 2), more(0), more(1), more(2))...,
+		))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | tags: [a, b, c, d, e, f, g, h, i, j, k, l]",
+			"     |        ^ bad a",
+			"     |           ^ bad b",
+			"     | and 1 more on this line",
+			"   2 | more: [x, y, z]",
+			"     |        ^ bad",
+			"     |           ^ bad",
+			"     | and 1 more on this line",
+		), requireExcerpt(t, yamltest.RequireSourceError(t, err), niceyaml.WithExcerptMarks(2)).String())
+	})
+
+	t.Run("a long line shows the windows of its marks alone", func(t *testing.T) {
+		t.Parallel()
+
+		// Every item of the line fails, so the line holds 400 problems. The
+		// problems that the excerpt counts do not get a window.
+		items := make([]string, 400)
+		errs := make([]error, 0, len(items))
+
+		for i := range items {
+			items[i] = fmt.Sprintf("item%03d", i)
+
+			errs = append(errs, niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Index(i))))
+		}
+
+		source := niceyaml.NewSourceFromString("[" + strings.Join(items, ", ") + "]\n")
+		err := yamltest.Bind(t, source, niceyaml.NewSummary("400 violations", errs...))
+
+		rendered := niceyaml.FormatError(err, niceyaml.WithExcerptWidth(8), niceyaml.WithExcerptMarks(3))
+		_, excerpt, ok := strings.Cut(rendered, "\n\n")
+		require.True(t, ok)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | [item000, item001, item...",
+			"     |  ^^^^^^^ bad",
+			"     |           ^^^^^^^ bad",
+			"     |                    ^^^^ bad",
+			"     | and 397 more on this line",
+		), excerpt)
+	})
+
+	t.Run("Annotate marks every problem", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+		err := yamltest.Bind(t, source, niceyaml.NewSummary("12 violations", tagErrors(all...)...))
+
+		view := source.View()
+		require.True(t, niceyaml.Annotate(err, view))
+
+		assert.Equal(t, stringtest.JoinLF(append(rows(12, 0), "   2 | more: [x, y, z]")...), view.String())
+	})
+
+	t.Run("the %+v verb prints at the default", func(t *testing.T) {
+		t.Parallel()
+
+		// The verb cuts the tree to its first problems and marks those
+		// alone. A detail of each on the same line adds a mark, so the line
+		// holds more marks than the default.
+		errs := make([]error, 0, 6)
+
+		for i := range 6 {
+			errs = append(errs, niceyaml.NewError(
+				"bad "+letters[i:i+1],
+				niceyaml.AtPath(paths.Doc().Child("tags").Index(i)),
+				niceyaml.WithDetails(niceyaml.NewError(
+					"see "+letters[i+6:i+7],
+					niceyaml.AtPath(paths.Doc().Child("tags").Index(i+6)),
+				)),
+			))
+		}
+
+		source := niceyaml.NewSourceFromString(input)
+		err := yamltest.Bind(t, source, niceyaml.NewSummary("6 violations", errs...))
+
+		_, excerpt, ok := strings.Cut(fmt.Sprintf("%+v", err), "\n\n")
+		require.True(t, ok)
+
+		got := strings.Split(excerpt, "\n")
+		require.Len(t, got, 1+niceyaml.DefaultExcerptMarks+2)
+		assert.Equal(t, "     | and 2 more on this line", got[1+niceyaml.DefaultExcerptMarks])
+		assert.Equal(t, "   2 | more: [x, y, z]", got[len(got)-1])
+	})
+}
+
 func TestFormatError_ExcerptWidth(t *testing.T) {
 	t.Parallel()
 

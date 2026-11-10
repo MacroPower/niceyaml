@@ -3781,6 +3781,38 @@ func TestDefaultAnnotation(t *testing.T) {
 				{Col: 10, Marker: "^^^^"},
 			},
 		},
+		// A separator labels its line and not a column of it, so its text
+		// starts at the first column whatever its columns are.
+		"a separator below labels the line without carets": {
+			content: "key: aaaa bbbb",
+			annotations: line.Annotations{
+				{Content: "second", Kind: kind.UISeparator, Placement: line.Below, Cols: position.NewSpan(5, 9)},
+				{Kind: kind.UISeparator, Placement: line.Below},
+				{Content: "first\tcut", Kind: kind.UISeparator, Placement: line.Below},
+			},
+			want: []printer.AnnotationRow{{Text: "first\u2409cut; second"}},
+		},
+		"a hunk header below labels the line without carets": {
+			content: "key: aaaa bbbb",
+			annotations: line.Annotations{
+				{Content: "@@ -1 +1 @@", Kind: kind.UIHunkHeader, Placement: line.Below, Cols: position.NewSpan(5, 9)},
+			},
+			want: []printer.AnnotationRow{{Text: "@@ -1 +1 @@"}},
+		},
+		"a separator below without content adds no row": {
+			content:     "key: aaaa bbbb",
+			annotations: line.Annotations{{Kind: kind.UISeparator, Placement: line.Below}},
+		},
+		// The row follows every caret row of the line, so it sits beside
+		// the last wrapped row.
+		"wrapped content puts a separator below the last row": {
+			content: "key: aaaa bbbb cccc dddd",
+			annotations: line.Annotations{
+				{Content: "and 2 more", Kind: kind.UISeparator, Placement: line.Below},
+			},
+			rowStarts: []int{0, 10, 20},
+			want:      []printer.AnnotationRow{{Col: 20, Text: "and 2 more"}},
+		},
 		"wrapped content clamps a negative row start and end": {
 			content:     "abc",
 			annotations: line.Annotations{below(0, 3, "")},

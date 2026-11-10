@@ -436,9 +436,13 @@ func (r *Result) Hunks(context int) *line.View {
 // lines of each side that its hunk holds.
 //
 // Each row of the result keeps the flag, the overlays, and the annotations
-// that view gives it, except the hunk headers and the separators. HunksOf
-// adds headers of its own, so the hunks of hunks match the hunks. The
-// result keeps the clip that [line.View.Clip] gave view, as
+// that view gives it, except the hunk headers and the separators that sit
+// above a row. HunksOf adds headers of its own, so the hunks of hunks match
+// the hunks. A separator below a row labels that row and not a gap, so it
+// stays. The row that counts the problems an error excerpt does not mark
+// on a line is such a separator.
+//
+// The result keeps the clip that [line.View.Clip] gave view, as
 // [line.View.Slice] does. HunksOf panics when view is not over the content
 // of Result.Unified, as [line.View.Over] reports.
 func (r *Result) HunksOf(view *line.View, context int) *line.View {
@@ -505,8 +509,8 @@ func (r *Result) HunksOf(view *line.View, context int) *line.View {
 
 	// Each row takes the decoration of view after the header, so the
 	// header stays above the marks, as Carry keeps it. The headers and the
-	// separators that a view of hunks carries need not match the hunks of
-	// the result, so they stay out.
+	// separators that a view of hunks carries above its rows need not match
+	// the hunks of the result, so they stay out.
 	for i := range hunks.All() {
 		hunks.SetFlag(i, view.Flag(i))
 
@@ -515,7 +519,7 @@ func (r *Result) HunksOf(view *line.View, context int) *line.View {
 		}
 
 		for _, a := range view.Annotations(i) {
-			if !isHunkMark(a) {
+			if !isHunkMark(a) || a.Placement != line.Above {
 				hunks.Annotate(i, a)
 			}
 		}

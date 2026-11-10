@@ -44,15 +44,19 @@ import (
 // place it.
 //
 // Detach keeps a copy of each line that the excerpts of its bindings show
-// with the context lines opts set. It keeps the width opts set too, as
-// [ExcerptOption] describes. Every renderer uses those options for a
-// detached error, whatever options the renderer receives, so a detached
-// error renders as err renders with opts. Those options hold for
-// [FormatError], [NewErrorReport], [SourceError.Excerpt], and the %+v
-// verb. The lines of a detached binding are not part of any view of a
-// source, so [Annotate] does not mark anything for it. Detach does not
-// keep any line of a source with excerpts off, as [WithExcerpts] sets
-// them.
+// with the context lines opts set. It keeps the lines of every problem,
+// however many one line holds. The excerpt of one binding marks problems
+// that the excerpt of the whole error only counts, so it shows those lines
+// too. Detach does not keep any line of a source with excerpts off, as
+// [WithExcerpts] sets them.
+//
+// Detach keeps the context lines, the width, and the number of marks on
+// one line that opts set too, as [ExcerptOption] describes. Every renderer
+// uses those options for a detached error, whatever options the renderer
+// receives, so a detached error renders as err renders with opts. Those
+// options hold for [FormatError], [NewErrorReport], [SourceError.Excerpt],
+// and the %+v verb. The lines of a detached binding are not part of any
+// view of a source, so [Annotate] does not mark anything for it.
 //
 // The bindings of one source share the copy that one call of Detach
 // keeps, so they render together as they did in err. A program might join
@@ -445,21 +449,27 @@ func (k *keptSource) identity() weak.Pointer[Source] {
 	return k.from
 }
 
-// keep copies the lines of src that an excerpt with marks shows, with the
-// context lines of the options of k.
+// keep copies the lines of src that an excerpt with any of marks shows,
+// with the context lines that the options of k set. It copies the lines of
+// every mark, however many one line holds. The excerpt of one binding marks
+// problems that the excerpt of the whole error only counts. It finds the
+// lines of those problems in the copy.
 func (k *keptSource) keep(src *Source, marks []excerpt.Mark) {
 	if !k.shows {
 		return
 	}
 
-	view := src.View()
-
-	if !excerpt.Annotate(view, src.lines, marks) {
+	// [line.View.Hunks] gives an excerpt the same spans around the lines
+	// that it marks.
+	marked := excerpt.Lines(src.lines, marks)
+	if len(marked) == 0 {
 		return
 	}
 
-	for i := range view.Hunks(k.cfg.context).All() {
-		k.rows = append(k.rows, i)
+	for _, span := range position.ContextSpans(marked, k.cfg.context, src.lines.Len()) {
+		for i := span.Start; i < span.End; i++ {
+			k.rows = append(k.rows, i)
+		}
 	}
 
 	k.lines, k.at = copyLines(src.lines, k.rows)
@@ -467,12 +477,19 @@ func (k *keptSource) keep(src *Source, marks []excerpt.Mark) {
 
 // excerpt returns a fresh view of the lines k kept, with marks on them,
 // cut to hunks and clipped as the options of k set, whatever options the
-// caller passes. The marks lie in the lines of the source, which k does
-// not hold. So excerpt first moves each mark to the lines that k kept.
+// caller passes. It marks at most the number of marks that those options
+// set on each line and counts the rest, as [WithExcerptMarks] describes.
+// The marks lie in the lines of the source, which k does not hold. So
+// excerpt first moves each mark to the lines that k kept.
 func (k *keptSource) excerpt(marks []excerpt.Mark, _ excerptConfig) (*line.View, bool) {
 	if !k.shows {
 		return nil, false
 	}
+
+	// The limit counts the marks of each line of the source, so it comes
+	// before the move. The move puts every mark of a line that k did not
+	// keep on line -1.
+	marks = excerpt.Limit(marks, k.cfg.marks)
 
 	moved := make([]excerpt.Mark, 0, len(marks))
 	for _, m := range marks {
@@ -493,7 +510,7 @@ func (k *keptSource) excerpt(marks []excerpt.Mark, _ excerptConfig) (*line.View,
 // mark any line. Each range becomes one range per line k kept, with the
 // columns [line.Lines.SliceLines] gives the range on that line.
 func (k *keptSource) move(m excerpt.Mark) excerpt.Mark {
-	moved := excerpt.Mark{Message: m.Message, Warning: m.Warning, Pos: position.New(-1, m.Pos.Col)}
+	moved := excerpt.Mark{Message: m.Message, Warning: m.Warning, More: m.More, Pos: position.New(-1, m.Pos.Col)}
 
 	if n, ok := slices.BinarySearch(k.rows, m.Pos.Line); ok {
 		moved.Pos.Line = k.at[n]

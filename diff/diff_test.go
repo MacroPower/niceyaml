@@ -954,6 +954,32 @@ func TestDiffResult_HunksOf(t *testing.T) {
 				"  10 | l10: 10",
 			),
 		},
+		// An error excerpt counts the problems it does not mark on a line in
+		// a separator below that line, which labels the line and not a gap.
+		"a separator below a row stays with its row": {
+			view: func(result *diff.Result, beforeView, afterView *line.View) *line.View {
+				afterView.Annotate(
+					11,
+					yamltest.ErrorAnnotation(position.NewSpan(5, 7), "bad"),
+					line.Annotation{Content: "and 2 more on this line", Kind: kind.UISeparator, Placement: line.Below},
+					line.Annotation{Content: "...", Kind: kind.UISeparator, Placement: line.Above},
+				)
+
+				view := result.Unified()
+				result.Carry(view, beforeView, afterView)
+
+				return view
+			},
+			want: stringtest.JoinLF(
+				"     | @@ -2 +2 @@",
+				"   2 | l2: 2",
+				"   2 | l2: changed",
+				"     | @@ -12 +12 @@",
+				"  12 | l12: 12",
+				"     |      ^^ bad",
+				"     | and 2 more on this line",
+			),
+		},
 		"hunks of hunks match the hunks": {
 			view: func(result *diff.Result, beforeView, afterView *line.View) *line.View {
 				return result.HunksOf(errorAt(11, position.NewSpan(5, 7))(result, beforeView, afterView), 1)

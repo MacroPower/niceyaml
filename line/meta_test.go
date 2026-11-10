@@ -319,6 +319,21 @@ func TestAnnotations_Groups(t *testing.T) {
 				{{Content: "c", Placement: line.Below}},
 			},
 		},
+		"below puts the kinds that label the line last": {
+			anns: line.Annotations{
+				{Content: "a", Kind: kind.UISeparator, Placement: line.Below},
+				{Content: "b", Kind: kind.UIHunkHeader, Placement: line.Below},
+				{Content: "c", Placement: line.Below},
+				{Content: "d", Kind: kind.TextWarn, Placement: line.Below},
+			},
+			placement: line.Below,
+			want: []line.Annotations{
+				{{Content: "d", Kind: kind.TextWarn, Placement: line.Below}},
+				{{Content: "c", Placement: line.Below}},
+				{{Content: "a", Kind: kind.UISeparator, Placement: line.Below}},
+				{{Content: "b", Kind: kind.UIHunkHeader, Placement: line.Below}},
+			},
+		},
 	}
 
 	for name, tc := range tcs {

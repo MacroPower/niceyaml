@@ -470,9 +470,11 @@ func (v *View) Slice(spans ...position.Span) *View {
 // after each gap between two lines the result holds. The separator
 // therefore marks the gap between two hunks and any gap the View itself
 // skips inside one. The lines that the result skips before the first hunk
-// do not get a separator. The result drops every separator the View
-// carries before it adds its own. The hunks of hunks therefore match the
-// hunks of the original View at the same or a smaller context.
+// do not get a separator. The result drops every separator that the View
+// carries above a line before it adds its own. The hunks of hunks therefore
+// match the hunks of the original View at the same or a smaller context. A
+// separator below a line labels that line and not a gap, so the result
+// keeps it.
 //
 // The result is a [View.Slice]. Its lines keep their indices, a range from
 // the content applies to it, and decoration that a caller adds later lands
@@ -507,7 +509,9 @@ func (v *View) Hunks(context int) *View {
 	// them and adds its own. The slice owns its annotations, so the
 	// deletion reaches nothing in the View.
 	for i, anns := range hunks.annotations {
-		kept := slices.DeleteFunc(anns, isSeparator)
+		kept := slices.DeleteFunc(anns, func(a Annotation) bool {
+			return isSeparator(a) && a.Placement == Above
+		})
 		if len(kept) == 0 {
 			delete(hunks.annotations, i)
 
@@ -561,19 +565,22 @@ func isSeparator(a Annotation) bool {
 	return a.Kind == kind.UISeparator
 }
 
-// marksWindow reports whether a is a mark that [View.Windows] centers a
-// window on. Separators and the hunk headers of a diff label the line
-// they sit above, not a column of it.
-func marksWindow(a Annotation) bool {
+// marksColumns reports whether a marks the columns of its [Annotation.Cols].
+// [View.Windows] centers a window on such a mark, and a renderer draws
+// carets under it below a line. Separators and the hunk headers of a diff
+// label the line they sit beside, not a column of it.
+func marksColumns(a Annotation) bool {
 	return a.Kind != kind.UISeparator && a.Kind != kind.UIHunkHeader
 }
 
 // Clip returns a copy of the [View] that shows part of each line longer
 // than cols columns. The copy shows a window of cols columns around each
 // mark on such a line, with "..." in place of each run of columns it
-// leaves out. Clip cuts columns as [View.Hunks] cuts lines. A document
-// minified onto one line, or a long encoded value on the line an error
-// marks, thus renders as a row of bounded length.
+// leaves out. Clip cuts columns as [View.Hunks] cuts lines. A long encoded
+// value on the line an error marks thus renders as a row of about cols
+// columns. Clip bounds each window and not the row, so the row of a line
+// grows with the marks on it. A document minified onto one line renders one
+// window for each mark that lies apart from the others.
 //
 // A mark is the first column of an [Overlay], or of the [Annotation.Cols]
 // of an annotation of a kind other than [kind.UISeparator] or
@@ -653,7 +660,7 @@ func (v *View) Windows(i int) position.Spans {
 	}
 
 	for _, a := range v.annotations[i] {
-		if marksWindow(a) {
+		if marksColumns(a) {
 			marks = append(marks, a.Cols.Start)
 		}
 	}
@@ -731,6 +738,13 @@ func (v *View) Windows(i int) position.Spans {
 // Overlays do not render a row, so a line with overlays but without an
 // annotation below it does not render a caret.
 //
+// An annotation of kind [kind.UISeparator] or [kind.UIHunkHeader] labels
+// its line and not a column of it. Below a line, each of those kinds gets
+// one row after the caret rows. The row holds the contents of its
+// annotations joined with "; ", from the first column and without carets.
+// An error excerpt counts the problems it does not mark on a line this
+// way, as "and 5 more on this line".
+//
 // Annotations that start more than [MaxColPastEnd] columns past the end
 // of the content start at that bound, as the printer starts them.
 // Each control character renders as
@@ -796,6 +810,16 @@ func (v *View) String() string {
 		// Each run of columns the annotations below the line label gets a
 		// row of its own, as the printer lays them out, errors first.
 		for _, group := range anns.Groups(Below) {
+			// A group that labels the line gets one row of text from the
+			// first column, without carets.
+			if !marksColumns(group[0]) {
+				if kept := group.WithContent(); len(kept) > 0 {
+					rows = append(rows, blank+escape.Control(strings.Join(kept.Contents(), "; ")))
+				}
+
+				continue
+			}
+
 			for _, r := range caret.Rows(row.Content, caretLabels(group, row.Width), nil) {
 				padding := strings.Repeat(" ", cellRow.Width(r.Col))
 				rows = append(rows, blank+padding+r.Marker+r.Text)
