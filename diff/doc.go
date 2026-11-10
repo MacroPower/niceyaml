@@ -43,6 +43,22 @@
 //
 //	row, ok := result.UnifiedRow(diff.Origin{Side: diff.Before, Index: i})
 //
+// A caller that reports or applies the changes instead of printing them
+// reads [Result.Changes]. Each [Change] spans the lines that one run of
+// changes deletes from the before revision and the lines that it inserts
+// into the after revision, in the coordinates of an Origin. A CI check
+// turns each Change into one annotation, and an editor turns it into one
+// text edit. [Result.Stats] counts the added and removed lines, and
+// [Stats.Changed] reports whether the revisions differ:
+//
+//	if !result.Stats().Changed() {
+//		return
+//	}
+//
+//	for _, c := range result.Changes() {
+//		fmt.Println(c.Before, c.After)
+//	}
+//
 // A diff ignores the decoration of its inputs. [Result.Carry] copies the
 // overlays and annotations of the input views onto a rendering, so the
 // marks of a revision, such as its errors, show in the diff. An unchanged

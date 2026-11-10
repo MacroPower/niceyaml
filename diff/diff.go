@@ -271,6 +271,11 @@ type Origin struct {
 // of an input. [Result.Carry] copies the overlays and annotations of the
 // input views onto a rendering.
 //
+// [Result.Changes] returns the changes as data for a caller that reports
+// or applies them instead of printing them. Each [Change] spans the lines
+// that one run of changes deletes and inserts. [Result.Stats] counts the
+// added and removed lines.
+//
 // A diff is not a YAML document, so the views do not carry parsing or
 // decoding behavior.
 //
@@ -673,6 +678,172 @@ func (r *Result) Stats() Stats {
 	return s
 }
 
+// Change is one run of changed lines in a diff. The run replaces the lines
+// of [Before] that it deletes with the lines of [After] that it inserts.
+// A caller can thus turn each Change into one text edit or one annotation
+// range.
+//
+// Each [position.Span] is half-open. Before and After hold indices of
+// lines in the content of each input, in the coordinates of an [Origin].
+// A Change that only inserts lines has an empty Before span at the place
+// in [Before] where the lines go. A Before span of [6, 6) thus places them
+// in front of the line of [Before] at index 6. A Change that only deletes
+// lines has an empty After span at the place in [After] where the lines
+// stood.
+//
+// Receive instances from [Result.Changes].
+type Change struct {
+	// Rows spans the rows of [Result.Unified] that show the run.
+	Rows position.Span
+	// Before spans the lines of [Before] that the run deletes.
+	Before position.Span
+	// After spans the lines of [After] that the run inserts.
+	After position.Span
+}
+
+// Changes returns the changes of the diff in order. Each [Change] is one
+// run of deleted and inserted rows of [Result.Unified] that unchanged rows
+// do not interrupt:
+//
+//	for _, c := range result.Changes() {
+//		fmt.Println(c.Rows, c.Before, c.After)
+//	}
+//
+// Changes returns nil when the diff does not change any line, and
+// [Stats.Changed] reports false for the same diff.
+//
+// The Before and After spans count lines, and the Rows span counts rows of
+// the unified view. [Result.PaneRow] finds the row of a side-by-side pane
+// that shows a line of the Before or After span.
+//
+// An input can skip lines of its content, as a view sliced to several
+// spans does. A run that crosses such a gap on either side splits at the
+// gap into several changes, so each span names exactly the lines that its
+// Change deletes or inserts.
+//
+// An empty span sits after the last line of its side before the run. A
+// gap can separate the run from that line and not from the next line of
+// the same side. The span then sits at that next line instead. On a side
+// that does not hold a line before the run, the span sits at the first
+// line of the side, or at 0 when the side is empty.
+//
+// The spans follow the ops of the [lcs.Algorithm]. An algorithm can list a
+// line twice, or list the lines of a side out of order. The run splits at
+// that op the way it splits at a gap, so each span still names consecutive
+// lines that the rows of its Change show.
+//
+// Each call returns a new slice.
+func (r *Result) Changes() []Change {
+	var (
+		changes []Change
+		rows    position.Span    // The rows of the open run, or an empty span when no run is open.
+		spans   [2]position.Span // The lines of each side that the open run holds, by [Side].
+		next    [2]lineMark      // The index that continues the current stretch of each side.
+		past    [2]lineMark      // The index after the last line of each side that an earlier op holds.
+	)
+
+	// The following argument gives the lines of the unchanged op that ends
+	// the run, when no gap separates that op from the run.
+	closeRun := func(following [2]lineMark) {
+		if rows.Len() == 0 {
+			return
+		}
+
+		for s := range spans {
+			if spans[s].Len() == 0 {
+				at := r.changePoint(Side(s), next[s], following[s], past[s])
+				spans[s] = position.NewSpan(at, at)
+			}
+		}
+
+		changes = append(changes, Change{Rows: rows, Before: spans[Before], After: spans[After]})
+		rows, spans = position.Span{}, [2]position.Span{}
+	}
+
+	for row, op := range r.ops {
+		var (
+			at  [2]lineMark // The line the op holds on each side.
+			gap bool
+		)
+
+		for s, p := range op.pos {
+			if p < 0 {
+				continue
+			}
+
+			at[s] = lineMark{index: r.inputs[s].indices[p], ok: true}
+			gap = gap || next[s].ok && at[s].index != next[s].index
+		}
+
+		// A stretch ends before the op whose line on either side does not
+		// follow the last line of that side in the stretch.
+		if gap {
+			closeRun([2]lineMark{})
+
+			next = [2]lineMark{}
+		}
+
+		if op.kind == lcs.OpEqual {
+			closeRun(at)
+		} else {
+			if rows.Len() == 0 {
+				rows.Start = row
+			}
+
+			rows.End = row + 1
+		}
+
+		for s, m := range at {
+			if !m.ok {
+				continue
+			}
+
+			if op.kind != lcs.OpEqual {
+				if spans[s].Len() == 0 {
+					spans[s].Start = m.index
+				}
+
+				spans[s].End = m.index + 1
+			}
+
+			next[s] = lineMark{index: m.index + 1, ok: true}
+			past[s] = next[s]
+		}
+	}
+
+	closeRun([2]lineMark{})
+
+	return changes
+}
+
+// lineMark is an index of a line in the content of an input. The ok field
+// reports whether the mark names an index.
+type lineMark struct {
+	index int
+	ok    bool
+}
+
+// changePoint returns the index where a [Change] sits on side s when its
+// run does not hold a line of s. The next argument marks the index after
+// the last line of s before the run, when no gap separates that line from
+// the run. The following argument marks the line of s after the run, under
+// the same condition. The past argument marks the index after the last
+// line of s that any earlier op holds.
+func (r *Result) changePoint(s Side, next, following, past lineMark) int {
+	switch indices := r.inputs[s].indices; {
+	case next.ok:
+		return next.index
+	case following.ok:
+		return following.index
+	case past.ok:
+		return past.index
+	case len(indices) > 0:
+		return indices[0]
+	default:
+		return 0
+	}
+}
+
 // getPanes returns the panes for side-by-side rendering, and it builds
 // them on the first call. It aligns lines so both sides have equal counts:
 //   - Equal lines appear on both sides at the same position.
@@ -1009,11 +1180,6 @@ func (r *Result) Carry(dst, before, after *line.View) {
 			}
 		}
 	}
-}
-
-// IsEmpty reports whether the diff holds zero lines.
-func (r *Result) IsEmpty() bool {
-	return len(r.ops) == 0
 }
 
 // defaultDiffer is the shared [Differ] behind [Diff]. Its [lcs.Hirschberg]

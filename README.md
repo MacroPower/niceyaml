@@ -29,7 +29,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 
 We use a **parse-once**, **style-once** approach. This means your users get a snappy UI, and you get a simple API. There's no need to employ multiple lexers, or perform any ANSI manipulation!
 
-Every part of `niceyaml` shares one **positioning system**. Each position names a line of some content and a column on that line, counted in runes from zero. Slices of a view keep the positions of the whole, so a range from a search or an error applies to a slice as it is. Diffs render new content with rows of their own. The `diff.Result` of each diff maps each row to the line of the revision it shows, and each line of a revision to its row.
+Every part of `niceyaml` shares one **positioning system**. Each position names a line of some content and a column on that line, counted in runes from zero. Slices of a view keep the positions of the whole, so a range from a search or an error applies to a slice as it is. Diffs render new content with rows of their own. The `diff.Result` of each diff maps each row to the line of the revision it shows, and each line of a revision to its row. Its `Changes` method returns each run of changes as the lines it deletes from one revision and inserts into the other.
 
 ## Features
 
@@ -105,6 +105,8 @@ The catalog example looks up a [theme][niceyaml/style/theme] by name for a `-the
 
 - [examples/diffs](examples/diffs)
 - [examples/review](examples/review)
+
+The diffs example prints a diff in full and as hunks, then lists each run of changes from `Result.Changes` as the lines it deletes and inserts.
 
 The review example diffs one document of a file, so the gutter keeps the line numbers of the file. It carries the validation errors of each revision onto the diff, prints the hunks around the changes and the errors, and prints the two revisions side by side.
 

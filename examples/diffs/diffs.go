@@ -35,4 +35,14 @@ func main() {
 	fmt.Println("\nPrint the summary diff:")
 
 	lipgloss.Println(p.Print(result.Hunks(2)))
+
+	// Each change spans the lines it deletes and inserts. The spans are
+	// half-open and count lines from zero, so a program can report or apply
+	// the changes without printing the diff.
+	fmt.Println("\nList the changes:")
+
+	for _, c := range result.Changes() {
+		fmt.Printf("lines [%d, %d) of before become lines [%d, %d) of after\n",
+			c.Before.Start, c.Before.End, c.After.Start, c.After.End)
+	}
 }

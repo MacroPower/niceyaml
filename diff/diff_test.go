@@ -195,7 +195,7 @@ func TestDiffer_Diff_Sequences(t *testing.T) {
 			got := result.Unified()
 			assert.Equal(t, tc.want, got.String())
 			assert.Equal(t, tc.wantStats, result.Stats())
-			assert.Equal(t, tc.want == "", result.IsEmpty())
+			assert.Equal(t, tc.wantStats.Changed(), len(result.Changes()) > 0)
 
 			// The result shares its lines with the inputs.
 			for _, l := range got.All() {
@@ -537,7 +537,7 @@ func TestDiffer_Full(t *testing.T) {
 			assert.Equal(t, tc.wantFlags, changedFlags(got))
 			assert.Equal(t, tc.wantStats, result.Stats())
 			assert.Equal(t, tc.wantStats != diff.Stats{}, result.Stats().Changed())
-			assert.Equal(t, tc.want == "", result.IsEmpty())
+			assert.Equal(t, tc.wantStats.Changed(), len(result.Changes()) > 0)
 		})
 	}
 }
@@ -2331,6 +2331,215 @@ func TestDiffResult_Origins_RepeatedLine(t *testing.T) {
 	row, ok = result.PaneRow(origin)
 	require.True(t, ok)
 	assert.Equal(t, 0, row)
+}
+
+// linesAt returns a [line.Sequence] that yields an empty line at each of
+// indices, for a diff whose algorithm ignores the content of its lines.
+func linesAt(indices ...int) line.Sequence {
+	return sequenceFunc(func(yield func(int, *line.Line) bool) {
+		for _, i := range indices {
+			if !yield(i, &line.Line{}) {
+				return
+			}
+		}
+	})
+}
+
+func TestDiffResult_Changes(t *testing.T) {
+	t.Parallel()
+
+	lines := func(ls ...string) line.Sequence {
+		return niceyaml.NewSourceFromString(stringtest.LinesLF(ls...)).Lines()
+	}
+	change := func(rowStart, rowEnd, beforeStart, beforeEnd, afterStart, afterEnd int) diff.Change {
+		return diff.Change{
+			Rows:   position.NewSpan(rowStart, rowEnd),
+			Before: position.NewSpan(beforeStart, beforeEnd),
+			After:  position.NewSpan(afterStart, afterEnd),
+		}
+	}
+
+	originBefore, originAfter := originViews()
+
+	tcs := map[string]struct {
+		before line.Sequence
+		after  line.Sequence
+		// Holds the algorithm of the diff, when it is not the default.
+		algo lcs.Algorithm
+		want []diff.Change
+	}{
+		"empty inputs": {},
+		"identical inputs": {
+			before: lines("a: 1", "b: 2"),
+			after:  lines("a: 1", "b: 2"),
+		},
+		"replace, insert, and delete": {
+			before: lines("a: 1", "b: 2", "c: 3", "d: 4", "e: 5", "f: 6", "g: 7", "h: 8"),
+			after:  lines("a: 1", "B: 2", "c: 3", "d: 4", "e: 5", "f: 6", "new: 1", "new: 2", "g: 7"),
+			want: []diff.Change{
+				change(1, 3, 1, 2, 1, 2),
+				// The inserted lines go in front of the before line at index 6.
+				change(7, 9, 6, 6, 6, 8),
+				// The deleted line stood at the end of after.
+				change(10, 11, 7, 8, 9, 9),
+			},
+		},
+		"insert before the first line": {
+			before: lines("b: 2"),
+			after:  lines("a: 1", "b: 2"),
+			want:   []diff.Change{change(0, 1, 0, 0, 0, 1)},
+		},
+		"insert into an empty input": {
+			after: lines("a: 1", "b: 2"),
+			want:  []diff.Change{change(0, 2, 0, 0, 0, 2)},
+		},
+		"delete every line": {
+			before: lines("a: 1", "b: 2"),
+			want:   []diff.Change{change(0, 2, 0, 2, 0, 0)},
+		},
+		"adjacent deletes and inserts form one change": {
+			before: lines("keep: 1", "old: 1", "old: 2", "keep: 2"),
+			after:  lines("keep: 1", "new: 1", "new: 2", "new: 3", "keep: 2"),
+			want:   []diff.Change{change(1, 6, 1, 3, 1, 4)},
+		},
+		// The before view starts at index 2 of its content, and the after
+		// view starts at index 1.
+		"sliced views keep the indices of their content": {
+			before: originBefore,
+			after:  originAfter,
+			want: []diff.Change{
+				change(1, 3, 3, 4, 2, 3),
+				change(4, 7, 5, 6, 4, 6),
+			},
+		},
+		// The after view skips indices 1 to 3 of its content, inclusive. The
+		// run deletes three lines and inserts the two lines after the gap.
+		"run across a gap splits at the gap": {
+			before: lines("a: 1", "b: 2", "c: 3", "d: 4"),
+			after: niceyaml.NewSourceFromString(stringtest.LinesLF(
+				"a: 1", "w: 0", "x: 0", "y: 0", "q: 1", "r: 2",
+			)).View().Slice(position.NewSpan(0, 1), position.NewSpan(4, 6)),
+			want: []diff.Change{
+				change(1, 4, 1, 4, 1, 1),
+				change(4, 6, 4, 4, 4, 6),
+			},
+		},
+		"insert that follows the line before a gap": {
+			before: linesAt(2, 10),
+			after:  linesAt(2, 3, 21),
+			algo: opsAlgorithm{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+				{Kind: lcs.OpEqual, Before: 1, After: 2},
+			},
+			want: []diff.Change{change(1, 2, 3, 3, 3, 4)},
+		},
+		"insert that precedes the line after a gap": {
+			before: linesAt(2, 10),
+			after:  linesAt(2, 20, 21),
+			algo: opsAlgorithm{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+				{Kind: lcs.OpEqual, Before: 1, After: 2},
+			},
+			want: []diff.Change{change(1, 2, 10, 10, 20, 21)},
+		},
+		"insert with a gap on each side of it": {
+			before: linesAt(2, 10),
+			after:  linesAt(2, 20, 30),
+			algo: opsAlgorithm{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpInsert, Before: -1, After: 1},
+				{Kind: lcs.OpEqual, Before: 1, After: 2},
+			},
+			want: []diff.Change{change(1, 2, 3, 3, 20, 21)},
+		},
+		"insert before every line of the other side": {
+			before: linesAt(10, 11),
+			after:  linesAt(0, 10, 11),
+			algo: opsAlgorithm{
+				{Kind: lcs.OpInsert, Before: -1, After: 0},
+				{Kind: lcs.OpEqual, Before: 0, After: 1},
+				{Kind: lcs.OpEqual, Before: 1, After: 2},
+			},
+			want: []diff.Change{change(0, 1, 10, 10, 0, 1)},
+		},
+		"algorithm that repeats a line": {
+			before: linesAt(0),
+			after:  linesAt(0),
+			algo: opsAlgorithm{
+				{Kind: lcs.OpEqual, Before: 0, After: 0},
+				{Kind: lcs.OpDelete, Before: 0, After: -1},
+				{Kind: lcs.OpDelete, Before: 0, After: -1},
+			},
+			want: []diff.Change{
+				change(1, 2, 0, 1, 1, 1),
+				change(2, 3, 0, 1, 1, 1),
+			},
+		},
+		"algorithm that lists lines out of order": {
+			before: linesAt(0, 1, 2),
+			after:  linesAt(),
+			algo: opsAlgorithm{
+				{Kind: lcs.OpDelete, Before: 2, After: -1},
+				{Kind: lcs.OpDelete, Before: 0, After: -1},
+				{Kind: lcs.OpDelete, Before: 1, After: -1},
+			},
+			want: []diff.Change{
+				change(0, 1, 2, 3, 0, 0),
+				change(1, 3, 0, 2, 0, 0),
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			result := diff.New(diff.WithAlgorithm(tc.algo)).Diff(tc.before, tc.after)
+
+			got := result.Changes()
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, result.Stats().Changed(), len(got) > 0)
+
+			// Each changed row belongs to one change, and the span of its
+			// side holds the line that the row shows.
+			unified := result.Unified()
+			changed := changedFlags(unified)
+
+			var stats diff.Stats
+
+			for _, c := range got {
+				stats.Removed += c.Before.Len()
+				stats.Added += c.After.Len()
+
+				for row := c.Rows.Start; row < c.Rows.End; row++ {
+					require.Contains(t, changed, row)
+					delete(changed, row)
+
+					origin, ok := result.UnifiedOrigin(row)
+					require.True(t, ok)
+
+					span := c.Before
+					if origin.Side == diff.After {
+						span = c.After
+					}
+
+					assert.True(t, span.Contains(origin.Index), "row %d shows %v outside %v", row, origin, span)
+				}
+			}
+
+			assert.Empty(t, changed)
+			assert.Equal(t, result.Stats(), stats)
+
+			// Each call returns a slice of its own.
+			if len(got) > 0 {
+				got[0] = diff.Change{}
+
+				assert.Equal(t, tc.want, result.Changes())
+			}
+		})
+	}
 }
 
 func TestDiffResult_Carry(t *testing.T) {
