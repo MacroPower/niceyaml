@@ -98,19 +98,12 @@ func notifyContext(parent context.Context) (context.Context, context.CancelFunc)
 	return ctx, stop
 }
 
-// lightHelpTheme names the built-in theme for help output on a light
-// terminal. Every color it gives the help output keeps a high contrast
-// against a white background.
-const lightHelpTheme = "modus-operandi"
-
-// helpColorScheme colors help output with the default charm theme on a dark
-// terminal and with [lightHelpTheme] on a light one. Help text sits on the
+// helpColorScheme colors help output with [theme.Charm] on a dark terminal
+// and with [theme.CharmLight] on a light one. Help text sits on the
 // terminal's own background, where the pale text of a dark theme is hard to
 // read on white.
 func helpColorScheme() fang.ColorSchemeFunc {
-	light, _ := theme.Builtin().Get(lightHelpTheme)
-
-	return fangs.LightDarkColorSchemeFunc(light, theme.Charm)
+	return fangs.LightDarkColorSchemeFunc(theme.CharmLight, theme.Charm)
 }
 
 // newRootCmd builds the nyaml root command and the function that stops

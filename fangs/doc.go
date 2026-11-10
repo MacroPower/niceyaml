@@ -36,8 +36,14 @@
 // theme for each background and picks the one that matches the background
 // fang detects:
 //
-//	light, _ := theme.Builtin().Get("github")
 //	err := fang.Execute(ctx, rootCmd,
-//	    fang.WithColorSchemeFunc(fangs.LightDarkColorSchemeFunc(light, theme.Charm)),
+//	    fang.WithColorSchemeFunc(fangs.LightDarkColorSchemeFunc(theme.CharmLight, theme.Charm)),
+//	)
+//
+// A nil theme selects the palette of [style.Default] for its background,
+// so two nils follow the terminal with the default palettes:
+//
+//	err := fang.Execute(ctx, rootCmd,
+//	    fang.WithColorSchemeFunc(fangs.LightDarkColorSchemeFunc(nil, nil)),
 //	)
 package fangs

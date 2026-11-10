@@ -75,12 +75,13 @@ type Printer struct {
 }
 
 // New creates a new [*Printer].
-// By default it uses [style.Default], [DefaultGutter], [DefaultAnnotation],
-// and an empty container style, so each row of the output is as wide as
-// its content. [WithContainerWidth] pins a width instead.
+// By default it uses the dark palette of [style.Default], [DefaultGutter],
+// [DefaultAnnotation], and an empty container style, so each row of the
+// output is as wide as its content. [WithContainerWidth] pins a width
+// instead. [WithStyles] covers the styles for a light terminal.
 func New(opts ...Option) *Printer {
 	p := &Printer{
-		styles:         style.Default(),
+		styles:         style.Default(true),
 		gutter:         DefaultGutter,
 		annotationFunc: DefaultAnnotation,
 		blends:         newBlendCache(),
@@ -184,12 +185,12 @@ type GutterContext struct {
 }
 
 // styler returns the styles a gutter renders with. It returns the styles
-// the context carries, or [style.Default] when the context carries nil or
-// a nil pointer. A gutter called with a zero context thus renders rather
-// than panics.
+// the context carries, or the dark palette of [style.Default] when the
+// context carries nil or a nil pointer. A gutter called with a zero context
+// thus renders rather than panics.
 func (c GutterContext) styler() style.Styler {
 	if nilness.IsNil(c.Styles) {
-		return style.Default()
+		return style.Default(true)
 	}
 
 	return c.Styles
@@ -812,14 +813,22 @@ func WithContainerWidth(n int) Option {
 // WithStyles is an [Option] that sets the [style.Styler] that styles
 // tokens, gutters, and annotations. The styler is typically a theme from
 // [go.jacobcolvin.com/niceyaml/style/theme]. A nil s, or one holding a nil
-// pointer such as a nil [*style.Styles], selects [style.Default].
+// pointer such as a nil [*style.Styles], selects the dark palette of
+// [style.Default].
+//
+// The printer does not read the terminal, so it cannot tell a light
+// background from a dark one. A program that prints on either detects the
+// background and passes the palette for it:
+//
+//	isDark := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
+//	p := printer.New(printer.WithStyles(style.Default(isDark)))
 //
 // To draw the output as a box in the theme's colors, use [WithBox]. To
 // style the frame around the output, use [WithContainerStyle].
 func WithStyles(s style.Styler) Option {
 	return func(c *config) {
 		if nilness.IsNil(s) {
-			s = style.Default()
+			s = style.Default(true)
 		}
 
 		c.styles = s

@@ -15,10 +15,19 @@
 //
 // By default the printer does not add anything around the rows it renders,
 // so each row ends where its content ends. [style.Default] does not set a
-// surface, so the text shows the terminal's own background. A theme that
-// sets a surface, such as [go.jacobcolvin.com/niceyaml/style/theme.Charm],
-// paints it behind each token. For a full-screen viewer, [WithBox] fills
-// the rest of the rectangle around the rows with the surface:
+// surface, so the text shows the terminal's own background. It takes
+// whether that background is dark and returns a palette that reads on it.
+// A Printer does not read the terminal, so without [WithStyles] it renders
+// with the dark palette. A program that prints on a light terminal too
+// detects the background and passes the palette for it:
+//
+//	isDark := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
+//	p := printer.New(printer.WithStyles(style.Default(isDark)))
+//
+// A theme that sets a surface, such as
+// [go.jacobcolvin.com/niceyaml/style/theme.Charm], paints it behind each
+// token. For a full-screen viewer, [WithBox] fills the rest of the
+// rectangle around the rows with the surface:
 //
 //	p := printer.New(printer.WithStyles(theme.Charm), printer.WithBox())
 //

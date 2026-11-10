@@ -142,21 +142,30 @@ var (
 	// [Light] nor [Dark].
 	ErrUnknownMode = errors.New("unknown mode")
 
-	// Charm is the theme of CharmTone colors. It paints the palette of
-	// [style.Default] on a Pepper surface, which [style.Default] leaves
-	// out. The catalog lists it so a picker can offer it by name.
+	// Charm is the theme of CharmTone colors for a dark background. It
+	// paints the dark palette of [style.Default] on a Pepper surface, which
+	// [style.Default] leaves out. The catalog lists it so a picker can
+	// offer it by name.
 	Charm = New("charm", Dark, func() style.Styles {
-		return style.Default().With(style.WithSurface(charmtone.Pepper))
+		return style.Default(true).With(style.WithSurface(charmtone.Pepper))
 	})
 
-	// The catalog of every palette plus charm, built once.
+	// CharmLight is the theme of CharmTone colors for a light background.
+	// It paints the light palette of [style.Default] on a Salt surface,
+	// which [style.Default] leaves out. The catalog lists it under the
+	// name "charm-light".
+	CharmLight = New("charm-light", Light, func() style.Styles {
+		return style.Default(false).With(style.WithSurface(charmtone.Salt))
+	})
+
+	// The catalog of every palette plus the charm themes, built once.
 	builtin = func() Catalog {
-		themes := make([]Theme, 0, len(palettes)+1)
+		themes := make([]Theme, 0, len(palettes)+2)
 		for name, p := range palettes {
 			themes = append(themes, fromColors(name, p.colors(), p.Tokens))
 		}
 
-		themes = append(themes, Charm)
+		themes = append(themes, Charm, CharmLight)
 
 		slices.SortFunc(themes, func(a, b Theme) int {
 			return strings.Compare(a.Name, b.Name)

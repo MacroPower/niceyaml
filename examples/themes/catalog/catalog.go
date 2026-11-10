@@ -128,6 +128,16 @@ func main() {
 	// section of the theme docs covers the collision.
 	plain := printer.New(printer.WithStyles(styles.With(style.WithSurface(nil))))
 	lipgloss.Println(plain.Print(view))
+
+	fmt.Println("\nPrint with the default styles for this background:")
+
+	// Given whether the background is dark, style.Default returns a
+	// palette without a surface that reads on it. When the program cannot
+	// learn the background, it passes true, and a printer without styles
+	// renders with that same dark palette.
+	dark := err != nil || bg == nil || isDark(bg)
+	inline := printer.New(printer.WithStyles(style.Default(dark)))
+	lipgloss.Println(inline.Print(view))
 }
 
 // isDark reports whether the HSL lightness of c is less than one half, the

@@ -123,7 +123,11 @@ func (f stylerFunc) Style(k kind.Kind) lipgloss.Style {
 func TestColorScheme_NilStyler(t *testing.T) {
 	t.Parallel()
 
-	want := fangs.ColorScheme(style.Default())
+	dark := fangs.ColorScheme(style.Default(true))
+	light := fangs.ColorScheme(style.Default(false))
+
+	// Equal schemes would let a function that ignores the background pass.
+	require.NotEqual(t, dark, light)
 
 	// A nil pointer to a type with a value Style method still satisfies
 	// style.Styler, and calling Style through it panics. So does a nil
@@ -135,24 +139,37 @@ func TestColorScheme_NilStyler(t *testing.T) {
 		"nil func":          stylerFunc(nil),
 	}
 
+	// ColorScheme and ColorSchemeFunc cannot tell the background, so a nil
+	// selects the dark palette. LightDarkColorSchemeFunc can, so a nil
+	// selects the palette for the background fang detects.
 	tcs := map[string]struct {
 		scheme func(styles style.Styler) fang.ColorScheme
+		want   fang.ColorScheme
 	}{
-		"ColorScheme": {scheme: fangs.ColorScheme},
+		"ColorScheme": {scheme: fangs.ColorScheme, want: dark},
 		"ColorSchemeFunc": {
 			scheme: func(styles style.Styler) fang.ColorScheme {
 				return fangs.ColorSchemeFunc(styles)(nil)
 			},
+			want: dark,
+		},
+		"ColorSchemeFunc on a light terminal": {
+			scheme: func(styles style.Styler) fang.ColorScheme {
+				return fangs.ColorSchemeFunc(styles)(lipgloss.LightDark(false))
+			},
+			want: dark,
 		},
 		"LightDarkColorSchemeFunc on a light terminal": {
 			scheme: func(styles style.Styler) fang.ColorScheme {
 				return fangs.LightDarkColorSchemeFunc(styles, styles)(lipgloss.LightDark(false))
 			},
+			want: light,
 		},
 		"LightDarkColorSchemeFunc on a dark terminal": {
 			scheme: func(styles style.Styler) fang.ColorScheme {
 				return fangs.LightDarkColorSchemeFunc(styles, styles)(lipgloss.LightDark(true))
 			},
+			want: dark,
 		},
 	}
 
@@ -164,7 +181,7 @@ func TestColorScheme_NilStyler(t *testing.T) {
 				var got fang.ColorScheme
 
 				require.NotPanics(t, func() { got = tc.scheme(styles) })
-				assert.Equal(t, want, got)
+				assert.Equal(t, tc.want, got)
 			})
 		}
 	}

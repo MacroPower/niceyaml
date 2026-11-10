@@ -1988,6 +1988,57 @@ func TestGutterFunctions(t *testing.T) {
 	}
 }
 
+func TestGutterContext_NilStyles(t *testing.T) {
+	t.Parallel()
+
+	// A gutter called outside a printer cannot tell the terminal's
+	// background. A context without styles thus renders with the dark
+	// palette of the default styles, as a printer without styles does. The
+	// diff marker of each context differs between the two palettes.
+	ctxs := map[string]printer.GutterContext{
+		"zero context":  {},
+		"inserted line": {Flag: line.FlagInserted, Number: 3, MaxNumber: 3},
+	}
+
+	gutters := map[string]printer.Gutter{
+		"DefaultGutter": printer.DefaultGutter,
+		"DiffGutter":    printer.DiffGutter,
+	}
+
+	tcs := map[string]struct {
+		styles style.Styler
+	}{
+		"nil":               {styles: nil},
+		"nil *style.Styles": {styles: (*style.Styles)(nil)},
+		"nil *theme.Theme":  {styles: (*theme.Theme)(nil)},
+	}
+
+	for ctxName, ctx := range ctxs {
+		for gutterName, gutter := range gutters {
+			for name, tc := range tcs {
+				t.Run(ctxName+" "+gutterName+" "+name, func(t *testing.T) {
+					t.Parallel()
+
+					render := func(styles style.Styler) string {
+						c := ctx
+						c.Styles = styles
+
+						return gutter.Render(c)
+					}
+
+					want := render(style.Default(true))
+					require.NotEqual(t, want, render(style.Default(false)))
+
+					var got string
+
+					require.NotPanics(t, func() { got = render(tc.styles) })
+					assert.Equal(t, want, got)
+				})
+			}
+		}
+	}
+}
+
 func TestPrinter_Style(t *testing.T) {
 	t.Parallel()
 
@@ -5114,10 +5165,16 @@ func TestPrinter_WithStyles_Nil(t *testing.T) {
 	t.Parallel()
 
 	view := niceyaml.NewSourceFromString("key: value").View()
-	want := printer.New().Print(view)
 
-	// A nil Styler, or one holding a nil pointer, selects the default
-	// styles rather than panicking in New.
+	// The printer cannot tell the terminal's background, so without styles
+	// it renders with the dark palette of the default styles.
+	want := printer.New(printer.WithStyles(style.Default(true))).Print(view)
+
+	assert.Equal(t, want, printer.New().Print(view))
+	assert.NotEqual(t, want, printer.New(printer.WithStyles(style.Default(false))).Print(view))
+
+	// A nil Styler, or one holding a nil pointer, selects the same styles
+	// rather than panicking in New.
 	tcs := map[string]struct {
 		styles style.Styler
 	}{

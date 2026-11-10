@@ -18,11 +18,11 @@ import (
 //
 // ColorScheme derives CLI styling from the theme system of niceyaml, so
 // the YAML viewer and CLI help output use the same colors. A nil styles, or
-// one holding a nil pointer such as a nil [*style.Styles], selects
-// [style.Default].
+// one holding a nil pointer such as a nil [*style.Styles], selects the dark
+// palette of [style.Default].
 func ColorScheme(styles style.Styler) fang.ColorScheme {
 	if isNil(styles) {
-		styles = style.Default()
+		styles = style.Default(true)
 	}
 
 	text := styles.Style(kind.Text)
@@ -56,8 +56,10 @@ func ColorScheme(styles style.Styler) fang.ColorScheme {
 // ColorSchemeFunc wraps [ColorScheme] for use with
 // [fang.WithColorSchemeFunc]. Each theme targets either a light or a dark
 // background, so the returned function ignores its [lipgloss.LightDarkFunc]
-// parameter. A nil styles, or one holding a nil pointer, selects
-// [style.Default].
+// parameter. A nil styles, or one holding a nil pointer, selects the dark
+// palette of [style.Default] on both backgrounds. To follow the background
+// with the default palettes, pass nil for both arguments of
+// [LightDarkColorSchemeFunc].
 func ColorSchemeFunc(styles style.Styler) fang.ColorSchemeFunc {
 	return func(_ lipgloss.LightDarkFunc) fang.ColorScheme {
 		return ColorScheme(styles)
@@ -72,9 +74,17 @@ func ColorSchemeFunc(styles style.Styler) fang.ColorSchemeFunc {
 // [fang.WithColorSchemeFunc]. Help output draws most of its text on the
 // terminal's own background. A theme made for one background might then
 // be hard to read on the other. Use [ColorSchemeFunc] to apply one theme
-// on both. A nil light or dark, or one holding a nil pointer, selects
-// [style.Default] for that background.
+// on both. A nil light or dark, or one holding a nil pointer, selects the
+// palette of [style.Default] for that background.
 func LightDarkColorSchemeFunc(light, dark style.Styler) fang.ColorSchemeFunc {
+	if isNil(light) {
+		light = style.Default(false)
+	}
+
+	if isNil(dark) {
+		dark = style.Default(true)
+	}
+
 	return func(ld lipgloss.LightDarkFunc) fang.ColorScheme {
 		// On a dark background, ld returns its second color, so two
 		// distinct colors reveal the background fang detected.

@@ -99,7 +99,7 @@ Views do not depend on the printer. The renderer example writes an HTML renderer
 - [examples/themes/catalog](examples/themes/catalog)
 - [examples/themes/custom](examples/themes/custom)
 
-The catalog example looks up a [theme][niceyaml/style/theme] by name for a `-theme` flag and sets the color profile for a `-color` flag. The custom example reads a theme from a YAML file, checks each color and style string, and builds the theme with [`theme.FromColors`][niceyaml/style/theme.FromColors].
+The catalog example looks up a [theme][niceyaml/style/theme] by name for a `-theme` flag and sets the color profile for a `-color` flag. It also prints with the default styles for the terminal's background, light or dark. The custom example reads a theme from a YAML file, checks each color and style string, and builds the theme with [`theme.FromColors`][niceyaml/style/theme.FromColors].
 
 ### Diffs
 

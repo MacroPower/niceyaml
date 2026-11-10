@@ -190,17 +190,77 @@ func TestNew_NilBuild(t *testing.T) {
 func TestCharm(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "charm", theme.Charm.Name)
-	assert.Equal(t, theme.Dark, theme.Charm.Mode)
+	// Each charm theme paints one palette of the default styles on a
+	// surface, which the default styles leave out.
+	tcs := map[string]struct {
+		surface color.Color
+		theme   theme.Theme
+		name    string
+		mode    theme.Mode
+		isDark  bool
+	}{
+		"Charm": {
+			theme:   theme.Charm,
+			name:    "charm",
+			mode:    theme.Dark,
+			isDark:  true,
+			surface: charmtone.Pepper,
+		},
+		"CharmLight": {
+			theme:   theme.CharmLight,
+			name:    "charm-light",
+			mode:    theme.Light,
+			isDark:  false,
+			surface: charmtone.Salt,
+		},
+	}
 
-	// Charm paints the palette of the default styles on a surface, which
-	// the default styles leave out.
-	assert.Equal(t, style.Default().With(style.WithSurface(charmtone.Pepper)), theme.Charm.Styles())
-	assert.Equal(t, charmtone.Pepper, theme.Charm.Styles().Surface())
-	assert.Nil(t, style.Default().Surface())
-	assert.Equal(t, lipgloss.NoColor{}, style.Default().Style(kind.Text).GetBackground())
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	assert.Equal(t, theme.Charm.Name, builtin(t, "charm").Name)
+			assert.Equal(t, tc.name, tc.theme.Name)
+			assert.Equal(t, tc.mode, tc.theme.Mode)
+
+			assert.Equal(t, style.Default(tc.isDark).With(style.WithSurface(tc.surface)), tc.theme.Styles())
+			assert.Equal(t, tc.surface, tc.theme.Styles().Surface())
+
+			// A picker finds the theme by name and under its mode.
+			assert.Equal(t, tc.name, builtin(t, tc.name).Name)
+
+			got, ok := theme.Builtin().Mode(tc.mode).Get(tc.name)
+			require.True(t, ok)
+			assert.Equal(t, tc.theme.Styles(), got.Styles())
+		})
+	}
+}
+
+func TestCharmLight_ReadableOnSurface(t *testing.T) {
+	t.Parallel()
+
+	// The light palette targets a white terminal, and its Salt surface is a
+	// shade darker, so every token must keep the WCAG AA 4.5:1 there too.
+	tokens := []kind.Kind{
+		kind.Text,
+		kind.Comment,
+		kind.CommentPreproc,
+		kind.LiteralBoolean,
+		kind.LiteralNull,
+		kind.LiteralNumber,
+		kind.LiteralString,
+		kind.NameAlias,
+		kind.NameAnchor,
+		kind.NameDecorator,
+		kind.NameTag,
+		kind.Punctuation,
+		kind.PunctuationHeading,
+	}
+
+	for _, k := range tokens {
+		st := theme.CharmLight.Style(k)
+		assert.GreaterOrEqual(t, yamltest.Contrast(st.GetForeground(), st.GetBackground()), 4.5,
+			"%s draws %s", k, style.Encode(st))
+	}
 }
 
 func TestCatalog_With(t *testing.T) {
@@ -353,6 +413,7 @@ func TestBuiltin(t *testing.T) {
 
 	assert.Equal(t, "abap", names[0])
 	assert.Contains(t, names, "charm")
+	assert.Contains(t, names, "charm-light")
 	assert.True(t, slices.IsSorted(names))
 	assert.Equal(t, len(names), theme.Builtin().Len())
 
@@ -914,7 +975,7 @@ func TestPalette_HighlightsReadable(t *testing.T) {
 	}
 
 	// TestDefault_HighlightsReadable in the style package covers the
-	// highlights of Charm, with and without its surface.
+	// highlights of Charm and CharmLight, with and without their surfaces.
 	for _, th := range paletteThemes() {
 		t.Run(th.Name, func(t *testing.T) {
 			t.Parallel()
@@ -1139,11 +1200,12 @@ func standsOut(token, marked lipgloss.Style) bool {
 	return distance(a, b) >= minMarkDistance
 }
 
-// paletteThemes returns every built-in theme but Charm, which sets its
-// headings and highlights by hand rather than through FromColors.
+// paletteThemes returns every built-in theme but Charm and CharmLight,
+// which set their headings and highlights by hand rather than through
+// FromColors.
 func paletteThemes() []theme.Theme {
 	return slices.DeleteFunc(theme.Builtin().All(), func(th theme.Theme) bool {
-		return th.Name == theme.Charm.Name
+		return th.Name == theme.Charm.Name || th.Name == theme.CharmLight.Name
 	})
 }
 

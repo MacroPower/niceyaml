@@ -30,7 +30,8 @@ func (p palette) colors() Colors {
 	}
 }
 
-// palettes holds every built-in theme except charm, keyed by name.
+// palettes holds every built-in theme except charm and charm-light, keyed
+// by name.
 //
 // Most entries derive from the Chroma syntax highlighter:
 // https://github.com/alecthomas/chroma

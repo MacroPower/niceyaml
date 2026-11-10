@@ -308,17 +308,13 @@ func TestRootCmdStopWithoutStart(t *testing.T) {
 func TestHelpColorScheme(t *testing.T) {
 	t.Parallel()
 
-	light, ok := theme.Builtin().Get(lightHelpTheme)
-	require.True(t, ok)
-	require.Equal(t, theme.Light, light.Mode)
-
 	csFunc := helpColorScheme()
 
 	tcs := map[string]struct {
 		isDark bool
 		want   fang.ColorScheme
 	}{
-		"light terminal": {isDark: false, want: fangs.ColorScheme(light)},
+		"light terminal": {isDark: false, want: fangs.ColorScheme(theme.CharmLight)},
 		"dark terminal":  {isDark: true, want: fangs.ColorScheme(theme.Charm)},
 	}
 

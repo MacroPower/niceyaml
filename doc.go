@@ -81,7 +81,9 @@
 //
 // Themes from [go.jacobcolvin.com/niceyaml/style/theme] provide color
 // palettes. Without one, [go.jacobcolvin.com/niceyaml/printer.Printer]
-// renders with [go.jacobcolvin.com/niceyaml/style.Default].
+// renders with the dark palette of
+// [go.jacobcolvin.com/niceyaml/style.Default], which also returns a
+// palette for a light terminal.
 //
 // # Options
 //

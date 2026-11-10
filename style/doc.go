@@ -57,10 +57,15 @@
 //
 //	plain := theme.Charm.Styles().With(style.WithSurface(nil))
 //
-// [Default] does not set a surface, and its pale text reads best on a dark
-// terminal. Each theme picks its colors for its own surface. On a
-// terminal background of another color, some of its text might be hard to
-// read.
+// Each theme picks its colors for its own surface. On a terminal
+// background of another color, some of its text might be hard to read.
+//
+// [Default] does not set a surface, so it suits output that a program
+// prints inline. It takes whether the terminal's background is dark and
+// returns a palette whose text reads on that background:
+//
+//	isDark := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
+//	styles := style.Default(isDark)
 //
 // # Themes
 //

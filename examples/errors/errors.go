@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"charm.land/lipgloss/v2"
 
@@ -12,6 +13,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/style"
 )
 
 // broken leaves a flow sequence open, so the parser rejects it. It is a
@@ -25,7 +27,13 @@ order: [kaffe, kanelbulle
 var example string
 
 func main() {
-	p := printer.New()
+	// The default styles draw on the terminal's own background, and the
+	// printer does not read the terminal. The program asks whether that
+	// background is dark and passes the answer to style.Default, which
+	// returns the palette that reads on it. When it cannot ask, such as
+	// in a pipe, lipgloss.HasDarkBackground answers true.
+	isDark := lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
+	p := printer.New(printer.WithStyles(style.Default(isDark)))
 
 	fmt.Println("\nPrint a syntax error:")
 
