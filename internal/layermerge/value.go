@@ -44,33 +44,35 @@ type mapEntry struct {
 	// The YAML text of the key, with its tag, as the layer of value
 	// spells it.
 	key string
-	// Whether a layer removed the entry with a written null. The merged
-	// document leaves the entry out. The value field holds the null that
-	// removed the entry, so an error about the key binds at that null. For
-	// an entry that a merged layer removed, value is a null of that layer.
+	// Whether a written null of a layer keeps the entry out of the merged
+	// document. Such a null removes the entry that the layers below hold,
+	// and it does not add an entry where they do not hold one. The value
+	// field holds that null, so an error about the key binds at it. For an
+	// entry that a merged layer removed, value is a null of that layer.
 	// That null stands for the null in a layer of its own.
 	removed bool
 }
 
 // merge puts upper, the entry a higher layer holds under the name of e,
-// over e. A removed upper removes e. A removed e stays removed under a
-// null, and takes the null of upper when that null removes, as
-// [Value.removes] reports. Over any other e, a removing null removes a
-// value and replaces a null. Any other null replaces only a null that
-// does not remove. Any other value replaces a removed e, or merges over
+// over e. A removed upper removes e, and so does a null that removes, as
+// [Value.removes] reports. Any other null keeps a removed e and a null of
+// e that removes. Any other value replaces a removed e, or merges over
 // the value of e as [Value.Merge] describes.
 func (e *mapEntry) merge(upper *mapEntry) {
 	value := upper.value
 
 	switch {
-	case upper.removed, value.removes() && (e.removed || e.value.kind != kindNull):
+	case upper.removed, value.removes():
 		e.value, e.removed = value, true
 
-	case value.kind == kindNull && !value.removes() && (e.removed || e.value.removes()):
+	case value.kind == kindNull && (e.removed || e.value.removes()):
 		// The null keeps the removal, or the null below that removes.
 
 	case e.removed:
+		value.strip()
+
 		e.value, e.removed = value, false
+
 	default:
 		e.value = e.value.Merge(value)
 	}
@@ -91,13 +93,45 @@ func (v *Value) removes() bool {
 	return v.kind == kindNull && v.written && v.tag == ""
 }
 
+// strip marks as removed each entry of v whose null removes, as
+// [Value.removes] reports. It serves a value of a higher layer that the
+// merged document takes whole. The layers below do not hold a value for
+// such a null to remove, and the null does not add its key either. The
+// entries of each mapping inside v take the same mark. A sequence keeps
+// each null it holds, because a sequence replaces what lies below it
+// with every element.
+func (v *Value) strip() {
+	for _, entry := range v.entries {
+		entry.strip()
+	}
+}
+
+// strip marks e as removed when its null removes, and otherwise strips
+// its value as [Value.strip] describes.
+func (e *mapEntry) strip() {
+	if e.value.removes() {
+		e.removed = true
+
+		return
+	}
+
+	e.value.strip()
+}
+
 // Merge returns upper merged over v, where upper comes from a higher
 // layer. Two mappings merge entry by entry, as [mapEntry.merge]
 // describes, and v then holds the result. A null in upper keeps v,
 // unless v is a null too. Any other upper replaces v. Either value can be
 // nil. A nil value stands for a layer that does not hold a value there.
 //
-// Merge does not let a null remove a value. [mapEntry.merge] decides
+// For a nil v, the result is upper as its layer wrote it, with each null
+// it holds. Over any other v, the null of an entry of upper that removes,
+// as [Value.removes] reports, does not reach the merged document. It
+// removes the entry that v holds under its key, and it does not add an
+// entry where v does not hold one. Its entry stays in the result as a
+// removed one. A null inside a sequence of upper stays.
+//
+// Merge does not let a null remove v itself. [mapEntry.merge] decides
 // removal for the value under a key, and the root of a layer does not
 // have a key.
 func (v *Value) Merge(upper *Value) *Value {
@@ -114,12 +148,16 @@ func (v *Value) Merge(upper *Value) *Value {
 		return v
 
 	case v.kind != kindMapping || upper.kind != kindMapping:
+		upper.strip()
+
 		return upper
 	}
 
 	for _, entry := range upper.entries {
 		i, ok := v.names[entry.name]
 		if !ok {
+			entry.strip()
+
 			v.names[entry.name] = len(v.entries)
 			v.entries = append(v.entries, entry)
 

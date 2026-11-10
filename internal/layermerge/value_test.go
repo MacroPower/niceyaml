@@ -82,6 +82,53 @@ func TestValue_Merge(t *testing.T) {
 			layers: []string{stringtest.LinesLF("a: 1", "b: 2"), "a: null\n"},
 			want:   "b: 2\n",
 		},
+		"a written null adds nothing where the layer below lacks its key": {
+			layers: []string{"a: 1\n", stringtest.LinesLF("b: null", "c: !!null ~")},
+			want:   "a: 1\n",
+		},
+		"a written null removes a written null of the lowest layer": {
+			layers: []string{stringtest.LinesLF("a: 1", "b: ~"), "b: null\n"},
+			want:   "a: 1\n",
+		},
+		"a written null removes a null with no text of the lowest layer": {
+			layers: []string{"b:\n", "b: null\n"},
+			want:   "{}\n",
+		},
+		"a written null removes a null with no text of a layer between": {
+			layers: []string{"a: 1\n", "b:\n", "b: ~\n"},
+			want:   "a: 1\n",
+		},
+		"a written null adds nothing over an empty mapping": {
+			layers: []string{"{}\n", stringtest.LinesLF("a: ~", "b: {c: null}")},
+			want:   "b: {}\n",
+		},
+		"a written null adds nothing over a null at the root": {
+			layers: []string{"~\n", stringtest.LinesLF("a: ~", "b: 1")},
+			want:   "b: 1\n",
+		},
+		"a null with no text keeps out the key a written null did not add": {
+			layers: []string{"a: 1\n", "b: ~\n", "b:\n"},
+			want:   "a: 1\n",
+		},
+		"the lowest layer keeps its nulls": {
+			layers: []string{stringtest.LinesLF("a: null", "b: {c: ~}"), "d: 1\n"},
+			want:   stringtest.LinesLF("a: null", "b:", "  c: ~", "d: 1"),
+		},
+		"a written null adds nothing inside a mapping the merge takes whole": {
+			layers: []string{
+				stringtest.LinesLF("a: 1", "b: [x]", "d:"),
+				stringtest.LinesLF("a: {k: ~, l: 2}", "b: {k: ~}", "c: {k: {m: ~}}", "d: {k: ~}"),
+			},
+			want: stringtest.LinesLF("a:", "  l: 2", "b: {}", "d: {}", "c:", "  k: {}"),
+		},
+		"a written null stays inside a sequence": {
+			layers: []string{"a: 1\n", "b: [{k: ~}, ~]\n"},
+			want:   stringtest.LinesLF("a: 1", "b:", "  - k: ~", "  - ~"),
+		},
+		"a null with no text stays where the layer below lacks its key": {
+			layers: []string{"a: 1\n", "b:\n"},
+			want:   stringtest.LinesLF("a: 1", "b:"),
+		},
 		"a null with no text keeps the value below": {
 			layers: []string{"a: 1\n", "a:\n"},
 			want:   "a: 1\n",
@@ -103,7 +150,7 @@ func TestValue_Merge(t *testing.T) {
 			want:   "a: x\n",
 		},
 		"a value takes the place of a removed key": {
-			layers: []string{"a: {b: 1}\n", "a: ~\n", "a: {c: 2}\n"},
+			layers: []string{"a: {b: 1}\n", "a: ~\n", "a: {c: 2, d: ~}\n"},
 			want:   stringtest.LinesLF("a:", "  c: 2"),
 		},
 		"aliases and merge keys resolve": {

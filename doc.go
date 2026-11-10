@@ -1396,13 +1396,36 @@
 //
 // The merged document holds env.A alone. A null of a higher layer keeps the
 // key removed, and a higher layer that sets a value there restores the key
-// with only that value. A written null stays a null where the layers below it
-// do not hold a value.
+// with only that value.
+//
+// A written null never adds its key. Where the layers below do not hold the
+// key, the merged document lacks it too, at any depth of a mapping that the
+// layer adds. A null of a higher layer keeps that key out as well, and a
+// value of a higher layer sets it. The file of a user thus turns a default
+// off with `proxy: ~`, and that line reads the same after the defaults gain
+// or lose the key.
+//
+// The lowest layer that holds a value is the document that the layers above
+// it change, so it keeps each null it writes. A merge of one layer thus holds
+// what its file holds. A written null of a higher layer removes a null that a
+// layer below holds under its key, written or not, as it removes any other
+// value. In every layer, a written null stays inside a sequence, because a
+// sequence replaces what lies below it whole.
+//
+// A layer without content, such as a file of comments, does not hold a value.
+// A layer with content holds one, even where its document is an empty mapping
+// or a null, as in a file that holds only `{}` or `~`. A file above such a
+// layer thus does not keep its written nulls.
 //
 // A null that a layer leaves unwritten keeps the value below it. A key that
 // does not have anything after it holds such a null, and so does a tag
 // without a value. A key whose entries are all commented out thus does not
 // change anything. A null at the root of a layer keeps the document below it.
+//
+// An unwritten null also keeps a key out where a written null of a layer
+// below removes the key or does not add it. It stays a null where no layer
+// below holds a value or writes a null under its key. A layer above the
+// lowest one thus sets a null with `proxy:`, and only there.
 //
 // Two keys are one key when a path selects them by the same name, as
 // [go.jacobcolvin.com/niceyaml/paths.Resolver.KeyName] gives it. The keys 80
@@ -1478,10 +1501,10 @@
 // An error for a key that is missing from every layer binds at the key of the
 // mapping that lacks it. It binds in the layer whose mapping lies deepest
 // along the path, and in the highest of several such layers. An error at a
-// key that a layer removed binds at the null that removed it, in the highest
-// layer that writes one there. An error without a location binds without a
-// position in the layer that the Source stands for, as in "base.yaml: quota
-// service: connection refused".
+// key that a written null removes or does not add binds at that null, in the
+// highest layer that writes one there. An error without a location binds
+// without a position in the layer that the Source stands for, as in
+// "base.yaml: quota service: connection refused".
 //
 // The bound error reports the [SourceError.Source], the [SourceError.Node],
 // and the [SourceError.Path] that it has in the layer it binds in. A layer
@@ -1492,10 +1515,12 @@
 // shows the lines of the layer.
 //
 // A merged Source is a layer like any other, and so is a Node of its
-// document. A merge that holds one reads it as a file of the same text, and
-// that layer removes each key that its own layers removed. The merge binds
-// each error in the file that holds the value, so every error and every
-// origin belongs to a document that a merge did not build.
+// document. A merge that holds one reads it as a file of the same text. That
+// text lacks each key that a written null of its own layers removed or did
+// not add, but the layer keeps the null. The null thus removes the key that a
+// layer below the merged Source holds. The merge binds each error in the file
+// that holds the value, so every error and every origin belongs to a document
+// that a merge did not build.
 //
 // The decode fills the Go value from the merged document as the Decoding
 // section describes. A default that the value holds thus survives where the
@@ -1521,8 +1546,9 @@
 // [go.jacobcolvin.com/niceyaml/encoder.Marshal] writes a nil pointer field of
 // a struct as `null`. A layer that a program encodes from a struct thus
 // removes the value under each nil pointer whose field lacks the omitempty
-// option. [WithExcerpts] set to false keeps the lines of a layer that holds
-// secrets out of every excerpt.
+// option. It does not set a null where the layers below lack the key.
+// [WithExcerpts] set to false keeps the lines of a layer that holds secrets
+// out of every excerpt.
 //
 // # Alias Limit
 //

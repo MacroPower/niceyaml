@@ -34,7 +34,9 @@ var (
 // base file with the file of one environment over it. Each mapping merges
 // into the mapping below it key by key. Each sequence and each scalar
 // replaces what lies below it whole, so a layer cannot set one element of
-// a sequence. A null written as `null` or `~` removes its key.
+// a sequence. A null that a layer writes as `null` or `~` removes its key
+// and never adds one. The lowest layer that holds a value keeps the nulls
+// it writes.
 //
 // A decode of the Source validates the merged document once. Each error
 // binds in the file that holds the value that the error is about. The

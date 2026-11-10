@@ -5,9 +5,10 @@
 // go-yaml decoder reads it, with every alias and `<<` merge key resolved.
 // [Value.Merge] puts the value of a higher layer over a lower one. A
 // mapping merges key by key, a sequence or a scalar replaces what lies
-// below it, and a written null without a tag removes its key. A removed
-// entry stays in the value, so an error about its key finds the null that
-// removed it. Each value names the layer it came from by index, and
+// below it. A written null without a tag keeps its key out of the merged
+// value, in every layer above the lowest one that holds a value. Its
+// entry stays in the value as a removed one, so an error about its key
+// finds that null. Each value names the layer it came from by index, and
 // [Value.Find] finds the value at a path. [Text] writes the merged value
 // as YAML.
 package layermerge

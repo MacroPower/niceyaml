@@ -187,18 +187,122 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 				"$.proxy.url":  "prod.yaml:1:1",
 			},
 		},
-		"a null stays where no layer below holds a value": {
-			layers: []string{stringtest.LinesLF("a: 1", "d: null"), stringtest.LinesLF("b: ~", "c:", "d: ~")},
-			want: stringtest.LinesLF(
-				"a: 1",
-				"d: ~",
-				"b: ~",
-				"c:",
-			),
+		"a written null adds nothing where no layer below holds its key": {
+			layers: []string{"a: 1\n", stringtest.LinesLF("b: ~", "c: null", "d: !!null Null")},
+			want:   "a: 1\n",
 			binds: map[string]string{
 				"$.b": "prod.yaml:1:4",
-				"$.d": "prod.yaml:3:4",
+				"$.c": "prod.yaml:2:4",
+				"$.d": "prod.yaml:3:11",
 			},
+		},
+		"an unwritten null stays a null where no layer below holds its key": {
+			layers: []string{"a: 1\n", stringtest.LinesLF("b:", "c: # none", "d: !!null")},
+			want:   stringtest.LinesLF("a: 1", "b:", "c:", "d:"),
+			binds:  map[string]string{"$.b": "prod.yaml:1:3"},
+		},
+		"the lowest layer keeps the nulls it writes": {
+			layers: []string{stringtest.LinesLF("a: ~", "m: {b: null}"), "c: 1\n"},
+			want:   stringtest.LinesLF("a: ~", "m:", "  b: null", "c: 1"),
+			binds: map[string]string{
+				"$.a":   "base.yaml:1:4",
+				"$.m.b": "base.yaml:2:8",
+			},
+		},
+		"the lowest layer that holds a value keeps the nulls it writes": {
+			layers: []string{"# nothing\n", "a: ~\n", "b: ~\n"},
+			want:   stringtest.LinesLF("# nothing", "a: ~"),
+			binds: map[string]string{
+				"$.a": "mid.yaml:1:4",
+				"$.b": "prod.yaml:1:4",
+			},
+		},
+		"a written null removes the written null of the lowest layer": {
+			layers: []string{stringtest.LinesLF("a: 1", "d: null"), "d: ~\n"},
+			want:   "a: 1\n",
+			binds:  map[string]string{"$.d": "prod.yaml:1:4"},
+		},
+		"a written null removes the unwritten null of the lowest layer": {
+			layers: []string{"p:\n", "p: ~\n"},
+			want:   "{}\n",
+			binds:  map[string]string{"$.p": "prod.yaml:1:4"},
+		},
+		"a written null removes the unwritten null of a layer between": {
+			layers: []string{"a: 1\n", "p:\n", "p: ~\n"},
+			want:   "a: 1\n",
+			binds:  map[string]string{"$.p": "prod.yaml:1:4"},
+		},
+		"a written null adds nothing above an empty mapping": {
+			layers: []string{"{}\n", stringtest.LinesLF("p: ~", "m: {k: ~}", "b: 1")},
+			want:   stringtest.LinesLF("m: {}", "b: 1"),
+			binds: map[string]string{
+				"$.p":   "prod.yaml:1:4",
+				"$.m.k": "prod.yaml:2:8",
+			},
+		},
+		"a written null adds nothing above a written null at the root": {
+			layers: []string{"~\n", stringtest.LinesLF("p: null", "b: 1")},
+			want:   "b: 1\n",
+			binds:  map[string]string{"$.p": "prod.yaml:1:4"},
+		},
+		"a written null adds nothing above an unwritten null at the root": {
+			layers: []string{"!!null\n", "p: ~\n"},
+			want:   "{}\n",
+			binds:  map[string]string{"$.p": "prod.yaml:1:4"},
+		},
+		"an unwritten null keeps out the key that a written null did not add": {
+			layers: []string{
+				"a: 1\n",
+				stringtest.LinesLF("p: ~", "q: null"),
+				stringtest.LinesLF("p:", "q: !!null"),
+			},
+			want: "a: 1\n",
+			binds: map[string]string{
+				"$.p": "mid.yaml:1:4",
+				"$.q": "mid.yaml:2:4",
+			},
+		},
+		"a value sets the key that a written null did not add": {
+			layers: []string{"a: 1\n", "p: ~\n", "p: {k: ~, l: 1}\n"},
+			want:   stringtest.LinesLF("a: 1", "p:", "  l: 1"),
+			binds: map[string]string{
+				"$.p.k": "prod.yaml:1:8",
+				"$.p.l": "prod.yaml:1:14",
+			},
+		},
+		"a written null adds nothing inside a mapping under a new key": {
+			layers: []string{"a: 1\n", "m: {x: ~, y: 2, z: {w: null}}\n"},
+			want:   stringtest.LinesLF("a: 1", "m:", "  y: 2", "  z: {}"),
+			binds: map[string]string{
+				"$.m.x":   "prod.yaml:1:8",
+				"$.m.y":   "prod.yaml:1:14",
+				"$.m.z.w": "prod.yaml:1:24",
+			},
+		},
+		"a written null adds nothing inside a mapping that replaces a scalar, a sequence, or a null": {
+			layers: []string{
+				stringtest.LinesLF("a: 1", "b: [x]", "c:"),
+				stringtest.LinesLF("a: {k: ~, l: 2}", "b: {k: ~}", "c: {k: ~, l: 3}"),
+			},
+			want: stringtest.LinesLF("a:", "  l: 2", "b: {}", "c:", "  l: 3"),
+			binds: map[string]string{
+				"$.a.k": "prod.yaml:1:8",
+				"$.b.k": "prod.yaml:2:8",
+				"$.c.k": "prod.yaml:3:8",
+			},
+		},
+		"a written null adds nothing inside a mapping over a removed key": {
+			layers: []string{"proxy: {url: x}\n", "proxy: ~\n", "proxy: {url: ~, port: 2, tls: {cert: ~}}\n"},
+			want:   stringtest.LinesLF("proxy:", "  port: 2", "  tls: {}"),
+			binds: map[string]string{
+				"$.proxy.url":      "prod.yaml:1:14",
+				"$.proxy.tls.cert": "prod.yaml:1:38",
+			},
+		},
+		"a written null adds nothing inside a mapping that replaces the root": {
+			layers: []string{"hello\n", stringtest.LinesLF("a: ~", "b: 1")},
+			want:   "b: 1\n",
+			binds:  map[string]string{"$.a": "prod.yaml:1:4"},
 		},
 		"an unwritten null keeps the written null below it": {
 			layers: []string{stringtest.LinesLF("d: null", "e:"), stringtest.LinesLF("d:", "e:")},
@@ -672,11 +776,11 @@ func TestNewSourceFromLayers_Decode_Nulls(t *testing.T) {
 		"an anchored null removes":             {prod: "proxy: &none ~\n", want: removed},
 		"an alias to a written null removes": {
 			prod: stringtest.LinesLF("none: &none ~", "proxy: *none"),
-			want: removed + "none: ~\n",
+			want: removed,
 		},
 		"a written null that a merge key brings in removes": {
 			prod: stringtest.LinesLF("none: &none {proxy: ~}", "<<: *none"),
-			want: removed + stringtest.LinesLF("none:", "  proxy: ~"),
+			want: removed + "none: {}\n",
 		},
 		"a key with nothing after it keeps": {prod: "proxy:\n", want: kept},
 		"a key before a comment keeps":      {prod: "proxy: # none\n", want: kept},
@@ -726,12 +830,17 @@ func TestNewSourceFromLayers_Decode_Equivalence(t *testing.T) {
 		DecodeInto(ctx context.Context, v any, opts ...niceyaml.DecodeOption) error
 	}
 
-	// One layer merges into what it holds, and an empty mapping above or
-	// below it changes nothing, so every arrangement decodes as the
-	// document alone does.
+	// A document above an empty mapping is not the lowest layer, so a
+	// null it writes under a key does not reach the merged document.
+	const overEmpty = "over an empty mapping"
+
+	// One layer merges into what it holds, and an empty mapping above it
+	// changes nothing. An empty mapping below it changes only a document
+	// that writes a null under a key, so that document skips overEmpty.
+	// Every arrangement that runs thus decodes as the document alone does.
 	arrangements := map[string]func(doc, empty *niceyaml.Node) []niceyaml.Layer{
 		"alone":                  func(doc, _ *niceyaml.Node) []niceyaml.Layer { return []niceyaml.Layer{doc} },
-		"over an empty mapping":  func(doc, empty *niceyaml.Node) []niceyaml.Layer { return []niceyaml.Layer{empty, doc} },
+		overEmpty:                func(doc, empty *niceyaml.Node) []niceyaml.Layer { return []niceyaml.Layer{empty, doc} },
 		"under an empty mapping": func(doc, empty *niceyaml.Node) []niceyaml.Layer { return []niceyaml.Layer{doc, empty} },
 	}
 
@@ -747,6 +856,10 @@ func TestNewSourceFromLayers_Decode_Equivalence(t *testing.T) {
 		}
 
 		for arrangement, arrange := range arrangements {
+			if tc.writesNull && arrangement == overEmpty {
+				continue
+			}
+
 			t.Run(name+" "+arrangement, func(t *testing.T) {
 				t.Parallel()
 
@@ -1523,6 +1636,35 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 				"$.proxy": "prod.yaml:1:8",
 			},
 		},
+		"a written null adds nothing where no file below holds its key": {
+			base: "name: shop\n",
+			mid:  stringtest.LinesLF("proxy: ~", "env: {B: ~}"),
+			prod: "name: prod\n",
+			want: stringtest.LinesLF("name: prod", "env: {}"),
+			binds: map[string]string{
+				"$.proxy": "mid.yaml:1:8",
+				"$.env.B": "mid.yaml:2:10",
+			},
+		},
+		// The text of mid.yaml and prod.yaml merged holds only the name.
+		"a written null removes a key that only the lowest file holds": {
+			base: "proxy: {url: x}\n",
+			mid:  "name: mid\n",
+			prod: "proxy: ~\n",
+			want: "name: mid\n",
+			binds: map[string]string{
+				"$.proxy": "prod.yaml:1:8",
+			},
+		},
+		"a written null removes the key a higher file adds": {
+			base: "name: shop\n",
+			mid:  "proxy: {url: x}\n",
+			prod: "proxy: ~\n",
+			want: "name: shop\n",
+			binds: map[string]string{
+				"$.proxy": "prod.yaml:1:8",
+			},
+		},
 		"an unwritten null removes nothing": {
 			base: stringtest.LinesLF("name: shop", "server: {port: 80}"),
 			mid:  stringtest.LinesLF("server:", "  # port: 9090"),
@@ -1539,6 +1681,24 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 			want: "name: shop\n",
 			binds: map[string]string{
 				"$.proxy": "mid.yaml:1:8",
+			},
+		},
+		"an unwritten null above a written one that adds nothing adds nothing": {
+			base: "name: shop\n",
+			mid:  "proxy: ~\n",
+			prod: "proxy:\n",
+			want: "name: shop\n",
+			binds: map[string]string{
+				"$.proxy": "mid.yaml:1:8",
+			},
+		},
+		"a written null removes the unwritten null of a file below": {
+			base: "name: shop\n",
+			mid:  "proxy:\n",
+			prod: "proxy: ~\n",
+			want: "name: shop\n",
+			binds: map[string]string{
+				"$.proxy": "prod.yaml:1:8",
 			},
 		},
 		// The merged text spells the null of mid.yaml as a written one
@@ -3340,6 +3500,20 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		cfg, err := layers.Decode[layerConfig](t.Context())
 		require.NoError(t, err)
 		assert.Nil(t, cfg.Backup)
+
+		// Over a base that does not set a backup, the null does not add
+		// one, so the backup the program set survives the decode.
+		bare := niceyaml.NewSourceFromString("name: shop\n", niceyaml.WithName("base.yaml"))
+
+		layers = yamltest.Layers(t, bare, env)
+
+		assert.Equal(t, "name: env\n", mergedText(t, layers))
+
+		cfg = layerConfig{Backup: &layerServer{Host: "d", Port: 9}}
+
+		err = layers.DecodeInto(t.Context(), &cfg)
+		require.NoError(t, err)
+		assert.Equal(t, &layerServer{Host: "d", Port: 9}, cfg.Backup)
 	})
 
 	t.Run("one decode reports the values every layer gets wrong", func(t *testing.T) {
@@ -3723,6 +3897,46 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 
 		_, err = mergedLayers(t, nodes).Decode[layerConfig](t.Context(), niceyaml.WithValidator(requires))
 		require.ErrorContains(t, err, "base.yaml:5:9: $.server.port: 0 is less than 1")
+	})
+
+	t.Run("a written null passes a schema that rejects a null, whatever lies below it", func(t *testing.T) {
+		t.Parallel()
+
+		typed := schema.MustCompile([]byte(`{
+			"type": "object",
+			"properties": {"proxy": {"type": "string"}}
+		}`))
+
+		user := "proxy: null\n"
+
+		// The file of the user opts out of the proxy. The merged document
+		// lacks the proxy whether or not the defaults set one.
+		for name, defaults := range map[string]string{
+			"defaults that set the key":  stringtest.LinesLF("proxy: http://corp:3128", "other: 1"),
+			"defaults that lack the key": "other: 1\n",
+		} {
+			layers := layerFiles(t, defaults, user)
+
+			assert.Equal(t, "other: 1\n", mergedText(t, layers), name)
+			require.NoError(t, layers.ValidateDocuments(t.Context(), typed), name)
+		}
+
+		// Alone, the file is the document, and its null stays.
+		alone := layerFiles(t, user)
+
+		assert.Equal(t, user, mergedText(t, alone))
+
+		err := alone.ValidateDocuments(t.Context(), typed)
+		require.EqualError(t, err, `base.yaml:1:8: $.proxy: expected "string", got "null"`)
+
+		// A null the file leaves unwritten stays a null where the
+		// defaults lack the key.
+		unwritten := layerFiles(t, "other: 1\n", "proxy:\n")
+
+		assert.Equal(t, stringtest.LinesLF("other: 1", "proxy:"), mergedText(t, unwritten))
+
+		err = unwritten.ValidateDocuments(t.Context(), typed)
+		require.EqualError(t, err, `prod.yaml:1:8: $.proxy: expected "string", got "null"`)
 	})
 
 	t.Run("a key the schema requires reports at the null that removed it", func(t *testing.T) {
@@ -5215,12 +5429,17 @@ var (
 
 	// MergedCorpus holds documents that spell their values in the ways the
 	// merged document must write again. Each has a mapping at its root, so
-	// an empty mapping above or below it changes nothing.
+	// an empty mapping above it changes nothing. An empty mapping below it
+	// changes nothing either, unless the document writes a null under a
+	// key.
 	mergedCorpus = map[string]struct {
 		// Returns a pointer to a new value of a Go type the document decodes
 		// into, or nil for a document with none.
 		typed func() any
 		input string
+		// Whether the document writes a null under a key. Such a null
+		// stays only where its document is the lowest layer.
+		writesNull bool
 	}{
 		"tagged scalars": {
 			input: stringtest.LinesLF(
@@ -5229,7 +5448,6 @@ var (
 				"int: !!int 7",
 				"float: !!float 1",
 				"bool: !!bool true",
-				"nul: !!null null",
 				"time: !!timestamp 2001-12-14",
 				`quoted: !!str "5"`,
 			),
@@ -5344,8 +5562,6 @@ var (
 				"stamp: 2001-12-14T21:59:43Z",
 				"yes: yes",
 				"bool: True",
-				"nul: Null",
-				"tilde: ~",
 				"absent:",
 				"url: http://example.com/a?b=c#d",
 				"lead: -dash",
@@ -5359,7 +5575,6 @@ var (
 			typed: func() any {
 				return new(struct {
 					Stamp   time.Time `yaml:"stamp"`
-					Tilde   *string   `yaml:"tilde"`
 					Version string    `yaml:"version"`
 					Hex     string    `yaml:"hex"`
 					URL     string    `yaml:"url"`
@@ -5375,6 +5590,22 @@ var (
 					Bool    bool      `yaml:"bool"`
 				})
 			},
+		},
+		"written nulls": {
+			input: stringtest.LinesLF(
+				"first: 1",
+				"nul: Null",
+				"tilde: ~",
+				"tagged: !!null null",
+				"nested: {word: null}",
+			),
+			typed: func() any {
+				return new(struct {
+					Tilde *string `yaml:"tilde"`
+					First int     `yaml:"first"`
+				})
+			},
+			writesNull: true,
 		},
 		"keys": {
 			input: stringtest.LinesLF(

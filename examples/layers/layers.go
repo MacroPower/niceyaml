@@ -57,7 +57,7 @@ func main() {
 
 	// Pass the layers lowest first. A mapping merges key by key, a
 	// sequence or a scalar replaces what the layer below holds, and a
-	// null removes its key.
+	// null that a layer writes removes its key.
 	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, prod})
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))
