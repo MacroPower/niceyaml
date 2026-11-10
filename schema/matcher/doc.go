@@ -45,8 +45,14 @@
 //
 // The base is the working directory at the time [FilePath] runs.
 // [WithBaseDir] names another base, such as the root of a project or the
-// directory of a configuration file. Documents that carry a relative
-// path, such as those from an [io/fs.FS], match by that path as written.
+// directory of a configuration file. A pattern that starts with "**"
+// stays under the base too. So "**/values.yaml" matches that file at any
+// depth of the project and in no other project. A rooted pattern such as
+// "/**/k8s/*.yaml" does not use the base, so it matches a file in any
+// location.
+//
+// Documents that carry a relative path, such as those from an
+// [io/fs.FS], match by that path as written.
 //
 // # Composing Matchers
 //

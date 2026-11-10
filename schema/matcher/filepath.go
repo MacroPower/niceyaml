@@ -43,9 +43,11 @@ type filePathConfig struct {
 }
 
 // WithBaseDir is a [FilePathOption] that sets the base directory of a
-// [FilePath] matcher. A relative pattern matches an absolute file path
-// under the base directory. Without this option, the base is the working
-// directory.
+// [FilePath] matcher. A relative pattern matches an absolute file path as
+// the path that leads to the file from the base directory. A pattern that
+// starts with "**" stays under the base, and a pattern leaves the base
+// only through the ".." elements that it writes. Without this option, the
+// base is the working directory.
 //
 // Pass the root of a project, or the directory of the configuration file
 // that lists the patterns, so the patterns apply wherever the program
@@ -91,31 +93,43 @@ type filePathMatcher struct {
 // does not parse. Use [MustFilePath] for patterns that you know are valid
 // at compile time.
 //
-//	// Matches any YAML file recursively.
+//	// Matches any YAML file at any depth under the base directory.
 //	m, err := matcher.FilePath("**/*.yaml")
 //
-//	// Matches any YAML file in k8s directories.
+//	// Matches any YAML file in a k8s directory under the base directory.
 //	m, err := matcher.FilePath("**/k8s/*.yaml")
 //
 //	// Matches YAML files only in the base directory.
 //	m, err := matcher.FilePath("*.yaml")
+//
+//	// Matches any YAML file in a k8s directory, in any location.
+//	m, err := matcher.FilePath("/**/k8s/*.yaml")
 //
 // A relative file path matches as written. Documents that
 // [niceyaml.NewSourceFromFS] reads carry the relative path of their file,
 // and [niceyaml.WithFilePath] can set one. So "configs/*.yaml" matches a
 // document that NewSourceFromFS read from "configs/app.yaml".
 //
-// [niceyaml.NewSourceFromFile] sets an absolute file path. An absolute
-// file path matches as written too, so "**/k8s/*.yaml" and
-// "/etc/app/*.yaml" match it whatever the base directory is.
+// [niceyaml.NewSourceFromFile] sets an absolute file path. Match tests a
+// relative pattern against the path that leads to that file from the
+// base directory, and never against the absolute path as written. Under
+// the base "/repo", "configs/*.yaml" matches "/repo/configs/app.yaml"
+// however the caller spelled the file. There "**/k8s/*.yaml" matches
+// "/repo/deploy/k8s/app.yaml" and does not match "/other/k8s/app.yaml".
 //
-// An absolute file path also matches as the path that leads to it from
-// the base directory. Under the base "/repo", "configs/*.yaml" matches
-// "/repo/configs/app.yaml" however the caller spelled the file, and
-// "../shared/*.yaml" matches "/shared/app.yaml". A "*" matches a name but
-// never matches a "..", so "*/app.yaml" matches "/repo/configs/app.yaml"
-// and does not match a file above "/repo". Match compares the two paths
-// as text and does not follow symbolic links.
+// Wildcards match names and never match a "..", and "**" is one of them.
+// So a relative pattern reaches a file outside the base only through the
+// ".." elements that it writes, and "../shared/*.yaml" matches
+// "/shared/app.yaml" under the base "/repo". Match compares the two
+// paths as text and does not follow symbolic links.
+//
+// A rooted pattern opens with "/" and matches an absolute file path as
+// written, whatever the base directory is. Write a pattern for any
+// location rooted, such as "/**/k8s/*.yaml". On Windows, an absolute file
+// path opens with a volume name, so a rooted pattern there opens with one
+// too, as in "C:/**/k8s/*.yaml". When the braces of a pattern hold a
+// rooted and a relative alternative, as in "{/etc/app,configs}/*.yaml",
+// each alternative follows its own rule.
 //
 // The base directory is the working directory at the time FilePath runs.
 // A later change of directory does not move it.
@@ -127,8 +141,9 @@ type filePathMatcher struct {
 // patterns belong to the root of a project.
 //
 // In a process without a working directory, a relative base does not
-// resolve to an absolute path. Match then reports [ErrNoBaseDir] for an
-// absolute file path that a relative pattern does not match as written.
+// resolve to an absolute path. Match then reports [ErrNoBaseDir] when it
+// tests an absolute file path against a relative pattern. A rooted
+// pattern and a relative file path do not need the base.
 //
 // FilePath also returns [ErrInvalidPattern] for an empty pattern, because
 // such a pattern does not match any path and silently disables the
@@ -196,13 +211,19 @@ func (m *filePathMatcher) Describe() string {
 func (m *filePathMatcher) Match(_ context.Context, doc *niceyaml.Node) (bool, error) {
 	path := doc.FilePath()
 
-	if m.pattern.Match(path) {
+	// Match does not know the directory that a relative path leads from,
+	// so that path matches as written.
+	if !filepath.IsAbs(path) {
+		return m.pattern.Match(path), nil
+	}
+
+	// A rooted pattern names its own directory, so it does not need the
+	// base.
+	if m.pattern.MatchRooted(path) {
 		return true, nil
 	}
 
-	// Only a relative pattern matches a path that leads from the base,
-	// and only an absolute path has one.
-	if !filepath.IsAbs(path) || !m.pattern.Relative() {
+	if !m.pattern.Relative() {
 		return false, nil
 	}
 
@@ -217,5 +238,5 @@ func (m *filePathMatcher) Match(_ context.Context, doc *niceyaml.Node) (bool, er
 		return false, nil //nolint:nilerr // A path outside the base is a plain no.
 	}
 
-	return m.pattern.Match(rel), nil
+	return m.pattern.MatchRelative(rel), nil
 }

@@ -335,15 +335,40 @@ func TestPattern_Match(t *testing.T) {
 			pattern: "../*/x.yaml",
 			path:    "../../x.yaml",
 		},
-		"double star matches parent elements": {
+		"double star matches no parent element": {
+			pattern: "**/x.yaml",
+			path:    "../x.yaml",
+		},
+		"double star matches no parent elements": {
 			pattern: "**/x.yaml",
 			path:    "../../x.yaml",
+		},
+		"double star matches no name after a parent element": {
+			pattern: "**/x.yaml",
+			path:    "../a/x.yaml",
+		},
+		"double star after a parent matches names": {
+			pattern: "../**/x.yaml",
+			path:    "../a/b/x.yaml",
 			want:    true,
 		},
-		"double star after a parent matches a second parent": {
+		"double star after a parent matches no directory": {
+			pattern: "../**/x.yaml",
+			path:    "../x.yaml",
+			want:    true,
+		},
+		"double star after a parent matches no second parent": {
 			pattern: "../**/x.yaml",
 			path:    "../../a/x.yaml",
+		},
+		"double stars around a parent match no directory": {
+			pattern: "**/../**",
+			path:    "..",
 			want:    true,
+		},
+		"double star alone matches no parent itself": {
+			pattern: "**",
+			path:    "..",
 		},
 		"rooted double star matches no parent element": {
 			pattern: "/**/x.yaml",
@@ -434,6 +459,79 @@ func TestPattern_Match(t *testing.T) {
 
 			got := p.Match(tc.path)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// MatchRooted and MatchRelative split the patterns that the braces expand
+// to, and Match tries them all.
+func TestPattern_MatchRootedAndRelative(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		pattern      string
+		path         string
+		wantRooted   bool
+		wantRelative bool
+	}{
+		"rooted pattern and rooted path": {
+			pattern:    "/etc/app/*.yaml",
+			path:       "/etc/app/x.yaml",
+			wantRooted: true,
+		},
+		"rooted pattern and relative path": {
+			pattern: "/etc/app/*.yaml",
+			path:    "etc/app/x.yaml",
+		},
+		"relative pattern and relative path": {
+			pattern:      "configs/*.yaml",
+			path:         "configs/x.yaml",
+			wantRelative: true,
+		},
+		"relative pattern and rooted path": {
+			pattern: "configs/*.yaml",
+			path:    "/configs/x.yaml",
+		},
+		"relative double star and rooted path": {
+			pattern:      "**/configs/*.yaml",
+			path:         "/srv/configs/x.yaml",
+			wantRelative: true,
+		},
+		"rooted double star and rooted path": {
+			pattern:    "/**/configs/*.yaml",
+			path:       "/srv/configs/x.yaml",
+			wantRooted: true,
+		},
+		"braces match through the rooted pattern": {
+			pattern:    "{/etc,configs}/*.yaml",
+			path:       "/etc/x.yaml",
+			wantRooted: true,
+		},
+		"braces match through the relative pattern": {
+			pattern:      "{/etc,configs}/*.yaml",
+			path:         "configs/x.yaml",
+			wantRelative: true,
+		},
+		"braces match through neither pattern": {
+			pattern: "{/etc,configs}/*.yaml",
+			path:    "other/x.yaml",
+		},
+		"empty path": {
+			pattern: "{/etc,configs}/*.yaml",
+			path:    "",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p, err := filepaths.NewPattern(tc.pattern)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.wantRooted, p.MatchRooted(tc.path), "rooted")
+			assert.Equal(t, tc.wantRelative, p.MatchRelative(tc.path), "relative")
+			assert.Equal(t, tc.wantRooted || tc.wantRelative, p.Match(tc.path), "any")
 		})
 	}
 }

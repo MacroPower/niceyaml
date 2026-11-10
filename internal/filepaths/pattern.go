@@ -26,8 +26,10 @@ var (
 //
 // Create instances with [NewPattern].
 type Pattern struct {
-	// The normalized patterns ExpandBraces yields for the pattern.
-	globs []string
+	// The normalized patterns ExpandBraces yields for the pattern, split
+	// into those that [rooted] reports and the rest.
+	rooted   []string
+	relative []string
 }
 
 // NewPattern creates a new [Pattern] from a glob pattern string. It
@@ -79,14 +81,31 @@ func NewPattern(pattern string) (Pattern, error) {
 		}
 	}
 
-	return Pattern{globs: globs}, nil
+	var p Pattern
+
+	for _, glob := range globs {
+		if rooted(glob) {
+			p.rooted = append(p.rooted, glob)
+		} else {
+			p.relative = append(p.relative, glob)
+		}
+	}
+
+	return p, nil
+}
+
+// rooted reports whether glob names its own root, so it matches a path as
+// written and never a path that leads from some directory. Such a glob
+// opens with a separator, or with a volume name on Windows.
+func rooted(glob string) bool {
+	return strings.HasPrefix(glob, "/") || filepath.VolumeName(glob) != ""
 }
 
 // parentsMatchable reports whether every ".." element of glob sits in
 // a leading run of ".." and "**" elements of a relative pattern. A ".."
 // of a cleaned path can pair with a pattern element only in that run. A
-// "**" in that run can match zero directories, so a ".." after it can
-// still pair with a ".." at the start of the path.
+// "**" in that run matches zero directories there, so a ".." after it
+// can still pair with a ".." at the start of the path.
 func parentsMatchable(glob string) bool {
 	leading := !strings.HasPrefix(glob, "/")
 
@@ -114,11 +133,35 @@ func parentsMatchable(glob string) bool {
 // root-only pattern "*.yaml".
 //
 // A cleaned path that leads out of the directory it starts in opens with
-// ".." elements. Each of them matches a ".." element of the pattern, or
-// counts among the directories a "**" matches. The "*" and "?" wildcards
-// and character classes match only the name of a file or a directory, so
-// "*/x.yaml" matches "a/x.yaml" but not "../x.yaml".
+// ".." elements. Each of them matches only a ".." element of the pattern.
+// Every wildcard matches only the name of a file or a directory, and "**"
+// matches any number of directory names. So "*/x.yaml" and "**/x.yaml"
+// match "a/x.yaml" but not "../x.yaml". A pattern reaches a path outside
+// that directory only through the ".." elements that it writes. A "**"
+// can match zero directories, so "**/../x.yaml" matches "../x.yaml".
 func (p Pattern) Match(path string) bool {
+	return p.MatchRooted(path) || p.MatchRelative(path)
+}
+
+// MatchRooted is like [Pattern.Match] but tries only the rooted patterns
+// that the braces expand to. A rooted pattern opens with a separator, or
+// with a volume name on Windows. It names the absolute paths it matches,
+// whatever directory the caller works in.
+func (p Pattern) MatchRooted(path string) bool {
+	return matchGlobs(p.rooted, path)
+}
+
+// MatchRelative is like [Pattern.Match] but tries only the relative
+// patterns that the braces expand to. A relative pattern matches a path
+// that leads from some directory. So a caller that holds an absolute path
+// passes the path that leads to it from that directory.
+func (p Pattern) MatchRelative(path string) bool {
+	return matchGlobs(p.relative, path)
+}
+
+// matchGlobs reports whether path matches one of globs, as
+// [Pattern.Match] describes.
+func matchGlobs(globs []string, path string) bool {
 	if path == "" {
 		return false
 	}
@@ -127,10 +170,10 @@ func (p Pattern) Match(path string) bool {
 
 	parents, rest := cutParents(clean)
 	if parents == 0 {
-		return matchAnyGlob(p.globs, clean)
+		return matchAnyGlob(globs, clean)
 	}
 
-	return slices.ContainsFunc(p.globs, func(glob string) bool {
+	return slices.ContainsFunc(globs, func(glob string) bool {
 		return matchParents(glob, parents, rest)
 	})
 }
@@ -158,68 +201,46 @@ func cutParents(path string) (int, string) {
 // matchParents reports whether glob matches the cleaned path made of
 // parents ".." elements followed by rest, as [Pattern.Match] describes.
 // Doublestar matches a ".." of the path with any element that matches
-// its two dots. So matchParents pairs those elements with glob itself
-// and hands doublestar the rest of both.
+// its two dots. So matchParents pairs those elements with the ".."
+// elements of glob itself and hands doublestar the rest of both.
 func matchParents(glob string, parents int, rest string) bool {
 	elems := splitElements(glob)
 
-	// Each entry says whether the elements before its index can match the
-	// ".." elements read so far.
-	at := make([]bool, len(elems)+1)
-	at[0] = true
-
+	// A "**" does not match a ".." of the path, so each "**" before the
+	// last ".." of the path matches zero directories.
 	for range parents {
-		skipDoubleStars(elems, at)
-
-		next := make([]bool, len(elems)+1)
-
-		for i, elem := range elems {
-			switch {
-			case !at[i]:
-			case elem == "..":
-				next[i+1] = true
-			case elem == "**":
-				next[i] = true
-			}
+		elems = trimDoubleStars(elems)
+		if len(elems) == 0 || elems[0] != ".." {
+			return false
 		}
 
-		at = next
+		elems = elems[1:]
 	}
 
-	skipDoubleStars(elems, at)
-
-	// A path of ".." elements alone leaves no element for glob to match.
+	// A path of ".." elements alone leaves no name for glob to match.
 	if rest == "" {
-		return at[len(elems)]
+		return len(trimDoubleStars(elems)) == 0
 	}
 
-	for i := range elems {
-		if at[i] && matchGlob(strings.Join(elems[i:], "/"), rest) {
-			return true
-		}
-	}
-
-	return false
+	return matchGlob(strings.Join(elems, "/"), rest)
 }
 
-// skipDoubleStars marks the index after each "**" of elems that at
-// marks, because a "**" can match zero directories.
-func skipDoubleStars(elems []string, at []bool) {
-	for i, elem := range elems {
-		if at[i] && elem == "**" {
-			at[i+1] = true
-		}
+// trimDoubleStars returns elems without the "**" elements that open it.
+func trimDoubleStars(elems []string) []string {
+	for len(elems) > 0 && elems[0] == "**" {
+		elems = elems[1:]
 	}
+
+	return elems
 }
 
 // Relative reports whether any pattern the braces expand to is relative.
-// A relative pattern does not open with a separator, and it matches a
-// path that leads from some directory. So a caller that holds an
-// absolute path must know that directory to match the two.
+// A relative pattern does not open with a separator, or with a volume
+// name on Windows. It matches a path that leads from some directory. So
+// a caller that holds an absolute path must know that directory to match
+// the two through [Pattern.MatchRelative].
 func (p Pattern) Relative() bool {
-	return slices.ContainsFunc(p.globs, func(glob string) bool {
-		return !strings.HasPrefix(glob, "/")
-	})
+	return len(p.relative) > 0
 }
 
 // CleanPath returns path cleaned and with forward slashes as separators.
@@ -257,8 +278,8 @@ func expandPattern(pattern string, rewrite func(string) string) ([]string, error
 // name, and it drops a ".." immediately after the root of a rooted
 // pattern. It keeps a leading "..". It also keeps a ".." after a glob
 // element, because a glob cannot name the one directory the ".." leaves.
-// [Pattern.Match] pairs a ".." of the path only with a ".." or a "**" of
-// the pattern.
+// [Pattern.Match] pairs a ".." of the path only with a ".." of the
+// pattern.
 //
 // It first writes each escaped "/" and "." bare, as
 // [unescapeSeparatorsAndDots] does, so these rules see the separators

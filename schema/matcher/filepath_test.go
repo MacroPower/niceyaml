@@ -48,6 +48,7 @@ func TestFilePath(t *testing.T) {
 		"any yaml file":                    {pattern: "**/*.yaml", filePath: "any/path/file.yaml", want: true},
 		"any yaml file in root":            {pattern: "**/*.yaml", filePath: "file.yaml", want: true},
 		"parent after double star":         {pattern: "**/../x.yaml", filePath: "../x.yaml", want: true},
+		"double star matches no parent":    {pattern: "**/x.yaml", filePath: "../x.yaml", want: false},
 		"empty file path":                  {pattern: "**/*.yaml", filePath: "", want: false},
 		"empty file path with dot pattern": {pattern: ".", filePath: "", want: false},
 	}
@@ -142,6 +143,11 @@ func TestFilePath_BaseDir(t *testing.T) {
 	base := filepath.Join(root, "repo")
 	globBase := filepath.Join(root, "proj[1]{a,b}")
 
+	// A rooted pattern opens with the volume of the paths it matches,
+	// which is empty except on Windows.
+	anywhere := filepath.ToSlash(filepath.VolumeName(root)) + "/**/configs/*.yaml"
+	other := filepath.ToSlash(filepath.Join(root, "other"))
+
 	tcs := map[string]struct {
 		pattern  string
 		base     string
@@ -196,11 +202,71 @@ func TestFilePath_BaseDir(t *testing.T) {
 			filePath: filepath.Join(root, "other", "app.yaml"),
 			want:     false,
 		},
-		"double star outside the base": {
+		"double star in the base": {
+			pattern:  "**/*.yaml",
+			base:     base,
+			filePath: filepath.Join(base, "app.yaml"),
+			want:     true,
+		},
+		"double star deeper under the base": {
+			pattern:  "**/configs/*.yaml",
+			base:     base,
+			filePath: filepath.Join(base, "sub", "configs", "app.yaml"),
+			want:     true,
+		},
+		"double star beside the base": {
 			pattern:  "**/configs/*.yaml",
 			base:     base,
 			filePath: filepath.Join(root, "other", "configs", "app.yaml"),
+			want:     false,
+		},
+		"double star above the base": {
+			pattern:  "**/*.yaml",
+			base:     base,
+			filePath: filepath.Join(root, "app.yaml"),
+			want:     false,
+		},
+		"double star after a parent beside the base": {
+			pattern:  "../**/configs/*.yaml",
+			base:     base,
+			filePath: filepath.Join(root, "other", "configs", "app.yaml"),
 			want:     true,
+		},
+		"double star after a parent above the parent": {
+			pattern:  "../**/*.yaml",
+			base:     filepath.Join(base, "sub"),
+			filePath: filepath.Join(root, "app.yaml"),
+			want:     false,
+		},
+		"rooted double star outside the base": {
+			pattern:  anywhere,
+			base:     base,
+			filePath: filepath.Join(root, "other", "configs", "app.yaml"),
+			want:     true,
+		},
+		"rooted double star under the base": {
+			pattern:  anywhere,
+			base:     base,
+			filePath: filepath.Join(base, "configs", "app.yaml"),
+			want:     true,
+		},
+		"braces match outside the base through the rooted alternative": {
+			pattern:  "{" + other + ",configs}/*.yaml",
+			base:     base,
+			filePath: filepath.Join(root, "other", "app.yaml"),
+			want:     true,
+		},
+		"braces match under the base through the relative alternative": {
+			pattern:  "{" + other + ",configs}/*.yaml",
+			base:     base,
+			filePath: filepath.Join(base, "configs", "app.yaml"),
+			want:     true,
+		},
+		"braces keep the relative alternative under the base": {
+			pattern:  "{" + other + ",**/configs}/*.yaml",
+			base:     base,
+			filePath: filepath.Join(root, "third", "configs", "app.yaml"),
+			want:     false,
 		},
 		"parent pattern beside the base": {
 			pattern:  "../shared/*.yaml",
@@ -233,13 +299,13 @@ func TestFilePath_BaseDir(t *testing.T) {
 			want:     true,
 		},
 		"absolute pattern outside the base": {
-			pattern:  filepath.ToSlash(filepath.Join(root, "other")) + "/*.yaml",
+			pattern:  other + "/*.yaml",
 			base:     base,
 			filePath: filepath.Join(root, "other", "app.yaml"),
 			want:     true,
 		},
 		"absolute pattern that names another directory": {
-			pattern:  filepath.ToSlash(filepath.Join(root, "other")) + "/*.yaml",
+			pattern:  other + "/*.yaml",
 			base:     base,
 			filePath: filepath.Join(base, "app.yaml"),
 			want:     false,
@@ -255,6 +321,12 @@ func TestFilePath_BaseDir(t *testing.T) {
 			base:     base,
 			filePath: "other/app.yaml",
 			want:     false,
+		},
+		"relative path matches a double star as written": {
+			pattern:  "**/configs/*.yaml",
+			base:     base,
+			filePath: "sub/configs/app.yaml",
+			want:     true,
 		},
 		"empty file path": {
 			pattern:  "*.yaml",
@@ -329,8 +401,10 @@ func TestFilePath_WorkingDirectory(t *testing.T) {
 
 // A pattern matches a file on disk however the caller spelled its path
 // and whatever directory the read ran in, since NewSourceFromFile gives
-// the document the absolute path of the file. The test changes the
-// process's working directory, so it does not run in parallel.
+// the document the absolute path of the file. A pattern with another base
+// does not match the file, even when it starts with "**". The test
+// changes the process's working directory, so it does not run in
+// parallel.
 //
 //nolint:paralleltest // See above.
 func TestFilePath_FileOnDisk(t *testing.T) {
@@ -359,6 +433,7 @@ func TestFilePath_FileOnDisk(t *testing.T) {
 			under := matcher.MustFilePath("configs/*.yaml")
 			anyDepth := matcher.MustFilePath("**/configs/*.yaml")
 			elsewhere := matcher.MustFilePath("other/*.yaml")
+			otherBase := matcher.MustFilePath("**/configs/*.yaml", matcher.WithBaseDir(filepath.Join(root, "other")))
 
 			t.Chdir(tc.dir)
 
@@ -370,15 +445,16 @@ func TestFilePath_FileOnDisk(t *testing.T) {
 			assert.True(t, match(t, under, doc))
 			assert.True(t, match(t, anyDepth, doc))
 			assert.False(t, match(t, elsewhere, doc))
+			assert.False(t, match(t, otherBase, doc))
 		})
 	}
 }
 
 // In a process whose working directory is gone, a relative base has no
-// absolute path. A matcher then cannot decide for an absolute path that
-// its relative pattern does not match as written, and it decides every
-// other case as it does with a base. The test removes the process's
-// working directory, so it does not run in parallel.
+// absolute path. A matcher then cannot decide when a relative pattern
+// meets an absolute path, and it decides every other case as it does
+// with a base. The test removes the process's working directory, so it
+// does not run in parallel.
 //
 //nolint:paralleltest // See above.
 func TestFilePath_NoWorkingDirectory(t *testing.T) {
@@ -386,6 +462,11 @@ func TestFilePath_NoWorkingDirectory(t *testing.T) {
 	file := filepath.Join(base, "configs", "app.yaml")
 
 	yamltest.RemoveWorkingDirectory(t)
+
+	// A rooted pattern opens with the volume of the paths it matches,
+	// which is empty except on Windows.
+	volume := filepath.ToSlash(filepath.VolumeName(base))
+	rootedBase := filepath.ToSlash(base)
 
 	tcs := map[string]struct {
 		err      error
@@ -411,15 +492,35 @@ func TestFilePath_NoWorkingDirectory(t *testing.T) {
 			filePath: file,
 			want:     true,
 		},
-		"absolute path the pattern matches as written": {
+		"double star pattern and absolute path": {
 			pattern:  "**/configs/*.yaml",
+			filePath: file,
+			err:      matcher.ErrNoBaseDir,
+		},
+		"rooted double star pattern": {
+			pattern:  volume + "/**/configs/*.yaml",
 			filePath: file,
 			want:     true,
 		},
 		"rooted pattern": {
-			pattern:  filepath.ToSlash(filepath.Join(base, "other")) + "/*.yaml",
+			pattern:  rootedBase + "/other/*.yaml",
 			filePath: file,
 			want:     false,
+		},
+		"braces whose rooted alternative matches": {
+			pattern:  "{" + rootedBase + "/configs,other}/*.yaml",
+			filePath: file,
+			want:     true,
+		},
+		"braces whose rooted alternative does not match": {
+			pattern:  "{" + rootedBase + "/other,configs}/*.yaml",
+			filePath: file,
+			err:      matcher.ErrNoBaseDir,
+		},
+		"double star pattern and relative path": {
+			pattern:  "**/configs/*.yaml",
+			filePath: "sub/configs/app.yaml",
+			want:     true,
 		},
 		"relative path": {
 			pattern:  "configs/*.yaml",
