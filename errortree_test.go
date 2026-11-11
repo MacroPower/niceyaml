@@ -3038,8 +3038,10 @@ func TestErrorTree_MessageContextAndPath(t *testing.T) {
 			want: "too old",
 		},
 		"unreadable file": {
+			// The name of the file is on the binding, so the message is
+			// the reason alone.
 			node: niceyaml.NewErrorTree(errMissing),
-			want: "read file: open missing.yaml: file does not exist",
+			want: "file does not exist",
 		},
 		"wrapper around a binding": {
 			// The message leaves out the location of the binding and the

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -292,8 +291,11 @@ func fileResult(diag io.Writer, name string, err error, warnings *niceyaml.Warni
 // that name parent directories, such as "**/.github/workflows/*.yml",
 // then match whatever the working directory is. Schema directives
 // resolve against the directory of that file. When the read fails, the
-// error from [readSource] already names the file, so validateFile does
-// not add a name of its own.
+// error of NewSourceFromFile names the file already, as [escape.Line]
+// draws it, so validateFile does not add a name of its own. A glob match
+// takes its name from the file system, and the escape keeps a line feed
+// in that name from starting a row of its own in the output of the error
+// handler in main.
 func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, extra ...niceyaml.SourceOption) error {
 	// WithName keeps messages naming the file as the user typed it. The
 	// read uses the typed path, so a read error names the file that way
@@ -302,39 +304,12 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, ex
 	// file one way.
 	opts := append([]niceyaml.SourceOption{niceyaml.WithName(yamlPath)}, extra...)
 
-	source, err := readSource(yamlPath, opts...)
+	source, err := niceyaml.NewSourceFromFile(yamlPath, opts...)
 	if err != nil {
-		return err
+		return err //nolint:wrapcheck // The error names the file that did not read.
 	}
 
 	return source.ValidateDocuments(ctx, reg)
-}
-
-// readSource reads the file at path into a [*niceyaml.Source] with opts, as
-// [niceyaml.NewSourceFromFile] does. A read error names path as
-// [escape.Line] draws it, as the library names a source.
-//
-// A glob match takes its name from the file system. The error handler in
-// main keeps each line break in a message as a row break. A raw newline in
-// an unescaped name then starts a row of its own. A file past the byte
-// limit of opts fails without a full read, with an error bound to the name
-// of the source.
-func readSource(path string, opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
-	source, err := niceyaml.NewSourceFromFile(path, opts...)
-
-	// The read made this error, so no other caller holds it. The wrapper
-	// holds its text from before the escape, so a new one replaces it.
-	if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
-		pathErr.Path = escape.Line(pathErr.Path)
-
-		return nil, fmt.Errorf("read file: %w", pathErr)
-	}
-
-	if err != nil {
-		return nil, err //nolint:wrapcheck // The error says that the read failed.
-	}
-
-	return source, nil
 }
 
 // newAccess returns the [*schema.Access] of the --schema-root and

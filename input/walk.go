@@ -449,10 +449,11 @@ func (r *reader) sourceOptions(user []niceyaml.SourceOption, own ...niceyaml.Sou
 
 // readError returns the problem of a file whose read failed. The problem
 // is the reason that the system gives, such as "permission denied", or the
-// error of a file longer than the byte limit, which the read bound to the
-// name of the file already.
+// error of a Source constructor, which the constructor bound to the name
+// and the file path of the file already.
 func readError(err error) error {
-	if errors.Is(err, niceyaml.ErrLimit) {
+	bound, ok := errors.AsType[*niceyaml.SourceError](err)
+	if ok && bound != nil {
 		return err
 	}
 

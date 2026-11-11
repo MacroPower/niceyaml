@@ -138,17 +138,21 @@ func runViewer(ctx context.Context, tty io.Writer, m tea.Model) error {
 
 // loadSources reads the file at each path into a [*niceyaml.Source] and
 // names each Source with the status bar label that [revisionLabels] gives
-// its path. A read error from [readSource] already names the path, so
-// loadSources does not add a name of its own.
+// its path. A read error from [niceyaml.NewSourceFromFile] names the path
+// as the user typed it, so loadSources does not add a name of its own.
 func loadSources(paths []string, opts ...niceyaml.SourceOption) ([]*niceyaml.Source, error) {
 	labels := revisionLabels(paths)
 	sources := make([]*niceyaml.Source, 0, len(paths))
 
 	for i, path := range paths {
-		source, err := readSource(path, append([]niceyaml.SourceOption{niceyaml.WithName(labels[i])}, opts...)...)
+		source, err := niceyaml.NewSourceFromFile(path, opts...)
 		if err != nil {
-			return nil, err
+			return nil, err //nolint:wrapcheck // The error names the file that did not read.
 		}
+
+		// The label replaces the path only after the read, so a read error
+		// names the file as the user typed it rather than by its base name.
+		source = source.WithText(source.Text(), niceyaml.WithName(labels[i]))
 
 		sources = append(sources, source)
 	}

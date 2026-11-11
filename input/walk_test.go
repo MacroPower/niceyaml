@@ -1480,6 +1480,68 @@ func TestFS_UnreadableLinks(t *testing.T) {
 	}
 }
 
+func TestFS_UnreadableFile(t *testing.T) {
+	t.Parallel()
+
+	fsys := unreadableFS{
+		MapFS:      mapFS(map[string]string{"cafe.yaml": cafeDoc, "hours.yaml": hoursV1Doc}),
+		unreadable: "config/hours.yaml",
+	}
+
+	files, err := readAll(t, input.FS(fsys, "config"))
+	require.ErrorIs(t, err, fs.ErrPermission)
+	assert.Equal(t, []string{"config/cafe.yaml"}, readNames(files))
+
+	var failed *input.File
+
+	for i := range files {
+		if files[i].Err != nil {
+			failed = &files[i]
+		}
+	}
+
+	require.NotNil(t, failed)
+	assert.Equal(t, "config/hours.yaml", failed.Name)
+	assert.Equal(t, "config/hours.yaml: "+fs.ErrPermission.Error(), failed.Err.Error())
+	assert.False(t, niceyaml.IsInvalid(failed.Err))
+
+	// The binding reports the path of the file in the file system, as the
+	// Source of a file that reads does.
+	bound := slices.Collect(niceyaml.Bindings(failed.Err))
+	require.Len(t, bound, 1)
+	assert.Equal(t, "config/hours.yaml", bound[0].Name())
+	assert.Equal(t, "config/hours.yaml", bound[0].FilePath())
+}
+
+// unreadableFS is a file system whose file at the path unreadable opens,
+// and whose every read of that file fails with a [*fs.PathError] that
+// matches [fs.ErrPermission], as the read of a file on disk does.
+type unreadableFS struct {
+	fstest.MapFS
+
+	unreadable string
+}
+
+func (f unreadableFS) Open(name string) (fs.File, error) {
+	file, err := f.MapFS.Open(name)
+	if err != nil || name != f.unreadable {
+		return file, err //nolint:wrapcheck // The walk reads the error of the file system.
+	}
+
+	return unreadableFile{File: file, name: name}, nil
+}
+
+// unreadableFile is the file of an [unreadableFS] whose reads fail.
+type unreadableFile struct {
+	fs.File
+
+	name string
+}
+
+func (f unreadableFile) Read([]byte) (int, error) {
+	return 0, &fs.PathError{Op: "read", Path: f.name, Err: fs.ErrPermission}
+}
+
 // subFS returns the directory at dir in fsys as a file system.
 func subFS(t *testing.T, fsys fs.FS, dir string) fs.FS {
 	t.Helper()
