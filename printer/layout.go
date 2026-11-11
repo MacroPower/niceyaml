@@ -75,15 +75,10 @@ import (
 // adds only right padding, so its printed rows and cells match the
 // layout.
 //
-// Those offsets hold when the container style does not set a width, a
-// height, or an alignment of its own. A width narrower than the rows
-// wraps them, so one row of the layout prints as several. A height
-// taller than the rows with a vertical alignment other than top puts
-// empty rows before the first row. A horizontal alignment other than
-// left moves each row narrower than the container to the right.
-// [WithContainerWidth] pins the width without wrapping the rows.
-// [Rendered.Rows] returns rows that match the layout under every
-// container style.
+// Those offsets hold under every container style, because the printer
+// ignores the properties of [WithContainerStyle] that size or align the
+// container. Row r of the layout prints as row r+top of Print, where top
+// is the rows the top of the frame takes.
 //
 // Create instances with [Printer.Layout] or [Printer.Render].
 type Layout struct {

@@ -17,7 +17,7 @@
 // returns the same value afterwards:
 //
 //	if t, ok := theme.Builtin().Get("dracula"); ok {
-//		p := printer.New(printer.WithStyles(t), printer.WithBox())
+//		p := printer.New(printer.WithStyles(t), printer.WithBox(true))
 //	}
 //
 // Themes with a background paint it behind each token, so without
@@ -30,7 +30,7 @@
 // surface, and [CharmLight] paints the light palette on a Salt surface.
 // Each is a Theme so a program can name it without a lookup:
 //
-//	p := printer.New(printer.WithStyles(theme.Charm), printer.WithBox())
+//	p := printer.New(printer.WithStyles(theme.Charm), printer.WithBox(true))
 //
 // To print on the terminal's own background, a program passes
 // [style.Default] the background it detects in place of either theme.
@@ -39,7 +39,7 @@
 // that overrides some of its kinds with [style.Styles.With]:
 //
 //	styles := theme.Charm.Styles().With(style.Set(kind.Comment, dim))
-//	p := printer.New(printer.WithStyles(styles), printer.WithBox())
+//	p := printer.New(printer.WithStyles(styles), printer.WithBox(true))
 //
 // [Theme.With] applies the same options and returns a Theme with the same
 // name and mode, so the result goes into a [Catalog]. [style.Update]

@@ -494,7 +494,7 @@ func TestPrinter_Layout_ContainerFrame(t *testing.T) {
 		wantLeft int
 	}{
 		"box": {
-			opt: printer.WithBox(),
+			opt: printer.WithBox(true),
 		},
 		"right padding and bottom margin": {
 			opt: printer.WithContainerStyle(lipgloss.NewStyle().PaddingRight(2).MarginBottom(1)),

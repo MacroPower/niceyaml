@@ -68,7 +68,7 @@ func main() {
 	catalog := theme.Builtin().With(fika)
 	fmt.Printf("The catalog holds %d themes, %s among them.\n", catalog.Len(), fika.Name)
 
-	fikaPrinter := printer.New(printer.WithStyles(fika), printer.WithBox())
+	fikaPrinter := printer.New(printer.WithStyles(fika), printer.WithBox(true))
 	lipgloss.Println(fikaPrinter.Print(source.View()))
 
 	fmt.Println("\nPrint the kinds the theme derives:")

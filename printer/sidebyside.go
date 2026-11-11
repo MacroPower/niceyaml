@@ -88,7 +88,12 @@ func (p *Printer) renderSideBySide(left, right *line.View, measure bool) *SideBy
 
 	// Each pane renders without the container, which wraps the joined
 	// rows, and wraps to its half of the width.
-	pane := p.With(WithContainerStyle(lipgloss.NewStyle()), WithContainerWidth(0), WithMaxNumber(maxNumber))
+	pane := p.With(
+		WithContainerStyle(lipgloss.NewStyle()),
+		WithBox(false),
+		WithContainerWidth(0),
+		WithMaxNumber(maxNumber),
+	)
 
 	paneWidth := 0
 	if p.wrap > 0 {

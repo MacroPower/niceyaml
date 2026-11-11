@@ -44,14 +44,11 @@ func TestPrinter_Render(t *testing.T) {
 			opts: []printer.Option{printer.WithContainerWidth(30)},
 			want: []string{"   1  a: 1", "   2  b: 2"},
 		},
-		// Print wraps the first row to the 10 cells of the container.
 		"container style width does not wrap the rows": {
 			view: view(stringtest.LinesLF("a: one two three four", "b: 2")),
 			opts: []printer.Option{printer.WithContainerStyle(lipgloss.NewStyle().Width(10))},
 			want: []string{"   1  a: one two three four", "   2  b: 2"},
 		},
-		// Print puts four empty rows before the first row and moves both
-		// rows to the right.
 		"container style height and alignment do not move the rows": {
 			view: view(twoLines),
 			opts: []printer.Option{printer.WithContainerStyle(
@@ -61,7 +58,7 @@ func TestPrinter_Render(t *testing.T) {
 		},
 		"box does not pad the rows": {
 			view: view(stringtest.LinesLF("a: 1", "longer: 2")),
-			opts: []printer.Option{printer.WithBox()},
+			opts: []printer.Option{printer.WithBox(true)},
 			want: []string{"   1  a: 1", "   2  longer: 2"},
 		},
 		// The frame takes 6 of the 24 cells and the gutter takes 6, so

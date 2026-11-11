@@ -24,7 +24,7 @@ func main() {
 	p := printer.New(
 		printer.WithStyles(theme.Charm),
 		printer.WithGutter(printer.DefaultGutter),
-		printer.WithBox(),
+		printer.WithBox(true),
 	)
 
 	fmt.Println("\nPrint with syntax highlighting:")

@@ -98,7 +98,7 @@ func main() {
 
 	// Without the box, the surface ends where the content of each row ends.
 	// The box fills the rest of the rectangle around the rows with it.
-	boxed := printer.New(printer.WithStyles(styles), printer.WithBox())
+	boxed := printer.New(printer.WithStyles(styles), printer.WithBox(true))
 	lipgloss.Println(boxed.Print(view))
 
 	fmt.Println("\nPrint on the terminal's own background:")
