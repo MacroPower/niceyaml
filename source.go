@@ -1434,9 +1434,12 @@ func (s *Source) AllDocuments() []*Node {
 // It leaves out the empty documents that Source.Documents leaves out. The
 // validator v thus runs on the documents with content, or on the one
 // empty document of a file without content. A schema that wants a
-// mapping then rejects an empty file, unless [SkipEmpty] wraps v. A nil v
-// checks only the parse of each document, so with a ctx that has not
-// ended, ValidateDocuments returns the error [Source.File] returns.
+// mapping then rejects an empty file, unless [SkipEmpty] wraps v.
+//
+// ValidateDocuments panics if v is nil, including a v that holds a nil
+// pointer or func. A caller that checks only the syntax of a file passes
+// [NoValidator]. With a ctx that has not ended, ValidateDocuments then
+// returns the error [Source.File] returns.
 //
 // ValidateDocuments checks ctx before each document and one more time
 // after the last. After ctx ends, ValidateDocuments does not validate
@@ -1448,6 +1451,8 @@ func (s *Source) AllDocuments() []*Node {
 // documents with content that passes it still fails [Source.Decode] with
 // [ErrMultipleDocuments].
 func (s *Source) ValidateDocuments(ctx context.Context, v Validator) error {
+	mustValidator("Source.ValidateDocuments", v)
+
 	var (
 		errs []error
 		// The error of the parse of the document before, which the next

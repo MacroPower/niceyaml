@@ -3147,10 +3147,10 @@ func TestDocument_Err(t *testing.T) {
 
 				return err //nolint:wrapcheck // The test inspects the error of the call.
 			}},
-			"Validate with a nil validator": {call: func(t *testing.T, doc *niceyaml.Node) error {
+			"Validate with NoValidator": {call: func(t *testing.T, doc *niceyaml.Node) error {
 				t.Helper()
 
-				return doc.Validate(t.Context(), nil)
+				return doc.Validate(t.Context(), niceyaml.NoValidator)
 			}},
 			"Validate": {call: func(t *testing.T, doc *niceyaml.Node) error {
 				t.Helper()

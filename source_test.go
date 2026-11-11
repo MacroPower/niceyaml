@@ -2517,7 +2517,7 @@ func TestSource_AllDocuments(t *testing.T) {
 		assert.Same(t, all[0].Err(), all[1].Err())
 
 		// ValidateDocuments reports the error both documents return once.
-		assert.Same(t, all[0].Err(), source.ValidateDocuments(t.Context(), nil))
+		assert.Same(t, all[0].Err(), source.ValidateDocuments(t.Context(), niceyaml.NoValidator))
 
 		// The one error is bound to the document that holds its location,
 		// whichever of the two returns it.
@@ -3485,7 +3485,7 @@ func TestSource_ValidateDocuments(t *testing.T) {
 		})
 	}
 
-	t.Run("a nil validator returns the error File returns", func(t *testing.T) {
+	t.Run("NoValidator returns the error File returns", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]string{
@@ -3511,11 +3511,10 @@ func TestSource_ValidateDocuments(t *testing.T) {
 			"stream of markers alone": "...\n",
 		}
 
-		// A nil pointer to a fieldValidator panics if it runs.
+		// A validator that passes every Node of its own returns the same.
 		validators := map[string]niceyaml.Validator{
-			"nil":               nil,
-			"nil pointer":       (*fieldValidator)(nil),
-			"nil ValidatorFunc": niceyaml.ValidatorFunc(nil),
+			"NoValidator":   niceyaml.NoValidator,
+			"ValidatorFunc": niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error { return nil }),
 		}
 
 		for name, input := range tcs {
@@ -3530,6 +3529,33 @@ func TestSource_ValidateDocuments(t *testing.T) {
 					assert.Equal(t, fileErr, source.ValidateDocuments(t.Context(), v), via)
 				}
 			})
+		}
+	})
+
+	t.Run("panics for a nil validator", func(t *testing.T) {
+		t.Parallel()
+
+		// A file that does not parse panics too, so the call fails the
+		// same way for every file.
+		inputs := map[string]string{
+			"a file that parses":         "name: a\n",
+			"a file that does not parse": "a: [\n",
+			"an empty file":              "",
+		}
+
+		for name, v := range nilValidators() {
+			for of, input := range inputs {
+				t.Run(name+" on "+of, func(t *testing.T) {
+					t.Parallel()
+
+					source := niceyaml.NewSourceFromString(input)
+
+					assert.PanicsWithValue(t, "niceyaml.Source.ValidateDocuments: validator is nil", func() {
+						//nolint:errcheck // The call panics before it returns.
+						_ = source.ValidateDocuments(t.Context(), v)
+					})
+				})
+			}
 		}
 	})
 
@@ -3573,8 +3599,8 @@ func TestSource_ValidateDocuments(t *testing.T) {
 			// The message of each binding the result holds, in file order.
 			want []string
 		}{
-			"nil reports the syntax alone": {
-				v:    nil,
+			"NoValidator reports the syntax alone": {
+				v:    niceyaml.NoValidator,
 				want: []string{"f.yaml:3:7: " + unclosedSequence},
 			},
 			"one validator": {
@@ -3961,8 +3987,8 @@ func TestSource_ValidateDocuments_Context(t *testing.T) {
 
 		assert.Same(t, source, yamltest.RequireSourceError(t, err).Source())
 
-		// With a nil validator, the ended ctx still fails the call.
-		err = source.ValidateDocuments(ctx, nil)
+		// With NoValidator, the ended ctx still fails the call.
+		err = source.ValidateDocuments(ctx, niceyaml.NoValidator)
 		require.ErrorIs(t, err, context.Canceled)
 		assert.Equal(t, []string{"f.yaml: context canceled"}, bindingMessages(err))
 	})
@@ -5763,14 +5789,16 @@ func TestWithReferences(t *testing.T) {
 					"base: &base",
 					"  port: 0",
 				),
-				want: "app.yaml:2:9: $.server.port: port must be at least 1",
+				validator: niceyaml.NoValidator,
+				want:      "app.yaml:2:9: $.server.port: port must be at least 1",
 			},
 			"key the reference leaves out": {
 				reference: stringtest.LinesLF(
 					"base: &base",
 					"  host: localhost",
 				),
-				want: "app.yaml:2:9: $.server.port: port must be at least 1",
+				validator: niceyaml.NoValidator,
+				want:      "app.yaml:2:9: $.server.port: port must be at least 1",
 			},
 			"violation of a schema": {
 				reference: stringtest.LinesLF(
@@ -7385,7 +7413,7 @@ func TestWithByteLimit(t *testing.T) {
 		require.True(t, ok)
 		assert.Same(t, doc, at)
 
-		err := source.ValidateDocuments(t.Context(), nil)
+		err := source.ValidateDocuments(t.Context(), niceyaml.NoValidator)
 		assert.Same(t, fileErr, err)
 	})
 

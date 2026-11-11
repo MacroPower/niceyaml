@@ -3750,13 +3750,12 @@ func TestWithValueCheck(t *testing.T) {
 		require.EqualError(t, err, "3:3: $.hosts.DB~: host name is not lowercase")
 	})
 
-	t.Run("a nil function adds nothing", func(t *testing.T) {
+	t.Run("panics for a nil function", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := yamltest.FirstDocument(t, "addr: 127.0.0.1\n").Decode[checkedService](
-			t.Context(), niceyaml.WithValueCheck[netip.Addr](nil),
-		)
-		require.NoError(t, err)
+		assert.PanicsWithValue(t, "niceyaml.WithValueCheck: fn is nil", func() {
+			niceyaml.WithValueCheck[netip.Addr](nil)
+		})
 	})
 
 	t.Run("panics for a pointer or interface type", func(t *testing.T) {
@@ -6416,28 +6415,30 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		assert.Equal(t, plainConfig{}, result)
 	})
 
-	t.Run("skips a nil validator", func(t *testing.T) {
+	t.Run("panics for a nil validator", func(t *testing.T) {
 		t.Parallel()
 
-		tcs := map[string]struct {
-			validator niceyaml.Validator
-		}{
-			"nil interface": {validator: nil},
-			"nil pointer":   {validator: (*fieldValidator)(nil)},
-			"nil func":      {validator: niceyaml.ValidatorFunc(nil)},
-		}
-
-		for name, tc := range tcs {
+		for name, v := range nilValidators() {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, decodeNameValueDoc)
-
-				result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(tc.validator))
-				require.NoError(t, err)
-				assert.Equal(t, plainConfig{Name: "test", Value: 42}, result)
+				// The option panics where the program builds it, before
+				// any decode.
+				assert.PanicsWithValue(t, "niceyaml.WithValidator: validator is nil", func() {
+					niceyaml.WithValidator(v)
+				})
 			})
 		}
+	})
+
+	t.Run("NoValidator passes every document", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, decodeNameValueDoc)
+
+		result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(niceyaml.NoValidator))
+		require.NoError(t, err)
+		assert.Equal(t, plainConfig{Name: "test", Value: 42}, result)
 	})
 
 	t.Run("a scoped decode passes the scope", func(t *testing.T) {

@@ -4054,10 +4054,11 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 		))
 	})
 
-	t.Run("a nil validator runs nothing", func(t *testing.T) {
+	t.Run("NoValidator passes", func(t *testing.T) {
 		t.Parallel()
 
-		require.NoError(t, layerFiles(t, baseInput, layerProdHost).ValidateDocuments(t.Context(), nil))
+		require.NoError(t,
+			layerFiles(t, baseInput, layerProdHost).ValidateDocuments(t.Context(), niceyaml.NoValidator))
 	})
 }
 

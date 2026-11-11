@@ -108,11 +108,23 @@
 // there is a bug, such as the result of an ignored error, and the option
 // panics rather than fail open.
 //
-// An option that adds a function or a matcher to a list, such as
-// [go.jacobcolvin.com/niceyaml/manifest.WithCheck], has no default to
-// keep. Its doc says what a nil argument does. Some such options add
-// nothing for a nil argument, and the constructor of others returns an
-// error for it.
+// A check is a value that helps decide whether a document passes, such as
+// a [Validator], a matcher, a schema resolver, or the function of
+// [WithValueCheck]. A skipped check lets a document pass without the
+// check that the program meant to run, so the module rejects a nil check
+// everywhere. The function that gets a nil check panics and names itself
+// in the message, as [WithValidator], [Node.Validate], and
+// [go.jacobcolvin.com/niceyaml/schema.When] do. The options of
+// [go.jacobcolvin.com/niceyaml/manifest.NewRegistry] report a nil check
+// through the error of NewRegistry instead, beside the other mistakes of
+// its options.
+//
+// A program that checks only on some condition passes a named value that
+// passes every document, such as [NoValidator] or
+// [go.jacobcolvin.com/niceyaml/schema.AcceptAll]. A function that only
+// drops warnings, such as the function of
+// [go.jacobcolvin.com/niceyaml/manifest.WithWarningFilter], is not a
+// check, and the option adds nothing for a nil function.
 //
 // Every integer limit option, such as [WithByteLimit] or
 // [go.jacobcolvin.com/niceyaml/schema.WithLoadLimit], reads 0 as no
@@ -927,6 +939,18 @@
 // does:
 //
 //	err := source.ValidateDocuments(ctx, niceyaml.MultiValidator(schema, names))
+//
+// Every function that takes a Validator panics for a nil one, as the
+// Options section describes. [NoValidator] passes every node, so a program
+// that validates only on some condition passes it where it does not have
+// a check:
+//
+//	v := niceyaml.NoValidator
+//	if strict {
+//		v = schema
+//	}
+//
+//	err := source.ValidateDocuments(ctx, v)
 //
 // A validator writes its errors from the Node it gets, so an `@` path reads
 // from that Node. The decode or the Node.Validate call that runs the

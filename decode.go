@@ -114,13 +114,17 @@ func newDecodeConfig(s *Source, opts []DecodeOption) decodeConfig {
 // at the first that fails. A caller that wants every failure of several
 // validators gives one option a [MultiValidator].
 //
-// Validation skips a nil dv, and a dv that holds a nil pointer or func,
-// such as a schema a program loads only on some paths. A
-// [go.jacobcolvin.com/niceyaml/schema.Schema] checks the document against
-// one JSON schema, and a [go.jacobcolvin.com/niceyaml/schema.Registry]
-// against the schema it picks for the document:
+// A [go.jacobcolvin.com/niceyaml/schema.Schema] checks the document
+// against one JSON schema, and a
+// [go.jacobcolvin.com/niceyaml/schema.Registry] against the schema it
+// picks for the document:
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
+//
+// WithValidator panics if dv is nil, including a dv that holds a nil
+// pointer or func, such as the nil schema that a dropped error leaves
+// behind. A program that loads a schema only on some condition passes
+// [NoValidator] where it does not have one.
 //
 // An empty document validates as any other does. Wrap a validator in
 // [SkipEmpty] to pass an empty document, so the decode returns the zero
@@ -129,6 +133,8 @@ func newDecodeConfig(s *Source, opts []DecodeOption) decodeConfig {
 // [Node.SelfValidate], [Source.SelfValidate], and [SelfValidateValue] do
 // not run validators, so they ignore WithValidator.
 func WithValidator(dv Validator) DecodeOption {
+	mustValidator("WithValidator", dv)
+
 	return func(c *decodeConfig) {
 		c.validators = append(c.validators, dv)
 	}
@@ -202,18 +208,18 @@ func WithSelfValidation(enabled bool) DecodeOption {
 // runs each of its functions twice.
 //
 // WithValueCheck panics for a pointer or interface T, because the walk
-// never checks a value of such a type. A nil fn does not add a check.
+// never checks a value of such a type. It also panics if fn is nil.
 func WithValueCheck[T any](fn func(ctx context.Context, v *T) error) DecodeOption {
 	t := reflect.TypeFor[T]()
 	if t.Kind() == reflect.Pointer || t.Kind() == reflect.Interface {
 		panic(fmt.Sprintf("niceyaml.WithValueCheck: %v is a pointer or interface type, which the walk never checks", t))
 	}
 
-	return func(c *decodeConfig) {
-		if fn == nil {
-			return
-		}
+	if fn == nil {
+		panic("niceyaml.WithValueCheck: fn is nil")
+	}
 
+	return func(c *decodeConfig) {
 		c.checks = append(c.checks, valueCheck{typ: t, run: func(ctx context.Context, p reflect.Value) error {
 			v, _ := reflect.TypeAssert[*T](p)
 

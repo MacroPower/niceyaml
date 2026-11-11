@@ -6597,6 +6597,77 @@ func TestValidatorFunc_Check(t *testing.T) {
 	})
 }
 
+func TestNoValidator(t *testing.T) {
+	t.Parallel()
+
+	docs := yamltest.AllDocuments(t, niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"name: test",
+		"---",
+		"name: [",
+	), niceyaml.WithName("f.yaml")), 2)
+	require.NoError(t, docs[0].Err())
+	require.EqualError(t, docs[1].Err(), "f.yaml:3:7: sequence end token ']' not found")
+
+	t.Run("passes every Node of a document that parsed", func(t *testing.T) {
+		t.Parallel()
+
+		name := yamltest.At(t, docs[0], paths.Current().Child("name"))
+		empty := yamltest.FirstDocument(t, "")
+
+		for _, n := range []*niceyaml.Node{docs[0], name, empty} {
+			require.NoError(t, niceyaml.NoValidator.Check(t.Context(), n))
+			require.NoError(t, n.Validate(t.Context(), niceyaml.NoValidator))
+		}
+	})
+
+	t.Run("returns the error of a document that did not parse", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Same(t, docs[1].Err(), niceyaml.NoValidator.Check(t.Context(), docs[1]))
+	})
+
+	t.Run("passes inside each combinator", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]niceyaml.Validator{
+			"MultiValidator": niceyaml.MultiValidator(niceyaml.NoValidator, niceyaml.NoValidator),
+			"ChainValidator": niceyaml.ChainValidator(niceyaml.NoValidator),
+			"SkipEmpty":      niceyaml.SkipEmpty(niceyaml.NoValidator),
+			"Each":           niceyaml.Each(paths.Current().ChildAll(), niceyaml.NoValidator),
+		}
+
+		for name, v := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				require.NoError(t, docs[0].Validate(t.Context(), v))
+			})
+		}
+	})
+
+	t.Run("a program compares a Validator with it", func(t *testing.T) {
+		t.Parallel()
+
+		// The comparison of two interface values panics when both hold a
+		// func, so it runs here as a program writes it.
+		off := func(v niceyaml.Validator) bool { return v == niceyaml.NoValidator }
+
+		assert.True(t, off(niceyaml.NoValidator))
+		assert.False(t, off(typedNilValidator()))
+		assert.False(t, off(&fieldValidator{}))
+	})
+}
+
+// nilValidators returns each value that a function of the package rejects
+// as a nil [niceyaml.Validator], under the name of its kind.
+func nilValidators() map[string]niceyaml.Validator {
+	return map[string]niceyaml.Validator{
+		"nil interface": nil,
+		"nil pointer":   (*fieldValidator)(nil),
+		"nil func":      niceyaml.ValidatorFunc(nil),
+	}
+}
+
 func TestMultiValidator(t *testing.T) {
 	t.Parallel()
 
@@ -6674,20 +6745,21 @@ func TestMultiValidator(t *testing.T) {
 		require.NoError(t, dd.Validate(t.Context(), niceyaml.MultiValidator(typedNil, passing)))
 	})
 
-	t.Run("skips a nil validator", func(t *testing.T) {
+	t.Run("panics for a nil validator", func(t *testing.T) {
 		t.Parallel()
 
-		var order []string
+		for name, v := range nilValidators() {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		err := dd.Validate(t.Context(), niceyaml.MultiValidator(
-			badB,
-			nil,
-			(*fieldValidator)(nil),
-			niceyaml.ValidatorFunc(nil),
-			recordingValidator(&order, "after"),
-		))
-		require.ErrorIs(t, err, errB)
-		assert.Equal(t, []string{"after"}, order)
+				assert.PanicsWithValue(t, "niceyaml.MultiValidator: validator at index 0 is nil", func() {
+					niceyaml.MultiValidator(v)
+				})
+				assert.PanicsWithValue(t, "niceyaml.MultiValidator: validator at index 1 is nil", func() {
+					niceyaml.MultiValidator(badB, v, nil)
+				})
+			})
+		}
 	})
 
 	t.Run("keeps its validators when the caller edits the slice", func(t *testing.T) {
@@ -6894,23 +6966,21 @@ func TestChainValidator(t *testing.T) {
 		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator(typedNilValidator())))
 	})
 
-	t.Run("skips a nil validator", func(t *testing.T) {
+	t.Run("panics for a nil validator", func(t *testing.T) {
 		t.Parallel()
 
-		var order []string
+		for name, v := range nilValidators() {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		err := doc.Validate(t.Context(), niceyaml.ChainValidator(
-			recordingValidator(&order, "before"),
-			nil,
-			(*fieldValidator)(nil),
-			niceyaml.ValidatorFunc(nil),
-			recordingValidator(&order, "after"),
-			first,
-		))
-		require.ErrorIs(t, err, errFirst)
-		assert.Equal(t, []string{"before", "after"}, order)
-
-		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator(nil)))
+				assert.PanicsWithValue(t, "niceyaml.ChainValidator: validator at index 0 is nil", func() {
+					niceyaml.ChainValidator(v)
+				})
+				assert.PanicsWithValue(t, "niceyaml.ChainValidator: validator at index 1 is nil", func() {
+					niceyaml.ChainValidator(first, v, nil)
+				})
+			})
+		}
 	})
 
 	t.Run("keeps its validators when the caller edits the slice", func(t *testing.T) {
@@ -7044,8 +7114,8 @@ func TestChainValidator(t *testing.T) {
 				b:    unboundSecond,
 				want: "x.yaml:3:7: $.name: second rule",
 			},
-			"the first is nil": {
-				a:    nil,
+			"the first is NoValidator": {
+				a:    niceyaml.NoValidator,
 				b:    second,
 				want: "x.yaml:3:7: $.name: second rule",
 			},
@@ -7295,14 +7365,24 @@ func TestSkipEmpty(t *testing.T) {
 		}
 	})
 
-	t.Run("a nil validator passes every Node", func(t *testing.T) {
+	t.Run("panics for a nil validator", func(t *testing.T) {
+		t.Parallel()
+
+		for name, v := range nilValidators() {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.PanicsWithValue(t, "niceyaml.SkipEmpty: validator is nil", func() {
+					niceyaml.SkipEmpty(v)
+				})
+			})
+		}
+	})
+
+	t.Run("a nil error pointer is no failure", func(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t, "a: 1\n")
-
-		for _, v := range []niceyaml.Validator{nil, (*fieldValidator)(nil), niceyaml.ValidatorFunc(nil)} {
-			require.NoError(t, doc.Validate(t.Context(), niceyaml.SkipEmpty(v)))
-		}
 
 		// A typed nil pointer reports no failure, as it does from a
 		// validator given alone.
@@ -7586,12 +7666,22 @@ func TestEach(t *testing.T) {
 		}
 	})
 
-	t.Run("a nil validator passes every Node", func(t *testing.T) {
+	t.Run("panics for a nil validator", func(t *testing.T) {
 		t.Parallel()
 
-		for _, v := range []niceyaml.Validator{nil, (*fieldValidator)(nil), niceyaml.ValidatorFunc(nil)} {
-			require.NoError(t, doc.Validate(t.Context(), niceyaml.Each(items, v)))
+		for name, v := range nilValidators() {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.PanicsWithValue(t, "niceyaml.Each: validator is nil", func() {
+					niceyaml.Each(items, v)
+				})
+			})
 		}
+	})
+
+	t.Run("a nil error pointer is no failure", func(t *testing.T) {
+		t.Parallel()
 
 		// A typed nil pointer reports no failure, as it does from a
 		// validator given alone.
@@ -7945,7 +8035,7 @@ func TestNode_Validate(t *testing.T) {
 		assert.Same(t, want, dd.Validate(t.Context(), rejectingValidator(want)))
 	})
 
-	t.Run("a nil validator returns what Err returns", func(t *testing.T) {
+	t.Run("NoValidator returns what Err returns", func(t *testing.T) {
 		t.Parallel()
 
 		docs := yamltest.AllDocuments(t, niceyaml.NewSourceFromString(stringtest.LinesLF(
@@ -7958,19 +8048,47 @@ func TestNode_Validate(t *testing.T) {
 
 		name := yamltest.At(t, docs[0], paths.Current().Child("name"))
 
-		// A nil pointer to a fieldValidator panics if it runs.
-		for _, v := range []niceyaml.Validator{nil, (*fieldValidator)(nil), niceyaml.ValidatorFunc(nil)} {
-			require.NoError(t, docs[0].Validate(t.Context(), v))
-			require.NoError(t, name.Validate(t.Context(), v))
-			assert.Same(t, docs[1].Err(), docs[1].Validate(t.Context(), v))
-		}
+		require.NoError(t, docs[0].Validate(t.Context(), niceyaml.NoValidator))
+		require.NoError(t, name.Validate(t.Context(), niceyaml.NoValidator))
+		assert.Same(t, docs[1].Err(), docs[1].Validate(t.Context(), niceyaml.NoValidator))
 
 		// A context that ended changes neither result.
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		require.NoError(t, docs[0].Validate(ctx, nil))
-		assert.Same(t, docs[1].Err(), docs[1].Validate(ctx, nil))
+		require.NoError(t, docs[0].Validate(ctx, niceyaml.NoValidator))
+		assert.Same(t, docs[1].Err(), docs[1].Validate(ctx, niceyaml.NoValidator))
+	})
+
+	t.Run("panics for a nil validator", func(t *testing.T) {
+		t.Parallel()
+
+		docs := yamltest.AllDocuments(t, niceyaml.NewSourceFromString(stringtest.LinesLF(
+			"name: test",
+			"---",
+			"name: [",
+		)), 2)
+		require.Error(t, docs[1].Err())
+
+		// A document that did not parse panics too, so the call fails the
+		// same way for every file.
+		nodes := map[string]*niceyaml.Node{
+			"a document":                    docs[0],
+			"a scoped Node":                 yamltest.At(t, docs[0], paths.Current().Child("name")),
+			"a document that did not parse": docs[1],
+		}
+
+		for name, v := range nilValidators() {
+			for on, n := range nodes {
+				t.Run(name+" on "+on, func(t *testing.T) {
+					t.Parallel()
+
+					assert.PanicsWithValue(t, "niceyaml.Node.Validate: validator is nil", func() {
+						_ = n.Validate(t.Context(), v) //nolint:errcheck // The call panics before it returns.
+					})
+				})
+			}
+		}
 	})
 
 	t.Run("a validator of one call reaches no other decode", func(t *testing.T) {

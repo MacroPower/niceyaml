@@ -2,6 +2,7 @@ package niceyaml
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"reflect"
 	"slices"
@@ -532,6 +533,27 @@ func visitOf(v reflect.Value) visit {
 }
 
 var (
+	// NoValidator is a [Validator] that passes every Node. Every function of
+	// the package that takes a Validator panics for a nil one, so a missing
+	// check never reads as a document that passed. A program that validates
+	// only on some condition starts from NoValidator, and the call site then
+	// shows that the check can be off:
+	//
+	//	v := niceyaml.NoValidator
+	//	if strict {
+	//		v = reg
+	//	}
+	//
+	//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(v))
+	//
+	// Its Check method returns only the error of a document that did not
+	// parse. [Source.ValidateDocuments] with NoValidator thus checks the
+	// syntax of a file. A program compares a Validator with NoValidator to
+	// learn whether the check is off.
+	// [go.jacobcolvin.com/niceyaml/schema.AcceptAll] is the schema that passes
+	// every document.
+	NoValidator Validator = noValidator{}
+
 	// The result of [implementsSelfValidator] for each type it has read.
 	ownsValidator unmarshaler.TypeCache[bool]
 
@@ -1476,6 +1498,8 @@ type SelfValidator interface {
 // See [ValidatorFunc], [MultiValidator], [ChainValidator], [SkipEmpty],
 // [Each], [go.jacobcolvin.com/niceyaml/schema.Schema], and
 // [go.jacobcolvin.com/niceyaml/schema.Registry] for implementations.
+// [NoValidator] is the ready-made Validator that passes every Node, for a
+// caller that does not have a check to run.
 //
 // Check gets the Node that runs it, the root of a document or a Node from
 // [Node.At] or [Node.Nodes]. It returns its errors as it wrote them from
@@ -1544,6 +1568,33 @@ func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 	return n.checkWith(ctx, f)
 }
 
+// noValidator is the [Validator] behind [NoValidator].
+type noValidator struct{}
+
+// Check implements [Validator].
+func (noValidator) Check(_ context.Context, n *Node) error {
+	return n.Err()
+}
+
+// mustValidator panics if v is nil or holds a nil pointer or func. The
+// panic names fn, the function of the package that got v.
+func mustValidator(fn string, v Validator) {
+	if nilness.IsNil(v) {
+		panic("niceyaml." + fn + ": validator is nil")
+	}
+}
+
+// mustValidators panics if one of validators is nil or holds a nil
+// pointer or func. The panic names fn, the function of the package that
+// got the validators, and the index of the first such validator.
+func mustValidators(fn string, validators []Validator) {
+	for i, v := range validators {
+		if nilness.IsNil(v) {
+			panic(fmt.Sprintf("niceyaml.%s: validator at index %d is nil", fn, i))
+		}
+	}
+}
+
 // MultiValidator returns a [Validator] that runs every validator in
 // order and reports every failure. [ChainValidator] instead stops at the
 // first. MultiValidator suits rules that check a document independently,
@@ -1551,8 +1602,7 @@ func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 //
 //	err := doc.Validate(ctx, niceyaml.MultiValidator(schema, names))
 //
-// Each validator sees the node whatever the ones before it reported. The
-// run skips a nil validator, and one that holds a nil pointer or func.
+// Each validator sees the node whatever the ones before it reported.
 // When every validator passes, the run returns nil. A lone failure comes
 // back as its validator wrote it, unless it also holds a warning, as the
 // Warnings section of the package documentation describes. Two or more
@@ -1567,17 +1617,19 @@ func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 // package documentation describes. MultiValidator copies the validators
 // it gets, so a caller that edits the slice it passed does not change the
 // Validator.
+//
+// MultiValidator panics if a validator is nil, including one that holds a
+// nil pointer or func. [NoValidator] is the validator that passes every
+// Node.
 func MultiValidator(validators ...Validator) Validator {
+	// The check covers the copy, which holds the validators that run.
 	validators = slices.Clone(validators)
+	mustValidators("MultiValidator", validators)
 
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
 		var errs []error
 
 		for _, dv := range validators {
-			if nilness.IsNil(dv) {
-				continue
-			}
-
 			err := ctx.Err()
 			if err != nil {
 				return err //nolint:wrapcheck // The context names the reason, and the Node that runs the validator binds it.
@@ -1611,8 +1663,7 @@ func MultiValidator(validators ...Validator) Validator {
 //
 // A validator runs only after every validator before it has passed. A
 // validator that decodes the node thus does not report a value that the
-// schema already rejected. The run skips a nil validator, and one that
-// holds a nil pointer or func. A ChainValidator without validators passes
+// schema already rejected. A ChainValidator without validators passes
 // every Node. A decode runs the validators of repeated [WithValidator]
 // options the same way.
 //
@@ -1622,8 +1673,14 @@ func MultiValidator(validators ...Validator) Validator {
 // package documentation describes a failure that holds a warning.
 // ChainValidator copies the validators it gets, so a caller that edits
 // the slice it passed does not change the Validator.
+//
+// ChainValidator panics if a validator is nil, including one that holds a
+// nil pointer or func. [NoValidator] is the validator that passes every
+// Node.
 func ChainValidator(validators ...Validator) Validator {
+	// The check covers the copy, which holds the validators that run.
 	validators = slices.Clone(validators)
+	mustValidators("ChainValidator", validators)
 
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
 		return n.firstFailure(ctx, validators)
@@ -1644,12 +1701,16 @@ func ChainValidator(validators ...Validator) Validator {
 // error of its parse.
 //
 // SkipEmpty returns the errors of v as [ValidatorFunc.Check] returns the
-// errors of its function. A nil v passes every Node. SkipEmpty takes one
-// validator, so it wraps the one that [MultiValidator] or
-// [ChainValidator] makes of several.
+// errors of its function. SkipEmpty takes one validator, so it wraps the
+// one that [MultiValidator] or [ChainValidator] makes of several.
+//
+// SkipEmpty panics if v is nil, including a v that holds a nil pointer or
+// func.
 func SkipEmpty(v Validator) Validator {
+	mustValidator("SkipEmpty", v)
+
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
-		if n.IsEmpty() || nilness.IsNil(v) {
+		if n.IsEmpty() {
 			return nil
 		}
 
@@ -1685,18 +1746,16 @@ func SkipEmpty(v Validator) Validator {
 // Each reports every failure in document order, as [MultiValidator] reports
 // the failures of its validators. It hands the warnings of v to the
 // [Warnings] collector of its context, bound at the Node that v checked. A
-// path that does not select a Node passes. A nil v, or one that holds a nil
-// pointer or func, also passes, and Each does not resolve the path for it. An
-// error from Node.Nodes comes back as Node.Nodes returns it, and a document
-// that did not parse returns the error of its parse. A context that ends
-// stops the run, as the Cancellation section of the package documentation
-// describes.
+// path that does not select a Node passes. An error from Node.Nodes comes
+// back as Node.Nodes returns it, and a document that did not parse returns
+// the error of its parse. A context that ends stops the run, as the
+// Cancellation section of the package documentation describes.
+//
+// Each panics if v is nil, including a v that holds a nil pointer or func.
 func Each(path paths.Path, v Validator) Validator {
-	return ValidatorFunc(func(ctx context.Context, n *Node) error {
-		if nilness.IsNil(v) {
-			return nil
-		}
+	mustValidator("Each", v)
 
+	return ValidatorFunc(func(ctx context.Context, n *Node) error {
 		nodes, err := n.Nodes(path)
 		if err != nil {
 			return err
@@ -1750,10 +1809,15 @@ func Each(path paths.Path, v Validator) Validator {
 // that way on every Node a path selects, such as each element of a list.
 //
 // A document that did not parse returns the error that [Node.Err] returns
-// before v runs, even when v is nil. Otherwise a nil v, or one that holds a
-// nil pointer or func, passes without running. A validator that returns a nil
-// [*Error] or [*SourceError] pointer passes too.
+// before v runs. A validator that returns a nil [*Error] or [*SourceError]
+// pointer passes.
+//
+// Validate panics if v is nil, including a v that holds a nil pointer or
+// func, whether or not the document parsed. A caller that does not have a
+// check to run passes [NoValidator].
 func (n *Node) Validate(ctx context.Context, v Validator) error {
+	mustValidator("Node.Validate", v)
+
 	return n.validate(ctx, []Validator{v})
 }
 
@@ -1771,14 +1835,10 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 
 // firstFailure runs validators in order on n and returns the errors of
 // the first failure, as [Node.checkWith] returns them, or nil when each
-// of them passes. It skips a nil validator, and one that holds a nil
-// pointer or func.
+// of them passes. [WithValidator], [ChainValidator], and [Node.Validate]
+// reject a nil validator before the run, so none of the validators is nil.
 func (n *Node) firstFailure(ctx context.Context, validators []Validator) error {
 	for _, dv := range validators {
-		if nilness.IsNil(dv) {
-			continue
-		}
-
 		// A typed nil pointer is no failure, as [Node.Bind] reads it, and
 		// neither is a result of warnings alone.
 		err := n.checkWith(ctx, dv.Check)
