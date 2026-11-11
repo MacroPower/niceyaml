@@ -507,11 +507,17 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // reads the schema itself, such as an editor that completes keys from
 // its properties. [Schema.WithoutDeprecations] returns a Schema that
 // checks with the same validator and does not hand over deprecations.
+// [Schema.WithoutFields] returns a Schema that checks with the same
+// validator and does not see the fields it names.
 //
 // A Schema is safe for concurrent use. Create instances with [Compile],
 // [MustCompile], or [FromJSONSchema]. [AcceptAll] passes every document.
 type Schema struct {
 	compiled *jsonschema.Validator
+	// The fields that a check removes from the value before the
+	// validator reads it, as [Schema.WithoutFields] sets. Each holds the
+	// selectors of its path.
+	hidden [][]paths.Selector
 	// Whether the schema passes every document and value without reading
 	// it, as the schema that a "$schema=none" directive names does.
 	acceptAll bool
@@ -543,6 +549,126 @@ func (s *Schema) WithoutDeprecations() *Schema {
 	derived.noDeprecations = true
 
 	return &derived
+}
+
+// WithoutFields returns a [*Schema] that checks with the same compiled
+// validator as s, and removes the entry at each of fields from the value
+// before the validator reads it. [Schema.Check] removes the entries from
+// the value that it decodes, and [Schema.ValidateValue] removes them from
+// a copy of the data that it takes. A closed schema that does not
+// declare such a field thus passes a value that holds it. A program
+// whose documents carry envelope keys, such as apiVersion and kind,
+// checks the rest of each document against a schema of the body:
+//
+//	body := sch.WithoutFields(paths.Doc().Child("apiVersion"), paths.Doc().Child("kind"))
+//
+//	err := doc.Validate(ctx, body)
+//
+// Each path reads from the value that the call checks, whether the path
+// starts at `$` or `@`. The path holds the `.name` and `[n]` selectors
+// alone, and it ends in a `.name` selector. Each name matches a key of
+// the value as the decoder spells it, such as 16 for a key that the
+// document spells 0x10. A path that the value does not hold removes
+// nothing. The removal leaves the node of [Schema.Check] as it is, so
+// every other violation keeps its location. The value loses the entry
+// with every other value of its key, such as one that a `<<` merge key
+// brings in. A mapping that held only the removed fields becomes an empty
+// mapping. The schema does not report a deprecation of a removed field.
+//
+// The returned schema also removes the fields that s removes.
+// [Schema.JSONSchema] on it returns the validator of s. The schema s stays
+// as it is.
+//
+// Panics if a path does not end in a `.name` selector, or if it holds a
+// selector other than `.name` and `[n]`, such as a wildcard.
+func (s *Schema) WithoutFields(fields ...paths.Path) *Schema {
+	hidden := slices.Clone(s.hidden)
+
+	for _, p := range fields {
+		sels := slices.Collect(p.Selectors())
+
+		last, ok := p.Last()
+		if !ok || last.Kind != paths.SelectorChild {
+			panic(fmt.Sprintf("schema.Schema.WithoutFields: path %s does not end in a name", p))
+		}
+
+		for _, sel := range sels {
+			if sel.Kind != paths.SelectorChild && sel.Kind != paths.SelectorIndex {
+				panic(fmt.Sprintf("schema.Schema.WithoutFields: path %s holds the %s selector %s", p, sel.Kind, sel))
+			}
+		}
+
+		hidden = append(hidden, sels)
+	}
+
+	derived := *s
+	derived.hidden = hidden
+
+	return &derived
+}
+
+// withoutFields returns data without the entry at each of fields, which
+// [Schema.WithoutFields] checked. It copies each map and slice on the
+// path to an entry that it removes, and returns the rest of data as it
+// is. So it never writes into data.
+func withoutFields(data any, fields [][]paths.Selector) any {
+	for _, sels := range fields {
+		data, _ = withoutField(data, sels)
+	}
+
+	return data
+}
+
+// withoutField returns data without the entry at sels, and reports
+// whether data held the entry.
+func withoutField(data any, sels []paths.Selector) (any, bool) {
+	sel := sels[0]
+
+	switch v := data.(type) {
+	case map[string]any:
+		if sel.Kind != paths.SelectorChild {
+			return data, false
+		}
+
+		elem, ok := v[sel.Name]
+		if !ok {
+			return data, false
+		}
+
+		if len(sels) == 1 {
+			out := maps.Clone(v)
+			delete(out, sel.Name)
+
+			return out, true
+		}
+
+		elem, ok = withoutField(elem, sels[1:])
+		if !ok {
+			return data, false
+		}
+
+		out := maps.Clone(v)
+		out[sel.Name] = elem
+
+		return out, true
+
+	case []any:
+		if sel.Kind != paths.SelectorIndex || sel.Index >= len(v) || len(sels) == 1 {
+			return data, false
+		}
+
+		elem, ok := withoutField(v[sel.Index], sels[1:])
+		if !ok {
+			return data, false
+		}
+
+		out := slices.Clone(v)
+		out[sel.Index] = elem
+
+		return out, true
+	}
+
+	return data, false
 }
 
 // Ref returns the [Ref] that carries the compiled schema, which
@@ -934,7 +1060,7 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) ([]er
 	// key decodes once however many of them lie under its mapping.
 	idx := datapath.NewIndex(resolver, keys)
 	c := converter{root: rootOf(n), idx: idx}
-	instance := normalizeJSON(data, c.root, idx)
+	instance := withoutFields(normalizeJSON(data, c.root, idx), s.hidden)
 
 	var (
 		records []jsonschema.Deprecation

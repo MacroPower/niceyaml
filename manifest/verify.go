@@ -69,10 +69,10 @@ import (
 //
 // [SchemaTypeFields] on a version states whether its schema reads the type
 // fields, so Verify leaves out both reports for that version. With false,
-// the check sees every type field blank, and Verify reports each type
+// the check does not see any type field, and Verify reports each type
 // field that the schema requires:
 //
-//	MenuItem v1: $.kind: required, but manifest.SchemaTypeFields(false) blanks it
+//	MenuItem v1: $.kind: required, but manifest.SchemaTypeFields(false) hides it
 //
 // For the layout that [Unversioned] adds, Verify gives these reports
 // about the kind field alone. A document of that layout might write the
@@ -202,7 +202,7 @@ func (r *Registry) verifyTypeFields(entry *kindEntry, compiled map[*versionEntry
 
 			case v.cfg.hasTypeFields:
 				errs = append(errs, authorError(
-					fmt.Sprintf("%s: %s: required, but manifest.SchemaTypeFields(false) blanks it", name, p),
+					fmt.Sprintf("%s: %s: required, but manifest.SchemaTypeFields(false) hides it", name, p),
 					fmt.Sprintf("remove %s from required, or pass manifest.SchemaTypeFields(true)", p),
 				))
 

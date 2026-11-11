@@ -2,60 +2,27 @@ package manifest
 
 import (
 	"fmt"
-	"slices"
-	"unicode/utf8"
 
-	"github.com/goccy/go-yaml/ast"
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // prepareWork sets the working copy to a copy of doc, the document or a
-// migrated copy of it, without a blanked field. It keeps doc and locate,
-// so that a schema check can build a copy that blanks the type fields that
-// its schema does not read.
+// migrated copy of it. Every line and column of the copy matches doc, so
+// locate moves a location of the copy, as doc places it, into the
+// document. A nil locate leaves the location as it is, for doc itself.
+// The copy takes the unmarshalers of the registry ahead of those of the
+// Source of doc. It adds the problem of a copy that does not parse, or
+// that holds nothing, and reports false.
 func (d *docState) prepareWork(doc *niceyaml.Node, locate func(niceyaml.Located) niceyaml.Place) bool {
-	work, ok := d.workingCopy(doc, locate, nil)
-	if !ok {
-		return false
-	}
-
-	d.work, d.workFrom, d.workLocate = work, doc, locate
-
-	return true
-}
-
-// workingCopy returns a copy of doc that holds the lines of doc, with the
-// type field at each of hide blanked. Every line and column of the copy
-// matches doc, so locate moves a location of the copy, as doc places it,
-// into the document. A nil locate leaves the location as it is, for doc
-// itself. The copy takes the unmarshalers of the registry ahead of those
-// of the Source of doc. It adds the problem of a copy that does not parse,
-// or that is empty after the blanking, and reports false.
-func (d *docState) workingCopy(
-	doc *niceyaml.Node,
-	locate func(niceyaml.Located) niceyaml.Place,
-	hide []paths.Path,
-) (*niceyaml.Node, bool) {
 	src := doc.Source()
-	text := src.Text()
 	span := doc.Span()
 	start, end := textBounds(doc)
 
-	work := []rune(text[start:end])
-	blank := &blanker{doc: doc, src: src, base: start, text: text, work: work, first: -1}
-
-	for _, p := range hide {
-		blank.field(p)
-	}
-
-	blank.fillEmptyRoot()
-
-	working := niceyaml.NewSourceFromDerived(string(blank.work), d.doc, func(at niceyaml.Located) niceyaml.Place {
+	working := niceyaml.NewSourceFromDerived(src.Text()[start:end], d.doc, func(at niceyaml.Located) niceyaml.Place {
 		if at.HasRange {
 			at.Range.Start.Line += span.Start
 			at.Range.End.Line += span.Start
@@ -72,17 +39,19 @@ func (d *docState) workingCopy(
 		if n.Err() != nil {
 			d.fail(n.Err())
 
-			return nil, false
+			return false
 		}
 
 		if !n.IsEmpty() {
-			return n, true
+			d.work = n
+
+			return true
 		}
 	}
 
-	d.fail(niceyaml.NewError("document holds nothing but its type fields"))
+	d.fail(niceyaml.NewError("document holds nothing"))
 
-	return nil, false
+	return false
 }
 
 // textBounds returns the bytes [start, end) of the text of the Source of
@@ -111,7 +80,7 @@ func textBounds(doc *niceyaml.Node) (int, int) {
 type schemaFields struct {
 	// The validator that the registry read the fields from.
 	validator *jsonschema.Validator
-	// The type fields that the check of the schema sees blank.
+	// The type fields that the check of the schema does not see.
 	hidden []paths.Path
 	// The type fields that the schema might read in a place that the
 	// registry does not follow, as [schemaField] describes. The registry
@@ -129,7 +98,7 @@ type schemaFields struct {
 // type field that the schema does not declare is unsure when a branch or
 // a $ref that the document does not resolve might read it, as
 // [schemaField] describes. Such a field is unsure whether or not the
-// schema also requires it. The check sees every other type field blank.
+// schema also requires it. The check does not see any other type field.
 //
 // The registry keeps the fields of each version under the version and
 // the validator that it read them from. The schema registry hands a
@@ -202,127 +171,4 @@ const unsureWhy = "a branch or a $ref to another document might read it"
 func unsureRemedy(p paths.Path) string {
 	return fmt.Sprintf("declare %s under properties outside every branch and every such $ref, "+
 		"or pass manifest.SchemaTypeFields", p)
-}
-
-// blanker blanks type fields of a document in a working copy of its
-// lines. It works rune by rune, so every other rune keeps its line and its
-// column.
-type blanker struct {
-	doc  *niceyaml.Node
-	src  *niceyaml.Source
-	text string
-	work []rune
-	// The rune index in work of the first rune that the blanker cleared,
-	// or -1.
-	first int
-	// The byte offset in text where work starts.
-	base int
-	// The number of root entries that the blanker cleared.
-	cleared int
-}
-
-// field blanks the entry at p, a field that the document writes as a
-// scalar.
-func (b *blanker) field(p paths.Path) {
-	if r := readField(b.doc, p, nil); !r.found {
-		return
-	}
-
-	keys, err := b.doc.Ranges(p.Key())
-	if err != nil || len(keys) == 0 {
-		return
-	}
-
-	values, err := b.doc.Ranges(p)
-	if err != nil || len(values) == 0 {
-		return
-	}
-
-	from, ok := b.runeAt(keys[0].Start)
-	if !ok {
-		return
-	}
-
-	to, ok := b.runeAt(values[len(values)-1].End)
-	if !ok {
-		return
-	}
-
-	from, to = b.flowComma(from, to)
-
-	for i := from; i < to && i < len(b.work); i++ {
-		if b.work[i] != '\n' && b.work[i] != '\r' {
-			b.work[i] = ' '
-		}
-	}
-
-	if b.first < 0 || from < b.first {
-		b.first = from
-	}
-
-	if p.Len() == 1 {
-		b.cleared++
-	}
-}
-
-// runeAt returns the index in work of the rune at pos in the document.
-func (b *blanker) runeAt(pos position.Position) (int, bool) {
-	off, ok := b.src.Offset(pos)
-	if !ok || off < b.base || off > len(b.text) {
-		return 0, false
-	}
-
-	return utf8.RuneCountInString(b.text[b.base:off]), true
-}
-
-// flowComma widens the range [from, to) of an entry of a flow mapping to
-// include the comma after it, or the comma before it for the last entry.
-func (b *blanker) flowComma(from, to int) (int, int) {
-	i := to
-	for i < len(b.work) && (b.work[i] == ' ' || b.work[i] == '\t') {
-		i++
-	}
-
-	if i < len(b.work) && b.work[i] == ',' {
-		return from, i + 1
-	}
-
-	if i >= len(b.work) || b.work[i] != '}' {
-		return from, to
-	}
-
-	j := from - 1
-	for j >= 0 && (b.work[j] == ' ' || b.work[j] == '\t' || b.work[j] == '\n' || b.work[j] == '\r') {
-		j--
-	}
-
-	if j >= 0 && b.work[j] == ',' {
-		return j, to
-	}
-
-	return from, to
-}
-
-// fillEmptyRoot writes "{}" over the first blanked runes when the root
-// mapping held only the blanked fields. The copy then holds an empty
-// mapping rather than an empty document.
-func (b *blanker) fillEmptyRoot() {
-	if b.cleared == 0 || b.first < 0 || b.first+2 > len(b.work) {
-		return
-	}
-
-	entries, ok := astnode.Entries(astnode.Content(b.doc.AST()))
-	if !ok || len(entries) > b.cleared {
-		return
-	}
-
-	if m, ok := astnode.Content(b.doc.AST()).(*ast.MappingNode); ok && m.IsFlowStyle {
-		return
-	}
-
-	if slices.Contains(b.work[b.first:b.first+2], '\n') {
-		return
-	}
-
-	b.work[b.first], b.work[b.first+1] = '{', '}'
 }

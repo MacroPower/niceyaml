@@ -29,14 +29,8 @@ type docState struct {
 	doc *niceyaml.Node
 	// The working copy of the document, in the layout of the current
 	// version after the steps ran, or nil. The checks of the document read
-	// it, and a schema check that hides a type field reads a blanked copy
-	// instead.
+	// it.
 	work *niceyaml.Node
-	// The document or migrated copy that work copies.
-	workFrom *niceyaml.Node
-	// The function that moves a location of work into the document, or
-	// nil for the document itself.
-	workLocate func(niceyaml.Located) niceyaml.Place
 	// The name, when the document reached the layout of the current version
 	// with a name that is a non-empty string.
 	name string
@@ -647,11 +641,13 @@ func detailsOf(texts []string) []error {
 // checkSchema checks the working copy against the schema of v, and reports
 // whether it passed. A version without a schema passes. The check sees
 // each type field that [Registry.schemaFields] does not hide, with the
-// names of v, and sees every other type field blank. A schema with a type
-// field that the registry is unsure about fails the document without a
-// check. On the unversioned layout, such a schema fails only a document
-// that writes the field. The check of every other document sees the same
-// lines whether or not the schema reads the field. Each problem of the
+// names of v. It does not see any other type field that the working copy
+// writes in place, because [schema.Schema.WithoutFields] removes the
+// field from the value that the schema reads. A schema with a type field
+// that the registry is unsure about fails the document without a check.
+// On the unversioned layout, such a schema fails only a document that
+// writes the field. The check of every other document sees the same value
+// whether or not the schema reads the field. Each problem of the
 // check takes detail as its last detail, when detail is not nil. Only the
 // schema of the current version reports deprecations.
 func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail error) bool {
@@ -678,7 +674,7 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 	unsure := false
 
 	for _, p := range fields.unsure {
-		if v.cfg.unversioned && !readField(d.workFrom, p, nil).found {
+		if v.cfg.unversioned && !readField(d.work, p, nil).found {
 			continue
 		}
 
@@ -691,20 +687,24 @@ func (d *docState) checkSchema(ctx context.Context, v *versionEntry, detail erro
 		return false
 	}
 
-	work := d.work
+	// The check hides only a type field that the working copy writes in
+	// place. A type field that only a `<<` merge key brings in stays in
+	// the value.
+	hide := make([]paths.Path, 0, len(fields.hidden))
 
-	if len(fields.hidden) > 0 {
-		var ok bool
-
-		work, ok = d.workingCopy(d.workFrom, d.workLocate, fields.hidden)
-		if !ok {
-			return false
+	for _, p := range fields.hidden {
+		if readField(d.work, p, nil).found {
+			hide = append(hide, p)
 		}
+	}
+
+	if len(hide) > 0 {
+		sch = sch.WithoutFields(hide...)
 	}
 
 	warnings := niceyaml.NewWarnings()
 
-	err = work.Validate(warnings.Context(ctx), sch)
+	err = d.work.Validate(warnings.Context(ctx), sch)
 
 	d.warn(warnings.Err())
 

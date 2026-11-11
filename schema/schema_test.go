@@ -4144,6 +4144,190 @@ func TestSchema_WithoutDeprecations(t *testing.T) {
 	})
 }
 
+func TestSchema_WithoutFields(t *testing.T) {
+	t.Parallel()
+
+	// A closed schema that does not declare the envelope keys apiVersion
+	// and kind, at the root or in an item of items.
+	closed := compileSchema(t, `{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "meta": {"type": "object", "additionalProperties": false, "properties": {"name": {"type": "string"}}},
+    "items": {"type": "array", "items": {"type": "object", "additionalProperties": false}},
+    "spec": {"type": "object", "properties": {"port": {"type": "integer", "minimum": 1}}}
+  }
+}`)
+
+	root := paths.Doc()
+	apiVersion, kind := root.Child("apiVersion"), root.Child("kind")
+
+	tcs := map[string]struct {
+		schema *schema.Schema
+		doc    string
+		err    string
+	}{
+		"the schema sees every field": {
+			schema: closed,
+			doc:    stringtest.LinesLF("apiVersion: v1", "kind: Cafe", "spec:", "  port: 0"),
+			err: stringtest.JoinLF(
+				"cafe.yaml: 3 schema violations",
+				"cafe.yaml:1:1: $.apiVersion~: value is not allowed",
+				"cafe.yaml:2:1: $.kind~: value is not allowed",
+				"cafe.yaml:4:9: $.spec.port: 0 is less than 1",
+			),
+		},
+		"another violation keeps its location": {
+			schema: closed.WithoutFields(apiVersion, kind),
+			doc:    stringtest.LinesLF("apiVersion: v1", "kind: Cafe", "spec:", "  port: 0"),
+			err:    "cafe.yaml:4:9: $.spec.port: 0 is less than 1",
+		},
+		"fields from successive calls": {
+			schema: closed.WithoutFields(apiVersion).WithoutFields(kind),
+			doc:    stringtest.LinesLF("apiVersion: v1", "kind: Cafe"),
+		},
+		"current path": {
+			schema: closed.WithoutFields(paths.Current().Child("apiVersion"), paths.Current().Child("kind")),
+			doc:    stringtest.LinesLF("apiVersion: v1", "kind: Cafe"),
+		},
+		"field that the value does not hold": {
+			schema: closed.WithoutFields(
+				apiVersion, kind, root.Child("meta", "kind"), root.Child("items").Index(3).Child("kind"),
+			),
+			doc: stringtest.LinesLF("kind: Cafe", "items:", "  - {}"),
+		},
+		"mapping that held only the field": {
+			schema: closed.WithoutFields(root.Child("meta", "kind")),
+			doc:    stringtest.LinesLF("meta:", "  kind: Cafe"),
+		},
+		"item of a sequence": {
+			schema: closed.WithoutFields(root.Child("items").Index(1).Child("kind")),
+			doc:    stringtest.LinesLF("items:", "  - kind: Cafe", "  - kind: Hours"),
+			err:    "cafe.yaml:2:5: $.items[0].kind~: value is not allowed",
+		},
+		"anchor on the field": {
+			schema: closed.WithoutFields(kind),
+			doc:    stringtest.LinesLF("kind: &k Cafe", "meta:", "  name: *k"),
+		},
+		"field that a merge key also brings in": {
+			schema: closed.WithoutFields(kind),
+			doc:    stringtest.LinesLF("<<: {kind: Hours}", "kind: Cafe"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.doc, niceyaml.WithName("cafe.yaml"))
+
+			err := doc.Validate(t.Context(), tc.schema)
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, schema.ErrViolation)
+			assert.Equal(t, tc.err, err.Error())
+		})
+	}
+
+	t.Run("value", func(t *testing.T) {
+		t.Parallel()
+
+		data := map[string]any{
+			"apiVersion": "v1",
+			"meta":       map[string]any{"kind": "Cafe", "name": "yamull"},
+			"items":      []any{map[string]any{"kind": "Cafe"}},
+		}
+
+		s := closed.WithoutFields(apiVersion, root.Child("meta", "kind"), root.Child("items").Index(0).Child("kind"))
+		require.NoError(t, s.ValidateValue(t.Context(), data))
+
+		// The removal works on a copy, so the data keeps every field.
+		assert.Equal(t, map[string]any{
+			"apiVersion": "v1",
+			"meta":       map[string]any{"kind": "Cafe", "name": "yamull"},
+			"items":      []any{map[string]any{"kind": "Cafe"}},
+		}, data)
+
+		err := closed.WithoutFields(apiVersion).ValidateValue(t.Context(), data)
+		require.ErrorIs(t, err, schema.ErrViolation)
+	})
+
+	t.Run("deprecated field", func(t *testing.T) {
+		t.Parallel()
+
+		s := compileSchema(t, cafeSchema)
+		doc := yamltest.FirstDocument(t, "legacyPricing: true\n")
+
+		warnings := niceyaml.NewWarnings()
+		require.NoError(t, doc.Validate(warnings.Context(t.Context()), s))
+		require.ErrorIs(t, warnings.Err(), schema.ErrDeprecated)
+
+		warnings = niceyaml.NewWarnings()
+		require.NoError(t, doc.Validate(warnings.Context(t.Context()), s.WithoutFields(root.Child("legacyPricing"))))
+		require.NoError(t, warnings.Err())
+	})
+
+	t.Run("shares the validator", func(t *testing.T) {
+		t.Parallel()
+
+		derived := closed.WithoutFields(kind)
+		assert.Same(t, closed.JSONSchema(), derived.JSONSchema())
+		assert.NotSame(t, closed, derived)
+
+		// The schema that WithoutFields derived from stays as it is.
+		doc := yamltest.FirstDocument(t, "kind: Cafe\n")
+		require.ErrorIs(t, doc.Validate(t.Context(), closed), schema.ErrViolation)
+	})
+
+	t.Run("accept all", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, schema.AcceptAll.WithoutFields(kind).ValidateValue(t.Context(), "value"))
+	})
+
+	t.Run("panics", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			path paths.Path
+			want string
+		}{
+			"root": {
+				path: root,
+				want: "schema.Schema.WithoutFields: path $ does not end in a name",
+			},
+			"index": {
+				path: root.Child("items").Index(0),
+				want: "schema.Schema.WithoutFields: path $.items[0] does not end in a name",
+			},
+			"key": {
+				path: kind.Key(),
+				want: "schema.Schema.WithoutFields: path $.kind~ does not end in a name",
+			},
+			"wildcard": {
+				path: root.Child("items").IndexAll().Child("kind"),
+				want: "schema.Schema.WithoutFields: path $.items[*].kind holds the index-all selector [*]",
+			},
+			"recursive": {
+				path: root.Recursive("kind"),
+				want: "schema.Schema.WithoutFields: path $..kind does not end in a name",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.PanicsWithValue(t, tc.want, func() { closed.WithoutFields(tc.path) })
+			})
+		}
+	})
+}
+
 func TestAcceptAll(t *testing.T) {
 	t.Parallel()
 

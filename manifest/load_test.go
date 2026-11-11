@@ -2546,7 +2546,7 @@ func TestRegistry_Load_KindOnly(t *testing.T) {
 			),
 			notMatches: []error{manifest.ErrSchemaTypeField},
 		},
-		"branch that sees the kind field blank": {
+		"branch that hides the kind field": {
 			// The condition does not hold without the type field.
 			opts:  branch(manifest.SchemaTypeFields(false)),
 			files: map[string]string{"pipe.yaml": stringtest.LinesLF("type: sink", "id: out")},
@@ -4591,23 +4591,23 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 		"    `-- "+remedy("$.kind"),
 	)
 
-	// The error of a check that requires both type fields and sees them
-	// blank.
+	// The error of a check that requires both type fields and does not
+	// see them. It binds at the root mapping of the document, as the
+	// document writes it.
 	missingBoth := stringtest.JoinLF(
 		"brew.yaml: 2 errors",
-		`|-- brew.yaml:3:1: $.apiVersion: missing required property "apiVersion"`,
-		"`-- brew.yaml:3:1: $.kind: missing required property \"kind\"",
+		`|-- brew.yaml:1:1: $.apiVersion: missing required property "apiVersion"`,
+		"`-- brew.yaml:1:1: $.kind: missing required property \"kind\"",
 		"",
 		"brew.yaml",
 		"   1 | apiVersion: v2",
+		`     | ^^^^^^^^^^ missing required property "apiVersion"; missing required property "kind"`,
 		"   2 | kind: Brew",
 		"   3 | metadata:",
-		`     | ^^^^^^^^ missing required property "apiVersion"; missing required property "kind"`,
-		"   4 |   name: bryggkaffe",
 	)
 
 	visible := []manifest.VersionOption{manifest.SchemaTypeFields(true)}
-	blank := []manifest.VersionOption{manifest.SchemaTypeFields(false)}
+	hidden := []manifest.VersionOption{manifest.SchemaTypeFields(false)}
 
 	tcs := map[string]struct {
 		// The schema of v2, and the other options of v2.
@@ -4657,11 +4657,11 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 				"   2 | kind: Brew",
 			),
 		},
-		"branch that sees the type fields blank": {
+		"branch that hides the type fields": {
 			// The condition does not hold without the kind field, so the
 			// schema check passes and the check of the name fails.
 			schema:  branch,
-			version: blank,
+			version: hidden,
 			doc:     bare,
 			err: stringtest.JoinLF(
 				"brew.yaml:1:1: $.metadata.name: name must be a non-empty string",
@@ -4728,9 +4728,9 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 				"     | ^^^^",
 			),
 		},
-		"branch that sees the type fields blank on the unversioned layout": {
+		"branch that hides the type fields on the unversioned layout": {
 			schema:      branch,
-			version:     blank,
+			version:     hidden,
 			unversioned: true,
 			doc:         kinded,
 		},
@@ -4779,9 +4779,9 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 			version: visible,
 			doc:     brew,
 		},
-		"$ref to another document that sees the type fields blank": {
+		"$ref to another document that hides the type fields": {
 			schema:  outside,
-			version: blank,
+			version: hidden,
 			doc:     brew,
 			err:     missingBoth,
 		},
@@ -4813,9 +4813,9 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 			unversioned: true,
 			doc:         plain,
 		},
-		"closed schema behind a $ref that sees the type fields blank": {
+		"closed schema behind a $ref that hides the type fields": {
 			schema:  closedOutside,
-			version: blank,
+			version: hidden,
 			doc:     brew,
 		},
 		"closed schema that sees the type fields": {
@@ -4836,9 +4836,9 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 				"   4 |   name: bryggkaffe",
 			),
 		},
-		"declared schema that sees the type fields blank": {
+		"declared schema that hides the type fields": {
 			schema:  brewSchema("v2", "Tea"),
-			version: blank,
+			version: hidden,
 			doc:     brew,
 			err:     missingBoth,
 		},
@@ -4939,6 +4939,132 @@ func TestRegistry_Load_SchemaTypeFields(t *testing.T) {
 					require.NotErrorIs(t, err, manifest.ErrSchemaTypeField)
 				}
 			}
+		})
+	}
+}
+
+// Roster is a kind whose schema is closed and does not declare the type
+// fields.
+type Roster struct {
+	Tmpl map[string]any `json:"tmpl,omitzero"`
+	Meta Metadata       `json:"meta,omitzero"`
+	Spec ShiftSpec      `json:"spec,omitzero"`
+}
+
+func TestRegistry_Load_HiddenTypeFields(t *testing.T) {
+	t.Parallel()
+
+	// A closed schema that declares neither type field, wherever the
+	// registry reads them.
+	closed := `{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "tmpl": {"type": "object"},
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"name": {"type": "string"}}
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"open": {"type": "string"}, "close": {"type": "string"}}
+    }
+  }
+}`
+
+	meta := paths.Doc().Child("meta")
+	nested := []manifest.RegistryOption{
+		manifest.WithVersionField(meta.Child("version")),
+		manifest.WithKindField(meta.Child("kind")),
+	}
+
+	tcs := map[string]struct {
+		opts []manifest.RegistryOption
+		doc  string
+		err  string
+	}{
+		"anchor on the kind field": {
+			doc: stringtest.LinesLF(
+				"apiVersion: v2",
+				"kind: &k Roster",
+				"spec:",
+				`  open: "07:00"`,
+				"  close: *k",
+			),
+		},
+		"mapping that holds only the type fields": {
+			opts: nested,
+			doc: stringtest.LinesLF(
+				"meta:",
+				"  version: v2",
+				"  kind: Roster",
+				"spec:",
+				`  open: "07:00"`,
+			),
+		},
+		"flow mapping that holds only the type fields": {
+			opts: nested,
+			doc: stringtest.LinesLF(
+				"meta: {version: v2, kind: Roster}",
+				"spec:",
+				`  open: "07:00"`,
+			),
+		},
+		"root mapping that holds only the type fields": {
+			doc: stringtest.LinesLF("apiVersion: v2", "kind: Roster"),
+		},
+		"merge key before the kind field": {
+			doc: stringtest.LinesLF(
+				"tmpl: &t",
+				"  kind: Template",
+				"<<: *t",
+				"apiVersion: v2",
+				"kind: Roster",
+				"spec:",
+				`  open: "07:00"`,
+			),
+		},
+		"violation beside the hidden type fields": {
+			opts: nested,
+			doc: stringtest.LinesLF(
+				"meta:",
+				"  version: v2",
+				"  kind: Roster",
+				"spec:",
+				"  open: 7",
+			),
+			err: stringtest.JoinLF(
+				`roster.yaml:5:9: $.spec.open: expected "string", got "integer"`,
+				"",
+				"   3 |   kind: Roster",
+				"   4 | spec:",
+				"   5 |   open: 7",
+				"     |         ^",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := manifest.MustNewRegistry(append(slices.Clone(tc.opts),
+				manifest.WithKinds(manifest.NewKind[Roster]("Roster",
+					manifest.Version("v2", manifest.Schema(schema.Embedded([]byte(closed)))))),
+			)...)
+
+			_, err := reg.Load(t.Context(),
+				manifest.Sources(niceyaml.NewSourceFromString(tc.doc, niceyaml.WithName("roster.yaml"))))
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, schema.ErrViolation)
+			assert.Equal(t, tc.err, niceyaml.FormatError(err))
 		})
 	}
 }
