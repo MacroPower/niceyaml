@@ -15,6 +15,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/escape"
 	"go.jacobcolvin.com/niceyaml/internal/caret"
+	"go.jacobcolvin.com/niceyaml/internal/cellcut"
 	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
@@ -488,7 +489,7 @@ func ColWidth(content string, col int) int {
 // right-left cells when the row reaches cell right, and fewer when the
 // row ends before it. [Printer.Pad] pads such a result to the window.
 func Cut(row string, left, right int) string {
-	return cells.Cut(row, left, right)
+	return cellcut.Cut(row, left, right)
 }
 
 // CutWidth returns what [Cut] returns along with its width in cells. Like
@@ -497,7 +498,7 @@ func Cut(row string, left, right int) string {
 // A viewer that pads the cut to its window pads right-left less that
 // width.
 func CutWidth(row string, left, right int) (string, int) {
-	return cells.CutWidth(row, left, right)
+	return cellcut.CutWidth(row, left, right)
 }
 
 // AnnotationRow is a row an [AnnotationFunc] renders for the annotations
@@ -1391,7 +1392,7 @@ func (p *Printer) gutterWidth(maxNumber int) int {
 func (p *Printer) renderGutter(ctx GutterContext, width int) string {
 	// The cut shows a wide rune that straddles the width as a space in its
 	// style, so only a row that falls short takes the pad.
-	text, w := cells.CutWidth(firstRow(p.gutter.Render(ctx)), 0, width)
+	text, w := cellcut.CutWidth(firstRow(p.gutter.Render(ctx)), 0, width)
 	if w < width {
 		text += firstRow(p.styles.Style(kind.Text).Render(strings.Repeat(" ", width-w)))
 	}
