@@ -189,6 +189,7 @@ func containerFrame(s lipgloss.Style) lipgloss.Style {
 //   - [WithWrapWidth]
 //   - [WithMaxNumber]
 //   - [WithFlagBlend]
+//   - [WithTabWidth]
 type Option func(*config)
 
 // config holds the settings an [Option] configures, and the cache of
@@ -211,6 +212,9 @@ type config struct {
 	wrap           int
 	containerWidth int
 	maxNumber      int
+	// The distance between two tab stops of the content, as WithTabWidth
+	// sets it, or 0 for the picture of a tab.
+	tabWidth int
 	// Whether apply fills the container with the kind.Text style, as
 	// WithBox sets it.
 	box bool
@@ -410,6 +414,13 @@ type AnnotationContext struct {
 	// columns of Content it labels in [line.Annotation.Cols].
 	Annotations line.Annotations
 	Placement   line.Placement
+
+	// TabWidth is the tab width of the printer, as [WithTabWidth] sets it.
+	// A tab in Content takes the cells up to the next multiple of TabWidth,
+	// counted from the start of Content. A TabWidth of 0 measures each tab
+	// as its one-cell picture. [AnnotationContext.ColWidth] and
+	// [DefaultAnnotation] measure with it.
+	TabWidth int
 }
 
 // ColWidth returns the display width of the first col runes of
@@ -420,10 +431,11 @@ type AnnotationContext struct {
 // line, the printer measures the padding from the start of the wrapped
 // row that holds Col instead, as the AnnotationRow doc describes. Like the
 // printer, ColWidth stops at [line.MaxColPastEnd] columns past the end, so
-// a stray column such as [math.MaxInt] pads a bounded row. See [ColWidth]
-// for the rules it measures by.
+// a stray column such as [math.MaxInt] pads a bounded row. It measures by
+// the rules of [ColWidth], except that a tab takes the cells that
+// [AnnotationContext.TabWidth] gives it.
 func (ctx AnnotationContext) ColWidth(col int) int {
-	return ColWidth(ctx.Content, annotationCol(ctx.Content, col))
+	return cells.NewRow(ctx.Content, cells.Tabs{Width: ctx.TabWidth}).Width(annotationCol(ctx.Content, col))
 }
 
 // annotationCol returns the column the printer starts an [AnnotationRow]
@@ -448,9 +460,12 @@ func annotationCol(content string, col int) int {
 //
 // ColWidth measures the content alone. A viewer that scrolls horizontally
 // asks [Layout.CellOf] for the cell of a column instead, because that
-// method also counts the cells a style's transform adds.
+// method also counts the cells a style's transform adds. ColWidth does not
+// know the tab width of a printer, so it measures each tab as its picture
+// whatever [WithTabWidth] sets. [AnnotationContext.ColWidth] measures with
+// the tab width of the printer that calls the func.
 func ColWidth(content string, col int) int {
-	return cells.NewRow(content).Width(col)
+	return cells.NewRow(content, cells.Tabs{}).Width(col)
 }
 
 // Cut returns cells left through right-1 of row, or "" when right is at or
@@ -595,8 +610,9 @@ func NoAnnotation(AnnotationContext) []AnnotationRow {
 // the wrapped row that holds the start of the run. That wrapped row might
 // not show any column of the run, as when the run starts on a space the
 // wrap drops. The contents then follow a single caret at the start of the
-// run. Apart from that single caret, a space the wrap drops, at a break
-// or at the end of the line, does not get a caret.
+// run. A tab that [AnnotationContext.TabWidth] draws as spaces counts as
+// such a space. Apart from that single caret, a space the wrap drops, at a
+// break or at the end of the line, does not get a caret.
 //
 // An annotation of kind [kind.UISeparator] or [kind.UIHunkHeader] labels
 // its line and not a column of it, as [line.Annotation] describes. Below
@@ -608,7 +624,9 @@ func NoAnnotation(AnnotationContext) []AnnotationRow {
 //
 // Every control character in an annotation renders as
 // [go.jacobcolvin.com/niceyaml/escape.Control] draws it, so a newline does
-// not start a row.
+// not start a row. A tab in the content takes the cells that
+// [AnnotationContext.TabWidth] gives it, so the carets under it and after
+// it stay under their columns.
 //
 // Every row DefaultAnnotation returns starts at a column between 0 and
 // [line.MaxColPastEnd] columns past the end of the content, inclusive,
@@ -659,7 +677,7 @@ func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 		labels = append(labels, caret.Label{Text: a.Content, Cols: cols})
 	}
 
-	caretRows := caret.Rows(ctx.Content, labels, wrappedRows(ctx))
+	caretRows := caret.Rows(ctx.Content, ctx.TabWidth, labels, wrappedRows(ctx))
 	if len(caretRows) == 0 {
 		return nil
 	}
@@ -685,8 +703,9 @@ func labelsLine(anns line.Annotations) bool {
 // [AnnotationContext.RowEnds]. A row without an entry in RowEnds ends
 // where the next row begins, less the spaces the wrap drops before that
 // start. The last such row ends at the end of the content. First,
-// wrappedRows escapes the content as the printer shows it, so a tab
-// counts as its picture rather than a space. It returns nil when
+// wrappedRows escapes the content as the printer shows it. A tab thus
+// counts as its picture rather than a space, unless
+// [AnnotationContext.TabWidth] draws it as spaces. It returns nil when
 // RowStarts is empty. [caret.Rows] reads nil as one row that shows the
 // whole line.
 func wrappedRows(ctx AnnotationContext) []position.Span {
@@ -694,7 +713,7 @@ func wrappedRows(ctx AnnotationContext) []position.Span {
 		return nil
 	}
 
-	shown := []rune(escape.Control(ctx.Content))
+	shown := []rune(escapeContent(ctx.Content, ctx.TabWidth))
 	rows := make([]position.Span, 0, len(ctx.RowStarts))
 
 	for r, lo := range ctx.RowStarts {
@@ -717,6 +736,22 @@ func wrappedRows(ctx AnnotationContext) []position.Span {
 	}
 
 	return rows
+}
+
+// escapeContent returns content as [escape.Control] draws it, rune for
+// rune, but it keeps each tab when tabWidth is positive. The printer draws
+// such a tab as spaces, which the wrap drops at a break.
+func escapeContent(content string, tabWidth int) string {
+	if tabWidth <= 0 {
+		return escape.Control(content)
+	}
+
+	pieces := strings.Split(content, "\t")
+	for i, piece := range pieces {
+		pieces[i] = escape.Control(piece)
+	}
+
+	return strings.Join(pieces, "\t")
 }
 
 // renderLineNumber renders the line number portion of a gutter. The number
@@ -1038,10 +1073,62 @@ func WithFlagBlend(enabled bool) Option {
 	}
 }
 
+// WithTabWidth is an [Option] that sets the distance between the tab
+// stops of the content, in cells. With a positive n, each tab in the
+// content of a line renders as the spaces up to the next multiple of n
+// cells. The stops count from the start of the content, after the
+// gutter. The spaces take the colors of the segment that holds the tab,
+// but not its transform. A width of 0, the default, draws each tab as its
+// picture "␉" in one cell, as
+// [go.jacobcolvin.com/niceyaml/escape.Control] draws it. A negative width
+// counts as 0.
+//
+// Use it for a viewer of a valid document. In such a document, a tab in a
+// block scalar aligns the text after it, as in an embedded Makefile or a
+// table of tab-separated values:
+//
+//	p := printer.New(printer.WithTabWidth(4))
+//
+// A tab stays one column of the content, and it takes between 1 and n
+// cells, inclusive, as a wide rune takes two. Positions, overlays, and
+// annotations thus keep the columns of the source. [Layout.CellOf] gives
+// the cell where a tab starts, and [Layout.PositionAt] gives the column
+// of the tab for each of its cells. [AnnotationContext.TabWidth] carries
+// the width to an [AnnotationFunc], so the carets of [DefaultAnnotation]
+// stay under their columns.
+//
+// The tab stops count the cells of the content, without the cells that
+// the transform of a style adds or removes. On a line that wraps, each
+// tab keeps the cells it takes on the whole line. The wrap drops the
+// spaces of a tab at a break, as it drops any other space there. An
+// annotation that starts on such a tab gets a single caret.
+//
+// The tab width applies to every view the printer renders, the excerpts
+// of [Printer.PrintError] included, so an excerpt shows a tab as blank
+// space. An error such as the one a YAML parser reports for a tab in the
+// indentation points at such a tab. A program that prints both derives a
+// printer that shows the picture for its errors:
+//
+//	errPrinter := p.With(printer.WithTabWidth(0))
+//
+// [ColWidth] and [line.View.String] always measure and draw the picture.
+func WithTabWidth(n int) Option {
+	return func(c *config) {
+		c.tabWidth = max(0, n)
+	}
+}
+
 // WrapWidth returns the width the output of the printer fits, as
 // [WithWrapWidth] sets it, or 0 when the printer does not wrap.
 func (p *Printer) WrapWidth() int {
 	return p.wrap
+}
+
+// TabWidth returns the distance between the tab stops of the content, as
+// [WithTabWidth] sets it, or 0 when the printer draws each tab as its
+// picture.
+func (p *Printer) TabWidth() int {
+	return p.tabWidth
 }
 
 // ContainerWidth returns the width [WithContainerWidth] pins the container
@@ -1425,7 +1512,7 @@ func newViewLine(view *line.View, idx int, ln *line.Line) viewLine {
 // shown text, the rendered line without its escape sequences. Offsets and
 // lengths count runes.
 type runSpan struct {
-	text     string // The escaped content the run covers.
+	text     string // The escaped content the run covers, or the spaces of a tab.
 	col      int    // The column of the content at which the run starts.
 	cols     int    // The number of columns of the content the run covers.
 	shown    int    // The offset in the shown text at which the run starts.
@@ -1448,8 +1535,10 @@ type runSpan struct {
 // line. A run never ends inside a grapheme cluster, so an escape sequence
 // never splits one. A cluster that segments of different styles share
 // renders in the style of the segment holding its first rune, the one
-// [cells.Row] measures it by. It returns the rendered content and a
-// [runSpan] for each run, in order.
+// [cells.Row] measures it by. With a tab width, each tab is a run of its
+// own that covers one column and shows the spaces up to its tab stop, in
+// the style of its segment without the transform. It returns the rendered
+// content and a [runSpan] for each run, in order.
 func (p *Printer) renderRuns(vl viewLine) (string, []runSpan) {
 	base := flagKind(vl.view.Flag(vl.idx))
 
@@ -1465,20 +1554,17 @@ func (p *Printer) renderRuns(vl viewLine) (string, []runSpan) {
 		shown   int
 	)
 
-	flush := func() {
-		if !started {
-			return
-		}
+	row := cells.NewRow(vl.row.Content, cells.Tabs{Width: p.tabWidth})
 
-		// The escape keeps one rune per rune of the content, so the escaped
-		// text counts the columns of the run.
-		text := escape.Control(run.String())
-		rendered := p.blended(runKey, runSeg, runTint).Render(text)
+	// The emit func renders text, which covers cols columns of the
+	// content, in st.
+	emit := func(st lipgloss.Style, text string, cols int) {
+		rendered := st.Render(text)
 		runShown := ansi.Strip(rendered)
 		span := runSpan{
 			text:     text,
 			col:      col,
-			cols:     utf8.RuneCountInString(text),
+			cols:     cols,
 			shown:    shown,
 			shownLen: utf8.RuneCountInString(runShown),
 			textAt:   -1,
@@ -1489,14 +1575,43 @@ func (p *Printer) renderRuns(vl viewLine) (string, []runSpan) {
 		}
 
 		sb.WriteString(rendered)
-		run.Reset()
 
 		spans = append(spans, span)
 		col += span.cols
 		shown += span.shownLen
 	}
 
-	row := cells.NewRow(vl.row.Content)
+	flush := func() {
+		if !started {
+			return
+		}
+
+		st := p.blended(runKey, runSeg, runTint)
+		raw := run.String()
+		run.Reset()
+
+		// Each tab splits the run, so that it shows its own spaces. The
+		// escape keeps one rune per rune of the content, so the escaped
+		// text of each other piece counts its columns.
+		for raw != "" {
+			piece, rest, tab := raw, "", false
+			if p.tabWidth > 0 {
+				piece, rest, tab = strings.Cut(raw, "\t")
+			}
+
+			if piece != "" {
+				text := escape.Control(piece)
+				emit(st, text, utf8.RuneCountInString(text))
+			}
+
+			if tab {
+				emit(st.UnsetTransform(), strings.Repeat(" ", row.Cells(col)), 1)
+			}
+
+			raw = rest
+		}
+	}
+
 	at := 0 // The column of the content the next rune takes.
 
 	for _, seg := range vl.row.Segments {
@@ -1602,8 +1717,12 @@ func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Pl
 
 	// Each wrapped row gets a [cells.Row] of its own text the first time
 	// a row of annotations sits beside it, so the work stays linear in
-	// the length of the line.
+	// the length of the line. A tab on a wrapped row keeps the cells it
+	// takes on the whole line, so the row starts at the cell that the line
+	// takes before it.
 	rowCells := make([]*cells.Row, len(out))
+
+	var lineCells *cells.Row
 
 	for _, group := range groups {
 		rows := p.annotationFunc(AnnotationContext{
@@ -1613,6 +1732,7 @@ func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Pl
 			Overlays:    slices.Clone(vl.row.Overlays),
 			RowStarts:   slices.Clone(starts),
 			RowEnds:     slices.Clone(w.ends),
+			TabWidth:    p.tabWidth,
 		})
 
 		for _, row := range rows {
@@ -1644,7 +1764,17 @@ func (p *Printer) annotationRows(vl viewLine, gutterWidth int, placement line.Pl
 			// next row, and the padding counts the cells that rest takes
 			// alone, such as none for a combining accent.
 			if rowCells[j] == nil {
-				measured := cells.NewRow(string(content[from:to]))
+				tabs := cells.Tabs{Width: p.tabWidth}
+				if p.tabWidth > 0 && from > 0 {
+					if lineCells == nil {
+						measured := cells.NewRow(text, tabs)
+						lineCells = &measured
+					}
+
+					tabs.Start = lineCells.Width(from)
+				}
+
+				measured := cells.NewRow(string(content[from:to]), tabs)
 				rowCells[j] = &measured
 			}
 

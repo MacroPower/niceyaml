@@ -235,7 +235,7 @@ func (sl shownLine) cellsBefore(r, offset int) int {
 
 	f := &m.from[slot]
 	if f.end < end {
-		f.row, f.end = cells.NewRow(string(shown[from:end])), end
+		f.row, f.end = cells.NewRow(string(shown[from:end]), cells.Tabs{}), end
 	}
 
 	return f.row.Width(offset - from)
@@ -254,7 +254,7 @@ func (sl shownLine) rowCells(j int) cells.Row {
 	}
 
 	if m.rows[j] == nil {
-		row := cells.NewRow(string(m.runesOf(sl.text)[sl.starts[j]:sl.ends[j]]))
+		row := cells.NewRow(string(m.runesOf(sl.text)[sl.starts[j]:sl.ends[j]]), cells.Tabs{})
 		m.rows[j] = &row
 	}
 
@@ -560,10 +560,10 @@ func isBreakSpace(r rune) bool {
 // spaces the wrapper drops. The wrapper drops them when the first word
 // does not fit beside them.
 //
-// The caller escapes the text, so a tab never reaches rowBounds. An
-// excerpt shows a tab as its control picture, and the text of an error
-// shows it as the spaces [go.jacobcolvin.com/niceyaml/escape.Tabs] puts
-// in its place.
+// The caller escapes the text, so a tab never reaches rowBounds. The
+// content of a line shows a tab as its control picture, or as the spaces
+// up to its tab stop with [WithTabWidth]. The text of an error shows it as
+// the spaces [go.jacobcolvin.com/niceyaml/escape.Tabs] puts in its place.
 func rowBounds(text string, pieces []string) ([]int, []int) {
 	runes := []rune(text)
 	tails := spaceTails(text, len(runes))

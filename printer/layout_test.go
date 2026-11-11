@@ -937,8 +937,26 @@ func TestPrinter_Layout_CellOf(t *testing.T) {
 		overlays []position.Range
 		pos      position.Position
 		wrap     int
+		tabWidth int
 		want     int
 	}{
+		"tab takes one cell by default": {
+			content: "k: \"a\tb\"",
+			pos:     position.New(0, 6),
+			want:    6,
+		},
+		"tab starts at its own cell": {
+			content:  "k: \"a\tb\"",
+			tabWidth: 4,
+			pos:      position.New(0, 5),
+			want:     5,
+		},
+		"tab takes the cells to its stop": {
+			content:  "k: \"a\tb\"",
+			tabWidth: 4,
+			pos:      position.New(0, 6),
+			want:     8,
+		},
 		"plain column": {
 			content: "key: value",
 			pos:     position.New(0, 5),
@@ -1003,7 +1021,7 @@ func TestPrinter_Layout_CellOf(t *testing.T) {
 			view := niceyaml.NewSourceFromString(tc.content).View()
 			view.AddOverlay(testOverlayHighlight, tc.overlays...)
 
-			p := testPrinter().With(printer.WithWrapWidth(tc.wrap))
+			p := testPrinter().With(printer.WithWrapWidth(tc.wrap), printer.WithTabWidth(tc.tabWidth))
 
 			assert.Equal(t, tc.want, p.Layout(view).CellOf(tc.pos))
 		})
@@ -1232,9 +1250,22 @@ func TestPrinter_Layout_PositionAt(t *testing.T) {
 		overlays   []position.Range
 		clip       int
 		wrap       int
+		tabWidth   int
 		row        int
 		cell       int
 	}{
+		"each cell of a tab gives the tab": {
+			content:  "k: \"a\tb\"",
+			tabWidth: 4,
+			cell:     7,
+			want:     new(position.New(0, 5)),
+		},
+		"cell after a tab": {
+			content:  "k: \"a\tb\"",
+			tabWidth: 4,
+			cell:     8,
+			want:     new(position.New(0, 6)),
+		},
 		"first cell": {
 			content: "key: value",
 			want:    new(position.New(0, 0)),
@@ -1509,7 +1540,7 @@ func TestPrinter_Layout_PositionAt(t *testing.T) {
 
 			view = view.Clip(tc.clip)
 
-			p := testPrinter().With(printer.WithWrapWidth(tc.wrap))
+			p := testPrinter().With(printer.WithWrapWidth(tc.wrap), printer.WithTabWidth(tc.tabWidth))
 
 			// A cell that shows no column gives the zero position.
 			var want position.Position
@@ -1566,6 +1597,16 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 				view.AddOverlay(testOverlayHighlight,
 					yamltest.LineRange(0, 3, 5),
 					yamltest.LineRange(0, 9, 14),
+				)
+			},
+		},
+		"tabs": {
+			printer: testPrinter().With(printer.WithWrapWidth(10), printer.WithTabWidth(4)),
+			input:   stringtest.LinesLF("k: \"a\tb\tcc\tddd\teeee\"", "b: |", "  \tx\t\ty"),
+			decorate: func(view *line.View) {
+				view.AnnotateLine(
+					2,
+					line.Annotation{Content: "tab", Placement: line.Below, Cols: position.NewSpan(4, 6)},
 				)
 			},
 		},
@@ -1679,9 +1720,12 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 					got, ok := l.PositionAt(row, cell)
 					if !ok {
 						// Only a space the wrapper dropped at a break and a
-						// column a clipped line leaves out take no cell.
+						// column a clipped line leaves out take no cell. A
+						// tab that a tab width draws as spaces is such a
+						// space.
 						if !clipped(view, pos) {
-							require.Equal(t, " ", string(r), "position %s", pos)
+							dropped := r == ' ' || r == '\t' && tc.printer.TabWidth() > 0
+							require.True(t, dropped, "position %s holds %q", pos, r)
 						}
 
 						continue

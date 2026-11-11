@@ -10,7 +10,8 @@
 //
 // A column gets one caret for each cell that its rune renders in. The
 // carets thus stay under the runes that they mark on a line that holds
-// wide or control characters.
+// wide or control characters. A tab takes one cell, or the cells up to
+// the next tab stop when the renderer sets a tab width.
 //
 // On a line that wraps, a run gets a row beside each wrapped row that
 // shows some of its columns. The text follows the carets beside the
@@ -52,7 +53,10 @@ type Row struct {
 }
 
 // Rows returns the rows that mark labels below content, the text of a line
-// without its line ending, in the order that a renderer draws them.
+// without its line ending, in the order that a renderer draws them. A
+// tabWidth of 0 or less measures each tab as its one-cell picture. A
+// positive one measures each tab as the cells up to the next multiple of
+// tabWidth, counted from the start of content.
 //
 // Wrapped holds the columns of content that each row of the line shows
 // when the line wraps, in order, each without the spaces that the wrap
@@ -64,12 +68,12 @@ type Row struct {
 // as with an empty span or one past the end of content. That column can
 // lie past the end. A start before column zero counts as zero. Callers
 // must bound the start, because a row pads out to it.
-func Rows(content string, labels []Label, wrapped []position.Span) []Row {
+func Rows(content string, tabWidth int, labels []Label, wrapped []position.Span) []Row {
 	if len(labels) == 0 {
 		return nil
 	}
 
-	l := newLayout(content, wrapped)
+	l := newLayout(content, tabWidth, wrapped)
 
 	var rows []Row
 
@@ -96,16 +100,16 @@ type layout struct {
 	width int
 }
 
-// newLayout creates a new [layout] for content, wrapped as [Rows] takes
-// it.
-func newLayout(content string, wrapped []position.Span) layout {
+// newLayout creates a new [layout] for content, with tabWidth and wrapped
+// as [Rows] takes them.
+func newLayout(content string, tabWidth int, wrapped []position.Span) layout {
 	width := len([]rune(content))
 
 	if len(wrapped) == 0 {
 		wrapped = []position.Span{position.NewSpan(0, width)}
 	}
 
-	return layout{row: cells.NewRow(content), wrapped: wrapped, width: width}
+	return layout{row: cells.NewRow(content, cells.Tabs{Width: tabWidth}), wrapped: wrapped, width: width}
 }
 
 // runs groups labels by the columns that they mark, as [layout.marked]
@@ -164,10 +168,10 @@ type piece struct {
 // rows returns the rows that mark r. Each wrapped row that shows some of
 // the columns of r gets a caret row. The text of r follows the carets
 // beside the wrapped row that holds its start. That wrapped row might not
-// show any of the columns of r, as when the start falls on a space that
-// the wrap drops. The text then follows a single caret at the start, on a
-// row of its own. A run that has neither text nor a caret row gets that
-// single caret alone.
+// show any of the columns of r, as when the start falls on a space or a
+// tab that the wrap drops. The text then follows a single caret at the
+// start, on a row of its own. A run that has neither text nor a caret row
+// gets that single caret alone.
 func (l layout) rows(r run) []Row {
 	start := r.cols.Start
 
@@ -222,12 +226,25 @@ func (l layout) rowOf(col int) int {
 
 // single returns the row that marks col alone, with one caret for each
 // cell that the rune there renders in. A column past the end of the content
-// gets one caret.
+// gets one caret. A column that no wrapped row shows also gets one caret,
+// because it takes no cell of the output. The wrap drops such a column
+// when it holds a space or a tab at a break.
 func (l layout) single(col int) Row {
+	if col < l.width && !l.shown(col) {
+		return Row{Col: col, Marker: "^"}
+	}
+
 	marks := make([]bool, col+1)
 	marks[col] = true
 
 	return Row{Col: col, Marker: strings.Trim(l.render(marks), " ")}
+}
+
+// shown reports whether a wrapped row shows col.
+func (l layout) shown(col int) bool {
+	return slices.ContainsFunc(l.wrapped, func(w position.Span) bool {
+		return w.Contains(col)
+	})
 }
 
 // cut returns a caret row for each wrapped row of the line that holds a

@@ -733,7 +733,7 @@ func (v *View) Windows(i int) position.Spans {
 
 	slices.Sort(marks)
 
-	row := cells.NewRow(ln.Content())
+	row := cells.NewRow(ln.Content(), cells.Tabs{})
 
 	var windows position.Spans
 
@@ -863,7 +863,7 @@ func (v *View) String() string {
 		var cellRow cells.Row
 
 		if len(anns) > 0 {
-			cellRow = cells.NewRow(row.Content)
+			cellRow = cells.NewRow(row.Content, cells.Tabs{})
 		}
 
 		// Each kind of annotation above the line gets a row of its own,
@@ -898,7 +898,7 @@ func (v *View) String() string {
 				continue
 			}
 
-			for _, r := range caret.Rows(row.Content, caretLabels(group, row.Width), nil) {
+			for _, r := range caret.Rows(row.Content, 0, caretLabels(group, row.Width), nil) {
 				padding := strings.Repeat(" ", cellRow.Width(r.Col))
 				rows = append(rows, blank+padding+r.Marker+r.Text)
 			}

@@ -34,10 +34,13 @@
 // # Rows and Tabs
 //
 // A line feed and a tab are C0 controls, so Control draws them as "␊"
-// and "␉". The picture of a tab suits the content of a document, where a
-// tab is a character the reader wants to see. In a name or a message, a
-// tab is layout instead, because it aligns the text after it. A line feed
-// in a message starts a new row.
+// and "␉". The picture of a tab suits the excerpt of an error, where a
+// tab is often the fault and the reader wants to see it. In a name or a
+// message, a tab is layout instead, because it aligns the text after it.
+// A line feed in a message starts a new row. A viewer of a valid
+// document, where a tab in a block scalar aligns text too, sets a tab
+// width with [go.jacobcolvin.com/niceyaml/printer.WithTabWidth], and the
+// printer then draws each tab of the content as spaces up to a tab stop.
 //
 // A program picks the function by the rows that its text takes. Text that
 // takes one row, such as the name of a source or a message on a row of

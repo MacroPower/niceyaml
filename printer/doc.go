@@ -156,6 +156,17 @@
 // cluster therefore styles the whole cluster when it covers the first
 // rune. Otherwise it does not style the cluster.
 //
+// # Tabs
+//
+// By default the printer draws each tab of the content as its picture
+// "␉" in one cell, so an excerpt shows the tab that a YAML parser
+// rejects. [WithTabWidth] draws each tab as spaces up to the next tab
+// stop instead, which keeps the alignment of text that a block scalar
+// holds, such as a Makefile or tab-separated values. A tab stays one
+// column of the content either way, so positions, overlays, and
+// annotations keep the columns of the source, and [Layout] counts the
+// cells that each tab takes.
+//
 // # Annotations
 //
 // The printer renders the [line.Annotations] a view carries. The

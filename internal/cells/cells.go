@@ -3,7 +3,8 @@
 //
 // A rendered row shows each control character in one cell, as the rune
 // that [escape.Control] puts in its place. That rune is a picture for a C0
-// control or DEL, and U+FFFD for a C1 control.
+// control or DEL, and U+FFFD for a C1 control. [Tabs] with a width show
+// each tab as the spaces up to the next tab stop instead.
 //
 // A rendered row shows each grapheme cluster at its display width. A
 // cluster can hold several runes, as a combining mark, an emoji zero-width
@@ -13,7 +14,7 @@
 // a cell. A marker aimed at any rune of a cluster therefore lands under
 // the whole cluster.
 //
-//	row := cells.NewRow("a: 1️⃣ x")
+//	row := cells.NewRow("a: 1️⃣ x", cells.Tabs{})
 //	row.Width(7) // 6, the cells before x
 //
 // A rendered row also carries the escape sequences of its styles. [Cut]
@@ -47,15 +48,54 @@ type Row struct {
 	starts []int
 }
 
+// Tabs sets how a [Row] measures a tab. The zero Tabs measures each tab
+// as its one-cell picture.
+type Tabs struct {
+	// Width is the distance between two tab stops, in cells. A tab takes
+	// the cells up to the next tab stop, between 1 and Width, inclusive.
+	// A Width of 0 or less measures each tab as its picture.
+	Width int
+	// Start is the cell of the line at which the content starts. The tab
+	// stops fall on the multiples of Width counted from the start of the
+	// line, so a [Row] of a wrapped row of the line passes the cells that
+	// the line takes before the row. A negative Start counts as 0.
+	Start int
+}
+
 // NewRow creates a new [Row] for content, the text of a line without its
-// line ending.
-func NewRow(content string) Row {
+// line ending. It measures each tab as tabs sets.
+func NewRow(content string, tabs Tabs) Row {
 	r := Row{before: []int{0}}
+	start := max(0, tabs.Start)
 
-	rest := escape.Control(content)
+	for content != "" {
+		piece, rest, tab := content, "", false
+		if tabs.Width > 0 {
+			piece, rest, tab = strings.Cut(content, "\t")
+		}
 
-	for rest != "" {
-		cluster, width := ansi.FirstGraphemeCluster(rest, ansi.GraphemeWidth)
+		r = r.add(escape.Control(piece))
+
+		// A tab is a grapheme cluster of its own, so it starts its own
+		// column and ends before the next rune.
+		if tab {
+			total := r.total()
+			at := (start%tabs.Width + total%tabs.Width) % tabs.Width
+			r.before = append(r.before, total+tabs.Width-at)
+			r.starts = append(r.starts, len(r.starts))
+		}
+
+		content = rest
+	}
+
+	return r
+}
+
+// add returns r with the columns of shown, text that [escape.Control]
+// escaped, after its own.
+func (r Row) add(shown string) Row {
+	for shown != "" {
+		cluster, width := ansi.FirstGraphemeCluster(shown, ansi.GraphemeWidth)
 		start := len(r.starts)
 
 		for i := range utf8.RuneCountInString(cluster) {
@@ -68,7 +108,7 @@ func NewRow(content string) Row {
 			r.starts = append(r.starts, start)
 		}
 
-		rest = rest[len(cluster):]
+		shown = shown[len(cluster):]
 	}
 
 	return r

@@ -25,10 +25,11 @@ func TestRows(t *testing.T) {
 	wrapped := []position.Span{position.NewSpan(0, 10), position.NewSpan(11, 16)}
 
 	tcs := map[string]struct {
-		content string
-		labels  []caret.Label
-		wrapped []position.Span
-		want    []caret.Row
+		content  string
+		labels   []caret.Label
+		wrapped  []position.Span
+		want     []caret.Row
+		tabWidth int
 	}{
 		"no labels": {
 			content: "key: value",
@@ -130,11 +131,46 @@ func TestRows(t *testing.T) {
 				{Col: 11, Marker: "^^"},
 			},
 		},
+		"a tab takes one caret by default": {
+			content: "\t\techo",
+			labels:  []caret.Label{label(1, 3, "here")},
+			want:    []caret.Row{{Col: 1, Marker: "^^ ", Text: "here"}},
+		},
+		"a tab takes a caret for each cell up to its stop": {
+			content:  "\t\techo",
+			tabWidth: 4,
+			labels:   []caret.Label{label(1, 3, "here")},
+			want:     []caret.Row{{Col: 1, Marker: "^^^^^ ", Text: "here"}},
+		},
 		"a run without text on a dropped space gets a single caret": {
 			content: wrappedContent,
 			wrapped: wrapped,
 			labels:  []caret.Label{label(10, 10, "")},
 			want:    []caret.Row{{Col: 10, Marker: "^"}},
+		},
+		// The ideographic space takes two cells of the whole line, but the
+		// wrap drops it, so it takes no cell of the output.
+		"a run on a dropped wide space gets a single caret": {
+			content: "ab　cd",
+			wrapped: []position.Span{position.NewSpan(0, 2), position.NewSpan(3, 5)},
+			labels:  []caret.Label{label(2, 3, "x")},
+			want:    []caret.Row{{Col: 2, Marker: "^ ", Text: "x"}},
+		},
+		// The tab takes cells 2 through 3 of the whole line, but the wrap
+		// drops it, so it takes no cell of the output.
+		"a run on a dropped tab gets a single caret": {
+			content:  "ab\tcdef",
+			tabWidth: 4,
+			wrapped:  []position.Span{position.NewSpan(0, 2), position.NewSpan(3, 7)},
+			labels:   []caret.Label{label(2, 3, "tab")},
+			want:     []caret.Row{{Col: 2, Marker: "^ ", Text: "tab"}},
+		},
+		"a run without text on a dropped tab gets a single caret": {
+			content:  "ab\tcdef",
+			tabWidth: 4,
+			wrapped:  []position.Span{position.NewSpan(0, 2), position.NewSpan(3, 7)},
+			labels:   []caret.Label{label(2, 3, "")},
+			want:     []caret.Row{{Col: 2, Marker: "^"}},
 		},
 	}
 
@@ -142,7 +178,7 @@ func TestRows(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, caret.Rows(tc.content, tc.labels, tc.wrapped))
+			assert.Equal(t, tc.want, caret.Rows(tc.content, tc.tabWidth, tc.labels, tc.wrapped))
 		})
 	}
 }
