@@ -76,11 +76,22 @@ func writeOrSkip(t *testing.T, dir, name, content string) {
 	}
 }
 
+// noNetwork is an [http.RoundTripper] that fails every request.
+type noNetwork struct{}
+
+// RoundTrip fails the request with an error that names the test as the
+// cause.
+func (noNetwork) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("test reached the network")
+}
+
 // quietValidateCmd returns nyaml validate set to run with args, to write
 // its stdout to out and its stderr to errOut, and to print no error
-// itself.
+// itself. Its SchemaStore lookups fail rather than fetch the catalog. A
+// test that checks a file without a $schema comment must pass --schema,
+// --schemastore=false, or --offline.
 func quietValidateCmd(out, errOut io.Writer, args ...string) *cobra.Command {
-	cmd := validateCmd()
+	cmd := validateCmd(schemastore.WithHTTPClient(&http.Client{Transport: noNetwork{}}))
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
 	cmd.SetOut(out)
