@@ -384,11 +384,13 @@
 // more than one `<<` merge key binds at its first merge key, whatever each
 // merge key reads. Each site binds as the Errors section describes. Its
 // message names the program as [WithApp] names it, and a detail says what
-// to write instead. Its Related field holds the paths of the sites of the
-// construct, such as the first anchor of a name that the document defines
-// twice. For an anchor that a call takes away, it holds each alias that
-// reads the anchor, and the mapping of each merge key that reads it. Each
-// site other than the one where the error binds comes as a detail too.
+// to write instead. Its Fix field holds the words of that detail. Its
+// Related field holds the paths of the sites of the construct, such as the
+// first anchor of a name that the document defines twice. For an anchor
+// that a call takes away, it holds each alias that reads the anchor, and
+// the mapping of each merge key that reads it. Each site other than the
+// one where the error binds comes as a detail too, before the detail of
+// the fix.
 //
 // [go.jacobcolvin.com/niceyaml.IsInvalid] reports true for a construct of
 // the user's text, so a server that answers an invalid upload with a 4xx
@@ -911,7 +913,9 @@
 // the call that wrote the token names it already. So each problem of a
 // call names the call once in its details, whatever its message says.
 // These details come after the other details of the problem. The detail of
-// the call that wrote the token comes first.
+// the call that wrote the token comes first. So the details of an
+// [*UnsupportedError] come in three groups: the related sites, then the
+// fix that its Fix field holds, then the calls.
 //
 // A detail says "from this value" where the problem binds at the site of a
 // value that its call replaced, as a Set replaces the value at its place.

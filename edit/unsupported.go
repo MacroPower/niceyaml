@@ -152,6 +152,10 @@ func (c Construct) String() string {
 type UnsupportedError struct {
 	// The message of the problem.
 	msg string
+	// Fix says what to write instead, as a detail of the problem says it.
+	// It addresses the author of the document, or the author of the
+	// program when InValue is true.
+	Fix string
 	// Related holds the paths of the sites of the construct in text order,
 	// such as the first anchor of a name that the document defines twice.
 	// Each path names its site in the user's text, as the Errors section of
@@ -240,6 +244,7 @@ func (d *Doc) refusal(in *instance, named string) error {
 
 	err := &UnsupportedError{
 		msg:       msg,
+		Fix:       in.fix,
 		Construct: in.construct,
 		Related:   related,
 		InValue:   in.inValue,

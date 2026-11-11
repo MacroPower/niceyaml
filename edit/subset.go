@@ -245,12 +245,13 @@ func (d *Doc) valueRefusal(h *Node, origin int, in *instance, named string) erro
 	err := &UnsupportedError{
 		msg: fmt.Sprintf("%s %s to a value whose YAML holds %s, and %s does not write %s",
 			d.subject(), named, in.reach, d.appName(), in.object),
+		Fix:       in.fix,
 		Construct: in.construct,
 		Related:   []paths.Path{},
 		InValue:   true,
 	}
 
-	fix := errors.New(in.fix)
+	fix := errors.New(err.Fix)
 
 	problem := d.bindSite(d.setSite(h, origin), func(opts ...niceyaml.ErrorOption) error {
 		return niceyaml.Unchecked(err, append([]niceyaml.ErrorOption{niceyaml.WithDetails(fix)}, opts...)...)
