@@ -759,7 +759,9 @@
 // them, so a call can replace or remove the function of a type and turn the
 // JSON methods off. A program gives the unmarshalers of a Source from
 // [NewSourceFromLayers] to [MergeUnmarshalers], as the Layers section
-// describes.
+// describes. The [go.jacobcolvin.com/niceyaml/encoder.Marshaler] values set
+// how the same types write YAML, for an encode and for the edits of the
+// edit package.
 //
 // When the decoder rejects a value, the decode returns an error that matches
 // [ErrDecode] and carries the `$` path of the value. Its message describes

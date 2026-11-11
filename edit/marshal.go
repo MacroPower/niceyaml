@@ -1,10 +1,15 @@
 package edit
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"reflect"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -67,8 +72,8 @@ func refusal(err error, text string) string {
 	return fmt.Sprintf("%s at %d:%d of %s", syntax.Message, pos.Line, pos.Column, text)
 }
 
-// marshaledYAML returns the problem of doc, the YAML that the marshaler of
-// v writes, or nil when go-yaml reads one value from it as the text says.
+// marshaledYAML returns the problem of doc, the YAML that the method of v
+// named method writes, or nil when go-yaml reads one value from it as the text says.
 // Err is the error of the marshaler, which returns no problem, because the
 // encode then fails with that error.
 //
@@ -83,12 +88,12 @@ func refusal(err error, text string) string {
 // text, as [Doc.valueMisread] finds it. After those checks, marshaledYAML
 // returns the instances that the finder finds in the text, as
 // [Doc.valueInstances] finds them, such as an anchor or an alias.
-func marshaledYAML(v reflect.Value, doc []byte, err error) ([]instance, error) {
+func marshaledYAML(v reflect.Value, method string, doc []byte, err error) ([]instance, error) {
 	if err != nil {
 		return nil, nil //nolint:nilerr // The encode fails with the error of the marshaler.
 	}
 
-	who := fmt.Sprintf("the MarshalYAML method of %T", v.Interface())
+	who := fmt.Sprintf("the %s method of %T", method, v.Interface())
 
 	file, err := encoderParse(doc)
 	panicked, ok := errors.AsType[*parserPanicError](err)
@@ -150,6 +155,99 @@ func marshaledYAML(v reflect.Value, doc []byte, err error) ([]instance, error) {
 	}
 
 	return enc.valueInstances(fmt.Sprintf("%T", v.Interface())), nil
+}
+
+// convertedJSON returns the problem of doc, the YAML that go-yaml converts
+// js to, when go-yaml reads another value from doc than encoding/json reads
+// from js. Js is the JSON of the MarshalJSON method of v. Go-yaml's
+// conversion writes some values as YAML that reads as another value. For
+// example, it writes the JSON string "\n" as a literal block that reads as
+// "", and the JSON number 1e3 as a plain scalar that reads as a string. The
+// problem matches errEncoder. A doc that go-yaml's decoder refuses returns
+// no problem, because the check of the encoded text names that refusal.
+func convertedJSON(v reflect.Value, js, doc []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(js))
+	dec.UseNumber()
+
+	var want, got any
+
+	if dec.Decode(&want) != nil || yaml.Unmarshal(doc, &got) != nil {
+		return nil //nolint:nilerr // The encode or the check of its text names the refusal.
+	}
+
+	if sameJSON(want, got) {
+		return nil
+	}
+
+	return goyamlProblem("go-yaml converts the JSON %s that the MarshalJSON method of %T writes to the YAML %s, "+
+		"which go-yaml reads as %s", cut(strings.TrimSpace(string(js))), v.Interface(),
+		cut(strconv.Quote(string(doc))), shownCut(got))
+}
+
+// sameJSON reports whether y, a value that go-yaml's decoder reads, holds
+// the value j that encoding/json reads with numbers as [json.Number]. Each
+// number of y matches the number of j that it parses to.
+func sameJSON(j, y any) bool {
+	switch jv := j.(type) {
+	case nil:
+		return y == nil
+	case bool, string:
+		return j == y
+	case json.Number:
+		return sameNumber(jv, y)
+	case []any:
+		ys, ok := y.([]any)
+		if !ok || len(ys) != len(jv) {
+			return false
+		}
+
+		for i, e := range jv {
+			if !sameJSON(e, ys[i]) {
+				return false
+			}
+		}
+
+		return true
+
+	case map[string]any:
+		ym, ok := y.(map[string]any)
+		if !ok || len(ym) != len(jv) {
+			return false
+		}
+
+		for k, e := range jv {
+			ye, found := ym[k]
+			if !found || !sameJSON(e, ye) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	return false
+}
+
+// sameNumber reports whether y, a number that go-yaml's decoder reads,
+// is the number n. An integer y matches the integer n of the same value,
+// so the JSON number -0 matches the 0 that go-yaml converts it to.
+func sameNumber(n json.Number, y any) bool {
+	i, isInt := new(big.Int).SetString(n.String(), 10)
+
+	switch yv := y.(type) {
+	case int64:
+		return isInt && i.Cmp(big.NewInt(yv)) == 0
+
+	case uint64:
+		return isInt && i.Cmp(new(big.Int).SetUint64(yv)) == 0
+
+	case float64:
+		f, err := n.Float64()
+
+		return err == nil && f == yv
+	}
+
+	return false
 }
 
 // directiveProblem returns the problem of dir, a directive before the value

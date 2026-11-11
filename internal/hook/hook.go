@@ -15,6 +15,7 @@ import (
 
 	"github.com/goccy/go-yaml/ast"
 
+	"go.jacobcolvin.com/niceyaml/internal/marshaler"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -110,6 +111,15 @@ var (
 	// that go-yaml's encoder gave it, which a parse of the text might read
 	// otherwise.
 	Marshal func(ctx context.Context, v, opts any) ([]byte, ast.Node, error)
+
+	// EncodeNode returns the node that go-yaml's encoder makes for v under
+	// opts, a []encoder.Option, with the marshalers of the options. It
+	// returns the error of go-yaml's encoder as it is.
+	EncodeNode func(ctx context.Context, v, opts any) (ast.Node, error)
+
+	// Marshalers returns the marshalers that opts, a []encoder.Option, give
+	// an encode.
+	Marshalers func(opts any) marshaler.Options
 
 	// OwnDecode decodes the first document of text into an any with
 	// go-yaml's decoder alone, as yaml.Unmarshal decodes it. With comments,

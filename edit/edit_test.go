@@ -3,12 +3,15 @@ package edit_test
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,6 +19,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/edit"
+	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -25,6 +29,33 @@ var (
 	typeFields = []paths.Path{paths.Doc().Child("apiVersion"), paths.Doc().Child("kind")}
 	// The label that the tests give their edits.
 	label = edit.WithLabel("cafe.jacobcolvin.com/v1")
+
+	// The marshaler that writes a net.IPNet as its CIDR text.
+	cidrText = encoder.CustomMarshaler(func(_ context.Context, n net.IPNet) (any, error) {
+		return n.String(), nil
+	})
+
+	// The unmarshaler that reads a net.IPNet from its CIDR text.
+	cidrRead = niceyaml.CustomUnmarshaler(func(_ context.Context, n *net.IPNet, decode func(any) error) error {
+		var s string
+
+		err := decode(&s)
+		if err != nil {
+			return err
+		}
+
+		_, parsed, err := net.ParseCIDR(s)
+		if err != nil {
+			return fmt.Errorf("read network: %w", err)
+		}
+
+		*n = *parsed
+
+		return nil
+	})
+
+	// The network 10.0.0.0/8.
+	tenNet = net.IPNet{IP: net.IPv4(10, 0, 0, 0).To4(), Mask: net.CIDRMask(8, 32)}
 )
 
 // newDoc returns a Doc of the first document of text, named test.yaml,
@@ -9701,6 +9732,354 @@ func TestWithUnmarshalers(t *testing.T) {
 	read, err := d.Node().Decode[map[string]level](t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, map[string]level{"alarm": 2}, read)
+}
+
+// milli is a quantity that writes JSON alone, such as a Kubernetes
+// resource quantity: the string "500m" for 500 thousandths.
+type milli struct {
+	n int
+}
+
+func (m milli) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf("%q", fmt.Sprintf("%dm", m.n))), nil
+}
+
+func (m *milli) UnmarshalJSON(data []byte) error {
+	var s string
+
+	err := json.Unmarshal(data, &s)
+	if err != nil {
+		return fmt.Errorf("read quantity: %w", err)
+	}
+
+	_, err = fmt.Sscanf(s, "%dm", &m.n)
+	if err != nil {
+		return fmt.Errorf("read quantity %q: %w", s, err)
+	}
+
+	return nil
+}
+
+// jsonLink writes JSON alone. Its field can hold the jsonLink itself, which the
+// JSON does not write.
+type jsonLink struct {
+	Next *jsonLink
+}
+
+func (jsonLink) MarshalJSON() ([]byte, error) {
+	return []byte(`"loop"`), nil
+}
+
+// jsonLines writes JSON alone, as a string with a line break.
+type jsonLines struct{}
+
+func (jsonLines) MarshalJSON() ([]byte, error) {
+	return []byte(`"x\ny\n"`), nil
+}
+
+// jsonBroken writes JSON alone, as its JSON, or fails with its error. Its
+// field can hold the jsonBroken itself, which the JSON does not write.
+type jsonBroken struct {
+	Next *jsonBroken
+	err  error
+	json string
+}
+
+func (j jsonBroken) MarshalJSON() ([]byte, error) {
+	return []byte(j.json), j.err
+}
+
+func TestWithMarshalers(t *testing.T) {
+	t.Parallel()
+
+	type route struct {
+		Net net.IPNet `yaml:"net"`
+		Via string    `yaml:"via"`
+	}
+
+	type hop struct {
+		name string
+	}
+
+	type hopRoute struct {
+		Name string `yaml:"name"`
+		Via  hop    `yaml:"via"`
+	}
+
+	// A function of the type of its value writes itself again.
+	loop := encoder.CustomMarshaler(func(_ context.Context, h hop) (any, error) {
+		return &hop{name: h.name + "!"}, nil
+	})
+	failing := encoder.CustomMarshaler(func(context.Context, hop) (any, error) {
+		return nil, errors.New("hop is secret")
+	})
+	hops := encoder.CustomMarshaler(func(_ context.Context, h hop) (any, error) {
+		return map[string]any{"name": h.name, "next": []string{"a", "b"}}, nil
+	})
+
+	gates := encoder.CustomMarshaler(func(_ context.Context, h hop) (any, error) {
+		return map[string]any{"gw": h.name}, nil
+	})
+	names := encoder.CustomMarshaler(func(_ context.Context, h hop) (any, error) {
+		return h.name, nil
+	})
+
+	reads := niceyaml.WithUnmarshalers(cidrRead, niceyaml.JSONUnmarshalers(true))
+
+	tcs := map[string]struct {
+		fn         edit.Func
+		before     string
+		want       string
+		err        string
+		marshalers []encoder.Marshaler
+	}{
+		"values that the Func decodes write back as the document holds them": {
+			before:     "net: 10.0.0.0/8\ncpu: 500m\n",
+			marshalers: []encoder.Marshaler{cidrText, encoder.JSONMarshalers(true)},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				ipn, err := n.At(paths.Doc().Child("net")).Decode[net.IPNet](ctx)
+				if err != nil {
+					return err
+				}
+
+				q, err := n.At(paths.Doc().Child("cpu")).Decode[milli](ctx)
+				if err != nil {
+					return err
+				}
+
+				q.n *= 2
+
+				err = n.At(paths.Doc().Child("net")).Set(ctx, ipn)
+				if err != nil {
+					return err
+				}
+
+				return n.At(paths.Doc().Child("cpu")).Set(ctx, q)
+			},
+			want: "net: 10.0.0.0/8\ncpu: 1000m\n",
+		},
+		"without marshalers values write field by field": {
+			before: "net: 10.0.0.0/8\ncpu: 500m\n",
+			fn: func(ctx context.Context, n *edit.Node) error {
+				err := n.At(paths.Doc().Child("net")).Set(ctx, tenNet)
+				if err != nil {
+					return err
+				}
+
+				return n.At(paths.Doc().Child("cpu")).Set(ctx, milli{n: 1000})
+			},
+			want: "net: {ip: 10.0.0.0, mask: [255, 0, 0, 0]}\ncpu: {}\n",
+		},
+		"a JSON method without JSONMarshalers": {
+			before:     "cpu: 500m\n",
+			marshalers: []encoder.Marshaler{encoder.JSONMarshalers(true), encoder.JSONMarshalers(false)},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("cpu")).Set(ctx, milli{n: 1000})
+			},
+			want: "cpu: {}\n",
+		},
+		"a value inside an inserted struct": {
+			before:     "routes:\n  - net: 10.0.0.0/8\n    via: a\n",
+			marshalers: []encoder.Marshaler{cidrText},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				ipn := net.IPNet{IP: net.IPv4(192, 168, 0, 0).To4(), Mask: net.CIDRMask(16, 32)}
+
+				return n.At(paths.Doc().Child("routes").Index(0)).Insert(ctx, route{Net: ipn, Via: "b"})
+			},
+			want: "routes:\n  - net: 192.168.0.0/16\n    via: b\n  - net: 10.0.0.0/8\n    via: a\n",
+		},
+		"a function that returns a collection": {
+			before:     "hops:\n  - name: x\n",
+			marshalers: []encoder.Marshaler{hops},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("hops").Index(1)).Set(ctx, &hop{name: "z"})
+			},
+			want: "hops:\n  - name: x\n  - name: z\n    next:\n      - a\n      - b\n",
+		},
+		"a set of structs whose field writes a mapping into an indented sequence": {
+			before:     "routes:\n  - name: x\n",
+			marshalers: []encoder.Marshaler{gates},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("routes")).Set(ctx, []hopRoute{{Name: "r", Via: hop{name: "g"}}})
+			},
+			want: "routes:\n  - name: r\n    via:\n      gw: g\n",
+		},
+		"an insert of a struct whose field writes a mapping into an indented sequence": {
+			before:     "routes:\n  - name: x\n",
+			marshalers: []encoder.Marshaler{gates},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("routes").Index(0)).Insert(ctx, hopRoute{Name: "r", Via: hop{name: "g"}})
+			},
+			want: "routes:\n  - name: r\n    via:\n      gw: g\n  - name: x\n",
+		},
+		"a function that returns a string that ends in two line breaks": {
+			before:     "hop: x\n",
+			marshalers: []encoder.Marshaler{names},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("hop")).Set(ctx, hop{name: "b\n\n"})
+			},
+			want: "hop: \"b\\n\\n\"\n",
+		},
+		"a JSON method whose string go-yaml converts to another string": {
+			before:     "cpu: 500m\n",
+			marshalers: []encoder.Marshaler{encoder.JSONMarshalers(true)},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("cpu")).Set(ctx, jsonBroken{json: `"\n"`})
+			},
+			err: `test.yaml:1:6: $.cpu: go-yaml converts the JSON "\n" that the MarshalJSON method of ` +
+				`edit_test.jsonBroken writes to the YAML "|\n\n", which go-yaml reads as ""`,
+		},
+		"a JSON method whose number go-yaml converts to a string": {
+			before:     "cpu: 500m\n",
+			marshalers: []encoder.Marshaler{encoder.JSONMarshalers(true)},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("cpu")).Set(ctx, jsonBroken{json: `1e-07`})
+			},
+			err: `test.yaml:1:6: $.cpu: go-yaml converts the JSON 1e-07 that the MarshalJSON method of ` +
+				`edit_test.jsonBroken writes to the YAML "1e-07\n", which go-yaml reads as "1e-07"`,
+		},
+		"a JSON method that writes negative zero": {
+			before:     "cpu: 500m\n",
+			marshalers: []encoder.Marshaler{encoder.JSONMarshalers(true)},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("cpu")).Set(ctx, jsonBroken{json: `-0`})
+			},
+			want: "cpu: 0\n",
+		},
+		"a JSON method whose object go-yaml does not convert": {
+			// Encoding/json reads an object that repeats a key, and go-yaml's
+			// conversion refuses it, so the encode fails with that refusal.
+			before:     "cpu: 500m\n",
+			marshalers: []encoder.Marshaler{encoder.JSONMarshalers(true)},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("cpu")).Set(ctx, jsonBroken{json: `{"a":1,"a":2}`})
+			},
+			err: "test.yaml:1:6: $.cpu: the edit cannot write the value of $.cpu: value does not encode: " +
+				"[1:8] mapping key \"a\" already defined at [1:2]\n>  1 | {\"a\":1,\"a\":2}\n              ^\n",
+		},
+		"a key of a map": {
+			before: "hops: {}\n",
+			marshalers: []encoder.Marshaler{encoder.CustomMarshaler(func(_ context.Context, h hop) (any, error) {
+				return h.name, nil
+			})},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("hops")).Set(ctx, map[hop]int{{name: "x"}: 1})
+			},
+			want: "hops: {x: 1}\n",
+		},
+		"a nil function removes the function before it": {
+			before:     "net: x\n",
+			marshalers: []encoder.Marshaler{cidrText, encoder.CustomMarshaler[net.IPNet](nil)},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("net")).Set(ctx, tenNet)
+			},
+			want: "net: {ip: 10.0.0.0, mask: [255, 0, 0, 0]}\n",
+		},
+		"a function that returns a value that holds its value": {
+			before: "hop: x\n",
+			marshalers: []encoder.Marshaler{encoder.CustomMarshaler(func(_ context.Context, h hop) (any, error) {
+				return []hop{h}, nil
+			})},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("hop")).Set(ctx, hop{name: "y"})
+			},
+			err: "test.yaml:1:6: $.hop: the edit cannot write the value of $.hop: it refers to itself",
+		},
+		"a JSON method of a value whose fields hold the value": {
+			before:     "chain: 1\n",
+			marshalers: []encoder.Marshaler{encoder.JSONMarshalers(true)},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				l := &jsonLink{}
+				l.Next = l
+
+				return n.At(paths.Doc().Child("chain")).Set(ctx, l)
+			},
+			want: "chain: loop\n",
+		},
+		"a function that returns its own type": {
+			before:     "hop: x\n",
+			marshalers: []encoder.Marshaler{loop},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("hop")).Set(ctx, hop{name: "y"})
+			},
+			err: "test.yaml:1:6: $.hop: the edit cannot write the value of $.hop: value does not encode: " +
+				"the function for edit_test.hop returns a value of type *edit_test.hop, which it writes again",
+		},
+		"a duration inside an interface": {
+			// The encoder writes the duration as go-yaml writes one, and it
+			// does not call the function, so neither does the check.
+			before: "x:\n  d: 1s\n",
+			marshalers: []encoder.Marshaler{encoder.CustomMarshaler(func(context.Context, time.Duration) (any, error) {
+				return map[[2]int]int{{1, 2}: 3}, nil
+			})},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("x")).Set(ctx, map[string]any{"d": 2 * time.Second})
+			},
+			want: "x:\n  d: 2s\n",
+		},
+		"a JSON method that writes a string with a line break": {
+			before:     "a:\n  b: 1\n",
+			marshalers: []encoder.Marshaler{encoder.JSONMarshalers(true)},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("a").Child("b")).Set(ctx, jsonLines{})
+			},
+			want: "a:\n  b: |\n    x\n    y\n",
+		},
+		"a function that fails": {
+			before:     "hop: x\n",
+			marshalers: []encoder.Marshaler{failing},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				return n.At(paths.Doc().Child("hop")).Set(ctx, hop{name: "y"})
+			},
+			err: "test.yaml:1:6: $.hop: the edit cannot write the value of $.hop: value does not encode: hop is secret",
+		},
+		"a JSON method that fails": {
+			before:     "cpu: 500m\n",
+			marshalers: []encoder.Marshaler{encoder.JSONMarshalers(true)},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				j := &jsonBroken{err: errors.New("json secret")}
+				j.Next = j
+
+				return n.At(paths.Doc().Child("cpu")).Set(ctx, j)
+			},
+			err: "test.yaml:1:6: $.cpu: the edit cannot write the value of $.cpu: value does not encode: json secret",
+		},
+		"a JSON method that writes text that is not JSON": {
+			before:     "cpu: 500m\n",
+			marshalers: []encoder.Marshaler{encoder.JSONMarshalers(true)},
+			fn: func(ctx context.Context, n *edit.Node) error {
+				j := &jsonBroken{json: `{"a":`}
+				j.Next = j
+
+				return n.At(paths.Doc().Child("cpu")).Set(ctx, j)
+			},
+			err: "test.yaml:1:6: $.cpu: the edit cannot write the value of $.cpu: value does not encode: " +
+				"[1:5] could not find map value\n>  1 | {\"a\":\n           ^\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.before, niceyaml.WithName("test.yaml"), reads)
+
+			d, err := edit.New(doc, edit.WithMarshalers(tc.marshalers...))
+			require.NoError(t, err)
+
+			err = d.Apply(t.Context(), paths.Doc(), tc.fn)
+			if tc.err != "" {
+				require.Error(t, err)
+				assert.Equal(t, tc.err, err.Error())
+				assert.Equal(t, tc.before, d.Text())
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, d.Text())
+		})
+	}
 }
 
 func TestDoc_Apply_duplicateKeys(t *testing.T) {

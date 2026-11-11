@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
@@ -103,6 +104,7 @@ type removal struct {
 //   - [WithMigrateHint]
 //   - [WithDecodeOptions]
 //   - [WithUnmarshalers]
+//   - [WithMarshalers]
 //   - [WithVersionField]
 //   - [WithKindField]
 //   - [WithVersionOnly]
@@ -118,6 +120,7 @@ type registryConfig struct {
 	migrateHint     string
 	decodeOptions   []niceyaml.DecodeOption
 	unmarshalers    []niceyaml.Unmarshaler
+	marshalers      []encoder.Marshaler
 	ignores         []matcher.Matcher
 	kinds           []*Kind
 	checks          []func(ctx context.Context, set *Set) error
@@ -210,6 +213,28 @@ func WithDecodeOptions(opts ...niceyaml.DecodeOption) RegistryOption {
 func WithUnmarshalers(us ...niceyaml.Unmarshaler) RegistryOption {
 	return func(c *registryConfig) {
 		c.unmarshalers = append(c.unmarshalers, us...)
+	}
+}
+
+// WithMarshalers is a [RegistryOption] that sets how the Go types of the
+// kinds write YAML, such as a [net.IPNet] that a document writes as CIDR
+// text:
+//
+//	manifest.WithMarshalers(encoder.CustomMarshaler(func(ctx context.Context, n net.IPNet) (any, error) {
+//		return n.String(), nil
+//	}))
+//
+// A migration step passes the marshalers to the
+// [go.jacobcolvin.com/niceyaml/edit.Doc] of the document through
+// [go.jacobcolvin.com/niceyaml/edit.WithMarshalers]. Each
+// [go.jacobcolvin.com/niceyaml/edit.Node.Set] and
+// [go.jacobcolvin.com/niceyaml/edit.Node.Insert] in a step thus writes a
+// value that it read through the unmarshalers of [WithUnmarshalers] the
+// way the document holds it. Each WithMarshalers adds to the ones before
+// it, so a later function for a type replaces an earlier one.
+func WithMarshalers(ms ...encoder.Marshaler) RegistryOption {
+	return func(c *registryConfig) {
+		c.marshalers = append(c.marshalers, ms...)
 	}
 }
 

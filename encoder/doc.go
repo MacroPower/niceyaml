@@ -37,6 +37,13 @@
 // can change one of its settings, as in
 // encoder.New(w, encoder.Pretty(), encoder.WithIndent(4)).
 //
+// [WithMarshalers] sets how the types of the program write YAML. A
+// [CustomMarshaler] writes one type as another value, such as a
+// [net.IPNet] as its CIDR text, and [JSONMarshalers] writes the types
+// with a MarshalJSON method through that method. The edits of the edit
+// package and the migration steps of the manifest package take the same
+// marshalers.
+//
 // [WithYAMLOptions] passes go-yaml options through for settings that do
 // not have an option of their own. [WithYAMLComments] adds comments to
 // each document by YAML path. It skips a path of keys and indexes that

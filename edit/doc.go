@@ -61,6 +61,15 @@
 // except !!binary and !!timestamp, as [Node.MarshalYAML] describes.
 // [Node.Set] lists the values that a Set refuses.
 //
+// A Set writes a value of a type by the MarshalYAML or MarshalText method
+// of the type, and otherwise field by field. [WithMarshalers] gives the
+// types of the program a function or their MarshalJSON methods instead.
+// A Func that decodes a value through the unmarshalers of the program,
+// changes it, and sets it back then writes it the way the document holds
+// it:
+//
+//	d, err := edit.New(doc, edit.WithMarshalers(cidr, encoder.JSONMarshalers(true)))
+//
 // A path selects each node of the text once. A wildcard or a recursive
 // descent selects a node at its first path in the order of the text. Each
 // path that reaches the node through an alias or a `<<` merge key selects

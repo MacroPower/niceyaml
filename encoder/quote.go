@@ -1,6 +1,7 @@
 package encoder
 
 import (
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -13,7 +14,8 @@ import (
 // otherwise writes in a form that reads back as a different value or does
 // not parse. It checks the unquoted, single-quoted, and literal block
 // forms. It also double-quotes a literal block from a marshaler's YAML
-// that sits where YAML forbids one. It leaves a block collection in a flow
+// that sits where YAML forbids one, or where it does not read back under
+// its key, as [blockSafe] checks. It leaves a block collection in a flow
 // collection as it is. Go-yaml writes that collection in block style, and
 // quoting does not make block style valid there. Only a marshaler's YAML
 // puts a block collection there.
@@ -62,7 +64,13 @@ func (q quoter) Visit(node ast.Node) ast.Visitor {
 		for i, value := range n.Values {
 			n.Values[i] = inner.flowSafe(value)
 
-			if s, ok := value.(*ast.StringNode); ok && !inner.flow {
+			if inner.flow {
+				continue
+			}
+
+			n.Values[i] = entrySafe(n.Values[i])
+
+			if s, ok := value.(*ast.StringNode); ok {
 				quoteEntry(s)
 			}
 		}
@@ -71,7 +79,7 @@ func (q quoter) Visit(node ast.Node) ast.Visitor {
 
 	case *ast.MappingValueNode:
 		n.Key = q.keySafe(n.Key)
-		n.Value = q.flowSafe(n.Value)
+		n.Value = blockSafe(q.flowSafe(n.Value), n.Key.GetToken().Position.Column)
 
 	case *ast.StringNode:
 		q.quote(n, false)
@@ -116,6 +124,147 @@ func (q quoter) keySafe(key ast.MapKeyNode) ast.MapKeyNode {
 	}
 
 	return key
+}
+
+// blockSafe returns value, the value of a key at the column col, or a
+// double-quoted string in place of value when value is a literal block
+// that does not read back under the key. Such a block comes from a
+// marshaler whose output go-yaml parses, as the YAML that go-yaml makes of
+// the JSON of a MarshalJSON method. The go-yaml printer writes the lines
+// of the block with the indentation that they had in that output. A block
+// whose lines do not sit right of the column of its key ends before them.
+// The indentation indicator of a block counts from the indentation of its
+// key, so a block with an indicator reads back only at the indentation of
+// the output too. The check looks through the tags and anchors that a
+// marshaler's YAML can put on the block. It also quotes a block that
+// [keepsBreaks] reports. [entrySafe] checks a block that is an entry of a
+// block sequence.
+func blockSafe(value ast.Node, col int) ast.Node {
+	switch v := value.(type) {
+	case *ast.LiteralNode:
+		if blockIndent(v) < col || strings.ContainsAny(v.Start.Value, "123456789") || keepsBreaks(v) {
+			return doubleQuoted(v)
+		}
+
+	case *ast.TagNode:
+		v.Value = blockSafe(v.Value, col)
+	case *ast.AnchorNode:
+		v.Value = blockSafe(v.Value, col)
+	}
+
+	return value
+}
+
+// entrySafe returns value, an entry of a block sequence, or a
+// double-quoted string in its place. It quotes a literal or folded block
+// that might not read back as the entry. Such a block comes
+// from a marshaler whose output go-yaml parses. The printer of a block
+// sequence indents each line of an entry by the indentation that the line
+// already has. It moves a line that starts left of the column after the
+// "-" to the right, and it leaves every other line in place. Each
+// sequence that holds the entry indents its lines again, such as an outer
+// sequence or the sequence of a mapping in a sequence. A block whose lines
+// share one indentation moves as a whole, so it reads back. The lines of
+// any other block can come out misaligned. The indentation indicator of a
+// block counts from the indentation of the entry, and the printer changes
+// that indentation, so a block with an indicator does not read back
+// either. It also quotes a block that [keepsBreaks] reports. The check
+// looks through the tags and anchors that a marshaler's YAML can put on
+// the block.
+func entrySafe(value ast.Node) ast.Node {
+	switch v := value.(type) {
+	case *ast.LiteralNode:
+		if !evenBlock(v) || strings.ContainsAny(v.Start.Value, "123456789") || keepsBreaks(v) {
+			return doubleQuoted(v)
+		}
+
+	case *ast.TagNode:
+		v.Value = entrySafe(v.Value)
+	case *ast.AnchorNode:
+		v.Value = entrySafe(v.Value)
+	}
+
+	return value
+}
+
+// keptSafe returns node, the root of a document, or a double-quoted
+// string in place of node when node is a block that [keepsBreaks]
+// reports. It looks through the tags and anchors that a marshaler's YAML
+// can put on the block. [blockSafe] and [entrySafe] check such a block
+// under a key and in a block sequence.
+func keptSafe(node ast.Node) ast.Node {
+	switch n := node.(type) {
+	case *ast.LiteralNode:
+		if keepsBreaks(n) {
+			return doubleQuoted(n)
+		}
+
+	case *ast.TagNode:
+		n.Value = keptSafe(n.Value)
+	case *ast.AnchorNode:
+		n.Value = keptSafe(n.Value)
+	}
+
+	return node
+}
+
+// keepsBreaks reports whether lit is a block with the keep indicator "+"
+// whose string ends in more than one line break, or in spaces before its
+// last line break. Such a block comes from a marshaler whose output
+// go-yaml parses. The YAML that go-yaml makes of a JSON string that ends
+// in two line breaks holds one. The go-yaml printer drops the spaces and
+// the empty lines at the end of a block. The block then reads back with
+// one line break at its end. The check also reports a string whose last
+// line of text ends in a space. Such a string reads back, so the encoder
+// quotes a few blocks that it can write as they are.
+func keepsBreaks(lit *ast.LiteralNode) bool {
+	s := strings.TrimSuffix(lit.Value.Value, "\n")
+
+	return strings.Contains(lit.Start.Value, "+") && s != strings.TrimRight(s, " \n")
+}
+
+// evenBlock reports whether every line of lit that is not empty starts
+// with the same number of spaces, as the go-yaml printer writes the
+// block. A line of spaces alone counts all of its spaces. The printer
+// moves such a line by the same rule as a line of text. The line is part
+// of the value of the block when it is longer than the indentation of the
+// block.
+func evenBlock(lit *ast.LiteralNode) bool {
+	// The printer drops the spaces and line breaks at the end of the block.
+	text := strings.TrimRight(strings.TrimRight(lit.Value.GetToken().Origin, " "), "\n")
+	indent := -1
+
+	for line := range strings.Lines(text) {
+		line = strings.TrimSuffix(line, "\n")
+		if line == "" {
+			continue
+		}
+
+		n := len(line) - len(strings.TrimLeft(line, " "))
+		if indent == -1 {
+			indent = n
+		}
+
+		if n != indent {
+			return false
+		}
+	}
+
+	return true
+}
+
+// blockIndent returns the number of spaces before the first line of lit
+// with content, as the go-yaml printer writes it. It returns
+// [math.MaxInt] for a block without such a line.
+func blockIndent(lit *ast.LiteralNode) int {
+	for line := range strings.Lines(lit.Value.GetToken().Origin) {
+		body := strings.TrimLeft(line, " ")
+		if strings.TrimSpace(body) != "" {
+			return len(line) - len(body)
+		}
+	}
+
+	return math.MaxInt
 }
 
 // doubleQuoted returns a double-quoted string that holds the text of lit.

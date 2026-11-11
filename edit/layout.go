@@ -854,7 +854,9 @@ func (d *Doc) writeString(ctx context.Context, h *Node, x heldString, origin int
 	replaced := &run{}
 	d.notes[-1-origin].text = replaced
 
-	pl, err := d.renderPayload(ctx, h, x.str, step, origin, nil)
+	// The string is a string of the text, which the marshalers of the
+	// program do not write.
+	pl, err := d.renderPayload(ctx, h, x.str, step, origin, nil, nil)
 	if err != nil {
 		return err
 	}
