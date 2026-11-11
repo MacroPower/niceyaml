@@ -768,8 +768,8 @@
 //  5. The go-yaml decoder fills the target.
 //  6. Every value in the result that implements [SelfValidator] or
 //     [SelfValidatorContext] validates itself, and each function from
-//     [WithValueCheck] checks the values of its type. [WithSelfValidation] set
-//     to false turns this step off.
+//     [WithValueCheck] or [WithNodeCheck] checks the values of its type.
+//     [WithSelfValidation] set to false turns this step off.
 //
 // A field that the document leaves out keeps its value. A mapping merges into
 // a struct field by field at every depth, and the document replaces a slice,
@@ -1065,8 +1065,8 @@
 //
 // A [Validator] checks a node before the decode, as a JSON schema does. A
 // [SelfValidator] checks a decoded value afterward, and so do a
-// [SelfValidatorContext] and a function from [WithValueCheck]. [Node.Validate]
-// runs a Validator without decoding. A
+// [SelfValidatorContext] and a function from [WithValueCheck] or
+// [WithNodeCheck]. [Node.Validate] runs a Validator without decoding. A
 // [go.jacobcolvin.com/niceyaml/schema.Schema] checks a node against one JSON
 // schema, and a [go.jacobcolvin.com/niceyaml/schema.Registry] picks the schema
 // for each document.
@@ -1256,23 +1256,25 @@
 // Every error below a slice, an array, or a map that decodes itself binds at
 // that value.
 //
-// A Validate or ValidateContext method and a function from WithValueCheck do
-// not hold a Node. A check that needs one, such as a check against a
-// registry, thus runs after Decode returns and binds its result with
-// Node.Bind. A check of map entries belongs in a Validate or ValidateContext
-// method or a WithValueCheck function of the type of the entry. The decode
-// puts the paths of that check under the key as the document spells it.
+// A Validate method gets only its value. A ValidateContext method and a
+// function from WithValueCheck get the value and the context of the call. A
+// check that needs the Node of its value, such as one that
+// resolves a path beside the file or the layer that sets the value, uses
+// [WithNodeCheck]. Its function gets the Node of each value of its type
+// beside the value, or nil where the document does not hold the value. A
+// check of map entries belongs in a Validate or ValidateContext method or a
+// WithValueCheck function of the type of the entry. The decode puts the
+// paths of that check under the key as the document spells it.
 //
 // [Node.SelfValidate] runs the self-validation step on its own, for a program
-// whose library writes its environment or its flags into the value. The
-// program decodes with [WithSelfValidation] set to false, lets the library
-// fill the value, and then calls SelfValidate. SelfValidate runs only the
-// functions of WithValueCheck that it gets, so the program passes them to
-// SelfValidate as well. A Validator does not see a value that the library
-// sets this way. A program that keeps its constraints in a schema checks
-// the final value with
-// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] and places the
-// result with Node.Bind.
+// whose library writes its environment or its flags into the value. The program
+// decodes with [WithSelfValidation] set to false, lets the library fill the
+// value, and then calls SelfValidate. SelfValidate runs only the functions of
+// WithValueCheck and WithNodeCheck that it gets, so the program passes them to
+// SelfValidate as well. A Validator does not see a value that the library sets
+// this way. A program that keeps its constraints in a schema checks the final
+// value with [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] and
+// places the result with Node.Bind.
 //
 // The walk follows the value, and each error binds where its path resolves in
 // the document. An error under a field or an element that the document lacks
@@ -1283,11 +1285,11 @@
 //
 // A check on a value that did not come from a document, such as the body of a
 // request, does not have a line to report. [SelfValidateValue] runs the
-// Validate or ValidateContext method of every value below such a value, and
-// the functions of WithValueCheck that it gets. It binds the result with
-// [BindValue], so the text names each path, as in "$.close: closes before it
-// opens". A caller that later learns where the value stands places the error
-// there with [Rebase] and Node.Bind.
+// Validate or ValidateContext method of every value below such a value, and the
+// functions of WithValueCheck and WithNodeCheck that it gets. It binds the
+// result with [BindValue], so the text names each path, as in "$.close: closes
+// before it opens". A caller that later learns where the value stands places
+// the error there with [Rebase] and Node.Bind.
 //
 // # Scoped Nodes
 //
@@ -1398,9 +1400,9 @@
 // # Cancellation
 //
 // The context of a call reaches every [Validator] that the call runs, every
-// function from [CustomUnmarshaler] and [WithValueCheck], and every
-// ValidateContext method of a [SelfValidatorContext]. A check that does
-// remote work, such as resolving a schema reference, thus stops when the
+// function from [CustomUnmarshaler], [WithValueCheck], and [WithNodeCheck],
+// and every ValidateContext method of a [SelfValidatorContext]. A check that
+// does remote work, such as resolving a schema reference, thus stops when the
 // caller cancels the context. A Validate method of a [SelfValidator] does
 // not get the context, so a type whose check does I/O implements
 // SelfValidatorContext instead.

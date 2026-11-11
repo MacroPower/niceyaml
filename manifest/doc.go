@@ -433,6 +433,27 @@
 // of [WithUnmarshalers]. Every error and every warning binds in the file of
 // the user.
 //
+// The decode reads the document in the layout of the current version,
+// which can be a copy that the load made. Each validator of
+// [WithDecodeOptions] and [DecodeOptions] gets a Node of what the decode
+// reads. So does each function of [niceyaml.WithNodeCheck] among those
+// options. The [niceyaml.Node.FilePath] and [niceyaml.Node.FS] of such a
+// Node name the file of the user, and the [niceyaml.Node.Path] follows
+// the layout of the current version. Its lines and positions belong to
+// the copy, and they can differ from those of the file after a step
+// rewrote the document.
+//
+// A merged Source that [input.Sources] reads has the file path and the
+// file system of the layer that [niceyaml.MergeAs] names, or else of the
+// lowest layer. A function that resolves a file beside its value thus
+// calls [niceyaml.Node.Origin] for the Node in the layer that set the
+// value. It reads the directory from that Node. A copy that the load made
+// is not a merged Source, so Origin returns the Node of the copy itself.
+// The load makes such a copy of a migrated document, and of every
+// document of an [input.Sources] input under [WithUnmarshalers]. In such
+// a copy, a value that a higher layer set resolves against the directory
+// of the MergeAs layer or the lowest layer.
+//
 // After each document has run its checks, the load compares the names of
 // the manifests of each kind with [NameField]. It counts the manifests of
 // each kind that [Required] or [Singleton] marks. When the load has not

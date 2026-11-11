@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"math"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -17,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 	"time"
 	"unsafe"
 
@@ -25,6 +29,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
+
+	slashpath "path"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/encoder"
@@ -4056,6 +4062,588 @@ func TestWithValueCheck(t *testing.T) {
 
 				assert.PanicsWithValue(t,
 					"niceyaml.WithValueCheck: "+tc.want+" is a pointer or interface type, which the walk never checks",
+					tc.call,
+				)
+			})
+		}
+	})
+}
+
+// nodeFile is a path that a function of niceyaml.WithNodeCheck resolves
+// beside the file that sets it.
+type nodeFile string
+
+// nodeTLS holds the files of a TLS setup.
+type nodeTLS struct {
+	Cert nodeFile `yaml:"cert"`
+	Key  nodeFile `yaml:"key"`
+	CA   nodeFile `yaml:"ca"`
+}
+
+// nodeBundle decodes itself through a second type with the same fields.
+type nodeBundle struct {
+	File nodeFile `yaml:"file"`
+}
+
+func (b *nodeBundle) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain nodeBundle
+
+	return unmarshal((*plain)(b))
+}
+
+// nodeConfig holds a [nodeFile] in each place that a function of
+// niceyaml.WithNodeCheck gets a Node for, or nil.
+type nodeConfig struct {
+	Keys   map[nodeFile]string `yaml:"keys"`
+	Bundle nodeBundle          `yaml:"bundle"`
+	TLS    nodeTLS             `yaml:"tls"`
+	Files  []nodeFile          `yaml:"files"`
+}
+
+// recordNodes returns a check of T that sets got at the text of each value
+// to the path of its Node, or to "nil" for a nil Node.
+func recordNodes[T any](got map[string]string) niceyaml.DecodeOption {
+	return niceyaml.WithNodeCheck(func(_ context.Context, n *niceyaml.Node, v *T) error {
+		if n == nil {
+			got[fmt.Sprint(*v)] = "nil"
+
+			return nil
+		}
+
+		got[fmt.Sprint(*v)] = n.Path().String()
+
+		return nil
+	})
+}
+
+// existsBesideOrigin returns the check that the documentation of
+// [niceyaml.WithNodeCheck] gives, with the path package imported as
+// slashpath. It fails a file that does not exist beside the layer that sets
+// it, and it skips a file that a reference document sets.
+func existsBesideOrigin() niceyaml.DecodeOption {
+	return niceyaml.WithNodeCheck(func(_ context.Context, n *niceyaml.Node, f *nodeFile) error {
+		if n == nil || *f == "" {
+			return nil
+		}
+
+		origin, err := n.Origin()
+		if errors.Is(err, paths.ErrAlias) {
+			return nil
+		}
+
+		if err != nil {
+			return fmt.Errorf("origin: %w", err)
+		}
+
+		if fsys := origin.FS(); fsys != nil {
+			_, err = fs.Stat(fsys, slashpath.Join(slashpath.Dir(origin.FilePath()), string(*f)))
+		} else {
+			_, err = os.Stat(filepath.Join(filepath.Dir(origin.FilePath()), string(*f)))
+		}
+
+		if err != nil {
+			return niceyaml.Unchecked(err)
+		}
+
+		return nil
+	})
+}
+
+func ExampleWithNodeCheck() {
+	ctx := context.Background()
+
+	type file string
+
+	type config struct {
+		TLS struct {
+			Cert file `yaml:"cert"`
+			Key  file `yaml:"key"`
+		} `yaml:"tls"`
+	}
+
+	base := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"tls:",
+		"  cert: cert.pem",
+		"  key: key.pem",
+	), niceyaml.WithFilePath("/etc/app/base.yaml"))
+
+	override := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"tls:",
+		"  key: local.pem",
+	), niceyaml.WithFilePath("/home/me/.config/app/override.yaml"))
+
+	merged, err := niceyaml.NewSourceFromLayers(ctx, []*niceyaml.Source{base, override})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Each file names the layer that sets it.
+	resolve := niceyaml.WithNodeCheck(func(_ context.Context, n *niceyaml.Node, f *file) error {
+		if n == nil {
+			return nil
+		}
+
+		origin, err := n.Origin()
+		if err != nil {
+			return fmt.Errorf("origin: %w", err)
+		}
+
+		fmt.Println(origin.FilePath(), *f)
+
+		return nil
+	})
+
+	_, err = merged.Decode[config](ctx, resolve)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Output:
+	// /etc/app/base.yaml cert.pem
+	// /home/me/.config/app/override.yaml local.pem
+}
+
+func TestWithNodeCheck(t *testing.T) {
+	t.Parallel()
+
+	t.Run("gets the Node of each value", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			keys:
+			  k.pem: x
+			bundle:
+			  file: bundled.pem
+			tls:
+			  cert: cert.pem
+			files: [a.pem, b.pem]
+		`))
+
+		// Each Node is the one that Node.At gives for its path.
+		scoped := niceyaml.WithNodeCheck(func(_ context.Context, n *niceyaml.Node, _ *nodeFile) error {
+			if n != nil {
+				at, err := doc.At(n.Path())
+				require.NoError(t, err)
+				assert.Equal(t, at.AST(), n.AST())
+				assert.Equal(t, at.Span(), n.Span())
+			}
+
+			return nil
+		})
+
+		got := map[string]string{}
+
+		_, err := doc.Decode[nodeConfig](t.Context(), recordNodes[nodeFile](got), recordNodes[nodeBundle](got), scoped)
+		require.NoError(t, err)
+
+		assert.Equal(t, map[string]string{
+			"k.pem":         "$.keys.'k.pem'~",
+			"{bundled.pem}": "$.bundle",
+			"bundled.pem":   "nil",
+			"cert.pem":      "$.tls.cert",
+			"b.pem":         "$.files[1]",
+			"a.pem":         "$.files[0]",
+			"":              "nil",
+		}, got)
+	})
+
+	t.Run("the value at the start of the walk gets the Node that At gives", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			// Whether Node.At finds the root, so the check gets a Node.
+			want bool
+		}{
+			"a document with content": {
+				input: "cert: cert.pem\n",
+				want:  true,
+			},
+			"a null below a header": {
+				input: "---\n",
+				want:  true,
+			},
+			"a null": {
+				input: "null\n",
+				want:  true,
+			},
+			"an empty document": {
+				input: "",
+			},
+			"a document of comments": {
+				input: "# nothing\n",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				at, atErr := doc.At(paths.Current())
+				if tc.want {
+					require.NoError(t, atErr)
+				} else {
+					require.Error(t, atErr)
+				}
+
+				var (
+					got    *niceyaml.Node
+					called bool
+				)
+
+				root := niceyaml.WithNodeCheck(func(_ context.Context, n *niceyaml.Node, _ *nodeTLS) error {
+					got, called = n, true
+
+					return nil
+				})
+
+				_, err := doc.Decode[nodeTLS](t.Context(), root)
+				require.NoError(t, err)
+				require.True(t, called)
+
+				if !tc.want {
+					assert.Nil(t, got)
+
+					return
+				}
+
+				require.NotNil(t, got)
+				assert.Equal(t, at.Path(), got.Path())
+				assert.Equal(t, at.AST(), got.AST())
+				assert.Equal(t, at.Span(), got.Span())
+			})
+		}
+	})
+
+	t.Run("a Node from a merged Source reads the layer from its origin", func(t *testing.T) {
+		t.Parallel()
+
+		base := niceyaml.NewSourceFromString(stringtest.Input(`
+			tls:
+			  cert: cert.pem
+			  key: key.pem
+		`), niceyaml.WithFilePath("/etc/app/base.yaml"))
+
+		override := niceyaml.NewSourceFromString(stringtest.Input(`
+			tls:
+			  key: local.pem
+			  ca: ca.pem
+		`), niceyaml.WithFilePath("/home/me/app/override.yaml"))
+
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Source{base, override})
+		require.NoError(t, err)
+
+		got := map[string]string{}
+		origins := niceyaml.WithNodeCheck(func(_ context.Context, n *niceyaml.Node, f *nodeFile) error {
+			require.NotNil(t, n)
+
+			origin, err := n.Origin()
+			require.NoError(t, err)
+
+			got[n.Path().String()] = origin.FilePath() + ": " + string(*f)
+
+			return nil
+		})
+
+		type config struct {
+			TLS nodeTLS `yaml:"tls"`
+		}
+
+		_, err = merged.Decode[config](t.Context(), origins)
+		require.NoError(t, err)
+
+		assert.Equal(t, map[string]string{
+			"$.tls.cert": "/etc/app/base.yaml: cert.pem",
+			"$.tls.key":  "/home/me/app/override.yaml: local.pem",
+			"$.tls.ca":   "/home/me/app/override.yaml: ca.pem",
+		}, got)
+	})
+
+	t.Run("a file beside its layer resolves on disk and in a file system", func(t *testing.T) {
+		t.Parallel()
+
+		// The base layer sets cert.pem, and the top layer sets key.pem.
+		// Each file exists only beside the layer that sets it.
+		files := map[string]string{
+			"base/app.yaml": "tls:\n  cert: cert.pem\n  key: cert.pem\n",
+			"base/cert.pem": "",
+			"top/app.yaml":  "tls:\n  key: key.pem\n",
+			"top/key.pem":   "",
+		}
+
+		dir := t.TempDir()
+		fsys := fstest.MapFS{}
+
+		for name, text := range files {
+			require.NoError(t, os.MkdirAll(filepath.Join(dir, filepath.Dir(name)), 0o750))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(text), 0o600))
+
+			fsys[name] = &fstest.MapFile{Data: []byte(text)}
+		}
+
+		tcs := map[string]struct {
+			open func(name string) (*niceyaml.Source, error)
+		}{
+			"on disk": {
+				open: func(name string) (*niceyaml.Source, error) {
+					return niceyaml.NewSourceFromFile(filepath.Join(dir, name))
+				},
+			},
+			"in a file system": {
+				open: func(name string) (*niceyaml.Source, error) {
+					return niceyaml.NewSourceFromFS(fsys, name)
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				base, err := tc.open("base/app.yaml")
+				require.NoError(t, err)
+
+				top, err := tc.open("top/app.yaml")
+				require.NoError(t, err)
+
+				merged, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Source{base, top})
+				require.NoError(t, err)
+
+				type config struct {
+					TLS nodeTLS `yaml:"tls"`
+				}
+
+				got, err := merged.Decode[config](t.Context(), existsBesideOrigin())
+				require.NoError(t, err)
+				assert.Equal(t, nodeTLS{Cert: "cert.pem", Key: "key.pem"}, got.TLS)
+			})
+		}
+	})
+
+	t.Run("a merged Source gets a Node without an origin below a reference alias", func(t *testing.T) {
+		t.Parallel()
+
+		refs := niceyaml.NewSourceFromString("defaults: &tls {cert: ref.pem}\n")
+		base := niceyaml.NewSourceFromString("tls: *tls\n",
+			niceyaml.WithReferences(refs), niceyaml.WithFilePath("/etc/app/base.yaml"))
+		override := niceyaml.NewSourceFromString("other: 1\n",
+			niceyaml.WithFilePath("/home/me/app/override.yaml"))
+
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), []*niceyaml.Source{base, override})
+		require.NoError(t, err)
+
+		type config struct {
+			TLS   nodeTLS `yaml:"tls"`
+			Other int     `yaml:"other"`
+		}
+
+		var (
+			got       []string
+			originErr error
+		)
+
+		record := niceyaml.WithNodeCheck(func(_ context.Context, n *niceyaml.Node, f *nodeFile) error {
+			if n == nil {
+				return nil
+			}
+
+			got = append(got, n.Path().String()+": "+string(*f))
+
+			_, originErr = n.Origin()
+
+			return nil
+		})
+
+		_, err = merged.Decode[config](t.Context(), record)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"$.tls.cert: ref.pem"}, got)
+		require.ErrorIs(t, originErr, paths.ErrAlias)
+
+		// The documented check skips the value, so ref.pem need not exist.
+		decoded, err := merged.Decode[config](t.Context(), existsBesideOrigin())
+		require.NoError(t, err)
+		assert.Equal(t, nodeFile("ref.pem"), decoded.TLS.Cert)
+
+		// A check that returns the error of Origin fails the valid document.
+		strict := niceyaml.WithNodeCheck(func(_ context.Context, n *niceyaml.Node, _ *nodeFile) error {
+			if n == nil {
+				return nil
+			}
+
+			_, err := n.Origin()
+			if err != nil {
+				return fmt.Errorf("origin: %w", err)
+			}
+
+			return nil
+		})
+
+		_, err = merged.Decode[config](t.Context(), strict)
+		require.EqualError(t, err,
+			"origin: /etc/app/base.yaml:1:6: $.tls: resolve $.tls.cert: alias reads a reference document: *tls")
+		require.ErrorIs(t, err, paths.ErrAlias)
+	})
+
+	t.Run("gets a nil Node below a path that names several entries", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			same:
+			  1: {cert: one.pem}
+			  "1": {cert: also-one.pem}
+			other:
+			  1: {cert: other.pem}
+		`), niceyaml.WithAllowDuplicateKeys(true))
+
+		type config struct {
+			Same  map[any]nodeTLS `yaml:"same"`
+			Other map[any]nodeTLS `yaml:"other"`
+		}
+
+		got := map[string]string{}
+
+		_, err := doc.Decode[config](t.Context(), recordNodes[nodeTLS](got))
+		require.NoError(t, err)
+
+		assert.Equal(t, map[string]string{
+			"{one.pem  }":      "nil",
+			"{also-one.pem  }": "nil",
+			"{other.pem  }":    "$.other.1",
+		}, got)
+	})
+
+	t.Run("an error binds at the value", func(t *testing.T) {
+		t.Parallel()
+
+		missing := niceyaml.WithNodeCheck(func(_ context.Context, n *niceyaml.Node, f *nodeFile) error {
+			if n != nil && *f == "missing.pem" {
+				return errors.New("file not found")
+			}
+
+			return nil
+		})
+
+		_, err := yamltest.FirstDocument(t, "cert: cert.pem\nkey: missing.pem\n").Decode[nodeTLS](t.Context(), missing)
+		require.EqualError(t, err, "2:6: $.key: file not found")
+		assert.True(t, niceyaml.IsInvalid(err))
+	})
+
+	t.Run("shares its order with WithValueCheck", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		value := func(name string) niceyaml.DecodeOption {
+			return niceyaml.WithValueCheck(func(context.Context, *nodeFile) error {
+				order = append(order, name)
+
+				return nil
+			})
+		}
+
+		node := func(name string) niceyaml.DecodeOption {
+			return niceyaml.WithNodeCheck(func(context.Context, *niceyaml.Node, *nodeFile) error {
+				order = append(order, name)
+
+				return nil
+			})
+		}
+
+		type config struct {
+			File nodeFile `yaml:"file"`
+		}
+
+		_, err := yamltest.FirstDocument(t, "file: a.pem\n").Decode[config](t.Context(),
+			node("first"), value("second"), node("third"))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"first", "second", "third"}, order)
+	})
+
+	t.Run("gets a nil Node below an alias to a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		refs := niceyaml.NewSourceFromString("defaults: &tls {cert: ref.pem}\n")
+		doc := yamltest.Document(t, niceyaml.NewSourceFromString("tls: *tls\n", niceyaml.WithReferences(refs)))
+
+		type config struct {
+			TLS nodeTLS `yaml:"tls"`
+		}
+
+		got := map[string]string{}
+
+		_, err := doc.Decode[config](t.Context(), recordNodes[nodeFile](got), recordNodes[nodeTLS](got))
+		require.NoError(t, err)
+
+		assert.Equal(t, map[string]string{
+			"{ref.pem  }": "$.tls",
+			"ref.pem":     "nil",
+			"":            "nil",
+		}, got)
+	})
+
+	t.Run("gets a nil Node without a document", func(t *testing.T) {
+		t.Parallel()
+
+		got := map[string]string{}
+
+		err := niceyaml.SelfValidateValue(t.Context(), nodeTLS{Cert: "cert.pem"}, recordNodes[nodeFile](got))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"cert.pem": "nil", "": "nil"}, got)
+	})
+
+	t.Run("gets a nil Node in a document that did not parse", func(t *testing.T) {
+		t.Parallel()
+
+		var doc *niceyaml.Node
+
+		for _, n := range niceyaml.NewSourceFromString("cert: [\n").AllDocuments() {
+			doc = n
+		}
+
+		require.Error(t, doc.Err())
+
+		got := map[string]string{}
+
+		err := doc.SelfValidate(t.Context(), &nodeTLS{Cert: "cert.pem"}, recordNodes[nodeTLS](got))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"{cert.pem  }": "nil"}, got)
+	})
+
+	t.Run("panics for a nil function", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t, "niceyaml.WithNodeCheck: fn is nil", func() {
+			niceyaml.WithNodeCheck[nodeFile](nil)
+		})
+	})
+
+	t.Run("panics for a pointer or interface type", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			call func()
+			want string
+		}{
+			"a pointer": {
+				call: func() {
+					niceyaml.WithNodeCheck(func(context.Context, *niceyaml.Node, **nodeFile) error { return nil })
+				},
+				want: "*niceyaml_test.nodeFile",
+			},
+			"an interface": {
+				call: func() { niceyaml.WithNodeCheck[any](nil) },
+				want: "interface {}",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.PanicsWithValue(t,
+					"niceyaml.WithNodeCheck: "+tc.want+" is a pointer or interface type, which the walk never checks",
 					tc.call,
 				)
 			})
