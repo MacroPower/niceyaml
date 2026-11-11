@@ -62,6 +62,10 @@
 // A [DiffMode] picks the revision the viewport compares with. By default it
 // compares each revision with the one before it, and [Model.SetDiffMode]
 // can compare with the first revision instead or turn the diff off.
+// [Model.DiffBaseIndex] returns the index of the revision the diff
+// compares with, and [Model.DiffResult] returns the diff on display. A
+// parent reads the changes from that diff, such as to jump to the next
+// change or to list the changes, without computing the diff again.
 //
 // Set [ViewModeHunks] via [Model.SetViewMode] to render a condensed diff
 // showing only changed lines with surrounding context, or
