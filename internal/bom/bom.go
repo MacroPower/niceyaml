@@ -138,6 +138,10 @@ func NewIndex(src string) Index {
 // A mark that the tokenizer dropped lies before column 0 of its line.
 // Offset reports false for a negative line or column, a line that the
 // text does not hold, and a column past the end of its line.
+//
+// Offset reads the start of the line from the index and then walks the
+// runes of the line up to col. The index does not hold the offsets of the
+// runes within a line, so a call takes time in proportion to col.
 func (x Index) Offset(line, col int) (int, bool) {
 	if line < 0 || col < 0 || line >= len(x.starts) {
 		return 0, false
@@ -191,6 +195,9 @@ func trimLineEnding(s string) string {
 //
 // Position reports false for a negative off and for one past the length
 // of the text.
+//
+// Position finds the line by search and then walks the runes of the line
+// up to off, as [Index.Offset] walks them up to a column.
 func (x Index) Position(off int) (int, int, bool) {
 	if off < 0 {
 		return 0, 0, false

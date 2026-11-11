@@ -4,6 +4,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 
@@ -27,6 +28,13 @@ import (
 // style can transform the text it styles and change its width. It does
 // not assemble output, so one Layout replaces a render for every question
 // about rows. It stays valid until the view or the printer changes.
+//
+// [Layout.CellOf] and [Layout.PositionAt] measure the cells of a line the
+// first time a call asks about that line. The layout keeps the measures,
+// and each later call searches them. A viewer can thus ask for the cell
+// of every match on a line of any length. Every copy of a Layout shares
+// the measures, and goroutines can call the methods of one Layout at the
+// same time.
 //
 // A viewer that draws the rows too takes them with their layout from
 // [Printer.Render]. Both then come from one pass over the view, and row n
@@ -120,13 +128,142 @@ func (ll lineLayout) lineCol(col int) (int, bool) {
 // shownLine is the shown text of one line, the rendered line without its
 // escape sequences, with the runs it renders in. It holds the offset in
 // the text at which each wrapped row begins, and the offset after the last
-// rune each row shows.
+// rune each row shows. Its measures hold the cells that the text takes,
+// which [Layout.CellOf] and [Layout.PositionAt] read.
 type shownLine struct {
+	measures   *shownMeasures
 	text       string
 	runs       []runSpan
 	starts     []int
 	ends       []int
 	contentLen int
+}
+
+// shownMeasures holds the runes of the shown text of one line and the
+// measures of the cells that those runes take on each row. It keeps what
+// a call makes, so a later call that asks for the same cells reads them
+// and does not measure the text again. It does not measure a line that no
+// caller asks about.
+//
+// It keeps three things:
+//
+//   - The runes of the text, which the first call that reads them makes.
+//   - For each row, one measure for [Layout.CellOf]. The first call for a
+//     column of the row makes it, and it covers the row and one rune more.
+//     A call for an offset past the start of the next row replaces it with
+//     a measure from the start of the row to the end of the text.
+//   - For each row, one measure for [Layout.PositionAt], which the first
+//     call for a cell of the row makes.
+//
+// Every copy of a [Layout] shares the measures of its lines. The mutex
+// guards them, so goroutines can read one layout at the same time.
+type shownMeasures struct {
+	// The runes of the shown text, or nil before the first call reads
+	// them.
+	runes []rune
+	// For each row, the cells of the shown text from the start of the row,
+	// as [Layout.CellOf] counts them.
+	from []cellsFrom
+	// For each row, the cells of the runes the row shows, as
+	// [Layout.PositionAt] counts them, or nil before the first call reads
+	// the row.
+	rows []*cells.Row
+	mu   sync.Mutex
+}
+
+// cellsFrom measures the shown text of a line from the start of one row up
+// to the offset end. An end of 0 marks a row that no call has measured.
+type cellsFrom struct {
+	row cells.Row
+	end int
+}
+
+// shownRunes returns the runes of the shown text. The caller must not
+// change them.
+func (sl shownLine) shownRunes() []rune {
+	m := sl.measures
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.runesOf(sl.text)
+}
+
+// runesOf returns the runes of text, the shown text of the line. The
+// caller holds the mutex.
+func (m *shownMeasures) runesOf(text string) []rune {
+	if m.runes == nil {
+		m.runes = []rune(text)
+	}
+
+	return m.runes
+}
+
+// cellsBefore returns the cells that the shown text takes from the start
+// of row r up to offset. It measures the text from that start as one row,
+// so it counts the spaces that the wrapper dropped after the row too. A
+// line without rows counts from the start of the text. An offset at or
+// before the start of the row does not take any cell.
+func (sl shownLine) cellsBefore(r, offset int) int {
+	slot, from := 0, 0
+	if r < len(sl.starts) {
+		slot, from = r, sl.starts[r]
+	}
+
+	if offset <= from {
+		return 0
+	}
+
+	m := sl.measures
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	shown := m.runesOf(sl.text)
+
+	if m.from == nil {
+		m.from = make([]cellsFrom, max(1, len(sl.starts)))
+	}
+
+	// Where a grapheme cluster ends depends on the runes up to the one
+	// after it and not on any later rune. A measure that ends past offset
+	// thus counts the cells before offset as a measure of the whole text
+	// does. The offset of a column that the row holds does not pass the
+	// start of the next row. A measure that ends one rune past that start
+	// therefore serves every such column, and its size follows the row
+	// and not the line. Any other offset takes a measure of the whole
+	// text.
+	end := len(shown)
+	if slot+1 < len(sl.starts) && offset <= sl.starts[slot+1] {
+		end = min(end, sl.starts[slot+1]+1)
+	}
+
+	f := &m.from[slot]
+	if f.end < end {
+		f.row, f.end = cells.NewRow(string(shown[from:end])), end
+	}
+
+	return f.row.Width(offset - from)
+}
+
+// rowCells returns the cells of the runes that row j shows, measured on
+// their own as the terminal draws the row.
+func (sl shownLine) rowCells(j int) cells.Row {
+	m := sl.measures
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.rows == nil {
+		m.rows = make([]*cells.Row, len(sl.starts))
+	}
+
+	if m.rows[j] == nil {
+		row := cells.NewRow(string(m.runesOf(sl.text)[sl.starts[j]:sl.ends[j]]))
+		m.rows[j] = &row
+	}
+
+	return *m.rows[j]
 }
 
 // Layout computes the [Layout] of view as [Printer.Print] renders it. It
@@ -214,6 +351,8 @@ func (p *Printer) layLine(vl viewLine, gutterWidth int, measure bool) laidLine {
 		cols:    w.starts,
 		offsets: make([]int, len(w.pieces)),
 	}
+
+	ll.shown.measures = &shownMeasures{}
 
 	for j, piece := range w.pieces {
 		ll.rows += len(rowsAt(laid.above, j))
@@ -640,17 +779,10 @@ func (l Layout) CellOf(pos position.Position) int {
 
 	ll := l.lines[k]
 	sl := ll.shown
-	shown := []rune(sl.text)
 	col := ll.col(max(0, pos.Col))
 
-	offset := shownOffset(sl.runs, shown, col, sl.contentLen)
-
-	from := 0
-	if r := rowIndex(ll.cols, col); r < len(sl.starts) {
-		from = min(sl.starts[r], offset)
-	}
-
-	cell := cells.NewRow(string(shown[from:])).Width(offset - from)
+	offset := shownOffset(sl.runs, sl.shownRunes(), col, sl.contentLen)
+	cell := sl.cellsBefore(rowIndex(ll.cols, col), offset)
 	past := max(0, col-sl.contentLen)
 
 	return cell + min(past, math.MaxInt-cell)
@@ -706,9 +838,8 @@ func (l Layout) PositionAt(row, cell int) (position.Position, bool) {
 	}
 
 	sl := ll.shown
-	shown := []rune(sl.text)
 	from, to := sl.starts[j], sl.ends[j]
-	cellsRow := cells.NewRow(string(shown[from:to]))
+	cellsRow := sl.rowCells(j)
 
 	if cell >= cellsRow.Width(to-from) {
 		return position.Position{}, false
@@ -718,7 +849,7 @@ func (l Layout) PositionAt(row, cell int) (position.Position, bool) {
 	// cluster that covers it.
 	at := cellsRow.Start(sort.Search(to-from, func(i int) bool { return cellsRow.Width(i+1) > cell }))
 
-	col, ok := ll.lineCol(shownCol(sl.runs, shown, from+at, sl.contentLen))
+	col, ok := ll.lineCol(shownCol(sl.runs, sl.shownRunes(), from+at, sl.contentLen))
 	if !ok {
 		return position.Position{}, false
 	}

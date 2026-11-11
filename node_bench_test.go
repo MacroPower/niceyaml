@@ -136,6 +136,152 @@ func BenchmarkNode_Nodes(b *testing.B) {
 	}
 }
 
+// The first call on a document looks up a token on each line of each
+// item. A lookup on a line of a few tokens does not allocate, so the
+// lines do not add an allocation for each item.
+func BenchmarkNode_Nodes_First(b *testing.B) {
+	path := paths.Current().Child("items").IndexAll()
+
+	for _, n := range []int{1000, 10000} {
+		yaml := "items:\n" + yamltest.GenerateLines(n, sourceBenchItem)
+
+		b.Run(fmt.Sprintf("items_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				b.StopTimer()
+
+				doc := yamltest.FirstDocument(b, yaml, yamltest.NoSizeLimits()...)
+
+				b.StartTimer()
+
+				items, err := doc.Nodes(path)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				if len(items) != n {
+					b.Fatalf("got %d nodes, want %d", len(items), n)
+				}
+			}
+
+			yamltest.ReportTimePer(b, n, "item")
+		})
+	}
+}
+
+// oneLineItems are the numbers of items that the benchmarks of a document
+// on a single line run at.
+var oneLineItems = []int{100, 1000, 10000}
+
+// oneLineDocument returns the document of a flow sequence of the given
+// number of mappings, all on one line, as a minified JSON document holds
+// them.
+func oneLineDocument(tb testing.TB, items int) *niceyaml.Node {
+	tb.Helper()
+
+	return yamltest.FirstDocument(
+		tb,
+		yamltest.FlowSequence(`{"id": 0, "name": "u"}`, items)+"\n",
+		yamltest.NoSizeLimits()...,
+	)
+}
+
+// The time for each item stays level as the line grows when a Node does
+// not walk the line to find its tokens.
+func BenchmarkNode_Nodes_OneLine(b *testing.B) {
+	path := paths.Current().IndexAll()
+
+	for _, n := range oneLineItems {
+		doc := oneLineDocument(b, n)
+
+		b.Run(fmt.Sprintf("items_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				items, err := doc.Nodes(path)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				if len(items) != n {
+					b.Fatalf("got %d nodes, want %d", len(items), n)
+				}
+			}
+
+			yamltest.ReportTimePer(b, n, "item")
+		})
+	}
+}
+
+func BenchmarkNode_Range_OneLine(b *testing.B) {
+	for _, n := range oneLineItems {
+		items, err := oneLineDocument(b, n).Nodes(paths.Current().IndexAll())
+		require.NoError(b, err)
+
+		b.Run(fmt.Sprintf("items_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				for _, item := range items {
+					if _, ok := item.Range(); !ok {
+						b.Fatal("no range")
+					}
+				}
+			}
+
+			yamltest.ReportTimePer(b, n, "item")
+		})
+	}
+}
+
+func BenchmarkNode_NodeAt_OneLine(b *testing.B) {
+	for _, n := range oneLineItems {
+		doc := oneLineDocument(b, n)
+		width := doc.Source().Lines().Line(0).Width()
+
+		// A space after each "id" value makes each item one column wider.
+		spaced := yamltest.FirstDocument(
+			b,
+			yamltest.FlowSequence(`{"id": 0 , "name": "u"}`, n)+"\n",
+			yamltest.NoSizeLimits()...,
+		)
+
+		// A position on the text of a token finds the token at its column.
+		// Each item takes 24 columns after the "[" that opens the
+		// sequence, and its first value sits 7 columns into it. A position
+		// past the end of the line finds the last text before it. So does
+		// a position in the space after a value, which sits 8 columns into
+		// an item of 25 columns. The first ten items have such a space
+		// near the start of the line, with the rest of the line after it.
+		ats := []struct {
+			doc  *niceyaml.Node
+			at   func(i int) position.Position
+			name string
+		}{
+			{name: "text", doc: doc, at: func(i int) position.Position { return position.New(0, 1+24*((i*7919)%n)+7) }},
+			{name: "end", doc: doc, at: func(int) position.Position { return position.New(0, width) }},
+			{name: "spaces", doc: spaced, at: func(i int) position.Position { return position.New(0, 1+25*(i%10)+8) }},
+		}
+
+		for _, tc := range ats {
+			b.Run(fmt.Sprintf("items_%d/%s", n, tc.name), func(b *testing.B) {
+				b.ReportAllocs()
+
+				i := 0
+
+				for b.Loop() {
+					if _, ok := tc.doc.NodeAt(tc.at(i)); !ok {
+						b.Fatal("no node")
+					}
+
+					i++
+				}
+			})
+		}
+	}
+}
+
 func BenchmarkNode_BindManyPaths(b *testing.B) {
 	sizes := []struct {
 		name string

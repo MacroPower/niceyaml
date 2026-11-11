@@ -61,6 +61,15 @@
 //	ranges := lines.TokenRanges(tk)          // Every line with runes of the token.
 //	content := lines.ContentRanges(tk)       // The same without surrounding spaces and tabs.
 //
+// Each of these lookups searches for its line and for its place on that
+// line. A document minified onto one line thus answers them about as fast
+// as the same document with one value on each line.
+//
+// TokenRanges and ContentRanges search by the offset of the token, and
+// they read the tokens that share that offset one by one. Every token
+// without a position counts at offset 0. A lookup among such tokens thus
+// takes time in proportion to their number.
+//
 // [Lines.Tokens] reverses the split. A token the split cut across lines
 // collapses back to one, and the result holds the lexer's original tokens
 // in their original order.

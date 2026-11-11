@@ -1445,20 +1445,41 @@ func contentTokenAt(lines line.Lines, pos position.Position) *token.Token {
 
 // lastContentTokenOn returns the last token of l that holds text before
 // column col, comments left out, or nil when no token does.
+//
+// It starts at the column before col and steps back one token at a time
+// until a token holds such text. It thus looks up only the tokens between
+// that text and col, however many tokens the line holds.
 func lastContentTokenOn(l *line.Line, col int) *token.Token {
-	var found *token.Token
+	for c := min(col, l.Width()) - 1; c >= 0; {
+		tk := l.TokenAt(c)
 
-	for _, tk := range l.SourceTokens() {
-		if tk.Position == nil || tk.Type == token.CommentType {
-			continue
+		if tk != nil && tk.Position != nil && tk.Type != token.CommentType {
+			if sp, ok := l.ContentSpan(tk); ok && sp.Len() > 0 && sp.Start < col {
+				return tk
+			}
 		}
 
-		if sp, ok := l.ContentSpan(tk); ok && sp.Len() > 0 && sp.Start < col {
-			found = tk
-		}
+		c = firstColumnOf(l, c, tk) - 1
 	}
 
-	return found
+	return nil
+}
+
+// firstColumnOf returns the first column of the run of columns of l that
+// ends at col and that [line.Line.TokenAt] resolves to tk, the token at
+// col. The run holds the columns of tk up to col and the indentation
+// before tk. In indentation that text does not follow, tk is nil and the
+// run holds that indentation.
+//
+// It compares the tokens themselves, so it tells tk from another token of
+// the line with the same type, value, origin, and position.
+// [line.Line.TokenSpan] reports the columns of the first such token, which
+// can sit far before col.
+func firstColumnOf(l *line.Line, col int, tk *token.Token) int {
+	// The columns before the run resolve to the tokens before tk, so a
+	// search finds the first column of the run. The search does not step
+	// through each column of a long token or of a wide indentation.
+	return sort.Search(col, func(c int) bool { return l.TokenAt(c) == tk })
 }
 
 // NodeKind is the structural kind of the value a [Node] holds, as
