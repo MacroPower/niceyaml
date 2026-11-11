@@ -53,7 +53,7 @@ func TestLimitFlags(t *testing.T) {
 			text: shallow,
 			args: []string{"--byte-limit", "4"},
 			err:  niceyaml.ErrLimit,
-			msg:  "test.yaml: file is larger than 4 bytes",
+			msg:  "test.yaml: file is larger than 4 bytes (raise it with --byte-limit)",
 		},
 		"the default depth limit fails a deep document": {
 			text: deep,
@@ -67,7 +67,7 @@ func TestLimitFlags(t *testing.T) {
 		"the default byte limit fails a large file": {
 			text: stream,
 			err:  niceyaml.ErrLimit,
-			msg:  "test.yaml: file is larger than 256 KiB",
+			msg:  "test.yaml: file is larger than 256 KiB (raise it with --byte-limit)",
 		},
 		"a byte limit of zero passes a stream of documents": {
 			text: stream,
@@ -138,6 +138,12 @@ func TestLimitFlags(t *testing.T) {
 			}
 
 			assert.Contains(t, err.Error(), tc.msg)
+
+			// Only the read checks the byte limit, so only its error names
+			// the flag that raises it.
+			if !strings.Contains(tc.msg, "--byte-limit") {
+				assert.NotContains(t, err.Error(), "--byte-limit")
+			}
 		})
 	}
 }

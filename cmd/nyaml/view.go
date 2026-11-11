@@ -40,7 +40,7 @@ func viewCmd() *cobra.Command {
 			"Supports glob patterns like *.yaml.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paths, sources, err := flags.load(args)
+			paths, sources, err := loadFiles(args)
 			if err != nil {
 				return err
 			}
@@ -69,7 +69,6 @@ func viewCmd() *cobra.Command {
 
 // viewerFlags holds the flags that the view and diff commands share.
 type viewerFlags struct {
-	limits      *limitFlags
 	search      string
 	lineNumbers bool
 	print       bool
@@ -87,26 +86,19 @@ func addViewerFlags(cmd *cobra.Command) *viewerFlags {
 	cmd.Flags().BoolVarP(&f.print, "print", "p", false,
 		"print to stdout and exit, as when stdout is not a terminal")
 
-	f.limits = addLimitFlags(cmd)
-
 	return f
 }
 
-// load expands the glob patterns of args and reads each file it names
-// with the limits of the flags. It returns the paths of the files, each as
-// the user typed it or as the glob matched it, and their sources.
-func (f *viewerFlags) load(args []string) ([]string, []*niceyaml.Source, error) {
-	sourceOpts, err := f.limits.options()
-	if err != nil {
-		return nil, nil, err
-	}
-
+// loadFiles expands the glob patterns of args and reads each file it names
+// with [loadSources]. It returns the paths of the files, each as the user
+// typed it or as the glob matched it, and their sources.
+func loadFiles(args []string) ([]string, []*niceyaml.Source, error) {
 	paths, err := expandPaths(args...)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	sources, err := loadSources(paths, sourceOpts...)
+	sources, err := loadSources(paths)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -140,12 +132,19 @@ func runViewer(ctx context.Context, tty io.Writer, m tea.Model) error {
 // names each Source with the status bar label that [revisionLabels] gives
 // its path. A read error from [niceyaml.NewSourceFromFile] names the path
 // as the user typed it, so loadSources does not add a name of its own.
-func loadSources(paths []string, opts ...niceyaml.SourceOption) ([]*niceyaml.Source, error) {
+//
+// The view and diff commands show the lines of each file and never parse
+// them, so loadSources reads each file with [niceyaml.WithoutLimits]. The
+// limits of a Source bound the cost of the go-yaml parser, and validate,
+// the command that parses, takes them as flags. A Source holds many times
+// the bytes of its text, so the memory of a run grows with the size of
+// its files.
+func loadSources(paths []string) ([]*niceyaml.Source, error) {
 	labels := revisionLabels(paths)
 	sources := make([]*niceyaml.Source, 0, len(paths))
 
 	for i, path := range paths {
-		source, err := niceyaml.NewSourceFromFile(path, opts...)
+		source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithoutLimits())
 		if err != nil {
 			return nil, err //nolint:wrapcheck // The error names the file that did not read.
 		}

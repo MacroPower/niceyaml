@@ -45,7 +45,7 @@ func diffCmd() *cobra.Command {
 			"the patterns expand.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			paths, sources, err := flags.load(args)
+			paths, sources, err := loadFiles(args)
 			if err != nil {
 				return err
 			}

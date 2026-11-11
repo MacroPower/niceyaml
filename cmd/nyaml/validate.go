@@ -293,9 +293,10 @@ func fileResult(diag io.Writer, name string, err error, warnings *niceyaml.Warni
 // resolve against the directory of that file. When the read fails, the
 // error of NewSourceFromFile names the file already, as [escape.Line]
 // draws it, so validateFile does not add a name of its own. A glob match
-// takes its name from the file system, and the escape keeps a line feed
-// in that name from starting a row of its own in the output of the error
-// handler in main.
+// takes its name from the file system. The escape keeps a line feed in
+// that name from starting a row of its own in the output of the error
+// handler in main. The error of a file past the byte limit ends with a
+// hint that names --byte-limit.
 func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, extra ...niceyaml.SourceOption) error {
 	// WithName keeps messages naming the file as the user typed it. The
 	// read uses the typed path, so a read error names the file that way
@@ -305,6 +306,13 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry, ex
 	opts := append([]niceyaml.SourceOption{niceyaml.WithName(yamlPath)}, extra...)
 
 	source, err := niceyaml.NewSourceFromFile(yamlPath, opts...)
+
+	// The read checks the byte limit alone, so a limit error here names
+	// the flag that raises it. The other limits fail a document later.
+	if errors.Is(err, niceyaml.ErrLimit) {
+		return fmt.Errorf("%w (raise it with --byte-limit)", err)
+	}
+
 	if err != nil {
 		return err //nolint:wrapcheck // The error names the file that did not read.
 	}
