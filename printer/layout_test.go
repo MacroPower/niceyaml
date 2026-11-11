@@ -1,9 +1,12 @@
 package printer_test
 
 import (
+	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -1003,6 +1006,127 @@ func TestPrinter_Layout_CellOf(t *testing.T) {
 			p := testPrinter().With(printer.WithWrapWidth(tc.wrap))
 
 			assert.Equal(t, tc.want, p.Layout(view).CellOf(tc.pos))
+		})
+	}
+}
+
+// TestPrinter_Layout_KeptMeasures verifies that a layout gives the same
+// cell and the same position whatever it answered before. A layout keeps
+// what it measures of a line for the next call. One layout thus answers
+// every call here in three orders, and each answer must match that of a
+// layout that has not answered any call.
+func TestPrinter_Layout_KeptMeasures(t *testing.T) {
+	t.Parallel()
+
+	prefixed := style.New(lipgloss.NewStyle(), style.Set(kind.LiteralString, bracketStyle("val=", "")))
+
+	tcs := map[string]struct {
+		printer *printer.Printer
+		input   string
+	}{
+		"one row": {
+			printer: testPrinter(),
+			input:   "k: 日本語 e\u0301x 😀 [1, 2, 3]\n",
+		},
+		"wrapped words": {
+			printer: testPrinter().With(printer.WithWrapWidth(10)),
+			input:   stringtest.LinesLF("key: aaaa bbbb cccc 日本語日本語日本語", "b: 2"),
+		},
+		// The wrap drops the space before " \u0301c" and keeps the mark.
+		// The last row thus starts inside a cluster of the line.
+		"wrap inside a cluster": {
+			printer: testPrinter().With(printer.WithWrapWidth(3)),
+			input:   "k: e\u0301e\u0301e\u0301e\u0301e\u0301 a \u0301b \u0301c\n",
+		},
+		// The wrap drops spaces that take two cells, and the mark after
+		// one of them.
+		"wrapped wide spaces": {
+			printer: testPrinter().With(printer.WithWrapWidth(4)),
+			input:   "k: a\u3000\u0301b\u3000\u3000c d\n",
+		},
+		"wrapped transform": {
+			printer: testPrinter().With(printer.WithWrapWidth(5), printer.WithStyles(prefixed)),
+			input:   stringtest.LinesLF("k: value", "b: other words"),
+		},
+	}
+
+	type query struct {
+		row, cell int // The arguments of PositionAt.
+		pos       position.Position
+		byCell    bool // Whether the query asks PositionAt or CellOf.
+	}
+
+	// An answer is the cell of a position, or the position of a cell with
+	// whether the cell shows one.
+	ask := func(l printer.Layout, q query) string {
+		if q.byCell {
+			pos, ok := l.PositionAt(q.row, q.cell)
+
+			return fmt.Sprint(pos, ok)
+		}
+
+		return strconv.Itoa(l.CellOf(q.pos))
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString(tc.input).View()
+			kept := tc.printer.Layout(view)
+
+			var queries []query
+
+			for i, ln := range view.All() {
+				for col := -1; col <= ln.Width()+2; col++ {
+					queries = append(queries, query{pos: position.New(i, col)})
+				}
+			}
+
+			for row := range kept.Rows() {
+				for cell := range kept.Width() + 1 {
+					queries = append(queries, query{row: row, cell: cell, byCell: true})
+				}
+			}
+
+			want := make([]string, len(queries))
+			for i, q := range queries {
+				want[i] = ask(tc.printer.Layout(view), q)
+			}
+
+			for i, q := range queries {
+				require.Equal(t, want[i], ask(kept, q), "query %d in order: %+v", i, q)
+			}
+
+			for i, q := range slices.Backward(queries) {
+				require.Equal(t, want[i], ask(kept, q), "query %d in reverse: %+v", i, q)
+			}
+
+			// A copy of the layout shares what the layout measured, and
+			// goroutines read both at the same time.
+			shared := tc.printer.Layout(view)
+			got := make([][]string, 4)
+
+			var wg sync.WaitGroup
+
+			for g := range got {
+				wg.Go(func() {
+					l := shared
+					got[g] = make([]string, len(queries))
+
+					for i := range queries {
+						// Each goroutine starts at its own query.
+						at := (i + g*len(queries)/len(got)) % len(queries)
+						got[g][at] = ask(l, queries[at])
+					}
+				})
+			}
+
+			wg.Wait()
+
+			for g := range got {
+				assert.Equal(t, want, got[g], "goroutine %d", g)
+			}
 		})
 	}
 }

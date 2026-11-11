@@ -580,7 +580,7 @@ func (ls Lines) TokenAt(pos position.Position) *token.Token {
 // type, value, origin, and position. TokenRanges returns nil when tk is
 // nil or when it does not find tk.
 func (ls Lines) TokenRanges(tk *token.Token) position.Ranges {
-	return ls.ranges(tk, (*Line).TokenSpan)
+	return ls.ranges(tk, wholeSpan)
 }
 
 // ContentRanges returns the ranges of tk's content, one per line it appears
@@ -591,44 +591,38 @@ func (ls Lines) TokenRanges(tk *token.Token) position.Ranges {
 // either, as for [Lines.TokenRanges]. ContentRanges returns nil when tk is
 // nil or when it does not find tk.
 func (ls Lines) ContentRanges(tk *token.Token) position.Ranges {
-	return ls.ranges(tk, (*Line).ContentSpan)
+	return ls.ranges(tk, segment.Segment.ContentSpan)
 }
 
 // ranges collects one range per line that holds tk. The span function
-// picks the columns within each line, and a line where span is empty does
-// not contribute a range. It visits only the lines that hold a token at
-// the offset of tk, and only the lines that hold tk itself when any line
-// does.
-func (ls Lines) ranges(
-	tk *token.Token, span func(*Line, *token.Token) (position.Span, bool),
-) position.Ranges {
+// picks the columns within the segment of each line, and a line where the
+// span is empty does not contribute a range. It visits each line that
+// holds a token at the offset of tk one time.
+func (ls Lines) ranges(tk *token.Token, span func(segment.Segment) position.Span) position.Ranges {
 	if tk == nil {
 		return nil
 	}
 
-	idxs := ls.linesAt(tk.Position)
-
-	// Another line's token with tk's fields is a different token, such as
-	// the other revision's in a diff, so it matches only a copy of tk.
-	held := false
-
-	for i := range idxs {
-		if ls.lines[i].holds(tk) {
-			held = true
-
-			break
-		}
-	}
-
 	var result position.Ranges
 
-	for i := range idxs {
-		if held && !ls.lines[i].holds(tk) {
+	// Another line's token with tk's fields is a different token, such as
+	// the other revision's in a diff. It matches only a copy of tk. The
+	// first line that holds tk itself therefore drops the ranges of the
+	// lines before it. Each later line counts only when it holds tk too.
+	anyHeld := false
+
+	for i := range ls.linesAt(tk.Position) {
+		sp, found, held := ls.lines[i].find(tk, span)
+
+		if held && !anyHeld {
+			anyHeld, result = true, nil
+		}
+
+		if anyHeld && !held {
 			continue
 		}
 
-		sp, ok := span(ls.lines[i], tk)
-		if !ok || sp.Len() <= 0 {
+		if !found || sp.Len() <= 0 {
 			continue
 		}
 

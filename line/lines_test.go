@@ -1975,6 +1975,13 @@ func TestLines_TokenRanges(t *testing.T) {
 	after := newLines(stringtest.LinesLF("a: 1", "b: 3"))
 	revisions := line.Collect(after.Line(0), before.Line(1), after.Line(1))
 
+	// The same on lines that hold enough tokens to index them. The value
+	// 3 sits at the same position in each revision.
+	longBefore := newLines(stringtest.LinesLF("a: 1", "b: [1, 2, 3, 4]"))
+	longAfter := newLines(stringtest.LinesLF("a: 1", "b: [1, 2, 3, 5]"))
+	longRevisions := line.Collect(longAfter.Line(0), longBefore.Line(1), longAfter.Line(1))
+	require.Greater(t, len(longRevisions.Line(2).Tokens()), 8)
+
 	// Values with spaces or tabs around their text, which the content
 	// ranges leave out, and a position in the spaces that resolves to the
 	// value.
@@ -2108,6 +2115,30 @@ func TestLines_TokenRanges(t *testing.T) {
 			tk:          revisions.TokenAt(position.New(2, 0)).Clone(),
 			wantToken:   position.Ranges{yamltest.LineRange(1, 0, 1), yamltest.LineRange(2, 0, 1)},
 			wantContent: position.Ranges{yamltest.LineRange(1, 0, 1), yamltest.LineRange(2, 0, 1)},
+		},
+		"inserted revision token on a long line": {
+			lines:       longRevisions,
+			tk:          longRevisions.TokenAt(position.New(2, 10)),
+			wantToken:   position.Ranges{yamltest.LineRange(2, 9, 11)},
+			wantContent: position.Ranges{yamltest.LineRange(2, 10, 11)},
+		},
+		"deleted revision token on a long line": {
+			lines:       longRevisions,
+			tk:          longRevisions.TokenAt(position.New(1, 10)),
+			wantToken:   position.Ranges{yamltest.LineRange(1, 9, 11)},
+			wantContent: position.Ranges{yamltest.LineRange(1, 10, 11)},
+		},
+		"revision part token on a long line": {
+			lines:       longRevisions,
+			tk:          longRevisions.Line(2).Token(7),
+			wantToken:   position.Ranges{yamltest.LineRange(2, 9, 11)},
+			wantContent: position.Ranges{yamltest.LineRange(2, 10, 11)},
+		},
+		"copy of a revision token on a long line": {
+			lines:       longRevisions,
+			tk:          longRevisions.TokenAt(position.New(2, 10)).Clone(),
+			wantToken:   position.Ranges{yamltest.LineRange(1, 9, 11), yamltest.LineRange(2, 9, 11)},
+			wantContent: position.Ranges{yamltest.LineRange(1, 10, 11), yamltest.LineRange(2, 10, 11)},
 		},
 		"content excludes leading and trailing spaces": {
 			lines:       spaced,

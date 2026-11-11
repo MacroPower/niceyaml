@@ -1116,6 +1116,49 @@ func TestNode_PathAt_ScopedNode(t *testing.T) {
 	})
 }
 
+// TestNode_Nodes_OneLine verifies that the nodes of a document on a single
+// line, as a minified JSON document is, each find their own columns of
+// that line.
+func TestNode_Nodes_OneLine(t *testing.T) {
+	t.Parallel()
+
+	const items = 300
+
+	doc := oneLineDocument(t, items)
+	width := doc.Source().Lines().Line(0).Width()
+
+	found, err := doc.Nodes(paths.Current().IndexAll())
+	require.NoError(t, err)
+	require.Len(t, found, items)
+
+	for i, item := range found {
+		// Each item takes 22 columns and the ", " after it. The first
+		// starts after the "[" that opens the sequence.
+		start := 1 + 24*i
+
+		require.Equal(t, paths.Doc().Index(i), item.Path())
+		require.Equal(t, position.NewSpan(0, 1), item.Span())
+		require.Equal(t, yamltest.LineRange(0, start, start+22), yamltest.RangeOf(t, item))
+
+		name := yamltest.At(t, item, paths.Current().Child("name"))
+		require.Equal(t, yamltest.LineRange(0, start+18, start+21), yamltest.RangeOf(t, name))
+
+		at, ok := doc.NodeAt(position.New(0, start+7))
+		require.True(t, ok)
+		require.Equal(t, paths.Doc().Index(i).Child("id"), at.Path())
+	}
+
+	// A position past the end of the line takes the node of the last text
+	// before it, the "]" that closes the sequence.
+	for _, col := range []int{width - 1, width, width + 1} {
+		at, ok := doc.NodeAt(position.New(0, col))
+		require.True(t, ok)
+		assert.Equal(t, paths.Doc(), at.Path())
+	}
+
+	assert.Equal(t, yamltest.LineRange(0, 0, width), yamltest.RangeOf(t, doc))
+}
+
 // nodesAt lists what [niceyaml.Node.NodeAt] reports for every position of
 // the lines of its source, one row per run of columns with one answer, as
 // pathsAt lists paths. The columns of a line run two past its last
@@ -1210,6 +1253,43 @@ func TestNode_NodeAt(t *testing.T) {
 				"0:17 $.flow",
 			),
 		},
+		// A position in the spaces after the text of a token takes the node
+		// of the last text before it, whatever follows it on the line.
+		"spaces after the values of a flow sequence": {
+			input: "seq: [a , {b: 1 } , c ]  # note",
+			want: stringtest.JoinLF(
+				"0:0 $.seq",
+				"0:6 $.seq[0]",
+				"0:8 $.seq",
+				"0:9 $.seq[1]",
+				"0:11 $.seq[1].b",
+				"0:16 $.seq[1]",
+				"0:17 $.seq",
+				"0:19 $.seq[2]",
+				"0:22 $.seq",
+			),
+		},
+		// The indentation of a line belongs to the token that ends on the
+		// line before, so the tokens of the line do not cover it. A
+		// position in it, or on a comment after it, takes the node of the
+		// last text on the lines before.
+		"comment on a line of its own": {
+			input: stringtest.JoinLF("a:", "  b: 1", "      # note", "  c: 2"),
+			want: stringtest.JoinLF(
+				"0:0 $.a",
+				"1:0 $.a.b",
+				"2:0 $.a",
+				"3:0 $.a.c",
+			),
+		},
+		"spaces on the last line without a line ending": {
+			input: stringtest.JoinLF("a:", "  b: 1", "      "),
+			want: stringtest.JoinLF(
+				"0:0 $.a",
+				"1:0 $.a.b",
+				"2:0 $.a",
+			),
+		},
 		"end of an entry without a value": {
 			input: stringtest.JoinLF("y:", "z: 1"),
 			want: stringtest.JoinLF(
@@ -1277,6 +1357,57 @@ func TestNode_NodeAt(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
 			doc = yamltest.AtOrSelf(t, doc, tc.path)
+
+			assert.Equal(t, tc.want, nodesAt(t, doc))
+		})
+	}
+}
+
+// TestNode_NodeAt_TokensWithoutPosition verifies the node of a position
+// after the last text of a line. The tokens between the text and the
+// position do not have a position. Each "," of a line then equals the
+// others in type, value, origin, and position. A lookup of one by those
+// fields thus finds the first of them.
+func TestNode_NodeAt_TokensWithoutPosition(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"flow sequence": {
+			input: stringtest.JoinLF("[x, y,", " z]"),
+			want: stringtest.JoinLF(
+				"0:0 $",
+				"0:1 $[0]",
+				"0:3 $[1]",
+				"1:0 $[2]",
+				"1:2 $",
+			),
+		},
+		"flow mapping": {
+			input: stringtest.JoinLF("{a: 1 , b: 2 ,", "}"),
+			want: stringtest.JoinLF(
+				"0:0 $",
+				"0:1 $.a",
+				"0:7 $.b",
+				"1:0 $",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			for _, tk := range tks {
+				if tk.Type == token.CollectEntryType {
+					tk.Position = nil
+				}
+			}
+
+			doc := yamltest.Document(t, niceyaml.NewSourceFromTokens(tks))
 
 			assert.Equal(t, tc.want, nodesAt(t, doc))
 		})

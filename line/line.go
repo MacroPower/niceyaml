@@ -1,9 +1,12 @@
 package line
 
 import (
+	"cmp"
 	"iter"
 	"slices"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/goccy/go-yaml/token"
 
@@ -22,6 +25,19 @@ import (
 // to the line. Treat them as read-only and call [token.Token.Clone] before
 // modifying one.
 //
+// A Line searches its tokens by column, so [Line.TokenAt] and [Line.Width]
+// do not walk the line. [Line.TokenSpan] and [Line.ContentSpan] read each
+// token of a line of a few tokens, and such a line does not keep an index.
+// A longer line indexes its tokens by offset on the first lookup of the
+// columns of a token. TokenSpan and ContentSpan then read only the tokens
+// at the offset of their token. On the one line of a minified document,
+// each lookup takes about the time that it takes on a short line.
+//
+// TokenSpan and ContentSpan read the tokens that share an offset in the
+// order of the line until one matches. Every token without a position
+// counts at offset 0. A lookup on a long line of such tokens thus takes
+// time in proportion to the number of tokens before the match.
+//
 // The zero value is an empty line without a number. A side-by-side diff
 // uses it as the placeholder opposite an inserted or deleted line.
 //
@@ -30,8 +46,129 @@ import (
 type Line struct {
 	segments segment.Segments
 
+	// The offset of the source and of the part token of each segment, with
+	// the index of the segment. Each pair occurs once, and the pairs sort
+	// by offset and then by segment. A token without a position counts at
+	// offset 0. The first lookup of a token builds the pairs, so creating a
+	// Line does not build them. A line of [maxScan] segments or fewer never
+	// builds them.
+	byOffset []offsetSegment
+	once     sync.Once
+
 	// The 1-indexed line number a renderer displays.
 	number int
+}
+
+// maxScan is the largest number of segments that a [Line] reads one by
+// one to find a token. Most lines of a document with one value on each
+// line hold fewer segments. A test of each segment of such a line takes
+// less time than a search of a token index. The line also does not
+// allocate an index.
+const maxScan = 8
+
+// inOrder names the first [maxScan] segments of a line in the order of
+// the line. A line that does not index its tokens reads its segments
+// through inOrder. The offsets in inOrder do not carry a meaning.
+var inOrder = func() [maxScan]offsetSegment {
+	var pairs [maxScan]offsetSegment
+
+	for i := range pairs {
+		pairs[i].seg = i
+	}
+
+	return pairs
+}()
+
+// offsetSegment is an offset in the token index of a [Line] and the index
+// of a segment whose source or part token sits there.
+type offsetSegment struct {
+	off, seg int
+}
+
+// segmentsAt returns the segments that a token at p can match, in the
+// order of the line. The callers read only the index of each segment.
+//
+// On a line of [maxScan] segments or fewer, they are every segment of the
+// line. On a longer line, they are the segments whose source or part
+// token sits at the offset of p. The first call on such a line builds its
+// token index. A segment of a token at another position with the same
+// offset can be among them. On a line of either length, the segments that
+// match a token come in the same order, so the first match is the same.
+func (l *Line) segmentsAt(p *token.Position) []offsetSegment {
+	if len(l.segments) <= maxScan {
+		return inOrder[:len(l.segments)]
+	}
+
+	l.once.Do(func() { l.byOffset = offsetSegments(l.segments) })
+
+	off := offsetOf(p)
+
+	// The segments at one offset can be every segment of the line, as on
+	// a line of tokens without positions. A search thus finds each end of
+	// them. The second search looks for a larger offset and not for off+1,
+	// because off+1 overflows when off is the largest int.
+	lo := sort.Search(len(l.byOffset), func(i int) bool { return l.byOffset[i].off >= off })
+	at := l.byOffset[lo:]
+	n := sort.Search(len(at), func(i int) bool { return at[i].off > off })
+
+	return at[:n]
+}
+
+// offsetSegments returns the offset of the source and of the part token
+// of each segment of segs with the index of the segment, sorted by offset
+// and then by segment.
+func offsetSegments(segs segment.Segments) []offsetSegment {
+	n := 0
+
+	for _, seg := range segs {
+		_, count := segmentOffsets(seg)
+		n += count
+	}
+
+	pairs := make([]offsetSegment, 0, n)
+
+	for i, seg := range segs {
+		offs, count := segmentOffsets(seg)
+		for _, off := range offs[:count] {
+			pairs = append(pairs, offsetSegment{off: off, seg: i})
+		}
+	}
+
+	// The offsets of a stream from the tokenizer ascend along a line, so
+	// the pairs come nearly in order. Each pair occurs once, so the order
+	// is the same for any sort.
+	slices.SortFunc(pairs, func(a, b offsetSegment) int {
+		return cmp.Or(cmp.Compare(a.off, b.off), cmp.Compare(a.seg, b.seg))
+	})
+
+	return pairs
+}
+
+// segmentOffsets returns the offsets of the source and of the part token
+// of seg, and the number of offsets it returns. It skips a nil token. A
+// segment whose source and part token share an offset, such as the
+// segment of a token on one line, has one offset.
+func segmentOffsets(seg segment.Segment) ([2]int, int) {
+	var (
+		offs [2]int
+		n    int
+	)
+
+	for _, tk := range [2]*token.Token{seg.Source(), seg.Part()} {
+		if tk == nil {
+			continue
+		}
+
+		off := offsetOf(tk.Position)
+		if n > 0 && offs[0] == off {
+			continue
+		}
+
+		offs[n] = off
+		n++
+	}
+
+	return offs, n
 }
 
 // Number returns the 1-indexed line number of this [Line], or 0 for the
@@ -111,9 +248,7 @@ func (l *Line) TokenAt(col int) *token.Token {
 // [Lines.TokenRanges] skips. The second result is false when tk is nil or
 // does not have a part on this line.
 func (l *Line) TokenSpan(tk *token.Token) (position.Span, bool) {
-	return l.span(tk, func(seg segment.Segment) position.Span {
-		return position.NewSpan(0, seg.Width())
-	})
+	return l.span(tk, wholeSpan)
 }
 
 // ContentSpan returns the columns of tk's content on this [Line], excluding
@@ -125,34 +260,68 @@ func (l *Line) ContentSpan(tk *token.Token) (position.Span, bool) {
 	return l.span(tk, segment.Segment.ContentSpan)
 }
 
-// holds reports whether a segment of this line has tk itself, not a copy,
-// as its source or part token.
-func (l *Line) holds(tk *token.Token) bool {
-	return slices.ContainsFunc(l.segments, func(seg segment.Segment) bool {
-		return seg.Source() == tk || seg.Part() == tk
-	})
+// wholeSpan returns the columns of seg within itself, from 0 to its width.
+func wholeSpan(seg segment.Segment) position.Span {
+	return position.NewSpan(0, seg.Width())
 }
 
-// span finds the segment that holds tk and returns the columns that span
-// picks within it, offset to the line.
+// span returns the columns that span picks within the first segment that
+// holds tk or a copy of it, offset to the line.
+//
+// It reads the segments that tk can match in the order of the line and
+// stops at the first that holds tk.
 func (l *Line) span(tk *token.Token, span func(segment.Segment) position.Span) (position.Span, bool) {
 	if tk == nil {
 		return position.Span{}, false
 	}
 
-	col := 0
-
-	for _, seg := range l.segments {
-		if seg.Contains(tk) {
-			sp := span(seg)
-
-			return position.NewSpan(col+sp.Start, col+sp.End), true
+	for _, e := range l.segmentsAt(tk.Position) {
+		if seg := l.segments[e.seg]; seg.Contains(tk) {
+			return spanOnLine(seg, span), true
 		}
-
-		col += seg.Width()
 	}
 
 	return position.Span{}, false
+}
+
+// find looks tk up on this line as [Line.span] does, and its first two
+// results are the results of span. The third result reports whether a
+// segment has tk itself, not a copy, as its source or part token.
+//
+// It reads the segments that tk can match in the order of the line and
+// stops at the first that has tk itself. The caller passes a tk that is
+// not nil.
+func (l *Line) find(
+	tk *token.Token, span func(segment.Segment) position.Span,
+) (position.Span, bool, bool) {
+	var (
+		sp    position.Span
+		found bool
+	)
+
+	for _, e := range l.segmentsAt(tk.Position) {
+		seg := l.segments[e.seg]
+
+		if !found && seg.Contains(tk) {
+			sp, found = spanOnLine(seg, span), true
+		}
+
+		// A segment that has tk itself holds tk, so the columns are known
+		// by now.
+		if seg.Source() == tk || seg.Part() == tk {
+			return sp, true, true
+		}
+	}
+
+	return sp, found, false
+}
+
+// spanOnLine returns the columns that span picks within seg, offset to
+// the line of seg.
+func spanOnLine(seg segment.Segment, span func(segment.Segment) position.Span) position.Span {
+	col, in := seg.Start(), span(seg)
+
+	return position.NewSpan(col+in.Start, col+in.End)
 }
 
 // IsEmpty reports whether this [Line] holds zero tokens.
@@ -165,13 +334,7 @@ func (l *Line) IsEmpty() bool {
 // does not measure the display width. A wide rune, such as a Chinese,
 // Japanese, or Korean ideograph, takes one column but two terminal cells.
 func (l *Line) Width() int {
-	var w int
-
-	for _, seg := range l.segments {
-		w += seg.Width()
-	}
-
-	return w
+	return l.segments.Width()
 }
 
 // Runes returns an iterator over the runes on this [Line]. Each iteration

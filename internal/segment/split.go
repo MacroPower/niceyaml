@@ -325,6 +325,12 @@ func (b *builder) Build() []Line {
 		}
 	}
 
+	// A line can take a segment after the builder finished it, so the
+	// segments take their columns when every line is complete.
+	for _, l := range b.lines {
+		l.Segments.place()
+	}
+
 	return b.lines
 }
 

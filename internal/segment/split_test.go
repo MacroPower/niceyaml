@@ -1232,3 +1232,42 @@ func TestTextLen(t *testing.T) {
 		}
 	})
 }
+
+// TestSplit_SegmentStarts verifies that each segment of a line that Split
+// returns starts at the column where the segment before it ends. A line
+// that takes a part after Split finished it, such as the line ending that
+// the lexer repeats after a tag, keeps that order.
+func TestSplit_SegmentStarts(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]string{
+		"flow sequence":               "[a, {b: 1}, \"c\"]\n",
+		"multi-byte runes":            "日本: 語 # コメント\n",
+		"block scalar":                "a: |\n  one\n  two\nb: 2\n",
+		"block scalar that keeps":     "a: |+\n  one\n\n",
+		"repeated ending after a tag": "a: !!str\n  b\n",
+		"crlf after a comment":        "a: 1 # c\r\nb: 2\r\n",
+		"indented keys":               "a:\n  b:\n    c: 1\n",
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := segment.Split(tokens.Tokenize(input))
+			require.NotEmpty(t, lines)
+
+			for _, l := range lines {
+				col := 0
+
+				for _, seg := range l.Segments {
+					assert.Equal(t, col, seg.Start(), "line %d", l.Number)
+
+					col += seg.Width()
+				}
+
+				assert.Equal(t, col, l.Segments.Width(), "line %d", l.Number)
+			}
+		})
+	}
+}

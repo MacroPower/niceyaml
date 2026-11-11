@@ -150,11 +150,11 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 	key := &token.Token{Origin: "key"}
 	colon := &token.Token{Origin: ":"}
 	value := &token.Token{Origin: " value\n"}
-	entry := segment.Segments{
+	entry := segment.NewSegments(
 		segment.New(key, key),
 		segment.New(colon, colon),
 		segment.New(value, value),
-	}
+	)
 
 	// The lexer bundles the indentation of the next line into the end of a
 	// plain scalar, so " x\n  " spans two lines and leaves "  " on the second.
@@ -183,41 +183,55 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 		"negative column":                  {segs: entry, col: -1},
 		"no segments":                      {segs: nil, col: 0},
 		"indentation resolves to the next token": {
-			segs: segment.Segments{segment.New(prev, indent), segment.New(other, other)},
+			segs: segment.NewSegments(segment.New(prev, indent), segment.New(other, other)),
 			col:  0,
 			want: other,
 		},
 		"last indentation column resolves to the next token": {
-			segs: segment.Segments{segment.New(prev, indent), segment.New(other, other)},
+			segs: segment.NewSegments(segment.New(prev, indent), segment.New(other, other)),
 			col:  1,
 			want: other,
 		},
 		"indentation with a tab resolves to the next token": {
-			segs: segment.Segments{segment.New(prev, tabbed), segment.New(other, other)},
+			segs: segment.NewSegments(segment.New(prev, tabbed), segment.New(other, other)),
 			col:  1,
 			want: other,
 		},
 		"indentation with nothing after it": {
-			segs: segment.Segments{segment.New(prev, indent)},
+			segs: segment.NewSegments(segment.New(prev, indent)),
 			col:  0,
 			want: nil,
 		},
 		"indentation before only the line ending of the next token": {
-			segs: segment.Segments{segment.New(tabbed, tabbed), segment.New(next, nl)},
+			segs: segment.NewSegments(segment.New(tabbed, tabbed), segment.New(next, nl)),
 			col:  0,
 			want: nil,
 		},
 		"indentation skips an empty token to reach the next one": {
-			segs: segment.Segments{
+			segs: segment.NewSegments(
 				segment.New(prev, indent),
 				segment.New(empty, empty),
 				segment.New(other, other),
-			},
+			),
 			col:  0,
 			want: other,
 		},
+		"a token after an empty token": {
+			segs: segment.NewSegments(
+				segment.New(key, key),
+				segment.New(empty, empty),
+				segment.New(colon, colon),
+			),
+			col:  3,
+			want: colon,
+		},
+		"the column where an empty token sits at the end": {
+			segs: segment.NewSegments(segment.New(key, key), segment.New(empty, empty)),
+			col:  3,
+			want: nil,
+		},
 		"whitespace with a line ending keeps its own token": {
-			segs: segment.Segments{segment.New(blank, blank)},
+			segs: segment.NewSegments(segment.New(blank, blank)),
 			col:  0,
 			want: blank,
 		},
@@ -232,11 +246,35 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 	}
 }
 
+func TestNewSegments(t *testing.T) {
+	t.Parallel()
+
+	key := &token.Token{Origin: "key"}
+	empty := &token.Token{}
+	wide := &token.Token{Origin: ": 日本\n"}
+
+	segs := segment.NewSegments(
+		segment.New(key, key),
+		segment.New(empty, empty),
+		segment.New(wide, wide),
+	)
+
+	starts := make([]int, len(segs))
+	for i, seg := range segs {
+		starts[i] = seg.Start()
+	}
+
+	assert.Equal(t, []int{0, 3, 3}, starts)
+	assert.Equal(t, 7, segs.Width())
+	assert.Equal(t, 0, segment.NewSegments().Width())
+	assert.Equal(t, 0, segment.Segments(nil).Width())
+}
+
 func TestSegments_PartTokens(t *testing.T) {
 	t.Parallel()
 
 	tk := &token.Token{Origin: "x"}
-	segs := segment.Segments{segment.New(tk, tk)}
+	segs := segment.NewSegments(segment.New(tk, tk))
 
 	assert.Equal(t, token.Tokens{tk}, segs.PartTokens())
 	assert.Nil(t, segment.Segments(nil).PartTokens())

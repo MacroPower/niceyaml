@@ -1276,6 +1276,12 @@ func (s *Source) Text() string {
 // with a final line ending, the offset of column 0 of the line after it
 // is the length of the text.
 //
+// Offset reads the start of the line from an index and then walks the
+// runes of that line up to the column. A column counts runes and an offset
+// counts bytes, so a call takes time in proportion to the column. That
+// time matters only on a line of many thousands of runes, such as a
+// minified document.
+//
 // Offset reports false for a position outside the text. A position is
 // outside the text when it has a negative line or column, a line past
 // the last, or a column past the end of its line. Offset also reports
@@ -1308,6 +1314,10 @@ func (s *Source) Offset(pos position.Position) (int, bool) {
 //	if ok {
 //		path, _ := doc.PathAt(pos)
 //	}
+//
+// PositionAt finds the line by search and then walks the runes of that line
+// up to off, as [Source.Offset] walks them up to a column. A call thus
+// takes time in proportion to the column it returns.
 //
 // PositionAt reports false for a negative off and for one past the length
 // of the text. It also reports false for a Source that

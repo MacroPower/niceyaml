@@ -1,6 +1,9 @@
 package line_test
 
 import (
+	"fmt"
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/goccy/go-yaml/token"
@@ -8,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
 
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/tokens"
@@ -31,6 +35,24 @@ func TestLine(t *testing.T) {
 
 		for range l.Runes() {
 			t.Fatal("zero value must not yield")
+		}
+
+		// The zero value does not hold a token, with or without a position.
+		for _, tk := range []*token.Token{
+			nil,
+			{Type: token.StringType, Value: "key", Origin: "key"},
+			{
+				Type: token.StringType, Value: "key", Origin: "key",
+				Position: &token.Position{Line: 1, Column: 1, Offset: 1},
+			},
+		} {
+			span, ok := l.TokenSpan(tk)
+			assert.False(t, ok)
+			assert.Equal(t, position.Span{}, span)
+
+			span, ok = l.ContentSpan(tk)
+			assert.False(t, ok)
+			assert.Equal(t, position.Span{}, span)
 		}
 	})
 
@@ -274,6 +296,180 @@ func TestLine_TokenSpan(t *testing.T) {
 			assert.Equal(t, tc.wantContent, cspan)
 		})
 	}
+}
+
+// TestLine_TokenSpan_Offsets verifies that a line finds each of its tokens
+// whatever offsets the tokens carry. A stream built by hand can leave its
+// positions out, give every token one offset, or give offsets that do not
+// follow the order of the line.
+//
+// A line reads a few tokens one by one and indexes a larger number of
+// them. Each case thus runs on lines of several lengths. Two of them are
+// the longest line that does not index its tokens and a line of one token
+// more.
+func TestLine_TokenSpan_Offsets(t *testing.T) {
+	t.Parallel()
+
+	at := func(offset int) *token.Position {
+		return &token.Position{Line: 1, Column: 1, Offset: offset}
+	}
+
+	// The numbers of tokens that each case adds to the end of its line.
+	// The tokens do not have positions and do not equal a token of a case.
+	fills := []int{0, 4, 5, 60}
+
+	fill := func(tks token.Tokens, n int) token.Tokens {
+		for range n {
+			tks = append(tks, &token.Token{Type: token.SequenceEndType, Value: "]", Origin: "]"})
+		}
+
+		return tks
+	}
+
+	tcs := map[string]struct {
+		positions [4]*token.Position
+	}{
+		"without positions":       {},
+		"one offset for each":     {positions: [4]*token.Position{at(5), at(5), at(5), at(5)}},
+		"descending offsets":      {positions: [4]*token.Position{at(40), at(30), at(20), at(10)}},
+		"offsets out of order":    {positions: [4]*token.Position{at(20), at(40), at(10), at(30)}},
+		"positions on some alone": {positions: [4]*token.Position{nil, at(7), nil, at(3)}},
+		"negative offsets":        {positions: [4]*token.Position{at(-5), at(-1), at(-5), at(-9)}},
+		"the largest offset for each": {
+			positions: [4]*token.Position{at(math.MaxInt), at(math.MaxInt), at(math.MaxInt), at(math.MaxInt)},
+		},
+		"the largest and the smallest offsets": {
+			positions: [4]*token.Position{at(math.MaxInt), at(math.MinInt), at(math.MaxInt - 1), at(math.MinInt)},
+		},
+	}
+
+	for name, tc := range tcs {
+		for _, n := range fills {
+			t.Run(fmt.Sprintf("%s/%d tokens", name, 4+n), func(t *testing.T) {
+				t.Parallel()
+
+				tks := fill(token.Tokens{
+					{Type: token.StringType, Value: "key", Origin: "key", Position: tc.positions[0]},
+					{Type: token.MappingValueType, Value: ":", Origin: ":", Position: tc.positions[1]},
+					{Type: token.StringType, Value: "one", Origin: "  one ", Position: tc.positions[2]},
+					{Type: token.CommentType, Value: " two", Origin: "# two", Position: tc.positions[3]},
+				}, n)
+
+				lines := line.NewLines(tks)
+				require.Equal(t, 1, lines.Len())
+
+				l := lines.Line(0)
+				require.Equal(t, "key:  one # two"+strings.Repeat("]", n), l.Content())
+
+				wantSpans := []position.Span{
+					position.NewSpan(0, 3),
+					position.NewSpan(3, 4),
+					position.NewSpan(4, 10),
+					position.NewSpan(10, 15),
+				}
+				wantContent := []position.Span{
+					position.NewSpan(0, 3),
+					position.NewSpan(3, 4),
+					position.NewSpan(6, 9),
+					position.NewSpan(10, 15),
+				}
+
+				for i, tk := range tks[:4] {
+					// The lexer token, the part of it on the line, and a copy
+					// of each find the same columns.
+					for _, found := range []*token.Token{tk, l.Token(i), tk.Clone(), l.Token(i).Clone()} {
+						span, ok := l.TokenSpan(found)
+						require.True(t, ok, "token %d", i)
+						assert.Equal(t, wantSpans[i], span, "token %d", i)
+
+						content, ok := l.ContentSpan(found)
+						require.True(t, ok, "token %d", i)
+						assert.Equal(t, wantContent[i], content, "token %d", i)
+					}
+
+					assert.Equal(t, position.Ranges{yamltest.LineRange(0, wantSpans[i].Start, wantSpans[i].End)},
+						lines.TokenRanges(tk), "token %d", i)
+					assert.Equal(t, position.Ranges{yamltest.LineRange(0, wantContent[i].Start, wantContent[i].End)},
+						lines.ContentRanges(tk.Clone()), "token %d", i)
+				}
+
+				absent := &token.Token{Type: token.StringType, Value: "key", Origin: "key", Position: at(99)}
+
+				_, ok := l.TokenSpan(absent)
+				assert.False(t, ok, "a token at an offset that the line does not hold")
+				assert.Nil(t, lines.TokenRanges(absent))
+			})
+		}
+	}
+
+	// A token matches by its type, value, origin, and position, so the
+	// second of two tokens that agree in all four finds the first.
+	for _, n := range fills {
+		t.Run(fmt.Sprintf("equal tokens find the first of them/%d tokens", 3+n), func(t *testing.T) {
+			t.Parallel()
+
+			tks := fill(token.Tokens{
+				{Type: token.StringType, Value: "x", Origin: "x"},
+				{Type: token.CollectEntryType, Value: ",", Origin: ","},
+				{Type: token.StringType, Value: "x", Origin: "x"},
+			}, n)
+
+			lines := line.NewLines(tks)
+			l := lines.Line(0)
+
+			for _, tk := range []*token.Token{tks[0], tks[2], tks[2].Clone()} {
+				span, ok := l.TokenSpan(tk)
+				require.True(t, ok)
+				assert.Equal(t, position.NewSpan(0, 1), span)
+
+				assert.Equal(t, position.Ranges{yamltest.LineRange(0, 0, 1)}, lines.TokenRanges(tk))
+				assert.Equal(t, position.Ranges{yamltest.LineRange(0, 0, 1)}, lines.ContentRanges(tk))
+			}
+		})
+	}
+}
+
+// TestLine_TokenSpan_LongLine verifies that the tokens of a line that
+// holds thousands of them each find their own columns. The spans follow
+// each other from column 0 to the width of the line, and each column
+// resolves to the token whose span holds it.
+func TestLine_TokenSpan_LongLine(t *testing.T) {
+	t.Parallel()
+
+	lines := oneLine(500)
+	require.Equal(t, 1, lines.Len())
+
+	l := lines.Line(0)
+	content := []rune(l.Content())
+	require.Len(t, content, l.Width())
+
+	tks := l.SourceTokens()
+	require.Len(t, tks, 500*10+1)
+
+	col := 0
+
+	for i, tk := range tks {
+		span, ok := l.TokenSpan(tk)
+		require.True(t, ok, "token %d", i)
+		require.Equal(t, col, span.Start, "token %d", i)
+		require.Equal(t, tokens.TrimLineEnding(tk.Origin), string(content[span.Start:span.End]), "token %d", i)
+
+		got, ok := l.ContentSpan(tk.Clone())
+		require.True(t, ok, "token %d", i)
+		require.Equal(t, strings.Trim(tk.Origin, " \n"), string(content[got.Start:got.End]), "token %d", i)
+
+		for c := span.Start; c < span.End; c++ {
+			require.Same(t, tk, l.TokenAt(c), "column %d", c)
+		}
+
+		require.Equal(t, position.Ranges{yamltest.LineRange(0, got.Start, got.End)}, lines.ContentRanges(tk))
+
+		col = span.End
+	}
+
+	assert.Equal(t, l.Width(), col)
+	assert.Equal(t, l.Width(), lines.Width())
+	assert.Nil(t, l.TokenAt(col))
 }
 
 func TestLine_String(t *testing.T) {
