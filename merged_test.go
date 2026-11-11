@@ -5723,12 +5723,12 @@ func TestNode_Origin(t *testing.T) {
 			wantPath:  "$.server.port",
 			want:      "  port: 9",
 		},
-		"a mapping read through an alias comes from the content of the anchor": {
+		"a mapping that a layer writes as an alias comes from the alias": {
 			inputs:    []string{baseInput, aliased},
 			path:      server,
 			wantLayer: "prod.yaml",
 			wantPath:  "$.server",
-			want:      "  port: 9",
+			want:      "server: *defaults",
 		},
 		"a value a merge key brings in comes from the content of the anchor": {
 			inputs: []string{

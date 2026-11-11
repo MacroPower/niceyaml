@@ -545,7 +545,7 @@ func (u Unmarshaler) applyTo(o *unmarshaler.Options) {
 // [yaml.RawMessage].
 //
 // The decoder writes the value out as text for the decode function. A
-// decode of a node that holds an alias then fails when the aliases of
+// decode of a value that holds an alias then fails when the aliases of
 // the document repeat more text than the document byte limit of the Source
 // allows.
 // It also fails when they nest the document past its depth limit. Each
@@ -755,11 +755,14 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // pointer, or not a pointer, DecodeInto returns an error that wraps
 // [ErrDecodeTarget] before anything runs. So does a decode under
 // [UnknownFieldsWarn] whose ctx does not carry a [Warnings] collector,
-// with an error that wraps [ErrNoWarnings]. When the node holds an alias, the
-// decode counts what a decode of the whole document reads, with each alias
-// reading its content in full. When aliases make up too much of that count,
-// DecodeInto returns an error that matches [ErrExcessiveAliasing], bound at
-// the alias of the document that repeats the most. For a v whose type reads
+// with an error that wraps [ErrNoWarnings]. When the value that the decode
+// reads holds an alias, the decode counts what a decode of the whole
+// document reads, with each alias reading its content in full. For a Node
+// at a local alias without a tag that lies outside the content of its
+// anchor, that value is the content of the anchor.
+// When aliases make up too much of that count, DecodeInto returns an
+// error that matches [ErrExcessiveAliasing], bound at the alias of the
+// document that repeats the most. For a v whose type reads
 // text anywhere, the error for aliases past the bounds that the document
 // byte limit and the depth limit of the [Source] set on them matches
 // [ErrLimit] too.
@@ -800,9 +803,9 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 		return err
 	}
 
-	err = aliasing.CheckDecode(n)
+	err = aliasing.CheckDecode(decodedValue{n})
 	if err == nil && aliasing.DecodesTextWith(reflect.TypeOf(v).Elem(), cfg.unmarshalers) {
-		err = aliasing.CheckDecodeText(n)
+		err = aliasing.CheckDecodeText(decodedValue{n})
 	}
 
 	if err != nil {
@@ -811,7 +814,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 
 	// The decoder step reports each problem as an error, whatever it wraps,
 	// because the decoder stops at the first and reads no value past it.
-	err = n.bindOwn(AsErrors(n.decodeUnbound(ctx, n.AST(), v, cfg, comments)))
+	err = n.bindOwn(AsErrors(n.decodeUnbound(ctx, n.valueNode(), v, cfg, comments)))
 
 	if cfg.unknownFields == UnknownFieldsWarn {
 		n.warnUnknownFields(ctx, reflect.TypeOf(v).Elem(), cfg, err)
@@ -835,7 +838,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments
 // does not run when ctx does not carry a collector, when ctx has ended, or
 // when err, the error of the decoder step, holds a panic.
 func (n *Node) warnUnknownFields(ctx context.Context, t reflect.Type, cfg decodeConfig, err error) {
-	if scopeOf(ctx) == nil || ctx.Err() != nil || holdsPanic(err) || !astnode.HasContent(n.AST()) {
+	if scopeOf(ctx) == nil || ctx.Err() != nil || holdsPanic(err) || !astnode.HasContent(n.valueNode()) {
 		return
 	}
 
@@ -843,8 +846,8 @@ func (n *Node) warnUnknownFields(ctx context.Context, t reflect.Type, cfg decode
 	strict.unknownFields = UnknownFieldsReject
 
 	c := newProblemCollector(ctx, n, strict)
-	c.register(n.AST())
-	c.collectUnknown(t, n.AST())
+	c.register(n.valueNode())
+	c.collectUnknown(t, n.valueNode())
 
 	if ctx.Err() != nil {
 		return
@@ -1528,7 +1531,7 @@ func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, erro
 		return zero, n.bindOwn(err)
 	}
 
-	start, err := cfg.defaults.start(reflect.TypeFor[T](), n.AST())
+	start, err := cfg.defaults.start(reflect.TypeFor[T](), n.valueNode())
 	if err != nil {
 		return zero, n.bindOwn(err)
 	}
@@ -2981,12 +2984,21 @@ func rejectionLabel(label rejection.Label) error {
 // same key takes that path too, or when the path selects nothing, as below
 // a tag that converts a collection. So an alias binds at its "*" as it
 // does where the path selects it.
+//
+// For a Node at a local alias, a rejection at the root of the content
+// that the alias reads binds at the path of the Node, and thus at the
+// alias. A rejection at the root of a Node at a tagged alias or at an
+// alias to a reference document binds there too.
 func (n *Node) rejectionLocation(tk *token.Token) []ErrorOption {
 	index, resolver := n.doc.pathIndex(), n.doc.pathResolver()
 
 	path, selects, ok := index.OwnerPath(resolver, tk)
 	if !ok {
 		return []ErrorOption{atToken(tk)}
+	}
+
+	if n.readsRoot(tk) {
+		return []ErrorOption{AtPath(n.base)}
 	}
 
 	if merged, ok := index.MergedOwnerPath(resolver, tk); ok && n.bindsAt(merged, index.OwnerToken(tk)) {

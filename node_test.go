@@ -398,6 +398,328 @@ func TestNode_Kind(t *testing.T) {
 	})
 }
 
+func TestNode_Target(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		opts  []niceyaml.SourceOption
+		input string
+		path  paths.Path
+		// The path of the target, or empty when the target is the Node.
+		want string
+		// The text of the AST of the target.
+		wantAST string
+		span    position.Span
+		// Whether the target lies in a reference Source.
+		reference bool
+	}{
+		"alias": {
+			input:   stringtest.LinesLF("base: &x", "  port: 1", "other: 1", "c: *x"),
+			path:    paths.Doc().Child("c"),
+			want:    "$.base",
+			wantAST: "  port: 1",
+			span:    position.NewSpan(0, 2),
+		},
+		"tagged alias": {
+			input:   stringtest.LinesLF("base: &x {port: 1}", "d: !t *x"),
+			path:    paths.Doc().Child("d"),
+			want:    "$.base",
+			wantAST: "{port: 1}",
+			span:    position.NewSpan(0, 1),
+		},
+		"alias element": {
+			input:   stringtest.LinesLF("list:", "  - &e {q: 1}", "g: *e"),
+			path:    paths.Doc().Child("g"),
+			want:    "$.list[0]",
+			wantAST: "{q: 1}",
+			span:    position.NewSpan(1, 2),
+		},
+		"anchor on a merge value": {
+			input:   stringtest.LinesLF("m:", "  <<: &mm {z: 1}", "f: *mm"),
+			path:    paths.Doc().Child("f"),
+			want:    "$.m.<<",
+			wantAST: "{z: 1}",
+			span:    position.NewSpan(1, 2),
+		},
+		"anchor on a hidden entry": {
+			opts:    []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			input:   stringtest.LinesLF("a: &x {k: 1}", "a: 2", "c: *x"),
+			path:    paths.Doc().Child("c"),
+			want:    "$.a",
+			wantAST: "{k: 1}",
+			span:    position.NewSpan(0, 1),
+		},
+		"anchor on a hidden block entry": {
+			opts:    []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			input:   stringtest.LinesLF("a: &x", "  k: 1", "a: 2", "c: *x"),
+			path:    paths.Doc().Child("c"),
+			want:    "$.a",
+			wantAST: "  k: 1",
+			span:    position.NewSpan(0, 2),
+		},
+		"anchor on a hidden merge value": {
+			opts:    []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			input:   stringtest.LinesLF("m:", "  <<: &x {k: 1}", "  <<: {j: 2}", "c: *x"),
+			path:    paths.Doc().Child("c"),
+			want:    "$.m.<<",
+			wantAST: "{k: 1}",
+			span:    position.NewSpan(1, 2),
+		},
+		"alias inside its own anchor": {
+			input:   "a: &x {b: *x}\n",
+			path:    paths.Doc().Child("a", "b"),
+			want:    "$.a",
+			wantAST: "{b: *x}",
+			span:    position.NewSpan(0, 1),
+		},
+		"alias to a reference": {
+			opts:      []niceyaml.SourceOption{yamltest.References("other: 1\nbase: &base {port: 80}\n")},
+			input:     "server: *base\n",
+			path:      paths.Doc().Child("server"),
+			want:      "$.base",
+			wantAST:   "{port: 80}",
+			span:      position.NewSpan(1, 2),
+			reference: true,
+		},
+		"not an alias": {
+			input: stringtest.LinesLF("base: &x {port: 1}", "c: *x"),
+			path:  paths.Doc().Child("base"),
+		},
+		"path through an alias": {
+			input: stringtest.LinesLF("base: &x {port: 1}", "c: *x"),
+			path:  paths.Doc().Child("c", "port"),
+		},
+		"root": {
+			input: "a: 1\n",
+			path:  paths.Doc(),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
+			n := yamltest.AtOrSelf(t, doc, tc.path)
+
+			got, err := n.Target()
+			require.NoError(t, err)
+
+			if tc.want == "" {
+				assert.Same(t, n, got)
+
+				return
+			}
+
+			assert.NotSame(t, n, got)
+			assert.Equal(t, tc.want, got.Path().String())
+			assert.Equal(t, tc.wantAST, got.AST().String())
+			assert.Equal(t, tc.span, got.Span())
+			assert.Equal(t, tc.reference, got.Source() != doc.Source())
+
+			// The Node at the alias decodes what the target decodes.
+			want, err := got.Decode[any](t.Context())
+			require.NoError(t, err)
+
+			if name != "alias inside its own anchor" {
+				value, err := n.Decode[any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, want, value)
+			}
+		})
+	}
+
+	t.Run("anchor below a hidden entry", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a:",
+			"  b: &x {k: 1}",
+			"a: 2",
+			"c: *x",
+		), niceyaml.WithAllowDuplicateKeys(true), niceyaml.WithName("a.yaml"))
+
+		c := yamltest.At(t, doc, paths.Doc().Child("c"))
+
+		got, err := c.Target()
+		require.NoError(t, err)
+
+		// The path spells the anchor, but the later entry of a holds the
+		// scalar 2, so the path selects no node.
+		assert.Equal(t, "$.a.b", got.Path().String())
+		assert.Equal(t, "{k: 1}", got.AST().String())
+		assert.Equal(t, position.NewSpan(1, 2), got.Span())
+
+		_, err = doc.At(got.Path())
+		require.Error(t, err)
+
+		// An error bound at the root of the target resolves by its path,
+		// which reaches the later entry, outside the view of the target.
+		bound := yamltest.RequireSourceError(t, got.Bind(niceyaml.NewError("bad")))
+		at, ok := bound.Position()
+		require.True(t, ok)
+		assert.Equal(t, position.New(2, 3), at)
+		assert.False(t, bound.Annotate(got.View()))
+
+		// A decode that rejects the content binds at the content.
+		_, err = got.Decode[int](t.Context())
+		require.Error(t, err)
+
+		bound = yamltest.RequireSourceError(t, err)
+		assert.True(t, bound.Annotate(got.View()))
+	})
+
+	t.Run("an alias without an anchor", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "*nope\n")
+
+		_, err := doc.Target()
+		require.ErrorIs(t, err, paths.ErrAlias)
+	})
+
+	t.Run("a nil Node", func(t *testing.T) {
+		t.Parallel()
+
+		var n *niceyaml.Node
+
+		got, err := n.Target()
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
+
+	t.Run("a document that did not parse", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.UnparsedDocument(t, "a: [\n")
+
+		_, err := doc.Target()
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+	})
+}
+
+// A Node at an alias describes the alias as the document writes it, and
+// a decode reads the content of the anchor. An error below the alias binds
+// at the anchor, which the view of the target holds.
+func TestNode_Target_errorBelowAlias(t *testing.T) {
+	t.Parallel()
+
+	type T struct {
+		Port string `yaml:"port"`
+	}
+
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"base: &x",
+		"  port: [1]",
+		"other: 1",
+		"c: *x",
+	), niceyaml.WithName("a.yaml"))
+
+	c := yamltest.At(t, doc, paths.Doc().Child("c"))
+	assert.IsType(t, &ast.AliasNode{}, c.AST())
+	assert.Equal(t, position.NewSpan(3, 4), c.Span())
+	assert.Equal(t, niceyaml.NodeMapping, c.Kind())
+
+	tks := c.Tokens()
+	require.NotEmpty(t, tks)
+	assert.Equal(t, token.AliasType, tks[0].Type)
+
+	target, err := c.Target()
+	require.NoError(t, err)
+
+	var v T
+
+	err = c.DecodeInto(t.Context(), &v)
+	require.Error(t, err)
+
+	bound := yamltest.RequireSourceError(t, err)
+	assert.False(t, bound.Annotate(c.View()))
+	assert.True(t, bound.Annotate(target.View()))
+}
+
+// A path that the content of an anchor does not hold binds at the alias
+// that reads the anchor. An error at the root of a Node at the alias binds
+// there too. The view of that Node holds the alias even when the alias
+// sits on the line after its key.
+func TestNode_Bind_missingBelowAlias(t *testing.T) {
+	t.Parallel()
+
+	ref := niceyaml.NewSourceFromString("defaults: &r {a: 1}\n", niceyaml.WithName("ref.yaml"))
+
+	tcs := map[string]struct {
+		input string
+		scope paths.Path
+		path  paths.Path
+		want  string
+		// Whether the view of the Node at scope marks the error.
+		marked bool
+	}{
+		"alias on the line after its key": {
+			input:  "base: &x\n  port: 1\nc:\n  *x\n",
+			scope:  paths.Doc().Child("c"),
+			path:   paths.Current().Child("zz"),
+			want:   "a.yaml:4:3: $.c.zz: missing",
+			marked: true,
+		},
+		"alias on the line of its key": {
+			input:  "base: &x\n  port: 1\nc: *x\n",
+			scope:  paths.Doc().Child("c"),
+			path:   paths.Current().Child("zz"),
+			want:   "a.yaml:3:4: $.c.zz: missing",
+			marked: true,
+		},
+		"tagged alias on the line after its key": {
+			input:  "base: &x\n  port: 1\nc: !t\n  *x\n",
+			scope:  paths.Doc().Child("c"),
+			path:   paths.Current().Child("zz"),
+			want:   "a.yaml:4:3: $.c.zz: missing",
+			marked: true,
+		},
+		"alias element": {
+			input:  "base: &x\n  port: 1\nc:\n  - *x\n",
+			scope:  paths.Doc().Child("c").Index(0),
+			path:   paths.Current().Child("zz"),
+			want:   "a.yaml:4:5: $.c[0].zz: missing",
+			marked: true,
+		},
+		"alias below a scope": {
+			input:  "base: &x\n  port: 1\nc:\n  *x\n",
+			scope:  paths.Doc(),
+			path:   paths.Current().Child("c").Child("zz"),
+			want:   "a.yaml:4:3: $.c.zz: missing",
+			marked: true,
+		},
+		"alias of an anchor with a merge key of a reference": {
+			input:  "base: &x\n  <<: *r\n  port: 1\nc:\n  *x\n",
+			scope:  paths.Doc().Child("c"),
+			path:   paths.Current().Child("zz"),
+			want:   "a.yaml:5:3: $.c.zz: missing",
+			marked: true,
+		},
+		"path through the alias binds at the anchor": {
+			input: "base: &x\n  port: 1\nc:\n  *x\n",
+			scope: paths.Doc().Child("c"),
+			path:  paths.Current().Child("port").Child("zz"),
+			want:  "a.yaml:2:9: $.c.port.zz: missing",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("a.yaml"), niceyaml.WithReferences(ref))
+			scope := yamltest.At(t, doc, tc.scope)
+
+			err := scope.Bind(niceyaml.NewError("missing", niceyaml.AtPath(tc.path)))
+			require.EqualError(t, err, tc.want)
+
+			bound := yamltest.RequireSourceError(t, err)
+			assert.Equal(t, tc.marked, bound.Annotate(scope.View()))
+		})
+	}
+}
+
 func TestNode_At_Root(t *testing.T) {
 	t.Parallel()
 
@@ -2873,8 +3195,9 @@ func TestDocument_At_Scope(t *testing.T) {
 	t.Run("scope on an alias", func(t *testing.T) {
 		t.Parallel()
 
-		// The node of an alias is the content of its anchor, but the node
-		// of a tagged alias is the tag, which sits on the line of the alias.
+		// The node of an alias is the alias, and the node of a tagged alias
+		// is the tag. Each sits on the line of the alias, and a decode reads
+		// the content of the anchor.
 		tcs := map[string]struct {
 			input string
 			want  string
@@ -2886,8 +3209,8 @@ func TestDocument_At_Scope(t *testing.T) {
 					"mid: 2",
 					"c: *x",
 				),
-				want: "{k: 1}",
-				span: position.NewSpan(0, 1),
+				want: "*x",
+				span: position.NewSpan(2, 3),
 			},
 			"tagged alias": {
 				input: stringtest.LinesLF(
@@ -5590,65 +5913,70 @@ func TestNode_At_Span(t *testing.T) {
 		})
 	}
 
-	t.Run("a path that ends at an alias covers the content of the anchor", func(t *testing.T) {
+	t.Run("a path that ends at an alias covers the alias", func(t *testing.T) {
 		t.Parallel()
 
-		// An error at such a Node binds at the alias, outside the span.
-		// Each case lists the span, and the view Node.Span documents for
-		// the error: the lines of the Node and the line of the error.
+		// An error at such a Node binds at the alias, inside the span.
+		// Node.Target spans the content of the anchor.
 		tcs := map[string]struct {
-			input string
-			path  paths.Path
-			want  string
-			span  position.Span
+			input  string
+			path   paths.Path
+			target paths.Path
+			want   string
+			span   position.Span
+			anchor position.Span
 		}{
 			"alias under a key": {
-				input: stringtest.LinesLF("base: &h", "  open: 9", "  close: 5", "mid: 0", "hours: *h"),
-				path:  paths.Current().Child("hours"),
-				span:  position.NewSpan(1, 3),
+				input:  stringtest.LinesLF("base: &h", "  open: 9", "  close: 5", "mid: 0", "hours: *h"),
+				path:   paths.Current().Child("hours"),
+				target: paths.Doc().Child("base"),
+				span:   position.NewSpan(4, 5),
+				anchor: position.NewSpan(0, 3),
 				want: stringtest.JoinLF(
-					"   2 |   open: 9",
-					"   3 |   close: 5",
 					"   5 | hours: *h",
 					"     |        ^ bad",
 				),
 			},
 			"alias on the line below its key": {
-				input: stringtest.LinesLF("base: &h", "  open: 9", "hours:", "  *h"),
-				path:  paths.Current().Child("hours"),
-				span:  position.NewSpan(1, 2),
+				input:  stringtest.LinesLF("base: &h", "  open: 9", "hours:", "  *h"),
+				path:   paths.Current().Child("hours"),
+				target: paths.Doc().Child("base"),
+				span:   position.NewSpan(3, 4),
+				anchor: position.NewSpan(0, 2),
 				want: stringtest.JoinLF(
-					"   2 |   open: 9",
 					"   4 |   *h",
 					"     |   ^ bad",
 				),
 			},
 			"alias element": {
-				input: stringtest.LinesLF("base: &d", "  - mon", "days:", "  - *d"),
-				path:  paths.Current().Child("days").Index(0),
-				span:  position.NewSpan(1, 2),
+				input:  stringtest.LinesLF("base: &d", "  - mon", "days:", "  - *d"),
+				path:   paths.Current().Child("days").Index(0),
+				target: paths.Doc().Child("base"),
+				span:   position.NewSpan(3, 4),
+				anchor: position.NewSpan(0, 2),
 				want: stringtest.JoinLF(
-					"   2 |   - mon",
 					"   4 |   - *d",
 					"     |     ^ bad",
 				),
 			},
 			"alias to a scalar": {
-				input: stringtest.LinesLF("base: &v one", "mid: 0", "plain:", "  *v"),
-				path:  paths.Current().Child("plain"),
-				span:  position.NewSpan(0, 1),
+				input:  stringtest.LinesLF("base: &v one", "mid: 0", "plain:", "  *v"),
+				path:   paths.Current().Child("plain"),
+				target: paths.Doc().Child("base"),
+				span:   position.NewSpan(3, 4),
+				anchor: position.NewSpan(0, 1),
 				want: stringtest.JoinLF(
-					"   1 | base: &v one",
 					"   4 |   *v",
 					"     |   ^ bad",
 				),
 			},
 			"alias key": {
-				input: stringtest.LinesLF("x: &k hours", "*k :", "  open: 9"),
-				path:  paths.Current().Child("hours").Key(),
-				span:  position.NewSpan(0, 1),
+				input:  stringtest.LinesLF("x: &k hours", "*k :", "  open: 9"),
+				path:   paths.Current().Child("hours").Key(),
+				target: paths.Doc().Child("x"),
+				span:   position.NewSpan(1, 2),
+				anchor: position.NewSpan(0, 1),
 				want: stringtest.JoinLF(
-					"   1 | x: &k hours",
 					"   2 | *k :",
 					"     | ^ bad",
 				),
@@ -5672,13 +6000,13 @@ func TestNode_At_Span(t *testing.T) {
 				bound := yamltest.RequireSourceError(t, scoped.Bind(errors.New("bad")))
 
 				view := scoped.View()
-				require.False(t, bound.Annotate(view))
-				assert.Equal(t, scoped.View().String(), view.String())
-
-				pos := yamltest.PositionOf(t, bound)
-				view = scoped.Source().View().Slice(scoped.Span(), position.NewSpan(pos.Line, pos.Line+1))
 				require.True(t, bound.Annotate(view))
 				assert.Equal(t, tc.want, view.String())
+
+				target, err := scoped.Target()
+				require.NoError(t, err)
+				assert.Equal(t, tc.target, target.Path())
+				assert.Equal(t, tc.anchor, target.Span())
 			})
 		}
 	})
@@ -6733,16 +7061,22 @@ func TestNode_Nodes(t *testing.T) {
 		t.Parallel()
 
 		ref := yamltest.At(t, doc, paths.Current().Child("ref"))
-		assert.Equal(t, position.NewSpan(10, 11), ref.Span())
+		assert.Equal(t, position.NewSpan(11, 12), ref.Span())
 
 		// The path points at the alias, so the error binds there, where
 		// the document binds the same path, and the view of the scope
-		// holds no line to mark.
+		// marks it.
 		err := ref.Bind(yamltest.ErrorAt("bad"))
 		require.EqualError(t, err, "m.yaml:12:6: $.ref: bad")
 
 		bound := yamltest.RequireSourceError(t, err)
-		assert.False(t, bound.Annotate(ref.View()))
+		assert.True(t, bound.Annotate(ref.View()))
+
+		// The view of the content of the anchor does not hold the alias.
+		target, err := ref.Target()
+		require.NoError(t, err)
+		assert.Equal(t, position.NewSpan(9, 11), target.Span())
+		assert.False(t, bound.Annotate(target.View()))
 
 		err = doc.Bind(yamltest.ErrorAt("bad", "ref"))
 		require.EqualError(t, err, "m.yaml:12:6: $.ref: bad")

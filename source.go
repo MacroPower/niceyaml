@@ -602,8 +602,11 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 // than the document holds. With the limit on, a decode, a
 // [go.jacobcolvin.com/niceyaml/schema.Schema], and a
 // [go.jacobcolvin.com/niceyaml/matcher.Content] or
-// [go.jacobcolvin.com/niceyaml/matcher.Text] matcher refuse a
-// node of such a document that holds an alias. The error matches
+// [go.jacobcolvin.com/niceyaml/matcher.Text] matcher refuse to read a
+// value of such a document that holds an alias. The value of a [Node] at
+// a local alias without a tag that lies outside the content of its anchor
+// is the content of the anchor. The Alias Limit section of the package
+// documentation describes the value at other aliases. The error matches
 // [ErrExcessiveAliasing], and [IsInvalid] reports it.
 //
 // The limit follows the rule of gopkg.in/yaml.v3, which weighs the share
@@ -1143,6 +1146,19 @@ func (s *Source) referenceDocuments(seen map[*Source]bool) []*Node {
 	}
 
 	return out
+}
+
+// referenceDocumentHolding returns the root of the document of the
+// reference documents of s that holds tk, as [Source.referenceDocuments]
+// lists them, or nil when none of them holds it.
+func (s *Source) referenceDocumentHolding(tk *token.Token) *Node {
+	for _, doc := range s.referenceDocuments(map[*Source]bool{}) {
+		if doc.doc.err == nil && doc.doc.holds(tk) {
+			return doc
+		}
+	}
+
+	return nil
 }
 
 // exportedAnchors returns the anchors a Source finds in s when it reads s

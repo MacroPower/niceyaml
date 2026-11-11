@@ -326,13 +326,14 @@ type Layer interface {
 // and not with those of [MergeUnmarshalers]. So a program that decodes
 // origins gives the same [WithUnmarshalers] to the Source of every layer.
 //
-// A value that a layer reads through an alias or a `<<` merge key has its
-// origin at the content of the anchor. A value that a layer reads through
-// an alias to a reference document of [WithReferences] has its origin at
-// that alias, as [Node.At] scopes it. A value below such an alias, or one
-// that a `<<` merge key brings in from a reference document, does not
-// have a Node in its layer. For such a value, Origin returns the error
-// that Node.At returns for its path. That error wraps
+// A value that a layer writes as an alias has its origin at that alias,
+// as [Node.At] scopes it. [Node.Target] of the origin gives the content
+// of the anchor. A value below such an alias, or one that a `<<` merge
+// key brings in, has its origin at the anchor. A value below an alias
+// to a reference document of [WithReferences], or one that a `<<` merge
+// key brings in from a reference document, does not have a Node in its
+// layer. For such a value, Origin returns the error that Node.At
+// returns for its path. That error wraps
 // [go.jacobcolvin.com/niceyaml/paths.ErrAlias] and binds to the layer
 // that holds the alias.
 func (n *Node) Origin() (*Node, error) {
@@ -580,12 +581,12 @@ func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, erro
 		return nil, err
 	}
 
-	err = aliasing.CheckDecodeText(n)
+	err = aliasing.CheckDecodeText(decodedValue{n})
 	if err != nil {
 		return nil, n.aliasingError(err)
 	}
 
-	if !astnode.HasContent(n.AST()) {
+	if !astnode.HasContent(n.valueNode()) {
 		return nil, nil //nolint:nilnil // A layer with no content holds no value.
 	}
 
@@ -598,7 +599,7 @@ func (l resolvedLayer) read(ctx context.Context, i int) (*layermerge.Value, erro
 		Layer:      i,
 	}
 
-	v, err := r.Read(n.AST())
+	v, err := r.Read(n.valueNode())
 	if err != nil {
 		if nodeErr, ok := errors.AsType[*layermerge.NodeError](err); ok {
 			err = Invalid(nodeErr.Err, atToken(nodeErr.Token))

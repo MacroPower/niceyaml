@@ -8434,6 +8434,37 @@ func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 			input: yamltest.MergeLevels(7),
 			path:  paths.Current().Child("m0"),
 		},
+		"alias of an anchor without an alias in a document past the limit": {
+			// The decode reads the content of the anchor, which repeats
+			// nothing.
+			input: yamltest.AliasLevels(7) + "s: &s {p: 1}\nt: *s\n",
+			path:  paths.Current().Child("t"),
+		},
+		"alias of an anchor with an alias in a document past the limit": {
+			input: yamltest.AliasLevels(7) + "s: &s {p: *l0}\nt: *s\n",
+			path:  paths.Current().Child("t"),
+			err:   niceyaml.ErrExcessiveAliasing,
+		},
+		"tagged alias of an anchor without an alias in a document past the limit": {
+			// The decode reads the tag, which holds the alias.
+			input: yamltest.AliasLevels(7) + "s: &s {p: 1}\nt: !t *s\n",
+			path:  paths.Current().Child("t"),
+			err:   niceyaml.ErrExcessiveAliasing,
+		},
+		"alias to a reference in a document past the limit": {
+			// The decode reads the alias, because its anchor lies in the
+			// reference document.
+			input: yamltest.AliasLevels(7) + "t: *s\n",
+			path:  paths.Current().Child("t"),
+			opts:  []niceyaml.SourceOption{yamltest.References("s: &s {p: 1}\n")},
+			err:   niceyaml.ErrExcessiveAliasing,
+		},
+		"alias inside its own anchor in a document past the limit": {
+			// The decode reads the alias, which reads null.
+			input: yamltest.AliasLevels(7) + "s: &s {p: *s}\n",
+			path:  paths.Current().Child("s").Child("p"),
+			err:   niceyaml.ErrExcessiveAliasing,
+		},
 		"nested lists": {
 			input: yamltest.AliasLevels(7),
 			err:   niceyaml.ErrExcessiveAliasing,
@@ -8706,6 +8737,13 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 					Kind   []string     `yaml:"kind"`
 				})
 			},
+		},
+		"text unmarshaler of an alias of an anchor without an alias": {
+			// The decode reads the content of the anchor, which repeats
+			// nothing.
+			input:  manyAliases + "s: &s hello\nt: *s\n",
+			path:   paths.Current().Child("t"),
+			target: func() any { return new(aliasText) },
 		},
 		"a few aliases": {
 			input:  "a: &a hello\nkind: [*a, *a, *a]\n",
@@ -15154,6 +15192,123 @@ func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
 
 		srcErr := yamltest.RequireSourceError(t, err)
 		assert.Same(t, scoped, yamltest.BoundNode(t, srcErr))
+	})
+}
+
+// A rejection at the root of a Node at an alias binds at the alias, under
+// the path of the Node, whatever the form of the alias. The view of the
+// Node thus holds the error.
+func TestDocument_Decode_Rejection_AliasRoot(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		opts  []niceyaml.SourceOption
+		input string
+		path  paths.Path
+		want  string
+	}{
+		"alias": {
+			input: stringtest.LinesLF("base: &x {port: 80}", "c: *x"),
+			path:  paths.Doc().Child("c"),
+			want:  "a.yaml:2:4: $.c: expected integer, got mapping",
+		},
+		"tagged alias": {
+			input: stringtest.LinesLF("base: &x {port: 80}", "d: !t *x"),
+			path:  paths.Doc().Child("d"),
+			want:  "a.yaml:2:7: $.d: expected integer, got mapping",
+		},
+		"alias element": {
+			input: stringtest.LinesLF("base: &x {port: 80}", "list:", "  - *x"),
+			path:  paths.Doc().Child("list").Index(0),
+			want:  "a.yaml:3:5: $.list[0]: expected integer, got mapping",
+		},
+		"alias of a block mapping": {
+			input: stringtest.LinesLF("base: &x", "  port: 80", "c: *x"),
+			path:  paths.Doc().Child("c"),
+			want:  "a.yaml:3:4: $.c: expected integer, got mapping",
+		},
+		"alias of a scalar": {
+			input: stringtest.LinesLF("base: &x one", "c: *x"),
+			path:  paths.Doc().Child("c"),
+			want:  "a.yaml:2:4: $.c: expected integer, got string",
+		},
+		"alias of a hidden entry": {
+			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			input: stringtest.LinesLF("a: &x {k: 1}", "a: 2", "c: *x"),
+			path:  paths.Doc().Child("c"),
+			want:  "a.yaml:3:4: $.c: expected integer, got mapping",
+		},
+		"alias of a hidden merge value": {
+			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			input: stringtest.LinesLF("m:", "  <<: &x {k: 1}", "  <<: {j: 2}", "c: *x"),
+			path:  paths.Doc().Child("c"),
+			want:  "a.yaml:4:4: $.c: expected integer, got mapping",
+		},
+		"alias in a document that reuses another anchor name": {
+			input: stringtest.LinesLF("u: &y 1", "v: &y 2", "a: &x {p: 1}", "b: *x"),
+			path:  paths.Doc().Child("b"),
+			want:  "a.yaml:4:4: $.b: expected integer, got mapping",
+		},
+		"alias whose anchor name a later anchor reuses": {
+			input: stringtest.LinesLF("a: &x {p: 1}", "b: *x", "c: &x 2", "d: *x"),
+			path:  paths.Doc().Child("b"),
+			want:  "a.yaml:2:4: $.b: expected integer, got mapping",
+		},
+		"alias to a reference": {
+			opts:  []niceyaml.SourceOption{yamltest.References("base: &x {port: 80}\n")},
+			input: "c: *x\n",
+			path:  paths.Doc().Child("c"),
+			want:  "a.yaml:1:4: $.c: expected integer, got mapping",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, append(tc.opts, niceyaml.WithName("a.yaml"))...)
+			n := yamltest.At(t, doc, tc.path)
+
+			_, err := n.Decode[int](t.Context())
+			require.EqualError(t, err, tc.want)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+			srcErr := yamltest.RequireSourceError(t, err)
+			assert.True(t, srcErr.Annotate(n.View()))
+		})
+	}
+
+	// The anchor itself is no alias, so a rejection there binds at the
+	// anchor.
+	t.Run("anchor", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(
+			t,
+			stringtest.LinesLF("base: &x {port: 80}", "c: *x"),
+			niceyaml.WithName("a.yaml"),
+		)
+		n := yamltest.At(t, doc, paths.Doc().Child("base"))
+
+		_, err := n.Decode[int](t.Context())
+		require.EqualError(t, err, "a.yaml:1:1: $.base: expected integer, got mapping")
+	})
+
+	// A decode of an enclosing Node reads the alias below its root, so the
+	// same rejection binds at the anchor under the path of the alias.
+	t.Run("enclosing node", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(
+			t,
+			stringtest.LinesLF("base: &x {port: 80}", "c: *x"),
+			niceyaml.WithName("a.yaml"),
+		)
+
+		_, err := doc.Decode[struct {
+			C int `yaml:"c"`
+		}](t.Context())
+		require.EqualError(t, err, "a.yaml:1:1: $.c: expected integer, got mapping")
 	})
 }
 

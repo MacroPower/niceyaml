@@ -407,11 +407,10 @@ func isExplicitString(node *niceyaml.Node, raw any) bool {
 // returns the node that they wrap. It also reports whether one of the
 // tags it passed is !!str. It follows each alias to the content of its
 // anchor, as the decoder does, and an alias that reads a reference
-// document to the anchor there. [niceyaml.Node.At] follows an alias at
-// the end of a path but stops at a tag on it, so the node of
-// `version: !t *v` still holds the alias. At also stops at an alias that
-// reads a reference document. The first result is nil for an alias that
-// does not resolve or that leads back to itself.
+// document to the anchor there. [niceyaml.Node.At] scopes an alias at
+// the end of a path as the document writes it, so the node of `version:
+// *v` or `version: !t *v` holds the alias. The first result is nil for an
+// alias that does not resolve or that leads back to itself.
 func valueNode(node *niceyaml.Node) (ast.Node, bool) {
 	var (
 		n         = node.AST()

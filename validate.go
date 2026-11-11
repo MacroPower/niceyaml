@@ -1350,7 +1350,7 @@ type DataLocator struct {
 // binds without a position.
 func (n *Node) DataLocator() *DataLocator {
 	return &DataLocator{
-		root: n.AST(),
+		root: n.valueNode(),
 		idx:  datapath.NewIndex(n.DocumentResolver(), n.keyReader()),
 		base: n.base,
 	}
@@ -1374,7 +1374,10 @@ func (n *Node) DataLocator() *DataLocator {
 // on. The error binds where that path binds, as [SourceError.Nearest]
 // describes. A member that a mapping lacks binds at the key of the
 // mapping, and an index past the end of a sequence binds at the key of the
-// sequence. A name below a scalar binds at the scalar.
+// sequence. A name below a scalar binds at the scalar. A name that the
+// content of an anchor lacks directly below its alias binds at the alias.
+// A name that the content lacks deeper down binds inside the anchor, at
+// the nearest value that the content holds.
 //
 // A name can lead behind an alias that the document cannot follow, such
 // as an alias to an anchor of a document from [WithReferences]. So can a
