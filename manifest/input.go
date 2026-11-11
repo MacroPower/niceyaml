@@ -58,10 +58,11 @@ const (
 // describes, and opts change the selection. A p of "-" names the file "-".
 // [Stdin] reads standard input.
 //
-// [Plan.Apply] rewrites only the files of a Path input, so an app should
-// read the files of its user with Path. An app that keeps its files
-// elsewhere, such as a server that stores them in a database, writes
-// [PlanFile.After] for each file of [Plan.Files] itself.
+// [WriteAtomic], the default writer of [Plan.Apply], rewrites only the
+// files of a Path input. An app should thus read the files of its user
+// with Path. An app that keeps its files elsewhere, such as a server that
+// stores them in a database, passes Apply a [WriteFunc] through
+// [WithWriter].
 func Path(p string, opts ...InputOption) Input {
 	return Input{in: &inputDef{kind: inputPath, path: p, cfg: newInputConfig(opts)}}
 }
@@ -98,8 +99,9 @@ func Path(p string, opts ...InputOption) Input {
 // for each path that reaches it through one of those entries. A file
 // that one entry and its own path both reach thus loads twice.
 //
-// [Plan.Apply] does not write a file of fsys, and fails it with an error
-// that matches [ErrReadOnly].
+// [WriteAtomic] does not write a file of fsys, and fails it with an error
+// that matches [ErrReadOnly]. A [WriteFunc] that [WithWriter] gives
+// [Plan.Apply] can write it elsewhere.
 func FS(fsys fs.FS, p string, opts ...InputOption) Input {
 	return Input{in: &inputDef{kind: inputFS, fsys: fsys, path: p, cfg: newInputConfig(opts)}}
 }
@@ -136,7 +138,7 @@ func Reader(name string, r io.Reader, opts ...InputOption) Input {
 }
 
 // newStreamInput returns the [Input] that reads r under name with opts.
-// The kind tells why Apply cannot rewrite the text.
+// The kind tells why [WriteAtomic] cannot rewrite the text.
 func newStreamInput(name string, r io.Reader, kind targetKind, opts []InputOption) Input {
 	cfg := newInputConfig(opts)
 
@@ -168,8 +170,8 @@ type stream struct {
 	// first one found.
 	read func() (string, error)
 	name string
-	// The place that the text came from, which tells why Apply cannot
-	// rewrite it.
+	// The place that the text came from, which tells why [WriteAtomic]
+	// cannot rewrite it.
 	kind targetKind
 }
 
@@ -242,7 +244,7 @@ func WithRecursive(recursive bool) InputOption {
 // [WithExclude] select among those files and, under [WithRecursive], among
 // those directories.
 //
-// A walk with WithHidden meets the temporary files that [Plan.Apply]
+// A walk with WithHidden meets the temporary files that [WriteAtomic]
 // names ".<name>.<hex>", and under [WithRecursive] it enters directories
 // such as ".git". The default patterns do not match the temporary files.
 // An app that passes an include pattern as broad as "*" should exclude
@@ -268,7 +270,7 @@ func WithHidden(hidden bool) InputOption {
 // should pass it for the directory that it reads by default, such as
 // ~/.config/cafe. Tools such as GNU stow fill that directory with links to
 // files outside it. An app should not pass it for a directory that a
-// flag names. [Plan.Apply] never rewrites a file outside the directory.
+// flag names. [WriteAtomic] never rewrites a file outside the directory.
 //
 // The walk of a [Path] input opens each file through an [os.Root] of the
 // directory. Without the option, the walk thus refuses a link that leads
@@ -276,7 +278,7 @@ func WithHidden(hidden bool) InputOption {
 // load. The refusal covers symbolic links only, so the walk reads a file
 // that a hard link names. An app that only reads a directory can also
 // open an [os.Root] on the directory and pass [FS] its FS and ".". That
-// input keeps the same refusal, and [Plan.Apply] does not rewrite its
+// input keeps the same refusal, and [WriteAtomic] does not rewrite its
 // files.
 //
 // The walk of an [FS] input learns where a link leads only when the file

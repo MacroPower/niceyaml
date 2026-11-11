@@ -149,8 +149,8 @@ func (l *loader) newPlan() *Plan {
 
 // Files returns the files that the plan changes, in load order. It leaves
 // out each file that is up to date or that a problem blocks. It also
-// returns each file that [Plan.Apply] cannot write, so a dry run shows its
-// diff.
+// returns each file that [WriteAtomic] cannot write, so a dry run shows
+// its diff and a [WriteFunc] can write it.
 func (p *Plan) Files() []*PlanFile {
 	return p.files
 }

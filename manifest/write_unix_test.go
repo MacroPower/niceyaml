@@ -3,6 +3,8 @@
 package manifest_test
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -71,4 +73,38 @@ func TestPlan_Apply_ReadOnlyFile(t *testing.T) {
 			assert.Equal(t, hoursDoc, yamltest.ReadFile(t, path))
 		})
 	}
+}
+
+func TestWriteAtomic_Fallback(t *testing.T) {
+	t.Parallel()
+
+	plan, config := planDir(t, newCafeRegistry(t), map[string]string{"hours.yaml": hoursDoc})
+	path := filepath.Join(config, "hours.yaml")
+
+	require.NoError(t, os.Chmod(config, 0o555))
+	t.Cleanup(func() { assert.NoError(t, os.Chmod(config, 0o755)) })
+
+	// WriteAtomic cannot create a file in the directory, so the writer
+	// writes the file in place.
+	var fallback []string
+
+	write := func(ctx context.Context, f *manifest.PlanFile) error {
+		err := manifest.WriteAtomic(ctx, f)
+		if !errors.Is(err, manifest.ErrReadOnly) {
+			return err //nolint:wrapcheck // Apply binds the problem to the file.
+		}
+
+		fallback = append(fallback, f.Source().Name())
+
+		return os.WriteFile(f.Source().Name(), f.After(), 0o600)
+	}
+
+	res, err := plan.Apply(t.Context(), manifest.WithWriter(write))
+	require.NoError(t, err)
+	assert.Equal(t, []string{path}, fallback)
+	assert.Equal(t, stringtest.JoinLF(
+		path+`: migrated Hours "weekday" to cafe.jacobcolvin.com/v1`,
+		"1 file migrated",
+	), res.Summary())
+	assert.Equal(t, string(plan.Files()[0].After()), yamltest.ReadFile(t, path))
 }

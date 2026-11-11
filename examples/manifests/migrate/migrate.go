@@ -80,11 +80,11 @@ func main() {
 
 	p := printer.New()
 
-	// Apply rewrites only the files that a Path input reads from disk, so
-	// the program works on a copy of its embedded files. Each message names
-	// a file by the path that the input gives. The program thus loads
-	// relative paths from inside the copy, and no message names the
-	// temporary directory.
+	// The default writer of Apply rewrites only the files that a Path input
+	// reads from disk. The program thus works on a copy of its embedded
+	// files. Each message names a file by the path that the input gives, so
+	// the program loads relative paths from inside the copy, and no message
+	// names the temporary directory.
 	leave, err := enterCopy(files)
 	if err != nil {
 		lipgloss.Println(p.PrintError(err))

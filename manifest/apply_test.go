@@ -206,6 +206,142 @@ func TestPlan_Apply_ReadOnly(t *testing.T) {
 	}
 }
 
+func TestPlan_Apply_WithWriter(t *testing.T) {
+	t.Parallel()
+
+	reg := newCafeRegistry(t)
+
+	base := niceyaml.NewSourceFromString(hoursDoc, niceyaml.WithName("base.yaml"))
+	top := niceyaml.NewSourceFromString(stringtest.LinesLF("spec:", `  closes: "20:00"`), niceyaml.WithName("top.yaml"))
+
+	tcs := map[string]struct {
+		in manifest.Input
+		// Write returns the problem of the file named name, or nil to store
+		// the file.
+		write func(name string) error
+		// Want holds the names of the files that the writer stores.
+		want    []string
+		err     error
+		message string
+		summary string
+	}{
+		"file of a file system": {
+			in:    configFS(map[string]string{"hours.yaml": hoursDoc, "menu.yaml": menuDoc}),
+			write: func(string) error { return nil },
+			want:  []string{"config/hours.yaml", "config/menu.yaml"},
+			summary: stringtest.JoinLF(
+				`config/hours.yaml: migrated Hours "weekday" to cafe.jacobcolvin.com/v1`,
+				`config/menu.yaml: migrated MenuItem "kanelbulle" to cafe.jacobcolvin.com/v1`,
+				"2 files migrated",
+			),
+		},
+		"source": {
+			in:    manifest.Sources(niceyaml.NewSourceFromString(hoursDoc, niceyaml.WithName("hours.yaml"))),
+			write: func(string) error { return nil },
+			want:  []string{"hours.yaml"},
+			summary: stringtest.JoinLF(
+				`hours.yaml: migrated Hours "weekday" to cafe.jacobcolvin.com/v1`,
+				"1 file migrated",
+			),
+		},
+		"problem of the writer": {
+			in: configFS(map[string]string{"hours.yaml": hoursDoc, "menu.yaml": menuDoc}),
+			write: func(name string) error {
+				if name == "config/hours.yaml" {
+					return errors.New("store offline\nretry later")
+				}
+
+				return nil
+			},
+			want:    []string{"config/menu.yaml"},
+			message: "config/hours.yaml: store offline\nretry later",
+			summary: stringtest.JoinLF(
+				"config/hours.yaml: not written, store offline",
+				`config/menu.yaml: migrated MenuItem "kanelbulle" to cafe.jacobcolvin.com/v1`,
+				"1 file migrated, 1 not written",
+			),
+		},
+		"merged layers": {
+			in:    manifest.Sources(yamltest.Layers(t, base, top)),
+			write: func(string) error { return nil },
+			err:   manifest.ErrReadOnly,
+			message: stringtest.JoinLF(
+				"base.yaml:1:13: $.apiVersion: cannot rewrite a document that merges layers",
+				"",
+				"   1 | apiVersion: cafe.jacobcolvin.com/v1alpha1",
+				"     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+				"   2 | kind: Hours",
+				"   3 | metadata:",
+			),
+			summary: stringtest.JoinLF(
+				"base.yaml: not written, base.yaml:1:13: $.apiVersion: cannot rewrite a document that merges layers",
+				"1 file not written",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			plan, err := reg.PlanMigration(t.Context(), tc.in)
+			require.NoError(t, err)
+
+			stored := map[string]string{}
+			write := func(_ context.Context, f *manifest.PlanFile) error {
+				name := f.Source().Name()
+
+				err := tc.write(name)
+				if err != nil {
+					return err
+				}
+
+				stored[name] = string(f.After())
+
+				return nil
+			}
+
+			res, err := plan.Apply(t.Context(), manifest.WithWriter(write))
+			assert.Equal(t, res.Err(), err)
+			assert.Equal(t, tc.summary, res.Summary())
+
+			if tc.message == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Equal(t, tc.message, niceyaml.FormatError(err))
+			}
+
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+			}
+
+			var names []string
+
+			for _, f := range res.Files() {
+				names = append(names, f.Source().Name())
+				assert.Equal(t, string(f.After()), stored[f.Source().Name()])
+			}
+
+			assert.Equal(t, tc.want, names)
+			assert.Len(t, stored, len(tc.want))
+		})
+	}
+}
+
+func TestWithWriter_Nil(t *testing.T) {
+	t.Parallel()
+
+	plan, err := newCafeRegistry(t).PlanMigration(t.Context(), configFS(map[string]string{"hours.yaml": hoursDoc}))
+	require.NoError(t, err)
+
+	res, err := plan.Apply(t.Context(), manifest.WithWriter(nil))
+	require.ErrorIs(t, err, manifest.ErrReadOnly)
+	assert.Empty(t, res.Files())
+	assert.Equal(t, "config/hours.yaml: cannot rewrite a file of a file system that cafe only reads",
+		niceyaml.FormatError(err))
+}
+
 func TestPlan_Apply_Problems(t *testing.T) {
 	t.Parallel()
 
@@ -334,8 +470,9 @@ func TestPlan_Apply_ContextEndsPartway(t *testing.T) {
 
 	plan, config := planDir(t, newCafeRegistry(t), map[string]string{"hours.yaml": hoursDoc, "menu.yaml": menuDoc})
 
-	// The context ends after Apply writes the first file.
-	res, err := plan.Apply(&endingContext{Context: t.Context(), live: 1})
+	// The context ends after Apply writes the first file. Apply and
+	// WriteAtomic each check the context of that file.
+	res, err := plan.Apply(&endingContext{Context: t.Context(), live: 2})
 	require.ErrorIs(t, err, context.Canceled)
 	require.Len(t, res.Files(), 1)
 	assert.Equal(t, config+"/menu.yaml: context canceled", err.Error())

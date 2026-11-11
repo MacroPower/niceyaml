@@ -1,6 +1,7 @@
 package manifest_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -162,4 +163,24 @@ func TestPlan_Apply_Mode(t *testing.T) {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o640), info.Mode().Perm())
+}
+
+func TestWriteAtomic(t *testing.T) {
+	t.Parallel()
+
+	plan, config := planDir(t, newCafeRegistry(t), map[string]string{"hours.yaml": hoursDoc})
+	path := filepath.Join(config, "hours.yaml")
+	f := plan.Files()[0]
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.ErrorIs(t, manifest.WriteAtomic(ctx, f), context.Canceled)
+	assert.Equal(t, hoursDoc, yamltest.ReadFile(t, path))
+
+	require.NoError(t, manifest.WriteAtomic(t.Context(), f))
+	assert.Equal(t, string(f.After()), yamltest.ReadFile(t, path))
+
+	// The file now holds the new text, so a second write finds it changed.
+	require.ErrorIs(t, manifest.WriteAtomic(t.Context(), f), manifest.ErrChanged)
 }

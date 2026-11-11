@@ -12,39 +12,85 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/quantity"
 )
 
+// WriteFunc writes the new text of one file of a plan, as
+// [PlanFile.After] returns it, or returns the problem that prevents the
+// write. [Plan.Apply] calls it for each file of [Plan.Files] that it
+// writes. [WriteAtomic] is the WriteFunc that Apply uses by default.
+type WriteFunc func(ctx context.Context, f *PlanFile) error
+
+// ApplyOption configures one call of [Plan.Apply].
+//
+// Available options:
+//   - [WithWriter]
+type ApplyOption func(*applyConfig)
+
+// applyConfig holds the settings that each [ApplyOption] gives an Apply.
+type applyConfig struct {
+	write WriteFunc
+}
+
+// WithWriter is an [ApplyOption] that sets the [WriteFunc] that writes
+// each file. A program that keeps its files elsewhere, such as in a
+// database, passes a WriteFunc that stores [PlanFile.After] there. A nil
+// fn selects [WriteAtomic], the default.
+//
+// A WriteFunc can call WriteAtomic first and store the file another way
+// when the error of WriteAtomic matches [ErrReadOnly]. The guarantees of
+// WriteAtomic hold only for the files that it writes. A WriteFunc that
+// stores a file another way should first compare the stored text with the
+// text of [PlanFile.Source]. A WriteFunc that skips the compare can
+// overwrite a concurrent edit.
+func WithWriter(fn WriteFunc) ApplyOption {
+	return func(c *applyConfig) {
+		c.write = fn
+	}
+}
+
 // Apply writes the new text of each file of [Plan.Files] and returns a
-// [Result] that records what it did. It writes each file atomically, so a
-// crash leaves the old text or the new text. Each file keeps its mode, its
-// owner, and its group. On Linux, each file also keeps its access control
-// list and its SELinux label. A symlink keeps pointing at its target, which
-// receives the new text.
+// [Result] that records what it did. It hands each file to the
+// [WriteFunc] of [WithWriter], or to [WriteAtomic] by default, one file at
+// a time in load order. WriteAtomic writes only the files that a [Path]
+// input read from disk, and fails each other file with an error that
+// matches [ErrReadOnly].
 //
-// Apply checks each file immediately before it replaces it, and leaves the
-// file as it is when it cannot replace it whole. Apply continues with the
-// other files. A file whose text differs from the text that the plan read
-// fails with an error that matches [ErrChanged].
+// Apply counts a file as written when the WriteFunc returns nil for it.
+// When the WriteFunc returns an error, Apply counts the file as not
+// written and continues with the other files. The error becomes the
+// problem of the file in [Result.Err], and its first line becomes the
+// reason that [Result.Summary] gives.
 //
-// A file that the plan did not read from disk, or that the process cannot
-// write, fails with an error that matches [ErrReadOnly]. So does a file
-// with more than one hard link. So does a file whose owner, group, access
-// control list, or SELinux label the system refuses to give to the
-// replacement.
+// Apply refuses each file of [Sources] whose Source merges layers,
+// whatever the WriteFunc. Such a file fails with an error that matches
+// [ErrReadOnly], and Apply does not hand it to the WriteFunc.
 //
-// A program that keeps its files elsewhere writes [PlanFile.After] itself,
-// under the name that [PlanFile.Source] gives. [Plan.Err] and
-// [Plan.Warnings] report what a load of the new text finds.
+// [Plan.Err] and [Plan.Warnings] report what a load of the new text
+// finds. A program that writes [PlanFile.After] without Apply thus still
+// gets that report, but it does not get a Result.
 //
 // Apply returns a Result even when it returns an error, so a program
 // prints [Result.Summary] in either case. The error is the one that
 // [Result.Err] returns. A file that Apply has not reached when ctx ends
 // counts as not written, and its problem matches ctx.Err().
-func (p *Plan) Apply(ctx context.Context) (*Result, error) {
+func (p *Plan) Apply(ctx context.Context, opts ...ApplyOption) (*Result, error) {
+	cfg := applyConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	if cfg.write == nil {
+		cfg.write = WriteAtomic
+	}
+
 	res := &Result{plan: p, failed: make(map[int]failure)}
 
 	for _, f := range p.files {
 		err := ctx.Err()
+		if err == nil && len(hook.Layers(f.f.src)) > 0 {
+			err = f.layersProblem()
+		}
+
 		if err == nil {
-			err = f.write()
+			err = cfg.write(ctx, f)
 		}
 
 		if err != nil {
@@ -239,8 +285,8 @@ func firstLine(s string) string {
 	return line
 }
 
-// readOnly returns the problem of a file that Apply cannot write, or nil.
-// It matches [ErrReadOnly].
+// readOnly returns the problem of a file that [WriteAtomic] cannot write,
+// or nil. It matches [ErrReadOnly].
 func (f *PlanFile) readOnly() error {
 	app := f.reg.app()
 	t := f.f.target
@@ -256,10 +302,6 @@ func (f *PlanFile) readOnly() error {
 		return readOnlyProblem("cannot rewrite a file of a file system that " + app + " only reads")
 
 	case targetSource:
-		if len(hook.Layers(f.f.src)) > 0 {
-			return f.layersProblem()
-		}
-
 		return readOnlyProblem("cannot rewrite a file that " + app + " built in memory")
 
 	case targetDisk:
@@ -294,14 +336,15 @@ func (f *PlanFile) layersProblem() error {
 	return problem
 }
 
-// readOnlyProblem returns the problem, with details, of a file that Apply
-// cannot write. The problem matches [ErrReadOnly].
+// readOnlyProblem returns the problem, with details, of a file that
+// [Plan.Apply] or [WriteAtomic] refuses to write. The problem matches
+// [ErrReadOnly].
 func readOnlyProblem(msg string, details ...error) error {
 	return niceyaml.Unchecked(&problemError{msg: msg, marks: []error{ErrReadOnly}}, niceyaml.WithDetails(details...))
 }
 
-// unkeptProblem returns the problem, with details, of a file that Apply
-// cannot replace whole. The system refuses to give the new file something
+// unkeptProblem returns the problem, with details, of a file that
+// [WriteAtomic] cannot replace whole. The system refuses to give the new file something
 // that the old one has, and err is the error of that refusal. The problem
 // matches [ErrReadOnly] and keeps the reason that the system gives in err.
 func unkeptProblem(err error, msg string, details ...error) error {

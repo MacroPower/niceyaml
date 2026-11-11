@@ -45,7 +45,7 @@ type file struct {
 	name string
 	// The documents of the file that the load checked, in order.
 	docs []*docState
-	// Where Apply writes the file.
+	// Where [WriteAtomic] writes the file.
 	target target
 	// The number of documents of the file that fail to route, so a plan
 	// leaves them as they are.
@@ -55,7 +55,7 @@ type file struct {
 }
 
 // targetKind names the place that a file came from. The place decides
-// whether Apply rewrites the file.
+// whether [WriteAtomic] rewrites the file.
 type targetKind int
 
 // The places that a file comes from.
@@ -67,7 +67,7 @@ const (
 	targetSource
 )
 
-// target is where a file came from, and where Apply writes it.
+// target is where a file came from, and where [WriteAtomic] writes it.
 type target struct {
 	// The directory input whose walk found the file, or "" for a file that
 	// an input names directly.

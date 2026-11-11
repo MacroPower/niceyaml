@@ -147,20 +147,35 @@
 // in [PlanFile.Header] and [PlanFile.Removals], so each value that a
 // rewrite deletes has a row that says so.
 //
-// Apply writes each file atomically and keeps its mode, its owner, and its
-// group. On Linux, it also keeps the access control list and the SELinux
-// label of the file. Apply leaves a file as it is when the file has more
-// than one hard link. Apply does the same when the system refuses to give
-// the replacement the owner, the group, the access control list, or the
-// SELinux label of the file. Each such file fails with an error that
-// matches [ErrReadOnly].
+// By default, Apply writes each file with [WriteAtomic]. It writes each
+// file atomically and keeps its mode. On unix systems, it also keeps the
+// owner and the group of the file, and on Linux, the access control list
+// and the SELinux label. It leaves a file as it is when the system
+// refuses to give the replacement one of those. On unix systems, it also
+// leaves a file as it is when the file has more than one hard link, or
+// when the process cannot write the directory of the file. Each such file
+// fails with an error that matches [ErrReadOnly]. The doc comment of
+// WriteAtomic lists what each platform checks. A file whose text changed
+// after the plan read it fails with an error that matches [ErrChanged].
 //
-// Apply writes only the files that a [Path] input read from disk. Each
-// other file fails with an error that matches [ErrReadOnly], but its plan
-// still holds its new text. A dry run thus shows the diff, and an app that
-// keeps its files elsewhere writes [PlanFile.After] itself. A file whose
-// text changed after the plan read it fails with an error that matches
-// [ErrChanged].
+// WriteAtomic writes only the files that a [Path] input read from disk.
+// Each other file fails with an error that matches [ErrReadOnly], but its
+// plan still holds its new text. A dry run thus shows the diff. An app
+// that keeps its files elsewhere passes Apply a [WriteFunc] through
+// [WithWriter], and the Result counts the files that the WriteFunc
+// writes. A WriteFunc can also try WriteAtomic first and store a file
+// another way when the error matches ErrReadOnly:
+//
+//	write := func(ctx context.Context, f *manifest.PlanFile) error {
+//		err := manifest.WriteAtomic(ctx, f)
+//		if !errors.Is(err, manifest.ErrReadOnly) {
+//			return err
+//		}
+//
+//		return store.Swap(ctx, f.Source().Name(), f.Source().Text(), f.After())
+//	}
+//
+//	res, err := plan.Apply(ctx, manifest.WithWriter(write))
 //
 // # Loading
 //
@@ -224,7 +239,7 @@
 // when another process changes the directory during the load. The
 // refusal covers symbolic links only, so the walk reads a file that a
 // hard link names. An [FS] input that reads "." of the FS of an [os.Root]
-// opened on the directory keeps the same refusal. [Plan.Apply] does not
+// opened on the directory keeps the same refusal. [WriteAtomic] does not
 // rewrite the files of an FS input.
 //
 // A load reads the inputs in order, the files of a directory sorted by

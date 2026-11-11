@@ -166,9 +166,9 @@ func WithAppName(name string) RegistryOption {
 // WithMigrateHint is a [RegistryOption] that sets the detail that comes
 // last on each problem that a rewrite clears, such as
 // `run "cafe config migrate" to update this file`. Only the problems of the
-// files of a [Path] input carry it, because [Plan.Apply] rewrites only
-// those. A file that a link leads to outside the input directory does not
-// carry it either.
+// files of a [Path] input carry it, because [WriteAtomic], the default
+// writer of [Plan.Apply], rewrites only those. A file that a link leads
+// to outside the input directory does not carry it either.
 func WithMigrateHint(hint string) RegistryOption {
 	return func(c *registryConfig) {
 		c.migrateHint = hint

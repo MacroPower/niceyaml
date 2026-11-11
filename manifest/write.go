@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -17,17 +18,67 @@ import (
 )
 
 // errOutside indicates a link that leads outside the directory that a
-// walk reads or that Apply works in.
+// walk reads or that [WriteAtomic] works in.
 var errOutside = errors.New("link leads outside the directory")
 
 // maxLinks is the number of links that the resolve of one path follows at
 // most.
 const maxLinks = 40
 
-// write writes the new text of f over its file on disk, or returns the
-// problem that prevents Apply from writing it.
-func (f *PlanFile) write() error {
-	err := f.readOnly()
+// WriteAtomic is the [WriteFunc] that [Plan.Apply] uses by default. It
+// writes the new text of f over its file on disk, or returns the problem
+// that prevents the write. It writes only a file that a [Path] input read
+// from disk. Each other file fails with an error that matches
+// [ErrReadOnly]. WriteAtomic returns the error of ctx when ctx has ended
+// before it starts.
+//
+// WriteAtomic writes the new text to a temporary file beside the old one,
+// named ".<name>.<hex>", and renames it over the old one. A crash thus
+// leaves the old text or the new text. The process must be able to
+// create a file in the directory of the file. A symbolic link keeps
+// pointing at its target, which receives the new text. For a file that a
+// directory input found, WriteAtomic never follows a link out of the
+// input directory.
+//
+// WriteAtomic reads the file again immediately before the rename. A file
+// whose text differs from the text that the plan read, or that no longer
+// exists, fails with an error that matches [ErrChanged]. WriteAtomic then
+// leaves the file as it is.
+//
+// The new file gets the mode of the old one. On unix systems, it also
+// gets the owner and the group of the old one. On Linux, it also gets the
+// access control list and the SELinux label. Platforms other than unix do
+// not keep the owner or the group, and platforms other than Linux do not
+// keep any extended attribute. When the system refuses to give the new
+// file one of them, WriteAtomic leaves the old file as it is and fails
+// with an error that matches [ErrReadOnly]. That error also keeps the
+// error that the system returned.
+//
+// These files fail with an error that matches ErrReadOnly:
+//
+//   - A file that is not a regular file, such as a named pipe or a device.
+//   - A file without a write permission bit. On unix systems, the access
+//     check of the process also decides, as faccessat does with the
+//     effective IDs.
+//   - On unix systems, a file in a directory that the process cannot
+//     write, even when the file itself is writable.
+//   - On unix systems, a file with more than one hard link. A rename
+//     replaces the file, so each other link keeps the old text.
+//   - A file that a directory input reached through a link that leads
+//     outside the input directory, as [WithOutsideLinks] allows.
+//
+// Platforms other than unix skip the access check, the check of the
+// directory, and the check of hard links. The write permission bits alone
+// decide there. On those platforms, a file whose directory refuses
+// the new file fails with the error of the system, which does not match
+// ErrReadOnly.
+func WriteAtomic(ctx context.Context, f *PlanFile) error {
+	err := ctx.Err()
+	if err != nil {
+		return err //nolint:wrapcheck // Apply binds the end of ctx to the file.
+	}
+
+	err = f.readOnly()
 	if err != nil {
 		return err
 	}
@@ -55,11 +106,11 @@ func (t target) diskPath() string {
 	return filepath.Join(t.root, filepath.FromSlash(t.path))
 }
 
-// place returns the directory that Apply works in and the path of the file
-// below it. For a file that a directory input found, Apply works in the
-// directory that the input leads to. For a file that an input names
-// directly, Apply works in the directory of the file, with every link
-// resolved.
+// place returns the directory that [WriteAtomic] works in and the path of
+// the file below it. For a file that a directory input found, WriteAtomic
+// works in the directory that the input leads to. For a file that an
+// input names directly, WriteAtomic works in the directory of the file,
+// with every link resolved.
 func (t target) place() (string, string, error) {
 	if t.root != "" {
 		return t.root, filepath.FromSlash(t.path), nil
@@ -73,8 +124,8 @@ func (t target) place() (string, string, error) {
 	return filepath.Dir(resolved), filepath.Base(resolved), nil
 }
 
-// diskReadOnly returns the problem of the file at path when Apply cannot
-// write it, or nil. A file that does not exist passes, and the write
+// diskReadOnly returns the problem of the file at path when [WriteAtomic]
+// cannot write it, or nil. A file that does not exist passes, and the write
 // reports it.
 func diskReadOnly(path string) error {
 	info, err := os.Stat(path)
