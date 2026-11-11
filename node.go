@@ -355,9 +355,9 @@ func (n *Node) AST() ast.Node {
 //
 // A sequence element and the root do not have a key. A path with the `~`
 // selector of [paths.Path.Key] after either thus does not select a node,
-// and At returns an error wrapping [paths.ErrNotFound] for it.
-// [Node.Ranges] and an [Error] at a path that ends in such a `~` still
-// point at the element or the root.
+// and At returns an error wrapping [paths.ErrNotFound] for it. That
+// error, [Node.Ranges], and an [Error] at a path that ends in such a `~`
+// still point at the element or the root.
 //
 // A path that does not select a node returns the error that
 // [paths.Resolver.Node] describes, bound to the source. It wraps
@@ -995,9 +995,14 @@ func (n *Node) pathLocation(path paths.Path) (location, error) {
 }
 
 // nearestLocation returns the location an error binds at when path names
-// a missing key, which is the key of the mapping that lacks it. It reports
-// true only when reason wraps [paths.ErrNotFound] and that key has a
-// position.
+// a node the document does not hold. That location is the nearest node
+// the document holds, as [paths.Resolver.Nearest] finds it. A mapping, a
+// sequence, or a null binds at the key of its entry, the "-" of its
+// element, or the first token of the root. A scalar binds at its own
+// token, where an error at its path binds. An element or a root that a
+// `~` passes can be an alias that does not resolve, and it binds at that
+// alias. It reports true only when
+// reason wraps [paths.ErrNotFound] and that token has a position.
 func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 	if !errors.Is(reason, paths.ErrNotFound) {
 		return location{}, false
@@ -1010,12 +1015,32 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 		return location{}, false
 	}
 
-	tk, err := resolver.Token(near.Key())
+	at := near.Key()
+
+	node, err := resolver.Node(near)
+	if err == nil && heldScalar(n.doc.content(node)) {
+		at = near
+	}
+
+	tk, err := resolver.Token(at)
 	if err != nil || tk == nil || tk.Position == nil {
 		return location{}, false
 	}
 
 	return location{pos: position.NewFromToken(tk), tk: tk, near: &near}, true
+}
+
+// heldScalar reports whether content, a mapping, a sequence, or a scalar
+// as [document.content] returns it, is a scalar other than a null. An
+// error at a path below such a scalar binds at the scalar itself, because
+// the scalar is where the path stops.
+func heldScalar(content ast.Node) bool {
+	switch content.(type) {
+	case *ast.MappingNode, *ast.SequenceNode:
+		return false
+	}
+
+	return !astnode.IsNil(content) && content.Type() != ast.NullType
 }
 
 // aliasLocation returns the location of the alias that path cannot follow,
@@ -1062,12 +1087,14 @@ func (n *Node) aliasLocation(path paths.Path, reason error) (location, bool) {
 }
 
 // bindUnresolved binds reason, the error path failed to resolve with. A
-// missing key binds as [Invalid] at the mapping that lacks it, with the
-// bare [paths.ErrNotFound] text, because the binding writes the path in
-// front of it. An alias that the path cannot follow, such as one without
-// an anchor or one inside the value of its own anchor, binds at the alias,
-// as [Node.bindAlias] binds it. Any other reason binds as
-// [Node.bindLookup] binds it.
+// missing node binds as [Invalid] at path, so it binds at the nearest node
+// the document holds, as [Node.nearestLocation] finds it. Its message is
+// the bare [paths.ErrNotFound] text, because the binding writes the path
+// in front of it. A document without content adds the
+// [paths.ErrNoDocument] text. An alias that the path cannot follow, such
+// as one without an anchor or one inside the value of its own anchor,
+// binds at the alias, as [Node.bindAlias] binds it. Any other reason binds
+// as [Node.bindLookup] binds it.
 func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 	if bound, ok := n.bindAlias(path, reason); ok {
 		return bound
@@ -1077,11 +1104,12 @@ func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 		return n.bindLookup(reason)
 	}
 
-	if _, ok := n.nearestLocation(path, reason); !ok {
-		return n.bindOwn(Invalid(reason))
+	msg := paths.ErrNotFound.Error()
+	if errors.Is(reason, paths.ErrNoDocument) {
+		msg += ": " + paths.ErrNoDocument.Error()
 	}
 
-	return n.bindOwn(Invalid(&markedError{err: reason, msg: paths.ErrNotFound.Error()}, AtPath(path)))
+	return n.bindOwn(Invalid(&markedError{err: reason, msg: msg}, AtPath(path)))
 }
 
 // bindLookup binds reason, the error of a lookup that neither misses a
@@ -1759,16 +1787,16 @@ func (n *Node) mergedBy(tk *token.Token) bool {
 //     merge key, near the mapping that holds it.
 //   - An entry of the document goes on along the rest of path.
 //   - A key that no entry has binds at the mapping, as
-//     [Node.nearestLocation] binds a key that the document leaves out.
+//     [Node.nearestLocation] binds a node that the document does not hold.
 //
 // The rest of path binds as [Node.resolveLocation] binds a path. A path
 // that enters an alias the document cannot follow binds at the alias, near
 // the path of the alias, with a reason that names that alias. The location
-// of a merge key binds so too. A rest of path that does not resolve fails as
-// it fails in a mapping without the merge key, so a rest that selects
-// nothing returns an error that wraps [paths.ErrNotFound]. The result is
-// reason when the lookup cannot read the merge source of the key, or reason
-// does not wrap [paths.ErrReferenceAlias].
+// of a merge key binds so too. A rest of path that misses a node binds at
+// the nearest node that the walk reaches, as it binds in a mapping without
+// the merge key, as [paths.Resolver.Nearest] finds that node. The result
+// is reason when the lookup cannot read the merge source of the key, or
+// reason does not wrap [paths.ErrReferenceAlias].
 //
 // The walk reads the merge sources of a mapping through the aliases of the
 // document, and such reads are part of what the alias limit weighs. The
@@ -1830,11 +1858,7 @@ func (w *mergeWalk) walk(t datapath.Target, rest paths.Path) (location, error) {
 
 	for i, sel := range sels {
 		if sel.Kind == paths.SelectorKey {
-			if i != len(sels)-1 {
-				return w.miss(nil)
-			}
-
-			return w.at(t, true, nil)
+			return w.key(t, sels[i:])
 		}
 
 		content, err := w.resolver.Deref(t.Node)
@@ -1878,7 +1902,7 @@ func (w *mergeWalk) walk(t datapath.Target, rest paths.Path) (location, error) {
 			}
 
 			if entry == nil {
-				return w.missing(t, content, sels[i:])
+				return w.missing(t, content)
 			}
 
 			t = datapath.Target{Node: entry.Value, Parent: astnode.Parent{Entry: entry}, Path: t.Path.Child(sel.Name)}
@@ -1886,7 +1910,7 @@ func (w *mergeWalk) walk(t datapath.Target, rest paths.Path) (location, error) {
 		case paths.SelectorIndex:
 			seq, ok := datapath.Deref(w.resolver, content).(*ast.SequenceNode)
 			if !ok || sel.Index >= len(seq.Values) {
-				return w.miss(nil)
+				return w.missing(t, content)
 			}
 
 			t = datapath.Target{
@@ -1896,11 +1920,56 @@ func (w *mergeWalk) walk(t datapath.Target, rest paths.Path) (location, error) {
 			}
 
 		default:
-			return w.miss(nil)
+			// A path with a `.*`, `[*]`, or `..` selector does not resolve
+			// for ErrWildcard, so it does not reach the walk.
+			return location{}, w.reason
 		}
 	}
 
 	return w.at(t, false, nil)
+}
+
+// key returns the location of rest, the selectors of the path from t,
+// which start with a `~` selector. A `~` after another `~` selects what
+// the first one selects. Rest thus resolves when it holds `~` selectors
+// alone, and binds where [paths.Resolver.Token] points for it.
+//
+// Any other selector after them misses, as [paths.Resolver.Nearest]
+// describes. A key is a scalar, so the path binds at the key, near the
+// path that ends in the `~` selectors. An element and the root do not
+// have a key, so the `~` selectors after either do not select a node. The
+// path then binds as a node that t does not hold binds. The `~` does not
+// read the value at t, so it binds there even at an alias that does not
+// resolve.
+func (w *mergeWalk) key(t datapath.Target, rest []paths.Selector) (location, error) {
+	near := t.Path
+
+	n := 0
+	for n < len(rest) && rest[n].Kind == paths.SelectorKey {
+		near = near.Key()
+		n++
+	}
+
+	if n == len(rest) {
+		return w.at(t, true, nil)
+	}
+
+	if keyless(t) {
+		return w.missing(t, t.Node)
+	}
+
+	loc, err := w.at(t, true, nil)
+	loc.near = &near
+
+	return loc, err
+}
+
+// keyless reports whether the node at t lacks a key, as a sequence
+// element and the root do. The walk starts at the longest path that the
+// resolver resolves. A `~` after that path thus does not resolve, so the
+// node at a target without a Parent, where the walk starts, lacks a key.
+func keyless(t datapath.Target) bool {
+	return t.Parent.Entry == nil || astnode.Content(t.Parent.Entry.Key) == nil
 }
 
 // merge returns the location of an entry that alias, the alias of a `<<`
@@ -1916,47 +1985,30 @@ func (w *mergeWalk) merge(t datapath.Target, alias *ast.AliasNode) (location, er
 	return location{pos: position.NewFromToken(tk), tk: tk, near: &t.Path, unfollowed: w.unresolved(err)}, nil
 }
 
-// missing returns the location of a key that the mapping at t, whose
-// content is content, leaves out. The selectors of rest start at that key.
-// It binds as [Node.nearestLocation] binds such a key. Where that binding
-// does not bind, the path does not resolve. That holds for a selector of
-// rest that is not a child selector, and for content that is neither a
-// mapping nor a null.
-func (w *mergeWalk) missing(t datapath.Target, content ast.Node, rest []paths.Selector) (location, error) {
-	for _, sel := range rest {
-		if sel.Kind != paths.SelectorChild {
-			return w.miss(nil)
-		}
-	}
-
-	held := datapath.Deref(w.resolver, content)
-	if _, ok := held.(*ast.MappingNode); !ok && (astnode.IsNil(held) || held.Type() != ast.NullType) {
-		return w.miss(nil)
-	}
-
-	loc, err := w.at(t, true, nil)
+// missing returns the location of a node that the node at t does not
+// hold, where content is the content of t. It binds as
+// [Node.nearestLocation] binds such a node. A scalar binds at its own
+// token, and a mapping, a sequence, or a null at the key of its entry.
+func (w *mergeWalk) missing(t datapath.Target, content ast.Node) (location, error) {
+	loc, err := w.at(t, !heldScalar(datapath.Deref(w.resolver, content)), nil)
 	loc.near = &t.Path
 
 	return loc, err
 }
 
 // miss returns the reason that the path does not resolve where the walk
-// stops, for err, the error of the lookup there, or for nil when that
-// lookup selects nothing. Until the walk passes a mapping by a key that
-// its `<<` merge key of a reference document does not bring in, the
-// resolver stops where the walk stops. The reason is then the reason of
-// the resolver. After that mapping, the path fails as it fails in a
-// mapping without the merge key. The reason reads as the resolver words
-// err with the whole path, or wraps [paths.ErrNotFound].
+// stops, for err, the error of the lookup there. Until the walk passes a
+// mapping by a key that its `<<` merge key of a reference document does
+// not bring in, the resolver stops where the walk stops. The reason is
+// then the reason of the resolver. After that mapping, the path fails as
+// it fails in a mapping without the merge key. The reason then reads as
+// the resolver words err with the whole path.
 func (w *mergeWalk) miss(err error) (location, error) {
-	switch {
-	case !w.left:
+	if !w.left {
 		return location{}, w.reason
-	case err != nil:
-		return location{}, w.unresolved(err)
-	default:
-		return location{}, fmt.Errorf("resolve %s: %w", w.full, paths.ErrNotFound)
 	}
+
+	return location{}, w.unresolved(err)
 }
 
 // at returns the location of the token of t, or of the key of its entry

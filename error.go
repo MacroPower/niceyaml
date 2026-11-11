@@ -1043,13 +1043,13 @@ type errorConfig struct {
 // A sequence element and the root do not have a key. A path that ends in
 // a `~` after either points where the path before the `~` does.
 //
-// A path that the document leaves out, such as the path a check for a
-// required field names, binds at the key of the mapping that lacks the
-// value. A path that enters an alias the document cannot follow binds at
-// the alias, as [SourceError.Nearest] describes. With [AtPosition] or
-// [AtRange], the error binds there instead, and the path names the value in
-// the message alone. [DataLocator.At] builds both from the names of decoded
-// data.
+// A path that the document does not hold, such as the path a check for a
+// required field names, binds at the nearest node the document holds along
+// it, such as the key of the mapping that lacks the value. A path that
+// enters an alias the document cannot follow binds at the alias, as
+// [SourceError.Nearest] describes. With [AtPosition] or [AtRange], the error
+// binds there instead, and the path names the value in the message alone.
+// [DataLocator.At] builds both from the names of decoded data.
 func AtPath(p paths.Path) ErrorOption {
 	return func(c *errorConfig) {
 		c.path, c.hasPath = p, true
@@ -1203,13 +1203,15 @@ func (l locus) rebase(base paths.Path) locus {
 	return l
 }
 
-// fallback is where an error binds when the document does not hold its
-// path. The self-validation walk sets one below a value that decodes
-// itself, because the fields of such a value do not have to mirror the
-// document.
+// fallback is where an error binds when its path does not bind at any
+// node of the document, such as a wildcard path. The nearest node that
+// the document holds along the path of the error wins over the fallback.
+// The self-validation walk sets one below a value that decodes itself,
+// because the fields of such a value do not have to mirror the document.
 type fallback struct {
 	// The paths of the values above the error that decode themselves, the
-	// nearest first. The error binds at the first one the document holds.
+	// nearest first. When the path of the error does not bind, the error
+	// binds at the first one that binds.
 	at []paths.Path
 	// The first of at is a slice, an array, or a map, and field tags do not
 	// place its elements. The error thus binds at the first of at that the
@@ -1588,8 +1590,8 @@ func locateMerged(b binder, node *Node, at position.Position, l locus) (location
 //
 // A problem that does not carry a location binds at the location of the
 // nearest heading above it that carries one, unless a [Rebase] lies between
-// them. A path that the document leaves out binds at the nearest node above
-// it, as [SourceError.Nearest] describes. Any other location that does not
+// them. A path that the document does not hold binds at the nearest node
+// above it, as [SourceError.Nearest] describes. Any other location that does not
 // resolve costs the SourceError its position, for the reason
 // [SourceError.Unresolved] returns. The Errors section of the package
 // documentation describes these cases.
@@ -4334,7 +4336,7 @@ func writeString(f fmt.State, s string) {
 // A position from [AtPosition] can fall inside a token, on the spaces
 // before it, or on a later line of a multi-line token. The range then
 // starts where the content of the token starts, so it might differ from
-// [SourceError.Position]. For a path the document leaves out, or one that
+// [SourceError.Position]. For a path the document does not hold, or one that
 // enters an alias it cannot follow, the range covers the token
 // [SourceError.Nearest] describes.
 //
@@ -4379,13 +4381,16 @@ func (e *SourceError) Position() (position.Position, bool) {
 //   - [ErrPathNeedsDocument] for a path without a single document to
 //     resolve in.
 //   - The resolution error from [go.jacobcolvin.com/niceyaml/paths] for a
-//     path that does not select anything in the document.
+//     path that does not select anything and does not have a nearest node
+//     to bind at, such as a wildcard path or a path in a document without
+//     content.
 //   - [ErrNoLocation] for a path whose token does not carry a position.
 //   - [ErrAmbiguousPath] for a path that names the entries of several keys
 //     of a decoded map.
 //
-// A path to a key a mapping leaves out binds at that mapping, as
-// [SourceError.Nearest] describes, and does not have a reason. A path that
+// A path that misses a node of the document binds at the nearest node the
+// document holds, as [SourceError.Nearest] describes, and does not have a
+// reason. A path that
 // enters an alias the document cannot follow binds with both a position and
 // a reason. It binds at the alias, and the reason wraps
 // [go.jacobcolvin.com/niceyaml/paths.ErrAlias], so a caller can distinguish
@@ -4415,10 +4420,13 @@ func (e *SourceError) Unresolved() error {
 // path selects, for one that lacks either a path or a position, and for a
 // nil SourceError. The nearest node is one of these:
 //
-//   - The mapping that lacks a key the path names, as for a required field
-//     or a misspelled name. The range covers the key of that mapping, or
-//     the token [AtPath] describes for a mapping without a key, and
-//     [SourceError.Unresolved] returns nil.
+//   - The longest part of the path that the document holds, whatever
+//     selector after it misses. That node can be a mapping that lacks a key
+//     for a required field or a misspelled name. It can also be a sequence
+//     too short for an index, or a scalar that a name or an index looks
+//     into. The range covers the key of a mapping, a sequence, or a null,
+//     or the token [AtPath] describes for one without a key. It covers the
+//     text of a scalar. [SourceError.Unresolved] returns nil.
 //   - An alias on the path that the document cannot follow, such as one to
 //     an anchor of a reference document from [WithReferences]. The range
 //     covers the `*` of the alias, and SourceError.Unresolved returns a
@@ -4431,7 +4439,10 @@ func (e *SourceError) Unresolved() error {
 //   - A value that decodes itself, for an error a [SelfValidator] returns
 //     at or below it, because its fields do not have to mirror the
 //     document. The range covers the text of the value. Every error below a
-//     slice, an array, or a map that decodes itself binds at it.
+//     slice, an array, or a map that decodes itself binds at it. An error
+//     below any other such value binds at the longest part of its path that
+//     the document holds, as for any path. It binds at the value only when
+//     its path does not have such a part.
 //
 // An error about a required field thus binds at the key of the mapping that
 // lacks the field:

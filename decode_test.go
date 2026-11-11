@@ -3517,7 +3517,7 @@ func TestWithValueCheck(t *testing.T) {
 			},
 			"Validate fails": {
 				input: "value: 1\n",
-				err:   "$.name~: name is required",
+				err:   "1:1: $.name~: name is required",
 			},
 		}
 
@@ -9837,7 +9837,7 @@ func TestNode_DecodeAt(t *testing.T) {
 			read:    readAs[string](),
 			want:    "",
 			err:     paths.ErrNotFound,
-			wantErr: "cfg.yaml: resolve $.kind.group: not found",
+			wantErr: "cfg.yaml:1:7: $.kind.group: not found",
 		},
 		"a value of the wrong type": {
 			path:    paths.Current().Child("kind"),
@@ -9994,22 +9994,22 @@ func TestNode_DecodeAt(t *testing.T) {
 			"a key of an empty file": {
 				input:   "",
 				path:    versionPath,
-				wantErr: "cfg.yaml: resolve $.version: not found: document has no content",
+				wantErr: "cfg.yaml: $.version: not found: document has no content",
 			},
 			"a key of a file of comments": {
 				input:   "# nothing\n",
 				path:    versionPath,
-				wantErr: "cfg.yaml: resolve $.version: not found: document has no content",
+				wantErr: "cfg.yaml: $.version: not found: document has no content",
 			},
 			"a key below a header": {
 				input:   "---\n",
 				path:    versionPath,
-				wantErr: "cfg.yaml: resolve $.version: not found: document has no content",
+				wantErr: "cfg.yaml: $.version: not found: document has no content",
 			},
 			"the root of an empty file": {
 				input:   "",
 				path:    paths.Current(),
-				wantErr: "cfg.yaml: resolve $: not found: document has no content",
+				wantErr: "cfg.yaml: $: not found: document has no content",
 			},
 			"the root below a header is a null": {
 				input: "---\n",
@@ -10918,8 +10918,8 @@ func (*problemLocated) UnmarshalYAML(ctx context.Context, node ast.Node) error {
 	case "absent":
 		return niceyaml.Invalid(errBadServer, niceyaml.AtPath(paths.Doc().Child("absent")))
 
-	case "below":
-		return niceyaml.Invalid(errBadServer, niceyaml.AtPath(port.Child("unit")))
+	case "wildcard":
+		return niceyaml.Invalid(errBadServer, niceyaml.AtPath(port.ChildAll()))
 
 	case "unplaced":
 		//nolint:wrapcheck // The test checks where a decode places the result as it is.
@@ -13581,9 +13581,9 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 			want:  "base.yaml: bad server",
 		},
 		"unmarshaler error at a path that resolves nowhere": {
-			input: own("below"),
+			input: own("wildcard"),
 			err:   errBadServer,
-			want:  "base.yaml: $.port.unit: bad server",
+			want:  "base.yaml: $.port.*: bad server",
 		},
 		"unmarshaler error at a path several keys share": {
 			input: own("ambiguous"),

@@ -86,8 +86,8 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 			want: stringtest.LinesLF("a: 2", "b: z", "c: w"),
 			binds: map[string]string{
 				"$.a":    "prod.yaml:1:4",
-				"$.b[0]": "prod.yaml",
-				"$.c.k":  "prod.yaml",
+				"$.b[0]": "prod.yaml:2:4",
+				"$.c.k":  "prod.yaml:3:4",
 			},
 		},
 		"a sequence replaces a sequence whole": {
@@ -103,7 +103,7 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 			),
 			binds: map[string]string{
 				"$.tags[0]":      "prod.yaml:1:8",
-				"$.tags[2]":      "prod.yaml",
+				"$.tags[2]":      "prod.yaml:1:1",
 				"$.list[0].name": "prod.yaml:3:12",
 				"$.list[0].port": "prod.yaml:3:3",
 			},
@@ -3054,7 +3054,7 @@ func TestMergeAppend(t *testing.T) {
 					"$.plugins[2]": "prod.yaml:3:5: $.plugins[0]: here",
 					"$.plugins":    "prod.yaml:2:1: $.plugins: here",
 					"$.plugins~":   "prod.yaml:2:1: $.plugins~: here",
-					"$.plugins[3]": "prod.yaml: $.plugins[3]: here",
+					"$.plugins[3]": "prod.yaml:2:1: $.plugins[3]: here",
 					"$.tags[0]":    "prod.yaml:4:8: $.tags[0]: here",
 					"$.plugins[*]": "prod.yaml: $.plugins[*]: here",
 					"$.*":          "prod.yaml: $.*: here",
@@ -3654,9 +3654,11 @@ func TestMergeAppend(t *testing.T) {
 			niceyaml.WithName("envs.yaml"))
 
 		// One address of each case lacks a port. No document holds the
-		// port of an address, so the error binds at the nearest value
-		// that decodes itself. That value is the sequence of addresses,
-		// or the service that holds the sequence.
+		// port of an address. Field tags do not place the elements of the
+		// sequence of addresses, which decodes itself, so an error below
+		// it binds at that sequence. The service that holds a sequence
+		// decodes itself as a struct, so an error below it binds at the
+		// nearest value the document holds, which is the address.
 		tcs := map[string]struct {
 			// The layers of the merge, lowest first.
 			layers func(t *testing.T) []*niceyaml.Node
@@ -3817,9 +3819,9 @@ func TestMergeAppend(t *testing.T) {
 						stringtest.LinesLF("svc:", "  addrs:", "    - c:3"),
 					)
 				},
-				want:        "base.yaml:1:1: $.svc.addrs[1].port: port is required",
+				want:        "base.yaml:1:22: $.svc.addrs[1].port: port is required",
 				wantPath:    "$.svc.addrs[1].port",
-				wantNearest: "$.svc",
+				wantNearest: "$.svc.addrs[1]",
 				wantAddr:    "b",
 			},
 			"a service, for an address of the higher file": {
@@ -3831,9 +3833,9 @@ func TestMergeAppend(t *testing.T) {
 						stringtest.LinesLF("# prod", "svc:", "  addrs:", "    - c"),
 					)
 				},
-				want:        "prod.yaml:2:1: $.svc.addrs[0].port: port is required",
+				want:        "prod.yaml:4:7: $.svc.addrs[0].port: port is required",
 				wantPath:    "$.svc.addrs[0].port",
-				wantNearest: "$.svc",
+				wantNearest: "$.svc.addrs[0]",
 				wantAddr:    "c",
 			},
 			"a service, below a file that holds the service without an address": {
@@ -3842,9 +3844,9 @@ func TestMergeAppend(t *testing.T) {
 
 					return layerNodes(t, "svc: {addrs: ['a:1']}\n", "svc: {addrs: [b]}\n", "svc: {name: api}\n")
 				},
-				want:        "mid.yaml:1:1: $.svc.addrs[0].port: port is required",
+				want:        "mid.yaml:1:15: $.svc.addrs[0].port: port is required",
 				wantPath:    "$.svc.addrs[0].port",
-				wantNearest: "$.svc",
+				wantNearest: "$.svc.addrs[0]",
 				wantAddr:    "b",
 			},
 			"a service, for an address of the one file that holds the sequence": {
@@ -3853,9 +3855,9 @@ func TestMergeAppend(t *testing.T) {
 
 					return layerNodes(t, "svc: {addrs: ['a:1', b]}\n", "svc: {name: api}\n")
 				},
-				want:        "base.yaml:1:1: $.svc.addrs[1].port: port is required",
+				want:        "base.yaml:1:22: $.svc.addrs[1].port: port is required",
 				wantPath:    "$.svc.addrs[1].port",
-				wantNearest: "$.svc",
+				wantNearest: "$.svc.addrs[1]",
 				wantAddr:    "b",
 			},
 		}
@@ -3894,8 +3896,8 @@ func TestMergeAppend(t *testing.T) {
 			})
 		}
 
-		// Without the option, the highest file that holds the service
-		// holds the sequence whole or lacks it, and the error binds there.
+		// Without the option, the highest file that holds the sequence
+		// holds it whole, and the error binds at the address there.
 		t.Run("a sequence that replaces keeps the layer of the value", func(t *testing.T) {
 			t.Parallel()
 
@@ -3904,12 +3906,13 @@ func TestMergeAppend(t *testing.T) {
 			require.NoError(t, err)
 
 			_, err = layers.Decode[config](t.Context())
-			require.EqualError(t, err, "prod.yaml:1:1: $.svc.addrs[1].port: port is required")
+			require.EqualError(t, err, "base.yaml:1:22: $.svc.addrs[1].port: port is required")
 		})
 
 		// The path of the option does not go through an element, so it
 		// does not name the addresses of a group. The groups replace, and
-		// the error binds in the highest file that holds the service.
+		// the error binds at the address in the highest file that holds
+		// the groups.
 		t.Run("a sequence inside an element that replaces keeps the layer of the value", func(t *testing.T) {
 			t.Parallel()
 
@@ -3920,7 +3923,7 @@ func TestMergeAppend(t *testing.T) {
 			require.NoError(t, err)
 
 			_, err = layers.Decode[config](t.Context())
-			require.EqualError(t, err, "prod.yaml:1:1: $.svc.groups[0].addrs[1].port: port is required")
+			require.EqualError(t, err, "base.yaml:1:32: $.svc.groups[0].addrs[1].port: port is required")
 		})
 	})
 
@@ -6246,13 +6249,17 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("servers").Index(0).Child("port"))),
 			want: "base.yaml:5:21: $.servers[0].port: bad",
 		},
-		"an element the sequence lacks binds in its layer with no position": {
+		"an element the sequence lacks binds at the sequence in its layer": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("servers").Index(3).Child("port"))),
-			want: "base.yaml: $.servers[3].port: bad",
+			want: "base.yaml:4:1: $.servers[3].port: bad",
 		},
-		"a path below a scalar binds in the layer of the scalar": {
+		"a path below a scalar binds at the scalar in its layer": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPath(portPath.Child("unit"))),
-			want: "base.yaml: $.server.port.unit: bad",
+			want: "base.yaml:3:9: $.server.port.unit: bad",
+		},
+		"a wildcard path binds in the lowest layer with no position": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("servers").IndexAll())),
+			want: "base.yaml: $.servers[*]: bad",
 		},
 		"an entry binds in the layer that holds it": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("backends", "a", "port"))),

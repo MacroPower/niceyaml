@@ -639,8 +639,8 @@ func TestResolver_Nearest(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 		path  string
-		// The path of the mapping that lacks the key, or "" when the
-		// path has none.
+		// The path of the nearest node the document holds, or "" when
+		// the path does not miss a node below one.
 		want string
 	}{
 		"key a mapping leaves out": {
@@ -721,34 +721,75 @@ func TestResolver_Nearest(t *testing.T) {
 		"name in a scalar": {
 			input: "server: hello\n",
 			path:  "$.server.name",
+			want:  "$.server",
 		},
 		"name in a sequence": {
 			input: "servers: [a, b]\n",
 			path:  "$.servers.name",
+			want:  "$.servers",
 		},
 		"index past the end": {
 			input: "servers: [a, b]\n",
 			path:  "$.servers[5]",
+			want:  "$.servers",
+		},
+		"index in a mapping": {
+			input: server,
+			path:  "$.server[0]",
+			want:  "$.server",
+		},
+		"index in the root scalar": {
+			input: "hello\n",
+			path:  "$[0]",
+			want:  "$",
 		},
 		"name below an index past the end": {
 			input: stringtest.LinesLF("servers:", "  - port: 80"),
 			path:  "$.servers[5].name",
+			want:  "$.servers",
 		},
 		"index below the missing key": {
 			input: server,
 			path:  "$.server.names[0]",
+			want:  "$.server",
+		},
+		"index below a key the root leaves out": {
+			input: server,
+			path:  "$.missing[0]",
+			want:  "$",
 		},
 		"key selector on the missing key": {
 			input: server,
 			path:  "$.server.name~",
+			want:  "$.server",
 		},
 		"key selector on an element before the missing key": {
 			input: stringtest.LinesLF("servers:", "  - port: 80"),
 			path:  "$.servers[0]~.name",
+			want:  "$.servers[0]",
 		},
 		"key selector on the root before the missing key": {
 			input: server,
 			path:  "$~.name",
+			want:  "$",
+		},
+		"key selector on an element that is an alias that does not resolve": {
+			input: "servers: [*nope]\n",
+			path:  "$.servers[0]~.name",
+			want:  "$.servers[0]",
+		},
+		"key selector on a root that is an alias that does not resolve": {
+			input: "*nope\n",
+			path:  "$~.name",
+			want:  "$",
+		},
+		"key selector on an element": {
+			input: stringtest.LinesLF("servers:", "  - port: 80"),
+			path:  "$.servers[0]~",
+		},
+		"key selector on the root": {
+			input: server,
+			path:  "$~",
 		},
 		"wildcard": {
 			input: stringtest.LinesLF("servers:", "  - port: 80"),
@@ -803,8 +844,9 @@ func TestResolver_Nearest(t *testing.T) {
 
 			assertPathText(t, got, tc.want)
 
-			// The mapping resolves and the path below it does not.
-			_, err := r.Node(got)
+			// The nearest node has a token and the path below it does not
+			// resolve.
+			_, err := r.Token(got)
 			require.NoError(t, err)
 
 			_, err = r.Node(path)

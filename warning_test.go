@@ -1522,9 +1522,9 @@ func TestWarnings(t *testing.T) {
 			"spec: 2",
 		), niceyaml.WithName("all.yaml")).Documents()
 
-		// The spec key holds a number, so this path does not resolve.
+		// A wildcard path does not resolve to one node.
 		deep := func() error {
-			return niceyaml.NewWarning("old deep", niceyaml.AtPath(paths.Doc().Child("spec").Child("deep")))
+			return niceyaml.NewWarning("old deep", niceyaml.AtPath(paths.Doc().Child("spec").ChildAll()))
 		}
 		layout := func() error {
 			return niceyaml.NewWarning("old layout")
@@ -1546,8 +1546,8 @@ func TestWarnings(t *testing.T) {
 				},
 				want: stringtest.JoinLF(
 					"all.yaml: 2 warnings",
-					"all.yaml: document 1: warning: $.spec.deep: old deep",
-					"all.yaml: document 2: warning: $.spec.deep: old deep",
+					"all.yaml: document 1: warning: $.spec.*: old deep",
+					"all.yaml: document 2: warning: $.spec.*: old deep",
 				),
 				docs: []int{0, 1},
 			},
@@ -1582,8 +1582,8 @@ func TestWarnings(t *testing.T) {
 				},
 				want: stringtest.JoinLF(
 					"all.yaml: 2 warnings",
-					"all.yaml: document 2: warning: $.spec.deep: old deep",
-					"all.yaml: document 1: warning: $.spec.deep: old deep",
+					"all.yaml: document 2: warning: $.spec.*: old deep",
+					"all.yaml: document 1: warning: $.spec.*: old deep",
 				),
 				docs: []int{1, 0},
 			},
@@ -2196,8 +2196,8 @@ func TestWarnings_Report(t *testing.T) {
 	badExtra := niceyaml.Invalid(fs.ErrPermission, niceyaml.AtPath(paths.Doc().Child("extra")))
 	badSeats := yamltest.ErrorAt("bad seats", "spec", "seats")
 
-	// The extra key holds a string, so this path does not resolve.
-	oldDeep := niceyaml.NewWarning("old deep", niceyaml.AtPath(paths.Doc().Child("extra").Child("deep")))
+	// A wildcard path does not resolve to one node.
+	oldDeep := niceyaml.NewWarning("old deep", niceyaml.AtPath(paths.Doc().Child("extra").ChildAll()))
 
 	included := yamltest.FirstDocument(t, stringtest.LinesLF("y:", "  deep: 1"), niceyaml.WithName("inc.yaml"))
 	oldY := included.Bind(niceyaml.NewWarning("old y", niceyaml.AtPath(paths.Doc().Child("y").Child("deep"))))
@@ -2286,7 +2286,7 @@ func TestWarnings_Report(t *testing.T) {
 			is:   fs.ErrPermission,
 			want: stringtest.JoinLF(
 				"cafe.yaml: 1 error, 1 warning",
-				"cafe.yaml:1:1: warning: $.spec: $.extra.deep: old deep",
+				"cafe.yaml:1:1: warning: $.spec: $.extra.*: old deep",
 				"cafe.yaml:3:8: $.extra: permission denied",
 			),
 		},
@@ -2316,7 +2316,7 @@ func TestWarnings_Report(t *testing.T) {
 			is:   fs.ErrPermission,
 			want: stringtest.JoinLF(
 				"cafe.yaml: 1 error, 1 warning",
-				"cafe.yaml:1:1: warning: $.spec: $.extra.deep: old deep",
+				"cafe.yaml:1:1: warning: $.spec: $.extra.*: old deep",
 				"cafe.yaml:3:8: $.extra: permission denied",
 			),
 		},
@@ -2560,9 +2560,9 @@ func TestWarnings_Report(t *testing.T) {
 		docs := source.Documents()
 		one := yamltest.FirstDocument(t, "spec: 1\n", niceyaml.WithName("one.yaml"))
 
-		// The spec key holds a number, so this path does not resolve.
+		// A wildcard path does not resolve to one node.
 		deep := func() error {
-			return niceyaml.NewWarning("old deep", niceyaml.AtPath(paths.Doc().Child("spec").Child("deep")))
+			return niceyaml.NewWarning("old deep", niceyaml.AtPath(paths.Doc().Child("spec").ChildAll()))
 		}
 		layout := func() error {
 			return niceyaml.NewWarning("old layout")
@@ -2589,8 +2589,8 @@ func TestWarnings_Report(t *testing.T) {
 				want: stringtest.JoinLF(
 					"all.yaml: 1 error, 2 warnings",
 					"all.yaml:3:7: $.spec: bad spec",
-					"all.yaml: document 2: warning: $.spec.deep: old deep",
-					"all.yaml: document 1: warning: $.spec.deep: old deep",
+					"all.yaml: document 2: warning: $.spec.*: old deep",
+					"all.yaml: document 1: warning: $.spec.*: old deep",
 				),
 			},
 			"beside the same warning bound in no document": {
@@ -2609,8 +2609,8 @@ func TestWarnings_Report(t *testing.T) {
 				want: stringtest.JoinLF(
 					"1 error, 2 warnings",
 					"all.yaml:3:7: $.spec: bad spec",
-					"all.yaml: document 2: warning: $.spec.deep: old deep",
-					"all.yaml: document 1: warning: $.spec.deep: old deep",
+					"all.yaml: document 2: warning: $.spec.*: old deep",
+					"all.yaml: document 1: warning: $.spec.*: old deep",
 				),
 			},
 			"not beside a detached copy of it in the same document": {
@@ -2619,7 +2619,7 @@ func TestWarnings_Report(t *testing.T) {
 				want: stringtest.JoinLF(
 					"1 error, 1 warning",
 					"all.yaml:3:7: $.spec: bad spec",
-					"all.yaml: document 2: warning: $.spec.deep: old deep",
+					"all.yaml: document 2: warning: $.spec.*: old deep",
 				),
 			},
 			"not beside the same warning at one position that another document binds": {

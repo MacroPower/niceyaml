@@ -4619,11 +4619,27 @@ func TestSource_Bind(t *testing.T) {
 		err := one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("zz").Index(0))))
 
 		bound := yamltest.RequireSourceError(t, err)
-		assert.Equal(t, "one.yaml: $.zz[0]: bad", err.Error())
+		assert.Equal(t, "one.yaml:1:1: $.zz[0]: bad", err.Error())
 		assert.Same(t, doc, yamltest.BoundDocument(t, bound))
+		require.NoError(t, bound.Unresolved())
 
-		rangeErr := bound.Unresolved()
-		require.ErrorIs(t, rangeErr, paths.ErrNotFound)
+		near, ok := bound.Nearest()
+		require.True(t, ok)
+		assert.Equal(t, "$", near.String())
+	})
+
+	t.Run("wildcard path binds to the one document", func(t *testing.T) {
+		t.Parallel()
+
+		one := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2"), niceyaml.WithName("one.yaml"))
+		doc := yamltest.Document(t, one)
+
+		err := one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("zz").IndexAll())))
+
+		bound := yamltest.RequireSourceError(t, err)
+		assert.Equal(t, "one.yaml: $.zz[*]: bad", err.Error())
+		assert.Same(t, doc, yamltest.BoundDocument(t, bound))
+		require.ErrorIs(t, bound.Unresolved(), paths.ErrWildcard)
 
 		_, ok := bound.Range()
 		assert.False(t, ok)
@@ -6187,26 +6203,53 @@ func TestWithReferences(t *testing.T) {
 				reference:  true,
 			},
 			// A path that selects nothing below a key that the merge does not
-			// bring in reads as it reads in a mapping without the merge key.
+			// bring in reads as it reads in a mapping without the merge key,
+			// so it binds at the nearest node the document holds.
 			"index past the end of a sequence that the mapping writes": {
-				path:       paths.Doc().Child("list").Index(5),
-				want:       "app.yaml: $.list[5]: bad",
-				unresolved: "resolve $.list[5]: not found",
+				path: paths.Doc().Child("list").Index(5),
+				want: "app.yaml:2:1: $.list[5]: bad",
+				near: "$.list",
 			},
 			"index into a scalar that the mapping writes": {
-				path:       paths.Doc().Child("kind").Index(0),
-				want:       "app.yaml: $.kind[0]: bad",
-				unresolved: "resolve $.kind[0]: not found",
+				path: paths.Doc().Child("kind").Index(0),
+				want: "app.yaml:1:7: $.kind[0]: bad",
+				near: "$.kind",
 			},
 			"key below a scalar that the mapping writes": {
-				path:       paths.Doc().Child("spec", "q", "r"),
-				want:       "app.yaml: $.spec.q.r: bad",
-				unresolved: "resolve $.spec.q.r: not found",
+				path: paths.Doc().Child("spec", "q", "r"),
+				want: "app.yaml:3:11: $.spec.q.r: bad",
+				near: "$.spec.q",
 			},
 			"entry of a key that neither writes": {
-				path:       paths.Doc().Child("missing").Key(),
-				want:       "app.yaml: $.missing~: bad",
-				unresolved: "resolve $.missing~: not found",
+				path: paths.Doc().Child("missing").Key(),
+				want: "app.yaml:1:1: $.missing~: bad",
+				near: "$",
+			},
+			"key of an entry that the mapping writes": {
+				path: paths.Doc().Child("list").Key().Key(),
+				want: "app.yaml:2:1: $.list~~: bad",
+			},
+			// A key is a scalar, so a selector after its `~` binds at the key.
+			"index into a key that the mapping writes": {
+				path: paths.Doc().Child("list").Key().Index(0),
+				want: "app.yaml:2:1: $.list~[0]: bad",
+				near: "$.list~",
+			},
+			"name below a key that the mapping writes": {
+				path: paths.Doc().Child("kind").Key().Key().Child("x"),
+				want: "app.yaml:1:1: $.kind~~.x: bad",
+				near: "$.kind~~",
+			},
+			// An element does not have a key, so a selector after its `~`
+			// binds at the element.
+			"name below the key of an element": {
+				path: paths.Doc().Child("list").Index(0).Key().Child("x"),
+				want: "app.yaml:2:8: $.list[0]~.x: bad",
+				near: "$.list[0]",
+			},
+			"key of an element": {
+				path: paths.Doc().Child("list").Index(0).Key(),
+				want: "app.yaml:2:8: $.list[0]~: bad",
 			},
 		}
 
@@ -6236,6 +6279,70 @@ func TestWithReferences(t *testing.T) {
 				require.EqualError(t, bound.Unresolved(), tc.unresolved)
 				assert.Equal(t, tc.reference, errors.Is(bound.Unresolved(), paths.ErrReferenceAlias))
 			})
+		}
+	})
+
+	t.Run("selector after the key of an element alias binds at the alias with or without a merge", func(t *testing.T) {
+		t.Parallel()
+
+		// The `~` of an element selects nothing whatever the element holds,
+		// so a path through it does not read the alias of the element.
+		docs := map[string]*niceyaml.Node{}
+		for name, merge := range map[string]string{"merge": "<<: *base", "plain": "spec: b"} {
+			docs[name] = yamltest.FirstDocument(t,
+				stringtest.LinesLF("kind: a", "list: [*base, *nope]", merge),
+				niceyaml.WithName("app.yaml"),
+				yamltest.References(stringtest.LinesLF(
+					"base: &base",
+					"  replicas: 1",
+				)),
+			)
+		}
+
+		tcs := map[string]struct {
+			path paths.Path
+			want string
+			// The path that Nearest reports, or empty for none.
+			near string
+		}{
+			"name below the key of an alias to a reference document": {
+				path: paths.Doc().Child("list").Index(0).Key().Child("x"),
+				want: "app.yaml:2:8: $.list[0]~.x: bad",
+				near: "$.list[0]",
+			},
+			"name below the key of an alias without an anchor": {
+				path: paths.Doc().Child("list").Index(1).Key().Child("x"),
+				want: "app.yaml:2:15: $.list[1]~.x: bad",
+				near: "$.list[1]",
+			},
+			"key of an alias to a reference document": {
+				path: paths.Doc().Child("list").Index(0).Key(),
+				want: "app.yaml:2:8: $.list[0]~: bad",
+			},
+		}
+
+		for name, tc := range tcs {
+			for docName, doc := range docs {
+				t.Run(name+"/"+docName, func(t *testing.T) {
+					t.Parallel()
+
+					err := doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(tc.path)))
+					require.EqualError(t, err, tc.want)
+
+					bound := yamltest.RequireSourceError(t, err)
+					require.NoError(t, bound.Unresolved())
+
+					near, ok := bound.Nearest()
+					if tc.near == "" {
+						assert.False(t, ok)
+
+						return
+					}
+
+					require.True(t, ok)
+					assert.Equal(t, tc.near, near.String())
+				})
+			}
 		}
 	})
 

@@ -4817,6 +4817,8 @@ func TestNode_At_NotFound(t *testing.T) {
 		items:
 		  - x
 		  - k: 1
+		aliases:
+		  - *nope
 	`), niceyaml.WithName("c.yaml"))
 
 	hoursPath := paths.Current().Child("hours")
@@ -4827,8 +4829,7 @@ func TestNode_At_NotFound(t *testing.T) {
 		scope paths.Path
 		path  paths.Path
 		want  string
-		// The path the error reports and the mapping it is bound at, or ""
-		// for an error with no location.
+		// The path the error reports and the nearest node it is bound at.
 		wantPath string
 		near     string
 	}{
@@ -4863,22 +4864,56 @@ func TestNode_At_NotFound(t *testing.T) {
 			wantPath: "$.hours.close",
 			near:     "$.hours",
 		},
-		"an index past the end of a sequence has no location": {
-			path: itemsPath.Index(7),
-			want: "c.yaml: resolve $.items[7]: not found",
+		"an index past the end of a sequence binds at the key of the sequence": {
+			path:     itemsPath.Index(7),
+			want:     "c.yaml:5:1: $.items[7]: not found",
+			wantPath: "$.items[7]",
+			near:     "$.items",
 		},
-		"an index past the end of the scope has no location": {
-			scope: itemsPath,
-			path:  paths.Current().Index(7),
-			want:  "c.yaml: resolve $.items[7]: not found",
+		"an index past the end of the scope binds at the key of the scope": {
+			scope:    itemsPath,
+			path:     paths.Current().Index(7),
+			want:     "c.yaml:5:1: $.items[7]: not found",
+			wantPath: "$.items[7]",
+			near:     "$.items",
 		},
-		"a key below a scalar has no location": {
-			path: paths.Current().Child("name", "sub"),
-			want: "c.yaml: resolve $.name.sub: not found",
+		"an index below a key the root leaves out binds at the root": {
+			path:     paths.Current().Child("zzz").Index(0),
+			want:     "c.yaml:2:1: $.zzz[0]: not found",
+			wantPath: "$.zzz[0]",
+			near:     "$",
 		},
-		"a key of a sequence has no location": {
-			path: itemsPath.Child("k"),
-			want: "c.yaml: resolve $.items.k: not found",
+		"a key below a scalar binds at the scalar": {
+			path:     paths.Current().Child("name", "sub"),
+			want:     "c.yaml:2:7: $.name.sub: not found",
+			wantPath: "$.name.sub",
+			near:     "$.name",
+		},
+		"a key below a scalar element binds at the scalar": {
+			path:     itemsPath.Index(0).Child("sub"),
+			want:     "c.yaml:6:5: $.items[0].sub: not found",
+			wantPath: "$.items[0].sub",
+			near:     "$.items[0]",
+		},
+		"an index of a mapping binds at the key of the mapping": {
+			path:     hoursPath.Index(3),
+			want:     "c.yaml:3:1: $.hours[3]: not found",
+			wantPath: "$.hours[3]",
+			near:     "$.hours",
+		},
+		"a key of a sequence binds at the key of the sequence": {
+			path:     itemsPath.Child("k"),
+			want:     "c.yaml:5:1: $.items.k: not found",
+			wantPath: "$.items.k",
+			near:     "$.items",
+		},
+		// The `~` of an element selects nothing whatever the element holds,
+		// so the path does not read the alias.
+		"a key below the key of an element alias binds at the alias": {
+			path:     paths.Current().Child("aliases").Index(0).Key().Child("x"),
+			want:     "c.yaml:9:5: $.aliases[0]~.x: not found",
+			wantPath: "$.aliases[0]~.x",
+			near:     "$.aliases[0]",
 		},
 	}
 
@@ -4888,14 +4923,14 @@ func TestNode_At_NotFound(t *testing.T) {
 
 			node := yamltest.AtOrSelf(t, doc, tc.scope)
 
-			// An Error at the same path binds at the same place, or at none.
+			// An Error at the same path binds at the same place.
 			required := yamltest.RequireSourceError(
 				t,
 				node.Bind(niceyaml.NewError("required", niceyaml.AtPath(tc.path))),
 			)
 
-			wantRange, located := required.Range()
-			require.Equal(t, tc.wantPath != "", located)
+			wantRange, ok := required.Range()
+			require.True(t, ok)
 
 			_, atErr := node.At(tc.path)
 			_, rangesErr := node.Ranges(tc.path)
@@ -4914,19 +4949,15 @@ func TestNode_At_NotFound(t *testing.T) {
 					assert.Same(t, doc, yamltest.BoundDocument(t, bound))
 
 					rng, ok := bound.Range()
-					assert.Equal(t, located, ok)
+					assert.True(t, ok)
 					assert.Equal(t, wantRange, rng)
 					require.NoError(t, bound.Unresolved())
 
 					path, ok := bound.Path()
-					assert.Equal(t, located, ok)
+					assert.True(t, ok)
 
-					near, nearOK := bound.Nearest()
-					assert.Equal(t, located, nearOK)
-
-					if !located {
-						return
-					}
+					near, ok := bound.Nearest()
+					assert.True(t, ok)
 
 					assert.Equal(t, "not found", bound.Message())
 					assert.Equal(t, tc.wantPath, path.String())
@@ -4951,20 +4982,60 @@ func TestNode_At_NotFound(t *testing.T) {
 		), niceyaml.FormatError(err, niceyaml.WithContextLines(1)))
 	})
 
-	t.Run("a document with no content has no mapping to bind at", func(t *testing.T) {
+	t.Run("the excerpt marks the sequence that an index runs past", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := doc.At(itemsPath.Index(7))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"c.yaml:5:1: $.items[7]: not found",
+			"",
+			"   4 |   open: 9",
+			"   5 | items:",
+			"     | ^^^^^",
+			"   6 |   - x",
+		), niceyaml.FormatError(err, niceyaml.WithContextLines(1)))
+	})
+
+	t.Run("the excerpt marks the scalar that a key looks into", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := doc.At(paths.Current().Child("name", "sub"))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"c.yaml:2:7: $.name.sub: not found",
+			"",
+			"   1 | # c",
+			"   2 | name: s",
+			"     |       ^",
+			"   3 | hours:",
+		), niceyaml.FormatError(err, niceyaml.WithContextLines(1)))
+	})
+
+	t.Run("a document with no content has no node to bind at", func(t *testing.T) {
 		t.Parallel()
 
 		empty := yamltest.FirstDocumentWithPath(t, "# nothing\n", "e.yaml")
 		path := paths.Current().Child("zzz")
-		want := "e.yaml: resolve $.zzz: not found: document has no content"
+		want := "e.yaml: $.zzz: not found: document has no content"
 
-		_, err := empty.At(path)
-		require.ErrorIs(t, err, paths.ErrNoDocument)
-		require.EqualError(t, err, want)
+		_, atErr := empty.At(path)
+		_, rangesErr := empty.Ranges(path)
 
-		_, err = empty.Ranges(path)
-		require.ErrorIs(t, err, paths.ErrNoDocument)
-		require.EqualError(t, err, want)
+		for _, err := range []error{atErr, rangesErr} {
+			require.ErrorIs(t, err, paths.ErrNoDocument)
+			require.EqualError(t, err, want)
+
+			bound := yamltest.RequireSourceError(t, err)
+			assert.Equal(t, "not found: document has no content", bound.Message())
+
+			got, ok := bound.Path()
+			require.True(t, ok)
+			assert.Equal(t, "$.zzz", got.String())
+
+			_, ok = bound.Position()
+			assert.False(t, ok)
+		}
 	})
 
 	t.Run("Nodes returns no error for a key a mapping leaves out", func(t *testing.T) {
@@ -4989,32 +5060,32 @@ func TestNode_At_NotFound(t *testing.T) {
 		}{
 			"the root": {
 				path:   paths.Current().Key(),
-				want:   "c.yaml: resolve $~: not found",
+				want:   "c.yaml:2:1: $~: not found",
 				ranges: position.Ranges{yamltest.LineRange(1, 0, 4)},
 			},
 			"a scalar element": {
 				path:   itemsPath.Index(0).Key(),
-				want:   "c.yaml: resolve $.items[0]~: not found",
+				want:   "c.yaml:6:5: $.items[0]~: not found",
 				ranges: position.Ranges{yamltest.LineRange(5, 4, 5)},
 			},
 			"a mapping element": {
 				path:   itemsPath.Index(1).Key(),
-				want:   "c.yaml: resolve $.items[1]~: not found",
+				want:   "c.yaml:7:3: $.items[1]~: not found",
 				ranges: position.Ranges{yamltest.LineRange(6, 2, 3)},
 			},
 			"an element that is the scope": {
 				scope:  itemsPath.Index(1),
 				path:   paths.Current().Key(),
-				want:   "c.yaml: resolve $.items[1]~: not found",
+				want:   "c.yaml:7:3: $.items[1]~: not found",
 				ranges: position.Ranges{yamltest.LineRange(6, 2, 3)},
 			},
 			"a selector after the key of an element": {
 				path: itemsPath.Index(1).Key().Child("k"),
-				want: "c.yaml: resolve $.items[1]~.k: not found",
+				want: "c.yaml:7:3: $.items[1]~.k: not found",
 			},
 			"a selector after the key of the root": {
 				path: paths.Current().Key().Child("name"),
-				want: "c.yaml: resolve $~.name: not found",
+				want: "c.yaml:2:1: $~.name: not found",
 			},
 		}
 
@@ -5715,9 +5786,9 @@ func TestNode_Bind_Scope(t *testing.T) {
 			want: "cfg.yaml:3:5: $.shops[0].hours.nope: bad",
 			path: "$.shops[0].hours.nope",
 		},
-		"a path that does not resolve joins the scope": {
+		"a path below a scalar joins the scope and binds at the scalar": {
 			err:  yamltest.ErrorAt("bad", "open", "nope"),
-			want: "cfg.yaml: $.shops[0].hours.open.nope: bad",
+			want: "cfg.yaml:4:13: $.shops[0].hours.open.nope: bad",
 			path: "$.shops[0].hours.open.nope",
 		},
 		"a path beside a range joins the scope and binds at the range": {
@@ -6169,17 +6240,6 @@ func TestNode_Bind_Scope(t *testing.T) {
 				},
 				is:   paths.ErrWildcard,
 				want: "cfg.yaml: resolve $.shops[0].hours.*: wildcard path matches any number of nodes",
-			},
-			"a path that names an index of a mapping": {
-				run: func(t *testing.T) error {
-					t.Helper()
-
-					_, err := hours.At(paths.Current().Index(3))
-
-					return err //nolint:wrapcheck // The test inspects the error of the call.
-				},
-				is:   paths.ErrNotFound,
-				want: "cfg.yaml: resolve $.shops[0].hours[3]: not found",
 			},
 			"a wildcard path given to Ranges": {
 				run: func(t *testing.T) error {

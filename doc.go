@@ -424,14 +424,19 @@
 //
 // Binding resolves each location once. A check for a required field names a
 // path to a value that the document does not hold. Such a path binds at the
-// key of the mapping that lacks the value. A path that enters an alias the
-// document cannot follow, such as one to an anchor in a reference document,
-// binds at the alias. An error that a [SelfValidator] or a function from
-// WithValueCheck returns below a value that decodes itself binds at that
-// value when its path does not select anything. [SourceError.Nearest] reports
-// the node in each case.
+// nearest node that the document holds along it, whatever selector misses.
+// A mapping that lacks a key, a sequence too short for an index, and a null
+// bind at the key of their entry. A scalar that a path looks into binds at
+// its own text. A path that enters an alias the document cannot follow binds
+// at the alias. One such alias refers to an anchor in a reference document.
+// An error that a [SelfValidator] or a function from WithValueCheck returns
+// below a value that decodes itself binds at that value when its path does
+// not bind at any node of the document, such as a wildcard path.
+// [SourceError.Nearest] reports the node in each case.
 //
 // Any other location that does not resolve costs the binding its position.
+// A wildcard path, a path in a document without content, and a line past
+// the end of the source are such locations.
 // [SourceError.Unresolved] then returns the reason, such as [ErrOutOfRange]
 // for a line that the source does not hold, or [ErrPathNeedsDocument] for a
 // path without a single document to resolve in. Such a binding names its
@@ -1119,9 +1124,12 @@
 // A value that decodes itself validates as any other value does, and so does
 // every value below it. Its fields do not have to mirror the document. An
 // error below it whose path the document does not hold thus binds at the
-// nearest value that decodes itself, and [SourceError.Nearest] names that
-// value. Every error below a slice, an array, or a map that decodes itself
-// binds at that value.
+// nearest node that the document holds along that path. That node can be
+// the value itself or any node below it, such as the sequence that lacks
+// an element or the scalar that the value parses. [SourceError.Nearest]
+// names it.
+// Every error below a slice, an array, or a map that decodes itself binds at
+// that value.
 //
 // A Validate method and a function from WithValueCheck do not hold a Node. A
 // check that needs one, such as a check against a registry, thus runs after
@@ -1139,11 +1147,11 @@
 // sets this way.
 //
 // The walk follows the value, and each error binds where its path resolves in
-// the document. An error under a field that the document lacks binds at the
-// key of the mapping that lacks it. An error under an element that the
-// document lacks binds without a position. [Source.SelfValidate] runs the
-// step through the one document of a Source. An empty Source represents an
-// optional file that does not exist.
+// the document. An error under a field or an element that the document lacks
+// binds at the nearest node the document holds. That node can be the
+// mapping that lacks the field or the sequence that lacks the element.
+// [Source.SelfValidate] runs the step through the one document of a Source.
+// An empty Source represents an optional file that does not exist.
 //
 // A check on a value that did not come from a document, such as the body of a
 // request, does not have a line to report. [SelfValidateValue] runs the
@@ -1219,12 +1227,12 @@
 //
 // [Node.At] and [Node.DecodeAt] return an error that wraps [paths.ErrNotFound]
 // for a path that does not select anything, and IsInvalid reports that error.
-// For a key that a mapping leaves out, the error binds at the key of that
-// mapping, as in "cfg.yaml:3:1: $.server.name: not found". Any other such
-// error does not have a location. In a document without content, the error
-// also wraps [paths.ErrNoDocument]. A decode can return an error that matches
-// paths.ErrNotFound for a node that is present, so the error of At alone
-// tells whether a value is absent.
+// The error carries the path and binds at the nearest node the document
+// holds, as in "cfg.yaml:3:1: $.server.name: not found" for a key that the
+// mapping at line 3 lacks. In a document without content, the error does not
+// have a position, and it wraps [paths.ErrNoDocument] as well. A decode can
+// return an error that matches paths.ErrNotFound for a node that is present,
+// so the error of At alone tells whether a value is absent.
 //
 // # Cancellation
 //
@@ -1668,9 +1676,10 @@
 // element, such as a sequence that decodes itself. It stays there too when it
 // binds at the key of such a value.
 //
-// An error for a key that is missing from every layer binds at the key of the
-// mapping that lacks it. It binds in the layer whose mapping lies deepest
-// along the path, and in the highest of several such layers. An error at a
+// An error for a path that every layer misses binds at the nearest node that
+// a layer holds along the path, such as the key of the mapping that lacks a
+// key. It binds in the layer whose node lies deepest along the path, and in
+// the highest of several such layers. An error at a
 // key that a written null removes or does not add binds at that null, in the
 // highest layer that writes one there. An error without a location binds
 // without a position in the layer that the Source stands for, as in
