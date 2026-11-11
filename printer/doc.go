@@ -137,8 +137,13 @@
 // overlay does. A changed line then keeps its syntax highlighting on the
 // diff background:
 //
+//	result, err := diff.Diff(ctx, before, after)
+//	if err != nil {
+//		return err
+//	}
+//
 //	p := printer.New(printer.WithFlagBlend(true))
-//	lipgloss.Println(p.Print(diff.Diff(before, after).Unified()))
+//	lipgloss.Println(p.Print(result.Unified()))
 //
 // Either way, [DefaultGutter] draws the marker of the flag in the diff
 // kind, on the same background as the line.

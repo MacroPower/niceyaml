@@ -987,7 +987,7 @@ func (n *Node) rangeOf(node ast.Node) (position.Range, bool) {
 // file. A document of a file that holds several, or the node a Node from
 // [Node.At] selects, thus renders, diffs, or searches on its own:
 //
-//	result := diff.Diff(before[1].View(), after[1].View())
+//	result, err := diff.Diff(ctx, before[1].View(), after[1].View())
 //
 // Each call returns a view of its own without decoration, as [Source.View]
 // does, and [line.View.Held] returns its lines on their own. The view

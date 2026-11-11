@@ -5,7 +5,11 @@
 // Source values, with an [lcs.Algorithm]. The default is [lcs.Hirschberg].
 // Create one with [New], or call [Diff] for the default Differ:
 //
-//	result := diff.Diff(before.Lines(), after.Lines())
+//	result, err := diff.Diff(ctx, before.Lines(), after.Lines())
+//	if err != nil {
+//		return err
+//	}
+//
 //	p := printer.New()
 //	lipgloss.Println(p.Print(result.Unified()))
 //	lipgloss.Println(p.Print(result.Hunks(3)))
@@ -15,7 +19,23 @@
 // document in two revisions of the file diff that document alone. The
 // gutter and hunk headers then show the line numbers of the file:
 //
-//	result := diff.Diff(before[1].View(), after[1].View())
+//	result, err := diff.Diff(ctx, before[1].View(), after[1].View())
+//
+// The time a diff takes depends on the content of both revisions. Inputs
+// that share many lines in a different order take time close to the square
+// of their length, as [lcs] describes. The byte limit of a Source does not
+// bound that time, but a deadline on the context does. A diff returns the
+// error of the context after the context ends. It never returns a coarser
+// result in place of the exact one. A server that diffs submitted
+// revisions thus answers when the deadline passes:
+//
+//	ctx, cancel := context.WithTimeout(ctx, time.Second)
+//	defer cancel()
+//
+//	result, err := diff.Diff(ctx, before.Lines(), after.Lines())
+//	if errors.Is(err, context.DeadlineExceeded) {
+//		return errTooDifferent
+//	}
 //
 // A [Result] renders the diff in several layouts:
 //
@@ -113,7 +133,7 @@
 //	differ := diff.New(diff.WithLineKey(func(l *line.Line) string {
 //		return strings.TrimRight(l.Content(), " \t")
 //	}))
-//	result := differ.Diff(before.Lines(), after.Lines())
+//	result, err := differ.Diff(ctx, before.Lines(), after.Lines())
 //
 // The key decides only which lines the diff pairs, and every rendering
 // shows each line as its revision wrote it. An unchanged row of the unified

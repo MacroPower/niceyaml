@@ -142,7 +142,14 @@ func main() {
 		// The rewrite writes the type fields of v1 and the changes of the
 		// steps. It keeps every other byte, such as the comments and the
 		// place of each key.
-		lipgloss.Println(p.Print(f.Diff(1)))
+		hunks, err := f.Diff(ctx, 1)
+		if err != nil {
+			lipgloss.Println(p.PrintError(err))
+
+			return
+		}
+
+		lipgloss.Println(p.Print(hunks))
 	}
 
 	fmt.Println(plan.Summary())

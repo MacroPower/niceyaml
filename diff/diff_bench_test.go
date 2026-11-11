@@ -49,7 +49,12 @@ func benchDiff(b *testing.B, yamlA, yamlB string, render func(*diff.Result)) {
 	linesB := niceyaml.NewSourceFromString(yamlB, yamltest.NoSizeLimits(niceyaml.WithName("b"))...).Lines()
 
 	for b.Loop() {
-		render(diff.Diff(linesA, linesB))
+		result, err := diff.Diff(b.Context(), linesA, linesB)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		render(result)
 	}
 }
 

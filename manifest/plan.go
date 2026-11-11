@@ -268,11 +268,18 @@ func (f *PlanFile) Header() string {
 // A printer renders the view with styles. [line.View.String] renders it
 // as plain text for a log, with a "-" beside each line the plan removes
 // and a "+" beside each line it adds.
-func (f *PlanFile) Diff(lines int) *line.View {
-	result := diff.Diff(f.f.src.Lines(), f.f.src.WithText(string(f.after)).Lines())
+//
+// Diff passes ctx to [diff.Diff], so a deadline bounds the diff of a
+// large file. When ctx ends, Diff returns a nil view with the error of
+// ctx, which matches [context.Canceled] or [context.DeadlineExceeded].
+func (f *PlanFile) Diff(ctx context.Context, lines int) (*line.View, error) {
+	result, err := diff.Diff(ctx, f.f.src.Lines(), f.f.src.WithText(string(f.after)).Lines())
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The error of ctx, as Diff documents.
+	}
 
 	if f.f.src.ShowsExcerpts() {
-		return result.Hunks(lines)
+		return result.Hunks(lines), nil
 	}
 
 	stats := result.Stats()
@@ -294,7 +301,7 @@ func (f *PlanFile) Diff(lines int) *line.View {
 		parts = append(parts, word)
 	}
 
-	return line.NewView(niceyaml.NewSourceFromString(strings.Join(parts, ", ")).Lines())
+	return line.NewView(niceyaml.NewSourceFromString(strings.Join(parts, ", ")).Lines()), nil
 }
 
 // removalPath returns the path of the value that rm removed, as a header

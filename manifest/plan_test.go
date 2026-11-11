@@ -17,6 +17,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/edit"
 	"go.jacobcolvin.com/niceyaml/input"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/manifest"
 	"go.jacobcolvin.com/niceyaml/matcher"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -1058,7 +1059,7 @@ func TestPlanFile_Diff(t *testing.T) {
 		`   7 -  closes: "19:00"`,
 		`   6 +  open: "07:00" # summer hours`,
 		`   7 +  close: "19:00"`,
-	), stringtest.TrimLineEnds(p.Print(plan.Files()[0].Diff(3))))
+	), stringtest.TrimLineEnds(p.Print(requirePlanDiff(t, plan.Files()[0], 3))))
 
 	// The plain text of the view marks the lines the plan removes and
 	// adds, so a log of it reads as a diff.
@@ -1074,13 +1075,42 @@ func TestPlanFile_Diff(t *testing.T) {
 		`   7 -   closes: "19:00"`,
 		`   6 +   open: "07:00" # summer hours`,
 		`   7 +   close: "19:00"`,
-	), plan.Files()[0].Diff(3).String())
+	), requirePlanDiff(t, plan.Files()[0], 3).String())
 
 	hidden, err := newCafeRegistry(t).PlanMigration(t.Context(),
 		configFS(files, input.WithSourceOptions(niceyaml.WithExcerpts(false))))
 	require.NoError(t, err)
 	require.Len(t, hidden.Files(), 1)
-	assert.Equal(t, "   1  3 lines removed, 3 added", stringtest.TrimLineEnds(p.Print(hidden.Files()[0].Diff(3))))
+	assert.Equal(
+		t,
+		"   1  3 lines removed, 3 added",
+		stringtest.TrimLineEnds(p.Print(requirePlanDiff(t, hidden.Files()[0], 3))),
+	)
+}
+
+func TestPlanFile_Diff_Context(t *testing.T) {
+	t.Parallel()
+
+	plan := planOf(t, cafeOptions(), map[string]string{"hours.yaml": hoursDoc})
+	require.Len(t, plan.Files(), 1)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	got, err := plan.Files()[0].Diff(ctx, 3)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, got)
+}
+
+// requirePlanDiff returns the view that [manifest.PlanFile.Diff] returns
+// for f with the context of t, and fails t when Diff returns an error.
+func requirePlanDiff(t *testing.T, f *manifest.PlanFile, lines int) *line.View {
+	t.Helper()
+
+	view, err := f.Diff(t.Context(), lines)
+	require.NoError(t, err)
+
+	return view
 }
 
 func TestPlanFile_Removals(t *testing.T) {

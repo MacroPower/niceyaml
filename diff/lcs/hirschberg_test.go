@@ -1,6 +1,7 @@
 package lcs_test
 
 import (
+	"context"
 	"fmt"
 	"math/rand/v2"
 	"slices"
@@ -60,7 +61,7 @@ func TestHirschberg_Diff(t *testing.T) {
 			t.Parallel()
 
 			before, after := strings.Split(tc.before, ""), strings.Split(tc.after, "")
-			got := lcs.NewHirschberg().Diff(before, after)
+			got := requireDiff(t, lcs.NewHirschberg(), before, after)
 
 			requireValidOps(t, before, after, got)
 			assert.Equal(t, tc.want, kindsOf(got))
@@ -79,10 +80,10 @@ func TestHirschberg_Reuse(t *testing.T) {
 		{Kind: lcs.OpInsert, Before: -1, After: 1},
 	}
 
-	first := h.Diff([]string{"a", "b"}, []string{"a", "c"})
+	first := requireDiff(t, h, []string{"a", "b"}, []string{"a", "c"})
 	assert.Equal(t, want, first)
 
-	second := h.Diff([]string{"x", "y", "z"}, []string{"x", "z"})
+	second := requireDiff(t, h, []string{"x", "y", "z"}, []string{"x", "z"})
 	assert.Equal(t, []lcs.Op{
 		{Kind: lcs.OpEqual, Before: 0, After: 0},
 		{Kind: lcs.OpDelete, Before: 1, After: -1},
@@ -99,18 +100,33 @@ func TestHirschberg_Concurrent(t *testing.T) {
 
 	before := []string{"a", "b", "c", "d", "e"}
 	after := []string{"a", "x", "c", "y", "e"}
-	want := h.Diff(before, after)
+	want := requireDiff(t, h, before, after)
 
 	var wg sync.WaitGroup
 
 	for range 16 {
 		wg.Go(func() {
 			for range 50 {
-				assert.Equal(t, want, h.Diff(before, after))
+				got, err := h.Diff(t.Context(), before, after)
+				if err != nil {
+					t.Error(err)
+
+					return
+				}
+
+				assert.Equal(t, want, got)
+
+				got, err = h.Diff(t.Context(), []string{"a"}, []string{"a", "b"})
+				if err != nil {
+					t.Error(err)
+
+					return
+				}
+
 				assert.Equal(t, []lcs.Op{
 					{Kind: lcs.OpEqual, Before: 0, After: 0},
 					{Kind: lcs.OpInsert, Before: -1, After: 1},
-				}, h.Diff([]string{"a"}, []string{"a", "b"}))
+				}, got)
 			}
 		})
 	}
@@ -197,7 +213,7 @@ func TestHirschberg_DiffIsMinimal(t *testing.T) {
 					after = randomLines()
 				}
 
-				got := h.Diff(before, after)
+				got := requireDiff(t, h, before, after)
 
 				requireValidOps(t, before, after, got)
 				require.Equal(t, naiveLCSLen(before, after), equalOps(got),
@@ -271,7 +287,7 @@ func TestHirschberg_DiffScales(t *testing.T) {
 			}
 
 			start := time.Now()
-			got := lcs.NewHirschberg().Diff(before, after)
+			got := requireDiff(t, lcs.NewHirschberg(), before, after)
 			elapsed := time.Since(start)
 
 			requireValidOps(t, before, after, got)
@@ -279,6 +295,94 @@ func TestHirschberg_DiffScales(t *testing.T) {
 			assert.Less(t, elapsed, time.Second)
 		})
 	}
+}
+
+func TestHirschberg_DiffContext(t *testing.T) {
+	t.Parallel()
+
+	// The lines of both inputs come from three short texts in a random
+	// order, so the inputs share every line in a different order. The search
+	// then takes seconds, and a deadline of a few milliseconds ends it.
+	rng := rand.New(rand.NewPCG(3, 4))
+
+	slow := func() []string {
+		lines := make([]string, 60000)
+		for i := range lines {
+			lines[i] = []string{"-", "~", "a:"}[rng.IntN(3)]
+		}
+
+		return lines
+	}
+
+	slowBefore, slowAfter := slow(), slow()
+
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	tcs := map[string]struct {
+		ctx    func(t *testing.T) context.Context
+		before []string
+		after  []string
+		err    error
+	}{
+		"canceled before a diff without a search": {
+			ctx:    func(*testing.T) context.Context { return canceled },
+			before: []string{"a"},
+			after:  []string{"a"},
+			err:    context.Canceled,
+		},
+		"canceled before a diff with a search": {
+			ctx:    func(*testing.T) context.Context { return canceled },
+			before: []string{"a", "b", "c"},
+			after:  []string{"c", "b", "a"},
+			err:    context.Canceled,
+		},
+		"deadline during the search": {
+			ctx: func(t *testing.T) context.Context {
+				t.Helper()
+
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+				t.Cleanup(cancel)
+
+				return ctx
+			},
+			before: slowBefore,
+			after:  slowAfter,
+			err:    context.DeadlineExceeded,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			h := lcs.NewHirschberg()
+
+			start := time.Now()
+			got, err := h.Diff(tc.ctx(t), tc.before, tc.after)
+			elapsed := time.Since(start)
+
+			require.ErrorIs(t, err, tc.err)
+			assert.Nil(t, got)
+			assert.Less(t, elapsed, time.Second)
+
+			// The ended diff returns its buffers to the pool, and the next
+			// diff of the same instance starts from clean buffers.
+			before, after := []string{"a", "b", "c"}, []string{"a", "x", "c"}
+			assert.Equal(t, "=-+=", kindsOf(requireDiff(t, h, before, after)))
+		})
+	}
+}
+
+// requireDiff returns the ops that h computes for before and after with
+// the context of t, and fails t when h returns an error.
+func requireDiff(t *testing.T, h *lcs.Hirschberg, before, after []string) []lcs.Op {
+	t.Helper()
+
+	ops, err := h.Diff(t.Context(), before, after)
+	require.NoError(t, err)
+
+	return ops
 }
 
 // numberedLines returns n lines that are all distinct, "key0: value0"

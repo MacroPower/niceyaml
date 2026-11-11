@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strconv"
@@ -52,8 +53,9 @@ type config struct {
 // [Differ] between goroutines, you must give it an algorithm that is safe
 // for concurrent use.
 //
-// [Differ.Diff] panics when the ops of the algorithm break the rule that
-// [lcs.Algorithm] states.
+// [Differ.Diff] passes its context to the algorithm and returns the error
+// of the algorithm as it is. It panics when the ops of the algorithm break
+// the rule that [lcs.Algorithm] states.
 //
 // The default is [lcs.Hirschberg].
 func WithAlgorithm(algo lcs.Algorithm) Option {
@@ -123,7 +125,7 @@ func New(opts ...Option) *Differ {
 // several documents, the views of one document in two revisions of the
 // file diff that document alone:
 //
-//	result := diff.Diff(before[1].View(), after[1].View())
+//	result, err := diff.Diff(ctx, before[1].View(), after[1].View())
 //
 // Diff reads the lines of a view and ignores its decoration, so the flags,
 // overlays, and annotations of an input never reach the result.
@@ -151,13 +153,29 @@ func New(opts ...Option) *Differ {
 // [Result.UnifiedOrigin] and the other methods that map rows give the
 // deleted row and the inserted row different origins.
 //
+// A diff can take time close to the square of the number of lines, as
+// [lcs] describes, so ctx bounds it. Diff checks ctx before it calls the
+// [lcs.Algorithm], and [lcs.Hirschberg] checks it while it searches. When
+// ctx has ended, or the algorithm returns an error, Diff returns a nil
+// [*Result] with that error as it is. The error of ctx matches
+// [context.Canceled] or [context.DeadlineExceeded].
+//
 // Diff panics when the ops that the [lcs.Algorithm] returns break the rule
 // that [lcs.Algorithm] states. Such ops hold an [lcs.OpKind] other than
 // [lcs.OpEqual], [lcs.OpDelete], or [lcs.OpInsert], or they drop, repeat,
 // or reorder a line of a revision.
-func (d *Differ) Diff(a, b line.Sequence) *Result {
+func (d *Differ) Diff(ctx context.Context, a, b line.Sequence) (*Result, error) {
+	err := ctx.Err()
+	if err != nil {
+		return nil, err //nolint:wrapcheck // The error of ctx, as Diff documents.
+	}
+
 	r := &Result{inputs: [2]input{collect(a), collect(b)}}
-	r.ops = d.computeOps(r.inputs[Before].lines, r.inputs[After].lines)
+
+	r.ops, err = d.computeOps(ctx, r.inputs[Before].lines, r.inputs[After].lines)
+	if err != nil {
+		return nil, err
+	}
 
 	// Each row of the unified view shows the line of its op. The ops hold
 	// each line of an input once, so each line maps to one row.
@@ -180,7 +198,7 @@ func (d *Differ) Diff(a, b line.Sequence) *Result {
 
 	r.unified = line.Collect(lines...)
 
-	return r
+	return r, nil
 }
 
 // collect returns the lines of seq as an [input], which a diff reads by
@@ -220,9 +238,14 @@ func collect(seq line.Sequence) input {
 //
 // The ops must hold every line of each side once, in order, as
 // [lcs.Algorithm] states. Ops that drop, repeat, or reorder a line would
-// render a wrong diff without a trace, so computeOps panics on them.
-func (d *Differ) computeOps(before, after line.Lines) []lineOp {
-	diffOps := d.algo.Diff(d.keys(before), d.keys(after))
+// render a wrong diff without a trace, so computeOps panics on them. It
+// returns the error of the algorithm as it is.
+func (d *Differ) computeOps(ctx context.Context, before, after line.Lines) ([]lineOp, error) {
+	diffOps, err := d.algo.Diff(ctx, d.keys(before), d.keys(after))
+	if err != nil {
+		return nil, err //nolint:wrapcheck // Diff returns the error of the algorithm as it is.
+	}
+
 	ops := make([]lineOp, 0, len(diffOps))
 
 	var (
@@ -268,7 +291,7 @@ func (d *Differ) computeOps(before, after line.Lines) []lineOp {
 		}
 	}
 
-	return ops
+	return ops, nil
 }
 
 // keys returns the key of each line of lines, by position. The algorithm
@@ -480,8 +503,8 @@ func (r *Result) Unified() *line.View {
 // Hunks picks its rows from the changes alone. [Result.HunksOf] also picks
 // the rows that a decorated view marks, such as an error that
 // [Result.Carry] copies onto an unchanged row.
-func (r *Result) Hunks(context int) *line.View {
-	return r.HunksOf(r.Unified(), context)
+func (r *Result) Hunks(contextLines int) *line.View {
+	return r.HunksOf(r.Unified(), contextLines)
 }
 
 // HunksOf returns the hunks of view, a view of [Result.Unified] that
@@ -514,7 +537,7 @@ func (r *Result) Hunks(context int) *line.View {
 // of Result.Unified, as [line.View.Over] reports.
 //
 // [Result.PaneHunksOf] returns the hunks of two side-by-side panes.
-func (r *Result) HunksOf(view *line.View, context int) *line.View {
+func (r *Result) HunksOf(view *line.View, contextLines int) *line.View {
 	if !view.Over(r.unified) {
 		panic("diff: HunksOf: view is not a view of this Result")
 	}
@@ -522,7 +545,7 @@ func (r *Result) HunksOf(view *line.View, context int) *line.View {
 	rows := func(row int) [2]int { return r.ops[row].pos }
 	marked := func(row int) bool { return hunkMarked(view, row) }
 
-	spans, parts := hunkSpans(r.consecutiveParts(len(r.ops), rows), context, marked, view)
+	spans, parts := hunkSpans(r.consecutiveParts(len(r.ops), rows), contextLines, marked, view)
 
 	return hunksOf(r.Unified(), view, spans, r.hunkHeaders(spans, parts, rows))
 }
@@ -540,10 +563,10 @@ func (r *Result) HunksOf(view *line.View, context int) *line.View {
 // decorates only the rows of [Result.After], so the hunks of
 // Result.Before leave out its rows and the context rows around it.
 //
-// PaneHunks returns PaneHunksOf(r.Before(), r.After(), context). See
+// PaneHunks returns PaneHunksOf(r.Before(), r.After(), contextLines). See
 // [Result.PaneHunksOf] for the rows, the headers, and the gaps.
-func (r *Result) PaneHunks(context int) (*line.View, *line.View) {
-	return r.PaneHunksOf(r.Before(), r.After(), context)
+func (r *Result) PaneHunks(contextLines int) (*line.View, *line.View) {
+	return r.PaneHunksOf(r.Before(), r.After(), contextLines)
 }
 
 // PaneHunksOf returns the hunks of two side-by-side panes, as
@@ -581,7 +604,7 @@ func (r *Result) PaneHunks(context int) (*line.View, *line.View) {
 // [Result.HunksOf] states. PaneHunksOf panics when before is not over the
 // content of Result.Before, or after is not over the content of
 // Result.After, as [line.View.Over] reports.
-func (r *Result) PaneHunksOf(before, after *line.View, context int) (*line.View, *line.View) {
+func (r *Result) PaneHunksOf(before, after *line.View, contextLines int) (*line.View, *line.View) {
 	p := r.getPanes()
 
 	if !before.Over(p.content[Before]) {
@@ -597,7 +620,7 @@ func (r *Result) PaneHunksOf(before, after *line.View, context int) (*line.View,
 		return p.rows[row].changed || hunkMarked(before, row) || hunkMarked(after, row)
 	}
 
-	spans, parts := hunkSpans(r.consecutiveParts(len(p.rows), rows), context, marked, before, after)
+	spans, parts := hunkSpans(r.consecutiveParts(len(p.rows), rows), contextLines, marked, before, after)
 	headers := r.hunkHeaders(spans, parts, rows)
 
 	return hunksOf(r.pane(Before), before, spans, headers), hunksOf(r.pane(After), after, spans, headers)
@@ -611,7 +634,7 @@ func (r *Result) PaneHunksOf(before, after *line.View, context int) (*line.View,
 // numbering.
 func hunkSpans(
 	parts []consecutivePart,
-	context int,
+	contextLines int,
 	marked func(row int) bool,
 	views ...*line.View,
 ) (position.Spans, []consecutivePart) {
@@ -630,7 +653,7 @@ func hunkSpans(
 				}
 			}
 
-			for _, span := range position.ContextSpans(rows, context, run.End).Clamp(run.Start, run.End) {
+			for _, span := range position.ContextSpans(rows, contextLines, run.End).Clamp(run.Start, run.End) {
 				spans = append(spans, span)
 				spanParts = append(spanParts, part)
 			}
@@ -1286,7 +1309,11 @@ func (r *Result) PaneRow(o Origin) (int, bool) {
 // [After] from after. The marks follow the annotations each row carries
 // already, so a hunk header stays above them.
 //
-//	result := diff.Diff(before, after)
+//	result, err := diff.Diff(ctx, before, after)
+//	if err != nil {
+//		return err
+//	}
+//
 //	view := result.Unified()
 //	result.Carry(view, before, after)
 //
@@ -1366,12 +1393,14 @@ func (r *Result) Carry(dst, before, after *line.View) {
 var defaultDiffer = New()
 
 // Diff computes the difference between two revisions using the default
-// line key and algorithm. See [Differ.Diff].
+// line key and algorithm. See [Differ.Diff]. It returns an error only
+// when ctx ends, and the error matches [context.Canceled] or
+// [context.DeadlineExceeded].
 //
 // Every call goes through one shared [Differ], which is safe for concurrent
 // use, so repeated calls reuse its pooled working buffers.
-func Diff(a, b line.Sequence) *Result {
-	return defaultDiffer.Diff(a, b)
+func Diff(ctx context.Context, a, b line.Sequence) (*Result, error) {
+	return defaultDiffer.Diff(ctx, a, b)
 }
 
 // lineOp is one row of the unified view.

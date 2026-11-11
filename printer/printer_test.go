@@ -20,7 +20,6 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -1102,7 +1101,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 
 			p := testPrinterWithGutter(gutter).With(printer.WithWrapWidth(tc.width))
 
-			view := yamltest.Diff(tc.before, tc.after).Unified()
+			view := yamltest.Diff(t, tc.before, tc.after).Unified()
 			view.AddOverlay(testOverlayHighlight, tc.overlays...)
 
 			got := p.Print(view)
@@ -2362,7 +2361,7 @@ func TestPrinter_PrintSideBySide(t *testing.T) {
 		},
 		"diff placeholders print blank gutters": {
 			views: func() (*line.View, *line.View) {
-				result := yamltest.Diff("a: 1\n", twoLines)
+				result := yamltest.Diff(t, "a: 1\n", twoLines)
 
 				return result.Before(), result.After()
 			},
@@ -2510,7 +2509,7 @@ func TestPrinter_PrintSideBySide_Golden(t *testing.T) {
 			viewAfter.AnnotateLine(6, yamltest.ErrorAnnotation(position.NewSpan(11, 16), "price is not in kr"))
 			viewAfter.AnnotateLine(5, line.Annotation{Content: "new item", Kind: kind.TextOK, Placement: line.Above})
 
-			result := diff.Diff(viewBefore, viewAfter)
+			result := yamltest.DiffLines(t, viewBefore, viewAfter)
 			left, right := result.Before(), result.After()
 			result.Carry(left, viewBefore, viewAfter)
 			result.Carry(right, viewBefore, viewAfter)
@@ -3184,7 +3183,7 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 
 			p := testPrinterWithGutter(printer.DefaultGutter)
 
-			assert.Equal(t, tc.want, p.Print(yamltest.Diff(tc.before, tc.after).Hunks(tc.context)))
+			assert.Equal(t, tc.want, p.Print(yamltest.Diff(t, tc.before, tc.after).Hunks(tc.context)))
 		})
 	}
 }
@@ -3719,7 +3718,7 @@ func TestWithFlagBlend_MarkerFill(t *testing.T) {
 
 	before := niceyaml.NewSourceFromString("a: 1\nb: 2 # old\n")
 	after := niceyaml.NewSourceFromString("a: 1\nb: 3 # new\n")
-	view := diff.Diff(before.Lines(), after.Lines()).Unified()
+	view := yamltest.DiffLines(t, before.Lines(), after.Lines()).Unified()
 
 	p := printer.New(printer.WithStyles(theme.Charm), printer.WithFlagBlend(true))
 	rows := strings.Split(p.Print(view), "\n")
@@ -5518,7 +5517,7 @@ func TestPrinter_LineNumbers_Placeholder(t *testing.T) {
 
 	// A side-by-side diff pads the shorter side with zero-value lines, which
 	// have no number. The gutter renders a blank column for them.
-	result := yamltest.Diff(stringtest.JoinLF(
+	result := yamltest.Diff(t, stringtest.JoinLF(
 		"a: 1",
 		"b: 2",
 		"c: 3",
@@ -5738,7 +5737,7 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 func TestPrinter_WithStyles_Zero(t *testing.T) {
 	t.Parallel()
 
-	hunks := yamltest.Diff(
+	hunks := yamltest.Diff(t,
 		stringtest.LinesLF("name: web", "replicas: 3", "ports:", "  - 80"),
 		stringtest.LinesLF("name: web", "replicas: 5", "ports:", "  - 80", "  - 443"),
 	).Hunks(1)

@@ -5480,7 +5480,7 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		// The unified view holds a from after, then b from before as a
 		// deleted line, then b from after as an inserted one.
-		view := diff.Diff(before.Lines(), after.Lines()).Unified()
+		view := yamltest.DiffLines(t, before.Lines(), after.Lines()).Unified()
 		require.Equal(t, 3, view.Count())
 
 		require.True(t, bound.Annotate(view))
@@ -5542,7 +5542,7 @@ func TestSourceError_Annotate(t *testing.T) {
 
 				bound := requireBound(t, before, yamltest.ErrorAt("bad "+tc.key, tc.key))
 
-				view := tc.view(diff.Diff(before.Lines(), after.Lines()))
+				view := tc.view(yamltest.DiffLines(t, before.Lines(), after.Lines()))
 				require.Equal(t, tc.want, bound.Annotate(view))
 
 				for i := range view.All() {

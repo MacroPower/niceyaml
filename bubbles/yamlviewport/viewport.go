@@ -2,6 +2,7 @@ package yamlviewport
 
 import (
 	"cmp"
+	"context"
 	"iter"
 	"reflect"
 	"slices"
@@ -1647,7 +1648,14 @@ func (m *Model) getDiffResult() *diff.Result {
 		// view is over. The copies keep the marks the views carry now, so
 		// every view of the cached diff shows the same marks.
 		m.diffViews = [2]*line.View{m.revision(base).View().Clone(), m.currentRevision().View().Clone()}
-		m.diffResult = diff.Diff(m.diffViews[diff.Before], m.diffViews[diff.After])
+		result, err := diff.Diff(context.Background(), m.diffViews[diff.Before], m.diffViews[diff.After])
+		if err != nil {
+			// The default algorithm returns only the error of its context,
+			// and a background context never ends.
+			panic("yamlviewport: diff: " + err.Error())
+		}
+
+		m.diffResult = result
 		m.diffKey = pair
 	}
 

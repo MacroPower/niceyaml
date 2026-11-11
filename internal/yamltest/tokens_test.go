@@ -1,6 +1,7 @@
 package yamltest_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"runtime"
@@ -567,6 +568,12 @@ func (r *recordingTB) Helper() {}
 // failure message when t has a Name method.
 func (r *recordingTB) Name() string {
 	return "recordingTB"
+}
+
+// Context overrides the embedded TB for the helpers that pass the context
+// of tb on.
+func (r *recordingTB) Context() context.Context {
+	return context.Background()
 }
 
 func (r *recordingTB) Errorf(format string, args ...any) {

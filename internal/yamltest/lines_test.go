@@ -202,7 +202,7 @@ func TestLineNumbers(t *testing.T) {
 
 	// The unified view holds line 2 of both revisions, so two of its lines
 	// have the number 2.
-	unified := yamltest.Diff(stringtest.LinesLF("a: 1", "b: 2"), stringtest.LinesLF("a: 1", "b: 3")).Unified()
+	unified := yamltest.Diff(t, stringtest.LinesLF("a: 1", "b: 2"), stringtest.LinesLF("a: 1", "b: 3")).Unified()
 
 	tcs := map[string]struct {
 		seq  line.Sequence

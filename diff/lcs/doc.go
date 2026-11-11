@@ -21,6 +21,12 @@
 // Inputs that share many lines in a different order still take time close to
 // the square of their length.
 //
+// The context that [Algorithm.Diff] takes bounds that time. [Hirschberg]
+// checks the context before each round of its search and returns the error
+// of the context after the context ends. It keeps the result exact, so a
+// diff that runs out of time fails rather than returning a longer edit
+// sequence.
+//
 // The search keeps O(m+n) working memory, and the result holds one operation
 // per line, so [Hirschberg] takes O(m+n) space as well.
 //
@@ -34,7 +40,7 @@
 // returns a fresh slice:
 //
 //	h := lcs.NewHirschberg()
-//	ops := h.Diff(before, after)
+//	ops, err := h.Diff(ctx, before, after)
 //
 // Each [Op] in the result keeps a line that both inputs share, deletes a
 // line from before, or inserts a line from after. It holds the line's index
@@ -45,6 +51,10 @@
 // an Algorithm the key of each line, which is the content of the line
 // unless the caller sets another key. It maps each [OpKind] to a line flag
 // when it builds rendering views from the operations.
+//
+// An [Algorithm] of your own should check the context it takes as it
+// works, so a deadline of the caller stops it. It should return the error
+// of the context after the context ends.
 //
 // The operations must hold every element of each input once, in order, as
 // [Algorithm] states. The diff package panics on operations that drop,

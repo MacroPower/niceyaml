@@ -1,6 +1,9 @@
 package lcs
 
-import "strconv"
+import (
+	"context"
+	"strconv"
+)
 
 // Algorithm computes a sequence of operations to transform before into after.
 //
@@ -16,7 +19,12 @@ type Algorithm interface {
 	// [OpInsert] operations count from 0 to len(after)-1. Between two
 	// [OpEqual] operations, the deletions and insertions might come in any
 	// order. The diff package panics when the operations break this rule.
-	Diff(before, after []string) []Op
+	//
+	// An Algorithm should check ctx while it works and return the error of
+	// ctx after ctx ends, so a deadline bounds a costly diff. The diff
+	// package returns a non-nil error as it is, and it reads the operations
+	// only when the error is nil.
+	Diff(ctx context.Context, before, after []string) ([]Op, error)
 }
 
 // OpKind represents the kind of diff operation.
