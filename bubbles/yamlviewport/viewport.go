@@ -98,9 +98,10 @@ func (s finderSearcher) Load(lines line.Sequence) Index {
 // A diff shows lines of two revisions, and each line carries the overlays
 // and annotations it has in the view of the revision that holds it. For a
 // deleted line, and for every line of the left pane of [ViewModeSideBySide],
-// that is the revision the diff compares with. For any other line it is the
-// current revision. Outside that pane an unchanged line comes from the
-// current revision, so a mark it has in the other revision does not show.
+// that is the revision the diff compares with, at [Model.DiffBaseIndex].
+// For any other line it is the current revision. Outside that pane an
+// unchanged line comes from the current revision, so a mark it has in the
+// other revision does not show.
 // [ViewModeHunks] shows the lines around each change, and a mark on any
 // other line stays hidden with its line. The diff sets the flag of each
 // line and shows the line whole. The flags of a view and the clip that
@@ -834,7 +835,7 @@ func (m *Model) ReplaceRevision(i int, r Revision) bool {
 		return false
 	}
 
-	shown := i == m.revIndex || i == m.diffBaseIndex()
+	shown := i == m.revIndex || i == m.DiffBaseIndex()
 
 	// Copies of a Model share the backing array of revisions, so the swap
 	// goes into an array of its own.
@@ -953,6 +954,54 @@ func (m *Model) DiffStats() diff.Stats {
 	return m.getDiffResult().Stats()
 }
 
+// DiffResult returns the diff on display and true. It reports false when
+// the viewport does not show a diff, as [Model.ShowingDiff] reports.
+//
+// The viewport renders every view of the diff from the returned
+// [*diff.Result]. It keeps the Result until it compares another pair of
+// revisions or a change of the history, such as [Model.ReplaceRevision],
+// drops it. A parent can walk the changes with the Result, such as to
+// count them or to reveal the next one. Each [diff.Origin] of the Result
+// names a line of one of the two revisions on display, and
+// [Model.Reveal] takes that line as a [Hit]:
+//
+//	rev := m.viewport.RevisionIndex()
+//	if origin.Side == diff.Before {
+//		rev = m.viewport.DiffBaseIndex()
+//	}
+//
+//	m.viewport.Reveal(yamlviewport.Hit{
+//		Revision: rev,
+//		Position: position.New(origin.Index, 0),
+//	})
+//
+// The renderings of the Result do not carry the marks of the revisions.
+// [diff.Result.Carry] copies them onto a rendering from the views of the
+// two revisions.
+func (m *Model) DiffResult() (*diff.Result, bool) {
+	if !m.ShowingDiff() {
+		return nil, false
+	}
+
+	return m.getDiffResult(), true
+}
+
+// DiffBaseIndex returns the index of the revision that the diff compares
+// the current one with under the current [DiffMode], or -1 when the
+// viewport does not show a diff. The diff shows that revision as the
+// [diff.Before] side and the current revision as the [diff.After] side.
+func (m *Model) DiffBaseIndex() int {
+	if !m.ShowingDiff() {
+		return -1
+	}
+
+	if m.diffMode == DiffModeOrigin {
+		return 0
+	}
+
+	return m.revIndex - 1
+}
+
 // DiffMode returns the current diff display mode.
 func (m *Model) DiffMode() DiffMode {
 	return m.diffMode
@@ -975,10 +1024,10 @@ func (m *Model) SetDiffMode(mode DiffMode) {
 		return
 	}
 
-	oldBase := m.diffBaseIndex()
+	oldBase := m.DiffBaseIndex()
 	m.diffMode = mode
 
-	if m.diffBaseIndex() != oldBase {
+	if m.DiffBaseIndex() != oldBase {
 		m.rebuildViews()
 	}
 }
@@ -1549,21 +1598,6 @@ func heldMatches(view *line.View, matches position.Ranges) position.Ranges {
 	return held
 }
 
-// diffBaseIndex returns the index of the revision that the diff compares
-// the current one against under the current [DiffMode], or -1 when the
-// viewport does not show a diff.
-func (m *Model) diffBaseIndex() int {
-	if !m.ShowingDiff() {
-		return -1
-	}
-
-	if m.diffMode == DiffModeOrigin {
-		return 0
-	}
-
-	return m.revIndex - 1
-}
-
 // currentRevision returns the revision on display, or nil without revisions.
 func (m *Model) currentRevision() Revision {
 	return m.revision(m.revIndex)
@@ -1605,7 +1639,7 @@ func (m *Model) getDisplayLines() *line.View {
 // Callers must check [Model.ShowingDiff] first. Without a diff, the Model
 // does not have a base revision.
 func (m *Model) getDiffResult() *diff.Result {
-	base := m.diffBaseIndex()
+	base := m.DiffBaseIndex()
 	pair := [2]int{base, m.revIndex}
 	if m.diffResult == nil || m.diffKey != pair {
 		// A diff compares the lines each view holds, as the other view
@@ -2424,10 +2458,10 @@ func (m *Model) VisibleRowCount() int {
 // A diff shows lines of two revisions, so the [Hit] names the revision
 // that holds the line under the cell. For a deleted line, and for every
 // line of the left pane of [ViewModeSideBySide], that is the revision the
-// diff compares with. For any other line it is the current revision. The
-// position counts in the content of that revision, whatever the diff
-// shows around the line. Without a diff both panes of ViewModeSideBySide
-// show the current revision.
+// diff compares with, at [Model.DiffBaseIndex]. For any other line it is
+// the current revision. The position counts in the content of that
+// revision, whatever the diff shows around the line. Without a diff both
+// panes of ViewModeSideBySide show the current revision.
 //
 // HitAt reports false for a cell that does not show content of a revision.
 // Such a cell lies in the frame of either container style, in the gutter,
@@ -2568,7 +2602,7 @@ func (m *Model) revisionHit(right bool, pos position.Position) (Hit, bool) {
 
 	index := m.revIndex
 	if origin.Side == diff.Before {
-		index = m.diffBaseIndex()
+		index = m.DiffBaseIndex()
 	}
 
 	return Hit{Revision: index, Position: position.New(origin.Index, pos.Col)}, true
@@ -2594,11 +2628,12 @@ func (m *Model) revisionHit(right bool, pos position.Position) (Hit, bool) {
 // Reveal does not change the revision on display, the [ViewMode], or the
 // [DiffMode]. It reports false and leaves the viewport as it is when the
 // view on display does not show the position. The viewport shows the
-// current revision and, with a diff, the revision the diff compares with.
-// Reveal reports false for a Hit of any other revision. It also reports
-// false for a line outside every hunk of [ViewModeHunks] and for a line
-// that the view of the revision does not hold. It reports false for a
-// column past the end of its line and for every Hit on a zero Model.
+// current revision and, with a diff, the revision the diff compares with,
+// at [Model.DiffBaseIndex]. Reveal reports false for a Hit of any other
+// revision. It also reports false for a line outside every hunk of
+// [ViewModeHunks] and for a line that the view of the revision does not
+// hold. It reports false for a column past the end of its line and for
+// every Hit on a zero Model.
 //
 // A diff shows an unchanged line of the revision it compares with in the
 // left pane of [ViewModeSideBySide]. Every other view of the diff shows
@@ -2676,7 +2711,7 @@ func (m *Model) locate(hit Hit) (bool, position.Position, bool) {
 	var side diff.Side
 
 	switch hit.Revision {
-	case m.diffBaseIndex():
+	case m.DiffBaseIndex():
 		side = diff.Before
 	case m.revIndex:
 		side = diff.After
@@ -2834,10 +2869,11 @@ func (m *Model) SearchCount() int {
 // that holds the line the match starts on, as [Model.HitAt] names the
 // revision of a cell. For a match on a deleted line, and for a match in
 // the left pane of [ViewModeSideBySide], that is the revision the diff
-// compares with. For any other match it is the current revision.
-// SearchMatch reports false for an index outside the matches. It also
-// reports false for a match that starts on a placeholder of
-// ViewModeSideBySide, because the placeholder shows no line of a revision.
+// compares with, at [Model.DiffBaseIndex]. For any other match it is the
+// current revision. SearchMatch reports false for an index outside the
+// matches. It also reports false for a match that starts on a placeholder
+// of ViewModeSideBySide, because the placeholder shows no line of a
+// revision.
 func (m *Model) SearchMatch(i int) (Match, bool) {
 	if i < 0 || i >= len(m.searchMatches) {
 		return Match{}, false

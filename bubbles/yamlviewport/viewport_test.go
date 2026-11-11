@@ -2804,6 +2804,182 @@ func TestViewport_DiffOfRevisionsOverPartOfTheSource(t *testing.T) {
 	assert.Contains(t, m.View(), "c: 3")
 }
 
+func TestViewport_DiffBaseIndex(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		mode yamlviewport.DiffMode
+		show int
+		want int
+	}{
+		"adjacent compares with the revision before": {
+			mode: yamlviewport.DiffModeAdjacent,
+			show: 2,
+			want: 1,
+		},
+		"origin compares with the first revision": {
+			mode: yamlviewport.DiffModeOrigin,
+			show: 2,
+			want: 0,
+		},
+		"first revision shows no diff": {
+			mode: yamlviewport.DiffModeAdjacent,
+			show: 0,
+			want: -1,
+		},
+		"diff turned off": {
+			mode: yamlviewport.DiffModeNone,
+			show: 2,
+			want: -1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 40, 10)
+			addRevisions(&m, "a: 1\n", "a: 2\n", "a: 3\n")
+			m.SetDiffMode(tc.mode)
+			m.GotoRevision(tc.show)
+
+			assert.Equal(t, tc.want, m.DiffBaseIndex())
+		})
+	}
+
+	t.Run("without revisions", func(t *testing.T) {
+		t.Parallel()
+
+		m := testModel(testPrinter(), 40, 10)
+
+		assert.Equal(t, -1, m.DiffBaseIndex())
+	})
+}
+
+func TestViewport_DiffResult(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		mode      yamlviewport.DiffMode
+		viewMode  yamlviewport.ViewMode
+		show      int
+		wantStats diff.Stats
+		wantOK    bool
+	}{
+		"adjacent": {
+			mode:      yamlviewport.DiffModeAdjacent,
+			show:      2,
+			wantStats: diff.Stats{Added: 1, Removed: 1},
+			wantOK:    true,
+		},
+		"origin": {
+			mode:      yamlviewport.DiffModeOrigin,
+			show:      2,
+			wantStats: diff.Stats{Added: 2, Removed: 2},
+			wantOK:    true,
+		},
+		"hunks": {
+			mode:      yamlviewport.DiffModeOrigin,
+			viewMode:  yamlviewport.ViewModeHunks,
+			show:      2,
+			wantStats: diff.Stats{Added: 2, Removed: 2},
+			wantOK:    true,
+		},
+		"first revision": {
+			mode: yamlviewport.DiffModeAdjacent,
+			show: 0,
+		},
+		"diff turned off": {
+			mode: yamlviewport.DiffModeNone,
+			show: 2,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 40, 10)
+			addRevisions(&m,
+				stringtest.LinesLF("a: 1", "b: 2", "c: 3"),
+				stringtest.LinesLF("a: 1", "b: 20", "c: 3"),
+				stringtest.LinesLF("a: 1", "b: 20", "c: 30"),
+			)
+			m.SetDiffMode(tc.mode)
+			m.SetViewMode(tc.viewMode)
+			m.GotoRevision(tc.show)
+
+			res, ok := m.DiffResult()
+			require.Equal(t, tc.wantOK, ok)
+
+			if !tc.wantOK {
+				assert.Nil(t, res)
+
+				return
+			}
+
+			require.NotNil(t, res)
+			assert.Equal(t, tc.wantStats, res.Stats())
+			assert.Equal(t, m.DiffStats(), res.Stats())
+
+			again, ok := m.DiffResult()
+			require.True(t, ok)
+			assert.Same(t, res, again)
+
+			// Each origin of the diff names a line of one of the two
+			// revisions on display. Reveal takes the line of a change as a
+			// Hit.
+			unified := res.Unified()
+			changes := 0
+
+			for row := range unified.All() {
+				origin, ok := res.UnifiedOrigin(row)
+				require.True(t, ok, "row %d", row)
+
+				rev := m.RevisionIndex()
+				if origin.Side == diff.Before {
+					rev = m.DiffBaseIndex()
+				}
+
+				r, ok := m.Revision(rev)
+				require.True(t, ok)
+				assert.Equal(t, unified.Line(row).Content(), r.View().Line(origin.Index).Content(), "row %d", row)
+
+				if unified.Flag(row) == line.FlagDefault {
+					continue
+				}
+
+				changes++
+
+				hit := yamlviewport.Hit{Revision: rev, Position: position.New(origin.Index, 0)}
+				assert.True(t, m.Reveal(hit), "row %d", row)
+			}
+
+			assert.Equal(t, tc.wantStats.Added+tc.wantStats.Removed, changes)
+		})
+	}
+}
+
+func TestViewport_DiffResultFollowsHistory(t *testing.T) {
+	t.Parallel()
+
+	m := testModel(testPrinter(), 40, 10)
+	addRevisions(&m, "a: 1\n", "a: 2\n")
+
+	res, ok := m.DiffResult()
+	require.True(t, ok)
+
+	// A swap of a revision of the diff drops the diff, and the viewport
+	// computes and renders a new one.
+	require.True(t, m.ReplaceRevision(1, niceyaml.NewSourceFromString("a: 2\nb: 3\n")))
+
+	swapped, ok := m.DiffResult()
+	require.True(t, ok)
+	assert.NotSame(t, res, swapped)
+	assert.Equal(t, diff.Stats{Added: 2, Removed: 1}, swapped.Stats())
+	assert.Equal(t, m.DiffStats(), swapped.Stats())
+}
+
 func TestViewport_ViewFitsHeight(t *testing.T) {
 	t.Parallel()
 
