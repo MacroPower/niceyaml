@@ -17,6 +17,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/fault"
 	"go.jacobcolvin.com/niceyaml/internal/hook"
 	"go.jacobcolvin.com/niceyaml/internal/mapkey"
+	"go.jacobcolvin.com/niceyaml/internal/quantity"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -1094,7 +1095,21 @@ func (d *Doc) Text() string {
 //
 // FileText returns an error that matches [ErrUsage] when a Doc comes from
 // another Source than src, and when two Docs come from one document.
+//
+// With one Doc or more, FileText checks the text that it returns against
+// the byte limit of src, which [niceyaml.Source.ByteLimit] reports.
+// [Doc.Apply] checks its document against the other documents as the user
+// wrote them. So the Docs of several documents can each keep the limit and
+// together break it. A text past the limit fails with the message that src
+// gives such a text, as in "app.yaml: file is larger than 256 KiB". The
+// error matches [niceyaml.ErrLimit], and [niceyaml.IsInvalid] does not
+// report it. A program that writes a larger file builds src with a larger
+// limit. Without a Doc, the text is the text of src, and FileText does not
+// check it.
+//
 // During an Apply, FileText reads the text of each Doc as Doc.Text does.
+// That text stands between two calls. So FileText can report the byte
+// limit for a text that a later call brings back within it.
 func FileText(src *niceyaml.Source, docs ...*Doc) (string, error) {
 	sorted := slices.Clone(docs)
 	slices.SortStableFunc(sorted, func(a, b *Doc) int { return a.start - b.start })
@@ -1120,6 +1135,13 @@ func FileText(src *niceyaml.Source, docs ...*Doc) (string, error) {
 	}
 
 	b.WriteString(text[last:])
+
+	// Without a Doc, the text is the user's text, which the check does not
+	// cover. A path binds in one document, not in the file. So the error
+	// names src alone, as the error of a load of the file does.
+	if limit := src.ByteLimit(); len(docs) > 0 && b.Len() > limit {
+		return "", src.Bind(niceyaml.Unchecked(&limitError{msg: "file is larger than " + quantity.Bytes(limit)}))
+	}
 
 	return b.String(), nil
 }

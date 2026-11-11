@@ -746,7 +746,9 @@
 // the user's text, which [go.jacobcolvin.com/niceyaml.WithByteLimit],
 // [go.jacobcolvin.com/niceyaml.WithDocumentByteLimit], and
 // [go.jacobcolvin.com/niceyaml.WithDepthLimit] set. The byte limit counts
-// the bytes of the whole file. The document byte limit counts the bytes
+// the bytes of the whole file, with the other documents as the user wrote
+// them. [FileText] checks the byte limit again on the file that the Docs
+// of several documents leave. The document byte limit counts the bytes
 // of the edited document as a load of the file counts them, with the
 // comments below a "..." marker in the document after the marker. The
 // calls read the text without the limits, so a later call can bring the
