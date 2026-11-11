@@ -74,7 +74,9 @@ const defaultRetryAfter = 1 * time.Minute
 // [Loadable] or [Embedded] apart from a Ref that names a file or a URL
 // with the same Key, as Loadable describes. It consults that cache
 // before loading. So after a schema compiles, the registry serves it to
-// every later document that names it without loading it again.
+// every later document that names it without loading it again. With
+// [WithRefreshAfter], the registry loads a schema that reached a URL
+// again after an interval.
 //
 // The registry remembers a failed load or compile for the interval that
 // [WithRetryAfter] sets, one minute by default. Every document that
@@ -83,19 +85,24 @@ const defaultRetryAfter = 1 * time.Minute
 //
 // The registry drops a failure after its interval has passed. It keeps
 // every schema that it compiles until [WithCacheLimit] drops the schema
-// to make room or the program drops it. [Registry.Invalidate] drops the
-// schemas of the documents that a program names, [Registry.Forget] the
-// schemas of a file system, and [Registry.Purge] every schema. The
-// registry holds each file system for as long as it keeps an entry from
-// that file system, as [FileFS] describes. Each distinct Key adds an
-// entry, whether its schema compiled or failed. A URL that differs from
-// another only in its query string or fragment is a Key of its own.
+// to make room or the program drops it. With [WithRefreshAfter], it also
+// loads a schema again when a document that the schema reached from a
+// URL is older than the interval of that option. [Registry.Invalidate]
+// drops the schemas of the documents that a program names,
+// [Registry.Forget] the schemas of a file system, and [Registry.Purge]
+// every schema. The registry holds each file system for as long as it
+// keeps an entry from that file system, as [FileFS] describes. Each
+// distinct Key adds an entry, whether its schema compiled or failed. A
+// URL that differs from another only in its query string or fragment is
+// a Key of its own.
 //
 // A schema stays in the cache after the file or URL that it came from
 // changes, and so does each document that its $refs name. A program that
 // watches its schema files, such as an editor, passes each file that
 // changes to Invalidate. The next document that names a schema that
-// Invalidate dropped loads it again.
+// Invalidate dropped loads it again. A long-running program that
+// validates against remote schemas gives the registry
+// [WithRefreshAfter].
 //
 // The registry compiles every schema with the options that
 // [WithCompileOptions] gave it. [Registry.Schema] returns the compiled
@@ -150,6 +157,7 @@ type Registry struct {
 //   - [WithRequireSchema]
 //   - [WithHTTPClient]
 //   - [WithRetryAfter]
+//   - [WithRefreshAfter]
 //   - [WithAccess]
 //   - [WithCacheLimit]
 //   - [WithLoadLimit]
@@ -166,8 +174,11 @@ type registryConfig struct {
 	compileOpts []CompileOption
 	access      accessConfig  // the files on disk that the registry reads and the URLs that it fetches
 	retryAfter  time.Duration // how long the registry remembers a failure
-	cacheLimit  int           // the most entries that each cache keeps, or niceyaml.NoLimit
-	loadLimit   int           // the most bytes of each schema document that the registry reads, or niceyaml.NoLimit
+	// How long after its load the registry fetches a URL document again,
+	// or zero for never.
+	refreshAfter time.Duration
+	cacheLimit   int // the most entries that each cache keeps, or niceyaml.NoLimit
+	loadLimit    int // the most bytes of each schema document that the registry reads, or niceyaml.NoLimit
 	// Makes Check report ErrNoMatch when every resolver declines.
 	requireSchema bool
 	// Whether WithAccess gave the registry its access. A registry without
@@ -224,12 +235,17 @@ func WithHTTPClient(client *http.Client) RegistryOption {
 // schemas, such as one file with a new fragment each time. Those
 // documents then hold memory for one interval of failures at most.
 //
-// The interval covers only failures. The registry keeps a schema that
-// compiled until [WithCacheLimit] drops it to make room, or until
+// The interval covers failures. The registry keeps a schema that
+// compiled until [WithCacheLimit] drops it to make room, until
 // [Registry.Invalidate], [Registry.Forget], or [Registry.Purge] drops
-// it. Each of those methods also drops the failures that it matches
-// before their interval has passed. The registry does not remember the
-// failure of a request whose context ended.
+// it, or until the interval of [WithRefreshAfter] has passed. Each of
+// those methods also drops the failures that it matches before their
+// interval has passed. The registry does not remember the failure of a
+// request whose context ended.
+//
+// A refresh of [WithRefreshAfter] that fails leaves the copy that the
+// registry holds in place. The registry serves that copy for this
+// interval and then tries the refresh again.
 //
 // Defaults to 1 minute. An interval of zero or less keeps the default,
 // because an interval that short loads a broken schema again for every
@@ -239,6 +255,68 @@ func WithRetryAfter(interval time.Duration) RegistryOption {
 		if interval > 0 {
 			c.retryAfter = interval
 		}
+	}
+}
+
+// WithRefreshAfter is a [RegistryOption] that sets how long the registry
+// serves a document that it loaded from a URL before it loads the
+// document again. Such a document is the schema that a [Ref] from [URL]
+// names, or a document that a $ref names. The option covers the URLs
+// that the HTTP client fetches and the URLs that a loader from
+// [WithLoader] serves:
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithRefreshAfter(time.Hour),
+//	    schema.WithResolvers(schema.Directive(), schemastore.New()),
+//	)
+//
+// The interval starts when the compile that loaded the document starts.
+// For a document that a validation loads, the interval starts when that
+// load starts. A schema falls due with the first URL document that its
+// compile, or a validation with it, reached. So a schema from [File]
+// whose $ref names a URL compiles again with the new copy of that URL.
+// The compile reads the schema itself again too, with each of its
+// documents that has fallen due. A [*Schema] that the registry returned
+// before the refresh stays unchanged.
+//
+// The first request for a schema that has fallen due starts a refresh,
+// which loads and compiles the schema again. That request waits for the
+// refresh until its own context ends, and then gets the copy that the
+// registry holds. A request that arrives while the refresh runs gets the
+// held copy without waiting. The refresh drops the cancellation and
+// deadline of the context of the request that started it. So the Timeout
+// of the client from [WithHTTPClient] bounds a refresh from a host that
+// does not answer. A loader from WithLoader bounds its own loads.
+//
+// When the refresh fails, the registry keeps serving the copy that it
+// holds and tries again after the interval of [WithRetryAfter]. A schema
+// that its host withdraws thus keeps validating until a release such as
+// [Registry.Invalidate] drops it.
+//
+// The interval covers only the registry that the option configures.
+// Invalidate, [Registry.Forget], and [Registry.Purge] also act on each
+// registry among the resolvers, but the option does not. A program that
+// nests registries, as the Untrusted Documents section of the package
+// documentation does, gives the option to each nested registry that
+// fetches URLs.
+//
+// Each refresh fetches the whole document. A program can give
+// [WithHTTPClient] a client whose Transport caches responses by their
+// Cache-Control and ETag headers. Each refresh then sends a conditional
+// request, and a document that did not change costs a 304 response.
+//
+// The interval covers only URLs. A program that watches its schema files
+// passes each file that changes to Invalidate. A Ref from [Loadable] or
+// [Embedded] never falls due, because its load returns the same bytes
+// for one key.
+//
+// By default the registry never loads a URL document again, so a
+// short-lived program validates every document of one run against one
+// copy of each schema. An interval of zero or less keeps that default.
+// Given more than once, the last option wins.
+func WithRefreshAfter(interval time.Duration) RegistryOption {
+	return func(c *registryConfig) {
+		c.refreshAfter = max(interval, 0)
 	}
 }
 
@@ -375,7 +453,7 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 	// send the fetch elsewhere.
 	r.client = r.access.guard(r.client)
 
-	r.cache = newCache(r.cacheLimit, r.retryAfter)
+	r.cache = newCache(r.cacheLimit, r.retryAfter, r.refreshAfter)
 
 	return r
 }
@@ -992,6 +1070,11 @@ func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 // or a call to [runtime.Goexit] in the load happens again in every
 // caller that shared it. The registry does not remember a panic or a
 // Goexit, so the next request runs the load again.
+//
+// A refresh of a schema that has fallen due, as [WithRefreshAfter]
+// describes, runs apart from the context of each caller. Only the caller
+// that starts the refresh waits for it. When that caller's context ends
+// first, Schema returns the schema that the registry holds.
 func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 	v, err := r.loadSchema(ctx, ref)
 	if err != nil {
@@ -1033,32 +1116,57 @@ func (r *Registry) loadSchema(ctx context.Context, ref Ref) (*Schema, error) {
 	}
 
 	for {
-		e, gen, ok := r.cache.schema(key)
-		if ok {
+		e, gen, h := r.cache.schema(key)
+		if h == hitFresh {
 			return r.answer(ref, e)
 		}
 
+		// A refresh of a schema that the cache holds drops the
+		// cancellation and deadline of ctx. A caller that stops waiting
+		// thus leaves the refresh running. A refresh that fails then
+		// counts as a failure, and the cache serves the schema it holds
+		// for the retry interval.
+		//
 		// A request after a release starts a load of its own, so it never
-		// shares a load that started before the release.
-		call := r.group.do(flightKey{key: key, gen: gen}, func() (flight, error) {
-			s, err := r.compile(ctx, ref, key, gen)
+		// shares a load that started before the release. A refresh is the
+		// exception, because its key leaves out the generation. A request
+		// for a schema that a release left in place thus joins the refresh
+		// in flight and gets the held schema without waiting.
+		run, fk := ctx, flightKey{key: key, gen: gen}
+		if h == hitDue {
+			run, fk = context.WithoutCancel(ctx), flightKey{key: key, refresh: true}
+		}
+
+		call, started := r.group.do(fk, func() (flight, error) {
+			s, err := r.compile(run, ref, key, gen)
 
 			// Report whether this caller's context ended before the load
 			// failed, so a joiner can tell that cancellation apart from a
 			// failure of the load itself.
-			return flight{schema: s, starterEnded: err != nil && ctx.Err() != nil}, err
+			return flight{schema: s, starterEnded: err != nil && run.Err() != nil}, err
 		})
+
+		// Only the caller that starts a refresh waits for it. Every other
+		// caller gets the schema that the cache holds.
+		if h == hitDue && !started {
+			return e.schema, nil
+		}
 
 		select {
 		case <-ctx.Done():
-			// The load this caller waits on may have finished in the same
+			// The load this caller waits on might have finished in the same
 			// instant the context ended. Its result counts when it is ready,
 			// so the outcome does not depend on which case the select picks.
 			// A schema that a later load cached does not count, because this
-			// caller's context ended before that load began.
+			// caller's context ended before that load began. A caller that
+			// started a refresh gets the schema that the cache holds.
 			select {
 			case <-call.done:
 			default:
+				if h == hitDue {
+					return e.schema, nil
+				}
+
 				return nil, &LoadError{Ref: ref, Phase: ErrLoad, Err: ctx.Err()}
 			}
 
@@ -1186,11 +1294,12 @@ func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 // URL in a Ref from URL does not name the file, so a program passes a
 // Ref from [File] for a file.
 //
-// The registry does not check a URL that it fetched for changes.
 // Invalidate for a URL drops that document and each schema that reached
 // it. It does not drop the documents that its $refs name, which a
 // program cannot list. A program that needs fresh copies of its remote
-// schemas calls [Registry.Purge] on a schedule of its own.
+// schemas gives the registry [WithRefreshAfter]. The registry then loads
+// each URL document again after the interval of that option, with the
+// documents that its $refs name.
 //
 // Invalidate acts only on the cache. A [*Schema] that the registry
 // returned before Invalidate stays unchanged, so a caller that holds one
@@ -1504,14 +1613,18 @@ type refDoc struct {
 // document instead of calling load. The registry keeps the document
 // until [WithCacheLimit] or a release such as [Registry.Invalidate]
 // drops it. When two calls load one document at once, both return the
-// document that the first of them kept.
+// document that the first of them kept. A document from a URL that has
+// fallen due, as [WithRefreshAfter] describes, loads again. When that
+// load fails, the call returns the document that the registry holds.
 //
 // The registry remembers a load that fails, and bytes that do not parse,
 // for the retry interval. A call inside the interval returns that error
 // instead of calling load, and the first call after the interval loads
 // again. A failure under a context that ended does not say anything
-// about the document, so the registry does not remember the failure. A
-// document that loads takes the place of a failure.
+// about the document, so the registry does not remember the failure.
+// When the registry holds a document that loaded before, such as one that
+// has fallen due, the call returns that document instead. A document
+// that loads takes the place of a failure.
 func (r *Registry) refDocument(
 	ctx context.Context, key cacheKey, uri string, load func() ([]byte, error), rc *reach,
 ) (refDoc, error) {
@@ -1520,19 +1633,26 @@ func (r *Registry) refDocument(
 		return doc, doc.err
 	}
 
+	loaded := time.Now()
 	doc, err := loadRefDoc(ctx, uri, load, r.loadLimit)
 
 	var failedAt time.Time
 
 	if err != nil {
 		if ctx.Err() != nil {
+			// A document that loaded before still serves the schema.
+			held, ok := r.cache.heldDoc(key, rc)
+			if ok {
+				return held, nil
+			}
+
 			return refDoc{}, err
 		}
 
 		doc, failedAt = refDoc{err: err}, time.Now()
 	}
 
-	doc = r.cache.keepDoc(key, doc, failedAt, gen)
+	doc = r.cache.keepDoc(key, doc, failedAt, loaded, gen, rc)
 
 	return doc, doc.err
 }
@@ -1572,7 +1692,8 @@ func loadRefDoc(ctx context.Context, uri string, load func() ([]byte, error), li
 // holds it. The registry loads each such document once and keeps it for
 // every schema that references it, at compile time and during
 // validation. It keeps the document until [WithCacheLimit] or a release
-// such as [Registry.Invalidate] drops it. The resolver records each
+// such as [Registry.Invalidate] drops it, or until a document from a URL
+// falls due, as [WithRefreshAfter] describes. The resolver records each
 // document in rc, the reach of the schema, so a release of the document
 // finds the schema.
 //
@@ -1880,10 +2001,11 @@ func fileFragment(ref Ref) string {
 // compiled schema, or the failure of the last attempt to load and
 // compile one, with the reach of that attempt. The registry keeps a
 // schema until [WithCacheLimit] or a release such as
-// [Registry.Invalidate] drops it. It answers with a failure until the
-// retry interval has passed since the attempt, so the requests inside
-// the interval do not load anything. After the interval, it drops the
-// failure.
+// [Registry.Invalidate] drops it, or until a compile takes the place of
+// a schema that has fallen due, as [WithRefreshAfter] describes. It
+// answers with a failure until the retry interval has passed since the
+// attempt, so the requests inside the interval do not load anything.
+// After the interval, it drops the failure.
 type cacheEntry struct {
 	schema *Schema
 	failed *failure
@@ -1915,12 +2037,15 @@ func (r *Registry) answer(ref Ref, e cacheEntry) (*Schema, error) {
 }
 
 // A flightKey names a shared load by the cache key that it loads and the
-// generation of the cache that it started in, as [cache] describes.
+// generation of the cache that it started in, as [cache] describes. A
+// refresh of a schema that has fallen due leaves out the generation. So
+// one refresh per cache key runs at a time.
 //
 //nolint:unused // The fields tell the loads of the registry apart.
 type flightKey struct {
-	key cacheKey
-	gen uint64
+	key     cacheKey
+	gen     uint64
+	refresh bool
 }
 
 // A flight carries the result of a shared load to every caller that
@@ -1936,24 +2061,27 @@ type flight struct {
 // outcome under key, and returns the outcome. The key is the one that
 // [keyOf] returns for ref. When an earlier flight left an entry under
 // key that the cache still answers with, compile answers with that
-// entry. The group runs one compile per key and generation at a time,
-// and each compile checks the cache first. So every caller sees one
-// schema per key while the cache keeps it.
+// entry. An entry that has fallen due does not answer, and compile loads
+// the schema again. The group runs one compile per key and generation at
+// a time, and each compile checks the cache first. So every caller sees
+// one schema per key while the cache keeps it.
 //
 // The compile started in gen, a generation of the cache. When a release
 // has started a new generation since then, compile does not keep
 // anything, and the callers that share the compile get what it compiled.
 //
 // A failure goes into the cache with the time that it happened, for the
-// requests of the retry interval. A failure under a context that ended
-// does not say anything about the schema, so compile does not keep that
-// failure, and the next request tries again.
+// requests of the retry interval. When the cache holds a schema that has
+// fallen due, the failure leaves that schema in place, and compile
+// answers with it. A failure under a context that ended does not say
+// anything about the schema, so compile does not keep that failure, and
+// the next request tries again.
 func (r *Registry) compile(ctx context.Context, ref Ref, key cacheKey, gen uint64) (*Schema, error) {
-	if e, _, ok := r.cache.schema(key); ok {
+	if e, _, h := r.cache.schema(key); h == hitFresh {
 		return r.answer(ref, e)
 	}
 
-	rc := newReach(key)
+	rc := r.cache.newReach(key)
 	compiled, failed := r.attempt(ctx, ref, rc)
 	entry := cacheEntry{schema: compiled, failed: failed}
 

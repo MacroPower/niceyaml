@@ -40,7 +40,8 @@ import (
 //
 // Without a limit, the registry keeps each schema that it compiles until
 // [Registry.Forget], [Registry.Invalidate], or [Registry.Purge] drops
-// it. It holds the file system that the schema comes from for that long.
+// it, or until a refresh from [WithRefreshAfter] replaces it. It holds
+// the file system that the schema comes from for that long.
 //
 // Each distinct [Ref.Key] adds an entry. A URL that differs from another
 // only in its query string or fragment is a Key of its own. In a
@@ -67,6 +68,16 @@ func WithCacheLimit(n int) RegistryOption {
 // [Registry.Invalidate] drops a document and every schema that reached
 // it in one step. A cache is safe for concurrent use.
 //
+// The cache dates each schema and document that a URL served, when
+// [WithRefreshAfter] gave the registry an interval. A request for such
+// a schema after its due time gets [hitDue], and a request for such a
+// document after its due time is a miss. The registry then loads the
+// entry again. When that load fails, the cache keeps the entry that it
+// holds and dates it again for the retry interval, as [lru.keep]
+// describes. A schema falls due when the first URL document that it
+// reached falls due, so a refresh of the document reaches each schema
+// that reached it.
+//
 // The cache counts its generations. [cache.invalidate] and [cache.purge]
 // each start a new one. A load keeps its outcome only in the generation
 // that it started in. A load that ran across a release thus does not keep its
@@ -84,16 +95,22 @@ type cache struct {
 	// different ways, as [docOf] describes.
 	docKeys map[docID]map[cacheKey]struct{}
 	gen     uint64
-	mu      sync.Mutex
+	// How long after its load an entry from a URL falls due, or zero for
+	// never.
+	refreshAfter time.Duration
+	mu           sync.Mutex
 }
 
 // newCache creates a new [cache] that keeps at most limit schemas and at
 // most limit documents, or any number for [niceyaml.NoLimit]. The cache drops
-// a failure retryAfter after it happened.
-func newCache(limit int, retryAfter time.Duration) *cache {
+// a failure retryAfter after it happened. An entry from a URL falls due
+// refreshAfter after its load started, or never for a refreshAfter of
+// zero.
+func newCache(limit int, retryAfter, refreshAfter time.Duration) *cache {
 	c := &cache{
-		dependents: make(map[docID]map[*reach]struct{}),
-		docKeys:    make(map[docID]map[cacheKey]struct{}),
+		dependents:   make(map[docID]map[*reach]struct{}),
+		docKeys:      make(map[docID]map[cacheKey]struct{}),
+		refreshAfter: refreshAfter,
 	}
 
 	c.schemas = newLRU(limit, retryAfter, c.releaseSchema)
@@ -103,20 +120,86 @@ func newCache(limit int, retryAfter time.Duration) *cache {
 }
 
 // schema returns the entry that c keeps under key, and the generation
-// that a load for key starts in after a miss.
-func (c *cache) schema(key cacheKey) (cacheEntry, uint64, bool) {
+// that a load for key starts in after a miss. It also returns the [hit]
+// that says what the entry answers. An entry that has fallen due answers
+// with [hitDue], and c keeps it until a load takes its place.
+func (c *cache) schema(key cacheKey) (cacheEntry, uint64, hit) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	e, ok := c.schemas.get(key)
+	e, due, ok := c.schemas.get(key)
 
-	return e, c.gen, ok
+	switch {
+	case !ok:
+		return e, c.gen, hitNone
+	case isDue(due):
+		return e, c.gen, hitDue
+	default:
+		return e, c.gen, hitFresh
+	}
+}
+
+// A hit says what an entry that a [cache] holds answers with.
+type hit int
+
+const (
+	// The cache does not hold an entry, and a load must produce one.
+	hitNone hit = iota
+	// The entry answers every request.
+	hitFresh
+	// The entry holds a schema that has fallen due. It answers a request
+	// only while a load that takes its place has not finished.
+	hitDue
+)
+
+// newReach creates a new [reach] for a compile, which starts now, of the
+// schema that the registry keeps under key. The reach starts with the
+// document of the schema itself, which falls due as [cache.dueAfter]
+// says.
+func (c *cache) newReach(key cacheKey) *reach {
+	start := time.Now()
+
+	return &reach{
+		key:   key,
+		start: start,
+		due:   c.dueAfter(key, start),
+		docs:  map[docID]struct{}{docOf(key): {}},
+		state: reachPending,
+	}
+}
+
+// dueAfter returns the time when an entry under key that loaded at
+// start falls due. It returns the zero time, for never, when key does
+// not name a URL or when c does not refresh anything.
+func (c *cache) dueAfter(key cacheKey, start time.Time) time.Time {
+	if c.refreshAfter <= 0 || key.kind != keyURL {
+		return time.Time{}
+	}
+
+	return start.Add(c.refreshAfter)
+}
+
+// reached records in rc that its schema used a document that falls due
+// at due. The schema falls due no later than the document. For a schema
+// that c keeps, reached moves the due time of its entry too.
+func (c *cache) reached(rc *reach, due time.Time) {
+	if due.IsZero() || (!rc.due.IsZero() && !due.Before(rc.due)) {
+		return
+	}
+
+	rc.due = due
+
+	if rc.state == reachKept {
+		c.schemas.advance(rc.key, due)
+	}
 }
 
 // keepSchema keeps e, with rc as its reach, under key for a compile that
 // started in generation gen. It returns the entry that c then holds under
 // key. For a compile from an earlier generation, keepSchema does not keep
-// e, and returns e as it is.
+// e. It returns e as it is, or for a failure, the schema that c holds
+// under key. A release that started a new generation without dropping
+// that schema thus leaves the schema to answer a failed refresh.
 func (c *cache) keepSchema(key cacheKey, e cacheEntry, failedAt time.Time, gen uint64, rc *reach) cacheEntry {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -124,12 +207,25 @@ func (c *cache) keepSchema(key cacheKey, e cacheEntry, failedAt time.Time, gen u
 	if gen != c.gen {
 		rc.state = reachDropped
 
+		if !failedAt.IsZero() {
+			held, _, ok := c.schemas.get(key)
+			if ok && held.failed == nil {
+				return held
+			}
+		}
+
 		return e
 	}
 
 	e.reach = rc
 
-	kept := c.schemas.keep(key, e, failedAt)
+	var due time.Time
+
+	if failedAt.IsZero() {
+		due = rc.due
+	}
+
+	kept, _ := c.schemas.keep(key, e, failedAt, due)
 	if kept.reach != rc {
 		rc.state = reachDropped
 
@@ -148,7 +244,8 @@ func (c *cache) keepSchema(key cacheKey, e cacheEntry, failedAt time.Time, gen u
 // doc records that the schema of rc reached the document that key names.
 // It returns what c keeps under key, with the generation that a load for
 // key starts in after a miss. The record comes before the read, so a release
-// of the document that runs after doc returns finds the schema of rc.
+// of the document that runs after doc returns finds the schema of rc. A
+// document that has fallen due is a miss, as it is in [cache.schema].
 func (c *cache) doc(key cacheKey, rc *reach) (refDoc, uint64, bool) {
 	id := docOf(key)
 
@@ -165,26 +262,91 @@ func (c *cache) doc(key cacheKey, rc *reach) (refDoc, uint64, bool) {
 		}
 	}
 
-	d, ok := c.docs.get(key)
+	d, due, ok := c.docs.get(key)
+	if !ok || isDue(due) {
+		return d, c.gen, false
+	}
 
-	return d, c.gen, ok
+	if rc.state != reachDropped {
+		c.reached(rc, due)
+	}
+
+	return d, c.gen, true
 }
 
-// keepDoc keeps d under key for a load that started in generation gen,
-// and returns the document that c then holds under key. For a load from
-// an earlier generation, keepDoc does not keep d, and returns d as it is.
-func (c *cache) keepDoc(key cacheKey, d refDoc, failedAt time.Time, gen uint64) refDoc {
+// heldDoc returns the document that c holds under key, for a load of the
+// document that ended with its context. It takes the lock of c and
+// returns what [cache.held] returns.
+func (c *cache) heldDoc(key cacheKey, rc *reach) (refDoc, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.held(key, rc)
+}
+
+// held returns the document that c holds under key, for a load of the
+// document that cannot serve the schema of rc. The caller holds the lock
+// of c. It returns a document that loaded, whether or not it has fallen
+// due, and records its due time in rc as [cache.doc] does. A schema
+// that uses a document that has fallen due falls due with it, so the
+// next request for the schema loads it again. When c does not hold a
+// document that loaded, it reports false.
+func (c *cache) held(key cacheKey, rc *reach) (refDoc, bool) {
+	d, due, ok := c.docs.get(key)
+	if !ok || d.err != nil {
+		return refDoc{}, false
+	}
+
+	if rc.state != reachDropped {
+		c.reached(rc, due)
+	}
+
+	return d, true
+}
+
+// keepDoc keeps d under key for a load that started at loaded in
+// generation gen, for the schema whose reach is rc. It returns the
+// document that c then holds under key. For a load from an earlier
+// generation, keepDoc does not keep d. It returns d as it is, or for a
+// failure, the document that c holds under key, as [cache.held] does.
+//
+// A document from a URL falls due when the compile of rc started, plus
+// the refresh interval, so it falls due with the schema that the compile
+// fetched. A load for a schema that c keeps already, as a validation
+// runs, starts the interval at loaded.
+func (c *cache) keepDoc(key cacheKey, d refDoc, failedAt, loaded time.Time, gen uint64, rc *reach) refDoc {
 	id := docOf(key)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	start := rc.start
+	if rc.state != reachPending {
+		start = loaded
+	}
+
+	var due time.Time
+
+	if failedAt.IsZero() {
+		due = c.dueAfter(key, start)
+	}
+
 	if gen != c.gen {
+		if !failedAt.IsZero() {
+			if held, ok := c.held(key, rc); ok {
+				return held
+			}
+		}
+
 		return d
 	}
 
-	kept := c.docs.keep(key, d, failedAt)
+	kept, due := c.docs.keep(key, d, failedAt, due)
 	link(c.docKeys, id, key)
+
+	if rc.state != reachDropped {
+		c.reached(rc, due)
+	}
 
 	return kept
 }
@@ -269,16 +431,14 @@ func (c *cache) releaseDoc(key cacheKey, _ refDoc) {
 // names. A validation with the compiled schema that loads a $ref document
 // adds that document. A [cache] guards it.
 type reach struct {
+	// When the compile started.
+	start time.Time
+	// When the first URL document that the schema used falls due, or the
+	// zero time for never.
+	due   time.Time
 	docs  map[docID]struct{}
 	key   cacheKey // the key the registry keeps the schema under
 	state reachState
-}
-
-// newReach creates a new [reach] for a compile of the schema that the
-// registry keeps under key. The reach starts with the document of the
-// schema itself.
-func newReach(key cacheKey) *reach {
-	return &reach{key: key, docs: map[docID]struct{}{docOf(key): {}}, state: reachPending}
 }
 
 // A reachState says whether a [cache] keeps the outcome of the compile
@@ -359,7 +519,9 @@ func unlink[K, V comparable](m map[K]map[V]struct{}, k K, v V) {
 // An lru keeps values by key in the order of their last use. It drops
 // the value used least recently when it holds more than its limit. It
 // drops a value that records a failure when the retry interval has
-// passed since the failure. It calls its release function with each
+// passed since the failure. A value that does not record a failure can
+// carry a due time, after which a new value takes its place, as
+// [lru.keep] describes. It calls its release function with each
 // value that it drops. It is not safe for concurrent use, and a [cache]
 // guards it.
 type lru[K comparable, V any] struct {
@@ -377,10 +539,13 @@ type lruItem[K comparable, V any] struct {
 	// The time of the failure that the value records, or the zero time
 	// for a value that does not record a failure.
 	failedAt time.Time
-	key      K
-	value    V
-	use      *list.Element // the element of the item in recent
-	failure  *list.Element // the element of the item in failures, or nil
+	// The time after which a value that does not record a failure falls
+	// due, or the zero time for never.
+	due     time.Time
+	key     K
+	value   V
+	use     *list.Element // the element of the item in recent
+	failure *list.Element // the element of the item in failures, or nil
 }
 
 // newLRU creates a new [lru] that keeps at most limit values, or any
@@ -395,15 +560,15 @@ func newLRU[K comparable, V any](limit int, retryAfter time.Duration, release fu
 	}
 }
 
-// get returns the value that c keeps under key and marks it used. For a
-// failure whose retry interval has passed, get drops the failure and
-// reports false.
-func (c *lru[K, V]) get(key K) (V, bool) {
+// get returns the value that c keeps under key, with its due time, and
+// marks it used. For a failure whose retry interval has passed, get drops
+// the failure and reports false.
+func (c *lru[K, V]) get(key K) (V, time.Time, bool) {
 	item, ok := c.items[key]
 	if !ok {
 		var zero V
 
-		return zero, false
+		return zero, time.Time{}, false
 	}
 
 	if c.expired(item) {
@@ -411,29 +576,38 @@ func (c *lru[K, V]) get(key K) (V, bool) {
 
 		var zero V
 
-		return zero, false
+		return zero, time.Time{}, false
 	}
 
 	c.recent.MoveToFront(item.use)
 
-	return item.value, true
+	return item.value, item.due, true
 }
 
-// keep keeps v under key and returns it. A failedAt other than the zero
-// time says that v records a failure that happened then. When c already
-// keeps a value under key that does not record a failure, keep marks
-// that value used and returns it in place of v. Every caller thus sees
-// one value per key.
+// keep keeps v, which falls due at due, under key, and returns the value
+// that c then keeps with its due time. A failedAt other than the zero
+// time says that v records a failure that happened then.
+//
+// When c already keeps a value under key that does not record a failure
+// and has not fallen due, keep marks that value used and returns it in
+// place of v. Every caller thus sees one value per key. A value that has
+// fallen due gives way to a v that does not record a failure. A v that
+// records a failure leaves that value in place, and the value then falls
+// due again when the retry interval has passed since the failure.
 //
 // Before it adds v, keep drops each failure whose retry interval has
 // passed. After it adds v, keep drops the values used least recently
 // until c holds at most its limit.
-func (c *lru[K, V]) keep(key K, v V, failedAt time.Time) V {
+func (c *lru[K, V]) keep(key K, v V, failedAt, due time.Time) (V, time.Time) {
 	if item, ok := c.items[key]; ok {
-		if item.failure == nil {
+		if item.failure == nil && (!isDue(item.due) || !failedAt.IsZero()) {
+			if isDue(item.due) {
+				item.due = failedAt.Add(c.retryAfter)
+			}
+
 			c.recent.MoveToFront(item.use)
 
-			return item.value
+			return item.value, item.due
 		}
 
 		c.remove(item)
@@ -441,7 +615,7 @@ func (c *lru[K, V]) keep(key K, v V, failedAt time.Time) V {
 
 	c.dropExpired()
 
-	item := &lruItem[K, V]{key: key, value: v, failedAt: failedAt}
+	item := &lruItem[K, V]{key: key, value: v, failedAt: failedAt, due: due}
 	item.use = c.recent.PushFront(item)
 
 	if !failedAt.IsZero() {
@@ -454,7 +628,21 @@ func (c *lru[K, V]) keep(key K, v V, failedAt time.Time) V {
 		c.remove(itemOf[K, V](c.recent.Back()))
 	}
 
-	return v
+	return v, due
+}
+
+// advance moves the due time of the value that c keeps under key to due,
+// when the value does not record a failure and due comes before its own
+// due time.
+func (c *lru[K, V]) advance(key K, due time.Time) {
+	item, ok := c.items[key]
+	if !ok || item.failure != nil {
+		return
+	}
+
+	if item.due.IsZero() || due.Before(item.due) {
+		item.due = due
+	}
 }
 
 // discard drops the value that c keeps under key, if any.
@@ -493,6 +681,12 @@ func (c *lru[K, V]) expired(item *lruItem[K, V]) bool {
 	return item.failure != nil && time.Since(item.failedAt) >= c.retryAfter
 }
 
+// isDue reports whether due, the due time of a value that an [lru]
+// keeps, has passed. The zero time never passes.
+func isDue(due time.Time) bool {
+	return !due.IsZero() && !time.Now().Before(due)
+}
+
 // remove drops item from c and calls the release function with it.
 func (c *lru[K, V]) remove(item *lruItem[K, V]) {
 	delete(c.items, item.key)
@@ -529,22 +723,22 @@ type flightCall[V any] struct {
 	val  V
 }
 
-// do returns the call in flight for key. When no call is in flight, do
-// starts fn on a goroutine of its own and returns the new call. The
-// group forgets the call when it ends, so the next do for key starts a
-// new call.
+// do returns the call in flight for key, and whether do started it. When
+// no call is in flight, do starts fn on a goroutine of its own and
+// returns the new call. The group forgets the call when it ends, so the
+// next do for key starts a new call.
 //
 // The call runs fn through [capture.Run]. Without it, a panic in fn ends
 // the process, and a call to [runtime.Goexit] skips the close of done
 // and leaves every caller blocked. With capture.Run, the call keeps
 // either as an error in err. Each caller must pass err to
 // [capture.Reraise].
-func (g *flightGroup[K, V]) do(key K, fn func() (V, error)) *flightCall[V] {
+func (g *flightGroup[K, V]) do(key K, fn func() (V, error)) (*flightCall[V], bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	if c, ok := g.calls[key]; ok {
-		return c
+		return c, false
 	}
 
 	if g.calls == nil {
@@ -570,5 +764,5 @@ func (g *flightGroup[K, V]) do(key K, fn func() (V, error)) *flightCall[V] {
 		close(c.done)
 	}()
 
-	return c
+	return c, true
 }

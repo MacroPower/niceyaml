@@ -51,9 +51,10 @@ type LoaderFunc func(ctx context.Context, uri string) ([]byte, error)
 // of a fetch. The limit of [WithLoadLimit] covers them. The registry
 // keeps each document that a $ref names. So load runs once for each URL
 // until [WithCacheLimit] or a release such as [Registry.Invalidate]
-// drops the document. A schema whose $ref load does not serve fails to
-// load with [ErrLoad], unless [WithRequireRefs] is false. The registry
-// remembers a failed load for the interval of [WithRetryAfter].
+// drops the document, or until the interval of [WithRefreshAfter] has
+// passed. A schema whose $ref load does not serve fails to load with
+// [ErrLoad], unless [WithRequireRefs] is false. The registry remembers a
+// failed load for the interval of [WithRetryAfter].
 // [Registry.Load] calls load on every call, as it fetches on every call.
 //
 // The error of a document that load did not serve is a [*FetchError].

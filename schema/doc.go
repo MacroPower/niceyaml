@@ -368,12 +368,14 @@
 //
 // [Registry.Schema] checks its cache by key before it loads and compiles
 // those bytes. After a schema compiles, the registry serves it to every
-// later document that names it without loading it again. The registry
-// remembers a failed load or compile for the interval [WithRetryAfter]
-// sets, one minute by default. The documents that name a broken schema
-// inside the interval cost one attempt between them. The first document
-// after the interval loads the schema again. [WithCacheLimit] bounds the
-// number of schemas the cache keeps.
+// later document that names it without loading it again. With
+// [WithRefreshAfter], the registry loads a schema that reached a URL
+// again after an interval. The registry remembers a failed load or
+// compile for the interval [WithRetryAfter] sets, one minute by
+// default. The documents that name a broken schema inside the interval
+// cost one attempt between them. The first document after the interval
+// loads the schema again. [WithCacheLimit] bounds the number of schemas
+// the cache keeps.
 //
 // The registry serves a schema from its cache after the file or URL it
 // came from changes. A program that watches its schema files, such as an
@@ -381,6 +383,13 @@
 // registry then drops the schema of that file and each schema whose
 // $refs reached the file. The next document that names one loads it
 // again. [Registry.Purge] drops every schema the registry keeps.
+// [WithRefreshAfter] makes the registry fetch each schema and $ref
+// document from a URL again after an interval. When that fetch fails,
+// the registry keeps validating with the copy that it holds. The
+// interval covers only the registry that the option configures, but a
+// release such as Purge also reaches each registry among its resolvers.
+// A program that nests registries, as the Untrusted Documents section
+// does, gives the option to each nested registry that fetches URLs.
 //
 // A caller that holds a Ref of its own takes the compiled schema from the
 // same cache. A resolver that picks the schema from the document returns
