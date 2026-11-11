@@ -52,8 +52,8 @@ func countedRefs(n int) ([]schema.Ref, []*atomic.Int32) {
 func loadAll(t *testing.T, reg *schema.Registry, refs ...schema.Ref) {
 	t.Helper()
 
-	for _, ref := range refs {
-		_, err := reg.Schema(t.Context(), ref)
+	for i := range refs {
+		_, err := reg.Schema(t.Context(), refs[i])
 		require.NoError(t, err)
 	}
 }

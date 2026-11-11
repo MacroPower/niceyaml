@@ -113,6 +113,9 @@ var (
 	// [Schema.ValidateValue] returns nil for every value. A schema compiled
 	// from "true" also passes every document, but its check decodes the
 	// document first. [Schema.JSONSchema] on AcceptAll returns nil.
+	// [Schema.AcceptsAll] reports true for AcceptAll and for the schema
+	// that the directive names, so a program tests for either with it
+	// rather than by comparing pointers.
 	AcceptAll = &Schema{acceptAll: true}
 
 	// The schema that [Directive] names for "$schema=none". It passes every
@@ -555,6 +558,23 @@ type Schema struct {
 // nil for [AcceptAll], which checks nothing.
 func (s *Schema) JSONSchema() *jsonschema.Validator {
 	return s.compiled
+}
+
+// AcceptsAll reports whether s passes every document and value without
+// reading it. It reports true for [AcceptAll], for the schema that a
+// "$schema=none" directive of [Directive] names, and for a schema derived
+// from either of them, such as by [Schema.WithoutDeprecations]. A program
+// tells a document whose validation is off by it:
+//
+//	m, err := reg.Lookup(ctx, doc)
+//	if err == nil && m.Schema.AcceptsAll() {
+//	    fmt.Printf("%s: validation off\n", doc.FilePath())
+//	}
+//
+// It reports false for a schema compiled from "true", which also passes
+// every document but decodes the document first.
+func (s *Schema) AcceptsAll() bool {
+	return s.acceptAll
 }
 
 // WithoutDeprecations returns a [*Schema] that checks with the same

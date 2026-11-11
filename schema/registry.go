@@ -458,7 +458,54 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 	return r
 }
 
-// Lookup finds the validator for a document.
+// Match is the schema that a [Registry] found for a document, with the
+// [Ref] that named it. [Registry.Lookup] returns one.
+//
+// A program reports the schema that each document chose by [Ref.Name]:
+//
+//	m, err := reg.Lookup(ctx, doc)
+//	if err != nil {
+//	    return err
+//	}
+//
+//	if m.Schema.AcceptsAll() {
+//	    fmt.Printf("%s: validation off\n", doc.FilePath())
+//
+//	    return nil
+//	}
+//
+//	err = doc.Validate(ctx, m.Schema)
+//	if err != nil {
+//	    return err
+//	}
+//
+//	fmt.Printf("%s: valid against %s\n", doc.FilePath(), m.Ref.Name())
+//
+// A program passes the Ref to [Registry.Load] to read the schema that the
+// document chose. It passes the Ref to [Registry.Invalidate] to load the
+// schema again after an edit.
+//
+// Some Refs do not have a name. A [*Schema] among the resolvers, and a Ref
+// from [Schema.Ref], name a compiled schema, so their Ref has an empty
+// [Ref.Key] and [Ref.Name]. A program that compiled its own schemas
+// compares Schema with them instead. When the winning resolver is a
+// [Registry], the Ref carries the compiled schema and the name of the Ref
+// that the inner registry chose, as [Registry.Resolve] describes.
+//
+// [Ref.Key] does not tell every schema apart. A Ref from [FileFS] and a
+// Ref from [File] for one path share a Key, and the Name of the FileFS
+// Ref is the path as given.
+type Match struct {
+	// Schema is the compiled schema that Ref names, which the document
+	// validates against.
+	Schema *Schema
+	// Ref is the Ref that the winning resolver named for the document.
+	Ref Ref
+}
+
+// Lookup finds the schema for a document. It returns a [Match] that holds
+// the compiled schema and the [Ref] that the winning resolver named for
+// the document.
 //
 // Returns [ErrNoMatch] if every resolver declines the document, with a
 // detail from [niceyaml.WithDetails] for each resolver that gave a
@@ -537,34 +584,41 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // fails its Validate or ValidateContext method, bound at the value.
 //
 // For most uses, prefer [Registry.Check], which combines lookup and
-// validation. Use Lookup when you need the validator for custom
-// processing.
-func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (*Schema, error) {
+// validation. Use Lookup when you need the schema for custom processing,
+// or the Ref to report which schema a document chose.
+func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (Match, error) {
 	err := n.Err()
 	if err != nil {
 		//nolint:wrapcheck // The source bound the error of the document already.
-		return nil, err
+		return Match{}, err
 	}
 
-	v, _, err := r.lookup(ctx, n)
+	m, _, err := r.lookup(ctx, n)
 	if err != nil {
 		// The root of the document gives the error no location, where a
 		// scoped Node would point it at its value.
 		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
-		return nil, n.Document().Bind(err)
+		return Match{}, n.Document().Bind(err)
 	}
 
-	return v, nil
+	return m, nil
 }
 
 // Resolve implements [Resolver], so one registry is a resolver of
 // another. Resolve names the schema that [Registry.Lookup] finds for
-// doc, as a [Ref] from [Schema.Ref]. This registry loads and compiles
-// that schema under its own [Access], cache, and limits. The registry
-// that asked validates with the schema unchanged and does not load
-// anything for it. So it does not need an Access of its own for the
-// schemas that this registry names. A $ref that the validation reaches
-// loads through this registry too.
+// doc, as a [Ref] that carries the compiled schema, which [Ref.Schema]
+// returns. This registry loads and compiles that schema under its own
+// [Access], cache, and limits. The registry that asked validates with
+// the schema unchanged and does not load anything for it. So it does not
+// need an Access of its own for the schemas that this registry names. A
+// $ref that the validation reaches loads through this registry too.
+//
+// The Ref keeps the [Ref.Name] of the Ref that this registry chose, so
+// the [Match] of the registry that asked names the schema too. Its
+// [Ref.Key] is empty, because the registry that asked does not cache
+// anything for it. [Registry.Load] thus fails for the Ref, and
+// [Registry.Invalidate] ignores it. A program that needs the Ref that
+// this registry chose calls [Registry.Lookup] of this registry.
 //
 // So a program can confine the schemas that its documents pick and trust
 // its own schemas and those of a catalog, each in a registry of its own:
@@ -629,12 +683,12 @@ func (r *Registry) Resolve(ctx context.Context, doc *niceyaml.Node) (Ref, error)
 		return Ref{}, err
 	}
 
-	s, _, err := r.lookup(ctx, doc)
+	m, _, err := r.lookup(ctx, doc)
 	if err != nil {
 		return Ref{}, err
 	}
 
-	return s.Ref(), nil
+	return Ref{schema: m.Schema, name: m.Ref.Name()}, nil
 }
 
 // lookup is [Registry.Lookup] before Lookup binds the error to the
@@ -647,19 +701,19 @@ func (r *Registry) Resolve(ctx context.Context, doc *niceyaml.Node) (Ref, error)
 // check the document with. A problem that declares a fault of its own,
 // such as the error of a resolver that found the document at fault,
 // stays a fault inside it.
-func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, bool, error) {
-	v, unmatched, err := r.lookupSchema(ctx, doc)
+func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (Match, bool, error) {
+	m, unmatched, err := r.lookupSchema(ctx, doc)
 	if err != nil && !unmatched {
 		err = niceyaml.Unchecked(err)
 	}
 
-	return v, unmatched, err
+	return m, unmatched, err
 }
 
 // lookupSchema is [Registry.lookup] before lookup wraps the error.
-func (r *Registry) lookupSchema(ctx context.Context, doc *niceyaml.Node) (*Schema, bool, error) {
+func (r *Registry) lookupSchema(ctx context.Context, doc *niceyaml.Node) (Match, bool, error) {
 	if doc != doc.Document() {
-		return nil, false, fmt.Errorf("registry needs a whole document: %w: %s", niceyaml.ErrScopedNode, doc.Path())
+		return Match{}, false, fmt.Errorf("registry needs a whole document: %w: %s", niceyaml.ErrScopedNode, doc.Path())
 	}
 
 	// A resolver that ignores its context, as a Ref does, would name a
@@ -670,7 +724,7 @@ func (r *Registry) lookupSchema(ctx context.Context, doc *niceyaml.Node) (*Schem
 	// reports the context's error whether the resolver named a schema,
 	// declined, or failed.
 	if ctx.Err() != nil {
-		return nil, false, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
+		return Match{}, false, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
 	}
 
 	var reasons []error
@@ -689,11 +743,11 @@ func (r *Registry) lookupSchema(ctx context.Context, doc *niceyaml.Node) (*Schem
 				err = ctxErr
 			}
 
-			return nil, false, resolveError(err)
+			return Match{}, false, resolveError(err)
 		}
 
 		if err != nil && !isDecline(err) {
-			return nil, false, resolveError(err)
+			return Match{}, false, resolveError(err)
 		}
 
 		if err != nil {
@@ -707,12 +761,14 @@ func (r *Registry) lookupSchema(ctx context.Context, doc *niceyaml.Node) (*Schem
 			// The cache remembers the failure without a location, so each
 			// document that names the schema locates it at its own site.
 			err = ref.at.locate(doc, err)
+
+			return Match{}, false, err
 		}
 
-		return v, false, err
+		return Match{Ref: ref, Schema: v}, false, nil
 	}
 
-	return nil, true, noMatch(reasons)
+	return Match{}, true, noMatch(reasons)
 }
 
 // isDecline reports whether err, the error of a resolver, declines the
@@ -841,7 +897,8 @@ func (e reasonError) Unwrap() error {
 
 // Check validates a document using the first matching schema. It
 // combines schema lookup and validation into a single call. Use
-// [Registry.Lookup] when you need the validator for custom processing.
+// [Registry.Lookup] when you need the schema for custom processing, or
+// the [Ref] that names it.
 // Check takes the root [niceyaml.Node] of a document. It returns the
 // violations of a document that does not conform to its schema. It
 // returns [ErrNoMatch] when every resolver declines the document, unless
@@ -942,7 +999,7 @@ func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 		return err
 	}
 
-	v, unmatched, err := r.lookup(ctx, n)
+	m, unmatched, err := r.lookup(ctx, n)
 	if err != nil {
 		if !r.requireSchema && unmatched {
 			return nil
@@ -955,13 +1012,15 @@ func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 	}
 
 	//nolint:wrapcheck // Validation errors pass through unchanged.
-	return n.Validate(ctx, v)
+	return n.Validate(ctx, m.Schema)
 }
 
-// Schema returns the compiled schema that ref names. For a Ref from
-// [Schema.Ref], Schema returns the schema that the Ref carries,
-// unchanged. For any other Ref, Schema compiles the bytes that
-// [Registry.Load] loads for it on the first request for its cache key.
+// Schema returns the compiled schema that ref names. For a Ref that
+// carries a compiled schema, such as one from [Schema.Ref] or
+// [Registry.Resolve], Schema returns that schema unchanged, whatever
+// [Ref.Name] the Ref has. For any other Ref, Schema compiles the bytes
+// that [Registry.Load] loads for it on the first request for its cache
+// key.
 // It compiles with the options that [WithCompileOptions] gave the
 // registry, and it serves the result from the cache after that.
 //
@@ -1225,9 +1284,12 @@ func (r *Registry) loadSchema(ctx context.Context, ref Ref) (*Schema, error) {
 // caller that parses the bytes picks the reader by their first byte, as
 // [Compile] does.
 //
-// The zero Ref does not name any bytes. A Ref from [Schema.Ref] carries
-// a compiled schema rather than bytes, and [Ref.Schema] returns that
-// schema. Load returns an error for both kinds of Ref.
+// The zero Ref does not name any bytes. A Ref that carries a compiled
+// schema, such as one from [Schema.Ref] or [Registry.Resolve], holds
+// that schema rather than bytes, and [Ref.Schema] returns it. Load
+// returns an error for both kinds of Ref, even when the Ref has a
+// [Ref.Name]. A program reads the bytes of a schema that a nested
+// registry chose from that registry.
 //
 // A Ref that a document names, as [RefBeside] and [Directive] build it,
 // loads only in a registry that [WithAccess] gave an Access. In any
@@ -1283,11 +1345,16 @@ func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 //
 // Invalidate matches a file by its path as the Ref spells it. A symbolic
 // link to the file, or its path in another letter case, names another
-// document. Invalidate ignores the zero Ref, a Ref from [Schema.Ref],
-// and a Ref that does not name a file that the registry can read. A Ref
-// from FileFS does not name such a file when its path leaves the file
-// system, or when the file system does not have an identity, as FileFS
-// describes.
+// document. Invalidate ignores the zero Ref and a Ref that does not name
+// a file that the registry can read. A Ref from FileFS does not name
+// such a file when its path leaves the file system, or when the file
+// system does not have an identity, as FileFS describes.
+//
+// Invalidate ignores a Ref that carries a compiled schema, such as one
+// from [Schema.Ref] or [Registry.Resolve], even when its [Ref.Name]
+// spells a file. The registry did not load anything for such a Ref. A
+// program reloads a schema that a nested registry chose through that
+// registry, or through the outer registry with the Ref of the file.
 //
 // Invalidate also ignores a Ref from [URL] whose key is not an HTTP or
 // HTTPS URL. The registry does not load anything for such a Ref. A file
@@ -1318,14 +1385,14 @@ func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 func (r *Registry) Invalidate(refs ...Ref) {
 	ids := make(map[docID]struct{}, len(refs))
 
-	for _, ref := range refs {
-		if ref.Key() == "" {
+	for i := range refs {
+		if refs[i].Key() == "" {
 			continue
 		}
 
 		// A Ref that has no cache key names no file the registry reads
 		// and no URL it fetches, so the registry keeps nothing under it.
-		key, err := keyOf(ref)
+		key, err := keyOf(refs[i])
 		if err != nil {
 			continue
 		}
